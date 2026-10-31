@@ -72,6 +72,9 @@ Ref* __fastcall Lock(void* actor,Ref* out,int index){
     return out;
 }
 NativeLease Lease(unsigned peer){NativeLease l{};l.object=actors[peer*3].body;l.control=actors[peer*3].control;return l;}
+}  // namespace
+namespace crew::netref_stub {extern int ambiguousSlot;}   // net_object_ref_stub.h
+namespace {
 bool Balanced(){
     for(const auto& a:actors)if(At<LONG>(a.control,8)!=1 || At<LONG>(a.control,12)!=20)return false;
     for(const auto& peer:lockControls)for(const auto& c:peer)if(At<LONG>(c,8)!=1 || At<LONG>(c,12)!=20)return false;
@@ -188,6 +191,15 @@ void RegistryChecks(){
  CHECK(!ResolveNativeProjectileLock(missing.target,1,&strongPoint,&strongControl) && !strongPoint && !strongControl);
  CHECK(!ResolveNativeProjectileActor(missing.target,&strongActor,&actorControl) && !strongActor && !actorControl);
  actors[4].id[31]^=1;CHECK(!projectile_native::ResolveActor(s.target,&found));actors[4].id[31]^=1;
+ // A player target (its mission slot, net_object_ref.h) with no object here (left, deleted): an empty actor, as an expired
+ // NetId's record, not a pending one (that would fault the stream after its timeout). Two of the slot: a failure.
+ {unsigned char gone[32]{};CHECK(crew::netref::MakePlayer(3,gone));
+  CHECK(projectile_native::ResolveActor(gone,&found) && !found.object && !found.control);
+  void* none=nullptr;const void* noneControl=nullptr;
+  CHECK(ResolveNativeProjectileActor(gone,&none,&noneControl) && !none && !noneControl);
+  CHECK(ResolveNativeProjectileLock(gone,1,&none,&noneControl) && !none && !noneControl);
+  crew::netref_stub::ambiguousSlot=3;CHECK(!projectile_native::ResolveActor(gone,&found));
+  CHECK(!ResolveNativeProjectileActor(gone,&none,&noneControl) && !none);crew::netref_stub::ambiguousSlot=-1;}
  Put<LONG>(actors[4].control,8,0);Put<Ref>(records[1],0x10,{reinterpret_cast<void*>(1),actors[4].control});
  CHECK(projectile_native::ResolveActor(s.target,&found) && !found.object && !found.control);
  CHECK(ResolveNativeProjectileActor(s.target,&strongActor,&actorControl) && !strongActor && !actorControl);
@@ -388,3 +400,5 @@ int main(){
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("enemy control projectile native: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }
+// Object references over the fixture's NetIds (net_object_resolve.h).
+#include "net_object_ref_stub.h"

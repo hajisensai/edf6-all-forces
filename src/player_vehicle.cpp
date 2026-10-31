@@ -104,7 +104,7 @@ void ConfigureHook(unsigned char* box,const airdrop::SharedRef* requester,const 
         const unsigned char* who=requester ? static_cast<const unsigned char*>(requester->object) : nullptr;
         if(twin<0 || !box || !who)return;
         Pending p;
-        // The requester by its mission slot (player_requester.h), the same on every machine; its NetId is not.
+        // The requester by its mission slot (net_object_ref.h), the same on every machine; its NetId is not.
         if(!PlayerRequesterOf(who,p.requester) || wire::ZeroId(p.requester)) {
             if(logs++<32)Log("PLAYERVEH a %ls request by %p that is no live player: the stock twin",kPlayerVehicles[twin].twin,who);
             return;
@@ -133,9 +133,13 @@ bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t s
         return true;
     }
     if(m.kind==playerveh::Kind::have){engine.Heard(static_cast<int>(peer),m);return true;}
-    // A decide / sync speaks for a player: it must be the sender's own (a peer never decides another machine's request).
+    // A decide / sync speaks for a player: it must be the sender's own (a peer never decides another machine's request):
+    // found here (fallen too) by its PUID, not here by its slot's member (SenderOwns).
     bool sender=false;
-    __try { sender=SenderIsPlayer(m.requester,puid,nullptr,true); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
+    __try {
+        NetResolved who{};
+        sender=ResolveNetRef(m.requester,NetLife::present,&who) && SenderOwns(who,puid);
+    } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
     if(!sender) {
         if(logs++<32)Log("PLAYERVEH peer %u: a %s for a player that is not its sender's: dropped",peer,m.kind==playerveh::Kind::decide ? "decision" : "sync");
         return true;
@@ -157,7 +161,7 @@ void Joined(std::uint32_t peer) noexcept {
     SendHave(peer);
     unsigned char id[wire::kIdBytes];
     bool ok=false;
-    __try { const unsigned char* me=PlayerHuman();ok=me && PlayerRequesterOf(me,id) && !wire::ZeroId(id); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
+    __try { const unsigned char* me=PlayerHuman();ok=me && EncodeNetRef(me,id) && netref::IsPlayer(id); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
     if(!ok)return;
     playerveh::Msg syncs[kPlayerVehicleCount];
     const int n=engine.Syncs(id,origin,syncs,kPlayerVehicleCount);

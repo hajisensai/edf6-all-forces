@@ -6,7 +6,7 @@
 #include "../tools/npc_core_check.cpp"
 #undef main
 #include "../src/command_protocol.h"
-#include "../src/player_requester.h"
+#include "../src/net_object_ref.h"
 #include <vector>
 namespace rpc_fixture {
 using namespace crew;
@@ -69,8 +69,8 @@ void Setup() {
 command_net::Message Request(mapcmd::Order order,unsigned sequence=1) {
     command_net::Message message;message.kind=command_net::Kind::request;message.epoch=99;message.sequence=sequence;
     message.request.count=1;message.request.command={order,{40,0,0}};
-    // The requester by its mission slot (player_requester.h): `other` is mission player 1.
-    MakePlayerRequester(1,message.request.requester);std::memcpy(message.request.units[0],ids[0],32);
+    // The requester by its mission slot (net_object_ref.h): `other` is mission player 1.
+    netref::MakePlayer(1,message.request.requester);std::memcpy(message.request.units[0],ids[0],32);
     if(order==Order::focus)std::memcpy(message.request.focus,ids[3],32);
     return message;
 }
@@ -108,7 +108,7 @@ int main() {
     Setup();Put<void*>(human,kLeader,ownerPlayer);SeeSquad(human,human,0,npc::Control::recruited,now);
     reply=Dispatch(Request(Order::follow));Check(reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::notOwner) && follows==0,
         "actual NPC executor rejects stealing the host player's recruited squad");
-    Setup();auto forged=Request(Order::recruit);MakePlayerRequester(0,forged.request.requester);reply=Dispatch(forged);
+    Setup();auto forged=Request(Order::recruit);netref::MakePlayer(0,forged.request.requester);reply=Dispatch(forged);
     Check(reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::invalidRequester) && !executed && !follows,
         "another player's slot cannot impersonate another authenticated PUID");
     Setup();reply=Dispatch(Request(Order::guard));auto* q=FindSquad(human);auto* soldier=Entry(human,now);

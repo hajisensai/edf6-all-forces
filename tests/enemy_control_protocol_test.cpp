@@ -15,6 +15,8 @@ namespace {
 int checks=0;
 void Check(bool value,const char* why){++checks;if(!value){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}}
 NativeId Id(unsigned value){NativeId id{};id[0]=static_cast<std::uint8_t>(value);id[12]=5;id[24]=71;return id;}
+// A player's ID: its object reference (net_object_ref.h: mission slot `slot`), never a NetId.
+NativeId Player(unsigned slot){NativeId id{};crew::netref::MakePlayer(static_cast<int>(slot),id.data());return id;}
 constexpr std::uint64_t kProfile=0x1234567812345678ull;
 constexpr std::uint8_t kInput[]={0x42,0x17,0x80,0};
 struct Room;
@@ -75,7 +77,7 @@ bool Send(void* user,std::uint32_t peer,const void* bytes,std::size_t size){
     r.history.push_back(p);r.queue.push_back(p);return true;
 }
 bool Authenticate(void* user,const char* puid,const NativeId& player){
-    const auto& n=*static_cast<Node*>(user);for(const auto& peer:n.room->nodes)if(peer->puid==puid)return peer->player==player || (CanonicalId(peer->secondPlayer) && peer->secondPlayer==player);return false;
+    const auto& n=*static_cast<Node*>(user);for(const auto& peer:n.room->nodes)if(peer->puid==puid)return peer->player==player || (PlayerId(peer->secondPlayer) && peer->secondPlayer==player);return false;
 }
 bool Resolve(void* user,LeaseSpec* spec){auto& n=*static_cast<Node*>(user);++n.resolves;if(n.rejectResolve || spec->target[0]<100 || spec->target[0]>=200)return false;spec->profileHash=kProfile;return true;}
 bool Prepare(void* user,std::uint64_t,const LeaseSpec& spec){auto& n=*static_cast<Node*>(user);++n.prepares;return !n.rejectPrepare && spec.profileHash==kProfile;}
@@ -92,15 +94,15 @@ bool Restore(void* user,std::uint64_t id,const LeaseSpec&){auto& n=*static_cast<
 bool Activate(void* user,std::uint64_t,const LeaseSpec&){auto& n=*static_cast<Node*>(user);++n.activates;return !n.failActivate;}
 Hooks Backend(Node* n){return {n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};}
 Room::Room(unsigned count,unsigned legacyPeer,unsigned oldPeer):legacy(legacyPeer),oldVersion(oldPeer){
-    for(unsigned i=0;i<count;++i){auto n=std::make_unique<Node>();n->id=i;n->room=this;n->puid="player-"+std::to_string(i);n->player=Id(10+i);nodes.push_back(std::move(n));}
+    for(unsigned i=0;i<count;++i){auto n=std::make_unique<Node>();n->id=i;n->room=this;n->puid="player-"+std::to_string(i);n->player=Player(10+i);nodes.push_back(std::move(n));}
     for(auto& n:nodes){n->context={true,n->id==0,777,n->id ? Peer(n->id,0) : 0,count-1,n->puid.c_str()};Check(n->protocol.Configure(Backend(n.get())),"startup backend accepted");}
     Settle();
 }
 Message Unpack(const Packet& p){Message m;Check(Decode(p.bytes.data(),p.bytes.size(),m),"read recorded wire message");return m;}
 void Codec(){
-    Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Id(10);m.spec.target=Id(100);
+    Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Player(10);m.spec.target=Id(100);
     std::vector<std::uint8_t> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"request codec accepts canonical native identities");
-    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==5,"explicit ECTL/version5 byte prefix");
+    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==7,"explicit ECTL/version7 byte prefix");
     Message back;Check(Decode(bytes.data(),bytes.size(),back) && back.spec.target==m.spec.target,"semantic fields roundtrip without native struct layout");
     Room r;
     for(std::size_t n=0;n<bytes.size();++n){Check(!Decode(bytes.data(),n,back),"all truncated datagrams rejected");Check(r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),n,r.now)==(n>=4),"owned malformed/truncated magic is consumed, foreign prefix is not");}
@@ -108,12 +110,12 @@ void Codec(){
     bytes[4]=2;Check(!Decode(bytes.data(),bytes.size(),back) && r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),bytes.size(),r.now),"unsupported ECTL version is rejected and still claimed");
     m.spec.requesterPlayer[20]=1;Check(!Encode(m,bytes.data(),bytes.size()),"native ID padding cannot carry uninitialized bytes");
     m.spec.requesterPlayer={};Check(!Encode(m,bytes.data(),bytes.size()),"empty native player ID rejected");
-    m.spec.requesterPlayer=Id(10);strcpy_s(m.spec.ownerPuid,"forged-owner");Check(!Encode(m,bytes.data(),bytes.size()),"owner identity cannot be supplied in a request payload");
+    m.spec.requesterPlayer=Player(10);strcpy_s(m.spec.ownerPuid,"forged-owner");Check(!Encode(m,bytes.data(),bytes.size()),"owner identity cannot be supplied in a request payload");
 }
 void VariableWireBounds() {
     static_assert(kWirePrefixBytes==192 && kWireBytes==704 && kWireBytes<=1024,"every complete native batch fits the real SDK maximum");
     Message m;m.kind=Kind::Action;m.epoch=123;m.lease=5;m.request=7;m.sequence=1;m.spec.profileHash=kProfile;
-    m.spec.requesterPlayer=Id(10);m.spec.target=Id(100);strcpy_s(m.spec.ownerPuid,"player-1");m.capability=1u<<16;
+    m.spec.requesterPlayer=Player(10);m.spec.target=Id(100);strcpy_s(m.spec.ownerPuid,"player-1");m.capability=1u<<16;
     for(std::size_t size=1;size<=kMaxPoseBytes;++size) {
         m.input={};m.inputSize=static_cast<std::uint16_t>(size);for(std::size_t i=0;i<size;++i)m.input[i]=static_cast<std::uint8_t>(i*31+size);
         std::vector<std::uint8_t> bytes(EncodedSize(m));Check(bytes.size()==kWirePrefixBytes+size && Encode(m,bytes.data(),bytes.size()),"variable wire stores exactly the complete typed batch with no fixed unused padding");
@@ -163,7 +165,7 @@ void Conflicts(){
     Check(r.Request(2,101),"independent second owner request queued");r.Settle();Check(r.nodes[0]->protocol.ActiveCount()==2,"independent players can control different targets");
 }
 void SplitScreenIdentity(){
-    Room r;r.nodes[1]->secondPlayer=Id(50);
+    Room r;r.nodes[1]->secondPlayer=Player(50);
     Check(r.Request(1,100),"split-screen primary source request queued");r.Settle();
     Check(r.nodes[1]->protocol.Request(r.nodes[1]->secondPlayer,Id(100),0,r.now),"same PUID secondary source requests occupied target");r.Settle();
     Check(r.nodes[0]->protocol.LastResult()==Result::Conflict && r.nodes[0]->protocol.ActiveCount()==1,"target exclusivity uses canonical target identity across split-screen sources");
@@ -256,7 +258,7 @@ void LimitsAndAuthority(){
     }
 }
 void PerSourceOutcomes(){
-    Room r;r.nodes[1]->secondPlayer=Id(50);
+    Room r;r.nodes[1]->secondPlayer=Player(50);
     Check(r.Request(1,100),"P1 asynchronous request queued");
     Check(r.nodes[1]->protocol.Request(r.nodes[1]->secondPlayer,Id(220),0,r.now),"P2 independent unsupported target request queued");
     Check(r.nodes[1]->protocol.RequestFor(r.nodes[1]->player)->result==Result::Pending &&
@@ -272,7 +274,7 @@ void PerSourceOutcomes(){
     r.nodes[1]->failRestore=true;Check(r.nodes[1]->protocol.Exit(1,r.now),"P1 starts failed native restore");r.Pump();
     Check(primary->result==Result::RestoreFailed && primary->lease==1 && secondary->result==Result::Unsupported,"restore failure is reported only to the owning source and retains its lease");
     r.nodes[1]->failRestore=false;r.Settle();Check(primary->result==Result::Complete && secondary->result==Result::Unsupported,"all-peer restoration completes the correct source alone");
-    r.nodes[0]->secondPlayer=Id(51);
+    r.nodes[0]->secondPlayer=Player(51);
     Check(!r.nodes[0]->protocol.Request(r.nodes[0]->secondPlayer,Id(220),0,r.now),"host's own unsupported target refuses immediately");
     const auto* localRejected=r.nodes[0]->protocol.RequestFor(r.nodes[0]->secondPlayer);
     Check(localRejected && localRejected->result==Result::Unsupported && !localRejected->lease,"host-local refusal also has a source-correlated terminal record");

@@ -64,14 +64,18 @@ void Drop(Tracked& t) noexcept { npcmark::Assign(t.enemy,{});t=Tracked{};t.slot=
 void Look(Tracked& t,ULONGLONG now) noexcept {
     t.looked=true;t.lookedAt=now;t.slot=-1;t.name[0]=0;
     npcmark::Assign(t.enemy,{});
-    MarkIdentities ids{};
-    if(!ResolveMarkIdentities(Zero(t.marker) ? nullptr : t.marker,Zero(t.target) ? nullptr : t.target,&ids))return;
+    // One walk: the marker (its player, fallen too: its marks come cleared then) and the target (a player by its slot, the
+    // rest by its NetId: net_object_ref.h), live.
+    const unsigned char* refs[2]={Zero(t.marker) ? nullptr : t.marker,Zero(t.target) ? nullptr : t.target};
+    const NetLife lives[2]={NetLife::present,NetLife::live};
+    NetResolved found[2]{};
+    if(!ResolveNetRefs(refs,lives,2,found))return;
     // Named only when it is its sender's own player (a peer cannot name another): the name tag's name.
-    if(ids.player && SenderIsPlayer(ids.puid,t.puid)) {
-        t.slot=ids.slot;
-        if(!ReadPlayerName(ids.player.obj,t.name,kQMarkName))t.name[0]=0;
+    if(found[0].found && netref::IsPlayer(t.marker) && SenderIsPlayer(found[0].puid,t.puid)) {
+        t.slot=found[0].slot;
+        if(!ReadPlayerName(found[0].obj.obj,t.name,kQMarkName))t.name[0]=0;
     }
-    if(ids.target)npcmark::Assign(t.enemy,npcmark::Capture(ids.target.obj));
+    if(found[1].found)npcmark::Assign(t.enemy,npcmark::Capture(found[1].obj.obj));
 }
 
 // Where each tracked enemy's lock point is now.
@@ -127,22 +131,28 @@ void Publish(ULONGLONG now) noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
-// This machine's state to send: its player's ID (player_requester.h: its mission slot), its enemy mark (by ID, else its position alone) and its point.
+// This machine's state to send: its player's reference (net_object_ref.h: its mission slot), its enemy mark (by its
+// reference: a player by its slot, the rest by NetId; else its position alone) and its point. A player that fell sends
+// its marks cleared, by its slot still: the teammates drop them now, not kSilentMs on.
 bool OwnState(qmark_net::State* s,ULONGLONG now) noexcept {
     *s=qmark_net::State{};
     const unsigned char* human=PlayerHuman();
-    if(!human || !PlayerRequesterOf(human,s->marker))return false;   // no player in a world here: nothing to say
+    if(!human || !EncodeNetRef(human,s->marker) || !netref::IsPlayer(s->marker)) {   // no player in a world here: nothing to say
+        std::memset(s->marker,0,32);
+        return false;
+    }
+    s->letGo=letGoes;
+    if(human[kDead])return true;
     const void* enemy=nullptr;
     if(NpcMarkOwn(&enemy,s->enemyAt)) {
         s->enemy=true;
-        if(!ReadNativeObjectId(static_cast<const unsigned char*>(enemy),s->target))std::memset(s->target,0,32);
+        if(!EncodeNetRef(enemy,s->target))std::memset(s->target,0,32);
     }
     if(ownPoint.on && now<ownPoint.until) {
         s->point=true;std::memcpy(s->pointAt,ownPoint.at,12);
         const ULONGLONG left=ownPoint.until-now;
         s->pointLeftMs=static_cast<std::uint32_t>(left<qmark_net::kMaxPointMs ? left : qmark_net::kMaxPointMs);
     }
-    s->letGo=letGoes;
     return true;
 }
 }  // namespace

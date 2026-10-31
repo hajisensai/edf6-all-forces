@@ -20,7 +20,7 @@ struct Plan {
     std::uint32_t catalogId=0,count=0;
     float target[3]{};
     Unit units[kMaxUnits]{};
-    // The requesting player (player_requester.h: its mission slot, the same on every machine); team 0 preserves stock
+    // The requesting player (net_object_ref.h: its mission slot, the same on every machine); team 0 preserves stock
     // behaviour while retaining ownership.
     unsigned char requester[32]{};
     std::uint32_t team=0; // 0 stock, else the host-authorized PvP faction team (pvp_match.h PvpTeam)

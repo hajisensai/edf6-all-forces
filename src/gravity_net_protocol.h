@@ -14,7 +14,10 @@
 // Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
 // to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
 // and radial kinds, the float guns taken from the game's own drop. Version 3 (2026-10-31): a player (a grab's grabber, a
-// gun's asker and owner) goes by its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// gun's asker and owner) goes by its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// Version 4 (2026-10-31): every object is its reference (net_object_ref.h): a player by its slot with the tag at bytes
+// 20..23 (a grab's target too: a teammate grabbed is found on every machine, which its NetId was not), anything else by
+// its NetId; a grabber that fell mid-grab lets go (its letGo, throw, flight and radial found with it dead).
 // Other objects go by their native network ID
 // (support_soldier.h ReadNativeObjectId), all zero for one without it (a debris piece, a body of an unregistered object):
 // found by the grab's ray and position instead, and, thrown, steered on every copy by its grabber's flight states (the
@@ -26,7 +29,7 @@
 namespace crew::gravity_net {
 constexpr std::uint32_t kGrabMagic=0x54565247u;   // "GRVT"
 constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
-constexpr std::uint32_t kVersion=3;
+constexpr std::uint32_t kVersion=4;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
 constexpr std::uint64_t kHoldGapMs=50;     // a hold's state goes out this often while it lasts
@@ -46,8 +49,8 @@ struct Grab {
     GrabKind kind=GrabKind::hold;
     std::uint32_t origin=0;          // the sender's run (a new one: its grabs start over)
     std::uint32_t grab=0;            // the grab's serial in that run (a new one: a new thing held)
-    unsigned char grabber[32]{};     // the grabbing player's native ID
-    unsigned char target[32]{};      // what is held (zero: found by the ray and `at`)
+    unsigned char grabber[32]{};     // the grabbing player's reference (net_object_ref.h)
+    unsigned char target[32]{};      // what is held, its reference (a player's too; zero: found by the ray and `at`)
     float at[3]{};                   // where it was when grabbed (the ray's hit), on the grabber's machine
     float rayA[3]{},rayB[3]{};       // the grab's ray
     float goal[3]{};                 // hold: the point it is drawn to
@@ -64,7 +67,7 @@ struct Gun {
     std::uint32_t origin=0;          // the host's run (drop / owner / gone), the asker's (pick)
     std::uint16_t serial=0;          // the gun's, given by the host
     std::uint8_t index=0;            // drop: which of the colonist's guns (its weak list's order)
-    unsigned char who[32]{};         // drop: the colonist's native ID; pick: the asking player's; owner: the owner's
+    unsigned char who[32]{};         // drop: the colonist's NetId; pick: the asking player's reference; owner: the owner's
     float at[3]{};                   // drop: where it fell
     std::uint32_t leftMs=0;          // owner: how long it floats from now (0: to the mission's end)
 };

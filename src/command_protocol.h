@@ -12,12 +12,15 @@ namespace crew::command_net {
 // is on its way to, mapcmd.cpp MapCommandAuthority) and the formation order (mapcmd::Order::formation, its parameter in
 // Command::param: the map's T and formation menu). Both in words a version-6 message keeps zero (the one after `kind`,
 // the one after the point): the layout and the size are 6's.
-// Version 8 (2026-10-31): the requester is the player's requester ID (player_requester.h: its mission slot, the same on
+// Version 8 (2026-10-31): the requester is the player's requester ID (net_object_ref.h: its mission slot, the same on
 // every machine; a stock mission numbers the players' NetIds per machine), no longer its NetId. A build before it is not
 // spoken to at all (kMinVersion 8: its messages do not decode, ours do not there; no compatibility with older builds).
+// Version 9 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23) and
+// the focus any object's reference (a player's by its slot: an enemy player in PvP, which a NetId named on no other
+// machine); an older build is not spoken to (kMinVersion 9).
 // Negotiated, not assumed: every hello goes out as version kMinVersion with the sender's highest version in the hello's
 // formationTotal; the host answers each peer at the lower of the two and the client speaks that version from then on.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=8,kMinVersion=8,kMaxPeers=1024;
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=9,kMinVersion=9,kMaxPeers=1024;
 constexpr bool Compatible(std::uint32_t version) noexcept { return version>=kMinVersion && version<=kVersion; }
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;

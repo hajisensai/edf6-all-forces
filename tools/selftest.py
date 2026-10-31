@@ -1910,7 +1910,8 @@ def barrage_copies_agree() -> None:
     # Called from the map's bar (2026-10-26), told to the peers by its own channel, its area warned of.
     assert 'BarrageStart(k.barrage,caller,target,heading,k.damage)' in src('src/airstrike.cpp')
     barrage_cpp = src('src/barrage.cpp')
-    assert 'WarnBarrage(kind,setup.target,heading,s.end);' in barrage_cpp and 'if(IsPlayer(caller))Tell(' in barrage_cpp
+    # This machine's player's barrage told (tell = IsPlayer(caller)); a peer's played here is never told again.
+    assert 'WarnBarrage(kind,setup.target,heading,s.end);' in barrage_cpp and 'if(tell)Tell(' in barrage_cpp and         'IsPlayer(caller));' in barrage_cpp
     assert 'plugin_net::RegisterChannel(BarrageNetChannel());' in src('src/support_net.cpp')
     assert 'GuardedTick(kStepBarrage,&BarrageTick);' in src('src/crew.cpp') and 'ResetBarrages();' in src('src/mission.cpp')
     assert 'InstallBarrages();' in src('src/plugin.cpp')

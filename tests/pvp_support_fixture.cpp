@@ -53,7 +53,7 @@ crew::support_net::Plan Reset(bool owned=false,unsigned count=1) noexcept {
     fixture=Fixture{};
     crew::support_net::Plan plan{};plan.count=count;
     if(owned) {
-        crew::MakePlayerRequester(3,plan.requester);   // the requester's mission slot (player_requester.h)
+        crew::netref::MakePlayer(3,plan.requester);   // the requester's mission slot (net_object_ref.h)
         std::memcpy(fixture.expectedId,plan.requester,sizeof(plan.requester));
     }
     return plan;
@@ -126,7 +126,7 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
     if(!fixture.markOk || (fixture.markFailAt && fixture.markCalls==fixture.markFailAt))return false;
     out->player=fixture.markPlayer;out->puid=fixture.markPuid;out->slot=fixture.markSlot;return true;
 }
-// The player's requester identity (player_requester.h), as the fixture's parent ID says it is.
+// The player's requester identity (net_object_ref.h), as the fixture's parent ID says it is.
 bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
     ++fixture.objectIdCalls;
     fixture.correctObjectIdArgs=fixture.correctObjectIdArgs && who.obj==fixture.expectedParent.obj && out;

@@ -1,6 +1,7 @@
 // Production resolver + ReadNativeObjectId; private scene only, no game/DllMain/installation.
 // Optional argv[1] executes the real EDF.dll all-team walker, with only its mutex services stubbed.
 #include "../src/command_identity.cpp"
+#include "../src/net_object_resolve.cpp"
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
@@ -12,15 +13,17 @@ const Config& Cfg() noexcept {static const Config cfg{};return cfg;}
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept {return false;}
 bool OnlineHostOnly() noexcept {return false;}
+ULONGLONG frameNow=0;   // 0: no frame, the resolver keeps no player table (each lookup walks)
+ULONGLONG GameFrame() noexcept {return frameNow;}
 }
 namespace {
 using namespace crew;
-using namespace crew::command_identity;
+using namespace crew::netobj;
 int checks=0,walks=0,mutation=0;
 unsigned char actors[19][0x1EE0]{},ctrls[19][16]{},netctrls[19][16]{},entries[19][0x28]{};
 unsigned char user[0x50]{},userctrl[16]{},user2[0x50]{},userctrl2[16]{},mgr[0x50]{},teams[team_native::kTeamCapacity*0x38]{},status[0x15000]{};
 unsigned char ids[19][32]{},heads[7][0x30]{},nodes[19][0x30]{};
-unsigned char requester0[32]{};   // actors[0]'s requester: mission slot 0 (player_requester.h)
+unsigned char requester0[32]{};   // actors[0]'s requester: mission slot 0 (net_object_ref.h)
 unsigned sceneCount=19;
 void Check(bool ok,const char* why){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}}
 // Each object through the visitor's own slot 1, as the native walker calls it (Visit, or the mark resolver's VisitMark).
@@ -50,7 +53,7 @@ void Reset() {
     std::memset(netctrls,0,sizeof netctrls);std::memset(entries,0,sizeof entries);
     std::memset(user,0,sizeof user);std::memset(userctrl,0,sizeof userctrl);
     std::memset(user2,0,sizeof user2);std::memset(userctrl2,0,sizeof userctrl2);
-    std::memset(ids,0,sizeof ids);MakePlayerRequester(0,requester0);
+    std::memset(ids,0,sizeof ids);netref::MakePlayer(0,requester0);
     Put<void*>(image,kTeamManager,mgr);Put<void*>(image,kGameStatus,status);
     Put<void*>(mgr,0x38,teams);Put<std::uint64_t>(mgr,0x48,7);Put<unsigned>(status,0x14FF8,1);
     for(unsigned i=0;i<19;++i) {
@@ -78,36 +81,115 @@ void SecondPlayer(int slot) {
     actors[1][edf::kHumanPlayer]=1;Put<void*>(actors[1],0x1ED0,user2);Put<void*>(actors[1],0x1ED8,userctrl2);
     Put<LONG>(userctrl2,8,1);Put<void*>(user2,0x18,user2);Put<int>(user2,0x48,slot);Put<unsigned>(status,0x14FF8,2);
 }
-// A support plan's requester is the player's mission slot (player_requester.h): it finds that player on any machine,
+// A support plan's requester is the player's mission slot (net_object_ref.h): it finds that player on any machine,
 // whatever NetId the player has there (a stock mission's are the script thread's count on each machine, 2026-10-31).
 void PlayerRequesters() {
     unsigned char requester[32]{},again[32]{};int slot=-1;
-    Check(MakePlayerRequester(1,requester) && PlayerRequesterSlot(requester,&slot) && slot==1,"slot requester round trip");
-    Check(!requester[20] && !requester[21] && !requester[22] && !requester[23] && Canonical(requester),"slot requester keeps the canonical shape");
-    Check(!PlayerRequesterSlot(ids[0],nullptr),"a native NetId is not a slot requester");
-    Check(!MakePlayerRequester(-1,again) && !MakePlayerRequester(kPlayerRequesterSlots,again),"slot outside EDF6Coop's slots rejected");
-    std::memcpy(again,requester,32);again[8]=1;Check(!PlayerRequesterSlot(again,nullptr),"slot requester with other bytes rejected");
-    std::memcpy(again,requester,32);again[4]=0;again[5]=4;Check(!PlayerRequesterSlot(again,nullptr),"slot 1024 rejected");
+    Check(netref::MakePlayer(1,requester) && netref::IsPlayer(requester,&slot) && slot==1,"slot requester round trip");
+    Check(requester[20]==0x41 && requester[21]==0x46 && requester[22]==0x50 && requester[23]==0x52 && !netref::IsNative(requester),
+          "a player's reference: its tag where a NetId is always zero");
+    Check(!netref::IsPlayer(ids[0],nullptr),"a native NetId is not a slot requester");
+    Check(!netref::MakePlayer(-1,again) && !netref::MakePlayer(netref::kPlayerSlots,again),"slot outside EDF6Coop's slots rejected");
+    std::memcpy(again,requester,32);again[8]=1;Check(!netref::IsPlayer(again,nullptr),"slot requester with other bytes rejected");
+    std::memcpy(again,requester,32);again[0]=0;again[1]=4;Check(!netref::IsPlayer(again,nullptr),"slot 1024 rejected");
     MarkIdentities m{};
-    MakePlayerRequester(0,requester);
+    netref::MakePlayer(0,requester);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[0] && m.slot==0 && m.puid==user,"slot 0 finds its player");
     Check(!ResolveMarkIdentities(ids[0],nullptr,&m) && !m.player,"a NetId marker names no player");
     Check(ResolveMarkIdentities(ids[0],ids[2],&m) && !m.player && m.target.obj==actors[2],"a NetId marker: the target still found");
     SecondPlayer(1);
     // The host's player: another NetId on this machine than on the host's (here the same as the local player's).
     std::memcpy(entries[1]+8,entries[0]+8,32);
-    MakePlayerRequester(1,requester);
+    netref::MakePlayer(1,requester);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[1] && m.slot==1 && m.puid==user2,
           "slot 1 finds its player whatever its NetId");
-    MakePlayerRequester(0,requester);
+    netref::MakePlayer(0,requester);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[0] && m.puid==user,"slot 0 is not taken by the other");
     Put<int>(user2,0x48,0);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player && m.slot==-1 && !m.puid,"two players of one slot: none");
-    Put<int>(user2,0x48,2);MakePlayerRequester(2,requester);
+    Put<int>(user2,0x48,2);netref::MakePlayer(2,requester);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player,"slot outside the mission's players: none");
-    Put<int>(user2,0x48,1);actors[1][kDead]=1;MakePlayerRequester(1,requester);
+    Put<int>(user2,0x48,1);actors[1][kDead]=1;netref::MakePlayer(1,requester);
     Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player,"dead player: none");
+    // NetLife::present: a fallen player is still named (an ultimate's caller, a grabber that let go as it fell).
+    NetResolved r{};
+    Check(ResolveNetRef(requester,NetLife::present,&r) && r.found && r.dead && r.obj.obj==actors[1] && r.slot==1 && r.puid==user2,
+          "dead player, present: found, dead");
+    Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && r.slot==1,"dead player, live: not found, its slot told");
+    Check(EncodeNetRef(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a dead player's reference is its slot");
+    Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !again[0],"a dead player has no live requester");
+    // One of the slot dead, one alive (a body and its respawn): the live one.
+    Put<int>(user,0x48,1);
+    Check(ResolveNetRef(requester,NetLife::present,&r) && r.found && !r.dead && r.obj.obj==actors[0] && r.puid==user,
+          "one dead, one live of a slot: the live one");
     actors[1][kDead]=0;
+    Check(ResolveNetRef(requester,NetLife::present,&r) && !r.found && r.slot==1,"two live players of a slot: none");
+    actors[0][kDead]=1;actors[1][kDead]=1;
+    Check(ResolveNetRef(requester,NetLife::present,&r) && !r.found,"two dead players of a slot, none live: none");
+    actors[0][kDead]=0;actors[1][kDead]=0;Put<int>(user,0x48,0);
+    actors[1][0x18]=4;
+    Check(ResolveNetRef(requester,NetLife::present,&r) && !r.found && r.slot==1 && !r.puid,"its object deleted: not found, its slot told");
+    actors[1][0x18]=0;
+    // A player as a target (a teammate grabbed, a player marked): found by its slot whatever its NetId here.
+    MarkIdentities t{};
+    Check(ResolveGrabIdentities(nullptr,requester,&t) && t.target.obj==actors[1],"a player target found by its slot");
+    Check(EncodeNetRef(ObjRef{actors[2],ctrls[2]},again) && !std::memcmp(again,ids[2],32),"anything else: its NetId");
+    {
+        const unsigned char* refs[3]={requester,ids[2],nullptr};
+        const NetLife lives[3]={NetLife::live,NetLife::live,NetLife::live};
+        NetResolved got[3]{};
+        Check(ResolveNetRefs(refs,lives,3,got) && got[0].obj.obj==actors[1] && got[1].obj.obj==actors[2] && !got[2].found &&
+              got[2].slot==-1,"one walk, a player, a NetId and none");
+        unsigned char bad[32]{};std::memcpy(bad,requester,32);bad[9]=1;refs[2]=bad;
+        Check(!ResolveNetRefs(refs,lives,3,got) && !got[0].found,"an invalid reference: no walk, nothing found");
+    }
+    // What an object is called is not whether it is found (review of #307): deleted this frame, a player keeps its slot and
+    // an NPC its NetId (a lock's owner still sent); finding it is the receiver's NetLife. A deleted player is no requester.
+    actors[1][0x18]=4;
+    Check(EncodeNetRef(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a deleted player is still its slot");
+    Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !again[0],"a deleted player is no live requester");
+    actors[1][0x18]=0;actors[2][0x18]=4;
+    Check(EncodeNetRef(ObjRef{actors[2],ctrls[2]},again) && !std::memcmp(again,ids[2],32),"a deleted NPC is still its NetId");
+    actors[2][0x18]=0;
+    Check(!EncodeNetRef(ObjRef{actors[2],ctrls[3]},again) && !again[0],"a stale weak reference names nothing");
+    {   // A player soldier with no User bound (no mission slot): no name another machine shares, never its NetId.
+        Put<void*>(actors[1],0x1ED0,nullptr);
+        Check(!EncodeNetRef(ObjRef{actors[1],ctrls[1]},again) && !again[0],"a player with no slot is not named by its NetId");
+        Put<void*>(actors[1],0x1ED0,user2);
+    }
+    // A player is found by its slot alone: its NetId (here both players' are ids[0]'s) names nothing in the walk.
+    Check(ResolveNetRef(ids[0],NetLife::present,&r) && !r.found && !r.ambiguous,"a player's NetId finds no player");
+    // Two live players of one slot: ambiguous, not gone.
+    Put<int>(user,0x48,1);
+    Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && r.ambiguous,"two live of a slot: ambiguous");
+    Put<int>(user,0x48,0);
+    Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && !r.ambiguous,"one of a slot: found, not ambiguous");
+    {   // The frame's player table: a player reference again in one frame walks no more; a frame later, or one of its
+        // players no longer itself (deleted), walks again; a NetId always walks.
+        frameNow=40;const int before=walks;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.obj.obj==actors[1] && walks==before+1,"first lookup of the frame walks");
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.obj.obj==actors[1] && walks==before+1,"again in the frame: no walk");
+        unsigned char slot0[32]{};netref::MakePlayer(0,slot0);
+        Check(ResolveNetRef(slot0,NetLife::live,&r) && r.obj.obj==actors[0] && walks==before+1,"another slot from the same table");
+        actors[1][kDead]=1;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && walks==before+2,"none live of the slot in the table: walks (a respawn since)");
+        Check(ResolveNetRef(requester,NetLife::present,&r) && r.found && r.dead && walks==before+2,"fallen, present: from the table, its death read now");
+        actors[1][kDead]=0;
+        Check(ResolveNetRef(ids[2],NetLife::live,&r) && r.obj.obj==actors[2] && walks==before+3,"a NetId walks");
+        actors[1][0x18]=4;
+        Check(ResolveNetRef(requester,NetLife::present,&r) && !r.found && walks==before+4,"a player deleted since: walks again");
+        actors[1][0x18]=0;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+5,"none of the slot in the table: walks, found");
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+5,"then the table again");
+        frameNow=41;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+6,"a new frame walks");
+        Put<int>(user2,0x48,0);   // its slot changed under the table
+        Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && walks==before+7,"a slot changed since: walks again");
+        Put<int>(user2,0x48,1);
+        Put<unsigned>(status,0x14FF8,3);
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+8,"another world (its player count): walks");
+        Put<unsigned>(status,0x14FF8,2);frameNow=0;
+    }
     Check(PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a live player's requester is its slot");
     Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[2]},again) && !again[0],"a stale reference has no requester");
     Check(!PlayerRequesterOf(ObjRef{actors[2],ctrls[2]},again) && !again[0],"a soldier that is no player has no requester");
@@ -163,14 +245,22 @@ int main(int argc,char** argv) {
     Check(!ResolveCommandIdentities(requester0,ids+1,1,nullptr,nullptr),"missing output rejected");
     ids[1][20]=1;Rejected("noncanonical padding rejected");Reset();
     std::memset(requester0,0,32);Rejected("zero requester rejected");Reset();
-    // The requester is its mission slot alone (player_requester.h): its NetId names no player on another machine.
+    // The requester is its mission slot alone (net_object_ref.h): its NetId names no player on another machine.
     std::memcpy(requester0,ids[0],32);Rejected("a NetId requester rejected");Reset();
-    MakePlayerRequester(1,requester0);Rejected("a slot no player holds rejected");Reset();
+    netref::MakePlayer(1,requester0);Rejected("a slot no player holds rejected");Reset();
     std::memcpy(entries[0]+8,ids[18],32);Check(Resolve() && out.requester.obj==actors[0],"the requester found whatever its NetId here");Reset();
-    SecondPlayer(1);MakePlayerRequester(1,requester0);
+    SecondPlayer(1);netref::MakePlayer(1,requester0);
     Check(ResolveCommandIdentities(requester0,ids+2,15,ids[17],&out) && out.requester.obj==actors[1] && out.requesterPuid==user2 &&
           out.units[0].obj==actors[2],"the other player's slot finds it");Reset();
     SecondPlayer(0);Rejected("two players of the requester's slot rejected");Reset();
+    // The focus may be a player (an enemy player in PvP): by its slot.
+    SecondPlayer(1);netref::MakePlayer(1,ids[17]);
+    Check(ResolveCommandIdentities(requester0,ids+2,15,ids[17],&out) && out.focus.obj==actors[1],"a player focus found by its slot");
+    Reset();
+    SecondPlayer(1);netref::MakePlayer(1,ids[17]);
+    Check(!ResolveCommandIdentities(requester0,ids+1,16,ids[17],&out),"one object named as a unit and as the focus rejected");
+    Reset();
+    SecondPlayer(1);netref::MakePlayer(1,ids[1]);Rejected("a player as a unit rejected");Reset();
     std::memcpy(ids[1],requester0,32);Rejected("requester's ID repeated as unit rejected");Reset();
     std::memset(ids[1],0,32);Rejected("zero unit rejected");Reset();
     std::memset(ids[17],0,32);Rejected("zero supplied focus rejected");Reset();

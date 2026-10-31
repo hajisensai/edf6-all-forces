@@ -9,8 +9,11 @@
 // ignored. A peer without this plugin version (no QMRK) drops the bytes: its support parser rejects the magic.
 // The enemy goes by its native network ID (support_soldier.h ReadNativeObjectId, the one the map commands' focus uses:
 // the same object on every machine); an all-zero ID: one without it, shown at the position sent. The marker is the
-// sending player's own requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine),
+// sending player's own requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine),
 // resolved and checked against the authenticated sender on the receiving machine. Version 2 (2026-10-31): that ID.
+// Version 3 (2026-10-31): the marker and the target are object references (net_object_ref.h: a player by its slot with
+// its tag at bytes 20..23, anything else by its NetId), so a marked player (an enemy player in PvP) is found on every
+// machine; a machine whose player fell sends its marks cleared (the marker by its slot still) instead of going quiet.
 #pragma once
 #include <array>
 #include <cstddef>
@@ -18,7 +21,7 @@
 
 namespace crew::qmark_net {
 constexpr std::uint32_t kMagic=0x4B524D51u;   // "QMRK"
-constexpr std::uint32_t kVersion=2;
+constexpr std::uint32_t kVersion=3;
 // kCapLetGo: `letGo` counts the marks its player let go (the key again on the same enemy), so the receiver tells a let-go
 // (its cue) from a mark gone with its enemy (silent).
 constexpr std::uint32_t kCapEnemy=1u,kCapPoint=2u,kCapLetGo=4u,kCapabilities=kCapEnemy|kCapPoint|kCapLetGo;
@@ -31,9 +34,9 @@ struct State {
     std::uint32_t origin=0;          // the sender's run (a new one: its sequence starts over)
     std::uint32_t sequence=0;
     std::uint32_t caps=kCapabilities;
-    unsigned char marker[32]{};      // the marking player's native ID (zero: not known)
+    unsigned char marker[32]{};      // the marking player's reference (net_object_ref.h; zero: not known)
     bool enemy=false;
-    unsigned char target[32]{};      // the enemy's native ID (zero: none, shown at enemyAt)
+    unsigned char target[32]{};      // the marked object's reference (zero: none, shown at enemyAt)
     float enemyAt[3]{};
     bool point=false;
     float pointAt[3]{};
@@ -42,7 +45,7 @@ struct State {
 };
 bool Owned(const void* bytes,std::size_t size) noexcept;           // the QMRK magic (any version)
 bool Encode(const State&,void* bytes,std::size_t size) noexcept;
-// False: not QMRK, the wrong size, a newer version, an ID not canonical, a coordinate not finite, a point past kMaxPointMs.
+// False: not QMRK, the wrong size, another version, a marker that is no player's reference, a target not a reference, a coordinate not finite, a point past kMaxPointMs.
 bool Decode(const void* bytes,std::size_t size,State& out) noexcept;
 bool SameMarks(const State& a,const State& b) noexcept;            // the same enemy and the same point (not positions)
 

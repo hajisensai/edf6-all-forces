@@ -26,8 +26,7 @@ ultimate_net::Msg Sample() {
     m.kind=ultimate_net::Kind::start;m.origin=0xA1B2C3D4u;m.serial=7;m.frame=123;m.seed=0x0123456789ABCDEFull;m.damage=15000.0f;
     m.at[0]=-1234.5f;m.at[1]=42.25f;m.at[2]=987.0f;
     m.plane[0]=43.75f;m.plane[1]=60.0f;m.plane[2]=42.25f+ultimate::kPlaneMost;
-    for(int i=0;i<32;++i)m.caller[i]=static_cast<unsigned char>(i+1);
-    for(int i=20;i<24;++i)m.caller[i]=0;   // the NetId's padding
+    crew::netref::MakePlayer(3,m.caller);   // the caller's reference (net_object_ref.h): mission player 3
     return m;
 }
 bool Same(const ultimate_net::Msg& a,const ultimate_net::Msg& b) {
@@ -64,7 +63,9 @@ void WireChecks() {
     Check(Refused([](Msg& x){x.damage=-1.0f;}) && Refused([](Msg& x){x.damage=2.0e9f;}),"a damage no weapon has: refused");
     Check(Refused([](Msg& x){x.origin=0;}) && Refused([](Msg& x){x.serial=0;}),"no key: refused");
     Check(Refused([](Msg& x){std::memset(x.caller,0,32);}),"no caller: refused");
-    Check(Refused([](Msg& x){x.caller[21]=1;}),"a caller ID not canonical: refused");
+    Check(Refused([](Msg& x){x.caller[21]=1;}),"a caller reference with a broken tag: refused");
+    Check(Refused([](Msg& x){std::memset(x.caller,0,32);for(int i=0;i<20;++i)x.caller[i]=static_cast<unsigned char>(i+1);}),
+          "a caller by its NetId (another on every machine): refused");
     Check(Refused([](Msg& x){x.plane[1]=x.at[1]-5.0f;}) && Refused([](Msg& x){x.plane[2]=x.at[1]+ultimate::kPlaneMost+1.0f;}),
           "a ground circle under the centre or past kPlaneMost over it: refused");
     Check(Refused([](Msg& x){x.kind=static_cast<Kind>(9);}),"an unknown kind: refused");
@@ -73,7 +74,8 @@ void WireChecks() {
     unsigned char c[kWire];
     std::memcpy(c,b,kWire);c[0]='X';Check(!Decode(c,kWire,out) && !Owned(c,kWire),"another magic: not this channel's");
     std::memcpy(c,b,kWire);PutU(c,4,1);Check(!Decode(c,kWire,out),"an older version (the caller its NetId): dropped");
-    std::memcpy(c,b,kWire);PutU(c,4,3);Check(!Decode(c,kWire,out),"another version: dropped");
+    std::memcpy(c,b,kWire);PutU(c,4,2);Check(!Decode(c,kWire,out),"version 2 (the player's tag at bytes 0..3): dropped");
+    std::memcpy(c,b,kWire);PutU(c,4,4);Check(!Decode(c,kWire,out),"another version: dropped");
     Check(!Decode(b,kWire-4,out),"another size: dropped");
     std::memcpy(c,b,kWire);c[8]=0;Check(!Decode(c,kWire,out),"kind 0: dropped");
     std::memcpy(c,b,kWire);PutF(c,36,std::nanf(""));Check(!Decode(c,kWire,out),"a centre not finite: dropped");

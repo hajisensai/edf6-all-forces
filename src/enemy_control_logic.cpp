@@ -1,4 +1,5 @@
 #include "enemy_control_types.h"
+#include "net_object_ref.h"
 #include <cmath>
 #include <cwchar>
 
@@ -35,12 +36,13 @@ bool ValidInput(const Input& input) noexcept {
     if(input.absoluteAim) {
         if(std::fabs(input.aimYaw)>3.141593f || std::fabs(input.aimPitch)>1.2f)return false;
     } else if(input.aimYaw!=0 || input.aimPitch!=0)return false;
-    for(unsigned i=20;i<24;++i)if(input.fullFocusId[i])return false;
+    // The focus is an object reference (net_object_ref.h): an enemy player by its slot, the rest by NetId, or none.
+    if(!crew::netref::Valid(input.focusRef,true))return false;
     if(!input.absoluteAim) {
         for(float value:input.move)if(value!=0)return false;
         for(float value:input.look)if(value!=0)return false;
         for(const auto& active:input.active)if(active.id || active.phase)return false;
-        for(auto byte:input.fullFocusId)if(byte)return false;
+        for(auto byte:input.focusRef)if(byte)return false;
     }
     bool ended=false;
     for(unsigned i=0;i<kConcurrentAbilities;++i) {

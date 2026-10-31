@@ -1,5 +1,6 @@
 // Explicit little-endian Deiroi part events. Native pointers and padded structs never cross the wire.
 #pragma once
+#include "net_object_ref.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -13,7 +14,9 @@ constexpr std::size_t kHeaderBytes=8;
 constexpr std::size_t kControlBytes=42;
 constexpr std::size_t kShotBytes=121;
 constexpr std::size_t kEntityBytes=161;
-constexpr std::uint8_t kVersion=1;
+// Version 2 (2026-10-31): an entity shot's target is its object reference (net_object_ref.h: a player by its slot, the tag
+// at bytes 20..23), never the player's NetId (another on every machine).
+constexpr std::uint8_t kVersion=2;
 
 enum class Kind : std::uint8_t { control=1,shot=2,entity=3 };
 struct Event {
@@ -42,13 +45,8 @@ inline bool Valid(const Event& event) noexcept {
     }
     if((event.kind!=Kind::shot && event.kind!=Kind::entity) || event.shotIndex>0x7FFFFFFEu)return false;
     if(event.kind==Kind::entity) {
-        unsigned targetBits=0;
-        for(unsigned i=0;i<32;++i) {
-            const auto value=event.targetActorId[i];
-            if(i>=20 && i<24 && value)return false;
-            targetBits|=value;
-        }
-        if(!targetBits && event.lockOrdinal)return false;
+        if(!crew::netref::Valid(event.targetActorId,true))return false;
+        if(crew::netref::IsNone(event.targetActorId) && event.lockOrdinal)return false;
     }
     float speed=0,power=0;
     std::memcpy(&speed,event.actual+1,sizeof(speed));std::memcpy(&power,event.actual+3,sizeof(power));

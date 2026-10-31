@@ -4,7 +4,7 @@
 #include "pvp.h"
 #include "pvp_native.h"
 #include "command_identity.h"
-#include "player_requester.h"
+#include "net_object_ref.h"
 #include "coop_extension_api.h"
 #include "support_net.h"
 #include "support_soldier.h"
@@ -17,7 +17,7 @@ bool EmptyRequester(const unsigned char (&requester)[32]) noexcept {
     for(unsigned char byte:requester)if(byte)return false;
     return true;
 }
-// The requester is the player's mission slot (player_requester.h), never its NetId: a stock mission numbers the players'
+// The requester is the player's mission slot (net_object_ref.h), never its NetId: a stock mission numbers the players'
 // NetIds per machine, so a guest found no host player by the host's and refused every plan the host asked for (2026-10-31).
 // The mark resolver finds the one live player of that slot here (borrowed, immediate game-thread use); Coop resolves the
 // slot to a real transport PUID, then the sealed-world gate proves it is also that player's native EOS identity.
@@ -25,7 +25,7 @@ bool ResolveOwner(const unsigned char (&requester)[32],const ObjRef* expected,ED
     if(!out)return false;
     *out={};
     int slot=-1;
-    if(!PlayerRequesterSlot(requester,&slot))return false;
+    if(!netref::IsPlayer(requester,&slot))return false;
     MarkIdentities mark{};
     if(!ResolveMarkIdentities(requester,nullptr,&mark) || !mark.player || mark.slot!=slot || !mark.puid)return false;
     if(expected && (mark.player.obj!=expected->obj || mark.player.ctrl!=expected->ctrl))return false;

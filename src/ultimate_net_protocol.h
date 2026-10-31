@@ -13,7 +13,11 @@
 // peer that announced the bit, another version dropped by the registry.
 //   magic, version, kind (byte 8), origin @12, serial @16, frame @20, seed @24 (two words, low first), damage @32,
 //   at[3] @36, plane[3] @48, caller[32] @60; zero to kWire.
-// Version 2 (2026-10-31): the caller is its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// Version 2 (2026-10-31): the caller is its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// Version 3 (2026-10-31): the caller is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23),
+// taken when the show starts and sent with every message of it, its caller fallen or not (before, a caller that fell sent
+// no keep and no end, and a receiver dropped a fallen caller's messages); a receiver that does not have the caller (left,
+// deleted) plays the show's looks without its rounds.
 #pragma once
 #include "ultimate_plan.h"
 #include "wire.h"
@@ -22,7 +26,7 @@
 
 namespace crew::ultimate_net {
 constexpr std::uint32_t kMagic=0x53544C55u;   // "ULTS"
-constexpr std::uint32_t kVersion=2;
+constexpr std::uint32_t kVersion=3;
 constexpr std::size_t kWire=96;
 constexpr std::uint64_t kKeepMs=1000;          // a playing show's keep goes out this often
 constexpr float kMostDamage=1.0e9f;            // a weapon's damage past this is not a weapon's
@@ -37,7 +41,7 @@ struct Msg {
     float damage=0.0f;               // the weapon's (dealt on the caller's machine only)
     float at[3]{};                   // the centre, already on the ground
     float plane[ultimate::kGroundCircles]{};   // the ground circles' heights (ultimate.cpp CirclePlane), the caller's
-    unsigned char caller[32]{};      // the calling player's requester ID (command_identity.h PlayerRequesterOf)
+    unsigned char caller[32]{};      // the calling player's reference (net_object_ref.h), taken when its show started
 };
 
 namespace detail {
@@ -49,7 +53,7 @@ inline bool KindOk(Kind k) noexcept { return k==Kind::start || k==Kind::keep || 
 // planes where CirclePlane puts them (over the centre, at most kPlaneMost), a caller and a key.
 inline bool Valid(const Msg& m) noexcept {
     if(!KindOk(m.kind) || !m.origin || !m.serial || m.frame<0 || m.frame>ultimate::kAfterEnd)return false;
-    if(!(m.damage>=0.0f) || m.damage>kMostDamage || wire::ZeroId(m.caller) || !wire::CanonicalId(m.caller))return false;
+    if(!(m.damage>=0.0f) || m.damage>kMostDamage || !netref::IsPlayer(m.caller))return false;
     for(float p:m.plane)if(!(p>=m.at[1]-0.01f) || !(p<=m.at[1]+ultimate::kPlaneMost+0.01f))return false;
     return true;
 }
@@ -65,12 +69,12 @@ inline bool Encode(const Msg& m,void* bytes,std::size_t size) noexcept {
      .U32(static_cast<std::uint32_t>(m.frame)).U32(static_cast<std::uint32_t>(m.seed)).U32(static_cast<std::uint32_t>(m.seed>>32))
      .F(m.damage).V3(m.at);
     for(float p:m.plane)w.F(p);
-    w.Id(m.caller);
+    w.Ref(m.caller,false,true);
     return w.Ok() && w.Used()==detail::kUsed;
 }
 
 // False: not ULTS, the wrong size, another version, an unknown kind, a number not finite or out of its bounds, a frame
-// outside the show, no caller or one not canonical, no origin or serial.
+// outside the show, a caller that is no player's reference, no origin or serial.
 inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
     if(!Owned(bytes,size) || size!=kWire)return false;
     wire::Reader r(bytes,size);
@@ -86,7 +90,7 @@ inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
     m.damage=r.F(kMostDamage);
     r.V3(m.at);
     for(float& p:m.plane)p=r.F();
-    r.Id(m.caller);
+    r.Ref(m.caller,false,true);
     if(!r.Ok() || !detail::Valid(m))return false;
     out=m;
     return true;

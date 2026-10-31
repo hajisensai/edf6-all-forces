@@ -27,6 +27,15 @@ bool RadialOk(const Grab& g) noexcept {
         (g.goal[0]>0.0f && g.goal[0]<=kMostRadial && g.goal[1]>=-kMostRadialSpeed && g.goal[1]<=kMostRadialSpeed);
 }
 bool Kind(GunKind k) noexcept { return k==GunKind::drop || k==GunKind::pick || k==GunKind::owner || k==GunKind::gone; }
+// A gun's `who` (net_object_ref.h): a drop's colonist by its NetId, a pick's and an owner's player by its slot.
+bool WhoOk(const Gun& g) noexcept {
+    switch(g.kind) {
+    case GunKind::drop: return netref::ValidNative(g.who,false);
+    case GunKind::pick: case GunKind::owner: return netref::IsPlayer(g.who);
+    case GunKind::gone: return netref::Valid(g.who,true);
+    }
+    return false;
+}
 }  // namespace
 
 bool OwnedGrab(const void* bytes,std::size_t size) noexcept { return Owned(bytes,size,kGrabMagic); }
@@ -36,7 +45,7 @@ bool Encode(const Grab& g,void* bytes,std::size_t size) noexcept {
     if(!bytes || size!=kGrabWire || !Kind(g.kind) || !RadialOk(g))return false;
     wire::Writer w(bytes,size);
     w.U32(kGrabMagic).U32(kVersion).U8(static_cast<std::uint8_t>(g.kind)).Seek(kGOrigin).U32(g.origin).U32(g.grab)
-     .Id(g.grabber).Id(g.target).V3(g.at).V3(g.rayA).V3(g.rayB).V3(g.goal).V3(g.vel);
+     .Ref(g.grabber,false,true).Ref(g.target).V3(g.at).V3(g.rayA).V3(g.rayB).V3(g.goal).V3(g.vel);
     return w.Ok() && w.Used()==kGUsed;
 }
 
@@ -48,7 +57,7 @@ bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept {
     if(r.U32()!=kVersion)return false;
     g.kind=static_cast<GrabKind>(r.U8());
     r.Seek(kGOrigin);g.origin=r.U32();g.grab=r.U32();
-    r.Id(g.grabber);r.Id(g.target);
+    r.Ref(g.grabber,false,true);r.Ref(g.target);
     r.V3(g.at);r.V3(g.rayA);r.V3(g.rayB);r.V3(g.goal);r.V3(g.vel);
     if(!r.Ok() || !Kind(g.kind) || !RadialOk(g))return false;
     out=g;
@@ -56,10 +65,10 @@ bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept {
 }
 
 bool Encode(const Gun& g,void* bytes,std::size_t size) noexcept {
-    if(!bytes || size!=kGunWire || g.leftMs>kMostLeftMs || !Kind(g.kind))return false;
+    if(!bytes || size!=kGunWire || g.leftMs>kMostLeftMs || !Kind(g.kind) || !WhoOk(g))return false;
     wire::Writer w(bytes,size);
     w.U32(kGunMagic).U32(kVersion).U8(static_cast<std::uint8_t>(g.kind)).Seek(kUSerial).U16(g.serial).U8(g.index)
-     .Seek(kUOrigin).U32(g.origin).Id(g.who).V3(g.at).U32(g.leftMs);
+     .Seek(kUOrigin).U32(g.origin).Ref(g.who).V3(g.at).U32(g.leftMs);
     return w.Ok() && w.Used()==kUUsed;
 }
 
@@ -72,8 +81,8 @@ bool Decode(const void* bytes,std::size_t size,Gun& out) noexcept {
     g.kind=static_cast<GunKind>(r.U8());
     r.Seek(kUSerial);g.serial=r.U16();g.index=r.U8();
     r.Seek(kUOrigin);g.origin=r.U32();
-    r.Id(g.who);r.V3(g.at);g.leftMs=r.U32();
-    if(!r.Ok() || !Kind(g.kind) || g.leftMs>kMostLeftMs)return false;
+    r.Ref(g.who);r.V3(g.at);g.leftMs=r.U32();
+    if(!r.Ok() || !Kind(g.kind) || !WhoOk(g) || g.leftMs>kMostLeftMs)return false;
     out=g;
     return true;
 }

@@ -134,7 +134,7 @@ struct Gun {
     ULONGLONG nextShot=0;
     std::uint64_t rng=0x9E3779B97F4A7C15ull;
     std::uint16_t serial=0;    // the host's for it (online: the gun's name on every machine; 0 offline)
-    unsigned char ownerId[32]{};   // floating: its owner's ID (online; player_requester.h: its mission slot)
+    unsigned char ownerId[32]{};   // floating: its owner's ID (online; net_object_ref.h: its mission slot)
     unsigned char fromId[32]{};    // the host's: the colonist it came from and its place in its list (a joining peer is told)
     std::uint8_t fromIndex=0;
     bool claiming=false;       // put down, the game's drop of it not claimed yet (claimAt: the gun's place then)
@@ -542,7 +542,7 @@ void Step(ULONGLONG ms,float dt) noexcept {
     unsigned char* me=PlayerHuman();
     const bool host=OnlineHostOnly();
     unsigned char myId[32]{};
-    const bool haveId=me && PlayerRequesterOf(me,myId);   // its mission slot (player_requester.h), the same on every machine
+    const bool haveId=me && PlayerRequesterOf(me,myId);   // its mission slot (net_object_ref.h), the same on every machine
     for(auto& g:guns) {
         if(g.state==State::free)continue;
         if(g.state==State::ground) {

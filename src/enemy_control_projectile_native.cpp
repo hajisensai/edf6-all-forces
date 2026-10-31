@@ -42,7 +42,9 @@ bool Ready() noexcept {
     admittedImage=image;return true;
 }
 bool Zero(const unsigned char* id) noexcept {unsigned any=0;for(unsigned i=0;i<32;++i)any|=id[i];return !any;}
-bool Canonical(const unsigned char* id) noexcept {return !Zero(id) && !At<std::uint32_t>(id,20);}
+// A target's / an owner's ID: its object reference (net_object_ref.h): a player by its slot, the rest by its NetId.
+bool Canonical(const unsigned char* id) noexcept {return netref::Valid(id,false);}
+bool NativeCanonical(const unsigned char* id) noexcept {return netref::IsNative(id);}
 bool Matrix(const float* matrix) noexcept {
     if(!Readable(matrix,64))return false;for(unsigned i=0;i<16;++i)if(!std::isfinite(matrix[i]))return false;
     if(std::fabs(matrix[15]-1.0f)>0.0001f)return false;
@@ -112,8 +114,14 @@ bool Compatible(const void* local,const void* actual) noexcept {
     }
     return true;
 }
+// The registry's record of a NetId (NativeActor): the actor's own NetId.
+bool ReadNativeActorId(const Ref& r,unsigned char* id) noexcept {
+    return Actor(r) && ReadNativeObjectId(static_cast<const unsigned char*>(r.object),id) && NativeCanonical(id);
+}
+// What goes on the wire for an actor (a lock's owner, a projectile's extra): its reference, a player by its slot (the enemy
+// player a controlled enemy shoots at in PvP: its NetId is another on every machine), the rest by its NetId.
 bool ReadActorId(const Ref& r,unsigned char* id) noexcept {
-    return Actor(r) && ReadNativeObjectId(static_cast<const unsigned char*>(r.object),id) && Canonical(id);
+    return Actor(r) && EncodeNetRef(ObjRef{r.object,r.control},id) && Canonical(id);
 }
 bool CaptureLock(const Ref& lock,unsigned char* id,std::uint32_t* index) noexcept {
     if(!Weak(lock))return false;if(!lock.control || At<LONG>(lock.control,8)==0)return true;
@@ -160,7 +168,7 @@ bool NativeActor(const unsigned char* id,Ref* out) noexcept {
             if(!actor.control || !Weak(actor))return false; // placeholder is not proven expired
             if(At<LONG>(actor.control,8)==0){if(!stable() || !sameRecord())return false;*out={};return true;}
             unsigned char actual[32]{};
-            if(!ReadActorId(actor,actual) || std::memcmp(actual,id,32) || !stable() || !sameRecord() || !Actor(actor))return false;
+            if(!ReadNativeActorId(actor,actual) || std::memcmp(actual,id,32) || !stable() || !sameRecord() || !Actor(actor))return false;
             *out=actor;return true;
         }
         if(node==first)return false;node=At<const unsigned char*>(node,8);
@@ -170,6 +178,18 @@ bool NativeActor(const unsigned char* id,Ref* out) noexcept {
 
 bool ResolveActor(const unsigned char* id,Ref* out) noexcept {
     *out={};if(Zero(id))return true;if(!Canonical(id))return false;
+    // A player by its slot (net_object_ref.h): present (a fallen player is still a target's body). The walk ran and no
+    // object of that slot is here (gone, deleted, left): an empty actor, as an expired NetId's record (NativeActor). Only
+    // two of the slot (ambiguous) or a walk that could not run is a failure. Its strong reference is taken at the handoff.
+    if(netref::IsPlayer(id)) {
+        NetResolved found{};
+        if(!ResolveNetRef(id,NetLife::present,&found) || found.ambiguous)return false;
+        if(!found.found)return true;
+        const Ref actor{const_cast<void*>(found.obj.obj),static_cast<unsigned char*>(const_cast<void*>(found.obj.ctrl))};
+        unsigned char actual[32]{};
+        if(!ReadActorId(actor,actual) || std::memcmp(actual,id,32))return false;
+        *out=actor;return true;
+    }
 #ifdef ENEMY_CONTROL_PROJECTILE_NATIVE_TEST
     // Existing boundary fixtures can omit the game registry entirely. Lifecycle
     // fixtures install the real native-layout registry and exercise the path above.

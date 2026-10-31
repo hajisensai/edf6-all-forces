@@ -5,6 +5,7 @@
 // This restores input/AI control state; it cannot undo projectiles or damage already emitted by native gameplay.
 #pragma once
 #include "enemy_control_action_types.h"
+#include "net_object_ref.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -18,9 +19,14 @@ constexpr std::uint32_t kMagic=0x4c544345u,kCapability=5;
 // of +Z). An input of version 3 means the other way round on two axes, so a version-3 peer must not take part: its
 // hello does not decode here (nor ours there), it is never capable, and the host refuses every control in a room
 // with it (Session: every peer capable) instead of moving the enemy mirrored on one machine.
-// Version 5 (2026-10-31): the requesting player (LeaseSpec::requesterPlayer) is its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine); a version-4 peer
+// Version 5 (2026-10-31): the requesting player (LeaseSpec::requesterPlayer) is its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine); a version-4 peer
 // is left out the same way.
-constexpr std::uint8_t kVersion=5;
+// Version 6 (2026-10-31): the requesting player is its object reference (net_object_ref.h: the slot with its tag at bytes
+// 20..23, never a NetId's form), and every target a controlled enemy's projectile or attack names (a player too: the
+// enemy player in PvP) goes by its reference; a version-5 peer is left out the same way.
+// Version 7 (2026-10-31): the controller's manual focus (Input focusRef, input version 4) and the Deiroi entity shot's
+// lock target are references too, and a player target not here is an empty actor, not a pending one.
+constexpr std::uint8_t kVersion=7;
 constexpr std::size_t kMaxPeers=32,kMaxLeases=16,kMaxInputBytes=512,kChunkBytes=512,kWirePrefixBytes=192,kWireBytes=kWirePrefixBytes+kMaxInputBytes,kMaxPoseBytes=512,kMaxActions=1024,kActionWindow=128;
 using ActionIndex=std::uint16_t;
 static_assert(kMaxActions<=static_cast<std::size_t>((std::numeric_limits<ActionIndex>::max)())+1,"all shared action pool indices must fit without truncation");
@@ -90,6 +96,8 @@ inline bool CanonicalId(const NativeId& id) noexcept {
     bool any=false;for(auto b:id)any=any || b!=0;
     return any && !id[20] && !id[21] && !id[22] && !id[23];
 }
+// A requesting player's ID: its object reference (net_object_ref.h), never a NetId.
+inline bool PlayerId(const NativeId& id) noexcept { return crew::netref::IsPlayer(id.data()); }
 inline std::uint64_t Mix64(std::uint64_t value) noexcept {
     value=(value^(value>>30))*0xbf58476d1ce4e5b9ull;
     value=(value^(value>>27))*0x94d049bb133111ebull;
@@ -127,7 +135,7 @@ inline bool Valid(const Message& m) noexcept {
     for(std::size_t i=m.inputSize;i<m.input.size();++i)if(m.input[i])return false;
     if(m.kind!=Kind::InputRequest && m.kind!=Kind::Input && m.kind!=Kind::Pose && m.kind!=Kind::Action && m.kind!=Kind::ActionAckBatch && m.inputSize)return false;
     if(m.kind==Kind::Hello || m.kind==Kind::Welcome)return m.request!=0;
-    if(m.kind==Kind::Request || m.kind==Kind::Cancel || m.kind==Kind::CancelAck)return m.request && CanonicalId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && !m.spec.ownerPuid[0];
+    if(m.kind==Kind::Request || m.kind==Kind::Cancel || m.kind==Kind::CancelAck)return m.request && PlayerId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && !m.spec.ownerPuid[0];
     if(m.kind==Kind::Reject)return m.request!=0;
     if(m.kind==Kind::ActionAckBatch) {
         if(!m.ok || m.result!=Result::Complete || m.lease || m.request || m.sequence || m.seed || m.capability || m.spec.profileHash || m.inputSize<8+kAckEntryBytes || m.input[0]!=2 || !m.input[1] || m.input[1]>kAckBatchEntries || m.inputSize!=8+kAckEntryBytes*m.input[1] || m.spec.ownerPuid[0])return false;
@@ -140,14 +148,14 @@ inline bool Valid(const Message& m) noexcept {
         return true;
     }
     if(!m.lease)return false;
-    if(m.kind==Kind::Prepare)return m.request && CanonicalId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) &&
+    if(m.kind==Kind::Prepare)return m.request && PlayerId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) &&
         m.spec.profileHash && ValidPuid(m.spec.ownerPuid);
     if(m.kind==Kind::ActionAck)return m.request && m.sequence && !m.seed && !m.capability && !m.inputSize &&
-        CanonicalId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && m.spec.profileHash && ValidPuid(m.spec.ownerPuid);
+        PlayerId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && m.spec.profileHash && ValidPuid(m.spec.ownerPuid);
     if(m.kind==Kind::Pose || m.kind==Kind::Action) {
         const auto parts=m.capability>>16,index=m.capability&0xFFFFu;
         return m.sequence && m.request && !m.seed && !m.ok && m.result==Result::Idle &&
-            CanonicalId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && m.spec.profileHash &&
+            PlayerId(m.spec.requesterPlayer) && CanonicalId(m.spec.target) && m.spec.profileHash &&
             ValidPuid(m.spec.ownerPuid) && m.inputSize && m.inputSize<=kChunkBytes && parts && parts<=kMaxPoseBytes/kChunkBytes &&
             index<parts && (index+1==parts || m.inputSize==kChunkBytes);
     }
@@ -514,7 +522,7 @@ inline void Protocol::HostInput(Lease& l,const Message& m,std::uint64_t now) noe
     if(!hooks_.ApplyInput(hooks_.user,l.view.id,l.view.spec,meta,accepted.input.data(),accepted.inputSize))End(l,Result::ApplyFailed,now);
 }
 inline bool Protocol::Request(const NativeId& player,const NativeId& target,std::uint64_t profile,std::uint64_t now) noexcept {
-    if(!CanonicalId(player) || !CanonicalId(target) || nextRequest_==UINT64_MAX){last_=Result::Unauthorized;return false;}
+    if(!PlayerId(player) || !CanonicalId(target) || nextRequest_==UINT64_MAX){last_=Result::Unauthorized;return false;}
     Message m;m.kind=Kind::Request;m.request=++nextRequest_;m.spec.requesterPlayer=player;m.spec.target=target;m.spec.profileHash=profile;
     RecordRequest(m,now);
     if(!Ready()){last_=Result::Unavailable;RejectRequest(m.request,last_);return false;}

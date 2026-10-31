@@ -79,7 +79,7 @@ bool Requester(const char* authenticated,const ep::NativeId& id) noexcept {
     // The host's reason for an Unauthorized reply (the guest sees only that; 2026-10-30 report #27). A PUID / participant
     // mismatch is logged by the sender check itself (SupportCommandRequesterMatches).
     std::atomic<int>& said=requesterLogs;
-    if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id)) {
+    if(!ep::ValidPuid(authenticated) || !ep::PlayerId(id)) {
         if(said.fetch_add(1)<16)Log("ENEMYCTRL NET request refused: malformed sender or player ID");
         return false;
     }
@@ -98,7 +98,7 @@ bool Authenticate(void*,const char* puid,const ep::NativeId& source) noexcept {
 struct Actors { ObjRef source{},target{}; };
 bool ResolveActors(const ep::LeaseSpec& spec,Actors* out) noexcept {
     if(!out)return false;*out={};
-    if(!InSession() || !ep::CanonicalId(spec.requesterPlayer) || !ep::CanonicalId(spec.target) ||
+    if(!InSession() || !ep::PlayerId(spec.requesterPlayer) || !ep::CanonicalId(spec.target) ||
        spec.requesterPlayer==spec.target || !ep::ValidPuid(spec.ownerPuid))return false;
     CommandIdentities identities{};
     if(!ResolveCommandIdentities(spec.requesterPlayer.data(),nullptr,0,spec.target.data(),&identities) ||
@@ -189,7 +189,7 @@ bool NormalizeInput(void*,std::uint64_t token,const ep::LeaseSpec& spec,const ep
         Actors actors{};enemy_control::Input input{};
         if(!transport.host || !ResolveActors(spec,&actors) || !en::DecodeInput(bytes,size,&input))return false;
         input.sequence=meta.sequence;input.seed=meta.seed;
-        if(!EnemyControlNormalizeNetworkInput(token,&input))std::memset(input.fullFocusId,0,32);
+        if(!EnemyControlNormalizeNetworkInput(token,&input))std::memset(input.focusRef,0,32);
         return en::EncodeInput(input,bytes,size);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

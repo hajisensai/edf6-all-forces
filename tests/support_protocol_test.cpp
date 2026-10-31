@@ -1,3 +1,4 @@
+#include "../src/net_object_ref.h"
 #include "../src/support_protocol.h"
 #include "../src/support_loadout.h"
 #include "../src/support_submarine.h"
@@ -644,7 +645,8 @@ void PvpSupportCodec() {
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");
     bool zero=true;for(unsigned i=68;i<kWireSize;++i)zero=zero && wire[i]==0;
     Check(zero,"legacy BEGIN unused unit and tail stay byte-zero");
-    begin.unit.resourceId=kBeginRequesterMetadata;begin.unit.role=2;begin.unit.netId[0]=41;begin.unit.netId[12]=1;
+    // The requester: a player's reference (net_object_ref.h: slot 41, its tag at bytes 20..23).
+    begin.unit.resourceId=kBeginRequesterMetadata;begin.unit.role=2;crew::netref::MakePlayer(41,begin.unit.netId);
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.role==2 &&
         decoded.unit.resourceId==kBeginRequesterMetadata && !std::memcmp(decoded.unit.netId,begin.unit.netId,32),
         "BEGIN requester identity and authorized side cross the unchanged real v2 codec");
@@ -655,7 +657,9 @@ void PvpSupportCodec() {
     auto malformed=begin;malformed.unit.role=3;
     Check(!Encode(malformed,wire,sizeof(wire)),"unknown PvP team rejected");
     malformed=begin;malformed.unit.netId[20]=1;
-    Check(!Encode(malformed,wire,sizeof(wire)),"requester native padding must be canonical");
+    Check(!Encode(malformed,wire,sizeof(wire)),"a requester with its tag broken rejected");
+    malformed=begin;std::memset(malformed.unit.netId,0,32);malformed.unit.netId[0]=41;malformed.unit.netId[12]=1;
+    Check(!Encode(malformed,wire,sizeof(wire)),"a requester by a NetId rejected (a player is its slot)");
     malformed=begin;std::memset(malformed.unit.netId,0,32);
     Check(!Encode(malformed,wire,sizeof(wire)),"metadata cannot claim an empty requester");
     malformed=begin;malformed.unit.resourceId=123;
@@ -670,23 +674,24 @@ void PvpSupportCodec() {
     Check(!Encode(malformed,wire,sizeof(wire)),"unmarked BEGIN cannot carry requester bytes");
     Check(Encode(begin,wire,sizeof(wire)),"valid requester fixture");
     wire[68]^=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects unknown BEGIN magic");wire[68]^=1;
-    wire[160]=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects noncanonical requester padding");wire[160]=0;
+    {const unsigned char was=wire[160];wire[160]=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects a requester with its tag broken");wire[160]=was;}
     wire[72]=3;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects invalid metadata side");wire[72]=0;
     wire[76]=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects dirty metadata fields");
     Plan plan;plan.count=1;plan.units[0].resourceId=1;
     plan.units[0].matrix[0]=plan.units[0].matrix[5]=plan.units[0].matrix[10]=plan.units[0].matrix[15]=1;
     Check(ValidPlan(plan,false),"legacy plan has no requester or team");
     plan.team=1;Check(!ValidPlan(plan,false),"team plan requires a requester");
-    plan.requester[0]=41;Check(ValidPlan(plan,false),"canonical requester permits team one");
+    crew::netref::MakePlayer(41,plan.requester);Check(ValidPlan(plan,false),"a player's requester permits team one");
     plan.team=0;Check(ValidPlan(plan,false),"requester with stock team is a valid ownership cache");
     plan.team=3;Check(!ValidPlan(plan,false),"plan rejects unsupported team");
-    plan.team=2;plan.requester[23]=1;Check(!ValidPlan(plan,false),"plan rejects noncanonical native requester");
+    plan.team=2;plan.requester[23]=1;Check(!ValidPlan(plan,false),"plan rejects a requester with its tag broken");
+    std::memset(plan.requester,0,32);plan.requester[0]=41;Check(!ValidPlan(plan,false),"plan rejects a requester by its NetId");
 }
 void PvpSupport() {
     {Room r(3);
      Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport) && r.nodes[1]->session->HostDetails()==kDetails &&
         r.nodes[1]->session->PeersHaveDetails(kDetailPvpSupport),"host and clients negotiate independent support details");
-     r.nodes[0]->requester[0]=41;r.nodes[0]->requester[12]=1;r.nodes[0]->team=2;
+     crew::netref::MakePlayer(41,r.nodes[0]->requester);r.nodes[0]->team=2;
      RequesterPlanner(*r.nodes[0],true);
      Check(r.nodes[0]->session->Ready(),"requester-aware hook can be the sole host planner");
      const float at[3]={10,20,30};const std::uint64_t load=0xDD99998;
@@ -702,21 +707,21 @@ void PvpSupport() {
         "host emits explicit BEGIN requester metadata");
      r.Step(2100);r.With(0);const float own[3]={1,2,3};Check(current->session->Submit(5,own,r.now),"host submits its own support");r.Settle();
      Check(r.nodes[0]->requesterPeer==0,"host-local planner requester is peer zero");}
-    {Room r(2);r.nodes[0]->requester[0]=42;r.nodes[0]->team=0;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+    {Room r(2);crew::netref::MakePlayer(42,r.nodes[0]->requester);r.nodes[0]->team=0;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.requester[0]==42 && !n->last.team,
         "stock-side deployment retains ownership on every peer");}
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();
      Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"one legacy peer closes the room metadata gate");
-     r.nodes[0]->requester[0]=42;r.nodes[0]->team=1;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+     crew::netref::MakePlayer(42,r.nodes[0]->requester);r.nodes[0]->team=1;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
      for(const auto& n:r.nodes)Check(!n->spawns,"no metadata transaction spawns with a legacy third peer");
      bool began=false;for(const auto& p:r.history)began=began || p.message.kind==Kind::begin;
      Check(!began,"all-peer capability gate runs before any BEGIN metadata is sent");
-     r.nodes[0]->requester[0]=0;r.nodes[0]->team=0;r.Step(2100);r.Submit();r.Settle();
+     std::memset(r.nodes[0]->requester,0,32);r.nodes[0]->team=0;r.Step(2100);r.Submit();r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1,"legacy stock support remains usable in a mixed room");
      const auto legacy=Find(r,Kind::begin,1);unsigned char wire[kWireSize]{};Check(Encode(legacy.message,wire,sizeof(wire)),"legacy mixed-room BEGIN encoded");
      bool zero=true;for(unsigned i=68;i<kWireSize;++i)zero=zero && wire[i]==0;
      Check(zero,"mixed-room legacy BEGIN carries no metadata bytes");}
-    {Room r(3);r.dropTo=0;r.dropKind=Kind::ready;r.nodes[0]->requester[0]=42;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+    {Room r(3);r.dropTo=0;r.dropKind=Kind::ready;crew::netref::MakePlayer(42,r.nodes[0]->requester);RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
      r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();r.dropTo=999;r.Settle();
      for(const auto& n:r.nodes)Check(!n->spawns,"capability loss before commit cancels a prepared requester transaction");}
     {Room r(3);const auto old=Find(r,Kind::hello,0);
@@ -730,7 +735,7 @@ void PvpSupport() {
      wrong.message.challenge+=100;wrong.message.unit.role=0;r.Deliver(wrong);
      Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"wrong challenge with equal mission serial cannot erase current capability");}
     for(bool assembled:{false,true}) {
-        Room r(3);r.nodes[0]->requester[0]=42;RequesterPlanner(*r.nodes[0]);
+        Room r(3);crew::netref::MakePlayer(42,r.nodes[0]->requester);RequesterPlanner(*r.nodes[0]);
         if(assembled){r.dropTo=1;r.dropKind=Kind::prepare;}else{r.dropTo=0;r.dropKind=Kind::ready;}
         r.Submit();r.Settle();Packet welcome{};
         for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::welcome)welcome=p;
@@ -764,7 +769,7 @@ void PvpSupport() {
 }
 namespace {
 Plan DronePlan(std::uint32_t resource=crew::kSupportSubDroneResource,std::uint64_t parent=901) {
-    Plan p{};p.catalogId=kPreparedDroneCatalog;p.count=1;p.team=2;p.requester[0]=41;p.requester[12]=1;
+    Plan p{};p.catalogId=kPreparedDroneCatalog;p.count=1;p.team=2;crew::netref::MakePlayer(41,p.requester);
     p.target[0]=10;p.target[1]=20;p.target[2]=30;
     auto& u=p.units[0];u.resourceId=resource;u.variant=parent;
     u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;std::memcpy(u.matrix+12,p.target,12);return p;

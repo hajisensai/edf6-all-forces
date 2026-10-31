@@ -20,7 +20,7 @@
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "command_identity.h"
-#include "player_requester.h"
+#include "net_object_ref.h"
 #include "version_notice.h"
 #include "hudtext.h"
 #include "plugin_net.h"
@@ -367,11 +367,11 @@ bool PlanRequester(std::uint32_t peer,unsigned char* out,ObjRef* outActor=nullpt
         if(!actor.obj)continue;
         EDF6CoopPeer who{};
         if(!resolve(static_cast<std::int32_t>(i),&who) || !PeerValid(who) || std::strcmp(who.id,authenticated))continue;
-        // Named by its mission slot (player_requester.h), the same on every machine; its NetId is not (a stock mission's
+        // Named by its mission slot (net_object_ref.h), the same on every machine; its NetId is not (a stock mission's
         // are the script thread's count on each machine).
         __try {
             unsigned char candidate[32]{};MarkIdentities identities{};
-            if(MakePlayerRequester(static_cast<int>(i),candidate) &&
+            if(netref::MakePlayer(static_cast<int>(i),candidate) &&
                ResolveMarkIdentities(candidate,nullptr,&identities) && identities.player.obj==actor.obj &&
                identities.player.ctrl==actor.ctrl && SupportCommandRequesterMatches(identities.puid,authenticated)) {
                 std::memcpy(out,candidate,32);if(outActor)*outActor=actor;return true;

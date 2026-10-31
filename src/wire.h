@@ -5,8 +5,11 @@
 //  - Reader fails sticky: a read past the end, a float not finite (or past its bound), an ID not canonical leaves Ok()
 //    false, and every later read returns zero; a decoder reads everything, then asks Ok() once.
 // Native IDs (support_soldier.h ReadNativeObjectId, command_identity.h): 32 bytes, bytes 20..23 zero (the NetId's padding,
-// never identity), or all zero (none given).
+// never identity), or all zero (none given). Object references (net_object_ref.h: a player by its mission slot, anything
+// else by its NetId): Ref, which also takes a player's; every field that names an object a player may be (a caller, a
+// grabber, a target, a focus) goes by Ref, never Id.
 #pragma once
+#include "net_object_ref.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +50,12 @@ public:
         if(Room(kIdBytes)){if(id)std::memcpy(p_+at_,id,kIdBytes);at_+=kIdBytes;}
         return *this;
     }
+    // An object reference (net_object_ref.h; null: none). One that is not Valid (`allowNone`, `playerOnly`) fails the message.
+    Writer& Ref(const unsigned char* ref,bool allowNone=true,bool playerOnly=false) noexcept {
+        if(!netref::Valid(ref,allowNone,playerOnly)){ok_=false;return *this;}
+        if(Room(kIdBytes)){if(ref)std::memcpy(p_+at_,ref,kIdBytes);at_+=kIdBytes;}
+        return *this;
+    }
     Writer& Bytes(const void* b,std::size_t n) noexcept { if(Room(n)){if(b)std::memcpy(p_+at_,b,n);at_+=n;} return *this; }
     Writer& Skip(std::size_t n) noexcept { if(Room(n))at_+=n; return *this; }
     Writer& Seek(std::size_t at) noexcept { if(at>size_)ok_=false;else at_=at; return *this; }
@@ -85,6 +94,13 @@ public:
         const unsigned char* id=p_+at_;at_+=kIdBytes;
         if(!CanonicalId(id)){ok_=false;if(out)std::memset(out,0,kIdBytes);return;}
         if(out)std::memcpy(out,id,kIdBytes);
+    }
+    // An object reference (net_object_ref.h): one not Valid (`allowNone`, `playerOnly`) fails the message (zeros written).
+    void Ref(unsigned char* out,bool allowNone=true,bool playerOnly=false) noexcept {
+        if(!Room(kIdBytes)){if(out)std::memset(out,0,kIdBytes);return;}
+        const unsigned char* ref=p_+at_;at_+=kIdBytes;
+        if(!netref::Valid(ref,allowNone,playerOnly)){ok_=false;if(out)std::memset(out,0,kIdBytes);return;}
+        if(out)std::memcpy(out,ref,kIdBytes);
     }
     void Bytes(void* out,std::size_t n) noexcept {
         if(!Room(n)){if(out)std::memset(out,0,n);return;}

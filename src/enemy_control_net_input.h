@@ -1,6 +1,7 @@
 // Canonical semantic input only. Native pointers, raw pad memory and function/CAS addresses never cross the wire.
 #pragma once
 #include "enemy_control_types.h"
+#include "net_object_ref.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +9,7 @@
 
 namespace crew::enemy_control_net {
 constexpr std::size_t kInputBytes=4+5*4+3*4+enemy_control::kConcurrentAbilities*8+32;
-constexpr std::uint8_t kInputVersion=3;
+constexpr std::uint8_t kInputVersion=4;   // 4: the focus is an object reference (a player by its slot)
 inline bool ValidSemanticInput(const enemy_control::Input& input) noexcept {
     for(float value:input.move)if(!std::isfinite(value) || std::fabs(value)>1.0f)return false;
     for(float value:input.look)if(!std::isfinite(value) || std::fabs(value)>1.0f)return false;
@@ -18,12 +19,13 @@ inline bool ValidSemanticInput(const enemy_control::Input& input) noexcept {
     if(input.absoluteAim) {
         if(std::fabs(input.aimYaw)>pi || std::fabs(input.aimPitch)>1.2f)return false;
     } else if(input.aimYaw!=0.0f || input.aimPitch!=0.0f)return false;
-    for(unsigned i=20;i<24;++i)if(input.fullFocusId[i])return false;
+    // The focus is an object reference (net_object_ref.h): an enemy player by its slot, the rest by NetId, or none.
+    if(!crew::netref::Valid(input.focusRef,true))return false;
     if(!input.absoluteAim) {
         for(float value:input.move)if(value!=0)return false;
         for(float value:input.look)if(value!=0)return false;
         for(const auto& channel:input.active)if(channel.id || channel.phase)return false;
-        for(auto byte:input.fullFocusId)if(byte)return false;
+        for(auto byte:input.focusRef)if(byte)return false;
     }
     bool ended=false;
     for(unsigned i=0;i<enemy_control::kConcurrentAbilities;++i) {
@@ -55,7 +57,7 @@ inline bool EncodeInput(const enemy_control::Input& input,void* bytes,std::size_
     for(float value:input.look)PutFloat(out,value);
     Put32(out,input.absoluteAim ? 1u : 0u);PutFloat(out,input.aimYaw);PutFloat(out,input.aimPitch);
     for(const auto& channel:input.active){Put32(out,channel.id);Put32(out,channel.phase);}
-    for(auto byte:input.fullFocusId)*out++=byte;
+    for(auto byte:input.focusRef)*out++=byte;
     // Input.sequence/seed belong to the authenticated host's envelope, never the controller's payload.
     return out==static_cast<unsigned char*>(bytes)+size;
 }
@@ -70,7 +72,7 @@ inline bool DecodeInput(const void* bytes,std::size_t size,enemy_control::Input*
     const auto flags=Get32(in);if(flags>1)return false;
     input.absoluteAim=flags!=0;input.aimYaw=GetFloat(in);input.aimPitch=GetFloat(in);
     for(auto& channel:input.active){channel.id=Get32(in);channel.phase=Get32(in);}
-    for(auto& byte:input.fullFocusId)byte=*in++;
+    for(auto& byte:input.focusRef)byte=*in++;
     if(!ValidSemanticInput(input))return false;
     *out=input;return true;
 }

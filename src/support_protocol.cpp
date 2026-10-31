@@ -1,3 +1,4 @@
+#include "net_object_ref.h"
 #include "pvp_match.h"
 #include "support_protocol.h"
 #include "support_loadout.h"
@@ -15,11 +16,8 @@ bool ZeroId(const unsigned char* id) noexcept {
     for(unsigned i=0;i<32;++i)if(id[i])return false;
     return true;
 }
-bool CanonicalRequester(const unsigned char* id) noexcept {
-    if(ZeroId(id))return false;
-    for(unsigned i=20;i<24;++i)if(id[i])return false;
-    return true;
-}
+// A plan's requester: a player's reference (net_object_ref.h: its mission slot, tag at bytes 20..23), never a NetId.
+bool CanonicalRequester(const unsigned char* id) noexcept { return crew::netref::IsPlayer(id); }
 bool RequesterMetadata(const unsigned char* id,std::uint32_t team) noexcept {
     return (team==0 || crew::pvp_match::PvpTeam(static_cast<int>(team))) && (ZeroId(id) ? team==0 : CanonicalRequester(id));
 }
