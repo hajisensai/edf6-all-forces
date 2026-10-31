@@ -82,9 +82,10 @@ bool MapHoldsHumanKeys(const unsigned char* human) noexcept { return mapOwnsKeys
 bool haveEye=true;
 unsigned char rideVehicle[0x1200]{};
 fpview::M4 rideFrame=fpview::Identity();
+bool gazeMarker=false;   // the seat's model has its vc_gaze_<seat> marker (an open seat laid with its gun: open_rider)
 bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     if(!haveEye)return false;
-    *out=RideView{};out->vehicle=rideVehicle;
+    *out=RideView{};out->vehicle=rideVehicle;out->gaze=gazeMarker;
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
 bool sensorScreen=false,flownCraft=false;   // the seat has a weapon station's monitor; the vehicle is a craft the player flies
@@ -369,6 +370,27 @@ int main() {
         flownCraft=false;sensorScreen=false;
         std::memcpy(cam+kCamMatrix,native.m,64);
         check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,"a cockpit seat keeps its bone's frame");
+        // A closed cockpit's gunner (tank_gunner: no monitor, no gaze marker) with a gun that turns: still his turret's
+        // frame (the sight's own optic looks along the gun), whatever the gun or the stock camera do.
+        gunTurns=true;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
+              "a closed cockpit's gunner keeps his bone's frame though his gun turns");
+        // The user, 2026-10-31 (「第一人称四管防空车视角不随炮管往上抬」): the quad Vulcan's / M163's open seat (its gaze
+        // marker, no monitor) looks along the gun's bore from its marker's eye, stopped where the gun stops.
+        gazeMarker=true;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::fabs(At<float>(cam,kCamMatrix+36)-bore.m[9])<1e-5f &&
+              std::fabs(At<float>(cam,kCamMatrix+32)-bore.m[8])<1e-5f && At<float>(cam,kCamMatrix+48)==5.0f &&
+              At<float>(cam,kCamMatrix+52)==2.0f && At<float>(cam,kCamMatrix+56)==7.0f,
+              "an open seat with its gaze marker looks along its gun's bore (to its elevation stop) from its own eye");
+        // An open seat with no gun that turns (the kei truck's bed, the cargo truck's driver): its bone's frame as
+        // before, not the stock camera's way (that is a station's virtual aim only).
+        gunTurns=false;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
+              "an open seat with no gun that turns keeps its bone's frame");
+        gazeMarker=false;
     }
     // Production instrument pose on a synthetic skeleton, then the same restore used after native draw.
     unsigned char inst[0x50]{},bones[2*kBoneStride]{};float pose[32]{},backup[32]{};

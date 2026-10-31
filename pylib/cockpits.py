@@ -36,6 +36,10 @@ FLAT_NORMAL, NEUTRAL_RMO = texfile.FLAT_NORMAL_XY, (190, 0, 255)   # matte nonme
 NORMAL_TEX, RMO_TEX = 'edf6vc_cpit_n.dds', 'edf6vc_cpit_rmo.dds'
 ASSET_DIR = 'cockpits'          # under a model root: textures/, parts/<asset>/, CREDITS.txt
 MARKER = 'vc_eye_{}'
+# A seat whose kit lays its sight line with the gun (Kit.gaze): a transform-only marker beside its eye. The plugin's
+# first person then looks from the eye along the seat's gun where that gun turns in yaw and pitch (src/fp_view.h
+# GunCameraSeat / GunCameraWay, src/fp_vehicle.cpp VehicleEye reads it by name), else along the eye's own frame.
+GAZE = 'vc_gaze_{}'
 MATERIAL_PREFIX = 'edf6vc_cpit_'   # every kit material's (graft)
 
 
@@ -67,7 +71,7 @@ class KitMaterial:
 SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
 SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
 INSTRUMENT = 'vc_i_{}_{}_{}'   # seat, screen / control index, control: a moving instrument's pivot (graft)
-GRAFTED_BONES = (*(p.split('{')[0] for p in (MARKER, SCREEN, INSTRUMENT)), cockpit_shell.PREFIX)
+GRAFTED_BONES = (*(p.split('{')[0] for p in (MARKER, GAZE, SCREEN, INSTRUMENT)), cockpit_shell.PREFIX)
 
 
 @dataclass(frozen=True)
@@ -106,7 +110,12 @@ class Kit:
     None: no such promise (an open gun mount, a cab whose windows reach the floor). `windows`: the real glass under
     the sill the eye may see out through (a helicopter's chin window; eye-frame triangles, cockpit_tub): the tub leaves
     those lines open and leaks() lets them through. `conform`: the names of parts (a tub) whose corners fitted() may pull
-    toward the eye where they would show outside the hull: along its line of sight a corner covers the same view."""
+    toward the eye where they would show outside the hull: along its line of sight a corner covers the same view.
+    `gaze`: the seat's sight line is its gun's, not the cockpit's (graft writes the GAZE marker): a seat with nothing
+    round the eye that turns with the gun, its eye where the gun is laid from (a weapon station's camera:
+    remote_display; a rider standing at an open mount: open_rider, the M163's operator; the user, 2026-10-31:
+    「第一人称四管防空车视角不随炮管往上抬」). False: a closed cockpit (a turret's gunner behind his sight: tank_gunner),
+    whose view is its cockpit's and whose sight's optic (vc_optic_) is the one laid with the gun."""
     parts: list[om.Part]
     materials: dict[str, KitMaterial]
     outside: frozenset[str] = frozenset()
@@ -116,6 +125,7 @@ class Kit:
     conform: frozenset[str] = frozenset()
     controls: tuple[InstrumentControl, ...] = ()  # physical instruments replacing source-model dial faces
     ranges: tuple[tuple[int,int], ...] = ()
+    gaze: bool = False
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -306,6 +316,8 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     md = clear_cab_interior(md, fits)
     for fit in fits:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
+        if kit_of[fit.seat].gaze:
+            md = vehicle_optics.add_marker(md, fit.bone, GAZE.format(fit.seat), frame(fit))
         seen=set()
         for index,scr in enumerate(kit_of[fit.seat].screens):
             marker=screen_marker(fit.seat,scr)
