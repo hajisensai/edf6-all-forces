@@ -176,5 +176,16 @@ CAR_AI = (0x17D8B50, 0x17D8FA0, 0x17D9458, 0x17DA508, 0x17DADB0, 0x17DB590, 0x17
           0x17DC620, 0x17DCAB0, 0x17DCFB8, 0x17DFDC8, 0x17E01B0, 0x17E0A80, 0x17E1828)
 for vt in CAR_AI:
     assert slot(vt, 14) == 0x630890 and slot(vt, 72) == 0x661440, hex(vt)
+# The object activation the plugin runs before an NPC driver's first pass (npcai.cpp ActivateDrivenVehicle): it tests
+# +0x4A0, sets it to 1 and calls slot 26; CreateEnemy / CreateFriend's `active` calls it (0x1D8AAB). Every vehicle AI
+# action reads the vehicle's +0x4A0 before it turns to, aims at or fires on its target.
+act = code(0x548D50, 0xE8)
+assert act[0x548D56] == 'cmp byte ptr [rcx + 0x4a0], 0' and act[0x548D5D] == 'mov rbx, rcx' and act[0x548D60] == 'jne 0x548e32'
+assert act[0x548D6C] == 'bt eax, 0x15' and act[0x548D70] == 'jb 0x548e32'
+assert act[0x548E18] == 'mov byte ptr [rbx + 0x4a0], 1' and act[0x548E1F] == 'call qword ptr [rax + 0xd0]'
+assert code(0x1D8AAB, 5)[0x1D8AAB] == 'call 0x548d50'
+for at in (0x6616C0, 0x63C381, 0x649067, 0x604A1A):   # CarBase, the mechs, Proteus, the Barga's stand-by
+    assert code(at, 8)[at] == 'cmp byte ptr [rbx + 0x4a0], 0', hex(at)
+assert code(0x6616C7, 6)[0x6616C7] == 'je 0x661788'   # inactive: past the turn, the aim and the fire
 print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, '
-      'the trucks\' own slot 6, its key lookup (+0x100 through 0x66F040) and aim table, the seat aim gate')
+      'the trucks\' own slot 6, its key lookup (+0x100 through 0x66F040) and aim table, the seat aim gate, the activation 0x548D50 and its +0x4A0 gates')

@@ -114,12 +114,13 @@ bool Die506Ok() noexcept { MissingRecoveryDependency();return false; }
 int WeaponLock(const unsigned char*,float*,float*) noexcept { if(!payloadScenario)MissingRecoveryDependency();return 0; }
 void ClearWeaponLock(unsigned char*) noexcept { if(!payloadScenario)MissingRecoveryDependency(); }
 const void* WeaponLockObject(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
+const void* WeaponLockingObject(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
 bool MapPadState(std::uint16_t*,std::uint8_t*,std::uint8_t*) noexcept { MissingRecoveryDependency();return false; }
 void NextLockTarget(unsigned char*) noexcept { MissingRecoveryDependency(); }
 GearState PlayerGear(unsigned char*,bool,bool,bool,float,float,float,float) noexcept { MissingRecoveryDependency();return GearState{}; }
 float ClosureIn(const float*,const float*,float,float,float,float,bool*) noexcept { MissingRecoveryDependency();return -1.0f; }
 Gpws GpwsOf(float,bool) noexcept { MissingRecoveryDependency();return Gpws::none; }
-namespace audio { void LockTone(int,float) noexcept { if(!payloadScenario)MissingRecoveryDependency(); } }
+namespace audio { void LockTone(int,float,const void*,const void*) noexcept { if(!payloadScenario)MissingRecoveryDependency(); } }
 namespace jet {
 Jet jets[kMaxJets]{};
 bool SpawnReady() noexcept { MissingRecoveryDependency();return false; }

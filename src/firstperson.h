@@ -31,8 +31,10 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
 
 // fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
 // `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the
-// marker was found. False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit (no marker).
-struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; float frame[16]; };
+// marker was found, whether the seat's sight line is its gun's (`gaze`: the model's vc_gaze_<seat> marker, an open
+// seat's kit: fp_view.h GunCameraSeat). False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit
+// (no marker).
+struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; bool gaze; float frame[16]; };
 bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 
 // A seat's cockpit screens (the model's vc_scr_<seat>_<kind>_<w>x<h> markers, pylib/cockpits.py Screen): where the HUD

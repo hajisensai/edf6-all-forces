@@ -13,6 +13,12 @@ namespace crew {
 int WeaponLock(const unsigned char* w,float* point,float* progress) noexcept;
 // The object weapon `w`'s first completed lock is on (nullptr: none locked yet).
 const void* WeaponLockObject(const unsigned char* w) noexcept;
+// The object weapon `w`'s lock in progress is on (nullptr: none locking).
+const void* WeaponLockingObject(const unsigned char* w) noexcept;
+// The object the lock `state` of WeaponLock names: the first completed lock's (2), the one in progress (1), else nullptr.
+inline const void* WeaponLockTarget(const unsigned char* w,int state) noexcept {
+    return state==2 ? WeaponLockObject(w) : state==1 ? WeaponLockingObject(w) : nullptr;
+}
 // Drops weapon `w`'s locks now (it relocks on its next tick).
 void ClearWeaponLock(unsigned char* w) noexcept;
 // The target cycle (the jets' target key): the lock in progress dropped, or with none in progress every lock dropped;

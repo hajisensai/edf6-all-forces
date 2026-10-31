@@ -35,10 +35,11 @@ bool IsFuelTank(const unsigned char*) noexcept { return false; }
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 const void* WeaponLockObject(const unsigned char*) noexcept { return nullptr; }   // no auto turrets on these fixtures
+const void* WeaponLockingObject(const unsigned char*) noexcept { return nullptr; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
 bool GunnerAirTarget(const void*) noexcept { return false; }
-namespace audio { void LockTone(int,float) noexcept {} }
+namespace audio { void LockTone(int,float,const void*,const void*) noexcept {} }
 void UnexpectedBoundary() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 void PumpAircraftPayloadUi(unsigned char*) noexcept { UnexpectedBoundary(); }
 int AutoTurretSteers(const void*,unsigned) noexcept { return 0; }

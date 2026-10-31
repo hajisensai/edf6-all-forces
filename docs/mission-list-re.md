@@ -174,7 +174,8 @@ ApplyResult 的通关部分在 `0x70D879`：
 
 **字段 7：本部背景 / UI 配色变体（2026-10-18 复核）。** 三个读取者：
 - `0x840A30`（选关光标 `0x8A5A79`、本部入口 `0x904F10`、房间 `0x9062BA`）把它作为 UI 参数 0x14 发给背景对象 HUiBG（`[0x20B2960]-0x88`）。HUiBG 构造（`0x8BE0E0`）按名字收集 `lyt_bg.sgo` 的四个子布局 `BG_BASE`、`BG_BASE_B`、`BG_BASE_C`、`BG_BASE_D`（名字硬编码在 DLL，`0x1800068` / `0x1806A68`），存成 weak_ptr 向量 `+0x770`；参数 0x14 的处理 `0x8BE6E0` 有边界检查（下标 ≥ 向量长度就整个不做），只让第 i 个子布局 `+0x1F8 = 1`。四个皮肤：`UI/BG.sgo`（EDF5 的本部背景：`BG.SGO` 与 EDF5 逐字节相同，`BG.RAB` 的四张贴图相同、模型换成 EDF6 的 MDB 版本）、`BG_B/C/D.sgo`（EDF6 的三种）。
-- UI 基类构造（`0x83E8A8`）：≥ 3 时取 1，存 `+0x764`，即各 UI 皮肤的 `.B` / `.C` 配色变体。
+- UI 基类构造（`0x83E8A8`）：≥ 3 时取 1，存 `+0x764`，即各 UI 皮肤的 `.B` / `.C` 配色变体。整个 UI（出击选兵种 / 选武器、HUD 等）的配色由它决定：0 = 藏青蓝，1 = 卡其，2 = 深绿（原版后期 M092_5..M094、M131、M148..M152 用 2）。
+- 生成规则（2026-10-31，`tools/make_edf5_campaign.py` 的 `UI_BLUE` / `UI_EDF41`）：EDF4.1 三个包的行写 2（4.1 原本是深绿；`.c` 变体是 EDF6 自带的深绿，接近 4.1 观感但不是 4.1 原图），EDF5 三个包与测试场保持 0（测试场取 RM015 的值）。同时影响士兵预览灯光 `menu_model_light_setting[2]`。
 - `0x93F750`（HUiHQ3DModel，士兵 3D 模型）：**不检查边界**，按它索引 `MenuModelSetting.sgo` 的 `menu_model_light_setting`（4 项）。所以字段 7 只能是 0..3，追加第五种背景不能靠加大这个值。
 
 **EDF4.1 包的本部背景（2026-10-18，`tools/edf41_menu_bg.py` + `src/edf5campaign.cpp` InstallEdf41MenuBg）。**

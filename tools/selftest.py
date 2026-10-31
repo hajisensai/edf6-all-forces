@@ -6165,7 +6165,8 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
+                                      'drivegear.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
@@ -7078,8 +7079,10 @@ def edf5_campaign_pack_music() -> None:
     assert [p.pack.bgm for p in e5c.PACKS41] == ['BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission',
                                                  'BGM_Sinkou_taisenmenu']
     assert e5c.RANGE.bgm is None
-    row = e5c.new_row(4, {'key': 'EDF41/M001', 'bgm': e5c.BGM41, 'progress': 0.5, 'flags': e5c.FLAGS}, [5])
-    assert row.items[3].items == [5.0] and row.items[7] == 0.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
+    row = e5c.new_row(4, {'key': 'EDF41/M001', 'ui': e5c.UI_EDF41, 'bgm': e5c.BGM41, 'progress': 0.5,
+                          'flags': e5c.FLAGS}, [5])
+    assert row.items[3].items == [5.0] and row.items[7] == 2.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
+    assert e5c.UI_BLUE == 0.0 and e5c.UI_EDF41 == 2.0
     template = [f'm{k}' for k in range(14)]
     for pack in (*e5c.PACKS, *(p.pack for p in e5c.PACKS41)):
         for kind in pack.kinds:
@@ -7087,6 +7090,48 @@ def edf5_campaign_pack_music() -> None:
             assert entry[e5c.M_BGM] == pack.bgm and template[e5c.M_BGM] == 'm3', (pack.tag, kind)
             assert [entry[k] for k in (2, 4, 7, 11, 12, 13)] == [template[k] for k in (2, 4, 7, 11, 12, 13)]
     assert e5c.mode_entry(template, e5c.RANGE, 9)[e5c.M_BGM] == 'm3', "the range lost the stock mode's music"
+
+
+@test
+def edf5_campaign_ui_variants_real() -> None:
+    """Row member 7 = 2 (EDF4.1 packs: the dark green UI) makes the sortie soldier / weapon select load the `.c` skin
+    textures: every `*_MERGE.RAB` that LYT_HUIHQSOLDIERSELECT / LYT_HUIHQWEAPONSELECT reach (layout -> *_skin.sgo ->
+    object .sgo -> RAB) has a `<name>.C.RAB` sibling in EDF6's own UI folder (a developer's machine: skipped without
+    the game). The `.c` set is EDF6's own dark green, close to 4.1's look but not 4.1's original art."""
+    import rootcpk
+    import sgo
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    have = {n.upper() for n in game.names('UI')}
+
+    def strings(name: str) -> set[str]:
+        out: set[str] = set()
+
+        def walk(x: object) -> None:
+            if isinstance(x, str):
+                out.add(x)
+            elif isinstance(x, dict):
+                for k, v in x.items():
+                    walk(k)
+                    walk(v)
+            elif isinstance(x, (list, tuple)):
+                for v in x:
+                    walk(v)
+        walk(sgo.plain(sgo.read(game.read('UI', name))[1]))
+        return out
+
+    def sgos(name: str, skin: bool) -> list[str]:
+        return sorted(s.split('/')[-1] for s in strings(name)
+                      if s.lower().endswith('.sgo') and s.lower().endswith('_skin.sgo') == skin)
+    rabs = []
+    for layout in ('LYT_HUIHQSOLDIERSELECT.SGO', 'LYT_HUIHQWEAPONSELECT.SGO'):
+        for skin in sgos(layout, True):
+            for obj in sgos(skin, False):
+                rabs += [s.split('/')[-1].upper() for s in strings(obj) if s.lower().endswith('_merge.rab')]
+    assert len(rabs) >= 10, rabs
+    missing = [r for r in rabs if r[:-len('_MERGE.RAB')] + '.C.RAB' not in have]
+    assert not missing, missing
 
 
 @test
@@ -12241,7 +12286,7 @@ def edf41_story_pack_real() -> None:
     assert [m[e5c.M_BGM] for m in ours] == [e5c.BGM41] * 2, "the modes' HQ music is not EDF4.1's"
     listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
     assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
-    assert {(r.items[7], r.items[8]) for r in listed} == {(0.0, e5c.BGM41)}, "not EDF4.1's HQ music"
+    assert {(r.items[7], r.items[8]) for r in listed} == {(2.0, e5c.BGM41)}, "not EDF4.1's UI colour (dark green) / HQ music"
     for r in rows41:
         for name in r['files']:
             assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)

@@ -19,6 +19,7 @@
 //    walk and the dash, followed by a quarter a frame, went into the camera).
 #pragma once
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace crew {
@@ -133,10 +134,25 @@ inline bool GunCameraFrame(const float* way,const float* eye,M4* out) noexcept {
     const float look[3]={eye[0]+way[0],eye[1]+way[1],eye[2]+way[2]};
     return LookFrame(eye,look,out);
 }
-// Whether seat `seat`'s first person is a gun camera (above): it has the station's monitor (a sensor screen marker), and
-// it is not the pilot's seat of a craft the player flies (`flies`: a drone's, an aircraft's, a helicopter's, the
-// Sazabi's: their monitor shows the nose, which the flight turns, not an aim).
-constexpr bool GunCameraSeat(bool sensorScreen,bool flies,int seat) noexcept { return sensorScreen && !(flies && seat==0); }
+// Whether seat `seat`'s first person is laid with its gun (above): its kit says the seat's sight line is the gun's
+// (pylib/cockpit_kits.py Kit.gaze): the station's monitor (a sensor screen marker: remote_display) or the gaze marker
+// vc_gaze_<seat> (an open seat: open_rider, the M163's and the quad Vulcan's operator standing at his gun, the user
+// 2026-10-31: 「第一人称四管防空车视角不随炮管往上抬」), and it is not the pilot's seat of a craft the player flies (`flies`:
+// a drone's, an aircraft's, a helicopter's, the Sazabi's: their monitor shows the nose, which the flight turns, not an
+// aim). A closed cockpit (a tank's gunner behind his sight: tank_gunner) has neither: its view is its turret's frame,
+// the sight's own optic (vc_optic_) the one that looks along the gun.
+constexpr bool GunCameraSeat(bool sensorScreen,bool gaze,bool flies,int seat) noexcept {
+    return (sensorScreen || gaze) && !(flies && seat==0);
+}
+// Where a gun camera seat (GunCameraSeat) looks: along the gun's bore where its gun turns in yaw and pitch (`bore`:
+// vhud.cpp SeatGunLine found it); else a station's monitor (`sensorScreen`) along the stock seat camera's way (its
+// rider's virtual aim: the gunship's side guns, the 410's pods), and an open seat along its own bone's frame: a rider
+// with no gun of his own that turns (the kei truck's bed, the cargo truck's driver) looks as he always did.
+enum class GunWay : std::uint8_t { cockpit, bore, stock };
+constexpr GunWay GunCameraWay(bool sensorScreen,bool gaze,bool flies,int seat,bool bore) noexcept {
+    return !GunCameraSeat(sensorScreen,gaze,flies,seat) ? GunWay::cockpit
+         : bore ? GunWay::bore : sensorScreen ? GunWay::stock : GunWay::cockpit;
+}
 
 // The procedural motion (fp_motion.h) as a matrix in the camera's frame (x right, y up, z ahead): turned about `pivot`
 // by pitch (up), yaw (right) and roll (right), then moved by the offset.

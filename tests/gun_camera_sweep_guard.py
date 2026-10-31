@@ -1,8 +1,11 @@
 """Geometry guard (the user, 2026-10-27: 「有些载具第一人称会被挡到，比如温压弹火箭车，抬炮管以后看不见前面了」): every gun
 camera seat of a plugin V603 vehicle sees where its gun points at every elevation the gun has.
 
-A remote_display seat (its sensor screen: src/fp_view.h GunCameraSeat) looks from its eye marker along the gun's bore
-(GunCameraFrame / vhud.cpp SeatGunLine); the eye moves only with the bone its fit names (pylib/cockpit_fits_plugin.py).
+A seat whose kit lays its sight line with the gun (pylib/cockpits.py Kit.gaze: a remote_display station's camera, its
+sensor screen, and an open_rider at an open mount, its vc_gaze_ marker: the M163's and the quad Vulcan's operator, the
+user 2026-10-31 「第一人称四管防空车视角不随炮管往上抬」; src/fp_view.h GunCameraSeat) looks from its eye marker along the
+gun's bore (GunCameraFrame / vhud.cpp SeatGunLine); the eye moves only with the bone its fit names
+(pylib/cockpit_fits_plugin.py).
 pylib/cockpit_sweep.py aim_blocked raises the gun through the V603's elevation range on the vehicle's own model
 (models/<folder>: wt_tracked.load, the emplacements' too) and casts the aim line from the eye: it must meet nothing of
 the vehicle. The TOS-1's and the Patriot's eyes on the turret (cannon_main) met their own launcher packs from 31 / 26
@@ -23,6 +26,7 @@ from dataclasses import replace
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
 import cockpit_fits  # noqa: E402
+import cockpit_kits  # noqa: E402
 import cockpit_sweep  # noqa: E402
 import emplacement_model as em  # noqa: E402
 import rootcpk  # noqa: E402
@@ -48,10 +52,15 @@ def describe(blocked: list[tuple[float, float]]) -> str:
 def main() -> int:
     global skipped
     kinds = {v.sgo: kind for kind, v in vc.GROUND_VEHICLES.items() if v.stock == 'V603_FLAK'}
+    room = dict(left=1.5, right=1.5, up=1.0, down=1.0, ahead=2.0, back=2.0)   # a kit's gaze does not hang on its room
+    used = {f.kit for fits in cockpit_fits.FITS.values() for f in fits}
+    gazing = {name for name in used if cockpit_kits.KITS[name](room).gaze}
+    check({'remote_display', 'open_rider'} <= gazing, f'the gun-laid kits include the stations and the open seats: {gazing}')
+    swept = set()
     seen = 0
     for stem, fits in sorted(cockpit_fits.FITS.items()):
         kind = kinds.get(stem)
-        cameras = [f for f in fits if f.kit == 'remote_display']
+        cameras = [f for f in fits if f.kit in gazing]
         if kind is None or not cameras:
             continue
         if wt.folder(kind) is None:
@@ -64,6 +73,7 @@ def main() -> int:
             continue
         spec = wt.load(kind)
         seen += 1
+        swept |= {f.kit for f in cameras}
         for fit in cameras:
             blocked = cockpit_sweep.aim_blocked(spec, fit)
             check(not blocked, f'{stem} seat {fit.seat} (eye {fit.eye} on {fit.bone}): the aim line meets the vehicle '
@@ -74,6 +84,8 @@ def main() -> int:
                 check(bool(old) and old[0][0] > 20.0 and old[-1][0] == cockpit_sweep.V603_ELEVATION[1],
                       f'{stem}: the turret-mounted eye is blocked from some elevation up to the stop ({old[:2]})')
     check(seen > 0, 'no gun camera seat of a V603 vehicle had its model to sweep')
+    if wt.folder('vulcan') is not None:
+        check('open_rider' in swept, f'the M163 / quad Vulcan open seats were swept: {sorted(swept)}')
     print(f'{"FAIL" if failed else "PASS"}: {checks - failed}/{checks} gun camera sweeps clear, {skipped} skipped')
     return 1 if failed else 0
 

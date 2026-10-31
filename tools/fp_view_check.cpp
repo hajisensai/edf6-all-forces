@@ -531,9 +531,25 @@ void GunCamera() {
            std::fabs(std::asin(stock.m[9])-wanted)<1e-4f,"a gun at its stop: the camera on the gun's line, not the stock view's");
     const float none[3]={0,0,0};
     Expect(!crew::fpview::GunCameraFrame(none,eye,&out),"no way to look: no gun camera (the bone's frame stays)");
-    Expect(crew::fpview::GunCameraSeat(true,false,0) && crew::fpview::GunCameraSeat(true,true,1) &&
-           !crew::fpview::GunCameraSeat(true,true,0) && !crew::fpview::GunCameraSeat(false,false,1),
-           "gun cameras: every station monitor seat but a flown craft's pilot's");
+    using crew::fpview::GunCameraSeat;using crew::fpview::GunCameraWay;using crew::fpview::GunWay;
+    // GunCameraSeat(sensor screen, gaze marker, flown craft, seat)
+    Expect(GunCameraSeat(true,false,false,0) && GunCameraSeat(true,false,true,1) &&
+           !GunCameraSeat(true,false,true,0) && !GunCameraSeat(false,false,false,1),
+           "gun cameras: every station monitor seat but a flown craft's pilot's; a closed cockpit seat is not one");
+    // The user, 2026-10-31: the quad Vulcan's / M163's open seat (open_rider: no monitor, its gaze marker) is laid
+    // with the gun; a closed turret's gunner (tank_gunner: neither) keeps his turret's frame (10-25: the sight's optic).
+    Expect(GunCameraSeat(false,true,false,0) && GunCameraSeat(false,true,false,1) && GunCameraSeat(true,true,false,0) &&
+           !GunCameraSeat(false,true,true,0) && !GunCameraSeat(false,false,false,0),
+           "an open seat with its gaze marker is laid with its gun; a closed cockpit and a flown craft's pilot are not");
+    Expect(GunCameraWay(false,true,false,0,true)==GunWay::bore && GunCameraWay(true,false,false,1,true)==GunWay::bore &&
+           GunCameraWay(true,true,false,1,true)==GunWay::bore,"a gun that turns in yaw and pitch: along its bore");
+    Expect(GunCameraWay(true,false,false,1,false)==GunWay::stock && GunCameraWay(true,true,false,1,false)==GunWay::stock,
+           "a station's gun that does not turn (a virtual aim): along the stock seat camera's way");
+    Expect(GunCameraWay(false,true,false,1,false)==GunWay::cockpit,
+           "an open seat with no gun that turns (a kei truck's bed, a cargo truck's driver): its bone's frame, as before");
+    Expect(GunCameraWay(false,false,false,0,true)==GunWay::cockpit && GunCameraWay(false,true,true,0,true)==GunWay::cockpit &&
+           GunCameraWay(true,false,true,0,true)==GunWay::cockpit,
+           "a closed cockpit's gunner and a flown craft's pilot keep the bone's frame even with a turning gun");
 }
 
 int main() {

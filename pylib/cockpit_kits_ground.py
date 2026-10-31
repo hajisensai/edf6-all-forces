@@ -314,11 +314,14 @@ def troop_bay(cabin: Cabin, aside: float = 0.0) -> Kit:
 
 def open_rider(cabin: Cabin) -> Kit:
     """A rider in the open (on a truck's bed, its tailgate): a small 'status' tablet in his hands, low before him,
-    two-sided (seen from outside too, where the rider holds it). The vehicle's own model is the rest of the view."""
+    two-sided (seen from outside too, where the rider holds it). The vehicle's own model is the rest of the view.
+    Nothing round him turns with a gun, so he looks where his gun does (gaze: the M163's / quad Vulcan's operator at
+    the gun, the user 2026-10-31 「第一人称四管防空车视角不随炮管往上抬」); a rider with no gun that turns (a truck's bed)
+    looks along his seat as before (src/fp_view.h GunCameraWay)."""
     z = min(0.42, cabin['ahead'] - 0.06) if math.isfinite(cabin['ahead']) else 0.42
     p, s = _screen('status', (0.0, -0.22, z), 0.16, 0.1, None)
     parts = [two_sided(p), two_sided(_backing('tablet', s, 0.012, 0.006))]
-    return Kit(parts, _materials('metal_dark', 'screen'), frozenset(q.name for q in parts), (s,))
+    return Kit(parts, _materials('metal_dark', 'screen'), frozenset(q.name for q in parts), (s,), gaze=True)
 
 
 GAUGE = 'sf-stage6-speedo'      # a moped's digital speedometer (tools/prep_cockpit_ground.py), its LCD ahead of the eye

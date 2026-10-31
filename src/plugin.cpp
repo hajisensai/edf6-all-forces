@@ -261,6 +261,8 @@ void Validate(Config& n) noexcept {
     n.vehicleFire6Button=static_cast<int>(FixInt("VehicleFire6Button",n.vehicleFire6Button,0,0xFFFF));
     n.vehicleAutoTurretKey=static_cast<int>(FixInt("VehicleAutoTurretKey",n.vehicleAutoTurretKey,0,254));
     n.vehicleAutoTurretButton=static_cast<int>(FixInt("VehicleAutoTurretButton",n.vehicleAutoTurretButton,0,0xFFFF));
+    n.vehicleCruiseUpKey=static_cast<int>(FixInt("VehicleCruiseUpKey",n.vehicleCruiseUpKey,0,254));
+    n.vehicleCruiseDownKey=static_cast<int>(FixInt("VehicleCruiseDownKey",n.vehicleCruiseDownKey,0,254));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -330,6 +332,8 @@ void Validate(Config& n) noexcept {
     else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
+    n.lockToneBeeps=static_cast<int>(FixInt("LockToneBeeps",n.lockToneBeeps,0,100));
+    n.lockToneLockedMs=static_cast<int>(FixInt("LockToneLockedMs",n.lockToneLockedMs,0,60000));
     Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
     Fix("VehicleTurretVolume",n.vehicleTurretVolume,0.0f,4.0f);
     Fix("VehicleReloadVolume",n.vehicleReloadVolume,0.0f,4.0f);
@@ -596,6 +600,8 @@ void LoadConfig() noexcept {
     n.autoTurrets=ReadBool(L"AutoTurrets",n.autoTurrets);
     n.vehicleAutoTurretKey=ReadInt(L"VehicleAutoTurretKey",static_cast<DWORD>(n.vehicleAutoTurretKey));
     n.vehicleAutoTurretButton=ReadInt(L"VehicleAutoTurretButton",static_cast<DWORD>(n.vehicleAutoTurretButton));
+    n.vehicleCruiseUpKey=ReadInt(L"VehicleCruiseUpKey",static_cast<DWORD>(n.vehicleCruiseUpKey));
+    n.vehicleCruiseDownKey=ReadInt(L"VehicleCruiseDownKey",static_cast<DWORD>(n.vehicleCruiseDownKey));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -699,6 +705,8 @@ void LoadConfig() noexcept {
     n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
+    n.lockToneBeeps=ReadInt(L"LockToneBeeps",static_cast<DWORD>(n.lockToneBeeps));
+    n.lockToneLockedMs=ReadInt(L"LockToneLockedMs",static_cast<DWORD>(n.lockToneLockedMs));
     n.vehicleSound=ReadBool(L"VehicleSound",n.vehicleSound);
     n.vehicleEngineVolume=ReadFloat(L"VehicleEngineVolume",n.vehicleEngineVolume);
     n.vehicleTurretVolume=ReadFloat(L"VehicleTurretVolume",n.vehicleTurretVolume);
@@ -992,6 +1000,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
+    Log("CONFIG lockTone beeps=%d lockedMs=%d",n.lockToneBeeps,n.lockToneLockedMs);
     Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
@@ -1014,7 +1023,7 @@ void LoadConfig() noexcept {
         n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec,n.vanillaRecruit,n.npcFreeSquadCover);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
-    Log("CONFIG vehicleGears=%d",n.vehicleGears);
+    Log("CONFIG vehicleGears=%d up=0x%X down=0x%X",n.vehicleGears,n.vehicleCruiseUpKey,n.vehicleCruiseDownKey);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s overheat=%.0fs cool=%.0fs resume=%.0f%% "

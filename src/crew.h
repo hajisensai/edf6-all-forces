@@ -215,6 +215,8 @@ struct Config {
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
+    int lockToneBeeps=3;            // ...the lock tone: this many beeps while locking, then silent (0: sounds as long as the lock, as it did; lock_cue.h)
+    int lockToneLockedMs=450;       // ...and the locked tone this long, then silent (a lock that holds stays silent)
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
     // The gravity operations (gravity.cpp) and their users: the gravity gun (gravitygun.cpp, the Air Raider's EDF6VC_CALL_GRAVITY_GUN)
@@ -496,7 +498,8 @@ struct Config {
                                     // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
-    bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, W / S shift War Thunder's cruise gears
+    bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, two keys of their own shift War Thunder's cruise gears; W / S override them
+    int vehicleCruiseUpKey=0x09,vehicleCruiseDownKey=0x70;   // ...the gear-up / gear-down keys (Tab / F1: no other binding in the ground vehicles, no sprint Shift or Chat Ctrl, no sticky-keys Shift x5; docs/feedback-2026-10-31-gears-lock-tone.md)
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round

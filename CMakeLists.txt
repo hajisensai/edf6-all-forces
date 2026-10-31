@@ -1935,6 +1935,10 @@ add_executable(drive_gear_test EXCLUDE_FROM_ALL tests/drive_gear_test.cpp)
 target_compile_options(drive_gear_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks drive_gear_test)
 add_test(NAME drive_gear COMMAND drive_gear_test)
+add_executable(lock_cue_test EXCLUDE_FROM_ALL tests/lock_cue_test.cpp)
+target_compile_options(lock_cue_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks lock_cue_test)
+add_test(NAME lock_cue COMMAND lock_cue_test)
 # Where the gears read each vehicle's own top (CarBase's gear table, the setup's scaler, every geared class's slot 46,
 # the units) and the stock SGOs' tops (docs/vehicle-top-speed-re.md); without the game: skipped (77).
 add_test(NAME drive_gear_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drive_gear_native_audit.py" "${EDF6_NATIVE_DLL}")
