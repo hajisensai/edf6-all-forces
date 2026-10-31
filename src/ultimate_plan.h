@@ -19,13 +19,15 @@ namespace ultimate {
 constexpr float kPi=3.14159265358979f;
 constexpr int kFps=60;
 // Frames from the call (the stock countdown already over: the hook is the satellite's fire state).
-// Slow on purpose (the user, 2026-10-20, after a 25 s first cut: 「来的太快了，应该慢一点，不然没那种宏状感」): 40 s in all.
+// Slow on purpose (the user, 2026-10-20, after a 25 s first cut: 「来的太快了，应该慢一点，不然没那种宏状感」): 36 s in all.
+// The after is short (a player, 2026-10-31: 「爆炸光效持续过久 使用后几乎需要一段时间……才会恢复」; before, 10 s with the
+// sky coming back over the last 8 of them): the circles close, the sky is back 4 s after the cannon, and it is over.
 constexpr int kChargeEnd=12*kFps;            // 0 .. 720: charge
 constexpr int kStormEnd=kChargeEnd+10*kFps;  // .. 1320: storm (its last kGather frames the gather)
 constexpr int kCannonEnd=kStormEnd+8*kFps;   // .. 1800: cannon
-constexpr int kAfterEnd=kCannonEnd+10*kFps;  // .. 2400: after; the show is over
-constexpr int kSkyBackAt=kCannonEnd+2*kFps;  // the sky starts coming back two seconds into the after
-constexpr float kSkyBackSec=8.0f;            // and is back 10 s after the last ring
+constexpr int kAfterEnd=kCannonEnd+6*kFps;   // .. 2160: after; the show is over (was 10 s)
+constexpr int kSkyBackAt=kCannonEnd+1*kFps;  // the sky starts coming back a second into the after (was 2 s)
+constexpr float kSkyBackSec=3.0f;            // and is back 4 s into it, ~5 s after the last ring (was 8 s: 10 s into it)
 constexpr float kSkyDarkSec=8.0f;            // the charge's fade into the dark sky
 constexpr int kGather=150;                   // the storm's last 2.5 s: the circles gather their light for the shot
 constexpr int kGatherAt=kStormEnd-kGather;
@@ -376,12 +378,121 @@ inline int BurstsAt(std::uint64_t seed,int frame,Burst* out,int most) noexcept {
     return n;
 }
 
+// ---- the looks, on a budget ----
+// A player, 2026-10-31 (docs/feedback-2026-10-31-ultimate-fx.md): 「天罚导弹的爆炸光效持续过久 使用后几乎需要一段时间……才会
+// 恢复 并且低配置玩家使用后会很卡 几乎没有战斗能力」. Every burst's round (BurstsAt) is a SolidBullet01 charge with its blast
+// radius (pylib/vcobjects.py ult_rounds: the gunship's charge), whose own explosion is the burst seen; before, each burst drew
+// a stock effect on top of it as well: an Explosion(20) for each of ~1000 bolt landings and 624 wave fronts' bursts, a Smoke
+// (ExplosionWind) of 25 / 40 for each of those 624 (stock: 0.1 .. 2), an Explosion_Big of 27.5 for each of the 148 ring
+// blasts (stock 1, the 4.1 ports' at most 6; it makes an ExplosionWind, a Blazing and a quake of its own: docs/edf41-classes.md
+// Explosion_Big), the after 60 Blazing(6) and 20 Smoke(25), a 110 m StencilLight 8 frames long for every bolt (~27 at once).
+// Now the bursts' rounds are their explosions, and on top of them only what LooksAt lists, every frame, within these:
+// sizes no larger than the stock code's (kStock*), the counts and lights at once capped (tools/ultimate_check.cpp counts a
+// whole show). The damage, the rounds and their SGOs' radii are as they were.
+constexpr float kStockExplosionMost=6.0f;   // Explosion_Big's size, the 4.1 ports' largest (src/edf41mother.cpp: 6)
+constexpr float kStockSmokeMost=2.0f;       // ExplosionWind's size, the stock's largest (src/edf41mother.cpp Smoke: 0.1 .. 2)
+constexpr float kStockBlazeMost=1.5f;       // Blazing's size, the 4.1 ports' largest (src/edf41mother.cpp: 0.25 .. 1.5)
+constexpr float kBlastLook=6.0f;            // a ring blast's Explosion (the plain one: no smoke, no fire of its own)
+constexpr float kDustSize=2.0f;             // the great shock wave's dust where its front crosses kDustAt
+constexpr float kDustAt=0.9f*kRadius;
+constexpr int kDustEvery=2;                 // of its front's bursts there: every other one
+constexpr int kFireEvery=10,kFireFor=2*kFps;   // the after's fires: one every kFireEvery frames over its first kFireFor
+constexpr float kFireSize=1.5f;
+constexpr int kFireSmokeEvery=3;            // of those fires, every third smokes
+constexpr float kFireSmoke=2.0f;
+constexpr int kMostSmokes=12,kMostFires=12;    // a show's whole (tools/ultimate_check.cpp)
+static_assert(kBlastLook<=kStockExplosionMost && kDustSize<=kStockSmokeMost && kFireSmoke<=kStockSmokeMost &&
+              kFireSize<=kStockBlazeMost,"no look larger than the stock code's");
+// The lights (StencilLight, alive `frames` frames from the frame it is made). A light of kBigLight m or more is big (it
+// covers most of the screen): at most kMostBigLights of a show's at once; the bolts' at most kMostBoltLights (one made every
+// kBoltLightEvery frames, on the frame's first bolt), every light of a show at most kMostLights.
+constexpr int kBoltLightEvery=2,kBoltLightFrames=8;
+constexpr float kBoltLightRadius=80.0f;     // was 110 m, one for every bolt
+constexpr int kChargeLightEvery=30,kChargeLightFrames=30;   // the charge's crimson (was 40 frames: two at once)
+constexpr float kChargeLightRadius=0.8f*kRadius;
+constexpr int kGatherLightEvery=10,kGatherLightFrames=10;   // the gather's gold, growing (was one every 8 frames, 10 long)
+constexpr float kGatherLightFrom=40.0f,kGatherLightGrow=160.0f;
+constexpr int kBeamLightEvery=12,kBeamLightFrames=12;       // the main beam's violet (was one every 10 frames, 14 long)
+constexpr float kBeamLightRadius=kRadius;
+constexpr float kBigLight=150.0f;
+constexpr int kMostBoltLights=4,kMostBigLights=1,kMostLights=kMostBoltLights+kMostBigLights;
+static_assert((kBoltLightFrames+kBoltLightEvery-1)/kBoltLightEvery<=kMostBoltLights && kChargeLightFrames<=kChargeLightEvery &&
+              kGatherLightFrames<=kGatherLightEvery && kBeamLightFrames<=kBeamLightEvery,"the lights within their caps");
+constexpr int kMaxLooksAFrame=40;           // a ring's blasts (at most 23), the great wave's dust (8), a light
+
+enum class LookKind : unsigned char { explosion, smoke, blaze, light };
+// Where: the ground under the offset (`at`), the centre (on the ground), the top sky circle's centre (the main beam's start).
+enum class LookPlace : unsigned char { ground, centre, beamTop };
+enum class LightTint : unsigned char { none, crimson, bolt, violet, gold };   // a light's colour (src/ultimate.cpp)
+// `size`: an effect's size or a light's radius (m); `frames`: a light's life; `burst`: the index in BurstsAt's list of the
+// same frame whose look it is (drawn only where that burst's round is: nothing seen without its damage), -1 none.
+struct Look { LookKind kind; LookPlace place; float at[2]; float size; int frames; LightTint tint; int burst; };
+
 // The after's fires: on after frame `frame`, whether one starts and where (an offset in the area).
 inline bool FireAt(std::uint64_t seed,int frame,float* at) noexcept {
-    if(frame<0 || frame>=4*kFps || frame%4)return false;
+    if(frame<0 || frame>=kFireFor || frame%kFireEvery)return false;
     Rng g=FrameRng(seed^0xF14Eull,frame);
     InDisc(g,kRadius*0.9f,at);
     return true;
+}
+// Whether ground wave `w`'s front bursts on show frame `frame` for the first time at kDustAt or past it.
+inline bool DustAt(int w,int frame) noexcept {
+    float r,before;
+    if(w!=kGreatWave || !WaveBursts(w,frame,&r) || r<kDustAt)return false;
+    return !WaveBursts(w,frame-kWaveEvery,&before) || before<kDustAt;
+}
+// The looks of show frame `frame` (at most `most`): how many. `bursts`/`count`: BurstsAt(seed, frame)'s list, which their
+// `burst` index into. The same seed and frame give every machine the same.
+inline int LooksAt(std::uint64_t seed,int frame,const Burst* bursts,int count,Look* out,int most) noexcept {
+    int n=0;
+    const auto add=[&](LookKind kind,LookPlace place,float x,float z,float size,int frames,LightTint tint,int burst){
+        if(n<most)out[n++]=Look{kind,place,{x,z},size,frames,tint,burst};
+    };
+    const auto light=[&](LookPlace place,float x,float z,float radius,int frames,LightTint tint){
+        add(LookKind::light,place,x,z,radius,frames,tint,-1);
+    };
+    for(int k=0;k<count;++k) {
+        const Burst& b=bursts[k];
+        if(b.kind==BurstKind::blast)add(LookKind::explosion,LookPlace::ground,b.at[0],b.at[1],kBlastLook,0,LightTint::none,k);
+    }
+    for(int w=0;w<kWaveCount;++w) {
+        if(!DustAt(w,frame))continue;
+        int i=0;
+        for(int k=0;k<count;++k) {
+            const Burst& b=bursts[k];
+            if(b.kind!=BurstKind::wave || b.great!=(w==kGreatWave))continue;
+            if(i++%kDustEvery==0)add(LookKind::smoke,LookPlace::ground,b.at[0],b.at[1],kDustSize,0,LightTint::none,k);
+        }
+    }
+    switch(PhaseAt(frame)) {
+    case Phase::charge:
+        if(frame%kChargeLightEvery==0)light(LookPlace::centre,0,0,kChargeLightRadius,kChargeLightFrames,LightTint::crimson);
+        break;
+    case Phase::storm: {
+        const int f=frame-kChargeEnd;
+        Bolt bolt[kMaxBoltsAFrame];
+        if(f%kBoltLightEvery==0 && BoltsAt(seed,f,bolt)>0)
+            light(LookPlace::ground,bolt[0].at[0],bolt[0].at[1],kBoltLightRadius,kBoltLightFrames,LightTint::bolt);
+        const int g=frame-kGatherAt;
+        if(g>=0 && g%kGatherLightEvery==0)
+            light(LookPlace::beamTop,0,0,kGatherLightFrom+kGatherLightGrow*static_cast<float>(g)/kGather,kGatherLightFrames,LightTint::gold);
+        break;
+    }
+    case Phase::cannon:
+        if((frame-kStormEnd)%kBeamLightEvery==0)light(LookPlace::centre,0,0,kBeamLightRadius,kBeamLightFrames,LightTint::violet);
+        break;
+    case Phase::after: {
+        const int f=frame-kCannonEnd;
+        float at[2];
+        if(FireAt(seed,f,at)) {
+            add(LookKind::blaze,LookPlace::ground,at[0],at[1],kFireSize,0,LightTint::none,-1);
+            if((f/kFireEvery)%kFireSmokeEvery==0)add(LookKind::smoke,LookPlace::ground,at[0],at[1],kFireSmoke,0,LightTint::none,-1);
+        }
+        break;
+    }
+    case Phase::over: break;
+    }
+    return n;
 }
 }  // namespace ultimate
 }  // namespace crew

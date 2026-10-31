@@ -7,7 +7,9 @@
 //  - the bursts on the ground (ultimate_plan.h BurstsAt: the bolts' landings, the rings' blasts, the ground shock waves'
 //    fronts): each one a round and the explosion drawn with it, one point and one radius (BurstsFrame; the user, 2026-10-25:
 //    「天罚的伤害和实际落点是不是不一样啊，感觉外面的闪电爆炸没伤害」);
-//  - effects without damage, none of them an explosion: the after's fires and smoke, camera quake, StencilLight flashes;
+//  - the looks on top (ultimate_plan.h LooksAt, on a budget: a player, 2026-10-31, 「低配置玩家使用后会很卡」): a ring
+//    blast's plain explosion, the great shock wave's dust, the after's few fires and smoke, StencilLight flashes; and camera
+//    quakes;
 //  - the sky: the game's own light fade manager, what the missions' EventLightTool_EnvFadeAnimation calls (EnvFade below),
 //    faded into the dark at the start and back to what it was (a snapshot of the renderer's values) at the end;
 //  - the circles and shock waves: flat disc objects of the plugin's (far_object.h, pylib/magic_circle.py);
@@ -149,7 +151,7 @@ void Darken(float sec) noexcept {
 // Back to the snapshot over `sec`: only the values the shows faded and that are still where they left them. A value the
 // mission's script faded since (its own EnvFade: a storm coming in mid-show) is the mission's now, and stays (before
 // 2026-10-20 the snapshot was written over it). The shows' fades are all done by then (the last, a flash's way back,
-// 1.5 s after the last ring; the sky comes back 5 s later), so "where they left them" is their last target (推测: a fade
+// 1.5 s after the last ring; the sky comes back ~2.3 s later), so "where they left them" is their last target (推测: a fade
 // ends on its target exactly; ultimate_show.h SkyStillOurs allows 2 %).
 void SkyBack(float sec) noexcept {
     if(!sky.refs.HasSnapshot() || !FadeMgr())return;
@@ -390,7 +392,6 @@ void ChargeFrame(Show& s,int f) noexcept {
         const float to[3]={x,GroundAt(s,x,z),z};
         Steer(s,s.aims[i],EmcRound::ultSight,from,to,a.size);
     }
-    if(f%30==0)edf41c::StencilLight(s.at,kCrimson,kRadius*0.8f,40);
     if(f%45==0)edf41c::Quake(s.at,0.25f+0.5f*f/kChargeEnd,kRadius*3.0f);
 }
 
@@ -412,7 +413,6 @@ void GatherFrame(Show& s,int frame) noexcept {
         Steer(s,s.gather[k],EmcRound::ultGather,from,top,r.size);
     }
     const float t=static_cast<float>(g)/kGather;
-    if(g%8==0)edf41c::StencilLight(top,kGold,40.0f+160.0f*t,10);
     if(g%20==0)edf41c::Quake(s.at,0.3f+0.9f*t,kRadius*4.0f);
 }
 
@@ -426,8 +426,7 @@ void StormFrame(Show& s,int f) noexcept {
         const float x=s.at[0]+bolts[k].at[0],z=s.at[2]+bolts[k].at[1];
         const float to[3]={x,GroundAt(s,x,z),z};
         const float from[3]={s.at[0]+bolts[k].from[0],lift,s.at[2]+bolts[k].from[1]};
-        Fire(s,EmcRound::ultBolt,from,to,s.damage*kBoltShare/kBoltFrames);   // its burst where it lands: BurstsFrame
-        edf41c::StencilLight(to,kBoltLight,110.0f,8);
+        Fire(s,EmcRound::ultBolt,from,to,s.damage*kBoltShare/kBoltFrames);   // its burst and light where it lands: BurstsFrame
         if(k==0 && f-s.thunder>=9) {       // a thunder now and then, never on top of the last
             s.thunder=f;
             Rng g=FrameRng(s.seed^0x7A0Dull,f);
@@ -466,7 +465,6 @@ void CannonFrame(Show& s,int f) noexcept {
         RoundSize(s.beam,kBeamSize*scale);
         RoundSize(s.core,kCoreSize*scale);
     }
-    if(f%10==0)edf41c::StencilLight(s.at,kViolet,kRadius,14);
     const int k=RingAt(f);
     if(k>=0) {   // its blasts: BurstsFrame
         Sound(s,audio::kUltBlast,s.at,1.0f-0.02f*static_cast<float>(k));
@@ -497,16 +495,48 @@ void WavesFrame(Show& s,int frame) noexcept {
     }
 }
 
-// The bursts of show frame `frame` (ultimate_plan.h BurstsAt): each one's damage round and its look from one point and one
-// radius. The round is the caller's charge whose blast radius is the burst's (the spark SGO's kSparkRadius, the blast SGO's
-// kRingBlast: its own blast is the explosion seen), dropped from kBurstDrop m over the ground under the point; the look added
-// to it (the stock explosion helpers at kLookOfRadius of that radius, a wave's dust) only where that round is: a burst whose
-// round could not be made while the caller is there shows nothing (counted, said at the show's end), so nothing seen is
-// without its damage. A show whose caller is gone fires no rounds and plays its looks out (Fire, CheckCaller).
+const float* LightColour(LightTint t) noexcept {
+    switch(t) {
+    case LightTint::crimson: return kCrimson;
+    case LightTint::violet: return kViolet;
+    case LightTint::gold: return kGold;
+    case LightTint::bolt: case LightTint::none: break;
+    }
+    return kBoltLight;
+}
+// The looks of show frame `frame` (ultimate_plan.h LooksAt: what to draw on top of the bursts' rounds, on its budget), each
+// at its place; a burst's look only where its round is (`shown`), on the ground found for it (`ground`).
+void LooksFrame(const Show& s,int frame,const Burst* bursts,int count,const bool* shown,const float* ground) noexcept {
+    Look looks[kMaxLooksAFrame];
+    const int n=LooksAt(s.seed,frame,bursts,count,looks,kMaxLooksAFrame);
+    for(int k=0;k<n;++k) {
+        const Look& l=looks[k];
+        if(l.burst>=0 && !shown[l.burst])continue;
+        float p[3]={s.at[0],s.at[1],s.at[2]};
+        if(l.place==LookPlace::ground) {
+            p[0]=s.at[0]+l.at[0];p[2]=s.at[2]+l.at[1];
+            p[1]=l.burst>=0 ? ground[l.burst] : GroundAt(s,p[0],p[2]);
+        } else if(l.place==LookPlace::beamTop) BeamTop(s,frame,p);
+        switch(l.kind) {
+        case LookKind::explosion: edf41c::Explosion(p,kUp,l.size); break;
+        case LookKind::smoke: edf41c::Smoke(p,l.size); break;
+        case LookKind::blaze: edf41c::Blazing(p,kUp,l.size); break;
+        case LookKind::light: edf41c::StencilLight(p,LightColour(l.tint),l.size,l.frames); break;
+        }
+    }
+}
+
+// The bursts of show frame `frame` (ultimate_plan.h BurstsAt): each one's damage round, then the frame's looks (LooksFrame).
+// The round is the caller's charge whose blast radius is the burst's (the spark SGO's kSparkRadius, the blast SGO's
+// kRingBlast: its own blast is the explosion seen), dropped from kBurstDrop m over the ground under the point; a look of a
+// burst's only where that round is: a burst whose round could not be made while the caller is there shows nothing more
+// (counted, said at the show's end), so nothing seen is without its damage. A show whose caller is gone fires no rounds and
+// plays its looks out (Fire, CheckCaller).
 constexpr float kBurstDrop=3.0f;      // m: the charges fly 3 m a frame (EMC_BLAST_SPEED): on the ground the next frame
-constexpr float kLookOfRadius=0.5f;   // the explosion helpers' size per metre of blast (the stock look the storm and rings had)
 void BurstsFrame(Show& s,int frame) noexcept {
     Burst bursts[kMaxBurstsAFrame];
+    bool shown[kMaxBurstsAFrame]{};
+    float ground[kMaxBurstsAFrame]{};
     const int n=BurstsAt(s.seed,frame,bursts,kMaxBurstsAFrame);
     for(int k=0;k<n;++k) {
         const Burst& b=bursts[k];
@@ -515,22 +545,15 @@ void BurstsFrame(Show& s,int frame) noexcept {
         const float above[3]={x,to[1]+kBurstDrop,z};
         const EmcRound round=b.kind==BurstKind::blast ? EmcRound::ultBlast : EmcRound::ultSpark;
         ++s.bursts;
-        if(s.live && !Fire(s,round,above,to,s.damage*b.share).obj){++s.burstsLost;continue;}
-        if(b.kind==BurstKind::blast)edf41c::BigExplosion(to,kUp,b.radius*kLookOfRadius,1.0f);
-        else edf41c::Explosion(to,kUp,b.radius*kLookOfRadius);
-        if(b.kind==BurstKind::wave)edf41c::Smoke(to,b.great ? 40.0f : 25.0f);
+        ground[k]=to[1];
+        shown[k]=!s.live || Fire(s,round,above,to,s.damage*b.share).obj;
+        if(!shown[k])++s.burstsLost;
     }
+    LooksFrame(s,frame,bursts,n,shown,ground);
 }
 
 void AfterFrame(Show& s,int f) noexcept {
-    if(f==0)DropRounds(s);
-    float off[2];
-    if(FireAt(s.seed,f,off)) {
-        const float x=s.at[0]+off[0],z=s.at[2]+off[1];
-        const float p[3]={x,GroundAt(s,x,z),z};
-        edf41c::Blazing(p,kUp,6.0f);
-        if(f%12==0)edf41c::Smoke(p,25.0f);
-    }
+    if(f==0)DropRounds(s);   // its fires and smoke: BurstsFrame's looks
 }
 
 // Every round the show fires preloaded this mission: a show is the bursts' rounds as much as its beams (a show begun
