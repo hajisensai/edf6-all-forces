@@ -69,7 +69,7 @@ enum class MarkPress { none, tap, hold };
 struct MarkKey { bool down,armed; unsigned long long at; };
 inline MarkPress StepMarkKey(MarkKey& k,bool down,bool start,bool keep,unsigned long long now) noexcept {
     MarkPress r=MarkPress::none;
-    if(down && !k.down){k.armed=start;k.at=now;}
+    if(down && !k.down){k.armed=start && keep;k.at=now;}
     else if(down && k.armed && !keep)k.armed=false;
     else if(down && k.armed && now-k.at>=kMarkClearMs){k.armed=false;r=MarkPress::hold;}
     else if(!down && k.down && k.armed){k.armed=false;r=keep ? MarkPress::tap : MarkPress::none;}

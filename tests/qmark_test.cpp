@@ -374,11 +374,11 @@ void ShareChecks() {
     {
         const float at[3]={10,0,20};
         ownEnemy=true;QMarkSetPoint(at);Frame();
-        sends=0;UpdateQMarkNetwork(true,2,&Send,T+820);
+        sends=0;UpdateQMarkNetwork(true,2,&Send,T+1100);   // the keepalive due: sent whatever was before
         qmark_net::State marked;
         Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),marked) && marked.enemy && marked.point,"an enemy and a point marked: sent");
         qmark_net::Inbox peer;qmark_net::Change ch=qmark_net::Change::none;
-        Check(peer.Receive(1,marked,T+820,&ch) && ch==qmark_net::Change::marked,"...the teammate has them");
+        Check(peer.Receive(1,marked,T+1100,&ch) && ch==qmark_net::Change::marked,"...the teammate has them");
         float was[3]{};
         ownEnemy=false;
         Check(QMarkClearPoint(was) && was[0]==10.0f && was[2]==20.0f,"the point cleared: where it was");
@@ -387,11 +387,11 @@ void ShareChecks() {
         QMarkView v2[kQMarkViews];int own=0;const int n2=Views(v2);
         for(int i=0;i<n2;++i)own+=v2[i].own;
         Check(own==0,"cleared: neither of this machine's marks shown");
-        sends=0;UpdateQMarkNetwork(true,2,&Send,T+830);
+        sends=0;UpdateQMarkNetwork(true,2,&Send,T+1160);
         qmark_net::State cleared;
         Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),cleared) && !cleared.enemy && !cleared.point &&
               cleared.letGo==marked.letGo+1,"the clear sent at once: no enemy, no point, the let-go counted");
-        Check(peer.Receive(1,cleared,T+830,&ch) && ch==qmark_net::Change::letGo && !peer.Enemy(1,T+830) && !peer.Point(1,T+830),
+        Check(peer.Receive(1,cleared,T+1160,&ch) && ch==qmark_net::Change::letGo && !peer.Enemy(1,T+1160) && !peer.Point(1,T+1160),
               "the teammate: both gone, a let-go (its off cue)");
     }
     // The name not readable: P<n> (no name).
