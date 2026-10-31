@@ -65,7 +65,7 @@ bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
     if(!out)return false;
     __try {
         const auto object=static_cast<const unsigned char*>(who.obj);
-        if(!EncodeNetRef(who,out) || !netref::IsPlayer(out) || !Readable(object,kDead+1) || object[kDead]) {
+        if(!EncodeNetRef(who,out) || !netref::IsPlayer(out) || !Readable(object,kDead+1) || object[kDead] || (object[0x18]&4)) {
             std::memset(out,0,32);return false;
         }
         return true;

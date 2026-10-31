@@ -178,14 +178,17 @@ bool NativeActor(const unsigned char* id,Ref* out) noexcept {
 
 bool ResolveActor(const unsigned char* id,Ref* out) noexcept {
     *out={};if(Zero(id))return true;if(!Canonical(id))return false;
-    // A player by its slot (net_object_ref.h), in the one walk: present (a fallen player is still a target's body); not
-    // here yet is pending, as a NetId missing from the registry. Its strong reference is taken at the handoff, as below.
+    // A player by its slot (net_object_ref.h): present (a fallen player is still a target's body). The walk ran and no
+    // object of that slot is here (gone, deleted, left): an empty actor, as an expired NetId's record (NativeActor). Only
+    // two of the slot (ambiguous) or a walk that could not run is a failure. Its strong reference is taken at the handoff.
     if(netref::IsPlayer(id)) {
         NetResolved found{};
-        if(!ResolveNetRef(id,NetLife::present,&found) || !found.found)return false;
-        *out=Ref{const_cast<void*>(found.obj.obj),static_cast<unsigned char*>(const_cast<void*>(found.obj.ctrl))};
+        if(!ResolveNetRef(id,NetLife::present,&found) || found.ambiguous)return false;
+        if(!found.found)return true;
+        const Ref actor{const_cast<void*>(found.obj.obj),static_cast<unsigned char*>(const_cast<void*>(found.obj.ctrl))};
         unsigned char actual[32]{};
-        return ReadActorId(*out,actual) && !std::memcmp(actual,id,32);
+        if(!ReadActorId(actor,actual) || std::memcmp(actual,id,32))return false;
+        *out=actor;return true;
     }
 #ifdef ENEMY_CONTROL_PROJECTILE_NATIVE_TEST
     // Existing boundary fixtures can omit the game registry entirely. Lifecycle

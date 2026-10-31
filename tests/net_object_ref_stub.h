@@ -8,6 +8,9 @@
 #include <cstring>
 
 namespace crew {
+namespace netref_stub {
+int ambiguousSlot=-1;   // a player slot two objects answer (net_object_resolve.h NetResolved::ambiguous)
+}
 bool EncodeNetRef(const ObjRef& object,unsigned char out[32]) noexcept {
     unsigned char id[32]{};
     std::memset(out,0,32);
@@ -16,7 +19,10 @@ bool EncodeNetRef(const ObjRef& object,unsigned char out[32]) noexcept {
 bool EncodeNetRef(const void* object,unsigned char out[32]) noexcept { return EncodeNetRef(ObjRef{object,nullptr},out); }
 bool ResolveNetRef(const unsigned char* ref,NetLife,NetResolved* out) noexcept {
     *out=NetResolved{};
-    if(netref::IsPlayer(ref,&out->slot))return true;   // no players in the fixture's world
+    if(netref::IsPlayer(ref,&out->slot)) {   // no players in the fixture's world: not here, or two of the slot
+        out->ambiguous=out->slot==netref_stub::ambiguousSlot;
+        return true;
+    }
     MarkIdentities found{};
     if(!ResolveMarkIdentities(nullptr,ref,&found))return false;
     if(found.target){out->obj=found.target;out->found=true;}

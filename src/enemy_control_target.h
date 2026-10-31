@@ -10,15 +10,17 @@ struct Selection {
     ObjRef actor{},lock{};
     float point[3]{};
     int lockIndex=-1;
-    unsigned char nativeId[32]{};
+    // The actor's object reference (net_object_ref.h: a player by its mission slot, the rest by NetId), zero offline.
+    unsigned char ref[32]{};
     // Unreleased old pins survive a failed replacement until TryClear retries.
     ObjRef retiredActor{},retiredLock{};
 };
 bool Pick(const ObjRef& owner,const ObjRef& controlled,const Ray&,Selection*) noexcept;
-bool Resolve(const ObjRef& owner,const ObjRef& controlled,const unsigned char fullNativeId[32],const Ray&,Selection*) noexcept;
+// The focus named by `focusRef` (net_object_resolve.h ResolveNetRef, live). Not here: true with an empty selection.
+bool Resolve(const ObjRef& owner,const ObjRef& controlled,const unsigned char focusRef[32],const Ray&,Selection*) noexcept;
 // Missing/dead/illegal focus clears the ID, and is a successful empty selection.
 // False means the controller/body/ray itself is invalid. Never revoke a lease.
-bool Normalize(const ObjRef& owner,const ObjRef& controlled,unsigned char fullNativeId[32],const Ray&,Selection* =nullptr) noexcept;
+bool Normalize(const ObjRef& owner,const ObjRef& controlled,unsigned char focusRef[32],const Ray&,Selection* =nullptr) noexcept;
 bool Valid(const ObjRef& owner,const ObjRef& controlled,const Ray&,const Selection&) noexcept;
 // Preflight failure leaves the record unchanged. A partially completed native
 // release keeps every remaining pin in the record for a later cleanup attempt.

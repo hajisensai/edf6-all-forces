@@ -19,17 +19,22 @@ struct NetResolved {
     void* puid=nullptr;    // a found player's native PUID (its User+0x18)
     bool dead=false;       // found, and dead (only ever with NetLife::present)
     bool found=false;
+    bool ambiguous=false;  // not found because two objects answer it (two live players of one slot): not "gone"
 };
 constexpr unsigned kMaxNetRefs=18;   // a map command's requester, 16 units and its focus
 
 // The reference of `object` as every machine finds it: a player (one of this mission's, its User bound) by its slot, dead or
-// alive; anything else by its native NetId. False (and `out` zero) for an object deleted, stale, or with neither.
+// alive, scene-deleted or not; anything else by its native NetId. What it is called only: whether it is still found is the
+// receiver's NetLife. False (and `out` zero) for a stale weak reference, a player soldier with no mission slot (no User
+// bound), or an object with no NetId.
 bool EncodeNetRef(const ObjRef& object,unsigned char out[32]) noexcept;
 bool EncodeNetRef(const void* object,unsigned char out[32]) noexcept;   // the object's own current reference
 // `n` references (each null or all zero: none, never found) in one walk, each to `lives[i]`. A player's: its one live
 // player of that slot; with none live and NetLife::present, its one present player (dead=true); two live of one slot, or
-// two present and none live, are none. A NetId's: the one object of it live (or present). Not found leaves `out[i].found`
-// false (a player's slot still told). False only when the walk could not run (no world, an invalid reference, n too many):
+// two present and none live, are none (`ambiguous`). A NetId's: the one object of it live (or present), never a player
+// soldier (a player only by its slot). Not found leaves `out[i].found` false (a player's slot still told). Player references
+// alone reuse the frame's (GameFrame) table of the mission's players, each entry rechecked, so a per-frame lookup costs no
+// walk. False only when the walk could not run (no world, an invalid reference, n too many):
 // every `out` cleared.
 bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsigned n,NetResolved* out) noexcept;
 bool ResolveNetRef(const unsigned char* ref,NetLife life,NetResolved* out) noexcept;

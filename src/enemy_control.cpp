@@ -4,6 +4,7 @@
 #include "crew.h"
 #include "team_native_logic.h"
 #include "enemy_control.h"
+#include "net_object_resolve.h"
 #include "enemy_control_native.h"
 #include "enemy_control_identity.h"
 #include "enemy_control_catalog.h"
@@ -399,7 +400,7 @@ bool BuildWeaponAim(Session& session) noexcept {
     }
     enemy_target::Selection selected{};
     if(session.networked) {
-        if(!enemy_target::Resolve(session.owner,session.target,session.input.fullFocusId,ray,&selected))selected={};
+        if(!enemy_target::Resolve(session.owner,session.target,session.input.focusRef,ray,&selected))selected={};
     } else if(!enemy_target::Pick(session.owner,session.target,ray,&selected))selected={};
     if(!enemy_target::Apply(session.nativeTarget,selected.actor ? &selected : nullptr) ||
         !enemy_target::TryAssign(session.focus,selected))return false;
@@ -595,7 +596,7 @@ void Sample(Session& session,Input& sample) noexcept {
     sample.absoluteAim=true;sample.aimYaw=session.yaw;sample.aimPitch=session.pitch;
     enemy_target::Ray ray{};enemy_target::Selection target{};
     if(AimRay(session,sample.aimYaw,sample.aimPitch,&ray) && enemy_target::Pick(session.owner,session.target,ray,&target))
-        std::memcpy(sample.fullFocusId,target.nativeId,32);
+        std::memcpy(sample.focusRef,target.ref,32);
 }
 bool ProtectSource(Session& session) noexcept {
     __try {
@@ -999,8 +1000,9 @@ bool EnemyControlWeaponLockIdentity(const void* root,unsigned char id[32],int* o
             !Readable(focus.lock.ctrl,16) || At<LONG>(focus.lock.ctrl,8)<=0 || !Readable(focus.lock.obj,0x50) ||
             At<const void*>(focus.lock.obj,8)!=focus.actor.obj || At<int>(focus.lock.obj,0)!=0 ||
             !static_cast<const unsigned char*>(focus.lock.obj)[0x29] || !static_cast<const unsigned char*>(focus.lock.obj)[0x2A])return true;
+        // The focus by its reference (net_object_ref.h: an enemy player by its slot), as the Deiroi entity stream sends it.
         unsigned char actual[32]{};
-        if(!ReadNativeObjectId(static_cast<const unsigned char*>(focus.actor.obj),actual) || std::memcmp(actual,focus.nativeId,32))return true;
+        if(!EncodeNetRef(focus.actor,actual) || std::memcmp(actual,focus.ref,32))return true;
         std::memcpy(id,actual,32);*ordinal=focus.lockIndex;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -1030,9 +1032,9 @@ const unsigned char* EnemyControlBodyForMap(const unsigned char* human) noexcept
 bool EnemyControlNormalizeNetworkInput(std::uint64_t lease,Input* input) noexcept {
     auto* s=ByLease(lease);
     if(!s || !input || s->closing || s->snapshot.phase!=Phase::active || !Live(s->owner) || !Live(s->target) || !ValidInput(*input))return false;
-    if(!input->absoluteAim){std::memset(input->fullFocusId,0,32);return true;}
+    if(!input->absoluteAim){std::memset(input->focusRef,0,32);return true;}
     enemy_target::Ray ray{};if(!AimRay(*s,input->aimYaw,input->aimPitch,&ray))return false;
-    return enemy_target::Normalize(s->owner,s->target,input->fullFocusId,ray);
+    return enemy_target::Normalize(s->owner,s->target,input->focusRef,ray);
 }
 bool EnemyControlNeedsHostActions(std::uint64_t lease) noexcept {
     const auto* s=ByLease(lease);

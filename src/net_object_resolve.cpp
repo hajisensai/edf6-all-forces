@@ -16,18 +16,26 @@ constexpr unsigned kMaxPlayers=1024;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83};
 using WalkFn=void(__fastcall*)(void*,void*);
 
-// Not deleted, its own weak reference live (dead or alive).
-bool Present(const unsigned char* object,ObjRef* ref) noexcept {
-    if(!Readable(object,kDead+1) || (object[0x18]&4))return false;
+// Its own weak reference live (still allocated as itself: dead or alive, scene-deleted or not). What it is called by.
+bool Named(const unsigned char* object,ObjRef* ref) noexcept {
+    if(!Readable(object,kDead+1))return false;
     const auto ctrl=At<const unsigned char*>(object,kSelfCtrl);
     if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
     *ref=ObjRef{object,ctrl};return true;
+}
+// Named and not scene-deleted (+18 bit 2), dead or alive: what a reference finds.
+bool Present(const unsigned char* object,ObjRef* ref) noexcept {
+    return Named(object,ref) && !(object[0x18]&4);
 }
 bool Live(const unsigned char* object,ObjRef* ref) noexcept {
     return Present(object,ref) && !object[kDead];
 }
 bool Alive(const NetLife life,const unsigned char* object,ObjRef* ref) noexcept {
     return life==NetLife::live ? Live(object,ref) : Present(object,ref);
+}
+// A player's soldier (any machine's): named by its slot alone, never by its NetId (another on every machine).
+bool PlayerSoldier(const unsigned char* object) noexcept {
+    return Readable(object,0x1EE0) && IsSoldierClass(object) && IsAnyPlayer(object);
 }
 // A mission player's soldier: its slot (User+48, inside the mission's `expected` players) and its native PUID (User+18).
 bool Player(const unsigned char* object,unsigned expected,void** puid,int* slot) noexcept {
@@ -47,46 +55,74 @@ unsigned Expected() noexcept {
     const unsigned expected=At<unsigned>(status,0x14FF8);
     return expected<=kMaxPlayers ? expected : 0;
 }
+bool Same(const ObjRef& a,const ObjRef& b) noexcept { return a.obj==b.obj && a.ctrl==b.ctrl; }
+
+// The world a walk ran in: its team manager, its rows, its status and player count.
+struct World {
+    void* mgr=nullptr;void* teams=nullptr;const void* status=nullptr;unsigned expected=0;
+    bool operator==(const World& o) const noexcept {
+        return mgr==o.mgr && teams==o.teams && status==o.status && expected==o.expected;
+    }
+};
+bool CurrentWorld(World* w) noexcept {
+    *w=World{};
+    void* mgr=At<void*>(image,kTeamManager);
+    const auto status=At<const unsigned char*>(image,kGameStatus);
+    if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
+    const unsigned expected=At<unsigned>(status,0x14FF8);
+    if(!expected || expected>kMaxPlayers)return false;
+    *w=World{mgr,At<void*>(mgr,0x38),status,expected};return true;
+}
+
+// The mission players one walk met (every player soldier with its User bound, dead or alive), kept for its frame
+// (GameFrame): a player's reference is found again in that frame without another walk (an enemy's attack on a player,
+// rechecked every frame). Borrowed pointers, never pinned: each one asked about is checked again (Present, its own weak
+// reference, its slot and PUID) before use, and one that fails sends the lookup back to a walk. Game thread only.
+struct Seen { ObjRef ref{};void* puid=nullptr;int slot=-1; };
+constexpr unsigned kMaxSeen=2*kMaxPlayers;
+struct Players {
+    ULONGLONG frame=0;World world{};bool valid=false,overflow=false;
+    unsigned count=0;
+    Seen seen[kMaxSeen];
+};
+Players players;
+void Record(Players& t,const ObjRef& ref,void* puid,int slot) noexcept {
+    for(unsigned i=0;i<t.count;++i)if(Same(t.seen[i].ref,ref))return;   // the same object met again in another team
+    if(t.count==kMaxSeen){t.overflow=true;return;}
+    t.seen[t.count++]=Seen{ref,puid,slot};
+}
+// Seen `s` is still the player it was: present, its weak reference, its slot and PUID.
+bool StillSeen(const Seen& s,unsigned expected) noexcept {
+    ObjRef now{};void* puid=nullptr;int slot=-1;
+    const auto object=static_cast<const unsigned char*>(s.ref.obj);
+    return Present(object,&now) && Same(now,s.ref) && Player(object,expected,&puid,&slot) && slot==s.slot && puid==s.puid;
+}
 
 struct Query {
     netref::Kind kind=netref::Kind::none;
     NetLife life=NetLife::live;
     int slot=-1;
     const unsigned char* id=nullptr;   // a native NetId's
-    // What the walk met: a player's live and (dead) present objects, a NetId's objects; two different ones of either: none.
-    ObjRef live{},present{},match{};
-    void* livePuid=nullptr;void* presentPuid=nullptr;
-    bool liveTwice=false,presentTwice=false,matchTwice=false;
+    ObjRef match{};                    // a NetId's object; two different ones: ambiguous
+    bool matchTwice=false;
 };
 struct Visitor {
     const void* const* vtable;
     Query q[kMaxNetRefs]{};
     unsigned n=0,expected=0;
-    bool players=false,natives=false;
+    bool natives=false;
+    Players* table=nullptr;
 };
-bool Same(const ObjRef& a,const ObjRef& b) noexcept { return a.obj==b.obj && a.ctrl==b.ctrl; }
-// `ref` into `slot`, `twice` set when another object came already (the same object met again in another team is no second).
-void Note(ObjRef& slot,bool& twice,const ObjRef& ref) noexcept {
-    if(slot && !Same(slot,ref))twice=true;
-    slot=ref;
-}
 void __fastcall Ignore(void*) noexcept {}
 void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
     if(!object)return;
     __try {
         ObjRef ref{};
         if(!Present(object,&ref))return;
-        if(v->players) {
+        if(PlayerSoldier(object)) {   // by its slot alone: its NetId is matched by no reference
             void* puid=nullptr;int slot=-1;
-            if(Player(object,v->expected,&puid,&slot)) {
-                const bool live=!object[kDead];
-                for(unsigned i=0;i<v->n;++i) {
-                    Query& q=v->q[i];
-                    if(q.kind!=netref::Kind::player || q.slot!=slot)continue;
-                    if(live){Note(q.live,q.liveTwice,ref);q.livePuid=puid;}
-                    else {Note(q.present,q.presentTwice,ref);q.presentPuid=puid;}
-                }
-            }
+            if(Player(object,v->expected,&puid,&slot))Record(*v->table,ref,puid,slot);
+            return;
         }
         if(!v->natives)return;
         unsigned char id[32]{};
@@ -94,23 +130,51 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
         for(unsigned i=0;i<v->n;++i) {
             Query& q=v->q[i];
             if(q.kind!=netref::Kind::native || std::memcmp(id,q.id,32))continue;
-            if(Alive(q.life,object,&ref))Note(q.match,q.matchTwice,ref);
+            if(Alive(q.life,object,&ref)) {
+                if(q.match && !Same(q.match,ref))q.matchTwice=true;
+                q.match=ref;
+            }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&Visit)};
 
-NetResolved Result(const Query& q) noexcept {
+// One native all-team walk in world `w`: the player table refilled, the NetId queries matched. False when it could not
+// run, the world changed under it (a mission's end), or more player soldiers than the table holds.
+bool WalkWorld(Visitor& v,const World& w,ULONGLONG frame) noexcept {
+    players.valid=false;players.overflow=false;players.count=0;
+    if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)) || !team_walk::WalkRows(w.mgr))return false;
+    v.expected=w.expected;v.table=&players;
+    reinterpret_cast<WalkFn>(image+kEnumAllTeams)(w.mgr,&v);
+    World after{};
+    if(!CurrentWorld(&after) || !(after==w) || players.overflow){players.count=0;return false;}
+    players.valid=true;players.frame=frame;players.world=w;
+    return true;
+}
+NetResolved Result(const Query& q,unsigned expected) noexcept {
     NetResolved r{};
     r.slot=q.slot;
     if(q.kind==netref::Kind::player) {
-        if(q.live && !q.liveTwice){r.obj=q.live;r.puid=q.livePuid;r.found=true;}
-        else if(!q.live && q.life==NetLife::present && q.present && !q.presentTwice) {
-            r.obj=q.present;r.puid=q.presentPuid;r.dead=true;r.found=true;
+        const Seen* live=nullptr;const Seen* dead=nullptr;
+        unsigned lives=0,deaths=0;
+        for(unsigned i=0;i<players.count;++i) {
+            const Seen& s=players.seen[i];
+            if(s.slot!=q.slot || !StillSeen(s,expected))continue;
+            if(!static_cast<const unsigned char*>(s.ref.obj)[kDead]){live=&s;++lives;}
+            else {dead=&s;++deaths;}
         }
-    } else if(q.kind==netref::Kind::native && q.match && !q.matchTwice) {
-        r.obj=q.match;r.found=true;
-        r.dead=static_cast<const unsigned char*>(q.match.obj)[kDead]!=0;
+        if(lives==1){r.obj=live->ref;r.puid=live->puid;r.found=true;}
+        else if(lives>1)r.ambiguous=true;
+        else if(q.life==NetLife::present) {
+            if(deaths==1){r.obj=dead->ref;r.puid=dead->puid;r.dead=true;r.found=true;}
+            else if(deaths>1)r.ambiguous=true;
+        }
+    } else if(q.kind==netref::Kind::native && q.match) {
+        if(q.matchTwice)r.ambiguous=true;
+        else {
+            r.obj=q.match;r.found=true;
+            r.dead=static_cast<const unsigned char*>(q.match.obj)[kDead]!=0;
+        }
     }
     return r;
 }
@@ -121,14 +185,17 @@ bool EncodeNetRef(const ObjRef& who,unsigned char out[32]) noexcept {
     if(!out)return false;
     std::memset(out,0,32);
     __try {
+        // What it is called, not whether it may be found: dead, or deleted this frame, it keeps its name (a lock's owner,
+        // a projectile's extra still sent); whether it is found is the receiver's NetLife.
         const auto object=static_cast<const unsigned char*>(who.obj);
         ObjRef ref{};
-        if(!Present(object,&ref) || ref.ctrl!=who.ctrl)return false;
-        void* puid=nullptr;int slot=-1;
-        const unsigned expected=Expected();
-        if(expected && Player(object,expected,&puid,&slot))return netref::MakePlayer(slot,out);
-        // A player soldier outside the mission's players (no User bound yet): no reference another machine would share.
-        if(IsAnyPlayer(object))return false;
+        if(!Named(object,&ref) || ref.ctrl!=who.ctrl)return false;
+        if(PlayerSoldier(object)) {
+            // A player by its slot alone; one outside the mission's players (no User bound) has no name another machine shares.
+            void* puid=nullptr;int slot=-1;
+            const unsigned expected=Expected();
+            return expected && Player(object,expected,&puid,&slot) && netref::MakePlayer(slot,out);
+        }
         unsigned char id[32]{};
         return ReadNativeObjectId(object,id) && netref::MakeNative(id,out);
     } __except(EXCEPTION_EXECUTE_HANDLER){std::memset(out,0,32);return false;}
@@ -152,25 +219,32 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
             q.kind=netref::Classify(refs[i],&q.slot);q.life=lives[i];
             if(q.kind==netref::Kind::invalid)return false;
             if(q.kind==netref::Kind::native){q.id=refs[i];visitor.natives=true;}
-            if(q.kind==netref::Kind::player)visitor.players=true;
             any=any || q.kind!=netref::Kind::none;
         }
         for(unsigned i=0;i<n;++i)out[i].slot=visitor.q[i].slot;
         if(!any)return true;   // nothing asked: nothing found, no walk
-        if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
-        void* mgr=At<void*>(image,kTeamManager);
-        const auto status=At<const unsigned char*>(image,kGameStatus);
-        if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
-        void* teams=At<void*>(mgr,0x38);
-        visitor.expected=At<unsigned>(status,0x14FF8);
-        if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
-        reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
-        // The world changed under the walk (a mission's end): nothing it met is trusted.
-        if(At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status || At<void*>(mgr,0x38)!=teams ||
-           At<unsigned>(status,0x14FF8)!=visitor.expected)return false;
-        for(unsigned i=0;i<n;++i)out[i]=Result(visitor.q[i]);
+        World world{};
+        if(!CurrentWorld(&world))return false;
+        // Players alone, this frame's table of this world, every one asked about still itself, and each asked slot has one
+        // there to its NetLife (live for live): no walk. A slot with none (gone, or a respawn made since the walk) walks.
+        const ULONGLONG frame=GameFrame();
+        bool cached=!visitor.natives && frame && players.valid && players.frame==frame && players.world==world;
+        for(unsigned j=0;cached && j<n;++j) {
+            const Query& q=visitor.q[j];
+            if(q.kind!=netref::Kind::player)continue;
+            bool held=false;
+            for(unsigned i=0;cached && i<players.count;++i) {
+                const Seen& s=players.seen[i];
+                if(s.slot!=q.slot)continue;
+                if(!StillSeen(s,world.expected)){cached=false;break;}
+                held=held || q.life==NetLife::present || !static_cast<const unsigned char*>(s.ref.obj)[kDead];
+            }
+            cached=cached && held;
+        }
+        if(!cached && !WalkWorld(visitor,world,frame))return false;
+        for(unsigned i=0;i<n;++i)out[i]=Result(visitor.q[i],world.expected);
         return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){for(unsigned i=0;i<n;++i)out[i]=NetResolved{};return false;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){for(unsigned i=0;i<n;++i)out[i]=NetResolved{};players.valid=false;return false;}
 }
 bool ResolveNetRef(const unsigned char* ref,NetLife life,NetResolved* out) noexcept {
     const unsigned char* refs[1]={ref};

@@ -2,6 +2,7 @@
 // target weak ownership. Never called from weapon hooks, rendering or transport.
 #include "enemy_control_target.h"
 #include "memory.h"
+#include "net_object_resolve.h"
 #include "support_soldier.h"
 #include <cmath>
 #include <cstring>
@@ -32,11 +33,13 @@ bool Alive(const ObjRef& r) noexcept {
 }
 bool Finite(const float* p) noexcept {return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]);}
 bool Zero(const unsigned char* id) noexcept {for(unsigned i=0;i<32;++i)if(id[i])return false;return true;}
-bool Canonical(const unsigned char* id) noexcept {
-    if(!id)return false;
-    unsigned any=0;
-    for(unsigned i=0;i<32;++i){if(i>=20 && i<24 && id[i])return false;any|=id[i];}
-    return any!=0;
+// A focus is an object reference (net_object_ref.h): a player by its mission slot (an enemy player in PvP: its NetId is
+// another on every machine), anything else by its NetId.
+bool Canonical(const unsigned char* id) noexcept {return id && netref::Valid(id,false);}
+// `actor`'s reference is `id` (what it is called on every machine: net_object_resolve.h EncodeNetRef).
+bool Named(const ObjRef& actor,const unsigned char* id) noexcept {
+    unsigned char actual[32]{};
+    return EncodeNetRef(actor,actual) && !std::memcmp(actual,id,32);
 }
 bool Frame(const ObjRef& owner,const ObjRef& controlled,const Ray& ray) noexcept {
     const float d2=ray.direction[0]*ray.direction[0]+ray.direction[1]*ray.direction[1]+ray.direction[2]*ray.direction[2];
@@ -170,27 +173,18 @@ struct Search {
     const ObjRef* owner;
     const ObjRef* controlled;
     const Ray* ray;
-    const unsigned char* id;
+    const void* only;      // a resolved focus (Resolve / Normalize): no other actor is a candidate
     const void* direct=nullptr;
     Selection selected{};
     float score=1.0f;
-    bool ambiguous=false;
-    ObjRef matched{};
 };
 void __fastcall Ignore(void*,unsigned) noexcept {}
 void __fastcall Visit(Search* s,const void* object) noexcept {
     __try {
         if(!object || object==s->owner->obj || object==s->controlled->obj || !Readable(object,kSelfCtrl+8))return;
+        if(s->only && object!=s->only)return;
         const ObjRef actor=ObjRef::Of(object);
         if(!Hostile(*s->controlled,actor))return;
-        unsigned char id[32]{};
-        const bool identified=ReadNativeObjectId(static_cast<const unsigned char*>(object),id) && Canonical(id);
-        if(!identified)std::memset(id,0,32); // offline actors have no native network identity
-        if(s->id && (!identified || std::memcmp(s->id,id,32)))return;
-        if(s->id) {
-            if(s->matched && !Same(s->matched,actor)){s->ambiguous=true;return;}
-            s->matched=actor;
-        }
         const auto count=At<std::uint64_t>(object,0x378);
         if(count>kMaxLocks)return;
         // Actors without a lock point remain valid physical/capture targets. A
@@ -213,7 +207,7 @@ void __fastcall Visit(Search* s,const void* object) noexcept {
                 score=-2.0f+(square-along*along)/(1.0f+square);
             }
             if((score<0.0f && object!=s->direct) || score>=s->score || !Visible(*s->owner,*s->controlled,actor,*s->ray,next.point))continue;
-            std::memcpy(next.nativeId,id,32);s->selected=next;s->score=score;
+            s->selected=next;s->score=score;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
@@ -239,6 +233,13 @@ bool SearchTarget(const ObjRef& owner,const ObjRef& controlled,const Ray& ray,co
     if(!out)return false;
     *out={};
     if(!Frame(owner,controlled,ray) || (id && !Canonical(id)))return false;
+    // A focus named by reference is found as every receiver finds one (ResolveNetRef, live): a player by its slot (its live
+    // object of that slot), the rest by NetId. Not here (dead, gone): an empty selection; two of it: a failure.
+    NetResolved focus{};
+    if(id) {
+        if(!ResolveNetRef(id,NetLife::live,&focus) || focus.ambiguous)return false;
+        if(!focus.found)return true;
+    }
     const auto* manager=At<const unsigned char*>(image,kTeams);
     const int team=ObserverTeam(controlled);
     if(team<0 || team>=static_cast<int>(kMaxTeams) || !Readable(manager,0x50))return false;
@@ -247,13 +248,18 @@ bool SearchTarget(const ObjRef& owner,const ObjRef& controlled,const Ray& ray,co
     const auto count=At<std::uint64_t>(rows+team*0x38,0x28);
     if(!count || count>kMaxTeams || !Readable(rows,static_cast<std::size_t>(count)*0x38) ||
         !Readable(At<const void*>(rows+team*0x38,0x18),static_cast<std::size_t>(count)*4))return false;
-    Search search{kVisitor,&owner,&controlled,&ray,id,Direct(owner,controlled,ray)};
+    Search search{kVisitor,&owner,&controlled,&ray,id ? focus.obj.obj : nullptr,Direct(owner,controlled,ray)};
     reinterpret_cast<void(__fastcall*)(const void*,int,void*)>(image+kWalk)(manager,team,&search);
-    if(search.ambiguous || !Alive(owner) || !Alive(controlled) || At<const void*>(image,kTeams)!=manager ||
+    if(!Alive(owner) || !Alive(controlled) || At<const void*>(image,kTeams)!=manager ||
         At<const void*>(manager,0x38)!=rows)return false;
     if(search.selected.actor) {
-        const auto& selected=search.selected;
+        auto& selected=search.selected;
         if(!Alive(selected.actor))return false;
+        if(id) {
+            // Still the object the reference found (the walk ran game code since).
+            if(!Same(selected.actor,focus.obj) || !StillNetRef(id,NetLife::live,focus))return false;
+            std::memcpy(selected.ref,id,32);
+        } else if(!EncodeNetRef(selected.actor,selected.ref))std::memset(selected.ref,0,32);   // offline: no network name
         if(selected.lockIndex>=0) {
             ObjRef lock{};float point[3]{};
             if(!Lock(selected.actor,selected.lockIndex,&lock,point) || !Same(lock,selected.lock))return false;
@@ -318,9 +324,7 @@ bool Normalize(const ObjRef& owner,const ObjRef& controlled,unsigned char id[32]
 bool Valid(const ObjRef& owner,const ObjRef& controlled,const Ray& ray,const Selection& selected) noexcept {
     __try {
         if(!Frame(owner,controlled,ray) || !Hostile(controlled,selected.actor) || Same(owner,selected.actor))return false;
-        unsigned char id[32]{};
-        if(!Zero(selected.nativeId) && (!Canonical(selected.nativeId) ||
-            !ReadNativeObjectId(static_cast<const unsigned char*>(selected.actor.obj),id) || std::memcmp(id,selected.nativeId,32)))return false;
+        if(!Zero(selected.ref) && (!Canonical(selected.ref) || !Named(selected.actor,selected.ref)))return false;
         float point[3]{};ObjRef lock{};
         if(selected.lockIndex>=0) {
             if(!Lock(selected.actor,selected.lockIndex,&lock,point) || !Same(lock,selected.lock))return false;
@@ -346,7 +350,7 @@ bool TryAssign(Selection& retained,const Selection& next) noexcept {
         const auto oldActor=retained.actor,oldLock=retained.lock;
         retained.actor=retained.retiredActor;retained.lock=retained.retiredLock;
         retained.retiredActor=oldActor;retained.retiredLock=oldLock;
-        std::memcpy(retained.point,desired.point,12);retained.lockIndex=desired.lockIndex;std::memcpy(retained.nativeId,desired.nativeId,32);
+        std::memcpy(retained.point,desired.point,12);retained.lockIndex=desired.lockIndex;std::memcpy(retained.ref,desired.ref,32);
         const bool actor=Drop(retained.retiredActor),lock=Drop(retained.retiredLock);
         return actor && lock;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -391,9 +395,7 @@ bool Apply(NativeLease& lease,const Selection* selection) noexcept {
         ObjRef next{};
         if(selection && selection->actor) {
             if(!Hostile(lease.root,selection->actor))return false;
-            unsigned char id[32]{};
-            if(!Zero(selection->nativeId) && (!Canonical(selection->nativeId) ||
-                !ReadNativeObjectId(static_cast<const unsigned char*>(selection->actor.obj),id) || std::memcmp(id,selection->nativeId,32)))return false;
+            if(!Zero(selection->ref) && (!Canonical(selection->ref) || !Named(selection->actor,selection->ref)))return false;
             next=selection->actor;
         }
         void* object=const_cast<void*>(lease.root.obj);

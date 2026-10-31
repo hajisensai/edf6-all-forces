@@ -30,7 +30,14 @@ int main() {
     Check(!Decode(b,sizeof(b)-1,d),"the wrong size");
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[4]=1;Check(!Decode(c,kWire,d),"an older version (the caller its NetId)");
      c[4]=2;Check(!Decode(c,kWire,d),"version 2 (the player's tag at bytes 0..3)");
-     c[4]=4;Check(!Decode(c,kWire,d),"another version");}
+     c[4]=3;Check(!Decode(c,kWire,d),"version 3 (no caller team)");
+     c[4]=5;Check(!Decode(c,kWire,d),"another version");}
+    // The caller's team rides along (a peer without the caller warns and fires from a stand-in of that side).
+    {Msg x=m;x.team=3;Check(Encode(x,b,sizeof(b)) && Decode(b,sizeof(b),d) && d.team==3,"the caller's team round trips");
+     x.team=-1;Check(!Encode(x,b,sizeof(b)),"a negative team");
+     x.team=crew::team_native::kTeamCapacity;Check(!Encode(x,b,sizeof(b)),"a team past the table");
+     x.team=2;Encode(x,b,sizeof(b));b[crew::barrage_net::detail::kTeam]=200;Check(!Decode(b,sizeof(b),d),"a wire team past the table");
+     Encode(m,b,sizeof(b));}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[8]=static_cast<unsigned char>(crew::barrage::kKinds);Check(!Decode(c,kWire,d),"an unknown kind");}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[0]^=1;Check(!Decode(c,kWire,d) && !Owned(c,kWire),"not BRGS");}
     {Msg x=m;x.heading[0]=0;x.heading[2]=0;Check(!Encode(x,b,sizeof(b)),"no heading: no barrage");}

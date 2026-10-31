@@ -189,7 +189,7 @@ bool NormalizeInput(void*,std::uint64_t token,const ep::LeaseSpec& spec,const ep
         Actors actors{};enemy_control::Input input{};
         if(!transport.host || !ResolveActors(spec,&actors) || !en::DecodeInput(bytes,size,&input))return false;
         input.sequence=meta.sequence;input.seed=meta.seed;
-        if(!EnemyControlNormalizeNetworkInput(token,&input))std::memset(input.fullFocusId,0,32);
+        if(!EnemyControlNormalizeNetworkInput(token,&input))std::memset(input.focusRef,0,32);
         return en::EncodeInput(input,bytes,size);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -41,6 +41,9 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept
 bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {   // the owner's (net_object_ref.h)
     return ReadNativeObjectId(static_cast<const unsigned char*>(who.obj),out);
 }
+bool EncodeNetRef(const ObjRef& who,unsigned char out[32]) noexcept {   // an object's reference: here its fixture NetId
+    return ReadNativeObjectId(static_cast<const unsigned char*>(who.obj),out);
+}
 bool EnemyControlNativeNetworkPoseReady(const enemy_native::NativeLease&) noexcept {return true;}
 bool EnemyControlWeaponAimReady(const enemy_native::NativeProfile*) noexcept {return true;}
 bool InstallEnemyControlUnitGuide() noexcept {return true;}
@@ -77,10 +80,10 @@ namespace enemy_target {
 bool Install() noexcept {return true;}
 bool Pick(const ObjRef&,const ObjRef&,const Ray&,Selection* out) noexcept {if(out)*out=fixtureFocus;return true;}
 bool Resolve(const ObjRef&,const ObjRef&,const unsigned char* id,const Ray&,Selection* out) noexcept {
-    if(out)*out={};if(std::memcmp(id,fixtureFocus.nativeId,32))return false;if(out)*out=fixtureFocus;return true;
+    if(out)*out={};if(std::memcmp(id,fixtureFocus.ref,32))return false;if(out)*out=fixtureFocus;return true;
 }
 bool Normalize(const ObjRef&,const ObjRef&,unsigned char* id,const Ray&,Selection* out) noexcept {
-    if(out)*out={};if(std::memcmp(id,fixtureFocus.nativeId,32))std::memset(id,0,32);else if(out)*out=fixtureFocus;return true;
+    if(out)*out={};if(std::memcmp(id,fixtureFocus.ref,32))std::memset(id,0,32);else if(out)*out=fixtureFocus;return true;
 }
 bool TryAssign(Selection& next,const Selection& source) noexcept {next=source;return true;}
 bool TryClear(Selection& next) noexcept {if(fixtureFocusClearFails)return false;next={};return true;}
@@ -262,7 +265,7 @@ int main() {
     using namespace crew;using namespace crew::enemy_control;
     Input relative{};relative.move[0]=1;
     Check(!ValidInput(relative),"moving semantic input requires an authenticated absolute view");
-    relative={};relative.fullFocusId[20]=1;
+    relative={};relative.focusRef[20]=1;
     Check(!ValidInput(relative),"core rejects noncanonical NativeID padding");
     relative={};relative.active[0]={42,1};
     Check(!ValidInput(relative),"skill input without an absolute view cannot bypass the wire validator");
@@ -432,7 +435,7 @@ int main() {
     fixtureNetFailed=false;fixturePendingVisible=false;fixtureOnline=false;fixtureNetworkIds=false;ResetEnemyControl();
     // Core target selection publishes only real retained identities. Target helper
     // visibility/hostility/native weak setters have their own production fixture.
-    fixtureFocus.actor=ObjRef::Of(target2);fixtureFocus.lock={target2+0x1000,targetCtrl2};fixtureFocus.nativeId[0]=3;fixtureFocus.lockIndex=0;
+    fixtureFocus.actor=ObjRef::Of(target2);fixtureFocus.lock={target2+0x1000,targetCtrl2};fixtureFocus.ref[0]=3;fixtureFocus.lockIndex=0;
     Put<const void*>(target2,0x368,target2+0x1100);Put<std::uint64_t>(target2,0x378,1);
     Put<const void*>(target2+0x1100,0,fixtureFocus.lock.obj);Put<const void*>(target2+0x1100,8,fixtureFocus.lock.ctrl);
     Put<const void*>(target2+0x1000,8,target2);target2[0x1029]=target2[0x102A]=1;
@@ -467,10 +470,10 @@ int main() {
     Check(EnemyControlBegin(ObjRef::Of(owner1),ObjRef::Of(target1),candidate.profileHash,2002,true,"FixturePuid") && EnemyControlActivate(2002),"online begin binds the native action role before activation");
     bool networkKnown=false;Check(EnemyControlNetworkContext(target1,&networkKnown) && networkKnown,"authenticated online context is immutable for the exact body lease");
     const unsigned beforeScope=fixtureBefore,afterScope=fixtureAfter;
-    Input networkInput{};networkInput.absoluteAim=true;networkInput.sequence=1;networkInput.seed=91;networkInput.fullFocusId[0]=88;
-    Check(EnemyControlNormalizeNetworkInput(2002,&networkInput) && !networkInput.fullFocusId[0],"host clears an invalid full focus ID without revoking the input lease");
-    fixtureFocus.actor=ObjRef::Of(target2);fixtureFocus.nativeId[0]=77;networkInput.fullFocusId[0]=77;
-    Check(EnemyControlNormalizeNetworkInput(2002,&networkInput) && networkInput.fullFocusId[0]==77,"host preserves only the helper-validated full target identity");
+    Input networkInput{};networkInput.absoluteAim=true;networkInput.sequence=1;networkInput.seed=91;networkInput.focusRef[0]=88;
+    Check(EnemyControlNormalizeNetworkInput(2002,&networkInput) && !networkInput.focusRef[0],"host clears an invalid full focus ID without revoking the input lease");
+    fixtureFocus.actor=ObjRef::Of(target2);fixtureFocus.ref[0]=77;networkInput.focusRef[0]=77;
+    Check(EnemyControlNormalizeNetworkInput(2002,&networkInput) && networkInput.focusRef[0]==77,"host preserves only the helper-validated full target identity");
     networkInput.active[0]={abilities[1].id,2};Check(EnemyControlApply(2002,networkInput),"online named ability enters the ordered input queue");NativeStep(target1);
     Check(fixtureBefore==beforeScope+1 && fixtureAfter==afterScope+1,"accepted action scope brackets native input and named command once");
     Check(EnemyControlNeedsHostActions(2002),"network core exposes its real bound native action provider");

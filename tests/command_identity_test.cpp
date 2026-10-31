@@ -13,6 +13,8 @@ const Config& Cfg() noexcept {static const Config cfg{};return cfg;}
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept {return false;}
 bool OnlineHostOnly() noexcept {return false;}
+ULONGLONG frameNow=0;   // 0: no frame, the resolver keeps no player table (each lookup walks)
+ULONGLONG GameFrame() noexcept {return frameNow;}
 }
 namespace {
 using namespace crew;
@@ -140,6 +142,53 @@ void PlayerRequesters() {
               got[2].slot==-1,"one walk, a player, a NetId and none");
         unsigned char bad[32]{};std::memcpy(bad,requester,32);bad[9]=1;refs[2]=bad;
         Check(!ResolveNetRefs(refs,lives,3,got) && !got[0].found,"an invalid reference: no walk, nothing found");
+    }
+    // What an object is called is not whether it is found (review of #307): deleted this frame, a player keeps its slot and
+    // an NPC its NetId (a lock's owner still sent); finding it is the receiver's NetLife. A deleted player is no requester.
+    actors[1][0x18]=4;
+    Check(EncodeNetRef(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a deleted player is still its slot");
+    Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !again[0],"a deleted player is no live requester");
+    actors[1][0x18]=0;actors[2][0x18]=4;
+    Check(EncodeNetRef(ObjRef{actors[2],ctrls[2]},again) && !std::memcmp(again,ids[2],32),"a deleted NPC is still its NetId");
+    actors[2][0x18]=0;
+    Check(!EncodeNetRef(ObjRef{actors[2],ctrls[3]},again) && !again[0],"a stale weak reference names nothing");
+    {   // A player soldier with no User bound (no mission slot): no name another machine shares, never its NetId.
+        Put<void*>(actors[1],0x1ED0,nullptr);
+        Check(!EncodeNetRef(ObjRef{actors[1],ctrls[1]},again) && !again[0],"a player with no slot is not named by its NetId");
+        Put<void*>(actors[1],0x1ED0,user2);
+    }
+    // A player is found by its slot alone: its NetId (here both players' are ids[0]'s) names nothing in the walk.
+    Check(ResolveNetRef(ids[0],NetLife::present,&r) && !r.found && !r.ambiguous,"a player's NetId finds no player");
+    // Two live players of one slot: ambiguous, not gone.
+    Put<int>(user,0x48,1);
+    Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && r.ambiguous,"two live of a slot: ambiguous");
+    Put<int>(user,0x48,0);
+    Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && !r.ambiguous,"one of a slot: found, not ambiguous");
+    {   // The frame's player table: a player reference again in one frame walks no more; a frame later, or one of its
+        // players no longer itself (deleted), walks again; a NetId always walks.
+        frameNow=40;const int before=walks;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.obj.obj==actors[1] && walks==before+1,"first lookup of the frame walks");
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.obj.obj==actors[1] && walks==before+1,"again in the frame: no walk");
+        unsigned char slot0[32]{};netref::MakePlayer(0,slot0);
+        Check(ResolveNetRef(slot0,NetLife::live,&r) && r.obj.obj==actors[0] && walks==before+1,"another slot from the same table");
+        actors[1][kDead]=1;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && walks==before+2,"none live of the slot in the table: walks (a respawn since)");
+        Check(ResolveNetRef(requester,NetLife::present,&r) && r.found && r.dead && walks==before+2,"fallen, present: from the table, its death read now");
+        actors[1][kDead]=0;
+        Check(ResolveNetRef(ids[2],NetLife::live,&r) && r.obj.obj==actors[2] && walks==before+3,"a NetId walks");
+        actors[1][0x18]=4;
+        Check(ResolveNetRef(requester,NetLife::present,&r) && !r.found && walks==before+4,"a player deleted since: walks again");
+        actors[1][0x18]=0;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+5,"none of the slot in the table: walks, found");
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+5,"then the table again");
+        frameNow=41;
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+6,"a new frame walks");
+        Put<int>(user2,0x48,0);   // its slot changed under the table
+        Check(ResolveNetRef(requester,NetLife::live,&r) && !r.found && walks==before+7,"a slot changed since: walks again");
+        Put<int>(user2,0x48,1);
+        Put<unsigned>(status,0x14FF8,3);
+        Check(ResolveNetRef(requester,NetLife::live,&r) && r.found && walks==before+8,"another world (its player count): walks");
+        Put<unsigned>(status,0x14FF8,2);frameNow=0;
     }
     Check(PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a live player's requester is its slot");
     Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[2]},again) && !again[0],"a stale reference has no requester");

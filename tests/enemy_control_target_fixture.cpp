@@ -12,6 +12,9 @@ using namespace crew::enemy_target;
 unsigned checks=0,failures=0,deletes=0,walkCalls=0,notifyCalls=0;
 bool mapReady=true,nativeSender=true,nativeIds=true;
 float mapDistance=-1.0f;
+// Fixture players: an actor named by its mission slot (net_object_ref.h), as EncodeNetRef names a player soldier.
+std::vector<std::pair<const unsigned char*,int>> playerSlots;
+unsigned resolveCalls=0;
 const void* opaque=nullptr;
 unsigned refusedSignature=0;
 std::vector<const unsigned char*> actors;
@@ -98,6 +101,35 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* id) noexcept 
     for(const auto* actor:actors)if(actor==object){std::memcpy(id,reinterpret_cast<const Actor*>(actor)->id,32);return true;}
     return false;
 }
+// net_object_resolve.h over the fixture's actors: a player by its slot, the rest by its NetId; found live (or present).
+bool EncodeNetRef(const ObjRef& object,unsigned char out[32]) noexcept {
+    std::memset(out,0,32);
+    for(const auto& p:playerSlots)if(p.first==object.obj)return netref::MakePlayer(p.second,out);
+    unsigned char id[32]{};
+    return ReadNativeObjectId(static_cast<const unsigned char*>(object.obj),id) && netref::MakeNative(id,out);
+}
+bool EncodeNetRef(const void* object,unsigned char out[32]) noexcept {return EncodeNetRef(ObjRef::Of(object),out);}
+bool Here(const unsigned char* actor,NetLife life) noexcept {
+    return !(actor[0x18]&4) && At<LONG>(At<const void*>(actor,kSelfCtrl),8)>0 && (life==NetLife::present || !actor[kDead]);
+}
+bool ResolveNetRef(const unsigned char* ref,NetLife life,NetResolved* out) noexcept {
+    ++resolveCalls;*out=NetResolved{};
+    if(netref::Classify(ref,&out->slot)==netref::Kind::invalid)return false;
+    unsigned matches=0;
+    for(const auto* actor:actors) {
+        unsigned char name[32]{};
+        if(!EncodeNetRef(ObjRef::Of(actor),name) || std::memcmp(name,ref,32) || !Here(actor,life))continue;
+        if(!matches++)out->obj=ObjRef::Of(actor);
+    }
+    if(matches==1)out->found=true;
+    else {out->obj={};out->ambiguous=matches>1;}
+    return true;
+}
+bool StillNetRef(const unsigned char* ref,NetLife life,const NetResolved& r) noexcept {
+    unsigned char name[32]{};
+    const auto* actor=static_cast<const unsigned char*>(r.obj.obj);
+    return r.found && Here(actor,life) && EncodeNetRef(r.obj,name) && !std::memcmp(name,ref,32);
+}
 bool MapRayReady() noexcept {return mapReady;}
 float MapRay(const float*,const float* to,float* hit) noexcept {if(hit)std::memcpy(hit,to,12);return mapDistance;}
 float ObjectRay(const float* from,const float* to,float* hit,std::uint32_t* body) noexcept {
@@ -115,10 +147,10 @@ int main() {
     controlled.vtable[37]=reinterpret_cast<void*>(&Serialize);controlled.network[14]=reinterpret_cast<void*>(&Send);
     Ray ray{{0,0,0},{0,0,1},6000};Selection selected{};
     CHECK(Pick(owner.Ref(),controlled.Ref(),ray,&selected));CHECK(Same(selected.actor,enemy.Ref()));CHECK(selected.lockIndex==0);
-    CHECK(selected.lock.obj==enemy.point && selected.lock.ctrl==enemy.pointCtrl);CHECK(!std::memcmp(selected.nativeId,enemy.id,32));CHECK(Valid(owner.Ref(),controlled.Ref(),ray,selected));
+    CHECK(selected.lock.obj==enemy.point && selected.lock.ctrl==enemy.pointCtrl);CHECK(!std::memcmp(selected.ref,enemy.id,32));CHECK(Valid(owner.Ref(),controlled.Ref(),ray,selected));
     // Offline actors keep real weak identity, without inventing network IDs.
     nativeIds=false;CHECK(Pick(owner.Ref(),controlled.Ref(),ray,&selected));CHECK(Same(selected.actor,enemy.Ref()));
-    CHECK(Zero(selected.nativeId));CHECK(Valid(owner.Ref(),controlled.Ref(),ray,selected));nativeIds=true;
+    CHECK(Zero(selected.ref));CHECK(Valid(owner.Ref(),controlled.Ref(),ray,selected));nativeIds=true;
     // Full native ID includes bytes24..31; low-ID equality cannot choose another actor.
     unsigned char id[32]{};std::memcpy(id,enemy.id,32);id[24]^=1;CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray,&selected));CHECK(!selected.actor);CHECK(!Canonical(id));
     std::memcpy(id,enemy.id,32);id[20]=1;CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray));CHECK(!Canonical(id));
@@ -169,6 +201,31 @@ int main() {
     // actor is outside this ray's cone, rather than selecting by iteration order.
     Actor duplicate(3,2,1000,0,100);std::memcpy(id,enemy.id,32);
     CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray,&selected));CHECK(Zero(id) && !selected.actor);duplicate.bytes[kDead]=1;
+    // An enemy player (PvP) is its mission slot on the wire, not its NetId (another on every machine): picked, it is named
+    // by its slot; a focus naming the slot finds its live player; dead, gone or two of the slot: no focus.
+    {
+        playerSlots.push_back({enemy.bytes,2});
+        unsigned char slot2[32]{};CHECK(netref::MakePlayer(2,slot2));
+        CHECK(Pick(owner.Ref(),controlled.Ref(),ray,&selected));CHECK(selected.actor.obj==enemy.bytes);
+        CHECK(!std::memcmp(selected.ref,slot2,32));CHECK(Valid(owner.Ref(),controlled.Ref(),ray,selected));
+        std::memcpy(id,slot2,32);resolveCalls=0;
+        CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray,&selected));CHECK(selected.actor.obj==enemy.bytes);
+        CHECK(!std::memcmp(id,slot2,32) && resolveCalls==1);
+        CHECK(Resolve(owner.Ref(),controlled.Ref(),slot2,ray,&selected));CHECK(selected.actor.obj==enemy.bytes);
+        // Its NetId names nothing any more: the player is found by its slot alone.
+        std::memcpy(id,enemy.id,32);CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray,&selected));CHECK(Zero(id) && !selected.actor);
+        enemy.bytes[kDead]=1;
+        CHECK(Resolve(owner.Ref(),controlled.Ref(),slot2,ray,&selected));CHECK(!selected.actor);
+        enemy.bytes[kDead]=0;
+        playerSlots.push_back({off.bytes,2});
+        CHECK(!Resolve(owner.Ref(),controlled.Ref(),slot2,ray,&selected));CHECK(!selected.actor);
+        std::memcpy(id,slot2,32);CHECK(Normalize(owner.Ref(),controlled.Ref(),id,ray,&selected));CHECK(Zero(id));
+        off.bytes[kDead]=1;   // one of the slot fallen (a body and its respawn): the live one
+        CHECK(Resolve(owner.Ref(),controlled.Ref(),slot2,ray,&selected));CHECK(selected.actor.obj==enemy.bytes);
+        off.bytes[kDead]=0;playerSlots.clear();
+        unsigned char gone[32]{};CHECK(netref::MakePlayer(7,gone));   // no player of that slot here
+        CHECK(Resolve(owner.Ref(),controlled.Ref(),gone,ray,&selected));CHECK(!selected.actor);
+    }
     // Native current/forced are saved separately, exact counts return on restore.
     ObjRef seedCurrent{},seedForced{};
     CHECK(crew::enemy_target::Store(controlled.bytes,0x518,friendActor.Ref(),seedCurrent));
@@ -220,7 +277,7 @@ int main() {
     // A retained native root and target use independent real pages. Refusing
     // any one counter or native field page must leave the entire lease intact.
     Actor pagedTarget(10,2,0,0,100);Put<void*>(pagedTarget.bytes,kSelfCtrl,pinPage);
-    Selection pageTarget{};pageTarget.actor={pagedTarget.bytes,pinPage};std::memcpy(pageTarget.nativeId,pagedTarget.id,32);
+    Selection pageTarget{};pageTarget.actor={pagedTarget.bytes,pinPage};std::memcpy(pageTarget.ref,pagedTarget.id,32);
     std::memcpy(objectPage,controlled.bytes,sizeof(controlled.bytes));Put<void*>(objectPage,kSelf,objectPage);Put<void*>(objectPage,kSelfCtrl,rootPage);
     Put<void*>(objectPage,0x518,nullptr);Put<void*>(objectPage,0x520,nullptr);Put<void*>(objectPage,0x528,nullptr);Put<void*>(objectPage,0x530,nullptr);
     NativeLease protectedLease{};CHECK(Begin(ObjRef{objectPage,rootPage},&protectedLease));CHECK(Apply(protectedLease,&pageTarget));

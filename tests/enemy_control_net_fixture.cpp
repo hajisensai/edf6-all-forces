@@ -373,8 +373,8 @@ bool EnemyControlActivate(std::uint64_t id) noexcept {
 }
 bool EnemyControlNormalizeNetworkInput(std::uint64_t id,ec::Input* input) noexcept {
     ++native.normalizeCalls;if(!input || native.leases.find(id)==native.leases.end())return false;
-    bool any=false;for(auto b:input->fullFocusId)any=any || b!=0;
-    if(any){const auto* focus=ActorById(input->fullFocusId);if(!focus || !focus->alive || !focus->registered || focus->Ref().obj==native.leases[id].source.obj || focus->Ref().obj==native.leases[id].target.obj)std::memset(input->fullFocusId,0,32);}
+    bool any=false;for(auto b:input->focusRef)any=any || b!=0;
+    if(any){const auto* focus=ActorById(input->focusRef);if(!focus || !focus->alive || !focus->registered || focus->Ref().obj==native.leases[id].source.obj || focus->Ref().obj==native.leases[id].target.obj)std::memset(input->focusRef,0,32);}
     return true;
 }
 bool EnemyControlValidateInput(std::uint64_t id,const ec::Input& input) noexcept {
@@ -828,7 +828,7 @@ void RejectNonCanonicalSizes(Room& current,const Packet& packet) {
     auto padded=packet.bytes;padded.push_back(0);attempt(padded.data(),padded.size());
 }
 void HostPoseSamplingAndAtomicDelivery() {
-    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==6 && ep::kCapability==5);
+    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==7 && ep::kCapability==5);
     CHECK(current.Request(0,5));current.Until(0,ep::Phase::beginning);
     crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==0 && PosePacketCount(current)==0);
     current.Until(0,ep::Phase::activating);crew::EnemyControlNetworkFrame();
@@ -1001,11 +1001,11 @@ void ProductionSignalBatchesRespectNativeBarriers() {
 }
 void HostNormalizesStaleFocusWithoutRevokingControl() {
     Room current(0,200);CHECK(current.PureRequest(1,2,5));current.Pump();const auto lease=current.ForSource(0,actors[2].id)->id;ec::Input input;input.absoluteAim=true;
-    std::memcpy(input.fullFocusId,actors[6].id.data(),32);unsigned char bytes[en::kInputBytes]{};CHECK(en::EncodeInput(input,bytes,sizeof(bytes)));
+    std::memcpy(input.focusRef,actors[6].id.data(),32);unsigned char bytes[en::kInputBytes]{};CHECK(en::EncodeInput(input,bytes,sizeof(bytes)));
     CHECK(current.Protocol(1).SubmitInput(lease,bytes,sizeof(bytes),now));current.Pump();
-    CHECK(native.normalizeCalls==1 && !std::memcmp(current.LastInput(0,lease).fullFocusId,actors[6].id.data(),32));
+    CHECK(native.normalizeCalls==1 && !std::memcmp(current.LastInput(0,lease).focusRef,actors[6].id.data(),32));
     actors[6].alive=false;CHECK(current.Protocol(1).SubmitInput(lease,bytes,sizeof(bytes),now));current.Pump();
-    for(unsigned node=0;node<3;++node){const auto accepted=current.LastInput(node,lease);CHECK(accepted.sequence==2 && current.Lease(node,lease)->phase==ep::Phase::active);for(auto b:accepted.fullFocusId)CHECK(!b);}
+    for(unsigned node=0;node<3;++node){const auto accepted=current.LastInput(node,lease);CHECK(accepted.sequence==2 && current.Lease(node,lease)->phase==ep::Phase::active);for(auto b:accepted.focusRef)CHECK(!b);}
     CHECK(native.normalizeCalls==2 && !native.restoreCalls);
 }
 void HostExitDrainsNativeAndWireOutboxes() {

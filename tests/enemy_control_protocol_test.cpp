@@ -102,7 +102,7 @@ Message Unpack(const Packet& p){Message m;Check(Decode(p.bytes.data(),p.bytes.si
 void Codec(){
     Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Player(10);m.spec.target=Id(100);
     std::vector<std::uint8_t> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"request codec accepts canonical native identities");
-    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==6,"explicit ECTL/version6 byte prefix");
+    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==7,"explicit ECTL/version7 byte prefix");
     Message back;Check(Decode(bytes.data(),bytes.size(),back) && back.spec.target==m.spec.target,"semantic fields roundtrip without native struct layout");
     Room r;
     for(std::size_t n=0;n<bytes.size();++n){Check(!Decode(bytes.data(),n,back),"all truncated datagrams rejected");Check(r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),n,r.now)==(n>=4),"owned malformed/truncated magic is consumed, foreign prefix is not");}

@@ -29,7 +29,8 @@ struct Input {
     float move[3]{},look[2]{};
     float aimYaw=0,aimPitch=0;
     bool absoluteAim=false;
-    unsigned char fullFocusId[32]{};
+    // The aimed-at actor's object reference (net_object_ref.h: an enemy player by its mission slot, the rest by NetId).
+    unsigned char focusRef[32]{};
     ActiveAbility active[kConcurrentAbilities]{};
     std::uint64_t sequence=0,seed=0;
 };

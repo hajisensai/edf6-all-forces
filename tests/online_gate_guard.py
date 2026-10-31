@@ -168,7 +168,8 @@ def check_damage(root: str) -> None:
     if 'unsigned char* const caller=PlayerHuman();' not in strike:
         fail("src/airstrike.cpp SupportStrikeAt: a strike must be called by this machine's player")
     barrage = code_only(read(root, 'src/barrage.cpp'))
-    if 'if(IsPlayer(caller))Tell(' not in body(barrage, 'BarrageResult BarrageStart(') or             'SenderOwns(who,puid)' not in body(barrage, 'bool ReceiveBarrageNetwork('):
+    receive = body(barrage, 'bool ReceiveBarrageNetwork(')
+    if 'IsPlayer(caller));' not in body(barrage, 'BarrageResult BarrageStart(') or             'if(tell)Tell(' not in body(barrage, 'BarrageResult Start(') or             'SenderOwns(who,puid)' not in receive or ',false);' not in receive:
         fail("src/barrage.cpp: only this machine's player's barrage is told, and a peer's only for its own player")
     support = code_only(read(root, 'src/support_dispatch.cpp'))
     dispatch = body(support, 'bool SpawnDeployment(')

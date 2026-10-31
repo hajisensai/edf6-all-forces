@@ -210,7 +210,10 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
     m.kind=kind;m.origin=origin;m.serial=++serial;m.damage=damage;
     std::memcpy(m.at,at,12);std::memcpy(m.heading,heading,12);
     bool id=false;
-    __try { id=EncodeNetRef(caller,m.caller) && netref::IsPlayer(m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
+    __try {
+        id=EncodeNetRef(caller,m.caller) && netref::IsPlayer(m.caller);
+        m.team=At<std::int32_t>(caller,kTeam);
+    } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
     unsigned char bytes[barrage_net::kWire];
     if(!id || !barrage_net::Encode(m,bytes,sizeof(bytes))) {
         Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no player of this mission's");
@@ -221,8 +224,13 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
 }
 }  // namespace
 
-BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
-    if(kind<0 || kind>=barrage::kKinds || !caller || !at || !heading || !std::isfinite(at[0]+at[1]+at[2]+heading[0]+heading[2])) {
+namespace {
+// A barrage of `kind` at `at` along `heading` for side `team` (its guided rounds' enemies), its rounds fired by `caller`
+// (their owner; nullptr: the warning alone, no rounds: a peer's barrage whose caller and side have no object here).
+// `tell`: this machine's player's own, told to every peer.
+BarrageResult Start(int kind,const unsigned char* caller,std::int32_t team,const float* at,const float* heading,float damage,
+                    bool tell) noexcept {
+    if(kind<0 || kind>=barrage::kKinds || !at || !heading || !std::isfinite(at[0]+at[1]+at[2]+heading[0]+heading[2])) {
         Log("BARRAGE not started: no kind / caller / target");
         return BarrageResult::noTarget;
     }
@@ -239,8 +247,8 @@ BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,
     Show& s=shows[i];
     s=Show{};
     s.kind=static_cast<Kind>(kind);
-    edf41c::WeakSet(s.caller,caller);
-    if(!edf41c::WeakAlive(s.caller)) {
+    if(caller)edf41c::WeakSet(s.caller,caller);
+    if(caller && !edf41c::WeakAlive(s.caller)) {
         edf41c::WeakReset(s.caller);
         Log("BARRAGE not started: its caller is gone");
         return BarrageResult::noCaller;
@@ -262,7 +270,7 @@ BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,
     Aims aims;
     if(s.kind==Kind::guided) {
         std::memcpy(aims.at,setup.target,12);
-        __try { VisitEnemiesOf(At<std::int32_t>(caller,kTeam),&SeeAim,&aims); } __except(EXCEPTION_EXECUTE_HANDLER){aims.n=0;}
+        __try { VisitEnemiesOf(team,&SeeAim,&aims); } __except(EXCEPTION_EXECUTE_HANDLER){aims.n=0;}
         setup.aims=aims.n;setup.aim=aims.pts;
         for(int a=0;a<aims.n;++a)Log("BARRAGE guided aim %d: (%.1f, %.1f, %.1f)",a,aims.pts[a][0],aims.pts[a][1],aims.pts[a][2]);
     }
@@ -273,15 +281,27 @@ BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,
     }
     s.end=barrage::EndFrame(s.rounds,s.n);
     s.start=GameFrame();
-    s.on=s.n>0;
-    if(!s.on){edf41c::WeakReset(s.caller);s.by=nullptr;}
+    s.on=s.n>0 && caller;
+    if(!s.on){if(caller)edf41c::WeakReset(s.caller);s.by=nullptr;}
     Log("BARRAGE %s at (%.0f, %.0f, %.0f): %d rounds over %.1f s, damage %.0f a round%s",barrage::kKindNames[kind],setup.target[0],
         setup.target[1],setup.target[2],s.n,static_cast<float>(s.end)/60.0f,s.damage,
         s.kind==Kind::guided ? (aims.n ? ", aimed at enemies" : ", no enemy near: round the mark") : "");
-    if(!s.on)return BarrageResult::noRounds;
+    if(!s.n)return BarrageResult::noRounds;
     WarnBarrage(kind,setup.target,heading,s.end);
-    if(IsPlayer(caller))Tell(kind,caller,at,heading,s.damage);   // this machine's player's: every peer plays it too
+    if(!caller)return BarrageResult::noCaller;   // the warning alone (a peer's barrage with nothing here to fire it)
+    if(tell)Tell(kind,caller,at,heading,s.damage);   // this machine's player's: every peer plays it too
     return BarrageResult::started;
+}
+}  // namespace
+
+BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
+    if(!caller) {
+        Log("BARRAGE not started: no kind / caller / target");
+        return BarrageResult::noTarget;
+    }
+    std::int32_t team=0;
+    __try { team=At<std::int32_t>(caller,kTeam); } __except(EXCEPTION_EXECUTE_HANDLER){return BarrageResult::noCaller;}
+    return Start(kind,caller,team,at,heading,damage,IsPlayer(caller));
 }
 
 void BarrageTick() noexcept {
@@ -322,16 +342,26 @@ bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes
         return true;
     }
     if(!heard.First(m.origin,m.serial))return true;
-    // Its rounds are fired by its caller's copy here (their damage zeroed: jet_bay.cpp ShellMake, its team the guided aims'):
-    // a barrage is its rounds alone, so without that copy (left, deleted) there is nothing of it to play.
+    // Its rounds are fired by its caller's copy here (their damage zeroed: jet_bay.cpp ShellMake, the caller is another
+    // machine's), the guided aims the sender's side's (m.team). Without that copy (left, deleted) a stand-in of its side fires
+    // them: this machine's player when it is of that side and alive, the rounds' damage zero outright (the stand-in is this
+    // machine's, whose shots would count: the hit is the caller's machine's alone). No stand-in: the warning alone, as an
+    // ultimate whose caller is not here plays its effects only.
+    const unsigned char* by=static_cast<const unsigned char*>(who.obj.obj);
+    float damage=m.damage;
+    const char* how="its caller";
     if(!who.found) {
-        Log("BARRAGE NET peer %u's barrage %08X:%u (%s): its caller is not here: not played",peer,m.origin,m.serial,
-            barrage::kKindNames[m.kind]);
-        return true;
+        by=nullptr;damage=0.0f;how="the warning alone (its caller is not here, no player of its side here)";
+        __try {
+            const unsigned char* me=PlayerHuman();
+            if(me && Readable(me,kDead+1) && !me[kDead] && At<std::int32_t>(me,kTeam)==m.team) {
+                by=me;how="a stand-in (its caller is not here: this machine's player, no damage)";
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER){by=nullptr;}
     }
-    const BarrageResult got=BarrageStart(m.kind,static_cast<const unsigned char*>(who.obj.obj),m.at,m.heading,m.damage);
-    Log("BARRAGE NET peer %u's barrage %08X:%u (%s): %s here",peer,m.origin,m.serial,barrage::kKindNames[m.kind],
-        got==BarrageResult::started ? "played" : "not played");
+    const BarrageResult got=Start(m.kind,by,m.team,m.at,m.heading,damage,false);
+    Log("BARRAGE NET peer %u's barrage %08X:%u (%s): %s here, by %s",peer,m.origin,m.serial,barrage::kKindNames[m.kind],
+        got==BarrageResult::started ? "played" : got==BarrageResult::noCaller && !by ? "warned" : "not played",how);
     return true;
 }
 void ResetBarrageNetwork() noexcept {}
