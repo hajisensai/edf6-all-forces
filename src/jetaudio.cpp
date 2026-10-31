@@ -16,6 +16,7 @@
 // one-shots from a pool of kShots, each with its filter and its ears as the jets' are.
 #include "jetaudio.h"
 #include "crew.h"
+#include "lock_cue.h"
 #include "vsynth.h"
 #include <windows.h>
 #include <xaudio2.h>
@@ -45,15 +46,15 @@ bool tried=false,ok=false,whine=true;
 std::vector<std::int16_t> roarPcm,whinePcm;
 WAVEFORMATEX roarFormat{},whineFormat{};
 struct Slot { IXAudio2SourceVoice* roar; IXAudio2SourceVoice* whine; bool used; };
-// The lock tone (LockTone): a 1 kHz sine loop, whole cycles; locked it plays at kLockedRatio steadily, locking it
-// beeps kBeepMs every kBeepSlow..kBeepFast ms as the lock closes in.
-constexpr float kToneHz=1000.0f,kLockedRatio=1.6f,kToneVolume=0.25f;
-constexpr ULONGLONG kBeepMs=70,kBeepSlow=450,kBeepFast=120,kToneStaleMs=200;
+// The lock tone (LockTone): a 1 kHz sine loop, whole cycles; what it sounds when, and for how long, lock_cue.h decides
+// (locked it plays at kLockedRatio, locking it beeps as the lock closes in; both only for the first few cues).
+constexpr float kToneHz=1000.0f,kToneVolume=0.25f;
+constexpr ULONGLONG kToneStaleMs=200;
 IXAudio2SourceVoice* lockVoice=nullptr;
 std::vector<std::int16_t> tonePcm;
 WAVEFORMATEX toneFormat{};
-ULONGLONG toneAt=0,beepFrom=0;
-int toneState=0;
+ULONGLONG toneAt=0;
+lock_cue::LockCue toneCue;
 // The threat warning (ThreatTone): the lock tone's loop on a voice of its own, lower and beeping: locked on by an
 // enemy kThreatLockRatio, kThreatLockMs on in every kThreatLockPeriod; a missile coming kThreatMissileRatio,
 // kThreatMissileMs on in every kThreatMissilePeriod; just launched, steady and warbling between kLaunchHigh and
@@ -721,7 +722,7 @@ void Warn(const Cockpit& c) noexcept {
     Callouts(c.callouts,now);
 }
 
-void LockTone(int state,float progress) noexcept {
+void LockTone(int state,float progress,const void* weapon,const void* target) noexcept {
     if(!Start())return;
     if(!lockVoice) {
         const int n=kRate/10;   // 100 ms: 100 whole cycles of kToneHz
@@ -734,23 +735,18 @@ void LockTone(int state,float progress) noexcept {
     }
     const ULONGLONG now=GetTickCount64();
     toneAt=now;
-    if(state!=toneState){toneState=state;beepFrom=now;}
-    float volume=0.0f,ratio=1.0f;
-    if(state==2){volume=kToneVolume;ratio=kLockedRatio;}
-    else if(state==1) {
-        const float p=progress<0.0f ? 0.0f : progress>1.0f ? 1.0f : progress;
-        const ULONGLONG period=kBeepSlow-static_cast<ULONGLONG>(p*static_cast<float>(kBeepSlow-kBeepFast));
-        volume=(now-beepFrom)%period<kBeepMs ? kToneVolume : 0.0f;
-    }
-    volume*=WarnGain();
-    lockVoice->SetFrequencyRatio(ratio);
+    const Config& cfg=Cfg();
+    const lock_cue::ToneOut out=lock_cue::Step(toneCue,weapon,target,state,progress,now,cfg.lockToneBeeps,
+                                               static_cast<ULONGLONG>(cfg.lockToneLockedMs));
+    const float volume=out.on ? kToneVolume*WarnGain() : 0.0f;
+    lockVoice->SetFrequencyRatio(out.ratio);
     Pan(lockVoice,volume,volume);
     lockVoice->SetVolume(1.0f);
 }
 
 void Beat(float volume) noexcept {
     const ULONGLONG now=GetTickCount64();
-    if(lockVoice && now-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneState=0;}
+    if(lockVoice && now-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneCue=lock_cue::LockCue{};}
     if(threatVoice && now-threatAt>kToneStaleMs)Pan(threatVoice,0.0f,0.0f);
     if(warnMade && now-warnAt>kToneStaleMs) {   // no aircraft flown (or the plugin off): the warnings stop
         if(hornVoice)Pan(hornVoice,0.0f,0.0f);

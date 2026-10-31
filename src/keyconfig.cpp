@@ -51,6 +51,7 @@ constexpr hudtext::Tx kSlotText[]={
     hudtext::Tx::kbSzLock,hudtext::Tx::kbSzDash,hudtext::Tx::kbSzDescend,hudtext::Tx::kbSzFunnel,hudtext::Tx::kbSzCannon,
     hudtext::Tx::kbSzMelee,hudtext::Tx::kbSzGuard,
     hudtext::Tx::kbFire3,hudtext::Tx::kbFire4,hudtext::Tx::kbFire5,hudtext::Tx::kbFire6,hudtext::Tx::kbAutoTurret,
+    hudtext::Tx::kbCruiseUp,hudtext::Tx::kbCruiseDown,
 };
 static_assert(sizeof(kSlotText)/sizeof(kSlotText[0])==static_cast<std::size_t>(kb::kSlotCount),"a label for every slot");
 constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx::kbPageVehicle,hudtext::Tx::kbPageAir,
@@ -85,6 +86,7 @@ constexpr KeyField kFields[]={
     {L"VehicleFire3Key",&Config::vehicleFire3Key},{L"VehicleFire4Key",&Config::vehicleFire4Key},
     {L"VehicleFire5Key",&Config::vehicleFire5Key},{L"VehicleFire6Key",&Config::vehicleFire6Key},
     {L"VehicleAutoTurretKey",&Config::vehicleAutoTurretKey},
+    {L"VehicleCruiseUpKey",&Config::vehicleCruiseUpKey},{L"VehicleCruiseDownKey",&Config::vehicleCruiseDownKey},
 };
 constexpr int kFieldCount=static_cast<int>(sizeof(kFields)/sizeof(kFields[0]));
 constexpr bool SameName(const wchar_t* a,const wchar_t* b) noexcept {

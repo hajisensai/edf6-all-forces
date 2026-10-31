@@ -1153,6 +1153,8 @@ HUDTEXT(kbFire4,L"Vehicle: fire key 4",L"载具：开火键 4",L"載具：開火
 HUDTEXT(kbFire5,L"Vehicle: fire key 5",L"载具：开火键 5",L"載具：開火鍵 5",L"車両：発射キー 5")
 HUDTEXT(kbFire6,L"Vehicle: fire key 6",L"载具：开火键 6",L"載具：開火鍵 6",L"車両：発射キー 6")
 HUDTEXT(kbAutoTurret,L"Vehicle: auto turrets on / off",L"载具：自动炮塔开关",L"載具：自動砲塔開關",L"車両：自動砲塔オン/オフ")
+HUDTEXT(kbCruiseUp,L"Vehicle: cruise gear up",L"载具：定速挡位升挡",L"載具：定速檔位升檔",L"車両：クルーズ段 アップ")
+HUDTEXT(kbCruiseDown,L"Vehicle: cruise gear down",L"载具：定速挡位降挡",L"載具：定速檔位降檔",L"車両：クルーズ段 ダウン")
 HUDTEXT(kbDrillLaunch,L"Drill tank: launch the drill",L"钻头战车：发射钻头",L"鑽頭戰車：發射鑽頭",L"ドリル戦車：ドリル射出")
 HUDTEXT(kbProteusMode,L"Proteus: walk / deploy",L"普罗透斯：行走/架设",L"普羅透斯：行走/架設",L"プロテウス：歩行/展開")
 HUDTEXT(kbProteusShield,L"Proteus: shield",L"普罗透斯：护盾",L"普羅透斯：護盾",L"プロテウス：シールド")

@@ -57,7 +57,7 @@ bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
     // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
     *m={};m->kind=w[0x101]==1 || w[0x101]==2 || w[0x101]==10 || w[0x101]==13 || w[0x101]==21 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
 }
-namespace audio { void LockTone(int,float) noexcept {} }
+namespace audio { void LockTone(int,float,const void*,const void*) noexcept {} }
 }
 namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
 // The game's lock (lockon.cpp), the target's height over the ground (npcai.cpp) and the enemy list (heli.cpp), as the
@@ -67,6 +67,7 @@ namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const f
 namespace crew {
 const void* lockObject=nullptr;
 const void* WeaponLockObject(const unsigned char*) noexcept { return lockObject; }
+const void* WeaponLockingObject(const unsigned char*) noexcept { return nullptr; }
 bool airTarget=false;
 bool GunnerAirTarget(const void*) noexcept { return airTarget; }
 const void* enemyObject=nullptr;

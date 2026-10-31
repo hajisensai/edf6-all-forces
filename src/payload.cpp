@@ -443,7 +443,7 @@ void Lock(unsigned char* w) noexcept {
     if(!IsStoreWeapon(w))return;   // the stock missile beeps itself
     float at[3],progress=0.0f;
     const int lock=WeaponLock(w,at,&progress);
-    audio::LockTone(lock,progress);
+    audio::LockTone(lock,progress,w,WeaponLockTarget(w,lock));
 }
 
 // Redirects belong to one live vehicle and seat; NPC and local-player seats coexist.

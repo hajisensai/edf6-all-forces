@@ -1,5 +1,6 @@
-// War Thunder's cruise gears for the stock ground vehicles (the user, 2026-10-25: 「飞机和车类改成ws调挡位和战雷一样」
-// 「车辆定速挡位吧」; ini VehicleGears): on the keyboard W shifts up a gear and S down one (held, one more a kRepeatSec),
+// (Since 2026-10-31 the gears are two keys of their own, W / S override them: Input below.)
+// War Thunder's cruise gears for the stock ground vehicles (the user, 2026-10-25:「飞机和车类改成ws调挡位和战雷一样」
+// 「车辆定速挡位吧」; ini VehicleGears): on the keyboard the cruise-up key shifts up a gear and the cruise-down key down one (held, one more a kRepeatSec),
 // R N 1 2 3 4, and the vehicle keeps going in the gear it was left in. Each forward gear below the top holds a speed, its
 // share of this vehicle's own governed top (the user, 2026-10-26: by each vehicle's real top, not its class's): the
 // native drive's top gear speed, read off the vehicle (drivegear.cpp; docs/vehicle-top-speed-re.md); the top gear is the
@@ -25,6 +26,7 @@ struct State {
     int held=0;            // the key held last frame: +1 W, -1 S, 0 none
     float heldSec=0.0f;    // how long since it shifted on it
     bool open=false;       // the drive open (under the gear's speed, not yet up to it)
+    bool blocked=false;    // W / S cancelled the cruise: the gear keys do nothing until they are let go (a press resumes it)
 };
 
 inline void Step(State& s,int key) noexcept {
@@ -42,6 +44,38 @@ inline void Shift(State& s,int key,float dt) noexcept {
     if(!key)return;
     s.heldSec+=dt;
     if(s.heldSec>=kRepeatSec){s.heldSec-=kRepeatSec;Step(s,key);}
+}
+
+// One frame of the gears' keys (the user, 2026-10-31: 「载具的档位制有些难用…建议改成战雷高度相似 因为战雷档位是单独的按键，
+// 同时优先级低于正常WASD 会被直接覆盖」). The gears are two keys of their own (`cruiseKey`: +1 the cruise-up key, -1 the
+// cruise-down key, 0 neither or both); W / S (`manual`: the seat's stick Y past the press threshold) always win: one press
+// cancels the cruise (back to N) and the keyboard's own stick goes through as the stock game reads it, no gear written.
+// Let go, it stays in N and writes nothing; the gear keys cruise again once pressed anew (a gear key held through the
+// W / S press does not count), from N up to 1st as before. True: the gear's stick is to be written this frame.
+inline bool Input(State& s,int cruiseKey,bool manual,float dt) noexcept {
+    if(manual) {
+        s.gear=kNeutral;s.open=false;s.held=cruiseKey;s.heldSec=0.0f;s.blocked=cruiseKey!=0;
+        return false;
+    }
+    if(s.blocked) {   // a gear key down since the cancel / the start / the keys' return: ignored until let go
+        if(cruiseKey!=0)return s.gear!=kNeutral;
+        s.blocked=false;s.held=0;s.heldSec=0.0f;
+    }
+    Shift(s,cruiseKey,dt);
+    return s.gear!=kNeutral;
+}
+
+// A drive that starts (boarding, another vehicle, a stale one begun again): in N, and a gear key already down then (the
+// sprint's Shift as the player gets in) is no press: it has to be let go and pressed anew.
+inline State Fresh() noexcept {
+    State s;
+    s.blocked=true;
+    return s;
+}
+// The keys are not the player's for now (the game paused, the map open, another window in front): a gear key still down
+// when they come back is no press either.
+inline void Hold(State& s) noexcept {
+    s.blocked=true;s.held=0;s.heldSec=0.0f;
 }
 
 // The native forward gear table (CarBase +0x1760, docs/vehicle-top-speed-re.md): `count` rows, the last one's speed

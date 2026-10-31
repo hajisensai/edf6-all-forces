@@ -1092,7 +1092,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     if(next && guided){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
     j.lock=guided ? WeaponLock(st[j.store].weapon,j.lockAt,&j.lockProgress) : 0;
     j.lockWeapon=guided ? st[j.store].weapon : nullptr;
-    audio::LockTone(j.lock,j.lockProgress);
+    audio::LockTone(j.lock,j.lockProgress,j.lockWeapon,j.lockWeapon ? WeaponLockTarget(j.lockWeapon,j.lock) : nullptr);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
     // Heard through warn.cpp WarnTick (from the threats Threats gathers), with every aircraft the player flies.

@@ -88,6 +88,68 @@ int main() {
             Check(b.least>=want-kBand*own-0.02f*own && b.most<=want+0.02f*own,text);
         }
     }
+    // The gears on keys of their own, W / S override them (Input): +1 the cruise-up key, -1 the cruise-down key.
+    {
+        State k;
+        Check(!Input(k,0,false,dt) && k.gear==kNeutral,"nothing pressed: N, no stick written");
+        Check(Input(k,1,false,dt) && k.gear==1,"the gear key pressed: 1st, the stick is the gear's");
+        for(int i=0;i<10;++i)Input(k,1,false,dt);
+        Check(k.gear==1,"the gear key held under kRepeatSec: still 1st");
+        for(int i=0;i<static_cast<int>(kRepeatSec/dt)+2;++i)Input(k,1,false,dt);
+        Check(k.gear==2,"the gear key held kRepeatSec: one more");
+        Input(k,0,false,dt);
+        Check(Input(k,1,false,dt) && k.gear==3,"pressed anew: 3rd");
+        Input(k,0,false,dt);Input(k,-1,false,dt);Check(k.gear==2,"the cruise-down key: down one");
+
+        // W or S in hand: back to N, false (the keys go through), whatever the gear key does at the same time.
+        Check(!Input(k,0,true,dt) && k.gear==kNeutral,"W / S pressed: the cruise is cancelled (N), not written");
+        Check(!Input(k,1,true,dt) && k.gear==kNeutral,"W / S held: the gear key does nothing");
+        Check(!Input(k,-1,true,dt) && k.gear==kNeutral,"W / S held: the cruise-down key does nothing either");
+        Check(!Input(k,0,false,dt) && k.gear==kNeutral,"W / S let go: it stays in N, nothing written");
+        for(int i=0;i<600;++i)Check(!Input(k,0,false,dt) && k.gear==kNeutral,"let go: N held, nothing written");
+        Check(Input(k,1,false,dt) && k.gear==1,"the gear key pressed again: cruise from N up to 1st");
+
+        // A gear key already down when W / S went in is not a new press when W / S are let go.
+        State h;h.gear=3;
+        Input(h,1,true,dt);
+        Check(!Input(h,1,false,dt) && h.gear==kNeutral,"a gear key held through W / S: no gear on its release of W / S");
+        for(int i=0;i<600;++i)Input(h,1,false,dt);
+        Check(h.gear==kNeutral,"...and no key repeat from it either");
+        Input(h,0,false,dt);
+        Check(Input(h,1,false,dt) && h.gear==1,"...until it is let go and pressed anew");
+
+        // A drive that starts (boarding while the sprint's Shift is down; another vehicle; a stale one): a gear key down then
+        // is no press.
+        {
+            State f=Fresh();
+            Check(f.gear==kNeutral,"a fresh drive is in N");
+            for(int i=0;i<600;++i)Check(!Input(f,1,false,dt) && f.gear==kNeutral,"started with the gear key down: no gear, however long");
+            Input(f,0,false,dt);
+            Check(Input(f,1,false,dt) && f.gear==1,"...let go and pressed anew: 1st");
+            State g2=Fresh();
+            Check(!Input(g2,0,false,dt) && Input(g2,1,false,dt) && g2.gear==1,"started with no key down: the first press shifts");
+            State d2=Fresh();
+            Check(!Input(d2,-1,false,dt) && d2.gear==kNeutral,"started with the cruise-down key down: no gear (R) either");
+        }
+        // The keys come back (pause over, the map closed, the window in front again) with a gear key still down.
+        {
+            State p;p.gear=2;
+            Hold(p);
+            Check(Input(p,1,false,dt) && p.gear==2,"keys back with the gear key down: the gear held, not shifted");
+            for(int i=0;i<600;++i)Input(p,1,false,dt);
+            Check(p.gear==2,"...and no key repeat");
+            Input(p,0,false,dt);
+            Check(Input(p,1,false,dt) && p.gear==3,"...let go and pressed anew: shifts");
+            State q;q.gear=2;Hold(q);
+            Check(Input(q,0,false,dt) && q.gear==2 && !q.blocked,"keys back with none down: the gear goes on");
+        }
+
+        // From R / the top gear W / S cancels the same way.
+        State r2;r2.gear=kReverse;
+        Check(!Input(r2,0,true,dt) && r2.gear==kNeutral,"in R: W / S cancels to N");
+        State t;t.gear=kTopGear;
+        Check(!Input(t,0,true,dt) && t.gear==kNeutral && !t.open,"in the top gear: W / S cancels to N");
+    }
     std::printf("drive_gear: %d checks passed\n",checks);
     return 0;
 }
