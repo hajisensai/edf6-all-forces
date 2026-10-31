@@ -33,6 +33,9 @@ void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC
 // Checks only (no patch): the flight's own code, and which of avoidance, the water probe, the rescue's seat
 // reach and board button and the delete of called helis can be used. False: no heli is flown.
 bool CheckHeliProfile() noexcept;
+// The shot entry 0x696FD0's hook (every round of every weapon class tells FirstPersonShot after it), by its own prologue
+// check, not the heli profile: the first person installs it. The medic work in it waits for CheckHeliProfile.
+bool InstallShotEntry() noexcept;
 bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door guns (their weapon-user hook)
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;

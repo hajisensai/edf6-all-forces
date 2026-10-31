@@ -3,10 +3,12 @@
 // A flash class's constructor reads its look from the weapon's SGO list MuzzleFlash_CustomParameter, handed over in the
 // flash's parameter block (weapon+0x488) at +0x40 (= weapon+0x4C8): a document handle {doc, node index} (variant tag 2,
 // 0x68DBE5). Each element is read by index (0x52DE0) and turned into a double (0x52F50) inside the constructor: the
-// sizes become the geometry of its beams (0x2C0AE0 / 0x2BD720) and the colour its tint; neither is read from the flash's
-// matrix afterwards, so the viewmodel's shrink never reached them (the flash drawn at the shrunk muzzle stayed full size:
-// 1/FirstPersonScale times the gun's apparent size). The plugin scales those elements for the one construction and puts
-// the bytes back right after (Edit / Restore).
+// sizes become the geometry of its beams (0x2C0AE0 / 0x2BD720) or sprite and the colour its tint. That geometry is drawn
+// through the flash's world matrix (flash+0x60, copied from its borrowed matrix: in first person shot·T, the viewmodel's
+// scale included), so it already shrinks with the gun as drawn and keeps the third person's proportion to it; the first
+// pass, a light at the matrix's position row, takes only the colour. The first person's flash is smaller and dimmer
+// only by these elements: the caller scales the sizes by FirstPersonFlashScale and the colour by FirstPersonFlashBright
+// for the one construction and puts the bytes back right after (Edit / Restore).
 // The document (H, 0x52DE0 / 0x52E50 / 0x52F50): an override map [doc+0x08] (u32 per node, -1 none; count doc+0x18) into
 // 40-byte override slots [doc+0x28]; the loaded file [doc+0x50]: nodes 16 bytes at file + i32 [file+0xC] + index*16
 // {u64 value, u32 type} (pylib/dsgo.py: type 0 a double, 3 a container whose block at node + value holds the count at

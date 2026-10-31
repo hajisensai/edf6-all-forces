@@ -216,7 +216,9 @@ inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* gri
 // animation's departure from R0 is then shown, arms and weapon through the same T (the hand stays on the grip). The
 // hold lasts kShotHoldFrames after the latest shot (the native fire state +0xBD4 is 1 only on the shot's own frame,
 // fp-soldier-re.md §4, so it cannot say when the animation ends), then eases back to the per-frame anchor over
-// kShotBlendFrames. A reload or a switch releases it at once (eased: the reload is anchored per frame).
+// kShotBlendFrames. Nothing else cuts it short: the reload that an emptying round starts (+0xBD4 3) begins while the
+// firing animation still runs (live 2026-10-31: Goliath D1's launcher 70 deg up, state 3 from the 20th step of 24), so
+// the hold keeps running to its end and the reload after it is anchored per frame again. A weapon switch drops it (firstperson.cpp).
 struct ShotHold {
     M4 last{},rest{};    // the root in the aim frame: the last camera step's, and R0 the hold shows the shot from
     bool lastOk=false;
@@ -235,20 +237,19 @@ inline M4 BlendFrames(const M4& a,const M4& b,float t) noexcept {
 }
 
 // One camera step of hand `s`: `weapon` its root as it will be drawn, `aim` the soldier's aim frame, `shot` a round of
-// that weapon left since the last step (0x696FD0, every weapon class's one shot entry), `release` the hold must end (a
-// reload has begun). `anchor` is what AnchoredTransform anchors on: `weapon` itself whenever no shot is being shown.
+// that weapon left since the last step (0x696FD0, every weapon class's one shot entry). `anchor` is what AnchoredTransform anchors on: `weapon` itself whenever no shot is being shown.
 // True while the anchor is not `weapon` (holding or easing back). A degenerate frame drops the hold.
-inline bool ShotAnchor(ShotHold& s,const M4& weapon,const M4& aim,bool shot,bool release,M4* anchor) noexcept {
+inline bool ShotAnchor(ShotHold& s,const M4& weapon,const M4& aim,bool shot,M4* anchor) noexcept {
     *anchor=weapon;
     M4 a,w,inv,local;
     if(!Orthonormal(aim,&a) || !Orthonormal(weapon,&w) || !InverseAffine(a,&inv)){s=ShotHold{};return false;}
     local=Mul(w,inv);
-    if(shot && !release) {
+    if(shot) {
         // A shot from rest takes R0 from the step before (this step's pose may already be the kick's first frame); one
         // during the hold or its easing back keeps the R0 it has.
         if(!s.holding && s.blend==0)s.rest=s.lastOk ? s.last : local;
         s.holding=true;s.frames=kShotHoldFrames;s.blend=0;
-    } else if(s.holding && (release || --s.frames<=0)) {
+    } else if(s.holding && --s.frames<=0) {
         s.holding=false;s.frames=0;s.blend=kShotBlendFrames;
     }
     bool moved=false;

@@ -134,10 +134,10 @@ print('the shot entry: five callers, the fire classes reach it, the flash parame
 # class's constructor; the constructors read MuzzleFlash_CustomParameter at the parameter block's +0x40 (= weapon+0x4C8,
 # a document handle: tag 2, 0x68DBE5) and fp_flash.h scales the elements of these indices.
 factories=re.findall(r'\{(0x[0-9A-F]+),"(\w+)",(?:&fpflash::k(\w+)|nullptr)\}',re.search(r'kFlashFactories\[\]=\{(.*?)\n\};',source,re.S).group(1))
-assert len(factories)==9,factories
+assert len(factories)==10,factories
 ctor={'MuzzleFlash01':0x2BEC90,'MuzzleFlash02':0x2BFE60,'LaserMuzzleFlash02':0x2BBE90,'LaserMuzzleFlash01':0x2BB300,
       'LaserMuzzleFlash03':0x2BD9B0,'EfsMuzzleFlash':0x2BA6D0,'MuzzleFlashRailGun':0x2C0F90,'PileBunkerMuzzleFlash01':0x2C2640,
-      'TestMuzzleFlash':0x2C3710}
+      'TestMuzzleFlash':0x2C3710,'MuzzleSmoke01':0x2C1BB0}
 for vt,name,layout in factories:
     vt=int(vt,16)
     assert rtti(vt)=='.?AVFactory@'+name+'@@',(name,rtti(vt))

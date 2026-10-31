@@ -225,7 +225,7 @@ hook 0x6BF9F0(model, ctx, pass, view):
 - 工厂：类对象 vtable 为 `Factory@X`，slot 2 生成。`MuzzleFlash01` `0x17A63F8` → ctor `0x2BEC90`；`MuzzleFlash02` `0x17A64F8` → `0x2BFE60`；
   `LaserMuzzleFlash02` `0x17A61E8` → `0x2BBE90`；`LaserMuzzleFlash01` `0x17A60D0` → `0x2BB300`；`LaserMuzzleFlash03` `0x17A6308` → `0x2BD9B0`；
   `EfsMuzzleFlash` `0x17A6000` → `0x2BA6D0`；`MuzzleFlashRailGun` `0x17A65F8` → `0x2C0F90`；`PileBunkerMuzzleFlash01` `0x17A6808` → `0x2C2640`；
-  `TestMuzzleFlash` `0x17A6900` → `0x2C3710`。另有 `MuzzleSmoke01`（vtable `0x17A6778`，ctor `0x2C1BB0`，火箭筒用）不在 `kFlashFactories`，不挪也不改。
+  `TestMuzzleFlash` `0x17A6900` → `0x2C3710`。另有 `MuzzleSmoke01`（工厂 `0x17A66F8`，对象 vtable `0x17A6778`，ctor `0x2C1BB0`，火箭筒的烟，实机 Goliath D1 见到）：`kFlashFactories` 里只登记名字（日志用、无布局），不在 `flashClasses`，不挪也不改。
 - 布局（构造函数按元素序号读，见 audit 的立即数）：`MuzzleFlash01/02`、`LaserMuzzleFlash02` 为「光束」：[1] 光束长、[2] 宽、[5] 辐条长、[6] 辐条宽、[8] 颜色 vec4；
   `LaserMuzzleFlash01/03` 为「精灵」：[1] 尺寸、[2] 颜色。Root.cpk 里用这 5 类的 420 把原版武器都符合（`V_FUEL01` 的 MF02 列表为空，不生成）。
   其余 4 类布局未核实，第一人称保持原版并记一行日志。

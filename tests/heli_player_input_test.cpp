@@ -123,17 +123,23 @@ void __fastcall StockMedicShot(unsigned char* weapon,unsigned muzzle,void* overr
 }
 
 void CheckMedicPermission() {
-    Check(!InstallMedicPermission() && !medicShotNext,"unknown shot signature leaves hook off");
+    Check(!InstallShotEntry() && !medicShotNext,"unknown shot signature leaves hook off");
     std::memcpy(image+kMedicShot,kMedicShotSig,sizeof(kMedicShotSig));
-    Check(InstallMedicPermission() && InstallMedicPermission(),"matching shot installs once");
+    // The first person installs the entry on its own check, before or without the heli profile (medicOn false).
+    Check(!medicOn && InstallShotEntry() && InstallMedicPermission(),"matching shot installs once, without the heli profile");
     auto* trampoline=reinterpret_cast<unsigned char*>(medicShotNext);
     Check(std::memcmp(trampoline,kMedicShotSig,sizeof(kMedicShotSig))==0,"trampoline copies complete 15-byte prologue");
     Check(At<const void*>(trampoline,sizeof(kMedicShotSig)+6)==image+kMedicShot+sizeof(kMedicShotSig),"trampoline resumes at instruction boundary");
     medicShotNext=&StockMedicShot;
     Put<const void*>(medicWeapon,0x120,inputVehicle);Put<const void*>(inputVehicle,0,image+kVt410);
     Put<float>(medicWeapon,kWeaponDamage,-150.0f);
-    // Invoke the installed entry, including the fifth (stack) replay argument.
     inputConfig.enabled=false;inputConfig.medicGunnerAim=false;
+    medicWeapon[kWeaponFriendlyDamage]=0;
+    reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,nullptr,&shotCounter,false);
+    Check(shotCalls==1 && shotPermission==0 && firstPersonShots==1,
+          "without the heli profile the entry still tells the first person, its medic work off");
+    shotCalls=0;firstPersonShots=0;medicOn=true;
+    // Invoke the installed entry, including the fifth (stack) replay argument.
     for(bool replay:{false,true}) {
         medicWeapon[kWeaponFriendlyDamage]=0; // RideAi or subsequent mission script cleared it.
         reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
@@ -175,7 +181,7 @@ void CheckMedicPermission() {
     Check(medicWeapon[kWeaponFriendlyDamage]==0,"missing owner is unchanged");
     RestoreMedicPermission(nullptr);
     inputConfig.enabled=true;inputConfig.medicGunnerAim=true;
-    VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;
+    VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;medicOn=false;
 }
 // Production HeliFrame with one of the plugin's jets whose seats are all empty: a launched drone (JetFliesItself) is
 // flown (JetFrame), as an NPC-piloted jet is; a crewed one with no pilot is not (it waits for its real crew).
