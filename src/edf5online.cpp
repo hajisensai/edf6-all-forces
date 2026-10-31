@@ -49,6 +49,14 @@
 // AngelScript's (0x1DC544) gives back an empty player: 0x591130 returns null for an index no user stands at, or one the
 // game's online player records do not take (0x5959E1 `cmp edi, 4`, widened by EDF6Coop's Extend=1). The call is given
 // an empty record then, which 0x22AB90 takes its own empty path on (0x22ACDC -> 0x22AEF2).
+// Its online registration (2026-10-31, an EDF4.1 pack mission online: the guest never saw the host move) gives every
+// player the same network id: 0x22B045 calls 0x7834F0 with the script's position (0x10AC6E0: the process's instruction
+// pointer less its code base, one CreatePlayer for all of them), and 0x7772D0 makes the id of that alone (it stores
+// edx, not the index in r8d). The room keeps its objects in maps keyed by the id (0x75B780: +0x120, the ones the state
+// sync 0x75D2E0 walks, and +0xC0) and assigns over a key it has, so the last player registered is the only one left:
+// on the host the guest's copy, not the host's own, which then sends nothing; on the guest its own, which goes on
+// sending to a host whose entry for that id is that guest's copy. The call is given an id of the player's index
+// (kPlayerNetId | index), the same on every machine and out of the script positions' range (code offsets).
 // More than four only where every machine creates them (edf5online_room.h): EDF6Coop 2.5.0's BvmPlayerTableHooks here
 // and every mission player's machine telling the room it runs this; otherwise every one creates four, and says why.
 #include "crew.h"
@@ -106,6 +114,9 @@ const unsigned char kRowIndexCode[]={0x89,0x9C,0x37,0x68,0x01,0x00,0x00};
 // 0x22AC29: mov rdx,r9; mov ecx,r13d; call 0x591130 - the one creation's online player object.
 constexpr unsigned kObjectAt=0x22AC29,kObjectCall=0x22AC2F,kOnlineObject=0x591130;
 const unsigned char kObjectCode[]={0x49,0x8B,0xD1,0x41,0x8B,0xCD,0xE8,0xFC,0x64,0x36,0x00};
+// 0x22B045: call 0x7834F0 - its online registration (r9d the script's position, [rsp+0x20] r13d the index).
+constexpr unsigned kRegisterCall=0x22B045,kRegister=0x7834F0;
+constexpr std::uint32_t kPlayerNetId=0x80000000;   // a player's network id: this | its mission index
 
 // The table's readers. 0x21F380 (r15 the BVM object, r12 the loop's player): 0x21F3C2 lea r8,[r12+r12*2]; xorps
 // xmm0,xmm0 - the row (r15 + r8*8 + 0x168) of each pass (0x21F8D2 loops back to it); 0x21F3C9 movdqu [rsp+0x30],xmm0;
@@ -174,6 +185,10 @@ DeleteFn freeFn=nullptr;   // the game's delete; tests/edf5_online_native_test.c
 // null when the game makes none. Set at install; the test points it at its own.
 using OnlineObjectFn=void*(__fastcall*)(int,const void*,int);
 OnlineObjectFn onlineObject=nullptr;
+// 0x7834F0(rcx the room's owner, rdx the player's weak_ptr, r8b a copy (pad -1), r9d the id's seed, [rsp+0x20] the
+// index, [rsp+0x28] a float): the online registration. Set at install.
+using RegisterFn=void*(__fastcall*)(void*,void*,bool,std::uint32_t,std::int32_t,float);
+RegisterFn registerFn=nullptr;
 // What 0x22AB90 gets for none: a record whose control block (+0x30) is null, so it locks nothing, casts null
 // (0x22AC7F) and returns an empty player (0x22ACDC -> 0x22AEF2). Read only.
 alignas(16) const unsigned char kNoOnlineObject[0x40]{};
@@ -325,6 +340,12 @@ void* __fastcall Edf5BvmOnlineObject(int index,const void* matrix,int mode) {
                            "online records do not take): an empty player, as AngelScript's creation makes",index);
     noObjectLogged=true;
     return const_cast<unsigned char*>(kNoOnlineObject);
+}
+
+// The patched 0x22B045: the registration with an id of the player's index (0x22AFDE has skipped a negative one).
+// Not noexcept, as above.
+void* __fastcall Edf5BvmRegisterPlayer(void* owner,void* made,bool copy,std::uint32_t,std::int32_t index,float f) {
+    return registerFn(owner,made,copy,kPlayerNetId|static_cast<std::uint32_t>(index),index,f);
 }
 
 // --- The plugin's rows (game thread: the BVM executor and the BVM object's destructor)
@@ -545,7 +566,7 @@ struct Stubs {
     unsigned char code[0x800];
     std::size_t size=0;
     std::size_t normalize=0,layoutAt=0,row=0,rowIndex=0,guide=0,first=0,area=0;
-    std::size_t object=0,get=0,wait=0,set=0,flag11=0,flag7=0,rowsGone=0;
+    std::size_t object=0,reg=0,get=0,wait=0,set=0,flag11=0,flag7=0,rowsGone=0;
     void Bytes(std::initializer_list<unsigned char> bytes) noexcept {for(unsigned char b:bytes)code[size++]=b;}
     void Imm64(std::uint64_t value) noexcept {std::memcpy(code+size,&value,8);size+=8;}
     void Imm32(std::uint32_t value) noexcept {std::memcpy(code+size,&value,4);size+=4;}
@@ -634,6 +655,7 @@ void BuildStubs(Stubs& s) noexcept {
     s.JumpTo(reinterpret_cast<const void*>(&AreaHook));
     // The redirected calls' thunks.
     s.object=s.size;s.JumpTo(reinterpret_cast<const void*>(&Edf5BvmOnlineObject));
+    s.reg=s.size;s.JumpTo(reinterpret_cast<const void*>(&Edf5BvmRegisterPlayer));
     s.get=s.size;s.JumpTo(reinterpret_cast<const void*>(&GetHook));
     s.wait=s.size;s.JumpTo(reinterpret_cast<const void*>(&WaitHook));
     s.set=s.size;s.JumpTo(reinterpret_cast<const void*>(&SetHook));
@@ -690,7 +712,7 @@ bool InstallEdf5Online() noexcept {
                       {kAreaKeep,kAreaKeepCode,sizeof(kAreaKeepCode)},{kAreaRows,kAreaRowsCode,sizeof(kAreaRowsCode)},
                       {kAreaArgs,kAreaArgsCode,sizeof(kAreaArgsCode)},{kRowsGoneArgs,kRowsGoneCode,sizeof(kRowsGoneCode)}};
     struct Call { unsigned rva,target; };
-    const Call calls[]={{kPreloadCall,kBvmPreload},{kObjectCall,kOnlineObject},{kGetCall,kGet},{kWaitCall,kWait},
+    const Call calls[]={{kPreloadCall,kBvmPreload},{kObjectCall,kOnlineObject},{kRegisterCall,kRegister},{kGetCall,kGet},{kWaitCall,kWait},
                         {kSetCall,kSet},{kFlag11Call,kFlag11},{kFlag7Call,kFlag7},{kAreaCall,kAreaInit},
                         {kRowsGoneCall,kVectorDtor}};
     bool known=true;
@@ -730,6 +752,7 @@ bool InstallEdf5Online() noexcept {
     };
     call(kPreloadCall,image+kAsPreload);
     call(kObjectCall,page+stubs.object);
+    call(kRegisterCall,page+stubs.reg);
     call(kRowsGoneCall,page+stubs.rowsGone);
     call(kGetCall,page+stubs.get);
     call(kWaitCall,page+stubs.wait);
@@ -759,6 +782,7 @@ bool InstallEdf5Online() noexcept {
         return false;
     }
     onlineObject=reinterpret_cast<OnlineObjectFn>(image+kOnlineObject);
+    registerFn=reinterpret_cast<RegisterFn>(image+kRegister);
     std::size_t written=0;
     while(written<count && writeCode(writes[written].rva,writes[written].bytes,writes[written].size))++written;
     if(written<count) {
@@ -767,13 +791,14 @@ bool InstallEdf5Online() noexcept {
         while(written>0){--written;restored=writeCode(writes[written].rva,writes[written].was,writes[written].size) && restored;}
         if(restored)VirtualFree(page,0,MEM_RELEASE);   // kept if a site could not be put back: it may still jump there
         onlineObject=nullptr;
+        registerFn=nullptr;
         Log("HOOK edf5 online=0 (EDF+0x%X not writable: %s)",failed,
             restored ? "every site written put back, nothing left patched" : "A SITE COULD NOT BE PUT BACK, its stubs kept");
         return false;
     }
     ready=true;
     Log("HOOK edf5 online=1 (EDF5 scripts online: PreloadPlayerResource is AngelScript's, CreatePlayer creates the session's "
-        "players; past the loop's %u, up to %u, only with EDF6Coop 2.5.0+'s BvmPlayerTableHooks (EDF+0x21F3CF/0x222761/"
+        "players, each registered online under its own network id; past the loop's %u, up to %u, only with EDF6Coop 2.5.0+'s BvmPlayerTableHooks (EDF+0x21F3CF/0x222761/"
         "0x228AED/0x22A685) in place and every member running this build (EDF6Coop member attribute EDF6X_BVMPLAYERS): placed "
         "as EDF6Coop places AngelScript's, in the script's player table for its route guide, area waits and per-player "
         "natives; else four everywhere)",kBvmPlayerSlots,kBvmPlayerCapacity);
