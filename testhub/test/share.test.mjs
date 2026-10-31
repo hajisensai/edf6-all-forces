@@ -150,12 +150,12 @@ test('published: manifest, Range reads of a part, and the whole file stream', as
   assert.deepEqual(new Uint8Array(await whole.arrayBuffer()), zip);
 });
 
-test('a new publish keeps the one before it and deletes older ones, in its own slot only', async () => {
+test('a new publish deletes the other versions of its slot', async () => {
   const e = env();
   assert.equal((await share(e, zipOf(2000), 'm1', 1000, 'models.zip', 'models')).status, 200);
   for (const v of ['v1', 'v2', 'v3']) assert.equal((await share(e, zipOf(3000), v, 1000)).status, 200);
   const versions = new Set([...e.FILES.objects.keys()].map((k) => k.split('/').slice(1, 3).join('/')));
-  assert.deepEqual([...versions].sort(), ['main/latest.json', 'main/v2', 'main/v3', 'models/latest.json', 'models/m1']);
+  assert.deepEqual([...versions].sort(), ['main/latest.json', 'main/v3', 'models/latest.json', 'models/m1']);
   assert.equal((await (await call(e, '/share/main/manifest.json')).json()).version, 'v3');
   assert.equal((await (await call(e, '/share/models/manifest.json')).json()).name, 'models.zip');
   const data = zipOf(10);

@@ -11,8 +11,8 @@
 //
 // Public paths: /share/<slot>/manifest.json (rolling, no-store), /share/<slot>/<version>/part-NNN (Range, immutable)
 // and /share/<slot>/<version>/file (all parts as one stream, for download managers and browsers without the save
-// dialog). A publish keeps the slot's previous version, so a download started before it still finishes; older ones
-// are deleted.
+// dialog). A publish deletes every other version of the slot (R2 space): a download of the old one still running
+// fails, and the page offers the new one on reload.
 import { HttpError, body } from './http.js';
 
 export const SLOTS = ['main', 'models'];
@@ -193,16 +193,13 @@ export async function publishShare(request, env) {
     published_at: Date.now(),
   };
   const text = JSON.stringify(manifest);
-  const prev = await env.FILES.get(`${dir}/latest.json`);
-  const prevVersion = prev ? JSON.parse(await new Response(prev.body).text()).version : '';
   await env.FILES.put(`${dir}/${version}/manifest.json`, text, { httpMetadata: { contentType: 'application/json' } });
   await env.FILES.put(`${dir}/latest.json`, text, { httpMetadata: { contentType: 'application/json' } });
-  const removed = await pruneShare(env, dir, new Set([version, prevVersion]));
+  const removed = await pruneShare(env, dir, new Set([version]));
   return { slot, version, name, size_bytes: sizeBytes, parts: parts.length, removed };
 }
 
-// Every version of the slot but the kept ones (the new one and the one it replaced) leaves R2, uploads left half way
-// included.
+// Every version of the slot but the kept one (the new one) leaves R2, uploads left half way included.
 async function pruneShare(env, dir, keep) {
   const removed = [];
   let cursor;

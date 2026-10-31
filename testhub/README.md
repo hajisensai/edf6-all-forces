@@ -94,4 +94,4 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 
 发布：`python tools/testhub.py share <zip> --slot main|models [--notes TEXT]`（开发者账号）。每片上传时带 SHA-256，由 R2 校验；
 已存在且哈希相同的片会跳过，中断后原样重跑即可。最后一步 publish 核对分片首尾相接、大小与哈希，再切换该槽位的 `latest.json`；
-每个槽位保留上一版（正在下载的人不受影响），更早的版本删除。
+每个槽位只留这一版，旧版本全部删除（省 R2 空间；正在下载旧版的人会中断，刷新页面拿新版）。
