@@ -185,15 +185,15 @@ int main() {
     Current().viewOk[0]=true;Current().view[0]=fpview::Identity();
     float flashMatrix[16]{};flashMatrix[0]=flashMatrix[5]=flashMatrix[10]=flashMatrix[15]=1;
     Put<float>(weapon,kFireRecoil,.075f);Current().shots[0]=0;
-    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);Shot(weapon);}   // the round's flash, then the entry's hook
     int reload=0;
     fpmotion::Cue firing{};Hand(weapon,0,0,0,firing,&reload);
-    check(firing.shots==2 && firing.recoil>=.3f,"actual shot events drive recoil even when the sampled counter does not advance");
+    check(firing.shots==2 && firing.recoil>=.3f,"actual shot events (the shot entry, each round once with its flash) drive recoil even when the sampled counter does not advance");
     firing=fpmotion::Cue{};Hand(weapon,0,0,0,firing,&reload);
     check(firing.shots==0,"shot events are consumed once");
-    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);Shot(weapon);}   // the round's flash, then the entry's hook
     firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing,&reload);
-    check(firing.shots==2,"counter and flash observations of the same shots are not double counted");
+    check(firing.shots==2,"the counter and the shot entry's rounds of the same shots are not double counted");
     check(reload==0,"no reload while the weapon fires");
     // The reload is the game's own frames left (+0xE68) while the state is 3 (the animation) or 4 (its _finish).
     const auto reloadIn=[&](int state,int left) {
