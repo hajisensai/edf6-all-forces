@@ -1,4 +1,5 @@
 #include "command_protocol.h"
+#include "net_object_ref.h"
 #include <cmath>
 #include <cstring>
 namespace crew::command_net {
@@ -50,16 +51,18 @@ bool CanonicalId(const unsigned char* id,bool allowEmpty) noexcept {
     if(!id)return false;for(unsigned i=20;i<24;++i)if(id[i])return false;return allowEmpty || !Empty(id);
 }
 bool ValidRequest(const Request& r,std::uint32_t version) noexcept {
+    // The requester: a player's reference (net_object_ref.h); the units: NPCs by their NetId; the focus: any object's (a
+    // player's too: an enemy player in PvP).
     if(!Compatible(version) || !r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder ||
-       !CanonicalId(r.requester))return false;
+       !netref::IsPlayer(r.requester))return false;
     if(r.flags&~kQueued)return false;
     if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
     if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) : r.command.param!=0)return false;
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
-    if(r.command.order==mapcmd::Order::focus) {if(!CanonicalId(r.focus) || !std::memcmp(r.focus,r.requester,32))return false;}
+    if(r.command.order==mapcmd::Order::focus) {if(!netref::Valid(r.focus,false) || !std::memcmp(r.focus,r.requester,32))return false;}
     else if(!Empty(r.focus))return false;
     for(std::uint32_t i=0;i<r.count;++i) {
-        if(!CanonicalId(r.units[i]) || !std::memcmp(r.units[i],r.requester,32) ||
+        if(!netref::ValidNative(r.units[i],false) || !std::memcmp(r.units[i],r.requester,32) ||
            (!Empty(r.focus) && !std::memcmp(r.units[i],r.focus,32)))return false;
         for(std::uint32_t j=0;j<i;++j)if(!std::memcmp(r.units[i],r.units[j],32))return false;
     }

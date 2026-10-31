@@ -185,6 +185,10 @@ struct Show {
     edf41c::WeakRef caller{};
     const unsigned char* by=nullptr;
     bool live=false;
+    // The caller's reference on the wire (net_object_ref.h: its slot), taken when the show began: every message of the
+    // show carries it, the caller fallen or gone or not; a remote show's follow / stop go by its key and this slot.
+    unsigned char callerRef[32]{};
+    int callerSlot=-1;
     float at[3]{};           // the centre, on the ground
     float damage=0.0f;       // the weapon's (+0x89C), shared out below
     std::uint64_t seed=0;
@@ -543,16 +547,17 @@ bool ShowRoundsReady() noexcept {
 }
 
 // ---- online (ultimate_net_protocol.h) ----
-// The caller's native ID for a message, or false (the caller has none: nobody else can find it).
+// The show's message, its caller the reference taken when it began (Show::callerRef), or false (the caller had none: no
+// player of this mission's, nobody else would find it).
 bool Message(const Show& s,ultimate_net::Kind kind,ultimate_net::Msg& m) noexcept {
     m=ultimate_net::Msg{};
     m.kind=kind;m.origin=s.key.origin;m.serial=s.key.serial;
     m.frame=s.done<0 ? 0 : s.done>kAfterEnd ? kAfterEnd : s.done;
     m.seed=s.seed;m.damage=s.damage;
     std::memcpy(m.at,s.at,12);std::memcpy(m.plane,s.plane,sizeof(m.plane));
-    bool ok=false;
-    __try { ok=s.live && PlayerRequesterOf(s.by,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}   // its mission slot
-    return ok;
+    if(!netref::IsPlayer(s.callerRef))return false;
+    std::memcpy(m.caller,s.callerRef,32);
+    return true;
 }
 // This machine's show `s` to every peer that has the channel (or to `peer` alone).
 void Send(Show& s,ultimate_net::Kind kind,std::uint32_t peer=0) noexcept {
@@ -702,6 +707,12 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
     for(int c=0;c<kGroundCircles;++c)plane[c]=CirclePlane(centre,c);
     Show& s=Begin(i,false,k,caller,centre,plane,damage,seed,0);
     s.done=-1;
+    // Its caller's reference for the peers, taken now (a fallen caller's too: its slot), kept for the show's every message.
+    __try {
+        if(!EncodeNetRef(caller,s.callerRef) || !netref::IsPlayer(s.callerRef,&s.callerSlot)) {
+            std::memset(s.callerRef,0,32);s.callerSlot=-1;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){std::memset(s.callerRef,0,32);s.callerSlot=-1;}
     const float* const by=reinterpret_cast<const float*>(caller+0x90);   // its position (the matrix's last row)
     Log("ULTIMATE show %08X:%u at (%.0f,%.0f,%.0f), %.0f m from the caller, damage %.0f seed %016llX (%d playing): charge %d, "
         "storm %d, cannon %d, after %d frames",k.origin,k.serial,s.at[0],s.at[1],s.at[2],std::hypot(by[0]-s.at[0],by[2]-s.at[2]),
@@ -779,17 +790,18 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
         if(netLogs++<16)Log("ULTIMATE NET peer %u: a message that does not read (%zu bytes): dropped",peer,size);
         return true;
     }
-    // The caller must be the sender's own player (a peer never starts a show for another machine's); a dead one too (a
-    // show plays on after its caller fell).
-    MarkIdentities ids{};
+    // The caller must be the sender's own player (a peer never starts a show for another machine's): found here, fallen too
+    // (a show plays on after its caller fell), by its PUID; not here (left, deleted), by its slot's member (SenderOwns).
+    NetResolved who{};
     bool sender=false;
-    __try { sender=SenderIsPlayer(m.caller,puid,&ids,true); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
-    if(!sender || !ids.player.obj) {
+    __try { sender=ResolveNetRef(m.caller,NetLife::present,&who) && SenderOwns(who,puid); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
+    if(!sender) {
         if(netLogs++<16)Log("ULTIMATE NET peer %u: show %08X:%u names a caller that is not its sender's player: dropped",peer,m.origin,m.serial);
         return true;
     }
     const Key k{m.origin,m.serial};
-    const unsigned char* const caller=static_cast<const unsigned char*>(ids.player.obj);
+    // Found: its rounds fired by it (their damage zeroed here: jet_bay.cpp ShellMake); not here: the looks alone.
+    const unsigned char* const caller=who.found ? static_cast<const unsigned char*>(who.obj.obj) : nullptr;
     switch(table.Receive(k,m.kind==ultimate_net::Kind::end)) {
     case Act::none: break;
     case Act::begin: {
@@ -803,6 +815,8 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
         const int from=StartFrame(m.frame);
         Show& s=Begin(i,true,k,caller,m.at,m.plane,m.damage,m.seed,from);
         s.done=-1;   // its first tick plays frame 0 on, or seeks when the caller is past kMostCatchUp already
+        std::memcpy(s.callerRef,m.caller,32);s.callerSlot=who.slot;
+        if(!caller)Log("ULTIMATE NET peer %u's show %08X:%u: its caller is not here: its looks alone",peer,k.origin,k.serial);
         Log("ULTIMATE NET peer %u's show %08X:%u (%s at frame %d) at (%.0f,%.0f,%.0f), seed %016llX: played here from frame %d",
             peer,k.origin,k.serial,m.kind==ultimate_net::Kind::start ? "started" : "heard",m.frame,m.at[0],m.at[1],m.at[2],
             static_cast<unsigned long long>(m.seed),from);
@@ -811,7 +825,7 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     case Act::follow: {
         const int i=table.Find(k);
         Show& s=shows[i];
-        if(!s.remote || s.by!=caller)break;   // not this caller's show (a key of this machine's own, another caller's)
+        if(!s.remote || s.callerSlot!=who.slot)break;   // not this caller's show (a key of this machine's own, another caller's)
         table.SetPeer(i,peer);
         if(Behind(s.done,m.frame)) {
             s.seekTo=StartFrame(m.frame);
@@ -821,7 +835,7 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     }
     case Act::stop: {
         Show& s=shows[table.Find(k)];
-        if(!s.remote || s.by!=caller)break;
+        if(!s.remote || s.callerSlot!=who.slot)break;
         const int to=EndSeek(s.done,m.frame);
         if(to>s.done)s.seekTo=to;
         Log("ULTIMATE NET peer %u ended show %08X:%u at its frame %d%s",peer,k.origin,k.serial,m.frame,to>=0 ? ": winding it down" : "");

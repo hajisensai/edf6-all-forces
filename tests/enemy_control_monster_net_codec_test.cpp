@@ -42,13 +42,13 @@ bool ValidNativeProjectileSample(const NativeProjectileSample& sample) noexcept 
 }
 }
 int main() {
-    static_assert(wire::kTag==0x31504E4Du && wire::kVersion==1 && wire::kMaxBatch==1 && wire::kMaxBytes==512,"fixed Monster envelope");
+    static_assert(wire::kTag==0x31504E4Du && wire::kVersion==2 && wire::kMaxBatch==1 && wire::kMaxBytes==512,"fixed Monster envelope");
     static_assert(wire::kEventBytes==361 && wire::kHeaderBytes==8,"complete explicit field layout");
     auto input=Example();wire::Event output[wire::kMaxBatch]{};
     unsigned char bytes[wire::kMaxBytes+1]{},original[wire::kMaxBytes+1]{};std::size_t used=999;unsigned count=999;
     Check(wire::EventBytes(input)==361 && wire::Bytes(&input,1)==369,"explicit full sample size");
     Check(wire::Encode(&input,1,bytes,sizeof(bytes),&used) && used==369,"full outcome fits one reliable packet");
-    Check(bytes[0]=='M' && bytes[1]=='N' && bytes[2]=='P' && bytes[3]=='1' && bytes[4]==1 && bytes[5]==1 && !bytes[6] && !bytes[7],"canonical eight byte header");
+    Check(bytes[0]=='M' && bytes[1]=='N' && bytes[2]=='P' && bytes[3]=='1' && bytes[4]==2 && bytes[5]==1 && !bytes[6] && !bytes[7],"canonical eight byte header");
     Check(bytes[8]==0x80 && bytes[15]==0x10 && bytes[16]==0x11 && bytes[23]==0x88 && bytes[24]==2,"metadata is explicitly little endian");
     Check(bytes[296]==0xDC && bytes[297]==0xFE && bytes[366]==1 && bytes[367]==1 && bytes[368]==3,"unaligned uint16, booleans and resource mask have exact packed offsets");
     Check(wire::Decode(bytes,used,output,wire::kMaxBatch,&count) && count==1 && Same(input,output[0]),"every typed field and negative zero roundtrips exactly");

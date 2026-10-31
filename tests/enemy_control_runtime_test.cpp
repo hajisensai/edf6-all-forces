@@ -38,7 +38,7 @@ float MapRay(const float* from,const float* to,float* out) noexcept {
 bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept {
     if(!fixtureNetworkIds)return false;std::memset(out,0,32);out[0]=object[0x20];return true;
 }
-bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {   // the owner's (player_requester.h)
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {   // the owner's (net_object_ref.h)
     return ReadNativeObjectId(static_cast<const unsigned char*>(who.obj),out);
 }
 bool EnemyControlNativeNetworkPoseReady(const enemy_native::NativeLease&) noexcept {return true;}

@@ -201,7 +201,8 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
 std::uint32_t origin=0,serial=0;   // this machine's barrages: its run, the last one's number in it
 barrage_net::Heard heard;          // the peers' barrages played here
 // This machine's player's barrage told to every peer that has the channel, its caller by its mission slot
-// (player_requester.h; a caller that is no live player: nobody else can find it, nothing sent).
+// (net_object_ref.h, a fallen caller's too; a caller that is no player of this mission's: nobody else can find it, nothing
+// sent).
 void Tell(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
     if(!plugin_net::Ready())return;
     if(!origin)origin=plugin_net::NewOrigin();
@@ -209,10 +210,10 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
     m.kind=kind;m.origin=origin;m.serial=++serial;m.damage=damage;
     std::memcpy(m.at,at,12);std::memcpy(m.heading,heading,12);
     bool id=false;
-    __try { id=PlayerRequesterOf(caller,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
+    __try { id=EncodeNetRef(caller,m.caller) && netref::IsPlayer(m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
     unsigned char bytes[barrage_net::kWire];
     if(!id || !barrage_net::Encode(m,bytes,sizeof(bytes))) {
-        Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no live player");
+        Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no player of this mission's");
         return;
     }
     const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));
@@ -310,17 +311,25 @@ bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes
         if(netLogs++<16)Log("BARRAGE NET peer %u: a message that does not read (%zu bytes): dropped",peer,size);
         return true;
     }
-    // The caller must be the sender's own player (a peer never starts a barrage for another machine's).
-    MarkIdentities ids{};
+    // The caller must be the sender's own player (a peer never starts a barrage for another machine's): found here, fallen
+    // too, by its PUID; not here, by its slot's member (SenderOwns).
+    NetResolved who{};
     bool sender=false;
-    __try { sender=SenderIsPlayer(m.caller,puid,&ids,true); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
-    if(!sender || !ids.player.obj) {
+    __try { sender=ResolveNetRef(m.caller,NetLife::present,&who) && SenderOwns(who,puid); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
+    if(!sender) {
         if(netLogs++<16)Log("BARRAGE NET peer %u: barrage %08X:%u names a caller that is not its sender's player: dropped",peer,
                             m.origin,m.serial);
         return true;
     }
     if(!heard.First(m.origin,m.serial))return true;
-    const BarrageResult got=BarrageStart(m.kind,static_cast<const unsigned char*>(ids.player.obj),m.at,m.heading,m.damage);
+    // Its rounds are fired by its caller's copy here (their damage zeroed: jet_bay.cpp ShellMake, its team the guided aims'):
+    // a barrage is its rounds alone, so without that copy (left, deleted) there is nothing of it to play.
+    if(!who.found) {
+        Log("BARRAGE NET peer %u's barrage %08X:%u (%s): its caller is not here: not played",peer,m.origin,m.serial,
+            barrage::kKindNames[m.kind]);
+        return true;
+    }
+    const BarrageResult got=BarrageStart(m.kind,static_cast<const unsigned char*>(who.obj.obj),m.at,m.heading,m.damage);
     Log("BARRAGE NET peer %u's barrage %08X:%u (%s): %s here",peer,m.origin,m.serial,barrage::kKindNames[m.kind],
         got==BarrageResult::started ? "played" : "not played");
     return true;

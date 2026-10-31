@@ -1,3 +1,4 @@
+#include "../src/net_object_ref.h"
 #include "../src/command_protocol.h"
 #include <cstdio>
 #include <cstdlib>
@@ -45,7 +46,8 @@ Room::Room(unsigned count,bool capable) {
     Step();
 }
 Request Make(unsigned count=1,mapcmd::Order order=mapcmd::Order::guard) {
-    Request r;r.count=count;r.command={order,{20,0,30}};r.requester[0]=200;
+    // The requester: a player's reference (net_object_ref.h: slot 2); the units and the focus: NetIds.
+    Request r;r.count=count;r.command={order,{20,0,30}};crew::netref::MakePlayer(2,r.requester);
     if(order==mapcmd::Order::focus)r.focus[0]=100;
     for(unsigned i=0;i<count && i<kCommandNetUnits;++i)r.units[i][0]=static_cast<unsigned char>(i+1);
     return r;
@@ -84,8 +86,18 @@ void Codec() {
     Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
           mapcmd::kLastOrder==mapcmd::Order::formation,"HOLD is appended (13), the formation order after it (14)");
-    Check(kVersion==8 && kMinVersion==8 && Compatible(8) && !Compatible(7) && !Compatible(6) && !Compatible(9),
-          "the wire is version 8 (the requester its mission slot); no older version spoken");
+    Check(kVersion==9 && kMinVersion==9 && Compatible(9) && !Compatible(8) && !Compatible(7) && !Compatible(10),
+          "the wire is version 9 (every object its reference); no older version spoken");
+    {   // The requester only a player's reference, a unit only a NetId, the focus either (an enemy player in PvP).
+        Request r=Make(2,mapcmd::Order::focus);
+        Check(ValidRequest(r),"a focus by its NetId");
+        crew::netref::MakePlayer(4,r.focus);Check(ValidRequest(r),"a focus that is a player, by its slot");
+        std::memcpy(r.focus,r.requester,32);Check(!ValidRequest(r),"the requester as its own focus refused");
+        r=Make(2,mapcmd::Order::focus);std::memset(r.requester,0,32);r.requester[0]=200;
+        Check(!ValidRequest(r),"a requester by a NetId refused");
+        r=Make(2,mapcmd::Order::focus);crew::netref::MakePlayer(4,r.units[1]);Check(!ValidRequest(r),"a player as a unit refused");
+        r=Make(2,mapcmd::Order::focus);r.focus[21]=3;Check(!ValidRequest(r),"a focus neither a NetId nor a player's refused");
+    }
     for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
         m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&
@@ -133,7 +145,7 @@ void Version8() {
         Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
     }
     m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"nothing goes out at an older version");
-    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),7),"a request travels at version 8 alone");
+    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),8),"a request travels at version 9 alone");
 }
 // The negotiation: every hello at kMinVersion with the sender's highest in it; an older build is never answered.
 void Negotiation() {
@@ -149,12 +161,13 @@ void Negotiation() {
         for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(p.message.version==kMinVersion && p.message.request.formationTotal==kVersion,
             "a hello goes out at the lowest version, the sender's highest in it");
     }
-    {   // an older build (version 7 and before: its requester a NetId): no capability for its hello, its requests not run
+    {   // an older build (version 8 and before: its player's tag at bytes 0..3, its focus a NetId): no capability for its
+        // hello, its requests not run
         Room r(2);const auto before=r.sent.size();
-        Message hello;hello.version=7;hello.epoch=r.epoch;hello.request.formationTotal=7;
+        Message hello;hello.version=8;hello.epoch=r.epoch;hello.request.formationTotal=8;
         r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
         Check(r.sent.size()==before,"an older build's hello: not answered");
-        Message forged;forged.version=7;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
+        Message forged;forged.version=8;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
         r.nodes[0]->session->Receive(1,r.Name(1),forged,r.now);r.Pump();
         Check(r.nodes[0]->executed==0,"an older build's request is not executed");
     }

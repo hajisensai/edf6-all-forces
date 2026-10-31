@@ -14,7 +14,8 @@ namespace {
 int checks=0,failures=0;
 void Check(bool ok,const char* what) { ++checks;if(!ok){++failures;std::printf("FAIL %s\n",what);} }
 
-const unsigned char kPlayer[32]={0x11,0x22,0,0,0,0,0,0,0,0,0,0,5,0,0,0,7,0,0,0,0,0,0,0,9,9};
+// A player's reference (net_object_ref.h: slot 1, the tag at bytes 20..23) and an enemy's NetId.
+const unsigned char kPlayer[32]={1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x41,0x46,0x50,0x52};
 const unsigned char kEnemy[32]={0x33,0x44,0,0,0,0,0,0,0,0,0,0,5,0,0,0,8,0,0,0,0,0,0,0,1,2};
 
 Grab MakeGrab(GrabKind kind,std::uint32_t origin,std::uint32_t grab) {
@@ -43,6 +44,13 @@ void WireChecks() {
     Check(!Decode(copy,sizeof(copy),back),"a grab of an unknown kind is refused");
     Grab bad=g;bad.target[21]=1;
     Check(!Encode(bad,bytes,sizeof(bytes)),"a grab with a non-canonical ID is refused");
+    bad=g;std::memcpy(bad.target,kPlayer,32);std::memcpy(bad.grabber,kPlayer,32);bad.grabber[0]=2;
+    Check(Encode(bad,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),back) && !std::memcmp(back.target,kPlayer,32),
+          "a grab of a player (a teammate) by its slot");
+    bad=g;std::memcpy(bad.grabber,kEnemy,32);
+    Check(!Encode(bad,bytes,sizeof(bytes)),"a grabber by a NetId (no player's reference) is refused");
+    Encode(g,bytes,sizeof(bytes));std::memcpy(copy,bytes,sizeof(copy));copy[4]=3;
+    Check(!Decode(copy,sizeof(copy),back),"a grab of version 3 (the player's tag at bytes 0..3): not taken");
     bad=g;bad.goal[0]=std::nanf("");
     Check(!Encode(bad,bytes,sizeof(bytes)),"a grab with a number not finite is refused");
     Grab none=g;std::memset(none.target,0,32);
@@ -58,6 +66,12 @@ void WireChecks() {
           !std::memcmp(mb.who,kPlayer,32) && mb.at[0]==-7.5f && mb.leftMs==90000,"a gun message round trip");
     m.leftMs=kMostLeftMs+1;
     Check(!Encode(m,gb,sizeof(gb)),"a gun message past the longest float is refused");
+    m.leftMs=0;std::memcpy(m.who,kEnemy,32);
+    Check(!Encode(m,gb,sizeof(gb)),"an owner by a NetId is refused");
+    m.kind=GunKind::drop;
+    Check(Encode(m,gb,sizeof(gb)),"a drop's colonist by its NetId");
+    std::memcpy(m.who,kPlayer,32);
+    Check(!Encode(m,gb,sizeof(gb)),"a drop's colonist by a player's reference is refused");
     Check(!Decode(bytes,sizeof(bytes),mb),"a grab is not a gun message");
 }
 

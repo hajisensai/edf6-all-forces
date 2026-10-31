@@ -298,7 +298,7 @@ bool CandidateClear(Candidate& candidate) noexcept {
     if(!Drop(candidate.owner) || !Drop(candidate.target))return false;
     candidate=Candidate{};return true;
 }
-// The owner (kind 1, a player) by its mission slot (player_requester.h), the same on every machine; the target by its NetId.
+// The owner (kind 1, a player) by its mission slot (net_object_ref.h), the same on every machine; the target by its NetId.
 void MakeId(const ObjRef& object,unsigned char (&id)[32],std::uint64_t serial,unsigned kind) noexcept {
     if(kind==1 ? PlayerRequesterOf(object,id) : ReadNativeObjectId(static_cast<const unsigned char*>(object.obj),id))return;
     // Offline identities stay inside this local candidate table. Network entry

@@ -73,7 +73,7 @@ void ClosingDrainsAcceptedOutcomes() {
      closings[r.nodes[0].get()].empty=true;r.Step();r.Closed(1,Result::Complete);for(const auto& node:r.nodes)Check(!closings[node.get()].aborts,"normal drained exit uses no fault retirement");}
     {Room r;EnableClosing(r);Check(r.Request(),"retained source identity closing starts");r.Settle();closings[r.nodes[0].get()].empty=false;
      Check(r.nodes[1]->protocol.Exit(1,r.now),"source exits before its old player registry entry retires");r.Pump();
-     r.nodes[1]->player=Id(71);auto bytes=ActionBytes(232);Check(r.nodes[0]->protocol.SubmitAction(1,bytes.data(),bytes.size(),r.now),"cached accepted outcome remains bound to original lease after the source leaves active lookup");r.Pump();
+     r.nodes[1]->player=Player(71);auto bytes=ActionBytes(232);Check(r.nodes[0]->protocol.SubmitAction(1,bytes.data(),bytes.size(),r.now),"cached accepted outcome remains bound to original lease after the source leaves active lookup");r.Pump();
      Check(actionLedgers[r.nodes[1].get()].sequences==std::vector<std::uint64_t>({1}) && actionLedgers[r.nodes[2].get()].sequences==std::vector<std::uint64_t>({1}),"draining uses sealed original source identity and retained native body, never adopts a replacement player");
      closings[r.nodes[0].get()].empty=true;r.Step();r.Closed(1,Result::Complete);}
     {Room r;EnableClosing(r);Check(r.Request(),"retriable closing action starts");r.Settle();auto bytes=ActionBytes(232);actionLedgers[r.nodes[2].get()].result=ActionResult::failed;

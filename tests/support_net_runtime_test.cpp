@@ -149,10 +149,10 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* id) noexcept 
     }
     return false;
 }
-// A player requester (player_requester.h) names its mission slot: the actor of that index here, unless the fixture hides it.
+// A player requester (net_object_ref.h) names its mission slot: the actor of that index here, unless the fixture hides it.
 bool ResolveMarkIdentities(const unsigned char* marker,const unsigned char*,MarkIdentities* out) noexcept {
     int slot=-1;
-    if(marker && PlayerRequesterSlot(marker,&slot)) {
+    if(marker && netref::IsPlayer(marker,&slot)) {
         if(!out || fixture::nativeIdMissing || slot>=static_cast<int>(fixture::actors))return false;
     } else if(!marker || !out || marker[0]<0x40 || marker[0]>=0x40+fixture::actors)return false;
     const unsigned i=slot>=0 ? static_cast<unsigned>(slot) : marker[0]-0x40u;
@@ -261,7 +261,7 @@ bool Spawn(std::uint64_t,const Plan& plan,bool remote) noexcept {
     Check(!remote,"host native spawn callback authority");++spawnCount;
     // A player requester's slot as 0x40+slot (the actor's NativeNetId stand-in), a prepared child's owner byte as it came.
     int slot=-1;
-    lastSupportTeam=plan.team;lastSupportOwner=crew::PlayerRequesterSlot(plan.requester,&slot) ? 0x40+slot : plan.requester[0];return true;
+    lastSupportTeam=plan.team;lastSupportOwner=crew::netref::IsPlayer(plan.requester,&slot) ? 0x40+slot : plan.requester[0];return true;
 }
 void Destroy(std::uint64_t) noexcept { ++destroyCount; }
 bool Derive(std::uint32_t ordinal,unsigned char* bytes) noexcept { std::memset(bytes,0,32);bytes[12]=5;std::memcpy(bytes+4,&ordinal,4);return true; }
@@ -418,7 +418,7 @@ int main() {
     online=true;host=true;ready=true;installed=true;peerCount=0;generation++;tick+=1000;pvpTeam=0;
     crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive});Step();
     for(unsigned kind=0;kind<4;++kind) {
-        Plan child{};child.catalogId=kPreparedDroneCatalog;child.count=1;child.requester[0]=0x40;
+        Plan child{};child.catalogId=kPreparedDroneCatalog;child.count=1;crew::netref::MakePlayer(0,child.requester);
         auto& unit=child.units[0];unit.resourceId=kind==0 ? crew::kSupportSubDroneResource : crew::CarrierDroneResource(kind-1,kind,true);
         unit.variant=0x1122334400ull+kind;unit.matrix[0]=unit.matrix[5]=unit.matrix[10]=unit.matrix[15]=1;
         const auto beforeSpawn=spawnCount;const auto token=crew::SubmitPreparedSupportPlan(child);
@@ -428,11 +428,11 @@ int main() {
         const auto beforeDestroy=destroyCount;crew::ReportSupportFailure(token);
         Check(destroyCount==beforeDestroy+1 && !crew::SupportTransactionActive(token),"real dynamic wrapper token follows Session Destroy cancellation");
     }
-    Plan rejected{};rejected.catalogId=kPreparedDroneCatalog;rejected.count=1;rejected.requester[0]=0x40;
+    Plan rejected{};rejected.catalogId=kPreparedDroneCatalog;rejected.count=1;crew::netref::MakePlayer(0,rejected.requester);
     rejected.units[0].resourceId=crew::kSupportSubDroneResource;rejected.units[0].variant=99;
     rejected.units[0].matrix[0]=rejected.units[0].matrix[5]=rejected.units[0].matrix[10]=rejected.units[0].matrix[15]=1;
     rejected.units[0].netId[0]=1;Check(!crew::SubmitPreparedSupportPlan(rejected),"prepared wrapper cannot smuggle an existing native child ID");
-    rejected.units[0].netId[0]=0;rejected.requester[0]=0;
+    rejected.units[0].netId[0]=0;std::memset(rejected.requester,0,32);
     Check(!crew::SubmitPreparedSupportPlan(rejected),"dynamic wrapper refuses missing canonical owner");
     crew::ResetSupportNet();
     WorldParticipants();

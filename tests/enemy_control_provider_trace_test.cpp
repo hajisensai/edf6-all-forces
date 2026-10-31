@@ -215,7 +215,7 @@ struct AggregateTraceBus {
         Check(trace.name=="beam_double" && !trace.sourceHz && trace.units==480 && trace.end==421,"aggregate uses one complete actual dual-beam invocation with its original charge and 480 units");
         for(const auto& tick:trace.ticks)for(const auto& packet:tick.packets)expected.push_back(&packet);
         Check(expected.size()==480,"one body contributes exactly 480 actual typed payloads, without repeated cycles");
-        for(unsigned body=0;body<bodies;++body){sources[body]=Id(40+body);owners[body]=body%peers;}
+        for(unsigned body=0;body<bodies;++body){sources[body]=Player(40+body);owners[body]=body%peers;}
     }
     ~AggregateTraceBus(){for(const auto& node:room.nodes)aggregateTraceBuses.erase(node.get());}
     unsigned Body(std::uint64_t lease) const {const auto found=leaseBody.find(lease);Check(found!=leaseBody.end(),"aggregate callback names an exact acquired body");return found->second;}

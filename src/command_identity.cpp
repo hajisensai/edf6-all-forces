@@ -1,172 +1,58 @@
 #include "command_identity.h"
-#include "player_requester.h"
 #include "memory.h"
-#include "team_walk.h"
-#include "support_soldier.h"
+#include <cstring>
 
+// The older resolvers over the one walk of net_object_resolve.cpp (ResolveNetRefs): the same references, the same rules.
 namespace crew {
-namespace command_identity {
-constexpr unsigned kEnumAllTeams=0x5E0C80,kTeamManager=0x20B2978,kGameStatus=0x20B2890;
-constexpr unsigned kMaxPlayers=1024,kMaxIds=kMaxCommandIdentities+2;
-constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83};
-using WalkFn=void(__fastcall*)(void*,void*);
-struct Visitor {
-    const void* const* vtable;
-    unsigned char ids[kMaxIds][32]{};
-    ObjRef refs[kMaxIds]{};
-    unsigned count=0,expected=0;
-    bool failed=false;
-    void* puid=nullptr;
-    int requesterSlot=-1;   // ids[0] is a player requester (player_requester.h): its player found by that slot, never by an ID
-};
-bool Canonical(const unsigned char* id) noexcept {
-    if(!id || !Readable(id,32))return false;
-    unsigned any=0;
-    for(unsigned i=0;i<32;++i){if(i>=20 && i<24 && id[i])return false;any|=id[i];}
-    return any!=0;
-}
-bool Live(const unsigned char* object,ObjRef* ref) noexcept {
-    if(!Readable(object,kDead+1) || (object[0x18]&4) || object[kDead])return false;
-    const auto ctrl=At<const unsigned char*>(object,kSelfCtrl);
-    if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
-    *ref=ObjRef{object,ctrl};return true;
-}
-bool Requester(const unsigned char* object,unsigned expected,void** puid,int* slot=nullptr) noexcept {
-    if(!Readable(object,0x1EE0) || !IsAnyPlayer(object) || !IsSoldierClass(object))return false;
-    const auto user=At<const unsigned char*>(object,0x1ED0);
-    const auto ctrl=At<const unsigned char*>(object,0x1ED8);
-    if(!Readable(user,0x4C) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0)return false;
-    const int index=At<int>(user,0x48);
-    if(index<0 || static_cast<unsigned>(index)>=expected)return false;
-    if(slot)*slot=index;
-    *puid=At<void*>(user,0x18);return *puid!=nullptr;
-}
-void __fastcall Ignore(void*) noexcept {}
-void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
-    if(v->failed || !object)return;
-    __try {
-        ObjRef ref{};void* puid=nullptr;int slot=-1;
-        if(Live(object,&ref) && Requester(object,v->expected,&puid,&slot) && slot==v->requesterSlot) {
-            // The same object met again in another team is no second player; two of one slot fail.
-            if(v->refs[0] && (v->refs[0].obj!=ref.obj || v->refs[0].ctrl!=ref.ctrl)){v->failed=true;return;}
-            v->refs[0]=ref;v->puid=puid;
-        }
-        unsigned char id[32]{};
-        if(!ReadNativeObjectId(object,id))return;
-        for(unsigned i=1;i<v->count;++i) {
-            if(std::memcmp(id,v->ids[i],32))continue;
-            if(!Live(object,&ref) || (v->refs[i] &&
-                (v->refs[i].obj!=ref.obj || v->refs[i].ctrl!=ref.ctrl))) {v->failed=true;return;}
-            v->refs[i]=ref;return;
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER){v->failed=true;}
-}
-const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&Visit)};
-// The Q mark's (qmark.cpp): the marker and its target, either one missing is no failure (a dead marker, an enemy not
-// yet registered here); a match not live is left empty.
-struct MarkVisitor {
-    const void* const* vtable;
-    const unsigned char* target;
-    unsigned expected=0;
-    MarkIdentities out{};
-    bool deadTarget=false;   // the target may be dead (not deleted)
-    // The marker, a player requester (player_requester.h): the live player of that mission slot, found by its User, never
-    // by an ID; two of them is none.
-    int markerSlot=-1;
-    bool markerTwice=false;
-};
-// Not deleted, its own weak reference live (dead or alive).
-bool Present(const unsigned char* object,ObjRef* ref) noexcept {
-    if(!Readable(object,kDead+1) || (object[0x18]&4))return false;
-    const auto ctrl=At<const unsigned char*>(object,kSelfCtrl);
-    if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
-    *ref=ObjRef{object,ctrl};return true;
-}
-void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
-    if(!object)return;
-    __try {
-        ObjRef ref{};
-        if(v->markerSlot>=0) {
-            void* puid=nullptr;int slot=-1;
-            if(Live(object,&ref) && Requester(object,v->expected,&puid,&slot) && slot==v->markerSlot) {
-                // The same object met again in another team is no second player.
-                if(v->out.player && (v->out.player.obj!=ref.obj || v->out.player.ctrl!=ref.ctrl))v->markerTwice=true;
-                v->out.player=ref;v->out.puid=puid;v->out.slot=slot;
-            }
-        }
-        unsigned char id[32]{};
-        if(!v->target || !ReadNativeObjectId(object,id))return;
-        if(!std::memcmp(id,v->target,32) && (v->deadTarget ? Present(object,&ref) : Live(object,&ref)))v->out.target=ref;
-    } __except(EXCEPTION_EXECUTE_HANDLER){}
-}
-const void* const kMarkVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&VisitMark)};
-bool Add(Visitor* v,const unsigned char* id) noexcept {
-    if(!Canonical(id) || v->count>=kMaxIds)return false;
-    for(unsigned i=0;i<v->count;++i)if(!std::memcmp(id,v->ids[i],32))return false;
-    std::memcpy(v->ids[v->count++],id,32);return true;
-}
-bool StillLive(const Visitor& v) noexcept {
-    for(unsigned i=1;i<v.count;++i) {
-        const auto object=static_cast<const unsigned char*>(v.refs[i].obj);
-        ObjRef ref{};unsigned char id[32]{};
-        if(!Live(object,&ref) || ref.ctrl!=v.refs[i].ctrl || ref.obj==v.refs[0].obj ||
-            !ReadNativeObjectId(object,id) || std::memcmp(id,v.ids[i],32))return false;
-    }
-    const auto asker=static_cast<const unsigned char*>(v.refs[0].obj);
-    ObjRef ref{};void* puid=nullptr;int slot=-1;
-    return Live(asker,&ref) && ref.ctrl==v.refs[0].ctrl && Requester(asker,v.expected,&puid,&slot) &&
-        puid==v.puid && slot==v.requesterSlot;
-}
-}
 bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned char units[][32],
                               unsigned count,const unsigned char focus[32],CommandIdentities* out) noexcept {
-    using namespace command_identity;
     if(!out)return false;
     __try {
         *out=CommandIdentities{};
-        if(count>kMaxCommandIdentities || (count && !units))return false;
-        Visitor visitor{kVisitorVtable};
-        if(!PlayerRequesterSlot(requester,&visitor.requesterSlot) || !Add(&visitor,requester))return false;
-        for(unsigned i=0;i<count;++i)if(!Add(&visitor,units[i]))return false;
-        if(focus && !Add(&visitor,focus))return false;
-        if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
-        void* mgr=At<void*>(image,kTeamManager);
-        const auto status=At<const unsigned char*>(image,kGameStatus);
-        if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
-        void* teams=At<void*>(mgr,0x38);
-        visitor.expected=At<unsigned>(status,0x14FF8);
-        if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
-        reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
-        if(visitor.failed || At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status ||
-           At<void*>(mgr,0x38)!=teams || At<unsigned>(status,0x14FF8)!=visitor.expected || !StillLive(visitor))return false;
-        CommandIdentities result{};result.requester=visitor.refs[0];result.requesterPuid=visitor.puid;result.count=count;
-        for(unsigned i=0;i<count;++i)result.units[i]=visitor.refs[i+1];
-        if(focus)result.focus=visitor.refs[count+1];
+        if(count>kMaxCommandIdentities || (count && !units) || !netref::IsPlayer(requester))return false;
+        const unsigned char* refs[kMaxNetRefs]{};
+        NetLife lives[kMaxNetRefs]{};
+        unsigned n=0;
+        refs[n++]=requester;
+        for(unsigned i=0;i<count;++i) {
+            if(!netref::IsNative(units[i]))return false;   // an NPC unit: never a player
+            refs[n++]=units[i];
+        }
+        if(focus) {
+            const netref::Kind k=netref::Classify(focus);
+            if(k!=netref::Kind::player && k!=netref::Kind::native)return false;
+            refs[n++]=focus;
+        }
+        for(unsigned i=0;i<n;++i)for(unsigned j=0;j<i;++j)if(!std::memcmp(refs[i],refs[j],32))return false;
+        for(unsigned i=0;i<n;++i)lives[i]=NetLife::live;
+        NetResolved found[kMaxNetRefs]{};
+        if(!ResolveNetRefs(refs,lives,n,found))return false;
+        for(unsigned i=0;i<n;++i) {
+            if(!found[i].found)return false;
+            for(unsigned j=0;j<i;++j)if(found[j].obj.obj==found[i].obj.obj)return false;   // one object named twice
+        }
+        if(!found[0].puid)return false;
+        for(unsigned i=0;i<n;++i)if(!StillNetRef(refs[i],NetLife::live,found[i]))return false;
+        CommandIdentities result{};result.requester=found[0].obj;result.requesterPuid=found[0].puid;result.count=count;
+        for(unsigned i=0;i<count;++i)result.units[i]=found[i+1].obj;
+        if(focus)result.focus=found[count+1].obj;
         *out=result;return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){*out=CommandIdentities{};return false;}
 }
 namespace {
 bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],bool deadTarget,MarkIdentities* out) noexcept {
-    using namespace command_identity;
     if(!out)return false;
     *out=MarkIdentities{};
-    __try {
-        MarkVisitor visitor{kMarkVisitorVtable,Canonical(target) ? target : nullptr};
-        visitor.deadTarget=deadTarget;
-        // A player goes by its mission slot alone: a NetId (a stock mission numbers them per machine) names none.
-        if(!Canonical(marker) || !PlayerRequesterSlot(marker,&visitor.markerSlot))visitor.markerSlot=-1;
-        if(visitor.markerSlot<0 && !visitor.target)return false;
-        if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
-        void* mgr=At<void*>(image,kTeamManager);
-        const auto status=At<const unsigned char*>(image,kGameStatus);
-        if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
-        visitor.expected=At<unsigned>(status,0x14FF8);
-        if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
-        reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
-        if(visitor.markerTwice){visitor.out.player={};visitor.out.puid=nullptr;visitor.out.slot=-1;}
-        *out=visitor.out;
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){*out=MarkIdentities{};return false;}
+    // The marker goes by its mission slot alone (a NetId names no player); a reference not valid is not asked.
+    const unsigned char* refs[2]={netref::IsPlayer(marker) ? marker : nullptr,
+                                  netref::Valid(target,false) ? target : nullptr};
+    if(!refs[0] && !refs[1])return false;
+    const NetLife lives[2]={NetLife::live,deadTarget ? NetLife::present : NetLife::live};
+    NetResolved found[2]{};
+    if(!ResolveNetRefs(refs,lives,2,found))return false;
+    if(found[0].found){out->player=found[0].obj;out->slot=found[0].slot;out->puid=found[0].puid;}
+    if(found[1].found)out->target=found[1].obj;
+    return true;
 }
 }  // namespace
 bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
@@ -176,18 +62,13 @@ bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char t
     return ResolveMarks(grabber,target,true,out);
 }
 bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
-    using namespace command_identity;
     if(!out)return false;
-    std::memset(out,0,32);
     __try {
-        const auto status=At<const unsigned char*>(image,kGameStatus);
-        if(!Readable(status,0x14FFC))return false;
-        const unsigned expected=At<unsigned>(status,0x14FF8);
         const auto object=static_cast<const unsigned char*>(who.obj);
-        ObjRef ref{};void* puid=nullptr;int slot=-1;
-        if(!expected || expected>kMaxPlayers || !Live(object,&ref) || ref.ctrl!=who.ctrl ||
-           !Requester(object,expected,&puid,&slot))return false;
-        return MakePlayerRequester(slot,out);
+        if(!EncodeNetRef(who,out) || !netref::IsPlayer(out) || !Readable(object,kDead+1) || object[kDead]) {
+            std::memset(out,0,32);return false;
+        }
+        return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){std::memset(out,0,32);return false;}
 }
 bool PlayerRequesterOf(const void* object,unsigned char out[32]) noexcept {

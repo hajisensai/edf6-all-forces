@@ -126,7 +126,7 @@ int main() {
     unsigned char bytes[wire::kMaxBytes+1]{},original[wire::kMaxBytes+1]{};
     std::size_t used=999;
     Check(wire::Encode(input,2,bytes,sizeof(bytes),&used) && used==171,"mixed kinds use exact variable record sizes");
-    Check(bytes[0]=='E' && bytes[1]=='D' && bytes[2]=='G' && bytes[3]=='1' && bytes[4]==1 && bytes[5]==2 && !bytes[6] && !bytes[7],"canonical magic version count and reserved bytes");
+    Check(bytes[0]=='E' && bytes[1]=='D' && bytes[2]=='G' && bytes[3]=='1' && bytes[4]==2 && bytes[5]==2 && !bytes[6] && !bytes[7],"canonical magic version count and reserved bytes");
     Check(bytes[8]==1 && bytes[9]==8 && bytes[16]==1,"kind and uint64 serial use explicit little endian");
     Check(bytes[17]==127 && !bytes[18] && bytes[19]==31 && !bytes[20],"part key never depends on host struct layout");
     Check(bytes[22]==0x11 && bytes[29]==0x88 && bytes[30]==0x10 && bytes[37]==0xFE,"command and seed retain full uint64 range");
@@ -298,6 +298,10 @@ int main() {
         changed=entity;changed.targetActorId[i]=1;
         Check(!wire::Valid(changed) && !wire::EventBytes(changed),"each canonical target reserved byte must remain zero");
     }
+    // A player target (the enemy player a controlled Deiroi shoots at in PvP): its reference, the slot and the tag.
+    changed=entity;std::memset(changed.targetActorId,0,32);crew::netref::MakePlayer(3,changed.targetActorId);
+    Check(wire::Valid(changed) && wire::EventBytes(changed)==161,"a player target by its reference (net_object_ref.h)");
+    changed.targetActorId[8]=1;Check(!wire::Valid(changed),"a tagged target with other bytes set: refused");
     changed=entity;std::memset(changed.targetActorId,0,32);
     Check(!wire::Valid(changed),"an empty actor ID cannot carry a nonzero lock ordinal");
     changed.lockOrdinal=0;Check(wire::Valid(changed),"an unguided entity has an all-zero target and zero ordinal");

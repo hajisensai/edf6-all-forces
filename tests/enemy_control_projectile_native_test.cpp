@@ -388,3 +388,5 @@ int main(){
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("enemy control projectile native: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }
+// Object references over the fixture's NetIds (net_object_resolve.h).
+#include "net_object_ref_stub.h"

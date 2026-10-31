@@ -54,10 +54,14 @@ Actor* ActorByObject(const void* object) noexcept {
     for(auto& actor:actors)if(actor.object==object)return &actor;
     return nullptr;
 }
+// A player's ID: its object reference (net_object_ref.h: mission slot `slot`), never a NetId.
+ep::NativeId Player(unsigned slot) noexcept {
+    ep::NativeId id{};crew::netref::MakePlayer(static_cast<int>(slot),id.data());return id;
+}
 void InitActors() noexcept {
-    actors[0].id=Id(10);actors[0].owner=0;actors[1].id=Id(11);actors[1].owner=0;
-    actors[2].id=Id(20);actors[2].owner=1;actors[3].id=Id(21);actors[3].owner=1;
-    actors[4].id=Id(30);actors[4].owner=2;
+    actors[0].id=Player(10);actors[0].owner=0;actors[1].id=Player(11);actors[1].owner=0;
+    actors[2].id=Player(20);actors[2].owner=1;actors[3].id=Player(21);actors[3].owner=1;
+    actors[4].id=Player(30);actors[4].owner=2;
     for(unsigned i=5;i<8;++i){actors[i].id=Id(100+i-5);actors[i].target=true;actors[i].profile=0xAABBCC00ull+i;}
     for(auto& actor:actors) {
         actor.alive=true;actor.registered=true;
@@ -824,7 +828,7 @@ void RejectNonCanonicalSizes(Room& current,const Packet& packet) {
     auto padded=packet.bytes;padded.push_back(0);attempt(padded.data(),padded.size());
 }
 void HostPoseSamplingAndAtomicDelivery() {
-    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==5 && ep::kCapability==5);
+    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==6 && ep::kCapability==5);
     CHECK(current.Request(0,5));current.Until(0,ep::Phase::beginning);
     crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==0 && PosePacketCount(current)==0);
     current.Until(0,ep::Phase::activating);crew::EnemyControlNetworkFrame();

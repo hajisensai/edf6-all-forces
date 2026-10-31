@@ -24,12 +24,13 @@ PlayerJetReadout jetHud{};bool jetHudOn=false;
 PlayerHeliReadout heli{};bool heliOn=false;
 // This machine's mark (npcai.cpp's).
 bool ownEnemy=false;float ownAt[3]={5,0,300};
-// The player's requester ID (player_requester.h: its mission slot, the same on every machine) and its native NetId (this
+// The player's requester ID (net_object_ref.h: its mission slot, the same on every machine) and its native NetId (this
 // machine's alone: a stock mission numbers the players' per machine, never sent); the enemy's native ID.
-const unsigned char kPlayerId[32]={0x41,0x46,0x50,0x52,2};
+// A player's reference (net_object_ref.h): the slot at bytes 0..3, the tag "AFPR" at bytes 20..23.
+const unsigned char kPlayerId[32]={1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x41,0x46,0x50,0x52};
 const unsigned char kPlayerNetId[32]={0x11,0x22,0,0,0,0,0,0,0,0,0,0,5,0,0,0,7,0,0,0,0,0,0,0,9,9};
 const unsigned char kEnemyId[32]={0x33,0x44,0,0,0,0,0,0,0,0,0,0,5,0,0,0,8,0,0,0,0,0,0,0,1,2};
-const unsigned char kTeamId[32]={0x55,0x66,0,0,0,0,0,0,0,0,0,0,5,0,0,0,9,0,0,0,0,0,0,0,3,4};
+const unsigned char kTeamId[32]={2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x41,0x46,0x50,0x52};   // the teammate: slot 2
 // The resolver: whether the teammate's player and the enemy are in this world, the player's slot and PUID.
 bool resolveTeam=true,resolveEnemy=true;int resolves=0;
 int teamPuid=0;
@@ -56,14 +57,21 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept
     if(object==enemyMem){std::memcpy(out,kEnemyId,32);return true;}
     return false;
 }
-bool PlayerRequesterOf(const void* object,unsigned char out[32]) noexcept {
-    std::memset(out,0,32);if(object!=humanMem)return false;
-    std::memcpy(out,kPlayerId,32);return true;
+// An object's reference (net_object_resolve.h): this player by its slot (dead too), the enemy by its NetId.
+bool EncodeNetRef(const void* object,unsigned char out[32]) noexcept {
+    std::memset(out,0,32);
+    if(object==humanMem){std::memcpy(out,kPlayerId,32);return true;}
+    if(object==enemyMem){std::memcpy(out,kEnemyId,32);return true;}
+    return false;
 }
-bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
-    ++resolves;*out=MarkIdentities{};
-    if(resolveTeam && marker && !std::memcmp(marker,kTeamId,32)){out->player=ObjRef{humanMem,enemyCtrl};out->slot=2;out->puid=&teamPuid;}
-    if(resolveEnemy && target && !std::memcmp(target,kEnemyId,32))out->target=ObjRef::Of(enemyMem);
+bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsigned n,NetResolved* out) noexcept {
+    ++resolves;
+    for(unsigned i=0;i<n;++i)out[i]=NetResolved{};
+    if(n!=2 || lives[0]!=NetLife::present || lives[1]!=NetLife::live)return false;   // the marker fallen too, the target live
+    if(refs[0] && netref::IsPlayer(refs[0],&out[0].slot) && resolveTeam && !std::memcmp(refs[0],kTeamId,32)) {
+        out[0].obj=ObjRef{humanMem,enemyCtrl};out[0].puid=&teamPuid;out[0].found=true;
+    } else if(refs[0] && !std::memcmp(refs[0],kTeamId,32))out[0].slot=2;
+    if(resolveEnemy && refs[1] && !std::memcmp(refs[1],kEnemyId,32)){out[1].obj=ObjRef::Of(enemyMem);out[1].found=true;}
     return true;
 }
 bool SupportCommandRequesterMatches(void* puid,const char* sender) noexcept { return puid==&teamPuid && !std::strcmp(sender,senderPuid); }
@@ -222,9 +230,16 @@ void WireChecks() {
           !std::memcmp(d.marker,kPlayerId,32) && !std::memcmp(d.target,kEnemyId,32) && d.enemyAt[2]==3e3f && d.pointAt[2]==-8.0f &&
           d.pointLeftMs==4321 && d.caps==kCapabilities,"round trip");
     Check(b[0]=='Q' && b[1]=='M' && b[2]=='R' && b[3]=='K',"magic QMRK on the wire");
-    unsigned char c[kWireSize];std::memcpy(c,b,sizeof(c));c[4]=3;
+    unsigned char c[kWireSize];std::memcpy(c,b,sizeof(c));c[4]=4;
     Check(Owned(c,sizeof(c)) && !Decode(c,sizeof(c),d),"a newer version: ours, not taken");
     c[4]=1;Check(Owned(c,sizeof(c)) && !Decode(c,sizeof(c),d),"an older version (the marker its NetId): ours, not taken");
+    c[4]=2;Check(Owned(c,sizeof(c)) && !Decode(c,sizeof(c),d),"version 2 (the player's tag at bytes 0..3): ours, not taken");
+    std::memcpy(c,b,sizeof(c));std::memcpy(c+24,kEnemyId,32);
+    Check(!Decode(c,sizeof(c),d),"a marker that is no player's reference (a NetId): not taken");
+    std::memcpy(c,b,sizeof(c));std::memcpy(c+56,kTeamId,32);
+    Check(Decode(c,sizeof(c),d) && !std::memcmp(d.target,kTeamId,32),"a marked player (by its slot): taken");
+    std::memcpy(c,b,sizeof(c));c[56+21]=7;
+    Check(!Decode(c,sizeof(c),d),"a target neither a NetId nor a player's reference: not taken");
     std::memcpy(c,b,sizeof(c));c[8]|=0x80;
     Check(Decode(c,sizeof(c),d) && d.caps==kCapabilities && d.enemy,"an unknown capability bit: masked off, the rest taken");
     std::memcpy(c,b,sizeof(c));c[8]=static_cast<unsigned char>(kCapPoint);
@@ -306,6 +321,12 @@ void ShareChecks() {
           d.point && d.pointAt[2]==20.0f && d.pointLeftMs>0,"the state sent: the marker (its mission slot, not its NetId), the enemy by its native ID, the point and its time");
     sends=0;UpdateQMarkNetwork(true,2,&Send,T+10);Check(sends==0,"not again within the gap");
     UpdateQMarkNetwork(true,2,&Send,T+qmark_net::kEnemyKeepMs);Check(sends==2,"the enemy's position again on its keepalive");
+    // This machine's player fell: its marks go out cleared at once (by its slot still), not left to kSilentMs.
+    humanMem[kDead]=1;sends=0;UpdateQMarkNetwork(true,2,&Send,T+qmark_net::kEnemyKeepMs+qmark_net::kMinGapMs);
+    Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),d) && !std::memcmp(d.marker,kPlayerId,32) && !d.enemy && !d.point,
+          "a fallen player: its marks sent cleared, its marker its slot");
+    humanMem[kDead]=0;sends=0;UpdateQMarkNetwork(true,2,&Send,T+qmark_net::kEnemyKeepMs+2*qmark_net::kMinGapMs);
+    Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),d) && d.enemy && d.point,"back up: its marks again");
     // A teammate's.
     unsigned char b[qmark_net::kWireSize];
     std::memset(played,0,sizeof(played));resolves=0;

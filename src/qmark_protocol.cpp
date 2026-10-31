@@ -1,4 +1,5 @@
 #include "qmark_protocol.h"
+#include "net_object_ref.h"
 #include <cmath>
 #include <cstring>
 
@@ -20,8 +21,9 @@ std::uint32_t Get32(const unsigned char* p) noexcept {
 void PutF(unsigned char* p,float f) noexcept { std::uint32_t v;std::memcpy(&v,&f,4);Put32(p,v); }
 float GetF(const unsigned char* p) noexcept { const std::uint32_t v=Get32(p);float f;std::memcpy(&f,&v,4);return f; }
 bool Zero(const unsigned char* id) noexcept { for(int i=0;i<32;++i)if(id[i])return false;return true; }
-// A native ID as command_identity.cpp takes it (bytes 20..23 zero), or all zero (none).
-bool IdOk(const unsigned char* id) noexcept { for(int i=20;i<24;++i)if(id[i])return false;return true; }
+// The marker: a player's reference or none; the target: any object's reference or none (net_object_ref.h).
+bool MarkerOk(const unsigned char* id) noexcept { return netref::Valid(id,true,true); }
+bool TargetOk(const unsigned char* id) noexcept { return netref::Valid(id,true); }
 bool Finite(const float* v) noexcept { return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]); }
 bool Near(const float* a,const float* b) noexcept {   // the same point: within a metre (a new press elsewhere is not)
     const float d[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};
@@ -36,7 +38,7 @@ bool Owned(const void* bytes,std::size_t size) noexcept {
 }
 
 bool Encode(const State& s,void* bytes,std::size_t size) noexcept {
-    if(!bytes || size!=kWireSize || !IdOk(s.marker) || !IdOk(s.target) || s.pointLeftMs>kMaxPointMs ||
+    if(!bytes || size!=kWireSize || !MarkerOk(s.marker) || !TargetOk(s.target) || s.pointLeftMs>kMaxPointMs ||
        !Finite(s.enemyAt) || !Finite(s.pointAt))return false;
     auto* p=static_cast<unsigned char*>(bytes);
     std::memset(p,0,size);
@@ -64,7 +66,7 @@ bool Decode(const void* bytes,std::size_t size,State& out) noexcept {
     s.letGo=(s.caps&kCapLetGo) ? Get32(p+kLetGo) : 0u;
     s.enemy=(flags&kFlagEnemy)!=0 && (s.caps&kCapEnemy)!=0;
     s.point=(flags&kFlagPoint)!=0 && (s.caps&kCapPoint)!=0;
-    if(!IdOk(s.marker) || !IdOk(s.target) || !Finite(s.enemyAt) || !Finite(s.pointAt) || s.pointLeftMs>kMaxPointMs)return false;
+    if(!MarkerOk(s.marker) || !TargetOk(s.target) || !Finite(s.enemyAt) || !Finite(s.pointAt) || s.pointLeftMs>kMaxPointMs)return false;
     if(!s.enemy)std::memset(s.target,0,32);
     if(!s.point)s.pointLeftMs=0;
     out=s;

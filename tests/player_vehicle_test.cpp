@@ -64,8 +64,10 @@ void Wire() {
     Check(size==kHead+4+18 && Decode(bytes,size,back) && back.count==2 && Same(back.have[1],m.have[1]),"have round trip");
     Check(!Decode(bytes,size-1,back),"a have of the wrong size refused");
     bytes[4]=1;Check(!Decode(bytes,size,back),"an older version (the requester its NetId) refused");
-    bytes[4]=3;Check(!Decode(bytes,size,back),"a newer version refused");
-    Msg d;d.kind=Kind::decide;d.origin=9;d.seq=3;d.variant=m.have[0];d.requester[0]=1;d.requester[31]=2;
+    bytes[4]=2;Check(!Decode(bytes,size,back),"version 2 (the player's tag at bytes 0..3) refused");
+    bytes[4]=4;Check(!Decode(bytes,size,back),"a newer version refused");
+    // The requester: a player's reference (net_object_ref.h), mission player 1.
+    Msg d;d.kind=Kind::decide;d.origin=9;d.seq=3;d.variant=m.have[0];crew::netref::MakePlayer(1,d.requester);
     size=Encode(d,bytes,sizeof(bytes));
     Check(size==kDecideSize && Decode(bytes,size,back) && back.seq==3 && Same(back.variant,d.variant) && SameId(back.requester,d.requester),
           "decide round trip");
@@ -74,7 +76,9 @@ void Wire() {
     d.variant.body=VehicleBody::fighter;Check(!Encode(d,bytes,sizeof(bytes)),"a support body is no player's decision");
     d.variant.body=VehicleBody::pfighter;std::memset(d.requester,0,32);Check(!Encode(d,bytes,sizeof(bytes)),"no requester: refused");
     d.requester[0]=1;d.requester[20]=5;Check(!Encode(d,bytes,sizeof(bytes)),"a requester ID not canonical refused");
-    Msg s;s.kind=Kind::sync;s.origin=4;s.variant.body=VehicleBody::pstrike;s.seq=11;s.requester[0]=9;
+    std::memset(d.requester,0,32);d.requester[0]=1;d.requester[31]=2;Check(!Encode(d,bytes,sizeof(bytes)),"a requester by its NetId refused");
+    crew::netref::MakePlayer(1,d.requester);
+    Msg s;s.kind=Kind::sync;s.origin=4;s.variant.body=VehicleBody::pstrike;s.seq=11;crew::netref::MakePlayer(9,s.requester);
     size=Encode(s,bytes,sizeof(bytes));
     Check(size==kSyncSize && Decode(bytes,size,back) && back.kind==Kind::sync && back.seq==11,"sync round trip");
     Msg zero=s;zero.origin=0;Check(!Encode(zero,bytes,sizeof(bytes)),"no origin: refused");
@@ -141,7 +145,7 @@ struct World {
 };
 Machine* NewMachine(std::uint8_t tag,VehicleLoadout own0) {
     auto* x=new Machine;
-    x->id[0]=tag;x->id[31]=static_cast<unsigned char>(tag+100);x->origin=tag*1000u+1;
+    crew::netref::MakePlayer(tag,x->id);x->origin=tag*1000u+1;   // its player's reference (net_object_ref.h)
     x->own[0]=own0;
     return x;
 }
@@ -272,7 +276,7 @@ void Machines() {
     // Offline: the own loaded jet when its file is preloaded.
     {Engine e;const Variant av=Of(a);VehicleLoadout own[kPlayerVehicleCount]{};own[0]=a;
      e.Begin(own,kPlayerVehicleCount,&av,1);
-     unsigned char id[32]{};id[0]=1;
+     unsigned char id[32]{};crew::netref::MakePlayer(1,id);
      const Msg d=e.Decide(id,VehicleBody::pfighter,1,false);
      Check(d.variant.bits==LoadoutVariant(a) && e.Land(id,VehicleBody::pfighter,d.seq).bits==d.variant.bits,"offline: the own loaded jet");
      e.Begin(own,kPlayerVehicleCount,nullptr,0);

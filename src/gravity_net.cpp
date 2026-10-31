@@ -39,6 +39,7 @@ struct Out {
     bool holding=false;
     gravity::Target t;
     gravity_net::Grab hold{};       // its state as it goes out (origin, grab, IDs, ray, goal)
+    ObjRef by{};                    // its grabber (this machine's player): fallen mid-grab, the grab is let go (Frame)
     ULONGLONG calledAt=0,sentAt=0;
     gravity_net::Grab queue[kMostQueued]{};   // throws, let-goes, radials not sent yet
     int queued=0;
@@ -65,8 +66,16 @@ void End(gravity_net::GrabKind kind,const float* vel) noexcept {
     // Thrown, with no ID to find it by: every copy is steered by its flight from now on (FlightTick).
     if(kind==gravity_net::GrabKind::thrown && Zero(g.target))
         out.flight=Out::Flight{true,out.t,g,GameMs(),0,0};
-    out.holding=false;out.t=gravity::Target{};
+    out.holding=false;out.t=gravity::Target{};out.by=ObjRef{};
     if(netReady)Queue(g);
+}
+// The grabber still a live player? Its grab is let go the moment it falls (the peers hear the letGo; it is not held on a
+// dead player's machine's word, nor left to kHoldStaleMs).
+bool GrabberLive() noexcept {
+    __try {
+        const auto* o=static_cast<const unsigned char*>(out.by.obj);
+        return o && Readable(o,kDead+1) && out.by.Is(o) && !o[kDead] && !(o[0x18]&4);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 // ---- the peers' grabs ----
@@ -96,21 +105,26 @@ std::uint32_t HolderOf(const gravity::Target& t,ULONGLONG now) noexcept {
 bool Look(std::uint32_t peer,const gravity_net::Grab& g,ULONGLONG now) noexcept {
     In& r=in[peer];
     r.lookedAt=now;r.found=false;r.t=gravity::Target{};
-    MarkIdentities ids{};
-    if(!ResolveGrabIdentities(g.grabber,Zero(g.target) ? nullptr : g.target,&ids) || !ids.player)return false;
-    if(!SenderIsPlayer(ids.puid,r.puid)) {
+    // One walk (net_object_ref.h): the grabber by its slot, live while it holds, fallen too for what ends a grab (a throw,
+    // a flight); the target by its reference (a player by its slot: a teammate grabbed), dead or alive.
+    const unsigned char* refs[2]={g.grabber,Zero(g.target) ? nullptr : g.target};
+    const NetLife lives[2]={g.kind==gravity_net::GrabKind::hold ? NetLife::live : NetLife::present,NetLife::present};
+    NetResolved found[2]{};
+    if(!ResolveNetRefs(refs,lives,2,found) || !found[0].found)return false;
+    if(!SenderOwns(found[0],r.puid)) {
         if(logs++<32)Log("GRAVITY NET peer %u's grab names a player that is not its own: ignored",peer);
         return false;
     }
+    const ObjRef grabber=found[0].obj,target=found[1].found ? found[1].obj : ObjRef{};
     gravity::Target t;
     // Found: no longer followed here (a throw of this machine's it may still be in): its impacts and contacts are the
     // grabber's machine's to deal now, never this one's too.
-    if(ids.target && gravity::TargetOf(ids.target.obj,0xFFFFFFu,&t)){r.t=t;r.found=true;gravity::Untrack(t);return true;}
+    if(target && gravity::TargetOf(target.obj,0xFFFFFFu,&t)){r.t=t;r.found=true;gravity::Untrack(t);return true;}
     float hit[3];
-    if(gravity::Pick(g.rayA,g.rayB,ids.player.obj,&t,hit)) {
+    if(gravity::Pick(g.rayA,g.rayB,grabber.obj,&t,hit)) {
         float at[3];
         if(!gravity::Position(t,at))std::memcpy(at,hit,12);
-        const bool same=ids.target ? t.obj.obj==ids.target.obj : (Dist(hit,g.at)<=kSameAt || Dist(at,g.at)<=kSameAt);
+        const bool same=target ? t.obj.obj==target.obj : (Dist(hit,g.at)<=kSameAt || Dist(at,g.at)<=kSameAt);
         if(same){r.t=t;r.found=true;gravity::Untrack(t);return true;}
     }
     return false;
@@ -188,7 +202,9 @@ bool Hold(const Target& t,const unsigned char* by,const float* hit,const float* 
         gravity_net::Grab g{};
         g.kind=gravity_net::GrabKind::hold;
         if(!PlayerRequesterOf(by,g.grabber))return true;   // no live player: nobody else can find whose it is
-        if(t.obj.obj && !ReadNativeObjectId(static_cast<const unsigned char*>(t.obj.obj),g.target))std::memset(g.target,0,32);
+        // What is held by its reference (net_object_ref.h): a player by its slot, the rest by its NetId; none: the ray.
+        if(t.obj.obj && !EncodeNetRef(t.obj,g.target))std::memset(g.target,0,32);
+        out.by=ObjRef::Of(by);
         float at[3];
         if(hit)std::memcpy(g.at,hit,12);
         else if(gravity::Position(t,at))std::memcpy(g.at,at,12);
@@ -237,7 +253,7 @@ int Radial(const float* centre,float radius,float speed,const unsigned char* by,
 void Frame() noexcept {
     if(!InSession())return;
     const ULONGLONG now=GameMs();
-    if(out.holding && now-out.calledAt>kHoldStaleMs)End(gravity_net::GrabKind::letGo,nullptr);
+    if(out.holding && (now-out.calledAt>kHoldStaleMs || !GrabberLive()))End(gravity_net::GrabKind::letGo,nullptr);
     if(!netReady || !gravity::Ready())return;
     __try { FlightTick(now); } __except(EXCEPTION_EXECUTE_HANDLER){out.flight=Out::Flight{};}
     for(std::uint32_t p=1;p<=peerCount;++p) {
@@ -246,7 +262,7 @@ void Frame() noexcept {
 }
 
 void Reset() noexcept {
-    out.holding=false;out.t=gravity::Target{};out.queued=0;out.flight=Out::Flight{};
+    out.holding=false;out.t=gravity::Target{};out.by=ObjRef{};out.queued=0;out.flight=Out::Flight{};
     for(auto& r:in){r.t=gravity::Target{};r.found=false;r.flight=gravity::Target{};}
     inbox.Reset();
 }

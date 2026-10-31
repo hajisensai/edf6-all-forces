@@ -99,7 +99,7 @@ void PoseIndependentRestoration() {
     r.dropFrom=99;r.Step();Check(r.Lease(0,2)->phase==Phase::closed && r.Lease(0,1)->phase==Phase::active,"finishing the independent restoration preserves the live controller");
 }
 void PoseCodec() {
-    Message m;m.kind=Kind::Pose;m.epoch=1;m.lease=2;m.request=3;m.sequence=1;m.spec.profileHash=kProfile;m.spec.requesterPlayer=Id(10);m.spec.target=Id(100);strcpy_s(m.spec.ownerPuid,"player-1");m.inputSize=4;m.capability=1u<<16;
+    Message m;m.kind=Kind::Pose;m.epoch=1;m.lease=2;m.request=3;m.sequence=1;m.spec.profileHash=kProfile;m.spec.requesterPlayer=Player(10);m.spec.target=Id(100);strcpy_s(m.spec.ownerPuid,"player-1");m.inputSize=4;m.capability=1u<<16;
     std::vector<unsigned char> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"pose is an explicit canonical ECTL kind");
     auto bad=m;bad.seed=1;Check(!Encode(bad,bytes.data(),bytes.size()),"pose cannot claim input seed authority");
     bad=m;bad.capability=0;Check(!Encode(bad,bytes.data(),bytes.size()),"zero compound count rejected");

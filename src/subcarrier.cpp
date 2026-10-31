@@ -189,7 +189,7 @@ struct Sub {
     bool down[kSystemCount];          // worn out (since downAt, game ms)
     ULONGLONG downAt[kSystemCount];
     bool bayLogged;                   // the bay's launch failure was logged
-    unsigned char ownerNativeId[32]{}; // authenticated requester (player_requester.h: its mission slot), bound by the support dispatcher before activation
+    unsigned char ownerNativeId[32]{}; // authenticated requester (net_object_ref.h: its mission slot), bound by the support dispatcher before activation
     ObjRef drone[kBayDrones];         // the bay's drones out
     bool droneWeak[kBayDrones]{};      // online children retain their identity while their transaction activates
     ULONGLONG droneAt;

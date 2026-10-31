@@ -472,3 +472,5 @@ int main() {
     VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
     std::printf("enemy main accepted action fixture: %u checks, %u failures\n",checks,failures);return failures ? 1 : 0;
 }
+// Object references over the fixture's NetIds (net_object_resolve.h).
+#include "net_object_ref_stub.h"

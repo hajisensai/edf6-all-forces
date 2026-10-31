@@ -18,7 +18,7 @@ int main() {
     m.kind=4;m.origin=0x1234ABCDu;m.serial=7;m.damage=850.0f;
     m.at[0]=100.5f;m.at[1]=-3.0f;m.at[2]=2000.0f;
     m.heading[0]=0.6f;m.heading[2]=-0.8f;
-    for(int i=0;i<32;++i)m.caller[i]=static_cast<unsigned char>(i<20 ? i+1 : i>=24 ? 0x40+i : 0);
+    crew::netref::MakePlayer(5,m.caller);   // the caller's reference (net_object_ref.h): mission player 5
     unsigned char b[kWire];
     Check(Encode(m,b,sizeof(b)),"a barrage encodes");
     Msg d;
@@ -29,7 +29,8 @@ int main() {
     for(std::size_t i=crew::barrage_net::detail::kUsed;i<kWire;++i)Check(b[i]==0,"zero past what is used");
     Check(!Decode(b,sizeof(b)-1,d),"the wrong size");
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[4]=1;Check(!Decode(c,kWire,d),"an older version (the caller its NetId)");
-     c[4]=3;Check(!Decode(c,kWire,d),"another version");}
+     c[4]=2;Check(!Decode(c,kWire,d),"version 2 (the player's tag at bytes 0..3)");
+     c[4]=4;Check(!Decode(c,kWire,d),"another version");}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[8]=static_cast<unsigned char>(crew::barrage::kKinds);Check(!Decode(c,kWire,d),"an unknown kind");}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[0]^=1;Check(!Decode(c,kWire,d) && !Owned(c,kWire),"not BRGS");}
     {Msg x=m;x.heading[0]=0;x.heading[2]=0;Check(!Encode(x,b,sizeof(b)),"no heading: no barrage");}
@@ -37,7 +38,8 @@ int main() {
     {Msg x=m;x.origin=0;Check(!Encode(x,b,sizeof(b)),"no origin");}
     {Msg x=m;x.damage=-1;Check(!Encode(x,b,sizeof(b)),"a negative damage");}
     {Msg x=m;std::memset(x.caller,0,32);Check(!Encode(x,b,sizeof(b)),"no caller");}
-    {Msg x=m;x.caller[21]=1;Check(!Encode(x,b,sizeof(b)),"a caller not canonical");}
+    {Msg x=m;x.caller[21]=1;Check(!Encode(x,b,sizeof(b)),"a caller reference with a broken tag");}
+    {Msg x=m;std::memset(x.caller,0,32);x.caller[0]=7;x.caller[24]=9;Check(!Encode(x,b,sizeof(b)),"a caller by its NetId");}
     {Msg x=m;x.at[0]=NAN;Check(!Encode(x,b,sizeof(b)),"a point that is no number");}
     {Encode(m,b,sizeof(b));
      float bad=5.0f;std::memcpy(b+crew::barrage_net::detail::kHeading,&bad,4);Check(!Decode(b,sizeof(b),d),"a heading past a unit's");}

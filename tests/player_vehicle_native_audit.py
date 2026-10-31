@@ -57,7 +57,7 @@ def audit_source() -> None:
     check('if(InSession())SendMsg(m);' in hook and 'engine.Decide(' in hook and 'engine.Count(' in hook,
           'only this machine\'s request is decided (and told the room online); another\'s is counted')
     recv = body(pv, 'bool Receive(')
-    check('SenderIsPlayer(m.requester,puid' in recv and recv.index('SenderIsPlayer') < recv.index('engine.Received(m)'),
+    check('SenderOwns(who,puid)' in recv and recv.index('SenderOwns') < recv.index('engine.Received(m)'),
           'a decision / sync is taken only from the requester\'s own machine')
     install = body(pv, 'bool InstallPlayerVehicles()')
     check('AirdropWatching()' in install and 'landing=watching && AirdropWatching();' in install,

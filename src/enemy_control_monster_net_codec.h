@@ -5,7 +5,8 @@
 
 namespace crew::enemy_native::monster_wire {
 inline constexpr std::uint32_t kTag=0x31504E4Du; // MNP1
-inline constexpr std::uint8_t kVersion=1;
+// Version 2 (2026-10-31): a sample's target / extra is its object reference (net_object_ref.h: a player by its slot).
+inline constexpr std::uint8_t kVersion=2;
 inline constexpr unsigned kMaxBatch=1;
 inline constexpr std::size_t kMaxBytes=512,kHeaderBytes=8;
 inline constexpr std::size_t kEventBytes=8+8+1+16*4+16*4+kProjectileWords*4+3*4+kProjectileBytes+2+32+32+4+1+1+1;

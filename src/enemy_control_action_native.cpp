@@ -74,6 +74,9 @@ constexpr Sig kSigs[]={
 };
 constexpr unsigned kBindings=16,kQueued=64,kWords=44,kStateBytes=26,kHeaderBytes=8,kBatch=21,kPhaseSampleFrames=2;
 constexpr std::uint32_t kMagic=0x31414E45; // ENA1
+// The root states' version byte: 2 (2026-10-31) since the Deiroi attack's target (words 15..22) is an object reference
+// (net_object_ref.h: a player by its slot, never its NetId).
+constexpr unsigned char kRootVersion=2;
 struct State {
     Family family=Family::none;std::uint8_t semantic=0,serial=0;
     std::uint64_t cycle=0,entrySeed=0,variantSeed=0;bool entryKnown=false,fromDamage=false;float seconds=0;std::uint32_t frame=0;
@@ -287,7 +290,9 @@ bool Valid(const State& s) noexcept {
     if(s.family==Family::deiroi) {
         if(s.semantic==4 || s.data[2]>255 || (s.data[2]>=6 && s.data[2]!=255) || s.data[13]>1 || s.data[14]>1 ||
            !Finite(s,5,8))return false;
-        if(s.data[20] || s.data[23])return false;for(unsigned i=24;i<kWords;++i)if(s.data[i])return false;
+        // Words 15..22: the attack's target, an object reference (net_object_ref.h: a player by its slot, its tag in word 20).
+        if(s.data[23] || !netref::Valid(reinterpret_cast<const unsigned char*>(s.data+15),true))return false;
+        for(unsigned i=24;i<kWords;++i)if(s.data[i])return false;
         if(s.semantic==5){bool any=false;for(unsigned i=15;i<23;++i)any=any || s.data[i]!=0;if(!any)return false;}
         else for(unsigned i=15;i<23;++i)if(s.data[i])return false;
     } else if(s.family==Family::large) {
@@ -318,7 +323,7 @@ bool ReadState(Binding& b,State* out) noexcept {
             if(!Readable(controller,0x150))return false;
             const auto* target=At<const unsigned char*>(controller,0x140);const auto* control=At<const unsigned char*>(controller,0x148);
             if(!Readable(control,16) || At<LONG>(control,8)<=0 || !Readable(target,0x38) || At<const void*>(target,0x30)!=control ||
-               !ReadNativeObjectId(target,reinterpret_cast<unsigned char*>(s.data+15))) {
+               !EncodeNetRef(target,reinterpret_cast<unsigned char*>(s.data+15))) {
                 if(!b.observed || b.last.semantic!=5)return false;std::memcpy(s.data+15,b.last.data+15,32);
             }
         }
@@ -484,7 +489,7 @@ bool ReleaseMainTargets(Binding& b) noexcept {
 }
 Result ApplyRootStates(Binding* b,const void* bytes,std::size_t size) {
         const auto* p=static_cast<const unsigned char*>(bytes);
-        if(GetWire(p,4)!=kMagic || *p++!=1)return Result::failed;
+        if(GetWire(p,4)!=kMagic || *p++!=kRootVersion)return Result::failed;
         const unsigned count=*p++;if(!count || count>kBatch || *p++ || *p++)return Result::failed;
         const auto* end=static_cast<const unsigned char*>(bytes)+size;
         State state[kBatch]{};ObjRef stomp[kBatch]{};State previous=b->remote;bool prior=b->applied;
@@ -504,7 +509,7 @@ Result ApplyRootStates(Binding* b,const void* bytes,std::size_t size) {
                 if(!actor || !control)return Result::failed;
                 b->targetReferences[i]={actor,control};b->targetsHeld|=1u<<i;
                 unsigned char actual[32]{};
-                if(!ReadNativeObjectId(static_cast<const unsigned char*>(actor),actual) || std::memcmp(id,actual,32))return Result::pending;
+                if(!EncodeNetRef(actor,actual) || std::memcmp(id,actual,32))return Result::pending;
                 stomp[i]=b->targetReferences[i];
             }
             previous=s;prior=true;
@@ -615,7 +620,7 @@ bool CaptureNativeAction(const NativeLease& l,void* bytes,std::size_t capacity,s
                     if(required+next>limit)break;required+=next;++count;
                 }
                 if(!count)return false;
-                auto* p=static_cast<unsigned char*>(bytes);PutWire(p,kMagic,4);*p++=1;*p++=static_cast<unsigned char>(count);*p++=0;*p++=0;
+                auto* p=static_cast<unsigned char*>(bytes);PutWire(p,kMagic,4);*p++=kRootVersion;*p++=static_cast<unsigned char>(count);*p++=0;*p++=0;
                 for(unsigned i=0;i<count;++i)Encode(b->queue[(b->head+i)%kQueued],p,i ? &b->queue[(b->head+i-1)%kQueued] : nullptr);
                 *used=required;b->head=(b->head+count)%kQueued;b->count-=count;FlushFinal(*b);
             } else if(source==1) {

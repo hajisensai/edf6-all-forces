@@ -542,3 +542,5 @@ int main(int argc,char** argv){
     CHECK(destructors==faultDestructors && faultDestructors==3);VirtualFree(image,0,MEM_RELEASE);
     std::printf("Merman actual factory: %u checks, %u failures\n",checks,failures);return failures ? 1 : 0;
 }
+// Object references over the fixture's NetIds (net_object_resolve.h).
+#include "net_object_ref_stub.h"

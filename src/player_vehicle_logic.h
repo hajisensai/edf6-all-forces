@@ -105,10 +105,11 @@ inline bool ParseValue(const char* value,Variant* out,int* count) noexcept {
 }
 
 // --- The mission's messages (plugin_net.h channel PVEH, support_protocol.h kExtPlayerVehicle) ---
-// The requester is the player's requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// The requester is the player's requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 // Version 2 (2026-10-31): that ID; version 1 sent the NetId, which a guest did not find for the host's player.
+// Version 3 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23).
 inline constexpr std::uint32_t kMagic=0x48455650u;   // "PVEH"
-inline constexpr std::uint32_t kVersion=2;
+inline constexpr std::uint32_t kVersion=3;
 inline constexpr std::size_t kHead=16;                // magic, version, kind @8, origin @12
 inline constexpr std::size_t kDecideSize=kHead+8+4+4+wire::kIdBytes;   // body @16, seq @20, bits @24, requester @32
 inline constexpr std::size_t kSyncSize=kHead+8+wire::kIdBytes;          // body @16, next seq @20, requester @24
@@ -144,15 +145,15 @@ inline std::size_t Encode(const Msg& m,void* bytes,std::size_t capacity) noexcep
     } else if(m.kind==Kind::decide) {
         if(!IsPlayerBody(m.variant.body) || (m.variant.bits && !Valid(m.variant)) || wire::ZeroId(m.requester))return 0;
         w.U8(static_cast<std::uint8_t>(m.variant.body)).Seek(20).U32(m.seq)
-         .U32(static_cast<std::uint32_t>(m.variant.bits)).U32(static_cast<std::uint32_t>(m.variant.bits>>32)).Id(m.requester);
+         .U32(static_cast<std::uint32_t>(m.variant.bits)).U32(static_cast<std::uint32_t>(m.variant.bits>>32)).Ref(m.requester,false,true);
     } else {
         if(!IsPlayerBody(m.variant.body) || wire::ZeroId(m.requester))return 0;
-        w.U8(static_cast<std::uint8_t>(m.variant.body)).Seek(20).U32(m.seq).Id(m.requester);
+        w.U8(static_cast<std::uint8_t>(m.variant.body)).Seek(20).U32(m.seq).Ref(m.requester,false,true);
     }
     return w.Ok() && w.Used()==size ? size : 0;
 }
 // False: not PVEH, another version, a size its kind does not have, a variant that is no player's loaded jet, no origin,
-// no requester or one not canonical.
+// a requester that is no player's reference.
 inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
     if(!Owned(bytes,size) || size<kHead)return false;
     wire::Reader r(bytes,size);
@@ -176,12 +177,12 @@ inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
     }
     case Kind::decide:
         if(size!=kDecideSize)return false;
-        m.variant.body=static_cast<VehicleBody>(r.U8());r.Seek(20);m.seq=r.U32();m.variant.bits=bits();r.Id(m.requester);
+        m.variant.body=static_cast<VehicleBody>(r.U8());r.Seek(20);m.seq=r.U32();m.variant.bits=bits();r.Ref(m.requester,false,true);
         if(!IsPlayerBody(m.variant.body) || (m.variant.bits && !Valid(m.variant)) || wire::ZeroId(m.requester))return false;
         break;
     case Kind::sync:
         if(size!=kSyncSize)return false;
-        m.variant.body=static_cast<VehicleBody>(r.U8());r.Seek(20);m.seq=r.U32();r.Id(m.requester);
+        m.variant.body=static_cast<VehicleBody>(r.U8());r.Seek(20);m.seq=r.U32();r.Ref(m.requester,false,true);
         if(!IsPlayerBody(m.variant.body) || wire::ZeroId(m.requester))return false;
         break;
     default: return false;
