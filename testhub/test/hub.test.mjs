@@ -105,6 +105,43 @@ test('reports: a reply can mark the report done in the same step; without a stat
   assert.equal(r.reply, '已修 abc1234');
 });
 
+test('reports: the reporter follows up its own: progress, more text and files, withdraw while unhandled', async () => {
+  const e = { ...env(), ACCOUNTS: 'alice:pw:tester,bob:pw:tester,dev:pw:dev' };
+  const id = await addReport(e);
+  const other = await addReport(e, '别的');
+  await call(e, '/api/reply', { method: 'POST', data: { report_id: id, text: '在看', status: 'doing' } });
+  const mine = async (user = 'alice', ids = `${id},${other},x,999`) => (await (await call(e, '/api/report/mine?ids=' + ids, { user })).json()).reports;
+  const r = (await mine()).find((x) => x.id === id);
+  assert.equal(r.status, 'doing');
+  assert.equal(r.reply, '在看');
+  assert.ok(r.reply_at > 0);
+  assert.equal((await mine()).length, 2);
+  assert.deepEqual(await mine('bob'), []);   // not bob's
+  assert.deepEqual(await mine('alice', ''), []);
+
+  const append = (user, form) => call(e, '/api/report/append', { user, method: 'POST', raw: form });
+  const form = new FormData();
+  form.set('report_id', String(id));
+  form.set('note', '换了存档还是一样');
+  form.append('file', new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' }));
+  assert.deepEqual(await (await append('alice', form)).json(), { id, files: 1 });
+  const state = (await (await call(e, '/api/state', { user: 'alice' })).json()).reports.find((x) => x.id === id);
+  assert.match(state.note, /^炸了\n\n—— 补充 .* UTC ——\n换了存档还是一样$/);
+  assert.equal(state.files.length, 1);
+  assert.equal((await append('bob', form)).status, 404);
+  const empty = new FormData();
+  empty.set('report_id', String(id));
+  assert.equal((await append('alice', empty)).status, 400);
+
+  const withdraw = (user, rid) => call(e, '/api/report/withdraw', { user, method: 'POST', data: { report_id: rid } });
+  assert.equal((await withdraw('bob', other)).status, 404);
+  assert.equal((await withdraw('alice', other)).status, 200);
+  assert.equal((await mine()).find((x) => x.id === other).status, 'closed');
+  assert.equal((await withdraw('alice', other)).status, 409);   // already closed
+  await call(e, '/api/report_status', { method: 'POST', data: { report_id: id, status: 'done' } });
+  assert.equal((await withdraw('alice', id)).status, 409);      // the developer concluded it
+});
+
 test('cases: done (已完成) is a state of its own', async () => {
   const e = env();
   const { id } = await (await call(e, '/api/case', { method: 'POST', data: { title: 't' } })).json();

@@ -15,6 +15,10 @@ Cloudflare Worker + D1（测试版、测试项、反馈的元数据）+ R2（安
 
 反馈的处理状态（页面「反馈记录」上方一览表的「处理状态」列，开发者在表里直接改，其他人只读）：
 `open` 待处理（新反馈默认）/ `doing` 处理中 / `verify` 已修待确认 / `done` 已完成 / `closed` 不处理。
+反馈人跟进自己的反馈（测试者，或者把 QQ 群里的反馈整理过来的机器人「かぐや」，账号 `kaguya`）：
+`GET /api/report/mine?ids=1,2` 看开发者回复和处理状态；`POST /api/report/append`（multipart：`report_id`、`note`、`file`）追加说明和附件，
+说明接在原文后面、标上「补充」和时间；`POST /api/report/withdraw {report_id}` 撤回，只在「待处理 / 处理中」时可以（变成「不处理」），
+开发者给过结论的回 409。都只能动自己的反馈（开发者不限），别人的回 404。
 回复时可以顺手标状态：`testhub.py reply 12 "已在 abc1234 修复" --status done`；单独改用 `testhub.py status 12 done`。
 
 ## 关卡策划（/plan.html）
