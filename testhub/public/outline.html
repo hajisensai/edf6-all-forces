@@ -11,7 +11,7 @@
   <header class="top">
     <h1>EDF 全军出击 · 剧情大纲</h1>
     <nav><a href="/">测试</a> · <a href="/plan.html">关卡策划</a> · <a href="/story.html">MOD 剧情关卡</a> · <b>剧情大纲</b></nav>
-    <span class="me"><span id="me"></span> · <a href="/logout">退出</a></span>
+    <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
   </header>
   <p id="error" class="err hide" role="alert"></p>
   <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
@@ -25,7 +25,7 @@
         <button class="btn small hide" id="save" type="button">保存</button>
       </span>
     </div>
-    <p class="muted" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
+    <p class="muted hide" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
     <p class="muted" id="saved" role="status"></p>
     <textarea id="copyBox" class="hide" readonly aria-label="大纲文字"></textarea>
     <div id="board" aria-live="polite">加载中……</div>

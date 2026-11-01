@@ -3,7 +3,8 @@
 //  - cases: what to test, how, and its state; reports: the tester's results with logs / videos attached;
 //  - the developer's replies sit under each report.
 // Everything is behind a login (ACCOUNTS secret); scripts and the installer use HTTP Basic instead of the cookie.
-// The one exception is /download (share.js): the share package, public so a link to it can be passed around.
+// The exceptions: /download (share.js), the share package, public so a link to it can be passed around; and reading the
+// story outline (/outline.html, outline.js), so a group's outline can be shown to anyone.
 import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
@@ -19,7 +20,9 @@ const STATUSES = ['todo', 'verify', 'pass', 'fail', 'done', 'closed'];
 // The developer's handling of a report (the page's 处理状态 column): 待处理 / 处理中 / 已修待确认 / 已完成 / 不处理.
 export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 // The download page and its scripts are public too (share.js: the share package needs no account).
-const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs']);
+// So is the story outline page: anyone may read the groups' outlines, only a group's members (and developers) edit it.
+const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs',
+  '/outline.html', '/outline.js']);
 const SESSION_DAYS = 60;
 
 export default {
@@ -81,6 +84,10 @@ async function route(request, env) {
 
   const me = await who(request, env, accounts);
   if (!me) {
+    // No account at all (not wrong credentials, which stay a 401): the outline is readable as a visitor.
+    if (path === '/api/outline' && method === 'GET' && !request.headers.get('authorization')) {
+      return json(await outlineRoute(request, env, null, MISSIONS, groupsOf(accounts), path, url));
+    }
     if (path === '/' || path.endsWith('.html')) return redirect('/login.html');
     return json({ error: 'login required' }, 401, { 'www-authenticate': 'Basic realm="edf6-testhub"' });
   }
