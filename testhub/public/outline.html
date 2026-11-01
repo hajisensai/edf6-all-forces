@@ -25,7 +25,7 @@
         <button class="btn small hide" id="save" type="button">保存</button>
       </span>
     </div>
-    <p class="muted hide" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
+    <p class="muted hide" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。登录后每条线、每一步都能打分（1–5）和写评价。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
     <p class="muted" id="saved" role="status"></p>
     <textarea id="copyBox" class="hide" readonly aria-label="大纲文字"></textarea>
     <div id="board" aria-live="polite">加载中……</div>
@@ -38,6 +38,23 @@
       <label for="fBody">内容</label><textarea id="fBody" maxlength="4000"></textarea>
       <p class="row"><button class="btn ghost small danger" id="fDelete" type="button">删除这一步</button>
         <span class="row" style="margin-left:auto"><button class="btn ghost" id="fCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
+    </form>
+  </dialog>
+  <dialog id="rateDlg" class="digestBox outlineDlg" aria-labelledby="rateDlgTitle">
+    <form id="rateForm" method="dialog">
+      <h2 id="rateDlgTitle">评分与评价</h2>
+      <p class="muted" id="rSummary"></p>
+      <div id="rReviews"></div>
+      <label>我的评分</label>
+      <div class="choices" id="rScore">
+        <label><input type="radio" name="score" value="1">1</label><label><input type="radio" name="score" value="2">2</label>
+        <label><input type="radio" name="score" value="3">3</label><label><input type="radio" name="score" value="4">4</label>
+        <label><input type="radio" name="score" value="5">5</label>
+      </div>
+      <label for="rBody">我的评价（可空）</label><textarea id="rBody" maxlength="1000"></textarea>
+      <p id="rError" class="err" role="alert"></p>
+      <p class="row"><button class="btn ghost small danger hide" id="rDelete" type="button">删掉我的评分</button>
+        <span class="row" style="margin-left:auto"><button class="btn ghost" id="rCancel" type="button">关闭</button><button class="btn" id="rSave" type="submit">保存评分</button></span></p>
     </form>
   </dialog>
   <dialog id="laneDlg" class="digestBox outlineDlg" aria-labelledby="laneDlgTitle">

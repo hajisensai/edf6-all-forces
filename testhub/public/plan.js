@@ -1,5 +1,6 @@
 // The level plan page: the group's outline and its proposals (/api/plan). Everything players wrote is put on the
 // page as text nodes (h() below): no string of theirs is ever parsed as markup.
+// Anyone can read it (no account needed; then without authors or scripts); writing shows only on a group the viewer can write.
 'use strict';
 
 const STATUS = { open: '待讨论', accepted: '采纳', done: '已做', rejected: '不做' };
@@ -8,7 +9,7 @@ const $ = (id) => document.getElementById(id);
 let state = null;
 let pending = null;   // { verb: 'insert' | 'move', ...body, label }
 let editing = null;   // the proposal id the form edits
-let group = null;     // the group a developer looks at
+let group = null;     // the group being looked at
 
 // h('div', { class: 'x', onclick: f }, 'text', node, [more]): strings become text nodes.
 function h(tag, attrs, ...kids) {
@@ -74,6 +75,7 @@ function rowsHtml() {
   const counts = new Map();
   for (const p of state.proposals) if (p.kind === 'edit') counts.set(p.mission, (counts.get(p.mission) || 0) + 1);
   const needle = $('filter').value.trim().toLowerCase();
+  const w = state.editable;
   const out = [];
   if (pending) out.push(slot(null));
   let seq = 0;
@@ -82,12 +84,12 @@ function rowsHtml() {
     if (r.kind === 'loop') {
       el = h('li', { class: 'loop' },
         h('span', {}, '—— ', r.note, ' ——'),
-        h('span', { class: 'acts' },
+        w ? h('span', { class: 'acts' },
           button('改说明', () => {
             const note = prompt('分隔线的说明', r.note);
             if (note != null) act('/api/plan/loop-note', { id: r.id, note }).catch(() => {});
           }),
-          moveButton(r, '分隔线「' + r.note + '」'), removeButton(r)));
+          moveButton(r, '分隔线「' + r.note + '」'), removeButton(r)) : null);
     } else if (r.kind === 'stock') {
       const m = missions.get(r.mission);
       if (!m) continue;
@@ -103,8 +105,8 @@ function rowsHtml() {
         h('span', { class: 'acts' },
           state.digests.includes(m.key) ? button('看脚本', () => openDigest(m)) : null,
           n ? button(`意见 ${n}`, () => showOnly(m.key)) : null,
-          button('写意见', () => startProposal('edit', m.key)),
-          moveButton(r, missionName(m))));
+          w ? button('写意见', () => startProposal('edit', m.key)) : null,
+          w ? moveButton(r, missionName(m)) : null));
     } else {
       const p = proposals.get(r.proposal_id);
       seq += 1;
@@ -112,9 +114,9 @@ function rowsHtml() {
       if (needle && !`${seq} ${title}`.toLowerCase().includes(needle)) continue;
       el = h('li', { class: 'new' },
         h('span', { class: 'seq' }, seq), h('span', { class: 'tag new' }, '新关卡'), h('b', {}, ' ', title),
-        p ? h('span', { class: 'muted' }, ' · ', p.author) : null,
+        p?.author ? h('span', { class: 'muted' }, ' · ', p.author) : null,
         h('span', { class: 'acts' }, p ? button('看意见', () => showOnly('#' + p.id)) : null,
-          moveButton(r, '新关卡「' + title + '」'), removeButton(r)));
+          w ? [moveButton(r, '新关卡「' + title + '」'), removeButton(r)] : null));
     }
     out.push(el);
     if (pending) out.push(slot(r.id));
@@ -153,6 +155,8 @@ function setPending(p) {
 }
 
 function renderOutline() {
+  $('outlineTools').classList.toggle('hide', !state.editable);
+  $('formSection').classList.toggle('hide', !state.editable);
   $('pending').classList.toggle('hide', !pending);
   $('pendingText').textContent = pending ? pending.label : '';
   $('outline').replaceChildren(...rowsHtml());
@@ -197,12 +201,13 @@ function renderProposals() {
   const replies = new Map();
   for (const r of state.replies) (replies.get(r.proposal_id) || replies.set(r.proposal_id, []).get(r.proposal_id)).push(r);
   $('proposals').replaceChildren(...(list.length ? list.map((p) => proposalCard(p, missions.get(p.mission), replies.get(p.id) || []))
-    : [document.createTextNode('还没有意见。')]));
+    : [document.createTextNode(state.group == null ? '还没有哪个组写了关卡策划。' : '还没有意见。')]));
 }
 
 function proposalCard(p, m, replies) {
-  const mine = p.author === state.me.user || state.me.role === 'dev';
-  const dev = state.me.role === 'dev';
+  const w = state.editable;
+  const dev = w && state.me.role === 'dev';
+  const mine = w && (p.author === state.me.user || dev);
   const status = dev
     ? h('select', { class: 'small', onchange: (e) => act('/api/plan/proposal-status', { id: p.id, status: e.target.value }).catch(() => {}) },
       Object.entries(STATUS).map(([k, v]) => h('option', { value: k, selected: k === p.status }, v)))
@@ -212,18 +217,18 @@ function proposalCard(p, m, replies) {
     h('div', { class: 'row' },
       h('span', { class: `tag ${p.kind}` }, KIND[p.kind]), m ? h('span', { class: 'muted' }, missionName(m)) : null,
       m && state.digests.includes(m.key) ? button('看脚本', () => openDigest(m)) : null, status,
-      h('span', { class: 'muted' }, `#${p.id} · ${p.author} · ${when(p.created_at)}`, p.updated_at !== p.created_at ? ` · 改于 ${when(p.updated_at)}` : '')),
+      h('span', { class: 'muted' }, `#${p.id}${p.author ? ' · ' + p.author : ''} · ${when(p.created_at)}`, p.updated_at !== p.created_at ? ` · 改于 ${when(p.updated_at)}` : '')),
     h('h3', {}, p.title),
     p.body ? h('pre', {}, p.body) : null,
     replies.map((r) => h('div', { class: 'reply' },
-      h('span', { class: 'muted' }, `${r.author} · ${when(r.at)}`),
-      (r.author === state.me.user || dev) ? button('删除', () => {
+      h('span', { class: 'muted' }, `${r.author ? r.author + ' · ' : ''}${when(r.at)}`),
+      w && (r.author === state.me.user || dev) ? button('删除', () => {
         if (confirm('删掉这条回复？')) act('/api/plan/reply-delete', { id: r.id }).catch(() => {});
       }) : null,
       h('pre', {}, r.body))),
-    h('div', { class: 'row' }, input, button('回复', () => {
+    w ? h('div', { class: 'row' }, input, button('回复', () => {
       if (input.value.trim()) act('/api/plan/reply', { proposal_id: p.id, body: input.value }).catch(() => {});
-    })),
+    })) : null,
     mine ? h('div', { class: 'row' },
       button('编辑', () => startEdit(p)),
       button('删除意见', () => {
@@ -342,12 +347,14 @@ $('group').addEventListener('change', () => { group = $('group').value; pending 
 
 async function load() {
   state = await api('/api/plan' + (group == null ? '' : '?group=' + encodeURIComponent(group)));
-  $('me').textContent = state.me.user + (state.me.role === 'dev' ? '（开发者）' : state.me.group ? `（${state.me.group} 组）` : '');
-  if (state.me.role === 'dev') {
-    if (group == null) group = state.group;
-    $('groupBar').classList.remove('hide');
-    $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === state.group }, g || '（未分组）')));
-  }
+  group = state.group;
+  if (!state.editable) { pending = null; stopEdit(); }
+  const me = state.me;
+  $('me').textContent = !me ? '未登录（只能查看）' : me.user + (me.role === 'dev' ? '（开发者）' : me.group ? `（${me.group} 组）` : '');
+  $('auth').textContent = me ? '退出' : '登录';
+  $('auth').href = me ? '/logout' : '/login.html';
+  $('groupBar').classList.toggle('hide', state.groups.length < 2);
+  $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === state.group }, g || '（未分组）')));
   renderMissionSelect();
   renderOutline();
   renderShow();
