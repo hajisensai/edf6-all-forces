@@ -1,6 +1,7 @@
 'use strict';
 // The story outline page (/api/outline): the group's mission lines drawn as timelines, edited in place and saved
 // whole. Players' text only ever goes into text nodes (h() below), never markup.
+// Anyone can read it (no account needed); the edit controls show only on a group the viewer can write.
 
 const $ = (id) => document.getElementById(id);
 const EMPTY = { title: '', lanes: [] };
@@ -109,6 +110,9 @@ function renderLane(l) {
 
 function render() {
   $('title').textContent = data.title || '剧情大纲';
+  const canEdit = !!state?.editable;
+  $('edit').classList.toggle('hide', !canEdit);
+  $('hint').classList.toggle('hide', !canEdit);
   $('edit').textContent = editing ? '完成编辑' : '编辑';
   $('edit').disabled = busy;
   $('addLane').classList.toggle('hide', !editing);
@@ -117,7 +121,9 @@ function render() {
   $('saved').textContent = dirty ? '有改动还没保存' : state?.updated_at ? `最后由 ${state.updated_by} 于 ${when(state.updated_at)} 保存` : '';
   $('saved').classList.toggle('bad', dirty);
   if (!data.lanes.length) {
-    $('board').replaceChildren(h('p', { class: 'muted' }, editing ? '点上面的「＋ 新任务线」开始，比如「5、6代任务线」。' : '这个组还没有剧情大纲。点「编辑」，再点「＋ 新任务线」开始写。'));
+    $('board').replaceChildren(h('p', { class: 'muted' }, group == null ? '还没有哪个组写了剧情大纲。'
+      : !canEdit ? '这个组还没有剧情大纲。'
+        : editing ? '点上面的「＋ 新任务线」开始，比如「5、6代任务线」。' : '这个组还没有剧情大纲。点「编辑」，再点「＋ 新任务线」开始写。'));
     return;
   }
   const parts = [];
@@ -228,8 +234,12 @@ async function load() {
   state = await api('/api/outline' + (group == null ? '' : '?group=' + encodeURIComponent(group)));
   group = state.group;
   data = state.outline ? structuredClone(state.outline) : structuredClone(EMPTY);
-  $('me').textContent = state.me.user + (state.me.role === 'dev' ? '（开发者）' : state.me.group ? `（${state.me.group} 组）` : '');
-  $('groupBar').classList.toggle('hide', state.me.role !== 'dev');
+  if (!state.editable) editing = false;
+  const me = state.me;
+  $('me').textContent = !me ? '未登录（只能查看）' : me.user + (me.role === 'dev' ? '（开发者）' : me.group ? `（${me.group} 组）` : '');
+  $('auth').textContent = me ? '退出' : '登录';
+  $('auth').href = me ? '/logout' : '/login.html';
+  $('groupBar').classList.toggle('hide', state.groups.length < 2);
   $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === group }, g || '（未分组）')));
   render();
 }

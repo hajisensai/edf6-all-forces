@@ -3,6 +3,9 @@
 // list it is one document, saved whole: every save names the version it was edited from, so two people editing at
 // once cannot silently overwrite each other (the later save gets a 409 and reloads).
 // Players' text: cleaned like the plan (clean()), rendered as text only (public/outline.js), rate limited per account.
+// Reading is open to everyone, visitors without an account included; writing stays with the group's members and developers.
+// A group with nothing written yet is listed only to those who can write it.
+import { GROUP } from './auth.js';
 import { Plan, clean, scope } from './plan.js';
 import { HttpError, body } from './http.js';
 
@@ -45,10 +48,23 @@ export function normalize(raw) {
 export async function outlineRoute(request, env, me, missions, groups, path, url) {
   const db = env.DB;
   if (path === '/api/outline' && request.method === 'GET') {
-    const group = scope(me, url.searchParams.get('group'));
-    const row = await db.prepare('SELECT * FROM story_outline WHERE grp = ?1').bind(group).first();
+    // me = null: a visitor without an account.
+    const editable = (g) => me != null && (me.role === 'dev' || me.group === g);
+    const filled = new Set((await db.prepare("SELECT grp FROM story_outline WHERE json_array_length(data, '$.lanes') > 0").all())
+      .results.map((r) => r.grp));
+    const shown = groups.filter((g) => filled.has(g) || editable(g));
+    const asked = url.searchParams.get('group');
+    let group;
+    if (asked != null) {
+      if (!GROUP.test(asked)) throw new HttpError(400, 'bad group');
+      if (!shown.includes(asked)) throw new HttpError(404, '这个组还没有剧情大纲');
+      group = asked;
+    } else {
+      group = me && shown.includes(me.group) ? me.group : shown[0] ?? null;   // own group first (a developer's: the ungrouped one)
+    }
+    const row = group == null ? null : await db.prepare('SELECT * FROM story_outline WHERE grp = ?1').bind(group).first();
     return {
-      me: { user: me.user, role: me.role, group: me.group }, group, groups: me.role === 'dev' ? groups : [group],
+      me: me && { user: me.user, role: me.role, group: me.group }, group, groups: shown, editable: group != null && editable(group),
       outline: row ? JSON.parse(row.data) : null, version: row ? row.version : 0,
       updated_by: row?.updated_by ?? null, updated_at: row?.updated_at ?? null,
     };

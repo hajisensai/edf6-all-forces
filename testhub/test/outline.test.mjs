@@ -16,7 +16,8 @@ function call(e, path, data, user = 'alice') {
     body: data === undefined ? undefined : JSON.stringify(data),
   }), e);
 }
-const get = async (e, user = 'alice', group = '') => (await call(e, '/api/outline?group=' + group, undefined, user)).json();
+const get = async (e, user = 'alice', group) => (await call(e, '/api/outline' + (group == null ? '' : '?group=' + group), undefined, user)).json();
+const visit = (e, query = '') => worker.fetch(new Request('https://edf6.test/api/outline' + query), e);
 const sample = () => ({ title: '轮回剧情大纲', lanes: [
   { id: 'l56', name: '5、6代任务线', tone: 'edf', note: '', after: [], steps: [{ id: 's1', title: '第一次轮回', tag: '轮回 1', body: '一块把传送门炸了' }] },
   { id: 'lmix', name: '融合线', tone: 'violet', note: '', after: ['l56', 'nope', 'lmix'], steps: [] },
@@ -41,14 +42,49 @@ test('outline: a group shares one outline; saves compare-and-set on the version'
   assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 0 })).status, 409);
 });
 
-test('outline: groups are isolated; developers pick the group', async () => {
+test('outline: everyone reads every written group, only members and developers write it', async () => {
   const e = env();
   await call(e, '/api/outline/save', { outline: sample(), version: 0 });
-  assert.equal((await get(e, 'bob')).outline, null);
-  assert.equal((await get(e, 'bob', 'a')).outline, null);   // a tester cannot look into another group
-  assert.equal((await get(e, 'dev', 'a')).outline.lanes.length, 2);
-  assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 0, group: 'b' }, 'dev')).status, 200);
-  assert.equal((await get(e, 'bob')).version, 1);
+  const own = await get(e, 'bob');
+  assert.equal(own.group, 'b');
+  assert.equal(own.outline, null);
+  assert.equal(own.editable, true);
+  assert.deepEqual(own.groups, ['a', 'b']);   // its own empty group, plus the written one
+  const other = await get(e, 'bob', 'a');
+  assert.equal(other.outline.lanes.length, 2);
+  assert.equal(other.editable, false);
+  // a save always lands in the tester's own group, never the one it was reading
+  assert.equal((await call(e, '/api/outline/save', { outline: { title: '', lanes: [] }, version: 0, group: 'a' }, 'bob')).status, 200);
+  assert.equal((await get(e, 'alice')).version, 1);
+  assert.equal((await get(e, 'dev', 'a')).editable, true);
+  assert.deepEqual((await get(e, 'dev')).groups, ['', 'a', 'b']);   // a developer sees every group, empty or not
+  assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 1, group: 'b' }, 'dev')).status, 200);
+  assert.equal((await get(e, 'bob')).version, 2);
+});
+
+test('outline: visitors without an account read written groups only', async () => {
+  const e = env();
+  let v = await (await visit(e)).json();
+  assert.deepEqual([v.me, v.group, v.groups, v.outline, v.editable], [null, null, [], null, false]);
+  await call(e, '/api/outline/save', { outline: sample(), version: 0 });
+  await call(e, '/api/outline/save', { outline: { title: '', lanes: [] }, version: 0 }, 'bob');   // saved, but empty
+  v = await (await visit(e)).json();
+  assert.deepEqual(v.groups, ['a']);
+  assert.equal(v.group, 'a');
+  assert.equal(v.outline.lanes.length, 2);
+  assert.equal(v.editable, false);
+  assert.equal((await visit(e, '?group=b')).status, 404);
+  assert.equal((await visit(e, '?group=nobody')).status, 404);
+  assert.equal((await visit(e, '?group=%3Cx%3E')).status, 400);
+  assert.deepEqual((await get(e, 'alice')).groups, ['a']);   // bob's empty group is hidden from other groups too
+  // writing still needs an account; wrong credentials are refused, not treated as a visitor
+  const save = await worker.fetch(new Request('https://edf6.test/api/outline/save', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ outline: sample(), version: 1, group: 'a' }) }), e);
+  assert.equal(save.status, 401);
+  const wrong = await worker.fetch(new Request('https://edf6.test/api/outline', { headers: { authorization: 'Basic ' + btoa('alice:nope') } }), e);
+  assert.equal(wrong.status, 401);
+  assert.equal((await worker.fetch(new Request('https://edf6.test/outline.html'), e)).status, 200);
+  assert.equal((await worker.fetch(new Request('https://edf6.test/story.html'), e)).status, 303);   // the rest stays behind the login
 });
 
 test('outline: validation, clean text, limits and rate', async () => {
@@ -73,7 +109,6 @@ test('outline: validation, clean text, limits and rate', async () => {
   e.DB.raw.prepare('DELETE FROM write_log').run();
   for (let i = 0; i < perWindow; i++) e.DB.raw.prepare('INSERT INTO write_log (author, at) VALUES (?, ?)').run('alice', Date.now());
   assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 1 })).status, 429);
-  assert.equal((await worker.fetch(new Request('https://edf6.test/api/outline'), e)).status, 401);
 });
 
 test('outline migration is repeatable', () => {
