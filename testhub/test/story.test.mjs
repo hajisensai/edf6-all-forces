@@ -17,7 +17,7 @@ function call(e, path, data, user = 'alice') {
   }), e);
 }
 const draft = (title, extra = {}) => ({ title, body: '剧情\n下一段', status: 'planned', ...extra });
-const rows = async (e, user = 'alice', group = '') => (await (await call(e, '/api/story?group=' + group, undefined, user)).json()).rows;
+const rows = async (e, user = 'alice', group) => (await (await call(e, '/api/story' + (group == null ? '' : '?group=' + group), undefined, user)).json()).rows;
 
 test('story: creation, edit and deletion are separate from the planning outline', async () => {
   const e = env();
@@ -38,7 +38,10 @@ test('story: groups are isolated; only authors and developers edit or delete', a
   const e = env();
   const { id } = await (await call(e, '/api/story/save', draft('本组', { group: 'b' }))).json();
   assert.equal((await rows(e)).length, 1);
-  assert.deepEqual(await rows(e, 'bob', 'a'), []);
+  assert.deepEqual(await rows(e, 'bob'), []);
+  const other = await (await call(e, '/api/story?group=a', undefined, 'bob')).json();   // readable, not writable
+  assert.equal(other.rows[0].title, '本组');
+  assert.equal(other.editable, false);
   assert.equal((await call(e, '/api/story/save', draft('篡改', { id }), 'bob')).status, 404);
   assert.equal((await call(e, '/api/story/move', { id, direction: 'up' }, 'bob')).status, 404);
   assert.equal((await call(e, '/api/story/remove', { id }, 'amy')).status, 403);
@@ -80,12 +83,18 @@ test('story: a mission jumps straight to any place in one move', async () => {
 
 test('story: authentication, validation, clean text and write limits', async () => {
   const e = env();
-  assert.equal((await worker.fetch(new Request('https://edf6.test/api/story'), e)).status, 401);
+  const visitor = (path, init) => worker.fetch(new Request('https://edf6.test' + path, init), e);
+  assert.equal((await visitor('/api/story/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft('x')) })).status, 401);
+  assert.deepEqual((await (await visitor('/api/story')).json()).groups, []);
+  await call(e, '/api/story/save', draft('公开'));
+  const seen = await (await visitor('/api/story')).json();
+  assert.deepEqual([seen.me, seen.group, seen.editable, seen.rows[0].title, seen.rows[0].author], [null, 'a', false, '公开', null]);
+  assert.equal((await visitor('/story.html')).status, 200);
   for (const data of [null, [], draft(''), draft('x', { status: 'invalid' }), draft('x', { mission: 'EDF7/M1' }), draft('x', { id: 'oops' })]) {
     assert.equal((await call(e, '/api/story/save', data)).status, 400);
   }
   const { id } = await (await call(e, '/api/story/save', draft('a\u202Eb <img src=x>', { body: 'x\u0007y' }))).json();
-  const [saved] = await rows(e);
+  const saved = (await rows(e)).at(-1);
   assert.equal(saved.title, 'ab <img src=x>');
   assert.equal(saved.body, 'xy');
   assert.equal((await call(e, '/api/story/move', { id, direction: 'sideways' })).status, 400);

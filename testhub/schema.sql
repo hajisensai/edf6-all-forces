@@ -119,3 +119,14 @@ CREATE TABLE IF NOT EXISTS story_outline (
   updated_by TEXT,
   updated_at INTEGER
 );
+
+-- Scores and reviews on the story outline's lines and steps, one per account and item (migrations/0004).
+CREATE TABLE IF NOT EXISTS outline_ratings (
+  grp TEXT NOT NULL,
+  item TEXT NOT NULL,               -- a lane's or a step's id in that group's outline
+  author TEXT NOT NULL,
+  score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
+  body TEXT NOT NULL DEFAULT '',
+  at INTEGER NOT NULL,
+  PRIMARY KEY (grp, item, author)
+);
