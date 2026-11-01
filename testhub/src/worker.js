@@ -8,6 +8,7 @@ import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from '.
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
+import { outlineRoute } from './outline.js';
 import { shareRoute, putSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
@@ -88,6 +89,10 @@ async function route(request, env) {
   if (path === '/api/missions' && method === 'GET') return json({ me, missions: MISSIONS });
   if (path === '/api/story' || path.startsWith('/api/story/')) {
     const out = await storyRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
+    if (out) return json(out);
+  }
+  if (path === '/api/outline' || path.startsWith('/api/outline/')) {
+    const out = await outlineRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
     if (out) return json(out);
   }
   if (path === '/api/state' && method === 'GET') return json(await state(env, me));
