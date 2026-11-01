@@ -183,7 +183,7 @@ test('worker: pages and replies carry the security headers', async () => {
   }
 });
 
-test('mission catalog is authenticated and read-only, without creating a group outline', async () => {
+test('mission catalog is read-only and public, without creating a group outline', async () => {
   const e = wenv();
   const response = await call(e, '/api/missions');
   assert.equal(response.status, 200);
@@ -191,8 +191,9 @@ test('mission catalog is authenticated and read-only, without creating a group o
   assert.equal(catalog.me.user, 'alice');
   assert.equal(catalog.missions.length, 424);
   assert.equal(e.DB.raw.prepare('SELECT COUNT(*) AS n FROM outline').get().n, 0);
-  const denied = await worker.fetch(new Request('https://edf6.test/api/missions'), e);
-  assert.equal(denied.status, 401);
+  const visitor = await (await worker.fetch(new Request('https://edf6.test/api/missions'), e)).json();
+  assert.equal(visitor.me, null);
+  assert.equal(visitor.missions.length, 424);
 });
 
 test('worker: cross-site writes, non-JSON bodies and unknown actions are refused', async () => {
@@ -208,17 +209,49 @@ test('worker: cross-site writes, non-JSON bodies and unknown actions are refused
   assert.equal((await call(e, '/api/plan/__proto__', { method: 'POST', data: {} })).status, 404);
 });
 
-test('worker: a player asking for another group gets their own; the developer sees every group', async () => {
+test('worker: players read written groups but write only their own; the developer sees every group', async () => {
   const e = wenv();
   await call(e, '/api/plan/proposal', { method: 'POST', data: { kind: 'new', title: 'a 组的' } });
+  const own = await (await call(e, '/api/plan', { user: 'bob' })).json();
+  assert.equal(own.group, 'b');
+  assert.equal(own.editable, true);
+  assert.deepEqual(own.groups, ['a', 'b']);
   const bob = await (await call(e, '/api/plan?group=a', { user: 'bob' })).json();
-  assert.equal(bob.group, 'b');
-  assert.equal(bob.proposals.length, 0);
-  assert.deepEqual(bob.groups, ['b']);
+  assert.equal(bob.group, 'a');
+  assert.equal(bob.editable, false);
+  assert.equal(bob.proposals[0].author, 'alice');
+  // a write lands in bob's own group whatever group it names
+  const id = bob.proposals[0].id;
+  assert.equal((await call(e, '/api/plan/reply', { user: 'bob', method: 'POST', data: { group: 'a', proposal_id: id, body: 'x' } })).status, 404);
+  assert.equal((await (await call(e, '/api/plan?group=nobody', { user: 'bob' })).json()).group, 'b');   // unlisted: back to its own
   const devView = await (await call(e, '/api/plan?group=a', { user: 'dev' })).json();
   assert.equal(devView.proposals[0].title, 'a 组的');
   assert.deepEqual(devView.groups, ['', 'a', 'b']);
   assert.ok(devView.missions.length > 280);   // EDF6 and EDF5
+});
+
+test('worker: visitors read the plan of written groups, without authors or script digests', async () => {
+  const e = wenv();
+  const visit = async (q = '') => (await worker.fetch(new Request('https://edf6.test/api/plan' + q), e)).json();
+  const none = await visit();
+  assert.deepEqual([none.me, none.group, none.groups, none.editable, none.proposals], [null, null, [], false, []]);
+  const { id } = await (await call(e, '/api/plan/proposal', { method: 'POST', data: { kind: 'new', title: 'a 组的', body: '想法' } })).json();
+  await call(e, '/api/plan/reply', { method: 'POST', data: { proposal_id: id, body: '回复' } });
+  await worker.fetch(new Request('https://edf6.test/api/plan/digest?mission=EDF6%2FM001', { method: 'PUT', body: 'script',
+    headers: { authorization: 'Basic ' + btoa('dev:pw') } }), e);
+  const v = await visit();
+  assert.equal(v.group, 'a');
+  assert.deepEqual(v.groups, ['a']);
+  assert.equal(v.editable, false);
+  assert.equal(v.proposals[0].title, 'a 组的');
+  assert.equal(v.proposals[0].author, null);
+  assert.equal(v.replies[0].author, null);
+  assert.deepEqual(v.digests, []);
+  assert.equal((await worker.fetch(new Request('https://edf6.test/api/plan/digest?mission=EDF6%2FM001'), e)).status, 401);
+  const write = await worker.fetch(new Request('https://edf6.test/api/plan/reply', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ proposal_id: id, body: 'x' }) }), e);
+  assert.equal(write.status, 401);
+  assert.equal((await worker.fetch(new Request('https://edf6.test/plan.html'), e)).status, 200);
 });
 
 test('worker: script digests are uploaded by developers and read by every account', async () => {

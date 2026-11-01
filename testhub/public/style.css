@@ -102,6 +102,7 @@ main.wide { max-width: 1200px; }
 .olLane[data-tone="hazard"] { --tone: var(--warn); }
 .olLane[data-tone="violet"] { --tone: #7c5cc4; }
 .olName { margin: 0; font-size: 17px; }
+.olRate { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 4px; font-size: 13px; color: var(--warn); }
 .olNote { white-space: pre-wrap; margin: 4px 0 0; }
 .olSteps { list-style: none; margin: 10px 0 0; padding: 0; }
 .olStep { position: relative; padding: 0 0 14px 32px; min-width: 0; }

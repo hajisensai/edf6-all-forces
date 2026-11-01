@@ -73,8 +73,11 @@ test('outline: visitors without an account read written groups only', async () =
   assert.equal(v.group, 'a');
   assert.equal(v.outline.lanes.length, 2);
   assert.equal(v.editable, false);
-  assert.equal((await visit(e, '?group=b')).status, 404);
-  assert.equal((await visit(e, '?group=nobody')).status, 404);
+  assert.equal((await (await visit(e, '?group=b')).json()).group, 'a');   // an empty group is not shown, even when asked for
+  assert.equal((await (await visit(e, '?group=nobody')).json()).group, 'a');
+  assert.equal(v.updated_by, null);   // who saved it, and when, only with an account
+  assert.equal(v.updated_at, null);
+  assert.equal((await get(e, 'bob', 'a')).updated_by, 'alice');
   assert.equal((await visit(e, '?group=%3Cx%3E')).status, 400);
   assert.deepEqual((await get(e, 'alice')).groups, ['a']);   // bob's empty group is hidden from other groups too
   // writing still needs an account; wrong credentials are refused, not treated as a visitor
@@ -84,7 +87,40 @@ test('outline: visitors without an account read written groups only', async () =
   const wrong = await worker.fetch(new Request('https://edf6.test/api/outline', { headers: { authorization: 'Basic ' + btoa('alice:nope') } }), e);
   assert.equal(wrong.status, 401);
   assert.equal((await worker.fetch(new Request('https://edf6.test/outline.html'), e)).status, 200);
-  assert.equal((await worker.fetch(new Request('https://edf6.test/story.html'), e)).status, 303);   // the rest stays behind the login
+  assert.equal((await worker.fetch(new Request('https://edf6.test/index.html'), e)).status, 303);   // the test pages stay behind the login
+});
+
+test('outline: any account scores and reviews lines and steps; visitors see only the average and count', async () => {
+  const e = env();
+  await call(e, '/api/outline/save', { outline: sample(), version: 0 });
+  const rate = (user, data) => call(e, '/api/outline/rate', { group: 'a', ...data }, user);
+  assert.equal((await rate('alice', { item: 's1', score: 5, body: '好' })).status, 200);
+  assert.equal((await rate('bob', { item: 's1', score: 2, body: 'x\u202Ey' })).status, 200);   // another group may rate too
+  const back = await (await rate('bob', { item: 'lmix', score: 4 })).json();
+  assert.deepEqual(back.scores.lmix, { avg: 4, n: 1 });
+  assert.equal((await rate('bob', { item: 's1', score: 3, body: '改主意了' })).status, 200);   // replaces bob's own
+  for (const bad of [{ item: 's1', score: 0 }, { item: 's1', score: 6 }, { item: 's1', score: 2.5 }, { item: 's1', score: '4' }]) {
+    assert.equal((await rate('bob', bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await rate('bob', { item: 'nope', score: 3 })).status, 404);
+  assert.equal((await call(e, '/api/outline/rate', { group: 'b', item: 's1', score: 3 }, 'bob')).status, 404);
+  const seen = await get(e, 'amy');
+  assert.deepEqual(seen.scores.s1, { avg: 4, n: 2 });
+  assert.deepEqual(seen.reviews.s1.map((r) => [r.author, r.score, r.body]), [['alice', 5, '好'], ['bob', 3, '改主意了']]);
+  const v = await (await visit(e)).json();
+  assert.deepEqual(v.scores, { s1: { avg: 4, n: 2 }, lmix: { avg: 4, n: 1 } });
+  assert.equal(v.reviews, undefined);
+  const anon = await worker.fetch(new Request('https://edf6.test/api/outline/rate', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ group: 'a', item: 's1', score: 5 }) }), e);
+  assert.equal(anon.status, 401);
+  assert.equal((await call(e, '/api/outline/unrate', { group: 'a', item: 's1' }, 'bob')).status, 200);
+  assert.deepEqual((await get(e)).scores.s1, { avg: 5, n: 1 });
+  // a step deleted from the outline takes its scores with it
+  const edited = (await get(e)).outline;
+  edited.lanes[0].steps = [];
+  assert.equal((await call(e, '/api/outline/save', { outline: edited, version: 1 })).status, 200);
+  assert.equal(e.DB.raw.prepare("SELECT COUNT(*) AS n FROM outline_ratings WHERE item = 's1'").get().n, 0);
+  assert.deepEqual((await get(e)).scores, { lmix: { avg: 4, n: 1 } });
 });
 
 test('outline: validation, clean text, limits and rate', async () => {
@@ -111,9 +147,11 @@ test('outline: validation, clean text, limits and rate', async () => {
   assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 1 })).status, 429);
 });
 
-test('outline migration is repeatable', () => {
+test('outline migrations are repeatable', () => {
   const e = env();
-  const sql = readFileSync(new URL('../migrations/0003-story-outline.sql', import.meta.url), 'utf8');
-  e.DB.raw.exec(sql);
-  e.DB.raw.exec(sql);
+  for (const file of ['0003-story-outline.sql', '0004-outline-ratings.sql']) {
+    const sql = readFileSync(new URL('../migrations/' + file, import.meta.url), 'utf8');
+    e.DB.raw.exec(sql);
+    e.DB.raw.exec(sql);
+  }
 });

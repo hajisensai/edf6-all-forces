@@ -2,6 +2,7 @@
 // The story outline page (/api/outline): the group's mission lines drawn as timelines, edited in place and saved
 // whole. Players' text only ever goes into text nodes (h() below), never markup.
 // Anyone can read it (no account needed); the edit controls show only on a group the viewer can write.
+// Every line and step shows its average score; with an account it can be scored and reviewed (visitors see only the score).
 
 const $ = (id) => document.getElementById(id);
 const EMPTY = { title: '', lanes: [] };
@@ -81,6 +82,17 @@ function mergeBand(row) {
   return h('div', { class: 'olMerge' }, svg, h('span', {}, from.map((l) => l.name).join(' ＋ ') + ' 汇入'));
 }
 
+// An item's score (lane or step id), and with an account the button that opens its reviews.
+function rating(id, label) {
+  if (editing) return null;
+  const x = state?.scores?.[id];
+  const text = x ? `★ ${x.avg.toFixed(1)} · ${x.n} 人评分` : '还没有评分';
+  if (!state?.me) return x ? h('span', { class: 'olRate' }, text) : null;
+  const mine = (state.reviews?.[id] || []).some((r) => r.author === state.me.user);
+  return h('span', { class: 'olRate' }, text, ' ',
+    h('button', { type: 'button', class: 'btn ghost small', onclick: () => openRate(id, label) }, mine ? '看评价 / 改我的评分' : '看评价 / 评分'));
+}
+
 function newStep() { return { id: uid(), tag: '', title: '新的一步', body: '' }; }
 
 function renderLane(l) {
@@ -92,7 +104,8 @@ function renderLane(l) {
       onclick: () => editing && openStep(l, s),
       onkeydown: (e) => { if (editing && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openStep(l, s); } } },
       h('h3', {}, s.title, s.tag ? h('span', { class: 'olTag' }, s.tag) : null),
-      s.body ? h('p', {}, s.body) : null),
+      s.body ? h('p', {}, s.body) : null,
+      rating(s.id, `${l.name} · 第 ${i + 1} 步「${s.title}」`)),
     editing ? h('div', { class: 'row olTools' },
       small('上移', () => { swap(l.steps, i, -1); changed(); }, i === 0),
       small('下移', () => { swap(l.steps, i, 1); changed(); }, i === l.steps.length - 1),
@@ -100,6 +113,7 @@ function renderLane(l) {
   return h('div', { class: 'olLane', 'data-tone': l.tone || 'edf' },
     h('div', { class: 'row' }, h('h3', { class: 'olName' }, l.name), h('span', { class: 'muted' }, `${l.steps.length} 步`)),
     l.note ? h('p', { class: 'muted olNote' }, l.note) : null,
+    rating(l.id, `任务线「${l.name}」`),
     editing ? h('div', { class: 'row olTools' },
       small('改名称 / 说明 / 汇合', () => openLane(l)),
       small('往前', () => { swap(data.lanes, li, -1); changed(); }, li === 0),
@@ -199,6 +213,45 @@ $('lDelete').addEventListener('click', () => {
   changed();
 });
 $('laneDlg').addEventListener('close', () => { $('lDelete').dataset.armed = ''; $('lDelete').textContent = '删除整条线'; });
+
+// ------------------------------------------------------------ scores and reviews
+
+function openRate(id, label) {
+  current = { rate: id };
+  const all = state.reviews?.[id] || [];
+  const mine = all.find((r) => r.author === state.me.user);
+  const x = state.scores?.[id];
+  $('rateDlgTitle').textContent = label;
+  $('rSummary').textContent = x ? `平均 ${x.avg.toFixed(1)} 分，${x.n} 人评分` : '还没有人评分';
+  $('rReviews').replaceChildren(...all.map((r) => h('div', { class: 'reply' },
+    h('span', { class: 'muted' }, `${r.author} · ${'★'.repeat(r.score)}${'☆'.repeat(5 - r.score)} · ${when(r.at)}`),
+    r.body ? h('pre', {}, r.body) : null)));
+  for (const r of document.querySelectorAll('#rScore input')) r.checked = mine ? Number(r.value) === mine.score : false;
+  $('rBody').value = mine?.body || '';
+  $('rDelete').classList.toggle('hide', !mine);
+  $('rError').textContent = '';
+  $('rateDlg').showModal();
+}
+async function rate(path, payload) {
+  const out = await api(path, { item: current.rate, ...payload });
+  state.scores = out.scores;
+  state.reviews = out.reviews;
+  render();
+}
+$('rateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pick = document.querySelector('#rScore input:checked');
+  if (!pick) { $('rError').textContent = '先选一个分数（1–5）'; return; }
+  try { await rate('/api/outline/rate', { score: Number(pick.value), body: $('rBody').value }); $('rateDlg').close(); }
+  catch (err) { $('rError').textContent = '没有存上：' + err.message; }
+});
+$('rDelete').addEventListener('click', async () => {
+  if (!armed($('rDelete'), '再点一次确认删掉')) return;
+  try { await rate('/api/outline/unrate', {}); $('rateDlg').close(); }
+  catch (err) { $('rError').textContent = '没有删掉：' + err.message; }
+});
+$('rCancel').addEventListener('click', () => $('rateDlg').close());
+$('rateDlg').addEventListener('close', () => { $('rDelete').dataset.armed = ''; $('rDelete').textContent = '删掉我的评分'; });
 
 function asText() {
   return rows().flat().map((l) => [

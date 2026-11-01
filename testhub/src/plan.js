@@ -5,7 +5,8 @@
 // Poisoning: whatever players write is data. It is stored cleaned (clean(): no control, direction or zero-width
 // characters, bounded length), shown only as text (public/plan.js builds DOM nodes, never markup), fenced as
 // untrusted when the developer pulls it (tools/testhub.py plan), and every write is rate limited per account.
-// A group sees only its own rows; developers see every group.
+// Anyone may read any group that has something written (a visitor without an account too, me = null; authors are
+// left out for visitors); a group writes only its own rows, developers every group's.
 import { GROUP } from './auth.js';
 import { HttpError, body } from './http.js';
 
@@ -36,6 +37,31 @@ export function scope(me, asked) {
   return g;
 }
 
+// Who can write a group's rows: its members and developers (me = null: a visitor, nobody's member).
+export function canWrite(me, grp) {
+  return me != null && (me.role === 'dev' || me.group === grp);
+}
+
+// The groups listed to a reader: those with something written (`filled`, an SQL query of grp values), and an empty
+// one only to those who can write it.
+export async function readable(db, me, groups, filled) {
+  const has = new Set((await db.prepare(filled).all()).results.map((r) => r.grp));
+  return groups.filter((g) => has.has(g) || canWrite(me, g));
+}
+
+// The group a read shows: the one asked for if it is listed, else the reader's own, else the first listed; null when
+// nothing is listed.
+export function pick(me, asked, shown) {
+  if (asked != null && !GROUP.test(asked)) throw new HttpError(400, 'bad group');
+  if (asked != null && shown.includes(asked)) return asked;
+  return me && shown.includes(me.group) ? me.group : shown[0] ?? null;
+}
+
+// For a visitor: the rows without who wrote them.
+export function anonymous(me, rows, fields = ['author']) {
+  return me ? rows : rows.map((r) => ({ ...r, ...Object.fromEntries(fields.map((f) => [f, null])) }));
+}
+
 // An id from a request: a whole number, else a 400 (not NaN bound into SQL).
 export function int(value) {
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
@@ -56,14 +82,17 @@ export class Plan {
   constructor(env, me, missions) {
     this.db = env.DB;
     this.me = me;
-    this.dev = me.role === 'dev';
+    this.dev = me?.role === 'dev';
     this.missions = missions;
     this.keys = new Set(missions.map((m) => m.key));
   }
 
   // ------------------------------------------------------------ reads
 
+  // grp = null: no group to show (a visitor, and nobody has written anything yet).
   async state(grp, groups) {
+    const me = this.me && { user: this.me.user, role: this.me.role, group: this.me.group };
+    if (grp == null) return { me, group: null, groups, editable: false, missions: this.missions, outline: [], proposals: [], replies: [], digests: [] };
     await this.seed(grp);
     const [outline, proposals, replies, digests] = await Promise.all([
       this.db.prepare('SELECT id, kind, mission, proposal_id, note, author, at FROM outline WHERE grp = ?1 ORDER BY sort, id').bind(grp).all(),
@@ -71,10 +100,11 @@ export class Plan {
       this.db.prepare('SELECT r.* FROM proposal_replies r JOIN proposals p ON p.id = r.proposal_id WHERE p.grp = ?1 ORDER BY r.id').bind(grp).all(),
       this.db.prepare('SELECT mission FROM mission_digests').all(),
     ]);
+    // The script digests are the game's own files: listed (and readable) only with an account.
     return {
-      me: { user: this.me.user, role: this.me.role, group: this.me.group }, group: grp, groups: this.dev ? groups : [grp],
-      missions: this.missions, outline: outline.results, proposals: proposals.results.map(({ grp: _, ...p }) => p),
-      replies: replies.results, digests: digests.results.map((d) => d.mission),
+      me, group: grp, groups, editable: canWrite(this.me, grp),
+      missions: this.missions, outline: anonymous(me, outline.results), proposals: anonymous(me, proposals.results.map(({ grp: _, ...p }) => p)),
+      replies: anonymous(me, replies.results), digests: me ? digests.results.map((d) => d.mission) : [],
     };
   }
 
@@ -306,7 +336,10 @@ const ACTIONS = {
 
 export async function planRoute(request, env, me, missions, groups, path, url) {
   const plan = new Plan(env, me, missions);
-  if (path === '/api/plan' && request.method === 'GET') return plan.state(scope(me, url.searchParams.get('group')), groups);
+  if (path === '/api/plan' && request.method === 'GET') {
+    const shown = await readable(env.DB, me, groups, "SELECT grp FROM proposals UNION SELECT grp FROM outline WHERE kind != 'stock'");
+    return plan.state(pick(me, url.searchParams.get('group'), shown), shown);
+  }
   if (path === '/api/plan/digest' && request.method === 'GET') return plan.digest(url.searchParams.get('mission'));
   if (path === '/api/plan/digest' && request.method === 'PUT') {
     if (me.role !== 'dev') throw new HttpError(403, 'developer only');   // before reading the body

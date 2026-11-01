@@ -1,5 +1,5 @@
 // Custom story missions are group-owned data, independent of the stock planning outline.
-import { Plan, between, clean, int, scope } from './plan.js';
+import { Plan, anonymous, between, canWrite, clean, int, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
 
 const STATUSES = ['planned', 'writing', 'testing', 'done'];
@@ -9,9 +9,11 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
   const plan = new Plan(env, me, missions);
   const db = env.DB;
   if (path === '/api/story' && request.method === 'GET') {
-    const group = scope(me, url.searchParams.get('group'));
-    const rows = await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
-    return { me, group, groups: plan.dev ? groups : [group], rows: rows.results.map(({ grp, ...row }) => row) };
+    // Readable by anyone (me = null: a visitor), written by the group's members and developers.
+    const shown = await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions');
+    const group = pick(me, url.searchParams.get('group'), shown);
+    const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
+    return { me, group, groups: shown, editable: group != null && canWrite(me, group), rows: anonymous(me, rows.results.map(({ grp, ...row }) => row)) };
   }
   if (request.method !== 'POST' || !['/api/story/save', '/api/story/move', '/api/story/remove'].includes(path)) return null;
   const b = await body(request);
