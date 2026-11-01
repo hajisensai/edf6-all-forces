@@ -89,6 +89,8 @@ dialog.digestBox .row label.inline { margin-left: auto; font-weight: 500; }
 .storyMission { border-top: 1px solid var(--line); padding: 16px 0; overflow-wrap: anywhere; }
 .storyMission:first-child { border-top: 0; }
 .storyMission h3 { margin: 0; font-size: 16px; }
+.moveTo { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.moveTo input { width: 5.5em; padding: 2px 6px; font-size: 13px; }
 .storyBody { white-space: pre-wrap; }
 .progress { height: 8px; background: var(--code); border-radius: 99px; overflow: hidden; margin: 12px 0 6px; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }

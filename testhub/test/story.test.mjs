@@ -62,6 +62,22 @@ test('story: teammates can move missions; boundaries and worn gaps preserve ever
   assert.deepEqual((await rows(e)).map((r) => r.title), ['二', '三', '一']);
 });
 
+test('story: a mission jumps straight to any place in one move', async () => {
+  const e = env();
+  const ids = [];
+  for (const title of ['一', '二', '三', '四', '五']) ids.push((await (await call(e, '/api/story/save', draft(title))).json()).id);
+  const titles = async () => (await rows(e)).map((r) => r.title);
+  assert.equal((await call(e, '/api/story/move', { id: ids[4], position: 1 }, 'amy')).status, 200);
+  assert.deepEqual(await titles(), ['五', '一', '二', '三', '四']);
+  await call(e, '/api/story/move', { id: ids[4], position: '4' });
+  assert.deepEqual(await titles(), ['一', '二', '三', '五', '四']);
+  await call(e, '/api/story/move', { id: ids[0], position: 99 });
+  assert.deepEqual(await titles(), ['二', '三', '五', '四', '一']);
+  await call(e, '/api/story/move', { id: ids[1], position: 0 });
+  assert.deepEqual(await titles(), ['二', '三', '五', '四', '一']);
+  assert.equal((await call(e, '/api/story/move', { id: ids[1], position: 'x' })).status, 400);
+});
+
 test('story: authentication, validation, clean text and write limits', async () => {
   const e = env();
   assert.equal((await worker.fetch(new Request('https://edf6.test/api/story'), e)).status, 401);
