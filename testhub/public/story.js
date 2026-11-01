@@ -46,15 +46,24 @@ function render() {
     (!status || r.status === status) && (!needle || `${r.title} ${r.body} ${missionName(r.mission) || ''}`.toLowerCase().includes(needle)));
   $('count').textContent = `共 ${state.rows.length} 关` + (rows.length !== state.rows.length ? `，显示 ${rows.length} 关` : '，按剧情顺序排列');
   const button = (text, fn, disabled = false) => h('button', { type: 'button', class: 'btn ghost small', onclick: fn, disabled: disabled || busy }, text);
+  const last = state.rows.length;
+  const moveTo = (r, position) => change('/api/story/move', { id: r.id, position });
   $('story').replaceChildren(...(rows.length ? rows.map((r) => {
     const own = state.me.role === 'dev' || state.me.user === r.author;
+    // Jump straight to a place: one click to the top / bottom, or type the number of the place.
+    const target = h('input', { type: 'number', class: 'small', min: 1, max: last, placeholder: '第几关', 'aria-label': `把「${r.title}」移到第几关`, disabled: busy || last < 2,
+      onkeydown: (e) => { if (e.key === 'Enter') go(); } });
+    const go = () => { const n = Number(target.value); if (Number.isInteger(n) && n >= 1 && n !== r.index + 1) moveTo(r, n); };
     const item = h('article', { class: 'storyMission' },
       h('div', { class: 'row' }, h('span', { class: 'tag' }, `第 ${r.index + 1} 关`), h('h3', {}, r.title), h('span', { class: 'badge' }, STATUS[r.status] || r.status)),
       r.body ? h('p', { class: 'storyBody' }, r.body) : h('p', { class: 'muted' }, '还没有填写剧情内容。'),
       r.mission ? h('p', { class: 'muted' }, '参考地图：', missionName(r.mission)) : null,
       h('div', { class: 'row' }, h('span', { class: 'muted' }, `创建者：${r.author}`),
+        button('移到第一关', () => moveTo(r, 1), r.index === 0),
         button('上移', () => change('/api/story/move', { id: r.id, direction: 'up' }), r.index === 0),
-        button('下移', () => change('/api/story/move', { id: r.id, direction: 'down' }), r.index === state.rows.length - 1)));
+        button('下移', () => change('/api/story/move', { id: r.id, direction: 'down' }), r.index === last - 1),
+        button('移到最后', () => moveTo(r, last), r.index === last - 1),
+        h('span', { class: 'moveTo' }, '移到第', target, '关', button('移动', go, last < 2))));
     if (own) item.lastChild.append(button('编辑', () => openEditor(r)), button('删除', () => {
       deleting = r.id;
       $('deleteText').textContent = `确定删除「${r.title}」？`;

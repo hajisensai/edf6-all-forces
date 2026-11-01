@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>剧情大纲 · EDF 全军出击</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="wide">
+  <header class="top">
+    <h1>EDF 全军出击 · 剧情大纲</h1>
+    <nav><a href="/">测试</a> · <a href="/plan.html">关卡策划</a> · <a href="/story.html">MOD 剧情关卡</a> · <b>剧情大纲</b></nav>
+    <span class="me"><span id="me"></span> · <a href="/logout">退出</a></span>
+  </header>
+  <p id="error" class="err hide" role="alert"></p>
+  <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
+  <section>
+    <div class="row">
+      <h2 id="title" style="margin:0">剧情大纲</h2>
+      <span class="row" style="margin-left:auto">
+        <button class="btn ghost small" id="edit" type="button">编辑</button>
+        <button class="btn ghost small hide" id="addLane" type="button">＋ 新任务线</button>
+        <button class="btn ghost small" id="copy" type="button">复制为文字</button>
+        <button class="btn small hide" id="save" type="button">保存</button>
+      </span>
+    </div>
+    <p class="muted" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
+    <p class="muted" id="saved" role="status"></p>
+    <textarea id="copyBox" class="hide" readonly aria-label="大纲文字"></textarea>
+    <div id="board" aria-live="polite">加载中……</div>
+  </section>
+  <dialog id="stepDlg" class="digestBox outlineDlg" aria-labelledby="stepDlgTitle">
+    <form id="stepForm" method="dialog">
+      <h2 id="stepDlgTitle">编辑这一步</h2>
+      <label for="fTitle">标题</label><input type="text" id="fTitle" maxlength="80" required>
+      <label for="fTag">标签（可空，比如「轮回 1」「DLC」）</label><input type="text" id="fTag" maxlength="20">
+      <label for="fBody">内容</label><textarea id="fBody" maxlength="4000"></textarea>
+      <p class="row"><button class="btn ghost small danger" id="fDelete" type="button">删除这一步</button>
+        <span class="row" style="margin-left:auto"><button class="btn ghost" id="fCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
+    </form>
+  </dialog>
+  <dialog id="laneDlg" class="digestBox outlineDlg" aria-labelledby="laneDlgTitle">
+    <form id="laneForm" method="dialog">
+      <h2 id="laneDlgTitle">编辑任务线</h2>
+      <label for="lName">名称</label><input type="text" id="lName" maxlength="40" required>
+      <label for="lNote">说明（可空）</label><textarea id="lNote" maxlength="1000"></textarea>
+      <label for="lTone">颜色</label><select id="lTone"><option value="edf">绿</option><option value="hazard">橙</option><option value="violet">紫</option></select>
+      <label>接在哪些任务线后面（汇合线就勾上它前面的线）</label><div id="lAfter" class="choices"></div>
+      <p class="row"><button class="btn ghost small danger" id="lDelete" type="button">删除整条线</button>
+        <span class="row" style="margin-left:auto"><button class="btn ghost" id="lCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
+    </form>
+  </dialog>
+</main>
+<script src="/outline.js"></script>
+</body>
+</html>

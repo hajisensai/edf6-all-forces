@@ -51,15 +51,17 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
     await db.prepare('DELETE FROM story_missions WHERE id = ?1').bind(row.id).run();
     return { ok: true };
   }
-  if (!['up', 'down'].includes(b.direction)) throw new HttpError(400, '移动方向无效');
+  // Either one step (direction) or straight to a 1-based place in the list (position; past either end = that end).
+  const position = b.position == null ? null : int(b.position);
+  if (position == null && !['up', 'down'].includes(b.direction)) throw new HttpError(400, '移动方向无效');
   await plan.charge();
   // Move to a gap rather than swapping two rows: concurrent moves never leave a half-swapped pair.
   for (let pass = 0; pass < 2; pass++) {
     const rows = (await db.prepare('SELECT id, sort FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all()).results;
     const index = rows.findIndex((r) => r.id === row.id);
     if (index < 0) throw new HttpError(404, '这条剧情关卡不存在，请刷新');
-    const nextIndex = index + (b.direction === 'up' ? -1 : 1);
-    if (nextIndex < 0 || nextIndex >= rows.length) return { ok: true };
+    const nextIndex = position != null ? Math.min(Math.max(position, 1), rows.length) - 1 : index + (b.direction === 'up' ? -1 : 1);
+    if (nextIndex < 0 || nextIndex >= rows.length || nextIndex === index) return { ok: true };
     const rest = rows.filter((r) => r.id !== row.id);
     const sort = between(rest[nextIndex - 1]?.sort ?? null, rest[nextIndex]?.sort ?? null);
     if (sort !== null) {

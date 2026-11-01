@@ -111,3 +111,11 @@ CREATE TABLE IF NOT EXISTS story_missions (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS story_missions_grp ON story_missions(grp, sort, id);
+-- Each group's story outline (/outline.html, src/outline.js); also migrations/0003-story-outline.sql.
+CREATE TABLE IF NOT EXISTS story_outline (
+  grp TEXT PRIMARY KEY,
+  data TEXT NOT NULL,               -- the outline as JSON (src/outline.js normalize())
+  version INTEGER NOT NULL,         -- bumped on every save; a save names the version it was edited from
+  updated_by TEXT,
+  updated_at INTEGER
+);

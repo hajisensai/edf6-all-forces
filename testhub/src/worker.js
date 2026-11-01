@@ -8,10 +8,12 @@ import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from '.
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
+import { outlineRoute } from './outline.js';
 import { shareRoute, putSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
+const MAX_NOTE = 20000;
 const RESULTS = ['pass', 'fail', 'new', 'info'];
 const STATUSES = ['todo', 'verify', 'pass', 'fail', 'done', 'closed'];
 // The developer's handling of a report (the page's 处理状态 column): 待处理 / 处理中 / 已修待确认 / 已完成 / 不处理.
@@ -90,11 +92,18 @@ async function route(request, env) {
     const out = await storyRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
     if (out) return json(out);
   }
+  if (path === '/api/outline' || path.startsWith('/api/outline/')) {
+    const out = await outlineRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
+    if (out) return json(out);
+  }
   if (path === '/api/state' && method === 'GET') return json(await state(env, me));
   if (path === '/api/latest' && method === 'GET') return json(await latest(env, url.searchParams.get('channel')));
   if (path.startsWith('/dl/') && method === 'GET') return download(env, 'builds/' + decodeURIComponent(path.slice(4)));
   if (path.startsWith('/file/') && method === 'GET') return attachment(env, Number(path.slice(6)));
   if (path === '/api/report' && method === 'POST') return json(await report(request, env, me));
+  if (path === '/api/report/mine' && method === 'GET') return json(await myReports(env, me, url.searchParams.get('ids')));
+  if (path === '/api/report/append' && method === 'POST') return json(await appendReport(request, env, me));
+  if (path === '/api/report/withdraw' && method === 'POST') return json(await withdrawReport(request, env, me));
   if (path === '/api/reply' && method === 'POST') { need(dev); return json(await reply(request, env)); }
   if (path === '/api/report_status' && method === 'POST') { need(dev); return json(await reportStatus(request, env)); }
   if (path === '/api/case' && method === 'POST') { need(dev); return json(await saveCase(request, env)); }
@@ -190,35 +199,85 @@ function cleanName(name) {
 }
 
 async function report(request, env, me) {
-  const length = Number(request.headers.get('content-length') || 0);
-  if (length > MAX_UPLOAD) throw new HttpError(413, `附件总共不能超过 ${MAX_UPLOAD >> 20} MB`);
-  const form = await request.formData();
+  const { form, uploads } = await uploadsOf(request);
   const result = String(form.get('result') || '');
   if (!RESULTS.includes(result)) throw new HttpError(400, 'result must be one of ' + RESULTS.join('/'));
   const caseId = Number(form.get('case_id')) || null;
-  const note = String(form.get('note') || '').slice(0, 20000);
+  const note = String(form.get('note') || '').slice(0, MAX_NOTE);
   const version = String(form.get('version') || '').slice(0, 80);
   const source = form.get('source') === 'exe' ? 'exe' : 'web';
-  const uploads = form.getAll('file').filter((f) => typeof f === 'object' && f.size > 0);
-  const total = uploads.reduce((n, f) => n + f.size, 0);
-  if (total > MAX_UPLOAD) throw new HttpError(413, `附件总共不能超过 ${MAX_UPLOAD >> 20} MB`);
   if (!note.trim() && !uploads.length) throw new HttpError(400, '说明和附件至少要有一样');
 
   const row = await env.DB.prepare(
     'INSERT INTO reports (case_id, author, result, note, version, source, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id',
   ).bind(caseId, me.user, result, note, version, source, Date.now()).first();
-  const files = [];
-  for (const f of uploads) {
-    const name = cleanName(f.name);
-    const key = `reports/${row.id}/${crypto.randomUUID().slice(0, 8)}-${name}`;
-    await env.FILES.put(key, f.stream(), { httpMetadata: { contentType: f.type || 'application/octet-stream' } });
-    files.push(env.DB.prepare('INSERT INTO files (report_id, name, size, r2_key) VALUES (?1, ?2, ?3, ?4)').bind(row.id, name, f.size, key));
-  }
-  if (files.length) await env.DB.batch(files);
+  const files = await saveFiles(env, row.id, uploads);
   if (caseId && result === 'fail') {
     await env.DB.prepare("UPDATE cases SET status = 'fail', updated_at = ?2 WHERE id = ?1").bind(caseId, Date.now()).run();
   }
-  return { id: row.id, files: files.length };
+  return { id: row.id, files };
+}
+
+async function uploadsOf(request) {
+  const length = Number(request.headers.get('content-length') || 0);
+  if (length > MAX_UPLOAD) throw new HttpError(413, `附件总共不能超过 ${MAX_UPLOAD >> 20} MB`);
+  const form = await request.formData();
+  const uploads = form.getAll('file').filter((f) => typeof f === 'object' && f.size > 0);
+  if (uploads.reduce((n, f) => n + f.size, 0) > MAX_UPLOAD) throw new HttpError(413, `附件总共不能超过 ${MAX_UPLOAD >> 20} MB`);
+  return { form, uploads };
+}
+
+async function saveFiles(env, reportId, uploads) {
+  const files = [];
+  for (const f of uploads) {
+    const name = cleanName(f.name);
+    const key = `reports/${reportId}/${crypto.randomUUID().slice(0, 8)}-${name}`;
+    await env.FILES.put(key, f.stream(), { httpMetadata: { contentType: f.type || 'application/octet-stream' } });
+    files.push(env.DB.prepare('INSERT INTO files (report_id, name, size, r2_key) VALUES (?1, ?2, ?3, ?4)').bind(reportId, name, f.size, key));
+  }
+  if (files.length) await env.DB.batch(files);
+  return files.length;
+}
+
+// A reporter following up its own reports (a tester, or the community bot that files what players say in the QQ
+// group): the developer's reply and handling status, more text and files, or taking a report back while nobody has
+// handled it yet. Someone else's report is a 404 (developers may act on any).
+async function ownReport(env, me, id) {
+  const row = Number.isSafeInteger(id) && id > 0 ? await env.DB.prepare('SELECT * FROM reports WHERE id = ?1').bind(id).first() : null;
+  if (!row || (row.author !== me.user && me.role !== 'dev')) throw new HttpError(404, 'no such report');
+  return row;
+}
+
+async function myReports(env, me, ids) {
+  const list = [...new Set(String(ids || '').split(',').map(Number).filter((n) => Number.isSafeInteger(n) && n > 0))].slice(0, 100);
+  if (!list.length) return { reports: [] };
+  const rows = await env.DB.prepare(
+    `SELECT id, author, result, status, status_at, reply, reply_at FROM reports WHERE id IN (${list.map((_, i) => '?' + (i + 1)).join(',')})`,
+  ).bind(...list).all();
+  return { reports: rows.results.filter((r) => r.author === me.user || me.role === 'dev') };
+}
+
+async function appendReport(request, env, me) {
+  const { form, uploads } = await uploadsOf(request);
+  const r = await ownReport(env, me, Number(form.get('report_id')));
+  const note = String(form.get('note') || '').trim();
+  if (!note && !uploads.length) throw new HttpError(400, '说明和附件至少要有一样');
+  if (note) {
+    if (r.note.length >= MAX_NOTE) throw new HttpError(409, '这条反馈的说明已经写满了，请另开一条');
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = `${r.note}\n\n—— 补充 ${stamp} UTC ——\n${note}`.slice(0, MAX_NOTE);
+    await env.DB.prepare('UPDATE reports SET note = ?2 WHERE id = ?1').bind(r.id, next).run();
+  }
+  return { id: r.id, files: await saveFiles(env, r.id, uploads) };
+}
+
+async function withdrawReport(request, env, me) {
+  const { report_id: id } = await body(request);
+  const r = await ownReport(env, me, Number(id));
+  const done = await env.DB.prepare("UPDATE reports SET status = 'closed', status_at = ?2 WHERE id = ?1 AND status IN ('open', 'doing')")
+    .bind(r.id, Date.now()).run();
+  if (!done.meta.changes) throw new HttpError(409, '开发者已经处理过这条反馈，撤不回了');
+  return { ok: true };
 }
 
 // A reply, and with it (optional) the report's handling status: answering "fixed in …" and marking it done is one step.

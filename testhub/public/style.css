@@ -89,8 +89,40 @@ dialog.digestBox .row label.inline { margin-left: auto; font-weight: 500; }
 .storyMission { border-top: 1px solid var(--line); padding: 16px 0; overflow-wrap: anywhere; }
 .storyMission:first-child { border-top: 0; }
 .storyMission h3 { margin: 0; font-size: 16px; }
+.moveTo { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.moveTo input { width: 5.5em; padding: 2px 6px; font-size: 13px; }
 .storyBody { white-space: pre-wrap; }
 .progress { height: 8px; background: var(--code); border-radius: 99px; overflow: hidden; margin: 12px 0 6px; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 .gap-top { margin-top: 12px; }
+main.wide { max-width: 1200px; }
+.olBoard { display: grid; gap: 12px; }
+.olRow { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+.olLane { --tone: var(--ok); border: 1px solid var(--line); border-top: 4px solid var(--tone); border-radius: 8px; padding: 12px; min-width: 0; }
+.olLane[data-tone="hazard"] { --tone: var(--warn); }
+.olLane[data-tone="violet"] { --tone: #7c5cc4; }
+.olName { margin: 0; font-size: 17px; }
+.olNote { white-space: pre-wrap; margin: 4px 0 0; }
+.olSteps { list-style: none; margin: 10px 0 0; padding: 0; }
+.olStep { position: relative; padding: 0 0 14px 32px; min-width: 0; }
+.olStep::before { content: ""; position: absolute; left: 10px; top: 24px; bottom: 0; width: 2px; background: var(--line); }
+.olStep:last-child::before { display: none; }
+.olDot { position: absolute; left: 0; top: 2px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: var(--panel); background: var(--tone); font-variant-numeric: tabular-nums; }
+.olCard h3 { margin: 0; font-size: 15px; display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; overflow-wrap: anywhere; }
+.olCard p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.olTag { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 4px; color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent); white-space: nowrap; }
+.olBoard.editing .olCard { cursor: pointer; border-radius: 6px; outline: 1px dashed var(--line); outline-offset: 3px; }
+.olBoard.editing .olCard:hover, .olBoard.editing .olCard:focus-visible { outline-color: var(--accent); }
+.olTools { gap: 4px; margin-top: 4px; }
+.olMerge { display: grid; justify-items: center; color: var(--muted); font-size: 13px; text-align: center; }
+.olMerge svg { width: min(520px, 100%); height: 40px; display: block; }
+.olMerge path { stroke: var(--muted); fill: none; stroke-width: 2; }
+.olMerge polygon { fill: var(--muted); }
+dialog.outlineDlg { width: min(560px, calc(100vw - 32px)); }
+dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
+.danger { color: var(--bad) !important; }
+#copyBox { min-height: 200px; margin: 8px 0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
