@@ -114,6 +114,7 @@ async function route(request, env) {
   if (path === '/api/report/mine' && method === 'GET') return json(await myReports(env, me, url.searchParams.get('ids')));
   if (path === '/api/report/append' && method === 'POST') return json(await appendReport(request, env, me));
   if (path === '/api/report/withdraw' && method === 'POST') return json(await withdrawReport(request, env, me));
+  if (path === '/api/report/retract' && method === 'POST') return json(await retractReport(request, env, me));
   if (path === '/api/reply' && method === 'POST') { need(dev); return json(await reply(request, env)); }
   if (path === '/api/report_status' && method === 'POST') { need(dev); return json(await reportStatus(request, env)); }
   if (path === '/api/case' && method === 'POST') { need(dev); return json(await saveCase(request, env)); }
@@ -288,6 +289,25 @@ async function withdrawReport(request, env, me) {
     .bind(r.id, Date.now()).run();
   if (!done.meta.changes) throw new HttpError(409, '开发者已经处理过这条反馈，撤不回了');
   return { ok: true };
+}
+
+// Takes back one supplement (a "—— 补充 … UTC ——" section of the note): the last one, or the last one containing
+// `contains`. Only while nobody has handled the report; attachments belong to no particular section and stay.
+const APPEND_SEP = /\n\n—— 补充 \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC ——\n/g;
+
+async function retractReport(request, env, me) {
+  const { report_id: id, contains } = await body(request);
+  const r = await ownReport(env, me, Number(id));
+  if (r.status !== 'open' && r.status !== 'doing') throw new HttpError(409, '开发者已经处理过这条反馈，补充撤不回了');
+  const note = r.note || '';
+  const starts = [...note.matchAll(APPEND_SEP)].map((m, i, all) => ({ from: m.index, len: m[0].length, to: i + 1 < all.length ? all[i + 1].index : note.length }));
+  const want = typeof contains === 'string' ? contains : '';
+  const hit = starts.filter((p) => !want || note.slice(p.from + p.len, p.to).includes(want)).pop();
+  if (!hit) throw new HttpError(404, '没有可以撤回的补充');
+  const next = note.slice(0, hit.from) + note.slice(hit.to);
+  const done = await env.DB.prepare('UPDATE reports SET note = ?2 WHERE id = ?1 AND note = ?3').bind(r.id, next, note).run();
+  if (!done.meta.changes) throw new HttpError(409, '反馈刚被改过，请重试');
+  return { ok: true, removed: note.slice(hit.from + hit.len, hit.to).slice(0, 200) };
 }
 
 // A reply, and with it (optional) the report's handling status: answering "fixed in …" and marking it done is one step.
