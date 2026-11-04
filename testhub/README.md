@@ -18,7 +18,9 @@ Cloudflare Worker + D1（测试版、测试项、反馈的元数据）+ R2（安
 反馈人跟进自己的反馈（测试者，或者把 QQ 群里的反馈整理过来的机器人「かぐや」，账号 `kaguya`）：
 `GET /api/report/mine?ids=1,2` 看开发者回复和处理状态；`POST /api/report/append`（multipart：`report_id`、`note`、`file`）追加说明和附件，
 说明接在原文后面、标上「补充」和时间；`POST /api/report/withdraw {report_id}` 撤回，只在「待处理 / 处理中」时可以（变成「不处理」），
-开发者给过结论的回 409。都只能动自己的反馈（开发者不限），别人的回 404。
+开发者给过结论的回 409。
+`POST /api/report/retract {report_id, contains?}` 撤回自己最后一段「补充」（`contains` 非空时撤回内容含它的最后一段；附件不动），
+只在「待处理 / 处理中」时可以（否则 409），没有补充回 404，返回 `{ok, removed}`（被删段正文前 200 字）。都只能动自己的反馈（开发者不限），别人的回 404。
 回复时可以顺手标状态：`testhub.py reply 12 "已在 abc1234 修复" --status done`；单独改用 `testhub.py status 12 done`。
 
 ## 关卡策划（/plan.html）

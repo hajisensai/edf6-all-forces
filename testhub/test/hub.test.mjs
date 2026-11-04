@@ -142,6 +142,42 @@ test('reports: the reporter follows up its own: progress, more text and files, w
   assert.equal((await withdraw('alice', id)).status, 409);      // the developer concluded it
 });
 
+test('reports: retract one supplement of your own', async () => {
+  const e = { ...env(), ACCOUNTS: 'alice:pw:tester,bob:pw:tester,dev:pw:dev' };
+  const id = await addReport(e);
+  const retract = (user, rid, contains) => call(e, '/api/report/retract', { user, method: 'POST', data: { report_id: rid, contains } });
+  const append = async (note) => {
+    const f = new FormData();
+    f.set('report_id', String(id));
+    f.set('note', note);
+    assert.equal((await call(e, '/api/report/append', { user: 'alice', method: 'POST', raw: f })).status, 200);
+  };
+  const note = async () => (await (await call(e, '/api/state', { user: 'alice' })).json()).reports.find((x) => x.id === id).note;
+  assert.equal((await retract('alice', id)).status, 404);   // nothing appended yet
+  await append('第一段');
+  await append('第二段');
+  await append('第三段');
+  assert.equal((await retract('bob', id)).status, 404);     // not bob's
+  const res = await retract('alice', id, '第一');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, removed: '第一段' });
+  assert.doesNotMatch(await note(), /第一段/);
+  assert.match(await note(), /第二段[\s\S]*第三段/);
+  assert.equal((await retract('alice', id, '不存在')).status, 404);
+  assert.deepEqual(await (await retract('alice', id)).json(), { ok: true, removed: '第三段' });
+  assert.match(await note(), /^炸了\n\n—— 补充 .* UTC ——\n第二段$/);
+  assert.deepEqual(await (await retract('alice', id)).json(), { ok: true, removed: '第二段' });
+  assert.equal(await note(), '炸了');
+  assert.equal((await retract('alice', id)).status, 404);
+  for (const status of ['done', 'verify', 'closed']) {
+    await append('x');
+    await call(e, '/api/report_status', { method: 'POST', data: { report_id: id, status } });
+    assert.equal((await retract('alice', id)).status, 409, status);
+    await call(e, '/api/report_status', { method: 'POST', data: { report_id: id, status: 'open' } });
+    assert.equal((await retract('alice', id)).status, 200);
+  }
+});
+
 test('cases: done (已完成) is a state of its own', async () => {
   const e = env();
   const { id } = await (await call(e, '/api/case', { method: 'POST', data: { title: 't' } })).json();
