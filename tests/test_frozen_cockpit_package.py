@@ -48,6 +48,20 @@ class FrozenCockpitPackageTests(unittest.TestCase):
                 build_release.build_exe('test')
         self.assertEqual(len(calls), 2)
 
+    def test_release_includes_nested_cockpit_models_and_textures(self) -> None:
+        import obj_model
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            expected=('CREDITS_plugin.txt','parts/plugin_wt_f16a/cockpit.npz',
+                      'parts/plugin_wt_f16a/albedo.png','textures/air_tub.png')
+            for relative in expected:
+                file=root/relative;file.parent.mkdir(parents=True,exist_ok=True);file.write_bytes(b'asset')
+            with patch.object(build_release,'RELEASE_MODELS',('cockpits',)), \
+                    patch.object(obj_model,'model_dir',return_value=folder):
+                files=build_release.release_models()
+            self.assertEqual({arc for _path,arc in files},{'models/cockpits/'+p for p in expected})
+            self.assertTrue(all(Path(source).read_bytes()==b'asset' for source,_arc in files))
+
     def test_each_family_change_invalidates_cached_optics_recipe(self) -> None:
         # Use the actual registry sources with the public recipe scanner. Before
         # the fix __import__ hid these dependencies from both freezing and caching.

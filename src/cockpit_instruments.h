@@ -4,7 +4,7 @@
 
 namespace crew {
 namespace instruments {
-enum Field { hp,hull,fuel,speed,altitude,heading,slot,ammo,warn,climb,pitch,power,count };
+enum Field { hp,hull,fuel,speed,altitude,heading,slot,ammo,warn,climb,pitch,power,ammo0,ammo1,ammo2,ammo3,load0,load1,load2,load3,count };
 struct Readings { float value[count]; float share[count]; bool contact[6]; float at[6][2]; int language=0; bool flight=false; };
 
 // Native cabin fragments retain their original animated parent outside the local
@@ -52,7 +52,8 @@ inline fpview::M4 Pose(const fpview::M4& original,wchar_t mode,int field,int pla
         return fpview::Mul(fpview::Translate(readings.at[field][0],readings.at[field][1],0),original);
     }
     const float v=ready ? readings.value[field] : -1.0f;
-    if(mode==L'd' || mode==L'p') {
+    if(mode==L'd' || mode==L'p' || mode==L'k') {
+        if(mode==L'k' && (!ready || !Available(readings,field)))return fpview::Collapse(original.m+12);
         const float number=mode==L'p' && v>=0 && std::isfinite(v) ? fpview::Clamp(readings.share[field],0,1)*100 : v;
         return Segment(number,place,segment) ? original : fpview::Collapse(original.m+12);
     }
@@ -62,6 +63,12 @@ inline fpview::M4 Pose(const fpview::M4& original,wchar_t mode,int field,int pla
         fpview::M4 out=original;
         for(int i=0;i<3;++i)out.m[i]*=k;
         return out;
+    }
+    if(mode==L'h' || mode==L'j') {
+        if(!ready || !Available(readings,field))return fpview::Collapse(original.m+12);
+        if(mode==L'j')return fpview::Mul(fpview::Translate(0,-fpview::Clamp(v,-45.0f,45.0f)/45.0f*place*.0002f,0),original);
+        const float a=std::fmod(v,360.0f)*0.01745329252f,axis[3]={0,0,1};
+        return fpview::Mul(fpview::Rotation(axis,std::cos(a),std::sin(a)),original);
     }
     if(mode==L'n' || mode==L'r' || mode==L'q' || mode==L'a') {
         if(!ready || !Available(readings,field))return fpview::Collapse(original.m+12);

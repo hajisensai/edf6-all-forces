@@ -52,7 +52,7 @@ import cockpits
 import obj_model as om
 from cockpit_room import TEX, Cabin, _room
 from cockpit_shapes import panel
-from cockpit_tub import TUB_TEXTURE, tub
+from cockpit_tub import TUB_TEXTURE, tub, gap_liner
 from cockpits import Kit, KitFn, KitMaterial, Screen
 
 Vec3 = tuple[float, float, float]
@@ -219,9 +219,18 @@ def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
             conform=frozenset({'tub'}) if model.sill is not None else frozenset())
     import cockpit_retrofit as retrofit
     blocks=retrofit.F16 if model.slug=='plugin_wt_f16a' else retrofit.C130 if model.slug=='plugin_c130_deck' else ()
-    return retrofit.apply(kit,blocks,lambda p:np.asarray(p)*k,limits=(lo,hi),
-                          ranges={retrofit.ci.SPEED:2000 if model.slug=='plugin_wt_f16a' else 700,
-                                  retrofit.ci.ALT:10000}) if blocks else kit
+    if blocks:
+        kit=retrofit.apply(kit,blocks,lambda p:np.asarray(p)*k,limits=(lo,hi),
+                           ranges={retrofit.ci.SPEED:2000 if model.slug=='plugin_wt_f16a' else 700,
+                                   retrofit.ci.ALT:10000})
+    if model.sill is not None:
+        # Include the final replacement faces and complete display apertures,
+        # not the baked faces that retrofit has just removed.
+        hardware=[p for p in kit.parts if p.name!='tub']
+        hardware += [panel('display_footprint','screen',s.centre,s.width,s.height,s.facing,s.up)
+                     for s in kit.screens if s.kind not in ('hud','sensor')]
+        kit.parts=[gap_liner(p,hardware) if p.name=='tub' else p for p in kit.parts]
+    return kit
 
 
 def _kit(name: str, model: Model, doc: str) -> KitFn:
@@ -235,7 +244,9 @@ def _kit(name: str, model: Model, doc: str) -> KitFn:
 FIGHTER_WANT = {'left': 0.62, 'right': 0.62, 'up': 0.5, 'down': 1.15, 'ahead': 1.8, 'back': 0.45}
 FIGHTER_LEAST = {'left': 0.3, 'right': 0.3, 'up': 0.06, 'down': 0.4, 'ahead': 0.6, 'back': 0.15}
 # A fighter's panel and consoles: the side consoles 0.5 m out, the MFDs 0.3-0.45 m down and 0.7-0.9 m ahead.
-FIGHTER_FULL = {'left': 0.5, 'right': 0.5, 'down': 0.6, 'ahead': 0.95}
+# Fit the entire retained interior, including the stick pedestal and floor.
+# Using only the panel depth (0.6 m) clipped the lower hardware before lining it.
+FIGHTER_FULL = {'left': 0.62, 'right': 0.62, 'down': 1.15, 'ahead': 1.75, 'back': 0.42}
 # A fighter's canopy sill seen from the seat (a bubble canopy's rail at the shoulder, 0.25 m under the eye and 0.5 m
 # out): under it the tub (the floor, the side consoles' walls, the seat's bulkhead), over it the canopy.
 FIGHTER_SILL = -25.0

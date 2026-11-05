@@ -3,6 +3,7 @@
 // round cannot become a command to the turret or the mouse-flight aim.
 #include "crew.h"
 #include "vehicle_look.h"
+#include "firstperson.h"
 #include "fp_view.h"
 #include "memory.h"
 #include "vecmath.h"
@@ -20,7 +21,8 @@ struct Look {
     unsigned seat=0;
     ULONGLONG frame=~0ULL,seen=0;
     float yaw=0,pitch=0;
-    bool held=false,keys=true,offered=false;
+    bool held=false,keys=true,offered=false,aiming=false,aimValid=false,worldAim=false;
+    float aimYaw=0,aimPitch=0,hullYaw=0;
 };
 Look look{};
 std::atomic<bool> cameraReady{false};
@@ -60,13 +62,28 @@ unsigned char* Begin(unsigned char* v,float* saved) noexcept {
         if(At<const void*>(seat,kSeatRider)!=human || !edf::IsPlayer(human))continue;
         if(!look.vehicle.Is(v) || !look.human.Is(human) || look.seat!=i)look=Look{};
         look.vehicle=ObjRef::Of(v);look.human=ObjRef::Of(human);look.seat=i;
-        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=Offered(v,look.keys);look.seen=GameMs();
+        float marker[16];bool video=false;const bool aiming=FirstPersonSeatFrame(v,i,marker,&video);
+        const float hullYaw=std::atan2(At<float>(v,kMatrix+32),At<float>(v,kMatrix+40));
+        NixTorso torso{};
+        const bool worldAim=video || TurretCamTurret(v,i) || (PlayerNixTorso(&torso) && torso.vehicle==v && torso.held);
+        if(aiming && look.aimValid && worldAim)look.aimYaw=std::remainder(look.aimYaw+look.hullYaw-hullYaw,2*kPi);
+        look.hullYaw=hullYaw;look.worldAim=worldAim;
+        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=Offered(v,look.keys) || aiming;look.seen=GameMs();
         if(!look.offered){look.yaw=look.pitch=0;look.held=false;return nullptr;}
+        if(aiming && (!look.aiming || !look.aimValid)) {
+            fpview::M4 hull,inverse,station;std::memcpy(hull.m,v+kMatrix,64);std::memcpy(station.m,marker,64);
+            if(fpview::InverseAffine(hull,&inverse)) {
+                const auto local=fpview::Mul(station,inverse);
+                look.aimYaw=std::atan2(local.m[8],local.m[10]);look.aimPitch=std::asin(vec::Clamp(local.m[9],-1.0f,1.0f));
+                look.aimValid=true;
+            }
+        }
+        look.aiming=aiming;if(!aiming)look.aimValid=false;
         if(look.frame!=GameFrame()) {
             look.frame=GameFrame();
             const Config& c=Cfg();
-            const bool held=look.keys ? (edf::AsyncKey(c.freeLookKey)&0x8000)!=0 :
-                (At<std::uint16_t>(seat,kButtons)&c.freeLookButton)!=0;
+            const bool held=Offered(v,look.keys) && (look.keys ? (edf::AsyncKey(c.freeLookKey)&0x8000)!=0 :
+                (At<std::uint16_t>(seat,kButtons)&c.freeLookButton)!=0);
             const bool changed=held!=look.held;look.held=held;
             if(held) {
                 const float x=At<float>(seat,kStick),y=At<float>(seat,kStick+4);
@@ -76,6 +93,13 @@ unsigned char* Begin(unsigned char* v,float* saved) noexcept {
                     look.pitch=vec::Clamp(look.pitch-y*rate,-kPitchLimit,kPitchLimit);
                 }
             } else {
+                if(look.aiming && look.aimValid) {
+                    const float x=At<float>(seat,kStick),y=At<float>(seat,kStick+4),rate=c.turretCamRate*kPi/180/60;
+                    if(std::isfinite(x+y)) {
+                        look.aimYaw=std::remainder(look.aimYaw-x*rate,2*kPi);
+                        look.aimPitch=vec::Clamp(look.aimPitch-y*rate,-kPitchLimit,kPitchLimit);
+                    }
+                }
                 look.yaw*=1-kReturn;look.pitch*=1-kReturn;
                 if(std::fabs(look.yaw)+std::fabs(look.pitch)<kDone)look.yaw=look.pitch=0;
             }
@@ -111,9 +135,17 @@ bool VehicleLookActive(const void* vehicle) noexcept {
 bool VehicleLookCamera(const unsigned char* human,float* matrix) noexcept {
     const Look s=ReadLook();
     __try {
-        if(human!=s.human.obj || !Current(s,s.vehicle.obj) || (!s.held && s.yaw==0 && s.pitch==0) || !InputAllowed())return false;
+        if(human!=s.human.obj || !Current(s,s.vehicle.obj) || (!s.aiming && !s.held && s.yaw==0 && s.pitch==0) || !InputAllowed())return false;
         const float pivot[3]={0,0,0};
         fpview::M4 base;std::memcpy(base.m,matrix,64);
+        if(s.aiming && s.aimValid) {
+            fpview::M4 hull;std::memcpy(hull.m,static_cast<const unsigned char*>(s.vehicle.obj)+kMatrix,64);
+            // Keep a stabilized turret/Nix view on its world bearing even when
+            // hull simulation runs after input sampling. Ordinary car views follow the hull.
+            const float yaw=s.worldAim ? std::remainder(s.aimYaw+s.hullYaw-std::atan2(hull.m[8],hull.m[10]),2*kPi) : s.aimYaw;
+            const auto aimed=fpview::Mul(fpview::MotionMatrix(0,0,0,s.aimPitch,yaw,0,pivot),hull);
+            std::memcpy(base.m,aimed.m,48); // retain the cockpit eye, including moving/rolling hulls
+        }
         // Native camera rows point left, up, forward (firstperson.cpp). Local
         // negative yaw looks right; retain the seat's pitch/roll and eye position.
         const auto rotated=fpview::Mul(fpview::MotionMatrix(0,0,0,s.pitch,-s.yaw,0,pivot),base);
@@ -121,7 +153,7 @@ bool VehicleLookCamera(const unsigned char* human,float* matrix) noexcept {
         std::memcpy(matrix,rotated.m,64);
         static ULONGLONG logAt=0;
         const ULONGLONG ms=GetTickCount64();
-        if(Cfg().debug && s.held && ms-logAt>=500) {
+        if(Cfg().debug && (s.held || s.aiming) && ms-logAt>=500) {
             logAt=ms;
             const auto seat=SeatAt(static_cast<unsigned char*>(const_cast<void*>(s.vehicle.obj)),s.seat);
             const float axisYaw=At<float>(seat,kSeatAim+kAimAxes+kAxisAngle);

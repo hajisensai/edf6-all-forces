@@ -59,6 +59,12 @@ def regions(md, fits, hull):
 
 def _native_owners(md, bone):
     allowed = {bone}
+    # Nix's chest plate is rigid to spine, the parent of the station's body.
+    # It is cabin armour, unlike the separately animated arms and leg equipment.
+    ancestor=md.bones[bone].parent
+    while ancestor>=0:
+        if md.name_of(md.bones[ancestor].name) in ('spine','mune','neck'):allowed.add(ancestor)
+        ancestor=md.bones[ancestor].parent
     for candidate in md.bones:
         if not md.name_of(candidate.name).lower().startswith('door_'):
             continue
@@ -70,7 +76,7 @@ def _native_owners(md, bone):
     return allowed
 
 
-def triangle_masks(md, obj, mesh, envelopes):
+def triangle_masks(md, obj, mesh, envelopes, hidden=()):
     """Per triangle seat mask and original owner; zero means native geometry retained."""
     indices = np.frombuffer(mesh.indices, dtype='<u2').reshape(-1, 3)
     masks = np.zeros(len(indices), dtype=np.uint32)
@@ -105,10 +111,17 @@ def triangle_masks(md, obj, mesh, envelopes):
         # merely because one corner overlaps a crew region.
         intersects = ((corners >= low) & (corners <= high)).all((1, 2))
         masks[eligible & intersects] |= stations[bone]
+    per_seat={}
+    for seat,bone in hidden:per_seat.setdefault(seat,set()).add(bone)
+    for seat,hidden_bones in per_seat.items():
+        if mesh.flags[1]:
+            eligible=((weights==0) | np.isin(bones,list(hidden_bones))).all(1)[indices].all(1)
+        else:eligible=np.isin(owner,list(hidden_bones))[indices].all(1)
+        masks[eligible] |= 1 << seat
     return masks, owner
 
 
-def _slice(mesh, triangles, bone):
+def _slice(mesh, triangles, bone_map):
     """An exact vertex subset, changing only its effective rigid skin owner."""
     used, inverse = np.unique(triangles.reshape(-1), return_inverse=True)
     data = bytearray(b''.join(mesh.vdata[int(i) * mesh.vsize:(int(i) + 1) * mesh.vsize] for i in used))
@@ -119,7 +132,9 @@ def _slice(mesh, triangles, bone):
     # Replace even zero-weight entries so no reference escapes the ubyte palette.
     for i in range(len(used)):
         at = i * mesh.vsize + elem.offset
-        data[at:at + 4] = bytes([bone]) * 4
+        for component in range(4):
+            original=data[at+component]
+            if original in bone_map:data[at+component]=bone_map[original]
     return replace(mesh, vdata=bytes(data), indices=inverse.astype('<u2').tobytes())
 
 
@@ -134,6 +149,21 @@ def separate(md, fits, hull):
     envelopes = regions(md, fits, hull)
     if not envelopes:
         return md
+    hidden=[]
+    for fit in fits:
+        # A complete gunner cabin replaces the native turret interior. Its gun
+        # meshes must not pass through that cabin's visor in the local 1x view;
+        # optics and outside observers retain the unmodified animated equipment.
+        if fit.kit=='tank_gunner':
+            station=md.bone_index(fit.bone)
+            for candidate in md.bones:
+                ancestor=candidate.index
+                while ancestor>=0 and ancestor!=station:ancestor=md.bones[ancestor].parent
+                if ancestor==station:hidden.append((fit.seat,candidate.index))
+        for name in fit.hide_bones:
+            bone=md.bone_index(name)
+            if bone<0:raise ValueError(f'cockpit self-visibility bone missing: {name}')
+            hidden.append((fit.seat,bone))
     world = bind_world(md)
     clones, objects = {}, []
     for obj in md.objects:
@@ -142,7 +172,7 @@ def separate(md, fits, hull):
             if md.name_of(md.materials[mesh.material].name).startswith('edf6vc_cpit_'):
                 meshes.append(mesh)
                 continue
-            masks, owner = triangle_masks(md, obj, mesh, envelopes)
+            masks, owner = triangle_masks(md, obj, mesh, envelopes, hidden)
             indices = np.frombuffer(mesh.indices, dtype='<u2').reshape(-1, 3)
             if (masks == 0).any():
                 meshes.append(replace(mesh, indices=indices[masks == 0].astype('<u2').tobytes()))
@@ -150,8 +180,12 @@ def separate(md, fits, hull):
                 selected = indices[masks == mask]
                 if not mesh.flags[1]:
                     raise ValueError('replacement cabin has an unskinned native shell')
-                for parent in np.unique(owner[selected[:, 0]]):
-                    triangles = selected[owner[selected[:, 0]] == parent]
+                used=np.unique(selected)
+                indices_of=np.asarray(read_elem(mesh,'BLENDINDICES',0))[used]
+                weights_of=np.asarray(read_elem(mesh,'BLENDWEIGHT',0))[used]
+                parents=np.unique(indices_of[weights_of>0])
+                mapping={}
+                for parent in parents:
                     key = (int(mask), int(parent))
                     if key not in clones:
                         name = PREFIX + str(key[0]) + '_' + str(key[1])
@@ -159,13 +193,11 @@ def separate(md, fits, hull):
                             raise ValueError('cockpit shell exceeds the MDB ubyte skin-index limit')
                         md = vehicle_optics.add_marker(md, md.name_of(md.bones[parent].name), name, world[parent])
                         bones = list(md.bones)
-                        # The stored inverse bind is authoritative, including the
-                        # native exporter's rounding. Do not recompute it from the
-                        # accumulated parent transforms and move exterior vertices.
                         bones[-1] = replace(bones[-1], kind=3, bounded=1, local=ident(),
                                             inv_bind=list(md.bones[parent].inv_bind))
                         md = replace(md, bones=bones)
                         clones[key] = len(bones) - 1
-                    meshes.append(_slice(mesh, triangles, clones[key]))
+                    mapping[int(parent)]=clones[key]
+                meshes.append(_slice(mesh, selected, mapping))
         objects.append(replace(obj, meshes=[replace(me, mesh_index=i) for i, me in enumerate(meshes)]))
     return replace(md, objects=objects, buffer_order=None)

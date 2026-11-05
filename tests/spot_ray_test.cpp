@@ -23,6 +23,7 @@ const Config& Cfg() noexcept { return testConfig; }
 unsigned char* PlayerHuman() noexcept { return human; }
 bool SightZoomCanMount(const void*,unsigned) noexcept { return false; }
 bool SightZoomMounted(const void*) noexcept { return false; }
+bool VehicleLookActive(const void*) noexcept { return false; }
 bool HighCamOn(const void*) noexcept { return false; }
 bool TurretCamHighTransition(const void*) noexcept { return false; }
 bool TurretCamTurret(const void*,unsigned) noexcept { return false; }

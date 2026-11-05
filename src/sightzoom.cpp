@@ -57,9 +57,8 @@ Toggle toggle{};
 // seat's aim (seat+0xE0), what SightLayStep is told apart by before anything else is read.
 struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; const unsigned char* aim=nullptr; };
 Cue cue{};
-// The sight is up (its camera, its lay, its reticle): magnified, or at 1x in a vehicle's first person (War Thunder's
-// gunner sight: firstperson.h FirstPersonGunnerSight). Otherwise at 1x the turret camera has the view and the gun.
-bool Up(const Cue& c) noexcept { return !VehicleLookActive(c.vehicle.obj) && (c.zoom>1.0f || FirstPersonGunnerSight()); }
+// Only explicit magnification enters the mounted optic; 1x remains the broad cockpit view.
+bool Up(const Cue& c) noexcept { return !VehicleLookActive(c.vehicle.obj) && c.zoom>1.0f; }
 // The lay (sightzoom.h LayStep): the superelevation the seat's gun carries over the line of sight now, as SightLayStep
 // last turned it (game thread, under cueLock; the camera reads it). Not engaged: the aim step never reached it (its hooks
 // are not in, stab.cpp RemapAimAxis cannot map the axis): the camera falls back to the set range's whole angle.
@@ -310,9 +309,7 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     toggle.held=down;
     // The range setting, while the sight is magnified: the wheel (swallowed then: map.cpp TakeScopeWheel) and the
     // keys on the keyboard and mouse, the d-pad on a pad; one step a notch or a press (sightzoom.h NextZero).
-    // At 1x too in a vehicle's first person (War Thunder's gunner sight: its range is set at any magnification; the
-    // sight lays the gun by it, so a range that could not be turned there left the rounds short of the reticle).
-    const bool scoped=sightzoom::At(toggle.step)>1.0f || FirstPersonGunnerSight();
+    const bool scoped=sightzoom::At(toggle.step)>1.0f;
     int notches=TakeScopeWheel(scoped);   // the wheel whichever input the seat is on (a pad player's mouse too)
     const bool up=scoped && keys && KeyHeld(c.sightRangeUpKey),downKey=scoped && keys && KeyHeld(c.sightRangeDownKey);
     notches+=(up && !toggle.upHeld ? 1 : 0)-(downKey && !toggle.downHeld ? 1 : 0);

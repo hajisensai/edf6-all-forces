@@ -4,7 +4,7 @@ function of the room round its eye, returning parts in the eye's frame laid out 
 A mech's cockpit is a closed pod in its torso, laid out for playing through it (the user: "注意这是为游戏服务的"): the
 visor is the whole front less a thin frame and nothing crosses it (the mech's own hull is not drawn from inside: the
 game culls its backs, so the world shows through), the live screens (cockpits.Screen) sit at the view's lower corners
-(status left, weapons right) and on the console under the visor (the map, a glance down), the pilot's seat with its
+(left and right hand magazines, with vehicle health) and on the console under the visor (both roof magazines); navigation is on the side wall, the pilot's seat with its
 console and control arms below the sight line, plated walls round the rest.
 
 Real material, not boxes: the seat, console and control arms are Romain Revert's modelled cockpit "The cockpit"
@@ -230,10 +230,21 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
         neck=tuple(c[i]-up[i]*(h/2+.06*w)-facing[i]*.014 for i in range(3))
         parts.append(cylinder(f'mount_{kind}','console_shell',foot,neck,.009*k,10))
         screens.append(scr)
+    # Keep navigation available on the side wall, leaving the three forward
+    # monitors to the two hands and both roof mounts simultaneously.
+    radar=(L-.03,-.13*k,.06*k)
+    glass, scr=_screen('map',radar,.18*k,.12*k)
+    parts += [glass]+_bezel('bezel_map',radar,.18*k,.12*k);screens.append(scr)
     cw, ch = 0.2 * k, 0.15 * k
-    c = (-0.02 * k, -0.42 * k, 0.58 * k)   # the asset console's centre screen (asset (-0.1, -0.06, -0.015)), 1 cm proud
+    c = (-0.02 * k, max(-0.16*k,-D+ch/2+.02), 0.58 * k)   # the asset console's centre screen (asset (-0.1, -0.06, -0.015)), 1 cm proud
     glass, scr = _screen(middle, c, cw, ch)
     parts += [glass]+_bezel(f'bezel_{middle}',c,cw,ch)
+    # Raise the roof-magazine monitor above the retained control grips, mounted
+    # on two stems rather than leaving its lower row behind the console arms.
+    for sign in (-1,1):
+        base=(c[0]+sign*cw*.43,max(-D+.02,-.37*k),c[2]+.015*k)
+        end=(base[0],c[1]-ch*.5,base[2])
+        if abs(base[1]-end[1])>.005:parts.append(cylinder('top_monitor_stem','console_shell',base,end,.007*k,8))
     screens.append(scr)
     mats = _materials('mech_plate','mech_frame','metal_dark','screen')
     mats.update(CONSOLE_MATERIALS)
@@ -253,7 +264,7 @@ def _merged(parts: list[om.Part]) -> list[om.Part]:
 # many separate plates: a ray from a point near a seam escapes between them (cockpits.exposed), so the pod is the
 # box round the eye whose every face point is enclosed (measured with cockpits.exposed on a 0.12 m grid of each face,
 # grown 0.05 m a side at a time), a little inside it; the room measured straight out (clearance) is wider.
-PILOT = ('map', ('status', 'weapons'))      # middle under the visor; left and right of it
+PILOT = ('toparms', ('leftarms', 'rightarms'))      # middle under the visor; left and right of it
 PODS: dict[str, tuple[Cabin, tuple[str, tuple[str, str]], str]] = {
     'mech_begaruta': ({'left': 0.62, 'right': 0.62, 'up': 0.32, 'down': 0.33, 'ahead': 0.73, 'back': 0.37}, PILOT,
                       "Begaruta's pilot in its chest (closed box round (0, 7.2, -0.3): 0.65 0.65 0.35 0.35 1.3 0.4)."),

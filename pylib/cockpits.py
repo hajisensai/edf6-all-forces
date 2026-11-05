@@ -52,6 +52,8 @@ class Fit:
     yaw: float = 0.0
     pitch: float = 0.0
     scale: float = 1.0
+    unarmed: bool = False  # a known unarmed cab uses its spare display for navigation
+    hide_bones: tuple[str, ...] = ()  # native parts hidden only from this local cockpit
     shell_ahead: float | None = None  # measured native cab nose beyond its first axial pane, metres from the eye
 
 
@@ -62,7 +64,7 @@ class KitMaterial:
     emissive: bool = False
 
 
-SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
+SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor', 'leftarms', 'rightarms', 'toparms')
 SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
 
 
@@ -250,7 +252,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             nonlocal md
             # Visibility-only geometry can share a bone even at different positions.
             # Needles and bars keep their own pivots; their transforms are not visibility-only.
-            reusable = control.control[0] in 'dDplcuv'
+            reusable = control.control[0] in 'dDplcuvk'
             name = shared.get(control.control) if reusable else None
             if name is None:
                 name = f'vc_i_{fit.seat}_{index}_{control.control}'
@@ -590,6 +592,9 @@ def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy
     for round_index in range(SHRINK_ROUNDS + 1):
         print(f'        席位 {fit.seat}：适配第 {round_index+1}/{SHRINK_ROUNDS+1} 轮，读取座舱部件……', flush=True)
         kit = kit_fn(room)
+        if fit.unarmed:
+            kit.screens=tuple(replace(screen,kind='map') if screen.kind=='weapons' else screen for screen in kit.screens)
+            kit.parts=[replace(part,name='screen_map') if part.name=='screen_weapons' and part.material=='screen' else part for part in kit.parts]
         if kit.conform:
             _conform(tris, kit, m, fit.scale)
         inside = [p for p in kit.parts if p.name not in kit.outside]

@@ -21,6 +21,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "cockpit_canvas.h"
+#include <utility>
 #include "firstperson.h"
 #include "vehicle_look.h"
 #include "formation.h"
@@ -4847,7 +4848,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.lookHint) {
             wchar_t key[32];
             if(snap.lookKeys)KeyName(Cfg().freeLookKey,key,32);else SeatButtonName(Cfg().freeLookButton,key,32);
-            Label(t,lines,&at,width*0.5f,height*0.86f,1,kLineScale*0.85f*s,kWhite,Tr(Tx::vehicleLookHold),key);
+            Label(t,lines,&at,width*0.5f,screensOn ? 24.0f*s : height*0.86f,1,kLineScale*0.85f*s,kWhite,Tr(Tx::vehicleLookHold),key);
         }
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
@@ -4863,6 +4864,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;
             }
+            if(screensOn)controlsBottom=100.0f*s;
             TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at,
                            snap.turretBinding ? &snap.binding : nullptr,controlsBottom);
         }

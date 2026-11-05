@@ -414,6 +414,15 @@ int main() {
       Expect(crew::instruments::Pose(Identity(),L'B',fuel,0,0,reading,false).m[0]==0
              && crew::instruments::Pose(Identity(),L'T',0,0,0,reading,false).m[0]==0,
              "new bars and contacts cannot show invented neighbouring-seat values");
+    reading.value[heading]=0;auto north=crew::instruments::Pose(Identity(),L'h',heading,360,0,reading,true);
+    reading.value[heading]=360;auto full=crew::instruments::Pose(Identity(),L'h',heading,360,0,reading,true);
+    Expect(std::memcmp(north.m,full.m,64)==0,"compass wraps at north with no 270-degree sweep stop");
+    reading.value[heading]=90;auto east=crew::instruments::Pose(Identity(),L'h',heading,360,0,reading,true);
+    const float eastMark[3]={1,0,0};float mark[3];Point(east,eastMark,mark);
+    Expect(Near(mark[0],0) && Near(mark[1],1),"east cardinal mark reaches fixed top index at heading 090");
+    reading.flight=true;reading.value[pitch]=30;
+    auto horizon=crew::instruments::Pose(Identity(),L'j',pitch,100,0,reading,true);
+    Expect(horizon.m[13]<0 && horizon.m[0]==1,"nose-up moves the horizon down instead of rotating a quantity needle");
     for(int language=0;language<4;++language) {
         reading.language=language;
         int visible=0;

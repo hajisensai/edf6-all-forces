@@ -71,7 +71,7 @@ using fpview::M4;
 
 // The camera (map.cpp's layout): its per-frame slot, target soldier, world matrix rows, near clip.
 constexpr unsigned kCamVtable=0x1768C10,kCamStep=0xF86A0;
-constexpr std::size_t kCamStepSlot=4,kCamTargetRef=0x350,kCamTarget=0x360,kCamMatrix=0x220,kCamEyeRow=0x250,kCamNear=0x28;
+constexpr std::size_t kCamStepSlot=4,kCamTargetRef=0x350,kCamTarget=0x360,kCamMatrix=0x220,kCamEyeRow=0x250,kCamFov=0x24,kCamNear=0x28;
 const unsigned char kCamStepCode[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x90};
 // AnimationModel's draw (slot 1): draw(model, ctx, pass, view). Its LODs: the base one embedded at +0x160, the others
 // an array at [+0x250] (count +0x260, 0xF0 each); a LOD's skeleton instance at its +0x58.
@@ -193,6 +193,7 @@ struct State {
     bool fresh;                 // the eye taken as it is next frame
     float savedNear,savedSmooth;
     bool nearSet,smoothSet;
+    float savedFov=0,writtenFov=0;bool fovSet=false;
     // The motion: last frame's readings and the springs.
     bool have;
     float pitch,yaw,pos[3],vy;
@@ -359,7 +360,7 @@ bool GadgetView(const unsigned char* cam,const unsigned char* h) noexcept {
 const char* VehicleYields(unsigned char* h) noexcept {
     const void* v=At<const void*>(h,kHumanVehicle);
     if(HighCamOn(v) || TurretCamHighTransition(v))return "the high view";
-    if(SightZoomMounted(v))return "the gunner's sight";   // at 1x too in first person (FirstPersonGunnerSight)
+    if(SightZoomMounted(v))return "the gunner's sight";
     float eye[3];
     RideView ride{};
     if(!VehicleEye(h,eye,&ride))return "no cockpit in this seat";
@@ -747,6 +748,8 @@ void Probe(const bool* anchored,const M4* anchor) noexcept {
 void Leave() noexcept {
     ++viewRevision;
     if(Current().on){PlaceAll(true);Rebatch(true);}
+    if(Current().cam && Current().fovSet && At<float>(Current().cam,kCamFov)==Current().writtenFov)
+        Put<float>(Current().cam,kCamFov,Current().savedFov);
     if(Current().cam && Current().nearSet)Put<float>(Current().cam,kCamNear,Current().savedNear);
     if(Current().human && Current().smoothSet)Put<float>(Current().human,kLookSmooth,Current().savedSmooth);
     if(Current().on)Log("FP view back to the stock camera");
@@ -816,7 +819,7 @@ void Fit(int hand,bool dual,float* grip) noexcept {
 }
 
 // Each hand's T this frame (above: its own weapon's anchor, else the other hand's T, else the aim frame).
-void Views(const unsigned char* h,const unsigned char* cam) noexcept {
+void Views(const unsigned char* h,const unsigned char* cam,bool advanceMotion=true) noexcept {
     const Config& c=Cfg();
     M4 anchor[2]={fpview::Identity(),fpview::Identity()};
     bool anchored[2];
@@ -828,8 +831,10 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const float hold[3]={-c.fpHoldX,c.fpHoldY,c.fpHoldZ};
     const float pivots[2][3]={{anchored[kRight] ? grip[kRight][0] : kPivot[0],anchored[kRight] ? gy : kPivot[1],anchored[kRight] ? gz : kPivot[2]},
                               {anchored[kLeft] ? grip[kLeft][0] : -kPivot[0],anchored[kLeft] ? gy : kPivot[1],anchored[kLeft] ? gz : kPivot[2]}};
-    if(c.fpMotion)Motion(h,pivots);
-    else Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
+    if(advanceMotion) {
+        if(c.fpMotion)Motion(h,pivots);
+        else Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
+    }
     const M4 view=MatrixAt(cam+kCamMatrix);
     for(int hand=kRight;hand<=kLeft;++hand) {
         bool flip=false;
@@ -907,6 +912,16 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     std::memcpy(cam+kCamMatrix,ride.frame,64);
     VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
+    bool remote=false;float station[16];
+    for(int i=0;i<Current().screens.n;++i)remote|=Current().screens.s[i].kind==ScreenKind::sensor;
+    if(remote || FirstPersonSeatFrame(ride.vehicle,static_cast<unsigned>(ride.seat),station)) {
+        const float before=At<float>(cam,kCamFov);
+        if(std::isfinite(before) && before>0) {
+            if(!Current().fovSet || before!=Current().writtenFov)Current().savedFov=before;
+            Current().writtenFov=remote ? 1.570796327f : 1.308996939f;Current().fovSet=true;
+            Put<float>(cam,kCamFov,Current().writtenFov);
+        }
+    }
     if(Current().nearSet){Put<float>(cam,kCamNear,Current().savedNear);Current().nearSet=false;}
     if(Current().smoothSet){Put<float>(h,kLookSmooth,Current().savedSmooth);Current().smoothSet=false;}
     Current().body=h+kBodyModel;Current().weaponCount=0;Current().inHandCount=0;
@@ -963,7 +978,14 @@ void Camera(unsigned char* cam) noexcept {
 void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
     SyncSession();++renderFrame;
     State* before=selected;
-    __try { for(auto& state:states)if(state.on){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
+    __try { for(auto& state:states)if(state.on){
+        selected=&state;
+        // Camera callbacks can precede the native weapon update. Rebuild anchors
+        // after simulation, before any colour draw; both arms and weapons then
+        // use this render's root pose and aim frame, including fast Fencer dashes.
+        if(!state.riding && state.human && state.cam)Views(state.human,state.cam,false);
+        PlaceAll(false);
+    } } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
     reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
@@ -1024,6 +1046,10 @@ void CamStepSelected(void* camera,void* step) {
         std::memcpy(cam+kCamMatrix,Current().lookApplied.before,64);
     if(Current().lookApplied.cam==cam)Current().lookApplied=LookApplied{};
     if(Current().on && Current().cam==cam)std::memcpy(cam+kCamMatrix,Current().stock,sizeof(Current().stock));
+    if(Current().fovSet && Current().cam==cam) {
+        if(At<float>(cam,kCamFov)==Current().writtenFov)Put<float>(cam,kCamFov,Current().savedFov);
+        Current().fovSet=false;
+    }
     nextCamStep(camera,step);
     CameraAfterNative(cam);
 }
@@ -1203,14 +1229,14 @@ void InstrumentPose(unsigned char* inst,float* backup) noexcept {
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
-        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p') && fields!=6))continue;
+        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p' || mode==L'k') && fields!=6))continue;
         const bool mine=seat==Current().ride.seat;
         const bool rangedNeedle=mode==L'n' && fields>=5;
-        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
+        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T' || mode==L'k';
         // Adjacent stations visible from this seat use the same language, while their
         // new health/percent widgets remain neutral without that seat's live data.
         if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u'
-            && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
+            && mode!=L'r' && mode!=L'q' && mode!=L'a' && mode!=L'h' && mode!=L'j' && !rangedNeedle && !neutralWidget)continue;
         const bool ready=Current().instrumentsReady && (mine || (mode==L'l' && place==0));
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,Current().instruments,ready);
@@ -1360,6 +1386,16 @@ void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
 void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept {
     for(auto& state:states)if(state.on && state.riding && state.human==human){state.instruments=readings;state.instrumentsReady=true;}
+}
+bool FirstPersonSeatFrame(const void* vehicle,unsigned seat,float* frame,bool* remote) noexcept {
+    for(const auto& state:states)if(state.on && state.riding && state.ride.vehicle==vehicle && state.ride.seat==static_cast<int>(seat)) {
+        bool video=false;
+        for(int i=0;i<state.screens.n;++i)video|=state.screens.s[i].kind==ScreenKind::sensor;
+        if(remote)*remote=video;
+        if(!video && state.ride.seat==0 && state.ride.name && (std::strstr(state.ride.name,"Helicopter") || std::strstr(state.ride.name,"Heli")))return false;
+        std::memcpy(frame,state.ride.frame,64);return true;
+    }
+    return false;
 }
 bool FirstPersonGunnerSight() noexcept {
     const Config& c=Cfg();

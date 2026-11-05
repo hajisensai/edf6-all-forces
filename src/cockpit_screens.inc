@@ -79,8 +79,50 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
     return f;
 }
 
+// One mapping drives both the physical counters and their loadout thumbnails.
+// Native Nix order is right hand, left hand, right shoulder, left shoulder.
+void PanelArmSources(const Snapshot& snap,int (&source)[4]) noexcept {
+    for(int& i:source)i=-1;
+    if(!snap.stock)return;
+    const auto& a=snap.stockHud;int order[kStockArms];const int n=a.arms<kStockArms ? a.arms : kStockArms;
+    for(int i=0;i<n;++i)order[i]=i;
+    bool grouped=false;
+    for(int i=0;i<snap.scr.n;++i)grouped|=snap.scr.s[i].kind==ScreenKind::leftarms;
+    if(grouped) {
+        for(int i=1;i<n;++i)for(int j=i;j>0 && a.arm[order[j]].mountHeight<a.arm[order[j-1]].mountHeight;--j)std::swap(order[j],order[j-1]);
+        if(n>=2 && a.arm[order[0]].mountSide<a.arm[order[1]].mountSide)std::swap(order[0],order[1]);
+    }
+    for(int i=0;i<n;++i) {
+        int channel=grouped ? a.arm[order[i]].mountRole : i;
+        if(channel<0)for(int slot=0;slot<4;++slot)if(source[slot]<0){channel=slot;break;}
+        if(channel>=0 && channel<4 && source[channel]<0)source[channel]=order[i];
+    }
+}
+
+bool PanelIcon(const Snapshot& snap,int channel,hudcue::StoreIcon* icon,bool* picked) noexcept {
+    if(channel<0 || channel>=4)return false;
+    if(snap.stock) {
+        int source[4];PanelArmSources(snap,source);
+        const int i=source[channel];if(i<0)return false;
+        const auto& a=snap.stockHud.arm[i];const auto sight=a.reticle;
+        *icon=hudcue::ArmIconOf(static_cast<int>(a.kind),a.lobbed,static_cast<int>(a.style),
+                               sight==reticle::Style::cannon || sight==reticle::Style::precision);
+        *picked=i==snap.stockHud.selected;return true;
+    }
+    if(snap.cockpit) {
+        if(snap.jet.guns>0) {
+            if(channel==0){*icon=hudcue::StoreIcon::gun;*picked=snap.jet.store<0;return true;}
+            --channel;
+        }
+        if(channel>=snap.jet.stores || channel>=kMostStores)return false;
+        *icon=hudcue::StoreIconOf(snap.jet.storeName[channel],snap.jet.storeRole[channel]);
+        *picked=channel==snap.jet.store;return true;
+    }
+    return false;
+}
+
 // Game thread, once the complete vehicle snapshot is gathered. The model draw consumes these readings; the HUD
-// renderer never reads native objects or paints over the physical instruments.
+// renderer uses the same snapshot for loadout thumbnails in the panel cells.
 namespace {
 void PublishInstruments(const Snapshot& snap) noexcept {
     using namespace instruments;
@@ -111,6 +153,19 @@ void PublishInstruments(const Snapshot& snap) noexcept {
         const auto& a=snap.stockHud;
         const int picked=a.selected>=0 && a.selected<a.arms ? a.selected : a.sight>=0 && a.sight<a.arms ? a.sight : 0;
         if(picked<kStockArms){r.value[slot]=static_cast<float>(picked+1);r.value[ammo]=static_cast<float>(a.arm[picked].ammo);}
+    }
+    if(snap.stock) {
+        int source[4];PanelArmSources(snap,source);
+        for(int channel=0;channel<4;++channel) {
+            if(source[channel]<0)continue;
+            const auto& arm=snap.stockHud.arm[source[channel]];
+            r.value[ammo0+channel]=static_cast<float>(arm.ammo);
+            r.value[load0+channel]=1; r.share[load0+channel]=hudcue::CellLoad(arm.ammo,arm.reload,arm.cycleSec,arm.cycle);
+        }
+    } else if(snap.cockpit) {
+        int channel=0;
+        if(snap.jet.guns>0){r.value[ammo0]=static_cast<float>(snap.jet.gunRounds);r.value[load0]=1;r.share[load0]=1;channel=1;}
+        for(int i=0;i<snap.jet.stores && channel<4;++i,++channel){r.value[ammo0+channel]=static_cast<float>(snap.jet.storeRounds[i]);r.value[load0+channel]=1;r.share[load0+channel]=1;}
     }
     FirstPersonInstrumentReadings(r,PlayerHuman());
 }
@@ -263,14 +318,17 @@ bool HudGlass(const CockpitScreens& c) noexcept {
 void RwsDisplay(void* drawer,void* ctx,Text* t,float width,float height,float s,const ScreenFeed& f,const Snapshot& snap,
                 Line* lines,int* at) noexcept {
     const float zoom=snap.stock && snap.stockHud.zoom>1.0f ? snap.stockHud.zoom : 1.0f;
-    ScopeShade(drawer,ctx,t,width,height,s,zoom,true,lines,at);
-    float hx,hy;
-    scopeview::RectHalf(width,height,&hx,&hy);
+    (void)zoom;
+    const float hx=width*.5f,hy=height*.5f;
     const float cx=width*0.5f,cy=height*0.5f,pad=40.0f*s;
     Rect(drawer,ctx,cx-hx,cy-hy,cx+hx,cy+hy,kScreenGlow);
     Label(t,lines,at,cx+hx-pad,cy-hy+pad,2,kLineScale,kScreenInk,L"%ls",Tr(Tx::rwsTitle));
-    if(f.picked>=0 && f.picked<f.cells)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[f.picked].text);
-    else if(f.cells>0)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[0].text);
+    for(int i=0;i<f.cells;++i) {
+        const float y=cy-hy+pad+(40.0f+44.0f*i)*s;
+        Label(t,lines,at,cx+hx-pad-64*s,y,2,kLineScale,
+              f.cell[i].picked ? kCyan : kScreenInk,L"%ls",f.cell[i].text);
+        StoreGlyph(drawer,ctx,cx+hx-pad-25*s,y,1.25f*s,f.cell[i].icon,f.cell[i].picked ? kCyan : kScreenInk);
+    }
     if(snap.stock && snap.stockHud.aimOk) {
         const float* a=snap.stockHud.aim;
         const float gun=sight::HeadingOf(a),hull=sight::HeadingOf(snap.stockHud.hull);
@@ -294,10 +352,15 @@ void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float wid
     const ScreenFeed feed=FeedOf(snap);
     const float ts=t ? t->s : s;
     for(int i=0;i<snap.scr.n;++i)if(snap.scr.s[i].kind==ScreenKind::sensor){RwsDisplay(drawer,ctx,t,width,height,s,feed,snap,lines,at);break;}
-    if(snap.scr.physical)return;
+    if(snap.scr.physical && feed.cells+(snap.cockpit && snap.jet.guns>0 ? 1 : 0)>4) {
+        // Larger aircraft loadouts retain the complete simultaneous picture strip.
+        LoadoutStrip(drawer,ctx,t,width,36*s,s,feed.cell,feed.cells,lines,at);
+    }
     for(int i=0;i<snap.scr.n;++i) {
         const CockpitScreen& c=snap.scr.s[i];
         if(c.kind==ScreenKind::hud || c.kind==ScreenKind::sensor)continue;   // the head-up glass / the station's monitor: on the view
+        const float normal[3]={c.right[1]*c.up[2]-c.right[2]*c.up[1],c.right[2]*c.up[0]-c.right[0]*c.up[2],c.right[0]*c.up[1]-c.right[1]*c.up[0]};
+        if(normal[0]*c.off[0]+normal[1]*c.off[1]+normal[2]*c.off[2]>=-0.001f)continue;
         float px[4],py[4];
         bool ok=true;
         const float hw=c.w*0.5f,hh=c.h*0.5f,corner[4][2]={{-hw,hh},{hw,hh},{hw,-hh},{-hw,-hh}};   // TL TR BR BL
@@ -310,6 +373,25 @@ void DrawCockpitScreens(void* drawer,void* ctx,Text* t,const float* vp,float wid
         }
         const float cw=kCanvasH*c.w/c.h;
         if(!ok || !canvas::Onto(screenCanvas,px,py,cw,kCanvasH))continue;
+        if(snap.scr.physical) {
+            int channels[4]={0,1,2,3},count=4;
+            if(c.kind==ScreenKind::leftarms){channels[0]=0;count=1;}
+            else if(c.kind==ScreenKind::rightarms){channels[0]=1;count=1;}
+            else if(c.kind==ScreenKind::toparms){channels[0]=2;channels[1]=3;count=2;}
+            else if(c.kind!=ScreenKind::weapons)continue;
+            // Icons use exactly the loadout artwork, warped onto the reserved
+            // panel cells. The five-digit counters remain model geometry.
+            screenCanvas.on=true;
+            for(int row=0;row<count;++row) {
+                hudcue::StoreIcon icon;bool picked=false;
+                if(!PanelIcon(snap,channels[row],&icon,&picked))continue;
+                const float y=count==1 ? .16f : count==2 ? .17f-row*.33f : .25f-row*.20f;
+                const float k=std::fmin(cw*(count==1 ? .62f : .27f)/36.0f,kCanvasH*(count==1 ? .23f : count==2 ? .15f : .13f)/26.0f);
+                StoreGlyph(drawer,ctx,cw*(count==1 ? .5f : .28f),kCanvasH*(.5f-y),k,icon,picked ? kCyan : kScreenInk);
+            }
+            screenCanvas.on=false;
+            continue;
+        }
         const int first=*at;
         if(t)t->s=1.0f;   // canvas pixels while it is laid out
         screenCanvas.on=true;

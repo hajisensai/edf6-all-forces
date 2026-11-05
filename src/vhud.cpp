@@ -30,6 +30,7 @@
 #include "edf/weapon.h"
 #include "weapon_mount.h"
 #include <cmath>
+#include <cwchar>
 #include <cstring>
 
 namespace crew {
@@ -104,6 +105,19 @@ void Reload(const unsigned char* w,StockArm& a) noexcept {
 // How far left of the vehicle's middle `centre` its weapon `w`'s first muzzle is, m, across the camera's view `look` (the
 // strip's order, hud_cue.h SideOrder); 0 unknown. Left is up x look: (look z, 0, -look x), as the hull's row 0 is its left
 // (turretcam.h) for its row 1 up and row 2 its nose.
+int MountRole(const unsigned char* vehicle,const unsigned char* holder) noexcept {
+    const auto bone=At<const unsigned char*>(holder,weaponmount::kHolderBone);
+    if(weaponmount::BoneIndex(vehicle+weaponmount::kVehicleModel,bone)<0)return -1;
+    const auto name=At<const wchar_t*>(bone,0);if(!name)return -1;
+    const std::size_t length=std::wcslen(name);
+    if(length<2 || name[length-2]!=L'_')return -1;
+    const int side=name[length-1]==L'l' ? 0 : name[length-1]==L'r' ? 1 : -1;
+    if(side<0)return -1;
+    if(std::wcsncmp(name,L"weapon_shoulder_",16)==0)return 2+side;
+    if(std::wcsncmp(name,L"weapon_hand_",12)==0 || std::wcsncmp(name,L"weapon_lowerArm_",16)==0)return side;
+    return -1;
+}
+
 float SideOf(const unsigned char* w,const float* centre,const float* look) noexcept {
     const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
     const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
@@ -266,9 +280,9 @@ void DebugLog(const StockHudReadout& r) noexcept {
         r.hpMax,r.arms,r.selected,r.threats,r.fuel.ok,r.fuel.share,r.fuel.sec);
     for(int i=0;i<r.arms;++i) {
         const StockArm& a=r.arm[i];
-        Log("VHUD   %d %s %d/%d reload %.2f (%.1fs) kind %d aimed %d hit %d ranged %d%s %.0fm %.1fs lock %d",i,a.label,a.ammo,a.ammoMax,
+        Log("VHUD   %d %s %d/%d reload %.2f (%.1fs) kind %d aimed %d hit %d ranged %d%s %.0fm %.1fs lock %d mount %d",i,a.label,a.ammo,a.ammoMax,
             a.reload,a.reloadSec,static_cast<int>(a.kind),a.aimed,a.hit,a.ranged,a.ranged && !a.inReach ? " (out of reach)" : "",a.range,
-            a.flight,a.lock);
+            a.flight,a.lock,a.mountRole);
     }
 }
 }  // namespace
@@ -340,6 +354,9 @@ void StockHudFrame(unsigned char* v) noexcept {
             // OtherTriggerSight: the Titan's Requiem cannon while its machine gun is picked).
             Arm(w,!r.heli && (a.coFired || a.armed),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
             a.side=SideOf(w,r.pos,r.lookOk ? r.look : r.hull);
+            a.mountRole=MountRole(v,holders[i]);
+            a.mountSide=SideOf(w,r.pos,r.hull);
+            float mount[3],direction[3];if(edf::MeanMuzzle(w,64,mount,direction))a.mountHeight=mount[1]-r.pos[1];
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     // A Proteus seat also works the stock mounts it borrows (proteus.cpp: the driver both cannons with nobody at the
@@ -351,6 +368,8 @@ void StockHudFrame(unsigned char* v) noexcept {
             auto& a=r.arm[r.arms++];a.coFired=true;
             Arm(borrowed[i],true,a,false);
             a.side=SideOf(borrowed[i],r.pos,r.lookOk ? r.look : r.hull);
+            a.mountSide=SideOf(borrowed[i],r.pos,r.hull);
+            float mount[3],direction[3];if(edf::MeanMuzzle(borrowed[i],64,mount,direction))a.mountHeight=mount[1]-r.pos[1];
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     }

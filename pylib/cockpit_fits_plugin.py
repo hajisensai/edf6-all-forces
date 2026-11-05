@@ -70,7 +70,7 @@ _B401_HOLD = (-1.0, 1.7, 2.6)
 _410_CABIN = (-0.15, 1.9, 0.3)
 
 FITS: dict[str, tuple[Fit, ...]] = {
-    'EDF6VC_SEDAN': (Fit(0, 'body', (-.35, 1.19, .12), 'sedan_cab'),),
+    'EDF6VC_SEDAN': (Fit(0, 'body', (-.35, 1.19, .12), 'sedan_cab', unarmed=True),),
     # The player's and the NPC interceptors and the enemy fighter (BOMBER501's mesh at 0.65): the front seat of the
     # painted tandem canopy (room 0.77, 0.77, 0.35, 0.77, 3.15, 14.46). Every fighter sits in War Thunder's F-16A
     # Block 15 cockpit (cockpit_kits_plugin jet_f16; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧").
@@ -104,7 +104,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # The twin-gun artillery: the gunner in the turret between the two guns, high under its roof (room after the
     # station came in off the roof 0.74, 0.75, 0.23, 1.27, 1.52, 0.58): lower, at the guns' height, their breeches'
     # angular backs filled the sight; from up here the view runs ahead between them.
-    'EDF6VC_ARTILLERY': (Fit(0, 'cannon_main', (0.0, 2.65, -0.3), 'tank_gunner'),),
+    'EDF6VC_ARTILLERY': (Fit(0, 'cannon_main', (0.0, 2.65, -0.3), 'tank_gunner', hide_bones=('cannon_l','cannon_slide_l','cannon_r','cannon_slide_r')),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,

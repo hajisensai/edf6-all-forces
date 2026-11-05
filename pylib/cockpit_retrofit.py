@@ -174,32 +174,62 @@ def _dial(name,centre,facing,up,diameter,field,ground,labels,ranges):
            cylinder(name+'_face','retrofit_face',at(z=.003),at(z=.004),radius*.91,32)]
     maximum=160 if ground and field==ci.SPEED else RANGES.get(field,100)
     maximum=ranges.get(field,maximum)
-    for tick in range(21):
-        angle=math.radians(-135+270*tick/20);dx,dy=math.sin(angle),math.cos(angle)
-        direction=tuple(r[k]*dx+u[k]*dy for k in range(3))
-        parts.append(panel(name+'_tick','retrofit_scale',at(dx*radius*.79,dy*radius*.79,.005),
-                           radius*.025,radius*(.15 if tick%5==0 else .07),f,direction))
-    signed=field in (ci.CLIMB,ci.PITCH)
-    for tick in (0,5,10,15,20):
-        angle=math.radians(-135+270*tick/20)
-        value=round(maximum*(tick/10-1 if signed else tick/20))
-        parts.append(_text(name+'_number',str(value),at(math.sin(angle)*radius*.59,
-                         math.cos(angle)*radius*.59,.0055),diameter*.28,diameter*.085,'retrofit_scale',f,u))
+    compass=field==ci.HEADING
+    attitude=field==ci.PITCH
+    card=[]
+    if compass:
+        # Heading is a full compass card: north at zero, clockwise east/south/west,
+        # rotating beneath a fixed lubber mark. It is never a 270-degree quantity.
+        for tick in range(36):
+            angle=math.radians(tick*10);dx,dy=math.sin(angle),math.cos(angle)
+            direction=tuple(r[k]*dx+u[k]*dy for k in range(3))
+            card.append(panel(name+'_tick','retrofit_scale',at(dx*radius*.76,dy*radius*.76,.005),
+                              radius*.025,radius*(.14 if tick%3==0 else .06),f,direction))
+            if tick%3==0:
+                text={0:'N',9:'E',18:'S',27:'W'}.get(tick,str(tick))
+                card.append(_text(name+'_number',text,at(dx*radius*.56,dy*radius*.56,.0055),
+                                  diameter*.18,diameter*.085,'retrofit_scale',f,direction))
+        parts.append(panel(name+'_lubber','retrofit_needle',at(0,radius*.83,.009),
+                           radius*.08,radius*.18,f,u))
+    elif attitude:
+        # The aircraft reference stays fixed while the horizon moves down for nose-up.
+        parts.append(panel(name+'_reference','retrofit_needle',at(z=.009),radius*.9,radius*.04,f,u))
+        for degrees in (-30,0,30):
+            y=degrees/45*radius*.4
+            parts.append(panel(name+'_ladder','retrofit_scale',at(0,y,.005),radius*.25,radius*.018,f,u))
+    else:
+        for tick in range(21):
+            angle=math.radians(-135+270*tick/20);dx,dy=math.sin(angle),math.cos(angle)
+            direction=tuple(r[k]*dx+u[k]*dy for k in range(3))
+            parts.append(panel(name+'_tick','retrofit_scale',at(dx*radius*.79,dy*radius*.79,.005),
+                               radius*.025,radius*(.15 if tick%5==0 else .07),f,direction))
+        signed=field==ci.CLIMB
+        for tick in (0,5,10,15,20):
+            angle=math.radians(-135+270*tick/20)
+            value=round(maximum*(tick/10-1 if signed else tick/20))
+            parts.append(_text(name+'_number',str(value),at(math.sin(angle)*radius*.59,
+                             math.cos(angle)*radius*.59,.0055),diameter*.28,diameter*.085,'retrofit_scale',f,u))
     title=TITLES.get(field,'-')
     if title in ci.LABELS:
         for language,text in enumerate(ci.LABELS[title]):
-            labels[language].append(_text(name+'_title',text,at(0,-radius*.62,.006),diameter*.56,
-                                          diameter*.09,'retrofit_scale',f,u))
+            labels[language].append(_text(name+'_title',text,at(0,0 if compass else -radius*.62,.009),
+                                          diameter*(.30 if compass else .56),diameter*(.07 if compass else .09),
+                                          'retrofit_scale',f,u))
     else:
         parts.append(_text(name+'_unit',title,at(0,-radius*.62,.006),diameter*.5,diameter*.09,'retrofit_scale',f,u))
     dash=_text(name+'_unknown','-',at(0,0,.008),diameter*.18,diameter*.10,'retrofit_scale',f,u)
     controls=[]
     if field is not None:
-        # A single pivot drives the rigid needle. The case and scale never animate.
-        p=panel(name+'_needle','retrofit_needle',at(0,radius*.31,.008),radius*.045,radius*.72,f,u)
+        if compass:
+            p=merge(card,name+'_card');mode='h';limit=360
+        elif attitude:
+            p=panel(name+'_horizon','retrofit_scale',at(z=.008),radius*1.25,radius*.035,f,u)
+            mode='j';limit=round(diameter*1000)
+        else:
+            p=panel(name+'_needle','retrofit_needle',at(0,radius*.31,.008),radius*.045,radius*.72,f,u)
+            mode='a' if field==ci.CLIMB else 'q' if field==ci.HP else 'r';limit=maximum
         parts.append(p)
-        mode='a' if signed else 'q' if field==ci.HP else 'r'
-        controls.append(InstrumentControl(p.name,f'{mode}_{field}_{maximum}',at(z=.008),f,u))
+        controls.append(InstrumentControl(p.name,f'{mode}_{field}_{limit}',at(z=.008 if not compass else .005),f,u))
         controls.append(InstrumentControl(dash.name,f'u_{field}',at(z=.008),f,u))
     parts.append(dash)
     return parts,controls
@@ -318,10 +348,22 @@ def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), 
 
 AIR_FIELDS=(ci.SPEED,ci.ALT,ci.PITCH,ci.CLIMB,ci.HEADING,ci.FUEL,ci.POWER,ci.HP,None)
 F16=(
-    Block('right_flight',(-.205,-.38,.875),(0,.18,-.984),.25,.24,3,AIR_FIELDS),
-    Block('standby',(0,-.50,.85),(0,.18,-.984),.20,.18,2,(ci.SPEED,ci.ALT,ci.PITCH,ci.HEADING)),
-    Block('right_aux',(-.44,-.68,.645),(.10,.737,-.668),.12,.32,1,(ci.POWER,ci.FUEL,ci.HP)),
-    Block('right_upper_aux',(-.3694,-.5777,.7626),(.1024,.7261,-.6799),.07,.07,1,(ci.POWER,)),
+    Block('right_flight',(-.205,-.38,.875),(0,.18,-.984),.25,.24,3,
+          (ci.SPEED,ci.ALT,ci.PITCH,ci.HEADING,ci.CLIMB,ci.FUEL,ci.POWER),
+          dials=(DialAt((-.13103,-.29458,.88340),.060),DialAt((-.19327,-.30045,.88562),.052),
+                 DialAt((-.13103,-.36046,.87276),.060),DialAt((-.21620,-.39703,.86874),.052),
+                 DialAt((-.27284,-.41951,.86446),.039),DialAt((-.21532,-.45640,.85809),.052),
+                 DialAt((-.27453,-.47680,.85459),.058))),
+    Block('standby_upper',(0,-.46012,.85524),(0,.18,-.984),.20,.10,2,(ci.SPEED,ci.PITCH),
+          dials=(DialAt((.04586,-.46012,.85524),.084),DialAt((-.04602,-.46012,.85524),.084))),
+    Block('standby_lower',(0,-.53832,.80928),(0,.765,-.644),.20,.12,2,(ci.ALT,ci.HEADING),
+          dials=(DialAt((.04557,-.53832,.80928),.084),DialAt((-.04602,-.53832,.80928),.084))),
+    Block('right_aux_forward',(-.44752,-.69316,.62936),(.10,.737,-.668),.06,.06,1,(ci.FUEL,),
+          dials=(DialAt((-.44752,-.69316,.62936),.047),)),
+    Block('right_aux_rear',(-.46205,-.73754,.57938),(.10,.737,-.668),.07,.07,1,(ci.POWER,),
+          dials=(DialAt((-.46205,-.73754,.57938),.054),)),
+    Block('right_upper_aux',(-.36656,-.57384,.76410),(.1024,.7261,-.6799),.07,.07,1,(ci.POWER,),
+          dials=(DialAt((-.36656,-.57384,.76410),.056),)),
     Block('left_switches',(.40,-.67,.63),(-.10,.64,-.76),.26,.40,4,mode='switches'),
     Block('right_switches',(-.46,-.79,.39),(0,1,0),.20,.32,3,mode='switches'),
     Block('centre_controls',(0,-.335,.80),(0,.18,-.984),.16,.20,mode='blank'),

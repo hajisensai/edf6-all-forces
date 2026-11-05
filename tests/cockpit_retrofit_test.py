@@ -65,7 +65,7 @@ for scale in (1.,.43):
     k=Kit([panel('source','original',(0,0,0),2*scale,2*scale,(0,0,-1))],{'original':KitMaterial((50,50,50))})
     rt.apply(k,(block,),lambda p:np.asarray(p)*scale)
     for i,site in enumerate(sites):
-        needle=next(c for c in k.controls if c.part==f'retrofit_surveyed_{i}_needle')
+        needle=next(c for c in k.controls if c.part==f'retrofit_surveyed_{i}_'+('horizon' if i==0 else 'needle'))
         assert np.allclose(needle.centre[:2],np.asarray(site.centre[:2])*scale)
         rim=next(p for p in k.parts if p.name==f'retrofit_surveyed_{i}_rim')
         xyz=np.array([v.pos for v in rim.verts]);assert np.allclose(np.ptp(xyz,axis=0)[:2],site.diameter*scale)
@@ -78,6 +78,7 @@ print('surveyed dial mounts and fitted control pivots passed')
 # Captions sit below the lowest numeric scale and remain inside the face, in
 # every language. Enlarging cases to their bores must not enlarge a text overlap.
 for field in rt.TITLES:
+    if field in (rt.ci.HEADING,rt.ci.PITCH):continue
     labels={i:[] for i in range(4)}
     parts,_=rt._dial('layout',(0,0,0),(0,0,-1),(0,1,0),.118,field,False,labels,{})
     numbers=[v.pos[1] for p in parts if p.name.endswith('_number') for v in p.verts]
@@ -85,3 +86,15 @@ for field in rt.TITLES:
     for p in captions:
         assert max(v.pos[1] for v in p.verts)<min(numbers),'caption overlaps the lower numeric scale'
         assert max(np.linalg.norm(v.pos[:2]) for v in p.verts)<=.118*.5*.91+1e-9,'caption exceeds the dial face'
+
+# Direction and attitude use their own physical mechanisms, rather than a
+# quantity needle. The compass caption stays in the quiet hub, clear of its card.
+for field,mode in ((rt.ci.HEADING,'h'),(rt.ci.PITCH,'j')):
+    captions={i:[] for i in range(4)}
+    parts,controls=rt._dial('special',(0,0,0),(0,0,-1),(0,1,0),.10,field,False,captions,{})
+    assert any(c.control.startswith(f'{mode}_{field}_') for c in controls)
+    assert not any(p.name.endswith('_needle') for p in parts)
+    if field==rt.ci.HEADING:
+        assert any(p.name.endswith('_card') for p in parts) and any(p.name.endswith('_lubber') for p in parts)
+        assert all(np.linalg.norm(v.pos[:2])<.10*.2 for group in captions.values() for p in group for v in p.verts)
+print('compass card, fixed index and moving horizon controls passed')

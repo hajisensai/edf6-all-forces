@@ -13,11 +13,11 @@ bool FirstPersonOn() noexcept;        // game thread: the local player's camera 
 // Draw thread or game thread (map.cpp's camera step): the stock HUD is off on `camera` for a vehicle's first person
 // (its information goes on the cockpit's panels instead; the user, 2026-10-13: "关，信息全上面板").
 bool FirstPersonHidesStockHud(const void* camera) noexcept;
-// Any thread: the player has first person on for vehicles (the key's switch). A seat whose gun carries a mounted optic
-// is then seen through that optic at every magnification, 1x too (War Thunder's gunner sight, the user, 2026-10-14:
-// "完全把战雷的搬过来": the view on the gun, the reticle on the bore, the barrel never across it; sightzoom.cpp owns that
-// camera); the other seats through their cockpit's eye.
+// Legacy preference query. At 1x the cockpit or full remote view owns the camera;
+// the mounted optic is used only after an explicit magnification step.
 bool FirstPersonGunnerSight() noexcept;
+// The active local cockpit marker frame for normal first-person aiming.
+bool FirstPersonSeatFrame(const void* vehicle,unsigned seat,float* frame,bool* remote=nullptr) noexcept;
 
 // fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
 // `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the
@@ -29,7 +29,7 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 // draws its live read-outs (hud.cpp CockpitScreens). `off`: the screen's centre from the eye, `right` / `up` its unit
 // axes as seen from its front (world), w x h metres. Relative to the eye, so the draw (a frame after the camera step)
 // puts it round the eye its own view has.
-enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map, sensor };   // sensor: a remote station's monitor
+enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map, sensor, leftarms, rightarms, toparms };   // sensor: a remote station's monitor
 struct CockpitScreen { ScreenKind kind; float off[3],right[3],up[3],w,h; };
 constexpr int kMostScreens=8;
 struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; bool physical; };

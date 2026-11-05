@@ -53,7 +53,7 @@ int VehicleScreens(const unsigned char* v,int seat,const float* eye,CockpitScree
     if(!bones || n<=0 || n>kMostBones || !Readable(bones,static_cast<std::size_t>(n)*kBoneStride))return 0;
     wchar_t prefix[24];
     const int len=std::swprintf(prefix,24,L"vc_scr_%d_",seat);
-    static const wchar_t* const kinds[]={L"flight",L"weapons",L"status",L"hud",L"map",L"sensor"};
+    static const wchar_t* const kinds[]={L"flight",L"weapons",L"status",L"hud",L"map",L"sensor",L"leftarms",L"rightarms",L"toparms"};
     for(std::int32_t i=0;i<n;++i) {
         const unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
         const auto name=At<const wchar_t*>(rec,0);
@@ -61,7 +61,7 @@ int VehicleScreens(const unsigned char* v,int seat,const float* eye,CockpitScree
         if(!name || out->n>=kMostScreens || std::wcsncmp(name,prefix,static_cast<std::size_t>(len))!=0)continue;
         const wchar_t* rest=name+len;
         int kind=-1;
-        for(int k=0;k<6;++k) {
+        for(int k=0;k<9;++k) {
             const std::size_t kl=std::wcslen(kinds[k]);
             if(std::wcsncmp(rest,kinds[k],kl)==0 && rest[kl]==L'_'){kind=k;rest+=kl+1;break;}
         }

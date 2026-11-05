@@ -261,9 +261,14 @@ def release_models() -> list[tuple[str, str]]:
         if folder is None:
             print(f'note: model {name} not found ({", ".join(obj_model.model_roots())}): the release goes without it')
             continue
-        for f in sorted(os.listdir(folder)):
-            if os.path.isfile(os.path.join(folder, f)):
-                out.append((os.path.join(folder, f), f'models/{name}/{f}'))
+        # Cockpit parts and textures live below their family directories. A flat
+        # listing shipped only CREDITS and silently relied on the developer assets.
+        for directory, dirs, files in os.walk(folder):
+            dirs.sort()
+            for file in sorted(files):
+                source=os.path.join(directory,file)
+                relative=os.path.relpath(source,folder).replace(os.sep,'/')
+                out.append((source,f'models/{name}/{relative}'))
     return out
 
 

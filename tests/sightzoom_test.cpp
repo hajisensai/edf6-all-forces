@@ -240,15 +240,14 @@ int wmain(int argc,wchar_t** argv){
     Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6,
                 "scope eye uses physical optic bone, not third-person camera or muzzle");
     Check(SightZoomMounted(vehicle),"active physical view asks turret input to stay native");
-    // War Thunder's gunner sight: in a vehicle's first person the mounted optic is the view at 1x too.
+    // First-person 1x is the wide cockpit view. Only a deliberate zoom enters the optic.
     Setup();Button(0);gunnerSight=true;
-    Check(SightZoomNow(vehicle)==1 && SightZoomMounted(vehicle),"first person: the optic is up at 1x (the gunner's sight)");
-    Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6 &&
-                Fov()==originalFov,"first person at 1x: the eye on the optic bone, the field of view unmagnified");
-    observing=true;
-    Check(!SightZoomMounted(vehicle) && Fov()==originalFov,"free look yields the mounted optic to the seat camera");
-    observing=false;Check(SightZoomMounted(vehicle),"releasing observation resumes the same mounted optic");
-    gunnerSight=false;Check(!SightZoomMounted(vehicle),"first person off: 1x is the turret camera's again");
+    Check(SightZoomNow(vehicle)==1 && !SightZoomMounted(vehicle),"first person at 1x retains the cockpit view");
+    Fov();Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0 && Fov()==originalFov,
+                "1x cannot replace the wide camera with a narrow physical optic");
+    observing=true;Check(!SightZoomMounted(vehicle),"observation remains out of the 1x optic");
+    observing=false;Check(!SightZoomMounted(vehicle),"releasing observation does not force 1x into the optic");
+    Zoom();Check(SightZoomMounted(vehicle),"explicit zoom still enters the authored optic");
     Setup();opticPresent=false;gunnerSight=true;Button(0);
     Check(!SightZoomMounted(vehicle),"first person in a seat without an optic: no gunner's sight (the cockpit's eye)");
     originalWrites=false;ResetSightZoom();Fov();Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0,"leaving restores untouched original world matrix");
@@ -293,8 +292,8 @@ int wmain(int argc,wchar_t** argv){
     // the camera's line of sight is laid under the bore by
     // the round's superelevation for that range, the setting kept across the seat's weapons and dropped with the seat.
     Setup();gunnerSight=true;roundSpeed=10.0f;roundFactor=1.0f;Button(0);
-    Check(wheelHeld,"first person at 1x: the gunner's sight takes the wheel (its range)");
-    wheelNotches=3;Button(0);Check(SightZoomRange(vehicle)==75,"first person at 1x: three notches set 75 m, as magnified");
+    Check(!wheelHeld,"first person at 1x leaves the wheel with normal controls");
+    wheelNotches=3;Button(0);Check(SightZoomRange(vehicle)==0,"1x does not change the optical range setting");
     Setup();Button(0);Check(!wheelHeld,"at 1x the wheel stays the game's");
     roundSpeed=10.0f;roundFactor=1.0f;Zoom();Check(wheelHeld,"magnified, the sight takes the wheel");
     wheelNotches=3;Button(0);float angle=0.0f;

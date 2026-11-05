@@ -141,3 +141,59 @@ def tub(lo: np.ndarray, hi: np.ndarray, sill: float, windows: np.ndarray | tuple
                                         ('tub_back', 2, z0, 0, (x0, x1)), ('tub_front', 2, z1, 0, (x0, x1))):
         parts += _wall(name, axis, at, along, span, y0, y1, sill, w)
     return merge(parts, 'tub')
+
+def gap_liner(liner: om.Part, hardware: list[om.Part]) -> om.Part:
+    """Fill angular gaps only, leaving authored controls visible after hull fitting.
+
+    A conforming full floor can move ahead of a stick or instrument. Subtract the
+    front-facing hardware silhouettes, even when that hardware is deeper than the
+    liner. The original cockpit closes those rays; the liner closes only its gaps.
+    All cuts are in angular space, which radial hull conformance preserves.
+    """
+    from shapely import Polygon, union_all, constrained_delaunay_triangles
+    triangles=[np.asarray([v.pos for v in p.verts])[p.tris] for p in hardware if p.tris]
+    if not triangles:return liner
+    tri=np.concatenate(triangles)
+    normal=np.cross(tri[:,1]-tri[:,0],tri[:,2]-tri[:,0])
+    tri=tri[(normal*tri.mean(1)).sum(1)<-1e-12]
+    if not len(tri):return liner
+    vertices=[];faces=[];masks={}
+    for indices in liner.tris:
+        polygon=np.asarray([liner.verts[i].pos for i in indices])
+        # Every tub face is axis-aligned before conformance.
+        span=np.ptp(polygon,axis=0);axis=int(np.argmin(span));sign=np.sign(polygon[0,axis])
+        axes=[i for i in range(3) if i!=axis]
+        target=Polygon(polygon[:,axes]/(polygon[:,axis,None]*sign))
+        key=(axis,sign)
+        if key not in masks:
+            # Clip triangles crossing the hemisphere before projection.
+            projected=[]
+            for triangle in tri:
+                poly=[]
+                for j,cur in enumerate(triangle):
+                    prev=triangle[j-1];dc=cur[axis]*sign-1e-6;dp=prev[axis]*sign-1e-6
+                    if (dc>=0)!=(dp>=0):poly.append(prev+(cur-prev)*(dp/(dp-dc)))
+                    if dc>=0:poly.append(cur)
+                if len(poly)>=3:
+                    pts=np.asarray(poly);shape=Polygon(pts[:,axes]/(pts[:,axis,None]*sign))
+                    if shape.is_valid and shape.area>1e-14:projected.append(shape)
+            # Float32 source meshes contain coincident/near-collinear edges.
+            # A fixed angular grid avoids GEOS shell ambiguities without a
+            # visible change (far below the existing 1e-6 ray edge tolerance).
+            masks[key]=union_all(projected,grid_size=1e-8)
+        gaps=target.difference(masks[key],grid_size=1e-8)
+        if gaps.is_empty:continue
+        a,b,c=polygon;uv0=np.asarray(liner.verts[indices[0]].uv)
+        uv1=np.asarray(liner.verts[indices[1]].uv);uv2=np.asarray(liner.verts[indices[2]].uv)
+        inverse=np.linalg.pinv(np.stack((b-a,c-a),axis=1))
+        for face2 in constrained_delaunay_triangles(gaps).geoms:
+            pts=np.zeros((3,3));pts[:,axis]=polygon[0,axis]
+            pts[:,axes]=np.asarray(face2.exterior.coords)[:3]*abs(polygon[0,axis])
+            # Preserve the original inward winding after projection/triangulation.
+            if np.dot(np.cross(pts[1]-pts[0],pts[2]-pts[0]),liner.verts[indices[0]].normal)<0:pts=pts[::-1]
+            start=len(vertices)
+            for pt in pts:
+                weights=inverse@(pt-a);uv=uv0+weights[0]*(uv1-uv0)+weights[1]*(uv2-uv0)
+                vertices.append(om.Vertex(tuple(pt),liner.verts[indices[0]].normal,tuple(uv)))
+            faces.append((start,start+1,start+2))
+    return om.Part(liner.name,liner.material,vertices,faces)

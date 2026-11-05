@@ -37,7 +37,7 @@ MODEL = 'edf6vc_sedan.mdb'
 SOURCE = 'sk_car_sedan01.mdb'
 DIGEST = '4ead8979524c6664cfc2a686f57ffab6ccb019ded833938298f48a3f95259fdb'
 EYE = (-0.35, 1.19, 0.12)
-FIT = (cockpits.Fit(0, 'body', EYE, 'sedan_cab'),)
+FIT = (cockpits.Fit(0, 'body', EYE, 'sedan_cab', unarmed=True),)
 HOST = 'V512_KEITRUCK'
 WHEELS = ('tireF_l', 'tireF_r', 'tireB_l', 'tireB_r')
 
@@ -228,6 +228,36 @@ def collision(game, members):
     return bytes(shape.buf)
 
 
+def closed_driver(mab: bytes, locator: str) -> bytes:
+    """Use native closed-cabin visibility (the tank's DispCharacter=0).
+
+    A seated soldier's radio/backpack is taller than this civilian roof. The
+    native riding action (EDF+57AE6A) reads this locator's embedded SGO; merely
+    changing vehicle_riding_position's profile never changes that visibility.
+    Patch only its integer, retaining the animation and every MAB offset.
+    """
+    point, _radius = vc.mab_locator(mab, locator)
+    table, end = struct.unpack_from('<2I', mab, 0x14)
+    record = next(r for r in range(table+0x20, end, 0x20)
+                  if r+struct.unpack_from('<i', mab, r+0xC)[0] == point)
+    payload = record+struct.unpack_from('<i', mab, record+0x1C)[0]
+    _version, settings = sgo.read(mab[payload:])
+    if settings != {'Animation': 'vehicle_striker_rear', 'DispCharacter': 1}:
+        raise ValueError('native truck driver visibility/animation changed')
+    _version, _count, nodes, names, name_at = struct.unpack_from('<5I', mab, payload+4)
+    out = bytearray(mab)
+    for i in range(names):
+        at = payload+name_at+8*i
+        rel, index = struct.unpack_from('<iI', mab, at)
+        if vc._utf16_at(mab, at+rel) != 'DispCharacter':continue
+        at = payload+nodes+12*index
+        if struct.unpack_from('<3I', mab, at) != (1,4,1):
+            raise ValueError('native driver visibility is not a true integer')
+        struct.pack_into('<I', out, at+8, 0)
+        return bytes(out)
+    raise ValueError('native driver visibility missing')
+
+
 def build(root):
     game = rootcpk.Game(root)
     version, m = sgo.read(game.read('OBJECT', HOST+'.SGO'))
@@ -240,7 +270,7 @@ def build(root):
                         (m['vehicle_riding_position'][0][0], (-1.1, -.55, EYE[2]))):
         at,_ = vc.mab_locator(bytes(mab), name)
         struct.pack_into('<3f', mab, at, *point)
-    m['animation_model'][2] = bytes(mab)
+    m['animation_model'][2] = closed_driver(bytes(mab), m['vehicle_riding_position'][0][1])
     m['vehicle_riding_position'] = m['vehicle_riding_position'][:1]
     m['vehicle_weapon_setting'] = []
     m['vehicle_setup'][-1] = []

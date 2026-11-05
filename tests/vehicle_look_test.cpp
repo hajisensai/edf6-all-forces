@@ -16,8 +16,14 @@ unsigned char* image=nullptr;
 Config config{};
 ULONGLONG frame=0,now=1000;
 unsigned char human[0x2000]{},vehicle[0x2000]{},seats[2*kSeatStride]{};
-bool onFoot=false,map=false,paused=false,sazabi=false,high=false;
+bool onFoot=false,map=false,paused=false,sazabi=false,high=false,firstPerson=false,worldAim=false;
+bool FirstPersonSeatFrame(const void*,unsigned,float* out,bool* remote) noexcept {
+    if(remote)*remote=false;
+    if(!firstPerson)return false;const auto marker=fpview::Identity();std::memcpy(out,marker.m,64);return true;
+}
 bool HighCamOn(const void*) noexcept{return high;}
+bool TurretCamTurret(const void*,unsigned) noexcept{return worldAim;}
+bool PlayerNixTorso(NixTorso*) noexcept{return false;}
 bool TurretCamHighTransition(const void*) noexcept{return high;}
 const Config& Cfg() noexcept{return config;}
 ULONGLONG GameFrame() noexcept{return frame;}
@@ -84,6 +90,26 @@ int main(){
     check(!look.offered,"high view retains its existing observation controller");
     high=false;VehicleLookSetReady(false);++frame;{VehicleLookInput input(vehicle);}
     check(!look.offered && At<float>(seats,kStick)==.5f,"unavailable camera hook never consumes look input");
+    VehicleLookSetReady(true);look=Look{};firstPerson=true;config.freeLookButton=0;
+    const auto identity=fpview::Identity();std::memcpy(vehicle+kMatrix,identity.m,64);
+    Put<std::uint16_t>(seats,kButtons,0);Put<float>(seats,kStick,.6f);Put<float>(seats,kStick+4,-.4f);++frame;
+    {VehicleLookInput input(vehicle);check(At<float>(seats,kStick)==.6f && At<float>(seats,kStick+4)==-.4f,"normal cockpit aiming retains native weapon input");}
+    auto normal=fpview::Translate(10,20,30);
+    check(VehicleLookCamera(human,normal.m) && normal.m[9]>0 && normal.m[8]<0,"normal right/up input turns the first-person view without holding a key");
+    check(!VehicleLookActive(vehicle),"normal aim is not free-look and does not disable the new turret controller");
+    const float aimYaw=look.aimYaw,aimPitch=look.aimPitch;
+    Put<float>(seats,kStick,0);Put<float>(seats,kStick+4,0);++frame;{VehicleLookInput input(vehicle);}
+    check(look.aimYaw==aimYaw && look.aimPitch==aimPitch,"ordinary cockpit aim does not spring back when input stops");
+    worldAim=true;++frame;{VehicleLookInput input(vehicle);}
+    auto beforeTurn=fpview::Identity();VehicleLookCamera(human,beforeTurn.m);
+    const float pivot[3]={0,0,0};const auto turnedHull=fpview::MotionMatrix(0,0,0,0,.35f,0,pivot);
+    std::memcpy(vehicle+kMatrix,turnedHull.m,64);
+    auto afterTurn=fpview::Identity();VehicleLookCamera(human,afterTurn.m);
+    check(std::fabs(beforeTurn.m[8]-afterTurn.m[8])<1e-5f && std::fabs(beforeTurn.m[10]-afterTurn.m[10])<1e-5f,
+          "stabilized view does not jump when Nix legs or a tank hull turn after input sampling");
+    ++frame;{VehicleLookInput input(vehicle);}VehicleLookCamera(human,afterTurn.m);
+    check(std::fabs(beforeTurn.m[8]-afterTurn.m[8])<1e-5f,"next input frame preserves the same world bearing");
+    firstPerson=false;
     config.enabled=false;
     check(!VehicleLookActive(vehicle),"disabling the plugin yields immediately");
     std::printf("vehicle look: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;

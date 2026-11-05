@@ -5,6 +5,7 @@
 // other works as before.
 #include "crew.h"
 #include "turretaim.h"
+#include "vehicle_look.h"
 #include "memory.h"
 #include "spot_ray.h"
 #include "npc_mark.h"
@@ -177,6 +178,6 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_SightBindingV1(con
 }
 extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void* vehicle,unsigned seat) {
     using namespace crew;
-    __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}
+    __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (VehicleLookActive(vehicle) || HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -1150,6 +1150,14 @@ def check_package() -> int:
                for text in cockpit_instruments.LABELS[key] for ch in text)
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
+    # Exercise the shipped GEOS extension too, not just its Python import.
+    import numpy as np
+    from cockpit_tub import tub, gap_liner
+    from cockpit_shapes import panel
+    liner=tub(np.array([-.5,-1.,-.4]),np.array([.5,.4,1.5]),-30.)
+    control=panel('package_control','test',(0.,-.7,.45),.3,.3,(0.,.8,-.6))
+    cut=gap_liner(liner,[control])
+    assert cut.tris and len(cut.tris)!=len(liner.tris)
     importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder
     import texfile
     import texfile_accel

@@ -1713,6 +1713,50 @@ int ScreensDrawn(const wchar_t* name,const float* pos,const float* fwd,int width
     return failed;
 }
 
+int PanelDrawChecks(const std::wstring& dir) {
+    int failures=0;const float origin[3]={0,0,0},forward[3]={0,0,1};
+    Snapshot snap{};snap.stock=true;snap.stockHud.arms=4;
+    for(int i=0;i<4;++i){snap.stockHud.arm[i].mountRole=i;snap.stockHud.arm[i].kind=static_cast<RoundKind>(i);snap.stockHud.arm[i].ammo=100-i;}
+    snap.stockHud.arm[1].style=static_cast<WeaponStyle>(1);
+    const ScreenKind kinds[]={ScreenKind::weapons,ScreenKind::leftarms,ScreenKind::rightarms,ScreenKind::toparms};
+    for(int width:{960,1280,1920,2560})for(int k=0;k<4;++k) {
+        float vp[16];Camera(origin,forward,static_cast<float>(width),1080,vp);
+        snap.scr={};snap.scr.n=1;snap.scr.physical=true;
+        auto& panel=snap.scr.s[0];panel=ScreenAt(kinds[k],forward,0);panel.off[1]=0;panel.w=.4f;panel.h=.3f;
+        wchar_t file[96];std::swprintf(file,96,L"%ls\\physical_ammo_%d_%d.txt",dir.c_str(),width,k);
+        if(_wfopen_s(&out,file,L"w") || !out){++failures;continue;}
+        std::fprintf(out,"W %d 1080\n",width);
+        Line lines[256]{};int at=0;boxing=true;box={};drawn=0;
+        DrawCockpitScreens(nullptr,nullptr,nullptr,vp,static_cast<float>(width),1080,1,snap,lines,&at);
+        boxing=false;std::fclose(out);out=nullptr;
+        if(!box.any || drawn<4 || box.x0<0 || box.x1>width || box.y0<0 || box.y1>1080)++failures;
+        snap.stockHud.arms=0;boxing=true;drawn=0;
+        DrawCockpitScreens(nullptr,nullptr,nullptr,vp,static_cast<float>(width),1080,1,snap,lines,&at);
+        boxing=false;if(drawn)++failures;snap.stockHud.arms=4;
+        // The backs of physical monitors must not glow through the cabin.
+        panel.right[0]*=-1;boxing=true;drawn=0;
+        DrawCockpitScreens(nullptr,nullptr,nullptr,vp,static_cast<float>(width),1080,1,snap,lines,&at);
+        boxing=false;if(drawn)++failures;
+    }
+    // Four stores plus a separate gun overflow the four physical counters.
+    // Draw production output with no panel markers: all four stores must still
+    // appear in the complete strip, rather than disappearing at the old >4 test.
+    Snapshot aircraft{};aircraft.cockpit=true;aircraft.scr.physical=true;
+    aircraft.jet.guns=1;aircraft.jet.stores=4;
+    const char* stores[]={"AIM-9X","AIM-120","Mk 82","Hydra 70"};
+    for(int i=0;i<4;++i){aircraft.jet.storeName[i]=stores[i];aircraft.jet.storeRole[i]=i;aircraft.jet.storeRounds[i]=10+i;}
+    float vp[16];Camera(origin,forward,1920,1080,vp);
+    Line labels[256]{};int at=0;boxing=true;drawn=0;
+    DrawCockpitScreens(nullptr,nullptr,nullptr,vp,1920,1080,1,aircraft,labels,&at);
+    boxing=false;if(!drawn || at<4)++failures;
+    for(int i=0;i<4;++i) {
+        wchar_t name[32];std::swprintf(name,32,L"%hs",stores[i]);bool found=false;
+        for(int j=0;j<at;++j)found|=std::wcsstr(labels[j].text,name)!=nullptr;
+        if(!found)++failures;
+    }
+    std::printf("physical ammo thumbnail draw: %d failures\n",failures);return failures;
+}
+
 int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) {
     int failed=0;
     hasJet=hasHeli=hasWarn=hasSazabi=hasDrill=hasNix=hasProteus=false;hasStock=true;
@@ -2374,6 +2418,43 @@ int PhysicalInstrumentFeedChecks() {
     s.heliFly=true;s.heliHud.f.climb=-2;s.heliHud.f.power=.35f;s.heliHud.sym.nose[2]=1;PublishInstruments(s);
     check(deliveredInstruments.flight && deliveredInstruments.value[instruments::climb]==-2
           && std::fabs(deliveredInstruments.value[instruments::power]-35)<.001f,"stock helicopters publish their own live climb and power");
+    Snapshot mech{};mech.stock=true;mech.stockHud.arms=4;mech.scr.n=1;mech.scr.s[0].kind=ScreenKind::leftarms;
+    const int roles[4]={2,0,3,1},rounds[4]={111,222,333,444};
+    for(int i=0;i<4;++i){mech.stockHud.arm[i].mountRole=roles[i];mech.stockHud.arm[i].ammo=rounds[i];mech.stockHud.arm[i].ammoMax=1000;}
+    for(int picked=0;picked<4;++picked) {
+        mech.stockHud.selected=picked;PublishInstruments(mech);
+        check(deliveredInstruments.value[instruments::ammo0]==222 && deliveredInstruments.value[instruments::ammo1]==444
+              && deliveredInstruments.value[instruments::ammo2]==111 && deliveredInstruments.value[instruments::ammo3]==333,
+              "left/right hands and both roof magazines are all present, independent of selected trigger");
+    }
+    for(int i=0;i<4;++i) {
+        mech.stockHud.arm[i].kind=static_cast<RoundKind>(i);
+        mech.stockHud.arm[i].style=static_cast<WeaponStyle>(i==1 ? 1 : 0);
+    }
+    for(int selected=0;selected<4;++selected) {
+        mech.stockHud.selected=selected;
+        for(int channel=0;channel<4;++channel) {
+            int source[4];PanelArmSources(mech,source);
+            hudcue::StoreIcon icon;bool picked=false;
+            const auto& arm=mech.stockHud.arm[source[channel]];
+            check(PanelIcon(mech,channel,&icon,&picked) && icon==hudcue::ArmIconOf(static_cast<int>(arm.kind),arm.lobbed,static_cast<int>(arm.style)),
+                  "each simultaneous panel thumbnail classifies the same mount as its physical counter");
+            check(picked==(source[channel]==selected),"highlight follows the selected trigger without hiding other thumbnails");
+        }
+    }
+    mech.stockHud.arm[2].ammo=0;PublishInstruments(mech);
+    check(deliveredInstruments.value[instruments::ammo3]==0 && deliveredInstruments.value[instruments::ammo0]==222,
+          "empty roof gun remains a measured zero without changing another magazine");
+    mech.stockHud.arms=2;PublishInstruments(mech);
+    check(deliveredInstruments.value[instruments::ammo1]<0 && deliveredInstruments.value[instruments::ammo3]<0,
+          "absent weapon mounts stay absent, instead of borrowing the selected magazine");
+    Snapshot jet{};jet.cockpit=true;jet.jet.guns=1;jet.jet.stores=2;jet.jet.store=1;
+    jet.jet.storeName[0]="AIM-9X";jet.jet.storeName[1]="Mk 82";jet.jet.storeRole[0]=0;jet.jet.storeRole[1]=2;
+    hudcue::StoreIcon glyph;bool picked=false;
+    check(PanelIcon(jet,0,&glyph,&picked) && glyph==hudcue::StoreIcon::gun,"aircraft gun has its own thumbnail");
+    check(PanelIcon(jet,1,&glyph,&picked) && glyph==hudcue::StoreIcon::aamShort && !picked,"missile thumbnail uses the actual store name");
+    check(PanelIcon(jet,2,&glyph,&picked) && glyph==hudcue::StoreIcon::bomb && picked,"bomb thumbnail remains independent of gun ammo");
+    check(!PanelIcon(jet,3,&glyph,&picked),"absent aircraft stores do not invent thumbnails");
     config=Config{};
     std::printf("cockpit feed: %d failures\n",failed);return failed;
 }
@@ -2401,7 +2482,8 @@ int wmain(int argc,wchar_t** argv) {
     *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
     SetScreen(1920,1080);
     quadOk=textOk=uiOk=true;
-    int failed=PhysicalInstrumentFeedChecks();
+    int failed=PhysicalInstrumentFeedChecks()+PanelDrawChecks(dir);
+    if(argc>1 && !wcscmp(argv[1],L"--check-panels"))return failed ? 1 : 0;
     for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
         const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
         if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;

@@ -18,6 +18,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include "../autoturret/src/designate.cpp"
 #undef GetWindowThreadProcessId
 #include <cstdio>
+#include <initializer_list>
 
 namespace autoturret {
 unsigned char imageBytes[16]{};
@@ -149,6 +150,17 @@ int main() {
     Press(flak,flakGun,0x56);
     observing=true;Check(!Ask(flak,flakGun).steer,"the overhead view / optic: no steering");
     observing=false;Check(Ask(flak,flakGun).steer,"back: steering again");
+    observing=false;edf::Put<const void*>(flak.v,0,image+kFlakVtable);
+    for(bool locked:{false,true})for(bool leadMode:{false,true}) {
+        const auto legacy=PlayerControlRule(flak.v,0,leadMode,locked);
+        Check(!legacy.steer && !legacy.drag,"old auto-tracking never competes with the player's current aim controller");
+    }
+    unsigned char drillRecord[0x110]{};
+    edf::Put<const wchar_t*>(drillRecord,0,L"edf6vc_drill");
+    edf::Put<void*>(tank.v,0xEE0+0x10,drillRecord);edf::Put<int>(tank.v,0xEE0+0x20,1);
+    Check(LegacyTrackingDisabled(tank.v),"the drill's authored marker disables old player tracking outside the camera too");
+    const auto drillRule=PlayerControlRule(tank.v,0,false,true);
+    Check(!drillRule.steer && !drillRule.drag,"a locked drill never falls back to the old turning controller");
     // No player in the seat: no answer.
     edf::Put<int>(flak.humanCtrl,edf::kCtrlUses,0);edf::aimlink::PlayerAimV4 none{};
     Check(!EDF6AutoTurret_PlayerAimV4(flak.v,0,flakGun.data,&none) && !none.steer,"an empty seat gets nothing");

@@ -20,6 +20,7 @@
 // windows is in front. Game thread, under the callers' __try.
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 #include "turret.h"
 #include "aimmath.h"
 #include "edf/aimlink.h"
@@ -278,8 +279,21 @@ bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
     return link::Resolve(link::kCrewDll,link::kCameraTurret,cameraTurret,cameraTried) && cameraTurret(vehicle,seat);
 }
 
+bool LegacyTrackingDisabled(const unsigned char* vehicle) noexcept {
+    if(At<const void*>(vehicle,0)==image+kFlakVtable)return true;
+    constexpr std::size_t skeleton=0xEE0,records=0x10,count=0x20,stride=0x110;
+    if(!edf::Readable(vehicle+skeleton,count+4))return false;
+    const auto bones=At<const unsigned char*>(vehicle+skeleton,records);const int n=At<int>(vehicle+skeleton,count);
+    if(!bones || n<=0 || n>512 || !edf::Readable(bones,static_cast<std::size_t>(n)*stride))return false;
+    for(int i=0;i<n;++i) {
+        const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*stride,0);
+        if(name && std::wcscmp(name,L"edf6vc_drill")==0)return true;
+    }
+    return false;
+}
+
 edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool lead,bool locked) noexcept {
-    if(ObservesTurret(vehicle,seat))return {false,false};
+    if(ObservesTurret(vehicle,seat) || CrewAims(vehicle,seat) || LegacyTrackingDisabled(vehicle))return {false,false};
     return link::PlayerGunRule(CameraTurret(vehicle,seat),lead,locked);
 }
 

@@ -15,6 +15,7 @@ import obj_model as om
 
 # Keep in step with src/cockpit_instruments.h. Negative readings mean unavailable, never zero.
 HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER = range(12)
+AMMO0, AMMO1, AMMO2, AMMO3, LOAD0, LOAD1, LOAD2, LOAD3 = range(12,20)
 FONT = {
     '%': ('101','001','010','100','101'),
     'H': ('101','101','111','101','101'), 'P': ('110','101','110','100','100'),
@@ -115,14 +116,18 @@ def instrument(s: Screen, index: int, numbers: bool = True,
         live(p,f'B_{field}',point(-.43,y,.002))
 
     def digits(field: int, y: float, count: int, title: str, x: float = .01,
-               width: float = .7, mode: str = 'D') -> None:
+               width: float = .7, mode: str = 'D', height: float = .20) -> None:
         if title:label(title,-.43,y+.17)
         # Segment order: top, upper right, lower right, bottom, lower left, upper left, middle.
         segments=((0,.5,.65,.1),(.4,.25,.1,.4),(.4,-.25,.1,.4),(0,-.5,.65,.1),
                   (-.4,-.25,.1,.4),(-.4,.25,.1,.4),(0,0,.65,.1))
-        dw, dh = width/count, .16
+        # Width/height are physical dimensions: a one-digit slot must not stretch
+        # across the whole monitor. Keep all digit cells at a readable 0.6 aspect.
+        dh = min(height, width/count*s.width/s.height/.60)
+        dw = dh*s.height/s.width*.60
+        run = dw*count
         for place in range(count):
-            cx=x+width/2-(place+.5)*dw
+            cx=x+run/2-(place+.5)*dw
             for seg,(dx,dy,w,h) in enumerate(segments):
                 p=rect(f'digit_{field}_{place}_{seg}','instrument_ink',cx+dx*dw,y+dy*dh,w*dw,h*dh,.002)
                 live(p,f'{mode}_{field}_{place}_{seg}',point(cx,y,.002))
@@ -198,9 +203,24 @@ def instrument(s: Screen, index: int, numbers: bool = True,
         else:
             live(rect('health','instrument_ink',0,-.33,.86,.045,.002),f'B_{HP}',point(-.43,-.33,.002))
         live(rect('warn','instrument_needle',.35,-.425,.08,.045,.003),f'B_{WARN}',point(.31,-.425,.003))
-    elif s.kind == 'weapons':
-        digits(AMMO,.22,5,'AMMO')
-        digits(SLOT,-.2,1,'SLOT')
+    elif s.kind in ('weapons','leftarms','rightarms','toparms'):
+        grouped=s.kind!='weapons'
+        channels=(0,) if s.kind=='leftarms' else (1,) if s.kind=='rightarms' else (2,3) if s.kind=='toparms' else (0,1,2,3)
+        label('L' if s.kind=='leftarms' else 'R' if s.kind=='rightarms' else 'TOP' if s.kind=='toparms' else 'AMMO',-.43,.43)
+        if s.kind=='leftarms':
+            digits(HP,.37,3,'',.26,.25,'p',.10)
+            label('%',.40,.40,.009)
+        for row,channel in enumerate(channels):
+            y=.04 if len(channels)==1 else .17-row*.33 if grouped else .25-row*.20
+            if len(channels)>1:label(('L' if channel==2 else 'R') if s.kind=='toparms' else str(channel+1),-.43,y+.03,.013)
+            # Reserve the left half for the live loadout thumbnail. Single-hand
+            # displays put a larger thumbnail above their complete round count.
+            digits(AMMO0+channel,-.12 if len(channels)==1 else y,5,'',
+                   .0 if len(channels)==1 else .22,.70 if len(channels)==1 else .43,
+                   'k',.20 if len(channels)==1 else .16 if grouped else .13)
+            if not grouped:continue
+            live(rect(f'load_{channel}','instrument_ink',0,y-(.19 if len(channels)==1 else .14 if grouped else .085),.78,.014,.002),
+                 f'B_{LOAD0+channel}',point(-.39,y-(.19 if len(channels)==1 else .14 if grouped else .085),.002))
     elif s.kind == 'flight':
         dial(SPEED,-.25,.16,'KMH',2000)
         dial(ALT,.25,.16,'ALT M',3000)
@@ -208,7 +228,15 @@ def instrument(s: Screen, index: int, numbers: bool = True,
         digits(HEADING,-.32,3,'',.21,.46)
     else:
         # Contacts move in the physical monitor plane; a steering wheel or bezel can occlude them.
-        dial(HEADING,0,.08,'HDG',360)
+        # A map has a compass rose, never a quantity needle on a 270-degree scale.
+        radius=min(s.width*.35,s.height*.30);card=[]
+        for tick in range(36):
+            angle=math.radians(tick*10);dx,dy=math.sin(angle),math.cos(angle)
+            card.append(rect('rose_tick','instrument_dim',dx*radius/s.width,.08+dy*radius/s.height,
+                             .006,.016 if tick%9 else .035))
+        p=merge(card,prefix+'_compass_card')
+        live(p,f'h_{HEADING}_360',point(0,.08))
+        label('HDG',-.18,-.35,.013,max_width=.36)
         for contact in range(6):
             live(rect(f'contact_{contact}','instrument_needle',0,.08,.025,.025,.004),
                  f'T_{contact}',point(0,.08,.004),extent=(s.width,s.height))

@@ -105,3 +105,45 @@ wing=replace(wing,vdata=bytes(payload))
 assert not shell.triangle_masks(model,model.objects[0],wing,shell.regions(model,fits,hull))[0].any(), \
        'a wing crossing the cabin box remains intact instead of losing its external tip'
 print('native shell payload, animated exterior, large/half/uppercase vertices, protected equipment and seat masks passed')
+
+# Torso armour above body (Nix spine) is part of the cabin, not a protected arm.
+spine=replace(model,names=['spine',*model.names[1:]])
+assert 0 in shell._native_owners(spine,1) and 2 not in shell._native_owners(spine,1)
+# Authored self-visibility can hide the twin cannon parts from its own seat at
+# any distance, while the exact original outside pose and payload stay intact.
+self_fit=(replace(fits[0],hide_bones=('rotor',)),)
+self_model=shell.separate(model,self_fit,hull)
+assert triangles(self_model)==triangles(model),'self-visibility must not alter any outside geometry'
+assert any(self_model.name_of(b.name)=='vc_shell_1_2' for b in self_model.bones)
+mask,_=shell.triangle_masks(model,model.objects[0],model.objects[0].meshes[2],[],[(0,2)])
+assert list(mask)==[1],'only the requested seat owns its hidden weapon geometry'
+print('torso parent and explicit local self-visibility passed')
+
+# Mixed gun vertices keep every original influence outside, and collapse together
+# inside. Assigning the entire triangle to its dominant bone would deform it.
+weighted_fit=(replace(fits[0],hide_bones=('body','rotor')),)
+weighted=shell.separate(model,weighted_fit,hull)
+for pose in ({},{'body':[('y',37)],'rotor':[('x',24)]}):
+    assert triangles(weighted,pose)==triangles(model,pose),'mixed native equipment deformed outside the cockpit'
+mask,_=shell.triangle_masks(model,model.objects[0],model.objects[0].meshes[3],[],[(0,1),(0,2)])
+assert list(mask)==[1],'a triangle whose influences are all self-hidden must not leave a visible seam'
+print('mixed equipment weights preserved outside and hidden together inside')
+
+# A cropped donor assembly must never leave its fitting half as a torn sheet.
+old_station = cockpit_kits._tank_station
+try:
+    points=np.array([[-.3,-.5,.3],[-.1,-.5,.3],[-.2,-.3,.3],
+                     [-.7,-.5,.3],[-.3,-.5,.3],[-.2,-.3,.3],
+                     [.1,-.5,.3],[.3,-.5,.3],[.2,-.3,.3],
+                     [-.2,.1,.3],[.2,.1,.3],[0,.3,.3]])
+    faces=np.array([[0,1,2],[3,4,5],[6,7,8],[9,10,11]])
+    cockpit_kits._tank_station=lambda:(points,np.ones_like(points),np.zeros((len(points),2)),faces,
+                                       np.zeros(4,dtype=int),('',),np.array([[80,80,80]]))
+    cockpit_kits._tank_components.cache_clear()
+    parts,_=cockpit_kits._tank_parts(1.,(-.5,-1.,-.5),(.5,.5,.5),[])
+    kept=np.array([v.pos for p in parts for v in p.verts])
+    assert len(kept)==3 and kept[:,0].min()>=.1, 'whole breech/roof assemblies removed; complete lower control retained'
+finally:
+    cockpit_kits._tank_station=old_station
+    cockpit_kits._tank_components.cache_clear()
+print('tank donor: no sliced roof, wall or breech assemblies remain')

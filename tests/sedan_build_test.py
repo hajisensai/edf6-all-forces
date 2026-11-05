@@ -66,6 +66,18 @@ def main():
     version, m = sgo.read(files['OBJECT/EDF6VC_SEDAN.SGO'])
     assert m['xgs_scene_object_class'] == 'Vehicle_Car'
     assert len(m['vehicle_riding_position']) == 1 and m['vehicle_weapon_setting'] == [] and m['vehicle_setup'][-1] == []
+    assert m['vehicle_riding_position'][0][3:] == sgo.read(game.read('OBJECT',sedan.HOST+'.SGO'))[1]['vehicle_riding_position'][0][3:], 'native driver profile, class mask and input mode retained'
+    at,_=vcobjects.mab_locator(m['animation_model'][2],m['vehicle_riding_position'][0][1])
+    native_mab=sgo.read(game.read('OBJECT',sedan.HOST+'.SGO'))[1]['animation_model'][2]
+    hidden=sedan.closed_driver(native_mab,m['vehicle_riding_position'][0][1])
+    assert len(hidden)==len(native_mab) and sum(a!=b for a,b in zip(hidden,native_mab))==1
+    table,end=struct.unpack_from('<2I',hidden,0x14)
+    point,_=vcobjects.mab_locator(hidden,m['vehicle_riding_position'][0][1])
+    record=next(r for r in range(table+0x20,end,0x20) if r+struct.unpack_from('<i',hidden,r+0xC)[0]==point)
+    payload=record+struct.unpack_from('<i',hidden,record+0x1C)[0]
+    assert sgo.read(hidden[payload:])[1]=={'Animation':'vehicle_striker_rear','DispCharacter':0}
+    seated=struct.unpack_from('<3f',m['animation_model'][2],at)
+    assert abs(seated[1]+.849+.70-sedan.EYE[1])<1e-4, 'seat anchor follows the measured sedan eye'
     assert len(m['car_base_wheel']) == 4 and 'mission_setup' in m
     call = next(c for c in calls.CALLS if c.ground == 'sedan')
     template = game.read('WEAPON', call_weapons.template_of(call)+'.SGO')

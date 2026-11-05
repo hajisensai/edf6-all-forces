@@ -60,21 +60,51 @@ def _in_cone(p: np.ndarray, yaw: tuple[float, float], pitch: tuple[float, float]
     return (p[..., 2] > 0.02) & (y > yaw[0]) & (y < yaw[1]) & (x > pitch[0]) & (x < pitch[1])
 
 
+@functools.lru_cache(maxsize=1)
+def _tank_components() -> np.ndarray:
+    """Welded source components, before any per-cabin/view cropping.
+
+    A triangle-level crop leaves torn roof sheets and half a breech inside the
+    liner. Keep a complete fitting control assembly or omit that assembly.
+    """
+    pos, _nrm, _uv, tris, _mat, _textures, _colours = _tank_station()
+    parent = list(range(len(pos)))
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    welded = {}
+    for i, p in enumerate(pos):
+        key = tuple(np.round(p, 5))
+        if key in welded:parent[root(i)] = root(welded[key])
+        else:welded[key] = i
+    for a, b, c in tris:
+        parent[root(b)] = root(a)
+        parent[root(c)] = root(a)
+    return np.array([root(int(t[0])) for t in tris])
+
+
 def _tank_parts(k: float, lo: tuple[float, float, float], hi: tuple[float, float, float],
                 holes: list[tuple[tuple[float, float], tuple[float, float]]]) -> tuple[list[om.Part], dict[str, KitMaterial]]:
-    """The station scaled `k` about the eye, only its triangles wholly inside lo..hi and touching none of `holes`
-    (yaw and pitch ranges: the view ahead, the screens), one part per material."""
+    """Whole control assemblies below the window; the authored liner supplies walls/roof.
+
+    Source armour, overhead sheets and the breech do not belong inside another
+    vehicle. Never slice their triangles into arbitrary spikes beside the window.
+    """
     pos, nrm, uv, tris, mat, textures, colours = _tank_station()
     q = pos * k
     corners = q[tris]
     keep = ((corners >= np.array(lo)) & (corners <= np.array(hi))).all((1, 2))
-    # Points along each triangle's edges and its centre: a long thin part (a rod from the roof to the floor) crosses
-    # the view with all three corners outside it.
+    keep &= (corners[:, :, 1] < -.12*k).all(1)
     w = np.linspace(0.0, 1.0, 9)[:, None, None]
     samples = np.concatenate([corners[None, :, a] * (1 - w) + corners[None, :, b] * w for a, b in ((0, 1), (1, 2), (2, 0))]
                              + [corners.mean(1)[None]])
     for yaw, pitch in holes:
         keep &= ~_in_cone(samples, yaw, pitch).any(0)
+    components = _tank_components()
+    rejected = np.unique(components[~keep])
+    keep &= ~np.isin(components, rejected)
     parts, mats = [], {}
     slug = os.path.dirname(TANK_STATION)
     for m in np.unique(mat[keep]):

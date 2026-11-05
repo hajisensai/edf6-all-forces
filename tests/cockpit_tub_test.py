@@ -44,6 +44,18 @@ def main() -> int:
            f'...and the tub leaves them open, not sealed over ({len(window_lines & open_lines)} of them; a cell on the '
            "glass's edge stays)")
     expect(not open_lines - window_lines, 'the opening reaches no line past the glass')
+    # A control deeper than the conforming liner must remain visible. Its
+    # silhouette closes those rays; the liner closes every remaining gap.
+    from cockpit_shapes import panel
+    control=panel('console','test',(0,-.7,.45),.3,.3,(0,.8,-.6))
+    liner=cockpit_tub.gap_liner(cockpit_tub.tub(lo,hi,sill),[control])
+    combined=cockpits.Kit([liner,control],{},sill=sill)
+    expect(not cockpits.leaks(combined),'gap-only liner and authored controls still close the cockpit')
+    tri=np.array([[liner.verts[i].pos for i in t] for t in liner.tris])
+    centre=np.array((0,-.7,.45));right,up,_=__import__('cockpit_shapes').basis((0,.8,-.6))
+    rays=np.array([centre+np.asarray(right)*x+np.asarray(up)*y for x in (-.1,0,.1) for y in (-.1,0,.1)])
+    expect(not cockpit_tub.through(rays,tri).any(),'liner has no face in front of the control silhouette')
+    expect(not cockpit_tub.through(rays,tri*.5).any(),'radial hull fitting cannot cover the control again')
     print(f'{failures} FAILED' if failures else 'all passed')
     return 1 if failures else 0
 

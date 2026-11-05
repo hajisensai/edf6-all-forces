@@ -45,7 +45,7 @@ float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool SightZoomMounted(const void*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return onFoot; }
 bool MapHoldsKeys() noexcept { return mapOwnsKeys; }
-bool haveEye=true;
+bool haveEye=true,sensorScreen=false;
 unsigned char rideVehicle[0x1200]{};
 fpview::M4 rideFrame=fpview::Identity();
 bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
@@ -53,7 +53,7 @@ bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     *out=RideView{};out->vehicle=rideVehicle;
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
-int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
+int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=sensorScreen ? 1 : 0;if(sensorScreen)out->s[0].kind=ScreenKind::sensor;return out->n; }
 bool drawArmMask=false;
 void __fastcall RecordBodyDraw(void*,void*,int,void*) { drawArmMask=fpskin::Active(); }
 float laserStart[4]{},laserEnd[4]{};
@@ -146,6 +146,12 @@ int main() {
         check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
               "the production ride copies the complete seat frame, including bank/inversion and position");
     }
+    Put<float>(cam,kCamFov,.78539816f);sensorScreen=true;
+    check(Ride(cam,human) && std::fabs(At<float>(cam,kCamFov)-1.570796327f)<1e-6f,
+          "remote video uses the full 90-degree field, independent of the optic's 1x");
+    check(Current().savedFov==.78539816f,"remote field stores the original native camera value");
+    Leave();check(At<float>(cam,kCamFov)==.78539816f,"leaving the remote station restores the native field of view");
+    sensorScreen=false;reset();
     // Production instrument pose on a synthetic skeleton, then the same restore used after native draw.
     unsigned char inst[0x50]{},bones[2*kBoneStride]{};float pose[32]{},backup[32]{};
     Put<void*>(inst,kInstBones,bones);Put<int>(inst,kInstCount,2);Put<float*>(inst,kInstPose,pose);
@@ -295,6 +301,38 @@ int main() {
           "cockpit feed and physical screens follow their exact human owner");
     check(!ArmBone(L"kata_l") && !ArmBone(L"arms_l") && ArmBone(L"jowan0_l") && ArmBone(L"kawan0_l"),
           "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
+    // The camera can run before the weapon's native update. At render both
+    // transforms must be sampled again, without advancing recoil/motion twice.
+    {
+        State state{};StateScope scope(&state);state.on=true;state.human=human;state.cam=cam;
+        unsigned char set[kSetStride]{};const unsigned char* held=weapon;
+        Put<void*>(human,kSets,set);Put<std::uint64_t>(human,kSetCount,1);Put<const void*>(set,kSetWeapon,&held);
+        unsigned char renderInst[0x40]{};M4 root=fpview::Identity();
+        Put<void*>(model,kBaseLod+kLodInst,renderInst);Put<int>(renderInst,kInstCount,1);Put<void*>(renderInst,kInstPose,root.m);
+        Put<void*>(weapon,kWeaponMount,nullptr);
+        Put<void*>(weapon,0,nativeImage+64);Put<void*>(nativeImage,56,nativeImage+128);
+        Put<std::uint32_t>(nativeImage,128+0xC,256);
+        const char* shield=".?AVWeapon_Shield@@";std::memcpy(nativeImage+272,shield,std::strlen(shield)+1);
+        config.fpFit=false;config.fpMotion=false;config.fpScale=.5f;
+        const M4 origin=fpview::Identity();std::memcpy(human+kAim,origin.m,64);std::memcpy(cam+kCamMatrix,origin.m,64);
+        const float rest[3]={.3f,1.1f,.5f};fpview::Point(origin,rest,root.m+12);Views(human,cam);
+        const auto motion=state.motion;bool coherent=true;
+        for(int frame=0;frame<120;++frame) {
+            // Simulate the gap between camera and model updates during a dash.
+            Views(human,cam);
+            M4 aim=fpview::Translate(frame*.65f,frame*.13f,-frame*.44f);
+            std::memcpy(human+kAim,aim.m,64);std::memcpy(cam+kCamMatrix,aim.m,64);
+            float action[3]={.08f*std::sin(frame*.1f),0,.2f*std::sin(frame*.1f)};
+            float local[3];for(int i=0;i<3;++i)local[i]=rest[i]+action[i];
+            root=aim;fpview::Point(aim,local,root.m+12);
+            Views(human,cam,false);M4 inverse;fpview::InverseAffine(aim,&inverse);
+            float world[3],placed[3];fpview::Point(state.view[kRight],root.m+12,world);fpview::Point(inverse,world,placed);
+            const float grip[3]={-fpview::CenteredGrip(config.fpGripX,config.fpCenter),config.fpGripY,config.fpGripZ};
+            for(int i=0;i<3;++i)coherent &= std::fabs(placed[i]-(grip[i]+action[i])*.5f)<1e-4f;
+        }
+        check(coherent,"render refresh removes dash displacement while retaining native shield/attack translation");
+        check(std::memcmp(&motion,&state.motion,sizeof(motion))==0,"render anchor refresh never advances motion twice");
+    }
     ResetFirstPerson();SyncSession();
     check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
     return failed ? 1 : 0;
