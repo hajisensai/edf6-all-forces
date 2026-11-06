@@ -970,6 +970,9 @@ def check(game: str) -> bool:
     if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', vanilla_launch.STATE)):   # the game may be running vanilla now
         print(f'\n原版启动：{vanilla_launch.INI} 现在是原版设置（不加载 MOD）；游戏退出后会自动恢复，'
               '没恢复的话下次原版启动或运行安装器选 1 时恢复。')
+    if os.path.isfile(vanilla_launch._p(vanilla_launch.SWAPPED)):
+        print(f'\n原版启动：{vanilla_launch._p(vanilla_launch.SAVES)} 现在是原版存档，MOD 存档在 '
+              f'{vanilla_launch._p(vanilla_launch.MOD_STASH)}；游戏退出后下次原版启动或运行安装器选 1 时换回。')
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
 
@@ -1277,8 +1280,8 @@ def main(argv: list[str]) -> int:
 def write_game(mode: str, game: str) -> int:
     """The flows that write Mods (and its ledger): under the generator's lock (pylib/ledger.py), waiting a while for a
     background generator the game started (it outlives the game), else refused with nothing written. First the
-    ModLoader.ini a vanilla launch left off is put back (the game is not running here)."""
-    if said := vanilla_launch.restore(game):
+    ModLoader.ini a vanilla launch left off and the mod's saves it set aside are put back (the game is not running)."""
+    for said in vanilla_launch.restore_all(game):
         print(said)
     with wait_generate_lock(game) as held:
         if not held:
