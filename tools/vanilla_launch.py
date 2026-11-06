@@ -119,14 +119,18 @@ def _restore(game: str) -> str | None:
 
 # ---------------------------------------------------------------- the saves
 # Not shared: a mod save with a weapon the stock table lacks equipped crashes the stock game at the main menu. The game
-# keeps every save under %LOCALAPPDATA%\EarthDefenceForce6\SAVE_DATA (Steam Cloud syncs that folder); a vanilla run
-# renames it to SAVE_DATA.mod and the vanilla saves (SAVE_DATA.vanilla) to SAVE_DATA, and back after. Renames only, on
-# one volume: nothing is deleted, and every vanilla run first copies the mod saves into SAVE_DATA.mod-backups.
+# keeps each slot in %LOCALAPPDATA%\EarthDefenceForce6\SAVE_DATA\<SteamID>\saveslotNN\, and Steam Cloud syncs every file
+# in those folders (any name: the plugin's MAIN.GST.edf6vc is synced too; the game's BACKUP folder is not). So both sets
+# live in the slot folders, both synced: the slot's own files are the set its MODE file names (no file: the mod's), the
+# other set beside them as <name>.edf6mod / <name>.edf6vanilla. A switch copies (never renames or moves): the playing
+# set into its store first, then the other store over the slot's files; MODE says which step is done, so a switch cut
+# off anywhere resumes without mixing the sets. Before each vanilla run the whole SAVE_DATA is also copied, locally,
+# into SAVE_DATA.mod-backups\<time> (the last KEEP_BACKUPS kept).
 SAVES = 'SAVE_DATA'
-MOD_STASH = SAVES + '.mod'               # the mod's saves while a vanilla run is on
-VANILLA_STASH = SAVES + '.vanilla'       # the vanilla saves while the mod plays
-BACKUPS = SAVES + '.mod-backups'         # a copy of the mod's saves before each vanilla run
-SWAPPED = SAVES + '.vanilla-on.json'     # a vanilla run swapped the saves: {'mod_had': the mod had saves}
+BACKUPS = SAVES + '.mod-backups'         # beside SAVE_DATA, not synced: a copy of everything before each vanilla run
+SUFFIX = {'mod': '.edf6mod', 'vanilla': '.edf6vanilla'}
+MODE = 'EDF6AF.mode'                     # in each slot folder: mod | vanilla | mod-saved | vanilla-saved
+ON = SAVES + '.vanilla-on'               # beside SAVE_DATA, local: a vanilla run is on (slots it made are vanilla's)
 KEEP_BACKUPS = 10
 
 
@@ -136,6 +140,83 @@ def save_root() -> str:
 
 def _p(*names: str) -> str:
     return os.path.join(save_root(), *names)
+
+
+def slots() -> list[str]:
+    """Every saveslotNN folder of every account in SAVE_DATA."""
+    out: list[str] = []
+    root = _p(SAVES)
+    for user in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        d = os.path.join(root, user)
+        for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if name.lower().startswith('saveslot') and os.path.isdir(os.path.join(d, name)):
+                out.append(os.path.join(d, name))
+    return out
+
+
+def _mode(slot: str) -> str:
+    try:
+        with open(os.path.join(slot, MODE), encoding='ascii') as f:
+            return f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return 'vanilla' if os.path.exists(_p(ON)) else 'mod'   # a slot the vanilla run made has no MODE yet
+
+
+def _set_mode(slot: str, mode: str) -> None:
+    modfiles.atomic_write(os.path.join(slot, MODE), mode.encode('ascii'))
+
+
+def _own(slot: str) -> list[str]:
+    """The slot's own files: the playing set (not a store, not MODE, not a half-written temporary)."""
+    return sorted(n for n in os.listdir(slot) if os.path.isfile(os.path.join(slot, n)) and n != MODE
+                  and not n.endswith((*SUFFIX.values(), '.tmp-edf6')))
+
+
+def _stored(slot: str, mode: str) -> list[str]:
+    s = SUFFIX[mode]
+    return sorted(n[:-len(s)] for n in os.listdir(slot) if n.endswith(s) and os.path.isfile(os.path.join(slot, n)))
+
+
+def _copy(src: str, dst: str) -> None:
+    with open(src, 'rb') as f:
+        modfiles.atomic_write(dst, f.read())
+
+
+def _store(slot: str, mode: str) -> None:
+    """The slot's own files copied into `mode`'s store (whose files the set no longer has removed)."""
+    own = _own(slot)
+    for n in own:
+        _copy(os.path.join(slot, n), os.path.join(slot, n + SUFFIX[mode]))
+    for n in set(_stored(slot, mode)) - set(own):
+        os.remove(os.path.join(slot, n + SUFFIX[mode]))
+
+
+def _load(slot: str, mode: str) -> None:
+    """`mode`'s store copied over the slot's own files (an empty store: an empty slot, the game starts it new)."""
+    stored = _stored(slot, mode)
+    for n in set(_own(slot)) - set(stored):
+        os.remove(os.path.join(slot, n))   # held in the other store already (_store ran first)
+    for n in stored:
+        _copy(os.path.join(slot, n + SUFFIX[mode]), os.path.join(slot, n))
+
+
+def switch(slot: str, to: str, keep: bool = False) -> bool:
+    """The slot to `to`'s set; True when it changed. `keep` (first vanilla run, copy chosen): the vanilla set starts as
+    a copy of the mod's, i.e. the slot's files stay. Each step is marked in MODE before the next."""
+    other = 'mod' if to == 'vanilla' else 'vanilla'
+    mode = _mode(slot)
+    if mode == to:
+        return False
+    if mode == to + '-saved':   # cut off after storing `to`'s set, before loading the other: the files are still `to`'s
+        _set_mode(slot, to)
+        return False
+    if mode != other + '-saved':
+        _store(slot, other)
+        _set_mode(slot, other + '-saved')
+    if not keep:
+        _load(slot, to)
+    _set_mode(slot, to)
+    return True
 
 
 def backup_mod_saves() -> str | None:
@@ -161,42 +242,33 @@ def first_vanilla_saves() -> bool:
 
 
 def swap_in_saves() -> None:
-    """The vanilla saves into SAVE_DATA, the mod's aside. SWAPPED first: a crash before the renames leaves a marker
-    swap_out_saves recognizes as nothing swapped (MOD_STASH absent while the mod had saves)."""
-    mod_had = os.path.isdir(_p(SAVES))
-    copy = not os.path.isdir(_p(VANILLA_STASH)) and mod_had and first_vanilla_saves()
+    """Every slot to the vanilla set. ON first: a slot the vanilla game makes during the run is the vanilla set's."""
+    all_slots = slots()
+    keep = bool(all_slots) and not any(_stored(s, 'vanilla') for s in all_slots) and any(_own(s) for s in all_slots) \
+        and first_vanilla_saves()
+    for s in all_slots:   # before ON: a slot without MODE reads as vanilla while ON is there
+        if not os.path.isfile(os.path.join(s, MODE)):
+            _set_mode(s, 'mod')
     os.makedirs(save_root(), exist_ok=True)
-    modfiles.save_json(_p(SWAPPED), {'mod_had': mod_had})
-    if mod_had:
-        os.rename(_p(SAVES), _p(MOD_STASH))
-    if os.path.isdir(_p(VANILLA_STASH)):
-        os.rename(_p(VANILLA_STASH), _p(SAVES))
-    elif copy:
-        shutil.copytree(_p(MOD_STASH), _p(SAVES))
-    else:
-        os.makedirs(_p(SAVES))
+    modfiles.atomic_write(_p(ON), b'')
+    for s in all_slots:
+        switch(s, 'vanilla', keep)
 
 
 def swap_out_saves() -> str | None:
-    """The mod's saves back into SAVE_DATA and the vanilla ones aside, when a vanilla run swapped them (else None).
-    Never while the game runs: it writes its saves into SAVE_DATA, the vanilla game would write into the mod's."""
-    if not os.path.isfile(_p(SWAPPED)):
+    """Every slot back to the mod's set, when any is not (else None): after a vanilla run, or a slot that came down
+    from Steam Cloud in the vanilla set (a run on another machine). Never while the game runs: it would be loading or
+    writing the very files."""
+    pending = [s for s in slots() if _mode(s) != 'mod']
+    if not pending and not os.path.exists(_p(ON)):
         return None
     if modfiles.game_running():
         return '游戏还在运行：存档等游戏退出后（下次原版启动或运行安装器时）再换回 MOD 存档'
-    mod_had = modfiles.load_json(_p(SWAPPED), {}).get('mod_had', True)
-    if mod_had and not os.path.isdir(_p(MOD_STASH)):   # stopped before the renames: SAVE_DATA is still the mod's
-        os.remove(_p(SWAPPED))
-        return None
-    if os.path.isdir(_p(SAVES)):
-        aside = _p(VANILLA_STASH)
-        if os.path.exists(aside):   # never over another copy
-            aside += time.strftime('-%Y%m%d-%H%M%S')
-        os.rename(_p(SAVES), aside)
-    if mod_had:
-        os.rename(_p(MOD_STASH), _p(SAVES))
-    os.remove(_p(SWAPPED))
-    return f'已换回 MOD 存档（原版存档留在 {_p(VANILLA_STASH)}，下次原版启动再用）'
+    for s in pending:
+        switch(s, 'mod')
+    if os.path.exists(_p(ON)):
+        os.remove(_p(ON))
+    return '已换回 MOD 存档（原版存档以 .edf6vanilla 留在各存档槽里，和 MOD 存档一起云同步）' if pending else None
 
 
 def restore_all(game: str) -> list[str]:
@@ -241,7 +313,7 @@ def launch(game: str) -> int:
     for said in restore_all(game):   # a run that did not get to put things back
         print(said)
     print('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。')
-    print('存档不共用：原版用自己的存档，MOD 存档先备份再挪开，游戏退出后换回。')
+    print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），MOD 存档先备份，游戏退出后换回。')
     if said := backup_mod_saves():
         print('已备份 MOD 存档到', said)
     swap_in_saves()

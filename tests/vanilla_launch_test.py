@@ -94,26 +94,28 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
     with open(os.path.join(g, vl.INI), 'wb') as f:
         f.write(raw)
     local = os.path.join(root, 'local', 'EarthDefenceForce6')
-    MOD = {'76561198000000000/saveslot00/MAIN.GST': b'mod save', 'SYSTEM/SYSTEM.CFG': b'cfg'}
+    user = os.path.join(local, vl.SAVES, '76561198000000000')
+    slot0, slot1 = os.path.join(user, 'saveslot00'), os.path.join(user, 'saveslot01')
+    MOD = {'MAIN.GST': b'mod save', 'MAIN.GST.edf6vc': b'mod rows', 'COMMON.CFG': b'mod cfg'}
+    VAN = {'MAIN.GST': b'vanilla save', 'COMMON.CFG': b'vanilla cfg'}
+    system = os.path.join(user, 'SYSTEM', 'SYSTEM.CFG')
 
-    def tree(path: str) -> dict[str, bytes] | None:
-        if not os.path.isdir(path):
-            return None
-        out = {}
-        for d, _dirs, files in os.walk(path):
-            for n in files:
-                full = os.path.join(d, n)
-                out[os.path.relpath(full, path).replace(os.sep, '/')] = open(full, 'rb').read()
-        return out
-
-    def plant(path: str, files: dict[str, bytes]) -> None:
-        for rel, data in files.items():
-            os.makedirs(os.path.dirname(os.path.join(path, rel)), exist_ok=True)
-            with open(os.path.join(path, rel), 'wb') as f:
+    def plant(d: str, files: dict[str, bytes]) -> None:
+        os.makedirs(d, exist_ok=True)
+        for n, data in files.items():
+            with open(os.path.join(d, n), 'wb') as f:
                 f.write(data)
-    plant(os.path.join(local, vl.SAVES), MOD)
-    live, mod_stash, van_stash = (os.path.join(local, n) for n in (vl.SAVES, vl.MOD_STASH, vl.VANILLA_STASH))
-    swapped = os.path.join(local, vl.SWAPPED)
+
+    def own(slot: str) -> dict[str, bytes]:
+        return {n: open(os.path.join(slot, n), 'rb').read() for n in vl._own(slot)}
+
+    def store(slot: str, mode: str) -> dict[str, bytes]:
+        return {n: open(os.path.join(slot, n + vl.SUFFIX[mode]), 'rb').read() for n in vl._stored(slot, mode)}
+
+    def settled() -> bool:   # every slot back to the mod's set, nothing pending
+        return all(vl._mode(s) == 'mod' for s in vl.slots()) and not os.path.exists(os.path.join(local, vl.ON))
+    plant(slot0, MOD)
+    plant(os.path.dirname(system), {'SYSTEM.CFG': b'system'})
 
     real = (vl.os.startfile if hasattr(vl.os, 'startfile') else None, vl.game_pid, vl.modfiles.game_running, vl.time.sleep,
             vl._on_close, vl.save_root, vl.first_vanilla_saves)
@@ -124,10 +126,10 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         vl.save_root = lambda: local
         vl.modfiles.game_running = lambda *_a: True
         with quiet():
-            check(vl.launch(g) == 1 and ini_of(g) == raw and tree(live) == MOD and not os.path.exists(swapped),
+            check(vl.launch(g) == 1 and ini_of(g) == raw and own(slot0) == MOD and os.listdir(slot0) == sorted(MOD),
                   'game running: refused, nothing touched')
 
-        def run_game(answers: list[bool], writes: dict[str, bytes] | None = None, starts: bool = True) -> int:
+        def run_game(answers: list[bool], play=None, starts: bool = True) -> int:
             """One launch: EDF6.exe shows up on the third poll, runs two polls, exits (or never shows up)."""
             asked = iter(answers)
             vl.first_vanilla_saves = lambda: next(asked)
@@ -137,32 +139,37 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
             vl.game_pid = (lambda: next(polls)) if starts else (lambda: None)
 
             def start(url: str) -> None:
-                seen.update(url=url, ini=ini_of(g), live=tree(live), mod=tree(mod_stash))
-                if writes:
-                    plant(live, writes)   # the vanilla game saving
+                seen.update(url=url, ini=ini_of(g), own=own(slot0), mod=store(slot0, 'mod'))
+                if play:
+                    play()   # the vanilla game saving
             vl.os.startfile = start
             with quiet():
                 return vl.launch(g)
 
         vl.prepare(g)   # a left-over ini from a run that never put it back: put back first, then the run goes on
-        check(run_game([False], {'76561198000000000/saveslot00/MAIN.GST': b'vanilla save'}) == 0, 'first run: 0')
+        check(run_game([False], lambda: plant(slot0, VAN)) == 0, 'first run: 0')
         check(seen['url'] == vl.STEAM_URL and b'Redirect=False' in seen['ini'], 'Steam started with the vanilla ini')
-        check(seen['live'] == {} and seen['mod'] == MOD, 'first run, a new save: SAVE_DATA empty, the mod saves aside')
+        check(seen['own'] == {} and seen['mod'] == MOD, 'first run, a new save: the slot empty, the mod set stored in it')
         check(ini_of(g) == raw and not os.path.isfile(state_of(g)), 'after the game: the ini back')
-        check(tree(live) == MOD and not os.path.exists(mod_stash) and not os.path.exists(swapped), 'the mod saves back')
-        VAN = {'76561198000000000/saveslot00/MAIN.GST': b'vanilla save'}
-        check(tree(van_stash) == VAN, 'the vanilla saves kept aside')
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN and store(slot0, 'mod') == MOD and settled(),
+              'after the game: the mod set back, both sets in the slot (both synced)')
+        check(open(system, 'rb').read() == b'system', 'SYSTEM untouched')
         backups = os.path.join(local, vl.BACKUPS)
-        check(len(os.listdir(backups)) == 1 and tree(os.path.join(backups, os.listdir(backups)[0])) == MOD,
-              'the mod saves backed up before the run')
+        first = os.path.join(backups, os.listdir(backups)[0])
+        check(len(os.listdir(backups)) == 1 and own(os.path.join(first, '76561198000000000', 'saveslot00')) == MOD,
+              'the saves backed up before the run')
 
-        check(run_game([]) == 0, 'second run: not asked again')
-        check(seen['live'] == VAN and seen['mod'] == MOD, 'second run: the vanilla saves in, the mod saves aside')
-        check(tree(live) == MOD and tree(van_stash) == VAN, 'and back after')
+        VAN2 = {**VAN, 'MAIN.GST': b'vanilla save 2'}
+        check(run_game([], lambda: plant(slot0, VAN2)) == 0, 'second run: not asked again')
+        check(seen['own'] == VAN and seen['mod'] == MOD, 'second run: the vanilla set loaded')
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'and its progress stored after')
+
+        check(run_game([], lambda: plant(slot1, {'MAIN.GST': b'new vanilla slot'})) == 0, 'a run making a new slot')
+        check(own(slot1) == {} and store(slot1, 'vanilla') == {'MAIN.GST': b'new vanilla slot'} and settled(),
+              'the new slot is the vanilla set: stored, empty for the mod')
 
         check(run_game([], starts=False) == 1, 'the game never started: 1')
-        check(ini_of(g) == raw and tree(live) == MOD and tree(van_stash) == VAN and not os.path.exists(swapped),
-              'and everything back')
+        check(ini_of(g) == raw and own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'everything back')
 
         # the window closed while the game runs: the ini back, the saves left until the game is gone
         vl.modfiles.game_running = lambda *_a: False
@@ -170,31 +177,40 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         vl.prepare(g)
         vl.modfiles.game_running = lambda *_a: True
         said = vl.restore_all(g)
-        check(ini_of(g) == raw and tree(live) == VAN and os.path.exists(swapped) and any('还在运行' in s for s in said),
-              'game running: the ini back, the saves not swapped under it')
+        check(ini_of(g) == raw and own(slot0) == VAN2 and any('还在运行' in s for s in said),
+              'game running: the ini back, the saves not switched under it')
         vl.modfiles.game_running = lambda *_a: False
         vl.restore_all(g)
-        check(tree(live) == MOD and tree(van_stash) == VAN and not os.path.exists(swapped), 'after it exits: swapped back')
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'after it exits: switched back')
 
-        # stopped between the marker and the renames: SAVE_DATA is still the mod's, left alone
-        vl.modfiles.save_json(swapped, {'mod_had': True})
-        check(vl.swap_out_saves() is None and tree(live) == MOD and not os.path.exists(swapped), 'a marker alone: dropped')
+        # cut off midway (each step marked): resumed without mixing the sets
+        vl.swap_in_saves()                       # vanilla set playing
+        vl._store(slot0, 'vanilla')
+        vl._set_mode(slot0, 'vanilla-saved')
+        plant(slot0, {'MAIN.GST': MOD['MAIN.GST']})   # half the mod set copied back, then the power went
+        os.remove(os.path.join(local, vl.ON))    # the next start: a new run, ON gone with nothing else
+        vl.restore_all(g)
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'a switch back cut off: resumed')
+        vl._store(slot0, 'mod')
+        vl._set_mode(slot0, 'mod-saved')         # cut off on the way in, after storing the mod set
+        vl.restore_all(g)
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'a switch in cut off: the mod set kept')
 
-        # first run copying the mod saves; a mod with no saves at all
-        import shutil
-        shutil.rmtree(van_stash)
-        vl.modfiles.game_running = lambda *_a: False
+        # a slot that came down from Steam Cloud in the vanilla set (a run on another machine, no ON here)
+        vl._store(slot0, 'mod')
+        vl._load(slot0, 'vanilla')
+        vl._set_mode(slot0, 'vanilla')
+        check(vl.restore_all(g) and own(slot0) == MOD and settled(), 'synced in the vanilla set: switched back')
+
+        # first run copying the mod set
+        for s in vl.slots():
+            for n in vl._stored(s, 'vanilla'):
+                os.remove(os.path.join(s, n + vl.SUFFIX['vanilla']))
         vl.first_vanilla_saves = lambda: True
         vl.swap_in_saves()
-        check(tree(live) == MOD and tree(mod_stash) == MOD, 'copy chosen: the vanilla saves start as a copy')
+        check(own(slot0) == MOD and vl._mode(slot0) == 'vanilla', 'copy chosen: the vanilla set starts as the mod set')
         vl.restore_all(g)
-        check(tree(live) == MOD and tree(van_stash) == MOD, 'and back')
-        shutil.rmtree(live)
-        vl.swap_in_saves()
-        check(tree(live) == MOD and not os.path.exists(mod_stash), 'no mod saves: the vanilla ones in, nothing aside')
-        vl.restore_all(g)
-        check(not os.path.exists(live) and tree(van_stash) == MOD, 'and the vanilla ones aside again, no mod saves made up')
-        plant(live, MOD)
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == MOD and settled(), 'and is stored after')
 
         for _ in range(vl.KEEP_BACKUPS + 2):
             vl.backup_mod_saves()
@@ -234,7 +250,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
     finally:
         installer.wait_generate_lock, vl.modfiles.game_running = real_lock, real_running
     check(ini_of(g) == raw and not os.path.isfile(state_of(g)), 'write_game puts a left-over ini back first')
-    check(tree(live) == MOD and not os.path.exists(swapped), 'and the mod saves')
+    check(own(slot0) == MOD and settled(), 'and the mod saves')
 
 inst = open(os.path.join(ROOT, 'tools', 'installer.py'), encoding='utf-8').read()
 check('write_launcher(game)' in inst and 'remove_launcher(game)' in inst, 'install / uninstall call them')

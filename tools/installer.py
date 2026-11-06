@@ -970,9 +970,10 @@ def check(game: str) -> bool:
     if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', vanilla_launch.STATE)):   # the game may be running vanilla now
         print(f'\n原版启动：{vanilla_launch.INI} 现在是原版设置（不加载 MOD）；游戏退出后会自动恢复，'
               '没恢复的话下次原版启动或运行安装器选 1 时恢复。')
-    if os.path.isfile(vanilla_launch._p(vanilla_launch.SWAPPED)):
-        print(f'\n原版启动：{vanilla_launch._p(vanilla_launch.SAVES)} 现在是原版存档，MOD 存档在 '
-              f'{vanilla_launch._p(vanilla_launch.MOD_STASH)}；游戏退出后下次原版启动或运行安装器选 1 时换回。')
+    vanilla_slots = [s for s in vanilla_launch.slots() if vanilla_launch._mode(s) != 'mod']
+    if vanilla_slots:
+        print(f'\n原版启动：{len(vanilla_slots)} 个存档槽现在是原版存档（MOD 存档以 .edf6mod 在同一槽里）；'
+              '游戏退出后下次原版启动或运行安装器选 1 时换回。')
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
 
