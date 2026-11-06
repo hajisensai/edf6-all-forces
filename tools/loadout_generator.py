@@ -174,7 +174,10 @@ def generate_main(args: list[str]) -> int:
 
 def run(argv: list[str]) -> int:
     """The slim exe's entry (also what installer.run does for this argument): `loadout-generate <game>`; never asks,
-    never waits for Enter."""
+    never waits for Enter. `vanilla-launch <game>`: the game folder's 原版启动.cmd (tools/vanilla_launch.py)."""
+    if argv[:1] == ['vanilla-launch'] and len(argv) == 2:
+        import vanilla_launch
+        return vanilla_launch.launch(argv[1].strip('"'))
     if argv[:1] != ['loadout-generate']:
         print(generate_line('failed'), 'message=usage: loadout-generate <game directory>')
         return 2
