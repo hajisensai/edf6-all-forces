@@ -24,6 +24,7 @@ import threading
 import time
 
 import modfiles
+import save_backup
 
 LAUNCHER = '原版启动.cmd'                                # in the game folder, beside EDF6.exe
 STATE = 'EDF6VehicleCrew.vanilla_launch.json'          # in Mods/Plugins: the ini as it was, while a vanilla run is on
@@ -125,13 +126,11 @@ def _restore(game: str) -> str | None:
 # other set beside them as <name>.edf6mod / <name>.edf6vanilla. A switch copies (never renames or moves): the playing
 # set into its store first, then the other store over the slot's files; MODE says which step is done, so a switch cut
 # off anywhere resumes without mixing the sets. Before each vanilla run the whole SAVE_DATA is also copied, locally,
-# into SAVE_DATA.mod-backups\<time> (the last KEEP_BACKUPS kept).
+# into SAVE_DATA.backups\<time> (tools/save_backup.py: the mod's starts are backed up the same way).
 SAVES = 'SAVE_DATA'
-BACKUPS = SAVES + '.mod-backups'         # beside SAVE_DATA, not synced: a copy of everything before each vanilla run
 SUFFIX = {'mod': '.edf6mod', 'vanilla': '.edf6vanilla'}
 MODE = 'EDF6AF.mode'                     # in each slot folder: mod | vanilla | mod-saved | vanilla-saved
 ON = SAVES + '.vanilla-on'               # beside SAVE_DATA, local: a vanilla run is on (slots it made are vanilla's)
-KEEP_BACKUPS = 10
 
 
 def save_root() -> str:
@@ -219,20 +218,6 @@ def switch(slot: str, to: str, keep: bool = False) -> bool:
     return True
 
 
-def backup_mod_saves() -> str | None:
-    """SAVE_DATA copied into BACKUPS/<time> (the oldest beyond KEEP_BACKUPS removed); its path, None with no saves."""
-    if not os.path.isdir(_p(SAVES)):
-        return None
-    stamp = time.strftime('%Y%m%d-%H%M%S')
-    dst, n = _p(BACKUPS, stamp), 1
-    while os.path.exists(dst):
-        dst, n = _p(BACKUPS, f'{stamp}-{n}'), n + 1
-    shutil.copytree(_p(SAVES), dst)
-    for old in sorted(os.listdir(_p(BACKUPS)))[:-KEEP_BACKUPS]:
-        shutil.rmtree(_p(BACKUPS, old), ignore_errors=True)
-    return dst
-
-
 def first_vanilla_saves() -> bool:
     """No vanilla saves yet: True copies the mod's (asked once), False starts the vanilla game with none."""
     print('原版第一次启动，还没有原版专用存档：')
@@ -313,9 +298,9 @@ def launch(game: str) -> int:
     for said in restore_all(game):   # a run that did not get to put things back
         print(said)
     print('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。')
-    print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），MOD 存档先备份，游戏退出后换回。')
-    if said := backup_mod_saves():
-        print('已备份 MOD 存档到', said)
+    print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），启动前先备份，游戏退出后换回。')
+    if said := save_backup.backup(save_root()):
+        print('已备份存档到', said)
     swap_in_saves()
     prepare(game)
     _on_close(game)

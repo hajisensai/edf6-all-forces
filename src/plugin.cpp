@@ -29,6 +29,7 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "loadout_store.h"
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
@@ -1282,6 +1283,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     ini.Start(iniPath);
     NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
+    StartSaveBackup();   // the saves copied before the game reads them (tools/save_backup.py), whatever follows
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}

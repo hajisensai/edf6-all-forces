@@ -899,6 +899,9 @@ set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-
 # 原版启动.cmd: ModLoader.ini off for one run and back (tools/vanilla_launch.py).
 add_test(NAME vanilla_launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vanilla_launch_test.py")
 set_tests_properties(vanilla_launch PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The saves backed up before every start, thinned with age (tools/save_backup.py).
+add_test(NAME save_backup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/save_backup_test.py")
+set_tests_properties(save_backup PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME frozen_cockpit_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_frozen_cockpit_package.py")
 set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")

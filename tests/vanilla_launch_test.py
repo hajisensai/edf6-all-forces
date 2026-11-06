@@ -154,7 +154,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN and store(slot0, 'mod') == MOD and settled(),
               'after the game: the mod set back, both sets in the slot (both synced)')
         check(open(system, 'rb').read() == b'system', 'SYSTEM untouched')
-        backups = os.path.join(local, vl.BACKUPS)
+        backups = os.path.join(local, vl.save_backup.BACKUPS)
         first = os.path.join(backups, os.listdir(backups)[0])
         check(len(os.listdir(backups)) == 1 and own(os.path.join(first, '76561198000000000', 'saveslot00')) == MOD,
               'the saves backed up before the run')
@@ -212,9 +212,6 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         vl.restore_all(g)
         check(own(slot0) == MOD and store(slot0, 'vanilla') == MOD and settled(), 'and is stored after')
 
-        for _ in range(vl.KEEP_BACKUPS + 2):
-            vl.backup_mod_saves()
-        check(len(os.listdir(backups)) == vl.KEEP_BACKUPS, 'backups pruned to KEEP_BACKUPS')
     finally:
         if real[0] is not None:
             vl.os.startfile = real[0]

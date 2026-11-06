@@ -54,7 +54,7 @@ def imports_of(path: str) -> set[str]:
 # What the generator may import (stdlib, and the repository's own SGO / CPK readers the real builder was measured to use).
 ALLOWED = {'__future__', 'contextlib', 'os', 'sys', 'time', 'traceback', 'typing', 'msvcrt', 'gamedir', 'modfiles', 'support_loadout',
            'menu_preview', 'rootcpk', 'room_layout',   # the preview's menu SGOs (stage 7), the screen's layouts (stage 4)
-           'vanilla_launch'}   # the game folder's 原版启动.cmd runs `vanilla-launch <game>`
+           'vanilla_launch', 'save_backup'}   # 原版启动.cmd's `vanilla-launch <game>`, the plugin's `backup-saves`
 got = imports_of(os.path.join(ROOT, 'tools', 'loadout_generator.py'))
 check(got <= ALLOWED, f'loadout_generator imports only {sorted(ALLOWED)}: {sorted(got - ALLOWED)}')
 for heavy in build_release.GENERATOR_EXCLUDES:
@@ -64,8 +64,11 @@ sl_imports = imports_of(os.path.join(ROOT, 'tools', 'support_loadout.py'))
 check(not sl_imports & {'testhub', 'installer', 'tkinter', 'numpy', 'PIL', 'procmesh', 'jet_models'},
       f'support_loadout pulls in nothing heavy: {sorted(sl_imports)}')
 vl_imports = imports_of(os.path.join(ROOT, 'tools', 'vanilla_launch.py'))
-check(vl_imports <= {'__future__', 'base64', 'ctypes', 'os', 're', 'shutil', 'subprocess', 'sys', 'threading', 'time', 'modfiles'},
+check(vl_imports <= {'__future__', 'base64', 'ctypes', 'os', 're', 'shutil', 'subprocess', 'sys', 'threading', 'time', 'modfiles',
+                     'save_backup'},
       f'vanilla_launch imports only the stdlib and modfiles: {sorted(vl_imports)}')
+sb_imports = imports_of(os.path.join(ROOT, 'tools', 'save_backup.py'))
+check(sb_imports <= {'__future__', 'datetime', 'hashlib', 'os', 'shutil'}, f'save_backup imports only the stdlib: {sorted(sb_imports)}')
 mp_imports = imports_of(os.path.join(ROOT, 'tools', 'menu_preview.py'))
 check(not mp_imports & set(build_release.GENERATOR_EXCLUDES),
       f'menu_preview pulls in nothing the slim generator excludes: {sorted(mp_imports)}')
