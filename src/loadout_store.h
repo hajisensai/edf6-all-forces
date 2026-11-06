@@ -7,6 +7,8 @@
 //                          EDF6VehicleCrew.generator.exe, written by install): it makes the coloured soldiers / loaded
 //                          vehicles' files the ini and the pending list name that are not there yet, new names only
 //   VariantGenerationStatus what it is doing / did (Mods/Plugins/EDF6VehicleCrew.generate_status.txt)
+//   StartSaveBackup        the same exe as `backup-saves`, hidden, not waited for (tools/save_backup.py): the saves
+//                          copied before this start reads them, the old copies thinned with age
 // Game thread or any one thread; each call is short (no waiting on the generator).
 #pragma once
 #include "loadout_file.h"
@@ -22,4 +24,5 @@ inline constexpr int kLoadoutSaveMost=128;   // room_menu.h SaveSet: 2 * kMostUn
 bool SaveSupportLoadouts(const LoadoutSave* items,int count,int* failed,wchar_t* why,std::size_t capacity) noexcept;
 bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept;
 GenerateStatus VariantGenerationStatus() noexcept;
+bool StartSaveBackup() noexcept;
 }  // namespace crew

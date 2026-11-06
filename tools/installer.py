@@ -78,6 +78,7 @@ from loadout_generator import (GENERATE_LOCK, GENERATE_STATUS, GENERATOR, genera
                                generate_main, generate_menu_preview, generate_summary, generate_variants, loadout_generate,
                                write_generate_status)
 GENERATOR_FILES = (GENERATOR, GENERATE_STATUS, GENERATE_LOCK)
+import vanilla_launch  # noqa: E402   原版启动.cmd beside EDF6.exe, run by the generator above
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 # Settings whose shipped default became on (the user, 2026-10-07: "还有什么默认是关的，都打开，都装mod了，肯定要打开啊"):
 # key -> (the old default, the new one). An existing ini still holding the old default gets the new one, once: the
@@ -712,6 +713,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     generator = install_generator(game, generator_source())
     if generator:
         print('写入', generator, '（游戏内战前配置菜单保存后在后台用它生成新文件）')
+    if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', GENERATOR)):   # the launcher runs the generator
+        write_launcher(game)
     if room is not None:   # the in-game menu's screen: HUiRoom's and HUiHQMain's layouts (never LYT_MAINFRAME: EDF6Coop's)
         write_room_layouts(game, room)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
@@ -884,6 +887,7 @@ def uninstall(game: str) -> None:
         os.remove(cache)
         print('删除', cache)
     remove_generator(game, lock=False)   # the lock: held by this flow, removed after it (write_game)
+    remove_launcher(game)   # it runs the generator just removed
     import room_layout   # with 1 and 2: without the plugin the menu's panel would only cover the screen
     deleted, kept = room_layout.remove(game)
     for path in deleted:
@@ -963,6 +967,13 @@ def check(game: str) -> bool:
     print()
     ok &= make_edf5_campaign.check(game)
     ok &= check_edf41_source(game)
+    if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', vanilla_launch.STATE)):   # the game may be running vanilla now
+        print(f'\n原版启动：{vanilla_launch.INI} 现在是原版设置（不加载 MOD）；游戏退出后会自动恢复，'
+              '没恢复的话下次原版启动或运行安装器选 1 时恢复。')
+    vanilla_slots = [s for s in vanilla_launch.slots() if vanilla_launch._mode(s) != 'mod']
+    if vanilla_slots:
+        print(f'\n原版启动：{len(vanilla_slots)} 个存档槽现在是原版存档（MOD 存档以 .edf6mod 在同一槽里）；'
+              '游戏退出后下次原版启动或运行安装器选 1 时换回。')
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
 
@@ -1196,6 +1207,22 @@ def install_generator(game: str, exe: str | None) -> str | None:
     return dst
 
 
+def write_launcher(game: str) -> None:
+    """原版启动.cmd beside EDF6.exe (tools/vanilla_launch.py): double-clicked, the game starts once without any mod."""
+    path = os.path.join(game, vanilla_launch.LAUNCHER)
+    data = vanilla_launch.launcher_text(GENERATOR)
+    if modfiles.read(path) != data:
+        modfiles.atomic_write(path, data)
+        print('写入', path, '（双击以原版启动游戏：这一次不加载任何 MOD，游戏退出后自动恢复）')
+
+
+def remove_launcher(game: str) -> None:
+    path = os.path.join(game, vanilla_launch.LAUNCHER)
+    if os.path.isfile(path):
+        os.remove(path)
+        print('删除', path)
+
+
 def remove_generator(game: str, lock: bool = True) -> None:
     """install_generator's copy, its status file and (`lock`) its lock. One still in use (a generator the game just closed
     started, still finishing) is kept and said: uninstall goes on. Uninstall holds the lock while it runs: it removes the
@@ -1253,7 +1280,10 @@ def main(argv: list[str]) -> int:
 
 def write_game(mode: str, game: str) -> int:
     """The flows that write Mods (and its ledger): under the generator's lock (pylib/ledger.py), waiting a while for a
-    background generator the game started (it outlives the game), else refused with nothing written."""
+    background generator the game started (it outlives the game), else refused with nothing written. First the
+    ModLoader.ini a vanilla launch left off and the mod's saves it set aside are put back (the game is not running)."""
+    for said in vanilla_launch.restore_all(game):
+        print(said)
     with wait_generate_lock(game) as held:
         if not held:
             return 1

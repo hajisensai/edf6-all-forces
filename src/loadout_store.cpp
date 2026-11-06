@@ -88,6 +88,26 @@ bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept {
     return started;
 }
 
+bool StartSaveBackup() noexcept {
+    wchar_t exe[MAX_PATH];
+    if(!PluginsPath(kGenerator,exe,std::size(exe)) || GetFileAttributesW(exe)==INVALID_FILE_ATTRIBUTES) {
+        Log("SAVE backup not started: no %ls (reinstall with the installer)",kGenerator);
+        return false;
+    }
+    wchar_t line[MAX_PATH+32];
+    _snwprintf_s(line,_TRUNCATE,L"\"%ls\" backup-saves",exe);   // CreateProcessW may write into its command line
+    STARTUPINFOW si{};si.cb=sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if(!CreateProcessW(exe,line,nullptr,nullptr,FALSE,CREATE_NO_WINDOW|BELOW_NORMAL_PRIORITY_CLASS,nullptr,nullptr,&si,&pi)) {
+        Log("SAVE backup not started: CreateProcess error %lu",GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    Log("SAVE backup started");
+    return true;
+}
+
 GenerateStatus VariantGenerationStatus() noexcept {
     wchar_t status[MAX_PATH],exe[MAX_PATH];
     GenerateStatus s;
