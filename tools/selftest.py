@@ -6861,7 +6861,7 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
-    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'd<=p.reach && d<p.bestD && !WastedFire(p.self,object)' in npcai
     assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
     assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
     assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
