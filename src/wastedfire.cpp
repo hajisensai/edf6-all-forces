@@ -267,8 +267,17 @@ void EyeOf(const void* shooter,float* eye) noexcept {
     const float* p=reinterpret_cast<const float*>(s+kPosition);
     eye[0]=p[0];eye[1]=p[1]+(IsSoldierClass(s) ? 1.5f : 2.0f);eye[2]=p[2];
 }
+// GameMs read once a game frame for Feedback: it is asked per shooter and target (thousands a frame in a crowd) and
+// GameMs reads the pause flag each time; holds last seconds, so a frame's lag changes nothing. Game thread only, as
+// GameMs. WastedFireHit keeps the exact GameMs (a hold's start).
+ULONGLONG feedbackFrame=0,feedbackMs=0;
+ULONGLONG FeedbackMs() noexcept {
+    const ULONGLONG frame=GameFrame();
+    if(frame!=feedbackFrame){feedbackFrame=frame;feedbackMs=GameMs();}
+    return feedbackMs;
+}
 bool Feedback(const void* shooter,const void* target) noexcept {
-    const ULONGLONG ms=GameMs();
+    const ULONGLONG ms=FeedbackMs();
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);
     ReleaseSRWLockShared(&lock);
@@ -324,5 +333,6 @@ void ResetWastedFire() noexcept {
     for(auto& p:plans)p=Plan{};
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
+    feedbackFrame=feedbackMs=0;
 }
 }  // namespace crew

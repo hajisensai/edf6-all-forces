@@ -14,6 +14,9 @@ const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 ULONGLONG nowMs=1000;
 ULONGLONG GameMs() noexcept { return nowMs; }
+// A new frame with every step of nowMs, unless a case holds one frame (heldFrame) across steps.
+ULONGLONG heldFrame=0;
+ULONGLONG GameFrame() noexcept { return heldFrame ? heldFrame : nowMs; }
 bool IsSoldierClass(const void*) noexcept { return false; }
 // The lock points and the ray the plan uses, as each case sets them.
 struct Lock { const void* object; float at[3]; };
@@ -194,11 +197,29 @@ void Plans() {
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr) && WastedFire(soldier,other),"an invincible enemy: held, no target");
     locks.clear();
 }
+// Feedback reads the game clock once a frame: a hold ends at the first frame past it, not within the frame it was
+// last read; WastedFireHit starts the hold at the exact time.
+void FeedbackClock() {
+    ResetWastedFire();
+    static unsigned char a[16],b[16];
+    nowMs=50000;
+    Check(!Feedback(a,b),"no hits: not wasted");
+    for(int i=0;i<wastedfire::kWastedHits;++i)WastedFireHit(a,b,false);
+    Check(Feedback(a,b),"hits that hurt nothing: wasted");
+    heldFrame=nowMs;
+    nowMs+=wastedfire::kWastedHoldMs;
+    Check(Feedback(a,b),"the hold run out within the frame the clock was read: still held this frame");
+    heldFrame=0;
+    Check(!Feedback(a,b),"the next frame: the hold over");
+    ResetWastedFire();
+    nowMs=1000;
+}
 }  // namespace
 
 int main(int argc,char** argv) {
+    FeedbackClock();   // no EDF.dll needed
     if(argc<2 || !argv[1][0] || GetFileAttributesA(argv[1])==INVALID_FILE_ATTRIBUTES) {
-        std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return 77;
+        std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return failures ? 1 : 77;
     }
     image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
     if(!image){std::puts("FAIL: the DLL did not map");return 1;}
