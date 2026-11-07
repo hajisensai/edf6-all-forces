@@ -22,6 +22,7 @@
 // open, +0xD90 frames left: UfoCarrier_CloseInterval counting down, 0x4F8507); an anchor while a living ship shields it.
 #include "crew.h"
 #include "hit_predict.h"
+#include "memo_epoch.h"
 #include "memory.h"
 #include "wasted_fire.h"
 
@@ -279,16 +280,8 @@ bool Feedback(const void* shooter,const void* target) noexcept {
 // a dozen gunners that was ~60,000 memory asks a frame, ~3 ms of the game thread (perfrun blast, 2026-11-07). The
 // answers are the same for every gunner within a frame, so each target is looked at once a frame. Game thread only, as
 // the plans are.
-// The memo's key: a new epoch each frame, and again each kStallMs a frame does not move (paused, loading, or the frame
-// clock not found) so a stalled frame never keeps an answer for good. Not the wall clock itself: a slow frame (33-75 ms
-// at stress) crossing a short wall-clock step re-judged every target 2-3 times a frame (PERF MEM 30x: ~8800 working-set
-// asks a frame).
-constexpr ULONGLONG kStallMs=250;
-struct MemoClock { ULONGLONG frame=~0ull,since=0,epoch=0; } memoClock;
-ULONGLONG MemoEpoch(MemoClock& c,ULONGLONG frame,ULONGLONG wallMs) noexcept {
-    if(frame!=c.frame || wallMs-c.since>=kStallMs){c.frame=frame;c.since=wallMs;++c.epoch;}
-    return c.epoch;
-}
+// Keyed by memoepoch::Clock (src/memo_epoch.h): once a frame, not once per wall-clock step.
+memoepoch::Clock memoClock;
 struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
 TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
 struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
@@ -307,7 +300,7 @@ const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
     if(!shooter || !target)return hitpredict::Verdict::fire;
-    const ULONGLONG frame=MemoEpoch(memoClock,GameFrame(),GetTickCount64());
+    const ULONGLONG frame=memoClock.Epoch(GameFrame(),GetTickCount64());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
         shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
@@ -357,7 +350,7 @@ void ResetWastedFire() noexcept {
     for(auto& p:plans)p=Plan{};
     for(auto& m:targetMemo)m=TargetMemo{};
     shooterMemo=ShooterMemo{};
-    memoClock=MemoClock{~0ull,0,memoClock.epoch};   // epochs only grow: no cleared memo's key comes back
+    memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
 }

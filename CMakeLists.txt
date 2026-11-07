@@ -1957,6 +1957,11 @@ target_include_directories(pvp_native_fixture PRIVATE src common third_party/EDF
 target_compile_options(pvp_native_fixture PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks pvp_native_fixture)
 add_test(NAME pvp_native_fixture COMMAND pvp_native_fixture)
+# memoepoch::Clock (src/memo_epoch.h), the key of VerdictOf's per-frame memo; offline, unlike hit_accept_native.
+add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
+target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks memo_epoch_test)
+add_test(NAME memo_epoch COMMAND memo_epoch_test)
 # edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
 add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
 target_link_libraries(memory_readable_test PRIVATE edf6common)

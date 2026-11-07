@@ -197,7 +197,8 @@ void Plans() {
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr) && WastedFire(soldier,other),"an invincible enemy: held, no target");
     // The per-frame target memo: within a frame a target is looked at once (every gunner asks of every enemy), the
-    // next frame looks again; a frame that did not move for kStallMs is looked at again too.
+    // next frame looks again; a frame that did not move for memoepoch::kStallMs is looked at again too (the
+    // clock's own rules: tests/memo_epoch_test.cpp).
     frameHeld=true;
     ++frameNo;
     Put<std::uint32_t>(other,kObjFlags,0);
@@ -207,19 +208,10 @@ void Plans() {
     Check(!first && !second,"the same frame: the target's first answer kept (made invincible mid-frame, still fire)");
     Sleep(40);   // a slow frame: more than one old 32 ms step, well under the stall guard
     Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same slow frame past 32 ms: the first answer still kept");
-    memoClock.since-=kStallMs;   // the frame stalled for the guard
+    memoClock.since-=memoepoch::kStallMs;   // the frame stalled for the guard
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"a frame stalled for the guard: looked at again (invincible: held)");
     Put<std::uint32_t>(other,kObjFlags,0);
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the stalled frame's new answer kept until the next guard");
-    {
-        MemoClock c{};
-        const ULONGLONG e1=MemoEpoch(c,5,1000);
-        Check(MemoEpoch(c,5,1000+kStallMs-1)==e1,"memo clock: the same frame under the guard keeps its epoch");
-        const ULONGLONG e2=MemoEpoch(c,5,1000+kStallMs);
-        Check(e2!=e1,"memo clock: the same frame at the guard starts a new epoch");
-        Check(MemoEpoch(c,5,1000+kStallMs+1)==e2,"memo clock: the guard counts from the new epoch");
-        Check(MemoEpoch(c,6,1000+kStallMs+1)!=e2,"memo clock: a new frame starts a new epoch at once");
-    }
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     ++frameNo;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next frame: looked at again (invincible: held)");
