@@ -96,7 +96,7 @@ void __fastcall HealRec(void* h,float amount) { ++heals;healed=h;healAmount=amou
 const float* __fastcall NodePosRec(const void* model) { return static_cast<const float*>(model); }
 void Boxes(int kind0,int kind1) {
     Put<void*>(image,kDropManager,boxMgr);
-    Put<void*>(boxMgr,kBoxList,boxHead);
+    Put<void*>(boxMgr,kBoxList,boxHead);Put<std::uint64_t>(boxMgr,kBoxCount,2);
     Put<void*>(boxHead,0,boxNode[0]);Put<void*>(boxNode[0],0,boxNode[1]);Put<void*>(boxNode[1],0,boxHead);
     const int kinds[2]={kind0,kind1};
     for(int i=0;i<2;++i) {
