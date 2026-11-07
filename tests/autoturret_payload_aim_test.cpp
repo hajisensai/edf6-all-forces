@@ -6,6 +6,7 @@
 
 namespace autoturret {
 int HookGunners() noexcept { return 0; }
+void ResetGunnerLog() noexcept {}
 }
 
 namespace fixture {

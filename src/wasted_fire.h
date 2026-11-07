@@ -27,7 +27,10 @@ struct Pair {
     std::uint64_t hitAt;         // the last hit
     std::uint64_t holdUntil;     // its fire at the target wasted until then (0: not)
 };
-struct Book { Pair pair[kPairs]; };
+// latestHold: the latest holdUntil any pair has been given (never lowered: a hold cleared or its pair taken over leaves it
+// where it was). Past it no pair is held, so Wasted answers without the scan: nearly every frame no hold runs at all, and
+// the AI asks it a shooter and lock point at a time.
+struct Book { Pair pair[kPairs]; std::uint64_t latestHold; };
 
 // The pair's entry, or (make) the least recently hit one taken over for it; nullptr when not there and not made.
 inline Pair* Find(Book& b,const void* shooter,const void* target,bool make) noexcept {
@@ -52,12 +55,13 @@ inline bool Hit(Book& b,const void* shooter,const void* target,bool hurt,std::ui
     if(ms<p->holdUntil)return false;   // held already (a player's own fire goes on): no new hold until it runs out
     if(++p->futile<kWastedHits)return false;
     p->futile=0;p->holdUntil=ms+kWastedHoldMs;
+    if(p->holdUntil>b.latestHold)b.latestHold=p->holdUntil;
     return true;
 }
 
 // Whether `shooter`'s fire at `target` is wasted at `ms` (its hits on it have hurt nothing lately).
 inline bool Wasted(const Book& b,const void* shooter,const void* target,std::uint64_t ms) noexcept {
-    if(!shooter || !target)return false;
+    if(!shooter || !target || ms>=b.latestHold)return false;   // every pair's hold run out (or none given)
     for(const Pair& p:b.pair)
         if(p.shooter==shooter && p.target==target)return ms<p.holdUntil;
     return false;

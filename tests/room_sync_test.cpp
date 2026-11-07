@@ -760,6 +760,8 @@ void PlayerLoadouts() {
     Tick(host,0,now+1000);
     Expect(host.engine.MemberPlayerVehicles().count==1 && host.engine.MemberPlayerVehicles().Has(mine),
            "the host reads the client's loaded jet (the junk member's skipped)");
+    const std::uint64_t version=host.engine.MemberPlayersVersion();
+    Expect(version!=0,"the set changing bumps its version (room_sync.cpp copies it for other threads then)");
     Expect(host.pending==std::vector<std::wstring>({file}) && host.starts==1,"the host notes the file and generates it (no ini of its own names it)");
     Expect(ValueOf(0,kKeyHave) && std::strstr(ValueOf(0,kKeyHave),";0;r"),"its readiness for the host list is not changed by it");
     bool logged=false;for(const auto& l:host.log)logged|=l.find("player loadouts do not read")!=std::string::npos;
@@ -769,6 +771,8 @@ void PlayerLoadouts() {
     host.Finish();
     Tick(host,0,now+2000);
     Expect(host.starts==1 && host.Has(file),"made, not generated again");
+    Expect(host.engine.MemberPlayersVersion()==version && host.engine.MemberPlayerVehicles().Has(mine),
+           "the same set read again: the version unchanged (nothing to copy)");
     // Kept for the mission once the room is left; the key withdrawn.
     lobby.current=1;client.engine.Leave(&kFakeApi);
     Expect(!ValueOf(1,playerveh::kKey),"the client's value withdrawn when it leaves");
@@ -779,9 +783,11 @@ void PlayerLoadouts() {
     client.ownPlayer=value;
     Tick(client,1,now+5000);Tick(host,0,now+5001);
     Expect(host.engine.MemberPlayerVehicles().count==1,"listed again in a new room");
+    const std::uint64_t listedAgain=host.engine.MemberPlayersVersion();
     client.ownPlayer.clear();
     Tick(client,1,now+7000);Tick(host,0,now+7001);
     Expect(!ValueOf(1,playerveh::kKey) && host.engine.MemberPlayerVehicles().count==0,"none any more: withdrawn, no longer listed");
+    Expect(host.engine.MemberPlayersVersion()!=listedAgain,"emptied: the version bumped, the copy emptied too");
 }
 }  // namespace
 

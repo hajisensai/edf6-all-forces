@@ -2511,7 +2511,9 @@ def turret_aim_wired() -> None:
     # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
     lockon = src('src/lockon.cpp')
     score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'PlayerHolds(w)' in score
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w,&store,&held);' in score
+    facts = lockon.split('void FactsOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsStoreWeapon(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
     holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
     assert 'Rider::player' in holds and 'IsPlayer(owner)' in holds and 'SeatHolds(seat,w)' in holds
 
@@ -5555,8 +5557,8 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w) && !(spec && spec->nativeControl))' in payload
-    assert 'return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(store && !(spec && spec->nativeControl))' in payload and 'stores[i]=IsStoreWeapon(ws[i]);' in payload
+    assert 'return playerSeat && FreeSecondary(c) && IsCoaxSpec(spec) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -6866,7 +6868,8 @@ def air_chase_wired() -> None:
     assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
     assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
     assert 'std::memcmp(p.from,from,12)==0' in src('src/wastedfire.cpp'), 'cached plans belong to the same muzzle and weapon'
-    assert 'if(!HoldFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
+    heli = src('src/heli.cpp')
+    assert 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });' in heli and heli.count('held())return;') >= 3
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
     assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'

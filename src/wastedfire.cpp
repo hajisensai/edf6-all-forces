@@ -25,6 +25,8 @@
 #include "memory.h"
 #include "wasted_fire.h"
 
+#include <atomic>
+
 namespace crew {
 namespace {
 // --- The game's hit-acceptance overrides (slot 16) the plugin may ask ---
@@ -177,6 +179,10 @@ bool rayMeetsObjects=false;
 wastedfire::Book book{};
 planlog::Gate planLog{};   // the WASTEDFIRE plan lines (a shooter and target kind every 3 s, 4 a second in all)
 SRWLOCK lock=SRWLOCK_INIT;
+// book.latestHold as stored under the lock, for Feedback to read without it: past it no pair is held and the answer is
+// no, without the lock and the 256-pair scan (the AI asks a shooter and lock point at a time; nearly always no hold runs).
+// Apart from the book because it is reset by assignment (an atomic cannot be).
+std::atomic<std::uint64_t> latestHoldMirror{0};
 
 // The target's lock points (its own registry entries), at most `max`; its root when it has none.
 struct Points { const void* target; float p[4][3]; int n; };
@@ -269,6 +275,7 @@ void EyeOf(const void* shooter,float* eye) noexcept {
 }
 bool Feedback(const void* shooter,const void* target) noexcept {
     const ULONGLONG ms=GameMs();
+    if(ms>=latestHoldMirror.load(std::memory_order_relaxed))return false;
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);
     ReleaseSRWLockShared(&lock);
@@ -294,6 +301,7 @@ void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     const ULONGLONG ms=GameMs();
     AcquireSRWLockExclusive(&lock);
     const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
+    latestHoldMirror.store(book.latestHold,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
     if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
@@ -319,6 +327,7 @@ bool HoldFire(const void* shooter,const void* target,const float* from,float spe
 void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
+    latestHoldMirror.store(0,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     for(auto& w:watched)w=Watched{};
     for(auto& p:plans)p=Plan{};

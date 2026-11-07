@@ -10,5 +10,8 @@ unsigned Abilities(const NativeLease&,NativeAbility* out,unsigned capacity) noex
 // Called once on an admitted, deduplicated press by the owner runtime. Pad
 // entries belong to RunInput; this executes only catalogue command entries.
 bool ReadAbilityState(const NativeLease&,const NativeAbility&,enemy_control::Ability*) noexcept;
+// ReadAbilityState for count entries in order (abilities[i].channel indexes native),
+// stopping at the first failure; one refresh shares a single Deiroi battery walk.
+bool ReadAbilityStates(const NativeLease&,const NativeAbility* native,enemy_control::Ability* abilities,unsigned count) noexcept;
 bool ExecuteAbility(const NativeLease&,const NativeAbility&,std::uint64_t sequence,std::uint64_t seed) noexcept;
 }

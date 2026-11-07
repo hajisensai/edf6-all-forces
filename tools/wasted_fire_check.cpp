@@ -62,6 +62,48 @@ void Run() {
     Check(Find(book,&many[0],&ship,false)==nullptr,"full: the least recently hit pair gone");
 }
 
+// Wasted's early out (Book::latestHold: past the latest hold given, no scan) answers as the full scan does: holds given,
+// cleared by a hit that hurts, pairs taken over by others, all the while asked about every pair at times around the holds.
+bool Scanned(const Book& b,const void* shooter,const void* target,std::uint64_t ms) {
+    if(!shooter || !target)return false;
+    for(const Pair& p:b.pair)
+        if(p.shooter==shooter && p.target==target)return ms<p.holdUntil;
+    return false;
+}
+void EarlyOut() {
+    constexpr int kTargets=8,kShooters=kPairs/kTargets*5/4;   // a quarter more pairs than the table keeps: some taken over
+    static Book b{};
+    static int shooters[kShooters],targets[kTargets];
+    Check(b.latestHold==0 && !Wasted(b,&shooters[0],&targets[0],0),"no hold given: not wasted");
+    std::uint32_t seed=12345;
+    auto next=[&seed]{seed=seed*1103515245u+12345u;return seed>>8;};
+    std::uint64_t ms=1000;
+    int mismatches=0,held=0,early=0;
+    for(int i=0;i<50000;++i) {
+        ms+=next()%40;
+        const void* s=&shooters[next()%kShooters];
+        const void* t=&targets[next()%kTargets];
+        Hit(b,s,t,next()%7==0,ms);
+        for(int k=0;k<4;++k) {
+            const void* qs=&shooters[next()%kShooters];
+            const void* qt=&targets[next()%kTargets];
+            const std::uint64_t at=ms+next()%(2*kWastedHoldMs);
+            const bool want=Scanned(b,qs,qt,at);
+            if(Wasted(b,qs,qt,at)!=want)++mismatches;
+            if(want)++held;
+            if(at>=b.latestHold)++early;
+        }
+        bool under=true;
+        for(const Pair& p:b.pair)under=under && p.holdUntil<=b.latestHold;
+        if(!under)++mismatches;
+    }
+    Check(mismatches==0,"early out: the same answer as the scan, latestHold never below a hold");
+    Check(held>0 && early>0,"early out: both held pairs and early outs exercised");
+    // A long quiet spell after the last hold: everything answers no by the early out.
+    ms=b.latestHold;
+    Check(!Wasted(b,&shooters[0],&targets[0],ms) && !Scanned(b,&shooters[0],&targets[0],ms),"past the latest hold: not wasted");
+}
+
 // The WASTEDFIRE plan lines (planlog): a moving fortress's hundred parts under a squad's fire, planned every frame, give
 // one line a shooter and target kind every kEveryMs and at most kPerSecond lines in any second; the line says how many
 // plans it stands for. (2026-10-31: a line a part rotated the 32 MB log within seconds.)
@@ -120,6 +162,7 @@ void PlanLog() {
 
 int main() {
     Run();
+    EarlyOut();
     PlanLog();
     std::printf("wasted_fire_check: %d cases, %d failed\n",cases,failures);
     return failures ? 1 : 0;
