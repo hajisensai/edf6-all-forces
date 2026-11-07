@@ -480,7 +480,7 @@ void Gather(std::int32_t team) noexcept {
     w.player=player.at && GameMs()-player.at<kPlayerFixMs;
     if(w.player)std::memcpy(w.playerAt,player.pos,12);
     VisitEnemiesOf(team,&SeeEnemy,&w);
-    // The local player first: whatever the walk's order and the table's room, no shot crosses them (B1).
+    // The local player first: whatever the walk's order, no shot crosses them (B1).
     if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
         const float* p=Pos(me);
         w.fr[0]=npc::Friend{{p[0],p[1]+1.0f,p[2]},kSoldierRadius};w.frObject[0]=me;w.friends=1;

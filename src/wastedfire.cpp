@@ -24,6 +24,8 @@
 #include "hit_predict.h"
 #include "memory.h"
 #include "wasted_fire.h"
+#include "edf/hash_index.h"
+#include <vector>
 
 namespace crew {
 namespace {
@@ -154,23 +156,58 @@ bool Accepts(unsigned char* o,Kind k,const float* at,std::uint32_t body) noexcep
 }
 
 // --- The watch: each target's window and motion, each shooter-target pair's last plan ---
-struct Watched { const void* target; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
-constexpr int kWatched=64;
-Watched watched[kWatched]{};
-Watched& Watch(const void* target) noexcept {
-    Watched* oldest=&watched[0];
-    for(Watched& x:watched) {
-        if(x.target==target)return x;
-        if(x.at<oldest->at)oldest=&x;
+// Rows by key, as many as the battle asks for (a fortress's hundred parts, a crowd's shooter-target pairs: fixed 64 / 128
+// tables thrashed, each miss a new ray and a target's learnt window lost), a row unused for `forget` ms given up at the
+// next sweep (one pass every `forget` ms: linear in the rows). Game thread.
+template<class K,class Row> struct Rows {
+    std::vector<Row> row;
+    edf::HashIndex<K> index;
+    std::vector<int> free;
+    std::uint64_t sweptAt=0;
+    Row* Find(const K& key) noexcept { const int i=index.Find(key);return i<0 ? nullptr : &row[static_cast<std::size_t>(i)]; }
+    // A new row for `key` (not in the table), its fields default.
+    template<class Unused> Row& Make(const K& key,std::uint64_t ms,std::uint64_t forget,Unused unused) {
+        if(ms-sweptAt>forget) {
+            sweptAt=ms;
+            for(std::size_t i=0;i<row.size();++i)
+                if(row[i].used && unused(row[i])){index.Erase(row[i].key);row[i]=Row{};free.push_back(static_cast<int>(i));}
+        }
+        int at;
+        if(!free.empty()){at=free.back();free.pop_back();}
+        else {at=static_cast<int>(row.size());row.emplace_back();}
+        Row& r=row[static_cast<std::size_t>(at)];
+        r=Row{};r.key=key;r.used=true;
+        index.Set(key,at);
+        return r;
     }
-    *oldest=Watched{target,0,{},{},{}};
-    return *oldest;
+    void Clear() noexcept { row.clear();index.Clear();free.clear();sweptAt=0; }
+};
+
+struct Watched { const void* key; bool used; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
+constexpr std::uint64_t kWatchForgetMs=60000;   // a target nobody has aimed at for a minute: its window learnt again
+Rows<const void*,Watched> watched;
+Watched& Watch(const void* target) {
+    if(Watched* w=watched.Find(target))return *w;
+    const std::uint64_t ms=GameMs();
+    return watched.Make(target,ms,kWatchForgetMs,[ms](const Watched& w) noexcept { return ms-w.at>kWatchForgetMs; });
 }
-struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet;
-              float from[3],speed,gravity; };
-constexpr int kPlans=128;
+// A plan's key: the shooter, its target and its round (the same pair planned for the eye's straight line and for the
+// muzzle's round are two plans); where it fired from is checked on a hit, not keyed (it moves every frame).
+struct PlanKey {
+    const void* shooter=nullptr;
+    const void* target=nullptr;
+    float speed=0.0f,gravity=0.0f;
+    bool operator==(const PlanKey& o) const noexcept { return shooter==o.shooter && target==o.target && speed==o.speed && gravity==o.gravity; }
+};
+std::uint64_t HashOf(const PlanKey& k) noexcept {
+    std::uint32_t s,g;std::memcpy(&s,&k.speed,4);std::memcpy(&g,&k.gravity,4);
+    return edf::HashOf(edf::PtrPair{k.shooter,k.target})^edf::HashMix((static_cast<std::uint64_t>(s)<<32)|g);
+}
+struct Plan { PlanKey key; bool used; const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3];
+              bool aimSet; float from[3],speed,gravity; };
 constexpr std::uint64_t kPlanMs=150;   // a pair's plan holds this long (rays a pair at most ~7 a second)
-Plan plans[kPlans]{};
+constexpr std::uint64_t kPlanSweepMs=1000;
+Rows<PlanKey,Plan> plans;
 // Whether a layer-11 ray has met a body of an object yet this mission: until then a miss says nothing about the target.
 bool rayMeetsObjects=false;
 
@@ -188,7 +225,7 @@ void SeePoint(void* ctx,const void* object,const float* aim) {
 // The plan for `shooter` firing from `from` (rounds of `speed` m/s, `gravity` m/s^2; 0: unknown, taken as a straight line)
 // at `target`: fire / wait / skip and the point to aim at (its lock point whose predicted hit the game would take).
 Plan Assess(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
-    Plan p{shooter,target,0,hitpredict::Verdict::fire,{},false};
+    Plan p{};p.shooter=shooter;p.target=target;p.verdict=hitpredict::Verdict::fire;
     std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
@@ -251,15 +288,13 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
 
 const Plan& PlanFor(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
     const std::uint64_t ms=GameMs();
-    Plan* oldest=&plans[0];
-    for(Plan& p:plans) {
-        if(p.shooter==shooter && p.target==target && p.speed==speed && p.gravity==gravity &&
-           std::memcmp(p.from,from,12)==0 && ms-p.at<kPlanMs)return p;
-        if(p.at<oldest->at)oldest=&p;
-    }
-    *oldest=Assess(shooter,target,from,speed,gravity);
-    oldest->at=ms;
-    return *oldest;
+    const PlanKey key{shooter,target,speed,gravity};
+    Plan* p=plans.Find(key);
+    if(p && std::memcmp(p->from,from,12)==0 && ms-p->at<kPlanMs)return *p;
+    const Plan fresh=Assess(shooter,target,from,speed,gravity);
+    if(!p)p=&plans.Make(key,ms,kPlanSweepMs,[ms](const Plan& q) noexcept { return ms-q.at>=kPlanMs; });
+    *p=fresh;p->key=key;p->used=true;p->at=ms;
+    return *p;
 }
 // The shooter's eye: a soldier's 1.5 m over its feet, a vehicle's 2 m over its root.
 void EyeOf(const void* shooter,float* eye) noexcept {
@@ -329,8 +364,8 @@ void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
     ReleaseSRWLockExclusive(&lock);
-    for(auto& w:watched)w=Watched{};
-    for(auto& p:plans)p=Plan{};
+    watched.Clear();
+    plans.Clear();
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
     feedbackFrame=feedbackMs=0;

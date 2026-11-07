@@ -413,6 +413,7 @@ target_compile_options(hash_index_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hash_index_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # Fire that cannot hurt its target held (tools/wasted_fire_check.cpp, src/wasted_fire.h).
 add_executable(wasted_fire_check EXCLUDE_FROM_ALL tools/wasted_fire_check.cpp)
+target_include_directories(wasted_fire_check PRIVATE common)
 target_compile_options(wasted_fire_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(wasted_fire_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # What the charge drones and the gunship go for and when a charge drone gives up (tools/air_chase_check.cpp,
