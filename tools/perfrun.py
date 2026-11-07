@@ -7,10 +7,10 @@ SCENARIO
   grand                              the test range's grand battle (testrange/gen.py grand_battle)
   horde | blast                      heavier swarms (PRESETS): 400 ants; 300 ants under tank shells, rockets, artillery
   stress:N[:ENEMY]                   swarm times N (the user, 2026-11-07: "a hundred times the monsters and NPCs"):
-                                     up to 160*N enemies, 3*N soldier squads but at most MAX_SQUADS (120, 720
-                                     soldiers: the game's ai::World has 1024 agent ids, soldiers take one each and
-                                     past that it crashes, docs/stress-re.md), blast's vehicles shelling them; the
-                                     PERF OBJECTS rows say how many the game really held
+                                     up to 160*N enemies, 3*N soldier squads (past ~1000 soldiers the plugin's
+                                     ai::World capacity patch is what keeps the game up, docs/aiworld-re.md),
+                                     blast's vehicles shelling them; the PERF OBJECTS rows say how many the game
+                                     really held
   swarm[:ENEMY[:PER[:CAP[:LEVEL]]]]  the test range with waves of ENEMY (default giantant01): PER every 2 s while fewer
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
@@ -65,12 +65,6 @@ PRESETS = {
 }
 
 
-# stress's soldier squads at most (six soldiers each). The game's ai::World pathfinding table has 1024 agent ids
-# (EDF.dll 0xEF613 fills ids 1..1024); soldiers hold one each (ants do not: 1123 ants and 662 soldiers ran), and once
-# they run out an agent gets id 0xFFFF that the AI thread indexes unchecked -> crash at EDF.dll+0xF3E9D (stress:100,
-# 1082 soldiers). 720 soldiers leave room for the vehicles' crews and the mission's own (docs/stress-re.md).
-MAX_SQUADS = 120
-
 
 def stress_fields(n: int) -> tuple[int, int, float]:
     """stress:N's waves: (per wave, cap, seconds to warm). swarm's cap and squads times N; the waves grow with N so the
@@ -94,7 +88,7 @@ def plan_for(scenario: str):
         plan = gen.Plan()
         plan.vehicles = {}
         plan.friends = dict(PRESETS['blast'][1])
-        plan.squads = min(3 * n, MAX_SQUADS)
+        plan.squads = 3 * n
         plan.waves = gen.Waves(enabled=True, enemy=enemy, per_wave=per, max_alive=cap, first_delay=3.0, interval=2.0,
                                level=0.3)
         return plan
@@ -203,7 +197,8 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
                        os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1',),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
-                       during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks))
+                       during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
+                       quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
     finally:
         if plan:
             if drive.game_pids():

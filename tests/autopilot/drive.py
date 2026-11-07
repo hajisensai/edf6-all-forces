@@ -633,7 +633,8 @@ def commit_of(row: str) -> float:
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
         keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
-        hq: bool = False, every: float = 15.0, during: Callable[[], None] | None = None) -> int:
+        hq: bool = False, every: float = 15.0, during: Callable[[], None] | None = None,
+        quit_wait: int = 90) -> int:
     """`during`: called on a thread of its own once the mission has started (tools/perfrun.py samples the game there);
     the run quits as soon as it returns, SECONDS then only the longest stay."""
     install(game)
@@ -685,7 +686,7 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
             print('the game exited before quit was requested')
             return 1
         command(game, 'quit')
-        for _ in range(90):
+        for _ in range(quit_wait):   # (a game at a few fps takes minutes to leave a mission)
             if not game_pids():
                 break
             time.sleep(1)
@@ -699,7 +700,7 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         print(f'commit peak sampled {peak:.0f} MB, process peak commit {reported_peak:.0f} MB')
         print('last:', mem_rows[-1] if mem_rows else None)
         if game_pids():
-            print('the game did not exit in 90 s: left running, the plugin stays installed')
+            print(f'the game did not exit in {quit_wait} s: left running, the plugin stays installed')
             return 1
         return 0
     finally:

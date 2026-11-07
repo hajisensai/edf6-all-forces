@@ -736,6 +736,11 @@ add_test(NAME pvp_units COMMAND pvp_units_test)
 add_executable(team_native_test tests/team_native_test.cpp)
 target_compile_options(team_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME team_native COMMAND team_native_test)
+# ai::World's agent capacity sites (src/aiworld_capacity_logic.h) offline, and against the real EDF.dll: every site's
+# bytes, and no access to the stock agent table outside them (tests/aiworld_capacity_audit.py, skipped without one).
+add_executable(aiworld_capacity_test tests/aiworld_capacity_test.cpp)
+target_compile_options(aiworld_capacity_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME aiworld_capacity COMMAND aiworld_capacity_test)
 # The PvP match as data: factions, roles, relations, the native overlay (src/pvp_match.h).
 add_executable(pvp_match_test tests/pvp_match_test.cpp)
 target_compile_options(pvp_match_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -944,6 +949,8 @@ set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
 add_test(NAME team_native_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/team_native_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(team_native_sigs PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aiworld_capacity_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
@@ -1104,7 +1111,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -1918,6 +1925,7 @@ add_test(NAME as_registration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 add_test(NAME mission_script_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_mission_script.py")
 add_test(NAME bvm41_dataflow COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bvm41_dataflow.py")
 target_sources(EDF6VehicleCrew PRIVATE src/sight_contacts.cpp src/pvp.cpp src/pvp_native.cpp src/team_native.cpp src/room_pvp.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/aiworld_capacity.cpp)
 add_executable(debug_spawn_net_test EXCLUDE_FROM_ALL tests/debug_spawn_net_test.cpp src/support_protocol.cpp)
 target_include_directories(debug_spawn_net_test PRIVATE src)
 target_compile_options(debug_spawn_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
