@@ -1,20 +1,74 @@
 // Memory primitives shared by EDF6VehicleCrew and EDF6AutoTurret: one copy (the two plugins had drifted
 // apart: only one had the region cache and the E9 tail-jump redirect).
 #include "edf/memory.h"
+#include <psapi.h>
 #include <cstring>
 namespace edf {
-// The plugin asks this many times per object per frame. A VirtualQuery each was a system call each, ~15% of
-// the game thread with 30-odd jets out (2026-10-04 sampling). So each thread keeps the regions it queried
-// (a heap region is megabytes: nearly every pointer falls in one already seen) and forgets them when the
-// tick count moves (each frame or so), so a region freed and remapped is asked about again.
+// The plugin asks this many times per object per frame (WastedFire / PickTarget per gunner per enemy, the jets' and
+// crews' frames): hundreds to thousands of asks a frame in a battle.
+//
+// VirtualQuery was the answer and the cost: it describes the run of like pages from the asked page to the end of the
+// region, so the kernel walks the page tables over all of it, and a game heap region is hundreds of MB. With ~100
+// ants and the NPC tanks fighting them it was 35% of the game thread, with the grand battle 47% (~7 ms a frame;
+// tools/perfrun.py, 2026-11-07). Its answer was also cached badly: the run starts at the asked page, so a pointer
+// lower in the same region never hit, and asked again from there to the end.
+//
+// So the pages themselves are asked: QueryWorkingSetEx tells each page's protection, in time by the number of pages
+// asked, not by the region. It knows only pages in the working set (Valid); any other page (paged out, reserved,
+// free, a guard page, whose PTE is never valid) is asked with VirtualQuery as before. The answers are kept per thread
+// by page for the tick (each frame or so), as the regions were, so a page freed and remapped is asked again.
 // Not a probing read: touching a PAGE_GUARD page (a thread's stack guard) would take the guard away.
+namespace {
+constexpr std::uintptr_t kPage=0x1000;
+// What a page allows, as Readable checks it: 0 nothing (or not known), else these bits.
+constexpr unsigned char kRead=1,kWrite=2;
+unsigned char Allows(DWORD protect) noexcept {
+    if(protect&(PAGE_NOACCESS|PAGE_GUARD)) return 0;
+    switch(protect&0xff) {
+    case PAGE_READWRITE: case PAGE_WRITECOPY: case PAGE_EXECUTE_READWRITE: case PAGE_EXECUTE_WRITECOPY:
+        return kRead|kWrite;
+    case PAGE_READONLY: case PAGE_EXECUTE_READ:
+        return kRead;
+    default:
+        return 0;
+    }
+}
+
+// Per thread, direct-mapped by page number; an entry counts only in the tick it was written. An entry is the page's
+// address with what it allows in the low bits (a page address has 12 zero bits), and its tick: 16 bytes, 128 KB. A
+// battle's game thread looks at ~5,000 pages a frame (300 ants and their gunners): 1024 entries were too few, each
+// frame pushed out what it would ask again (perfrun blast, 2026-11-07: 4,800 working-set calls a frame).
+struct PageCache {
+    static constexpr int kSize=8192;
+    struct Entry { std::uintptr_t pageAllows; ULONGLONG tick; };
+    Entry e[kSize];
+    Entry& Slot(std::uintptr_t page) noexcept { return e[(page/kPage)%kSize]; }
+};
+// Made on a thread's first ask, freed when the thread ends (a game or Coop thread that comes and goes leaks nothing).
+struct PageCacheOwner {
+    PageCache* pages=nullptr;
+    bool tried=false;
+    ~PageCacheOwner() { if(pages) VirtualFree(pages,0,MEM_RELEASE); }
+};
+PageCache* Pages() noexcept {
+    thread_local PageCacheOwner owner;
+    if(!owner.pages && !owner.tried) {
+        owner.tried=true;
+        owner.pages=static_cast<PageCache*>(VirtualAlloc(nullptr,sizeof(PageCache),MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    }
+    return owner.pages;
+}
+
+thread_local ReadableStats stats{};
+std::uint64_t Qpc() noexcept { LARGE_INTEGER t; QueryPerformanceCounter(&t); return static_cast<std::uint64_t>(t.QuadPart); }
+
+// VirtualQuery's answer for the pages from `at`, the old way: the region cache, then the call.
 struct Region { std::uintptr_t base,end; DWORD state,protect; };
-static bool Query(std::uintptr_t at,MEMORY_BASIC_INFORMATION& mbi) noexcept {
+bool Query(std::uintptr_t at,MEMORY_BASIC_INFORMATION& mbi,ULONGLONG now) noexcept {
     constexpr int kKept=32;
     thread_local Region kept[kKept];
     thread_local int count=0,next=0;
     thread_local ULONGLONG tick=0;
-    const ULONGLONG now=GetTickCount64();
     if(now!=tick){tick=now;count=0;next=0;}
     for(int i=0;i<count;++i)
         if(at>=kept[i].base && at<kept[i].end) {
@@ -22,7 +76,10 @@ static bool Query(std::uintptr_t at,MEMORY_BASIC_INFORMATION& mbi) noexcept {
             mbi.State=kept[i].state;mbi.Protect=kept[i].protect;
             return true;
         }
-    if(!VirtualQuery(reinterpret_cast<void*>(at),&mbi,sizeof(mbi)))return false;
+    const std::uint64_t t0=Qpc();
+    const bool ok=VirtualQuery(reinterpret_cast<void*>(at),&mbi,sizeof(mbi))!=0;
+    ++stats.vqCalls;stats.vqTicks+=Qpc()-t0;
+    if(!ok)return false;
     const auto base=reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
     kept[next]={base,base+mbi.RegionSize,mbi.State,mbi.Protect};
     next=(next+1)%kKept;
@@ -30,23 +87,70 @@ static bool Query(std::uintptr_t at,MEMORY_BASIC_INFORMATION& mbi) noexcept {
     return true;
 }
 
-bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
-    auto at=reinterpret_cast<std::uintptr_t>(ptr);
-    if (!at || size>UINTPTR_MAX-at) return false;
-    const auto end=at+size;
+bool ReadableByRegion(std::uintptr_t at,std::uintptr_t end,unsigned char need,ULONGLONG now) noexcept {
     while(at<end) {
         MEMORY_BASIC_INFORMATION mbi{};
-        if (!Query(at,mbi) || mbi.State!=MEM_COMMIT
-            || (mbi.Protect&(PAGE_NOACCESS|PAGE_GUARD))) return false;
-        const DWORD p=mbi.Protect&0xff;
-        if (writable ? !(p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY)
-                     : !(p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY)) return false;
+        if(!Query(at,mbi,now) || mbi.State!=MEM_COMMIT || (Allows(mbi.Protect)&need)!=need) return false;
         const auto next=reinterpret_cast<std::uintptr_t>(mbi.BaseAddress)+mbi.RegionSize;
         if(next<=at) return false;
         at=next;
     }
     return true;
 }
+
+// The pages asked at once (an object, a few KB at most); a longer span is asked by region.
+constexpr std::uintptr_t kMaxPages=16;
+}  // namespace
+
+bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
+    const auto at=reinterpret_cast<std::uintptr_t>(ptr);
+    if (!at || size>UINTPTR_MAX-at) return false;
+    const auto end=at+size;
+    if(end==at) return true;
+    ++stats.asks;
+    const unsigned char need=writable ? kRead|kWrite : kRead;
+    const ULONGLONG now=GetTickCount64();
+    const std::uintptr_t first=at&~(kPage-1),last=(end-1)&~(kPage-1);
+    const std::uintptr_t pages=(last-first)/kPage+1;
+    PageCache* cache=Pages();
+    if(pages>kMaxPages || !cache) return ReadableByRegion(at,end,need,now);
+    PSAPI_WORKING_SET_EX_INFORMATION ask[kMaxPages];
+    int asked=0;
+    for(std::uintptr_t page=first;;page+=kPage) {
+        const auto& hit=cache->Slot(page);
+        if((hit.pageAllows&~(kPage-1))==page && hit.tick==now) {
+            ++stats.pageHits;
+            if((hit.pageAllows&need)!=need) return false;
+        } else {
+            ask[asked]={};
+            ask[asked].VirtualAddress=reinterpret_cast<void*>(page);
+            ++asked;
+        }
+        if(page==last) break;
+    }
+    if(!asked) return true;
+    const std::uint64_t t0=Qpc();
+    const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask,static_cast<DWORD>(asked*sizeof(ask[0])))!=0;
+    ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked);stats.wsTicks+=Qpc()-t0;
+    if(!got) return ReadableByRegion(at,end,need,now);
+    for(int i=0;i<asked;++i) {
+        const auto page=reinterpret_cast<std::uintptr_t>(ask[i].VirtualAddress);
+        unsigned char allows=0;
+        if(ask[i].VirtualAttributes.Valid) {
+            allows=Allows(static_cast<DWORD>(ask[i].VirtualAttributes.Win32Protection));
+        } else {
+            // Not in the working set (paged out, never touched, reserved, free, a guard page): VirtualQuery's answer,
+            // kept like any other for the tick (Readable never touches the page, so it stays out and would be asked
+            // again every time: a trimmed working set would be the old cost back).
+            MEMORY_BASIC_INFORMATION mbi{};
+            if(Query(page,mbi,now) && mbi.State==MEM_COMMIT) allows=Allows(mbi.Protect);
+        }
+        cache->Slot(page)={page|allows,now};
+        if((allows&need)!=need) return false;
+    }
+    return true;
+}
+ReadableStats TakeReadableStats() noexcept { const ReadableStats s=stats; stats={}; return s; }
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept {
     if(!anchor || !code || !size || size>0x1000) return nullptr;
     SYSTEM_INFO info{};

@@ -274,14 +274,39 @@ bool Feedback(const void* shooter,const void* target) noexcept {
     ReleaseSRWLockShared(&lock);
     return wasted;
 }
+// What a target is this frame, apart from who shoots at it: whether it is readable, its kind, and for an ordinary enemy
+// the whole verdict. Every NPC gunner asks of every enemy each frame (npc::PickTarget, GunnerVisit): with 300 ants and
+// a dozen gunners that was ~60,000 memory asks a frame, ~3 ms of the game thread (perfrun blast, 2026-11-07). The
+// answers are the same for every gunner within a frame, so each target is looked at once a frame. Game thread only, as
+// the plans are.
+struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
+TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
+struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
+const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
+    TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
+    if(m.target==target && m.frame==frame)return m;
+    m={target,frame,Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    if(!m.readable)return m;
+    const auto o=static_cast<const unsigned char*>(target);
+    m.kind=AcceptOk() ? KindOf(o) : Kind::none;
+    // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
+    if(m.kind==Kind::none || m.kind==Kind::yes)
+        m.verdict=At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+    return m;
+}
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
-    if(!shooter || !target || !Readable(shooter,kPosition+12) || !Readable(target,kObjFlags+4))return hitpredict::Verdict::fire;
-    const auto o=static_cast<const unsigned char*>(target);
-    const Kind k=AcceptOk() ? KindOf(o) : Kind::none;
-    // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
-    if(k==Kind::none || k==Kind::yes)
-        return At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+    if(!shooter || !target)return hitpredict::Verdict::fire;
+    // the frame, and the time in 32 ms steps besides: a frame clock that never moved (paused, or not found) must not
+    // keep an answer for good
+    const ULONGLONG frame=(GameFrame()<<24)^(GetTickCount64()>>5);
+    if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
+        shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
+    if(!shooterMemo.readable)return hitpredict::Verdict::fire;
+    const TargetMemo& t=TargetThisFrame(target,frame);
+    if(!t.readable)return hitpredict::Verdict::fire;
+    const Kind k=t.kind;
+    if(k==Kind::none || k==Kind::yes)return t.verdict;
     float eye[3];
     if(!from){EyeOf(shooter,eye);from=eye;}
     const Plan& p=PlanFor(shooter,target,from,speed,gravity);
@@ -322,6 +347,8 @@ void ResetWastedFire() noexcept {
     ReleaseSRWLockExclusive(&lock);
     for(auto& w:watched)w=Watched{};
     for(auto& p:plans)p=Plan{};
+    for(auto& m:targetMemo)m=TargetMemo{};
+    shooterMemo=ShooterMemo{};
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
 }
