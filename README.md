@@ -713,7 +713,7 @@ python tools/perfrun.py grand                      # 测试场大决战
 python tools/perfrun.py M001 --ab A.dll B.dll      # 两个构建交替跑（默认 ABAB），出 A/B 表
 ```
 
-- 场景：`M001` / `RM015` / 行号（原版任务）、`grand`、`swarm[:敌人[:每波[:上限[:等级]]]]`。测试场场景只改写测试场任务目录里的 4 个文件
+- 场景：`M001` / `RM015` / 行号（原版任务）、`grand`、`swarm[:敌人[:每波[:上限[:等级]]]]`，以及更重的 `horde`（400 只蚂蚁）、`blast`（300 只蚂蚁对 6 辆坦克、2 辆喀秋莎、2 门自行榴弹炮，爆炸多；字段同 swarm，可逐个覆盖）。测试场场景只改写测试场任务目录里的 4 个文件
   （`gen.write_scenario`），不走会重新生成全部载具的完整安装；测试场要先由安装器装好。测试场只留当前方案要用的生成载具，
   所以 `grand` 要求先在测试场启动器里用大决战方案装过一次（缺什么会直接报出来，不会进游戏崩掉）。原件先存到排队目录
   （`%LOCALAPPDATA%\EDF6TestQueue\…\range-scenario-original`），游戏没退出、来不及还原时用 `python tools/perfrun.py --restore` 放回。

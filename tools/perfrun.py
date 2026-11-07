@@ -5,6 +5,7 @@
 SCENARIO
   M001 | RM015 | ROW                 a stock offline mission (tests/autopilot/drive.py's)
   grand                              the test range's grand battle (testrange/gen.py grand_battle)
+  horde | blast                      heavier swarms (PRESETS): 400 ants; 300 ants under tank shells, rockets, artillery
   swarm[:ENEMY[:PER[:CAP[:LEVEL]]]]  the test range with waves of ENEMY (default giantant01): PER every 2 s while fewer
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
@@ -43,11 +44,20 @@ for sub in ('pylib', 'testrange', os.path.join('tests', 'autopilot'), 'tools'):
 import gamedir  # noqa: E402
 import gamelease  # noqa: E402
 
-WARM = {'grand': 45.0, 'swarm': 30.0}   # the waves need this long to fill up; a stock mission's start: 25 s
+WARM = {'grand': 45.0, 'swarm': 30.0, 'horde': 40.0, 'blast': 40.0}   # the waves need this long to fill up; a stock mission's start: 25 s
 # (past drive.run's real-mouse nudge at 20 s, which must not fall into the clean window)
 SAMPLER = os.path.join(ROOT, 'build', 'rip_sampler.exe')
 AUTOPILOT = os.path.join(ROOT, 'build', 'tools', 'EDF6Autopilot.dll')   # tests/autopilot/drive.py installs it
 DEFAULT_DLL = os.path.join(ROOT, 'build', 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')
+
+
+# Heavier range battles (the user, 2026-11-07: "more monsters, and more explosions"): the waves (as swarm's fields)
+# and the friends fighting them. horde: 400 ants at once; blast: 300 ants under tank shells, rockets and artillery.
+PRESETS = {
+    'horde': ('giantant01:40:400:0.3', {'vehicle403_tank_mission': 4}, 4),
+    'blast': ('giantant01:40:300:0.3', {'vehicle403_tank_mission': 6, 'edf6tr_katyusha_mission': 2,
+                                        'edf6tr_artillery_mission': 2}, 4),
+}
 
 
 def plan_for(scenario: str):
@@ -56,15 +66,20 @@ def plan_for(scenario: str):
     kind, *rest = scenario.split(':')
     if kind == 'grand':
         return gen.grand_battle(gen.Plan())
-    if kind == 'swarm':
+    if kind in PRESETS:
+        # the preset's wave fields, each overridden by one given after it (blast:giantspider01 → spiders)
+        rest = [mine if i < len(rest) and rest[i] else theirs for i, (theirs, mine)
+                in enumerate(zip(PRESETS[kind][0].split(':'), [*rest, *[''] * 4]))]
+    if kind in ('swarm', *PRESETS):
         enemy = rest[0] if len(rest) > 0 and rest[0] else 'giantant01'
         per = int(rest[1]) if len(rest) > 1 else 25
         cap = int(rest[2]) if len(rest) > 2 else 160
         level = float(rest[3]) if len(rest) > 3 else 0.3
         plan = gen.Plan()
         plan.vehicles = {}
-        plan.friends = {'vehicle403_tank_mission': 3}
-        plan.squads = 3
+        friends, squads = PRESETS[kind][1:] if kind in PRESETS else ({'vehicle403_tank_mission': 3}, 3)
+        plan.friends = dict(friends)
+        plan.squads = squads
         plan.waves = gen.Waves(enabled=True, enemy=enemy, per_wave=per, max_alive=cap, first_delay=3.0, interval=2.0,
                                level=level)
         return plan
