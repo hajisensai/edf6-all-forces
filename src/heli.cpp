@@ -60,6 +60,7 @@
 #include "firstperson.h"
 #include <cmath>
 #include <cstdarg>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -73,7 +74,9 @@ constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=0x10;
 constexpr std::size_t kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTargetLockable=0x2A;
 constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
 constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
-constexpr int kMaxNodes=8192;
+// The lock registry is an MSVC std::list (head at +8, its size at +0x10: 0x22E210 bumps it, 0x22E330, against max_size);
+// a walk goes over that many nodes at most -- the list's own count, not a fixed cap a battle's lock points pass.
+constexpr std::size_t kRegSize=0x10;
 constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
@@ -656,8 +659,9 @@ template<class F> bool ForEachEnemyOf(std::int32_t team,const void* v,F&& f) noe
     if(!relation || !Readable(registry,kRegList+0x10))return false;
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return false;
-    int n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
+    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
+    std::uint64_t n=0;
+    for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);
         if(!target || target[0]!=0 || !target[kTargetValid] || !target[kTargetLockable])continue;
         const auto object=At<const unsigned char*>(target,kTargetObject);
@@ -695,11 +699,12 @@ constexpr float kAimOver=0.3f;      // m over a soldier's origin (its feet) the 
 constexpr float kHurtWeight=200.0f; // m a friend counts farther per share of its HP it still has (the most hurt first)
 constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point (plus the round's blast)
 constexpr std::size_t kWeaponBlast=0x8B0;   // AmmoExplosion, the blast radius (0x68D82F, docs/heli-input-re.md)
-constexpr int kMaxFriends=64;
 bool visitOk=false;                  // 0x5E11D0 is the walk read above (CheckHeliProfile)
 
 struct Friend { const void* object; float aim[3]; float share; };
-struct FriendList { Friend f[kMaxFriends]; int n; };
+// Every hurt friend of the frame (a big battle's dozens: a fixed 64 dropped the rest in walk order, the most hurt among them);
+// grown once, kept across frames.
+struct FriendList { std::vector<Friend> f; int n=0; };
 struct FriendVisitor { const void* const* vtable; FriendList* list; };
 using VisitFriendsFn=void(__fastcall*)(void*,std::int32_t,FriendVisitor*);
 
@@ -711,14 +716,15 @@ bool IsSoldier(const unsigned char* o) noexcept {
 }
 
 void AddFriend(FriendList& l,const unsigned char* o) noexcept {
-    if(l.n>=kMaxFriends || !IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
+    if(!IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
     const auto ride=At<const unsigned char*>(o,kHumanVehicleCtrl);
     if(ride && Readable(ride,0x10) && At<std::int32_t>(ride,8)!=0)return;   // in a vehicle (0x56D700's own test)
     const float hp=At<float>(o,kHp),max=At<float>(o,kHpMax);
     if(!std::isfinite(hp) || !std::isfinite(max) || !(max>0.0f) || !(hp>0.0f) || hp>=max*kHurt)return;
     const float* p=reinterpret_cast<const float*>(o+kPosition);
     if(!std::isfinite(p[0]+p[1]+p[2]))return;
-    Friend& f=l.f[l.n++];
+    if(l.f.size()<=static_cast<std::size_t>(l.n))l.f.resize(l.f.empty() ? 64 : l.f.size()*2);
+    Friend& f=l.f[static_cast<std::size_t>(l.n++)];
     f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kAimOver;f.aim[2]=p[2];f.share=hp/max;
 }
 
@@ -3869,8 +3875,9 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
     if(!Readable(registry,kRegList+0x10))return false;
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return false;
-    int n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
+    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
+    std::uint64_t n=0;
+    for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);
         if(!target || target[0]!=0 || !target[kTargetValid])continue;
         const auto object=At<const unsigned char*>(target,kTargetObject);

@@ -5997,7 +5997,7 @@ def map_commands_wired() -> None:
         human_frame.index('MapCommandQueueTick();') < human_frame.index('if(!human || !human[kHumanPlayer]'), 'the queue advances on the scene tick'
     assert 'GuardedTick(kStepMapQueue,&MapCommandQueueTick);' in src('src/crew.cpp')
     assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
-    assert 'NpcSquadSuccessor(' in code and 'handovers[handoverNext]=Handover{' in src('src/npcai.cpp')
+    assert 'NpcSquadSuccessor(' in code and 'AddHandover(Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()});' in src('src/npcai.cpp')
     assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
     assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
     assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
@@ -6863,7 +6863,7 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
-    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'd<=p.reach && d<p.bestD && !WastedFire(p.self,object)' in npcai
     assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
     assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
     assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')

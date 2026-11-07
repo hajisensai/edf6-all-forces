@@ -11,14 +11,15 @@
 // (none hurt it in between) holds its fire at that target for kWastedHoldMs, then tries again (the hatch may have opened,
 // the shooter moved under it). One hit that hurts clears it at once.
 #pragma once
+#include "edf/hash_index.h"
 #include <cstdint>
+#include <vector>
 
 namespace crew {
 namespace wastedfire {
 constexpr int kWastedHits=4;                 // hits in a row that hurt nothing: the shooter's fire at it is wasted
 constexpr std::uint64_t kWastedHoldMs=6000;  // ms it holds its fire at that target before it tries again
 constexpr std::uint64_t kForgetMs=15000;     // ms without a hit on it after which the count starts over
-constexpr int kPairs=256;                    // shooter-target pairs remembered (the least recently hit one goes)
 
 struct Pair {
     const void* shooter;
@@ -27,27 +28,50 @@ struct Pair {
     std::uint64_t hitAt;         // the last hit
     std::uint64_t holdUntil;     // its fire at the target wasted until then (0: not)
 };
-// latestHold: the latest holdUntil any pair has been given (never lowered: a hold cleared or its pair taken over leaves it
-// where it was). Past it no pair is held, so Wasted answers without the scan: nearly every frame no hold runs at all, and
-// the AI asks it a shooter and lock point at a time.
-struct Book { Pair pair[kPairs]; std::uint64_t latestHold; };
+// Every pair hit lately, however many shooters a battle puts on a ship (a fixed 256, least recently hit going, dropped the
+// holds of a crowd's shooters): rows indexed by (shooter, target), a pair not hit for kForgetMs given up (it holds nothing
+// then: its count starts over and its hold, kWastedHoldMs < kForgetMs after its last hit, has run out -- as if never made).
+struct Book {
+    std::vector<Pair> pair;
+    edf::PairIndex index;
+    std::vector<int> free;       // rows given up, taken again first
+    std::uint64_t sweptAt=0;
+    // the latest holdUntil any pair has been given (never lowered): past it no pair is held, so Wasted
+    // answers without the lookup (nearly every frame no hold runs at all)
+    std::uint64_t latestHold=0;
+};
 
-// The pair's entry, or (make) the least recently hit one taken over for it; nullptr when not there and not made.
-inline Pair* Find(Book& b,const void* shooter,const void* target,bool make) noexcept {
-    Pair* oldest=&b.pair[0];
-    for(Pair& p:b.pair) {
-        if(p.shooter==shooter && p.target==target)return &p;
-        if(p.hitAt<oldest->hitAt)oldest=&p;
+// The pair's entry, nullptr when not there.
+inline const Pair* Find(const Book& b,const void* shooter,const void* target) noexcept {
+    const int i=b.index.Find(edf::PtrPair{shooter,target});
+    return i<0 ? nullptr : &b.pair[static_cast<std::size_t>(i)];
+}
+// Its entry, made when not there: a row given up, else a new one. Every kForgetMs the pairs forgotten are given up (one
+// pass over the rows: linear in the pairs, not per hit).
+inline Pair* Make(Book& b,const void* shooter,const void* target,std::uint64_t ms) {
+    const edf::PtrPair key{shooter,target};
+    if(const int i=b.index.Find(key);i>=0)return &b.pair[static_cast<std::size_t>(i)];
+    if(ms-b.sweptAt>kForgetMs) {
+        b.sweptAt=ms;
+        for(std::size_t i=0;i<b.pair.size();++i) {
+            Pair& p=b.pair[i];
+            if(p.shooter && ms-p.hitAt>kForgetMs){b.index.Erase(edf::PtrPair{p.shooter,p.target});p=Pair{};b.free.push_back(static_cast<int>(i));}
+        }
     }
-    if(!make)return nullptr;
-    *oldest=Pair{shooter,target,0,0,0};
-    return oldest;
+    int row;
+    if(!b.free.empty()){row=b.free.back();b.free.pop_back();}
+    else {row=static_cast<int>(b.pair.size());b.pair.emplace_back();}
+    b.pair[static_cast<std::size_t>(row)]=Pair{shooter,target,0,0,0};
+    b.index.Set(key,row);
+    return &b.pair[static_cast<std::size_t>(row)];
 }
 
 // A hit by `shooter` on `target` at `ms` settled: it hurt (its HP fell) or not. True when it starts a hold.
 inline bool Hit(Book& b,const void* shooter,const void* target,bool hurt,std::uint64_t ms) noexcept {
     if(!shooter || !target || shooter==target)return false;
-    Pair* p=Find(b,shooter,target,!hurt);
+    Pair* p=nullptr;
+    if(!hurt)p=Make(b,shooter,target,ms);   // a hurting hit makes no record, it only clears one
+    else if(const int i=b.index.Find(edf::PtrPair{shooter,target});i>=0)p=&b.pair[static_cast<std::size_t>(i)];
     if(!p)return false;
     if(hurt){p->futile=0;p->holdUntil=0;p->hitAt=ms;return false;}
     if(ms-p->hitAt>kForgetMs)p->futile=0;
@@ -62,9 +86,8 @@ inline bool Hit(Book& b,const void* shooter,const void* target,bool hurt,std::ui
 // Whether `shooter`'s fire at `target` is wasted at `ms` (its hits on it have hurt nothing lately).
 inline bool Wasted(const Book& b,const void* shooter,const void* target,std::uint64_t ms) noexcept {
     if(!shooter || !target || ms>=b.latestHold)return false;   // every pair's hold run out (or none given)
-    for(const Pair& p:b.pair)
-        if(p.shooter==shooter && p.target==target)return ms<p.holdUntil;
-    return false;
+    const Pair* p=Find(b,shooter,target);
+    return p && ms<p->holdUntil;
 }
 
 }  // namespace wastedfire

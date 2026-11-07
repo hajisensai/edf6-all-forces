@@ -534,7 +534,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     // readout shows it (ownGun false: their gun is not the plugin's).
     if(crew[0]==Crew::player)DriverFrame(vehicle);
     if(!any)return;
-    Nearby nearby;
+    static Nearby nearby;   // kept: its room grows to the battle once
     ScanEnemies(vehicle,cfg.gunnerRange+kMuzzleReach,nearby);
     const float down=Down(vehicle);
     for(unsigned s=1;s<count;++s) {

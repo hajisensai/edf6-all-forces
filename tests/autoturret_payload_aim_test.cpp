@@ -155,6 +155,48 @@ int main() {
     check(EDF6AutoTurret_PlayerAimV4(vehicle,0,native.bytes.data(),&out) && out.steer && publishedGun==native.bytes.data(),"unhandled V4 query preserves native standalone steering");
     check(native.bytes==nativeBefore && ap.bytes==apBefore && he.bytes==heBefore,"aim readers never rewrite native or selected weapon state");
     check(Frame()==sameFrame,"all V4 switch and return checks share one actual input-hook frame");
+
+    // A battle's registry (perfrun stress:30: 1508 enemies): every lock point in the snapshot (the old one held 1024) and
+    // every enemy in range in a vehicle's scan (the old one kept the first 256); the walk bounded by the list's own count
+    // (+0x10), so a list whose last node does not lead back to the head still ends.
+    {
+        constexpr int kPoints=3000;
+        struct Node { Node* next; Node* prev; unsigned char* target; };
+        std::vector<Node> nodes(kPoints+1);
+        std::vector<std::array<unsigned char,0x40>> targets(kPoints);
+        std::vector<std::array<unsigned char,0x400>> foes(kPoints);
+        unsigned char registry[0x20]{},manager[0x40]{};
+        std::vector<unsigned char> rows(kTeamStride*kMaxTeam);
+        std::int32_t relation[kMaxTeam]{};relation[1]=kEnemyRelation;
+        Node* const head=&nodes[kPoints];
+        for(int i=0;i<kPoints;++i) {
+            Node& n=nodes[static_cast<std::size_t>(i)];
+            n.next=i+1<kPoints ? &nodes[static_cast<std::size_t>(i)+1] : head;n.target=targets[static_cast<std::size_t>(i)].data();
+            unsigned char* t=n.target;unsigned char* o=foes[static_cast<std::size_t>(i)].data();
+            Put<void*>(t,kTargetObject,o);t[kTargetValid]=t[kTargetLockable]=1;
+            Put<float>(t,kTargetAim,static_cast<float>(i));Put<float>(t,kTargetAim+8,10.0f);
+            Put<std::int32_t>(o,kTeam,1);
+        }
+        head->next=&nodes[0];
+        Put<void*>(registry,kRegList,head);Put<std::uint64_t>(registry,kRegSize,kPoints);Put<void*>(image,kRegistry,registry);
+        Put<void*>(image,kTeams,manager);Put<void*>(manager,kTeamArray,rows.data());
+        Put<const std::int32_t*>(rows.data(),kTeamRelation,relation);
+        Put<std::int32_t>(vehicle,kTeam,0);
+        ++frame;int count=0;
+        const Enemy* const all=World(&count);
+        bool rowsOk=count==kPoints;
+        for(int i=0;rowsOk && i<kPoints;++i)rowsOk=all[i].object==foes[static_cast<std::size_t>(i)].data() && all[i].pos[0]==static_cast<float>(i);
+        check(rowsOk,"3000 lock points: every one in the frame's snapshot, in registry order");
+        Nearby wide{};ScanEnemies(vehicle,1.0e6f,wide);
+        check(wide.count==kPoints && wide.e[kPoints-1]==&all[kPoints-1],"a vehicle's scan keeps every enemy in range, not the first 256");
+        Put<std::int32_t>(foes[7].data(),kTeam,0);
+        Nearby fewer{};++frame;ScanEnemies(vehicle,1.0e6f,fewer);
+        check(fewer.count==kPoints-1,"a friend among them left out");
+        nodes[kPoints-1].next=&nodes[0];   // its last node back to the first, not the head
+        ++frame;World(&count);
+        check(count==kPoints,"a walk ends after the list's own count of nodes");
+        Put<void*>(image,kRegistry,nullptr);Put<void*>(image,kTeams,nullptr);
+    }
     std::printf("autoturret payload aim: %d checks, %d failures\n",checks,failed);
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;return failed?1:0;
 }

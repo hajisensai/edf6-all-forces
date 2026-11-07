@@ -44,11 +44,14 @@
 #include "support_soldier.h"
 #include "transport.h"
 #include "vhud.h"
+#include "edf/hash_index.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <deque>
+#include <memory>
 #include <vector>
 
 namespace crew {
@@ -126,7 +129,11 @@ constexpr float kSpotStop=3.0f;         // m from its combat spot it stops
 constexpr float kBehindPlayer=8.0f;     // m behind the player a hurt soldier falls back to
 constexpr ULONGLONG kSpotMs=4000,kLosFrames=6,kStaleMs=2000,kLogMs=2000,kPlayerFixMs=2000;
 constexpr int kArmMissFrames=90;        // a pick not taken this long (1.5 s: a heavy weapon's switch takes a while): picking off for it
-constexpr int kMaxArms=16,kMaxSoldiers=256,kMaxEnemies=1024,kMaxFriends=512,kMaxRoot=16,kMaxNobodys=128;
+constexpr int kMaxArms=16,kMaxRoot=16;
+// The soldiers', the frame's enemies' and friends' tables grow with the battle (perfrun stress:30: 662 soldiers, 1508
+// enemies; fixed 256 / 1024 / 512 left the rest without the plugin's AI or out of target choice). Their first sizes:
+// the old caps, room enough for a stock mission without growing.
+constexpr int kFirstEnemies=1024,kFirstFriends=512,kFirstNobodys=128;
 
 struct Soldier {
     ObjRef ref;
@@ -159,46 +166,41 @@ struct Soldier {
     ULONGLONG climbSince;    // its action limits have read as the climb's (kClimbLimits) since then; 0: not
     bool climbSaid;          // that stretch logged (StuckClimb)
 };
-Soldier soldiers[kMaxSoldiers]{};
-ULONGLONG fullLoggedAt=0,listLoggedAt=0;
+// Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
+std::deque<Soldier> soldiers;
+edf::PtrIndex soldierIndex;
+ULONGLONG listLoggedAt=0;
 
 // --- The frame's world, gathered once a frame by the first soldier's Think ---
 struct Enemy { const void* object; float aim[3]; int points; };
 struct World {
     ULONGLONG frame;
     std::int32_t team;
-    int enemies,friends;
-    Enemy enemy[kMaxEnemies];
-    npc::Friend fr[kMaxFriends];
-    const void* frObject[kMaxFriends];
-    int nobodys;                       // nobody's (team 5) ground vehicles: BOARD's candidates only (no shot lanes)
-    const void* nobody[kMaxNobodys];
-    bool player,lane,lookOk;
-    float playerAt[3],look[3];
-    npc::Lane laneOf;
+    int enemies=0,friends=0;
+    // Sized up front and grown (never shrunk) by Gather alone: an Enemy* into it holds for the frame.
+    std::vector<Enemy> enemy=std::vector<Enemy>(kFirstEnemies);
+    std::vector<npc::Friend> fr=std::vector<npc::Friend>(kFirstFriends);
+    std::vector<const void*> frObject=std::vector<const void*>(kFirstFriends);
+    int nobodys=0;                     // nobody's (team 5) ground vehicles: BOARD's candidates only (no shot lanes)
+    std::vector<const void*> nobody=std::vector<const void*>(kFirstNobodys);
+    edf::PtrIndex enemyIndex;          // object -> its row in enemy[] (a lock point each: one object, several points)
+    bool player=false,lane=false,lookOk=false;
+    float playerAt[3]{},look[3]{};
+    npc::Lane laneOf{};
 };
 World world{};
-// SeeEnemy's lookup of an object already in world.enemy (one entry per object, a lock point each call): open
-// addressing over twice kMaxEnemies slots, so a free one is always found. A slot counts only while its stamp is the
-// current Gather's: nothing is cleared between frames or missions, and the 64-bit stamp (bumped by every Gather and
-// with World{} in ResetNpcAi, never reset) never comes back to an old one. Kept out of World so World{} (ResetNpcAi) stays its old size.
-constexpr int kEnemySlots=kMaxEnemies*2;
-static_assert((kEnemySlots&(kEnemySlots-1))==0,"kEnemySlots: a power of two (the hash's mask)");
-struct EnemySlot { ULONGLONG stamp; int index; };
-EnemySlot enemySlots[kEnemySlots]{};
-ULONGLONG enemyStamp=1;   // above the zeroed slots' 0: none counts before the first Gather
+// Room for row `n` of `v` (doubling: a battle's growth costs a few copies in a mission, not one a frame).
+template<class T> void Room(std::vector<T>& v,int n) {
+    if(static_cast<std::size_t>(n)>=v.size())v.resize(v.size()*2>static_cast<std::size_t>(n) ? v.size()*2 : static_cast<std::size_t>(n)+1);
+}
 
 const float* Pos(const unsigned char* o) noexcept { return reinterpret_cast<const float*>(o+kPosition); }
 
 void SeeEnemy(void* ctx,const void* object,const float* aim) {
     auto& w=*static_cast<World*>(ctx);
-    // The index first, the room after: a full table still counts the points of an enemy it holds (as the scan did).
-    const auto key=reinterpret_cast<std::uintptr_t>(object);
-    unsigned h=static_cast<unsigned>((key>>4)*0x9E3779B97F4A7C15ull>>40)&(kEnemySlots-1);
-    for(;enemySlots[h].stamp==enemyStamp;h=(h+1)&(kEnemySlots-1))
-        if(w.enemy[enemySlots[h].index].object==object){++w.enemy[enemySlots[h].index].points;return;}
-    if(w.enemies>=kMaxEnemies)return;
-    enemySlots[h]=EnemySlot{enemyStamp,w.enemies};
+    if(const int i=w.enemyIndex.Find(object);i>=0){++w.enemy[i].points;return;}
+    Room(w.enemy,w.enemies);
+    w.enemyIndex.Set(object,w.enemies);
     Enemy& e=w.enemy[w.enemies++];
     e.object=object;std::memcpy(e.aim,aim,12);e.points=1;
 }
@@ -209,10 +211,11 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         auto& f=*static_cast<FriendWalk*>(self);
         auto o=static_cast<const unsigned char*>(object);
         World& w=*f.w;
-        if(!o || o[kDead] || w.friends>=kMaxFriends || (w.friends>0 && w.frObject[0]==o))return;
+        if(!o || o[kDead] || (w.friends>0 && w.frObject[0]==o))return;
         const float r=IsSoldierClass(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
         const float* p=Pos(o);
         if(!std::isfinite(p[0]+p[1]+p[2]))return;
+        Room(w.fr,w.friends);Room(w.frObject,w.friends);
         npc::Friend& fr=w.fr[w.friends];
         fr.pos[0]=p[0];fr.pos[1]=p[1]+(r==kVehicleRadius ? 1.5f : 1.0f);fr.pos[2]=p[2];fr.radius=r;
         w.frObject[w.friends++]=o;
@@ -226,7 +229,8 @@ void __fastcall NobodyVisit(void* self,void* object) noexcept {
     __try {
         World& w=*static_cast<FriendWalk*>(self)->w;
         auto o=static_cast<const unsigned char*>(object);
-        if(!o || o[kDead] || w.nobodys>=kMaxNobodys || !KnownVehicle(o) || !NpcDrivable(o))return;
+        if(!o || o[kDead] || !KnownVehicle(o) || !NpcDrivable(o))return;
+        Room(w.nobody,w.nobodys);
         w.nobody[w.nobodys++]=o;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
@@ -472,11 +476,11 @@ void FormationTick() noexcept {
 
 void Gather(std::int32_t team) noexcept {
     World& w=world;
-    w.frame=GameFrame();++enemyStamp;w.team=team;w.enemies=w.friends=w.nobodys=0;
+    w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;w.enemyIndex.Clear();
     w.player=player.at && GameMs()-player.at<kPlayerFixMs;
     if(w.player)std::memcpy(w.playerAt,player.pos,12);
     VisitEnemiesOf(team,&SeeEnemy,&w);
-    // The local player first: whatever the walk's order and the table's room, no shot crosses them (B1).
+    // The local player first: whatever the walk's order, no shot crosses them (B1).
     if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
         const float* p=Pos(me);
         w.fr[0]=npc::Friend{{p[0],p[1]+1.0f,p[2]},kSoldierRadius};w.frObject[0]=me;w.friends=1;
@@ -495,18 +499,26 @@ void Gather(std::int32_t team) noexcept {
     SweepFrame();
 }
 
+// The soldier's entry, by its object (the same one: ObjRef::Is), or null.
+Soldier* FindSoldier(const void* h) noexcept {
+    const int i=soldierIndex.Find(h);
+    return i>=0 && soldiers[static_cast<std::size_t>(i)].ref.Is(h) ? &soldiers[static_cast<std::size_t>(i)] : nullptr;
+}
+// Its entry, a new one for a soldier not driven yet: the first slot of a gone object (stale, or another object at its
+// address), else a new slot at the end. The scan runs only for a new soldier; a known one is found by the index.
 Soldier* Entry(const unsigned char* h,ULONGLONG ms) noexcept {
-    Soldier* slot=nullptr;
-    for(auto& s:soldiers) {
-        if(s.ref.Is(h))return &s;
-        if(!slot && (!s.ref || s.ref.obj==h || ms-s.seen>kStaleMs))slot=&s;
+    if(Soldier* s=FindSoldier(h))return s;
+    std::size_t at=soldiers.size();
+    for(std::size_t i=0;i<soldiers.size();++i) {
+        const Soldier& s=soldiers[i];
+        if(!s.ref || s.ref.obj==h || ms-s.seen>kStaleMs){at=i;break;}
     }
-    if(!slot) {
-        if(ms-fullLoggedAt>10000){fullLoggedAt=ms;Log("NPCAI table full: soldier %p left to the stock AI",h);}
-        return nullptr;
-    }
+    if(at==soldiers.size())soldiers.emplace_back();
+    Soldier* slot=&soldiers[at];
+    if(slot->ref && soldierIndex.Find(slot->ref.obj)==static_cast<int>(at))soldierIndex.Erase(slot->ref.obj);
     *slot=Soldier{};
     slot->ref=ObjRef::Of(h);slot->arm=slot->wantArm=-1;
+    soldierIndex.Set(h,static_cast<int>(at));
     return slot;
 }
 
@@ -611,10 +623,12 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
-// The friends (the player among them) but `self`, for the shot's test.
-int FriendsBut(const void* self,npc::Friend* out) noexcept {
+// The friends (the player among them) but `self`, for the shot's test, into `out` (each caller's own buffer, kept from
+// frame to frame: it grows to the battle's friends once).
+int FriendsBut(const void* self,std::vector<npc::Friend>& out) noexcept {
+    if(out.size()<static_cast<std::size_t>(world.friends))out.resize(static_cast<std::size_t>(world.friends));
     int n=0;
-    for(int i=0;i<world.friends;++i)if(world.frObject[i]!=self)out[n++]=world.fr[i];
+    for(int i=0;i<world.friends;++i)if(world.frObject[i]!=self)out[static_cast<std::size_t>(n++)]=world.fr[i];
     return n;
 }
 bool FriendNear(const void* self,const float* at,float r) noexcept {
@@ -713,9 +727,9 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
-    npc::Friend fr[kMaxFriends];
+    static std::vector<npc::Friend> fr;
     const int n=FriendsBut(h,fr);
-    return npc::ShotClear(eye,t.aim,kSpread,a.arm[i].blast,fr,n);
+    return npc::ShotClear(eye,t.aim,kSpread,a.arm[i].blast,fr.data(),n);
 }
 
 // A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
@@ -733,16 +747,16 @@ float LongestReach(const Arms& a) noexcept {
 }
 // Whether a round of `blast` at `t` (none: along the look, as far as `reach` or the ground) keeps off every friend.
 bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
-    npc::Friend fr[kMaxFriends];
+    static std::vector<npc::Friend> fr;
     const int n=FriendsBut(h,fr);
-    if(t)return npc::ShotClear(eye,t->aim,kSpread,blast,fr,n);
+    if(t)return npc::ShotClear(eye,t->aim,kSpread,blast,fr.data(),n);
     if(reach<=0.0f)return false;
     float dir[3];
     const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
     dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
     float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
-    return npc::ShotClear(eye,to,kSpread,blast,fr,n);
+    return npc::ShotClear(eye,to,kSpread,blast,fr.data(),n);
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
@@ -853,7 +867,9 @@ bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& serve
 // One entry a squad, keyed by its top NPC (the soldier at the top of the +0x548 chain below the player, or with no
 // leader at all): its order from the map, how many members its soldiers' Think counted last frame, its control, its
 // dismissal's cooldown. The members are never stored: the stock chain is read again each frame.
-constexpr int kMaxSquads=64;
+// Dismissal cooldowns remembered at once (the soonest done goes): squads the player dismissed within NpcDismissCooldown,
+// a player's doing, not the battle's size.
+constexpr int kCooldowns=64;
 constexpr ULONGLONG kSquadSeenMs=500;
 constexpr ULONGLONG kDismissedGoneMs=60000;
 constexpr ULONGLONG kOrderSeenMs=kSquadSeenMs; // same freshness interval as visible/selectable squad rows
@@ -878,8 +894,10 @@ struct Squad {
     // began, when a member last fired. Reset by every new point order (GuardOrder).
     ULONGLONG attackSeenFrame=0,attackHoldAt=0,attackShotAt=0;
 };
-Squad squads[kMaxSquads]{};
-npc::Cooldowns<kMaxSquads> cooldowns;
+// Every squad counted this mission, growing with the battle (a deque: Squad* stays valid), and their index by top.
+std::deque<Squad> squads;
+edf::PtrIndex squadIndex;
+npc::Cooldowns<kCooldowns> cooldowns;
 int dismissedCount=0;   // squads cooling down now (their +0x540 to give back)
 std::uint32_t SquadKey(const void* top) noexcept {
     const auto a=reinterpret_cast<std::uintptr_t>(top);
@@ -898,8 +916,20 @@ unsigned char* TopNpc(unsigned char* h) noexcept {
 }
 
 Squad* FindSquad(const void* top) noexcept {
-    for(auto& q:squads)if(q.top.Is(top))return &q;
-    return nullptr;
+    const int i=squadIndex.Find(top);
+    return i>=0 && squads[static_cast<std::size_t>(i)].top.Is(top) ? &squads[static_cast<std::size_t>(i)] : nullptr;
+}
+// `q`'s top changed to `top` (a hand-over, or none): the index follows.
+void Retop(Squad& q,const ObjRef& top) noexcept {
+    std::size_t at=squads.size();
+    if(q.top) {
+        const int i=squadIndex.Find(q.top.obj);
+        if(i>=0 && &squads[static_cast<std::size_t>(i)]==&q){at=static_cast<std::size_t>(i);squadIndex.Erase(q.top.obj);}
+    }
+    q.top=top;
+    if(!top)return;
+    if(at==squads.size())for(std::size_t i=0;i<squads.size();++i)if(&squads[i]==&q){at=i;break;}
+    if(at<squads.size())squadIndex.Set(top.obj,static_cast<int>(at));
 }
 
 // Counted by every member's Think; the top's own Think sets its class and control.
@@ -908,10 +938,18 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
     if(!q) {
         // A slot no squad has been counted in lately; never a dismissed one's whose cooldown has yet to put its +0x540
         // back (its soldiers may only be out of this machine's update for a while).
-        for(auto& e:squads)if(!e.top || (ms-e.seen>kSquadSeenMs*4 && (!e.dismissed || ms-e.seen>kDismissedGoneMs))){q=&e;break;}
-        if(!q)return nullptr;
+        // The scan runs for a new squad only; a known one is found by the index.
+        std::size_t at=squads.size();
+        for(std::size_t i=0;i<squads.size();++i) {
+            const Squad& e=squads[i];
+            if(!e.top || (ms-e.seen>kSquadSeenMs*4 && (!e.dismissed || ms-e.seen>kDismissedGoneMs))){at=i;break;}
+        }
+        if(at==squads.size())squads.emplace_back();
+        q=&squads[at];
         if(q->dismissed)--dismissedCount;
-        npcmark::Assign(q->commandFocus,{});*q=Squad{};q->top=ObjRef::Of(top);q->cls=cls;
+        Retop(*q,ObjRef{});
+        npcmark::Assign(q->commandFocus,{});*q=Squad{};
+        q->top=ObjRef::Of(top);squadIndex.Set(top,static_cast<int>(at));q->cls=cls;
     }
     if(h==top)q->cls=cls;
     ++q->counting;
@@ -1159,7 +1197,7 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         return;
     }
     if(!t)return;
-    npc::Friend fr[kMaxFriends];
+    static std::vector<npc::Friend> fr;
     const int friends=FriendsBut(h,fr);
     const float dist=npc::Dist(eye,t->aim);
     for(int i=0;i<n;++i) {
@@ -1179,13 +1217,13 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         if(!npcpack::Fits(pack,target,&pitch))continue;
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
-            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr,friends,[](const float* from,const float* to) noexcept {
+            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr.data(),friends,[](const float* from,const float* to) noexcept {
                 float collision[3];return MapRay(from,to,collision)>=0.0f;
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
             const float wall=MapRay(eye,t->aim,hit);
-            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr,friends) || (wall>=0.0f && wall<dist-2.0f))continue;
+            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
         Look(h,dir);
@@ -1330,7 +1368,7 @@ void Think(unsigned char* h,int cls) noexcept {
     if(team!=0 && team!=kTeamFriend) {
         // An explicitly assigned mission crew may follow its vehicle's scripted faction change.
         // Only complete that already-authorized boarding; do not take over ordinary enemy AI.
-        for(auto& s:soldiers)if(s.ref.Is(h) && s.boardV){Board(s,h,Pos(h),GameMs());break;}
+        if(Soldier* s=FindSoldier(h); s && s->boardV)Board(*s,h,Pos(h),GameMs());
         return;
     }
     const ULONGLONG ms=GameMs();
@@ -1451,11 +1489,21 @@ int OtherSquads(const unsigned char* except,bool playersOnly,unsigned char** lea
 // The hand-overs Succeed made lately (NpcSquadSuccessor): the dead top's identity and the squad's top after it (its new
 // leader, or the squad its remnant joined), so that what the map holds by the top's identity (its selection, its RTS
 // groups) goes on with the squad instead of losing it with its leader.
+// Every one of the last kHandoverMs (a battle's leaders die faster than any fixed ring holds), oldest first, numbered from
+// handoverFirst; the index has the newest of each dead top.
 struct Handover { ObjRef old,now; ULONGLONG at; };
-constexpr int kHandovers=32;
 constexpr ULONGLONG kHandoverMs=300000;
-Handover handovers[kHandovers]{};
-int handoverNext=0;
+std::deque<Handover> handovers;
+int handoverFirst=0;
+edf::PtrIndex handoverIndex;
+void AddHandover(const Handover& h) {
+    while(!handovers.empty() && h.at-handovers.front().at>kHandoverMs) {
+        if(handoverIndex.Find(handovers.front().old.obj)==handoverFirst)handoverIndex.Erase(handovers.front().old.obj);
+        handovers.pop_front();++handoverFirst;
+    }
+    handovers.push_back(h);
+    handoverIndex.Set(h.old.obj,handoverFirst+static_cast<int>(handovers.size())-1);
+}
 
 void Succeed(unsigned char* dead) noexcept {
     unsigned char* m[kMaxSquad];
@@ -1476,20 +1524,24 @@ void Succeed(unsigned char* dead) noexcept {
     auto up=At<unsigned char*>(dead,kLeader);
     if(up && (!Readable(up,kDead+1) || up[kDead]))up=nullptr;
     // Too few left: join another squad instead (the nearest with room).
-    unsigned char* others[32];float at[32][3];int sizes[32];
+    // Every squad of the frame's friends a candidate (not the first 32 of the walk: in a big battle the nearest is further on).
+    static std::vector<unsigned char*> others;static std::unique_ptr<float[][3]> at;static std::vector<int> sizes;
+    if(others.size()<static_cast<std::size_t>(world.friends)) {
+        others.resize(static_cast<std::size_t>(world.friends));sizes.resize(others.size());at.reset(new float[others.size()][3]);
+    }
     const Squad* const oldSquad=FindSquad(dead);
     const int k=n<Cfg().npcSquadMin && !(oldSquad && oldSquad->dismissed) ?
-                OtherSquads(dead,up && IsAnyPlayer(up),others,at,sizes,32) : 0;
-    const int join=k ? npc::JoinSquad(n,Cfg().npcSquadMin,Pos(lead),at,sizes,k,Cfg().npcSquadMax,Cfg().npcSquadJoinRange) : -1;
+                OtherSquads(dead,up && IsAnyPlayer(up),others.data(),at.get(),sizes.data(),world.friends) : 0;
+    const int join=k ? npc::JoinSquad(n,Cfg().npcSquadMin,Pos(lead),at.get(),sizes.data(),k,Cfg().npcSquadMax,Cfg().npcSquadJoinRange) : -1;
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
     for(int i=0;i<n;++i)if(m[i]!=top)Follow(m[i],top);
-    handovers[handoverNext]=Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()};handoverNext=(handoverNext+1)%kHandovers;
+    AddHandover(Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()});
     TransportSucceed(dead,join>=0 ? nullptr : lead);   // its transport goes with the squad (transport.cpp)
     if(Squad* const old=FindSquad(dead)) {
-        if(join>=0){if(old->dismissed){old->dismissed=false;--dismissedCount;}old->top=ObjRef{};}
+        if(join>=0){if(old->dismissed){old->dismissed=false;--dismissedCount;}Retop(*old,ObjRef{});}
         else {
-            old->top=ObjRef::Of(lead);
+            Retop(*old,ObjRef::Of(lead));
             if(old->dismissed) {   // still cooling down: the new leader may not be recruited either until it ends
                 const ULONGLONG ms=GameMs();
                 cooldowns.Start(SquadKey(lead),ms,cooldowns.Left(SquadKey(dead),ms));
@@ -2151,9 +2203,10 @@ bool InstallNpcAi() noexcept {
 void ResetNpcAi() noexcept {
     ResetCommandSnapshots();
     ResetGunnerInputs();ResetDriverPayload();ResetVehicleAi();
-    for(auto& s:soldiers)s=Soldier{};
-    for(auto& q:squads){npcmark::Assign(q.commandFocus,{});q=Squad{};}
-    cooldowns=npc::Cooldowns<kMaxSquads>{};
+    soldiers.clear();soldierIndex.Clear();
+    for(auto& q:squads)npcmark::Assign(q.commandFocus,{});
+    squads.clear();squadIndex.Clear();
+    cooldowns=npc::Cooldowns<kCooldowns>{};
     dismissedCount=0;
     npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};followedLock=nullptr;jetMark=JetMark{};
     AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
@@ -2161,17 +2214,20 @@ void ResetNpcAi() noexcept {
     // are let go now rather than at the next record, which may be missions away.
     for(auto& r:sixRuns)npcmark::Assign(r.ref,ObjRef{});
     sixRuns.clear();
-    world=World{};++enemyStamp;   // world.enemy emptied: its index too (enemySlots)
+    world=World{};   // world.enemy emptied, its index (enemyIndex) with it
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
     for(auto& p:peerMarches)p=PeerMarch{};
     ResetSweep();
-    fullLoggedAt=listLoggedAt=0;
+    listLoggedAt=0;
 }
 
 // --- The squads on the map (§6) ---
 namespace {
-char squadNames[kMaxSquads*2][24];
+// The command units' names and states (CommandUnit points into them until the next call): a row each, grown to the most
+// rows asked for.
+struct UnitText { char name[24],status[16]; };
+std::vector<UnitText> unitText;
 const char* kClassWords[kClasses]={"RANGER","WING DIVER","FENCER","AIR RAIDER"};
 // Counted by its soldiers' Think within kSquadSeenMs: alive then (the map reads no object it has not seen lately).
 bool Live(const Squad& q,ULONGLONG ms) noexcept {
@@ -2184,8 +2240,10 @@ bool Live(const Squad& q,ULONGLONG ms) noexcept {
 struct RemoteSquad {
     ObjRef top{};int cls=0,alive=0;npc::Control control=npc::Control::free;float pos[3]{};
 };
-RemoteSquad remoteSquads[kMaxSquads]{};int remoteSquadCount=0;ULONGLONG remoteSquadFrame=~ULONGLONG{0};
-void ResetCommandSnapshots() noexcept {remoteSquadCount=0;remoteSquadFrame=~ULONGLONG{0};}
+// The other machines' squads this frame, as many as there are, and their index by top.
+std::vector<RemoteSquad> remoteSquads;int remoteSquadCount=0;ULONGLONG remoteSquadFrame=~ULONGLONG{0};
+edf::PtrIndex remoteSquadIndex;
+void ResetCommandSnapshots() noexcept {remoteSquadCount=0;remoteSquadIndex.Clear();remoteSquadFrame=~ULONGLONG{0};}
 struct CommandSquadVisitor { const void* const* vtable; };
 void __fastcall CommandSquadIgnore(void*) noexcept {}
 void __fastcall CommandSquadVisit(CommandSquadVisitor*,unsigned char* human) noexcept {
@@ -2195,18 +2253,19 @@ void __fastcall CommandSquadVisit(CommandSquadVisitor*,unsigned char* human) noe
         if(!top || !Readable(top,kHumanVehicleCtrl+8) || top[kDead] || IsOnlineAuthority(top))return;
         const auto identity=ObjRef::Of(top);
         unsigned char nativeId[32];if(!identity.ctrl || !ReadNativeObjectId(top,nativeId))return;
-        for(int i=0;i<remoteSquadCount;++i)if(remoteSquads[i].top.obj==top && remoteSquads[i].top.ctrl==identity.ctrl){++remoteSquads[i].alive;return;}
-        if(remoteSquadCount==kMaxSquads)return;
-        auto& row=remoteSquads[remoteSquadCount++];row={};row.top=identity;row.alive=1;
+        if(const int i=remoteSquadIndex.Find(top);i>=0 && remoteSquads[static_cast<std::size_t>(i)].top.ctrl==identity.ctrl){++remoteSquads[static_cast<std::size_t>(i)].alive;return;}
+        if(static_cast<std::size_t>(remoteSquadCount)>=remoteSquads.size())remoteSquads.resize(remoteSquads.empty() ? 64 : remoteSquads.size()*2);
+        remoteSquadIndex.Set(top,remoteSquadCount);
+        auto& row=remoteSquads[static_cast<std::size_t>(remoteSquadCount++)];row={};row.top=identity;row.alive=1;
         const auto vt=At<const unsigned char*>(top,0);
         for(int i=0;i<kClasses;++i)if(vt==image+kSoldiers[i].vtable)row.cls=i;
         row.control=ControlOf(top,RootLeader(top));std::memcpy(row.pos,Pos(top),12);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 void RefreshCommandSnapshots() noexcept {
-    if(!InSession() || !ok || !Cfg().enabled || !Cfg().customNpcAi){remoteSquadCount=0;return;}
+    if(!InSession() || !ok || !Cfg().enabled || !Cfg().customNpcAi){remoteSquadCount=0;remoteSquadIndex.Clear();return;}
     if(remoteSquadFrame==GameFrame())return;
-    remoteSquadFrame=GameFrame();remoteSquadCount=0;
+    remoteSquadFrame=GameFrame();remoteSquadCount=0;remoteSquadIndex.Clear();
     // This read-only scene walk must not call SeeSquad/Think/Gather on replicas. They have no local
     // AI table entry, but their actual native identity is sufficient to select and request authority.
     constexpr unsigned char sig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
@@ -2215,7 +2274,7 @@ void RefreshCommandSnapshots() noexcept {
         auto* manager=At<void*>(image,kTeamManager);if(!Readable(manager,0x50))return;
         static const void* const table[]={reinterpret_cast<const void*>(&CommandSquadIgnore),reinterpret_cast<const void*>(&CommandSquadVisit)};
         CommandSquadVisitor visitor{table};reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,player.team,&visitor);
-    } __except(EXCEPTION_EXECUTE_HANDLER){remoteSquadCount=0;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){remoteSquadCount=0;remoteSquadIndex.Clear();}
 }
 // A squad whose top sits in a vehicle (the plugin's real crews, a support's soldiers): its vehicle's crew.
 bool SquadRiding(const Squad& q) noexcept { return !HumanOnFoot(static_cast<const unsigned char*>(q.top.obj)); }
@@ -2245,24 +2304,26 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     const ULONGLONG ms=GameMs();
     int n=0;
     RefreshCommandSnapshots();
-    static char status[kMaxSquads*2][16];
-    for(int i=0;i<kMaxSquads && n<most;++i) {
+    if(most>0 && unitText.size()<static_cast<std::size_t>(most))unitText.resize(static_cast<std::size_t>(most));
+    for(std::size_t i=0;i<squads.size() && n<most;++i) {
         const Squad& q=squads[i];
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
-        std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
+        UnitText& text=unitText[static_cast<std::size_t>(n)];
+        std::snprintf(text.name,sizeof(text.name),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
         const bool joinOnly=JoinOnly(q.control,q.top.obj);
-        out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control) && !joinOnly,StatusOf(q,ms,status[n],sizeof(status[n])),
+        out[n]=CommandUnit{q.top.obj,text.name,q.cmd,false,{},npc::Scripted(q.control) && !joinOnly,StatusOf(q,ms,text.status,sizeof(text.status)),
                            SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
                            SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
         out[n].joinOnly=joinOnly;
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
-    for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
-        const auto& q=remoteSquads[i];
-        std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive);
+    for(int i=0;i<remoteSquadCount && n<most;++i) {
+        const auto& q=remoteSquads[static_cast<std::size_t>(i)];
+        UnitText& text=unitText[static_cast<std::size_t>(n)];
+        std::snprintf(text.name,sizeof(text.name),"%s x%d",kClassWords[q.cls],q.alive);
         const bool riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         const bool joinOnly=JoinOnly(q.control,q.top.obj);
-        out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control) && !joinOnly,"REMOTE",riding,
+        out[n]={q.top.obj,text.name,{},false,{},npc::Scripted(q.control) && !joinOnly,"REMOTE",riding,
                 mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding,joinOnly),
                 q.control==npc::Control::recruited};
         out[n].joinOnly=joinOnly;
@@ -2277,10 +2338,11 @@ int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
     if(tally)*tally=SquadTally{};
     if(!ok || !Cfg().customNpcAi)return 0;
     const ULONGLONG ms=GameMs();
-    static SquadRow all[kMaxSquads*2];   // the game thread's (too big for its stack)
+    static std::vector<SquadRow> all;   // the game thread's, kept: a row for every squad, local and remote
     int n=0;
     RefreshCommandSnapshots();
-    for(int i=0;i<kMaxSquads;++i) {
+    if(all.size()<squads.size()+static_cast<std::size_t>(remoteSquadCount))all.resize(squads.size()+static_cast<std::size_t>(remoteSquadCount));
+    for(std::size_t i=0;i<squads.size();++i) {
         const Squad& q=squads[i];
         if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         SquadRow& r=all[n++];r={};
@@ -2294,14 +2356,14 @@ int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
         r.now=q.cmd;r.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);r.riding=SquadRiding(q);
         r.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,r.locked,r.riding);
     }
-    for(int i=0;i<remoteSquadCount && n<kMaxSquads*2;++i) {
-        const auto& q=remoteSquads[i];auto& row=all[n++];row={};
+    for(int i=0;i<remoteSquadCount;++i) {
+        const auto& q=remoteSquads[static_cast<std::size_t>(i)];auto& row=all[static_cast<std::size_t>(n++)];row={};
         row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);
         row.riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
         row.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,row.locked,row.riding);
     }
-    std::stable_sort(all,all+n,[](const SquadRow& a,const SquadRow& b){ return a.rank<b.rank; });
+    std::stable_sort(all.begin(),all.begin()+n,[](const SquadRow& a,const SquadRow& b){ return a.rank<b.rank; });
     if(tally) {
         tally->total=n;
         for(int i=0;i<n;++i){tally->riding+=all[i].rank==2;tally->scripted+=all[i].rank==3;}
@@ -2639,9 +2701,7 @@ int CancelBoarding(unsigned char* top) noexcept {
     unsigned char* members[kMaxSquad];
     const int n=Members(top,members,kMaxSquad);
     int cancelled=0;
-    for(int i=0;i<n;++i)for(auto& s:soldiers)if(s.ref.Is(members[i]) && s.boardV) {
-        s.boardV=ObjRef{};++cancelled;break;
-    }
+    for(int i=0;i<n;++i)if(Soldier* s=FindSoldier(members[i]); s && s->boardV){s->boardV=ObjRef{};++cancelled;}
     return cancelled;
 }
 
@@ -2916,12 +2976,16 @@ bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
     const ULONGLONG ms=GameMs();
     ObjRef at=old;bool found=false;
     for(int hop=0;hop<4;++hop) {   // a new leader dead too: its own hand-over (newest first)
-        bool step=false;
-        for(int k=1;k<=kHandovers && !step;++k) {
-            const Handover& h=handovers[(handoverNext-k+kHandovers)%kHandovers];
-            if(h.old.obj && h.old.obj==at.obj && h.old.ctrl==at.ctrl && ms-h.at<=kHandoverMs){at=h.now;step=found=true;}
+        // The newest hand-over of this top; another object's at its address (rare): the older ones, newest first.
+        const Handover* hit=nullptr;
+        if(const int i=handoverIndex.Find(at.obj);i>=handoverFirst) {
+            const Handover& h=handovers[static_cast<std::size_t>(i-handoverFirst)];
+            if(h.old.ctrl==at.ctrl)hit=&h;
+            else for(std::size_t k=handovers.size();k-- && !hit;)
+                if(handovers[k].old.obj==at.obj && handovers[k].old.ctrl==at.ctrl)hit=&handovers[k];
         }
-        if(!step)break;
+        if(!hit || ms-hit->at>kHandoverMs)break;
+        at=hit->now;found=true;
     }
     if(found)*now=at;
     return found;

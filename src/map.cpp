@@ -44,6 +44,7 @@
 #include "vecmath.h"
 #include <Xinput.h>
 #include <algorithm>
+#include <vector>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -342,23 +343,24 @@ void __fastcall WalkDtor(void*,unsigned) noexcept {}
 void* kWalkVtable[]={reinterpret_cast<void*>(&WalkDtor),reinterpret_cast<void*>(&WalkVisit)};
 
 // The enemies as the stock radar finds them (HUiHudRader's update 0x82B4D0 walks 0x5E0F20(manager, its team, functor):
-// every live object of every team hostile to it, relation 2), all of them gathered here (kFoes at most).
+// every live object of every team hostile to it, relation 2), all of them gathered here: the table grows with the battle
+// (a fixed 4096 dropped the rest of a stress battle's from the nearest and the median); the map shows kMapDots of them.
 struct Foe { const unsigned char* o; float d2,hpMax; };
-constexpr int kFoes=4096;
-Foe foes[kFoes];
+std::vector<Foe> foeTable(4096);
 int foeCount=0;
 struct Hostile { void** vtable; const float* me; };
 void __fastcall HostileVisit(void* self,void* object) noexcept {
     __try {
         const auto o=static_cast<const unsigned char*>(object);
-        if(foeCount>=kFoes || !o || !Readable(o,kHp+4) || o[kDead])return;
+        if(!o || !Readable(o,kHp+4) || o[kDead])return;
         const float* p=PosOf(o);
         const float* me=static_cast<Hostile*>(self)->me;
         const float d[3]={p[0]-me[0],p[1]-me[1],p[2]-me[2]};
         const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
         if(!std::isfinite(d2))return;
         float hpMax=0.0f;HpShare(o,&hpMax);
-        foes[foeCount++]=Foe{o,d2,hpMax};
+        if(static_cast<std::size_t>(foeCount)>=foeTable.size())foeTable.resize(foeTable.size()*2);
+        foeTable[static_cast<std::size_t>(foeCount++)]=Foe{o,d2,hpMax};
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 void* kHostileVtable[]={reinterpret_cast<void*>(&WalkDtor),reinterpret_cast<void*>(&HostileVisit)};
@@ -403,7 +405,10 @@ bool CellGround(float x,float z,float y,int* rays,float* h) noexcept {
 void Enemies(Game& g) noexcept {
     g.dots=0;g.larges=0;
     if(!foeCount)return;
-    static float hps[kFoes];
+    Foe* const foes=foeTable.data();
+    static std::vector<float> hpTable;
+    if(hpTable.size()<static_cast<std::size_t>(foeCount))hpTable.resize(foeTable.size());
+    float* const hps=hpTable.data();
     int n=0;
     for(int i=0;i<foeCount;++i)if(foes[i].hpMax>0.0f)hps[n++]=foes[i].hpMax;
     float median=0.0f;
