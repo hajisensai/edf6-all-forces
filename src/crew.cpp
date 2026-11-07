@@ -817,6 +817,17 @@ void UnderVehicle(unsigned char* v) noexcept {
     WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
 }
 
+// The live objects of a team: the game's own GetTeamObjectCount (0x1B5260 -> 0x5E13E0(TeamManager, team, false), under
+// the manager's lock; the dead not yet deleted are not counted, docs/swarm-team-re.md). -1 off a mission or faulted.
+constexpr unsigned kTeamObjectCount=0x5E13E0,kPerfTeamManager=0x20B2978;
+int TeamObjects(std::int32_t team) noexcept {
+    __try {
+        void* const manager=At<void*>(image,kPerfTeamManager);
+        if(!manager)return -1;
+        return reinterpret_cast<int(__fastcall*)(void*,std::int32_t,bool)>(image+kTeamObjectCount)(manager,team,false);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+
 // The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
 // how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
 constexpr ULONGLONG kPerfMs=5000;
@@ -833,6 +844,19 @@ void PerfTick() noexcept {
     if(t-perf.at<kPerfMs)return;
     if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
         perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
+    // what the frames carried (the stress runs: how many there really were, not how many the mission asked for)
+    if(Cfg().debug && perf.frames)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
+        TeamObjects(2));
+    // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
+    // the system calls left with their time
+    const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only
+    if(Cfg().debug && perf.frames) {
+        const double f=static_cast<double>(perf.frames),tick=1000.0/static_cast<double>(hz.QuadPart);
+        Log("PERF MEM a frame: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
+            static_cast<double>(r.asks)/f,static_cast<double>(r.pageHits)/f,static_cast<double>(r.wsCalls)/f,
+            static_cast<double>(r.wsPages)/f,static_cast<double>(r.wsTicks)*tick/f,static_cast<double>(r.vqCalls)/f,
+            static_cast<double>(r.vqTicks)*tick/f);
+    }
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
