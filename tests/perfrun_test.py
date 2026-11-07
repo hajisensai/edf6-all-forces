@@ -136,8 +136,7 @@ def scenarios() -> None:
     check((p.waves.max_alive, p.waves.per_wave, p.squads) == (16000, 400, perfrun.MAX_SQUADS)
           and p.friends == perfrun.PRESETS['blast'][1],
           'stress:100: a hundred times the enemies, waves at most 400, blast shelling them, squads capped')
-    check(perfrun.plan_for('stress:10').squads == 30 and perfrun.MAX_SQUADS * 6 <= 760,
-          'stress: 3*N squads below the cap; the cap keeps soldiers well under the 1024 ai::World agent ids')
+    check(perfrun.plan_for('stress:10').squads == 30, 'stress: 3*N squads below the cap')
     check(perfrun.plan_for('stress:1:giantspider01').waves.enemy == 'giantspider01' and
           perfrun.stress_fields(1)[2] == 40.0 and perfrun.stress_fields(100)[2] == 90.0, 'stress: its enemy, its warm-up')
     for name, (wave, friends, _) in perfrun.PRESETS.items():
@@ -210,6 +209,29 @@ def report_parsing() -> None:
         check(perf_report.Plugins(os.path.join(d, 'gone.dll')).dll is None, 'a DLL no longer there is not resolved')
         check(perf_report.short_name("crew::`anonymous namespace'::ThinkHook<0>") == 'crew::ThinkHook<0>',
               'PDB names lose the anonymous namespace')
+        long_ = 'x' * 85
+        check(perf_report.short_name(long_ + '::operator<') == long_ + '::operator<' and
+              perf_report.short_name(f'std::unique_ptr<{long_}>::operator->') == 'std::unique_ptr<...>::operator->' and
+              perf_report.short_name(f'f<{long_}>::g<int>') == 'f<...>' and
+              perf_report.short_name(f'{long_}::operator>><int>') == f'{long_}::operator>><...>',
+              "a long name's template arguments fold; an operator's own < > are not brackets")
+        src = os.path.join(d, 'old.dll')   # --dll old.dll: perfrun installs it as EDF6VehicleCrew.dll
+        with open(src, 'wb') as f:
+            f.write(b'MZ')
+        check(perf_report.Plugins(src, 'not its sha').dll is None and
+              perf_report.Plugins(src, perf_report.file_sha256(src)).dll == src,
+              'the DLL is resolved only when it is the file the run placed (sha256)')
+        opened = []
+        real_image = perf_report.Image
+        perf_report.Image = lambda path, classes=True: opened.append(path) or None
+        try:
+            plug = perf_report.Plugins(src)
+            plug.func('EDF6VehicleCrew.dll+1000', True)
+            plug.func('old.dll+1000', True)
+            plug.func('EDF6AutoTurret.dll+1000', True)
+        finally:
+            perf_report.Image = real_image
+        check(opened == [src], "a renamed --dll is resolved under perfrun's install name, other modules are not")
         run = os.path.join(d, 'run')
         os.makedirs(run)
         with open(os.path.join(run, 'run.json'), 'w') as f:

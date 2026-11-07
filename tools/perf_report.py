@@ -166,9 +166,18 @@ def file_sha256(path: str) -> str:
 def short_name(name: str) -> str:
     """A PDB name made readable: anonymous namespaces dropped, and a long template's arguments (lambdas) elided."""
     name = re.sub(r"`anonymous namespace'::|A0x[0-9a-f]+::", '', name)
-    if len(name) > 80 and '<' in name:
-        name = name[:name.index('<')] + '<...>' + name[name.rindex('>') + 1:]
+    if len(name) > 80:
+        # an operator's own < > (operator<, operator->, operator>>=) are not template brackets: mask them,
+        # same length, so the indices still fit the name
+        masked = re.sub(r'operator\s*(?:<=>|<<=|>>=|->\*|<<|>>|<=|>=|->|<|>)',
+                        lambda m: '_' * len(m.group(0)), name)
+        i, j = masked.find('<'), masked.rfind('>')
+        if 0 <= i < j:
+            name = name[:i] + '<...>' + name[j + 1:]
     return name
+
+
+INSTALLED_DLL = 'EDF6VehicleCrew.dll'   # perfrun's install name for the run's DLL (tools/perfrun.py)
 
 
 class Plugins:
@@ -187,7 +196,9 @@ class Plugins:
     def _module(self, mod: str) -> tuple[int | None, Image | None]:
         if mod not in self.mods:
             base, img = None, None
-            dll = self.dll if self.dll and os.path.basename(self.dll).lower() == mod.lower() else None
+            # perfrun installs whatever --dll names as Plugins/EDF6VehicleCrew.dll, so the stacks carry that name,
+            # not the source file's
+            dll = self.dll if mod.lower() == INSTALLED_DLL.lower() else None
             if dll:
                 try:
                     img = Image(dll, classes=False)
