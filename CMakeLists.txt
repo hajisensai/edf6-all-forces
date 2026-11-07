@@ -403,6 +403,10 @@ target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permiss
 add_executable(hit_predict_check EXCLUDE_FROM_ALL tools/hit_predict_check.cpp)
 target_compile_options(hit_predict_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hit_predict_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The rubble scan throttle per chassis (tools/rubble_due_check.cpp, src/rubble_due.h).
+add_executable(rubble_due_check EXCLUDE_FROM_ALL tools/rubble_due_check.cpp)
+target_compile_options(rubble_due_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(rubble_due_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # Fire that cannot hurt its target held (tools/wasted_fire_check.cpp, src/wasted_fire.h).
 add_executable(wasted_fire_check EXCLUDE_FROM_ALL tools/wasted_fire_check.cpp)
 target_compile_options(wasted_fire_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -1025,7 +1029,7 @@ set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_due_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
@@ -1969,6 +1973,11 @@ target_include_directories(pvp_native_fixture PRIVATE src common third_party/EDF
 target_compile_options(pvp_native_fixture PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks pvp_native_fixture)
 add_test(NAME pvp_native_fixture COMMAND pvp_native_fixture)
+# memoepoch::Clock (src/memo_epoch.h), the key of VerdictOf's per-frame memo; offline, unlike hit_accept_native.
+add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
+target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks memo_epoch_test)
+add_test(NAME memo_epoch COMMAND memo_epoch_test)
 # edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
 add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
 target_link_libraries(memory_readable_test PRIVATE edf6common)

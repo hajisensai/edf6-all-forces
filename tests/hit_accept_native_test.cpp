@@ -14,10 +14,10 @@ const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 ULONGLONG nowMs=1000;
 ULONGLONG GameMs() noexcept { return nowMs; }
-// Each ask a frame of its own (the cases change a target between asks), unless a case holds the frame (the per-frame
-// target memo's own case).
-ULONGLONG frameNo=1;bool frameHeld=false;
-ULONGLONG GameFrame() noexcept { return frameHeld ? frameNo : ++frameNo; }
+// Each ask a frame of its own (the cases change a target between asks), unless a case holds the frame: frameHeld
+// (the per-frame target memo's own case) or heldFrame (Feedback's once-a-frame clock across steps of nowMs).
+ULONGLONG frameNo=1;bool frameHeld=false;ULONGLONG heldFrame=0;
+ULONGLONG GameFrame() noexcept { if(heldFrame)return heldFrame; return frameHeld ? frameNo : ++frameNo; }
 bool IsSoldierClass(const void*) noexcept { return false; }
 // The lock points and the ray the plan uses, as each case sets them.
 struct Lock { const void* object; float at[3]; };
@@ -197,31 +197,50 @@ void Plans() {
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr) && WastedFire(soldier,other),"an invincible enemy: held, no target");
     // The per-frame target memo: within a frame a target is looked at once (every gunner asks of every enemy), the
-    // next frame looks again. The memo's key also has the time in 32 ms steps: a step crossed between two asks is a
-    // new key, so the same-frame half is retried until both asks fell in one step.
+    // next frame looks again; a frame that did not move for memoepoch::kStallMs is looked at again too (the
+    // clock's own rules: tests/memo_epoch_test.cpp).
     frameHeld=true;
-    bool kept=false;
-    for(int i=0;i<20 && !kept;++i) {
-        ++frameNo;
-        const ULONGLONG step=GetTickCount64()>>5;
-        Put<std::uint32_t>(other,kObjFlags,0);
-        const bool first=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
-        Put<std::uint32_t>(other,kObjFlags,kInvincible);
-        const bool second=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
-        if(GetTickCount64()>>5!=step)continue;
-        kept=!first && !second;
-    }
-    Check(kept,"the same frame: the target's first answer kept (made invincible mid-frame, still fire)");
+    ++frameNo;
+    Put<std::uint32_t>(other,kObjFlags,0);
+    const bool first=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
+    Put<std::uint32_t>(other,kObjFlags,kInvincible);
+    const bool second=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
+    Check(!first && !second,"the same frame: the target's first answer kept (made invincible mid-frame, still fire)");
+    Sleep(40);   // a slow frame: more than one old 32 ms step, well under the stall guard
+    Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same slow frame past 32 ms: the first answer still kept");
+    memoClock.since-=memoepoch::kStallMs;   // the frame stalled for the guard
+    Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"a frame stalled for the guard: looked at again (invincible: held)");
+    Put<std::uint32_t>(other,kObjFlags,0);
+    Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the stalled frame's new answer kept until the next guard");
+    Put<std::uint32_t>(other,kObjFlags,kInvincible);
     ++frameNo;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next frame: looked at again (invincible: held)");
     frameHeld=false;
     locks.clear();
 }
+// Feedback reads the game clock once a frame: a hold ends at the first frame past it, not within the frame it was
+// last read; WastedFireHit starts the hold at the exact time.
+void FeedbackClock() {
+    ResetWastedFire();
+    static unsigned char a[16],b[16];
+    nowMs=50000;
+    Check(!Feedback(a,b),"no hits: not wasted");
+    for(int i=0;i<wastedfire::kWastedHits;++i)WastedFireHit(a,b,false);
+    Check(Feedback(a,b),"hits that hurt nothing: wasted");
+    heldFrame=nowMs;
+    nowMs+=wastedfire::kWastedHoldMs;
+    Check(Feedback(a,b),"the hold run out within the frame the clock was read: still held this frame");
+    heldFrame=0;
+    Check(!Feedback(a,b),"the next frame: the hold over");
+    ResetWastedFire();
+    nowMs=1000;
+}
 }  // namespace
 
 int main(int argc,char** argv) {
+    FeedbackClock();   // no EDF.dll needed
     if(argc<2 || !argv[1][0] || GetFileAttributesA(argv[1])==INVALID_FILE_ATTRIBUTES) {
-        std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return 77;
+        std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return failures ? 1 : 77;
     }
     image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
     if(!image){std::puts("FAIL: the DLL did not map");return 1;}

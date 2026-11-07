@@ -6,7 +6,8 @@
     are still kept (a second write would take the first one's scenario for the original);
   - perfrun's scenarios: grand is the grand battle, swarm's fields reach the waves, a stock mission has no plan;
   - perf_report reads the plugin's PERF rows only inside the window (both row formats), sums GPU engines per type, and
-    tells the game thread by System::update on its stack;
+    tells the game thread by System::update on its stack, labels a plugin hook below a phase by its outermost
+    plugin frame (not the phase's own time) and ranks the plugin's functions by inclusive and self samples;
   - drive.run's `during` ends the stay as soon as it returns (the loop condition, read from the source).
 Exit code 1 when one fails.
 """
@@ -132,8 +133,10 @@ def scenarios() -> None:
     check((p.waves.enemy, p.waves.per_wave, p.waves.max_alive) == ('giantant01', 30, 400),
           "horde: a field given after it overrides the preset's, the rest stay")
     p = perfrun.plan_for('stress:100')
-    check((p.waves.max_alive, p.waves.per_wave, p.squads) == (16000, 400, 300) and p.friends == perfrun.PRESETS['blast'][1],
-          'stress:100: a hundred times swarm, waves at most 400, blast shelling them')
+    check((p.waves.max_alive, p.waves.per_wave, p.squads) == (16000, 400, perfrun.MAX_SQUADS)
+          and p.friends == perfrun.PRESETS['blast'][1],
+          'stress:100: a hundred times the enemies, waves at most 400, blast shelling them, squads capped')
+    check(perfrun.plan_for('stress:10').squads == 30, 'stress: 3*N squads below the cap')
     check(perfrun.plan_for('stress:1:giantspider01').waves.enemy == 'giantspider01' and
           perfrun.stress_fields(1)[2] == 40.0 and perfrun.stress_fields(100)[2] == 90.0, 'stress: its enemy, its warm-up')
     for name, (wave, friends, _) in perfrun.PRESETS.items():
@@ -186,6 +189,49 @@ def report_parsing() -> None:
         lines = perf_report.phases(img, stacks, 10)
         check(any('object_update' in x for x in lines) and any('GiantAnt#5' in x for x in lines),
               'game thread samples land in their phase with the class below')
+        # a plugin hook on a vtable slot, called by the ai_update loop: the plugin's time, by its outermost frame
+        # (unsymbolized here: no DLL at hand, so the frame's own RVA)
+        ai = f'EDF.dll+{perf_report.SYSTEM_UPDATE + 0x400:x}'
+        hooked = ([['ntdll.dll+20', 'EDF6VehicleCrew.dll+2000', 'EDF6VehicleCrew.dll+1000', ai, 'EDF6.exe+10']] * 6 +
+                  [['EDF.dll+500010', 'EDF6VehicleCrew.dll+1000', ai]] * 3 + [['ntdll.dll+20', ai]])
+        lines = perf_report.phases(img, hooked, 10)
+        check(any('ai_update' in x for x in lines) and any(x.strip() == '-  90.0% [plugin] EDF6VehicleCrew.dll+1000'
+                                                           for x in lines),
+              'a plugin hook below a phase is labelled by its outermost frame, also when it calls back into EDF.dll')
+        check(any(x.strip() == '-  10.0% (in the phase itself / system code)' for x in lines),
+              'only system code below the phase stays the phase\'s own')
+        check(not perf_report.is_plugin('EDF6.exe+10') and perf_report.is_plugin('EDF6VehicleCrew.dll+1'),
+              'EDF6.exe is not a plugin')
+        fl = perf_report.plugin_functions(perf_report.Plugins(None), hooked, 10, 20.0)
+        check('-  90.0%  18.00 ms/frame EDF6VehicleCrew.dll+1000 (self 0.0%)' in fl and
+              '-  60.0%  12.00 ms/frame EDF6VehicleCrew.dll+2000 (self 60.0%)' in fl,
+              'plugin functions: inclusive and self shares, ms of a frame; EDF.dll work they call is not their self')
+        check(perf_report.Plugins(os.path.join(d, 'gone.dll')).dll is None, 'a DLL no longer there is not resolved')
+        check(perf_report.short_name("crew::`anonymous namespace'::ThinkHook<0>") == 'crew::ThinkHook<0>',
+              'PDB names lose the anonymous namespace')
+        long_ = 'x' * 85
+        check(perf_report.short_name(long_ + '::operator<') == long_ + '::operator<' and
+              perf_report.short_name(f'std::unique_ptr<{long_}>::operator->') == 'std::unique_ptr<...>::operator->' and
+              perf_report.short_name(f'f<{long_}>::g<int>') == 'f<...>' and
+              perf_report.short_name(f'{long_}::operator>><int>') == f'{long_}::operator>><...>',
+              "a long name's template arguments fold; an operator's own < > are not brackets")
+        src = os.path.join(d, 'old.dll')   # --dll old.dll: perfrun installs it as EDF6VehicleCrew.dll
+        with open(src, 'wb') as f:
+            f.write(b'MZ')
+        check(perf_report.Plugins(src, 'not its sha').dll is None and
+              perf_report.Plugins(src, perf_report.file_sha256(src)).dll == src,
+              'the DLL is resolved only when it is the file the run placed (sha256)')
+        opened = []
+        real_image = perf_report.Image
+        perf_report.Image = lambda path, classes=True: opened.append(path) or None
+        try:
+            plug = perf_report.Plugins(src)
+            plug.func('EDF6VehicleCrew.dll+1000', True)
+            plug.func('old.dll+1000', True)
+            plug.func('EDF6AutoTurret.dll+1000', True)
+        finally:
+            perf_report.Image = real_image
+        check(opened == [src], "a renamed --dll is resolved under perfrun's install name, other modules are not")
         run = os.path.join(d, 'run')
         os.makedirs(run)
         with open(os.path.join(run, 'run.json'), 'w') as f:

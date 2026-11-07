@@ -22,6 +22,7 @@
 // open, +0xD90 frames left: UfoCarrier_CloseInterval counting down, 0x4F8507); an anchor while a living ship shields it.
 #include "crew.h"
 #include "hit_predict.h"
+#include "memo_epoch.h"
 #include "memory.h"
 #include "wasted_fire.h"
 
@@ -267,8 +268,17 @@ void EyeOf(const void* shooter,float* eye) noexcept {
     const float* p=reinterpret_cast<const float*>(s+kPosition);
     eye[0]=p[0];eye[1]=p[1]+(IsSoldierClass(s) ? 1.5f : 2.0f);eye[2]=p[2];
 }
+// GameMs read once a game frame for Feedback: it is asked per shooter and target (thousands a frame in a crowd) and
+// GameMs reads the pause flag each time; holds last seconds, so a frame's lag changes nothing. Game thread only, as
+// GameMs. WastedFireHit keeps the exact GameMs (a hold's start).
+ULONGLONG feedbackFrame=0,feedbackMs=0;
+ULONGLONG FeedbackMs() noexcept {
+    const ULONGLONG frame=GameFrame();
+    if(frame!=feedbackFrame){feedbackFrame=frame;feedbackMs=GameMs();}
+    return feedbackMs;
+}
 bool Feedback(const void* shooter,const void* target) noexcept {
-    const ULONGLONG ms=GameMs();
+    const ULONGLONG ms=FeedbackMs();
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);
     ReleaseSRWLockShared(&lock);
@@ -279,6 +289,8 @@ bool Feedback(const void* shooter,const void* target) noexcept {
 // a dozen gunners that was ~60,000 memory asks a frame, ~3 ms of the game thread (perfrun blast, 2026-11-07). The
 // answers are the same for every gunner within a frame, so each target is looked at once a frame. Game thread only, as
 // the plans are.
+// Keyed by memoepoch::Clock (src/memo_epoch.h): once a frame, not once per wall-clock step.
+memoepoch::Clock memoClock;
 struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
 TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
 struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
@@ -297,9 +309,7 @@ const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
     if(!shooter || !target)return hitpredict::Verdict::fire;
-    // the frame, and the time in 32 ms steps besides: a frame clock that never moved (paused, or not found) must not
-    // keep an answer for good
-    const ULONGLONG frame=(GameFrame()<<24)^(GetTickCount64()>>5);
+    const ULONGLONG frame=memoClock.Epoch(GameFrame(),GetTickCount64());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
         shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
@@ -349,7 +359,9 @@ void ResetWastedFire() noexcept {
     for(auto& p:plans)p=Plan{};
     for(auto& m:targetMemo)m=TargetMemo{};
     shooterMemo=ShooterMemo{};
+    memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
+    feedbackFrame=feedbackMs=0;
 }
 }  // namespace crew
