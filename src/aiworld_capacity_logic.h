@@ -58,6 +58,12 @@ constexpr Site kSites[]={
     AIW_SLOT12(0xF380E,0x48,0xC7,0x84,0xEE),   // mov qword [rsi+rbp*8+0x80],0: unregister (0xF37D0)
     AIW_SLOT8(0xF3B3D,0x4C,0x89,0xB4,0xEE),    // mov [rsi+rbp*8+0x80],r14: the recycle loop (0xF3AA0)
     AIW_SLOT8(0xF3E90,0x4C,0x8B,0x84,0xC1),    // mov r8,[rcx+rax*8+0x80]: vtable slot 5 (0xF3E60)
+    // ai::World::AvoidanceFilter (vtable 0x1768A18, world = filter+0x18, made at 0xEF43E, kept at World+0x20D8):
+    // slots 3 and 4 are leaf functions without .pdata, each reading both agents of a pair by their ids.
+    AIW_SLOT8(0xF4168,0x49,0x8B,0x94,0xC1),    // mov rdx,[r9+rax*8+0x80]: slot 3 (0xF4160), first agent
+    AIW_SLOT8(0xF4175,0x49,0x8B,0x8C,0xC1),    // mov rcx,[r9+rax*8+0x80]: slot 3, second agent
+    AIW_SLOT8(0xF41C4,0x4C,0x8B,0x84,0xC1),    // mov r8,[rcx+rax*8+0x80]: slot 4 (0xF41B0), first agent
+    AIW_SLOT8(0xF41EA,0x48,0x8B,0x8C,0xC1),    // mov rcx,[rcx+rax*8+0x80]: slot 4, second agent
     // 0xEF180: mov edi,0x401 bounds the free-id fill (and its reserve): ids 1..0xFFFE.
     {0xEF613,5,1,Kind::IdBound,{0xBF,0x01,0x04,0,0},{0xBF,B0(kIdBound),B1(kIdBound),B2(kIdBound),B3(kIdBound)}},
 };

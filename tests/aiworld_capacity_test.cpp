@@ -38,7 +38,7 @@ int main() {
     }
     Expect(kinds[static_cast<int>(Kind::WorldSize)]==3,"allocation and both destructor branches");
     Expect(kinds[static_cast<int>(Kind::ZeroBase)]==1 && kinds[static_cast<int>(Kind::ZeroCount)]==1,"one zero loop");
-    Expect(kinds[static_cast<int>(Kind::Slot)]==7,"seven slot accesses");
+    Expect(kinds[static_cast<int>(Kind::Slot)]==11,"eleven slot accesses");
     Expect(kinds[static_cast<int>(Kind::IdBound)]==1,"one id bound");
     Expect(kSites[kSiteCount-1].kind==Kind::IdBound,"the id bound is written last");
     Expect(kSites[0].kind==Kind::WorldSize,"the allocation grows first");
