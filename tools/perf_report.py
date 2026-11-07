@@ -147,6 +147,35 @@ def read_perf(log: str, window: tuple[float, float]) -> list[tuple[float, int, f
     return rows
 
 
+OBJECTS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF OBJECTS enemies (-?\d+), player team (-?\d+), friends (-?\d+)')
+
+
+def read_objects(log: str, window: tuple[float, float]) -> dict:
+    """The plugin's PERF OBJECTS rows (what the game held: its own team counts, the living only) in `window`: each
+    team's mean and max, {} on a build without them."""
+    def tod(t: float) -> float:
+        lt = time.localtime(t)
+        return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
+    a, b = tod(window[0]), tod(window[1])
+    rows = []
+    try:
+        with open(log, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                m = OBJECTS.search(line)
+                if m and a + 5 <= int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) <= b + 0.5:
+                    rows.append((int(m[4]), int(m[5]), int(m[6])))
+    except OSError:
+        return {}
+    if not rows:
+        return {}
+    return {name: (sum(r[i] for r in rows) / len(rows), max(r[i] for r in rows))
+            for i, name in enumerate(('enemies', 'player team', 'friends'))}
+
+
+def objects_text(objs: dict) -> str:
+    return ', '.join(f'{k} {m:.0f} (max {x})' for k, (m, x) in objs.items())
+
+
 def frame_summary(rows) -> dict:
     if not rows:
         return {}
@@ -293,6 +322,9 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                    f'max {fs["worst_max_ms"]:.1f} ms')
     else:
         out.append('no PERF rows in the window (Debug=1 not on, or the window too short)')
+    objs = read_objects(os.path.join(run_dir, 'vehiclecrew.log'), cw)
+    if objs:
+        out += ['', 'Living objects (the game\'s team counts, mean over the window): ' + objects_text(objs)]
     cpu = read_cpu(os.path.join(run_dir, 'cpu.txt')) if os.path.exists(os.path.join(run_dir, 'cpu.txt')) else {}
     stacks_path = os.path.join(run_dir, 'stacks.txt')
     samples = read_samples(stacks_path) if os.path.exists(stacks_path) else {}
@@ -342,23 +374,25 @@ def ab_table(run_dirs: list[str]) -> str:
         except OSError:
             run = {}
         if 'cpu' not in run.get('windows', {}):
-            rows.append((run.get('variant', '?'), os.path.basename(d), {}, None))
+            rows.append((run.get('variant', '?'), os.path.basename(d), {}, None, {}))
             continue
         cw = tuple(run['windows']['cpu'])
         fs = frame_summary(read_perf(os.path.join(d, 'vehiclecrew.log'), cw))
         cpu = read_cpu(os.path.join(d, 'cpu.txt')) if os.path.exists(os.path.join(d, 'cpu.txt')) else {}
         secs = cw[1] - cw[0]
-        rows.append((run.get('variant', '?'), os.path.basename(d), fs, cpu.get('total', 0) / 10 / secs if cpu else None))
-    out = ['| variant | run | mean ms | over 20 ms | over 33 ms | worst of 5 s (median) | process CPU (% of a core) |',
-           '|---|---|---|---|---|---|---|']
-    for v, name, fs, c in sorted(rows, key=lambda r: (r[0], r[1])):
+        objs = read_objects(os.path.join(d, 'vehiclecrew.log'), cw)
+        rows.append((run.get('variant', '?'), os.path.basename(d), fs, cpu.get('total', 0) / 10 / secs if cpu else None,
+                     objs))
+    out = ['| variant | run | mean ms | over 20 ms | over 33 ms | worst of 5 s (median) | process CPU (% of a core) '
+           '| living objects |', '|---|---|---|---|---|---|---|---|']
+    for v, name, fs, c, objs in sorted(rows, key=lambda r: (r[0], r[1])):
         if not fs:
             out.append(f'| {v} | {name} | ' + ('no PERF rows' if c is not None else 'not sampled') +
-                       f' | | | | {"" if c is None else f"{c:.0f}"} |')
+                       f' | | | | {"" if c is None else f"{c:.0f}"} | |')
             continue
         o20 = f'{fs["over20_pct"]:.2f}%' if fs['over20_pct'] is not None else 'n/a'
         out.append(f'| {v} | {name} | {fs["mean_ms"]:.2f} | {o20} | {fs["over33"]} | {fs["worst_median_ms"]:.1f} | '
-                   f'{c or 0:.0f} |')
+                   f'{c or 0:.0f} | {objects_text(objs)} |')
     return '\n'.join(out) + '\n'
 
 

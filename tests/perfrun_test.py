@@ -159,6 +159,14 @@ def report_parsing() -> None:
             f.write('[13:00:15.000] PERF 301 frames: mean 16.7 ms (60 fps), worst 33.3 ms, 0 over 33 ms\n')
         s = perf_report.frame_summary(perf_report.read_perf(log, (t0 + 10, t0 + 20)))
         check(s['frames'] == 301 and s['over20_pct'] is None, 'an older build without "over 20 ms" still reads')
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write('[13:00:04.000] PERF OBJECTS enemies 9999, player team 1, friends 1\n'
+                    '[13:00:15.000] PERF OBJECTS enemies 1000, player team 40, friends 300\n'
+                    '[13:00:20.000] PERF OBJECTS enemies 2000, player team 40, friends 280\n')
+        o = perf_report.read_objects(log, (t0 + 10, t0 + 20))
+        check(o == {'enemies': (1500, 2000), 'player team': (40, 40), 'friends': (290, 300)},
+              'PERF OBJECTS: mean and max in the window only')
+        check(perf_report.read_objects(os.path.join(d, 'none.log'), (t0, t0 + 1)) == {}, 'no log: no objects')
         gpu = os.path.join(d, 'gpu.csv')
         with open(gpu, 'w', encoding='utf-8') as f:
             f.write('"time","\\\\H\\GPU Engine(pid_1_luid_0_phys_0_eng_0_engtype_3D)\\Utilization Percentage",'
