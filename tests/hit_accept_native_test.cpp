@@ -226,8 +226,8 @@ void FeedbackClock() {
     nowMs=50000;
     Check(!Feedback(a,b),"no hits: not wasted");
     for(int i=0;i<wastedfire::kWastedHits;++i)WastedFireHit(a,b,false);
+    heldFrame=nowMs;   // this frame: the clock read here is the one kept
     Check(Feedback(a,b),"hits that hurt nothing: wasted");
-    heldFrame=nowMs;
     nowMs+=wastedfire::kWastedHoldMs;
     Check(Feedback(a,b),"the hold run out within the frame the clock was read: still held this frame");
     heldFrame=0;
