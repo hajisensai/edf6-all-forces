@@ -374,7 +374,7 @@ int main() {
     SeeSquad(human,human,0,npc::Control::free,now);
     Expect(human[kAutoFollow]==1,"offline script release still enables recruitment");
     Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);
-    squads[0].top=ObjRef::Of(dead);squads[0].dismissed=true;squads[0].autoFollow=1;dismissedCount=1;
+    squads.emplace_back();squadIndex.Set(dead,0);squads[0].top=ObjRef::Of(dead);squads[0].dismissed=true;squads[0].autoFollow=1;dismissedCount=1;
     cooldowns.Start(SquadKey(dead),now,10000);PreThink(human);
     Expect(At<void*>(human,kLeader)==nullptr && squads[0].top.Is(human) && squads[0].dismissed &&
            cooldowns.Left(SquadKey(human),now)==10000 && human[kAutoFollow]==0,
@@ -1213,6 +1213,56 @@ int main() {
         config.customNpcAi=false;
         Expect(run(human)==other,"executed, the AI off: the stock walk's player");
         config.customNpcAi=true;nextJoinMark=nullptr;
+    }
+    {   // Battle-size tables (perfrun stress:30 had 662 soldiers and 1508 enemies; the old tables held 256 / 1024 / 512 / 64):
+        // every soldier, enemy, friend, squad and leader's hand-over is kept, and a known one is found again as itself.
+        Reset();
+        constexpr int kSoldierCount=1500,kEnemyCount=4000,kSquadCount=600,kHandoverCount=100;
+        constexpr std::size_t kSmall=0x40;
+        std::vector<unsigned char> crowd(static_cast<std::size_t>(kEnemyCount)*kSmall);
+        const auto at=[&](int i){ return crowd.data()+static_cast<std::size_t>(i)*kSmall; };
+        std::vector<Soldier*> slot(kSoldierCount);
+        bool distinct=true,again=true;
+        for(int i=0;i<kSoldierCount;++i){slot[static_cast<std::size_t>(i)]=Entry(at(i),now);distinct=distinct && slot[static_cast<std::size_t>(i)];}
+        for(int i=0;i<kSoldierCount;++i){Soldier* e=Entry(at(i),now);again=again && e==slot[static_cast<std::size_t>(i)] && e->ref.Is(at(i));e->seen=now;}
+        Expect(distinct && again && soldiers.size()==kSoldierCount,"1500 soldiers: each has its own entry and finds it again");
+        slot[1]->arm=7;
+        now+=kStaleMs+1;slot[1]->seen=now;
+        Soldier* const reused=Entry(at(kSoldierCount),now);
+        Expect(reused==slot[0] && soldiers.size()==kSoldierCount && FindSoldier(at(0))==nullptr && Entry(at(1),now)==slot[1] && slot[1]->arm==7,
+               "a gone soldier's entry is the first taken again; a live one keeps its own");
+
+        world.enemies=0;world.enemyIndex.Clear();
+        const float aim[3]={1,2,3};
+        for(int k=0;k<2;++k)for(int i=0;i<kEnemyCount;++i)SeeEnemy(&world,at(i),aim);   // two lock points each
+        bool rows=world.enemies==kEnemyCount;
+        for(int i=0;rows && i<kEnemyCount;++i)rows=world.enemy[static_cast<std::size_t>(i)].object==at(i) && world.enemy[static_cast<std::size_t>(i)].points==2;
+        Expect(rows,"4000 enemies: every one in the frame's list, in walk order, its lock points counted on its own row");
+
+        std::vector<std::vector<unsigned char>> people(kSquadCount,std::vector<unsigned char>(0x2200));
+        world.friends=0;
+        FriendWalk walk{kFriendVtable,&world};
+        for(auto& p:people) {
+            Put<void*>(p.data(),0,image+kSoldiers[0].vtable);Put<int>(p.data(),kTeam,kTeamFriend);Put<float>(p.data(),kPosition,1.0f);
+            FriendVisit(&walk,p.data());
+        }
+        static std::vector<npc::Friend> mine;
+        Expect(world.friends==kSquadCount && FriendsBut(people[5].data(),mine)==kSquadCount-1,
+               "600 friends (the old table held 512): all of them in the shot's test");
+        bool squadsOk=true;
+        for(auto& p:people)squadsOk=squadsOk && SeeSquad(p.data(),p.data(),0,npc::Control::free,now)!=nullptr;
+        for(auto& p:people){const Squad* f=FindSquad(p.data());squadsOk=squadsOk && f && f->top.Is(p.data());}
+        Expect(squadsOk && squads.size()==kSquadCount,"600 squads (the old table held 64): each counted in its own entry and found by its top");
+        Retop(*FindSquad(people[0].data()),ObjRef::Of(people[1].data()+0x100));
+        Expect(FindSquad(people[0].data())==nullptr && FindSquad(people[1].data()+0x100)==&squads[0],"a hand-over moves the squad's index to its new top");
+
+        for(int i=0;i<kHandoverCount;++i)AddHandover(Handover{ObjRef::Of(at(i)),ObjRef::Of(at(kHandoverCount+i)),now});
+        ObjRef next{};
+        Expect(NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && next.obj==at(kHandoverCount) &&
+               NpcSquadSuccessor(ObjRef::Of(at(kHandoverCount-1)),&next) && next.obj==at(2*kHandoverCount-1),
+               "100 hand-overs in a moment: the first one still followed (the old ring kept 32)");
+        now+=kHandoverMs+1;AddHandover(Handover{ObjRef::Of(at(3000)),ObjRef::Of(at(3001)),now});
+        Expect(!NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && handovers.size()==1,"hand-overs past kHandoverMs are dropped");
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
