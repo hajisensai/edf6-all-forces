@@ -943,6 +943,9 @@ target_compile_options(keybind_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME keybind COMMAND keybind_test "${CMAKE_SOURCE_DIR}/EDF6VehicleCrew.ini" "${CMAKE_SOURCE_DIR}/autoturret/EDF6AutoTurret.ini")
 add_test(NAME keyconfig_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/keyconfig_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(keyconfig_native PROPERTIES SKIP_RETURN_CODE 77)
+# The lock registry's node count bounds the plugins' registry walks (tests/lock_registry_native_audit.py).
+add_test(NAME lock_registry_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/lock_registry_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(lock_registry_native PROPERTIES SKIP_RETURN_CODE 77)
 # The installer side of the room menu's review fixes: the ledger merged on save, every Mods writer under the generator's
 # lock, the room layouts never stopping an install, stale generated variant files removed (a fake game directory).
 add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_lock_test.py")
