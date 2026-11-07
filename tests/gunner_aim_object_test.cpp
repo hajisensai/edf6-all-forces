@@ -5,7 +5,8 @@
 namespace autoturret {
 unsigned char* image=nullptr;Config cfg{};
 namespace {void* called=nullptr;unsigned char weapon[32]{};}
-void Log(const char*,...) noexcept{}
+int logs=0;
+void Log(const char*,...) noexcept{++logs;}
 void SeeVehicle(const void*) noexcept{}
 ULONGLONG Frame() noexcept{return 1;}
 void ScanEnemies(const unsigned char*,float,Nearby& out) noexcept{out.count=0;}
@@ -23,6 +24,10 @@ bool Stabilized(const unsigned char*,unsigned,const float*,float*,float*) noexce
 float PriorityWeight(const Enemy&) noexcept{return 1;}
 bool ActualWeapon(const unsigned char*,unsigned,const unsigned char*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
 void PublishAim(const unsigned char*,bool,const void*,const float*,const void*) noexcept{}
+bool Same(const void* obj,const void* ctrl) noexcept {   // plugin.cpp's
+    if(!ctrl || !Readable(obj,kSelfCtrl+8) || At<const void*>(obj,kSelfCtrl)!=ctrl)return false;
+    return Readable(ctrl,edf::kCtrlUses+4) && At<std::int32_t>(ctrl,edf::kCtrlUses)>0;
+}
 const unsigned char* SeatGun(const unsigned char*) noexcept{return weapon;}
 void __fastcall LocalRec(void* aim){called=aim;static_cast<unsigned char*>(aim)[kAimNetwork]=0;}
 }
@@ -59,6 +64,28 @@ int main(){
     learn=learn && back>0.0f && LearnSign(1.0f,0.0005f,-0.0005f,true)==1.0f;
     if(!learn)std::printf("FAIL side gun sign learned from the main turret's turn\n");
     pass=pass && learn;
-    std::printf("gunner_aim_object_test: embedded handoff, vtable preservation, full-circle rear-target reach and sign learning %s\n",pass?"passed":"FAILED");
+    // LogOnce: more vehicle seats asking each frame than its table holds no longer log every one of them every frame
+    // (the old 16-entry ring missed every call then). A gone vehicle's entry is reused, a vehicle built at a gone one's
+    // address is told about again, and the mission's reset forgets them all.
+    constexpr unsigned kCars=300;
+    static unsigned char cars[kCars][kSelfCtrl+8]{},ctrls[kCars+1][16]{};
+    for(unsigned i=0;i<kCars;++i){Put<void*>(cars[i],kSelfCtrl,ctrls[i]);Put<std::int32_t>(ctrls[i],edf::kCtrlUses,1);}
+    const int before=logs;
+    for(unsigned i=0;i<kCars;++i)LogOnce(cars[i],1,"first");
+    bool once=logs-before==257;                                            // 256 seats and one "table full"
+    for(int frame=0;frame<3;++frame)for(unsigned i=0;i<kCars;++i)LogOnce(cars[i],1,"again");
+    once=once && logs-before==257;                                         // the frames after: nothing
+    Put<std::int32_t>(ctrls[0],edf::kCtrlUses,0);                         // car 0 gone: its entry is reused
+    LogOnce(cars[256],1,"freed");LogOnce(cars[256],1,"freed");
+    once=once && logs-before==258;
+    Put<void*>(cars[1],kSelfCtrl,ctrls[kCars]);Put<std::int32_t>(ctrls[kCars],edf::kCtrlUses,1);   // a new car at car 1's address
+    LogOnce(cars[1],1,"new");LogOnce(cars[1],1,"new");
+    once=once && logs-before==259;
+    ResetGunnerLog();
+    LogOnce(cars[2],1,"next mission");LogOnce(cars[2],2,"other seat");LogOnce(cars[2],1,"next mission");
+    once=once && logs-before==261;
+    if(!once)std::printf("FAIL LogOnce logged %d lines\n",logs-before);
+    pass=pass && once;
+    std::printf("gunner_aim_object_test: embedded handoff, vtable preservation, full-circle rear-target reach, sign learning and LogOnce %s\n",pass?"passed":"FAILED");
     VirtualFree(vtable,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);return pass?0:1;
 }

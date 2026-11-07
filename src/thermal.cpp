@@ -63,6 +63,10 @@ struct RenderFrame {
     std::uint64_t serial=0;
     Mode mode=Mode::optical;
     bool active=false,target=false,failed=false;
+    // One render frame of views: the players whose view began in it, and whether any of them drew thermal. A player's
+    // view beginning again starts the next frame (split screen: both viewports share this one renderer).
+    unsigned seen=0;
+    bool used=false;
 };
 thread_local RenderFrame frame;
 
@@ -128,11 +132,21 @@ void __fastcall BeginHook(void* manager,void* native,const void* view) {
     Player* const p=ViewPlayer(view);
     if(!p)return;
     frame.active=false;frame.target=false;frame.failed=false;frame.view=view;frame.player=p;
+    // An optical view keeps the compiled shaders and states (rebuilding them is 8 shader compiles; in split screen with
+    // one player in thermal it was every frame). Everything goes once a whole frame drew no thermal, so nothing (nor
+    // the device they reference) outlives the thermal sight by more than a frame.
+    const unsigned bit=1u<<static_cast<unsigned>(p-players);
+    if(frame.seen&bit) {
+        if(!frame.used)frame.gpu.Reset();
+        frame.seen=0;frame.used=false;
+    }
+    frame.seen|=bit;
     frame.shot=ReadSnapshot(*p);frame.mode=p->requested.load(std::memory_order_acquire);
     if(frame.mode==Mode::optical || !frame.shot.enabled || !frame.shot.eligible || !frame.shot.inSight ||
-       GetTickCount64()-frame.shot.at>kFreshMs) {frame.gpu.Reset();return;}
+       GetTickCount64()-frame.shot.at>kFreshMs) {frame.gpu.Invalidate();return;}
     frame.active=frame.gpu.BeginView(Context(native),++frame.serial);
-    if(!frame.active)Failed();
+    if(frame.active)frame.used=true;
+    else Failed();
 }
 void __fastcall EndHook(void* manager,void* native,const void* view) {
     reinterpret_cast<StageFn>(image+kViewEnd)(manager,native,view);

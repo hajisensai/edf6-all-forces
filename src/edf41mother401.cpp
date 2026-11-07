@@ -301,15 +301,10 @@ void PlaySeAt(Part& p,int i,const float* pos,SoundHandle* loop=nullptr) noexcept
 }
 void PlaySe(Part& p,int i,SoundHandle* loop=nullptr) noexcept { PlaySeAt(p,i,F(p.obj,kPosAt),loop); }
 bool Vec3Key(const void* o,const wchar_t* key,float* out) noexcept { return Vec(Key(o,key),out,3); }
+// Persist shares copies by content, so no cache keyed by the node's address (a later mission's SGO can reuse it).
 const SgoNode* PersistKey(const void* o,const wchar_t* key) noexcept {
-    static std::unordered_map<const SgoNode*,const SgoNode*> cache;
     const SgoNode* n=Key(o,key);
-    if(!n)return nullptr;
-    const auto it=cache.find(n);
-    if(it!=cache.end())return it->second;
-    const SgoNode* c=Persist(n);
-    cache[n]=c;
-    return c;
+    return n ? Persist(n) : nullptr;
 }
 
 // ---- the state machine -------------------------------------------------------------------------------------------------

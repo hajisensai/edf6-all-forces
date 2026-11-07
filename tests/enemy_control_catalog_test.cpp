@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iterator>
 #include "../src/enemy_control_catalog.h"
+#include "../src/enemy_control_deiroi.h"
 #include "../src/enemy_control_types.h"
 #include "../src/crew.h"
 #include "../src/memory.h"
@@ -37,6 +38,12 @@ unsigned DeiroiGunCount(const NativeLease& lease) noexcept { return lease.profil
 bool ReadDeiroiGunCount(const NativeLease& lease,unsigned* count) noexcept {if(!count || !fixtureDeiroiRosterValid)return false;*count=DeiroiGunCount(lease);return true;}
 bool DeiroiGunOrdinal(const NativeLease&,unsigned index,unsigned* key) noexcept { if(!key || index>=fixtureDeiroiGuns)return false;*key=((index/3)<<16)|(index%3);return true; }
 bool ReadDeiroiAbilityState(const NativeLease&,unsigned,bool automatic,enemy_control::Ability* out) noexcept { if(!out)return false;out->state=automatic ? enemy_control::AbilityState::active : enemy_control::AbilityState::native;out->cooldownKnown=false;return true; }
+unsigned fixtureRosterReads=0;const DeiroiGunRoster* fixtureRoster=nullptr;bool fixtureRosterSplit=false;
+bool ReadDeiroiAbilityState(const NativeLease& lease,DeiroiGunRoster* roster,unsigned key,bool automatic,enemy_control::Ability* out) noexcept {
+    if(!roster)return false;++fixtureRosterReads;
+    if(fixtureRoster && fixtureRoster!=roster)fixtureRosterSplit=true;fixtureRoster=roster;
+    return ReadDeiroiAbilityState(lease,key,automatic,out);
+}
 bool ExecuteDeiroiAbility(const NativeLease&,unsigned ordinal,bool automatic,std::uint64_t,std::uint64_t) noexcept { fixtureDeiroiOrdinal=ordinal;fixtureDeiroiAutomatic=automatic;return true; }
 bool fixtureCommandInstalled=true,fixtureAcceptedHandled=false,fixtureAcceptedResult=true;
 unsigned fixtureAcceptedCommands=0;
@@ -151,6 +158,18 @@ int main() {
     Check(ExecuteAbility(lease,list[10],19,99) && fixtureDeiroiOrdinal==0x10001 && !fixtureDeiroiAutomatic,"selected foot battery dispatches its own manual command");
     Check(ExecuteAbility(lease,list[11],20,100) && fixtureDeiroiOrdinal==0x10001 && fixtureDeiroiAutomatic,"automatic can be restored independently for the selected battery");
     Check(ReadAbilityState(lease,list[11],&status) && status.state==enemy_control::AbilityState::active,"Deiroi state refresh dispatches the real automatic-mode reader");
+    {
+        enemy_control::Ability batch[12]{},single{};
+        for(unsigned i=0;i<12;++i)batch[i].channel=11-i;   // channel indexes the native list, not the refresh position
+        Check(ReadAbilityStates(lease,list,batch,12),"batched catalogue refresh succeeds on a live Deiroi");
+        bool same=true;
+        for(unsigned i=0;i<12;++i)same=same && ReadAbilityState(lease,list[11-i],&single) && single.state==batch[i].state && single.cooldownKnown==batch[i].cooldownKnown;
+        Check(same,"batched refresh reports exactly the per-entry ReadAbilityState results");
+        Check(fixtureRosterReads==10 && !fixtureRosterSplit,"all ten foot-battery entries of one refresh share one battery walk");
+        object[0x2E8]=1;fixtureRosterReads=0;
+        Check(!ReadAbilityStates(lease,list,batch,12) && fixtureRosterReads==0,"per-entry identity still fails the whole refresh before any battery read");
+        object[0x2E8]=0;
+    }
     fixtureDeiroiGuns=4096;Check(Abilities(lease,list,96)==0,"foot-battery command expansion fails rather than truncating beyond4096");
     fixtureDeiroiGuns=0;fixtureDeiroiRosterValid=false;Check(Abilities(lease,list,96)==0,"unvalidated Deiroi parts cannot silently publish only the two body skills");fixtureDeiroiRosterValid=true;
     Check(Abilities(lease,list,96)==2,"a completely validated zero-battery Deiroi remains distinct from enumeration failure");

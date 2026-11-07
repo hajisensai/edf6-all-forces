@@ -247,10 +247,8 @@ std::int64_t HolderIndex(const unsigned char* v,const unsigned char* h) noexcept
 }
 
 // A coaxial machine gun (tools/make_stock_stores.py COAX; the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」).
-bool IsCoax(const unsigned char* w) noexcept {
-    const StoreSpec* const spec=StoreOf(w);
-    return spec && spec->role==StoreRole::coax;
-}
+bool IsCoaxSpec(const StoreSpec* spec) noexcept { return spec && spec->role==StoreRole::coax; }
+bool IsCoax(const unsigned char* w) noexcept { return IsCoaxSpec(StoreOf(w)); }
 // The coax's next round as its belt has it (kCoaxTracerEvery): a tracer when the rounds left are a multiple of it,
 // else ball. Written before every pull (the player's and the NPC crew's): the weapon fires at most one round a frame
 // (FireInterval 4-5), each with the colour of the count it leaves from, so the belt's rhythm holds whichever comes
@@ -344,8 +342,8 @@ constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
 // pulled by any class's own fire (only the plugin's redirect reaches it), so its latch is the key's alone on every class.
 enum class Source : std::uint8_t { cycle, coax, second, key };
 struct Control { Source source=Source::cycle; unsigned char key=0; bool autoTurret=false; };
-Control ControlOf(Class c,const unsigned char* w) noexcept {
-    const auto spec=StoreOf(w);
+// `spec`: the weapon's StoreOf (ReadSeat looks it up once a weapon, not once a question).
+Control ControlOfSpec(Class c,const StoreSpec* spec) noexcept {
     if(!spec || spec->nativeControl)return {};
     // A gunner seat's own weapon (its own turret, seat_turret.cpp): that seat's primary trigger, which the V603 reads on
     // seat 0 alone (docs/independent-seat-re.md).
@@ -355,6 +353,7 @@ Control ControlOf(Class c,const unsigned char* w) noexcept {
     if(spec->role==StoreRole::coax)return {Source::coax,0,false};
     return {};
 }
+Control ControlOf(Class c,const unsigned char* w) noexcept { return ControlOfSpec(c,StoreOf(w)); }
 // The own fire key of weapon `w` on class `c` (ControlOf), 0 none.
 unsigned char OwnKey(Class c,const unsigned char* w) noexcept { return ControlOf(c,w).key; }
 // The weapons on the second trigger (the BMPT's missiles): one launcher's rounds, its own cycle (Switch).
@@ -363,24 +362,21 @@ bool HasOwnKeys(Class c,unsigned char* const* ws,const PayloadReadout& r) noexce
     for(int i=0;i<r.count;++i)if(OwnKey(c,ws[i]))return true;
     return false;
 }
-// An auto turret's weapon on `c`.
-bool AutoTurret(Class c,const unsigned char* w) noexcept {
-    const Control k=ControlOf(c,w);
-    return k.key && k.autoTurret;
-}
+// An auto turret's weapon (its control on its class, ControlOf).
+bool AutoTurret(const Control& k) noexcept { return k.key && k.autoTurret; }
 bool SwitchSecondary(Class c,const unsigned char* w,const PayloadEntry& entry) noexcept {
     return entry.fire==PayloadFire::secondary && !entry.coax && !IndependentSecondary(c,w);
 }
 
 // `weapons`: the seat's stock weapons (its stores left out). `playerSeat`: the readout of a player's seat (an NPC's
 // selection treats a coaxial gun as one more store, fired through the redirected primary pull: NpcPayloadSelect).
-PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons,bool playerSeat=true) noexcept {
+// `spec` / `store`: the weapon's StoreOf and IsStoreWeapon, read once by ReadSeat.
+PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const StoreSpec* spec,bool store,int weapons,bool playerSeat=true) noexcept {
     const std::int64_t s=static_cast<std::int64_t>(seat);
     // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
-    const auto spec=StoreOf(w);
-    if(const unsigned char key=OwnKey(c,w))return key==kSecondTriggerKey ? PayloadFire::secondary : PayloadFire::key;
-    if(IsStoreWeapon(w) && !(spec && spec->nativeControl))
-        return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;
+    if(const unsigned char key=ControlOfSpec(c,spec).key)return key==kSecondTriggerKey ? PayloadFire::secondary : PayloadFire::key;
+    if(store && !(spec && spec->nativeControl))
+        return playerSeat && FreeSecondary(c) && IsCoaxSpec(spec) ? PayloadFire::secondary : PayloadFire::store;
     switch(c) {
         case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
@@ -417,10 +413,14 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         index[count]=HolderIndex(v,holders[i]);
         ws[count++]=w;
     }
+    // Each weapon's store lookup once (a scan of the catalogue's file prefixes): every question below is about these.
+    const StoreSpec* specs[kMostPayload];
+    bool stores[kMostPayload];
     int stock=0;
     for(int i=0;i<count;++i) {
-        const auto spec=StoreOf(ws[i]);
-        stock+=IsStoreWeapon(ws[i]) && !(spec && spec->nativeControl) ? 0 : 1;
+        specs[i]=StoreOf(ws[i]);
+        stores[i]=IsStoreWeapon(ws[i]);
+        stock+=stores[i] && !(specs[i] && specs[i]->nativeControl) ? 0 : 1;
     }
     for(int i=0;i<count;++i) {
         PayloadEntry& e=r.entry[i];
@@ -430,11 +430,12 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         e.rounds=rounds>0 ? rounds : 0;
         e.capacity=cap>0 ? cap : 0;
         Reload(ws[i],rounds,&e.ready,&e.reloadSec);
-        e.fire=FireOf(c,seat,index[i],ws[i],stock,playerSeat);
-        e.coax=IsCoax(ws[i]);
+        e.fire=FireOf(c,seat,index[i],specs[i],stores[i],stock,playerSeat);
+        e.coax=IsCoaxSpec(specs[i]);
         e.homing=At<std::int32_t>(ws[i],kWeaponLockon)==kHoming;
-        e.key=OwnKey(c,ws[i]);
-        e.autoTurret=AutoTurret(c,ws[i]);
+        const Control k=ControlOfSpec(c,specs[i]);
+        e.key=k.key;
+        e.autoTurret=AutoTurret(k);
     }
     return count;
 }

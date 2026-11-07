@@ -828,12 +828,15 @@ bool Medic(const unsigned char* v) noexcept {
     return false;
 }
 
-// What `h` aims at: f(object, lock point, extra score in m). A medic: the hurt friends, the most hurt counting nearest;
-// any other: the enemies.
+// What `h` aims at: f(object, lock point, extra score in m, held). A medic: the hurt friends, the most hurt counting nearest;
+// any other: the enemies. held() says whether it is no target of its after all: an enemy its fire is wasted on
+// (WastedFire). Asked by f only after its own cheap range checks: HoldFire costs region scans, a lock and maybe a
+// plan's raycasts, and nearly every enemy is out of range.
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
-    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
-    // An enemy its fire is wasted on (WastedFire) is no target of its.
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!HoldFire(v,o))f(o,a,0.0f); });
+    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept {
+        f(o,a,share*kHurtWeight,[]() noexcept { return false; });
+    });
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); }); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -858,13 +861,14 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
     bool focusSeen=false;
-    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra) noexcept {
+    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra,auto&& held) noexcept {
         if(focusSeen)return;
-        // The map's focus order (Heli::focus): this one, past its post's range and before any other.
-        if(h.focus.Is(object)){focusSeen=true;bestObject=object;std::memcpy(bestAim,a,12);return;}
+        // The map's focus order (Heli::focus): this one, past its post's range and before any other (a held one dropped).
+        if(h.focus.Is(object)){if(held())return;focusSeen=true;bestObject=object;std::memcpy(bestAim,a,12);return;}
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
         if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if(held())return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2])+extra;
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
@@ -1496,11 +1500,11 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
     if(!std::isfinite(gravity) || gravity<0.0f)gravity=0.0f;
     const void* best=nullptr;float bestScore=0.0f,bestAt[3]{};
     if(std::isfinite(speed) && speed>1.0f)
-        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra) noexcept {
+        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra,auto&& held) noexcept {
             const float d[3]={p[0]-gp[0],p[1]-gp[1],p[2]-gp[2]};
             const float dist=std::sqrt(Dot3(d,d));
             float err[2],axis[2];
-            if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis))return;
+            if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis) || held())return;
             float score=dist+extra+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
             if(g.target.Is(object))score-=kDoorKeep;
             if(share.Is(object))score-=kDoorShare;
