@@ -22,6 +22,10 @@ bool Stabilized(const unsigned char*,unsigned,const float*,float*,float*) noexce
 float PriorityWeight(const Enemy&) noexcept{return 1;}
 bool ActualWeapon(const unsigned char*,unsigned,const unsigned char*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
 void PublishAim(const unsigned char*,bool,const void*,const float*,const void*) noexcept{}
+bool Same(const void* obj,const void* ctrl) noexcept {   // plugin.cpp's
+    if(!ctrl || !Readable(obj,kSelfCtrl+8) || At<const void*>(obj,kSelfCtrl)!=ctrl)return false;
+    return Readable(ctrl,edf::kCtrlUses+4) && At<std::int32_t>(ctrl,edf::kCtrlUses)>0;
+}
 const unsigned char* SeatGun(const unsigned char* s) noexcept {
     const auto list=At<const unsigned char* const*>(s,kSeatWeapons);
     return list && At<std::uint64_t>(s,kSeatWeaponCount) ? At<const unsigned char*>(list[0],kHolderWeapon) : nullptr;

@@ -277,4 +277,6 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
 // slots it patched (0: it left them stock).
 int HookGunners() noexcept;
+// gunner.cpp: forgets which vehicle seats LogOnce has told about (each mission's start, designate.cpp's MissionResetV1).
+void ResetGunnerLog() noexcept;
 }  // namespace autoturret

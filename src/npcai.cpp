@@ -178,13 +178,27 @@ struct World {
     npc::Lane laneOf;
 };
 World world{};
+// SeeEnemy's lookup of an object already in world.enemy (one entry per object, a lock point each call): open
+// addressing over twice kMaxEnemies slots, so a free one is always found. A slot counts only while its stamp is the
+// current Gather's: nothing is cleared between frames or missions, and the 64-bit stamp (bumped by every Gather and
+// with World{} in ResetNpcAi, never reset) never comes back to an old one. Kept out of World so World{} (ResetNpcAi) stays its old size.
+constexpr int kEnemySlots=kMaxEnemies*2;
+static_assert((kEnemySlots&(kEnemySlots-1))==0,"kEnemySlots: a power of two (the hash's mask)");
+struct EnemySlot { ULONGLONG stamp; int index; };
+EnemySlot enemySlots[kEnemySlots]{};
+ULONGLONG enemyStamp=1;   // above the zeroed slots' 0: none counts before the first Gather
 
 const float* Pos(const unsigned char* o) noexcept { return reinterpret_cast<const float*>(o+kPosition); }
 
 void SeeEnemy(void* ctx,const void* object,const float* aim) {
     auto& w=*static_cast<World*>(ctx);
-    for(int i=0;i<w.enemies;++i)if(w.enemy[i].object==object){++w.enemy[i].points;return;}
+    // The index first, the room after: a full table still counts the points of an enemy it holds (as the scan did).
+    const auto key=reinterpret_cast<std::uintptr_t>(object);
+    unsigned h=static_cast<unsigned>((key>>4)*0x9E3779B97F4A7C15ull>>40)&(kEnemySlots-1);
+    for(;enemySlots[h].stamp==enemyStamp;h=(h+1)&(kEnemySlots-1))
+        if(w.enemy[enemySlots[h].index].object==object){++w.enemy[enemySlots[h].index].points;return;}
     if(w.enemies>=kMaxEnemies)return;
+    enemySlots[h]=EnemySlot{enemyStamp,w.enemies};
     Enemy& e=w.enemy[w.enemies++];
     e.object=object;std::memcpy(e.aim,aim,12);e.points=1;
 }
@@ -458,7 +472,7 @@ void FormationTick() noexcept {
 
 void Gather(std::int32_t team) noexcept {
     World& w=world;
-    w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;
+    w.frame=GameFrame();++enemyStamp;w.team=team;w.enemies=w.friends=w.nobodys=0;
     w.player=player.at && GameMs()-player.at<kPlayerFixMs;
     if(w.player)std::memcpy(w.playerAt,player.pos,12);
     VisitEnemiesOf(team,&SeeEnemy,&w);
@@ -2143,7 +2157,11 @@ void ResetNpcAi() noexcept {
     dismissedCount=0;
     npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};followedLock=nullptr;jetMark=JetMark{};
     AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
-    world=World{};
+    // The last mission's slot 6 records: their objects are gone with it, so their control-block pins (RecordSixRun)
+    // are let go now rather than at the next record, which may be missions away.
+    for(auto& r:sixRuns)npcmark::Assign(r.ref,ObjRef{});
+    sixRuns.clear();
+    world=World{};++enemyStamp;   // world.enemy emptied: its index too (enemySlots)
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
     for(auto& p:peerMarches)p=PeerMarch{};
@@ -3330,14 +3348,25 @@ struct GunnerWrite { ObjRef vehicle,rider; unsigned seat; float values[4]; };
 std::vector<GunnerWrite> gunnerWrites;
 constexpr std::size_t kGunnerInputs[4]={0x2D0,0x2D4,0x2E4,0x2E0};
 void ResetGunnerInputs() noexcept { gunnerWrites.clear(); }
+// An entry whose vehicle is gone (or its address another object's) is dropped with nothing cleared.
+template<class Write> bool StaleWrite(const Write& w) noexcept {
+    return !Readable(w.vehicle.obj,kSelfCtrl+8) || !w.vehicle.Is(w.vehicle.obj);
+}
+// Swap-with-back: the entries' order means nothing.
+template<class Write> void DropWrite(std::vector<Write>& writes,std::size_t i) noexcept {
+    writes[i]=writes.back();writes.pop_back();
+}
 void ReleaseGunnerInputs(unsigned char* v) noexcept {
-    for(auto it=gunnerWrites.begin();it!=gunnerWrites.end();) {
-        if(!Readable(it->vehicle.obj,kSelfCtrl+8) || !it->vehicle.Is(it->vehicle.obj)){it=gunnerWrites.erase(it);continue;}
-        if(it->vehicle.obj!=v){++it;continue;}
-        unsigned char* seat=it->seat<SeatCount(v) ? SeatAt(v,it->seat) : nullptr;
-        if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider)))
-            for(int k=0;k<4;++k)if(At<float>(seat,kGunnerInputs[k])==it->values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
-        it=gunnerWrites.erase(it);
+    // Only v's own entries are tested here (staleness too); the others' stale ones go once a frame (PurgeStaleWrites).
+    for(std::size_t i=0;i<gunnerWrites.size();) {
+        const GunnerWrite& w=gunnerWrites[i];
+        if(w.vehicle.obj!=v){++i;continue;}
+        if(!StaleWrite(w)) {
+            unsigned char* seat=w.seat<SeatCount(v) ? SeatAt(v,w.seat) : nullptr;
+            if(seat && !AnyPlayerIn(seat) && Readable(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider)))
+                for(int k=0;k<4;++k)if(At<float>(seat,kGunnerInputs[k])==w.values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
+        }
+        DropWrite(gunnerWrites,i);
     }
 }
 void RememberGunnerInputs(unsigned char* v,unsigned index,const unsigned char* seat) {
@@ -3453,22 +3482,34 @@ constexpr unsigned char kDriverAimContext[2][17]={
 bool driverPayloadReady=false;
 struct DriverWrite { ObjRef vehicle,rider; float fire[2]; ULONGLONG at; };
 std::vector<DriverWrite> driverWrites;
-void ResetDriverPayload() noexcept { driverWrites.clear(); }
+ULONGLONG writesPurged=~0ull;   // the GameFrame whose first NpcGunnersInput dropped the stale entries of both lists
+void ResetDriverPayload() noexcept { driverWrites.clear();writesPurged=~0ull; }
+// Once a frame, the stale entries of vehicles no Release call matches (gone ones): the lists stay as long as the
+// crewed vehicles, without every vehicle's call testing every entry.
+void PurgeStaleWrites() noexcept {
+    if(writesPurged==GameFrame())return;
+    writesPurged=GameFrame();
+    for(std::size_t i=0;i<gunnerWrites.size();)if(StaleWrite(gunnerWrites[i]))DropWrite(gunnerWrites,i);else ++i;
+    for(std::size_t i=0;i<driverWrites.size();)if(StaleWrite(driverWrites[i]))DropWrite(driverWrites,i);else ++i;
+}
 bool RealPayloadDriver(unsigned char* v) noexcept {
     return Cfg().enabled && (Cfg().stockStores || NativePayloadControl(v,0)) && !v[kDead] && SeatCount(v)>0 &&
         edf::LivingSoldierInSeat(image,SeatAt(v,0)) && AiGunner(v,SeatAt(v,0));
 }
 void ReleaseDriverPayload(unsigned char* v,bool replace) noexcept {
-    for(auto it=driverWrites.begin();it!=driverWrites.end();) {
-        if(!Readable(it->vehicle.obj,kSelfCtrl+8) || !it->vehicle.Is(it->vehicle.obj)){it=driverWrites.erase(it);continue;}
-        if(it->vehicle.obj!=v){++it;continue;}
-        if(!replace && RealPayloadDriver(v) && GameMs()-it->at<=200){++it;continue;}
-        auto seat=SeatCount(v) ? SeatAt(v,0) : nullptr;
-        if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider))) {
-            constexpr std::size_t offsets[]={0x2E4,0x2E0};
-            for(int k=0;k<2;++k)if(At<float>(seat,offsets[k])==it->fire[k])Put<float>(seat,offsets[k],0.0f);
+    // As ReleaseGunnerInputs: v's own entries only, the stale test on those.
+    for(std::size_t i=0;i<driverWrites.size();) {
+        const DriverWrite& w=driverWrites[i];
+        if(w.vehicle.obj!=v){++i;continue;}
+        if(!StaleWrite(w)) {
+            if(!replace && RealPayloadDriver(v) && GameMs()-w.at<=200){++i;continue;}
+            auto seat=SeatCount(v) ? SeatAt(v,0) : nullptr;
+            if(seat && !AnyPlayerIn(seat) && Readable(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider))) {
+                constexpr std::size_t offsets[]={0x2E4,0x2E0};
+                for(int k=0;k<2;++k)if(At<float>(seat,offsets[k])==w.fire[k])Put<float>(seat,offsets[k],0.0f);
+            }
         }
-        it=driverWrites.erase(it);
+        DropWrite(driverWrites,i);
     }
 }
 void RememberDriverPayload(unsigned char* v) {
@@ -3529,6 +3570,7 @@ bool InstallDriverPayload() noexcept {
 }
 
 void NpcGunnersInput(unsigned char* v) noexcept {
+    PurgeStaleWrites();
     ReleaseDriverPayload(v,false); // never erase this frame's still-valid stock driver aim
     ReleaseGunnerInputs(v);
     if(!ok || !Cfg().enabled || !Cfg().npcGunners || v[kDead])return;

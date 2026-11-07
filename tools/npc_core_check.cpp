@@ -1214,6 +1214,41 @@ int main() {
         Expect(run(human)==other,"executed, the AI off: the stock walk's player");
         config.customNpcAi=true;nextJoinMark=nullptr;
     }
+    // SeeEnemy's hashed index (enemySlots) gives what the old scan of world.enemy did: one entry per object in first-seen
+    // order, the first lock point's aim, a point per call, a full table still counting the enemies it holds, and a new
+    // Gather's stamp (or ResetNpcAi) forgetting the last frame's.
+    {
+        static unsigned char pool[0x40000];
+        struct Ref { const void* object; float aim0; int points; };
+        static Ref ref[kMaxEnemies];
+        bool same=true,full=true,fresh=true;
+        for(const std::size_t stride:{std::size_t{0x10},std::size_t{0x318},std::size_t{0x4000}}) {
+            ++enemyStamp;world.enemies=0;int refs=0;
+            const int distinct=stride==0x10 ? kMaxEnemies+40 : 12;   // 0x10: past the table's room
+            for(int pass=0;pass<3;++pass)for(int k=0;k<distinct;++k) {
+                const int i=(k*11+pass*3)%distinct;
+                const void* o=pool+(static_cast<std::size_t>(i)*stride)%sizeof(pool);
+                const float aim[3]={static_cast<float>(pass*1000+i),0,0};
+                SeeEnemy(&world,o,aim);
+                int r=0;while(r<refs && ref[r].object!=o)++r;   // the old scan
+                if(r<refs)++ref[r].points;
+                else if(refs<kMaxEnemies)ref[refs++]=Ref{o,aim[0],1};
+            }
+            same=same && world.enemies==refs;
+            for(int r=0;r<refs && same;++r)
+                same=world.enemy[r].object==ref[r].object && world.enemy[r].aim[0]==ref[r].aim0 && world.enemy[r].points==ref[r].points;
+            if(stride==0x10)full=world.enemies==kMaxEnemies && world.enemy[0].points==3;
+        }
+        const float aim[3]={1,2,3};
+        ++enemyStamp;world.enemies=0;SeeEnemy(&world,pool,aim);
+        fresh=world.enemies==1 && world.enemy[0].points==1;
+        ResetNpcAi();SeeEnemy(&world,pool,aim);
+        fresh=fresh && world.enemies==1 && world.enemy[0].points==1;
+        Expect(same,"SeeEnemy's index: the same entries, order, first aims and points as the scan");
+        Expect(full,"SeeEnemy's index: a full table counts its enemies' points and takes no new one");
+        Expect(fresh,"SeeEnemy's index: a new Gather or ResetNpcAi forgets the last frame's enemies");
+        ResetNpcAi();
+    }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
 #endif
