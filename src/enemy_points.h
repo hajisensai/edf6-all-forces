@@ -1,5 +1,5 @@
 // The enemy lock points of a side (heli.cpp ForEachEnemyOf, VisitEnemies): the lock registry walk and its filter, and
-// the frame's copy of its result that the NPC gunner seats share (heli.cpp VisitEnemiesThisStep). Pure logic over the
+// the frame's copy of its result that the NPC gunner seats share (heli.cpp NearestEnemyThisStep). Pure logic over the
 // registry's memory; tools/enemy_points_check.cpp proves the copy's visits equal the live walk's.
 //
 // Until 2026-11-07 every AI gunner seat of every vehicle walked the whole registry each frame (stress:100: 3.7 ms a
@@ -54,5 +54,22 @@ template<class F> inline void Visit(const std::vector<Point>& points,const void*
         if(p.object==self || static_cast<const unsigned char*>(p.object)[edf::kDead])continue;
         f(p.object,p.aim);
     }
+}
+
+// The pick a nearest-within-reach visitor makes over Visit (npcai.cpp's gunner seats: d <= reach, d < the best so far,
+// then usable): the same object and distance, `usable` asked of the same points in the same order. Only a would-be best
+// is tested for self and death, so the copy is read for its aim points alone, not each object's memory.
+struct Pick { const void* object; float dist; };
+template<class Dist,class Usable>
+inline Pick Nearest(const std::vector<Point>& points,const void* self,const float* from,float reach,Dist&& dist,
+                    Usable&& usable) noexcept {
+    Pick best{nullptr,1e30f};
+    for(const Point& p:points) {
+        const float d=dist(from,p.aim);
+        if(!(d<=reach && d<best.dist))continue;
+        if(p.object==self || static_cast<const unsigned char*>(p.object)[edf::kDead] || !usable(p.object))continue;
+        best={p.object,d};
+    }
+    return best;
 }
 }  // namespace enemypoints

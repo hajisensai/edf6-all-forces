@@ -110,6 +110,45 @@ int main() {
     Check(bad==0,"the copy's visits equal the live walk's for every vehicle",bad);
     Check(badAfterDeaths==0,"and after some died since the copy",badAfterDeaths);
     Check(visits>10000 && selfSkipped>1000,"the registries exercise the filter and the vehicle's own points",visits,selfSkipped);
+    // Nearest (the gunner seats' pick): the object, its distance and every usable() asked, as the nearest-within-reach
+    // visitor over the live walk; also after some died since the copy. usable() refuses some objects (WastedFire).
+    {
+        int badPick=0,picked=0,asked=0;
+        auto dist=[](const float* a,const float* b){
+            const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};return std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        };
+        for(int run=0;run<200;++run) {
+            Registry r;
+            Make(r,rng,1+static_cast<int>(rng()%200),static_cast<int>(rng()%1500));
+            std::vector<Point> copy;
+            Collect(r.head,r.relation,copy);
+            if(run%2)for(auto& o:r.objects)if(rng()%6==0)o[edf::kDead]=1;
+            std::uniform_real_distribution<float> pos(-500.0f,500.0f),reachOf(0.0f,700.0f);
+            for(int k=0;k<20;++k) {
+                const void* self=r.objects[rng()%r.objects.size()].get();
+                const float from[3]={pos(rng),pos(rng),pos(rng)};
+                const float reach=k==0 ? 1e9f : reachOf(rng);
+                const unsigned refuse=static_cast<unsigned>(rng()%5);
+                std::vector<const void*> askedLive,askedCopy;
+                const void* liveBest=nullptr;float liveD=1e30f;
+                Walk(r.head,r.relation,self,[&](const void* o,const float* a){
+                    const float d=dist(from,a);
+                    if(d<=reach && d<liveD) {
+                        askedLive.push_back(o);
+                        if((reinterpret_cast<std::uintptr_t>(o)>>4)%5!=refuse){liveBest=o;liveD=d;}
+                    }
+                });
+                const Pick got=Nearest(copy,self,from,reach,dist,[&](const void* o){
+                    askedCopy.push_back(o);return (reinterpret_cast<std::uintptr_t>(o)>>4)%5!=refuse;
+                });
+                badPick+=got.object!=liveBest || std::memcmp(&got.dist,&liveD,4)!=0 || askedLive!=askedCopy;
+                picked+=got.object!=nullptr;asked+=static_cast<int>(askedCopy.size());
+            }
+        }
+        std::printf("  Nearest: %d picks, %d usable() asks\n",picked,asked);
+        Check(badPick==0,"Nearest: the live visitor's pick, distance and usable() asks",badPick);
+        Check(picked>1000 && asked>picked,"Nearest: picks made and refusals exercised",picked,asked);
+    }
     // The walk's node cap (kMaxNodes): a longer list stops at the same node both ways.
     {
         Registry r;

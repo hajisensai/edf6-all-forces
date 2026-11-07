@@ -59,6 +59,7 @@
 #include "profile_sigs.h"
 #include "firstperson.h"
 #include "enemy_points.h"
+#include "npc_logic.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -3857,19 +3858,19 @@ bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noe
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
-// VisitEnemies from the side's copy of this scene step (enemy_points.h): the registry walked once per side per frame,
+// The enemies of a side copied once per scene step (enemy_points.h): the registry walked once per side per frame,
 // not once per gunner seat. The copy is taken at the side's first ask in the step; one that has died since is skipped.
 // Keyed by the native scene step (SceneStepNow), not GameFrame: that one moves on only after the first vehicle's input,
 // where the gunners run. With the step unreadable: the live walk.
 namespace {
 struct StepPoints { SceneStep step; bool taken,ok; std::vector<enemypoints::Point> points; };
 StepPoints stepPoints[kMaxTeam];
-}
-bool VisitEnemiesThisStep(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
+// The side's copy for this step, or null: the step unreadable or the team out of the table (the live walk then).
+StepPoints* PointsThisStep(const unsigned char* vehicle) noexcept {
     const SceneStep step=SceneStepNow();
     std::int32_t team=At<std::int32_t>(vehicle,kTeam);
     if(team==kTeamVehicle)team=player.team;
-    if(!step.scene || team<0 || team>=kMaxTeam)return VisitEnemies(vehicle,visit,ctx);
+    if(!step.scene || team<0 || team>=kMaxTeam)return nullptr;
     StepPoints& s=stepPoints[team];
     if(!s.taken || s.step.scene!=step.scene || s.step.count!=step.count || s.step.mission!=step.mission) {
         const unsigned char* head=nullptr;
@@ -3879,8 +3880,24 @@ bool VisitEnemiesThisStep(const unsigned char* vehicle,EnemyVisitor visit,void* 
         else s.points.clear();
         s.step=step;s.taken=true;
     }
-    if(!s.ok)return false;
-    enemypoints::Visit(s.points,vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+    return &s;
+}
+}  // namespace
+bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float reach,EnemyUsable usable,void* ctx,
+                          const void*& best,float& bestDist) noexcept {
+    best=nullptr;bestDist=1e30f;
+    auto dist=[](const float* a,const float* b) noexcept { return npc::Dist(a,b); };
+    auto ok=[&](const void* object) noexcept { return usable(ctx,object); };
+    StepPoints* const s=PointsThisStep(vehicle);
+    if(!s) {   // the live walk, Nearest's rule
+        return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept {
+            const float d=dist(from,aim);
+            if(d<=reach && d<bestDist && ok(object)){best=object;bestDist=d;}
+        });
+    }
+    if(!s->ok)return false;
+    const enemypoints::Pick p=enemypoints::Nearest(s->points,vehicle,from,reach,dist,ok);
+    best=p.object;bestDist=p.dist;
     return true;
 }
 

@@ -292,8 +292,18 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;
 }
-// The frame's copy visits what the live walk does (tools/enemy_points_check.cpp).
-bool VisitEnemiesThisStep(const unsigned char* v,EnemyVisitor visit,void* ctx) noexcept { return VisitEnemies(v,visit,ctx); }
+// The frame's copy picks what the live walk does (tools/enemy_points_check.cpp): the stub enemy, the same rule.
+bool NearestEnemyThisStep(const unsigned char* v,const float* from,float reach,EnemyUsable usable,void* ctx,
+                          const void*& best,float& bestDist) noexcept {
+    best=nullptr;bestDist=1e30f;
+    struct C { const float* from; float reach; EnemyUsable usable; void* ctx; const void** best; float* bestDist; };
+    C c{from,reach,usable,ctx,&best,&bestDist};
+    return VisitEnemies(v,[](void* x,const void* object,const float* aim) {
+        auto& k=*static_cast<C*>(x);
+        const float d=npc::Dist(k.from,aim);
+        if(d<=k.reach && d<*k.bestDist && k.usable(k.ctx,object)){*k.best=object;*k.bestDist=d;}
+    },&c);
+}
 }
 #ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {
