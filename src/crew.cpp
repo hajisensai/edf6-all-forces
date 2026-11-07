@@ -833,6 +833,16 @@ void PerfTick() noexcept {
     if(t-perf.at<kPerfMs)return;
     if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
         perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
+    // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
+    // the system calls left with their time
+    const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only
+    if(Cfg().debug && perf.frames) {
+        const double f=static_cast<double>(perf.frames),tick=1000.0/static_cast<double>(hz.QuadPart);
+        Log("PERF MEM a frame: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
+            static_cast<double>(r.asks)/f,static_cast<double>(r.pageHits)/f,static_cast<double>(r.wsCalls)/f,
+            static_cast<double>(r.wsPages)/f,static_cast<double>(r.wsTicks)*tick/f,static_cast<double>(r.vqCalls)/f,
+            static_cast<double>(r.vqTicks)*tick/f);
+    }
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
