@@ -99,7 +99,126 @@ def module(frame: str) -> str:
 
 
 def is_plugin(frame: str) -> bool:
-    return module(frame).lower().startswith(PLUGIN_MODULES)
+    # .dll: EDF6.exe, the game's own launcher at the stack's root, shares the prefix
+    m = module(frame).lower()
+    return m.startswith(PLUGIN_MODULES) and m.endswith('.dll')
+
+
+class _Dbghelp:
+    """dbghelp in this process, one session for every plugin module (each loaded at its own fake base)."""
+
+    def __init__(self) -> None:
+        import ctypes
+        import ctypes.wintypes as wt
+        self.ctypes = ctypes
+        self.dbg = ctypes.WinDLL('dbghelp.dll')
+        self.proc = wt.HANDLE(0x45444636)   # any value: no real process, modules are loaded by hand
+        # UNDNAME (names as in the source), FAIL_CRITICAL_ERRORS, EXACT_SYMBOLS (a PDB of another build is refused)
+        self.dbg.SymSetOptions(0x2 | 0x200 | 0x400)
+        self.dbg.SymInitializeW.argtypes = [wt.HANDLE, wt.LPCWSTR, wt.BOOL]
+        self.dbg.SymSetSearchPathW.argtypes = [wt.HANDLE, wt.LPCWSTR]
+        self.dbg.SymLoadModuleExW.restype = ctypes.c_uint64
+        self.dbg.SymLoadModuleExW.argtypes = [wt.HANDLE, wt.HANDLE, wt.LPCWSTR, wt.LPCWSTR, ctypes.c_uint64, wt.DWORD,
+                                              ctypes.c_void_p, wt.DWORD]
+        self.dbg.SymFromAddr.argtypes = [wt.HANDLE, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_void_p]
+        if not self.dbg.SymInitializeW(self.proc, None, False):
+            raise OSError('SymInitialize failed')
+        self.next_base = 0x10000000
+
+        class SymbolInfo(ctypes.Structure):
+            _fields_ = [('SizeOfStruct', wt.ULONG), ('TypeIndex', wt.ULONG), ('Reserved', ctypes.c_uint64 * 2),
+                        ('Index', wt.ULONG), ('Size', wt.ULONG), ('ModBase', ctypes.c_uint64), ('Flags', wt.ULONG),
+                        ('Value', ctypes.c_uint64), ('Address', ctypes.c_uint64), ('Register', wt.ULONG),
+                        ('Scope', wt.ULONG), ('Tag', wt.ULONG), ('NameLen', wt.ULONG), ('MaxNameLen', wt.ULONG),
+                        ('Name', ctypes.c_char * 1024)]
+        self.SymbolInfo = SymbolInfo
+
+    def load(self, dll: str) -> int | None:
+        self.dbg.SymSetSearchPathW(self.proc, os.path.dirname(os.path.abspath(dll)))
+        base = self.dbg.SymLoadModuleExW(self.proc, None, dll, None, self.next_base, 0x8000000, None, 0)
+        if not base:
+            return None
+        self.next_base += 0x10000000
+        return base
+
+    def symbol(self, base: int, rva: int) -> tuple[int, str] | None:
+        """(function start RVA, name) from the PDB; None without one (no symbol, or only the nearest export)."""
+        s = self.SymbolInfo()
+        s.SizeOfStruct = 88   # the fixed part, without the name
+        s.MaxNameLen = 1023
+        disp = self.ctypes.c_uint64()
+        if not self.dbg.SymFromAddr(self.proc, base + rva, self.ctypes.byref(disp), self.ctypes.byref(s)):
+            return None
+        if s.Flags & 0x200:   # SYMFLAG_EXPORT: the nearest export, not the function
+            return None
+        return s.Address - base, s.Name.decode(errors='replace')
+
+
+def file_sha256(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def short_name(name: str) -> str:
+    """A PDB name made readable: anonymous namespaces dropped, and a long template's arguments (lambdas) elided."""
+    name = re.sub(r"`anonymous namespace'::|A0x[0-9a-f]+::", '', name)
+    if len(name) > 80 and '<' in name:
+        name = name[:name.index('<')] + '<...>' + name[name.rindex('>') + 1:]
+    return name
+
+
+class Plugins:
+    """Names plugin frames by function. Only the run's own DLL (perfrun placed it; its sha256 is in run.json) is
+    resolved: by the PDB next to it (dbghelp), else by its .pdata. The other plugin modules in the game folder are
+    whatever was installed, so a file of the same name elsewhere may be another build (wrong names, as seen with
+    EDF6AutoTurret 2026-11-07); their frames keep their own RVA, as does every frame without the DLL at hand."""
+
+    _dbghelp: _Dbghelp | None = None
+
+    def __init__(self, dll: str | None, sha: str | None = None) -> None:
+        self.dll = dll if dll and os.path.isfile(dll) and (not sha or sha == file_sha256(dll)) else None
+        self.mods: dict[str, tuple[int | None, Image | None]] = {}
+        self.cache: dict[tuple[str, int], tuple[str, str]] = {}
+
+    def _module(self, mod: str) -> tuple[int | None, Image | None]:
+        if mod not in self.mods:
+            base, img = None, None
+            dll = self.dll if self.dll and os.path.basename(self.dll).lower() == mod.lower() else None
+            if dll:
+                try:
+                    img = Image(dll, classes=False)
+                except Exception:   # pefile missing or not a PE: RVAs as they are
+                    img = None
+                if os.path.isfile(os.path.splitext(dll)[0] + '.pdb'):
+                    try:
+                        if Plugins._dbghelp is None:
+                            Plugins._dbghelp = _Dbghelp()
+                        base = Plugins._dbghelp.load(dll)
+                    except (OSError, AttributeError):   # not Windows, or dbghelp refused
+                        base = None
+            self.mods[mod] = (base, img)
+        return self.mods[mod]
+
+    def func(self, frame: str, leaf: bool) -> tuple[str, str]:
+        """(key, name) of the function a plugin frame is in. Return addresses (every frame but the leaf) are looked up
+        one byte back: a call that ends its function returns to the next one."""
+        mod, _, off = frame.rpartition('+')
+        rva = int(off, 16) - (0 if leaf else 1)
+        k = (mod, rva)
+        if k not in self.cache:
+            base, img = self._module(mod)
+            sym = Plugins._dbghelp.symbol(base, rva) if base and Plugins._dbghelp else None
+            if sym:
+                self.cache[k] = (f'{mod}+{sym[0]:x}', short_name(sym[1]))
+            else:
+                start = img.start(rva) if img else None
+                key = f'{mod}+{start if start is not None else int(off, 16):x}'
+                self.cache[k] = (key, key)
+        return self.cache[k]
 
 
 def read_samples(path: str) -> dict[str, list[list[str]]]:
@@ -237,8 +356,10 @@ def thread_role(img: Image, stacks: list[list[str]]) -> str:
     return 'leaf ' + ', '.join(f'{m} {c * 100 // len(stacks)}%' for m, c in leaf)
 
 
-def phases(img: Image, stacks: list[list[str]], top: int) -> list[str]:
-    """The game thread by System::update phase, and below each the class whose virtual the phase loop called."""
+def phases(img: Image, stacks: list[list[str]], top: int, plug: Plugins | None = None) -> list[str]:
+    """The game thread by System::update phase, and below each the class whose virtual the phase loop called, or the
+    plugin function it called (a hook on a vtable slot, e.g. the soldiers' Think on slot 7 in ai_update)."""
+    plug = plug or Plugins(None)
     ph = collections.Counter()
     below: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     for st in stacks:
@@ -255,15 +376,68 @@ def phases(img: Image, stacks: list[list[str]], top: int) -> list[str]:
             i = starts.index(APP_FRAME) if APP_FRAME in starts else len(starts)
             key = 'outside System::update' + (f' (App frame ret {rvas[i]:#x})' if i < len(starts) else '')
         ph[key] += 1
+        # the outermost plugin frame when the phase reached the plugin before any EDF.dll function: the plugin's
+        # time, not the phase's own
+        hook = None
+        for j in range(i - 1, -1, -1):
+            if rvas[j] is not None:
+                break
+            if is_plugin(st[j]):
+                hook = '[plugin] ' + plug.func(st[j], j == 0)[1]
+                break
         chain = [img.name(s) for s in reversed(starts[:i]) if s is not None][:2]
-        below[key][' > '.join(chain) + (' [plugin below]' if any(is_plugin(f) for f in st[:i]) else '')
-                   if chain else '(in the phase itself / system code)'] += 1
+        if hook:
+            label = hook
+        elif chain:
+            label = ' > '.join(chain) + (' [plugin below]' if any(is_plugin(f) for f in st[:i]) else '')
+        else:
+            label = '(in the phase itself / system code)'
+        below[key][label] += 1
     n = len(stacks)
     out = []
     for k, v in ph.most_common():
         out.append(f'- {v / n * 100:5.1f}% {k}')
         for c, m in below[k].most_common(top // 2):
             out.append(f'  - {m / n * 100:5.1f}% {c}')
+    return out
+
+
+def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms: float | None) -> list[str]:
+    """The plugin's functions on a thread: inclusive (on the stack at all) and self (the deepest frame outside the
+    system DLLs, so the system calls below it count but EDF.dll work it called does not), as a share of the thread's
+    samples and ms of each frame (share x mean frame time; meaningful for the game thread)."""
+    n = len(stacks)
+    incl: collections.Counter = collections.Counter()
+    selfc: collections.Counter = collections.Counter()
+    names: dict[str, str] = {}
+    for st in stacks:
+        seen = set()
+        own: str | bool | None = None
+        for j, f in enumerate(st):
+            if not is_plugin(f):
+                if own is None and frame_rva(f) is not None:
+                    own = False   # EDF.dll is deepest: the sample is the game's
+                continue
+            key, name = plug.func(f, j == 0)
+            names[key] = name
+            seen.add(key)
+            if own is None:
+                own = key
+        if own:
+            selfc[own] += 1
+        for k in seen:
+            incl[k] += 1
+    if not incl:
+        return ['no plugin frames']
+
+    def row(k: str, c: int) -> str:
+        ms = f' {c / n * frame_ms:6.2f} ms/frame' if frame_ms else ''
+        label = names[k] if names[k] == k else f'{names[k]} ({k})'
+        return f'- {c / n * 100:5.1f}%{ms} {label}'
+    out = ['inclusive:', '']
+    out += [row(k, c) + f' (self {selfc[k] / n * 100:.1f}%)' for k, c in incl.most_common(top)]
+    out += ['', 'self (system calls below included):', '']
+    out += [row(k, c) for k, c in selfc.most_common(top)]
     return out
 
 
@@ -330,6 +504,8 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
     samples = read_samples(stacks_path) if os.path.exists(stacks_path) else {}
     if samples and img is None:
         img = Image(run.get('edf_dll') or edf_dll())
+    # the run's own build, if the file is still the one measured: its PDB names the plugin's frames
+    plug = Plugins(run.get('dll'), run.get('sha256'))
     roles = {t: thread_role(img, s) for t, s in samples.items() if len(s) >= 20} if samples else {}
     out += ['', '## Threads (clean window: CPU, % of one core)', '']
     if cpu:
@@ -357,7 +533,9 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
             s = samples[t]
             out += [f'### thread {t}: {len(s)} samples ({len(s) / total_n * 100:.0f}%), {roles.get(t, "")}', '']
             if roles.get(t, '').startswith('game thread'):
-                out += ['by phase:', ''] + phases(img, s, top) + ['']
+                out += ['by phase:', ''] + phases(img, s, top, plug) + ['']
+                out += ['#### Plugin functions (game thread)', ''] + plugin_functions(
+                    plug, s, top, fs['mean_ms'] if fs else None) + ['']
             out += thread_detail(img, s, top) + ['']
     text = '\n'.join(out) + '\n'
     with open(os.path.join(run_dir, 'report.md'), 'w', encoding='utf-8') as f:
