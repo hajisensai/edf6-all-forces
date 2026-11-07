@@ -3560,7 +3560,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         GunnerPick p{v,Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
-        else VisitEnemies(v,&GunnerVisit,&p);
+        else VisitEnemiesThisStep(v,&GunnerVisit,&p);   // the side's points of this frame, walked once (enemy_points.h)
         if(p.best && HoldFire(v,p.best)){p.best=nullptr;step=GunnerStep::holdFire;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {

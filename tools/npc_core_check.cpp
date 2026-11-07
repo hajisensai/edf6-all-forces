@@ -292,6 +292,8 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;
 }
+// The frame's copy visits what the live walk does (tools/enemy_points_check.cpp).
+bool VisitEnemiesThisStep(const unsigned char* v,EnemyVisitor visit,void* ctx) noexcept { return VisitEnemies(v,visit,ctx); }
 }
 #ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {

@@ -67,6 +67,8 @@ Sea SeaAt(float x,float z,float* surface) noexcept;
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
+// VisitEnemies from the side's copy of this frame (enemy_points.h): for the per-seat asks of every vehicle each frame.
+bool VisitEnemiesThisStep(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept;   // every valid lock point, whatever its side (impact.cpp)
 // Whether `point` is within `radius` of the segment from->to (between its ends).
 bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;
