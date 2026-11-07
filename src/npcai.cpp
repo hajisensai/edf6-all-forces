@@ -3396,13 +3396,9 @@ constexpr unsigned kSeatFire=0x65F6F0;
 const unsigned char kSeatFireSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 using SeatFireFn=void(__fastcall*)(void*,int,const void*);
 struct GunnerPick { const void* self; const float* from; float reach; const void* best; float bestD; };
-void GunnerVisit(void* ctx,const void* object,const float* aim) {
-    auto& p=*static_cast<GunnerPick*>(ctx);
-    const float d=npc::Dist(p.from,aim);
-    // WastedFire last, only for one that would be the best: it is the costly test, and one passed over is passed
-    // over either way.
-    if(d<=p.reach && d<p.bestD && !WastedFire(p.self,object)){p.best=object;p.bestD=d;}
-}
+// WastedFire is asked only of one that would be the best (NearestEnemyThisStep): it is the costly test, and one passed
+// over is passed over either way.
+bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }
 }  // namespace
 
 namespace {
@@ -3666,7 +3662,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         GunnerPick p{v,Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
-        else VisitEnemies(v,&GunnerVisit,&p);
+        else NearestEnemyThisStep(v,p.from,reach,&GunnerUsable,v,p.best,p.bestD);   // the side's points of this frame (enemy_points.h)
         if(p.best && HoldFire(v,p.best)){p.best=nullptr;step=GunnerStep::holdFire;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {

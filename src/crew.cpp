@@ -87,8 +87,14 @@ namespace { gameclock::Clock clock; }
 ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),GamePaused()); }
 // System increments +CE0 once before the scene's complete input/update traversal.
 // Reading this on the game thread avoids guessing frame boundaries from vehicle order.
-namespace { gameframe::Clock frameClock; bool frameClockOk=false; }
+namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
+SceneStep SceneStepNow() noexcept {
+    if(!frameClockOk)return {};
+    const auto system=At<const unsigned char*>(image,kSystem);
+    if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return {};
+    return {At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0),missionCount};
+}
 void SeeFrame(const void*) noexcept {
     if(!frameClockOk)return;
     const auto system=At<const unsigned char*>(image,kSystem);
@@ -1109,7 +1115,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
-    frameClock.Reset();tickFrame=0;
+    frameClock.Reset();tickFrame=0;++missionCount;
     ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
