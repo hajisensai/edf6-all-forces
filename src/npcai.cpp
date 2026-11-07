@@ -2481,9 +2481,7 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
 //    that soldier with the box's share of its full health); offline only, NpcPickupHealth on, a hurt soldier.
 constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kNotifyBox=0x2C7D50,kApplyBox=0x2C7540,kHealHuman=0x547870,kNodePos=0x11B15B0;
 constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4,kBoxId=0xC8;
-// The box list is an MSVC std::list: its node count at +0xDE8 (the collect pass's erase 0x2CA446 dec qword [rsi+0xDE8]).
-// A walk goes over that many nodes: a battle's drops, not a fixed 128 (and 256 nodes) of them.
-constexpr std::size_t kBoxCount=kBoxList+8;
+constexpr int kMaxBoxes=128;
 const unsigned char kNotifyBoxSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x81,0xEC,0x60,0x06,0x00,0x00};
 const unsigned char kApplyBoxSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x0F,0x29,0x74,0x24,0x20};
 const unsigned char kHealHumanSig[]={0x80,0xB9,0xE8,0x02,0x00,0x00,0x00,0x75,0x20,0xF3,0x0F,0x58,0x89,0xF8,0x02,0x00,0x00,0xF3,0x0F,0x5D};
@@ -2512,18 +2510,14 @@ void* DropManager() noexcept {
     return m && Readable(m,kBoxList+0x10) ? m : nullptr;
 }
 
-// The boxes on the ground (not taken), into `out` (the caller's, kept: it grows to the battle's drops once): their Unit,
-// position (the model's, as Collect reads it) and kind.
-int Boxes(std::vector<SweepBox>& out) noexcept {
+// The boxes on the ground (not taken), at most `most`: their Unit, position (the model's, as Collect reads it) and kind.
+int Boxes(SweepBox* out,int most) noexcept {
     unsigned char* const m=static_cast<unsigned char*>(DropManager());
     if(!m)return 0;
     const auto head=At<unsigned char*>(m,kBoxList);
     if(!Readable(head,0x20))return 0;
-    const std::uint64_t count=At<std::uint64_t>(m,kBoxCount);
-    if(out.size()<count)out.resize(static_cast<std::size_t>(count));
-    int n=0;
-    std::uint64_t guard=0;
-    for(auto node=At<unsigned char*>(head,0);node && node!=head && guard<count;node=At<unsigned char*>(node,0),++guard) {
+    int n=0,guard=0;
+    for(auto node=At<unsigned char*>(head,0);node && node!=head && n<most && guard<kMaxBoxes*2;node=At<unsigned char*>(node,0),++guard) {
         if(!Readable(node,0x20))break;
         auto u=At<unsigned char*>(node,kBoxNodeUnit);
         if(!Readable(u,kBoxId+sizeof(std::int32_t)) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
@@ -2532,7 +2526,7 @@ int Boxes(std::vector<SweepBox>& out) noexcept {
         if(kind<0 || kind>3 || !model)continue;
         const float* p=reinterpret_cast<NodePosFn>(image+kNodePos)(model);
         if(!p || !std::isfinite(p[0]+p[1]+p[2]))continue;
-        out[static_cast<std::size_t>(n++)]=SweepBox{u,{p[0],p[1],p[2]},kind};
+        out[n++]=SweepBox{u,{p[0],p[1],p[2]},kind};
     }
     return n;
 }
@@ -2619,13 +2613,12 @@ void SweepFrame() noexcept {
     if(!sweep.on)return;
     if(!me || !world.player){EndSweep("the player is gone");return;}
     if(ms>=sweep.until){EndSweep("its time is up");return;}
-    static std::vector<SweepBox> boxes;
-    const int nb=Boxes(boxes);
+    SweepBox boxes[kMaxBoxes];
+    const int nb=Boxes(boxes,kMaxBoxes);
     const void* who[32];
     const int np=SweepRoster(ms,who,32);
-    static std::vector<npc::pickup::Box> b;
-    if(b.size()<boxes.size())b.resize(boxes.size());
-    for(int i=0;i<nb;++i){std::memcpy(b[static_cast<std::size_t>(i)].pos,boxes[static_cast<std::size_t>(i)].pos,12);b[static_cast<std::size_t>(i)].kind=boxes[static_cast<std::size_t>(i)].kind;}
+    npc::pickup::Box b[kMaxBoxes];
+    for(int i=0;i<nb;++i){std::memcpy(b[i].pos,boxes[i].pos,12);b[i].kind=boxes[i].kind;}
     npc::pickup::Picker p[32];
     for(int i=0;i<np;++i) {
         auto h=static_cast<const unsigned char*>(who[i]);
@@ -2634,7 +2627,7 @@ void SweepFrame() noexcept {
     }
     npc::pickup::Rules r{PickupHealth(),InSession(),c.npcPickupRange,{world.playerAt[0],world.playerAt[1],world.playerAt[2]}};
     int out[32];
-    const int given=npc::pickup::Assign(b.data(),nb,p,np,r,out);
+    const int given=npc::pickup::Assign(b,nb,p,np,r,out);
     int left=0;
     for(int i=0;i<nb;++i)for(int k=0;k<np;++k)if(npc::pickup::Takes(b[i],p[k],r)){++left;break;}
     AcquireSRWLockExclusive(&sweepLock);sweep.left=left;ReleaseSRWLockExclusive(&sweepLock);
@@ -2643,15 +2636,15 @@ void SweepFrame() noexcept {
         if(out[k]<0)continue;
         Soldier* s=Entry(static_cast<const unsigned char*>(who[k]),ms);
         if(!s)continue;
-        const SweepBox& x=boxes[static_cast<std::size_t>(out[k])];
+        const SweepBox& x=boxes[out[k]];
         s->pickUnit=x.unit;std::memcpy(s->pickPos,x.pos,12);s->pickKind=x.kind;s->pickFrame=GameFrame();
     }
 }
 
 // The box still lying where the sweep saw it this frame (not taken since): its current position.
 bool BoxStill(const void* unit,float* at4) noexcept {
-    static std::vector<SweepBox> boxes;
-    const int n=Boxes(boxes);
+    SweepBox boxes[kMaxBoxes];
+    const int n=Boxes(boxes,kMaxBoxes);
     for(int i=0;i<n;++i) {
         if(boxes[i].unit!=unit)continue;
         const float* p=reinterpret_cast<NodePosFn>(image+kNodePos)(At<const void*>(static_cast<const unsigned char*>(unit),kBoxModel));
