@@ -84,7 +84,7 @@ bool Scanned(const Book& b,const void* shooter,const void* target,std::uint64_t 
     return false;
 }
 void EarlyOut() {
-    constexpr int kTargets=8,kShooters=kPairs/kTargets*5/4;   // a quarter more pairs than the table keeps: some taken over
+    constexpr int kTargets=8,kShooters=40;   // 320 pairs, holds coming and going
     static Book b{};
     static int shooters[kShooters],targets[kTargets];
     Check(b.latestHold==0 && !Wasted(b,&shooters[0],&targets[0],0),"no hold given: not wasted");

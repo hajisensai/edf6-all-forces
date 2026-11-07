@@ -149,19 +149,14 @@ int main() {
         Check(badPick==0,"Nearest: the live visitor's pick, distance and usable() asks",badPick);
         Check(picked>1000 && asked>picked,"Nearest: picks made and refusals exercised",picked,asked);
     }
-    // The walk's node cap (kMaxNodes): a longer list stops at the same node both ways.
+    // The walk's node count (the registry's own, its +0x10): no more nodes than it says, a list of any length whole.
     {
-        Registry r;
-        Make(r,rng,50,kMaxNodes+500);
-        std::vector<Point> copy;
-        Collect(r.head,r.relation,copy);
-        Check(Same(Live(r,nullptr),FromCopy(copy,nullptr)),"past kMaxNodes: the same cut");
-        // the cut is real: the last 500 nodes are never visited (all made enemy, alive and lockable)
+        constexpr int kCount=300,kLonger=kCount+10;
         Registry tail;
         for(auto& rel:tail.relation)rel=kEnemyRelation;
         auto o=std::make_unique<unsigned char[]>(0x400);std::memset(o.get(),0,0x400);
         tail.objects.push_back(std::move(o));
-        for(int i=0;i<kMaxNodes+10;++i) {
+        for(int i=0;i<kLonger;++i) {
             auto t=std::make_unique<unsigned char[]>(0x40);std::memset(t.get(),0,0x40);
             t[kTargetValid]=t[kTargetLockable]=1;
             edf::Put<const void*>(t.get(),kTargetObject,tail.objects[0].get());
@@ -170,10 +165,12 @@ int main() {
             tail.targets.push_back(std::move(t));tail.nodes.push_back(std::move(n));
         }
         Link(tail);
-        std::vector<Point> all;
+        std::vector<Point> cut,all;
+        Collect(tail.head,tail.relation,cut,kCount);
         Collect(tail.head,tail.relation,all);
-        Check(all.size()==static_cast<std::size_t>(kMaxNodes),"the copy holds kMaxNodes points of a longer list",
-              static_cast<long long>(all.size()));
+        Check(cut.size()==static_cast<std::size_t>(kCount),"the copy stops at the node count given",
+              static_cast<long long>(cut.size()));
+        Check(all.size()==static_cast<std::size_t>(kLonger),"no count given: the whole list",static_cast<long long>(all.size()));
     }
     // The negative control: a copy that does not leave the asking vehicle out differs from the walk.
     {
