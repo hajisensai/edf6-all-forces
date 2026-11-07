@@ -131,6 +131,11 @@ def scenarios() -> None:
     p = perfrun.plan_for('horde::30')
     check((p.waves.enemy, p.waves.per_wave, p.waves.max_alive) == ('giantant01', 30, 400),
           "horde: a field given after it overrides the preset's, the rest stay")
+    p = perfrun.plan_for('stress:100')
+    check((p.waves.max_alive, p.waves.per_wave, p.squads) == (16000, 400, 300) and p.friends == perfrun.PRESETS['blast'][1],
+          'stress:100: a hundred times swarm, waves at most 400, blast shelling them')
+    check(perfrun.plan_for('stress:1:giantspider01').waves.enemy == 'giantspider01' and
+          perfrun.stress_fields(1)[2] == 40.0 and perfrun.stress_fields(100)[2] == 90.0, 'stress: its enemy, its warm-up')
     for name, (wave, friends, _) in perfrun.PRESETS.items():
         check(wave.split(':')[0] in {s for s, _, _ in gen.ENEMIES} and all(f in gen.DERIVED or f in gen.JETS or
               f.startswith('vehicle') for f in friends), f'preset {name}: an enemy and friends the range knows')

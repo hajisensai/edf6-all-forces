@@ -685,6 +685,7 @@ def _q(text: str) -> str:
 
 
 SPAWN_BATCH, SPAWN_GAP = 4, 0.25
+SQUAD_BATCH = 10   # soldier squads made in one frame (six soldiers each), SPAWN_GAP apart
 
 
 def script(plan: Plan, lay: Layout) -> str:
@@ -780,7 +781,9 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
     for kind, point in enemy_spots(plan, lay):
         lines.append(f'	CreateEnemy({_q(point.name)}, {_q("app:/object/" + kind + ".sgo")}, {plan.vehicle_level:.2f}, true);')
-    for _ in range(0 if grand else plan.squads):
+    for i in range(0 if grand else plan.squads):
+        if i and i % SQUAD_BATCH == 0:   # (perfrun's stress: hundreds of squads, not all in one frame)
+            lines.append(f'\tWait({SPAWN_GAP:.2f});')
         lines.append(f'	CreateFriendSquad({_q(lay.player.name)}, 20, {_q(GRAND_SOLDIERS[0])}, {_q(GRAND_SOLDIERS[1])}, 6, '
                      f'{plan.vehicle_level:.2f}, false);')
     if w.enabled and target_spots(lay) and targets:

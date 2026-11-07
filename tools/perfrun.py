@@ -6,6 +6,9 @@ SCENARIO
   M001 | RM015 | ROW                 a stock offline mission (tests/autopilot/drive.py's)
   grand                              the test range's grand battle (testrange/gen.py grand_battle)
   horde | blast                      heavier swarms (PRESETS): 400 ants; 300 ants under tank shells, rockets, artillery
+  stress:N[:ENEMY]                   swarm times N (the user, 2026-11-07: "a hundred times the monsters and NPCs"):
+                                     up to 160*N enemies, 3*N soldier squads, blast's vehicles shelling them; the
+                                     PERF OBJECTS rows say how many the game really held
   swarm[:ENEMY[:PER[:CAP[:LEVEL]]]]  the test range with waves of ENEMY (default giantant01): PER every 2 s while fewer
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
@@ -60,10 +63,32 @@ PRESETS = {
 }
 
 
+def stress_fields(n: int) -> tuple[int, int, float]:
+    """stress:N's waves: (per wave, cap, seconds to warm). swarm's cap and squads times N; the waves grow with N so the
+    cap can be reached (40 a wave for N up to 5, 400 at most: one wave is one call, a bigger one is a hitch of its own),
+    the warm-up as long as filling the cap at that rate takes (2 s a wave), 40 s to 150 s."""
+    cap = 160 * n
+    per = min(400, 40 * max(1, -(-n // 5)))
+    return per, cap, max(40.0, min(150.0, 10.0 + cap / (per / 2.0)))
+
+
 def plan_for(scenario: str):
     """The range plan of a range scenario, None for a stock mission."""
     import gen
     kind, *rest = scenario.split(':')
+    if kind == 'stress':
+        n = int(rest[0]) if rest and rest[0] else 1
+        if n < 1:
+            raise ValueError('stress:N needs N >= 1')
+        per, cap, _ = stress_fields(n)
+        enemy = rest[1] if len(rest) > 1 and rest[1] else 'giantant01'
+        plan = gen.Plan()
+        plan.vehicles = {}
+        plan.friends = dict(PRESETS['blast'][1])
+        plan.squads = 3 * n
+        plan.waves = gen.Waves(enabled=True, enemy=enemy, per_wave=per, max_alive=cap, first_delay=3.0, interval=2.0,
+                               level=0.3)
+        return plan
     if kind == 'grand':
         return gen.grand_battle(gen.Plan())
     if kind in PRESETS:
@@ -153,7 +178,9 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         raise SystemExit('the game is running (the user may be playing): not touched')
     os.makedirs(out, exist_ok=True)
     plan = plan_for(scenario)
-    warm = opts['warm'] if opts['warm'] is not None else WARM.get(scenario.split(':')[0], 25.0)
+    kind, *rest = scenario.split(':')
+    warm = (opts['warm'] if opts['warm'] is not None else
+            stress_fields(int(rest[0]) if rest and rest[0] else 1)[2] if kind == 'stress' else WARM.get(kind, 25.0))
     marks: dict = {}
     log = plugin_log(game)
     # the plugin appends to its log across launches: only what this launch writes is this run's
