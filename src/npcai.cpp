@@ -3316,9 +3316,10 @@ using SeatFireFn=void(__fastcall*)(void*,int,const void*);
 struct GunnerPick { const void* self; const float* from; float reach; const void* best; float bestD; };
 void GunnerVisit(void* ctx,const void* object,const float* aim) {
     auto& p=*static_cast<GunnerPick*>(ctx);
-    if(WastedFire(p.self,object))return;
     const float d=npc::Dist(p.from,aim);
-    if(d<=p.reach && d<p.bestD){p.best=object;p.bestD=d;}
+    // WastedFire last, only for one that would be the best: it is the costly test, and one passed over is passed
+    // over either way.
+    if(d<=p.reach && d<p.bestD && !WastedFire(p.self,object)){p.best=object;p.bestD=d;}
 }
 }  // namespace
 
