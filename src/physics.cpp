@@ -4,6 +4,7 @@
 // chassis lost the motion welding and the character's vertical contacts lost the force limit on the way.
 #include "crew.h"
 #include "memory.h"
+#include "rubble_due.h"
 
 #include <atomic>
 #include <cstring>
@@ -250,7 +251,6 @@ constexpr std::uint32_t kFlagMassChanger=0x800000;
 constexpr std::uint8_t kCategoryDebris=1,kCategoryHeavy=2,kQualityDebris=1;
 constexpr std::uint16_t kHeavyFactor=0x42C8;   // 100.0f: the hull keeps 1-a = 2% of a rubble push
 constexpr float kRubbleRadius=15.0f;
-constexpr ULONGLONG kRubbleScanMs=250;
 
 struct ChassisWorld {
     unsigned char* iface;
@@ -334,20 +334,9 @@ void MarkRubble(const ChassisWorld& w) noexcept {
     }
 }
 
-struct RubbleScan { const void* wrapper; ULONGLONG at; };
-RubbleScan rubbleScans[8]{};
+rubble::Table rubbleScans{};   // each chassis' last rubble scan (rubble_due.h)
 
-bool RubbleDue(const void* wrapper) noexcept {
-    const ULONGLONG now=GetTickCount64();
-    RubbleScan* slot=&rubbleScans[0];
-    for(auto& s:rubbleScans) {
-        if(s.wrapper==wrapper) { slot=&s; break; }
-        if(s.at<slot->at)slot=&s;
-    }
-    if(slot->wrapper==wrapper && now-slot->at<kRubbleScanMs)return false;
-    *slot=RubbleScan{wrapper,now};
-    return true;
-}
+bool RubbleDue(const void* wrapper) noexcept { return rubble::Due(rubbleScans,wrapper,GetTickCount64()); }
 
 bool heavyChassis;
 bool probeChassisVelocity;
