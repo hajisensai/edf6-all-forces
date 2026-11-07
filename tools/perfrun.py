@@ -203,7 +203,8 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
                        os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1',),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
-                       during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks))
+                       during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
+                       quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
     finally:
         if plan:
             if drive.game_pids():
