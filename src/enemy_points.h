@@ -24,7 +24,7 @@ struct Point { const void* object; float aim[3]; };
 
 // f(object, aim) for each valid, lockable lock point on the circular list at `head` whose object is alive, is not
 // `self`, and whose team `relation` (the side's row of the team table) calls an enemy, its aim finite; in list order.
-template<class F> void Walk(const unsigned char* head,const std::int32_t* relation,const void* self,F&& f) noexcept {
+template<class F> inline void Walk(const unsigned char* head,const std::int32_t* relation,const void* self,F&& f) noexcept {
     using edf::At;
     int n=0;
     for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
@@ -49,7 +49,7 @@ inline void Collect(const unsigned char* head,const std::int32_t* relation,std::
 }
 
 // The copy as `self`'s walk would give it: without `self`, and without one that has died since the copy was taken.
-template<class F> void Visit(const std::vector<Point>& points,const void* self,F&& f) noexcept {
+template<class F> inline void Visit(const std::vector<Point>& points,const void* self,F&& f) noexcept {
     for(const Point& p:points) {
         if(p.object==self || static_cast<const unsigned char*>(p.object)[edf::kDead])continue;
         f(p.object,p.aim);

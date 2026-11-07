@@ -25,10 +25,10 @@ constexpr std::int32_t kMostBodies=0x40000;
 constexpr int kMost=1024;            // chassis noted between two passes; a full window passes early (Note: false)
 constexpr int kSlots=2*kMost;        // the wrapper -> entry index (open addressing, a power of 2)
 
-template<class T> T Get(const void* base,std::size_t offset) noexcept {
+template<class T> inline T Get(const void* base,std::size_t offset) noexcept {
     T v;std::memcpy(&v,static_cast<const unsigned char*>(base)+offset,sizeof(T));return v;
 }
-template<class T> void Set(void* base,std::size_t offset,T v) noexcept {
+template<class T> inline void Set(void* base,std::size_t offset,T v) noexcept {
     std::memcpy(static_cast<unsigned char*>(base)+offset,&v,sizeof(T));
 }
 
