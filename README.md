@@ -703,6 +703,25 @@ EDF5 任务的引导线改为跟随脚本点名的目标。转角会比原版的
   队列按游戏目录分开（`%LOCALAPPDATA%\EDF6TestQueue\<目录哈希>`），对临时游戏副本的测试不会排在真实测试后面。
 - 排队只管会话之间；**用户自己开着的游戏照旧不碰**（各脚本原有的「游戏在运行就拒绝」检查不变）。
 
+### 性能实测（perfrun.py）
+
+一条命令测一个场景的帧时间、各线程 CPU、GPU 占用和热点，后台跑、自己排队、结束逐字节还原：
+
+```
+python tools/perfrun.py swarm                      # 测试场 160 只蚂蚁 + NPC 坦克、士兵班对打
+python tools/perfrun.py grand                      # 测试场大决战
+python tools/perfrun.py M001 --ab A.dll B.dll      # 两个构建交替跑（默认 ABAB），出 A/B 表
+```
+
+- 场景：`M001` / `RM015` / 行号（原版任务）、`grand`、`swarm[:敌人[:每波[:上限[:等级]]]]`。测试场场景只改写测试场任务目录里的 4 个文件
+  （`gen.write_scenario`），不走会重新生成全部载具的完整安装；测试场要先由安装器装好。测试场只留当前方案要用的生成载具，
+  所以 `grand` 要求先在测试场启动器里用大决战方案装过一次（缺什么会直接报出来，不会进游戏崩掉）。原件先存到排队目录
+  （`%LOCALAPPDATA%\EDF6TestQueue\…\range-scenario-original`），游戏没退出、来不及还原时用 `python tools/perfrun.py --restore` 放回。
+- 进关等 `--warm` 秒（场面铺满；默认大决战 45、蚁群 30、原版 25），再采 `--cpu` 秒的干净窗口（不挂起线程：线程 CPU、GPU、插件
+  `Debug=1`（出厂默认）的 PERF 帧时间）和 `--stacks` 秒的栈（各默认 20），采完立刻退游戏，不按固定时长挂机。`--shots` 截图会掉帧，测帧时间时别开。
+- 结果在 `tmp/perf/<场景>-<时间>/`：`report.md`（按线程、按 `System::update` 阶段和对象类归并的热点，EDF.dll 地址为 RVA）与原始采样。
+  `python tools/perf_report.py <目录>` 可重新生成。需要先 `cmake --build build --target rip_sampler EDF6Autopilot`（两个都不在 `build.cmd` 的默认目标里）。
+
 ### 自动实测（run_test.py）
 
 一条命令：启动游戏 → 认画面走菜单（标题、存档、模式这些绿色菜单一路回车；作战指令总部 → 出击 → 任务列表按到顶，就是测试场那一关，

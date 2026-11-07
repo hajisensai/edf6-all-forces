@@ -62,6 +62,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
@@ -632,7 +633,9 @@ def commit_of(row: str) -> float:
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
         keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
-        hq: bool = False, every: float = 15.0) -> int:
+        hq: bool = False, every: float = 15.0, during: Callable[[], None] | None = None) -> int:
+    """`during`: called on a thread of its own once the mission has started (tools/perfrun.py samples the game there);
+    the run quits as soon as it returns, SECONDS then only the longest stay."""
     install(game)
     placed: tuple[str, bytes] | None = None
     placements: list[Placement] = []
@@ -657,7 +660,10 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         next_shot = start + every
         nudge_at = start + min(20, seconds / 2)
         pending = sorted(keys, key=lambda k: k[1])
-        while (now := time.time()) < end:
+        worker = threading.Thread(target=during, daemon=True) if during else None
+        if worker:
+            worker.start()
+        while (now := time.time()) < end and not (worker and not worker.is_alive()):
             if not game_pids():
                 print('the game exited before the observation period ended')
                 return 1
