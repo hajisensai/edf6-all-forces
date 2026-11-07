@@ -821,19 +821,20 @@ void UnderVehicle(unsigned char* v) noexcept {
 // how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
 constexpr ULONGLONG kPerfMs=5000;
 constexpr double kPerfSlowMs=33.4;
-struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow; ULONGLONG at; } perf{};
+constexpr double kPerfLateMs=20.0;   // over one 1/60 s tick and its jitter: a frame that took two (frame_pacing.cpp)
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow,late; ULONGLONG at; } perf{};
 void PerfTick() noexcept {
     LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
     if(perf.last.QuadPart) {
         const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
-        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;if(ms>perf.worst)perf.worst=ms;}
+        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;perf.late+=ms>kPerfLateMs;if(ms>perf.worst)perf.worst=ms;}
     }
     perf.last=now;
     const ULONGLONG t=GetTickCount64();
     if(t-perf.at<kPerfMs)return;
-    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
-        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
-    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
+    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over %.0f ms",perf.frames,
+        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.late,kPerfLateMs,perf.slow,kPerfSlowMs);
+    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=perf.late=0;
 }
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }

@@ -130,6 +130,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
@@ -925,6 +926,9 @@ add_test(NAME team_native_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_D
 set_tests_properties(team_native_sigs PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
+add_test(NAME frame_pacing_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(frame_pacing_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
@@ -1025,6 +1029,7 @@ set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_ch
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
+add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
 add_dependencies(offline_checks stab_native_readback_test)
 add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
@@ -1387,6 +1392,12 @@ target_compile_options(npc_gunners_online_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(npc_gunners_online_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_gunners_online_test)
 add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
+# rip_sampler: an out-of-process sampling profiler for the running game (tools/rip_sampler.cpp; summarised by
+# tools/rip_analyze.py, docs/frame-pacing-re.md); never shipped: cmake --build build --target rip_sampler
+add_executable(rip_sampler EXCLUDE_FROM_ALL tools/rip_sampler.cpp)
+target_link_libraries(rip_sampler PRIVATE dbghelp psapi winmm)
+target_compile_options(rip_sampler PRIVATE /W4 /WX /utf-8 /permissive-)
+
 # EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot

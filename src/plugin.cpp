@@ -16,6 +16,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crash_dump.h"
+#include "frame_pacing.h"
 #include "log_buffer.h"
 #include "crew.h"
 #include "gravity.h"
@@ -1298,6 +1299,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // The weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
     InstallWeaponRecords();
+    InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     Log("ROOM isolation=%d",InstallModRoom());
