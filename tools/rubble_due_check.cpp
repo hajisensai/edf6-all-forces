@@ -75,6 +75,29 @@ int main() {
         }
         Check(wrong==0,"chassis coming and going: due once, then held",wrong);
     }
+    // More than kSlots chassis within kRubbleScanMs (the fallback: the home slot taken from a held chassis): every
+    // newcomer still scans, the table keeps kSlots distinct chassis, and a second pass within the throttle scans only
+    // the ones that fell out, not all of them. Each rescan takes a held chassis's home slot, so a few more fall out
+    // in turn (measured 139 of 1100 for 76 over): bounded by twice the overflow, not every step as the 8-slot LRU.
+    {
+        static Table t{};
+        constexpr int n=1100;
+        std::vector<unsigned char> objs(n*0x40);
+        const std::uint64_t now=3600000;
+        int first=0;
+        for(int i=0;i<n;++i)first+=Due(t,objs.data()+i*0x40,now);
+        Check(first==n,"over kSlots chassis: every one due on its first step",first);
+        int held=0,dup=0;
+        for(int k=0;k<kSlots;++k) {
+            held+=t.slot[k].wrapper!=nullptr && t.slot[k].at==now;
+            for(int j=k+1;j<kSlots;++j)dup+=t.slot[k].wrapper && t.slot[k].wrapper==t.slot[j].wrapper;
+        }
+        Check(held==kSlots && dup==0,"over kSlots chassis: the table holds kSlots distinct ones",held,dup);
+        int again=0;
+        for(int i=0;i<n;++i)again+=Due(t,objs.data()+i*0x40,now+16);
+        std::printf("  over kSlots: second pass %d of %d due\n",again,n);
+        Check(again>0 && again<=2*(n-kSlots),"over kSlots chassis: within the throttle only the evicted rescan",again);
+    }
     std::printf("rubble_due_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }
