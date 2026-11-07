@@ -1152,6 +1152,7 @@ add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
+add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 

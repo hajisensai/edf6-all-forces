@@ -4,7 +4,7 @@
 
 ## 怎么找到的
 
-`tools/rip_sampler.cpp` 是进程外的采样器，不需要管理员权限，也不用 ETW。每个 tick 只采本 tick 用过 CPU 的线程：挂起线程，用 dbghelp `StackWalk64` 按目标进程的 .pdata 回溯栈，再恢复。`tools/rip_analyze.py` 用 EDF.dll 的 .pdata 把地址归到函数。
+`tools/rip_sampler.cpp` 是进程外的采样器，不需要管理员权限，也不用 ETW。每个 tick 只采本 tick 用过 CPU 的线程：挂起线程，用 dbghelp `StackWalk64` 按目标进程的 .pdata 回溯栈，再恢复。`tools/rip_analyze.py` 用 EDF.dll 的 .pdata 把地址归到函数。之后的性能实测用 `tools/perfrun.py`（README「性能实测」）一条命令完成：场景、采样、报告、还原。
 
 在 M001 里用 `tests/autopilot/drive.py` 后台挂机，采样 90 s（装着本插件与 EDF6Coop）：
 
