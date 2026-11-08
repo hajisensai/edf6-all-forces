@@ -133,3 +133,4 @@ dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
 #copyBox { min-height: 200px; margin: 8px 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
+.bar { margin: 1em 0; }

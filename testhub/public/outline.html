@@ -14,18 +14,22 @@
     <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
   </header>
   <p id="error" class="err hide" role="alert"></p>
-  <p id="groupBar" class="row hide"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></p>
+  <div id="groupBar" class="row hide bar"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></div>
+  <div id="bookBar" class="row hide bar"><span>这个组的大纲</span><fieldset id="books" class="chips" aria-label="这个组的大纲"></fieldset>
+    <button class="btn ghost small hide" id="newBook" type="button">＋ 新建一份大纲</button></div>
   <section>
     <div class="row">
       <h2 id="title" style="margin:0">剧情大纲</h2>
+      <input type="text" id="titleInput" class="hide" maxlength="60" placeholder="大纲名称" aria-label="大纲名称">
       <span class="row" style="margin-left:auto">
         <button class="btn ghost small" id="edit" type="button">编辑</button>
         <button class="btn ghost small hide" id="addLane" type="button">＋ 新任务线</button>
         <button class="btn ghost small" id="copy" type="button">复制为文字</button>
+        <button class="btn ghost small danger hide" id="removeBook" type="button">删除这份大纲</button>
         <button class="btn small hide" id="save" type="button">保存</button>
       </span>
     </div>
-    <p class="muted hide" id="hint">同组共用一份大纲：几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。登录后每条线、每一步都能打分（1–5）和写评价。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
+    <p class="muted hide" id="hint">一个组可以有好几份大纲（上面切换，「＋ 新建一份大纲」再写一份），同组成员都能改。每份大纲里几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。登录后每条线、每一步都能打分（1–5）和写评价。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
     <p class="muted" id="saved" role="status"></p>
     <textarea id="copyBox" class="hide" readonly aria-label="大纲文字"></textarea>
     <div id="board" aria-live="polite">加载中……</div>
