@@ -48,6 +48,23 @@ void Log(const char*,...) noexcept {}
 bool EnemyControlWeaponLock(const void*,void*) noexcept{return false;}
 bool EnemyControlWeaponAim(const void* object,float* out) noexcept {if(!fixture::aimOwned || object!=fixture::object)return false;std::memcpy(out,fixture::actualAim,12);return true;}
 }
+// The fake object carries no SGO: the sound tables (edf41_dragon_se) are absent, so ConfigureSounds logs and turns the
+// sounds off; nothing past the table lookup may run.
+namespace crew::edf41c {
+int keyLookups=0;
+const SgoNode* Key(const void*,const wchar_t*) noexcept{++keyLookups;return nullptr;}
+int Count(const SgoNode* array) noexcept{return array ? 0 : -1;}
+const SgoNode* Child(const SgoNode*,int) noexcept{fixture::Check(false,"no sound table to walk");return nullptr;}
+bool Float(const SgoNode*,float*) noexcept{fixture::Check(false,"no sound table to read");return false;}
+bool Int(const SgoNode*,std::int32_t*) noexcept{fixture::Check(false,"no sound table to read");return false;}
+bool Text(const SgoNode*,wchar_t*,std::size_t) noexcept{fixture::Check(false,"no sound table to read");return false;}
+int BoneIndex(void*,const wchar_t*) noexcept{fixture::Check(false,"no sound bones without a table");return -1;}
+bool BoneMatrix(void*,int,float*) noexcept{fixture::Check(false,"no sound point without a table");return false;}
+bool PlaySe(const void*,const wchar_t*,const float*,SoundHandle*) noexcept{fixture::Check(false,"no sound without a table");return false;}
+void MoveSound(SoundHandle&,const float*) noexcept{fixture::Check(false,"no sound to move");}
+void StopSound(SoundHandle&,int) noexcept{}
+bool FillSePreset(unsigned char*,const void*,const wchar_t*) noexcept{fixture::Check(false,"no preset without a table");return false;}
+}
 namespace crew::enemy_native {
 bool DeiroiWeaponAimReady() noexcept{return false;}
 bool WalkingAcceptedAimPoint(const void*,float*) noexcept{return false;}
