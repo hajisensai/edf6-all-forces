@@ -144,15 +144,22 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
 
 结论：这只是**同一帧内 begin / end 事件的对冲合并**。合并在 PostSolve 任务里完成，派发线程和其它事件一样，是任意的单个线程。它既不把派发推迟到游戏线程，也不提供跨线程缓冲，**对多线程没有帮助**。不要指望靠置 `+0x78` 把回调挪回主线程。
 
-## 7. 残余风险（需要运行时确认）
+## 7. 残余风险与实现前补审的结论
 
-1. **图的边是否完备**（推测）。上面只验证了世界级任务的直接前驱。如果某个 collide 或 solve 任务和 PostCollide / PreSolve / PostSolve 之间没有排序，回调里改世界（增删 body、改速度、改 motion）就会和那个任务数据竞争。
-   - 验证办法：Debug 构建里，在三个世界级任务进入时断言「队列里没有本步其它正在运行的任务」，或者从 `graph+0x328` 导出整张图的边做静态核对。
-2. 回调在 worker 上调用非线程安全的游戏子系统（音频、特效、对象创建）。今天这些调用在游戏线程上，打开多线程后会在另一个线程上发生；同一时刻游戏线程停在 `0x9EDDB0`，AI 线程、渲染线程和今天一样会重叠。所以「和其它游戏线程的交叠」与今天相同，变化只是 thread id。依赖 `GetCurrentThreadId` 的代码：
-   - 游戏范围内 `0x6D3C0` / `0x6D3F0` 是 debug owner 跟踪，不阻塞；
-   - 其余都是 render / CRI / CRT。
+1. **图的边是否完备**。实现时把任务图静态导出了一遍（`tests/havok_mt_audit.py` 第 6 项，`graph()` 线性跟踪 addTask `0x9EC400` / `0x9EC4F0` / `0x9EC630` / `0x9EC6E0` 返回的句柄流到 `graph+0x328` 的 word 对）：
+   - collide 图（`0xE7E570`）新建 18 个任务，30 条边全部解析出来，外部输入只有 `+0x4C8` / `+0x4CA` / `+0x4CC`。**18 个任务全都是 PostCollide（`sim+0x6A8`，句柄 `+0x4D6`）的祖先**（已验证）。所以 PostCollide 运行时，本步的 narrowphase 任务已经全部结束。
+   - solve 图（`0xE82390`）：PreSolve（`+0x4D8`）以 `+0x4D6` 为前驱；求解任务在 PreSolve 之后、汇合到 `+0x4DA`；`+0x4DA` → `+0x4DC` → PostSolve（`+0x4E0`）（已验证）。
+   - 没展开的：`0xE823F5` 的 `0x9EC7A0` 插入的子图（`sim+0x190`，`+0x4DA` 取的是它里面的一个节点）和 `0xE82AC7` 的 `0x9ECCE0`。它们按 Havok 的设计汇合在 `+0x4DA`，**推测**不和 PreSolve / PostSolve 并发；这是 Havok 自己发布的多线程模式，世界级任务存在的意义就是串行点。
+2. 回调在 worker 上调用非线程安全的游戏子系统（音频、特效、对象创建）。游戏线程在整个图执行期间停在 `0x9EDDB0`，所以回调和游戏线程代码互斥，和 AI 线程、渲染线程、CRI 线程的交叠与今天完全相同，变化只是 thread id。thread id 会造成差别的只有三类，逐一核对过：
+   - TLS：见下面第 3 条，没有游戏自己的 thread_local（已验证）。
+   - `GetCurrentThreadId`：`0x6D3C0` / `0x6D3F0` 是 debug owner 跟踪，不阻塞；其余是 render / CRI / CRT。
+   - **可重入锁的所有者**：如果游戏线程在步进期间持有某个 CRITICAL_SECTION，回调在游戏线程上重入同一把锁今天能过，换到 worker 上就会死锁。System::update `0x1198DA0` 里唯一的临界区是 `0x1199006` 的 scoped lock（`0x50BC0` = EnterCriticalSection），在 `0x119908B` 由 `0x50BE0`（LeaveCriticalSection）释放，到两次步进 `0x1199359` / `0x1199479` 之间没有再加锁，函数里也没有别的锁导入；上一层 `0x705530`（帧函数，`0x705715` 调 System::update）里也没有锁导入、没有调 `0x50BC0`（已验证；System::update 部分由审计第 5 项守着）。再往上的主循环没有查（推测不在锁里跑帧）。`CharacterControl_Walk` 的自旋锁 `0x11B95A2` 本来就不可重入，换线程不改变什么。
+   - 音频 `0x7B4510` → `0x7AA8C0` → `0x7ABE30` 是游戏自己的播放请求，只在回调里被调用（PostCollide / PreSolve / PostSolve 任务串行），和游戏线程互斥；CRI 侧本来就有自己的服务线程。音频换线程身份后的行为放进实机待测项（§13）。
 3. TLS：游戏范围内用 `gs:[0x58]` 的 57 个函数全部属于两种模式之一——(a) MSVC magic static 的 epoch（TLS+0x20），(b) Havok monitor stream（TLS+8，看 `+0x24` 是否已初始化，`0x97E1D0` 懒创建）。**没有发现**游戏自己的 thread_local 状态（已验证）。
-4. 形状批 collector `[bullet+0x990]` 的类和 `0x11B8800` codec 没有审完。
+4. 补审完的两项（已验证）：
+   - 形状批 collector `[bullet+0x990]`：在 `0x235929` 经 `0x230770` 赋值，是 `std::shared_ptr`（控制块 vtable `0x179E1A0` = `_Ref_count<hknpClosestHitCollector>`，另一支 `0x179E178` = `_Ref_count<hknpAllHitsCollector>`），collector 本身是 Havok 原版类（`hknpClosestHitCollector` vt `0x1768B78` 在 `0x2357F9` 写入），每颗子弹各自一个，只写自身。
+   - `hknpUFMShapeTagCodec`（vt `0x1AE3388`）：槽 3 `0xDF9DE0` 是 `ret 0`；槽 4 decode `0x11B8800` 只读 `this+0x20` 的表，写只落在 out 参数 `[r9]` / `[r9+4]` / `[r9+8]`（审计第 7 项）。纯函数，可并发。
+5. 仍未逐个审：World::Initialize lambda 1..6（库 / buffer signal，推测在游戏线程），以及 §5 里同一批次内同一颗子弹是否可能出现两次（推测不会，一颗子弹每帧一条）。
 
 ## 8. Havok 内存与 TLS 在 worker 上
 
@@ -180,7 +187,7 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
 最小修正：
 
 - reset 和退出路径都按「`0xA15050` close → pool vt+0x40（`0x1310630`，waitForCompletion，清 `+0x154` / `+0x155` / `+0x140`）→ 再调 `0x118F0A0`」的顺序执行。
-- 修补点要么四处一起打，要么都不打，每处都先核对指纹：两个 step thunk `0x1199359`、`0x1199479`；两个 teardown thunk `0x70E38E`、`0x70FEC6`。另一个方案是把 `0x119932F` → `0x118F270` 改成 `C2 00 00`。
+- 修补点要么一起打，要么都不打，每处都先核对指纹。实际实现（§12）用了三处：步进前唯一调用空函数的 `0x119932F` 改成每帧接队列（两次步进 `0x1199359` / `0x1199479` 都在它之后，不用分别改），两个 teardown 调用点 `0x70E38E`、`0x70FEC6` 改成先 close + 等待。
 - 挂 worker 前核对 vtable（pool `0x1AFED80`、queue `0x182EC50` / `0x182EC80`），传给 pool 的是完整 queue 指针，不是 `+0x18` 的子对象。
 
 ## 10. 插件钩子逐个排查
@@ -206,10 +213,10 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
 - 回调之间**不加锁**。前提是三个世界级任务保持单实例（`[task+0x10]=1`），这是任务对象自带的属性，不要去改。
 - 新的并发面（narrowphase / solver modifier、MTQueryQueue）都只做只读加 per-item 写，不需要额外串行化。
 - 必须做的：
-  - §9 的 teardown 顺序，四处一起打；
+  - §9 的 teardown 顺序，和打开一起打（§12）；
   - 挂 worker 前核对 vtable；
-  - 插件钩子的非游戏线程 Debug 守卫。
-- 默认值只在 A/B 实测之后定：stress-1 / 10 / 30 / 100、reset、退出。实测时重点看 §7 第 1 条（边完备性）。
+  - 插件钩子的非游戏线程 Debug 守卫：没有做。§10 已逐个确认会在 worker 上跑的插件代码只有两处且都安全，其余钩子都不在物理任务里；新加的钩子若落在物理回调里，按 §3 / §10 的方法重审。
+- 实现默认开（ini `HavokMultithread=1`，委托方要求）；A/B 实测（§13）有问题就改默认值。实测时重点看 §7 第 1 条没展开的子图。
 
 ## 附：扫描脚本
 
@@ -220,3 +227,46 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
 - `fires.py`：signal 触发点；
 - `scanw.py`：直接调用 BFS，收集写、锁、TLS、导入函数；
 - `plugx.py`：插件常量和 BFS 闭包取交集。
+
+## 12. 实现（`src/havok_mt.cpp`、`src/havok_mt_logic.h`）
+
+ini `HavokMultithread=1`（默认开，只在插件启动时读，改了要重启游戏）。为 0 时什么都不改，日志 `HAVOKMT off`。
+
+插件启动时（`src/plugin.cpp`，`InstallPhysics()` 之后）先核对，任何一项不符就一处不改、记一行 `HAVOKMT refused: …`：
+
+- 三个调用点前后 12 字节（`mov rcx,[rip→0x20B30A0]; call rel32`）和它们原来的目标；
+- 6 段函数指纹：`0x118F270`（`ret 0`）、processTaskQueue `0x130FE20`、waitForCompletion `0x1310630`、close `0xA15050` 的开头，复位 `0x118F110..0x118F13D`（先放 pool 再放 queue、中间没有 close），析构 `0x118ECAD`（自带 vt+0x68 close）；
+- 四个 vtable 槽：pool `0x1AFED80` 槽 4 / 8 / 10 = `0x130FE20` / `0x1310630` / `0x130FF70`，队列子对象 `0x182EC80` 槽 13 = `0xA15050`。
+
+然后改写三个 rel32（`RedirectCall`，经近处 12 字节 thunk 调到插件函数），**先**改两个复位调用点，**最后**改步进前的调用点；任何一处失败就把已改的按原字节写回（全有或全无）：
+
+| 调用点 | 原来 | 现在（游戏线程） |
+|---|---|---|
+| `0x119932F`（System::update，两次步进之前） | `call 0x118F270`（`ret 0`） | `BeforeStep(holder)`：读 holder / pool / queue，核对三个 vtable；`[pool+0x140]` 为空、worker 数 > 0、队列没关时调 `0x130FE20(pool, queue)`（完整 queue 指针），日志 `HAVOKMT N worker threads process the physics task queue` |
+| `0x70E38E`、`0x70FEC6` | `call 0x118F0A0`（复位） | `BeforeReset(holder)`：`[pool+0x140]` 非空且 vtable 都对时 `0xA15050(queue+0x18)` close → `0x1310630(pool)` 等每个 worker 退出 process（清 `+0x140` / `+0x154` / `+0x155` / `[queue+0x380]`），日志 `HAVOKMT reset: queue … closed and the workers back in X ms`；然后调原来的 `0x118F0A0` |
+
+每帧的决策是纯函数 `DecideStep`（`havok_mt_logic.h`）：已接上 → 不动；接着别的队列、vtable 不认得、没有 worker、队列已关 → 不接，每种情况只记一次日志。复位会新建 pool 和 queue（`0x118F185` / `0x118F1E7`），新 pool 没接队列，下一帧 `BeforeStep` 再接，所以每次复位日志里应该是一对 `reset … closed` / `… process the physics task queue (attach #n)`。
+
+正常析构 `0x118EC70` 自己在 `0x118ECB8` close，再释放 pool（pool 析构等 worker 退出），不需要改。只有 `0x118EB67`（持有者构造）调用的 `0x118F2E0` 也会建 pool / queue，那时都还是空的；`0x118F8B0` / `0x118F930` 没有任何引用（审计第 4 项）。
+
+worker 空闲时睡在信号量上（mode 0 的处理循环 `0xA0F4F0`：`0xA0FC3B` LeaveCriticalSection → `0x9EAE60` WaitForSingleObject(INFINITE) → EnterCriticalSection），不自旋。
+
+插件自己在物理任务里跑的代码只有 `src/physics.cpp` 的 vertical contact cave（只读、`std::atomic<float>`、SEH）和 `src/edf41robo.cpp` 借用的 `RagdollDefaultContactCallback`（写插件自己的组件，被世界级任务串行），都不用改（§10）。
+
+### 离线验证
+
+- `tests/havok_mt_test.cpp`（ctest `havok_mt`）：调用点字节解码、`CallBytes` 往返与 rel32 边界、指纹里决定顺序的字段与常量一致、`DecideStep` / `ResetNeedsDetach` 每个分支。
+- `tests/havok_mt_audit.py`（ctest `havok_mt_native`，要 `EDF6_NATIVE_DLL`）：§12 的全部字节与 vtable 槽、RTTI 名；`0x118F270` / `0x118F0A0` 的 rel32 引用恰好是表里的调用点、没有绝对地址引用；复位与析构的顺序、setNumThreads 的 close → wait → reopen → processTaskQueue；持有者全局只在三处被写；System::update 步进期间不持锁；任务图（§7 第 1 条）；codec。带反向检查。
+- `tests/havok_mt_sim.py`（ctest `havok_mt_sim`，要 unicorn，没有就跳过）：真 EDF.dll 代码在 unicorn 下跑——改写后的调用点经 12 字节 thunk 进桩时 rcx = holder、返回后栈平衡；processTaskQueue 在 3 个 worker 的假 pool 上写对字段、唤醒每个 worker；close 在锁内置位并唤醒每个睡着的 worker；waitForCompletion 等 3 次并清字段；之后 pool 析构不再等。反向：接上而不 close，pool 析构一上来就等 3 次 worker（真机上等不到，就是死锁）。
+
+## 13. 实机待测项（主会话做）
+
+装 DLL 前核对日志里 `HAVOKMT on`，进关卡后有 `HAVOKMT 15 worker threads process the physics task queue`（worker 数随 CPU 线程数）。A/B 用 `HavokMultithread=0/1`。
+
+1. **帧时间**：stress-1 / 10 / 30 / 100 各跑一段，记录平均与 99% 帧时间。预期 stress-100 每帧省 8–13 ms、stress-30 省 3–6 ms。
+2. **havok_update 占比**：同一场景下 System::update（`0x1198DA0`）每帧耗时与占帧比例；看 worker 是否真的分到任务（任务管理器 / ETW 里 15 个 worker 线程在步进期间有 CPU 时间）。
+3. **任务切换 50 次无死锁**：反复进出任务 / 重开，每次日志应成对出现 `HAVOKMT reset: … closed and the workers back in X ms`（X 应在毫秒以内）和下一次 `attach #n`；任何一次卡住就是复位顺序还有漏洞。退出游戏（回主菜单、直接关窗口）同样不能挂住。
+4. **worker 空闲时 CPU**：暂停 / 菜单 / 过场时 15 个 worker 应睡着（占用接近 0）；不应出现自旋占满核。
+5. **联机影响**：两台机器一开一关、都开，看物理对象（尸体、碎片、集装箱、载具）表现与同步是否和原版一样；hknp 多线程求解的结果是否和单线程逐位一致没有验证，房主 / 客人各算各的物理对象可能出现比原版更大的分歧。
+6. **回调换线程**：碰撞音效（载具撞击、弹壳落地、布娃娃落地）、碰撞伤害（`RigidBodyContactDamageControl`、巨型单位挤压）、地图破坏、EDF4.1 机器人（edf41robo）的接触冷却，与原版逐项对比，留意崩溃、丢声、重复伤害。
+7. 残余推测项：§7 第 1 条里没展开的 `0x9EC7A0` / `0x9ECCE0` 子图——实测中出现回调期间的随机崩溃或物理状态错乱时，优先怀疑这里（`HavokMultithread=0` 能消失即是）。
