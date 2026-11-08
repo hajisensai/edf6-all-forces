@@ -37,6 +37,7 @@
 #include "crew.h"
 #include "team_native_logic.h"
 #include "edf41_hitlayer.h"
+#include "edf41layer_live.h"
 #include "edf41classes.h"
 #include "edf41mother_pose.h"
 #include "edf41_sound_channels.h"
@@ -2548,6 +2549,18 @@ bool ResolveMother301Spawn(const wchar_t* resource,controlled_pvp::SpawnProof* o
     out->maxMembers=partCount+1;out->maxEmitters=partCount;return true;
 }
 }  // namespace
+
+// The layer machinery for the other ported parts (src/edf41layer_live.h: the 401 parts).
+namespace edf41layer {
+bool LivePrims() noexcept { return LayerPrims(); }
+int LiveAreaQueryLayer() noexcept { return LayerPrims() ? AreaQueryLayer() : -1; }
+int LiveRagdollLayer(void* ragdoll,std::size_t* count) noexcept { return LayerPrims() ? RagdollLayer(ragdoll,count) : -1; }
+const std::uint32_t* LiveTable() noexcept { return LayerPrims() ? GroupFilterTable() : nullptr; }
+void LiveSetRagdollLayer(void* ragdoll,int layer) noexcept {
+    if(LayerPrims() && layer>0 && layer<kLayers)reinterpret_cast<void(__fastcall*)(void*,int)>(image+kRagdollSetLayer)(ragdoll,layer);
+}
+}  // namespace edf41layer
+
 const EnemyControlAdapter& Edf41Mother301ControlAdapter() noexcept {
     static const EnemyControlAdapter adapter{"EDF4.1 母舰",&ControlMatch301,&ControlAbilities301,&ControlHash301,&ControlBegin301,&ControlApply301,&ControlRestore301,&ControlNetwork301,&ControlPvpHooks301};return adapter;
 }
