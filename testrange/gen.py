@@ -1446,8 +1446,9 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
     scenario on an installed range (tools/perfrun.py), not a fresh install, which regenerates every derived vehicle
     (minutes) and touches the whole Mods tree. Refuses unless the range is installed, the waves' enemy is one the range
     knows (ENEMIES) and every generated SGO the plan spawns is already in Mods, and while an earlier run's originals
-    are still kept (restore_scenario first). The originals go to scenario_backup before anything is written. Returns
-    what without_missing left out of the plan."""
+    are still kept (restore_scenario first). The originals go to scenario_backup before anything is written, all of
+    them or none (the backup is built aside and renamed into place). Returns what without_missing left out of the
+    plan."""
     if not installed(game_root):
         raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
     backup = scenario_backup(game_root)
@@ -1470,15 +1471,24 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     text, points_file, _, _ = _range_files(game_root, game, plan)
     out = mission_dir(game_root, RANGE_MISSION)
-    os.makedirs(backup)
-    absent = []
-    for name in SCENARIO_FILES:
-        if os.path.exists(os.path.join(out, name)):
-            shutil.copy2(os.path.join(out, name), os.path.join(backup, name))
-        else:
-            absent.append(name)
-    with open(os.path.join(backup, 'absent.json'), 'w', encoding='utf-8') as f:
-        json.dump(absent, f)
+    # The backup is whole or not there: built aside, then renamed into place in one step, so a copy that fails
+    # (disk full, a file held) leaves no half backup that refuses every later run and that restore cannot read.
+    building = backup + '.tmp'   # never a backup: what a run that died while building left is thrown away
+    shutil.rmtree(building, ignore_errors=True)
+    try:
+        os.makedirs(building)
+        absent = []
+        for name in SCENARIO_FILES:
+            if os.path.exists(os.path.join(out, name)):
+                shutil.copy2(os.path.join(out, name), os.path.join(building, name))
+            else:
+                absent.append(name)
+        with open(os.path.join(building, 'absent.json'), 'w', encoding='utf-8') as f:
+            json.dump(absent, f)
+        os.replace(building, backup)
+    except BaseException:
+        shutil.rmtree(building, ignore_errors=True)
+        raise
     try:
         _write_mission(game_root, game, RANGE_MISSION, plan.site, text, points_file)
     except BaseException:

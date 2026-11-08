@@ -3,7 +3,8 @@
     the game folder) so a run that dies loses nothing, and restore_scenario puts them back byte for byte (a file that
     was not there is removed again); it refuses, before writing anything, when the range is not installed, the waves'
     enemy is not one the range knows, a generated SGO the plan spawns is not in Mods, or an earlier run's originals
-    are still kept (a second write would take the first one's scenario for the original);
+    are still kept (a second write would take the first one's scenario for the original); a copy of the originals
+    that fails leaves no half backup (the next run goes ahead);
   - perfrun's scenarios: grand is the grand battle, swarm's fields reach the waves, a stock mission has no plan;
   - perf_report reads the plugin's PERF rows only inside the window (both row formats), sums GPU engines per type, and
     tells the game thread by System::update on its stack, labels a plugin hook below a phase by its outermost
@@ -85,6 +86,29 @@ def scenario_files() -> None:
             check(not os.path.exists(os.path.join(out, 'MISSION.RMPA')), 'restore removes a file that was not there')
             check(sorted(os.listdir(out)) == sorted(['MISSION.AC', gen.MARKER]), 'nothing else left in the folder')
             check(not os.path.exists(backup) and not gen.restore_scenario(root), 'the kept originals go once restored')
+            # a copy that fails while keeping the originals: no half backup left, nothing written, the next run goes
+            real_copy = gen.shutil.copy2
+
+            def failing_copy(src, dst, *a, **k):
+                raise OSError('disk full')
+            gen.shutil.copy2 = failing_copy
+            written.clear()
+            try:
+                gen.write_scenario(root, plan)
+                check(False, 'a failed copy of the originals is raised')
+            except OSError:
+                check(not written, 'a failed copy of the originals writes nothing')
+            finally:
+                gen.shutil.copy2 = real_copy
+            check(not os.path.exists(backup) and not os.path.exists(backup + '.tmp'),
+                  'a failed copy of the originals leaves no half backup')
+            gen.write_scenario(root, plan)
+            check(written == [gen.RANGE_MISSION] and os.path.isfile(os.path.join(backup, 'absent.json')),
+                  'the run after a failed copy goes ahead with a whole backup')
+            check(gen.restore_scenario(root), 'and is restored')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'the old script back after the failed copy and the next run')
+            written.clear()
             bad = gen.Plan()
             bad.vehicles = {}
             bad.waves.enemy = 'giantant1'
