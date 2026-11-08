@@ -507,10 +507,9 @@ bool RefreshPvp(Session& session) noexcept {
 bool RefreshAdapterCatalogue(Session& session) {
     if(!session.catalogue.adapter) {
         if(!session.nativeOwned)return true;
-        for(unsigned i=0;i<session.catalogue.abilities.size();++i)
-            if(!enemy_native::ReadAbilityState(session.native,session.catalogue.native[session.catalogue.abilities[i].channel],
-                &session.catalogue.abilities[i]))return false;
-        return true;
+        // Batched so the Deiroi foot-battery walk runs once per refresh, not per entry.
+        return enemy_native::ReadAbilityStates(session.native,session.catalogue.native.data(),session.catalogue.abilities.data(),
+            static_cast<unsigned>(session.catalogue.abilities.size()));
     }
     const auto* adapter=session.catalogue.adapter;
     if(!adapter->Match(session.target.obj) || adapter->ProfileHash(session.target.obj)!=session.catalogue.hash ||

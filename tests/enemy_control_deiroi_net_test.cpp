@@ -101,6 +101,12 @@ bool DeiroiGunOrdinal(const NativeLease&,unsigned index,unsigned* key) noexcept 
 bool ResolveDeiroiControlledGun(const void* object,NativeLease* root,unsigned* key) noexcept {unsigned index=0;if(!GunIndex(object,&index,key) || !roles[index] || static_cast<const unsigned char*>(object)[0x2E8] || owners[index].object[0x2E8])return false;*root=leases[index];return true;}
 bool ResolveDeiroiControlledGunKey(const NativeLease& lease,unsigned key,void** child) noexcept {const int i=OwnerIndex(lease.object);if(i<0)return false;for(unsigned j=0;j<activeGunCount;++j)if(gunKeys[j]==key){*child=guns[i][j].object;return true;}return false;}
 bool ResolveDeiroiRetainedGunKey(const NativeLease& lease,unsigned key,void** child) noexcept {return ResolveDeiroiControlledGunKey(lease,key,child);}
+// The production batch equals count + per-index ordinal + key resolve; the fixture composes them the same way.
+bool ReadDeiroiGunEntries(const NativeLease& lease,unsigned* keys,void** children,unsigned capacity,unsigned* count) noexcept {
+    *count=0;const unsigned total=DeiroiGunCount(lease);if(total>capacity)return false;
+    for(unsigned index=0;index<total;++index)if(!DeiroiGunOrdinal(lease,index,&keys[index]) || !ResolveDeiroiControlledGunKey(lease,keys[index],&children[index]))return false;
+    *count=total;return true;
+}
 bool DeiroiExplicitTransition(const void*) noexcept {return explicitTransition;}
 bool DeiroiGunManual(const NativeLease&,unsigned) noexcept{return manualGun;}
 bool DeiroiNativeTransitionActive(const NativeLease&) noexcept{return sourceTransition;}

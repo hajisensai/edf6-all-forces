@@ -4,7 +4,10 @@
 #include "../src/heli.h"
 #include "../src/ground_navigation.h"
 #include <cstdio>
+#include <array>
+#include <cmath>
 #include <memory>
+#include <vector>
 namespace {
 ULONGLONG frame=100;int queries=0,floors=0,waters=0,walls=0,cases=0,failures=0;
 float floorHeight=0,surface=0;crew::Sea sea=crew::Sea::land;bool cornerWall=false;
@@ -101,5 +104,56 @@ void SupportBeforeNpcs() {
     }
     Check(result==Result::moving && route->partial,"safe admission prefix completes under NPC load without solving the entire route");
 }
+// GroundNavigateDeferred asked before each call, and the call skipped when it says the caller waits (npcai.cpp MoveTo:
+// its ends' floor rays then not cast), = every caller calling: the same results, waypoints, routes and queries, frame by
+// frame, under a budget the population runs out of, with callers that miss frames (the one the turn waits for among
+// them: "a vanished caller").
+struct Step { Result result; float next[3]; int count,length,cursor,queries; bool skipped; };
+void Settle() {   // the shared turn left by an earlier test let go: two frames with a caller arriving where it stands
+    auto s=std::make_unique<State>();const float at[3]={0,0,0};float next[3]{};
+    for(int i=0;i<3;++i){Next();crew::GroundNavigate(*s,at,at,0.1f,frame*16,next);}
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+std::vector<Step> Population(bool ask) {
+    constexpr int kActors=24,kFrames=150;
+    Settle();Scene(0,crew::Sea::land);
+    auto states=std::make_unique<State[]>(kActors);
+    std::vector<std::array<float,3>> at(kActors);   // each walks a metre a frame toward its waypoint while moving
+    for(int i=0;i<kActors;++i)at[static_cast<std::size_t>(i)]={static_cast<float>(i)*3.0f,0,0};
+    std::vector<Step> steps;
+    for(int f=0;f<kFrames;++f) {
+        Next();
+        for(int i=0;i<kActors;++i) {
+            if((f*7+i*3)%11==0)continue;   // not called this frame (dead, riding, ordered to stand)
+            float* const from=at[static_cast<std::size_t>(i)].data();
+            const float to[3]={static_cast<float>(i)*3.0f+12.0f+static_cast<float>(i%4)*6.0f,0,static_cast<float>(i%5)*7.0f};
+            Step st{};
+            st.skipped=ask && crew::GroundNavigateDeferred(states[i]);
+            if(st.skipped){st.result=Result::pending;st.next[0]=from[0];st.next[1]=from[1];st.next[2]=from[2];}
+            else st.result=crew::GroundNavigate(states[i],from,to,0.1f,frame*16,st.next);
+            st.count=states[i].count;st.length=states[i].length;st.cursor=states[i].cursor;st.queries=queries;
+            steps.push_back(st);
+            if(st.result==Result::moving) {
+                const float dx=st.next[0]-from[0],dz=st.next[2]-from[2],d=std::sqrt(dx*dx+dz*dz);
+                const float k=d>1.0f ? 1.0f/d : 1.0f;
+                from[0]+=dx*k;from[2]+=dz*k;
+            }
+        }
+    }
+    return steps;
+}
+void DeferredTurn() {
+    const std::vector<Step> called=Population(false),asked=Population(true);
+    bool same=called.size()==asked.size();
+    int skipped=0,moving=0;
+    for(std::size_t i=0;same && i<called.size();++i) {
+        const Step &a=called[i],&b=asked[i];
+        same=a.result==b.result && a.next[0]==b.next[0] && a.next[1]==b.next[1] && a.next[2]==b.next[2] && a.count==b.count &&
+             a.length==b.length && a.cursor==b.cursor && a.queries==b.queries;
+        skipped+=b.skipped;moving+=b.result==Result::moving;
+    }
+    std::printf("deferred turn: %zu calls, %d skipped, %d moving\n",called.size(),skipped,moving);
+    Check(same,"callers asking GroundNavigateDeferred first and skipping the call = every caller calling");
+    Check(skipped>100 && moving>300,"the population waited its turn and walked (the skip was taken and routes followed)");
+}
+}
+int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

@@ -239,6 +239,16 @@ int main() {
     Check(thermal.CaptureIndexed(f.context.Get(),6,3,2),"capture after binding this camera actual depth");f.Target();f.FinalTarget();
     Check(thermal.Composite(f.context.Get(),Polarity::whiteHot),"compose after provisional depth replacement");
     Check(f.Pixel(f.finalColour,4,8)[0]>230,"provisional observation does not lock out the real scene mask");
+
+    // An optical view only invalidates; a frame without thermal resets everything. The next thermal view rebuilds
+    // and draws the same image.
+    f.Setup();Check(thermal.BeginView(f.context.Get(),token++),"begin a view later drawn optically");
+    thermal.Invalidate();Check(!thermal.Composite(f.context.Get(),Polarity::whiteHot),"an invalidated view preserves the image");
+    thermal.Reset();Check(!thermal.Composite(f.context.Get(),Polarity::whiteHot),"a reset leaves no view to compose");
+    f.Setup();Check(thermal.BeginView(f.context.Get(),token++),"begin after a reset");
+    Check(thermal.CaptureIndexed(f.context.Get(),6,3,2),"capture recreates the mask");f.Target();f.FinalTarget();
+    Check(thermal.Composite(f.context.Get(),Polarity::whiteHot),"compose after a reset");
+    Check(f.Pixel(f.finalColour,4,8)[0]>230,"rebuilt renderer gives the same heat as before the reset");
     thermal.Reset();
     std::printf("thermal_gpu: %d real WARP shader, depth, polarity, state and lifecycle checks passed\n",checks);
 }

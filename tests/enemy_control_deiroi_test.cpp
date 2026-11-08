@@ -119,6 +119,31 @@ int main(){
     enemy_control::Ability state{};state.id=123;state.cooldownKnown=true;state.name[0]=L'X';
     CHECK(ReadDeiroiAbilityState(lease,1,true,&state)&&state.state==enemy_control::AbilityState::active&&!state.cooldownKnown&&state.id==123&&state.name[0]==L'X');
     CHECK(ReadDeiroiAbilityState(lease,1,false,&state)&&state.state==enemy_control::AbilityState::native);
+    {   // The one-walk batch readers return exactly what the per-call walks return.
+        unsigned batchKeys[256];void* batchChildren[256];unsigned batchCount=0;
+        CHECK(ReadDeiroiGunEntries(lease,batchKeys,batchChildren,256,&batchCount)&&batchCount==3&&batchCount==DeiroiGunCount(lease));
+        for(unsigned i=0;i<batchCount;++i) {
+            unsigned ordinal=~0u;void* resolved=nullptr;
+            CHECK(DeiroiGunOrdinal(lease,i,&ordinal)&&ordinal==batchKeys[i]);
+            CHECK(ResolveDeiroiControlledGunKey(lease,ordinal,&resolved)&&resolved==batchChildren[i]);
+        }
+        CHECK(!ReadDeiroiGunEntries(lease,batchKeys,batchChildren,2,&batchCount)&&batchCount==0);
+        DeiroiGunRoster roster;enemy_control::Ability shared{},single{};
+        for(const unsigned ordinal:{0u,1u,0x10000u,0xFFFFu})for(const bool automatic:{false,true}) {
+            const bool sharedRead=ReadDeiroiAbilityState(lease,&roster,ordinal,automatic,&shared);
+            CHECK(sharedRead&&sharedRead==ReadDeiroiAbilityState(lease,ordinal,automatic,&single)&&shared.state==single.state);
+        }
+        CHECK(roster.taken&&roster.count==3);
+        parts[2].b[0x639]=1;   // the shared walk still reads the live 0x639 gate per entry
+        CHECK(ReadDeiroiAbilityState(lease,&roster,0x10000,false,&shared)&&shared.state==enemy_control::AbilityState::unavailable);
+        parts[2].b[0x639]=0;
+        Put<int>(parts[2].b,0xB30,9);   // incomplete walk: every key unavailable, as with per-call Select
+        DeiroiGunRoster broken;
+        CHECK(ReadDeiroiAbilityState(lease,&broken,1,false,&shared)&&shared.state==enemy_control::AbilityState::unavailable&&broken.taken&&broken.count==0);
+        CHECK(ReadDeiroiAbilityState(lease,1,false,&single)&&single.state==enemy_control::AbilityState::unavailable);
+        CHECK(!ReadDeiroiGunEntries(lease,batchKeys,batchChildren,256,&batchCount)&&batchCount==0);
+        Put<int>(parts[2].b,0xB30,0);
+    }
     Put<void*>(parts[2].b,0,image+0x17AB4B0);CHECK(ReadDeiroiGunCount(lease,&completeCount)&&completeCount==2);
     Put<void*>(parts[2].b,0,image+0x17AB118+8);CHECK(DeiroiGunCount(lease)==~0u);Put<void*>(parts[2].b,0,image+0x17AB118);
     Put<int>(parts[2].b,0xB30,9);CHECK(DeiroiGunCount(lease)==~0u);Put<int>(parts[2].b,0xB30,0);
