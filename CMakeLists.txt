@@ -36,6 +36,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/floatgun.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 # A remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp, docs/online-re.md §10).
 target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
+# The Epsilon 403's store holders past its seats on its slot 48 (src/storerecoil.cpp, docs/recoil-re.md §3.1).
+target_sources(EDF6VehicleCrew PRIVATE src/storerecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # A soldier's zoomed scope as a real optic (src/infantryscope.cpp: the cue, the stock crosshair's draw held back).
@@ -832,6 +834,12 @@ target_link_libraries(gunner_recoil_test PRIVATE edf6common)
 target_include_directories(gunner_recoil_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(gunner_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME gunner_recoil COMMAND gunner_recoil_test)
+# The 403's slot 48 hook for its store holders (src/storerecoil.cpp) against a stand-in EDF.dll.
+add_executable(store_recoil_test tests/store_recoil_test.cpp)
+target_link_libraries(store_recoil_test PRIVATE edf6common)
+target_include_directories(store_recoil_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(store_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME store_recoil COMMAND store_recoil_test)
 
 add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
 target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
