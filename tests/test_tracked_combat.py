@@ -70,7 +70,9 @@ class CatalogContractTests(unittest.TestCase):
                           'BMPT_ATGM': (2, False), 'BMPT_ATGMF': (2, False),
                           **{vc.xm_store(u, a): (a.fire, a.auto) for u in xm_units.v603() for a in u.arms if a.fire},
                           # the stock vehicles' independent weapons, each as its vehicles mount it (vc.STOCK_MOUNTS)
-                          'AGM_L_K3': (3, False), 'RKT_K3': (3, False), 'AAM_S_K2A': (2, True), 'AAM_M_K2A': (2, True)})
+                          'AGM_L_K3': (3, False), 'RKT_K3': (3, False), 'AAM_S_K2A': (2, True), 'AAM_M_K2A': (2, True),
+                          # 2026-11-08: the Grape's coax off the Car's throttle (docs/feedback-2026-11-08-grape-keys.md)
+                          'MG401_K4': (4, False)})
         self.assertEqual({k: vc.vehicle_fire_keys(vc.GROUND_VEHICLES[k]) for k in ('bmpt', 'xm_large_tank', 'xm_large_tank_emp')},
                          {'bmpt': {2: ['BMPT_ATGM', 'BMPT_ATGMF']},
                           'xm_large_tank': {3: ['XM_LARGE_TANK_AAM'], 4: ['XM_LARGE_TANK_ROCKETS']},
