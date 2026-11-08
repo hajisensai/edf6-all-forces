@@ -301,6 +301,60 @@ class DriverTest(unittest.TestCase):
         kept = self.plugins / (drive.NAME + '.placed') / 'Plugins__EDF6VehicleCrew.dll'
         self.assertEqual(kept.read_bytes(), b'installed plugin')
 
+    def test_a_game_that_outlives_the_run_is_put_back_by_restore(self):
+        """The game still running at the run's end (quit_wait passed): nothing is touched then, everything the run put
+        there (the placed plugin, the ini, a new SGO, the loadout, the autopilot) is recorded on disk, a new install is
+        refused until it is put back, and `drive.py restore` (a later process: nothing kept in memory) puts it back byte
+        for byte, mtimes too."""
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        ini = self.plugins / 'EDF6VehicleCrew.ini'
+        ini.write_bytes(b'[VehicleCrew]\r\nEnabled=1\r\n')
+        import os
+        os.utime(dll, (1_600_000_000, 1_600_000_000))
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        sgo = self.root / 'X.SGO'
+        sgo.write_bytes(b'sgo')
+        loadout = self.root / 'load.ini'
+        loadout.write_bytes(b'ours')
+        running = []
+        self.pids.side_effect = lambda: list(running)
+
+        def launch():
+            running.append(123)
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',
+                             f'{sgo}=OBJECT/X.SGO'), ini=('Debug=1',), loadout=str(loadout)), 1)
+        self.assertEqual(dll.read_bytes(), b'our build')   # the game holds it: not touched
+        self.assertTrue(self.path('.dll').exists())
+        running.clear()
+        with self.assertRaises(RuntimeError) as refused:
+            drive.install(self.game)
+        self.assertIn('drive.py restore', str(refused.exception))
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
+            self.assertEqual(drive.main(['restore']), 0)
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        self.assertEqual(int(dll.stat().st_mtime), 1_600_000_000)
+        self.assertEqual(ini.read_bytes(), b'[VehicleCrew]\r\nEnabled=1\r\n')
+        self.assertFalse((self.plugins.parent / 'OBJECT' / 'X.SGO').exists())
+        self.assertEqual(sorted(p.name for p in self.plugins.iterdir()), ['EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'])
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
+            self.assertEqual(drive.main(['restore']), 0)   # nothing left: nothing to do
+
+    def test_restore_refuses_while_the_game_runs(self):
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        drive.install(self.game)
+        drive.place_file(self.game, 'Plugins/EDF6VehicleCrew.dll', b'our build')
+        self.pids.return_value = [123]
+        with self.assertRaises(RuntimeError):
+            drive.restore_placed(self.game)
+        self.assertEqual((self.plugins / 'EDF6VehicleCrew.dll').read_bytes(), b'our build')
+        self.pids.return_value = []
+        self.assertTrue(drive.restore_placed(self.game))
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
     def test_loadout_changed_during_the_run_is_left(self):
         source = self.root / 'load.ini'
         source.write_bytes(b'ours')

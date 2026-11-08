@@ -270,6 +270,7 @@ def report_parsing() -> None:
             json.dump({'scenario': 'x', 'variant': 'B'}, f)
         t = perf_report.ab_table([run, failed])
         check('| A | run | 16.70 | 2.00% | 0 | 30.0 | 50 |' in t, 'the A/B table row')
+        check('| AutoTurret |' in t, "the A/B table shows each round's AutoTurret")
         check('| B | failed | not sampled |' in t, 'a round without samples is a row, not a crash')
 
 
@@ -334,13 +335,95 @@ def both_plugins() -> None:
         check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll', f'{turret}=Plugins/EDF6AutoTurret.dll'),
               "the same build's AutoTurret placed with it")
         check(perfrun.placements(None) == (), '--dll installed: nothing placed')
+        # what the run records is what the game loads, taken before the launch
+        game = os.path.join(d, 'game')
+        gplugins = os.path.join(game, 'Mods', 'Plugins')
+        os.makedirs(gplugins)
+        with open(turret, 'wb') as f:
+            f.write(b'built turret')
+        got = perfrun.loaded_plugins(game, crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) ==
+              (turret, 'built-alongside', perfrun.sha256(turret)), "AutoTurret built alongside: that build's recorded")
+        lone = os.path.join(d, 'lone')
+        os.makedirs(lone)
+        lone_crew = os.path.join(lone, 'EDF6VehicleCrew.dll')
+        open(lone_crew, 'wb').close()
+        got = perfrun.loaded_plugins(game, lone_crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) == (None, 'none', None),
+              'no AutoTurret anywhere: recorded as none, not guessed')
+        game_turret = os.path.join(gplugins, 'EDF6AutoTurret.dll')
+        with open(game_turret, 'wb') as f:
+            f.write(b'old installed turret')
+        got = perfrun.loaded_plugins(game, lone_crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) ==
+              (game_turret, 'game-folder', perfrun.sha256(game_turret)),
+              "no AutoTurret next to --dll: the game folder's, the one the game loads, recorded")
+        with open(os.path.join(gplugins, 'EDF6VehicleCrew.dll'), 'wb') as f:
+            f.write(b'installed crew')
+        got = perfrun.loaded_plugins(game, None)
+        check(got['turret_source'] == 'game-folder' and got['sha256'] == perfrun.sha256(
+              os.path.join(gplugins, 'EDF6VehicleCrew.dll')), "--dll installed: the game folder's both")
+        check(perfrun.ab_turrets(game, crew, lone_crew) is not None and
+              perfrun.ab_turrets(game, lone_crew, crew) is not None,
+              "--ab with the build's AutoTurret on one side only: refused")
+        check(perfrun.ab_turrets(game, crew, crew) is None and perfrun.ab_turrets(game, lone_crew, lone_crew) is None,
+              '--ab with AutoTurret alongside both or neither: runs')
     finally:
         shutil.rmtree(d)
+
+
+def outlived_runs() -> None:
+    """The game outliving a run (quit_wait passed): one_run says what was not put back for a stock mission too, and
+    --restore puts back both the range mission and what drive.py placed (drive.restore_placed), under the lease."""
+    import drive
+    saved = (drive.game_pids, drive.run, drive.restore_placed, gen.restore_scenario, perfrun.gamedir.find_or_dev)
+    calls = []
+    d = tempfile.mkdtemp()
+    try:
+        game = os.path.join(d, 'game')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        os.environ['EDF6_QUEUE_DIR'] = os.path.join(d, 'queues')
+        running = []
+        drive.game_pids = lambda: list(running)
+
+        def fake_run(*a, **k):
+            running.append(1)   # the game does not leave
+            return 1
+        drive.run = fake_run
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc != 0 and 'perfrun.py --restore' in out.getvalue() and 'placed plugins' in out.getvalue(),
+              'a stock mission the game outlived: not put back, said so, with the one command that does')
+        with open(os.path.join(d, 'out', 'run.json'), encoding='utf-8') as f:
+            run = json.load(f)
+        check('turret_source' in run and 'sha256' in run, 'run.json records the plugins taken before the launch')
+        running.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) or True
+        gen.restore_scenario = lambda g: calls.append(('range', g)) or False
+        perfrun.gamedir.find_or_dev = lambda: game
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.main(['--restore'])
+        check(rc == 0 and calls == [('range', game), ('placed', game)],
+              '--restore puts back the range mission and what drive.py placed')
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) and False
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.main(['--restore'])
+        check(rc == 1, '--restore fails while a placed file is left (changed by someone else)')
+    finally:
+        drive.game_pids, drive.run, drive.restore_placed, gen.restore_scenario, perfrun.gamedir.find_or_dev = saved
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
 
 
 scenario_files()
 log_turnover()
 both_plugins()
+outlived_runs()
 ini_option()
 scenarios()
 report_parsing()

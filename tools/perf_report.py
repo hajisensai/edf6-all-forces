@@ -562,8 +562,10 @@ def ab_table(run_dirs: list[str]) -> str:
                 run = json.load(f)
         except OSError:
             run = {}
+        turret = run.get('turret_sha256')
+        turret = f'{turret[:8]} ({run.get("turret_source", "?")})' if turret else run.get('turret_source', '?')
         if 'cpu' not in run.get('windows', {}):
-            rows.append((run.get('variant', '?'), os.path.basename(d), {}, None, {}))
+            rows.append((run.get('variant', '?'), os.path.basename(d), {}, None, {}, turret))
             continue
         cw = tuple(run['windows']['cpu'])
         fs = frame_summary(read_perf(os.path.join(d, 'vehiclecrew.log'), cw))
@@ -571,17 +573,17 @@ def ab_table(run_dirs: list[str]) -> str:
         secs = cw[1] - cw[0]
         objs = read_objects(os.path.join(d, 'vehiclecrew.log'), cw)
         rows.append((run.get('variant', '?'), os.path.basename(d), fs, cpu.get('total', 0) / 10 / secs if cpu else None,
-                     objs))
+                     objs, turret))
     out = ['| variant | run | mean ms | over 20 ms | over 33 ms | worst of 5 s (median) | process CPU (% of a core) '
-           '| living objects |', '|---|---|---|---|---|---|---|---|']
-    for v, name, fs, c, objs in sorted(rows, key=lambda r: (r[0], r[1])):
+           '| living objects | AutoTurret |', '|---|---|---|---|---|---|---|---|---|']
+    for v, name, fs, c, objs, turret in sorted(rows, key=lambda r: (r[0], r[1])):
         if not fs:
             out.append(f'| {v} | {name} | ' + ('no PERF rows' if c is not None else 'not sampled') +
-                       f' | | | | {"" if c is None else f"{c:.0f}"} | |')
+                       f' | | | | {"" if c is None else f"{c:.0f}"} | | {turret} |')
             continue
         o20 = f'{fs["over20_pct"]:.2f}%' if fs['over20_pct'] is not None else 'n/a'
         out.append(f'| {v} | {name} | {fs["mean_ms"]:.2f} | {o20} | {fs["over33"]} | {fs["worst_median_ms"]:.1f} | '
-                   f'{c or 0:.0f} | {objects_text(objs)} |')
+                   f'{c or 0:.0f} | {objects_text(objs)} | {turret} |')
     return '\n'.join(out) + '\n'
 
 
