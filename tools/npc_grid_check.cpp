@@ -89,11 +89,15 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             const float r=U(1,40);
             std::vector<int> scan;
             for(int i=0;i<n && static_cast<int>(scan.size())<64;++i)if(npc::Horiz(eye,aim(i))<r)scan.push_back(i);
-            got.clear();
-            g.Around(eye,r,[&](int i){ if(npc::Horiz(eye,aim(i))<r)got.push_back(i); });
-            std::sort(got.begin(),got.end());
-            if(got.size()>64)got.resize(64);
+            npc::grid::FirstAround(g,eye,r,64,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
             if(got!=scan)++mismatches[3];
+            // Fewer and more than the crowd holds (the partial selection at its edges).
+            for(const int most:{0,1,5,1000}) {
+                std::vector<int> scan2;
+                for(int i=0;i<n && static_cast<int>(scan2.size())<most;++i)if(npc::Horiz(eye,aim(i))<r)scan2.push_back(i);
+                npc::grid::FirstAround(g,eye,r,most,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
+                if(got!=scan2)++mismatches[3];
+            }
             int count=0,count2=0;
             for(int i=0;i<n;++i)if(npc::Dist(aim(i),eye)<=r)++count;
             g.Around(eye,r,[&](int i){ if(npc::Dist(aim(i),eye)<=r)++count2; });

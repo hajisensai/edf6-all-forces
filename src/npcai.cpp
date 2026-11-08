@@ -854,21 +854,26 @@ void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,const
     s.spotSet=true;s.spotAt=ms;
 }
 
+// The threats pressing on `pos`: the enemies within `reach` of it over the ground, the first kMaxThreats in the list's
+// order (as the scan over every enemy took them), a large one weighing 3. Through the grid (npc_grid.h FirstAround).
+constexpr int kMaxThreats=64;
+int ThreatsNear(const float* pos,float reach,npc::Threat* out) noexcept {
+    static std::vector<int> rows;
+    npc::grid::FirstAround(world.enemyGrid,pos,reach,kMaxThreats,
+                           [pos,reach](int i) noexcept { return npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach; },rows);
+    int n=0;
+    for(const int i:rows) {
+        const Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+        out[n++]=npc::Threat{{e.aim[0],e.aim[1],e.aim[2]},e.points>=kLargePoints ? 3.0f : 1.0f};
+    }
+    return n;
+}
 // Crowded (§3.6): back off, side-step or roll; true when it moved.
 bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,ULONGLONG ms,const char** what) noexcept {
     if(!Cfg().npcEvade)return false;
-    npc::Threat threats[64];int n=0;
+    npc::Threat threats[kMaxThreats];
     const float reach=Cfg().npcDangerRange*2.0f;
-    // The enemies within reach from the cells round it, in the list's order: the first 64 of them, as the scan took.
-    static std::vector<int> inReach;
-    inReach.clear();
-    world.enemyGrid.Around(pos,reach,[pos,reach](int i) { if(npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach)inReach.push_back(i); });
-    std::sort(inReach.begin(),inReach.end());
-    for(const int i:inReach) {
-        if(n>=64)break;
-        const Enemy& e=world.enemy[static_cast<std::size_t>(i)];
-        threats[n++]=npc::Threat{{e.aim[0],e.aim[1],e.aim[2]},e.points>=kLargePoints ? 3.0f : 1.0f};
-    }
+    const int n=ThreatsNear(pos,reach,threats);
     const bool rollReady=c.rolls && (At<std::uint32_t>(h,kControlMask)&kMaskRoll) && ms-s.rollAt>=static_cast<ULONGLONG>(Cfg().npcRollSec*1000.0f);
     const npc::Evade e=npc::CrowdResponse(pos,threats,n,Cfg().npcDangerRange,Cfg().npcCrowd,Cfg().npcGrabRange,rollReady);
     if(e.move==npc::Move::hold)return false;

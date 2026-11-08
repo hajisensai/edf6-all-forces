@@ -16,7 +16,7 @@
 //    the scan's order), as they do for a query point, scope or reach that is not finite.
 //  - Order: PickTarget / NearestHoriz rank by (score, index): a tie goes to the lower index, as the scans' first-wins
 //    did. Box / Capsule give each cell's points in index order, cells in row order; a caller that needs the scan's
-//    order (Evade's first 64) sorts what it collected.
+//    order (Evade's first 64) takes them through FirstAround (a partial selection of the lowest indices).
 // No cap: the cells are sized from the points' extent and enlarged so that there are at most ~4 per point (a far
 // outlier makes the cells coarser, never the arrays huge); the arrays grow with the battle and are kept.
 // Pure logic, no game memory: the frame's lists it indexes are copies (positions read once, in Gather).
@@ -220,6 +220,22 @@ template<class AimOf> int NearestHoriz(const Grid& g,int n,AimOf aimOf,const flo
         if(d<nd || (d==nd && best>=0 && i<best)){nd=d;best=i;}
     });
     return best;
+}
+
+// The scan `for(i=0; i<n && got<most; ++i) if(keep(i)) out[got++]=i` through `g`: the first `most` points in index
+// order for which keep(i) holds, ascending, into `out`, keep asked only of the points Around(c, r) visits (it must hold
+// of none outside that box: the caller's own test of "within r"). Those it holds of are gathered in the cells' order,
+// then the `most` lowest indices taken by a partial selection (nth_element, linear in what was gathered) and only they
+// sorted: a dense crowd round `c` (hundreds in reach) costs O(k + most log most), not O(k log k).
+template<class Keep> void FirstAround(const Grid& g,const float* c,float r,int most,Keep keep,std::vector<int>& out) {
+    out.clear();
+    if(most<=0)return;
+    g.Around(c,r,[&](int i){ if(keep(i))out.push_back(i); });
+    if(out.size()>static_cast<std::size_t>(most)) {
+        std::nth_element(out.begin(),out.begin()+most,out.end());
+        out.resize(static_cast<std::size_t>(most));
+    }
+    std::sort(out.begin(),out.end());
 }
 
 // The friends a shot from `from` to `to` can touch (ShotClear's two tests: within `line` of its line, within `blast` of
