@@ -1769,12 +1769,20 @@ KNOWN_SILENT: dict[str, tuple[frozenset[str], str]] = {
                       "MAB hatch events; 301's cues are in no EDF6 bank, 401's in tikyuu4_en_UFOcarrier401 under no preset"),
     'EDF6_Berserker_Large': (frozenset({'歩行メカ衝突', 'ヘクトル衝突'}),
                              'ragdoll_contact; its cue en_Hector_down is in tikyuu4_en_Hector, no EDF6 preset names it'),
+    'UfoMother301': (frozenset({'母船UFO弱点収納', '母船UFO弱点収納完了', '母船UFOハッチ閉じる稼動', '母船UFOハッチ閉じる停止',
+                                '母船UFOハッチふた閉じる', '母船UFOハッチふた開く', '母船UFOハッチ開く稼動', '母船UFOハッチ開く停止',
+                                '母船UFO弱点出現', '母船UFO弱点出現完了'}),
+                     "the hull's MAB events (its weak point's hatch); edf41_se has them, but the plugin plays the hull's sounds "
+                     "by code and does not follow its clips"),
     'UfoSmall507': (frozenset({'EDF4小型UFO衝突'}),
                     "ragdoll_contact; the same cue (en_UFOmini_crush) as EDF6's 小型UFO衝突, not renamed yet"),
 }
 # Part classes the plugin builds whose MAB events it plays from their hull's edf41_se (src/edf41mother.cpp: the cannons'
 # edf41_sound_events, the hatches by code): the hull's check holds those cues to its banks.
 HULL_SOUND_CLASSES = {'UfoMother301_BigCannon', 'UfoMother301_Cannon', 'UfoMother301_Hatch', 'UfoMother301_Panel'}
+# The keys by which the plugin plays an object's MAB se events itself (on the clip's clock, from edf41_se): a MAB name in edf41_se
+# plays only where one of them is; elsewhere EDF6 alone resolves it, by SEPRESET name.
+MAB_PLAYER_KEYS = ('edf41_dragon_se', 'edf41_robo_events', 'edf41_sound_events')
 
 
 def sound_cues(games: 'Games') -> tuple[dict[str, str], dict[str, set[str]]]:
@@ -1815,7 +1823,8 @@ def mab_sound_names(members: dict) -> list[str]:
 
 def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
     """ValueError when a sound name of the object cannot play: SE_KEYS, its MAB se events and ragdoll_contact. A name is
-    played by EDF6 from SEPRESET.SGO (not there: an empty preset, silent) or by the plugin from the object's edf41_se; its cue
+    played by EDF6 from SEPRESET.SGO (not there: an empty preset, silent) or by the plugin from the object's edf41_se (a MAB
+    name only where the plugin follows the clips, MAB_PLAYER_KEYS); its cue
     must be in a bank the object lists in game_sound or a resident one (else the player the cue names is null: the M015 crash
     of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50). A MAB name the plugin plays must not
     be in SEPRESET too (EDF6 would play it as well). Silent names only as KNOWN_SILENT lists them for the class."""
@@ -1842,8 +1851,9 @@ def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
         raise ValueError(f"{rel}: MAB sounds {twice} are in SEPRESET.SGO and the plugin's edf41_se: they would play twice")
     known, _why = KNOWN_SILENT.get(cls, (frozenset(), ''))
     silent = []
+    mab_played = any(k in members for k in MAB_PLAYER_KEYS)
     for n in dict.fromkeys(names + mab_names + contact_names):
-        if n in own:
+        if n in own and (mab_played or n in names or n in contact_names):
             continue
         if n not in seset:
             silent.append(n)
@@ -2420,10 +2430,9 @@ NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER30
 ROOTS.update(MOTHER401_ROOTS)
 NATIVE_FIXES.update({root: mother401_fix for root in (*MOTHER401_ROOTS, *MOTHER401_DLC_ROOTS)})
 def dragon_fix(games: 'Games', files: dict[str, bytes]) -> None:
-    """After the giant's alias: its ragdoll's mass, its MAB sound table; the sounds checked again with that table."""
+    """After the giant's alias: its ragdoll's mass, its MAB sound table (build checks the sounds after it)."""
     dragon_ragdoll_fix(games, files)
     dragon_events(files)
-    check_sounds(games, files['OBJECT/DRAGONBIG401.SGO'], 'OBJECT/DRAGONBIG401.SGO')
 
 
 NATIVE_FIXES['DRAGONBIG401.SGO'] = dragon_fix   # after its alias (the giant dragon above)
@@ -2627,7 +2636,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
     check_fracture(members, files, rel)
     graft_cas(games, a, files, cas, rel_of(t_am[1]) if t_am and isinstance(t_am[1], str) else '')
     check_materials(games, files, rel, {k: len(theirs[k]) for k in MATERIAL_KEYS if k in theirs}, a.inert_materials)
-    check_sounds(games, files[rel], rel)
+    if root not in NATIVE_FIXES:   # else after the fix (build), which may add the plugin's sound keys
+        check_sounds(games, files[rel], rel)
 
 
 def hidden_model(rab: bytes, donor_mdb: str, name: str) -> bytes:
@@ -4048,6 +4058,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 alias(games, root, out, ALIASES[root])
                 if root in NATIVE_FIXES:
                     NATIVE_FIXES[root](games, out)
+                    check_sounds(games, out[rel], rel)
             except ValueError as e:
                 why.append(f'alias {ALIASES[root].cls}: {e}')
         if not why and root in NATIVE_FIXES and root not in ALIASES:   # a native class without an alias (UfoRobo, the 401)
