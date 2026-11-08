@@ -595,6 +595,35 @@ void FanCases() {
 }
 
 
+// The old per-call walk over the image's vtable COL cells; the cached per-image table must answer identically.
+const NativeProfile* ScanFamily(const void* owner) {
+    if(!Readable(owner,0x38))return nullptr;
+    const auto table=At<const unsigned char*>(owner,0);if(!Readable(table-8,8))return nullptr;
+    const auto col=At<const void*>(table-8,0);
+    for(const auto& p:profiles) {const auto native=image+p.vtableRva;if(Readable(native-8,8) && At<const void*>(native-8,0)==col)return &p;}
+    return nullptr;
+}
+void FamilyCases() {
+    CHECK(colImage==image && profileCols.size()==std::size(profiles));
+    for(const auto& p:profiles) {
+        Object o(p.name);Put<void*>(o.bytes,0,image+p.vtableRva);
+        const auto family=Family(o.bytes);CHECK(family!=nullptr && family==ScanFamily(o.bytes) && family->vtableRva==p.vtableRva);
+    }
+    alignas(16) unsigned char foreignTable[16]{};Put<const void*>(foreignTable,0,image+0x2000010); // a COL no profile owns
+    Object o("GiantAnt");Put<void*>(o.bytes,0,foreignTable+8);CHECK(!Family(o.bytes) && !ScanFamily(o.bytes));
+    Put<void*>(o.bytes,0,nullptr);CHECK(!Family(o.bytes) && !ScanFamily(o.bytes));
+    // An unreadable row never matches, even an object whose own COL cell holds the same null placeholder.
+    const auto saved=profileCols[0];profileCols[0]=ProfileCol{nullptr,false};
+    Put<const void*>(foreignTable,0,nullptr);Put<void*>(o.bytes,0,foreignTable+8);CHECK(!Family(o.bytes));
+    Put<void*>(o.bytes,0,image+profiles[0].vtableRva);CHECK(Family(o.bytes)!=&profiles[0]);profileCols[0]=saved;
+    CHECK(Family(o.bytes)==&profiles[0]);
+    // The resolved-profile overload keeps the admission gate: no profile, no aim point.
+    controlled=o.bytes;float point[4]={4,3,2,1};const float untouched[4]={4,3,2,1};
+    CHECK(!Point(o.bytes,nullptr,point) && Vec(point,untouched));
+    CHECK(Point(o.bytes,&profiles[0],point));const float live[4]={110,120,30,1};CHECK(Vec(point,live));
+    ready=false;std::memcpy(point,untouched,16);CHECK(!Point(o.bytes,&profiles[0],point) && Vec(point,untouched));ready=true;
+    controlled=nullptr;
+}
 void AcceptedPointCases() {
     Object root("EDF6_Berserker_TypeShooter");controlled=root.bytes;acceptedOwner=root.bytes;float point[4]={-1,-2,-3,-4};
     acceptedEnabled=true;const unsigned queries=coreQueries;
@@ -631,7 +660,10 @@ void ReadinessCases() {
     constexpr unsigned char mainOriginal[]={0x48,0x85,0xC0,0x74,0x5A,0x48,0x8B,0x8F,0x20,0x01,0,0,0x48,0x8B,0x11};std::memcpy(image+0x31CC4B,mainOriginal,sizeof(mainOriginal));
     constexpr unsigned char meteorOriginal[]={0x48,0x8D,0x8E,0x20,0x01,0,0,0xE8,0x51,0x0E,0x33,0,0x84,0xC0};std::memcpy(image+0x443A93,meteorOriginal,sizeof(meteorOriginal));
     deiroiReady=true;const bool installed=InstallEnemyControlWeaponAim();CHECK(installed);if(!installed)return;CHECK(std::size(profiles)==34);AllReady(true);
-    CHECK(InstallEnemyControlWeaponAim());AllReady(true);CHECK(!EnemyControlWeaponAimReady(nullptr));
+    CHECK(colImage==image && profileCols.size()==std::size(profiles)); // the new image's COL table is built by install
+    const auto* cols=profileCols.data();
+    CHECK(InstallEnemyControlWeaponAim());AllReady(true);CHECK(profileCols.data()==cols); // never rebuilt under live hooks
+    CHECK(!EnemyControlWeaponAimReady(nullptr));
     NativeProfile foreign=profiles[0];CHECK(!EnemyControlWeaponAimReady(&foreign));
     deiroiReady=false;for(const auto& p:profiles)CHECK(EnemyControlWeaponAimReady(&p)==(std::strcmp(p.name,"Deiroi")!=0));deiroiReady=true;
     auto foreignByte=[&](unsigned at){image[at]^=1;AllReady(false);image[at]^=1;};
@@ -856,13 +888,13 @@ int main() {
     using namespace fixture;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));if(!image)return 2;
     unsigned i=0;for(const auto& p:profiles)Put<const void*>(image+p.vtableRva-8,0,image+0x2000000+(i++)*0x20);
-    admittedImage=image;ready=true;
+    admittedImage=image;ready=true;CacheProfileCols(); // production fills this inside install, before the first redirect
     Leaf(0x6D1800,reinterpret_cast<const void*>(&NativeUnit));Leaf(0x34E470,reinterpret_cast<const void*>(&NativeLarge));
     Leaf(0x6BB5A0,reinterpret_cast<const void*>(&NativeLocator));Leaf(0x4054E0,reinterpret_cast<const void*>(&NativeSpawn));
     Bytes noise;
     for(unsigned reg:regs) {Append(noise,{static_cast<unsigned char>(reg>=8 ? 0x49 : 0x48),static_cast<unsigned char>(0xB8+(reg&7))});Address(noise,reinterpret_cast<const void*>(0xFEED000000000000ull+reg));}
     for(unsigned reg=0;reg<6;++reg)Append(noise,{0x0F,0x57,static_cast<unsigned char>(0xC0+reg*9)});
     Append(noise,{0xF9,0xC3});scribble=reinterpret_cast<ScribbleFn>(Executable(noise));
-    TypedRuntimeCases();InlineCases();StackCases();ShellCases();BossCases();WalkingCases();PartsCases();FanCases();AcceptedPointCases();BossLockCases();DeiroiMainCases();MeteorCases();ReadinessCases();
+    FamilyCases();TypedRuntimeCases();InlineCases();StackCases();ShellCases();BossCases();WalkingCases();PartsCases();FanCases();AcceptedPointCases();BossLockCases();DeiroiMainCases();MeteorCases();ReadinessCases();
     std::printf("enemy weapon aim runtime: %d checks, %d failures\n",checks,failures);return failures?1:0;
 }

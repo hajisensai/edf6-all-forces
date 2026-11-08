@@ -532,6 +532,17 @@ EDF6AutoTurret 时，键仍按 ini。
 做法来自 KittopiaCreator 的补丁 SupportUnitCanBePlacedOnAllies：在 `SupportUnitBullet01` 的构造函数里清掉这个标志（`src/supportunit.cpp`）。
 改 ini 马上对之后扔出的装置生效。联机时命中由每台机器各自计算，所有玩家设成一样最好。逆向依据见 `docs/supportunit-allies-re.md`（静态分析，未进游戏实测）。
 
+## 物理多核（HavokMultithread）
+
+原版游戏启动时按 CPU 线程数建好了 Havok 物理的工作线程（8 核 16 线程的机器上是 15 个），却从不把物理任务交给它们：
+每帧的碰撞检测、约束求解、子弹的批量射线查询全在游戏主线程上一个个跑。ini `HavokMultithread=1`（默认开）时，
+插件在每帧物理步进前把这组工作线程接到物理任务队列上，任务图在多核上并行；碰撞回调（伤害、音效、地图破坏等）
+仍由 Havok 的世界级任务一个接一个执行，和主线程互斥。切换任务、退出关卡前，插件先关闭队列、等工作线程全部退出，
+再让游戏释放它们（原版这里不关队列，接上工作线程后会死锁）。只在启动时读这个键，改了要重启游戏；0 = 原版。
+`Debug=1` 时还会给三个世界级物理任务（PostCollide / PreSolve / PostSolve）挂一个只计数的探针，每次切换任务在日志里记
+`HAVOKMT world tasks so far: … overlapping, at most N at once`，出现重叠会立刻记一行 `OVERLAPPED`。
+`src/havok_mt.cpp`，逆向与审计见 `docs/havok-mt-re.md`（静态分析、离线检查、unicorn 模拟与实测数据，§13）。
+
 ## 原版问题修正：引导路线穿墙
 
 任务里从玩家脚下指向目的地、一串滚动箭头连成的那条引导线，原版会扎进墙里（EDF6 自己的任务和 EDF5 任务都有）。
@@ -703,6 +714,25 @@ EDF5 任务的引导线改为跟随脚本点名的目标。转角会比原版的
 - 占用是操作系统文件锁：占用者崩溃 / 被杀 / 关掉终端，游戏立刻空出来，不会留下陈旧的占用；排队者死了也自动出队。先来先得。
   队列按游戏目录分开（`%LOCALAPPDATA%\EDF6TestQueue\<目录哈希>`），对临时游戏副本的测试不会排在真实测试后面。
 - 排队只管会话之间；**用户自己开着的游戏照旧不碰**（各脚本原有的「游戏在运行就拒绝」检查不变）。
+
+### 性能实测（perfrun.py）
+
+一条命令测一个场景的帧时间、各线程 CPU、GPU 占用和热点，后台跑、自己排队、结束逐字节还原：
+
+```
+python tools/perfrun.py swarm                      # 测试场 160 只蚂蚁 + NPC 坦克、士兵班对打
+python tools/perfrun.py grand                      # 测试场大决战
+python tools/perfrun.py M001 --ab A.dll B.dll      # 两个构建交替跑（默认 ABAB），出 A/B 表
+```
+
+- 场景：`M001` / `RM015` / 行号（原版任务）、`grand`、`swarm[:敌人[:每波[:上限[:等级]]]]`，以及更重的 `horde`（400 只蚂蚁）、`blast`（300 只蚂蚁对 6 辆坦克、2 辆喀秋莎、2 门自行榴弹炮，爆炸多；字段同 swarm，可逐个覆盖）。测试场场景只改写测试场任务目录里的 4 个文件
+  （`gen.write_scenario`），不走会重新生成全部载具的完整安装；测试场要先由安装器装好。测试场只留当前方案要用的生成载具，
+  所以 `grand` 要求先在测试场启动器里用大决战方案装过一次（缺什么会直接报出来，不会进游戏崩掉）。原件先存到排队目录
+  （`%LOCALAPPDATA%\EDF6TestQueue\…\range-scenario-original`），游戏没退出、来不及还原时用 `python tools/perfrun.py --restore` 放回。
+- 进关等 `--warm` 秒（场面铺满；默认大决战 45、蚁群 30、原版 25），再采 `--cpu` 秒的干净窗口（不挂起线程：线程 CPU、GPU、插件
+  `Debug=1`（出厂默认）的 PERF 帧时间）和 `--stacks` 秒的栈（各默认 20），采完立刻退游戏，不按固定时长挂机。`--shots` 截图会掉帧，测帧时间时别开。
+- 结果在 `tmp/perf/<场景>-<时间>/`：`report.md`（按线程、按 `System::update` 阶段和对象类归并的热点，EDF.dll 地址为 RVA）与原始采样。
+  `python tools/perf_report.py <目录>` 可重新生成。需要先 `cmake --build build --target rip_sampler EDF6Autopilot`（两个都不在 `build.cmd` 的默认目标里）。
 
 ### 自动实测（run_test.py）
 

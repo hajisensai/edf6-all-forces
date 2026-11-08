@@ -20,6 +20,7 @@ void ReloadConfigIfChanged() noexcept{}
 float Down(const unsigned char*) noexcept{return 0;}
 ULONGLONG Frame() noexcept{return 1;}
 bool Same(const void*,const void*) noexcept{return false;}
+void ResetGunnerLog() noexcept{}
 const Enemy* World(int* count) noexcept{*count=0;return nullptr;}
 const std::int32_t* Relations(std::int32_t) noexcept{return nullptr;}
 }

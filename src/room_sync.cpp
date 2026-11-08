@@ -34,9 +34,13 @@ void PublishHostList() noexcept {
 // The other members' player loadouts the last room published (MemberPlayerVehicles), for the mission's start.
 SRWLOCK playersLock=SRWLOCK_INIT;
 VariantSet playersCopy;
+std::uint64_t playersCopyVersion=0;   // the engine's MemberPlayersVersion() copied: the set only changes on its tick
 void PublishPlayers() noexcept {
+    const std::uint64_t version=engine.MemberPlayersVersion();
+    if(version==playersCopyVersion)return;
     AcquireSRWLockExclusive(&playersLock);
     playersCopy=engine.MemberPlayerVehicles();
+    playersCopyVersion=version;
     ReleaseSRWLockExclusive(&playersLock);
 }
 bool apiLogged=false;
@@ -53,13 +57,19 @@ const EDF6CoopMemberAttributeApi* Api() noexcept {
     return table;
 }
 
-// Mods/OBJECT beside EDF6.exe (support_variants.cpp ModsPath).
+// Mods/OBJECT beside EDF6.exe (support_variants.cpp ModsPath). The directory is worked out once (the exe's path does
+// not change while it runs; FileThere asks for every variant every tick), only the file appended each time.
+wchar_t objectDir[MAX_PATH]{};
 bool ObjectPath(const wchar_t* file,wchar_t* out,std::size_t capacity) noexcept {
-    const DWORD n=GetModuleFileNameW(nullptr,out,static_cast<DWORD>(capacity));
-    wchar_t* slash=n && n<capacity ? wcsrchr(out,L'\\') : nullptr;
-    if(!slash)return false;
-    slash[1]=0;
-    return wcscat_s(out,capacity,L"Mods\\OBJECT\\")==0 && wcscat_s(out,capacity,file)==0;
+    if(!objectDir[0]) {
+        const DWORD n=GetModuleFileNameW(nullptr,out,static_cast<DWORD>(capacity));
+        wchar_t* slash=n && n<capacity ? wcsrchr(out,L'\\') : nullptr;
+        if(!slash)return false;
+        slash[1]=0;
+        if(wcscat_s(out,capacity,L"Mods\\OBJECT\\")!=0)return false;
+        wcscpy_s(objectDir,out);
+    }
+    return wcscpy_s(out,capacity,objectDir)==0 && wcscat_s(out,capacity,file)==0;
 }
 bool FileThere(void*,const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];

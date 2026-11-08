@@ -139,7 +139,8 @@ function render() {
   $('addLane').classList.toggle('hide', !editing);
   $('save').classList.toggle('hide', !editing && !dirty);
   $('save').disabled = !dirty || busy;
-  $('saved').textContent = dirty ? '有改动还没保存' : state?.updated_at ? `最后由 ${state.updated_by} 于 ${when(state.updated_at)} 保存` : '';
+  $('saved').textContent = dirty ? '有改动还没保存' : state?.updated_at
+    ? (state.author ? `创建者：${state.author} · ` : '') + `最后由 ${state.updated_by} 于 ${when(state.updated_at)} 保存` : '';
   $('saved').classList.toggle('bad', dirty);
   if (!data.lanes.length) {
     $('board').replaceChildren(h('p', { class: 'muted' }, group == null ? '还没有哪个组写了剧情大纲。'
@@ -313,7 +314,7 @@ async function load() {
 
 // The group's outlines as buttons, the shown one pressed; the address keeps ?book= so a link opens the same one.
 function renderBooks() {
-  const list = state.books.map((b) => ({ book: b.book, label: (b.title || `大纲 ${b.book}`) + (b.lanes ? '' : '（空）') }));
+  const list = state.books.map((b) => ({ book: b.book, label: (b.title || `大纲 ${b.book}`) + (b.author ? ` · ${b.author}` : '') + (b.lanes ? '' : '（空）') }));
   if (book === 0 && state.editable) list.push({ book: 0, label: '新大纲（还没保存）' });
   $('books').replaceChildren(...list.map((b) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(b.book === book),
     onclick: () => { if (b.book !== book) leave(() => { book = b.book; return b.book ? load() : null; }); } }, b.label)));

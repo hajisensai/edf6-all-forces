@@ -44,25 +44,45 @@ bool ready=false,redirected[kTypedCount]{};
 unsigned char callBytes[kTypedCount][5]{};
 using PointFn=float*(__fastcall*)(void*,float*);
 using UnitFn=void(__fastcall*)(void*,void*);
+// Each profile's vtable COL cell is in EDF.dll .rdata, immutable for the admitted image: read once per image (before
+// the first hook is redirected) instead of one Readable probe per profile on every hook call. Unreadable rows never match.
+struct ProfileCol { const void* col;bool readable; };
+std::vector<ProfileCol> profileCols;
+const unsigned char* colImage=nullptr;
+void CacheProfileCols() noexcept {
+    // Never rebuilt for the same image: a retried install may already have live hooks reading this table.
+    if(!image || colImage==image)return;
+    std::size_t count=0;const auto profiles=enemy_native::Profiles(&count);
+    profileCols.assign(count,ProfileCol{nullptr,false});
+    for(std::size_t i=0;i<count;++i) {
+        const auto native=image+profiles[i].vtableRva;
+        if(Readable(native-8,8))profileCols[i]=ProfileCol{At<const void*>(native-8,0),true};
+    }
+    colImage=image;
+}
 const enemy_native::NativeProfile* Family(const void* owner) noexcept {
     if(!Readable(owner,0x38))return nullptr;
     const auto table=At<const unsigned char*>(owner,0);
     if(!Readable(table-8,8))return nullptr;
     const auto col=At<const void*>(table-8,0);
+    if(colImage!=image)return nullptr;
     std::size_t count=0;const auto profiles=enemy_native::Profiles(&count);
-    for(std::size_t i=0;i<count;++i) {
-        const auto native=image+profiles[i].vtableRva;
-        if(Readable(native-8,8) && At<const void*>(native-8,0)==col)return profiles+i;
-    }
+    for(std::size_t i=0;i<count && i<profileCols.size();++i)
+        if(profileCols[i].readable && profileCols[i].col==col)return profiles+i;
     return nullptr;
 }
-bool Point(const void* owner,float* out) noexcept {
-    if(!ready || image!=admittedImage || !out || !Family(owner))return false;
+// For callers that already resolved owner's Family: skips the second profile walk, keeps the admission gate.
+bool Point(const void* owner,const enemy_native::NativeProfile* profile,float* out) noexcept {
+    if(!ready || image!=admittedImage || !out || !profile)return false;
     float point[3];
     // Accepted native bursts retain their host-frozen point; future actions still use the current Core reticle.
     if(!enemy_native::WalkingAcceptedAimPoint(owner,point) && !EnemyControlWeaponAim(owner,point))return false;
     for(float value:point)if(!std::isfinite(value))return false;
     std::memcpy(out,point,12);out[3]=1.0f;return true;
+}
+bool Point(const void* owner,float* out) noexcept {
+    if(!ready || image!=admittedImage || !out)return false;
+    return Point(owner,Family(owner),out);
 }
 // At each native inline emitter the target point precedes its ORIGINAL gravity/speed solver.
 // The callback bypasses only old AI-target coordinate selection, including the null-target forward fallback.
@@ -136,7 +156,7 @@ bool __fastcall BallisticPoint(const void* owner,float* out) noexcept {
         else if(std::strcmp(profile->name,"Nephila")==0) {context=0x1100;muzzle=0x10A0;speed=0x10C0;}
         else return false;
         const auto root=static_cast<const unsigned char*>(owner);alignas(16) float point[4];
-        if(!Readable(root+context,0xC0,true) || !Readable(root+muzzle,16) || !Readable(root+speed,4) || !Point(owner,point))return false;
+        if(!Readable(root+context,0xC0,true) || !Readable(root+muzzle,16) || !Readable(root+speed,4) || !Point(owner,profile,point))return false;
         const float velocity=At<float>(root,speed);
         if(!std::isfinite(velocity) || velocity<=0)return false;
         reinterpret_cast<BallisticFn>(image+0x2312A0)(const_cast<unsigned char*>(root)+context,out,point,
@@ -156,7 +176,7 @@ bool __fastcall SquidDirection(const void* control,float* out) noexcept {
         for(std::size_t i=0;i<count;++i)if(At<const void*>(list+i*16,0)==control) {
             const auto weak=At<const unsigned char*>(list+i*16,8);member=Readable(weak,12) && At<LONG>(weak,8)>0;break;
         }
-        float point[4];if(!member || !Point(root,point))return false;
+        float point[4];if(!member || !Point(root,profile,point))return false;
         const auto muzzle=reinterpret_cast<const float*>(static_cast<const unsigned char*>(control)+0xF0);
         for(unsigned i=0;i<3;++i) {if(!std::isfinite(muzzle[i]))return false;out[i]=point[i]-muzzle[i];}
         out[3]=1;return true;
@@ -204,7 +224,7 @@ bool InstallStack(unsigned index) {
     stackCode[index]=code;stackBytes[index]=b;return true;
 }
 
-bool LargeOwner(const void* control,const void** owner) noexcept {
+bool LargeOwner(const void* control,const void** owner,const enemy_native::NativeProfile** family) noexcept {
     if(!Readable(control,0x18))return false;
     const auto root=At<const unsigned char*>(control,0x10);
     const auto profile=Family(root);
@@ -215,16 +235,16 @@ bool LargeOwner(const void* control,const void** owner) noexcept {
     for(std::size_t i=0;i<count;++i)if(At<const void*>(entries+i*16,0)==control) {
         const auto weak=At<const unsigned char*>(entries+i*16,8);
         if(!Readable(weak,16) || At<LONG>(weak,8)<=0)return false;
-        *owner=root;return true;
+        *owner=root;*family=profile;return true;
     }
     return false;
 }
 float* __fastcall LargePoint(void* control,float* out) {
     __try {
-        const void* owner=nullptr;
-        if(Readable(out,16,true) && LargeOwner(control,&owner)) {
+        const void* owner=nullptr;const enemy_native::NativeProfile* family=nullptr;
+        if(Readable(out,16,true) && LargeOwner(control,&owner,&family)) {
             if(enemy_native::WalkingGunAimPoint(control,out)) {out[3]=1.0f;return out;}
-            if(Point(owner,out))return out;
+            if(Point(owner,family,out))return out;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return reinterpret_cast<PointFn>(image+0x34E470)(control,out);
@@ -277,7 +297,7 @@ float* __fastcall MonsterLocator(void* locator,float* out) {
     __try {
         auto* root=static_cast<unsigned char*>(locator)-0x6D8;
         const auto profile=Family(root);alignas(16) float point[4];
-        if(profile && profile->kind==enemy_native::Kind::monster && Readable(root+0x6A0,0x20,true) && root[0x6A0] && Point(root,point)) {
+        if(profile && profile->kind==enemy_native::Kind::monster && Readable(root+0x6A0,0x20,true) && root[0x6A0] && Point(root,profile,point)) {
             std::memcpy(root+0x6B0,point,16);root[0x6A1]=1;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -418,7 +438,7 @@ bool InstallBossContext() noexcept {
     bossContext=true;return true;
 }
 
-bool HumanoidOwner(const void* weapon,const void** owner) noexcept {
+bool HumanoidOwner(const void* weapon,const void** owner,const enemy_native::NativeProfile** family) noexcept {
     if(!Readable(weapon,0x738))return false;
     const auto root=At<const unsigned char*>(weapon,0x5B0);
     const auto profile=Family(root);
@@ -430,7 +450,7 @@ bool HumanoidOwner(const void* weapon,const void** owner) noexcept {
     for(std::size_t i=0;i<count;++i)if(At<const void*>(entries+i*16,0)==weapon) {
         const auto weak=At<const unsigned char*>(entries+i*16,8);
         if(weak!=self || !Readable(weak,24) || At<LONG>(weak,8)<=0 || At<const void*>(weak,16)!=weapon)return false;
-        *owner=root;return true;
+        *owner=root;*family=profile;return true;
     }
     return false;
 }
@@ -438,14 +458,14 @@ using HumanoidPointFn=bool(__fastcall*)(void*,float*);
 using HumanoidSetFn=void(__fastcall*)(void*,const float*);
 bool __fastcall HumanoidPoint(void* weapon,float* out) {
     __try {
-        const void* owner=nullptr;
-        if(Readable(out,16,true) && HumanoidOwner(weapon,&owner) && Point(owner,out))return true;
+        const void* owner=nullptr;const enemy_native::NativeProfile* family=nullptr;
+        if(Readable(out,16,true) && HumanoidOwner(weapon,&owner,&family) && Point(owner,family,out))return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return reinterpret_cast<HumanoidPointFn>(image+0x450920)(weapon,out);
 }
 void __fastcall HumanoidSet(void* weapon,const float* was) {
     alignas(16) float point[4];bool use=false;
-    __try {const void* owner=nullptr;use=HumanoidOwner(weapon,&owner) && Point(owner,point);}
+    __try {const void* owner=nullptr;const enemy_native::NativeProfile* family=nullptr;use=HumanoidOwner(weapon,&owner,&family) && Point(owner,family,point);}
     __except(EXCEPTION_EXECUTE_HANDLER) {use=false;}
     reinterpret_cast<HumanoidSetFn>(image+0x4A1D40)(weapon,use ? point : was);
 }
@@ -462,7 +482,7 @@ bool __fastcall ShellPoint(const void* control,float* out) noexcept {
         const void* owner=nullptr;
         if(!OwnerOfUnit(At<const void*>(control,0),&owner))return false;
         const auto family=Family(owner);
-        return family && std::strcmp(family->name,"EDF6_ShellFish")==0 && Point(owner,out);
+        return family && std::strcmp(family->name,"EDF6_ShellFish")==0 && Point(owner,family,out);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 using ControlFn=void(__fastcall*)(void*,const void*);
@@ -476,7 +496,7 @@ void __fastcall SpinnerTarget(void* control,const void* target) {
                 if(OwnerOfUnit(At<const void*>(list,0),&owner)) {
                     const auto family=Family(owner);
                     if(family && std::strcmp(family->name,"EDF6_SpinnerUfo")==0 && Readable(owner,0x11B0) &&
-                       At<const void*>(owner,0x11A8)==control && Point(owner,point)) {
+                       At<const void*>(owner,0x11A8)==control && Point(owner,family,point)) {
                         bool all=true;
                         for(std::size_t i=1;i<count;++i) {const void* other=nullptr;if(!OwnerOfUnit(At<const void*>(list+i*0x30,0),&other) || other!=owner)all=false;}
                         if(all) {
@@ -502,7 +522,7 @@ void __fastcall MermanTarget(void* control,const void* target) {
         if(Readable(control,0x80,true) && OwnerOfUnit(At<const void*>(control,0),&owner)) {
             const auto family=Family(owner);
             use=family && !std::strcmp(family->name,"EDF6_Merman") && Readable(owner,0x1C18) &&
-                At<const void*>(owner,0x1C10)==control && Point(owner,point);
+                At<const void*>(owner,0x1C10)==control && Point(owner,family,point);
         }
         if(use)std::memcpy(static_cast<unsigned char*>(control)+0x10,point,16);
     } __except(EXCEPTION_EXECUTE_HANDLER) {use=false;}
@@ -536,7 +556,7 @@ bool InstallShell() {
     shellCode=code;shellBytes=b;return true;
 }
 
-bool UnitOwner(const void* unit,const void** owner) noexcept {
+bool UnitOwner(const void* unit,const void** owner,const enemy_native::NativeProfile** family) noexcept {
     if(!Readable(unit,0x2E0))return false;
     const auto root=At<const unsigned char*>(unit,0x2B0);
     const auto weak=At<const unsigned char*>(unit,0x2B8);
@@ -552,13 +572,13 @@ bool UnitOwner(const void* unit,const void** owner) noexcept {
     } else if(std::strcmp(profile->name,"GiantAntEX") && std::strcmp(profile->name,"GiantBeeEX") &&
               std::strcmp(profile->name,"GiantSpiderEX") && std::strcmp(profile->name,"EDF6_Berserker_Middle") &&
               std::strcmp(profile->name,"EDF6_Berserker_TypeShooter") && std::strcmp(profile->name,"EDF6_GiantDangoLarge"))return false;
-    *owner=root;return true;
+    *owner=root;*family=profile;return true;
 }
 void __fastcall UnitPoint(void* unit,void* dt) {
     bool changed=false;unsigned flags=0;alignas(16) float saved[4],point[4];
     __try {
-        const void* owner=nullptr;
-        if(UnitOwner(unit,&owner) && Readable(static_cast<unsigned char*>(unit)+0x2C0,0x20,true) && Point(owner,point)) {
+        const void* owner=nullptr;const enemy_native::NativeProfile* family=nullptr;
+        if(UnitOwner(unit,&owner,&family) && Readable(static_cast<unsigned char*>(unit)+0x2C0,0x20,true) && Point(owner,family,point)) {
             flags=At<unsigned>(unit,0x2C0);std::memcpy(saved,static_cast<unsigned char*>(unit)+0x2D0,16);
             Put<unsigned>(unit,0x2C0,flags|2u);std::memcpy(static_cast<unsigned char*>(unit)+0x2D0,point,16);changed=true;
         }
@@ -675,6 +695,7 @@ bool InstallEnemyControlWeaponAim() noexcept {
         if(ready && image==admittedImage)return true;
         if(!image || (admittedImage && admittedImage!=image))return false;
         for(const auto& p:kPrints)if(!Readable(image+p.rva,sizeof(p.bytes)) || std::memcmp(image+p.rva,p.bytes,sizeof(p.bytes)))return false;
+        CacheProfileCols(); // hooks go live at the first RedirectCall below and resolve Family from this table
         constexpr unsigned sites[]={0x34E231,0x34F978,0x6D550B,0x45448D,0x455B62,0x4545B7,0x455B96,0x46F96C,0x40B13C,0x4BA0B5,0x3D87AD,0x3D87DF,0x44500D,0x447703,0x443B5E,0x44E40A,0x3A027D,0x3A85DE,0x31CB9A};
         constexpr unsigned originals[]={0x34E470,0x34E470,0x6D1800,0x450920,0x450920,0x4A1D40,0x4A1D40,0x4A1D40,0x4054E0,0x6BB5A0,0x3DB140,0x3DB140,0x44E640,0x44DE70,0x448230,0x548EF0,0x3A9CF0,0x3A9CF0,0x6CFBC0};
         auto hooks=TypedHooks();
