@@ -7,9 +7,13 @@
 //                          EDF6VehicleCrew.generator.exe, written by install): it makes the coloured soldiers / loaded
 //                          vehicles' files the ini and the pending list name that are not there yet, new names only
 //   VariantGenerationStatus what it is doing / did (Mods/Plugins/EDF6VehicleCrew.generate_status.txt)
+//   RestoreModSaves        the saves left in the vanilla set (src/save_mode.h: a 原版启动 window closed while the vanilla
+//                          game ran, a slot synced from a vanilla run elsewhere) switched back by the same exe as
+//                          `restore-saves`, waited for: before the game reads them; false (logged) when it could not
 //   StartSaveBackup        the same exe as `backup-saves`, hidden, not waited for (tools/save_backup.py): the saves
 //                          copied before this start reads them, the old copies thinned with age
-// Game thread or any one thread; each call is short (no waiting on the generator).
+// Game thread or any one thread; each call is short (no waiting on the generator), except RestoreModSaves (EML6_Load
+// only, and only when the saves are not in the mod set).
 #pragma once
 #include "loadout_file.h"
 #include "loadout_ini.h"
@@ -25,4 +29,5 @@ bool SaveSupportLoadouts(const LoadoutSave* items,int count,int* failed,wchar_t*
 bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept;
 GenerateStatus VariantGenerationStatus() noexcept;
 bool StartSaveBackup() noexcept;
+bool RestoreModSaves() noexcept;
 }  // namespace crew

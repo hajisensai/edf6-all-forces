@@ -1283,6 +1283,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     ini.Start(iniPath);
     NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
+    // The saves in the mod's set before the game reads them (tools/vanilla_launch.py restore_saves): never the mod game on
+    // the vanilla saves (whose progress would then be stored as the vanilla set's).
+    if(!RestoreModSaves()){Log("REFUSED: the saves are still in the vanilla set (原版启动)");return false;}
     StartSaveBackup();   // the saves copied before the game reads them (tools/save_backup.py), whatever follows
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}
