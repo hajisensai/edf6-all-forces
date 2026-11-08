@@ -13,6 +13,7 @@
 #include "support_config.h"
 #include "support_policy.h"
 #include "support_soldier.h"
+#include "npc_arms.h"
 #include "support_spawn.h"
 #include "support_net.h"
 #include "pvp.h"
@@ -106,6 +107,8 @@ Deployment deployments[kDeployments]{};
 // No cooldown after a delivery (the user, 2026-10-25: 「支援调度 30 秒的全局冷却 删掉」; a limit will be the calls' pt): a call
 // waits only for the one still being planned.
 bool offlinePending=false;std::uint64_t nextOffline=1;
+// An offline request planned, its soldiers' player weapons loading (npc_arms.h NpcArmsLoaded) before it is made.
+bool offlinePlanned=false;SupportPlan offlinePlan{};
 wchar_t status[160]{};
 struct LocalRequest {
     bool shown=false,acceptNotices=false,hasNotice=false;
@@ -753,6 +756,13 @@ bool Validate(const SupportPlan& plan) noexcept {
        StrikeCatalog(plan.catalogId,strike) || (!dynamicDrone && !SupportSoldiersReady()))return false;
     // A soldier kind whose bodies are not installed here (support_call.h SupportKindInstalled: the X-Morph model pack) is
     // refused before anything is made, whatever the entry (not half a deployment); every peer runs the same install.
+    // A soldier given a player weapon (docs/feature-npc-weapon-tier.md; ValidPlan checked it is its kind's) needs the
+    // weapon hooks here: without them it would come as another soldier than the requester's. Refused, never stock.
+    for(unsigned i=0;i<plan.count;++i)
+        if(plan.units[i].arms && !SupportSoldierArmsReady()) {
+            Log("SUPPORT validate catalog=%u: unit %u carries a player weapon and the weapon hooks are not in here",plan.catalogId,i);
+            return false;
+        }
     for(unsigned i=0;i<plan.count;++i)
         if(IsSupportSoldierResource(plan.units[i].resourceId) && !SupportKindInstalled(SupportSoldierWeapon(plan.units[i].resourceId))) {
             Log("SUPPORT validate catalog=%u: unit %u resource %X: its soldier kind is not installed here (the X-Morph model pack)",
@@ -1126,7 +1136,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         const wchar_t* const made=here && (unit.variant&kVariantApplied) ? path : nullptr;
         if(unit.resourceId<kAircraft) {
             if(!(aboard ? CreateSupportSoldierUnregistered : ApplySupportSoldierResource)(unit.matrix,unit.resourceId,
-                    networked ? unit.netId : nullptr,!networked,&object,made)) {
+                    networked ? unit.netId : nullptr,!networked,&object,made,unit.arms)) {
                 Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
                 Destroy(id);return false;
             }
@@ -1487,7 +1497,7 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
     else {
         Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         planning.loadout=loadout;
-        offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
+        offlinePending=true;offlinePlanned=false;accepted=true;Status(L"正在安排支援入口及路线");
         offlineCharge=held.on ? price : 0;held.Keep();
         offlineFollowUp=followUp;
         Log("SUPPORT request catalog=%d accepted offline, load %llX, %d pt",index,static_cast<unsigned long long>(loadout),price);
@@ -1766,15 +1776,30 @@ void SupportDispatchTick() noexcept {
     Configure();SupportNetTick();
     AirdropTestCall();
     if(offlinePending && !LocalAuthority()) {
-        offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
+        offlinePending=false;offlinePlanned=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
         SupportPointsRefund(offlineCharge);offlineCharge=0;offlineFollowUp=false;
     }
     if(offlinePending) {
-        SupportPlan plan;
+        SupportPlan& plan=offlinePlan;
         const int catalog=static_cast<int>(planning.catalog);float at[3];std::memcpy(at,planning.target,12);
-        const auto result=Plan(planning.catalog,planning.target,planning.loadout,&plan);
+        auto result=support_net::PlanResult::ready;
+        if(!offlinePlanned) {
+            plan=SupportPlan{};
+            result=Plan(planning.catalog,planning.target,planning.loadout,&plan);
+            if(result==support_net::PlanResult::ready) {
+                // This player's soldier weapons, as a request carries them online (support_net.cpp SubmitSupportRequest,
+                // support_protocol.cpp): each soldier the one of its kind.
+                support_net::RequesterArms arms{};LocalRequesterArms(&arms);
+                for(unsigned i=0;i<plan.count && i<support_net::kMaxUnits;++i) {
+                    auto& unit=plan.units[i];
+                    unit.arms=IsSupportSoldierResource(unit.resourceId) ? arms.kind[static_cast<int>(SupportSoldierWeapon(unit.resourceId))] : 0;
+                }
+                offlinePlanned=true;
+            }
+        }
+        if(offlinePlanned)result=NpcArmsLoaded(plan);
         if(result!=support_net::PlanResult::pending) {
-            offlinePending=false;
+            offlinePending=false;offlinePlanned=false;
             bool made=false;
             if(result==support_net::PlanResult::ready) {
                 made=SpawnDeployment(nextOffline++,plan,false,false);
@@ -1983,7 +2008,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     airdropTestSince=0;airdropTestAsked=false;
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;offlineCharge=0;offlineFollowUp=false;nextOffline=1;status[0]=0;configNoticeShown=false;
+    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;offlinePlanned=false;offlineCharge=0;offlineFollowUp=false;nextOffline=1;status[0]=0;configNoticeShown=false;
     rescueNote[0]=0;rescueSubmitting=false;rescueEnded=false;rescueRequest=0;
     legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     localRequest={};

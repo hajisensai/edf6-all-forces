@@ -24,6 +24,7 @@
 #include "sazabi_sound.h"
 #include "support_spawn.h"
 #include "support_soldier.h"
+#include "npc_arms.h"
 #include "thermal.h"
 #include "pvp.h"
 #include "enemy_control.h"
@@ -187,6 +188,8 @@ void MissionStart() noexcept {
     PreloadAirdrop();         // ...and the stock container a transport plane drops one in (airdrop.cpp)
     WatchMissionPhase("support soldiers");
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
+    WatchMissionPhase("support soldier weapons");
+    PreloadNpcArms();         // ...and the player weapons this player's soldiers carry, one tier below its own (npc_arms.h)
     WatchMissionPhase("support variants");
     PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
     WatchMissionPhase("player vehicles");

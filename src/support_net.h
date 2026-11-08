@@ -15,6 +15,17 @@ struct Unit {
     // unit message's `challenge`, which a unit message never used (an older peer reads it and ignores it; a host plans
     // one only when every peer announced kExtVariants, support_protocol.h).
     std::uint64_t variant=0;
+    // A soldier's weapon (npc_tier.h PackArms: the requesting player's pick, one tier below its own; 0: the stock template
+    // under the stock rule). Filled by the host's Session from the request's RequesterArms (Session::Advance), never by a
+    // planner; on the wire in the unit message's `request` (low word) and its last reserved word (high word).
+    std::uint64_t arms=0;
+};
+// The requesting player's weapon for each soldier kind (SupportWeapon order; npc_tier.h PackArms, 0: none): decided by
+// the requester (npc_arms.h LocalRequesterArms) and carried in its request (support_protocol.cpp: the request message's
+// unit fields), so every machine builds the same soldiers (docs/feature-npc-weapon-tier.md).
+constexpr std::uint32_t kArmsKinds=15;
+struct RequesterArms {
+    std::uint64_t kind[kArmsKinds]{};
 };
 struct Plan {
     std::uint32_t catalogId=0,count=0;
@@ -58,6 +69,7 @@ bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
 using SupportPlan=support_net::Plan;
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept;
+// The request carries this machine's player's soldier weapons (npc_arms.h LocalRequesterArms).
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0) noexcept;
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;

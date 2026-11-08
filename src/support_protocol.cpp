@@ -1,4 +1,5 @@
 #include "net_object_ref.h"
+#include "npc_tier.h"
 #include "pvp_match.h"
 #include "support_protocol.h"
 #include "support_loadout.h"
@@ -10,6 +11,39 @@ namespace crew::support_net {
 namespace {
 bool Point(const float* p) noexcept {
     for(int i=0;i<3;++i)if(!std::isfinite(p[i]) || std::fabs(p[i])>1.0e6f)return false;
+    return true;
+}
+static_assert(kArmsKinds==static_cast<std::uint32_t>(kSupportWeaponCount),"a requester's arms: one word a soldier kind");
+// A unit's weapon: none, or one its soldier kind carries (npc_tier.h UnpackArms; never on a vehicle).
+bool UnitArms(const Unit& u) noexcept {
+    return !u.arms || (IsSupportSoldierResource(u.resourceId) && npctier::UnpackArms(u.arms,SupportSoldierWeapon(u.resourceId),nullptr));
+}
+bool ValidArms(const RequesterArms& a) noexcept {
+    for(std::uint32_t k=0;k<kArmsKinds;++k)if(!npctier::UnpackArms(a.kind[k],static_cast<SupportWeapon>(k),nullptr))return false;
+    return true;
+}
+// A request's arms in its unit fields (resourceId, role, matrix, netId: 104 bytes, all zero in a request before): per
+// kind its weapon id (u16, 0xFFFF none) and its stars (u32, a nibble each), 90 bytes, the rest zero.
+constexpr std::size_t kArmsBytes=6*kArmsKinds,kUnitBytes=8+64+32;
+static_assert(kArmsBytes<=kUnitBytes,"the arms fit the request's unit fields");
+void PutArms(unsigned char* p,const RequesterArms& a) noexcept {
+    std::memset(p,0,kUnitBytes);
+    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6) {
+        const std::uint64_t v=a.kind[k];
+        const std::uint16_t id=v ? static_cast<std::uint16_t>(v&0xFFFFu) : static_cast<std::uint16_t>(0xFFFFu);
+        const auto stars=static_cast<std::uint32_t>(v>>16);
+        p[0]=static_cast<unsigned char>(id);p[1]=static_cast<unsigned char>(id>>8);
+        for(unsigned i=0;i<4;++i)p[2+i]=static_cast<unsigned char>(stars>>(i*8));
+    }
+}
+bool GetArms(const unsigned char* p,RequesterArms& a) noexcept {
+    for(std::size_t i=kArmsBytes;i<kUnitBytes;++i)if(p[i])return false;
+    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6) {
+        const auto id=static_cast<std::uint16_t>(p[0]|(p[1]<<8));
+        std::uint32_t stars=0;for(unsigned i=0;i<4;++i)stars|=static_cast<std::uint32_t>(p[2+i])<<(i*8);
+        if(id==0xFFFFu){if(stars)return false;a.kind[k]=0;continue;}
+        a.kind[k]=npctier::kArmsOn|id|(static_cast<std::uint64_t>(stars)<<16);
+    }
     return true;
 }
 bool ZeroId(const unsigned char* id) noexcept {
@@ -24,7 +58,7 @@ bool RequesterMetadata(const unsigned char* id,std::uint32_t team) noexcept {
 bool BeginUnit(const Unit& unit) noexcept {
     // BEGIN has no unit transform/variant. Require byte-zero floats, including rejecting negative zero.
     const float zero[16]{};
-    if(unit.variant || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
+    if(unit.variant || unit.arms || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
     if(!unit.resourceId)return !unit.role && ZeroId(unit.netId);
     return unit.resourceId==kBeginRequesterMetadata && (unit.role==0 || crew::pvp_match::PvpTeam(static_cast<int>(unit.role))) &&
         CanonicalRequester(unit.netId);
@@ -42,7 +76,7 @@ std::uint32_t RequiredDetails(const Plan& plan,std::uint32_t wireId) noexcept {
     return bits;
 }
 bool ValidUnit(const Unit& u,bool ids) noexcept {
-    if(!u.resourceId || u.role>kMaxUnits)return false;
+    if(!u.resourceId || u.role>kMaxUnits || !UnitArms(u))return false;
     for(float x:u.matrix)if(!std::isfinite(x) || std::fabs(x)>1.0e6f)return false;
     if(u.matrix[3]!=0 || u.matrix[7]!=0 || u.matrix[11]!=0 || u.matrix[15]!=1)return false;
     for(int row=0;row<3;++row)for(int other=row;other<3;++other) {
@@ -75,7 +109,7 @@ bool ValidMessage(const Message& m) noexcept {
     if(m.kind==Kind::hello)return m.challenge!=0 && m.request!=0;
     if(!m.epoch)return false;
     if(m.kind==Kind::welcome)return m.challenge!=0 && m.request!=0;
-    if(m.kind==Kind::request)return m.request!=0;
+    if(m.kind==Kind::request)return m.request!=0 && ValidArms(m.arms);
     if(m.kind==Kind::requestStatus)return m.request!=0 && m.index<=static_cast<std::uint32_t>(RequestStatus::interrupted);
     if(!m.transaction)return false;
     if(m.kind==Kind::begin)return m.count!=0 && BeginUnit(m.unit);
@@ -106,11 +140,12 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     Store32(p,kMagic);Store32(p,kVersion);Store32(p,static_cast<std::uint32_t>(m.kind));Store32(p,0);
     Store32(p,static_cast<std::uint32_t>(m.epoch));Store32(p,static_cast<std::uint32_t>(m.epoch>>32));
     Store32(p,static_cast<std::uint32_t>(m.challenge));Store32(p,static_cast<std::uint32_t>(m.challenge>>32));
-    Store32(p,m.transaction);Store32(p,m.request);Store32(p,m.catalog);Store32(p,m.count);Store32(p,m.index);Store32(p,m.ok);
+    Store32(p,m.transaction);Store32(p,m.kind==Kind::unit ? static_cast<std::uint32_t>(m.unit.arms) : m.request);Store32(p,m.catalog);Store32(p,m.count);Store32(p,m.index);Store32(p,m.ok);
     for(float f:m.target)Float(p,f);
+    if(m.kind==Kind::request){PutArms(p,m.arms);p+=kUnitBytes;Store32(p,0);return true;}
     Store32(p,m.unit.resourceId);Store32(p,m.unit.role);
     for(float f:m.unit.matrix)Float(p,f);
-    std::memcpy(p,m.unit.netId,32);p+=32;Store32(p,0);
+    std::memcpy(p,m.unit.netId,32);p+=32;Store32(p,m.kind==Kind::unit ? static_cast<std::uint32_t>(m.unit.arms>>32) : 0u);
     return true;
 }
 bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
@@ -122,9 +157,19 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     m.challenge=Read32(p);m.challenge|=static_cast<std::uint64_t>(Read32(p))<<32;
     m.transaction=Read32(p);m.request=Read32(p);m.catalog=Read32(p);m.count=Read32(p);m.index=Read32(p);m.ok=Read32(p);
     for(float& f:m.target)f=Float(p);
+    if(m.kind==Kind::request) {
+        if(!GetArms(p,m.arms))return false;
+        p+=kUnitBytes;if(Read32(p))return false;
+        if(!ValidMessage(m))return false;
+        out=m;return true;
+    }
     m.unit.resourceId=Read32(p);m.unit.role=Read32(p);
     for(float& f:m.unit.matrix)f=Float(p);
-    std::memcpy(m.unit.netId,p,32);p+=32;if(Read32(p))return false;
+    std::memcpy(m.unit.netId,p,32);p+=32;
+    const std::uint32_t high=Read32(p);
+    // A unit message's weapon (Unit::arms): its low word where a request's id goes, its high word last.
+    if(m.kind==Kind::unit){m.unit.arms=m.request|(static_cast<std::uint64_t>(high)<<32);m.request=0;}
+    else if(high)return false;
     if(!ValidMessage(m))return false;
     out=m;return true;
 }
@@ -322,12 +367,15 @@ void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus sta
     if(!reply)return;
     reply->dirty=true;ReplyTo(peer);
 }
-bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout) noexcept {
+bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout,
+                     const RequesterArms* arms) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
     // Every slot holds a request still waiting for its outcome: a new one would push one out unsettled (its outcome
     // never told, its pt never settled). Not taken; nothing is sent.
     if(LocalWaiting()>=kRecentRequests)return false;
+    if(arms && !ValidArms(*arms))return false;
     Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;
+    if(arms)m.arms=*arms;
     Notice(m.request,RequestStatus::accepted);
     std::memcpy(m.target,target,sizeof(m.target));
     if(host_){const auto before=nextTransaction_;HostRequest(0,m,now);return nextTransaction_!=before;}
@@ -398,7 +446,7 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     auto* allocated=AllocateTransaction();if(!allocated){Refuse(peer,m,"no transaction slot");return;}
     auto& t=*allocated;t.phase=!channel && MapBusy() ? Phase::queued : Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
     t.rescue=channel;
-    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;
+    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;t.arms=m.arms;
     Publish(peer,m.request,RequestStatus::accepted);
 }
 std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now,PreparedKind kind) noexcept {
@@ -433,14 +481,34 @@ std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now,Prepare
 void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     auto& t=transactions_[id-1];
     if(t.phase==Phase::planning) {
-        const auto catalog=t.plan.catalogId;float target[3];std::memcpy(target,t.plan.target,sizeof(target));
-        const auto result=t.external ? PlanResult::ready : backend_.hooks.planForRequester ?
-            backend_.hooks.planForRequester(t.requester,catalog,target,t.loadout,&t.plan) :
-            backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
-        if(result==PlanResult::pending)return;
-        if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false) ||
+        const auto catalog=t.plan.catalogId;
+        if(!t.planned) {
+            float target[3];std::memcpy(target,t.plan.target,sizeof(target));
+            const auto result=t.external ? PlanResult::ready : backend_.hooks.planForRequester ?
+                backend_.hooks.planForRequester(t.requester,catalog,target,t.loadout,&t.plan) :
+                backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
+            if(result==PlanResult::pending)return;
+            if(result==PlanResult::refused){Cancel(id,true,RequestStatus::refused);return;}
+            // Its soldiers carry the requester's weapons (docs/feature-npc-weapon-tier.md), decided by the requester and
+            // given here, never by a planner: every soldier of a kind the request names one for. A prepared plan (the
+            // mission crews', a carrier's drone) has no requester's arms: its soldiers stay the stock templates.
+            for(std::uint32_t i=0;!t.external && i<t.plan.count && i<kMaxUnits;++i) {
+                auto& unit=t.plan.units[i];
+                unit.arms=IsSupportSoldierResource(unit.resourceId) ?
+                    t.arms.kind[static_cast<std::uint32_t>(SupportSoldierWeapon(unit.resourceId))] : 0;
+            }
+            t.planned=true;
+        }
+        if(t.plan.catalogId!=catalog || !ValidPlan(t.plan,false) ||
            (t.dynamicDrone && !ValidPreparedDronePlan(t.plan)) ||
            (RequiredDetails(t.plan,t.id) && !PeersHaveDetails(RequiredDetails(t.plan,t.id)))){Cancel(id,true,RequestStatus::refused);return;}
+        // What it needs loaded here first (Hooks::prepare, the very question each peer's PREPARE asks): the host makes it
+        // too, at COMMIT. Its BEGIN waits; the transaction's own deadline still runs.
+        if(!t.external && backend_.hooks.prepare) {
+            const PlanResult loaded=backend_.hooks.prepare(t.plan);
+            if(loaded==PlanResult::pending)return;
+            if(loaded==PlanResult::refused){Cancel(id,true,RequestStatus::refused);return;}
+        }
         for(std::uint32_t i=0;i<t.plan.count;++i) {
             if(t.plan.units[i].resourceId==kExistingVehicle)continue;
             if(ordinal_>=0x80000000u || !backend_.hooks.deriveId(ordinal_++,t.plan.units[i].netId)){Cancel(id,true);return;}

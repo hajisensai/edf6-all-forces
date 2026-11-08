@@ -303,19 +303,26 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return 
 bool aircraftLeft=false;
 bool SupportAircraftLeft(const ObjRef&) noexcept {return aircraftLeft;}
 bool SupportSoldiersReady() noexcept {return allReady;}
+// npc_arms.h / support_soldier.h: this player's soldier weapons (localArms), their loads (armsLoad), the hooks (armsReady).
+bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResult armsLoad=support_net::PlanResult::ready;
+int armsAsked=0;
+bool SupportSoldierArmsReady() noexcept {return armsReady;}
+void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
-std::wstring lastLooks[16];
+std::wstring lastLooks[16];std::uint64_t lastArms[16]{};
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon) noexcept {
     if(nativeFail)return false;
-    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastResources[resourceCount++]=resource;}lastLocal=local;lastId=id;
+    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastResources[resourceCount++]=resource;}
+    lastLocal=local;lastId=id;
     *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look) noexcept {
-    return ApplySupportSoldierResource(matrix,resource,id,local,out,look);
+                                      const wchar_t* look,std::uint64_t weapon) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon);
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {

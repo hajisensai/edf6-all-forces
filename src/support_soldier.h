@@ -18,6 +18,9 @@ enum class SupportSpawnFailure {
 // (a stock template always; one of ours when the installer wrote both its member and its leader). Logged per missing kind.
 void NoteSupportKindsInstalled() noexcept;
 bool InstallSupportSoldiers() noexcept;
+// Whether a soldier can carry a player weapon here (docs/feature-npc-weapon-tier.md): the weapon load and attack
+// coefficient hooks are in (InstallSupportSoldiers; the sites as read, else logged and false).
+bool SupportSoldierArmsReady() noexcept;
 // MissionStart: release old weak records, then queue the stock resources before WaitPreload.
 void PreloadSupportSoldiers() noexcept;
 void ResetSupportSoldiers() noexcept;
@@ -38,13 +41,15 @@ bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigne
 // The same for any support_call.h soldier resource (its stock weapon variant). `local` (no ID): a soldier this
 // machine alone owns, allowed offline and to the host of a world with no other participant; clients never.
 // `look`: a coloured copy of its template (support_loadout.h SupportLookFile, app:/object/ path) preloaded this mission
-// (support_variants.h); nullptr: the stock template.
+// (support_variants.h); nullptr: the stock template. `weapon`: the player weapon it carries (npctier::PackArms of its
+// kind, support_net.h Unit::arms; docs/feature-npc-weapon-tier.md) in place of the template's main one, with a player's
+// attack coefficient; 0: the template's weapon under the difficulty's. A weapon that cannot be given: not spawned.
 bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                 bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
+                                 bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept;
 // The same, but an ID-bearing soldier is not registered yet: the caller seats it first (a crew made aboard an aircraft
 // in the air) and then registers it with RegisterSupportObject(soldier, id); on failure it deletes it.
 bool CreateSupportSoldierUnregistered(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                      bool local,ObjRef* out,const wchar_t* look=nullptr) noexcept;
+                                      bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

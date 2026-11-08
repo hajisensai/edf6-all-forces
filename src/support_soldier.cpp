@@ -4,6 +4,7 @@
 #include "mod_file.h"
 #include "online_authority.h"
 #include "hudtext.h"
+#include "npc_tier.h"
 #include <cmath>
 #include <iterator>
 
@@ -12,6 +13,37 @@ namespace support_native {
 constexpr unsigned kCreate=0x11945E0,kDelete=0x118A1B0,kPreload=0x7A3780,kTeamCall=0x54EE70,kLevel=0x54E740,kFollow=0x54EC50;
 constexpr unsigned kInitVtable=0x1762068;
 constexpr unsigned kRegister=0x781950,kDeriveId=0x776790;
+// A support soldier's weapon (npc_tier.h; docs/feature-npc-weapon-tier.md). EDF.dll 0x678CCB46 RVAs:
+//  - soldier_load_weapon (the human's constructor, 0x594498..0x5944A9): lea r8,[rbp+150h] (the 8 star bytes, memset 5
+//    at 0x59436A); lea rdx,[rbp+188h] (the weapon path, an MSVC std::wstring); mov rcx,r13 (the human); call 0x58F360,
+//    its result unused. The template's first weapon (index 0) is its main one in every kind (Root.cpk: the 14 templates;
+//    a Fencer's index 1 its AI shield). 0x58F360 reads the path's c_str only (a long string: its pointer) for
+//    CreateObject and the stars as a qword.
+//  - the soldier's OnLevel (0x596820, SetLevel's vcall [vt+30h]): 0x5968AE mov rcx,[GameData]; 0x5968B5 call 0xD77B0
+//    (rcx GameData, xmm1 the level/10): the difficulty's attack coefficient, stored by 0x5968C8 movss [rdi+1CF0h],xmm0
+//    (the soldier in rdi; the only write of +0x1CF0 for a soldier). Its HP (0x59686D call 0xD7810) is untouched.
+constexpr unsigned kLoadWeaponCtx=0x594498,kLoadWeaponSite=0x5944A9,kLoadWeapon=0x58F360;
+constexpr unsigned kCoefCtx=0x5968AE,kCoefSite=0x5968B5,kCoef=0xD77B0,kCoefStore=0x5968C8;
+const unsigned char kLoadWeaponCode[]={0x4C,0x8D,0x85,0x50,0x01,0x00,0x00,0x48,0x8D,0x95,0x88,0x01,0x00,0x00,0x49,0x8B,0xCD,0xE8};
+const unsigned char kCoefCode[]={0x48,0x8B,0x0D,0xDB,0xBF,0xB1,0x01,0xE8};
+const unsigned char kCoefStoreCode[]={0xF3,0x0F,0x11,0x87,0xF0,0x1C,0x00,0x00};
+// An MSVC x64 std::wstring: a long one (capacity >= 8) holds its pointer first.
+struct MsvcWide { const wchar_t* ptr; std::uint64_t unused; std::uint64_t size; std::uint64_t capacity; };
+static_assert(sizeof(MsvcWide)==0x20);
+using LoadWeaponFn=void*(__fastcall*)(void*,const MsvcWide*,const void*);
+using CoefFn=float(__fastcall*)(void*,float);
+LoadWeaponFn loadWeaponNext=nullptr;CoefFn coefNext=nullptr;
+bool arms=false;   // both hooks in (InstallSupportSoldiers)
+// The soldier Spawn is creating with a player weapon: its path and stars, given to the first weapon load (index 0) of
+// the first human whose constructor loads one while it is set, which Spawn then checks is the soldier it got.
+struct Arming {
+    bool on=false,applied=false;
+    void* human=nullptr;
+    wchar_t path[96]{};
+    std::size_t length=0;
+    alignas(8) std::uint8_t stars[npctier::kStarCount]{};
+};
+Arming arming;
 constexpr std::size_t kNetworkManager=0x20B2AC8;
 constexpr std::size_t kObjectManager=0x20B2958,kPreloadManager=0x20B29A8;
 // The stock Ranger templates, [weapon][leader] in SupportWeapon order (support_call.h): one class, model and CAS, each
@@ -76,7 +108,8 @@ void RecordFault(SupportSpawnFailure cause) noexcept {
     if(!faulted)firstFault=cause;
     faulted=true;failure=firstFault;
 }
-struct Owned { ObjRef ref; unsigned epoch=0; bool held=false; };
+// `armed`: it carries a player weapon (npc_tier.h): the player's attack coefficient (CoefHook), not the difficulty's.
+struct Owned { ObjRef ref; unsigned epoch=0; bool held=false; bool armed=false; };
 constexpr unsigned kOwnedLimit=96;
 Owned owned[kOwnedLimit]{};
 unsigned epoch=0;
@@ -100,6 +133,18 @@ Owned* FreeEntry() noexcept {
         if(!entry.ref)return &entry;
     }
     return nullptr;
+}
+void* __fastcall LoadWeaponHook(void* human,const MsvcWide* path,const void* stars) noexcept {
+    if(!arming.on || arming.applied)return loadWeaponNext(human,path,stars);
+    arming.applied=true;arming.human=human;
+    const MsvcWide mine{arming.path,0,arming.length,arming.length};
+    return loadWeaponNext(human,&mine,arming.stars);
+}
+// A soldier this module made with a player weapon: the attack coefficient a player has (1, the weapon's own damage, as
+// the requester's), not the difficulty's (docs/feature-npc-weapon-tier.md). Every other soldier: the stock one.
+float __fastcall CoefHook(void* gameData,float scale,const void* soldier) noexcept {
+    if(soldier)for(const auto& entry:owned)if(entry.armed && entry.ref.obj==soldier)return 1.0f;
+    return coefNext(gameData,scale);
 }
 bool Matrix(const float* m) noexcept {
     if(!m || !Readable(m,64))return false;
@@ -139,12 +184,23 @@ int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* re
 }
 // `look`: a coloured copy of the resource's template (support_loadout.h SupportLookFile, app:/object/ spelling) the caller
 // found preloaded (support_variants.h); nullptr: the stock template. Same class, AI weapon and setup either way.
+// `weapon`: a player weapon it carries (npctier::PackArms, its kind's; support_net.h Unit::arms), 0: the template's.
 bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false,
-           bool registerNow=true,const wchar_t* look=nullptr) noexcept {
+           bool registerNow=true,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept {
     *out=ObjRef{};
     if(!Gate(netId!=nullptr,local))return false;
     const wchar_t* const body=Body(resource) && look ? look : Body(resource);
     if(!body){failure=SupportSpawnFailure::transform;return false;}
+    npctier::Arms carried;
+    if(weapon) {
+        // The weapon hooks not in, or arms not its kind's: never the template instead (it would not be the soldier every
+        // machine builds). Validate refuses such a plan first; this is the last word.
+        if(!arms || !npctier::UnpackArms(weapon,SupportSoldierWeapon(resource),&carried) ||
+           !npctier::ArmsPath(SupportSoldierWeapon(resource),carried,arming.path,std::size(arming.path))) {
+            Log("SUPPORT soldier weapon %016llX not buildable here (hooks %d): not spawned",static_cast<unsigned long long>(weapon),arms ? 1 : 0);
+            failure=SupportSpawnFailure::setup;return false;
+        }
+    }
     // Its kind is offered, parsed and planned only when installed (support_call.h SupportKindInstalled): a plan of another
     // machine with it reaches here only past this machine's Validate, which refuses it first.
     if(!SupportKindInstalled(SupportSoldierWeapon(resource))) {
@@ -168,8 +224,20 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
         std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
         nativeInput=nativeMatrix;
         InitParam init{image+kInitVtable,{}};
+        if(carried.on) {
+            arming.on=true;arming.applied=false;arming.human=nullptr;
+            arming.length=wcslen(arming.path);
+            std::memcpy(arming.stars,carried.stars,sizeof(arming.stars));
+        }
         soldier=create(missionManager,nativeMatrix,body,&init);
+        const bool given=arming.on && arming.applied && soldier && arming.human==soldier;
+        const bool wanted=arming.on;
+        arming=Arming{};
         if(!soldier){failure=SupportSpawnFailure::create;return false;}
+        if(wanted && !given) {
+            Log("SUPPORT soldier %ls: its weapon load did not take %016llX: deleted",body,static_cast<unsigned long long>(weapon));
+            failure=SupportSpawnFailure::setup;destroy(soldier);return false;
+        }
         stage="identity";
         const auto ctrl=At<unsigned char*>(soldier,kSelfCtrl);
         if(!IsSoldierClass(soldier) || IsAnyPlayer(soldier) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0) {
@@ -177,7 +245,7 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
         }
         // Retain only the weak count. The scene manager owns the actual soldier, exactly as CreateFriend.
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
-        *entry=Owned{ObjRef::Of(soldier),epoch,true};
+        *entry=Owned{ObjRef::Of(soldier),epoch,true,carried.on};
         stage="team";
         team(soldier,2,true);
         stage="level";
@@ -197,6 +265,7 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
         // A constructor fault may leave a partial object in the engine. Never retry that profile this process.
         RecordFault(soldier ? SupportSpawnFailure::setup : SupportSpawnFailure::create);
     }
+    arming=Arming{};
     if(soldier) {
         __try { destroy(soldier); } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
@@ -205,6 +274,40 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
 }
 }
 
+// The two weapon hooks (above): both or neither. Neither: soldiers come as the stock templates under the stock rule,
+// and a plan giving one a weapon is refused (logged once here).
+static void InstallSupportSoldierArms() noexcept {
+    using namespace support_native;
+    arms=false;
+    bool load=false,coef=false;
+    __try {
+        load=Matches(kLoadWeaponCtx,kLoadWeaponCode,sizeof(kLoadWeaponCode));
+        coef=Matches(kCoefCtx,kCoefCode,sizeof(kCoefCode)) && Matches(kCoefStore,kCoefStoreCode,sizeof(kCoefStoreCode));
+    } __except(EXCEPTION_EXECUTE_HANDLER){load=coef=false;}
+    if(!load || !coef){Log("SUPPORT arms: the weapon load / attack coefficient sites are not as read (load %d coef %d): soldiers keep their stock weapons",load,coef);return;}
+    loadWeaponNext=reinterpret_cast<LoadWeaponFn>(image+kLoadWeapon);
+    coefNext=reinterpret_cast<CoefFn>(image+kCoef);
+    // mov r8,rdi (the soldier); mov rax,CoefHook; jmp rax: the call keeps its return address and shadow space.
+    unsigned char stub[]={0x49,0x89,0xF8,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    const auto target=reinterpret_cast<std::uintptr_t>(&CoefHook);
+    std::memcpy(stub+5,&target,8);
+    void* const page=AllocateNearCode(image+kCoefSite,stub,sizeof(stub));
+    if(!page){Log("SUPPORT arms: no code page near the attack coefficient call: soldiers keep their stock weapons");return;}
+    bool changed=false;
+    if(!RedirectCall(image+kCoefSite,image+kCoef,page,changed)) {
+        Log("SUPPORT arms: the attack coefficient call not redirected%s: soldiers keep their stock weapons",changed ? " (half patched)" : "");
+        if(!changed)VirtualFree(page,0,MEM_RELEASE);
+        return;
+    }
+    changed=false;
+    if(!RedirectCall(image+kLoadWeaponSite,image+kLoadWeapon,reinterpret_cast<void*>(&LoadWeaponHook),changed)) {
+        // The coefficient hook alone changes nothing: no soldier is armed without the load hook.
+        Log("SUPPORT arms: the weapon load call not redirected%s: soldiers keep their stock weapons",changed ? " (half patched)" : "");
+        return;
+    }
+    arms=true;
+    Log("SUPPORT arms: weapon load (EDF+%X) and attack coefficient (EDF+%X) hooked",kLoadWeaponSite,kCoefSite);
+}
 void NoteSupportKindsInstalled() noexcept {
     using namespace support_native;
     for(int k=0;k<kSupportWeaponCount;++k) {
@@ -239,8 +342,10 @@ bool InstallSupportSoldiers() noexcept {
         deriveId=reinterpret_cast<DeriveFn>(image+kDeriveId);
         profile=true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    if(profile)InstallSupportSoldierArms();
     return profile;
 }
+bool SupportSoldierArmsReady() noexcept { return support_native::profile && support_native::arms; }
 void ResetSupportSoldiers() noexcept {
     using namespace support_native;
     preloaded=false;missionManager=nullptr;++epoch;
@@ -317,14 +422,14 @@ bool ApplySupportSoldierSpawn(const float* matrix,bool leader,const unsigned cha
     return support_native::Spawn(matrix,leader ? kSupportLeaderResource : kSupportRangerResource,out,id);
 }
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id,true,look);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,true,look,weapon);
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look) noexcept {
+                                      const wchar_t* look,std::uint64_t weapon) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id,false,look);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,false,look,weapon);
 }
 bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept {
     using namespace support_native;
