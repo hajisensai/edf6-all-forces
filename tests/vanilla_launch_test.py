@@ -112,6 +112,11 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
     def store(slot: str, mode: str) -> dict[str, bytes]:
         return {n: open(os.path.join(slot, n + vl.SUFFIX[mode]), 'rb').read() for n in vl._stored(slot, mode)}
 
+    def set_store(slot: str, mode: str, files: dict[str, bytes]) -> None:
+        for n in vl._stored(slot, mode):
+            os.remove(os.path.join(slot, n + vl.SUFFIX[mode]))
+        plant(slot, {n + vl.SUFFIX[mode]: data for n, data in files.items()})
+
     def settled() -> bool:   # every slot back to the mod's set, nothing pending
         return all(vl._mode(s) == 'mod' for s in vl.slots()) and not os.path.exists(os.path.join(local, vl.ON))
     plant(slot0, MOD)
@@ -155,9 +160,10 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
               'after the game: the mod set back, both sets in the slot (both synced)')
         check(open(system, 'rb').read() == b'system', 'SYSTEM untouched')
         backups = os.path.join(local, vl.save_backup.BACKUPS)
-        first = os.path.join(backups, os.listdir(backups)[0])
-        check(len(os.listdir(backups)) == 1 and own(os.path.join(first, '76561198000000000', 'saveslot00')) == MOD,
-              'the saves backed up before the run')
+        made = sorted(os.listdir(backups))   # same second: <stamp>, <stamp>-1
+        check(len(made) == 2 and own(os.path.join(backups, made[0], '76561198000000000', 'saveslot00')) == MOD
+              and own(os.path.join(backups, made[1], '76561198000000000', 'saveslot00')) == VAN,
+              'the saves backed up before the run (the mod set) and before switching back (the vanilla set played)')
 
         VAN2 = {**VAN, 'MAIN.GST': b'vanilla save 2'}
         check(run_game([], lambda: plant(slot0, VAN2)) == 0, 'second run: not asked again')
@@ -171,17 +177,61 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         check(run_game([], starts=False) == 1, 'the game never started: 1')
         check(ini_of(g) == raw and own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'everything back')
 
-        # the window closed while the game runs: the ini back, the saves left until the game is gone
+        # the window closed while the vanilla game runs: the ini back, the saves left under the running game; the
+        # game's next start with the mod (Steam, the ini back) runs restore-saves from the plugin before it reads them:
+        # never "the mod game on the vanilla saves", and the mod set never stored as the vanilla one.
         vl.modfiles.game_running = lambda *_a: False
         vl.swap_in_saves()
         vl.prepare(g)
         vl.modfiles.game_running = lambda *_a: True
-        said = vl.restore_all(g)
-        check(ini_of(g) == raw and own(slot0) == VAN2 and any('还在运行' in s for s in said),
-              'game running: the ini back, the saves not switched under it')
+        vl._close(g)
+        check(ini_of(g) == raw and own(slot0) == VAN2 and vl._mode(slot0) == 'vanilla',
+              'closed while the game runs: the ini back, the saves left under the running game')
+        try:
+            vl._step(vl.prepare, g)
+            check(False, 'no step after the close handler')
+        except vl.Closed:
+            check(ini_of(g) == raw and not os.path.isfile(state_of(g)), 'no step after the close handler: ini kept')
+        vl._closing = False
+        with quiet():   # the mod start: the plugin's restore-saves, the game (itself) running
+            check(lg.run(['restore-saves']) == 0, 'restore-saves: 0')
+        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and store(slot0, 'mod') == MOD and settled(),
+              'the mod start switches the saves back before the game reads them, the vanilla progress stored')
+        with quiet():
+            check(lg.run(['restore-saves']) == 0 and own(slot0) == MOD and settled(), 'restore-saves again: nothing')
+
+        # a slot synced from a vanilla run on another machine (MODE=vanilla, no ON here): the mod start switches it
         vl.modfiles.game_running = lambda *_a: False
-        vl.restore_all(g)
-        check(own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(), 'after it exits: switched back')
+        vl.swap_in_saves()
+        os.remove(os.path.join(local, vl.ON))
+        vl.modfiles.game_running = lambda *_a: True
+        with quiet():
+            check(lg.run(['restore-saves']) == 0 and own(slot0) == MOD and store(slot0, 'vanilla') == VAN2 and settled(),
+                  'synced in the vanilla set: the mod start switches it back')
+        vl.modfiles.game_running = lambda *_a: False
+
+        # the window closed during a launch, before the game: whatever step it came at, nothing is left changed
+        def close_at(prompt: bool) -> None:
+            """A launch whose window is closed at the first-run prompt (prompt) or while waiting for the game."""
+            vl.os.startfile = lambda _url: None
+            vl.modfiles.game_running = lambda *_a: False
+            for s in vl.slots():   # first run: asked
+                set_store(s, 'vanilla', {})
+
+            def ask() -> bool:
+                vl._close(g)
+                return False
+            vl.first_vanilla_saves = ask if prompt else (lambda: False)
+            closed = []
+            vl.game_pid = (lambda: None) if prompt else (lambda: (closed or closed.append(vl._close(g))) and None)
+            with quiet():
+                check(vl.launch(g) == 1, 'closed: 1')
+            check(ini_of(g) == raw and not os.path.isfile(state_of(g)) and own(slot0) == MOD and settled()
+                  and store(slot0, 'vanilla') == {}, f'closed {"at the prompt" if prompt else "waiting"}: nothing left')
+            vl._closing = False
+        close_at(True)
+        close_at(False)
+        set_store(slot0, 'vanilla', VAN2)   # the vanilla set again, as the sections below expect
 
         # cut off midway (each step marked): resumed without mixing the sets
         vl.swap_in_saves()                       # vanilla set playing
@@ -218,6 +268,169 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
         (vl.game_pid, vl.modfiles.game_running, vl.time.sleep, vl._on_close, vl.save_root,
          vl.first_vanilla_saves) = real[1:]
     vl.save_root = lambda: local   # for the installer checks below
+
+    # A switch cut off after every single write / removal (the power off, the process killed), then the next start's
+    # restore: every slot back to the whole mod set, every store whole, and a full round after it still intact. Three
+    # slots: one with both sets, one whose sets differ in file names, one never switched (no MODE yet).
+    class Cut(BaseException):
+        pass
+
+    real_write, real_unlink, real_running = vl._write, vl._unlink, vl.modfiles.game_running
+    slot2 = os.path.join(user, 'saveslot02')
+    MOD1, V1 = {'MAIN.GST': b'mod 1', 'MAIN.GST.edf6vc': b'rows 1'}, {'MAIN.GST': b'van 1', 'VONLY': b'only vanilla'}
+    MOD2 = {'MAIN.GST': b'mod 2'}
+
+    def base() -> None:
+        import shutil
+        shutil.rmtree(os.path.join(local, vl.SAVES))
+        if os.path.exists(os.path.join(local, vl.ON)):
+            os.remove(os.path.join(local, vl.ON))
+        plant(slot0, MOD)
+        set_store(slot0, 'mod', MOD)
+        set_store(slot0, 'vanilla', VAN)
+        plant(slot1, MOD1)
+        set_store(slot1, 'vanilla', V1)
+        plant(slot2, MOD2)
+        for s in (slot0, slot1):
+            vl._set_mode(s, 'mod')
+
+    def cut_after(n: int, fn) -> bool:
+        """fn with its (n+1)th write / removal never happening; True when it was cut."""
+        done = [0]
+
+        def gate(real):
+            def op(*a):
+                if done[0] == n:
+                    raise Cut
+                done[0] += 1
+                return real(*a)
+            return op
+        vl._write, vl._unlink = gate(real_write), gate(real_unlink)
+        try:
+            fn()
+            return False
+        except Cut:
+            return True
+        finally:
+            vl._write, vl._unlink = real_write, real_unlink
+
+    def whole_mod(why: str, van0: dict, van1: dict) -> None:
+        check(own(slot0) == MOD and own(slot1) == MOD1 and own(slot2) == MOD2 and settled(), f'{why}: the mod sets back')
+        check(store(slot0, 'mod') == MOD and store(slot0, 'vanilla') == van0 and store(slot1, 'vanilla') == van1,
+              f'{why}: the stores whole')
+        vl.swap_in_saves(False)
+        check(own(slot0) == van0 and own(slot1) == van1 and own(slot2) == {}, f'{why}: a full switch in after it')
+        vl.swap_out_saves()
+        check(own(slot0) == MOD and own(slot1) == MOD1 and own(slot2) == MOD2 and settled(), f'{why}: and out again')
+
+    real_fsync, real_backup = os.fsync, vl.save_backup.backup
+    try:   # durability and the backup are not what these cuts test (the launch above checks the backups): kept fast
+        os.fsync, vl.save_backup.backup = (lambda _fd: None), (lambda *_a: None)
+        vl.modfiles.game_running = lambda *_a: False
+        cuts = 0
+        while True:   # switching in (to the vanilla set), cut after `cuts` operations
+            base()
+            if not cut_after(cuts, lambda: vl.swap_in_saves(False)):
+                break
+            with quiet():
+                vl.restore_all(g)   # the next launch / install / the plugin's restore-saves: the same swap_out_saves
+            whole_mod(f'switch in cut after {cuts}', VAN, V1)
+            cuts += 1
+        check(cuts > 20, f'switching in: cut at each of its {cuts} operations')
+        out = 0
+        PLAYED0, PLAYED1 = {**VAN, 'MAIN.GST': b'played'}, {'MAIN.GST': b'played 1'}
+        while True:   # switching back after a vanilla run that saved, cut after `out` operations
+            base()
+            vl.swap_in_saves(False)
+            plant(slot0, PLAYED0)
+            os.remove(os.path.join(slot1, 'VONLY'))
+            plant(slot1, PLAYED1)
+            if not cut_after(out, vl.swap_out_saves):
+                break
+            with quiet():
+                vl.restore_all(g)
+            whole_mod(f'switch out cut after {out}', PLAYED0, PLAYED1)
+            out += 1
+        check(out > 10, f'switching out: cut at each of its {out} operations')
+
+        # the reviewed case by hand: the mod set stored, the vanilla load half done (some mod files removed, some
+        # vanilla ones copied in), MODE 'mod-saved': the restore loads the mod store, which stays as it was
+        base()
+        vl._store(slot0, 'mod')
+        vl._set_mode(slot0, 'mod-saved')
+        os.remove(os.path.join(slot0, 'MAIN.GST.edf6vc'))
+        plant(slot0, {'MAIN.GST': VAN['MAIN.GST']})
+        vl.swap_out_saves()
+        check(own(slot0) == MOD and store(slot0, 'mod') == MOD and vl._mode(slot0) == 'mod',
+              'a vanilla load cut off half way: the mod set loaded back, its store untouched')
+        vl.swap_in_saves(False)
+        vl.swap_out_saves()
+        check(own(slot0) == MOD and store(slot0, 'mod') == MOD, 'and a full round after it keeps the mod set')
+    finally:
+        vl._write, vl._unlink, vl.modfiles.game_running = real_write, real_unlink, real_running
+        os.fsync, vl.save_backup.backup = real_fsync, real_backup
+
+    # A STATE already there (an unrestored run): prepare refuses, the ini and STATE kept (never the vanilla ini recorded
+    # as the original).
+    vl.prepare(g)
+    before = ini_of(g), open(state_of(g), 'rb').read()
+    try:
+        vl.prepare(g)
+        check(False, 'prepare over an existing STATE refused')
+    except RuntimeError:
+        check((ini_of(g), open(state_of(g), 'rb').read()) == before, 'prepare over an existing STATE: nothing changed')
+    vl.restore(g)
+    check(ini_of(g) == raw, 'and the first STATE still restores the mod ini')
+
+    # Two at once, across processes: another process holding the lock (a 原版启动 running, the installer restoring)
+    # refuses a second launch, the installer and the plugin's restore-saves with nothing touched; a holder killed (no
+    # release) frees it.
+    import subprocess
+    env = {**os.environ, 'LOCALAPPDATA': os.path.join(root, 'local'), 'PYTHONIOENCODING': 'utf-8',
+           'PYTHONPATH': os.pathsep.join([os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')])}
+    hold = ('import sys, vanilla_launch as vl\n'
+            'with vl.exclusive() as held:\n'
+            '    print(held, flush=True)\n'
+            '    sys.stdin.readline()\n')
+
+    def holder() -> subprocess.Popen:
+        p = subprocess.Popen([sys.executable, '-c', hold], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             text=True)
+        check(p.stdout.readline().strip() == 'True', 'the other process holds the lock')
+        return p
+
+    real_running = vl.modfiles.game_running
+    vl.modfiles.game_running = lambda *_a: False
+    try:
+        vl.swap_in_saves(False)   # a vanilla run on: the saves in the vanilla set, the ini vanilla
+        vl.prepare(g)
+        snap = lambda: (ini_of(g), os.path.isfile(state_of(g)), own(slot0), own(slot1), vl._mode(slot0),  # noqa: E731
+                        os.path.exists(os.path.join(local, vl.ON)))
+        was = snap()
+        p = holder()
+        with vl.exclusive() as held:
+            check(not held, 'held by the other process: not taken here')
+        started = []
+        vl.os.startfile = lambda url: started.append(url)
+        with quiet():
+            check(vl.launch(g) == 1 and not started and snap() == was, 'a second launch: refused, nothing touched')
+            check(lg.run(['restore-saves']) == vl.BUSY and snap() == was, 'restore-saves: busy, nothing touched')
+            check(installer.write_game('install', g) == 1 and snap() == was, 'the installer: refused, nothing touched')
+        p.stdin.write('\n')
+        p.stdin.flush()
+        check(p.wait(30) == 0, 'the holder released it')
+        p = holder()
+        p.kill()   # never released: the mutex abandoned
+        p.wait(30)
+        with vl.exclusive() as held:
+            check(held, 'a killed holder does not lock anyone out')
+        with quiet():
+            check(lg.run(['restore-saves']) == 0 and own(slot0) == MOD and settled(), 'then restore-saves runs')
+        vl.restore(g)
+    finally:
+        vl.modfiles.game_running = real_running
+        if real[0] is not None:
+            vl.os.startfile = real[0]
 
     # the generator's dispatch
     called: list[str] = []
