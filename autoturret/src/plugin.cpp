@@ -25,6 +25,7 @@
 #include "autoturret_version.h"
 #include "build_id.h"
 #include "edf/input_source.h"
+#include "edf/katyusha_cab.h"
 #include "edf/keybind.h"
 #include "append_log.h"
 #include "turret.h"
@@ -476,14 +477,17 @@ bool Arc(double x,double y,const Shot& shot,bool high,float& elevation,float& ti
 
 // Elevation (rad, up positive) and flight time (frames) to hit a point in the vehicle frame: the lower of the two
 // arcs, the solve the game's vehicle aim runs (0x50350); a lofted gun's the higher, while its pitch is within the
-// axis' stops (shot.pitchMin..pitchMax), else the lower. False when out of reach.
+// axis' stops (shot.pitchMin..pitchMax), else the lower. False when out of reach. A lofted gun (the Katyusha) takes no
+// arc under the floor over its cab toward the point (common/edf/katyusha_cab.h, test site #36): EDF6VehicleCrew poses
+// its launcher no lower there, so its rockets would land long; the point is out of its reach.
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept {
     const double x=std::sqrt(local[0]*local[0]+local[2]*local[2]),y=local[1];
-    if(shot.lofted && Arc(x,y,shot,true,elevation,time)) {
+    const float cab=shot.lofted ? edf::katyusha::CabFloor(std::atan2(local[0],local[2])) : -kPi;
+    if(shot.lofted && Arc(x,y,shot,true,elevation,time) && elevation>=cab) {
         const float pitch=cfg.pitchSign*elevation+cfg.pitchOffset;
         if(pitch>=shot.pitchMin && pitch<=shot.pitchMax)return true;
     }
-    return Arc(x,y,shot,false,elevation,time);
+    return Arc(x,y,shot,false,elevation,time) && elevation>=cab;
 }
 
 // Wanted turret yaw/pitch and flight time (frames) for a point in the vehicle frame.

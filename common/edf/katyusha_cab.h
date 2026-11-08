@@ -32,4 +32,12 @@ inline float CabFloor(float azimuth) noexcept {
     const float lo=kCabFloorDeg[i],hi=kCabFloorDeg[(i+1)%kCabSteps];
     return (lo+(hi-lo)*f)*kRad;
 }
+
+// One frame of the launcher's elevation (rad; src/katyusha.cpp Launcher): `elev` eased toward `target` by at most
+// `step`, then lifted onto `cab` (CabFloor at the turntable's azimuth) at once when under it: the turntable turning over
+// the cab raises the launcher with it, no frame below the floor.
+inline float StepElevation(float elev,float target,float step,float cab) noexcept {
+    elev+=target-elev>step ? step : target-elev<-step ? -step : target-elev;
+    return elev<cab ? cab : elev;
+}
 }  // namespace edf::katyusha

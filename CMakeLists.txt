@@ -351,6 +351,13 @@ set_target_properties(gravity_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 add_executable(katyusha_rack_check EXCLUDE_FROM_ALL tools/katyusha_rack_check.cpp)
 target_compile_options(katyusha_rack_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(katyusha_rack_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Katyusha's firing floor over its cab (common/edf/katyusha_cab.h, the table tools/gen_katyusha_cab.py measures on
+# the model) and the pose's frame under it, offline (tools/katyusha_cab_check.cpp; the rays themselves:
+# tests/katyusha_cab_check.py, with the game). cmake --build build --target katyusha_cab_check && build\katyusha_cab_check.exe
+add_executable(katyusha_cab_check EXCLUDE_FROM_ALL tools/katyusha_cab_check.cpp)
+target_compile_options(katyusha_cab_check PRIVATE /W4 /WX /utf-8 /permissive-)
+target_include_directories(katyusha_cab_check PRIVATE ${CMAKE_SOURCE_DIR}/common)
+set_target_properties(katyusha_cab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
 # muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
@@ -1059,7 +1066,7 @@ set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
@@ -1607,6 +1614,8 @@ add_test(NAME coax_fire_motion_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(coax_fire_motion_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(katyusha_mount PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME katyusha_cab COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_cab_check.py" "${EDF6_GAME_DIR}")
+set_tests_properties(katyusha_cab PROPERTIES SKIP_RETURN_CODE 77)
 foreach(check IN ITEMS mission_participants_test mission_participant_gate_test)
     add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
     target_include_directories(${check} PRIVATE src common)

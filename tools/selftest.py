@@ -2431,6 +2431,56 @@ def katyusha_pose_agrees() -> None:
 
 
 @test
+def katyusha_fires_over_its_cab() -> None:
+    """The Katyusha's floor over its cab (test site #36: 「让喀秋莎的向前射角限制一下，他不应该穿过车头设计」): the table
+    (common/edf/katyusha_cab_gen.h) is what tools/gen_katyusha_cab.py made from today's inputs (its own record; the rays
+    on the model itself: ctest katyusha_cab, with the game); an entry covers every measured azimuth within a step of it
+    either way, so the line the plugin draws between two is never under a measured floor; the rays meet a triangle in
+    their way and miss one beside or behind them; the pose holds the launcher on it (src/katyusha.cpp Launcher, the stock
+    pose too), the player's loft (src/launcher.cpp LoftWant) and EDF6AutoTurret's arc (Ballistic) choose over it."""
+    import math
+    import gen_katyusha_cab
+    import katyusha_model as km
+    import numpy as np
+    why = gen_katyusha_cab.check()
+    assert why is None, f'common/edf/katyusha_cab_gen.h is stale ({why}): python tools/gen_katyusha_cab.py (with the game)'
+    table = gen_katyusha_cab.recorded()['floor']
+    assert len(table) * km.CAB_AZIMUTH_STEP == 360 and table[0] > 5.0 and table[len(table) // 2] == 0.0, table
+    assert all(0.0 <= f < km.PITCH_STOP_DEG for f in table)
+    # The table from a scan: a lone clear elevation between two entries reaches both, and the line between is over it.
+    scan = {a: 0.0 for a in range(0, 360, km.CAB_FINE_STEP)}
+    scan[37] = 12.0
+    scan[359] = 7.0
+    t = km.cab_floor_table(scan)
+    assert t[7] == t[8] == 12.0 + km.CAB_MARGIN_DEG and t[0] == t[71] == 7.0 + km.CAB_MARGIN_DEG and t[9] == t[1] == 0.0, t
+    for a in range(0, 360):
+        assert km.cab_floor_at(t, a) >= scan[a], (a, km.cab_floor_at(t, a), scan[a])
+        assert km.cab_floor_at(t, a + 0.5) >= max(scan[a], scan[(a + 1) % 360]), (a, km.cab_floor_at(t, a + 0.5))
+    assert km.cab_floor_at(t, -1.0) == km.cab_floor_at(t, 359.0) and km.cab_floor_at(t, 360.0) == t[0]
+    # The rays: a wall 3 m ahead of x = 0..1, y 0..2.
+    wall = np.array([[[0.0, 0.0, 3.0], [1.0, 0.0, 3.0], [0.0, 2.0, 3.0]], [[1.0, 0.0, 3.0], [1.0, 2.0, 3.0], [0.0, 2.0, 3.0]]])
+    starts = np.array([[[0.5, 1.0, 0.0]], [[2.0, 1.0, 0.0]], [[0.5, 1.0, 4.0]], [[0.5, 1.0, 0.0]]])
+    dirs = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, math.sin(0.6), math.cos(0.6)]])
+    assert list(km.rays_hit_each(starts, dirs, wall)) == [True, False, False, False]
+    assert not km.rays_hit(starts[0], dirs[0], wall, reach=2.0)
+    # The rays' starts: five per muzzle (its axis and its fins' reach across and up), the muzzles the model's.
+    env = km.cab_envelope()
+    assert len(env) == 5 * len(km.MUZZLES) and env[0] == km.MUZZLES[0][1] and abs(env[1][0] - env[0][0] - km.FIN_R) < 1e-12
+    assert km.turntable_point((0.0, 1.0, 1.0), (0.0, 0.0, 0.0), math.radians(90.0))[0] > 0.999  # forward turns to +x
+    # The plugins.
+    cab = src('common/edf/katyusha_cab.h')
+    assert '#include "edf/katyusha_cab_gen.h"' in cab and 'inline float CabFloor(' in cab and 'inline float StepElevation(' in cab
+    kat = src('src/katyusha.cpp')
+    launcher = kat.split('void Launcher(Rack& r,ULONGLONG ms)', 1)[1].split('\n}\n', 1)[0]
+    assert 'edf::katyusha::CabFloor(r.azimuth)' in launcher and 'edf::katyusha::StepElevation(' in launcher
+    assert 'if(!aim && !r.held && r.stock>=r.floor)return;' in launcher, 'the stock pose under the floor is not held'
+    assert 'L"Rocketcannon_base"' in kat and 'L"body"' in kat
+    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    assert 'edf::katyusha::CabFloor(std::atan2(across,ahead))' in loft and 'lowest=cab>stop ? cab : stop' in loft
+    ballistic = src('autoturret/src/plugin.cpp').split('bool Ballistic(', 1)[1].split('\n}\n', 1)[0]
+    assert 'edf::katyusha::CabFloor(std::atan2(local[0],local[2]))' in ballistic and ballistic.count('elevation>=cab') == 2
+
+@test
 def turret_aim_wired() -> None:
     """The player's turret (autoturret/src/designate.cpp): its ini keys are read, shipped and documented in both READMEs;
     the ownership rule (aimlink.h PlayerGunRule: with the turret camera, no lock) returns

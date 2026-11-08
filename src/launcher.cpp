@@ -19,6 +19,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "rounds.h"
+#include "edf/katyusha_cab.h"
 #include "edf/weapon.h"
 #include <cmath>
 
@@ -114,7 +115,9 @@ bool Solve(const unsigned char* weapon,LauncherReadout& r) noexcept {
 
 // The elevation (rad up, on the vehicle) the launcher needs to drop its rockets where the player's camera looks (the
 // first ground along the screen's centre: CameraRay + MapRay): the high arc while the launcher's stops allow it, else
-// the low one, else (out of reach) 45 deg, the farthest it throws. Solved as EDF6AutoTurret solves (edf::BallisticArc:
+// the low one, else (out of reach) 45 deg, the farthest it throws. The lowest stop toward the point is the floor over
+// the cab there (common/edf/katyusha_cab.h, test site #36), the pose's own (katyusha.cpp Launcher): a low arc under
+// it is lifted onto it, and the impact mark (Solve, from the muzzles as posed) shows where that lands. Solved as EDF6AutoTurret solves (edf::BallisticArc:
 // from the launcher's muzzles, in the vehicle's frame, gravity along the vehicle's down). False when the camera looks
 // at no ground: the launcher then stays where the player aims it (the stock pose).
 bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,float* want,float* range) noexcept {
@@ -129,7 +132,9 @@ bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned ch
     const double x=std::sqrt(across*across+ahead*ahead);
     const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
     const auto pitch=seat+kSeatAim+kAimAxes+kAxisStride;   // the pitch axis' stops, negative up
-    const float lowest=-At<float>(pitch,kAxisMax),highest=-At<float>(pitch,kAxisMin);
+    const float stop=-At<float>(pitch,kAxisMax),highest=-At<float>(pitch,kAxisMin);
+    const float cab=edf::katyusha::CabFloor(std::atan2(across,ahead));
+    const float lowest=cab>stop ? cab : stop;
     float e=0.0f,frames=0.0f;
     if(!(edf::BallisticArc(x,up,speed,drop,true,e,frames) && e>=lowest && e<=highest)
        && !edf::BallisticArc(x,up,speed,drop,false,e,frames))e=0.25f*kPi;
@@ -153,8 +158,9 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
     const float cam=CameraRay(eye,dir) ? std::asin(dir[1]<-1.0f ? -1.0f : dir[1]>1.0f ? 1.0f : dir[1])*180.0f/kPi : 0.0f;
     LoftReadout l{};
     if(LauncherLoft(v,&l))
-        Log("LOFT v=%p sight=%d %.0fm want=%.1f held=%d bone=%.1f stock(axis)=%.1f camera=%.1f ram=%+.1fdeg %.2fm",v,aim,sight,
-            want*180.0f/kPi,l.held,l.elevation*180.0f/kPi,l.stock*180.0f/kPi,cam,l.ramTurn*180.0f/kPi,l.ramLength);
+        Log("LOFT v=%p sight=%d %.0fm want=%.1f held=%d bone=%.1f stock(axis)=%.1f camera=%.1f ram=%+.1fdeg %.2fm azimuth=%.1f floor=%.1f",
+            v,aim,sight,want*180.0f/kPi,l.held,l.elevation*180.0f/kPi,l.stock*180.0f/kPi,cam,l.ramTurn*180.0f/kPi,l.ramLength,
+            l.azimuth*180.0f/kPi,l.floor*180.0f/kPi);
 }
 }  // namespace
 
