@@ -59,6 +59,12 @@ progress { width: 100%; }
 .hash, .files a, .report .muted { overflow-wrap: anywhere; word-break: break-all; }
 header.top nav { font-size: 14px; }
 label.inline { display: inline; margin: 0; }
+fieldset.chips { display: flex; flex-wrap: wrap; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.chip { font: inherit; font-size: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 99px; padding: 4px 12px; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; cursor: default; }
+.chip:disabled { opacity: .5; cursor: default; }
 .tools { margin: 8px 0; }
 .tools input[type=text], .tools select { width: auto; flex: 1 1 200px; }
 .btn.small { padding: 3px 9px; font-size: 13px; }
@@ -127,3 +133,4 @@ dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
 #copyBox { min-height: 200px; margin: 8px 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
+.bar { margin: 1em 0; }

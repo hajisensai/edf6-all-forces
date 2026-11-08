@@ -22,7 +22,7 @@ export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 // The download page and its scripts are public too (share.js: the share package needs no account).
 // So are the plan, story and outline pages: anyone may read them, only a group's members (and developers) write.
 const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs',
-  '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js']);
+  '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js', '/groups.js']);
 const SESSION_DAYS = 60;
 
 export default {

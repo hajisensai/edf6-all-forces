@@ -171,7 +171,7 @@ test('worker: added account can log in by cookie and Basic, stays in its group a
   const original = await (await call(e, '/api/plan')).json();
   assert.equal(original.group, 'a');
   const devView = await (await call(e, '/api/plan', { user: 'dev' })).json();
-  assert.deepEqual(devView.groups, ['', 'a', 'b', 'c']);
+  assert.deepEqual(devView.groups, ['']);   // nothing written yet: only the developer's own group is listed
 });
 
 test('worker: pages and replies carry the security headers', async () => {
@@ -209,7 +209,7 @@ test('worker: cross-site writes, non-JSON bodies and unknown actions are refused
   assert.equal((await call(e, '/api/plan/__proto__', { method: 'POST', data: {} })).status, 404);
 });
 
-test('worker: players read written groups but write only their own; the developer sees every group', async () => {
+test('worker: players read written groups but write only their own; the developer writes every group', async () => {
   const e = wenv();
   await call(e, '/api/plan/proposal', { method: 'POST', data: { kind: 'new', title: 'a 组的' } });
   const own = await (await call(e, '/api/plan', { user: 'bob' })).json();
@@ -226,7 +226,7 @@ test('worker: players read written groups but write only their own; the develope
   assert.equal((await (await call(e, '/api/plan?group=nobody', { user: 'bob' })).json()).group, 'b');   // unlisted: back to its own
   const devView = await (await call(e, '/api/plan?group=a', { user: 'dev' })).json();
   assert.equal(devView.proposals[0].title, 'a 组的');
-  assert.deepEqual(devView.groups, ['', 'a', 'b']);
+  assert.deepEqual(devView.groups, ['', 'a']);   // its own group and the written one, not the empty b
   assert.ok(devView.missions.length > 280);   // EDF6 and EDF5
 });
 
