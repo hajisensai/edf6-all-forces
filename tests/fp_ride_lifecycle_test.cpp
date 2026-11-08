@@ -64,6 +64,7 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool InstallShotEntry() noexcept { return false; }   // heli.cpp: no shot entry hooked here
+bool PlayerHeliFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool observeCamera=false;
 int lookOrbit=-1;   // the last VehicleLookCamera call's `orbit`: 1 round the vehicle (third person), 0 the head in place
 bool VehicleLookCamera(const unsigned char*,float* matrix,bool orbit) noexcept {
