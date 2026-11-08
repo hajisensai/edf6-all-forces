@@ -117,8 +117,9 @@ EDF.dll（Steam，TimeDateStamp `0x678CCB46`），下文地址均为 RVA（Image
   因此**不需要 AllocateNearCode / 代码洞**。
 - 完整性：上节的穷举证明所有读写这 5 类索引的代码都在 0xE75840..0xE76E10 内，且该段内每一处索引读写、每个 0xFFFF 哨兵、每个 2 字节步长 / 元素大小都在下表里；
   漏一处就会出现 16/32 位混用，所以补丁必须**全有或全无**：先校验 137 处原始字节全部吻合，任何一处不符整套不打、写一行 refused 日志。
-- 安装时机：补丁改变了字段位置（+0x3C/+0x64、节点 +4），必须在任何 hknpEventDispatcher 存在之前打（插件初始化时，世界在任务加载时才由 0xDA2840 一带创建）。
-  若初始化时已有 hknpWorld，旧对象的 +0x3C/+0x64 是未初始化内存，会立刻坏掉——见「待确认」。
+- 安装时机：补丁改变了字段位置（+0x3C/+0x64、节点 +4），必须在任何 hknpEventDispatcher 存在之前打。若安装时已有 dispatcher，
+  旧对象的 +0x3C/+0x64 是未初始化内存，会悄悄写坏链表。因此安装处做硬性检查：应用初始化写入的两个全局（文件系统管理器 `0x20B2880`、
+  物理系统 `0x20B30A0`，后者是造世界的 0x11AD340 的参数）任一非空，就整套 refused，见「复核意见的处理」。
 - 内存代价：+0x50 数组每 body 多 2 字节（body 数级别），+0x68 列表通常很短，可忽略。
 
 ## 补丁点（137 处，548 字节，全部等长原地改写）
@@ -263,23 +264,56 @@ EDF.dll（Steam，TimeDateStamp `0x678CCB46`），下文地址均为 RVA（Image
 | 0xE76DA7 | `0fb71407` | `8b140790` | dispatch merged 0xE76B70 | pending: movzx edx,w[rdi+rax] -> d |
 | 0xE76DB2 | `488d7f02` | `488d7f04` | dispatch merged 0xE76B70 | lea rdi,[rdi+2] -> +4 |
 
-## 实现建议（参照 docs/aiworld-re.md 那套）
+## 实现
 
-- `src/havok_props_logic.h`：`kSites[]`，每项 `{rva, size, stock[], patched[]}`，按上表；`static_assert` 总数 137。
-  另加两条只校验不改写的「锚点」：`0xA55860` 与 `0x978600` 的字节等价（除元素大小与 rel32），保证换调用目标的前提成立。
-- `src/havok_props.cpp`：插件初始化时校验全部 stock 字节 → 全部吻合才 `VirtualProtect` 写入；否则一行 `REFUSED havok-props` 日志、整套不打。
-- `tests/havok_props_audit.py`（`EDF6_NATIVE_DLL`）：
-  1. 每个 kSite 的 stock 字节与 DLL 一致；
-  2. 把补丁打到内存镜像后，重新反汇编 0xE75840..0xE76E10 的函数，断言不再有 `movzx r, r16`、16 位寄存器比较、`0xFFFF` 立即数、`word ptr` 访问，
-     白名单仅 key 访问（`[entry+2]`、`[event+4]`、`cmp ax,0xc`/`sub ax,0xd`/`cmp ax,0xb`）与 0xE758FA/0xE75900；
-  3. 全 .text 引用扫描：本函数族的外部引用集合与文档一致（新增引用就失败）；
-  4. 全 .text 模式扫描（16 位 `[r+0x38]`/`[r+0x60]` + 0xFFFF、`word [r+r*8+2]`）在本段外的命中集合与文档一致。
-- 离线单测：在 C++ 里用 16 字节节点 + 对象缓冲区模拟 allocEntry/freeChain 的加宽语义不是必须的；关键是 audit 的第 2、3、4 步。
+| 文件 | 内容 |
+|---|---|
+| `src/havok_props_logic.h` | 纯数据，不访问游戏：`kSites[137]`（RVA、长度、原字节、改后字节，与上表逐行一致），函数族范围 `0xE75840..0xE76E10`，两个 reserve 的完整字节 `kReserveU16Bytes` / `kReserveU32Bytes`（0x82 字节，只校验不改写），安装守卫用的两个全局 `kFsManager=0x20B2880`、`kPhysicsSystem=0x20B30A0` |
+| `src/havok_props.cpp/.h` | `InstallHavokProps()`：①137 处原字节逐一 `Matches`；②两个 reserve 字节吻合；③两个全局都为空；④逐处 `PatchCode`，任何一处写失败就倒序撤销已写的。任何一步不满足就整套不打，写一行 `HAVOKPROPS refused: ...`；成功写 `HAVOKPROPS event dispatcher indexes uint32 (stock uint16) sites=137` |
+| `src/plugin.cpp` | 在 `EML6_Load` 里紧跟 `InstallTeamCapacity()` 调用（同属「应用初始化之前」那一组） |
+| `tests/havok_props_test.cpp`（ctest `havok_props`） | 离线：自带一个只认这些指令形式的小解码器（不依赖 capstone），逐处解码原字节和改后字节，要求每对都是一种加宽改写：movzx16→mov32 同寄存器，16 位 store/cmp→32 位，内存操作数只能是「表头 +0x38→+0x3C / +0x60→+0x64」「节点 next +0→+4」「`*2`→`*4`」「`[r8+rcx]`→`[rcx+r8*2]`」「lea 的 +2→+4」之一，哨兵 0xFFFF→0xFFFFFFFF，元素大小 2→4，call 0xA55860→0x978600，其余只能是尾部 nop。并核对各类改写的条数（40 读、19 写、29 cmp、22 寄存器 movzx、10 哨兵、4 元素大小、5 步长、4 个 lea `*4`、3 个 call、搬移 2 条，共 138 条指令、87 个 nop），以及两个 reserve 只在元素大小和两处 call 位移上不同、两处 call 目标相同 |
+| `tests/havok_props_audit.py`（ctest `havok_props_native`，需要 `EDF6_NATIVE_DLL`） | 对真实 EDF.dll（只当文件读）：见下 |
+| `tests/havok_props_sim.py`（ctest `havok_props_sim`，需要 `EDF6_NATIVE_DLL` 和 unicorn，缺任一则 77 跳过） | 在 unicorn 里直接执行打过补丁的游戏代码：见下 |
 
-## 待确认
+### audit 证明了什么
 
-- 插件初始化时是否已存在 hknpWorld（标题画面背景）。EDFModLoader 在进程早期加载插件，预期没有；实现时在安装处断言 / 记日志，
-  并由主会话实机确认。
-- 实测 size=90514 是峰值同时存活的订阅数（节点释放会回到空闲表，size 不回落）。4100 个单位各自若干 body × 若干事件类型可以解释这个量级，
-  但没有逐类统计；若后续发现节点泄漏（body 删除后节点未回收），那是另一个问题，加宽后不会再卡死但内存会涨。
-- 0xE76080 没有任何调用者，加宽它只是为了一致；若 audit 发现它有了调用者，说明 DLL 不是本版本。
+1. 137 处原字节吻合，每处在所在单元的线性反汇编里正好覆盖整条指令；打补丁后同样落在指令边界上，单元内每个分支目标仍是补丁后某条指令的起点。两个 reserve 各是一个 0x82 字节的完整 .pdata 函数，字节与头文件一致。
+2. 函数族共 45 个单元（.pdata 函数，加上它们之间没有 .pdata 的叶代码；0xE762A0 的 switch 后面是跳转表，按 `CODE_END` 截断）。在补丁后的镜像里找「仍按 uint16 处理索引」的指令：16 位操作数、movzx 16 位、0xFFFF、`mov/lea r8d, 2` 元素大小、`add r64, 2` / `lea r,[r+2]` 步长、`*2` 寻址、call 0xA55860。剩下的必须正好等于 `KEEP`（搬移循环里冗余的 +2 拷贝两条，0xE75CE0/0xE75CED 的 `[rcx+r8*2]` 两条，其中 r8=2*id，实际按 4*id 寻址）加 `KEY`（36 条事件类型访问：`[node+2]`、`[event+4]`、`cmp ax,0xc` / `sub ax,0xd` / `cmp ax,0xb`），两个集合都已固定。
+   反向用例：137 处逐一单独还原成原字节，每一处都会在它自己的地址报出残留。
+3. 外部可达性是主证据：全 .text 扫 E8/E9 rel32、0F 8x 条件跳转、RIP 相对 disp32，结果必须正好等于 `EXTERNAL`，即两个构造调用点、删 body 的 0xDA8E1F、world 包装 0xDAB934/0xDAB93A/0xDAB989/0xDAB998、0xDAD159/0xDAD18E。全镜像里指向函数族的 64 位指针只能在两张 vtable 里；vtable 只被两个构造的 lea 引用；镜像里没有存放 vtable 指针的地方；代码里没有以函数族入口 RVA 作为操作数的指令（调用 / 跳转的相对位移除外，碰巧等值的情况已排除）。
+4. 字段跟踪：全 .text 里所有 `mov r64, qword [x+0x980]` / `[x+0x968]`（共 46 处，含无 .pdata 的代码）都在本单元内跟踪被加载的寄存器及其拷贝，经它的访问不能落在 +0x38..+0x8F。
+   辅助的模式扫描：字节预筛（16 位 `[r+0x38]/[r+0x60]`、`movzx word [b+i*8(+disp8)]`）后对命中单元解码，同时具备「0xFFFF 结尾」「+2 的 16 位 key」「16 字节节点（`word [b+i*8]` 或 `shl 4`）」「`word [b+i*8]` 或 16 位表头」的单元，必须都在 `NOT_DISPATCHER` 里（10 个，都是别的结构，单元内没有 0x980/0x968 位移，也不是函数族的调用者）。
+   反向用例：把 0xE75D30（基类派发）移出函数族范围，扫描能找到它。这一步只是辅助：先把指针存进栈或别的结构、之后再用的写法，它覆盖不到；主证据是第 3 步。
+5. 安装守卫的两个全局：`0x20B30A0` 只在 0x11A3575/0x11A359D（物理系统初始化 0x11A3410，经 0x11A3340 由应用初始化 0x7004F0 调用）和 0x11A38FF（关闭）写入；造世界的 0x11AD340 由 0x1193400 调用，传入的参数就是这个全局。`0x20B2880` 在 0x73DB6 写入。
+
+### sim 证明了什么
+
+用 unicorn 映射整份 EDF.dll 镜像（打补丁），Havok 堆、hkArray realloc 0x97C890、free 0x97B150 和 hkSignal 辅助函数用 Python 桩代替，其余全部执行游戏原代码：
+
+- 派生构造 0xE76640；24000 个 body，每个订阅 3 种事件，另加 2 个全局订阅，共 72002 个节点，超过 0xFFFF；
+- 删掉一半 body（0xE76460→0xE76010），再从空闲表重新订阅，size 不增长；
+- 置 +0x62「正在派发」后删 2000 个 body，走 +0x68 待释放列表（0x978600 扩容），再逐条 0xE76010；
+- 删掉全部 body，最后调析构体 0xE76680。
+
+每一步之后按加宽布局把所有链表走一遍：每个节点恰好属于空闲表、全局链或某个 body 链之一，没有环，每个 body 链上的事件类型与订阅一致；删光后空闲节点数等于「总数减全局订阅」。每次 free 给出的字节数必须等于该块分配时的大小，这直接验证了析构里元素大小改成 4 的必要性；析构后不允许有残留块。
+
+反向用例：
+- 原版代码按原布局跑，300 个 body 时一切正常，24000 个 body 时在 body 21844（约第 65534 个节点）出错；
+- 只把 0xE75C5E（截断点）、0xE758EF（搬移时的 next 拷贝）、0xE766F7（析构元素大小）中的任意一处留作原字节，都会失败。
+
+本机 Python 默认没有装 unicorn，ctest 会跳过 sim。手动运行方式：`pip install unicorn`（或 `--target` 装到临时目录再设 `PYTHONPATH`），然后 `python tests/havok_props_sim.py <EDF.dll>`，约 17 秒。
+
+## 复核意见的处理
+
+- **安装时机**（复核第 1 条）：已改为硬性检查，不再只记日志。插件在 CPP_OnBoot 加载，早于应用初始化，fsbudget.cpp 依赖同一个前提。`kFsManager` 和 `kPhysicsSystem` 任一非空，就说明应用初始化已经跑过，此时可能已存在原布局的 dispatcher，于是整套 refused。
+  残余前提：hknpWorld 构造 0xDA2020 还有两个调用者 0xDA3140、0xE23B69，它们都没有直接调用者（推测走 Havok 反射或序列化）。这两条路径同样需要 Havok 已初始化，按理也发生在应用初始化之后，但没有逐条证明。
+- **节点 +4 未被使用**（复核第 2 条）：函数族内已证明没有读写，外部只拿到节点 +8 的 `hkSignal*`。复核方抽查了 0x97B5E0、0x97B7C0、0x97B440，都没有负偏移访问。但订阅者并没有全部审过，所以这一条是**残余假设**，不是已证明的结论。audit 能断言的只是「族外没有新的引用」（第 3 步）。
+- **峰值还是泄漏**（复核第 3 条）：sim 证明，在游戏会走的分配 / 释放路径上，节点都会回到空闲表，删光 body 后空闲数等于总数减全局订阅。至于游戏是否对每个 body 都调用了 onBodyRemoved，需要实机确认：退关前后读 dispatcher（`[world+0x980]`）的 `[+0x48]` size，并沿 `+0x3C` 空闲表、节点 `+4` 走一遍算出空闲数。退关后「size − 空闲数」应接近全局订阅数，否则就是泄漏，需要另查。加宽之后泄漏不会再表现为卡死，只会表现为内存上涨。
+- **模式扫描是启发式**（复核第 4 条）：audit 以第 3 步的引用集合作为主证据，第 4 步的字段跟踪和模式扫描只作辅助，文档和 audit 注释里都已写明。
+
+## 待确认（实机）
+
+- 安装日志应出现 `HAVOKPROPS event dispatcher indexes uint32 (stock uint16) sites=137`。如果出现 `refused: the application's init has run`，说明插件加载时机和预期不同，需要重新判断。
+- 用 stress:100 退关，确认不再卡死，并按上节方法记录 size 与空闲数。
+- `hknpSetEventDispatcherCommand` 允许替换 dispatcher。目前游戏内没有第三处构造（audit 第 3 步会在出现新调用者时失败），但别的插件如果自己构造 dispatcher 并绕过 0xE75980，就会绕开补丁。
+- 实机压测时建议打开 Havok 堆检查，确认没有大小不符的 free。sim 已在桩里逐一核对过大小。
