@@ -56,9 +56,14 @@ for path in ('src/heli.cpp', 'autoturret/src/turret.h'):
     check('kRegList=0x8' in text, f'{path}: the head at registry+8')
     check('constexpr std::size_t kRegSize=0x10;' in text, f'{path}: the count at registry+0x10')
     check('kMaxNodes' not in text, f'{path}: no fixed node cap')
-for path, walks in (('src/heli.cpp', 2), ('autoturret/src/plugin.cpp', 1)):
+# heli.cpp's enemy walk is enemy_points.h Walk (shared with the gunner seats' frame copy): EnemyRegistry reads the count
+# and ForEachEnemyOf hands it over; its own walk (VisitAllLocks) reads it in place.
+for path, reads, walks in (('src/heli.cpp', 2, 1), ('autoturret/src/plugin.cpp', 1, 1), ('src/enemy_points.h', 0, 1)):
     text = (ROOT / path).read_text(encoding='utf-8')
-    check(len(re.findall(r'const std::uint64_t nodes=At<std::uint64_t>\(registry,kRegSize\);', text)) == walks and
+    check(len(re.findall(r'nodes=At<std::uint64_t>\(registry,kRegSize\);', text)) == reads and
           len(re.findall(r'node!=head && n<nodes;', text)) == walks, f'{path}: every registry walk bounded by the count')
+heli = (ROOT / 'src/heli.cpp').read_text(encoding='utf-8')
+check(heli.count('enemypoints::Walk(') == 1 and 'enemypoints::Walk(head,relation,v,static_cast<F&&>(f),nodes);' in heli,
+      'src/heli.cpp: the shared walk given the registry count')
 
 print(f'lock_registry_native_audit: {checks} checks passed')

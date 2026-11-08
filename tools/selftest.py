@@ -6876,8 +6876,10 @@ def air_chase_wired() -> None:
     assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }' in npcai
     assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
     assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
-    assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
-    assert 'std::memcmp(p.from,from,12)==0' in src('src/wastedfire.cpp'), 'cached plans belong to the same muzzle and weapon'
+    # A cached plan is the same weapon's (its round's speed and gravity are in the plans' key) and the same muzzle's.
+    wasted = src('src/wastedfire.cpp')
+    assert 'speed==o.speed && gravity==o.gravity' in wasted and 'const PlanKey key{shooter,target,speed,gravity};' in wasted
+    assert 'std::memcmp(p->from,from,12)==0' in wasted, 'cached plans belong to the same muzzle and weapon'
     heli = src('src/heli.cpp')
     assert 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });' in heli and heli.count('held())return;') >= 3
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
