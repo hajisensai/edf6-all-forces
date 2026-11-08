@@ -20,8 +20,11 @@ namespace crew {
 //      bytes 20..23 (the targets too: a teammate grabbed, a player marked or attacked), anything else by its NetId; an
 //      ultimate's / barrage's caller sent fallen too: QMRK v3, GRVT/FGUN v4, ULTS v3, BRGS v3, map commands v9, PVEH v3,
 //      enemy control v6 (its projectiles' targets and the Deiroi / monster codecs v2); the support wire keeps v2.
+//   8 (2026-11-08): the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
+//      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
+//      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=7;
+constexpr std::int64_t kAllForcesRoomProtocol=8;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

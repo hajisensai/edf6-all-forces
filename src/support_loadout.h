@@ -305,10 +305,10 @@ inline constexpr int kPayloadSharePercent=40;   // 40 % of the clean mass
 struct VehicleBodyRow { VehicleBody body; const wchar_t* name; const wchar_t* base; int most; bool tank; int payloadKg; };
 inline constexpr VehicleBodyRow kVehicleBodies[]={
     {VehicleBody::tank,L"TANK",L"V505_TANK_MISSION.SGO",4,true,0},
-    {VehicleBody::strike,L"STRIKE",L"EDF6VC_JET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
-    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_JET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
-    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_JET_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
-    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_JET_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    {VehicleBody::strike,L"STRIKE",L"EDF6VC_DN_SUPPORT_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
+    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_DN_SUPPORT_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
+    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_DN_SUPPORT_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
     // A player's own (their clean masses: pylib/vcobjects.py JET_MASSES of marks 7201 / 7202 / 7002 / 7003 / 7004).
     {VehicleBody::pfighter,L"PFIGHTER",L"EDF6VC_PJET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
     {VehicleBody::pstrike,L"PSTRIKE",L"EDF6VC_PJET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},

@@ -75,6 +75,7 @@ constexpr const char* kBomberCatch="a stock bomber a strike jet took over (no SG
 constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a wing's flight): the player fighter";
 constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own): the player fighter";
 constexpr const char* kXmCatch="an X-Morph jet (its twin is the model pack's, not always there): the player fighter";
+constexpr const char* kSupportCatch="a support call's aircraft (its kind in a Dreadnought model): its kind's catch";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
 // The player's flight model's numbers (playerjet.cpp Kind, the same fields and units).
@@ -153,6 +154,12 @@ inline constexpr Boardable kBoardable[]={
     {Body::xmAttack,Airframe::wing,Arm::none,Wing("xmAttack",MarkOf(Body::xmAttack),Npc(jet::Role::multirole),5.0f),kCatchPlayerFighter,kXmCatch},
     {Body::xmHeavyAttack,Airframe::wing,Arm::none,Wing("xmHeavyAttack",MarkOf(Body::xmHeavyAttack),Npc(jet::Role::multirole),7.0f),kCatchPlayerFighter,kXmCatch},
     {Body::xmBomber,Airframe::wing,Arm::none,Wing("xmBomber",MarkOf(Body::xmBomber),Npc(jet::Role::strike),10.0f),kCatchPlayerFighter,kXmCatch},
+    // The support calls' aircraft (jet_internal.h Body::sup*: the Dreadnought models, 28 / 29 / 18 x 30 / 30 m across), each
+    // flown as its kind and caught as its kind is (that kind's requested twin; the strike jet's: the player strike jet).
+    {Body::supStrike,Airframe::wing,Arm::none,Wing("supStrike",MarkOf(Body::supStrike),Npc(jet::Role::strike),14.0f),kCatchPlayerStrike,kSupportCatch},
+    {Body::supFighter,Airframe::wing,Arm::none,Wing("supFighter",MarkOf(Body::supFighter),Npc(jet::Role::fighter),14.0f),kCatchFighter,kSupportCatch},
+    {Body::supInterceptor,Airframe::wing,Arm::none,Wing("supInterceptor",MarkOf(Body::supInterceptor),Npc(jet::Role::interceptor),15.0f),kCatchInterceptor,kSupportCatch},
+    {Body::supMultirole,Airframe::wing,Arm::none,Wing("supMultirole",MarkOf(Body::supMultirole),Npc(jet::Role::multirole),15.0f),kCatchMultirole,kSupportCatch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

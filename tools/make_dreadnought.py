@@ -12,6 +12,8 @@ in neither its model nor its collision. Changing them takes a run of the install
                                                 durability and arms (the submarine carrier's: tools/make_jets.py writes
                                                 them), its door beside it
   Mods/OBJECT/EDF6VC_DN_<FIGHTER>.SGO           the fighters, NPC jets (src/jet_internal.h kBodies Body::dn*)
+  Mods/OBJECT/EDF6VC_DN_SUPPORT_<ROLE>.SGO      the support calls' aircraft in the fighters' models (pylib/vcobjects.py
+                                                SUPPORT_JETS; Body::sup*): the strike jet, fighter, interceptor, multirole
   Mods/OBJECT/EDF6VC_DN_ROUND_<GUN>.SGO         its turrets' rounds, their emplacements' (TURRET_ROUNDS, src/jet_bay.cpp
                                                 kDnRounds)
 
@@ -19,7 +21,8 @@ Without the model folder (pylib/obj_model.py model_dir: $EDF6VC_MODELS, `models`
 folder) none of it can be built: the dreadnought's SGO is then the stock V506_HELI.SGO as it is, so its request
 (tools/calls.py EDF6VC_CALL_DREADNOUGHT, always installed: the weapon table's rows never move) brings a plain N9 Eros
 heli, which the plugin (no Dreadnought mark) leaves alone; no fighter SGO is written (the plugin's hangar then launches
-none). Said once when it happens.
+none), nor any support aircraft's (the strike / fighter / interceptor / multirole supports are then not deployed: the
+model pack is part of the install, CLAUDE.md). Said once when it happens.
 Built in memory first, written atomically and recorded in the ledger as this tool's; --remove releases them.
 
   python tools/make_dreadnought.py [game dir]                  write / refresh
@@ -53,6 +56,7 @@ JET = vc.JETS[vc.DREADNOUGHT_JET]
 SGO_FILE = 'EDF6VC_DREADNOUGHT.SGO'
 STOCK_SGO = 'V506_HELI.SGO'
 FIGHTER_SGOS = {k: vc.dn_file(k, 'SGO') for k in vc.DREADNOUGHT_FIGHTERS}
+SUPPORT_SGOS = {role: vc.support_file(role) for role in vc.SUPPORT_JETS}
 # Its turrets' rounds (src/jet_bay.cpp kDnRounds, in tools/make_tracked_combat.py DREADNOUGHT_GUNS' order; vcobjects
 # DREADNOUGHT_TURRET_GUNS): each gun's emplacement's round (GUNS['emp_<kind>']: its speed, life, blast, thickness) in its
 # shell's tracer colour (EMPLACEMENT_SHELL's AmmoColor), made as the gunship cannon's round is (make_jets.gun_round: one
@@ -100,7 +104,8 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
     folder = dm.model_dir()
     if folder is None:
         print(f'未找到无畏舰模型（{dm.MODEL_SUBDIR}/{dm.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型目录）：'
-              '无畏舰请求先叫来普通的 N9 Eros 直升机，机库没有舰载机；放好模型后重新安装即可。')
+              '无畏舰请求先叫来普通的 N9 Eros 直升机，机库没有舰载机；对地攻击机 / 制空战斗机 / 截击机 / 多用途机支援'
+              '（它们用无畏舰舰载机的模型）也不会出动。放好模型后重新安装即可。')
         files = {f'OBJECT/{SGO_FILE}': game.read('OBJECT', STOCK_SGO)}
     else:
         files = {}
@@ -117,6 +122,8 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
             vc.jet_sgo(game, vc.DREADNOUGHT_JET), 0, vc.DREADNOUGHT_TURRETS, game.read('OBJECT', make_jets.GUNNER_STOCK))
         for kind, (name, *_rest) in vc.DREADNOUGHT_FIGHTERS.items():
             files[f'OBJECT/{FIGHTER_SGOS[kind]}'] = vc.jet_sgo(game, name)
+        for role, (name, *_rest) in vc.SUPPORT_JETS.items():   # the support calls' aircraft in the fighters' models
+            files[f'OBJECT/{SUPPORT_SGOS[role]}'] = vc.jet_sgo(game, name)
         for kind in TURRET_ROUNDS:
             gun = turret_round(game, kind)
             files[f'OBJECT/{gun.file}'] = make_jets.gun_round(game, gun)
@@ -134,12 +141,12 @@ def grid_of(model: str) -> tuple[int, int]:
 
 def made_files() -> list[str]:
     """The paths under Mods `build` writes with the model folder, its own SGO aside (the test range has its own):
-    every model's archive and airframe, the fighters' SGOs."""
+    every model's archive and airframe, the fighters' and the support aircraft's SGOs."""
     out = []
     for model in dm.MODELS:
         name = dm.archive_name(model)
         out += [f'OBJECT/{name}', f'OBJECT/{aircraft_collision.DN_FILES[name]}']
-    return out + [f'OBJECT/{f}' for f in (*FIGHTER_SGOS.values(), *TURRET_ROUNDS.values())]
+    return out + [f'OBJECT/{f}' for f in (*FIGHTER_SGOS.values(), *SUPPORT_SGOS.values(), *TURRET_ROUNDS.values())]
 
 
 def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> None:
@@ -155,6 +162,7 @@ def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -
     assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD tables model_lod.finish adds
     jets = {SGO_FILE: (vc.DREADNOUGHT_JET, dm.SHIP)}
     jets.update({FIGHTER_SGOS[k]: (name, k) for k, (name, *_r) in vc.DREADNOUGHT_FIGHTERS.items()})
+    jets.update({SUPPORT_SGOS[r]: (name, model) for r, (name, _m, model, *_r) in vc.SUPPORT_JETS.items()})
     for file, (name, model) in jets.items():
         jet = vc.JETS[name]
         v = sgo.load(data=files[f'OBJECT/{file}'])
