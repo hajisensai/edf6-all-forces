@@ -11,7 +11,7 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
   if (path === '/api/story' && request.method === 'GET') {
     // Readable by anyone (me = null: a visitor), written by the group's members and developers.
     const shown = await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions');
-    const group = pick(me, url.searchParams.get('group'), shown);
+    const group = pick(me, url.searchParams.get('group'), shown, groups);
     const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
     return { me, group, groups: shown, editable: group != null && canWrite(me, group), rows: anonymous(me, rows.results.map(({ grp, ...row }) => row)) };
   }

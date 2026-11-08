@@ -77,7 +77,7 @@ export async function outlineRoute(request, env, me, missions, groups, path, url
   if (path === '/api/outline' && request.method === 'GET') {
     // me = null: a visitor without an account.
     const shown = await readable(db, me, groups, "SELECT grp FROM story_outline WHERE json_array_length(data, '$.lanes') > 0");
-    const group = pick(me, url.searchParams.get('group'), shown);
+    const group = pick(me, url.searchParams.get('group'), shown, groups);
     const row = group == null ? null : await db.prepare('SELECT * FROM story_outline WHERE grp = ?1').bind(group).first();
     const outline = row ? JSON.parse(row.data) : null;
     return {

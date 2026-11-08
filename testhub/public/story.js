@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const STATUS = { planned: '构思中', writing: '制作中', testing: '待测试', done: '已完成' };
 let state;
 let catalog = [];
-let group = null;
+let group = new URLSearchParams(location.search).get('group');
 let editing = null;
 let busy = false;
 let deleting = null;
@@ -85,8 +85,10 @@ async function load() {
   $('auth').textContent = me ? '退出' : '登录';
   $('auth').href = me ? '/logout' : '/login.html';
   $('add').classList.toggle('hide', !state.editable);
-  $('groupBar').classList.toggle('hide', state.groups.length < 2);
-  $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === group }, g || '（未分组）')));
+  $('groupBar').classList.toggle('hide', groupButtons($('group'), state.groups, group, (g) => {
+    group = g;
+    load().catch((e) => error(e.message));
+  }) < 2);
   render();
 }
 
@@ -144,7 +146,6 @@ $('deleteDialog').addEventListener('close', () => { deleting = null; });
 $('add').addEventListener('click', () => openEditor());
 $('filter').addEventListener('input', () => { if (state) render(); });
 $('statusFilter').addEventListener('change', () => { if (state) render(); });
-$('group').addEventListener('change', () => { group = $('group').value; load().catch((e) => error(e.message)); });
 $('add').disabled = true;
 async function init() {
   catalog = (await api('/api/missions')).missions;

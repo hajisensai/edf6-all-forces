@@ -57,7 +57,9 @@ test('outline: everyone reads every written group, only members and developers w
   assert.equal((await call(e, '/api/outline/save', { outline: { title: '', lanes: [] }, version: 0, group: 'a' }, 'bob')).status, 200);
   assert.equal((await get(e, 'alice')).version, 1);
   assert.equal((await get(e, 'dev', 'a')).editable, true);
-  assert.deepEqual((await get(e, 'dev')).groups, ['', 'a', 'b']);   // a developer sees every group, empty or not
+  assert.deepEqual((await get(e, 'dev')).groups, ['', 'a']);   // its own (empty) group plus the written one: b is empty
+  assert.equal((await get(e, 'dev', 'b')).group, 'b');   // an unlisted empty group still opens by name for a developer
+  assert.equal((await get(e, 'alice', 'b')).group, 'a');   // but not for another group's tester
   assert.equal((await call(e, '/api/outline/save', { outline: sample(), version: 1, group: 'b' }, 'dev')).status, 200);
   assert.equal((await get(e, 'bob')).version, 2);
 });

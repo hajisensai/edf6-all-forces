@@ -14,7 +14,7 @@
     <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
   </header>
   <p id="error" class="err hide" role="alert"></p>
-  <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
+  <p id="groupBar" class="row hide"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></p>
   <section>
     <div class="row">
       <h2 id="title" style="margin:0">剧情大纲</h2>
@@ -69,6 +69,7 @@
     </form>
   </dialog>
 </main>
+<script src="/groups.js"></script>
 <script src="/outline.js"></script>
 </body>
 </html>
