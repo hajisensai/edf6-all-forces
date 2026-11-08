@@ -93,6 +93,10 @@ struct Deployment {
     // WithdrawGround put one still seated off, never delete it with the crew (2026-10-11 review: a squad that left its
     // trip while aboard went home with the vehicle and was deleted there).
     bool carried[support_net::kMaxUnits]{};
+    // An aircraft handed over (AirArrival): its guard to the call point let go on its own arrival, or nothing left to let
+    // go (lost, withdrawing, under the player's own order). `lost`: a unit died on the way in (logged once).
+    bool released[support_net::kMaxUnits]{};
+    bool lost=false;
     // Since when its ground vehicle (or an infantry leader's route, by index + 1) has made no way (GameMs; 0: it moves).
     // 2026-10-10 "我摇的人还没到目的地成棍木了": a route that stayed pending / blocked held the truck and its passengers (or a
     // walking squad's quiet movement) where they stood for the rest of the mission. Past kStuckMs they get off / are let go.
@@ -895,6 +899,33 @@ bool Unseat(const ObjRef& soldier) noexcept {
 // made no way while the deployment is still coming in), the vehicle it sits in and which seat, its team, its object
 // flags, its distance from the player and whether that is past the near camera's draw distance; a vehicle also its
 // riders and whether an NPC drives it.
+// An air call's aircraft, each handed over on its own (2026-11-08 「部分援军无法正常跟随」): ActivateSupportAircraft sent it
+// to the call point under a guard; once its own flight control says it is there (support_aircraft.h SupportEntry: a fixed
+// wing on its patrol ring, a gunship inside its reach, a helicopter on its guard orbit) Order::none lets that guard go,
+// and it keeps its call's own post or follows the player. Never a distance of the dispatcher's own: a 150 m test here
+// was one no fixed wing (circling 600-1500 m out) ever passed, so a follow call guarded the point all mission. True once
+// every aircraft is handed over (or lost, withdrawing, or under the player's own order).
+bool AirArrival(Deployment& deployed) noexcept {
+    SupportAircraft spec;
+    if(!AircraftSpecOf(deployed.plan.catalogId,&spec))return true;   // nothing of ours to hand over (Validate refuses it)
+    bool all=true;
+    for(unsigned i=0;i<deployed.plan.count;++i) {
+        if(deployed.released[i] || deployed.plan.units[i].role || deployed.plan.units[i].resourceId<kAircraft ||
+           deployed.plan.units[i].resourceId>=kVehicle)continue;
+        const void* object=deployed.objects[i].obj;
+        const SupportEntry entry=!Live(deployed.objects[i]) ? SupportEntry::gone :
+                                 spec.heli>=0 ? HeliSupportEntry(object,deployed.plan.target) : JetSupportEntry(object,deployed.plan.target);
+        if(entry==SupportEntry::flying){all=false;continue;}
+        if(entry==SupportEntry::arrived) {
+            // Not commandable this frame (its module has not flown it just now): asked again next frame.
+            if(!(spec.heli>=0 ? HeliCommand(object,Command{}) : JetCommand(object,Command{}))){all=false;continue;}
+            Log("SUPPORT deployment %llu: aircraft %u arrived: its guard of the call point let go (%s)",
+                static_cast<unsigned long long>(deployed.id),i,spec.follow ? "follows the player" : "keeps its post");
+        }
+        deployed.released[i]=true;
+    }
+    return all;
+}
 void Trace(Deployment& d) noexcept {
     const ULONGLONG now=GameMs();
     if(d.delivered && !d.deliveredAt)d.deliveredAt=now;
@@ -1832,12 +1863,21 @@ void SupportDispatchTick() noexcept {
                 seated=seated || At<const void*>(SeatAt(vehicle,seat),kSeatRider)==deployed.objects[i].obj;
             boarded=boarded && seated;
         }
+        SupportVehicleKind kind{};SupportCrewMode mode{};
+        const bool ground=GroundCatalog(deployed.plan.catalogId,kind,mode),infantry=InfantryCatalog(deployed.plan.catalogId);
         if(!alive && deployed.started) {
             // Once in the field, losses are gameplay. Never despawn the surviving deployed units.
-            Log("SUPPORT deployment %llu: a unit lost on the way: the survivors carry on (delivered)",static_cast<unsigned long long>(deployed.id));
-            deployed.delivered=true;Status(L"支援途中遭受损失，存活单位继续执行任务");continue;
-        }
-        if(!alive || (!deployed.started && GameMs()-deployed.born>kBoardLimit)) {
+            if(ground || infantry) {
+                Log("SUPPORT deployment %llu: a unit lost on the way: the survivors carry on (delivered)",static_cast<unsigned long long>(deployed.id));
+                deployed.delivered=true;Status(L"支援途中遭受损失，存活单位继续执行任务");continue;
+            }
+            // The surviving aircraft are still under the guard that brought them in: each is let go on its own arrival
+            // (AirArrival), else a follow call's survivors would guard the call point for the rest of the mission.
+            if(!deployed.lost) {
+                Log("SUPPORT deployment %llu: a unit lost on the way: the surviving aircraft fly on in",static_cast<unsigned long long>(deployed.id));
+                deployed.lost=true;Status(L"支援途中遭受损失，存活单位继续执行任务");
+            }
+        } else if(!alive || (!deployed.started && GameMs()-deployed.born>kBoardLimit)) {
             Log("SUPPORT deployment %llu: rolled back before it set off (%s; boarded %d)",static_cast<unsigned long long>(deployed.id),
                 alive ? "boarding took past kBoardLimit" : "a unit lost before it set off",boarded);
             const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;
@@ -1860,8 +1900,7 @@ void SupportDispatchTick() noexcept {
         if(!deployed.started)continue;
         // Ground hull follows verified route waypoints, not a line through walls. Arrival releases real
         // drivers only for empty delivery; the same objects remain in the mission and can return on foot.
-        SupportVehicleKind kind{};SupportCrewMode mode{};
-        if(GroundCatalog(deployed.plan.catalogId,kind,mode)) {
+        if(ground) {
             auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
             const float* position=reinterpret_cast<const float*>(vehicle+kPosition);float waypoint[3];
             const auto profile=VehicleRouteProfile(*SupportVehicleInfo(kind));
@@ -1923,7 +1962,7 @@ void SupportDispatchTick() noexcept {
                 Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" :
                        stuck ? L"支援车辆无法继续前进：乘员就地下车步行前往" : L"支援车辆已抵达目的地");
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
-        } else if(InfantryCatalog(deployed.plan.catalogId)) {
+        } else if(infantry) {
             int leader=0;bool complete=true,released=false;
             for(unsigned i=0;i<deployed.plan.count;++i)if(IsSupportLeaderResource(deployed.plan.units[i].resourceId) && leader<3) {
                 auto& route=deployed.infantry[leader++];
@@ -1962,21 +2001,9 @@ void SupportDispatchTick() noexcept {
                 deployed.delivered=true;
                 Status(hudtext::Tr(released ? hudtext::Tx::supportInfantryTransferred : hudtext::Tx::supportInfantryArrived));
             }
-        } else {
-            bool arrived=true;
-            for(unsigned i=0;i<deployed.plan.count;++i)if(!deployed.plan.units[i].role) {
-                const auto* pos=reinterpret_cast<const float*>(static_cast<const unsigned char*>(deployed.objects[i].obj)+kPosition);
-                arrived=arrived && support::FlatDistance(pos,deployed.plan.target)<150;
-            }
-            if(arrived) {
-                for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].resourceId>=kAircraft) {
-                    SupportAircraft spec;
-                    if(!AircraftSpecOf(deployed.plan.catalogId,&spec))continue;
-                    if(spec.heli>=0)HeliCommand(deployed.objects[i].obj,Command{});
-                    else JetCommand(deployed.objects[i].obj,Command{});
-                }
-                deployed.delivered=true;Status(L"支援已抵达并进入任务区域");
-            }
+        } else if(AirArrival(deployed)) {
+            deployed.delivered=true;
+            if(!deployed.lost)Status(L"支援已抵达并进入任务区域");
         }
     }
 }

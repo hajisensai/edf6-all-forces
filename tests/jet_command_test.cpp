@@ -19,6 +19,7 @@ float CeilingY() noexcept { MissingDependency();return 0; }
 void BodyAttitude(const unsigned char*,const float*,const float*,float,float,float*) noexcept { MissingDependency(); }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { MissingDependency();return nullptr; }
 void NpcGear(unsigned char*,float,float) noexcept { MissingDependency(); }
+PlayerFix player{{-5000.0f,0.0f,-5000.0f},1,1};
 namespace jet {
 Jet jets[kMaxJets]{};
 bool Alive(const ObjRef& ref) noexcept {
@@ -72,11 +73,61 @@ int main() {
         check(!MapCommandMoving(j,pos,anchor,k.range),"arrival has hysteresis for ordinary combat");
         pos[0]=anchor[0]+10000.0f;
         check(MapCommandMoving(j,pos,anchor,k.range),"far pursuit returns to the commanded area");
+        // 2026-11-08 「炮艇机要盘旋一会才能参战」: a gunship has arrived once its targets are in reach (`range` from the
+        // anchor, TargetRange), not only on its ring; every other kind still on its ring.
+        ApplyMapCommand(j,guard,1000);
+        pos[0]=anchor[0]+k.range-1.0f;
+        const bool shells=k.weapon==Weapon::shells;
+        check(MapCommandMoving(j,pos,anchor,k.range)==(!shells && k.range-1.0f>ring+40.0f),
+              "a gunship arrives inside its reach; the others only on their ring");
+        if(shells) {
+            check(k.range>ring+40.0f,"the gunship's reach lies past its ring (its arrival there is earlier)");
+            pos[0]=anchor[0]+k.range+100.0f;
+            check(!MapCommandMoving(j,pos,anchor,k.range),"its leash 100 m past its reach: no alternation at the edge");
+            pos[0]+=1.0f;
+            check(MapCommandMoving(j,pos,anchor,k.range),"past the leash it comes back in");
+            const float cannon=1795.0f;   // TargetRange with its cannon (jet_bay.cpp): its arrival grows with it
+            ApplyMapCommand(j,guard,1000);pos[0]=anchor[0]+cannon-1.0f;
+            check(!MapCommandMoving(j,pos,anchor,cannon),"with the cannon's reach it arrives from further out");
+            ApplyMapCommand(j,guard,1000);
+            check(MapCommandMoving(j,pos,anchor,k.range),"but not past the reach it is given");
+        }
+        pos[0]=anchor[0]+10000.0f;
         ApplyMapCommand(j,Command{Order::none,{}},1000);
         check(!j.cmdMoving && !MapCommandMoving(j,pos,anchor,k.range),"release removes travel constraints");
         ApplyMapCommand(j,Command{Order::follow,{}},1000);
         check(MapCommandMoving(j,pos,anchor,k.range),"follow joins a distant leader first");
         check(!MapCommandMoving(j,anchor,anchor,k.range),"follow permits combat after joining");
+    }
+    // A called jet on its way in (support_aircraft.h SupportEntry, 2026-11-08 「部分援军无法正常跟随」): the dispatcher lets
+    // its guard of the call point go on the arrival its own flight control judges, then it follows the player it escorts.
+    {
+        const float call[3]={10000.0f,0.0f,10000.0f},elsewhere[3]={9000.0f,0.0f,10000.0f};
+        Jet j{};j.role=Role::fighter;j.mode=Mode::patrol;j.launched=true;j.escort=true;
+        std::memcpy(j.anchor,player.pos,12);   // JetFrame keeps an escort's own anchor on the player
+        ApplyMapCommand(j,guard,1000);
+        check(SupportEntryOf(j,call)==SupportEntry::flying,"sent in: flying until its own arrival");
+        check(CommandAnchor(j,true,j.anchor)==j.cmd.at,"under the call's guard it works round the call point, not the player");
+        const Kind& k=KindOf(j);
+        float pos[3]={call[0]+k.patrol+20.0f,600.0f,call[2]};   // on its patrol ring, far past any fixed distance like 150 m
+        check(!MapCommandMoving(j,pos,call,k.range) && SupportEntryOf(j,call)==SupportEntry::arrived,
+              "on its patrol ring its flight control says it is there");
+        alignas(16) unsigned char marked[0x40]{},markedCtrl[16]{};
+        Put<void*>(marked,kSelfCtrl,markedCtrl);
+        ApplyMapFocus(j,ObjRef::Of(marked),1000);
+        check(SupportEntryOf(j,call)==SupportEntry::flying,"a focus order the player gave it: at its enemy first");
+        j.focus={};
+        ApplyMapCommand(j,Command{Order::none,{}},1000);
+        check(SupportEntryOf(j,call)==SupportEntry::superseded && CommandAnchor(j,true,j.anchor)==j.anchor &&
+              j.anchor[0]==player.pos[0],"let go: it works round the player it escorts");
+        ApplyMapCommand(j,Command{Order::guard,{elsewhere[0],elsewhere[1],elsewhere[2]}},1000);
+        check(SupportEntryOf(j,call)==SupportEntry::superseded,"the player's own guard elsewhere is never taken back");
+        ApplyMapCommand(j,guard,1000);j.cmdMoving=false;j.mode=Mode::withdraw;
+        check(SupportEntryOf(j,call)==SupportEntry::gone,"withdrawing: nothing to let go");
+        j.mode=Mode::patrol;j.reap=true;
+        check(SupportEntryOf(j,call)==SupportEntry::gone,"being deleted: nothing to let go");
+        j.reap=false;j.sortie.pass=SortiePass::gunRun;
+        check(SupportEntryOf(j,call)==SupportEntry::superseded,"a sortie flies its own one pass");
     }
     for(const Mode mode:{Mode::takeoff,Mode::withdraw,Mode::recover,Mode::bomb}) {
         Jet j{};j.mode=mode;ApplyMapCommand(j,guard,1000);

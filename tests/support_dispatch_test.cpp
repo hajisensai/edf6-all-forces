@@ -213,9 +213,10 @@ void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
 }
 bool soloHost=false;
 bool SupportSoloHostWorld() noexcept {return soloHost;}
+int airJet=-1,airHeli=static_cast<int>(HeliBody::eros506),airCount=1;bool airFollow=false;   // the air calls' spec
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
-    *out={-1,static_cast<int>(HeliBody::eros506),1,300,false};return true;
+    *out={airJet,airHeli,airCount,300,airFollow};return true;
 }
 int plannedAircraft=0,plannedHeli=-2;
 support::Refusal planRefusal=support::Refusal::none;
@@ -407,9 +408,24 @@ bool NpcSquadSetOrder(const void*,const mapcmd::Command& c,bool) noexcept {++squ
 bool SquadCommand(const void*,const Command&) noexcept {++orders;return true;}
 bool NpcPrepareSquadRoute(unsigned char*,const float*,float) noexcept {++routeOrders;return true;}
 bool NpcFinishSquadRoute(unsigned char*,const float*) noexcept {return true;}
-int heliCommands=0;
-bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {++heliCommands;return true;}
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept {return true;}
+int heliCommands=0,heliReleases=0,jetReleases=0;bool commandTakes=true;
+bool HeliCommand(const void*,const Command& c,const ObjRef&) noexcept {
+    ++heliCommands;if(!commandTakes)return false;
+    heliReleases+=c.order==mapcmd::Order::none;return true;
+}
+bool JetCommand(const void*,const Command& c,const ObjRef&) noexcept {
+    if(!commandTakes)return false;
+    jetReleases+=c.order==mapcmd::Order::none;return true;
+}
+// Each fixture object's arrival as its own flight control judges it (jet_internal.h SupportEntryOf, heli.cpp's): flying
+// until a case says otherwise; and the target each was asked about.
+SupportEntry entryState[32]{};int entryAsked=0;float entryTarget[3]{};
+SupportEntry EntryOf(const void* v,const float* target) noexcept {
+    ++entryAsked;std::memcpy(entryTarget,target,12);
+    return entryState[(static_cast<const unsigned char*>(v)-objects[0])/sizeof(objects[0])];
+}
+SupportEntry JetSupportEntry(const void* v,const float* target) noexcept {return EntryOf(v,target);}
+SupportEntry HeliSupportEntry(const void* v,const float* target) noexcept {return EntryOf(v,target);}
 bool areaMeasured=true,areaGround=true;
 bool PlayAreaMeasured() noexcept {return areaMeasured;}
 PlayArea MapPlayArea() noexcept {return {{-1500,-1500},{1500,1500},areaGround,0,true};}
@@ -467,6 +483,72 @@ int main() {
     check(!Validate(invalid),"a manifest cannot detach the specified crew from its aircraft");
     invalid=deployments[0].plan;invalid.count=1;
     check(!Validate(invalid),"a manned aircraft manifest cannot omit its real pilot");
+    // 2026-11-08 「部分援军无法正常跟随」: a follow call's guard of the call point is let go aircraft by aircraft, when each
+    // one's own flight control says it is there (a fixed wing's patrol ring is 600-1500 m out: the 150 m test of before
+    // never passed, so it guarded the point all mission), whatever its distance; a loss on the way lets the rest go too.
+    {
+        const auto hulls=[](const Deployment& d,unsigned* out) noexcept {
+            unsigned n=0;
+            for(unsigned i=0;i<d.plan.count;++i)if(!d.plan.units[i].role)out[n++]=static_cast<unsigned>(
+                (static_cast<const unsigned char*>(d.objects[i].obj)-objects[0])/sizeof(objects[0]));
+            return n;
+        };
+        for(const bool jetCall:{true,false}) {
+            ResetSupportDispatch();made=deleted=activated=heliCommands=heliReleases=jetReleases=entryAsked=0;fixtureMs+=40000;
+            airJet=jetCall ? 0 : -1;airHeli=jetCall ? -1 : static_cast<int>(HeliBody::eros506);airCount=2;airFollow=true;
+            for(auto& e:entryState)e=SupportEntry::flying;
+            check(SupportCallAt(0,target,note,128),"a follow call of two aircraft is queued");
+            SupportDispatchTick();
+            Deployment& d=deployments[0];unsigned hull[4];
+            check(hulls(d,hull)==2 && activated==2 && d.started,"two aircraft made in the air, both sent in under a guard");
+            int& releases=jetCall ? jetReleases : heliReleases;
+            // Over the very point but its own flight control not there yet (cmdMoving): nothing let go.
+            for(unsigned k=0;k<2;++k)std::memcpy(objects[hull[k]]+kPosition,target,12);
+            for(int i=0;i<3;++i){fixtureMs+=100;SupportDispatchTick();}
+            check(!releases && !d.delivered && entryAsked>0 && !std::memcmp(entryTarget,target,12),
+                  "asked its own flight control about the call point; not there: no release, whatever the distance");
+            // Far out on its patrol ring, its flight control there: that one is let go at once, on its own.
+            At<float>(objects[hull[0]],kPosition)=1200.0f;entryState[hull[0]]=SupportEntry::arrived;
+            fixtureMs+=100;SupportDispatchTick();
+            check(releases==1 && d.released[0] && !d.delivered,"the first one there is let go on its own (Order::none)");
+            fixtureMs+=100;SupportDispatchTick();
+            check(releases==1,"let go once, never every frame");
+            // Not commandable this frame: asked again the next.
+            entryState[hull[1]]=SupportEntry::arrived;commandTakes=false;
+            fixtureMs+=100;SupportDispatchTick();
+            check(releases==1 && !d.delivered,"its module did not take the release: still waiting");
+            commandTakes=true;fixtureMs+=100;SupportDispatchTick();
+            check(releases==2 && d.delivered && std::wcscmp(status,L"支援已抵达并进入任务区域")==0,
+                  "the second let go the next frame: the deployment is delivered");
+        }
+        // A loss on the way in (2026-11-08: this used to mark it delivered at once, its survivors left guarding the
+        // point): the surviving aircraft are let go on their own arrival as well.
+        ResetSupportDispatch();made=deleted=activated=jetReleases=0;fixtureMs+=40000;
+        airJet=0;airHeli=-1;airCount=2;airFollow=true;
+        for(auto& e:entryState)e=SupportEntry::flying;
+        check(SupportCallAt(0,target,note,128),"another follow call of two jets");
+        SupportDispatchTick();
+        Deployment& d=deployments[0];unsigned hull[4];
+        check(hulls(d,hull)==2 && d.started,"both flying in");
+        objects[hull[0]][kDead]=1;
+        fixtureMs+=100;SupportDispatchTick();
+        check(d.lost && !d.delivered && !jetReleases && std::wcscmp(status,L"支援途中遭受损失，存活单位继续执行任务")==0,
+              "a loss on the way: noted, its survivor still flying in, not marked delivered");
+        fixtureMs+=100;SupportDispatchTick();
+        entryState[hull[1]]=SupportEntry::arrived;fixtureMs+=100;SupportDispatchTick();
+        check(jetReleases==1 && d.delivered,"the survivor let go on its arrival: delivered");
+        // Under the player's own order meanwhile (a map command), or withdrawing: nothing to let go, never overridden.
+        ResetSupportDispatch();made=deleted=activated=jetReleases=0;fixtureMs+=40000;
+        for(auto& e:entryState)e=SupportEntry::flying;
+        check(SupportCallAt(0,target,note,128),"a third follow call of two jets");
+        SupportDispatchTick();
+        check(hulls(deployments[0],hull)==2,"both flying in");
+        entryState[hull[0]]=SupportEntry::superseded;entryState[hull[1]]=SupportEntry::gone;
+        fixtureMs+=100;SupportDispatchTick();
+        check(!jetReleases && deployments[0].delivered,"the player's own order and a withdrawal: nothing released, delivered");
+        ResetSupportDispatch();airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);airCount=1;airFollow=false;
+        for(auto& e:entryState)e=SupportEntry::flying;heliCommands=0;
+    }
     // No cooldown after a delivery (2026-10-25, the user: 「支援调度 30 秒的全局冷却 删掉」): the next call is taken at once.
     check(SupportCallAt(0,target,note,128) && SupportCallReadiness().state==SupportReady::planning,
           "a call right after a delivery is taken (no cooldown)");

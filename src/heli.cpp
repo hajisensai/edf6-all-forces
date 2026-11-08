@@ -3236,6 +3236,19 @@ bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexc
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+// A called heli on its way in (support_aircraft.h SupportEntry): arrived when CommandMoving (HeliGuardRadius + 20 m from
+// the post its guard order moved) cleared cmdMoving, as its own fight is let go there.
+SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept {
+    __try {
+        const Heli* const h=vehicle && target ? Find(vehicle) : nullptr;
+        if(!h || h->leaving || h->reap)return SupportEntry::gone;
+        if(h->sortie!=SortiePass::none || h->ferry)return SupportEntry::superseded;
+        if(h->cmd.order!=Order::guard || h->cmd.at[0]!=target[0] || h->cmd.at[1]!=target[1] || h->cmd.at[2]!=target[2])
+            return SupportEntry::superseded;
+        return h->cmdMoving || h->focus ? SupportEntry::flying : SupportEntry::arrived;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return SupportEntry::gone;}
+}
+
 bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
     __try {
         Heli* const h=Find(vehicle);

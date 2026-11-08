@@ -17,6 +17,7 @@
 #include "ferry_line.h"
 #include "air_chase.h"
 #include "sortie_plan.h"
+#include "support_aircraft.h"
 #include <cmath>
 
 namespace crew {
@@ -567,12 +568,34 @@ inline void ApplyMapFocus(Jet& j,const ObjRef& target,ULONGLONG ms) noexcept {
 
 // Patrol flies a ring rather than the centre. Arrival must include that ring, including outer wing slots;
 // the wider leash also includes its attack's extension so an ordinary pass can finish.
+// A gunship (Weapon::shells) fights from its circle out to `range` (TargetRange: its cannon's reach): it has arrived
+// once inside that, not only on its 600 m ring (2026-11-08 「炮艇机要盘旋一会才能参战」: it spiralled in from 1800 m without
+// taking a target). The leash stays 100 m past it, so the boundary does not alternate.
 inline bool MapCommandMoving(Jet& j,const float* pos,const float* anchor,float range) noexcept {
     const Kind& k=KindOf(j);
     const float ring=k.patrol+k.patrolStep*static_cast<float>(j.wing%kPatrolRings);
-    const float arrive=std::fmax(40.0f,ring+40.0f);
+    const float arrive=std::fmax(40.0f,k.weapon==Weapon::shells ? std::fmax(ring+40.0f,range) : ring+40.0f);
     const float leash=std::fmax(range,std::fmax(arrive+100.0f,k.extendOut));
     return AirCommandTransit(j.cmd,j.cmdMoving,pos,anchor,arrive,leash);
+}
+
+// What a jet works round under a map command (mapcmd.cpp): the point it was sent to guard, the player it was told to
+// follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
+inline const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
+    if(j.cmd.order==Order::guard)return j.cmd.at;
+    if(j.cmd.order==Order::follow && follow)return player.pos;
+    return own;
+}
+
+// A called jet on its way to `target` (support_aircraft.h SupportEntry): its own arrival (MapCommandMoving cleared
+// cmdMoving on its ring, a gunship's inside its reach), never a distance the dispatcher picks. A focus order the player
+// gave it meanwhile takes it at its enemy first: still flying in.
+inline SupportEntry SupportEntryOf(const Jet& j,const float* target) noexcept {
+    if(j.reap || j.mode==Mode::withdraw || j.mode==Mode::recover)return SupportEntry::gone;
+    if(j.sortie.pass!=SortiePass::none)return SupportEntry::superseded;   // its one pass, then away (jet_sortie.cpp)
+    if(j.cmd.order!=Order::guard || j.cmd.at[0]!=target[0] || j.cmd.at[1]!=target[1] || j.cmd.at[2]!=target[2])
+        return SupportEntry::superseded;
+    return j.cmdMoving || j.focus ? SupportEntry::flying : SupportEntry::arrived;
 }
 
 // --- Math ---

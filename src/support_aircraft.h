@@ -52,6 +52,16 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix
 // kind's cruise along its nose (jet_spawn.cpp Launch's start), a helicopter with its rotor turning (HeliCalled); else
 // (a legacy plan's hull on the ground) it takes off.
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target,bool airborne) noexcept;
+// Where a called aircraft is on its way in (ActivateSupportAircraft sent it to `target` under a guard order), as its own
+// flight control judges it: the dispatcher (support_dispatch.cpp) hands each one over on its own, never by a distance of
+// its own (2026-11-08: a 150 m test no fixed wing on its patrol ring ever passed, so a follow call never followed).
+//   flying     still under that guard and not yet there (jet_internal.h MapCommandMoving / heli.cpp CommandMoving)
+//   arrived    there: Order::none hands it back its own call (its post, or the player it follows)
+//   superseded under another order now (a map command the player gave it), or a sortie flying its own one pass
+//   gone       none of ours to hand over any more (withdrawing, deleted, not in its module's table)
+enum class SupportEntry : unsigned char { flying, arrived, superseded, gone };
+SupportEntry JetSupportEntry(const void* vehicle,const float* target) noexcept;    // jet_spawn.cpp
+SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept;   // heli.cpp
 bool DeleteSupportAircraft(const ObjRef&) noexcept;
 // A hull this support layer made (and has not deleted). Its owner, the dispatcher, deletes it with its real crew:
 // HeliReap / JetReap leave it alone (they never delete under real soldiers, and its crew is the dispatcher's).

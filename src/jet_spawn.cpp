@@ -504,6 +504,13 @@ void SupportAircraftFrame(unsigned char* v) noexcept {
     }
 }
 
+SupportEntry JetSupportEntry(const void* vehicle,const float* target) noexcept {
+    __try {
+        const Jet* const j=vehicle && target ? FindJet(static_cast<const unsigned char*>(vehicle)) : nullptr;
+        return j ? SupportEntryOf(*j,target) : SupportEntry::gone;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return SupportEntry::gone;}
+}
+
 bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
     return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
 }
