@@ -7,6 +7,7 @@ this machine from the player's own Root.cpk and never distributed.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -684,6 +685,7 @@ def _q(text: str) -> str:
 
 
 SPAWN_BATCH, SPAWN_GAP = 4, 0.25
+SQUAD_BATCH = 10   # soldier squads made in one frame (six soldiers each), SPAWN_GAP apart
 
 
 def script(plan: Plan, lay: Layout) -> str:
@@ -779,7 +781,9 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
     for kind, point in enemy_spots(plan, lay):
         lines.append(f'	CreateEnemy({_q(point.name)}, {_q("app:/object/" + kind + ".sgo")}, {plan.vehicle_level:.2f}, true);')
-    for _ in range(0 if grand else plan.squads):
+    for i in range(0 if grand else plan.squads):
+        if i and i % SQUAD_BATCH == 0:   # (perfrun's stress: hundreds of squads, not all in one frame)
+            lines.append(f'\tWait({SPAWN_GAP:.2f});')
         lines.append(f'	CreateFriendSquad({_q(lay.player.name)}, 20, {_q(GRAND_SOLDIERS[0])}, {_q(GRAND_SOLDIERS[1])}, 6, '
                      f'{plan.vehicle_level:.2f}, false);')
     if w.enabled and target_spots(lay) and targets:
@@ -1386,21 +1390,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     uses = sorted({rel for p in every for s, _ in placements(p) if s in OPTIONAL_VEHICLES
                    for rel in catalog.files_of(OPTIONAL_VEHICLES[s])}
                   | (set(catalog.files_of(wave)) if wave else set()))
-    points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
-    lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan))
-    text = script(plan, lay)
-    placed = [(s, npc, p) for s, npc, p in
-              spots_for(plan, layout(rmpa.points(points_file), small_count(plan), far_reserved(plan)))]
-    if plan.scenario == GRAND:   # the ships' points up in the air
-        for _, dy, p in grand_points(lay):
-            points_file = rmpa.raised(points_file, {p.name}, dy)
-    if target_ranged(plan):
-        points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
-    if plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS:
-        points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, PRIMER_KINDS[plan.waves.enemy][2])
-    primer = plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS
-    if primer and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in PRIMER_FILES):
-        raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
+    text, points_file, placed, primer = _range_files(game_root, game, plan)
     # The presets' scripts before anything is written (one that does not fit its site stops the install here).
     preset_files = {}
     for mission, p in presets.items():
@@ -1418,6 +1408,103 @@ def install(game_root: str, plan: Plan) -> list[str]:
     return ([f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed] + skipped
             + [f'对战预制关 {mission}：{site_of(p.site).label}，' + ('、'.join(f'{s} ×{n}' for s, n in p.vehicles.items())
                                                               or '不放载具') for mission, p in presets.items()])
+
+
+def _range_files(game_root: str, game: Game, plan: Plan) -> tuple[str, bytes, list, bool]:
+    """The range mission's script and points for `plan`, the placements (name, NPC-driven, point) and whether its waves
+    are the Primer creatures (their files then must be in Mods)."""
+    points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
+    lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan))
+    text = script(plan, lay)
+    placed = [(s, npc, p) for s, npc, p in
+              spots_for(plan, layout(rmpa.points(points_file), small_count(plan), far_reserved(plan)))]
+    if plan.scenario == GRAND:   # the ships' points up in the air
+        for _, dy, p in grand_points(lay):
+            points_file = rmpa.raised(points_file, {p.name}, dy)
+    if target_ranged(plan):
+        points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
+    if plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS:
+        points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, PRIMER_KINDS[plan.waves.enemy][2])
+    primer = plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS
+    if primer and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in PRIMER_FILES):
+        raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
+    return text, points_file, placed, primer
+
+
+SCENARIO_FILES = ('MISSION.JSON', 'MISSION.AC', 'MISSION.RMPA', MARKER)
+
+
+def scenario_backup(game_root: str) -> str:
+    """Where write_scenario keeps the range mission's original files until restore_scenario: on disk, beside the game
+    queue (pylib/gamelease.py), so a run that dies keeps them; never in the game folder."""
+    import gamelease
+    return os.path.join(gamelease.queue_dir(game_root), 'range-scenario-original')
+
+
+def write_scenario(game_root: str, plan: Plan) -> list[str]:
+    """Only the range mission's own folder rewritten for `plan`, nothing generated: for a measurement that needs a
+    scenario on an installed range (tools/perfrun.py), not a fresh install, which regenerates every derived vehicle
+    (minutes) and touches the whole Mods tree. Refuses unless the range is installed, the waves' enemy is one the range
+    knows (ENEMIES) and every generated SGO the plan spawns is already in Mods, and while an earlier run's originals
+    are still kept (restore_scenario first). The originals go to scenario_backup before anything is written. Returns
+    what without_missing left out of the plan."""
+    if not installed(game_root):
+        raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
+    backup = scenario_backup(game_root)
+    if os.path.exists(backup):
+        raise RuntimeError(f'上一次的测试场原件还留在 {backup}：先 python tools/perfrun.py --restore')
+    if plan.waves.enabled and plan.waves.enemy not in {s for s, _, _ in ENEMIES}:
+        raise RuntimeError(f'测试场不认识敌人「{plan.waves.enemy}」（gen.ENEMIES）：脚本创建不存在的 SGO 会让游戏退出')
+    game = Game(game_root)
+    plan, skipped = without_missing(game_root, plan)
+    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
+    if wave and not catalog.available(game_root, wave):
+        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）')
+    missing = sorted(x for x in spawned(plan) & (DERIVED.keys() | JETS.keys())
+                     if not os.path.isfile(os.path.join(game_root, 'Mods', 'OBJECT', x.upper() + '.SGO')))
+    if missing:
+        raise RuntimeError(f'{"、".join(missing)} 不在 Mods/OBJECT（测试场只留当前方案要用的生成载具）：'
+                           '先在测试场启动器里用这个方案装一次')
+    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)}):
+        if not has_mission_setup(game, sgo_name):
+            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
+    text, points_file, _, _ = _range_files(game_root, game, plan)
+    out = mission_dir(game_root, RANGE_MISSION)
+    os.makedirs(backup)
+    absent = []
+    for name in SCENARIO_FILES:
+        if os.path.exists(os.path.join(out, name)):
+            shutil.copy2(os.path.join(out, name), os.path.join(backup, name))
+        else:
+            absent.append(name)
+    with open(os.path.join(backup, 'absent.json'), 'w', encoding='utf-8') as f:
+        json.dump(absent, f)
+    try:
+        _write_mission(game_root, game, RANGE_MISSION, plan.site, text, points_file)
+    except BaseException:
+        restore_scenario(game_root)
+        raise
+    return skipped
+
+
+def restore_scenario(game_root: str) -> bool:
+    """The range mission's files as write_scenario found them, byte for byte (mtimes too), and the kept originals
+    removed; False when none were kept."""
+    backup = scenario_backup(game_root)
+    if not os.path.isfile(os.path.join(backup, 'absent.json')):
+        return False
+    with open(os.path.join(backup, 'absent.json'), encoding='utf-8') as f:
+        absent = json.load(f)
+    out = mission_dir(game_root, RANGE_MISSION)
+    for name in SCENARIO_FILES:
+        path = os.path.join(out, name)
+        if name in absent:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(path)
+        else:
+            shutil.copy2(os.path.join(backup, name), path)
+    shutil.rmtree(backup)
+    return True
 
 
 def _write_mission(game_root: str, game: Game, mission: str, site: str, text: str, points: bytes) -> None:

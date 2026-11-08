@@ -559,12 +559,36 @@ bool ExecuteDeiroiAbility(const NativeLease& lease,unsigned ordinal,bool automat
         deiroi_control::Rollback(lease,ordinal,wasManual);return false;
     }
 }
+bool ReadDeiroiGunEntries(const NativeLease& lease,unsigned* ordinals,void** children,unsigned capacity,unsigned* count) noexcept {
+    if(!ordinals || !children || !count)return false;*count=0;
+    __try {
+        deiroi_control::Entry entries[deiroi_control::kMaxBatteries]{};unsigned total=0;
+        if(!deiroi_control::Enumerate(lease,entries,deiroi_control::kMaxBatteries,&total) || total>capacity)return false;
+        for(unsigned i=0;i<total;++i){ordinals[i]=entries[i].key;children[i]=entries[i].ref.object;}
+        *count=total;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
 bool ReadDeiroiAbilityState(const NativeLease& lease,unsigned key,bool automatic,enemy_control::Ability* out) noexcept {
+    DeiroiGunRoster roster;return ReadDeiroiAbilityState(lease,&roster,key,automatic,out);
+}
+bool ReadDeiroiAbilityState(const NativeLease& lease,DeiroiGunRoster* roster,unsigned key,bool automatic,enemy_control::Ability* out) noexcept {
     using namespace deiroi_control;
-    if(!out || !IsDeiroi(lease))return false;
+    if(!out || !roster || !IsDeiroi(lease))return false;
     out->state=enemy_control::AbilityState::unavailable;out->cooldownKnown=false;
     __try {
-        Entry entry{};if(!Select(lease,key,&entry) || entry.ref.object[0x639])return true;
+        // Read-only within one refresh: the walk is taken once and only marked
+        // taken after it returns, so a fault still fails this read like Select did.
+        if(!roster->taken) {
+            Entry all[kMaxBatteries]{};unsigned count=0;
+            if(!Enumerate(lease,all,kMaxBatteries,&count))count=0; // incomplete walk: every key unavailable, as before
+            for(unsigned i=0;i<count;++i)roster->guns[i]={all[i].ref.object,all[i].ref.control,all[i].key};
+            roster->count=count;roster->taken=true;
+        }
+        const DeiroiGunRoster::Gun* found=nullptr;
+        for(unsigned i=0;i<roster->count;++i)if(roster->guns[i].key==key){found=&roster->guns[i];break;}
+        if(!found)return true;
+        Entry entry{};entry.ref={static_cast<unsigned char*>(found->object),static_cast<unsigned char*>(found->control)};entry.key=key;
+        if(entry.ref.object[0x639])return true;
         bool manual=false,owned=false;
         // Read-only: do not call Owner(), whose dead-root sweep releases leases.
         for(const auto& root:roots)if(root.ref.object==lease.object && root.ref.control==lease.control && Current(root.ref))

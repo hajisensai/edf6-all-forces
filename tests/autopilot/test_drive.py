@@ -158,6 +158,85 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             drive.run_options(['--cmd'])
 
+    def test_cycle_options(self):
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
+             patch.object(drive, 'run', return_value=0) as run:
+            self.assertEqual(drive.main(['run', 'RM015', '1', '1800', '--cycle', '20', '--ini', 'HavokMultithread=1',
+                                         '--cycle-stay', '30', '--cycle-reboot']), 0)
+        run.assert_called_once_with(self.game, 'RM015', 1, 1800, None, extra=(), loadout=None, shots=None, keys=(),
+                                    place=(), ini=('HavokMultithread=1',), hq=False, every=15.0,
+                                    cycle=(20, 30.0, True))
+        self.assertEqual(drive.run_options(['--cycle', '5'])[1]['cycle'], (5, 20.0, False))
+        self.assertNotIn('cycle', drive.run_options([])[1])
+        for bad in (['--cycle', '0'], ['--cycle', 'x'], ['--cycle', '10001'], ['--cycle'],
+                    ['--cycle', '3', '--cycle-stay', '0'], ['--cycle', '3', '--cycle-stay', 'x'],
+                    ['--cycle-stay', '30'], ['--cycle-reboot'], ['--cycle', '3', '--hq']):
+            with self.assertRaises(SystemExit, msg=bad):
+                drive.run_options(bad)
+
+    def test_cycle_command_text(self):
+        self.assertEqual(drive.cycle_command(20, 20.0, False), 'cycle 20 20')
+        self.assertEqual(drive.cycle_command(2, 45.5, True), 'cycle 2 45.5 reboot')
+
+    def test_cycle_outcome_and_report_from_the_plugins_rows(self):
+        log = ['[   1.0 s] CYCLE armed: leave and enter again 2 times, 20.0 s in each mission, back in by PlayMission_Offline',
+               '[  40.0 s] CYCLE 0/2 entered: the mission runs (row 13)',
+               '[  60.0 s] CYCLE 1/2 leaving: MissionMgr::End(ABORT), as the pause menu\'s withdraw, after 20.0 s',
+               '[  61.0 s] CYCLE 1/2 left: Result_Offline skipped (no result screen, nothing saved) -> PlayMission_Offline',
+               '[  90.0 s] CYCLE 1/2 entered: the mission runs (row 13)']
+        self.assertIsNone(drive.cycle_outcome(log))
+        self.assertEqual(drive.cycle_report(log, 2, None), 'cycle NOT finished in time: left 1 of 2, entered 2 '
+                                                           '(the first mission included)')
+        done = log + ['[ 111.0 s] CYCLE 2/2 left: Result_Offline skipped (no result screen, nothing saved) -> PlayMission_Offline',
+                      '[ 140.0 s] CYCLE 2/2 entered: the mission runs (row 13)',
+                      '[ 140.0 s] CYCLE done: left and entered again 2 times']
+        self.assertEqual(drive.cycle_outcome(done), 'done')
+        self.assertEqual(drive.cycle_report(done, 2, 'done'), 'cycle done: left 2 of 2, entered 3 (the first mission included)')
+        self.assertEqual(drive.cycle_outcome(log + ['[ 70.0 s] CYCLE failed: the script went back to the title (1/2 left)']),
+                         'failed')
+        self.assertEqual(drive.cycle_outcome(['[ 1.0 s] CYCLE refused: a cycle is already running']), 'failed')
+
+    def cycle_run(self, later: list[str], seconds: int = 600):
+        """drive.run with --cycle 3 on a fake clock: the plugin's log is `later` from 30 s into the mission on; the game
+        runs from the launch until quit is asked. (return code, commands sent, when quit was asked in s from the mission's start)"""
+        clock = [1000.0]
+        sent: list[str] = []
+        quit_at: list[float] = []
+
+        def command(_game, text):
+            sent.append(text)
+            if text == 'quit':
+                quit_at.append(clock[0] - 1000.0)
+
+        def sleep(s):
+            clock[0] += s
+
+        def log(_game):
+            return later if clock[0] >= 1030.0 else ['[   1.0 s] CYCLE armed: leave and enter again 3 times']
+        launched: list[bool] = []
+        self.pids.side_effect = lambda: [42] if launched and not quit_at else []
+        with patch.object(drive, 'launch', side_effect=lambda: launched.append(True)),              patch.object(drive, 'wait_for', return_value=True), \
+             patch.object(drive, 'command', side_effect=command), patch.object(drive, 'rows', side_effect=log), \
+             patch.object(drive.time, 'time', side_effect=lambda: clock[0]), \
+             patch.object(drive.time, 'sleep', side_effect=sleep):
+            rc = drive.run(self.game, 'RM015', 1, seconds, None, cycle=(3, 20.0, False))
+        return rc, sent, quit_at[0] if quit_at else None
+
+    def test_cycle_run_quits_once_done(self):
+        rc, sent, quit_at = self.cycle_run(['[ 300.0 s] CYCLE done: left and entered again 3 times'])
+        self.assertEqual(rc, 0)
+        self.assertEqual(sent[0], 'mission RM015 1\ncycle 3 20')
+        self.assertLess(quit_at, 40)   # as soon as it is done, not at the deadline
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_cycle_run_fails_on_a_failed_cycle_or_the_deadline(self):
+        rc, _, quit_at = self.cycle_run(['[ 300.0 s] CYCLE failed: the script went back to the title (1/3 left)'])
+        self.assertEqual(rc, 1)
+        self.assertLess(quit_at, 40)
+        rc, _, quit_at = self.cycle_run(['[ 300.0 s] CYCLE 1/3 left: ...'], seconds=120)
+        self.assertEqual(rc, 1)
+        self.assertGreaterEqual(quit_at, 120)
+
     def test_extra_commands_go_with_the_mission(self):
         with patch.object(drive, 'launch'), patch.object(drive, 'wait_for', return_value=False), \
              patch.object(drive, 'command') as command:

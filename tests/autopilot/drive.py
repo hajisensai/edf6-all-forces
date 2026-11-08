@@ -9,7 +9,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
                                                      left stick, look_*: its right stick)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
-  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW|edf5:ROW [0-4]
+  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW|edf5:ROW [0-4],
+                                                     cycle N [STAY] [reboot]
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
@@ -39,6 +40,13 @@ background"). For measurements, e.g. the big map's memory against the stock test
           --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
           --hq             the mission's pack and row made current, then the HQ (sortie) menu itself instead of the
                            mission: SECONDS there (its pictures with --shots), quit the same way
+          --cycle N        leave the mission and enter the same one again N times in this one launch (the plugin's
+                           `cycle` command: the pause menu's withdraw on the game thread, the result screen skipped,
+                           nothing saved; docs/mission-cycle-re.md), then quit as soon as the plugin logs
+                           "CYCLE done"; SECONDS is then the deadline for all of it (failed when it passes first,
+                           or on "CYCLE failed" / "CYCLE refused")
+          --cycle-stay S   seconds in each mission before it is left (default 20)
+          --cycle-reboot   back in through the script's ReBoot (SystemReset) instead of straight into the mission
         Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
         cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
         the counts are printed at the end (all must be 0).
@@ -57,11 +65,13 @@ import hashlib
 import json
 import ctypes.wintypes as wt
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
@@ -632,7 +642,12 @@ def commit_of(row: str) -> float:
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
         keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
-        hq: bool = False, every: float = 15.0) -> int:
+        hq: bool = False, every: float = 15.0, during: Callable[[], None] | None = None,
+        quit_wait: int = 90, cycle: tuple[int, float, bool] | None = None) -> int:
+    """`during`: called on a thread of its own once the mission has started (tools/perfrun.py samples the game there);
+    the run quits as soon as it returns, SECONDS then only the longest stay.
+    `cycle` (N, STAY, REBOOT): the plugin's `cycle` command handed with the mission; the run quits once it logs
+    CYCLE done, and fails when SECONDS pass first or the cycle failed."""
     install(game)
     placed: tuple[str, bytes] | None = None
     placements: list[Placement] = []
@@ -646,7 +661,8 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 placements.append(Placement(game, dest, f.read()))
         if ini:
             placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
-        command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra]))
+        command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra,
+                                 *([cycle_command(*cycle)] if cycle else [])]))
         launch()
         if not wait_for(game, 'SCRIPT HQMain stays' if hq else 'PlayMission_Offline', 240):
             print('the HQ menu never came (see the log)' if hq else 'the mission never started (see the log)')
@@ -657,7 +673,17 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         next_shot = start + every
         nudge_at = start + min(20, seconds / 2)
         pending = sorted(keys, key=lambda k: k[1])
-        while (now := time.time()) < end:
+        worker = threading.Thread(target=during, daemon=True) if during else None
+        if worker:
+            worker.start()
+        cycled: str | None = None   # with `cycle`: how it ended (done / failed), None while it runs
+        next_look = start
+        while (now := time.time()) < end and not (worker and not worker.is_alive()):
+            if cycle and now >= next_look:
+                cycled = cycle_outcome(rows(game))
+                if cycled:
+                    break
+                next_look = now + 2
             if not game_pids():
                 print('the game exited before the observation period ended')
                 return 1
@@ -678,8 +704,12 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         if not game_pids():
             print('the game exited before quit was requested')
             return 1
+        if cycle:
+            log = rows(game)
+            cycled = cycled or cycle_outcome(log)
+            print(cycle_report(log, cycle[0], cycled))
         command(game, 'quit')
-        for _ in range(90):
+        for _ in range(quit_wait):   # (a game at a few fps takes minutes to leave a mission)
             if not game_pids():
                 break
             time.sleep(1)
@@ -693,9 +723,9 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         print(f'commit peak sampled {peak:.0f} MB, process peak commit {reported_peak:.0f} MB')
         print('last:', mem_rows[-1] if mem_rows else None)
         if game_pids():
-            print('the game did not exit in 90 s: left running, the plugin stays installed')
+            print(f'the game did not exit in {quit_wait} s: left running, the plugin stays installed')
             return 1
-        return 0
+        return 0 if not cycle or cycled == 'done' else 1
     finally:
         watch.stop()
         print(watch.report())
@@ -710,6 +740,30 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 if placed:
                     remove_loadout(*placed)
                 uninstall(game)
+
+
+def cycle_command(count: int, stay: float, reboot: bool) -> str:
+    """The plugin's `cycle` command (tests/autopilot/autopilot.cpp AskCycle)."""
+    return f'cycle {count} {stay:g}' + (' reboot' if reboot else '')
+
+
+def cycle_outcome(log: list[str]) -> str | None:
+    """How the plugin's cycle ended, from its log: 'done', 'failed' (the script went back to the title, or the command
+    was refused), None while it runs."""
+    for row in log:
+        if ' CYCLE done' in row:
+            return 'done'
+        if ' CYCLE failed' in row or ' CYCLE refused' in row:
+            return 'failed'
+    return None
+
+
+def cycle_report(log: list[str], count: int, outcome: str | None) -> str:
+    """One line on the cycle: how many times the mission was left and entered, and how it ended."""
+    left = sum(1 for r in log if re.search(r' CYCLE \d+/\d+ left', r))
+    entered = sum(1 for r in log if re.search(r' CYCLE \d+/\d+ entered', r))
+    how = {'done': 'done', 'failed': 'FAILED (see the CYCLE rows)'}.get(outcome or '', 'NOT finished in time')
+    return f'cycle {how}: left {left} of {count}, entered {entered} (the first mission included)'
 
 
 def hold_keys(game: str, spec: str, ms: int, shots: str | None, name: str) -> None:
@@ -747,13 +801,18 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     place: list[str] = []
     ini: list[str] = []
     options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': (), 'hq': False, 'every': 15.0}
+    cycle_count, cycle_stay, cycle_reboot = 0, 20.0, False
     i = 0
     while i < len(argv):
-        if argv[i] == '--hq':
-            options['hq'] = True
+        if argv[i] in ('--hq', '--cycle-reboot'):
+            if argv[i] == '--hq':
+                options['hq'] = True
+            else:
+                cycle_reboot = True
             i += 1
             continue
-        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini', '--every'):
+        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini', '--every', '--cycle',
+                       '--cycle-stay'):
             if i + 1 >= len(argv):
                 raise SystemExit(argv[i] + ' needs a value')
             if argv[i] == '--cmd':
@@ -772,6 +831,20 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
                 if '=' not in argv[i + 1]:
                     raise SystemExit('--ini wants KEY=VALUE')
                 ini.append(argv[i + 1])
+            elif argv[i] == '--cycle':
+                try:
+                    cycle_count = int(argv[i + 1])
+                except ValueError:
+                    cycle_count = 0
+                if not 1 <= cycle_count <= 10000:
+                    raise SystemExit('--cycle wants a count from 1 to 10000')
+            elif argv[i] == '--cycle-stay':
+                try:
+                    cycle_stay = float(argv[i + 1])
+                except ValueError:
+                    cycle_stay = 0.0
+                if not 1 <= cycle_stay <= 3600:
+                    raise SystemExit('--cycle-stay wants seconds from 1 to 3600')
             else:
                 options[argv[i][2:]] = argv[i + 1]
             i += 2
@@ -782,6 +855,12 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     options['keys'] = tuple(keys)
     options['place'] = tuple(place)
     options['ini'] = tuple(ini)
+    if (cycle_stay != 20.0 or cycle_reboot) and not cycle_count:
+        raise SystemExit('--cycle-stay / --cycle-reboot go with --cycle N')
+    if cycle_count and options['hq']:
+        raise SystemExit('--cycle leaves a mission: not with --hq')
+    if cycle_count:
+        options['cycle'] = (cycle_count, cycle_stay, cycle_reboot)
     return args, options
 
 

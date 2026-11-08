@@ -1,6 +1,6 @@
 'use strict';
-// The story outline page (/api/outline): the group's mission lines drawn as timelines, edited in place and saved
-// whole. Players' text only ever goes into text nodes (h() below), never markup.
+// The story outline page (/api/outline): a group's outlines (several per group, `book`), each one's mission lines
+// drawn as timelines, edited in place and saved whole. Players' text only ever goes into text nodes (h() below), never markup.
 // Anyone can read it (no account needed); the edit controls show only on a group the viewer can write.
 // Every line and step shows its average score; with an account it can be scored and reviewed (visitors see only the score).
 
@@ -8,7 +8,8 @@ const $ = (id) => document.getElementById(id);
 const EMPTY = { title: '', lanes: [] };
 let state = null;      // the last /api/outline answer
 let data = EMPTY;      // the outline being shown / edited
-let group = null;
+let group = new URLSearchParams(location.search).get('group');
+let book = Number(new URLSearchParams(location.search).get('book')) || null;   // the outline shown; 0 = a new one not saved yet
 let editing = false;
 let dirty = false;
 let busy = false;
@@ -123,8 +124,14 @@ function renderLane(l) {
 }
 
 function render() {
-  $('title').textContent = data.title || '剧情大纲';
+  $('title').textContent = data.title || (book ? `大纲 ${book}` : '新大纲');
   const canEdit = !!state?.editable;
+  $('title').classList.toggle('hide', editing);
+  $('titleInput').classList.toggle('hide', !editing);
+  if (editing && document.activeElement !== $('titleInput')) $('titleInput').value = data.title || '';
+  $('removeBook').classList.toggle('hide', !editing || !book);
+  $('removeBook').disabled = busy;
+  $('newBook').disabled = busy;
   $('edit').classList.toggle('hide', !canEdit);
   $('hint').classList.toggle('hide', !canEdit);
   $('edit').textContent = editing ? '完成编辑' : '编辑';
@@ -132,12 +139,13 @@ function render() {
   $('addLane').classList.toggle('hide', !editing);
   $('save').classList.toggle('hide', !editing && !dirty);
   $('save').disabled = !dirty || busy;
-  $('saved').textContent = dirty ? '有改动还没保存' : state?.updated_at ? `最后由 ${state.updated_by} 于 ${when(state.updated_at)} 保存` : '';
+  $('saved').textContent = dirty ? '有改动还没保存' : state?.updated_at
+    ? (state.author ? `创建者：${state.author} · ` : '') + `最后由 ${state.updated_by} 于 ${when(state.updated_at)} 保存` : '';
   $('saved').classList.toggle('bad', dirty);
   if (!data.lanes.length) {
     $('board').replaceChildren(h('p', { class: 'muted' }, group == null ? '还没有哪个组写了剧情大纲。'
       : !canEdit ? '这个组还没有剧情大纲。'
-        : editing ? '点上面的「＋ 新任务线」开始，比如「5、6代任务线」。' : '这个组还没有剧情大纲。点「编辑」，再点「＋ 新任务线」开始写。'));
+        : editing ? '先在上面填大纲名称，再点「＋ 新任务线」开始，比如「5、6代任务线」。' : '这份大纲还是空的。点「编辑」，再点「＋ 新任务线」开始写。'));
     return;
   }
   const parts = [];
@@ -233,7 +241,7 @@ function openRate(id, label) {
   $('rateDlg').showModal();
 }
 async function rate(path, payload) {
-  const out = await api(path, { item: current.rate, ...payload });
+  const out = await api(path, { book, item: current.rate, ...payload });
   state.scores = out.scores;
   state.reviews = out.reviews;
   render();
@@ -274,7 +282,8 @@ $('save').addEventListener('click', async () => {
   error('');
   render();
   try {
-    await api('/api/outline/save', { outline: data, version: state.version });
+    const out = await api('/api/outline/save', { book, outline: data, version: book ? state.version : 0 });
+    book = out.book;
     dirty = false;
     await load();
   } catch (e) {
@@ -284,30 +293,76 @@ $('save').addEventListener('click', async () => {
 window.addEventListener('beforeunload', (e) => { if (dirty) e.preventDefault(); });
 
 async function load() {
-  state = await api('/api/outline' + (group == null ? '' : '?group=' + encodeURIComponent(group)));
+  const q = new URLSearchParams();
+  if (group != null) q.set('group', group);
+  if (book) q.set('book', book);
+  state = await api('/api/outline' + (q.size ? '?' + q : ''));
   group = state.group;
-  data = state.outline ? structuredClone(state.outline) : structuredClone(EMPTY);
+  // 0 (a new outline being written) stays: the server has nothing to show for it yet.
+  if (book !== 0 || !state.editable) book = state.book || null;
+  data = book && state.outline ? structuredClone(state.outline) : structuredClone(EMPTY);
   if (!state.editable) editing = false;
+  if (book === null && state.editable && !state.books.length) { book = 0; }   // nothing yet: the first save makes outline 1
   const me = state.me;
   $('me').textContent = !me ? '未登录（只能查看）' : me.user + (me.role === 'dev' ? '（开发者）' : me.group ? `（${me.group} 组）` : '');
   $('auth').textContent = me ? '退出' : '登录';
   $('auth').href = me ? '/logout' : '/login.html';
-  $('groupBar').classList.toggle('hide', state.groups.length < 2);
-  $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === group }, g || '（未分组）')));
+  $('groupBar').classList.toggle('hide', groupButtons($('group'), state.groups, group, switchGroup) < 2);
+  renderBooks();
   render();
 }
-let leaveArmed = false;   // switching group with unsaved edits: the second switch discards them
-$('group').addEventListener('change', () => {
+
+// The group's outlines as buttons, the shown one pressed; the address keeps ?book= so a link opens the same one.
+function renderBooks() {
+  const list = state.books.map((b) => ({ book: b.book, label: (b.title || `大纲 ${b.book}`) + (b.author ? ` · ${b.author}` : '') + (b.lanes ? '' : '（空）') }));
+  if (book === 0 && state.editable) list.push({ book: 0, label: '新大纲（还没保存）' });
+  $('books').replaceChildren(...list.map((b) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(b.book === book),
+    onclick: () => { if (b.book !== book) leave(() => { book = b.book; return b.book ? load() : null; }); } }, b.label)));
+  $('newBook').classList.toggle('hide', !state.editable || book === 0);
+  $('bookBar').classList.toggle('hide', list.length < 2 && !state.editable);
+  const url = new URL(location.href);
+  if (book) url.searchParams.set('book', book); else url.searchParams.delete('book');
+  if (url.href !== location.href) history.replaceState(null, '', url);
+}
+let leaveArmed = false;   // switching group or outline with unsaved edits: the second switch discards them
+function leave(go) {
   if (dirty && !leaveArmed) {
     leaveArmed = true;
-    error('当前组的大纲有改动还没保存：先保存，或再切换一次放弃改动');
-    $('group').value = group;
+    error('当前大纲有改动还没保存：先保存，或再点一次放弃改动');
     return;
   }
   leaveArmed = false;
   dirty = false;
-  group = $('group').value;
   error('');
-  load().catch((e) => error(e.message));
+  const next = go();
+  if (next) next.catch((e) => error(e.message));
+}
+function switchGroup(g) { leave(() => { group = g; book = null; return load(); }); }
+$('newBook').addEventListener('click', () => leave(() => {
+  book = 0;
+  data = structuredClone(EMPTY);
+  state.version = 0;
+  state.scores = {};
+  state.reviews = {};
+  state.updated_at = null;
+  editing = true;
+  renderBooks();
+  render();
+  $('titleInput').focus();
+}));
+$('titleInput').addEventListener('input', () => { data.title = $('titleInput').value; dirty = true; $('saved').textContent = '有改动还没保存'; $('saved').classList.add('bad'); $('save').classList.remove('hide'); $('save').disabled = busy; });
+$('removeBook').addEventListener('click', async () => {
+  if (!armed($('removeBook'), `再点一次删除「${data.title || `大纲 ${book}`}」（连同它的评分）`)) return;
+  busy = true;
+  error('');
+  render();
+  try {
+    await api('/api/outline/remove', { book, version: state.version });
+    book = null;
+    dirty = false;
+    editing = false;
+    await load();
+  } catch (e) { error('删除失败：' + e.message); }
+  finally { busy = false; $('removeBook').dataset.armed = ''; $('removeBook').textContent = '删除这份大纲'; render(); }
 });
 load().catch((e) => { error('加载失败：' + e.message); $('board').textContent = '暂时无法加载大纲，请刷新重试。'; });

@@ -130,6 +130,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
@@ -402,8 +403,32 @@ target_compile_options(stab_native_readback_test PRIVATE /W4 /WX /utf-8 /permiss
 add_executable(hit_predict_check EXCLUDE_FROM_ALL tools/hit_predict_check.cpp)
 target_compile_options(hit_predict_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hit_predict_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The shared rubble pass (tools/rubble_pass_check.cpp, src/rubble_pass.h).
+add_executable(rubble_pass_check EXCLUDE_FROM_ALL tools/rubble_pass_check.cpp)
+target_compile_options(rubble_pass_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(rubble_pass_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# BodyMark's test order on real memory (tools/body_mark_check.cpp, src/body506.cpp).
+add_executable(body_mark_check EXCLUDE_FROM_ALL tools/body_mark_check.cpp)
+target_link_libraries(body_mark_check PRIVATE edf6common_dyn)
+target_compile_options(body_mark_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(body_mark_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The gunner seats' shared enemy points (tools/enemy_points_check.cpp, src/enemy_points.h).
+add_executable(enemy_points_check EXCLUDE_FROM_ALL tools/enemy_points_check.cpp)
+target_include_directories(enemy_points_check PRIVATE common)
+target_compile_options(enemy_points_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(enemy_points_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The soldiers' frame grid (tools/npc_grid_check.cpp, src/npc_grid.h): its answers are the brute-force scans'.
+add_executable(npc_grid_check EXCLUDE_FROM_ALL tools/npc_grid_check.cpp)
+target_compile_options(npc_grid_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(npc_grid_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The battle-size tables' key index (tools/hash_index_check.cpp, common/edf/hash_index.h).
+add_executable(hash_index_check EXCLUDE_FROM_ALL tools/hash_index_check.cpp)
+target_include_directories(hash_index_check PRIVATE common)
+target_compile_options(hash_index_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hash_index_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # Fire that cannot hurt its target held (tools/wasted_fire_check.cpp, src/wasted_fire.h).
 add_executable(wasted_fire_check EXCLUDE_FROM_ALL tools/wasted_fire_check.cpp)
+target_include_directories(wasted_fire_check PRIVATE common)
 target_compile_options(wasted_fire_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(wasted_fire_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # What the charge drones and the gunship go for and when a charge drone gives up (tools/air_chase_check.cpp,
@@ -721,6 +746,11 @@ add_test(NAME team_native COMMAND team_native_test)
 add_executable(havok_props_test tests/havok_props_test.cpp)
 target_compile_options(havok_props_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME havok_props COMMAND havok_props_test)
+# ai::World's agent capacity sites (src/aiworld_capacity_logic.h) offline, and against the real EDF.dll: every site's
+# bytes, and no access to the stock agent table outside them (tests/aiworld_capacity_audit.py, skipped without one).
+add_executable(aiworld_capacity_test tests/aiworld_capacity_test.cpp)
+target_compile_options(aiworld_capacity_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME aiworld_capacity COMMAND aiworld_capacity_test)
 # The PvP match as data: factions, roles, relations, the native overlay (src/pvp_match.h).
 add_executable(pvp_match_test tests/pvp_match_test.cpp)
 target_compile_options(pvp_match_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -933,8 +963,13 @@ add_test(NAME havok_props_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 set_tests_properties(havok_props_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME havok_props_sim COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/havok_props_sim.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(havok_props_sim PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aiworld_capacity_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
+add_test(NAME frame_pacing_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(frame_pacing_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
@@ -944,6 +979,9 @@ target_compile_options(keybind_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME keybind COMMAND keybind_test "${CMAKE_SOURCE_DIR}/EDF6VehicleCrew.ini" "${CMAKE_SOURCE_DIR}/autoturret/EDF6AutoTurret.ini")
 add_test(NAME keyconfig_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/keyconfig_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(keyconfig_native PROPERTIES SKIP_RETURN_CODE 77)
+# The lock registry's node count bounds the plugins' registry walks (tests/lock_registry_native_audit.py).
+add_test(NAME lock_registry_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/lock_registry_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(lock_registry_native PROPERTIES SKIP_RETURN_CODE 77)
 # The installer side of the room menu's review fixes: the ledger merged on save, every Mods writer under the generator's
 # lock, the room layouts never stopping an install, stale generated variant files removed (a fake game directory).
 add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_lock_test.py")
@@ -1031,10 +1069,11 @@ set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
+add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
 add_dependencies(offline_checks stab_native_readback_test)
 add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
@@ -1086,7 +1125,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -1157,6 +1196,7 @@ add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
+add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
@@ -1397,6 +1437,12 @@ target_compile_options(npc_gunners_online_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(npc_gunners_online_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_gunners_online_test)
 add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
+# rip_sampler: an out-of-process sampling profiler for the running game (tools/rip_sampler.cpp; summarised by
+# tools/rip_analyze.py, docs/frame-pacing-re.md); never shipped: cmake --build build --target rip_sampler
+add_executable(rip_sampler EXCLUDE_FROM_ALL tools/rip_sampler.cpp)
+target_link_libraries(rip_sampler PRIVATE dbghelp psapi winmm)
+target_compile_options(rip_sampler PRIVATE /W4 /WX /utf-8 /permissive-)
+
 # EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
@@ -1894,6 +1940,7 @@ add_test(NAME mission_script_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 add_test(NAME bvm41_dataflow COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bvm41_dataflow.py")
 target_sources(EDF6VehicleCrew PRIVATE src/sight_contacts.cpp src/pvp.cpp src/pvp_native.cpp src/team_native.cpp src/room_pvp.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/havok_props.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/aiworld_capacity.cpp)
 add_executable(debug_spawn_net_test EXCLUDE_FROM_ALL tests/debug_spawn_net_test.cpp src/support_protocol.cpp)
 target_include_directories(debug_spawn_net_test PRIVATE src)
 target_compile_options(debug_spawn_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -1968,6 +2015,17 @@ target_include_directories(pvp_native_fixture PRIVATE src common third_party/EDF
 target_compile_options(pvp_native_fixture PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks pvp_native_fixture)
 add_test(NAME pvp_native_fixture COMMAND pvp_native_fixture)
+# memoepoch::Clock (src/memo_epoch.h), the key of VerdictOf's per-frame memo; offline, unlike hit_accept_native.
+add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
+target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks memo_epoch_test)
+add_test(NAME memo_epoch COMMAND memo_epoch_test)
+# edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
+add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
+target_link_libraries(memory_readable_test PRIVATE edf6common)
+target_compile_options(memory_readable_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks memory_readable_test)
+add_test(NAME memory_readable COMMAND memory_readable_test)
 add_executable(thermal_models_test EXCLUDE_FROM_ALL tests/thermal_models_test.cpp src/thermal_models.cpp)
 target_include_directories(thermal_models_test PRIVATE src common)
 target_compile_options(thermal_models_test PRIVATE /W4 /WX /utf-8 /permissive-)

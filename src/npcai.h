@@ -30,6 +30,10 @@ bool NpcRestoreMissionSeat(unsigned char* vehicle,unsigned char* human) noexcept
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
 bool IsSoldierClass(const void* human) noexcept;
+// The same of an object the caller knows is live and whole (one the game's own walk hands over, its Think's `this`):
+// its vtable read without asking Readable first. Any other pointer (a leader, a rider, a table's) is asked by
+// IsSoldierClass.
+bool IsSoldierClassLive(const void* human) noexcept;
 // Authority-only support ingress: an exact, short leader waypoint. Followers keep native follow;
 // combat/evade/boarding stay ahead of the route. Updating it never clears target or combat state.
 bool NpcPrepareSquadRoute(unsigned char* leader,const float* waypoint,float arrivalRadius) noexcept;

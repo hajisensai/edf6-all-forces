@@ -133,7 +133,7 @@ def main() -> int:
                   'npcpack::AimOn(', 'NpcPackUse(h,slots[i].slot)'):
         fail('Backpack: the look before native readiness / its whole arc checked, or the use before its look')
     checks += 1
-    if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr,friends)' not in backpack:
+    if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')
     arms = body(npcai, 'Arms ArmsOf(const unsigned char* h) noexcept')
     checks += 1

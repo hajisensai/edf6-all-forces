@@ -111,19 +111,30 @@ CREATE TABLE IF NOT EXISTS story_missions (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS story_missions_grp ON story_missions(grp, sort, id);
--- Each group's story outline (/outline.html, src/outline.js); also migrations/0003-story-outline.sql.
+-- Each group's story outlines (/outline.html, src/outline.js), numbered from 1 within the group; migrations/0005.
+-- story_outline is the old one-per-group table, kept empty so the migrations stay runnable on a new database.
 CREATE TABLE IF NOT EXISTS story_outline (
   grp TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  updated_by TEXT,
+  updated_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS story_outlines (
+  grp TEXT NOT NULL,
+  book INTEGER NOT NULL,            -- the outline's number within its group, from 1
   data TEXT NOT NULL,               -- the outline as JSON (src/outline.js normalize())
   version INTEGER NOT NULL,         -- bumped on every save; a save names the version it was edited from
   updated_by TEXT,
-  updated_at INTEGER
+  updated_at INTEGER,
+  author TEXT,                      -- who started it (migrations/0006)
+  PRIMARY KEY (grp, book)
 );
 
 -- Scores and reviews on the story outline's lines and steps, one per account and item (migrations/0004).
 CREATE TABLE IF NOT EXISTS outline_ratings (
   grp TEXT NOT NULL,
-  item TEXT NOT NULL,               -- a lane's or a step's id in that group's outline
+  item TEXT NOT NULL,               -- "<outline number>/<lane or step id>" in that group (migrations/0005)
   author TEXT NOT NULL,
   score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
   body TEXT NOT NULL DEFAULT '',

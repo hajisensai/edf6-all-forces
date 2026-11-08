@@ -559,10 +559,12 @@ bool BindDeiroiAcceptedContext(const NativeLease& lease) noexcept {
         if(!DeiroiAcceptedActionsReady())return false;
         auto* stream=Bind(lease,authority);if(!stream || stream->faulted)return false;stream->offline=offline;
         if(!stream->rootStrong){if(!Strong(stream->root))return false;stream->rootStrong=true;}
-        const unsigned count=DeiroiGunCount(lease);if(count>256)return false;
+        // One enumeration for the whole bind; FactoryPath/Strong below do not
+        // change what it sees, so per-index re-walks only repeated the snapshot.
+        unsigned keys[256];void* children[256];unsigned count=0;
+        if(!ReadDeiroiGunEntries(lease,keys,children,256,&count))return false;
         for(unsigned index=0;index<count;++index) {
-            unsigned key=0;void* child=nullptr;
-            if(!DeiroiGunOrdinal(lease,index,&key) || !ResolveDeiroiControlledGunKey(lease,key,&child))return false;
+            const unsigned key=keys[index];void* const child=children[index];
             const Ref ref=Reference(child);Retained* free=nullptr;bool found=false;
             for(auto& part:stream->parts) {
                 if(part.strong && part.key==key) {if(part.ref.object!=ref.object || part.ref.control!=ref.control)return false;found=true;break;}

@@ -87,8 +87,14 @@ namespace { gameclock::Clock clock; }
 ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),GamePaused()); }
 // System increments +CE0 once before the scene's complete input/update traversal.
 // Reading this on the game thread avoids guessing frame boundaries from vehicle order.
-namespace { gameframe::Clock frameClock; bool frameClockOk=false; }
+namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
+SceneStep SceneStepNow() noexcept {
+    if(!frameClockOk)return {};
+    const auto system=At<const unsigned char*>(image,kSystem);
+    if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return {};
+    return {At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0),missionCount};
+}
 void SeeFrame(const void*) noexcept {
     if(!frameClockOk)return;
     const auto system=At<const unsigned char*>(image,kSystem);
@@ -218,11 +224,13 @@ State* StateFor(const void* vehicle,ULONGLONG now) noexcept {
     return slot;
 }
 
-int ClassOf(const void* object) noexcept {
-    if(!Readable(object,8))return -1;
-    const auto vtable=At<const unsigned char*>(object,0);
+int ClassOfVtable(const void* vtable) noexcept {
     for(int i=0;i<kClassCount;++i)if(vtable==image+kClasses[i].vtable)return i;
     return -1;
+}
+int ClassOf(const void* object) noexcept {
+    if(!Readable(object,8))return -1;
+    return ClassOfVtable(At<const unsigned char*>(object,0));
 }
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
@@ -546,10 +554,19 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         EnsureInputs();    // first mission frame: every plugin has loaded by now
-        if(Cfg().debug && IsJet(object) && PlayerJetBoardable(object))
+        // `object`: a member of the team the manager walks (0x5E11D0) under its lock (0x5E1207 call 0x50BC0): live for
+        // this visit, so its vtable is read without asking Readable first. (The stock visitor 0x5725A0 need not have
+        // touched it: with the human's [+0x1550] set and that one's [+8] non-zero it returns at once, 0x5725C0 jne
+        // 0x5725FB, before its __RTDynamicCast.) Asked once per object per frame on the player's walk (stress:100
+        // 2026-11-08: 1.1 ms a frame, a working-set call an object). Only a 506 can be a jet or the carrier's sub
+        // (IsJet / IsSub: a 506's mark, BodyMark 0 for any other vtable), so both, which ask Readable for the mark, are
+        // asked of a 506 alone.
+        const auto vtable=At<const void*>(object,0);
+        const bool body506=Heli506Vtable(vtable);
+        if(Cfg().debug && body506 && IsJet(object) && PlayerJetBoardable(object))
             DoorLog(static_cast<const unsigned char*>(object),human,f[kFunctorResult]!=0);
-        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || (IsJet(object) && !PlayerJetBoardable(object)) ||
-           IsSub(object))return;
+        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOfVtable(vtable)<0 ||
+           (body506 && ((IsJet(object) && !PlayerJetBoardable(object)) || IsSub(object))))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy || NpcCanYieldSeat(SeatAt(v,i));
@@ -817,23 +834,48 @@ void UnderVehicle(unsigned char* v) noexcept {
     WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
 }
 
+// The live objects of a team: the game's own GetTeamObjectCount (0x1B5260 -> 0x5E13E0(TeamManager, team, false), under
+// the manager's lock; the dead not yet deleted are not counted, docs/swarm-team-re.md). -1 off a mission or faulted.
+constexpr unsigned kTeamObjectCount=0x5E13E0,kPerfTeamManager=0x20B2978;
+int TeamObjects(std::int32_t team) noexcept {
+    __try {
+        void* const manager=At<void*>(image,kPerfTeamManager);
+        if(!manager)return -1;
+        return reinterpret_cast<int(__fastcall*)(void*,std::int32_t,bool)>(image+kTeamObjectCount)(manager,team,false);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+
 // The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
 // how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
 constexpr ULONGLONG kPerfMs=5000;
 constexpr double kPerfSlowMs=33.4;
-struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow; ULONGLONG at; } perf{};
+constexpr double kPerfLateMs=20.0;   // over one 1/60 s tick and its jitter: a frame that took two (frame_pacing.cpp)
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow,late; ULONGLONG at; } perf{};
 void PerfTick() noexcept {
     LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
     if(perf.last.QuadPart) {
         const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
-        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;if(ms>perf.worst)perf.worst=ms;}
+        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;perf.late+=ms>kPerfLateMs;if(ms>perf.worst)perf.worst=ms;}
     }
     perf.last=now;
     const ULONGLONG t=GetTickCount64();
     if(t-perf.at<kPerfMs)return;
-    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
-        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
-    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
+    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over %.0f ms",perf.frames,
+        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.late,kPerfLateMs,perf.slow,kPerfSlowMs);
+    // what the frames carried (the stress runs: how many there really were, not how many the mission asked for)
+    if(Cfg().debug && perf.frames)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
+        TeamObjects(2));
+    // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
+    // the system calls left with their time
+    const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only
+    if(Cfg().debug && perf.frames) {
+        const double f=static_cast<double>(perf.frames),tick=1000.0/static_cast<double>(hz.QuadPart);
+        Log("PERF MEM a frame: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
+            static_cast<double>(r.asks)/f,static_cast<double>(r.pageHits)/f,static_cast<double>(r.wsCalls)/f,
+            static_cast<double>(r.wsPages)/f,static_cast<double>(r.wsTicks)*tick/f,static_cast<double>(r.vqCalls)/f,
+            static_cast<double>(r.vqTicks)*tick/f);
+    }
+    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=perf.late=0;
 }
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
@@ -1027,6 +1069,7 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 }
 
 bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
+bool KnownVehicleVtable(const void* vtable) noexcept { return ClassOfVtable(vtable)>=0; }
 
 bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
     if(!out || !Cfg().enabled || !(Cfg().playerJet || Cfg().dreadnought))return false;
@@ -1084,7 +1127,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
-    frameClock.Reset();tickFrame=0;
+    frameClock.Reset();tickFrame=0;++missionCount;
     ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};

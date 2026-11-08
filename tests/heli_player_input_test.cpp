@@ -47,6 +47,7 @@ bool CameraRay(float* eye,float* dir) noexcept {
 }
 PlayerFix player{};
 ULONGLONG GameFrame() noexcept { return inputTime/16; }
+SceneStep SceneStepNow() noexcept { return {}; }   // unreadable: NearestEnemyThisStep walks live
 void MissingDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
 void SuppressBump(bool) noexcept { MissingDependency(); }
 void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingDependency(); }

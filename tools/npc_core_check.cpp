@@ -12,6 +12,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
+#include <random>
 
 namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
@@ -69,6 +70,10 @@ float arcWallZ=0.0f; // a finite map wall for production Backpack's segment quer
 bool flatFloor=false,completeRide=false;
 bool mapHeld=true,rayOn=false;
 const void* markEnemy=nullptr;
+// VisitEnemiesOf: gatherFoes enemies at (10 k, 0, 10 k) first, then with gatherFaults a point it cannot read (the walk
+// faulting part way through Gather).
+int gatherFoes=0;
+bool gatherFaults=false;
 int pointOrders=0;
 int weakDeletes=0;
 void DeleteWeakRecord(void*) { ++weakDeletes; }
@@ -145,6 +150,18 @@ void __fastcall RideRec(void* actor,SharedRef* ref,int slot) {
     }
 }
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
+// The lists filled by hand, then indexed as Gather leaves them: enemyIndex as SeeEnemy makes it (one row an object, its
+// first), the grids by IndexWorld.
+void IndexFixture() {
+    world.enemyIndex.Clear();
+    for(int i=0;i<world.enemies;++i)
+        if(world.enemyIndex.Find(world.enemy[static_cast<std::size_t>(i)].object)<0)world.enemyIndex.Set(world.enemy[static_cast<std::size_t>(i)].object,i);
+    IndexWorld(world);
+}
+// Gather run as ThinkHook runs it: a fault caught by the caller's handler. True when it faulted.
+bool GatherCaught(std::int32_t team) {
+    __try { Gather(team); return false; } __except(EXCEPTION_EXECUTE_HANDLER) { return true; }
+}
 void Reset() {
     heldSupportActor=nullptr;playerObj=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;flatFloor=completeRide=false;follows=rides=announcedBoards=0;
     arcWallZ=0.0f;
@@ -157,6 +174,7 @@ void Reset() {
     Put<unsigned>(human,kHumanMask,1);Put<unsigned>(seats+edf::kSeatStride,kSeatClass,1);Put<unsigned>(seats+edf::kSeatStride,kSeatEnable,1);
     doorAt[0]=doorAt[1]=doorAt[2]=0;doorReach=3.0f;
     gunnerEnemy=nullptr;vehicleCopyOwner=online::kCopyHost;
+    gatherFoes=0;gatherFaults=false;
     mapHeld=true;rayOn=false;markEnemy=nullptr;pointOrders=0;markinput::down=false;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
     transportTakes=false;transportOrders=transportCancels=transportPairs=0;transportPaired=transportPairTop=transportSucceededTo=nullptr;
@@ -188,6 +206,7 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
+bool KnownVehicleVtable(const void* vt) noexcept { return vt && vt==At<const void*>(vehicle,0); }   // the stand-in's class
 bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
 bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
 bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
@@ -205,7 +224,10 @@ bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
     if(!door)return false;std::memcpy(at,doorAt,12);*reach=doorReach;return true;
 }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
-    if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}return true;
+    if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}
+    for(int k=0;k<gatherFoes;++k){const float at[3]={10.0f*static_cast<float>(k),0.0f,10.0f*static_cast<float>(k)};visit(ctx,reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5000+k*0x10)),at);}
+    if(gatherFaults)visit(ctx,reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x6000)),reinterpret_cast<const float*>(static_cast<std::uintptr_t>(0x10)));
+    return true;
 }
 #ifdef SUPPORT_INFANTRY_NATIVE_TEST
 float MapFloorRay(const float* a,const float* b,float* at) noexcept {
@@ -292,6 +314,18 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;
 }
+// The frame's copy picks what the live walk does (tools/enemy_points_check.cpp): the stub enemy, the same rule.
+bool NearestEnemyThisStep(const unsigned char* v,const float* from,float reach,EnemyUsable usable,void* ctx,
+                          const void*& best,float& bestDist) noexcept {
+    best=nullptr;bestDist=1e30f;
+    struct C { const float* from; float reach; EnemyUsable usable; void* ctx; const void** best; float* bestDist; };
+    C c{from,reach,usable,ctx,&best,&bestDist};
+    return VisitEnemies(v,[](void* x,const void* object,const float* aim) {
+        auto& k=*static_cast<C*>(x);
+        const float d=npc::Dist(k.from,aim);
+        if(d<=k.reach && d<*k.bestDist && k.usable(k.ctx,object)){*k.best=object;*k.bestDist=d;}
+    },&c);
+}
 }
 #ifndef SUPPORT_INFANTRY_NATIVE_TEST
 int main() {
@@ -315,7 +349,7 @@ int main() {
         Expect(NpcSquadSuccessor(ObjRef::Of(dead),&next) && next.obj==human,"the dead top's squad goes on as its new leader's");
         Expect(!NpcSquadSuccessor(ObjRef::Of(other),&next),"a top that handed over to none has no successor");
     }
-    Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
+    Reset();world.friends=1;IndexFixture();world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
     unsigned char* leaders[4];float places[4][3];int sizes[4];
     Expect(OtherSquads(dead,false,leaders,places,sizes,4)==0,"fixed script squads cannot absorb a remnant");
     Reset();sessionOn=true;config.scriptNpcSettleSec=0;Put<void*>(human,kLeader,nullptr);Put<void*>(human,kRoute,other);
@@ -330,24 +364,24 @@ int main() {
     Expect(rides==0,"an unreadable seat door cannot fall back to boarding at the vehicle origin");
     Reset();s=Soldier{};s.boardV=ObjRef::Of(vehicle);s.boardSeat=1;s.boardAt=now;Board(s,human,nearby,now);
     Expect(rides==1 && At<int>(ctrl,8)==1,"a reachable door boards and balances the native by-value shared reference");
-    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};
+    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};IndexFixture();
     human[kTrigger]=human[kTrigger+1]=1;Enemy target{dead,{0,1.5f,20},1};Arms arms{};arms.n=2;arms.held[0]=0;arms.held[1]=1;
     arms.arm[0]=npc::Arm{100,0,1,false,true,false};arms.arm[1]=npc::Arm{100,10,1,false,true,false};
-    Put<void*>(human,kStockTarget,dead);Put<void*>(human,kStockTargetCtrl,ctrl);world.enemies=1;world.enemy[0]=target;
+    Put<void*>(human,kStockTarget,dead);Put<void*>(human,kStockTargetCtrl,ctrl);world.enemies=1;world.enemy[0]=target;IndexFixture();
     const float eye[3]={0,1.5f,0};Scripted(s,human,arms,eye,nearby);
     Expect(human[kTrigger+1]==0,"scripted Fencer secondary blast is checked even when primary is nonexplosive");
     Expect(human[kTrigger]==1,"the nonexplosive primary hand keeps firing while only the explosive second hand is vetoed");
-    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};
+    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};IndexFixture();
     arms=Arms{};arms.n=2;arms.held[0]=0;arms.arm[0]=npc::Arm{100,0,1,false,true,false};arms.arm[1]=npc::Arm{100,10,1,false,true,false};
     human[kTrigger]=1;Veto(human,&target,eye,arms);
     Expect(human[kTrigger]==1,"a held rifle is not vetoed for the rocket launcher only carried in the weapon list");
     arms.held[0]=-1;human[kTrigger]=1;Veto(human,&target,eye,arms);
     Expect(human[kTrigger]==0,"a hand whose weapon is unknown is tested with the largest carried blast");
-    Reset();wall=true;world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};
+    Reset();wall=true;world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{8,1.5f,20},0.8f};IndexFixture();
     arms=Arms{};arms.n=1;arms.held[0]=0;arms.arm[0]=npc::Arm{100,10,1,false,true,false};
     human[kTrigger]=1;Veto(human,nullptr,eye,arms);
     Expect(human[kTrigger]==0,"unknown target still checks the blast at the actual map impact");
-    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{0,1.5f,90},0.8f};
+    Reset();world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{0,1.5f,90},0.8f};IndexFixture();
     arms=Arms{};arms.n=1;arms.held[0]=0;arms.arm[0]=npc::Arm{100,0,1,false,true,false};
     human[kTrigger]=1;Veto(human,nullptr,eye,arms);
     Expect(human[kTrigger]==0,"unknown target fire lane extends beyond 60 metres to the weapon reach");
@@ -365,6 +399,120 @@ int main() {
         Put<std::uint64_t>(human,kSetCount,1);
         Expect(ArmsOf(human).held[1]==-1,"a one-handed soldier has no second hand's weapon");
     }
+    // ArmsOf with its pages asked in two batches (edf::PrefetchReadableSpans) = the ArmsOf before them (one call for
+    // the list, one for the weapons' batch, one each for a set and an entry), over lists with unreadable, null and
+    // shared weapons, no / one / two sets, a set's entry null or unreadable; and two working-set calls in a fresh tick.
+    {
+        constexpr std::size_t kPage=0x1000;
+        constexpr int kPages=48;
+        auto* block=static_cast<unsigned char*>(VirtualAlloc(nullptr,kPages*kPage,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+        Expect(block!=nullptr,"ArmsOf fixture pages");
+        if(block) {
+            DWORD old=0;
+            VirtualProtect(block+40*kPage,kPage,PAGE_NOACCESS,&old);   // an unreadable weapon / entry / set
+            unsigned char* const noAccess=block+40*kPage;
+            // weapons on pages 0..19 (two pages each: kWeaponAmmo+4 is 0xBEC bytes, put across a page edge)
+            unsigned char* weapons[10];
+            for(int i=0;i<10;++i) {
+                weapons[i]=block+static_cast<std::size_t>(2*i)*kPage+0x800;
+                Put<float>(weapons[i],0x894,1.0f+static_cast<float>(i));Put<float>(weapons[i],0x8E0,0.1f*static_cast<float>(i));
+                Put<float>(weapons[i],kArmReach,50.0f*static_cast<float>(i+1));Put<float>(weapons[i],kArmDamage,i==3 ? -1.0f : 7.0f);
+                Put<float>(weapons[i],kArmBlast,i%3==0 ? 4.0f : 0.0f);Put<std::int32_t>(weapons[i],kWeaponLockon,i==2 ? kHoming : 0);
+                Put<std::int32_t>(weapons[i],kWeaponAmmo,i==4 ? 0 : 30);
+            }
+            auto** list=reinterpret_cast<unsigned char**>(block+24*kPage);
+            unsigned char* const sets=block+26*kPage;   // two sets kSetStride apart
+            auto** entries=reinterpret_cast<unsigned char**>(block+30*kPage);
+            const auto before=[&](const unsigned char* h) {   // ArmsOf as it was (b1d80bec), SetWeapon its own
+                Arms a{};
+                const auto l=At<unsigned char* const*>(h,kWeapons);
+                const auto count=At<std::uint64_t>(h,kWeaponCount);
+                if(!count || count>16 || !Readable(l,count*8))return a;
+                const unsigned char* held[kHands];
+                for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
+                a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
+                for(int i=0;i<a.n;++i) {
+                    const unsigned char* w=l[i];
+                    npc::Arm& m=a.arm[i];m=npc::Arm{};
+                    if(!Readable(w,kWeaponAmmo+4) || NpcPackIndex(h,i))continue;
+                    const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
+                    a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
+                    a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
+                    for(int k=0;k<kHands;++k)if(w==held[k])a.held[k]=i;
+                    const float reach=At<float>(w,kArmReach),damage=At<float>(w,kArmDamage),blast=At<float>(w,kArmBlast);
+                    m.reach=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
+                    m.blast=std::isfinite(blast) && blast>0.0f ? blast : 0.0f;
+                    m.dps=std::isfinite(damage) && damage>0.0f ? damage : 1.0f;
+                    m.homing=At<std::int32_t>(w,kWeaponLockon)==kHoming;
+                    m.antiAir=m.homing;
+                    m.ready=At<std::int32_t>(w,kWeaponAmmo)>0;
+                }
+                return a;
+            };
+            const auto same=[](const Arms& x,const Arms& y) {
+                if(x.n!=y.n || x.held[0]!=y.held[0] || x.held[1]!=y.held[1])return false;
+                for(int i=0;i<x.n;++i) {
+                    const npc::Arm &p=x.arm[i],&q=y.arm[i];
+                    if(p.reach!=q.reach || p.blast!=q.blast || p.dps!=q.dps || p.homing!=q.homing || p.ready!=q.ready ||
+                       p.antiAir!=q.antiAir || x.speed[i]!=y.speed[i] || x.gravity[i]!=y.gravity[i])return false;
+                }
+                return true;
+            };
+            std::mt19937 rng(1108);
+            int compared=0,differ=0,armed=0;
+            for(int round=0;round<4000;++round) {
+                Reset();
+                const int count=static_cast<int>(rng()%7);   // 0 (no list) .. 6
+                for(int i=0;i<count;++i) {
+                    const unsigned r=rng()%12;
+                    list[i]=r<10 ? weapons[r] : r==10 ? nullptr : noAccess;
+                }
+                const bool listDead=rng()%15==0;
+                Put<const void*>(human,kWeapons,listDead ? static_cast<const void*>(noAccess) : list);
+                Put<std::uint64_t>(human,kWeaponCount,rng()%40==0 ? 17u : static_cast<std::uint64_t>(count));
+                const unsigned setCount=rng()%3;
+                Put<const void*>(human,kSets,rng()%20==0 ? static_cast<const void*>(noAccess) : sets);
+                Put<std::uint64_t>(human,kSetCount,setCount);
+                for(int k=0;k<kHands;++k) {
+                    const unsigned r=rng()%8;
+                    entries[k]=count && r<5 ? list[rng()%static_cast<unsigned>(count)] : r==5 ? weapons[rng()%10] : nullptr;
+                    Put<const void*>(sets+k*kSetStride,kSetWeapon,r==7 ? static_cast<const void*>(noAccess) : r==6 ? nullptr : &entries[k]);
+                }
+                packReady=packSlots=rng()%5==0;packSlot.index=static_cast<int>(rng()%4);
+                const Arms got=ArmsOf(human),was=before(human);
+                ++compared;differ+=!same(got,was);armed+=got.n>0 && got.held[0]>=0;
+            }
+            packReady=packSlots=false;
+            char what[160];
+            std::snprintf(what,sizeof(what),"ArmsOf with its pages batched = ArmsOf before (%d soldiers, %d differ)",compared,differ);
+            Expect(differ==0,what);
+            Expect(armed>500,"the soldiers compared held weapons found through their sets");
+            // Two calls a soldier: its list and sets, then its weapons and the sets' entries (each a page of its own here).
+            for(int i=0;i<4;++i)list[i]=weapons[i];
+            entries[0]=weapons[1];entries[1]=weapons[3];
+            Put<const void*>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,4);
+            Put<const void*>(human,kSets,sets);Put<std::uint64_t>(human,kSetCount,2);
+            Put<const void*>(sets,kSetWeapon,&entries[0]);Put<const void*>(sets+kSetStride,kSetWeapon,&entries[1]);
+            bool counted=false;
+            for(int attempt=0;attempt<200 && !counted;++attempt) {
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);   // nothing kept from before
+                const ULONGLONG tick=GetTickCount64();
+                edf::TakeReadableStats();
+                const Arms a=ArmsOf(human);
+                const edf::ReadableStats st=edf::TakeReadableStats();
+                if(GetTickCount64()!=tick)continue;
+                counted=true;
+                Expect(a.n==4 && a.held[0]==1 && a.held[1]==3,"the fixture soldier's weapons and hands");
+                Expect(st.wsCalls==2,"ArmsOf asks the working set twice: the list and sets, then the weapons and entries");
+                edf::TakeReadableStats();
+                const Arms b=before(human);
+                const edf::ReadableStats again=edf::TakeReadableStats();
+                Expect(same(a,b) && (again.wsCalls==0 || GetTickCount64()!=tick),"the answers kept for the tick serve the old order too");
+            }
+            Expect(counted,"a tick long enough to count ArmsOf's calls in");
+            VirtualFree(block,0,MEM_RELEASE);
+        }
+    }
     Reset();s=Soldier{};s.wantArm=-1;arms=Arms{};arms.n=4;arms.held[0]=0;
     arms.arm[0]=npc::Arm{5,0,1,false,true,false};arms.arm[1]=npc::Arm{100,0,10,false,true,false};
     arms.arm[3]=npc::Arm{100,0,100,false,true,false};ChooseArm(s,human,arms,&target,eye,nearby);
@@ -373,8 +521,8 @@ int main() {
     SeeSquad(human,human,0,npc::Control::script,now);++frame;++now;Put<void*>(human,kRoute,nullptr);
     SeeSquad(human,human,0,npc::Control::free,now);
     Expect(human[kAutoFollow]==1,"offline script release still enables recruitment");
-    Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);
-    squads[0].top=ObjRef::Of(dead);squads[0].dismissed=true;squads[0].autoFollow=1;dismissedCount=1;
+    Reset();world.friends=1;IndexFixture();world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);
+    squads.emplace_back();squadIndex.Set(dead,0);squads[0].top=ObjRef::Of(dead);squads[0].dismissed=true;squads[0].autoFollow=1;dismissedCount=1;
     cooldowns.Start(SquadKey(dead),now,10000);PreThink(human);
     Expect(At<void*>(human,kLeader)==nullptr && squads[0].top.Is(human) && squads[0].dismissed &&
            cooldowns.Left(SquadKey(human),now)==10000 && human[kAutoFollow]==0,
@@ -525,7 +673,7 @@ int main() {
         Put<unsigned>(human,kHumanMask,2);Put<unsigned>(dead,kHumanMask,1);Put<void*>(dead,kLeader,human);
         Put<void*>(human,kFollowers,head);Put<void*>(head,0,node);Put<void*>(node,0,head);Put<void*>(node,0x10,dead);
         Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);Put<int>(vehicle,kTeam,0);
-        Put<float>(vehicle,kPosition,1000);world.friends=1;world.frObject[0]=vehicle;
+        Put<float>(vehicle,kPosition,1000);world.friends=1;IndexFixture();world.frObject[0]=vehicle;
         SeeSquad(human,human,0,npc::Control::free,now);sessionOn=true;
         auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
         auto* child=Entry(dead,now);
@@ -547,7 +695,7 @@ int main() {
         Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
         Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
         Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
-        world.friends=0;world.nobodys=0;
+        world.friends=0;IndexFixture();world.nobodys=0;
         FriendWalk walk{kNobodyVtable,&world};
         NobodyVisit(&walk,vehicle);NobodyVisit(&walk,other);
         Expect(world.nobodys==1 && world.nobody[0]==vehicle,"team 5's walk keeps the empty ground vehicle, not other objects");
@@ -562,7 +710,7 @@ int main() {
         Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
         Put<int>(human,kTeam,0);Put<int>(vehicle,kTeam,kTeamVehicle);
         Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);
-        world.friends=0;world.nobodys=0;SeeSquad(human,human,0,npc::Control::free,now);
+        world.friends=0;IndexFixture();world.nobodys=0;SeeSquad(human,human,0,npc::Control::free,now);
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
         Expect(result.reason==NpcCommandReason::noVehicle,"without team 5's walk the same empty vehicle was never found (the bug)");
     }
@@ -604,7 +752,7 @@ int main() {
         Expect(result.Accepted() && std::strcmp(behavior.move,"at its post")==0 && At<float>(human,kMoveX)>0,
             "guard command runs production MoveTo/navigation and writes actual movement intent");
         unsigned char enemy[0x300]{},enemyCtrl[0x10]{};Put<void*>(enemy,kSelfCtrl,enemyCtrl);Put<long>(enemyCtrl,8,1);Put<long>(enemyCtrl,12,1);
-        world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,20},1};++frame;SeeSquad(human,human,0,npc::Control::free,now);
+        world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,20},1};IndexFixture();++frame;SeeSquad(human,human,0,npc::Control::free,now);
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(result.Accepted() && soldier->target.Is(enemy) && std::strcmp(behavior.move,"combat spot")==0,
@@ -656,7 +804,7 @@ int main() {
         // The player's move over the soldier's own fight (the user, 2026-10-09: "如果npc在打怪，就没办法移动了"): an enemy
         // close by takes a guard's soldier into its dodge / combat spot, never a move order's; an attack-move fights
         // what is in reach and walks on with nothing; the top at its place turns either into a guard of the point.
-        config.npcEvade=true;world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,4},1};
+        config.npcEvade=true;world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,4},1};IndexFixture();
         auto fights=[](const char* m){return std::strcmp(m,"combat spot")==0 || std::strcmp(m,"back off")==0 ||
                                              std::strcmp(m,"side-step")==0 || std::strcmp(m,"roll")==0;};
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::guard,{40,0,0}},ObjRef::Of(other),{});
@@ -672,7 +820,7 @@ int main() {
         Expect(result.Accepted() && fights(behavior.move),"an attack-move fights the enemy pressing on it");
         // The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭": an attack-move stops for any enemy
         // in its reach and fights it (the move order is the one that walks on firing).
-        world.enemy[0]=Enemy{enemy,{0,0,30},1};
+        world.enemy[0]=Enemy{enemy,{0,0,30},1};IndexFixture();
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(fights(behavior.move) && soldier->target.Is(enemy),"an attack-move stands and fights an enemy in reach, not only a close one");
@@ -682,7 +830,7 @@ int main() {
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(std::strcmp(behavior.move,"attack-move")==0 && soldier->target.Is(enemy),
                "an attack-move with no shot at its target for the grace walks on (not stuck at its combat spot)");
-        world.enemies=0;frame+=2;world.frame=frame;
+        world.enemies=0;IndexFixture();frame+=2;world.frame=frame;
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{40,0,0}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
         Expect(std::strcmp(behavior.move,"attack-move")==0,"an attack-move with the ground round it clear walks on to its point");
@@ -731,7 +879,7 @@ int main() {
     {
         Put<float>(human,kPosition,0.0f);Put<float>(human,kPosition+4,25.0f);Put<float>(human,kPosition+8,0.0f);
         Put<float>(human,kMoveX,0.5f);
-        MoveTo(human,Pos(human),Pos(human),1e9f);
+        MoveTo(human,Pos(human),Pos(human),1e9f,now);
         const Soldier* const hovering=Entry(human,now);
         Expect(hovering && !hovering->navigation.initialized && At<float>(human,kMoveX)==0.0f,
                "a soldier held in the air stands: no route search from the floor to a point in the air");
@@ -749,7 +897,7 @@ int main() {
         world.player=false;
         Expect(!ServedBy(npc::Control::free,nullptr).at,"no player known here: no one to fall back behind");
         Put<float>(human,kHumanHpMax,100.0f);Put<float>(human,kHumanHp,10.0f);
-        world.enemies=1;world.enemy[0]=Enemy{dead,{300.0f,1.5f,60.0f},1};
+        world.enemies=1;world.enemy[0]=Enemy{dead,{300.0f,1.5f,60.0f},1};IndexFixture();
         Soldier hurt{};const float at[3]={290.0f,0.0f,40.0f};
         Expect(FallBack(hurt,human,at,remote,now),"a hurt soldier of a remote player's squad falls back");
         Expect(std::fabs(hurt.fallTo[0]-300.0f)<0.01f && std::fabs(hurt.fallTo[2]-(40.0f-kBehindPlayer))<0.01f,
@@ -786,40 +934,40 @@ int main() {
         Expect(StaleSweepLeavesLockFree(),"a stale selected object cannot leave the sweep HUD lock held after SEH");
         Soldier fetch{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kWeapon;
         const float away[3]={20.0f,2.0f,30.0f},there[3]={50.4f,2.0f,30.0f};
-        Expect(PickUp(fetch,human,away) && collects==0,"a soldier far from its box runs to it, nothing taken yet");
+        Expect(PickUp(fetch,human,away,now) && collects==0,"a soldier far from its box runs to it, nothing taken yet");
         const float downstairs[3]={50.0f,-8.0f,30.0f};
-        Expect(PickUp(fetch,human,downstairs) && collects==0 && !boxUnit[0][kBoxTaken],
+        Expect(PickUp(fetch,human,downstairs,now) && collects==0 && !boxUnit[0][kBoxTaken],
                "a soldier directly below a box cannot collect it through another floor");
         sweep.on=false;
-        Expect(!PickUp(fetch,human,there) && collects==0,"recalling a sweep invalidates its already assigned pickup in the same frame");
+        Expect(!PickUp(fetch,human,there,now) && collects==0,"recalling a sweep invalidates its already assigned pickup in the same frame");
         sweep.on=true;
-        Expect(PickUp(fetch,human,there) && collects==1 && collectBy==me && notifies==1 && notifyBy==me,
+        Expect(PickUp(fetch,human,there,now) && collects==1 && collectBy==me && notifies==1 && notifyBy==me,
                "at its box: native Notify and Apply once, credited to the local player");
         Expect(notifyId==42 && notifyKind==npc::pickup::kWeapon && applyKind==notifyKind && notifyBeforeApply && untakenAtApply,
                "native Collect ordering and exact box identity: Notify, Apply, then mark taken");
         Expect(boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0 && !fetch.pickUnit,"only that box taken, the one a metre off left");
-        Expect(!PickUp(fetch,human,there),"no box any more: the soldier's other moves");
+        Expect(!PickUp(fetch,human,there,now),"no box any more: the soldier's other moves");
         fetch.pickUnit=boxUnit[0];
-        Expect(!PickUp(fetch,human,there) && collects==1,"a box someone else took: nothing called");
+        Expect(!PickUp(fetch,human,there,now) && collects==1,"a box someone else took: nothing called");
         Boxes(npc::pickup::kWeapon,npc::pickup::kHealSmall);
         std::memcpy(boxModel[1],boxModel[0],16);fetch.pickUnit=boxUnit[0];sessionOn=true;
-        Expect(PickUp(fetch,human,there) && collects==1 && notifies==1 && boxUnit[0][kBoxTaken] && !boxUnit[1][kBoxTaken] && heals==0,
+        Expect(PickUp(fetch,human,there,now) && collects==1 && notifies==1 && boxUnit[0][kBoxTaken] && !boxUnit[1][kBoxTaken] && heals==0,
                "online overlapping boxes: only the selected weapon is taken, the health box is never consumed");
         sessionOn=false;
         // Health boxes: the hurt soldier itself, offline, allowed.
         Boxes(npc::pickup::kHealBig,npc::pickup::kWeapon);
         config.npcPickupHealth=true;Put<float>(human,kHumanHpMax,1000.0f);Put<float>(human,kHumanHp,400.0f);
         fetch=Soldier{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kHealBig;
-        Expect(PickUp(fetch,human,there) && heals==1 && healed==human && std::fabs(healAmount-300.0f)<0.01f && collects==0 &&
+        Expect(PickUp(fetch,human,there,now) && heals==1 && healed==human && std::fabs(healAmount-300.0f)<0.01f && collects==0 &&
                boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0,
                "a hurt soldier at a big health box: healed 30% of its full health itself, not the player's Collect");
         Boxes(npc::pickup::kHealSmall,npc::pickup::kWeapon);
         Put<float>(human,kHumanHp,1000.0f);fetch.pickUnit=boxUnit[0];fetch.pickKind=npc::pickup::kHealSmall;
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"healed to full meanwhile: the box left for the player");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"healed to full meanwhile: the box left for the player");
         Put<float>(human,kHumanHp,400.0f);fetch.pickUnit=boxUnit[0];sessionOn=true;
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"online: no health box (the plugin's heal is not synced)");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"online: no health box (the plugin's heal is not synced)");
         sessionOn=false;config.npcPickupHealth=false;fetch.pickUnit=boxUnit[0];
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
         playerObj=nullptr;
     }
     // The mark (§6.3) is kept until its enemy dies or is gone (the user, 2026-10-07: "标记还很快消失", "标记效果应该先打死
@@ -1023,10 +1171,10 @@ int main() {
         Reset();config.enabled=true;config.customNpcAi=true;
         unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
         static unsigned char teamFoe[0x400]{},plainFoe[0x400]{};
-        world.enemies=3;
-        world.enemy[0]=Enemy{plainFoe,{0,0,5},1};
-        world.enemy[1]=Enemy{other,{0,0,100},1};
-        world.enemy[2]=Enemy{teamFoe,{0,0,20},1};
+        world.enemies=3;IndexFixture();
+        world.enemy[0]=Enemy{plainFoe,{0,0,5},1};IndexFixture();
+        world.enemy[1]=Enemy{other,{0,0,100},1};IndexFixture();
+        world.enemy[2]=Enemy{teamFoe,{0,0,20},1};IndexFixture();
         const float from[3]={0,0,0},distant[3]={0,0,150};
         Expect(!NearestMark(from),"nothing marked: no marked enemy, the nearest plain one not taken for one");
         teamMarks[0]=teamFoe;teamMarkCount=1;
@@ -1035,9 +1183,9 @@ int main() {
         Expect(NpcMarkEnemy(other,seen,true),"this machine marks another enemy too");
         Expect(NearestMark(from)==&world.enemy[2] && NearestMark(distant)==&world.enemy[1],
                "two marks: each NPC takes the one nearest it, whoever marked it");
-        world.enemy[2].aim[2]=100.0f;
+        world.enemy[2].aim[2]=100.0f;IndexFixture();
         Expect(NearestMark(from)==&world.enemy[1],"as near as each other: this machine's first");
-        teamMarks[0]=plainFoe;world.enemy[2].aim[2]=20.0f;
+        teamMarks[0]=plainFoe;world.enemy[2].aim[2]=20.0f;IndexFixture();
         Expect(NearestMark(from)==&world.enemy[0],"the teammate's mark moved to another enemy: that one");
         teamMarks[0]=dead;
         Expect(NearestMark(from)==&world.enemy[1],"a teammate's enemy not in this frame's list: not taken");
@@ -1068,7 +1216,7 @@ int main() {
         auto* soldier=Entry(human,now);soldier->control=npc::Control::free;
         static unsigned char foe[3][0x300]{},foeCtrl[3][0x10]{};
         for(int i=0;i<3;++i){Put<void*>(foe[i],kSelfCtrl,foeCtrl[i]);Put<long>(foeCtrl[i],8,1);Put<long>(foeCtrl[i],12,1);}
-        world.enemies=3;world.enemy[0]=Enemy{foe[0],{-2,0,24},1};world.enemy[1]=Enemy{foe[1],{0,0,25},1};world.enemy[2]=Enemy{foe[2],{2,0,26},1};
+        world.enemies=3;world.enemy[0]=Enemy{foe[0],{-2,0,24},1};world.enemy[1]=Enemy{foe[1],{0,0,25},1};world.enemy[2]=Enemy{foe[2],{2,0,26},1};IndexFixture();
         const float eyePoint[3]={0,1.5f,0};
         // The look the throw takes at the nearest (-2, 0, 24): the low arc at 36 m/s under 14.7 m/s^2, less the MG11's lift.
         const float to[3]={-2,0,24};float pitch=0.0f,flight=0.0f,dir[3];
@@ -1080,7 +1228,7 @@ int main() {
         const auto drive=[&]{now+=16;++frame;world.frame=frame;return Drive(*soldier,human,kSoldiers[0],packArms,nullptr,eyePoint,Pos(human),squad,now);};
         // A ready round is not sufficient: the native state / sub-slot mask may forbid its use. Such a backpack must
         // not continually take the main weapon's look and trigger, even though it is a good target for the grenade.
-        packCanUse=false;world.enemy[0].aim[0]=0.0f;
+        packCanUse=false;world.enemy[0].aim[0]=0.0f;IndexFixture();
         Put<float>(human,kViewPitch,std::atan2(eyePoint[1],24.0f));Put<float>(human,kViewYaw,0.0f);
         drive();
         Expect(packUses==0 && At<unsigned char>(human,kTrigger)==1 && std::fabs(At<float>(human,kLookPitch))<0.2f,
@@ -1090,7 +1238,7 @@ int main() {
         drive();
         Expect(packUses==0 && At<unsigned char>(human,kTrigger)==1 && At<float>(human,kLookPitch)==beforePitch && At<float>(human,kLookYaw)==beforeYaw,
                "a closed backpack gate does not starve the main rifle on subsequent frames");
-        world.enemy[0].aim[0]=-2.0f;packCanUse=true;
+        world.enemy[0].aim[0]=-2.0f;IndexFixture();packCanUse=true;
         Put<float>(human,kViewPitch,0.0f);Put<float>(human,kViewYaw,0.0f);
         arcWallZ=12.0f;Put<float>(human,kLookPitch,123.0f);human[kTrigger]=1;
         Backpack(*soldier,human,&world.enemy[0],eyePoint,kMaskLook,now);
@@ -1098,12 +1246,12 @@ int main() {
                "a wall beyond six metres forbids the grenade before taking the main weapon's aim / trigger (production Backpack)");
         arcWallZ=0.0f;
         const float mid=flight*0.5f;
-        world.friends=1;world.frObject[0]=other;
-        world.fr[0]=npc::Friend{{-1.0f,eyePoint[1]+36.0f*std::sin(pitch)*mid-0.5f*14.7f*mid*mid,12.0f},0.8f};
+        world.friends=1;IndexFixture();world.frObject[0]=other;
+        world.fr[0]=npc::Friend{{-1.0f,eyePoint[1]+36.0f*std::sin(pitch)*mid-0.5f*14.7f*mid*mid,12.0f},0.8f};IndexFixture();
         Backpack(*soldier,human,&world.enemy[0],eyePoint,kMaskLook,now);
         Expect(!packUses && human[kTrigger]==1 && At<float>(human,kLookPitch)==123.0f,
                "a friend midway along the actual lifted arc forbids the grenade before taking aim (production Backpack)");
-        world.friends=0;
+        world.friends=0;IndexFixture();
         drive();
         float expect[2]{};npc::AimDelta(0.0f,0.0f,dir,1.0f,kLookMost,expect);
         Expect(packUses==0 && At<unsigned char>(human,kTrigger)==0 && std::fabs(At<float>(human,kLookPitch)-expect[0])<1e-5f,
@@ -1120,21 +1268,21 @@ int main() {
         Expect(packUses==1,"done, but within kThrowGapMs of the last: it rests");
         now+=npcpack::kThrowGapMs;onIt();drive();
         Expect(packUses==2,"rested: the next throw");
-        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=1;onIt();drive();
+        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=1;IndexFixture();onIt();drive();
         Expect(packUses==2,"one small enemy: no grenade for it");
         world.enemy[0].points=3;onIt();drive();
         Expect(packUses==3,"one large one: the grenade");
-        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=3;world.enemy[0].points=1;
-        world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{-1,0,21},0.8f};onIt();drive();
+        now+=npcpack::kThrowGapMs;frame+=npcpack::kHoldFrames;world.enemies=3;IndexFixture();world.enemy[0].points=1;
+        world.friends=1;world.frObject[0]=other;world.fr[0]=npc::Friend{{-1,0,21},0.8f};IndexFixture();onIt();drive();
         Expect(packUses==3,"a friend where it lands: held");
-        world.friends=0;config.npcBackpack=false;onIt();drive();
+        world.friends=0;IndexFixture();config.npcBackpack=false;onIt();drive();
         Expect(packUses==3,"NpcBackpack=0: carried, never used");
         config.npcBackpack=true;Put<std::int32_t>(grenade,kWeaponAmmo,0);onIt();drive();drive();
         Expect(packUses==3 && packReloads==1,"empty: no throw, its reload asked for once");
         Put<std::int32_t>(grenade,kWeaponAmmo,3);onIt();drive();
         Expect(packUses==4,"loaded again: thrown");
         packReady=false;packSlots=0;Put<unsigned char**>(human,kWeapons,nullptr);Put<std::uint64_t>(human,kWeaponCount,0);
-        world.enemies=0;ResetNpcAi();
+        world.enemies=0;IndexFixture();ResetNpcAi();
     }
     // The stock's join mark and free-squad cover (the user 2026-10-19: "删除npc顶上的未招募红标" / "删除玩家招募npc以后npc
     // 的减伤消失问题", then "暂时取消这个掩护设定吧"): the mark hidden while the map recruits; the cover nobody's by
@@ -1213,6 +1361,267 @@ int main() {
         config.customNpcAi=false;
         Expect(run(human)==other,"executed, the AI off: the stock walk's player");
         config.customNpcAi=true;nextJoinMark=nullptr;
+    }
+    {   // Battle-size tables (perfrun stress:30 had 662 soldiers and 1508 enemies; the old tables held 256 / 1024 / 512 / 64):
+        // every soldier, enemy, friend, squad and leader's hand-over is kept, and a known one is found again as itself.
+        Reset();
+        constexpr int kSoldierCount=1500,kEnemyCount=4000,kSquadCount=600,kHandoverCount=100;
+        constexpr std::size_t kSmall=0x40;
+        std::vector<unsigned char> crowd(static_cast<std::size_t>(kEnemyCount)*kSmall);
+        const auto at=[&](int i){ return crowd.data()+static_cast<std::size_t>(i)*kSmall; };
+        std::vector<Soldier*> slot(kSoldierCount);
+        bool distinct=true,again=true;
+        for(int i=0;i<kSoldierCount;++i){slot[static_cast<std::size_t>(i)]=Entry(at(i),now);distinct=distinct && slot[static_cast<std::size_t>(i)];}
+        for(int i=0;i<kSoldierCount;++i){Soldier* e=Entry(at(i),now);again=again && e==slot[static_cast<std::size_t>(i)] && e->ref.Is(at(i));e->seen=now;}
+        Expect(distinct && again && soldiers.size()==kSoldierCount,"1500 soldiers: each has its own entry and finds it again");
+        slot[1]->arm=7;
+        now+=kStaleMs+1;slot[1]->seen=now;
+        Soldier* const reused=Entry(at(kSoldierCount),now);
+        Expect(reused==slot[0] && soldiers.size()==kSoldierCount && FindSoldier(at(0))==nullptr && Entry(at(1),now)==slot[1] && slot[1]->arm==7,
+               "a gone soldier's entry is the first taken again; a live one keeps its own");
+
+        world.enemies=0;IndexFixture();world.enemyIndex.Clear();
+        const float aim[3]={1,2,3};
+        for(int k=0;k<2;++k)for(int i=0;i<kEnemyCount;++i)SeeEnemy(&world,at(i),aim);   // two lock points each
+        bool rows=world.enemies==kEnemyCount;
+        for(int i=0;rows && i<kEnemyCount;++i)rows=world.enemy[static_cast<std::size_t>(i)].object==at(i) && world.enemy[static_cast<std::size_t>(i)].points==2;
+        Expect(rows,"4000 enemies: every one in the frame's list, in walk order, its lock points counted on its own row");
+
+        std::vector<std::vector<unsigned char>> people(kSquadCount,std::vector<unsigned char>(0x2200));
+        world.friends=0;IndexFixture();
+        FriendWalk walk{kFriendVtable,&world};
+        for(auto& p:people) {
+            Put<void*>(p.data(),0,image+kSoldiers[0].vtable);Put<int>(p.data(),kTeam,kTeamFriend);Put<float>(p.data(),kPosition,1.0f);
+            FriendVisit(&walk,p.data());
+        }
+        IndexFixture();
+        static std::vector<npc::Friend> mine;
+        const float shotFrom[3]={0.0f,1.0f,-5.0f},shotTo[3]={2.0f,1.0f,5.0f};   // across the spot they all stand on
+        Expect(world.friends==kSquadCount && FriendsOnShot(people[5].data(),shotFrom,shotTo,0.0f,mine)==kSquadCount-1,
+               "600 friends (the old table held 512): all of them in the shot's test");
+        bool squadsOk=true;
+        for(auto& p:people)squadsOk=squadsOk && SeeSquad(p.data(),p.data(),0,npc::Control::free,now)!=nullptr;
+        for(auto& p:people){const Squad* f=FindSquad(p.data());squadsOk=squadsOk && f && f->top.Is(p.data());}
+        Expect(squadsOk && squads.size()==kSquadCount,"600 squads (the old table held 64): each counted in its own entry and found by its top");
+        Retop(*FindSquad(people[0].data()),ObjRef::Of(people[1].data()+0x100));
+        Expect(FindSquad(people[0].data())==nullptr && FindSquad(people[1].data()+0x100)==&squads[0],"a hand-over moves the squad's index to its new top");
+
+        for(int i=0;i<kHandoverCount;++i)AddHandover(Handover{ObjRef::Of(at(i)),ObjRef::Of(at(kHandoverCount+i)),now});
+        ObjRef next{};
+        Expect(NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && next.obj==at(kHandoverCount) &&
+               NpcSquadSuccessor(ObjRef::Of(at(kHandoverCount-1)),&next) && next.obj==at(2*kHandoverCount-1),
+               "100 hand-overs in a moment: the first one still followed (the old ring kept 32)");
+        now+=kHandoverMs+1;AddHandover(Handover{ObjRef::Of(at(3000)),ObjRef::Of(at(3001)),now});
+        Expect(!NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && handovers.size()==1,"hand-overs past kHandoverMs are dropped");
+    }
+    // FriendVisit's radius off the vtable it read (IsSoldierClassLive, KnownVehicleVtable) against the old test
+    // (IsSoldierClassLive || IsAnyPlayer, then KnownVehicle, both asking Readable): the same for an NPC soldier of each
+    // class, this machine's player and another machine's (a soldier class, as the game makes every player), a soldier
+    // flagged a player with no pad and no network bit, the vehicle, and an object of no class we know.
+    {
+        Reset();
+        Put<const void*>(vehicle,0,image+0x17DADB0);   // a vtable of its own (505_Tank's), as every stock vehicle has
+        auto oldRadius=[](const unsigned char* o) {
+            return IsSoldierClassLive(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
+        };
+        std::vector<std::vector<unsigned char>> objects;
+        auto add=[&](const void* vt,bool flag,bool pad,bool remote) {
+            objects.emplace_back(0x2200);
+            unsigned char* o=objects.back().data();
+            Put<const void*>(o,0,vt);Put<int>(o,kTeam,kTeamFriend);Put<float>(o,kPosition,2.0f);
+            o[edf::kHumanPlayer]=flag ? 1 : 0;Put<const void*>(o,edf::kHumanPad,pad ? o : nullptr);
+            if(remote)o[edf::kRiderNet+edf::kNetFlags]|=1;
+        };
+        for(const auto& c:kSoldiers) {
+            const void* vt=image+c.vtable;
+            add(vt,false,false,false);add(vt,true,true,false);add(vt,true,false,true);add(vt,true,false,false);add(vt,false,true,true);
+        }
+        add(image+0x17D7320,false,false,false);   // DummyVehicleRider: no soldier class, not a vehicle
+        add(image+0x1234560,false,false,false);
+        world.friends=0;IndexFixture();
+        FriendWalk walk{kFriendVtable,&world};
+        bool same=true;int compared=0;
+        for(auto& o:objects) {
+            const int before=world.friends;
+            FriendVisit(&walk,o.data());
+            same=same && world.friends==before+1 && world.fr[static_cast<std::size_t>(before)].radius==oldRadius(o.data());++compared;
+        }
+        const int before=world.friends;
+        FriendVisit(&walk,vehicle);
+        same=same && world.friends==before+1 && world.fr[static_cast<std::size_t>(before)].radius==kVehicleRadius &&
+             oldRadius(vehicle)==kVehicleRadius;++compared;
+        Expect(same && compared==static_cast<int>(objects.size())+1,"FriendVisit's radius off the vtable: what the Readable-asking test gave, every kind");
+        Reset();IndexFixture();
+    }
+    // npcai.cpp's own grid questions (the wrappers as Think asks them: PickTarget with its held row and WastedFire,
+    // EnemyRow, FriendNear and FriendsOnShot with frObject != self and the radii they add, ThreatsNear's first 64 and
+    // weights, GroupAt, NearestEnemy) against the scans they replaced, written out here as npcai.cpp had them, over
+    // random battles: clusters, repeats (enemies and friends on one spot; a friend object listed twice), far points.
+    {
+        Reset();
+        std::mt19937 rng(20261108u);
+        const auto U=[&rng](float a,float b){ return std::uniform_real_distribution<float>(a,b)(rng); };
+        const auto I=[&rng](int n){ return static_cast<int>(rng()%static_cast<unsigned>(n)); };
+        constexpr int kObjects=2000,kStride=0x40;
+        std::vector<unsigned char> objects(static_cast<std::size_t>(kObjects)*kStride,0);
+        const auto obj=[&objects](int k){ return objects.data()+static_cast<std::size_t>(k)*kStride; };
+        for(int k=0;k<kObjects;++k)Put<const void*>(obj(k),kSelfCtrl,obj(k)+8);   // each its own control block
+        int bad[10]={},asked=0,arcs=0;
+        for(int battle=0;battle<12;++battle) {
+            const float spread=battle%3==0 ? 60.0f : battle%3==1 ? 400.0f : 1500.0f;
+            const int enemies=battle==11 ? 0 : 50+I(1100),friends=battle==10 ? 0 : 20+I(650);
+            float cx=U(-spread,spread),cz=U(-spread,spread);
+            const auto spot=[&](float* p){
+                const int kind=I(10);
+                if(kind<5){if(I(15)==0){cx=U(-spread,spread);cz=U(-spread,spread);}p[0]=cx+U(-12,12);p[2]=cz+U(-12,12);}
+                else if(kind<9){p[0]=U(-spread,spread);p[2]=U(-spread,spread);}
+                else{p[0]=U(-9e4f,9e4f);p[2]=U(-9e4f,9e4f);}
+                p[1]=U(-3,40);
+            };
+            world.enemies=enemies;world.friends=friends;
+            Room(world.enemy,enemies);Room(world.fr,friends);Room(world.frObject,friends);
+            for(int i=0;i<enemies;++i) {
+                Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+                // One row an object (SeeEnemy: another lock point of it counts in its row), on a spot of its own or
+                // on another's (ties).
+                e.object=obj(i);
+                if(i>0 && I(6)==0)std::memcpy(e.aim,world.enemy[static_cast<std::size_t>(I(i))].aim,12);else spot(e.aim);
+                e.points=1+I(4);
+            }
+            for(int i=0;i<friends;++i) {
+                npc::Friend& f=world.fr[static_cast<std::size_t>(i)];
+                if(i>0 && I(8)==0)f=world.fr[static_cast<std::size_t>(I(i))];else spot(f.pos);
+                f.radius=I(3)==0 ? kVehicleRadius : I(2) ? kSoldierRadius : kOtherRadius;
+                world.frObject[static_cast<std::size_t>(i)]=obj(I(kObjects));
+            }
+            IndexFixture();
+            wastedTarget=enemies ? world.enemy[static_cast<std::size_t>(I(enemies))].object : nullptr;
+            for(int ask=0;ask<700;++ask,++asked) {
+                float from[3],at[3];
+                if(enemies && I(2)){const float* a=world.enemy[static_cast<std::size_t>(I(enemies))].aim;from[0]=a[0]+U(-20,20);from[1]=a[1]+1.5f;from[2]=a[2]+U(-20,20);}
+                else spot(from);
+                if(friends && I(2)){const float* a=world.fr[static_cast<std::size_t>(I(friends))].pos;at[0]=a[0]+U(-3,3);at[1]=a[1];at[2]=a[2]+U(-3,3);}
+                else spot(at);
+                const void* self=I(4) && friends ? world.frObject[static_cast<std::size_t>(I(friends))] : obj(I(kObjects));
+                // PickTarget: the held target an object's ref (none, or one of them), WastedFire passing one over.
+                Soldier sol{};
+                sol.target=I(3)==0 ? ObjRef{} : ObjRef::Of(obj(I(kObjects)));
+                const float scope=I(6)==0 ? 1e9f : U(5,700),reach=I(3)==0 ? 0.0f : U(10,900);
+                const int want=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                    [&sol](int k) noexcept { return sol.target.Is(world.enemy[k].object); },
+                    [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },from,at,scope,reach);
+                const Pick pick=PickTarget(sol,self,from,at,scope,reach);
+                if(pick.e!=(want<0 ? nullptr : &world.enemy[static_cast<std::size_t>(want)]))++bad[0];
+                // EnemyRow: the first row whose object the ref is.
+                int row=-1;
+                for(int i=0;i<world.enemies;++i)if(sol.target.Is(world.enemy[static_cast<std::size_t>(i)].object)){row=i;break;}
+                if(EnemyRow(sol.target)!=row)++bad[1];
+                // FriendNear.
+                const float r=I(4)==0 ? U(20,300) : U(0.5f,10.0f);
+                bool nearWant=false;
+                for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r){nearWant=true;break;}
+                if(FriendNear(self,at,r)!=nearWant)++bad[2];
+                // A shot's friends: FriendsOnShot + ShotClear against every friend but self + ShotClear, and the
+                // candidates a superset of every friend but self the line or the blast touches.
+                float to[3];
+                if(enemies && I(3)){const float* a=world.enemy[static_cast<std::size_t>(I(enemies))].aim;to[0]=a[0];to[1]=a[1];to[2]=a[2];}
+                else{const float len=I(5)==0 ? U(300,3000) : U(0,200),ang=U(0,6.3f);to[0]=from[0]+std::sin(ang)*len;to[1]=from[1]+U(-15,15);to[2]=from[2]+std::cos(ang)*len;}
+                const float blast=I(2) ? 0.0f : U(1,25);
+                std::vector<npc::Friend> all,got;
+                for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self)all.push_back(world.fr[static_cast<std::size_t>(i)]);
+                const int n=FriendsOnShot(self,from,to,blast,got);
+                const bool clearAll=npc::ShotClear(from,to,kSpread,blast,all.data(),static_cast<int>(all.size()));
+                if(clearAll!=npc::ShotClear(from,to,kSpread,blast,got.data(),n))++bad[3];
+                if(clearAll!=ShotClearOf(self,from,to,blast))++bad[9];   // ShotOk / ShotSafe's own verdict
+                for(const npc::Friend& f:all) {
+                    float t;
+                    const bool touches=(npc::SegmentDist(from,to,f.pos,&t)<f.radius+kSpread && t>0.0f) ||
+                                       (blast>0.0f && npc::Dist(to,f.pos)<blast*1.25f+f.radius);
+                    if(!touches)continue;
+                    bool in=false;
+                    for(int k=0;k<n && !in;++k)in=std::memcmp(&got[static_cast<std::size_t>(k)],&f,sizeof(f))==0;
+                    if(!in){++bad[4];break;}
+                }
+                // A thrown backpack round (Backpack): ArcClear over the friends FriendsOnShot gives for its line and its
+                // Radius = ArcClear over every friend but self (its arc's ground track is the line's).
+                {
+                    const float speed=U(15,60),gravity=I(4)==0 ? 0.0f : npcpack::kGravity*U(0.5f,1.5f),radius=I(3)==0 ? 0.0f : U(1,12);
+                    const npcpack::Weapon pack{PackUse::thrown,150.0f,radius,0.0f,speed,gravity,0.0f,true};
+                    float pitch=0.0f,flight=0.0f;
+                    if(npcpack::LobPitch(npc::Horiz(from,to),to[1]-from[1],speed,gravity,&pitch,&flight)) {
+                        const auto open=[](const float*,const float*) noexcept { return false; };
+                        const int an=FriendsOnShot(self,from,to,npcpack::Radius(pack),got);
+                        if(npcpack::ArcClear(pack,from,to,pitch,kSpread,all.data(),static_cast<int>(all.size()),open)!=
+                           npcpack::ArcClear(pack,from,to,pitch,kSpread,got.data(),an,open))++bad[8];
+                        ++arcs;
+                    }
+                }
+                // ThreatsNear: the first 64 within reach in the list's order, weighed as Evade weighs them.
+                const float tr=I(3)==0 ? U(30,200) : U(2,40);
+                npc::Threat want64[kMaxThreats],got64[kMaxThreats];int wn=0;
+                for(int i=0;i<world.enemies && wn<kMaxThreats;++i) {
+                    const Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+                    if(npc::Horiz(from,e.aim)<tr)want64[wn++]=npc::Threat{{e.aim[0],e.aim[1],e.aim[2]},e.points>=kLargePoints ? 3.0f : 1.0f};
+                }
+                const int gn=ThreatsNear(from,tr,got64);
+                if(gn!=wn || std::memcmp(want64,got64,sizeof(npc::Threat)*static_cast<std::size_t>(wn))!=0)++bad[5];
+                // GroupAt round a target, and the nearest over the ground (FallBack).
+                if(enemies) {
+                    const Enemy& t=world.enemy[static_cast<std::size_t>(I(enemies))];
+                    const float gr=U(0,40);
+                    int count=0;
+                    for(int i=0;i<world.enemies;++i)if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=gr)++count;
+                    if(GroupAt(t,gr)!=(count>0 ? count : 1))++bad[6];
+                }
+                const Enemy* nearest=nullptr;float nd=1e30f;
+                for(int i=0;i<world.enemies;++i){const float d=npc::Horiz(from,world.enemy[static_cast<std::size_t>(i)].aim);if(d<nd){nd=d;nearest=&world.enemy[static_cast<std::size_t>(i)];}}
+                if(NearestEnemy(from)!=nearest)++bad[7];
+            }
+        }
+        wastedTarget=nullptr;
+        static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","FriendsOnShot's verdict","FriendsOnShot's superset",
+                                          "ThreatsNear","GroupAt","NearestEnemy","backpack ArcClear","ShotClearOf"};
+        for(int k=0;k<10;++k) {
+            char what[200];
+            std::snprintf(what,sizeof(what),"npcai's %s through the grid = the scan it replaced (%d asks over 12 battles, %d differ)",kWhat[k],asked,bad[k]);
+            Expect(bad[k]==0,what);
+        }
+        Expect(arcs>1000,"the thrown rounds compared had an arc to fly");
+        // IsAnyPlayerSelf (the Think's own object, no Readable) = IsAnyPlayer over every combination of its fields.
+        {
+            int differ=0;
+            alignas(16) static unsigned char body[0x400];
+            for(int k=0;k<64;++k) {
+                std::memset(body,0,sizeof(body));
+                body[edf::kHumanPlayer]=static_cast<unsigned char>(k&1 ? (k&8 ? 0x80 : 1) : 0);
+                Put<const void*>(body,edf::kHumanPad,k&2 ? body : nullptr);
+                body[edf::kRiderNet+edf::kNetFlags]=static_cast<unsigned char>((k&4 ? 1 : 0)|(k&16 ? 0xFE : 0)|(k&32 ? 2 : 0));
+                differ+=edf::IsAnyPlayer(body)!=edf::IsAnyPlayerSelf(body);
+            }
+            Expect(differ==0,"IsAnyPlayerSelf reads the fields IsAnyPlayer reads, the same answer");
+        }
+    }
+    // A fault part way through Gather's walks: the grids are made from the lists as the walk left them (Gather's
+    // __finally), not left over the last frame's rows; the row whose point could not be read is not made.
+    {
+        Reset();
+        world.enemies=50;world.friends=5;
+        for(int i=0;i<50;++i)world.enemy[static_cast<std::size_t>(i)]=Enemy{reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x9000+i*0x10)),{500.0f+static_cast<float>(i),0.0f,-300.0f},1};
+        for(int i=0;i<5;++i){world.fr[static_cast<std::size_t>(i)]=npc::Friend{{static_cast<float>(i),1.0f,0.0f},0.8f};world.frObject[static_cast<std::size_t>(i)]=other;}
+        IndexFixture();
+        ++frame;gatherFoes=3;gatherFaults=true;
+        const bool faulted=GatherCaught(0);
+        const float at[3]={10.0f,0.0f,10.0f},old[3]={500.0f,0.0f,-300.0f};
+        npc::Threat threats[kMaxThreats];
+        const int close=ThreatsNear(at,1.0f,threats),stale=ThreatsNear(old,5.0f,threats);
+        const int nearest=npc::grid::NearestHoriz(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[static_cast<std::size_t>(k)].aim; },old);
+        Expect(faulted && world.frame==frame && world.enemies==3 && world.enemyGrid.Points()==3 && world.friends==0 &&
+               world.friendGrid.Points()==0 && world.frRadius==0.0f && close==1 && stale==0 && nearest==2 &&
+               world.enemyIndex.Find(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x6000)))<0 &&
+               world.enemyIndex.Find(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5010)))==1,
+               "a fault part way through Gather: the grids are this frame's lists as walked, no half-made row");
+        gatherFaults=false;++frame;
+        Expect(!GatherCaught(0) && world.enemies==3 && world.enemyGrid.Points()==3,"the next frame's Gather walks them all again");
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
