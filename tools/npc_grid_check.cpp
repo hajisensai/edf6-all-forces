@@ -1,7 +1,7 @@
 // The soldiers' frame grid (src/npc_grid.h) offline: every question asked through it gives the brute-force scan's own
 // answer (npcai.cpp before 2026-11-08: npc_logic.h PickTarget, FriendNear, FriendsBut + ShotClear, Evade's first 64
 // threats, GroupAt, FallBack's nearest), over thousands of random points: clusters, exact ties (repeated positions),
-// points on cell edges, far outliers, odd points (NaN, infinite, past kFar), scopes and radii from 0 to past the whole
+// points on cell edges, far outliers (kept apart off the main body), odd points (NaN, infinite), scopes and radii from 0 to past the whole
 // grid, and the grid rebuilt over fewer and more points (objects gone and new: no index of the last build comes back).
 //   cmake --build build --target npc_grid_check && build\npc_grid_check.exe      (exit code 1 on a failure)
 #include "../src/npc_grid.h"
@@ -158,7 +158,7 @@ int main() {
         const float kInf=std::numeric_limits<float>::infinity(),kNan=std::numeric_limits<float>::quiet_NaN();
         pts[10].p[0]=kNan;pts[200].p[2]=kInf;pts[700].p[0]=-kInf;pts[900].p[0]=2e6f;pts[0].p[2]=kNan;
         g.Build(static_cast<int>(pts.size()),[&](int i){ return pts[static_cast<std::size_t>(i)].p; },16.0f);
-        Check(g.Odd()==5,"odd points kept apart",g.Odd(),5);
+        Check(g.Odd()==4 && g.Apart()>=5,"odd points (not finite) and one past kFar kept apart",g.Odd(),g.Apart());
         Compare(pts,g,2000,"odd points");
     }
     // Rebuilt over fewer points (objects gone: no index of the last build is visited), then more (the arrays grow).
@@ -203,8 +203,39 @@ int main() {
         for(std::size_t i=0;i<pts.size();++i){pts[i].p[0]=static_cast<float>(i);pts[i].p[2]=0.0f;}
         pts[49].p[0]=9.9e5f;pts[49].p[2]=-9.9e5f;
         g.Build(50,[&](int i){ return pts[static_cast<std::size_t>(i)].p; },16.0f);
-        Check(g.Cell()>=16.0f && g.Cell()<=1.0e6f,"an outlier: coarser cells",static_cast<long long>(g.Cell()));
+        Check(g.Cell()==16.0f && g.Apart()==1 && g.Odd()==0,"one far outlier among 50: kept apart, the cells as fine as asked",
+              static_cast<long long>(g.Cell()),g.Apart());
         Compare(pts,g,500,"one far outlier");
+    }
+    // A battle's cells do not change for a far point or two (9e5 m, past kFar at 5e7 m, -3e38): those are kept apart
+    // (visited by every query), not odd (the pick and the nearest stay on the grid), and the answers are the scans'.
+    {
+        std::vector<P> pts=Battle(3000,800.0f,false);
+        g.Build(3000,[&](int i){ return pts[static_cast<std::size_t>(i)].p; },16.0f);
+        const float cell=g.Cell();const int apart=g.Apart();
+        P far1=pts[5];far1.p[0]=9.0e5f;far1.p[2]=-9.0e5f;
+        P far2=pts[6];far2.p[0]=5.0e7f;
+        P far3=pts[7];far3.p[2]=-3.0e38f;
+        pts.insert(pts.begin()+100,far1);pts.push_back(far2);pts.insert(pts.begin(),far3);
+        g.Build(static_cast<int>(pts.size()),[&](int i){ return pts[static_cast<std::size_t>(i)].p; },16.0f);
+        Check(g.Cell()==cell && g.Odd()==0 && g.Apart()==apart+3,"far points: the battle's cells as before, the far ones apart",
+              static_cast<long long>(g.Cell()),g.Apart());
+        Compare(pts,g,1500,"a battle and three far points");
+        // A far point the nearest of all (none on the grid near it): still found (NearFirst visits those apart first).
+        const float* q=pts[0].p;
+        const float from[3]={q[0],0.0f,q[2]+10.0f};
+        int best=-1;float nd=1e30f;
+        for(int i=0;i<static_cast<int>(pts.size());++i){const float d=npc::Horiz(from,pts[static_cast<std::size_t>(i)].p);if(d<nd){nd=d;best=i;}}
+        Check(best==npc::grid::NearestHoriz(g,static_cast<int>(pts.size()),[&](int k){ return pts[static_cast<std::size_t>(k)].p; },from),
+              "the nearest is a far point apart",best);
+    }
+    // A battle in two camps far apart (a fifth of the points 20 km off): both are the body (more than a few strays).
+    {
+        std::vector<P> pts=Battle(2000,300.0f,false);
+        for(std::size_t i=0;i<pts.size();i+=5){pts[i].p[0]+=20000.0f;}
+        g.Build(2000,[&](int i){ return pts[static_cast<std::size_t>(i)].p; },16.0f);
+        Check(g.Apart()==0,"two camps: no point apart",g.Apart());
+        Compare(pts,g,1000,"two camps 20 km apart");
     }
     std::printf("npc_grid_check: %d of %d cases passed\n",cases-failures,cases);
     return failures ? 1 : 0;

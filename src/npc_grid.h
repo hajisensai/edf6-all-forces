@@ -11,14 +11,17 @@
 //  - Box / Capsule / NearFirst visit a superset of the points that can pass the caller's own test, which the caller
 //    still applies point by point with the same float expressions; the cell of a point and of a query bound come from
 //    one monotonic function (CellX / CellZ), and every bound is padded for the rounding of the caller's expressions.
-//  - A point whose position is not finite or is beyond kFar is "odd": kept apart and visited by every query (the scans
-//    saw it too). PickTarget / NearestHoriz go back to the scan itself when there is one (a NaN's comparisons depend on
-//    the scan's order), as they do for a query point, scope or reach that is not finite.
+//  - A point whose position is not finite is "odd": kept apart and visited by every query (the scans saw it too).
+//    PickTarget / NearestHoriz go back to the scan itself when there is one (a NaN's comparisons depend on the scan's
+//    order), as they do for a query point beyond kFar or a scope or reach that is not finite.
+//  - A finite point off the main body (Body: beyond kFar, or a stray far from the rest) is kept apart as well, visited
+//    by every query (NearFirst too, before its rings): the pick and the nearest stay on the grid; the cells cover the
+//    body only, so one far point does not make them coarse.
 //  - Order: PickTarget / NearestHoriz rank by (score, index): a tie goes to the lower index, as the scans' first-wins
 //    did. Box / Capsule give each cell's points in index order, cells in row order; a caller that needs the scan's
 //    order (Evade's first 64) takes them through FirstAround (a partial selection of the lowest indices).
-// No cap: the cells are sized from the points' extent and enlarged so that there are at most ~4 per point (a far
-// outlier makes the cells coarser, never the arrays huge); the arrays grow with the battle and are kept.
+// No cap: the cells are sized from the main body's extent and enlarged so that there are at most ~4 per point (a body
+// spread far makes the cells coarser, never the arrays huge); the arrays grow with the battle and are kept.
 // Pure logic, no game memory: the frame's lists it indexes are copies (positions read once, in Gather).
 #pragma once
 #include "npc_logic.h"
@@ -28,23 +31,34 @@
 #include <vector>
 
 namespace npc::grid {
-constexpr float kFar=1.0e6f;   // m from the origin: past it a point is odd (no map is near that size)
+constexpr float kFar=1.0e6f;   // m from the origin: past it a point is off the main body (no map is near that size)
 
 class Grid {
 public:
     // Over points 0..n-1, at(i) their (x, y, z); `want`: the cell's side in m (made larger when the points spread far).
     template<class At> void Build(int n,At at,float want) {
-        count=n>0 ? n : 0;odd.clear();
+        count=n>0 ? n : 0;apart.clear();oddCount=0;
+        cell=want>0.5f && std::isfinite(want) ? want : 16.0f;
+        // The main body's box: the points on the map (Regular), less a few far from the rest (Body).
+        xs.clear();zs.clear();
+        for(int i=0;i<count;++i) {
+            const float* p=at(i);
+            if(Regular(p[0],p[2])){xs.push_back(p[0]);zs.push_back(p[2]);}
+        }
+        float bx0=0.0f,bx1=0.0f,bz0=0.0f,bz1=0.0f;
+        const bool body=!xs.empty();
+        if(body){Body(xs,cell,bx0,bx1);Body(zs,cell,bz0,bz1);}
+        const auto inBody=[&](const float* p) noexcept { return body && p[0]>=bx0 && p[0]<=bx1 && p[2]>=bz0 && p[2]<=bz1; };
+        // Its points' own extent (the cells start at the lowest of them).
         float x0=0.0f,x1=0.0f,z0=0.0f,z1=0.0f;bool any=false;
         for(int i=0;i<count;++i) {
             const float* p=at(i);
-            if(!Regular(p[0],p[2]))continue;
+            if(!inBody(p))continue;
             if(!any){x0=x1=p[0];z0=z1=p[2];any=true;continue;}
             x0=(std::min)(x0,p[0]);x1=(std::max)(x1,p[0]);z0=(std::min)(z0,p[2]);z1=(std::max)(z1,p[2]);
         }
         minX=x0;minZ=z0;
-        cell=want>0.5f && std::isfinite(want) ? want : 16.0f;
-        // At most ~4 cells a point (and a few hundred for a handful): a coarser cell when the points spread far apart.
+        // At most ~4 cells a point (and a few hundred for a handful): a coarser cell when the body spreads far.
         const double budget=(std::max)(4.0*count,256.0);
         for(;;) {
             const double cx=std::floor((static_cast<double>(x1)-x0)/cell)+1.0,cz=std::floor((static_cast<double>(z1)-z0)/cell)+1.0;
@@ -57,7 +71,11 @@ public:
         if(where.size()<static_cast<std::size_t>(count))where.resize(static_cast<std::size_t>(count));
         for(int i=0;i<count;++i) {
             const float* p=at(i);
-            if(!Regular(p[0],p[2])){where[static_cast<std::size_t>(i)]=-1;odd.push_back(i);continue;}
+            if(!inBody(p)) {   // not finite (odd), or off the body
+                where[static_cast<std::size_t>(i)]=-1;apart.push_back(i);
+                if(!std::isfinite(p[0]) || !std::isfinite(p[2]))++oddCount;
+                continue;
+            }
             const int c=CellZ(p[2])*nx+CellX(p[0]);
             where[static_cast<std::size_t>(i)]=c;++start[static_cast<std::size_t>(c)+1];
         }
@@ -67,15 +85,18 @@ public:
         for(int i=0;i<count;++i)   // in index order: each cell's points ascending
             if(where[static_cast<std::size_t>(i)]>=0)item[static_cast<std::size_t>(fill[static_cast<std::size_t>(where[static_cast<std::size_t>(i)])]++)]=i;
     }
-    void Clear() noexcept { count=0;nx=nz=0;odd.clear();start.clear(); }
+    void Clear() noexcept { count=0;nx=nz=0;apart.clear();oddCount=0;start.clear(); }
     int Points() const noexcept { return count; }
-    int Odd() const noexcept { return static_cast<int>(odd.size()); }
+    // Points whose position is not finite (the pick and the nearest go back to the scans over them).
+    int Odd() const noexcept { return oddCount; }
+    // Points kept apart from the cells, visited by every query: the odd ones and those off the main body (far ones).
+    int Apart() const noexcept { return static_cast<int>(apart.size()); }
     float Cell() const noexcept { return cell; }
 
-    // f(i) for every point that can lie within [x0, x1] x [z0, z1] (padded for rounding), and every odd one. A bound
+    // f(i) for every point that can lie within [x0, x1] x [z0, z1] (padded for rounding), and every one apart. A bound
     // that is not a number: every point.
     template<class F> void Box(float x0,float z0,float x1,float z1,F&& f) const {
-        for(int i:odd)f(i);
+        for(int i:apart)f(i);
         if(!nx)return;
         if(std::isnan(x0) || std::isnan(x1) || std::isnan(z0) || std::isnan(z1)){Cells(0,nx-1,0,nz-1,f);return;}
         const float px=Pad(x0,x1),pz=Pad(z0,z1);
@@ -83,15 +104,15 @@ public:
     }
     // Every point within `r` of (x, z) on either axis (the box round it).
     template<class F> void Around(const float* c,float r,F&& f) const { Box(c[0]-r,c[2]-r,c[0]+r,c[2]+r,static_cast<F&&>(f)); }
-    // f(i) for every point that can lie within `margin` of segment a-b over the ground (its capsule), and every odd one.
+    // f(i) for every point that can lie within `margin` of segment a-b over the ground (its capsule), and every one apart.
     // Row by row: the stretch of the segment whose z can reach the row, its x range widened by the margin.
     template<class F> void Capsule(const float* a,const float* b,float margin,F&& f) const {
-        if(!nx){for(int i:odd)f(i);return;}
+        if(!nx){for(int i:apart)f(i);return;}
         if(!std::isfinite(a[0]+a[2]+b[0]+b[2]+margin)) {   // not a number or infinite: the box (every point at worst)
             Box((std::min)(a[0],b[0])-margin,(std::min)(a[2],b[2])-margin,(std::max)(a[0],b[0])+margin,(std::max)(a[2],b[2])+margin,f);
             return;
         }
-        for(int i:odd)f(i);
+        for(int i:apart)f(i);
         const float m=margin+Pad((std::min)(a[0],b[0])-margin,(std::max)(a[0],b[0])+margin)+
                       Pad((std::min)(a[2],b[2])-margin,(std::max)(a[2],b[2])+margin);
         const int r0=ClampZ((std::min)(a[2],b[2])-m),r1=ClampZ((std::max)(a[2],b[2])+m);
@@ -114,7 +135,8 @@ public:
     }
     // The cells round (x, z) nearest first, as rings of cells; within `clip` (cells, the inclusive [cx0, cx1] x [cz0,
     // cz1], already within the grid). Before each ring past the first: stop(lb) with lb a bound no point of that ring or
-    // any later one is nearer over the ground than (padded for rounding); true ends the walk. f(i) for each point.
+    // any later one is nearer over the ground than (padded for rounding); true ends the walk. f(i) for each point; the
+    // points apart first, all of them (an order-free caller: it ranks what it is given).
     struct Clip { int cx0,cx1,cz0,cz1; };
     Clip All() const noexcept { return Clip{0,nx-1,0,nz-1}; }
     // The cells that can hold a point within `r` of (x, z) on either axis.
@@ -123,6 +145,7 @@ public:
         return Clip{ClampX(x-r-px),ClampX(x+r+px),ClampZ(z-r-pz),ClampZ(z+r+pz)};
     }
     template<class Stop,class F> void NearFirst(float x,float z,Clip clip,Stop&& stop,F&& f) const {
+        for(int i:apart)f(i);   // first, whatever the clip and the bound (the caller's own test still applies)
         if(!nx || clip.cx0>clip.cx1 || clip.cz0>clip.cz1)return;
         const int cx=CellXUnclamped(x),cz=CellZUnclamped(z);
         // The ring that first meets the clip, the last one that does.
@@ -149,7 +172,25 @@ public:
 private:
     int count=0,nx=0,nz=0;
     float minX=0.0f,minZ=0.0f,cell=16.0f,inv=1.0f/16.0f;
-    std::vector<int> start,item,where,fill,odd;
+    int oddCount=0;
+    std::vector<int> start,item,where,fill,apart;
+    std::vector<float> xs,zs;   // Build's scratch
+
+    // The main body of the points' values `v` (finite, within kFar) on one axis, [lo, hi]: the values between the
+    // 1/64 quantiles (trimmed: a few far points do not count), widened by a quarter of that span and two cells. The
+    // values past it are a few strays (at most ~1/32 of them on the axis, kept apart: visited by every query), and the
+    // cells cover the body only: one far point no longer makes every cell coarse. Fewer than 16 values: all of them.
+    static void Body(std::vector<float>& v,float cell,float& lo,float& hi) {
+        const std::size_t m=v.size();
+        if(m<16){lo=*std::min_element(v.begin(),v.end());hi=*std::max_element(v.begin(),v.end());return;}
+        const std::size_t k=m/64>0 ? m/64 : 1;
+        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(k),v.end());
+        const float q0=v[k];
+        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(m-1-k),v.end());
+        const float q1=v[m-1-k];
+        const float pad=(q1-q0)*0.25f+2.0f*cell;
+        lo=q0-pad;hi=q1+pad;
+    }
 
     // A point's column / row: one monotonic float expression (a bound's cell is never past its point's), then clamped.
     int CellXUnclamped(float x) const noexcept { return Floor((x-minX)*inv); }
