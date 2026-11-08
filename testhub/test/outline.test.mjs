@@ -153,6 +153,16 @@ test('outline: validation, clean text, limits and rate', async () => {
   assert.equal((await call(e, '/api/outline/save', { book: 1, outline: sample(), version: 1 })).status, 429);
 });
 
+test('migration 0006 adds the outline author, taken from who saved it last', () => {
+  const e = env();
+  const db = e.DB.raw;
+  db.exec('DROP TABLE story_outlines');
+  db.exec(readFileSync(new URL('../migrations/0005-outline-books.sql', import.meta.url), 'utf8'));
+  db.prepare("INSERT INTO story_outlines (grp, book, data, version, updated_by, updated_at) VALUES ('a', 1, '{}', 1, 'amy', 1)").run();
+  db.exec(readFileSync(new URL('../migrations/0006-outline-author.sql', import.meta.url), 'utf8'));
+  assert.equal(db.prepare('SELECT author FROM story_outlines').get().author, 'amy');
+});
+
 test('outline migrations are repeatable', () => {
   const e = env();
   for (const file of ['0003-story-outline.sql', '0004-outline-ratings.sql', '0005-outline-books.sql']) {
@@ -171,8 +181,9 @@ test('outline migration 0005 moves each group\'s outline and its scores into out
   const sql = readFileSync(new URL('../migrations/0005-outline-books.sql', import.meta.url), 'utf8');
   db.exec(sql);
   db.exec(sql);
+  db.exec(readFileSync(new URL('../migrations/0006-outline-author.sql', import.meta.url), 'utf8'));
   const seen = await get(e, 'bob', 'a');
-  assert.deepEqual([seen.book, seen.version, seen.outline.title, seen.updated_by], [1, 4, '轮回剧情大纲', 'alice']);
+  assert.deepEqual([seen.book, seen.version, seen.outline.title, seen.updated_by, seen.author], [1, 4, '轮回剧情大纲', 'alice', 'alice']);
   assert.deepEqual(seen.scores.s1, { avg: 4, n: 1 });
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM story_outline').get().n, 0);
 });
@@ -187,7 +198,11 @@ test('outline: a group keeps several outlines, each saved, scored and deleted on
   assert.equal((await save({ outline: { title: '空的', lanes: [] }, version: 0 })).status, 200);   // outline 3, empty
   const list = await get(e, 'amy');
   assert.equal(list.book, 1);
-  assert.deepEqual(list.books, [{ book: 1, title: '轮回剧情大纲', lanes: 2 }, { book: 2, title: '星导者复仇线', lanes: 1 }, { book: 3, title: '空的', lanes: 0 }]);
+  assert.deepEqual(list.books, [{ book: 1, title: '轮回剧情大纲', lanes: 2, author: 'alice' }, { book: 2, title: '星导者复仇线', lanes: 1, author: 'amy' },
+    { book: 3, title: '空的', lanes: 0, author: 'alice' }]);
+  assert.equal(list.author, 'alice');   // who started it, not who saved it last
+  assert.deepEqual((await (await visit(e, '?group=a')).json()).books.map((b) => b.author), [null, null]);   // visitors see no authors
+  assert.equal((await (await visit(e, '?group=a')).json()).author, null);
   const two = await (await call(e, '/api/outline?book=2', undefined, 'amy')).json();
   assert.deepEqual([two.book, two.outline.title, two.version], [2, '星导者复仇线', 1]);
   // other groups and visitors do not see an empty outline
