@@ -10138,7 +10138,7 @@ def edf41_mother401_parts_collision_layer() -> None:
     assert 'Key(p.obj,L"is_keyframe_ragdoll")' in fn and '!battery &&' in fn, 'the core / panel split is the SGO key (4.1 0x26FAB0)'
     assert 'edf41layer::Part41Layer(battery,keyframe)' in fn and 'edf41layer::Edf6For41(l41)' in fn
     assert 'edf41layer::LivePrims()' in fn and 'edf41layer::LiveAgrees(table,to)' in fn, "move only on this build's code and table"
-    assert fn.index('LiveAgrees') < fn.index('LiveSetRagdollLayer'), 'the table check comes before the move'
+    assert fn.index('(table && !edf41layer::LiveAgrees(table,to))') < fn.index('LiveSetRagdollLayer'), 'the table check comes before the move'
     assert '0x6E9320' not in cpp and 'kRagdollSetLayer' not in cpp, 'the 401 parts use the shared layer code (src/edf41layer_live.h)'
     upd = cpp.split('std::uint64_t __fastcall PartUpdate(void* self,void* dt) {', 1)[1]
     assert re.search(r'InitPart\(\*p\); \}\s*if\(!p->layerDone\)p->layerDone=PartLayer\(\*p\);', upd), 'once, from the first frame on'

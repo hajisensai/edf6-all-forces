@@ -1007,7 +1007,7 @@ bool TickBattery(Part& b) noexcept {
 // 13 (is_keyframe_ragdoll 0) or 7 (the core's 1), PanelBase 0x26FAB0, and leaves a battery's on the ragdoll default 6 (0x333FB0);
 // each goes to the EDF6 layer that meets the body layers, the map ray and the area damage as 4.1's does (edf41layer::Edf6For41:
 // 15 / 7 / 6). Done once, when the ragdoll has its bodies (0x6E9320 moves the bodies it has); nothing moves when the layer code is
-// not this build's or the live filter table disagrees with the constructor's on the rows the choice rests on (logged).
+// not this build's or a live filter table found disagrees with the constructor's on the rows the choice rests on (logged).
 bool PartLayer(Part& p) noexcept {
     void* ragdoll=static_cast<char*>(p.obj)+kRagdollAt;
     std::int32_t kf=0;
@@ -1025,14 +1025,15 @@ bool PartLayer(Part& p) noexcept {
     if(from<0 || !n) { if(first)said[static_cast<int>(p.kind)].fetch_sub(1); return false; }   // no bodies yet
     const int query=edf41layer::LiveAreaQueryLayer();
     const std::uint32_t* table=edf41layer::LiveTable();
-    if(to<0 || query!=edf41layer::kEdf6AreaQuery || !edf41layer::LiveAgrees(table,to)) {
-        if(first)Log("EDF41M401 %s %p: layer 0x%X kept (4.1 layer %d -> EDF6 %d; area query %d, live filter table %s)",KindName(p.kind),p.obj,from,l41,to,query,
-            !table ? "not found" : "differs from 0x105510's");
+    // no live table found: the constructor's (this EDF.dll's 0x105510, the only build the plugin runs on) stands
+    if(to<0 || query!=edf41layer::kEdf6AreaQuery || (table && !edf41layer::LiveAgrees(table,to))) {
+        if(first)Log("EDF41M401 %s %p: layer 0x%X kept (4.1 layer %d -> EDF6 %d; area query %d; the live filter table differs from 0x105510's: %d)",
+                     KindName(p.kind),p.obj,from,l41,to,query,table ? 1 : 0);
         return true;
     }
     if(from!=to)edf41layer::LiveSetRagdollLayer(ragdoll,to);
-    if(first)Log("EDF41M401 %s %p: %zu bodies, layer 0x%X -> %d (4.1 %d%s; now 0x%X)",KindName(p.kind),p.obj,n,from,to,l41,keyframe ? ", keyframe" : "",
-                 edf41layer::LiveRagdollLayer(ragdoll));
+    if(first)Log("EDF41M401 %s %p: %zu bodies, layer 0x%X -> %d (4.1 %d%s; now 0x%X; live filter table %s)",KindName(p.kind),p.obj,n,from,to,l41,
+                 keyframe ? ", keyframe" : "",edf41layer::LiveRagdollLayer(ragdoll),table ? "agrees" : "not found, the constructor's");
     return true;
 }
 
