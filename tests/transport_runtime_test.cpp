@@ -58,7 +58,7 @@ bool NpcPrepareVehicleRoutePost(unsigned char* v,const float* at,float) noexcept
     ++routePosts;std::memcpy(truckPost,at,12);return true;
 }
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,std::uint64_t,
-                                       float* waypoint,npc::navigation::Profile) noexcept {
+                                       float* waypoint,npc::navigation::Profile,Hull) noexcept {
     const float dx=to[0]-from[0],dz=to[2]-from[2],d=std::hypot(dx,dz);
     if(d<=stop){std::memcpy(waypoint,from,12);return npc::navigation::Result::arrived;}
     const float step=std::fmin(20.0f,d);
