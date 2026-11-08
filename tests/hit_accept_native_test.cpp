@@ -18,6 +18,9 @@ ULONGLONG GameMs() noexcept { return nowMs; }
 // (the per-frame target memo's own case) or heldFrame (Feedback's once-a-frame clock across steps of nowMs).
 ULONGLONG frameNo=1;bool frameHeld=false;ULONGLONG heldFrame=0;
 ULONGLONG GameFrame() noexcept { if(heldFrame)return heldFrame; return frameHeld ? frameNo : ++frameNo; }
+// The wall clock the per-frame memo's stall guard reads: stepped by the cases, never the real time.
+ULONGLONG wallMs=1000;
+ULONGLONG WallMs() noexcept { return wallMs; }
 bool IsSoldierClass(const void*) noexcept { return false; }
 // The lock points and the ray the plan uses, as each case sets them.
 struct Lock { const void* object; float at[3]; };
@@ -206,12 +209,17 @@ void Plans() {
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     const bool second=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
     Check(!first && !second,"the same frame: the target's first answer kept (made invincible mid-frame, still fire)");
-    Sleep(40);   // a slow frame: more than one old 32 ms step, well under the stall guard
+    wallMs+=40;   // a slow frame: more than one old 32 ms step, well under the stall guard
     Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same slow frame past 32 ms: the first answer still kept");
-    memoClock.since-=memoepoch::kStallMs;   // the frame stalled for the guard
+    wallMs+=memoepoch::kStallMs-40-1;   // one ms short of the guard since the frame's first look
+    Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same frame just under the guard: the first answer still kept");
+    wallMs+=1;   // the frame stalled for the guard
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"a frame stalled for the guard: looked at again (invincible: held)");
     Put<std::uint32_t>(other,kObjFlags,0);
+    wallMs+=memoepoch::kStallMs-1;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the stalled frame's new answer kept until the next guard");
+    wallMs+=1;
+    Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next guard: looked at again (ordinary again: fire)");
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     ++frameNo;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next frame: looked at again (invincible: held)");

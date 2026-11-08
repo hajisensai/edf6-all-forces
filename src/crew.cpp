@@ -89,6 +89,7 @@ ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),Game
 // Reading this on the game thread avoids guessing frame boundaries from vehicle order.
 namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
+ULONGLONG WallMs() noexcept { return GetTickCount64(); }
 SceneStep SceneStepNow() noexcept {
     if(!frameClockOk)return {};
     const auto system=At<const unsigned char*>(image,kSystem);

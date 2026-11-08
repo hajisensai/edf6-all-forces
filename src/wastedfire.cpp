@@ -351,7 +351,7 @@ const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
     if(!shooter || !target)return hitpredict::Verdict::fire;
-    const ULONGLONG frame=memoClock.Epoch(GameFrame(),GetTickCount64());
+    const ULONGLONG frame=memoClock.Epoch(GameFrame(),WallMs());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
         shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;

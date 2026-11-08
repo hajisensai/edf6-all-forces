@@ -540,6 +540,9 @@ bool GamePaused() noexcept;
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
+// Wall time (GetTickCount64) for what has to see a stalled frame (memo_epoch.h): a function of its own, like GameMs and
+// GameFrame, so a test steps it instead of sleeping.
+ULONGLONG WallMs() noexcept;
 // The native scene step as it reads now (System +0xCE0, stepped before the scene's input/update traversal), with its
 // scene and the mission (ResetCrew): a per-frame key valid from the frame's first input on, where GameFrame still has
 // the last frame's until the first vehicle's input is done. scene null: unreadable.
