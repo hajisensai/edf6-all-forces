@@ -53,6 +53,13 @@ class PrepRuleTests(unittest.TestCase):
             self.assertEqual(prep.bone_of(z, name), 'cannon_l', name)
         for name in ('hatch_01', 'hatch_02'):
             self.assertEqual(prep.bone_of(s, name), 'body', name)
+        # docs/feedback-2026-11-08-bmpt-lantern.md: the lamps on the BMPT's turret back turn with it, the hull's stay; the
+        # PzH 2000's fitting on its turret's back face (under turret_box's floor) turns with the turret
+        for name in ('ex_lantern_b', 'ex_lantern_b_01'):
+            self.assertEqual(prep.bone_of(b, name), 'cannon_main', name)
+        for name in ('ex_lantern_b_02', 'ex_lantern_b_03', 'ex_lantern_l_02', 'ex_lantern_r_02'):
+            self.assertEqual(prep.bone_of(b, name), 'body', name)
+        self.assertEqual(prep.bone_of(z, 'ex_decor_14'), 'cannon_main')
 
     def test_collision_hulls_are_outward_convex_pieces(self) -> None:
         cube = np.asarray([(x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=float)
@@ -81,6 +88,61 @@ def shard_kinds(kinds) -> list:  # noqa: ANN001
 
 def _ready() -> bool:
     return (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file() and wt.available('vulcan') and wt.available('bmpt')
+
+
+# A hull part's vertex this far over the turret ring, inside the turret's box, is a turret fitting a rule missed: on
+# `body` it stays where it was as the turret turns (the BMPT's lamps on the turret's back, 2026-11-08). The hull's own
+# roof fittings stand lower (the BMPT's roof 0.1 m over its ring, the PzH 2000's 0.22 m).
+TURRET_RISE = 0.4               # m
+
+
+def hull_parts_in_turret(spec) -> list[tuple[str, int, list, list]]:  # noqa: ANN001
+    """The `body` parts with vertices over cannon_main's origin (the ring) by TURRET_RISE and inside the box of the
+    cannon_main parts: (part, vertices, their box). None for a model with no turret mesh (the Sturmtiger's casemate)."""
+    info = spec.info
+    ring = info['origins'].get('cannon_main')
+    turret = [spec.arrays[f'p{k}_pos'] for k, p in enumerate(info['parts']) if p['bone'] == 'cannon_main']
+    if ring is None or not turret:
+        return []
+    t = np.vstack(turret).astype(float)
+    lo, hi = t.min(axis=0), t.max(axis=0)
+    out = []
+    for k, p in enumerate(info['parts']):
+        if p['bone'] != 'body':
+            continue
+        P = spec.arrays[f'p{k}_pos'].astype(float)
+        inside = ((P[:, 1] > ring[1] + TURRET_RISE) & (P[:, 1] < hi[1]) & (P[:, 0] > lo[0]) & (P[:, 0] < hi[0]) &
+                  (P[:, 2] > lo[2]) & (P[:, 2] < hi[2]))
+        if inside.any():
+            q = P[inside]
+            out.append((p['name'], int(inside.sum()), q.min(axis=0).round(2).tolist(), q.max(axis=0).round(2).tolist()))
+    return out
+
+
+class WtRigTests(unittest.TestCase):
+    """The model folders alone (no game): every fitting over the turret ring inside the turret rides the turret."""
+
+    def test_no_hull_part_inside_the_turret(self) -> None:
+        kinds = [k for k in shard_kinds(wt.FOLDERS) if wt.available(k)]
+        if not kinds:
+            self.skipTest('no War Thunder model folder here')
+        for kind in kinds:
+            with self.subTest(kind=kind):
+                self.assertEqual(hull_parts_in_turret(wt.load(kind)), [],
+                                 'a turret fitting on body (tools/prep_wt_tracked.py rules / turret_box)')
+
+    def test_the_check_finds_a_fitting_left_on_the_hull(self) -> None:
+        # The BMPT's lamps as they were (2026-11-08): a body part's patch at the turret's back, over the ring.
+        if not wt.available('bmpt'):
+            self.skipTest('the BMPT model folder is unavailable')
+        spec = wt.load('bmpt')
+        info = json.loads(json.dumps(spec.info))
+        arrays = dict(spec.arrays)
+        k = len(info['parts'])
+        info['parts'].append({'name': 'body.lamp', 'bone': 'body', 'material': 0, 'triangles': 1, 'vertices': 3})
+        arrays[f'p{k}_pos'] = np.asarray([(0.6, 2.6, -2.05), (0.7, 2.6, -2.05), (0.6, 2.7, -2.05)], dtype=np.float32)
+        found = hull_parts_in_turret(wt.Spec(spec.folder, info, arrays))
+        self.assertEqual([f[0] for f in found], ['body.lamp'])
 
 
 @unittest.skipUnless(_ready(), 'EDF6 Root.cpk or the War Thunder model folders are unavailable')
