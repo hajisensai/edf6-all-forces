@@ -17,6 +17,15 @@ namespace edf {
 // asked, not by the region. It knows only pages in the working set (Valid); any other page (paged out, reserved,
 // free, a guard page, whose PTE is never valid) is asked with VirtualQuery as before. The answers are kept per thread
 // by page for the tick (each frame or so), as the regions were, so a page freed and remapped is asked again.
+// Why the tick and not the game frame (weighed 2026-11-08, stress:100 at 131 ms a frame re-asking pages ~8 times a
+// frame): the tick (GetTickCount64, ~16 ms) is the longest a page's answer is trusted, and a window no longer than it
+// is the condition (a page the game decommits meanwhile is read on our word). A frame window bounded by it ("the
+// shorter of the two": a new epoch when the frame or the tick moves) answers from the cache exactly as the tick alone
+// at stress (a frame there spans ~8 ticks, the tick moves first every time) and less at 60 fps (frame ~= tick: their
+// two edges both end a window); only a window longer than the tick saves asks, and that is the trust this code does
+// not give. Besides, memory.cpp is both plugins' and any thread's (AutoTurret, Coop callbacks, the plugins' own
+// threads): a frame epoch would be the game thread's notion pushed into a shared primitive. So the asks are cut where
+// they are made instead: PrefetchReadable for a batch, and no ask for an object known live (seat.h IsAnyPlayerSelf).
 // Not a probing read: touching a PAGE_GUARD page (a thread's stack guard) would take the guard away.
 namespace {
 constexpr std::uintptr_t kPage=0x1000;
