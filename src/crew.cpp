@@ -554,16 +554,19 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         EnsureInputs();    // first mission frame: every plugin has loaded by now
-        // `object`: the one the game's team walk (0x5E11D0, its registry's members) hands this visit, the stock visitor
-        // just called on it: live, its vtable read, not asked of Readable first. Asked once per object per frame on
-        // the player's walk (stress:100 2026-11-08: 1.1 ms a frame, a working-set call an object). Only a 506 can be a
-        // jet (IsJet: a 506's mark), so IsJet, which asks Readable for the mark, is asked of a 506 alone.
+        // `object`: a member of the team the manager walks (0x5E11D0) under its lock (0x5E1207 call 0x50BC0): live for
+        // this visit, so its vtable is read without asking Readable first. (The stock visitor 0x5725A0 need not have
+        // touched it: with the human's [+0x1550] set and that one's [+8] non-zero it returns at once, 0x5725C0 jne
+        // 0x5725FB, before its __RTDynamicCast.) Asked once per object per frame on the player's walk (stress:100
+        // 2026-11-08: 1.1 ms a frame, a working-set call an object). Only a 506 can be a jet or the carrier's sub
+        // (IsJet / IsSub: a 506's mark, BodyMark 0 for any other vtable), so both, which ask Readable for the mark, are
+        // asked of a 506 alone.
         const auto vtable=At<const void*>(object,0);
         const bool body506=Heli506Vtable(vtable);
         if(Cfg().debug && body506 && IsJet(object) && PlayerJetBoardable(object))
             DoorLog(static_cast<const unsigned char*>(object),human,f[kFunctorResult]!=0);
         if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOfVtable(vtable)<0 ||
-           (body506 && IsJet(object) && !PlayerJetBoardable(object)) || IsSub(object))return;
+           (body506 && ((IsJet(object) && !PlayerJetBoardable(object)) || IsSub(object))))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy || NpcCanYieldSeat(SeatAt(v,i));
