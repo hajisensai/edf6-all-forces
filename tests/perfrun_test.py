@@ -256,7 +256,68 @@ def drive_during() -> None:
           "drive.run's stay ends when `during` returns")
 
 
+def ini_option() -> None:
+    _, o = perfrun.options(['stress:1', '--ini', 'HavokMultithread=1', '--ini', 'Debug=0', '--dll', 'installed'])
+    check(o['ini'] == ['HavokMultithread=1', 'Debug=0'], '--ini repeats, in order')
+    check("ini=('Debug=1', *opts['ini'])" in inspect.getsource(perfrun.one_run), "--ini reaches drive.run after Debug=1")
+    try:
+        perfrun.options(['stress:1', '--ini', 'HavokMultithread'])
+        check(False, '--ini without = refused')
+    except SystemExit:
+        pass
+
+
+def log_turnover() -> None:
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp()
+    try:
+        log = os.path.join(d, 'EDF6VehicleCrew.log')
+        with open(log, 'wb') as f:
+            f.write(b'old launch\r\n')
+        mark = perfrun.log_mark(log)
+        with open(log, 'ab') as f:
+            f.write(b'this launch\r\n')
+        check(perfrun.run_log(log, mark) == b'this launch\r\n', 'no turnover: from the mark on')
+        with open(log, 'ab') as f:
+            f.write(b'before the rename\r\n')
+        os.replace(log, log + '.1')
+        with open(log, 'wb') as f:
+            f.write(b'(log continued)\r\nafter\r\n')
+        check(perfrun.run_log(log, mark) == b'this launch\r\nbefore the rename\r\n(log continued)\r\nafter\r\n',
+              'one turnover: .log.1 from the mark, then the new log')
+        os.replace(log, log + '.1')
+        with open(log, 'wb') as f:
+            f.write(b'third\r\n')
+        got = perfrun.run_log(log, mark)
+        check(got.startswith(b'(perfrun: the log turned over more than once') and got.endswith(b'third\r\n'),
+              'two turnovers: said so, what is left kept')
+        check(perfrun.run_log(os.path.join(d, 'none.log'), (0, 0)) is None, 'no log: nothing')
+    finally:
+        shutil.rmtree(d)
+
+
+def both_plugins() -> None:
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp()
+    try:
+        crew = os.path.join(d, 'EDF6VehicleCrew.dll')
+        open(crew, 'wb').close()
+        check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll',), 'no AutoTurret built: the crew alone')
+        turret = os.path.join(d, 'EDF6AutoTurret.dll')
+        open(turret, 'wb').close()
+        check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll', f'{turret}=Plugins/EDF6AutoTurret.dll'),
+              "the same build's AutoTurret placed with it")
+        check(perfrun.placements(None) == (), '--dll installed: nothing placed')
+    finally:
+        shutil.rmtree(d)
+
+
 scenario_files()
+log_turnover()
+both_plugins()
+ini_option()
 scenarios()
 report_parsing()
 drive_during()

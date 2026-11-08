@@ -19,6 +19,9 @@
 //    Debug_StartOffline() skips the logo, title, Epic login and slot choice, and the first HQMain() becomes
 //    PlayMission_Offline() with the mission row / difficulty set (GS+0x48 / +0x4C, GS = *(EDF+0x20B2890)); for "range"
 //    the mode is switched first the way the script's SetMode(int) does it (EnterRangeMode).
+//  - "cycle N [STAY] [reboot]" (with the mission, or once in it): withdraw from the mission STAY seconds (default 20)
+//    after it runs, the pause menu's way, and enter the same mission again, N times in one launch (CYCLE rows; for
+//    the Havok worker reset on the way out: docs/mission-cycle-re.md).
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
@@ -566,8 +569,10 @@ int FindRangeMode(const unsigned char* gs,int content) noexcept {
 
 // "mission range" / "mission edf41:ROW": that pack's offline mode made current, as SetMode(int) does; false leaves the menu as
 // is.
+volatile LONG enteredContent=-1;   // the pack's content id the last HQMain entered (-1: the stock list), for "cycle ... reboot"
 bool EnterRangeMode(unsigned char* gs) noexcept {
     const LONG content=InterlockedExchange(&rangeContent,-1);
+    InterlockedExchange(&enteredContent,content);
     if(content<0)return true;   // no range asked: the row alone
     if(!content){Log("RANGE the pack's content id is 0 in EDF6VehicleCrew.ini (the pack is not installed)");return false;}
     const int mode=FindRangeMode(gs,content);
@@ -578,8 +583,135 @@ bool EnterRangeMode(unsigned char* gs) noexcept {
     return true;
 }
 
+// --- "cycle N [STAY] [reboot]": leave the mission and enter the same one again, N times in one launch, the way a
+// player withdraws (docs/mission-cycle-re.md). For the Havok worker reset (EDF6VehicleCrew's HavokMultithread): the
+// mission's end frees the scene's resource group (MAINSCRIPT.AS PlayMission_Common: FreeGroup(RESOURCE_GROUP_SCENE)
+// -> FreeResourceGroup(2), EDF+0x70E330), which rebuilds Havok's thread pool (0x118F0A0 at 0x70E38E).
+//  - leaving: the pause menu's "withdraw" (HUiPause, 0x935340) is MissionMgr::End(mgr, MISSION_RESULT_ABORT = 2)
+//    (0x1F67F0; mgr = *(EDF+0x20B28A8)); the autopilot makes the same call on the game thread, from
+//    Application::OnWorldStepBegin (vtable slot EDF+0x17E91E0, 0x705A60), right after it ran the mission's update
+//    (MissionMgr::Update 0x1F6F40, which ends a mission the same way itself), STAY seconds after the mission runs;
+//  - back in the script, Result_Offline (the result screen, the save, a key press to close it) becomes
+//    PlayMission_Offline: the same row again, nothing written to the save. With "reboot" it becomes ReBoot instead
+//    (SystemReset 0x70FE00, its Havok reset at 0x70FEC6; then Boot, the title and HQMain the "mission" way again).
+constexpr std::size_t kMissionMgr=0x20B28A8,kMissionEnd=0x1F67F0,kMissionRunning=0x1F68B0,kWorldStepSlot=0x17E91E0,
+                      kWorldStep=0x705A60;
+constexpr int kMissionAbort=2;   // MAINSCRIPT COMMONTYPES.INNER.H MissionResult: UNKNOWN, CLEAR, ABORT, RETRY, ...
+// sub rsp,28h; mov rax,rcx; mov rcx,[rcx+40h]; test rcx,rcx; je; mov [rax+54h],edx; mov rax,[rcx]; call [rax+18h];
+// mov ecx,2
+const unsigned char kMissionEndSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0xC1,0x48,0x8B,0x49,0x40,0x48,0x85,0xC9,0x74,0x17,
+    0x89,0x50,0x54,0x48,0x8B,0x01,0xFF,0x50,0x18,0xB9,0x02,0x00,0x00,0x00};
+// mov rcx,[rcx+40h]; test rcx,rcx; jne +3; xor al,al; ret (then the script's state != 3)
+const unsigned char kMissionRunningSig[]={0x48,0x8B,0x49,0x40,0x48,0x85,0xC9,0x75,0x03,0x32,0xC0,0xC3};
+// sub rsp,48h; lea rdx,[rip+...] ("Application::OnWorldStepBegin")
+const unsigned char kWorldStepSig[]={0x48,0x83,0xEC,0x48,0x48,0x8D,0x15,0x35,0x3B,0x0E,0x01};
+using MissionEndFn=void(__fastcall*)(void*,int);
+using MissionRunningFn=bool(__fastcall*)(void*);
+using WorldStepFn=void(__fastcall*)(void*);
+WorldStepFn realWorldStep=nullptr;
+enum CyclePhase : LONG { kCycleOff, kCycleEntering, kCycleStaying, kCycleLeaving, kCycleDone };
+volatile LONG cyclePhase=kCycleOff,cycleTotal=0,cycleLeft=0,cycleStayMs=20000,cycleReboot=0,cycleRebooting=0;
+ULONGLONG cycleSince=0;   // the game thread's: when the current mission was first seen running
+
+void* MissionMgr() noexcept {return *reinterpret_cast<void**>(image+kMissionMgr);}
+
+// On the game thread, once a world step (after the step's own mission update).
+void CycleStep() noexcept {
+    const LONG phase=cyclePhase;
+    if(phase!=kCycleEntering && phase!=kCycleStaying)return;
+    void* const mgr=MissionMgr();
+    const bool running=mgr && reinterpret_cast<MissionRunningFn>(image+kMissionRunning)(mgr);
+    const ULONGLONG now=GetTickCount64();
+    if(phase==kCycleEntering) {
+        if(!running)return;
+        cycleSince=now;
+        const LONG left=cycleLeft,total=cycleTotal;
+        Log("CYCLE %ld/%ld entered: the mission runs (row %d)",left,total,
+            *reinterpret_cast<int*>(*reinterpret_cast<unsigned char**>(image+kGlobalState)+kMissionRow));
+        LogMemory("cycle entered");
+        if(left>=total) {
+            InterlockedExchange(&cyclePhase,kCycleDone);
+            Log("CYCLE done: left and entered again %ld times",total);
+            return;
+        }
+        InterlockedExchange(&cyclePhase,kCycleStaying);
+        return;
+    }
+    if(!running || now-cycleSince<static_cast<ULONGLONG>(cycleStayMs))return;   // (ended on its own: Result_Offline next)
+    InterlockedExchange(&cyclePhase,kCycleLeaving);
+    Log("CYCLE %ld/%ld leaving: MissionMgr::End(ABORT), as the pause menu's withdraw, after %.1f s (game thread %lu)",
+        cycleLeft+1,cycleTotal,(now-cycleSince)/1000.0,GetCurrentThreadId());
+    reinterpret_cast<MissionEndFn>(image+kMissionEnd)(mgr,kMissionAbort);
+}
+
+void __fastcall WorldStep(void* app) {
+    realWorldStep(app);
+    CycleStep();
+}
+
+// "cycle N [STAY seconds, default 20] [reboot]".
+void AskCycle(const char* text) noexcept {
+    int count=0;double stay=20.0;char how[16]{};
+    const int got=sscanf_s(text,"%*s %d %lf %15s",&count,&stay,how,static_cast<unsigned>(sizeof(how)));
+    if(got<1 || count<1 || count>10000 || !(stay>=1.0 && stay<=3600.0) || (got>=3 && _stricmp(how,"reboot"))) {
+        Log("CYCLE refused: \"%s\" (cycle N [STAY 1-3600 s] [reboot], N 1-10000)",text);
+        return;
+    }
+    if(cyclePhase!=kCycleOff && cyclePhase!=kCycleDone){Log("CYCLE refused: a cycle is already running");return;}
+    if(!edf::Matches(image,kMissionEnd,kMissionEndSig,sizeof(kMissionEndSig)) ||
+       !edf::Matches(image,kMissionRunning,kMissionRunningSig,sizeof(kMissionRunningSig)) ||
+       !edf::Matches(image,kWorldStep,kWorldStepSig,sizeof(kWorldStepSig))) {
+        Log("CYCLE refused: EDF+%#zx / %#zx / %#zx do not match",kMissionEnd,kMissionRunning,kWorldStep);
+        return;
+    }
+    if(!realWorldStep) {
+        void** const slot=reinterpret_cast<void**>(image+kWorldStepSlot);
+        void* next=nullptr;
+        if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&WorldStep),&next)) {
+            Log("CYCLE refused: Application::OnWorldStepBegin's slot EDF+%#zx not hooked",kWorldStepSlot);
+            return;
+        }
+        realWorldStep=reinterpret_cast<WorldStepFn>(next);
+    }
+    cycleTotal=count;cycleLeft=0;cycleStayMs=static_cast<LONG>(stay*1000.0);cycleReboot=got>=3;cycleRebooting=0;
+    InterlockedExchange(&cyclePhase,kCycleEntering);
+    Log("CYCLE armed: leave and enter again %d times, %.1f s in each mission, back in by %s",count,stay,
+        cycleReboot ? "ReBoot (SystemReset)" : "PlayMission_Offline");
+}
+
+// The script's next routine while a cycle runs: Result_Offline after a withdraw becomes the same mission again
+// (or ReBoot). Null: the routine as asked.
+const std::wstring* CycleRoutine(const std::wstring& decl) noexcept {
+    static const std::wstring play=L"string PlayMission_Offline()",reboot=L"string ReBoot()";
+    const LONG phase=cyclePhase;
+    if(phase!=kCycleStaying && phase!=kCycleLeaving && phase!=kCycleEntering)return nullptr;
+    if(decl==L"string Result_Offline()" && phase!=kCycleEntering) {
+        const LONG left=InterlockedIncrement(&cycleLeft);
+        Log("CYCLE %ld/%ld left%s: Result_Offline skipped (no result screen, nothing saved) -> %s",left,cycleTotal,
+            phase==kCycleStaying ? " (the mission ended on its own)" : "",cycleReboot ? "ReBoot" : "PlayMission_Offline");
+        LogMemory("cycle left");
+        InterlockedExchange(&cyclePhase,kCycleEntering);
+        if(!cycleReboot)return &play;
+        auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
+        missionDifficulty=*reinterpret_cast<int*>(gs+kDifficulty);
+        rangeContent=enteredContent;
+        missionRow=*reinterpret_cast<int*>(gs+kMissionRow);   // StartToTitle / HQMain take the "mission" way again
+        cycleRebooting=1;
+        return &reboot;
+    }
+    if(decl==L"string HQMain()")cycleRebooting=0;
+    // (the launch's own StartToTitle comes before the first mission: not a failure)
+    if(decl==L"string StartToTitle()" && !cycleRebooting && (phase!=kCycleEntering || cycleLeft>0)) {
+        InterlockedExchange(&cyclePhase,kCycleDone);
+        Log("CYCLE failed: the script went back to the title (%ld/%ld left)",cycleLeft,cycleTotal);
+    }
+    return nullptr;
+}
+
 void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
     if(InterlockedIncrement(&dumped)<=60){Log("COROUTINE call");DumpArg("rcx",out);DumpArg("rdx",decl);}
+    if(decl)
+        if(const std::wstring* next=CycleRoutine(*decl))return realCoRoutine(out,next);
     if(missionRow>=0 && decl) {
         if(*decl==L"string StartToTitle()") {
             static const std::wstring offline=L"string Debug_StartOffline()";
@@ -711,6 +843,7 @@ void RunCommand(const char* text) noexcept {
     if(!std::strcmp(word,"mem"))LogMemory("cmd");
     else if(!std::strcmp(word,"quit")){LogMemory("quit");Quit();}
     else if(!std::strcmp(word,"mission"))AskMission(text);
+    else if(!std::strcmp(word,"cycle"))AskCycle(text);
     else if(!std::strcmp(word,"probe")) {
         char what[32]{};
         const bool named=sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1;
