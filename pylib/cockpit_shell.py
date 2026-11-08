@@ -150,6 +150,12 @@ def self_hidden(md, fits):
     return out
 
 
+def native_bones(md):
+    """Each bone's native owner: a visibility clone (PREFIX, separate) stands for its parent, any other bone for itself.
+    A check of which bone carries which geometry reads skin indices through this, before or after the graft."""
+    return [b.parent if md.name_of(b.name).startswith(PREFIX) else b.index for b in md.bones]
+
+
 def _slice(mesh, triangles, clone_of):
     """An exact vertex subset, each weighted influence moved to its clone (`clone_of`: original bone -> clone): a
     blended vertex keeps every influence and weight, so the outside pose is the original's exactly."""

@@ -33,6 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import artillery_model  # noqa: E402
+import cockpit_shell  # noqa: E402
 import cockpits  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
@@ -318,7 +319,11 @@ def gun_problems(files: dict[str, bytes], game: vc.Game, md: Mdb | None) -> list
     the stock MAB unchanged)."""
     out: list[str] = []
     w = bind_world(md) if md is not None else None
-    pts = graft_pure.skinned_points(md) if md is not None else {}
+    pts: dict[int, list] = {}
+    if md is not None:   # a gun's vertices on its seat-visibility clone (cockpit_shell) are still that gun's
+        native = cockpit_shell.native_bones(md)
+        for bone, points in graft_pure.skinned_points(md).items():
+            pts.setdefault(native[bone], []).extend(points)
     body = artillery_model.turret_tris(md) if md is not None else []
     for stock, path, side in zip(STOCK_GUNS, VEHICLE.weapons, 'lr'):
         ref = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
