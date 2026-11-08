@@ -130,3 +130,22 @@ assert list(shell.triangle_masks(model,model.objects[0],mixed,[],[(0,1),(0,2)])[
 assert list(shell.triangle_masks(model,model.objects[0],mixed,[],[(0,1)])[0])==[0], \
        'a blended triangle with a visible influence stays whole'
 print('gunner cabin self-visibility and blended influences passed')
+
+# A cropped donor station never leaves the inside half of an assembly as a torn sheet: an assembly crossing the box
+# goes whole, a whole one inside stays.
+old_station=cockpit_kits._tank_station
+try:
+    points=np.array([[-.3,-.5,.3],[-.1,-.5,.3],[-.2,-.3,.3],     # inside, welded to the next (one assembly)
+                     [-.7,-.5,.3],[-.3,-.5,.3],[-.2,-.3,.3],     # crosses the box's left side
+                     [.1,-.5,.3],[.3,-.5,.3],[.2,-.3,.3]])       # a whole assembly inside
+    faces=np.array([[0,1,2],[3,4,5],[6,7,8]])
+    cockpit_kits._tank_station=lambda:(points,np.ones_like(points),np.zeros((len(points),2)),faces,
+                                       np.zeros(3,dtype=int),('',),np.array([[80,80,80]]))
+    cockpit_kits._tank_components.cache_clear()
+    parts,_=cockpit_kits._tank_parts(1.,(-.5,-1.,-.5),(.5,.5,.5),[])
+    kept=np.array([v.pos for p in parts for v in p.verts])
+    assert len(kept)==3 and kept[:,0].min()>=.1,'a crossing assembly goes whole; a whole one inside stays'
+finally:
+    cockpit_kits._tank_station=old_station
+    cockpit_kits._tank_components.cache_clear()
+print('tank donor station: whole assemblies only')
