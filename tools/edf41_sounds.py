@@ -13,6 +13,15 @@ Four groups (GROUPS), each written whole or not at all:
              it replaces, so no table moves and no @UTF writer is needed. The cue names stay 4.1's (a weapon SGO names its
              sound by cue); 1087 of the 1469 collide with EDF6's own SE cues, so the plugin loads this bank AFTER the stock
              ones and asks it by name only where the stock banks do not answer (or first, for 4.1 objects).
+  dragon     SOUND/PC/EDF41_EN_DRAGON.ACB  4.1's SOUND/PC/TIKYUU4_EN_DRAGON.ACB (ACB 1.22, waves embedded) patched as the weapon
+             bank is (OBJECT_BANKS: EDF6's AcfMd5Hash, Name 'tikyuu41_enDragon' as long as 4.1's 'tikyuu4_en_Dragon', a GUID
+             of ours: 4.1's bank has the GUID of EDF6's own bank of that name). EDF6's TIKYUU4_EN_DRAGON.ACB was cut for its
+             frog dragons: it keeps 4.1's en_DragonBig_v_* voices but not the giant's en_DragonBig_move_* (steps, wing beats,
+             landing, the fall) nor its flame hit. DragonBig401's SGO lists this bank in game_sound as
+             app:/sound/pc/edf41_en_dragon.acb (the /cri_bind/ route to Mods, as the weapon bank's path; the object loader
+             0x5466DF skips a bank that fails to load: the giant is then silent, nothing else), so the giant's own cues are
+             loaded while it is in the mission and the plugin plays them by name (tools/make_edf41_objects.py DRAGON_*,
+             src/edf41dragon.cpp).
   voice.JA / voice.EN
              SOUND/PC/EDF41_VOICE.<LANG>.AWB and EDF41_VOICE.<LANG>_LIST.AWE (the game builds the list's name from the AWB's
              by inserting _LIST before .AWE). The AWB is 4.1's with its version byte raised to 2, as EDF6 writes it (the
@@ -55,7 +64,7 @@ OWNER = 'edf41sound'   # pylib/ledger.py OWNERS
 # raise a group's number when its converter's output changes: that group (only) is converted again. table 2: the rows
 # gained the 'name' / 'caption' member names the game reads them by (version 1 wrote unnamed [speaker, text] lists).
 # table 4: the native lookup removes one trailing _E / _S, never an embedded one (E115_001_E_B keeps its full key).
-VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 4}
+VERSIONS = {'weapon': 1, 'dragon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 4}
 STAMP = '.edf41sound.json'   # Mods/: {group: {'version': VERSIONS[group], 'source': {file: [size, mtime ns]}}}
 
 Blob = bytes | bytearray
@@ -65,6 +74,24 @@ WEAPON_REL = 'SOUND/PC/EDF41_WEAPON_SE.ACB'
 BANK_NAME = b'tikyuu41_W'   # as long as EDF6's and 4.1's 'tikyuuX_SE': the string is patched where it stands
 OLD_NAME = b'tikyuuX_SE'
 GUID_SEED = b'edf41sound:weapon-se:' + BANK_NAME
+
+
+class ObjectBank:
+    """A 4.1 object's sound bank shipped whole under a name of ours (the dragon group in the module doc)."""
+    def __init__(self, source: str, rel: str, old: bytes, new: bytes) -> None:
+        if len(old) != len(new):
+            raise ValueError(f'{new!r} is not as long as {old!r}: the name is patched where it stands')
+        self.source, self.rel, self.old, self.new = source, rel, old, new
+        self.seed = b'edf41sound:object:' + new
+
+    def app_path(self) -> str:
+        """How an SGO's game_sound names the bank (the /cri_bind/ route: src/edf41sound.cpp, top)."""
+        return 'app:/' + self.rel.lower()
+
+
+OBJECT_BANKS: dict[str, ObjectBank] = {
+    'dragon': ObjectBank('TIKYUU4_EN_DRAGON.ACB', 'SOUND/PC/EDF41_EN_DRAGON.ACB', b'tikyuu4_en_Dragon', b'tikyuu41_enDragon'),
+}
 
 # language -> (4.1's AWB, 4.1's list); 4.1 ships two voice languages. EDF6 names them <base>.<LANG>.AWB, <base>.<LANG>_LIST.AWE.
 VOICES = {'JA': ('TIKYUU4_VOICE.AWB', 'TIKYUU4_VOICE_LIST.AWE'),
@@ -85,6 +112,7 @@ def table_rel(lang: str) -> str:
 
 GROUPS: dict[str, list[str]] = {
     'weapon': [WEAPON_REL],
+    **{group: [b.rel] for group, b in OBJECT_BANKS.items()},
     **{f'voice.{lang}': voice_rels(lang) for lang in VOICES},
     'table': [table_rel(lang) for lang in CAPTIONS],
 }
@@ -101,7 +129,8 @@ def plugin_path(root41: str, name: str) -> str:
 def sources41() -> list[str]:
     """Every EDF4.1 file any group is converted from, as a path under the EDF4.1 folder (what an EDF4.1 asset pack
     holds: tools/export_edf41_assets.py); the subtitle files are optional."""
-    return ([f'SOUND/PC/{SE_BANK}'] + [f'SOUND/PC/{n}' for lang in VOICES for n in VOICES[lang]]
+    return ([f'SOUND/PC/{SE_BANK}'] + [f'SOUND/PC/{b.source}' for b in OBJECT_BANKS.values()]
+            + [f'SOUND/PC/{n}' for lang in VOICES for n in VOICES[lang]]
             + ['/'.join((*PLUGINS, n)) for n in sorted(set(CAPTIONS.values()))])
 
 
@@ -109,6 +138,8 @@ def sources_of(group: str, root6: str, root41: str) -> list[str]:
     """The files a group is converted from."""
     if group == 'weapon':
         return [sound_path(root41, SE_BANK), sound_path(root6, SE_BANK)]
+    if group in OBJECT_BANKS:   # with EDF6's SE bank: its AcfMd5Hash (EDF6's banks share one)
+        return [sound_path(root41, OBJECT_BANKS[group].source), sound_path(root6, SE_BANK)]
     if group.startswith('voice.'):
         return [sound_path(root41, n) for n in VOICES[group[6:]]]
     return ([sound_path(root41, n) for lang in VOICES for n in VOICES[lang][1:]] + [os.path.join(root6, 'Root.cpk')]
@@ -128,23 +159,43 @@ def utf_fields(acb: Blob) -> tuple[int, int, dict[str, object]]:
     return 8 + strings_at, 8 + data_at, next(rows())
 
 
-def patch_bank(se41: bytes, hash6: bytes) -> bytes:
-    """4.1's SE bank with AcfMd5Hash = `hash6`, Name = BANK_NAME and a GUID of ours, patched where they stand."""
+def patch_bank(se41: bytes, hash6: bytes, old: bytes = OLD_NAME, new: bytes = BANK_NAME, seed: bytes = GUID_SEED) -> bytes:
+    """A 4.1 bank (the SE bank by default) with AcfMd5Hash = `hash6`, Name `old` -> `new` and a GUID of ours (md5 of
+    `seed`), patched where they stand."""
+    if len(old) != len(new):
+        raise ValueError(f'{new!r} is not as long as {old!r}')
     strings_at, data_at, row = utf_fields(se41)
-    if row['Name'] != OLD_NAME.decode():
-        raise ValueError(f'bank name {row["Name"]!r}, expected {OLD_NAME.decode()!r}')
+    if row['Name'] != old.decode():
+        raise ValueError(f'bank name {row["Name"]!r}, expected {old.decode()!r}')
     pool = se41[strings_at:data_at]
-    at = pool.find(OLD_NAME + b'\0')
-    if at < 0 or pool.count(OLD_NAME) != 1:
+    at = pool.find(old + b'\0')
+    if at < 0 or pool.count(old) != 1:
         raise ValueError('the bank name is not stored once in the string pool')
     out = bytearray(se41)
-    out[strings_at + at:strings_at + at + len(OLD_NAME)] = BANK_NAME
-    for field, value in (('AcfMd5Hash', hash6), ('AcbGuid', hashlib.md5(GUID_SEED).digest())):
+    out[strings_at + at:strings_at + at + len(old)] = new
+    for field, value in (('AcfMd5Hash', hash6), ('AcbGuid', hashlib.md5(seed).digest())):
         off, length = row[field]
         if length != 16 == len(value):
             raise ValueError(f'{field} is {length} bytes')
         out[data_at + off:data_at + off + 16] = value
     return bytes(out)
+
+
+def acf_hash6(root6: str) -> bytes:
+    """The AcfMd5Hash EDF6's banks are built against (its SE bank's)."""
+    with open(sound_path(root6, SE_BANK), 'rb') as f:
+        se6 = f.read()
+    _, data_at, row = utf_fields(se6)
+    off, length = row['AcfMd5Hash']
+    return se6[data_at + off:data_at + off + length]
+
+
+def object_bank(group: str, root6: str, root41: str) -> dict[str, Blob]:
+    """An OBJECT_BANKS group's file: 4.1's bank under our name and GUID, built against EDF6's ACF."""
+    b = OBJECT_BANKS[group]
+    with open(sound_path(root41, b.source), 'rb') as f:
+        data = f.read()
+    return {b.rel: patch_bank(data, acf_hash6(root6), b.old, b.new, b.seed)}
 
 
 def weapon_bank(root6: str, root41: str) -> dict[str, Blob]:
@@ -284,6 +335,8 @@ def make(group: str, root6: str, root41: str) -> dict[str, Blob]:
         return weapon_bank(root6, root41)
     if group == 'table':
         return voice_tables(root6, root41)
+    if group in OBJECT_BANKS:
+        return object_bank(group, root6, root41)
     return voice_bank(root41, group[6:])
 
 

@@ -65,6 +65,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import acb  # noqa: E402
 import edf41_sound  # noqa: E402
+import edf41_sounds  # noqa: E402  (tools/: the 4.1 banks the installer ships, OBJECT_BANKS)
 import edf5port  # noqa: E402
 import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
@@ -202,6 +203,8 @@ class Alias:
     add_locators: tuple['mab_legacy.Locator', ...] = ()   # MAB locators the class looks up unchecked that 4.1's MAB lacks
                               # (mab_legacy.mab_add_locators; SGO path)
     post: 'Callable[[dict], None] | None' = None   # last, on the SGO's members (SGO path): keys computed from the result
+    games_post: 'Callable[[Games, dict], None] | None' = None   # after post, with the games (SGO path): keys read from 4.1's
+                              # files (edf41_se: se41_table), before check_sounds
     take: tuple[str, ...] = ()   # template keys that replace 4.1's (SGO path): the look, when the class cannot drive 4.1's
                                  # model (CLASS_NAMES); with prune, the 4.1 files only that look needed are not shipped
 
@@ -741,9 +744,22 @@ ROOTS['ALIEN4LEGTANK301.SGO'] = 4
 #     capture state on the ground, 0x33599e) is DragonBig's ground_attack, the fire-breathing clip; glide_fly (the timed
 #     wing beat over the glide, 0x33a454) is glide_wingbeat; fly_damage_large (blown off in the air) is blow_off; damage_3 /
 #     fly_damage_3 (a third random hit clip) are damage_1 / fly_damage_1.
-#   - se_table in the class's order (0 hurt roar, 1 hit effect, 2 death roar, 3 blood, 4 fireball shot, 5 fireball hit,
-#     6..8 the bite): 4.1's names (ドラゴン大*, ドラゴン炎のブレス着弾) are not in EDF6's SEPRESET.SGO; the small dragon's of the
-#     same roles, the flame hit EDF6's grey flame thrower's.
+#   - the sounds (2026-11-08, docs/feedback-2026-11-08-edf41-dragon-sound.md). Every sound 4.1's giant makes is a 4.1 SEPRESET
+#     name (ドラゴン大*, ドラゴン炎*) EDF6's SEPRESET lacks, so EDF6 played none of them: not the MAB's 25 se events (roars, breath,
+#     steps, wing beats, landing; EDF6 resolves them by name at load, 0x6B9740) nor its se_table. They are 4.1's SEPRESET entries
+#     in edf41_se (se41_table) and the plugin plays them by cue: the MAB's se / se_stop events on the clips' own clock
+#     (edf41_dragon_se, edf41_sound.animation_events: 4.1's channels, bones, tracing), the se_table slots by filling the class's
+#     own presets (the vector 0x7B3310 builds at +0x1B18), the flame's hit sound into each flame bullet. Half the cues (the
+#     en_DragonBig_move_* and the flame hit) are in no EDF6 bank: EDF6's tikyuu4_en_Dragon was cut for its frog dragons. The
+#     installer ships 4.1's bank under a name of ours (tools/edf41_sounds.py OBJECT_BANKS['dragon']) and game_sound lists it.
+#   - se_table in the class's order (0 the hurt roar on entering the damage reaction, 0x335038; 1 the hit effect on a hit over
+#     a damage floor, 0x332449; 2 death roar, 3 blood at the death, 0x339C34; 4 fireball shot, 5 fireball hit; 6..8 the
+#     bite). 4.1's DragonBig has five (EDF41.exe, its presets 0x40 apart from [+0xF98]): [0] hit effect on a hit over a damage
+#     floor (0x1EDC15), [1] death roar and [2] blood at the death (0x1EF98B), [3] the pass over the target (0x1F158D, an AI
+#     state), [4] the flame's hit (into the flame bullet, 0x1ED62D). So 1 and 2 are 4.1's, 3 EDF6's own preset of 4.1's name;
+#     0 none ('': the giant roars from its damage clips' MAB, not per hit; an empty name is an empty preset, as a missing one);
+#     the fireball and the bite are never used (the class's fireball is not fired, the bite never closes). 4.1's pass sound
+#     ([3], 通過) is not played: the AI state that plays it is not mapped to EDF6's class.
 #   - the flame: 4.1 breathes FlameBullet02, one a frame, between the MAB events 火炎開始 and 火炎終了 of its three attack clips
 #     (0x1ee7c0 / 0x1ee7e0, 0x1ed530); EDF6's class hard-codes FlameBullet01 fireballs (0x33ae30 -> 0x32dd60) and registers no
 #     火炎* event. edf41_dragon tells the plugin each attack state's flame window (from DragonBig's MAB, read here) and the flame
@@ -759,10 +775,11 @@ DRAGON_OVERRIDE: tuple[tuple[str, object], ...] = (
     ('dragon_RagdollReactionScale', 2.5),
     ('dragon_AttackBulletSetting', [4.0, 2.0, 1.0e6, 0.2, 0.0]),
     ('dragom_AttackCaptureSetting', [1.0, 0.0, 0.0, 1.0]),
-    ('se_table', ['ドラゴン小ｖダメージ大', 'ドラゴン小ヒットエフェクト', 'ドラゴン小ｖ死亡大', '敵共通血しぶき大', 'ドラゴン火炎弾発射',
+    ('se_table', ['', 'ドラゴン大ヒットエフェクト', 'ドラゴン大ｖ死亡大', '敵共通血しぶき大', 'ドラゴン火炎弾発射',
                   'グレイ火炎放射命中', 'ドラゴン小噛みつき', 'ドラゴン小噛まれダメージ', 'ドラゴン小噛まれ飛行中の風']),
     ('edf41_flame', DRAGON_FLAME),
-    # 4.1's collision numbers; its sound (ドラゴン大衝突) has no SEPRESET name: the small dragon's
+    # 4.1's collision numbers; its sound (ドラゴン大衝突) has no SEPRESET name: the small dragon's (EDF6 plays ragdoll_contact
+    # itself; where the class keeps that preset is not known, so the plugin cannot fill it)
     ('ragdoll_contact', ['ドラゴン小衝突', 2000.0, 0.5, 10.0, 120]),
 )
 def dragon_flame_windows(mab: bytes) -> list:
@@ -783,6 +800,39 @@ def dragon_marks(members: dict) -> None:
     members['edf41_dragon'] = dragon_flame_windows(members['animation_model'][2])
 
 
+DRAGON_SE_PREFIXES = ('ドラゴン大', 'ドラゴン炎')   # 4.1's SEPRESET entries of the giant (se41_table)
+DRAGON_FLAME_HIT = 'ドラゴン炎のブレス着弾'      # 4.1's se_table[4]: the flame bullet's hit sound (src/edf41dragon.cpp Breathe)
+
+
+def dragon_sounds(games: 'Games', members: dict) -> None:
+    """edf41_se: 4.1's SEPRESET entries of every 4.1 name the giant plays (its MAB se events, the se_table slots that hold
+    4.1 names, the flame's hit); game_sound with 4.1's dragon bank as the installer ships it (see the giant dragon above)."""
+    rel = 'OBJECT/DRAGONBIG401.SGO'
+    table = se41_table(games, DRAGON_SE_PREFIXES)
+    have = {e[0] for e in table}
+    names = mab_sound_names(members) + [n for n in strings(members.get('se_table')) if n in have] + [DRAGON_FLAME_HIT]
+    missing = sorted(set(n for n in mab_sound_names(members) if not n.startswith(DRAGON_SE_PREFIXES)))
+    if missing:
+        raise ValueError(f'{rel}: MAB sounds {missing} are not the giant\'s own (DRAGON_SE_PREFIXES)')
+    if set(names) - have:
+        raise ValueError(f'{rel}: sounds {sorted(set(names) - have)} are not in EDF4.1\'s SEPRESET.SGO')
+    members['edf41_se'] = [e for e in table if e[0] in set(names)]
+    bank = edf41_sounds.OBJECT_BANKS['dragon'].app_path()
+    members['game_sound'] = [*[b for b in strings(members.get('game_sound')) if b != bank], bank]
+
+
+def dragon_events(files: dict[str, bytes]) -> None:
+    """edf41_dragon_se: the MAB's se / se_stop events per CAS state (edf41_sound.animation_events, on the CAS as the alias
+    left it: capture plays ground_attack ...), which src/edf41dragon.cpp plays on the main player's clock."""
+    rel = 'OBJECT/DRAGONBIG401.SGO'
+    version, members = sgo.read(files[rel])
+    am = members['animation_model']
+    members['edf41_dragon_se'] = edf41_sound.animation_events(files[rel_of(am[1])], mab_block(am[2]))
+    if not members['edf41_dragon_se']:
+        raise ValueError(f'{rel}: no CAS state plays a clip with MAB sounds')
+    files[rel] = sgo.write_depth_first(version, members)
+
+
 DRAGON_ALIAS = Alias(
     'DragonSmall', 'DRAGONSMALL401.SGO', (), override=DRAGON_OVERRIDE,
     state_aliases=(('main', 'capture', 'ground_attack'), ('main', 'glide_fly', 'glide_wingbeat'),
@@ -791,7 +841,7 @@ DRAGON_ALIAS = Alias(
     add_locators=(mab_legacy.Locator('捕食判定', 'head', 0, (0.0, 0.0, 0.5, 1.0), 2.0),
                   mab_legacy.Locator('捕食固定位置', 'ago', 2, (0.0, -0.1, 0.8, 1.0), (0.1, 0.1, 0.5, 1.0),
                                      (0.7853982, 1.5707964, 0.7853982, 1.0))),
-    post=dragon_marks)
+    post=dragon_marks, games_post=dragon_sounds)
 
 
 ALIASES['DRAGONBIG401.SGO'] = DRAGON_ALIAS
@@ -1701,8 +1751,35 @@ PLUGIN_SOUND_CLASSES = {'UfoMother401': "4.1's Earth Eater: se_table names 4.1 p
                                         "edf41_401_se carries their cues for src/edf41mother401.cpp"}
 
 
+# The sounds EDF6's own code plays by SEPRESET name besides SE_KEYS: every se event of the object's MAB (EDF6 parses them at load,
+# 0x6B9740: 0x7B16F0 fills each event's preset by name, an empty one when the name is not there, and plays it on the event)
+# and ragdoll_contact[0] (the collision sound). A name of these that EDF6's SEPRESET lacks is silent, as DragonBig401's 25 MAB
+# sounds were (2026-11-08); the plugin can play it instead from the object's edf41_se only where it follows the object's clips
+# itself (src/edf41dragon.cpp, src/edf41robo.cpp).
+# Silent 4.1 sounds known and not yet given a player, per class: (the names, why). check_sounds holds an object to its class's
+# set (a new silent name fails the build; one given a player must be taken out here).
+KNOWN_SILENT: dict[str, tuple[frozenset[str], str]] = {
+    'MovingFortress': (frozenset({'４足歩行メカダウン', '４足歩行メカハッチ停止', '４足歩行メカハッチ稼動', '４足歩行メカ旋回音',
+                                  '４足歩行メカ歩行音', '４足歩行メカ破壊', '４足歩行メカ足音'}),
+                       'MAB events; the cues are in tikyuu4_en_4LegTank, no EDF6 preset names them'),
+    'AntHill': (frozenset({'蟻塚稼動もごもご'}), 'MAB event; its cue en_moundAnt_driveMogoMogo is in no EDF6 bank'),
+    'BigNest': (frozenset({'蟻塚稼動もごもご'}), 'MAB event; its cue en_moundAnt_driveMogoMogo is in no EDF6 bank'),
+    'UfoCarrier508': (frozenset({'E4キャリア301ハッチオープンド', 'E4キャリア301ハッチクローズド', 'E4キャリア301ハッチ稼働オープン',
+                                 'E4キャリア301ハッチ稼働クローズ', 'E4キャリアオープン一個', 'E4キャリアクローズ一個'}),
+                      "MAB hatch events; 301's cues are in no EDF6 bank, 401's in tikyuu4_en_UFOcarrier401 under no preset"),
+    'EDF6_Berserker_Large': (frozenset({'歩行メカ衝突', 'ヘクトル衝突'}),
+                             'ragdoll_contact; its cue en_Hector_down is in tikyuu4_en_Hector, no EDF6 preset names it'),
+    'UfoSmall507': (frozenset({'EDF4小型UFO衝突'}),
+                    "ragdoll_contact; the same cue (en_UFOmini_crush) as EDF6's 小型UFO衝突, not renamed yet"),
+}
+# Part classes the plugin builds whose MAB events it plays from their hull's edf41_se (src/edf41mother.cpp: the cannons'
+# edf41_sound_events, the hatches by code): the hull's check holds those cues to its banks.
+HULL_SOUND_CLASSES = {'UfoMother301_BigCannon', 'UfoMother301_Cannon', 'UfoMother301_Hatch', 'UfoMother301_Panel'}
+
+
 def sound_cues(games: 'Games') -> tuple[dict[str, str], dict[str, set[str]]]:
-    """({SEPRESET name: its cue}, {bank file name: its cues}) of the EDF6 install (cached on `games`)."""
+    """({SEPRESET name: its cue}, {bank file name: its cues}) of the EDF6 install, and the 4.1 banks the installer ships
+    under names of ours (tools/edf41_sounds.py OBJECT_BANKS, read from 4.1's own file) (cached on `games`)."""
     if not hasattr(games, 'seset'):
         root = dsgo.parse(games.read6('SOUND/SEPRESET.SGO')).root
         games.seset = {n: root.items[i].items[0] for i, n in root.names.items()}
@@ -1712,19 +1789,46 @@ def sound_cues(games: 'Games') -> tuple[dict[str, str], dict[str, set[str]]]:
             if name.upper().endswith('.ACB'):
                 with open(os.path.join(folder, name), 'rb') as f:
                     games.banks[name.upper()] = set(acb.cue_names(f.read()))
+        for b in edf41_sounds.OBJECT_BANKS.values():
+            with open(edf41_sounds.sound_path(games.edf41_root, b.source), 'rb') as f:
+                games.banks[b.rel.rsplit('/', 1)[-1].upper()] = set(acb.cue_names(f.read()))
     return games.seset, games.banks
 
 
+def mab_of(members: dict) -> bytes | None:
+    """The object's MAB block (animation_model[2]) as bytes, from sgo.read (bytes), sgo.load ('raw:<hex>') or a DSGO."""
+    am = members.get('animation_model')
+    mab = am[2] if isinstance(am, list) and len(am) > 2 else None
+    if isinstance(mab, str) and mab.startswith('raw:'):
+        mab = bytes.fromhex(mab[4:])
+    return bytes(mab) if isinstance(mab, (bytes, bytearray)) and mab[:4] == b'MAB' + bytes(1) else None
+
+
+def mab_sound_names(members: dict) -> list[str]:
+    """The SEPRESET names the object's MAB se events play (EDF6 resolves them itself, see KNOWN_SILENT)."""
+    mab = mab_of(members)
+    if mab is None:
+        return []
+    return [str(p.get('name', '')) for events in mab_legacy.mab_event_params(mab).values()
+            for kind, _time, p in events if kind == 'se' and p.get('name')]
+
+
 def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
-    """ValueError when a sound name of the object (SE_KEYS) cannot play: it is not in SEPRESET.SGO (an empty preset:
-    silent), or its cue is in no bank the object lists in game_sound nor in a resident one (the player the cue names is
-    null: the M015 crash of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50)."""
+    """ValueError when a sound name of the object cannot play: SE_KEYS, its MAB se events and ragdoll_contact. A name is
+    played by EDF6 from SEPRESET.SGO (not there: an empty preset, silent) or by the plugin from the object's edf41_se; its cue
+    must be in a bank the object lists in game_sound or a resident one (else the player the cue names is null: the M015 crash
+    of UFOCARRIER, the sound system derefs it at EDF+0x240AD0 via 0x7B3310 / 0x6ABF50). A MAB name the plugin plays must not
+    be in SEPRESET too (EDF6 would play it as well). Silent names only as KNOWN_SILENT lists them for the class."""
     members = dsgo.to_py(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.load(data=data)
-    if str(members.get('xgs_scene_object_class')).split('_')[0] in PLUGIN_SOUND_CLASSES:
+    cls = str(members.get('xgs_scene_object_class'))
+    if cls.split('_')[0] in PLUGIN_SOUND_CLASSES:
         return
     names = [n for k in SE_KEYS for n in strings(members.get(k)) if n]
+    mab_names = [] if cls in HULL_SOUND_CLASSES else mab_sound_names(members)
+    contact = members.get('ragdoll_contact')
+    contact_names = [contact[0]] if isinstance(contact, list) and contact and isinstance(contact[0], str) and contact[0] else []
     own = {e[0]: e[1] for e in members.get('edf41_se', []) if isinstance(e, list) and len(e) >= 2}
-    if not names and not own:
+    if not names and not mab_names and not contact_names and not own:
         return
     seset, banks = sound_cues(games)
     loaded = set(RESIDENT_BANKS) | {s.rsplit('/', 1)[-1].upper() for s in strings(members.get('game_sound'))}
@@ -1733,14 +1837,25 @@ def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
     for n, cue in own.items():
         if cue not in cues:
             raise ValueError(f'{rel}: sound {n!r} (edf41_se) plays cue {cue}, which none of {sorted(loaded)} holds')
-    for n in names:
+    twice = sorted({n for n in mab_names if n in own and n in seset})
+    if twice:
+        raise ValueError(f"{rel}: MAB sounds {twice} are in SEPRESET.SGO and the plugin's edf41_se: they would play twice")
+    known, _why = KNOWN_SILENT.get(cls, (frozenset(), ''))
+    silent = []
+    for n in dict.fromkeys(names + mab_names + contact_names):
         if n in own:
             continue
         if n not in seset:
-            raise ValueError(f'{rel}: sound {n!r} is not in SEPRESET.SGO')
-        if seset[n] not in cues:
-            raise ValueError(f'{rel}: sound {n!r} plays cue {seset[n]}, which none of {sorted(loaded)} holds')
-
+            silent.append(n)
+        else:
+            # a preset is one cue, or one per ground material ({'normal': cue, 'soil': cue, ...}: the soldiers' steps)
+            preset = seset[n] if isinstance(seset[n], str) else dsgo.to_py(seset[n])
+            gone = sorted(c for c in strings(preset) if c not in cues)
+            if gone:
+                raise ValueError(f'{rel}: sound {n!r} plays cues {gone}, which none of {sorted(loaded)} holds')
+    unknown = [n for n in silent if n not in known]
+    if unknown:
+        raise ValueError(f"{rel}: sounds {unknown} are not in SEPRESET.SGO nor in the object's edf41_se: silent")
 
 
 def check_vehicle_sounds(games: 'Games', data: bytes, rel: str) -> None:
@@ -1827,6 +1942,7 @@ def archives(root: str) -> dict[str, rootcpk.Game]:
 class Games:
     def __init__(self, edf41: str, edf6: str) -> None:
         self.edf6_root = edf6
+        self.edf41_root = edf41
         self.in4 = archives(edf41)
         self.in6 = archives(edf6)
         self.have6 = set(self.in6)
@@ -2303,7 +2419,14 @@ NATIVE_FIXES: dict[str, Callable[['Games', dict[str, bytes]], None]] = {MOTHER30
 # The 401 has no stock template (no alias): its fix runs on 4.1's converted files as they are.
 ROOTS.update(MOTHER401_ROOTS)
 NATIVE_FIXES.update({root: mother401_fix for root in (*MOTHER401_ROOTS, *MOTHER401_DLC_ROOTS)})
-NATIVE_FIXES['DRAGONBIG401.SGO'] = dragon_ragdoll_fix   # after its alias (the giant dragon above)
+def dragon_fix(games: 'Games', files: dict[str, bytes]) -> None:
+    """After the giant's alias: its ragdoll's mass, its MAB sound table; the sounds checked again with that table."""
+    dragon_ragdoll_fix(games, files)
+    dragon_events(files)
+    check_sounds(games, files['OBJECT/DRAGONBIG401.SGO'], 'OBJECT/DRAGONBIG401.SGO')
+
+
+NATIVE_FIXES['DRAGONBIG401.SGO'] = dragon_fix   # after its alias (the giant dragon above)
 
 
 # ---- UfoRobo, EDF4.1's transforming ship / walking robot (docs/edf41-uforobo.md) -----------------------------------------
@@ -2496,6 +2619,8 @@ def alias(games: Games, root: str, files: dict[str, bytes], a: Alias) -> None:
         members['animation_model'] = [am[0], 'app:/' + cas.lower(), *am[2:]]
     if a.post:
         a.post(members)
+    if a.games_post:
+        a.games_post(games, members)
     files[rel] = sgo.write_depth_first(version, members)
     if a.prune:
         prune(files, rel)
