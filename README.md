@@ -534,13 +534,13 @@ EDF6AutoTurret 时，键仍按 ini。
 ## 物理多核（HavokMultithread）
 
 原版游戏启动时按 CPU 线程数建好了 Havok 物理的工作线程（8 核 16 线程的机器上是 15 个），却从不把物理任务交给它们：
-每帧的碰撞检测、约束求解、子弹的批量射线查询全在游戏主线程上一个个跑。开启 ini `HavokMultithread=1`（**默认关**，还没实测）后，
+每帧的碰撞检测、约束求解、子弹的批量射线查询全在游戏主线程上一个个跑。ini `HavokMultithread=1`（默认开）时，
 插件在每帧物理步进前把这组工作线程接到物理任务队列上，任务图在多核上并行；碰撞回调（伤害、音效、地图破坏等）
 仍由 Havok 的世界级任务一个接一个执行，和主线程互斥。切换任务、退出关卡前，插件先关闭队列、等工作线程全部退出，
 再让游戏释放它们（原版这里不关队列，接上工作线程后会死锁）。只在启动时读这个键，改了要重启游戏；0 = 原版。
 `Debug=1` 时还会给三个世界级物理任务（PostCollide / PreSolve / PostSolve）挂一个只计数的探针，每次切换任务在日志里记
 `HAVOKMT world tasks so far: … overlapping, at most N at once`，出现重叠会立刻记一行 `OVERLAPPED`。
-`src/havok_mt.cpp`，逆向与审计见 `docs/havok-mt-re.md`（静态分析、离线检查与 unicorn 模拟，未进游戏实测；实测项见该文档 §13）。
+`src/havok_mt.cpp`，逆向与审计见 `docs/havok-mt-re.md`（静态分析、离线检查、unicorn 模拟与实测数据，§13）。
 
 ## 原版问题修正：引导路线穿墙
 

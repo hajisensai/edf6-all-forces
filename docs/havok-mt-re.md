@@ -229,7 +229,7 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
   - §9 的 teardown 顺序，和打开一起打（§12）；
   - 挂 worker 前核对 vtable；
   - 世界级任务探针（`Debug=1`，§12）：实测时确认三者同一时刻最多一个；§10 已逐个确认会在 worker 上跑的插件代码只有两处且都安全，其余钩子（含克隆的敌人 vtable 槽）都不在物理任务里；新加的钩子若落在物理回调里，按 §3 / §10 的方法重审。
-- **默认关**（ini `HavokMultithread=0`，`Config::havokMultithread=false`）：还没做过任何实机测试。按 §13 测完（含 50 次切换任务、正常退出、联机房主 / 客人各算一遍对比、探针无重叠）并把证据写进本文档后，再改成默认开。
+- **默认开**（ini `HavokMultithread=1`，`Config::havokMultithread=true`）：§13 的实测（帧时间 A/B、进出任务 20 次 + 系统重启路径 3 次、探针 0 重叠、正常退出）都过了之后改的；联机对比与音效逐项对比还没做，见 §13 末尾。
 
 ## 附：扫描脚本
 
@@ -243,7 +243,7 @@ modifier 在 `0x704F20` 经 `0xDD3E00` 注册，共三个：Havok 原版 FlipBac
 
 ## 12. 实现（`src/havok_mt.cpp`、`src/havok_mt_logic.h`）
 
-ini `HavokMultithread`（**默认 0**，实机测完再定；只在插件启动时读，改了要重启游戏）。为 0 时什么都不改，日志 `HAVOKMT off`。
+ini `HavokMultithread`（默认 1，实测见 §13；只在插件启动时读，改了要重启游戏）。为 0 时什么都不改，日志 `HAVOKMT off`。
 
 插件启动时（`src/plugin.cpp`，`InstallPhysics()` 之后）先核对，任何一项不符就一处不改、记一行 `HAVOKMT refused: …`：
 
@@ -288,3 +288,23 @@ ini 改 `HavokMultithread=1`、保持 `Debug=1`。装 DLL 前核对日志里 `HA
 6. **回调换线程**：碰撞音效（载具撞击、弹壳落地、布娃娃落地）、碰撞伤害（`RigidBodyContactDamageControl`、巨型单位挤压）、地图破坏、EDF4.1 机器人（edf41robo）的接触冷却，与原版逐项对比，留意崩溃、丢声、重复伤害。
 7. **世界级任务探针**：每次复位的 `HAVOKMT world tasks so far` 行里 `overlapping` 必须是 0、`at most 1 at once`，`on worker threads` 应大于 0（说明回调确实换到了 worker）；任何一行 `OVERLAPPED` 都是阻断项（§7 第 1 条：`0x9EC7A0` 合并的子图与 PostCollide / PreSolve 没有静态排序）。实测中出现回调期间的随机崩溃或物理状态错乱时也优先怀疑这里（`HavokMultithread=0` 能消失即是）。
 8. 测完把数据（帧时间表、50 次切换的日志摘录、探针行、联机对比结论）写进本节，再把 ini 与 `Config` 默认改成 1。
+
+### 实测结果（2026-11-08，16 线程机器，压测树：本分支 + #324/#325/#326/#329/#330）
+
+日志：`HAVOKMT on` → 进关卡 `HAVOKMT 7 worker threads process the physics task queue (… attach #1)`（这台机器上池给出 7 个 worker）。
+
+帧时间 A/B（`perfrun stress:N --ini HavokMultithread=0/1`，同一 DLL，清洁窗口 20 s；怪的数量随刷怪进度略有出入）：
+
+| 档位 | 关 | 开 | havok_update 每帧 |
+|---|---|---|---|
+| stress:1 | 16.70 ms | 16.70 ms（顶在 60 fps，最差 5 s 中位 29.0 → 24.9 ms） | 7.3% → 5.5% |
+| stress:10 | 16.96 ms | 16.83 ms | 21.0% → 12.8% |
+| stress:30 | 63.26 ms（15.8 fps） | 47.87 ms（20.9 fps） | 约 15 → 5 ms |
+| stress:100 | 124.39 ms（8.0 fps） | 108.20 ms（9.2 fps） | 约 18 → 9 ms |
+
+进出任务（tests/autopilot `cycle`：游戏线程上 `MissionMgr::End(ABORT)`，与暂停菜单撤退同一调用，再直接进同一任务；docs/mission-cycle-re.md）：
+- `--cycle 20`：20 次 `HAVOKMT reset: … closed and the workers back in 0.03–0.42 ms (detach #1..#20)`、21 次 attach，`world tasks so far: 42896 runs, 25873 on worker threads, 0 overlapping, at most 1 at once`，正常退出。复位都经 `0x70E38E`（任务结束时脚本 `FreeResourceGroup(SCENE)`）。
+- `--cycle 3 --cycle-reboot`（`ReBoot` → `SystemReset`，`0x70FEC6`）：3 次复位 0.04–0.08 ms，0 重叠，正常退出。`SystemReset` 在任务结束的复位之后才到，那时 worker 已经离开队列，所以它那一处只是核对后放行。
+- 所有压测与循环都是关窗口正常退出（析构 `0x118EC70` 自带 close），没有一次挂住。
+
+还没做的：联机两台机器一开一关 / 都开的对比（第 5 项），碰撞音效与伤害的逐项对比（第 6 项），以及暂停时 worker 的 CPU（第 4 项，压测的线程表里空闲 worker 各在 2–4% 一核以内，没有自旋占满）。
