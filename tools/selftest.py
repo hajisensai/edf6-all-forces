@@ -6639,7 +6639,7 @@ def npc_ai_asks_less() -> None:
     own `human` (HideWalkUp) and an object the game's team walk hands over (Gather's FriendVisit, the ride prompt's
     visit) read without asking; ArmsOf's pages asked in two batches; MoveTo's floor rays only for a caller whose route
     turn it is. Each checked against the code before it offline (npc_core_check, common_host_check,
-    ground_navigation_runtime)."""
+    ground_navigation_runtime, crew_first_use_test)."""
     code, crew, nav, navh = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/ground_navigation.cpp'), src('src/ground_navigation.h')
     memh, mem, cmake = src('common/edf/memory.h'), src('common/memory.cpp'), src('CMakeLists.txt')
     body = lambda text, head: text.split(head, 1)[1].split('\n}\n', 1)[0]
@@ -6647,6 +6647,7 @@ def npc_ai_asks_less() -> None:
     assert 'IsAnyPlayerSelf(h)' in hide and 'IsAnyPlayer(h)' not in hide, "HideWalkUp: the Think's own object, not asked"
     visit = body(code, 'void __fastcall FriendVisit(void* self,void* object) noexcept {')
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
+    assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
     assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
     arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
@@ -6661,7 +6662,8 @@ def npc_ai_asks_less() -> None:
     assert 'bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;' in navh
     prompt = body(crew, 'void __fastcall PromptHook(void* functor,void* object) {')
     assert 'const auto vtable=At<const void*>(object,0);' in prompt and 'ClassOfVtable(vtable)<0' in prompt
-    assert 'ClassOf(object)' not in prompt and prompt.count('IsJet(object)') == prompt.count('body506 && IsJet(object)') == 2,         'the ride prompt: IsJet asked of a 506 alone'
+    assert 'ClassOf(object)' not in prompt and prompt.count('IsJet(object)') == 2 and         prompt.count('body506 && IsJet(object)') == 1 and prompt.count('body506 && ((IsJet(object)') == 1,         'the ride prompt: IsJet asked of a 506 alone'
+    assert prompt.count('IsSub(object)') == 1 and '|| IsSub(object))))return;' in prompt, 'the ride prompt: IsSub asked of a 506 alone'
     assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept;' in memh
     assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept {' in mem and 'class PrefetchBatch' in mem
     for test in ('npc_core_check', 'common_host_check'):
