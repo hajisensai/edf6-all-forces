@@ -40,12 +40,12 @@ public:
             const float* p=at(i);
             if(!Regular(p[0],p[2]))continue;
             if(!any){x0=x1=p[0];z0=z1=p[2];any=true;continue;}
-            x0=std::min(x0,p[0]);x1=std::max(x1,p[0]);z0=std::min(z0,p[2]);z1=std::max(z1,p[2]);
+            x0=(std::min)(x0,p[0]);x1=(std::max)(x1,p[0]);z0=(std::min)(z0,p[2]);z1=(std::max)(z1,p[2]);
         }
         minX=x0;minZ=z0;
         cell=want>0.5f && std::isfinite(want) ? want : 16.0f;
         // At most ~4 cells a point (and a few hundred for a handful): a coarser cell when the points spread far apart.
-        const double budget=std::max(4.0*count,256.0);
+        const double budget=(std::max)(4.0*count,256.0);
         for(;;) {
             const double cx=std::floor((static_cast<double>(x1)-x0)/cell)+1.0,cz=std::floor((static_cast<double>(z1)-z0)/cell)+1.0;
             if(cx*cz<=budget){nx=static_cast<int>(cx);nz=static_cast<int>(cz);break;}
@@ -88,13 +88,13 @@ public:
     template<class F> void Capsule(const float* a,const float* b,float margin,F&& f) const {
         if(!nx){for(int i:odd)f(i);return;}
         if(!std::isfinite(a[0]+a[2]+b[0]+b[2]+margin)) {   // not a number or infinite: the box (every point at worst)
-            Box(std::min(a[0],b[0])-margin,std::min(a[2],b[2])-margin,std::max(a[0],b[0])+margin,std::max(a[2],b[2])+margin,f);
+            Box((std::min)(a[0],b[0])-margin,(std::min)(a[2],b[2])-margin,(std::max)(a[0],b[0])+margin,(std::max)(a[2],b[2])+margin,f);
             return;
         }
         for(int i:odd)f(i);
-        const float m=margin+Pad(std::min(a[0],b[0])-margin,std::max(a[0],b[0])+margin)+
-                      Pad(std::min(a[2],b[2])-margin,std::max(a[2],b[2])+margin);
-        const int r0=ClampZ(std::min(a[2],b[2])-m),r1=ClampZ(std::max(a[2],b[2])+m);
+        const float m=margin+Pad((std::min)(a[0],b[0])-margin,(std::max)(a[0],b[0])+margin)+
+                      Pad((std::min)(a[2],b[2])-margin,(std::max)(a[2],b[2])+margin);
+        const int r0=ClampZ((std::min)(a[2],b[2])-m),r1=ClampZ((std::max)(a[2],b[2])+m);
         const double dz=static_cast<double>(b[2])-a[2],dx=static_cast<double>(b[0])-a[0];
         for(int row=r0;row<=r1;++row) {
             // The row's z band (a point in it may sit a rounding off it: m has the pad), the segment's t that reaches it.
@@ -103,11 +103,11 @@ public:
             if(std::fabs(dz)>1e-9) {
                 double u0=(lo-a[2])/dz,u1=(hi-a[2])/dz;
                 if(u0>u1)std::swap(u0,u1);
-                t0=std::max(t0,u0);t1=std::min(t1,u1);
+                t0=(std::max)(t0,u0);t1=(std::min)(t1,u1);
                 if(t0>t1)continue;
             } else if(a[2]<lo || a[2]>hi) continue;
             const double xa=a[0]+dx*t0,xb=a[0]+dx*t1;
-            const float xl=static_cast<float>(std::min(xa,xb)-m),xr=static_cast<float>(std::max(xa,xb)+m);
+            const float xl=static_cast<float>((std::min)(xa,xb)-m),xr=static_cast<float>((std::max)(xa,xb)+m);
             const int c0=ClampX(xl),c1=ClampX(xr);
             for(int c=c0;c<=c1;++c)Run(row*nx+c,f);
         }
@@ -126,15 +126,15 @@ public:
         if(!nx || clip.cx0>clip.cx1 || clip.cz0>clip.cz1)return;
         const int cx=CellXUnclamped(x),cz=CellZUnclamped(z);
         // The ring that first meets the clip, the last one that does.
-        const int gap=std::max({clip.cx0-cx,cx-clip.cx1,clip.cz0-cz,cz-clip.cz1,0});
-        const int last=std::max({cx-clip.cx0,clip.cx1-cx,cz-clip.cz0,clip.cz1-cz});
+        const int gap=(std::max)({clip.cx0-cx,cx-clip.cx1,clip.cz0-cz,cz-clip.cz1,0});
+        const int last=(std::max)({cx-clip.cx0,clip.cx1-cx,cz-clip.cz0,clip.cz1-cz});
         const float slack=Pad(x,x)+Pad(z,z)+1e-6f*cell*static_cast<float>(nx+nz);
         for(int r=gap;r<=last;++r) {
             if(r>0) {
                 const float lb=static_cast<float>(r-1)*cell-slack;
                 if(stop(lb>0.0f ? lb : 0.0f))return;
             }
-            const int x0=std::max(cx-r,clip.cx0),x1=std::min(cx+r,clip.cx1),z0=std::max(cz-r,clip.cz0),z1=std::min(cz+r,clip.cz1);
+            const int x0=(std::max)(cx-r,clip.cx0),x1=(std::min)(cx+r,clip.cx1),z0=(std::max)(cz-r,clip.cz0),z1=(std::min)(cz+r,clip.cz1);
             if(x0>x1 || z0>z1)continue;
             for(int row=z0;row<=z1;++row) {
                 if(row==cz-r || row==cz+r){for(int c=x0;c<=x1;++c)Run(row*nx+c,f);continue;}
@@ -165,7 +165,7 @@ private:
     int ClampZ(float z) const noexcept { return CellZ(z); }
     // A pad for a bound's rounding against the callers' own float expressions (a few ulps of the magnitudes in play).
     float Pad(float a,float b) const noexcept {
-        const float m=std::max({std::fabs(a),std::fabs(b),std::fabs(minX),std::fabs(minZ)});
+        const float m=(std::max)({std::fabs(a),std::fabs(b),std::fabs(minX),std::fabs(minZ)});
         return std::isfinite(m) ? 1e-3f+m*4e-6f : 0.0f;
     }
     template<class F> void Run(int c,F& f) const {

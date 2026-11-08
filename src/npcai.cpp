@@ -32,6 +32,7 @@
 #include "ground_navigation.h"
 #include "pickup.h"
 #include "npc_logic.h"
+#include "npc_grid.h"
 #include "npc_backpack.h"
 #include "ifc_model.h"
 #include "npc_mark.h"
@@ -134,6 +135,9 @@ constexpr int kMaxArms=16,kMaxRoot=16;
 // enemies; fixed 256 / 1024 / 512 left the rest without the plugin's AI or out of target choice). Their first sizes:
 // the old caps, room enough for a stock mission without growing.
 constexpr int kFirstEnemies=1024,kFirstFriends=512,kFirstNobodys=128;
+// The frame grids' cells (m, npc_grid.h): about a crowd's threat reach (Evade: 2 x NpcDangerRange) and a friend's
+// nearness to a target (kFriendNearTarget) -- a query looks at a few cells.
+constexpr float kEnemyCell=16.0f,kFriendCell=16.0f;
 
 struct Soldier {
     ObjRef ref;
@@ -184,6 +188,12 @@ struct World {
     int nobodys=0;                     // nobody's (team 5) ground vehicles: BOARD's candidates only (no shot lanes)
     std::vector<const void*> nobody=std::vector<const void*>(kFirstNobodys);
     edf::PtrIndex enemyIndex;          // object -> its row in enemy[] (a lock point each: one object, several points)
+    // enemy[] by its aim and fr[] by its position over the ground (npc_grid.h), built with them in Gather: a soldier's
+    // target, threats and friends near a shot are looked for in the cells round it, not over the whole side (stress:100,
+    // 2026-11-07: those scans were ~22 ms of a 132 ms frame, growing with soldiers x enemies). frRadius: the widest
+    // friend's radius (a shot's line is looked along that far off it).
+    npc::grid::Grid enemyGrid,friendGrid;
+    float frRadius=0.0f;
     bool player=false,lane=false,lookOk=false;
     float playerAt[3]{},look[3]{};
     npc::Lane laneOf{};
@@ -296,13 +306,12 @@ const Enemy* NearestMark(const float* from) noexcept {
     n+=QMarkTeamEnemies(marks+n,kQMarkViews);
     const Enemy* best=nullptr;
     float bestD=0.0f;
-    for(int k=0;k<n;++k)
-        for(int i=0;i<world.enemies;++i) {
-            if(world.enemy[i].object!=marks[k])continue;
-            const float d=npc::Dist(from,world.enemy[i].aim);
-            if(!best || d<bestD){best=&world.enemy[i];bestD=d;}
-            break;
-        }
+    for(int k=0;k<n;++k) {
+        const int i=marks[k] ? world.enemyIndex.Find(marks[k]) : -1;   // its row (one an object)
+        if(i<0)continue;
+        const float d=npc::Dist(from,world.enemy[static_cast<std::size_t>(i)].aim);
+        if(!best || d<bestD){best=&world.enemy[static_cast<std::size_t>(i)];bestD=d;}
+    }
     return best;
 }
 
@@ -494,6 +503,10 @@ void Gather(std::int32_t team) noexcept {
             reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
         }
     }
+    w.enemyGrid.Build(w.enemies,[&w](int i) noexcept { return w.enemy[static_cast<std::size_t>(i)].aim; },kEnemyCell);
+    w.friendGrid.Build(w.friends,[&w](int i) noexcept { return w.fr[static_cast<std::size_t>(i)].pos; },kFriendCell);
+    w.frRadius=0.0f;
+    for(int i=0;i<w.friends;++i)if(w.fr[static_cast<std::size_t>(i)].radius>w.frRadius)w.frRadius=w.fr[static_cast<std::size_t>(i)].radius;
     PlayerLane(w);
     FormationTick();
     SweepFrame();
@@ -602,22 +615,31 @@ Arms ArmsOf(const unsigned char* h) noexcept {
 }
 
 // --- The target ---
+// The row of the object `r` holds in this frame's enemies (the same object: ObjRef::Is), -1 when it is not among them.
+// One row an object (SeeEnemy), so it is the row the scans over enemy[] for r.Is(object) found.
+int EnemyRow(const ObjRef& r) noexcept {
+    const int i=r.obj ? world.enemyIndex.Find(r.obj) : -1;
+    return i>=0 && r.Is(world.enemy[static_cast<std::size_t>(i)].object) ? i : -1;
+}
 struct Pick { const Enemy* e; float dist; };
 // The target in its scope (npc_logic.h PickTarget): the nearest it can reach with `reach` (its longest weapon's).
 // One its fire is wasted on (WastedFire: a teleportation ship's hatch shut, its last hits on it all hurting nothing) is
 // passed over.
+// Through the frame's grid (npc_grid.h PickTarget: the scan's pick, nearest cells first). The held target is its row,
+// found once by the index (one row an object), not asked of every enemy (ObjRef::Is reads each enemy's object).
 Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
-    const int i=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                [&s](int k) noexcept { return s.target.Is(world.enemy[k].object); },
-                                [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
+    const int held=EnemyRow(s.target);
+    const int i=npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                                      [held](int k) noexcept { return k==held; },
+                                      [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
     const auto o=At<const void*>(h,kStockTarget);
     const auto ctrl=At<const unsigned char*>(h,kStockTargetCtrl);
     if(!o || !ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return nullptr;
-    for(int i=0;i<world.enemies;++i)if(world.enemy[i].object==o)return &world.enemy[i];
-    return nullptr;
+    const int i=world.enemyIndex.Find(o);   // its row (one an object), as the scan for the first row of it found
+    return i>=0 ? &world.enemy[static_cast<std::size_t>(i)] : nullptr;
 }
 npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
@@ -631,9 +653,24 @@ int FriendsBut(const void* self,std::vector<npc::Friend>& out) noexcept {
     for(int i=0;i<world.friends;++i)if(world.frObject[i]!=self)out[static_cast<std::size_t>(n++)]=world.fr[i];
     return n;
 }
+// The friends but `self` a shot from `from` to `to` (a round of `blast`) can touch, for ShotClear: those in the cells
+// along its line and round where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is
+// ShotClear over every friend (FriendsBut): the others are farther off its line and its blast than any friend's radius.
+int FriendsOnShot(const void* self,const float* from,const float* to,float blast,std::vector<npc::Friend>& out) noexcept {
+    static std::vector<int> rows;
+    npc::grid::ShotCandidates(world.friendGrid,from,to,world.frRadius+kSpread,blast>0.0f ? blast*1.25f+world.frRadius : 0.0f,rows);
+    if(out.size()<rows.size())out.resize(rows.size());
+    int n=0;
+    for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
+    return n;
+}
+// A friend but `self` within `r` of `at`: looked for in the cells round it (the same answer as over every friend).
 bool FriendNear(const void* self,const float* at,float r) noexcept {
-    for(int i=0;i<world.friends;++i)if(world.frObject[i]!=self && npc::Dist(world.fr[i].pos,at)<r)return true;
-    return false;
+    bool found=false;
+    world.friendGrid.Around(at,r,[&](int i) noexcept {
+        if(!found && world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r)found=true;
+    });
+    return found;
 }
 
 // --- The block's writes ---
@@ -728,7 +765,7 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
     }
     if(!s.los)return false;
     static std::vector<npc::Friend> fr;
-    const int n=FriendsBut(h,fr);
+    const int n=FriendsOnShot(h,eye,t.aim,a.arm[i].blast,fr);
     return npc::ShotClear(eye,t.aim,kSpread,a.arm[i].blast,fr.data(),n);
 }
 
@@ -748,14 +785,14 @@ float LongestReach(const Arms& a) noexcept {
 // Whether a round of `blast` at `t` (none: along the look, as far as `reach` or the ground) keeps off every friend.
 bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
     static std::vector<npc::Friend> fr;
-    const int n=FriendsBut(h,fr);
-    if(t)return npc::ShotClear(eye,t->aim,kSpread,blast,fr.data(),n);
+    if(t){const int n=FriendsOnShot(h,eye,t->aim,blast,fr);return npc::ShotClear(eye,t->aim,kSpread,blast,fr.data(),n);}
     if(reach<=0.0f)return false;
     float dir[3];
     const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
     dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
     float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
+    const int n=FriendsOnShot(h,eye,to,blast,fr);
     return npc::ShotClear(eye,to,kSpread,blast,fr.data(),n);
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
@@ -811,9 +848,16 @@ bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,UL
     if(!Cfg().npcEvade)return false;
     npc::Threat threats[64];int n=0;
     const float reach=Cfg().npcDangerRange*2.0f;
-    for(int i=0;i<world.enemies && n<64;++i)
-        if(npc::Horiz(pos,world.enemy[i].aim)<reach)
-            threats[n++]=npc::Threat{{world.enemy[i].aim[0],world.enemy[i].aim[1],world.enemy[i].aim[2]},world.enemy[i].points>=kLargePoints ? 3.0f : 1.0f};
+    // The enemies within reach from the cells round it, in the list's order: the first 64 of them, as the scan took.
+    static std::vector<int> inReach;
+    inReach.clear();
+    world.enemyGrid.Around(pos,reach,[pos,reach](int i) { if(npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach)inReach.push_back(i); });
+    std::sort(inReach.begin(),inReach.end());
+    for(const int i:inReach) {
+        if(n>=64)break;
+        const Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+        threats[n++]=npc::Threat{{e.aim[0],e.aim[1],e.aim[2]},e.points>=kLargePoints ? 3.0f : 1.0f};
+    }
     const bool rollReady=c.rolls && (At<std::uint32_t>(h,kControlMask)&kMaskRoll) && ms-s.rollAt>=static_cast<ULONGLONG>(Cfg().npcRollSec*1000.0f);
     const npc::Evade e=npc::CrowdResponse(pos,threats,n,Cfg().npcDangerRange,Cfg().npcCrowd,Cfg().npcGrabRange,rollReady);
     if(e.move==npc::Move::hold)return false;
@@ -839,8 +883,8 @@ bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& serve
     const float hpMax=At<float>(h,kHumanHpMax),hp=At<float>(h,kHumanHp);
     if(!(hpMax>0.0f) || !(hp/hpMax<Cfg().npcRetreatHp) || !served.at)return false;
     if(sol.fallAt && ms-sol.fallAt<kFallMs){MoveTo(h,pos,sol.fallTo,kSpotStop);return true;}
-    const Enemy* nearest=nullptr;float nd=1e30f;
-    for(int i=0;i<world.enemies;++i){const float d=npc::Horiz(pos,world.enemy[i].aim);if(d<nd){nd=d;nearest=&world.enemy[i];}}
+    const int ni=npc::grid::NearestHoriz(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },pos);
+    const Enemy* const nearest=ni>=0 ? &world.enemy[static_cast<std::size_t>(ni)] : nullptr;
     float back[3]={0.0f,0.0f,0.0f};
     if(served.look){back[0]=-served.look[0];back[2]=-served.look[2];}
     else if(nearest){back[0]=served.at[0]-nearest->aim[0];back[2]=served.at[2]-nearest->aim[2];}
@@ -1169,7 +1213,7 @@ bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
 // The enemies within `radius` of target `t`'s lock point, `t` among them.
 int GroupAt(const Enemy& t,float radius) noexcept {
     int n=0;
-    for(int i=0;i<world.enemies;++i)if(npc::Dist(world.enemy[i].aim,t.aim)<=radius)++n;
+    world.enemyGrid.Around(t.aim,radius,[&n,&t,radius](int i) noexcept { if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius)++n; });
     return n>0 ? n : 1;
 }
 ULONGLONG packLoggedAt=0;
@@ -1258,7 +1302,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
-        for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
+        if(const int i=EnemyRow(q->commandFocus);i>=0)commandTarget=&world.enemy[static_cast<std::size_t>(i)];
     }
     // A mark its fire is wasted on waits (the shut ship's hatch opens, it moves under it): the others fought meanwhile.
     const Enemy* const marked=commandTarget ? commandTarget : NearestMark(eye);
