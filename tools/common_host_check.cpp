@@ -109,6 +109,47 @@ int main() {
                 Expect(edf::TakeReadableStats().wsCalls==0 || GetTickCount64()!=tick,"a batch already kept is not asked again");
             }
             Expect(done,"a tick long enough to test the batch in");
+            // PrefetchReadableSpans: spans of their own sizes (8 bytes, a page and a half, a span over the 16 pages
+            // Readable asks by region, null, empty), the same pages kept as PrefetchReadable keeps them: Readable's
+            // answers after it the pages' own, with no call of its own.
+            const edf::ReadSpan spans[]={{block+3*0x1000+0xFF8,8},{block+4*0x1000+0x800,0x1000},{block+5*0x1000,8},
+                                         {block+7*0x1000+0x10,0x10},{block+9*0x1000,4},{block+20*0x1000,0x1000*20},
+                                         {nullptr,8},{block+21*0x1000,0},{block+22*0x1000+0x7F0,0x20}};
+            const auto spanTruth=[&](const edf::ReadSpan& s,bool writable) {
+                if(!s.ptr)return false;
+                if(!s.size)return true;
+                const auto at=reinterpret_cast<std::uintptr_t>(s.ptr);
+                for(std::uintptr_t page=at&~std::uintptr_t{0xFFF};page<at+s.size;page+=0x1000) {
+                    MEMORY_BASIC_INFORMATION info{};
+                    if(!VirtualQuery(reinterpret_cast<void*>(page),&info,sizeof(info)) || info.State!=MEM_COMMIT ||
+                       (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)))return false;
+                    const DWORD p=info.Protect&0xFF;
+                    if(p!=PAGE_READWRITE && p!=PAGE_READONLY)return false;
+                    if(writable && p!=PAGE_READWRITE)return false;
+                }
+                return true;
+            };
+            constexpr int kSpans=static_cast<int>(sizeof(spans)/sizeof(spans[0]));
+            done=false;
+            for(int attempt=0;attempt<200 && !done;++attempt) {
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);   // a fresh tick: nothing kept
+                const ULONGLONG tick=GetTickCount64();
+                edf::TakeReadableStats();
+                edf::PrefetchReadableSpans(spans,kSpans);
+                const edf::ReadableStats batch=edf::TakeReadableStats();
+                int wrong=0;
+                for(const auto& s:spans)
+                    if(s.size<=0x1000*16)   // the long span is Readable's by region (VirtualQuery): not the batch's
+                        wrong+=(edf::Readable(s.ptr,s.size)!=spanTruth(s,false)) || (edf::Readable(s.ptr,s.size,true)!=spanTruth(s,true));
+                const edf::ReadableStats after=edf::TakeReadableStats();
+                if(GetTickCount64()!=tick)continue;
+                done=true;
+                // pages 3, 4, 5, 7, 9, 22: six pages in one call
+                Expect(batch.wsCalls==1 && batch.wsPages==6,"the spans' pages asked in one call");
+                Expect(wrong==0,"Readable's answers after the spans are the pages' own");
+                Expect(after.wsCalls==0,"Readable asks the working set nothing more in the tick");
+            }
+            Expect(done,"a tick long enough to test the spans in");
             VirtualFree(block,0,MEM_RELEASE);
         }
     }

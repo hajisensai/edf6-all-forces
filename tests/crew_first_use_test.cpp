@@ -73,6 +73,7 @@ bool IsPrimerVehicle(const void*) noexcept{return false;}
 bool IsHelicopter(const void*) noexcept{return false;}
 bool HeliCrewed(const void*) noexcept{return false;}
 bool IsJet(const void*) noexcept{return testJet;}
+bool Heli506Vtable(const void*) noexcept{return testJet;}   // a jet is a 506 (PromptHook asks IsJet of a 506 alone)
 bool JetFliesItself(const void*) noexcept{return testDrone;}
 bool PlayerJetBoardable(const void*) noexcept{return testJet;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}

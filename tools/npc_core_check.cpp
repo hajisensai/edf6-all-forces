@@ -398,6 +398,120 @@ int main() {
         Put<std::uint64_t>(human,kSetCount,1);
         Expect(ArmsOf(human).held[1]==-1,"a one-handed soldier has no second hand's weapon");
     }
+    // ArmsOf with its pages asked in two batches (edf::PrefetchReadableSpans) = the ArmsOf before them (one call for
+    // the list, one for the weapons' batch, one each for a set and an entry), over lists with unreadable, null and
+    // shared weapons, no / one / two sets, a set's entry null or unreadable; and two working-set calls in a fresh tick.
+    {
+        constexpr std::size_t kPage=0x1000;
+        constexpr int kPages=48;
+        auto* block=static_cast<unsigned char*>(VirtualAlloc(nullptr,kPages*kPage,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+        Expect(block!=nullptr,"ArmsOf fixture pages");
+        if(block) {
+            DWORD old=0;
+            VirtualProtect(block+40*kPage,kPage,PAGE_NOACCESS,&old);   // an unreadable weapon / entry / set
+            unsigned char* const noAccess=block+40*kPage;
+            // weapons on pages 0..19 (two pages each: kWeaponAmmo+4 is 0xBEC bytes, put across a page edge)
+            unsigned char* weapons[10];
+            for(int i=0;i<10;++i) {
+                weapons[i]=block+static_cast<std::size_t>(2*i)*kPage+0x800;
+                Put<float>(weapons[i],0x894,1.0f+static_cast<float>(i));Put<float>(weapons[i],0x8E0,0.1f*static_cast<float>(i));
+                Put<float>(weapons[i],kArmReach,50.0f*static_cast<float>(i+1));Put<float>(weapons[i],kArmDamage,i==3 ? -1.0f : 7.0f);
+                Put<float>(weapons[i],kArmBlast,i%3==0 ? 4.0f : 0.0f);Put<std::int32_t>(weapons[i],kWeaponLockon,i==2 ? kHoming : 0);
+                Put<std::int32_t>(weapons[i],kWeaponAmmo,i==4 ? 0 : 30);
+            }
+            auto** list=reinterpret_cast<unsigned char**>(block+24*kPage);
+            unsigned char* const sets=block+26*kPage;   // two sets kSetStride apart
+            auto** entries=reinterpret_cast<unsigned char**>(block+30*kPage);
+            const auto before=[&](const unsigned char* h) {   // ArmsOf as it was (b1d80bec), SetWeapon its own
+                Arms a{};
+                const auto l=At<unsigned char* const*>(h,kWeapons);
+                const auto count=At<std::uint64_t>(h,kWeaponCount);
+                if(!count || count>16 || !Readable(l,count*8))return a;
+                const unsigned char* held[kHands];
+                for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
+                a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
+                for(int i=0;i<a.n;++i) {
+                    const unsigned char* w=l[i];
+                    npc::Arm& m=a.arm[i];m=npc::Arm{};
+                    if(!Readable(w,kWeaponAmmo+4) || NpcPackIndex(h,i))continue;
+                    const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
+                    a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
+                    a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
+                    for(int k=0;k<kHands;++k)if(w==held[k])a.held[k]=i;
+                    const float reach=At<float>(w,kArmReach),damage=At<float>(w,kArmDamage),blast=At<float>(w,kArmBlast);
+                    m.reach=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
+                    m.blast=std::isfinite(blast) && blast>0.0f ? blast : 0.0f;
+                    m.dps=std::isfinite(damage) && damage>0.0f ? damage : 1.0f;
+                    m.homing=At<std::int32_t>(w,kWeaponLockon)==kHoming;
+                    m.antiAir=m.homing;
+                    m.ready=At<std::int32_t>(w,kWeaponAmmo)>0;
+                }
+                return a;
+            };
+            const auto same=[](const Arms& x,const Arms& y) {
+                if(x.n!=y.n || x.held[0]!=y.held[0] || x.held[1]!=y.held[1])return false;
+                for(int i=0;i<x.n;++i) {
+                    const npc::Arm &p=x.arm[i],&q=y.arm[i];
+                    if(p.reach!=q.reach || p.blast!=q.blast || p.dps!=q.dps || p.homing!=q.homing || p.ready!=q.ready ||
+                       p.antiAir!=q.antiAir || x.speed[i]!=y.speed[i] || x.gravity[i]!=y.gravity[i])return false;
+                }
+                return true;
+            };
+            std::mt19937 rng(1108);
+            int compared=0,differ=0,armed=0;
+            for(int round=0;round<4000;++round) {
+                Reset();
+                const int count=static_cast<int>(rng()%7);   // 0 (no list) .. 6
+                for(int i=0;i<count;++i) {
+                    const unsigned r=rng()%12;
+                    list[i]=r<10 ? weapons[r] : r==10 ? nullptr : noAccess;
+                }
+                const bool listDead=rng()%15==0;
+                Put<const void*>(human,kWeapons,listDead ? static_cast<const void*>(noAccess) : list);
+                Put<std::uint64_t>(human,kWeaponCount,rng()%40==0 ? 17u : static_cast<std::uint64_t>(count));
+                const unsigned setCount=rng()%3;
+                Put<const void*>(human,kSets,rng()%20==0 ? static_cast<const void*>(noAccess) : sets);
+                Put<std::uint64_t>(human,kSetCount,setCount);
+                for(int k=0;k<kHands;++k) {
+                    const unsigned r=rng()%8;
+                    entries[k]=count && r<5 ? list[rng()%static_cast<unsigned>(count)] : r==5 ? weapons[rng()%10] : nullptr;
+                    Put<const void*>(sets+k*kSetStride,kSetWeapon,r==7 ? static_cast<const void*>(noAccess) : r==6 ? nullptr : &entries[k]);
+                }
+                packReady=packSlots=rng()%5==0;packSlot.index=static_cast<int>(rng()%4);
+                const Arms got=ArmsOf(human),was=before(human);
+                ++compared;differ+=!same(got,was);armed+=got.n>0 && got.held[0]>=0;
+            }
+            packReady=packSlots=false;
+            char what[160];
+            std::snprintf(what,sizeof(what),"ArmsOf with its pages batched = ArmsOf before (%d soldiers, %d differ)",compared,differ);
+            Expect(differ==0,what);
+            Expect(armed>500,"the soldiers compared held weapons found through their sets");
+            // Two calls a soldier: its list and sets, then its weapons and the sets' entries (each a page of its own here).
+            for(int i=0;i<4;++i)list[i]=weapons[i];
+            entries[0]=weapons[1];entries[1]=weapons[3];
+            Put<const void*>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,4);
+            Put<const void*>(human,kSets,sets);Put<std::uint64_t>(human,kSetCount,2);
+            Put<const void*>(sets,kSetWeapon,&entries[0]);Put<const void*>(sets+kSetStride,kSetWeapon,&entries[1]);
+            bool counted=false;
+            for(int attempt=0;attempt<200 && !counted;++attempt) {
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);   // nothing kept from before
+                const ULONGLONG tick=GetTickCount64();
+                edf::TakeReadableStats();
+                const Arms a=ArmsOf(human);
+                const edf::ReadableStats st=edf::TakeReadableStats();
+                if(GetTickCount64()!=tick)continue;
+                counted=true;
+                Expect(a.n==4 && a.held[0]==1 && a.held[1]==3,"the fixture soldier's weapons and hands");
+                Expect(st.wsCalls==2,"ArmsOf asks the working set twice: the list and sets, then the weapons and entries");
+                edf::TakeReadableStats();
+                const Arms b=before(human);
+                const edf::ReadableStats again=edf::TakeReadableStats();
+                Expect(same(a,b) && (again.wsCalls==0 || GetTickCount64()!=tick),"the answers kept for the tick serve the old order too");
+            }
+            Expect(counted,"a tick long enough to count ArmsOf's calls in");
+            VirtualFree(block,0,MEM_RELEASE);
+        }
+    }
     Reset();s=Soldier{};s.wantArm=-1;arms=Arms{};arms.n=4;arms.held[0]=0;
     arms.arm[0]=npc::Arm{5,0,1,false,true,false};arms.arm[1]=npc::Arm{100,0,10,false,true,false};
     arms.arm[3]=npc::Arm{100,0,100,false,true,false};ChooseArm(s,human,arms,&target,eye,nearby);

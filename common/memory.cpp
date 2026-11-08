@@ -165,39 +165,58 @@ bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
         if((Record(*cache,ask[i],now)&need)!=need) return false;
     return true;
 }
-void PrefetchReadable(const void* const* ptrs,std::size_t size,int n) noexcept {
-    PageCache* cache=Pages();
-    if(!cache || !ptrs || n<=0 || !size) return;
-    const ULONGLONG now=GetTickCount64();
-    PSAPI_WORKING_SET_EX_INFORMATION ask[kPrefetchPages];
-    int asked=0;
-    const auto flush=[&]() noexcept {
-        if(!asked) return;
-        const std::uint64_t t0=Qpc();
-        const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask,static_cast<DWORD>(asked*sizeof(ask[0])))!=0;
-        ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked);stats.wsTicks+=Qpc()-t0;
-        if(got) for(int i=0;i<asked;++i) Record(*cache,ask[i],now);   // refused: nothing kept, each Readable asks as before
-        asked=0;
-    };
-    for(int k=0;k<n;++k) {
-        const auto at=reinterpret_cast<std::uintptr_t>(ptrs[k]);
-        if(!at || size>UINTPTR_MAX-at) continue;
+namespace {
+// The pages of the spans added that the cache has not this tick, asked of the working set kPrefetchPages at a time.
+class PrefetchBatch {
+public:
+    explicit PrefetchBatch(PageCache& cache) noexcept : cache_(cache),now_(GetTickCount64()) {}
+    ~PrefetchBatch() { Flush(); }
+    PrefetchBatch(const PrefetchBatch&)=delete;
+    PrefetchBatch& operator=(const PrefetchBatch&)=delete;
+    void Add(const void* ptr,std::size_t size) noexcept {
+        const auto at=reinterpret_cast<std::uintptr_t>(ptr);
+        if(!at || !size || size>UINTPTR_MAX-at) return;
         const std::uintptr_t first=at&~(kPage-1),last=(at+size-1)&~(kPage-1);
-        if((last-first)/kPage+1>kMaxPages) continue;   // Readable asks such a span by region
+        if((last-first)/kPage+1>kMaxPages) return;   // Readable asks such a span by region
         for(std::uintptr_t page=first;;page+=kPage) {
-            const auto& hit=cache->Slot(page);
-            bool queued=(hit.pageAllows&~(kPage-1))==page && hit.tick==now;
-            for(int i=0;i<asked && !queued;++i) queued=reinterpret_cast<std::uintptr_t>(ask[i].VirtualAddress)==page;
+            const auto& hit=cache_.Slot(page);
+            bool queued=(hit.pageAllows&~(kPage-1))==page && hit.tick==now_;
+            for(int i=0;i<asked_ && !queued;++i) queued=reinterpret_cast<std::uintptr_t>(ask_[i].VirtualAddress)==page;
             if(!queued) {
-                if(asked==kPrefetchPages) flush();
-                ask[asked]={};
-                ask[asked].VirtualAddress=reinterpret_cast<void*>(page);
-                ++asked;
+                if(asked_==kPrefetchPages) Flush();
+                ask_[asked_]={};
+                ask_[asked_].VirtualAddress=reinterpret_cast<void*>(page);
+                ++asked_;
             }
             if(page==last) break;
         }
     }
-    flush();
+    void Flush() noexcept {
+        if(!asked_) return;
+        const std::uint64_t t0=Qpc();
+        const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask_,static_cast<DWORD>(asked_*sizeof(ask_[0])))!=0;
+        ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked_);stats.wsTicks+=Qpc()-t0;
+        if(got) for(int i=0;i<asked_;++i) Record(cache_,ask_[i],now_);   // refused: nothing kept, each Readable asks as before
+        asked_=0;
+    }
+private:
+    PageCache& cache_;
+    const ULONGLONG now_;
+    PSAPI_WORKING_SET_EX_INFORMATION ask_[kPrefetchPages];
+    int asked_=0;
+};
+}  // namespace
+void PrefetchReadable(const void* const* ptrs,std::size_t size,int n) noexcept {
+    PageCache* cache=Pages();
+    if(!cache || !ptrs || n<=0 || !size) return;
+    PrefetchBatch batch(*cache);
+    for(int k=0;k<n;++k) batch.Add(ptrs[k],size);
+}
+void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept {
+    PageCache* cache=Pages();
+    if(!cache || !spans || n<=0) return;
+    PrefetchBatch batch(*cache);
+    for(int k=0;k<n;++k) batch.Add(spans[k].ptr,spans[k].size);
 }
 ReadableStats TakeReadableStats() noexcept { const ReadableStats s=stats; stats={}; return s; }
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept {

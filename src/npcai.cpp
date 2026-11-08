@@ -225,7 +225,9 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         auto o=static_cast<const unsigned char*>(object);
         World& w=*f.w;
         if(!o || o[kDead] || (w.friends>0 && w.frObject[0]==o))return;
-        const float r=IsSoldierClass(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
+        // The object the game's own team walk hands over (live, its +0x2E8 read just above): its class read off its
+        // vtable, not asked of Readable first (stress:100 2026-11-08: 1.4 ms a frame, a working-set call a friend).
+        const float r=IsSoldierClassLive(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
         const float* p=Pos(o);
         if(!std::isfinite(p[0]+p[1]+p[2]))return;
         Room(w.fr,w.friends);Room(w.frObject,w.friends);
@@ -604,9 +606,25 @@ Arms ArmsOf(const unsigned char* h) noexcept {
     Arms a{};
     const auto list=At<unsigned char* const*>(h,kWeapons);
     const auto count=At<std::uint64_t>(h,kWeaponCount);
-    if(!count || count>16 || !Readable(list,count*8))return a;
-    // Its weapons' pages asked in one call, before each is asked below (edf::PrefetchReadable: the same answers).
-    edf::PrefetchReadable(reinterpret_cast<const void* const*>(list),kWeaponAmmo+4,static_cast<int>(count));
+    if(!count || count>16)return a;
+    // The pages it asks below, asked of the working set in two calls before (edf::PrefetchReadableSpans: the answers
+    // Readable gives, found in its cache): the list and the WeaponSets (SetWeapon's), then the weapons and the sets'
+    // entries, read through the sets. One call each was 4 a soldier (the list, the batch of weapons, a set, an entry:
+    // stress:100 2026-11-08, ArmsOf's asks 3.7 ms a frame, ~0.23 us of each call its own whatever its pages).
+    edf::ReadSpan spans[16+kHands];
+    int spanCount=0;
+    spans[spanCount++]={list,count*8};
+    for(int k=0;k<kHands;++k)if(At<std::uint64_t>(h,kSetCount)>static_cast<std::uint64_t>(k))
+        spans[spanCount++]={At<const unsigned char*>(h,kSets)+k*kSetStride,kSetWeapon+8};
+    edf::PrefetchReadableSpans(spans,spanCount);
+    if(!Readable(list,count*8))return a;
+    spanCount=0;
+    for(std::uint64_t i=0;i<count;++i)spans[spanCount++]={list[i],kWeaponAmmo+4};
+    for(int k=0;k<kHands;++k)if(At<std::uint64_t>(h,kSetCount)>static_cast<std::uint64_t>(k)) {
+        const auto set=At<const unsigned char*>(h,kSets)+k*kSetStride;
+        if(Readable(set,kSetWeapon+8))spans[spanCount++]={At<const void*>(set,kSetWeapon),8};
+    }
+    edf::PrefetchReadableSpans(spans,spanCount);
     const unsigned char* held[kHands];
     for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
     a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
@@ -728,9 +746,13 @@ void RouteStart(const float* pos,float* from) noexcept {
 // `ms`: the caller's game clock (its Think's, read once there: GameMs asks the pause state of System, a Readable each).
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {
     Soldier* const soldier=Entry(h,ms);
+    // Its turn first: one waiting behind the caller the route budget denied last frame stands, the call's pending
+    // (ground_navigation.h GroundNavigateDeferred), without the two floor rays of its ends the call would not look at
+    // (stress:100 2026-11-08: RouteStart 1.6 ms a frame).
+    if(!soldier || GroundNavigateDeferred(soldier->navigation)){Stand(h);return;}
     float waypoint[3],dir[3],from[3],goal[3];
     RouteStart(pos,from);RouteStart(to,goal);
-    if(!soldier || GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
+    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     if(!(pace>0.0f)){Stand(h);return;}
@@ -1659,8 +1681,10 @@ bool WalkUpOff() noexcept {
     return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !VanillaRecruitInEffect();   // online: the host's (host_settings.h)
 }
 // Before the stock Think: +0x540 that the walk-up gate would read, cleared (returned, to be put back); 0 when none.
+// h: ThinkHook's `human`, the object the game is calling Think on (live): read as PreThink reads it (IsAnyPlayerSelf),
+// not asked of Readable (stress:100 2026-11-08: IsAnyPlayer here was 2.4 ms a frame, a working-set call a soldier).
 std::uint8_t HideWalkUp(unsigned char* h) noexcept {
-    if(!WalkUpOff() || IsAnyPlayer(h) || At<const void*>(h,kLeader))return 0;
+    if(!WalkUpOff() || IsAnyPlayerSelf(h) || At<const void*>(h,kLeader))return 0;
     const std::uint8_t was=h[kAutoFollow];
     h[kAutoFollow]=0;
     return was;
@@ -2242,12 +2266,12 @@ bool NpcOwnsNativeThink(const void* nativeTable,const void* function) noexcept {
     return false;
 }
 
-bool IsSoldierClass(const void* human) noexcept {
-    if(!Readable(human,8))return false;
+bool IsSoldierClassLive(const void* human) noexcept {
     const auto vt=At<const unsigned char*>(human,0);
     for(const auto& c:kSoldiers)if(vt==image+c.vtable)return true;
     return false;
 }
+bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }
 
 bool InstallNpcAi() noexcept {
     __try {

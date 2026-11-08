@@ -6634,6 +6634,42 @@ def npc_ai_wired() -> None:
 
 
 @test
+def npc_ai_asks_less() -> None:
+    """Readable asked only of pointers nothing has shown live (stress:100 2026-11-08, docs/npc-ai-design.md): the Think's
+    own `human` (HideWalkUp) and an object the game's team walk hands over (Gather's FriendVisit, the ride prompt's
+    visit) read without asking; ArmsOf's pages asked in two batches; MoveTo's floor rays only for a caller whose route
+    turn it is. Each checked against the code before it offline (npc_core_check, common_host_check,
+    ground_navigation_runtime)."""
+    code, crew, nav, navh = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/ground_navigation.cpp'), src('src/ground_navigation.h')
+    memh, mem, cmake = src('common/edf/memory.h'), src('common/memory.cpp'), src('CMakeLists.txt')
+    body = lambda text, head: text.split(head, 1)[1].split('\n}\n', 1)[0]
+    hide = body(code, 'std::uint8_t HideWalkUp(unsigned char* h) noexcept {')
+    assert 'IsAnyPlayerSelf(h)' in hide and 'IsAnyPlayer(h)' not in hide, "HideWalkUp: the Think's own object, not asked"
+    visit = body(code, 'void __fastcall FriendVisit(void* self,void* object) noexcept {')
+    assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
+    assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
+    arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
+    first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
+    second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
+    assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
+    assert 'edf::PrefetchReadable(' not in arms
+    move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {')
+    assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
+    navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
+    assert navigate.index('if(Deferred(&state))') < navigate.index('auto edge='), 'the call and the ask share one turn'
+    assert 'bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept { return Deferred(&state); }' in nav
+    assert 'bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;' in navh
+    prompt = body(crew, 'void __fastcall PromptHook(void* functor,void* object) {')
+    assert 'const auto vtable=At<const void*>(object,0);' in prompt and 'ClassOfVtable(vtable)<0' in prompt
+    assert 'ClassOf(object)' not in prompt and prompt.count('IsJet(object)') == prompt.count('body506 && IsJet(object)') == 2,         'the ride prompt: IsJet asked of a 506 alone'
+    assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept;' in memh
+    assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept {' in mem and 'class PrefetchBatch' in mem
+    for test in ('npc_core_check', 'common_host_check'):
+        assert f'add_executable({test} EXCLUDE_FROM_ALL tools/{test}.cpp' in cmake, test
+    assert 'add_test(NAME ground_navigation_runtime' in cmake
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()

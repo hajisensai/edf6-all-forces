@@ -920,6 +920,9 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 enum class PluginBody { none, jet, sub, playerJet, sazabi, dreadnought };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
+// A 506's vtable (BodyMark is 0 for any other: so is IsJet): for an object the caller knows is live (one the game's
+// walk hands over), whose vtable it read itself.
+bool Heli506Vtable(const void* vtable) noexcept;
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in
 bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)

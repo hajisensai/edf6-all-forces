@@ -309,6 +309,8 @@ float BodyMark(const void* vehicle) noexcept {
     return At<float>(v,kSpeedGain);
 }
 
+bool Heli506Vtable(const void* vtable) noexcept { return vtable==image+kHeli506; }
+
 PluginBody BodyOf(const void* vehicle) noexcept {
     const float k=BodyMark(vehicle);
     for(const auto& m:kMarks)if(k>=m.first && k<=m.last)return m.body;

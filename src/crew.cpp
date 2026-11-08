@@ -224,11 +224,13 @@ State* StateFor(const void* vehicle,ULONGLONG now) noexcept {
     return slot;
 }
 
-int ClassOf(const void* object) noexcept {
-    if(!Readable(object,8))return -1;
-    const auto vtable=At<const unsigned char*>(object,0);
+int ClassOfVtable(const void* vtable) noexcept {
     for(int i=0;i<kClassCount;++i)if(vtable==image+kClasses[i].vtable)return i;
     return -1;
+}
+int ClassOf(const void* object) noexcept {
+    if(!Readable(object,8))return -1;
+    return ClassOfVtable(At<const unsigned char*>(object,0));
 }
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
@@ -552,10 +554,16 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         EnsureInputs();    // first mission frame: every plugin has loaded by now
-        if(Cfg().debug && IsJet(object) && PlayerJetBoardable(object))
+        // `object`: the one the game's team walk (0x5E11D0, its registry's members) hands this visit, the stock visitor
+        // just called on it: live, its vtable read, not asked of Readable first. Asked once per object per frame on
+        // the player's walk (stress:100 2026-11-08: 1.1 ms a frame, a working-set call an object). Only a 506 can be a
+        // jet (IsJet: a 506's mark), so IsJet, which asks Readable for the mark, is asked of a 506 alone.
+        const auto vtable=At<const void*>(object,0);
+        const bool body506=Heli506Vtable(vtable);
+        if(Cfg().debug && body506 && IsJet(object) && PlayerJetBoardable(object))
             DoorLog(static_cast<const unsigned char*>(object),human,f[kFunctorResult]!=0);
-        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || (IsJet(object) && !PlayerJetBoardable(object)) ||
-           IsSub(object))return;
+        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOfVtable(vtable)<0 ||
+           (body506 && IsJet(object) && !PlayerJetBoardable(object)) || IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy || NpcCanYieldSeat(SeatAt(v,i));

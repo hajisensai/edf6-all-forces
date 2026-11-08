@@ -95,6 +95,13 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 
 `edf::Readable` 的页缓存仍按 tick（GetTickCount64，约 16 ms）失效，没有改成按游戏帧（2026-11-08 评估）：缓存窗口不能比 tick 更长（一页在窗口内被游戏释放就会按旧答案去读），而「帧与 tick 取较短者」在 stress 下（一帧约 8 个 tick）与现在完全相同、60 fps 下帧边与 tick 边都会结束窗口、反而可能多失效，省不下任何询问；要省只能加长窗口，即降低安全性。`common/memory.cpp` 又是两个插件、任意线程共用的，不宜塞进游戏线程的帧概念。所以改在调用处少问：同批对象先 `PrefetchReadable`，Think 自己的对象（游戏正在调用它的 Think，必然存活）用 `IsAnyPlayerSelf` 直接读、不问 Readable。
 
+调用处少问的第二轮（2026-11-08，stress:100 采样：Readable 8.5 ms/帧，按直接调用者 HideWalkUp→IsAnyPlayer 30 样本、ArmsOf 28、FriendVisit→IsSoldierClass 18、PromptHook→IsJet→BodyMark 14，另有 ArmsOf 的 PrefetchReadable 19；PERF MEM 每帧约 8.7 万次询问、1.05 万次工作集调用 5.7 ms）。原则：游戏亲手交来的活对象不再问，其它指针照问，但能并成一次调用的并起来。
+- `HideWalkUp` 的 `h` 是 ThinkHook 正被调用 Think 的对象：改 `IsAnyPlayerSelf`。
+- `Gather` 的 `FriendVisit` 拿到的是游戏 TeamManager 队伍遍历（0x5E11D0，遍历自己的成员红黑树）交来的成员，上一行已直接读 `+0x2E8`：类判断用 `IsSoldierClassLive`（直接读 vtable）。乘骑提示 `PromptHook` 的 `object` 同样来自这个遍历、原版访问者刚对它做过 dynamic_cast：vtable 直接读，`ClassOfVtable` 判载具类，`IsJet`（要问 Readable 读 506 的标记）只对 506 vtable 问。
+- `ArmsOf`：原来一名士兵 4 次工作集调用（列表、武器批、WeaponSet、set 的 entry 各一次），改为 `edf::PrefetchReadableSpans` 两次（列表 + 两组 set；武器 + entry）。实测单次调用固定开销约 0.23 µs、每页约 0.2 µs。之后各处 Readable 的答案不变，只是都在缓存里找到。
+- `MoveTo`：路线预算把本帧排在「上一帧第一个被拒者」之前的调用者直接返回 pending（`GroundNavigate` 的轮转），而它两端的落地射线（`RouteStart`，1.6 ms/帧）此时根本不会被用到。先问 `GroundNavigateDeferred`（与调用共用同一个帧轮转函数、同样推进轮转状态），轮不到就直接 Stand，不再射线。
+
+
 ### 3.4 枪线（B1）
 
 - 玩家枪线 = 从玩家眼睛沿镜头中心（`CameraRay`）到第一处地图命中或 `NpcLaneLength` 米，宽 `NpcLaneWidth` 米（`npc_logic.h` `Lane`）。NPC 在线内就沿垂直方向往自己所在一侧横移出去（`LaneEscape`），战位也取在玩家两侧 `NpcFlankDeg` 度、不取在玩家与目标之间（`CombatSpot`）。
