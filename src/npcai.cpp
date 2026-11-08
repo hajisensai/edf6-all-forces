@@ -206,13 +206,16 @@ template<class T> void Room(std::vector<T>& v,int n) {
 
 const float* Pos(const unsigned char* o) noexcept { return reinterpret_cast<const float*>(o+kPosition); }
 
+// enemyIndex is made here, as the rows are (one row an object: its first point's): IndexWorld does not make it again.
 void SeeEnemy(void* ctx,const void* object,const float* aim) {
     auto& w=*static_cast<World*>(ctx);
     if(const int i=w.enemyIndex.Find(object);i>=0){++w.enemy[i].points;return;}
+    float at[3];
+    std::memcpy(at,aim,12);   // the game's point read before the row is made: a fault on it leaves no half-made row
     Room(w.enemy,w.enemies);
     w.enemyIndex.Set(object,w.enemies);
     Enemy& e=w.enemy[w.enemies++];
-    e.object=object;std::memcpy(e.aim,aim,12);e.points=1;
+    e.object=object;std::memcpy(e.aim,at,12);e.points=1;
 }
 
 struct FriendWalk { void** vtable; World* w; };
@@ -483,39 +486,42 @@ void FormationTick() noexcept {
     march.held=down;
 }
 
-// The frame's indexes over its lists, made from the lists as they stand: enemyIndex (one row an object, its first),
-// the enemy and friend grids, frRadius. Gather's last step once the lists are full; nothing else writes the lists, so
-// every ask of the frame finds the indexes and the lists alike (an offline fixture filling the lists calls it too).
+// The frame's grids over its lists, made from the lists as they stand: the enemy and friend grids, frRadius (enemyIndex
+// is SeeEnemy's, made with the rows). Run when Gather's walks end, however they end (Gather's __finally): every ask of
+// the frame finds the grids and the lists alike (an offline fixture filling the lists calls it too).
 void IndexWorld(World& w) noexcept {
-    w.enemyIndex.Clear();
-    for(int i=0;i<w.enemies;++i)
-        if(w.enemyIndex.Find(w.enemy[static_cast<std::size_t>(i)].object)<0)w.enemyIndex.Set(w.enemy[static_cast<std::size_t>(i)].object,i);
     w.enemyGrid.Build(w.enemies,[&w](int i) noexcept { return w.enemy[static_cast<std::size_t>(i)].aim; },kEnemyCell);
     w.friendGrid.Build(w.friends,[&w](int i) noexcept { return w.fr[static_cast<std::size_t>(i)].pos; },kFriendCell);
     w.frRadius=0.0f;
     for(int i=0;i<w.friends;++i)if(w.fr[static_cast<std::size_t>(i)].radius>w.frRadius)w.frRadius=w.fr[static_cast<std::size_t>(i)].radius;
 }
+// The frame's lists. A fault in the walks (the game's tables, its objects) is the caller's handler's (ThinkHook's Fault),
+// as before; the lists then hold what was walked until it, and __finally makes the grids from them on the way out (a
+// soldier after it this frame asks grids of this frame's lists, never the last frame's over rows since rewritten).
 void Gather(std::int32_t team) noexcept {
     World& w=world;
     w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;w.enemyIndex.Clear();
-    w.player=player.at && GameMs()-player.at<kPlayerFixMs;
-    if(w.player)std::memcpy(w.playerAt,player.pos,12);
-    VisitEnemiesOf(team,&SeeEnemy,&w);
-    // The local player first: whatever the walk's order, no shot crosses them (B1).
-    if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
-        const float* p=Pos(me);
-        w.fr[0]=npc::Friend{{p[0],p[1]+1.0f,p[2]},kSoldierRadius};w.frObject[0]=me;w.friends=1;
-    }
-    if(const auto manager=At<void*>(image,kTeamManager)) {
-        FriendWalk f{kFriendVtable,&w};
-        reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
-        // On team 5 itself the friends' walk had them already (BoardTarget reads the friends first).
-        if(team!=kTeamVehicle && Matches(kOneTeamWalk,kOneTeamWalkSig,sizeof(kOneTeamWalkSig))) {
-            FriendWalk n{kNobodyVtable,&w};
-            reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
+    __try {
+        w.player=player.at && GameMs()-player.at<kPlayerFixMs;
+        if(w.player)std::memcpy(w.playerAt,player.pos,12);
+        VisitEnemiesOf(team,&SeeEnemy,&w);
+        // The local player first: whatever the walk's order, no shot crosses them (B1).
+        if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
+            const float* p=Pos(me);
+            w.fr[0]=npc::Friend{{p[0],p[1]+1.0f,p[2]},kSoldierRadius};w.frObject[0]=me;w.friends=1;
         }
+        if(const auto manager=At<void*>(image,kTeamManager)) {
+            FriendWalk f{kFriendVtable,&w};
+            reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
+            // On team 5 itself the friends' walk had them already (BoardTarget reads the friends first).
+            if(team!=kTeamVehicle && Matches(kOneTeamWalk,kOneTeamWalkSig,sizeof(kOneTeamWalkSig))) {
+                FriendWalk n{kNobodyVtable,&w};
+                reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
+            }
+        }
+    } __finally {
+        IndexWorld(w);
     }
-    IndexWorld(w);
     PlayerLane(w);
     FormationTick();
     SweepFrame();
@@ -637,7 +643,9 @@ struct Pick { const Enemy* e; float dist; };
 // One its fire is wasted on (WastedFire: a teleportation ship's hatch shut, its last hits on it all hurting nothing) is
 // passed over.
 // Through the frame's grid (npc_grid.h PickTarget: the scan's pick, nearest cells first). The held target is its row,
-// found once by the index (one row an object), not asked of every enemy (ObjRef::Is reads each enemy's object).
+// looked up once by the index (one row an object): isCurrent is then an int compare for each enemy visited. (ObjRef::Is
+// compares the pointer first and reads memory only for the row that is the held object, so the scan's isCurrent read
+// once a frame too: what the row saves is the compares, not reads.)
 Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
     const int held=EnemyRow(s.target);
     const int i=npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
