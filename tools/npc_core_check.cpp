@@ -764,7 +764,7 @@ int main() {
     {
         Put<float>(human,kPosition,0.0f);Put<float>(human,kPosition+4,25.0f);Put<float>(human,kPosition+8,0.0f);
         Put<float>(human,kMoveX,0.5f);
-        MoveTo(human,Pos(human),Pos(human),1e9f);
+        MoveTo(human,Pos(human),Pos(human),1e9f,now);
         const Soldier* const hovering=Entry(human,now);
         Expect(hovering && !hovering->navigation.initialized && At<float>(human,kMoveX)==0.0f,
                "a soldier held in the air stands: no route search from the floor to a point in the air");
@@ -819,40 +819,40 @@ int main() {
         Expect(StaleSweepLeavesLockFree(),"a stale selected object cannot leave the sweep HUD lock held after SEH");
         Soldier fetch{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kWeapon;
         const float away[3]={20.0f,2.0f,30.0f},there[3]={50.4f,2.0f,30.0f};
-        Expect(PickUp(fetch,human,away) && collects==0,"a soldier far from its box runs to it, nothing taken yet");
+        Expect(PickUp(fetch,human,away,now) && collects==0,"a soldier far from its box runs to it, nothing taken yet");
         const float downstairs[3]={50.0f,-8.0f,30.0f};
-        Expect(PickUp(fetch,human,downstairs) && collects==0 && !boxUnit[0][kBoxTaken],
+        Expect(PickUp(fetch,human,downstairs,now) && collects==0 && !boxUnit[0][kBoxTaken],
                "a soldier directly below a box cannot collect it through another floor");
         sweep.on=false;
-        Expect(!PickUp(fetch,human,there) && collects==0,"recalling a sweep invalidates its already assigned pickup in the same frame");
+        Expect(!PickUp(fetch,human,there,now) && collects==0,"recalling a sweep invalidates its already assigned pickup in the same frame");
         sweep.on=true;
-        Expect(PickUp(fetch,human,there) && collects==1 && collectBy==me && notifies==1 && notifyBy==me,
+        Expect(PickUp(fetch,human,there,now) && collects==1 && collectBy==me && notifies==1 && notifyBy==me,
                "at its box: native Notify and Apply once, credited to the local player");
         Expect(notifyId==42 && notifyKind==npc::pickup::kWeapon && applyKind==notifyKind && notifyBeforeApply && untakenAtApply,
                "native Collect ordering and exact box identity: Notify, Apply, then mark taken");
         Expect(boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0 && !fetch.pickUnit,"only that box taken, the one a metre off left");
-        Expect(!PickUp(fetch,human,there),"no box any more: the soldier's other moves");
+        Expect(!PickUp(fetch,human,there,now),"no box any more: the soldier's other moves");
         fetch.pickUnit=boxUnit[0];
-        Expect(!PickUp(fetch,human,there) && collects==1,"a box someone else took: nothing called");
+        Expect(!PickUp(fetch,human,there,now) && collects==1,"a box someone else took: nothing called");
         Boxes(npc::pickup::kWeapon,npc::pickup::kHealSmall);
         std::memcpy(boxModel[1],boxModel[0],16);fetch.pickUnit=boxUnit[0];sessionOn=true;
-        Expect(PickUp(fetch,human,there) && collects==1 && notifies==1 && boxUnit[0][kBoxTaken] && !boxUnit[1][kBoxTaken] && heals==0,
+        Expect(PickUp(fetch,human,there,now) && collects==1 && notifies==1 && boxUnit[0][kBoxTaken] && !boxUnit[1][kBoxTaken] && heals==0,
                "online overlapping boxes: only the selected weapon is taken, the health box is never consumed");
         sessionOn=false;
         // Health boxes: the hurt soldier itself, offline, allowed.
         Boxes(npc::pickup::kHealBig,npc::pickup::kWeapon);
         config.npcPickupHealth=true;Put<float>(human,kHumanHpMax,1000.0f);Put<float>(human,kHumanHp,400.0f);
         fetch=Soldier{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kHealBig;
-        Expect(PickUp(fetch,human,there) && heals==1 && healed==human && std::fabs(healAmount-300.0f)<0.01f && collects==0 &&
+        Expect(PickUp(fetch,human,there,now) && heals==1 && healed==human && std::fabs(healAmount-300.0f)<0.01f && collects==0 &&
                boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0,
                "a hurt soldier at a big health box: healed 30% of its full health itself, not the player's Collect");
         Boxes(npc::pickup::kHealSmall,npc::pickup::kWeapon);
         Put<float>(human,kHumanHp,1000.0f);fetch.pickUnit=boxUnit[0];fetch.pickKind=npc::pickup::kHealSmall;
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"healed to full meanwhile: the box left for the player");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"healed to full meanwhile: the box left for the player");
         Put<float>(human,kHumanHp,400.0f);fetch.pickUnit=boxUnit[0];sessionOn=true;
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"online: no health box (the plugin's heal is not synced)");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"online: no health box (the plugin's heal is not synced)");
         sessionOn=false;config.npcPickupHealth=false;fetch.pickUnit=boxUnit[0];
-        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
+        Expect(PickUp(fetch,human,there,now) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
         playerObj=nullptr;
     }
     // The mark (§6.3) is kept until its enemy dies or is gone (the user, 2026-10-07: "标记还很快消失", "标记效果应该先打死
@@ -1279,8 +1279,10 @@ int main() {
             Put<void*>(p.data(),0,image+kSoldiers[0].vtable);Put<int>(p.data(),kTeam,kTeamFriend);Put<float>(p.data(),kPosition,1.0f);
             FriendVisit(&walk,p.data());
         }
+        IndexFixture();
         static std::vector<npc::Friend> mine;
-        Expect(world.friends==kSquadCount && FriendsBut(people[5].data(),mine)==kSquadCount-1,
+        const float shotFrom[3]={0.0f,1.0f,-5.0f},shotTo[3]={2.0f,1.0f,5.0f};   // across the spot they all stand on
+        Expect(world.friends==kSquadCount && FriendsOnShot(people[5].data(),shotFrom,shotTo,0.0f,mine)==kSquadCount-1,
                "600 friends (the old table held 512): all of them in the shot's test");
         bool squadsOk=true;
         for(auto& p:people)squadsOk=squadsOk && SeeSquad(p.data(),p.data(),0,npc::Control::free,now)!=nullptr;
@@ -1310,7 +1312,7 @@ int main() {
         std::vector<unsigned char> objects(static_cast<std::size_t>(kObjects)*kStride,0);
         const auto obj=[&objects](int k){ return objects.data()+static_cast<std::size_t>(k)*kStride; };
         for(int k=0;k<kObjects;++k)Put<const void*>(obj(k),kSelfCtrl,obj(k)+8);   // each its own control block
-        int bad[8]={},asked=0;
+        int bad[9]={},asked=0,arcs=0;
         for(int battle=0;battle<12;++battle) {
             const float spread=battle%3==0 ? 60.0f : battle%3==1 ? 400.0f : 1500.0f;
             const int enemies=battle==11 ? 0 : 50+I(1100),friends=battle==10 ? 0 : 20+I(650);
@@ -1384,6 +1386,20 @@ int main() {
                     for(int k=0;k<n && !in;++k)in=std::memcmp(&got[static_cast<std::size_t>(k)],&f,sizeof(f))==0;
                     if(!in){++bad[4];break;}
                 }
+                // A thrown backpack round (Backpack): ArcClear over the friends FriendsOnShot gives for its line and its
+                // Radius = ArcClear over every friend but self (its arc's ground track is the line's).
+                {
+                    const float speed=U(15,60),gravity=I(4)==0 ? 0.0f : npcpack::kGravity*U(0.5f,1.5f),radius=I(3)==0 ? 0.0f : U(1,12);
+                    const npcpack::Weapon pack{PackUse::thrown,150.0f,radius,0.0f,speed,gravity,0.0f,true};
+                    float pitch=0.0f,flight=0.0f;
+                    if(npcpack::LobPitch(npc::Horiz(from,to),to[1]-from[1],speed,gravity,&pitch,&flight)) {
+                        const auto open=[](const float*,const float*) noexcept { return false; };
+                        const int an=FriendsOnShot(self,from,to,npcpack::Radius(pack),got);
+                        if(npcpack::ArcClear(pack,from,to,pitch,kSpread,all.data(),static_cast<int>(all.size()),open)!=
+                           npcpack::ArcClear(pack,from,to,pitch,kSpread,got.data(),an,open))++bad[8];
+                        ++arcs;
+                    }
+                }
                 // ThreatsNear: the first 64 within reach in the list's order, weighed as Evade weighs them.
                 const float tr=I(3)==0 ? U(30,200) : U(2,40);
                 npc::Threat want64[kMaxThreats],got64[kMaxThreats];int wn=0;
@@ -1408,11 +1424,25 @@ int main() {
         }
         wastedTarget=nullptr;
         static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","FriendsOnShot's verdict","FriendsOnShot's superset",
-                                          "ThreatsNear","GroupAt","NearestEnemy"};
-        for(int k=0;k<8;++k) {
+                                          "ThreatsNear","GroupAt","NearestEnemy","backpack ArcClear"};
+        for(int k=0;k<9;++k) {
             char what[200];
             std::snprintf(what,sizeof(what),"npcai's %s through the grid = the scan it replaced (%d asks over 12 battles, %d differ)",kWhat[k],asked,bad[k]);
             Expect(bad[k]==0,what);
+        }
+        Expect(arcs>1000,"the thrown rounds compared had an arc to fly");
+        // IsAnyPlayerSelf (the Think's own object, no Readable) = IsAnyPlayer over every combination of its fields.
+        {
+            int differ=0;
+            alignas(16) static unsigned char body[0x400];
+            for(int k=0;k<64;++k) {
+                std::memset(body,0,sizeof(body));
+                body[edf::kHumanPlayer]=static_cast<unsigned char>(k&1 ? (k&8 ? 0x80 : 1) : 0);
+                Put<const void*>(body,edf::kHumanPad,k&2 ? body : nullptr);
+                body[edf::kRiderNet+edf::kNetFlags]=static_cast<unsigned char>((k&4 ? 1 : 0)|(k&16 ? 0xFE : 0)|(k&32 ? 2 : 0));
+                differ+=edf::IsAnyPlayer(body)!=edf::IsAnyPlayerSelf(body);
+            }
+            Expect(differ==0,"IsAnyPlayerSelf reads the fields IsAnyPlayer reads, the same answer");
         }
     }
     // A fault part way through Gather's walks: the grids are made from the lists as the walk left them (Gather's

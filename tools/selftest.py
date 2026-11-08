@@ -6428,9 +6428,9 @@ def npc_pickup_wired() -> None:
     code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
     drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
-    run = drive.index('PickUp(s,h,pos)')
+    run = drive.index('PickUp(s,h,pos,ms)')
     assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
-    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'reinterpret_cast<NotifyBoxFn>' in pick and 'reinterpret_cast<ApplyBoxFn>' in pick
     assert pick.index('image+kNotifyBox') < pick.index('image+kApplyBox')
     assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
@@ -6500,7 +6500,7 @@ def npc_ai_wired() -> None:
         "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
     assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayer(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
+    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayerSelf(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
     assert 'npc::Scripted(control) ? Scripted(' in think
     ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
     assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')

@@ -664,17 +664,12 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
-// The friends (the player among them) but `self`, for the shot's test, into `out` (each caller's own buffer, kept from
-// frame to frame: it grows to the battle's friends once).
-int FriendsBut(const void* self,std::vector<npc::Friend>& out) noexcept {
-    if(out.size()<static_cast<std::size_t>(world.friends))out.resize(static_cast<std::size_t>(world.friends));
-    int n=0;
-    for(int i=0;i<world.friends;++i)if(world.frObject[i]!=self)out[static_cast<std::size_t>(n++)]=world.fr[i];
-    return n;
-}
-// The friends but `self` a shot from `from` to `to` (a round of `blast`) can touch, for ShotClear: those in the cells
-// along its line and round where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is
-// ShotClear over every friend (FriendsBut): the others are farther off its line and its blast than any friend's radius.
+// The friends (the player among them) but `self` a shot from `from` to `to` (a round of `blast`) can touch, for
+// ShotClear, into `out` (each caller's own buffer, kept from frame to frame): those in the cells along its line and round
+// where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is ShotClear over every friend but
+// `self`: the others are farther off its line and its blast than any friend's radius. The same for a thrown round's arc
+// and landing (npc_backpack.h ArcClear: its ground track is the line's, its landing `blast` its Radius), so no caller
+// copies every friend any more.
 int FriendsOnShot(const void* self,const float* from,const float* to,float blast,std::vector<npc::Friend>& out) noexcept {
     static std::vector<int> rows;
     npc::grid::ShotCandidates(world.friendGrid,from,to,world.frRadius+kSpread,blast>0.0f ? blast*1.25f+world.frRadius : 0.0f,rows);
@@ -717,8 +712,8 @@ void RouteStart(const float* pos,float* from) noexcept {
 // a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
 // began again a second later, for each such soldier, out of the budget all of them share.
 // `pace`: the share of its full walk (the paced march: mapcmd.cpp MapPaceScale), 0 it stands.
-void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,float pace=1.0f) noexcept {
-    const ULONGLONG ms=GameMs();
+// `ms`: the caller's game clock (its Think's, read once there: GameMs asks the pause state of System, a Readable each).
+void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {
     Soldier* const soldier=Entry(h,ms);
     float waypoint[3],dir[3],from[3],goal[3];
     RouteStart(pos,from);RouteStart(to,goal);
@@ -911,7 +906,7 @@ constexpr ULONGLONG kFallMs=1000;
 bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& served,ULONGLONG ms) noexcept {
     const float hpMax=At<float>(h,kHumanHpMax),hp=At<float>(h,kHumanHp);
     if(!(hpMax>0.0f) || !(hp/hpMax<Cfg().npcRetreatHp) || !served.at)return false;
-    if(sol.fallAt && ms-sol.fallAt<kFallMs){MoveTo(h,pos,sol.fallTo,kSpotStop);return true;}
+    if(sol.fallAt && ms-sol.fallAt<kFallMs){MoveTo(h,pos,sol.fallTo,kSpotStop,ms);return true;}
     const Enemy* const nearest=NearestEnemy(pos);
     float back[3]={0.0f,0.0f,0.0f};
     if(served.look){back[0]=-served.look[0];back[2]=-served.look[2];}
@@ -931,7 +926,7 @@ bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& serve
         }
     }
     std::memcpy(sol.fallTo,to,12);sol.fallAt=ms;
-    MoveTo(h,pos,to,kSpotStop);
+    MoveTo(h,pos,to,kSpotStop,ms);
     return true;
 }
 
@@ -1171,7 +1166,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
             Stand(h); // nextThink already wrote native movement; a rejected entrance must hold, not reuse that intent.
             return true;
         }
-        MoveTo(h,pos,walkAt,stop);
+        MoveTo(h,pos,walkAt,stop,ms);
         return true;
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);
@@ -1190,7 +1185,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
 
 bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
                    const char** move,float* left=nullptr) noexcept;
-bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept;
+bool PickUp(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept;
 
 // A move / attack-move (the user, 2026-10-09: "如果npc在打怪，就没办法移动了"): the soldier walks to its place by the
 // order's point (its formation slot, else the point itself) -- the player's command, over its own dodging, falling
@@ -1208,10 +1203,10 @@ bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned
     const float pace=MapPaceScale(q->top.obj);
     if(!q->top.Is(h) && top && !top[kDead] && HumanOnFoot(top) && npc::Horiz(Pos(top),q->cmd.at)>kPointFollow) {
         left=npc::Horiz(pos,q->cmd.at);
-        MoveTo(h,pos,Pos(top),kTopKeep,pace);
+        MoveTo(h,pos,Pos(top),kTopKeep,ms,pace);
     } else if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
         left=npc::Horiz(pos,q->cmd.at);
-        MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f,pace);
+        MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f,ms,pace);
     }
     *move=q->cmd.order==Order::move ? "move order" : "attack-move";
     if(q->top.Is(h)) {
@@ -1270,7 +1265,6 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
     }
     if(!t)return;
     static std::vector<npc::Friend> fr;
-    const int friends=FriendsBut(h,fr);
     const float dist=npc::Dist(eye,t->aim);
     for(int i=0;i<n;++i) {
         const PackWeapon& row=*slots[i].row;
@@ -1287,6 +1281,9 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
                                      t->points>=kLargePoints};
         float pitch=0.0f,dir[3],hit[3];
         if(!npcpack::Fits(pack,target,&pitch))continue;
+        // The friends its round can touch: along the line over the ground (a throw's arc keeps to it: npc_backpack.h
+        // ArcClear's points are eye + (aim - eye) * t/flight on x and z) and round where it lands (its Radius).
+        const int friends=FriendsOnShot(h,eye,t->aim,row.use==PackUse::thrown ? npcpack::Radius(pack) : 0.0f,fr);
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
             if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr.data(),friends,[](const float* from,const float* to) noexcept {
@@ -1371,27 +1368,27 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     // squad meets no enemy (mapcmd_logic.h Pursues). A member with nothing of its own to shoot while the squad holds
     // stands with it (it would walk on alone to the point under the formation's move).
     if(mapcmd::Pursues(pursuit,holds) && Pursue(s,h,pos,q,root,ms,&p.move))return p;
-    if(holds && !t.e){MoveTo(h,pos,pos,1e9f);p.move="attack-move stand";return p;}
+    if(holds && !t.e){MoveTo(h,pos,pos,1e9f,ms);p.move="attack-move stand";return p;}
     if(Evade(s,h,c,pos,ms,&p.move))return p;
     if(s.boardV && Board(s,h,pos,ms)){p.move="to its seat";return p;}
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
-    if(s.pickUnit && s.pickFrame==GameFrame() && PickUp(s,h,pos)){p.move="to a box";return p;}
+    if(s.pickUnit && s.pickFrame==GameFrame() && PickUp(s,h,pos,ms)){p.move="to a box";return p;}
     if(!t.e && q && q->routeActive) {
         // The route is only the leader's quiet movement. Never apply guard-radius/formation offsets
         // to its short waypoint, or rewrite followers' native leader links and follow inputs.
-        if(q->top.Is(h)){MoveTo(h,pos,q->routePoint,q->routeArrival);p.move="support route";}
+        if(q->top.Is(h)){MoveTo(h,pos,q->routePoint,q->routeArrival,ms);p.move="support route";}
         else p.move="support follow";
         return p;
     }
     if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
-        MoveTo(h,pos,s.spot,kSpotStop);
+        MoveTo(h,pos,s.spot,kSpotStop,ms);
         p.move="combat spot";
     } else if(o.hold) {   // within its post's radius it stands (the stock follow of a recruited squad would pull it away)
-        MoveTo(h,pos,anchor,npc::Horiz(pos,anchor)>o.leash ? o.leash*0.5f : 1e9f);
+        MoveTo(h,pos,anchor,npc::Horiz(pos,anchor)>o.leash ? o.leash*0.5f : 1e9f,ms);
         p.move="at its post";
     }
     return p;
@@ -1434,8 +1431,9 @@ void StuckClimb(Soldier& s,const unsigned char* h,int cls,ULONGLONG ms) noexcept
         At<std::int32_t>(h,kClimbStates+12),track,state,static_cast<double>(now),static_cast<double>(start),static_cast<double>(end));
 }
 
+// h: the Think's own object (live: ThinkHook's `human`), read as PreThink reads it (IsAnyPlayerSelf).
 void Think(unsigned char* h,int cls) noexcept {
-    if(IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
+    if(IsAnyPlayerSelf(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
     const std::int32_t team=At<std::int32_t>(h,kTeam);
     if(team!=0 && team!=kTeamFriend) {
         // An explicitly assigned mission crew may follow its vehicle's scripted faction change.
@@ -1625,8 +1623,11 @@ void Succeed(unsigned char* dead) noexcept {
     else Log("NPCAI squad of dead leader %p: %p leads the %d left%s",dead,lead,n,up ? (IsAnyPlayer(up) ? " (still the player's)" : " (under its leader)") : "");
 }
 
+// h: the Think's own object (ThinkHook's `human`, live: the game is calling its Think), so whether it is a player is
+// read off it (IsAnyPlayerSelf), not asked of Readable first (stress:100, 2026-11-07: IsAnyPlayer here was 2.4% of the
+// frame, nearly all the working-set ask of each soldier's page).
 void PreThink(unsigned char* h) noexcept {
-    if(!followOk || !Cfg().npcSquadSuccession || IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;
+    if(!followOk || !Cfg().npcSquadSuccession || IsAnyPlayerSelf(h) || h[kDead] || !IsOnlineAuthority(h))return;
     const auto team=At<std::int32_t>(h,kTeam);
     if(team!=0 && team!=kTeamFriend)return;
     const auto leader=At<unsigned char*>(h,kLeader);
@@ -2540,7 +2541,7 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     const float top[3]={slot[0],slot[1]+0.55f,slot[2]},bottom[3]={slot[0],slot[1]-2.0f,slot[2]};
     float floor[3];
     if(MapFloorRay(top,bottom,floor)>=0.0f && std::isfinite(floor[1])) {
-        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive,q && !marching ? MapPaceScale(q->top.obj) : 1.0f);
+        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive,ms,q && !marching ? MapPaceScale(q->top.obj) : 1.0f);
     } else Stand(h);
     *move=marching ? "formation" : "guard formation";
     return true;
@@ -2732,21 +2733,21 @@ bool BoxStill(const void* unit,float* at4) noexcept {
 
 // A dropped box's centre is not necessarily a foot point. The walking target
 // must be ground inside its 3D pickup sphere; collecting still checks the box.
-void MoveToBox(unsigned char* h,const float* pos,const float* box) noexcept {
+void MoveToBox(unsigned char* h,const float* pos,const float* box,ULONGLONG ms) noexcept {
     const float top[3]={box[0],box[1]+0.1f,box[2]},bottom[3]={box[0],box[1]-npc::pickup::kReach,box[2]};
     float at[3];
     if(MapFloorRay(top,bottom,at)<0.0f || !std::isfinite(at[1]) || npc::Dist(at,box)>npc::pickup::kReach){Stand(h);return;}
-    MoveTo(h,pos,at,0.2f);
+    MoveTo(h,pos,at,0.2f,ms);
 }
 
 // Runs to its box and takes it there; false when the box is gone (someone took it): the soldier's other moves then.
-bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
+bool PickUp(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     if(!sweep.on || !IsOnlineAuthority(h) || h[kDead])return false;
-    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveToBox(h,pos,s.pickPos);return true;}
+    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveToBox(h,pos,s.pickPos,ms);return true;}
     alignas(16) float at[4];
     auto u=static_cast<unsigned char*>(s.pickUnit);
     if(!boxesOk || !BoxStill(u,at))return false;
-    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveToBox(h,pos,at);return true;}
+    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveToBox(h,pos,at,ms);return true;}
     s.pickUnit=nullptr;
     Stand(h);
     if(npc::pickup::IsHeal(s.pickKind)) {

@@ -14,6 +14,10 @@ bool IsAnyPlayer(const unsigned char* human) noexcept {
     return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && (At<const void*>(human,kHumanPad) || RemoteRider(human));
 }
 
+bool IsAnyPlayerSelf(const unsigned char* self) noexcept {
+    return self[kHumanPlayer] && (At<const void*>(self,kHumanPad) || (self[kRiderNet+kNetFlags]&1)!=0);   // RemoteRider's bit
+}
+
 bool RemoteRider(const unsigned char* rider) noexcept {
     return Readable(rider,kRiderNet+kNetFlags+1) && (rider[kRiderNet+kNetFlags]&1)!=0;
 }

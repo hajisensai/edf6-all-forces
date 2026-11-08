@@ -783,7 +783,7 @@ using Rider=edf::Rider;
 inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
 // A player of any machine in the seat (Rider::player is this machine's only: common/seat.cpp).
 inline bool AnyPlayerIn(const unsigned char* seat) noexcept { return edf::AnyPlayerIn(image,seat); }
-using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer;
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer; using edf::IsAnyPlayerSelf;
 
 // The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
 // GameMs (0: never seen).
