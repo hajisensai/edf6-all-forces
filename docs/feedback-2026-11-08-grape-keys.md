@@ -37,6 +37,8 @@
   `src/stores.inc` 里它的 `fireKey = 4`（`ControlOf` → `Source::key`）。NPC 车组照旧按同轴机枪的射程 / 锥角开火（`HasShot` 按 `IsCoax` 判）。
 - 开火键 4 的手柄默认改为 RB（`VehicleFire4Button = 0x200`，`src/crew.h` 与 `EDF6VehicleCrew.ini`）。原来是 0（手柄上没有开火键 4）。
   其它用开火键 4 的车（X-Morph 单位，V603 类）原版只读 `+0x2E4`，RB 也没有插件功能占用。
+  已装过的 ini 里还是旧出厂值 0 的，安装器按新加的一步（`tools/installer.py` `NEW_DEFAULTS_1108`，只做一次、带标记行）改成 512；
+  玩家自己设过的值不动（`tools/selftest.py` `fire4_pad_default_migrates`）。
 
 ### 最终键位（格雷普）
 
