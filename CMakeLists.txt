@@ -1947,6 +1947,10 @@ add_test(NAME lock_cue COMMAND lock_cue_test)
 # the units) and the stock SGOs' tops (docs/vehicle-top-speed-re.md); without the game: skipped (77).
 add_test(NAME drive_gear_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drive_gear_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(drive_gear_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The Car's (Grape's) seat inputs and the 505 / 601 / 603's against the keys of the plugin's add-on weapons
+# (docs/stock-payload-re.md §2.1): read-only, the game's EDF.dll found like drive_gear_native.
+add_test(NAME car_input_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/car_input_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(car_input_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_executable(map_pvp_input_test EXCLUDE_FROM_ALL tests/map_pvp_input_test.cpp)
 target_include_directories(map_pvp_input_test PRIVATE src common)
 target_compile_options(map_pvp_input_test PRIVATE /W4 /WX /utf-8 /permissive-)

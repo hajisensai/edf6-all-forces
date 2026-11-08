@@ -109,7 +109,8 @@ struct Config {
     // primary and the second trigger. Keys: 'X', the mouse's side buttons 4 / 5, 'H'; the pad's XInput bits as
     // VehicleSecondarySwitchButton's (4 the d-pad left; 0 none).
     int vehicleFire3Key=0x58,vehicleFire4Key=0x05,vehicleFire5Key=0x06,vehicleFire6Key=0x48;
-    int vehicleFire3Button=0x04,vehicleFire4Button=0,vehicleFire5Button=0,vehicleFire6Button=0;
+    // XInput bits: 3 the d-pad left, 4 RB (the Grape's coax: the Car leaves RB unread, docs/stock-payload-re.md §2.1)
+    int vehicleFire3Button=0x04,vehicleFire4Button=0x200,vehicleFire5Button=0,vehicleFire6Button=0;
     // The auto turrets (Store.auto, payload.cpp AutoShot): whether they are on as a mission starts, and the key / pad bits
     // that turn them on and off ('Y'; no pad button).
     bool autoTurrets=true;

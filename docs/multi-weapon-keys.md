@@ -77,7 +77,7 @@ Arm('aa_l', ..., fire=0, auto=True, seat=1, turret={'low': -5, 'high': 80, 'yaw_
 | 行 | ini | 默认 | 手柄（ini，XInput 位） |
 |---|---|---|---|
 | 开火键 3 | `VehicleFire3Key` | X | `VehicleFire3Button` = 4（十字键左） |
-| 开火键 4 | `VehicleFire4Key` | 鼠标侧键 4 | `VehicleFire4Button` = 0 |
+| 开火键 4 | `VehicleFire4Key` | 鼠标侧键 4 | `VehicleFire4Button` = 0x200（RB；2026-11-08 起，格雷普的同轴机枪） |
 | 开火键 5 | `VehicleFire5Key` | 鼠标侧键 5 | `VehicleFire5Button` = 0 |
 | 开火键 6 | `VehicleFire6Key` | H | `VehicleFire6Button` = 0 |
 | 自动炮塔开关 | `VehicleAutoTurretKey` | Y | `VehicleAutoTurretButton` = 0 |
@@ -95,7 +95,7 @@ Arm('aa_l', ..., fire=0, auto=True, seat=1, turret={'low': -5, 'high': 80, 'yaw_
 | X-Morph 防空坦克 | 导弹 | 2 | |
 | X-Morph 重型坦克 | 防空导弹 / 车头火箭；机枪塔为炮手座 1（原作 `machinegun_turret` 单骨炮塔，整座随炮手转动、抬起） | 3 / 4；炮手座攻击键 | 防空导弹、机枪塔（空座时） |
 | X-Morph EMP 坦克 | EMP 高射弹 / 导弹塔；左右防空机炮塔为炮手座 1 / 2（`seat`，各有自己的炮塔骨骼） | 2 / 3；炮手座攻击键 | 导弹塔、两座防空机炮塔（空座时） |
-| 格雷普（401）| AGM 反坦克导弹架 | 3 | |
+| 格雷普（401）| AGM 反坦克导弹架；同轴机枪（Car 类的副扳机是油门，`docs/feedback-2026-11-08-grape-keys.md`） | 3；4 | |
 | 403 电磁炮坦克 | AGM 导弹 | 3 | |
 | 404 超重型坦克 | AGM 导弹 | 3 | |
 | 开普勒（V603 防空车） | AAM 防空导弹（两种弹，T 切换） | 2 | 是 |

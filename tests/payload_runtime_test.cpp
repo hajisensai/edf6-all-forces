@@ -27,6 +27,8 @@ bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0},
                 coaxSpec{L"MG", "MG", StoreRole::coax,0,0},
+                // the Grape's coax (vcobjects.STOCK_MOUNTS 'ifv': MG401_K4): fire key 4, the Car's second trigger its throttle
+                carCoax{L"MG_K4", "MG", StoreRole::coax,0,0,0,0,false,StoreShell::native,4},
                 npcPairedLeft{L"PAIR_L", "pair", StoreRole::gun,0,0,1,0},npcPairedRight{L"PAIR_R", "pair", StoreRole::gun,0,0,1,1},
                 npcNativeHE{L"NATIVE_HE", "HE", StoreRole::gun,0,0,0,0,true},npcNativeAP{L"NATIVE_AP", "AP", StoreRole::gun,0,0,0,0,true},
                 bmptMissile{L"BMPT_ATGM", "Ataka", StoreRole::ground,0,0,0,0,false,StoreShell::native,kSecondTriggerKey},
@@ -41,6 +43,7 @@ const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG",
                 xmSeatGun{L"XM_TG", "TG", StoreRole::gun,0,0,0,0,false,StoreShell::native,0,true,1};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
     if(w[0x101]==23)return &xmSeatGun;
+    if(w[0x101]==14)return &carCoax;
     if(w[0x101]>=20 && w[0x101]<=22)return w[0x101]==20 ? &xmMg : w[0x101]==21 ? &xmAam : &xmAa;
     return w[0x101]==10 ? &bmptMissile : w[0x101]==11 ? &bmptApLeft : w[0x101]==12 ? &bmptApRight : w[0x101]==13 ? &bmptThermobaric : w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
@@ -182,7 +185,7 @@ int main() {
     // the main gun's pick untouched; the fire-control view follows the secondary edge to it and back.
     {
         ResetPayload();now+=1000;
-        auto v=vehicles[1];Put<void*>(v,0,image+0x1000);   // Class::other (not one of the classes read in §2)
+        auto v=vehicles[1];Put<void*>(v,0,image+kVt505);   // the 505: its input reads the primary and the left stick alone
         auto seat=SeatAt(v,0);
         for(int i=0;i<3;++i)weapons[1][i][kWeaponTrigger]=0;
         weapons[1][0][0x100]=0;weapons[1][0][0x101]=0;Put<int>(weapons[1][0],kWeaponAmmo,10);
@@ -248,6 +251,54 @@ int main() {
         where[2]=950;check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine),"beyond 900 m (its tracer burns out): the coax holds");
         where[2]=80;friendInLine=true;check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
         check(!NpcOwnWeaponsFire(v,0,nullptr),"no target, no burst");
+        // A class not read (FreeSecondary: only the 505 / 601): a coax with no key of its own has no control there, and
+        // is never one of the main gun's choices.
+        Put<void*>(v,0,image+0x1000);riders[1][edf::kHumanPlayer]=1;trackedHuman=riders[1];
+        ResetPayload();now+=1000;weapons[1][2][kWeaponTrigger]=0;Put<float>(seat,0x2E0,1.0f);PayloadFrame(v);
+        check(PlayerPayload(&coax) && coax.entry[2].fire==PayloadFire::other && !coax.entry[2].selectable && !weapons[1][2][kWeaponTrigger],
+              "an unread class: the second trigger does not fire a keyless coax, the cycle leaves it out");
+        Put<float>(seat,0x2E0,0.0f);riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;
+        Put<void*>(v,0,image+kVt403);
+    }
+    // The Grape (the Car class; the player, 2026-11-08, docs/feedback-2026-11-08-grape-keys.md: 「LT and LB are assigned to
+    // forward and reverse movement ... you cannot move forward unless you keep firing the coaxial machine gun, and you
+    // cannot move backward unless you change your weapon loadout」). The Car drives on +0x2E0 (LT) and brakes on LB
+    // (docs/stock-payload-re.md §2.1): its coax is on fire key 4 (pad RB), its belts switch on X.
+    {
+        ResetPayload();now+=1000;
+        auto v=vehicles[1];Put<void*>(v,0,image+kVtCar);
+        auto seat=SeatAt(v,0);
+        for(int i=0;i<3;++i)weapons[1][i][kWeaponTrigger]=0;
+        weapons[1][0][0x100]=0;weapons[1][0][0x101]=0;Put<int>(weapons[1][0],kWeaponAmmo,10);
+        weapons[1][1][0x100]=2;weapons[1][1][0x101]=3;Put<int>(weapons[1][1],kWeaponAmmo,150);Put<int>(weapons[1][1],kWeaponReloadTime,600);
+        weapons[1][2][0x100]=2;weapons[1][2][0x101]=14;Put<int>(weapons[1][2],kWeaponAmmo,2200);Put<int>(weapons[1][2],kWeaponReloadTime,600);
+        Put<const wchar_t*>(weapons[1][1],0x08,L"EDF6VC_AC_HE_150.SGO");Put<const wchar_t*>(weapons[1][2],0x08,L"EDF6VC_MG401_K4_2200.SGO");
+        Put<std::uint64_t>(seat,kSeatWeaponCount,3);
+        riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);trackedHuman=riders[1];
+        cfg.stockStores=true;cfg.vehicleFire4Button=0x0200;padButtons=0;
+        Put<unsigned char>(seat,kSeatPad,1);Put<std::uint16_t>(seat,kSeatButtons,0);
+        Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        PayloadFrame(v);now+=16;PayloadFrame(v);
+        PayloadReadout r{};
+        check(PlayerPayload(&r) && r.count==3 && r.entry[2].fire==PayloadFire::key && r.entry[2].key==4 && r.entry[2].coax &&
+              r.choices==2 && !r.entry[2].selectable && r.switchButton==kButtonX,
+              "the Grape: the coax on fire key 4, the main gun and its other belt the switch's two choices, on X");
+        const unsigned char* const was=PayloadPicked(v);
+        Put<float>(seat,0x2E0,1.0f);now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger] && PayloadSightPicked(v,0)==weapons[1][0],
+              "LT (the throttle) held: no coax burst, the view stays on the main gun");
+        padButtons=0x0200;now+=16;PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger]==1 && !weapons[1][0][kWeaponTrigger] && !weapons[1][1][kWeaponTrigger],
+              "RB (fire key 4) fires the coax alone, driving or not");
+        padButtons=0;weapons[1][2][kWeaponTrigger]=0;Put<float>(seat,0x2E0,0.0f);
+        Put<std::uint16_t>(seat,kSeatButtons,kButtonLB);now+=16;PayloadFrame(v);Put<std::uint16_t>(seat,kSeatButtons,0);
+        now+=16;PayloadFrame(v);
+        check(PayloadPicked(v)==was,"LB (the brake / reverse) switches nothing");
+        Put<std::uint16_t>(seat,kSeatButtons,kButtonX);now+=16;PayloadFrame(v);Put<std::uint16_t>(seat,kSeatButtons,0);
+        check(PayloadPicked(v)!=was,"X goes round the belts");
+        now+=16;PayloadFrame(v);
+        cfg.vehicleFire4Button=Config{}.vehicleFire4Button;
+        riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;Put<unsigned char>(seat,kSeatPad,0);
         Put<void*>(v,0,image+kVt403);
     }
     // 2026-10-12 「同轴机枪开火的时候主炮会伸缩」: the 505's and the 601's slot 48 play the main gun's firing motion for

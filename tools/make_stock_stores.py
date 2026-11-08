@@ -137,7 +137,8 @@ _VARIUS = (*_MBT[:1], _HEAT, *_MBT[1:])
 _IFV = (_rounds('AC_AP', 'AC_HE', 150, 0), _store('AGM_L', 4, 0))
 # The coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」, 「这个坦克的同轴机枪做的什么玩意，
 # 找现实的模型来做」; vcobjects COAX_MOUNTS / STORES 'MG<tank>'): the real 7.62 mm coax of each class, its ready belt,
-# fired by the secondary trigger (src/payload.cpp). The holder hangs on the bone that elevates the mantlet:
+# fired by the secondary trigger (src/payload.cpp), the Grape's by a fire key of its own (vcobjects.STOCK_MOUNTS: the Car
+# drives on that trigger). The holder hangs on the bone that elevates the mantlet:
 #   Blacker 505 (its five requests share the v505_tank skeleton): 'cannon' ('cannon_slide' under it is the barrel's
 #     recoil travel); Varius 601: 'cannon'; Grape 401: its 'Barrel' bone is the elevating cannon itself (no recoil bone).
 # The port on each mantlet and the gun's muzzle: vcobjects.COAX_MOUNTS.
@@ -187,7 +188,7 @@ def _mounted(category: str, m: Mount) -> Mount:
 
 
 LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: tuple(_mounted(c, m) for m in _BY_STEM.get(stem, _BY_CATEGORY[c])) +
-                                          ((COAX[stem],) if stem in COAX else ())
+                                          ((_mounted(c, COAX[stem]),) if stem in COAX else ())
                                           for stem, c in CATEGORIES.items()}
 LOADOUTS['VEHICLE409_HELI'] = (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1))   # its missile: holder 1
 # What each category must carry (tests/test_stock_store_loadouts.py): store kinds, or roles ('role:<role>').
