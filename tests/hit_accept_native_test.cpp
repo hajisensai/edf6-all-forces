@@ -193,6 +193,27 @@ void Plans() {
           "shut, due to open within the pre-aim: kept as the target (wait), trigger held");
     nowMs+=60000;
     Check(WastedFire(soldier,ship),"shut long past its rhythm: no target");
+    // The watch is each frame's (WatchTarget, every enemy), not the asks': a ship nobody asked of while it opened and
+    // shut (it never ranked as a soldier's best) has its rhythm known at the first ask, shut: wait, not skip.
+    ResetWastedFire();
+    ship[0xD84]=0;
+    const ULONGLONG t0=nowMs;
+    const struct { ULONGLONG at; unsigned char open; } seen[]={{0,0},{1000,1},{1500,0},{3000,1},{3500,0},{4500,0}};
+    for(const auto& s:seen){nowMs=t0+s.at;ship[0xD85]=s.open;WatchTarget(ship);}
+    Check(HoldFire(soldier,ship,eye,0.0f,0.0f,nullptr) && !WastedFire(soldier,ship),
+          "watched each frame, never asked: at the first ask, shut and due to open, kept as the target (wait)");
+    // Within a frame the asks change nothing watched: the window and motion as the frame's watch left them, however
+    // many ask and in what order.
+    frameHeld=true;++frameNo;nowMs+=16;
+    WatchTarget(ship);
+    const Watched before=*watched.Find(ship);
+    ship[0xD85]=1;
+    for(int i=0;i<5;++i){nowMs+=3;HoldFire(soldier,ship,eye,static_cast<float>(100*i),0.0f,nullptr);WastedFire(soldier,ship);}
+    Check(std::memcmp(&before,watched.Find(ship),sizeof(Watched))==0,"asks within a frame write nothing watched");
+    frameHeld=false;
+    ++frameNo;HoldFire(soldier,ship,eye,0.0f,0.0f,nullptr);
+    Check(watched.Find(ship)->w.opens==3,"the next frame's ask (nothing watched it yet) sees it once: the opening counted");
+    ship[0xD85]=0;
     // An ordinary enemy: always fire, no ray asked.
     rayOn=false;
     SetVtable(other,0x17C0BD0);Put<std::uint32_t>(other,kObjFlags,0);

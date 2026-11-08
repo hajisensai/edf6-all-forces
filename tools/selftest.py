@@ -6918,6 +6918,17 @@ def air_chase_wired() -> None:
     wasted = src('src/wastedfire.cpp')
     assert 'speed==o.speed && gravity==o.gravity' in wasted and 'const PlanKey key{shooter,target,speed,gravity};' in wasted
     assert 'std::memcmp(p->from,from,12)==0' in wasted, 'cached plans belong to the same muzzle and weapon'
+    # A target's window and motion are watched once a frame by the walks that list every enemy (WatchTarget), not by
+    # who asks: the AI asks only of a would-be best (npc_logic.h PickTarget, enemy_points.h Nearest). See is the one
+    # writer of a Watched (once a frame), a plan (Assess) only reads it.
+    assert wasted.count('Watch(target)') == 1 and 'Watched& w=Watch(target);\n    if(w.frame==frame)return &w;' in wasted
+    assert 'hitpredict::Observe(' in wasted.split('const Watched* See(', 1)[1].split('\n}\n', 1)[0]
+    assess = wasted.split('Plan Assess(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const Watched& w) noexcept' in assess and 'Watch(' not in assess and 'Observe(' not in assess
+    assert wasted.count('hitpredict::Observe(') == 1
+    gather = npcai.split('void Gather(std::int32_t team) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'for(int i=0;i<w.enemies;++i)WatchTarget(w.enemy[static_cast<std::size_t>(i)].object);' in gather
+    assert 'for(const enemypoints::Point& p:s.points)WatchTarget(p.object);' in src('src/heli.cpp')
     heli = src('src/heli.cpp')
     assert 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });' in heli and heli.count('held())return;') >= 3
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')

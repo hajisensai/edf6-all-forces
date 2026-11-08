@@ -528,6 +528,9 @@ void Gather(std::int32_t team) noexcept {
     } __finally {
         IndexWorld(w);
     }
+    // Every enemy's window and motion watched this frame (damagestats.h WatchTarget), not only those a soldier asks of:
+    // PickTarget asks WastedFire of a would-be best alone (npc_logic.h).
+    for(int i=0;i<w.enemies;++i)WatchTarget(w.enemy[static_cast<std::size_t>(i)].object);
     PlayerLane(w);
     FormationTick();
     SweepFrame();

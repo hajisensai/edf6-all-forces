@@ -3892,6 +3892,8 @@ StepPoints* PointsThisStep(const unsigned char* vehicle) noexcept {
         if(s.ok)enemypoints::Collect(head,relation,s.points,nodes);
         else s.points.clear();
         s.step=step;s.taken=true;
+        // every enemy's window watched each step, not only the would-be best a seat asks of (damagestats.h)
+        for(const enemypoints::Point& p:s.points)WatchTarget(p.object);
     }
     return &s;
 }
