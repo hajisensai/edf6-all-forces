@@ -678,6 +678,19 @@ int FriendsOnShot(const void* self,const float* from,const float* to,float blast
     for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
     return n;
 }
+// ShotClear over every friend but `self` for a shot from `from` to `to` (a round of `blast`), asked of the same cells as
+// FriendsOnShot and done at the first friend in the way: a yes or no needs neither their order nor each once, so nothing
+// is gathered or sorted (gathering and sorting the candidates cost 30 ms a frame with 2132 soldiers in one crowd).
+bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
+    bool clear=true;
+    const auto test=[&](int i) noexcept {
+        const std::size_t k=static_cast<std::size_t>(i);
+        if(clear && world.frObject[k]!=self && !npc::ShotClear(from,to,kSpread,blast,&world.fr[k],1))clear=false;
+    };
+    world.friendGrid.Capsule(from,to,world.frRadius+kSpread,test);
+    if(clear && blast>0.0f)world.friendGrid.Around(to,blast*1.25f+world.frRadius,test);
+    return clear;
+}
 // A friend but `self` within `r` of `at`: looked for in the cells round it (the same answer as over every friend).
 bool FriendNear(const void* self,const float* at,float r) noexcept {
     bool found=false;
@@ -778,9 +791,7 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
-    static std::vector<npc::Friend> fr;
-    const int n=FriendsOnShot(h,eye,t.aim,a.arm[i].blast,fr);
-    return npc::ShotClear(eye,t.aim,kSpread,a.arm[i].blast,fr.data(),n);
+    return ShotClearOf(h,eye,t.aim,a.arm[i].blast);
 }
 
 // A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
@@ -798,16 +809,14 @@ float LongestReach(const Arms& a) noexcept {
 }
 // Whether a round of `blast` at `t` (none: along the look, as far as `reach` or the ground) keeps off every friend.
 bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
-    static std::vector<npc::Friend> fr;
-    if(t){const int n=FriendsOnShot(h,eye,t->aim,blast,fr);return npc::ShotClear(eye,t->aim,kSpread,blast,fr.data(),n);}
+    if(t)return ShotClearOf(h,eye,t->aim,blast);
     if(reach<=0.0f)return false;
     float dir[3];
     const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
     dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
     float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
-    const int n=FriendsOnShot(h,eye,to,blast,fr);
-    return npc::ShotClear(eye,to,kSpread,blast,fr.data(),n);
+    return ShotClearOf(h,eye,to,blast);
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {

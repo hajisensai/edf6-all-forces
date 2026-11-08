@@ -1312,7 +1312,7 @@ int main() {
         std::vector<unsigned char> objects(static_cast<std::size_t>(kObjects)*kStride,0);
         const auto obj=[&objects](int k){ return objects.data()+static_cast<std::size_t>(k)*kStride; };
         for(int k=0;k<kObjects;++k)Put<const void*>(obj(k),kSelfCtrl,obj(k)+8);   // each its own control block
-        int bad[9]={},asked=0,arcs=0;
+        int bad[10]={},asked=0,arcs=0;
         for(int battle=0;battle<12;++battle) {
             const float spread=battle%3==0 ? 60.0f : battle%3==1 ? 400.0f : 1500.0f;
             const int enemies=battle==11 ? 0 : 50+I(1100),friends=battle==10 ? 0 : 20+I(650);
@@ -1376,7 +1376,9 @@ int main() {
                 std::vector<npc::Friend> all,got;
                 for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self)all.push_back(world.fr[static_cast<std::size_t>(i)]);
                 const int n=FriendsOnShot(self,from,to,blast,got);
-                if(npc::ShotClear(from,to,kSpread,blast,all.data(),static_cast<int>(all.size()))!=npc::ShotClear(from,to,kSpread,blast,got.data(),n))++bad[3];
+                const bool clearAll=npc::ShotClear(from,to,kSpread,blast,all.data(),static_cast<int>(all.size()));
+                if(clearAll!=npc::ShotClear(from,to,kSpread,blast,got.data(),n))++bad[3];
+                if(clearAll!=ShotClearOf(self,from,to,blast))++bad[9];   // ShotOk / ShotSafe's own verdict
                 for(const npc::Friend& f:all) {
                     float t;
                     const bool touches=(npc::SegmentDist(from,to,f.pos,&t)<f.radius+kSpread && t>0.0f) ||
@@ -1424,8 +1426,8 @@ int main() {
         }
         wastedTarget=nullptr;
         static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","FriendsOnShot's verdict","FriendsOnShot's superset",
-                                          "ThreatsNear","GroupAt","NearestEnemy","backpack ArcClear"};
-        for(int k=0;k<9;++k) {
+                                          "ThreatsNear","GroupAt","NearestEnemy","backpack ArcClear","ShotClearOf"};
+        for(int k=0;k<10;++k) {
             char what[200];
             std::snprintf(what,sizeof(what),"npcai's %s through the grid = the scan it replaced (%d asks over 12 battles, %d differ)",kWhat[k],asked,bad[k]);
             Expect(bad[k]==0,what);
