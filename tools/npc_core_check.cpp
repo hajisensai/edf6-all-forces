@@ -12,6 +12,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
+#include <random>
 
 namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
@@ -1295,6 +1296,124 @@ int main() {
                "100 hand-overs in a moment: the first one still followed (the old ring kept 32)");
         now+=kHandoverMs+1;AddHandover(Handover{ObjRef::Of(at(3000)),ObjRef::Of(at(3001)),now});
         Expect(!NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && handovers.size()==1,"hand-overs past kHandoverMs are dropped");
+    }
+    // npcai.cpp's own grid questions (the wrappers as Think asks them: PickTarget with its held row and WastedFire,
+    // EnemyRow, FriendNear and FriendsOnShot with frObject != self and the radii they add, ThreatsNear's first 64 and
+    // weights, GroupAt, NearestEnemy) against the scans they replaced, written out here as npcai.cpp had them, over
+    // random battles: clusters, repeats (enemies and friends on one spot; a friend object listed twice), far points.
+    {
+        Reset();
+        std::mt19937 rng(20261108u);
+        const auto U=[&rng](float a,float b){ return std::uniform_real_distribution<float>(a,b)(rng); };
+        const auto I=[&rng](int n){ return static_cast<int>(rng()%static_cast<unsigned>(n)); };
+        constexpr int kObjects=2000,kStride=0x40;
+        std::vector<unsigned char> objects(static_cast<std::size_t>(kObjects)*kStride,0);
+        const auto obj=[&objects](int k){ return objects.data()+static_cast<std::size_t>(k)*kStride; };
+        for(int k=0;k<kObjects;++k)Put<const void*>(obj(k),kSelfCtrl,obj(k)+8);   // each its own control block
+        int bad[8]={},asked=0;
+        for(int battle=0;battle<12;++battle) {
+            const float spread=battle%3==0 ? 60.0f : battle%3==1 ? 400.0f : 1500.0f;
+            const int enemies=battle==11 ? 0 : 50+I(1100),friends=battle==10 ? 0 : 20+I(650);
+            float cx=U(-spread,spread),cz=U(-spread,spread);
+            const auto spot=[&](float* p){
+                const int kind=I(10);
+                if(kind<5){if(I(15)==0){cx=U(-spread,spread);cz=U(-spread,spread);}p[0]=cx+U(-12,12);p[2]=cz+U(-12,12);}
+                else if(kind<9){p[0]=U(-spread,spread);p[2]=U(-spread,spread);}
+                else{p[0]=U(-9e4f,9e4f);p[2]=U(-9e4f,9e4f);}
+                p[1]=U(-3,40);
+            };
+            world.enemies=enemies;world.friends=friends;
+            Room(world.enemy,enemies);Room(world.fr,friends);Room(world.frObject,friends);
+            for(int i=0;i<enemies;++i) {
+                Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+                // One row an object (SeeEnemy: another lock point of it counts in its row), on a spot of its own or
+                // on another's (ties).
+                e.object=obj(i);
+                if(i>0 && I(6)==0)std::memcpy(e.aim,world.enemy[static_cast<std::size_t>(I(i))].aim,12);else spot(e.aim);
+                e.points=1+I(4);
+            }
+            for(int i=0;i<friends;++i) {
+                npc::Friend& f=world.fr[static_cast<std::size_t>(i)];
+                if(i>0 && I(8)==0)f=world.fr[static_cast<std::size_t>(I(i))];else spot(f.pos);
+                f.radius=I(3)==0 ? kVehicleRadius : I(2) ? kSoldierRadius : kOtherRadius;
+                world.frObject[static_cast<std::size_t>(i)]=obj(I(kObjects));
+            }
+            IndexFixture();
+            wastedTarget=enemies ? world.enemy[static_cast<std::size_t>(I(enemies))].object : nullptr;
+            for(int ask=0;ask<700;++ask,++asked) {
+                float from[3],at[3];
+                if(enemies && I(2)){const float* a=world.enemy[static_cast<std::size_t>(I(enemies))].aim;from[0]=a[0]+U(-20,20);from[1]=a[1]+1.5f;from[2]=a[2]+U(-20,20);}
+                else spot(from);
+                if(friends && I(2)){const float* a=world.fr[static_cast<std::size_t>(I(friends))].pos;at[0]=a[0]+U(-3,3);at[1]=a[1];at[2]=a[2]+U(-3,3);}
+                else spot(at);
+                const void* self=I(4) && friends ? world.frObject[static_cast<std::size_t>(I(friends))] : obj(I(kObjects));
+                // PickTarget: the held target an object's ref (none, or one of them), WastedFire passing one over.
+                Soldier sol{};
+                sol.target=I(3)==0 ? ObjRef{} : ObjRef::Of(obj(I(kObjects)));
+                const float scope=I(6)==0 ? 1e9f : U(5,700),reach=I(3)==0 ? 0.0f : U(10,900);
+                const int want=npc::PickTarget(world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                    [&sol](int k) noexcept { return sol.target.Is(world.enemy[k].object); },
+                    [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },from,at,scope,reach);
+                const Pick pick=PickTarget(sol,self,from,at,scope,reach);
+                if(pick.e!=(want<0 ? nullptr : &world.enemy[static_cast<std::size_t>(want)]))++bad[0];
+                // EnemyRow: the first row whose object the ref is.
+                int row=-1;
+                for(int i=0;i<world.enemies;++i)if(sol.target.Is(world.enemy[static_cast<std::size_t>(i)].object)){row=i;break;}
+                if(EnemyRow(sol.target)!=row)++bad[1];
+                // FriendNear.
+                const float r=I(4)==0 ? U(20,300) : U(0.5f,10.0f);
+                bool nearWant=false;
+                for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r){nearWant=true;break;}
+                if(FriendNear(self,at,r)!=nearWant)++bad[2];
+                // A shot's friends: FriendsOnShot + ShotClear against every friend but self + ShotClear, and the
+                // candidates a superset of every friend but self the line or the blast touches.
+                float to[3];
+                if(enemies && I(3)){const float* a=world.enemy[static_cast<std::size_t>(I(enemies))].aim;to[0]=a[0];to[1]=a[1];to[2]=a[2];}
+                else{const float len=I(5)==0 ? U(300,3000) : U(0,200),ang=U(0,6.3f);to[0]=from[0]+std::sin(ang)*len;to[1]=from[1]+U(-15,15);to[2]=from[2]+std::cos(ang)*len;}
+                const float blast=I(2) ? 0.0f : U(1,25);
+                std::vector<npc::Friend> all,got;
+                for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self)all.push_back(world.fr[static_cast<std::size_t>(i)]);
+                const int n=FriendsOnShot(self,from,to,blast,got);
+                if(npc::ShotClear(from,to,kSpread,blast,all.data(),static_cast<int>(all.size()))!=npc::ShotClear(from,to,kSpread,blast,got.data(),n))++bad[3];
+                for(const npc::Friend& f:all) {
+                    float t;
+                    const bool touches=(npc::SegmentDist(from,to,f.pos,&t)<f.radius+kSpread && t>0.0f) ||
+                                       (blast>0.0f && npc::Dist(to,f.pos)<blast*1.25f+f.radius);
+                    if(!touches)continue;
+                    bool in=false;
+                    for(int k=0;k<n && !in;++k)in=std::memcmp(&got[static_cast<std::size_t>(k)],&f,sizeof(f))==0;
+                    if(!in){++bad[4];break;}
+                }
+                // ThreatsNear: the first 64 within reach in the list's order, weighed as Evade weighs them.
+                const float tr=I(3)==0 ? U(30,200) : U(2,40);
+                npc::Threat want64[kMaxThreats],got64[kMaxThreats];int wn=0;
+                for(int i=0;i<world.enemies && wn<kMaxThreats;++i) {
+                    const Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+                    if(npc::Horiz(from,e.aim)<tr)want64[wn++]=npc::Threat{{e.aim[0],e.aim[1],e.aim[2]},e.points>=kLargePoints ? 3.0f : 1.0f};
+                }
+                const int gn=ThreatsNear(from,tr,got64);
+                if(gn!=wn || std::memcmp(want64,got64,sizeof(npc::Threat)*static_cast<std::size_t>(wn))!=0)++bad[5];
+                // GroupAt round a target, and the nearest over the ground (FallBack).
+                if(enemies) {
+                    const Enemy& t=world.enemy[static_cast<std::size_t>(I(enemies))];
+                    const float gr=U(0,40);
+                    int count=0;
+                    for(int i=0;i<world.enemies;++i)if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=gr)++count;
+                    if(GroupAt(t,gr)!=(count>0 ? count : 1))++bad[6];
+                }
+                const Enemy* nearest=nullptr;float nd=1e30f;
+                for(int i=0;i<world.enemies;++i){const float d=npc::Horiz(from,world.enemy[static_cast<std::size_t>(i)].aim);if(d<nd){nd=d;nearest=&world.enemy[static_cast<std::size_t>(i)];}}
+                if(NearestEnemy(from)!=nearest)++bad[7];
+            }
+        }
+        wastedTarget=nullptr;
+        static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","FriendsOnShot's verdict","FriendsOnShot's superset",
+                                          "ThreatsNear","GroupAt","NearestEnemy"};
+        for(int k=0;k<8;++k) {
+            char what[200];
+            std::snprintf(what,sizeof(what),"npcai's %s through the grid = the scan it replaced (%d asks over 12 battles, %d differ)",kWhat[k],asked,bad[k]);
+            Expect(bad[k]==0,what);
+        }
     }
     // A fault part way through Gather's walks: the grids are made from the lists as the walk left them (Gather's
     // __finally), not left over the last frame's rows; the row whose point could not be read is not made.

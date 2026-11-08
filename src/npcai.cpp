@@ -876,6 +876,11 @@ int ThreatsNear(const float* pos,float reach,npc::Threat* out) noexcept {
     }
     return n;
 }
+// The enemy nearest `pos` over the ground (the scan's: the first of a tie), null with none. Through the grid.
+const Enemy* NearestEnemy(const float* pos) noexcept {
+    const int i=npc::grid::NearestHoriz(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },pos);
+    return i>=0 ? &world.enemy[static_cast<std::size_t>(i)] : nullptr;
+}
 // Crowded (§3.6): back off, side-step or roll; true when it moved.
 bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,ULONGLONG ms,const char** what) noexcept {
     if(!Cfg().npcEvade)return false;
@@ -907,8 +912,7 @@ bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& serve
     const float hpMax=At<float>(h,kHumanHpMax),hp=At<float>(h,kHumanHp);
     if(!(hpMax>0.0f) || !(hp/hpMax<Cfg().npcRetreatHp) || !served.at)return false;
     if(sol.fallAt && ms-sol.fallAt<kFallMs){MoveTo(h,pos,sol.fallTo,kSpotStop);return true;}
-    const int ni=npc::grid::NearestHoriz(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },pos);
-    const Enemy* const nearest=ni>=0 ? &world.enemy[static_cast<std::size_t>(ni)] : nullptr;
+    const Enemy* const nearest=NearestEnemy(pos);
     float back[3]={0.0f,0.0f,0.0f};
     if(served.look){back[0]=-served.look[0];back[2]=-served.look[2];}
     else if(nearest){back[0]=served.at[0]-nearest->aim[0];back[2]=served.at[2]-nearest->aim[2];}
