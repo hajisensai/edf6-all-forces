@@ -3,6 +3,13 @@
   - prepare + restore give back the ini byte for byte (and no ini when there was none); an ini changed in between is kept;
   - launch: puts a left-over run back first, refuses while the game runs, starts Steam, waits for EDF6.exe to come and
     go, restores; restores too when the game never starts;
+  - the window closed while the game runs: the ini back, the saves switched back by the plugin's restore-saves at the
+    next mod start (also a slot synced in the vanilla set); closed at the prompt or while waiting: nothing left; no
+    launch step after the close handler;
+  - a switch in / out cut off after every single write or removal: the next restore gives every slot the whole mod
+    set, every store whole, and a full round after it works (a vanilla load cut half way: the mod store untouched);
+  - prepare refuses over an existing STATE; another process holding the lock refuses a second launch, the installer
+    and restore-saves with nothing touched, and a killed holder frees it;
   - the generator dispatches `vanilla-launch <game>`; install writes 原版启动.cmd, uninstall removes it, write_game
     restores a left-over ini.
 Exit code 1 when one fails.
