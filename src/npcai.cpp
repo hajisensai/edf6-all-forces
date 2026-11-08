@@ -483,6 +483,18 @@ void FormationTick() noexcept {
     march.held=down;
 }
 
+// The frame's indexes over its lists, made from the lists as they stand: enemyIndex (one row an object, its first),
+// the enemy and friend grids, frRadius. Gather's last step once the lists are full; nothing else writes the lists, so
+// every ask of the frame finds the indexes and the lists alike (an offline fixture filling the lists calls it too).
+void IndexWorld(World& w) noexcept {
+    w.enemyIndex.Clear();
+    for(int i=0;i<w.enemies;++i)
+        if(w.enemyIndex.Find(w.enemy[static_cast<std::size_t>(i)].object)<0)w.enemyIndex.Set(w.enemy[static_cast<std::size_t>(i)].object,i);
+    w.enemyGrid.Build(w.enemies,[&w](int i) noexcept { return w.enemy[static_cast<std::size_t>(i)].aim; },kEnemyCell);
+    w.friendGrid.Build(w.friends,[&w](int i) noexcept { return w.fr[static_cast<std::size_t>(i)].pos; },kFriendCell);
+    w.frRadius=0.0f;
+    for(int i=0;i<w.friends;++i)if(w.fr[static_cast<std::size_t>(i)].radius>w.frRadius)w.frRadius=w.fr[static_cast<std::size_t>(i)].radius;
+}
 void Gather(std::int32_t team) noexcept {
     World& w=world;
     w.frame=GameFrame();w.team=team;w.enemies=w.friends=w.nobodys=0;w.enemyIndex.Clear();
@@ -503,10 +515,7 @@ void Gather(std::int32_t team) noexcept {
             reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,kTeamVehicle,&n);
         }
     }
-    w.enemyGrid.Build(w.enemies,[&w](int i) noexcept { return w.enemy[static_cast<std::size_t>(i)].aim; },kEnemyCell);
-    w.friendGrid.Build(w.friends,[&w](int i) noexcept { return w.fr[static_cast<std::size_t>(i)].pos; },kFriendCell);
-    w.frRadius=0.0f;
-    for(int i=0;i<w.friends;++i)if(w.fr[static_cast<std::size_t>(i)].radius>w.frRadius)w.frRadius=w.fr[static_cast<std::size_t>(i)].radius;
+    IndexWorld(w);
     PlayerLane(w);
     FormationTick();
     SweepFrame();
