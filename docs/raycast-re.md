@@ -97,6 +97,14 @@ addHit `0xD93980`：若 `hit.fraction < this->earlyOut`，就把 `0x70` 字节�
 
 layer 22 的使用者有 66 处（`calls(0x106100)`），包括 `0x6519A0 / 0x6545D0 / 0x6563B0`（直升机）、`0x62DE60`（载具）、`0x208860`（GetGroundPosition）、`0x1D7490`（`MissionContext::internal_CastRayCreatePosition`）。它就是游戏的“打地图”专用层。
 
+### 3.1 与 4.1 的碰撞表对照（H，2026-11-08，`docs/edf41-ufomother401.md` 2.7）
+
+- 4.1（`EDF41.exe`）的 CollisionFilter 构造 `0xEBC70`：hkpGroupFilter（构造 `0x5E6F90`）先把层 1–27 全关（`0x5E7100`），再开 118 对（`0x5E7050`）。
+  EDF6 关的是 1–29，开 141 对。两张表的对子抄在 `src/edf41_hitlayer.h`（`kEdf6Pairs` / `kEdf41Pairs`），selftest `edf41_mother401_parts_collision_layer` 从两份代码重算比对。
+- 身体层 1–8 两两之间的碰撞两作相同。4.1 的「打地图」射线是层 19（`hkpWorld::castRay` 13 个调用点里 10 个用 0x13，含刷怪落点 `0x14D0F0`），
+  与 13–17、24 碰撞；对应 EDF6 的层 22（15–20、26）。4.1 的 13–17 是地图 / 建筑类层，对应 EDF6 的 15–20。
+- 层 17（EventAnimationObject 构造放的层）被 22 看见、不被范围伤害查询 13 看见；15 / 16 / 19 / 20 两者都看见。
+
 ## 4. 线程与时机（H / M）
 
 - 锁：GetGroundPosition 在射线前后调用的 `0xDAC5A0` / `0xDB04A0`（hknpWorld 读锁 / 解锁）在 release 版里都是 `ret 0`。**不需要加锁**（H）。

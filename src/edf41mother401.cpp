@@ -1001,7 +1001,7 @@ bool TickBattery(Part& b) noexcept {
     return false;
 }
 
-// ---- a part's collision layer (src/edf41_hitlayer.h; docs/edf41-ufomother401.md 2.6) -----------------------------------------
+// ---- a part's collision layer (src/edf41_hitlayer.h; docs/edf41-ufomother401.md 2.7) -----------------------------------------
 // EventAnimationObject's constructor puts every body on layer 0x11 (0x5B6401 0x6E9320(ragdoll, 0x11)): a map layer the area damage's
 // query (13) does not meet, so rockets and missiles never hurt a part, and one 4.1 never used for them. 4.1 puts a panel's shell on
 // 13 (is_keyframe_ragdoll 0) or 7 (the core's 1), PanelBase 0x26FAB0, and leaves a battery's on the ragdoll default 6 (0x333FB0);

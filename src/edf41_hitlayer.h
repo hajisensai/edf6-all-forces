@@ -40,7 +40,7 @@ constexpr int HitLayer(int part,int hull,int areaQuery,const std::uint32_t* tabl
 }
 
 // ---- the Earth Eater's (401) parts: 4.1's own layers carried over by the two games' filter tables ---------------------------------------
-// (docs/edf41-ufomother401.md 2.6, docs/raycast-re.md 3.1; tests/edf41_hitlayer_test.cpp; selftest edf41_mother401_parts_collision_layer)
+// (docs/edf41-ufomother401.md 2.7, docs/raycast-re.md 3.1; tests/edf41_hitlayer_test.cpp; selftest edf41_mother401_parts_collision_layer)
 //
 // Both games' CollisionFilter constructors start from an all-on table, turn every layer 1..N-1 off against all but layer 0
 // (hkpGroupFilter::disableCollisionsUsingBitfield(1 << l, 0xFFFFFFFE)) and enable a fixed list of pairs (enableCollisionsBetween).
@@ -91,8 +91,8 @@ inline constexpr LayerTable kEdf6Table=BuildTable(kEdf6FilterLayers,kEdf6Pairs);
 inline constexpr LayerTable kEdf41Table=BuildTable(kEdf41FilterLayers,kEdf41Pairs);
 
 // The queries that matter here. EDF6: 22 is the map ray (GetGroundPosition 0x208860, CastRayCreatePosition 0x1D7490, 66 users of the
-// stub 0x106100), 13 the area damage's AABB query (0x106070). 4.1: every hkpWorld::castRay caller (0x602FD0 / 0x6030D0: 11 of 13
-// sites, the spawn position 0x14D0F0 among them) casts with filter info 0x13: layer 19.
+// stub 0x106100), 13 the area damage's AABB query (0x106070). 4.1: the hkpWorld::castRay callers (0x602FD0 / 0x6030D0: 10 of 13
+// sites, the spawn position 0x14D0F0 among them; one 0x14, two 0) cast with filter info 0x13: layer 19.
 inline constexpr int kEdf6MapRay=22,kEdf6AreaQuery=13,kEdf41MapRay=19;
 // The character / body layers both games share by number (rows 1..8 meet each other the same way in both tables).
 inline constexpr int kBodyLayerFirst=1,kBodyLayerLast=8;

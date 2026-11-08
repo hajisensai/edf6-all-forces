@@ -10125,7 +10125,7 @@ def edf41_mother401_plugin_contract() -> None:
 @test
 def edf41_mother401_parts_collision_layer() -> None:
     """The Earth Eater's parts sit on the EDF6 layers that stand for 4.1's (docs/feedback-2026-11-08-edf41-earth-eater.md,
-    docs/edf41-ufomother401.md 2.6): EventAnimationObject leaves every body on 0x11, a map layer EDF6's area damage (query layer 13)
+    docs/edf41-ufomother401.md 2.7): EventAnimationObject leaves every body on 0x11, a map layer EDF6's area damage (query layer 13)
     never meets, so rockets did nothing to them. 4.1 puts a panel's shell on 13, the core's (is_keyframe_ragdoll 1) on 7 and a
     battery's on the ragdoll default 6; src/edf41_hitlayer.h carries both games' CollisionFilter pair lists and picks the EDF6 layer
     that meets the body layers 1..8, the map ray and the area damage as 4.1's layer does (15 / 7 / 6). Checked here: the plugin reads

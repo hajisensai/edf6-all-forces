@@ -39,7 +39,7 @@ int main() {
     Check(HitLayer(7,7,13,nullptr)==7,"already the hull's");
     Check(HitLayer(-1,7,13,nullptr)==-1 && HitLayer(0x11,-1,13,nullptr)==0x11,"unknown layers: unchanged");
 
-    // ---- the Earth Eater's parts: 4.1's layers carried over by the two filter tables (docs/edf41-ufomother401.md 2.6) ----
+    // ---- the Earth Eater's parts: 4.1's layers carried over by the two filter tables (docs/edf41-ufomother401.md 2.7) ----
     const auto row=[](const LayerTable& t,int a) {
         std::uint32_t m=0;
         for(int b=1;b<kLayers;++b)if(Sees(t.row,a,b))m|=1u<<b;
