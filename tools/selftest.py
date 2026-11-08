@@ -6859,7 +6859,17 @@ def air_chase_wired() -> None:
     assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
     crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
-    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::grid::PickTarget(world.enemyGrid,world.enemies,' in npcai
+    # The pick through the frame's grid (src/npc_grid.h) is the scan's own: the same TargetScore with the reach, the scan
+    # itself whenever a point or the query is not regular, and npc_grid_check (the random comparison with the scan) in CTest.
+    grid = src('src/npc_grid.h')
+    pick = grid.split('int PickTarget(const Grid& g,', 1)[1].split('\n}\n', 1)[0]
+    assert 'return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);' in pick and 'g.Odd()' in pick
+    assert 'TargetScore(Dist(eye,aim),reach,isCurrent(i))' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert '(score==bestScore && i<best)' in pick, 'a tie: the lower index, as the scan'
+    assert 'w.enemyGrid.Build(w.enemies,' in npcai and 'w.friendGrid.Build(w.friends,' in npcai, 'the grids built with the lists in Gather'
+    assert 'EXCLUDE_FROM_ALL tools/npc_grid_check.cpp' in src('CMakeLists.txt') and \
+        'npc_grid_check' in src('CMakeLists.txt').split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai

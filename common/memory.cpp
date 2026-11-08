@@ -100,6 +100,25 @@ bool ReadableByRegion(std::uintptr_t at,std::uintptr_t end,unsigned char need,UL
 
 // The pages asked at once (an object, a few KB at most); a longer span is asked by region.
 constexpr std::uintptr_t kMaxPages=16;
+// PrefetchReadable's pages a call (the stack array's size).
+constexpr int kPrefetchPages=64;
+
+// What a page asked of the working set allows, kept in `cache` for the tick `now`.
+unsigned char Record(PageCache& cache,const PSAPI_WORKING_SET_EX_INFORMATION& ask,ULONGLONG now) noexcept {
+    const auto page=reinterpret_cast<std::uintptr_t>(ask.VirtualAddress);
+    unsigned char allows=0;
+    if(ask.VirtualAttributes.Valid) {
+        allows=Allows(static_cast<DWORD>(ask.VirtualAttributes.Win32Protection));
+    } else {
+        // Not in the working set (paged out, never touched, reserved, free, a guard page): VirtualQuery's answer,
+        // kept like any other for the tick (Readable never touches the page, so it stays out and would be asked
+        // again every time: a trimmed working set would be the old cost back).
+        MEMORY_BASIC_INFORMATION mbi{};
+        if(Query(page,mbi,now) && mbi.State==MEM_COMMIT) allows=Allows(mbi.Protect);
+    }
+    cache.Slot(page)={page|allows,now};
+    return allows;
+}
 }  // namespace
 
 bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
@@ -133,22 +152,43 @@ bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
     const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask,static_cast<DWORD>(asked*sizeof(ask[0])))!=0;
     ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked);stats.wsTicks+=Qpc()-t0;
     if(!got) return ReadableByRegion(at,end,need,now);
-    for(int i=0;i<asked;++i) {
-        const auto page=reinterpret_cast<std::uintptr_t>(ask[i].VirtualAddress);
-        unsigned char allows=0;
-        if(ask[i].VirtualAttributes.Valid) {
-            allows=Allows(static_cast<DWORD>(ask[i].VirtualAttributes.Win32Protection));
-        } else {
-            // Not in the working set (paged out, never touched, reserved, free, a guard page): VirtualQuery's answer,
-            // kept like any other for the tick (Readable never touches the page, so it stays out and would be asked
-            // again every time: a trimmed working set would be the old cost back).
-            MEMORY_BASIC_INFORMATION mbi{};
-            if(Query(page,mbi,now) && mbi.State==MEM_COMMIT) allows=Allows(mbi.Protect);
-        }
-        cache->Slot(page)={page|allows,now};
-        if((allows&need)!=need) return false;
-    }
+    for(int i=0;i<asked;++i)
+        if((Record(*cache,ask[i],now)&need)!=need) return false;
     return true;
+}
+void PrefetchReadable(const void* const* ptrs,std::size_t size,int n) noexcept {
+    PageCache* cache=Pages();
+    if(!cache || !ptrs || n<=0 || !size) return;
+    const ULONGLONG now=GetTickCount64();
+    PSAPI_WORKING_SET_EX_INFORMATION ask[kPrefetchPages];
+    int asked=0;
+    const auto flush=[&]() noexcept {
+        if(!asked) return;
+        const std::uint64_t t0=Qpc();
+        const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask,static_cast<DWORD>(asked*sizeof(ask[0])))!=0;
+        ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked);stats.wsTicks+=Qpc()-t0;
+        if(got) for(int i=0;i<asked;++i) Record(*cache,ask[i],now);   // refused: nothing kept, each Readable asks as before
+        asked=0;
+    };
+    for(int k=0;k<n;++k) {
+        const auto at=reinterpret_cast<std::uintptr_t>(ptrs[k]);
+        if(!at || size>UINTPTR_MAX-at) continue;
+        const std::uintptr_t first=at&~(kPage-1),last=(at+size-1)&~(kPage-1);
+        if((last-first)/kPage+1>kMaxPages) continue;   // Readable asks such a span by region
+        for(std::uintptr_t page=first;;page+=kPage) {
+            const auto& hit=cache->Slot(page);
+            bool queued=(hit.pageAllows&~(kPage-1))==page && hit.tick==now;
+            for(int i=0;i<asked && !queued;++i) queued=reinterpret_cast<std::uintptr_t>(ask[i].VirtualAddress)==page;
+            if(!queued) {
+                if(asked==kPrefetchPages) flush();
+                ask[asked]={};
+                ask[asked].VirtualAddress=reinterpret_cast<void*>(page);
+                ++asked;
+            }
+            if(page==last) break;
+        }
+    }
+    flush();
 }
 ReadableStats TakeReadableStats() noexcept { const ReadableStats s=stats; stats={}; return s; }
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept {

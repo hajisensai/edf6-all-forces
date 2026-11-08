@@ -590,6 +590,8 @@ Arms ArmsOf(const unsigned char* h) noexcept {
     const auto list=At<unsigned char* const*>(h,kWeapons);
     const auto count=At<std::uint64_t>(h,kWeaponCount);
     if(!count || count>16 || !Readable(list,count*8))return a;
+    // Its weapons' pages asked in one call, before each is asked below (edf::PrefetchReadable: the same answers).
+    edf::PrefetchReadable(reinterpret_cast<const void* const*>(list),kWeaponAmmo+4,static_cast<int>(count));
     const unsigned char* held[kHands];
     for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
     a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
