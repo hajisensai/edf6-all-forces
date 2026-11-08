@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS story_outlines (
   version INTEGER NOT NULL,         -- bumped on every save; a save names the version it was edited from
   updated_by TEXT,
   updated_at INTEGER,
+  author TEXT,                      -- who started it (migrations/0006)
   PRIMARY KEY (grp, book)
 );
 
