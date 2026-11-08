@@ -66,6 +66,19 @@ def main():
     version, m = sgo.read(files['OBJECT/EDF6VC_SEDAN.SGO'])
     assert m['xgs_scene_object_class'] == 'Vehicle_Car'
     assert len(m['vehicle_riding_position']) == 1 and m['vehicle_weapon_setting'] == [] and m['vehicle_setup'][-1] == []
+    # A closed car hides its rider (DispCharacter 0, as every stock closed seat): one integer of the truck's driver
+    # locator parameters changes, its animation, profile, class mask and input mode stay.
+    native = sgo.read(game.read('OBJECT', sedan.HOST+'.SGO'))[1]
+    driver = m['vehicle_riding_position'][0][1]
+    assert m['vehicle_riding_position'][0][3:] == native['vehicle_riding_position'][0][3:]
+    hidden = sedan.closed_driver(native['animation_model'][2], driver)
+    assert len(hidden) == len(native['animation_model'][2])
+    assert sum(a != b for a, b in zip(hidden, native['animation_model'][2])) == 1, 'only DispCharacter changes'
+    def params(mab):
+        r = vcobjects._mab_record(mab, driver)
+        return sgo.read(mab[r+struct.unpack_from('<i', mab, r+0x1C)[0]:])[1]
+    assert params(hidden) == {'Animation': 'vehicle_striker_rear', 'DispCharacter': 0}
+    assert params(m['animation_model'][2]) == {'Animation': 'vehicle_striker_rear', 'DispCharacter': 0},         'the built sedan hides its driver'
     assert len(m['car_base_wheel']) == 4 and 'mission_setup' in m
     call = next(c for c in calls.CALLS if c.ground == 'sedan')
     template = game.read('WEAPON', call_weapons.template_of(call)+'.SGO')
