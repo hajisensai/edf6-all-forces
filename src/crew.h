@@ -80,7 +80,7 @@ struct Config {
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
-    bool havokMultithread=true; // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only
+    bool havokMultithread=false; // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; off until tested in game (docs/havok-mt-re.md §13)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
     float stockMissileNav=3.0f;// ...its navigation constant (2..6)
     bool playerLockByView=true;

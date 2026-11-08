@@ -6,6 +6,7 @@
 #include "havok_mt_logic.h"
 #include "crew.h"
 #include "memory.h"
+#include <atomic>
 #include <cstring>
 
 namespace crew {
@@ -20,6 +21,60 @@ using ResetFn=void(*)(void* holder);
 unsigned attaches=0,detaches=0;
 StepAction lastRefusal=StepAction::none;
 const void* lastRefusedPool=nullptr;
+
+// 世界级任务探针（Debug=1）：包装在任意线程上跑，只动下面的原子量；日志由游戏线程在 BeforeStep / 复位时写。
+using TaskProcessFn=std::uintptr_t(*)(void*,void*,void*,void*);
+std::atomic<DWORD> gameThread{0};      // BeforeStep 每帧写（游戏线程）
+std::atomic<int> worldRunning{0},worldPeak{0};
+std::atomic<unsigned> worldRuns{0},worldOnWorkers{0},worldOverlaps{0};
+unsigned overlapsLogged=0;
+bool probeOn=false;
+
+template<std::size_t I>
+std::uintptr_t WorldTaskProbe(void* task,void* input,void* a3,void* a4) noexcept {
+    const int now=worldRunning.fetch_add(1,std::memory_order_acq_rel)+1;
+    for(int peak=worldPeak.load(std::memory_order_relaxed);now>peak && !worldPeak.compare_exchange_weak(peak,now,std::memory_order_relaxed);) {}
+    if(now>1)worldOverlaps.fetch_add(1,std::memory_order_relaxed);
+    worldRuns.fetch_add(1,std::memory_order_relaxed);
+    if(GetCurrentThreadId()!=gameThread.load(std::memory_order_relaxed))worldOnWorkers.fetch_add(1,std::memory_order_relaxed);
+    const std::uintptr_t r=reinterpret_cast<TaskProcessFn>(image+kWorldTasks[I].process)(task,input,a3,a4);
+    worldRunning.fetch_sub(1,std::memory_order_acq_rel);
+    return r;
+}
+void* const kWorldTaskProbes[]={reinterpret_cast<void*>(&WorldTaskProbe<0>),reinterpret_cast<void*>(&WorldTaskProbe<1>),
+                                   reinterpret_cast<void*>(&WorldTaskProbe<2>)};
+static_assert(sizeof(kWorldTaskProbes)/sizeof(kWorldTaskProbes[0])==kWorldTaskCount,"one probe per world task");
+
+void LogProbe(const char* when) noexcept {
+    Log("HAVOKMT world tasks %s: %u runs, %u on worker threads, %u overlapping, at most %d at once",when,
+        worldRuns.load(std::memory_order_relaxed),worldOnWorkers.load(std::memory_order_relaxed),
+        worldOverlaps.load(std::memory_order_relaxed),worldPeak.load(std::memory_order_relaxed));
+}
+
+// 三个 vtable 槽 6 全换或全不换；只是诊断，失败不影响多线程本身。
+void InstallProbe() noexcept {
+    void** slots[kWorldTaskCount]{};
+    __try {
+        for(std::size_t i=0;i<kWorldTaskCount;++i) {
+            slots[i]=reinterpret_cast<void**>(image+kWorldTasks[i].vtable+kWorldTaskProcessSlot*8);
+            if(*slots[i]!=image+kWorldTasks[i].process) {
+                Log("HAVOKMT world task probe refused: %s vtable %#x slot %u is not %#x",kWorldTasks[i].name,kWorldTasks[i].vtable,
+                    static_cast<unsigned>(kWorldTaskProcessSlot),kWorldTasks[i].process);
+                return;
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("HAVOKMT world task probe refused: vtables unreadable");return;}
+    std::size_t done=0;
+    for(;done<kWorldTaskCount;++done)
+        if(!PatchVtableSlot(slots[done],image+kWorldTasks[done].process,kWorldTaskProbes[done]))break;
+    if(done<kWorldTaskCount) {
+        for(std::size_t i=done;i-->0;)PatchVtableSlot(slots[i],kWorldTaskProbes[i],image+kWorldTasks[i].process);
+        Log("HAVOKMT world task probe refused: %s slot could not be written (all put back)",kWorldTasks[done].name);
+        return;
+    }
+    probeOn=true;
+    Log("HAVOKMT world task probe on (Debug=1): PostCollide / PreSolve / PostSolve counted, overlaps logged");
+}
 
 bool VtablesOk(const unsigned char* pool,const unsigned char* queue) noexcept {
     return At<const void*>(pool,0)==image+kPoolVtable && At<const void*>(queue,0)==image+kQueueVtable &&
@@ -50,22 +105,26 @@ bool ReadStep(unsigned char* holder,StepView& v,unsigned char*& pool,unsigned ch
 const char* RefusalText(StepAction a) noexcept {
     switch(a) {
     case StepAction::foreign: return "the pool is processing another queue";
+    case StepAction::stale: return "the pool has this queue set but is not processing it (not a state the plugin leaves)";
     case StepAction::badVtable: return "the pool or queue is not the hkCpuThreadPool / hkDefaultTaskQueue read";
     case StepAction::noWorkers: return "the pool has no worker threads";
     case StepAction::closedQueue: return "the queue is closed";
+    case StepAction::unreadable: return "the physics holder, pool or queue is unreadable";
     default: return "";
     }
 }
 
 // 步进前（0x119932F，原来调 ret 0 的 0x118F270），游戏线程，rcx = holder。
 void BeforeStep(unsigned char* holder) noexcept {
+    if(probeOn) {
+        gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
+        // 第一次重叠立刻记一行（之后的累计在每次复位时记），不每帧刷屏
+        const unsigned overlaps=worldOverlaps.load(std::memory_order_relaxed);
+        if(overlaps && !overlapsLogged){overlapsLogged=overlaps;LogProbe("OVERLAPPED");}
+    }
     StepView v;
     unsigned char* pool=nullptr;unsigned char* queue=nullptr;
-    if(!ReadStep(holder,v,pool,queue)) {
-        if(lastRefusal!=StepAction::badVtable){Log("HAVOKMT physics holder %p unreadable: the step stays on the game thread",holder);lastRefusal=StepAction::badVtable;}
-        return;
-    }
-    const StepAction action=DecideStep(v);
+    const StepAction action=ReadStep(holder,v,pool,queue) ? DecideStep(v) : StepAction::unreadable;
     if(action==StepAction::none)return;
     if(action!=StepAction::attach) {
         if(action!=lastRefusal || pool!=lastRefusedPool)
@@ -104,6 +163,7 @@ void Detach(unsigned char* holder) noexcept {
     reinterpret_cast<PoolWaitFn>(image+kPoolWait)(pool);                     // 等每个 worker 退出，清 +0x140/+0x154/+0x155
     QueryPerformanceCounter(&t1);QueryPerformanceFrequency(&f);
     ++detaches;
+    if(probeOn)LogProbe("so far");
     Log("HAVOKMT reset: queue %p closed and the workers back in %.2f ms (detach #%u)",attached,
         f.QuadPart ? static_cast<double>(t1.QuadPart-t0.QuadPart)*1000.0/static_cast<double>(f.QuadPart) : 0.0,detaches);
 }
@@ -130,11 +190,16 @@ bool CheckCode() noexcept {
     return true;
 }
 
-// 改回原来的 E8 rel32（RedirectCall 写进去的是指向近处 thunk 的 rel32）。
+// 改回原来的 E8 rel32（RedirectCall 写进去的是指向近处 thunk 的 rel32），再释放那页 thunk（AllocateNearThunk 每个
+// thunk 单独一次分配）。只在安装失败时、同一次安装里刚改完就调：此时游戏线程还没跑到这些调用点。
 void Restore(const CallSite& s) noexcept {
     unsigned char now[5];
     std::memcpy(now,image+s.call,sizeof(now));
-    edf::PatchCode(image+s.call,now,s.stock+(s.call-s.context),sizeof(now));
+    std::int32_t rel=0;
+    std::memcpy(&rel,now+1,sizeof(rel));
+    void* thunk=image+s.call+5+rel;
+    if(edf::PatchCode(image+s.call,now,s.stock+(s.call-s.context),sizeof(now)) && thunk!=image+s.target)
+        VirtualFree(thunk,0,MEM_RELEASE);
 }
 }  // namespace
 
@@ -164,6 +229,7 @@ bool InstallHavokMultithread() noexcept {
     }
     Log("HAVOKMT on: the game's worker pool processes the physics task queue from the next step (step %#x, resets %#x %#x)",
         kStepSite.call,kResetSites[0].call,kResetSites[1].call);
+    if(Cfg().debug)InstallProbe();
     return true;
 }
 }  // namespace crew

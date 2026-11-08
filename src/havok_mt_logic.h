@@ -79,6 +79,19 @@ constexpr Fingerprint kFingerprints[]={
 };
 constexpr std::size_t kFingerprintCount=sizeof(kFingerprints)/sizeof(kFingerprints[0]);
 
+// 世界级任务探针（ini Debug=1 时装，只计数不拦截）：PostCollide / PreSolve / PostSolve 三个单实例任务的 process
+// （各自 vtable 槽 6，vt+0x30；全 DLL 只有这一处绝对引用）包一层，统计同一时刻在跑的个数与跑在非游戏线程上的次数，
+// 实机压测时证实「三者同一时刻最多一个」（docs/havok-mt-re.md §7 第 1 条）。三个函数都只用 rcx / rdx 与自己的影子区，
+// 不读栈上参数，包装按四个寄存器参数原样转发。
+struct WorldTask { const char* name; std::uint32_t vtable; std::uint32_t process; };
+constexpr std::size_t kWorldTaskProcessSlot=6;
+constexpr WorldTask kWorldTasks[]={
+    {"PostCollide",0x18C1D08,0xE819F0},   // → 0xDAC840
+    {"PreSolve",0x18C1CA0,0xE81C40},      // → 0xDAD360
+    {"PostSolve",0x18C21C0,0xE81AB0},     // → 0xDACA60
+};
+constexpr std::size_t kWorldTaskCount=sizeof(kWorldTasks)/sizeof(kWorldTasks[0]);
+
 // E8 rel32 指向 target 的 5 个字节。
 constexpr bool CallBytes(std::uint64_t site,std::uint64_t target,std::uint8_t out[5]) noexcept {
     const std::int64_t delta=static_cast<std::int64_t>(target)-static_cast<std::int64_t>(site+5);
@@ -106,11 +119,13 @@ struct StepView {
     int threads=0;               // [pool+0x20]
     bool closed=false;           // [queue+0x360]
 };
-enum class StepAction { none, attach, foreign, badVtable, noWorkers, closedQueue };
+// unreadable 不由 DecideStep 产生：读 holder / pool / queue 时出了访问异常（havok_mt.cpp 的 ReadStep）。
+enum class StepAction { none, attach, foreign, stale, badVtable, noWorkers, closedQueue, unreadable };
 constexpr StepAction DecideStep(const StepView& v) noexcept {
     if(!v.holder || !v.pool || !v.queue)return StepAction::none;              // 物理系统还没建或正在拆
     if(!v.vtables)return StepAction::badVtable;                               // 不是认得的对象：不碰
-    if(v.attached==v.queueAddr && v.processing)return StepAction::none;       // 已接上
+    if(v.attached==v.queueAddr)                                               // 已接上；记着这个队列却没在处理
+        return v.processing ? StepAction::none : StepAction::stale;          // 不是插件留下的状态（wait 会一起清），不碰
     if(v.attached!=0)return StepAction::foreign;                              // 接着别的队列：不是插件接的，不碰
     if(v.threads<=0)return StepAction::noWorkers;                             // 单核机器：pool 没建 worker
     if(v.closed)return StepAction::closedQueue;                               // 队列已关（正在析构）

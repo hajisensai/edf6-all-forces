@@ -16,6 +16,15 @@
    [task+0x10]=1；collide 图（0xE7E570）里新建的 18 个任务全都是 PostCollide（sim+0x6A8，句柄 +0x4D6）的祖先，
    PreSolve（+0x4D8）以 +0x4D6 为前驱，PostSolve（+0x4E0）以 +0x4DC 为前驱、+0x4DC 以 +0x4DA 为前驱；
 7. hknpUFMShapeTagCodec（vt 0x1AE3388）的 decode 0x11B8800 只写 out 参数（[r9]）；
+8. 世界级任务探针（kWorldTasks）：三个 vtable 的 RTTI 是 hknp 的三个世界级任务，槽 6 是头文件说的 process，
+   整个映像里这三个函数各只有这一处绝对引用、没有 rel32 调用；它们不读栈上的参数（包装按 4 个寄存器转发）；
+9. 任务图的合并：0x9ECCE0（0xE82AC7 调）只按句柄取 / 懒分配节点 +0x10 的附加数据，不加任务也不加边；0x9EC7A0
+   （0xE823F5 调）把子图的任务与边整段复制并按基数平移句柄，不在子图与主图之间加边——子图与 PostCollide / PreSolve
+   的先后静态上定不了，由第 8 项的探针在实机上看；
+10. 插件克隆的敌人主 vtable 槽 4 / 5 / 7 / 14：槽 7 / 4 / 5 在 System::update 的 0x1199131 / 0x119930B、0x1199261、
+   0x119940D 被调（游戏线程，0x119940D 在两次步进之间、不在任务里），槽 14 由 GameObjectBase::Update 0x54BE40
+   调；CharacterControl_Cling 的 Callback（InsectBase 一族 0x4A8B40）在对象 +0x5C0 的次级 vtable 里，不是插件克隆
+   的主 vtable；从全部回调 / 世界级任务 / modifier 入口出发的直接调用闭包里没有这些槽函数，也没有 0x54BE40；
 反向：把复位调用点表换成假地址、把 0x118F270 的期望改成别的，检查必须失败。
 EDF.dll 路径作参数，否则用 gamedir 找；没有 EDF.dll 或 capstone 时退出码 77（跳过）。"""
 from __future__ import annotations
@@ -378,6 +387,93 @@ check(vt_codec[4] == 0x11B8800 and vt_codec[3] == 0xDF9DE0 and IMG[0xDF9DE0:0xDF
       f'codec vtable {list(map(hex, vt_codec))}')
 writes = [i for i in dis(0x11B8800, 0x11B885F) if i.mnemonic == 'mov' and i.op_str.split(',')[0].strip().endswith(']')]
 check(writes and all('[r9' in i.op_str.split(',')[0] for i in writes), f'codec decode writes only [r9...]: {[i.op_str for i in writes]}')
+
+# ---- 8. 世界级任务探针
+WT = [(n, int(v, 16), int(f, 16)) for n, v, f in re.findall(r'\{"(\w+)",(0x[0-9A-F]+),(0x[0-9A-F]+)\}', logic)]
+check([n for n, _, _ in WT] == ['PostCollide', 'PreSolve', 'PostSolve'], f'world tasks in the header {WT}')
+slot6 = CONST['kWorldTaskProcessSlot']
+text_bytes = IMG[TEXT[0]:TEXT[1]]
+for (name, vt, fn) in WT:
+    check(rtti(vt) == f'.?AVhknp{name}Task@@', f'{name} vtable {vt:#x} RTTI {rtti(vt)}')
+    check(q(vt + 8 * slot6) - BASE == fn, f'{name} vtable slot {slot6} = {fn:#x}')
+    refs = [m.start() for m in re.finditer(re.escape(struct.pack('<Q', BASE + fn)), IMG)]
+    check(refs == [vt + 8 * slot6], f'{name} process {fn:#x} referenced only by its slot ({list(map(hex, refs))})')
+    rel = [TEXT[0] + m.start() for m in re.finditer(b'[\xE8\xE9]', text_bytes)
+           if m.start() + 5 <= len(text_bytes)
+           and TEXT[0] + m.start() + 5 + struct.unpack_from('<i', text_bytes, m.start() + 1)[0] == fn]
+    check(not rel, f'{name} process {fn:#x}: no rel32 call / jmp ({list(map(hex, rel))})')
+    # 入口处第 5 个参数在 rsp+0x28；函数自己 push / sub 之后换算回入口偏移
+    depth, stack_args = 0, []
+    for ins in dis(fn, {0xE819F0: 0xE81AB0, 0xE81AB0: 0xE81C40, 0xE81C40: 0xE81D40}[fn]):
+        if ins.mnemonic == 'int3':
+            break
+        if ins.mnemonic == 'push':
+            depth += 8
+        elif ins.mnemonic == 'sub' and ins.op_str.startswith('rsp, '):
+            depth += int(ins.op_str.split(', ')[1], 16)
+        for mm in re.finditer(r'\[rsp \+ (0x[0-9a-f]+)\]', ins.op_str):
+            if int(mm.group(1), 16) - depth >= 0x28:
+                stack_args.append(hex(ins.address))
+    check(not stack_args, f'{name} process reads no stack argument ({stack_args})')
+check(q(WT[0][1] + 8 * slot6) - BASE != WT[1][2], 'reverse: PostCollide slot is not PreSolve process')
+
+# ---- 9. 任务图的合并
+cce0 = dis(0x9ECCE0, 0x9ECD24)
+cce0_writes = [i for i in cce0 if i.mnemonic == 'mov' and i.op_str.split(',')[0].strip().endswith(']')]
+check(cce0[-1].mnemonic == 'ret' and not cce0_writes, f'0x9ECCE0 writes no graph field ({[hex(i.address) for i in cce0_writes]})')
+check(any(i.mnemonic == 'call' and i.op_str == 'qword ptr [rax + 0x10]' for i in cce0) and
+      any(i.op_str == 'rax, qword ptr [rax + r8*8 + 0x10]' for i in cce0), '0x9ECCE0 reads / allocates node +0x10')
+c7a0 = dis(0x9EC7A0, 0x9EC9EC)
+shifts = [i for i in c7a0 if i.mnemonic == 'add' and re.fullmatch(r'word ptr \[rcx \+ rax\*4( \+ 2)?\], bp', i.op_str)]
+check(len(shifts) == 2, f'0x9EC7A0 shifts both ends of every copied edge by the base ({len(shifts)})')
+edge_writes = [i for i in c7a0 if i.mnemonic == 'mov' and i.op_str.startswith('word ptr')]
+check(not edge_writes, f'0x9EC7A0 writes no edge of its own ({[hex(i.address) for i in edge_writes]})')
+check(IMG[0xE823F5] == 0xE8 and 0xE823F5 + 5 + struct.unpack_from('<i', IMG, 0xE823F6)[0] == 0x9EC7A0 and
+      IMG[0xE82AC7] == 0xE8 and 0xE82AC7 + 5 + struct.unpack_from('<i', IMG, 0xE82AC8)[0] == 0x9ECCE0,
+      'solve graph calls 0x9EC7A0 / 0x9ECCE0')
+
+# ---- 10. 插件克隆的敌人主 vtable 槽
+upd = {i.address: i.op_str for i in dis(0x1198DA0, 0x1199500)
+       if i.mnemonic == 'call' and i.op_str.startswith('qword ptr [rax + 0x')}
+want = {0x1199131: 0x38, 0x119930B: 0x38, 0x1199261: 0x20, 0x119940D: 0x28}
+check(all(upd.get(a) == f'qword ptr [rax + {o:#x}]' for a, o in want.items()), f'System::update calls slots 7 / 4 / 5')
+check(0x1199359 < 0x119940D < 0x1199479, 'slot 5 runs between the two steps (game thread, not in a task)')
+check(sum(1 for i in dis(0x54BE40, 0x54C200) if i.mnemonic == 'call' and i.op_str == 'qword ptr [rax + 0x70]') == 2,
+      'GameObjectBase::Update 0x54BE40 calls slot 14')
+
+
+def vt_start(a: int) -> int:
+    while not (0x1B00000 < q(a - 8) - BASE < 0x2200000 and struct.unpack_from('<I', IMG, q(a - 8) - BASE)[0] == 1):
+        a -= 8
+    return a
+
+
+cling = [m.start() for m in re.finditer(re.escape(struct.pack('<Q', BASE + 0x4A8B40)), IMG)]
+cols = {struct.unpack_from('<I', IMG, q(vt_start(a) - 8) - BASE + 4)[0] for a in cling}
+check(bool(cling) and cols == {0x5C0}, f'Cling Callback 0x4A8B40 only in secondary vtables at +0x5C0 ({cols})')
+inc = open(os.path.join(ROOT, 'src', 'enemy_control_native_profiles.inc'), encoding='utf-8').read()
+profiles = sorted({int(v, 16) for v in re.findall(r'\{"\w+",(0x[0-9A-Fa-f]+),', inc)})
+check(all(struct.unpack_from('<I', IMG, q(vt - 8) - BASE + 4)[0] == 0 for vt in profiles), 'cloned profiles are primary vtables')
+cloned = {q(vt + 8 * s) - BASE for vt in profiles for s in (4, 5, 7, 14)} | {0x54BE40}
+roots = [0x1351C0, 0x135170, 0x2C5B60, 0x328280, 0x34A5E0, 0x3679A0, 0x3A7A00, 0x3A4480, 0x42D070, 0x51EE10, 0x567100,
+         0x5E85A0, 0x5E8590, 0x5ED6C0, 0x5ED5B0, 0x5F21B0, 0x62EA70, 0x643F50, 0x652B30, 0x6CE6E0, 0x6DAC10, 0x6EC450,
+         0x6F1220, 0x7C79F0, 0x11AFE68, 0x11B94F0, 0x11DFD40, 0x11AEA30, 0x11DFD50, 0x11DFF70, 0xDAC840, 0xDAD360,
+         0xDACA60, 0x1064A0, 0x106770, 0x1064B0, 0x5F0860]
+seen, stack = set(), list(roots)
+while stack:
+    f = stack.pop()
+    if f in seen:
+        continue
+    seen.add(f)
+    for ins in md.disasm(IMG[f:f + 0x4000], f):
+        t = call_target(ins)
+        if t is not None and (ins.mnemonic == 'call' or not f <= t < f + 0x4000):
+            stack.append(t)
+        if ins.mnemonic in ('ret', 'int3'):
+            break
+check(len(profiles) >= 30 and len(seen) > 200, f'{len(profiles)} enemy profiles, callback closure {len(seen)} functions')
+check(not (cloned & seen), f'no cloned slot in the callback closure ({sorted(map(hex, cloned & seen))})')
+check(0xDAC840 in seen and 0x541FF0 in seen, 'reverse: the closure reaches the damage queue 0x541FF0')
 
 print(f'havok_mt_audit: {checks} checks, {failures} failures')
 raise SystemExit(1 if failures else 0)

@@ -99,6 +99,10 @@ void Fingerprints() {
         Expect(Seek(*d,{0x48,0x83,0xC1,0x18})>=0 && Seek(*d,{0xFF,0x50,0x68})>=0 && kQueueCloseSlot*8==0x68,"destructor closes sub vt+0x68",0x118ECAD);
     else Expect(false,"destructor fingerprint");
     Expect(kPoolProcessSlot*8==0x20 && kPoolWaitSlot*8==0x40 && kPoolSetThreadsSlot*8==0x50,"slot offsets");
+    Expect(kWorldTaskCount==3 && kWorldTaskProcessSlot*8==0x30,"three world tasks, process at vt+0x30");
+    for(std::size_t i=0;i<kWorldTaskCount;++i)
+        for(std::size_t j=i+1;j<kWorldTaskCount;++j)
+            Expect(kWorldTasks[i].vtable!=kWorldTasks[j].vtable && kWorldTasks[i].process!=kWorldTasks[j].process,"world tasks distinct",kWorldTasks[i].vtable);
 }
 
 void Decisions() {
@@ -115,7 +119,9 @@ void Decisions() {
     v.attached=0x6000;
     Expect(DecideStep(v)==StepAction::foreign,"another queue: not touched");
     v.attached=0x5000;v.processing=false;
-    Expect(DecideStep(v)==StepAction::foreign,"queue set, processing clear: not a state the plugin makes, not touched");
+    Expect(DecideStep(v)==StepAction::stale,"queue set, processing clear: not a state the plugin makes, not touched");
+    v.attached=0x6000;
+    Expect(DecideStep(v)==StepAction::foreign,"another queue, processing clear: not touched");
     v.attached=0;v.threads=0;
     Expect(DecideStep(v)==StepAction::noWorkers,"no workers");
     v.threads=15;v.closed=true;
