@@ -508,6 +508,10 @@ bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
     return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
 }
 
+const wchar_t* SupportAircraftFile(const SupportAircraft& spec) noexcept {
+    return SupportSpecValid(spec) ? Row(SupportBody(spec)).file : L"";
+}
+
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
     for(auto& own:supportAircraft)if(own.obj==ref.obj && own.ctrl==ref.ctrl && own.obj) {
         if(Alive(own)) {

@@ -539,6 +539,13 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             Refuse(catalog,"a peer runs an older All Forces without airborne air support",hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate));
             return PlanResult::refused;
         }
+        // Its hull must be installed and preloaded (the strike jet / fighter / interceptor / multirole are the model pack's
+        // Dreadnought models: jet_internal.h Body::sup*): refused before any pt is spent or route planned, never another body.
+        if(!SupportAircraftReady(spec)) {
+            Log("SUPPORT plan catalog=%u: %ls not installed / preloaded",catalog,SupportAircraftFile(spec));
+            Refuse(catalog,"its aircraft's SGO not installed / preloaded",L"这架支援飞机的资源未安装（模型包缺失？）：请装好模型包后用安装器重新安装");
+            return PlanResult::refused;
+        }
         spec.count=AircraftCount(catalog,spec,1+AirCrew(catalog,spec));
         // The rescue takes off from the nearest takeoff point (a submarine carrier's deck: support_entry.h TakeoffRoute),
         // the edge only when there is none it can climb out of (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」).

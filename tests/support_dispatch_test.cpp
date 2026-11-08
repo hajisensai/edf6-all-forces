@@ -259,6 +259,7 @@ bool IsHelicopter(const void*) noexcept {return heliHull;}
 bool NpcDriver(const unsigned char*) noexcept {return driverAboard;}
 #endif
 bool SupportAircraftReady(const SupportAircraft&) noexcept {return transportReady;}
+const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept {return L"EDF6VC_TEST.SGO";}
 bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
@@ -826,6 +827,13 @@ int main() {
     SupportCallAt(29,target,note,128);SupportDispatchTick();
     check(!made && !offlinePending,"a peer without the transports: refused before anything is made");
     peersTransports=true;
+    // A jet support whose body is not installed (the strike jet / fighter / interceptor / multirole: the model pack's
+    // Dreadnought models, jet_internal.h Body::sup*): refused at the plan with why, nothing made, no other body flown.
+    transportReady=false;ResetSupportDispatch();made=0;fixtureMs+=40000;
+    SupportCallAt(0,target,note,128);SupportDispatchTick();
+    SupportCallStatus(note,128);
+    check(!made && !offlinePending && std::wcsstr(note,L"模型包"),"a jet support's body not installed: refused with why, nothing made");
+    transportReady=true;
     // The container airdrops (airdrop.cpp; the user, 2026-10-09: "运输机还要能空投载具"): one entry per ground vehicle
     // after the transports, one row (the plane) with the vehicles as its chips.
     check(!std::wcscmp(SupportCallKey(33),L"TANK_AIRDROP") && !std::wcscmp(SupportCallKey(34),L"TRANSPORT_AIRDROP") &&
