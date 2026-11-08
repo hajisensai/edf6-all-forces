@@ -175,7 +175,11 @@ def generate_main(args: list[str]) -> int:
 def run(argv: list[str]) -> int:
     """The slim exe's entry (also what installer.run does for this argument): `loadout-generate <game>`; never asks,
     never waits for Enter. `vanilla-launch <game>`: the game folder's 原版启动.cmd (tools/vanilla_launch.py); `backup-saves`: the
-    plugin at the game's start (tools/save_backup.py)."""
+    plugin at the game's start (tools/save_backup.py); `restore-saves`: the plugin at the game's start, waited for, when the
+    saves are not in the mod's set (tools/vanilla_launch.py restore_saves)."""
+    if argv == ['restore-saves']:
+        import vanilla_launch
+        return vanilla_launch.restore_saves()
     if argv == ['backup-saves']:   # the plugin, when the game loads it (tools/save_backup.py)
         import save_backup
         return save_backup.main()

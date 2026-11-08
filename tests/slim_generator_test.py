@@ -64,7 +64,7 @@ sl_imports = imports_of(os.path.join(ROOT, 'tools', 'support_loadout.py'))
 check(not sl_imports & {'testhub', 'installer', 'tkinter', 'numpy', 'PIL', 'procmesh', 'jet_models'},
       f'support_loadout pulls in nothing heavy: {sorted(sl_imports)}')
 vl_imports = imports_of(os.path.join(ROOT, 'tools', 'vanilla_launch.py'))
-check(vl_imports <= {'__future__', 'base64', 'ctypes', 'os', 're', 'shutil', 'subprocess', 'sys', 'threading', 'time', 'modfiles',
+check(vl_imports <= {'__future__', 'base64', 'contextlib', 'ctypes', 'hashlib', 'os', 're', 'shutil', 'subprocess', 'sys', 'threading', 'time', 'modfiles',
                      'save_backup'},
       f'vanilla_launch imports only the stdlib and modfiles: {sorted(vl_imports)}')
 sb_imports = imports_of(os.path.join(ROOT, 'tools', 'save_backup.py'))

@@ -1281,9 +1281,14 @@ def main(argv: list[str]) -> int:
 def write_game(mode: str, game: str) -> int:
     """The flows that write Mods (and its ledger): under the generator's lock (pylib/ledger.py), waiting a while for a
     background generator the game started (it outlives the game), else refused with nothing written. First the
-    ModLoader.ini a vanilla launch left off and the mod's saves it set aside are put back (the game is not running)."""
-    for said in vanilla_launch.restore_all(game):
-        print(said)
+    ModLoader.ini a vanilla launch left off and the mod's saves it set aside are put back (the game is not running),
+    holding 原版启动's lock: refused while one runs (it would be switching the same ini and saves)."""
+    with vanilla_launch.exclusive() as free:
+        if not free:
+            print('原版启动正在运行：先退出游戏、关掉原版启动的窗口，再运行安装器。')
+            return 1
+        for said in vanilla_launch.restore_all(game):
+            print(said)
     with wait_generate_lock(game) as held:
         if not held:
             return 1

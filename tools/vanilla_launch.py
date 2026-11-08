@@ -7,14 +7,20 @@ stock game. So: back the ini up (STATE, in Mods/Plugins), write those three keys
 vanilla game gets saves of its own), start the game through Steam, wait for EDF6.exe to appear and to exit, then write
 the ini back and swap the saves back. The ini is written back only while it is still the one written here (anything
 that changed it since keeps its change); a run that never got to put things back (the window closed, the machine off)
-is put back by the next launch and by the installer's install / uninstall (restore_all).
+is put back by the next launch and by the installer's install / uninstall (restore_all), and the saves also by the
+plugin when the game next starts with the mod (restore_saves, before the game reads them: src/loadout_store.cpp).
+
+One at a time, across processes (exclusive: a named mutex per save folder, released by Windows when its holder dies): a
+second 原版启动 while one runs, the installer's restore and the plugin's restore_saves are refused, never interleaved.
 
 Stdlib and pylib/modfiles only: frozen into the slim generator (tests/slim_generator_test.py).
 """
 from __future__ import annotations
 
 import base64
+import contextlib
 import ctypes
+import hashlib
 import os
 import re
 import shutil
@@ -35,6 +41,8 @@ STEAM_URL = 'steam://rungameid/2291060'
 START_TIMEOUT = 300.0    # seconds for EDF6.exe to appear (Steam may have to start, or update the game, first)
 POLL = 2.0
 _lock = threading.Lock()   # restore runs on the main thread and in the console close handler
+_closing = False           # set (under _lock) by the close handler: the main thread takes no further step
+BUSY = 3                   # restore_saves' exit code when another process holds `exclusive`
 
 
 def launcher_text(generator: str) -> bytes:
@@ -84,8 +92,11 @@ def vanilla_ini(text: str) -> str:
 
 def prepare(game: str) -> None:
     """Backs the ini up into STATE and writes the vanilla one. STATE first: a crash between the two leaves an ini the
-    restore finds unchanged (no harm), never a vanilla ini with nothing to put back."""
+    restore finds unchanged (no harm), never a vanilla ini with nothing to put back. A STATE already there is refused,
+    never overwritten: the ini now may be a vanilla one, which would be kept as 'the original' for good."""
     ini, state = _paths(game)
+    if os.path.exists(state):
+        raise RuntimeError(f'{state} 已存在（上一次原版启动的 ini 还没恢复）：不覆盖')
     before = modfiles.read(ini)
     after = vanilla_ini((before or b'').decode('utf-8-sig', errors='replace')).encode('utf-8')
     modfiles.save_json(state, {'had': before is not None,
@@ -125,7 +136,10 @@ def _restore(game: str) -> str | None:
 # live in the slot folders, both synced: the slot's own files are the set its MODE file names (no file: the mod's), the
 # other set beside them as <name>.edf6mod / <name>.edf6vanilla. A switch copies (never renames or moves): the playing
 # set into its store first, then the other store over the slot's files; MODE says which step is done, so a switch cut
-# off anywhere resumes without mixing the sets. Before each vanilla run the whole SAVE_DATA is also copied, locally,
+# off anywhere resumes without mixing the sets: MODE is the slot's journal. '<X>-saved' says X's store is whole, not
+# which files the slot holds (a load cut off leaves both sets' files mixed), so whatever set a switch is headed for, it
+# loads that set's store whole (_load is idempotent: it only reads the store). Every write is an atomic rename; nothing
+# is overwritten or removed before the whole SAVE_DATA is backed up (save_backup, deduplicated by content). Before each vanilla run the whole SAVE_DATA is also copied, locally,
 # into SAVE_DATA.backups\<time> (tools/save_backup.py: the mod's starts are backed up the same way).
 SAVES = 'SAVE_DATA'
 SUFFIX = {'mod': '.edf6mod', 'vanilla': '.edf6vanilla'}
@@ -161,8 +175,16 @@ def _mode(slot: str) -> str:
         return 'vanilla' if os.path.exists(_p(ON)) else 'mod'   # a slot the vanilla run made has no MODE yet
 
 
+def _write(path: str, data: bytes) -> None:   # every write and removal of a switch goes through these two (the tests
+    modfiles.atomic_write(path, data)        # cut a switch off after each one)
+
+
+def _unlink(path: str) -> None:
+    os.remove(path)
+
+
 def _set_mode(slot: str, mode: str) -> None:
-    modfiles.atomic_write(os.path.join(slot, MODE), mode.encode('ascii'))
+    _write(os.path.join(slot, MODE), mode.encode('ascii'))
 
 
 def _own(slot: str) -> list[str]:
@@ -178,7 +200,7 @@ def _stored(slot: str, mode: str) -> list[str]:
 
 def _copy(src: str, dst: str) -> None:
     with open(src, 'rb') as f:
-        modfiles.atomic_write(dst, f.read())
+        _write(dst, f.read())
 
 
 def _store(slot: str, mode: str) -> None:
@@ -187,14 +209,14 @@ def _store(slot: str, mode: str) -> None:
     for n in own:
         _copy(os.path.join(slot, n), os.path.join(slot, n + SUFFIX[mode]))
     for n in set(_stored(slot, mode)) - set(own):
-        os.remove(os.path.join(slot, n + SUFFIX[mode]))
+        _unlink(os.path.join(slot, n + SUFFIX[mode]))
 
 
 def _load(slot: str, mode: str) -> None:
     """`mode`'s store copied over the slot's own files (an empty store: an empty slot, the game starts it new)."""
     stored = _stored(slot, mode)
     for n in set(_own(slot)) - set(stored):
-        os.remove(os.path.join(slot, n))   # held in the other store already (_store ran first)
+        _unlink(os.path.join(slot, n))   # held in the other store already (_store ran first)
     for n in stored:
         _copy(os.path.join(slot, n + SUFFIX[mode]), os.path.join(slot, n))
 
@@ -206,9 +228,10 @@ def switch(slot: str, to: str, keep: bool = False) -> bool:
     mode = _mode(slot)
     if mode == to:
         return False
-    if mode == to + '-saved':   # cut off after storing `to`'s set, before loading the other: the files are still `to`'s
+    if mode == to + '-saved':   # `to`'s store is whole; the files may be anything up to the other set (a load cut off)
+        _load(slot, to)
         _set_mode(slot, to)
-        return False
+        return True
     if mode != other + '-saved':
         _store(slot, other)
         _set_mode(slot, other + '-saved')
@@ -226,40 +249,107 @@ def first_vanilla_saves() -> bool:
     return pick == '2'
 
 
-def swap_in_saves() -> None:
-    """Every slot to the vanilla set. ON first: a slot the vanilla game makes during the run is the vanilla set's."""
+def first_time() -> bool:
+    """No vanilla set in any slot yet while there are mod saves: swap_in_saves asks first_vanilla_saves."""
     all_slots = slots()
-    keep = bool(all_slots) and not any(_stored(s, 'vanilla') for s in all_slots) and any(_own(s) for s in all_slots) \
-        and first_vanilla_saves()
+    return not any(_stored(s, 'vanilla') for s in all_slots) and any(_own(s) for s in all_slots)
+
+
+def swap_in_saves(keep: bool | None = None) -> None:
+    """Every slot to the vanilla set. ON first: a slot the vanilla game makes during the run is the vanilla set's.
+    `keep` None: asked here (first_time); launch asks before taking the lock (a prompt must not hold it)."""
+    if keep is None:
+        keep = first_time() and first_vanilla_saves()
+    all_slots = slots()
     for s in all_slots:   # before ON: a slot without MODE reads as vanilla while ON is there
         if not os.path.isfile(os.path.join(s, MODE)):
             _set_mode(s, 'mod')
     os.makedirs(save_root(), exist_ok=True)
-    modfiles.atomic_write(_p(ON), b'')
+    _write(_p(ON), b'')
     for s in all_slots:
         switch(s, 'vanilla', keep)
 
 
-def swap_out_saves() -> str | None:
+def swap_out_saves(in_game: bool = False) -> str | None:
     """Every slot back to the mod's set, when any is not (else None): after a vanilla run, or a slot that came down
-    from Steam Cloud in the vanilla set (a run on another machine). Never while the game runs: it would be loading or
-    writing the very files."""
+    from Steam Cloud in the vanilla set (a run on another machine). Never while the game runs (it would be loading or
+    writing the very files), except `in_game`: the game itself loading the plugin, before it reads the saves
+    (restore_saves). The saves are backed up first: the switch overwrites the vanilla store and the slot's files."""
     pending = [s for s in slots() if _mode(s) != 'mod']
     if not pending and not os.path.exists(_p(ON)):
         return None
-    if modfiles.game_running():
-        return '游戏还在运行：存档等游戏退出后（下次原版启动或运行安装器时）再换回 MOD 存档'
+    if not in_game and modfiles.game_running():
+        return '游戏还在运行：存档等游戏退出后（下次 MOD 启动、原版启动或运行安装器时）再换回 MOD 存档'
+    if pending:
+        save_backup.backup(save_root())
     for s in pending:
         switch(s, 'mod')
     if os.path.exists(_p(ON)):
-        os.remove(_p(ON))
+        _unlink(_p(ON))
     return '已换回 MOD 存档（原版存档以 .edf6vanilla 留在各存档槽里，和 MOD 存档一起云同步）' if pending else None
 
 
+def _restore_all(game: str) -> list[str]:
+    return [s for s in (_restore(game), swap_out_saves()) if s]
+
+
 def restore_all(game: str) -> list[str]:
-    """The ini and the saves a vanilla run left (what _restore and swap_out_saves said)."""
+    """The ini and the saves a vanilla run left (what _restore and swap_out_saves said). Callers in another process
+    than a running launch hold `exclusive` around it (installer.write_game)."""
     with _lock:
-        return [s for s in (_restore(game), swap_out_saves()) if s]
+        return _restore_all(game)
+
+
+def _mutex_name() -> str:
+    """One per save folder (the saves and, through the launch, the ini are what it guards); Local\\: this session's."""
+    where = os.path.normcase(os.path.abspath(save_root())).encode('utf-8')
+    return 'Local\\EDF6AF.vanilla_launch.' + hashlib.sha256(where).hexdigest()[:32]
+
+
+@contextlib.contextmanager
+def exclusive():
+    """Yields True holding the cross-process lock over the ini and the saves, False when another process holds it
+    (nothing waited for). A named mutex: a holder that dies (killed, the machine off) leaves it abandoned, which the
+    next one takes (WAIT_ABANDONED), so a dead holder never locks anyone out."""
+    if sys.platform != 'win32':
+        raise OSError('原版启动只支持 Windows')
+    k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    k32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p)
+    k32.WaitForSingleObject.restype = ctypes.c_uint32
+    k32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+    k32.ReleaseMutex.argtypes = (ctypes.c_void_p,)
+    k32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    h = k32.CreateMutexW(None, 0, _mutex_name())
+    if not h:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        got = k32.WaitForSingleObject(h, 0)
+        if got == 0xFFFFFFFF:   # WAIT_FAILED
+            raise ctypes.WinError(ctypes.get_last_error())
+        if got not in (0, 0x80):   # WAIT_OBJECT_0, WAIT_ABANDONED: ours; WAIT_TIMEOUT: another process's
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            k32.ReleaseMutex(h)
+    finally:
+        k32.CloseHandle(h)
+
+
+def restore_saves() -> int:
+    """`restore-saves`: the plugin runs it and waits, when the game loads it with the saves not in the mod's set (a
+    原版启动 window closed while the vanilla game ran, a slot synced from a vanilla run elsewhere): the game has not read
+    them yet, so they are switched back under it. BUSY when a 原版启动 or the installer holds the saves."""
+    with exclusive() as held:
+        if not held:
+            print('EDF6VC_SAVE_RESTORE busy (原版启动 or the installer is switching the saves)')
+            return BUSY
+        with _lock:
+            said = swap_out_saves(in_game=True)
+    print(f'EDF6VC_SAVE_RESTORE {"done" if said else "nothing"}')
+    return 0
 
 
 def game_pid() -> int | None:
@@ -275,16 +365,38 @@ def game_pid() -> int | None:
 _handler = None   # the console close handler, kept alive while it is installed
 
 
+class Closed(Exception):
+    """The console window is closing: the close handler has put back what it could; the main thread stops."""
+
+
+def _step(fn, *args):
+    """One step of launch, under _lock and only while the window is not closing: the close handler never runs in the
+    middle of a step, and no step runs after it (a prepare after its restore would leave the vanilla ini behind)."""
+    with _lock:
+        if _closing:
+            raise Closed
+        return fn(*args)
+
+
+def _close(game: str) -> None:
+    """The close handler's work: no further step, then the ini and the saves put back. The game running, the saves stay
+    (the game is using them): the ini back means its next start loads the plugin, which switches them back before the
+    game reads them (restore_saves), so the ini and the saves never stay apart."""
+    global _closing
+    with _lock:
+        _closing = True
+        _restore_all(game)
+
+
 def _on_close(game: str) -> None:
-    """Closing the window while the game runs puts the ini back (the loader read it when the game started); the saves
-    wait for the game to exit (swap_out_saves)."""
+    """Installed before anything is changed: closing the window at any point puts back what the run changed."""
     global _handler
     if sys.platform != 'win32':
         return
 
     @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
     def handler(_event: int) -> int:
-        restore_all(game)
+        _close(game)
         return 0
     _handler = handler
     ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, 1)
@@ -292,20 +404,32 @@ def _on_close(game: str) -> None:
 
 def launch(game: str) -> int:
     game = os.path.normpath(game)
+    with exclusive() as held:
+        if not held:
+            print('原版启动已经在运行（或安装器正在恢复存档）：不重复启动。')
+            return 1
+        try:
+            return _launch(game)
+        except Closed:
+            return 1
+
+
+def _launch(game: str) -> int:
     if modfiles.game_running():
         print(f'{modfiles.PROCESS} 已经在运行，先退出游戏再原版启动。')
         return 1
-    for said in restore_all(game):   # a run that did not get to put things back
-        print(said)
-    print('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。')
-    print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），启动前先备份，游戏退出后换回。')
-    if said := save_backup.backup(save_root()):
-        print('已备份存档到', said)
-    swap_in_saves()
-    prepare(game)
     _on_close(game)
-    print('游戏运行期间请不要关闭这个窗口。')
     try:
+        for said in _step(_restore_all, game):   # a run that did not get to put things back
+            print(said)
+        print('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。')
+        print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），启动前先备份，游戏退出后换回。')
+        if said := _step(save_backup.backup, save_root()):
+            print('已备份存档到', said)
+        keep = _step(first_time) and first_vanilla_saves()   # asked outside the lock
+        _step(swap_in_saves, keep)
+        _step(prepare, game)
+        print('游戏运行期间请不要关闭这个窗口。')
         os.startfile(STEAM_URL)
         waited = 0.0
         while (pid := game_pid()) is None:
@@ -320,8 +444,10 @@ def launch(game: str) -> int:
         print('游戏已退出。')
         return 0
     finally:
-        for said in restore_all(game):
-            print(said)
+        with _lock:
+            if not _closing:   # else the close handler has put things back
+                for said in _restore_all(game):
+                    print(said)
 
 
 if __name__ == '__main__':
