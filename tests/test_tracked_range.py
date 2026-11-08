@@ -20,6 +20,7 @@ import ledger
 import make_bmpt
 import make_vulcan
 import vcobjects as vc
+import xm_units
 import mdb
 import rmpa
 import rootcpk
@@ -97,6 +98,45 @@ class RangeCatalogTests(unittest.TestCase):
                         path.unlink()
                         self.assertFalse(catalog.available(root, row))
                         path.write_bytes(b'present')
+
+
+class UndeployedXMorphTests(unittest.TestCase):
+    """A machine without the X-Morph model pack (every CI nightly install, test site #35): install leaves the undeployed
+    units out instead of stopping on their SGO (wt_tracked.WtModelError -> has_mission_setup False -> RuntimeError)."""
+
+    def setUp(self):
+        stub = patch.object(xm_units, 'deployed', return_value=False)
+        stub.start()
+        self.addCleanup(stub.stop)
+        self.xm = {s for s in gen.PLACEABLE_DERIVED if gen.GROUND_MISSION.get(s) == 'make_xmorph'}
+        self.assertTrue(self.xm, 'no X-Morph unit on the M map: this test checks nothing')
+
+    def test_placeable_derived_leaves_undeployed_units_out(self):
+        own = gen.placeable_derived()
+        self.assertFalse(own & self.xm)
+        self.assertIn('edf6tr_vulcan_mission', own)
+        for name in self.xm:
+            self.assertFalse(gen.makeable(name), name)
+
+    def test_install_does_not_stop_and_writes_no_undeployed_unit(self):
+        unit = min(self.xm)
+        asked, written = [], []
+
+        def mission_setup(game, name):   # an undeployed unit's SGO cannot be made (no model folder), every other one can
+            asked.append(name)
+            return not (gen.GROUND_MISSION.get(name) == 'make_xmorph' and not xm_units.deployed(
+                name.removeprefix(gen.DERIVED_PREFIX).removesuffix('_mission')))
+
+        with tempfile.TemporaryDirectory() as root:
+            plan = gen.Plan(vehicles={unit: 1, 'edf6tr_vulcan_mission': 1})
+            plan.waves.enabled = False
+            with patch.object(gen, 'Game', return_value=SimpleNamespace(root=root)),                  patch.dict(gen.PVP_PLANS, clear=True),                  patch.object(gen, 'has_mission_setup', side_effect=mission_setup),                  patch.object(gen, '_range_files', return_value=('script', b'points', [], False)),                  patch.object(gen, '_write_derived', side_effect=lambda r, g, wanted, uses=(): written.extend(wanted)),                  patch.object(gen, '_write_mission'),                  patch.object(gen, 'register_pack', return_value=[]):
+                said = gen.install(root, plan)
+        self.assertFalse(set(asked) & self.xm)
+        self.assertFalse(set(written) & self.xm)
+        self.assertIn('edf6tr_vulcan_mission', written)
+        self.assertEqual([line for line in said if '模型包' in line],
+                         [f'跳过 {catalog.short(dict(gen.VEHICLES)[unit])}：没有它的模型文件夹（模型包），这个单位不部署'])
 
 
 class RangeLifecycleTests(unittest.TestCase):
