@@ -748,7 +748,8 @@ void RouteStart(const float* pos,float* from) noexcept {
 // began again a second later, for each such soldier, out of the budget all of them share.
 // `pace`: the share of its full walk (the paced march: mapcmd.cpp MapPaceScale), 0 it stands.
 // `ms`: the caller's game clock (its Think's, read once there: GameMs asks the pause state of System, a Readable each).
-void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {
+// `hull`: a vehicle the route goes round (Board: the one it walks to), which the map ray the routes use does not see.
+void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {
     Soldier* const soldier=Entry(h,ms);
     // Its turn first: one waiting behind the caller the route budget denied last frame stands, the call's pending
     // (ground_navigation.h GroundNavigateDeferred), without the two floor rays of its ends the call would not look at
@@ -756,7 +757,7 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     if(!soldier || GroundNavigateDeferred(soldier->navigation)){Stand(h);return;}
     float waypoint[3],dir[3],from[3],goal[3];
     RouteStart(pos,from);RouteStart(to,goal);
-    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
+    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull)!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     if(!(pace>0.0f)){Stand(h);return;}
@@ -1127,6 +1128,43 @@ bool seatEventsOk=false;
 struct SharedRef { void* obj; void* ctrl; };
 using RideFn=void(__fastcall*)(void*,SharedRef*,int);
 
+// A boarding soldier's route goes round its vehicle (ground_navigation.h crew::Hull; testhub #31: the riding point on the
+// far side, the route through the hull, the soldier pressed against it until the order was dropped and given again).
+// The routes' map ray (layer 22) meets no unit; the bullets' object layer 11 (heli.cpp ObjectRay) meets the vehicles'
+// bodies, and 0x108260(body id) gives a vehicle's body its vehicle (docs/bullet-pass-re.md, docs/boarding-re.md).
+constexpr unsigned kBodyObject=0x108260;
+const unsigned char kBodyObjectSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x05};
+const unsigned char kBodyObjectSig2[]={0x8B,0xD1,0x48,0x8D,0x48,0x10,0xE8};   // at +11
+using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
+bool hullOk=false;
+constexpr float kHullPast=0.05f;   // m past another object's body (a soldier, the walker's own) the ray goes on from
+// Whether a-b misses `vehicle`'s bodies: the nearest object hit each ray, past the others' (at most kHullHits; a
+// crowd beyond that along half a metre is left to the next check, the route's every 100 ms).
+bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(length>1e-3f) || !std::isfinite(length))return true;
+    const float unit[3]={d[0]/length,d[1]/length,d[2]/length};
+    float from[3]={a[0],a[1],a[2]};
+    for(int n=0;n<npc::navigation::kHullHits;++n) {
+        float at[3]{};std::uint32_t body=0;
+        if(ObjectRay(from,b,at,&body)<0.0f || !std::isfinite(at[0]+at[1]+at[2]))return true;
+        const void* owner=nullptr;
+        __try { owner=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body); } __except(EXCEPTION_EXECUTE_HANDLER){owner=nullptr;}
+        if(owner==vehicle)return false;
+        for(int k=0;k<3;++k)from[k]=at[k]+unit[k]*kHullPast;
+        if((b[0]-from[0])*unit[0]+(b[1]-from[1])*unit[1]+(b[2]-from[2])*unit[2]<=0.0f)return true;
+    }
+    return true;
+}
+// `floor`, `room`: the boarding circle (npc_logic.h BoardRoom), where the route need not go round the vehicle.
+Hull BoardHull(const void* vehicle,const float* floor,float room) noexcept {
+    if(!hullOk)return Hull{};
+    Hull hull{&HullClear,vehicle};
+    hull.inside[0]=floor[0];hull.inside[1]=floor[1];hull.inside[2]=floor[2];hull.room=room;
+    return hull;
+}
+
 // Whose a seat's input is: the plugin's real NPC driver (npc), or why not (the diagnosis names it: NpcVehicleAi below).
 enum class SeatInputOwner : std::uint8_t { npc, off, notOther, notSoldier, player, dead, remote, seatMismatch, vehicle, notSeat0 };
 const char* SeatInputOwnerName(SeatInputOwner o) noexcept {
@@ -1196,12 +1234,13 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
         // Stop near enough that arriving anywhere in the stop circle is inside the trigger (npc_logic.h BoardStop).
         const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
         float walkAt[3];
-        const float stop=MapFloorRay(above,below,walkAt)<0.0f ? 0.0f : npc::BoardStop(at[1]-walkAt[1],reach);
+        const bool floor=MapFloorRay(above,below,walkAt)>=0.0f;
+        const float stop=floor ? npc::BoardStop(at[1]-walkAt[1],reach) : 0.0f;
         if(stop<=0.0f) {
             Stand(h); // nextThink already wrote native movement; a rejected entrance must hold, not reuse that intent.
             return true;
         }
-        MoveTo(h,pos,walkAt,stop,ms);
+        MoveTo(h,pos,walkAt,stop,ms,1.0f,BoardHull(v,walkAt,npc::BoardRoom(at[1]-walkAt[1],reach)));
         return true;
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);
@@ -2285,6 +2324,9 @@ bool InstallNpcAi() noexcept {
     __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(0x57690D,kRideReleaseSig,sizeof(kRideReleaseSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
+    __try { hullOk=Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) && Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){hullOk=false;}
+    if(!hullOk)Log("NPCAI body->object 0x108260 not as read: a boarding soldier's route does not see its vehicle");
     __try { seatEventsOk=Matches(0x632AC6,kSeatSoundSig,sizeof(kSeatSoundSig)) && Matches(0x62F1AA,kSeatScanSig,sizeof(kSeatScanSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){seatEventsOk=false;}
     if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");

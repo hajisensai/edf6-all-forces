@@ -61,6 +61,9 @@ struct BasicState {
     // legWalked: the last leg was walked to its end (only such a leg counts as one more no nearer: a search again from
     // where the actor was held, blocked by a friend or a closed edge, ends where the last one did and is no leg walked).
     float legBest=1e30f;int legStale=0;bool legWalked=false;
+    // crew::GroundNavigate's Hull::object this route was searched round (none: nullptr). Another one is another
+    // search: a route found blind to a vehicle (a move order's) is not walked into it when the soldier is sent to board it.
+    const void* hull{};
 };
 using State=BasicState<kNodes>;
 using RouteState=BasicState<kRouteNodes>;
@@ -219,8 +222,13 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
 // Ground/clear are real scene queries in production, deterministic geometry in
 // tests. Sample each half metre at both footprint sides and the centre; sweep
 // ankles/waist/head plus vertical headroom, so corners cannot be cut diagonally.
-template<class Ground,class Clear>
-bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) noexcept {
+// `hull(a, b)`: whether the segment misses a body `clear` (the map's) does not see -- the vehicle a soldier walks round to
+// board it (crew::Hull). Swept on the centre line only (the floor-up headroom and the three heights): the actor's
+// centre is never inside such a body, so each of these segments starts outside it, while a side sample of an actor
+// pressed against it may start inside, where a ray finds no surface to tell, and every edge from there would read as
+// open or as shut. A route that passes a corner of it nearer than p.radius slides along it in the game's own collision.
+template<class Ground,class Clear,class Hull>
+bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hull hull) noexcept {
     const float distance=Horizontal(a,b);
     if(!Finite(a)||!Finite(b)||distance>p.cell*3.0f)return false;
     const int steps=(std::max)(1,static_cast<int>(std::ceil(distance/0.5f)));
@@ -236,17 +244,38 @@ bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) no
             Point foot{at.x+rx*offset,at.y,at.z+rz*offset};float floor{};
             if(!ground(foot,p.step,floor)||std::fabs(floor-at.y)>p.step)return false;
             Point low{foot.x,floor+0.08f,foot.z},high{foot.x,floor+p.height,foot.z};
-            if(!clear(low,high))return false;
+            if(!clear(low,high) || (side==0 && !hull(low,high)))return false;
             for(int level=0;level<3;++level) {
                 const float h=level==0 ? p.step+0.08f : level==1 ? p.height*0.65f : p.height;
                 Point start{previous.x+rx*offset,previous.y+h,previous.z+rz*offset};
                 Point end{foot.x,at.y+h,foot.z};
-                if(!clear(start,end))return false;
+                if(!clear(start,end) || (side==0 && !hull(start,end)))return false;
             }
         }
         previous=at;
     }
     out=previous;return true;
+}
+template<class Ground,class Clear>
+bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) noexcept {
+    return WalkEdge(a,b,out,p,ground,clear,[](Point,Point) noexcept {return true;});
+}
+// The rays crew::Hull::clear casts at most for one segment (the nearest hit each, past the bodies of other objects).
+constexpr int kHullHits=4;
+// The pieces of a-b horizontally outside the circle of `r` round `c` (none, one or two), each given to `piece(from, to)`
+// (y interpolated along a-b); true when every piece is. r <= 0: the whole segment.
+template<class Piece>
+bool OutsideCircle(Point a,Point b,Point c,float r,Piece piece) noexcept {
+    if(!(r>0.0f))return piece(a,b);
+    const float dx=b.x-a.x,dz=b.z-a.z,fx=a.x-c.x,fz=a.z-c.z;
+    const float qa=dx*dx+dz*dz,qb=2.0f*(fx*dx+fz*dz),qc=fx*fx+fz*fz-r*r;
+    const float disc=qb*qb-4.0f*qa*qc;
+    if(!(qa>1e-8f) || !(disc>0.0f))return qc<0.0f || piece(a,b);   // vertical, or a line that misses the circle
+    const float root=std::sqrt(disc),t0=(-qb-root)/(2.0f*qa),t1=(-qb+root)/(2.0f*qa);
+    auto at=[&](float t){return Point{a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t};};
+    if(t0>0.0f && !piece(a,at((std::min)(t0,1.0f))))return false;
+    if(t1<1.0f && !piece(at((std::max)(t1,0.0f)),b))return false;
+    return true;
 }
 } // namespace npc::navigation
 namespace crew {
@@ -255,8 +284,20 @@ namespace crew {
 // frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own
 // work for it (npcai.cpp MoveTo: the two floor rays of its ends) and take the pending.
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
+// A body the route must go round that the map ray (layer 22: terrain and buildings, no units; docs/raycast-re.md) does
+// not see: the vehicle a soldier walks to board (npcai.cpp Board). Its seat's riding point is often on the far side of
+// it, and a route blind to it ran straight into its hull: the soldier stood pressed against it until the order was
+// dropped and given again, over and over (testhub #31, docs/feedback-2026-11-08-board-path.md). `clear(object, a, b)`:
+// whether the segment a-b misses `object`'s bodies (at most npc::navigation::kHullHits rays). No object: none.
+// `inside`, `room`: a circle (horizontal metres round `inside`) where the route need not miss it: a boarding soldier's
+// seat takes it as it steps in there (npc_logic.h BoardRoom), and the riding point is often against the hull or in it.
+struct Hull {
+    bool (*clear)(const void* object,const float* a,const float* b) noexcept=nullptr;
+    const void* object=nullptr;
+    float inside[3]{};float room=0.0f;
+};
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={}) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
 }

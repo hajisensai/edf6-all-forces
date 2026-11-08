@@ -387,11 +387,16 @@ inline Steer ReturnToPost(const float* pos,const float* right,const float* forwa
 // point), kBoardShare of it: anywhere within it is inside the sphere. 0: less room than kBoardStopLeast (the floor out of
 // the sphere, or at its very rim), no stand to walk to.
 constexpr float kBoardStopMost=0.5f,kBoardStopLeast=0.1f,kBoardFeet=0.05f,kBoardShare=0.9f;
-inline float BoardStop(float drop,float reach) noexcept {
+// The room itself (kBoardShare of it, unclamped): the horizontal radius round the floor point within which a soldier
+// standing on that floor is inside the sphere and boards. 0: none. The route there (crew::Hull) need not go round the
+// vehicle within it: the soldier is seated as it steps in.
+inline float BoardRoom(float drop,float reach) noexcept {
     if(!std::isfinite(drop) || !std::isfinite(reach))return 0.0f;
     const float up=std::fabs(drop)+kBoardFeet,room=reach*reach-up*up;
-    if(!(room>0.0f))return 0.0f;
-    const float side=std::sqrt(room)*kBoardShare;
+    return room>0.0f ? std::sqrt(room)*kBoardShare : 0.0f;
+}
+inline float BoardStop(float drop,float reach) noexcept {
+    const float side=BoardRoom(drop,reach);
     return side<kBoardStopLeast ? 0.0f : side<kBoardStopMost ? side : kBoardStopMost;
 }
 
