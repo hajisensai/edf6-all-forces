@@ -9,6 +9,7 @@
 #include "scene_object.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace crew::edf41c {
@@ -184,9 +186,18 @@ bool Hook() noexcept {
     return true;
 }
 
-// Persistent node copies (Persist): never freed, a bullet keeps a pointer into one.
+// Persistent node copies (Persist): never freed, a bullet keeps a pointer into one. Kept in a deque (push_back never
+// moves existing elements) and shared by content: a copy is immutable and laid out with relative offsets over a
+// zero-filled buffer, so identical source trees give identical bytes, and callers that persist the same node again
+// (a floatgun per colonist kill, every robo spawn) reuse one copy instead of adding another each time.
 std::mutex persistLock;
 std::deque<std::vector<char>> persisted;
+std::unordered_multimap<std::uint64_t,std::size_t> persistedByHash;   // FNV-1a of the bytes -> index into `persisted`
+std::uint64_t Fnv1a(const std::vector<char>& v) noexcept {
+    std::uint64_t h=1469598103934665603ull;
+    for(const char c:v) { h^=static_cast<unsigned char>(c); h*=1099511628211ull; }
+    return h;
+}
 std::size_t NodeBytes(const SgoNode* n,int depth) noexcept {
     if(depth>8 || !Readable(n,sizeof(SgoNode)))return 0;
     if(n->type==3)return sizeof(SgoNode)+static_cast<std::size_t>(n->a+1)*sizeof(wchar_t)+8;
@@ -345,12 +356,20 @@ bool Text(const SgoNode* n,wchar_t* out,std::size_t capacity) noexcept {
 const SgoNode* Persist(const SgoNode* n) noexcept {
     const std::size_t bytes=NodeBytes(n,0);
     if(!bytes)return nullptr;
-    std::lock_guard<std::mutex> hold(persistLock);
-    persisted.emplace_back(bytes+16,'\0');
-    std::vector<char>& out=persisted.back();
+    std::vector<char> out(bytes+16,'\0');
     std::size_t end=sizeof(SgoNode);
-    if(!CopyNode(n,out,0,end)) { persisted.pop_back(); return nullptr; }
-    return reinterpret_cast<const SgoNode*>(out.data());
+    if(!CopyNode(n,out,0,end))return nullptr;
+    const std::uint64_t h=Fnv1a(out);
+    std::lock_guard<std::mutex> hold(persistLock);
+    const auto range=persistedByHash.equal_range(h);
+    for(auto it=range.first;it!=range.second;++it) {
+        const std::vector<char>& have=persisted[it->second];
+        if(have.size()==out.size() && std::memcmp(have.data(),out.data(),out.size())==0)
+            return reinterpret_cast<const SgoNode*>(have.data());
+    }
+    persistedByHash.emplace(h,persisted.size());
+    persisted.push_back(std::move(out));
+    return reinterpret_cast<const SgoNode*>(persisted.back().data());
 }
 
 // ---- objects ----------------------------------------------------------------------------------------------------

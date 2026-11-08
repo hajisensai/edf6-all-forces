@@ -27,7 +27,7 @@
 namespace crew {
 namespace {
 constexpr std::size_t kLockList=0xC60,kLockCount=0xC68,kLocking=0xC70,kLockingCtrl=0xC78,kLockProgress=0xC80;
-constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120;
+constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120,kWeaponNode=0x08;
 constexpr std::size_t kLockSoundTimer=0xCB8;
 constexpr std::size_t kNodeEntry=0x10,kNodeCtrl=0x18,kEntryPoint=0x10;
 // The entry is the lock-target registry's record (heli.cpp kTargetObject / kTargetAim: object +0x8, aim point +0x10).
@@ -106,9 +106,26 @@ float ViewAngle(void** ref) noexcept {
     return std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c);
 }
 
+// What Score asks of the weapon, not of the candidate: whether it is a store (its SGO) and the player holds it (its
+// owner, the seat's rider). The pick runs Score once a candidate (hundreds in a cone), so they are read once a weapon a
+// frame. Keyed by the weapon's resource node and owner too: another weapon at a freed one's address, or the weapon
+// changing hands, in the same frame reads afresh. The pick runs on the game thread only (the weapon's update).
+struct WeaponFacts { const unsigned char* weapon; const void* node; const void* owner; ULONGLONG frame; bool store,held; };
+WeaponFacts facts{nullptr,nullptr,nullptr,~0ull,false,false};
+void FactsOf(const unsigned char* w,bool* store,bool* held) noexcept {
+    if(!Readable(w,kWeaponOwner+8)){*store=IsStoreWeapon(w);*held=PlayerHolds(w);return;}
+    const ULONGLONG frame=GameFrame();
+    const auto node=At<const void*>(w,kWeaponNode),owner=At<const void*>(w,kWeaponOwner);
+    if(facts.weapon!=w || facts.node!=node || facts.owner!=owner || facts.frame!=frame)
+        facts={w,node,owner,frame,IsStoreWeapon(w),PlayerHolds(w)};
+    *store=facts.store;*held=facts.held;
+}
+
 // Candidate `ref` of weapon `w` (stock result `result`) scored by the plugin's order; false: the stock order.
 bool Score(void** ref,const unsigned char* result,const unsigned char* w,float* score) noexcept {
-    const bool store=IsStoreWeapon(w),held=PlayerHolds(w);
+    bool store=false,held=false;
+    FactsOf(w,&store,&held);
+    if(!store && !held)return false;   // the stock order whatever the view (below: no view score, no store score)
     const bool byView=held && (store ? Cfg().playerJetLockByView : Cfg().playerLockByView);
     const float view=byView ? ViewAngle(ref) : -1.0f;
     if(view>=0.0f)*score=view*view;

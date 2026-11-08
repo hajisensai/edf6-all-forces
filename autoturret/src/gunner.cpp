@@ -155,12 +155,29 @@ bool Barrel(const unsigned char* vehicle,const unsigned char* weapon,float* pos,
     return Dot(d,d)<kMuzzleReach*kMuzzleReach;
 }
 
-// Says something about a vehicle's seat once (per vehicle and seat, the last 16 of them).
+// Says something about a vehicle's seat once (per vehicle and seat). The key holds the vehicle's weak-this control
+// block too, so a vehicle built at a gone one's address is told about again. An entry is only ever reused once its
+// vehicle is gone (Same) and the table is emptied at each mission's start (ResetGunnerLog): a ring that dropped live
+// entries missed every call once more than its size of seats asked each frame, a log line per seat per frame.
+// Full of live vehicles' seats: said once, then nothing more until an entry frees. Game thread only.
+struct LoggedSeat { const void* vehicle; const void* ctrl; unsigned seat; };
+LoggedSeat logged[256]{};
+bool loggedFull=false;
 void LogOnce(const void* vehicle,unsigned seat,const char* format,...) noexcept {
-    static struct { const void* vehicle; unsigned seat; } logged[16]{};
-    static unsigned next=0;
-    for(const auto& l:logged)if(l.vehicle==vehicle && l.seat==seat)return;
-    logged[next++%16]={vehicle,seat};
+    const auto ctrl=At<const void*>(vehicle,kSelfCtrl);
+    LoggedSeat* slot=nullptr;
+    for(auto& l:logged) {
+        if(l.vehicle==vehicle && l.ctrl==ctrl && l.seat==seat)return;
+        if(!slot && !l.vehicle)slot=&l;
+    }
+    if(!slot)for(auto& l:logged)if(!Same(l.vehicle,l.ctrl)){slot=&l;break;}
+    if(!slot) {
+        if(!loggedFull)Log("GUNNER: LogOnce table full (%llu live vehicle seats): no more once-lines until one goes",
+                           static_cast<unsigned long long>(sizeof(logged)/sizeof(logged[0])));
+        loggedFull=true;
+        return;
+    }
+    *slot={vehicle,ctrl,seat};
     char text[400]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
     Log("GUNNER v=%p seat=%u: %s",vehicle,seat,text);
 }
@@ -517,7 +534,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     // readout shows it (ownGun false: their gun is not the plugin's).
     if(crew[0]==Crew::player)DriverFrame(vehicle);
     if(!any)return;
-    Nearby nearby;
+    static Nearby nearby;   // kept: its room grows to the battle once
     ScanEnemies(vehicle,cfg.gunnerRange+kMuzzleReach,nearby);
     const float down=Down(vehicle);
     for(unsigned s=1;s<count;++s) {
@@ -609,6 +626,11 @@ template<class Fn> bool Chain(unsigned vtable,std::size_t index,unsigned stock,F
     return true;
 }
 }  // namespace
+
+void ResetGunnerLog() noexcept {
+    for(auto& l:logged)l=LoggedSeat{};
+    loggedFull=false;
+}
 
 int HookGunners() noexcept {
     if(!image || !CheckGunnerProfile()){Log("HOOK gunners: unexpected layout, tank gunners off");return 0;}

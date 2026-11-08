@@ -268,6 +268,11 @@ struct VariantSet {
         return false;
     }
 };
+inline bool SameSet(const VariantSet& a,const VariantSet& b) noexcept {
+    if(a.count!=b.count)return false;
+    for(int i=0;i<a.count;++i)if(!(a.ref[i]==b.ref[i]))return false;
+    return true;
+}
 inline std::uint64_t Fnv(std::uint64_t h,const char* s,std::size_t n) noexcept {
     for(std::size_t i=0;i<n;++i){h^=static_cast<unsigned char>(s[i]);h*=1099511628211ull;}
     return h;
@@ -630,6 +635,9 @@ public:
     // Every other member's player loadouts the last room published (validated; kept when the room is left, as HostList):
     // the mission preloads their files (player_vehicle.cpp).
     const VariantSet& MemberPlayerVehicles() const noexcept { return memberPlayers_; }
+    // Bumped each time MemberPlayerVehicles() changes (0: never set): room_sync.cpp copies it for other threads only then,
+    // not every room frame.
+    std::uint64_t MemberPlayersVersion() const noexcept { return memberPlayersVersion_; }
     const VariantSet& Target() const noexcept { return target_; }
 private:
     // Everything a room leaves behind, but the tick clock and the situation the caller is filling.
@@ -720,7 +728,7 @@ private:
         else if(playerPublished_[0] && api->clear(playerveh::kKey))playerPublished_[0]=0;
         players_.count=0;playersBad_=0;
         api->snapshot(playerveh::kKey,&Engine::TakePlayer,this,nullptr);
-        memberPlayers_=players_;
+        if(!SameSet(memberPlayers_,players_)){memberPlayers_=players_;++memberPlayersVersion_;}
         if(playersBad_ && !playersBadLogged_) {
             playersBadLogged_=true;
             char text[96];std::snprintf(text,sizeof(text),"ROOMSYNC %d member(s)' player loadouts do not read: ignored",playersBad_);
@@ -836,6 +844,7 @@ private:
     VariantSet own_,decoded_,target_,noted_;
     VariantSet hostList_;               // HostList(): not cleared by Reset (a mission start leaves the room)
     VariantSet players_,memberPlayers_; // the other members' player loadouts: this tick's, and the last room's (kept)
+    std::uint64_t memberPlayersVersion_=0;
     int playersBad_=0;bool playersBadLogged_=false;
     char playerPublished_[playerveh::kValueMost+1]{};
     std::uint64_t hostListHash_=0;

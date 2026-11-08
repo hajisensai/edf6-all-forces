@@ -2511,7 +2511,9 @@ def turret_aim_wired() -> None:
     # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
     lockon = src('src/lockon.cpp')
     score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'PlayerHolds(w)' in score
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w,&store,&held);' in score
+    facts = lockon.split('void FactsOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsStoreWeapon(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
     holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
     assert 'Rider::player' in holds and 'IsPlayer(owner)' in holds and 'SeatHolds(seat,w)' in holds
 
@@ -5555,8 +5557,8 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w) && !(spec && spec->nativeControl))' in payload
-    assert 'return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(store && !(spec && spec->nativeControl))' in payload and 'stores[i]=IsStoreWeapon(ws[i]);' in payload
+    assert 'return playerSeat && FreeSecondary(c) && IsCoaxSpec(spec) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -6018,7 +6020,7 @@ def map_commands_wired() -> None:
         human_frame.index('MapCommandQueueTick();') < human_frame.index('if(!human || !human[kHumanPlayer]'), 'the queue advances on the scene tick'
     assert 'GuardedTick(kStepMapQueue,&MapCommandQueueTick);' in src('src/crew.cpp')
     assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
-    assert 'NpcSquadSuccessor(' in code and 'handovers[handoverNext]=Handover{' in src('src/npcai.cpp')
+    assert 'NpcSquadSuccessor(' in code and 'AddHandover(Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()});' in src('src/npcai.cpp')
     assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
     assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
     assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
@@ -6449,9 +6451,9 @@ def npc_pickup_wired() -> None:
     code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
     drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
-    run = drive.index('PickUp(s,h,pos)')
+    run = drive.index('PickUp(s,h,pos,ms)')
     assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
-    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'reinterpret_cast<NotifyBoxFn>' in pick and 'reinterpret_cast<ApplyBoxFn>' in pick
     assert pick.index('image+kNotifyBox') < pick.index('image+kApplyBox')
     assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
@@ -6521,7 +6523,7 @@ def npc_ai_wired() -> None:
         "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
     assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayer(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
+    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayerSelf(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
     assert 'npc::Scripted(control) ? Scripted(' in think
     ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
     assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
@@ -6652,6 +6654,44 @@ def npc_ai_wired() -> None:
     assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
     assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
     assert 'L"VanillaRecruit"' in plugin and re.search(r'^VanillaRecruit=0\s*$', ini, re.M) and 'VanillaRecruit' in readme and 'VanillaRecruit' in doc
+
+
+@test
+def npc_ai_asks_less() -> None:
+    """Readable asked only of pointers nothing has shown live (stress:100 2026-11-08, docs/npc-ai-design.md): the Think's
+    own `human` (HideWalkUp) and an object the game's team walk hands over (Gather's FriendVisit, the ride prompt's
+    visit) read without asking; ArmsOf's pages asked in two batches; MoveTo's floor rays only for a caller whose route
+    turn it is. Each checked against the code before it offline (npc_core_check, common_host_check,
+    ground_navigation_runtime, crew_first_use_test)."""
+    code, crew, nav, navh = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/ground_navigation.cpp'), src('src/ground_navigation.h')
+    memh, mem, cmake = src('common/edf/memory.h'), src('common/memory.cpp'), src('CMakeLists.txt')
+    body = lambda text, head: text.split(head, 1)[1].split('\n}\n', 1)[0]
+    hide = body(code, 'std::uint8_t HideWalkUp(unsigned char* h) noexcept {')
+    assert 'IsAnyPlayerSelf(h)' in hide and 'IsAnyPlayer(h)' not in hide, "HideWalkUp: the Think's own object, not asked"
+    visit = body(code, 'void __fastcall FriendVisit(void* self,void* object) noexcept {')
+    assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
+    assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
+    assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
+    arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
+    first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
+    second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
+    assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
+    assert 'edf::PrefetchReadable(' not in arms
+    move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {')
+    assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
+    navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
+    assert navigate.index('if(Deferred(&state))') < navigate.index('auto edge='), 'the call and the ask share one turn'
+    assert 'bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept { return Deferred(&state); }' in nav
+    assert 'bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;' in navh
+    prompt = body(crew, 'void __fastcall PromptHook(void* functor,void* object) {')
+    assert 'const auto vtable=At<const void*>(object,0);' in prompt and 'ClassOfVtable(vtable)<0' in prompt
+    assert 'ClassOf(object)' not in prompt and prompt.count('IsJet(object)') == 2 and         prompt.count('body506 && IsJet(object)') == 1 and prompt.count('body506 && ((IsJet(object)') == 1,         'the ride prompt: IsJet asked of a 506 alone'
+    assert prompt.count('IsSub(object)') == 1 and '|| IsSub(object))))return;' in prompt, 'the ride prompt: IsSub asked of a 506 alone'
+    assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept;' in memh
+    assert 'void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept {' in mem and 'class PrefetchBatch' in mem
+    for test in ('npc_core_check', 'common_host_check'):
+        assert f'add_executable({test} EXCLUDE_FROM_ALL tools/{test}.cpp' in cmake, test
+    assert 'add_test(NAME ground_navigation_runtime' in cmake
 
 
 @test
@@ -6880,16 +6920,29 @@ def air_chase_wired() -> None:
     assert fire.index('GunsAtTarget(j,v,pos,ms,"its NPC crew");') < fire.index('if(j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;')
     crew = bay.split('bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!j->t.target)return false;' in crew and 'const bool shell=!j->t.flyer && ' in crew
-    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::PickTarget(world.enemies,' in npcai
+    assert 'PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a))' in npcai and 'npc::grid::PickTarget(world.enemyGrid,world.enemies,' in npcai
+    # The pick through the frame's grid (src/npc_grid.h) is the scan's own: the same TargetScore with the reach, the scan
+    # itself whenever a point or the query is not regular, and npc_grid_check (the random comparison with the scan) in CTest.
+    grid = src('src/npc_grid.h')
+    pick = grid.split('int PickTarget(const Grid& g,', 1)[1].split('\n}\n', 1)[0]
+    assert 'return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);' in pick and 'g.Odd()' in pick
+    assert 'TargetScore(Dist(eye,aim),reach,isCurrent(i))' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert '(score==bestScore && i<best)' in pick, 'a tie: the lower index, as the scan'
+    assert 'w.enemyGrid.Build(w.enemies,' in npcai and 'w.friendGrid.Build(w.friends,' in npcai, 'the grids built with the lists in Gather'
+    assert 'EXCLUDE_FROM_ALL tools/npc_grid_check.cpp' in src('CMakeLists.txt') and \
+        'npc_grid_check' in src('CMakeLists.txt').split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }' in npcai
-    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'if(WastedFire(p.self,object))return;' in npcai
+    assert 'HoldFire(h,t->object,eye,known ? a.speed[w]' in npcai and 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }' in npcai
     assert 'if(target && HoldFire(v,target))target=nullptr;' in npcai and 'if(p.best && HoldFire(v,p.best))' in npcai
     assert 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]' in npcai and 'p.fire=!hold && ShotOk(' in npcai
-    assert 'p.speed==speed && p.gravity==gravity' in src('src/wastedfire.cpp')
-    assert 'std::memcmp(p.from,from,12)==0' in src('src/wastedfire.cpp'), 'cached plans belong to the same muzzle and weapon'
-    assert 'if(!HoldFire(v,o))f(o,a,0.0f);' in src('src/heli.cpp')
+    # A cached plan is the same weapon's (its round's speed and gravity are in the plans' key) and the same muzzle's.
+    wasted = src('src/wastedfire.cpp')
+    assert 'speed==o.speed && gravity==o.gravity' in wasted and 'const PlanKey key{shooter,target,speed,gravity};' in wasted
+    assert 'std::memcmp(p->from,from,12)==0' in wasted, 'cached plans belong to the same muzzle and weapon'
+    heli = src('src/heli.cpp')
+    assert 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });' in heli and heli.count('held())return;') >= 3
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
     assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'

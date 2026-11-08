@@ -124,6 +124,17 @@ void* AddLockPoint(void* object) noexcept {
 void SetLockPoint(void* point,const float* position) noexcept { std::memcpy(static_cast<unsigned char*>(point)+0x10,position,12); }
 }
 }
+// The tables' high-water marks: every slot at or past a mark is empty, so the truncated scans see
+// exactly what a whole-table scan saw, and Find(empty ref) is still the table's first empty slot.
+bool MarksHold() {
+    for(unsigned i=crew::savedUsed;i<crew::kMaxObjects;++i)if(crew::saved[i].ref.obj || crew::saved[i].ref.ctrl)return false;
+    for(unsigned i=crew::supportUsed;i<crew::kMaxSupportOwned;++i)
+        if(crew::supportOwners[i].ref.obj || crew::supportOwners[i].ref.ctrl)return false;
+    for(unsigned i=crew::emittersUsed;i<crew::kMaxNativeEmitters;++i)if(crew::nativeEmitters[i].binding.object)return false;
+    crew::Saved* firstEmpty=nullptr;
+    for(auto& item:crew::saved)if(!item.ref.obj && !item.ref.ctrl){firstEmpty=&item;break;}
+    return crew::Find(crew::ObjRef{})==firstEmpty;
+}
 int main() {
     // The production call site still calls a checked native-address function.
     // This fixture image supplies only that function as an absolute x64 jump.
@@ -151,12 +162,14 @@ int main() {
     // The hostile pass already reads the actor's live team. The stock friendly
     // pass has a literal 2, so its isolated hook must map only our active player.
     CHECK(crew::ApplyCollected(collection));crew::activeState.enabled=true;crew::radarActive.store(true);
+    CHECK(crew::savedUsed>0 && crew::emittersUsed>0 && MarksHold());
     unsigned char radar[0x790]{};edf::Put<void*>(radar,0x778,human.bytes);edf::Put<void*>(radar,0x780,human.control);
     CHECK(crew::RadarFriendTeam(radar,2)==1);CHECK(crew::RadarFriendTeam(radar,5)==5);
     CHECK(crew::RestoreAll());CHECK(crew::RadarFriendTeam(radar,2)==2);
     CHECK(edf::At<LONG>(human.control,12)==2); // one native, one retained weak cache identity
     crew::ResetPvpNative();CHECK(edf::At<LONG>(human.control,12)==1);
     for(const auto& item:crew::saved)CHECK(!item.ref);
+    CHECK(crew::savedUsed==0 && crew::emittersUsed==0 && MarksHold());
 
     // A failed baseline restore must retain the original team and weak identity,
     // including a scene-reset attempt, so the next game frame can finish it.
@@ -253,11 +266,14 @@ int main() {
     CHECK(edf::At<LONG>(supportNpc.control,12)==2);
     ownedState.entries[0].team=1;owned={};CHECK(crew::AppendOwnedSupport(owned,ownedState));
     CHECK(crew::ApplyCollected(owned));CHECK(edf::At<int>(supportVehicle.bytes,edf::kTeam)==1);
+    CHECK(crew::supportUsed==2 && MarksHold());
     crew::PvpNativeForgetSupport(supportRefs[1]);CHECK(edf::At<int>(supportVehicle.bytes,edf::kTeam)==5);
+    CHECK(crew::supportUsed==1 && MarksHold()); // the released top slot lowers the mark
     CHECK(edf::At<LONG>(supportVehicle.control,12)==1);
     CHECK(crew::RestoreAll());crew::ResetPvpNative();crew::PvpNativeClearSupportOwners();
     CHECK(edf::At<LONG>(supportNpc.control,12)==1);
     for(const auto& owner:crew::supportOwners)CHECK(!owner.ref);
+    CHECK(crew::supportUsed==0 && crew::savedUsed==0 && MarksHold());
     const unsigned failureChecksStart=checks;
     // A positive strong count plus PAGE_NOACCESS is an unknown identity, not
     // destruction. Preserve both the restoration ledger and authenticated owner.

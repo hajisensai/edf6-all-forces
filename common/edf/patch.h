@@ -16,6 +16,10 @@ bool ChainVtableSlot(void** slot,void* hook,void** next) noexcept;
 // Writes `replacement` over `size` code bytes at `at`, only while they are `expected` (true when they already
 // are `replacement`), and flushes the instruction cache.
 bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept;
+// Turns an import call (FF 15 rel32, 6 bytes, `sig`) at `site` into a direct call to `hook` (E8 rel32 to a near
+// thunk, then a nop). `*slotValue` gets what the import slot holds (the hook calls through it) before the site is
+// patched; when it is already set (several sites of one import), the slot must hold the same.
+bool RedirectImportCall(unsigned char* site,const unsigned char* sig,void* hook,void** slotValue) noexcept;
 // Puts `size` bytes at `at` back to the `previous` protection after a write. A failure leaves the code writable
 // but the write itself took, so it is counted (ProtectRestoreFailures, logged once loaded), not returned.
 void RestoreProtection(void* at,std::size_t size,DWORD previous) noexcept;
