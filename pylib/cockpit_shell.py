@@ -57,8 +57,19 @@ def regions(md, fits, hull):
     return out
 
 
+# The cabin armour rigid to a mech station's parents: Nix's chest plate is skinned to `spine`, the parent of its
+# station's `body` (docs/nix-re.md), and from the pilot's eye it is a glowing sheet across the pod (feedback
+# 2026-10-17). The arms and the leg equipment have their own animated bones and stay.
+TORSO = frozenset(('spine', 'mune', 'neck'))
+
+
 def _native_owners(md, bone):
     allowed = {bone}
+    ancestor = md.bones[bone].parent
+    while ancestor >= 0:
+        if md.name_of(md.bones[ancestor].name) in TORSO:
+            allowed.add(ancestor)
+        ancestor = md.bones[ancestor].parent
     for candidate in md.bones:
         if not md.name_of(candidate.name).lower().startswith('door_'):
             continue
@@ -70,8 +81,10 @@ def _native_owners(md, bone):
     return allowed
 
 
-def triangle_masks(md, obj, mesh, envelopes):
-    """Per triangle seat mask and original owner; zero means native geometry retained."""
+def triangle_masks(md, obj, mesh, envelopes, hidden=()):
+    """Per triangle seat mask and original owner; zero means native geometry retained. `hidden`: (seat, bone) pairs
+    whose geometry that seat never sees from its cockpit, wherever it is (self_hidden): a triangle all of whose
+    weighted influences are such bones, a blended one too."""
     indices = np.frombuffer(mesh.indices, dtype='<u2').reshape(-1, 3)
     masks = np.zeros(len(indices), dtype=np.uint32)
     owner = np.full(mesh.nverts, obj.bone, dtype=np.int64)
@@ -105,21 +118,52 @@ def triangle_masks(md, obj, mesh, envelopes):
         # merely because one corner overlaps a crew region.
         intersects = ((corners >= low) & (corners <= high)).all((1, 2))
         masks[eligible & intersects] |= stations[bone]
+    per_seat = {}
+    for seat, bone in hidden:
+        per_seat.setdefault(seat, set()).add(bone)
+    for seat, bones_of in per_seat.items():
+        if mesh.flags[1]:
+            eligible = ((weights == 0) | np.isin(bones, list(bones_of))).all(1)[indices].all(1)
+        else:
+            eligible = np.isin(owner, list(bones_of))[indices].all(1)
+        masks[eligible] |= 1 << seat
     return masks, owner
 
 
-def _slice(mesh, triangles, bone):
-    """An exact vertex subset, changing only its effective rigid skin owner."""
+def self_hidden(md, fits):
+    """(seat, bone) of the native parts a seat's complete cockpit replaces whatever their distance: a tank_gunner
+    cabin is the turret's inside, so the station bone's whole subtree (the turret's own guns, mantlet and breech that
+    crossed the cabin's visor: the twin-gun artillery's cannon_l / _r and their slides, the Titan's; feedback
+    2026-10-17). Only that seat's first-person colour draw; outside views and its optic keep the animated originals."""
+    out = []
+    for fit in fits:
+        if fit.kit == 'tank_gunner':
+            station = md.bone_index(fit.bone)
+            if station < 0:
+                raise ValueError(f'cockpit station bone missing: {fit.bone}')
+            for candidate in md.bones:
+                ancestor = candidate.index
+                while ancestor >= 0 and ancestor != station:
+                    ancestor = md.bones[ancestor].parent
+                if ancestor == station:
+                    out.append((fit.seat, candidate.index))
+    return out
+
+
+def _slice(mesh, triangles, clone_of):
+    """An exact vertex subset, each weighted influence moved to its clone (`clone_of`: original bone -> clone): a
+    blended vertex keeps every influence and weight, so the outside pose is the original's exactly."""
     used, inverse = np.unique(triangles.reshape(-1), return_inverse=True)
     data = bytearray(b''.join(mesh.vdata[int(i) * mesh.vsize:(int(i) + 1) * mesh.vsize] for i in used))
     elem = next(e for e in mesh.elems if e.name.upper() == 'BLENDINDICES')
     if elem.fmt != 21:
         raise ValueError('unsupported shell skin-index format')
-    # Every effective influence is the same original owner (triangle_masks guards it).
-    # Replace even zero-weight entries so no reference escapes the ubyte palette.
+    # Zero-weight entries keep their original (in-palette) bone.
     for i in range(len(used)):
         at = i * mesh.vsize + elem.offset
-        data[at:at + 4] = bytes([bone]) * 4
+        for k in range(4):
+            if data[at + k] in clone_of:
+                data[at + k] = clone_of[data[at + k]]
     return replace(mesh, vdata=bytes(data), indices=inverse.astype('<u2').tobytes())
 
 
@@ -132,7 +176,8 @@ def separate(md, fits, hull):
     """
     import vehicle_optics
     envelopes = regions(md, fits, hull)
-    if not envelopes:
+    hidden = self_hidden(md, fits)
+    if not envelopes and not hidden:
         return md
     world = bind_world(md)
     clones, objects = {}, []
@@ -142,7 +187,7 @@ def separate(md, fits, hull):
             if md.name_of(md.materials[mesh.material].name).startswith('edf6vc_cpit_'):
                 meshes.append(mesh)
                 continue
-            masks, owner = triangle_masks(md, obj, mesh, envelopes)
+            masks, owner = triangle_masks(md, obj, mesh, envelopes, hidden)
             indices = np.frombuffer(mesh.indices, dtype='<u2').reshape(-1, 3)
             if (masks == 0).any():
                 meshes.append(replace(mesh, indices=indices[masks == 0].astype('<u2').tobytes()))
@@ -150,8 +195,11 @@ def separate(md, fits, hull):
                 selected = indices[masks == mask]
                 if not mesh.flags[1]:
                     raise ValueError('replacement cabin has an unskinned native shell')
-                for parent in np.unique(owner[selected[:, 0]]):
-                    triangles = selected[owner[selected[:, 0]] == parent]
+                used = np.unique(selected)
+                influence = np.asarray(read_elem(mesh, 'BLENDINDICES', 0))[used]
+                weight = np.asarray(read_elem(mesh, 'BLENDWEIGHT', 0))[used]
+                clone_of = {}
+                for parent in np.unique(influence[weight > 0]):
                     key = (int(mask), int(parent))
                     if key not in clones:
                         name = PREFIX + str(key[0]) + '_' + str(key[1])
@@ -166,6 +214,7 @@ def separate(md, fits, hull):
                                             inv_bind=list(md.bones[parent].inv_bind))
                         md = replace(md, bones=bones)
                         clones[key] = len(bones) - 1
-                    meshes.append(_slice(mesh, triangles, clones[key]))
+                    clone_of[int(parent)] = clones[key]
+                meshes.append(_slice(mesh, selected, clone_of))
         objects.append(replace(obj, meshes=[replace(me, mesh_index=i) for i, me in enumerate(meshes)]))
     return replace(md, objects=objects, buffer_order=None)

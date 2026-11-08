@@ -105,3 +105,28 @@ wing=replace(wing,vdata=bytes(payload))
 assert not shell.triangle_masks(model,model.objects[0],wing,shell.regions(model,fits,hull))[0].any(), \
        'a wing crossing the cabin box remains intact instead of losing its external tip'
 print('native shell payload, animated exterior, large/half/uppercase vertices, protected equipment and seat masks passed')
+
+# Torso armour above a mech station's body (Nix's chest plate on spine) is cabin, not a protected arm or rotor.
+spine=replace(model,names=['spine',*model.names[1:]])
+assert 0 in shell._native_owners(spine,1) and 2 not in shell._native_owners(spine,1)
+assert 0 not in shell._native_owners(model,1), 'only the named torso bones join the cabin'
+print('torso parent of a mech station passed')
+
+# A complete gunner cabin hides its station's whole native subtree (the turret's guns, breech) from that seat only,
+# at any distance; a blended vertex keeps every influence, so every outside pose is the original's exactly.
+gun_fit=(cockpits.Fit(0,'root',(3,2,-4),'tank_gunner'),)
+assert sorted(shell.self_hidden(model,gun_fit))==[(0,0),(0,1),(0,2),(0,3)]
+assert shell.self_hidden(model,(cockpits.Fit(0,'body',(3,2,-4),'tank_gunner'),))==[(0,1),(0,3)]
+assert shell.self_hidden(model,(cockpits.Fit(0,'body',(3,2,-4),'heli_gunship'),))==[]
+gunner=vo.preorder(shell.separate(model,gun_fit,hull))
+for pose in ({},{'body':[('y',37)],'rotor':[('x',24)]}):
+    assert triangles(gunner,pose)==triangles(model,pose),'self-hidden native equipment deformed outside the cockpit'
+pos,triangles_,_=mv.geometry(cv.first_person_shell(gunner,0),{},[],None)
+area=np.linalg.norm(np.cross(pos[triangles_[:,1]]-pos[triangles_[:,0]],pos[triangles_[:,2]]-pos[triangles_[:,0]]),axis=1)
+assert not (area>1e-8).any(),'the gunner sees none of the turret it sits in'
+assert triangles(cv.first_person_shell(gunner,1))==triangles(model),'another seat keeps the native turret'
+mixed=model.objects[0].meshes[3]
+assert list(shell.triangle_masks(model,model.objects[0],mixed,[],[(0,1),(0,2)])[0])==[1]
+assert list(shell.triangle_masks(model,model.objects[0],mixed,[],[(0,1)])[0])==[0], \
+       'a blended triangle with a visible influence stays whole'
+print('gunner cabin self-visibility and blended influences passed')
