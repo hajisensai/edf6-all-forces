@@ -50,6 +50,37 @@ class StockStoreRecoilTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             stores._params(stores.Mount(stores.COAX_MG, 0))
 
+    def test_slot48_table_covers_every_built_class(self) -> None:
+        self.assertEqual(set(stores.SLOT48_RECOIL), set(stores.BUILT_CLASSES))
+        self.assertTrue(set(stores.SLOT48_ROUTED) <= {c for c, t in stores.SLOT48_RECOIL.items() if t and None in t})
+
+    def test_403_store_past_the_seats(self) -> None:
+        """testhub #12: the 403's AGM-114s are holder 3 of a three-seat 403. Its stock slot 48 takes holder 3 for seat
+        3's machine gun (AimRecoil into seat 3): no record is safe there; src/storerecoil.cpp runs the hull push."""
+        cls = 'Vehicle403_Tank'
+        self.assertEqual(stores.store_recoil(cls, 0, 3), 'BodyRecoil')
+        self.assertEqual([stores.store_recoil(cls, i, 3) for i in (1, 2)], ['AimRecoil', 'AimRecoil'])
+        self.assertEqual(stores.store_recoil(cls, 3, 3), 'BodyRecoil')
+        stores.check_store_recoil('VEHICLE403_TANK', cls, 3, 3)
+        # Without the plugin's own code for that holder (before the fix) the 403's store is refused, not shipped.
+        with patch.dict(stores.SLOT48_ROUTED, clear=True):
+            with self.assertRaisesRegex(ValueError, '不安全'):
+                stores.check_store_recoil('VEHICLE403_TANK', cls, 3, 3)
+        # A store that would land on a gunner's index wants AimRecoil, which _params never writes.
+        with self.assertRaisesRegex(ValueError, 'AimRecoil'):
+            stores.check_store_recoil('VEHICLE403_TANK', cls, 1, 3)
+        with self.assertRaisesRegex(ValueError, 'SLOT48_RECOIL'):
+            stores.store_recoil('Vehicle999_Unknown', 1, 1)
+
+    def test_403_route_is_the_plugins(self) -> None:
+        """SLOT48_ROUTED names code that exists: the 403's slot 48 chained, a holder past the seats on 0x5FFEE0."""
+        src = (ROOT / 'src' / 'storerecoil.cpp').read_text(encoding='utf-8')
+        head = (ROOT / 'src' / 'storerecoil.h').read_text(encoding='utf-8')
+        self.assertIn('kVtable403=0x17D8FA0,kFired403=0x5FED60,kHullFired=0x5FFEE0', src)
+        self.assertIn('index!=0 && index<holders && index>=seats ? Path::hull : Path::stock', head)
+        self.assertIn('InstallStoreRecoil();', (ROOT / 'src' / 'plugin.cpp').read_text(encoding='utf-8'))
+        self.assertIn('src/storerecoil.cpp', (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8'))
+
     def test_upgrade_rewrites_request_and_releases_old_coax_asset(self) -> None:
         with tempfile.TemporaryDirectory(prefix='edf6-stock-recoil-') as game, \
                 patch.object(modfiles, 'refuse_while_running', lambda: None):

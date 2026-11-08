@@ -111,12 +111,13 @@ def _rounds(ap: str, he: str, rounds: int, like: int) -> Mount:
 
 
 # Rockets and missiles are recoilless. Keep the BodyRecoil variant, even at zero
-# strength: the 505/601/Car callbacks require that variant and dereference its
-# payload without a null check. A gun round (vcobjects.Shell) recoils as the stock
-# gun it fires from: it takes that holder's own BodyRecoil pair from the request.
-# The 403's named AimRecoil is exclusive to its existing gunner mounts (slot 48
-# branches on the seat index): it is never copied (_params takes a pair of numbers
-# only, anything else is NO_RECOIL).
+# strength: every slot 48 that reads a store holder's record wants that variant and
+# dereferences its payload without a null check (SLOT48_RECOIL). A gun round
+# (vcobjects.Shell) recoils as the stock gun it fires from: it takes that holder's own
+# BodyRecoil pair from the request. The 403's named AimRecoil is exclusive to its
+# stock gunner holders 1 and 2: its slot 48 branches on the holder's index (not the
+# seat), holder i != 0 jittering seat i's aim; it is never copied (_params takes a pair
+# of numbers only, anything else is NO_RECOIL).
 NO_RECOIL = [0.0, 0.0]
 
 # What each kind of stock vehicle carries (a tank's 20 rounds beside its stock 25-30, an autocannon's belt beside
@@ -229,6 +230,54 @@ NOT_LOADED: dict[str, str] = {
 # class would get holders with no weapon.
 BUILT_CLASSES = ('Vehicle402_Rocket', 'Vehicle403_Tank', 'Vehicle404_Tank', 'Vehicle503_Bike', 'Vehicle505_Tank',
                  'Vehicle601_Tank', 'Vehicle603_Flak', 'VehicleHelicopter409', 'Vehicle_Car', 'Vehicle506_Helicopter')
+
+# The recoil record each class's slot 48 reads of a fired holder (VehicleBase slot 5 0x630250 calls it for every holder
+# whose gun fired, 0x630471; the record's variant is holder +0x20: 0x5FA150 hands the payload of the variant asked for and
+# null for the other, which the callers dereference unchecked: the testhub #12 crash, EDF+5F9F2B reading 0xC). By the
+# holder's index in the vehicle's holders: (index 0, index i != 0 with a seat i, index i past the seats); None: no record
+# is safe there; a class absent from a tuple's place reads none (docs/recoil-re.md §3.1, each callback disassembled):
+#   402 0x5FD9F0, 404 0x5FFEE0, 503 0x617B80, 505 0x61AEA0, 601 0x620960, 603 0x621700, Car 0x65A740: BodyRecoil for
+#     every holder (0x5FA150 variant 0, then the hull push 0x5F9FB0), no index or seat read;
+#   403 0x5FED60: holder 0 BodyRecoil (the hull push); holder i != 0 AimRecoil (variant 1) added to seat i's aim,
+#     seat i = [veh+0x608] + i*0x340 with no test against the seat count: past the seats a BodyRecoil record crashes and
+#     an AimRecoil record is written beyond the seat vector;
+#   409, 506 / 602: slot 48 is the VehicleBase part 0x62EA10 alone (the camera kick), no record read.
+SLOT48_RECOIL: dict[str, tuple[str | None, str | None, str | None] | None] = {
+    **{c: ('BodyRecoil', 'BodyRecoil', 'BodyRecoil') for c in (
+        'Vehicle402_Rocket', 'Vehicle404_Tank', 'Vehicle503_Bike', 'Vehicle505_Tank', 'Vehicle601_Tank',
+        'Vehicle603_Flak', 'Vehicle_Car')},
+    'Vehicle403_Tank': ('BodyRecoil', 'AimRecoil', None),
+    'VehicleHelicopter409': None, 'Vehicle506_Helicopter': None,
+}
+# Where the plugin runs its own code in place of a slot 48 place SLOT48_RECOIL leaves None, and the record that code
+# reads: the 403's holders past its seats (src/storerecoil.cpp: Vehicle404_Tank's slot 48, the hull push of the
+# holder's own BodyRecoil, as the 403's holder 0).
+SLOT48_ROUTED: dict[str, str] = {'Vehicle403_Tank': 'BodyRecoil'}
+
+
+def store_recoil(cls: str, index: int, seats: int) -> str | None:
+    """The recoil record class `cls`'s slot 48 needs of holder `index` on a vehicle of `seats` seats (SLOT48_RECOIL, the
+    plugin's own code where the stock code is safe for no record: SLOT48_ROUTED); None: it reads none."""
+    if cls not in SLOT48_RECOIL:
+        raise ValueError(f'载具类 {cls} 的槽 48 后坐力没有核过（SLOT48_RECOIL）')
+    read = SLOT48_RECOIL[cls]
+    if read is None:
+        return None
+    got = read[0 if index == 0 else 1 if index < seats else 2]
+    if got is None:
+        got = SLOT48_ROUTED.get(cls)
+    if got is None:
+        raise ValueError(f'载具类 {cls} 的第 {index} 个挂点（{seats} 个座位）：原版槽 48 对任何后坐力记录都不安全')
+    return got
+
+
+def check_store_recoil(stem: str, cls: str, stock: int, seats: int) -> None:
+    """Every store holder of `stem` (after its `stock` holders) gets the record its class's slot 48 reads: _params writes
+    the BodyRecoil pair."""
+    for k, mount in enumerate(LOADOUTS[stem]):
+        need = store_recoil(cls, stock + k, seats)
+        if need not in (None, 'BodyRecoil'):
+            raise ValueError(f'{stem}: 挂载 {mount.weapon}（第 {stock + k} 个挂点）槽 48 要 {need}，_params 只写 BodyRecoil')
 
 
 def derived_name(stem: str) -> str:
@@ -428,6 +477,8 @@ def derived_vehicle(game: vc.Game, stem: str) -> bytes:
     cls = vehicle_class(game, stem)
     if cls not in BUILT_CLASSES:
         raise ValueError(f'{stem}: 载具类 {cls} 的额外挂点插件不会造（src/stores.cpp kBuilds）')
+    own = _read_any(data)
+    check_store_recoil(stem, cls, len(own['vehicle_weapon_setting']), len(own.get('vehicle_riding_position', [])))
     kind_of = stock_round_kind(game)
     bones = model_bones(game, stem)
     for mount in LOADOUTS[stem]:   # a holder on a bone the model lacks is skipped by the game, its weapon never built
