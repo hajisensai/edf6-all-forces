@@ -23,6 +23,8 @@ options
   --stacks S        the stack window after it, default 20 (0: none)
   --interval MS     stack sampling interval, default 2
   --difficulty N    default 1
+  --ini KEY=VALUE   KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run (repeatable; drive.py --ini), e.g. an A/B
+                    of a switch: HavokMultithread=0 against HavokMultithread=1
   --out DIR         default tmp/perf/<scenario>-<time>
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
   --restore         put the range mission back from a run that could not (the game was still running)
@@ -195,7 +197,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         longest = int(warm + opts['cpu'] + opts['stacks'] + 90)
         # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
-                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1',),
+                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', *opts['ini']),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
                        during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
                        quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
@@ -228,7 +230,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
-            'difficulty': 1, 'out': None, 'shots': False, 'restore': False}
+            'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': []}
     pos = []
     i = 0
     while i < len(argv):
@@ -241,6 +243,11 @@ def options(argv: list[str]) -> tuple[str, dict]:
             i += 3
         elif a in ('--dll', '--out'):
             opts[a[2:]] = argv[i + 1]
+            i += 2
+        elif a == '--ini':
+            if '=' not in argv[i + 1]:
+                raise SystemExit('--ini wants KEY=VALUE')
+            opts['ini'].append(argv[i + 1])
             i += 2
         elif a == '--warm':
             opts['warm'] = float(argv[i + 1])

@@ -256,7 +256,19 @@ def drive_during() -> None:
           "drive.run's stay ends when `during` returns")
 
 
+def ini_option() -> None:
+    _, o = perfrun.options(['stress:1', '--ini', 'HavokMultithread=1', '--ini', 'Debug=0', '--dll', 'installed'])
+    check(o['ini'] == ['HavokMultithread=1', 'Debug=0'], '--ini repeats, in order')
+    check("ini=('Debug=1', *opts['ini'])" in inspect.getsource(perfrun.one_run), "--ini reaches drive.run after Debug=1")
+    try:
+        perfrun.options(['stress:1', '--ini', 'HavokMultithread'])
+        check(False, '--ini without = refused')
+    except SystemExit:
+        pass
+
+
 scenario_files()
+ini_option()
 scenarios()
 report_parsing()
 drive_during()
