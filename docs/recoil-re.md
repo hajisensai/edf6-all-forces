@@ -32,10 +32,26 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址全部是 RVA。纯静态分析（`to
 | 读 `FireRecoil` | `0x68CF34` | 武器 SGO 的 `FireRecoil` → `weapon+0x37C` | H |
 | 开火 | `0x6982A5` / `0x6982B7` | `weapon+0xBD4 = 1`（本帧开过火），`weapon+0xBD8 = weapon+0x37C`（`0x693A42` 每帧乘 0.9 衰减） | H |
 | 逐炮位 | VehicleBase slot 5 `0x630250`，`0x630471` | 遍历 `veh+0x638`（个数 `veh+0x648`）的 holder，武器 `+0xBD4 == 1` 就调本类 slot 48（`vtbl+0x180`）。**没有座位 / 乘员 / 网络判断** | H |
-| 各类 slot 48 | 402 `0x5FD9F0`、403 `0x5FED60`、404 `0x5FFEE0`、503 `0x617B80`、505 `0x61AEA0`、601 `0x620960`、603 `0x621700`、Car（格雷普 401）`0x65A740` | 载具死了（`veh+0x2E8`）就跳过；否则取 holder `+0x20` 的 BodyRecoil 参数，调 `0x5F9FB0`（403 的 AimRecoil 炮位、511、410 走 `0x5F9F10` 抖准星） | H |
+| 各类 slot 48 | 402 `0x5FD9F0`、403 `0x5FED60`、404 `0x5FFEE0`、503 `0x617B80`、505 `0x61AEA0`、601 `0x620960`、603 `0x621700`、Car（格雷普 401）`0x65A740` | 载具死了（`veh+0x2E8`）就跳过；否则取 holder `+0x20` 的 BodyRecoil 参数，调 `0x5F9FB0`（403 下标非 0 的挂点、511、410 取 AimRecoil 走 `0x5F9F10` 抖准星，见 §3.1） | H |
 | 加到车体 | `0x5F9FB0(参数, 车体刚体 veh+0x1698, FireRecoil, 炮的矩阵 weapon+0xB0)` | 线速度 += −FireRecoil × 推 × 60 × 0.7 × 矩阵第 3 行（炮管方向）；角速度 += −FireRecoil × 摆 × 0.3 × 矩阵第 1 行。读写函数与 `src/physics.cpp` 的 `kGetLinVel 0x11B1300` / `kSetLinVel 0x11B18F0` / `kGetAngVel 0x11B1060` / `kSetAngVel 0x11B1760` 相同 | 公式 H；「第 3 行 = 炮管方向、第 1 行 = 横轴」M |
 
 所以「推」= 车体被往后推，「摆」= 车体前后晃。`FireRecoil` 在 NPC 用的 AI 炮和玩家炮里相同（泰坦主炮都是 0.8），不是差异来源。(H)
+
+### 3.1 各类 slot 48 按挂点下标要哪种记录（2026-11-08，测试站 #12）
+
+`0x5FA150(holder+0x20, variant)`：记录的类型等于所要的 variant 才返回参数块（`holder+0x30`），否则返回 null；下列调用方都不判空。
+「下标」是挂点在 `veh+0x638` 里的位置（`0x62DB10`），不是座位号。逐个反汇编（H）：
+
+| 类 | slot 48 | 下标 0 | 下标 i ≠ 0（有座位 i） | 下标超出座位数 |
+|---|---|---|---|---|
+| 402 / 404 / 503 / 505 / 601 / 603 / Car（401、60X 卡车、607） | `0x5FD9F0` / `0x5FFEE0` / `0x617B80` / `0x61AEA0` / `0x620960` / `0x621700` / `0x65A740` | BodyRecoil | BodyRecoil | BodyRecoil（不读下标、不读座位） |
+| 403 | `0x5FED60` | BodyRecoil → `0x5F9FB0` 推车体 | AimRecoil（`0x5FEE40 mov edx,1`）→ `0x5F9F10` 加到座位 i 的 `+0xE0` 块（`[veh+0x608] + i*0x340`） | 无安全记录：BodyRecoil 读 `[0+0xC]` 崩溃，AimRecoil 写到座位数组之外 |
+| 409、506 / 602 | `0x62EA10`（VehicleBase 部分本身） | 不读 | 不读 | 不读 |
+| （511 `0x61F370`、410 `0x64D9C0`，插件不造额外挂点） | | AimRecoil，座位 下标+1；410 限下标 ≤ 1 | | |
+
+403 的 AGM-114（`tools/make_stock_stores.py` 追加的第 4 个挂点，下标 3，座位 0）正落在最后一列：插件 `src/storerecoil.cpp` 串接 403 的 slot 48，
+下标超出座位数的挂点改跑 `0x5FFEE0`（只用 VehicleBase 字段，与 403 下标 0 分支同样的步骤），按它自己的 BodyRecoil 推车体。
+生成侧的同一张表：`make_stock_stores.SLOT48_RECOIL` / `SLOT48_ROUTED`；真实 DLL 上的执行验证：`tests/stock_store_recoil_native_audit.py`。
 
 ## 4. 原版数据对照（Root.cpk）
 
