@@ -297,8 +297,26 @@ def log_turnover() -> None:
         shutil.rmtree(d)
 
 
+def both_plugins() -> None:
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp()
+    try:
+        crew = os.path.join(d, 'EDF6VehicleCrew.dll')
+        open(crew, 'wb').close()
+        check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll',), 'no AutoTurret built: the crew alone')
+        turret = os.path.join(d, 'EDF6AutoTurret.dll')
+        open(turret, 'wb').close()
+        check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll', f'{turret}=Plugins/EDF6AutoTurret.dll'),
+              "the same build's AutoTurret placed with it")
+        check(perfrun.placements(None) == (), '--dll installed: nothing placed')
+    finally:
+        shutil.rmtree(d)
+
+
 scenario_files()
 log_turnover()
+both_plugins()
 ini_option()
 scenarios()
 report_parsing()

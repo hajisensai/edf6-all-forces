@@ -15,8 +15,8 @@ SCENARIO
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
 options
-  --dll PATH        EDF6VehicleCrew.dll placed for the run (default: this checkout's build; `installed` keeps the
-                    game's own)
+  --dll PATH        EDF6VehicleCrew.dll placed for the run, with the EDF6AutoTurret.dll next to it when there is one
+                    (default: this checkout's build; `installed` keeps the game's own)
   --ab A B          two DLLs alternating (--rounds, default 2, so ABAB): frames and CPU only, an A/B table
   --warm S          seconds in the mission before sampling (default 45 grand, 30 swarm, 25 a stock mission)
   --cpu S           the clean window (thread CPU, GPU, frame times; nothing suspended), default 20
@@ -174,6 +174,19 @@ def plugin_log(game: str) -> str:
     return os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.log')
 
 
+def placements(dll: str | None) -> tuple[str, ...]:
+    """drive.py --place entries for a run: `dll` as EDF6VehicleCrew.dll and, when its build made one next to it, that
+    build's EDF6AutoTurret.dll too (one commit's plugins: the game folder's own AutoTurret may be weeks older and its
+    cost was charged to the run). None (`--dll installed`): nothing placed."""
+    if not dll:
+        return ()
+    out = [f'{dll}=Plugins/EDF6VehicleCrew.dll']
+    turret = os.path.join(os.path.dirname(dll), 'EDF6AutoTurret.dll')
+    if os.path.isfile(turret):
+        out.append(f'{turret}=Plugins/EDF6AutoTurret.dll')
+    return tuple(out)
+
+
 def log_mark(log: str) -> tuple[int, int]:
     """The plugin log's file id and size before a launch ((0, 0): none yet)."""
     try:
@@ -225,7 +238,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
-        place = (f'{dll}=Plugins/EDF6VehicleCrew.dll',) if dll else ()
+        place = placements(dll)
         longest = int(warm + opts['cpu'] + opts['stacks'] + 90)
         # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
@@ -247,7 +260,9 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
             f.write(data)
     used = dll or os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
+    turret = os.path.join(os.path.dirname(used), 'EDF6AutoTurret.dll')
     run = dict(scenario=scenario, variant=variant, dll=dll, sha256=sha256(used) if os.path.exists(used) else '?',
+               turret_sha256=sha256(turret) if os.path.exists(turret) else '?',
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
