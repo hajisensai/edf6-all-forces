@@ -1026,7 +1026,7 @@ bool PartLayer(Part& p) noexcept {
     const int query=edf41layer::LiveAreaQueryLayer();
     const std::uint32_t* table=edf41layer::LiveTable();
     if(to<0 || query!=edf41layer::kEdf6AreaQuery || !edf41layer::LiveAgrees(table,to)) {
-        Log("EDF41M401 %s %p: layer 0x%X kept (4.1 layer %d -> EDF6 %d; area query %d, live filter table %s)",KindName(p.kind),p.obj,from,l41,to,query,
+        if(first)Log("EDF41M401 %s %p: layer 0x%X kept (4.1 layer %d -> EDF6 %d; area query %d, live filter table %s)",KindName(p.kind),p.obj,from,l41,to,query,
             !table ? "not found" : "differs from 0x105510's");
         return true;
     }
