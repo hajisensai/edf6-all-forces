@@ -4,6 +4,7 @@
 // chassis lost the motion welding and the character's vertical contacts lost the force limit on the way.
 #include "crew.h"
 #include "memory.h"
+#include "rubble_pass.h"
 
 #include <atomic>
 #include <cstring>
@@ -247,10 +248,8 @@ constexpr std::size_t kBodyQuality=0x89,kBodyMaterial=0x8A,kBodyFlags=0x54;
 constexpr std::size_t kMgrLibrary=0x900,kLibMaterials=0x48,kLibMaterialCount=0x50,kMaterialStride=0x50;
 constexpr std::size_t kMatFlags=0x14,kMatCategory=0x30,kMatHeavyFactor=0x32;
 constexpr std::uint32_t kFlagMassChanger=0x800000;
-constexpr std::uint8_t kCategoryDebris=1,kCategoryHeavy=2,kQualityDebris=1;
+constexpr std::uint8_t kCategoryDebris=rubble::kCategoryDebris,kCategoryHeavy=2;
 constexpr std::uint16_t kHeavyFactor=0x42C8;   // 100.0f: the hull keeps 1-a = 2% of a rubble push
-constexpr float kRubbleRadius=15.0f;
-constexpr ULONGLONG kRubbleScanMs=250;
 
 struct ChassisWorld {
     unsigned char* iface;
@@ -308,45 +307,31 @@ void MarkHeavy(const ChassisWorld& w) noexcept {
     Put<std::uint8_t>(material,kMatCategory,kCategoryHeavy);
 }
 
-// The debris-preset bodies around the chassis: their materials become DEBRIS, once per material; the
-// chassis' own material is never touched here.
-void MarkRubble(const ChassisWorld& w) noexcept {
-    const float* at=reinterpret_cast<const float*>(w.body+0x30);
-    const std::uint16_t own=At<std::uint16_t>(w.body,kBodyMaterial);
-    const auto* bodies=At<const unsigned char*>(w.iface,kIfaceBodies);
-    const std::int32_t count=At<std::int32_t>(w.iface,kIfaceBodies+8);
-    for(std::int32_t i=0;i<count && i<0x40000;++i) {
-        const unsigned char* b=bodies+std::size_t(i)*kBodyStride;
-        if((At<std::uint32_t>(b,0x50)&0xFFFFFF)!=std::uint32_t(i))continue;
-        if((At<std::uint32_t>(b,kBodyFlags)&kBodyFlagsMotionMask)!=kBodyFlagDynamic)continue;
-        if(At<std::uint8_t>(b,kBodyQuality)!=kQualityDebris || At<std::uint16_t>(b,kBodyMaterial)==own)continue;
-        const float* p=reinterpret_cast<const float*>(b+0x30);
-        const float dx=p[0]-at[0],dy=p[1]-at[1],dz=p[2]-at[2];
-        if(dx*dx+dy*dy+dz*dz>kRubbleRadius*kRubbleRadius)continue;
-        unsigned char* const material=MaterialOf(w,b);
-        if(!material || At<std::uint8_t>(material,kMatCategory)!=0)continue;
+// The debris-preset bodies around the chassis noted since the last pass (rubble_pass.h): their materials become
+// DEBRIS, once per material; a chassis' own material is never touched by its own test. `w`: the chassis stepping now,
+// whose world was read this step.
+rubble::Window rubbleWindow{};
+
+void MarkRubble(const ChassisWorld& w,std::uint64_t now) noexcept {
+    rubble::Pass(rubbleWindow,At<const unsigned char*>(w.iface,kIfaceBodies),At<std::int32_t>(w.iface,kIfaceBodies+8),
+                 w.materials,w.materialCount,now,[](const unsigned char* b,const unsigned char* material) noexcept {
         if(MassLog())
             Log("PHYSICS rubble body %08X material %u: DEBRIS (factor %04X flags %08X)",At<std::uint32_t>(b,0x50),
                 At<std::uint16_t>(b,kBodyMaterial),At<std::uint16_t>(material,kMatHeavyFactor),
                 At<std::uint32_t>(material,kMatFlags));
-        Put<std::uint32_t>(material,kMatFlags,At<std::uint32_t>(material,kMatFlags)|kFlagMassChanger);
-        Put<std::uint8_t>(material,kMatCategory,kCategoryDebris);
-    }
+    });
 }
 
-struct RubbleScan { const void* wrapper; ULONGLONG at; };
-RubbleScan rubbleScans[8]{};
-
-bool RubbleDue(const void* wrapper) noexcept {
-    const ULONGLONG now=GetTickCount64();
-    RubbleScan* slot=&rubbleScans[0];
-    for(auto& s:rubbleScans) {
-        if(s.wrapper==wrapper) { slot=&s; break; }
-        if(s.at<slot->at)slot=&s;
+// This chassis noted for the next pass, the pass run when due (or now, the window being full).
+void NoteRubble(const void* wrapper,const ChassisWorld& w) noexcept {
+    const std::uint64_t now=GetTickCount64();
+    const float* at=reinterpret_cast<const float*>(w.body+0x30);
+    const std::uint16_t own=At<std::uint16_t>(w.body,kBodyMaterial);
+    if(!rubble::Note(rubbleWindow,w.iface,wrapper,at,own,now)) {
+        MarkRubble(w,now);
+        rubble::Note(rubbleWindow,w.iface,wrapper,at,own,now);
     }
-    if(slot->wrapper==wrapper && now-slot->at<kRubbleScanMs)return false;
-    *slot=RubbleScan{wrapper,now};
-    return true;
+    if(rubble::Due(rubbleWindow,now))MarkRubble(w,now);
 }
 
 bool heavyChassis;
@@ -359,7 +344,7 @@ void HeavyChassis(void* wrapper) noexcept {
         ChassisWorld w{};
         if(!wrapper || !ChassisOf(wrapper,w))return;
         MarkHeavy(w);
-        if(RubbleDue(wrapper))MarkRubble(w);
+        NoteRubble(wrapper,w);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 

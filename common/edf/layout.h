@@ -7,10 +7,12 @@
 #include <cstring>
 
 namespace edf {
-template<class T> T At(const void* base,std::size_t offset) noexcept {
+// `inline`: the shipped build is RelWithDebInfo (/Ob1), which expands only functions marked inline, so these were real
+// calls, every field read of both plugins (stress:100 profile: At<unsigned int> alone 2.3% of the game thread).
+template<class T> inline T At(const void* base,std::size_t offset) noexcept {
     T value;std::memcpy(&value,static_cast<const unsigned char*>(base)+offset,sizeof(T));return value;
 }
-template<class T> void Put(void* base,std::size_t offset,T value) noexcept {
+template<class T> inline void Put(void* base,std::size_t offset,T value) noexcept {
     std::memcpy(static_cast<unsigned char*>(base)+offset,&value,sizeof(T));
 }
 

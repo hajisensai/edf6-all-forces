@@ -693,6 +693,10 @@ bool Renderer::Composite(ID3D11DeviceContext* context, Polarity polarity) noexce
     return true;
 }
 
+void Renderer::Invalidate() noexcept {
+    if (impl_) impl_->Invalidate();
+}
+
 void Renderer::Reset() noexcept {
     impl_.reset();
 }

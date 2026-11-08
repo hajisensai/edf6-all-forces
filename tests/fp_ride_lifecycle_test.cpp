@@ -920,5 +920,38 @@ int main() {
         for(auto& state:states)state=State{};
         selected=&states[0];
     }
+    {   // The draws' cached snapshot (SnapshotOf): one copy per published count, the same content TakeSnapshotOf copies,
+        // never rewritten under a draw still reading it, and a busy writer's fallback copy is not kept as current.
+        StateScope scope(&states[0]);
+        Current().reloadLeft=7;Publish();
+        DrawSnap scratch{},copy{};
+        const DrawSnap* const first=SnapshotOf(0,&scratch);
+        check(first && first!=&scratch && SnapshotOf(0,&scratch)==first && first->reloadLeft==7 &&
+              TakeSnapshotOf(0,&copy) && copy.reloadLeft==7 && copy.on==first->on && copy.weaponCount==first->weaponCount,
+              "repeated draws of one published count share the thread's cached copy (the same content a copy takes)");
+        bool outerOk=false,outerKept=false,nestedOwn=false,innerNewer=false,restored=false;
+        const DrawSnap* const was=drawSnap;
+        {
+            const DrawSnapScope outer;outerOk=static_cast<bool>(outer) && drawSnap==first && Snap().reloadLeft==7;
+            Current().reloadLeft=8;Publish();
+            DrawSnap nestedScratch{};
+            const DrawSnap* const nested=SnapshotOf(0,&nestedScratch);
+            nestedOwn=nested==&nestedScratch && nested->reloadLeft==8;
+            {const DrawSnapScope inner;innerNewer=static_cast<bool>(inner) && Snap().reloadLeft==8 && drawSnap!=first;}
+            outerKept=first->reloadLeft==7 && Snap().reloadLeft==7;
+        }
+        restored=drawSnap==was;
+        check(outerOk && nestedOwn && innerNewer && outerKept && restored,
+              "a nested draw after a newer publish takes its own copy; the outer draw's cached one stays unchanged");
+        const DrawSnap* const refreshed=SnapshotOf(0,&scratch);
+        check(refreshed==first && refreshed->reloadLeft==8,"once no draw reads it, the cached copy takes the newer publish");
+        bool busyOk=false;
+        Published& p=published[0];
+        SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){d.reloadLeft=9;const DrawSnap* const busy=SnapshotOf(0,&scratch);busyOk=busy && busy->reloadLeft==8;});
+        const DrawSnap* const after=SnapshotOf(0,&scratch);
+        check(busyOk && after && after->reloadLeft==9,"a busy writer's fallback (the last whole copy) is not cached as the newer count's");
+        for(auto& state:states)state=State{};
+        selected=&states[0];
+    }
     return failed ? 1 : 0;
 }

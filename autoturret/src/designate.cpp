@@ -416,6 +416,7 @@ extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_MissionResetV1() {
     iniAutoAim=-1;SyncIniAutoAim();
     if(pilot.target)Log("LOCK: let go of t=%p (a new mission)",pilot.target);
     pilot=Pilot{};
+    ResetGunnerLog();
     Log("PILOT: a new mission: auto-aim %s (ini AutoAim)",autoAimOn ? "on" : "off");
 }
 

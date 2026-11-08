@@ -17,6 +17,10 @@ bool IsPlayer(const unsigned char* human) noexcept;
 // A player of any machine: this machine's (IsPlayer), or another's copied here with its player flag on. What a test
 // that tells NPC soldiers from players asks (an NPC's squad, a soldier to seat), not who this machine's keys drive.
 bool IsAnyPlayer(const unsigned char* human) noexcept;
+// IsAnyPlayer of an object the caller knows is live and whole: its own Think's `this` (the game is calling its virtual
+// Think on it, so its memory is the game's live object), read without asking Readable first. Any other object (a
+// leader, a rider, an object from a table) is asked by IsAnyPlayer.
+bool IsAnyPlayerSelf(const unsigned char* self) noexcept;
 // A player of any machine sits in `seat` (Rider::player, or another machine's player there as Rider::other): what a test
 // of "a player is aboard, leave it to them" asks, not "this machine's keys drive it".
 bool AnyPlayerIn(const unsigned char* image,const unsigned char* seat) noexcept;

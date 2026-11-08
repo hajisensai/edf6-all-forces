@@ -384,24 +384,8 @@ BOOL WINAPI DeleteHook(LPCWSTR path) {
     return ok;
 }
 
-// An import call (FF 15 rel32, 6 bytes) made a direct call to `hook` (E8 rel32 to a near thunk, then a nop).
-// `*slotValue`: what the import slot held (the hook calls through it), set before the site is patched.
 bool RedirectImportCall(unsigned rva,const unsigned char* sig,void* hook,void** slotValue) noexcept {
-    unsigned char* const site=image+rva;
-    std::int32_t rel=0;
-    std::memcpy(&rel,sig+2,4);
-    void* const* slot=reinterpret_cast<void* const*>(site+6+rel);
-    if(!Readable(slot,8) || !*slot)return false;
-    if(*slotValue && *slotValue!=*slot)return false;   // both sites of a pair use one slot
-    *slotValue=*slot;
-    void* const thunk=AllocateNearThunk(site,hook);
-    if(!thunk)return false;
-    const auto delta=static_cast<unsigned char*>(thunk)-(site+5);
-    if(delta>0x7FFFFFF0 || delta<-0x7FFFFFF0)return false;
-    unsigned char code[6]={0xE8,0,0,0,0,0x90};
-    const auto rel32=static_cast<std::int32_t>(delta);
-    std::memcpy(code+1,&rel32,4);
-    return edf::PatchCode(site,sig,code,sizeof(code));
+    return edf::RedirectImportCall(image+rva,sig,hook,slotValue);
 }
 
 // The screen's reads: `load` (the stub's register setup, 10 bytes `mov reg, uiTable` + the load) then a jump back.

@@ -8,10 +8,10 @@ namespace {
 // cannot consume it all.
 std::uint64_t frame=~std::uint64_t{0};int queries=0;
 const void* start=nullptr;const void* nextStart=nullptr;bool waiting=false;
-template<class State>
-npc::navigation::Result Navigate(State& state,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
-    using namespace npc::navigation;
+// The frame's turn: whether `state`'s call waits for the first caller the last frame denied (the call then returns
+// pending at once, its waypoint its `from`). The frame's budget is begun here, by whichever asks first: the call or
+// GroundNavigateDeferred, so the order of the turn is the same whether a caller asked before calling or not.
+bool Deferred(const void* state) noexcept {
     const auto now=GameFrame();
     if(frame!=now) {
         // Start the next frame at the first caller denied by the shared budget,
@@ -19,7 +19,13 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
         // can defer others for at most one frame; pointers are compared, never read.
         frame=now;queries=0;start=waiting ? nullptr : nextStart;nextStart=nullptr;waiting=start!=nullptr;
     }
-    if(waiting && start!=&state) {
+    return waiting && start!=state;
+}
+template<class State>
+npc::navigation::Result Navigate(State& state,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
+    using namespace npc::navigation;
+    if(Deferred(&state)) {
         waypoint[0]=from[0];waypoint[1]=from[1];waypoint[2]=from[2];return Result::pending;
     }
     waiting=false;
@@ -56,6 +62,7 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
     waypoint[0]=next.x;waypoint[1]=next.y;waypoint[2]=next.z;return result;
 }
 }  // namespace
+bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept { return Deferred(&state); }
 npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
     return Navigate(state,from,to,stop,ms,waypoint,profile);
