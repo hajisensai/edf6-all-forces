@@ -653,6 +653,16 @@ NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a 
     'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.95, 1.55), (-1.3, -1.22)), False),
     'bomber401': (((2.0, 5.8), (0.8, 2.15), (-2.0, -0.2)), True),
     'bomber501_2': (((1.5, 5.6), (-2.3, 2.3), (-12.95, -11.69)), True),
+    # The Dreadnought fighters (pylib/dreadnought_model.py; the support calls fly them too, vcobjects.SUPPORT_JETS), in the
+    # model as built (stood on its lowest point, centred), read off the model folder's meshes (2026-11-08):
+    #  - the fighter: two octagonal exhausts either side of the spine, their rims at z -7.6 (an inner ring 0.4 m deeper);
+    #  - the interceptor (the game's "Booster"): one booster on the centre line at the tail, its 12-sided end at z -15.1;
+    #  - the bomber: the two big octagonal exhausts high in the trailing edge of its wings, their rims at z -10.76;
+    #  - the defender: the engine pods at its wing tips, their slanted dark ends z -8.3 .. -7.4.
+    'EDF6VC_DN_FIGHTER.MRAB': (((2.9, 4.4), (1.55, 3.05), (-7.65, -7.55)), True),
+    'EDF6VC_DN_INTERCEPTOR.MRAB': (((-0.6, 0.6), (5.6, 6.7), (-15.15, -15.05)), False),
+    'EDF6VC_DN_BOMBER.MRAB': (((5.9, 9.5), (5.7, 9.5), (-10.8, -10.7)), True),
+    'EDF6VC_DN_DEFENDER.MRAB': (((12.9, 15.2), (-0.05, 2.0), (-8.4, -7.3)), True),
 }
 CARRIER_FILE = 'EDF6VC_CARRIER.MRAB'
 CARRIER_SGO = 'V508_TRANSPORT.SGO'   # the stock transport whose model (x MODELS[CARRIER_FILE].scale) the carrier wears

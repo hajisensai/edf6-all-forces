@@ -182,6 +182,10 @@ def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -
         names = {md.name_of(b.name) for b in md.bones}
         missing = {b for b, _ in v['vehicle_weapon_setting']} - names
         assert not missing, f'{file}: model lacks weapon bones {missing}'
+        if model in dm.NOZZLED:   # its flames on its own exhausts, as measured off the model (jet_models.NOZZLE_EXITS)
+            want = jet_models.exit_nozzles(jet_models.strip_nozzles(md), jet.file)
+            assert want, f'{file}: no exhaust measured on {jet.file}'
+            jet_models.check_nozzle_bones(md, want)
         if file == SGO_FILE:   # its box's centre the plugin's keel; a gunner seat a turret, every turret's bones in the model
             centre = float(v['heli_rigid_body'][0][1])
             assert abs(centre - vc.DREADNOUGHT_KEEL) < 0.01, f'{file}: box centre {centre} over the keel, vcobjects says {vc.DREADNOUGHT_KEEL}'
