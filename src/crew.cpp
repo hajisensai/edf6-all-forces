@@ -1069,6 +1069,7 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 }
 
 bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
+bool KnownVehicleVtable(const void* vtable) noexcept { return ClassOfVtable(vtable)>=0; }
 
 bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
     if(!out || !Cfg().enabled || !(Cfg().playerJet || Cfg().dreadnought))return false;

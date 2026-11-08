@@ -227,7 +227,11 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         if(!o || o[kDead] || (w.friends>0 && w.frObject[0]==o))return;
         // The object the game's own team walk hands over (live, its +0x2E8 read just above): its class read off its
         // vtable, not asked of Readable first (stress:100 2026-11-08: 1.4 ms a frame, a working-set call a friend).
-        const float r=IsSoldierClassLive(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
+        // A player of any machine is a soldier class (the player flag +0x354 / pad +0x340 are bound by 0x54ED40, called
+        // only where a player is made: CreatePlayer 0x1DC450 -> 0x591410, online 0x22AB90), so IsSoldierClassLive has
+        // them all: IsAnyPlayer, which asks Readable, adds no one.
+        const auto vtable=At<const void*>(o,0);
+        const float r=IsSoldierClassLive(o) ? kSoldierRadius : KnownVehicleVtable(vtable) ? kVehicleRadius : kOtherRadius;
         const float* p=Pos(o);
         if(!std::isfinite(p[0]+p[1]+p[2]))return;
         Room(w.fr,w.friends);Room(w.frObject,w.friends);
