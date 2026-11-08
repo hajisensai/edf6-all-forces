@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const EMPTY = { title: '', lanes: [] };
 let state = null;      // the last /api/outline answer
 let data = EMPTY;      // the outline being shown / edited
-let group = null;
+let group = new URLSearchParams(location.search).get('group');
 let editing = false;
 let dirty = false;
 let busy = false;
@@ -292,22 +292,20 @@ async function load() {
   $('me').textContent = !me ? '未登录（只能查看）' : me.user + (me.role === 'dev' ? '（开发者）' : me.group ? `（${me.group} 组）` : '');
   $('auth').textContent = me ? '退出' : '登录';
   $('auth').href = me ? '/logout' : '/login.html';
-  $('groupBar').classList.toggle('hide', state.groups.length < 2);
-  $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === group }, g || '（未分组）')));
+  $('groupBar').classList.toggle('hide', groupButtons($('group'), state.groups, group, switchGroup) < 2);
   render();
 }
 let leaveArmed = false;   // switching group with unsaved edits: the second switch discards them
-$('group').addEventListener('change', () => {
+function switchGroup(g) {
   if (dirty && !leaveArmed) {
     leaveArmed = true;
-    error('当前组的大纲有改动还没保存：先保存，或再切换一次放弃改动');
-    $('group').value = group;
+    error('当前组的大纲有改动还没保存：先保存，或再点一次放弃改动');
     return;
   }
   leaveArmed = false;
   dirty = false;
-  group = $('group').value;
+  group = g;
   error('');
   load().catch((e) => error(e.message));
-});
+}
 load().catch((e) => { error('加载失败：' + e.message); $('board').textContent = '暂时无法加载大纲，请刷新重试。'; });

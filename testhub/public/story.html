@@ -14,7 +14,7 @@
     <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
   </header>
   <p id="error" class="err hide" role="alert"></p>
-  <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
+  <p id="groupBar" class="row hide"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></p>
   <section>
     <h2>剧情顺序</h2>
     <p class="muted">谁都能看（不用登录）；同组共用一份 MOD 剧情列表，从第一关依次往下排列。这里单独维护自创剧情，不影响「关卡策划」大纲或游戏里的任务列表。每个人可以编辑自己的关卡，开发者可以编辑全部关卡；同组成员都可以调整顺序。</p>
@@ -45,6 +45,7 @@
     <p class="row"><button class="btn ghost" id="deleteCancel" type="button" autofocus>保留关卡</button><button class="btn" id="deleteConfirm" type="button">确认删除</button></p>
   </dialog>
 </main>
+<script src="/groups.js"></script>
 <script src="/story.js"></script>
 </body>
 </html>
