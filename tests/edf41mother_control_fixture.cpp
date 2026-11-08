@@ -21,6 +21,15 @@ const Config& Cfg() noexcept{return testConfig;}
 void Log(const char*,...) noexcept{}
 bool RegisterControlledPvpSpawnResolver(bool(*)(const wchar_t*,controlled_pvp::SpawnProof*) noexcept) noexcept{return true;}
 }
+#ifdef MOTHER401_FIXTURE
+namespace crew::edf41layer {   // src/edf41mother.cpp's layer code (src/edf41layer_live.h): not this build's, nothing moves
+bool LivePrims() noexcept{return false;}
+int LiveAreaQueryLayer() noexcept{return -1;}
+int LiveRagdollLayer(void*,std::size_t*) noexcept{return -1;}
+const std::uint32_t* LiveTable() noexcept{return nullptr;}
+void LiveSetRagdollLayer(void*,int) noexcept{}
+}
+#endif
 namespace edf {
 bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept{return false;}
 bool Readable(const void* p,std::size_t n,bool) noexcept {MEMORY_BASIC_INFORMATION mbi{};if(!p || !VirtualQuery(p,&mbi,sizeof(mbi)) || mbi.State!=MEM_COMMIT || (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;return n<=reinterpret_cast<std::uintptr_t>(mbi.BaseAddress)+mbi.RegionSize-reinterpret_cast<std::uintptr_t>(p);}
