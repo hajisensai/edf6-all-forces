@@ -206,6 +206,7 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
+bool KnownVehicleVtable(const void* vt) noexcept { return vt && vt==At<const void*>(vehicle,0); }   // the stand-in's class
 bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
 bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
 bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
@@ -1412,6 +1413,45 @@ int main() {
                "100 hand-overs in a moment: the first one still followed (the old ring kept 32)");
         now+=kHandoverMs+1;AddHandover(Handover{ObjRef::Of(at(3000)),ObjRef::Of(at(3001)),now});
         Expect(!NpcSquadSuccessor(ObjRef::Of(at(0)),&next) && handovers.size()==1,"hand-overs past kHandoverMs are dropped");
+    }
+    // FriendVisit's radius off the vtable it read (IsSoldierClassLive, KnownVehicleVtable) against the old test
+    // (IsSoldierClassLive || IsAnyPlayer, then KnownVehicle, both asking Readable): the same for an NPC soldier of each
+    // class, this machine's player and another machine's (a soldier class, as the game makes every player), a soldier
+    // flagged a player with no pad and no network bit, the vehicle, and an object of no class we know.
+    {
+        Reset();
+        Put<const void*>(vehicle,0,image+0x17DADB0);   // a vtable of its own (505_Tank's), as every stock vehicle has
+        auto oldRadius=[](const unsigned char* o) {
+            return IsSoldierClassLive(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
+        };
+        std::vector<std::vector<unsigned char>> objects;
+        auto add=[&](const void* vt,bool flag,bool pad,bool remote) {
+            objects.emplace_back(0x2200);
+            unsigned char* o=objects.back().data();
+            Put<const void*>(o,0,vt);Put<int>(o,kTeam,kTeamFriend);Put<float>(o,kPosition,2.0f);
+            o[edf::kHumanPlayer]=flag ? 1 : 0;Put<const void*>(o,edf::kHumanPad,pad ? o : nullptr);
+            if(remote)o[edf::kRiderNet+edf::kNetFlags]|=1;
+        };
+        for(const auto& c:kSoldiers) {
+            const void* vt=image+c.vtable;
+            add(vt,false,false,false);add(vt,true,true,false);add(vt,true,false,true);add(vt,true,false,false);add(vt,false,true,true);
+        }
+        add(image+0x17D7320,false,false,false);   // DummyVehicleRider: no soldier class, not a vehicle
+        add(image+0x1234560,false,false,false);
+        world.friends=0;IndexFixture();
+        FriendWalk walk{kFriendVtable,&world};
+        bool same=true;int compared=0;
+        for(auto& o:objects) {
+            const int before=world.friends;
+            FriendVisit(&walk,o.data());
+            same=same && world.friends==before+1 && world.fr[static_cast<std::size_t>(before)].radius==oldRadius(o.data());++compared;
+        }
+        const int before=world.friends;
+        FriendVisit(&walk,vehicle);
+        same=same && world.friends==before+1 && world.fr[static_cast<std::size_t>(before)].radius==kVehicleRadius &&
+             oldRadius(vehicle)==kVehicleRadius;++compared;
+        Expect(same && compared==static_cast<int>(objects.size())+1,"FriendVisit's radius off the vtable: what the Readable-asking test gave, every kind");
+        Reset();IndexFixture();
     }
     // npcai.cpp's own grid questions (the wrappers as Think asks them: PickTarget with its held row and WastedFire,
     // EnemyRow, FriendNear and FriendsOnShot with frObject != self and the radii they add, ThreatsNear's first 64 and
