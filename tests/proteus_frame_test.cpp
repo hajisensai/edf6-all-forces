@@ -276,6 +276,78 @@ void WalkerNotProteus() {
     Check(IsProteus(vehicle),"the stock model (no marker): the Proteus");
     ResetProteus();
 }
+// The allies' priority zone read without the lock while it is off (zoneOn): every write site (PublishZone on / off,
+// DropZone of this and another vehicle, ResetProteus) keeps the flag equal to zone.on, and Priority / ProteusPriorityZone
+// answer what the old reads (shared lock, whole Zone copied, then its `on`) answered.
+bool LockedPriority(const unsigned char* f,const unsigned char* cand,float* weight) {
+    AcquireSRWLockShared(&zoneLock);
+    const Zone z=zone;
+    ReleaseSRWLockShared(&zoneLock);
+    if(!z.on || GameMs()-z.at>kStaleMs)return false;
+    const auto searcher=At<const unsigned char*>(f,kSearcher);
+    if(!Readable(searcher,kTeam+4) || At<std::int32_t>(searcher,kTeam)!=z.team || !Readable(cand,kEnemyTarget+8))return false;
+    const void* const target=At<const void*>(cand,kEnemyTarget);
+    const float* p=Pos(cand);
+    const float d[3]={p[0]-z.z.centre[0],p[1]-z.z.centre[1],p[2]-z.z.centre[2]};
+    if(target!=z.z.vehicle && (!target || target!=z.human) && Dot3(d,d)>z.z.radius*z.z.radius)return false;
+    *weight=z.z.weight;
+    return *weight>0.0f && *weight<1.0f;
+}
+bool LockedPriorityZone(ProteusZone* pz) {
+    AcquireSRWLockShared(&zoneLock);
+    const Zone c=zone;
+    ReleaseSRWLockShared(&zoneLock);
+    if(!c.on || !Cfg().enabled || GameMs()-c.at>kStaleMs)return false;
+    *pz=c.z;
+    return true;
+}
+void PriorityZoneFastPath() {
+    ResetProteus();Setup();
+    alignas(16) static unsigned char functor[0x20]{},searcher[0x400]{},cands[4][0x600]{},other[0x40]{};
+    Put<const void*>(functor,kSearcher,searcher);
+    // near and unaimed, far and unaimed, far and after the vehicle, far and after the player
+    const float at[4][3]={{110,5,-50},{900,5,900},{900,5,900},{900,5,900}};
+    const void* targets[4]={nullptr,nullptr,vehicle,observerHuman};
+    for(int i=0;i<4;++i){std::memcpy(cands[i]+kPosition,at[i],12);Put<const void*>(cands[i],kEnemyTarget,targets[i]);}
+    auto same=[&](const char* state,bool expectOn) {
+        Check(zoneOn.load()==zone.on && zone.on==expectOn,state);
+        for(const std::int32_t team:{player.team,player.team+1}) {
+            Put<std::int32_t>(searcher,kTeam,team);
+            for(auto& cand:cands) {
+                float wNew=-1.0f,wOld=-1.0f;
+                const bool a=Priority(functor,cand,&wNew),b=LockedPriority(functor,cand,&wOld);
+                Check(a==b && wNew==wOld,state);
+            }
+        }
+        ProteusZone zNew{},zOld{};
+        const bool a=ProteusPriorityZone(&zNew),b=LockedPriorityZone(&zOld);
+        Check(a==b && !std::memcmp(&zNew,&zOld,sizeof zNew),state);
+    };
+    Unit u{};u.st.shieldOn=true;
+    same("zone after reset: off, both reads agree",false);
+    PublishZone(u,vehicle,config);
+    same("zone published: on, both reads agree",true);
+    {   // published and found: the near unaimed enemy and the ones after the vehicle / player weigh, the far one does not
+        Put<std::int32_t>(searcher,kTeam,player.team);float w=0;
+        Check(Priority(functor,cands[0],&w) && w==config.proteusPriority && !Priority(functor,cands[1],&w) &&
+              Priority(functor,cands[2],&w) && Priority(functor,cands[3],&w),"zone on: the lock path still weighs");
+    }
+    DropZone(other);
+    same("another vehicle's drop leaves the zone on",true);
+    u.st.shieldOn=false;PublishZone(u,vehicle,config);
+    same("shield down: the zone goes off",false);
+    u.st.shieldOn=true;PublishZone(u,vehicle,config);
+    same("shield up again: on",true);
+    now+=kStaleMs+1;
+    same("stale zone: flag on, both reads refuse",true);
+    now-=kStaleMs+1;
+    DropZone(vehicle);
+    same("its own drop: off",false);
+    PublishZone(u,vehicle,config);
+    same("published again: on",true);
+    ResetProteus();
+    same("mission reset clears the zone and its flag",false);
+}
 }  // namespace
 
 int main() {
@@ -287,6 +359,7 @@ int main() {
     Shield();
     GiveBackAll();
     WalkerNotProteus();
+    PriorityZoneFastPath();
     std::printf("proteus_frame_test: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }
