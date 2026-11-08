@@ -44,6 +44,23 @@ def main() -> int:
            f'...and the tub leaves them open, not sealed over ({len(window_lines & open_lines)} of them; a cell on the '
            "glass's edge stays)")
     expect(not open_lines - window_lines, 'the opening reaches no line past the glass')
+
+    # A control deeper than the tub stays in view: its silhouette closes those lines, the liner the rest; a liner
+    # pulled in toward the eye (the radial hull conformance) still leaves it open.
+    from cockpit_shapes import basis, panel
+    control = panel('console', 'test', (0, -.7, .45), .3, .3, (0, .8, -.6))
+    liner = cockpit_tub.gap_liner(cockpit_tub.tub(lo, hi, sill), [control])
+    expect(not cockpits.leaks(cockpits.Kit([liner, control], {}, sill=sill)),
+           'the gap-only liner and the control together still close every line under the sill')
+    expect(bool(cockpits.leaks(cockpits.Kit([liner], {}, sill=sill))), "...and the liner alone leaves the control's lines")
+    tri = np.array([[liner.verts[i].pos for i in t] for t in liner.tris])
+    right, up, _f = basis((0, .8, -.6))
+    rays = np.array([np.array((0, -.7, .45)) + np.asarray(right) * x + np.asarray(up) * y
+                     for x in (-.1, 0, .1) for y in (-.1, 0, .1)])
+    expect(not cockpit_tub.through(rays, tri).any(), 'no liner face in front of the control')
+    expect(not cockpit_tub.through(rays, tri * .5).any(), 'nor after the liner is pulled in toward the eye')
+    expect(cockpit_tub.gap_liner(cockpit_tub.tub(lo, hi, sill), []).tris == cockpit_tub.tub(lo, hi, sill).tris,
+           'no hardware: the whole tub')
     print(f'{failures} FAILED' if failures else 'all passed')
     return 1 if failures else 0
 

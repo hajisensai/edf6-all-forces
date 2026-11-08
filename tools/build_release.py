@@ -155,7 +155,8 @@ def plugin_data() -> list[str]:
 # Third-party packages the installer imports at run time: PyInstaller bundles what this Python has, and a missing
 # one is not an error to it. Without Pillow the frozen installer died generating the jets (procmesh.albedos,
 # ModuleNotFoundError: PIL) on every release built by CI from 2026-10-05 on.
-BUNDLED = (('numpy', 'numpy'), ('PIL', 'pillow'))
+# shapely (GEOS): the fighters' cockpit tub cut to the gaps between its hardware (cockpit_tub.gap_liner).
+BUNDLED = (('numpy', 'numpy'), ('PIL', 'pillow'), ('shapely', 'shapely'))
 
 
 def check_bundled() -> None:

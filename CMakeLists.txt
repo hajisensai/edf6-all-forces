@@ -862,6 +862,7 @@ add_test(NAME cabin_view COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/te
 add_test(NAME cockpit_instruments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_instruments_test.py")
 add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_retrofit_test.py")
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
+add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_tub_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
