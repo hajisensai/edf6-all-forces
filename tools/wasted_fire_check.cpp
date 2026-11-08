@@ -1,6 +1,6 @@
 // Fire that cannot hurt its target (src/wasted_fire.h), offline: a shooter whose hits on a target keep hurting nothing
 // (a teleportation ship's hull, its hatch's damage window shut) holds its fire at it for a while and tries again; one hit
-// that hurts clears it; another shooter (under the open hatch) is not held by the first one's hits; the table's room;
+// that hurts clears it; another shooter (under the open hatch) is not held by the first one's hits; a crowd's pairs all kept, the forgotten ones given up;
 // the WASTEDFIRE plan lines bounded (a shooter and target kind every 3 s, a few a second in all).
 //   cmake --build build --target wasted_fire_check && build\wasted_fire_check.exe      (exit code 1 on a failure)
 #include "../src/wasted_fire.h"
@@ -51,15 +51,70 @@ void Run() {
     Check(!Wasted(book,&soldier,&other,ms),"hits far apart: the count starts over each time");
     // A hit that hurts with no record makes none (the table is for the futile ones).
     Hit(book,&gunner,&other,true,ms);
-    Check(Find(book,&gunner,&other,false)==nullptr,"a hurting hit with no record makes none");
+    Check(Find(book,&gunner,&other)==nullptr,"a hurting hit with no record makes none");
     // Nobody's or its own hit: nothing.
     Hit(book,nullptr,&ship,false,ms);Hit(book,&ship,&ship,false,ms);
-    Check(Find(book,nullptr,&ship,false)==nullptr && Find(book,&ship,&ship,false)==nullptr,"no shooter / itself: not booked");
-    // The table full: the least recently hit pair goes, the newest stays.
-    static int many[kPairs+8];
-    for(int i=0;i<kPairs+8;++i)for(int k=0;k<kWastedHits;++k)Hit(book,&many[i],&ship,false,ms+=10);
-    Check(Wasted(book,&many[kPairs+7],&ship,ms),"full: the newest pair kept");
-    Check(Find(book,&many[0],&ship,false)==nullptr,"full: the least recently hit pair gone");
+    Check(Find(book,nullptr,&ship)==nullptr && Find(book,&ship,&ship)==nullptr,"no shooter / itself: not booked");
+    // A crowd on one ship (a battle's thousand soldiers; the old table's 256 pairs dropped the least recently hit): every
+    // shooter's hold kept, each found as its own pair.
+    constexpr int kCrowd=2000;
+    static int many[kCrowd];
+    for(int k=0;k<kWastedHits;++k)for(int i=0;i<kCrowd;++i)Hit(book,&many[i],&ship,false,ms+=1);
+    bool all=true;
+    for(int i=0;i<kCrowd;++i)all=all && Wasted(book,&many[i],&ship,ms);
+    Check(all,"2000 shooters on one ship: every one held");
+    Check(!Wasted(book,&many[0],&other,ms),"held at that ship alone");
+    // Pairs not hit for kForgetMs are given up and their rows taken again: the table holds the pairs of the last kForgetMs,
+    // not every pair of the mission; a given-up pair is as if never made.
+    const std::size_t rows=book.pair.size();
+    ms+=kForgetMs+1;
+    Check(!Wasted(book,&many[5],&ship,ms),"forgotten: not held");
+    for(int i=0;i<kCrowd;++i)Hit(book,&many[i],&other,false,ms+=1);
+    Check(book.pair.size()==rows && Find(book,&many[5],&ship)==nullptr && Find(book,&many[5],&other)!=nullptr,
+          "the forgotten pairs' rows taken by new pairs, the table no bigger");
+    Check(!Wasted(book,&many[5],&other,ms),"a pair made in a forgotten one's row starts its count at nothing");
+}
+
+// Wasted's early out (Book::latestHold: past the latest hold given, no scan) answers as the full scan does: holds given,
+// cleared by a hit that hurts, pairs taken over by others, all the while asked about every pair at times around the holds.
+bool Scanned(const Book& b,const void* shooter,const void* target,std::uint64_t ms) {
+    if(!shooter || !target)return false;
+    for(const Pair& p:b.pair)
+        if(p.shooter==shooter && p.target==target)return ms<p.holdUntil;
+    return false;
+}
+void EarlyOut() {
+    constexpr int kTargets=8,kShooters=40;   // 320 pairs, holds coming and going
+    static Book b{};
+    static int shooters[kShooters],targets[kTargets];
+    Check(b.latestHold==0 && !Wasted(b,&shooters[0],&targets[0],0),"no hold given: not wasted");
+    std::uint32_t seed=12345;
+    auto next=[&seed]{seed=seed*1103515245u+12345u;return seed>>8;};
+    std::uint64_t ms=1000;
+    int mismatches=0,held=0,early=0;
+    for(int i=0;i<50000;++i) {
+        ms+=next()%40;
+        const void* s=&shooters[next()%kShooters];
+        const void* t=&targets[next()%kTargets];
+        Hit(b,s,t,next()%7==0,ms);
+        for(int k=0;k<4;++k) {
+            const void* qs=&shooters[next()%kShooters];
+            const void* qt=&targets[next()%kTargets];
+            const std::uint64_t at=ms+next()%(2*kWastedHoldMs);
+            const bool want=Scanned(b,qs,qt,at);
+            if(Wasted(b,qs,qt,at)!=want)++mismatches;
+            if(want)++held;
+            if(at>=b.latestHold)++early;
+        }
+        bool under=true;
+        for(const Pair& p:b.pair)under=under && p.holdUntil<=b.latestHold;
+        if(!under)++mismatches;
+    }
+    Check(mismatches==0,"early out: the same answer as the scan, latestHold never below a hold");
+    Check(held>0 && early>0,"early out: both held pairs and early outs exercised");
+    // A long quiet spell after the last hold: everything answers no by the early out.
+    ms=b.latestHold;
+    Check(!Wasted(b,&shooters[0],&targets[0],ms) && !Scanned(b,&shooters[0],&targets[0],ms),"past the latest hold: not wasted");
 }
 
 // The WASTEDFIRE plan lines (planlog): a moving fortress's hundred parts under a squad's fire, planned every frame, give
@@ -120,6 +175,7 @@ void PlanLog() {
 
 int main() {
     Run();
+    EarlyOut();
     PlanLog();
     std::printf("wasted_fire_check: %d cases, %d failed\n",cases,failures);
     return failures ? 1 : 0;

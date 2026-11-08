@@ -303,9 +303,13 @@ bool InstallMessages() noexcept {
 
 float BodyMark(const void* vehicle) noexcept {
     const auto v=static_cast<const unsigned char*>(vehicle);
-    if(!Readable(v,kSpeedGain+4) || At<const unsigned char*>(v,0)!=image+kHeli506)return 0.0f;
+    // The vtable first (one page), the mark's 0x1630 bytes only for a 506: every object the ride prompt and the jet
+    // tests visit asks this each frame. Same answer: an unreadable head or another class is 0 either way.
+    if(!Readable(v,8) || At<const unsigned char*>(v,0)!=image+kHeli506 || !Readable(v,kSpeedGain+4))return 0.0f;
     return At<float>(v,kSpeedGain);
 }
+
+bool Heli506Vtable(const void* vtable) noexcept { return vtable==image+kHeli506; }
 
 PluginBody BodyOf(const void* vehicle) noexcept {
     const float k=BodyMark(vehicle);

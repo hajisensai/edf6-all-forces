@@ -46,6 +46,7 @@ bool Renderer::BeginView(ID3D11DeviceContext*,std::uint64_t) noexcept {return tr
 bool Renderer::ObserveSurface(ID3D11DeviceContext*) noexcept {return true;}
 bool Renderer::CaptureIndexed(ID3D11DeviceContext*,unsigned,unsigned,int) noexcept {return true;}
 bool Renderer::Composite(ID3D11DeviceContext*,Polarity) noexcept {return true;}
+void Renderer::Invalidate() noexcept {}
 void Renderer::Reset() noexcept {}
 std::size_t EnemyModels(const void*,const void**,std::size_t) noexcept {return 0;}
 }

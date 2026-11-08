@@ -31,6 +31,7 @@
 #include "seat_aim.h"
 #include "edf/aimlink.h"
 #include "edf/weapon.h"
+#include <atomic>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -170,6 +171,19 @@ Unit units[kMaxUnits]{};
 
 SRWLOCK zoneLock=SRWLOCK_INIT;
 struct Zone { bool on; ProteusZone z; std::int32_t team; const void* human; ULONGLONG at; } zone{};
+// zone.on mirrored for the readers' lock-free path (SearchHook runs per candidate of every soldier's target search):
+// every write of `zone` ends, still under zoneLock exclusive, with ZoneWritten. Clear, a reader skips the lock as if it
+// had taken it and seen on==false; set, it takes the lock and copies the whole Zone the writer released.
+std::atomic<bool> zoneOn{false};
+void ZoneWritten() noexcept { zoneOn.store(zone.on,std::memory_order_release); }
+// The zone when it is on (false: off, `*z` untouched).
+bool ReadZone(Zone* z) noexcept {
+    if(!zoneOn.load(std::memory_order_acquire))return false;
+    AcquireSRWLockShared(&zoneLock);
+    *z=zone;
+    ReleaseSRWLockShared(&zoneLock);
+    return z->on;
+}
 SRWLOCK readoutLock=SRWLOCK_INIT;
 struct Out { ProteusReadout r; ULONGLONG at; } out{};
 
@@ -418,11 +432,13 @@ void PublishZone(const Unit& u,const unsigned char* v,const Config& c) noexcept 
         zone.z.radius=c.proteusPriorityRadius;zone.z.weight=c.proteusPriority;zone.z.vehicle=v;
         zone.team=player.team;zone.human=PlayerHuman();zone.at=GameMs();
     } else if(zone.z.vehicle==v)zone.on=false;
+    ZoneWritten();
     ReleaseSRWLockExclusive(&zoneLock);
 }
 void DropZone(const unsigned char* v) noexcept {
     AcquireSRWLockExclusive(&zoneLock);
     if(zone.z.vehicle==v)zone.on=false;
+    ZoneWritten();
     ReleaseSRWLockExclusive(&zoneLock);
 }
 
@@ -579,10 +595,8 @@ void Incompatible(Unit& u,unsigned char* v,std::uint32_t version) noexcept {
 // --- the allies' priority (the soldiers' target search) ---
 // Whether the soldier searching (`f`) is on the zone's side and `cand` is an enemy the zone puts first.
 bool Priority(const unsigned char* f,const unsigned char* cand,float* weight) noexcept {
-    AcquireSRWLockShared(&zoneLock);
-    const Zone z=zone;
-    ReleaseSRWLockShared(&zoneLock);
-    if(!z.on || GameMs()-z.at>kStaleMs)return false;
+    Zone z;
+    if(!ReadZone(&z) || GameMs()-z.at>kStaleMs)return false;
     const auto searcher=At<const unsigned char*>(f,kSearcher);
     if(!Readable(searcher,kTeam+4) || At<std::int32_t>(searcher,kTeam)!=z.team || !Readable(cand,kEnemyTarget+8))return false;
     const void* const target=At<const void*>(cand,kEnemyTarget);
@@ -691,10 +705,8 @@ bool ProteusViewLift(const unsigned char* seat,float* look,float* eye) noexcept 
 }
 
 bool ProteusPriorityZone(ProteusZone* z) noexcept {
-    AcquireSRWLockShared(&zoneLock);
-    const Zone c=zone;
-    ReleaseSRWLockShared(&zoneLock);
-    if(!c.on || !Cfg().enabled || GameMs()-c.at>kStaleMs)return false;
+    Zone c;
+    if(!ReadZone(&c) || !Cfg().enabled || GameMs()-c.at>kStaleMs)return false;
     *z=c.z;
     return true;
 }
@@ -714,6 +726,7 @@ void ResetProteus() noexcept {
     RefreshFieldWrites();for(auto& field:fieldTargets)field=FieldTarget{};
     AcquireSRWLockExclusive(&zoneLock);
     zone=Zone{};
+    ZoneWritten();
     ReleaseSRWLockExclusive(&zoneLock);
     AcquireSRWLockExclusive(&readoutLock);
     out=Out{};

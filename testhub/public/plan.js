@@ -9,7 +9,7 @@ const $ = (id) => document.getElementById(id);
 let state = null;
 let pending = null;   // { verb: 'insert' | 'move', ...body, label }
 let editing = null;   // the proposal id the form edits
-let group = null;     // the group being looked at
+let group = new URLSearchParams(location.search).get('group');     // the group being looked at
 
 // h('div', { class: 'x', onclick: f }, 'text', node, [more]): strings become text nodes.
 function h(tag, attrs, ...kids) {
@@ -343,7 +343,6 @@ $('addNew').addEventListener('click', () => {
   const id = Number($('newPick').value);
   if (id) setPending({ verb: 'insert', kind: 'new', proposal_id: id, label: '放入新关卡：点一个「放到这里」' });
 });
-$('group').addEventListener('change', () => { group = $('group').value; pending = null; load().catch((e) => showError(e.message)); });
 
 async function load() {
   state = await api('/api/plan' + (group == null ? '' : '?group=' + encodeURIComponent(group)));
@@ -353,8 +352,11 @@ async function load() {
   $('me').textContent = !me ? '未登录（只能查看）' : me.user + (me.role === 'dev' ? '（开发者）' : me.group ? `（${me.group} 组）` : '');
   $('auth').textContent = me ? '退出' : '登录';
   $('auth').href = me ? '/logout' : '/login.html';
-  $('groupBar').classList.toggle('hide', state.groups.length < 2);
-  $('group').replaceChildren(...state.groups.map((g) => h('option', { value: g, selected: g === state.group }, g || '（未分组）')));
+  $('groupBar').classList.toggle('hide', groupButtons($('group'), state.groups, state.group, (g) => {
+    group = g;
+    pending = null;
+    load().catch((e) => showError(e.message));
+  }) < 2);
   renderMissionSelect();
   renderOutline();
   renderShow();

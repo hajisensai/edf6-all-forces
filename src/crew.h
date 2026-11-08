@@ -541,6 +541,11 @@ bool GamePaused() noexcept;
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
+// The native scene step as it reads now (System +0xCE0, stepped before the scene's input/update traversal), with its
+// scene and the mission (ResetCrew): a per-frame key valid from the frame's first input on, where GameFrame still has
+// the last frame's until the first vehicle's input is done. scene null: unreadable.
+struct SceneStep { const void* scene; std::uint32_t count,mission; };
+SceneStep SceneStepNow() noexcept;
 void SeeFrame(const void* vehicle) noexcept;
 
 // --- Mission lifecycle (mission.cpp) ---
@@ -779,7 +784,7 @@ using Rider=edf::Rider;
 inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
 // A player of any machine in the seat (Rider::player is this machine's only: common/seat.cpp).
 inline bool AnyPlayerIn(const unsigned char* seat) noexcept { return edf::AnyPlayerIn(image,seat); }
-using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer;
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer; using edf::IsAnyPlayerSelf;
 
 // The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
 // GameMs (0: never seen).
@@ -916,6 +921,9 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 enum class PluginBody { none, jet, sub, playerJet, sazabi, dreadnought };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
+// A 506's vtable (BodyMark is 0 for any other: so is IsJet): for an object the caller knows is live (one the game's
+// walk hands over), whose vtable it read itself.
+bool Heli506Vtable(const void* vtable) noexcept;
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in
 bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)

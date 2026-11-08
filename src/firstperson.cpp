@@ -338,13 +338,14 @@ template<class T,class Write> void SeqPublish(volatile LONG* seq,T* value,Write 
     InterlockedIncrement(seq);   // even: whole
 }
 // A copy torn by a writer meanwhile is taken again; while a writer keeps it busy the last whole copy stands. False: none.
-template<class T> bool SeqTake(volatile LONG* seq,const T* value,T* out,T* last,bool* lastOk) noexcept {
+// taken (optional): the even count the copy was whole under; left as it was when the copy is the last whole one instead.
+template<class T> bool SeqTake(volatile LONG* seq,const T* value,T* out,T* last,bool* lastOk,LONG* taken=nullptr) noexcept {
     for(int tries=0;tries<64;++tries) {
         const LONG before=InterlockedCompareExchange(seq,0,0);
         if(before&1){YieldProcessor();continue;}
         std::memcpy(out,value,sizeof(*out));
         MemoryBarrier();
-        if(InterlockedCompareExchange(seq,0,0)==before){*last=*out;*lastOk=true;return true;}
+        if(InterlockedCompareExchange(seq,0,0)==before){*last=*out;*lastOk=true;if(taken)*taken=before;return true;}
     }
     if(!*lastOk)return false;
     *out=*last;
@@ -370,9 +371,31 @@ int SnapHand(const DrawSnap& d,const void* model) noexcept {
 }
 void Publish() noexcept;
 void ResetToggleGestures() noexcept;
-bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
+// Each thread's whole copy of each published snapshot, kept while the count stays at the even value it was whole under:
+// the snapshot is written only under SeqPublish and its count only grows, so an unchanged even count is unchanged
+// content, and the many draws of one camera step (every model of the frame asks) share one copy instead of each
+// copying it twice. users: the draws on this thread still reading it (DrawSnapScope), never rewritten under them.
+struct SnapCache { LONG seq; bool valid; int users; DrawSnap snap; };
+thread_local SnapCache snapCache[kLocalViews]{};
+// The published snapshot of `index` as SeqTake would copy it: the thread's cached copy, or `scratch` when a draw on
+// this thread still reads the cached one (a nested draw). Null: none yet.
+const DrawSnap* SnapshotOf(int index,DrawSnap* scratch) noexcept {
     Published& p=published[index];
-    return SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk);
+    SnapCache& c=snapCache[index];
+    const LONG now=InterlockedCompareExchange(&p.seq,0,0);
+    if(c.valid && !(now&1) && c.seq==now)return &c.snap;
+    DrawSnap* const out=c.users ? scratch : &c.snap;
+    if(out==&c.snap)c.valid=false;
+    LONG taken=-1;   // odd: no count the copy was whole under (the last whole copy, a busy writer's): taken again next time
+    if(!SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk,&taken))return nullptr;
+    if(out==&c.snap && !(taken&1)){c.seq=taken;c.valid=true;}
+    return out;
+}
+bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
+    const DrawSnap* const snap=SnapshotOf(index,out);
+    if(!snap)return false;
+    if(snap!=out)*out=*snap;
+    return true;
 }
 bool TakeViews(int index,ViewHistory* out) noexcept {
     Published& p=published[index];
@@ -383,6 +406,31 @@ thread_local State* selected=&states[0];
 State& Current() noexcept { return *selected; }
 // This draw's copy of the selected state's published one (render thread). False: none yet.
 bool TakeSnapshot(DrawSnap* out) noexcept { return TakeSnapshotOf(static_cast<int>(selected-states),out); }
+// The selected state's published snapshot as the draw in progress (Snap) until the scope ends, without a copy of its
+// own while the thread's cached one is current (SnapshotOf); the cached one is held against a nested draw's refresh.
+// False: none yet (Snap unchanged).
+class DrawSnapScope {
+public:
+    DrawSnapScope() noexcept : index(static_cast<int>(selected-states)),snap(nullptr),before(drawSnap) {
+        snap=SnapshotOf(index,&scratch);
+        if(!snap)return;
+        if(snap==&snapCache[index].snap)++snapCache[index].users;
+        drawSnap=snap;
+    }
+    ~DrawSnapScope() {
+        if(!snap)return;
+        drawSnap=before;
+        if(snap==&snapCache[index].snap)--snapCache[index].users;
+    }
+    DrawSnapScope(const DrawSnapScope&)=delete;
+    DrawSnapScope& operator=(const DrawSnapScope&)=delete;
+    explicit operator bool() const noexcept { return snap!=nullptr; }
+private:
+    DrawSnap scratch;
+    int index;
+    const DrawSnap* snap;
+    const DrawSnap* before;
+};
 struct StateScope {
     State* before;
     explicit StateScope(State* next) noexcept : before(selected) { selected=next; }
@@ -492,10 +540,11 @@ State* ViewState(const void* view) noexcept {
     if(!view || !Readable(view,0x60)) {
         // Test/legacy single-view submissions without native parameters remain unambiguous only with one camera.
         State* only=nullptr;int cameras=0;
+        DrawSnap scratch;
         for(int k=0;k<kLocalViews;++k) {
-            DrawSnap s;
-            if(!TakeSnapshotOf(k,&s) || !s.hasCam)continue;
-            ++cameras;if(s.on)only=&states[k];
+            const DrawSnap* const s=SnapshotOf(k,&scratch);
+            if(!s || !s->hasCam)continue;
+            ++cameras;if(s->on)only=&states[k];
         }
         return cameras==1 ? only : nullptr;
     }
@@ -2195,9 +2244,9 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     State* state=ViewState(view);
     if(!state){NextDraw(model)(model,ctx,pass,view);return;}
     StateScope scope(state);
-    DrawSnap snap;
-    if(!TakeSnapshot(&snap)){NextDraw(model)(model,ctx,pass,view);return;}
-    SnapScope taken(&snap);DrawSelected(model,ctx,pass,view);
+    const DrawSnapScope taken;
+    if(!taken){NextDraw(model)(model,ctx,pass,view);return;}
+    DrawSelected(model,ctx,pass,view);
 }
 
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
@@ -2346,9 +2395,9 @@ void __fastcall LaserDrawHook(void* object,void* ctx,int pass,void* view) {
     State* state=ViewState(view);
     if(!state){LaserDrawSelected(object,ctx,pass,view);return;}
     StateScope scope(state);
-    DrawSnap snap;
-    if(!TakeSnapshot(&snap)){LaserDrawSelected(object,ctx,pass,view);return;}
-    SnapScope taken(&snap);LaserDrawSelected(object,ctx,pass,view);
+    const DrawSnapScope taken;
+    if(!taken){LaserDrawSelected(object,ctx,pass,view);return;}
+    LaserDrawSelected(object,ctx,pass,view);
 }
 
 // --- The laser's ray (the red dot) ---

@@ -12,7 +12,12 @@ const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 1000; }
 bool CameraRay(float*,float*) noexcept { return false; }
-bool IsStoreWeapon(const unsigned char*) noexcept { return false; }
+// Score's per-weapon facts (FactsOf): the frame and the store answer are the test's, the lookups counted.
+ULONGLONG frameNow=1;
+ULONGLONG GameFrame() noexcept { return frameNow; }
+bool storeAnswer=false;
+int storeQueries=0;
+bool IsStoreWeapon(const unsigned char*) noexcept { ++storeQueries;return storeAnswer; }
 }
 
 namespace {
@@ -111,6 +116,29 @@ int main() {
     NextLockTarget(weapon);
     Check(clearCalls==1 && cancelCalls==1 && dropCalls==1,"with no pending lock, the existing full-clear path is used");
     Check(skip.count==1 && skip.entries[0]==locked,"full cycle records the completed lock as skipped");
+
+    // Score reads the weapon's store / held facts once a frame, not once a candidate, and gives what a fresh read would.
+    {
+        alignas(16) static unsigned char picker[0xD00]{},nodeA[0x40]{},nodeB[0x40]{},result[0x40]{},crewless[0x1000]{};
+        Put<const void*>(picker,kWeaponNode,nodeA);
+        Put<float>(result,0,0.5f);Put<float>(result,4,0.25f);
+        void* ref[1]={target};
+        float score=-1.0f;
+        storeAnswer=false;storeQueries=0;
+        Check(!Score(ref,result,picker,&score) && !Score(ref,result,picker,&score) && storeQueries==1,
+              "no store, not held: the stock order, the weapon read once in the frame");
+        storeAnswer=true;
+        Check(!Score(ref,result,picker,&score) && storeQueries==1,"the same frame keeps the frame's answer");
+        ++frameNow;
+        Check(Score(ref,result,picker,&score) && storeQueries==2 && score==0.5f*0.5f+0.25f*0.25f,
+              "a new frame reads afresh: a store scores its stock yaw and pitch");
+        storeAnswer=false;
+        Put<const void*>(picker,kWeaponNode,nodeB);
+        Check(!Score(ref,result,picker,&score) && storeQueries==3,"another weapon at the same address reads afresh");
+        storeAnswer=true;
+        Put<const void*>(picker,kWeaponOwner,crewless);   // a vehicle with no seats: still not held
+        Check(Score(ref,result,picker,&score) && storeQueries==4,"the weapon changing hands reads afresh");
+    }
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("lockon: %d production cancellation checks passed\n",checks);
     return 0;

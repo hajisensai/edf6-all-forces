@@ -39,15 +39,22 @@ struct Saved {
     unsigned wanted=0;
     char sourceOwner[65]{};ObjRef sourceDriver{};
 };
-Saved saved[kMaxObjects]{};
+// Each table fills its first free slot and clears a released slot to {}, so every slot at or
+// past its high-water mark is empty. Scans stop at the mark instead of walking the whole table
+// every frame (only a few dozen slots are normally in use).
+Saved saved[kMaxObjects]{};unsigned savedUsed=0;
 // SceneObject caches retain their own weak identity: an active beam can outlive its holder and body.
 constexpr unsigned kMaxNativeEmitters=8192,kMaxWeaponEmitters=1025;
 struct NativeEmitter {
     controlled_pvp::Emitter binding{};int originalTeam=0;unsigned seen=0;bool changed=false;
 };
-NativeEmitter nativeEmitters[kMaxNativeEmitters]{};unsigned emitterEpoch=0;
+NativeEmitter nativeEmitters[kMaxNativeEmitters]{};unsigned emitterEpoch=0,emittersUsed=0;
+// CaptureWeapon's enumeration buffer (about 57 KB): a local would be zeroed on every call for every
+// weapon each frame. Only the game thread uses it and CaptureWeapon never nests (its callees only
+// read), and only the first `count` entries written by PvpNativeWeaponEmitters are ever read.
+controlled_pvp::Emitter weaponScratch[kMaxWeaponEmitters];
 struct SupportOwner { ObjRef ref{}; char puid[65]{}; };
-SupportOwner supportOwners[kMaxSupportOwned]{};
+SupportOwner supportOwners[kMaxSupportOwned]{};unsigned supportUsed=0;
 bool nativeFaulted=false,nativeHooksReady=false;
 std::atomic<bool> radarActive{false};
 pvp_protocol::State activeState{};
@@ -167,7 +174,7 @@ bool SupportDecoy(const void* object) noexcept {
     return object && Readable(object,8) && At<const void*>(object,0)==image+0x17D3F88;
 }
 bool AppendOwnedSupport(Collection& c,const pvp_protocol::State& state) noexcept {
-    for(const auto& owner:supportOwners)if(owner.ref) {
+    for(unsigned slot=0;slot<supportUsed;++slot)if(const auto& owner=supportOwners[slot];owner.ref) {
         const auto identity=Identity(owner.ref);
         if(identity==enemy_identity::State::unknown)return false;
         if(identity==enemy_identity::State::gone || !Live(owner.ref))continue;
@@ -189,6 +196,7 @@ void ReleaseSupportOwner(SupportOwner& owner) noexcept {
             reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
     }
     owner={};
+    while(supportUsed && !supportOwners[supportUsed-1].ref)--supportUsed; // drop only trailing empty slots
 }
 bool Collect(const pvp_protocol::State& state,Collection& c) noexcept {
     if(!nativeHooksReady || !CodeReady() || !state.count || state.count>pvp_protocol::kMaxMembers)return false;
@@ -232,9 +240,13 @@ void ReleaseWeak(Saved& item) noexcept {
             reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
     }
     item={};
+    while(savedUsed && !saved[savedUsed-1].ref)--savedUsed; // drop only trailing empty slots
 }
 Saved* Find(const ObjRef& ref) noexcept {
-    for(auto& item:saved)if(item.ref.obj==ref.obj && item.ref.ctrl==ref.ctrl)return &item;
+    for(unsigned i=0;i<savedUsed;++i)if(saved[i].ref.obj==ref.obj && saved[i].ref.ctrl==ref.ctrl)return &saved[i];
+    // An empty ref (e.g. PvpNativeForgetSupport for an unused jet slot) matched the first empty
+    // slot of the full table; past the mark that is exactly the slot at the mark.
+    if(!ref.obj && !ref.ctrl && savedUsed<kMaxObjects)return &saved[savedUsed];
     return nullptr;
 }
 bool RetainStrong(unsigned char* control) noexcept {
@@ -323,13 +335,17 @@ bool InstallVehicleOwnership() noexcept {
 bool Restore(Saved& item) noexcept;
 Saved* Reserve(const Desired& desired) noexcept {
     if(Saved* item=Find(desired.ref))return item;
-    for(auto& item:saved) {
+    // The first empty slot is at or below the mark; the search may reach it at the mark itself.
+    for(unsigned i=0;i<kMaxObjects;++i) {
+        auto& item=saved[i];
         if(item.ref && !Live(item.ref) && !Restore(item))continue;
         if(item.ref)continue;
         auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(desired.ref.ctrl));
         if(!Live(desired.ref))return nullptr;
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));
-        item.ref=desired.ref;item.vehicle=desired.vehicle;return &item;
+        item.ref=desired.ref;item.vehicle=desired.vehicle;
+        if(savedUsed<i+1)savedUsed=i+1;
+        return &item;
     }
     return nullptr;
 }
@@ -377,7 +393,7 @@ bool SetLastTeam(const ObjRef& ref,int team) noexcept {
 }
 bool SameRef(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
 NativeEmitter* FindEmitter(const controlled_pvp::Emitter& binding) noexcept {
-    for(auto& item:nativeEmitters)if(item.binding.object==binding.object && item.binding.kind==binding.kind &&
+    for(unsigned i=0;i<emittersUsed;++i)if(auto& item=nativeEmitters[i];item.binding.object==binding.object && item.binding.kind==binding.kind &&
         item.binding.incarnation==binding.incarnation && SameRef(item.binding.member,binding.member) &&
         SameRef(item.binding.storage,binding.storage))return &item;
     return nullptr;
@@ -389,10 +405,11 @@ void ReleaseEmitter(NativeEmitter& item) noexcept {
             reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
     }
     item={};
+    while(emittersUsed && !nativeEmitters[emittersUsed-1].binding.object)--emittersUsed; // drop only trailing empty slots
 }
 bool RestoreEmitters(const ObjRef& owner) noexcept {
     bool okay=true;
-    for(auto& item:nativeEmitters)if(item.binding.object && SameRef(item.binding.member,owner)) {
+    for(unsigned i=0;i<emittersUsed;++i)if(auto& item=nativeEmitters[i];item.binding.object && SameRef(item.binding.member,owner)) {
         int current=-1;const auto life=PvpNativeReadWeaponEmitter(item.binding,&current);
         if(life==controlled_pvp::Life::gone){ReleaseEmitter(item);continue;}
         if(life!=controlled_pvp::Life::live){okay=false;continue;}
@@ -403,13 +420,13 @@ bool RestoreEmitters(const ObjRef& owner) noexcept {
     }
     // A rollback may reapply the previous state before a failed sibling can restore.
     // Keep every surviving source baseline until the complete owner's restore succeeds.
-    if(okay)for(auto& item:nativeEmitters)
-        if(item.binding.object && SameRef(item.binding.member,owner))ReleaseEmitter(item);
+    if(okay)for(unsigned i=0;i<emittersUsed;++i)
+        if(auto& item=nativeEmitters[i];item.binding.object && SameRef(item.binding.member,owner))ReleaseEmitter(item);
     return okay;
 }
 bool ApplyEmitters(const ObjRef& owner,int team) noexcept {
     bool okay=true;
-    for(auto& item:nativeEmitters)if(item.binding.object && SameRef(item.binding.member,owner)) {
+    for(unsigned i=0;i<emittersUsed;++i)if(auto& item=nativeEmitters[i];item.binding.object && SameRef(item.binding.member,owner)) {
         int current=-1;const auto life=PvpNativeReadWeaponEmitter(item.binding,&current);
         if(life==controlled_pvp::Life::gone){ReleaseEmitter(item);continue;}
         if(life!=controlled_pvp::Life::live){okay=false;continue;}
@@ -426,7 +443,7 @@ bool ApplyEmitters(const ObjRef& owner,int team) noexcept {
     return okay;
 }
 bool CaptureWeapon(const unsigned char* weapon,const ObjRef& owner,int baselineTeam,bool previouslyApplied) noexcept {
-    controlled_pvp::Emitter current[kMaxWeaponEmitters]{};unsigned count=0;
+    controlled_pvp::Emitter* const current=weaponScratch;unsigned count=0;
     if(!PvpNativeWeaponEmitters(owner,weapon,current,kMaxWeaponEmitters,&count) || !count)return false;
     int inherited=baselineTeam;
     if(const auto* source=FindEmitter(current[0]))inherited=source->originalTeam;
@@ -437,12 +454,13 @@ bool CaptureWeapon(const unsigned char* weapon,const ObjRef& owner,int baselineT
         int baseline=-1;
         if(PvpNativeReadWeaponEmitter(current[i],&baseline)!=controlled_pvp::Life::live)return false;
         if(previouslyApplied)baseline=inherited;
-        NativeEmitter* slot=nullptr;
-        for(auto& candidate:nativeEmitters)if(!candidate.binding.object){slot=&candidate;break;}
+        NativeEmitter* slot=nullptr;unsigned slotIndex=0;
+        for(unsigned j=0;j<kMaxNativeEmitters;++j)if(!nativeEmitters[j].binding.object){slot=&nativeEmitters[j];slotIndex=j;break;}
         if(!slot || !current[i].storage.ctrl || !Readable(current[i].storage.ctrl,16) || At<LONG>(current[i].storage.ctrl,8)<=0)return false;
         auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(current[i].storage.ctrl));
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+12));
         slot->binding=current[i];slot->originalTeam=baseline;slot->seen=emitterEpoch;
+        if(emittersUsed<slotIndex+1)emittersUsed=slotIndex+1;
     }
     return true;
 }
@@ -450,7 +468,7 @@ bool Weapons(const Desired& desired,int team) noexcept {
     const Saved* ownerState=Find(desired.ref);
     if(!ownerState)return false;
     const bool previouslyApplied=ownerState->emittersApplied;
-    if(++emitterEpoch==0){emitterEpoch=1;for(auto& e:nativeEmitters)e.seen=0;}
+    if(++emitterEpoch==0){emitterEpoch=1;for(unsigned i=0;i<emittersUsed;++i)nativeEmitters[i].seen=0;}
     const auto* object=static_cast<const unsigned char*>(desired.ref.obj);
     const int sourceBaseline=ownerState->originalTeam==-1 && At<int>(object,kTeam)!=-1 ?
         ownerState->originalLastTeam : ownerState->originalTeam;
@@ -513,12 +531,13 @@ bool Restore(Saved& item) noexcept {
 }
 bool RestoreAll() noexcept {
     bool ok=true;
-    for(auto& item:saved)if(item.ref && !Restore(item))ok=false;
+    for(unsigned i=0;i<savedUsed;++i)if(saved[i].ref && !Restore(saved[i]))ok=false;
     return ok;
 }
 bool ApplyCollected(Collection& c) noexcept {
-    for(auto& owner:supportOwners)if(owner.ref && Identity(owner.ref)==enemy_identity::State::gone)ReleaseSupportOwner(owner);
-    if(++generation==0){generation=1;for(auto& item:saved)item.wanted=0;}
+    for(unsigned i=0;i<supportUsed;++i)
+        if(supportOwners[i].ref && Identity(supportOwners[i].ref)==enemy_identity::State::gone)ReleaseSupportOwner(supportOwners[i]);
+    if(++generation==0){generation=1;for(unsigned i=0;i<savedUsed;++i)saved[i].wanted=0;}
     // Reserve the entire write set first; a capacity failure must change no object.
     for(unsigned i=0;i<c.objectsCount;++i) {
         if(controlled_pvp::OwnsMember(c.objects[i].ref)) {
@@ -573,7 +592,7 @@ bool ApplyCollected(Collection& c) noexcept {
         }
     }
     // A player left a vehicle: restore that vehicle and its old crew immediately.
-    for(auto& item:saved)if(item.ref && item.wanted!=generation && !Restore(item))return false;
+    for(unsigned i=0;i<savedUsed;++i)if(saved[i].ref && saved[i].wanted!=generation && !Restore(saved[i]))return false;
     return true;
 }
 bool ApplyChecked(const pvp_protocol::State& state) noexcept {
@@ -639,9 +658,10 @@ void ResetPvpNative() noexcept {
         activeState={};radarActive.store(false,std::memory_order_release);return;
     }
     ClearTeamOverlay();
-    for(auto& item:saved)if(item.ref) {
-        __try {ReleaseWeak(item);} __except(EXCEPTION_EXECUTE_HANDLER){item={};}
+    for(unsigned i=0;i<savedUsed;++i)if(saved[i].ref) {
+        __try {ReleaseWeak(saved[i]);} __except(EXCEPTION_EXECUTE_HANDLER){saved[i]={};}
     }
+    savedUsed=0; // every slot below the mark was just cleared
     activeState={};radarActive.store(false,std::memory_order_release);generation=0;nativeFaulted=false;
 }
 bool PvpNativeAttachSupport(const char* puid,const ObjRef* objects,unsigned count,int team) noexcept {
@@ -657,7 +677,7 @@ bool PvpNativeAttachSupport(const char* puid,const ObjRef* objects,unsigned coun
             if(!IsSoldierClass(object) && !SupportDecoy(object) && !SeatCount(object))return false;
             for(unsigned j=0;j<i;++j)if(objects[i].obj==objects[j].obj)return false;
             bool existing=false;
-            for(const auto& owner:supportOwners)if(owner.ref.obj==objects[i].obj && owner.ref.ctrl==objects[i].ctrl) {
+            for(unsigned j=0;j<supportUsed;++j)if(const auto& owner=supportOwners[j];owner.ref.obj==objects[i].obj && owner.ref.ctrl==objects[i].ctrl) {
                 if(std::strcmp(owner.puid,puid))return false;
                 existing=true;break;
             }
@@ -674,13 +694,15 @@ bool PvpNativeAttachSupport(const char* puid,const ObjRef* objects,unsigned coun
         unsigned added=0;
         for(unsigned i=0;i<count;++i) {
             bool existing=false;
-            for(const auto& owner:supportOwners)existing=existing || (owner.ref.obj==objects[i].obj && owner.ref.ctrl==objects[i].ctrl);
+            for(unsigned j=0;j<supportUsed;++j)
+                existing=existing || (supportOwners[j].ref.obj==objects[i].obj && supportOwners[j].ref.ctrl==objects[i].ctrl);
             if(existing)continue;
             auto& owner=supportOwners[slots[added++]];
             if(owner.ref)ReleaseSupportOwner(owner);
             auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(objects[i].ctrl));
             InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));
             owner.ref=objects[i];std::memcpy(owner.puid,puid,std::strlen(puid)+1);
+            if(supportUsed<slots[added-1]+1)supportUsed=slots[added-1]+1;
         }
         if(!team)return true; // mode-off calls retain identity for a later mode-on
         if(PvpNativeApply(previous))return true;
@@ -694,8 +716,8 @@ bool PvpNativeSupportOwner(const ObjRef& parent,char* puid,unsigned capacity) no
     puid[0]=0;
     __try {
         if(!Live(parent) || static_cast<const unsigned char*>(parent.obj)[kDead])return false;
-        for(const auto& owner:supportOwners)
-            if(owner.ref.obj==parent.obj && owner.ref.ctrl==parent.ctrl && Live(owner.ref) && PuidValid(owner.puid)) {
+        for(unsigned i=0;i<supportUsed;++i)
+            if(const auto& owner=supportOwners[i];owner.ref.obj==parent.obj && owner.ref.ctrl==parent.ctrl && Live(owner.ref) && PuidValid(owner.puid)) {
                 std::memcpy(puid,owner.puid,std::strlen(owner.puid)+1);return true;
             }
         const Saved* item=Find(parent);ObjRef driver{};
@@ -726,12 +748,14 @@ void PvpNativeForgetSupport(const ObjRef& object) noexcept {
             if(Restore(*item)){if(item->ref)ReleaseWeak(*item);}
             else {nativeFaulted=true;return;}
         }
-        for(auto& owner:supportOwners)if(owner.ref.obj==object.obj && owner.ref.ctrl==object.ctrl)ReleaseSupportOwner(owner);
+        for(unsigned i=0;i<supportUsed;++i)
+            if(supportOwners[i].ref.obj==object.obj && supportOwners[i].ref.ctrl==object.ctrl)ReleaseSupportOwner(supportOwners[i]);
     } __except(EXCEPTION_EXECUTE_HANDLER){nativeFaulted=true;}
 }
 void PvpNativeClearSupportOwners() noexcept {
-    for(auto& owner:supportOwners)if(owner.ref) {
-        __try {ReleaseSupportOwner(owner);} __except(EXCEPTION_EXECUTE_HANDLER){owner={};}
+    for(unsigned i=0;i<supportUsed;++i)if(supportOwners[i].ref) {
+        __try {ReleaseSupportOwner(supportOwners[i]);} __except(EXCEPTION_EXECUTE_HANDLER){supportOwners[i]={};}
     }
+    supportUsed=0; // every slot below the mark was just cleared
 }
 }

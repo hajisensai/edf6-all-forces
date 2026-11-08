@@ -42,18 +42,19 @@ export function canWrite(me, grp) {
   return me != null && (me.role === 'dev' || me.group === grp);
 }
 
-// The groups listed to a reader: those with something written (`filled`, an SQL query of grp values), and an empty
-// one only to those who can write it.
+// The groups listed to a reader (the page's group buttons): those with something written (`filled`, an SQL query of grp
+// values), plus the reader's own group even while empty, so its members can start writing it.
 export async function readable(db, me, groups, filled) {
   const has = new Set((await db.prepare(filled).all()).results.map((r) => r.grp));
-  return groups.filter((g) => has.has(g) || canWrite(me, g));
+  return groups.filter((g) => has.has(g) || (me != null && me.group === g));
 }
 
-// The group a read shows: the one asked for if it is listed, else the reader's own, else the first listed; null when
+// The group a read shows: the one asked for if it is listed (or, for a developer, any existing group: an empty one is
+// not listed but can still be opened by name to start it), else the reader's own, else the first listed; null when
 // nothing is listed.
-export function pick(me, asked, shown) {
+export function pick(me, asked, shown, groups = shown) {
   if (asked != null && !GROUP.test(asked)) throw new HttpError(400, 'bad group');
-  if (asked != null && shown.includes(asked)) return asked;
+  if (asked != null && (shown.includes(asked) || (groups.includes(asked) && canWrite(me, asked)))) return asked;
   return me && shown.includes(me.group) ? me.group : shown[0] ?? null;
 }
 
@@ -338,7 +339,7 @@ export async function planRoute(request, env, me, missions, groups, path, url) {
   const plan = new Plan(env, me, missions);
   if (path === '/api/plan' && request.method === 'GET') {
     const shown = await readable(env.DB, me, groups, "SELECT grp FROM proposals UNION SELECT grp FROM outline WHERE kind != 'stock'");
-    return plan.state(pick(me, url.searchParams.get('group'), shown), shown);
+    return plan.state(pick(me, url.searchParams.get('group'), shown, groups), shown);
   }
   if (path === '/api/plan/digest' && request.method === 'GET') return plan.digest(url.searchParams.get('mission'));
   if (path === '/api/plan/digest' && request.method === 'PUT') {
