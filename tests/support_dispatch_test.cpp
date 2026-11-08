@@ -501,24 +501,24 @@ int main() {
             SupportDispatchTick();
             Deployment& d=deployments[0];unsigned hull[4];
             check(hulls(d,hull)==2 && activated==2 && d.started,"two aircraft made in the air, both sent in under a guard");
-            int& releases=jetCall ? jetReleases : heliReleases;
+            int& released=jetCall ? jetReleases : heliReleases;
             // Over the very point but its own flight control not there yet (cmdMoving): nothing let go.
             for(unsigned k=0;k<2;++k)std::memcpy(objects[hull[k]]+kPosition,target,12);
             for(int i=0;i<3;++i){fixtureMs+=100;SupportDispatchTick();}
-            check(!releases && !d.delivered && entryAsked>0 && !std::memcmp(entryTarget,target,12),
+            check(!released && !d.delivered && entryAsked>0 && !std::memcmp(entryTarget,target,12),
                   "asked its own flight control about the call point; not there: no release, whatever the distance");
             // Far out on its patrol ring, its flight control there: that one is let go at once, on its own.
-            At<float>(objects[hull[0]],kPosition)=1200.0f;entryState[hull[0]]=SupportEntry::arrived;
+            Put<float>(objects[hull[0]],kPosition,1200.0f);entryState[hull[0]]=SupportEntry::arrived;
             fixtureMs+=100;SupportDispatchTick();
-            check(releases==1 && d.released[0] && !d.delivered,"the first one there is let go on its own (Order::none)");
+            check(released==1 && d.released[0] && !d.delivered,"the first one there is let go on its own (Order::none)");
             fixtureMs+=100;SupportDispatchTick();
-            check(releases==1,"let go once, never every frame");
+            check(released==1,"let go once, never every frame");
             // Not commandable this frame: asked again the next.
             entryState[hull[1]]=SupportEntry::arrived;commandTakes=false;
             fixtureMs+=100;SupportDispatchTick();
-            check(releases==1 && !d.delivered,"its module did not take the release: still waiting");
+            check(released==1 && !d.delivered,"its module did not take the release: still waiting");
             commandTakes=true;fixtureMs+=100;SupportDispatchTick();
-            check(releases==2 && d.delivered && std::wcscmp(status,L"支援已抵达并进入任务区域")==0,
+            check(released==2 && d.delivered && std::wcscmp(status,L"支援已抵达并进入任务区域")==0,
                   "the second let go the next frame: the deployment is delivered");
         }
         // A loss on the way in (2026-11-08: this used to mark it delivered at once, its survivors left guarding the

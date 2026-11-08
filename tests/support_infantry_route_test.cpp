@@ -151,6 +151,8 @@ namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept{return p.coun
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept{return false;}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
 bool JetCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
+SupportEntry JetSupportEntry(const void*,const float*) noexcept{return SupportEntry::flying;}
+SupportEntry HeliSupportEntry(const void*,const float*) noexcept{return SupportEntry::flying;}
 PlayArea MapPlayArea() noexcept{return {{-930,-930},{930,930},true,0,true};}
 bool PlayAreaMeasured() noexcept{return true;}
 bool SupportAircraftLeft(const ObjRef&) noexcept{return false;}
