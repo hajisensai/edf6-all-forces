@@ -174,6 +174,38 @@ def plugin_log(game: str) -> str:
     return os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.log')
 
 
+def log_mark(log: str) -> tuple[int, int]:
+    """The plugin log's file id and size before a launch ((0, 0): none yet)."""
+    try:
+        st = os.stat(log)
+    except OSError:
+        return (0, 0)
+    return (st.st_ino, st.st_size)
+
+
+def run_log(log: str, mark: tuple[int, int]) -> bytes | None:
+    """What one launch wrote to the plugin log, `mark` its log_mark from before. Past 32 MB the plugin renames the log to
+    .log.1 and opens a new one (src/plugin.cpp): a rename keeps the file id, so the part before the rename is read from
+    .log.1 (from `mark`'s size when it is the same file, whole when the log turned over more than once and the start is
+    gone) ahead of the new log."""
+    if not os.path.exists(log):
+        return None
+    ino, size = mark
+    with open(log, 'rb') as f:
+        if ino and os.stat(log).st_ino == ino:
+            f.seek(size)
+            return f.read()
+        now = f.read()
+    old = log + '.1'
+    if not ino or not os.path.exists(old):
+        return now
+    with open(old, 'rb') as f:
+        if os.stat(old).st_ino == ino:
+            f.seek(size)
+            return f.read() + now
+        return b'(perfrun: the log turned over more than once; its start is lost)\r\n' + f.read() + now
+
+
 def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, variant: str = '') -> int:
     """One launch of the game: the scenario, sampled, its run.json and logs in `out`; everything put back. Non-zero
     when nothing was sampled, the run failed, or the range's files could not be put back (the game still running)."""
@@ -189,7 +221,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     marks: dict = {}
     log = plugin_log(game)
     # the plugin appends to its log across launches: only what this launch writes is this run's
-    log_from = os.path.getsize(log) if os.path.exists(log) else 0
+    log_at = log_mark(log)
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
@@ -209,11 +241,8 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
                 rc = rc or 1
             else:
                 gen.restore_scenario(game)
-    if os.path.exists(log):
-        with open(log, 'rb') as f:
-            if os.path.getsize(log) >= log_from:   # smaller: rotated (32 MB) during the run, all of it is new
-                f.seek(log_from)
-            data = f.read()
+    data = run_log(log, log_at)
+    if data is not None:
         with open(os.path.join(out, 'vehiclecrew.log'), 'wb') as f:
             f.write(data)
     used = dll or os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')

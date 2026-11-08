@@ -267,7 +267,38 @@ def ini_option() -> None:
         pass
 
 
+def log_turnover() -> None:
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp()
+    try:
+        log = os.path.join(d, 'EDF6VehicleCrew.log')
+        with open(log, 'wb') as f:
+            f.write(b'old launch\r\n')
+        mark = perfrun.log_mark(log)
+        with open(log, 'ab') as f:
+            f.write(b'this launch\r\n')
+        check(perfrun.run_log(log, mark) == b'this launch\r\n', 'no turnover: from the mark on')
+        with open(log, 'ab') as f:
+            f.write(b'before the rename\r\n')
+        os.replace(log, log + '.1')
+        with open(log, 'wb') as f:
+            f.write(b'(log continued)\r\nafter\r\n')
+        check(perfrun.run_log(log, mark) == b'this launch\r\nbefore the rename\r\n(log continued)\r\nafter\r\n',
+              'one turnover: .log.1 from the mark, then the new log')
+        os.replace(log, log + '.1')
+        with open(log, 'wb') as f:
+            f.write(b'third\r\n')
+        got = perfrun.run_log(log, mark)
+        check(got.startswith(b'(perfrun: the log turned over more than once') and got.endswith(b'third\r\n'),
+              'two turnovers: said so, what is left kept')
+        check(perfrun.run_log(os.path.join(d, 'none.log'), (0, 0)) is None, 'no log: nothing')
+    finally:
+        shutil.rmtree(d)
+
+
 scenario_files()
+log_turnover()
 ini_option()
 scenarios()
 report_parsing()
