@@ -23,6 +23,7 @@
 #include "firstperson.h"
 #include "thermal.h"
 #include "pvp.h"
+#include "havok_props.h"
 #include "team_native.h"
 #include "room_pvp.h"
 #include "edf41bike.h"
@@ -1300,6 +1301,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallWeaponRecords();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
+    InstallHavokProps();       // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
