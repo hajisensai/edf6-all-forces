@@ -712,6 +712,12 @@ target_compile_options(pvp_units_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME pvp_units COMMAND pvp_units_test)
 # The native team manager's capacity sites and the PvP relation overlay (src/team_native_logic.h), and the same sites
 # against the real EDF.dll (tests/team_native_sig_audit.py, skipped without one).
+# hknp 物理多线程的站点、补丁字节与每帧决策（src/havok_mt_logic.h），离线；对真 EDF.dll 的原字节、调用点唯一性、
+# 复位路径与 vtable 槽见 tests/havok_mt_audit.py，unicorn 跑 processTaskQueue / waitForCompletion / pool 析构与改写后的
+# 调用点见 tests/havok_mt_sim.py（缺 EDF.dll、capstone 或 unicorn 时跳过）。
+add_executable(havok_mt_test tests/havok_mt_test.cpp)
+target_compile_options(havok_mt_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME havok_mt COMMAND havok_mt_test)
 add_executable(team_native_test tests/team_native_test.cpp)
 target_compile_options(team_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME team_native COMMAND team_native_test)
@@ -923,6 +929,10 @@ set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
 add_test(NAME team_native_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/team_native_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(team_native_sigs PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME havok_mt_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/havok_mt_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(havok_mt_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME havok_mt_sim COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/havok_mt_sim.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(havok_mt_sim PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
@@ -1076,7 +1086,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test havok_mt_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -1883,6 +1893,7 @@ add_test(NAME as_registration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 add_test(NAME mission_script_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_mission_script.py")
 add_test(NAME bvm41_dataflow COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bvm41_dataflow.py")
 target_sources(EDF6VehicleCrew PRIVATE src/sight_contacts.cpp src/pvp.cpp src/pvp_native.cpp src/team_native.cpp src/room_pvp.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/havok_mt.cpp)
 add_executable(debug_spawn_net_test EXCLUDE_FROM_ALL tests/debug_spawn_net_test.cpp src/support_protocol.cpp)
 target_include_directories(debug_spawn_net_test PRIVATE src)
 target_compile_options(debug_spawn_net_test PRIVATE /W4 /WX /utf-8 /permissive-)

@@ -19,6 +19,7 @@
 #include "log_buffer.h"
 #include "crew.h"
 #include "gravity.h"
+#include "havok_mt.h"
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
@@ -566,6 +567,7 @@ void LoadConfig() noexcept {
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
+    n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
     n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
@@ -1340,6 +1342,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
+    InstallHavokMultithread();   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
