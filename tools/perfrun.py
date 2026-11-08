@@ -15,14 +15,16 @@ SCENARIO
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
 options
-  --dll PATH        EDF6VehicleCrew.dll placed for the run (default: this checkout's build; `installed` keeps the
-                    game's own)
+  --dll PATH        EDF6VehicleCrew.dll placed for the run, with the EDF6AutoTurret.dll next to it when there is one
+                    (default: this checkout's build; `installed` keeps the game's own)
   --ab A B          two DLLs alternating (--rounds, default 2, so ABAB): frames and CPU only, an A/B table
   --warm S          seconds in the mission before sampling (default 45 grand, 30 swarm, 25 a stock mission)
   --cpu S           the clean window (thread CPU, GPU, frame times; nothing suspended), default 20
   --stacks S        the stack window after it, default 20 (0: none)
   --interval MS     stack sampling interval, default 2
   --difficulty N    default 1
+  --ini KEY=VALUE   KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run (repeatable; drive.py --ini), e.g. an A/B
+                    of a switch: HavokMultithread=0 against HavokMultithread=1
   --out DIR         default tmp/perf/<scenario>-<time>
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
   --restore         put the range mission back from a run that could not (the game was still running)
@@ -172,6 +174,51 @@ def plugin_log(game: str) -> str:
     return os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.log')
 
 
+def placements(dll: str | None) -> tuple[str, ...]:
+    """drive.py --place entries for a run: `dll` as EDF6VehicleCrew.dll and, when its build made one next to it, that
+    build's EDF6AutoTurret.dll too (one commit's plugins: the game folder's own AutoTurret may be weeks older and its
+    cost was charged to the run). None (`--dll installed`): nothing placed."""
+    if not dll:
+        return ()
+    out = [f'{dll}=Plugins/EDF6VehicleCrew.dll']
+    turret = os.path.join(os.path.dirname(dll), 'EDF6AutoTurret.dll')
+    if os.path.isfile(turret):
+        out.append(f'{turret}=Plugins/EDF6AutoTurret.dll')
+    return tuple(out)
+
+
+def log_mark(log: str) -> tuple[int, int]:
+    """The plugin log's file id and size before a launch ((0, 0): none yet)."""
+    try:
+        st = os.stat(log)
+    except OSError:
+        return (0, 0)
+    return (st.st_ino, st.st_size)
+
+
+def run_log(log: str, mark: tuple[int, int]) -> bytes | None:
+    """What one launch wrote to the plugin log, `mark` its log_mark from before. Past 32 MB the plugin renames the log to
+    .log.1 and opens a new one (src/plugin.cpp): a rename keeps the file id, so the part before the rename is read from
+    .log.1 (from `mark`'s size when it is the same file, whole when the log turned over more than once and the start is
+    gone) ahead of the new log."""
+    if not os.path.exists(log):
+        return None
+    ino, size = mark
+    with open(log, 'rb') as f:
+        if ino and os.stat(log).st_ino == ino:
+            f.seek(size)
+            return f.read()
+        now = f.read()
+    old = log + '.1'
+    if not ino or not os.path.exists(old):
+        return now
+    with open(old, 'rb') as f:
+        if os.stat(old).st_ino == ino:
+            f.seek(size)
+            return f.read() + now
+        return b'(perfrun: the log turned over more than once; its start is lost)\r\n' + f.read() + now
+
+
 def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, variant: str = '') -> int:
     """One launch of the game: the scenario, sampled, its run.json and logs in `out`; everything put back. Non-zero
     when nothing was sampled, the run failed, or the range's files could not be put back (the game still running)."""
@@ -187,15 +234,15 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     marks: dict = {}
     log = plugin_log(game)
     # the plugin appends to its log across launches: only what this launch writes is this run's
-    log_from = os.path.getsize(log) if os.path.exists(log) else 0
+    log_at = log_mark(log)
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
-        place = (f'{dll}=Plugins/EDF6VehicleCrew.dll',) if dll else ()
+        place = placements(dll)
         longest = int(warm + opts['cpu'] + opts['stacks'] + 90)
         # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
-                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1',),
+                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', *opts['ini']),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
                        during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
                        quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
@@ -207,16 +254,15 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
                 rc = rc or 1
             else:
                 gen.restore_scenario(game)
-    if os.path.exists(log):
-        with open(log, 'rb') as f:
-            if os.path.getsize(log) >= log_from:   # smaller: rotated (32 MB) during the run, all of it is new
-                f.seek(log_from)
-            data = f.read()
+    data = run_log(log, log_at)
+    if data is not None:
         with open(os.path.join(out, 'vehiclecrew.log'), 'wb') as f:
             f.write(data)
     used = dll or os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
+    turret = os.path.join(os.path.dirname(used), 'EDF6AutoTurret.dll')
     run = dict(scenario=scenario, variant=variant, dll=dll, sha256=sha256(used) if os.path.exists(used) else '?',
+               turret_sha256=sha256(turret) if os.path.exists(turret) else '?',
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
@@ -228,7 +274,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
-            'difficulty': 1, 'out': None, 'shots': False, 'restore': False}
+            'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': []}
     pos = []
     i = 0
     while i < len(argv):
@@ -241,6 +287,11 @@ def options(argv: list[str]) -> tuple[str, dict]:
             i += 3
         elif a in ('--dll', '--out'):
             opts[a[2:]] = argv[i + 1]
+            i += 2
+        elif a == '--ini':
+            if '=' not in argv[i + 1]:
+                raise SystemExit('--ini wants KEY=VALUE')
+            opts['ini'].append(argv[i + 1])
             i += 2
         elif a == '--warm':
             opts['warm'] = float(argv[i + 1])
