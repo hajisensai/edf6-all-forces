@@ -14691,6 +14691,36 @@ def _jobs(argv: list[str]) -> int:
     return max(1, min(8, os.cpu_count() or 1))
 
 
+@test
+def air_support_arrival_is_the_flight_controls() -> None:
+    """2026-11-08 「部分援军无法正常跟随，炮艇机要盘旋一会才能参战」: an air call's guard of the call point is let go aircraft
+    by aircraft on the arrival its own flight control judges (support_aircraft.h SupportEntry: jet_internal.h
+    MapCommandMoving's patrol ring, heli.cpp CommandMoving's guard orbit), never on a distance the dispatcher picks (its
+    150 m test no fixed wing on a 600-1500 m ring ever passed: a follow call guarded the point all mission); a loss on the
+    way never skips that; a gunship has arrived once inside its reach (TargetRange), not only on its ring."""
+    dispatch = src('src/support_dispatch.cpp')
+    body = dispatch[dispatch.index('bool AirArrival(Deployment& deployed) noexcept {'):]
+    body = body[:body.index('\n}\n') + 3]
+    assert 'HeliSupportEntry(' in body and 'JetSupportEntry(' in body and 'released[i]=true' in body, body
+    assert 'FlatDistance' not in body and not re.search(r'<\s*\d{2,}', body), 'no fixed air arrival distance'
+    assert 'AirArrival(deployed)' in dispatch
+    assert not re.search(r'FlatDistance\([^;]*plan\.target\)\s*<\s*1\d\d\b', dispatch), 'the old 150 m air arrival is back'
+    lost = dispatch[dispatch.index('if(!alive && deployed.started) {'):]
+    lost = lost[:lost.index('} else if(!alive ||')]
+    assert 'ground || infantry' in lost and lost.count('continue;') == 1, 'an air loss on the way falls through to AirArrival'
+    jet = src('src/jet_internal.h')
+    moving = jet[jet.index('inline bool MapCommandMoving('):]
+    moving = moving[:moving.index('\n}\n')]
+    assert re.search(r'k\.weapon==Weapon::shells\s*\?\s*std::fmax\(ring\+40\.0f,range\)', moving), 'gunship arrives in its reach'
+    assert 'arrive+100.0f' in moving, 'its leash keeps the hysteresis'
+    assert 'cmdMoving' in jet[jet.index('inline SupportEntry SupportEntryOf('):][:900]
+    heli = src('src/heli.cpp')
+    entry = heli[heli.index('SupportEntry HeliSupportEntry('):][:900]
+    assert 'cmdMoving' in entry and 'Order::guard' in entry
+    spawn = src('src/jet_spawn.cpp')
+    assert 'SupportEntryOf(*j,target)' in spawn
+
+
 def main(argv: list[str] | None = None) -> int:
     """Every test, in -j worker processes (each a fresh interpreter: what one test leaves in a module's state stays in
     its worker, as it stayed in the one process before). The tests share no file outside their own temporary folders.

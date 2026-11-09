@@ -424,14 +424,6 @@ const float* GunnerAnchor(const Jet& j,const GunnerOrder& o) noexcept {
 
 constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a jet JetFrame stepped this recently is flown by the plugin now
 
-// What a jet works round under a map command (mapcmd.cpp): the point it was sent to guard, the player it was told to
-// follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
-const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
-    if(j.cmd.order==Order::guard)return j.cmd.at;
-    if(j.cmd.order==Order::follow && follow)return player.pos;
-    return own;
-}
-
 // A jet a map command reaches: the friendly side's, flown by the plugin's NPC now (JetFrame stamped it just now: not one
 // the player flies or that is called down for them), not withdrawing or being deleted, not a
 // carrier's drone (its carrier sends it) nor a Primer creature.

@@ -114,6 +114,33 @@ int main() {
     check(!HeliCommand(vehicle,Command{Order::focus,{}},ObjRef{}),"focus with no marked enemy is refused");
     h.focus=ObjRef::Of(enemy);
     check(HeliCommand(vehicle,Command{Order::follow,{}}) && !h.focus,"another order lets the focus target go");
+    // A called heli on its way in (support_aircraft.h SupportEntry; support_dispatch.cpp AirArrival lets its guard of the
+    // call point go with Order::none on `arrived`, which also drops a focus: HeliCommand). 2026-11-09 review.
+    {
+        const float* point=guard.at;const Command elsewhere{Order::guard,{500.0f,0.0f,0.0f}};
+        check(HeliCommand(vehicle,guard) && HeliSupportEntry(vehicle,point)==SupportEntry::flying,"sent in: flying until there");
+        h.cmdMoving=false;
+        check(HeliSupportEntry(vehicle,point)==SupportEntry::arrived,"its guard orbit reached: arrived");
+        h.focus=ObjRef::Of(enemy);
+        check(HeliSupportEntry(vehicle,point)==SupportEntry::flying,"a focus order the player gave it: never let go over it");
+        h.focus={};
+        check(HeliCommand(vehicle,elsewhere) && HeliSupportEntry(vehicle,point)==SupportEntry::superseded,
+              "the player's own guard elsewhere is never taken back");
+        check(HeliCommand(vehicle,Command{Order::none,{}}) && HeliSupportEntry(vehicle,point)==SupportEntry::superseded,
+              "let go already: nothing to let go");
+        check(HeliCommand(vehicle,guard),"sent in again");h.cmdMoving=false;
+        h.ferry=true;check(HeliSupportEntry(vehicle,point)==SupportEntry::superseded,"a squad's ferry is its own order");
+        h.ferry=false;h.called=true;HeliSortie(vehicle,SortiePass::heliStrafe,point);
+        check(h.sortie==SortiePass::heliStrafe && HeliSupportEntry(vehicle,point)==SupportEntry::sortie,
+              "a sortie flies its own one pass, set the moment it is sent: not arrived");
+        h.leaving=true;check(HeliSupportEntry(vehicle,point)==SupportEntry::gone,"leaving: nothing to hand over");
+        h.leaving=false;h.sortie=SortiePass::none;h.called=false;h.reap=true;
+        check(HeliSupportEntry(vehicle,point)==SupportEntry::gone,"being deleted: nothing to hand over");
+        h.reap=false;
+        check(HeliSupportEntry(vehicle,nullptr)==SupportEntry::gone && HeliSupportEntry(enemy,point)==SupportEntry::gone,
+              "none of ours: gone");
+        check(HeliCommand(vehicle,Command{Order::follow,{}}),"back to follow");
+    }
     // A squad's transport (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机"): a ferry holds over its point,
     // engaging nothing; landing, it comes down on that point (never beside the player); kept for its squad, it does not leave
     // for fuel or ammo; HeliFerry(nullptr) ends the ferry.
