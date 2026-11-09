@@ -10355,6 +10355,135 @@ def edf41_mother401_plugin_contract() -> None:
 
 
 @test
+def edf41_mother401_parts_collision_layer() -> None:
+    """The Earth Eater's parts sit on the EDF6 layers that stand for 4.1's (docs/feedback-2026-11-08-edf41-earth-eater.md,
+    docs/edf41-ufomother401.md 2.7): EventAnimationObject leaves every body on 0x11, a map layer EDF6's area damage (query layer 13)
+    never meets, so rockets did nothing to them. 4.1 puts a panel's shell on 13, the core's (is_keyframe_ragdoll 1) on 7 and a
+    battery's on the ragdoll default 6; src/edf41_hitlayer.h carries both games' CollisionFilter pair lists and picks the EDF6 layer
+    that meets the body layers 1..8, the map ray and the area damage as 4.1's layer does (15 / 7 / 6). Checked here: the plugin reads
+    is_keyframe_ragdoll and moves through the shared, fingerprinted layer code only when the live table agrees; the shipped data keeps
+    the key on the core alone; the choice recomputed from the header's pairs; and, with the games installed, the pair lists and the
+    4.1 layer code byte for byte."""
+    cpp = re.sub(r'//[^\n]*', '', src('src/edf41mother401.cpp'))
+    hdr = src('src/edf41_hitlayer.h')
+    fn = cpp.split('bool PartLayer(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Key(p.obj,L"is_keyframe_ragdoll")' in fn and '!battery &&' in fn, 'the core / panel split is the SGO key (4.1 0x26FAB0)'
+    assert 'edf41layer::Part41Layer(battery,keyframe)' in fn and 'edf41layer::Edf6For41(l41)' in fn
+    assert 'edf41layer::LivePrims()' in fn and 'edf41layer::LiveAgrees(table,to)' in fn, "move only on this build's code and table"
+    assert fn.index('(table && !edf41layer::LiveAgrees(table,to))') < fn.index('LiveSetRagdollLayer'), 'the table check comes before the move'
+    assert '0x6E9320' not in cpp and 'kRagdollSetLayer' not in cpp, 'the 401 parts use the shared layer code (src/edf41layer_live.h)'
+    upd = cpp.split('std::uint64_t __fastcall PartUpdate(void* self,void* dt) {', 1)[1]
+    assert re.search(r'InitPart\(\*p\); \}\s*if\(!p->layerDone\)p->layerDone=PartLayer\(\*p\);', upd), 'once, from the first frame on'
+    live = src('src/edf41mother.cpp').split('namespace edf41layer {', 1)[1].split('}  // namespace edf41layer', 1)[0]
+    assert 'LayerPrims() &&' in live and 'kRagdollSetLayer' in live
+
+    def pair_list(name: str) -> list[tuple[int, int]]:
+        body = hdr.split(f'inline constexpr unsigned char {name}[][2]={{', 1)[1].split('};', 1)[0]
+        return [(int(a), int(b)) for a, b in re.findall(r'\{(\d+),(\d+)\}', body)]
+    p6, p41 = pair_list('kEdf6Pairs'), pair_list('kEdf41Pairs')
+    assert len(p6) == 141 and len(p41) == 118
+    assert 'kEdf6FilterLayers=30,kEdf41FilterLayers=28' in hdr
+
+    def table(layers: int, pairs: list[tuple[int, int]]) -> list[int]:
+        t = [0xFFFFFFFF] * 32
+        for lay in range(1, layers):
+            a, b = 1 << lay, 0xFFFFFFFE
+            for i in range(32):
+                if a >> i & 1:
+                    t[i] &= ~b & 0xFFFFFFFF
+                if b >> i & 1:
+                    t[i] &= ~a & 0xFFFFFFFF
+        for a, b in pairs:
+            t[a] |= 1 << b
+            t[b] |= 1 << a
+        return t
+    t6, t41 = table(30, p6), table(28, p41)
+
+    def sees(t: list[int], a: int, b: int) -> bool:
+        return bool(t[a] >> b & 1)
+
+    def stands(l6: int, l41: int) -> bool:
+        return (all(sees(t6, l6, c) == sees(t41, l41, c) for c in range(1, 9)) and sees(t6, 22, l6) == sees(t41, 19, l41)
+                and sees(t6, 13, l6))
+    pick = {l41: next((l6 for l6 in range(1, 30) if stands(l6, l41)), -1) for l41 in (13, 7, 6)}
+    assert pick == {13: 15, 7: 7, 6: 6}, pick
+    assert sees(t6, 22, 0x11) and not sees(t6, 13, 0x11), "EventAnimationObject's 0x11: map ray yes, area damage no"
+    assert sees(t41, 19, 13), "4.1's own map ray meets its panels: the panels are map-like in 4.1 too"
+    # The gravity gun's grab ray is layer 15 and does not meet 15: after the move it still misses the panels, the core (7) and the
+    # batteries (6) come into its reach (docs/feedback-2026-11-08-edf41-earth-eater.md). tests/edf41_hitlayer_test.cpp checks it on the
+    # same constant; both must follow src/gravity.cpp.
+    grab = int(re.search(r'constexpr std::uint32_t kGrabLayer=(0x[0-9A-Fa-f]+);', src('src/gravity.cpp')).group(1), 0)
+    assert f'constexpr int kGravityGrab=0x{grab:02X};' in src('tests/edf41_hitlayer_test.cpp'), 'the hit layer test follows kGrabLayer'
+    assert not sees(t6, grab, pick[13]) and sees(t6, grab, pick[7]) and sees(t6, grab, pick[6]) and not sees(t6, grab, 0x11)
+    fb = src('docs/feedback-2026-11-08-edf41-earth-eater.md')
+    assert '现在能打到面板' not in fb and '仍然打不到面板' in fb, 'the gravity gun line names the core and batteries, not the panels'
+
+    import edf41_objects as eo
+    import sgo
+    kf = {}
+    for rel in eo.registry()['files']:
+        if rel.startswith('OBJECT/UFOMOTHER401_') and rel.endswith('.SGO'):
+            kf[rel] = sgo.load(data=eo.read(rel)).get('is_keyframe_ragdoll', 0)
+    assert kf and {r for r, v in kf.items() if v} == {'OBJECT/UFOMOTHER401_COREPANEL.SGO'}, kf
+
+    import capstone
+    import pefile
+    import rootcpk
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+
+    def made_pairs(img: bytes, start: int, enable: int, rbx: int) -> list[tuple[int, int]]:
+        regs = {'ebx': rbx}
+        out: list[tuple[int, int]] = []
+        for ins in md.disasm(img[start:start + 0x1000], start):
+            if ins.mnemonic == 'ret':
+                break
+            if ins.mnemonic == 'call' and ins.op_str == hex(enable):
+                out.append((regs['edx'], regs['r8d']))
+                continue
+            m = re.fullmatch(r'(edx|r8d), (0x[0-9a-f]+|\d+)', ins.op_str)
+            if ins.mnemonic == 'mov' and m:
+                regs[m.group(1)] = int(m.group(2), 0)
+                continue
+            m = re.fullmatch(r'(edx|r8d), (edx|r8d)', ins.op_str)
+            if ins.mnemonic == 'mov' and m:
+                regs[m.group(1)] = regs[m.group(2)]
+                continue
+            m = re.fullmatch(r'(edx|r8d), \[(rbx|rdx|r8)(?: ([+-]) (0x[0-9a-f]+|\d+))?\]', ins.op_str)
+            if ins.mnemonic == 'lea' and m:
+                v = regs[{'rbx': 'ebx', 'rdx': 'edx', 'r8': 'r8d'}[m.group(2)]]
+                d = int(m.group(4), 0) if m.group(4) else 0
+                regs[m.group(1)] = v - d if m.group(3) == '-' else v + d
+        return out
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        with pefile.PE(dll, fast_load=True) as pe:
+            img = pe.get_memory_mapped_image()
+        assert img[0x105583:0x105588].hex() == 'e808d5c800' and img[0x10558A:0x10558D].hex() == '83fb1e', 'EDF6 0x105510: 1..29 off'
+        assert img[0x106070:0x10607C].hex() == '33d24533c94533c08d4a0de9', 'EDF6 area query: layer 13'
+        assert img[0x106100:0x10610C].hex() == '33d24533c94533c08d4a16e9', 'EDF6 map ray: layer 22'
+        assert made_pairs(img, 0x10558F, 0xD92E50, 30) == p6, 'kEdf6Pairs is not what EDF.dll 0x105510 enables'
+    else:
+        print('skip  edf41_mother401_parts_collision_layer (EDF6 code): EDF6 not installed')
+    exe = os.path.join(os.path.dirname(rootcpk.DEFAULT_GAME), 'Earth Defense Force 4.1', 'EDF41.exe')
+    if not os.path.exists(exe):
+        print('skip  edf41_mother401_parts_collision_layer (4.1 code): EDF4.1 not installed')
+        return
+    with pefile.PE(exe, fast_load=True) as pe:
+        img = pe.get_memory_mapped_image()
+
+    def at(rva: int, hexbytes: str) -> None:
+        assert img[rva:rva + len(hexbytes) // 2].hex() == hexbytes, f'EDF41.exe 0x{rva:X}: not the code these notes read'
+    at(0xEBD43, 'e8b8b34f00')   # CollisionFilter 0xEBC70: disableCollisionsUsingBitfield(1 << l, ~1) ...
+    at(0xEBD4A, '83fb1c')       # ... for l = 1..27
+    assert made_pairs(img, 0xEBD4F, 0x5E7050, 28) == p41, 'kEdf41Pairs is not what EDF41.exe 0xEBC70 enables'
+    # PanelBase's shell 0x26FAB0: is_keyframe_ragdoll (r14d 2) -> 0x334370(ragdoll, 7), else 0xEEC00 -> layer 13
+    at(0x26FC38, '4183fe024c8b742440750fba07000000488bcee820470c00eb0c488d8bf0030000e8a2efe7ff')
+    at(0xEEC2F, '4183c80d')     # or r8d, 0xD
+    at(0x334014, '83c906')      # the ragdoll default (0x333FB0): or ecx, 6, the batteries' layer
+    at(0x14D155, 'c744247413000000')   # the spawn position ray casts with filter info 0x13: layer 19
+
+
+@test
 def edf41_mother401_parts_take_the_hull_level() -> None:
     """The Earth Eater's parts are as tough, and their guns as strong / accurate / fast, as the hull's level makes them
     (docs/feedback-2026-10-17-eartheater.md): 4.1 gives every panel the hull's effective level (+0x490, which the hull's slot 3

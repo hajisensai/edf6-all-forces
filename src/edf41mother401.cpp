@@ -32,7 +32,9 @@
 #endif
 #include "crew.h"
 #include "team_native_logic.h"
+#include "edf41_hitlayer.h"
 #include "edf41classes.h"
+#include "edf41layer_live.h"
 #include "edf41net.h"
 #include "enemy_control_legacy_mother.h"
 #include "pvp_controlled.h"
@@ -213,6 +215,7 @@ struct Part {
     int weakTries=0;
     int weakBone=-2;           // development (DevShoot): the weakpoint bone on the skeleton, -2 not looked up
     bool wholeHits=false;      // FinalCannon01 / FinalGenerator / the batteries: every hit counts (4.1 slot 10 0xb3630)
+    bool layerDone=false;      // its hit bodies are on 4.1's layer (PartLayer), or left as they are for a logged reason
     struct Mount { float pos[3]; std::uint64_t battery; };
     std::vector<Mount> mounts;
     bool mountsMade=false;
@@ -993,6 +996,42 @@ bool TickBattery(Part& b) noexcept {
     return false;
 }
 
+// ---- a part's collision layer (src/edf41_hitlayer.h; docs/edf41-ufomother401.md 2.7) -----------------------------------------
+// EventAnimationObject's constructor puts every body on layer 0x11 (0x5B6401 0x6E9320(ragdoll, 0x11)): a map layer the area damage's
+// query (13) does not meet, so rockets and missiles never hurt a part, and one 4.1 never used for them. 4.1 puts a panel's shell on
+// 13 (is_keyframe_ragdoll 0) or 7 (the core's 1), PanelBase 0x26FAB0, and leaves a battery's on the ragdoll default 6 (0x333FB0);
+// each goes to the EDF6 layer that meets the body layers, the map ray and the area damage as 4.1's does (edf41layer::Edf6For41:
+// 15 / 7 / 6). Done once, when the ragdoll has its bodies (0x6E9320 moves the bodies it has); nothing moves when the layer code is
+// not this build's or a live filter table found disagrees with the constructor's on the rows the choice rests on (logged).
+bool PartLayer(Part& p) noexcept {
+    void* ragdoll=static_cast<char*>(p.obj)+kRagdollAt;
+    std::int32_t kf=0;
+    const bool battery=IsBattery(p.kind);
+    const bool keyframe=!battery && Int(Key(p.obj,L"is_keyframe_ragdoll"),&kf) && kf!=0;
+    const int l41=edf41layer::Part41Layer(battery,keyframe),to=edf41layer::Edf6For41(l41);
+    static std::atomic<int> said[12]{};
+    const bool first=said[static_cast<int>(p.kind)].fetch_add(1)<1;
+    if(!edf41layer::LivePrims()) {
+        if(first)Log("EDF41M401 %s %p: the collision layer code is not this build's, its bodies stay where EventAnimationObject put them",KindName(p.kind),p.obj);
+        return true;
+    }
+    std::size_t n=0;
+    const int from=edf41layer::LiveRagdollLayer(ragdoll,&n);
+    if(from<0 || !n) { if(first)said[static_cast<int>(p.kind)].fetch_sub(1); return false; }   // no bodies yet
+    const int query=edf41layer::LiveAreaQueryLayer();
+    const std::uint32_t* table=edf41layer::LiveTable();
+    // no live table found: the constructor's (this EDF.dll's 0x105510, the only build the plugin runs on) stands
+    if(to<0 || query!=edf41layer::kEdf6AreaQuery || (table && !edf41layer::LiveAgrees(table,to))) {
+        if(first)Log("EDF41M401 %s %p: layer 0x%X kept (4.1 layer %d -> EDF6 %d; area query %d; the live filter table differs from 0x105510's: %d)",
+                     KindName(p.kind),p.obj,from,l41,to,query,table ? 1 : 0);
+        return true;
+    }
+    if(from!=to)edf41layer::LiveSetRagdollLayer(ragdoll,to);
+    if(first)Log("EDF41M401 %s %p: %zu bodies, layer 0x%X -> %d (4.1 %d%s; now 0x%X; live filter table %s)",KindName(p.kind),p.obj,n,from,to,l41,
+                 keyframe ? ", keyframe" : "",edf41layer::LiveRagdollLayer(ragdoll),table ? "agrees" : "not found, the constructor's");
+    return true;
+}
+
 // ---- first update of a part: its 4.1 fields from the SGO -----------------------------------------------------------------
 void GlowsMake(Part& p) noexcept;
 void InitPart(Part& p) noexcept {
@@ -1650,6 +1689,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         Part* p=Find(self);
         if(p) {   // every machine (edf41net; see HullUpdate)
             if(!p->seen) { p->seen=true; InitPart(*p); }
+            if(!p->layerDone)p->layerDone=PartLayer(*p);
             NetPartIn(*p);ControlTick401(*p);   // online: the host's attack starts, a kill seen from the HP alone
             if(!p->farDone && p->farTries<600) { ++p->farTries; p->farDone=FarRender(self); }
             if(IsBattery(p->kind)) {
