@@ -766,6 +766,14 @@ int main() {
           "the configured aircraft count reaches the runway planner and the crew carry the configured weapon");
     SupportPlan hostPlan=deployments[0].plan;
     check(Validate(hostPlan),"a peer accepts the host's configured weapons and count (structure, not its own ini)");
+    // A peer without the aircraft's body (the model pack: jet_internal.h Body::sup*) refuses the plan at PREPARE
+    // (Validate), as it does a ground vehicle or a soldier kind it lacks: nothing made, not a rollback after COMMIT.
+    {
+        const int before=made;transportReady=false;
+        check(!Validate(hostPlan) && made==before,"a peer without the aircraft's body installed / preloaded refuses the plan, nothing made");
+        transportReady=true;
+        check(Validate(hostPlan),"the same plan validates once the body is there");
+    }
     hostPlan.units[1].resourceId=0x503;check(!Validate(hostPlan),"a non-template soldier resource is refused");
     // A room with an older All Forces peer (no kCapSoldierVariants): the host plans the protocol v2 plan an older
     // Validate accepts (rifles, each call's own aircraft count) and says why, instead of a silent mid-transaction refusal.

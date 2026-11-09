@@ -828,6 +828,13 @@ bool Validate(const SupportPlan& plan) noexcept {
     // The rescue is not held to the mission's support rules (Plan does not ask them either).
     if(!IsRescue(plan.catalogId) && !support::Allowed(SupportMissionPolicy(),capability))return false;
     if(air && !AircraftSpecOf(plan.catalogId,&aircraft))return false;
+    // Its hull must be installed and preloaded here too (as Plan checks the host's; the strike jet / fighter / interceptor /
+    // multirole are the model pack's Dreadnought models, jet_internal.h Body::sup*): a peer without them answers READY !ok
+    // at PREPARE, so the host refuses before anything is made instead of every machine making it and rolling it back.
+    if(air && !SupportAircraftReady(aircraft)) {
+        Log("SUPPORT validate catalog=%u: %ls not installed / preloaded here (the model pack)",plan.catalogId,SupportAircraftFile(aircraft));
+        return false;
+    }
     if(ground && !SupportVehicleReady(kind,mode))return false;
     // Weapons and the number of aircraft are the host's configuration: a peer checks the structure and that every
     // soldier is one of the stock templates, never against its own ini.
