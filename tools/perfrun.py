@@ -284,14 +284,21 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
                        during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
                        quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
     finally:
+        # What drive.run left is on disk (drive.placed_dir), not in which way its own look at the game went: the game
+        # closed by now, it is put back here (restore_placed does nothing when drive.run already did).
         if drive.game_pids():
-            # drive.run left the placed DLLs, the ini and the autopilot (recorded on disk: drive.restore_placed)
-            print('!!! the game is still running: NOT put back: the placed plugins, the ini, the autopilot' +
-                  (f', the range mission (its originals kept in {gen.scenario_backup(game)})' if plan else '') +
-                  '. python tools/perfrun.py --restore once the game is closed')
-            rc = rc or 1
-        elif plan:
-            gen.restore_scenario(game)
+            if plan or drive.anything_left(game):
+                print('!!! the game is still running: NOT put back: the placed plugins, the ini, the autopilot' +
+                      (f', the range mission (its originals kept in {gen.scenario_backup(game)})' if plan else '') +
+                      '. python tools/perfrun.py --restore once the game is closed')
+                rc = rc or 1
+        else:
+            if plan:
+                gen.restore_scenario(game)
+            if not drive.restore_placed(game):
+                print('!!! not everything placed is put back (said above): python tools/perfrun.py --restore '
+                      'once it is dealt with')
+                rc = rc or 1
     data = run_log(log, log_at)
     if data is not None:
         with open(os.path.join(out, 'vehiclecrew.log'), 'wb') as f:

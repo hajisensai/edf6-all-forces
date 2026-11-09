@@ -276,7 +276,7 @@ def report_parsing() -> None:
 
 def drive_during() -> None:
     import drive
-    src = inspect.getsource(drive.run)
+    src = inspect.getsource(drive._session)   # drive.run's launch and stay
     check('during' in inspect.signature(drive.run).parameters and 'not worker.is_alive()' in src,
           "drive.run's stay ends when `during` returns")
 
@@ -387,6 +387,7 @@ def outlived_runs() -> None:
         drive.game_pids = lambda: list(running)
 
         def fake_run(*a, **k):
+            os.makedirs(drive.placed_dir(game), exist_ok=True)   # what it placed (the ini at least) is recorded
             running.append(1)   # the game does not leave
             return 1
         drive.run = fake_run
@@ -414,6 +415,27 @@ def outlived_runs() -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             rc = perfrun.main(['--restore'])
         check(rc == 1, '--restore fails while a placed file is left (changed by someone else)')
+        # The game leaving between drive.run's own look (still there: nothing put back) and one_run's: one_run puts
+        # back what the disk says is left, and a file left over fails the run.
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) or True
+
+        def late_exit(*a, **k):
+            return 1   # drive.run saw the game, left everything; it is gone now
+        drive.run = late_exit
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out2'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc == 1 and calls == [('placed', game)], 'the game gone after drive.run: one_run puts back what is left')
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) and False
+        drive.run = lambda *a, **k: 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out3'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc == 1 and calls == [('placed', game)] and 'perfrun.py --restore' in out.getvalue(),
+              'a placed file left over: the run fails, with the command that puts it back')
     finally:
         drive.game_pids, drive.run, drive.restore_placed, gen.restore_scenario, perfrun.gamedir.find_or_dev = saved
         import shutil
