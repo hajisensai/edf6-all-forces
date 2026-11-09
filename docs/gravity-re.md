@@ -549,7 +549,7 @@ SceneObject* o = BodyToObject(id);              // 0x108260：可能为 nullptr�
   不是另建 EventAnimationObject（`raycast-re.md` 说的 EAO layer 17 只是 EAO 自己，0x5B6401）。
 - InsectBase：OnDamaged 0x4A8DA0 见 +0x2E8 → `0x6DAE80(obj+0xE00)` 移除 cling 刚体；死亡状态（如 0x422C70）`0x4A8570` 激活 ragdoll（→0x6E4160）、
   `0x6ECF20(obj+0xB10, 0x11B1300(*(obj+0xE10)))` 把 cling 刚体当时的速度交给 ragdoll（0x4230B0..D2，H）。
-- HumanoidBase：第 60 槽 0x479640：`0x6E40B0(*(obj+0xA78))` 激活 ragdoll，再 `0x6EED10(*(base+0x20B30E0), ragdoll, weak self)` 登记到全局 ragdoll 管理器（H 调用；管理器语义/上限 M）。
+- HumanoidBase：第 60 槽 0x479640：`0x6E40B0(*(obj+0xA78))` 激活 ragdoll，再 `0x6EED10(*(base+0x20B30E0), ragdoll, weak self)` 登记到全局 ragdoll 管理器（H；容量 256 / 512 与生成器对象不进池见 `stress-re.md` 的尸体一条）。
 - HumanBase：ragdoll obj+0xD90，`+0x1180` = ragdoll 态（M），爆炸倒地也进 ragdoll（不死也会）。
 - MonsterBase：ragdoll obj+0xDA0，ctor 设层 8（`0x6E9320(rg, 8)`，0x4B5964，H）。
 

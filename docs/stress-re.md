@@ -30,5 +30,9 @@
 - 插件士兵 AI 的 `ThinkHook`（装在 ai_update 里 vtable 槽 7 上）占游戏线程 63%（stress:10）/ 60%（stress:30），其中 `WastedFire` 58% / 52%，`Feedback` 自身 46% / 40%。`PickTarget`（`src/npc_logic.h`）对每个敌人先算 `WastedFire` 再比距离；载具炮手的 `GunnerVisit` 也一样。
 - Havok 7–14%。
 - 特效与 ModelDebris 不到游戏线程的 2%。
-- 尸体由游戏本体限量：蚂蚁的死亡状态 15 s 后自删；RagdollManager（`0x6EED10` / `0x6EF090`）超出 256 / 512 个刚体预算时删最旧的尸体。规模变大时尸体不会无限堆积。
+- 尸体：蚂蚁的死亡状态 15 s 后自删。RagdollManager（单例 `[0x20B30E0]`，登记 `0x6EED10`，求和 `0x6EF090`）只限量**已登记**的布娃娃，是一个池、两种容量（2026-11-08 静态核对，H）：
+  - 计量是各条目 `+0x28`（取自 ragdoll `+0x88`，推测为刚体数）之和；超出时从最旧的删起，至少留 1 个（`0x6EEF21` / `0x6EEF30`）。
+  - 容量看 `[[0x20B2890]+0x40]`：1 或 2 时 256（`0x6EEF0B`），否则 512（`0x6EEF13`）。脚本 `SetLightWeightMode()`（`0x1BA160`，写 1）/ `SetFullLightWeightMode()`（`0x1BA150`，写 2）设它，每关在 `0x215044` 重置为 0。同一字段还把别处的上限 400→200（`0x2F9AC6` 等）、50→10（`0x4888FE`），对象未追。
+  - 带 `obj+0x380` 0x8000000 位的对象（唯一写入 `0x6E1162`，推测是生成器 / 传送出来的敌人，M）默认**不登记**（`0x6EEDBD` / `0x6EEDC9`），除非本关脚本调 `SetRagdollManagerAcceptGeneratorObjectMode(true)`（`0x1BAA20`，置 `mgr+0x18` bit0，`0x6EF0D0` 每关清零）。
+  - 所以 testrange 用 `CreateEnemyGroup` 的 stress / swarm 是 512、进池；用 `SetEnemyGenerator` 出兵的场景（如 `testrange/sub_vs_mothership.py`）尸体不受这个池约束。「规模变大尸体不会无限堆积」只对已登记的布娃娃成立。来源：QQ 群反馈（及开，2026-11-08）。
 - 音频与渲染不在关键路径上（各自线程，等游戏线程）。
