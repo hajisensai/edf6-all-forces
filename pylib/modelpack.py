@@ -77,15 +77,15 @@ def problem(app_dir: str) -> str | None:
             have = json.load(f)
     except (OSError, ValueError):
         return (f'这个安装器需要模型包 {want}，但安装器旁的 models 文件夹里没有它。'
-                f'请把“模型包”zip 解压到安装器所在文件夹（合并进 models 和 edf41）后重试。')
+                f'请把“模型包”的全部 zip（分成几片的，每片都要）解压到安装器所在文件夹（合并进 models 和 edf41）后重试。')
     if not isinstance(have, dict) or have.get('version') != want:
         return (f'这个安装器需要模型包 {want}，但 models 文件夹是 {have.get("version") if isinstance(have, dict) else "?"}。'
-                f'请解压对应版本的“模型包”zip 覆盖进 models 和 edf41 后重试。')
+                f'请解压对应版本“模型包”的全部 zip（每片都要）覆盖进 models 和 edf41 后重试。')
     files = have.get('files') if isinstance(have, dict) else None
     if not isinstance(files, dict) or any(str(rel).partition('/')[0] not in PARTS for rel in files):
-        return f'模型包 {want} 的 {MANIFEST} 损坏，请重新解压“模型包”zip。'
+        return f'模型包 {want} 的 {MANIFEST} 损坏，请重新解压“模型包”的全部 zip。'
     for rel, size in files.items():
         p = path_of(app_dir, rel)
         if not os.path.isfile(p) or os.path.getsize(p) != size:
-            return f'模型包 {want} 不完整（{rel} 缺失或大小不对）。请重新解压“模型包”zip。'
+            return f'模型包 {want} 不完整（{rel} 缺失或大小不对）。模型包分成几片时每片都要解压，请重新解压“模型包”的全部 zip。'
     return None
