@@ -121,7 +121,10 @@ constexpr std::size_t kBatteryChargeAt=0x2E8;  // frames of charge left (0x6D547
 // the CAS players (0x53BB17: +0xBD0, main player [+0xFD0]); each player 0x160 bytes at [+0x60], count [+0x70] (0x1166FB0
 // reads them so); a player's clip clock +0xE8, length +0xF0 (edf41classes ClipNow, real-run with the dragon)
 constexpr std::size_t kCasAt=0xBD0,kCasPlayers=0x60,kCasPlayerCount=0x70,kCasPlayerSize=0x160,kClipTime=0xE8,kClipLength=0xF0;
-constexpr ULONGLONG kStaleMs=5000;           // an object not ticked for this long is a new one (or the game was paused)
+// An entry not ticked during this many Hector ticks (all Hectors' together) is of an object gone. Counted in ticks, not by the
+// wall clock: a paused game ticks nothing, so a pause never drops a live entry (its shields deleted and made again). Identity
+// is the weak-this control block (hector::CacheMatches), never age.
+constexpr std::uint64_t kStaleTicks=0x4000;
 
 struct Handle {
     void* tree;
@@ -145,7 +148,7 @@ struct Entry {
     hector::Config cfg;
     hector::Cycle cycle;
     hector::Rng rng;
-    ULONGLONG last=0;
+    std::uint64_t seenAt=0;          // `ticks` at its last Tick
     std::uint64_t tick=0;
     std::uint64_t pickTick=~0ull;
     unsigned pickMask=0;
@@ -367,6 +370,15 @@ void EraseEntry(const void* self) noexcept {
     table.erase(it);
 }
 
+// Forget the objects that are gone (kStaleTicks), their shields with them. Call with tableLock held.
+void SweepGone() noexcept {
+    for(auto it=table.begin();it!=table.end();) {
+        if(ticks-it->second.seenAt<=kStaleTicks) { ++it; continue; }
+        DropShields(it->second);
+        it=table.erase(it);
+    }
+}
+
 // The entry of a 4.1 Hector, or null. Call with tableLock held.
 Entry* Find(const void* self) noexcept {
     const auto it=table.find(self);
@@ -395,12 +407,8 @@ void Tick(void* self) noexcept {
     const ULONGLONG now=GetTickCount64();
     std::lock_guard<std::mutex> hold(tableLock);
     auto cached=table.find(self);
-    if(cached!=table.end() && !hector::CacheMatches(cached->second.ref.ctrl,ref.ctrl,marked))EraseEntry(self);
+    if(cached!=table.end() && !hector::CacheMatches(cached->second.ref.ctrl,ref.ctrl,marked))EraseEntry(self);   // another object here
     Entry* e=Find(self);
-    if(e && now-e->last>kStaleMs) {      // another object at this address, or a long pause: start again
-        EraseEntry(self);
-        e=nullptr;
-    }
     if(!e) {
         if(known && !ReadConfig(self,cfg)) {     // the entry went stale (or away) after the marker-only check: parse it now
             EraseEntry(self);
@@ -415,7 +423,7 @@ void Tick(void* self) noexcept {
             cfg.range[0],cfg.range[1],cfg.sameWeapon ? 1 : 0,cfg.dwellBase,cfg.dwellRand,cfg.retreatBase,cfg.retreatRand,cfg.closeIn,
             cfg.stopMin,cfg.stopMax,e->cycle.counter,e->cycle.stopRadius);
     }
-    e->last=now;
+    e->seenAt=++ticks;
     ++e->tick;
     e->haveTarget=have;
     if(have) {
@@ -427,12 +435,7 @@ void Tick(void* self) noexcept {
         else if(ev==hector::Event::BackoffEnd)
             Log("EDF41AI backoff end %p dist %.1f next counter %.0f stop radius %.1f",self,e->dist,e->cycle.counter,e->cycle.stopRadius);
     }
-    if((++ticks&0x3FFF)==0)       // forget the objects that are gone
-        for(auto it=table.begin();it!=table.end();) {
-            if(now-it->second.last<=kStaleMs) { ++it; continue; }
-            DropShields(it->second);
-            it=table.erase(it);
-        }
+    if((ticks&(kStaleTicks-1))==0)SweepGone();
 }
 
 // Whether gun `i` of the owner attacks now: the class's own gate for its per-gun aim (0x34F913..0x34F94E).

@@ -56,6 +56,9 @@ namespace {
 constexpr std::size_t kVtable=0x17ABA40;
 constexpr std::size_t kSlotTick=7;
 constexpr std::size_t kTick=0x334930;
+// Slot 1, the deleting destructor (0x32FBA0: it writes this vtable back at +0, stops the class's own sound at +0x1B38, flags in r14d).
+constexpr std::size_t kSlotDtor=1;
+constexpr std::size_t kDtor=0x32FBA0;
 constexpr std::size_t kCruise=0x33AC10;
 constexpr std::size_t kCruiseSites[]={0x334A21,0x334A57};
 constexpr std::size_t kFireball=0x33AE30;
@@ -117,6 +120,7 @@ struct Handle {
     void* sgo;
 };
 using TickFn=std::uint64_t(__fastcall*)(void*,void*);
+using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);
 using TargetOfFn=char*(__fastcall*)(void*);
 using RestSumFn=float(__fastcall*)(void*);
 using CruiseFn=void(__fastcall*)(void*,void*,float);
@@ -147,7 +151,6 @@ struct Dragon {
     const Node* custom=nullptr;
     std::uint64_t rng=0;
     std::uint64_t shots=0;
-    ULONGLONG seen=0;
     int lastState=-2;
     int logged=0;
     unsigned probe=0;
@@ -161,6 +164,7 @@ struct Dragon {
 };
 
 TickFn nextTick=nullptr;
+DtorFn nextDtor=nullptr;
 std::mutex lock;
 std::unordered_map<const void*,Dragon> dragons;
 std::vector<std::vector<Node>> customCopies;   // never freed: a bullet keeps a pointer into one
@@ -416,29 +420,52 @@ void Breathe(char* self,Dragon& d) noexcept {
 }
 
 // The entry of `self` (a new one configured), or null when it is not a 4.1 dragon. Call with `lock` held.
+// An entry lives exactly as long as its object: DtorHook drops it with its sounds stopped (edf41_sound_channels.h: the
+// object's lifecycle ends a channel), ShutdownDragons stops what is left before the sound system goes. So an entry is never
+// judged by the wall clock (a paused game updates no object: the clip's sounds would be fired again from a new timeline) and a
+// new object at an old address never finds the old entry. Only an object of this exact vtable gets one: only its destructor
+// is hooked.
 Dragon* Find(void* self) noexcept {
-    const ULONGLONG now=GetTickCount64();
+    if(*static_cast<void* const*>(self)!=image+kVtable)return nullptr;
     auto it=dragons.find(self);
-    if(it!=dragons.end() && now-it->second.seen>5000) { StopSounds(it->second,0); dragons.erase(it); it=dragons.end(); }
     if(it==dragons.end()) {
         Dragon d;
         d.marked=Key(self,L"edf41_dragon")!=nullptr;
         if(d.marked) {
             d.ok=Configure(self,d);
             d.sounds=d.ok && ConfigureSounds(self,d);
-            d.rng=reinterpret_cast<std::uintptr_t>(self)^(now*0x9E3779B97F4A7C15ull);
+            d.rng=reinterpret_cast<std::uintptr_t>(self)^(GetTickCount64()*0x9E3779B97F4A7C15ull);
             Log("EDF41DRAGON %p configured=%d windows=%d (%d %.1f..%.1f, %d %.1f..%.1f, %d %.1f..%.1f) glide attack state %d",self,
                 d.ok ? 1 : 0,d.windowCount,d.windows[0].state,d.windows[0].from,d.windows[0].to,d.windows[1].state,d.windows[1].from,
                 d.windows[1].to,d.windows[2].state,d.windows[2].from,d.windows[2].to,d.glideAttack);
         }
         it=dragons.emplace(self,d).first;
-        if(dragons.size()>256)
-            for(auto j=dragons.begin();j!=dragons.end();)
-                if(j->first!=self && now-j->second.seen>5000) { StopSounds(j->second,0); j=dragons.erase(j); }
-                else ++j;
     }
-    it->second.seen=now;
     return it->second.marked && it->second.ok ? &it->second : nullptr;
+}
+
+// Slot 1 (kDtor): the entry goes with its object, its held MAB channels (the breath among them) stopped first. From the
+// application destructor on (edf41c::ShuttingDown) StopSound calls nothing: ShutdownDragons stopped them already.
+std::uint64_t __fastcall DtorHook(void* self,unsigned flags) {
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        const auto it=dragons.find(self);
+        if(it!=dragons.end()) {
+            StopSounds(it->second,0);
+            dragons.erase(it);
+        }
+    }
+    return nextDtor(self,flags);
+}
+
+// The game's shutdown (edf41c::AtGameShutdown, before the application destructor deletes the sound system): every dragon still
+// alive stops its sounds now; its destructor, if it comes later, only drops the entry.
+void ShutdownDragons() noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    int n=0;
+    for(auto& kv:dragons)
+        if(!kv.second.channels.Empty()) { StopSounds(kv.second,0); ++n; }
+    if(n)Log("EDF41DRAGON the game is shutting down: %d dragons' sounds stopped first",n);
 }
 
 char* MainPlayer(char* self) noexcept {
@@ -573,11 +600,20 @@ bool InstallEdf41Dragon() noexcept {
     }
     void** vtable=reinterpret_cast<void**>(image+kVtable);
     void* const tick=vtable[kSlotTick];
-    if(tick!=image+kTick) {
-        Log("EDF41DRAGON DragonSmall vtable slot 7 is %p, not EDF+%zX: not hooked",tick,kTick);
+    void* const dtor=vtable[kSlotDtor];
+    if(tick!=image+kTick || dtor!=image+kDtor) {
+        Log("EDF41DRAGON DragonSmall vtable slot 7 is %p (want EDF+%zX), slot 1 is %p (want EDF+%zX): not hooked",tick,kTick,dtor,kDtor);
         return false;
     }
     nextTick=reinterpret_cast<TickFn>(tick);
+    nextDtor=reinterpret_cast<DtorFn>(dtor);
+    // the destructor first: an entry is made only once it is there to drop it
+    const bool lifetime=PatchVtableSlot(vtable+kSlotDtor,dtor,reinterpret_cast<void*>(&DtorHook));
+    if(!lifetime) {
+        Log("EDF41DRAGON DragonSmall destructor slot not patched: not hooked");
+        return false;
+    }
+    edf41c::AtGameShutdown(&ShutdownDragons);   // the dragons' sounds stopped while the sound system still exists
     const bool t=PatchVtableSlot(vtable+kSlotTick,tick,reinterpret_cast<void*>(&TickHook));
     const bool control=t && enemy_native::RegisterControlledAiExtension(static_cast<std::uint32_t>(kVtable),static_cast<std::uint32_t>(kTick),
         &OwnsControlledTick,&ControlledTick,&ControlledSeed);
@@ -586,7 +622,7 @@ bool InstallEdf41Dragon() noexcept {
     for(const std::size_t site:kCruiseSites)
         cruise+=RedirectCall(image+site,image+kCruise,reinterpret_cast<void*>(&CruiseHook),changed) ? 1 : 0;
     const bool glide=RedirectCall(image+kGlideFireSite,image+kFireball,reinterpret_cast<void*>(&GlideFireHook),changed);
-    Log("EDF41DRAGON hooked: tick=%d cruise=%d/2 glide fire=%d controlled lifecycle=%d",t ? 1 : 0,cruise,glide ? 1 : 0,control ? 1 : 0);
+    Log("EDF41DRAGON hooked: dtor=1 tick=%d cruise=%d/2 glide fire=%d controlled lifecycle=%d",t ? 1 : 0,cruise,glide ? 1 : 0,control ? 1 : 0);
     return t && cruise==2 && glide && control;
 }
 }  // namespace crew

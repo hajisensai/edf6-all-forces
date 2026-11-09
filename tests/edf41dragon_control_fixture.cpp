@@ -1,5 +1,7 @@
 // Actual installed DragonSmall hook-chain contract and EDF4.1 flame lifecycle,
 // exercised inside a private fake native image. No game process is touched.
+#include <windows.h>
+namespace crew { ULONGLONG GetTickCount64() noexcept; }   // the production file's wall clock, faked below (a long pause)
 #include "../src/edf41dragon.cpp"
 #include "../src/enemy_control_weapon_aim.cpp"
 #include <cstdio>
@@ -7,7 +9,8 @@
 #include <cwchar>
 
 namespace fixture {
-int checks=0,ai=0,spawned=0,constructed=0,destroyed=0,played=0;
+int checks=0,ai=0,spawned=0,constructed=0,destroyed=0,played=0,dtors=0,soundStops=0;
+unsigned dtorFlags=0;ULONGLONG fakeClock=1000;void(*shutdownFn)() noexcept=nullptr;
 alignas(16) unsigned char object[0x1D40]{},clipRecord[0x160]{};
 crew::Config config{};
 crew::enemy_native::OwnsAiFn owns=nullptr;
@@ -27,7 +30,9 @@ void __fastcall Destroy(void*){++destroyed;}
 void* __fastcall Weak(void* out,const void*){return out;}
 void* __fastcall Spawn(void*,const float* matrix,void*,void* param){++spawned;std::memcpy(lastMatrix,matrix,64);std::memcpy(&damage,static_cast<char*>(param)+0x9C,4);std::memcpy(&seed,static_cast<char*>(param)+0x1A0,4);std::memcpy(&actualSpeed,static_cast<char*>(param)+0x94,4);std::memcpy(&actualLife,static_cast<char*>(param)+0x98,4);std::memcpy(&actualSize,static_cast<char*>(param)+0xC0,4);return nullptr;}
 bool __fastcall Play(void*,int,int,int){++played;return true;}
+std::uint64_t __fastcall NativeDtor(void* self,unsigned flags){++dtors;dtorFlags=flags;return reinterpret_cast<std::uint64_t>(self);}
 }
+ULONGLONG crew::GetTickCount64() noexcept {return fixture::fakeClock;}
 namespace edf {
 void* AllocateNearCode(const void*,const unsigned char*,std::size_t) noexcept{return nullptr;}
 bool PatchCode(unsigned char*,const unsigned char*,const unsigned char*,std::size_t) noexcept{return false;}
@@ -62,7 +67,8 @@ int BoneIndex(void*,const wchar_t*) noexcept{fixture::Check(false,"no sound bone
 bool BoneMatrix(void*,int,float*) noexcept{fixture::Check(false,"no sound point without a table");return false;}
 bool PlaySe(const void*,const wchar_t*,const float*,SoundHandle*) noexcept{fixture::Check(false,"no sound without a table");return false;}
 void MoveSound(SoundHandle&,const float*) noexcept{fixture::Check(false,"no sound to move");}
-void StopSound(SoundHandle&,int) noexcept{}
+void StopSound(SoundHandle& handle,int) noexcept{if(handle.instance)++fixture::soundStops;handle=SoundHandle{};}
+void AtGameShutdown(void(*fn)() noexcept) noexcept{fixture::shutdownFn=fn;}
 bool FillSePreset(unsigned char*,const void*,const wchar_t*) noexcept{fixture::Check(false,"no preset without a table");return false;}
 }
 namespace crew::enemy_native {
@@ -81,18 +87,19 @@ int main(){
  Jump(kTick,reinterpret_cast<void*>(&Ai));Jump(kKeyNode,reinterpret_cast<void*>(&fixture::Key));
  Jump(kFactoryByName,reinterpret_cast<void*>(&Factory));Jump(kLocatorMatrix,reinterpret_cast<void*>(&Locator));
  Jump(kParamCtor,reinterpret_cast<void*>(&Construct));Jump(kParamDtor,reinterpret_cast<void*>(&Destroy));
- Jump(kWeakAssign,reinterpret_cast<void*>(&Weak));Jump(kSpawn,reinterpret_cast<void*>(&Spawn));Jump(kPlayState,reinterpret_cast<void*>(&Play));
+ Jump(kWeakAssign,reinterpret_cast<void*>(&Weak));Jump(kSpawn,reinterpret_cast<void*>(&Spawn));Jump(kPlayState,reinterpret_cast<void*>(&Play));Jump(kDtor,reinterpret_cast<void*>(&NativeDtor));
  *reinterpret_cast<void**>(image+kBulletMgr)=reinterpret_cast<void*>(1);
- auto* table=reinterpret_cast<void**>(image+kVtable);table[kSlotTick]=image+kTick;config.edf41Ai=true;
+ auto* table=reinterpret_cast<void**>(image+kVtable);table[kSlotTick]=image+kTick;table[kSlotDtor]=image+kDtor;config.edf41Ai=true;
  *reinterpret_cast<const void**>(image+kVtable-8)=image+0x2000;*reinterpret_cast<const void**>(object)=image+kVtable;
  crew::enemy_weapon_aim::ready=true;crew::enemy_weapon_aim::admittedImage=image;crew::enemy_weapon_aim::CacheProfileCols();
  Check(InstallEdf41Dragon() && owns && controlled && onSeed,"production install registers its exact own-chain lifecycle and seed callbacks");
+ Check(table[kSlotDtor]==reinterpret_cast<void*>(&DtorHook) && shutdownFn==&ShutdownDragons,"the dragon's lifecycle ends its sounds: destructor slot wrapped, shutdown callback registered");
  Check(owns(table[kSlotTick]),"only the actual installed wrapper over the verified original is admitted");
  Check(!owns(image+kTick) && !owns(reinterpret_cast<void*>(&Ai)),"unknown hooks and bare native originals cannot impersonate the wrapper");
  const auto installed=table[kSlotTick];table[kSlotTick]=reinterpret_cast<void*>(&Ai);
  Check(!owns(installed),"later replacement of the global chain invalidates owned-hook admission");table[kSlotTick]=installed;
  Check(controlled(object,nullptr)==0 && ai==0 && spawned==0,"ordinary unmarked native DragonSmall never runs AI through the controlled extension");
- dragons[object]=Dragon{};auto& dragon=dragons[object];dragon.marked=dragon.ok=true;dragon.seen=GetTickCount64();dragon.windowCount=1;dragon.windows[0]={99,3,20};dragon.rng=7;
+ dragons[object]=Dragon{};auto& dragon=dragons[object];dragon.marked=dragon.ok=true;dragon.windowCount=1;dragon.windows[0]={99,3,20};dragon.rng=7;
  *reinterpret_cast<char**>(object+kCasAt+kPlayers)=reinterpret_cast<char*>(clipRecord);*reinterpret_cast<int*>(object+kMainPlayerAt)=0;
  *reinterpret_cast<int*>(clipRecord+kPlayerState)=99;*reinterpret_cast<float*>(clipRecord+kPlayerTime)=10;*reinterpret_cast<float*>(clipRecord+kPlayerLength)=100;
  *reinterpret_cast<float*>(object+kHpAt)=100;*reinterpret_cast<float*>(object+kLevelAt)=20;
@@ -116,6 +123,20 @@ int main(){
  Check(actualSpeed==dragon.speed && actualLife==dragon.life && actualSize==dragon.size && std::fabs(damage-0.075f)<1e-7f,"controlled flame preserves native source speed/lifetime/size and damage");
  aimOwned=false;onSeed(object,12345);controlled(object,nullptr);
  Check(lastMatrix[8]==firstDirection[0] && lastMatrix[9]==firstDirection[1] && lastMatrix[10]==firstDirection[2] && seed==firstSeed,"released/uncontrolled actual flame immediately returns to the unchanged native locator cone");
+ // The breath's channel 0 is held: only se_stop, replacement, a state exit or the object's lifecycle ends it (edf41_sound_channels.h).
+ const auto hold=[&](Dragon& d){d.channels.Start(0,[](BoneSound* sound){sound->handle.instance=reinterpret_cast<void*>(0x55);return true;},[](BoneSound& sound,int frames){edf41c::StopSound(sound.handle,frames);});};
+ hold(dragon);const auto shotsBefore=spawned;fakeClock+=60000;   // a pause of a minute: no object updated, the wall clock went on
+ controlled(object,nullptr);
+ Check(dragons.size()==1 && &dragons.at(object)==&dragon && soundStops==0 && !dragon.channels.Empty() && spawned==shotsBefore+1,
+       "a long pause keeps the same entry: its held breath is not cut and its clip's sounds are not fired again from a new timeline");
+ alignas(16) static unsigned char stranger[0x1D40]{};*reinterpret_cast<const void**>(stranger)=image+0x100;
+ {std::lock_guard<std::mutex> h(lock);Check(Find(stranger)==nullptr && dragons.count(stranger)==0,"an object of another vtable (whose destructor is not ours) gets no entry");}
+ shutdownFn();Check(soundStops==1 && dragon.channels.Empty() && dragons.count(object)==1,"game shutdown stops every live dragon's held sounds before the sound system goes");
+ hold(dragon);
+ const auto dtor=reinterpret_cast<std::uint64_t(__fastcall*)(void*,unsigned)>(table[kSlotDtor]);
+ Check(dtor(object,1)==reinterpret_cast<std::uint64_t>(object) && dtors==1 && dtorFlags==1,"the stock deleting destructor still runs once with its flags");
+ Check(soundStops==2 && dragons.count(object)==0,"destroying the dragon (DeleteObject, despawn) stops its held breath and drops its entry");
+ dtor(stranger,0);Check(dtors==2 && soundStops==2,"another object's destruction passes straight to the stock destructor");
  dragons.clear();VirtualFree(image,0,MEM_RELEASE);image=nullptr;
  std::printf("PASS %d actual dragon chain/flame checks\n",checks);
 }
