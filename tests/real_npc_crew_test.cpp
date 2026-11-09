@@ -11,6 +11,16 @@ void __fastcall RideMoveRec(void* h,SharedRef* ref,int index) {
     Put<void*>(h,kHumanSeat,dest);Put<void*>(h,kHumanRiding,ref->obj);
     --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides;
 }
+// The ride as the native one marks the vehicle (0x633D90 -> 0x633FE0): the new seat taken and changed this frame.
+void __fastcall RideMarkRec(void* h,SharedRef* ref,int index) {
+    RideMoveRec(h,ref,index);
+    auto* v=static_cast<unsigned char*>(ref->obj);
+    auto& mask=*reinterpret_cast<std::uint16_t*>(v+seatevt::kMask);
+    mask=static_cast<std::uint16_t>(mask|seatevt::SeatBit(static_cast<unsigned>(index))|
+        seatevt::ChangeBit(At<std::uint32_t>(v,seatevt::kShift),static_cast<unsigned>(index)));
+}
+bool missionCrewSays=false;
+bool MissionCrewRec(const unsigned char*,const unsigned char*) noexcept { return missionCrewSays; }
 int originalThinks=0;
 void __fastcall ThinkRecord(void*,const float*) {++originalThinks;}
 void __fastcall MovingThinkRecord(void* h,const float*) {
@@ -154,6 +164,20 @@ int main() {
     Expect(!OwnsNpcSeatInput(SeatAt(vehicle,1)),"gunner seat does not retain driver input policy");
     human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);
     Expect(!NpcMoveSeat(vehicle,1,0),"human cannot be moved by NPC yield path");
+    // A mission AI vehicle's crew moved aside for the player (crew.cpp Bump) rides quiet here, as the peer's RemoteRide
+    // quiets the same announced ride there; any other NPC's seat change keeps its sound.
+    SetNpcMissionCrew(&MissionCrewRec);seatEventsOk=true;Jump(kRideVehicle,reinterpret_cast<const void*>(&RideMarkRec));
+    for(const bool mission : {true,false}) {
+        CrewSetup();missionCrewSays=mission;
+        Put<void*>(seats,kSeatRider,human);Put<void*>(seats,kSeatRiderCtrl,human+0x2100);
+        Put<void*>(human,kHumanSeat,seats);Put<void*>(human,kHumanRiding,vehicle);
+        Put<std::uint32_t>(vehicle,seatevt::kShift,2);Put<std::uint16_t>(vehicle,seatevt::kMask,seatevt::SeatBit(0));
+        const bool moved=NpcMoveSeat(vehicle,0,1);
+        const bool sounds=seatevt::Sounds(At<std::uint16_t>(vehicle,seatevt::kMask),2,1);
+        Expect(moved && At<void*>(SeatAt(vehicle,1),kSeatRider)==human && sounds!=mission,
+               mission ? "mission crew's own seat change is quiet, as on the peer" : "an ordinary NPC's seat change still sounds");
+    }
+    SetNpcMissionCrew(nullptr);seatEventsOk=false;missionCrewSays=false;
     CrewSetup();heldSupportActor=human;world.friends=1;
     Expect(!NpcRequestCrew(vehicle),"held deployment actor cannot be recruited by a different vehicle");
     CrewSetup();nextThink[0]=&ThinkRecord;heldSupportActor=human;originalThinks=0;

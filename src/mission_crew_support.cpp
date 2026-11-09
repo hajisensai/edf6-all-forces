@@ -1,6 +1,7 @@
 #include "mission_crew_support.h"
 #include "mission_crew.h"
 #include "mission_crew_team.h"
+#include "mission_crew_quiet.h"
 #include "support_soldier.h"
 #include "support_loadout.h"
 #include "support_variants.h"
@@ -14,13 +15,32 @@
 namespace crew {
 namespace {
 constexpr unsigned kSoldier=1,kLeader=2;
+constexpr std::size_t kRiding=0x1548;   // Human: the vehicle it rides (weak_ptr object; control block +0x1550)
 static_assert(kSoldier==kSupportRangerResource && kLeader==kSupportLeaderResource,"the crew are the rifle templates' soldier resources");
-struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15]; };
+// quiet[i]: this machine cleared crew[i]'s random-talk bit while it sat in the vehicle and owes it back
+// (mission_crew_quiet.h; 测试站 #41).
+struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15],quiet[15]; };
 Deployment deployments[128]{};
 bool teamReady=false;
 std::uint64_t nextOffline=0x8000000000000000ULL;
+bool Exists(const ObjRef& r) noexcept {return r.obj && Readable(r.obj,kObjectFlags+4) && r.Is(r.obj);}
 bool Alive(const ObjRef& r) noexcept {
     return r.obj && Readable(r.obj,kSelfCtrl+8) && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead);
+}
+// Each of the deployment's soldiers: quiet while it sits in the deployment's own vehicle, as it was once off it.
+// `release`: the deployment lets them go (rolled back): every quieted one gets its bit back now.
+void QuietCrew(Deployment& d,bool release) noexcept {
+    const bool vehicleLive=!release && d.applied && Cfg().enabled && Alive(d.vehicle);
+    for(unsigned i=0;i<d.count;++i) {
+        const bool exists=Exists(d.crew[i]);
+        auto* h=static_cast<unsigned char*>(const_cast<void*>(d.crew[i].obj));
+        const bool aboard=vehicleLive && exists && !h[kDead] && Readable(h,kRiding+8) &&
+            At<const void*>(h,kRiding)==d.vehicle.obj;
+        const std::uint32_t flags=exists ? At<std::uint32_t>(h,kObjectFlags) : 0;
+        const crewquiet::Step step=crewquiet::Next(exists,aboard,flags,d.quiet[i]);
+        if(step.write)Put<std::uint32_t>(h,kObjectFlags,step.flags);
+        d.quiet[i]=step.quieted;
+    }
 }
 Deployment* Find(std::uint64_t tx) noexcept {
     for(auto& d:deployments)if(d.transaction==tx)return &d;
@@ -150,18 +170,32 @@ bool ApplyMissionCrewPlan(std::uint64_t tx,const SupportPlan& p,bool remote) noe
 void DestroyMissionCrewPlan(std::uint64_t tx) noexcept {
     Deployment* d=Find(tx);if(!d)return;
     const ObjRef v=d->vehicle;
+    QuietCrew(*d,true);   // its soldiers' talk as it was, before they go (symmetric with the aboard clear)
     for(unsigned i=0;i<d->count;++i)DeleteSupportSoldier(d->crew[i]);
     *d=Deployment{};
     if(Alive(v))RetryMissionCrew(static_cast<unsigned char*>(const_cast<void*>(v.obj)));
 }
+void MissionCrewQuietTick() noexcept {
+    for(auto& d:deployments)if(d.transaction && d.applied)QuietCrew(d,false);
+}
+bool MissionCrewRiding(const unsigned char* v,const unsigned char* h) noexcept {
+    if(!v || !h)return false;
+    for(const auto& d:deployments) {
+        if(!d.transaction || !d.applied || !d.vehicle.Is(v))continue;
+        for(unsigned i=0;i<d.count;++i)if(d.crew[i].Is(h))return true;
+    }
+    return false;
+}
 void ResetMissionCrewSupport() noexcept {
     // Mission teardown owns scene deletion; discard borrowed refs rather than deleting unrelated new objects.
+    // A quieted soldier's bit is not given back either: its object is the teardown's (mission_crew_quiet.h).
     for(auto& d:deployments)d=Deployment{};
     nextOffline=0x8000000000000000ULL;
 }
 void InstallMissionCrewSupport() noexcept {
     teamReady=InstallMissionCrewTeam(&TeamChanged);
     ConfigureMissionCrew(&Request,&ReadNativeObjectId,&Tick);
+    SetNpcMissionCrew(&MissionCrewRiding);
 }
 }
 

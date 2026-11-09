@@ -395,6 +395,8 @@ bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept {retur
 void DestroyMissionCrewPlan(std::uint64_t) noexcept {}
 void InstallMissionCrewSupport() noexcept {}
 void ResetMissionCrewSupport() noexcept {}
+int quietTicks=0;
+void MissionCrewQuietTick() noexcept {++quietTicks;}
 void ReportSupportFailure(std::uint64_t id) noexcept {Destroy(id);}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept {return p.count>0 && p.count<=kMaxUnits;}}
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boardRequests;return count;}
@@ -464,8 +466,11 @@ int main() {
           "successful native actor creation observer and exact identity matcher are both wired before creation");
     installedCreatedObserver(0,ObjRef{});
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
+    const int quietBefore=quietTicks;
     SupportDispatchTick();
     check(creationSeen && netConfigured==1,"first frame does not reset creation observations already collected during mission start");
+    check(quietTicks==quietBefore+1,"every dispatch frame keeps the mission AI vehicles' crews quiet");
+    SupportDispatchTick();check(quietTicks==quietBefore+1,"the mission crews' quiet runs once per game frame");
     // 2026-10-09: air support flies in from the edge. Created in the air, its real crew made inside it and seated at
     // once, the flight on at spawn: no runway, no walk aboard, no takeoff.
     check(made==2 && boardRequests==0 && seatNow==1 && activated==1 && lastAirborne,
@@ -476,6 +481,7 @@ int main() {
     check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
     fixtureMs+=100;SupportDispatchTick();
     fixtureMs+=100;SupportDispatchTick();check(activated==1,"activation is once, not every frame");
+    check(quietTicks==quietBefore+3,"the mission crews' quiet runs on each later frame too");
     // 2026-10-09 16:59: out of fuel, two support helis flew off and hung at the map's edge for the rest of the mission
     // (the plugin's reaps never delete under real soldiers). Its owner retires it: crew first, the hull once settled.
     check(deleted==0,"a flying support aircraft is never retired");

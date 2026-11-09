@@ -1807,6 +1807,7 @@ void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
+    MissionCrewQuietTick();   // the mission AI vehicles' crews: quiet while aboard (every machine, its own copies)
     AirdropTestCall();
     if(offlinePending && !LocalAuthority()) {
         offlinePending=false;offlinePlanned=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
