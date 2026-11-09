@@ -7,7 +7,7 @@
 // A group with nothing written yet is listed only to its own members; an empty outline only to those who can write it.
 // Every line and step can be scored (1..5) and reviewed by any account, once each (a new score replaces its old one;
 // stored per group as item "<book>/<id>", so equal ids in two outlines stay apart);
-// visitors see only each item's average and how many scored it, not the reviews or who saved the outline.
+// visitors see only each item's average and how many scored it, not the reviews, who started the outline or who saved it.
 import { GROUP } from './auth.js';
 import { Plan, canWrite, clean, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
@@ -92,17 +92,17 @@ export async function outlineRoute(request, env, me, missions, groups, path, url
     const group = pick(me, url.searchParams.get('group'), shown, groups);
     const editable = group != null && canWrite(me, group);
     // The group's outlines: the written ones, and the empty ones too for those who can write them.
-    const all = group == null ? [] : (await db.prepare('SELECT book, data FROM story_outlines WHERE grp = ?1 ORDER BY book').bind(group).all()).results
-      .map((r) => ({ book: r.book, outline: JSON.parse(r.data) })).filter((x) => editable || x.outline.lanes.length > 0);
+    const all = group == null ? [] : (await db.prepare('SELECT book, data, author FROM story_outlines WHERE grp = ?1 ORDER BY book').bind(group).all()).results
+      .map((r) => ({ book: r.book, author: r.author, outline: JSON.parse(r.data) })).filter((x) => editable || x.outline.lanes.length > 0);
     const asked = bookOf(url.searchParams.get('book'));
     const book = all.some((x) => x.book === asked) ? asked : all[0]?.book ?? 0;
     const row = book ? await db.prepare('SELECT * FROM story_outlines WHERE grp = ?1 AND book = ?2').bind(group, book).first() : null;
     const outline = row ? JSON.parse(row.data) : null;
     return {
       me: me && { user: me.user, role: me.role, group: me.group }, group, groups: shown, editable,
-      books: all.map((x) => ({ book: x.book, title: x.outline.title, lanes: x.outline.lanes.length })),
+      books: all.map((x) => ({ book: x.book, title: x.outline.title, lanes: x.outline.lanes.length, author: me ? x.author ?? null : null })),
       book, outline, version: row ? row.version : 0,
-      updated_by: me ? row?.updated_by ?? null : null, updated_at: me ? row?.updated_at ?? null : null,
+      author: me ? row?.author ?? null : null, updated_by: me ? row?.updated_by ?? null : null, updated_at: me ? row?.updated_at ?? null : null,
       ...(row ? await ratings(db, me, group, book, outline) : { scores: {} }),
     };
   }
@@ -156,7 +156,7 @@ export async function outlineRoute(request, env, me, missions, groups, path, url
     if (version !== 0) throw new HttpError(400, '新大纲的版本号应为 0');
     const n = await db.prepare('SELECT COUNT(*) AS n, MAX(book) AS top FROM story_outlines WHERE grp = ?1').bind(group).first();
     if (n.n >= OUTLINE_LIMIT.books) throw new HttpError(400, `每组最多 ${OUTLINE_LIMIT.books} 份大纲`);
-    saved = await db.prepare(`INSERT INTO story_outlines (grp, book, data, version, updated_by, updated_at) VALUES (?1, ?2, ?3, 1, ?4, ?5)
+    saved = await db.prepare(`INSERT INTO story_outlines (grp, book, data, version, updated_by, updated_at, author) VALUES (?1, ?2, ?3, 1, ?4, ?5, ?4)
       ON CONFLICT(grp, book) DO NOTHING RETURNING book, version`).bind(group, (n.top || 0) + 1, data, me.user, now).first();
     if (!saved) throw new HttpError(409, '别人刚好也新建了一份大纲：请再点一次保存');
     // A number freed by deleting the group's last outline may come back: its old scores must not.

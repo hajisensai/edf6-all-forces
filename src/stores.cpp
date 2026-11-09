@@ -54,10 +54,35 @@ const wchar_t* FileOf(const unsigned char* weapon,std::size_t* length) noexcept 
     return key+at;
 }
 
+// kStores' prefix lengths, and how many leading characters every prefix shares (gen_stores.py: all EDF6VC_...), at
+// compile time: SpecOf runs for every weapon asked about (each seat's, each lock candidate's) and most are stock ones,
+// which the shared part rejects in one compare instead of a wcslen and a compare a store.
+constexpr std::size_t PrefixLength(const wchar_t* s) noexcept {
+    std::size_t n=0;
+    while(s[n])++n;
+    return n;
+}
+struct StorePrefixes { std::size_t length[std::size(kStores)]; std::size_t common; };
+constexpr StorePrefixes MakePrefixes() noexcept {
+    StorePrefixes r{};
+    r.common=PrefixLength(kStores[0].prefix);
+    for(std::size_t i=0;i<std::size(kStores);++i) {
+        r.length[i]=PrefixLength(kStores[i].prefix);
+        std::size_t c=0;
+        while(c<r.common && c<r.length[i] && kStores[i].prefix[c]==kStores[0].prefix[c])++c;
+        r.common=c;
+    }
+    return r;
+}
+constexpr StorePrefixes kPrefixes=MakePrefixes();
+
 // The store whose files `name` (`length` characters) is one of: its prefix, then digits, then ".SGO".
 const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
-    for(const auto& s:kStores) {
-        const std::size_t p=std::wcslen(s.prefix);
+    // Every store's prefix begins with the shared part: a name too short for it or without it is none of them.
+    if(length<=kPrefixes.common+4 || _wcsnicmp(name,kStores[0].prefix,kPrefixes.common)!=0)return nullptr;
+    for(std::size_t k=0;k<std::size(kStores);++k) {
+        const StoreSpec& s=kStores[k];
+        const std::size_t p=kPrefixes.length[k];
         if(length<=p+4 || _wcsnicmp(name,s.prefix,p)!=0 || _wcsnicmp(name+length-4,L".SGO",4)!=0)continue;
         bool digits=true;
         for(std::size_t i=p;i<length-4;++i)digits=digits && std::iswdigit(name[i]);

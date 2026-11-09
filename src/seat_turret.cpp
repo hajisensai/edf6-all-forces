@@ -196,14 +196,17 @@ void NearestVisit(void* ctx,const void* object,const float* at) {
     const float dx=at[0]-p[0],dy=at[1]-p[1],dz=at[2]-p[2];
     const float d=std::sqrt(dx*dx+dy*dy+dz*dz);
     if(!(d>1.0f) || d>n.reach || d>=n.best)return;
+    // Traverse and elevations first: pure arithmetic on the pivot and the hull, where the kind test below casts a map
+    // floor ray (GunnerAirTarget). Both must pass for `best` to move, so the order changes nothing but the rays spent
+    // on enemies the turret could never point at.
+    const seat_turret::Limits l=LimitsOf(*n.t->spec);
+    const Aim a=AimAt(n.v,*n.t,at);
+    if(std::fabs(seat_turret::Wrap(a.yaw))>l.arc+1e-4f || a.pitch<l.low || a.pitch>l.high)return;
     const StoreRole role=n.t->spec->role;
     if(role==StoreRole::air || role==StoreRole::ground || role==StoreRole::bomb || role==StoreRole::rocket) {
         const bool air=GunnerAirTarget(object);
         if(air!=(role==StoreRole::air))return;
     }
-    const seat_turret::Limits l=LimitsOf(*n.t->spec);
-    const Aim a=AimAt(n.v,*n.t,at);
-    if(std::fabs(seat_turret::Wrap(a.yaw))>l.arc+1e-4f || a.pitch<l.low || a.pitch>l.high)return;
     n.best=d;n.aim=a;n.object=object;
 }
 

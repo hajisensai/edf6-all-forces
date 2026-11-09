@@ -223,17 +223,19 @@ inline float TargetScore(float dist,float reach,bool current) noexcept {
 }
 // The index of the target among `n` (aimOf(i): its lock point; isCurrent(i): it is the one held; usable(i): its fire at
 // it not wasted, wasted_fire.h), -1 with none in scope: within `scope` m of `anchor` over the ground (Horiz), ranked by
-// TargetScore from `eye`.
+// TargetScore from `eye`. usable is asked last, only of one that would become the best: it is the costly test (a
+// stress mission's 600 soldiers over 1000 enemies spent half the game thread in it), and an unusable one is skipped
+// either way, so the pick is the same.
 template<class AimOf,class IsCurrent,class Usable>
 int PickTarget(int n,AimOf aimOf,IsCurrent isCurrent,Usable usable,const float* eye,const float* anchor,float scope,
                float reach) noexcept {
     int best=-1;float bestScore=0.0f;
     for(int i=0;i<n;++i) {
-        if(!usable(i))continue;
         const float* aim=aimOf(i);
         if(Horiz(anchor,aim)>scope)continue;
         const float score=TargetScore(Dist(eye,aim),reach,isCurrent(i));
-        if(best<0 || score<bestScore){best=i;bestScore=score;}
+        if(!(best<0 || score<bestScore) || !usable(i))continue;
+        best=i;bestScore=score;
     }
     return best;
 }

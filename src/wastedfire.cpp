@@ -22,8 +22,13 @@
 // open, +0xD90 frames left: UfoCarrier_CloseInterval counting down, 0x4F8507); an anchor while a living ship shields it.
 #include "crew.h"
 #include "hit_predict.h"
+#include "memo_epoch.h"
 #include "memory.h"
 #include "wasted_fire.h"
+#include "edf/hash_index.h"
+#include <vector>
+
+#include <atomic>
 
 namespace crew {
 namespace {
@@ -154,29 +159,68 @@ bool Accepts(unsigned char* o,Kind k,const float* at,std::uint32_t body) noexcep
 }
 
 // --- The watch: each target's window and motion, each shooter-target pair's last plan ---
-struct Watched { const void* target; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
-constexpr int kWatched=64;
-Watched watched[kWatched]{};
-Watched& Watch(const void* target) noexcept {
-    Watched* oldest=&watched[0];
-    for(Watched& x:watched) {
-        if(x.target==target)return x;
-        if(x.at<oldest->at)oldest=&x;
+// Rows by key, as many as the battle asks for (a fortress's hundred parts, a crowd's shooter-target pairs: fixed 64 / 128
+// tables thrashed, each miss a new ray and a target's learnt window lost), a row unused for `forget` ms given up at the
+// next sweep (one pass every `forget` ms: linear in the rows). Game thread.
+template<class K,class Row> struct Rows {
+    std::vector<Row> row;
+    edf::HashIndex<K> index;
+    std::vector<int> free;
+    std::uint64_t sweptAt=0;
+    Row* Find(const K& key) noexcept { const int i=index.Find(key);return i<0 ? nullptr : &row[static_cast<std::size_t>(i)]; }
+    // A new row for `key` (not in the table), its fields default.
+    template<class Unused> Row& Make(const K& key,std::uint64_t ms,std::uint64_t forget,Unused unused) {
+        if(ms-sweptAt>forget) {
+            sweptAt=ms;
+            for(std::size_t i=0;i<row.size();++i)
+                if(row[i].used && unused(row[i])){index.Erase(row[i].key);row[i]=Row{};free.push_back(static_cast<int>(i));}
+        }
+        int at;
+        if(!free.empty()){at=free.back();free.pop_back();}
+        else {at=static_cast<int>(row.size());row.emplace_back();}
+        Row& r=row[static_cast<std::size_t>(at)];
+        r=Row{};r.key=key;r.used=true;
+        index.Set(key,at);
+        return r;
     }
-    *oldest=Watched{target,0,{},{},{}};
-    return *oldest;
+    void Clear() noexcept { row.clear();index.Clear();free.clear();sweptAt=0; }
+};
+
+struct Watched { const void* key; bool used; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
+constexpr std::uint64_t kWatchForgetMs=60000;   // a target nobody has aimed at for a minute: its window learnt again
+Rows<const void*,Watched> watched;
+Watched& Watch(const void* target) {
+    if(Watched* w=watched.Find(target))return *w;
+    const std::uint64_t ms=GameMs();
+    return watched.Make(target,ms,kWatchForgetMs,[ms](const Watched& w) noexcept { return ms-w.at>kWatchForgetMs; });
 }
-struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet;
-              float from[3],speed,gravity; };
-constexpr int kPlans=128;
+// A plan's key: the shooter, its target and its round (the same pair planned for the eye's straight line and for the
+// muzzle's round are two plans); where it fired from is checked on a hit, not keyed (it moves every frame).
+struct PlanKey {
+    const void* shooter=nullptr;
+    const void* target=nullptr;
+    float speed=0.0f,gravity=0.0f;
+    bool operator==(const PlanKey& o) const noexcept { return shooter==o.shooter && target==o.target && speed==o.speed && gravity==o.gravity; }
+};
+std::uint64_t HashOf(const PlanKey& k) noexcept {
+    std::uint32_t s,g;std::memcpy(&s,&k.speed,4);std::memcpy(&g,&k.gravity,4);
+    return edf::HashOf(edf::PtrPair{k.shooter,k.target})^edf::HashMix((static_cast<std::uint64_t>(s)<<32)|g);
+}
+struct Plan { PlanKey key; bool used; const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3];
+              bool aimSet; float from[3],speed,gravity; };
 constexpr std::uint64_t kPlanMs=150;   // a pair's plan holds this long (rays a pair at most ~7 a second)
-Plan plans[kPlans]{};
+constexpr std::uint64_t kPlanSweepMs=1000;
+Rows<PlanKey,Plan> plans;
 // Whether a layer-11 ray has met a body of an object yet this mission: until then a miss says nothing about the target.
 bool rayMeetsObjects=false;
 
 wastedfire::Book book{};
 planlog::Gate planLog{};   // the WASTEDFIRE plan lines (a shooter and target kind every 3 s, 4 a second in all)
 SRWLOCK lock=SRWLOCK_INIT;
+// book.latestHold as stored under the lock, for Feedback to read without it: past it no pair is held and the answer is
+// no, without the lock and the 256-pair scan (the AI asks a shooter and lock point at a time; nearly always no hold runs).
+// Apart from the book because it is reset by assignment (an atomic cannot be).
+std::atomic<std::uint64_t> latestHoldMirror{0};
 
 // The target's lock points (its own registry entries), at most `max`; its root when it has none.
 struct Points { const void* target; float p[4][3]; int n; };
@@ -188,7 +232,7 @@ void SeePoint(void* ctx,const void* object,const float* aim) {
 // The plan for `shooter` firing from `from` (rounds of `speed` m/s, `gravity` m/s^2; 0: unknown, taken as a straight line)
 // at `target`: fire / wait / skip and the point to aim at (its lock point whose predicted hit the game would take).
 Plan Assess(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
-    Plan p{shooter,target,0,hitpredict::Verdict::fire,{},false};
+    Plan p{};p.shooter=shooter;p.target=target;p.verdict=hitpredict::Verdict::fire;
     std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
@@ -251,15 +295,13 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
 
 const Plan& PlanFor(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
     const std::uint64_t ms=GameMs();
-    Plan* oldest=&plans[0];
-    for(Plan& p:plans) {
-        if(p.shooter==shooter && p.target==target && p.speed==speed && p.gravity==gravity &&
-           std::memcmp(p.from,from,12)==0 && ms-p.at<kPlanMs)return p;
-        if(p.at<oldest->at)oldest=&p;
-    }
-    *oldest=Assess(shooter,target,from,speed,gravity);
-    oldest->at=ms;
-    return *oldest;
+    const PlanKey key{shooter,target,speed,gravity};
+    Plan* p=plans.Find(key);
+    if(p && std::memcmp(p->from,from,12)==0 && ms-p->at<kPlanMs)return *p;
+    const Plan fresh=Assess(shooter,target,from,speed,gravity);
+    if(!p)p=&plans.Make(key,ms,kPlanSweepMs,[ms](const Plan& q) noexcept { return ms-q.at>=kPlanMs; });
+    *p=fresh;p->key=key;p->used=true;p->at=ms;
+    return *p;
 }
 // The shooter's eye: a soldier's 1.5 m over its feet, a vehicle's 2 m over its root.
 void EyeOf(const void* shooter,float* eye) noexcept {
@@ -267,21 +309,56 @@ void EyeOf(const void* shooter,float* eye) noexcept {
     const float* p=reinterpret_cast<const float*>(s+kPosition);
     eye[0]=p[0];eye[1]=p[1]+(IsSoldierClass(s) ? 1.5f : 2.0f);eye[2]=p[2];
 }
+// GameMs read once a game frame for Feedback: it is asked per shooter and target (thousands a frame in a crowd) and
+// GameMs reads the pause flag each time; holds last seconds, so a frame's lag changes nothing. Game thread only, as
+// GameMs. WastedFireHit keeps the exact GameMs (a hold's start).
+ULONGLONG feedbackFrame=0,feedbackMs=0;
+ULONGLONG FeedbackMs() noexcept {
+    const ULONGLONG frame=GameFrame();
+    if(frame!=feedbackFrame){feedbackFrame=frame;feedbackMs=GameMs();}
+    return feedbackMs;
+}
 bool Feedback(const void* shooter,const void* target) noexcept {
-    const ULONGLONG ms=GameMs();
+    const ULONGLONG ms=FeedbackMs();
+    if(ms>=latestHoldMirror.load(std::memory_order_relaxed))return false;
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);
     ReleaseSRWLockShared(&lock);
     return wasted;
 }
+// What a target is this frame, apart from who shoots at it: whether it is readable, its kind, and for an ordinary enemy
+// the whole verdict. Every NPC gunner asks of every enemy each frame (npc::PickTarget, GunnerVisit): with 300 ants and
+// a dozen gunners that was ~60,000 memory asks a frame, ~3 ms of the game thread (perfrun blast, 2026-11-07). The
+// answers are the same for every gunner within a frame, so each target is looked at once a frame. Game thread only, as
+// the plans are.
+// Keyed by memoepoch::Clock (src/memo_epoch.h): once a frame, not once per wall-clock step.
+memoepoch::Clock memoClock;
+struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
+TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
+struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
+const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
+    TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
+    if(m.target==target && m.frame==frame)return m;
+    m={target,frame,Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    if(!m.readable)return m;
+    const auto o=static_cast<const unsigned char*>(target);
+    m.kind=AcceptOk() ? KindOf(o) : Kind::none;
+    // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
+    if(m.kind==Kind::none || m.kind==Kind::yes)
+        m.verdict=At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+    return m;
+}
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
-    if(!shooter || !target || !Readable(shooter,kPosition+12) || !Readable(target,kObjFlags+4))return hitpredict::Verdict::fire;
-    const auto o=static_cast<const unsigned char*>(target);
-    const Kind k=AcceptOk() ? KindOf(o) : Kind::none;
-    // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
-    if(k==Kind::none || k==Kind::yes)
-        return At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+    if(!shooter || !target)return hitpredict::Verdict::fire;
+    const ULONGLONG frame=memoClock.Epoch(GameFrame(),GetTickCount64());
+    if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
+        shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
+    if(!shooterMemo.readable)return hitpredict::Verdict::fire;
+    const TargetMemo& t=TargetThisFrame(target,frame);
+    if(!t.readable)return hitpredict::Verdict::fire;
+    const Kind k=t.kind;
+    if(k==Kind::none || k==Kind::yes)return t.verdict;
     float eye[3];
     if(!from){EyeOf(shooter,eye);from=eye;}
     const Plan& p=PlanFor(shooter,target,from,speed,gravity);
@@ -294,6 +371,7 @@ void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     const ULONGLONG ms=GameMs();
     AcquireSRWLockExclusive(&lock);
     const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
+    latestHoldMirror.store(book.latestHold,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
     if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
@@ -319,10 +397,15 @@ bool HoldFire(const void* shooter,const void* target,const float* from,float spe
 void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
+    latestHoldMirror.store(0,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
-    for(auto& w:watched)w=Watched{};
-    for(auto& p:plans)p=Plan{};
+    watched.Clear();
+    plans.Clear();
+    for(auto& m:targetMemo)m=TargetMemo{};
+    shooterMemo=ShooterMemo{};
+    memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
+    feedbackFrame=feedbackMs=0;
 }
 }  // namespace crew

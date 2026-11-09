@@ -58,8 +58,11 @@
 #include "log_once.h"
 #include "profile_sigs.h"
 #include "firstperson.h"
+#include "enemy_points.h"
+#include "npc_logic.h"
 #include <cmath>
 #include <cstdarg>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -69,11 +72,14 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHeadRight=0x15C0,kHeadForward=0x15E0,kContact=0x1580,kRotor=0x1BF8;
 constexpr unsigned char kContactGround=2;
 // Lock-target registry and team relations (same as EDF6AutoTurret's turret.h)
-constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=0x10;
-constexpr std::size_t kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTargetLockable=0x2A;
+constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=enemypoints::kNodeTarget;
+constexpr std::size_t kTargetObject=enemypoints::kTargetObject,kTargetAim=enemypoints::kTargetAim;
+constexpr std::size_t kTargetValid=enemypoints::kTargetValid;
 constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
-constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
-constexpr int kMaxNodes=8192;
+constexpr std::int32_t kMaxTeam=enemypoints::kMaxTeam;
+// The lock registry is an MSVC std::list (head at +8, its size at +0x10: 0x22E210 bumps it, 0x22E330, against max_size);
+// a walk goes over that many nodes at most -- the list's own count, not a fixed cap a battle's lock points pass.
+constexpr std::size_t kRegSize=0x10;
 constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
@@ -649,25 +655,23 @@ float MinAimHoriz() noexcept { return Cfg().heliFireHeight/std::tan(kMaxDip); }
 // Calls f(object, lock point) for every valid, lockable lock point of an enemy of `v`'s side (a vehicle
 // nobody owns fights the player's enemies); an object can own several. False when the lock registry or
 // the team relations cannot be read.
-template<class F> bool ForEachEnemyOf(std::int32_t team,const void* v,F&& f) noexcept {
+// The registry's list head, its node count and `team`'s relation row (kTeamVehicle: the player's side), or false.
+bool EnemyRegistry(std::int32_t& team,const unsigned char*& head,const std::int32_t*& relation,
+                   std::uint64_t& nodes) noexcept {
     if(team==kTeamVehicle)team=player.team;
-    const auto relation=Relations(team);
+    relation=Relations(team);
     const auto registry=At<const unsigned char*>(image,kRegistry);
     if(!relation || !Readable(registry,kRegList+0x10))return false;
-    const auto head=At<const unsigned char*>(registry,kRegList);
-    if(!Readable(head,0x10))return false;
-    int n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
-        const auto target=At<const unsigned char*>(node,kNodeTarget);
-        if(!target || target[0]!=0 || !target[kTargetValid] || !target[kTargetLockable])continue;
-        const auto object=At<const unsigned char*>(target,kTargetObject);
-        if(!object || object==v || object[kDead])continue;
-        const auto other=At<std::int32_t>(object,kTeam);
-        if(other<0 || other>=kMaxTeam || relation[other]!=kEnemyRelation)continue;
-        const float* a=reinterpret_cast<const float*>(target+kTargetAim);
-        if(!std::isfinite(a[0]) || !std::isfinite(a[1]) || !std::isfinite(a[2]))continue;
-        f(static_cast<const void*>(object),a);
-    }
+    head=At<const unsigned char*>(registry,kRegList);
+    nodes=At<std::uint64_t>(registry,kRegSize);
+    return Readable(head,0x10);
+}
+template<class F> bool ForEachEnemyOf(std::int32_t team,const void* v,F&& f) noexcept {
+    const unsigned char* head=nullptr;
+    const std::int32_t* relation=nullptr;
+    std::uint64_t nodes=0;
+    if(!EnemyRegistry(team,head,relation,nodes))return false;
+    enemypoints::Walk(head,relation,v,static_cast<F&&>(f),nodes);
     return true;
 }
 template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
@@ -695,11 +699,12 @@ constexpr float kAimOver=0.3f;      // m over a soldier's origin (its feet) the 
 constexpr float kHurtWeight=200.0f; // m a friend counts farther per share of its HP it still has (the most hurt first)
 constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point (plus the round's blast)
 constexpr std::size_t kWeaponBlast=0x8B0;   // AmmoExplosion, the blast radius (0x68D82F, docs/heli-input-re.md)
-constexpr int kMaxFriends=64;
 bool visitOk=false;                  // 0x5E11D0 is the walk read above (CheckHeliProfile)
 
 struct Friend { const void* object; float aim[3]; float share; };
-struct FriendList { Friend f[kMaxFriends]; int n; };
+// Every hurt friend of the frame (a big battle's dozens: a fixed 64 dropped the rest in walk order, the most hurt among them);
+// grown once, kept across frames.
+struct FriendList { std::vector<Friend> f; int n=0; };
 struct FriendVisitor { const void* const* vtable; FriendList* list; };
 using VisitFriendsFn=void(__fastcall*)(void*,std::int32_t,FriendVisitor*);
 
@@ -711,14 +716,15 @@ bool IsSoldier(const unsigned char* o) noexcept {
 }
 
 void AddFriend(FriendList& l,const unsigned char* o) noexcept {
-    if(l.n>=kMaxFriends || !IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
+    if(!IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
     const auto ride=At<const unsigned char*>(o,kHumanVehicleCtrl);
     if(ride && Readable(ride,0x10) && At<std::int32_t>(ride,8)!=0)return;   // in a vehicle (0x56D700's own test)
     const float hp=At<float>(o,kHp),max=At<float>(o,kHpMax);
     if(!std::isfinite(hp) || !std::isfinite(max) || !(max>0.0f) || !(hp>0.0f) || hp>=max*kHurt)return;
     const float* p=reinterpret_cast<const float*>(o+kPosition);
     if(!std::isfinite(p[0]+p[1]+p[2]))return;
-    Friend& f=l.f[l.n++];
+    if(l.f.size()<=static_cast<std::size_t>(l.n))l.f.resize(l.f.empty() ? 64 : l.f.size()*2);
+    Friend& f=l.f[static_cast<std::size_t>(l.n++)];
     f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kAimOver;f.aim[2]=p[2];f.share=hp/max;
 }
 
@@ -828,12 +834,15 @@ bool Medic(const unsigned char* v) noexcept {
     return false;
 }
 
-// What `h` aims at: f(object, lock point, extra score in m). A medic: the hurt friends, the most hurt counting nearest;
-// any other: the enemies.
+// What `h` aims at: f(object, lock point, extra score in m, held). A medic: the hurt friends, the most hurt counting nearest;
+// any other: the enemies. held() says whether it is no target of its after all: an enemy its fire is wasted on
+// (WastedFire). Asked by f only after its own cheap range checks: HoldFire costs region scans, a lock and maybe a
+// plan's raycasts, and nearly every enemy is out of range.
 template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
-    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
-    // An enemy its fire is wasted on (WastedFire) is no target of its.
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { if(!HoldFire(v,o))f(o,a,0.0f); });
+    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept {
+        f(o,a,share*kHurtWeight,[]() noexcept { return false; });
+    });
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); }); });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -858,13 +867,14 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
     bool focusSeen=false;
-    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra) noexcept {
+    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra,auto&& held) noexcept {
         if(focusSeen)return;
-        // The map's focus order (Heli::focus): this one, past its post's range and before any other.
-        if(h.focus.Is(object)){focusSeen=true;bestObject=object;std::memcpy(bestAim,a,12);return;}
+        // The map's focus order (Heli::focus): this one, past its post's range and before any other (a held one dropped).
+        if(h.focus.Is(object)){if(held())return;focusSeen=true;bestObject=object;std::memcpy(bestAim,a,12);return;}
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
         if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if(held())return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2])+extra;
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
@@ -1496,11 +1506,11 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
     if(!std::isfinite(gravity) || gravity<0.0f)gravity=0.0f;
     const void* best=nullptr;float bestScore=0.0f,bestAt[3]{};
     if(std::isfinite(speed) && speed>1.0f)
-        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra) noexcept {
+        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra,auto&& held) noexcept {
             const float d[3]={p[0]-gp[0],p[1]-gp[1],p[2]-gp[2]};
             const float dist=std::sqrt(Dot3(d,d));
             float err[2],axis[2];
-            if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis))return;
+            if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis) || held())return;
             float score=dist+extra+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
             if(g.target.Is(object))score-=kDoorKeep;
             if(share.Is(object))score-=kDoorShare;
@@ -3860,13 +3870,58 @@ bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noe
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
+// The enemies of a side copied once per scene step (enemy_points.h): the registry walked once per side per frame,
+// not once per gunner seat. The copy is taken at the side's first ask in the step; one that has died since is skipped.
+// Keyed by the native scene step (SceneStepNow), not GameFrame: that one moves on only after the first vehicle's input,
+// where the gunners run. With the step unreadable: the live walk.
+namespace {
+struct StepPoints { SceneStep step; bool taken,ok; std::vector<enemypoints::Point> points; };
+StepPoints stepPoints[kMaxTeam];
+// The side's copy for this step, or null: the step unreadable or the team out of the table (the live walk then).
+StepPoints* PointsThisStep(const unsigned char* vehicle) noexcept {
+    const SceneStep step=SceneStepNow();
+    std::int32_t team=At<std::int32_t>(vehicle,kTeam);
+    if(team==kTeamVehicle)team=player.team;
+    if(!step.scene || team<0 || team>=kMaxTeam)return nullptr;
+    StepPoints& s=stepPoints[team];
+    if(!s.taken || s.step.scene!=step.scene || s.step.count!=step.count || s.step.mission!=step.mission) {
+        const unsigned char* head=nullptr;
+        const std::int32_t* relation=nullptr;
+        std::uint64_t nodes=0;
+        s.ok=EnemyRegistry(team,head,relation,nodes);
+        if(s.ok)enemypoints::Collect(head,relation,s.points,nodes);
+        else s.points.clear();
+        s.step=step;s.taken=true;
+    }
+    return &s;
+}
+}  // namespace
+bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float reach,EnemyUsable usable,void* ctx,
+                          const void*& best,float& bestDist) noexcept {
+    best=nullptr;bestDist=1e30f;
+    auto dist=[](const float* a,const float* b) noexcept { return npc::Dist(a,b); };
+    auto ok=[&](const void* object) noexcept { return usable(ctx,object); };
+    StepPoints* const s=PointsThisStep(vehicle);
+    if(!s) {   // the live walk, Nearest's rule
+        return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept {
+            const float d=dist(from,aim);
+            if(d<=reach && d<bestDist && ok(object)){best=object;bestDist=d;}
+        });
+    }
+    if(!s->ok)return false;
+    const enemypoints::Pick p=enemypoints::Nearest(s->points,vehicle,from,reach,dist,ok);
+    best=p.object;bestDist=p.dist;
+    return true;
+}
+
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
     const auto registry=At<const unsigned char*>(image,kRegistry);
     if(!Readable(registry,kRegList+0x10))return false;
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return false;
-    int n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
+    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
+    std::uint64_t n=0;
+    for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);
         if(!target || target[0]!=0 || !target[kTargetValid])continue;
         const auto object=At<const unsigned char*>(target,kTargetObject);

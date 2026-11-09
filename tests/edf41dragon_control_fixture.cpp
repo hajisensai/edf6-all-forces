@@ -85,7 +85,7 @@ int main(){
  *reinterpret_cast<void**>(image+kBulletMgr)=reinterpret_cast<void*>(1);
  auto* table=reinterpret_cast<void**>(image+kVtable);table[kSlotTick]=image+kTick;config.edf41Ai=true;
  *reinterpret_cast<const void**>(image+kVtable-8)=image+0x2000;*reinterpret_cast<const void**>(object)=image+kVtable;
- crew::enemy_weapon_aim::ready=true;crew::enemy_weapon_aim::admittedImage=image;
+ crew::enemy_weapon_aim::ready=true;crew::enemy_weapon_aim::admittedImage=image;crew::enemy_weapon_aim::CacheProfileCols();
  Check(InstallEdf41Dragon() && owns && controlled && onSeed,"production install registers its exact own-chain lifecycle and seed callbacks");
  Check(owns(table[kSlotTick]),"only the actual installed wrapper over the verified original is admitted");
  Check(!owns(image+kTick) && !owns(reinterpret_cast<void*>(&Ai)),"unknown hooks and bare native originals cannot impersonate the wrapper");

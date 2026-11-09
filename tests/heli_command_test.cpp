@@ -22,6 +22,7 @@ Config commandConfig{};
 const Config& Cfg() noexcept { return commandConfig; }
 ULONGLONG GameMs() noexcept { return 10000; }
 ULONGLONG GameFrame() noexcept { return 600; }
+SceneStep SceneStepNow() noexcept { return {}; }   // unreadable: NearestEnemyThisStep walks live
 void Log(const char*,...) noexcept {}
 const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
     constexpr wchar_t file[]=L"V_410HELI_GATLING01.SGO";

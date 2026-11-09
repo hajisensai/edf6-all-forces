@@ -444,13 +444,17 @@ unsigned Abilities(const NativeLease& lease,NativeAbility* out,unsigned capacity
     __try { return List(lease,out,capacity); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
-bool ReadAbilityState(const NativeLease& lease,const NativeAbility& ability,enemy_control::Ability* out) noexcept {
+namespace {
+// roster: shared Deiroi foot-battery walk of one refresh; nullptr walks per read.
+bool ReadAbilityStateWith(const NativeLease& lease,const NativeAbility& ability,enemy_control::Ability* out,DeiroiGunRoster* roster) noexcept {
     if(!out)return false;
     out->state=enemy_control::AbilityState::unavailable;out->cooldownKnown=false;out->cooldownSeconds=0;
     __try {
         if(!Identity(lease))return false;
         if(ability.kind==AbilityKind::deiroiFire || ability.kind==AbilityKind::deiroiAuto)
-            return ability.argument>=0 && ReadDeiroiAbilityState(lease,static_cast<unsigned>(ability.argument),ability.kind==AbilityKind::deiroiAuto,out);
+            return ability.argument>=0 && (roster ?
+                ReadDeiroiAbilityState(lease,roster,static_cast<unsigned>(ability.argument),ability.kind==AbilityKind::deiroiAuto,out) :
+                ReadDeiroiAbilityState(lease,static_cast<unsigned>(ability.argument),ability.kind==AbilityKind::deiroiAuto,out));
         if(ability.kind==AbilityKind::humanoidWeapon)
             return ability.argument>=0 && ReadHumanoidWeaponState(lease,static_cast<unsigned>(ability.argument),out);
         if(ability.kind==AbilityKind::walkingAction)
@@ -505,6 +509,17 @@ bool ReadAbilityState(const NativeLease& lease,const NativeAbility& ability,enem
         }
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+}
+bool ReadAbilityState(const NativeLease& lease,const NativeAbility& ability,enemy_control::Ability* out) noexcept {
+    return ReadAbilityStateWith(lease,ability,out,nullptr);
+}
+bool ReadAbilityStates(const NativeLease& lease,const NativeAbility* native,enemy_control::Ability* abilities,unsigned count) noexcept {
+    // Same order, per-entry Identity and first-failure stop as one ReadAbilityState
+    // per entry; only the Deiroi battery walk is shared across the refresh.
+    DeiroiGunRoster roster;
+    for(unsigned i=0;i<count;++i)if(!ReadAbilityStateWith(lease,native[abilities[i].channel],&abilities[i],&roster))return false;
+    return true;
 }
 bool ExecuteAbility(const NativeLease& lease,const NativeAbility& ability,std::uint64_t sequence,std::uint64_t seed) noexcept {
     try {

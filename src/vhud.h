@@ -51,6 +51,8 @@ bool ArcRoundOf(const unsigned char* w,const RoundModel& m,roundaim::Round* roun
 const char* VehicleClassName(const void* vehicle) noexcept;
 // crew.cpp: whether `vehicle` is of a class crew.cpp knows (kClasses: every stock vehicle class and the 506 body).
 bool KnownVehicle(const void* vehicle) noexcept;
+// KnownVehicle of a vtable already read (an object the caller knows is live: no Readable asked).
+bool KnownVehicleVtable(const void* vtable) noexcept;
 // The selected store of the player's seat, for the HUD to bracket: whoever lets the player pick one (feat/ov-payload's
 // payload switch) calls this every frame from the game thread with the weapon's index in the seat's holder list
 // (seat+0xC8, the order the HUD lists them in), -1 for none. Not called for a few frames: no selection is shown.

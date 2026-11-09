@@ -42,6 +42,7 @@ const Enemy* World(int* count) noexcept { *count=enemyCount;return enemies; }
 const std::int32_t* Relations(std::int32_t team) noexcept { return team==0 ? relation : nullptr; }
 void ReloadConfigIfChanged() noexcept {}
 float Down(const unsigned char*) noexcept { return 9.8f; }
+void ResetGunnerLog() noexcept {}
 }  // namespace autoturret
 
 namespace {

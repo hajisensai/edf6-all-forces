@@ -52,6 +52,9 @@ public:
     // observed view with no enemy captures still receives grayscale.
     bool Composite(ID3D11DeviceContext* context, Polarity polarity) noexcept;
 
+    // End the current view without touching any resource (a view drawn optically).
+    void Invalidate() noexcept;
+
     // Release device resources and invalidate the current view (resize/device loss).
     void Reset() noexcept;
 
