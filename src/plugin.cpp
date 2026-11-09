@@ -44,6 +44,7 @@
 #include "hudscale.h"
 #include "hudtext.h"
 #include "gunnerrecoil.h"
+#include "storerecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
 #include "enemy_control.h"
@@ -1367,6 +1368,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallHavokMultithread();   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
+    InstallStoreRecoil();   // the 403's store holders past its seats: the hull push, not a seat's jitter (storerecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
