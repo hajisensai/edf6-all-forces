@@ -151,14 +151,14 @@ bool Resolve(Rack& r,const unsigned char* v) noexcept {
     return true;
 }
 
-// The launcher weapon of `v` (its holder marked kMarkLofted, as launcher.cpp finds it on the seat), or nullptr.
+// The launcher weapon of `v` (its holder marked kMarkKatyusha: the Katyusha's own, common/edf/weapon.h), or nullptr.
 const unsigned char* LoftedWeapon(const unsigned char* v) noexcept {
     const auto holders=At<const unsigned char*>(v,kHolders);
     const auto count=At<std::uint64_t>(v,kHolderCount);
     if(!holders || !count || count>16 || !Readable(holders,count*kHolderStride))return nullptr;
     for(std::uint64_t i=0;i<count;++i) {
         const auto w=At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
-        if(Readable(w,kWeaponReloadLeft+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
+        if(Readable(w,kWeaponReloadLeft+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkKatyusha)return w;
     }
     return nullptr;
 }

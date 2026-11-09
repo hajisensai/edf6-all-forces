@@ -1396,7 +1396,7 @@ struct PlayerJetReadout {
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
-// kMarkLofted (common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
+// lofted (edf::Lofted, common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
 // round it its ripple's spread reaches (FireAccuracy's cone), the horizontal range, the flight in seconds and the
 // launcher's elevation in degrees. LauncherFrame from every vehicle's input (game thread); PlayerLauncher the last one,
 // false with none this moment.

@@ -2063,10 +2063,49 @@ def shkt_check_on_synthetic_data() -> None:
 def weapon_marks_agree() -> None:
     """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
     marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
-    assert marks == {'kMarkAir': '7301', 'kMarkGround': '7302', 'kMarkLofted': '7303'}, marks
+    assert marks == {'kMarkAir': '7301', 'kMarkGround': '7302', 'kMarkLofted': '7303', 'kMarkKatyusha': '7304'}, marks
     assert at_build.MARK_AIR == 7301.0 and at_build.MARK_GROUND == 7302.0
-    assert make_artillery.MARK_GROUND == 7302.0 and make_katyusha.MARK_LOFTED == 7303.0
-    assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_LOFTED
+    assert make_artillery.MARK_GROUND == 7302.0 and make_katyusha.MARK_KATYUSHA == 7304.0
+    assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_KATYUSHA
+
+
+@test
+def cab_floor_katyusha_only() -> None:
+    """The floor over the Katyusha's cab (common/edf/katyusha_cab.h CabFloor) bounds the Katyusha's arcs alone: it rides
+    the Katyusha's own mark (kMarkKatyusha, the one role with `cab`), not the lofted one (2026-11-09 review: the TOS-1,
+    kMarkLofted, lost its whole forward sector under it). Every generator's weapon with a lofted mark: only the
+    Katyusha's rockets carry kMarkKatyusha; every CabFloor in the plugins is gated on that mark."""
+    import make_tracked_combat as tc
+    roles = re.search(r'kGunRoles\[\]=\{(.*?)\};', src('common/edf/weapon.h'), re.S).group(1)
+    rows = re.findall(r'\{(kMark\w+),Prefer::(\w+),(true|false),(true|false)\}', roles)
+    assert len(rows) == 4 and [m for m, _, _, cab in rows if cab == 'true'] == ['kMarkKatyusha'], rows
+    assert {m for m, _, lofted, _ in rows if lofted == 'true'} == {'kMarkLofted', 'kMarkKatyusha'}, rows
+    # The data: every weapon table the generators write with a lofted mark.
+    lofted = {f'make_tracked_combat.GUNS[{k!r}]': g['LockonTargetType'] for k, g in tc.GUNS.items()
+              if g.get('LockonTargetType') in (7303.0, 7304.0)}
+    lofted['make_katyusha.ROCKETS'] = make_katyusha.ROCKETS['LockonTargetType']
+    assert lofted["make_tracked_combat.GUNS['tos1']"] == 7303.0, lofted
+    assert [k for k, v in lofted.items() if v == 7304.0] == ['make_katyusha.ROCKETS'], lofted
+    # Any other writer of the mark in the sources (a literal 7304 or the Katyusha's constant): the Katyusha's alone.
+    for d in ('tools', 'pylib', os.path.join('autoturret', 'tools')):
+        for name in sorted(os.listdir(os.path.join(ROOT, d))):
+            if not name.endswith('.py') or name == 'selftest.py':
+                continue
+            text = src(f"{d.replace(os.sep, '/')}/{name}")
+            for v in re.findall(r"'LockonTargetType':\s*([\w.]+)", text):
+                if v in ('7304', '7304.0', 'MARK_KATYUSHA'):
+                    assert name == 'make_katyusha.py', f'{d}/{name} writes the Katyusha mark'
+    # The plugins: every CabFloor gated on the Katyusha's mark.
+    plugin = src('autoturret/src/plugin.cpp')
+    assert plugin.count('edf::katyusha::CabFloor(') == 1 and 'shot.cab ? edf::katyusha::CabFloor(' in plugin
+    assert 'shot.cab=shot.cab || role.cab;' in plugin and 'if(target==kMarkKatyusha)return Mark::katyusha;' in plugin
+    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const bool katyusha=edf::RoleOf(At<std::int32_t>(weapon,edf::kWeaponMark)).cab;' in loft
+    assert 'katyusha ? edf::katyusha::CabFloor(' in loft and src('src/launcher.cpp').count('CabFloor(') == 1
+    assert 'At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkKatyusha)return w;' in src('src/katyusha.cpp')
+    # No reader left asking for kMarkLofted alone where any lofted launcher is meant.
+    for rel in ('src/highcam.cpp', 'src/launcher.cpp', 'src/sightzoom.cpp', 'src/turretcam.cpp', 'src/vhud.cpp'):
+        assert '==edf::kMarkLofted' not in src(rel), rel
 
 
 @test
@@ -2479,6 +2518,7 @@ def katyusha_fires_over_its_cab() -> None:
     assert 'edf::katyusha::CabFloor(std::atan2(across,ahead))' in loft and 'lowest=cab>stop ? cab : stop' in loft
     ballistic = src('autoturret/src/plugin.cpp').split('bool Ballistic(', 1)[1].split('\n}\n', 1)[0]
     assert 'edf::katyusha::CabFloor(std::atan2(local[0],local[2]))' in ballistic and ballistic.count('elevation>=cab') == 2
+    assert 'shot.cab ? edf::katyusha::CabFloor(' in ballistic, "the cab floor is the Katyusha's alone (cab_floor_katyusha_only)"
 
 @test
 def turret_aim_wired() -> None:

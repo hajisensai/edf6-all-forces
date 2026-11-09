@@ -197,6 +197,22 @@ int main() {
         check(count==kPoints,"a walk ends after the list's own count of nodes");
         Put<void*>(image,kRegistry,nullptr);Put<void*>(image,kTeams,nullptr);
     }
+    // The cab's floor is the Katyusha's alone (2026-11-09 review): the TOS-1's rockets (tools/make_tracked_combat.py
+    // GUNS['tos1']: 6 m/frame, 600 frames, gravity factor 0.6, kMarkLofted) take the low arc of a couple of degrees to a
+    // ground target 2 km dead ahead, which the Katyusha's floor over its cab (about 16 deg there) would put out of reach.
+    {
+        Weapon tos(6.0f,600,0.6f,kMarkLofted,0,0,0,0,0,1);
+        Put<void*>(holder,kHolderWeapon,tos.bytes.data());answer=Answer::unhandled;
+        const float ahead[3]={0.0f,0.0f,2000.0f},behind[3]={0.0f,0.0f,-2000.0f};
+        float e=0.0f,t=0.0f;
+        check(ReadShot(vehicle,seat,shot,range) && shot.lofted && !shot.cab && shot.ground,"TOS-1 (kMarkLofted): lofted, ground first, no cab floor");
+        check(Ballistic(ahead,shot,e,t) && e>0.0f && e<edf::katyusha::CabFloor(0.0f),"TOS-1 reaches a ground target dead ahead on its low arc under the Katyusha's floor");
+        Put<std::int32_t>(tos.bytes.data(),kLockonTargetType,kMarkKatyusha);
+        check(GunMark(tos.bytes.data())==Mark::katyusha && ReadShot(vehicle,seat,shot,range) && shot.lofted && shot.cab,"Katyusha (kMarkKatyusha): lofted with the cab floor");
+        check(!Ballistic(ahead,shot,e,t),"Katyusha: the same low arc over its cab is out of reach");
+        check(Ballistic(behind,shot,e,t) && e<edf::katyusha::CabFloor(0.0f),"Katyusha: behind, where no cab is in the way, the low arc stands");
+        Put<void*>(holder,kHolderWeapon,native.bytes.data());answer=Answer::selected;
+    }
     std::printf("autoturret payload aim: %d checks, %d failures\n",checks,failed);
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;return failed?1:0;
 }

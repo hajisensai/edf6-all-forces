@@ -106,7 +106,10 @@ int main() {
         using edf::RoleOf;using edf::Prefer;
         Check(RoleOf(edf::kMarkAir).prefer==Prefer::air && !RoleOf(edf::kMarkAir).lofted,"role table: the flak takes air targets first, low arc");
         Check(RoleOf(edf::kMarkGround).prefer==Prefer::ground && !RoleOf(edf::kMarkGround).lofted,"role table: the Bohr takes ground first, low arc");
-        Check(RoleOf(edf::kMarkLofted).prefer==Prefer::ground && RoleOf(edf::kMarkLofted).lofted,"role table: the Katyusha lobs at the ground");
+        Check(RoleOf(edf::kMarkLofted).prefer==Prefer::ground && RoleOf(edf::kMarkLofted).lofted && !RoleOf(edf::kMarkLofted).cab,"role table: the TOS-1 lobs at the ground, no cab floor");
+        Check(RoleOf(edf::kMarkKatyusha).prefer==Prefer::ground && RoleOf(edf::kMarkKatyusha).lofted && RoleOf(edf::kMarkKatyusha).cab,"role table: the Katyusha lobs at the ground over its cab");
+        Check(edf::Lofted(edf::kMarkLofted) && edf::Lofted(edf::kMarkKatyusha) && !edf::Lofted(edf::kMarkGround) && !edf::Lofted(0),"Lofted: both lofted marks, no other");
+        Check(!RoleOf(edf::kMarkAir).cab && !RoleOf(edf::kMarkGround).cab && !RoleOf(0).cab,"role table: only the Katyusha's mark carries the cab floor");
         Check(RoleOf(0).prefer==Prefer::any && !RoleOf(0).lofted && RoleOf(1).prefer==Prefer::any,"role table: an unmarked gun has no preference");
     }
     {

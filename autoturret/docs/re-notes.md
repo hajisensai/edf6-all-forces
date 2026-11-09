@@ -121,8 +121,8 @@ The game's vehicle aim (`0x622640`) takes the world gravity vector from
 `*(*(0x20B2958) + 0x68) + 0x20` (virtual slot 0 returns a pointer to it, m/s^2), rotates it into
 the vehicle frame and drops a round by `AmmoGravityFactor * gravity / 3600` metres per frame^2
 (`0x622B65`), then solves the two launch angles at `0x50350`. Measured gravity: about 14.7 m/s^2.
-The plugin does the same and takes the lower arc; a lofted gun (mark 7303, the Katyusha) the higher one while its
-pitch is within the axis' stops, else the lower (NPC crews only: see "The Katyusha's camera and pose"). The solve is
+The plugin does the same and takes the lower arc; a lofted gun (mark 7303, the TOS-1; 7304, the Katyusha) the higher one while its
+pitch is within the axis' stops, else the lower (the Katyusha's never under the floor over its cab) (NPC crews only: see "The Katyusha's camera and pose"). The solve is
 one copy, `common/weapon.cpp` `edf::BallisticArc`, which EDF6VehicleCrew's Katyusha loft calls too.
 
 ### Rounds in flight (2026-10-05, static)

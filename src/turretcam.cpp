@@ -397,7 +397,7 @@ bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ball
     float elevation=std::atan2(l[1],x),frames=0.0f,g[3];
     RoundModel model{};
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
-    const bool lofted=At<std::int32_t>(gun,edf::kWeaponMark)==edf::kMarkLofted;
+    const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
     // Guided rounds and motor-driven rockets do not follow the fixed-gravity arc solved here.
     if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const double drop=model.factor*-(g[0]*frame[3]+g[1]*frame[4]+g[2]*frame[5])/3600.0;
@@ -449,7 +449,7 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     float g[3];
     RoundModel model{};
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
-    const bool lofted=At<std::int32_t>(gun,edf::kWeaponMark)==edf::kMarkLofted;
+    const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
     if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const float vel[3]={dir[0]*model.speed,dir[1]*model.speed,dir[2]*model.speed};
         const float drop[3]={g[0]*model.factor/3600.0f,g[1]*model.factor/3600.0f,g[2]*model.factor/3600.0f};

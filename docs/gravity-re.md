@@ -645,7 +645,7 @@ SceneObject* o = BodyToObject(id);              // 0x108260：可能为 nullptr�
   - 可选：把插件参数（抓力、质量上限）放进 AmmoDamage 这类带星级曲线的字段，插件读 weapon+0x89C。
 - 不要改的字段：AmmoClass 保持 ""，AmmoCount 1，ReloadTime 0，FireSe，use_underground，Ammo_CustomParameter（[3,3] 传给 marker init 写进锁定条目 +0x20/+0x24，含义未明）。
 - 标记建议：AmmoHitSizeAdjust 的位模式 = `THROW_MARK_BASE | 0xE01` = 0x3F800E01（约 1.000427）。
-  - 现有标记：call 的浮点 7003–7011 / 7101–7121 / 7201–7202 / 7401；throw 的 0x3F800D61–D63；gun 的标签在 AmmoColor.a（0x3F801C85–88）；LockonTargetType 7301–7303。0xE01 和这些都不冲突。
+  - 现有标记：call 的浮点 7003–7011 / 7101–7121 / 7201–7202 / 7401；throw 的 0x3F800D61–D63；gun 的标签在 AmmoColor.a（0x3F801C85–88）；LockonTargetType 7301–7304。0xE01 和这些都不冲突。
   - 取接近 1.0 的值，是为了即使将来换成真子弹模板，命中半径也几乎不变；LaserMarker 不读这个字段：武器代码里只有 SGO 加载器 0x68D901 写它，它只随 InitParam 块进子弹。
   - 插件识别时同时核对 vtable == 0x17E45E8，双保险。
 

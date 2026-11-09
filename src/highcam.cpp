@@ -61,7 +61,7 @@ bool IndirectFireSeat(const unsigned char* seat) noexcept {
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
         if(!Readable(w,edf::kWeaponAccuracyScale+4))continue;
         const std::int32_t mark=At<std::int32_t>(w,edf::kWeaponMark);
-        if((mark==edf::kMarkLofted || mark==edf::kMarkGround) && At<std::int32_t>(w,edf::kWeaponAmmoAlive)>=kIndirectLife)return true;
+        if((edf::Lofted(mark) || mark==edf::kMarkGround) && At<std::int32_t>(w,edf::kWeaponAmmoAlive)>=kIndirectLife)return true;
     }
     return false;
 }

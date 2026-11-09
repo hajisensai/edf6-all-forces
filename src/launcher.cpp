@@ -1,5 +1,5 @@
 // The Katyusha's impact point (the user, 2026-10-05: "show where the rockets land, as the plane's bombs do"): while the
-// player rides a vehicle whose seat 0 holds a launcher marked kMarkLofted (tools/make_katyusha.py; common/edf/weapon.h),
+// player rides a vehicle whose seat 0 holds a lofted launcher (edf::Lofted; tools/make_katyusha.py; common/edf/weapon.h),
 // where a rocket fired now would come down, worked out the way the game flies it, and the ring its ripple spreads over.
 //  - From the launcher's own muzzles (their mean: common/edf/weapon.h MeanMuzzle, as fire 0x6969A0 builds them), along
 //    the rocket rail (the muzzle's row 2), at AmmoSpeed metres a frame (the live weapon's: what the request's tier and
@@ -36,7 +36,7 @@ LauncherReadout latest{};
 ULONGLONG latestMs=0;
 const void* latestVehicle=nullptr;
 
-// The seat's launcher marked kMarkLofted, or nullptr.
+// The seat's lofted launcher (edf::Lofted: kMarkLofted or kMarkKatyusha), or nullptr.
 const unsigned char* LoftedLauncher(const unsigned char* vehicle,const unsigned char* seat) noexcept {
     const auto selected=PayloadSightPicked(vehicle,0);
     if(!selected)return nullptr;
@@ -48,7 +48,7 @@ const unsigned char* LoftedLauncher(const unsigned char* vehicle,const unsigned 
         const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
         if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
-        if(w==selected && Readable(w,edf::kWeaponAccuracyScale+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
+        if(w==selected && Readable(w,edf::kWeaponAccuracyScale+4) && edf::Lofted(At<std::int32_t>(w,edf::kWeaponMark)))return w;
     }
     return nullptr;
 }
@@ -115,8 +115,9 @@ bool Solve(const unsigned char* weapon,LauncherReadout& r) noexcept {
 
 // The elevation (rad up, on the vehicle) the launcher needs to drop its rockets where the player's camera looks (the
 // first ground along the screen's centre: CameraRay + MapRay): the high arc while the launcher's stops allow it, else
-// the low one, else (out of reach) 45 deg, the farthest it throws. The lowest stop toward the point is the floor over
-// the cab there (common/edf/katyusha_cab.h, test site #36), the pose's own (katyusha.cpp Launcher): a low arc under
+// the low one, else (out of reach) 45 deg, the farthest it throws. The Katyusha's (kMarkKatyusha) lowest stop toward the
+// point is the floor over the cab there (common/edf/katyusha_cab.h, test site #36), the pose's own (katyusha.cpp
+// Launcher; another lofted launcher's is its axis' stop alone): a low arc under
 // it is lifted onto it, and the impact mark (Solve, from the muzzles as posed) shows where that lands. Solved as EDF6AutoTurret solves (edf::BallisticArc:
 // from the launcher's muzzles, in the vehicle's frame, gravity along the vehicle's down). False when the camera looks
 // at no ground: the launcher then stays where the player aims it (the stock pose).
@@ -133,7 +134,9 @@ bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned ch
     const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
     const auto pitch=seat+kSeatAim+kAimAxes+kAxisStride;   // the pitch axis' stops, negative up
     const float stop=-At<float>(pitch,kAxisMax),highest=-At<float>(pitch,kAxisMin);
-    const float cab=edf::katyusha::CabFloor(std::atan2(across,ahead));
+    // The cab's floor is the Katyusha's alone (kMarkKatyusha): another lofted launcher (the TOS-1) has no cab before it.
+    const bool katyusha=edf::RoleOf(At<std::int32_t>(weapon,edf::kWeaponMark)).cab;
+    const float cab=katyusha ? edf::katyusha::CabFloor(std::atan2(across,ahead)) : stop;
     const float lowest=cab>stop ? cab : stop;
     float e=0.0f,frames=0.0f;
     if(!(edf::BallisticArc(x,up,speed,drop,true,e,frames) && e>=lowest && e<=highest)
