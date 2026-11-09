@@ -176,10 +176,10 @@ void StatusText() {
 }
 
 void WaitDone(VariantGenerator& g) {
-    // Until it is done, however long: VariantGenerator starts its child BELOW_NORMAL_PRIORITY_CLASS (it must not take
-    // the game's CPU), so on a machine busy at normal priority (ctest -j) the stand-in cmd.exe waits for the CPU: 0.7 s
-    // alone, 90 s under 16 busy normal-priority processes (2026-10-25, the whole length of the load). No wall-clock
-    // bound here: a stand-in that never ends is the test's CTest TIMEOUT (CMakeLists.txt).
+    // Until it is done, however long: no wall-clock bound here, a stand-in that never ends is the test's CTest TIMEOUT
+    // (CMakeLists.txt). The stand-ins run at normal priority (Process): below normal, as the plugin's generator runs,
+    // a machine busy at normal priority starved them (90 s under 16 busy processes, 2026-10-25; past the 900 s timeout
+    // with several sessions' ctest -j at 100% CPU, 2026-11-08).
     while(g.Running())Sleep(20);
     Check(!g.Running(),"the stand-in finished");
 }
@@ -188,9 +188,17 @@ void Process() {
     wchar_t cmd[MAX_PATH];GetSystemDirectoryW(cmd,MAX_PATH);wcscat_s(cmd,L"\\cmd.exe");
     const std::wstring status=TempPath(L"status.txt");
     DeleteFileW(status.c_str());
-    VariantGenerator g;
-    Check(g.Status(status.c_str()).state==GenerateState::idle,"never started, no file: idle");
     wchar_t why[200]{};
+    {
+        // The plugin's generator below normal priority, asked of the child itself; not waited for (the handle closes,
+        // the child ends on its own whenever it gets the CPU).
+        VariantGenerator stock;
+        Check(stock.Start(cmd,L"/c exit 0",why,200) && stock.PriorityClass()==BELOW_NORMAL_PRIORITY_CLASS,
+              "the generator starts its child below normal priority");
+    }
+    VariantGenerator g(NORMAL_PRIORITY_CLASS);
+    Check(g.PriorityClass()==0,"nothing started, no priority class");
+    Check(g.Status(status.c_str()).state==GenerateState::idle,"never started, no file: idle");
     const std::wstring ok=L"/c (echo state=ok& echo made=2& echo message=done)>\""+status+L"\"";
     Check(g.Start(cmd,ok.c_str(),why,200),"the stand-in starts hidden");
     Check(!g.Start(cmd,ok.c_str(),why,200) || !g.Running(),"a second start is refused while one runs");

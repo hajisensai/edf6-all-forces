@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import sys
+import tempfile
 import time
 import unittest
 
@@ -12,6 +13,16 @@ import model_workers
 def echo(value: bytes, delay: float) -> bytes:
     time.sleep(delay)
     return str(os.getpid()).encode() + b'|' + value + b'|' + os.environ.get('OPENBLAS_NUM_THREADS', '').encode()
+
+
+def meet(folder: str, label: str, peers: tuple[str, ...]) -> bytes:
+    """Marks `label` running, then returns only once every one of `peers` is running too: two jobs that both return
+    ran at the same time, in two processes (a worker runs one job at a time). However long the second worker takes to
+    start; a pool that never runs them together hangs here, and that is the CTest TIMEOUT (CMakeLists.txt)."""
+    Path(folder, label).touch()
+    while not all(Path(folder, peer).exists() for peer in peers):
+        time.sleep(0.01)
+    return str(os.getpid()).encode() + b'|' + label.encode() + b'|' + os.environ.get('OPENBLAS_NUM_THREADS', '').encode()
 
 
 def fail() -> bytes:
@@ -26,8 +37,14 @@ class ModelWorkerTests(unittest.TestCase):
         self.assertEqual(model_workers.workers_for(16, None), 1)
 
     def test_real_parallel_order_and_environment_restoration(self) -> None:
+        # The two jobs wait for each other (meet): they must run at once, so in two workers. They used to sleep 0.3 s
+        # and 0.1 s and be expected on two PIDs, but the pool starts its workers on demand and either may take both
+        # jobs: under a busy ctest -j the second worker's interpreter took longer than 0.3 s to start, the first had
+        # finished `first` and took `second` as well (one PID; 111 of 160 runs, 16 at a time on a busy machine).
         before = os.environ.get('OPENBLAS_NUM_THREADS')
-        result = model_workers.run_jobs([(echo, (b'first', 0.3), 'first'), (echo, (b'second', 0.1), 'second')], workers=2)
+        with tempfile.TemporaryDirectory() as folder:
+            result = model_workers.run_jobs([(meet, (folder, 'first', ('second',)), 'first'),
+                                             (meet, (folder, 'second', ('first',)), 'second')], workers=2)
         first, second = [value.split(b'|') for value in result]
         self.assertNotEqual(first[0], second[0])
         self.assertNotEqual(int(first[0]), os.getpid())

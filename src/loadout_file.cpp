@@ -100,7 +100,7 @@ bool VariantGenerator::Start(const wchar_t* exe,const wchar_t* args,wchar_t* why
     std::wstring line=L"\""+std::wstring(exe)+L"\" "+args;   // CreateProcessW may write into its command line
     STARTUPINFOW si{};si.cb=sizeof(si);
     PROCESS_INFORMATION pi{};
-    if(!CreateProcessW(exe,line.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|BELOW_NORMAL_PRIORITY_CLASS,nullptr,nullptr,&si,&pi)) {
+    if(!CreateProcessW(exe,line.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|priority_,nullptr,nullptr,&si,&pi)) {
         Say(why,capacity,L"生成器没能启动");return false;
     }
     CloseHandle(pi.hThread);
