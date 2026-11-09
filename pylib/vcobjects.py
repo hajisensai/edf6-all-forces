@@ -663,7 +663,11 @@ class Mounting:
 # only the V603 reads its second trigger nowhere (key 2). A mounted kind is a kind of its own (mounted()), so the vehicles
 # that share the kind elsewhere keep its control there.
 STOCK_MOUNTS: dict[str, dict[str, Mounting]] = {
-    'ifv': {'AGM_L': Mounting(3)},              # the Grape's launcher beside its autocannon
+    # The Grape's launcher beside its autocannon, and its coaxial gun: the Car's stock input reads the second trigger
+    # (seat +0x2E0) as its throttle (0x65A548), where the tanks' coax is (src/payload.cpp FreeSecondary), so a key of its
+    # own (pad RB: VehicleFire4Button; the Car leaves RB unread, docs/stock-payload-re.md §2.1; the player, 2026-11-08:
+    # 「you cannot move forward unless you keep firing the coaxial machine gun」).
+    'ifv': {'AGM_L': Mounting(3), 'MG401': Mounting(4)},
     'railgun': {'AGM_L': Mounting(3)},          # the 403's missiles beside its rail gun
     'superheavy': {'AGM_L': Mounting(3)},       # the 404's missiles beside the driver's front gatling
     'flak': {'AAM_S': Mounting(FIRE_SECONDARY, auto=True),   # the Kepler's SAM launcher: one launcher's two rounds on the

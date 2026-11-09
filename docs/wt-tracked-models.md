@@ -40,7 +40,9 @@ installer ──make_tracked_combat──> vulcan_model / bmpt_model ──> pyl
   - BMPT：`wheel_*_front`→A（T-72 诱导轮在前），`wheel_*_01..06`→B..G，`wheel_*_drive`→H（主动轮在后），`wheel_*_top_*`（托带轮）→车体；
     `gun_barrel_02`（+x 左炮）→`cannon_slide_l`、`gun_barrel_01`→`cannon_slide_r`；武器模块 `bone_gun / ex_decor_01 / bone_mg_gun_twin` → `cannon_l`（俯仰）；
     Ataka 发射筒 `gun_mask_03/04 / 9m120_rocket` 留在 `cannon_main`（导弹的挂点本来就在 `cannon_main`，发射筒不随炮俯仰，筒口=导弹出口）；
-    车长周视镜 → `doppler_radar`，炮长舱盖瞄具块 → `tracking_radar`；车体两侧的 `bone_turret_01..04`（车体榴弹发射器）→ 车体。
+    车长周视镜 → `doppler_radar`，炮长舱盖瞄具块 → `tracking_radar`；车体两侧的 `bone_turret_01..04`（车体榴弹发射器）→ 车体；
+    炮塔后壁的两盏灯 `ex_lantern_b / ex_lantern_b_01` → `cannon_main`（精确名；`_02 / _03` 是车体灯，`docs/feedback-2026-11-08-bmpt-lantern.md`）。
+  - 守卫：`tests/test_wt_tracked.py` `WtRigTests` 要求没有 `body` 顶点高于座圈 0.4 m 又落在炮塔零件包围盒里（漏写规则的炮塔配件会被报出）。
 - 骨骼原点（`model.json origins`，`graft_pure.set_bone_origin`，旋转不变、子骨世界绑定不变）：
   - `cannon_main`：炮塔座圈圆心。对 `bone_turret` 顶点按 y 分层做圆拟合：M163 (0, 1.87, −0.27)，BMPT (0, 1.70, −0.25)（r≈1.2 m）。
   - `cannon_l/_r`（耳轴）：M163 取炮管轴高 y 2.31、炮塔前脸 z 0.05；BMPT 取侧视图上武器模块侧面轴承圆心 (y 2.44, z −1.47)。x 为各自炮管轴。

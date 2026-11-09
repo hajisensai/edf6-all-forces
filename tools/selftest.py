@@ -5694,7 +5694,7 @@ def stock_payload_and_seats_wired() -> None:
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
     assert 'if(store && !(spec && spec->nativeControl))' in payload and 'stores[i]=IsStoreWeapon(ws[i]);' in payload
-    assert 'return playerSeat && FreeSecondary(c) && IsCoaxSpec(spec) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(playerSeat && IsCoaxSpec(spec))return FreeSecondary(c) ? PayloadFire::secondary : PayloadFire::other;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -5943,7 +5943,7 @@ def edf41_mother_parts_default_migrates() -> None:
     assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
-                                                         installer.DEFAULTS_MARK_1024]
+                                                         installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -5993,6 +5993,29 @@ def high_cam_default_migrates() -> None:
     planned = installer.planned_ini(done, ini)
     assert re.search(r'^HighCamHeight=90$', planned[0], re.M) and re.search(r'^HighCamBack=55$', planned[0], re.M)
     assert 'HighCamHeight' in planned[3] and 'HighCamBack' in planned[3]
+
+
+@test
+def fire4_pad_default_migrates() -> None:
+    """Fire key 4's pad button went from 0 (none) to 512 (RB) when the Grape's coax moved off the Car's throttle onto it
+    (2026-11-08, docs/feedback-2026-11-08-grape-keys.md): the shipped ini and the plugin's default agree, an old ini still
+    at 0 is moved once by the installer's 11-08 step, a button the player chose is kept, a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^VehicleFire4Button=512$', ini, re.M) and 'vehicleFire4Button=0x200,' in crew
+    assert installer.NEW_DEFAULTS_1108[installer.SECTION] == {'VehicleFire4Button': ('0', '512')}
+    done = (f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\n{installer.DEFAULTS_MARK_1017}\n{installer.DEFAULTS_MARK_1024}\n'
+            'Enabled=1\nVehicleFire4Button=0\n')
+    text, flipped = installer.apply_new_defaults(done)
+    assert flipped == ['VehicleFire4Button'] and 'VehicleFire4Button=512' in text, flipped
+    assert text.count(installer.DEFAULTS_MARK_1108) == 1
+    again = text.replace('VehicleFire4Button=512', 'VehicleFire4Button=0')
+    assert installer.apply_new_defaults(again) == (again, []), "a later install undid the player's own 0"
+    mine = done.replace('VehicleFire4Button=0', 'VehicleFire4Button=8192 ; mine')
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == [] and 'VehicleFire4Button=8192 ; mine' in text, flipped
+    planned = installer.planned_ini(done, ini)
+    assert re.search(r'^VehicleFire4Button=512$', planned[0], re.M) and 'VehicleFire4Button' in planned[3]
 
 
 def make_stock_stores_wanted(text: str) -> bool:

@@ -135,8 +135,12 @@ BMPT = Vehicle(
         (r'^(bone_gun|ex_decor_01|bone_mg_gun_twin|gun_mask_0[34]|9m120_rocket)$', 'cannon_l'),
         (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's panoramic sight
         (r'^hatch_04$', 'tracking_radar'),                       # the gunner's hatch and sight block
-        # bone_turret_01..04 are the hull's grenade launchers (outside the ring): body
-        (r'^(bone_turret|ex_armor_turret_.*|ex_era_turret_.*|hatch_03|antenna)$', 'cannon_main'),
+        # bone_turret_01..04 are the hull's grenade launchers (outside the ring): body. The two lamps on the turret's
+        # back wall (ex_lantern_b, its glass and housing, and ex_lantern_b_01 beside it: y 2.54..2.75, z -2.13..-1.92,
+        # above the ring at y 1.70) are the turret's: on the hull they stayed in the air as it turned (the player,
+        # 2026-11-08, docs/feedback-2026-11-08-bmpt-lantern.md). Exact names: ex_lantern_b_02 / _03 (z -3.4, y 1.5..1.7)
+        # and ex_lantern_l / r_02 are the hull's own lamps.
+        (r'^(bone_turret|ex_armor_turret_.*|ex_era_turret_.*|hatch_03|antenna|ex_lantern_b|ex_lantern_b_01)$', 'cannon_main'),
     ],
     turret=(0.0, 1.70, -0.25),       # ring circle fit at y 1.50..1.75: centre z -0.20..-0.30, r 1.17..1.22
     trunnion={'cannon_l': (2.44, -1.47), 'cannon_r': (2.44, -1.47)},  # the module's side bearing (side render)
@@ -197,7 +201,10 @@ PZH2000 = Vehicle(
         (r'^(bone_gun|ex_decor_04|ex_decor_05|ex_armor_05)$', 'cannon_l'),
         (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's sight head
         (r'^mg_aa_mount_h$', 'tracking_radar'),                  # the roof machine gun's ring
-        (r'^(bone_turret|bone_turret_01|antenna_0[12]|bone_mg_aa_v|mg_aa_mount_v|ammo)$', 'cannon_main'),
+        # ex_decor_14 (the turret texture alone: x -0.59..0.57, y 1.91..2.43, z -4.56..-4.47) hangs on the turret's back
+        # face behind the hull's end (z -4.23), its foot under turret_box's floor (1.95): it was left on the hull
+        # (tests/test_wt_tracked.py test_no_hull_part_inside_the_turret, 2026-11-08).
+        (r'^(bone_turret|bone_turret_01|antenna_0[12]|bone_mg_aa_v|mg_aa_mount_v|ammo|ex_decor_14)$', 'cannon_main'),
     ],
     turret=(0.0, 1.84, -2.30),       # ring circle fit at y 0.82: centre z -2.15, r 0.9 (the basket); outer at y 1.9: -2.45
     trunnion={'cannon_l': (2.45, -0.90), 'cannon_r': (2.45, -0.90)},   # the barrel's axis behind the mantlet

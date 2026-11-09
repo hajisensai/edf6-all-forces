@@ -143,15 +143,15 @@
    "name": "body.wt_headlight_glass_c",
    "bone": "body",
    "material": 1,
-   "triangles": 416,
-   "vertices": 306
+   "triangles": 296,
+   "vertices": 224
   },
   {
    "name": "body.wt_headlight_glass_c_2",
    "bone": "body",
    "material": 2,
-   "triangles": 42,
-   "vertices": 48
+   "triangles": 28,
+   "vertices": 32
   },
   {
    "name": "body.wt_us_turret_glass_c",
@@ -180,13 +180,6 @@
    "material": 6,
    "triangles": 848,
    "vertices": 1248
-  },
-  {
-   "name": "body.wt_bmpt_terminator_turret_c_ussr_camo_green",
-   "bone": "body",
-   "material": 9,
-   "triangles": 2650,
-   "vertices": 3287
   },
   {
    "name": "body.wt_optic_glass_c",
@@ -245,6 +238,20 @@
    "vertices": 680
   },
   {
+   "name": "cannon_main.wt_headlight_glass_c",
+   "bone": "cannon_main",
+   "material": 1,
+   "triangles": 120,
+   "vertices": 82
+  },
+  {
+   "name": "cannon_main.wt_headlight_glass_c_2",
+   "bone": "cannon_main",
+   "material": 2,
+   "triangles": 14,
+   "vertices": 16
+  },
+  {
    "name": "cannon_main.wt_us_turret_glass_c",
    "bone": "cannon_main",
    "material": 3,
@@ -255,8 +262,8 @@
    "name": "cannon_main.wt_bmpt_terminator_turret_c_ussr_camo_green",
    "bone": "cannon_main",
    "material": 9,
-   "triangles": 55609,
-   "vertices": 71171
+   "triangles": 58259,
+   "vertices": 74458
   },
   {
    "name": "cannon_main.wt_optic_glass_c",
@@ -840,11 +847,11 @@
     ],
     [
      2.027429,
-     2.749783,
+     1.819697,
      3.596779
     ]
    ],
-   "source_triangles": 204586,
+   "source_triangles": 201802,
    "hull_triangles": 7278
   },
   "cannon_main": {

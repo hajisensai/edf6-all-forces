@@ -294,6 +294,8 @@ class WithGameTests(unittest.TestCase):
         rows = {stem: stores.stock_rows(self.game, stem) for stem in stores.COAX}
         for stem, mount in stores.COAX.items():
             with self.subTest(stem=stem):
+                # as its category mounts it (vcobjects.STOCK_MOUNTS: the Grape's on fire key 4, docs/stock-payload-re.md §2.1)
+                mount = stores._mounted(stores.CATEGORIES[stem], mount)
                 self.assertIn(mount, stores.LOADOUTS[stem])
                 stock = stores._read_any(self.game.read('OBJECT', stem + '.SGO'))['vehicle_weapon_setting']
                 self.assertEqual(rows[stem], 1)

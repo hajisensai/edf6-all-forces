@@ -104,11 +104,20 @@ NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1024 = '; edf6vc-defaults-2026-10-24：安装器已把仍是旧出厂值的高视角 HighCamHeight 45 / HighCamBack 35 ' \
                      '改成 90 / 55（想改就改，之后安装不会再改）'
+# Fire key 4 on a pad (2026-11-08, docs/feedback-2026-11-08-grape-keys.md): the Grape's coax moved off the Car's throttle
+# (LT) onto fire key 4, whose pad button shipped 0 (none); RB now (src/crew.h vehicleFire4Button). merge_ini keeps an old
+# ini's 0, which would leave the Grape's coax with no pad button at all.
+NEW_DEFAULTS_1108: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'VehicleFire4Button': ('0', '512')},
+}
+DEFAULTS_MARK_1108 = ('; edf6vc-defaults-2026-11-08：安装器已把仍是旧出厂值 0 的 VehicleFire4Button 改成 512（手柄 RB：'
+                      '格雷普的同轴机枪；想改就改，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
     (DEFAULTS_MARK_1017, NEW_DEFAULTS_1017),
     (DEFAULTS_MARK_1024, NEW_DEFAULTS_1024),
+    (DEFAULTS_MARK_1108, NEW_DEFAULTS_1108),
 )
 
 

@@ -17,7 +17,7 @@
 //    requests of the tanks, the flak, the missile launcher, the Grape, the bikes and the helicopters, holders after the
 //    stock ones that stores.cpp builds): catalogued stores (IsStoreWeapon) on the seat ride one stock
 //    control, the seat's second one when a stock weapon is on it (the helicopters' missile, the Titan's gatling), else
-//    its first (the gun). The jets' switch (PlayerJetSwitchKey R, pad LB) goes round that control's stock weapon and the
+//    its first (the gun). The jets' switch (PlayerJetSwitchKey R, pad LB; the Car's X: SwitchButton) goes round that control's stock weapon and the
 //    stores as the player jets' does (playerjet.cpp Stores): its press to the next with rounds, one spent for good (no
 //    reload coming) to the next by itself. With a store picked the control still pulls its stock weapons' triggers
 //    (every stock vehicle fires through the holder pull 0x62C000, in whichever slot it fires: 55, 57, the bike's 5);
@@ -56,7 +56,7 @@ namespace {
 constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x248,kWeaponReloadTime=0x20C,
                       kWeaponChargeNeed=0x22C,kWeaponReloadLeft=0xE68,kWeaponCharge=0xE7C;
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
-constexpr std::uint16_t kButtonLB=0x10;
+constexpr std::uint16_t kButtonLB=0x10,kButtonX=0x04;
 constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
 constexpr float kCoaxNpcM=900.0f;                 // an NPC crew's coaxial gun: targets this close (HasShot; a 7.62 mm
                                                   // coax's point-target reach, where its tracer burns out)
@@ -73,13 +73,17 @@ constexpr float kCoaxTracer[4]={3.0f,1.0f,0.35f,1.0f};   // red-orange (NATO M62
 constexpr float kCoaxBall[4]={0.3f,0.28f,0.26f,0.1f};    // ball: a faint streak (the game draws every round)
 constexpr int kTracked=64;
 
-// The classes whose fire was read (§2); the vtables as crew.cpp kClasses has them.
-enum class Class { other, heli506, heli409, tank403, tank404, flak603, bike503 };
-constexpr unsigned kVt403=0x17D8FA0,kVt404=0x17D9458,kVt603=0x17DC620,kVt503=0x17DA508;
+// The classes whose fire was read (§2); the vtables as crew.cpp kClasses has them. The 505 / 601 tanks and the Car (the
+// Grape, edf41bike.cpp's kCarVtable: the Car's own vtable, not the 607 / 60X trucks sharing its input) by their input
+// as read (docs/stock-payload-re.md §2.1): which seat controls each leaves unread (FreeSecondary, SwitchButton).
+enum class Class { other, heli506, heli409, tank403, tank404, flak603, bike503, tank505, tank601, car };
+constexpr unsigned kVt403=0x17D8FA0,kVt404=0x17D9458,kVt603=0x17DC620,kVt503=0x17DA508,kVt505=0x17DADB0,kVt601=0x17DC250,
+                   kVtCar=0x17E01B0;
 Class ClassOf(const void* v) noexcept {
     const auto vt=At<std::uintptr_t>(v,0)-reinterpret_cast<std::uintptr_t>(image);
     return vt==kVt506 ? Class::heli506 : vt==kVt409 ? Class::heli409 : vt==kVt403 ? Class::tank403 : vt==kVt404 ? Class::tank404 :
-           vt==kVt603 ? Class::flak603 : vt==kVt503 ? Class::bike503 : Class::other;
+           vt==kVt603 ? Class::flak603 : vt==kVt503 ? Class::bike503 : vt==kVt505 ? Class::tank505 : vt==kVt601 ? Class::tank601 :
+           vt==kVtCar ? Class::car : Class::other;
 }
 
 // The switch's state per vehicle the player sits in: the weapon picked, the switch down last frame.
@@ -325,9 +329,17 @@ int InstallCoaxMotion() noexcept {
     return hooked;
 }
 
-// Whether class `c`'s stock input leaves the seat's second fire control unread (the 505, the 601, the Grape: their
-// slot 55 pulls holder 0 on the primary trigger alone, docs/stock-payload-re.md §2), so a coaxial gun can have it.
-constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
+// Whether class `c`'s stock input leaves the seat's second trigger (seat +0x2E0: a pad's LT, the key config row's first
+// key) unread, so a coaxial gun can have it: only the classes read to leave it so (docs/stock-payload-re.md §2.1). The
+// 505 and 601 (0x61ACD0 / 0x620790, TankBase's drive 0x67EF80) read the primary trigger and the left stick alone. Not the
+// Car: +0x2E0 is its throttle (0x65A548), so a coax there fired whenever the Grape drove forward (the player, 2026-11-08,
+// docs/feedback-2026-11-08-grape-keys.md); its coax has a fire key of its own (vcobjects.STOCK_MOUNTS). A class not read
+// gives nothing away.
+constexpr bool FreeSecondary(Class c) noexcept { return c==Class::tank505 || c==Class::tank601; }
+// The seat button (seat +0x2E8, docs/stores-re.md §4) that goes round the primary's cycle on a pad: LB, which none of the
+// read classes but the Car reads; the Car brakes / reverses on it (0x65A551) and handbrakes on A (0x01), blows its horn
+// on L3 (0x40), and leaves RB (0x20: its slot 83 a bare ret) and X unread: X there (RB is VehicleFire4Button's, its coax).
+constexpr std::uint16_t SwitchButton(Class c) noexcept { return c==Class::car ? kButtonX : kButtonLB; }
 // --- Who pulls each weapon's trigger (ControlOf), whether it has a shot (HasShot), and the one pull (FireSeat): the
 // player's seat, its auto turrets and an NPC crew all fire through these (the user, 2026-10-30: 「让他可以统一函数之类的
 // 方便后续维护」; docs/multi-weapon-keys.md「统一接口」).
@@ -375,8 +387,12 @@ PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const StoreSpec* sp
     const std::int64_t s=static_cast<std::int64_t>(seat);
     // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
     if(const unsigned char key=ControlOfSpec(c,spec).key)return key==kSecondTriggerKey ? PayloadFire::secondary : PayloadFire::key;
-    if(store && !(spec && spec->nativeControl))
-        return playerSeat && FreeSecondary(c) && IsCoaxSpec(spec) ? PayloadFire::secondary : PayloadFire::store;
+    if(store && !(spec && spec->nativeControl)) {
+        // A coax with no key of its own: the second trigger where the class leaves it unread, else no control (never
+        // one more choice of the main gun's cycle).
+        if(playerSeat && IsCoaxSpec(spec))return FreeSecondary(c) ? PayloadFire::secondary : PayloadFire::other;
+        return PayloadFire::store;
+    }
     switch(c) {
         case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
@@ -670,7 +686,7 @@ void LaidVisit(void* ctx,const void* object,const float* aim) {
 }
 bool HasShot(const unsigned char* v,const unsigned char* w,const void* target,LineBlocked blocked) noexcept {
     if(Spent(w) || At<std::int32_t>(w,kWeaponAmmo)<=0)return false;
-    const bool coax=ControlOf(ClassOf(v),w).source==Source::coax;
+    const bool coax=IsCoax(w);   // on the second trigger or a fire key of its own (the Grape's): a coax's reach and cone
     if(!coax && At<std::int32_t>(w,kWeaponLockon)==kHoming) {
         const void* const locked=WeaponLockObject(w);
         if(!locked || !Readable(locked,kPosition+12))return false;
@@ -801,8 +817,9 @@ int SeatAutoTurrets(unsigned char* v,unsigned seat) noexcept {
 // primary's (its native belts and the stores riding it: `p.weapon`) and the intrinsic secondary's (IndependentSecondary:
 // `p.secondary`, the BMPT's two Ataka rounds on the V603's otherwise unread second trigger). Both fire at once, each on
 // its own trigger, and each has its own switch, whatever was fired last (as War Thunder's: the gun's rounds on their own
-// keys, the ATGM its own fire and selection; the user, 2026-10-21: 「学学战雷」): R / LB (PlayerJetSwitchKey) goes round the
-// primary's cycle only, VehicleSecondarySwitchKey (T) / VehicleSecondarySwitchButton (the d-pad right) the own
+// keys, the ATGM its own fire and selection; the user, 2026-10-21: 「学学战雷」): R / LB (PlayerJetSwitchKey; the Car's pad
+// X, SwitchButton) goes round the primary's cycle only, VehicleSecondarySwitchKey (T) / VehicleSecondarySwitchButton (the
+// d-pad right) the own
 // secondary's only; a menu choice (ConsumeChoice) goes to the cycle of the entry chosen. `chosen`: the control a press or
 // a menu choice changed (`store` the primary's cycle, the sight following its pick; `secondary` the own secondary's),
 // `other` none.
@@ -843,7 +860,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     // During a map hold follow the physical key only to drain its edge; do not replay it on close.
     const int vk=Cfg().playerJetSwitchKey;
     const bool down=keys ? (MapHoldsKeys() ? vk>0 && (edf::AsyncKey(vk)&0x8000)!=0 : KeyDown(vk)) :
-        (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
+        (At<std::uint16_t>(seat,kSeatButtons)&SwitchButton(c))!=0;
     const bool press=!MapHoldsKeys() && down && !p.held;
     p.held=down;
     // The own secondary's switch: its key on the keyboard, its pad buttons (XInput: the seat button word has no d-pad).
@@ -878,7 +895,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         p.secondary=ws[own[ownAt]];
         r.entry[own[ownAt]].picked=true;
     } else p.secondary=nullptr;
-    r.switchButton=kButtonLB;r.ownSwitchButton=ownMask;
+    r.switchButton=SwitchButton(c);r.ownSwitchButton=ownMask;
     if(ownEnabled){r.ownPicked=own[ownAt];r.ownChoices=no;}
     if(!enabled) {
         p.weapon=nullptr;
@@ -934,8 +951,9 @@ void PayloadFrame(unsigned char* v) noexcept {
     const unsigned char* const s=SeatAt(v,static_cast<unsigned>(seat));
     r.keys=At<unsigned char>(s,kSeatPad)==0;
     const bool primary=At<float>(s,0x2E4)>=0.8f;
-    const bool secondary=(c==Class::heli506 || c==Class::heli409) ?
-        (At<std::uint16_t>(s,kSeatButtons)&0x20)!=0 : At<float>(s,0x2E0)>=0.8f;
+    // The seat's second fire control: the helicopters' RB; the Car has none (+0x2E0 is its throttle, FreeSecondary).
+    const bool secondary=(c==Class::heli506 || c==Class::heli409) ? (At<std::uint16_t>(s,kSeatButtons)&0x20)!=0 :
+        c!=Class::car && At<float>(s,0x2E0)>=0.8f;
     const bool fresh=!sightPick.vehicle.Is(v) || !sightPick.human.Is(PlayerHuman()) || sightPick.seat!=static_cast<unsigned>(seat) || takeover;
     if(fresh) {
         sightPick={ObjRef::Of(v),ObjRef::Of(PlayerHuman()),static_cast<unsigned>(seat),PayloadFire::primary,primary,secondary};

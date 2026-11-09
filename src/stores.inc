@@ -51,6 +51,7 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_XM_HIGHWAY_TANK_MORTAR_","Mortar",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,5,false,0,{}},
     {L"EDF6VC_XM_HIGHWAY_TANK_LASER_","Laser",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,6,false,0,{}},
     {L"EDF6VC_AGM_L_K3_","AGM-114",StoreRole::ground,50.0f,0.0040f,0,0,false,StoreShell::native,3,false,0,{}},
+    {L"EDF6VC_MG401_K4_","M240C coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,4,false,0,{}},
     {L"EDF6VC_AAM_S_K2A_","AIM-9X",StoreRole::air,85.0f,0.0060f,0,0,false,StoreShell::native,2,true,0,{}},
     {L"EDF6VC_AAM_M_K2A_","AIM-120",StoreRole::air,152.0f,0.0100f,0,0,false,StoreShell::native,2,true,0,{}},
     {L"EDF6VC_RKT_K3_","Hydra 70",StoreRole::rocket,32.0f,0.0015f,0,0,false,StoreShell::native,3,false,0,{}},

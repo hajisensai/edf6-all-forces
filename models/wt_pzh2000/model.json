@@ -148,13 +148,6 @@
    "vertices": 164563
   },
   {
-   "name": "body.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
-   "bone": "body",
-   "material": 1,
-   "triangles": 538,
-   "vertices": 600
-  },
-  {
    "name": "body.wt_net_f_c",
    "bone": "body",
    "material": 2,
@@ -228,8 +221,8 @@
    "name": "cannon_main.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
    "bone": "cannon_main",
    "material": 1,
-   "triangles": 36399,
-   "vertices": 52933
+   "triangles": 36937,
+   "vertices": 53533
   },
   {
    "name": "cannon_main.wt_net_f_c",
@@ -821,15 +814,15 @@
     [
      -1.875003,
      0.073099,
-     -4.555002
+     -4.234204
     ],
     [
      1.889346,
-     2.433759,
+     2.075018,
      3.677057
     ]
    ],
-   "source_triangles": 129572,
+   "source_triangles": 129034,
    "hull_triangles": 4718
   },
   "cannon_main": {
@@ -845,7 +838,7 @@
      0.00296
     ]
    ],
-   "source_triangles": 60479,
+   "source_triangles": 61017,
    "hull_triangles": 4710
   },
   "cannon_l": {
