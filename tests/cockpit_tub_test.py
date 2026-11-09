@@ -61,6 +61,47 @@ def main() -> int:
     expect(not cockpit_tub.through(rays, tri * .5).any(), 'nor after the liner is pulled in toward the eye')
     expect(cockpit_tub.gap_liner(cockpit_tub.tub(lo, hi, sill), []).tris == cockpit_tub.tub(lo, hi, sill).tris,
            'no hardware: the whole tub')
+
+    # The clip to a face's half-space, all triangles at once, matches the one-at-a-time Sutherland-Hodgman pass.
+    rng = np.random.default_rng(7)
+    tris = rng.uniform(-1, 1, (400, 3, 3))
+    for axis, sign in ((0, 1.0), (1, -1.0), (2, 1.0)):
+        got = cockpit_tub._clipped(tris, axis, sign)
+        want = []
+        for triangle in tris:
+            poly = []
+            for j, cur in enumerate(triangle):
+                prev = triangle[j - 1]
+                dc, dp = cur[axis] * sign - 1e-6, prev[axis] * sign - 1e-6
+                if (dc >= 0) != (dp >= 0):
+                    poly.append(prev + (cur - prev) * (dp / (dp - dc)))
+                if dc >= 0:
+                    poly.append(cur)
+            if poly:
+                want.append(np.asarray(poly + [poly[0]] * (4 - len(poly))))
+        expect(len(got) == len(want) and np.allclose(got, np.asarray(want)),
+               f'the batched clip to axis {axis} sign {sign:+} matches the per-triangle one')
+
+    # Hardware whose projection misses every tub face of a plane is not merged there (a fighter's ~84k faces cost GEOS
+    # ~20 s a kit when all went in): faces high overhead change nothing and reach no union.
+    import shapely
+    overhead = panel('overhead', 'test', (0, 5, 1), 2, 2, (0, -1, 0))
+    real, merged = shapely.union_all, []
+
+    def counting(shapes, *a, **kw):
+        merged.append(len(shapes))
+        return real(shapes, *a, **kw)
+    shapely.union_all = counting
+    try:
+        alone = cockpit_tub.gap_liner(cockpit_tub.tub(lo, hi, sill), [control])
+        n_alone, merged[:] = sum(merged), []
+        both = cockpit_tub.gap_liner(cockpit_tub.tub(lo, hi, sill), [control, overhead])
+        n_both = sum(merged)
+    finally:
+        shapely.union_all = real
+    expect(n_both == n_alone, f'faces overhead reach no union ({n_alone} shapes merged, with them {n_both})')
+    expect([v.pos for v in alone.verts] == [v.pos for v in both.verts] and alone.tris == both.tris,
+           '...and leave the liner as it was')
     print(f'{failures} FAILED' if failures else 'all passed')
     return 1 if failures else 0
 
