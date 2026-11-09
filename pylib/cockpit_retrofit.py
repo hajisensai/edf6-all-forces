@@ -484,10 +484,25 @@ def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), 
 
 AIR_FIELDS=(ci.SPEED,ci.ALT,ci.PITCH,ci.CLIMB,ci.HEADING,ci.FUEL,ci.POWER,ci.HP,None)
 F16=(
-    Block('right_flight',(-.205,-.38,.875),(0,.18,-.984),.25,.24,3,AIR_FIELDS),
-    Block('standby',(0,-.50,.85),(0,.18,-.984),.20,.18,2,(ci.SPEED,ci.ALT,ci.PITCH,ci.HEADING)),
-    Block('right_aux',(-.44,-.68,.645),(.10,.737,-.668),.12,.32,1,(ci.POWER,ci.FUEL,ci.HP)),
-    Block('right_upper_aux',(-.3694,-.5777,.7626),(.1024,.7261,-.6799),.07,.07,1,(ci.POWER,)),
+    # Each dial in its own aperture of the model (feedback 2026-10-17: the right-hand and standby dials laid on a grid
+    # missed the holes): centres and bores surveyed on models/cockpits/parts/plugin_wt_f16a (a ring of the bezel's
+    # vertices half a bore out, none nearer); each group keeps its panel's own facing.
+    Block('right_flight',(-.205,-.38,.875),(0,.18,-.984),.25,.24,3,
+          (ci.SPEED,ci.ALT,ci.PITCH,ci.HEADING,ci.CLIMB,ci.FUEL,ci.POWER),
+          dials=(DialAt((-.13103,-.29458,.88340),.060),DialAt((-.19327,-.30045,.88562),.052),
+                 DialAt((-.13103,-.36046,.87276),.060),DialAt((-.21620,-.39703,.86874),.052),
+                 DialAt((-.27284,-.41951,.86446),.039),DialAt((-.21532,-.45640,.85809),.052),
+                 DialAt((-.27453,-.47680,.85459),.058))),
+    Block('standby_upper',(0,-.46012,.85524),(0,.18,-.984),.20,.10,2,(ci.SPEED,ci.PITCH),
+          dials=(DialAt((.04586,-.46012,.85524),.084),DialAt((-.04602,-.46012,.85524),.084))),
+    Block('standby_lower',(0,-.53832,.80928),(0,.765,-.644),.20,.12,2,(ci.ALT,ci.HEADING),
+          dials=(DialAt((.04557,-.53832,.80928),.084),DialAt((-.04602,-.53832,.80928),.084))),
+    Block('right_aux_forward',(-.44752,-.69316,.62936),(.10,.737,-.668),.06,.06,1,(ci.FUEL,),
+          dials=(DialAt((-.44752,-.69316,.62936),.047),)),
+    Block('right_aux_rear',(-.46205,-.73754,.57938),(.10,.737,-.668),.07,.07,1,(ci.POWER,),
+          dials=(DialAt((-.46205,-.73754,.57938),.054),)),
+    Block('right_upper_aux',(-.36656,-.57384,.76410),(.1024,.7261,-.6799),.07,.07,1,(ci.POWER,),
+          dials=(DialAt((-.36656,-.57384,.76410),.056),)),
     Block('left_switches',(.40,-.67,.63),(-.10,.64,-.76),.26,.40,4,mode='switches'),
     Block('right_switches',(-.46,-.79,.39),(0,1,0),.20,.32,3,mode='switches'),
     Block('centre_controls',(0,-.335,.80),(0,.18,-.984),.16,.20,mode='blank'),

@@ -218,6 +218,32 @@ def collision(game, members):
     return out
 
 
+def closed_driver(mab: bytes, locator: str) -> bytes:
+    """The driver locator's MAB parameters with DispCharacter 0: a closed car hides its rider, as every stock closed
+    seat does (docs/all-classes-ride-re.md: the ride state's entry HumanBase 0x57ADF0 reads seat+0x254, filled from the
+    seat locator's SGO by the seat's constructor 0x62B664). The V512's driver shows its rider (1, an open kei truck):
+    in the sedan the seated soldier's helmet, backpack and radio aerial came out through the roof (feedback
+    2026-10-17). Only that integer changes: the Animation, every locator and offset stay the truck's."""
+    record = vc._mab_record(mab, locator)
+    payload = record + struct.unpack_from('<i', mab, record + 0x1C)[0]
+    _version, settings = sgo.read(mab[payload:])
+    if settings != {'Animation': 'vehicle_striker_rear', 'DispCharacter': 1}:
+        raise ValueError(f"the V512 driver locator's parameters changed: {settings}")
+    _version, _count, nodes, names, name_at = struct.unpack_from('<5I', mab, payload + 4)
+    out = bytearray(mab)
+    for i in range(names):
+        at = payload + name_at + 8 * i
+        rel, index = struct.unpack_from('<iI', mab, at)
+        if vc._utf16_at(mab, at + rel) != 'DispCharacter':
+            continue
+        at = payload + nodes + 12 * index
+        if struct.unpack_from('<3I', mab, at) != (1, 4, 1):
+            raise ValueError("the V512 driver's DispCharacter is not an integer 1")
+        struct.pack_into('<I', out, at + 8, 0)
+        return bytes(out)
+    raise ValueError('the V512 driver locator has no DispCharacter')
+
+
 def build(root):
     game = rootcpk.Game(root)
     version, m = sgo.read(game.read('OBJECT', HOST+'.SGO'))
@@ -230,7 +256,7 @@ def build(root):
                         (m['vehicle_riding_position'][0][0], (-1.1, -.55, EYE[2]))):
         at,_ = vc.mab_locator(bytes(mab), name)
         struct.pack_into('<3f', mab, at, *point)
-    m['animation_model'][2] = bytes(mab)
+    m['animation_model'][2] = closed_driver(bytes(mab), m['vehicle_riding_position'][0][1])
     m['vehicle_riding_position'] = m['vehicle_riding_position'][:1]
     m['vehicle_weapon_setting'] = []
     m['vehicle_setup'][-1] = []

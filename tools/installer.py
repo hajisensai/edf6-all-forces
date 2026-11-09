@@ -1351,6 +1351,13 @@ def check_package() -> int:
                for text in cockpit_instruments.LABELS[key] for ch in text)
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
+    # The fighters' tub cut to its gaps (cockpit_tub.gap_liner) runs shapely's GEOS: run it, not just import it.
+    import numpy as np
+    import cockpit_shapes
+    import cockpit_tub
+    liner = cockpit_tub.tub(np.array([-.5, -1., -.4]), np.array([.5, .4, 1.5]), -30.)
+    cut = cockpit_tub.gap_liner(liner, [cockpit_shapes.panel('control', 'test', (0., -.7, .45), .3, .3, (0., .8, -.6))])
+    assert cut.tris and len(cut.tris) != len(liner.tris)
     import buildcache
     import make_tracked_combat
     import frozen_collision_probe

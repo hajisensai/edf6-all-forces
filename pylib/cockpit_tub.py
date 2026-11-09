@@ -141,3 +141,94 @@ def tub(lo: np.ndarray, hi: np.ndarray, sill: float, windows: np.ndarray | tuple
                                         ('tub_back', 2, z0, 0, (x0, x1)), ('tub_front', 2, z1, 0, (x0, x1))):
         parts += _wall(name, axis, at, along, span, y0, y1, sill, w)
     return merge(parts, 'tub')
+
+
+# The angular grid the liner's outlines are merged on: float32 source meshes have coincident and near-collinear edges
+# that leave GEOS's union ambiguous (a narrow cockpit's right side raised); far under the rays' 1e-6 edge tolerance.
+GRID = 1e-8
+
+
+def _clipped(tri: np.ndarray, axis: int, sign: float) -> np.ndarray:
+    """Triangles `tri` (n, 3, 3) clipped to the half-space `axis` * `sign` >= 1e-6 a tub face looks into (one
+    Sutherland-Hodgman pass, all at once): each survivor as 4 corners in order (a triangle's first corner repeated),
+    (m, 4, 3); the ones wholly behind dropped."""
+    d = tri[:, :, axis] * sign - 1e-6
+    inside = d >= 0
+    count = inside.sum(1)
+    tri, d, inside, count = tri[count > 0], d[count > 0], inside[count > 0], count[count > 0]
+    prev, dp, inside_p = np.roll(tri, 1, axis=1), np.roll(d, 1, axis=1), np.roll(inside, 1, axis=1)
+    cross = inside != inside_p
+    with np.errstate(divide='ignore', invalid='ignore'):
+        cut = prev + (tri - prev) * np.where(cross, dp / np.where(cross, dp - d, 1.0), 0.0)[:, :, None]
+    # Per edge (prev -> cur): the crossing point, then the corner when it is inside, in this order.
+    slots = np.stack((cut, tri), axis=2).reshape(len(tri), 6, 3)
+    keep = np.stack((cross, inside), axis=2).reshape(len(tri), 6)
+    order = np.argsort(~keep, axis=1, kind='stable')[:, :4]
+    out = np.take_along_axis(slots, order[:, :, None], axis=1)
+    n = keep.sum(1)
+    out[n == 3, 3] = out[n == 3, 0]
+    return out
+
+
+def gap_liner(liner: om.Part, hardware: list[om.Part]) -> om.Part:
+    """`liner` (a tub) cut to the gaps between `hardware` as the eye sees them: the faces of hardware turned toward
+    the eye close those lines of sight already, so the liner keeps only the rest. A full floor in front of a deeper
+    stick, pedestal or gauge covered it (the F-16's floor plane cut across the stick and the lower instruments,
+    feedback 2026-10-17). The cut is in the angles from the eye, which the radial hull conformance (cockpits._conform)
+    keeps: a liner pulled in toward the eye still leaves the same hardware open. Each tub face is axis-aligned, so its
+    gaps are cut in its own plane's projection (shapely's union, difference and constrained Delaunay); per plane, only
+    the hardware whose projection reaches the plane's tub faces is merged (a fighter's ~84k faces otherwise cost GEOS
+    some 20 s for each kit, again on every shrink round of cockpits.fitted)."""
+    import shapely
+    from shapely import Polygon, constrained_delaunay_triangles, union_all
+    tri = [np.asarray([v.pos for v in p.verts])[np.asarray(p.tris)] for p in hardware if p.tris]
+    if not tri:
+        return liner
+    tri = np.concatenate(tri).astype(np.float64)
+    normal = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    tri = tri[(normal * tri.mean(1)).sum(1) < -1e-12]   # faces turned toward the eye (at the origin)
+    if not len(tri):
+        return liner
+    faces_of: dict[tuple[int, float], list] = {}
+    entries_all = []
+    for indices in liner.tris:
+        polygon = np.asarray([liner.verts[i].pos for i in indices])
+        axis = int(np.argmin(np.ptp(polygon, axis=0)))
+        sign = float(np.sign(polygon[0, axis]))
+        axes = [i for i in range(3) if i != axis]
+        target = Polygon(polygon[:, axes] / (polygon[:, axis, None] * sign))
+        entries_all.append((indices, polygon, axis, axes, target, (axis, sign)))
+        faces_of.setdefault((axis, sign), []).append(target)
+    masks = {}
+    for (axis, sign), targets in faces_of.items():
+        axes = [i for i in range(3) if i != axis]
+        pts = _clipped(tri, axis, sign)   # clipped to the half-space the face looks into before the projection
+        flat = pts[:, :, axes] / (pts[:, :, axis, None] * sign)
+        x0, y0, x1, y1 = shapely.total_bounds(targets)
+        lo, hi = flat.min(1), flat.max(1)
+        near = (lo[:, 0] <= x1) & (hi[:, 0] >= x0) & (lo[:, 1] <= y1) & (hi[:, 1] >= y0)
+        shapes = shapely.polygons(flat[near])
+        shapes = shapes[shapely.is_valid(shapes) & (shapely.area(shapes) > 1e-14)]
+        masks[(axis, sign)] = union_all(shapes, grid_size=GRID)
+    vertices: list[om.Vertex] = []
+    faces: list[tuple[int, int, int]] = []
+    for indices, polygon, axis, axes, target, key in entries_all:
+        gaps = target.difference(masks[key], grid_size=GRID)
+        if gaps.is_empty:
+            continue
+        a, b, c = polygon
+        uv0, uv1, uv2 = (np.asarray(liner.verts[i].uv) for i in indices)
+        inverse = np.linalg.pinv(np.stack((b - a, c - a), axis=1))
+        n = liner.verts[indices[0]].normal
+        for piece in constrained_delaunay_triangles(gaps).geoms:
+            pts = np.zeros((3, 3))
+            pts[:, axis] = polygon[0, axis]
+            pts[:, axes] = np.asarray(piece.exterior.coords)[:3] * abs(polygon[0, axis])
+            if np.dot(np.cross(pts[1] - pts[0], pts[2] - pts[0]), n) < 0:   # the tub's own winding
+                pts = pts[::-1]
+            start = len(vertices)
+            for pt in pts:
+                w = inverse @ (pt - a)
+                vertices.append(om.Vertex(tuple(map(float, pt)), n, tuple(map(float, uv0 + w[0] * (uv1 - uv0) + w[1] * (uv2 - uv0)))))
+            faces.append((start, start + 1, start + 2))
+    return om.Part(liner.name, liner.material, vertices, faces)

@@ -466,13 +466,15 @@ def box(P: list[Vec3]) -> tuple[Vec3, Vec3]:
 def turret_tris(md: Mdb) -> list[tuple[Vec3, Vec3, Vec3]]:
     """The turret body's triangles: cannon_main-skinned, in the turret material."""
     main, mat = md.bone_index('cannon_main'), next(m.index for m in md.materials if md.name_of(m.name) == TURRET_MATERIAL[0])
+    import cockpit_shell
+    native = cockpit_shell.native_bones(md)   # after the graft the gunner's seat sees the turret on its clones
     out = []
     for o in md.objects:
         for me in o.meshes:
             if me.material != mat:
                 continue
             P, bi = g.mesh_positions(me), g.skin_columns(me)[0]
-            out += [tuple(P[i] for i in t) for t in g.triangles(me) if all(int(bi[i][0]) == main for i in t)]
+            out += [tuple(P[i] for i in t) for t in g.triangles(me) if all(native[int(bi[i][0])] == main for i in t)]
     return out  # type: ignore[return-value]
 
 

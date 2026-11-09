@@ -160,7 +160,8 @@ def plugin_data() -> list[str]:
 # Third-party packages the installer imports at run time: PyInstaller bundles what this Python has, and a missing
 # one is not an error to it. Without Pillow the frozen installer died generating the jets (procmesh.albedos,
 # ModuleNotFoundError: PIL) on every release built by CI from 2026-10-05 on.
-BUNDLED = (('numpy', 'numpy'), ('PIL', 'pillow'))
+# shapely (GEOS): the fighters' cockpit tub cut to the gaps between its hardware (cockpit_tub.gap_liner).
+BUNDLED = (('numpy', 'numpy'), ('PIL', 'pillow'), ('shapely', 'shapely'))
 
 
 def check_bundled() -> None:
@@ -240,7 +241,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'testhub', 'make_emc', 'make_ultimate', 'make_barrage', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_quadvulcan', 'make_emp_mid', 'make_emp_short', 'make_emp_long', 'make_tunguska', 'make_pzh2000', 'make_sturmtiger', 'make_ciws_phalanx', 'make_flak88', 'make_apocalypse', 'make_gdf005', 'make_laser', 'make_railgun', 'make_tos1', 'make_patriot', 'make_xmorph', 'xm_units', 'xm_heli', 'xm_jet', 'xm_air_model', 'car_model', 'xm_walker', 'xm_infantry', 'xm_rig', 'emplacement_model', 'quadvulcan_model', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
                 'edf41_materials', 'edf41materials', 'goldcoat', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'model_lod', 'mesh_simplify', 'mdb', 'edf6native', 'crilayla',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'cockpit_shapes', 'cockpit_tub', 'texfile_accel', 'model_workers', 'model_lod', 'mesh_simplify', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

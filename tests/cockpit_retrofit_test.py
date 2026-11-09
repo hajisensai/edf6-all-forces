@@ -158,3 +158,14 @@ for name,make in sorted(ck.KITS.items()):
         assert abs(np.dot(np.asarray(s.facing),c/np.linalg.norm(c))+1)<0.05,f'{name}: the glass does not face the eye'
 assert pilots>=7,pilots
 print(f'a head-up glass on the line of sight in every pilot station ({pilots}) passed')
+
+# The F-16's dials each sit in their own surveyed aperture (feedback 2026-10-17: the grid missed the holes): in a full
+# room every surveyed field gets its dial, centred on its hole.
+kit=ck.KITS['jet_f16']({s:3.0 for s in ('left','right','up','down','ahead','back')})
+for b in rt.F16:
+    if not b.dials:continue
+    for i in range(len(b.fields)):
+        assert any(c.part.startswith(f'retrofit_{b.name}_{i}_') and not c.control.startswith('u_') for c in kit.controls), \
+            f'{b.name}: surveyed dial {i} not placed'
+assert sum(len(b.dials) for b in rt.F16)==14
+print('F-16 surveyed dial apertures passed')

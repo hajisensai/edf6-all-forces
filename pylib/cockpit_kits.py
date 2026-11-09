@@ -60,10 +60,37 @@ def _in_cone(p: np.ndarray, yaw: tuple[float, float], pitch: tuple[float, float]
     return (p[..., 2] > 0.02) & (y > yaw[0]) & (y < yaw[1]) & (x > pitch[0]) & (x < pitch[1])
 
 
+@functools.lru_cache(maxsize=1)
+def _tank_components() -> np.ndarray:
+    """Each station triangle's welded component (one assembly: a breech guard, a roof sheet, a box), by triangles
+    sharing a vertex position."""
+    pos, _nrm, _uv, tris, _mat, _textures, _colours = _tank_station()
+    parent = list(range(len(pos)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    welded: dict[tuple, int] = {}
+    for i, p in enumerate(pos):
+        key = tuple(np.round(p, 5))
+        if key in welded:
+            parent[root(i)] = root(welded[key])
+        else:
+            welded[key] = i
+    for a, b, c in tris:
+        parent[root(int(b))] = root(int(a))
+        parent[root(int(c))] = root(int(a))
+    return np.array([root(int(t[0])) for t in tris])
+
+
 def _tank_parts(k: float, lo: tuple[float, float, float], hi: tuple[float, float, float],
                 holes: list[tuple[tuple[float, float], tuple[float, float]]]) -> tuple[list[om.Part], dict[str, KitMaterial]]:
-    """The station scaled `k` about the eye, only its triangles wholly inside lo..hi and touching none of `holes`
-    (yaw and pitch ranges: the view ahead, the screens), one part per material."""
+    """The station scaled `k` about the eye, only its assemblies (_tank_components) wholly inside lo..hi and touching
+    none of `holes` (yaw and pitch ranges: the view ahead, the screens), one part per material. Whole assemblies, not
+    triangles: cut triangle by triangle, the half of a breech or roof sheet left inside stood as torn spikes and open
+    faces beside the view (the AA's roof and right side, feedback 2026-10-17)."""
     pos, nrm, uv, tris, mat, textures, colours = _tank_station()
     q = pos * k
     corners = q[tris]
@@ -75,6 +102,8 @@ def _tank_parts(k: float, lo: tuple[float, float, float], hi: tuple[float, float
                              + [corners.mean(1)[None]])
     for yaw, pitch in holes:
         keep &= ~_in_cone(samples, yaw, pitch).any(0)
+    components = _tank_components()
+    keep &= ~np.isin(components, np.unique(components[~keep]))
     parts, mats = [], {}
     slug = os.path.dirname(TANK_STATION)
     for m in np.unique(mat[keep]):
