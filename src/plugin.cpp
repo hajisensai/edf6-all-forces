@@ -20,10 +20,12 @@
 #include "log_buffer.h"
 #include "crew.h"
 #include "gravity.h"
+#include "havok_mt.h"
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
 #include "pvp.h"
+#include "havok_props.h"
 #include "aiworld_capacity.h"
 #include "team_native.h"
 #include "room_pvp.h"
@@ -568,6 +570,7 @@ void LoadConfig() noexcept {
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
+    n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
     n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
@@ -1303,6 +1306,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
+    InstallHavokProps();       // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     InstallAiWorldCapacity();  // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
@@ -1344,6 +1348,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
+    InstallHavokMultithread();   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
