@@ -343,7 +343,8 @@ except Exception as e:   # no game on this machine (CI): the text checks above s
 if game is not None:
     import sgo
     real = rootcpk.DEFAULT_GAME
-    jets_installed = os.path.isfile(os.path.join(real, 'Mods', 'OBJECT', 'EDF6VC_JET_FIGHTER.SGO'))
+    # the fighter's base (sl.BODIES: the support fighter in its Dreadnought model, tools/make_dreadnought.py) installed
+    jets_installed = os.path.isfile(os.path.join(real, 'Mods', 'OBJECT', sl.BODIES['FIGHTER'][0]))
     text = out if jets_installed else sl.put(out, 'SupportVehicle_FIGHTER', '')
     files = sl.build(real if jets_installed else None, text, game)
     for leader in (True, False):

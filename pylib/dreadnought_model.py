@@ -170,6 +170,9 @@ BODY_SLOTS = ('albedo', 'normal', 'param_r_m_occ_hr')     # R roughness, G metal
 LIGHT_SLOTS = ('albedo', 'normal', 'param_r_m_light_hr')  # R roughness, G metal, B light mask (255: lit)
 LIGHT_PARAM = 'light_color'
 LIGHT_STRENGTH = 4.0        # stock lights run 1..30; about 3 and over bloom
+# The models with exhausts (pylib/jet_models.py NOZZLE_EXITS: bones nozzle_<i> the plugin lights its flames on,
+# src/exhaust_nozzles.h FindNozzles): the four fighters; the dreadnought's engines are its hull's.
+NOZZLED = ('fighter', 'defender', 'bomber', 'interceptor')
 MIN_TRIANGLES = {'dreadnought': 15000, 'fighter': 1000, 'defender': 800, 'bomber': 800, 'interceptor': 1000}
 
 
@@ -326,6 +329,9 @@ def build_model(game, folder: str, model: str,  # noqa: ANN001 - rootcpk.Game
                       pivots, posed, names)
     tris = sum(len(me.indices) // 6 for me in meshes)
     _req(tris >= MIN_TRIANGLES[model], f'{model}: {tris} triangles: the model folder is not tools/prep_dreadnought.py\'s')
+    if model in NOZZLED:   # a fighter's exhausts as bones of its own (jet_models.NOZZLE_EXITS: the plugin's flames)
+        import jet_models
+        md = jet_models.with_nozzles(md, jet_models.exit_nozzles(md, archive_name(model)))
     info = {'triangles': tris, 'meshes': len(meshes), 'materials': len(md.materials), 'bones': len(skel),
             'size': [round(float(x), 1) for x in np.ptp(np.vstack([q for q, _ in posed]), axis=0)]}
     if model == SHIP:

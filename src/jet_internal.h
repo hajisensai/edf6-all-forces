@@ -99,8 +99,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
                   heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
-                  xmHeavyAttack, xmBomber };
-constexpr int kBodyCount=30;
+                  xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole };
+constexpr int kBodyCount=34;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -168,6 +168,17 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      Role::drone,"xmHeavyAttack"},
     {Body::xmBomber,L"app:/object/edf6vc_xm_large_bomber_core.sgo",L"EDF6VC_XM_LARGE_BOMBER_CORE.SGO",7054.0f,Role::strike,
      Role::drone,"xmBomber"},
+    // The support calls' aircraft (kLaunchRows; tools/make_dreadnought.py, pylib/vcobjects.py SUPPORT_JETS): each kind's arms and
+    // durability in the Dreadnought fighter model of that kind (the player, 2026-11-07: 「飞机的模型换成对应的模型」), crewed as
+    // the support deployment brings it. Only with the model pack installed: without, the support is not deployed.
+    {Body::supStrike,L"app:/object/edf6vc_dn_support_strike.sgo",L"EDF6VC_DN_SUPPORT_STRIKE.SGO",7061.0f,Role::strike,Role::drone,
+     "supStrike"},
+    {Body::supFighter,L"app:/object/edf6vc_dn_support_fighter.sgo",L"EDF6VC_DN_SUPPORT_FIGHTER.SGO",7062.0f,Role::fighter,Role::drone,
+     "supFighter"},
+    {Body::supInterceptor,L"app:/object/edf6vc_dn_support_interceptor.sgo",L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",7063.0f,
+     Role::interceptor,Role::drone,"supInterceptor"},
+    {Body::supMultirole,L"app:/object/edf6vc_dn_support_multirole.sgo",L"EDF6VC_DN_SUPPORT_MULTIROLE.SGO",7064.0f,Role::multirole,
+     Role::drone,"supMultirole"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -275,11 +286,13 @@ static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of i
 constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r)]; }
 
 // The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
-// carriers whose own bodies' marks name their drones.
+// carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
+// multirole fly their kinds' Dreadnought-model bodies (Body::sup*; the plain bodies stay the player's parked / requested
+// twins' and the test range's).
 struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
-    {JetRole::strike,Body::strike},{JetRole::fighter,Body::fighter},{JetRole::interceptor,Body::interceptor},
-    {JetRole::multirole,Body::multirole},{JetRole::carrier,Body::carrier},{JetRole::blastCarrier,Body::blastCarrier},
+    {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
+    {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::carrier},{JetRole::blastCarrier,Body::blastCarrier},
     {JetRole::dollCarrier,Body::dollCarrier},{JetRole::gunship,Body::gunship},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));

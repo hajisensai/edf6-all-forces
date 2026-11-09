@@ -1711,6 +1711,7 @@ def hand_copies_agree() -> None:
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES)
                | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
+               | set(make_dreadnought.SUPPORT_SGOS.values())   # the support aircraft in the fighters' models
                # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
                | {f'EDF6VC_{k.upper()}.SGO' for k in vc.XM_JETS.values()})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
@@ -2680,6 +2681,49 @@ def boardable_seats_take_every_class() -> None:
 
 
 @test
+def support_jets_wear_their_models() -> None:
+    """The support deployment's strike jet, fighter, interceptor and multirole (the player 及开, 2026-11-07: 「飞机的模型换成
+    对应的模型」; docs/feature-support-jet-models.md) fly bodies of their own in the model pack's Dreadnought models: src/
+    jet_internal.h kLaunchRows sends each JetRole to its Body::sup* row, whose SGO, mark and role are pylib/vcobjects.py
+    SUPPORT_JETS' (tools/make_dreadnought.py writes those SGOs); each is its kind's durability and arms in that model,
+    weighs what its kind weighs, is boardable, crewed (not BodyRow::crewless) and a support loadout's base
+    (src/support_loadout.h kVehicleBodies, tools/support_loadout.py BODIES); its model has its exhausts measured
+    (jet_models.NOZZLE_EXITS). The gunship, the carriers and the transport plane keep their stock models (no model of
+    their kind in the pack)."""
+    import dreadnought_model as dm
+    import jet_models
+    import support_loadout as sl
+    table = re.sub(r'\s+', ' ', src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0])
+    rows = {b: (sgo_path, f, float(mark), role, rest) for b, sgo_path, f, mark, role, rest in re.findall(
+        r'\{Body::(\w+), ?L"([^"]*)", ?L"([^"]*)", ?(\d+)\.0f, ?Role::(\w+), ?Role::\w+, ?"\w+"([^}]*)\}', table)}
+    launch = dict(re.findall(r'\{JetRole::(\w+),Body::(\w+)\}', src('src/jet_internal.h').split('kLaunchRows[]={', 1)[1].split('};', 1)[0]))
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::wing,', src('src/playerjet_kinds.h')))
+    loadout = dict(re.findall(r'\{VehicleBody::\w+,L"(\w+)",L"([^"]+)"', src('src/support_loadout.h')))
+    assert set(vc.SUPPORT_JETS) == {'strike', 'fighter', 'interceptor', 'multirole'}, sorted(vc.SUPPORT_JETS)
+    for role, (name, mark, model, kind, kind_mark) in vc.SUPPORT_JETS.items():
+        body = 'sup' + role[0].upper() + role[1:]
+        assert launch.get(role) == body, f'kLaunchRows: JetRole::{role} flies {launch.get(role)}, not {body}'
+        file = vc.support_file(role)
+        assert rows[body][:4] == (f'app:/object/{file.lower()}', file, mark, role), (body, rows[body][:4])
+        assert 'true' not in rows[body][4], f'{body}: crewless or hostile'
+        assert body in boardable and mark in vc.BOARDABLE_MARKS, f'{body}: not boardable'
+        jet, base = vc.JETS[name], vc.JETS[kind]
+        assert base.mark == kind_mark and jet.mark == mark and model in dm.NOZZLED, (role, base.mark, jet.mark)
+        assert (jet.durability, jet.weapons) == (base.durability, base.weapons), f'{name}: not the arms of its kind'
+        assert jet.file == dm.archive_name(model) and jet.model == (f'app:/object/{jet.file.lower()}', dm.mdb_name(model))
+        assert jet.file in jet_models.NOZZLE_EXITS, f'{jet.file}: no exhaust measured'
+        assert vc.JET_MASSES[mark] == vc.JET_MASSES[kind_mark], f'{name}: weighs other than its kind'
+        key = role.upper()
+        assert sl.BODIES[key][0] == file and loadout[key] == file, (key, sl.BODIES[key], loadout.get(key))
+    marks = [m for _n, m, *_r in vc.SUPPORT_JETS.values()]
+    others = [j.mark for n, j in vc.JETS.items() if n not in {v[0] for v in vc.SUPPORT_JETS.values()}]
+    assert len(set(marks)) == len(marks) and not set(marks) & set(others), 'a support mark another jet has'
+    assert launch['gunship'] == 'gunship' and launch['carrier'] == 'carrier', launch
+    # the room protocol names the change (an older build made the stock-bomber support aircraft)
+    assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 8
+
+
+@test
 def every_boardable_aircraft_requested() -> None:
     """The Air Raider requests every aircraft the player flies (src/playerjet_kinds.h kBoardable) empty, as a vehicle (the
     user, 2026-10-06: 「补上空袭的召唤飞机，空母载具」), but those LEFT_OUT says why not: each request of one of them
@@ -2695,6 +2739,8 @@ def every_boardable_aircraft_requested() -> None:
         'doll': 'its one weapon is the charge that destroys it: the thrown doll drone brings that charge',
         **{b: "the Dreadnought's hangar launches it (src/dreadnought_hangar.inc): its model is the user's model folder's"
            for b in ('dnFighter', 'dnDefender', 'dnBomber', 'dnInterceptor')},
+        **{b: "a support call's aircraft (vcobjects.SUPPORT_JETS): its kind's request brings that kind's own twin"
+           for b in ('supStrike', 'supFighter', 'supInterceptor', 'supMultirole')},
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in

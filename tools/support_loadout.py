@@ -228,10 +228,10 @@ PAYLOAD_KG = {'TANK': 0, 'STRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100, 'FIGHTE
 # src/support_loadout.h kVehicleBodies: name -> (base file, most pylons, tank).
 BODIES: dict[str, tuple[str, int, bool]] = {
     'TANK': ('V505_TANK_MISSION.SGO', 4, True),
-    'STRIKE': ('EDF6VC_JET_STRIKE.SGO', 5, False),
-    'FIGHTER': ('EDF6VC_JET_FIGHTER.SGO', 5, False),
-    'INTERCEPTOR': ('EDF6VC_JET_INTERCEPTOR.SGO', 5, False),
-    'MULTIROLE': ('EDF6VC_JET_MULTIROLE.SGO', 5, False),
+    'STRIKE': ('EDF6VC_DN_SUPPORT_STRIKE.SGO', 5, False),
+    'FIGHTER': ('EDF6VC_DN_SUPPORT_FIGHTER.SGO', 5, False),
+    'INTERCEPTOR': ('EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO', 5, False),
+    'MULTIROLE': ('EDF6VC_DN_SUPPORT_MULTIROLE.SGO', 5, False),
     # A player's own summons (kPlayerVehicles): the request's twin is the base.
     'PFIGHTER': ('EDF6VC_PJET_FIGHTER.SGO', 5, False),
     'PSTRIKE': ('EDF6VC_PJET_STRIKE.SGO', 5, False),

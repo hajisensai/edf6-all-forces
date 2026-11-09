@@ -44,6 +44,8 @@ support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* tar
 float SupportPassTurn(const SupportAircraft&) noexcept;
 // Whether its hull can be made this mission (its SGO installed and preloaded: jet_spawn.cpp PreloadJets).
 bool SupportAircraftReady(const SupportAircraft&) noexcept;
+// Its body's SGO file name (jet_internal.h kBodies `file`), for the log; L"" for an invalid spec.
+const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept;
 // Creates the hull at `matrix` (in the air, or a legacy plan's runway) with empty seats. Activation never creates a rider.
 // `variant`: the body's loaded copy (support_loadout.h VehicleVariantFile, app:/object/ path) preloaded this mission
 // (support_variants.h); nullptr: the stock body. It must come up as the same role, as the stock body must.

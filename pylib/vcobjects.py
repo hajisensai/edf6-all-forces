@@ -771,6 +771,28 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
+# The support calls' aircraft (the support deployment's: tools/calls.py EDF6VC_CALL_STRIKE .. MULTIROLE_F and their sorties;
+# src/jet_internal.h kLaunchRows, Body::supStrike .. supMultirole): each its kind's durability and arms (JETS
+# 'edf6tr_jet_<role>_mission') in the airframe of that kind the model pack has, a Dreadnought fighter's model
+# (pylib/dreadnought_model.py; the player 及开, 2026-11-07: 「飞机的模型换成对应的模型」, docs/feature-support-jet-models.md):
+# the strike jet the Dreadnought bomber (ground attack), the fighter its fighter, the interceptor its interceptor, the
+# multirole its defender. Each under a mark of its own (a mark names one body's model: its masses, stores, boarding),
+# crewed as the kinds are (a Dreadnought fighter of the hangar's is crewless); built by tools/make_dreadnought.py with the
+# model pack's folder, or not at all (that support is then not deployed: src/jet_spawn.cpp SupportAircraftReady).
+# role -> (JETS name, mark, Dreadnought model, the kind it is: its JETS name and mark).
+SUPPORT_JETS: dict[str, tuple[str, float, str, str, float]] = {
+    'strike': ('edf6tr_dn_support_strike', 7061.0, 'bomber', 'edf6tr_jet_strike_mission', 7001.0),
+    'fighter': ('edf6tr_dn_support_fighter', 7062.0, 'fighter', 'edf6tr_jet_fighter_mission', 7002.0),
+    'interceptor': ('edf6tr_dn_support_interceptor', 7063.0, 'interceptor', 'edf6tr_jet_interceptor_mission', 7003.0),
+    'multirole': ('edf6tr_dn_support_multirole', 7064.0, 'defender', 'edf6tr_jet_multirole_mission', 7004.0),
+}
+
+
+def support_file(role: str) -> str:
+    """A support aircraft's SGO (SUPPORT_JETS; tools/make_dreadnought.py writes it, src/jet_internal.h kBodies names it)."""
+    return f'EDF6VC_DN_SUPPORT_{role.upper()}.SGO'
+
+
 # kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against, and
 # the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage). Every jet mark has one (tools/selftest.py
 # jet_masses_cover_every_jet): the carriers are the EDF transport x 1.6 (a C-17's class), the Primers' fighter a light
@@ -782,6 +804,9 @@ JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0
               # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
               # supercarrier's displacement (~100 kt)
               7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
+# ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
+# kVehicleBodies payloadKg)
+JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
 # ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
 JET_MASSES.update({u.air['mark']: u.air['mass'] for u in xm_units.ported('jet')})
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
@@ -839,7 +864,8 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # made from the strike jet (7001), and the Dreadnought's fighters (7041-7044). The enemy's, the Primer creatures' and the
 # submarine carrier keep the 506's seat.
 BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
-                             7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet'))})
+                             7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet')),
+                             *(mark for _n, mark, *_r in SUPPORT_JETS.values())})
 
 
 @dataclass(frozen=True)
@@ -1234,6 +1260,12 @@ JETS: dict[str, Jet] = {
                  'body', 'body')
        for k, (name, mark, hp, arms) in DREADNOUGHT_FIGHTERS.items()},
 }
+# The support aircraft (SUPPORT_JETS): their kinds' arms and durability in their Dreadnought models.
+JETS.update({name: Jet(mark, JETS[kind].durability, JETS[kind].weapons,
+                       (f'app:/object/{dn_file(model, "MRAB").lower()}', f'edf6vc_dn_{model}.mdb'), dn_file(model, 'MRAB'),
+                       'body', 'body')
+             for name, mark, model, kind, kind_mark in SUPPORT_JETS.values()})
+assert all(JETS[kind].mark == kind_mark for _n, _m, _d, kind, kind_mark in SUPPORT_JETS.values())
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
 # apart from nothing (src/playerjet_kinds.h kBoardable goes by the mark).

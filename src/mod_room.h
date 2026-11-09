@@ -22,7 +22,10 @@ namespace crew {
 //      enemy control v6 (its projectiles' targets and the Deiroi / monster codecs v2); the support wire keeps v2.
 //   8 (2026-11-08): a support soldier carries the requesting player's weapon one tier below its own and a player's attack
 //      coefficient (docs/feature-npc-weapon-tier.md): a request carries the requester's weapons, a unit its own
-//      (support_protocol.cpp, Unit::arms; the support wire keeps v2), every peer builds the soldier with it.
+//      (support_protocol.cpp, Unit::arms; the support wire keeps v2), every peer builds the soldier with it;
+//      and the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
+//      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
+//      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=8;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
