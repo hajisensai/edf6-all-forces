@@ -10230,6 +10230,14 @@ def edf41_mother401_parts_collision_layer() -> None:
     assert pick == {13: 15, 7: 7, 6: 6}, pick
     assert sees(t6, 22, 0x11) and not sees(t6, 13, 0x11), "EventAnimationObject's 0x11: map ray yes, area damage no"
     assert sees(t41, 19, 13), "4.1's own map ray meets its panels: the panels are map-like in 4.1 too"
+    # The gravity gun's grab ray is layer 15 and does not meet 15: after the move it still misses the panels, the core (7) and the
+    # batteries (6) come into its reach (docs/feedback-2026-11-08-edf41-earth-eater.md). tests/edf41_hitlayer_test.cpp checks it on the
+    # same constant; both must follow src/gravity.cpp.
+    grab = int(re.search(r'constexpr std::uint32_t kGrabLayer=(0x[0-9A-Fa-f]+);', src('src/gravity.cpp')).group(1), 0)
+    assert f'constexpr int kGravityGrab=0x{grab:02X};' in src('tests/edf41_hitlayer_test.cpp'), 'the hit layer test follows kGrabLayer'
+    assert not sees(t6, grab, pick[13]) and sees(t6, grab, pick[7]) and sees(t6, grab, pick[6]) and not sees(t6, grab, 0x11)
+    fb = src('docs/feedback-2026-11-08-edf41-earth-eater.md')
+    assert '现在能打到面板' not in fb and '仍然打不到面板' in fb, 'the gravity gun line names the core and batteries, not the panels'
 
     import edf41_objects as eo
     import sgo

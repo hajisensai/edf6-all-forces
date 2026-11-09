@@ -74,6 +74,18 @@ int main() {
         for(int c=kBodyLayerFirst;c<=kBodyLayerLast;++c)
             Check(Sees(kEdf6Table.row,l6,c)==Sees(kEdf41Table.row,l41,c),"a part meets the body layers as in 4.1");
     }
+    // the gravity gun's grab ray (src/gravity.cpp kGrabLayer = 0x0F): it does not meet layer 15, so the panels stay out of
+    // its reach after the move; the core (7) and the batteries (6) come into it, and on 0x11 none of the parts was in it
+    // (docs/feedback-2026-11-08-edf41-earth-eater.md, the gravity gun line)
+    {
+        constexpr int kGravityGrab=0x0F;
+        Check(!Sees(kEdf6Table.row,kGravityGrab,Edf6For41(k41PanelLayer)),"gravity grab ray 15 does not meet the panels' 15");
+        Check(Sees(kEdf6Table.row,kGravityGrab,Edf6For41(k41KeyframeLayer)),"gravity grab ray 15 meets the core's 7");
+        Check(Sees(kEdf6Table.row,kGravityGrab,Edf6For41(k41BatteryLayer)),"gravity grab ray 15 meets the batteries' 6");
+        Check(!Sees(kEdf6Table.row,kGravityGrab,0x11),"gravity grab ray 15 never met EventAnimationObject's 0x11");
+        Check(row(kEdf6Table,kGravityGrab)==bits({1,2,3,6,7,8,9,10,12,13,21,22,24,27,28}),"EDF6 layer 15's row (docs/gravity-re.md)");
+        Check(Sees(kEdf6Table.row,kEdf6MapRay,Edf6For41(k41PanelLayer)),"the map ray Pick casts first stops at a panel");
+    }
     // the live table must agree with the constructor's on the rows the choice rests on, or nothing is moved
     Check(LiveAgrees(kEdf6Table.row,15),"live = constructor's: agrees");
     {
