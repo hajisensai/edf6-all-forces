@@ -413,6 +413,45 @@ int main() {
           "looking up keeps orbit eye above the aircraft at its native height");
     Check(std::fabs((cameraLook[1]-cameraEye[1])/pilotCamera.radius-pilotCamera.dir[1])<1e-5f,
           "height floor lifts both camera points without changing the viewing ray");
+    // The cockpit's first person: the level airframe's eye frame turned onto the mouse view, elevation included, the eye kept.
+    const float cockpit[16]={-1,0,0,0, 0,1,0,0, 0,0,1,0, 3,4,5,1};
+    float fpFrame[16];std::memcpy(fpFrame,cockpit,64);
+    Check(PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame) && std::fabs(fpFrame[9]-std::sin(1.0f))<1e-5f &&
+          fpFrame[12]==3.0f && fpFrame[13]==4.0f && fpFrame[14]==5.0f,"first person looks up along the mouse view from the cockpit eye");
+    const float down[3]={0.0f,-std::sin(0.5f),std::cos(0.5f)};
+    for(int frame=0;frame<120;++frame) {
+        inputTime+=16;PublishPilotView({pilot.ref,inputSeat,inputTime,{down[0],down[1],down[2]}});
+        std::memcpy(fpFrame,cockpit,64);
+        Check(PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame),"first person stays owned by the mouse pilot");
+    }
+    Check(std::fabs(fpFrame[9]-down[1])<1e-4f && std::fabs(fpFrame[10]-down[2])<1e-4f && std::fabs(fpFrame[5]-std::cos(0.5f))<1e-4f,
+          "mouse down pitches the first-person view while the airframe stays level");
+    // Split screen: the other local camera rides another vehicle's seat 0 in first person (and its Type-1 camera asks too).
+    // Those asks are not the pilot's view: the pilot's ease keeps converging as if they never came.
+    {
+        alignas(16) static unsigned char tank[0x2100]{},tankSeat[0x340]{};
+        Put<void*>(tank,kSeats,tankSeat);Put<std::uint64_t>(tank,kSeatCount,1);tankSeat[kSeatPad]=1;
+        const float up[3]={0.0f,std::sin(0.4f),std::cos(0.4f)};
+        float expected[3]={pilotCamera.dir[0],pilotCamera.dir[1],pilotCamera.dir[2]};
+        bool untouched=true,followed=true;
+        for(int frame=0;frame<6;++frame) {
+            inputTime+=16;PublishPilotView({pilot.ref,inputSeat,inputTime,{up[0],up[1],up[2]}});
+            float other[16];std::memcpy(other,cockpit,64);
+            untouched=untouched && !PlayerHeliFirstPersonFrame(tank,0,other) && std::memcmp(other,cockpit,64)==0 &&
+                      !PlayerHeliCamera(tankSeat,stockEye,stockLook,cameraEye,cameraLook);
+            std::memcpy(fpFrame,cockpit,64);
+            followed=followed && PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame);
+            aim::EaseView(expected,up,0.016f);
+            for(int i=0;i<3;++i)followed=followed && std::fabs(pilotCamera.dir[i]-expected[i])<1e-5f;
+        }
+        Check(untouched,"another local camera's seat 0 is not the mouse pilot's view");
+        Check(followed,"another local camera's asks never restart the mouse pilot's ease");
+    }
+    std::memcpy(fpFrame,cockpit,64);
+    Check(!PlayerHeliFirstPersonFrame(inputVehicle,1,fpFrame) && std::memcmp(fpFrame,cockpit,64)==0,"another seat keeps its cockpit frame");
+    inputSeat[kSeatPad]=1;Check(!PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame) && std::memcmp(fpFrame,cockpit,64)==0,
+                                "pad first person keeps the cockpit frame");inputSeat[kSeatPad]=0;
+    PublishPilotView({pilot.ref,inputSeat,inputTime,{down[0],down[1],down[2]}});
     inputSeat[kSeatPad]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"pad camera remains stock");inputSeat[kSeatPad]=0;
     inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
     inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;

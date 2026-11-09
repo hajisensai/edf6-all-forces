@@ -60,6 +60,7 @@
 #include "firstperson.h"
 #include "enemy_points.h"
 #include "npc_logic.h"
+#include "fp_view.h"
 #include <cmath>
 #include <cstdarg>
 #include <vector>
@@ -2692,7 +2693,9 @@ PilotView pilotView{};
 void PublishPilotView(const PilotView& view) noexcept {
     AcquireSRWLockExclusive(&pilotViewLock);pilotView=view;ReleaseSRWLockExclusive(&pilotViewLock);
 }
-struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float radius,up,rise,dir[3]; };
+// The eased view direction (camera thread) both the third person's orbit and the cockpit's first person look along;
+// the orbit's radius / heights are taken from the native locator camera the first time it places it (`orbit`).
+struct PilotCamera { ObjRef ref;const unsigned char* seat;ULONGLONG ms;float dir[3];bool orbit;float radius,up,rise; };
 PilotCamera pilotCamera{};
 
 
@@ -3021,30 +3024,50 @@ void Replay(unsigned char* v) noexcept {
 }
 }  // namespace
 
-// Called only by the signature-checked native Type-1 locator camera hook. The flight and camera share one
-// mouse direction: do not integrate input again here or derive it from the rendered view (a feedback loop).
-bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+namespace {
+// The current local mouse pilot's view of `seat` (camera thread): its vehicle, the view direction eased onto the
+// flight's published mouse direction once per game ms. A new ease starts from `start` (the view as the game placed it).
+// The flight and camera share one mouse direction: do not integrate input again here or derive it from the rendered view
+// (a feedback loop).
+// Only the published pilot going invalid ends its ease; another local camera (split screen's other player in some
+// vehicle's seat 0) asking about its own seat is simply not the pilot's view and leaves the pilot's ease untouched.
+unsigned char* PilotViewDir(const unsigned char* seat,const float* start) noexcept {
     AcquireSRWLockShared(&pilotViewLock);const PilotView view=pilotView;ReleaseSRWLockShared(&pilotViewLock);
     const auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(view.ref.obj));
     const ULONGLONG ms=GameMs();
-    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || seat!=view.seat || ms-view.ms>250 ||
-       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=seat || SeatRider(seat)!=Rider::player ||
-       At<unsigned char>(seat,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider))) {
-        pilotCamera={};return false;
+    const unsigned char* const pilot=view.seat;
+    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || !pilot || ms-view.ms>250 ||
+       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=pilot || SeatRider(pilot)!=Rider::player ||
+       At<unsigned char>(pilot,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(pilot,kSeatRider))) {
+        pilotCamera={};return nullptr;
     }
-    // The camera-side matrix translation is the model origin, as in the native locator camera, not the input-side
-    // physics centre (sazabi_camera.inc documents the engine's swap between these contexts).
-    const float* pos=reinterpret_cast<const float*>(v+kMatrix)+12;
+    if(seat!=pilot)return nullptr;
     if(pilotCamera.ref.obj!=v || pilotCamera.ref.ctrl!=view.ref.ctrl || pilotCamera.seat!=seat) {
-        float d[3];float squared=0.0f;
-        for(int i=0;i<3;++i){d[i]=stockLook[i]-stockEye[i];squared+=d[i]*d[i];}
-        const float radius=std::sqrt(squared),up=stockLook[1]-pos[1],rise=stockEye[1]-stockLook[1];
-        if(!std::isfinite(radius+up+rise) || radius<0.5f)return false;
-        pilotCamera={view.ref,seat,ms,radius,up,rise,{d[0]/radius,d[1]/radius,d[2]/radius}};
+        const float length=std::sqrt(start[0]*start[0]+start[1]*start[1]+start[2]*start[2]);
+        if(!std::isfinite(length) || length<1e-3f)return nullptr;
+        pilotCamera=PilotCamera{};pilotCamera.ref=view.ref;pilotCamera.seat=seat;pilotCamera.ms=ms;
+        for(int i=0;i<3;++i)pilotCamera.dir[i]=start[i]/length;
     }
     if(ms!=pilotCamera.ms) {
         aim::EaseView(pilotCamera.dir,view.target,static_cast<float>(ms-pilotCamera.ms)/1000.0f);
         pilotCamera.ms=ms;
+    }
+    return v;
+}
+}  // namespace
+
+// Called only by the signature-checked native Type-1 locator camera hook: the third person orbits along the mouse view.
+bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    const float d[3]={stockLook[0]-stockEye[0],stockLook[1]-stockEye[1],stockLook[2]-stockEye[2]};
+    unsigned char* const v=PilotViewDir(seat,d);
+    if(!v)return false;
+    // The camera-side matrix translation is the model origin, as in the native locator camera, not the input-side
+    // physics centre (sazabi_camera.inc documents the engine's swap between these contexts).
+    const float* pos=reinterpret_cast<const float*>(v+kMatrix)+12;
+    if(!pilotCamera.orbit) {
+        const float radius=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]),up=stockLook[1]-pos[1],rise=stockEye[1]-stockLook[1];
+        if(!std::isfinite(radius+up+rise) || radius<0.5f)return false;
+        pilotCamera.orbit=true;pilotCamera.radius=radius;pilotCamera.up=up;pilotCamera.rise=rise;
     }
     for(int i=0;i<3;++i) {
         look[i]=pos[i]+(i==1 ? pilotCamera.up : 0.0f);
@@ -3056,6 +3079,23 @@ bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const floa
     const float raise=pos[1]+pilotCamera.up+pilotCamera.rise-eye[1];
     if(raise>0.0f){eye[1]+=raise;look[1]+=raise;}
     return true;
+}
+
+// The cockpit's first person (firstperson.cpp Ride): the eye stays on the cockpit's marker, the view looks along the
+// same mouse direction as the third person. The cockpit bone's frame is the airframe's: it turned with the mouse's
+// heading only because the hull yaws onto it, and never took the mouse's elevation (W/S pitch the hull).
+bool PlayerHeliFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept {
+    if(!frame || seat!=0)return false;
+    __try {
+        const auto v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!v || !SeatCount(v))return false;
+        if(PilotViewDir(SeatAt(v,0),frame+8)!=v)return false;
+        const float* d=pilotCamera.dir;
+        const auto aimed=fpview::HeadingFrame(std::atan2(d[0],d[2]),std::asin(Clamp(d[1],-1.0f,1.0f)),frame+12);
+        if(!fpview::Finite(aimed))return false;
+        std::memcpy(frame,aimed.m,sizeof aimed.m);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 namespace {
