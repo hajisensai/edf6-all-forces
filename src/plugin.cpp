@@ -1289,8 +1289,20 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
     // The saves in the mod's set before the game reads them (tools/vanilla_launch.py restore_saves): never the mod game on
-    // the vanilla saves (whose progress would then be stored as the vanilla set's).
-    if(!RestoreModSaves()){Log("REFUSED: the saves are still in the vanilla set (原版启动)");return false;}
+    // the vanilla saves (whose progress would then be stored as the vanilla set's). Not switched back: this plugin
+    // refusing to load is not enough (ModLoader.ini still loads the other plugins and redirects Mods, so the mod game
+    // would run on the vanilla or a half-switched set), so the game is ended here, before it reads the saves.
+    if(!RestoreModSaves()) {
+        Log("REFUSED: the saves are still in the vanilla set (原版启动): the game ended before it reads them");
+        FlushLog();
+        MessageBoxW(nullptr,
+            L"存档还在原版那套（原版启动留下的），没能换回 MOD 存档，详见 EDF6VehicleCrew.log。\n\n"
+            L"为了不让 MOD 游戏在原版存档上运行（这一局的进度会存错那套），游戏这次不启动。\n"
+            L"先关掉还开着的「原版启动」窗口，或运行安装器选 1（安装 / 更新）换回存档，再启动游戏。",
+            L"全军出击：存档还在原版那套",MB_OK|MB_ICONERROR|MB_TOPMOST|MB_SETFOREGROUND);
+        TerminateProcess(GetCurrentProcess(),1);
+        return false;
+    }
     StartSaveBackup();   // the saves copied before the game reads them (tools/save_backup.py), whatever follows
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}

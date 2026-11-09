@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
     plant(slot0, MOD)
     plant(os.path.dirname(system), {'SYSTEM.CFG': b'system'})
 
-    real = (vl.os.startfile if hasattr(vl.os, 'startfile') else None, vl.game_pid, vl.modfiles.game_running, vl.time.sleep,
+    real = (vl.os.startfile if hasattr(vl.os, 'startfile') else None, vl.game_pids, vl.modfiles.game_running, vl.time.sleep,
             vl._on_close, vl.save_root, vl.first_vanilla_saves)
     seen: dict[str, object] = {}
     try:
@@ -145,10 +145,11 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
             """One launch: EDF6.exe shows up on the third poll, runs two polls, exits (or never shows up)."""
             asked = iter(answers)
             vl.first_vanilla_saves = lambda: next(asked)
-            polls = iter([None, None, 4242])
-            running = iter([False, True, True, False, False])   # before, the wait for exit, the save swap after
+            polls = iter([set(), set(), set(), {4242}])   # before the start (none), then shows up on the third poll
+            # launch's check, swap_in_saves', _start's, the wait for exit (two polls), the save swap after
+            running = iter([False, False, False, True, True, False, False])
             vl.modfiles.game_running = (lambda *_a: next(running)) if starts else (lambda *_a: False)
-            vl.game_pid = (lambda: next(polls)) if starts else (lambda: None)
+            vl.game_pids = (lambda: next(polls)) if starts else (lambda: set())
 
             def start(url: str) -> None:
                 seen.update(url=url, ini=ini_of(g), own=own(slot0), mod=store(slot0, 'mod'))
@@ -229,8 +230,14 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
                 vl._close(g)
                 return False
             vl.first_vanilla_saves = ask if prompt else (lambda: False)
-            closed = []
-            vl.game_pid = (lambda: None) if prompt else (lambda: (closed or closed.append(vl._close(g))) and None)
+            polls: list[int] = []
+
+            def waiting() -> set[int]:   # the first call is _start's (under the lock): closed at the first poll after
+                polls.append(1)
+                if len(polls) == 2:
+                    vl._close(g)
+                return set()
+            vl.game_pids = (lambda: set()) if prompt else waiting
             with quiet():
                 check(vl.launch(g) == 1, 'closed: 1')
             check(ini_of(g) == raw and not os.path.isfile(state_of(g)) and own(slot0) == MOD and settled()
@@ -238,6 +245,46 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
             vl._closing = False
         close_at(True)
         close_at(False)
+
+        # the mod game started from Steam while the first-run prompt waits (the ini and the saves still the mod's, so
+        # the plugin loads as usual): the saves are never switched under it, Steam never asked, nothing left changed.
+        for s in vl.slots():
+            set_store(s, 'vanilla', {})
+        game_on: list[bool] = []
+        vl.modfiles.game_running = lambda *_a: bool(game_on)
+        vl.game_pids = lambda: {777} if game_on else set()
+        started: list[str] = []
+        vl.os.startfile = lambda url: started.append(url)
+        vl.first_vanilla_saves = lambda: game_on.append(True) or False
+        with quiet():
+            check(vl.launch(g) == 1, 'the game started at the prompt: 1')
+        check(not started and ini_of(g) == raw and not os.path.isfile(state_of(g)) and own(slot0) == MOD
+              and store(slot0, 'vanilla') == {} and settled(), 'the game started at the prompt: the saves never switched')
+        game_on.clear()
+        try:
+            game_on.append(True)
+            vl.swap_in_saves(False)
+            check(False, 'swap_in_saves with the game running: refused')
+        except vl.GameRunning:
+            check(own(slot0) == MOD and settled(), 'swap_in_saves with the game running: nothing changed')
+        game_on.clear()
+
+        # ... or right after the saves were switched (before Steam is asked): not started, never taken for the vanilla
+        # game; the ini back at once, the saves left under that game for its plugin's restore-saves.
+        real_prepare = vl.prepare
+        vl.prepare = lambda path: real_prepare(path) or game_on.append(True)
+        vl.first_vanilla_saves = lambda: False
+        try:
+            with quiet():
+                check(vl.launch(g) == 1, 'the game started before Steam was asked: 1')
+        finally:
+            vl.prepare = real_prepare
+        check(not started and ini_of(g) == raw and not os.path.isfile(state_of(g)) and vl._mode(slot0) == 'vanilla',
+              'the game started before Steam was asked: not started, the ini back, the saves left for restore-saves')
+        game_on.clear()
+        vl.restore_all(g)
+        check(own(slot0) == MOD and settled(), 'and switched back once it is gone')
+        vl.modfiles.game_running = lambda *_a: False
         set_store(slot0, 'vanilla', VAN2)   # the vanilla set again, as the sections below expect
 
         # cut off midway (each step marked): resumed without mixing the sets
@@ -272,7 +319,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
     finally:
         if real[0] is not None:
             vl.os.startfile = real[0]
-        (vl.game_pid, vl.modfiles.game_running, vl.time.sleep, vl._on_close, vl.save_root,
+        (vl.game_pids, vl.modfiles.game_running, vl.time.sleep, vl._on_close, vl.save_root,
          vl.first_vanilla_saves) = real[1:]
     vl.save_root = lambda: local   # for the installer checks below
 
@@ -471,4 +518,12 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-vanilla-') as root:
 
 inst = open(os.path.join(ROOT, 'tools', 'installer.py'), encoding='utf-8').read()
 check('write_launcher(game)' in inst and 'remove_launcher(game)' in inst, 'install / uninstall call them')
+# the plugin, the saves not switched back: the game itself ended (a box saying why) before it reads them, not just this
+# plugin unloaded: ModLoader.ini still loads the other plugins and redirects Mods, the mod game on the vanilla saves.
+plugin = open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8').read()
+at = plugin.find('if(!RestoreModSaves())')
+branch = plugin[at:plugin.find('return false;', at)]
+check(at >= 0 and 'MessageBoxW(' in branch and 'TerminateProcess(GetCurrentProcess(),' in branch
+      and branch.find('FlushLog();') < branch.find('TerminateProcess('),
+      'RestoreModSaves failing ends the game (log flushed, a box) before it reads the saves')
 print(f'vanilla_launch: {checks} checks OK')

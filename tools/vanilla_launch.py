@@ -255,9 +255,18 @@ def first_time() -> bool:
     return not any(_stored(s, 'vanilla') for s in all_slots) and any(_own(s) for s in all_slots)
 
 
+class GameRunning(RuntimeError):
+    """EDF6.exe found running where 原版启动 must not go on (swap_in_saves, _start): a game the player started meanwhile
+    (Steam, with the mod: the ini and the saves were still the mod's) is reading and writing the very files."""
+
+
 def swap_in_saves(keep: bool | None = None) -> None:
     """Every slot to the vanilla set. ON first: a slot the vanilla game makes during the run is the vanilla set's.
-    `keep` None: asked here (first_time); launch asks before taking the lock (a prompt must not hold it)."""
+    `keep` None: asked here (first_time); launch asks before taking the lock (a prompt must not hold it).
+    Never while the game runs (GameRunning, nothing changed): a mod game started during launch's first-run prompt would
+    go on playing on the vanilla set, and its progress be stored as the vanilla set's after it exits."""
+    if modfiles.game_running():
+        raise GameRunning(f'{modfiles.PROCESS} 已经在运行（启动原版之前被正常启动了）：不切换存档。先退出游戏再原版启动。')
     if keep is None:
         keep = first_time() and first_vanilla_saves()
     all_slots = slots()
@@ -352,14 +361,26 @@ def restore_saves() -> int:
     return 0
 
 
-def game_pid() -> int | None:
+def game_pids() -> set[int]:
     r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {modfiles.PROCESS}', '/FO', 'CSV', '/NH'],
                        capture_output=True, text=True, errors='replace')
+    pids = set()
     for line in r.stdout.splitlines():
         cells = [c.strip('"') for c in line.split('","')]
         if len(cells) > 1 and cells[0].lower() == modfiles.PROCESS.lower() and cells[1].isdigit():
-            return int(cells[1])
-    return None
+            pids.add(int(cells[1]))
+    return pids
+
+
+def _start() -> set[int]:
+    """Steam asked to start the game, the vanilla ini and saves in place (a step: the close handler never comes between
+    the check and the start). Refused (GameRunning) when EDF6.exe already runs: one started since swap_in_saves would
+    be taken for the vanilla game and waited on. The EDF6.exe PIDs before the start: launch waits for a new one."""
+    before = game_pids()
+    if before or modfiles.game_running():
+        raise GameRunning(f'{modfiles.PROCESS} 在原版启动之前已经运行：不启动，存档和 ini 换回 MOD 的。')
+    os.startfile(STEAM_URL)
+    return before
 
 
 _handler = None   # the console close handler, kept alive while it is installed
@@ -429,20 +450,23 @@ def _launch(game: str) -> int:
         keep = _step(first_time) and first_vanilla_saves()   # asked outside the lock
         _step(swap_in_saves, keep)
         _step(prepare, game)
+        before = _step(_start)
         print('游戏运行期间请不要关闭这个窗口。')
-        os.startfile(STEAM_URL)
         waited = 0.0
-        while (pid := game_pid()) is None:
+        while not (new := game_pids() - before):
             if waited >= START_TIMEOUT:
                 print(f'{int(START_TIMEOUT)} 秒内没有看到 {modfiles.PROCESS} 启动（Steam 没打开或启动被取消）。')
                 return 1
             time.sleep(POLL)
             waited += POLL
-        print(f'游戏已启动（PID {pid}），等它退出……')
+        print(f'游戏已启动（PID {min(new)}），等它退出……')
         while modfiles.game_running():
             time.sleep(POLL)
         print('游戏已退出。')
         return 0
+    except GameRunning as e:
+        print(e)
+        return 1
     finally:
         with _lock:
             if not _closing:   # else the close handler has put things back
