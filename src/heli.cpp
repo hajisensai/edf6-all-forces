@@ -3019,15 +3019,19 @@ namespace {
 // flight's published mouse direction once per game ms. A new ease starts from `start` (the view as the game placed it).
 // The flight and camera share one mouse direction: do not integrate input again here or derive it from the rendered view
 // (a feedback loop).
+// Only the published pilot going invalid ends its ease; another local camera (split screen's other player in some
+// vehicle's seat 0) asking about its own seat is simply not the pilot's view and leaves the pilot's ease untouched.
 unsigned char* PilotViewDir(const unsigned char* seat,const float* start) noexcept {
     AcquireSRWLockShared(&pilotViewLock);const PilotView view=pilotView;ReleaseSRWLockShared(&pilotViewLock);
     const auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(view.ref.obj));
     const ULONGLONG ms=GameMs();
-    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || seat!=view.seat || ms-view.ms>250 ||
-       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=seat || SeatRider(seat)!=Rider::player ||
-       At<unsigned char>(seat,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider))) {
+    const unsigned char* const pilot=view.seat;
+    if(!Cfg().enabled || !Cfg().heliMouseAim || !v || !pilot || ms-view.ms>250 ||
+       !view.ref.Is(v) || v[kDead] || !SeatCount(v) || SeatAt(v,0)!=pilot || SeatRider(pilot)!=Rider::player ||
+       At<unsigned char>(pilot,kSeatPad)!=0 || edf::RemoteRider(At<const unsigned char*>(pilot,kSeatRider))) {
         pilotCamera={};return nullptr;
     }
+    if(seat!=pilot)return nullptr;
     if(pilotCamera.ref.obj!=v || pilotCamera.ref.ctrl!=view.ref.ctrl || pilotCamera.seat!=seat) {
         const float length=std::sqrt(start[0]*start[0]+start[1]*start[1]+start[2]*start[2]);
         if(!std::isfinite(length) || length<1e-3f)return nullptr;

@@ -64,7 +64,13 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool InstallShotEntry() noexcept { return false; }   // heli.cpp: no shot entry hooked here
-bool PlayerHeliFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
+// heli.cpp's mouse-flown helicopter view (tested itself in heli_player_input_test): when it owns the seat it turns the
+// cockpit frame onto `heliFrame`.
+fpview::M4 heliFrame=fpview::Identity();bool heliFrameOwned=false;const void* heliFrameVehicle=nullptr;
+bool PlayerHeliFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept {
+    if(!heliFrameOwned || seat!=0 || vehicle!=heliFrameVehicle)return false;
+    std::memcpy(frame,heliFrame.m,64);return true;
+}
 bool observeCamera=false;
 int lookOrbit=-1;   // the last VehicleLookCamera call's `orbit`: 1 round the vehicle (third person), 0 the head in place
 bool VehicleLookCamera(const unsigned char*,float* matrix,bool orbit) noexcept {
@@ -397,6 +403,21 @@ int main() {
         check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
               "an open seat with no gun that turns keeps its bone's frame");
         gazeMarker=false;
+    }
+    // The mouse-flown helicopter's cockpit (heli.cpp PlayerHeliFirstPersonFrame): the camera looks along the mouse view,
+    // while the ride kept for the cockpit's screens / attitude indicator stays the airframe's banked bone frame.
+    {
+        const float axis[3]={0,0,1};rideFrame=fpview::Rotation(axis,std::cos(.6f),std::sin(.6f));
+        rideFrame.m[12]=5;rideFrame.m[13]=2;rideFrame.m[14]=7;
+        const float eyeAt[3]={5,2,7};heliFrame=fpview::HeadingFrame(.3f,-.4f,eyeAt);
+        heliFrameOwned=true;heliFrameVehicle=rideVehicle;
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,heliFrame.m,64)==0,
+              "the mouse-flown helicopter's pilot seat looks along the mouse view");
+        check(std::memcmp(Current().ride.frame,rideFrame.m,64)==0 && std::memcmp(Current().screens.frame,rideFrame.m,64)==0,
+              "the cockpit's screens and attitude indicator keep the airframe's bone frame");
+        heliFrameVehicle=nullptr;
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,"a seat the mouse pilot does not own keeps its bone's frame");
+        heliFrameOwned=false;rideFrame=fpview::Identity();
     }
     // Production instrument pose on a synthetic skeleton, then the same restore used after native draw.
     unsigned char inst[0x50]{},bones[2*kBoneStride]{};float pose[32]{},backup[32]{};
