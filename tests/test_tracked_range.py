@@ -130,7 +130,13 @@ class UndeployedXMorphTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             plan = gen.Plan(vehicles={unit: 1, 'edf6tr_vulcan_mission': 1})
             plan.waves.enabled = False
-            with patch.object(gen, 'Game', return_value=SimpleNamespace(root=root)),                  patch.dict(gen.PVP_PLANS, clear=True),                  patch.object(gen, 'has_mission_setup', side_effect=mission_setup),                  patch.object(gen, '_range_files', return_value=('script', b'points', [], False)),                  patch.object(gen, '_write_derived', side_effect=lambda r, g, wanted, uses=(): written.extend(wanted)),                  patch.object(gen, '_write_mission'),                  patch.object(gen, 'register_pack', return_value=[]):
+            with patch.object(gen, 'Game', return_value=SimpleNamespace(root=root)), \
+                 patch.dict(gen.PVP_PLANS, clear=True), \
+                 patch.object(gen, 'has_mission_setup', side_effect=mission_setup), \
+                 patch.object(gen, '_range_files', return_value=('script', b'points', [], False)), \
+                 patch.object(gen, '_write_derived', side_effect=lambda r, g, wanted, uses=(): written.extend(wanted)), \
+                 patch.object(gen, '_write_mission'), \
+                 patch.object(gen, 'register_pack', return_value=[]):
                 said = gen.install(root, plan)
         self.assertFalse(set(asked) & self.xm)
         self.assertFalse(set(written) & self.xm)
