@@ -146,6 +146,7 @@ bool RunHumanoidInput(NativeLease& lease,const Input& input,InputFn original,voi
     return RunInput(lease,input,original,dt,out);
 }
 bool ReadAbilityState(const NativeLease&,const NativeAbility&,enemy_control::Ability*) noexcept {return true;}
+bool ReadAbilityStates(const NativeLease&,const NativeAbility*,enemy_control::Ability*,unsigned) noexcept {return true;}
 unsigned Abilities(const NativeLease&,NativeAbility* out,unsigned cap) noexcept {
     if(fixtureActive==&fixtureSoldier) {   // the native order: pad buttons 0, 3, 4, 5, 6, then a weapon
         const NativeAbility soldier[]={

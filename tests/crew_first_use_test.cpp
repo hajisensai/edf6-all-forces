@@ -16,7 +16,8 @@ bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
-bool NpcCanYieldSeat(const unsigned char*) noexcept { return false; }
+int yieldAsks=0;   // PromptHook got past its object gate to the seats (the prompt cases)
+bool NpcCanYieldSeat(const unsigned char*) noexcept { ++yieldAsks;return false; }
 bool NpcMoveSeat(unsigned char*,unsigned,int) noexcept { return false; }
 // The fixture seats Dummies only (no soldier class here): npcai.cpp's NpcInSeat / NpcDriver as they read a Dummy.
 bool NpcInSeat(const unsigned char* seat) noexcept { return seat && SeatRider(seat)==Rider::dummy; }
@@ -72,9 +73,18 @@ bool SidecarHoldsPlayer(const void*) noexcept{return false;}
 bool IsPrimerVehicle(const void*) noexcept{return false;}
 bool IsHelicopter(const void*) noexcept{return false;}
 bool HeliCrewed(const void*) noexcept{return false;}
-bool IsJet(const void*) noexcept{return testJet;}
+// The body tests as body506.cpp / jet.cpp / subcarrier.cpp answer them: BodyMark reads the mark (+0x162C) of a 506
+// vtable alone, 0 (no body) for any other; IsJet is BodyOf's jet range, IsSub its sub mark. testJet: the boarding
+// cases' jet, whatever its vtable. markAsks: how often the mark was asked (PromptHook asks it of a 506 alone).
+int markAsks=0;bool testBoardable=false;
+float TestMark(const void* o) noexcept{
+    ++markAsks;
+    return Readable(o,8) && At<const void*>(o,0)==image+kVt506 && Readable(o,0x1630) ? At<float>(o,0x162C) : 0.0f;
+}
+bool IsJet(const void* o) noexcept{if(testJet)return true;const float k=TestMark(o);return k>=7001.0f && k<=7099.0f;}
+bool Heli506Vtable(const void* vt) noexcept{return testJet || vt==image+kVt506;}
 bool JetFliesItself(const void*) noexcept{return testDrone;}
-bool PlayerJetBoardable(const void*) noexcept{return testJet;}
+bool PlayerJetBoardable(const void*) noexcept{return testJet || testBoardable;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}
 bool SeatPoint(const unsigned char*,unsigned,float* point,float* reach) noexcept{std::memcpy(point,testDoor,12);*reach=2.3f;return true;}
 bool InstallNpcAi() noexcept{return false;}
@@ -95,6 +105,7 @@ void NpcGunnersInput(unsigned char*) noexcept{}
 void (*volatile unexpectedHook)()=&std::abort;
 int pvpFrameTicks=0,thermalFrameTicks=0,enemyFrameTicks=0,enemyNetworkTicks=0;
 void NoopGlobalTick() {}
+void __fastcall NoPrompt(void*,void*) {}
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}
 void ViewTick(void) noexcept{unexpectedHook();return;}
 void ViewDiagTick(void) noexcept{unexpectedHook();return;}
@@ -124,7 +135,7 @@ void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void SightZoomStock(unsigned char *) noexcept{unexpectedHook();return;}
 void TurretCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void StabFrame(unsigned char *) noexcept{unexpectedHook();return;}
-bool IsSub(void const *) noexcept{unexpectedHook();return {};}
+bool IsSub(void const * o) noexcept{return TestMark(o)==7101.0f;}
 void SubFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void CarrierLaserFrame(unsigned char const *) noexcept{unexpectedHook();return;}
 bool GunshipCrewSeats(void const *) noexcept{unexpectedHook();return {};}
@@ -320,6 +331,35 @@ int main(){
         frameClock.Observe(testHuman,testHuman,2);FrameTick();
         Check(pvpFrameTicks==3 && thermalFrameTicks==3 && enemyFrameTicks==3 && enemyNetworkTicks==3,"destroying the last vehicle does not stop PVP, thermal or enemy-control cleanup");
         unexpectedHook=&std::abort;
+    }
+    {
+        // The on-foot ride prompt's object gate, the production PromptHook: the vtable it read (ClassOfVtable, and the
+        // jet / sub tests asked of a 506 alone) passes or stops each object as the old gate did (ClassOf asking
+        // Readable, IsJet and IsSub asked of every object) -- a 506 with each body mark, another known class and an
+        // unknown one carrying a jet's or the sub's mark bytes -- and no mark is asked of a non-506.
+        Setup();inputsHooked=1;unexpectedHook=&NoopGlobalTick;originalPrompt=&NoPrompt;
+        unsigned char functor[0x18]{};Put<void*>(functor,kFunctorHuman,testHuman);
+        const void* const v506=image+kVt506;
+        const void* const tank=image+kClasses[0].vtable;   // a stock ground class
+        struct Case { const void* vt; float mark; bool boardable; };
+        const Case cases[]={{v506,0,false},{v506,7001,false},{v506,7001,true},{v506,7099,false},{v506,7101,false},
+                            {v506,7201,false},{v506,7401,false},{tank,0,false},{tank,7001,false},{tank,7101,false},
+                            {testVtable,0,false},{testVtable,7101,false}};
+        int compared=0;
+        for(const Case& c:cases) {
+            Put<const void*>(testVehicle,0,c.vt);Put<float>(testVehicle,0x162C,c.mark);testBoardable=c.boardable;
+            const bool oldPass=!(ClassOf(testVehicle)<0 || (IsJet(testVehicle) && !PlayerJetBoardable(testVehicle)) || IsSub(testVehicle));
+            yieldAsks=0;markAsks=0;functor[kFunctorResult]=0;
+            PromptHook(functor,testVehicle);
+            char what[160];
+            std::snprintf(what,sizeof what,"prompt gate (vtable %s, mark %.0f, boardable %d): as the old gate",
+                          c.vt==v506 ? "506" : c.vt==tank ? "known class" : "unknown",static_cast<double>(c.mark),c.boardable);
+            Check((yieldAsks>0)==oldPass,what);
+            if(c.vt!=v506)Check(markAsks==0,"prompt gate: a non-506 is not asked its body mark");
+            ++compared;
+        }
+        Check(compared==12,"prompt gate: every case run");
+        testBoardable=false;originalPrompt=nullptr;inputsHooked=0;unexpectedHook=&std::abort;
     }
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;

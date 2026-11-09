@@ -4,7 +4,9 @@
 // the next leader and the squad join, the dismiss cooldown, the mark's reach, a vehicle's way back to its post.
 //   cmake --build build --target npc_ai_check && build\npc_ai_check.exe      (exit code 1 on a failure)
 #include "../src/npc_logic.h"
+#include <algorithm>
 #include <cstdio>
+#include <random>
 
 namespace {
 int failures=0,cases=0;
@@ -314,6 +316,76 @@ void Targets() {
           TargetScore(140.0f,150.0f,false)<TargetScore(160.0f,150.0f,true),"reach outranks the keep");
 }
 
+// PickTarget asks usable last (2026-11-07, a stress mission's game thread half in WastedFire): the same pick as the
+// loop that asked it first, over random crowds with ties, a held one, ones out of scope or reach and usable failing
+// on the best; and usable asked only of the few in scope.
+int PickTargetUsableFirst(int n,const float (*aims)[3],int current,const bool* usable,const float* eye,
+                          const float* anchor,float scope,float reach) {
+    using namespace npc;
+    int best=-1;float bestScore=0.0f;
+    for(int i=0;i<n;++i) {
+        if(!usable[i])continue;
+        const float* aim=aims[i];
+        if(Horiz(anchor,aim)>scope)continue;
+        const float score=TargetScore(Dist(eye,aim),reach,i==current);
+        if(best<0 || score<bestScore){best=i;bestScore=score;}
+    }
+    return best;
+}
+void TargetsUsableLast() {
+    using namespace npc;
+    std::mt19937 rng(20261107u);
+    const float eye[3]={0.0f,1.5f,0.0f},anchor[3]={0.0f,0.0f,0.0f};
+    constexpr int kMax=48;
+    float aims[kMax][3];bool ok[kMax];
+    int mismatches=0,unusableBest=0,picks=0;
+    for(int round=0;round<200000;++round) {
+        const int n=static_cast<int>(rng()%(kMax+1));
+        // A coarse grid on some rounds: many equal distances and scores (ties keep the first index).
+        const bool grid=rng()%2==0;
+        for(int i=0;i<n;++i)
+            for(int k=0;k<3;++k)
+                aims[i][k]=grid ? static_cast<float>(static_cast<int>(rng()%9)-4)*20.0f
+                                : std::uniform_real_distribution<float>(-400.0f,400.0f)(rng);
+        const float scope=std::uniform_real_distribution<float>(0.0f,450.0f)(rng);
+        const float reachs[]={0.0f,20.0f,60.0f,150.0f,1000.0f};
+        const float reach=reachs[rng()%5];
+        const int current=n && rng()%3 ? static_cast<int>(rng()%n) : -1;
+        const unsigned share=rng()%4;   // usable none, a quarter, most, all
+        for(int i=0;i<n;++i)ok[i]=share==3 || (share>0 && rng()%4<share);
+        // Usable failing on the one that would be the best, again and again down the order.
+        if(rng()%2) {
+            for(int drop=static_cast<int>(rng()%4);drop>0;--drop) {
+                std::fill(ok,ok+n,true);
+                const int b=PickTargetUsableFirst(n,aims,current,ok,eye,anchor,scope,reach);
+                if(b<0)break;
+                ok[b]=false;++unusableBest;
+            }
+        }
+        const int want=PickTargetUsableFirst(n,aims,current,ok,eye,anchor,scope,reach);
+        const int got=PickTarget(n,[&](int i){return aims[i];},[&](int i){return i==current;},[&](int i){return ok[i];},
+                                 eye,anchor,scope,reach);
+        picks+=want>=0;
+        if(got!=want && ++mismatches<=5)Check(false,"usable asked last: the same pick as asked first",want,got);
+    }
+    Check(mismatches==0,"usable asked last: no pick differs over 200000 crowds",mismatches);
+    Check(unusableBest>10000 && picks>50000,"the crowds cover an unusable best and real picks",unusableBest,picks);
+    // 1000 enemies, 10 in scope, all usable: usable asked of those 10 at most, not the 1000.
+    static float many[1000][3];
+    for(int i=0;i<1000;++i){many[i][0]=i<10 ? 10.0f+static_cast<float>(i) : 600.0f+static_cast<float>(i);many[i][1]=0.0f;many[i][2]=0.0f;}
+    int asked=0;
+    const int got=PickTarget(1000,[&](int i){return many[i];},[](int){return false;},[&](int){++asked;return true;},
+                             eye,anchor,100.0f,150.0f);
+    Check(got==0 && asked>=1 && asked<=10,"usable asked only of the ones in scope",got,asked);
+    // In scope, nearest last: each one is the new best, so usable is asked of every one; nearest first: once.
+    asked=0;
+    PickTarget(10,[&](int i){return many[9-i];},[](int){return false;},[&](int){++asked;return true;},eye,anchor,100.0f,150.0f);
+    Check(asked==10,"nearest last: asked of each new best",asked);
+    asked=0;
+    PickTarget(10,[&](int i){return many[i];},[](int){return false;},[&](int){++asked;return true;},eye,anchor,100.0f,150.0f);
+    Check(asked==1,"nearest first: asked once",asked);
+}
+
 // The boarding walk's stop (BoardStop): standing anywhere within it on the floor under the riding point (and up to the
 // walk's 0.05 m of height slack) is inside the trigger sphere, for every drop the floor ray can give; the old fixed
 // 0.5 m stop is not (the negative control: the case the user hit).
@@ -372,6 +444,7 @@ int main() {
     Marks();
     Posts();
     Targets();
+    TargetsUsableLast();
     Boards();
     std::printf("npc_ai_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;

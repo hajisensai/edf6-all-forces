@@ -67,6 +67,12 @@ Sea SeaAt(float x,float z,float* surface) noexcept;
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
+// The enemy of `vehicle`'s side nearest `from` (npc::Dist to its lock point) within `reach` that `usable(ctx, object)`
+// accepts, from the side's copy of this frame (enemy_points.h Nearest; every gunner seat of every vehicle asks it each
+// frame): what VisitEnemies with that nearest-within-reach visitor picks. best null: none.
+using EnemyUsable=bool(*)(void* ctx,const void* object);
+bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float reach,EnemyUsable usable,void* ctx,
+                          const void*& best,float& bestDist) noexcept;
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept;   // every valid lock point, whatever its side (impact.cpp)
 // Whether `point` is within `radius` of the segment from->to (between its ends).
 bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;

@@ -99,11 +99,10 @@ ULONGLONG frame=1;
 const void* frameSeen[kFrameSeen]{};
 int frameSeenCount=0;
 
-// The world's lock points this frame (RefreshWorld; turret.h kMaxWorld).
-Enemy worldEnemies[kMaxWorld]{};
+// The world's lock points this frame (RefreshWorld; turret.h kFirstWorld): rows 0..worldCount-1.
+std::vector<Enemy> worldEnemies(kFirstWorld);
 int worldCount=0;
 ULONGLONG worldFrame=0,worldAt=0;
-bool worldFullLogged=false;
 
 // Tracks by (vehicle, seat): a slot is free when unused, its vehicle is gone (another weak-this control
 // block at the address, or none) or it has not been steered for kTrackIdleMs.
@@ -222,19 +221,17 @@ void RefreshWorld() noexcept {
     if(!Readable(registry,kRegList+0x10))return;
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return;
-    int n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
+    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
+    std::uint64_t n=0;
+    for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);
         if(!target || target[0]!=0 || !target[kTargetValid] || !target[kTargetLockable])continue;
         const auto object=At<const unsigned char*>(target,kTargetObject);
         if(!object || object[kDead])continue;
         const auto team=At<std::int32_t>(object,kTeam);
         if(team<0 || team>=kMaxTeam)continue;
-        if(worldCount>=kMaxWorld) {
-            if(!worldFullLogged){worldFullLogged=true;Log("ENEMIES more than %d lock points: the rest are not seen this frame",kMaxWorld);}
-            break;
-        }
-        Enemy& e=worldEnemies[worldCount];
+        if(static_cast<std::size_t>(worldCount)>=worldEnemies.size())worldEnemies.resize(worldEnemies.size()*2);
+        Enemy& e=worldEnemies[static_cast<std::size_t>(worldCount)];
         if(!Finite(target,kTargetAim,e.pos) || !Finite(object,kPosition,e.origin))continue;
         e.object=object;e.team=team;++worldCount;
     }
@@ -244,7 +241,7 @@ void RefreshWorld() noexcept {
 const Enemy* World(int* count) noexcept {
     RefreshWorld();
     *count=worldCount;
-    return worldEnemies;
+    return worldEnemies.data();
 }
 
 void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept {
@@ -252,11 +249,12 @@ void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept 
     RefreshWorld();
     const auto relation=Relations(At<std::int32_t>(vehicle,kTeam));
     if(!relation)return;
-    for(int i=0;i<worldCount && out.count<kMaxEnemies;++i) {
-        const Enemy& e=worldEnemies[i];
+    if(out.e.size()<static_cast<std::size_t>(worldCount))out.e.resize(static_cast<std::size_t>(worldCount));
+    for(int i=0;i<worldCount;++i) {
+        const Enemy& e=worldEnemies[static_cast<std::size_t>(i)];
         if(e.object==vehicle || relation[e.team]!=kEnemyRelation)continue;
         float local[3];ToLocal(vehicle,e.pos,local);
-        if(Dot(local,local)<=range*range)out.e[out.count++]=&e;
+        if(Dot(local,local)<=range*range)out.e[static_cast<std::size_t>(out.count++)]=&e;
     }
     diag.enemies+=static_cast<unsigned>(out.count);
 }
@@ -548,7 +546,7 @@ bool ReadShot(const unsigned char* vehicle,const unsigned char* seat,Shot& shot,
 // and nothing else while it cannot.
 const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,const void* keep,const void* dropped,const void* only,
                        Shot& shot,float range,float* world) noexcept {
-    Nearby nearby;
+    static Nearby nearby;   // kept: its room grows to the battle once
     ScanEnemies(vehicle,range,nearby);
     const float track=cfg.trackRange*range;
     const auto axes=seat+kSeatAim+kAimAxes;

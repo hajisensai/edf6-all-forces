@@ -326,6 +326,14 @@ bool ReadConfig(void* self,hector::Config& cfg) noexcept {
     return true;
 }
 
+// Only the edf41_hector marker. An entry already holds the rest of the key, parsed from this instance's own tree,
+// which does not change while the object lives; a missing marker still drops the entry.
+bool Marked(void* self) noexcept {
+    const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
+    Handle key{};
+    return Child(root,L"edf41_hector",key);
+}
+
 // The target's position, or false when the object has none.
 bool TargetOf(void* self,float* out) noexcept {
     char* me=static_cast<char*>(self);
@@ -353,8 +361,14 @@ Entry* Find(const void* self) noexcept {
 }
 
 void Tick(void* self) noexcept {
+    // The whole key is parsed only for a new entry (cfg is used nowhere else); a live entry of this instance needs the marker only.
+    bool known;
+    {
+        std::lock_guard<std::mutex> hold(tableLock);
+        known=Find(self)!=nullptr;
+    }
     hector::Config cfg;
-    const bool marked=ReadConfig(self,cfg);
+    const bool marked=known ? Marked(self) : ReadConfig(self,cfg);
     const ObjRef ref=ObjRef::Of(self);
     if(!marked || !ref.ctrl) {
         std::lock_guard<std::mutex> hold(tableLock);
@@ -374,6 +388,10 @@ void Tick(void* self) noexcept {
         e=nullptr;
     }
     if(!e) {
+        if(known && !ReadConfig(self,cfg)) {     // the entry went stale (or away) after the marker-only check: parse it now
+            table.erase(self);
+            return;
+        }
         e=&table[self];
         e->ref=ref;
         e->cfg=cfg;

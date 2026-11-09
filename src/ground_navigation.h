@@ -250,6 +250,11 @@ bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) no
 }
 } // namespace npc::navigation
 namespace crew {
+// Whether GroundNavigate(state, ...) this frame would return pending at once, its waypoint its `from`, without a
+// query: it waits its turn behind the caller the shared budget denied last frame. Asked before the call, it begins the
+// frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own
+// work for it (npcai.cpp MoveTo: the two floor rays of its ends) and take the pending.
+bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include "edf/layout.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
@@ -121,7 +122,9 @@ constexpr std::size_t kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTarge
 // Team relations: manager -> array (stride 0x38) per team -> int relation[team]; 2 = enemy.
 constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
 constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
-constexpr int kMaxNodes=8192;
+// The registry is an MSVC std::list (head at +8, its size at +0x10: 0x22E210 bumps it, 0x22E330); a walk goes over
+// that many nodes at most -- the list's own count, not a fixed cap a battle's lock points pass.
+constexpr std::size_t kRegSize=0x10;
 constexpr float kPi=3.14159265f;
 
 // The turret axes turn at (input x k) rad per frame; measured from the log at ~1.1 rad/s for a
@@ -146,11 +149,12 @@ struct Enemy { const void* object; std::int32_t team; float pos[3]; float origin
 // in the vehicle input phase, which runs before the bullet update phase of the same frame: the vehicles'
 // scans filter it, and the proximity fuse reads it for each round against the enemies of the side that
 // fired it, wherever that vehicle is.
-constexpr int kMaxWorld=1024;
+// As many as the registry holds (a battle's thousands: a fixed 1024 left the rest unseen); the snapshot grows, never shrinks.
+constexpr int kFirstWorld=1024;
 // The enemies of `vehicle`'s side within `range` of its turret pivot: pointers into the world snapshot,
 // valid for the current vehicle's step only (game thread; the snapshot is retaken next frame).
-constexpr int kMaxEnemies=256;
-struct Nearby { const Enemy* e[kMaxEnemies]; int count; };
+// Every one in range (a fixed 256 kept the first in walk order, not the best); each caller's Nearby is kept across frames.
+struct Nearby { std::vector<const Enemy*> e; int count=0; };
 void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept;
 // The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null.
 const std::int32_t* Relations(std::int32_t team) noexcept;
@@ -277,4 +281,6 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
 // slots it patched (0: it left them stock).
 int HookGunners() noexcept;
+// gunner.cpp: forgets which vehicle seats LogOnce has told about (each mission's start, designate.cpp's MissionResetV1).
+void ResetGunnerLog() noexcept;
 }  // namespace autoturret

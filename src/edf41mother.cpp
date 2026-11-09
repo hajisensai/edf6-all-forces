@@ -656,15 +656,10 @@ void Remove(void* obj,Part& p) noexcept {
     if(p.group==kBigCannon)Log("EDF41MOTHER main cannon %p removed: the hull's weak point can be hit",obj);
 }
 
-// A custom parameter node of a part's SGO, copied once for the bullets (keyed by the node: parts of one SGO share it).
+// A custom parameter node of a part's SGO, copied for the bullets. Persist shares copies by content (parts of one SGO
+// get one copy), so no cache keyed by the node's address: a later mission's SGO can reuse a freed node's address.
 const SgoNode* Custom(const SgoNode* node) noexcept {
-    static std::unordered_map<const SgoNode*,const SgoNode*> copies;
-    if(!node)return nullptr;
-    const auto it=copies.find(node);
-    if(it!=copies.end())return it->second;
-    const SgoNode* c=Persist(node);
-    copies[node]=c;
-    return c;
+    return node ? Persist(node) : nullptr;
 }
 bool FactoryName(void* obj,const wchar_t* key,wchar_t* out,std::size_t room,const wchar_t* fallback) noexcept {
     if(Text(Key(obj,key),out,room))return true;

@@ -211,7 +211,7 @@ int main() {
     auto* fine=Entry(units[0],npcFixtureMs);bool ordinaryLongMoving=false;
     for(int i=0;i<2200 && !ordinaryLongMoving;++i) {
         npcFixtureMs+=16;++frame;world.frame=frame;
-        MoveTo(units[0],Pos(units[0]),d.plan.target,kInfantryRouteStop);
+        MoveTo(units[0],Pos(units[0]),d.plan.target,kInfantryRouteStop,npcFixtureMs);
         ordinaryLongMoving=At<float>(units[0],kMoveX)!=0.0f || At<float>(units[0],kMoveZ)!=0.0f;
     }
     Check(ordinaryLongMoving && fine->navigation.partial && !fine->navigation.failed && fine->navigation.profile.cell==2 &&
