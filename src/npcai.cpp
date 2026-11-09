@@ -1126,6 +1126,34 @@ static_assert(seatevt::kMask==0x628 && seatevt::kShift==0x620,"the offsets the s
 bool seatEventsOk=false;
 struct SharedRef { void* obj; void* ctrl; };
 using RideFn=void(__fastcall*)(void*,SharedRef*,int);
+// Silent boardings (npcai.h SetNpcMissionCrew; 测试站 #41): the stock SeatRide 0x633C10 marks a new rider's seat taken
+// and changed itself (0x633D90 -> 0x633FE0: or [+0x628], bit; or [+0x628], bit << [+0x620]), so the vehicle's next
+// update (0x674B60 -> 0x632A60) plays the boarding preset unless the change bit is gone first: Quiet right after the ride.
+NpcMissionCrewFn missionCrewJudge=nullptr;
+// A peer's ride message (HUMAN_EVENT_VEHICLE_RIDE, HumanBase slot 15 0x5774C0): `lea rcx,[rsi-0x120]; call 0x5765E0`.
+constexpr unsigned kRemoteRideCall=0x577661;
+const unsigned char kRemoteRideSig[]={0x48,0x8D,0x8E,0xE0,0xFE,0xFF,0xFF,0xE8};   // 0x57765A
+bool remoteRideHooked=false;
+// The vehicle takes `human`'s seat as held from the start: no boarding sound for it (seat_events.h Quiet).
+void QuietRide(unsigned char* v,const unsigned char* human) noexcept {
+    if(!seatEventsOk || !v || !human || !Readable(v,kSeatCount+8) || !Readable(v+seatevt::kShift,12))return;
+    for(unsigned k=0;k<SeatCount(v);++k)if(At<const void*>(SeatAt(v,k),kSeatRider)==human) {
+        auto& mask=*reinterpret_cast<std::uint16_t*>(v+seatevt::kMask);
+        mask=seatevt::Quiet(mask,At<std::uint32_t>(v,seatevt::kShift),k);
+        return;
+    }
+}
+bool MissionCrewAboard(const unsigned char* v,const unsigned char* human) noexcept {
+    return missionCrewJudge && missionCrewJudge(v,human);
+}
+// The native receive's ride, then (a mission crew's copy seated in its own vehicle here) the same Quiet as the authority
+// wrote after its own ride. The by-value shared_ptr is the callee's (RideVehicle releases it): passed on untouched.
+void __fastcall RemoteRide(void* human,SharedRef* vehicle,int seat) noexcept {
+    reinterpret_cast<RideFn>(image+kRideVehicle)(human,vehicle,seat);
+    auto* h=static_cast<unsigned char*>(human);
+    auto* v=Readable(h,kHumanRiding+8) ? At<unsigned char*>(h,kHumanRiding) : nullptr;
+    if(v && MissionCrewAboard(v,h))QuietRide(v,h);
+}
 
 // Whose a seat's input is: the plugin's real NPC driver (npc), or why not (the diagnosis names it: NpcVehicleAi below).
 enum class SeatInputOwner : std::uint8_t { npc, off, notOther, notSoldier, player, dead, remote, seatMismatch, vehicle, notSeat0 };
@@ -1212,6 +1240,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,s.boardSeat);
+    if(!HumanOnFoot(h) && MissionCrewAboard(v,h))QuietRide(v,h);   // a mission AI vehicle's own crew: no boarding sound
     if(!HumanOnFoot(h))AnnounceNpcBoarding(h);
     Log("NPCAI soldier %p boards v=%p seat %d: %s",h,v,s.boardSeat,HumanOnFoot(h) ? "refused by the stock ride" : "seated");
     s.boardV=ObjRef{};
@@ -1735,8 +1764,18 @@ JoinMarkFn nextJoinMark=nullptr;
 bool coverOk=false;
 // What the cover's read sees with NpcFreeSquadCover=0: +0x540 0 (0x59B4CF -> 0x59B524, +0x478 = 1, no budget spent).
 alignas(16) const unsigned char kNoCover[kAutoFollow+0x10]{};
+// A mission AI vehicle's own crew (测试站 #41): no mark over it while it sits in that vehicle, whatever VanillaRecruit
+// (its driver is a squad top with +0x540 set: the stock would draw the mark at its head, over the vehicle). Off the
+// vehicle it is any soldier's again: the judge reads the soldier's +0x1548 each frame, nothing to give back. Asked only
+// of the few the stock would mark (its own gate first: +0x540 set, no +0x548 leader), so the walk of every soldier
+// pays no Readable (the 2026-11-08 stress lesson, HideWalkUp above).
+bool AboardMissionVehicle(const unsigned char* h) noexcept {
+    if(!h[kAutoFollow] || At<const void*>(h,kLeader) || !Readable(h,kHumanRiding+8))return false;
+    const auto* v=At<const unsigned char*>(h,kHumanRiding);
+    return v && MissionCrewAboard(v,h);
+}
 void __fastcall JoinMarkHook(void* marks,const unsigned char* human) noexcept {
-    if(WalkUpOff())return;
+    if(WalkUpOff() || AboardMissionVehicle(human))return;
     nextJoinMark(marks,human);
 }
 // The one whose +0x540 / +0x1A the stock's cover reads for `h` (rcx at 0x59B4CF): up +0x548 to the end of the chain;
@@ -2288,6 +2327,12 @@ bool InstallNpcAi() noexcept {
     __try { seatEventsOk=Matches(0x632AC6,kSeatSoundSig,sizeof(kSeatSoundSig)) && Matches(0x62F1AA,kSeatScanSig,sizeof(kSeatScanSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){seatEventsOk=false;}
     if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");
+    if(rideOk && seatEventsOk && !remoteRideHooked) {
+        bool matches=false,changed=false;
+        __try { matches=Matches(kRemoteRideCall-7,kRemoteRideSig,sizeof(kRemoteRideSig)); } __except(EXCEPTION_EXECUTE_HANDLER){matches=false;}
+        remoteRideHooked=matches && RedirectCall(image+kRemoteRideCall,image+kRideVehicle,reinterpret_cast<void*>(&RemoteRide),changed) && changed;
+        if(!remoteRideHooked)Log("NPCAI peer ride message not as read: a mission crew's boarding sounds on the peers");
+    }
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
     InstallRealDriverNative(&OwnsNpcSeatInput);
     InstallNpcBackpack();
@@ -3038,6 +3083,8 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     return moved;
 }
 
+void SetNpcMissionCrew(NpcMissionCrewFn judge) noexcept {missionCrewJudge=judge;}
+
 bool NpcRestoreMissionSeat(unsigned char* v,unsigned char* h) noexcept {
     if(!rideOk || !v || !IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead] ||
        !OnlineMaySeatNpc(v) || !IsOnlineAuthority(h) || At<const void*>(h,kHumanRiding)!=v)return false;
@@ -3052,6 +3099,7 @@ bool NpcRestoreMissionSeat(unsigned char* v,unsigned char* h) noexcept {
         _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
         SharedRef ref{v,ctrl};reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,static_cast<int>(i));
         if(At<const void*>(seat,kSeatRider)!=h)return false;
+        QuietRide(v,h);   // back in the seat it held: no boarding
         AnnounceNpcBoarding(h);return true;
     }
     return false;

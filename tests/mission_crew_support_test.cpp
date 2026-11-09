@@ -2,7 +2,10 @@
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
-unsigned char* image=nullptr;
+unsigned char* image=nullptr;Config config{};
+const Config& Cfg() noexcept {return config;}
+NpcMissionCrewFn silentRegistered=nullptr;
+void SetNpcMissionCrew(NpcMissionCrewFn f) noexcept {silentRegistered=f;}
 namespace {
 unsigned char vehicle[0x1000]{},seats[2*edf::kSeatStride]{},vctrl[16]{},people[15][0x1800]{},pctrl[15][16]{};
 bool sessionFlag=false,ready=true,active=true;int unholds=0;int spawned=0,deleted=0,boards=0,releases=0,retries=0,failAt=0;
@@ -98,6 +101,73 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
  Check(!p.units[1].variant && ApplyMissionCrewPlan(12,p,true) && !looks[0],"no crew colour: stock, no variant (an older host's plan)");
  p.units[1].variant=kVariantApplied|kVariantVehicle|1;Check(!ValidateMissionCrewPlan(p),"pylons on a mission crew soldier are refused");
  crewVariant=0;
+ // 测试站 #41 (mission_crew_quiet.h): a mission crew's own talk is off while it sits in its vehicle and back once off it.
+ {
+  constexpr std::uint32_t kTalk=crewquiet::kRandomTalk,kOther=0x4004420;   // the stock default flags hold the bit
+  auto flags=[](int i){return At<std::uint32_t>(people[i],kObjectFlags);};
+  auto aboard=[](int i,bool on){Put<void*>(people[i],0x1548,on ? static_cast<void*>(vehicle) : nullptr);};
+  // The pure step on its own: owned clear, owned restore, nothing owed for a bit someone else had cleared, gone forgotten.
+  Check(crewquiet::Next(true,true,kOther|kTalk,false).write && crewquiet::Next(true,true,kOther|kTalk,false).flags==kOther &&
+        crewquiet::Next(true,true,kOther|kTalk,false).quieted,"aboard: the talk bit cleared and owed back");
+  Check(!crewquiet::Next(true,true,kOther,false).write && !crewquiet::Next(true,true,kOther,false).quieted,
+        "aboard with the bit already off: nothing written, nothing owed");
+  Check(crewquiet::Next(true,false,kOther,true).flags==(kOther|kTalk) && crewquiet::Next(true,false,kOther,true).write &&
+        !crewquiet::Next(true,false,kOther,true).quieted,"off the vehicle: the owed bit given back");
+  Check(!crewquiet::Next(true,false,kOther,false).write,"never quieted: never written");
+  Check(!crewquiet::Next(false,false,0,true).write && !crewquiet::Next(false,false,0,true).quieted,"a soldier gone: forgotten, no write");
+  Check(crewquiet::Next(true,true,kOther|kTalk,true).flags==kOther && crewquiet::Next(true,true,kOther|kTalk,true).quieted,
+        "set again while aboard: cleared again, still owed once");
+
+  Reset();InstallMissionCrewSupport();
+  Check(silentRegistered==&MissionCrewRiding,"the silent-boarding judge is the mission crew registry");
+  Request(vehicle,false);
+  for(int i=0;i<2;++i)Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);
+  MissionCrewQuietTick();
+  Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"on foot by its vehicle: talk untouched");
+  Check(MissionCrewRiding(vehicle,people[0]) && MissionCrewRiding(vehicle,people[1]),"its own crew in its own vehicle is a silent boarding");
+  unsigned char stranger[0x1800]{},otherCar[0x1000]{},sctrl[16]{},octrl[16]{};
+  Put<void*>(stranger,kSelfCtrl,sctrl);Put<void*>(otherCar,kSelfCtrl,octrl);
+  Check(!MissionCrewRiding(vehicle,stranger),"a soldier of no mission deployment boarding it (the player's, a commanded one) sounds");
+  Check(!MissionCrewRiding(otherCar,people[0]),"the mission crew boarding another vehicle sounds");
+  aboard(0,true);aboard(1,true);MissionCrewQuietTick();
+  Check(flags(0)==kOther && flags(1)==kOther,"seated in its vehicle: each soldier's talk bit cleared, nothing else");
+  MissionCrewQuietTick();Check(flags(0)==kOther && deployments[0].quiet[0],"steady while aboard");
+  aboard(0,false);MissionCrewQuietTick();
+  Check(flags(0)==(kOther|kTalk) && !deployments[0].quiet[0] && flags(1)==kOther,"dismounted: its talk back, the one still aboard stays quiet");
+  aboard(0,true);MissionCrewQuietTick();Check(flags(0)==kOther,"back aboard: quiet again");
+  people[1][kDead]=1;MissionCrewQuietTick();
+  Check(flags(1)==(kOther|kTalk) && !deployments[0].quiet[1],"killed aboard: the bit given back (no longer a seated crew)");
+  people[1][kDead]=0;MissionCrewQuietTick();Check(flags(1)==kOther,"(alive again in the fixture) quiet again");
+  vehicle[kDead]=1;MissionCrewQuietTick();
+  Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"its vehicle destroyed: every soldier's talk back");
+  vehicle[kDead]=0;MissionCrewQuietTick();Check(flags(0)==kOther,"the vehicle back (fixture): quiet again");
+  config.enabled=false;MissionCrewQuietTick();
+  Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"the plugin turned off: every soldier's talk back");
+  config.enabled=true;MissionCrewQuietTick();Check(flags(0)==kOther && flags(1)==kOther,"turned on again: quiet again");
+  // A bit some other code had cleared before the soldier sat down is not the plugin's to give back.
+  aboard(0,false);MissionCrewQuietTick();Put<std::uint32_t>(people[0],kObjectFlags,kOther);aboard(0,true);MissionCrewQuietTick();
+  aboard(0,false);MissionCrewQuietTick();Check(flags(0)==kOther,"a bit already off when it sat down stays off when it leaves");
+  // Rollback: the bit given back before the soldier is deleted (symmetric), then the slot forgets it.
+  aboard(0,true);Put<std::uint32_t>(people[0],kObjectFlags,kOther|kTalk);MissionCrewQuietTick();
+  const auto tx=deployments[0].transaction;Check(flags(0)==kOther && flags(1)==kOther,"both quiet before the rollback");
+  DestroyMissionCrewPlan(tx);
+  Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk) && deleted==2,"rollback: every quieted soldier's talk back, then deleted");
+  Check(!MissionCrewRiding(vehicle,people[0]),"a rolled-back crew is no longer a mission crew");
+  // Mission end: the scene is the teardown's, nothing written through the old pointers.
+  Reset();Request(vehicle,false);for(int i=0;i<2;++i){Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);aboard(i,true);}
+  MissionCrewQuietTick();Check(flags(0)==kOther,"quiet before the mission ends");
+  ResetMissionCrewSupport();MissionCrewQuietTick();
+  Check(flags(0)==kOther && !MissionCrewRiding(vehicle,people[0]),"mission reset: forgotten without a write");
+  // A peer's copy (remote deployment): its own copies are quieted the same way (the talk event is gated per machine).
+  Reset();sessionFlag=true;Build(vehicle,&p);ApplyMissionCrewPlan(21,p,true);
+  for(int i=0;i<2;++i){Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);aboard(i,true);}
+  MissionCrewQuietTick();
+  Check(flags(0)==kOther && flags(1)==kOther && MissionCrewRiding(vehicle,people[1]),"a peer's copies quiet in their vehicle too");
+  aboard(1,false);MissionCrewQuietTick();Check(flags(1)==(kOther|kTalk),"a peer's copy dismounted: talk back");
+  // Not yet committed (a host's network transaction still pending): nothing is a mission crew yet.
+  Reset();sessionFlag=true;Request(vehicle,false);
+  Check(!MissionCrewRiding(vehicle,people[0]),"an uncommitted deployment quiets no one");
+ }
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew_support: %d checks passed\n",checks);
 }
 
