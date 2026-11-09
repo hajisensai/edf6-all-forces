@@ -214,6 +214,7 @@ private:
         bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)
         bool readyPending=false;   // a peer: PREPARE heard, its READY waiting on Hooks::prepare (a load going on)
         bool planned=false;        // host: planned, its soldiers armed; its BEGIN waiting on Hooks::prepare here (a load)
+        bool identified=false;     // host: its units' NetIds derived (once, before the BEGIN that may wait on a load)
         RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0,loadout=0;
         Plan plan{};

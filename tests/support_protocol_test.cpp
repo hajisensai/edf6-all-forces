@@ -246,7 +246,10 @@ void Capabilities() {
 // The requester decides it (npc_arms.h LocalRequesterArms) and its request carries it in the unit fields a request left
 // zero; the host gives each planned soldier its kind's, every unit message carries it, every peer builds the same soldier.
 // The wire stays v2: the room protocol (mod_room.h 8) keeps older builds out.
-bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status);
+bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status) {
+    for(const auto& n:r.nodes[node]->notices)if(n.first==request && n.second==status)return true;
+    return false;
+}
 RequesterArms SomeArms() {
     RequesterArms a{};
     crew::npctier::Arms rifle;rifle.on=true;rifle.id=26;for(int i=0;i<8;++i)rifle.stars[i]=static_cast<std::uint8_t>(i+2);
@@ -272,7 +275,7 @@ void Arms() {
      m.arms=RequesterArms{};
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && !out.arms.kind[0] && !out.arms.kind[13],"no arms: all none");}
     {Message m;m.kind=Kind::unit;m.epoch=22;m.transaction=1;m.index=3;m.unit.resourceId=crew::kSupportRangerResource;
-     m.unit.matrix[0]=m.unit.matrix[5]=m.unit.matrix[10]=m.unit.matrix[15]=1;Derive(7,m.unit.netId);m.unit.arms=arms.kind[0];
+     m.unit.matrix[0]=m.unit.matrix[5]=m.unit.matrix[10]=m.unit.matrix[15]=1;Derive(0x40000007,m.unit.netId);m.unit.arms=arms.kind[0];
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.arms==arms.kind[0] && out.request==0,
            "a unit's arms round-trip in its request word and its last word");
      m.unit.arms=arms.kind[5];Check(!Encode(m,bytes,sizeof(bytes)),"a ranger with a lance refused");
@@ -560,10 +563,6 @@ void RescueChannel() {
 }
 // 2026-10-27 (PR #269 review): a paid request's pt are settled by its outcome (support_points.h Ledger, keyed by the request
 // id), so every request this machine made is told one, and an id is never reused.
-bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status) {
-    for(const auto& n:r.nodes[node]->notices)if(n.first==request && n.second==status)return true;
-    return false;
-}
 void LocalOutcomes() {
     // A peer rejoining before anything was made restarts the host's epoch (its transactions cleared): the requests still
     // waiting on every machine are told interrupted, as a suspension tells them.

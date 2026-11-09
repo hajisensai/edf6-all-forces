@@ -19,7 +19,12 @@ struct Unit {
     // under the stock rule). Filled by the host's Session from the request's RequesterArms (Session::Advance), never by a
     // planner; on the wire in the unit message's `request` (low word) and its last reserved word (high word).
     std::uint64_t arms=0;
+    // Never on the wire, always 0: keeps a Unit a multiple of 16 bytes so every unit's matrix has the alignment of the
+    // first (tests/support_soldier_create_native_test.cpp places a Plan so that none is 16-aligned, the case the native
+    // CreateObject copy in support_soldier.cpp exists for).
+    std::uint64_t spare=0;
 };
+static_assert(sizeof(Unit)%16==0,"every Unit.matrix shares one alignment");
 // The requesting player's weapon for each soldier kind (SupportWeapon order; npc_tier.h PackArms, 0: none): decided by
 // the requester (npc_arms.h LocalRequesterArms) and carried in its request (support_protocol.cpp: the request message's
 // unit fields), so every machine builds the same soldiers (docs/feature-npc-weapon-tier.md).

@@ -502,16 +502,18 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         if(t.plan.catalogId!=catalog || !ValidPlan(t.plan,false) ||
            (t.dynamicDrone && !ValidPreparedDronePlan(t.plan)) ||
            (RequiredDetails(t.plan,t.id) && !PeersHaveDetails(RequiredDetails(t.plan,t.id)))){Cancel(id,true,RequestStatus::refused);return;}
-        // What it needs loaded here first (Hooks::prepare, the very question each peer's PREPARE asks): the host makes it
-        // too, at COMMIT. Its BEGIN waits; the transaction's own deadline still runs.
+        // Its ids once (a BEGIN waiting on a load below keeps them: the ordinals are never spent twice).
+        for(std::uint32_t i=0;!t.identified && i<t.plan.count;++i) {
+            if(t.plan.units[i].resourceId==kExistingVehicle)continue;
+            if(ordinal_>=0x80000000u || !backend_.hooks.deriveId(ordinal_++,t.plan.units[i].netId)){Cancel(id,true);return;}
+        }
+        t.identified=true;
+        // What it needs loaded here first (Hooks::prepare, the very question each peer's PREPARE asks, on the plan with its
+        // ids as theirs): the host makes it too, at COMMIT. Its BEGIN waits; the transaction's own deadline still runs.
         if(!t.external && backend_.hooks.prepare) {
             const PlanResult loaded=backend_.hooks.prepare(t.plan);
             if(loaded==PlanResult::pending)return;
             if(loaded==PlanResult::refused){Cancel(id,true,RequestStatus::refused);return;}
-        }
-        for(std::uint32_t i=0;i<t.plan.count;++i) {
-            if(t.plan.units[i].resourceId==kExistingVehicle)continue;
-            if(ordinal_>=0x80000000u || !backend_.hooks.deriveId(ordinal_++,t.plan.units[i].netId)){Cancel(id,true);return;}
         }
         if(!ValidPlan(t.plan) || !backend_.hooks.validate(t.plan)){Cancel(id,true,RequestStatus::refused);return;}
         t.phase=Phase::prepared;t.since=now;t.ready[0]=1;

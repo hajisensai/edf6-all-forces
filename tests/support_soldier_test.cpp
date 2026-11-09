@@ -238,17 +238,17 @@ int main() {
      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==1.0f,"the armed soldier: a player's attack coefficient");
      Check(support_native::CoefHook(nullptr,0.3f,plain.obj)==0.5f,"a stock support soldier: the difficulty's");
      Check(support_native::CoefHook(nullptr,0.3f,objects[30])==0.5f,"any other soldier (a mission's, the enemy's): the difficulty's");
-     const int before=made;
+     const int madeBefore=made;
      npctier::Arms lance;lance.on=true;lance.id=385;
      Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,npctier::PackArms(lance)) &&
-           made==before && SupportSoldierLastFailure()==SupportSpawnFailure::setup,"another kind's weapon: not spawned, nothing made");
+           made==madeBefore && SupportSoldierLastFailure()==SupportSpawnFailure::setup,"another kind's weapon: not spawned, nothing made");
      simulateLoad=false;const int del=deleted;
      Check(!ApplySupportSoldierResource(poses[3],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,packed) &&
-           made==before+1 && deleted==del+1,"its weapon load never taken: deleted, never the template's weapon instead");
+           made==madeBefore+1 && deleted==del+1,"its weapon load never taken: deleted, never the template's weapon instead");
      simulateLoad=true;support_native::arms=false;
      Check(!SupportSoldierArmsReady(),"the hooks not in: not ready");
      Check(!ApplySupportSoldierResource(poses[4],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,packed) &&
-           made==before+1,"the hooks not in: an armed soldier is refused before anything is made");
+           made==madeBefore+1,"the hooks not in: an armed soldier is refused before anything is made");
      Check(!support_native::arming.on,"no arming left behind");}
     simulateLoad=false;support_native::arms=false;
     ResetSupportSoldiers();VirtualFree(image,0,MEM_RELEASE);
