@@ -160,6 +160,12 @@ bool AimPoint(const void* target,float* out) noexcept;
 // +0x20), mapped by 0x6EA430; and a body's index by name (0x6EA670). -1: none.
 int HitBody(void* ragdoll,const void* damageInfo) noexcept;
 int RagdollBody(void* ragdoll,const wchar_t* name) noexcept;
+// A ragdoll component's collision layer: its first body's filter info (0x11B1240(body handle), handle = body +0x50; layer bits
+// 0..4) and every body moved to `layer` keeping its groups (0x6E9320(ragdoll, layer), what the classes' constructors call:
+// EventAnimationObject 0x5B6401 with 0x11, the insects 0x369A5C with 7). -1 / false: no body, or the code is not this build's.
+// (Added for the Hector's shield, src/edf41ai.cpp; edf41mother.cpp keeps its own copy with the area-query checks.)
+int RagdollLayer(void* ragdoll) noexcept;
+bool SetRagdollLayer(void* ragdoll,int layer) noexcept;
 // GDI (the data of 0xF0000000): +0x30 hit centre, +0x50 damage, +0x60 u16 flags (0x40 forced).
 constexpr std::size_t kGdiCentre=0x30,kGdiDamage=0x50,kGdiFlags=0x60;
 

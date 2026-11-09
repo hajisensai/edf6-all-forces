@@ -24,6 +24,8 @@
 | 音高换算 | cents = clamp(p×0.5, 0, 1)×2400 − 1200：p = 1 不变，0..2 = 低/高一个八度 | H |
 | 是否在播 | `bool 0x7A8A20(h)` | H |
 | 停止 / 释放 | `0x7A8CD0(h, int fadeFrames)`（≤0 立即）/ `0x7A8730(h)` | H |
+| MAB 的 se 事件 | 载入时解析（`0x6B9700..0x6B9928`）：`0x6B9740` 按 `name` 用 `0x7B16F0` 填 preset（名字不在 SEPRESET → 空 preset，事件到了也不响），`channel`、`node`（骨，`0x11002A0` 在模型 +0xA0 的骨架上查）、`is_trace_node`（缺省 1，`0x6B983D`）一起存成 0x90 字节的记录。4.1 的解析（EDF41.exe `0x321BB0..`）同字段、同缺省（`0x321BC3`）。4.1 移植对象的 MAB 名字 EDF6 没有时由插件按 CAS 时钟自己播（docs/feedback-2026-11-08-edf41-dragon-sound.md） | H |
+| 对象的 game_sound | 构造 `0x5466DF` 逐个 `0x7AA440(…, path, type 0, 1, 0)` 载入；失败 `0x546AB5` 释放引用并跳过，不崩 | H |
 
 **监听者**：`0x7AF3E0` 每帧对 4 个相机（`0x1195BE0(*(EDF+0x20B2958), i)`）取矩阵 +0x220..+0x250，位置（+0x250 行）存进 `SoundSystem+0x58` 的数组（数量 +0x68，每项 0x50 字节，位置在最前，其后是逆矩阵）。监听者 0 是玩家相机。(H)
 

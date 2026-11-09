@@ -11494,7 +11494,7 @@ def edf41_big_dragon_ragdoll_mass() -> None:
     top = sgo.load(data=eo.read('OBJECT/DRAGONBIG401.SGO'))
     per_kg = m.num(top['dragon_RagdollReactionScale']) / hk2014.total_mass(data)
     assert abs(per_kg - 2.5 / 361005.0) <= 1e-3 * per_kg, per_kg
-    assert m.NATIVE_FIXES['DRAGONBIG401.SGO'] is m.dragon_ragdoll_fix
+    assert m.NATIVE_FIXES['DRAGONBIG401.SGO'] is m.dragon_fix
     if not _e5c_have_game() or not _edf41_root():
         print('skip  edf41_big_dragon_ragdoll_mass (real archives): needs EDF6 and EDF4.1 installed')
         return
@@ -11507,6 +11507,130 @@ def edf41_big_dragon_ragdoll_mass() -> None:
     assert abs(hk2014.total_mass(files[big]) - limit) < 0.5
     top = sgo.load(data=files['OBJECT/DRAGONBIG401.SGO'])
     assert abs(m.num(top['dragon_RagdollReactionScale']) - 2.5 * limit / 361005.0) < 1e-4, top['dragon_RagdollReactionScale']
+
+
+@test
+def edf41_check_sounds_mab() -> None:
+    """2026-11-08 (DragonBig401 「Roars and sound effects do not play」): make_edf41_objects.check_sounds holds an object's
+    MAB se events and ragdoll_contact to SEPRESET too, not only SE_KEYS (EDF6 resolves them by name at load and plays an empty
+    preset for a name it lacks). On stand-in sound data (no game): a MAB name in neither SEPRESET nor edf41_se fails; one in
+    edf41_se fails too unless a plugin player key (MAB_PLAYER_KEYS) is there; with edf41_dragon_se it passes; one in both
+    fails (it would play twice); a class's KNOWN_SILENT names pass, another class's do not; a cue in no loaded bank fails;
+    the dragon bank the installer ships (OBJECT_BANKS) counts as loaded only when game_sound names its app path."""
+    import types
+    import make_edf41_objects as m
+    import sgo
+    import edf41_sounds
+    bank = edf41_sounds.OBJECT_BANKS['dragon']
+    games = types.SimpleNamespace(seset={'stock': 'cue6', 'ドラゴン小衝突': 'cue6'},
+                                  banks={'TIKYUUX_SE.ACB': {'cue6'}, 'MINE.ACB': {'cue41'},
+                                         bank.rel.rsplit('/', 1)[-1].upper(): {'big41'}})
+
+    def obj(cls: str, mab_names: list[str], **keys: object) -> bytes:
+        members = {'xgs_scene_object_class': cls, 'game_sound': ['app:/sound/adx/mine.acb'], **keys}
+        if mab_names:
+            members['animation_model'] = ['x', 'x', b'MAB' + bytes(1)]
+        return sgo.write_depth_first(0x102, members), mab_names
+
+    def run(cls: str, mab_names: list[str], **keys: object) -> str:
+        data, names = obj(cls, mab_names, **keys)
+        with patched(m, sound_cues=lambda _g: (games.seset, games.banks), mab_sound_names=lambda _m: list(names)):
+            try:
+                m.check_sounds(games, data, 'OBJECT/X.SGO')
+            except ValueError as e:
+                return str(e)
+        return ''
+
+    own = [['ドラゴン大足', 'cue41', 1, 1, 10, 50, 50]]
+    assert 'silent' in run('DragonSmall', ['ドラゴン大足'])
+    assert 'silent' in run('DragonSmall', ['ドラゴン大足'], edf41_se=own)          # no plugin player of the clips
+    assert run('DragonSmall', ['ドラゴン大足'], edf41_se=own, edf41_dragon_se=[]) == ''
+    assert run('DragonSmall', ['stock']) == ''
+    both = [['stock', 'cue41', 1, 1, 10, 50, 50]]
+    assert 'twice' in run('DragonSmall', ['stock'], edf41_se=both, edf41_dragon_se=[])
+    assert 'silent' in run('DragonSmall', [], ragdoll_contact=['ドラゴン大衝突', 1])
+    assert run('DragonSmall', [], ragdoll_contact=['ドラゴン小衝突', 1]) == ''
+    assert run('EDF6_Berserker_Large', [], ragdoll_contact=['歩行メカ衝突', 1]) == ''   # KNOWN_SILENT
+    assert 'silent' in run('DragonSmall', [], ragdoll_contact=['歩行メカ衝突', 1])
+    gone = [['ドラゴン大足', 'big41', 1, 1, 10, 50, 50]]
+    assert 'none of' in run('DragonSmall', ['ドラゴン大足'], edf41_se=gone, edf41_dragon_se=[])
+    assert run('DragonSmall', ['ドラゴン大足'], edf41_se=gone, edf41_dragon_se=[],
+               game_sound=['app:/sound/adx/mine.acb', bank.app_path()]) == ''
+    assert bank.app_path() == 'app:/sound/pc/edf41_en_dragon.acb'
+    for cls, (names, why) in m.KNOWN_SILENT.items():
+        assert names and why, cls
+
+
+@test
+def edf41_big_dragon_sounds() -> None:
+    """2026-11-08 (「Roars and sound effects do not play」, docs/feedback-2026-11-08-edf41-dragon-sound.md): the shipped
+    DragonBig401 carries what src/edf41dragon.cpp plays. edf41_dragon_se is the MAB's se / se_stop events per CAS state as
+    edf41_sound.animation_events gives them (every MAB se name in it, each with a CAS state the class plays); every 4.1 name
+    it plays (the events, the se_table slots that hold 4.1 names, the flame hit) is in edf41_se with 4.1's numbers;
+    game_sound names the 4.1 dragon bank the installer ships; se_table keeps the class's nine slots, the hurt roar empty
+    (4.1's giant roars from its damage clips). With the games: every shipped SGO passes check_sounds (the dragon was red
+    before this change), and 4.1's bank converts (tools/edf41_sounds.py) to our name with EDF6's ACF hash, 4.1's 61 cues."""
+    import edf41_objects as eo
+    import edf41_sound
+    import edf41_sounds
+    import make_edf41_objects as m
+    import mab_legacy
+    import cas_graft
+    import sgo
+    rel = 'OBJECT/DRAGONBIG401.SGO'
+    _, top = sgo.read(eo.read(rel))
+    plain = sgo.load(data=eo.read(rel))
+    am = top['animation_model']
+    cas = eo.read(m.rel_of(am[1]))
+    def rounded(v: object) -> object:
+        return [rounded(x) for x in v] if isinstance(v, list) else round(v, 3) if isinstance(v, float) else v
+    assert rounded(plain['edf41_dragon_se']) == rounded(edf41_sound.animation_events(cas, am[2])), 'regenerate edf41port'
+    clips = cas_graft.state_clips(cas)['main']
+    played = {e[2] for _state, _n, events in plain['edf41_dragon_se'] for e in events if e[1] == 0}
+    mab_names = set(m.mab_sound_names(top))
+    tracks = mab_legacy.mab_event_params(am[2])
+    reachable = {p['name'] for c in {c for cs in clips.values() for c in cs} for k, _t, p in tracks.get(c, []) if k == 'se'}
+    assert played == reachable and reachable <= mab_names, (sorted(mab_names - played), sorted(played - reachable))
+    assert all(state in clips for state, _n, _e in plain['edf41_dragon_se'])
+    own = {e[0]: e for e in plain['edf41_se']}
+    se_table = plain['se_table']
+    assert len(se_table) == 9 and se_table[0] == '' and se_table[1] == 'ドラゴン大ヒットエフェクト' and se_table[2] == 'ドラゴン大ｖ死亡大'
+    need = mab_names | {n for n in se_table if n.startswith(m.DRAGON_SE_PREFIXES)} | {m.DRAGON_FLAME_HIT}
+    assert set(own) == need, sorted(set(own) ^ need)
+    assert own[m.DRAGON_FLAME_HIT][1] == 'en_DragonBig_attackFireblessImpact'
+    assert edf41_sounds.OBJECT_BANKS['dragon'].app_path() in plain['game_sound']
+    src = open(os.path.join(ROOT, 'src', 'edf41dragon.cpp'), encoding='utf-8').read()
+    for key in ('edf41_dragon_se', 'edf41_se', 'se_table', 'ドラゴン炎のブレス着弾', 'kSkeletonAt=0x630+0xA0',
+                'kSeTableData=0x1B20,kSeTableCount=0x1B30'):
+        assert key in src, key
+    games = _sound_games()
+    if games is None or not _edf41_root():
+        print('skip  edf41_big_dragon_sounds (real games): needs EDF6 and EDF4.1 installed')
+        return
+    import acb
+    import rootcpk
+    real = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
+    reg = eo.registry()
+    sgos = [r for r in reg['files'] if r.endswith('.SGO')]
+    assert len(sgos) >= 150, len(sgos)
+    for r in sgos:
+        m.check_sounds(real, eo.read(r), r)
+    r6, r41 = games
+    out = edf41_sounds.object_bank('dragon', r6, r41)
+    b = edf41_sounds.OBJECT_BANKS['dragon']
+    new = out[b.rel]
+    with open(edf41_sounds.sound_path(r41, b.source), 'rb') as f:
+        old = f.read()
+    assert len(new) == len(old) and acb.cue_names(new) == acb.cue_names(old) and len(acb.cue_names(new)) == 61
+    _, data_at, row = edf41_sounds.utf_fields(new)
+    assert row['Name'] == 'tikyuu41_enDragon'
+    assert new[data_at + row['AcfMd5Hash'][0]:data_at + row['AcfMd5Hash'][0] + 16] == edf41_sounds.acf_hash6(r6)
+    with open(edf41_sounds.sound_path(r6, b.source), 'rb') as f:
+        e6 = f.read()
+    _, d6, row6 = edf41_sounds.utf_fields(e6)
+    assert new[data_at + row['AcbGuid'][0]:data_at + row['AcbGuid'][0] + 16] != e6[d6 + row6['AcbGuid'][0]:d6 + row6['AcbGuid'][0] + 16]
+    assert {c for e in own.values() for c in [e[1]]} <= set(acb.cue_names(new)) | set(acb.cue_names(e6)) | \
+        set(acb.cue_names(open(edf41_sounds.sound_path(r6, edf41_sounds.SE_BANK), 'rb').read()))
 
 
 # EDF4.1's mission maps (plan P6): the maps EDF4.1's 98 missions load (pylib/map_legacy.py converts their MAC).
@@ -14132,6 +14256,64 @@ def edf41_hector_material_merge() -> None:
     import inspect
     src_alias = inspect.getsource(m.alias_dsgo)
     assert 'hector_materials(' in src_alias and 'BERSERKER_DEATH_SLOT' in src_alias
+
+
+@test
+def edf41_hector_shield() -> None:
+    """The Hector's shield is 4.1's object again (docs/feedback-2026-11-08-edf41-hector-shield.md): every generated variant
+    holding a shield (edf41port/objects, read back) names the shield SGO in edf41_hector_shield with exactly its shield arms,
+    the others have no such key; the shield SGO is the plugin's class Hector401_Shield on a meshless model whose bones
+    hold every body of 4.1's shield ragdoll (both shipped), with a CAS whose main player has `default` (EventAnimationObject's
+    constructor plays it); the body model has the arm bones the plugin places the shield on. The plugin registers that class,
+    reads that key, refuses every hit on the shield, puts its bodies on the Hector's layer and never starts a shield arm."""
+    import cas_graft
+    import dsgo
+    import edf41_objects
+    import hk2014
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects')
+    shielded = 0
+    for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
+        with open(os.path.join(base, 'OBJECT', name), 'rb') as f:
+            top = dsgo.parse(f.read()).root
+        want = [float(i) for i, letter in enumerate((left, right)) if m.HECTOR_WEAPONS[(gen, letter)].cls == m.HECTOR_SHIELD_CLASS]
+        if not want:
+            assert m.HECTOR_SHIELD_KEY not in top.names.values(), name
+            continue
+        key = top.get(m.HECTOR_SHIELD_KEY)
+        shielded += 1
+        assert key.get('arms').items == want, (name, key.get('arms').items)
+        assert key.get('sgo') == 'app:/Object/hector401_shield_collision.sgo', name
+    assert shielded == 5, shielded   # 401 CS, LS, SC, SG, SS (301 has no shield)
+    shield = sgo.load(data=edf41_objects.read(m.HECTOR_SHIELD_SGO))
+    assert shield['xgs_scene_object_class'] == m.HECTOR_SHIELD_CLASS == 'Hector401_Shield', shield
+    assert set(shield) == {'xgs_scene_object_class', 'animation_model', 'ragdoll', 'game_object_durability'}, sorted(shield)
+    assert shield['game_object_durability'] > 0
+    am = shield['animation_model']
+    assert am[0] == [['app:/Object/hector401_shield.mrab', 'Hector401Shield.mdb']] and am[1] == 'app:/Object/hector401_shield_still.cas', am[:2]
+    rab = mdb.rab_read(edf41_objects.read(m.rel_of(am[0][0][0])))
+    assert [f.name for f in rab.files] == ['Hector401Shield.mdb'], [f.name for f in rab.files]
+    md = mdb.mdb_read(rab.files[0].data)
+    assert not md.materials and not md.textures and all(not ob.meshes for ob in md.objects)   # meshless: the body draws it
+    bones = {md.name_of(b.name) for b in md.bones}
+    bodies = [b.name for b in hk2014.rigid_bodies(hk2014.read(edf41_objects.read(m.rel_of(shield['ragdoll'][0]))))]
+    assert tuple(bodies) == m.HECTOR_SHIELD_BODIES, bodies
+    assert {b.split('.', 1)[1] for b in bodies} <= bones, (bodies, sorted(bones))
+    assert 'default' in cas_graft.states(edf41_objects.read(m.rel_of(am[1])))['main']
+    # the arm bones the plugin puts the shield on, in the shared body model of every variant
+    body_rab = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
+    body = next(f for f in body_rab.files if f.name.lower() == 'hector401cs.mdb')
+    names = {mdb.mdb_read(body.data).name_of(b.name) for b in mdb.mdb_read(body.data).bones}
+    assert {'arms_l', 'arms_r', 'gun_arms_r_gun_shield'} <= names, sorted(n for n in names if 'arms' in n)
+    code = src('src/edf41ai.cpp')
+    assert 'AddFactory(L"Hector401_Shield",&CreateShield)' in code
+    assert 'L"edf41_hector_shield"' in code and 'L"arms"' in code and 'L"sgo"' in code
+    assert 'bool __fastcall ShieldAccept(void*,void*) { return false; }' in code
+    assert 'SetSlot(shieldClone,kShieldAccept,' in code and 'AllowAnyTeam(shieldClone)' in code
+    assert 'SetRagdollLayer(obj+edf41c::kEaoRagdoll,to)' in code and 'kHectorRagdollAt=0xD80' in code
+    assert 'if(index>=0 && (e->shieldMask&(1u<<index)))return;' in code   # a shield arm never fires
 
 
 @test

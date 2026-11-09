@@ -17,7 +17,9 @@ def animation_events(cas: bytes, mab: bytes) -> list:
                 if kind not in ('se', 'se_stop'):
                     continue
                 channel = int(sgo.plain(params.get('channel', -1)))
-                trace = int(sgo.plain(params.get('is_trace_node', 0)))
+                # absent: the sound follows its bone (4.1's se event parser starts the flag at 1, EDF41.exe 0x321BC3, and
+                # only an is_trace_node key clears it; EDF6's own does the same, EDF.dll 0x6B983D)
+                trace = int(sgo.plain(params.get('is_trace_node', 1)))
                 events.append([float(time), int(kind == 'se_stop'), str(params.get('name', '')), channel,
                                str(params.get('node', '')), trace])
             if events:

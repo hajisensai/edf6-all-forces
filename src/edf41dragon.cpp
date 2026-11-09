@@ -15,6 +15,18 @@
 //    half the time a pass over the target breathing (fly_glide_attack), half the time a hover breathing (fly_attack:
 //    EDF41 0x1f0fc0). The call at 0x3359CA does that instead: a pass plays fly_glide_attack on the main player (and glide
 //    again once it ends), a hover enters the class's own fly_attack state (0x33A320, as the call next to it does).
+//  - The sounds (docs/feedback-2026-11-08-edf41-dragon-sound.md). Every sound of 4.1's giant is a 4.1 SEPRESET name EDF6's
+//    SEPRESET lacks; the SGO carries 4.1's entries (edf41_se: [name, cue, volume, pitch, three distances]) and the installer
+//    ships 4.1's dragon bank (tools/edf41_sounds.py OBJECT_BANKS), which game_sound loads with the object. Three players:
+//    (1) the MAB's se / se_stop events (edf41_dragon_se: per CAS state, [time, kind, name, channel, bone, trace]) on the main
+//    player's clock, as 4.1's MAB player does them (EDF41.exe 0x321F50 / 0x3220E0: a channel >= 0 stops its old sound first,
+//    se_stop stops it, a state change ends the clip's channels; edf41_sound_channels.h) at the bone's world point, a tracing
+//    one following it. EDF6 resolves the same events by name at load (0x6B9740) and finds nothing, so nothing plays twice.
+//    The bones are the skeleton of the model at +0x630 (the constructor finds the muzzle locator on it, 0x32E795; skeleton =
+//    model + 0xA0, as the MAB parser's 0x6B97EB and EventAnimationObject's 0x5C0 / 0x660). (2) the class's own se_table
+//    presets (the vector 0x7B3310 builds at +0x1B18: data +0x1B20, count +0x1B30, 0x80 each; read at 0x335038 / 0x332449 /
+//    0x339C34) whose 4.1 name EDF6 left empty, filled from edf41_se once. (3) the flame bullet's hit preset (InitParam +0x100,
+//    4.1's se_table[4] ドラゴン炎のブレス着弾 into its +0xB0, EDF41.exe 0x1ED62D).
 //  - The ranges: 4.1 wanders to points up to 500 from home (0x1f0122) where the class picks within 100 (the calls at
 //    0x334A21 / 0x334A57 of 0x33AC10, radius in xmm2), stays on the ground to fight a target within 500 (EDF41 0x1efd83;
 //    the class writes 100 to [+0x1C70], 0x3346B0) and recovers from an attack with a factor 1.0 (0x1f000c; the class's
@@ -28,11 +40,14 @@
 #include "enemy_control_native.h"
 #include "enemy_control_weapon_aim.h"
 #include "memory.h"
+#include "edf41classes.h"
+#include "edf41_sound_channels.h"
 
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -41,6 +56,9 @@ namespace {
 constexpr std::size_t kVtable=0x17ABA40;
 constexpr std::size_t kSlotTick=7;
 constexpr std::size_t kTick=0x334930;
+// Slot 1, the deleting destructor (0x32FBA0: it writes this vtable back at +0, stops the class's own sound at +0x1B38, flags in r14d).
+constexpr std::size_t kSlotDtor=1;
+constexpr std::size_t kDtor=0x32FBA0;
 constexpr std::size_t kCruise=0x33AC10;
 constexpr std::size_t kCruiseSites[]={0x334A21,0x334A57};
 constexpr std::size_t kFireball=0x33AE30;
@@ -83,6 +101,15 @@ constexpr std::uint32_t kKnockEvery=60,kKnockLines=240;   // the knock-down log:
 constexpr std::size_t kParamSize=0x1E0;
 constexpr float kCruiseRadius=500.0f,kGroundRadius=500.0f,kCooldownFactor=1.0f,kDamagePerLevel=0.00375f,kCone=0.2f;
 constexpr int kMostWindows=4;
+// The sounds (top of the file).
+constexpr std::size_t kSkeletonAt=0x630+0xA0;
+constexpr std::size_t kSeTableData=0x1B20,kSeTableCount=0x1B30,kPresetSize=0x80,kParamHitSe=0x100;
+constexpr int kMostSoundClips=64,kMostSoundKeys=64,kStopFade=16;
+const wchar_t kFlameHitSe[]=L"ドラゴン炎のブレス着弾";
+
+struct SoundKey { float time=0.0f; int kind=0,channel=-1,bone=-1; std::wstring name; bool trace=true; };
+struct SoundClip { int state=-1,clip=0; std::vector<SoundKey> events; };
+struct BoneSound { edf41c::SoundHandle handle; int bone=-1; bool trace=false; };
 
 struct Node {
     std::int32_t type;
@@ -93,6 +120,7 @@ struct Handle {
     void* sgo;
 };
 using TickFn=std::uint64_t(__fastcall*)(void*,void*);
+using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);
 using TargetOfFn=char*(__fastcall*)(void*);
 using RestSumFn=float(__fastcall*)(void*);
 using CruiseFn=void(__fastcall*)(void*,void*,float);
@@ -123,15 +151,20 @@ struct Dragon {
     const Node* custom=nullptr;
     std::uint64_t rng=0;
     std::uint64_t shots=0;
-    ULONGLONG seen=0;
     int lastState=-2;
     int logged=0;
     unsigned probe=0;
     std::uint32_t knockTicks=0,knockLogged=0;
     std::uint32_t ticks=0;
+    bool sounds=false,flameHitOk=false;
+    std::vector<SoundClip> clips;
+    edf41sound::Timeline timeline;
+    edf41sound::Channels<BoneSound> channels;
+    unsigned char flameHit[kPresetSize]{};   // a SePreset (0x7B3200 reads and writes it unaligned, movups)
 };
 
 TickFn nextTick=nullptr;
+DtorFn nextDtor=nullptr;
 std::mutex lock;
 std::unordered_map<const void*,Dragon> dragons;
 std::vector<std::vector<Node>> customCopies;   // never freed: a bullet keeps a pointer into one
@@ -213,6 +246,120 @@ bool Configure(void* self,Dragon& d) noexcept {
     return d.custom!=nullptr;
 }
 
+// Whether `name` is one of the object's 4.1 presets (edf41_se).
+bool Has41(void* self,const wchar_t* name) noexcept {
+    const edf41c::SgoNode* list=edf41c::Key(self,L"edf41_se");
+    wchar_t text[96];
+    for(int i=0;i<edf41c::Count(list);++i)
+        if(edf41c::Text(edf41c::Child(edf41c::Child(list,i),0),text,96) && std::wcscmp(text,name)==0)return true;
+    return false;
+}
+
+// The sound tables (top of the file): edf41_dragon_se resolved to CAS states and bones, the se_table slots that name a 4.1 preset
+// filled, the flame's hit preset. False: the SGO has no table or it is malformed (nothing of the sounds is done then).
+bool ConfigureSounds(void* self,Dragon& d) noexcept {
+    char* me=static_cast<char*>(self);
+    const edf41c::SgoNode* table=edf41c::Key(self,L"edf41_dragon_se");
+    const int count=edf41c::Count(table);
+    if(count<=0 || count>kMostSoundClips) {
+        Log("EDF41DRAGON %p no sound table (edf41_dragon_se %d entries): the giant is silent",self,count);
+        return false;
+    }
+    void* skeleton=me+kSkeletonAt;
+    void* cas=me+kCasAt;
+    const int mainPlayer=*reinterpret_cast<int*>(me+kMainPlayerAt);
+    const auto byName=reinterpret_cast<StateByNameFn>(image+kStateByName);
+    int keys=0,unbound=0;
+    for(int i=0;i<count;++i) {
+        const edf41c::SgoNode* row=edf41c::Child(table,i);
+        wchar_t state[64];
+        std::int32_t clip=0;
+        const edf41c::SgoNode* events=edf41c::Child(row,2);
+        const int n=edf41c::Count(events);
+        if(!edf41c::Text(edf41c::Child(row,0),state,64) || !edf41c::Int(edf41c::Child(row,1),&clip) || n<0 || n>kMostSoundKeys) {
+            d.clips.clear();
+            Log("EDF41DRAGON %p sound table entry %d malformed: the giant is silent",self,i);
+            return false;
+        }
+        SoundClip c;
+        c.state=byName(cas,mainPlayer,state,true);
+        c.clip=clip;
+        for(int k=0;k<n;++k) {
+            const edf41c::SgoNode* key=edf41c::Child(events,k);
+            SoundKey e;
+            std::int32_t kind=0,channel=-1,trace=1;
+            wchar_t name[96],node[64];
+            if(!edf41c::Float(edf41c::Child(key,0),&e.time) || !edf41c::Int(edf41c::Child(key,1),&kind)
+               || !edf41c::Text(edf41c::Child(key,2),name,96) || !edf41c::Int(edf41c::Child(key,3),&channel)
+               || !edf41c::Text(edf41c::Child(key,4),node,64) || !edf41c::Int(edf41c::Child(key,5),&trace)) {
+                d.clips.clear();
+                Log("EDF41DRAGON %p sound table entry %d key %d malformed: the giant is silent",self,i,k);
+                return false;
+            }
+            e.kind=kind;
+            e.channel=channel;
+            e.name=name;
+            e.trace=trace!=0;
+            e.bone=node[0] ? edf41c::BoneIndex(skeleton,node) : -1;
+            if(node[0] && e.bone<0)++unbound;
+            c.events.push_back(std::move(e));
+            ++keys;
+        }
+        if(c.state<0)Log("EDF41DRAGON %p sound table: no CAS state %ls",self,state);
+        else d.clips.push_back(std::move(c));
+    }
+    // the class's own presets that name a 4.1 sound (EDF6 left them empty); the vector checked against the key it was built from
+    const edf41c::SgoNode* names=edf41c::Key(self,L"se_table");
+    const std::size_t slots=*reinterpret_cast<const std::size_t*>(me+kSeTableCount);
+    unsigned char* data=*reinterpret_cast<unsigned char**>(me+kSeTableData);
+    int filled=0;
+    if(!data || edf41c::Count(names)<0 || slots!=static_cast<std::size_t>(edf41c::Count(names))
+       || !Readable(data,slots*kPresetSize)) {
+        Log("EDF41DRAGON %p se_table presets at +0x1B18: %zu slots, the key has %d: not filled",self,slots,edf41c::Count(names));
+    } else {
+        wchar_t name[96];
+        for(std::size_t i=0;i<slots;++i)
+            if(edf41c::Text(edf41c::Child(names,static_cast<int>(i)),name,96) && name[0] && Has41(self,name))
+                filled+=edf41c::FillSePreset(data+i*kPresetSize,self,name) ? 1 : 0;
+    }
+    d.flameHitOk=edf41c::FillSePreset(d.flameHit,self,kFlameHitSe);
+    Log("EDF41DRAGON %p sounds: %zu clips, %d keys (%d on a bone the skeleton lacks; tongue bone %d), se_table presets filled %d, "
+        "flame hit %d",self,d.clips.size(),keys,unbound,edf41c::BoneIndex(skeleton,L"tongue"),filled,d.flameHitOk ? 1 : 0);
+    return true;
+}
+
+void StopSounds(Dragon& d,int fade) noexcept {
+    d.channels.StopAll(fade,[](BoneSound& sound,int frames) { edf41c::StopSound(sound.handle,frames); });
+}
+
+// Where a sound of `bone` is: the bone's world point (the skeleton is fresh after the stock Update), else the object's.
+void SoundPoint(char* self,int bone,float* out) noexcept {
+    float m[16];
+    if(bone>=0 && edf41c::BoneMatrix(self+kSkeletonAt,bone,m))std::memcpy(out,m+12,12);
+    else std::memcpy(out,self+kPosAt,12);
+}
+
+// The MAB sounds of the clip the main player is in (top of the file).
+void StepSounds(char* self,Dragon& d,int state,float time) noexcept {
+    const auto stop=[](BoneSound& sound,int frames) { edf41c::StopSound(sound.handle,frames); };
+    d.timeline.Step(state,time,d.clips,[&](const SoundKey& e) {
+        if(e.kind==1) { d.channels.StopOne(e.channel,kStopFade,stop); return; }
+        if(e.kind!=0 || e.name.empty())return;
+        float at[3];
+        SoundPoint(self,e.bone,at);
+        d.channels.Start(e.channel,[&](BoneSound* sound) {
+            if(sound) { sound->bone=e.bone; sound->trace=e.trace; }
+            return edf41c::PlaySe(self,e.name.c_str(),at,sound ? &sound->handle : nullptr);
+        },stop);
+    },[&] { d.channels.StopAll(kStopFade,stop); });
+    d.channels.MoveAll([&](BoneSound& sound) {
+        if(!sound.trace)return;
+        float at[3];
+        SoundPoint(self,sound.bone,at);
+        edf41c::MoveSound(sound.handle,at);
+    });
+}
+
 float Uniform(std::uint64_t& rng) noexcept {
     rng=rng*6364136223846793005ull+1442695040888963407ull;
     return static_cast<float>((rng>>40)&0xFFFFFF)/16777216.0f;
@@ -250,6 +397,7 @@ void Breathe(char* self,Dragon& d) noexcept {
                                    muzzle[12],muzzle[13],muzzle[14],1.0f};
     alignas(16) unsigned char param[kParamSize];
     reinterpret_cast<ParamCtorFn>(image+kParamCtor)(param);
+    if(d.flameHitOk)std::memcpy(param+kParamHitSe,d.flameHit,kPresetSize);   // the hit sound (top of the file)
     const float damage=*reinterpret_cast<float*>(self+kLevelAt)*kDamagePerLevel;
     std::memcpy(param+0x94,&d.speed,4);
     std::memcpy(param+0x98,&d.life,4);
@@ -272,27 +420,52 @@ void Breathe(char* self,Dragon& d) noexcept {
 }
 
 // The entry of `self` (a new one configured), or null when it is not a 4.1 dragon. Call with `lock` held.
+// An entry lives exactly as long as its object: DtorHook drops it with its sounds stopped (edf41_sound_channels.h: the
+// object's lifecycle ends a channel), ShutdownDragons stops what is left before the sound system goes. So an entry is never
+// judged by the wall clock (a paused game updates no object: the clip's sounds would be fired again from a new timeline) and a
+// new object at an old address never finds the old entry. Only an object of this exact vtable gets one: only its destructor
+// is hooked.
 Dragon* Find(void* self) noexcept {
-    const ULONGLONG now=GetTickCount64();
+    if(*static_cast<void* const*>(self)!=image+kVtable)return nullptr;
     auto it=dragons.find(self);
-    if(it!=dragons.end() && now-it->second.seen>5000)dragons.erase(it), it=dragons.end();
     if(it==dragons.end()) {
         Dragon d;
         d.marked=Key(self,L"edf41_dragon")!=nullptr;
         if(d.marked) {
             d.ok=Configure(self,d);
-            d.rng=reinterpret_cast<std::uintptr_t>(self)^(now*0x9E3779B97F4A7C15ull);
+            d.sounds=d.ok && ConfigureSounds(self,d);
+            d.rng=reinterpret_cast<std::uintptr_t>(self)^(GetTickCount64()*0x9E3779B97F4A7C15ull);
             Log("EDF41DRAGON %p configured=%d windows=%d (%d %.1f..%.1f, %d %.1f..%.1f, %d %.1f..%.1f) glide attack state %d",self,
                 d.ok ? 1 : 0,d.windowCount,d.windows[0].state,d.windows[0].from,d.windows[0].to,d.windows[1].state,d.windows[1].from,
                 d.windows[1].to,d.windows[2].state,d.windows[2].from,d.windows[2].to,d.glideAttack);
         }
         it=dragons.emplace(self,d).first;
-        if(dragons.size()>256)
-            for(auto j=dragons.begin();j!=dragons.end();)
-                j=(j->first!=self && now-j->second.seen>5000) ? dragons.erase(j) : std::next(j);
     }
-    it->second.seen=now;
     return it->second.marked && it->second.ok ? &it->second : nullptr;
+}
+
+// Slot 1 (kDtor): the entry goes with its object, its held MAB channels (the breath among them) stopped first. From the
+// application destructor on (edf41c::ShuttingDown) StopSound calls nothing: ShutdownDragons stopped them already.
+std::uint64_t __fastcall DtorHook(void* self,unsigned flags) {
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        const auto it=dragons.find(self);
+        if(it!=dragons.end()) {
+            StopSounds(it->second,0);
+            dragons.erase(it);
+        }
+    }
+    return nextDtor(self,flags);
+}
+
+// The game's shutdown (edf41c::AtGameShutdown, before the application destructor deletes the sound system): every dragon still
+// alive stops its sounds now; its destructor, if it comes later, only drops the entry.
+void ShutdownDragons() noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    int n=0;
+    for(auto& kv:dragons)
+        if(!kv.second.channels.Empty()) { StopSounds(kv.second,0); ++n; }
+    if(n)Log("EDF41DRAGON the game is shutting down: %d dragons' sounds stopped first",n);
 }
 
 char* MainPlayer(char* self) noexcept {
@@ -320,6 +493,7 @@ std::uint64_t TickMaintenance(void* self,std::uint64_t r) {
         Log("EDF41DRAGON %p state %d -> %d (length %.1f)",self,d->lastState,state,*reinterpret_cast<float*>(clip+kPlayerLength));
     }
     d->lastState=state;
+    if(d->sounds)StepSounds(me,*d,state,time);
     const bool knocked=state>=0 && (state==*reinterpret_cast<int*>(me+kKnockStateAt) || state==*reinterpret_cast<int*>(me+kDownStateAt));
     if(!knocked)d->knockTicks=0;
     else if(d->knockTicks++%kKnockEvery==0 && d->knockLogged<kKnockLines) {   // why it stays down (edf41dragon_wake.h)
@@ -426,11 +600,20 @@ bool InstallEdf41Dragon() noexcept {
     }
     void** vtable=reinterpret_cast<void**>(image+kVtable);
     void* const tick=vtable[kSlotTick];
-    if(tick!=image+kTick) {
-        Log("EDF41DRAGON DragonSmall vtable slot 7 is %p, not EDF+%zX: not hooked",tick,kTick);
+    void* const dtor=vtable[kSlotDtor];
+    if(tick!=image+kTick || dtor!=image+kDtor) {
+        Log("EDF41DRAGON DragonSmall vtable slot 7 is %p (want EDF+%zX), slot 1 is %p (want EDF+%zX): not hooked",tick,kTick,dtor,kDtor);
         return false;
     }
     nextTick=reinterpret_cast<TickFn>(tick);
+    nextDtor=reinterpret_cast<DtorFn>(dtor);
+    // the destructor first: an entry is made only once it is there to drop it
+    const bool lifetime=PatchVtableSlot(vtable+kSlotDtor,dtor,reinterpret_cast<void*>(&DtorHook));
+    if(!lifetime) {
+        Log("EDF41DRAGON DragonSmall destructor slot not patched: not hooked");
+        return false;
+    }
+    edf41c::AtGameShutdown(&ShutdownDragons);   // the dragons' sounds stopped while the sound system still exists
     const bool t=PatchVtableSlot(vtable+kSlotTick,tick,reinterpret_cast<void*>(&TickHook));
     const bool control=t && enemy_native::RegisterControlledAiExtension(static_cast<std::uint32_t>(kVtable),static_cast<std::uint32_t>(kTick),
         &OwnsControlledTick,&ControlledTick,&ControlledSeed);
@@ -439,7 +622,7 @@ bool InstallEdf41Dragon() noexcept {
     for(const std::size_t site:kCruiseSites)
         cruise+=RedirectCall(image+site,image+kCruise,reinterpret_cast<void*>(&CruiseHook),changed) ? 1 : 0;
     const bool glide=RedirectCall(image+kGlideFireSite,image+kFireball,reinterpret_cast<void*>(&GlideFireHook),changed);
-    Log("EDF41DRAGON hooked: tick=%d cruise=%d/2 glide fire=%d controlled lifecycle=%d",t ? 1 : 0,cruise,glide ? 1 : 0,control ? 1 : 0);
+    Log("EDF41DRAGON hooked: dtor=1 tick=%d cruise=%d/2 glide fire=%d controlled lifecycle=%d",t ? 1 : 0,cruise,glide ? 1 : 0,control ? 1 : 0);
     return t && cruise==2 && glide && control;
 }
 }  // namespace crew
