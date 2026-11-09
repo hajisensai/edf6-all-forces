@@ -23,17 +23,22 @@ bool Deferred(const void* state) noexcept {
 }
 template<class State>
 npc::navigation::Result Navigate(State& state,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull) noexcept {
     using namespace npc::navigation;
     if(Deferred(&state)) {
         waypoint[0]=from[0];waypoint[1]=from[1];waypoint[2]=from[2];return Result::pending;
     }
     waiting=false;
+    if(!hull.clear)hull.object=nullptr;
+    // A route searched round another body (or round none) is not this one's: search again (Begin).
+    if(state.hull!=hull.object){state.hull=hull.object;state.initialized=false;}
     auto edge=[&](Point a,Point b,Point& out) noexcept {
         const float distance=Horizontal(a,b);
         if(distance>profile.cell*3.0f)return Edge::blocked;
         const int steps=(std::max)(1,static_cast<int>(std::ceil(distance/0.5f)));
-        const int worst=steps*20; // 16 floor/clearance queries plus four water queries
+        // 16 floor/clearance queries plus four water queries; round a hull, its four centre-line sweeps (WalkEdge),
+        // each in up to two pieces (OutsideCircle) of up to kHullHits rays
+        const int worst=steps*(20+(hull.object ? 8*kHullHits : 0));
         if(queries+worst>4096){if(!nextStart)nextStart=&state;return Edge::pending;}
         queries+=worst;
         bool waterUnknown=false;
@@ -54,7 +59,15 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
             const float a1[3]={a0.x,a0.y,a0.z},b1[3]={b0.x,b0.y,b0.z};float hit[3];
             return MapRay(a1,b1,hit)<0.0f;
         };
-        const bool walkable=WalkEdge(a,b,out,profile,ground,clear);
+        auto body=[&](Point a0,Point b0) noexcept {
+            if(!hull.object)return true;
+            return OutsideCircle(a0,b0,{hull.inside[0],hull.inside[1],hull.inside[2]},hull.room,[&](Point p,Point q) noexcept {
+                if(Horizontal(p,q)+std::fabs(p.y-q.y)<1e-3f)return true;
+                const float a1[3]={p.x,p.y,p.z},b1[3]={q.x,q.y,q.z};
+                return hull.clear(hull.object,a1,b1);
+            });
+        };
+        const bool walkable=WalkEdge(a,b,out,profile,ground,clear,body);
         return walkable ? Edge::open : waterUnknown ? Edge::pending : Edge::blocked;
     };
     Point next{};
@@ -64,11 +77,11 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
 }  // namespace
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept { return Deferred(&state); }
 npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
-    return Navigate(state,from,to,stop,ms,waypoint,profile);
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull) noexcept {
+    return Navigate(state,from,to,stop,ms,waypoint,profile,hull);
 }
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState& state,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
-    return Navigate(state,from,to,stop,ms,waypoint,profile);
+    return Navigate(state,from,to,stop,ms,waypoint,profile,Hull{});
 }
 }

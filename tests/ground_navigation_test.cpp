@@ -197,5 +197,80 @@ void Horizon() {
         Check(valid && at.x>80.0f,"it gets as near as the ground goes");
     }
 }
+// Testhub #31: a soldier sent to board stood against the vehicle until the order lapsed and was given again, over and
+// over: its seat's riding point was on the far side of the hull, and the route's map ray does not see vehicles, so the
+// route ran straight through it. The hull is now a second clearance (WalkEdge's `hull`, swept on the centre line), and
+// within the boarding circle round the goal (crew::Hull::room) it is not asked: the soldier is seated as it steps in.
+struct Vehicle {
+    float halfX=1.6f,halfZ=3.2f,top=2.4f;   // a hull at the origin, 3.2 m wide, 6.4 m long
+    bool seen=true;Point inside{};float room=0.0f;
+    bool Hits(Point p,Point q) const {
+        for(int i=0;i<=40;++i) {
+            const float t=static_cast<float>(i)/40.0f,x=p.x+(q.x-p.x)*t,z=p.z+(q.z-p.z)*t,y=p.y+(q.y-p.y)*t;
+            if(std::fabs(x)<halfX && std::fabs(z)<halfZ && y<top)return true;
+        }
+        return false;
+    }
+    Edge operator()(Point a,Point b,Point& out) const {
+        auto ground=[](Point,float,float& y){y=0.0f;return true;};
+        auto clear=[](Point,Point){return true;};   // the map ray: no units on its layer
+        auto hull=[&](Point p,Point q){
+            return !seen || OutsideCircle(p,q,inside,room,[&](Point u,Point v){return !Hits(u,v);});
+        };
+        return WalkEdge(a,b,out,{},ground,clear,hull) ? Edge::open : Edge::blocked;
+    }
+};
+Result Board(Vehicle& v,Point from,Point goal,State& s) {
+    std::uint64_t ms=1;Point next{};Result r=Result::pending;
+    for(int i=0;i<20000 && r==Result::pending;++i){ms+=16;r=Navigate(s,from,goal,0.3f,ms,next,[&](Point a,Point b,Point& c){return v(a,b,c);});}
+    return r;
 }
-int main(){Routing();LongRoutes();Horizon();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+bool Through(const Vehicle& v,Point from,const State& s) {
+    for(int i=0;i<s.length;++i){if(v.Hits(from,s.path[i]))return true;from=s.path[i];}
+    return false;
+}
+void BoardFarSide() {
+    const Point soldier{-2.4f,0,1.5f},seat{2.3f,0,-0.8f};   // either side of the hull, ~3 m from its centre (the #31 logs)
+    {
+        Vehicle blind;blind.seen=false;auto s=std::make_unique<State>();
+        Check(Board(blind,soldier,seat,*s)==Result::moving && Through(blind,soldier,*s),
+            "negative control: a route blind to the hull runs through it (#31)");
+    }
+    {
+        Vehicle v;auto s=std::make_unique<State>();
+        const Result r=Board(v,soldier,seat,*s);
+        Check(r==Result::moving && !Through(v,soldier,*s),"the riding point on the far side: the route goes round the hull");
+        Check(s->length>0 && Horizontal(s->path[s->length-1],seat)<0.1f,"...and ends at the riding point");
+        bool valid=true;Point at=soldier,out{};
+        for(int i=0;i<s->length;++i){valid=valid && v(at,s->path[i],out)==Edge::open;at=s->path[i];}
+        Check(valid,"every edge of it is clear of the hull");
+    }
+    {   // the riding point against the hull's side, its floor point inside the hull's footprint
+        const Point against{1.3f,0,-0.8f};
+        Vehicle shut;auto s=std::make_unique<State>();
+        Check(Board(shut,soldier,against,*s)!=Result::moving,"negative control: a goal in the hull's footprint is no route");
+        Vehicle v;v.inside=against;v.room=1.0f;s=std::make_unique<State>();
+        Check(Board(v,soldier,against,*s)==Result::moving,"within the boarding circle the hull is not asked: the goal is reached");
+        Point at=soldier;bool outside=true;
+        for(int i=0;i<s->length;++i) {
+            OutsideCircle(at,s->path[i],against,v.room,[&](Point p,Point q){outside=outside && !v.Hits(p,q);return true;});
+            at=s->path[i];
+        }
+        Check(outside,"...and goes round it everywhere outside that circle");
+    }
+    {   // the circle's pieces
+        int pieces=0;float length=0.0f;
+        OutsideCircle({-3,0,0},{3,0,0},{0,0,0},1.0f,[&](Point p,Point q){++pieces;length+=Horizontal(p,q);return true;});
+        Check(pieces==2 && std::fabs(length-4.0f)<1e-4f,"a segment across the circle: the two pieces outside it");
+        pieces=0;
+        OutsideCircle({-0.5f,0,0},{0.5f,0,0},{0,0,0},1.0f,[&](Point,Point){++pieces;return true;});
+        Check(pieces==0,"a segment inside it: none");
+        pieces=0;
+        OutsideCircle({0,0,0},{0,2,0},{0,0,0},1.0f,[&](Point,Point){++pieces;return true;});
+        Check(pieces==0,"a vertical segment inside it: none");
+        OutsideCircle({0,0,3},{0,2,3},{0,0,0},1.0f,[&](Point,Point){++pieces;return true;});
+        Check(pieces==1,"a vertical segment outside it: itself");
+    }
+}
+}
+int main(){Routing();LongRoutes();Horizon();BoardFarSide();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

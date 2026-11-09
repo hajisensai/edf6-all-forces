@@ -6620,7 +6620,16 @@ def npc_ai_wired() -> None:
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
-    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving' in move_to
+    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull)!=npc::navigation::Result::moving' in move_to
+    # Testhub #31: a boarding soldier's route goes round its vehicle (the map ray sees no unit), not within the
+    # boarding circle; a soldier stood against the hull until its order lapsed and was given again.
+    board = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'MoveTo(h,pos,walkAt,stop,ms,1.0f,BoardHull(v,walkAt,npc::BoardRoom(at[1]-walkAt[1],reach)));' in board, \
+        'Board: the route goes round the vehicle it walks to'
+    hull = code.split('bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'ObjectRay(from,b,at,&body)' in hull and 'if(owner==vehicle)return false;' in hull, \
+        'HullClear: the object layer, the owner of the body hit is the vehicle'
+    assert 'hullOk=Matches(kBodyObject,kBodyObjectSig,' in code
     assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
     assert move_to.index('RouteStart(to,goal);') < move_to.index('GroundNavigate('), '...and ends on the floor under its goal'
     assert 'p.horizon=kRouteHorizon;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
@@ -6744,7 +6753,7 @@ def npc_ai_asks_less() -> None:
     second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
     assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
     assert 'edf::PrefetchReadable(' not in arms
-    move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f) noexcept {')
+    move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {')
     assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
     navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
     assert navigate.index('if(Deferred(&state))') < navigate.index('auto edge='), 'the call and the ask share one turn'

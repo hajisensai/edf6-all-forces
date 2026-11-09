@@ -155,5 +155,47 @@ void DeferredTurn() {
     Check(same,"callers asking GroundNavigateDeferred first and skipping the call = every caller calling");
     Check(skipped>100 && moving>300,"the population waited its turn and walked (the skip was taken and routes followed)");
 }
+// Testhub #31: the boarding soldier's route goes round its vehicle (crew::Hull), which the map ray does not see. The
+// production adapter asks the hull's query on the route's centre line, not within the boarding circle, inside the
+// shared budget; a route found blind to the hull (a move order's, the same goal) is searched again once it is given.
+struct Box { float x,z,half; };
+int hullRays=0;
+bool HullMiss(const void* object,const float* a,const float* b) noexcept {
+    ++queries;++hullRays;
+    const Box& box=*static_cast<const Box*>(object);
+    for(int i=0;i<=40;++i) {
+        const float t=static_cast<float>(i)/40.0f,x=a[0]+(b[0]-a[0])*t,z=a[2]+(b[2]-a[2])*t,y=a[1]+(b[1]-a[1])*t;
+        if(std::fabs(x-box.x)<box.half && std::fabs(z-box.z)<box.half && y<2.4f)return false;
+    }
+    return true;
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+void HullRoute() {
+    Settle();Scene(0,crew::Sea::land);
+    static const Box vehicle{0,0,1.6f};
+    const float from[3]={-2.6f,0,1.0f},seat[3]={2.6f,0,-0.6f};float next[3]{};
+    auto through=[&](const State& s){
+        Point at{from[0],from[1],from[2]};
+        for(int i=0;i<s.length;++i) {
+            const float a[3]={at.x,0.5f,at.z},b[3]={s.path[i].x,0.5f,s.path[i].z};
+            const int keep=queries;const bool miss=HullMiss(&vehicle,a,b);queries=keep;--hullRays;
+            if(!miss)return true;
+            at=s.path[i];
+        }
+        return false;
+    };
+    auto s=std::make_unique<State>();
+    Check(Advance(*s,from,seat,next)==Result::moving && through(*s),"negative control: the map ray alone routes through the hull");
+    crew::Hull hull{&HullMiss,&vehicle};
+    hull.inside[0]=seat[0];hull.inside[1]=seat[1];hull.inside[2]=seat[2];hull.room=0.8f;
+    hullRays=0;Result r=Result::pending;
+    for(int i=0;i<400 && r==Result::pending;++i) {
+        Next();r=crew::GroundNavigate(*s,from,seat,0.1f,frame*16,next,{},hull);
+        Check(queries<=4096,"the hull's rays inside the shared world query budget");
+    }
+    Check(r==Result::moving && s->hull==&vehicle && !through(*s),"given the hull, the same order's route is searched again round it");
+    Check(hullRays>0,"the production adapter asks the hull's query");
+    Next();crew::GroundNavigate(*s,from,seat,0.1f,frame*16,next);
+    Check(s->hull==nullptr,"without it again: the route is no longer the hull's");
+}
+}
+int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
