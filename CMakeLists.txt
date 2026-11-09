@@ -795,7 +795,8 @@ add_test(NAME room_ui COMMAND room_ui_test)
 add_executable(loadout_writer_test tests/loadout_writer_test.cpp src/loadout_file.cpp)
 target_compile_options(loadout_writer_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME loadout_writer COMMAND loadout_writer_test)
-# Its stand-in children run below normal priority (VariantGenerator) and wait out a busy machine: the hang guard is here.
+# It waits for its stand-in children however long a busy machine takes (they run at normal priority; only the
+# plugin's own generator is below normal, VariantGenerator): the hang guard is here.
 set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
 add_executable(room_coop_capability_test tests/room_coop_capability_test.cpp)
 target_compile_options(room_coop_capability_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -943,6 +944,8 @@ set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCOD
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
 add_test(NAME bc5_normals COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bc5_normals.py")
 add_test(NAME model_workers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_workers.py")
+# Its two parallel jobs wait for each other however long the second worker takes to start: the hang guard is here.
+set_tests_properties(model_workers PROPERTIES TIMEOUT 600)
 add_test(NAME native_cmpl COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_cmpl.py")
 add_test(NAME native_helpers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_helpers.py")
 # tools/edf41_maps.py converting maps in processes of their own writes what one by one writes (skipped without the games)

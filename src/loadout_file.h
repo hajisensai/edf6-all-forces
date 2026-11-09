@@ -30,13 +30,23 @@ GenerateStatus ParseGenerateStatus(const std::string& text) noexcept;
 // killed) or a stale `running` left by one this object never started is reported failed, never running forever.
 class VariantGenerator {
 public:
+    // The plugin's generator runs below normal priority, so it never takes the game's CPU. tests/loadout_writer_test.cpp
+    // starts its stand-in children at normal priority: what it checks is the process's lifecycle and status file, and
+    // a below-normal child on a machine kept busy at normal priority (ctest -j beside other sessions) gets the CPU only
+    // from the balance-set manager's starvation boost, so it ran for minutes to past the 900 s timeout. The test
+    // checks the default's class itself on a child it does not wait for (PriorityClass).
+    explicit VariantGenerator(DWORD priorityClass=BELOW_NORMAL_PRIORITY_CLASS) noexcept : priority_(priorityClass) {}
     // False when one is still running or the process could not start (`why` says which).
     bool Start(const wchar_t* exe,const wchar_t* args,wchar_t* why,std::size_t capacity) noexcept;
     GenerateStatus Status(const wchar_t* statusPath) noexcept;
     bool Running() noexcept;
+    // The priority class of the process last started and not yet reaped (it answers after the process has exited);
+    // 0 with none.
+    DWORD PriorityClass() const noexcept { return process_ ? GetPriorityClass(process_) : 0; }
     ~VariantGenerator();
 private:
     void Reap() noexcept;
+    DWORD priority_;
     HANDLE process_=nullptr;
     bool ran_=false;
     DWORD exitCode_=0;
