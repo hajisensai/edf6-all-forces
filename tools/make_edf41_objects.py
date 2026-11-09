@@ -3614,7 +3614,9 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
 # arm bone), refusing every hit (slot 16), on the Hector's own body layer. The Hector's SGO names it in
 # edf41_hector_shield: {arms: [gun_control entry of each shielded arm], sgo: this SGO}.
 HECTOR_SHIELD_CLASS = 'Hector401_Shield'
-HECTOR_SHIELD_SGO = 'OBJECT/HECTOR401_SHIELD.SGO'                # 4.1's own path (its SGO, made over)
+HECTOR_SHIELD_SGO41 = 'OBJECT/HECTOR401_SHIELD.SGO'              # 4.1's (the closure's: hector_materials reads its glass)
+HECTOR_SHIELD_SGO = 'OBJECT/HECTOR401_SHIELD_COLLISION.SGO'     # the object made of it (a path of its own: the closure
+                                                                 # of the next variant takes files' copy of 4.1's path)
 HECTOR_SHIELD_MRAB = 'OBJECT/HECTOR401_SHIELD.MRAB'              # the meshless model
 HECTOR_SHIELD_CAS = 'OBJECT/HECTOR401_SHIELD_STILL.CAS'           # main / default, nothing moves
 HECTOR_SHIELD_KEY = 'edf41_hector_shield'
@@ -3629,7 +3631,7 @@ def app_path(rel: str) -> str:
 
 
 def hector_shield(games: 'Games', files: dict[str, bytes], out: dsgo.Node, a: Alias) -> None:
-    """The shield object of a Hector variant holding one (see above): files[HECTOR_SHIELD_SGO] made over from 4.1's for
+    """The shield object of a Hector variant holding one (see above): files[HECTOR_SHIELD_SGO] made of 4.1's SGO for
     EventAnimationObject (the meshless model, the still CAS, 4.1's ragdoll; no material, no range), those two files
     added, and the variant's edf41_hector_shield. ValueError when 4.1's files are not what this was written for. The same
     bytes whichever variant makes them (build's clash check)."""
@@ -3637,9 +3639,9 @@ def hector_shield(games: 'Games', files: dict[str, bytes], out: dsgo.Node, a: Al
     if not arms:
         return
     import hk2014
-    version, mine = sgo.read(convert(games, HECTOR_SHIELD_SGO))   # 4.1's (files may hold another variant's made-over one)
+    version, mine = sgo.read(convert(games, HECTOR_SHIELD_SGO41))
     if mine.get('xgs_scene_object_class') != HECTOR_SHIELD_CLASS:
-        raise ValueError(f'{HECTOR_SHIELD_SGO}: class {mine.get("xgs_scene_object_class")}, not {HECTOR_SHIELD_CLASS}')
+        raise ValueError(f'{HECTOR_SHIELD_SGO41}: class {mine.get("xgs_scene_object_class")}, not {HECTOR_SHIELD_CLASS}')
     am = mine['animation_model']
     entry = model_entries(am[0])[0]
     rag = mine['ragdoll']

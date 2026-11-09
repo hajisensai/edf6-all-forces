@@ -18,8 +18,8 @@
 
 ## 2. 修法（与 4.1 结构一致：盾重新是独立对象）
 
-- 生成器 `hector_shield`：带盾的变体写 `edf41_hector_shield: {arms: [盾臂的 gun_control 序号], sgo: app:/Object/hector401_shield.sgo}`；
-  `HECTOR401_SHIELD.SGO` 改造成插件类 `Hector401_Shield`（EventAnimationObject 底）：4.1 原版盾 ragdoll、无网格的 4.1 盾模型
+- 生成器 `hector_shield`：带盾的变体写 `edf41_hector_shield: {arms: [盾臂的 gun_control 序号], sgo: app:/Object/hector401_shield_collision.sgo}`；
+  该 SGO 由 4.1 的 `HECTOR401_SHIELD.SGO` 改造成插件类 `Hector401_Shield`（EventAnimationObject 底）：4.1 原版盾 ragdoll、无网格的 4.1 盾模型
   `HECTOR401_SHIELD.MRAB`（只留骨骼，供 ragdoll 绑定；玩家看到的盾仍是本体模型里那块网格和玻璃材质动画）、主播放器带 `default` 的静止 CAS。
 - 插件（`src/edf41ai.cpp` Shields）：赫克托每帧瞄完手臂后，盾对象第一次按臂骨世界矩阵生成，之后每帧贴到臂骨（`arms_l` / `arms_r`，
   盾网格就挂在这根骨上）；阵营跟赫克托一致、不登记（不是目标、不计入敌人数）；刚体从 EAO 构造放的地图层 0x11 移到赫克托本体

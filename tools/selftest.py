@@ -13977,7 +13977,7 @@ def edf41_hector_shield() -> None:
             continue
         shielded += 1
         assert key.get('arms').items == want, (name, key.get('arms').items)
-        assert key.get('sgo') == 'app:/Object/hector401_shield.sgo', name
+        assert key.get('sgo') == 'app:/Object/hector401_shield_collision.sgo', name
     assert shielded == 5, shielded   # 401 CS, LS, SC, SG, SS (301 has no shield)
     shield = sgo.load(data=edf41_objects.read(m.HECTOR_SHIELD_SGO))
     assert shield['xgs_scene_object_class'] == m.HECTOR_SHIELD_CLASS == 'Hector401_Shield', shield
