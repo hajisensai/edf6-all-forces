@@ -142,9 +142,16 @@ void* __fastcall LoadWeaponHook(void* human,const MsvcWide* path,const void* sta
 }
 // A soldier this module made with a player weapon: the attack coefficient a player has (1, the weapon's own damage, as
 // the requester's), not the difficulty's (docs/feature-npc-weapon-tier.md). Every other soldier: the stock one.
+// Only this mission's live entry for this very object: a dead armed soldier's entry stays until FreeEntry reaches it
+// or the mission resets, and a new object at its address (another control block, crew.h ObjRef) is not it.
 float __fastcall CoefHook(void* gameData,float scale,const void* soldier) noexcept {
-    if(soldier)for(const auto& entry:owned)if(entry.armed && entry.ref.obj==soldier)return 1.0f;
-    return coefNext(gameData,scale);
+    bool mine=false;
+    if(soldier) {
+        __try {
+            for(const auto& entry:owned)if(entry.armed && entry.epoch==epoch && entry.ref.Is(soldier) && Live(entry)){mine=true;break;}
+        } __except(EXCEPTION_EXECUTE_HANDLER){mine=false;}
+    }
+    return mine ? 1.0f : coefNext(gameData,scale);
 }
 bool Matrix(const float* m) noexcept {
     if(!m || !Readable(m,64))return false;

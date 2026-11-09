@@ -238,6 +238,19 @@ int main() {
      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==1.0f,"the armed soldier: a player's attack coefficient");
      Check(support_native::CoefHook(nullptr,0.3f,plain.obj)==0.5f,"a stock support soldier: the difficulty's");
      Check(support_native::CoefHook(nullptr,0.3f,objects[30])==0.5f,"any other soldier (a mission's, the enemy's): the difficulty's");
+     // The armed soldier dies; its entry stays (FreeEntry has not reached it). A new object at its address, another
+     // control block: the difficulty's coefficient, not the dead soldier's.
+     {auto* o=static_cast<unsigned char*>(const_cast<void*>(armed.obj));
+      Put<LONG>(controls[31],8,1);Put<LONG>(controls[31],12,1);
+      Put<unsigned char>(o,0x18,4);
+      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==0.5f,"a dead armed soldier: no longer a player's coefficient");
+      Put<unsigned char>(o,0x18,0);Put<void*>(o,0x30,controls[31]);
+      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==0.5f,"a new soldier at a dead armed one's address: the difficulty's");
+      Put<void*>(o,0x30,const_cast<void*>(armed.ctrl));
+      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==1.0f,"the armed soldier itself again: a player's");
+      ++support_native::epoch;
+      Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==0.5f,"another mission's entry: the difficulty's");
+      --support_native::epoch;}
      const int madeBefore=made;
      npctier::Arms lance;lance.on=true;lance.id=385;
      Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,npctier::PackArms(lance)) &&

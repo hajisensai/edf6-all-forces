@@ -34,6 +34,7 @@ struct PathSet {
         for(int i=0;i<count;++i)if(!_wcsicmp(path[i],p))return true;
         return false;
     }
+    bool Full() const noexcept { return count>=kPathsMost; }
     bool Add(const wchar_t* p) noexcept {
         if(Has(p))return true;
         if(count>=kPathsMost)return false;
@@ -43,22 +44,32 @@ struct PathSet {
 PathSet loaded,asked;
 void* mission=nullptr;   // the object manager the sets belong to
 
+// The preload and its completion query, set once their bytes matched (tests/npc_arms_test.cpp records them instead).
+int profileState=-1;
+PreloadFn preloadFn=nullptr;
+LoadDoneFn loadDoneFn=nullptr;
 bool Profile() noexcept {
-    static int ok=-1;
-    if(ok<0)ok=Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kLoadDone,kLoadDoneSig,sizeof(kLoadDoneSig)) ? 1 : 0;
-    return ok==1;
+    if(profileState<0) {
+        const bool ok=Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kLoadDone,kLoadDoneSig,sizeof(kLoadDoneSig));
+        if(ok){preloadFn=reinterpret_cast<PreloadFn>(image+kPreload);loadDoneFn=reinterpret_cast<LoadDoneFn>(image+kLoadDone);}
+        profileState=ok ? 1 : 0;
+    }
+    return profileState==1;
 }
-// A new mission's object manager: the sets were the last mission's.
+void* ObjectManager() noexcept {
+    __try { return At<void*>(image,kObjectMgr); } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+// The mission boundary (PreloadNpcArms, from MissionStart): the sets begin empty whether or not the object manager moved.
+void Reset() noexcept { mission=ObjectManager();loaded.count=0;asked.count=0; }
+// Between mission starts, another object manager is another mission too: the sets were the last mission's.
 void Follow() noexcept {
-    void* now=nullptr;
-    __try { now=At<void*>(image,kObjectMgr); } __except(EXCEPTION_EXECUTE_HANDLER){now=nullptr;}
-    if(now!=mission){mission=now;loaded.count=0;asked.count=0;}
+    if(ObjectManager()!=mission)Reset();
 }
 bool Queue(const wchar_t* path) noexcept {
     __try {
         void* const mgr=At<void*>(image,kPreloadMgr);
-        if(!mgr)return false;
-        reinterpret_cast<PreloadFn>(image+kPreload)(mgr,path,2,-1);
+        if(!mgr || !preloadFn)return false;
+        preloadFn(mgr,path,2,-1);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("SUPPORT arms: queuing the load of %ls faulted",path);return false;}
 }
@@ -105,7 +116,7 @@ void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
 }
 
 void PreloadNpcArms() noexcept {
-    Follow();
+    Reset();
     if(!Profile() || !SupportSoldierArmsReady())return;
     support_net::RequesterArms arms;
     LocalRequesterArms(&arms);
@@ -133,7 +144,8 @@ support_net::PlanResult NpcArmsLoaded(const support_net::Plan& plan) noexcept {
         if(!npctier::UnpackArms(unit.arms,kind,&a) || !npctier::ArmsPath(kind,a,path,std::size(path)))return PlanResult::refused;
         if(loaded.Has(path))continue;
         if(!asked.Has(path)) {
-            if(!Profile() || !asked.Add(path) || !Queue(path)) {
+            // Asked for only once queued: a load never queued is never taken for done by the completion query.
+            if(!Profile() || asked.Full() || !Queue(path) || !asked.Add(path)) {
                 Log("SUPPORT arms: %ls cannot be loaded here (the preload profile, or %d loads this mission): refused",path,kPathsMost);
                 return PlanResult::refused;
             }
@@ -145,7 +157,7 @@ support_net::PlanResult NpcArmsLoaded(const support_net::Plan& plan) noexcept {
     bool done=false;
     __try {
         void* const mgr=At<void*>(image,kPreloadMgr);
-        done=mgr && reinterpret_cast<LoadDoneFn>(image+kLoadDone)(mgr);
+        done=mgr && loadDoneFn && loadDoneFn(mgr);
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("SUPPORT arms: the load completion query faulted: refused");return PlanResult::refused;}
     if(!done)return PlanResult::pending;
     for(int i=0;i<asked.count;++i)loaded.Add(asked.path[i]);
