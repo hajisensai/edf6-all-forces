@@ -13971,10 +13971,10 @@ def edf41_hector_shield() -> None:
         with open(os.path.join(base, 'OBJECT', name), 'rb') as f:
             top = dsgo.parse(f.read()).root
         want = [float(i) for i, letter in enumerate((left, right)) if m.HECTOR_WEAPONS[(gen, letter)].cls == m.HECTOR_SHIELD_CLASS]
-        key = top.get(m.HECTOR_SHIELD_KEY)
         if not want:
-            assert key is None, name
+            assert m.HECTOR_SHIELD_KEY not in top.names.values(), name
             continue
+        key = top.get(m.HECTOR_SHIELD_KEY)
         shielded += 1
         assert key.get('arms').items == want, (name, key.get('arms').items)
         assert key.get('sgo') == 'app:/Object/hector401_shield_collision.sgo', name
