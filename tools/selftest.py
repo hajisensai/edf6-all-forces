@@ -10426,9 +10426,15 @@ def edf41_mother401_parts_collision_layer() -> None:
             kf[rel] = sgo.load(data=eo.read(rel)).get('is_keyframe_ragdoll', 0)
     assert kf and {r for r, v in kf.items() if v} == {'OBJECT/UFOMOTHER401_COREPANEL.SGO'}, kf
 
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    exe = os.path.join(os.path.dirname(rootcpk.DEFAULT_GAME), 'Earth Defense Force 4.1', 'EDF41.exe')
+    if not os.path.exists(dll) and not os.path.exists(exe):
+        print('skip  edf41_mother401_parts_collision_layer (EDF6 / 4.1 code): neither game installed')
+        return
+    # Only the code checks need these (CI has neither game nor capstone).
     import capstone
     import pefile
-    import rootcpk
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 
     def made_pairs(img: bytes, start: int, enable: int, rbx: int) -> list[tuple[int, int]]:
@@ -10454,7 +10460,6 @@ def edf41_mother401_parts_collision_layer() -> None:
                 d = int(m.group(4), 0) if m.group(4) else 0
                 regs[m.group(1)] = v - d if m.group(3) == '-' else v + d
         return out
-    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
     if os.path.exists(dll):
         with pefile.PE(dll, fast_load=True) as pe:
             img = pe.get_memory_mapped_image()
@@ -10464,7 +10469,6 @@ def edf41_mother401_parts_collision_layer() -> None:
         assert made_pairs(img, 0x10558F, 0xD92E50, 30) == p6, 'kEdf6Pairs is not what EDF.dll 0x105510 enables'
     else:
         print('skip  edf41_mother401_parts_collision_layer (EDF6 code): EDF6 not installed')
-    exe = os.path.join(os.path.dirname(rootcpk.DEFAULT_GAME), 'Earth Defense Force 4.1', 'EDF41.exe')
     if not os.path.exists(exe):
         print('skip  edf41_mother401_parts_collision_layer (4.1 code): EDF4.1 not installed')
         return
