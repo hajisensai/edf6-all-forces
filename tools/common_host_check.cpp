@@ -92,6 +92,13 @@ int main() {
             };
             bool done=false;
             for(int attempt=0;attempt<200 && !done;++attempt) {
+                // A fresh tick: nothing kept. The cache's entries count only in the tick they were written, and the
+                // batch asks only the pages not kept this tick, so "100 pages in two calls" holds only for a tick no
+                // ask of this thread has written yet. An attempt redone because the tick turned during it was not
+                // that: its Readables after the turn had already kept pages for the new tick, and the next attempt,
+                // in that tick, rightly asked fewer (0 to 69 pages seen under load, always on attempt 1). The
+                // spans' loop below starts each attempt the same way.
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);
                 const ULONGLONG tick=GetTickCount64();
                 edf::TakeReadableStats();
                 edf::PrefetchReadable(ptrs,0x800,kPages+2);
@@ -100,7 +107,7 @@ int main() {
                 for(int i=0;i<kPages+2;++i)
                     wrong+=(edf::Readable(ptrs[i],0x800)!=truth(i,false)) || (edf::Readable(ptrs[i],0x800,true)!=truth(i,true));
                 const edf::ReadableStats after=edf::TakeReadableStats();
-                if(GetTickCount64()!=tick)continue;   // the tick turned in between: the cache's answers are gone, again
+                if(GetTickCount64()!=tick)continue;   // the tick turned in between: again, from a fresh tick
                 done=true;
                 Expect(batch.wsCalls==2 && batch.wsPages==kPages,"100 pages asked in two calls");
                 Expect(wrong==0,"Readable's answers after the batch are the pages' own");
