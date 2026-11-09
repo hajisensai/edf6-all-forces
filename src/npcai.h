@@ -30,7 +30,7 @@ bool NpcRestoreMissionSeat(unsigned char* vehicle,unsigned char* human) noexcept
 // Whether `human` is a mission AI vehicle's own real crew in `vehicle` (mission_crew_support.cpp MissionCrewRiding;
 // 测试站 #41, docs/mission-crew-quiet-re.md). Such a soldier is kept out of sight and hearing while aboard: its boarding
 // there is not sounded (seat_events.h Quiet right after the stock ride: the plugin's own ride, an order walked to its
-// seat, and a peer's ride message 0x577661 on this machine) and no stock join mark (合流マーク) is drawn over it.
+// seat, a seat change made for a player (NpcMoveSeat), and a peer's ride message 0x577661 on this machine) and no stock join mark (合流マーク) is drawn over it.
 using NpcMissionCrewFn=bool(*)(const unsigned char* vehicle,const unsigned char* human) noexcept;
 void SetNpcMissionCrew(NpcMissionCrewFn judge) noexcept;
 // A new mission (mission.cpp MissionStart): the last mission's soldiers are gone.

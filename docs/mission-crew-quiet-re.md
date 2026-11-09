@@ -32,7 +32,7 @@
 |---|---|---|
 | 写入 | 原版 SeatRide `0x633C10` 把新乘员的座位记为占用并置「本帧变化」位（`0x633D90 → 0x633FE0`：`or [+0x628], bit; or [+0x628], bit << [+0x620]`；`0x633FE0` 的直接调用者 `0x633B6D / 0x633BFE`） | H |
 | 播放 | 车辆更新（车 `0x674B1A`、直升机 `0x652713`、步行机 `0x6437D0`）调 `0x632A60`，有变化位的座位：有人播上车预设、没人播下车预设；基类更新 `0x630596` 清变化位。细节见 `src/seat_events.h` | H |
-| 本机 | 插件自己的上车 `Board`（士兵走到上车点后调 `RideVehicle 0x5765E0`）与 `NpcRestoreMissionSeat`（回到原座位）之后，若是任务乘员坐进自己的车，立刻 `seatevt::Quiet`：车辆视这个座位为一直有人，下一帧没有变化位可播 | H |
+| 本机 | 插件自己的上车 `Board`（士兵走到上车点后调 `RideVehicle 0x5765E0`）、`NpcRestoreMissionSeat`（回到原座位）与 `NpcMoveSeat`（玩家上车时 `crew.cpp` `Bump` / `MoveRider` 把乘员挪到别的座位；对方机器收到这次上车消息同样走 `RemoteRide` 静音，两边一致）之后，若是任务乘员坐进自己的车，立刻 `seatevt::Quiet`：车辆视这个座位为一直有人，下一帧没有变化位可播 | H |
 | 联机副本 | 对方机器的上车消息 `HUMAN_EVENT_VEHICLE_RIDE` 走 HumanBase slot 15 `0x5774C0`，在 `0x577661` `call 0x5765E0`（前一条 `0x57765A lea rcx,[rsi-0x120]`，字节 `48 8D 8E E0 FE FF FF E8` 已核对）。插件把这一处 call 重定向到 `RemoteRide`：先原样调 RideVehicle（按值传入的 shared_ptr 交给被调方释放），再对本机登记的任务乘员副本做同一个 `Quiet`。`RideVehicle` 的另一个直接调用者 `0x6326F1` 不动 | H |
 
 玩家自己上车、玩家指挥 / 支援的载具乘员都不在任务乘员登记里，判据返回假，照原版出声。

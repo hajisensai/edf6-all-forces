@@ -6,7 +6,7 @@
 
 `mission_crew_support.cpp` 已有的部署登记：每个已提交的部署记着车辆与它的乘员（`ObjRef`）。`MissionCrewRiding(vehicle, human)` 只对「本部署的乘员坐在本部署的车里」为真。它经 `SetNpcMissionCrew` 交给 `npcai.cpp`，后者在三个地方问：
 
-1. 上车之后（`Board`、`NpcRestoreMissionSeat`、联机副本的 `RemoteRide`）：为真就 `seatevt::Quiet`，这次上车没有声音。
+1. 上车之后（`Board`、`NpcRestoreMissionSeat`、车内换座 `NpcMoveSeat`、联机副本的 `RemoteRide`）：为真就 `seatevt::Quiet`，这次上车没有声音。
 2. 合流标记 `JoinMarkHook`：为真就不画（不论 `VanillaRecruit`）。
 3. 不需要：台词位由 `mission_crew_support.cpp` 自己每帧管（下面）。
 

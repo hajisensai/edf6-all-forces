@@ -3079,8 +3079,12 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,to);
     const bool moved=SeatRider(seat)==Rider::none && At<const void*>(SeatAt(v,static_cast<unsigned>(to)),kSeatRider)==h;
-    if(moved)AnnounceNpcBoarding(h);
-    return moved;
+    if(!moved)return false;
+    // A mission AI vehicle's own crew moved aside (crew.cpp Bump / MoveRider): no boarding sound, the same Quiet the
+    // peer's RemoteRide writes after this ride's announcement, so every machine hears this seat change alike.
+    if(MissionCrewAboard(v,h))QuietRide(v,h);
+    AnnounceNpcBoarding(h);
+    return true;
 }
 
 void SetNpcMissionCrew(NpcMissionCrewFn judge) noexcept {missionCrewJudge=judge;}
