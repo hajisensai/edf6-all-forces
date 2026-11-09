@@ -62,7 +62,9 @@ int main() {
     // Slow, then done before the dump's time: logged with the memory, no dump.
     WatchMissionPhase("the game's player preload");
     Check(WaitFor("MISSION phase the game's player preload still running after"),"a slow phase reported");
-    Check(Logged("MEMORY stuck mission phase"),"with the memory state when it was");
+    // The watchdog thread logs the memory state right after the "still running" line (mission_watch.cpp): wait for it
+    // too, or this thread can look between the two lines.
+    Check(WaitFor("MEMORY stuck mission phase"),"with the memory state when it was");
     WatchMissionPhase("resets");
     Check(WaitFor("MISSION phase the game's player preload ended after"),"its end logged");
     Check(!Logged("writing a dump") && GetFileAttributesW(dump)==INVALID_FILE_ATTRIBUTES,"a phase over before the dump's time: none");
