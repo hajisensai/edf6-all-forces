@@ -141,6 +141,7 @@ bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept{return
 void DestroyMissionCrewPlan(std::uint64_t) noexcept{}
 void InstallMissionCrewSupport() noexcept{}
 void ResetMissionCrewSupport() noexcept{}
+void MissionCrewQuietTick() noexcept{}
 bool InstallMissionParticipantGate(MissionParticipantAdmission,MissionPlayerCreated) noexcept{return true;}
 bool MissionParticipantGateReady() noexcept{return true;}
 bool SupportMissionPlayerAllowed(int) noexcept{return true;}

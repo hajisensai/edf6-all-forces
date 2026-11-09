@@ -385,6 +385,7 @@ bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept {retur
 void DestroyMissionCrewPlan(std::uint64_t) noexcept {}
 void InstallMissionCrewSupport() noexcept {}
 void ResetMissionCrewSupport() noexcept {}
+void MissionCrewQuietTick() noexcept {}
 void ReportSupportFailure(std::uint64_t id) noexcept {Destroy(id);}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept {return p.count>0 && p.count<=kMaxUnits;}}
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boardRequests;return count;}
