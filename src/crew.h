@@ -1399,7 +1399,7 @@ struct PlayerJetReadout {
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
-// kMarkLofted (common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
+// lofted (edf::Lofted, common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
 // round it its ripple's spread reaches (FireAccuracy's cone), the horizontal range, the flight in seconds and the
 // launcher's elevation in degrees. LauncherFrame from every vehicle's input (game thread); PlayerLauncher the last one,
 // false with none this moment.
@@ -1419,10 +1419,11 @@ bool PlayerLauncher(LauncherReadout* out) noexcept;
 // katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
 // is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;
 // `aim` false: none, the stock pose, the player's own aim), eased at the stock turret's rate, and the telescopic ram's
-// two bones are aimed at each other's pivot. LauncherLoft: the last pose of `vehicle` (rad; held: off the stock pose).
+// two bones are aimed at each other's pivot; the launcher is never posed under the floor over the cab at the turntable's
+// azimuth (common/edf/katyusha_cab.h). LauncherLoft: the last pose of `vehicle` (rad; held: off the stock pose).
 bool InstallKatyusha() noexcept;
 void SetLauncherLoft(const void* vehicle,bool aim,float elevation) noexcept;
-struct LoftReadout { bool held; float elevation,stock,ramTurn,ramLength; };
+struct LoftReadout { bool held; float elevation,stock,ramTurn,ramLength,azimuth,floor; };
 bool LauncherLoft(const void* vehicle,LoftReadout* out) noexcept;
 void ResetKatyushas() noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft

@@ -223,7 +223,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true,bool 
     else{a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;}
     a.kind=m.kind;a.style=m.style;a.lobbed=m.lobbed;
     SightOf(w,m,antiAir,a);
-    a.lofted=At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted;
+    a.lofted=edf::Lofted(At<std::int32_t>(w,edf::kWeaponMark));
     if(a.lofted)strncpy_s(a.label,"ROCKETS",_TRUNCATE);
     if(!aim || a.lofted || m.kind==RoundKind::none)return;
     const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);

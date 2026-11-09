@@ -17,20 +17,26 @@ constexpr std::size_t kWeaponAmmoOwnerMove=0x24C,kWeaponOwnerVel=0x190;
 // The mod's marks in LockonTargetType (tools/build.py MARK_*, tools/make_*.py): the only stock reader of the field is
 // the lock query (0x696792), which a range-0, type-0 gun never makes, so a mark changes nothing in the stock game.
 // kMarkAir: an anti-air gun (EDF6AutoTurret: air targets first, fused rounds). kMarkGround: a ground-attack gun (ground
-// targets first, the low arc). kMarkLofted: a ground-attack launcher lobbing its rounds (the Katyusha: the high arc,
-// and EDF6VehicleCrew shows its rider where they land).
-constexpr std::int32_t kMarkAir=7301,kMarkGround=7302,kMarkLofted=7303;
+// targets first, the low arc). kMarkLofted: a ground-attack launcher lobbing its rounds (the TOS-1: the high arc,
+// and EDF6VehicleCrew shows its rider where they land). kMarkKatyusha: the Katyusha's launcher, lofted the same, and
+// behind the truck's cab: no arc under the floor over the cab (common/edf/katyusha_cab.h CabFloor, measured on its
+// model, test site #36). The floor is the Katyusha's alone (the TOS-1's rack has no cab before it: 2026-11-09 review,
+// under the floor its whole forward sector went out of reach), so it rides its own mark, not the lofted one.
+constexpr std::int32_t kMarkAir=7301,kMarkGround=7302,kMarkLofted=7303,kMarkKatyusha=7304;
 // What a mark means to an aim, one table for both plugins (2026-10-09, the user: "防空车的自瞄…统一一下"): the flak's
 // target choice and the tanks' are the same code, only these numbers differ. `prefer`: the targets it takes first (an
 // anti-air gun the air ones, a ground-attack gun the ground ones); `lofted`: its rounds take the high arc. Unmarked guns:
-// no preference, the low arc.
+// no preference, the low arc. `cab`: the Katyusha's cab floor bounds its arcs from below (kMarkKatyusha only).
 enum class Prefer : std::uint8_t { any, air, ground };
-struct GunRole { std::int32_t mark; Prefer prefer; bool lofted; };
-constexpr GunRole kGunRoles[]={{kMarkAir,Prefer::air,false},{kMarkGround,Prefer::ground,false},{kMarkLofted,Prefer::ground,true}};
+struct GunRole { std::int32_t mark; Prefer prefer; bool lofted; bool cab; };
+constexpr GunRole kGunRoles[]={{kMarkAir,Prefer::air,false,false},{kMarkGround,Prefer::ground,false,false},
+                               {kMarkLofted,Prefer::ground,true,false},{kMarkKatyusha,Prefer::ground,true,true}};
 constexpr GunRole RoleOf(std::int32_t mark) noexcept {
     for(const GunRole& r:kGunRoles)if(r.mark==mark)return r;
-    return GunRole{0,Prefer::any,false};
+    return GunRole{0,Prefer::any,false,false};
 }
+// A lofted launcher's mark (kMarkLofted or kMarkKatyusha): every reader that asks "is this a lofted launcher" asks this.
+constexpr bool Lofted(std::int32_t mark) noexcept { return RoleOf(mark).lofted; }
 
 // Weapon muzzles: array at +0x1D0, count at +0x1E0, stride 0xF0. Muzzle +0 is its bone (world rows
 // right/up/forward/position at +0xB0..+0xEF, updated every frame), +0x10 its local 4x4 matrix,

@@ -95,7 +95,7 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
            !round.rtti || round.kind==RoundKind::none || !edf::MeanMuzzle(weapon,64,muzzle,direction))return {};
         if(!std::isfinite(muzzle[0]+muzzle[1]+muzzle[2]+direction[0]+direction[1]+direction[2]))return {};
         const int mark=At<std::int32_t>(weapon,edf::kWeaponMark);
-        const bool indirect=!EnergyWeapon(round.style) && ((round.lobbed && round.alive>=600) || mark==edf::kMarkLofted ||
+        const bool indirect=!EnergyWeapon(round.style) && ((round.lobbed && round.alive>=600) || edf::Lofted(mark) ||
             (round.kind==RoundKind::arc && mark==edf::kMarkGround && round.alive>=600));
         Capability found{indirect ? Kind::indirect : aircraft || (heli && index==0) ? Kind::flight :
             EnergyWeapon(round.style) ? Kind::sensor : round.kind==RoundKind::homing ? Kind::missile : round.kind==RoundKind::rocket || round.lobbed ? Kind::rocket : Kind::optical,weapon};

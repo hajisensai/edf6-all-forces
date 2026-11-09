@@ -24,12 +24,20 @@
 //    0, as sazabi.cpp hides the rifle), one being loaded sits short of its stop along the rail. Every Katyusha posed
 //    here does it, a player's or an NPC crew's. Network replay decrements the same ammunition count as local firing
 //    (0x69820E); it does not count burstLeft, so rails follow the native ammunition/muzzle count instead.
+//  - The cab (test site #36: 「让喀秋莎的向前射角限制一下，他不应该穿过车头设计」). The rails sit on the bed, lower than the
+//    cab ahead of them, and the hinge's stops are 0..80 deg whichever way the turntable points: pointed over the cab
+//    low, the rockets flew out through it. The launcher is posed no lower than the floor over the cab at the
+//    turntable's azimuth (common/edf/katyusha_cab.h CabFloor, measured on the model): the stock pose too, so the
+//    player's Katyusha, an NPC crew's and a remote player's all fire over the cab (the rounds leave along this bone).
+//    The azimuth is the turntable's: the stock 0x661C00 (called by 0x5FDDA0 with the turntable, +0x2AC8, on the body
+//    bone, +0x2AC4) has just written its world rows; its forward is read in the body bone's.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
 #include "katyusha_rack.h"
 #include "layout.h"
 #include "memory.h"
+#include "edf/katyusha_cab.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -45,6 +53,8 @@ constexpr std::size_t kSkeleton=0x0,kSkeletonBones=0x58,kSkeletonLast=0x68,kSkel
 // pylib/katyusha_model.py RAM_ROD; the stock bones the pose touches.
 const wchar_t kRod[]=L"edf6vc_ram_rod";
 const wchar_t kMain[]=L"Rocketcannon_main";
+const wchar_t kBase[]=L"Rocketcannon_base";   // the turntable (0x5FDDA0: +0x2AC8)
+const wchar_t kBody[]=L"body";                // what it turns on (+0x2AC4)
 const wchar_t kProp[]=L"Rocketcannon_prop";
 // pylib/katyusha_model.py ROCKET_BONES: edf6vc_rkt_01..16, rocket k fired by the salvo's k-th round.
 const wchar_t kRocketBone[]=L"edf6vc_rkt_";
@@ -67,6 +77,7 @@ struct Rack {
     ULONGLONG seen;
     const void* bones;             // the bone array the records are in (looked up again when it changes)
     unsigned char *main,*prop,*rod;   // nullptr rod: its bones unreadable: left stock
+    unsigned char *base,*body;        // the turntable and the bone it turns on (the azimuth)
     float mainBind[16],propBind[16],rodBind[16];
     unsigned char* rocket[rack::kRockets];   // the rockets' records (rockets false: a model without them, left stock)
     float rocketBind[rack::kRockets][16];
@@ -76,6 +87,7 @@ struct Rack {
     ULONGLONG wantAt;
     bool held;                     // the launcher is held off its stock pose, at `elev`
     float elev,stock,ramTurn,ramLength;
+    float azimuth,floor;           // the turntable's azimuth on the body and the launcher's floor there (CabFloor)
 };
 Rack racks[kMaxRacks]{};
 SRWLOCK rackLock=SRWLOCK_INIT;
@@ -119,9 +131,12 @@ bool Resolve(Rack& r,const unsigned char* v) noexcept {
     r.rod=BoneRecord506(inst,kRod);
     r.main=BoneRecord506(inst,kMain);
     r.prop=BoneRecord506(inst,kProp);
-    if(!r.rod || !r.main || !r.prop || !SkeletonBind(inst,bones,r.main,r.mainBind) || !SkeletonBind(inst,bones,r.prop,r.propBind)
+    r.base=BoneRecord506(inst,kBase);
+    r.body=BoneRecord506(inst,kBody);
+    if(!r.rod || !r.main || !r.prop || !r.base || !r.body || !SkeletonBind(inst,bones,r.main,r.mainBind) || !SkeletonBind(inst,bones,r.prop,r.propBind)
        || !SkeletonBind(inst,bones,r.rod,r.rodBind)) {
-        if(r.rod)Log("KATYUSHA v=%p: its bones or their binds unreadable (main=%p prop=%p): the stock pose",v,r.main,r.prop);
+        if(r.rod)Log("KATYUSHA v=%p: its bones or their binds unreadable (main=%p prop=%p base=%p body=%p): the stock pose",v,r.main,
+                     r.prop,r.base,r.body);
         r.rod=nullptr;
         return false;
     }
@@ -136,14 +151,14 @@ bool Resolve(Rack& r,const unsigned char* v) noexcept {
     return true;
 }
 
-// The launcher weapon of `v` (its holder marked kMarkLofted, as launcher.cpp finds it on the seat), or nullptr.
+// The launcher weapon of `v` (its holder marked kMarkKatyusha: the Katyusha's own, common/edf/weapon.h), or nullptr.
 const unsigned char* LoftedWeapon(const unsigned char* v) noexcept {
     const auto holders=At<const unsigned char*>(v,kHolders);
     const auto count=At<std::uint64_t>(v,kHolderCount);
     if(!holders || !count || count>16 || !Readable(holders,count*kHolderStride))return nullptr;
     for(std::uint64_t i=0;i<count;++i) {
         const auto w=At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
-        if(Readable(w,kWeaponReloadLeft+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
+        if(Readable(w,kWeaponReloadLeft+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkKatyusha)return w;
     }
     return nullptr;
 }
@@ -194,17 +209,29 @@ void EyeNow(const Rack& r,const float* main,float* eye) noexcept {
 // The ram's angle from the cylinder's pivot to `eye`, rad up from the turntable's backward (ram_angle).
 float RamAngle(const float* pivot,const float* eye) noexcept { return std::atan2(eye[1]-pivot[1],-(eye[2]-pivot[2])); }
 
+// The turntable's azimuth on the body (rad, atan2(across, ahead): 0 over the cab, positive towards the model's +x): its
+// world forward (row 2) in the body bone's world rows, both as the stock pose just left them (the file comment).
+float Azimuth(const Rack& r) noexcept {
+    const float* f=reinterpret_cast<const float*>(r.base+kBoneWorld506)+8;
+    const float* b=reinterpret_cast<const float*>(r.body+kBoneWorld506);
+    return std::atan2(f[0]*b[0]+f[1]*b[1]+f[2]*b[2],f[0]*b[8]+f[1]*b[9]+f[2]*b[10]);
+}
+
 // The launcher held at r.elev, eased toward what LauncherFrame wants (or back to the stock pose when nothing is wanted;
-// once there it is left to the stock pose again). Its local is written when held.
+// once there it is left to the stock pose again), and never under the floor over the cab at the turntable's azimuth
+// (held there, the stock pose too, whenever it would go lower: at once, not eased, as the turntable turns over the
+// cab). Its local is written when held.
 void Launcher(Rack& r,ULONGLONG ms) noexcept {
     float* local=reinterpret_cast<float*>(r.main+kBoneLocal506);
     r.stock=std::asin(Clamp1(local[9]));   // the stock pose's forward (row 2), its rise on the turntable
+    r.azimuth=Azimuth(r);
+    r.floor=edf::katyusha::CabFloor(r.azimuth);
     const bool aim=r.aim && ms-r.wantAt<=kWantMs;
-    if(!aim && !r.held)return;
+    if(!aim && !r.held && r.stock>=r.floor)return;
     if(!r.held){r.held=true;r.elev=r.stock;}
     const float step=kLoftRate/60.0f,target=aim ? r.want : r.stock;
-    r.elev+=target-r.elev>step ? step : target-r.elev<-step ? -step : target-r.elev;
-    if(!aim && std::fabs(r.elev-r.stock)<1e-4f){r.held=false;return;}
+    r.elev=edf::katyusha::StepElevation(r.elev,target,step,r.floor);
+    if(!aim && r.stock>=r.floor && std::fabs(r.elev-r.stock)<1e-4f){r.held=false;return;}
     float set[16];
     RamTurn(r.mainBind,-r.elev,set);
     std::memcpy(set+12,local+12,16);   // the stock's translation: the hinge's pivot
@@ -285,7 +312,7 @@ bool LauncherLoft(const void* vehicle,LoftReadout* out) noexcept {
     AcquireSRWLockShared(&rackLock);
     for(const auto& r:racks) {
         if(!r.ref.Is(vehicle) || !r.rod)continue;
-        *out=LoftReadout{r.held,r.held ? r.elev : r.stock,r.stock,r.ramTurn,r.ramLength};
+        *out=LoftReadout{r.held,r.held ? r.elev : r.stock,r.stock,r.ramTurn,r.ramLength,r.azimuth,r.floor};
         ok=true;
         break;
     }

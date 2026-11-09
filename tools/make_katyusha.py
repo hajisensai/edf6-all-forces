@@ -11,7 +11,7 @@
                                             Goliath's rocket model at the M-13's length) leaving from the 16 rockets on
                                             the rails (a muzzle at each, fired in order: each rocket leaves its rail)
                                             on a ballistic arc (GrenadeBullet01, impact fuse, smoke trail), a 16-round
-                                            salvo, 10 of them; LockonTargetType kMarkLofted
+                                            salvo, 10 of them; LockonTargetType kMarkKatyusha
                                             (EDF6AutoTurret: an NPC crew's aimed by itself at ground targets on the
                                             rockets' high arc; EDF6VehicleCrew: the player's lifted onto the arc to where
                                             the camera looks, and the impact point on the HUD while the player rides it)
@@ -59,12 +59,13 @@ STOCK_MUZZLES = 10       # the Naegling's: 01..10 on MUZZLE_NODE
 # The truck's tyres (pylib/katyusha_model.py: each axle's tyres on two of the Naegling's wheel bones, the hubs 0.534 m
 # up): car_base_wheel [8] is a wheel's radius, the hub's height over the ground (the Naegling's 0.528 / 0.452).
 TYRE_RADIUS = 0.534
-# EDF6AutoTurret's lofted mark (autoturret/src/turret.h kMarkLofted; EDF6VehicleCrew src/launcher.cpp reads it too):
+# The Katyusha's own lofted mark (common/edf/weapon.h kMarkKatyusha: lofted as kMarkLofted, and kept over the cab's
+# floor, katyusha_cab.h; the TOS-1's kMarkLofted has no cab; EDF6VehicleCrew src/launcher.cpp / katyusha.cpp read it too):
 # EDF6AutoTurret aims an NPC crew's launcher at ground targets on the rockets' HIGH arc (the low one when the high one
 # is past the elevation stop); the player's it leaves alone: EDF6VehicleCrew lifts it onto that arc to the ground
 # point the camera looks at (src/katyusha.cpp) and shows where the rockets land. A stock game, or an EDF6AutoTurret
 # older than the mark, fires the launcher as any no-lock gun.
-MARK_LOFTED = 7303.0
+MARK_KATYUSHA = 7304.0
 # The launcher's elevation stop, degrees up: car_base_constraint_data's Rocketcannon_main hinge limit [1, -stop, 0]
 # (pitch negative-up; the Naegling's -50 lifts the rack 50 deg, the V603 flak's [1, -60, 5] is its aim axis
 # -1.047..0.087 rad, autoturret/docs/re-notes.md). 80 deg leaves the high arc 1/3..1 of the most range; the rack
@@ -109,7 +110,7 @@ ROCKETS = {
     'FireBurstCount': float(katyusha_model.ROCKET_COUNT), 'FireBurstInterval': 4.0, 'FireInterval': 240.0, 'FireAccuracy': 0.02,
     # EDF6AutoTurret's gun lock-on (autoturret/tools/build.py gun_lockon): no lock (type 0, range 0), its mark in
     # LockonTargetType, distribution 0.
-    'LockonType': 0.0, 'LockonTargetType': MARK_LOFTED, 'LockonRange': 0.0, 'Lockon_DistributionType': 0.0,
+    'LockonType': 0.0, 'LockonTargetType': MARK_KATYUSHA, 'LockonRange': 0.0, 'Lockon_DistributionType': 0.0,
     # GrenadeBullet01: [0] 0 = burst on impact, [3] 0 = no bounce, [4] / [5] its smoke trail (param, frames): the
     # motor's smoke hangs 2 s behind it.
     'Ammo_CustomParameter': [0.0, -0.004, 1.0, 0.0, 0.05, 120.0],
@@ -234,7 +235,7 @@ def check(files: dict[str, bytes]) -> None:
     assert [cam[0], cam[1]] == [list(CAMERA[0]), list(CAMERA[1])], cam
     vc.check_artillery_camera(CAMERA)
     w = dsgo.to_py(dsgo.parse(files[f'WEAPON/{vc.KATYUSHA_ROCKETS}']).root)
-    assert w['LockonTargetType'] == MARK_LOFTED and w['LockonType'] == 0.0 and w['AmmoClass'] == 'GrenadeBullet01', w
+    assert w['LockonTargetType'] == MARK_KATYUSHA and w['LockonType'] == 0.0 and w['AmmoClass'] == 'GrenadeBullet01', w
     assert w['AmmoModel'] == ROCKET_MODEL and ROCKET_MODEL in w['resource'], (w['AmmoModel'], w['resource'])
     assert 'app:/WEAPON/bullet_missile.rab' not in w['resource'], w['resource']
     assert abs(w['AmmoSize'] * w['AmmoHitSizeAdjust'] - ROCKET_CONTACT) < 1e-3, (w['AmmoSize'], w['AmmoHitSizeAdjust'])

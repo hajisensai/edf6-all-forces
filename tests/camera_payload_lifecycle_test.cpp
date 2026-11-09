@@ -92,7 +92,7 @@ struct NativeWeapon {
         Put<float>(data,edf::kWeaponAmmoSpeed,2);Put<float>(data,edf::kWeaponAmmoGravity,1);
         Put<int>(data,edf::kWeaponAmmoAlive,1200);Put<int>(data,kWeaponAmmo,10);
         Put<int>(data,0x248,20);Put<int>(data,0x20C,-1);
-        Put<int>(data,edf::kWeaponMark,lofted ? edf::kMarkLofted : edf::kMarkGround);
+        Put<int>(data,edf::kWeaponMark,lofted ? edf::kMarkKatyusha : edf::kMarkGround);
         Put<float>(data,edf::kWeaponAccuracy,0.02f);Put<float>(data,edf::kWeaponAccuracyScale,1);
     }
 };

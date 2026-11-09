@@ -86,21 +86,23 @@ using edf::kSeatAim; using edf::kAimAxes; using edf::kAxisStride; using edf::kAx
 // Weapon lock-on profile, filled from the SGO at 0x68D4A0: LockonType, LockonTargetType, LockonRange.
 constexpr std::size_t kLockonType=0x6B0,kLockonTargetType=0x6B4,kLockonRange=0x6D0;
 // Our guns' marker: LockonTargetType set to one of the mod's marks (common/edf/weapon.h: kMarkAir, kMarkGround,
-// kMarkLofted) by tools/build.py and tools/make_*.py. The only stock reader of the field is the lock query
+// kMarkLofted, kMarkKatyusha) by tools/build.py and tools/make_*.py. The only stock reader of the field is the lock query
 // (0x696792, which maps it to a lock class), and our guns never lock: LockonType 0 (fire-start 0x690BB0 fires a
 // type 0 gun with or without a lock) and LockonRange 0. So the mark changes nothing in the stock game: with the
 // plugin off, refused or deleted, the guns fire as any no-lock gun.
 // kMarkAir: an anti-air gun (air targets first; GrenadeBullet01 rounds get the fuses). kMarkGround: a
 // ground-attack gun (the Bohr's launchers: ground targets first, the low arc, stock impact fuse). kMarkLofted: a
-// ground-attack launcher on the high arc (the Katyusha: ground targets first, its rounds lobbed).
+// ground-attack launcher on the high arc (the TOS-1: ground targets first, its rounds lobbed). kMarkKatyusha: the
+// Katyusha's launcher, lofted the same and kept off arcs under its cab's floor (Ballistic).
 using edf::kMarkAir;
 using edf::kMarkGround;
 using edf::kMarkLofted;
+using edf::kMarkKatyusha;
 // Data built before 0.3.0 marked our guns with LockonType 4 (LockonTargetType 1: ground) and needed the fire
 // gate patched (LegacyFireGate in plugin.cpp). Still recognized so an old install keeps working with this
 // DLL; tools/build.py install rewrites the data with the mark above. Drop with the next data break.
 constexpr std::int32_t kLegacyLockonType=4,kLegacyGroundTargetType=1;
-enum class Mark { none, air, ground, lofted };
+enum class Mark { none, air, ground, lofted, katyusha };
 // Which of our guns `weapon` is; `legacy` (optional) says it carries the pre-0.3.0 mark.
 Mark GunMark(const unsigned char* weapon,bool* legacy=nullptr) noexcept;
 // Weapon ammo parameters, copied into each round when it is fired; speed is metres per frame.
@@ -206,7 +208,7 @@ Track* TrackFor(const unsigned char* vehicle,unsigned seat,bool player) noexcept
 // A gun's round as the aim sees it: muzzle speed (m/frame), the drop it picks up along the
 // vehicle's down axis (m/frame^2), and whether the gun hunts ground targets first. lofted: its rounds take the high
 // arc while its pitch (axis angle) stays within [pitchMin, pitchMax] (the axis' stops), else the low one.
-struct Shot { float speed; float drop; bool ground; bool lofted; float pitchMin,pitchMax; };
+struct Shot { float speed; float drop; bool ground; bool lofted; bool cab; float pitchMin,pitchMax; };
 
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo?lo:(v>hi?hi:v); }

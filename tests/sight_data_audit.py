@@ -32,7 +32,7 @@ for name, ammo, lock, alive, label in cases:
     fields = sgo.load(data=game.read('WEAPON', name))
     assert (fields['AmmoClass'], fields['LockonType'], fields['AmmoAlive']) == (ammo, lock, alive), name
     print(f'PASS real Root.cpk {name}: {label}')
-for label, fields, mark in (('Katyusha', make_katyusha.ROCKETS, 7303), ('howitzer', make_artillery.SHELLS, 7302)):
+for label, fields, mark in (('Katyusha', make_katyusha.ROCKETS, 7304), ('howitzer', make_artillery.SHELLS, 7302)):
     assert fields['AmmoClass'] == 'GrenadeBullet01' and fields['AmmoAlive'] >= 600 and fields['LockonTargetType'] == mark
     print(f'PASS generator parameters {label}: indirect fire (not a generated-asset or gameplay test)')
 # The sights' style rows (tools/reticle_check.cpp kWeapons): the numbers its Classify cases are built from must be the

@@ -25,6 +25,7 @@
 #include "autoturret_version.h"
 #include "build_id.h"
 #include "edf/input_source.h"
+#include "edf/katyusha_cab.h"
 #include "edf/keybind.h"
 #include "append_log.h"
 #include "turret.h"
@@ -265,6 +266,7 @@ Mark GunMark(const unsigned char* weapon,bool* legacy) noexcept {
     if(target==kMarkAir)return Mark::air;
     if(target==kMarkGround)return Mark::ground;
     if(target==kMarkLofted)return Mark::lofted;
+    if(target==kMarkKatyusha)return Mark::katyusha;
     if(At<std::int32_t>(weapon,kLockonType)!=kLegacyLockonType)return Mark::none;
     if(legacy)*legacy=true;
     return target==kLegacyGroundTargetType ? Mark::ground : Mark::air;
@@ -476,14 +478,18 @@ bool Arc(double x,double y,const Shot& shot,bool high,float& elevation,float& ti
 
 // Elevation (rad, up positive) and flight time (frames) to hit a point in the vehicle frame: the lower of the two
 // arcs, the solve the game's vehicle aim runs (0x50350); a lofted gun's the higher, while its pitch is within the
-// axis' stops (shot.pitchMin..pitchMax), else the lower. False when out of reach.
+// axis' stops (shot.pitchMin..pitchMax), else the lower. False when out of reach. The Katyusha (shot.cab: its own mark,
+// kMarkKatyusha; not every lofted gun, the TOS-1 has no cab before its rack) takes no arc under the floor over its cab
+// toward the point (common/edf/katyusha_cab.h, test site #36): EDF6VehicleCrew poses
+// its launcher no lower there, so its rockets would land long; the point is out of its reach.
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept {
     const double x=std::sqrt(local[0]*local[0]+local[2]*local[2]),y=local[1];
-    if(shot.lofted && Arc(x,y,shot,true,elevation,time)) {
+    const float cab=shot.cab ? edf::katyusha::CabFloor(std::atan2(local[0],local[2])) : -kPi;
+    if(shot.lofted && Arc(x,y,shot,true,elevation,time) && elevation>=cab) {
         const float pitch=cfg.pitchSign*elevation+cfg.pitchOffset;
         if(pitch>=shot.pitchMin && pitch<=shot.pitchMax)return true;
     }
-    return Arc(x,y,shot,false,elevation,time);
+    return Arc(x,y,shot,false,elevation,time) && elevation>=cab;
 }
 
 // Wanted turret yaw/pitch and flight time (frames) for a point in the vehicle frame.
@@ -519,10 +525,11 @@ bool ReadShot(const unsigned char* vehicle,const unsigned char* seat,Shot& shot,
         shot.speed=At<float>(weapon,kAmmoSpeed);
         gravity=At<float>(weapon,kAmmoGravity);
         // The mark's role from the one table (common/edf/weapon.h kGunRoles), the legacy mark read as its new one.
-        constexpr std::int32_t kValue[]={0,kMarkAir,kMarkGround,kMarkLofted};   // Mark::none, air, ground, lofted
+        constexpr std::int32_t kValue[]={0,kMarkAir,kMarkGround,kMarkLofted,kMarkKatyusha};   // Mark::none, air, ground, lofted, katyusha
         const edf::GunRole role=edf::RoleOf(kValue[static_cast<int>(mark)]);
         shot.ground=shot.ground || role.prefer==edf::Prefer::ground;
         shot.lofted=shot.lofted || role.lofted;
+        shot.cab=shot.cab || role.cab;
         const float reach=shot.speed*static_cast<float>(At<std::int32_t>(weapon,kAmmoAlive));
         if(reach>range)range=reach;
     });
@@ -641,7 +648,7 @@ float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,
 bool PlayerLofted(const unsigned char* seat) noexcept {
     if(edf::SeatRider(image,seat)!=edf::Rider::player)return false;
     bool lofted=false;
-    ForEachGun(seat,[&](const unsigned char* weapon) noexcept { lofted=lofted || GunMark(weapon)==Mark::lofted; });
+    ForEachGun(seat,[&](const unsigned char* weapon) noexcept { const Mark m=GunMark(weapon);lofted=lofted || m==Mark::lofted || m==Mark::katyusha; });
     return lofted;
 }
 
