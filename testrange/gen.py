@@ -187,9 +187,25 @@ PLACEABLE_DERIVED: tuple[str, ...] = tuple(
 MODEL_FOLDERS = {SAZABI_JET: sazabi_model.model_dir, DREADNOUGHT_JET: dreadnought_model.model_dir}
 
 
+def makeable(sgo_name: str) -> bool:
+    """Whether this machine can make the range's vehicle `sgo_name`: one made from a model folder that is not in the
+    repository only with that folder here (the Sazabi and the Dreadnought: MODEL_FOLDERS; an X-Morph unit: its model
+    pack's folder, make_xmorph.deployable). Every other one is made from the game's own files. One test for both what
+    install writes besides the plan (placeable_derived) and what a plan may hold (without_missing): a unit this machine
+    cannot make is left out and said so, never stops the install (test site #35, docs/feedback-2026-11-08-testrange-xm.md).
+    The M map's panel lists every row whatever the machine (src/spawn_catalog.inc is generated in CI) and shows a row
+    whose Mods files install did not write as not installed (src/debug_spawn.cpp ModRowLacks: catalog.files_of)."""
+    if sgo_name in MODEL_FOLDERS:
+        return bool(MODEL_FOLDERS[sgo_name]())
+    if GROUND_MISSION.get(sgo_name) == 'make_xmorph':
+        import make_xmorph
+        return make_xmorph.deployable(sgo_name.removeprefix(DERIVED_PREFIX).removesuffix('_mission'))
+    return True
+
+
 def placeable_derived() -> set[str]:
-    """PLACEABLE_DERIVED that this machine can make: the Sazabi and the Dreadnought only with their model folder."""
-    return {s for s in PLACEABLE_DERIVED if s not in MODEL_FOLDERS or MODEL_FOLDERS[s]()}
+    """PLACEABLE_DERIVED that this machine can make (makeable)."""
+    return {s for s in PLACEABLE_DERIVED if makeable(s)}
 
 
 # The Primer creatures (see PRIMER_FILES): what the range places, at most how many a wave, in all, and how far
@@ -1537,19 +1553,17 @@ def without_missing(game_root: str, plan: Plan) -> tuple[Plan, list[str]]:
     its build failed, EDF4.1's objects before the installer has run: catalog.available), nor the X-Morph units whose
     model folder this machine has not (pylib/xm_units.py: not deployed), and what was left out, said so. Nothing else
     changes: a range without them is the same range."""
-    import make_xmorph
     held = {*plan.vehicles, *plan.friends}
     gone = sorted(s for s in held if s in OPTIONAL_VEHICLES and not catalog.available(game_root, OPTIONAL_VEHICLES[s]))
-    undeployed = sorted(s for s in held if s in GROUND_MISSION and GROUND_MISSION[s] == 'make_xmorph'
-                        and not make_xmorph.deployable(s.removeprefix(DERIVED_PREFIX).removesuffix('_mission')))
+    undeployed = sorted(s for s in held if not makeable(s))
     if not gone and not undeployed:
         return plan, []
     left = {*gone, *undeployed}
     kept = replace(plan, vehicles={s: n for s, n in plan.vehicles.items() if s not in left},
                    friends={s: n for s, n in plan.friends.items() if s not in left})
     return kept, [f'跳过 {OPTIONAL_VEHICLES[s].label}：它的文件不在 Mods 里（{OPTIONAL_VEHICLES[s].rel}，先运行安装器）'
-                  for s in gone] + [f'跳过 {(TRACKED | WALKERS)[s.removeprefix(DERIVED_PREFIX).removesuffix("_mission")]}：没有它的模型'
-                                    f'文件夹（模型包），这个单位不部署' for s in undeployed]
+                  for s in gone] + [f'跳过 {catalog.short(dict(VEHICLES).get(s, s))}：没有它的模型文件夹（模型包），这个单位不部署'
+                                    for s in undeployed]
 
 
 def uninstall(game_root: str, unregister: bool = True) -> bool:
