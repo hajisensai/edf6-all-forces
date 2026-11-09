@@ -26,6 +26,7 @@
 #include "memory.h"
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
+#include "edf/host.h"
 #include <vector>
 
 #include <atomic>
@@ -76,9 +77,7 @@ struct alignas(16) GdiHit { float at[4]; unsigned char pad[0x10]; std::uint32_t 
 static_assert(sizeof(GdiHit)==0x30,"a GameDamageInfo hit entry");
 
 enum class Kind : std::uint8_t { none, yes, no, carrier, anchor, generator, fortressPart };
-Kind KindOf(const unsigned char* o) noexcept {
-    const auto vt=At<const unsigned char* const*>(o,0);
-    if(!Readable(vt,(kSlotAccept+1)*8))return Kind::none;
+Kind KindOfSlot(const unsigned char* const* vt) noexcept {
     const auto f=reinterpret_cast<std::uintptr_t>(vt[kSlotAccept])-reinterpret_cast<std::uintptr_t>(image);
     switch(f) {
     case kAcceptYes: case kAcceptMonster: return Kind::yes;
@@ -89,6 +88,17 @@ Kind KindOf(const unsigned char* o) noexcept {
     case kAcceptFortressPart: return Kind::fortressPart;
     default: return Kind::none;
     }
+}
+Kind KindOf(const unsigned char* o) noexcept {
+    const auto vt=At<const unsigned char* const*>(o,0);
+    return Readable(vt,(kSlotAccept+1)*8) ? KindOfSlot(vt) : Kind::none;
+}
+// The same for an object the game's own walk handed over (live): its vtable taken as the image's when it points into
+// it, no Readable ask (WatchTarget runs on every enemy each frame).
+Kind KindOfLive(const unsigned char* o) noexcept {
+    const auto vt=At<const unsigned char* const*>(o,0);
+    const auto at=reinterpret_cast<const unsigned char*>(vt);
+    return at>=image && at+(kSlotAccept+1)*8<=image+edf::kImageSize ? KindOfSlot(vt) : Kind::none;
 }
 // The bytes of `o` the plan reads for kind `k`.
 std::size_t ReachOf(Kind k) noexcept {
@@ -186,8 +196,13 @@ template<class K,class Row> struct Rows {
     void Clear() noexcept { row.clear();index.Clear();free.clear();sweptAt=0; }
 };
 
-struct Watched { const void* key; bool used; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
-constexpr std::uint64_t kWatchForgetMs=60000;   // a target nobody has aimed at for a minute: its window learnt again
+// A target's window and motion, observed once a frame (See: `frame` the memo epoch it was observed in), whoever asks
+// and however often: PickTarget / GunnerVisit ask only of a would-be best (npc_logic.h, enemy_points.h), so observing
+// on the ask left a ship that never ranked first unwatched until it did, its window unknown (skip, not wait) and its
+// velocity taken over seconds. WatchTarget (every enemy each frame: npcai.cpp Gather, heli.cpp's side copy) observes;
+// a plan (Assess) only reads.
+struct Watched { const void* key; bool used; std::uint64_t at,frame; float pos[3],vel[3]; hitpredict::Window w; };
+constexpr std::uint64_t kWatchForgetMs=60000;   // a target not seen for a minute: its window learnt again
 Rows<const void*,Watched> watched;
 Watched& Watch(const void* target) {
     if(Watched* w=watched.Find(target))return *w;
@@ -229,21 +244,34 @@ void SeePoint(void* ctx,const void* object,const float* aim) {
     if(object==s.target && s.n<4){std::memcpy(s.p[s.n],aim,12);++s.n;}
 }
 
+// Observed this frame (`frame`: the memo epoch) unless it was already: its velocity over the time since it was last
+// seen, its position, its window (hitpredict::Observe). The one writer of a Watched. Null when unreadable.
+const Watched* See(const void* target,Kind k,std::uint64_t frame) {
+    auto o=static_cast<const unsigned char*>(target);
+    if(!Readable(o,ReachOf(k)))return nullptr;
+    Watched& w=Watch(target);
+    if(w.frame==frame)return &w;
+    w.frame=frame;
+    const std::uint64_t ms=GameMs();
+    const float* root=reinterpret_cast<const float*>(o+kPosition);
+    if(w.at && ms>w.at)for(int i=0;i<3;++i)w.vel[i]=(root[i]-w.pos[i])*1000.0f/static_cast<float>(ms-w.at);
+    std::memcpy(w.pos,root,12);w.at=ms;
+    hitpredict::Observe(w.w,WindowOf(o,k).open,ms);
+    return &w;
+}
+
 // The plan for `shooter` firing from `from` (rounds of `speed` m/s, `gravity` m/s^2; 0: unknown, taken as a straight line)
-// at `target`: fire / wait / skip and the point to aim at (its lock point whose predicted hit the game would take).
-Plan Assess(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
+// at `target`, as `w` (See, this frame) has watched it: fire / wait / skip and the point to aim at (its lock point whose
+// predicted hit the game would take). Reads the watch, never writes it.
+Plan Assess(const void* shooter,const void* target,const float* from,float speed,float gravity,const Watched& w) noexcept {
     Plan p{};p.shooter=shooter;p.target=target;p.verdict=hitpredict::Verdict::fire;
     std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
     if(!Readable(o,ReachOf(k)))return p;
     const std::uint64_t ms=GameMs();
-    Watched& w=Watch(target);
     const float* root=reinterpret_cast<const float*>(o+kPosition);
-    if(w.at && ms>w.at)for(int i=0;i<3;++i)w.vel[i]=(root[i]-w.pos[i])*1000.0f/static_cast<float>(ms-w.at);
-    std::memcpy(w.pos,root,12);w.at=ms;
     const WindowNow now=WindowOf(o,k);
-    hitpredict::Observe(w.w,now.open,ms);
     Points pts{target,{},0};
     VisitLockPoints(&SeePoint,&pts);
     if(!pts.n){std::memcpy(pts.p[0],root,12);pts.n=1;}
@@ -293,12 +321,13 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     return p;
 }
 
-const Plan& PlanFor(const void* shooter,const void* target,const float* from,float speed,float gravity) noexcept {
+const Plan& PlanFor(const void* shooter,const void* target,const float* from,float speed,float gravity,
+                    const Watched& w) noexcept {
     const std::uint64_t ms=GameMs();
     const PlanKey key{shooter,target,speed,gravity};
     Plan* p=plans.Find(key);
     if(p && std::memcmp(p->from,from,12)==0 && ms-p->at<kPlanMs)return *p;
-    const Plan fresh=Assess(shooter,target,from,speed,gravity);
+    const Plan fresh=Assess(shooter,target,from,speed,gravity,w);
     if(!p)p=&plans.Make(key,ms,kPlanSweepMs,[ms](const Plan& q) noexcept { return ms-q.at>=kPlanMs; });
     *p=fresh;p->key=key;p->used=true;p->at=ms;
     return *p;
@@ -351,7 +380,7 @@ const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
 // The plan (from the shooter's own eye when `from` is null).
 hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float* from,float speed,float gravity,float* aim) noexcept {
     if(!shooter || !target)return hitpredict::Verdict::fire;
-    const ULONGLONG frame=memoClock.Epoch(GameFrame(),GetTickCount64());
+    const ULONGLONG frame=memoClock.Epoch(GameFrame(),WallMs());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
         shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
@@ -359,13 +388,26 @@ hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float
     if(!t.readable)return hitpredict::Verdict::fire;
     const Kind k=t.kind;
     if(k==Kind::none || k==Kind::yes)return t.verdict;
+    // Seen this frame already when WatchTarget ran (every enemy, each frame); else now (a target outside those walks,
+    // or a frame without them): once a frame either way, the asks after it add nothing.
+    const Watched* w=See(target,k,frame);
+    if(!w)return hitpredict::Verdict::fire;
     float eye[3];
     if(!from){EyeOf(shooter,eye);from=eye;}
-    const Plan& p=PlanFor(shooter,target,from,speed,gravity);
+    const Plan& p=PlanFor(shooter,target,from,speed,gravity,*w);
     if(aim && p.aimSet)std::memcpy(aim,p.aim,12);
     return p.verdict;
 }
 }  // namespace
+
+void WatchTarget(const void* target) noexcept {
+    if(!target || !AcceptOk())return;
+    __try {
+        const Kind k=KindOfLive(static_cast<const unsigned char*>(target));
+        if(k==Kind::none || k==Kind::yes)return;   // nothing to watch: only the invincible flag, read on the ask
+        See(target,k,memoClock.Epoch(GameFrame(),WallMs()));
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
 
 void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     const ULONGLONG ms=GameMs();

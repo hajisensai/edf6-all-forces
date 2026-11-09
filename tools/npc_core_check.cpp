@@ -292,6 +292,9 @@ bool FriendInLine(const float*,const float*,const void*) noexcept { return false
 // wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
 const void* wastedTarget=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
+// wastedfire.cpp WatchTarget: the objects Gather had watched, in order.
+std::vector<const void*> watchedTargets;
+void WatchTarget(const void* target) noexcept { watchedTargets.push_back(target); }
 // HoldFire: the same target held, and one due to open (heldTarget) aimed at and held; `aim` the weak spot when set.
 const void* heldTarget=nullptr;float weakAim[3]{};bool weakAimSet=false;
 float predictedSpeed=0.0f,predictedGravity=0.0f;
@@ -1620,8 +1623,13 @@ int main() {
                world.enemyIndex.Find(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x6000)))<0 &&
                world.enemyIndex.Find(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5010)))==1,
                "a fault part way through Gather: the grids are this frame's lists as walked, no half-made row");
-        gatherFaults=false;++frame;
+        gatherFaults=false;++frame;watchedTargets.clear();
         Expect(!GatherCaught(0) && world.enemies==3 && world.enemyGrid.Points()==3,"the next frame's Gather walks them all again");
+        // Every enemy's window watched by the frame's walk (WatchTarget), once an object, not only the would-be best
+        // PickTarget asks WastedFire of: the observation does not depend on who asks.
+        const std::vector<const void*> all={reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5000)),
+            reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5010)),reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5020))};
+        Expect(watchedTargets==all,"Gather watches every enemy of the frame, once an object");
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }

@@ -39,4 +39,9 @@ bool WastedFire(const void* shooter,const void* target) noexcept;
 bool HoldFire(const void* shooter,const void* target,const float* from=nullptr,float speed=0.0f,float gravity=0.0f,
               float* aim=nullptr) noexcept;
 void ResetWastedFire() noexcept;      // mission.cpp MissionStart: the last mission's objects forgotten
+// The window and motion of `target` observed for this frame, once a frame whoever asks (a teleportation ship's hatch, an
+// anchor, a generator, a fortress part; an ordinary enemy has none): called on every enemy each frame by the walks that
+// list them (npcai.cpp Gather, heli.cpp's side copy for the gunner seats), so a target the AI asks of only once it would
+// be the best (npc_logic.h PickTarget, enemy_points.h Nearest) was watched all along. Game thread.
+void WatchTarget(const void* target) noexcept;
 }  // namespace crew

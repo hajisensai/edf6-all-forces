@@ -1,5 +1,6 @@
 """Offline driver regressions: no game process, window or installation is touched."""
 import ctypes
+import io
 import builtins
 import sys
 import importlib.util
@@ -7,6 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
 
@@ -196,7 +198,7 @@ class DriverTest(unittest.TestCase):
                          'failed')
         self.assertEqual(drive.cycle_outcome(['[ 1.0 s] CYCLE refused: a cycle is already running']), 'failed')
 
-    def cycle_run(self, later: list[str], seconds: int = 600):
+    def cycle_run(self, later: list[str], seconds: int = 600, place: tuple[str, ...] = (), on_launch=None):
         """drive.run with --cycle 3 on a fake clock: the plugin's log is `later` from 30 s into the mission on; the game
         runs from the launch until quit is asked. (return code, commands sent, when quit was asked in s from the mission's start)"""
         clock = [1000.0]
@@ -215,11 +217,15 @@ class DriverTest(unittest.TestCase):
             return later if clock[0] >= 1030.0 else ['[   1.0 s] CYCLE armed: leave and enter again 3 times']
         launched: list[bool] = []
         self.pids.side_effect = lambda: [42] if launched and not quit_at else []
-        with patch.object(drive, 'launch', side_effect=lambda: launched.append(True)),              patch.object(drive, 'wait_for', return_value=True), \
+        def launch():
+            launched.append(True)
+            if on_launch:
+                on_launch()
+        with patch.object(drive, 'launch', side_effect=launch),              patch.object(drive, 'wait_for', return_value=True), \
              patch.object(drive, 'command', side_effect=command), patch.object(drive, 'rows', side_effect=log), \
              patch.object(drive.time, 'time', side_effect=lambda: clock[0]), \
              patch.object(drive.time, 'sleep', side_effect=sleep):
-            rc = drive.run(self.game, 'RM015', 1, seconds, None, cycle=(3, 20.0, False))
+            rc = drive.run(self.game, 'RM015', 1, seconds, None, cycle=(3, 20.0, False), place=place)
         return rc, sent, quit_at[0] if quit_at else None
 
     def test_cycle_run_quits_once_done(self):
@@ -300,6 +306,120 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(dll.read_bytes(), b'another session')
         kept = self.plugins / (drive.NAME + '.placed') / 'Plugins__EDF6VehicleCrew.dll'
         self.assertEqual(kept.read_bytes(), b'installed plugin')
+
+    def test_a_game_that_outlives_the_run_is_put_back_by_restore(self):
+        """The game still running at the run's end (quit_wait passed): nothing is touched then, everything the run put
+        there (the placed plugin, the ini, a new SGO, the loadout, the autopilot) is recorded on disk, a new install is
+        refused until it is put back, and `drive.py restore` (a later process: nothing kept in memory) puts it back byte
+        for byte, mtimes too."""
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        ini = self.plugins / 'EDF6VehicleCrew.ini'
+        ini.write_bytes(b'[VehicleCrew]\r\nEnabled=1\r\n')
+        import os
+        os.utime(dll, (1_600_000_000, 1_600_000_000))
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        sgo = self.root / 'X.SGO'
+        sgo.write_bytes(b'sgo')
+        loadout = self.root / 'load.ini'
+        loadout.write_bytes(b'ours')
+        running = []
+        self.pids.side_effect = lambda: list(running)
+
+        def launch():
+            running.append(123)
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
+            self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',
+                             f'{sgo}=OBJECT/X.SGO'), ini=('Debug=1',), loadout=str(loadout)), 1)
+        self.assertEqual(dll.read_bytes(), b'our build')   # the game holds it: not touched
+        self.assertTrue(self.path('.dll').exists())
+        running.clear()
+        with self.assertRaises(RuntimeError) as refused:
+            drive.install(self.game)
+        self.assertIn('drive.py restore', str(refused.exception))
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
+            self.assertEqual(drive.main(['restore']), 0)
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        self.assertEqual(int(dll.stat().st_mtime), 1_600_000_000)
+        self.assertEqual(ini.read_bytes(), b'[VehicleCrew]\r\nEnabled=1\r\n')
+        self.assertFalse((self.plugins.parent / 'OBJECT' / 'X.SGO').exists())
+        self.assertEqual(sorted(p.name for p in self.plugins.iterdir()), ['EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'])
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
+            self.assertEqual(drive.main(['restore']), 0)   # nothing left: nothing to do
+
+    def test_a_run_that_leaves_a_placed_file_fails(self):
+        """A run that went well otherwise is non-zero when restore_placed left a file (changed by someone else)."""
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        done = ['[ 300.0 s] CYCLE done: left and entered again 3 times']
+        rc, _, _ = self.cycle_run(done, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',))
+        self.assertEqual(rc, 0)   # put back: the run's own outcome
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        rc, _, _ = self.cycle_run(done, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',),
+                                  on_launch=lambda: dll.write_bytes(b'another session'))
+        self.assertEqual(rc, 1)
+        self.assertTrue((self.plugins / (drive.NAME + '.placed') / 'manifest.json').exists())
+
+    def test_unrecorded_files_in_placed_dir_fail_restore(self):
+        """An older drive.py's backup (EDF6Autopilot.placed/ without manifest.json, the user's own plugin in it):
+        restore says where it is and fails, touching nothing, and install keeps refusing - both see the same thing."""
+        placed = self.plugins / (drive.NAME + '.placed')
+        placed.mkdir()
+        (placed / 'Plugins__EDF6VehicleCrew.dll').write_bytes(b'the user plugin')
+        out = io.StringIO()
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), redirect_stdout(out):
+            self.assertEqual(drive.main(['restore']), 1)
+        self.assertIn('Plugins__EDF6VehicleCrew.dll', out.getvalue())
+        self.assertIn('Mods/Plugins/EDF6VehicleCrew.dll', out.getvalue())
+        self.assertEqual((placed / 'Plugins__EDF6VehicleCrew.dll').read_bytes(), b'the user plugin')
+        with self.assertRaises(RuntimeError):
+            drive.install(self.game)
+        (placed / 'Plugins__EDF6VehicleCrew.dll').unlink()   # dealt with by hand
+        with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
+            self.assertEqual(drive.main(['restore']), 0)
+        self.assertFalse(placed.exists())
+
+    def test_placement_that_failed_before_its_payload_leaves_nothing(self):
+        """The manifest write or the copy of the original failing: no copy without an entry, no entry without a
+        placement - placed_dir gone, the original untouched, a restore with nothing to do."""
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        placed = self.plugins / (drive.NAME + '.placed')
+        with patch.object(drive, '_write_manifest', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                drive.place_file(self.game, 'Plugins/EDF6VehicleCrew.dll', b'our build')
+        self.assertFalse(any(p.name.startswith('Plugins__') for p in placed.iterdir()) if placed.exists() else False)
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        self.assertTrue(drive.restore_placed(self.game))
+        self.assertFalse(placed.exists())
+        with patch.object(drive.shutil, 'copy2', side_effect=OSError('locked')):
+            with self.assertRaises(OSError):
+                drive.place_file(self.game, 'Plugins/EDF6VehicleCrew.dll', b'our build')
+        self.assertFalse(placed.exists())
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        # killed between the entry and the copy: the entry alone, the file still its original - nothing to put back
+        real_copy = drive.shutil.copy2
+        with patch.object(drive.shutil, 'copy2', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                drive.place_file(self.game, 'Plugins/EDF6VehicleCrew.dll', b'our build')
+        self.assertFalse(placed.exists())
+        self.assertIs(drive.shutil.copy2, real_copy)
+
+    def test_restore_refuses_while_the_game_runs(self):
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        drive.install(self.game)
+        drive.place_file(self.game, 'Plugins/EDF6VehicleCrew.dll', b'our build')
+        self.pids.return_value = [123]
+        with self.assertRaises(RuntimeError):
+            drive.restore_placed(self.game)
+        self.assertEqual((self.plugins / 'EDF6VehicleCrew.dll').read_bytes(), b'our build')
+        self.pids.return_value = []
+        self.assertTrue(drive.restore_placed(self.game))
+        self.assertEqual(list(self.plugins.iterdir()), [])
 
     def test_loadout_changed_during_the_run_is_left(self):
         source = self.root / 'load.ini'

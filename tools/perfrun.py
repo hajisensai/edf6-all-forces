@@ -17,7 +17,9 @@ SCENARIO
 options
   --dll PATH        EDF6VehicleCrew.dll placed for the run, with the EDF6AutoTurret.dll next to it when there is one
                     (default: this checkout's build; `installed` keeps the game's own)
-  --ab A B          two DLLs alternating (--rounds, default 2, so ABAB): frames and CPU only, an A/B table
+  --ab A B          two DLLs alternating (--rounds, default 2, so ABAB): frames and CPU only, an A/B table; both
+                    with their build's EDF6AutoTurret.dll next to them or neither (refused otherwise: one side would
+                    run the game folder's own)
   --warm S          seconds in the mission before sampling (default 45 grand, 30 swarm, 25 a stock mission)
   --cpu S           the clean window (thread CPU, GPU, frame times; nothing suspended), default 20
   --stacks S        the stack window after it, default 20 (0: none)
@@ -27,13 +29,15 @@ options
                     of a switch: HavokMultithread=0 against HavokMultithread=1
   --out DIR         default tmp/perf/<scenario>-<time>
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
-  --restore         put the range mission back from a run that could not (the game was still running)
+  --restore         put back what a run could not (the game outlived it): the range mission's files, and every file
+                    drive.py placed (the DLLs, the ini) byte for byte with the autopilot removed (drive.py restore)
 
 What it saves over doing the steps by hand: the range scenarios rewrite only the range mission's four files (gen.
 write_scenario) on the installed range, never the full install that regenerates every vehicle and touches Mods; the run
 quits as soon as sampling is done instead of staying a fixed time; the report (tools/perf_report.py) is written at the
-end. Everything runs under one game lease (tools/gamequeue.py) and the range files, the placed DLL and the ini are put
-back byte for byte. The game must not be running (it is the user's).
+end. Everything runs under one game lease (tools/gamequeue.py) and the range files, the placed DLLs and the ini are put
+back byte for byte: at the run's end, or by --restore when the game outlived the run (drive.py records what it placed
+on disk). The game must not be running (it is the user's).
 """
 from __future__ import annotations
 
@@ -174,6 +178,12 @@ def plugin_log(game: str) -> str:
     return os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.log')
 
 
+def turret_alongside(dll: str | None) -> str | None:
+    """The EDF6AutoTurret.dll `dll`'s build made next to it, None when there is none (or `--dll installed`)."""
+    turret = os.path.join(os.path.dirname(dll), 'EDF6AutoTurret.dll') if dll else None
+    return turret if turret and os.path.isfile(turret) else None
+
+
 def placements(dll: str | None) -> tuple[str, ...]:
     """drive.py --place entries for a run: `dll` as EDF6VehicleCrew.dll and, when its build made one next to it, that
     build's EDF6AutoTurret.dll too (one commit's plugins: the game folder's own AutoTurret may be weeks older and its
@@ -181,10 +191,36 @@ def placements(dll: str | None) -> tuple[str, ...]:
     if not dll:
         return ()
     out = [f'{dll}=Plugins/EDF6VehicleCrew.dll']
-    turret = os.path.join(os.path.dirname(dll), 'EDF6AutoTurret.dll')
-    if os.path.isfile(turret):
+    turret = turret_alongside(dll)
+    if turret:
         out.append(f'{turret}=Plugins/EDF6AutoTurret.dll')
     return tuple(out)
+
+
+def loaded_plugins(game: str, dll: str | None) -> dict:
+    """What the game loads in a run with `dll`, taken before the launch (as placements places them): each plugin's
+    file, where it comes from and its sha256. AutoTurret: the build's own next to `dll` (built-alongside), else the game
+    folder's (game-folder), else none (sha256 None)."""
+    plugins = os.path.join(game, 'Mods', 'Plugins')
+    crew = dll or os.path.join(plugins, 'EDF6VehicleCrew.dll')
+    turret = turret_alongside(dll)
+    source = 'built-alongside'
+    if not turret:
+        turret, source = os.path.join(plugins, 'EDF6AutoTurret.dll'), 'game-folder'
+        if not os.path.isfile(turret):
+            turret, source = None, 'none'
+    return dict(dll_used=crew, sha256=sha256(crew) if os.path.isfile(crew) else None,
+                turret=turret, turret_source=source, turret_sha256=sha256(turret) if turret else None)
+
+
+def ab_turrets(game: str, a: str, b: str) -> str | None:
+    """Why an A/B of `a` and `b` would not compare the VehicleCrew builds alone (None: it would): one side with its
+    build's AutoTurret, the other with the game folder's."""
+    sa, sb = (loaded_plugins(game, d)['turret_source'] for d in (a, b))
+    if (sa == 'built-alongside') != (sb == 'built-alongside'):
+        return (f'--ab: A runs AutoTurret from {sa}, B from {sb}: put the same build\'s EDF6AutoTurret.dll next to both '
+                'DLLs, or next to neither')
+    return None
 
 
 def log_mark(log: str) -> tuple[int, int]:
@@ -235,6 +271,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     log = plugin_log(game)
     # the plugin appends to its log across launches: only what this launch writes is this run's
     log_at = log_mark(log)
+    loaded = loaded_plugins(game, dll)   # before the launch: the files the game is about to load
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
@@ -247,22 +284,27 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
                        during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
                        quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
     finally:
-        if plan:
-            if drive.game_pids():
-                print(f'!!! the game is still running: the range mission was NOT put back; its originals are kept in '
-                      f'{gen.scenario_backup(game)} (python tools/perfrun.py --restore once the game is closed)')
+        # What drive.run left is on disk (drive.placed_dir), not in which way its own look at the game went: the game
+        # closed by now, it is put back here (restore_placed does nothing when drive.run already did).
+        if drive.game_pids():
+            if plan or drive.anything_left(game):
+                print('!!! the game is still running: NOT put back: the placed plugins, the ini, the autopilot' +
+                      (f', the range mission (its originals kept in {gen.scenario_backup(game)})' if plan else '') +
+                      '. python tools/perfrun.py --restore once the game is closed')
                 rc = rc or 1
-            else:
+        else:
+            if plan:
                 gen.restore_scenario(game)
+            if not drive.restore_placed(game):
+                print('!!! not everything placed is put back (said above): python tools/perfrun.py --restore '
+                      'once it is dealt with')
+                rc = rc or 1
     data = run_log(log, log_at)
     if data is not None:
         with open(os.path.join(out, 'vehiclecrew.log'), 'wb') as f:
             f.write(data)
-    used = dll or os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
-    turret = os.path.join(os.path.dirname(used), 'EDF6AutoTurret.dll')
-    run = dict(scenario=scenario, variant=variant, dll=dll, sha256=sha256(used) if os.path.exists(used) else '?',
-               turret_sha256=sha256(turret) if os.path.exists(turret) else '?',
+    run = dict(scenario=scenario, variant=variant, dll=dll, **loaded,
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
@@ -325,8 +367,9 @@ def main(argv: list[str]) -> int:
         with gamelease.lease(game, 'perfrun --restore'):
             if drive.game_pids():
                 raise SystemExit('the game is running: close it first')
-            print('the range mission put back' if gen.restore_scenario(game) else 'nothing kept to put back')
-        return 0
+            print('the range mission put back' if gen.restore_scenario(game) else 'no range mission kept to put back')
+            whole = drive.restore_placed(game)   # the placed DLLs and ini, the autopilot
+        return 0 if whole else 1
     for path, target in ((SAMPLER, 'rip_sampler'), (AUTOPILOT, 'EDF6Autopilot')):
         if not os.path.isfile(path):   # both EXCLUDE_FROM_ALL: build.cmd alone does not make them
             raise SystemExit(f'no {path}: cmake --build build --target {target}')
@@ -334,6 +377,9 @@ def main(argv: list[str]) -> int:
     out = os.path.abspath(opts['out'] or os.path.join(ROOT, 'tmp', 'perf', f'{scenario.replace(":", "_")}-{stamp}'))
     with gamelease.lease(game, 'perfrun ' + ' '.join(argv)):
         if opts['ab']:
+            why = ab_turrets(game, *opts['ab'])
+            if why:
+                raise SystemExit(why)
             opts['stacks'] = 0
             dirs = []
             rc = 0

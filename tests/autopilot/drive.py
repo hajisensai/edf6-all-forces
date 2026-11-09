@@ -52,6 +52,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
         the counts are printed at the end (all must be 0).
   python tests/autopilot/drive.py hide               the window off screen and at the back again
   python tests/autopilot/drive.py uninstall          remove the plugin, its keys file and its log (game closed)
+  python tests/autopilot/drive.py restore            what a run left when the game outlived it (game closed): every
+                                                     file it placed (--place, --ini, --loadout) put back byte for byte
+                                                     from <plugins>/EDF6Autopilot.placed/manifest.json, then uninstall
 
 The game must not be running for install / launch / uninstall (it is the user's: their running game is never touched).
 Every command but mem / shot first waits its turn for the machine's game (pylib/gamelease.py, tools/gamequeue.py):
@@ -270,9 +273,13 @@ def install(game: str) -> None:
         payload = f.read()
     marker = os.path.join(directory, NAME + '.session.json')
     # No files from a previous/manual installation may be adopted or overwritten.
+    if os.path.lexists(placed_dir(game)):
+        raise RuntimeError(f'an earlier run\'s placed files are not put back ({placed_dir(game)}): '
+                           'python tests/autopilot/drive.py restore (or python tools/perfrun.py --restore)')
     for ext in SESSION_EXTS:
         if os.path.lexists(os.path.join(directory, NAME + ext)):
-            raise RuntimeError('Existing autopilot files must be preserved: ' + NAME + ext)
+            raise RuntimeError('Existing autopilot files must be preserved: ' + NAME + ext +
+                               ' (a run that left it: python tests/autopilot/drive.py restore)')
     with open(marker, 'x', encoding='utf-8') as f:
         json.dump({'sha256': hashlib.sha256(payload).hexdigest()}, f)
     created = False
@@ -310,63 +317,150 @@ def uninstall(game: str) -> None:
     os.remove(marker)
 
 
-def place_loadout(game: str, source: str) -> tuple[str, bytes]:
+def placed_dir(game: str) -> str:
+    """Where a run's placements are recorded until put back: the originals and manifest.json (place)."""
+    return os.path.join(plugins(game), NAME + '.placed')
+
+
+def _manifest(game: str) -> list[dict]:
+    try:
+        with open(os.path.join(placed_dir(game), 'manifest.json'), encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+
+
+def _write_manifest(game: str, entries: list[dict]) -> None:
+    path = os.path.join(placed_dir(game), 'manifest.json')
+    if not entries:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    os.makedirs(placed_dir(game), exist_ok=True)
+    with open(path + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(entries, f, indent=1)
+    os.replace(path + '.tmp', path)
+
+
+def _sha(path: str) -> str | None:
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def place_file(game: str, dest: str, payload: bytes, *, new: bool = False) -> None:
+    """`payload` put at <game>/Mods/`dest` for one run (`--place`, `--ini`, `--loadout`; `new`: only where no file is,
+    FileExistsError otherwise). A transaction on disk: the original (when there is one) is copied into placed_dir and
+    the placement recorded in its manifest.json (dest, the original's and the payload's sha256) before the file is
+    written, so whoever puts things back (restore_placed: the run's own end, or `drive.py restore` / `perfrun
+    --restore` after a game that outlived the run) works from the disk, not from a driver that may be gone."""
+    path = os.path.join(game, 'Mods', dest)
+    entries = _manifest(game)
+    if any(os.path.normcase(e['dest']) == os.path.normcase(dest) for e in entries):
+        raise RuntimeError(f'{dest} is already placed for this run')
+    if new and os.path.lexists(path):
+        raise FileExistsError(path)
+    os.makedirs(placed_dir(game), exist_ok=True)
+    original = _sha(path)
+    kept = None
+    if original is not None:
+        kept = dest.replace('/', '__').replace('\\', '__')
+        if os.path.lexists(os.path.join(placed_dir(game), kept)):
+            raise FileExistsError(os.path.join(placed_dir(game), kept))
+    # The entry (with its kept name) is on disk before the copy: no file in placed_dir is ever unrecorded. An entry
+    # whose copy or payload never came is harmless to restore_placed (the file still holds its original).
+    entries.append({'dest': dest, 'kept': kept, 'original_sha256': original,
+                    'payload_sha256': hashlib.sha256(payload).hexdigest()})
+    _write_manifest(game, entries)
+    try:
+        if kept:
+            shutil.copy2(path, os.path.join(placed_dir(game), kept))   # bytes and mtime
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        f = open(path, 'xb' if new else 'wb')
+    except BaseException:
+        # nothing of the payload written: this placement never happened (its copy and its entry taken back)
+        if kept and os.path.lexists(os.path.join(placed_dir(game), kept)):
+            os.remove(os.path.join(placed_dir(game), kept))
+        entries.pop()
+        _write_manifest(game, entries)
+        if not entries and not os.listdir(placed_dir(game)):
+            os.rmdir(placed_dir(game))
+        raise
+    with f:   # a write failing from here on leaves the entry: restore_placed puts the original back
+        f.write(payload)
+    print('placed', dest, 'over the original' if original is not None else '(new)')
+
+
+def place_loadout(game: str, source: str) -> None:
     """The run's forced loadout written as EDF6VehicleCrew's ini; never over an existing one (the test range's)."""
     with open(source, 'rb') as f:
         payload = f.read()
-    path = os.path.join(plugins(game), LOADOUT)
-    with open(path, 'xb') as f:
-        f.write(payload)
-    print('loadout', source, '->', path)
-    return path, payload
+    place_file(game, os.path.join('Plugins', LOADOUT), payload, new=True)
+    print('loadout', source, '->', os.path.join(plugins(game), LOADOUT))
 
 
-class Placement:
-    """A file of the game's Mods put there for one run (`--place`, `--ini`): the bytes it had before (None: it did not
-    exist) are kept here and in `<plugins>/EDF6Autopilot.placed/` (so a crashed driver leaves them recoverable), and put
-    back afterwards byte for byte, only while the file still holds what this run wrote."""
+def restore_placed(game: str) -> bool:
+    """Everything a run placed put back, from the manifest on disk (place_file), last placed first, then the autopilot
+    uninstalled (when its session is there): a file still holding the payload gets its original back byte for byte
+    (mtime too) or is removed when there was none; one already holding the original needs nothing; one changed by
+    someone else is left as it is, with its original and its manifest entry kept (said so). The game must be closed.
+    True when nothing is left."""
+    require_closed()
+    left = []
+    for e in reversed(_manifest(game)):
+        path = os.path.join(game, 'Mods', e['dest'])
+        kept = os.path.join(placed_dir(game), e['kept']) if e['kept'] else None
+        now = _sha(path)
+        if now == e['payload_sha256'] and now != e['original_sha256']:
+            if kept is None:
+                os.remove(path)
+                print('removed', path)
+            elif _sha(kept) == e['original_sha256']:
+                shutil.copy2(kept, path)
+                print('restored', path, 'byte for byte')
+            else:
+                print('the kept original is missing or changed: left as it is:', path)
+                left.append(e)
+                continue
+        elif now != e['original_sha256']:
+            print('changed by someone else during the run: left as it is:', path,
+                  f'(its original kept at {kept})' if kept else '')
+            left.append(e)
+            continue
+        if kept and os.path.exists(kept):
+            os.remove(kept)
+    left.reverse()
+    _write_manifest(game, left)
+    if os.path.exists(os.path.join(placed_dir(game), 'manifest.json.tmp')):   # a manifest write that never finished
+        os.remove(os.path.join(placed_dir(game), 'manifest.json.tmp'))
+    stray = unrecorded_placed(game, left)
+    for name in stray:
+        print('!!! not in the manifest, left as it is:', os.path.join(placed_dir(game), name),
+              '(an original kept by an earlier run: an older drive.py that recorded none, or a run killed while '
+              f'placing; it was Mods/{name.replace("__", "/")}): put it back or delete it by hand, then restore again')
+    if not left and not stray and os.path.isdir(placed_dir(game)):
+        os.rmdir(placed_dir(game))
+    if os.path.isfile(os.path.join(plugins(game), NAME + '.session.json')):
+        uninstall(game)
+    return not left and not stray
 
-    def __init__(self, game: str, dest: str, payload: bytes) -> None:
-        self.path = os.path.join(game, 'Mods', dest)
-        self.payload = payload
-        self.original: bytes | None = None
-        if os.path.exists(self.path):
-            with open(self.path, 'rb') as f:
-                self.original = f.read()
-            keep = os.path.join(plugins(game), NAME + '.placed', dest.replace('/', '__').replace('\\', '__'))
-            os.makedirs(os.path.dirname(keep), exist_ok=True)
-            with open(keep, 'xb') as f:
-                f.write(self.original)
-            self.kept = keep
-        else:
-            self.kept = None
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, 'wb') as f:
-            f.write(payload)
-        print('placed', dest, 'over the original' if self.original is not None else '(new)')
 
-    def restore(self) -> None:
-        try:
-            with open(self.path, 'rb') as f:
-                now = f.read()
-        except FileNotFoundError:
-            now = None
-        if now != self.payload:
-            print('changed by someone else during the run: left as it is:', self.path)
-            return
-        if self.original is None:
-            os.remove(self.path)
-            print('removed', self.path)
-        else:
-            with open(self.path, 'wb') as f:
-                f.write(self.original)
-            print('restored', self.path, 'byte for byte')
-        if self.kept:
-            os.remove(self.kept)
-            try:
-                os.rmdir(os.path.dirname(self.kept))
-            except OSError:
-                pass
+def anything_left(game: str) -> bool:
+    """A run's placements (placed_dir) or its autopilot (its session) still in the game folder: restore_placed's work."""
+    return os.path.lexists(placed_dir(game)) or os.path.isfile(os.path.join(plugins(game), NAME + '.session.json'))
+
+
+def unrecorded_placed(game: str, entries: list[dict]) -> list[str]:
+    """The files in placed_dir that `entries` (its manifest) do not account for: manifest.json and the kept originals
+    are; anything else (an older drive.py's backups had no manifest) is an original nobody knows where to put back."""
+    try:
+        names = os.listdir(placed_dir(game))
+    except FileNotFoundError:
+        return []
+    known = {'manifest.json'} | {e['kept'] for e in entries if e['kept']}
+    return sorted(n for n in names if n not in known)
 
 
 def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
@@ -382,19 +476,6 @@ def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
         key, _, value = setting.partition('=')
         text = support_config.put(text, key.strip(), value.strip())
     return (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8')
-
-
-def remove_loadout(path: str, payload: bytes) -> None:
-    """The run's loadout removed, only while it is still the one this run wrote."""
-    try:
-        with open(path, 'rb') as f:
-            if f.read() != payload:
-                print('loadout changed by someone else: left at', path)
-                return
-    except FileNotFoundError:
-        return
-    os.remove(path)
-    print('removed', path)
 
 
 def steam_launching_title(steam: str | None = None, language: str | None = None) -> str | None:
@@ -647,20 +728,31 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
     """`during`: called on a thread of its own once the mission has started (tools/perfrun.py samples the game there);
     the run quits as soon as it returns, SECONDS then only the longest stay.
     `cycle` (N, STAY, REBOOT): the plugin's `cycle` command handed with the mission; the run quits once it logs
-    CYCLE done, and fails when SECONDS pass first or the cycle failed."""
+    CYCLE done, and fails when SECONDS pass first or the cycle failed.
+    Everything placed is put back at the end (restore_placed); non-zero too when anything is left (the game still
+    running, or restore_placed left a file), which placed_dir on disk then records for `drive.py restore`."""
+    put_back = [False]
+    rc = _session(game, mission, difficulty, seconds, keep, put_back, extra=extra, loadout=loadout, shots=shots,
+                  keys=keys, place=place, ini=ini, hq=hq, every=every, during=during, quit_wait=quit_wait, cycle=cycle)
+    return rc if put_back[0] else rc or 1
+
+
+def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, put_back: list[bool], *,
+             extra: tuple[str, ...], loadout: str | None, shots: str | None, keys: tuple[tuple[str, float, int], ...],
+             place: tuple[str, ...], ini: tuple[str, ...], hq: bool, every: float,
+             during: Callable[[], None] | None, quit_wait: int, cycle: tuple[int, float, bool] | None) -> int:
+    """run's launch and stay; put_back[0] set once everything placed is put back (its finally)."""
     install(game)
-    placed: tuple[str, bytes] | None = None
-    placements: list[Placement] = []
     watch = DesktopWatch().start()
     try:
         if loadout:
-            placed = place_loadout(game, loadout)
+            place_loadout(game, loadout)
         for item in place:
             source, _, dest = item.partition('=')
             with open(source, 'rb') as f:
-                placements.append(Placement(game, dest, f.read()))
+                place_file(game, dest, f.read())
         if ini:
-            placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
+            place_file(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini))
         command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra,
                                  *([cycle_command(*cycle)] if cycle else [])]))
         launch()
@@ -734,12 +826,14 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 shutil.copyfile(os.path.join(plugins(game), NAME + '.log'), keep)
                 print('log kept at', keep)
         finally:
-            if not game_pids():
-                for p in reversed(placements):
-                    p.restore()
-                if placed:
-                    remove_loadout(*placed)
-                uninstall(game)
+            if game_pids():
+                print('!!! the game is still running: the autopilot and the placed files stay '
+                      f'({placed_dir(game)}); python tests/autopilot/drive.py restore once the game is closed')
+            elif restore_placed(game):
+                put_back[0] = True
+            else:
+                print('!!! not everything placed is put back (said above): it stays recorded in '
+                      f'{placed_dir(game)}; python tests/autopilot/drive.py restore once it is dealt with')
 
 
 def cycle_command(count: int, stay: float, reboot: bool) -> str:
@@ -866,7 +960,7 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
 
 # What touches the game folder or the running game: done holding the machine's game lease (pylib/gamelease.py), so
 # two sessions never install over / drive each other's run. `mem` and `shot` only read.
-LEASED = ('install', 'uninstall', 'launch', 'hide', 'key', 'cmd', 'run')
+LEASED = ('install', 'uninstall', 'restore', 'launch', 'hide', 'key', 'cmd', 'run')
 
 
 def main(argv: list[str]) -> int:
@@ -884,6 +978,8 @@ def command_main(argv: list[str]) -> int:
         install(game)
     elif cmd == 'uninstall':
         uninstall(game)
+    elif cmd == 'restore':
+        return 0 if restore_placed(game) else 1
     elif cmd == 'launch':
         launch()
     elif cmd == 'hide':

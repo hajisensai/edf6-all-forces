@@ -18,6 +18,9 @@ ULONGLONG GameMs() noexcept { return nowMs; }
 // (the per-frame target memo's own case) or heldFrame (Feedback's once-a-frame clock across steps of nowMs).
 ULONGLONG frameNo=1;bool frameHeld=false;ULONGLONG heldFrame=0;
 ULONGLONG GameFrame() noexcept { if(heldFrame)return heldFrame; return frameHeld ? frameNo : ++frameNo; }
+// The wall clock the per-frame memo's stall guard reads: stepped by the cases, never the real time.
+ULONGLONG wallMs=1000;
+ULONGLONG WallMs() noexcept { return wallMs; }
 bool IsSoldierClass(const void*) noexcept { return false; }
 // The lock points and the ray the plan uses, as each case sets them.
 struct Lock { const void* object; float at[3]; };
@@ -190,6 +193,27 @@ void Plans() {
           "shut, due to open within the pre-aim: kept as the target (wait), trigger held");
     nowMs+=60000;
     Check(WastedFire(soldier,ship),"shut long past its rhythm: no target");
+    // The watch is each frame's (WatchTarget, every enemy), not the asks': a ship nobody asked of while it opened and
+    // shut (it never ranked as a soldier's best) has its rhythm known at the first ask, shut: wait, not skip.
+    ResetWastedFire();
+    ship[0xD84]=0;
+    const ULONGLONG t0=nowMs;
+    const struct { ULONGLONG at; unsigned char open; } seen[]={{0,0},{1000,1},{1500,0},{3000,1},{3500,0},{4500,0}};
+    for(const auto& s:seen){nowMs=t0+s.at;ship[0xD85]=s.open;WatchTarget(ship);}
+    Check(HoldFire(soldier,ship,eye,0.0f,0.0f,nullptr) && !WastedFire(soldier,ship),
+          "watched each frame, never asked: at the first ask, shut and due to open, kept as the target (wait)");
+    // Within a frame the asks change nothing watched: the window and motion as the frame's watch left them, however
+    // many ask and in what order.
+    frameHeld=true;++frameNo;nowMs+=16;
+    WatchTarget(ship);
+    const Watched before=*watched.Find(ship);
+    ship[0xD85]=1;
+    for(int i=0;i<5;++i){nowMs+=3;HoldFire(soldier,ship,eye,static_cast<float>(100*i),0.0f,nullptr);WastedFire(soldier,ship);}
+    Check(std::memcmp(&before,watched.Find(ship),sizeof(Watched))==0,"asks within a frame write nothing watched");
+    frameHeld=false;
+    ++frameNo;HoldFire(soldier,ship,eye,0.0f,0.0f,nullptr);
+    Check(watched.Find(ship)->w.opens==3,"the next frame's ask (nothing watched it yet) sees it once: the opening counted");
+    ship[0xD85]=0;
     // An ordinary enemy: always fire, no ray asked.
     rayOn=false;
     SetVtable(other,0x17C0BD0);Put<std::uint32_t>(other,kObjFlags,0);
@@ -206,12 +230,17 @@ void Plans() {
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     const bool second=HoldFire(soldier,other,eye,0.0f,0.0f,nullptr);
     Check(!first && !second,"the same frame: the target's first answer kept (made invincible mid-frame, still fire)");
-    Sleep(40);   // a slow frame: more than one old 32 ms step, well under the stall guard
+    wallMs+=40;   // a slow frame: more than one old 32 ms step, well under the stall guard
     Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same slow frame past 32 ms: the first answer still kept");
-    memoClock.since-=memoepoch::kStallMs;   // the frame stalled for the guard
+    wallMs+=memoepoch::kStallMs-40-1;   // one ms short of the guard since the frame's first look
+    Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the same frame just under the guard: the first answer still kept");
+    wallMs+=1;   // the frame stalled for the guard
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"a frame stalled for the guard: looked at again (invincible: held)");
     Put<std::uint32_t>(other,kObjFlags,0);
+    wallMs+=memoepoch::kStallMs-1;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the stalled frame's new answer kept until the next guard");
+    wallMs+=1;
+    Check(!HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next guard: looked at again (ordinary again: fire)");
     Put<std::uint32_t>(other,kObjFlags,kInvincible);
     ++frameNo;
     Check(HoldFire(soldier,other,eye,0.0f,0.0f,nullptr),"the next frame: looked at again (invincible: held)");

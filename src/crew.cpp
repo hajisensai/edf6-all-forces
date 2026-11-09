@@ -89,6 +89,7 @@ ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),Game
 // Reading this on the game thread avoids guessing frame boundaries from vehicle order.
 namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
+ULONGLONG WallMs() noexcept { return GetTickCount64(); }
 SceneStep SceneStepNow() noexcept {
     if(!frameClockOk)return {};
     const auto system=At<const unsigned char*>(image,kSystem);
@@ -834,14 +835,15 @@ void UnderVehicle(unsigned char* v) noexcept {
     WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
 }
 
-// The live objects of a team: the game's own GetTeamObjectCount (0x1B5260 -> 0x5E13E0(TeamManager, team, false), under
-// the manager's lock; the dead not yet deleted are not counted, docs/swarm-team-re.md). -1 off a mission or faulted.
+// The live objects of a team as the mission scripts count them: the game's own GetTeamObjectCount (0x1B5260 ->
+// 0x5E13E0(TeamManager, team, true), `mov r8b,1`; under the manager's lock). Not counted: the dead not yet deleted
+// (+0x2E8) and the objects flagged +0x380 & 0x2000 (docs/swarm-team-re.md Q3). -1 off a mission or faulted.
 constexpr unsigned kTeamObjectCount=0x5E13E0,kPerfTeamManager=0x20B2978;
 int TeamObjects(std::int32_t team) noexcept {
     __try {
         void* const manager=At<void*>(image,kPerfTeamManager);
         if(!manager)return -1;
-        return reinterpret_cast<int(__fastcall*)(void*,std::int32_t,bool)>(image+kTeamObjectCount)(manager,team,false);
+        return reinterpret_cast<int(__fastcall*)(void*,std::int32_t,bool)>(image+kTeamObjectCount)(manager,team,true);
     } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
 }
 

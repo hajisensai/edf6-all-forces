@@ -3,7 +3,8 @@
     the game folder) so a run that dies loses nothing, and restore_scenario puts them back byte for byte (a file that
     was not there is removed again); it refuses, before writing anything, when the range is not installed, the waves'
     enemy is not one the range knows, a generated SGO the plan spawns is not in Mods, or an earlier run's originals
-    are still kept (a second write would take the first one's scenario for the original);
+    are still kept (a second write would take the first one's scenario for the original); a copy of the originals
+    that fails leaves no half backup (the next run goes ahead);
   - perfrun's scenarios: grand is the grand battle, swarm's fields reach the waves, a stock mission has no plan;
   - perf_report reads the plugin's PERF rows only inside the window (both row formats), sums GPU engines per type, and
     tells the game thread by System::update on its stack, labels a plugin hook below a phase by its outermost
@@ -85,6 +86,29 @@ def scenario_files() -> None:
             check(not os.path.exists(os.path.join(out, 'MISSION.RMPA')), 'restore removes a file that was not there')
             check(sorted(os.listdir(out)) == sorted(['MISSION.AC', gen.MARKER]), 'nothing else left in the folder')
             check(not os.path.exists(backup) and not gen.restore_scenario(root), 'the kept originals go once restored')
+            # a copy that fails while keeping the originals: no half backup left, nothing written, the next run goes
+            real_copy = gen.shutil.copy2
+
+            def failing_copy(src, dst, *a, **k):
+                raise OSError('disk full')
+            gen.shutil.copy2 = failing_copy
+            written.clear()
+            try:
+                gen.write_scenario(root, plan)
+                check(False, 'a failed copy of the originals is raised')
+            except OSError:
+                check(not written, 'a failed copy of the originals writes nothing')
+            finally:
+                gen.shutil.copy2 = real_copy
+            check(not os.path.exists(backup) and not os.path.exists(backup + '.tmp'),
+                  'a failed copy of the originals leaves no half backup')
+            gen.write_scenario(root, plan)
+            check(written == [gen.RANGE_MISSION] and os.path.isfile(os.path.join(backup, 'absent.json')),
+                  'the run after a failed copy goes ahead with a whole backup')
+            check(gen.restore_scenario(root), 'and is restored')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'the old script back after the failed copy and the next run')
+            written.clear()
             bad = gen.Plan()
             bad.vehicles = {}
             bad.waves.enemy = 'giantant1'
@@ -246,12 +270,13 @@ def report_parsing() -> None:
             json.dump({'scenario': 'x', 'variant': 'B'}, f)
         t = perf_report.ab_table([run, failed])
         check('| A | run | 16.70 | 2.00% | 0 | 30.0 | 50 |' in t, 'the A/B table row')
+        check('| AutoTurret |' in t, "the A/B table shows each round's AutoTurret")
         check('| B | failed | not sampled |' in t, 'a round without samples is a row, not a crash')
 
 
 def drive_during() -> None:
     import drive
-    src = inspect.getsource(drive.run)
+    src = inspect.getsource(drive._session)   # drive.run's launch and stay
     check('during' in inspect.signature(drive.run).parameters and 'not worker.is_alive()' in src,
           "drive.run's stay ends when `during` returns")
 
@@ -310,13 +335,117 @@ def both_plugins() -> None:
         check(perfrun.placements(crew) == (f'{crew}=Plugins/EDF6VehicleCrew.dll', f'{turret}=Plugins/EDF6AutoTurret.dll'),
               "the same build's AutoTurret placed with it")
         check(perfrun.placements(None) == (), '--dll installed: nothing placed')
+        # what the run records is what the game loads, taken before the launch
+        game = os.path.join(d, 'game')
+        gplugins = os.path.join(game, 'Mods', 'Plugins')
+        os.makedirs(gplugins)
+        with open(turret, 'wb') as f:
+            f.write(b'built turret')
+        got = perfrun.loaded_plugins(game, crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) ==
+              (turret, 'built-alongside', perfrun.sha256(turret)), "AutoTurret built alongside: that build's recorded")
+        lone = os.path.join(d, 'lone')
+        os.makedirs(lone)
+        lone_crew = os.path.join(lone, 'EDF6VehicleCrew.dll')
+        open(lone_crew, 'wb').close()
+        got = perfrun.loaded_plugins(game, lone_crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) == (None, 'none', None),
+              'no AutoTurret anywhere: recorded as none, not guessed')
+        game_turret = os.path.join(gplugins, 'EDF6AutoTurret.dll')
+        with open(game_turret, 'wb') as f:
+            f.write(b'old installed turret')
+        got = perfrun.loaded_plugins(game, lone_crew)
+        check((got['turret'], got['turret_source'], got['turret_sha256']) ==
+              (game_turret, 'game-folder', perfrun.sha256(game_turret)),
+              "no AutoTurret next to --dll: the game folder's, the one the game loads, recorded")
+        with open(os.path.join(gplugins, 'EDF6VehicleCrew.dll'), 'wb') as f:
+            f.write(b'installed crew')
+        got = perfrun.loaded_plugins(game, None)
+        check(got['turret_source'] == 'game-folder' and got['sha256'] == perfrun.sha256(
+              os.path.join(gplugins, 'EDF6VehicleCrew.dll')), "--dll installed: the game folder's both")
+        check(perfrun.ab_turrets(game, crew, lone_crew) is not None and
+              perfrun.ab_turrets(game, lone_crew, crew) is not None,
+              "--ab with the build's AutoTurret on one side only: refused")
+        check(perfrun.ab_turrets(game, crew, crew) is None and perfrun.ab_turrets(game, lone_crew, lone_crew) is None,
+              '--ab with AutoTurret alongside both or neither: runs')
     finally:
         shutil.rmtree(d)
+
+
+def outlived_runs() -> None:
+    """The game outliving a run (quit_wait passed): one_run says what was not put back for a stock mission too, and
+    --restore puts back both the range mission and what drive.py placed (drive.restore_placed), under the lease."""
+    import drive
+    saved = (drive.game_pids, drive.run, drive.restore_placed, gen.restore_scenario, perfrun.gamedir.find_or_dev)
+    calls = []
+    d = tempfile.mkdtemp()
+    try:
+        game = os.path.join(d, 'game')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        os.environ['EDF6_QUEUE_DIR'] = os.path.join(d, 'queues')
+        running = []
+        drive.game_pids = lambda: list(running)
+
+        def fake_run(*a, **k):
+            os.makedirs(drive.placed_dir(game), exist_ok=True)   # what it placed (the ini at least) is recorded
+            running.append(1)   # the game does not leave
+            return 1
+        drive.run = fake_run
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc != 0 and 'perfrun.py --restore' in out.getvalue() and 'placed plugins' in out.getvalue(),
+              'a stock mission the game outlived: not put back, said so, with the one command that does')
+        with open(os.path.join(d, 'out', 'run.json'), encoding='utf-8') as f:
+            run = json.load(f)
+        check('turret_source' in run and 'sha256' in run, 'run.json records the plugins taken before the launch')
+        running.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) or True
+        gen.restore_scenario = lambda g: calls.append(('range', g)) or False
+        perfrun.gamedir.find_or_dev = lambda: game
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.main(['--restore'])
+        check(rc == 0 and calls == [('range', game), ('placed', game)],
+              '--restore puts back the range mission and what drive.py placed')
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) and False
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.main(['--restore'])
+        check(rc == 1, '--restore fails while a placed file is left (changed by someone else)')
+        # The game leaving between drive.run's own look (still there: nothing put back) and one_run's: one_run puts
+        # back what the disk says is left, and a file left over fails the run.
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) or True
+
+        def late_exit(*a, **k):
+            return 1   # drive.run saw the game, left everything; it is gone now
+        drive.run = late_exit
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out2'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc == 1 and calls == [('placed', game)], 'the game gone after drive.run: one_run puts back what is left')
+        calls.clear()
+        drive.restore_placed = lambda g: calls.append(('placed', g)) and False
+        drive.run = lambda *a, **k: 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out3'), None,
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+        check(rc == 1 and calls == [('placed', game)] and 'perfrun.py --restore' in out.getvalue(),
+              'a placed file left over: the run fails, with the command that puts it back')
+    finally:
+        drive.game_pids, drive.run, drive.restore_placed, gen.restore_scenario, perfrun.gamedir.find_or_dev = saved
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
 
 
 scenario_files()
 log_turnover()
 both_plugins()
+outlived_runs()
 ini_option()
 scenarios()
 report_parsing()
