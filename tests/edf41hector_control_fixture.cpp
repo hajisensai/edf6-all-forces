@@ -46,6 +46,22 @@ int BoneIndex(void*,const wchar_t*) noexcept {return -1;}
 bool Particle(const float*,int,float,const float*,const wchar_t*) noexcept {return true;}
 void StencilLight(const float*,const float*,float,int) noexcept {}
 bool AimPoint(const void*,float* out) noexcept {out[0]=10;out[1]=100;out[2]=20;return true;}
+// the shield (edf41ai Shields): the fixture's object has no edf41_hector_shield, so none of these may make anything
+const std::uint32_t kEaoSlots[45]{};
+bool BuildClone(Clone&,DtorFn,UpdateFn,MessageFn) noexcept {return false;}
+void SetSlot(Clone&,int,void*) noexcept {}
+void AllowAnyTeam(Clone&) noexcept {}
+bool AddFactory(const wchar_t*,CreateFn) noexcept {return false;}
+void* CloneObject(Clone&,std::size_t,std::size_t,void*) noexcept {fixture::Check(false,"no shield object is made");return nullptr;}
+void* CreateFromPath(const float*,const wchar_t*) noexcept {fixture::Check(false,"no shield is asked for");return nullptr;}
+void DeleteObject(void*) noexcept {}
+void SetFlag(void*,std::uint32_t,bool) noexcept {}
+bool SetTeam(void*,std::int32_t,bool) noexcept {return false;}
+int RagdollLayer(void*) noexcept {return -1;}
+bool SetRagdollLayer(void*,int) noexcept {return false;}
+void WeakSet(WeakRef& w,const void*) noexcept {w=WeakRef{};}
+void WeakReset(WeakRef& w) noexcept {w=WeakRef{};}
+bool WeakAlive(const WeakRef&) noexcept {return false;}
 }
 int main(){
  using namespace fixture;using namespace crew;

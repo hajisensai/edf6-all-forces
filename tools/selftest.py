@@ -13951,6 +13951,64 @@ def edf41_hector_material_merge() -> None:
 
 
 @test
+def edf41_hector_shield() -> None:
+    """The Hector's shield is 4.1's object again (docs/feedback-2026-11-08-edf41-hector-shield.md): every generated variant
+    holding a shield (edf41port/objects, read back) names the shield SGO in edf41_hector_shield with exactly its shield arms,
+    the others have no such key; the shield SGO is the plugin's class Hector401_Shield on a meshless model whose bones
+    hold every body of 4.1's shield ragdoll (both shipped), with a CAS whose main player has `default` (EventAnimationObject's
+    constructor plays it); the body model has the arm bones the plugin places the shield on. The plugin registers that class,
+    reads that key, refuses every hit on the shield, puts its bodies on the Hector's layer and never starts a shield arm."""
+    import cas_graft
+    import dsgo
+    import edf41_objects
+    import hk2014
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    base = os.path.join(ROOT, 'edf41port', 'objects')
+    shielded = 0
+    for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
+        with open(os.path.join(base, 'OBJECT', name), 'rb') as f:
+            top = dsgo.parse(f.read()).root
+        want = [float(i) for i, letter in enumerate((left, right)) if m.HECTOR_WEAPONS[(gen, letter)].cls == m.HECTOR_SHIELD_CLASS]
+        key = top.get(m.HECTOR_SHIELD_KEY)
+        if not want:
+            assert key is None, name
+            continue
+        shielded += 1
+        assert key.get('arms').items == want, (name, key.get('arms').items)
+        assert key.get('sgo') == 'app:/Object/hector401_shield.sgo', name
+    assert shielded == 5, shielded   # 401 CS, LS, SC, SG, SS (301 has no shield)
+    shield = sgo.load(data=edf41_objects.read(m.HECTOR_SHIELD_SGO))
+    assert shield['xgs_scene_object_class'] == m.HECTOR_SHIELD_CLASS == 'Hector401_Shield', shield
+    assert set(shield) == {'xgs_scene_object_class', 'animation_model', 'ragdoll', 'game_object_durability'}, sorted(shield)
+    assert shield['game_object_durability'] > 0
+    am = shield['animation_model']
+    assert am[0] == [['app:/Object/hector401_shield.mrab', 'Hector401Shield.mdb']] and am[1] == 'app:/Object/hector401_shield_still.cas', am[:2]
+    rab = mdb.rab_read(edf41_objects.read(m.rel_of(am[0][0][0])))
+    assert [f.name for f in rab.files] == ['Hector401Shield.mdb'], [f.name for f in rab.files]
+    md = mdb.mdb_read(rab.files[0].data)
+    assert not md.materials and not md.textures and all(not ob.meshes for ob in md.objects)   # meshless: the body draws it
+    bones = {md.name_of(b.name) for b in md.bones}
+    bodies = [b.name for b in hk2014.rigid_bodies(hk2014.read(edf41_objects.read(m.rel_of(shield['ragdoll'][0]))))]
+    assert tuple(bodies) == m.HECTOR_SHIELD_BODIES, bodies
+    assert {b.split('.', 1)[1] for b in bodies} <= bones, (bodies, sorted(bones))
+    assert 'default' in cas_graft.states(edf41_objects.read(m.rel_of(am[1])))['main']
+    # the arm bones the plugin puts the shield on, in the shared body model of every variant
+    body_rab = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
+    body = next(f for f in body_rab.files if f.name.lower() == 'hector401cs.mdb')
+    names = {mdb.mdb_read(body.data).name_of(b.name) for b in mdb.mdb_read(body.data).bones}
+    assert {'arms_l', 'arms_r', 'gun_arms_r_gun_shield'} <= names, sorted(n for n in names if 'arms' in n)
+    code = src('src/edf41ai.cpp')
+    assert 'AddFactory(L"Hector401_Shield",&CreateShield)' in code
+    assert 'L"edf41_hector_shield"' in code and 'L"arms"' in code and 'L"sgo"' in code
+    assert 'bool __fastcall ShieldAccept(void*,void*) { return false; }' in code
+    assert 'SetSlot(shieldClone,kShieldAccept,' in code and 'AllowAnyTeam(shieldClone)' in code
+    assert 'SetRagdollLayer(obj+edf41c::kEaoRagdoll,to)' in code and 'kHectorRagdollAt=0xD80' in code
+    assert 'if(index>=0 && (e->shieldMask&(1u<<index)))return;' in code   # a shield arm never fires
+
+
+@test
 def edf41_hector_guns() -> None:
     """Every generated Hector variant (edf41port/objects, read back) fires what 4.1's arms hold: each gun_control
     entry's bullet is the factory of its HectorWeapon row with the row's speed, lifetime, damage coefficient
