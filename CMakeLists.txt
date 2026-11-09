@@ -170,6 +170,10 @@ add_executable(append_log_test EXCLUDE_FROM_ALL tools/append_log_test.cpp)
 target_link_libraries(append_log_test PRIVATE edf6common)
 target_compile_options(append_log_test PRIVATE /W4 /WX /utf-8 /permissive-)
 # edf6common's load helpers: the strict ini number, the DLL file line, a patch putting the page protection back.
+# The plugin's check whether 原版启动 left the saves in the vanilla set (src/save_mode.h, tools/vanilla_launch.py _mode).
+add_executable(save_mode_check EXCLUDE_FROM_ALL tools/save_mode_check.cpp)
+target_include_directories(save_mode_check PRIVATE src)
+target_compile_options(save_mode_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(common_host_check EXCLUDE_FROM_ALL tools/common_host_check.cpp)
 target_link_libraries(common_host_check PRIVATE edf6common)
 target_compile_options(common_host_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -939,6 +943,12 @@ set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# 原版启动.cmd: ModLoader.ini off for one run and back (tools/vanilla_launch.py).
+add_test(NAME vanilla_launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vanilla_launch_test.py")
+set_tests_properties(vanilla_launch PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The saves backed up before every start, thinned with age (tools/save_backup.py).
+add_test(NAME save_backup COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/save_backup_test.py")
+set_tests_properties(save_backup PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME frozen_cockpit_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_frozen_cockpit_package.py")
 set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
@@ -1081,7 +1091,7 @@ target_compile_options(fp_flash_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
-set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
+set(EDF6_OFFLINE_CHECKS append_log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)

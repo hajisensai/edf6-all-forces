@@ -2,6 +2,7 @@
 #include "loadout_store.h"
 #include "crew.h"
 #include "support_call.h"
+#include "save_mode.h"
 #include <cwchar>
 #include <iterator>
 #include <new>
@@ -86,6 +87,60 @@ bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept {
     ReleaseSRWLockExclusive(&generatorLock);
     Log("LOADOUT generator %s: %ls",started ? "started" : "not started",started ? exe : (why ? why : L""));
     return started;
+}
+
+bool RestoreModSaves() noexcept {
+    wchar_t root[MAX_PATH];
+    const DWORD n=GetEnvironmentVariableW(L"LOCALAPPDATA",root,MAX_PATH);   // vanilla_launch.save_root
+    if(!n || n>=MAX_PATH || wcscat_s(root,L"\\EarthDefenceForce6")) {
+        Log("SAVE restore: no %%LOCALAPPDATA%%, the saves not checked");
+        return true;   // no save folder the generator could find either
+    }
+    if(!SavesNeedModRestore(root))return true;
+    wchar_t exe[MAX_PATH];
+    if(!PluginsPath(kGenerator,exe,std::size(exe)) || GetFileAttributesW(exe)==INVALID_FILE_ATTRIBUTES) {
+        Log("SAVE restore failed: the saves are in the vanilla set and there is no %ls (reinstall with the installer)",kGenerator);
+        return false;
+    }
+    wchar_t line[MAX_PATH+32];
+    _snwprintf_s(line,_TRUNCATE,L"\"%ls\" restore-saves",exe);   // CreateProcessW may write into its command line
+    STARTUPINFOW si{};si.cb=sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if(!CreateProcessW(exe,line,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi)) {
+        Log("SAVE restore failed: CreateProcess error %lu",GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess,INFINITE);   // the generator never waits on anything (vanilla_launch.restore_saves)
+    DWORD code=1;
+    GetExitCodeProcess(pi.hProcess,&code);
+    CloseHandle(pi.hProcess);
+    if(code!=0) {
+        Log("SAVE restore failed: restore-saves exit %lu (3: a 原版启动 or the installer holds the saves)",code);
+        return false;
+    }
+    Log("SAVE restored: the mod's saves switched back from the vanilla set");
+    return true;
+}
+
+bool StartSaveBackup() noexcept {
+    wchar_t exe[MAX_PATH];
+    if(!PluginsPath(kGenerator,exe,std::size(exe)) || GetFileAttributesW(exe)==INVALID_FILE_ATTRIBUTES) {
+        Log("SAVE backup not started: no %ls (reinstall with the installer)",kGenerator);
+        return false;
+    }
+    wchar_t line[MAX_PATH+32];
+    _snwprintf_s(line,_TRUNCATE,L"\"%ls\" backup-saves",exe);   // CreateProcessW may write into its command line
+    STARTUPINFOW si{};si.cb=sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if(!CreateProcessW(exe,line,nullptr,nullptr,FALSE,CREATE_NO_WINDOW|BELOW_NORMAL_PRIORITY_CLASS,nullptr,nullptr,&si,&pi)) {
+        Log("SAVE backup not started: CreateProcess error %lu",GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    Log("SAVE backup started");
+    return true;
 }
 
 GenerateStatus VariantGenerationStatus() noexcept {
