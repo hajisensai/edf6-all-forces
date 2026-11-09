@@ -3242,7 +3242,8 @@ SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept 
     __try {
         const Heli* const h=vehicle && target ? Find(vehicle) : nullptr;
         if(!h || h->leaving || h->reap)return SupportEntry::gone;
-        if(h->sortie!=SortiePass::none || h->ferry)return SupportEntry::superseded;
+        if(h->sortie!=SortiePass::none)return SupportEntry::sortie;   // its one pass, then away (StartLeave: gone)
+        if(h->ferry)return SupportEntry::superseded;
         if(h->cmd.order!=Order::guard || h->cmd.at[0]!=target[0] || h->cmd.at[1]!=target[1] || h->cmd.at[2]!=target[2])
             return SupportEntry::superseded;
         return h->cmdMoving || h->focus ? SupportEntry::flying : SupportEntry::arrived;

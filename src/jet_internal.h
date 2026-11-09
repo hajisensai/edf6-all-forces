@@ -592,7 +592,7 @@ inline const float* CommandAnchor(const Jet& j,bool follow,const float* own) noe
 // gave it meanwhile takes it at its enemy first: still flying in.
 inline SupportEntry SupportEntryOf(const Jet& j,const float* target) noexcept {
     if(j.reap || j.mode==Mode::withdraw || j.mode==Mode::recover)return SupportEntry::gone;
-    if(j.sortie.pass!=SortiePass::none)return SupportEntry::superseded;   // its one pass, then away (jet_sortie.cpp)
+    if(j.sortie.pass!=SortiePass::none)return SupportEntry::sortie;   // its one pass, then away (jet_sortie.cpp)
     if(j.cmd.order!=Order::guard || j.cmd.at[0]!=target[0] || j.cmd.at[1]!=target[1] || j.cmd.at[2]!=target[2])
         return SupportEntry::superseded;
     return j.cmdMoving || j.focus ? SupportEntry::flying : SupportEntry::arrived;

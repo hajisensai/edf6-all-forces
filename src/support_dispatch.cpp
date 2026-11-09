@@ -904,7 +904,9 @@ bool Unseat(const ObjRef& soldier) noexcept {
 // wing on its patrol ring, a gunship inside its reach, a helicopter on its guard orbit) Order::none lets that guard go,
 // and it keeps its call's own post or follows the player. Never a distance of the dispatcher's own: a 150 m test here
 // was one no fixed wing (circling 600-1500 m out) ever passed, so a follow call guarded the point all mission. True once
-// every aircraft is handed over (or lost, withdrawing, or under the player's own order).
+// every aircraft is handed over (or lost, withdrawing, or under the player's own order). A sortie's aircraft is on its
+// own one pass from the moment it is sent (SupportEntry::sortie): nothing to let go, and not done until it withdraws
+// (gone), so its deployment is traced the whole pass and never told 「已抵达」 while still off the map.
 bool AirArrival(Deployment& deployed) noexcept {
     SupportAircraft spec;
     if(!AircraftSpecOf(deployed.plan.catalogId,&spec))return true;   // nothing of ours to hand over (Validate refuses it)
@@ -915,7 +917,7 @@ bool AirArrival(Deployment& deployed) noexcept {
         const void* object=deployed.objects[i].obj;
         const SupportEntry entry=!Live(deployed.objects[i]) ? SupportEntry::gone :
                                  spec.heli>=0 ? HeliSupportEntry(object,deployed.plan.target) : JetSupportEntry(object,deployed.plan.target);
-        if(entry==SupportEntry::flying){all=false;continue;}
+        if(entry==SupportEntry::flying || entry==SupportEntry::sortie){all=false;continue;}
         if(entry==SupportEntry::arrived) {
             // Not commandable this frame (its module has not flown it just now): asked again next frame.
             if(!(spec.heli>=0 ? HeliCommand(object,Command{}) : JetCommand(object,Command{}))){all=false;continue;}
@@ -2003,7 +2005,9 @@ void SupportDispatchTick() noexcept {
             }
         } else if(AirArrival(deployed)) {
             deployed.delivered=true;
-            if(!deployed.lost)Status(L"支援已抵达并进入任务区域");
+            SupportAircraft spec;
+            if(!deployed.lost)Status(AircraftSpecOf(deployed.plan.catalogId,&spec) && spec.sortie ? L"空中支援出击完成，正在撤离"
+                                                                                               : L"支援已抵达并进入任务区域");
         }
     }
 }

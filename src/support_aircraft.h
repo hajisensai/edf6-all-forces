@@ -57,9 +57,12 @@ bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* 
 // its own (2026-11-08: a 150 m test no fixed wing on its patrol ring ever passed, so a follow call never followed).
 //   flying     still under that guard and not yet there (jet_internal.h MapCommandMoving / heli.cpp CommandMoving)
 //   arrived    there: Order::none hands it back its own call (its post, or the player it follows)
-//   superseded under another order now (a map command the player gave it), or a sortie flying its own one pass
+//   superseded under another order now (a map command the player gave it, a squad's ferry): nothing to let go
+//   sortie     flying its own one pass (jet_sortie.cpp / heli.cpp HeliSortie), set the moment it is sent: nothing to let
+//              go, and not there either (2026-11-09 review: taken as superseded, a sortie was "delivered" with its
+//              「已抵达」 on the first tick after it went out, still off the map); done once it withdraws (gone)
 //   gone       none of ours to hand over any more (withdrawing, deleted, not in its module's table)
-enum class SupportEntry : unsigned char { flying, arrived, superseded, gone };
+enum class SupportEntry : unsigned char { flying, arrived, superseded, sortie, gone };
 SupportEntry JetSupportEntry(const void* vehicle,const float* target) noexcept;    // jet_spawn.cpp
 SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept;   // heli.cpp
 bool DeleteSupportAircraft(const ObjRef&) noexcept;

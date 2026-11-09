@@ -214,9 +214,10 @@ void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
 bool soloHost=false;
 bool SupportSoloHostWorld() noexcept {return soloHost;}
 int airJet=-1,airHeli=static_cast<int>(HeliBody::eros506),airCount=1;bool airFollow=false;   // the air calls' spec
+int airSortie=0;   // a sortie call's pass (crew.h SortiePass; 0 none)
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
-    *out={airJet,airHeli,airCount,300,airFollow};return true;
+    *out={airJet,airHeli,airCount,300,airFollow,false,airSortie};return true;
 }
 int plannedAircraft=0,plannedHeli=-2;
 support::Refusal planRefusal=support::Refusal::none;
@@ -546,6 +547,27 @@ int main() {
         entryState[hull[0]]=SupportEntry::superseded;entryState[hull[1]]=SupportEntry::gone;
         fixtureMs+=100;SupportDispatchTick();
         check(!jetReleases && deployments[0].delivered,"the player's own order and a withdrawal: nothing released, delivered");
+        // A sortie (2026-11-09 review): on its own one pass from the moment it is sent (SupportEntry::sortie), still off
+        // the map: nothing let go, never 「已抵达」 on the tick after it went out; done once its aircraft withdraw.
+        for(const bool jetCall:{true,false}) {
+            ResetSupportDispatch();made=deleted=activated=heliReleases=jetReleases=0;fixtureMs+=40000;
+            airJet=jetCall ? 0 : -1;airHeli=jetCall ? -1 : static_cast<int>(HeliBody::eros506);airCount=2;airFollow=false;
+            airSortie=static_cast<int>(jetCall ? SortiePass::gunRun : SortiePass::heliStrafe);
+            for(auto& e:entryState)e=SupportEntry::sortie;
+            check(SupportCallAt(0,target,note,128),"a sortie call of two aircraft is queued");
+            SupportDispatchTick();
+            Deployment& s=deployments[0];
+            check(hulls(s,hull)==2 && s.started,"both sent on their pass");
+            for(int i=0;i<3;++i){fixtureMs+=100;SupportDispatchTick();}
+            check(!s.delivered && !jetReleases && !heliReleases && std::wcscmp(status,L"支援已抵达并进入任务区域")!=0,
+                  "a sortie on its pass: not delivered, no 「已抵达」, nothing released");
+            entryState[hull[0]]=SupportEntry::gone;fixtureMs+=100;SupportDispatchTick();
+            check(!s.delivered,"one withdrawn, the other still on its pass: not done");
+            entryState[hull[1]]=SupportEntry::gone;fixtureMs+=100;SupportDispatchTick();
+            check(s.delivered && !jetReleases && !heliReleases && std::wcscmp(status,L"空中支援出击完成，正在撤离")==0,
+                  "both withdrawn: the sortie is done, told so, never 「已抵达」");
+        }
+        airSortie=0;
         ResetSupportDispatch();airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);airCount=1;airFollow=false;
         for(auto& e:entryState)e=SupportEntry::flying;heliCommands=0;
     }

@@ -127,7 +127,7 @@ int main() {
         j.mode=Mode::patrol;j.reap=true;
         check(SupportEntryOf(j,call)==SupportEntry::gone,"being deleted: nothing to let go");
         j.reap=false;j.sortie.pass=SortiePass::gunRun;
-        check(SupportEntryOf(j,call)==SupportEntry::superseded,"a sortie flies its own one pass");
+        check(SupportEntryOf(j,call)==SupportEntry::sortie,"a sortie flies its own one pass: not arrived, not superseded");
     }
     for(const Mode mode:{Mode::takeoff,Mode::withdraw,Mode::recover,Mode::bomb}) {
         Jet j{};j.mode=mode;ApplyMapCommand(j,guard,1000);
