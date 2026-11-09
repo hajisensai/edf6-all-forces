@@ -29,7 +29,9 @@ std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) n
 const wchar_t* SupportSoldierLookPath(std::uint32_t,std::uint64_t variant,bool,wchar_t*,std::size_t) noexcept {
     return variant && (variant&kVariantApplied) && lookHere ? kLookPath : nullptr;
 }
-bool ApplySupportSoldierResource(const float*,std::uint32_t resource,const unsigned char*,bool local,ObjRef* out,const wchar_t* look) noexcept {
+bool ApplySupportSoldierResource(const float*,std::uint32_t resource,const unsigned char*,bool local,ObjRef* out,const wchar_t* look,
+                                 std::uint64_t weapon) noexcept {
+    if(weapon)return false;   // the mission crew is the stock templates (docs/feature-npc-weapon-tier.md)
     if(failAt && spawned+1==failAt)return false;
     if(local)return false;   // the mission crew is never a local-only soldier (as ApplySupportSoldierSpawn was)
     looks[spawned]=look;resources[spawned]=resource;

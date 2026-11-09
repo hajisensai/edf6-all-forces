@@ -127,6 +127,9 @@ struct Message {
     std::uint32_t transaction=0,request=0,catalog=0,count=0,index=0,ok=0;
     float target[3]{};
     Unit unit{};
+    // A request's: the requester's soldier weapons (support_net.h RequesterArms), on the wire in the unit fields a request
+    // never used (support_protocol.cpp: 6 bytes a kind). A unit message carries its own in unit.arms.
+    RequesterArms arms{};
 };
 constexpr std::size_t kWireSize=176;
 bool Encode(const Message&,void* bytes,std::size_t size) noexcept;
@@ -150,8 +153,10 @@ public:
     void Stop() noexcept;
     void Suspend() noexcept;
     bool Suspended() const noexcept { return suspended_; }
-    // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
-    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
+    // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`. `arms`: the
+    // requester's soldier weapons (null: none, the stock templates), sent in the request's unit fields.
+    bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0,
+                const RequesterArms* arms=nullptr) noexcept;
     // The default preserves existing-vehicle migration. An explicit dynamic
     // intent additionally requires all-peer details and preflight native Validate.
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now,PreparedKind kind=PreparedKind::missionCrew) noexcept;
@@ -208,9 +213,12 @@ private:
         bool spawned=false;
         bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)
         bool readyPending=false;   // a peer: PREPARE heard, its READY waiting on Hooks::prepare (a load going on)
+        bool planned=false;        // host: planned, its soldiers armed; its BEGIN waiting on Hooks::prepare here (a load)
+        bool identified=false;     // host: its units' NetIds derived (once, before the BEGIN that may wait on a load)
         RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0,loadout=0;
         Plan plan{};
+        RequesterArms arms{};      // host: the request's (Submit / HostRequest), given to the plan's soldiers once planned
         std::uint32_t id=0,requester=0,request=0,received=0; // id is wire identity; array position is bounded storage only
         std::uint64_t since=0;
         std::array<unsigned char,kMaxPeers+1> ready{},result{},activated{}; // cancelled result: 1 legacy response, 2 explicit CANCEL ACK

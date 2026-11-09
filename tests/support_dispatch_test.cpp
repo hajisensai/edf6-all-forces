@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "../src/map_buttons.h"
+#include "../src/npc_tier.h"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
@@ -305,19 +306,26 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return 
 bool aircraftLeft=false;
 bool SupportAircraftLeft(const ObjRef&) noexcept {return aircraftLeft;}
 bool SupportSoldiersReady() noexcept {return allReady;}
+// npc_arms.h / support_soldier.h: this player's soldier weapons (localArms), their loads (armsLoad), the hooks (armsReady).
+bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResult armsLoad=support_net::PlanResult::ready;
+int armsAsked=0;
+bool SupportSoldierArmsReady() noexcept {return armsReady;}
+void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
-std::wstring lastLooks[16];
+std::wstring lastLooks[16];std::uint64_t lastArms[16]{};
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon) noexcept {
     if(nativeFail)return false;
-    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastResources[resourceCount++]=resource;}lastLocal=local;lastId=id;
+    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastResources[resourceCount++]=resource;}
+    lastLocal=local;lastId=id;
     *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look) noexcept {
-    return ApplySupportSoldierResource(matrix,resource,id,local,out,look);
+                                      const wchar_t* look,std::uint64_t weapon) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon);
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
@@ -647,6 +655,76 @@ int main() {
               lastSquadOrder.at[0]==d.plan.target[0] && lastSquadOrder.at[2]==d.plan.target[2],
               "no way past kStuckMs: the squad let go to guard the point on its own");
         routeResult=npc::navigation::Result::pending;
+    }
+    // 2026-11-09 review F4 (docs/feature-npc-weapon-tier.md): offline, each soldier carries this player's weapon of its
+    // kind (LocalRequesterArms), the plan is made once and kept while those weapons load (NpcArmsLoaded pending), then made.
+    {
+        // Two packings per kind: the first and the last tier row of it (the second tells a re-plan from the kept plan).
+        support_net::RequesterArms first{},second{};
+        for(int k=0;k<kSupportWeaponCount;++k)for(int r=0;r<npctier::kTierRowCount;++r)if(npctier::kTierRows[r].kind==k) {
+            npctier::Arms a;a.on=true;a.id=npctier::kTierRows[r].id;
+            if(!first.kind[k])first.kind[k]=npctier::PackArms(a);
+            second.kind[k]=npctier::PackArms(a);
+        }
+        const auto armedAsPlanned=[&](const support_net::RequesterArms& arms) {
+            bool ok=resourceCount==made && made>0,any=false;
+            for(int i=0;i<resourceCount;++i) {
+                const auto r=lastResources[i];
+                const std::uint64_t want=IsSupportSoldierResource(r) ? arms.kind[static_cast<int>(SupportSoldierWeapon(r))] : 0;
+                ok=ok && lastArms[i]==want;any=any || lastArms[i]!=0;
+            }
+            return ok && any;
+        };
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        localArms=first;armsLoad=support_net::PlanResult::ready;armsAsked=0;
+        check(SupportCallAt(21,target,note,128),"an armed offline infantry call is taken");
+        SupportDispatchTick();
+        check(made==4 && !offlinePending && armsAsked==1 && armedAsPlanned(first),
+              "offline: each soldier gets this player's weapon of its kind, its loads asked once, made");
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        localArms=first;armsLoad=support_net::PlanResult::pending;armsAsked=0;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(!made && offlinePending && offlinePlanned && armsAsked==1,"its weapons still loading: planned, nothing made");
+        localArms=second;fixtureMs+=16;SupportDispatchTick();
+        check(!made && offlinePending && armsAsked==2,"still loading: asked again each frame, nothing made");
+        armsLoad=support_net::PlanResult::ready;fixtureMs+=16;SupportDispatchTick();
+        check(made==4 && !offlinePending && !offlinePlanned && armedAsPlanned(first),
+              "loaded: the plan kept from the first frame is made once (never planned again with the later weapons)");
+        fixtureMs+=16;SupportDispatchTick();
+        check(made==4,"made once");
+        // Pending at the mission boundary: the kept plan is the last mission's and is never made.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        armsLoad=support_net::PlanResult::pending;armsAsked=0;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(offlinePlanned && !made,"pending again");
+        ResetSupportDispatch();armsLoad=support_net::PlanResult::ready;
+        check(!offlinePending && !offlinePlanned,"the mission reset drops the kept plan");
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(!made && armsAsked==1,"...and nothing of it is made after the reset");
+        // Its weapons' loads refused here: refunded, nothing made.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        {const std::int32_t pt=SupportPoints();
+        armsLoad=support_net::PlanResult::refused;
+        check(SupportCallAt(21,target,note,128) && SupportPoints()<pt,"paid");
+        SupportDispatchTick();
+        check(!made && !offlinePending && SupportPoints()==pt,"its weapons cannot be loaded: nothing made, its pt back");}
+        // The weapon hooks not in here: a plan whose soldiers carry player weapons is refused, never made stock.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+        armsLoad=support_net::PlanResult::ready;armsReady=false;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(!made && !offlinePending && resourceCount==0,"the hooks not in: an armed plan is refused, nothing made");
+        SupportPlan armedPlan{};
+        check(Plan(21,target,0,&armedPlan)==support_net::PlanResult::ready && Validate(armedPlan),"an unarmed plan validates without the hooks");
+        bool armedOne=false;
+        for(unsigned i=0;i<armedPlan.count;++i)if(IsSupportSoldierResource(armedPlan.units[i].resourceId)) {
+            armedPlan.units[i].arms=first.kind[static_cast<int>(SupportSoldierWeapon(armedPlan.units[i].resourceId))];
+            armedOne=armedOne || armedPlan.units[i].arms!=0;
+        }
+        check(armedOne && !Validate(armedPlan),"Validate: a unit with a player weapon, the hooks not in: refused");
+        armsReady=true;
+        check(Validate(armedPlan),"...and accepted with the hooks in");
+        localArms={};armsAsked=0;
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
     }
     ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::pending;
     {const std::int32_t pt=SupportPoints();

@@ -86,6 +86,8 @@ jobs:
           if ($LASTEXITCODE) { Write-Error 'src/cockpit_fields.inc is stale: run python tools/gen_cockpit_fields.py and commit it'; exit 1 }
           python tools/gen_spawn_catalog.py --check
           if ($LASTEXITCODE) { Write-Error 'src/spawn_catalog.inc / src/spawn_catalog_archives.h is stale: run python tools/gen_spawn_catalog.py (--archives with the game when the catalog changed) and commit it'; exit 1 }
+          python tools/gen_npc_tiers.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/npc_tiers.inc / docs/npc-weapon-tiers.md is stale: run python tools/gen_npc_tiers.py and commit it'; exit 1 }
           # src/pvp_units.inc: no game here, so it re-derives from the classes the committed file records.
           python tools/gen_pvp_units.py --check
           if ($LASTEXITCODE) { Write-Error 'src/pvp_units.inc is stale: run python tools/gen_pvp_units.py (with the game) and commit it'; exit 1 }

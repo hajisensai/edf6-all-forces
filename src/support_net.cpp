@@ -19,6 +19,7 @@
 #include "player_vehicle.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
+#include "npc_arms.h"
 #include "command_identity.h"
 #include "net_object_ref.h"
 #include "version_notice.h"
@@ -425,8 +426,11 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     };
     combined.planForRequester=&PlanForRequester;
     combined.prepare=[](const support_net::Plan& plan) noexcept {   // the range's rows load before READY (debug_spawn.cpp)
-        return debugspawn::NetworkCatalog(plan.catalogId) ? PrepareRangeEnemy(plan) :
-            hooks.prepare ? hooks.prepare(plan) : support_net::PlanResult::ready;
+        if(debugspawn::NetworkCatalog(plan.catalogId))return PrepareRangeEnemy(plan);
+        // The soldiers' player weapons (npc_arms.h) load here before READY, as the range's rows.
+        const auto arms=NpcArmsLoaded(plan);
+        if(arms!=support_net::PlanResult::ready)return arms;
+        return hooks.prepare ? hooks.prepare(plan) : support_net::PlanResult::ready;
     };
     combined.validate=[](const support_net::Plan& plan) noexcept {
         if(plan.catalogId==debugspawn::kPvpUnitCatalog)return PvpValidateSupportPlan(plan) && ValidateRangeEnemy(plan);
@@ -548,7 +552,13 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
         Note(note,size,running ? L"支援自动握手尚未完成：联机通道已连接，但部署协议未就绪" :
             L"支援联机通道未就绪：当前参与者或认证直连尚未同步");return false;
     }
-    if(!session.Submit(static_cast<std::uint32_t>(catalogId),target,GetTickCount64(),loadout)) {
+    // This player's soldier weapons (docs/feature-npc-weapon-tier.md), decided here and carried by the request; none for
+    // the sea rescue (its crew flies, offline as online: support_dispatch.cpp RescueHere) or the test range's rows.
+    support_net::RequesterArms arms{};
+    const auto catalog=static_cast<std::uint32_t>(catalogId);
+    if(!debugspawn::NetworkCatalog(catalog) && !(hooks.ownChannel && hooks.ownChannel(catalog)))
+        LocalRequesterArms(&arms);
+    if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms)) {
         Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }
