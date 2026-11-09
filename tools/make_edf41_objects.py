@@ -3596,6 +3596,73 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
     out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
                                         'ai': ai, 'fx': fx}))
+    hector_shield(games, files, out, a)
+
+
+# The 4.1 Hector's shield as the object 4.1 makes of it (docs/feedback-2026-11-08-edf41-hector-shield.md; EDF41.exe, H):
+# every arm weapon is an object of its own (Hector401_Shield: factory 0x3CB310, ctor 0x22A080, vtable 0xA98C10), attached by
+# 0x22A740, which builds the weapon's ragdoll from its SGO's `ragdoll` (0x3327E0, owner = the Hector, so a hit on it is a hit
+# on the Hector) and, for the shield only (+0x10C = 1, set by its ctor), tags every body with property 2 = the shield's team
+# (0x3342B0). Two readers of that tag: the bullet filter 0x169550 lets a bullet meet a tagged body only when the team table
+# says the bullet's team is hostile to the shield's (own and friendly fire passes), and the Hector's damage filter (vtable
+# 0xA987E0 slot 10, 0x2210E0) refuses a hit whose sub-hit nearest the hit centre is a tagged body. The shield has no HP and
+# no damage handler of its own (its 13-slot vtable): it stops hostile bullets and takes nothing, for good.
+# The port: the shield's mesh stays in the body model (alias_dsgo's armed body, the look and its glass animation), and
+# its collision is that object again: Hector401_Shield, an EventAnimationObject the plugin registers (src/edf41ai.cpp),
+# made from this SGO with 4.1's own shield ragdoll on a meshless copy of 4.1's shield model (its bones, which the ragdoll
+# binds to), placed every frame on the arm bone the shield's mesh hangs from (graft_skinned: the donor's model frame on the
+# arm bone), refusing every hit (slot 16), on the Hector's own body layer. The Hector's SGO names it in
+# edf41_hector_shield: {arms: [gun_control entry of each shielded arm], sgo: this SGO}.
+HECTOR_SHIELD_CLASS = 'Hector401_Shield'
+HECTOR_SHIELD_SGO = 'OBJECT/HECTOR401_SHIELD.SGO'                # 4.1's own path (its SGO, made over)
+HECTOR_SHIELD_MRAB = 'OBJECT/HECTOR401_SHIELD.MRAB'              # the meshless model
+HECTOR_SHIELD_CAS = 'OBJECT/HECTOR401_SHIELD_STILL.CAS'           # main / default, nothing moves
+HECTOR_SHIELD_KEY = 'edf41_hector_shield'
+# 4.1's shield ragdoll: the bodies 4.1 tags (all of them), checked against the file (hector_shield)
+HECTOR_SHIELD_BODIES = ('RagDollProxys.gun_arms', 'RagDollProxys.gun_shield')
+
+
+def app_path(rel: str) -> str:
+    """OBJECT/X.MRAB -> app:/Object/x.mrab (the form the port writes for its own files)."""
+    folder, name = rel.split('/', 1)
+    return f'app:/{folder.capitalize()}/{name.lower()}'
+
+
+def hector_shield(games: 'Games', files: dict[str, bytes], out: dsgo.Node, a: Alias) -> None:
+    """The shield object of a Hector variant holding one (see above): files[HECTOR_SHIELD_SGO] made over from 4.1's for
+    EventAnimationObject (the meshless model, the still CAS, 4.1's ragdoll; no material, no range), those two files
+    added, and the variant's edf41_hector_shield. ValueError when 4.1's files are not what this was written for. The same
+    bytes whichever variant makes them (build's clash check)."""
+    arms = [i for i, g in enumerate(a.guns) if g.fire.cls == HECTOR_SHIELD_CLASS]
+    if not arms:
+        return
+    import hk2014
+    version, mine = sgo.read(convert(games, HECTOR_SHIELD_SGO))   # 4.1's (files may hold another variant's made-over one)
+    if mine.get('xgs_scene_object_class') != HECTOR_SHIELD_CLASS:
+        raise ValueError(f'{HECTOR_SHIELD_SGO}: class {mine.get("xgs_scene_object_class")}, not {HECTOR_SHIELD_CLASS}')
+    am = mine['animation_model']
+    entry = model_entries(am[0])[0]
+    rag = mine['ragdoll']
+    shkt = rel_of(rag[0])
+    bodies = tuple(b.name for b in hk2014.rigid_bodies(hk2014.read(files.get(shkt) or convert(games, shkt))))
+    if bodies != HECTOR_SHIELD_BODIES:
+        raise ValueError(f'{shkt}: bodies {bodies}, not {HECTOR_SHIELD_BODIES}')
+    rab = convert(games, rel_of(entry[0]))
+    files[HECTOR_SHIELD_MRAB] = hidden_model(rab, entry[1], entry[1])
+    md = mdb.mdb_read(mdb.rab_read(files[HECTOR_SHIELD_MRAB]).files[0].data)
+    for body in bodies:
+        if not has_bone(md, body.split('.', 1)[1]):
+            raise ValueError(f'{shkt}: body {body} has no bone of that name in {entry[1]}')
+    flat = convert(games, MOTHER401_FLAT_CAS)
+    files[HECTOR_SHIELD_CAS] = cas_graft.hollow(cas_graft.alias_states(flat, {'main': [('default', 'close_state')]}))
+    files[HECTOR_SHIELD_SGO] = sgo.write_depth_first(version, {
+        'xgs_scene_object_class': HECTOR_SHIELD_CLASS,
+        'animation_model': [[[app_path(HECTOR_SHIELD_MRAB), entry[1]]], app_path(HECTOR_SHIELD_CAS), am[2]],
+        'ragdoll': rag,
+        # EventAnimationObject's durability (GameObjectBase reads it): any above 0; the plugin makes it take no damage
+        'game_object_durability': 1.0,
+    })
+    out.set(HECTOR_SHIELD_KEY, dsgo_value({'arms': [float(i) for i in arms], 'sgo': app_path(HECTOR_SHIELD_SGO)}))
 
 
 # EDF6_Berserker_Large's material_animation slots (BerserkerBase, EDF.dll, enabled through 0x6DC830 / 0x6C0200(model,
