@@ -185,6 +185,12 @@ struct Entry {
         std::uint32_t shots=0;
     } fx[hector::kArms];
     bool fxRead=false;
+    // the shields (SGO edf41_hector_shield; Hector401_Shield below): the arms that hold one, the shield objects
+    bool shieldRead=false;
+    unsigned shieldMask=0;               // bit i: gun_control entry i is a shield (it never fires)
+    wchar_t shieldPath[128]{};
+    bool shieldMade[hector::kArms]{};
+    edf41c::WeakRef shield[hector::kArms];
 };
 
 std::atomic<int> animState{0};          // 0 unchecked, 1 the functions are this build's, 2 they are not: no animation
@@ -353,6 +359,14 @@ float FlatDistance(void* self,const float* target) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 
+void DropShields(Entry& e) noexcept;
+void EraseEntry(const void* self) noexcept {
+    const auto it=table.find(self);
+    if(it==table.end())return;
+    DropShields(it->second);
+    table.erase(it);
+}
+
 // The entry of a 4.1 Hector, or null. Call with tableLock held.
 Entry* Find(const void* self) noexcept {
     const auto it=table.find(self);
@@ -372,7 +386,7 @@ void Tick(void* self) noexcept {
     const ObjRef ref=ObjRef::Of(self);
     if(!marked || !ref.ctrl) {
         std::lock_guard<std::mutex> hold(tableLock);
-        table.erase(self);
+        EraseEntry(self);
         return;
     }
     float target[3];
@@ -381,15 +395,15 @@ void Tick(void* self) noexcept {
     const ULONGLONG now=GetTickCount64();
     std::lock_guard<std::mutex> hold(tableLock);
     auto cached=table.find(self);
-    if(cached!=table.end() && !hector::CacheMatches(cached->second.ref.ctrl,ref.ctrl,marked))table.erase(cached);
+    if(cached!=table.end() && !hector::CacheMatches(cached->second.ref.ctrl,ref.ctrl,marked))EraseEntry(self);
     Entry* e=Find(self);
     if(e && now-e->last>kStaleMs) {      // another object at this address, or a long pause: start again
-        table.erase(self);
+        EraseEntry(self);
         e=nullptr;
     }
     if(!e) {
         if(known && !ReadConfig(self,cfg)) {     // the entry went stale (or away) after the marker-only check: parse it now
-            table.erase(self);
+            EraseEntry(self);
             return;
         }
         e=&table[self];
@@ -414,8 +428,11 @@ void Tick(void* self) noexcept {
             Log("EDF41AI backoff end %p dist %.1f next counter %.0f stop radius %.1f",self,e->dist,e->cycle.counter,e->cycle.stopRadius);
     }
     if((++ticks&0x3FFF)==0)       // forget the objects that are gone
-        for(auto it=table.begin();it!=table.end();)
-            it=now-it->second.last>kStaleMs ? table.erase(it) : std::next(it);
+        for(auto it=table.begin();it!=table.end();) {
+            if(now-it->second.last<=kStaleMs) { ++it; continue; }
+            DropShields(it->second);
+            it=table.erase(it);
+        }
 }
 
 // Whether gun `i` of the owner attacks now: the class's own gate for its per-gun aim (0x34F913..0x34F94E).
@@ -647,12 +664,156 @@ void Effects(void* self,Entry& e) noexcept {
     }
 }
 
+// ---- the shield (tools/make_edf41_objects.py hector_shield; docs/feedback-2026-11-08-edf41-hector-shield.md) ---------------------
+// 4.1 (EDF41.exe, H): the shield is an object of its own (Hector401_Shield, vtable 0xA98C10) whose ragdoll bodies all carry
+// property 2 (0x3342B0); bullets meet them only when hostile to the shield's team (0x169550) and the Hector refuses a hit
+// landing on them (slot 10 0x2210E0): it stops the player's bullets and takes nothing. Here: an EventAnimationObject of the
+// plugin's class Hector401_Shield (4.1's shield ragdoll on a meshless shield model; the mesh the player sees is part of the
+// body model), made by its Hector's update from the SGO edf41_hector_shield names, its matrix the arm bone's world after the
+// arms are aimed (the shield mesh hangs from that bone: mdb.graft_skinned puts the donor's model frame on it), the Hector's
+// team, not registered (no target, not counted), its bodies on the Hector's own ragdoll layer (WalkingEnemyBase +0xD80,
+// 0x53BCD9; EventAnimationObject's constructor put them on the map layer 0x11, which walkers and climbers take for ground),
+// refusing every hit (slot 16). It goes when its Hector dies or goes (its own update checks), or when the Hector's entry
+// here is dropped. Every machine makes its own for its own copy of the Hector: it takes no damage, so nothing of it travels.
+constexpr std::size_t kHectorRagdollAt=0xD80;   // WalkingEnemyBase's ragdoll component (0x53BCD9; the kind EAO has at +0xAA0)
+constexpr std::size_t kHectorTeamAt=0x314;
+constexpr int kShieldAccept=16;                  // slot 16 Accept(object, GDI*) -> bool (ApplyDamage 0x547C30 asks it)
+struct ShieldRec {
+    edf41c::WeakRef owner;
+    bool layered=false;
+    bool gone=false;                             // DeleteObject asked
+};
+std::mutex shieldLock;
+std::unordered_map<const void*,ShieldRec> shields;
+edf41c::Clone shieldClone{"EventAnimationObject (Hector401_Shield)",edf41c::kEaoVtable,45,edf41c::kEaoSlots,{},{},{}};
+std::atomic<int> shieldsMade{0};
+
+std::uint64_t __fastcall ShieldDtor(void* self,unsigned flags) {
+    {
+        std::lock_guard<std::mutex> hold(shieldLock);
+        const auto it=shields.find(self);
+        if(it!=shields.end()) { edf41c::WeakReset(it->second.owner); shields.erase(it); }
+    }
+    return reinterpret_cast<edf41c::DtorFn>(shieldClone.orig[edf41c::kSlotDtor])(self,flags);
+}
+std::uint64_t __fastcall ShieldUpdate(void* self,void* dt) {
+    bool drop=false;
+    {
+        std::lock_guard<std::mutex> hold(shieldLock);
+        const auto it=shields.find(self);
+        if(it!=shields.end() && !it->second.gone) {
+            const ShieldRec& r=it->second;
+            drop=!edf41c::WeakAlive(r.owner) ||
+                 *reinterpret_cast<const std::uint8_t*>(static_cast<const char*>(r.owner.object)+kDestroyedAt)!=0;
+            if(drop)it->second.gone=true;
+        }
+    }
+    if(drop)edf41c::DeleteObject(self);   // its Hector died or went: so does the shield
+    return reinterpret_cast<edf41c::UpdateFn>(shieldClone.orig[edf41c::kSlotUpdate])(self,dt);
+}
+std::uint64_t __fastcall ShieldMessage(void* self,std::uint32_t msg,void* data) {
+    return reinterpret_cast<edf41c::MessageFn>(shieldClone.orig[edf41c::kSlotMessage])(self,msg,data);
+}
+bool __fastcall ShieldAccept(void*,void*) { return false; }   // 4.1: no hit on the shield counts (0x2210E0)
+
+void CreateShield(void* info) noexcept {
+    void* obj=edf41c::CloneObject(shieldClone,edf41c::kEaoCtor,edf41c::kEaoSize,info);
+    if(!obj)return;
+    // EventAnimationObject's constructor set +0x380 bit 0 (no HP loss); nothing aims at it and no count waits for it
+    edf41c::SetFlag(obj,edf41c::kNoHpLoss|edf41c::kNotTarget|edf41c::kNotCounted,true);
+    std::lock_guard<std::mutex> hold(shieldLock);
+    shields[obj]=ShieldRec{};
+}
+
+// The shield arms and the SGO path of edf41_hector_shield ({arms: [entry...], sgo: path}); none: no shield.
+void ReadShield(void* self,Entry& e) noexcept {
+    e.shieldRead=true;
+    const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
+    Handle key{},arms{},path{};
+    if(!Child(root,L"edf41_hector_shield",key))return;
+    if(!AnimReady() || !Child(key,L"arms",arms) || !Child(key,L"sgo",path)) {
+        Log("EDF41AI hector %p: edf41_hector_shield is not {arms, sgo} (or the SGO readers are not this build's): no shield",self);
+        return;
+    }
+    const int n=CountOf(arms);
+    for(int i=0;i<n && i<hector::kArms;++i) {
+        const Handle a=At(arms,i);
+        const float v=reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&a);
+        if(v>=0.0f && v<static_cast<float>(hector::kArms))e.shieldMask|=1u<<static_cast<int>(v);
+    }
+    const wchar_t* text=reinterpret_cast<const wchar_t*(__fastcall*)(const Handle*)>(image+kNodeText)(&path);
+    if(text)wcsncpy_s(e.shieldPath,text,_TRUNCATE);
+    if(!e.shieldPath[0])e.shieldMask=0;
+    Log("EDF41AI hector %p shields: arms %s%s (%ls)",self,(e.shieldMask&1u) ? "L" : "",(e.shieldMask&2u) ? "R" : "",e.shieldPath);
+}
+
+void DropShields(Entry& e) noexcept {
+    for(int i=0;i<hector::kArms;++i) {
+        if(edf41c::WeakAlive(e.shield[i]))edf41c::DeleteObject(e.shield[i].object);
+        edf41c::WeakReset(e.shield[i]);
+    }
+}
+
+// After the arms are aimed (their world matrices are this frame's): each shield made once, then kept on its arm bone.
+void Shields(void* self,Entry& e) noexcept {
+    if(!e.shieldRead)ReadShield(self,e);
+    if(!e.shieldMask)return;
+    if(*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) { DropShields(e); return; }
+    char* skel=static_cast<char*>(self)+kSkeletonAt;
+    char* recs=Readable(skel,0x28) ? *reinterpret_cast<char**>(skel+0x10) : nullptr;
+    const std::int64_t count=recs ? *reinterpret_cast<const std::int64_t*>(skel+0x20) : 0;
+    const std::int32_t team=*reinterpret_cast<const std::int32_t*>(static_cast<char*>(self)+kHectorTeamAt);
+    for(int i=0;i<hector::kArms;++i) {
+        if(!(e.shieldMask&(1u<<i)) || e.arm[i]<0 || e.arm[i]>=count)continue;
+        float m[16];
+        std::memcpy(m,recs+static_cast<std::size_t>(e.arm[i])*kBoneSize+kBoneWorldAt,sizeof(m));
+        if(!Finite16(m))continue;
+        if(!e.shieldMade[i]) {           // once: a shield the game would not make is not asked for again
+            e.shieldMade[i]=true;
+            void* obj=edf41c::CreateFromPath(m,e.shieldPath);
+            bool ours=false;
+            if(obj) {
+                std::lock_guard<std::mutex> hold(shieldLock);
+                const auto it=shields.find(obj);
+                ours=it!=shields.end();
+                if(ours)edf41c::WeakSet(it->second.owner,self);
+            }
+            if(!ours) {
+                Log("EDF41AI hector %p arm %d: %ls made %p, no Hector401_Shield: this Hector's shield stops nothing",self,i,e.shieldPath,obj);
+                if(obj)edf41c::DeleteObject(obj);
+                continue;
+            }
+            edf41c::SetTeam(obj,team,false);
+            edf41c::WeakSet(e.shield[i],obj);
+            Log("EDF41AI hector %p arm %d: shield #%d %p made, team %d",self,i,++shieldsMade,obj,team);
+        }
+        if(!edf41c::WeakAlive(e.shield[i]))continue;
+        char* obj=static_cast<char*>(e.shield[i].object);
+        std::memcpy(obj+edf41c::kMatrixAt,m,sizeof(m));
+        if(*reinterpret_cast<const std::int32_t*>(obj+kHectorTeamAt)!=team)edf41c::SetTeam(obj,team,false);
+        bool layered=true;
+        {
+            std::lock_guard<std::mutex> hold(shieldLock);
+            const auto it=shields.find(obj);
+            if(it!=shields.end()) { layered=it->second.layered; it->second.layered=true; }
+        }
+        if(!layered) {                   // once, after the constructor built its ragdoll on the map layer
+            const int from=edf41c::RagdollLayer(obj+edf41c::kEaoRagdoll);
+            const int to=edf41c::RagdollLayer(static_cast<char*>(self)+kHectorRagdollAt);
+            const bool moved=to>=0 && from>=0 && (from==to || edf41c::SetRagdollLayer(obj+edf41c::kEaoRagdoll,to));
+            Log("EDF41AI hector %p arm %d: shield %p bodies on layer %d, the Hector's %d: %s",self,i,obj,from,to,
+                moved ? "now the Hector's" : "LEFT where they are (walkers may take it for ground)");
+        }
+    }
+}
+
 std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     Tick(self);
     const std::uint64_t result=reinterpret_cast<BaseUpdateFn>(image+kBaseUpdate)(self,dt);
     std::lock_guard<std::mutex> hold(tableLock);
     if(Entry* e=Find(self)) {
         AimArms(self,*e);
+        Shields(self,*e);
         if(!*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt))Effects(self,*e);
         if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) {
             StepHead(self,*e);
@@ -757,10 +918,15 @@ void __fastcall GunStartHook(void* gun) {
         const char* base=static_cast<char*>(owner);
         void** guns=*reinterpret_cast<void***>(const_cast<char*>(base)+kGunsAt);
         const std::uint64_t count=*reinterpret_cast<const std::uint64_t*>(base+kGunCountAt);
-        if(e && !EnemyControlTargetActive(owner) && e->haveTarget && count==hector::kArms && guns) {
-            int index=-1;
+        int index=-1;
+        if(e && count==hector::kArms && guns)
             for(int i=0;i<hector::kArms;++i)
                 if(guns[2*i]==gun)index=i;
+        // a shield arm's gun_control entry is there because the class wants one per arm; 4.1's shield has no weapon
+        // (Hector401_Shield's vtable: no fire), so it never starts, whoever drives the Hector
+        if(e && !e->shieldRead)ReadShield(owner,*e);
+        if(index>=0 && (e->shieldMask&(1u<<index)))return;
+        if(e && !EnemyControlTargetActive(owner) && e->haveTarget && count==hector::kArms && guns) {
             if(e->pickTick!=e->tick) {          // one pick per attack: the loop starts the arms in the same tick
                 e->pickTick=e->tick;
                 e->pickMask=hector::PickArms(e->cfg,e->rng,e->dist);
@@ -795,8 +961,15 @@ bool InstallEdf41Ai() noexcept {
         gaits+=RedirectCall(image+site,image+kCasPlayState,reinterpret_cast<void*>(&GaitStateHook),changed) ? 1 : 0;
     for(const std::size_t site:kGaitRateSites)
         rates+=RedirectCall(image+site,image+kCasSetRate,reinterpret_cast<void*>(&GaitRateHook),changed) ? 1 : 0;
-    Log("EDF41AI hooked: update=%d walk=%d/3 face=%d/3 gun start=%d/2 gait state=%d/4 rate=%d/2",ok ? 1 : 0,walks,faces,guns,
-        gaits,rates);
+    // the shields (4.1's Hector401_Shield as an object again: Shields above)
+    bool shield=edf41c::BuildClone(shieldClone,&ShieldDtor,&ShieldUpdate,&ShieldMessage);
+    if(shield) {
+        edf41c::SetSlot(shieldClone,kShieldAccept,reinterpret_cast<void*>(&ShieldAccept));
+        edf41c::AllowAnyTeam(shieldClone);   // EventAnimationObject's slot 22 takes team 6 only: the Hector's team would not take
+        shield=edf41c::AddFactory(L"Hector401_Shield",&CreateShield);
+    }
+    Log("EDF41AI hooked: update=%d walk=%d/3 face=%d/3 gun start=%d/2 gait state=%d/4 rate=%d/2 shield class=%d",ok ? 1 : 0,walks,faces,guns,
+        gaits,rates,shield ? 1 : 0);
     return ok && walks==3 && faces==3 && guns==2 && gaits==4 && rates==2;
 }
 }  // namespace crew

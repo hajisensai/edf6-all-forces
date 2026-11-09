@@ -669,6 +669,37 @@ int HitBody(void* ragdoll,const void* damageInfo) noexcept {
     }
     return At<int(__fastcall*)(void*,std::uint32_t)>(kBodyById)(ragdoll,body);
 }
+namespace {
+constexpr std::size_t kBodyFilterInfo=0x11B1240,kRagdollSetLayer=0x6E9320;
+constexpr Print kLayerPrints[]={
+    {kBodyFilterInfo,{0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00}},{kRagdollSetLayer,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
+};
+std::atomic<int> layerState{0};   // 0 unchecked, 1 good, 2 refused
+bool LayerCode() noexcept {
+    const int s=layerState.load();
+    if(s)return s==1;
+    bool ok=true;
+    for(const Print& p:kLayerPrints)ok=ok && Readable(image+p.rva,8) && std::memcmp(image+p.rva,p.bytes,8)==0;
+    if(!ok)Log("EDF41CLASS the collision layer code is not what this was written for: ragdoll layers are left as they are");
+    layerState=ok ? 1 : 2;
+    return ok;
+}
+}  // namespace
+int RagdollLayer(void* ragdoll) noexcept {
+    const char* r=static_cast<const char*>(ragdoll);
+    if(!ragdoll || !LayerCode() || !Readable(r+0x78,0x18))return -1;
+    const char* data=*reinterpret_cast<const char* const*>(r+0x78);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(r+0x88);
+    if(!data || !n || n>4096 || !Readable(data+0x50,8))return -1;
+    void* handle=*reinterpret_cast<void* const*>(data+0x50);
+    if(!handle || !Readable(static_cast<char*>(handle)+0xF0,0x18))return -1;
+    return static_cast<int>(At<std::uint32_t(__fastcall*)(void*)>(kBodyFilterInfo)(handle)&31u);
+}
+bool SetRagdollLayer(void* ragdoll,int layer) noexcept {
+    if(layer<0 || layer>=32 || RagdollLayer(ragdoll)<0)return false;
+    At<void(__fastcall*)(void*,int)>(kRagdollSetLayer)(ragdoll,layer);
+    return RagdollLayer(ragdoll)==layer;
+}
 int RagdollBody(void* ragdoll,const wchar_t* name) noexcept {
     if(!Prims() || !ragdoll || !Rd(ragdoll,0x90,"ragdoll"))return -1;
     return At<int(__fastcall*)(void*,const wchar_t*)>(kBodyByName)(ragdoll,name);
