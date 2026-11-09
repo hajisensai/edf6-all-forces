@@ -87,19 +87,23 @@ bool InstallFramePacing() noexcept {
     const HANDLE probe=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_MODIFY_STATE|SYNCHRONIZE);
     if(!probe){Log("PACING no high-resolution timer (error %lu): the game's waits left as they are",GetLastError());return false;}
     CloseHandle(probe);
-    if(!edf::Matches(image,kPumpSleep-sizeof(kPumpArg),kPumpArg,sizeof(kPumpArg)) ||
-       !edf::Matches(image,kTickSleep-sizeof(kTickArg),kTickArg,sizeof(kTickArg)) ||
-       !edf::Matches(image,kTickCount,kTickCountSig,sizeof(kTickCountSig))) {
-        Log("PACING the game's waits or its tick clock are not as read (another hook?): left as they are");
-        return false;
+    // Each wait on its own: PumpWait reads no tick clock, so the clock's signature and period gate TickWait only.
+    bool pump=false,tick=false;
+    if(edf::Matches(image,kPumpSleep-sizeof(kPumpArg),kPumpArg,sizeof(kPumpArg)))
+        pump=edf::RedirectImportCall(image+kPumpSleep,kPumpSig,reinterpret_cast<void*>(&PumpWait),&gameSleep);
+    else Log("PACING the window thread's wait is not as read (another hook?): left as it is");
+    if(!edf::Matches(image,kTickSleep-sizeof(kTickArg),kTickArg,sizeof(kTickArg)))
+        Log("PACING the frame step's wait is not as read (another hook?): left as it is");
+    else if(!edf::Matches(image,kTickCount,kTickCountSig,sizeof(kTickCountSig)))
+        Log("PACING the tick clock 0x11DAE60 is not as read (another MOD or hook?): the frame step's wait left as it is");
+    else {
+        LARGE_INTEGER freq;
+        QueryPerformanceFrequency(&freq);   // fixed at boot; 0x11DAE60 asks it each call (0x66D60) for the same value
+        qpcFreq=static_cast<std::uint64_t>(freq.QuadPart);
+        tickPeriod=pacing::TickPeriod(qpcFreq);
+        if(!tickPeriod)Log("PACING QPC frequency %llu: no tick period, the frame step's wait left as it is",qpcFreq);
+        else tick=edf::RedirectImportCall(image+kTickSleep,kTickSig,reinterpret_cast<void*>(&TickWait),&gameSleep);
     }
-    LARGE_INTEGER freq;
-    QueryPerformanceFrequency(&freq);   // fixed at boot; 0x11DAE60 asks it each call (0x66D60) for the same value
-    qpcFreq=static_cast<std::uint64_t>(freq.QuadPart);
-    tickPeriod=pacing::TickPeriod(qpcFreq);
-    if(!tickPeriod){Log("PACING QPC frequency %llu: no tick period, the game's waits left as they are",qpcFreq);return false;}
-    const bool pump=edf::RedirectImportCall(image+kPumpSleep,kPumpSig,reinterpret_cast<void*>(&PumpWait),&gameSleep);
-    const bool tick=edf::RedirectImportCall(image+kTickSleep,kTickSig,reinterpret_cast<void*>(&TickWait),&gameSleep);
     Log("PACING window thread wait=%d, frame step wait=%d",pump,tick);
     return pump && tick;
 }

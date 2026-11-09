@@ -985,6 +985,8 @@ set_target_properties(frame_pacing_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
 add_test(NAME frame_pacing_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(frame_pacing_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# Each of the two waits installed on its own checks only (tests/frame_pacing_install_guard.py).
+add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
