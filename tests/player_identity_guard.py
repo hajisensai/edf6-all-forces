@@ -102,7 +102,7 @@ LOCAL_ONLY = {
 PLAYER_NETID = re.compile(r'ReadNativeObjectId\(\s*(PlayerHuman\(\)|me|human|who|by|caller|s\.by|'
                           r'static_cast<const unsigned char\*>\(\s*(requester|actor|owner|ownerPlayer)\.obj\s*\))\s*,')
 VERSIONS = [
-    ('src/mod_room.h', r'kAllForcesRoomProtocol=(\d+)', 7),
+    ('src/mod_room.h', r'kAllForcesRoomProtocol=(\d+)', 8),
     ('src/command_protocol.h', r'kMinVersion=(\d+)', 9),
     ('src/player_vehicle_logic.h', r'kVersion=(\d+)', 3),
     ('src/barrage_net_protocol.h', r'kVersion=(\d+)', 4),

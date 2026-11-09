@@ -2,6 +2,7 @@
 #include "../src/support_protocol.h"
 #include "../src/support_loadout.h"
 #include "../src/support_submarine.h"
+#include "../src/npc_tier.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,7 +25,7 @@ bool SamePlanSpecs(const Plan& a,const Plan& b) noexcept {
        std::memcmp(a.requester,b.requester,sizeof(a.requester)) || a.team!=b.team)return false;
     for(std::uint32_t i=0;i<kMaxUnits;++i) {
         const auto& x=a.units[i];const auto& y=b.units[i];
-        if(x.resourceId!=y.resourceId || x.role!=y.role || x.variant!=y.variant ||
+        if(x.resourceId!=y.resourceId || x.role!=y.role || x.variant!=y.variant || x.arms!=y.arms ||
            std::memcmp(x.matrix,y.matrix,sizeof(x.matrix)) || std::memcmp(x.netId,y.netId,sizeof(x.netId)))return false;
     }
     return true;
@@ -68,6 +69,7 @@ struct Node {
     std::vector<std::pair<std::uint32_t,RequestStatus>> notices;
     std::vector<std::uint64_t> destroyedTokens;
     std::vector<std::string> refusals;   // the host's causes (Hooks::refused)
+    PlanResult prepare=PlanResult::ready;int prepares=0;   // Hooks::prepare: the soldiers' weapons loaded here (npc_arms.h)
 };
 Node* current=nullptr;
 struct Packet { unsigned from,to;Message message; };
@@ -158,6 +160,7 @@ bool DeriveForSession(std::uint32_t ordinal,unsigned char* out) noexcept {return
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
 void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
 void Refused(std::uint32_t,std::uint32_t,const char* why) noexcept { current->refusals.emplace_back(why ? why : ""); }
+PlanResult Prepare(const Plan&) noexcept { ++current->prepares;return current->prepare; }
 void RequesterPlanner(Node& node,bool only=false) {
     Backend b{&node,&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
     b.hooks.notice=&Notice;b.hooks.variants=&Hello;
@@ -168,7 +171,7 @@ Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
-        b.hooks.notice=&Notice;b.hooks.variants=&Hello;b.hooks.refused=&Refused;
+        b.hooks.notice=&Notice;b.hooks.variants=&Hello;b.hooks.refused=&Refused;b.hooks.prepare=&Prepare;
         b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
@@ -238,6 +241,67 @@ void Capabilities() {
     {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
      r.legacyNode=999;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}
+}
+// 2026-11-08 (docs/feature-npc-weapon-tier.md): a support soldier carries the requester's weapon one tier below its own.
+// The requester decides it (npc_arms.h LocalRequesterArms) and its request carries it in the unit fields a request left
+// zero; the host gives each planned soldier its kind's, every unit message carries it, every peer builds the same soldier.
+// The wire stays v2: the room protocol (mod_room.h 8) keeps older builds out.
+bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status);
+RequesterArms SomeArms() {
+    RequesterArms a{};
+    crew::npctier::Arms rifle;rifle.on=true;rifle.id=26;for(int i=0;i<8;++i)rifle.stars[i]=static_cast<std::uint8_t>(i+2);
+    crew::npctier::Arms lance;lance.on=true;lance.id=385;lance.stars[0]=10;
+    a.kind[0]=crew::npctier::PackArms(rifle);a.kind[5]=crew::npctier::PackArms(lance);
+    return a;
+}
+void Arms() {
+    const RequesterArms arms=SomeArms();
+    unsigned char bytes[kWireSize];Message out;
+    {Message m;m.kind=Kind::request;m.epoch=3;m.request=4;m.catalog=5;m.arms=arms;
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out),"a request with arms round-trips");
+     bool same=true;for(std::uint32_t k=0;k<kArmsKinds;++k)same=same && out.arms.kind[k]==arms.kind[k];
+     Check(same && out.request==4,"every kind's arms exact");
+     Check(bytes[4]==2 && bytes[5]==0,"the support wire stays v2");
+     bytes[68+6*kArmsKinds]=1;Check(!Decode(bytes,sizeof(bytes),out),"the request's unused unit bytes stay zero");
+     Check(Encode(m,bytes,sizeof(bytes)),"re-encode");bytes[68]=0xFF;bytes[69]=0xFF;
+     Check(!Decode(bytes,sizeof(bytes),out),"none (0xFFFF) with stars refused");
+     RequesterArms bad=arms;bad.kind[1]=arms.kind[0];m.arms=bad;
+     Check(!Encode(m,bytes,sizeof(bytes)),"another kind's weapon never leaves");
+     bad=arms;bad.kind[0]|=0xFull<<16;m.arms=bad;
+     Check(!Encode(m,bytes,sizeof(bytes)),"a star over 10 never leaves");
+     m.arms=RequesterArms{};
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && !out.arms.kind[0] && !out.arms.kind[13],"no arms: all none");}
+    {Message m;m.kind=Kind::unit;m.epoch=22;m.transaction=1;m.index=3;m.unit.resourceId=crew::kSupportRangerResource;
+     m.unit.matrix[0]=m.unit.matrix[5]=m.unit.matrix[10]=m.unit.matrix[15]=1;Derive(7,m.unit.netId);m.unit.arms=arms.kind[0];
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.arms==arms.kind[0] && out.request==0,
+           "a unit's arms round-trip in its request word and its last word");
+     m.unit.arms=arms.kind[5];Check(!Encode(m,bytes,sizeof(bytes)),"a ranger with a lance refused");
+     m.unit.resourceId=crew::kSupportVehicleResource;m.unit.arms=arms.kind[0];Check(!Encode(m,bytes,sizeof(bytes)),"a vehicle carries none");
+     Message b;b.kind=Kind::begin;b.epoch=22;b.transaction=1;b.count=1;b.catalog=5;
+     Check(Encode(b,bytes,sizeof(bytes)),"begin encodes");bytes[175]=1;Check(!Decode(bytes,sizeof(bytes),out),"a begin's last word stays zero");}
+    // A guest's request: the host plans, gives each soldier its kind's arms, every peer makes the same.
+    {Room r(3);const float at[3]={10,20,30};
+     r.With(1);Check(current->session->Submit(5,at,r.now,0,&arms),"a guest submits with its arms");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"every peer spawns once");
+     bool given=true;for(std::uint32_t i=0;i<r.nodes[0]->last.count;++i)given=given && r.nodes[0]->last.units[i].arms==arms.kind[0];
+     Check(given,"every rifle soldier the requester's rifle arms");
+     Check(SamePlanSpecs(r.nodes[0]->last,r.nodes[1]->last) && SamePlanSpecs(r.nodes[0]->last,r.nodes[2]->last),"every peer the same arms");
+     Check(r.nodes[0]->prepares>=1 && r.nodes[1]->prepares>=1 && r.nodes[2]->prepares>=1,"every peer asked whether the weapons are loaded");}
+    // The host's own request, its weapons loading: BEGIN waits for them, then the room makes it.
+    {Room r(3);const float at[3]={10,20,30};r.nodes[0]->prepare=PlanResult::pending;
+     r.With(0);Check(current->session->Submit(5,at,r.now,0,&arms),"the host submits with its arms");r.Settle();
+     bool began=false;for(const auto& p:r.history)began=began || p.message.kind==Kind::begin;
+     Check(!began && r.nodes[0]->plans==1,"the host's BEGIN waits for its loads, planned once");
+     r.nodes[0]->prepare=PlanResult::ready;r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"loaded: every peer spawns once");
+     Check(r.nodes[0]->plans==1,"never planned again");}
+    {Room r(3);const float at[3]={10,20,30};r.nodes[0]->prepare=PlanResult::refused;
+     r.With(1);Check(current->session->Submit(5,at,r.now,0,&arms),"a request whose weapon cannot load on the host");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==0,"refused: nothing made");
+     Check(Told(r,1,1,RequestStatus::refused),"the requester told refused");}
+    {Room r(3);const float at[3]={10,20,30};
+     RequesterArms bad=arms;bad.kind[2]=arms.kind[0];
+     r.With(1);Check(!current->session->Submit(5,at,r.now,0,&bad),"arms of the wrong kind never submitted");}
 }
 void Loadout() {
     // A composed load (support_call.h PackSupportLoadout) rides in the request's challenge: the host's plan sees it; an
@@ -1083,4 +1147,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Arms();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

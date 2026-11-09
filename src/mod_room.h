@@ -20,8 +20,11 @@ namespace crew {
 //      bytes 20..23 (the targets too: a teammate grabbed, a player marked or attacked), anything else by its NetId; an
 //      ultimate's / barrage's caller sent fallen too: QMRK v3, GRVT/FGUN v4, ULTS v3, BRGS v3, map commands v9, PVEH v3,
 //      enemy control v6 (its projectiles' targets and the Deiroi / monster codecs v2); the support wire keeps v2.
+//   8 (2026-11-08): a support soldier carries the requesting player's weapon one tier below its own and a player's attack
+//      coefficient (docs/feature-npc-weapon-tier.md): a request carries the requester's weapons, a unit its own
+//      (support_protocol.cpp, Unit::arms; the support wire keeps v2), every peer builds the soldier with it.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=7;
+constexpr std::int64_t kAllForcesRoomProtocol=8;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

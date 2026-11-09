@@ -27,6 +27,20 @@ int asked=0;
 bool FakeInstalled(const wchar_t* file) noexcept { ++asked;return ourFilesThere && !wcsncmp(file,L"EDF6VC_",7); }
 unsigned char registeredId[32]{};
 void Check(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
+// The human's constructor's soldier_load_weapon loop (support_soldier.cpp kLoadWeaponSite): its main weapon (index 0)
+// and a second one (a Fencer's AI shield), each through the hooked call when simulateLoad.
+bool simulateLoad=false;int loads=0;wchar_t loadPaths[8][96]{};std::uint8_t loadStars[8][8]{};void* loadHuman[8]{};
+void* __fastcall FakeLoad(void* human,const support_native::MsvcWide* path,const void* stars) {
+    if(loads<8){wcscpy_s(loadPaths[loads],path->ptr);std::memcpy(loadStars[loads],stars,8);loadHuman[loads]=human;}
+    ++loads;return nullptr;
+}
+float __fastcall FakeCoef(void*,float) {return 0.5f;}
+void LoadTemplateWeapons(void* human) {
+    alignas(8) std::uint8_t five[8];std::memset(five,5,sizeof five);
+    const wchar_t* main=L"app:/weapon/aisoldierrifle01.sgo";const wchar_t* second=L"app:/weapon/aiheavyshield01.sgo";
+    const support_native::MsvcWide a{main,0,wcslen(main),wcslen(main)},b{second,0,wcslen(second),wcslen(second)};
+    support_native::LoadWeaponHook(human,&a,five);support_native::LoadWeaponHook(human,&b,five);
+}
 unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,support_native::InitParam* init) {
     if(made==failAt)return nullptr;
     const int i=made++;
@@ -39,6 +53,7 @@ unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,suppor
     auto* o=objects[i];auto* c=controls[i];std::memset(o,0,sizeof objects[i]);std::memset(c,0,16);
     Put<unsigned>(o,0,wrong ? 0 : 0x534F4C44);Put<void*>(o,0x28,o);Put<void*>(o,0x30,c);
     Put<LONG>(c,8,1);Put<LONG>(c,12,1);std::memcpy(o+0x90,m+12,12);
+    if(simulateLoad)LoadTemplateWeapons(o);
     return o;
 }
 void __fastcall Delete(void* o){++deleted;Put<unsigned char>(o,0x18,4);}
@@ -206,6 +221,36 @@ int main() {
           wcsstr(SupportSoldierFailureText(),L"预载异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
           "preload SEH is a persistent mission-resource fault, not unsupported native profile");
     const int oldMade=made;Check(!SpawnSupportSoldier(poses[0],&one) && made==oldMade,"preload fault does not retry construction");
+    // 2026-11-08 (docs/feature-npc-weapon-tier.md): a soldier given a player weapon gets it in place of its template's
+    // main one (its stars too), a player's attack coefficient (1) at its SetLevel; every other soldier the stock ones.
+    Setup();support_native::arms=true;support_native::loadWeaponNext=&FakeLoad;support_native::coefNext=&FakeCoef;simulateLoad=true;loads=0;
+    Check(SupportSoldierArmsReady(),"the weapon hooks in: soldiers can be armed");
+    {npctier::Arms w;w.on=true;w.id=26;for(int i=0;i<8;++i)w.stars[i]=static_cast<std::uint8_t>(i);
+     const auto packed=npctier::PackArms(w);
+     ObjRef armed,plain;
+     Check(ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&armed,nullptr,packed),
+           "a rifle soldier with Minion Buster MK3 spawns");
+     Check(loads==2 && !wcscmp(loadPaths[0],L"app:/weapon/aweapon026.sgo") && loadStars[0][0]==0 && loadStars[0][7]==7 &&
+           loadHuman[0]==armed.obj,"its main weapon (index 0): the player weapon with the requester's stars");
+     Check(!wcscmp(loadPaths[1],L"app:/weapon/aiheavyshield01.sgo") && loadStars[1][0]==5,"its second weapon untouched (a Fencer's shield)");
+     Check(ApplySupportSoldierResource(poses[1],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain),"a stock soldier spawns");
+     Check(loads==4 && !wcscmp(loadPaths[2],L"app:/weapon/aisoldierrifle01.sgo") && loadStars[2][0]==5,"a soldier without arms: its template's weapon");
+     Check(support_native::CoefHook(nullptr,0.3f,armed.obj)==1.0f,"the armed soldier: a player's attack coefficient");
+     Check(support_native::CoefHook(nullptr,0.3f,plain.obj)==0.5f,"a stock support soldier: the difficulty's");
+     Check(support_native::CoefHook(nullptr,0.3f,objects[30])==0.5f,"any other soldier (a mission's, the enemy's): the difficulty's");
+     const int before=made;
+     npctier::Arms lance;lance.on=true;lance.id=385;
+     Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,npctier::PackArms(lance)) &&
+           made==before && SupportSoldierLastFailure()==SupportSpawnFailure::setup,"another kind's weapon: not spawned, nothing made");
+     simulateLoad=false;const int del=deleted;
+     Check(!ApplySupportSoldierResource(poses[3],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,packed) &&
+           made==before+1 && deleted==del+1,"its weapon load never taken: deleted, never the template's weapon instead");
+     simulateLoad=true;support_native::arms=false;
+     Check(!SupportSoldierArmsReady(),"the hooks not in: not ready");
+     Check(!ApplySupportSoldierResource(poses[4],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,packed) &&
+           made==before+1,"the hooks not in: an armed soldier is refused before anything is made");
+     Check(!support_native::arming.on,"no arming left behind");}
+    simulateLoad=false;support_native::arms=false;
     ResetSupportSoldiers();VirtualFree(image,0,MEM_RELEASE);
     std::printf("support_soldier_test: %d checks passed\n",checks);
 }
