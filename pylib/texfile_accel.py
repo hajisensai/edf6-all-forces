@@ -152,7 +152,22 @@ def _search(p: tuple, axis: Any, best: tuple) -> tuple:
 
 
 def _level(pixels: Any) -> bytes:
-    """texfile._dxt1_level: the same candidates, integers, bytes."""
+    """texfile._dxt1_level: the same candidates, integers, bytes; native/dxt1.cpp's when the DLL is there."""
+    import numpy as np
+    import edf6native
+    lib = edf6native.lib()
+    if lib is not None:
+        import ctypes
+        height, width = pixels.shape[:2]
+        data = np.ascontiguousarray(pixels, dtype=np.uint8).tobytes()
+        out = ctypes.create_string_buffer(((width + 3) // 4) * ((height + 3) // 4) * 8)
+        size = lib.edf6_dxt1_level(data, width, height, out)
+        return out.raw[:size]
+    return _level_numpy(pixels)
+
+
+def _level_numpy(pixels: Any) -> bytes:
+    """_level in numpy (no DLL: a dev checkout without build.cmd)."""
     import numpy as np
     global _SHIFT
     if _SHIFT is None:
