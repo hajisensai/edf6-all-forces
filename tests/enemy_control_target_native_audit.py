@@ -144,5 +144,13 @@ instruction(0x6CEBFF, 'mov', 'rbp, qword ptr [rdx]')
 check('VirtualQuery(' in source and 'bool TryClear(' in source, 'physical protection proof and recoverable cleanup API')
 check('PlayerHuman(' not in source and 'CameraRay(' not in source, 'no primary-player/global camera fallback')
 check('0x548EF0)(' not in source and 'AddLockPoint(' not in source, 'no fake target or generated lockpoint')
-check('fullNativeId[32]' in (root / 'src/enemy_control_target.h').read_text(encoding='utf-8-sig'), 'full native ID API')
+header = (root / 'src/enemy_control_target.h').read_text(encoding='utf-8-sig')
+# The API carries a whole 32-byte object reference (net_object_ref.h), compared in full against the actor's own.
+check('unsigned char ref[32]{};' in header and
+      'bool Resolve(const ObjRef& owner,const ObjRef& controlled,const unsigned char focusRef[32],' in header and
+      'bool Normalize(const ObjRef& owner,const ObjRef& controlled,unsigned char focusRef[32],' in header, 'full object reference API')
+check('return EncodeNetRef(actor,actual) && !std::memcmp(actual,id,32);' in source and
+      'std::memcpy(selected.ref,id,32);' in source and
+      '!StillNetRef(id,NetLife::live,focus)' in source and
+      'std::memcpy(retained.ref,desired.ref,32);' in source, 'full object reference resolved, rechecked and retained')
 print(f'enemy target native audit: {checks} checks passed; DLL read only')

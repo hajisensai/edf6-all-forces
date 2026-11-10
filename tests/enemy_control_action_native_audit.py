@@ -186,7 +186,14 @@ call(0x322458, 0x30C0F0)
 exact(0x32536F, 'mov', 'rcx, qword ptr [rdx + 0x28]')
 exact(0x32537A, 'mov', 'qword ptr [rbx + 0x140], rcx')
 exact(0x325388, 'mov', 'qword ptr [rbx + 0x148], r8')
-check('ReadNativeObjectId(target,reinterpret_cast<unsigned char*>(s.data+15))' in source, 'real selected target ID captured')
+# The leg controller's +0x140/+0x148 weak pair is encoded whole (net_object_ref.h: 32 bytes, a player by slot, the rest
+# by the full native NetId); the wire validator and the replay both compare all 32 bytes.
+check('!EncodeNetRef(target,reinterpret_cast<unsigned char*>(s.data+15))' in source and
+      'At<const void*>(target,0x30)!=control' in source and
+      'std::memcpy(s.data+15,b.last.data+15,32)' in source and
+      'netref::Valid(reinterpret_cast<const unsigned char*>(s.data+15),true)' in source and
+      'if(!EncodeNetRef(actor,actual) || std::memcmp(id,actual,32))return Result::pending' in source,
+      'real selected target ID captured as a full object reference and rechecked on replay')
 check('ResolveNativeProjectileActor(id,&actor,&control)' in source and 'b->stompTarget=stomp[i].obj' in source, 'full native target ID retained before replay, including dead allocated actors')
 check('if(!actor || !control)return Result::failed' in source and 'ReleaseNativeProjectileLock(const_cast<void*>(r.obj),r.ctrl,&consumed)' in source and 'if(consumed)b.targetsUncertain=true' in source, 'expired target cannot ACK a no-op; strong target release retains uncertain cleanup')
 check('if(enable)b.nativeEffects|=1u' in source and 'Fn<void(__fastcall*)(void*)>(0x3F01F0)' in source, 'actual enabled event observed and replayed locally')
