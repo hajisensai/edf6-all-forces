@@ -3,6 +3,7 @@
 // round cannot become a command to the turret or the mouse-flight aim.
 #include "crew.h"
 #include "vehicle_look.h"
+#include "seat_switch_logic.h"
 #include "fp_view.h"
 #include "memory.h"
 #include "vecmath.h"
@@ -42,15 +43,22 @@ bool Current(const Look& s,const void* v) noexcept {
         !HumanOnFoot(human) && At<const void*>(human,kHumanVehicle)==v && s.seat<SeatCount(vehicle) &&
         At<const void*>(SeatAt(const_cast<unsigned char*>(vehicle),s.seat),kSeatRider)==human;
 }
+}  // namespace
+
 // Sazabi already uses middle-click/R3 for its own lock. Rebinding free look to
 // another key/button enables it there without consuming that existing action.
-bool Offered(const unsigned char* v,bool keys) noexcept {
+// On a pad the stock vehicle keeps the buttons its own input tests in that seat (StockPadReads): a Grape with a horn
+// keeps L3 for it in the driver's seat (docs/feedback-2026-11-10-grape-l3.md), as the rotor craft keeps its descend.
+bool VehicleLookOffered(const void* vehicle,unsigned seat,bool keys) noexcept {
     const Config& c=Cfg();
     const int binding=keys ? c.freeLookKey : c.freeLookButton;
     constexpr int kL3=0x40;   // a rotor craft's descend on a pad (playerjet_board.inc kButtonL3): no free look on it there
-    return binding>0 && !(IsSazabi(v) && (keys ? binding==c.sazabiLockKey : (binding&c.sazabiLockButton)!=0)) &&
-           !(!keys && (binding&kL3)!=0 && PlayerRotorCraft(v));
+    return binding>0 && !(IsSazabi(vehicle) && (keys ? binding==c.sazabiLockKey : (binding&c.sazabiLockButton)!=0)) &&
+           !(!keys && (binding&kL3)!=0 && PlayerRotorCraft(vehicle)) &&
+           (keys || seatsw::PadActionFree(static_cast<unsigned>(binding),StockPadReads(vehicle,seat)));
 }
+
+namespace {
 // `turretLook`: the seat the player holds there has the turret camera's own free look (TurretCamFreeLook): this one
 // yields, takes no input and turns no camera (asked before lookLock: it reads the sight, whose Up asks VehicleLookActive).
 unsigned char* Begin(unsigned char* v,float* saved,int turretLook) noexcept {
@@ -64,7 +72,7 @@ unsigned char* Begin(unsigned char* v,float* saved,int turretLook) noexcept {
         if(At<const void*>(seat,kSeatRider)!=human || !edf::IsPlayer(human))continue;
         if(!look.vehicle.Is(v) || !look.human.Is(human) || look.seat!=i)look=Look{};
         look.vehicle=ObjRef::Of(v);look.human=ObjRef::Of(human);look.seat=i;
-        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=Offered(v,look.keys) && turretLook!=static_cast<int>(i);look.seen=GameMs();
+        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=VehicleLookOffered(v,i,look.keys) && turretLook!=static_cast<int>(i);look.seen=GameMs();
         if(!look.offered){look.yaw=look.pitch=0;look.held=false;return nullptr;}
         if(look.frame!=GameFrame()) {
             look.frame=GameFrame();

@@ -73,6 +73,13 @@ for at in (0x65A505, 0x65A5C4):
     assert data(at, 8) == bytes.fromhex('f687e8020000' '20' '74'), hex(at)   # test 0x20; je
     assert data(at + 9, 12) == bytes.fromhex('488b03' '488bcb' 'ff9098020000'), hex(at)   # call [vtable+0x298]: slot 83
 CAR_READS = {'trigger2': True, 0x01: 'handbrake', 0x10: 'brake', 0x40: 'horn'}   # 0x20: slot 83, nothing
+# Whose buttons, and when the horn (2026-11-10, docs/feedback-2026-11-10-grape-l3.md): the player path reads the seat
+# at [veh+0x608] (common/edf/layout.h kSeats: seat 0, the driver) and tests L3 only when the vehicle has a horn
+# (+0x29B0). The 607 / 60X trucks run the same input (crew.cpp kClasses).
+assert data(0x65A475, 7) == bytes.fromhex('488bb908060000'), 'rdi = [veh+0x608]: seat 0'
+assert data(0x65A5FC, 7) == bytes.fromhex('80bbb029000000'), 'the horn only with +0x29B0 set'
+for vt in (0x17DCAB0, 0x17DCFB8):
+    assert slot(vt, 55) == 0x65A390, f'{vt:#x} shares the Car input'
 
 # --- The keyboard: which key-config action feeds which seat input (docs/keyconfig-re.md §8)
 # HumanBase 0x572DF0 fills the seat inputs from row (seat +0x2B4) of the key objects, 7 of 0x18 bytes each:
@@ -147,6 +154,25 @@ assert XINPUT_TO_SEAT.get(fire4) == 0x20, 'fire key 4 on a pad: RB, which the Ca
 import vcobjects as vc  # noqa: E402
 coax = vc.STOCK_MOUNTS['ifv']['MG401']
 assert coax.key == 4 and vc.STORES[vc.mounted('MG401', coax)].role == 'coax', 'the Grape\'s coax on fire key 4'
+# The pad free look (FreeLookButton, default L3) gives the Car's driver buttons to the Car: seat_switch_logic.h's
+# constants equal the reads above, crew.cpp StockPadReads applies them by the input function and the horn flag, and both
+# free looks (vehicle_look.cpp, turretcam.cpp FreeHeld) ask PadActionFree through VehicleLookOffered.
+logic = (ROOT / 'src' / 'seat_switch_logic.h').read_text(encoding='utf-8')
+assert int(re.search(r'kCarInputFn=(0x[0-9A-Fa-f]+);', logic).group(1), 0) == slot(CAR, 55)
+assert int(re.search(r'kCarPadReads=(0x[0-9A-Fa-f]+),', logic).group(1), 0) == 0x01 | 0x10, 'A handbrake, LB brake'
+assert int(re.search(r'kCarHornButton=(0x[0-9A-Fa-f]+);', logic).group(1), 0) == 0x40, 'L3 the horn'
+crew_cpp = (ROOT / 'src' / 'crew.cpp').read_text(encoding='utf-8')
+stock = re.search(r'unsigned StockPadReads\(const void\* vehicle,unsigned seat\) noexcept \{(.*?)\n\}', crew_cpp, re.S).group(1)
+assert 'kClasses[c].input!=seatsw::kCarInputFn' in stock and 'kHorn=0x29B0' in stock and 'CarPadReads(seat,' in stock, stock
+look = (ROOT / 'src' / 'vehicle_look.cpp').read_text(encoding='utf-8')
+assert 'seatsw::PadActionFree(static_cast<unsigned>(binding),StockPadReads(vehicle,seat))' in look
+assert 'VehicleLookOffered(v,i,look.keys)' in look, 'the look asks with the seat it is in'
+turret = (ROOT / 'src' / 'turretcam.cpp').read_text(encoding='utf-8')
+held = re.search(r'bool FreeHeld\(const void\* v,const unsigned char\* seat\) noexcept \{(.*?)\n\}', turret, re.S).group(1)
+assert 'VehicleLookOffered(v,0,keys)' in held, 'the turret camera free look: the same gate'
+free_button = int(re.search(r'int freeLookButton=(0x[0-9A-Fa-f]+|\d+);', crew_h).group(1), 0)
+assert free_button & 0x40, 'the default pad free look is L3: on a Grape with a horn the gate above takes it away'
 print("car input audit: Car reads +0x2E0 throttle, LB brake, A handbrake, L3 horn, RB nothing; the keyboard's horn is the "
       "drive page's middle-button row, free look off it; 505/601/603 no +0x2E0; "
-      f'the Grape\'s coax on key 4 (pad {fire4:#x}), its switch on seat button {car_switch:#x}: OK')
+      f'the Grape\'s coax on key 4 (pad {fire4:#x}), its switch on seat button {car_switch:#x}; '
+      'the pad free look leaves the driver A / LB / L3 horn to the Car: OK')

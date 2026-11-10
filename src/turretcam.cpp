@@ -296,7 +296,7 @@ void AxesDir(const unsigned char* v,const unsigned char* seat,float* d) noexcept
     vec::Normalize(d);
 }
 
-bool FreeHeld(const unsigned char* seat) noexcept;
+bool FreeHeld(const void* v,const unsigned char* seat) noexcept;
 void Publish(const TurretCamReadout& r) noexcept;
 
 // A camera request with an explicit seat/take owner. A rendered FP, map, optic or previous vehicle's ray cannot
@@ -305,7 +305,7 @@ bool ExternalView(const void* v,bool high) noexcept {
     return MapHoldsKeys() || MapOwnsView() || (!high &&
         (SightZoomMounted(v) || FirstPersonVehicleView(v,0) || VehicleLookActive(v)));
 }
-void SuspendView(const unsigned char* seat) noexcept {
+void SuspendView(const void* v,const unsigned char* seat) noexcept {
     AcquireSRWLockExclusive(&lock);
     if(shared.seat==seat) {
         shared.normalRay=false;shared.resume=true;shared.view=false;shared.decoupled=false;
@@ -314,7 +314,7 @@ void SuspendView(const unsigned char* seat) noexcept {
     ReleaseSRWLockExclusive(&lock);
     game.hasAim=false;game.aimHit=false;game.holdHit=false;game.steer=tcam::SteerState{};
     std::memset(game.aim,0,sizeof(game.aim));std::memset(game.holdAt,0,sizeof(game.holdAt));
-    game.held=FreeHeld(seat);game.foreign=false;
+    game.held=FreeHeld(v,seat);game.foreign=false;
     Publish(TurretCamReadout{});
 }
 void PublishNormalRay(const unsigned char* seat,unsigned take,const float* eye,const float* look) noexcept {
@@ -344,11 +344,15 @@ bool AimPoint(const Shared& s,const float* pivot,float* p,bool* hit) noexcept {
     return true;
 }
 
-bool FreeHeld(const unsigned char* seat) noexcept {
+// The turret camera's seat is seat 0: on a pad its free look leaves the buttons the stock input reads there as
+// vehicle_look.cpp's does (VehicleLookOffered: a Grape's L3 is its horn).
+bool FreeHeld(const void* v,const unsigned char* seat) noexcept {
     const Config& c=Cfg();
-    if(At<unsigned char>(seat,kSeatPad)==0)return KeyHeld(c.freeLookKey);
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    if(!VehicleLookOffered(v,0,keys))return false;
+    if(keys)return KeyHeld(c.freeLookKey);
     const std::uint16_t buttons=At<std::uint16_t>(seat,kSeatButtons);
-    return c.freeLookButton>0 && (buttons&static_cast<std::uint16_t>(c.freeLookButton))!=0 &&
+    return (buttons&static_cast<std::uint16_t>(c.freeLookButton))!=0 &&
         !seatsw::ChordOwns(buttons,static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.freeLookButton));   // the thermal chord's
 }
 
@@ -471,10 +475,10 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     if(ExternalView(s.v,s.high)) {
         // Native input (and StabStep after us) keeps its exact ownership. A cockpit/optic is attached to the
         // controlled mount; its view must never be reinterpreted as a new world target for that mount.
-        cmd[0]=in[0];cmd[1]=in[1];SuspendView(seat);
+        cmd[0]=in[0];cmd[1]=in[1];SuspendView(s.v,seat);
         return;
     }
-    const bool held=FreeHeld(seat);
+    const bool held=FreeHeld(s.v,seat);
     const bool leavingHigh=s.highView && !s.high;
     const bool press=held && (!game.held || leavingHigh),release=!held && game.held && !leavingHigh;
     game.held=held;
@@ -870,7 +874,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
         AcquireSRWLockExclusive(&lock);
         shared=Shared{};shared.ref=ObjRef::Of(v);shared.v=v;shared.seat=seat;shared.take=++takes;shared.resume=true;
         ReleaseSRWLockExclusive(&lock);
-        game=GameSide{};game.held=FreeHeld(seat);   // a key held while boarding is no press
+        game=GameSide{};game.held=FreeHeld(v,seat);   // a key held while boarding is no press
         Log("TURRETCAM v=%p: a turret the player drives (decoupled=%d, free look key 0x%X / button 0x%X, aim hook %d)",v,
             c.decoupledTurretCam,c.freeLookKey,c.freeLookButton,nextAim!=nullptr);
     }
@@ -881,7 +885,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     const bool observing=shared.highView || shared.observing;
     ReleaseSRWLockShared(&lock);
     const bool external=ExternalView(v,high);
-    if(external)SuspendView(seat);
+    if(external)SuspendView(v,seat);
     AcquireSRWLockShared(&lock);
     const Shared normalSource=shared;
     ReleaseSRWLockShared(&lock);

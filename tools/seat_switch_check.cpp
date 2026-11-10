@@ -94,8 +94,23 @@ void Chord() {
     Expect(!ChordOwns(kR3,kR3,kR3),"a single-button setting owns nothing");
 }
 
+// The free look on a pad gives way to the stock action on its button (2026-11-10: the Grape's L3 horn).
+void StockButtons() {
+    using namespace crew::seatsw;
+    constexpr unsigned kA=0x01,kLB=0x10,kRB=0x20,kL3=0x40,kR3=0x80;
+    Expect(CarPadReads(0,true)==(kA|kLB|kL3) && CarPadReads(0,false)==(kA|kLB),"the Car's driver: A, LB, and L3 with a horn");
+    Expect(CarPadReads(1,true)==0 && CarPadReads(3,false)==0,"the Car's other seats: nothing read");
+    Expect(!PadActionFree(kL3,CarPadReads(0,true)),"a Grape with a horn: no L3 free look in the driver's seat");
+    Expect(PadActionFree(kL3,CarPadReads(0,false)) && PadActionFree(kL3,CarPadReads(1,true)),
+           "no horn, or a passenger's seat: L3 free look offered");
+    Expect(!PadActionFree(kL3|kR3,CarPadReads(0,true)) && PadActionFree(kR3,CarPadReads(0,true)) && !PadActionFree(kRB|kLB,CarPadReads(0,false)),
+           "any shared button takes it away; a button the Car leaves keeps it");
+    Expect(!PadActionFree(0,0) && !PadActionFree(0x100,0),"no button: not offered");
+}
+
 int main() {
     Chord();
+    StockButtons();
     HeldAcrossTheMove();
     CarriedInput();
     Rotation();

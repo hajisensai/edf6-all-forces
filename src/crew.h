@@ -1336,6 +1336,9 @@ bool PlayerDreadnoughtCue(DreadnoughtCue* out) noexcept;
 bool DreadnoughtRound(unsigned char* owner,int round,const float* from,const float* at,bool real) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
+// The seat buttons `vehicle`'s stock player input tests in its seat `seat` (seat_switch_logic.h CarPadReads: the Car's
+// path, a Grape's driver A / LB / L3 horn), 0 for the classes that read none (or are not reversed).
+unsigned StockPadReads(const void* vehicle,unsigned seat) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the
 // vehicle. Broadphase candidates alone never request boarding; FrameTick handles the pending actual hit.
 bool PlayerJetBoardingSupported(const void* vehicle) noexcept; // aircraft controls, without the on-foot reach/speed gate

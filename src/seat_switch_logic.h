@@ -73,5 +73,21 @@ constexpr bool ChordHeld(std::uint16_t buttons,unsigned mask) noexcept {
 constexpr bool ChordOwns(std::uint16_t buttons,unsigned chord,unsigned button) noexcept {
     return ButtonCount(chord)>=2 && (chord&button)!=0 && ChordHeld(buttons,chord);
 }
+
+// The seat buttons a stock class's own player input tests (docs/stock-payload-re.md §2.1). The Car's player path
+// (slot 55 0x65A390: the Car, the 607 and 60X trucks) reads the driver's seat (`[veh+0x608]`, seat 0) only: A the
+// handbrake, LB the brake, and L3 the horn when the vehicle has one (`veh+0x29B0`, 0x65A5FC). Every other class: 0
+// (none read, or not reversed). Pinned by tests/car_input_native_audit.py.
+inline constexpr unsigned kCarInputFn=0x65A390;
+inline constexpr unsigned kCarPadReads=0x11,kCarHornButton=0x40;
+constexpr unsigned CarPadReads(unsigned seat,bool horn) noexcept {
+    return seat!=0 ? 0u : kCarPadReads|(horn ? kCarHornButton : 0u);
+}
+// A plugin action held on a pad button (the free look, FreeLookButton) in a seat whose stock input tests `stockReads`:
+// offered only when it shares none of them. The stock action keeps its button (one action per button in a context,
+// plan-2026-10-25-keybinds.md §3 rule 4): on a Grape with a horn the free look gives L3 to the horn (2026-11-10).
+constexpr bool PadActionFree(unsigned binding,unsigned stockReads) noexcept {
+    return (binding&0xFFu)!=0 && (binding&stockReads)==0;
+}
 }  // namespace seatsw
 }  // namespace crew

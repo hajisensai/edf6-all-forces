@@ -30,4 +30,8 @@ inline bool OrbitPivot(const float* matrix,const float* centre,float* pivot) noe
     return ahead>0.0f && ahead<1.0e4f;
 }
 bool VehicleLookHint(bool* keys) noexcept;
+// Whether the free look (FreeLookKey, `keys` true; FreeLookButton on a pad) is offered in `vehicle`'s seat `seat`: not
+// on a button that seat's own action there owns (the Sazabi's lock, a rotor craft's descend, a stock class's own reads:
+// a Grape's L3 horn). turretcam.cpp's own free look asks the same.
+bool VehicleLookOffered(const void* vehicle,unsigned seat,bool keys) noexcept;
 }  // namespace crew
