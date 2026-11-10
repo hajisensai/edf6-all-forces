@@ -9145,7 +9145,8 @@ def stock_holds_build() -> None:
         assert {k for k in before if before[k] != after[k]} <= set(rh.FIELDS), name
     msh.check(files, donor)
     assert 'WEAPON/AWEAPON057.SGO' in files, 'the Monsoon'
-    assert len(shotguns) - len(files) == 3 and len(files) >= 30, (len(shotguns), len(files))
+    assert len(shotguns) - len(files) == 3 and len(files) == 35, (len(shotguns), len(files))
+
 
 @test
 def mab_strings_relaid_as_the_game() -> None:
