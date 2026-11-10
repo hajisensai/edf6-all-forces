@@ -129,5 +129,10 @@
 - 离线：`python tools/make_dreadnought.py --out tmp/dnout`（生成 + `check`：SGO 模型 / 标记 / 耐久 / 挂载 / 碰撞 / 武器骨骼 / 喷口骨骼）、
   `tools/selftest.py` `support_jets_wear_their_models`（C++ `kLaunchRows` / `kBodies` / `kBoardable` / `kVehicleBodies` 与 vcobjects、
   support_loadout 一致，标记不撞，协议 ≥ 8）、`support_dispatch_test`（机体未安装：规划阶段拒绝并说明，什么也不造）。
+- C-130（2026-11-10）：`python tools/make_c130.py --out <scratch>`（生成 + `check`：两个 SGO 的模型 / CAS / 标记 / 耐久 / 挂载 / 碰撞 /
+  `edf6vc_airframe`、炮手座与 13 座、模型档案骨骼 / 蒙皮 / 着地、`check_muzzle` 整机包围盒 = `C130_AIRFRAME`；本机约 1 分 46 秒）、
+  `selftest` `support_c130_models`（kLaunchRows / kBodies / kBoardable / gunmuzzle.h / jet_bay.cpp / 协议 ≥ 9）、
+  `gunship_muzzle_check`（AC-130 箱：正下方出膛在机腹下、平射在翼尖外、横穿长度 = 翼展）、`cockpit_build_*`（C-130 两个生成模型的座舱骨骼预算按
+  `c130_model.SKELETON_BONES`）。
 - 需实机确认：四种模型的大小与飞行观感（DN 模型比原 bomber 外形宽）、尾焰位置（尤其 Defender 翼尖吊舱）、导弹 / 机炮从 `body` 发出的观感、
   编队间距（模型更宽，翼尖可能相碰；NPC 刚体是整机框）、低空俯冲时整机框与地面的余量、玩家登机后的视角（无座舱内饰）。
