@@ -17,6 +17,7 @@
 #pragma warning(pop)
 #include "crash_dump.h"
 #include "frame_pacing.h"
+#include "frame_rate_logic.h"
 #include "log_buffer.h"
 #include "crew.h"
 #include "gravity.h"
@@ -576,6 +577,11 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
+    {
+        const int raw=ReadInt(L"FrameRateCap",static_cast<DWORD>(n.frameRateCap));
+        n.frameRateCap=framerate::FixCap(raw);
+        if(n.frameRateCap!=raw)Log("CONFIG FrameRateCap=%d: %d used (0 the game's own 59.94, -1 no cap, 61..1000)",raw,n.frameRateCap);
+    }
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
     n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
@@ -1332,6 +1338,12 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
     InstallWeaponRecords();
     InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
+    // ini FrameRateCap (docs/unlimited-fps-re.md): the presentation frames are not wired into the game in this build (no
+    // patch: frames without a step would show the same picture and lose input edges until the interpolation and the
+    // input shadow are in). Said once, so a log asked about it shows the setting was read and why the rate is the game's.
+    if(Cfg().frameRateCap!=framerate::kOff)
+        Log("FRAMERATE FrameRateCap=%d read; rendering above the game's 59.94 Hz is not wired in yet (docs/unlimited-fps-re.md): "
+            "the game runs at its own rate",Cfg().frameRateCap);
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     InstallHavokProps();       // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
