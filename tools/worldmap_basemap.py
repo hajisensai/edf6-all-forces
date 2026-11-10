@@ -13,7 +13,7 @@
                                                       folder OUT (default DIR/../worldmap_tex, pylib/worldmap.py
                                                       TEXTURE_DIR): only what the release ships, never the sources
                                                         EDF6VC_WORLDMAP_WORLD.DDS / _JAPAN.DDS   DXT1, full mip chain
-                                                        worldmap_tex.json   TEXTURE_VERSION, each file's SHA-256 / size
+                                                        worldmap_tex.json   worldmap.TEXTURE_VERSION, each file's SHA-256 / size
                                                         SOURCE.txt          where from, the credit
 
 Sources: the whole world at 5400 x 2700 (15 px / degree: Japan would be ~300 px wide) and the 500 m tile D1
@@ -139,7 +139,6 @@ def derive(folder: str) -> list[str]:
 
 # ------------------------------------------------------------------------------------------ game textures
 
-TEXTURE_VERSION = 1    # raise when the textures' bytes change for the same sources (tools/worldmap_pack.py checks it)
 TEXTURE_SOURCES = {'world': WORLD_OUT, 'japan': JAPAN_OUT}   # pylib/worldmap.py TEXTURES kind -> derived PNG
 TEXTURE_SIZES = {'world': WORLD_SIZE, 'japan': JAPAN_SIZE}
 PAGE_URL = 'https://visibleearth.nasa.gov/collection/1484/blue-marble'
@@ -192,7 +191,7 @@ def textures(folder: str, out: str | None = None) -> list[str]:
         f.write(texture_source_text())
     written.append(os.path.join(out, 'SOURCE.txt'))
     with open(os.path.join(out, worldmap.TEXTURE_INDEX), 'w', encoding='utf-8', newline='\n') as f:
-        json.dump({'version': TEXTURE_VERSION, 'files': files}, f, indent=1, sort_keys=True)
+        json.dump({'version': worldmap.TEXTURE_VERSION, 'files': files}, f, indent=1, sort_keys=True)
         f.write('\n')
     written.append(os.path.join(out, worldmap.TEXTURE_INDEX))
     return written

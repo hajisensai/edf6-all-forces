@@ -26,6 +26,7 @@ DETAIL_NORTH, DETAIL_SOUTH, DETAIL_WEST, DETAIL_EAST = 47.0, 27.0, 127.0, 147.0
 # the plugin their app:/ paths (src/worldmap.inc kWorldTexture / kJapanTexture).
 TEXTURE_DIR = 'worldmap_tex'
 TEXTURE_INDEX = 'worldmap_tex.json'     # in TEXTURE_DIR: {'version', 'files': {name: {'sha256', 'size'}}}
+TEXTURE_VERSION = 1     # the index's version: raise when the textures' bytes change for the same sources
 TEXTURES = {'world': 'UI/EDF6VC_WORLDMAP_WORLD.DDS',    # under Mods; the whole Earth, 4096 x 2048
             'japan': 'UI/EDF6VC_WORLDMAP_JAPAN.DDS'}    # DETAIL_* above, 4096 x 4096
 

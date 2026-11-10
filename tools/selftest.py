@@ -597,6 +597,41 @@ def release_models_whole_folders() -> None:
 
 
 @test
+def worldmap_textures_in_model_pack() -> None:
+    """The world map's base textures ride the model pack (docs/plan-2026-11-10-worldmap.md §2): their folder is a
+    RELEASE_MODELS folder (so pylib/modelpack.py's models/ part and its version cover it), the installer copies it under
+    Mods as its own ledger owner and releases it on uninstall, and a model pack holding that folder installs the two
+    textures (tests/test_worldmap_pack.py has the refusals)."""
+    import build_release
+    import worldmap
+    import worldmap_basemap
+    import worldmap_pack
+    from unittest import mock
+    assert worldmap.TEXTURE_DIR in build_release.RELEASE_MODELS
+    assert worldmap_pack.OWNER in ledger.OWNERS
+    inst = src('tools/installer.py')
+    assert 'worldmap_pack.install(game)' in inst and 'worldmap_pack.remove,' in inst
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as work:
+        derived = os.path.join(work, 'worldmap')
+        os.makedirs(derived)
+        sizes = {'world': (16, 8), 'japan': (16, 16)}
+        for kind, size in sizes.items():
+            Image.new('RGB', size, (20, 60, 140)).save(os.path.join(derived, worldmap_basemap.TEXTURE_SOURCES[kind]))
+        with mock.patch.dict(worldmap_basemap.TEXTURE_SIZES, sizes):
+            worldmap_basemap.textures(derived)
+        game = os.path.join(work, 'game')
+        os.makedirs(game)
+        pack = os.path.join(work, worldmap.TEXTURE_DIR)
+        with mock.patch.object(worldmap_pack.obj_model, 'model_dir', return_value=pack):
+            written, skipped = worldmap_pack.install(game, say=lambda _s: None)
+        assert skipped == [] and len(written) == len(worldmap.TEXTURES), (written, skipped)
+        for rel in worldmap.TEXTURES.values():
+            assert os.path.isfile(os.path.join(game, 'Mods', *ledger.key(rel).split('/'))), rel
+        assert len(worldmap_pack.remove(game)[0]) == len(worldmap.TEXTURES)
+
+
+@test
 def release_imports() -> None:
     """Every project module tools/installer.py imports inside a function (tools/, pylib/, testrange/) is one of
     tools/build_release.py's PyInstaller hidden imports: a generator left out installs in a dev checkout and is missing
