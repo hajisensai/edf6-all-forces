@@ -59,6 +59,7 @@ import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 import modelpack  # noqa: E402
+import model_workers  # noqa: E402
 from i18n import take_lang_arg, tr  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
@@ -530,6 +531,51 @@ def build_asset(cache: Any, module: Any, label: str, builder: Any = None, settin
     return built
 
 
+Asset = tuple[str, str, tuple, 'dict | None']   # (group, label, its builder's extra arguments, settings: build_asset's)
+
+
+def build_assets(cache: Any, assets: list[Asset]) -> dict[str, Any]:
+    """Every group of `assets` (build_asset each): its files, None when the installed ones are current. The groups to
+    build are built side by side, model_workers.group_workers() at a time, each in a process of its own
+    (buildcache.build_group): they only read the game and the models (nothing is written before all are built), and one
+    after the other they left all but two of the cores idle (a first install: 39 minutes, 2026-11-10,
+    docs/feedback-2026-11-10-installer-en.md). One at a time (a small machine), here, in order, as before."""
+    import buildcache
+    out: dict[str, Any] = {}
+    todo: list[Asset] = []
+    for group, label, args, settings in assets:
+        assert group in buildcache.GROUPS, group
+        started = time.perf_counter()
+        if cache.current(group, settings):
+            print(tr(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）',
+                     f'{label}: verified, reusing the installed files ({time.perf_counter() - started:.1f} s)'), flush=True)
+            out[group] = None
+        else:
+            todo.append((group, label, args, settings))
+    workers = model_workers.group_workers()
+    if workers <= 1 or len(todo) <= 1:
+        for group, label, args, _ in todo:
+            started = time.perf_counter()
+            print(tr(f'{label}：生成中（首次安装或输入/输出发生变化）……',
+                     f'{label}: generating (first install, or its inputs / outputs changed)...'), flush=True)
+            out[group] = buildcache.builder(group)(cache.game, *args)
+            print(tr(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）',
+                     f'{label}: generated ({time.perf_counter() - started:.1f} s)'), flush=True)
+        return out
+    started = time.perf_counter()
+    print(tr(f'生成 {len(todo)} 组资源（首次安装或输入/输出发生变化），{min(workers, len(todo))} 组同时进行：',
+             f'Generating {len(todo)} asset groups (first install, or their inputs / outputs changed), '
+             f'{min(workers, len(todo))} at a time:'), flush=True)
+    for _, label, _, _ in todo:
+        print('  ' + label, flush=True)
+    results = model_workers.run_jobs([(buildcache.build_group, (cache.game, group, args), label)
+                                      for group, label, args, _ in todo], workers)
+    out.update({group: files for (group, *_), files in zip(todo, results)})
+    print(tr(f'{len(todo)} 组资源生成完成（{time.perf_counter() - started:.1f} 秒）',
+             f'{len(todo)} asset groups generated ({time.perf_counter() - started:.1f} s)'), flush=True)
+    return out
+
+
 def find_edf41(game: str) -> str | None:
     """Where EDF4.1 is read from, looked up once per install (its maps, sounds and the EDF4.1 story pack need it): the
     player's EDF4.1, else the EDF4.1 asset pack next to the installer (pylib/edf41src.py find)."""
@@ -622,28 +668,51 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(tr('已取消，没有写入任何文件。', 'Cancelled; nothing was written.'))
         return
     cache = buildcache.Cache(game)
-    optics = build_asset(cache, make_optics, tr('载具实体瞄具模型', 'Vehicle sight models'), make_optics.build_models)
-    jets = build_asset(cache, make_jets, tr('战机、直升机、无人机', 'Jets, helicopters, drones'))
-    sub = build_asset(cache, make_sub, tr('潜水母舰', 'Submarine carrier'))
-    katyusha = build_asset(cache, make_katyusha, tr('喀秋莎火箭炮车', 'Katyusha rocket truck'))
-    artillery = build_asset(cache, make_artillery, tr('自行榴弹炮', 'Self-propelled howitzer'))
-    chute = build_asset(cache, make_chute, tr('降落伞', 'Parachute'))
-    drill = build_asset(cache, make_drill, tr('钻头战车', 'Drill tank'))
-    emc = build_asset(cache, make_emc, tr('EMC 蓄力光束', 'EMC charged beam'))
-    ult = build_asset(cache, make_ultimate, tr('终极支援「天罚」特效', 'Ultimate support "Judgement" effects'))
-    barrage = build_asset(cache, make_barrage, tr('远程炮击弹药', 'Long-range barrage shells'))
-    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its generator (its
-    # make_<kind> tool; an X-Morph unit's, make_xmorph's builder: buildcache.tool).
-    tracked = {kind: build_asset(cache, buildcache.tool(kind), label)
-               for kind, label in make_tracked_combat.LABELS.items()}
-    # ...and the X-Morph aircraft (the helicopters: the stock V506 in their own models, pylib/xm_heli.py; the jets: the
-    # plugin's aircraft in their own models, pylib/xm_jet.py), make_xmorph's too
-    tracked.update({u.key: build_asset(cache, buildcache.tool(u.key), xm_units.label(u))
-                    for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))})
-    # The X-Morph cars on the V512 (tools/make_xmorph.py CARS: pylib/car_model.py), each by its builder.
-    cars = {kind: build_asset(cache, buildcache.tool(kind), label) for kind, label in make_xmorph.CARS.items()}
-    # The X-Morph walkers and infantry (make_xmorph's own: pylib/xm_walker.py, xm_infantry.py), each its builder.
-    xmorph = {kind: build_asset(cache, buildcache.tool(kind), label) for kind, label in make_xmorph.LABELS.items() if kind in make_xmorph.OWN}
+    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
+    hangars = make_dreadnought.dm.hangars_wanted(planned)
+    # Every generated asset group (build_assets), each by its generator (tools/make_<group>.py; an X-Morph unit's,
+    # make_xmorph's builder: buildcache.tool): the vehicles and emplacements on the V603 (make_tracked_combat.LABELS) and
+    # the X-Morph aircraft (the helicopters: the stock V506 in their own models, pylib/xm_heli.py; the jets: the plugin's
+    # aircraft in their own models, pylib/xm_jet.py), the X-Morph cars on the V512 (make_xmorph.CARS: pylib/car_model.py)
+    # and its walkers and infantry (make_xmorph's own: pylib/xm_walker.py, xm_infantry.py).
+    tracked_kinds = [*make_tracked_combat.LABELS, *(u.key for u in (*xm_units.ported('heli'), *xm_units.ported('jet')))]
+    xmorph_kinds = [kind for kind in make_xmorph.LABELS if kind in make_xmorph.OWN]
+    assets: list[Asset] = [
+        ('optics', tr('载具实体瞄具模型', 'Vehicle sight models'), (), None),
+        ('jets', tr('战机、直升机、无人机', 'Jets, helicopters, drones'), (), None),
+        ('sub', tr('潜水母舰', 'Submarine carrier'), (), None),
+        ('katyusha', tr('喀秋莎火箭炮车', 'Katyusha rocket truck'), (), None),
+        ('artillery', tr('自行榴弹炮', 'Self-propelled howitzer'), (), None),
+        ('chute', tr('降落伞', 'Parachute'), (), None),
+        ('drill', tr('钻头战车', 'Drill tank'), (), None),
+        ('emc', tr('EMC 蓄力光束', 'EMC charged beam'), (), None),
+        ('ultimate', tr('终极支援「天罚」特效', 'Ultimate support "Judgement" effects'), (), None),
+        ('barrage', tr('远程炮击弹药', 'Long-range barrage shells'), (), None),
+        *((kind, label, (), None) for kind, label in make_tracked_combat.LABELS.items()),
+        *((u.key, xm_units.label(u), (), None) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))),
+        *((kind, label, (), None) for kind, label in make_xmorph.CARS.items()),
+        *((kind, make_xmorph.LABELS[kind], (), None) for kind in xmorph_kinds),
+        ('sidecar', tr('边三轮摩托', 'Sidecar motorcycle'), (), None),
+        ('sedan', tr('民用轿车', 'Civilian sedan'), (), None),
+        ('sazabi', tr('沙扎比（模型生成约 1.5 分钟）', 'Sazabi (about 1.5 minutes to generate)'), (), None),
+        ('dreadnought', tr(f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
+                           f'Dreadnought and its aircraft (hangar modules: {make_dreadnought.fitting_text(hangars)}; '
+                           'about 3 minutes to generate)'),
+         (hangars,), {'hangars': make_dreadnought.dm.hangars_text(hangars)}),
+        ('c130', tr('炮舰机与伞兵运输机（模型包的 C-130；模型与座舱生成约 4 分钟）',
+                    'Gunship and paratrooper transport (the model pack\'s C-130; about 4 minutes for the model and cockpit)'), (), None),
+        ('proteus', tr('普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）',
+                       'Proteus shield (the stock Air Raider\'s EM bunker wall; also undoes the model older versions made)'), (), None),
+        ('bigmap', tr('大地图（3 x 3 无缝平原，只读 Chunk02.cpk）', 'Big map (a seamless 3 x 3 plain; reading Chunk02.cpk only)'), (), None),
+    ]
+    built = build_assets(cache, assets)
+    optics, jets, sub, katyusha, artillery, chute, drill, emc, ult, barrage = (
+        built[g] for g in ('optics', 'jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage'))
+    tracked = {kind: built[kind] for kind in tracked_kinds}
+    cars = {kind: built[kind] for kind in make_xmorph.CARS}
+    xmorph = {kind: built[kind] for kind in xmorph_kinds}
+    sidecar, sedan, sazabi, dreadnought, c130, proteus, bigmap = (
+        built[g] for g in ('sidecar', 'sedan', 'sazabi', 'dreadnought', 'c130', 'proteus', 'bigmap'))
     stock = None
     if stock_stores:
         print(tr('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……',
@@ -657,20 +726,6 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print(tr('游骑兵的霰弹枪改成像突击步枪那样握持（原版霰弹枪与移植霰弹枪；只读 Root.cpk，不修改它）……',
              'Making the Ranger hold shotguns like assault rifles (stock and ported shotguns; reads Root.cpk without changing it)...'))
     holds = make_stock_holds.build(game)
-    sidecar = build_asset(cache, make_sidecar, tr('边三轮摩托', 'Sidecar motorcycle'))
-    sedan = build_asset(cache, make_sedan, tr('民用轿车', 'Civilian sedan'))
-    sazabi = build_asset(cache, make_sazabi, tr('沙扎比（模型生成约 1.5 分钟）', 'Sazabi (about 1.5 minutes to generate)'))
-    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
-    hangars = make_dreadnought.dm.hangars_wanted(planned)
-    dreadnought = build_asset(cache, make_dreadnought,
-                              tr(f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
-                                 f'Dreadnought and its aircraft (hangar modules: {make_dreadnought.fitting_text(hangars)}; '
-                                 'about 3 minutes to generate)'),
-                              lambda g: make_dreadnought.build(g, hangars),
-                              {'hangars': make_dreadnought.dm.hangars_text(hangars)})
-    c130 = build_asset(cache, make_c130, tr('炮舰机与伞兵运输机（模型包的 C-130；模型与座舱生成约 4 分钟）', 'Gunship and paratrooper transport (the model pack\'s C-130; about 4 minutes for the model and cockpit)'))
-    proteus = build_asset(cache, make_proteus, tr('普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）', 'Proteus shield (the stock Air Raider\'s EM bunker wall; also undoes the model older versions made)'))
-    bigmap = build_asset(cache, make_bigmap, tr('大地图（3 x 3 无缝平原，只读 Chunk02.cpk）', 'Big map (a seamless 3 x 3 plain; reading Chunk02.cpk only)'))
     root41 = find_edf41(game)
     want_campaign = campaign_requested or make_edf5_campaign.wanted(game)
     # What EDF4.1's objects and maps will leave out, as far as it can be told now; settled after they are written.

@@ -11,7 +11,14 @@ import sys
 import time
 from typing import Any, Callable, Iterator, TextIO
 
+from i18n import tr
+
 Job = tuple[Callable[..., bytes], tuple[Any, ...], str]
+# The installer's asset groups built side by side (group_workers): each group's process holds Root.cpk's index, its
+# models and its own model jobs' results (run_jobs: up to two more processes of its own), measured below 3 GiB together
+# for the largest groups (2026-11-10, docs/feedback-2026-11-10-installer-en.md); at most 4 at a time, one for every 4 cores.
+GROUP_CAP = 4
+GROUP_MEMORY = 3 * 1024**3
 
 
 def workers_for(cpus: int, available: int | None, cap: int = 2, per_worker: int = 2 * 1024**3) -> int:
@@ -36,6 +43,14 @@ def available_memory() -> int | None:
 
 def worker_count() -> int:
     return workers_for(os.cpu_count() or 1, available_memory())
+
+
+def group_workers(cpus: int | None = None, available: int | None = None) -> int:
+    """How many asset groups the installer builds at once (installer.build_assets): one a 4 cores, GROUP_MEMORY each,
+    at most GROUP_CAP; 1 (in the installer's own process, one after the other) on a small machine."""
+    cpus = (os.cpu_count() or 1) if cpus is None else cpus
+    available = available_memory() if available is None else available
+    return workers_for(cpus // 2, available, GROUP_CAP, GROUP_MEMORY)
 
 
 def utf8_pipes() -> None:
@@ -71,9 +86,9 @@ def _run(job: Job) -> bytes:
     started = time.perf_counter()
     output = _TaggedOutput(sys.stdout, label)
     with contextlib.redirect_stdout(output):
-        print('开始生成……', flush=True)
+        print(tr('开始生成……', 'generating...'), flush=True)
         result = function(*arguments)
-        print(f'生成完成（{time.perf_counter()-started:.1f} 秒）', flush=True)
+        print(tr(f'生成完成（{time.perf_counter()-started:.1f} 秒）', f'generated ({time.perf_counter()-started:.1f} s)'), flush=True)
     return result
 
 
@@ -104,7 +119,7 @@ def ordered_jobs(jobs: list[Job], workers: int) -> Iterator[Any]:
         for job in jobs:
             yield _run(job)
         return
-    print(f'  使用 {count} 个转换进程（共 {len(jobs)} 个任务）', flush=True)
+    print(tr(f'  使用 {count} 个转换进程（共 {len(jobs)} 个任务）', f'  {count} conversion processes ({len(jobs)} jobs)'), flush=True)
     with _one_blas_thread(), ProcessPoolExecutor(max_workers=count, mp_context=multiprocessing.get_context('spawn')) as pool:
         waiting: deque = deque()
         queue = iter(jobs)
@@ -125,12 +140,17 @@ def run_jobs(jobs: list[Job], workers: int | None = None) -> list[bytes]:
     count = min(len(jobs), worker_count() if workers is None else workers)
     if count <= 1:
         return [_run(job) for job in jobs]
-    print(f'  使用 {count} 个生成进程（共 {len(jobs)} 个模型任务）', flush=True)
+    print(tr(f'  使用 {count} 个生成进程（共 {len(jobs)} 个模型任务）', f'  {count} generator processes ({len(jobs)} model jobs)'), flush=True)
     with _one_blas_thread(), ProcessPoolExecutor(max_workers=count, mp_context=multiprocessing.get_context('spawn')) as pool:
         results = [b''] * len(jobs)
         pending = {pool.submit(_run, job): i for i, job in enumerate(jobs)}
-        for future in as_completed(pending):
-            results[pending[future]] = future.result()
+        try:
+            for future in as_completed(pending):
+                results[pending[future]] = future.result()
+        except BaseException:   # a job failed: the ones not started are not run for nothing (the pool waits the running)
+            for future in pending:
+                future.cancel()
+            raise
         return results
 
 
@@ -139,6 +159,6 @@ def _process_identity() -> bytes:
 
 
 def check_entry() -> None:
-    result = run_jobs([(_process_identity, (), '入口检查 1'), (_process_identity, (), '入口检查 2')], workers=2)
+    result = run_jobs([(_process_identity, (), 'entry check 1'), (_process_identity, (), 'entry check 2')], workers=2)
     assert all(int(value) != os.getpid() for value in result), 'model jobs ran in the installer process'
     print('EDF6VC_WORKERS_OK spawn entry', flush=True)

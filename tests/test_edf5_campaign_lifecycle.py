@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager, redirect_stdout
+import collections
 import ctypes
 import io
 import os
@@ -73,7 +74,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         with ExitStack() as stack:
             for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
                                 'build_autoturret': ({}, False), 'install_autoturret': None,
-                                'build_asset': None, 'find_edf41': None, 'material_compat_wanted': False}.items():   # a stand-in game: no EDF4.1
+                                'build_assets': collections.defaultdict(lambda: None), 'find_edf41': None, 'material_compat_wanted': False}.items():   # a stand-in game: no EDF4.1
                 stack.enter_context(patch.object(installer, name, return_value=value))
             for module, name, value in ((rootcpk, 'use', None), (call_weapons, 'recover', False),
                                         (call_weapons, 'install', []), (gen, 'install', []),

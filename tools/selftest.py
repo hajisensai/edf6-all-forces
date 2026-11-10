@@ -1829,7 +1829,7 @@ def emc_copies_agree() -> None:
     assert 'std::memcpy(c.pos,v+kPosition,12);' in emc and 'x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f' in src('src/hud.cpp')
     assert 'ResetEmc();' in src('src/mission.cpp') and 'InstallEmc();' in src('src/plugin.cpp')
     inst = src('tools/installer.py')
-    assert 'build_asset(cache, make_emc,' in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
+    assert "('emc', tr(" in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('EmcBeam', 'EmcChargeSec', 'EmcBeamSec', 'EmcBlastRadius', 'EmcBlastShare', 'EmcBreak'):
         assert re.search(rf'^{key}=', ini, re.M) and f'L"{key}"' in plugin and key in readme, key
@@ -1883,7 +1883,7 @@ def ultimate_copies_agree() -> None:
     assert 'GuardedTick(kStepUltimate,&UltimateTick);' in crew and 'ResetUltimate();' in src('src/mission.cpp')
     assert 'EmcRound::ultBeam' in strike and 'kSkyBackSec' in strike
     inst = src('tools/installer.py')
-    assert 'build_asset(cache, make_ultimate,' in inst and 'make_ultimate.install(game, ult)' in inst and 'make_ultimate.remove' in inst
+    assert "('ultimate', tr(" in inst and 'make_ultimate.install(game, ult)' in inst and 'make_ultimate.remove' in inst
     assert "'ultimate'" in src('pylib/buildcache.py')
     cmake = src('CMakeLists.txt')
     assert 'src/ultimate.cpp' in cmake and 'add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)' in cmake
@@ -1925,7 +1925,7 @@ def barrage_copies_agree() -> None:
     import buildcache
     assert make_barrage.OWNER in ledger.OWNERS and 'barrage' in buildcache.GROUPS
     inst = src('tools/installer.py')
-    assert 'build_asset(cache, make_barrage,' in inst and 'make_barrage.install(game, barrage)' in inst and \
+    assert "('barrage', tr(" in inst and 'make_barrage.install(game, barrage)' in inst and \
         'make_barrage.remove' in inst and "('barrage', barrage)" in inst
     assert "'make_barrage'" in src('tools/build_release.py')
     cmake = src('CMakeLists.txt')
@@ -5225,6 +5225,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
                           check=lambda game: True))
             enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
+            enter(patched(installer.model_workers, group_workers=lambda: 1))   # the stand-in builders are this process's
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
 
             def mission(game: str, plan: object) -> list[str]:

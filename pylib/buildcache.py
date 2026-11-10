@@ -118,8 +118,39 @@ def recipes() -> dict[str, str]:
     return source_recipes(str(Path(__file__).resolve().parent.parent))
 
 
-def inputs(game: str, group: str) -> dict[str, Any]:
-    """Cheap stock archive identity, plus content of the selected external model folder."""
+def build_group(game: str, group: str, args: tuple = ()) -> Any:
+    """`group`'s generated files (its generator's build(game, *args); the optics' build_models), as the installer builds
+    them: in a process of its own when several groups are built at once (installer.build_assets, model_workers.run_jobs),
+    which starts with nothing of the installer's state but the game it reads (rootcpk.use)."""
+    import rootcpk
+    rootcpk.use(game)
+    return builder(group)(game, *args)
+
+
+def builder(group: str) -> Any:
+    """The function that builds `group`'s files from the game (and its extra arguments): tool(group).build, the optics'
+    make_optics.build_models (its build makes the stock redirects too, built after every writer)."""
+    if group == 'optics':
+        import make_optics
+        return make_optics.build_models
+    return tool(group).build
+
+
+def _file_sha(path: Path, memo: dict | None) -> str:
+    """sha256_file, once per file per Cache (memo): the cockpit parts and a model folder several groups read (the
+    Dreadnought's for its turrets, the M163's for two vehicles) were hashed again for every group (the cockpits' 62 MB
+    once for each of the 44 cockpit groups on every update, 2026-11-10). Keyed by size and mtime: a file changed meanwhile is hashed again."""
+    if memo is None:
+        return sha256_file(str(path))
+    st = path.stat()
+    key = (os.path.normcase(str(path)), st.st_size, st.st_mtime_ns)
+    if key not in memo:
+        memo[key] = sha256_file(str(path))
+    return memo[key]
+
+
+def inputs(game: str, group: str, memo: dict | None = None) -> dict[str, Any]:
+    """Cheap stock archive identity, plus content of the selected external model folder (`memo`: _file_sha's)."""
     archive = Path(game) / ('Chunk02.cpk' if group == 'bigmap' else 'Root.cpk')
     st = archive.stat()
     result: dict[str, Any] = {'archive': [str(archive.resolve()), st.st_size, st.st_mtime_ns, st.st_ctime_ns]}
@@ -135,13 +166,13 @@ def inputs(game: str, group: str) -> dict[str, Any]:
         import cockpits
         folder = cockpits.asset_root() if cockpits.assets_present() else None
         result['cockpits'] = None if folder is None else {
-            str(p.relative_to(folder)).replace('\\', '/'): sha256_file(str(p))
+            str(p.relative_to(folder)).replace('\\', '/'): _file_sha(p, memo)
             for p in sorted(Path(folder).rglob('*')) if p.is_file()}
     if group in MODEL_INPUTS:
         import obj_model
         folder = obj_model.model_dir(MODEL_INPUTS[group])
         result['model'] = None if folder is None else {
-            str(p.relative_to(folder)).replace('\\', '/'): sha256_file(str(p))
+            str(p.relative_to(folder)).replace('\\', '/'): _file_sha(p, memo)
             for p in sorted(Path(folder).rglob('*')) if p.is_file()}
         if folder is not None:
             result['external'] = model_external_inputs(folder)
@@ -190,6 +221,7 @@ class Cache:
         self.recipes = recipes()
         self.entries: dict[str, Any] = {}
         self.signatures: dict[str, dict] = {}
+        self.hashed: dict = {}   # inputs' _file_sha memo: each input file hashed once for all the groups
         try:
             with open(self.path, encoding='utf-8') as f:
                 data = json.load(f)
@@ -201,7 +233,7 @@ class Cache:
     def current(self, group: str, settings: dict[str, Any] | None = None) -> bool:
         """Whether `group`'s installed outputs are the ones its recipe, inputs and `settings` (the ini's choices its
         generator builds by: the Dreadnought's hangar modules) make."""
-        signature = {'recipe': self.recipes[group], 'inputs': inputs(self.game, group)}
+        signature = {'recipe': self.recipes[group], 'inputs': inputs(self.game, group, self.hashed)}
         if settings is not None:
             signature['settings'] = settings
         self.signatures[group] = signature

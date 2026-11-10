@@ -199,6 +199,8 @@ class IncrementalTests(unittest.TestCase):
                                       'install_autoturret': lambda g, files, force: None}.items():
                 stack.enter_context(patch.object(installer, name, replacement))
             stack.enter_context(patch.object(call_weapons, 'recover', lambda g: False))
+            # the stand-in builders below are this process's: the groups built here, one after the other (build_assets)
+            stack.enter_context(patch.object(installer.model_workers, 'group_workers', lambda: 1))
             import rootcpk   # the installer points it at its game: not this stand-in, for the tests after this one
             stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
             shared = stack.enter_context(patch.object(call_weapons, 'install'))
