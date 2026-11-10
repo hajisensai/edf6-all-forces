@@ -26,6 +26,7 @@
 #include "enemy_control_net.h"
 #include "thermal.h"
 #include "vehicle_look.h"
+#include "seat_switch_logic.h"
 #include "drivegear.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
@@ -1139,4 +1140,10 @@ void ResetCrew() noexcept {
     testBoarded=false;testBoardSeen=0;testBoardTries=0;
 }
 int VehicleClassOf(const void* object) noexcept { return ClassOf(object); }
+unsigned StockPadReads(const void* vehicle,unsigned seat) noexcept {
+    const int c=ClassOf(vehicle);
+    if(c<0 || kClasses[c].input!=seatsw::kCarInputFn)return 0;
+    constexpr std::size_t kHorn=0x29B0;   // the Car's horn flag (setup 0x659F72 from its SGO; read at 0x65A5FC)
+    return seatsw::CarPadReads(seat,Readable(vehicle,kHorn+1) && At<unsigned char>(vehicle,kHorn)!=0);
+}
 }  // namespace crew

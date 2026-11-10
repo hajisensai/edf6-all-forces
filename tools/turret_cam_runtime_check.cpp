@@ -3,7 +3,10 @@
 #include "../src/crew.h"
 namespace crew {
 bool observation=false;
-bool VehicleLookActive(const void*) noexcept { return observation; } bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
+bool VehicleLookActive(const void*) noexcept { return observation; }
+bool lookOffered=true;   // vehicle_look.cpp VehicleLookOffered: false where the stock vehicle reads the button (a Grape's L3 horn)
+bool VehicleLookOffered(const void*,unsigned,bool) noexcept { return lookOffered; }
+bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
 #define ReadRound TurretTestRound
 #include "../src/turretcam.cpp"
 #undef ReadRound
@@ -209,6 +212,10 @@ void Run() {
         Aim(seat,input,cmd);
         Check(cmd[0]==0 && cmd[1]==0 && shared.orbitYaw!=0,"free look orbits actual endpoint and holds native gun input");
         owner=1;Aim(seat,input,cmd);Check(cmd[0]==input[0] && cmd[1]==input[1],"foreign gun controller keeps ownership in free look");
+        owner=0;lookOffered=false;game=GameSide{};shared.orbitYaw=0;Aim(seat,input,cmd);
+        Check(cmd[0]==input[0] && cmd[1]==input[1] && shared.orbitYaw==0,
+              "the button is the stock vehicle's there (a Grape's L3 horn): no free look, native gun input kept");
+        lookOffered=true;
         owner=0;Put<std::uint16_t>(seat,kSeatButtons,0);Put<float>(seat,kSeatStick,0);Put<float>(seat,kSeatStick+4,0);
     }
     Check(cameraReads==0,"high Aim never re-reads downward observation ray");
