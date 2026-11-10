@@ -833,6 +833,10 @@ JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark i
 C130_GUNSHIP_MARK = 7065.0
 C130_TRANSPORT_MARK = 7066.0
 JET_MASSES[C130_GUNSHIP_MARK] = JET_MASSES[C130_TRANSPORT_MARK] = JET_MASSES[7011.0]
+# ...and the support's air carriers in the model pack's Helicarrier (HELICARRIER_JETS): the carriers' mass (the carrier
+# kind's mark -> the Helicarrier's)
+HELICARRIER_MARKS = {7005.0: 7067.0, 7009.0: 7068.0, 7010.0: 7069.0}
+JET_MASSES.update({mark: JET_MASSES[kind] for kind, mark in HELICARRIER_MARKS.items()})
 # ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
 JET_MASSES.update({u.air['mark']: u.air['mass'] for u in xm_units.ported('jet')})
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
@@ -892,7 +896,7 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
                              7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet')),
                              *(mark for _n, mark, *_r in SUPPORT_JETS.values()), C130_GUNSHIP_MARK,
-                             C130_TRANSPORT_MARK})
+                             C130_TRANSPORT_MARK, *HELICARRIER_MARKS.values()})
 
 
 @dataclass(frozen=True)
@@ -1345,6 +1349,21 @@ JETS[C130_GUNSHIP_JET] = Jet(C130_GUNSHIP_MARK, JETS[GUNSHIP_JET].durability, JE
 JETS[C130_TRANSPORT_JET] = Jet(C130_TRANSPORT_MARK, JETS['edf6tr_jet_strike_mission'].durability, JETS['edf6tr_jet_strike_mission'].weapons,
                                ('app:/object/' + C130_JETS[C130_TRANSPORT_JET][0].lower(), C130_JETS[C130_TRANSPORT_JET][1]),
                                C130_JETS[C130_TRANSPORT_JET][0], 'body', 'body')
+# The support's air carrier and its blast / doll drone carriers in the model pack's Helicarrier (pylib/helicarrier_model.py,
+# the Sketchfab "Helicarrier", CC BY 4.0; docs/feature-support-jet-models.md §6): src/jet_internal.h Body::supCarrier /
+# supBlastCarrier / supDollCarrier under marks of their own (HELICARRIER_MARKS: the plugin picks the fans' reach over the
+# ground by them, src/nacelle_reach.h), each the arms and durability of the carrier kind it replaces (its weapons on
+# `body`: the model has no hardpoints; a carrier fires none, its drones do). One model for the three (as the V508 one);
+# built by tools/make_helicarrier.py with the model pack's helicarrier folder, or not at all (those supports are then not
+# deployed). The V508 carriers (7005, 7009, 7010) stay the requested / parked twins'.
+# name -> the carrier kind it replaces
+HELICARRIER_JETS: dict[str, str] = {'edf6tr_helicarrier': 'edf6tr_jet_carrier_mission',
+                                    'edf6tr_helicarrier_blast': 'edf6tr_jet_blast_carrier_mission',
+                                    'edf6tr_helicarrier_doll': 'edf6tr_jet_doll_carrier_mission'}
+HELICARRIER_MODEL = ('app:/object/edf6vc_helicarrier.mrab', 'edf6vc_helicarrier.mdb')
+for _name, _kind in HELICARRIER_JETS.items():
+    JETS[_name] = Jet(HELICARRIER_MARKS[JETS[_kind].mark], JETS[_kind].durability, JETS[_kind].weapons, HELICARRIER_MODEL,
+                      'EDF6VC_HELICARRIER.MRAB', 'body', 'body')
 # The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
 # 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
 # bring, each one's requested twin (parked: the whole plane's box, every class; requested: vehicle_setup). Left out on
@@ -1943,7 +1962,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
         raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
-    if airframe in aircraft_collision.DN_FILES or airframe in aircraft_collision.C130_FILES:
+    if airframe in aircraft_collision.PACK_FILES:
         # Its body is its ragdoll's mesh compound (src/body506.cpp MakeAirframe), told by this member: the game keeps
         # no shape userData of a compact SHKT (aircraft_collision.MAGIC read 0 at shape +0x28 in every vehicle, range
         # 2026-10-21: the Dreadnought flew as its whole box, its deck 12 m over its hull).

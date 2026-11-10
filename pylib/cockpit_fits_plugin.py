@@ -188,6 +188,13 @@ FITS: dict[str, tuple[Fit, ...]] = {
         Fit(1, 'c130_hull', (1.5, 2.4, 3.0), 'remote_display', 90.0),
     ),
     'EDF6VC_C130_TRANSPORT': (Fit(0, 'c130_hull', _C130_DECK, 'plane_deck'),) + _hold('c130_hull', _C130_HOLD, range(1, 13)),
+    # The support's air carriers (pylib/helicarrier_model.py: the model pack's Helicarrier, 80 m, stood on its lowest point;
+    # +x its left, the bow +z 40). The pilot on the island's bridge (the island off the deck's starboard edge, read off the
+    # hull 2026-11-10: x -6.1 .. -2.8, z -21.7 .. -13.0, its top y 16.4; room 1.0, 1.95, 1.89, 2.72, 2.99, 2.03 left, right,
+    # up, down, ahead, back: cockpits.clearance; the island's front is open higher up). The C-130J's flight deck
+    # (plane_deck) still crossed the island's slanted walls after every shrink: he commands from the monitor (the drones'
+    # and the gunship gunner's remote_display), as the carrier's drones are what fights.
+    'EDF6VC_HELICARRIER': (Fit(0, 'hc_hull', (-4.0, 12.5, -19.0), 'remote_display'),),
     # The transport helicopter (410 with ten passengers): the stock 410's pilot and pod guns (pylib/cockpit_fits_air.py
     # VEHICLE410_HELI, the same model) and its cabin's passengers in the UH-60M's troop seats.
     'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _heli_cabin('body', _410_CABIN, range(3, 13)),

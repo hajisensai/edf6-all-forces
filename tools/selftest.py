@@ -1708,12 +1708,14 @@ def hand_copies_agree() -> None:
     # ...and the Dreadnought's fighters and its turrets' rounds: tools/make_dreadnought.py
     import make_dreadnought
     import make_c130
+    import make_helicarrier
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES) | set(vc.ANDRYUSHA_BOMBLET_FILES)   # ...the Andryusha's: tools/make_katyusha.py
                | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
                | set(make_dreadnought.SUPPORT_SGOS.values())   # the support aircraft in the fighters' models
                | set(make_c130.SGOS)   # the support's gunship and paratroop plane in the C-130s: tools/make_c130.py
+               | set(make_helicarrier.SGOS)   # the support's carriers in the Helicarrier: tools/make_helicarrier.py
                # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
                | {f'EDF6VC_{k.upper()}.SGO' for k in vc.XM_JETS.values()})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
@@ -2719,8 +2721,8 @@ def support_jets_wear_their_models() -> None:
     SUPPORT_JETS' (tools/make_dreadnought.py writes those SGOs); each is its kind's durability and arms in that model,
     weighs what its kind weighs, is boardable, crewed (not BodyRow::crewless) and a support loadout's base
     (src/support_loadout.h kVehicleBodies, tools/support_loadout.py BODIES); its model has its exhausts measured
-    (jet_models.NOZZLE_EXITS). The gunship and the transport plane fly the C-130s (support_c130_models); the carriers keep
-    their stock models (no model of their kind in the pack)."""
+    (jet_models.NOZZLE_EXITS). The gunship and the transport plane fly the C-130s (support_c130_models); the carriers fly
+    the Helicarrier (support_helicarrier_models)."""
     import dreadnought_model as dm
     import jet_models
     import support_loadout as sl
@@ -2749,7 +2751,7 @@ def support_jets_wear_their_models() -> None:
     marks = [m for _n, m, *_r in vc.SUPPORT_JETS.values()]
     others = [j.mark for n, j in vc.JETS.items() if n not in {v[0] for v in vc.SUPPORT_JETS.values()}]
     assert len(set(marks)) == len(marks) and not set(marks) & set(others), 'a support mark another jet has'
-    assert launch['gunship'] == 'c130Gunship' and launch['carrier'] == 'carrier', launch
+    assert launch['gunship'] == 'c130Gunship' and launch['carrier'] == 'supCarrier', launch
     # the room protocol names the change (an older build made the stock-bomber support aircraft)
     assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 8
 
@@ -2801,6 +2803,59 @@ def support_c130_models() -> None:
 
 
 @test
+def support_helicarrier_models() -> None:
+    """The support's carrier and its blast / doll drone carriers fly the model pack's Helicarrier (docs/feature-support-jet-
+    models.md §6): src/jet_internal.h kLaunchRows sends JetRole::carrier / blastCarrier / dollCarrier to Body::supCarrier /
+    supBlastCarrier / supDollCarrier, whose SGOs, marks and roles are pylib/vcobjects.py HELICARRIER_JETS' and
+    HELICARRIER_MARKS' (tools/make_helicarrier.py writes the SGOs), each its kind's arms, durability and mass, boardable
+    as itself with the drones (Airframe::rotor, Arm::drones), crewed; its four lift fans are the bones the plugin tilts
+    (helicarrier_model.THRUSTERS: src/jet_flight.cpp Thrusters), their reach its own table (src/nacelle_reach.h
+    kHelicarrier, by Jet::liftFans: src/jet.cpp LiftFanJet); the V508 carriers stay the requested and parked twins; the room protocol is
+    10 or later."""
+    import helicarrier_model as hm
+    import jet_models
+    import make_helicarrier
+    table = re.sub(r'\s+', ' ', src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0])
+    rows = {b: (sgo_path, f, float(mark), role, drone, rest) for b, sgo_path, f, mark, role, drone, rest in re.findall(
+        r'\{Body::(\w+), ?L"([^"]*)", ?L"([^"]*)", ?(\d+)\.0f, ?Role::(\w+), ?Role::(\w+), ?"\w+"([^}]*)\}', table)}
+    launch = dict(re.findall(r'\{JetRole::(\w+),Body::(\w+)\}', src('src/jet_internal.h').split('kLaunchRows[]={', 1)[1].split('};', 1)[0]))
+    boardable = {b: (frame, arm) for b, frame, arm in
+                 re.findall(r'\{Body::(\w+),Airframe::(\w+),Arm::(\w+),', src('src/playerjet_kinds.h'))}
+    want = {'carrier': ('supCarrier', 'EDF6VC_HELICARRIER.SGO', 'drone', 'carrier'),
+            'blastCarrier': ('supBlastCarrier', 'EDF6VC_HELICARRIER_BLAST.SGO', 'blast', 'blastCarrier'),
+            'dollCarrier': ('supDollCarrier', 'EDF6VC_HELICARRIER_DOLL.SGO', 'doll', 'dollCarrier')}
+    assert set(vc.HELICARRIER_JETS) == set(make_helicarrier.SGOS.values()), (vc.HELICARRIER_JETS, make_helicarrier.SGOS)
+    for role, (body, file, drone, stock) in want.items():
+        assert launch.get(role) == body, f'kLaunchRows: JetRole::{role} flies {launch.get(role)}, not {body}'
+        name = make_helicarrier.SGOS[file]
+        jet, kind = vc.JETS[name], vc.JETS[vc.HELICARRIER_JETS[name]]
+        assert jet.file == hm.ARCHIVE == jet_models.HELICARRIER_FILE and jet.model == vc.HELICARRIER_MODEL, (name, jet.file)
+        assert rows[body][:5] == (f'app:/object/{file.lower()}', file, jet.mark, 'carrier', drone), (body, rows[body][:5])
+        assert 'true' not in rows[body][5], f'{body}: crewless or hostile'
+        assert kind.mark == rows[stock][2] and jet.mark == vc.HELICARRIER_MARKS[kind.mark], (body, kind.mark, jet.mark)
+        assert (jet.durability, jet.weapons) == (kind.durability, kind.weapons), f'{name}: not the arms of its kind'
+        assert vc.JET_MASSES[jet.mark] == vc.JET_MASSES[kind.mark], f'{name}: weighs other than its kind'
+        assert boardable.get(body) == ('rotor', 'drones') and jet.mark in vc.BOARDABLE_MARKS, f'{body}: not boardable as a carrier'
+        assert boardable.get(stock) == ('rotor', 'drones'), f'{stock}: the V508 twin is no longer boardable'
+        others = [r[2] for b, r in rows.items() if b != body]
+        assert jet.mark not in others, f'{body}: mark {jet.mark} another body has'
+    assert hm.THRUSTERS == ('boosterF_l', 'boosterF_r', 'boosterB_l', 'boosterB_r')
+    flight = src('src/jet_flight.cpp')
+    for bone in hm.THRUSTERS:
+        assert f'"{bone}"' in flight, f'src/jet_flight.cpp no longer tilts {bone}'
+    jet_src = src('src/jet.cpp')
+    lift = jet_src.split('bool LiftFanJet(', 1)[1].split('\n}\n', 1)[0]
+    assert all(f'Body::{b}' in lift for b, *_ in want.values()), 'src/jet.cpp LiftFanJet: the Helicarrier bodies'
+    assert 'j->liftFans=LiftFanJet(v);' in jet_src, 'NewEntry marks the Helicarrier'
+    assert 'j.liftFans ? nacelle::kHelicarrier : nacelle::kV508' in flight, 'Thrusters reads the reach of the body it tilts'
+    reach = src('src/nacelle_reach.h')
+    for name in ('kHcFront', 'kHcBack'):
+        vals = re.search(name + r'\[[^\]]*\]=\{([^}]*)\}', reach)
+        assert vals and len(vals.group(1).split(',')) == 23, f'src/nacelle_reach.h {name}'
+    assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 10
+
+
+@test
 def every_boardable_aircraft_requested() -> None:
     """The Air Raider requests every aircraft the player flies (src/playerjet_kinds.h kBoardable) empty, as a vehicle (the
     user, 2026-10-06: 「补上空袭的召唤飞机，空母载具」), but those LEFT_OUT says why not: each request of one of them
@@ -2820,6 +2875,8 @@ def every_boardable_aircraft_requested() -> None:
            for b in ('supStrike', 'supFighter', 'supInterceptor', 'supMultirole')},
         'c130Gunship': "the support's AC-130 (vcobjects.C130_JETS): the gunship request brings the gunship's own twin",
         'transportPlane': "the paratroop plane (vcobjects.C130_JETS): it carries the support's paratroopers, not a pilot's",
+        **{b: "the support's Helicarrier (vcobjects.HELICARRIER_JETS): the carrier requests bring their kinds' own twins"
+           for b in ('supCarrier', 'supBlastCarrier', 'supDollCarrier')},
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in

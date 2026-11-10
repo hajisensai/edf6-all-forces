@@ -99,8 +99,9 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
                   heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
-                  xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole, c130Gunship };
-constexpr int kBodyCount=35;
+                  xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole, c130Gunship, supCarrier,
+                  supBlastCarrier, supDollCarrier };
+constexpr int kBodyCount=38;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -187,6 +188,17 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // (jet_bay.cpp GunshipMuzzle: gunmuzzle.h kC130Gunship). Body::gunship stays its requested twin's mark (the bomber401).
     {Body::c130Gunship,L"app:/object/edf6vc_c130_gunship.sgo",L"EDF6VC_C130_GUNSHIP.SGO",7065.0f,Role::gunship,Role::drone,
      "c130Gunship"},
+    // The support's air carrier and its blast / doll drone carriers (kLaunchRows: the carrier calls, guarding / following,
+    // and the support deployment) in the model pack's Helicarrier (tools/make_helicarrier.py, pylib/vcobjects.py
+    // HELICARRIER_JETS; docs/feature-support-jet-models.md §6): each its carrier kind's arms, durability and drones under a
+    // mark of its own, its four lift fans the thrusters (jet_flight.cpp Thrusters: the same bone names, their reach over the
+    // ground nacelle_reach.h kHelicarrier, by these marks). Body::carrier / blastCarrier / dollCarrier stay the requested /
+    // parked twins' (the V508). Only with the model pack installed: without, these supports are not deployed.
+    {Body::supCarrier,L"app:/object/edf6vc_helicarrier.sgo",L"EDF6VC_HELICARRIER.SGO",7067.0f,Role::carrier,Role::drone,"supCarrier"},
+    {Body::supBlastCarrier,L"app:/object/edf6vc_helicarrier_blast.sgo",L"EDF6VC_HELICARRIER_BLAST.SGO",7068.0f,Role::carrier,
+     Role::blast,"supBlastCarrier"},
+    {Body::supDollCarrier,L"app:/object/edf6vc_helicarrier_doll.sgo",L"EDF6VC_HELICARRIER_DOLL.SGO",7069.0f,Role::carrier,
+     Role::doll,"supDollCarrier"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -295,13 +307,13 @@ constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r
 
 // The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
 // carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
-// multirole fly their kinds' Dreadnought-model bodies (Body::sup*; the plain bodies stay the player's parked / requested
-// twins' and the test range's).
+// multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130
+// (Body::sup*, Body::c130Gunship; the plain bodies stay the player's parked / requested twins' and the test range's).
 struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
     {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
-    {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::carrier},{JetRole::blastCarrier,Body::blastCarrier},
-    {JetRole::dollCarrier,Body::dollCarrier},{JetRole::gunship,Body::c130Gunship},
+    {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::supCarrier},{JetRole::blastCarrier,Body::supBlastCarrier},
+    {JetRole::dollCarrier,Body::supDollCarrier},{JetRole::gunship,Body::c130Gunship},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));
 constexpr bool LaunchRowsInOrder() noexcept {
@@ -509,6 +521,8 @@ struct Jet {
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
     bool crewless=false;     // its body's BodyRow::crewless (NewEntry)
+    bool liftFans=false;     // its body is the support's Helicarrier (LiftFanJet, NewEntry): its thrusters reach as
+                             // nacelle_reach.h kHelicarrier, not the V508's pods (jet_flight.cpp Thrusters)
     bool supportMetadata=false; // remote carrier metadata alone never drives native input
     bool supportDrone=false,supportPending=false; // staged network drone: no AI/fire before every peer activates
     bool entered;            // ...its first attack run begun: its arrival over (Entering)
@@ -653,6 +667,7 @@ void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place 
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
 bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
 bool CrewlessJet(const unsigned char* v) noexcept;  // a jet body flown with no one in it (BodyRow::crewless)
+bool LiftFanJet(const unsigned char* v) noexcept;   // the support's Helicarrier (Body::supCarrier ..): its lift fans tilt
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept {

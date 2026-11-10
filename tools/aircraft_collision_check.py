@@ -239,6 +239,24 @@ class GameAssets(unittest.TestCase):
         self.assertLess(min(got['front']), -5.0)
         self.assertGreater(min(got['back']), 2.5)
 
+    def test_helicarrier_reach_table_is_the_model(self):
+        """src/nacelle_reach.h kHcFront / kHcBack hold the support Helicarrier's lift fans' lowest points as the model
+        pack's model has them (to 1 cm), well over its bottom (so they never limit the tilt)."""
+        import re
+        import helicarrier_model as hm
+        if hm.model_dir() is None:
+            self.skipTest('no model pack helicarrier/ folder')
+        src = open(os.path.join(os.path.dirname(__file__), '..', 'src', 'nacelle_reach.h'), encoding='utf-8').read()
+        front, back = ac.NACELLE_TABLES[jet_models.HELICARRIER_FILE]
+        table = {k: [float(x) for x in re.findall(r'(-?[0-9.]+)f', re.search(k + r'\[kCount\]=\{(.*?)\};', src, re.S).group(1))]
+                 for k in (front, back)}
+        got = ac.nacelle_lowest(self.game, jet_models.HELICARRIER_FILE)
+        for side, key in (('front', front), ('back', back)):
+            self.assertEqual(len(table[key]), len(got[side]))
+            for a, b in zip(table[key], got[side]):
+                self.assertAlmostEqual(a, b, delta=0.01)
+            self.assertGreater(min(got[side]), 4.0)
+
     def test_generated_sgos_use_same_shapes_for_every_owner(self):
         import make_jets
         import vcobjects as vc

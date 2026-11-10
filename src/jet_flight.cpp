@@ -350,12 +350,14 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float
     const float up=Dot(j.m.thrust,u),fwd=Dot(j.m.thrust,f);
     const float tilt=Clamp(std::atan2(-up,fwd),-kThrustBack,0.0f);
     const float yaw=Clamp(Dot(j.m.omega,u)/k.roll,-1.0f,1.0f)*kThrustYaw;
+    const nacelle::Reach& reach=j.liftFans ? nacelle::kHelicarrier : nacelle::kV508;   // whose nacelles (NewEntry)
     float want[4];
     for(int i=0;i<4;++i) {
         const float side=j.surf.bind[i][12]>=0.0f ? 1.0f : -1.0f;   // the nacelle's x in the body
         want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
-        // Near the ground no further than keeps it over the ground (nacelle_reach.h; F_l, F_r the front pair).
-        if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? nacelle::kFront : nacelle::kBack,-clear,-kThrustBack));
+        // Near the ground no further than keeps it over the ground (nacelle_reach.h, the table of its model; F_l, F_r the
+        // front pair).
+        if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? reach.front : reach.back,-clear,-kThrustBack));
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
     // The stock Booster flame on each nozzle (its model's nozzle bones, one on each pod: booster.cpp), with the engine
