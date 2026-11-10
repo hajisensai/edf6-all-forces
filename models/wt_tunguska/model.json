@@ -5,7 +5,7 @@
  "source": "https://sketchfab.com/3d-models/2s6-tunguska-war-thunder-dd5c6c0b5497401daf222c57a22f6c23",
  "prepared_from": "2S6.obj",
  "winding_flipped": false,
- "auto_smooth_deg": 50.0,
+ "normals": "auto_smooth 45",
  "materials": [
   {
    "name": "v603_kyata_R",
@@ -26,68 +26,78 @@
    "template": "v603_body",
    "albedo": "textures/2s6_body_c_ussr_camo_green.jpg",
    "normal": "textures/2s6_body_n_n.jpg",
-   "occlusion": "textures/2s6_body_ao_ao_occ.png"
+   "occlusion": "textures/2s6_body_ao_ao_occ.png",
+   "specular": "textures/2s6_body_n_s.jpg"
   },
   {
    "name": "wt_net_b_c",
    "template": "v603_body",
    "albedo": "textures/net_b_c.jpg",
    "normal": "textures/net_b_n_n.jpg",
-   "occlusion": "textures/net_b_ao_ao_occ.png"
+   "occlusion": "textures/net_b_ao_ao_occ.png",
+   "specular": "textures/net_b_n_s.jpg"
   },
   {
    "name": "wt_net_f_c",
    "template": "v603_body",
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
-   "occlusion": "textures/net_f_ao_ao_occ.png"
+   "occlusion": "textures/net_f_ao_ao_occ.png",
+   "specular": "textures/net_f_n_s.jpg"
   },
   {
    "name": "wt_2s6_body_c",
    "template": "v603_body",
    "albedo": "textures/2s6_body_c.jpg",
    "normal": "textures/2s6_body_n_n.jpg",
-   "occlusion": "textures/2s6_body_ao_ao_occ.png"
+   "occlusion": "textures/2s6_body_ao_ao_occ.png",
+   "specular": "textures/2s6_body_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "occlusion": "textures/headlight_glass_n_ao_occ.png"
+   "occlusion": "textures/headlight_glass_n_ao_occ.png",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c_7",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
-   "normal": "textures/headlight_glass_n_n.jpg"
+   "normal": "textures/headlight_glass_n_n.jpg",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_2s6_turret_c_ussr_camo_green",
    "template": "v603_body",
    "albedo": "textures/2s6_turret_c_ussr_camo_green.jpg",
    "normal": "textures/2s6_turret_n_n.jpg",
-   "occlusion": "textures/2s6_turret_ao_ao_occ.png"
+   "occlusion": "textures/2s6_turret_ao_ao_occ.png",
+   "specular": "textures/2s6_turret_n_s.jpg"
   },
   {
    "name": "wt_2s6_gun_c_ussr_camo_green",
    "template": "v603_body",
    "albedo": "textures/2s6_gun_c_ussr_camo_green.jpg",
    "normal": "textures/2s6_gun_n_n.jpg",
-   "occlusion": "textures/2s6_gun_ao_ao_occ.png"
+   "occlusion": "textures/2s6_gun_ao_ao_occ.png",
+   "specular": "textures/2s6_gun_n_s.jpg"
   },
   {
    "name": "wt_optic_glass_c",
    "template": "v603_body",
    "albedo": "textures/optic_glass_c.jpg",
-   "normal": "textures/optic_glass_n_n.jpg"
+   "normal": "textures/optic_glass_n_n.jpg",
+   "specular": "textures/optic_glass_n_s.jpg"
   },
   {
    "name": "wt_9m311_rocket_c_ussr_camo_green",
    "template": "v603_body",
    "albedo": "textures/9m311_rocket_c_ussr_camo_green.jpg",
    "normal": "textures/9m311_rocket_n_n.jpg",
-   "occlusion": "textures/9m311_rocket_ao_ao_occ.png"
+   "occlusion": "textures/9m311_rocket_ao_ao_occ.png",
+   "specular": "textures/9m311_rocket_n_s.jpg"
   }
  ],
  "parts": [
@@ -96,7 +106,7 @@
    "bone": "body",
    "material": 2,
    "triangles": 76507,
-   "vertices": 112244
+   "vertices": 114675
   },
   {
    "name": "body.wt_net_b_c",
@@ -124,7 +134,7 @@
    "bone": "body",
    "material": 6,
    "triangles": 576,
-   "vertices": 443
+   "vertices": 364
   },
   {
    "name": "body.wt_headlight_glass_c_7",
@@ -138,7 +148,7 @@
    "bone": "cannon_l",
    "material": 9,
    "triangles": 4271,
-   "vertices": 5676
+   "vertices": 5739
   },
   {
    "name": "cannon_main.wt_net_b_c",
@@ -152,7 +162,7 @@
    "bone": "cannon_main",
    "material": 8,
    "triangles": 38699,
-   "vertices": 47520
+   "vertices": 49115
   },
   {
    "name": "cannon_main.wt_optic_glass_c",
@@ -166,28 +176,28 @@
    "bone": "cannon_main",
    "material": 11,
    "triangles": 21760,
-   "vertices": 25256
+   "vertices": 25404
   },
   {
    "name": "cannon_r.wt_2s6_gun_c_ussr_camo_green",
    "bone": "cannon_r",
    "material": 9,
    "triangles": 4226,
-   "vertices": 5617
+   "vertices": 5702
   },
   {
    "name": "cannon_slide_l.wt_2s6_gun_c_ussr_camo_green",
    "bone": "cannon_slide_l",
    "material": 9,
    "triangles": 12922,
-   "vertices": 15048
+   "vertices": 15962
   },
   {
    "name": "cannon_slide_r.wt_2s6_gun_c_ussr_camo_green",
    "bone": "cannon_slide_r",
    "material": 9,
    "triangles": 13018,
-   "vertices": 15161
+   "vertices": 16062
   },
   {
    "name": "catapi_body.v603_kyata_R",
@@ -208,126 +218,126 @@
    "bone": "doppler_radar",
    "material": 8,
    "triangles": 9208,
-   "vertices": 12226
+   "vertices": 12563
   },
   {
    "name": "wheel_A_l",
    "bone": "tire_moveA_l",
    "material": 2,
    "triangles": 1272,
-   "vertices": 1244
+   "vertices": 1307
   },
   {
    "name": "wheel_A_r",
    "bone": "tire_moveA_r",
    "material": 2,
    "triangles": 1272,
-   "vertices": 1245
+   "vertices": 1307
   },
   {
    "name": "wheel_B_l",
    "bone": "tire_moveB_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1090
   },
   {
    "name": "wheel_B_r",
    "bone": "tire_moveB_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1090
   },
   {
    "name": "wheel_C_l",
    "bone": "tire_moveC_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1090
   },
   {
    "name": "wheel_C_r",
    "bone": "tire_moveC_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1090
   },
   {
    "name": "wheel_D_l",
    "bone": "tire_moveD_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1096
   },
   {
    "name": "wheel_D_r",
    "bone": "tire_moveD_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1096
   },
   {
    "name": "wheel_E_l",
    "bone": "tire_moveE_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1092
   },
   {
    "name": "wheel_E_r",
    "bone": "tire_moveE_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1092
   },
   {
    "name": "wheel_F_l",
    "bone": "tire_moveF_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1094
   },
   {
    "name": "wheel_F_r",
    "bone": "tire_moveF_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1094
   },
   {
    "name": "wheel_G_l",
    "bone": "tire_moveG_l",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1094
   },
   {
    "name": "wheel_G_r",
    "bone": "tire_moveG_r",
    "material": 2,
    "triangles": 1092,
-   "vertices": 1034
+   "vertices": 1094
   },
   {
    "name": "wheel_H_l",
    "bone": "tire_moveH_l",
    "material": 2,
    "triangles": 4708,
-   "vertices": 5746
+   "vertices": 5839
   },
   {
    "name": "wheel_H_r",
    "bone": "tire_moveH_r",
    "material": 2,
    "triangles": 4708,
-   "vertices": 5746
+   "vertices": 5839
   },
   {
    "name": "tracking_radar.wt_2s6_turret_c_ussr_camo_green",
    "bone": "tracking_radar",
    "material": 8,
    "triangles": 3192,
-   "vertices": 3951
+   "vertices": 4032
   }
  ],
  "origins": {

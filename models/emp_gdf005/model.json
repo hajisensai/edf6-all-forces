@@ -11,7 +11,9 @@
    "template": "v603_body",
    "albedo": "textures/gdf005_0.png",
    "source": "afb7896f-0aab-4619-be91-faa6ff040210",
-   "normal": "textures/gdf005_0_normal.jpg"
+   "normal": "textures/gdf005_0_normal.jpg",
+   "roughness_metal": "textures/gdf005_0_rm.png",
+   "occlusion": "textures/gdf005_0_occ.png"
   }
  ],
  "parts": [
@@ -20,21 +22,21 @@
    "role": "base",
    "material": 0,
    "triangles": 13286,
-   "vertices": 15169
+   "vertices": 16476
   },
   {
    "name": "turret.edf6vc_gdf005_0",
    "role": "turret",
    "material": 0,
    "triangles": 8057,
-   "vertices": 9151
+   "vertices": 10931
   },
   {
    "name": "gun.edf6vc_gdf005_0",
    "role": "gun",
    "material": 0,
    "triangles": 1678,
-   "vertices": 1951
+   "vertices": 2062
   }
  ],
  "pivots": {

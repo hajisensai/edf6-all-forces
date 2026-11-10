@@ -10,31 +10,36 @@
    "name": "edf6vc_laser_0",
    "template": "v603_body",
    "albedo": "textures/laser_0.png",
-   "source": "phong3"
+   "source": "phong3",
+   "roughness_metal": "textures/laser_0_rm.png"
   },
   {
    "name": "edf6vc_laser_1",
    "template": "v603_body",
    "albedo": "textures/laser_1.png",
-   "source": "phong2"
+   "source": "phong2",
+   "roughness_metal": "textures/laser_1_rm.png"
   },
   {
    "name": "edf6vc_laser_2",
    "template": "v603_body",
    "albedo": "textures/laser_2.png",
-   "source": "phong1"
+   "source": "phong1",
+   "roughness_metal": "textures/laser_2_rm.png"
   },
   {
    "name": "edf6vc_laser_3",
    "template": "v603_body",
    "albedo": "textures/laser_3.png",
-   "source": "lambert1"
+   "source": "lambert1",
+   "roughness_metal": "textures/laser_3_rm.png"
   },
   {
    "name": "edf6vc_laser_4",
    "template": "v603_body",
    "albedo": "textures/laser_4.png",
-   "source": "phong4"
+   "source": "phong4",
+   "roughness_metal": "textures/laser_4_rm.png"
   }
  ],
  "parts": [

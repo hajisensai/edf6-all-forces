@@ -10,19 +10,22 @@
    "name": "edf6vc_ciws_phalanx_0",
    "template": "v603_body",
    "albedo": "textures/ciws_phalanx_0.png",
-   "source": "Mat_CIWS"
+   "source": "Mat_CIWS",
+   "roughness_metal": "textures/ciws_phalanx_0_rm.png"
   },
   {
    "name": "edf6vc_ciws_phalanx_1",
    "template": "v603_body",
    "albedo": "textures/ciws_phalanx_1.png",
-   "source": "Mat_Dof_CIWS"
+   "source": "Mat_Dof_CIWS",
+   "roughness_metal": "textures/ciws_phalanx_1_rm.png"
   },
   {
    "name": "edf6vc_ciws_phalanx_2",
    "template": "v603_body",
    "albedo": "textures/ciws_phalanx_2.png",
-   "source": "Mat_Ammo"
+   "source": "Mat_Ammo",
+   "roughness_metal": "textures/ciws_phalanx_2_rm.png"
   }
  ],
  "parts": [

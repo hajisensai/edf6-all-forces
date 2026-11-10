@@ -6,8 +6,9 @@
                        origin), triangles
         model.json     the parts (role, material), the materials (texture files), the pivots (the turret's turning
                        axis, the guns' trunnion, their mouths, a rotor's axis), the source and its licence
-        textures/      each material's base colour at its own size (no limit of ours: docs/texture-quality.md), and
-                       its normal map where it has one (<name>_normal.png, DirectX green: Model.normal_green)
+        textures/      each material's base colour at its own size (no limit of ours: docs/texture-quality.md), its
+                       normal map where it has one (<name>_normal.png, DirectX green: Model.normal_green), its
+                       roughness / metalness (<name>_rm.png) and occlusion (<name>_occ.png) maps (pylib/pbr_maps.py)
         LICENSE.txt    the attribution the licence asks for
 
     python tools/prep_glb_model.py <kind> <model.glb> [--out <models>/<folder>] [--license <license.json>]
@@ -37,6 +38,8 @@ ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 
 import gltf  # noqa: E402
+import mesh_normals  # noqa: E402
+import pbr_maps  # noqa: E402
 
 FORMAT = 1
 ROLES = ('base', 'turret', 'gun', 'rotor')
@@ -237,6 +240,21 @@ def _normal(mat: gltf.Material, m: Model, out_dir: str, name: str) -> str | None
     return rel
 
 
+def _surface(mat: gltf.Material, out_dir: str, name: str) -> dict[str, str]:
+    """The material's roughness / metalness (textures/<name>_rm.png, the game's R / G: pylib/pbr_maps.py; its factors
+    as a 4 x 4 map without a texture) and its occlusion (textures/<name>_occ.png, its black lifted) where it has one, as
+    model.json keys."""
+    from PIL import Image
+    out = {'roughness_metal': f'textures/{name}_rm.png'}
+    Image.fromarray(pbr_maps.roughness_metal(mat), 'RGB').save(os.path.join(out_dir, out['roughness_metal']),
+                                                               optimize=True)
+    occ = pbr_maps.occlusion(mat)
+    if occ is not None:
+        out['occlusion'] = f'textures/{name}_occ.png'
+        Image.fromarray(occ, 'L').save(os.path.join(out_dir, out['occlusion']), optimize=True)
+    return out
+
+
 def _plain(mat: gltf.Material, out_dir: str, name: str) -> str:
     """A material with no texture: its base colour as a 4 x 4 image."""
     from PIL import Image
@@ -284,6 +302,7 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
                     mat.append(cur)
     maps: dict[str, str] = {}
     normal_maps: dict[str, str] = {}
+    surface: dict[str, dict[str, str]] = {}     # material -> map_Pr / map_Pm / map_ao -> file
     if mtllib:
         name = None
         with open(os.path.join(os.path.dirname(path), mtllib), encoding='utf-8', errors='replace') as f:
@@ -295,6 +314,8 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
                     maps[name] = t[1]
                 elif t and t[0] in ('map_normal', 'norm', 'map_Bump', 'bump') and name:
                     normal_maps[name] = t[1].split()[-1]    # the file is the last word (after any -bm option)
+                elif t and t[0] in ('map_Pr', 'map_Pm', 'map_ao') and name:
+                    surface.setdefault(name, {})[t[0]] = t[1].split()[-1]
     P, UV = np.asarray(V, dtype=np.float64), np.asarray(T, dtype=np.float64)
     tv, tt = np.asarray(tri_v, dtype=np.int64), np.asarray(tri_t, dtype=np.int64)
     # unweld per (position, uv) corner, as glTF stores them
@@ -306,8 +327,19 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
         data = open(os.path.join(os.path.dirname(path), tex), 'rb').read() if tex else None
         ntex = normal_maps.get(name)
         normal = open(os.path.join(os.path.dirname(path), ntex), 'rb').read() if ntex else None
+        # roughness and metalness: one ORM map (glTF's channels: R occlusion, G roughness, B metalness) as map_Pr and
+        # map_Pm (the GDF-005's), its occlusion map_ao; anything else is not read (nothing here exports it)
+        sf = surface.get(name, {})
+        if sf.get('map_Pr') != sf.get('map_Pm'):
+            raise ValueError(f'{path}: material {name}: roughness {sf.get("map_Pr")} and metalness {sf.get("map_Pm")} '
+                             'are not one ORM map')
+        if 'map_Pr' not in sf:
+            raise ValueError(f'{path}: material {name} has no roughness / metalness map (map_Pr, map_Pm)')
+        read = lambda f: open(os.path.join(os.path.dirname(path), f), 'rb').read()   # noqa: E731
         materials.append(gltf.Material(name, (1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0), texture=data,
-                                       texture_mime='image/jpeg' if data else '', normal=normal))
+                                       texture_mime='image/jpeg' if data else '', normal=normal,
+                                       metal_rough=read(sf['map_Pr']),
+                                       occlusion=read(sf['map_ao']) if sf.get('map_ao') else None))
     uv = UV[uniq[:, 1]] * (1.0, -1.0) + (0.0, 1.0)     # bottom-left OBJ v -> glTF's top-left
     scene = gltf.Scene(P[uniq[:, 0]], None, inv.reshape(-1, 3), np.asarray(mat, dtype=np.int64), materials, {},
                        np.asarray(mat, dtype=np.int64), uv)
@@ -339,7 +371,7 @@ def read_skinned(path: str, origins: dict) -> tuple[gltf.Scene, list[str]]:
     ibm = acc(skin['inverseBindMatrices']).reshape(-1, 4, 4).transpose(0, 2, 1)   # column-major
     for name, m_ in zip(joints, ibm):
         origins[name] = np.linalg.inv(m_)[:3, 3]
-    pos, uv, tri, mat, joint_of = [], [], [], [], []
+    pos, nrm, uv, tri, mat, joint_of = [], [], [], [], [], []
     base = 0
     for p in g['meshes'][node['mesh']]['primitives']:
         v = acc(p['attributes']['POSITION']).astype(np.float64)
@@ -348,6 +380,7 @@ def read_skinned(path: str, origins: dict) -> tuple[gltf.Scene, list[str]]:
         W = acc(p['attributes']['WEIGHTS_0']).astype(np.float64)
         top = J[np.arange(len(J)), np.argmax(W, axis=1)].astype(np.int64)
         pos.append(v)
+        nrm.append(acc(p['attributes']['NORMAL']).astype(np.float64) if 'NORMAL' in p['attributes'] else None)
         uv.append(acc(p['attributes']['TEXCOORD_0']).astype(np.float64)[:, :2] if 'TEXCOORD_0' in p['attributes']
                   else np.zeros((len(v), 2)))
         tri.append(f + base)
@@ -356,7 +389,10 @@ def read_skinned(path: str, origins: dict) -> tuple[gltf.Scene, list[str]]:
         base += len(v)
     T = np.vstack(tri)
     jo = np.concatenate(joint_of)
-    scene = gltf.Scene(np.vstack(pos), None, T, np.concatenate(mat).astype(np.int64), gltf._materials(g, [binary]),
+    N = None if any(n is None for n in nrm) else np.vstack(nrm)     # the bind pose's own (mesh space, as the positions)
+    if N is not None:
+        N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+    scene = gltf.Scene(np.vstack(pos), N, T, np.concatenate(mat).astype(np.int64), gltf._materials(g, [binary]),
                        {}, jo.astype(np.int64), np.vstack(uv))
     return scene, [f'/{name}/' for name in joints]
 
@@ -401,7 +437,7 @@ def prepare(m: Model, src: str, out: str) -> dict:
     materials, mat_of = [], {}
     arrays: dict[str, np.ndarray] = {}
     parts = []
-    tri_n = None if N is None else N
+    smooth = None   # mesh_normals.auto_smooth of the whole model: Sketchfab's for an upload with no normals
     for role in ROLES:
         for mi in sorted(set(scene.material[keep & (roles == role)].tolist())):
             sel = np.flatnonzero(keep & (roles == role) & (scene.material == mi))
@@ -415,19 +451,18 @@ def prepare(m: Model, src: str, out: str) -> dict:
                 normal = _normal(mat, m, out, name)
                 if normal:
                     materials[-1]['normal'] = normal
+                materials[-1].update(_surface(mat, out, name))
             tri = scene.triangles[sel]
             idx, inv = np.unique(tri, return_inverse=True)
+            if N is not None and np.isfinite(N[idx]).all() and np.any(N[idx]):
+                nrm = N[idx]            # the source's own
+            else:                       # none (an OBJ export): a vertex a (position, smoothed normal) pair
+                if smooth is None:
+                    smooth = mesh_normals.auto_smooth(P, scene.triangles)
+                pair, inv = np.unique(np.stack((tri, smooth[1][sel]), -1).reshape(-1, 2), axis=0, return_inverse=True)
+                idx, nrm = pair[:, 0], smooth[0][pair[:, 1]]
             k = len(parts)
             pos = P[idx]
-            if tri_n is not None and np.isfinite(tri_n[idx]).all() and np.any(tri_n[idx]):
-                nrm = tri_n[idx]
-            else:                       # no normals: the faces' own, per vertex (flat enough for hard surfaces)
-                nrm = np.zeros_like(pos)
-                t = inv.reshape(-1, 3)
-                fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
-                for c in range(3):
-                    np.add.at(nrm, t[:, c], fn)
-                nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
             uv = scene.uvs[idx] if scene.uvs is not None else np.zeros((len(idx), 2))
             arrays[f'p{k}_pos'] = pos.astype(np.float32)
             arrays[f'p{k}_nrm'] = nrm.astype(np.float32)

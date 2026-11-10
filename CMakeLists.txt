@@ -166,7 +166,7 @@ configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6Vehicle
 # pylib/edf6native.py loads them with ctypes, tools/build_release.py bundles the DLL. Each is a port of a Python
 # reference that stays the fallback (tests/test_native_*.py: the same bytes).
 # MODULE, not SHARED: nothing links it, and SHARED libraries are the game's plugins (selftest pack_ships_every_plugin).
-add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp)
+add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp native/dxt1.cpp)
 target_compile_options(edf6cmpl PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(edf6cmpl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pylib")
 
@@ -1011,11 +1011,15 @@ add_test(NAME frozen_cockpit_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
 add_test(NAME bc5_normals COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bc5_normals.py")
+# The model conversion chain's quality fixes (docs/model-quality-1110.md): DXT1 candidates, auto-smoothed normals,
+# glTF surface maps, float positions past obj_model.PRECISE_EXTENT.
+add_test(NAME model_quality COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_quality.py")
 add_test(NAME model_workers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_workers.py")
 # Its two parallel jobs wait for each other however long the second worker takes to start: the hang guard is here.
 set_tests_properties(model_workers PROPERTIES TIMEOUT 600)
 add_test(NAME native_cmpl COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_cmpl.py")
 add_test(NAME native_helpers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_helpers.py")
+add_test(NAME native_dxt1 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_dxt1.py")
 # tools/edf41_maps.py converting maps in processes of their own writes what one by one writes (skipped without the games)
 add_test(NAME edf41_maps_parallel COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_maps_parallel.py")
 set_tests_properties(texture_acceleration bc5_normals model_workers edf41_maps_parallel PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

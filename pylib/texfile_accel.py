@@ -58,45 +58,149 @@ def _half(pixels: Any) -> Any:
     return ((total + 2) >> 2).astype(np.uint8)
 
 
-def _level(pixels: Any) -> bytes:
+# texfile._dxt1_block over blocks of 16 pixels, planar (each channel an (n, 16) int32 array: contiguous, and every
+# intermediate fits: covariance at most 16 x 4080^2, errors 16 x 3 x 765^2); the power iteration in int64.
+
+def _rgb565(r: Any, g: Any, b: Any) -> Any:
+    return ((r * 31 + 127) // 255) << 11 | ((g * 63 + 127) // 255) << 5 | (b * 31 + 127) // 255
+
+
+def _rgb888(c: Any) -> tuple[Any, Any, Any]:
+    r, g, b = c >> 11, (c >> 5) & 63, c & 31
+    return (r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)
+
+
+_SHIFT = None
+
+
+def _fit(p: tuple, c0: Any, c1: Any) -> tuple[Any, Any, Any, Any]:
+    """texfile._dxt1_fit for every block: (error, colour0, colour1, indices)."""
     import numpy as np
+    c0, c1 = np.maximum(c0, c1), np.minimum(c0, c1)
+    e0 = [x[:, None] for x in _rgb888(c0)]
+    e1 = [x[:, None] for x in _rgb888(c1)]
+    d = [a - b for a, b in zip(e0, e1)]
+    dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    s = 6 * ((p[0] - e1[0]) * d[0] + (p[1] - e1[1]) * d[1] + (p[2] - e1[2]) * d[2])
+    w = (s >= dd).astype(np.int32) + (s >= 3 * dd) + (s >= 5 * dd)      # colour0's weight in thirds
+    v = 3 - w
+    total = sum(((3 * p[c] - w * e0[c] - v * e1[c]) ** 2).sum(1) for c in range(3))
+    idx = (np.asarray(texfile._DXT1_INDEX, dtype=np.int64)[w] << _SHIFT).sum(1)
+    one = c0 == c1
+    if one.any():
+        flat = sum(((3 * p[c] - 3 * e0[c]) ** 2).sum(1) for c in range(3))
+        total = np.where(one, flat, total)
+        idx = np.where(one, 0, idx)
+    return total.astype(np.int64), c0, c1, idx
+
+
+def _refit(p: tuple, idx: Any) -> tuple[Any, Any, Any]:
+    """texfile._dxt1_refit for every block: (colour0, colour1, whether they are fixed)."""
+    import numpy as np
+    x = np.asarray(texfile._DXT1_WEIGHT, dtype=np.int32)[(idx[:, None] >> _SHIFT) & 3]     # (n, 16)
+    y = 3 - x
+    xx, xy, yy = (x * x).sum(1).astype(np.int64), (x * y).sum(1).astype(np.int64), (y * y).sum(1).astype(np.int64)
+    xp = [(x * c).sum(1).astype(np.int64) for c in p]
+    yp = [(y * c).sum(1).astype(np.int64) for c in p]
+    det = xx * yy - xy * xy
+    ok = det != 0
+    den = np.where(ok, det, 1) * 255
+    ends = []
+    for a, b in ((yy, -xy), (-xy, xx)):
+        q = []
+        for c, top in enumerate((31, 63, 31)):
+            num = 3 * (a * xp[c] + b * yp[c]) * top
+            q.append(np.minimum(top, np.maximum(0, (2 * num + den) // (2 * den))))
+        ends.append(q[0] << 11 | q[1] << 5 | q[2])
+    return ends[0], ends[1], ok
+
+
+def _pick(best: tuple, got: tuple, take: Any) -> tuple:
+    import numpy as np
+    return tuple(np.where(take, g, b) for g, b in zip(got, best))
+
+
+def _search(p: tuple, axis: Any, best: tuple) -> tuple:
+    """The principal-axis candidate and the refits (texfile._dxt1_block past the range fit) for blocks `p`."""
+    import numpy as np
+    unit = texfile.DXT1_UNIT
+    rows = np.arange(len(axis))
+    d = [16 * c - c.sum(1, keepdims=True) for c in p]
+    cov = [[(d[j] * d[k]).sum(1).astype(np.int64) for k in range(3)] for j in range(3)]
+    v = [np.where(axis == c, unit, 0).astype(np.int64) for c in range(3)]
+    for _ in range(texfile.DXT1_POWER):
+        w = [cov[j][0] * v[0] + cov[j][1] * v[1] + cov[j][2] * v[2] for j in range(3)]
+        m = np.maximum(np.maximum(np.abs(w[0]), np.abs(w[1])), np.abs(w[2]))
+        live = m > 0
+        safe = np.maximum(m, 1)
+        v = [np.where(live, x * unit // safe, y) for x, y in zip(w, v)]
+    t = d[0].astype(np.int64) * v[0][:, None] + d[1] * v[1][:, None] + d[2] * v[2][:, None]
+    hi, lo = t.argmax(1), t.argmin(1)
+    got = _fit(p, _rgb565(*(c[rows, hi] for c in p)), _rgb565(*(c[rows, lo] for c in p)))
+    best = _pick(best, got, got[0] < best[0])
+    active = np.ones(len(axis), dtype=bool)
+    for _ in range(texfile.DXT1_REFITS):
+        active &= best[1] != best[2]
+        c0, c1, ok = _refit(p, best[3])
+        active &= ok
+        if not active.any():
+            break
+        got = _fit(p, np.where(ok, c0, best[1]), np.where(ok, c1, best[2]))
+        active &= got[0] < best[0]
+        best = _pick(best, got, active)
+    return best
+
+
+def _level(pixels: Any) -> bytes:
+    """texfile._dxt1_level: the same candidates, integers, bytes; native/dxt1.cpp's when the DLL is there."""
+    import numpy as np
+    import edf6native
+    lib = edf6native.lib()
+    if lib is not None:
+        import ctypes
+        height, width = pixels.shape[:2]
+        data = np.ascontiguousarray(pixels, dtype=np.uint8).tobytes()
+        out = ctypes.create_string_buffer(((width + 3) // 4) * ((height + 3) // 4) * 8)
+        size = lib.edf6_dxt1_level(data, width, height, out)
+        return out.raw[:size]
+    return _level_numpy(pixels)
+
+
+def _level_numpy(pixels: Any) -> bytes:
+    """_level in numpy (no DLL: a dev checkout without build.cmd)."""
+    import numpy as np
+    global _SHIFT
+    if _SHIFT is None:
+        _SHIFT = np.arange(16, dtype=np.int64) * 2
     height, width = pixels.shape[:2]
     padded = np.pad(pixels, ((0, (-height) % 4), (0, (-width) % 4), (0, 0)), mode='edge')
     blocks = padded.reshape(padded.shape[0] // 4, 4, padded.shape[1] // 4, 4, 4)
-    blocks = blocks.transpose(0, 2, 1, 3, 4).reshape(-1, 16, 4)
+    blocks = blocks.transpose(3 + 1, 0, 2, 1, 3).reshape(4, -1, 16)[:3]      # (channel, block, pixel)
     output = []
-    # Bound the temporary int64 arrays independently of texture resolution.
-    for start in range(0, len(blocks), 4096):
-        px = blocks[start:start + 4096, :, :3].astype(np.int64)
-        axis = (px.max(1) - px.min(1)).argmax(1)
-        rows = np.arange(len(px))
-        along = px[rows[:, None], np.arange(16)[None, :], axis[:, None]]
-        a, b = px[rows, along.argmax(1)], px[rows, along.argmin(1)]
-
-        def rgb565(rgb: Any) -> Any:
-            return (((rgb[:, 0] * 31 + 127) // 255) << 11 |
-                    ((rgb[:, 1] * 63 + 127) // 255) << 5 |
-                    (rgb[:, 2] * 31 + 127) // 255)
-
-        c0, c1 = rgb565(a), rgb565(b)
-        flat = c0 == c1
-        swap = c0 < c1
-        a, b = np.where(swap[:, None], b, a), np.where(swap[:, None], a, b)
-        c0, c1 = np.maximum(c0, c1), np.minimum(c0, c1)
-        delta = a - b
-        denominator = np.maximum((delta * delta).sum(1), 1)
-        t = ((px - b[:, None]) * delta[:, None]).sum(2) * 3 / denominator[:, None]
-        palette = np.where(t < 0.5, 1, np.where(t < 1.5, 3, np.where(t < 2.5, 2, 0)))
-        indices = np.bitwise_or.reduce(palette.astype(np.uint32) << (np.arange(16, dtype=np.uint32) * 2), axis=1)
-        indices[flat] = 0
-        packed = np.empty(len(px), dtype=[('c0', '<u2'), ('c1', '<u2'), ('indices', '<u4')])
-        packed['c0'], packed['c1'], packed['indices'] = c0, c1, indices
+    # Bound the temporaries independently of texture resolution.
+    for start in range(0, blocks.shape[1], 16384):
+        p = tuple(blocks[c, start:start + 16384].astype(np.int32) for c in range(3))
+        n = len(p[0])
+        rows = np.arange(n)
+        span = np.stack([c.max(1) - c.min(1) for c in p], 1)
+        axis = span.argmax(1)
+        along = np.choose(axis[:, None], p)
+        hi, lo = along.argmax(1), along.argmin(1)
+        best = _fit(p, _rgb565(*(c[rows, hi] for c in p)), _rgb565(*(c[rows, lo] for c in p)))
+        hard = np.flatnonzero(best[0] > texfile.DXT1_GOOD)      # the rest keep the range fit
+        if len(hard):
+            sub = _search(tuple(c[hard] for c in p), axis[hard], tuple(x[hard] for x in best))
+            best = tuple(np.array(x) for x in best)
+            for x, y in zip(best, sub):
+                x[hard] = y
+        packed = np.empty(n, dtype=[('c0', '<u2'), ('c1', '<u2'), ('indices', '<u4')])
+        packed['c0'], packed['c1'], packed['indices'] = best[1], best[2], best[3]
         output.append(packed.tobytes())
     return b''.join(output)
 
 
 def dxt1_dds(image: texfile.Image) -> bytes:
-    """Exact texfile.dxt1_dds range-fit and box-filter semantics, in batches."""
+    """texfile.dxt1_dds, byte for byte (the same integer block encoder and box filter), in batches."""
     import numpy as np
     pixels = np.frombuffer(image.rgba, dtype=np.uint8).reshape(image.height, image.width, 4)
     levels = []

@@ -18,8 +18,12 @@ its occlusion map in the stock body material's occlusion channel (param_r_m_occ_
 stock maps' mean, the procedural vehicles' PLAIN_RMO), the tracks under the native track materials' names so the
 SGO's tank_caterpillar_animation still scrolls them.
 
-A material may say more (the X-Morph units' folders, tools/prep_xmorph.py, docs/xmorph-port.md):
-    'specular'   a grey specular map: roughness and metalness per texel (SPECULAR_RM) instead of PLAIN_RMO
+A material may say more (the X-Morph units' folders, tools/prep_xmorph.py, docs/xmorph-port.md; the War Thunder and
+glTF sources', docs/model-quality-1110.md):
+    'specular'   a grey specular map: roughness and metalness per texel (SPECULAR_RM) instead of PLAIN_RMO (War
+                 Thunder's `<stem>_n_s`, X-Morph's specular maps)
+    'roughness_metal'  a map whose R and G are the parameter map's roughness and metalness as they are (a glTF
+                 material's, pylib/pbr_maps.py), instead of PLAIN_RMO
     'emissive'   a grey light mask, with the template LIGHT: Retro-Balam's light material (the Dreadnought's lit
                  hulls': dreadnought_model.LIGHT_HOST), the mask's texels glowing in their albedo's colour ('light':
                  its light_color strength), the v603_body template's colour parameters kept
@@ -263,13 +267,15 @@ def _columns(template: Mesh, pos: np.ndarray, nrm: np.ndarray, tan: np.ndarray, 
 def part_rows(template: Mesh, pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tris: np.ndarray, bone: int
               ) -> tuple[np.ndarray, np.ndarray]:
     """The part's vertices packed in `template`'s layout (one row each, rigid on `bone`) and the triangles that draw:
-    one with two corners at one stored (half-float) point draws nothing and is left out (obj_model.drawn_triangles)."""
+    one with two corners at one stored point (half or float, as the layout stores positions) draws nothing and is left
+    out (obj_model.drawn_triangles)."""
     pos = pos.astype(np.float64)
     nrm = nrm.astype(np.float64)
     uv = uv.astype(np.float64)
     tan, bin_ = tangent_frames(pos, nrm, uv, tris)
-    half = pos.astype(np.float16)
-    a, b, c = (half[tris[:, k]] for k in range(3))
+    fmt = next(e.fmt for e in template.elems if e.name.lower() == 'position')
+    stored = pos.astype({7: np.float16, 1: np.float32, 4: np.float32}[fmt])
+    a, b, c = (stored[tris[:, k]] for k in range(3))
     keep = ~(np.all(a == b, axis=1) | np.all(b == c, axis=1) | np.all(a == c, axis=1))
     rows = np.frombuffer(_columns(template, pos, nrm, tan, bin_, uv, bone), dtype=np.uint8).reshape(len(pos), -1)
     return rows, tris[keep]
@@ -355,6 +361,20 @@ def _specular_dds(specular: str, blue: str | None, blue_default: int, min_side: 
     return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
+def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int) -> bytes:
+    """A parameter map from a roughness / metalness map (its R and G as they are: pylib/pbr_maps.py) and the occlusion
+    in B (NO_OCCLUSION without one), at the larger of the two's sizes (min_side at least)."""
+    import texfile_accel
+    from PIL import Image
+    rg = _pil(rm, min_side, 'RGB')
+    occ = _pil(occlusion, min_side, 'L') if occlusion else None
+    size = max((rg.size, occ.size if occ else (0, 0)), key=lambda wh: wh[0] * wh[1])
+    rgba = np.full((size[1], size[0], 4), 255, dtype=np.uint8)
+    rgba[..., :2] = np.asarray(rg.resize(size, Image.LANCZOS))[..., :2]
+    rgba[..., 2] = np.asarray(occ.resize(size, Image.LANCZOS)) if occ else NO_OCCLUSION
+    return texfile_accel.dxt1_dds(_texfile(rgba))
+
+
 def _param_dds(occlusion: str | None, rg: tuple[int, int]) -> bytes:
     """A parameter map: R, G constant, B the model's occlusion (NO_OCCLUSION without one)."""
     import texfile
@@ -384,13 +404,18 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     if m['template'] == LIGHT:
         _req(bool(m.get('specular')) and bool(m.get('emissive')), f'{stem}: a light material without its maps')
         out['param_r_m_light_hr'] = (f'{stem}_rml.dds', _specular_dds(path('specular'), path('emissive'), 0, side))
-    elif m.get('specular'):
-        out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
-                                   _specular_dds(path('specular'), path('occlusion'), NO_OCCLUSION, side))
     elif m['template'].startswith('v603_kyata'):
+        # the native track material: its own parameter slots (the V603 track map's mean, the occlusion apart)
+        _req(not (m.get('specular') or m.get('roughness_metal')), f'{stem}: a track material with surface maps')
         out['param_r_m_xxx'] = ('edf6vc_wt_track_rmx.dds', texfile.solid_dxt1(TRACK_RMX))
         occ = path('occlusion')
         out['param_occ'] = (f'{stem}_occ.dds', _dds_of(occ) if occ else texfile.solid_dxt1((222, 219, 222)))
+    elif m.get('specular'):
+        out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
+                                   _specular_dds(path('specular'), path('occlusion'), NO_OCCLUSION, side))
+    elif m.get('roughness_metal'):
+        out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
+                                   _roughness_metal_dds(path('roughness_metal'), path('occlusion'), side))
     else:
         out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds', _param_dds(path('occlusion'), PLAIN_RMO))
     return out
@@ -482,14 +507,18 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
     rab.files = [f for f in rab.files if f.name.lower() == keep]
     mat_index = []
     added: set[str] = set()
-    templates = {host.name_of(host.materials[me.material].name): me for me in host.objects[0].meshes}
+    # the stock layouts, positions widened for a model reaching past obj_model.PRECISE_EXTENT
+    extent = max(float(np.abs(spec.part(k)[0]).max(initial=0.0)) for k in range(len(spec.info['parts'])))
+    templates = {host.name_of(host.materials[me.material].name): om.position_layout(me, extent)
+                 for me in host.objects[0].meshes}
     same: dict[bytes, str] = {}    # a texture's bytes -> the member that holds them (one atlas, several materials)
     for m in spec.info['materials']:
         tex = {kind_: (same.setdefault(dds, fn), dds) for kind_, (fn, dds) in material_textures(spec, m).items()}
         slots = {kind_: fn for kind_, (fn, _d) in tex.items()}
         if m['template'] == LIGHT:
             import dreadnought_model as dm
-            light_md, templates[LIGHT] = dm._host(game, dm.LIGHT_HOST)
+            light_md, light_mesh = dm._host(game, dm.LIGHT_HOST)
+            templates[LIGHT] = om.position_layout(light_mesh, extent)
             md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
             md = _lit(md, mi, host, float(m.get('light', LIGHT_STRENGTH)))
         else:

@@ -1,5 +1,7 @@
 """Developer-only: a Sketchfab .glb of a tracked vehicle into the OBJ form tools/prep_wt_tracked.py reads (War Thunder's
-own exports: one OBJ object a node, `vehicle#<node>_<n>`, its MTL's albedo maps), its pieces named by what they are, so
+own exports: one OBJ object a node, `vehicle#<node>_<n>`, its MTL's maps: albedo, normal, the roughness / metalness
+(map_RM) and occlusion (map_ao) pylib/pbr_maps.py makes of the glTF's, its normals as `vn`), its pieces named by what
+they are, so
 the War Thunder pipeline (bones, wheels, collision, muzzles, missiles) builds it as it builds the 2S6 or the BMPT.
 
     python tools/glb_to_wt_obj.py <kind> <model.glb> <out folder>      -> <out>/<kind>.obj, .mtl, textures/
@@ -24,6 +26,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 
 import gltf  # noqa: E402
+import pbr_maps  # noqa: E402
 import texfile_accel  # noqa: E402
 import prep_glb_model as pg  # noqa: E402
 
@@ -121,6 +124,7 @@ def convert(kind: str, src: str, out: str) -> dict:
     a = np.radians(s.yaw)
     rot = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
     P = scene.positions @ rot.T
+    N = None if scene.normals is None else scene.normals @ rot.T
     P -= (0.0, P[:, 1].min(), 0.0)
     # a piece's node: its mesh node's name, or the parent's where the mesh node is only its material's (Collada exports)
     segs = [paths[k].strip('/').split('/') for k in range(len(paths))]
@@ -170,6 +174,14 @@ def convert(kind: str, src: str, out: str) -> dict:
             Image.fromarray(texfile_accel.directx_normals(rgb, s.normal_green, f'{kind} {m.name}'), 'RGB').save(
                 os.path.join(out, 'textures', f'{name}_n.png'), optimize=True)
             mtl[-1] += f'map_normal textures/{name}_n.png\n'
+        # its roughness / metalness (the game's R / G, map_RM) and occlusion (map_ao: prep_wt_tracked lifts its black)
+        Image.fromarray(pbr_maps.roughness_metal(m), 'RGB').save(
+            os.path.join(out, 'textures', f'{name}_rm.png'), optimize=True)
+        mtl[-1] += f'map_RM textures/{name}_rm.png\n'
+        occ = pbr_maps.occlusion(m, floor=False)
+        if occ is not None:
+            Image.fromarray(occ, 'L').save(os.path.join(out, 'textures', f'{name}_ao.png'), optimize=True)
+            mtl[-1] += f'map_ao textures/{name}_ao.png\n'
     with open(os.path.join(out, f'{kind}.mtl'), 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(mtl))
     uv = scene.uvs if scene.uvs is not None else np.zeros((len(P), 2))
@@ -180,6 +192,8 @@ def convert(kind: str, src: str, out: str) -> dict:
         f.writelines(f'v {x:.5f} {y:.5f} {z:.5f}\n' for x, y, z in P)
         # prep_wt_tracked reads the WT exports' (u, -v): the glb's top-left v is negated back to theirs
         f.writelines(f'vt {u:.6f} {-v:.6f}\n' for u, v in uv)
+        if N is not None:   # the glTF's own normals (its normal maps were baked on them), one a position as in glTF
+            f.writelines(f'vn {x:.6f} {y:.6f} {z:.6f}\n' for x, y, z in N)
         cur, count = None, 0
         for t in order:
             key = (names[t], int(scene.material[t]))
@@ -189,7 +203,8 @@ def convert(kind: str, src: str, out: str) -> dict:
                 f.write(f'o vehicle#{key[0].split("@")[0]}_{count}_0\nusemtl m{key[1]}\n')
                 cur = key
             a_, b_, c_ = scene.triangles[t] + 1
-            f.write(f'f {a_}/{a_} {b_}/{b_} {c_}/{c_}\n')
+            f.write(f'f {a_}/{a_}/{a_} {b_}/{b_}/{b_} {c_}/{c_}/{c_}\n' if N is not None else
+                    f'f {a_}/{a_} {b_}/{b_} {c_}/{c_}\n')
     counts: dict[str, int] = {}
     for n in names:
         counts[n.split('@')[0]] = counts.get(n.split('@')[0], 0) + 1

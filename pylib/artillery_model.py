@@ -373,7 +373,8 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
         turret_pieces += [(b.sleeve, om.rigid(b.sleeve, hb[f'cannon_{s}'])),
                           (b.tube, om.rigid(b.tube, hb[f'cannon_slide_{s}']))]
     meshes = [replace(me, material=mat_map[m]) for m, me in stock]
-    meshes += om.build_meshes(host0.objects[0].meshes[0], turret_pieces, turret_mat)
+    meshes += om.build_meshes(host0.objects[0].meshes[0], turret_pieces, turret_mat,
+                              extent=om.reach(p for p, _s in turret_pieces))
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)

@@ -7,6 +7,7 @@ test_native_*.py compare the two).
   crilayla.cpp     crilayla.decompress                        (every compressed file read from a game's CPK)
   lzss_greedy.cpp  fmb_build.cmpl_fast                        (the SK maps' terrain leaves)
   aabb_tree.cpp    hkcms_build._section_tree, simd_tree       (the SK maps' collision meshes)
+  dxt1.cpp         texfile._dxt1_level (texfile_accel)         (every DXT1 texture the installer encodes)
 
 lib() -> the CDLL, or None. Found beside the frozen installer's modules (build_release bundles it) or in a dev
 checkout's build/pylib. A DLL there that does not load raises, every time: never half native, half Python.
@@ -31,6 +32,7 @@ _PROTOTYPES = {
     'edf6_section_tree': (ctypes.c_int, (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)),
     'edf6_simd_tree_nodes': (ctypes.c_size_t, (ctypes.c_size_t,)),
     'edf6_simd_tree': (ctypes.c_int, (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)),
+    'edf6_dxt1_level': (ctypes.c_size_t, (ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)),
 }
 
 

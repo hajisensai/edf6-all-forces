@@ -286,9 +286,10 @@ def build_model(game, folder: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noq
         md = _with_light(md, mi, strength)
         groups.append((mi, light_mesh, [(p, b) for p, b in pieces if p.material == src]))
     meshes = []
+    extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for mi, tmpl, group in groups:
         if group:
-            meshes += om.build_meshes(tmpl, [(p, om.rigid(p, b)) for p, b in group], mi)
+            meshes += om.build_meshes(tmpl, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     bones = procmesh.bones(joints, OBJECT_NAME, posed, 1.0)

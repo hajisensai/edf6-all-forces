@@ -5,48 +5,54 @@
  "source": "https://sketchfab.com/3d-models/m163-war-thunder-4d6f3359f84e47caa49d717b91d4270a",
  "prepared_from": "M163.obj",
  "winding_flipped": false,
- "auto_smooth_deg": 50.0,
+ "normals": "auto_smooth 45",
  "materials": [
   {
    "name": "wt_m163_vulcan_body_c_us_camo_olive",
    "template": "v603_body",
    "albedo": "textures/m163_vulcan_body_c_us_camo_olive.jpg",
    "normal": "textures/m163_vulcan_body_n_n.jpg",
-   "occlusion": "textures/m163_vulcan_body_ao_ao_occ.png"
+   "occlusion": "textures/m163_vulcan_body_ao_ao_occ.png",
+   "specular": "textures/m163_vulcan_body_n_s.jpg"
   },
   {
    "name": "wt_m163_vulcan_body_c",
    "template": "v603_body",
    "albedo": "textures/m163_vulcan_body_c.jpg",
    "normal": "textures/m163_vulcan_body_n_n.jpg",
-   "occlusion": "textures/m163_vulcan_body_ao_ao_occ.png"
+   "occlusion": "textures/m163_vulcan_body_ao_ao_occ.png",
+   "specular": "textures/m163_vulcan_body_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "occlusion": "textures/headlight_glass_n_ao_occ.png"
+   "occlusion": "textures/headlight_glass_n_ao_occ.png",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c_3",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
-   "normal": "textures/headlight_glass_n_n.jpg"
+   "normal": "textures/headlight_glass_n_n.jpg",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_m163_vulcan_turret_c_us_camo_olive",
    "template": "v603_body",
    "albedo": "textures/m163_vulcan_turret_c_us_camo_olive.jpg",
    "normal": "textures/m163_vulcan_turret_n_n.jpg",
-   "occlusion": "textures/m163_vulcan_turret_ao_ao_occ.png"
+   "occlusion": "textures/m163_vulcan_turret_ao_ao_occ.png",
+   "specular": "textures/m163_vulcan_turret_n_s.jpg"
   },
   {
    "name": "wt_m163_vulcan_gun_c_us_camo_olive",
    "template": "v603_body",
    "albedo": "textures/m163_vulcan_gun_c_us_camo_olive.jpg",
    "normal": "textures/m163_vulcan_gun_n_n.jpg",
-   "occlusion": "textures/m163_vulcan_gun_ao_ao_occ.png"
+   "occlusion": "textures/m163_vulcan_gun_ao_ao_occ.png",
+   "specular": "textures/m163_vulcan_gun_n_s.jpg"
   },
   {
    "name": "v603_kyata_L",
@@ -67,14 +73,16 @@
    "template": "v603_body",
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
-   "occlusion": "textures/net_f_ao_ao_occ.png"
+   "occlusion": "textures/net_f_ao_ao_occ.png",
+   "specular": "textures/net_f_n_s.jpg"
   },
   {
    "name": "wt_m163_vulcan_ammo_c",
    "template": "v603_body",
    "albedo": "textures/m163_vulcan_ammo_c.jpg",
    "normal": "textures/m163_vulcan_ammo_n_n.jpg",
-   "occlusion": "textures/m163_vulcan_ammo_ao_ao_occ.png"
+   "occlusion": "textures/m163_vulcan_ammo_ao_ao_occ.png",
+   "specular": "textures/m163_vulcan_ammo_n_s.jpg"
   }
  ],
  "parts": [
@@ -83,7 +91,7 @@
    "bone": "body",
    "material": 0,
    "triangles": 46448,
-   "vertices": 56032
+   "vertices": 56441
   },
   {
    "name": "body.wt_m163_vulcan_body_c",
@@ -97,7 +105,7 @@
    "bone": "body",
    "material": 2,
    "triangles": 156,
-   "vertices": 117
+   "vertices": 106
   },
   {
    "name": "body.wt_headlight_glass_c_3",
@@ -111,35 +119,35 @@
    "bone": "body",
    "material": 8,
    "triangles": 371,
-   "vertices": 290
+   "vertices": 331
   },
   {
    "name": "cannon_main.wt_m163_vulcan_turret_c_us_camo_olive",
    "bone": "cannon_main",
    "material": 4,
    "triangles": 13109,
-   "vertices": 14203
+   "vertices": 14196
   },
   {
    "name": "cannon_main.wt_m163_vulcan_gun_c_us_camo_olive",
    "bone": "cannon_main",
    "material": 5,
    "triangles": 3442,
-   "vertices": 4094
+   "vertices": 4168
   },
   {
    "name": "cannon_main.wt_m163_vulcan_ammo_c",
    "bone": "cannon_main",
    "material": 9,
    "triangles": 5397,
-   "vertices": 8970
+   "vertices": 9081
   },
   {
    "name": "cannon_r.wt_m163_vulcan_gun_c_us_camo_olive",
    "bone": "cannon_r",
    "material": 5,
    "triangles": 4311,
-   "vertices": 5247
+   "vertices": 5307
   },
   {
    "name": "catapi_body.v603_kyata_L",
@@ -160,14 +168,14 @@
    "bone": "doppler_radar",
    "material": 5,
    "triangles": 2073,
-   "vertices": 2169
+   "vertices": 2187
   },
   {
    "name": "edf6vc_m61_rotor.wt_m163_vulcan_gun_c_us_camo_olive",
    "bone": "edf6vc_m61_rotor",
    "material": 5,
    "triangles": 2794,
-   "vertices": 2744
+   "vertices": 2714
   },
   {
    "name": "wheel_A_l",
@@ -188,14 +196,14 @@
    "bone": "tire_moveB_l",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_B_r",
    "bone": "tire_moveB_r",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_C_l",
@@ -230,42 +238,42 @@
    "bone": "tire_moveE_l",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_E_r",
    "bone": "tire_moveE_r",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_F_l",
    "bone": "tire_moveF_l",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_F_r",
    "bone": "tire_moveF_r",
    "material": 0,
    "triangles": 1296,
-   "vertices": 1323
+   "vertices": 1337
   },
   {
    "name": "wheel_G_l",
    "bone": "tire_moveG_l",
    "material": 0,
    "triangles": 804,
-   "vertices": 838
+   "vertices": 840
   },
   {
    "name": "wheel_G_r",
    "bone": "tire_moveG_r",
    "material": 0,
    "triangles": 804,
-   "vertices": 838
+   "vertices": 840
   },
   {
    "name": "wheel_G_outer_l",
@@ -286,7 +294,7 @@
    "bone": "tracking_radar",
    "material": 4,
    "triangles": 996,
-   "vertices": 1427
+   "vertices": 1428
   }
  ],
  "origins": {

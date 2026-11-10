@@ -5,12 +5,13 @@
  "source": "https://sketchfab.com/3d-models/tos-1-buratino-low-poly-255fba6ba6c44b97aaea91d0225d0c75",
  "prepared_from": "tos1.obj",
  "winding_flipped": false,
- "auto_smooth_deg": 50.0,
+ "normals": "source",
  "materials": [
   {
    "name": "wt_m1_c",
    "template": "v603_body",
-   "albedo": "textures/m1_c.jpg"
+   "albedo": "textures/m1_c.jpg",
+   "roughness_metal": "textures/m1_rm.png"
   },
   {
    "name": "v603_kyata_L",
@@ -29,35 +30,35 @@
    "bone": "body",
    "material": 0,
    "triangles": 2812,
-   "vertices": 4114
+   "vertices": 3500
   },
   {
    "name": "cannon_main.wt_m1_c",
    "bone": "cannon_main",
    "material": 0,
    "triangles": 283,
-   "vertices": 372
+   "vertices": 352
   },
   {
    "name": "cannon_slide_l.wt_m1_c",
    "bone": "cannon_slide_l",
    "material": 0,
    "triangles": 1589,
-   "vertices": 2020
+   "vertices": 1905
   },
   {
    "name": "catapi_body.v603_kyata_L",
    "bone": "catapi_body",
    "material": 1,
    "triangles": 240,
-   "vertices": 390
+   "vertices": 285
   },
   {
    "name": "catapi_body.v603_kyata_R",
    "bone": "catapi_body",
    "material": 2,
    "triangles": 240,
-   "vertices": 390
+   "vertices": 286
   },
   {
    "name": "doppler_radar.wt_m1_c",
@@ -169,21 +170,21 @@
    "bone": "tire_moveH_l",
    "material": 0,
    "triangles": 116,
-   "vertices": 186
+   "vertices": 128
   },
   {
    "name": "wheel_H_r",
    "bone": "tire_moveH_r",
    "material": 0,
    "triangles": 116,
-   "vertices": 188
+   "vertices": 130
   },
   {
    "name": "tracking_radar.wt_m1_c",
    "bone": "tracking_radar",
    "material": 0,
    "triangles": 58,
-   "vertices": 86
+   "vertices": 79
   }
  ],
  "origins": {

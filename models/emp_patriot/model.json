@@ -10,13 +10,15 @@
    "name": "edf6vc_patriot_0",
    "template": "v603_body",
    "albedo": "textures/patriot_0.png",
-   "source": "0d5d4022_dds"
+   "source": "0d5d4022_dds",
+   "roughness_metal": "textures/patriot_0_rm.png"
   },
   {
    "name": "edf6vc_patriot_1",
    "template": "v603_body",
    "albedo": "textures/patriot_1.png",
-   "source": "75aec434_dds"
+   "source": "75aec434_dds",
+   "roughness_metal": "textures/patriot_1_rm.png"
   }
  ],
  "parts": [

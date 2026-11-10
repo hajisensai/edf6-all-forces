@@ -239,17 +239,14 @@ def template(game) -> tuple[Mdb, Mesh]:  # noqa: ANN001 - rootcpk.Game
 
 
 def precise_template(mesh: Mesh) -> Mesh:
-    """Vertex layout for newly built cockpit meshes: float32 positions, retaining all other native elements.
+    """Vertex layout for newly built cockpit meshes: float32 positions, retaining all other native elements
+    (obj_model.precise_positions).
 
     The hull template uses half4 positions. At a cab's model-space offset its quantisation can exceed the 1-2 mm
     gap between a glyph and its display, bending their triangles through each other. Widen the declaration before
     packing new vertices; merely moving the screen cannot fix the glyphs fighting their own backing.
     """
-    position = next(e for e in mesh.elems if e.name.lower()=='position')
-    if position.fmt!=7: return mesh
-    elems = [replace(e,fmt=1) if e is position else replace(e,offset=e.offset+8 if e.offset>position.offset else e.offset)
-             for e in mesh.elems]
-    return replace(mesh,vsize=mesh.vsize+8,elems=elems,vdata=b'',indices=b'')
+    return om.precise_positions(mesh)
 
 
 def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa: ANN001 - rootcpk.Game
@@ -369,7 +366,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             elif p.name == 'metallic': v[0] = 0.0
             params.append(replace(p,value=v))
         md.materials[mi] = replace(md.materials[mi],params=params)
-        meshes += om.build_meshes(tmpl_mesh, pieces, mi)
+        meshes += om.build_meshes(tmpl_mesh, pieces, mi, extent=0.0)     # precise_template: float positions already
     host = md.objects[0]
     meshes = [replace(me, mesh_index=len(host.meshes) + k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(host, meshes=host.meshes + meshes)] + list(md.objects[1:]), buffer_order=None)
