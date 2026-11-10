@@ -81,6 +81,7 @@ struct Config {
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;  // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
+    int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz, -1 no cap, 61..1000; read at start only; not wired into the game yet (docs/unlimited-fps-re.md)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
     float stockMissileNav=3.0f;// ...its navigation constant (2..6)
     bool playerLockByView=true;
