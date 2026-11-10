@@ -491,7 +491,8 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
             if(result==PlanResult::refused){Cancel(id,true,RequestStatus::refused);return;}
             // Its soldiers carry the requester's weapons (docs/feature-npc-weapon-tier.md), decided by the requester and
             // given here, never by a planner: every soldier of a kind the request names one for. A prepared plan (the
-            // mission crews', a carrier's drone) has no requester's arms: its soldiers stay the stock templates.
+            // mission crews', a carrier's drone) has no request: its units keep the arms its builder gave them (a mission
+            // crew's: the host's player's, mission_crew_support.cpp Build; a drone: none).
             for(std::uint32_t i=0;!t.external && i<t.plan.count && i<kMaxUnits;++i) {
                 auto& unit=t.plan.units[i];
                 unit.arms=IsSupportSoldierResource(unit.resourceId) ?

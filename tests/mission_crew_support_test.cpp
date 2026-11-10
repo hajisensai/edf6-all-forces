@@ -15,7 +15,7 @@ std::uint64_t submitted=0;
 bool InstallMissionCrewTeam(MissionCrewTeamFn) noexcept {return true;}
 void SetObjectTeam(unsigned char* p,std::int32_t team) noexcept {Put<int>(p,kTeam,team);}
 bool InSession() noexcept {return sessionFlag;}
-bool OnlineHostOnly() noexcept {return true;}
+bool hostHere=true;bool OnlineHostOnly() noexcept {return hostHere;}
 bool SupportTransactionActive(std::uint64_t) noexcept {return active;}
 bool HoldSupportSoldier(const ObjRef&,bool held) noexcept {if(!held)++unholds;return true;}
 bool NpcRestoreMissionSeat(unsigned char*,unsigned char*) noexcept {return true;}
@@ -200,6 +200,11 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
   Check(!Request(vehicle,false) && submitted==before2,"host: no transaction before its own weapon is loaded");
   armsLoad=support_net::PlanResult::ready;
   Check(Request(vehicle,false) && submitted==before2+1,"host: submitted once loaded");
+  Reset();sessionFlag=true;hostHere=false;localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;
+  const auto before3=submitted;
+  Check(!Request(vehicle,false) && submitted==before3 && armsAsked==0 && spawned==0,
+        "a client builds no crew plan: picks and loads no weapon of its own player");
+  hostHere=true;
   Reset();sessionFlag=true;localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;Build(vehicle,&p);
   Check(ValidateMissionCrewPlan(p),"a peer with the weapon hooks accepts an armed crew plan");
   Check(ApplyMissionCrewPlan(31,p,true) && weapons[0]==rifle && weapons[1]==rifle,"a peer makes the host's weapons, not its own");

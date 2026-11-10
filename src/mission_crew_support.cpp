@@ -138,6 +138,8 @@ bool Request(unsigned char* v,bool restored) noexcept {
         }
         return true; // the same unified network transaction is still being prepared
     }
+    // Online only the host builds a crew plan (its player's weapons go into it): another machine neither picks nor loads any.
+    if(InSession() && !OnlineHostOnly())return false;
     SupportPlan plan;if(!Build(v,&plan))return false;
     // The weapons it gives loaded here first (the host's own pick: its mission preload has them, npc_arms.h
     // PreloadNpcArms); pending: the mission crew asks again next frame (mission_crew.cpp: not dispatched). Each peer
