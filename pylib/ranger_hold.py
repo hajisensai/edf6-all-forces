@@ -51,9 +51,8 @@ def hold_set(root: Node) -> HoldSet | None:
 
 
 def rows_of(table: dsgo.Document) -> list[Node]:
-    """WEAPONTABLE's rows ([id, 'app:/weapon/<file>.sgo', category, ...])."""
-    root = table.root
-    return list(root.items[0].items) if len(root.items) == 1 and isinstance(root.items[0], Node) else list(root.items)
+    """WEAPONTABLE's rows (its 'table': [id, 'app:/weapon/<file>.sgo', category, ...] each)."""
+    return list(table.root.get('table').items)
 
 
 def sgo_name(row: Node) -> str:

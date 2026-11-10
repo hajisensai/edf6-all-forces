@@ -5127,6 +5127,9 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(importlib.import_module('make_stock_stores'),
                           build=lambda game, overlay=None: (dict(stores), [], {}),
                           store_files=lambda: []))   # the fake make_jets writes no store weapons to need
+            # the stock shotguns held as the rifles (tools/make_stock_holds.py): written, gone again with uninstall 1
+            holds = {'WEAPON/FAKE_SHOTGUN.SGO': b'held'}
+            enter(patched(importlib.import_module('make_stock_holds'), build=lambda game: (dict(holds), [])))
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
@@ -5150,6 +5153,8 @@ def pack_install_upgrade_uninstall() -> None:
                 assert installer.check(game), 'check fails right after install'
                 for rel, data in stores.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
+                for rel, data in holds.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'held shotgun {rel} not installed'
                 for rel, data in loadout.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'loadout file {rel} not installed'
                 assert built_from and '[VehicleCrew]' in built_from[-1], 'the loadouts are built from the installed ini'
@@ -8940,6 +8945,7 @@ def ported_weapon_locators_fit_real() -> None:
     import edf5port
     import mab_legacy
     import ported_weapons as pw
+    import ranger_hold
     import rootcpk
     edf6 = rootcpk.DEFAULT_GAME
     if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
@@ -9004,12 +9010,16 @@ def ported_weapon_locators_fit_real() -> None:
             for f in edf5port.HOLD:
                 if f not in donor.names.values():
                     continue
+                if p.category == ranger_hold.SHOTGUN and f in ranger_hold.FIELDS:
+                    continue   # a Ranger shotgun's names are the rifle-like set (below), its hand still EDF6's
                 if f == 'custom_parameter':
                     if edf5port._first_text(r.get(f)) is not None and not r.get(f).names:
                         assert r.get(f).items[0] == donor.get(f).items[0], f'{p.id}: recoil not EDF6\'s'
                     continue
                 assert edf5port._key(r.get(f)) == edf5port._key(donor.get(f)), \
                     f'{p.id} {f}: not as most of EDF6\'s weapons on its model hold it'
+        if p.category == ranger_hold.SHOTGUN:
+            assert ranger_hold.hold_set(r) == models.shotgun_hold(), f'{p.id}: a shotgun not held as the rifles'
         # fit_locators alone, hold_as off
         unheld = build(p, False, True).get('animation_model').items[2].data
         if unheld == raw_block:
