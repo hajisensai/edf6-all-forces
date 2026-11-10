@@ -4350,9 +4350,6 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
 alignas(16) const float kBtnFill[4]={0.03f,0.05f,0.06f,0.78f};
 alignas(16) const float kBtnLit[4]={0.10f,0.42f,0.50f,0.90f};
 constexpr float kBtnRowH=30.0f,kBtnGap=6.0f,kBtnPad=8.0f,kBtnIcon=18.0f,kBtnMargin=16.0f,kBtnBottom=142.0f;   // px at 1080 lines
-// The formation button's menu (map_buttons.h MenuColumn; the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"):
-// over the button, a row a shape -- a selected guarding squad's defences, the march of the squads following the player --
-// the shape in use lit; a click on a row is that shape (mapcmd.cpp PickFormation).
 // The ALL OUT button's menu (map_buttons.h kDismountMenu; test site #45 「如何让某个角色单独下车」): over the button, a row a
 // choice -- everyone, everyone but the driver, one class's riders; a click on a row is that DISMOUNT ALL (mapcmd.cpp
 // PickDismount). Its rows go to mapcmd.cpp as the formation menu's do (one menu at a time).
@@ -4400,6 +4397,9 @@ void MapDismountMenu(void* drawer,void* ctx,Text* text,float width,float height,
     }
     MapCommandFormationButtons(rects,entries,placed);
 }
+// The formation button's menu (map_buttons.h MenuColumn; the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"):
+// over the button, a row a shape -- a selected guarding squad's defences, the march of the squads following the player --
+// the shape in use lit; a click on a row is that shape (mapcmd.cpp PickFormation).
 void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapCommandReadout& c,
                       const float* buttons,const int* ids,int n,Line* lines,int* at) noexcept {
     if(!c.formationMenu && c.dismountMenu){MapDismountMenu(drawer,ctx,text,width,height,s,c,buttons,ids,n,lines,at);return;}

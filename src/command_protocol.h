@@ -40,7 +40,7 @@ struct Ways { std::uint32_t order=0; float current[3]{}; std::uint32_t n=0; floa
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };
 struct Request {
     std::uint32_t count=0;
-    mapcmd::Command command{};   // command.param: the formation order's (version 7), 0 for every other order
+    mapcmd::Command command{};   // command.param: the formation order's (version 7), DISMOUNT ALL's choice (version 10), 0 for every other order
     std::uint32_t flags=0;       // kQueued (version 7)
     unsigned char requester[32]{},focus[32]{},units[kCommandNetUnits][32]{};
     std::uint32_t formationTotal=0,formationSlots[kCommandNetUnits]{};
