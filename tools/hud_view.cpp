@@ -1635,6 +1635,29 @@ int InfantryScopeScenes(const std::wstring& dir,const float* ground) {
         std::printf("%s  %ls: eyepiece %d, etched numbers %d (want >= %d) inside %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",c.name,
                     scopePieces,numbers,c.numbers,inside,apart);
     }
+    // The picture in the picture (InfantryScope=2, scope_pip.h; testhub #32): the frame unmagnified (the scene's FOV the
+    // stock one), the lens round the centre; the HUD draws the scope's rim (kSides black pieces, no eyepiece black all
+    // round, nothing dimmed round it) and the etched numbers inside the lens.
+    for(const Case& c:cases) {
+        hasInfantry=true;sceneInfantry=InfantryScopeCue{&sceneInfantry,c.zoom,c.look,true,scopepip::ScopeFov(c.zoom)};
+        sceneFov=55.0f;
+        StockTank(ground);hasStock=false;
+        sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;
+        std::wstring name=std::wstring(c.name)+L"_pip";
+        scopePieces=surroundPieces=0;Scene(dir,name.c_str(),ground);
+        const float r=scopepip::LensRadius(1920.0f,1080.0f);
+        int numbers=0;bool inside=true;
+        for(const Drew& p:drew)
+            if(!p.text.empty() && p.text[0]>=L'0' && p.text[0]<=L'9') {
+                ++numbers;
+                const float x=(p.x0+p.x1)*0.5f-960.0f,y=(p.y0+p.y1)*0.5f-540.0f;
+                inside=inside && x*x+y*y<=r*r;
+            }
+        const bool ok=scopePieces==scopeview::kSides && surroundPieces==0 && numbers>=c.numbers && inside;
+        failed+=!ok;
+        std::printf("%s  %ls: rim %d, dimmed round it %d, etched numbers %d (want >= %d) inside the lens %d\n",ok ? "ok  " : "FAIL",
+                    name.c_str(),scopePieces,surroundPieces,numbers,c.numbers,inside);
+    }
     hasInfantry=false;scopePieces=0;sceneFov=55.0f;
     Scene(dir,L"infantry_scope_closed",ground);
     failed+=scopePieces!=0;

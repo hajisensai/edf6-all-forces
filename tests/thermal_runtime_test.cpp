@@ -37,6 +37,8 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept {return true
 // Deliberately false: this function means online session, which must not gate offline thermal seats.
 bool InSession() noexcept {return false;}
 void Log(const char*,...) noexcept {}
+// The soldier's scope lens at the world's end (infantryscope.cpp): its own test is scope_crosshair_test.
+void InfantryScopeWorldEnd(ID3D11DeviceContext*,const void*) noexcept {}
 }
 namespace crew::thermal {
 struct Renderer::Impl {};

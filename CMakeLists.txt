@@ -308,6 +308,10 @@ set_target_properties(seat_events_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 add_executable(scopeview_check EXCLUDE_FROM_ALL tools/scopeview_check.cpp)
 target_compile_options(scopeview_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(scopeview_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The picture-in-picture scope's arithmetic (src/scope_pip.h): the lens shows the stock zoom's angles (tools/scope_pip_check.cpp).
+add_executable(scope_pip_check EXCLUDE_FROM_ALL tools/scope_pip_check.cpp)
+target_compile_options(scope_pip_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(scope_pip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # A vehicle gun's fire-control system (src/firecontrol.h): each gun's system and what it shows, offline
 # (tools/firecontrol_check.cpp). cmake --build build --target firecontrol_check && build\firecontrol_check.exe
 add_executable(firecontrol_check EXCLUDE_FROM_ALL tools/firecontrol_check.cpp)
@@ -680,10 +684,17 @@ target_link_libraries(sightzoom_test PRIVATE edf6common)
 target_compile_options(sightzoom_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME sightzoom COMMAND sightzoom_test)
 # The stock crosshair held back under a vehicle sight's field (src/scope_hold.h, infantryscope.cpp CrossDrawHook).
-add_executable(scope_crosshair_test tests/scope_crosshair_test.cpp)
-target_link_libraries(scope_crosshair_test PRIVATE edf6common)
+add_executable(scope_crosshair_test tests/scope_crosshair_test.cpp src/scope_pip_gpu.cpp)
+target_link_libraries(scope_crosshair_test PRIVATE edf6common d3d11 d3dcompiler)
 target_compile_options(scope_crosshair_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME scope_crosshair COMMAND scope_crosshair_test)
+# The picture-in-picture scope's production flow (src/infantryscope.cpp InfantryScope=2: the camera step, the HUD's lens
+# flag, the world's end on a D3D11 WARP device).
+add_executable(infantry_scope_pip_test tests/infantry_scope_pip_test.cpp src/scope_pip_gpu.cpp)
+target_link_libraries(infantry_scope_pip_test PRIVATE edf6common d3d11 d3dcompiler)
+target_compile_options(infantry_scope_pip_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME infantry_scope_pip COMMAND infantry_scope_pip_test)
+set_tests_properties(infantry_scope_pip PROPERTIES TIMEOUT 90)
 add_executable(highcam_input_test EXCLUDE_FROM_ALL tests/highcam_input_test.cpp)
 target_include_directories(highcam_input_test PRIVATE src common)
 target_link_libraries(highcam_input_test PRIVATE edf6common user32)
@@ -1136,7 +1147,7 @@ set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
@@ -2050,7 +2061,7 @@ target_compile_options(decal_depth_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks decal_depth_native_test)
 add_test(NAME decal_depth_native COMMAND decal_depth_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(decal_depth_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
-target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp)
 target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler)
 add_executable(debug_spawn_files_check EXCLUDE_FROM_ALL tests/debug_spawn_files_test.cpp)
 target_compile_options(debug_spawn_files_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -2076,6 +2087,14 @@ target_compile_options(thermal_gpu_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks thermal_gpu_test)
 add_test(NAME thermal_gpu COMMAND thermal_gpu_test)
 set_tests_properties(thermal_gpu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
+# The picture-in-picture scope's lens pass (src/scope_pip_gpu.cpp) on a real D3D11 WARP device.
+add_executable(scope_pip_gpu_test EXCLUDE_FROM_ALL tests/scope_pip_gpu_test.cpp src/scope_pip_gpu.cpp)
+target_include_directories(scope_pip_gpu_test PRIVATE src)
+target_link_libraries(scope_pip_gpu_test PRIVATE d3d11 d3dcompiler)
+target_compile_options(scope_pip_gpu_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks scope_pip_gpu_test)
+add_test(NAME scope_pip_gpu COMMAND scope_pip_gpu_test)
+set_tests_properties(scope_pip_gpu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
 add_test(NAME thermal_models_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/thermal_model_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(thermal_models_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(march_pace_test EXCLUDE_FROM_ALL tests/march_pace_test.cpp)

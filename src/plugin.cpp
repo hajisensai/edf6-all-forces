@@ -55,6 +55,7 @@
 #include "enemy_control_weapon_aim.h"
 #include "enemy_control_radar.h"
 #include "pvp_controlled_spawn.h"
+#include "scope_pip.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
 #include "seat_turret.h"
@@ -824,7 +825,8 @@ void LoadConfig() noexcept {
     n.sightRangeDownKey=ReadInt(L"SightRangeDownKey",static_cast<DWORD>(n.sightRangeDownKey));
     n.sightRangeStep=ReadInt(L"SightRangeStep",static_cast<DWORD>(n.sightRangeStep));
     n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
-    n.infantryScope=ReadBool(L"InfantryScope",n.infantryScope);
+    n.infantryScope=static_cast<int>(FixInt("InfantryScope",ReadInt(L"InfantryScope",static_cast<DWORD>(n.infantryScope)),
+                                            scopepip::kModeLowest,scopepip::kModeHighest));
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);

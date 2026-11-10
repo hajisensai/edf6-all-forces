@@ -5,6 +5,7 @@
 #include "memory.h"
 #include "sight_contacts.h"
 #include "firstperson.h"
+#include "infantryscope.h"
 #include "stores.h"
 #include "edf/input_source.h"
 #include "seat_switch_logic.h"
@@ -148,8 +149,7 @@ void __fastcall BeginHook(void* manager,void* native,const void* view) {
     if(frame.active)frame.used=true;
     else Failed();
 }
-void __fastcall EndHook(void* manager,void* native,const void* view) {
-    reinterpret_cast<StageFn>(image+kViewEnd)(manager,native,view);
+void ThermalEnd(void* native,const void* view) noexcept {
     if(!frame.active || frame.view!=view || !frame.player)return;
     Player& p=*frame.player;
     const Mode now=p.requested.load(std::memory_order_acquire);
@@ -159,6 +159,13 @@ void __fastcall EndHook(void* manager,void* native,const void* view) {
         } else Failed();
     }
     frame.active=false;frame.target=false;
+}
+// The world's end: the thermal composite (a vehicle's sight), then a soldier's scope lens (infantryscope.h
+// InfantryScopeWorldEnd, on foot: the two never share a view; the lens would magnify the thermal picture if they did).
+void __fastcall EndHook(void* manager,void* native,const void* view) {
+    reinterpret_cast<StageFn>(image+kViewEnd)(manager,native,view);
+    ThermalEnd(native,view);
+    if(installed.load(std::memory_order_acquire))InfantryScopeWorldEnd(Context(native),view);
 }
 void __fastcall SubmitHook(void* system,void* object,int pass) {
     if(!frame.active || frame.failed || pass!=1 || static_cast<unsigned char*>(system)+0xE0!=frame.view || !Target(object)) {

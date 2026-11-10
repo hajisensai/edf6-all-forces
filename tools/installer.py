@@ -112,15 +112,19 @@ NEW_DEFAULTS_1108: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1108 = ('; edf6vc-defaults-2026-11-08：安装器已把仍是旧出厂值 0 的 VehicleFire4Button 改成 512（手柄 RB：'
                       '格雷普的同轴机枪；想改就改，之后安装不会再改）')
-# Free look off the middle button (2026-11-10, docs/feedback-2026-11-10-freeview-key.md): on the stock drive page the
-# middle button is the row that sounds the Grape's horn, so free look (FreeLookKey) went to C and the high view (HighCamKey)
-# from C to L. The game's key store (COMMON.CFG) takes the same move once (common/edf/keybind.h kCrewSteps); this is the
-# ini's, for a store seeded from it later and for a game whose key config the plugin's pages are not in.
+# Two flips at 2026-11-10, one step (one mark):
+# - Free look off the middle button (docs/feedback-2026-11-10-freeview-key.md): on the stock drive page the middle button
+#   is the row that sounds the Grape's horn, so free look (FreeLookKey) went to C and the high view (HighCamKey) from C to
+#   L. The game's key store (COMMON.CFG) takes the same move once (common/edf/keybind.h kCrewSteps); this is the ini's.
+# - The picture-in-picture scope (testhub #32, docs/feedback-2026-11-10-pip-scope.md): InfantryScope went from a switch
+#   (1 the whole-screen eyepiece) to a mode whose default is 2 (the lens only, src/scope_pip.h); merge_ini keeps an old
+#   ini's 1, which would never show the picture in the picture the maintainer asked for.
 NEW_DEFAULTS_1110: dict[str, dict[str, tuple[str, str]]] = {
-    SECTION: {'HighCamKey': ('0x43', '0x4C'), 'FreeLookKey': ('0x04', '0x43')},
+    SECTION: {'HighCamKey': ('0x43', '0x4C'), 'FreeLookKey': ('0x04', '0x43'), 'InfantryScope': ('1', '2')},
 }
 DEFAULTS_MARK_1110 = ('; edf6vc-defaults-2026-11-10：安装器已把仍是旧出厂值的观察键 FreeLookKey 0x04（鼠标中键，在格雷普上就是喇叭）'
-                      '改成 0x43（C），高视角 HighCamKey 0x43（C）改成 0x4C（L）（想改就改，之后安装不会再改）')
+                      '改成 0x43（C），高视角 HighCamKey 0x43（C）改成 0x4C（L），InfantryScope 1 改成 2（步兵开镜画中画：'
+                      '镜外不放大、只放大镜片里；想要整屏放大就改回 1）（想改就改，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
