@@ -77,6 +77,16 @@ bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* va
     return SaveSupportLoadouts(&one,1,nullptr,why,capacity);
 }
 
+bool SaveIniFlag(const char* key,const char* value) noexcept {
+    const wchar_t* path=ConfigPath();
+    if(!path || !*path || !key || !value)return false;
+    std::string before,after;
+    try {
+        if(!ReadFileBytes(path,&before) || !RewriteIniKey(before,"VehicleCrew",key,value,&after))return false;
+    } catch(...){return false;}   // std::string's allocations: out of memory
+    return after==before || ReplaceFileAtomic(path,after);
+}
+
 bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept {
     wchar_t exe[MAX_PATH],game[MAX_PATH],args[MAX_PATH+40];
     if(!PluginsPath(kGenerator,exe,std::size(exe)) || !GameDir(game,std::size(game))){Say(why,capacity,L"路径太长");return false;}

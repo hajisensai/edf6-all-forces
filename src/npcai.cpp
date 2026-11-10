@@ -45,8 +45,7 @@
 #include "support_soldier.h"
 #include "transport.h"
 #include "ride_along.h"
-#include "ini_text.h"
-#include "loadout_file.h"
+#include "loadout_store.h"
 #include "vhud.h"
 #include "edf/hash_index.h"
 #include <algorithm>
@@ -3485,15 +3484,10 @@ void NpcRideAlongTick() noexcept {
 
 // --- The first-time hint (ride_along.h HintStep) ---
 namespace {
+// The ini written off the game thread (loadout_store.cpp SaveIniFlag: a read and an atomic replace).
 DWORD WINAPI WriteHintShown(void*) noexcept {
-    const wchar_t* path=ConfigPath();
-    std::string before,after;
-    try {
-        if(!path || !*path || !ReadFileBytes(path,&before) ||
-           !initext::detail::Rewrite(before,"VehicleCrew","CommandHintShown","1",&after)){Log("NPCAI command hint: the ini was not written");return 0;}
-    } catch(...){return 0;}
-    if(after!=before && !ReplaceFileAtomic(path,after)){Log("NPCAI command hint: the ini was not written");return 0;}
-    Log("NPCAI command hint: shown, CommandHintShown=1 written");
+    Log(SaveIniFlag("CommandHintShown","1") ? "NPCAI command hint: shown, CommandHintShown=1 written" :
+                                              "NPCAI command hint: the ini was not written");
     return 0;
 }
 // The nearest squad the map can command within kHintNear of `me`: one to recruit or `me`'s own, on foot (this machine's
