@@ -15208,8 +15208,15 @@ def main(argv: list[str] | None = None) -> int:
     """Every test, in -j worker processes (each a fresh interpreter: what one test leaves in a module's state stays in
     its worker, as it stayed in the one process before). The tests share no file outside their own temporary folders.
     Took ~21 min in one process (2026-10-25)."""
-    import time
     argv = sys.argv[1:] if argv is None else argv
+    import checklock   # below normal and one full check on the machine at a time (pylib/checklock.py)
+    checklock.below_normal()
+    with checklock.held(f'tools/selftest.py ({os.path.basename(ROOT)})'):
+        return _main(argv)
+
+
+def _main(argv: list[str]) -> int:
+    import time
     jobs = _jobs(argv)
     costs = _costs()
     order = sorted(range(len(TESTS)), key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first

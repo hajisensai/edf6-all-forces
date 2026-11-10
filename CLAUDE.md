@@ -37,9 +37,9 @@
 
 ## 验证
 
-- 离线（不需要游戏），推送前至少跑：
-  - `cmake --build build --target offline_checks` 后 `ctest --test-dir build --output-on-failure -j 8`（用例互不共享输出，可并行；新用例别写固定的共享路径，也别按墙钟判时效）
-  - `python tools/selftest.py`（安装链自测：calls.inc 一致性、武器表事务、归属账本、ini 合并、每个插件都进了安装包；默认 8 个工作进程并行、按上次耗时从长到短排，`-j 1` 串行）
+- 离线（不需要游戏），推送前跑 **`python tools/check.py`**（一条命令跑完 CI 的全部离线检查：build.cmd + offline_checks，然后 ctest、selftest、py_compile、生成文件 `--check` 并行；日志在 `build/check-*.log`，失败的尾部最后打印）。它以**低于正常的优先级**运行（子进程继承，桌面和游戏不卡），并且**全机同一时间只跑一套**（`pylib/checklock.py`，其他会话排队并打印谁在跑）：几个会话同时跑全套时每套慢 3–7 倍（2026-11-10 各 build 目录的耗时记录），排队反而更快。不要再手动并行起 `ctest -j` + `selftest`。
+  - 只改了某一块、想快速看一个用例：`ctest --test-dir build -R <名字>`、`build\<x>_check.exe`；`python tools/selftest.py` 单跑也会排同一个队。
+  - ctest 用例互不共享输出，可并行；新用例别写固定的共享路径，也别按墙钟判时效。selftest 默认 8 个工作进程、按上次耗时从长到短排，`-j 1` 串行。
 - 测试墙钟由最长的单个用例决定：一个用例超过约 3 分钟就拆分片（`cockpit_build_<I>` 的 `--shard I/N`、`wt_tracked_<I>` 的 `EDF6_TEST_SHARD`），别让一个进程串行跑全部车型；只验证某一样东西的测试别顺带走「生成全部载具」的安装路径（patch 掉 `gen.placeable_derived` 之类，由那些载具自己的测试覆盖）。ctest 已给每个用例设 `OPENBLAS_NUM_THREADS=1`（`-j` 并行时 numpy 每进程开满核会超订）。
 - 单个离线检查：`cmake --build build --target <x>_check && build\<x>_check.exe`。
 - 需要游戏文件的 native 审计测试靠缓存变量 `EDF6_NATIVE_DLL` / `EDF6_GAME_DIR`，不设就跳过。
@@ -52,7 +52,7 @@
 - 多个会话共用一个游戏目录，装 DLL 会互相覆盖：看实机结果前先核对游戏目录里 DLL 的 sha256 / mtime 与日志里的 loading 时间，确认测的是自己那版。
 - 装功能分支的 DLL 前先把 `origin/main` 合进来，旧基底会缺崩溃修复。
 - 武器表 / Mods 目录多会话共用：安装只复制自己的文件，不整份覆盖表；别删存档里仍装备着的武器行（会主菜单闪退）。
-- 测前备份、测后逐字节还原游戏目录。
+- 测前备份、测后逐字节还原游戏目录：只备份**这次要覆盖的文件**（`drive.py` / `run_test.py` / `perfrun.py` 已经逐文件做了，带清单、结束自动放回），不要整份复制 `Mods/`（约 10 GB）或游戏目录再逐个算 sha256，那样每次测试写十几 GB、硬盘卡死。
 - 能不开游戏就不开：离线检查、`tests/autopilot/drive.py`（后台驱动）、`testrange/run_test.py` 依次优先。
 
 ## 测试站与反馈
