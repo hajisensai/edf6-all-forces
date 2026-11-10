@@ -79,6 +79,10 @@ class _TaggedOutput:
             self.pending = ''
         self.stream.flush()
 
+    def isatty(self) -> bool:
+        # a job's own jobs (an asset group's models, installer.build_assets) pass _run's utf8_pipes again, in here
+        return self.stream.isatty()
+
 
 def _run(job: Job) -> bytes:
     function, arguments, label = job

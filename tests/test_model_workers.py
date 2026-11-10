@@ -29,6 +29,12 @@ def fail() -> bytes:
     raise ValueError('model generation failed')
 
 
+def nested(workers: int) -> bytes:
+    """A job running jobs of its own (an asset group built beside the others and its models: installer.build_assets)."""
+    return b','.join(v.split(b'|')[1] for v in model_workers.run_jobs(
+        [(echo, (b'in1', 0), 'inner 1'), (echo, (b'in2', 0), 'inner 2')], workers))
+
+
 class ModelWorkerTests(unittest.TestCase):
     def test_cpu_and_available_memory_limit(self) -> None:
         self.assertEqual(model_workers.workers_for(16, 8 * 1024**3), 2)
@@ -85,7 +91,14 @@ class ModelWorkerTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr.decode('utf-8', 'replace'))
         out = run.stdout.decode('utf-8')
         self.assertIn('EDF6VC_WORKERS_OK', out)
-        self.assertIn('[入口检查 1] 开始生成', out)
+        self.assertIn('[entry check 1] 开始生成', out)
+
+    def test_jobs_inside_a_job(self) -> None:
+        # 2026-11-10: a group built in its own process ran its models here (one worker) through _run's utf8_pipes on
+        # the group's tagged stdout, which had no isatty
+        self.assertEqual(model_workers.run_jobs([(nested, (1,), 'group 1'), (nested, (2,), 'group 2')], workers=2),
+                         [b'in1,in2', b'in1,in2'])
+        self.assertEqual(nested(1), b'in1,in2')
 
 
 if __name__ == '__main__':
