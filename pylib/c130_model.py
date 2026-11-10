@@ -203,7 +203,9 @@ def build_archive(game, folder: str, model: str) -> tuple[bytes, dict, Mdb]:  # 
 def check_archive(arc: bytes, model: str) -> None:
     """Re-read `arc`: archive and model round-trip; the V506 frame's bones first, the hull and PROPS propellers; one
     object on the kind-2 bone `model`; every texture member in place; bind x inverse bind the identity; every vertex
-    100 % on one c130_ skin bone; the model standing on its origin."""
+    100 % on one c130_ skin bone; the model standing on its origin. The seats' cockpits tools/make_c130.py grafts in
+    (pylib/cockpits.py: their marker bones, their kits' materials) are left out of the bones' and the meshes' checks."""
+    import cockpits
     import graft_pure as g
     rab = rab_read(arc)
     _req(rab_write(rab) == arc, 'archive does not round-trip')
@@ -219,6 +221,8 @@ def check_archive(arc: bytes, model: str) -> None:
     _req(len(md.objects) == 1 and md.bones[md.objects[0].bone].kind == 2, 'not one object on a kind-2 bone')
     w = bind_world(md)
     for b in md.bones:
+        if cockpits.grafted_bone(md.name_of(b.name)):
+            continue
         p = mmul(w[b.index], b.inv_bind)
         err = max(abs(p[k] - (1.0 if k in (0, 5, 10, 15) else 0.0)) for k in range(16))
         _req(err < 1e-4, f'bone {md.name_of(b.name)}: bind x inverse bind off identity by {err}')
@@ -226,6 +230,8 @@ def check_archive(arc: bytes, model: str) -> None:
     for j, me in enumerate(md.objects[0].meshes):
         idx = struct.unpack(f'<{len(me.indices) // 2}H', me.indices)
         _req(bool(idx) and len(idx) % 3 == 0 and max(idx) < me.nverts < 0x10000, f'mesh {j}: index buffer')
+        if cockpits.grafted_material(md.name_of(md.materials[me.material].name)):
+            continue
         bi, bw = g.skin_columns(me)
         for p, r, wt in zip(g.mesh_positions(me), bi, bw):
             bone = int(r[0])

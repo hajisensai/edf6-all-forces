@@ -57,15 +57,72 @@
 每台机器按计划自己造支援机（`PrepareSupportAircraft`）。旧版会造 bomber 外形、标记 7001–7004 的机体，新版造 7061–7064：房间协议从 7 升到 8
 （`src/mod_room.h`），旧版不能进新版房间。
 
-## 6. 保持原样、需要的外部模型
+## 6. 炮舰机、伞兵运输机换成 C-130；空中航母仍缺模型（2026-11-10）
 
-| 支援 | 现在 | 需要的模型 |
+维护者原话（`docs/feedback-2026-11-10-support-plane-models.md`）：「没有模型来源的支援机型 直接去网站上拿呗，不用管授权」。
+
+| 支援 | 现在 | 模型 |
 |---|---|---|
-| 炮舰机 gunship（`EDF6VC_CALL_GUNSHIP[_F]`、引导打击） | 原版 BOMBER401 | 固定翼炮艇机（AC-130 一类：侧向火炮、运输机机体），翼展 40 m 级。模型包里只有 X-Morph 的旋翼炮艇，飞法不符 |
-| 空中航母 carrier / 自爆 / 人偶无人机母舰 | V508 运输机 × 1.6 | 大型旋翼 / 推力矢量空中母舰（能放无人机的机腹舱），约 60–80 m |
-| 伞兵运输机 transportPlane | 原版 BOMBER401 | 固定翼运输机（C-130 一类：尾门、货舱） |
+| 炮舰机 gunship（`EDF6VC_CALL_GUNSHIP[_F]`、引导打击 `EDF6VC_CALL_SORTIE_GUIDED`） | **AC-130**：新机体 `Body::c130Gunship`，标记 **7065**，`EDF6VC_C130_GUNSHIP.SGO` | 模型包 `c130/gunship.obj` |
+| 伞兵运输机 transportPlane | **C-130**：`Body::transportPlane` 改用 `EDF6VC_C130_TRANSPORT.SGO`，标记由 7001 改为 **7066** | 模型包 `c130/transport.obj` |
+| 空中航母 carrier / 自爆 / 人偶无人机母舰 | 不变：V508 运输机 × 1.6 | **没找到**，见 6.4 |
 
-以上都没有已知授权清楚的来源，未自行下载。
+### 6.1 来源
+
+- FlightGear FGAddon 的 Lockheed C-130 Hercules：`https://svn.code.sf.net/p/flightgear/fgaddon/trunk/Aircraft/C130`（svn 直链，不用登录，
+  2026-11-10 下载到 `D:\APP\edf6-models\downloadslightgear_c130`），GPL v2（随模型复制 `COPYING`），`c130/SOURCE.txt` 记了来源与改动。
+  机体 `Models/c130.ac` + `texture.png`、螺旋桨 `Models/Propellers/propeller.ac`，炮舰机的火炮取它自带的 AC-130 内饰
+  `Models/Interior/ac130/armament/gau12`（两门 GAU-12 25 mm 加特林）与 `armament/40`（40 mm 博福斯），按它的 `all-gau12.xml` /
+  `all-bofors.xml` 摆在机身左侧。
+- `tools/prep_c130.py`（开发者用，读 AC3D：`pylib/ac3d.py`，只当数据读）→ `D:\APP\edf6-models\c130\`：两个 OBJ（游戏坐标、米，+Y 上、+Z 机头、
+  +X 机体左侧）、每个材质的颜色 / 平法线 / 粗糙度贴图、`c130.json`（骨骼：机体 + 4 个螺旋桨 `c130_prop_<i>`）。起落架去掉（飞行姿态），
+  舱门保持关闭；窗玻璃改为不透明深色。整机 40.29 × 11.63 × 29.64 m（翼展 × 高 × 长；原机 40.41 × 11.9 × 29.79）。
+- 公开模型站上 AC-130 / C-130 的其它候选（Sketchfab、cgtrader 免费区）都要登录才能下载，FGAddon 的是唯一的直链，且自带 AC-130 火炮。
+
+### 6.2 生成与接入
+
+- `pylib/c130_model.py`：OBJ → `EDF6VC_C130_<GUNSHIP|TRANSPORT>.MRAB`（骨架照无畏舰：`mdl` → 模型骨骼，`globalSRT` → `body`（V506 锚点，
+  BODY_AT）→ `c130_hull` → `c130_prop_1..4`；材质借 V505 车体材质）。`build_model(textures=False)` 只建网格不压贴图，给
+  `jet_models._model_of` 量包围盒 / 碰撞用。
+- `tools/make_c130.py`（安装器分组 `c130`，ledger 所有者 `c130`，模型输入 `c130/`）：两个模型档案、各自的碰撞
+  `EDF6VC_C130_<M>_AIRFRAME.SHKT`（`aircraft_collision.C130_FILES`，24 × 32 格，SGO 带 `edf6vc_airframe` 成员，同 DN 支援机）、两个 SGO：
+  - 炮舰机：`vcobjects.C130_JETS` 的 `edf6tr_c130_gunship`，炮舰机原有的耐久与挂载，`make_jets.with_gunner_seat` 加侧炮手座；
+  - 运输机：`edf6tr_c130_transport`，打击机的耐久与挂载，`with_passenger_seats` 加 12 个乘客座（共 13 座）。
+  - 座舱（`pylib/cockpit_fits_plugin.py`）：驾驶座 `plane_deck_gun` / `plane_deck` 眼点 (0.6, 3.0, 10.0)（更靠前时座舱面板从机头露出），
+    炮手座 `remote_display` (1.5, 2.4, 3.0) 朝左（yaw 90），乘客 `plane_hold` 首座 (-0.9, 2.2, 3.0)。眼点周围净空用射线实测（见该文件注释）。
+  - `check`：SGO 的模型 / CAS / 标记 / 耐久 / 挂载 / 碰撞文件 / 武器骨骼、炮手座与乘客座、模型档案 `c130_model.check_archive`（跳过座舱嫁接的骨骼与材质）。
+  - 没有 `c130/` 文件夹时什么也不写（安装器一行提示）；插件在规划阶段就拒绝炮舰机支援 / 伞兵运输机（`SupportAircraftReady`：机体 SGO 未预载），
+    不退回 bomber401 外形。CI 的 nightly 安装包不带模型包，所以 nightly 单装时这两种支援不可用（同无畏舰支援机）。
+- `make_jets` 不再写 bomber401 外形的伞兵运输机（`EDF6VC_JET_TRANSPORT.SGO`、`EDF6VC_TRANSPORT_PLANE.MRAB` 及其座舱）。
+  `EDF6VC_JET_GUNSHIP.SGO`（`Body::gunship`，标记 7011）与 `EDF6VC_FLY_GUNSHIP.SGO`（空袭兵请求来自驾的炮舰机）保持 bomber401 外形：
+  标记 7011 仍是请求孪生机的，机库 / 抓取规则不变。
+
+### 6.3 为什么另起标记
+
+- 插件按 mission_setup 标记认机体（`jet.cpp` `IsJetVehicle` / `CrewlessJet`、`playerjet_kinds.inc` `BoardRowOf`）。
+  - 炮舰机：侧炮的出膛点按整机包围盒算（`src/gunmuzzle.h`），bomber401 是 51.9 × 4.0 × 16.2 m，C-130 是 40.3 × 11.6 × 29.6 m。
+    同一个标记分不出两种外形，所以 C-130 炮舰机用 7065，`jet_bay.cpp AirframeOf` 按标记取 `kC130Gunship` 或 `kGunship`；
+    `kC130Gunship` = `make_c130.C130_AIRFRAME`，`make_c130.check_muzzle` 对模型、`selftest support_c130_models` 对头文件各校验一次。
+  - 运输机：原来与打击机共用 7001，`BoardRowOf` 再按模型骨骼认成 bomber401；C-130 不是 bomber401，会被认成打击机（elevon 轰炸机），
+    所以改用 7066，`kBoardable` 给它自己一行（按打击机的飞法）。
+- 质量：两者都按 AC-130 的 70 t（`JET_MASSES`，同 7011）；挂载同各自原来的（`stores.inc` 已重新生成）。
+- 联机：每台机器按计划各自造支援机，旧版会造 bomber401 外形、标记 7011 / 7001 的，新版造 7065 / 7066：房间协议 8 → **9**。
+
+### 6.4 空中航母：没找到可下载的模型（待办）
+
+- 需要：大型旋翼 / 推力矢量空中母舰，60–80 m，机腹能放无人机；插件还依赖现模型的 4 个可倾转推进器骨骼（`boosterF_l` 等，
+  `aircraft_collision.NACELLES`、`src/nacelle_reach.h`）、着陆架舱作最低点、无人机停靠位置。
+- 2026-11-10 搜过：Poly Pizza（airship / carrier：只有低多边形飞艇、民用船）、Sketchfab（科幻飞行航母为付费模型）、cgtrader（"flying aircraft
+  carrier" 付费；免费区 "futuristic aircraft carrier" 要登录下载，且看不出是飞行母舰）。没有不登录就能直接下载、外形合适的。
+- 待办：维护者若能提供（或允许用账号下载）一个模型，按 C-130 的流程做 `prep_<x>.py` / `<x>_model.py`，并另做推进器骨骼与无人机停靠点的映射；
+  在那之前空中航母保持原版 V508 × 1.6。
+
+### 6.5 需实机确认
+
+- 两架 C-130 的大小与飞行观感（比 bomber401 窄 12 m、长 13 m、高 7 m），炮舰机绕圈时侧炮从机体包围盒外出膛的观感；
+- 驾驶座 / 炮手座 / 乘客座的第一人称座舱位置与朝向（只做了离线净空检查）；
+- 螺旋桨不转（骨骼已留，插件未驱动）；没有尾焰（涡桨，模型没有喷口骨骼）；
+- 运输机投伞兵的位置（仍是插件按机体原点投放）。
 
 ## 7. 验证
 
