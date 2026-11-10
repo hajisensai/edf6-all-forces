@@ -236,9 +236,9 @@ def check_archive(arc: bytes, model: str) -> None:
             continue
         bi, bw = g.skin_columns(me)
         for p, r, wt in zip(g.mesh_positions(me), bi, bw):
-            bone = int(r[0])
-            _req(md.name_of(md.bones[bone].name).startswith(PREFIX) and md.bones[bone].kind == 3
-                 and abs(wt[0] - 1.0) < 1e-3, f'mesh {j}: skin {r} {wt}')
+            own = cockpits.own_bone(md, int(r[0]))   # a cockpit shell region's child stands for its bone
+            _req(own.startswith(PREFIX) and md.bones[names.index(own)].kind == 3 and abs(wt[0] - 1.0) < 1e-3,
+                 f'mesh {j}: skin {r} {wt}')
             lo = min(lo, p[1])
     _req(-0.05 < lo < 0.05, f'{model}: its lowest point at y {lo:.3f}, not the origin')
 
