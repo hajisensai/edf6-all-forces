@@ -2,6 +2,7 @@
 // filter on a synthetic MSVC std::set laid out as the stock team manager's (0x82B220) and a native float4 row vector.
 // No EDF.dll, no game.
 #include "../src/mission_crew_radar.cpp"
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -11,15 +12,16 @@ unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 }
 namespace {
+using namespace crew::crewradar;
 int checks=0;
 void Check(bool ok,const char* what) {
     ++checks;
     if(!ok){std::printf("FAIL: %s\n",what);std::exit(1);}
 }
 // _Tree_node<void*>: +0 left, +8 parent, +0x10 right, +0x18 color, +0x19 isnil, +0x20 value.
-struct alignas(16) Node { Node* left; Node* parent; Node* right; unsigned char color,isnil,pad[6]; const void* value; };
-static_assert(offsetof(Node,right)==crewradar::kRight && offsetof(Node,isnil)==crewradar::kIsNil &&
-              offsetof(Node,value)==crewradar::kValue,"the MSVC node layout");
+struct Node { Node* left; Node* parent; Node* right; unsigned char color,isnil,pad[6]; const void* value; };
+static_assert(offsetof(Node,right)==kRight && offsetof(Node,isnil)==kIsNil &&
+              offsetof(Node,value)==kValue,"the MSVC node layout");
 // A balanced search tree over `objects` (their order is the set's order), its head as MSVC keeps it.
 struct Tree {
     Node head{};std::vector<Node> nodes;
@@ -38,7 +40,7 @@ struct Tree {
 };
 // The native vector the radar fills: +8 data, +0x10 capacity, +0x18 size; the rows are float4 positions.
 struct List { void* vtable; float* data; std::uint64_t capacity,size; };
-static_assert(offsetof(List,data)==crewradar::kData && offsetof(List,size)==crewradar::kSize,"the native row vector");
+static_assert(offsetof(List,data)==kData && offsetof(List,size)==kSize,"the native row vector");
 // The rows 0x82B220 makes: one per node in order, here the node's index as x.
 std::vector<float> Fill(List& list,std::size_t n) {
     std::vector<float> rows(n*4);
@@ -54,7 +56,7 @@ std::vector<int> Xs(const List& list) {
 }
 
 int main() {
-    using namespace crew;
+    using namespace crew;using namespace crew::crewradar;
     unsigned char soldiers[9][16]{};
     std::vector<const void*> objects;
     for(auto& s:soldiers)objects.push_back(s);
@@ -110,15 +112,15 @@ int main() {
     Check(list.size==9,"cleared: every dot back");
 
     // Through the team manager as 0x82B23C..0x82B24B reads it, on a private image.
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,crewradar::kTeamManager+0x1000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,kTeamManager+0x1000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     Check(image!=nullptr,"private image");
     MissionCrewRadarPublish(seated,3);
     unsigned char manager[0x40]{};
     struct TeamRow { Node* head; unsigned char rest[0x30]; } teams[7]{};
-    static_assert(sizeof(TeamRow)==crewradar::kTeamRow,"a team row");
+    static_assert(sizeof(TeamRow)==kTeamRow,"a team row");
     teams[2].head=&tree.head;
-    void* teamsAt=teams;std::memcpy(manager+crewradar::kTeams,&teamsAt,8);
-    void* managerAt=manager;std::memcpy(image+crewradar::kTeamManager,&managerAt,8);
+    void* teamsAt=teams;std::memcpy(manager+kTeams,&teamsAt,8);
+    void* managerAt=manager;std::memcpy(image+kTeamManager,&managerAt,8);
     rows=Fill(list,9);list.data=rows.data();
     MissionCrewRadarFilter(&list,2);
     Check(list.size==9,"the walk's bytes not checked yet: the radar left as it is");
@@ -130,7 +132,7 @@ int main() {
     rows=Fill(list,9);list.data=rows.data();
     MissionCrewRadarFilter(&list,-1);
     Check(list.size==9,"no team: untouched");
-    managerAt=nullptr;std::memcpy(image+crewradar::kTeamManager,&managerAt,8);
+    managerAt=nullptr;std::memcpy(image+kTeamManager,&managerAt,8);
     MissionCrewRadarFilter(&list,2);
     Check(list.size==9,"no team manager (between missions): untouched");
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;

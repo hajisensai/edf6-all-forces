@@ -5,8 +5,8 @@
 #include <cstring>
 
 namespace crew {
+namespace crewradar {
 namespace {
-using namespace crewradar;
 // 0x82B220, the stock one-team walk (mission_crew_radar.h): the whole body, so the set layout, the row layout and the
 // order of the walk this filter repeats are the ones the radar used.
 constexpr unsigned kWalk=0x82B220;
@@ -65,47 +65,48 @@ void FilterLocked(const void* head,unsigned char* list) noexcept {
     if(kept!=rows)std::memcpy(list+kSize,&kept,sizeof kept);
 }
 }
+}
 
 bool InstallMissionCrewRadar() noexcept {
-    if(ready.load(std::memory_order_acquire))return true;
-    if(!image || !Matches(kWalk,kWalkCode,sizeof(kWalkCode))) {
+    if(crewradar::ready.load(std::memory_order_acquire))return true;
+    if(!image || !Matches(crewradar::kWalk,crewradar::kWalkCode,sizeof(crewradar::kWalkCode))) {
         Log("Mission crew radar: the stock team walk 0x82B220 is not as expected; the crews keep their radar dots");
         return false;
     }
-    ready.store(true,std::memory_order_release);
+    crewradar::ready.store(true,std::memory_order_release);
     return true;
 }
 void MissionCrewRadarPublish(const void* const* objects,unsigned count) noexcept {
-    if(count>kMost)count=kMost;   // the registry holds no more (static_assert in mission_crew_support.cpp)
-    AcquireSRWLockExclusive(&lock);
-    for(unsigned i=0;i<count;++i)hidden[i]=objects[i];
-    hiddenCount=count;published.store(count,std::memory_order_release);
-    ReleaseSRWLockExclusive(&lock);
+    if(count>crewradar::kMost)count=crewradar::kMost;   // the registry holds no more (static_assert in mission_crew_support.cpp)
+    AcquireSRWLockExclusive(&crewradar::lock);
+    for(unsigned i=0;i<count;++i)crewradar::hidden[i]=objects[i];
+    crewradar::hiddenCount=count;crewradar::published.store(count,std::memory_order_release);
+    ReleaseSRWLockExclusive(&crewradar::lock);
 }
 bool MissionCrewRadarHidden(const void* object) noexcept {
-    if(!object || !published.load(std::memory_order_acquire))return false;
-    AcquireSRWLockShared(&lock);
-    const bool found=HiddenLocked(object);
-    ReleaseSRWLockShared(&lock);
+    if(!object || !crewradar::published.load(std::memory_order_acquire))return false;
+    AcquireSRWLockShared(&crewradar::lock);
+    const bool found=crewradar::HiddenLocked(object);
+    ReleaseSRWLockShared(&crewradar::lock);
     return found;
 }
 void MissionCrewRadarFilterRows(const void* head,void* list) noexcept {
-    if(!head || !list || !published.load(std::memory_order_acquire))return;
-    AcquireSRWLockShared(&lock);
-    __try {FilterLocked(head,static_cast<unsigned char*>(list));}
+    if(!head || !list || !crewradar::published.load(std::memory_order_acquire))return;
+    AcquireSRWLockShared(&crewradar::lock);
+    __try {crewradar::FilterLocked(head,static_cast<unsigned char*>(list));}
     __except(EXCEPTION_EXECUTE_HANDLER){}
-    ReleaseSRWLockShared(&lock);
+    ReleaseSRWLockShared(&crewradar::lock);
 }
 void MissionCrewRadarFilter(void* list,int team) noexcept {
-    if(!ready.load(std::memory_order_acquire) || team<0 || !list || !published.load(std::memory_order_acquire))return;
+    if(!crewradar::ready.load(std::memory_order_acquire) || team<0 || !list || !crewradar::published.load(std::memory_order_acquire))return;
     const void* head=nullptr;
     __try {
         // 0x82B23C..0x82B24B: [manager] +0x38, the team's 0x38-byte row, its first qword the set's head.
-        const auto* manager=Field<const unsigned char*>(image,kTeamManager);
+        const auto* manager=crewradar::Field<const unsigned char*>(image,crewradar::kTeamManager);
         if(!manager)return;
-        const auto* teams=Field<const unsigned char*>(manager,kTeams);
+        const auto* teams=crewradar::Field<const unsigned char*>(manager,crewradar::kTeams);
         if(!teams)return;
-        head=Field<const void*>(teams,static_cast<std::size_t>(team)*kTeamRow);
+        head=crewradar::Field<const void*>(teams,static_cast<std::size_t>(team)*crewradar::kTeamRow);
     } __except(EXCEPTION_EXECUTE_HANDLER){return;}
     MissionCrewRadarFilterRows(head,list);
 }
