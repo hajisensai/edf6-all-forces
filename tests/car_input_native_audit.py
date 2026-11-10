@@ -74,6 +74,30 @@ for at in (0x65A505, 0x65A5C4):
     assert data(at + 9, 12) == bytes.fromhex('488b03' '488bcb' 'ff9098020000'), hex(at)   # call [vtable+0x298]: slot 83
 CAR_READS = {'trigger2': True, 0x01: 'handbrake', 0x10: 'brake', 0x40: 'horn'}   # 0x20: slot 83, nothing
 
+# --- The keyboard: which key-config action feeds which seat input (docs/keyconfig-re.md §8)
+# HumanBase 0x572DF0 fills the seat inputs from row (seat +0x2B4) of the key objects, 7 of 0x18 bytes each:
+# +0x940 -> +0x2E0, +0x958 -> +0x2E4, +0x970 -> bit 0x10, +0x988 -> bit 0x20, +0x9A0 -> bit 0x01, +0x9B8 -> bit 0x40,
+# +0x9D0 -> bit 0x08 (row 3 only).
+for at, obj in ((0x5733B9, 0x940), (0x5733D3, 0x958), (0x573413, 0x9A0), (0x5734F0, 0x970), (0x573521, 0x988), (0x573552, 0x9B8)):
+    assert data(at, 7) == bytes.fromhex('4538a8') + struct.pack('<I', obj), hex(at)   # cmp [r8+obj], r13b
+assert data(0x57351D, 4) == bytes.fromhex('6683c920'), '+0x988 sets bit 0x20 (RB)'
+assert data(0x57354E, 4) == bytes.fromhex('6683c940'), '+0x9B8 sets bit 0x40 (L3)'
+# 0x78890 binds each row's 7 key objects to the actions of a 7-byte row table it builds at [rbp+0x48] (0x4E: none).
+ROWS = bytes.fromhex('3235334d34364e' '3837' '4e4e4e394e' '3b3a3d3c3e4e4e' '4241403f4e4344' '48474645494e4e'
+                     '4c4a4e4b4e4e4e' '38374e4e4e4e4e')
+moves = bytes.fromhex('c74548' '3235334d' 'c7454c' '34364e38' 'c74550' '374e4e4e' 'c74554' '394e3b3a' 'c74558' '3d3c3e4e'
+                      'c7455c' '4e424140' 'c74560' '3f4e4344' 'c74564' '48474645' 'c74568' '494e4e4c' 'c7456c' '4a4e4b4e'
+                      'c74570' '4e4e3837' 'c74574' '4e4e4e4e' 'c64578' '4e')
+assert data(0x7A536, len(moves)) == moves, "the key objects' row table (0x7A536)"
+assert ROWS[3 * 7 + 6] != 0x4E and all(ROWS[r * 7 + 6] == 0x4E for r in range(7) if r != 3), 'bit 0x08: row 3 only'
+DRIVE = ROWS[0:7]   # the Car's row: its throttle (+0x2E0) is the drive page's DriveAccel 0x32, on no other row
+assert DRIVE[0] == 0x32 and all(ROWS[r * 7] != 0x32 for r in range(1, 7))
+assert DRIVE[3] == 0x4D, "the drive page's 「DriveHorn」 (default right button) is bit 0x20: the Car's empty slot 83"
+assert DRIVE[5] == 0x36, "the drive page's 「TanksAttack2」 (default middle button) is bit 0x40: the Car's horn"
+HORN_DEFAULT_VK = 0x04   # 0x36's stock default, the middle button (0xD52F0; tests/keyconfig_native_audit.py)
+free_look = int(re.search(r'int freeLookKey=(0x[0-9A-Fa-f]+|\d+);', (ROOT / 'src' / 'crew.h').read_text(encoding='utf-8')).group(1), 0)
+assert free_look != HORN_DEFAULT_VK, "free look on the key that sounds the Grape's horn (2026-11-10)"
+
 
 # --- The 505 / 601 / 603: the primary trigger and the left stick, no +0x2E0, no button word
 def calls(begin: int, end: int) -> set[int]:
@@ -123,5 +147,6 @@ assert XINPUT_TO_SEAT.get(fire4) == 0x20, 'fire key 4 on a pad: RB, which the Ca
 import vcobjects as vc  # noqa: E402
 coax = vc.STOCK_MOUNTS['ifv']['MG401']
 assert coax.key == 4 and vc.STORES[vc.mounted('MG401', coax)].role == 'coax', 'the Grape\'s coax on fire key 4'
-print('car input audit: Car reads +0x2E0 throttle, LB brake, A handbrake, L3 horn, RB nothing; 505/601/603 no +0x2E0; '
+print("car input audit: Car reads +0x2E0 throttle, LB brake, A handbrake, L3 horn, RB nothing; the keyboard's horn is the "
+      "drive page's middle-button row, free look off it; 505/601/603 no +0x2E0; "
       f'the Grape\'s coax on key 4 (pad {fire4:#x}), its switch on seat button {car_switch:#x}: OK')

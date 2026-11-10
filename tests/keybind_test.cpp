@@ -117,12 +117,14 @@ std::vector<Bind> Binds() {
     stock("stock WeaponSelect",0x0F,kFoot,1);stock("stock Reload",0x23,kFoot,1);stock("stock Dash/Boost",0x56,kFoot,1);
     stock("stock UseSub",0x2B,kFoot,1);stock("stock CallVehicle",0x17,kFoot,1);
     stock("stock DriveAccel",0x28,kGround,5);stock("stock DriveBrake",0x24,kGround,5);stock("stock HandBrake",0x63,kGround,5);
+    // the drive page's rows as the seat reads them (docs/keyconfig-re.md §8, 0x7A536): 「DriveHorn」 (right) is the seat's RB
+    // bit, nothing on the Car; 「TanksAttack2」 (middle) its L3 bit, the Car's horn: free look left the middle button for it
     stock("stock TanksAttack1",0x0C,kGround,5);stock("stock DriveHorn",0x0E,kGround,5);stock("stock TanksAttack2",0x0D,kGround,5);
     stock("stock HeliAttack1",0x0C,kHeli,7);stock("stock HeliAttack2",0x0E,kHeli,7);stock("stock HeliFlight",0x63,kHeli,7);
     // the plugins' slots and where each is read (docs/plan-2026-10-25-keybinds.md §1)
     const unsigned ctx[kb::kSlotCount]={
         kFoot,kFoot,kFoot,kFoot|kVehicles,kFoot|kVehicles,kFoot|kVehicles,kRoom,kFoot,kTurret,
-        kVehicles&~kSazabi,kGround,kGround|kTurret,kGround|kTurret,kGround|kTurret,kVehicles,kVehicles,kVehicles,kGround|kProteus,kFoot,kGunship,
+        kVehicles,kGround,kGround|kTurret,kGround|kTurret,kGround|kTurret,kVehicles,kVehicles,kVehicles,kGround|kProteus,kFoot,kGunship,
         kJet,kJet|kHeli,kJet,kJet,kJet,kDrill,kProteus,kProteus,kProteus,
         kDread,kDread,kDread,kDread,kDread,kDread,
         kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,
@@ -143,7 +145,6 @@ const char* const kKnown[]={
     "FirstPersonKey|SazabiMeleeKey",            // plan §2 #8
     "PlayerJetSwitchKey|DrillLaunchKey",        // R: the drill tank's launch and its stores (both on R since the drill's launch)
     "PlayerJetSwitchKey|SazabiFunnelKey",       // R: the family 「武器切换」 (plan §3.2)
-    "FreeLookKey|stock TanksAttack2",           // the middle button: the stock vehicles' second weapon vs free look (§1.2)
 };
 
 void Matrix() {
@@ -314,6 +315,70 @@ void Store() {
     Check(kb::Seed(old.data(),kb::Owner::turret,[](const kb::Slot&){ return 'J'; })==1 && kb::SlotVk(old.data(),0x57)=='J' &&
           kb::Seeded(old.data(),kb::Owner::turret) && kb::SlotVk(old.data(),0x53)=='P',
           "the turret's marker its own: its one slot seeded, the crew's left alone");
+
+    // The default steps (kCrewSteps): the marker keeps the steps taken beside the end; one written before them has none.
+    Check(kb::MarkerEnd(kb::MarkerOf(0x80,1))==0x80 && kb::MarkerSteps(kb::MarkerOf(0x80,1))==1 &&
+          kb::MarkerSteps(kb::MarkerOf(0x80))==0 && kb::MarkerSteps(0)==0,"the marker: the end and the steps apart");
+    Check(kb::StepsOf(kb::Owner::crew)==1 && kb::StepsOf(kb::Owner::turret)==0,"the crew's one step (2026-11-10), none of the turret's");
+    Check(kb::SeededSteps(store.data(),kb::Owner::crew)==kb::StepsOf(kb::Owner::crew),
+          "a store seeded now takes no step (its ini has the new defaults): marked as taken");
+    const auto seededBefore=[](int freeLook,int highCam) {
+        std::vector<unsigned char> st(kb::kStoreSize,0);
+        for(const kb::Slot& s:kb::kSlots)
+            if(s.owner==kb::Owner::crew)kb::WriteSynced(st.data(),0,s.action,kb::CodeOfVk(s.defaultVk));
+        kb::WriteSynced(st.data(),0,0x58,kb::CodeOfVk(freeLook));kb::WriteSynced(st.data(),0,0x59,kb::CodeOfVk(highCam));
+        *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(kb::OwnerEnd(kb::Owner::crew));   // all slots, no step
+        return st;
+    };
+    const auto seed=[](std::vector<unsigned char>& st,int* moved) {
+        return kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot&){ return 'Z'; },moved);
+    };
+    {   // the old defaults: free look middle, the high view C -> free look C, the high view L, in the four sets
+        auto st=seededBefore(0x04,'C');
+        Check(!kb::Seeded(st.data(),kb::Owner::crew),"seeded before the step: not seeded through");
+        int moved=-1;
+        Check(seed(st,&moved)==0 && moved==2,"the step moved both, seeded nothing (" + std::to_string(moved) + ")");
+        bool sets=true;
+        for(int set=0;set<kb::kSyncedSets;++set)
+            sets=sets && *kb::SlotPtr(st.data(),0,set,0x58)==kb::CodeOfVk('C') && *kb::SlotPtr(st.data(),0,set,0x59)==kb::CodeOfVk('L');
+        Check(sets && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='L',"free look on C, the high view on L");
+        Check(kb::Seeded(st.data(),kb::Owner::crew) && seed(st,&moved)==0 && moved==0,"the step taken once");
+        kb::WriteSynced(st.data(),0,0x58,kb::CodeOfVk(0x04));
+        Check(seed(st,&moved)==0 && moved==0 && kb::SlotVk(st.data(),0x58)==0x04,"the player's middle button after it: kept");
+    }
+    {   // the player's own free look key: kept; the high view still on C: L (the new default)
+        auto st=seededBefore(0x12,'C');
+        int moved=-1;seed(st,&moved);
+        Check(moved==1 && kb::SlotVk(st.data(),0x58)==0x12 && kb::SlotVk(st.data(),0x59)=='L',"the player's free look key kept");
+    }
+    {   // the player's own high view key: kept; free look on C (free)
+        auto st=seededBefore(0x04,'O');
+        int moved=-1;seed(st,&moved);
+        Check(moved==1 && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='O',"the player's high view key kept");
+    }
+    {   // the player put another action on C: free look stays where it is (no step makes two actions share a key)
+        auto st=seededBefore(0x04,'O');
+        kb::WriteSynced(st.data(),0,0x52,kb::CodeOfVk('C'));   // FirstPersonKey
+        int moved=-1;seed(st,&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x58)==0x04 && kb::Seeded(st.data(),kb::Owner::crew),
+              "C taken by the player's own key: free look not moved, the step still marked taken");
+    }
+    {   // a store seeded before the step and before slots added since: the new slots from the ini, then the step
+        auto st=seededBefore(0x04,'C');
+        *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(0x70);
+        int moved=-1;
+        const int seededNow=kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.defaultVk; },&moved);
+        Check(seededNow>0 && moved==2 && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='L' &&
+              kb::Seeded(st.data(),kb::Owner::crew),"the slots added since and the step, one marker");
+    }
+    {   // the step's slots themselves seeded just now (the marker's end at them): the ini's keys are the player's, kept
+        auto st=seededBefore(0x04,'C');
+        *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(0x58);
+        int moved=-1;
+        kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.action==0x58 ? 0x04 : s.action==0x59 ? 'C' : s.defaultVk; },&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x58)==0x04 && kb::SlotVk(st.data(),0x59)=='C' && kb::Seeded(st.data(),kb::Owner::crew),
+              "slots seeded now from the ini: no step on them");
+    }
 }
 // The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
 // The stock defaults the plugin changes: Chat Enter, VoiceChat K, each in the four sets, each a key the stock dialog

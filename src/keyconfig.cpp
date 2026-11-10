@@ -134,8 +134,8 @@ std::atomic<bool> iniKeysRead{false};
 // This plugin's slots its marker does not cover yet, from the ini; EDF6AutoTurret's own are its business.
 void EnsureSeeded(unsigned char* store) noexcept {
     if(kb::Seeded(store,kb::Owner::crew) || !iniKeysRead.load())return;
-    const int from=kb::SeededEnd(store,kb::Owner::crew);
-    int unmapped=0;
+    const int from=kb::SeededEnd(store,kb::Owner::crew),steps=kb::SeededSteps(store,kb::Owner::crew);
+    int unmapped=0,moved=0;
     const int written=kb::Seed(store,kb::Owner::crew,[&](const kb::Slot& s) noexcept {
         const KeyField* f=FieldOf(s.ini);
         const int vk=f ? iniKeys[f-kFields].load() : s.defaultVk;
@@ -144,10 +144,16 @@ void EnsureSeeded(unsigned char* store) noexcept {
             ++unmapped;
         }
         return vk;
-    });
-    if(from>kb::kFirstAction)
-        Log("KEYCONFIG %d key(s) added since the store was seeded (slots 0x%X..) seeded from the ini (%d unmapped); the others kept",
-            written,from,unmapped);
+    },&moved);
+    if(from>kb::kFirstAction && steps<kb::StepsOf(kb::Owner::crew))
+        Log("KEYCONFIG default steps %d..%d on the seeded store: %d key(s) still on an old default moved to the new one "
+            "(2026-11-10: FreeLookKey middle button -> C, HighCamKey C -> L); keys the player set kept",steps+1,
+            kb::StepsOf(kb::Owner::crew),moved);
+    if(from>kb::kFirstAction) {
+        if(from<kb::OwnerEnd(kb::Owner::crew))
+            Log("KEYCONFIG %d key(s) added since the store was seeded (slots 0x%X..) seeded from the ini (%d unmapped); the others kept",
+                written,from,unmapped);
+    }
     else if(!seededLogged.exchange(true))
         Log("KEYCONFIG this plugin's keys seeded from the ini into the game's key store (slots 0x%X.., %d unmapped): from now on "
             "they are set in the game's key config (the 「插件」 pages), the ini's *Key values are no longer read",kb::kFirstAction,

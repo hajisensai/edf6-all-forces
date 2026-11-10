@@ -5943,7 +5943,8 @@ def edf41_mother_parts_default_migrates() -> None:
     assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
-                                                         installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108]
+                                                         installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
+                                                         installer.DEFAULTS_MARK_1110]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6016,6 +6017,33 @@ def fire4_pad_default_migrates() -> None:
     assert flipped == [] and 'VehicleFire4Button=8192 ; mine' in text, flipped
     planned = installer.planned_ini(done, ini)
     assert re.search(r'^VehicleFire4Button=512$', planned[0], re.M) and 'VehicleFire4Button' in planned[3]
+
+
+@test
+def free_look_key_default_migrates() -> None:
+    """Free look went from the middle button to C, the high view from C to L (2026-11-10,
+    docs/feedback-2026-11-10-freeview-key.md: the middle button is the stock drive page's row that sounds the Grape's horn):
+    the shipped ini, the plugin's defaults and the key config's slots agree; an old ini still on the old defaults is moved
+    once by the 11-10 step, a key the player chose is kept, a later install changes nothing."""
+    import installer
+    ini, crew, kb = src('EDF6VehicleCrew.ini'), src('src/crew.h'), src('common/edf/keybind.h')
+    assert re.search(r'^FreeLookKey=0x43$', ini, re.M) and re.search(r'^HighCamKey=0x4C$', ini, re.M)
+    assert 'int freeLookKey=0x43;' in crew and 'int highCamKey=0x4C;' in crew
+    assert '{0x58,12,0,Owner::crew,L"FreeLookKey",0x43}' in kb and '{0x59,12,1,Owner::crew,L"HighCamKey",0x4C}' in kb
+    assert '{{0x59,0x43,0x4C},{0x58,0x04,0x43}}' in kb, 'the key store takes the same move (kMoves1110)'
+    assert installer.NEW_DEFAULTS_1110[installer.SECTION] == {'HighCamKey': ('0x43', '0x4C'), 'FreeLookKey': ('0x04', '0x43')}
+    done = (f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\n{installer.DEFAULTS_MARK_1017}\n{installer.DEFAULTS_MARK_1024}\n'
+            f'{installer.DEFAULTS_MARK_1108}\nEnabled=1\nFreeLookKey=0x04\nHighCamKey=0x43\n')
+    text, flipped = installer.apply_new_defaults(done)
+    assert sorted(flipped) == ['FreeLookKey', 'HighCamKey'], flipped
+    assert 'FreeLookKey=0x43' in text and 'HighCamKey=0x4C' in text and text.count(installer.DEFAULTS_MARK_1110) == 1
+    again = text.replace('FreeLookKey=0x43', 'FreeLookKey=0x04')
+    assert installer.apply_new_defaults(again) == (again, []), "a later install undid the player's own middle button"
+    mine = done.replace('FreeLookKey=0x04', 'FreeLookKey=0x12 ; mine')
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == ['HighCamKey'] and 'FreeLookKey=0x12 ; mine' in text, flipped
+    planned = installer.planned_ini(done, ini)
+    assert re.search(r'^FreeLookKey=0x43$', planned[0], re.M) and 'FreeLookKey' in planned[3]
 
 
 def make_stock_stores_wanted(text: str) -> bool:
