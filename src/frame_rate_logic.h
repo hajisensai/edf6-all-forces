@@ -10,7 +10,8 @@
 //    nothing: the presentation frames this file schedules.
 //  - so the picture a frame renders is the state after the last step; with the pair (previous step, last step) a
 //    presentation frame at phase a since the last boundary shows previous + a*(last - previous), and a tick frame
-//    (render before its step) shows the last step, a = 1: the shown time runs one tick behind, without a jump.
+//    (render before its step) shows the last step, a = 1: the shown time runs one tick behind, without a jump (but
+//    for the part of a slot a step may have waited for its slot, see Ready).
 #pragma once
 #include <cmath>
 #include <cstdint>
