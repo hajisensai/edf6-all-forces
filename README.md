@@ -545,6 +545,15 @@ EDF6AutoTurret 时，键仍按 ini。
 `HAVOKMT world tasks so far: … overlapping, at most N at once`，出现重叠会立刻记一行 `OVERLAPPED`。
 `src/havok_mt.cpp`，逆向与审计见 `docs/havok-mt-re.md`（静态分析、离线检查、unicorn 模拟与实测数据，§13）。
 
+## 帧率上限（FrameRateCap，开发中，当前版本不生效）
+
+原版的 60 帧锁不是垂直同步，而是主循环按 1/59.94 秒一个 tick 步进，没到下一个 tick 就等；整个游戏逻辑（物理、AI、武器、镜头）
+都按 tick 走。只拿掉等待并不会更流畅：多出来的帧画的是同一个状态，还会让植被风变快、快按的键和鼠标位移丢失。
+正确的做法是逻辑仍按 59.94 Hz 步进，多出的帧在前后两步之间插值镜头、模型、特效再显示（画面比逻辑晚一个 tick）。
+ini `FrameRateCap`：`0` = 原版（默认），`-1` = 不限，`61`–`1000` = 最多这么多帧。**当前版本只读取这一项**（非 0 时日志记一行
+`FRAMERATE`），游戏仍按原版运行：插值与输入保留还没接进游戏，接入要分阶段实机验收。逆向、方案、阶段与实机清单见
+`docs/unlimited-fps-re.md`（离线检查 `tools/frame_rate_check.cpp`）。
+
 ## 原版问题修正：引导路线穿墙
 
 任务里从玩家脚下指向目的地、一串滚动箭头连成的那条引导线，原版会扎进墙里（EDF6 自己的任务和 EDF5 任务都有）。
