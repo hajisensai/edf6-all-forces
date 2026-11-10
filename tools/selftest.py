@@ -2763,8 +2763,9 @@ def support_c130_models() -> None:
     m = re.search(r'kC130Gunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', src('src/gunmuzzle.h'))
     assert m, 'src/gunmuzzle.h kC130Gunship'
     got = [float(m.group(k)) for k in range(1, 7)]
-    assert got == [v for part in make_c130.C130_AIRFRAME for v in part], (got, make_c130.C130_AIRFRAME)
+    assert got == [v for part in make_jets.muzzle_airframe(make_c130.C130_AIRFRAME) for v in part], (got, make_c130.C130_AIRFRAME)
     assert 'check_muzzle(game)' in src('tools/make_c130.py'), 'tools/make_c130.py build holds the model to C130_AIRFRAME'
+    assert 'make_jets.check_rigid_centre(files[f'OBJECT/{GUNSHIP_SGO}'], GUNSHIP_SGO, C130_AIRFRAME)' in src('tools/make_c130.py'),         "tools/make_c130.py check holds the AC-130's collision box (gunmuzzle.h's frame) to C130_AIRFRAME"
     assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 9
 
 
@@ -4180,8 +4181,11 @@ def gunship_muzzle_wired() -> None:
     m = re.search(r'kGunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', head)
     assert m, 'src/gunmuzzle.h kGunship'
     got = [float(m.group(k)) for k in range(1, 7)]
-    want = [v for part in make_jets.GUNSHIP_AIRFRAME for v in part]
-    assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
+    # about the vehicle's origin, the collision box's centre (make_jets.muzzle_airframe), which the build holds to the model's
+    # whole box on both gunship SGOs (check_rigid_centre)
+    want = [v for part in make_jets.muzzle_airframe(make_jets.GUNSHIP_AIRFRAME) for v in part]
+    assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py muzzle_airframe(GUNSHIP_AIRFRAME) {want}'
+    assert 'check_rigid_centre(out[f'OBJECT/{name}'], name, GUNSHIP_AIRFRAME)' in src('tools/make_jets.py'),         "tools/make_jets.py build holds the gunships' collision boxes to GUNSHIP_AIRFRAME"
     m = re.search(r'kCannonHit=' + num, head)
     assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
     m = re.search(r'kGatlingHit=' + num, head)

@@ -45,11 +45,13 @@ OWNER = 'c130'   # pylib/ledger.py
 GUNSHIP_SGO = 'EDF6VC_C130_GUNSHIP.SGO'
 TRANSPORT_SGO = 'EDF6VC_C130_TRANSPORT.SGO'
 SGOS = {GUNSHIP_SGO: (vc.C130_GUNSHIP_JET, 'gunship'), TRANSPORT_SGO: (vc.C130_TRANSPORT_JET, 'transport')}
-# The AC-130's whole box (jet_models.model_box of its archive: [centre, half extents], the vehicle's axes about its
-# origin): src/gunmuzzle.h kC130Gunship, which its rounds leave off (as make_jets.GUNSHIP_AIRFRAME the bomber401's);
-# check_muzzle holds the model to it, tools/selftest.py gunship_muzzle_wired the header.
-C130_AIRFRAME = ((0.0, 5.815, 0.0), (20.15, 5.815, 14.82))
-AIRFRAME_FIT = 0.01   # m
+# The AC-130's whole box (jet_models.model_box of its archive: [centre, half extents], the model's axes about its origin,
+# its belly): src/gunmuzzle.h kC130Gunship is make_jets.muzzle_airframe of it (about the vehicle's origin, the collision
+# box's centre, which check holds to this box: make_jets.check_rigid_centre), which its rounds leave off (as
+# make_jets.GUNSHIP_AIRFRAME the bomber401's); check_muzzle holds the model to it, tools/selftest.py support_c130_models
+# the header.
+C130_AIRFRAME = ((0.0, 5.812, 0.0), (20.141, 5.812, 14.82))
+AIRFRAME_FIT = make_jets.AIRFRAME_FIT
 
 
 def build(root: str) -> dict[str, bytes]:
@@ -120,6 +122,7 @@ def check(files: dict[str, bytes], game: vc.Game) -> None:
         missing = {b for b, _ in v['vehicle_weapon_setting']} - {md.name_of(b.name) for b in md.bones}
         assert not missing, f'{file}: model lacks weapon bones {missing}'
     make_jets.check_gunner_seat(files[f'OBJECT/{GUNSHIP_SGO}'], GUNSHIP_SGO, vc.C130_GUNSHIP_MARK)
+    make_jets.check_rigid_centre(files[f'OBJECT/{GUNSHIP_SGO}'], GUNSHIP_SGO, C130_AIRFRAME)   # gunmuzzle.h kC130Gunship's frame
     make_jets.check_passenger_seats(files[f'OBJECT/{TRANSPORT_SGO}'], 1 + make_jets.TRANSPORT_PLANE_PASSENGERS, TRANSPORT_SGO, 1)
     make_jets.check_weapon_bones(files, game)
 

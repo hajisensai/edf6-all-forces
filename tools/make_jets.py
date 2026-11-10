@@ -195,11 +195,32 @@ GATLING = GunRound(GATLING_FILE, GATLING_RADIUS, GATLING_SPEED, GATLING_LIFE, GA
                    GATLING_COLOR)
 SIDE_GUNS: tuple[GunRound, ...] = (CANNON, GATLING)   # src/jet_bay.cpp kSideGuns' order
 # Where the gunship's rounds leave (src/gunmuzzle.h; the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」): off its airframe,
-# the stock bomber401 model's whole box [centre, half extents] (jet_models.model_box, the vehicle's axes and origin), on
-# the line from the box's centre to the aim, a round's hit radius (#7 AmmoSize x #8 AmmoHitSizeAdjust) and a margin past
-# it. From the vehicle's origin, the belly's floor, the line to a target inside the banked circle crossed the plane.
-# check_gunship_muzzle holds these to the game's model and the stock shell; tools/selftest.py holds src/gunmuzzle.h to them.
+# the stock bomber401 model's whole box [centre, half extents] (jet_models.model_box: the model's axes and origin, its
+# lowest point), on the line from the box's centre to the aim, a round's hit radius (#7 AmmoSize x #8 AmmoHitSizeAdjust)
+# and a margin past it. check_gunship_muzzle holds these to the game's model and the stock shell; tools/selftest.py holds
+# src/gunmuzzle.h to muzzle_airframe(GUNSHIP_AIRFRAME).
 GUNSHIP_AIRFRAME = ((0.0, 2.136, 0.0), (25.938, 2.009, 8.078))
+
+
+def muzzle_airframe(box) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001
+    """A gunship's model box (model frame) as src/gunmuzzle.h holds it: about the vehicle's origin, which is its collision
+    box's centre (heli_rigid_body[0]: the game puts the model's root at the object matrix less that centre,
+    docs/player-jet-re.md §15.2), and a gunship's collision box is its model's whole box (check_rigid_centre): centred on
+    it, the same half extents."""
+    return (0.0, 0.0, 0.0), tuple(box[1])
+
+
+def check_rigid_centre(data: bytes, name: str, box) -> None:  # noqa: ANN001
+    """Raise GunshipMuzzleError unless gunship SGO `name`'s collision box (heli_rigid_body) is its model's whole box `box`
+    (to AIRFRAME_FIT): the frame src/gunmuzzle.h's airframe is held in (muzzle_airframe)."""
+    import sgo
+    rb = sgo.read(data)[1].get('heli_rigid_body')
+    got = [[_number(v) for v in row] for row in rb[:2]] if isinstance(rb, list) and len(rb) >= 2 else None
+    if got is None or any(g is None or abs(g - w) > AIRFRAME_FIT for row, want in zip(got, box) for g, w in zip(row, want)):
+        raise GunshipMuzzleError(f'{name} 的碰撞箱 {got} 不是整机包围盒 {box}：炮口的机体框（src/gunmuzzle.h）按碰撞箱中心算')
+
+
+AIRFRAME_FIT = 0.01   # m
 SHELL_STOCK = 'DEMOGUNSHIPFIREE25.SGO'   # the gunship's shells (src/jet_bay.cpp kGunshipSgo), fired as the game has them
 SHELL_HIT = 10.0                         # its hit radius: #7 10 x #8 1
 SHELL_SPEED = 8.0                        # m a frame: #5 (src/gunmuzzle.h kShell, the shell's path off its airframe)
@@ -322,6 +343,8 @@ def build(root: str) -> dict[str, bytes]:
     # what is written is held to the same contract as what was authored
     for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_HELI_FILE):
         check_own_model(out, name)
+    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET)):   # src/gunmuzzle.h kGunship's frame
+        check_rigid_centre(out[f'OBJECT/{name}'], name, GUNSHIP_AIRFRAME)
     check_weapon_bones(out, game)
     return out
 

@@ -83,7 +83,7 @@
 原版没有能载一个小队的直升机或固定翼。做法与炮舰机加炮手座位（`with_gunner_seat`）相同：复制机体已有座位的定位点，套用 410 门炮手的姿势和按键行，掩码 15，乘客座上不挂武器。
 
 - `EDF6VC_HELI_TRANSPORT.SGO`：410 + 10 个乘客座 = 13 座，可载 12 人（门炮手座上的人会操作门炮）。
-- `EDF6VC_JET_TRANSPORT.SGO`：bomber401 打击机 + 12 个乘客座 = 13 座。mark 7001，所以插件按打击机来飞它，再用 `ferry` 标志关掉索敌。
+- `EDF6VC_JET_TRANSPORT.SGO`：bomber401 打击机 + 12 个乘客座 = 13 座。mark 7001，所以插件按打击机来飞它，再用 `ferry` 标志关掉索敌。（2026-11-10 起改为模型包 C-130 做的 `EDF6VC_C130_TRANSPORT.SGO`，标记 7066，`kBoardable` 有自己一行，仍按打击机的飞法；见 `docs/feature-support-jet-models.md` §6。）
 
 `check_passenger_seats` 生成时会校验：座位数、乘客座的掩码 / 姿势 / 按键行、定位点来自原版座位、乘客座上没挂武器。
 

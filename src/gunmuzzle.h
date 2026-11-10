@@ -1,12 +1,13 @@
 // The gunship's muzzle, the pure part (no game, no Windows: tools/gunship_muzzle_check.cpp includes it alone; jet_bay.cpp
 // fires the gunship's shells and cannon from it). README 炮舰机的机炮; the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」.
 //
-// The rounds used to leave from the vehicle's origin (veh+0x90). On the bomber401 model the gunship flies, that origin is
-// the belly's floor (the model's lowest vertex is 0.13 m over it, its wing 1.3-2.8 m over it, 52 m across: pylib/
-// jet_models.py model_box('bomber401')). The gunship circles its target banked into the turn (the NPC: about 60 degrees at
-// its 2 g; the player: up to playerjet.cpp kTurnBank, 69 degrees) and looks down at the target only 22-30 degrees (350 m
-// over a 600-850 m circle): in the airframe's own axes the line from the belly to the target climbs (the bank less the
-// look-down) across the fuselage and the inside wing, so the rounds flew out through the plane.
+// The rounds used to leave from the vehicle's origin (veh+0x90): the airframe box's centre (below), 52 m across the
+// bomber401's wings (pylib/jet_models.py model_box('bomber401')). (Until 2026-11-10 this said the belly's floor, which no
+// gunship SGO has been since its collision box became its whole model's, 2026-10-06: the box was held 2.1 m too high.)
+// The gunship circles its target banked into the turn (the NPC: about 60 degrees at its 2 g; the player: up to
+// playerjet.cpp kTurnBank, 69 degrees) and looks down at the target only 22-30 degrees (350 m over a 600-850 m circle):
+// in the airframe's own axes the line from its middle to the target climbs (the bank less the look-down) across the
+// fuselage and the inside wing, so the rounds flew out through the plane.
 //
 // The muzzle now: where the line from the airframe box's centre to the aim leaves that box grown by `clear` each way (the
 // whole model's box: wings, nose and tail, in the vehicle's axes). The grown box is convex, so the rest of the line to the
@@ -17,15 +18,19 @@
 #include <cmath>
 
 namespace gunmuzzle {
-// A box in the vehicle's axes (x aside, y up, z forward: the rows of veh+0x60), around the vehicle's origin.
+// A box in the vehicle's axes (x aside, y up, z forward: the rows of veh+0x60), around the vehicle's origin. That origin
+// (veh+0x90) is the collision box's centre (heli_rigid_body[0]): the native state callback puts the model's root at the
+// object matrix less that centre (docs/player-jet-re.md §15.2, the 2026-10-08 correction; pylib/vcobjects.py seat_camera),
+// and a gunship's collision box is its whole model's box (vcobjects.jet_sgo: aircraft_collision.model_key), so its
+// airframe stands centred on the vehicle's origin (tools/make_jets.py muzzle_airframe, check_rigid_centre).
 struct Airframe { float centre[3],half[3]; };
 // The gunship's: the stock bomber401 model's whole box (tools/make_jets.py GUNSHIP_AIRFRAME, held to the model by its
-// build and to this by tools/selftest.py gunship_muzzle_wired).
-constexpr Airframe kGunship{{0.0f,2.136f,0.0f},{25.938f,2.009f,8.078f}};
+// build and to this by tools/selftest.py gunship_muzzle_wired) about its centre.
+constexpr Airframe kGunship{{0.0f,0.0f,0.0f},{25.938f,2.009f,8.078f}};
 // The support's AC-130 (jet_internal.h Body::c130Gunship): the model pack's C-130 model's whole box (tools/make_c130.py
-// C130_AIRFRAME, held to the model by its build and to this by tools/selftest.py gunship_muzzle_wired). 40 m across, 30 m
-// long, 11.6 m to the fin's top: it stands on its belly (the model's lowest point, its origin).
-constexpr Airframe kC130Gunship{{0.0f,5.815f,0.0f},{20.15f,5.815f,14.82f}};
+// C130_AIRFRAME, held to the model by its build and to this by tools/selftest.py support_c130_models) about its centre:
+// 40 m across, 30 m long, 11.6 m from its belly to the fin's top.
+constexpr Airframe kC130Gunship{{0.0f,0.0f,0.0f},{20.141f,5.812f,14.82f}};
 constexpr float kMargin=0.5f;      // m past a round's hit sphere
 constexpr float kCannonHit=1.6f;   // the cannon round's hit radius: make_jets.py CANNON_SIZE x CANNON_HIT
 constexpr float kGatlingHit=0.8f;  // the gatling round's: make_jets.py GATLING_SIZE x GATLING_HIT

@@ -141,22 +141,27 @@ void GeometryChecks() {
     low[13]=1.0f;
     Expect(!gunmuzzle::Muzzle(low,gunmuzzle::kGunship,ground,gunmuzzle::kCannonHit+gunmuzzle::kMargin,out),
            "near terrain: do not fire cannon from the airframe centre");
-    const float side[3]={m[12]-1000.0f,m[13]+2.136f,m[14]};   // level out of the left wingtip
+    const float side[3]={m[12]-1000.0f,m[13]+gunmuzzle::kGunship.centre[1],m[14]};   // level out of the left wingtip
     Expect(gunmuzzle::Muzzle(m,gunmuzzle::kGunship,side,1.0f,out) && std::fabs(out[0]-(m[12]-25.938f-1.0f))<1e-2f,
            "level to the side: off the wingtip",out[0],m[12]-26.938f);
     const float a[3]={m[12]-30.0f,m[13]+1.0f,m[14]},b[3]={m[12]+30.0f,m[13]+1.0f,m[14]};
     Expect(std::fabs(gunmuzzle::InsideLength(m,gunmuzzle::kGunship,a,b,0.0f)-51.876f)<1e-2f,"a line across the wings: its span inside");
-    // The support's AC-130 (kC130Gunship): its box stands on its origin; straight down 2 m under its belly, level to the
-    // side off its wingtip, a line across its wings its 40.3 m span inside.
+    // The support's AC-130 (kC130Gunship): its box centred on the vehicle's origin (the collision box's centre, as
+    // kGunship's: gunmuzzle.h Airframe); straight down 2 m under its belly, level to the side off its wingtip, a line
+    // across its wings its 40.3 m span inside.
     const gunmuzzle::Airframe& c=gunmuzzle::kC130Gunship;
-    Expect(std::fabs(c.centre[1]-c.half[1])<1e-4f,"AC-130: its box's bottom on its origin",c.centre[1]-c.half[1],0.0);
-    Expect(gunmuzzle::Muzzle(m,c,below,2.0f,out) && std::fabs(out[1]-(m[13]-2.0f))<1e-3f,"AC-130 straight down: 2 m under the belly",
-           out[1],m[13]-2.0f);
+    Expect(std::fabs(c.centre[0])+std::fabs(c.centre[1])+std::fabs(c.centre[2])<1e-6f && std::fabs(gunmuzzle::kGunship.centre[1])<1e-6f,
+           "the gunships' boxes centred on the vehicle's origin");
+    Expect(gunmuzzle::Muzzle(m,c,below,2.0f,out) && std::fabs(out[1]-(m[13]-c.half[1]-2.0f))<1e-3f,"AC-130 straight down: 2 m under the belly",
+           out[1],m[13]-c.half[1]-2.0f);
     const float cside[3]={m[12]-1000.0f,m[13]+c.centre[1],m[14]};
     Expect(gunmuzzle::Muzzle(m,c,cside,1.0f,out) && std::fabs(out[0]-(m[12]-c.half[0]-1.0f))<1e-2f,"AC-130 level to the side: off the wingtip",
            out[0],m[12]-c.half[0]-1.0f);
-    const float ca[3]={m[12]-30.0f,m[13]+5.0f,m[14]},cb[3]={m[12]+30.0f,m[13]+5.0f,m[14]};
-    Expect(std::fabs(gunmuzzle::InsideLength(m,c,ca,cb,0.0f)-40.3f)<1e-2f,"AC-130: a line across the wings its span inside");
+    // the belly 5.8 m under the vehicle's origin: an aim 4 m under it is inside the airframe
+    const float belly[3]={m[12],m[13]-4.0f,m[14]+3.0f};
+    Expect(!gunmuzzle::Muzzle(m,c,belly,1.0f,out),"AC-130: an aim in the fuselage under the origin: no muzzle");
+    const float ca[3]={m[12]-30.0f,m[13]+1.0f,m[14]},cb[3]={m[12]+30.0f,m[13]+1.0f,m[14]};
+    Expect(std::fabs(gunmuzzle::InsideLength(m,c,ca,cb,0.0f)-2.0f*c.half[0])<1e-2f,"AC-130: a line across the wings its span inside");
 }
 }  // namespace
 
