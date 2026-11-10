@@ -231,7 +231,7 @@ float ViewYScale(const void* view) noexcept {
 
 namespace {
 // Render thread only: the lens's compositor (scope_pip_gpu.h), the world views since the lens last wanted it. Any
-// thread: whether this mission's first drawn lens / a mis-sized lens view was logged.
+// thread: whether this mission's first drawn lens / a lens view that could not be held was logged.
 scopepip::LensCompositor compositor;
 unsigned idleViews=0;
 std::atomic<bool> drawnLogged{false},lensSizeLogged{false};
@@ -284,8 +284,12 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
 void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept {
     // Render thread, after the lens view's world: the lens drawn into the main view's world colour (both released).
     float h=0.0f,r=0.0f,lensYScale=0.0f;
+    const bool heldMain=compositor.HoldsMain(),heldLens=compositor.HoldsLens();
     if(!context || !compositor.Composite(context,&h,&r,&lensYScale)) {
         lensShown.store(false,std::memory_order_release);
+        // docs/scope-pip-re.md §4.5 (M): the lens view's world end is the one with view+0 == 3. Not seen: say so once.
+        if((!heldMain || !heldLens) && !lensSizeLogged.exchange(true,std::memory_order_acq_rel))
+            Log("INFANTRYSCOPE the lens command found no %s world colour held: no lens this frame",heldMain ? "lens view's" : "main view's");
         return;
     }
     // The reticle's FOV: the lens view's own projection as rendered (it may be a step behind the camera).

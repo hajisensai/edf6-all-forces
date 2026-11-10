@@ -12,8 +12,10 @@
 //    launcher's chevrons and stadiametric rangefinder; every mark sized from the live projection, as the glass is.
 // InfantryScope (EDF6VehicleCrew.ini, scope_pip.h Mode): 0 the stock zoom and crosshair; 1 the whole screen zoomed under
 // the eyepiece above; 2 (the default since 2026-11-10, testhub #32) the picture in the picture: the camera step keeps
-// the frame unmagnified, the lens round the screen's centre shows the scope's power (scope_pip_gpu.cpp at the world's
-// end), the HUD draws the scope's rim and the reticle in the lens only (docs/scope-pip-re.md).
+// the frame unmagnified, the lens round the screen's centre shows the scope's power, rendered by the engine's fourth
+// viewport at the lens's own field and resolution (scope_lens.cpp) and drawn into the main view's world colour before
+// its post stage (scope_pip_gpu.cpp), the HUD draws the scope's rim and the reticle in the lens only
+// (docs/scope-pip-re.md).
 // The cue is gathered on the game thread (map.cpp MapHumanFrame) and published whole under a lock; the crosshair hook
 // and the HUD read only that. Addresses: RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
@@ -52,8 +54,9 @@ void InfantryScopeFrame(unsigned char* human) noexcept;   // game thread, the lo
 bool InfantryScopeNow(InfantryScopeCue* out) noexcept;    // any thread: the cue, false when none is fresh
 bool InstallInfantryScope() noexcept;                     // at load: the stock crosshair's draw chained (checked)
 void ResetInfantryScope() noexcept;                       // mission start
-// InfantryScope=2, the picture in the picture (scope_pip.h, docs/scope-pip-re.md). Render thread, at the end of a world
-// view (thermal.cpp EndHook, after the native world end, before the post stage and the HUD): the lens drawn into that
-// view's colour target when it is the scoped soldier's and its camera left the frame unmagnified.
+// InfantryScope=2, the picture in the picture (scope_pip.h, docs/scope-pip-re.md §5.3). Render thread, at the end of a
+// world view (thermal.cpp EndHook, after the native world end, before the post stage and the HUD): the scoped soldier's
+// main view's world colour held, then the lens view's (viewport 3); the lens command after them (scope_lens.h
+// InfantryScopeLensCommand) draws the lens.
 void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept;
 }  // namespace crew
