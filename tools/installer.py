@@ -112,12 +112,21 @@ NEW_DEFAULTS_1108: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1108 = ('; edf6vc-defaults-2026-11-08：安装器已把仍是旧出厂值 0 的 VehicleFire4Button 改成 512（手柄 RB：'
                       '格雷普的同轴机枪；想改就改，之后安装不会再改）')
+# The picture-in-picture scope (testhub #32, 2026-11-10, docs/feedback-2026-11-10-pip-scope.md): InfantryScope went from a
+# switch (1 the whole-screen eyepiece) to a mode whose default is 2 (the lens only, src/scope_pip.h); merge_ini keeps an
+# old ini's 1, which would never show the picture in the picture the maintainer asked for.
+NEW_DEFAULTS_1110: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'InfantryScope': ('1', '2')},
+}
+DEFAULTS_MARK_1110 = ('; edf6vc-defaults-2026-11-10：安装器已把仍是旧出厂值 1 的 InfantryScope 改成 2（步兵开镜画中画：'
+                      '镜外不放大、只放大镜片里；想要整屏放大就改回 1，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
     (DEFAULTS_MARK_1017, NEW_DEFAULTS_1017),
     (DEFAULTS_MARK_1024, NEW_DEFAULTS_1024),
     (DEFAULTS_MARK_1108, NEW_DEFAULTS_1108),
+    (DEFAULTS_MARK_1110, NEW_DEFAULTS_1110),
 )
 
 

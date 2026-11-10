@@ -5943,7 +5943,8 @@ def edf41_mother_parts_default_migrates() -> None:
     assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
-                                                         installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108]
+                                                         installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
+                                                         installer.DEFAULTS_MARK_1110]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6016,6 +6017,33 @@ def fire4_pad_default_migrates() -> None:
     assert flipped == [] and 'VehicleFire4Button=8192 ; mine' in text, flipped
     planned = installer.planned_ini(done, ini)
     assert re.search(r'^VehicleFire4Button=512$', planned[0], re.M) and 'VehicleFire4Button' in planned[3]
+
+
+@test
+def infantry_scope_pip_default_migrates() -> None:
+    """InfantryScope went from a switch (1: the whole screen zoomed under the eyepiece) to a mode whose default is 2, the
+    picture in the picture (testhub #32, docs/feedback-2026-11-10-pip-scope.md): the shipped ini, the plugin's default and
+    its range agree; an old ini still at 1 is moved once by the installer's 11-10 step, a 0 the player chose is kept, a
+    later install changes nothing."""
+    import installer
+    ini, crew, plugin = src('EDF6VehicleCrew.ini'), src('src/crew.h'), src('src/plugin.cpp')
+    pip = src('src/scope_pip.h')
+    assert re.search(r'^InfantryScope=2$', ini, re.M) and 'int infantryScope=2;' in crew
+    assert 'constexpr int kModeLowest=0,kModeHighest=2,kModeDefault=2;' in pip
+    assert 'FixInt("InfantryScope"' in plugin and 'scopepip::kModeLowest,scopepip::kModeHighest' in plugin
+    assert installer.NEW_DEFAULTS_1110[installer.SECTION] == {'InfantryScope': ('1', '2')}
+    done = ''.join(f'{m}\n' for m, _ in installer.DEFAULTS_STEPS[:-1])
+    old = f'[VehicleCrew]\n{done}Enabled=1\nInfantryScope=1\n'
+    text, flipped = installer.apply_new_defaults(old)
+    assert flipped == ['InfantryScope'] and re.search(r'^InfantryScope=2$', text, re.M), flipped
+    assert text.count(installer.DEFAULTS_MARK_1110) == 1
+    again = text.replace('InfantryScope=2', 'InfantryScope=1')
+    assert installer.apply_new_defaults(again) == (again, []), "a later install undid the player's own 1"
+    mine = old.replace('InfantryScope=1', 'InfantryScope=0 ; mine')
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == [] and 'InfantryScope=0 ; mine' in text, flipped
+    planned = installer.planned_ini(old, ini)
+    assert re.search(r'^InfantryScope=2$', planned[0], re.M) and 'InfantryScope' in planned[3]
 
 
 def make_stock_stores_wanted(text: str) -> bool:
