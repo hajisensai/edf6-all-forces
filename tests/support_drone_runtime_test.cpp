@@ -68,6 +68,8 @@ bool ReadNativeObjectId(const unsigned char*,unsigned char* id) noexcept {if(id)
 bool FixBodyPart506(unsigned char*,const char*) noexcept {return true;}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {return EXCEPTION_EXECUTE_HANDLER;}
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {return true;}
+// support_firepower.cpp: every aircraft the plugin makes friendly fires on the Eros's request curve.
+bool MarkSupportFirepower(unsigned char*,supportlevel::Curve c) noexcept {return c==supportlevel::Curve::eros;}
 bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned count) noexcept {
     ++fixture::attaches;fixture::lastAttach=++fixture::serial;fixture::seenParent=parent.obj;
     if(count==1 && children)fixture::seenChild=children[0];

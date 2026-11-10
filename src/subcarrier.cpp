@@ -1273,8 +1273,7 @@ unsigned char* PrepareSupportSubmarine(const float* matrix,float afloatY) noexce
             DeleteSupportSubmarine(s->ref);return nullptr;
         }
         reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
-        LevelVehicle(v);
-        if(At<std::int32_t>(v,kTeam)!=kTeamFriend || !PrepareNpcVehicle(v,true)) {
+        if(At<std::int32_t>(v,kTeam)!=kTeamFriend || !LevelVehicle(v) || !PrepareNpcVehicle(v,true)) {
             DeleteSupportSubmarine(s->ref);return nullptr;
         }
         s->bornAt=GameMs();s->inputAt=s->bornAt;s->launched=true;s->pending=true;s->sea=true;s->floor=afloatY;

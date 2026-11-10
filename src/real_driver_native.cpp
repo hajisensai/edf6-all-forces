@@ -1,6 +1,7 @@
 #include "real_driver_native.h"
 #include "crew.h"
 #include "memory.h"
+#include "support_firepower.h"
 
 namespace crew {
 namespace {
@@ -48,7 +49,9 @@ bool ApplyMissionSetup(unsigned char* vehicle) noexcept {
         Log("Real NPC driver: mission setup release failed");
         applied=false;
     }
-    return applied;
+    // A support vehicle's firepower by level after each setup (support_firepower.h): the setup has just written the
+    // game's own, and rebuilt the weapons from it.
+    return applied && ApplySupportFirepower(vehicle);
 }
 }
 

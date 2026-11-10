@@ -587,8 +587,10 @@ void ResetLauncher() noexcept;    // launcher.cpp
 void ResetHeliSight() noexcept;   // helisight.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
-// What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
-void LevelVehicle(unsigned char* vehicle) noexcept;
+// An aircraft the plugin spawns for the player's side (jet_spawn.cpp): its durability scaled to the mission's difficulty
+// as a script's CreateFriend scales it, its firepower marked to go by the support level (support_firepower.h). False:
+// not marked; the caller deletes it.
+bool LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 bool InstallTerrainShare() noexcept;   // fieldshare.cpp
 void ResetTerrainShare() noexcept;

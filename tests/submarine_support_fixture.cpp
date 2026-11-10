@@ -109,7 +109,7 @@ PluginBody BodyOf(const void*) noexcept {return submarine_fixture::correctBody ?
 float BodyMark(const void*) noexcept {return 0.0f;}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {++submarine_fixture::bodyFixes;return submarine_fixture::fixOk;}
 bool BodyPartOk() noexcept {return true;}
-void LevelVehicle(unsigned char*) noexcept {}
+bool LevelVehicle(unsigned char*) noexcept { return true; }   // jet_spawn.cpp: levelled, its firepower marked
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {++submarine_fixture::prepareCalls;return submarine_fixture::prepareOk;}
 bool SeatNpcRider(unsigned char*,bool) noexcept {++submarine_fixture::crewRequests;return true;}
 bool IsSoldierClass(const void*) noexcept {return submarine_fixture::driverSoldier;}

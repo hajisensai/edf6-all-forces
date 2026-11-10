@@ -35,6 +35,7 @@
 #include "barrel_recoil.h"
 #include "support_variants.h"
 #include "support_aircraft.h"   // ResetSupportFollowUps
+#include "support_firepower.h"
 #include "support_points.h"
 #include "support_warning.h"
 #include "player_vehicle.h"
@@ -124,6 +125,7 @@ void MissionStart() noexcept {
     ResetUltimate();
     ResetBarrages();
     ResetSupportFollowUps();
+    ResetSupportFirepower();
     ResetSupportWarnings();
     SupportPointsReset();
     ResetSupportDispatch();

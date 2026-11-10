@@ -70,7 +70,7 @@ void TriggerStore(const Store&) noexcept { if(payloadScenario){++payloadTriggers
 Burden BurdenOf(float,const Store*,int) noexcept { if(!payloadScenario)MissingRecoveryDependency();return Burden{1.0f,0.0f}; }
 const JetMass* JetMassOf(float) noexcept { if(!ramScenario)MissingRecoveryDependency();return &ramMass; }
 bool IsStoreWeapon(const unsigned char*) noexcept { MissingRecoveryDependency();return false; }
-void LevelVehicle(unsigned char*) noexcept { MissingRecoveryDependency(); }
+bool LevelVehicle(unsigned char*) noexcept { MissingRecoveryDependency();return false; }
 void LogImpact(const char*,const void*,const float*,const float*) noexcept { if(!ramScenario)MissingRecoveryDependency(); }
 bool LastViewProj(float*) noexcept { MissingRecoveryDependency();return false; }
 bool CameraRay(float*,float*) noexcept { MissingRecoveryDependency();return false; }
