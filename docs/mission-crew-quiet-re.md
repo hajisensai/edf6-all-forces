@@ -35,11 +35,11 @@
 
 做法（`src/mission_crew_radar.h/.cpp`）：`RadarFriends` 在原版 `0x82B220` 填完之后调 `MissionCrewRadarFilter(list, team)`：对同一个集合按**同样的中序**再走一遍，节点数和行数相等时一节点对一行，把登记为「坐在自己车里」的乘员那几行删掉（后面的行前移、改 `+0x18`，不动 capacity，不写士兵、队伍和集合）；节点数和行数不等（集合在两次遍历之间变了）就整行不动。安装时核对 `0x82B220` 整段 `0xE9` 字节，不符就记一行日志、雷达照原版。
 
-隐藏集合：`mission_crew_support.cpp` 每帧 `MissionCrewQuietTick` 用和台词位同一个判据（已提交的部署、乘员活着、`+0x1548` 是本部署的活车、插件开着）算出 `aboard[i]`，把所有在车上的乘员对象指针整份发布（`MissionCrewRadarPublish`，SRW 锁）；雷达只拿集合里的对象指针和它比，不读士兵。回滚 `DestroyMissionCrewPlan` 删士兵前后都重发，任务重置清空集合。下车、死亡、车毁、插件关，下一帧发布的集合里就没有它，步兵点回来。
+隐藏集合：`mission_crew_support.cpp` 每帧 `MissionCrewQuietTick` 用和台词位同一个判据（已提交的部署、乘员活着、`+0x1548` 是本部署的活车、插件开着）算出 `aboard[i]`，把所有在车上的乘员对象指针整份发布（`MissionCrewRadarPublish`，SRW 锁）；雷达只拿集合里的对象指针和它比，不读士兵。回滚 `DestroyMissionCrewPlan` 先清 `aboard` 并重发集合、再删士兵（雷达线程不会拿已删 / 被复用的对象比较），任务重置清空集合。下车、死亡、车毁、插件关，下一帧发布的集合里就没有它，步兵点回来。
 
 联机：雷达是本机 HUD，每台机器用自己的部署登记（含对方部署在本机的副本）过滤自己的雷达；不加消息，不改房间协议。
 
-其它三行（team 4 与两处 `rdi+5`）不过滤：任务乘员只在玩家友方的 AI 载具上，画在友方一行。
+其它三行（team 4 与两处 `rdi+5`）以及敌方一组（`EnumConflictObject`）不过滤。依据（M，推断）：任务乘员只来自原版 RideAi 载具，RideAi 的乘员写死 team 2（`docs/swarm-team-re.md` §Q1），乘员队伍跟着载具走，通常画在友方一行。未覆盖的情形：任务脚本事后把这类载具改到别的队（`mission_crew_team.cpp` 会让乘员跟过去），或 PVP 里对方阵营的玩家看 team 2 的任务载具（乘员在他的敌方一组）——这两种情况下乘员仍会单独出点。
 
 `InterflowMarkDraw` 是本机 HUD 对象，联机时每台机器按自己的副本画：本地表现，无协议。
 

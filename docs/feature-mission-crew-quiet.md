@@ -27,7 +27,7 @@
 
 ## 雷达点（2026-11-10，`docs/feedback-2026-11-10-crew-radar-dot.md`）
 
-`MissionCrewQuietTick` 每帧把「坐在本部署自己的车里」的乘员（与台词位同一判据，`Deployment::aboard`）整份发布给 `src/mission_crew_radar.cpp`；原版雷达的友方一行（`pvp_native.cpp` `RadarFriends` → `0x82B220`）填完后按同一集合顺序删掉这些乘员的行，只剩载具自己的点。下车 / 死亡 / 车毁 / 插件关的下一帧就不在集合里，步兵点回来；回滚删士兵时立即重发，任务重置清空。逆向见 `docs/mission-crew-quiet-re.md` §2.1。
+`MissionCrewQuietTick` 每帧把「坐在本部署自己的车里」的乘员（与台词位同一判据，`Deployment::aboard`）整份发布给 `src/mission_crew_radar.cpp`；原版雷达的友方一行（`pvp_native.cpp` `RadarFriends` → `0x82B220`）填完后按同一集合顺序删掉这些乘员的行，只剩载具自己的点。下车 / 死亡 / 车毁 / 插件关的下一帧就不在集合里，步兵点回来；回滚时先放回、重发集合，再删士兵，任务重置清空。逆向见 `docs/mission-crew-quiet-re.md` §2.1。
 
 ## 联机
 

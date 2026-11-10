@@ -185,9 +185,11 @@ void DestroyMissionCrewPlan(std::uint64_t tx) noexcept {
     Deployment* d=Find(tx);if(!d)return;
     const ObjRef v=d->vehicle;
     QuietCrew(*d,true);   // its soldiers' talk as it was, before they go (symmetric with the aboard clear)
+    // The release cleared every aboard[i]: the radar's hidden set drops them before they are deleted, so the radar's
+    // thread never compares against an object already gone (or reused).
+    PublishRadar();
     for(unsigned i=0;i<d->count;++i)DeleteSupportSoldier(d->crew[i]);
     *d=Deployment{};
-    PublishRadar();   // the deleted soldiers are out of the radar's hidden set before their objects are reused
     if(Alive(v))RetryMissionCrew(static_cast<unsigned char*>(const_cast<void*>(v.obj)));
 }
 void MissionCrewQuietTick() noexcept {
