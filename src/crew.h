@@ -269,7 +269,7 @@ struct Config {
     float sidecarNpcRange=25.0f;    // ...from within this many metres of the bike
     bool highCam=true;              // the high camera toggle (highcam.cpp; placed by turretcam.cpp)
     int highCamClass=2;             // ...offered in: 1 indirect-fire vehicles, 2 + big ones, 3 every turret turretcam.cpp serves
-    int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
+    int highCamKey=0x4C;            // ...its key ('L' since 2026-11-10, C went to free look; a Windows virtual-key code, 0: none)
     int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     float highCamHeight=90.0f;      // ...the high eye: m over the vehicle's origin
     float highCamBack=55.0f;        // ...m behind it
@@ -277,7 +277,8 @@ struct Config {
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
-    int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
+    int freeLookKey=0x43;           // ...free look while held: the camera turns, the turret holds ('C'; 0 none). Not the
+                                    // middle button: on the drive page that is the Grape's horn (docs/keyconfig-re.md §8)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
     int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)

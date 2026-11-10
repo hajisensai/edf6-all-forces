@@ -123,8 +123,8 @@ inline constexpr Slot kSlots[]={
     {0x56,11,7,Owner::crew,L"PlayerJetChuteCutKey",0x58},
     {0x57,11,8,Owner::turret,L"AutoAimKey",0x4A},
     // page 12: every vehicle
-    {0x58,12,0,Owner::crew,L"FreeLookKey",0x04},
-    {0x59,12,1,Owner::crew,L"HighCamKey",0x43},
+    {0x58,12,0,Owner::crew,L"FreeLookKey",0x43},   // C since 2026-11-10 (kSteps; the middle button is the Grape's horn)
+    {0x59,12,1,Owner::crew,L"HighCamKey",0x4C},    // L since 2026-11-10 (C went to free look)
     {0x5A,12,2,Owner::crew,L"SightZoomKey",0x5A},
     {0x5B,12,3,Owner::crew,L"SightRangeUpKey",0x21},
     {0x5C,12,4,Owner::crew,L"SightRangeDownKey",0x22},
@@ -173,15 +173,37 @@ inline constexpr Slot kSlots[]={
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;
-// Each owner's marker: a slot of set 0 no page lists, holding kMarkerTag | the end of what the owner seeded (one past its
-// highest slot byte then). The slots are only ever added at the next byte, so the owner's slots from that end on are the
-// ones added since: those alone are seeded (MarkerEnd). Anything else in the slot (0 in a fresh store): nothing seeded.
+// Each owner's marker: a slot of set 0 no page lists, holding kMarkerTag | the default steps taken << 8 | the end of what
+// the owner seeded (one past its highest slot byte then). The slots are only ever added at the next byte, so the owner's
+// slots from that end on are the ones added since: those alone are seeded (MarkerEnd). Anything else in the slot (0 in a
+// fresh store): nothing seeded. A marker written before the steps existed has 0 there: no step taken.
 inline constexpr unsigned char kMarkerAction[2]={0xFE,0xFD};   // Owner::crew, Owner::turret
 inline constexpr std::uint32_t kMarkerTag=0x4B420000u,kMarkerTagMask=0xFFFF0000u;   // "BK" in the high half
-constexpr std::int32_t MarkerOf(int end) noexcept { return static_cast<std::int32_t>(kMarkerTag|static_cast<std::uint32_t>(end)); }
+constexpr std::int32_t MarkerOf(int end,int steps=0) noexcept {
+    return static_cast<std::int32_t>(kMarkerTag|(static_cast<std::uint32_t>(steps)&0xFFu)<<8|(static_cast<std::uint32_t>(end)&0xFFu));
+}
 constexpr int MarkerEnd(std::int32_t marker) noexcept {
     const std::uint32_t m=static_cast<std::uint32_t>(marker);
-    return (m&kMarkerTagMask)==kMarkerTag ? static_cast<int>(m&~kMarkerTagMask) : kFirstAction;
+    return (m&kMarkerTagMask)==kMarkerTag ? static_cast<int>(m&0xFFu) : kFirstAction;
+}
+constexpr int MarkerSteps(std::int32_t marker) noexcept {
+    const std::uint32_t m=static_cast<std::uint32_t>(marker);
+    return (m&kMarkerTagMask)==kMarkerTag ? static_cast<int>(m>>8&0xFFu) : 0;
+}
+
+// --- Default steps: a slot's default changed after stores were seeded. COMMON.CFG keeps what a seeded slot holds, so a
+// new default reaches a store seeded before it only through a step (the installer's ini steps, tools/installer.py
+// NEW_DEFAULTS_*, are the same for the ini). A move: the slot still holding its old default gets the new one, if no
+// other slot holds that key then (a move freeing a key lets the one waiting for it go: HighCamKey off C, then
+// FreeLookKey onto it). A key the player set is kept. A store seeded after a step (its ini has the new defaults) skips it.
+struct Move { unsigned char action; int fromVk; int toVk; };
+struct Step { const Move* moves; int count; };
+// 2026-11-10 (docs/feedback-2026-11-10-freeview-key.md): free look off the middle button, which on the drive page is the
+// stock row that sounds the Grape's horn (docs/keyconfig-re.md §8), onto C; the high view off C onto L.
+inline constexpr Move kMoves1110[]={{0x59,0x43,0x4C},{0x58,0x04,0x43}};
+inline constexpr Step kCrewSteps[]={{kMoves1110,2}};
+constexpr int StepsOf(Owner owner) noexcept {
+    return owner==Owner::crew ? static_cast<int>(sizeof(kCrewSteps)/sizeof(kCrewSteps[0])) : 0;
 }
 // EDF6VehicleCrew's export (looked up by name, common/edf/aimlink.h Resolve): true once its 「插件」 pages are in the game's
 // key config. The store's slots are the keys only then; EDF6AutoTurret without it (alone, or the pages not offered)
@@ -232,6 +254,21 @@ constexpr bool CatalogValid() noexcept {
     return true;
 }
 static_assert(CatalogValid(),"the slots' bytes, pages and rows are in order and fit the stock page lists");
+// Each step's moves: slots of the crew, from another key to the slot's default now, at most 8 to a step (ApplyStep).
+constexpr bool StepsValid() noexcept {
+    for(const Step& st:kCrewSteps) {
+        if(st.count<1 || st.count>8)return false;
+        for(int i=0;i<st.count;++i) {
+            const Slot* s=SlotOf(st.moves[i].action);
+            if(!s || s->owner!=Owner::crew || st.moves[i].fromVk==st.moves[i].toVk)return false;
+        }
+    }
+    // the last step's moves end on the defaults (an earlier step's may have been moved on by a later one)
+    const Step& last=kCrewSteps[sizeof(kCrewSteps)/sizeof(kCrewSteps[0])-1];
+    for(int i=0;i<last.count;++i)if(SlotOf(last.moves[i].action)->defaultVk!=last.moves[i].toVk)return false;
+    return true;
+}
+static_assert(StepsValid(),"the default steps move crew slots onto their defaults");
 
 // The store's slot `action` of `player`'s set `set` (store = the option object + kStore).
 inline std::int32_t* SlotPtr(unsigned char* store,int player,int set,int action) noexcept {
@@ -245,16 +282,47 @@ inline void WriteSynced(unsigned char* store,int player,int action,std::int32_t 
 }
 // Where the owner's marker says its seeding got to (kFirstAction: nothing seeded).
 inline int SeededEnd(unsigned char* store,Owner owner) noexcept { return MarkerEnd(Read(store,0,kMarkerAction[static_cast<int>(owner)])); }
-inline bool Seeded(unsigned char* store,Owner owner) noexcept { return SeededEnd(store,owner)>=OwnerEnd(owner); }
+inline int SeededSteps(unsigned char* store,Owner owner) noexcept { return MarkerSteps(Read(store,0,kMarkerAction[static_cast<int>(owner)])); }
+inline bool Seeded(unsigned char* store,Owner owner) noexcept {
+    return SeededEnd(store,owner)>=OwnerEnd(owner) && SeededSteps(store,owner)>=StepsOf(owner);
+}
+// Does a slot other than `except` hold `code` (player 0's set 0, as the plugins read them)?
+inline bool CodeHeld(unsigned char* store,std::int32_t code,int except) noexcept {
+    for(const Slot& s:kSlots)if(s.action!=except && Read(store,0,s.action)==code)return true;
+    return false;
+}
+// One step on a seeded store (player 0's, as seeded): the moves whose slot still holds the old default and whose new key
+// is free, until none is left to take. The slots moved.
+inline int ApplyStep(unsigned char* store,const Step& step) noexcept {
+    bool done[8]{};
+    int moved=0;
+    for(bool again=true;again;) {
+        again=false;
+        for(int i=0;i<step.count && i<8;++i) {
+            const Move& m=step.moves[i];
+            if(done[i] || Read(store,0,m.action)!=CodeOfVk(m.fromVk) || CodeHeld(store,CodeOfVk(m.toVk),m.action))continue;
+            WriteSynced(store,0,m.action,CodeOfVk(m.toVk));
+            done[i]=again=true;
+            ++moved;
+        }
+    }
+    return moved;
+}
 // The owner's slots its marker does not cover yet from its ini (`iniVk(slot)`: the ini's virtual key, or the slot's
 // default when the ini has none), then its marker; the slots it covers keep what they hold (the player's keys). Player
 // 0's: the keyboard is the first local player's (the menu's keyboard pages are player 0's). The slots written.
-template<class IniVk> int Seed(unsigned char* store,Owner owner,IniVk iniVk) noexcept {
-    const int from=SeededEnd(store,owner);
-    int written=0;
+// A store the owner seeded before (some of) its default steps takes those steps on the slots it keeps (`moved`: the slots
+// they moved); a store seeded now takes none (the ini has the new defaults).
+template<class IniVk> int Seed(unsigned char* store,Owner owner,IniVk iniVk,int* moved=nullptr) noexcept {
+    const int from=SeededEnd(store,owner),steps=from>kFirstAction ? SeededSteps(store,owner) : StepsOf(owner);
+    int written=0,stepped=0;
     for(const Slot& s:kSlots)
         if(s.owner==owner && s.action>=from){WriteSynced(store,0,s.action,CodeOfVk(iniVk(s)));++written;}
-    if(from<OwnerEnd(owner))*SlotPtr(store,0,0,kMarkerAction[static_cast<int>(owner)])=MarkerOf(OwnerEnd(owner));
+    if(owner==Owner::crew)
+        for(int i=steps;i<StepsOf(owner);++i)stepped+=ApplyStep(store,kCrewSteps[i]);
+    if(from<OwnerEnd(owner) || steps<StepsOf(owner))
+        *SlotPtr(store,0,0,kMarkerAction[static_cast<int>(owner)])=MarkerOf(OwnerEnd(owner),StepsOf(owner));
+    if(moved)*moved=stepped;
     return written;
 }
 // The virtual key a slot holds now for the plugins (0: unassigned, or a code they cannot read: see VkOfCode).
