@@ -252,6 +252,16 @@ Wing Diver 能量（PaleWing slot 5 `0x5808B0`，M）：当前 `+0x308`、上限
 | 第三人称镜头状态 1 是否另有随俯仰的枢轴偏移 | 原版里朝天 / 朝地时对比准星与弹着点 |
 | 163 个未解析武器 SGO 的 `fire_model_direction` | 扩展 `tmp/fp/muz.py` 的 DSGO 分支 |
 
+## 7. 验证情况
+
+- 静态：本文 H 项都由 `tools/edfre.py` 的 `dis / callers / xrefs / find_disp / vtable_of / vt_owner` 逐条读过（脚本在 `tmp/fp/`，未提交）；
+  `fire_model_direction` 统计、士兵 `game_object_camera_setting`（眼睛与注视点在瞄准系里只差 z，例如 Ranger `(-0.6,1.5,0)`/`(-0.6,1.5,-2.5)`，
+  Fencer `(-1,1.8,0)`/`(-1,1.8,-3.465)`）由 `pylib/rootcpk.py` + `sgo/dsgo` 从 Root.cpk 只读得到。
+- 本文初稿（§0–§6）时没有构建、没有改代码、没有任何实机或两机验证。
+- 2026-11-10（§2.5、§8 已实现）：射击条目三行、`0x691560` 读行、`0x696150` 的 `+0x78C` 与 Umbra 隐藏、`0x59A880` 的标记与逐把隐藏由
+  `tests/fp_render_native_audit.py` 对 Steam 版 EDF.dll 逐字节钉住；`0x696FD0` 函数体内没有对条目 `+0x50..+0x8F` 的直接写（位置的防穿拉回
+  只改栈上副本 `[rbp-0x60]`，`0x697445..0x697469`；其间的虚调用未逐个展开，M），所以入口前改、返回后还原覆盖整发。数学与生命周期是离线测试；仍没有实机或两机验证。
+
 ## 8. 原版动作（アピール）隐藏武器与第一人称（2026-11-10，测试站 #32）
 
 玩家：「第一人称时候做动作的姿势很怪 武器不会消失并且手很鬼畜」。
@@ -270,13 +280,6 @@ Wing Diver 能量（PaleWing slot 5 `0x5808B0`，M）：当前 `+0x308`、上限
   画出来就是动作动画本身从眼睛看过去的样子；武器重新显示后回到视图模型。离线 `tests/fp_ride_lifecycle_test.cpp`。
 - 未实测：动作动画在眼睛视角里是否进画面（挥手、敬礼大多在胸前以上，应可见；只在身体前下方的动作可能看不到手）；动作期间
   镜头是否需要跟头骨（现仍是身体中轴线上的视高，见 README）。
-
-## 7. 验证情况
-
-- 静态：本文 H 项都由 `tools/edfre.py` 的 `dis / callers / xrefs / find_disp / vtable_of / vt_owner` 逐条读过（脚本在 `tmp/fp/`，未提交）；
-  `fire_model_direction` 统计、士兵 `game_object_camera_setting`（眼睛与注视点在瞄准系里只差 z，例如 Ranger `(-0.6,1.5,0)`/`(-0.6,1.5,-2.5)`，
-  Fencer `(-1,1.8,0)`/`(-1,1.8,-3.465)`）由 `pylib/rootcpk.py` + `sgo/dsgo` 从 Root.cpk 只读得到。
-- 没有构建、没有改代码、没有任何实机或两机验证。
 
 ---
 
