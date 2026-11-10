@@ -1,7 +1,8 @@
 // First person on foot (firstperson.cpp; the user, 2026-10-12: "a proper first-person game's view", the stock body not
 // shown, arms and weapon as a viewmodel, the stock moves kept, online in sync). RE: docs/fp-render-re.md,
-// docs/fp-soldier-re.md. Everything here is this machine's picture: the body, its animation, the shots and the aim the
-// network carries stay the game's.
+// docs/fp-soldier-re.md. Everything here is this machine's picture: the body, its animation, where the shots leave from
+// and the aim the network carries stay the game's; only a local round's direction is turned onto the crosshair's point
+// (FirstPersonAimShot, fp_aim.h).
 #pragma once
 #include <cstdint>
 #include "cockpit_instruments.h"
