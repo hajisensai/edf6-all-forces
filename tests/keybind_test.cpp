@@ -367,8 +367,8 @@ void Store() {
         auto st=seededBefore(0x04,'C');
         *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(0x70);
         int moved=-1;
-        const int written=kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.defaultVk; },&moved);
-        Check(written>0 && moved==2 && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='L' &&
+        const int seededNow=kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.defaultVk; },&moved);
+        Check(seededNow>0 && moved==2 && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='L' &&
               kb::Seeded(st.data(),kb::Owner::crew),"the slots added since and the step, one marker");
     }
 }
