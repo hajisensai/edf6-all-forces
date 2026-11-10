@@ -8,6 +8,7 @@
 //  - A weapon's SGO: weapon +0x08 is its resource node (shared by every weapon from that file), node +0x20 its key,
 //    an MSVC std::wstring of the upper-cased path (inline under 8 characters' capacity, +0x38).
 #include "stores.h"
+#include "store_burden.h"
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -76,8 +77,9 @@ constexpr StorePrefixes MakePrefixes() noexcept {
 }
 constexpr StorePrefixes kPrefixes=MakePrefixes();
 
-// The store whose files `name` (`length` characters) is one of: its prefix, then digits, then ".SGO".
-const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
+// The store whose files `name` (`length` characters) is one of: its prefix, then digits (the rounds it is loaded with,
+// into `rounds` when asked), then ".SGO".
+const StoreSpec* SpecOf(const wchar_t* name,std::size_t length,std::int32_t* rounds=nullptr) noexcept {
     // Every store's prefix begins with the shared part: a name too short for it or without it is none of them.
     if(length<=kPrefixes.common+4 || _wcsnicmp(name,kStores[0].prefix,kPrefixes.common)!=0)return nullptr;
     for(std::size_t k=0;k<std::size(kStores);++k) {
@@ -85,8 +87,14 @@ const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
         const std::size_t p=kPrefixes.length[k];
         if(length<=p+4 || _wcsnicmp(name,s.prefix,p)!=0 || _wcsnicmp(name+length-4,L".SGO",4)!=0)continue;
         bool digits=true;
-        for(std::size_t i=p;i<length-4;++i)digits=digits && std::iswdigit(name[i]);
-        if(digits)return &s;
+        std::int32_t n=0;
+        for(std::size_t i=p;i<length-4;++i) {
+            digits=digits && std::iswdigit(name[i]);
+            if(digits && n<100000)n=n*10+static_cast<std::int32_t>(name[i]-L'0');
+        }
+        if(!digits)continue;
+        if(rounds)*rounds=n;
+        return &s;
     }
     return nullptr;
 }
@@ -280,13 +288,14 @@ int ReadStores(unsigned char* v,Store* out,int most) noexcept {
         if(!Readable(w,kWeaponLocked+8))continue;
         std::size_t length=0;
         const wchar_t* name=FileOf(w,&length);
-        const StoreSpec* spec=name ? SpecOf(name,length) : nullptr;
+        std::int32_t rounds=0;
+        const StoreSpec* spec=name ? SpecOf(name,length,&rounds) : nullptr;
         if(!spec)continue;
         const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
         const auto locked=At<std::uint64_t>(w,kWeaponLocked);
         const float range=At<float>(w,kWeaponLockRange);
         out[n++]=Store{w,spec,ammo>0 ? ammo : 0,locked<64 ? static_cast<std::int32_t>(locked) : 0,
-                       std::isfinite(range) && range>0.0f ? range : 0.0f};
+                       std::isfinite(range) && range>0.0f ? range : 0.0f,rounds};
     }
     return n;
 }
@@ -304,15 +313,19 @@ const JetWeaponRow* JetWeapon(int i) noexcept {
     return i>=0 && i<static_cast<int>(std::size(kJetWeapons)) ? &kJetWeapons[i] : nullptr;
 }
 
+Burden BurdenOver(float cleanKg,const Store* stores,int count) noexcept {
+    float kg=0.0f,drag=0.0f;
+    for(int i=0;i<count;++i) {
+        if(!stores[i].spec)continue;
+        const burden::Load l=burden::HolderLoad(*stores[i].spec,stores[i].rounds,stores[i].ammo);
+        kg+=l.kg;drag+=l.drag;
+    }
+    return burden::Ratio(cleanKg,kg,drag);
+}
+
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept {
     const JetMass* const kind=JetMassOf(mark);
-    const float clean=kind ? kind->mass : 0.0f;
-    Burden b{1.0f,0.0f};
-    if(clean<=0.0f)return b;
-    float kg=0.0f;
-    for(int i=0;i<count;++i){kg+=stores[i].spec->mass*static_cast<float>(stores[i].ammo);b.drag+=stores[i].spec->drag*static_cast<float>(stores[i].ammo);}
-    b.mass=(clean+kg)/clean;
-    return b;
+    return BurdenOver(kind ? kind->mass : 0.0f,stores,count);
 }
 
 bool InstallStores() noexcept {

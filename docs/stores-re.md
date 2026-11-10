@@ -228,3 +228,31 @@ EDF.dll TimeDateStamp 0x678CCB46，RVA。置信度：H 读代码确认，M 推�
 2. 弹从机腹下表面出生时会不会被自己的机体碰撞挡住：`docs/bullet-pass-re.md` §3.2 原版子弹不打发射者自己，按此推断不会。
 3. 停在斜坡上时机体随地形倾斜，0.2 m 的离地余量是按水平停放算的；无人机（滑橇）只有 0.32 m。
 4. `Primer` 战机（敌方 NPC，不停放）、沙扎比、潜艇母舰没有改。
+
+## 12. 重量和阻力：挂架（2026-11-10，测试站 #39）
+
+用户原话与取舍见 `docs/feedback-2026-11-10-pylon-weight.md`。纯计算，不读游戏：`src/store_burden.h`，测试 `tests/store_burden_test.cpp`。
+
+- 挂载登记（`pylib/vcobjects.py` `STORES`）除每发的 `mass` / `drag` 外，还有挂架：`per_pylon`（一个挂架装几发）、`pylon_mass`（kg）、
+  `pylon_drag`（占净机寄生阻力的份额）。`per_pylon` 为 0 表示没有挂架（机炮弹、垂发、原版载具的弹），此时挂架重量、阻力必须为 0（`Store.__post_init__` 校验）。
+  生成器 `tools/gen_stores.py` 把三项写到 `StoreSpec` 末尾（`pylonMass` / `pylonDrag` / `perPylon`），手写的 `StoreSpec`（`playerjet_board.inc` `kSpecials`、测试）不受影响。
+- 一个挂点的武器文件是 `EDF6VC_<KIND>_<rounds>.SGO`（`vcobjects.store_file`），`stores.cpp` `SpecOf` 顺带读出装填数 `rounds`（`Store::rounds`）。
+  挂架数 = `ceil(rounds / perPylon)`；挂点负荷 = 剩余弹数 × 每发 + 挂架数 × 每挂架（`burden::HolderLoad`）。剩余弹数超过文件里的装填数时按剩余弹数算挂架。
+- 机体负担：质量比 =（净重 + Σ挂点重量）/ 净重，阻力份额 = Σ挂点阻力（`burden::Ratio`；`BurdenOf` 按战机型号查净重，`BurdenOver` 给定净重，原版直升机用）。
+- 数值（真实同类挂架的量级）：
+
+  | 挂载 | 每发 kg / 阻力 | 挂架 | 每挂架 kg / 阻力 |
+  |---|---|---|---|
+  | AIM-9X | 85 / 0.004 | LAU-7 类导轨，1 发 | 35 / 0.002 |
+  | AIM-120 | 152 / 0.007 | LAU-127 导轨，1 发 | 45 / 0.003 |
+  | AIM-54 | 450 / 0.018 | LAU-93 导轨 + 托架，1 发 | 90 / 0.007 |
+  | AGM-65 | 300 / 0.014 | LAU-117 导轨，1 发 | 60 / 0.006 |
+  | AGM-114 | 50 / 0.002 | M299 发射架，4 发 | 66 / 0.008 |
+  | Mk 82 | 230 / 0.011 | 炸弹挂架，1 发 | 50 / 0.004 |
+  | Hydra 70 | 32 / 0.0002 | 19 管火箭巢 | 40 / 0.0247 |
+
+  每发阻力原来含挂架那份（例如 AIM-9X 原 0.006），拆分后「每发 + 每挂架 / 每挂架发数」等于原值，满挂时总阻力与原来一致（测试逐项核对），战机满挂的调校不动；
+  满挂多了挂架重量（攻击机 22 t 满挂多 810 kg）。火箭巢打空后阻力仍有满巢的 87%。
+- 原版直升机：净重按机种取（`kHeliMass506` 5.5 t：N9 Eros 与 602 Heron 同一个运行时类、无字段可区分；`kHeliMass409` 6.8 t；`kHeliMass410` 15 t，Brute 不挂挂载），
+  质量比怎么作用到原版飞行律见 `docs/aircraft-re.md` §2「挂载重量」。
+- 未做：战前配装菜单的「挂载重量」与 40% 上限只算弹重（`support_loadout.h` `LoadoutMassKg`），不含挂架。

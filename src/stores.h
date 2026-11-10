@@ -1,7 +1,8 @@
 // The jets' stores (src/stores.cpp, docs/stores-re.md): the missiles and bombs a jet carries besides its guns, each in
 // a holder of its own (pylib/vcobjects.py JETS: guns L / R, the stores, the fuel tank). The plugin tells them apart by
 // their weapon's SGO, picks and fires them itself (the 506 fires only holders 0-2 from its two fire bytes), and
-// weighs them: a jet with stores aboard is heavier and draggier.
+// weighs them: a jet with stores aboard is heavier and draggier, and the pylons they hang on stay when they are gone
+// (test hub #39; store_burden.h).
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +50,12 @@ struct StoreSpec {
     // turret by itself with nobody in it.
     unsigned char seat=0;
     StoreTurret turret{};
+    // What it hangs on (pylib/vcobjects.py Store.pylon_mass / pylon_drag / per_pylon): ceil(rounds / perPylon) pylons for a
+    // holder of `rounds`, each pylonMass kg and pylonDrag of the clean jet's drag, loaded or spent; perPylon 0: none. Last, so the
+    // hand-written specs (playerjet_board.inc kSpecials, the tests) keep their fields' meaning.
+    float pylonMass=0.0f;
+    float pylonDrag=0.0f;
+    unsigned perPylon=0;
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };
@@ -63,6 +70,7 @@ struct Store {
     std::int32_t ammo;
     std::int32_t locked;     // targets in its lock list (homing ones)
     float lockRange;         // m (homing ones; its SGO's LockonRange)
+    std::int32_t rounds=0;   // what its holder was loaded with (its file's EDF6VC_<KIND>_<rounds>.SGO): its pylons' count
 };
 constexpr int kMostStores=7;   // the gunship: its four pylons and its shells, cannon and gatling (playerjet_board.inc SpecialRoom)
 
@@ -71,9 +79,12 @@ int ReadStores(unsigned char* vehicle,Store* out,int most) noexcept;
 // Fires the store's weapon this frame (its trigger latch, weapon +0x139; held, again each frame).
 void TriggerStore(const Store& s) noexcept;
 // What `count` stores add to the jet of mark `mark`: its mass over its clean mass (>= 1) and its parasitic drag's
-// share over clean (>= 0). A mark without a mass: none.
+// share over clean (>= 0), their rounds left and the pylons they were loaded on (store_burden.h). A mark without a mass:
+// none.
 struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
+// The same over a clean mass of `cleanKg` (a stock helicopter's, heli.cpp HeliType::mass).
+Burden BurdenOver(float cleanKg,const Store* stores,int count) noexcept;
 // The kind of mark `mark` (pylib/vcobjects.py JET_MASSES: every jet's), or nullptr.
 const JetMass* JetMassOf(float mark) noexcept;
 // The `i`th of the NPC jets' weapon SGOs (stores.inc kJetWeapons): its jet's mark and its path (app:/weapon/...); nullptr

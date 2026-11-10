@@ -91,6 +91,9 @@ float CeilingY() noexcept { MissingDependency();return 0.0f; }
 float GameStep(ULONGLONG) noexcept { MissingDependency();return 1.0f/60.0f; }
 float ClosureIn(const float*,const float*,float,float,float,float,bool*) noexcept { MissingDependency();return 0.0f; }
 Gpws GpwsOf(float,bool) noexcept { MissingDependency();return Gpws::none; }
+// stores.cpp: the stand-in helicopters carry no stores (HeliMass: x1, their own lift and blend).
+int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
+Burden BurdenOver(float,const Store*,int) noexcept { MissingDependency();return Burden{1.0f,0.0f}; }
 }
 
 namespace {

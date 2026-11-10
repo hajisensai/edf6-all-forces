@@ -61,6 +61,8 @@
 #include "enemy_points.h"
 #include "npc_logic.h"
 #include "fp_view.h"
+#include "store_burden.h"
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <vector>
@@ -254,6 +256,8 @@ constexpr float kGunshipRadius=90.0f,kGunshipHeight=40.0f,kGunshipSpeed=10.0f;
 // Rotor radii: the 506's disc 4.76 m (docs/player-jet-re.md, its ragdoll); the 410's 20 m across (kReach410); the 409's
 // is not measured, taken a little over the 506's.
 constexpr float kRotor506=4.8f,kRotor409=5.0f,kRotor410=10.0f;
+// Its clean mass (store_burden.h kHeliMass*: what its stores weigh it against, HeliMass).
+constexpr float kMass506=burden::kHeliMass506,kMass409=burden::kHeliMass409,kMass410=burden::kHeliMass410;
 enum class Attack { strafe, rocketRun, gunship };
 enum class Guns { nose, doors };
 struct HeliType {
@@ -263,12 +267,13 @@ struct HeliType {
     float circleRadius,circleHeight,circleSpeed,turretReach;
     Guns guns;
     float rotor;
+    float mass;
 };
 const HeliType kHeliTypes[]={
-    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
-    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose,kRotor409},
-    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors,kRotor410},
-    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506},
+    {kVt506,"506",kReachOther,kGun506Range,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506,kMass506},
+    {kVt409,"409",kReachOther,0.0f,Attack::rocketRun,kTurretRadius,kTurretHeight,kTurretSpeed,kTurretReach,Guns::nose,kRotor409,kMass409},
+    {kVt410,"410",kReach410,0.0f,Attack::gunship,kGunshipRadius,kGunshipHeight,kGunshipSpeed,0.0f,Guns::doors,kRotor410,kMass410},
+    {kVtHeliBase,"base",kReachOther,0.0f,Attack::strafe,0.0f,0.0f,0.0f,0.0f,Guns::nose,kRotor506,kMass506},
 };
 const HeliType* TypeOf(const void* vehicle) noexcept {
     if(!Readable(vehicle,8))return nullptr;
@@ -2480,6 +2485,24 @@ bool IsHelicopter(const void* vehicle) noexcept { return TypeOf(vehicle)!=nullpt
 namespace {
 constexpr std::size_t kLiftPerRotor=0x1610,kLiftMass=0x161C;
 constexpr ULONGLONG kCueFreshMs=300;
+
+// ---- A stock helicopter's stores weigh it (test hub #39; store_burden.h, docs/aircraft-re.md §2「挂载重量」) ----
+// Its mass over clean: seat 0's stores (stores.cpp ReadStores: the rounds left and the pylons they were loaded on) over
+// its class's clean mass (HeliType::mass). 1 for a plugin body (jet.cpp and the others weigh their own: BurdenOf), a
+// craft that is no stock helicopter, or one without stores.
+float HeliMass(const unsigned char* v) noexcept {
+    const HeliType* const t=TypeOf(v);
+    if(!t || !(t->mass>0.0f))return 1.0f;
+    Store st[kMostStores];
+    const int n=ReadStores(const_cast<unsigned char*>(v),st,kMostStores);
+    if(n<=0 || BodyOf(v)!=PluginBody::none)return 1.0f;
+    return BurdenOver(t->mass,st,n).mass;
+}
+// Its lift per rotor speed and horizontal blend as its physics step reads them (HeliPhysicsHook weighs them for the step
+// alone: every other reader and writer of +0x1610 / +0x1630 (Tune, the assists, the cue) sees and keeps its own).
+burden::HeliFlight FlightNow(const unsigned char* v) noexcept {
+    return burden::Weighed(burden::HeliFlight{At<float>(v,kLiftPerRotor),At<float>(v,kBlend)},HeliMass(v));
+}
 SRWLOCK cueLock=SRWLOCK_INIT;
 HeliCue cue{};
 ULONGLONG cueAt=0;
@@ -2488,7 +2511,7 @@ ULONGLONG cueAt=0;
 void HeliCueStep(unsigned char* v) noexcept {
     if(!IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player)return;
     if(!(At<unsigned char>(v,kContact)&2))return;
-    const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);
+    const float lift=FlightNow(v).lift,mass=At<float>(v,kLiftMass);
     if(!(lift>1e-3f) || !(mass>0.0f) || !std::isfinite(lift+mass))return;
     AcquireSRWLockExclusive(&cueLock);
     cue=HeliCue{At<float>(v,kRotor),aim::HoverRotor(lift,mass)};
@@ -2766,6 +2789,64 @@ bool InstallPlayerAttitude() noexcept {
     return false;
 }
 
+// The stock helicopters' physics step (HelicopterBase 0x6519A0, H: the 506's slot 57 0x61B710, the 409's 0x64AF90 and the
+// 410's 0x64D870 each call it first; HelicopterBase's own slot 57 is it). It reads the lift per rotor speed +0x1610
+// (0x651F29: vy' = lerp(1, +0x1618, t) vy + rotor x +0x1610) and the blend +0x1630 (0x651E91: v' = d v + b (k stick - d v))
+// each frame and writes neither (docs/aircraft-re.md §1-2), so a craft's stores weigh it for the step alone
+// (store_burden.h Weighed): the fields hold its own again as the step returns. Prologue (15 bytes, no rip-relative
+// operand): mov rax,rsp; mov [rax+10h],rbx; mov [rax+18h],rsi; mov [rax+20h],rdi.
+constexpr std::size_t kHeliPhysics=0x6519A0,kHeliPhysicsCopied=15;
+const unsigned char kHeliPhysicsSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x48,0x89,0x78,0x20};
+using HeliPhysicsFn=void(__fastcall*)(unsigned char*);
+HeliPhysicsFn heliPhysicsNext=nullptr;
+constexpr int kWeighedSaid=8;
+std::atomic<int> weighedSaid{0};
+
+void __fastcall HeliPhysicsHook(unsigned char* v) {
+    burden::HeliFlight own{0.0f,0.0f};
+    bool weighed=false;
+    __try {
+        if(Cfg().enabled) {
+            const float mass=HeliMass(v);
+            own=burden::HeliFlight{At<float>(v,kLiftPerRotor),At<float>(v,kBlend)};
+            if(mass>1.0f && std::isfinite(mass+own.lift+own.blend)) {
+                const burden::HeliFlight use=burden::Weighed(own,mass);
+                Put<float>(v,kLiftPerRotor,use.lift);Put<float>(v,kBlend,use.blend);
+                weighed=true;
+                if(weighedSaid.fetch_add(1)<kWeighedSaid)
+                    Log("HELI v=%p its stores weigh it x%.3f: lift %.4f -> %.4f a rotor, blend %.5f -> %.5f",v,mass,own.lift,
+                        use.lift,own.blend,use.blend);
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    heliPhysicsNext(v);
+    if(weighed) {
+        __try { Put<float>(v,kLiftPerRotor,own.lift);Put<float>(v,kBlend,own.blend); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    }
+}
+
+bool InstallHeliWeight() noexcept {
+    if(heliPhysicsNext)return true;
+    if(!Matches(kHeliPhysics,kHeliPhysicsSig,sizeof(kHeliPhysicsSig)))return false;
+    unsigned char trampoline[kHeliPhysicsCopied+14];
+    std::memcpy(trampoline,kHeliPhysicsSig,kHeliPhysicsCopied);
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+kHeliPhysicsCopied,jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kHeliPhysics+kHeliPhysicsCopied);
+    std::memcpy(trampoline+kHeliPhysicsCopied+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kHeliPhysics,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[kHeliPhysicsCopied];
+    std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&HeliPhysicsHook);
+    std::memcpy(patch+6,&hook,8);
+    patch[14]=0x90;
+    heliPhysicsNext=reinterpret_cast<HeliPhysicsFn>(code);
+    if(edf::PatchCode(image+kHeliPhysics,kHeliPhysicsSig,patch,sizeof(patch)))return true;
+    heliPhysicsNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+    return false;
+}
+
 // Its record: a new one (a free slot or a stale one) starts level, at a hover, the aim on its nose.
 Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& p:pilots)if(p.ref.Is(v) && ms-p.seen<=kAssistStaleMs)return &p;
@@ -2774,15 +2855,16 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
     std::memcpy(p->aim,fwd,12);
-    const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
+    const float lift=FlightNow(v).lift,mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed (its stores' weight in it)
     p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
     return p;
 }
 
-// The heli's own top speed now (its params as PlayerAssist leaves them: b k / (1 - d (1 - b))), else kTopSpeed.
+// The heli's own top speed now (its params as PlayerAssist leaves them, the blend as its stores weigh it: b k / (1 - d (1 - b))),
+// else kTopSpeed.
 float PlayerTop(const unsigned char* v) noexcept {
-    const float k=At<float>(v,kSpeedGain),b=At<float>(v,kBlend),d=At<float>(v,kDamp),denom=1.0f-d*(1.0f-b);
+    const float k=At<float>(v,kSpeedGain),b=FlightNow(v).blend,d=At<float>(v,kDamp),denom=1.0f-d*(1.0f-b);
     const float top=denom>1e-6f ? b*k/denom : 0.0f;
     return std::isfinite(top) && top>1.0f ? top : kTopSpeed;
 }
@@ -2835,7 +2917,7 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     // 3. The collective. Space spins up the rotor on the ground; W/S never add lift.
     if(!grounded) {
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
-        const aim::Rotor rotor{At<float>(v,kLiftPerRotor),At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),
+        const aim::Rotor rotor{FlightNow(v).lift,At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),
                                At<float>(v,kRotorDown)};
         Put<float>(v,kInThrottle,aim::CollectiveThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,rotor));
     } else if(vert>0.0f)Put<float>(v,kInThrottle,1.0f);
@@ -2877,7 +2959,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     }
     for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
     if(grounded) {
-        const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
+        const float lift=FlightNow(v).lift,mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
         if(lift>1e-3f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=aim::HoverRotor(lift,mass);}
     }
     PlayerJetSymbols& y=r.sym;
@@ -4020,6 +4102,8 @@ bool CheckHeliProfile() noexcept {
         profileOk=true;medicOn=true;
         Log("HELI medic healing permission=%d (410 local/replayed shots heal friends)",InstallMedicPermission());
         Log("HELI player attitude=%d (mouse pitch separated from forward speed)",InstallPlayerAttitude());
+        Log("HELI stores weigh=%d (a stock helicopter's stores and pylons scale its lift and blend in its physics step)",
+            InstallHeliWeight());
         // Called helis that left are deleted (HeliReap) with the game's Delete, as jet.cpp deletes its jets.
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
         if(!deleteOk)Log("HELI delete: profile mismatch (called helis that leave fly on away instead of being deleted)");
