@@ -2487,10 +2487,11 @@ constexpr ULONGLONG kCueFreshMs=300;
 // craft that is no stock helicopter, or one without stores.
 float HeliMass(const unsigned char* v) noexcept {
     const HeliType* const t=TypeOf(v);
-    if(!t || !(t->mass>0.0f) || BodyOf(v)!=PluginBody::none)return 1.0f;
+    if(!t || !(t->mass>0.0f))return 1.0f;
     Store st[kMostStores];
     const int n=ReadStores(const_cast<unsigned char*>(v),st,kMostStores);
-    return n>0 ? BurdenOver(t->mass,st,n).mass : 1.0f;
+    if(n<=0 || BodyOf(v)!=PluginBody::none)return 1.0f;
+    return BurdenOver(t->mass,st,n).mass;
 }
 // Its lift per rotor speed and horizontal blend as its physics step reads them (HeliPhysicsHook weighs them for the step
 // alone: every other reader and writer of +0x1610 / +0x1630 (Tune, the assists, the cue) sees and keeps its own).

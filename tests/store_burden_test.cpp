@@ -96,8 +96,9 @@ void Jets() {
 }
 
 // The game's flight law for a stock heli (docs/aircraft-re.md §2), per frame: the horizontal velocity v' = d v + b (k s - d v);
-// the vertical vy' = lerp(1, vdamp, t) vy + rotor L - g/60, t the rotor's way from idle to the hover crossover
-// (M g / (60 L), hover rotor), g/60 what the 506's measured hover (aim::kHoverRotor at aim::kHoverLift) holds.
+// the vertical vy' = lerp(1, vdamp, t) vy + rotor L - g/60 (m/s; Havok's gravity a frame), t the rotor's way from idle to
+// the hover crossover (M g / (60 L), hover rotor), g/60 what the 506's measured hover (aim::kHoverRotor at aim::kHoverLift)
+// holds. climb: vy after 5 s at full rotor, m/s.
 struct Flight { float top,reach5s,climb5s,hover; };
 Flight Fly(burden::HeliFlight f) {
     constexpr float d=0.999f,k=80.0f,vdamp=0.95f,idle=0.2f,gFrame=aim::kHoverRotor*aim::kHoverLift;
@@ -109,7 +110,7 @@ Flight Fly(burden::HeliFlight f) {
         const float t=vec::Clamp((1.0f-idle)/(hover-idle),0.0f,1.0f);
         vy=(1.0f+(vdamp-1.0f)*t)*vy+1.0f*f.lift-gFrame;
     }
-    return Flight{f.blend*k/(1.0f-d*(1.0f-f.blend)),reach,vy*60.0f,hover};
+    return Flight{f.blend*k/(1.0f-d*(1.0f-f.blend)),reach,vy,hover};
 }
 
 void Helis() {
@@ -130,6 +131,8 @@ void Helis() {
     Check(Near(loaded.hover,clean.hover*m,1e-4f) && loaded.hover<1.0f,"loaded: it needs more rotor to hover, and can");
     Check(Near(aim::HoverRotor(burden::Weighed(own,m).lift,1.0f),loaded.hover,1e-3f),"the plugin's hover reads the weighed lift");
     Check(loaded.climb5s<pylons.climb5s && pylons.climb5s<clean.climb5s && loaded.climb5s>1.0f,"climb: loaded < pylons < clean, still climbs");
+    // The steady climb (L - g/60) / (1 - vdamp): what 5 s at full rotor reaches.
+    Check(Near(clean.climb5s,(own.lift-aim::kHoverRotor*aim::kHoverLift)/0.05f,0.05f),"clean: its steady climb, m/s");
     Check(loaded.reach5s<pylons.reach5s && pylons.reach5s<clean.reach5s,"acceleration: loaded < pylons < clean");
     Check(loaded.top<pylons.top && pylons.top<clean.top && loaded.top>0.7f*clean.top,"top speed: a little lower loaded");
     std::printf("506 + stores x%.3f (spent x%.3f): hover %.3f -> %.3f, climb %.1f -> %.1f m/s, 5 s %.1f -> %.1f m/s, top %.1f -> %.1f m/s\n",
