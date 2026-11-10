@@ -115,10 +115,13 @@ def _host(game):  # noqa: ANN001, ANN202 - rootcpk.Game -> (Mdb, mdb.Mesh)
     return md, mesh
 
 
-def _textures(folder: str, model: str, material: str) -> tuple[dict[str, bytes], dict[str, str]]:
+def _textures(folder: str, model: str, material: str, made: bool = True) -> tuple[dict[str, bytes], dict[str, str]]:
     """({archive file: DDS}, {slot: file}) of one material: its colour, normal map, roughness / metal (B 255: no
-    occlusion)."""
+    occlusion). Not `made`: the files named, empty (a model only measured: jet_models._model_of)."""
     stem = f'edf6vc_c130_{model}_{material.lower()}'
+    if not made:
+        names = [f'{stem}_df.dds', f'{stem}_nm.dds', f'{stem}_rm.dds']
+        return dict.fromkeys(names, b''), dict(zip(BODY_SLOTS, names))
     rml = texfile.load_image(os.path.join(folder, f'{material}_rml.png'))
     px = bytearray(rml.rgba)
     px[2::4] = b'\xff' * (len(px) // 4)
@@ -129,8 +132,9 @@ def _textures(folder: str, model: str, material: str) -> tuple[dict[str, bytes],
     return files, dict(zip(BODY_SLOTS, files))
 
 
-def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noqa: ANN001 - rootcpk.Game
-    """(model, its textures {file: DDS}, info)."""
+def build_model(game, folder: str, model: str, textures: bool = True) -> tuple[Mdb, dict[str, bytes], dict]:  # noqa: ANN001
+    """(model, its textures {file: DDS}, info): `game` a rootcpk.Game. Without `textures` the textures are named, not made
+    (empty): the model alone, as jet_models measures it."""
     import numpy as np
     import procmesh
     manifest = read_manifest(folder)
@@ -161,7 +165,7 @@ def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], d
     tex: dict[str, bytes] = {}
     meshes = []
     for material in entry['materials']:
-        files, slots = _textures(folder, model, material)
+        files, slots = _textures(folder, model, material, textures)
         tex.update(files)
         md, mi = om.add_material(md, host_md, BODY_HOST[2], f'c130_{material.lower()}', slots)
         group = [(p, b) for p, b in pieces if p.material == material]

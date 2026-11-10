@@ -24,8 +24,8 @@
 // Not boardable: the enemy's jets (BodyRow::hostile: the enemy fighter, the Primer fighter: the stock seat check
 // lets nobody into the other side's vehicle, and a jet the enemy flies is no ride for the player) and the helis
 // (stock helicopters, flown by the stock heli code already).
-// No row of its own: the paratroop plane (Body::transportPlane, transport.cpp) is the bomber401 strike jet with passenger
-// seats, the same mark and model, so BoardRowOf finds it as bomber401 and the player flies it as that row.
+// The paratroop plane (Body::transportPlane, transport.cpp) is the model pack's C-130 under a mark of its own, a row of its
+// own (it was the bomber401 strike jet with passenger seats, found by BoardRowOf as bomber401, until 2026-11-10).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
 #include "jet_internal.h"
@@ -75,6 +75,7 @@ constexpr const char* kBomberCatch="a stock bomber a strike jet took over (no SG
 constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a wing's flight): the player fighter";
 constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own): the player fighter";
 constexpr const char* kXmCatch="an X-Morph jet (its twin is the model pack's, not always there): the player fighter";
+constexpr const char* kC130Catch="a support C-130 (no twin of its own): the player strike jet";
 constexpr const char* kSupportCatch="a support call's aircraft (its kind in a Dreadnought model, no twin of its own): a player jet";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
@@ -161,6 +162,10 @@ inline constexpr Boardable kBoardable[]={
     {Body::supFighter,Airframe::wing,Arm::none,Wing("supFighter",MarkOf(Body::supFighter),Npc(jet::Role::fighter),14.0f),kCatchPlayerFighter,kSupportCatch},
     {Body::supInterceptor,Airframe::wing,Arm::none,Wing("supInterceptor",MarkOf(Body::supInterceptor),Npc(jet::Role::interceptor),15.0f),kCatchPlayerFighter,kSupportCatch},
     {Body::supMultirole,Airframe::wing,Arm::none,Wing("supMultirole",MarkOf(Body::supMultirole),Npc(jet::Role::multirole),15.0f),kCatchPlayerFighter,kSupportCatch},
+    // The support's C-130s (jet_internal.h Body::transportPlane, Body::c130Gunship: 40 m across, 30 m long): the paratroop
+    // plane flown as the strike jet, the AC-130 flown and crewed as the gunship.
+    {Body::transportPlane,Airframe::wing,Arm::none,Wing("transportPlane",MarkOf(Body::transportPlane),Npc(jet::Role::strike),20.0f),kCatchPlayerStrike,kC130Catch},
+    {Body::c130Gunship,Airframe::wing,Arm::shells,Wing("c130Gunship",MarkOf(Body::c130Gunship),Npc(jet::Role::gunship),20.0f),kCatchPlayerStrike,kC130Catch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

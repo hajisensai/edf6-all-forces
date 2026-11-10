@@ -13,8 +13,8 @@ Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, whi
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.SGO: the plugin's other aircraft
 (interceptor, fighter, multirole, gunship, drone, the three air carriers) parked empty, which EDF6VC_CALL_FLY_* bring.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model, its own copy EDF6VC_GUNSHIP.MRAB, with the
-gunship's own mark and a gunner seat), the transports (EDF6VC_JET_TRANSPORT / EDF6VC_HELI_TRANSPORT.SGO in their own copies
-of the stock models, EDF6VC_TRANSPORT_PLANE / EDF6VC_HELI_TRANSPORT.MRAB, which carry their seats' cockpits), the
+gunship's own mark and a gunner seat), the transport helicopter (EDF6VC_HELI_TRANSPORT.SGO in its own copy of the stock
+model, EDF6VC_HELI_TRANSPORT.MRAB, which carries its seats' cockpits; the paratroop plane is tools/make_c130.py's), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash or a ground vehicle's ram sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64 / _02 / _04 / _12.SGO, and the gunship's
 side guns' rounds (src/jet_bay.cpp GunShot): the long-range cannon's EDF6VC_GUNSHIP_CANNON.SGO and the 25 mm
@@ -235,28 +235,27 @@ MEDIC_GUN_AMMO = 240.0
 MEDIC_GUN_NAMES = {'ja': 'メディックガン', 'en': 'Medic Gun', 'cn': '救護機砲', 'kr': '메딕 건', 'sc': '救护机炮'}
 # The transports (the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"; src/transport.cpp, docs/feature-2026-10-09-transport.md):
 # no stock helicopter or plane carries a squad (the 410 Brute: a pilot and two door gunners, the bomber: its pilot), so
-# these are the call-in Brute (EDF6VC_HELI_410, script-placeable) and the bomber401 strike jet with passenger seats added
-# the way the gunship's gunner seat is (with_gunner_seat): rows copied from a seat the model already has (its locators:
-# the models have no others), the 410 door gunner's pose and key row, every class (mask 15), no weapon on them.
+# these are the call-in Brute (EDF6VC_HELI_410, script-placeable) and the model pack's C-130 (tools/make_c130.py) with
+# passenger seats added the way the gunship's gunner seat is (with_gunner_seat): rows copied from a seat the model already
+# has (its locators: the models have no others), the 410 door gunner's pose and key row, every class (mask 15), no weapon
+# on them.
 #  - TRANSPORT_HELI_FILE: 2 door gunners + TRANSPORT_HELI_EXTRA passengers = 12 riders (a 12-soldier platoon in one).
-#  - TRANSPORT_PLANE_FILE: TRANSPORT_PLANE_PASSENGERS behind the pilot; the plugin flies it as a strike jet (its mark) that
-#    attacks nothing (jet.cpp JetFerry) and drops them by parachute over the point.
+#  - the paratroop plane (tools/make_c130.py TRANSPORT_SGO): TRANSPORT_PLANE_PASSENGERS behind the pilot; the plugin flies
+#    it as a strike jet (its kind) that attacks nothing (jet.cpp JetFerry) and drops them by parachute over the point.
 TRANSPORT_HELI_FILE = 'EDF6VC_HELI_TRANSPORT.SGO'
 TRANSPORT_HELI_EXTRA = 10
-TRANSPORT_PLANE_FILE = 'EDF6VC_JET_TRANSPORT.SGO'
 TRANSPORT_PLANE_PASSENGERS = 12
 # The gunship's and the transports' own models, so their seats' first-person cockpits are grafted into them
 # (cockpits.graft_files at the end of build; pylib/cockpit_fits_plugin.py fits them by these files' stems): the stock
 # models they flew, under names of their own (with_model points their SGOs at them; the stock bomber401 the airstrikes
 # take over and the stock 410 the call-ins bring keep theirs):
-#  - the gunship's (vc.GUNSHIP_MODEL_FILE) and the transport plane's (TRANSPORT_PLANE_MODEL_FILE): jet_models.STOCK_COPIES,
-#    the stock bomber401's geometry as it is (skinned, its nozzle bones on: check_stock_copy), so their boxes, collision
-#    asset, muzzle box (GUNSHIP_AIRFRAME), seats and doors stay the stock model's;
+#  - the gunship's (vc.GUNSHIP_MODEL_FILE): jet_models.STOCK_COPIES, the stock bomber401's geometry as it is (skinned, its
+#    nozzle bones on: check_stock_copy), so its box, collision asset, muzzle box (GUNSHIP_AIRFRAME), seats and doors stay
+#    the stock model's;
 #  - the transport helicopter's (TRANSPORT_HELI_MODEL_FILE): the stock 410's archive byte for byte (heli_transport_model:
 #    the model the 410's cockpit fits were measured on, cockpit_fits.DIGESTS), its bones, locators and animation the 410's.
 #    (It was the stock 410's model, which the installer points at the 410's cockpit model: three seats' cockpits, none for
 #    the passengers.)
-TRANSPORT_PLANE_MODEL_FILE = 'EDF6VC_TRANSPORT_PLANE.MRAB'
 TRANSPORT_HELI_MODEL_FILE = 'EDF6VC_HELI_TRANSPORT.MRAB'
 TRANSPORT_HELI_STOCK = 'VEHICLE410_HELI'   # the stock model's stem (its archive and model member)
 BOMBER401_MODEL = BOMBERS['EDF6VC_BOMBER401.SGO'][0]
@@ -276,8 +275,7 @@ def build(root: str) -> dict[str, bytes]:
     for name, data in vc.portal_lasers(game).items():
         out[f'OBJECT/{name}'] = data
     out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
-    for name in (vc.GUNSHIP_MODEL_FILE, TRANSPORT_PLANE_MODEL_FILE):   # the stock bomber401 under their own names
-        out[f'OBJECT/{name}'] = jet_models.stock_copy(game, name)
+    out[f'OBJECT/{vc.GUNSHIP_MODEL_FILE}'] = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)   # the stock bomber401, its own name
     out[f'OBJECT/{TRANSPORT_HELI_MODEL_FILE}'] = heli_transport_model(game)
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
@@ -315,19 +313,14 @@ def build(root: str) -> dict[str, bytes]:
     heli = with_model(heli, ('app:/object/' + TRANSPORT_HELI_MODEL_FILE.lower(), model_ref(heli)[1]))
     check_passenger_seats(heli, 3 + TRANSPORT_HELI_EXTRA, TRANSPORT_HELI_FILE, 3)
     out[f'OBJECT/{TRANSPORT_HELI_FILE}'] = heli
-    plane = with_passenger_seats(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS,
-                                 game.read('OBJECT', GUNNER_STOCK))
-    plane = with_model(plane, ('app:/object/' + TRANSPORT_PLANE_MODEL_FILE.lower(), BOMBER401_MODEL[1]))
-    check_passenger_seats(plane, 1 + TRANSPORT_PLANE_PASSENGERS, TRANSPORT_PLANE_FILE, 1)
-    out[f'OBJECT/{TRANSPORT_PLANE_FILE}'] = plane
-    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
+    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_HELI_FILE):
         check_own_model(out, name)
     check_weapon_bones(out, game)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     # (pylib/model_lod.py)
     out = model_lod.finish(cockpits.graft_files(game, out))
     # what is written is held to the same contract as what was authored
-    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
+    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_HELI_FILE):
         check_own_model(out, name)
     check_weapon_bones(out, game)
     return out
@@ -380,8 +373,8 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, TRANSPORT_PLANE_FILE, MODEL_FILE, *MODEL_FILES,
-               vc.GUNSHIP_MODEL_FILE, TRANSPORT_PLANE_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE,
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, MODEL_FILE, *MODEL_FILES,
+               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
@@ -539,8 +532,9 @@ def check_passenger_seats(data: bytes, total: int, name: str, stock_seats: int) 
             raise ValueError(f'{name}: 有武器挂在乘客座上（{w!r}）')
 
 
-def check_gunner_seat(data: bytes, name: str = GUNSHIP_FILE) -> None:
-    """Re-read the gunship SGO and raise GunnerSeatError unless: its mark is GUNSHIP_MARK; it has exactly two seats;
+def check_gunner_seat(data: bytes, name: str = GUNSHIP_FILE, mark: float = GUNSHIP_MARK) -> None:
+    """Re-read the gunship SGO and raise GunnerSeatError unless: its mark is `mark` (GUNSHIP_MARK; the support's AC-130's
+    vcobjects.C130_GUNSHIP_MARK, tools/make_c130.py); it has exactly two seats;
     seat 0 is the pilot's (PILOT_KEYS); the gunner seat has the pilot's three locators, GUNNER_POSE, a class mask every
     class passes (15) and GUNNER_KEYS; no weapon sits on the gunner seat (every vehicle_weapon_setting on seat 0 or -1),
     one setting a weapon of mission_setup."""
@@ -552,7 +546,7 @@ def check_gunner_seat(data: bytes, name: str = GUNSHIP_FILE) -> None:
 
     _, m = sgo.read(data)
     setup = m.get('mission_setup')
-    need(isinstance(setup, list) and _number(setup[1][0]) == GUNSHIP_MARK, 'mission_setup 的标记不是炮舰机的')
+    need(isinstance(setup, list) and _number(setup[1][0]) == mark, 'mission_setup 的标记不是炮舰机的')
     seats = m.get('vehicle_riding_position')
     need(isinstance(seats, list) and len(seats) == GUNNER_SEAT + 1, f'应有 {GUNNER_SEAT + 1} 个座位')
     pilot, gunner = seats[0], seats[GUNNER_SEAT]

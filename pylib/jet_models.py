@@ -9,7 +9,7 @@ name inside the archive, CMPL-compressed like pylib/mdb_jet.py does); every othe
   EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    skinned (jet_gear.skin_rigid), landing gear, x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
   EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`, `body` levelled
-  EDF6VC_GUNSHIP.MRAB, EDF6VC_TRANSPORT_PLANE.MRAB  BOMBER401.MRAB  bomber401.mdb  x 1, skinned, nozzle bones (STOCK_COPIES:
+  EDF6VC_GUNSHIP.MRAB      BOMBER401.MRAB         bomber401.mdb    x 1, skinned, nozzle bones (STOCK_COPIES:
                            the stock geometry, for their cockpits)
 
 The fixed-wing models carry retractable landing gear (pylib/jet_gear.py, Recipe.gear): three legs grafted from a stock
@@ -490,6 +490,9 @@ HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'
 SAZABI_FILE = 'EDF6VC_SAZABI.MRAB'   # pylib/sazabi_model.py OUT_ARC   # the stock heli every jet SGO is made from
 # The Dreadnought's ships (pylib/dreadnought_model.py FILES, archive -> model): made from the user's model folder too.
 DN_FILES = {f'EDF6VC_DN_{m.upper()}.MRAB': m for m in ('dreadnought', 'fighter', 'defender', 'bomber', 'interceptor')}
+# The C-130s (pylib/c130_model.py FILES, archive -> model: the support gunship and the paratroop plane): made from the
+# model pack's folder too.
+C130_FILES = {f'EDF6VC_C130_{m.upper()}.MRAB': m for m in ('gunship', 'transport')}
 # The X-Morph jets' (pylib/xm_air_model.py, archive -> unit key): made from the model pack's folders too.
 XM_FILES = {f'EDF6VC_{u.key.upper()}.MRAB': u.key for u in xm_units.ported('jet')}
 
@@ -529,6 +532,12 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
         if folder is None:
             raise FileNotFoundError(f'no {dreadnought_model.MODEL_SUBDIR} model folder')
         return dreadnought_model.build_model(game, folder, DN_FILES[file])[0]
+    if file in C130_FILES:   # made from the model pack's folder (pylib/c130_model.py)
+        import c130_model
+        folder = c130_model.model_dir()
+        if folder is None:
+            raise FileNotFoundError(f'no {c130_model.MODEL_SUBDIR} model folder')
+        return c130_model.build_model(game, folder, C130_FILES[file], textures=False)[0]
     if file in XM_FILES:     # made from the model pack's folder (pylib/xm_air_model.py, its holders pylib/xm_jet.py's)
         import obj_model
         import xm_air_model
@@ -582,8 +591,8 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
 # boxes are in the lifted frame.
 STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bomber401.mdb'),
                                              'bomber501_2': ('BOMBER501.MRAB', 'bomber501_2.mdb')}
-# The gunship's and the transport plane's own models (tools/make_jets.py: vcobjects.GUNSHIP_MODEL_FILE,
-# make_jets.TRANSPORT_PLANE_MODEL_FILE): the stock bomber401 they fly, its geometry as it is (no scale, no grounding, no
+# The requested gunship's own model (tools/make_jets.py: vcobjects.GUNSHIP_MODEL_FILE; the support's gunship and the
+# paratroop plane fly the model pack's C-130s, C130_FILES): the stock bomber401 it flies, its geometry as it is (no scale, no grounding, no
 # gear: their boxes, their collision asset (aircraft_collision's 'bomber401'), the gunship's muzzle box (make_jets
 # GUNSHIP_AIRFRAME) and their flight stay the stock model's), under names of their own so their seats' cockpits can be
 # grafted into them (cockpits.graft_files, pylib/cockpit_fits_plugin.py) while the stock bomber the airstrikes take over
@@ -592,7 +601,7 @@ STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bo
 # nozzles as bones of its own (with_nozzles, measured as tools/gen_nozzles.py measures the stock: src/nozzles_gen.h knows
 # the stock bomber401 by its bone count, 2, which the skinning and the cockpits' marker bones change, so without bones of
 # its own it would fly without its flames; src/exhaust_nozzles.h FindNozzles takes a model's own bones first).
-STOCK_COPIES: dict[str, str] = {'EDF6VC_GUNSHIP.MRAB': 'bomber401', 'EDF6VC_TRANSPORT_PLANE.MRAB': 'bomber401'}
+STOCK_COPIES: dict[str, str] = {'EDF6VC_GUNSHIP.MRAB': 'bomber401'}
 
 
 def stock_copy_model(src: Mdb, key: str, hps: list[jet_hardpoints.Hardpoint] | None = None) -> Mdb:

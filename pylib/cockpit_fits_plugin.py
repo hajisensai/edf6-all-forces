@@ -7,8 +7,8 @@ the bones; the room round each eye measured on the generated model as tools/cock
 one, quoted per row as metres left, right, up, down, ahead, back), and checked with
 `tools/cockpit_preview.py <STEM> --generator <tool>` (the seat's view, the vehicle from outside).
 
-The gunship's, the transport plane's and the transport helicopter's models are the stock ones they fly, under names of
-their own (tools/make_jets.py): EDF6VC_GUNSHIP / EDF6VC_TRANSPORT_PLANE the stock BOMBER401's geometry as it is, its mesh
+The requested gunship's and the transport helicopter's models are the stock ones they fly, under names of
+their own (tools/make_jets.py): EDF6VC_GUNSHIP the stock BOMBER401's geometry as it is, its mesh
 skinned (pylib/jet_models.py STOCK_COPIES: the stock is rigid, and a cockpit measures its room against skinned meshes),
 EDF6VC_HELI_TRANSPORT the stock VEHICLE410_HELI archive byte for byte (its digest the 410's: make_jets
 heli_transport_model).
@@ -56,16 +56,13 @@ def _seated(bone: str, spots: list[tuple[Vec3, float]], seats: range, kit: str) 
                  for n, (seat, (eye, yaw)) in enumerate(zip(seats, spots)))
 
 
-# The stock BOMBER401 (the gunship's and the transport plane's hull, jet_models.STOCK_COPIES: its own frame, the belly
-# 0.127 m over the origin): the flight deck in the cockpit bump, the pilot in the left seat (room 4.16, 5.16, 0.64, 2.67,
-# 2.87, 4.35: the hull is a hall; under the bump's low roof the deck is scaled down); the hold behind and under it, the
-# first passenger on the right-hand troop seats looking across (yaw 90). The hull's section there is a wide flat hall
-# open into the wings, round in its corners: the box round that eye that the hull closes (every face point enclosed,
-# seen along the axes and the diagonals; a 0.1 m grid) is 1.35 m aft, 2 m forward, 1.5 m up, 1.0 m down, 2.2 m across
-# and 0.4 m behind him; the hold at HOLD_SCALE fits it (its roof 1.33 m up, its floor 0.95 m down, its far wall 1.98 m
-# across), cut 1 m forward of him (the deck's floor is over the hold beyond).
+# The stock BOMBER401 (the requested gunship's hull, jet_models.STOCK_COPIES: its own frame, the belly 0.127 m over the
+# origin): the flight deck in the cockpit bump, the pilot in the left seat (room 4.16, 5.16, 0.64, 2.67, 2.87, 4.35: the
+# hull is a hall; under the bump's low roof the deck is scaled down). (Its hold carried the paratroop plane's passengers
+# until that plane became the model pack's C-130, 2026-11-10.)
 _B401_DECK = (0.5, 3.03, 4.0)
-_B401_HOLD = (-1.0, 1.7, 2.6)
+_C130_DECK = (0.6, 3.0, 10.0)
+_C130_HOLD = (-0.9, 2.2, 3.0)
 # The 410's cabin (the transport helicopter's): the first passenger in the forward-facing row right of the middle, the
 # box the hull closes round him 0.98 m left, 0.68 right, 0.73 up, 0.83 down, 1.98 ahead, 0.83 behind (its cabin doors
 # stand open behind that); the UH-60M's cabin at CABIN_SCALE fits it (its walls 0.92 / 0.63 m out, its floor 0.73 m
@@ -179,9 +176,18 @@ FITS: dict[str, tuple[Fit, ...]] = {
         Fit(0, 'bomber401', _B401_DECK, 'plane_deck_gun'),
         Fit(1, 'bomber401', (2.6, 1.73, 1.0), 'remote_display', 90.0),
     ),
-    # The transport plane's pilot and its twelve passengers in the hold (the far run 1.75 m across).
-    'EDF6VC_TRANSPORT_PLANE': (Fit(0, 'bomber401', _B401_DECK, 'plane_deck'),) + _hold('bomber401', _B401_HOLD,
-                                                                                       range(1, 13)),
+    # The support's AC-130 and C-130 (pylib/c130_model.py: the model pack's, FlightGear's C-130 stood on its belly, centred;
+    # +x its left, the nose +z 14.8). Read off the model's hull (2026-11-10): the windscreen's glass z 12.2-13.6, y 2.2-4.0;
+    # the hold's skin x -2.05 .. 2.05, y 0.0 .. 4.7. The pilot in the left seat (room 1.38, 2.58, 1.57, 2.62, 3.1 left,
+    # right, up, down, ahead: an eye nearer the windscreen showed the deck's panel through the nose); the gunner on the left
+    # flank between the 25 mm gatlings (z 6.6-8.2) and the 40 mm (z -2.2 .. -1.8), facing out (yaw 90) on the gun camera's
+    # monitor; the passengers on the hold's right-hand troop seats looking across (room 3.31 left, 1.51 right, 2.34 up,
+    # 1.85 down). Their look in the game is to be confirmed (docs/feature-support-jet-models.md §6).
+    'EDF6VC_C130_GUNSHIP': (
+        Fit(0, 'c130_hull', _C130_DECK, 'plane_deck_gun'),
+        Fit(1, 'c130_hull', (1.5, 2.4, 3.0), 'remote_display', 90.0),
+    ),
+    'EDF6VC_C130_TRANSPORT': (Fit(0, 'c130_hull', _C130_DECK, 'plane_deck'),) + _hold('c130_hull', _C130_HOLD, range(1, 13)),
     # The transport helicopter (410 with ten passengers): the stock 410's pilot and pod guns (pylib/cockpit_fits_air.py
     # VEHICLE410_HELI, the same model) and its cabin's passengers in the UH-60M's troop seats.
     'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _heli_cabin('body', _410_CABIN, range(3, 13)),

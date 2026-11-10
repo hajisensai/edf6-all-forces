@@ -37,6 +37,8 @@ FILES = {None: 'EDF6VC_AIRFRAME_BOMBER.SHKT',
 # The Dreadnought's ships (pylib/dreadnought_model.py): made from the user's model folder, so tools/make_dreadnought.py
 # writes these (assets_of), not tools/make_jets.py (assets: FILES).
 DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES}
+# The model pack's C-130s (pylib/c130_model.py): tools/make_c130.py writes these the same way.
+C130_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.C130_FILES}
 # The 500 m dreadnought's own grid (tools/make_dreadnought.py, tools/prep_dreadnought.py: its markers stand on and clear
 # these cells): a cell is its column's highest point, and at 24 x 32 (9.5 by 15.6 m) 39.5% of its hull's area had its
 # collision more than 1.5 m over the drawn deck (3.1 m on average, 57 m at the worst, by a 96 x 128 grid of the
@@ -53,12 +55,12 @@ def grid_of(key) -> tuple[int, int]:
 
 def file_of(key) -> str:
     """The airframe file of a model_key."""
-    return FILES[key] if key in FILES else DN_FILES[key]
+    return FILES[key] if key in FILES else DN_FILES[key] if key in DN_FILES else C130_FILES[key]
 
 
 def model_key(jet, model):
     """Supported rendered model, or False for aircraft built elsewhere (Primer/sub)."""
-    if jet.file in jet_models.MODELS or jet.file in DN_FILES:
+    if jet.file in jet_models.MODELS or jet.file in DN_FILES or jet.file in C130_FILES:
         return jet.file
     if jet.box_model in jet_models.STOCK_BOMBERS:
         return jet.box_model

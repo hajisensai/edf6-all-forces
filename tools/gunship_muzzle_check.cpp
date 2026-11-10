@@ -146,6 +146,17 @@ void GeometryChecks() {
            "level to the side: off the wingtip",out[0],m[12]-26.938f);
     const float a[3]={m[12]-30.0f,m[13]+1.0f,m[14]},b[3]={m[12]+30.0f,m[13]+1.0f,m[14]};
     Expect(std::fabs(gunmuzzle::InsideLength(m,gunmuzzle::kGunship,a,b,0.0f)-51.876f)<1e-2f,"a line across the wings: its span inside");
+    // The support's AC-130 (kC130Gunship): its box stands on its origin; straight down 2 m under its belly, level to the
+    // side off its wingtip, a line across its wings its 40.3 m span inside.
+    const gunmuzzle::Airframe& c=gunmuzzle::kC130Gunship;
+    Expect(std::fabs(c.centre[1]-c.half[1])<1e-4f,"AC-130: its box's bottom on its origin",c.centre[1]-c.half[1],0.0);
+    Expect(gunmuzzle::Muzzle(m,c,below,2.0f,out) && std::fabs(out[1]-(m[13]-2.0f))<1e-3f,"AC-130 straight down: 2 m under the belly",
+           out[1],m[13]-2.0f);
+    const float cside[3]={m[12]-1000.0f,m[13]+c.centre[1],m[14]};
+    Expect(gunmuzzle::Muzzle(m,c,cside,1.0f,out) && std::fabs(out[0]-(m[12]-c.half[0]-1.0f))<1e-2f,"AC-130 level to the side: off the wingtip",
+           out[0],m[12]-c.half[0]-1.0f);
+    const float ca[3]={m[12]-30.0f,m[13]+5.0f,m[14]},cb[3]={m[12]+30.0f,m[13]+5.0f,m[14]};
+    Expect(std::fabs(gunmuzzle::InsideLength(m,c,ca,cb,0.0f)-40.3f)<1e-2f,"AC-130: a line across the wings its span inside");
 }
 }  // namespace
 

@@ -22,6 +22,10 @@ struct Airframe { float centre[3],half[3]; };
 // The gunship's: the stock bomber401 model's whole box (tools/make_jets.py GUNSHIP_AIRFRAME, held to the model by its
 // build and to this by tools/selftest.py gunship_muzzle_wired).
 constexpr Airframe kGunship{{0.0f,2.136f,0.0f},{25.938f,2.009f,8.078f}};
+// The support's AC-130 (jet_internal.h Body::c130Gunship): the model pack's C-130 model's whole box (tools/make_c130.py
+// C130_AIRFRAME, held to the model by its build and to this by tools/selftest.py gunship_muzzle_wired). 40 m across, 30 m
+// long, 11.6 m to the fin's top: it stands on its belly (the model's lowest point, its origin).
+constexpr Airframe kC130Gunship{{0.0f,5.815f,0.0f},{20.15f,5.815f,14.82f}};
 constexpr float kMargin=0.5f;      // m past a round's hit sphere
 constexpr float kCannonHit=1.6f;   // the cannon round's hit radius: make_jets.py CANNON_SIZE x CANNON_HIT
 constexpr float kGatlingHit=0.8f;  // the gatling round's: make_jets.py GATLING_SIZE x GATLING_HIT

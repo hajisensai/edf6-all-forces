@@ -811,6 +811,11 @@ JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0
 # ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
 # kVehicleBodies payloadKg)
 JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
+# ...and the support's C-130s (C130_JETS): the AC-130 the gunship's (C130_GUNSHIP_MARK), the paratroop plane the same
+# airframe's (C130_TRANSPORT_MARK)
+C130_GUNSHIP_MARK = 7065.0
+C130_TRANSPORT_MARK = 7066.0
+JET_MASSES[C130_GUNSHIP_MARK] = JET_MASSES[C130_TRANSPORT_MARK] = JET_MASSES[7011.0]
 # ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
 JET_MASSES.update({u.air['mark']: u.air['mass'] for u in xm_units.ported('jet')})
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
@@ -869,7 +874,8 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # submarine carrier keep the 506's seat.
 BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
                              7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet')),
-                             *(mark for _n, mark, *_r in SUPPORT_JETS.values())})
+                             *(mark for _n, mark, *_r in SUPPORT_JETS.values()), C130_GUNSHIP_MARK,
+                             C130_TRANSPORT_MARK})
 
 
 @dataclass(frozen=True)
@@ -1295,6 +1301,23 @@ GUNSHIP_MODEL_FILE = 'EDF6VC_GUNSHIP.MRAB'
 GUNSHIP_MODEL = ('app:/object/' + GUNSHIP_MODEL_FILE.lower(), 'bomber401.mdb')
 JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=GUNSHIP_MODEL,
                             body='bomber401', box_model='bomber401')
+# The support's gunship and paratroop plane in the model pack's C-130s (pylib/c130_model.py, FlightGear's C-130 Hercules;
+# the maintainer, 2026-11-10: 「没有模型来源的支援机型 直接去网站上拿呗」, docs/feature-support-jet-models.md §6): the AC-130
+# (src/jet_internal.h Body::c130Gunship, C130_GUNSHIP_MARK: a mark of its own, so the plugin fires its rounds off this
+# airframe's box, src/gunmuzzle.h kC130Gunship, and not the bomber401 requested twin's) and the C-130 (Body::transportPlane,
+# C130_TRANSPORT_MARK: flown as a strike jet, its kind, but boarded as itself, not as the strike jet whose mark it had while
+# it was the bomber401). Each the arms and durability of what it replaces (the gunship's, the strike jet's); built by
+# tools/make_c130.py with the model pack's c130 folder, or not at all (that support is then not deployed).
+# name -> (archive, model)
+C130_JETS: dict[str, tuple[str, str]] = {'edf6tr_c130_gunship': ('EDF6VC_C130_GUNSHIP.MRAB', 'edf6vc_c130_gunship.mdb'),
+                                         'edf6tr_c130_transport': ('EDF6VC_C130_TRANSPORT.MRAB', 'edf6vc_c130_transport.mdb')}
+C130_GUNSHIP_JET, C130_TRANSPORT_JET = C130_JETS
+JETS[C130_GUNSHIP_JET] = Jet(C130_GUNSHIP_MARK, JETS[GUNSHIP_JET].durability, JETS[GUNSHIP_JET].weapons,
+                             ('app:/object/' + C130_JETS[C130_GUNSHIP_JET][0].lower(), C130_JETS[C130_GUNSHIP_JET][1]),
+                             C130_JETS[C130_GUNSHIP_JET][0], 'body', 'body')
+JETS[C130_TRANSPORT_JET] = Jet(C130_TRANSPORT_MARK, JETS['edf6tr_jet_strike_mission'].durability, JETS['edf6tr_jet_strike_mission'].weapons,
+                               ('app:/object/' + C130_JETS[C130_TRANSPORT_JET][0].lower(), C130_JETS[C130_TRANSPORT_JET][1]),
+                               C130_JETS[C130_TRANSPORT_JET][0], 'body', 'body')
 # The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
 # 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
 # bring, each one's requested twin (parked: the whole plane's box, every class; requested: vehicle_setup). Left out on
@@ -1893,7 +1916,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
         raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
-    if airframe in aircraft_collision.DN_FILES:
+    if airframe in aircraft_collision.DN_FILES or airframe in aircraft_collision.C130_FILES:
         # Its body is its ragdoll's mesh compound (src/body506.cpp MakeAirframe), told by this member: the game keeps
         # no shape userData of a compact SHKT (aircraft_collision.MAGIC read 0 at shape +0x28 in every vehicle, range
         # 2026-10-21: the Dreadnought flew as its whole box, its deck 12 m over its hull).

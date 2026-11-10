@@ -190,7 +190,7 @@ bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mo
 // The transports (transport.h; the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"): four entries after the
 // ground ones (so every older index, ini key and wire value stands): a squad / a platoon flown in by a transport
 // helicopter (EDF6VC_HELI_TRANSPORT: it lands short of the point, they get off, it stays theirs: transport.cpp), and one
-// dropped by a transport plane's stick over the point (EDF6VC_JET_TRANSPORT; the plane leaves). One aircraft each: the
+// dropped by a transport plane's stick over the point (EDF6VC_C130_TRANSPORT; the plane leaves). One aircraft each: the
 // helicopter seats twelve, the plane twelve (a platoon); the plan is the hull, its pilot and the soldiers aboard.
 constexpr int kTransportEntries=4;
 int TransportStart() noexcept {return GroundStart()+kSupportVehicleCount*2;}
@@ -604,7 +604,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             return PlanResult::refused;
         }
         if(!SupportAircraftReady(spec)) {
-            Refuse(catalog,plane ? "EDF6VC_JET_TRANSPORT.SGO not installed / preloaded" : "EDF6VC_HELI_TRANSPORT.SGO not installed / preloaded",
+            Refuse(catalog,plane ? "EDF6VC_C130_TRANSPORT.SGO not installed / preloaded" : "EDF6VC_HELI_TRANSPORT.SGO not installed / preloaded",
                    L"运输机资源未安装：请用安装器重新安装");
             return PlanResult::refused;
         }

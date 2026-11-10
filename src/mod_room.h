@@ -26,8 +26,10 @@ namespace crew {
 //      and the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
 //      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
 //      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
+//   9 (2026-11-10): the support's gunship and paratroop plane fly the model pack's C-130s (jet_internal.h Body::c130Gunship,
+//      mark 7065; Body::transportPlane, now mark 7066): an older build would make the bomber401 ones under other marks.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=8;
+constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {
