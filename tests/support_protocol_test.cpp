@@ -274,6 +274,13 @@ void Arms() {
      Check(!Encode(m,bytes,sizeof(bytes)),"a star over 10 never leaves");
      m.arms=RequesterArms{};
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && !out.arms.kind[0] && !out.arms.kind[13],"no arms: all none");}
+    // 2026-11-10: the X-Morph infantry (the last kind) carries the Ranger's assault rifles: the rifle's arms are its own.
+    {Message m;m.kind=Kind::request;m.epoch=3;m.request=5;m.catalog=5;m.arms=arms;
+     m.arms.kind[static_cast<int>(crew::SupportWeapon::xmInfantry)]=arms.kind[0];
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) &&
+           out.arms.kind[static_cast<int>(crew::SupportWeapon::xmInfantry)]==arms.kind[0],"an X-Morph infantry's rifle round-trips");
+     m.arms.kind[static_cast<int>(crew::SupportWeapon::xmInfantry)]=arms.kind[5];
+     Check(!Encode(m,bytes,sizeof(bytes)),"an X-Morph infantry with a lance never leaves");}
     {Message m;m.kind=Kind::unit;m.epoch=22;m.transaction=1;m.index=3;m.unit.resourceId=crew::kSupportRangerResource;
      m.unit.matrix[0]=m.unit.matrix[5]=m.unit.matrix[10]=m.unit.matrix[15]=1;Derive(0x40000007,m.unit.netId);m.unit.arms=arms.kind[0];
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.arms==arms.kind[0] && out.request==0,
@@ -395,6 +402,23 @@ void Existing() {
         Check(n->last.units[1].netId[12]==5 && n->last.units[1].role==1,"new real crew gets derived identity and vehicle reference");
     }
     r.With(0);Check(!r.nodes[0]->session->SubmitPrepared(p,r.now),"same registered vehicle cannot receive duplicate crew transaction");
+}
+// 2026-11-10 (docs/feature-npc-weapon-tier.md 2.4): a mission crew's plan carries the host's player's weapon on each
+// soldier (no request, no requester's arms: the host builds it); every peer makes the same and loads it before READY.
+void ExistingArms() {
+    const RequesterArms arms=SomeArms();
+    Room r(3);Plan p;p.catalogId=kMissionCrewCatalog;p.count=3;
+    for(unsigned i=0;i<3;++i)p.units[i].matrix[0]=p.units[i].matrix[5]=p.units[i].matrix[10]=p.units[i].matrix[15]=1;
+    p.units[0].resourceId=kExistingVehicle;p.units[0].netId[0]=67;p.units[0].netId[12]=1;
+    p.units[1].resourceId=crew::kSupportLeaderResource;p.units[1].role=1;p.units[1].arms=arms.kind[0];
+    p.units[2].resourceId=crew::kSupportRangerResource;p.units[2].role=1;p.units[2].arms=arms.kind[0];
+    r.With(0);Check(r.nodes[0]->session->SubmitPrepared(p,r.now)==1,"the host submits an armed mission crew");r.Settle();
+    for(const auto& n:r.nodes)
+        Check(n->spawns==1 && n->last.units[1].arms==arms.kind[0] && n->last.units[2].arms==arms.kind[0] && !n->last.units[0].arms,
+              "every peer makes the crew with the host's weapons, kept as planned (no requester's arms over them)");
+    Check(r.nodes[1]->prepares>=1 && r.nodes[2]->prepares>=1,"each peer asked whether the crew's weapons are loaded");
+    Plan bad=p;bad.units[0].netId[0]=68;bad.units[1].arms=arms.kind[5];
+    r.With(0);Check(!r.nodes[0]->session->SubmitPrepared(bad,r.now),"a crew soldier with another kind's weapon is refused");
 }
 void RequestOutcomes() {
     Room r(3);r.nodes[0]->refusePlan=true;Check(r.Submit(),"client request queued before host environment refusal");
@@ -1146,4 +1170,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Arms();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Arms();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ExistingArms();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

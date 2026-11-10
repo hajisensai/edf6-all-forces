@@ -1697,6 +1697,14 @@ bool RescueHere(const float* target) noexcept {
     // again. Refused: Refuse wrote why (rescueNote).
     if(planned==support_net::PlanResult::pending)RescueNote(hudtext::Tr(hudtext::Tx::rescueAreaPending));
     if(planned!=support_net::PlanResult::ready)return false;
+    // Its crew carries the swimmer's weapons, one tier below (the maintainer, 2026-11-10: 海上救援机组 "改成拿玩家武器";
+    // docs/feature-npc-weapon-tier.md 2.4). Their kind is this player's own, queued with the mission's preload
+    // (PreloadNpcArms): ready at once. Not loaded yet: heli.cpp asks again after its retry wait, the load going on.
+    GiveLocalArms(&plan);
+    if(const auto loaded=NpcArmsLoaded(plan);loaded!=support_net::PlanResult::ready) {
+        RescueNote(loaded==support_net::PlanResult::pending ? L"救援机组的武器正在载入，稍后自动重试" : L"救援机组的武器无法载入");
+        return false;
+    }
     if(!SpawnDeployment(nextOffline++,plan,false,false)){RescueNote(L"救援直升机、真实机组或席位分配失败");return false;}
     return true;
 }
@@ -1837,11 +1845,7 @@ void SupportDispatchTick() noexcept {
             if(result==support_net::PlanResult::ready) {
                 // This player's soldier weapons, as a request carries them online (support_net.cpp SubmitSupportRequest,
                 // support_protocol.cpp): each soldier the one of its kind.
-                support_net::RequesterArms arms{};LocalRequesterArms(&arms);
-                for(unsigned i=0;i<plan.count && i<support_net::kMaxUnits;++i) {
-                    auto& unit=plan.units[i];
-                    unit.arms=IsSupportSoldierResource(unit.resourceId) ? arms.kind[static_cast<int>(SupportSoldierWeapon(unit.resourceId))] : 0;
-                }
+                GiveLocalArms(&plan);
                 offlinePlanned=true;
             }
         }

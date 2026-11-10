@@ -1,4 +1,5 @@
 #include "../src/mission_crew_support.cpp"
+#include "../src/npc_tier.h"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
@@ -32,12 +33,18 @@ std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) n
 const wchar_t* SupportSoldierLookPath(std::uint32_t,std::uint64_t variant,bool,wchar_t*,std::size_t) noexcept {
     return variant && (variant&kVariantApplied) && lookHere ? kLookPath : nullptr;
 }
+// npc_arms.h / support_soldier.h: the building machine's player's weapons (localArms), their loads (armsLoad), the
+// weapon hooks (armsReady); the weapon each soldier was made with (weapons[]).
+bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResult armsLoad=support_net::PlanResult::ready;
+int armsAsked=0;std::uint64_t weapons[15]{};
+bool SupportSoldierArmsReady() noexcept {return armsReady;}
+void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 bool ApplySupportSoldierResource(const float*,std::uint32_t resource,const unsigned char*,bool local,ObjRef* out,const wchar_t* look,
                                  std::uint64_t weapon) noexcept {
-    if(weapon)return false;   // the mission crew is the stock templates (docs/feature-npc-weapon-tier.md)
     if(failAt && spawned+1==failAt)return false;
     if(local)return false;   // the mission crew is never a local-only soldier (as ApplySupportSoldierSpawn was)
-    looks[spawned]=look;resources[spawned]=resource;
+    looks[spawned]=look;resources[spawned]=resource;weapons[spawned]=weapon;
     Put<void*>(people[spawned],kSelfCtrl,pctrl[spawned]);Put<int>(pctrl[spawned],8,1);
     *out=ObjRef::Of(people[spawned++]);return true;
 }
@@ -52,6 +59,7 @@ namespace {
 int checks=0;
 void Check(bool b,const char* what){++checks;if(!b){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
 void Reset(){using namespace crew;ResetMissionCrewSupport();teamReady=true;spawned=deleted=boards=releases=retries=failAt=0;sessionFlag=false;ready=true;active=true;unholds=0;
+ armsReady=true;localArms={};armsLoad=support_net::PlanResult::ready;armsAsked=0;std::memset(weapons,0,sizeof(weapons));
  std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(people,0,sizeof(people));
  Put<void*>(vehicle,kSelfCtrl,vctrl);Put<int>(vctrl,8,1);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,2);
  for(unsigned i=0;i<2;++i){Put<unsigned>(seats+i*edf::kSeatStride,0x30,1);Put<unsigned>(seats+i*edf::kSeatStride,0x34,1);}
@@ -169,6 +177,37 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
   // Not yet committed (a host's network transaction still pending): nothing is a mission crew yet.
   Reset();sessionFlag=true;Request(vehicle,false);
   Check(!MissionCrewRiding(vehicle,people[0]),"an uncommitted deployment quiets no one");
+ }
+ // The crew's player weapons (2026-11-10, the maintainer: 任务乘员 "改成拿玩家武器"; docs/feature-npc-weapon-tier.md 2.4):
+ // the building machine's player's rifle-kind pick (offline this one, online the host), carried by the plan.
+ {
+  npctier::Arms pick;pick.on=true;pick.id=9;for(auto& st:pick.stars)st=3;   // a rifle row (Minion Buster Burst)
+  const std::uint64_t rifle=npctier::PackArms(pick);
+  Check(npctier::UnpackArms(rifle,SupportWeapon::rifle,nullptr),"the fixture's pick is a rifle-kind weapon");
+  Reset();localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;
+  Check(Build(vehicle,&p) && p.units[1].arms==rifle && p.units[2].arms==rifle && !p.units[0].arms,
+        "each crew seat (leader and member: the rifle templates) carries the builder's rifle pick; the vehicle none");
+  Check(Request(vehicle,false) && spawned==2 && weapons[0]==rifle && weapons[1]==rifle && armsAsked==1,
+        "offline: the crew made with that weapon once it is loaded");
+  Reset();localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;armsLoad=support_net::PlanResult::pending;
+  Check(!Request(vehicle,false) && spawned==0 && releases==0,"its weapon still loading: nothing made, the old riders kept (asked again)");
+  armsLoad=support_net::PlanResult::refused;
+  Check(!Request(vehicle,false) && spawned==0,"its weapon cannot be loaded: nothing made, never the stock crew instead");
+  armsLoad=support_net::PlanResult::ready;
+  Check(Request(vehicle,false) && spawned==2 && weapons[0]==rifle,"loaded: made with it");
+  Reset();sessionFlag=true;localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;armsLoad=support_net::PlanResult::pending;
+  const auto before2=submitted;
+  Check(!Request(vehicle,false) && submitted==before2,"host: no transaction before its own weapon is loaded");
+  armsLoad=support_net::PlanResult::ready;
+  Check(Request(vehicle,false) && submitted==before2+1,"host: submitted once loaded");
+  Reset();sessionFlag=true;localArms.kind[static_cast<int>(SupportWeapon::rifle)]=rifle;Build(vehicle,&p);
+  Check(ValidateMissionCrewPlan(p),"a peer with the weapon hooks accepts an armed crew plan");
+  Check(ApplyMissionCrewPlan(31,p,true) && weapons[0]==rifle && weapons[1]==rifle,"a peer makes the host's weapons, not its own");
+  armsReady=false;
+  Check(!ValidateMissionCrewPlan(p),"a peer without the weapon hooks refuses an armed crew plan (never stock)");
+  armsReady=true;
+  Reset();Check(Build(vehicle,&p) && !p.units[1].arms && !p.units[2].arms,"no pick (weapon hooks not in on the builder): stock crew");
+  Check(Request(vehicle,false) && spawned==2 && !weapons[0] && !weapons[1],"...made as the stock templates");
  }
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew_support: %d checks passed\n",checks);
 }
