@@ -71,6 +71,9 @@ def render() -> str:
     lines.append('// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.')
     lines.append(f'inline constexpr float kDetailNorth={_f(worldmap.DETAIL_NORTH)},kDetailSouth={_f(worldmap.DETAIL_SOUTH)},'
                  f'kDetailWest={_f(worldmap.DETAIL_WEST)},kDetailEast={_f(worldmap.DETAIL_EAST)};')
+    lines.append('// The base map textures (model pack folder worldmap_tex, installed by tools/worldmap_pack.py).')
+    lines.append(f'inline constexpr const wchar_t* kWorldTexture={_w(worldmap.app_path(worldmap.TEXTURES["world"]))};')
+    lines.append(f'inline constexpr const wchar_t* kJapanTexture={_w(worldmap.app_path(worldmap.TEXTURES["japan"]))};')
     return '\n'.join(lines) + '\n'
 
 

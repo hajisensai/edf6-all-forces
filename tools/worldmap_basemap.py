@@ -8,13 +8,24 @@
                                                         bluemarble_japan.png   pylib/worldmap.py DETAIL_* (20 x 20 deg,
                                                                                every place inside) cut from tile D1 at
                                                                                240 px / deg, 4096 x 4096
+  python -B tools/worldmap_basemap.py textures [DIR] [OUT]
+                                                      the game textures from the two derived PNGs into the model pack
+                                                      folder OUT (default DIR/../worldmap_tex, pylib/worldmap.py
+                                                      TEXTURE_DIR): only what the release ships, never the sources
+                                                        EDF6VC_WORLDMAP_WORLD.DDS / _JAPAN.DDS   DXT1, full mip chain
+                                                        worldmap_tex.json   TEXTURE_VERSION, each file's SHA-256 / size
+                                                        SOURCE.txt          where from, the credit
 
 Sources: the whole world at 5400 x 2700 (15 px / degree: Japan would be ~300 px wide) and the 500 m tile D1
 (90-180 E, 0-90 N, 21600 x 21600) for the zoomed-in view.
 Licence: NASA imagery is not copyrighted (NASA Media Usage Guidelines; Visible Earth: free to use, credit NASA Earth
 Observatory). It could be committed; it is not, by the maintainer's rule for large assets (2026-11-10).
-The game textures (DDS inside a RAB the plugin loads) are made from the derived PNGs once the drawing path is fixed
-(plan §5); that converter is not written yet.
+The game textures (`textures`): loose DDS files under Mods/UI, as the loadout menu's EDF6VC_WHITE.DDS (tools/room_layout.py)
+that the plugin already binds through Skin_Texture; DXT1 (BC1) with the legacy 124-byte header and a full mip chain to
+1 x 1, the layout of Root.cpk's own UI/LOCALENV_TRAIN_FINE_MENUMODEL.DDS (512 x 512, DXT1, 10 levels). The stock
+loading pictures are BC7 (DX10 header); no BC7 encoder is in this project, and DXT1 at 4096 is the plan's choice (§2).
+They are built once by the developer and shipped whole: the installer only checks their hashes and copies them
+(tools/worldmap_pack.py), it encodes nothing.
 """
 from __future__ import annotations
 
@@ -126,12 +137,77 @@ def derive(folder: str) -> list[str]:
     return out
 
 
+# ------------------------------------------------------------------------------------------ game textures
+
+TEXTURE_VERSION = 1    # raise when the textures' bytes change for the same sources (tools/worldmap_pack.py checks it)
+TEXTURE_SOURCES = {'world': WORLD_OUT, 'japan': JAPAN_OUT}   # pylib/worldmap.py TEXTURES kind -> derived PNG
+TEXTURE_SIZES = {'world': WORLD_SIZE, 'japan': JAPAN_SIZE}
+PAGE_URL = 'https://visibleearth.nasa.gov/collection/1484/blue-marble'
+
+
+def texture_dds(image: 'object') -> bytes:
+    """A PIL image as the DXT1 DDS the game reads (texfile_accel.dxt1_dds: range-fit blocks, a 2x2 box-filtered mip
+    chain to 1 x 1, the legacy header); alpha dropped."""
+    import texfile
+    import texfile_accel
+    rgba = image.convert('RGBA')
+    return texfile_accel.dxt1_dds(texfile.Image(rgba.width, rgba.height, bytearray(rgba.tobytes())))
+
+
+def texture_source_text() -> str:
+    lines = ['World map base textures for EDF6 All Forces (tools/worldmap_basemap.py textures).', '',
+             f'Credit: {CREDIT}', f'Collection page: {PAGE_URL}', 'Author: Reto Stockli, NASA Goddard Space Flight Center',
+             '(NASA Earth Observatory). No Sketchfab uid: not a Sketchfab model.', '', 'Sources:']
+    for src in SOURCES:
+        lines.append(f'  {BASE_URL}{src.remote}')
+        lines.append(f'    sha256 {src.sha256}')
+    lines += ['', 'Files:']
+    for kind, rel in worldmap.TEXTURES.items():
+        w, h = TEXTURE_SIZES[kind]
+        lines.append(f'  {rel.rsplit("/", 1)[1]}  {w} x {h} DXT1 + mips, from {TEXTURE_SOURCES[kind]} '
+                     f'(equirectangular; installed as Mods/{rel})')
+    return '\n'.join(lines) + '\n'
+
+
+def textures(folder: str, out: str | None = None) -> list[str]:
+    """The release folder (pylib/worldmap.py TEXTURE_DIR) from `folder`'s derived PNGs (run `derive` first)."""
+    import json
+    from PIL import Image
+    out = out or os.path.join(os.path.dirname(os.path.abspath(folder)), worldmap.TEXTURE_DIR)
+    os.makedirs(out, exist_ok=True)
+    files = {}
+    written = []
+    for kind, rel in worldmap.TEXTURES.items():
+        path = os.path.join(folder, TEXTURE_SOURCES[kind])
+        with Image.open(path) as im:
+            if im.size != TEXTURE_SIZES[kind]:
+                raise SystemExit(f'{path}: {im.size}, expected {TEXTURE_SIZES[kind]} (run derive)')
+            data = texture_dds(im)
+        name = rel.rsplit('/', 1)[1]
+        with open(os.path.join(out, name), 'wb') as f:
+            f.write(data)
+        files[name] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
+        written.append(os.path.join(out, name))
+    with open(os.path.join(out, 'SOURCE.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(texture_source_text())
+    written.append(os.path.join(out, 'SOURCE.txt'))
+    with open(os.path.join(out, worldmap.TEXTURE_INDEX), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump({'version': TEXTURE_VERSION, 'files': files}, f, indent=1, sort_keys=True)
+        f.write('\n')
+    written.append(os.path.join(out, worldmap.TEXTURE_INDEX))
+    return written
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] not in ('fetch', 'derive'):
+    if len(argv) < 2 or argv[1] not in ('fetch', 'derive', 'textures'):
         print(__doc__)
         return 2
     folder = argv[2] if len(argv) > 2 else DEFAULT_DIR
-    for path in fetch(folder) if argv[1] == 'fetch' else derive(folder):
+    if argv[1] == 'textures':
+        paths = textures(folder, argv[3] if len(argv) > 3 else None)
+    else:
+        paths = fetch(folder) if argv[1] == 'fetch' else derive(folder)
+    for path in paths:
         print(path)
     return 0
 
