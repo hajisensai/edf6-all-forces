@@ -57,7 +57,7 @@
 每台机器按计划自己造支援机（`PrepareSupportAircraft`）。旧版会造 bomber 外形、标记 7001–7004 的机体，新版造 7061–7064：房间协议从 7 升到 8
 （`src/mod_room.h`），旧版不能进新版房间。
 
-## 6. 炮舰机、伞兵运输机换成 C-130；空中航母仍缺模型（2026-11-10）
+## 6. 炮舰机、伞兵运输机换成 C-130；空中航母换成 Helicarrier（2026-11-10）
 
 维护者原话（`docs/feedback-2026-11-10-support-plane-models.md`）：「没有模型来源的支援机型 直接去网站上拿呗，不用管授权」。
 
@@ -65,7 +65,7 @@
 |---|---|---|
 | 炮舰机 gunship（`EDF6VC_CALL_GUNSHIP[_F]`、引导打击 `EDF6VC_CALL_SORTIE_GUIDED`） | **AC-130**：新机体 `Body::c130Gunship`，标记 **7065**，`EDF6VC_C130_GUNSHIP.SGO` | 模型包 `c130/gunship.obj` |
 | 伞兵运输机 transportPlane | **C-130**：`Body::transportPlane` 改用 `EDF6VC_C130_TRANSPORT.SGO`，标记由 7001 改为 **7066** | 模型包 `c130/transport.obj` |
-| 空中航母 carrier / 自爆 / 人偶无人机母舰 | 不变：V508 运输机 × 1.6 | **没找到**，见 6.4 |
+| 空中航母 carrier / 自爆 / 人偶无人机母舰 | **Helicarrier**：新机体 `Body::supCarrier` / `supBlastCarrier` / `supDollCarrier`，标记 **7067 / 7068 / 7069**，`EDF6VC_HELICARRIER[_BLAST\|_DOLL].SGO` | 模型包 `helicarrier/helicarrier.obj`，见 6.4 |
 
 ### 6.1 来源
 
@@ -108,17 +108,38 @@
 - 质量：两者都按 AC-130 的 70 t（`JET_MASSES`，同 7011）；挂载同各自原来的（`stores.inc` 已重新生成）。
 - 联机：每台机器按计划各自造支援机，旧版会造 bomber401 外形、标记 7011 / 7001 的，新版造 7065 / 7066：房间协议 8 → **9**。
 
-### 6.4 空中航母：没找到可下载的模型（待办）
+### 6.4 空中航母：Sketchfab 的 Helicarrier
 
-- 需要：大型旋翼 / 推力矢量空中母舰，60–80 m，机腹能放无人机；插件还依赖现模型的 4 个可倾转推进器骨骼（`boosterF_l` 等，
-  `aircraft_collision.NACELLES`、`src/nacelle_reach.h`）、着陆架舱作最低点、无人机停靠位置。
-- 2026-11-10 搜过：Poly Pizza（airship / carrier：只有低多边形飞艇、民用船）、Sketchfab（科幻飞行航母为付费模型）、cgtrader（"flying aircraft
-  carrier" 付费；免费区 "futuristic aircraft carrier" 要登录下载，且看不出是飞行母舰）。没有不登录就能直接下载、外形合适的。
-- 待办：维护者若能提供（或允许用账号下载）一个模型，按 C-130 的流程做 `prep_<x>.py` / `<x>_model.py`，并另做推进器骨骼与无人机停靠点的映射；
-  在那之前空中航母保持原版 V508 × 1.6。
+- 来源：Sketchfab「Helicarrier」`https://sketchfab.com/3d-models/helicarrier-97cf6cccb2fa48c18fbef5c5600c434d`（uid
+  `97cf6cccb2fa48c18fbef5c5600c434d`，上传者 ramonaflowers，glb 元数据署名作者 CoolCat；许可 **CC Attribution（CC BY 4.0）**；
+  12841 三角形、一张 1024² 贴图）。用账号 token 走下载 API（token 只在运行时从 `%USERPROFILE%\.edf6-sketchfab	oken` 读，不进仓库 / 日志），
+  原件在 `D:\APP\edf6-models\downloads\sketchfab_helicarrier\`，只当数据读（`python -I`）。选它是因为在可下载的候选里它有「四个升力风扇 + 甲板 +
+  舰岛」，风扇正好对上插件的四个倾转推进器，面数也适合游戏。
+- `tools/prep_helicarrier.py`（开发者用）→ `D:\APP\edf6-models\helicarrier\`：缩放到全长 80 m（系数 0.202），x 以四个风扇中心的平均为 0、
+  y 以最低点为 0、z 居中；整机 **45.96 × 16.39 × 80.0 m**（宽 × 高 × 长；原版 V508 × 1.6 是 59.4 × 17 × 76.8 m）。舰首 +z（双叉甲板），舰岛在右舷（-x）。
+  四个升力风扇（轮毂 + 辐条 + 转子圈）从船体里按连通面切出来作独立部件，绕轮毂**立起来**（轴朝 +z）存进绑定姿态，SOURCE.txt 记来源与改动。
+- 推进器映射：插件 `jet_flight.cpp Thrusters` 按骨骼名 `boosterF_l / F_r / B_l / B_r` 把推进器绕本地 X 从 0° 转到 -110°（悬停 -90°）。
+  四个风扇就用这四个名字（`helicarrier_model.THRUSTERS`，轴心为轮毂：前 (±15.5, 8.9, 0.7)、后 (±13.8, 9.0, -23.0)，直径 8.7–9.7 m），
+  所以巡航时风扇竖着、悬停时转平落回风扇圈里，插件逻辑不改。每个风扇下挂一根 `nozzle_<i>`（`jet_models.with_nozzles`，宽 = 风扇直径），尾焰沿用。
+- 着地倾转限幅：`src/nacelle_reach.h` 另给 `kHcFront` / `kHcBack`（`aircraft_collision.nacelle_lowest` 对新模型实测，`aircraft_collision_check`
+  在有模型包时逐项核对），`jet_flight.cpp NacelleReach` 按标记选表。风扇最低点离船底至少 5 m，实际不会限制倾转。
+- 无人机：放出点 / 停靠点不改（`jet_carrier.cpp kLaunchBelow` 25 m、`jet_internal.h kDockBelow` 15 m，都在载具原点 = 碰撞箱中心之下）。
+  新模型高 16.39 m，停靠点在船底下 6.8 m、放出点 16.8 m，都在船体投影内；`make_helicarrier.check_drone_bay` 生成时从源码读这两个常量核对
+  （离船底不小于 5 m、在投影内）。
+- 生成：`pylib/helicarrier_model.py`（骨架同 C-130：`mdl` → `helicarrier` → `globalSRT` → `body` → `hc_hull` → 四个风扇，再加喷口骨骼）、
+  `tools/make_helicarrier.py`（安装器分组 / ledger 所有者 `helicarrier`，模型输入 `helicarrier/`）：`EDF6VC_HELICARRIER.MRAB`、碰撞
+  `EDF6VC_HELICARRIER_AIRFRAME.SHKT`（`aircraft_collision.HELICARRIER_FILES`，SGO 带 `edf6vc_airframe`）、三个 SGO（`vcobjects.HELICARRIER_JETS`：
+  各自原机种的耐久、挂载与质量，标记 `HELICARRIER_MARKS` 7005→7067、7009→7068、7010→7069）。
+- 座舱：舰岛里的眼点 (-4.0, 12.5, -19.0) 净空只有约 1–3 m，`plane_deck` 收缩 8 轮仍穿出舰岛斜壁，所以用 `remote_display`（`cockpit_fits_plugin`）。
+- 另起标记的原因同 6.3：新外形的包围盒、喷口、倾转表都不同，按标记才分得开。V508 外形的空中航母（7005 / 7009 / 7010）仍是空袭兵请求来自驾 /
+  测试场停放的孪生机，不变。可驾驶：三行 `kBoardable`（旋翼、无人机挂载，同原航母）。
+- 没有 `helicarrier/` 文件夹时什么也不写，三种航母支援在规划阶段拒绝（`SupportAircraftReady`：机体 SGO 未预载），不退回 V508 外形。
+- 联机：新版造 7067–7069 的航母，房间协议 9 → **10**。
 
 ### 6.5 需实机确认
 
+- Helicarrier：舰首方向（+z 双叉甲板朝前）与大小观感；四个风扇巡航竖立、悬停转平落回风扇圈（倾转方向）；尾焰从风扇下方喷出；
+  碰撞与降落（整机最低点着地）；无人机从机腹下放出 / 回收的位置；舰岛 `remote_display` 座舱的位置与朝向；
 - 两架 C-130 的大小与飞行观感（比 bomber401 窄 12 m、长 13 m、高 7 m），炮舰机绕圈时侧炮从机体包围盒外出膛的观感；
 - 驾驶座 / 炮手座 / 乘客座的第一人称座舱位置与朝向（只做了离线净空检查）；
 - 螺旋桨不转（骨骼已留，插件未驱动）；没有尾焰（涡桨，模型没有喷口骨骼）；
