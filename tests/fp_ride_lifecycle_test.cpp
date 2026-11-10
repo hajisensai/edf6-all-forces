@@ -64,6 +64,8 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool InstallShotEntry() noexcept { return false; }   // heli.cpp: no shot entry hooked here
+float mapRayHit=-1.0f;int mapRays=0;   // heli.cpp MapRay: the aim's map hit along the view (metres, < 0 none)
+float MapRay(const float*,const float*,float*) noexcept { ++mapRays;return mapRayHit; }
 // heli.cpp's mouse-flown helicopter view (tested itself in heli_player_input_test): when it owns the seat it turns the
 // cockpit frame onto `heliFrame`.
 fpview::M4 heliFrame=fpview::Identity();bool heliFrameOwned=false;const void* heliFrameVehicle=nullptr;

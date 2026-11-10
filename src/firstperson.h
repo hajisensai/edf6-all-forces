@@ -12,6 +12,13 @@ bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's c
 // Game thread, after each round of any weapon (heli.cpp's hook on the shot entry 0x696FD0: local and replayed rounds of
 // every weapon class): the local first person's kick and recoil for the hand holding it (others: nothing).
 void FirstPersonShot(const unsigned char* weapon) noexcept;
+// Game thread, before a round of `weapon` from its muzzle entry `muzzle` (the same hook, ahead of the stock shot): a
+// local, unreplayed round of the weapon in this machine's first-person player's hand is turned from the real muzzle onto
+// the point the view's centre meets (fp_aim.h Converge; docs/fp-soldier-re.md §2.5): the entry's shot rows are
+// rewritten for that round, FirstPersonAimRestore puts them back after it. False (rows untouched): not such a round.
+struct FpShotAim { float* rows; float saved[12]; };
+bool FirstPersonAimShot(unsigned char* weapon,unsigned muzzle,bool replay,FpShotAim* out) noexcept;
+void FirstPersonAimRestore(const FpShotAim& aim) noexcept;
 // Outer camera owner (map/TV) finished its step: suspend this viewport's viewmodel while it owns the view.
 void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept;
 bool FirstPersonOn() noexcept;        // game thread: the local player's camera is in first person this frame

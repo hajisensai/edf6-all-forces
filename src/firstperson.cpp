@@ -69,6 +69,8 @@
 #include "vehicle_look.h"
 #include "fp_motion.h"
 #include "fp_flash.h"
+#include "fp_aim.h"
+#include "heli.h"
 #include "log_once.h"
 #include "fp_skin_gpu.h"
 #include "thermal.h"
@@ -124,6 +126,12 @@ constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264
                       kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
                       kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
+// A weapon the third person hides (H, docs/fp-soldier-re.md §8): 0x696150(weapon, hide) writes +0x78C and hides its model
+// in Umbra (0x6C04B0 -> 0x11B3480); the appeal (0x59A880) calls it for every set's weapon. Hidden is not in hand here.
+constexpr std::size_t kWeaponHidden=0x78C;
+// A muzzle entry's shot matrix (H, fp-soldier-re.md §2.1-2.2): rows right / up / forward at +0x50 / +0x60 / +0x70 (read
+// by 0x691560 for each round: 0x69168B), the position at +0x80 (0x6972C5, pulled back out of a wall by 0x696FD0).
+constexpr std::size_t kShotRows=0x50;
 // The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
 // and the Wing Diver's: Debug=1 logs every change to match them). Only the Ranger's is a sprint (a run held); the
 // Fencer's (0xA38 its dash, measured 2026-10-14: 0.2 s a press, toggling at each one) and the Wing Diver's are bursts
@@ -230,6 +238,7 @@ struct DrawSnap {
     bool instrumentsReady;
     instruments::Readings instruments;
     M4 probeAnchor[2];bool probeAnchored[2];   // Debug=1: each hand's anchor as the camera step read it
+    bool nativeArms;            // a stock action (fp_aim.h NativeArms): the arms as its animation poses them, no IK
 };
 
 struct State {
@@ -310,6 +319,11 @@ struct State {
     instruments::Readings instruments;
     bool instrumentsReady;
     bool gunCamera;             // the seat's view is its gun camera's (Ride: fp_view.h GunCameraFrame), last said in the log
+    bool nativeArms;            // every weapon in hand hidden by the third person (an appeal): the arms native (fp_aim.h)
+    // The aim (fp_aim.h Converge): on foot this camera step (aimOk) and the view's direction it left (aimCamDir); the
+    // map's hit along the last line asked (aimHitEye / aimHitDir, aimHit m, < 0 none): one ray for a burst's rounds.
+    bool aimOk,aimHitHave;
+    float aimCamDir[3],aimHitEye[3],aimHitDir[3],aimHit;
 };
 /// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
 constexpr int kLocalViews=4;
@@ -974,14 +988,21 @@ void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
     Current().inHandCount=0;
     auto n=At<std::uint64_t>(h,kSetCount);
     if(n>kMostSets)n=kMostSets;
+    bool armed[kMostSets]{},hidden[kMostSets]{};
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
         if(!w)continue;
+        // The third person hides it (an appeal, 0x696150): neither drawn nor posed here, as there.
+        armed[k]=true;hidden[k]=At<std::uint8_t>(w,kWeaponHidden)!=0;
+        if(hidden[k])continue;
         const int hand=HandOf(w);
         Current().inHand[Current().inHandCount]=w+kWeaponModel;Current().inHandCtrls[Current().inHandCount]=At<const void*>(w,kSelfCtrl);Current().handOf[Current().inHandCount++]=hand;
         LogWeapon(w,hand);
         if(!anchored[hand])anchored[hand]=RootPose(w+kWeaponModel,&anchor[hand]);
     }
+    const bool native=fpaim::NativeArms(static_cast<int>(n),armed,hidden);
+    if(native!=Current().nativeArms)Log("FP %s",native ? "a stock action: its weapons hidden, the arms as it poses them" : "the stock action over: the viewmodel again");
+    Current().nativeArms=native;
 }
 
 // The hand a weapon model is in, -1: not in hand.
@@ -1029,6 +1050,42 @@ Flash* Relocate(unsigned char* w) noexcept {
 // A round of `weapon` (heli.cpp's hook on 0x696FD0, every weapon class's one shot entry, after the round): for this
 // machine's first person, the hand that weapon is in takes a shot for its kick (Kicks) and its recoil (Hand), whether or
 // not the weapon has a muzzle flash.
+// The view and the shot agree only this far (cos 20 deg): past it the camera is not following the aim frame (a special
+// view the native camera turns by angles, cam+0x3F0) and the shot is left native.
+constexpr float kAimCamAgree=0.94f;
+// One local round of `weapon` (in this state's hand) from its muzzle entry `muzzle` (0x696FD0's own pick: the index
+// modulo the count, entries 0xF0 apart at [+0x1D0]) turned onto the point the view meets (fp_aim.h Converge): the
+// direction the aim frame has now (what the next frame shows; the shot's own mode-0 rows come from it, 0x6969A0), the
+// eye where this step's ease puts it on the body as it is now, the map's first hit along the view (MapRay: terrain and
+// buildings, not characters). `out` gets the rows to put back after the shot.
+bool AimShot(const unsigned char* h,unsigned char* weapon,unsigned muzzle,FpShotAim* out) noexcept {
+    const auto count=At<std::uint64_t>(weapon,edf::kMuzzleCount);
+    const auto list=At<unsigned char*>(weapon,edf::kMuzzles);
+    if(!list || count==0 || count>64)return false;
+    unsigned char* const entry=list+(muzzle%count)*edf::kMuzzleStride;
+    float* const rows=reinterpret_cast<float*>(entry+kShotRows);
+    const M4 aim=MatrixAt(h+kAim);
+    float dir[3]={aim.m[8],aim.m[9],aim.m[10]};
+    if(!fpaim::Unit3(dir) || fpaim::Dot(dir,Current().aimCamDir)<kAimCamAgree)return false;
+    float eye[3];
+    fpview::EyeWorld(MatrixAt(h+kBodyFrame),Current().eyeLocal,eye);
+    State& c=Current();
+    bool same=c.aimHitHave;
+    for(int i=0;i<3 && same;++i)same=std::fabs(c.aimHitEye[i]-eye[i])<1e-3f && std::fabs(c.aimHitDir[i]-dir[i])<1e-4f;
+    if(!same) {
+        const float to[3]={eye[0]+dir[0]*fpaim::kFar,eye[1]+dir[1]*fpaim::kFar,eye[2]+dir[2]*fpaim::kFar};
+        float at[3];
+        c.aimHit=MapRay(eye,to,at);
+        std::memcpy(c.aimHitEye,eye,12);std::memcpy(c.aimHitDir,dir,12);c.aimHitHave=true;
+    }
+    float turned[12];
+    std::memcpy(turned,rows,sizeof(turned));
+    if(fpaim::Converge(turned,rows+12,eye,dir,c.aimHit)!=fpaim::Result::turned)return false;
+    std::memcpy(out->saved,rows,sizeof(out->saved));out->rows=rows;
+    std::memcpy(rows,turned,sizeof(turned));
+    return true;
+}
+
 void Shot(const unsigned char* weapon) noexcept {
     const int hand=Current().on && !Current().overridden ? HandOfModel(weapon+kWeaponModel) : -1;
     if(hand<0)return;
@@ -1418,6 +1475,18 @@ void Fit(int hand,bool dual,float* grip) noexcept {
 void BuildViews(const unsigned char* h,const unsigned char* cam,const M4* anchor,const M4* frame,const bool* anchored) noexcept {
     const Config& c=Cfg();
     const M4 view=MatrixAt(cam+kCamMatrix);
+    if(Current().nativeArms) {
+        // A stock action (fp_aim.h NativeArms): both arms where its animation puts them, seen from the eye. No grip, no
+        // scale, no motion, no IK: the hold and the arm fit are for a weapon in hand, and posed onto a gesture they
+        // fought it (the hands' jitter, test site #32).
+        for(int hand=kRight;hand<=kLeft;++hand) {
+            Current().view[hand]=fpview::Identity();Current().viewOk[hand]=true;Current().shown[hand]=true;
+            Current().onOther[hand]=false;Current().axisOk[hand]=false;
+        }
+        Current().built=view;Current().builtReady=true;
+        for(int hand=kRight;hand<=kLeft;++hand){Current().probeAnchor[hand]=anchor[hand];Current().probeAnchored[hand]=anchored[hand];}
+        return;
+    }
     for(int hand=kRight;hand<=kLeft;++hand) {
         bool flip=false;
         const auto weapon=HandWeapon(hand,&flip);
@@ -1649,6 +1718,7 @@ void Camera(unsigned char* cam) noexcept {
         Current().on=true;Current().cam=cam;Current().human=h;Current().fresh=true;Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
         Log("FP view on %p (player %p)",cam,h);
     }
+    Current().aimOk=false;
     if(!HumanOnFoot(h)) {
         if(!Ride(cam,h))Leave();
         return;
@@ -1664,6 +1734,10 @@ void Camera(unsigned char* cam) noexcept {
     float eye[3];
     fpview::EyeWorld(body,Current().eyeLocal,eye);
     std::memcpy(cam+kCamEyeRow,eye,12);
+    // The aim this step leaves (fp_aim.h Converge): the native view's forward row, the soldier's aim frame (camera
+    // state 1 0xFB520: the eye and the look-at differ in z only, so its rows are the aim frame's +0x60 rows).
+    std::memcpy(Current().aimCamDir,cam+kCamMatrix+32,12);
+    Current().aimOk=fpaim::Unit3(Current().aimCamDir);Current().aimHitHave=false;
     Current().stepNearSet=false;
     const bool depthReady=ViewDepthReady();
     if(!depthReady)ReturnNear(cam);
@@ -1756,6 +1830,7 @@ void Publish() noexcept {
         d.hasCam=c.cam!=nullptr;d.camera=c.builtReady ? c.built : fpview::Identity();
         d.rideSeat=c.ride.seat;d.instrumentsReady=c.instrumentsReady;d.instruments=c.instruments;
         for(int k=0;k<2;++k){d.probeAnchor[k]=c.probeAnchor[k];d.probeAnchored[k]=c.probeAnchored[k];}
+        d.nativeArms=c.nativeArms && !c.riding;
     });
 }
 
@@ -1959,7 +2034,7 @@ void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpvie
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
     if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     ArmFit fit[2]{};
-    if(body && Cfg().fpArmIk && !d.riding)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,frustum,otherBox);
+    if(body && Cfg().fpArmIk && !d.riding && !d.nativeArms)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,frustum,otherBox);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -2527,6 +2602,28 @@ void FirstPersonShot(const unsigned char* weapon) noexcept {
     __try { for(auto& state:states)if(state.on){selected=&state;Shot(weapon);} }
     __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
+}
+
+bool FirstPersonAimShot(unsigned char* weapon,unsigned muzzle,bool replay,FpShotAim* out) noexcept {
+    out->rows=nullptr;
+    if(!camOk || !weapon || replay)return false;
+    State* before=selected;
+    bool turned=false;
+    __try {
+        for(auto& state:states) {
+            if(!state.on || state.overridden || state.riding || !state.aimOk || !state.human)continue;
+            selected=&state;
+            if(HandOfModel(weapon+kWeaponModel)<0)continue;   // this player's, in hand (a hidden one is not: an appeal)
+            turned=AimShot(state.human,weapon,muzzle,out);
+            break;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){out->rows=nullptr;turned=false;}
+    selected=before;
+    return turned;
+}
+void FirstPersonAimRestore(const FpShotAim& aim) noexcept {
+    if(!aim.rows)return;
+    __try { std::memcpy(aim.rows,aim.saved,sizeof(aim.saved)); } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 int LocalPlayers(unsigned char** out,int most) noexcept {
