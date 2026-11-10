@@ -75,7 +75,7 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
     if why is None:
         for name, rel in files().items():
             if _foreign(led, rel):
-                why = f'Mods 里已有别的 MOD 的 {rel}'
+                why = f'Mods 里的 {rel} 是别的 MOD 的，或装后被改过（不覆盖）'
                 break
             entry = entries[name]
             path = os.path.join(folder, name)
