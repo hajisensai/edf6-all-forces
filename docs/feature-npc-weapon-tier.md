@@ -116,18 +116,29 @@
 
 **写法（`src/support_firepower.cpp`）——只改伤害、不碰血量、不用补偿系数**：
 
-- 生成时（setup 之前）`MarkSupportFirepower(载具, 曲线)` 登记（ObjRef，按控制块判活，任务开始清空）。
+- 生成时（setup 之前）`MarkSupportFirepower(载具, 曲线)` 登记（ObjRef，按控制块判活，任务开始清空），**登记时就取好等级与倍率**：
+  一个任务内难度与任务位置不变，之后每次 setup 写同一个值；取不到等级的载具在登记这一步就被拒绝，不会出现「setup 已按原版写完、再写等级失败」而留在原版缩放上的情况。
 - 每次 mission setup（`real_driver_native.cpp` / `support_spawn.cpp` 的 `ApplyMissionSetup`，slot 46 → `0x62F800`）之后，
-  `ApplySupportFirepower` 对登记过的载具直接写 `+0x678 = LevelDamage × +0x67C`（`+0x67C` 构造时 1.0，`0x6295FA`，H；即未置 bit3 分支的规则，
+  `ApplySupportFirepower` 对登记过的载具直接写 `+0x678 = 登记时的 LevelDamage × +0x67C`（`+0x67C` 构造时 1.0，`0x6295FA`，H；即未置 bit3 分支的规则，
   玩家呼叫载具走的就是这条），并把每个武器槽 `+0x638[i]`（数量 `+0x648`，步长 0x48）的 `+0x40` 改成同值——setup 建武器时把
   `+0x678` 抄进槽 `+0x40`（`0x633842` 读、`0x633936` 写，H），每帧 `0x6303C4..0x63044E` `weapon+0x788 = veh+0x398 × 槽+0x40`（H），所以两处都要写。
 - 飞机仍先 SetLevel(1)（bit3），setup 照原版算血量（`耐久 × setup 耐久 × 0xD78D0 友军 HP 系数 × 等级项`）；setup 写的 `+0x678` 随即被覆盖。
   生成顺序不变，血量与原版一致；不需要「目标 / 等级」这种补偿系数，也不 hook `0xD7870`（它仍服务原版任务友军）。
 - 插件把原版 RideAi 槽换成自己的 `RideHook → PrepareNpcVehicle → ApplyMissionSetup`（`mission_crew.cpp`），所以援军飞机没有绕过这一步的 setup 路径（M：
   `0x633063` 的原版 RideAi 不再被调用；`0x633280` 一类别的 setup 入口只用于调试生成）。
-- 登记失败（`0xD7B60` 特征码不符、登记表 128 满、对象已死）或写入失败（难度越界、武器槽不可读）：该载具不出动（生成路径删除它），日志一行，
-  不退回原版缩放。
-- 敌方 `SpawnJet`（对战里敌方队伍）不登记，仍按原版。
+- 登记失败（`0xD7B60` 特征码不符、取不到等级、登记表 256 满、对象已死）：生成路径删除该载具，日志一行，不退回原版缩放。
+  地面援军（`SpawnSupportVehicle`）只拒绝这一台，不把这种载具标成坏资源（表满是暂时的）；`0xD7B60` 特征码不符时
+  `SupportVehicleReady` 对布莱克 / 运兵车直接答「不可用」（轻卡没有武器，照常）。
+  空投（`airdrop.cpp VehicleStep`）的车是原版集装箱造的：登记失败时不跑 setup（与原有的 setup 失败同一处理：日志「its mission setup FAILED」，
+  车留在原地、没有建武器），插件不在集装箱的流程中途删除它。
+  写入失败只剩武器槽不可读 / 访问异常（对象已坏），此时 setup 报失败。
+- `SpawnJet` 的 `team` 不是友军时不登记，仍按原版（目前所有调用者都用默认的友军）。
+- 之后不会再有绕过 `ApplySupportFirepower` 的 setup（H，2026-11-10 复核）：空投集装箱在 `VehicleStep` 之后写 `+0x67C = 等级`（`0x5E904E`，插件传 1.0），
+  设定文字为空（`+0xC48`）且设定值类型为 0xFFFF（`+0xC68`，插件传空设定）时跳过它自己的 slot 46（`0x5E9054..0x5E906A`）；
+  快照 `0x62FBF0` 只在 `+0xE30 == 2`（`0x633280` / 快照自身写入）时重跑 slot 46（`0x630153..0x63017A`），`+0xE30 == 1` 走 RideAi 槽（已换成 `RideHook`），
+  援军载具不写 `+0xE30 = 2`。布莱克 / 运兵车 / 506 / 409 / 410 / 直升机基类的 slot 46（`0x61B060` / `0x61C430` / `0x61B770` / `0x64B3C0` / `0x64DA60` / `0x6530E0`）
+  都是先基类 setup 再 `0x633330` 建武器（H）。全程序读 `[reg+0x678]` 的指令里，除 `0x633842` 外只有 `0x6054D5`（函数 `0x605150`，
+  由 `0x607DB0` 当回调登记、`0x601DBF` 调用），它不在上述 slot 46 的直接调用里（M：没逐层展开间接调用）。
 
 **房间协议 `kAllForcesRoomProtocol` 8 → 9**：每台机器各自造援军副本，旧版副本按旧规则打伤害，结果不一致，所以旧版不能进房。
 
@@ -145,6 +156,9 @@
 - `tests/player_identity_guard.py`：房间协议号 9（§4.1）。
 - `tests/support_level_test.cpp`：等级表（各难度首末关、单调、`0xE2710` 的夹取 / 插值 / 无上限）、三条请求曲线插值与两端保持。
 - `tests/support_spawn_test.cpp`：地面援军在 setup 前登记、setup 后写火力；坦克 Blacker、运兵车 Grape、轻卡不登记；登记 / 写入失败即拒绝（含空投路径）。
+  登记失败的坦克在 setup 前删除、不影响下一台；`0xD7B60` 不符时有武器的地面援军不可用、轻卡可用。
+- `tests/support_firepower_test.cpp`：`support_firepower.cpp` 本身（私有映像、`0xD7B60` 用带原版序言的桩）：登记时取等级、之后改难度不影响；
+  `+0x678` 与每个武器槽 `+0x40` 写成同值、槽数之外不动；未登记的不动；无等级拒绝；同地址重登记替换；槽数异常报失败；表满拒绝、死对象槽复用、任务开始清空。
 - `tests/real_driver_native_test.cpp`：spawned setup 之后恰好调一次火力步骤。
 - `tools/selftest.py support_level_tables_match_the_game`：表与本机游戏数据一致。
 

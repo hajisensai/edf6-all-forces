@@ -16,8 +16,11 @@ using ProgressFn=float(__fastcall*)(void*);
 constexpr std::size_t kDamage=0x678,kBase=0x67C,kHolders=0x638,kHolderCount=0x648,kHolderStride=0x48,kHolderDamage=0x40;
 constexpr std::size_t kMaxHolders=256;
 
-struct Mark { ObjRef ref; supportlevel::Curve curve; };
-constexpr unsigned kMarks=128;
+// A marked vehicle and what its weapons deal, decided when it is marked: the difficulty and the mission's place do not
+// change within a mission, so every later setup of it writes the same multiplier and none of them can fail for want of
+// a level (a vehicle with no level is refused before its first setup, by its spawn path).
+struct Mark { ObjRef ref; supportlevel::Curve curve; std::int32_t difficulty; float progress; int level; float multiplier; };
+constexpr unsigned kMarks=256;   // over every live support object the spawn paths can hold at once (jets 64, ground 64, ...)
 Mark marks[kMarks]{};
 bool ready=false;
 
@@ -33,6 +36,17 @@ const Mark* Find(const unsigned char* v) noexcept {
     }
     return nullptr;
 }
+// The support level now: false when the game status cannot give one.
+bool LevelNow(std::int32_t& difficulty,float& progress,int& level) noexcept {
+    __try {
+        unsigned char* const gs=At<unsigned char*>(image,kGameStatus);
+        if(!gs || !Readable(gs,kDifficulty+4))return false;
+        difficulty=At<std::int32_t>(gs,kDifficulty);
+        progress=reinterpret_cast<ProgressFn>(image+kProgress)(gs);
+        level=supportlevel::SupportLevel(difficulty,progress);
+        return level>=0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 }  // namespace
 
 bool InstallSupportFirepower() noexcept {
@@ -40,6 +54,8 @@ bool InstallSupportFirepower() noexcept {
     if(!ready)Log("SUPPORT firepower: unexpected EDF.dll progress code: support vehicles and aircraft are not deployed");
     return ready;
 }
+
+bool SupportFirepowerReady() noexcept { return ready; }
 
 void ResetSupportFirepower() noexcept {
     for(auto& m:marks)m=Mark{};
@@ -49,13 +65,17 @@ bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
     if(!ready || !v)return false;
     const ObjRef ref=ObjRef::Of(v);
     if(!Live(ref))return false;
+    std::int32_t difficulty=-1;float progress=0.0f;int level=-1;
+    if(!LevelNow(difficulty,progress,level)) {
+        Log("SUPPORT firepower: %p refused: difficulty %d progress %.3f has no level",v,difficulty,progress);return false;
+    }
     Mark* slot=nullptr;
     for(auto& m:marks) {
         if(m.ref.obj==v){slot=&m;break;}   // the same address again: a new object there replaces the old mark
         if(!slot && (!m.ref || !Live(m.ref)))slot=&m;
     }
     if(!slot){Log("SUPPORT firepower: %u vehicles marked already: %p refused",kMarks,v);return false;}
-    *slot=Mark{ref,curve};
+    *slot=Mark{ref,curve,difficulty,progress,level,supportlevel::LevelDamage(curve,level)};
     return true;
 }
 
@@ -63,15 +83,8 @@ bool ApplySupportFirepower(unsigned char* v) noexcept {
     const Mark* const m=v ? Find(v) : nullptr;
     if(!m)return true;
     __try {
-        unsigned char* const gs=At<unsigned char*>(image,kGameStatus);
-        if(!gs || !Readable(gs,kDifficulty+4)){Log("SUPPORT firepower v=%p: no game status",v);return false;}
-        const std::int32_t difficulty=At<std::int32_t>(gs,kDifficulty);
-        const float progress=reinterpret_cast<ProgressFn>(image+kProgress)(gs);
-        const int level=supportlevel::SupportLevel(difficulty,progress);
-        if(level<0){Log("SUPPORT firepower v=%p: difficulty %d progress %.3f has no level",v,difficulty,progress);return false;}
-        const float multiplier=supportlevel::LevelDamage(m->curve,level);
         const float was=At<float>(v,kDamage);
-        const float damage=multiplier*At<float>(v,kBase);
+        const float damage=m->multiplier*At<float>(v,kBase);
         auto* const holders=At<unsigned char*>(v,kHolders);
         const auto count=At<std::size_t>(v,kHolderCount);
         if(count && (!holders || count>kMaxHolders || !Readable(holders,count*kHolderStride))) {
@@ -80,7 +93,7 @@ bool ApplySupportFirepower(unsigned char* v) noexcept {
         Put<float>(v,kDamage,damage);
         for(std::size_t i=0;i<count;++i)Put<float>(holders+i*kHolderStride,kHolderDamage,damage);
         Log("SUPPORT firepower v=%p curve=%s difficulty=%d progress=%.3f level=%d: damage x%.3f (the game's x%.3f), %zu weapons",
-            v,supportlevel::CurveName(m->curve),difficulty,progress,level,damage,was,count);
+            v,supportlevel::CurveName(m->curve),m->difficulty,m->progress,m->level,damage,was,count);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         Log("SUPPORT firepower v=%p: fault",v);return false;

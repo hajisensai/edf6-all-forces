@@ -7,7 +7,8 @@
 #include <limits>
 
 namespace fixture {
-bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false,failMark=false,failFirepower=false;
+bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false,failMark=false,failFirepower=false,
+     firepowerReady=true;
 int marks=0,firepowers=0,markedAt=-1;crew::supportlevel::Curve lastCurve=crew::supportlevel::Curve::eros;
 const wchar_t* lastPath=nullptr;
 const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
@@ -66,6 +67,7 @@ bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
     ++fixture::marks;fixture::markedAt=fixture::applies;fixture::lastCurve=curve;
     return !fixture::failMark;
 }
+bool SupportFirepowerReady() noexcept { return fixture::firepowerReady; }
 bool ApplySupportFirepower(unsigned char* v) noexcept {
     fixture::Check(v==fixture::object && fixture::markedAt>=0 && fixture::applies>fixture::markedAt,"firepower written after its setup");
     fixture::markedAt=-1;
@@ -123,9 +125,28 @@ int main() {
     v=SpawnSupportVehicle(tank,manned,at,forward,nullptr);
     Check(v && !std::wcscmp(fixture::lastPath,kSupportVehicles[0].sgo),"no variant: the stock V505_TANK_MISSION");
     Check(DeleteSupportVehicle(v),"stock tank rollback");
+    // Its firepower not marked (no level, the marks full): this hull refused and deleted, before any setup; the tank
+    // stays callable (not a broken resource).
+    {
+        const int applies=fixture::applies,deletes=fixture::deletes;
+        fixture::failMark=true;
+        Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"an unmarked tank is refused");
+        Check(fixture::applies==applies && fixture::deletes==deletes+1,"an unmarked tank is deleted before its setup");
+        fixture::failMark=false;
+        Check(SupportVehicleReady(tank,manned),"an unmarked tank does not disable the tank");
+        v=SpawnSupportVehicle(tank,manned,at,forward,nullptr);
+        Check(v,"the next tank is made");
+        Check(DeleteSupportVehicle(v),"the next tank's rollback");
+    }
+    // The firepower step not installed: the armed hulls are not ready (none made to be refused), the unarmed truck is.
+    fixture::firepowerReady=false;
+    Check(!SupportVehicleReady(tank,manned) && !SupportVehicleReady(SupportVehicleKind::transport,manned),
+          "no firepower step: no armed support hull");
+    Check(SupportVehicleReady(SupportVehicleKind::civilianTruck,SupportCrewMode::unmanned),"no firepower step: the truck still");
+    fixture::firepowerReady=true;
     fixture::failSetup=true;
     Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"setup fault cannot return partial hull");
-    Check(fixture::disposals==4 && fixture::deletes==5 && fixture::owners==3,"setup fault disposes variant and hull before ownership");
+    Check(fixture::disposals==5 && fixture::deletes==7 && fixture::owners==4,"setup fault disposes variant and hull before ownership");
     PreloadSupportVehicles();Check(!SupportVehicleReady(tank,manned),"faulted resource stays disabled across mission reset");
     fixture::failSetup=false;
     v=SpawnSupportVehicle(SupportVehicleKind::civilianTruck,SupportCrewMode::unmanned,at,forward,nullptr);
