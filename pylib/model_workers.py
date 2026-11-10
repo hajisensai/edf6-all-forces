@@ -164,7 +164,22 @@ def _process_identity() -> bytes:
     return str(os.getpid()).encode('ascii')
 
 
+def _group_identity() -> bytes:
+    """An asset group's process starting model jobs of its own (installer.build_assets: a group beside the others, its
+    models in processes it starts): its pid, then its jobs'."""
+    inner = run_jobs([(_process_identity, (), 'entry check inner 1'), (_process_identity, (), 'entry check inner 2')],
+                     workers=2)
+    return b','.join([_process_identity(), *inner])
+
+
 def check_entry() -> None:
+    """The frozen exe's process starts (build_release runs it): model jobs, and the group processes' own model jobs."""
     result = run_jobs([(_process_identity, (), 'entry check 1'), (_process_identity, (), 'entry check 2')], workers=2)
     assert all(int(value) != os.getpid() for value in result), 'model jobs ran in the installer process'
+    groups = run_jobs([(_group_identity, (), 'entry check group 1'), (_group_identity, (), 'entry check group 2')],
+                      workers=2)
+    for group in groups:
+        own, *inner = (int(value) for value in group.split(b','))
+        assert len(inner) == 2 and not {own, *inner} & {os.getpid()} and own not in inner, \
+            f'a group process did not start model jobs of its own: {own}, {inner}'
     print('EDF6VC_WORKERS_OK spawn entry', flush=True)
