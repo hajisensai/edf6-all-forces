@@ -31,6 +31,8 @@ bool HumanOnFoot(const unsigned char*) noexcept{return true;}
 bool ReadRound(const unsigned char*,RoundModel* r) noexcept{*r=RoundModel{};return false;}
 bool HudScopeHoldsCrosshair(const void* who) noexcept{return who && who==scopeSoldier;}
 bool EnemyControlReplacesPlayerHud(const void* who) noexcept{return who && who==controlling;}
+const void* LocalViewPlayer(const void*) noexcept{return nullptr;}
+namespace thermal { Status GetStatus(const void*) noexcept{return Status{};} }
 }
 bool Matches(unsigned,const unsigned char*,std::size_t) noexcept{return false;}
 
@@ -50,7 +52,7 @@ int wmain() {
     controlling=nullptr;
     Check(Draws(soldier),"control ended: the crosshair is back");
     // A soldier's own open scope (InfantryScopeNow) still holds it back, as before.
-    config.enabled=config.infantryScope=true;
+    config.enabled=true;config.infantryScope=1;
     Publish(Published{ObjRef::Of(soldier),InfantryScopeCue{soldier,4.0f,scope::Look::marksman},GetTickCount64()});
     Check(!Draws(soldier) && Draws(other),"an infantry scope holds back its own soldier's crosshair only");
     Publish(Published{});

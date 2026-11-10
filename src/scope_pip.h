@@ -54,6 +54,31 @@ inline float Magnification(float frameYScale,float scopeFov) noexcept {
 // scope's own field of view, whatever the frame round the lens was rendered at).
 inline float LensFocal(float h,float scopeFov) noexcept { return 0.5f*h*YScale(scopeFov); }
 
+// The camera step's FOV in the picture in the picture: the stock step wrote `written` = pi/4 / camZoom (its own write,
+// 0xF8906: the same float division) and the frame keeps the unmagnified pi/4; anything else (another camera logic's
+// value, the state 1 close-up's easing) is left as it is: 0. camZoom is the camera's own copy of the soldier's zoom
+// (cam+0x410).
+inline float Unzoomed(float written,float camZoom) noexcept {
+    if(!(camZoom>=kLeast) || !std::isfinite(camZoom) || !std::isfinite(written))return 0.0f;
+    const float stock=kBaseFov/camZoom;
+    return std::fabs(written-stock)<=stock*1e-5f ? kBaseFov : 0.0f;
+}
+
+// When the camera may keep the frame unmagnified (the lens draws the power): the picture in the picture is wanted, the
+// world's end is hooked (the lens pass has its place) and the pass has not refused this device's surface, and either the
+// lens drew within kLensFreshMs (wall) or the scope opened within kProbationMs (the first frames, before any pass ran).
+// Otherwise the stock zoom stays and the HUD draws the whole-screen eyepiece (mode 1's picture): a frame never shows the
+// unmagnified world through a lens that is not there.
+constexpr unsigned long long kLensFreshMs=250,kProbationMs=500;
+constexpr bool LensDrew(unsigned long long now,unsigned long long lensAt) noexcept {
+    return lensAt!=0 && now>=lensAt && now-lensAt<=kLensFreshMs;
+}
+constexpr bool KeepUnzoomed(bool wanted,bool hooked,bool refused,unsigned long long now,unsigned long long openedAt,
+                            unsigned long long lensAt) noexcept {
+    return wanted && hooked && !refused &&
+           (LensDrew(now,lensAt) || (openedAt!=0 && now>=openedAt && now-openedAt<=kProbationMs));
+}
+
 // The lens on a w x h target: centre, radius, magnification. Source() is the frame's pixel the lens shows at (x, y):
 // the centre's neighbourhood scaled up by `m` (the GPU pass samples exactly this; scope_pip_gpu.cpp kShaders).
 struct Lens { float cx,cy,r,m; };

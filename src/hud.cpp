@@ -26,6 +26,7 @@
 #include "formation.h"
 #include "map_buttons.h"
 #include "scopeview.h"
+#include "scope_pip.h"
 #include "reticle.h"
 #include "scopereticle.h"
 #include "boarding_entrance.h"
@@ -5567,6 +5568,9 @@ alignas(16) const float kScopeSurround[4]={0.0f,0.0f,0.0f,scopeview::kSurroundAl
 alignas(16) const float kScopeFeather[scopeview::kFeathers][4]={
     {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[0]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[1]},
     {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[2]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[3]}};
+alignas(16) const float kLensFeather[scopepip::kFeathers][4]={
+    {0.0f,0.0f,0.0f,scopepip::kFeatherAlpha[0]},{0.0f,0.0f,0.0f,scopepip::kFeatherAlpha[1]},
+    {0.0f,0.0f,0.0f,scopepip::kFeatherAlpha[2]},{0.0f,0.0f,0.0f,scopepip::kFeatherAlpha[3]}};
 alignas(16) const float kScopeBezel[4]={0.75f,0.8f,0.78f,0.55f};
 void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) noexcept {
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
@@ -5613,11 +5617,25 @@ static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,floa
         if(passCamera && (!Readable(passCamera,0x368) ||
            (At<const void*>(passCamera,0x350)!=c.human && At<const void*>(passCamera,0x360)!=c.human)))return;   // another player's view
     } __except(EXCEPTION_EXECUTE_HANDLER){return;}
-    const bool monocular=infantryscope::EyepieceOf(c.look)==sightzoom::Eyepiece::monocular;
-    const float cx=width*0.5f,cy=height*0.5f,r=scopeview::Radius(width,height,monocular);
-    Eyepiece(drawer,ctx,width,height,cx,cy,r,monocular);
-    float focal=CentreFocal(vp,width,height);
-    if(!(focal>0.0f))focal=0.5f*height/std::tan(0.5f*sightzoom::kBaseFov/c.zoom);   // the stock camera's vertical FOV
+    const float cx=width*0.5f,cy=height*0.5f;
+    float r,focal;
+    if(c.lens) {
+        // The picture in the picture (scope_pip.h): the world round the lens unmagnified and clear; the lens's last tenth
+        // darkening into the scope's tube (its rim, kRim of the radius, black); the reticle's angles the scope's FOV's
+        // (the lens shows the stock zoomed camera's picture), not the frame's round it.
+        r=scopepip::LensRadius(width,height);
+        for(int b=0;b<scopepip::kFeathers;++b)
+            for(int i=0;i<scopeview::kSides;++i)
+                Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r*scopepip::FeatherFrom(b),r*scopepip::FeatherTo(b)),kLensFeather[b]);
+        for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,scopepip::RimOut(r)),kScopeDark);
+        focal=scopepip::LensFocal(height,c.lensFov);
+    } else {
+        const bool monocular=infantryscope::EyepieceOf(c.look)==sightzoom::Eyepiece::monocular;
+        r=scopeview::Radius(width,height,monocular);
+        Eyepiece(drawer,ctx,width,height,cx,cy,r,monocular);
+        focal=CentreFocal(vp,width,height);
+        if(!(focal>0.0f))focal=0.5f*height/std::tan(0.5f*sightzoom::kBaseFov/c.zoom);   // the stock camera's vertical FOV
+    }
     const reticle::View v{cx,cy,focal,s,kLineScale};
     reticle::Sketch k{};
     scope::Draw(c.look,reticle::Aim{},v,scope::Field{cx,cy,r},&k);

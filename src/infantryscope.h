@@ -10,12 +10,18 @@
 //  - hud.cpp InfantryScope draws a real optic: the eyepiece (scopeview.h), and the reticle by what the weapon is
 //    (scopereticle.h): a marksman's mil-dot duplex, a quick-firing rifle's combat optic (chevron, drop bars), a rocket
 //    launcher's chevrons and stadiametric rangefinder; every mark sized from the live projection, as the glass is.
+// InfantryScope (EDF6VehicleCrew.ini, scope_pip.h Mode): 0 the stock zoom and crosshair; 1 the whole screen zoomed under
+// the eyepiece above; 2 (the default since 2026-11-10, testhub #32) the picture in the picture: the camera step keeps
+// the frame unmagnified, the lens round the screen's centre shows the scope's power (scope_pip_gpu.cpp at the world's
+// end), the HUD draws the scope's rim and the reticle in the lens only (docs/scope-pip-re.md).
 // The cue is gathered on the game thread (map.cpp MapHumanFrame) and published whole under a lock; the crosshair hook
 // and the HUD read only that. Addresses: RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
 #include "scopereticle.h"
 #include "sightzoom.h"
 #include <cstdint>
+
+struct ID3D11DeviceContext;
 
 namespace crew {
 namespace infantryscope {
@@ -36,9 +42,18 @@ struct InfantryScopeCue {
     const void* human;     // the soldier looking through it (the HUD pass's camera must follow it)
     float zoom;            // the scope's power (weapon +0x784)
     scope::Look look;
+    // InfantryScope=2 (scope_pip.h): the lens drew the scope's picture in the frame's centre lately (scope_pip.h
+    // LensDrew), the frame round it unmagnified; then lensFov is the scope's vertical FOV (the reticle's angles in the
+    // lens). False: the whole screen is zoomed (InfantryScope=1, or the lens not drawing), the eyepiece over it.
+    bool lens=false;
+    float lensFov=0.0f;
 };
 void InfantryScopeFrame(unsigned char* human) noexcept;   // game thread, the local player's frame (MapHumanFrame)
 bool InfantryScopeNow(InfantryScopeCue* out) noexcept;    // any thread: the cue, false when none is fresh
 bool InstallInfantryScope() noexcept;                     // at load: the stock crosshair's draw chained (checked)
 void ResetInfantryScope() noexcept;                       // mission start
+// InfantryScope=2, the picture in the picture (scope_pip.h, docs/scope-pip-re.md). Render thread, at the end of a world
+// view (thermal.cpp EndHook, after the native world end, before the post stage and the HUD): the lens drawn into that
+// view's colour target when it is the scoped soldier's and its camera left the frame unmagnified.
+void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept;
 }  // namespace crew

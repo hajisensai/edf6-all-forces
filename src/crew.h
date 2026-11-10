@@ -286,7 +286,8 @@ struct Config {
     int sightRangeDownKey=0x22;     // ...nearer ('Page Down'; the wheel down too)
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
-    bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
+    int infantryScope=2;            // a soldier's scoped weapon zoomed (infantryscope.cpp, scope_pip.h Mode): 0 stock, 1 the whole
+                                    // screen under a real optic's eyepiece and reticle, 2 the picture in the picture (the lens only)
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
