@@ -130,6 +130,23 @@ class Normals(unittest.TestCase):
 
 
 class Surface(unittest.TestCase):
+    def test_gltf_material_maps_read(self) -> None:
+        """gltf._materials hands each map to pbr_maps (metallic-roughness, occlusion and its strength); a map on
+        another UV set than TEXCOORD_0 is refused, not laid on the wrong texels."""
+        import base64
+        uri = 'data:image/png;base64,' + base64.b64encode(_png(np.full((2, 2, 4), 255))).decode()
+        g = {'images': [{'uri': uri}], 'textures': [{'source': 0}],
+             'materials': [{'name': 'a', 'pbrMetallicRoughness': {'metallicRoughnessTexture': {'index': 0},
+                                                                   'metallicFactor': 0.0},
+                            'occlusionTexture': {'index': 0, 'strength': 0.3}}]}
+        (m,) = gltf._materials(g, [])
+        self.assertIsNotNone(m.metal_rough)
+        self.assertIsNotNone(m.occlusion)
+        self.assertEqual((m.workflow, m.metallic, m.occlusion_strength), ('metal', 0.0, 0.3))
+        g['materials'][0]['occlusionTexture']['texCoord'] = 1
+        with self.assertRaises(gltf.GltfError):
+            gltf._materials(g, [])
+
     def test_metallic_roughness_map_and_factors(self) -> None:
         mr = np.zeros((4, 4, 4), dtype=np.uint8)
         mr[..., 1], mr[..., 2], mr[..., 3] = 200, 100, 255
@@ -161,6 +178,34 @@ class Positions(unittest.TestCase):
         self.assertIs(om.position_layout(mesh, om.PRECISE_EXTENT), mesh)
         wide = om.position_layout(mesh, om.PRECISE_EXTENT + 1)
         self.assertEqual((wide.vsize, [(e.fmt, e.offset) for e in wide.elems]), (32, [(1, 0), (7, 16), (12, 24)]))
+
+    def test_one_model_one_position_format(self) -> None:
+        """A model built a material at a time: a material near the origin still stores floats when the model reaches
+        past the extent, so a vertex it shares with a far one is the same point in both (half: 3.9 mm off at 12 m)."""
+        import struct
+        layout = [VElem(7, 0, 0, 'BINORMAL'), VElem(7, 8, 0, 'TANGENT'), VElem(7, 16, 0, 'NORMAL'),
+                  VElem(7, 24, 0, 'POSITION'), VElem(12, 32, 0, 'TEXCOORD'), VElem(1, 40, 0, 'BLENDWEIGHT'),
+                  VElem(21, 56, 0, 'BLENDINDICES')]
+        template = Mesh(bytes(4), 0, 0, 60, layout, 0, b'', b'')
+        shared = (12.0013, 1.0, 0.0)
+
+        def tri(name: str, far: float) -> om.Part:
+            vs = [om.Vertex(p, (0.0, 0.0, 1.0), (0.0, 0.0)) for p in (shared, (far, 1.0, 0.0), (far, 2.0, 0.0))]
+            return om.Part(name, name, vs, [(0, 1, 2)])
+
+        near, wide = tri('glass', 11.0), tri('hull', 20.0)
+        extent = om.reach([near, wide])
+        meshes = [om.build_meshes(template, [(p, om.rigid(p, 3))], material=k, extent=extent)[0]
+                  for k, p in enumerate((near, wide))]
+        firsts = []
+        for me in meshes:
+            pos = next(e for e in me.elems if e.name.lower() == 'position')
+            self.assertEqual(pos.fmt, 1)
+            firsts.append(struct.unpack_from('<3f', me.vdata, pos.offset))
+        self.assertEqual(firsts[0], firsts[1])
+        # the near material alone (no model extent) would have stored halves
+        alone = om.build_meshes(template, [(near, om.rigid(near, 3))], material=0, extent=0.0)[0]
+        self.assertEqual(next(e.fmt for e in alone.elems if e.name.lower() == 'position'), 7)
 
 
 if __name__ == '__main__':

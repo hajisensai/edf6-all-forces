@@ -16,7 +16,9 @@ The pipeline (each step a plain function, the caller decides what goes where):
     skins_by_reference(part, ref, bone_map)           per-vertex bone influences copied from a reference mesh whose
                                                       triangles coincide (a kitbash of stock parts), bones mapped
     rigid(part, bone)                                 every vertex 100 % on one bone
-    build_meshes(template, [(part, skins)], material) skinned MDB meshes in the template mesh's vertex layout,
+    build_meshes(template, [(part, skins)], material, extent=)
+                                                      skinned MDB meshes in the template mesh's vertex layout (float
+                                                      positions for a model whose reach(...) passes PRECISE_EXTENT),
                                                       tangents / binormals from the UVs, split below 65536 vertices
     model_dir(name)                                   where a user-supplied model folder is ($EDF6VC_MODELS, the release's
                                                       `models`, the developer's folder)
@@ -743,25 +745,34 @@ def precise_positions(mesh: Mesh) -> Mesh:
     return replace(mesh, vsize=mesh.vsize + 8, elems=elems, vdata=b'', indices=b'')
 
 
+def reach(parts: Iterable[Part]) -> float:
+    """The largest |coordinate| of the parts' vertices (0 without any): the extent position_layout takes. A model
+    built in several build_meshes calls (one a material) passes its whole reach to each, so that its meshes store
+    positions alike: a vertex two materials share (the C-130's canopy glass and hull: 171 of them, up to 3.9 mm apart
+    as half and float) lands on the same point in both."""
+    return max((abs(c) for p in parts for v in p.verts for c in v.pos), default=0.0)
+
+
 def position_layout(template: Mesh, extent: float) -> Mesh:
     """The layout a model whose vertices reach `extent` metres (the largest |coordinate|) packs into: `template`'s, its
     positions widened past PRECISE_EXTENT."""
     return precise_positions(template) if extent > PRECISE_EXTENT else template
 
 
-def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material: int) -> list[Mesh]:
+def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material: int, *, extent: float
+                 ) -> list[Mesh]:
     """Skinned meshes (material index `material`, mesh_index 0: the caller numbers them) of the pieces' triangles in
     `template`'s vertex layout, each with fewer than 65536 vertices (a piece is never split across meshes unless it
     alone is too big). flags = skinned, max influences actually used (1..4).
     Two kinds of triangle draw nothing and are not written (drawn_triangles): one with two corners at the same point as
     written (no area; the Sazabi's OBJ has 1,604), and one whose three vertices, packed, are those of one written before in
     the same turn (the same surface drawn twice). Every vertex's tangent frame is still taken over all of its piece's
-    triangles, so what is written is byte for byte what was, less those. Pieces reaching past PRECISE_EXTENT are
-    written with float positions (position_layout)."""
+    triangles, so what is written is byte for byte what was, less those. `extent` is the whole model's (reach(): the
+    largest |coordinate| of all its parts, not only these): past PRECISE_EXTENT positions are written as floats
+    (position_layout), in every call for the model alike."""
     if not any(e.name.lower() == 'blendindices' for e in template.elems):
         raise ObjError('the template mesh is not skinned')
-    template = position_layout(template, max((abs(c) for part, _s in pieces for v in part.verts for c in v.pos),
-                                             default=0.0))
+    template = position_layout(template, max(extent, reach(p for p, _s in pieces)))
     out: list[Mesh] = []
     rows: list[bytes] = []
     idx: list[int] = []

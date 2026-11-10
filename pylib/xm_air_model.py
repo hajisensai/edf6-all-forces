@@ -171,6 +171,7 @@ def build_model(game, folder: str, key: str,  # noqa: ANN001 - rootcpk.Game
     md = Mdb(body_md.version, names, [], [], [], [])
     tex: dict[str, bytes] = {}
     meshes = []
+    extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for m in info['materials']:
         if m.get('dropped'):
             continue
@@ -178,7 +179,7 @@ def build_model(game, folder: str, key: str,  # noqa: ANN001 - rootcpk.Game
         tex.update(files)
         md, mi = om.add_material(md, body_md, BODY_HOST[2], f'{key}_{m["name"]}', slots)
         group = [(p, b) for p, b in pieces if p.material == m['name']]
-        meshes += om.build_meshes(body_mesh, [(p, om.rigid(p, b)) for p, b in group], mi)
+        meshes += om.build_meshes(body_mesh, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     skel = procmesh.bones(joints, key, posed, 1.0)

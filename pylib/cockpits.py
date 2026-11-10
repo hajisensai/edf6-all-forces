@@ -366,7 +366,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             elif p.name == 'metallic': v[0] = 0.0
             params.append(replace(p,value=v))
         md.materials[mi] = replace(md.materials[mi],params=params)
-        meshes += om.build_meshes(tmpl_mesh, pieces, mi)
+        meshes += om.build_meshes(tmpl_mesh, pieces, mi, extent=0.0)     # precise_template: float positions already
     host = md.objects[0]
     meshes = [replace(me, mesh_index=len(host.meshes) + k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(host, meshes=host.meshes + meshes)] + list(md.objects[1:]), buffer_order=None)

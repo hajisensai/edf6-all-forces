@@ -13,8 +13,8 @@
 
 Only what a static export uses: no skins, no animations, no sparse accessors, no Draco or meshopt compression (a
 material in the older KHR_materials_pbrSpecularGlossiness workflow gives its diffuse texture and factor as the base
-colour, its specular-glossiness map and factors as they are), triangle primitives (mode 4) only. Anything else is an
-error, not a guess.
+colour, its specular-glossiness map and factors as they are), triangle primitives (mode 4) only, textures on
+TEXCOORD_0 without KHR_texture_transform only. Anything else is an error, not a guess.
 """
 from __future__ import annotations
 
@@ -154,6 +154,11 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
         def image(ref: dict | None) -> tuple[bytes, str] | None:
             if ref is None or buffers is None:
                 return None
+            if ref.get('texCoord', 0) != 0 or 'KHR_texture_transform' in ref.get('extensions', {}):
+                # only TEXCOORD_0 is read: a map on another set (an occlusion map on the second UVs) or moved by a
+                # transform would be laid on the wrong texels
+                raise GltfError(f'material {m.get("name", i)}: a texture on texCoord {ref.get("texCoord", 0)} or '
+                                'with KHR_texture_transform is not read')
             source = g['textures'][ref['index']].get('source')
             return None if source is None else _image(g, source, buffers, base_dir)
 

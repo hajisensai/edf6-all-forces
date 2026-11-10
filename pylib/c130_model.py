@@ -165,12 +165,13 @@ def build_model(game, folder: str, model: str, textures: bool = True) -> tuple[M
     md = Mdb(host_md.version, names, [], [], [], [])
     tex: dict[str, bytes] = {}
     meshes = []
+    extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for material in entry['materials']:
         files, slots = _textures(folder, model, material, textures)
         tex.update(files)
         md, mi = om.add_material(md, host_md, BODY_HOST[2], f'c130_{material.lower()}', slots)
         group = [(p, b) for p, b in pieces if p.material == material]
-        meshes += om.build_meshes(host_mesh, [(p, om.rigid(p, b)) for p, b in group], mi)
+        meshes += om.build_meshes(host_mesh, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     skel = procmesh.bones(joints, model, posed, 1.0)

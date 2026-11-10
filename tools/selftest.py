@@ -5385,7 +5385,7 @@ def obj_meshes_split_below_65536() -> None:
     # ones drawn as points, which build_meshes leaves out)
     big = om.merge([om.Part('c', 'm', [om.Vertex(om.add(v.pos, (k % 14 * 2.0, k // 14 % 14 * 2.0, k // 196 * 2.0)), v.normal, v.uv)
                                        for v in cube.verts], cube.tris) for k in range(2800)])
-    meshes = om.build_meshes(template, [(big, om.rigid(big, 3))], material=2)
+    meshes = om.build_meshes(template, [(big, om.rigid(big, 3))], material=2, extent=0.0)
     assert len(meshes) == 2 and all(me.nverts < 0x10000 and me.material == 2 for me in meshes)
     assert sum(len(me.indices) // 6 for me in meshes) == len(big.tris)
     me = meshes[0]
@@ -5420,7 +5420,7 @@ def obj_meshes_skip_what_draws_nothing() -> None:
              (2, 1, 0)]           # (0, 1, 2) wound the other way: the back face, kept
     part = om.Part('cube', 'm', verts, clean + extra)
     skins = om.rigid(part, 3)
-    (me,) = om.build_meshes(template, [(part, skins)], material=0)
+    (me,) = om.build_meshes(template, [(part, skins)], material=0, extent=0.0)
     frames = om.tangent_frames(part)
     rows = [pack_vertex(layout, 60, om._row(layout, v, f, s)) for v, f, s in zip(verts, frames, skins)]
     out = [me.vdata[k * 60:(k + 1) * 60] for k in range(me.nverts)]

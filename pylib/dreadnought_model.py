@@ -311,6 +311,7 @@ def build_model(game, folder: str, model: str,  # noqa: ANN001 - rootcpk.Game
     md = Mdb(body_md.version, names, [], [], [], [])
     tex: dict[str, bytes] = {}
     meshes = []
+    extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for material in entry['materials']:
         lit, files, slots = _textures(folder, model, material)
         tex.update(files)
@@ -319,7 +320,7 @@ def build_model(game, folder: str, model: str,  # noqa: ANN001 - rootcpk.Game
         if lit:
             md = _with_light(md, mi, LIGHT_STRENGTH)
         group = [(p, b) for p, b in pieces if p.material == material]
-        meshes += om.build_meshes(tmpl, [(p, om.rigid(p, b)) for p, b in group], mi)
+        meshes += om.build_meshes(tmpl, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     skel = procmesh.bones(joints, model, posed, 1.0)

@@ -318,7 +318,7 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
                                  {'albedo': albedo_of(mat), 'normal': NORMAL_TEX, 'param_r_m_occ_hr': RMO_TEX})
         pieces = [(p, om.rigid(p, body)) for p in hull if p.material == mat]
         pieces += [(p, om.rigid(p, drill_bone)) for p in drill if p.material == mat]
-        meshes += om.build_meshes(template, pieces, mi)
+        meshes += om.build_meshes(template, pieces, mi, extent=om.reach([*hull, *drill]))
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)
