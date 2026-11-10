@@ -35,11 +35,6 @@ struct StoreSpec {
     StoreRole role;
     float mass;              // kg a round
     float drag;              // a round's share of the clean jet's parasitic drag
-    // What it hangs on (pylib/vcobjects.py Store.pylon_mass / pylon_drag / per_pylon): ceil(rounds / perPylon) pylons for a
-    // holder of `rounds`, each pylonMass kg and pylonDrag of the clean jet's drag, loaded or spent; perPylon 0: none.
-    float pylonMass=0.0f;
-    float pylonDrag=0.0f;
-    unsigned perPylon=0;
     unsigned group=0;        // nonzero: one selectable loadout spanning its native barrel holders
     unsigned barrel=0;       // original native holder index for that linked barrel
     bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
@@ -55,6 +50,12 @@ struct StoreSpec {
     // turret by itself with nobody in it.
     unsigned char seat=0;
     StoreTurret turret{};
+    // What it hangs on (pylib/vcobjects.py Store.pylon_mass / pylon_drag / per_pylon): ceil(rounds / perPylon) pylons for a
+    // holder of `rounds`, each pylonMass kg and pylonDrag of the clean jet's drag, loaded or spent; perPylon 0: none. Last, so the
+    // hand-written specs (playerjet_board.inc kSpecials, the tests) keep their fields' meaning.
+    float pylonMass=0.0f;
+    float pylonDrag=0.0f;
+    unsigned perPylon=0;
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };

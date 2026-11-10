@@ -1,5 +1,5 @@
 // What stores weigh and drag (test hub #39, the player: 「重量应该和挂载挂钩，某些挂载投完以后应该只有挂架重量（如有的话）」;
-// docs/stores-re.md「重量和阻力」). Pure math, no EDF.dll: stores.cpp BurdenOf / BurdenOver and heli.cpp's stock-helicopter
+// docs/stores-re.md §12「重量和阻力：挂架」). Pure math, no EDF.dll: stores.cpp BurdenOf / BurdenOver and heli.cpp's stock-helicopter
 // weighing call it, tests/store_burden_test.cpp checks it.
 //  - a holder loaded with `rounds` rounds of a store hangs them on ceil(rounds / perPylon) pylons (a rail, a rack, a pod:
 //    StoreSpec::perPylon, pylib/vcobjects.py Store.per_pylon); its rounds left weigh and drag each their own, its pylons
@@ -41,7 +41,7 @@ inline Burden Ratio(float cleanKg,float kg,float drag) noexcept {
 // A stock helicopter's flight params the burden changes (veh+0x1610 lift per rotor speed, +0x1630 the horizontal blend),
 // as its physics step reads them for a mass ratio `mass` (>= 1; less is taken as 1: nothing aboard lightens it).
 struct HeliFlight { float lift,blend; };
-// A stock helicopter class's clean mass, kg (heli.cpp HeliType::mass; docs/stores-re.md §8): the 506 class flies the N9
+// A stock helicopter class's clean mass, kg (heli.cpp HeliType::mass; docs/stores-re.md §12): the 506 class flies the N9
 // Eros and the Heron 602 alike (one runtime class, no field tells them apart), a medium utility helicopter's 5.5 t; the
 // 409 Nereid an attack helicopter's 6.8 t; the 410 Brute a heavy gunship's 15 t (it carries no stores: stores.cpp builds
 // none for its class). What matters is the ratio its stores make with it.
