@@ -6259,6 +6259,55 @@ def damage_stats_wired() -> None:
 
 
 @test
+def damage_numbers_wired() -> None:
+    """The damage numbers' colours and the allies' numbers (src/dmgnum.cpp, README 伤害数字, docs/damage-numbers-re.md):
+    its ini keys are read, range-checked, shipped and documented; the addresses it patches are the doc's; it is
+    installed, built and its offline check is wired; with the game present every stock signature it checks is the
+    bytes EDF.dll has there, the patched span holds no jump target, and the shim disassembles to the calls it means."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/damage-numbers-re.md')
+    code, header, cmake = src('src/dmgnum.cpp'), src('src/dmgnum.h'), src('CMakeLists.txt')
+    for key in ('DamageNumberColors', 'DamageNumberWeakColor', 'DamageNumberFriendlyColor', 'DamageNumberAllies',
+                'DamageNumberAllyColor'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('DamageNumberWeakColor', 'DamageNumberFriendlyColor', 'DamageNumberAllyColor'):
+        assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
+    consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+    for name in ('kColorStores', 'kColorBack', 'kPlayerNotice'):
+        assert f'`{consts[name]:#X}`'.replace('0X', '0x') in doc, name
+    assert 'InstallDamageNumbers();' in plugin and 'src/dmgnum.cpp' in cmake
+    assert 'add_executable(dmgnum_check' in cmake and 'dmgnum_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        return
+    import edfre
+    stores = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(r'kColorBytes\[\]=\{(.*?)\};', code, re.S).group(1)))
+    assert edfre.img[consts['kColorStores']:consts['kColorStores'] + len(stores)] == stores, 'the colour stores'
+    assert consts['kColorStores'] + len(stores) == consts['kColorBack'], 'the patched span ends where the shim returns'
+    body = re.search(r'kSigs\[\]=\{(.*?)\n\};', code, re.S).group(1)
+    for m in re.finditer(r'\{(0x[0-9A-F]+|kPlayerNotice),\{([^}]*)\},(\d+)\}', body):
+        rva = consts['kPlayerNotice'] if m.group(1) == 'kPlayerNotice' else int(m.group(1), 16)
+        sig = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', m.group(2)))
+        assert len(sig) == int(m.group(3)) and edfre.img[rva:rva + len(sig)] == sig, hex(rva)
+    assert len(re.findall(r'\{(0x[0-9A-F]+|kPlayerNotice),\{', body)) == 6, 'every signature parsed'
+    lo, hi = consts['kColorStores'] + 1, consts['kColorBack']
+    for ins in edfre.md.disasm(edfre.img[0x547C30:0x548700], 0x547C30):
+        if ins.mnemonic.startswith('j') or ins.mnemonic == 'call':
+            try:
+                to = int(ins.op_str, 16)
+            except ValueError:
+                continue
+            assert not lo <= to < hi, f'{ins.address:#x} jumps into the patched span'
+    stub_src = re.sub(r'//[^\n]*', '', re.search(r'kStub\[\]=\{(.*?)\};', header, re.S).group(1))
+    stub = bytes(int(b, 0) for b in re.findall(r'0x[0-9A-F]+|\b0\b', stub_src))
+    asm = [(i.mnemonic, i.op_str) for i in edfre.md.disasm(stub, 0)]
+    assert asm[:8] == [('push', 'rcx'), ('sub', 'rsp, 0x38'), ('mov', 'qword ptr [rsp + 0x20], rcx'),
+                       ('movss', 'dword ptr [rsp + 0x28], xmm6'), ('mov', 'rcx, rbp'), ('mov', 'rdx, rdi'), ('mov', 'r8, r13'),
+                       ('lea', 'r9, [rsp + 0x40]')], asm[:8]
+    assert [a[0] for a in asm[8:13]] == ['movabs', 'call', 'add', 'pop', 'jmp'], asm[8:]
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the

@@ -14,6 +14,8 @@
 //    attack): the attacker itself names the source (an enemy's kind is its weapon).
 // 0x54A586 itself is left alone: subcarrier.cpp checks that its call still reaches 0x547C30 (DamageCallReaches).
 #include "crew.h"
+#include "damagestats.h"
+#include "dmgnum.h"
 #include "edf/host.h"
 #include "edf/patch.h"
 #include "hudtext.h"
@@ -388,6 +390,14 @@ template<class Fn> int Redirect(unsigned site,unsigned target,void* hook,Fn* nex
 }
 }  // namespace
 
+dmgstat::Side AttackerSide(unsigned char* attacker) noexcept {
+    if(!attacker || !Readable(attacker,kTeam+4))return dmgstat::Side::world;
+    if(EnemyTeam(At<std::int32_t>(attacker,kTeam)))return dmgstat::Side::enemy;
+    return SideOf(attacker,nullptr);
+}
+
+bool WeakPartObject(const unsigned char* victim) noexcept { return victim && dmgnum::WeakPartClass(ClassOf(victim)); }
+
 bool InstallDamageStats() noexcept {
     __try {
         if(!HookDamage()){Log("HOOK damageStats: 0x547C30's head is not the stock one: the statistics are off");return false;}
@@ -401,6 +411,7 @@ bool InstallDamageStats() noexcept {
 }
 
 void ResetDamageStats() noexcept {
+    LogDamageNumbers();
     AcquireSRWLockExclusive(&tagLock);
     std::memset(tags,0,sizeof(tags));
     ReleaseSRWLockExclusive(&tagLock);

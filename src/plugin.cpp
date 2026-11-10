@@ -410,6 +410,9 @@ void Validate(Config& n) noexcept {
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
     n.damageStatsKey=static_cast<int>(FixInt("DamageStatsKey",n.damageStatsKey,0,254));
+    n.damageNumberWeakColor=static_cast<int>(FixInt("DamageNumberWeakColor",n.damageNumberWeakColor,0,0xFFFFFF));
+    n.damageNumberFriendlyColor=static_cast<int>(FixInt("DamageNumberFriendlyColor",n.damageNumberFriendlyColor,0,0xFFFFFF));
+    n.damageNumberAllyColor=static_cast<int>(FixInt("DamageNumberAllyColor",n.damageNumberAllyColor,0,0xFFFFFF));
     n.debugSpawnKey=static_cast<int>(FixInt("DebugSpawnKey",n.debugSpawnKey,0,254));
     n.debugSpawnPrevKey=static_cast<int>(FixInt("DebugSpawnPrevKey",n.debugSpawnPrevKey,0,254));
     n.debugSpawnNextKey=static_cast<int>(FixInt("DebugSpawnNextKey",n.debugSpawnNextKey,0,254));
@@ -860,6 +863,11 @@ void LoadConfig() noexcept {
     n.mapMarchPace=ReadBool(L"MapMarchPace",n.mapMarchPace);
     n.damageStats=ReadBool(L"DamageStats",n.damageStats);
     n.damageStatsKey=ReadInt(L"DamageStatsKey",static_cast<DWORD>(n.damageStatsKey));
+    n.damageNumberColors=ReadBool(L"DamageNumberColors",n.damageNumberColors);
+    n.damageNumberWeakColor=ReadInt(L"DamageNumberWeakColor",static_cast<DWORD>(n.damageNumberWeakColor));
+    n.damageNumberFriendlyColor=ReadInt(L"DamageNumberFriendlyColor",static_cast<DWORD>(n.damageNumberFriendlyColor));
+    n.damageNumberAllies=ReadBool(L"DamageNumberAllies",n.damageNumberAllies);
+    n.damageNumberAllyColor=ReadInt(L"DamageNumberAllyColor",static_cast<DWORD>(n.damageNumberAllyColor));
     n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);   // off unless the ini says 1 (an old ini without it: off)
     n.debugSpawnKey=ReadInt(L"DebugSpawnKey",static_cast<DWORD>(n.debugSpawnKey));
     n.debugSpawnPrevKey=ReadInt(L"DebugSpawnPrevKey",static_cast<DWORD>(n.debugSpawnPrevKey));
@@ -1065,6 +1073,8 @@ void LoadConfig() noexcept {
         n.vehicleFire5Button,n.vehicleFire6Button,n.autoTurrets,n.vehicleAutoTurretKey,n.vehicleAutoTurretButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
+    Log("CONFIG damageNumbers colours=%d weak=0x%06X friendly=0x%06X allies=%d ally=0x%06X",n.damageNumberColors,
+        n.damageNumberWeakColor,n.damageNumberFriendlyColor,n.damageNumberAllies,n.damageNumberAllyColor);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
@@ -1374,6 +1384,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
     InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
+    InstallDamageNumbers(); // the damage notice's colours (dmgnum.cpp): weak spots, friendly fire, the allies' numbers
     InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
