@@ -206,6 +206,34 @@ class JetHolderTests(unittest.TestCase):
         self.assertEqual((nose['xm_gun_l'][2], nose['xm_gun_r'][2]), (6.0, 6.0))      # no gun: the jets' own, at the nose
 
 
+class TextureSideTests(unittest.TestCase):
+    """Every X-Morph family resamples its maps to xm_units.TEXTURE_MIN_SIDE before block compression (docs/xmorph-names.md
+    「贴图」): the aircraft's (xm_air_model) and the walkers' (xm_rig) as the ground units' (prep_xmorph MIN_SIDE)."""
+
+    @staticmethod
+    def _side(dds: bytes) -> tuple[int, int]:
+        return struct.unpack_from('<II', dds, 12)[::-1]        # DDS header: height, width -> (width, height)
+
+    def test_every_family_resamples_to_the_same_side(self) -> None:
+        from PIL import Image
+        import xm_air_model
+        import xm_rig
+        import xm_units
+        side = xm_units.TEXTURE_MIN_SIDE
+        self.assertEqual(px.MIN_SIDE, side)
+        with tempfile.TemporaryDirectory() as d:
+            Image.new('RGBA', (64, 64), (90, 100, 110, 255)).save(os.path.join(d, 'col.png'))
+            Image.new('RGBA', (64, 64), (128, 128, 255, 255)).save(os.path.join(d, 'nor.png'))
+            material = {'name': 'hull', 'albedo': 'col.png', 'normal': 'nor.png'}
+            files, _slots = xm_air_model._textures(d, 'xm_test', material)
+            self.assertEqual(self._side(files['edf6vc_xm_test_hull_df.dds']), (side, side))
+            self.assertEqual(self._side(files['edf6vc_xm_test_hull_nm.dds']), (side, side))
+            spec = xm_rig.Spec(d, {}, {})
+            out = xm_rig._material_textures(spec, material)
+            self.assertEqual(self._side(out['albedo'][1]), (side, side))
+            self.assertEqual(self._side(out['normal'][1]), (side, side))
+
+
 def _box(c, h) -> tuple[np.ndarray, np.ndarray]:  # noqa: ANN001
     """A closed box (EDF frame) wound outward."""
     c, h = np.asarray(c, float), np.asarray(h, float)
