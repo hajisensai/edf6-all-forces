@@ -20,7 +20,8 @@ Developer side:
                                                          a share package to the public page /download (several
                                                          zips: one version of several files, e.g. the model pack's
                                                          parts in order; --version required then; --part-mb: a
-                                                         slow uplink's smaller requests, default 64)
+                                                         slow uplink's smaller requests, default 64; parts
+                                                         already there are asked about first, not resent)
   python tools/testhub.py plan [--group G]                a group's level outline and proposals (players' text fenced)
   python tools/testhub.py digests [DIR]                   upload tools/make_mission_digest.py's output (default tmp/digests)
   case status: todo / verify (fixed, to be checked) / pass / fail / done / closed.
@@ -959,8 +960,8 @@ def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, par
     """A share package to its slot (main: the main package, models: the model pack) on the public page /download, as one
     version of one or more files in the given order (the model pack's ...-1of2.zip, ...-2of2.zip: models-required.json's
     model_packs; the page tells players to download them all and extract them into the same folder). Each file is cut
-    into parts, each uploaded with its SHA-256 (R2 checks it on the way in); a part already there with the same hash is
-    skipped, so a cut-off run is rerun as is. The one publish at the end switches the slot to this version, all files."""
+    into parts, each asked about first (GET) and uploaded with its SHA-256 (R2 checks it on the way in) only if not
+    already there with the same hash and size, so a cut-off run is rerun as is and sends only what is missing. The one publish at the end switches the slot to this version, all files."""
     names = [os.path.basename(p) for p in zpaths]
     if not names or len({n.lower() for n in names}) != len(names):
         raise SystemExit('share: give each zip once')
@@ -987,9 +988,13 @@ def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, par
                 part = {'name': f'part-{n:03d}', 'offset': at, 'length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
                 q = urllib.parse.urlencode({'slot': slot, 'version': version, 'file': k, 'name': part['name'],
                                             'sha256': part['sha256']})
-                with hub.request('PUT', f'/api/share/part?{q}', data, {'Content-Type': 'application/octet-stream'},
-                                 timeout=900) as r:
-                    done = json.loads(r.read().decode('utf-8'))
+                # Ask first (GET, no body): a part already there with this hash and size is not sent again, so a
+                # resumed upload over a slow link costs one small request per finished part.
+                done = hub.get_json(f'/api/share/part?{q}')
+                if not (done.get('existed') and done.get('size') == len(data)):
+                    with hub.request('PUT', f'/api/share/part?{q}', data, {'Content-Type': 'application/octet-stream'},
+                                     timeout=900) as r:
+                        done = json.loads(r.read().decode('utf-8'))
                 parts.append(part)
                 print(f"  {part['name']}: {(at + len(data)) >> 20}/{size >> 20} MB"
                       f"{' (already there)' if done.get('existed') else ''}", flush=True)

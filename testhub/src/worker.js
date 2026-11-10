@@ -10,7 +10,7 @@ import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
 import { outlineRoute } from './outline.js';
-import { shareRoute, putSharePart, publishShare } from './share.js';
+import { shareRoute, putSharePart, headSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
@@ -123,6 +123,7 @@ async function route(request, env) {
   if (path === '/api/build/part' && method === 'PUT') { need(dev); return json(await putBuildPart(request, env, url)); }
   if (path === '/api/build/finish' && method === 'POST') { need(dev); return json(await finishBuild(request, env, url)); }
   if (path === '/api/build/abort' && method === 'POST') { need(dev); return json(await abortBuild(env, url)); }
+  if (path === '/api/share/part' && method === 'GET') { need(dev); return json(await headSharePart(request, env, url)); }
   if (path === '/api/share/part' && method === 'PUT') { need(dev); return json(await putSharePart(request, env, url)); }
   if (path === '/api/share/publish' && method === 'POST') { need(dev); return json(await publishShare(request, env)); }
   if (path === '/api/reports' && method === 'GET') { need(dev); return json(await reportsSince(env, Number(url.searchParams.get('since') || 0))); }

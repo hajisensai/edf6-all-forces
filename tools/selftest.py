@@ -15569,12 +15569,21 @@ def share_publishes_every_file_of_a_version() -> None:
 
         def __init__(self) -> None:
             self.calls: list[tuple] = []
+            self.held: dict[tuple, int] = {}
+
+        def get_json(self, path):
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(path).query))
+            assert path.startswith('/api/share/part?'), path
+            self.calls.append(('ask', q['file'], q['name']))
+            size = self.held.get((q['slot'], q['version'], q['file'], q['name']))
+            return {'name': q['name'], 'existed': True, 'size': size} if size is not None else {'name': q['name'], 'existed': False}
 
         def request(self, method, path, data=None, headers=None, timeout=60):
             q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(path).query))
             assert method == 'PUT' and path.startswith('/api/share/part?'), path
             assert hashlib.sha256(data).hexdigest() == q['sha256'], q
             self.calls.append(('part', q['slot'], q['version'], q['file'], q['name'], len(data)))
+            self.held[(q['slot'], q['version'], q['file'], q['name'])] = len(data)
             return contextlib.nullcontext(io.BytesIO(b'{"ok": true}'))
 
         def post_json(self, path, body):
@@ -15591,14 +15600,21 @@ def share_publishes_every_file_of_a_version() -> None:
         hub = FakeHub()
         with contextlib.redirect_stdout(io.StringIO()):
             testhub._share(hub, paths, 'models', 'm1', 'notes', part_size=1000)
+            # Rerun of the same version: every part is asked about and found, none is sent again; the publish still goes.
+            first = len(hub.calls)
+            testhub._share(hub, paths, 'models', 'm1', 'notes', part_size=1000)
+            rerun = hub.calls[first:]
+            del hub.calls[first:]
             try:
                 testhub._share(FakeHub(), paths, 'models', '', 'notes', part_size=1000)
                 raise AssertionError('several zips without --version')
             except SystemExit:
                 pass
-    assert [c[:6] for c in hub.calls[:-1]] == [
+    assert [c[:6] for c in hub.calls[:-1] if c[0] == 'part'] == [
         ('part', 'models', 'm1', '0', 'part-000', 1000), ('part', 'models', 'm1', '0', 'part-001', 1000),
         ('part', 'models', 'm1', '0', 'part-002', 560), ('part', 'models', 'm1', '1', 'part-000', 700)], hub.calls
+    assert [c for c in hub.calls if c[0] == 'ask'] == [('ask', str(k), f'part-00{n}') for k, n in ((0, 0), (0, 1), (0, 2), (1, 0))]
+    assert [c[0] for c in rerun] == ['ask'] * 4 + ['publish'], rerun
     kind, path, body = hub.calls[-1]
     assert (kind, path, body['slot'], body['version'], body['notes']) == ('publish', '/api/share/publish', 'models', 'm1', 'notes')
     assert [(f['name'], f['size_bytes'], f['sha256'], len(f['parts'])) for f in body['files']] == [

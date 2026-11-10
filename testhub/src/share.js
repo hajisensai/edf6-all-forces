@@ -130,10 +130,7 @@ function slotOf(value) {
   return value;
 }
 
-// PUT /api/share/part?slot=&version=&file=k&name=part-NNN&sha256=: one part of the version's file k, streamed into R2,
-// which checks it against the SHA-256. A part already there with the same hash answers ok, so a publish cut off half
-// way is simply run again.
-export async function putSharePart(request, env, url) {
+function partParams(url) {
   const q = url.searchParams;
   const slot = slotOf(q.get('slot'));
   const version = q.get('version') || '';
@@ -143,6 +140,26 @@ export async function putSharePart(request, env, url) {
   if (!safe(version) || !FILE.test(file) || Number(file) >= MAX_FILES || !PART.test(name) || !HEX64.test(sha256)) {
     throw new HttpError(400, `version=[A-Za-z0-9._-], file=0..${MAX_FILES - 1}, name=part-NNN and sha256= required`);
   }
+  return { slot, version, file, name, sha256 };
+}
+
+// GET /api/share/part?(same query as the PUT): does R2 already hold this part with this hash? The client asks before
+// sending the bytes, so a resumed upload over a slow link does not send the parts already there again.
+export async function headSharePart(request, env, url) {
+  const { slot, version, file, name, sha256 } = partParams(url);
+  const key = `share/${slot}/${version}/${file}/${name}`;
+  const old = await env.FILES.head(key);
+  if (!old) return { name, existed: false };
+  const had = old.checksums?.sha256 ? hex(old.checksums.sha256) : '';
+  if (had !== sha256) throw new HttpError(409, `${key} already holds other bytes; publish under a new version`);
+  return { name, existed: true, size: old.size };
+}
+
+// PUT /api/share/part?slot=&version=&file=k&name=part-NNN&sha256=: one part of the version's file k, streamed into R2,
+// which checks it against the SHA-256. A part already there with the same hash answers ok, so a publish cut off half
+// way is simply run again.
+export async function putSharePart(request, env, url) {
+  const { slot, version, file, name, sha256 } = partParams(url);
   const length = Number(request.headers.get('content-length') || 0);
   if (!length) throw new HttpError(400, 'content-length required');
   const key = `share/${slot}/${version}/${file}/${name}`;

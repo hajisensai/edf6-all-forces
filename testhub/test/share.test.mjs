@@ -116,6 +116,13 @@ test('a part is accepted again only with the same bytes; the publish refuses gap
   assert.equal((await (await put(data)).json()).existed, true);
   const other = zipOf(1000, 7);
   assert.equal((await put(other, await sha256(other))).status, 409);
+  // GET asks without sending: unknown part, held part, another hash, and developers only.
+  const ask = (name, h = sha, user = 'dev') => call(e, `/api/share/part?slot=main&version=v1&file=0&name=${name}&sha256=${h}`, { user });
+  assert.deepEqual(await (await ask('part-009')).json(), { name: 'part-009', existed: false });
+  assert.deepEqual(await (await ask('part-000')).json(), { name: 'part-000', existed: true, size: 1000 });
+  assert.equal((await ask('part-000', await sha256(other))).status, 409);
+  assert.equal((await ask('part-000', sha, null)).status, 401);
+  assert.equal((await ask('part-000', sha, 'alice')).status, 403);
   const publish = (parts, size = 1000, more = []) => call(e, '/api/share/publish', {
     user: 'dev', method: 'POST', data: { slot: 'main', version: 'v1', files: [{ name: 'a.zip', size_bytes: size, sha256: sha, parts }, ...more] },
   });
