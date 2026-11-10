@@ -3713,7 +3713,8 @@ def proteus_wired() -> None:
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
     assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::barrageBurst)+1' in bay   # the Proteus's before the ultimate's
-    assert 'PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));' in src('src/jet_spawn.cpp')
+    assert ('PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) || '
+            'ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));') in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')

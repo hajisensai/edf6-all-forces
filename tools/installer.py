@@ -741,7 +741,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('c130', c130), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
