@@ -2918,11 +2918,13 @@ bool PickUp(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept 
     return true;
 }
 
-int CancelBoarding(unsigned char* top) noexcept {
+// `top`'s members walking to a seat stop (`onlyTo`: only those walking to that vehicle's).
+int CancelBoarding(unsigned char* top,const void* onlyTo=nullptr) noexcept {
     unsigned char* members[kMaxSquad];
     const int n=Members(top,members,kMaxSquad);
     int cancelled=0;
-    for(int i=0;i<n;++i)if(Soldier* s=FindSoldier(members[i]); s && s->boardV){s->boardV=ObjRef{};++cancelled;}
+    for(int i=0;i<n;++i)
+        if(Soldier* s=FindSoldier(members[i]); s && s->boardV && (!onlyTo || s->boardV.Is(onlyTo))){s->boardV=ObjRef{};++cancelled;}
     return cancelled;
 }
 
@@ -3082,7 +3084,7 @@ bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=n
 // `param`: DISMOUNT ALL's choice (mapcmd_logic.h DismountLeaves: all but the driver, some classes' riders); `onlyIn`: only
 // the riders of that vehicle (a squad riding along with its player gets out of the player's vehicle, not of another).
 bool DismountSquad(unsigned char* top,int* affected=nullptr,bool all=true,std::uint32_t param=0,const unsigned char* onlyIn=nullptr) noexcept {
-    const int cancelled=onlyIn ? 0 : CancelBoarding(top);
+    const int cancelled=CancelBoarding(top,onlyIn);   // riding along: those still walking to that vehicle stop too
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
     int off=0;
