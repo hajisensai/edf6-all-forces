@@ -32,13 +32,18 @@ CSV = os.path.join(ROOT, 'docs', 'weapons.csv')
 OUT = os.path.join(ROOT, 'src', 'npc_tiers.inc')
 DOC = os.path.join(ROOT, 'docs', 'npc-weapon-tiers.md')
 
+# The Ranger's assault rifles: the rifle Ranger's series, and the X-Morph infantry's (below).
+RANGER_RIFLES: tuple[tuple[str, str], ...] = (
+    ('PA-11', r'PA-11'), ('Minion', r'^Minion '), ('Slugger NN', r'^Slugger NN'), ('G&M', r'^G&M-'),
+    ('Raven', r'Raven$'), ('Stork', r'Stork'), ('Blazer', r'Blazer$'), ('Orchid', r'-Orchid$'),
+    ('Sirius', r'Sirius$'), ('Slade', r'Slade$'))
+
 # (kind, its label, its class in docs/weapons.csv, the category, [(series, regular expression on name_en)]), in
-# SupportWeapon order. The X-Morph infantry (last) carries none: it is no EDF soldier (its own X-Morph weapons).
+# SupportWeapon order. The X-Morph infantry (last; the maintainer, 2026-11-10: 任务乘员、海上救援机组、X-Morph 步兵
+# "改成拿玩家武器") is the rifle Ranger's soldier on its own model (pylib/xm_infantry.py STOCK: N601_COMMON_RANGER_AF,
+# whose first weapon is AiSoldierRifle01) and in X-Morph: Defense a machine-gun infantry: the Ranger's assault rifles.
 SERIES: tuple[tuple[str, str, str, int, tuple[tuple[str, str], ...]], ...] = (
-    ('rifle', '游骑兵·步枪', 'Ranger', 0, (
-        ('PA-11', r'PA-11'), ('Minion', r'^Minion '), ('Slugger NN', r'^Slugger NN'), ('G&M', r'^G&M-'),
-        ('Raven', r'Raven$'), ('Stork', r'Stork'), ('Blazer', r'Blazer$'), ('Orchid', r'-Orchid$'),
-        ('Sirius', r'Sirius$'), ('Slade', r'Slade$'))),
+    ('rifle', '游骑兵·步枪', 'Ranger', 0, RANGER_RIFLES),
     ('flame', '游骑兵·火焰', 'Ranger', 6, (
         ('Burner', r'^Burner$'), ('Flamethrower', r'Flamethrower'), ('Flame Cannon', r'^(Flame|Magma) Cannon$'))),
     ('rocket', '游骑兵·火箭', 'Ranger', 3, (
@@ -73,7 +78,7 @@ SERIES: tuple[tuple[str, str, str, int, tuple[tuple[str, str], ...]], ...] = (
         ('Blasthole Spear', r'^Blasthole Spear'), ('Blast Twin Spears', r'^Blast Twin Spears'))),
     ('fshotgun', '重装·霰弹', 'Fencer', 203, (
         ('Dexter', r'^Dexter Automatic Shotgun'),)),
-    ('xminfantry', 'X-Morph 步兵', '', -1, ()),
+    ('xminfantry', 'X-Morph 步兵', 'Ranger', 0, RANGER_RIFLES),
 )
 KIND_NAMES = tuple(k[0] for k in SERIES)
 
@@ -129,9 +134,6 @@ def render_doc() -> str:
              '由 `tools/gen_npc_tiers.py` 按 `docs/weapons.csv` 与脚本里的 `SERIES` 生成，不要手改。'
              '规则见 [feature-npc-weapon-tier.md](feature-npc-weapon-tier.md)：同一系列里按等级排，「前一型号」是排在它前面的那把。', '']
     for kind_index, (kind, label, cls, category, series) in enumerate(SERIES):
-        if not series:
-            lines += [f'## {label}（`{kind}`）', '', '不带玩家武器（X-Morph 步兵用自己的 X-Morph 武器，仍按原版规则）。', '']
-            continue
         lines += [f'## {label}（`{kind}`，{cls} 类别 {category}）', '']
         for i, (name, pattern) in enumerate(series):
             chain = ' → '.join(f'{r["name"]}（{r["id"]}）' for r in t if r['kind'] == kind_index and r['series'] == i)

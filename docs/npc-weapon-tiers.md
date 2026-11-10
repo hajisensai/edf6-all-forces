@@ -106,6 +106,15 @@
 
 - Dexter（`^Dexter Automatic Shotgun`）：Dexter Automatic Shotgun（773） → Dexter Automatic Shotgun D1（777） → Dexter Automatic Shotgun D2（784） → Dexter Automatic Shotgun G（789） → Dexter Automatic Shotgun ZA（796） → Dexter Automatic Shotgun ZG（800） → Dexter Automatic Shotgun ZGXE（1418） → Dexter Automatic Shotgun ZGXX（1515）
 
-## X-Morph 步兵（`xminfantry`）
+## X-Morph 步兵（`xminfantry`，Ranger 类别 0）
 
-不带玩家武器（X-Morph 步兵用自己的 X-Morph 武器，仍按原版规则）。
+- PA-11（`PA-11`）：Broken PA-11（0） → PA-11 LS（3） → PA-11 SLS（6）
+- Minion（`^Minion `）：Minion Buster（1） → Minion Buster Burst（9） → Minion Buster MK2（15） → Minion Buster MK3（26） → Minion Blast（30） → Minion Buster MKX（42）
+- Slugger NN（`^Slugger NN`）：Slugger NN1（2） → Slugger NN2（18） → Slugger NN3（24） → Slugger NN3 SLS（29） → Slugger NN4（35） → Slugger NN5（1376）
+- G&M（`^G&M-`）：G&M-21S（4） → G&M-22S（8） → G&M-A23（12） → G&M-A23 LS（21） → G&M-24S（28） → G&M-A25（37） → G&M-A29（43）
+- Raven（`Raven$`）：M1 Raven（5） → M2 Raven（16） → M2R Raven（20） → M2RER Raven（22） → M3 Raven（32） → M4 Raven（36） → M5 Raven（44） → M9 Raven（1452）
+- Stork（`Stork`）：T1 Stork（7） → T1 Stork S（11） → T1 Stork LS（13） → T2 Stork（17） → T2 Stork KF（19） → T3 Stork（23） → T3 Stork Burst（25） → T4 Stork（31） → T4 Stork AE（34） → T4 Stork MK2（38） → T5 Stork（41） → TZ Stork（45）
+- Blazer（`Blazer$`）：Blazer（14） → Omega Blazer（1363） → EXA Blazer（1364） → Planet Blazer（1453）
+- Orchid（`-Orchid$`）：X400-Orchid（33） → X500-Orchid（39） → X900-Orchid（1371）
+- Sirius（`Sirius$`）：MXR Sirius（27）
+- Slade（`Slade$`）：MA9E Slade（1375） → MA10E Slade（1451）

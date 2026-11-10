@@ -32,7 +32,7 @@ void Table() {
     Check(kTierRowCount>100,"the tier table has the series of every armed kind");
     std::set<std::pair<int,int>> seen;
     for(const auto& r:kTierRows) {
-        Check(r.kind<kSupportWeaponCount && static_cast<SupportWeapon>(r.kind)!=SupportWeapon::xmInfantry,"a row's kind is a stock soldier kind");
+        Check(r.kind<kSupportWeaponCount,"a row's kind is a soldier kind");
         Check(seen.insert({r.kind,r.id}).second,"a weapon once per kind");
         Check(r.sgo && r.sgo[0],"a row names its WEAPONTABLE weapon");
         if(r.prev<0)continue;
@@ -42,7 +42,7 @@ void Table() {
     }
     for(int k=0;k<kSupportWeaponCount;++k) {
         const auto kind=static_cast<SupportWeapon>(k);
-        Check(KindArmed(kind)==(kind!=SupportWeapon::xmInfantry),"every stock kind armed, the X-Morph infantry not");
+        Check(KindArmed(kind),"every kind armed, the X-Morph infantry too (2026-11-10)");
         // Each series has exactly one first model.
         std::set<int> firsts,series;
         for(const auto& r:kTierRows)if(r.kind==k){series.insert(r.series);if(r.prev<0)firsts.insert(r.series);}
@@ -82,7 +82,26 @@ void Pick() {
     Fake none;inv=Inv(none);
     a=PickArms(SupportWeapon::rifle,inv);
     Check(a.on && a.id==0 && a.stars[0]==0,"a new save: the kind's lowest weapon, 0 stars");
-    Check(!PickArms(SupportWeapon::xmInfantry,inv).on,"the X-Morph infantry carries none");
+    {
+        // The X-Morph infantry (the rifle Ranger's soldier on its own model) carries the Ranger's assault rifles: the very
+        // rows of the rifle kind, so the same requester gives it the same weapon.
+        const Arms xm=PickArms(SupportWeapon::xmInfantry,inv);
+        Check(xm.on && xm==PickArms(SupportWeapon::rifle,inv),"the X-Morph infantry: the rifle Ranger's pick");
+        int rifle=0,infantry=0;
+        for(const auto& r:kTierRows) {
+            if(r.kind==static_cast<int>(SupportWeapon::rifle))++rifle;
+            if(r.kind!=static_cast<int>(SupportWeapon::xmInfantry))continue;
+            ++infantry;
+            const TierRow* same=RowOf(SupportWeapon::rifle,r.id);
+            Check(same && same->series==r.series && same->prev==r.prev && same->level==r.level,"each X-Morph row is a rifle row");
+        }
+        Check(infantry>0 && infantry==rifle,"the X-Morph infantry: every assault rifle, nothing else");
+        Check(kTierRows[5].kind==static_cast<int>(SupportWeapon::rifle),"the rifle rows come first");
+        Fake eq;eq.star=4;
+        Inventory einv=Inv(eq);einv.equipped[0]=static_cast<int>(kTierRows[5].id);
+        Check(PickArms(SupportWeapon::xmInfantry,einv)==PickArms(SupportWeapon::rifle,einv) &&
+              PickArms(SupportWeapon::xmInfantry,einv).id!=kTierRows[5].id,"an equipped rifle: the same tier below it");
+    }
     // Stars above the unlock cap clamp to it.
     Fake hi;hi.star=200;hi.owned={803};inv=Inv(hi);
     a=PickArms(static_cast<SupportWeapon>(10),inv);
