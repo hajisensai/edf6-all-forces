@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import modfiles  # noqa: E402
 import ranger_hold  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
@@ -75,11 +76,13 @@ def check(files: dict[str, bytes], donor: ranger_hold.HoldSet) -> None:
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
-    """Writes `files` (build) as this tool's; what it wrote before and does not now is released (the stock file
-    comes back)."""
+    """Writes `files` (build) as this tool's, each only when it is not already exactly that (every install rebuilds
+    them: an unchanged file is not rewritten); what it wrote before and does not now is released (the stock file
+    comes back). Returns the paths written."""
     led = ledger.Ledger(root)
     before = set(led.owned_by(OWNER))
-    paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
+    paths = [led.put(OWNER, rel, data) for rel, data in files.items()
+             if not (ledger.key(rel) in before and modfiles.sha256_file(led.disk(rel)) == modfiles.sha256(data))]
     led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
     return paths
 
@@ -91,7 +94,6 @@ def remove(root: str) -> tuple[list[str], list[str]]:
 
 
 def main(argv: list[str]) -> int:
-    import modfiles
     args = [a for a in argv if not a.startswith('--')]
     out = argv[argv.index('--out') + 1] if '--out' in argv else None
     if out in args:
