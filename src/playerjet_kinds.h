@@ -76,6 +76,7 @@ constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a win
 constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own): the player fighter";
 constexpr const char* kXmCatch="an X-Morph jet (its twin is the model pack's, not always there): the player fighter";
 constexpr const char* kC130Catch="a support C-130 (no twin of its own): the player strike jet";
+constexpr const char* kHelicarrierCatch="a support Helicarrier, 46 x 80 m (no twin of its own; the catch is a wing's flight): the player fighter";
 constexpr const char* kSupportCatch="a support call's aircraft (its kind in a Dreadnought model, no twin of its own): a player jet";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
@@ -166,6 +167,10 @@ inline constexpr Boardable kBoardable[]={
     // plane flown as the strike jet, the AC-130 flown and crewed as the gunship.
     {Body::transportPlane,Airframe::wing,Arm::none,Wing("transportPlane",MarkOf(Body::transportPlane),Npc(jet::Role::strike),20.0f),kCatchPlayerStrike,kC130Catch},
     {Body::c130Gunship,Airframe::wing,Arm::shells,Wing("c130Gunship",MarkOf(Body::c130Gunship),Npc(jet::Role::gunship),20.0f),kCatchPlayerStrike,kC130Catch},
+    // The support's Helicarriers (jet_internal.h Body::supCarrier ..: 46 m across, 80 m long): flown as the carriers.
+    {Body::supCarrier,Airframe::rotor,Arm::drones,Rotor("supCarrier",MarkOf(Body::supCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
+    {Body::supBlastCarrier,Airframe::rotor,Arm::drones,Rotor("supBlastCarrier",MarkOf(Body::supBlastCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
+    {Body::supDollCarrier,Airframe::rotor,Arm::drones,Rotor("supDollCarrier",MarkOf(Body::supDollCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

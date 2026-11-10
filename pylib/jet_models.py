@@ -493,6 +493,9 @@ DN_FILES = {f'EDF6VC_DN_{m.upper()}.MRAB': m for m in ('dreadnought', 'fighter',
 # The C-130s (pylib/c130_model.py FILES, archive -> model: the support gunship and the paratroop plane): made from the
 # model pack's folder too.
 C130_FILES = {f'EDF6VC_C130_{m.upper()}.MRAB': m for m in ('gunship', 'transport')}
+# The support's air carrier (pylib/helicarrier_model.py ARCHIVE: the support carriers' Helicarrier): made from the model
+# pack's folder too.
+HELICARRIER_FILE = 'EDF6VC_HELICARRIER.MRAB'
 # The X-Morph jets' (pylib/xm_air_model.py, archive -> unit key): made from the model pack's folders too.
 XM_FILES = {f'EDF6VC_{u.key.upper()}.MRAB': u.key for u in xm_units.ported('jet')}
 
@@ -538,6 +541,12 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
         if folder is None:
             raise FileNotFoundError(f'no {c130_model.MODEL_SUBDIR} model folder')
         return c130_model.build_model(game, folder, C130_FILES[file], textures=False)[0]
+    if file == HELICARRIER_FILE:   # made from the model pack's folder (pylib/helicarrier_model.py), its nozzles on
+        import helicarrier_model
+        folder = helicarrier_model.model_dir()
+        if folder is None:
+            raise FileNotFoundError(f'no {helicarrier_model.MODEL_SUBDIR} model folder')
+        return helicarrier_model.build_model(game, folder, textures=False)[0]
     if file in XM_FILES:     # made from the model pack's folder (pylib/xm_air_model.py, its holders pylib/xm_jet.py's)
         import obj_model
         import xm_air_model

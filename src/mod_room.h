@@ -39,8 +39,11 @@ namespace crew {
 //      a guest's squad on foot.
 //      And the support's gunship and paratroop plane fly the model pack's C-130s (jet_internal.h Body::c130Gunship,
 //      mark 7065; Body::transportPlane, now mark 7066): an older build would make the bomber401 ones under other marks.
+//  10 (2026-11-10): the support's air carrier and blast / doll drone carriers fly the model pack's Helicarrier (jet_internal.h
+//      Body::supCarrier / supBlastCarrier / supDollCarrier, marks 7067-7069): an older build would make the V508 ones under
+//      the requested twins' marks 7005 / 7009 / 7010.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=9;
+constexpr std::int64_t kAllForcesRoomProtocol=10;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

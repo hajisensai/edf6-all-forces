@@ -81,6 +81,11 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 constexpr float kThrustBack=nacelle::kMostBack,kThrustRate=0.8f,kThrustYaw=0.25f;
 constexpr float kNacelleFar=50.0f;   // m: a bottom this far over the ground leaves the nacelles free (they reach 5.2 m)
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
+// Whose nacelles they are (nacelle_reach.h): the support's Helicarriers' lift fans (Body::supCarrier ..) or the V508's pods.
+const nacelle::Reach& NacelleReach(float mark) noexcept {
+    for(const Body b:{Body::supCarrier,Body::supBlastCarrier,Body::supDollCarrier})if(mark==Row(b).mark)return nacelle::kHelicarrier;
+    return nacelle::kV508;
+}
 // The Primer fighter's wings (Flap): both beat kFlapAmplitude rad about their bones' local X (the model's forward)
 // kFlapHz times a second, faster (up to kFlapHzMost) the more it climbs or speeds up; each downstroke lifts it
 // (kFlapLift m/s^2 at the stroke's middle, none on the upstroke): it flies in beats. kFlapUp: the sign of theta that
@@ -350,12 +355,14 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms,float
     const float up=Dot(j.m.thrust,u),fwd=Dot(j.m.thrust,f);
     const float tilt=Clamp(std::atan2(-up,fwd),-kThrustBack,0.0f);
     const float yaw=Clamp(Dot(j.m.omega,u)/k.roll,-1.0f,1.0f)*kThrustYaw;
+    const nacelle::Reach& reach=NacelleReach(BodyMark(v));
     float want[4];
     for(int i=0;i<4;++i) {
         const float side=j.surf.bind[i][12]>=0.0f ? 1.0f : -1.0f;   // the nacelle's x in the body
         want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
-        // Near the ground no further than keeps it over the ground (nacelle_reach.h; F_l, F_r the front pair).
-        if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? nacelle::kFront : nacelle::kBack,-clear,-kThrustBack));
+        // Near the ground no further than keeps it over the ground (nacelle_reach.h, the table of its model; F_l, F_r the
+        // front pair).
+        if(clear<kNacelleFar)want[i]=std::fmax(want[i],nacelle::MostTilt(i<2 ? reach.front : reach.back,-clear,-kThrustBack));
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
     // The stock Booster flame on each nozzle (its model's nozzle bones, one on each pod: booster.cpp), with the engine

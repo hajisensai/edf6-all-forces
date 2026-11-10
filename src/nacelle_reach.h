@@ -8,6 +8,10 @@
 // So near the ground a nacelle tilts no further than keeps its lowest point over the ground under the craft: kFront /
 // kBack are the nacelle's lowest model y (m over the origin) every kStep from 0 to -kBack, measured off the model by
 // pylib/aircraft_collision.py nacelle_lowest (tools/aircraft_collision_check.py --game holds these to it).
+// The support's Helicarrier (pylib/helicarrier_model.py, jet_internal.h Body::supCarrier ..) tilts its four lift fans under
+// the same bone names: kHcFront / kHcBack, its fans' lowest model y the same way (tools/aircraft_collision_check.py holds them
+// to the model pack's model when it is there). Its fans stand in rings high on its sponsons: 5 m over its bottom at the
+// least, so they never limit the tilt; ReachOf picks the table by the carrier's mark.
 // Pure arithmetic: tools/jet_obstacle_sim.cpp --ground-settle-suite checks MostTilt.
 #pragma once
 #include <cmath>
@@ -21,6 +25,14 @@ constexpr float kFront[kCount]={1.17f,1.04f,0.97f,0.96f,1.01f,1.12f,0.46f,-0.50f
                                 -5.06f,-5.18f,-5.19f,-5.09f,-5.19f,-5.17f,-5.05f,-4.83f};
 constexpr float kBack[kCount]={7.14f,7.24f,7.06f,6.69f,6.10f,5.56f,5.05f,4.59f,4.17f,3.80f,3.49f,3.23f,3.02f,2.88f,2.79f,2.77f,2.81f,
                                2.84f,2.93f,2.85f,2.81f,2.78f,2.80f};
+constexpr float kHcFront[kCount]={5.02f,5.06f,5.11f,5.18f,5.29f,5.42f,5.58f,5.76f,5.97f,6.20f,6.45f,6.72f,6.98f,7.04f,7.10f,7.19f,
+                                  7.28f,7.39f,7.51f,7.50f,7.48f,7.48f,7.48f};
+constexpr float kHcBack[kCount]={4.96f,5.02f,5.10f,5.22f,5.36f,5.53f,5.73f,5.95f,6.20f,6.45f,6.71f,6.99f,7.28f,7.59f,7.65f,7.67f,
+                                 7.70f,7.74f,7.77f,7.70f,7.64f,7.60f,7.55f};
+// A carrier's two tables: its front pair's (boosterF_*) and its back pair's (boosterB_*).
+struct Reach { const float* front; const float* back; };
+constexpr Reach kV508{kFront,kBack};
+constexpr Reach kHelicarrier{kHcFront,kHcBack};
 
 // The nacelle's lowest model y at tilt `at` (rad, 0 .. -kStep (kCount - 1)), between the entries.
 inline float Lowest(const float* table,float at) noexcept {
