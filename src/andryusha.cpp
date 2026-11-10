@@ -20,16 +20,23 @@
 //    its weak count at +0x9B0: the vehicle) as the plugin's own rounds (jet_bay.cpp AndryushaBomblet). A burst whose owner
 //    is gone (the truck destroyed while its rockets flew) has no shooter to fire them as: logged, not split.
 //  - Online: every machine runs its own copy of a carrier and splits it alike (the bomblets' pattern seeded by where it
-//    burst); the damage counts on one machine (jet_bay.cpp ShellMake: OnlineShotCounts). The fuse switch is this
-//    machine's write to its copy of the weapon: a remote player's switch is not sent (docs/andryusha-re.md 待办).
+//    burst); the damage counts on one machine (jet_bay.cpp ShellMake: OnlineShotCounts). The fuse switch writes this
+//    machine's copy of the weapon and is sent to the vehicle's copies (andryusha_net.h 'AFUZ', AndryushaFrame): each
+//    writes the same fuse into its copy, so every machine's carriers burst alike (room protocol 10).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "andryusha.h"
+#include "andryusha_net.h"
 #include "heli.h"            // MapRay
+#include "layout.h"
 #include "map.h"             // MapHoldsKeys
 #include "memory.h"
+#include "online_authority.h"
+#include "plugin_net.h"      // RoomGeneration
+#include "seat_net_transport.h"
 #include "seat_switch_logic.h"
 #include "edf/patch.h"
+#include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
 
@@ -198,7 +205,97 @@ bool KeyDown(int vk) noexcept {   // payload.cpp KeyDown
 // cycle, payload.cpp Switch, so the key is free on this truck), held last frame.
 const void* switchVehicle=nullptr;
 bool switchHeld=false;
+
+// --- Online: the fuse to the vehicle's copies (andryusha_net.h). Game thread (the vehicles' frame, tag 15's receive).
+constexpr int kMostSpeakers=16;
+struct Speaker { ObjRef ref{}; std::uint8_t sent=0; ULONGLONG at=0; };
+Speaker speakers[kMostSpeakers]{};
+// The receivers' watermarks, one stream a vehicle (seat_net.h StreamGates), dropped with the room's members.
+seat_net::StreamGates<kMostSpeakers*2,64> fuseGates;
+std::uint32_t fuseGatesRoom=0;
+bool netReady=false;
+int fuseSaid=0;
+
+// The Andryusha's launcher on `v`: its holder in the vehicle's holder array (the same on every copy) and its weapon (the
+// Katyusha's mark, AmmoHitSizeAdjust one of the fuse marks); -1 none.
+int FuseHolder(const unsigned char* v,unsigned char** weapon) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const auto count=At<std::uint64_t>(v,kHolderCount);
+    if(!holders || !count || count>seat_net::kMostHolders || !Readable(holders,count*kHolderStride))return -1;
+    for(std::uint64_t i=0;i<count;++i) {
+        const auto w=At<unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
+        if(!Readable(w,kWeaponHitAdjust+4) || At<std::int32_t>(w,edf::kWeaponMark)!=edf::kMarkKatyusha)continue;
+        std::uint32_t bits;std::memcpy(&bits,w+kWeaponHitAdjust,4);
+        if(andryusha::FuseOf(bits)==Fuse::none)continue;
+        *weapon=w;
+        return static_cast<int>(i);
+    }
+    return -1;
+}
+// Whether this machine speaks for `v`'s fuse (andryusha_net::Speaks): its player on the launcher's seat 0, or no player
+// there and it runs the vehicle.
+bool SpeaksHere(unsigned char* v) noexcept {
+    if(!SeatCount(v))return IsOnlineAuthority(v);
+    const unsigned char* seat=SeatAt(v,0);
+    const bool byPlayer=SeatRider(seat)==Rider::player;
+    return andryusha_net::Speaks(byPlayer && At<const void*>(seat,kSeatRider)==PlayerHuman(),byPlayer,IsOnlineAuthority(v));
+}
+Speaker* SpeakerFor(const unsigned char* v,ULONGLONG now) noexcept {
+    Speaker* free=nullptr;
+    for(auto& x:speakers) {
+        if(x.ref.Is(v))return &x;
+        if(!free && (!x.ref || !x.ref.Is(x.ref.obj) || now-x.at>andryusha_net::kRefreshMs*4))free=&x;
+    }
+    if(free)*free=Speaker{ObjRef::Of(v),0,0};
+    return free;
+}
+
+// Another machine's fuse of `v`: written into this copy's launcher when it comes from the vehicle's speaker.
+void FuseReceived(unsigned char* v,const void* block,std::size_t size) noexcept {
+    andryusha_net::State s;
+    if(!netReady || !Cfg().enabled || !InSession() || !andryusha_net::Decode(block,size,s))return;
+    __try {
+        if(!Readable(v,kHolderCount+8) || v[edf::kDead])return;
+        unsigned char* w=nullptr;
+        if(FuseHolder(v,&w)!=s.holder)return;   // not this vehicle's launcher (another holder, not an Andryusha)
+        const std::uint32_t room=plugin_net::RoomGeneration();
+        if(room!=fuseGatesRoom){fuseGates.Reset();fuseGatesRoom=room;}   // other members: their watermarks with them
+        const ObjRef ref=ObjRef::Of(v);
+        auto* const gate=fuseGates.For({ref.obj,ref.ctrl,0},[](const void* obj,const void* ctrl) noexcept {
+            return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
+        });
+        if(!gate || !gate->Admit(s.head,true,SpeaksHere(v),seat_net::SeatController(v,0)))return;
+        const Fuse fuse=static_cast<Fuse>(s.fuse);
+        std::uint32_t bits;std::memcpy(&bits,w+kWeaponHitAdjust,4);
+        if(andryusha::FuseOf(bits)==fuse)return;
+        const std::uint32_t mark=andryusha::MarkOf(fuse);
+        std::memcpy(w+kWeaponHitAdjust,&mark,4);
+        Log("ANDRYUSHA v=%p fuse from its speaker's machine: %s",v,fuse==Fuse::airburst ? "airburst (proximity)" : "impact");
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
 }  // namespace
+
+void AndryushaFrame(unsigned char* v) noexcept {
+    if(!netReady || !Cfg().enabled || v[edf::kDead] || !InSession() || !seat_net::Replicated(true,At<std::uint16_t>(v,0x128)))return;
+    unsigned char* w=nullptr;
+    const int holder=FuseHolder(v,&w);
+    if(holder<0)return;
+    seat_net::ChainVehicle(v);   // this class hears its copies' fuses too
+    const ULONGLONG now=GameMs();
+    Speaker* const slot=SpeakerFor(v,now);
+    if(!slot)return;
+    if(!SpeaksHere(v)){slot->sent=0;slot->at=now;return;}   // the next time it speaks, it sends at once
+    std::uint32_t bits;std::memcpy(&bits,w+kWeaponHitAdjust,4);
+    const auto fuse=static_cast<std::uint8_t>(andryusha::FuseOf(bits));
+    if(!andryusha_net::Due(fuse,slot->sent,now,slot->sent ? slot->at : 0))return;
+    andryusha_net::State m;
+    m.holder=holder;m.fuse=fuse;m.head.controller=seat_net::SeatController(v,0);
+    if(!seat_net::Stamp(&m,sizeof(m)) || !andryusha_net::Valid(m))return;
+    if(seat_net::Send(v,&m,sizeof(m))) {
+        if(fuse!=slot->sent && fuseSaid<16){++fuseSaid;Log("ANDRYUSHA v=%p fuse sent to its copies: %s",v,fuse==2 ? "airburst" : "impact");}
+        slot->sent=fuse;slot->at=now;
+    }
+}
 
 void AndryushaTick() noexcept {
     if(!hooked)return;
@@ -260,6 +357,9 @@ void ResetAndryusha() noexcept {
     burstCount=0;
     ReleaseSRWLockExclusive(&lock);
     switchVehicle=nullptr;switchHeld=false;
+    for(auto& x:speakers)x=Speaker{};
+    fuseGates.Reset();
+    fuseSaid=0;
 }
 
 bool InstallAndryusha() noexcept {
@@ -271,7 +371,8 @@ bool InstallAndryusha() noexcept {
         const auto slot=reinterpret_cast<void**>(image+kGrenadeVtable)+kUpdateSlot;
         if(*slot!=image+kGrenadeUpdate)Log("ANDRYUSHA grenade update: chaining onto %p (EDF6AutoTurret's fuses)",*slot);
         hooked=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&UpdateHook),&nextUpdate);
-        Log("HOOK andryusha=%d (the Andryusha's carriers: fuses and bomblets)",hooked);
+        netReady=hooked && seat_net::Install() && seat_net::Register(andryusha_net::kMagic,&FuseReceived);
+        Log("HOOK andryusha=%d online=%d (the Andryusha's carriers: fuses and bomblets; its fuse on tag 15 'AFUZ')",hooked,netReady);
         return hooked;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

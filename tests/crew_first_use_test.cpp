@@ -157,6 +157,7 @@ void KeyConfigTick() noexcept{}   // crew.cpp's FrameTick follows the game's key
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void AndryushaFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool PlayerJetOwnSight(void const *) noexcept{unexpectedHook();return {};}
 bool PlayerHeliOwnSight(void const *) noexcept{unexpectedHook();return {};}
 void HeliSightFrame(unsigned char *) noexcept{unexpectedHook();return;}

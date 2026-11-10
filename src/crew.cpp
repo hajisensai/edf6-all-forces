@@ -974,6 +974,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepRam,&VehicleRamFrame,v);       // after the drill and the sidecar: what the parts drove into this frame
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
+    Guarded(kStepLauncher,&AndryushaFrame,v);    // after the fuse switch (LauncherFrame): the fuse to the copies
     Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
     Guarded(kStepPayload,&SeatTurretsFrame,v);   // the gunner seats' own turrets: trained, the unmanned ones fired
     Guarded(kStepPayload,&TwinBarrelFrame,v);    // after every pull of this frame (stock, store, NPC): twin barrels in turn

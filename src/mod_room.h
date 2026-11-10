@@ -42,6 +42,9 @@ namespace crew {
 //  10 (2026-11-10): the support's air carrier and blast / doll drone carriers fly the model pack's Helicarrier (jet_internal.h
 //      Body::supCarrier / supBlastCarrier / supDollCarrier, marks 7067-7069): an older build would make the V508 ones under
 //      the requested twins' marks 7005 / 7009 / 7010.
+//      And the Andryusha's fuse switch goes to the vehicle's copies (andryusha_net.h 'AFUZ' on tag 15): every
+//      machine writes the rider's fuse into its copy of the launcher, so its carriers burst and split alike. An older
+//      build ignores the block (seat_net.h) and keeps its copy's impact fuse: its bomblets would fall elsewhere.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=10;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

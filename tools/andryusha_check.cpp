@@ -1,6 +1,7 @@
 // The Andryusha's fuses and bomblets offline (src/andryusha.h; docs/andryusha-re.md, test site #37):
 //   cmake --build build --target andryusha_check && build\andryusha_check.exe
 #include "../src/andryusha.h"
+#include "../src/andryusha_net.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -92,6 +93,38 @@ int main() {
     }
     Check(disc,"airburst: every aim on the disc under it, apart");
     Check(farthest>0.8f*kAirburstSpread && nearest<0.4f*kAirburstSpread,"airburst: the disc covered, centre to edge");
+
+    // The fuse online (andryusha_net.h 'AFUZ'): the block a receiver admits, who speaks, when it sends.
+    {
+        namespace an=crew::andryusha_net;
+        an::State s{};
+        s.head.sender=7;s.head.sequence=1;s.holder=1;s.fuse=static_cast<std::uint8_t>(Fuse::airburst);
+        Check(an::Valid(s),"fuse: a switch's block");
+        an::State out{};
+        Check(an::Decode(&s,sizeof(s),out) && out.holder==1 && out.fuse==2,"fuse: decoded");
+        Check(!an::Decode(&s,sizeof(s)-1,out),"fuse: decoded only whole");
+        an::State bad=s;bad.fuse=0;Check(!an::Valid(bad),"fuse: no fuse is no block");
+        bad=s;bad.fuse=3;Check(!an::Valid(bad),"fuse: only impact or airburst");
+        bad=s;bad.holder=-1;Check(!an::Valid(bad),"fuse: a holder of the vehicle's");
+        bad=s;bad.holder=64;Check(!an::Valid(bad),"fuse: within the holders a block names");
+        bad=s;bad.pad[1]=1;Check(!an::Valid(bad),"fuse: its padding is zero");
+        bad=s;bad.head.magic=0x52555453u;Check(!an::Valid(bad),"fuse: another kind's magic");
+        bad=s;bad.head.version=2;Check(!an::Valid(bad),"fuse: another version");
+        bad=s;bad.head.sequence=0;Check(!an::Valid(bad),"fuse: unstamped");
+        Check(an::kMagic!=crew::seat_net::kPickMagic,"fuse: its own kind on tag 15");
+        // One speaker: the rider's machine; with no player on the seat, the vehicle's authority.
+        Check(an::Speaks(true,true,false) && !an::Speaks(false,true,true),"fuse: a player rides: their machine alone");
+        Check(an::Speaks(false,false,true) && !an::Speaks(false,false,false),"fuse: none rides: the authority alone");
+        Check(an::Due(2,1,100,90) && an::Due(1,0,100,0),"fuse: a switch or a new speaker sends at once");
+        Check(!an::Due(1,1,500,100) && an::Due(1,1,100+an::kRefreshMs,100),"fuse: else the refresh");
+        // The receiver's gate (seat_net.h): its speaker's blocks in the seat's epoch, newer ones only, never its own.
+        crew::seat_net::Gate gate{};
+        Check(gate.Admit(s.head,true,false,-1) && !gate.Admit(s.head,true,false,-1),"fuse: a block once");
+        an::State next=s;next.head.sequence=2;
+        Check(!gate.Admit(next.head,true,true,-1),"fuse: the speaker never applies a block");
+        Check(!gate.Admit(next.head,true,false,5),"fuse: another rider's epoch refuses it");
+        Check(gate.Admit(next.head,true,false,-1),"fuse: the next one in its epoch");
+    }
 
     std::printf("andryusha_check: %d checks, %d failed\n",checks,failed);
     return failed ? 1 : 0;
