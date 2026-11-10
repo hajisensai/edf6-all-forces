@@ -89,6 +89,10 @@ BEHIND = [(float(yaw), float(pitch)) for yaw in range(100, 261, 5) for pitch in 
 
 
 GENERATED_SKELETON = 32
+# ...but the generated models whose skeleton is known without their model folder: the C-130s' (pylib/c130_model.py
+# SKELETON_BONES; twelve passengers' hold kits take 232 bones, more than 256 - GENERATED_SKELETON).
+import c130_model  # noqa: E402
+GENERATED_SKELETONS = {c130_model.archive_name(m).removesuffix('.MRAB'): c130_model.SKELETON_BONES for m in c130_model.MODELS}
 ROOM = dict(left=1.5, right=1.5, up=1.0, down=1.0, ahead=2.0, back=2.0)
 
 
@@ -152,8 +156,9 @@ def generated(stem: str, fits) -> None:  # noqa: ANN001
     """Its model is its generator's; its cockpits' instrument bones laid out in a generous room must leave the skeleton
     GENERATED_SKELETON bones (EV603_MARINE, the largest a generator starts from, has 19)."""
     need = generated_bones(fits)
-    expect(need + GENERATED_SKELETON <= 256,
-           f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton')
+    skeleton = GENERATED_SKELETONS.get(stem, GENERATED_SKELETON)
+    expect(need + skeleton <= 256,
+           f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton of {skeleton}')
 
 
 def fitted_model(game, stem: str, fits, copies) -> None:  # noqa: ANN001

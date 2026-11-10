@@ -552,6 +552,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_katyusha
     import make_sazabi
     import make_dreadnought
+    import make_c130
     import make_proteus
     import make_optics
     import make_stock_holds
@@ -620,6 +621,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
                               f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
                               lambda g: make_dreadnought.build(g, hangars),
                               {'hangars': make_dreadnought.dm.hangars_text(hangars)})
+    c130 = build_asset(cache, make_c130, '炮舰机与伞兵运输机（模型包的 C-130；模型与座舱生成约 4 分钟）')
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     root41 = find_edf41(game)
@@ -653,6 +655,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
             (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) + \
+            (make_c130.install(game, c130) if c130 is not None else []) + \
             (make_proteus.install(game, proteus) if proteus is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
@@ -759,7 +762,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('c130', c130), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -849,6 +852,7 @@ def uninstall(game: str) -> None:
     import make_katyusha
     import make_sazabi
     import make_dreadnought
+    import make_c130
     import make_proteus
     import make_optics
     import make_stock_holds
@@ -887,7 +891,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_c130.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

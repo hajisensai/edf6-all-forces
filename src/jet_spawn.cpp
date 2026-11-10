@@ -607,7 +607,7 @@ void PreloadJets() noexcept {
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
         // ...and with the Dreadnought, whose turrets fire their emplacements' rounds (the cannon's on an install from before
         // them: jet_bay.cpp TurretRound)
-        PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
+        PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
         PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;

@@ -351,8 +351,13 @@ gunmuzzle::Motion MotionOf(const Jet& j) noexcept {
     for(int c=0;c<3;++c){mo.vel[c]=j.m.vel[c]/60.0f;mo.spin[c]=j.m.omega[c]/60.0f;}   // m/s, rad/s -> a frame
     return mo;
 }
+// The airframe gunship `v` is, by its mark: the support's AC-130 (Body::c130Gunship) or the bomber401 (Body::gunship, its
+// requested twin's).
+const gunmuzzle::Airframe& AirframeOf(const unsigned char* v) noexcept {
+    return BodyMark(v)==Row(Body::c130Gunship).mark ? gunmuzzle::kC130Gunship : gunmuzzle::kGunship;
+}
 bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gunmuzzle::Round& r,float* out) noexcept {
-    return gunmuzzle::Launch(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,at,r.hit+gunmuzzle::kMargin,out);
+    return gunmuzzle::Launch(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),AirframeOf(v),r,at,r.hit+gunmuzzle::kMargin,out);
 }
 
 // Whether round `r` from `muzzle` at `aim` keeps its hit sphere off gunship `v`'s airframe as both fly (gunmuzzle.h Clears:
@@ -363,7 +368,7 @@ bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gun
 constexpr ULONGLONG kOwnHeldLogMs=2000;
 bool GunshipClears(const Jet& j,const unsigned char* v,const gunmuzzle::Round& r,const float* muzzle,const float* aim,const char* gun,
                    const char* who,int& count,ULONGLONG& at) noexcept {
-    if(gunmuzzle::Clears(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),gunmuzzle::kGunship,r,muzzle,aim))return true;
+    if(gunmuzzle::Clears(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),AirframeOf(v),r,muzzle,aim))return true;
     ++count;
     const ULONGLONG ms=GameMs();
     if(!at || ms-at>=kOwnHeldLogMs) {

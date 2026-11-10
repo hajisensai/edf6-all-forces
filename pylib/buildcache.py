@@ -21,13 +21,13 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'proteus', 'optics')
-MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'quadvulcan': 'wt_m163', 'tunguska': 'wt_tunguska',
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'c130', 'proteus', 'optics')
+MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'c130': 'c130', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'quadvulcan': 'wt_m163', 'tunguska': 'wt_tunguska',
                 'pzh2000': 'wt_pzh2000', 'sturmtiger': 'wt_sturmtiger',
                 **{kind: 'dreadnought' for kind in ('emp_mid', 'emp_short', 'emp_long')}, 'ciws_phalanx': 'emp_phalanx', 'flak88': 'emp_flak88', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
                 'gdf005': 'emp_gdf005', 'laser': 'emp_laser', 'railgun': 'emp_railgun', 'patriot': 'emp_patriot'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
-COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics')
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics', 'c130')
 # Every X-Morph unit is a group of its own (its ledger owner, its model folder; pylib/xm_units.py), all built by the one
 # generator tools/make_xmorph.py (generator(), tool()); the V603 ones, the cars and the walkers carry cockpits (the
 # aircraft none yet, the infantry none).

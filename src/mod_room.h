@@ -37,6 +37,8 @@ namespace crew {
 //      v10, mapcmd_logic.h DismountParamValid), and the squads following a player ride along with that player
 //      (src/ride_along.h; the host runs the guests' squads): an older build in the room would refuse the order or leave
 //      a guest's squad on foot.
+//      And the support's gunship and paratroop plane fly the model pack's C-130s (jet_internal.h Body::c130Gunship,
+//      mark 7065; Body::transportPlane, now mark 7066): an older build would make the bomber401 ones under other marks.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

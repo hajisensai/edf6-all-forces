@@ -99,8 +99,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
                   heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
-                  xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole };
-constexpr int kBodyCount=34;
+                  xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole, c130Gunship };
+constexpr int kBodyCount=35;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -147,10 +147,12 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly",true},
     // The medic heli (tools/make_jets.py MEDIC_HELI_FILE): the 410 with healing door guns (heli.cpp Medic).
     {Body::heliMedic,L"app:/object/edf6vc_heli_medic.sgo",L"EDF6VC_HELI_MEDIC.SGO",0.0f,Role::fighter,Role::drone,"heliMedic"},
-    // The transports (tools/make_jets.py TRANSPORT_*; transport.cpp): the 410 with ten passenger seats more, and the bomber401
-    // strike jet with twelve behind its pilot (flown as a strike jet that attacks nothing: jet.cpp JetFerry).
+    // The transports (transport.cpp): the 410 with ten passenger seats more (tools/make_jets.py TRANSPORT_HELI_*), and the
+    // model pack's C-130 with twelve behind its pilot (tools/make_c130.py; a mark of its own, the strike jet's role and arms:
+    // flown as a strike jet that attacks nothing, jet.cpp JetFerry). Only with the model pack installed: without, the plane
+    // is not deployed.
     {Body::heliTransport,L"app:/object/edf6vc_heli_transport.sgo",L"EDF6VC_HELI_TRANSPORT.SGO",0.0f,Role::fighter,Role::drone,"heliTransport"},
-    {Body::transportPlane,L"app:/object/edf6vc_jet_transport.sgo",L"EDF6VC_JET_TRANSPORT.SGO",7001.0f,Role::strike,Role::drone,"transportPlane"},
+    {Body::transportPlane,L"app:/object/edf6vc_c130_transport.sgo",L"EDF6VC_C130_TRANSPORT.SGO",7066.0f,Role::strike,Role::drone,"transportPlane"},
     // The Dreadnought's fighters (tools/make_dreadnought.py, pylib/vcobjects.py DREADNOUGHT_FIGHTERS): the Dreadnought game's
     // fighters' models, crewless (its hangar launches them), each flying its role's way.
     {Body::dnFighter,L"app:/object/edf6vc_dn_fighter.sgo",L"EDF6VC_DN_FIGHTER.SGO",7041.0f,Role::fighter,Role::drone,"dnFighter",false,true},
@@ -179,6 +181,12 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      Role::interceptor,Role::drone,"supInterceptor"},
     {Body::supMultirole,L"app:/object/edf6vc_dn_support_multirole.sgo",L"EDF6VC_DN_SUPPORT_MULTIROLE.SGO",7064.0f,Role::multirole,
      Role::drone,"supMultirole"},
+    // The support's gunship (kLaunchRows: the gunship calls, guarding / following, and the guided strike) in the model pack's
+    // AC-130 (tools/make_c130.py, pylib/vcobjects.py C130_JETS; the maintainer, 2026-11-10: 「没有模型来源的支援机型 直接去网站上
+    // 拿呗」): the gunship's arms, durability and side gunner under a mark of its own, so its rounds leave off its own airframe
+    // (jet_bay.cpp GunshipMuzzle: gunmuzzle.h kC130Gunship). Body::gunship stays its requested twin's mark (the bomber401).
+    {Body::c130Gunship,L"app:/object/edf6vc_c130_gunship.sgo",L"EDF6VC_C130_GUNSHIP.SGO",7065.0f,Role::gunship,Role::drone,
+     "c130Gunship"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -293,7 +301,7 @@ struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
     {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
     {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::carrier},{JetRole::blastCarrier,Body::blastCarrier},
-    {JetRole::dollCarrier,Body::dollCarrier},{JetRole::gunship,Body::gunship},
+    {JetRole::dollCarrier,Body::dollCarrier},{JetRole::gunship,Body::c130Gunship},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));
 constexpr bool LaunchRowsInOrder() noexcept {
