@@ -15,8 +15,8 @@ SOURCE.txt) and the player's own Root.cpk (only read):
                                                  (pylib/vcobjects.py HELICARRIER_JETS, HELICARRIER_MARKS)
 
 Its drones leave and dock under its middle (src/jet_carrier.cpp kLaunchBelow 25 m, src/jet_internal.h kDockBelow 15 m:
-under the vehicle's position, the collision box's centre, as for the V508 one, whose box is 0.3 m taller): check_drone_bay
-holds the model to it (the points under the belly, clear of the hull by DOCK_CLEAR, inside the hull's footprint).
+under the vehicle's position, the collision box's centre, as for the V508 one, whose box is 0.3 m taller):
+tools/aircraft_collision_check.py (test_helicarrier_drone_bay, offline: it reads src/) holds the model to it (the points under the belly, clear of the hull by DOCK_CLEAR, inside the hull's footprint).
 
 Without the model folder none of it is written (the installer says so once): the carrier supports and calls are then not
 deployed (src/support_dispatch.cpp refuses them at planning; the model pack is part of the install, CLAUDE.md). Built in
@@ -29,7 +29,6 @@ memory first, written atomically and recorded in the ledger as this tool's; --re
 from __future__ import annotations
 
 import os
-import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,11 +49,6 @@ OWNER = 'helicarrier'   # pylib/ledger.py
 SGOS = {'EDF6VC_HELICARRIER.SGO': 'edf6tr_helicarrier', 'EDF6VC_HELICARRIER_BLAST.SGO': 'edf6tr_helicarrier_blast',
         'EDF6VC_HELICARRIER_DOLL.SGO': 'edf6tr_helicarrier_doll'}
 AIRFRAME = aircraft_collision.HELICARRIER_FILES[hm.ARCHIVE]
-# The drones' place (m under the vehicle's position): read off the source.
-DRONE_SOURCES = {'kLaunchBelow': os.path.join(HERE, '..', 'src', 'jet_carrier.cpp'),
-                 'kDockBelow': os.path.join(HERE, '..', 'src', 'jet_internal.h')}
-DOCK_CLEAR = 5.0   # m at least between the hull's lowest point and a drone's launch / dock point (the drone: 5.7 m long,
-                   # 1.3 m high; the V508 carrier's dock is 6.5 m under its hull)
 
 
 def build(root: str) -> dict[str, bytes]:
@@ -72,7 +66,6 @@ def build(root: str) -> dict[str, bytes]:
     jet_models._MODELS_MADE[(id(game), hm.ARCHIVE)] = md   # what jet_sgo measures (model_box, _model_of): this one, built once
     # its collision measured off it as built, about its whole model's box centre (the vehicle's position as its SGO has it)
     files[f'OBJECT/{AIRFRAME}'] = aircraft_collision.airframe(game, md, jet_models.model_box(game, hm.ARCHIVE)[0])
-    check_drone_bay(game)
     for file, name in SGOS.items():
         files[f'OBJECT/{file}'] = vc.jet_sgo(game, name)
     import cockpits
@@ -80,29 +73,6 @@ def build(root: str) -> dict[str, bytes]:
     files = model_lod.finish(cockpits.graft_files(game, files))
     check(files, game)   # what is written is held to the same contract
     return files
-
-
-def drone_offsets() -> tuple[float, ...]:
-    """(kLaunchBelow, kDockBelow): m under the carrier's position its drones leave and dock (DRONE_SOURCES)."""
-    out = []
-    for name, path in DRONE_SOURCES.items():
-        with open(path, encoding='utf-8') as h:
-            m = re.search(name + r'=([0-9.]+)f', h.read())
-        if not m:
-            raise ValueError(f'{path}: no {name}')
-        out.append(float(m.group(1)))
-    return tuple(out)
-
-
-def check_drone_bay(game: vc.Game) -> None:
-    """The drones' launch and dock point (drone_offsets under the vehicle's position, the whole model's box centre) is under
-    the hull by DOCK_CLEAR or more and inside its footprint (x, z within the box): they leave from under its middle, not
-    out of its side or through its hull."""
-    (cx, cy, cz), (hx, hy, hz) = jet_models.model_box(game, hm.ARCHIVE)
-    for below in drone_offsets():
-        clear = (cy - hy) - (cy - below)
-        if clear < DOCK_CLEAR or abs(cx) > hx or abs(cz) > hz:
-            raise ValueError(f'无人机出入点（载具原点下 {below} m）离船底只有 {clear:.2f} m，或不在船体投影内（{cx}, {cz}）')
 
 
 def check(files: dict[str, bytes], game: vc.Game) -> None:

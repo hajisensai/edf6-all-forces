@@ -6,6 +6,7 @@ python tools/aircraft_collision_check.py --game    read Root.cpk, verify written
 from __future__ import annotations
 
 import os
+import re
 import struct
 import sys
 import unittest
@@ -109,6 +110,39 @@ class Geometry(unittest.TestCase):
         used = [lane for lane in range(4) if f[lane] <= f[4+lane]]
         self.assertTrue(used and all(0 < f[24+lane] < n for lane in used))
         self.assertTrue(all(f[24+lane] == 0 for lane in range(4) if lane not in used))
+
+
+# The support Helicarrier's drone bay (was tools/make_helicarrier.py; here because it reads the plugin's sources,
+# which the frozen installer does not carry: release_reads_no_sources in tools/selftest.py).
+# The drones' place (m under the vehicle's position): read off the source.
+DRONE_SOURCES = {'kLaunchBelow': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'jet_carrier.cpp'),
+                 'kDockBelow': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'jet_internal.h')}
+DOCK_CLEAR = 5.0   # m at least between the hull's lowest point and a drone's launch / dock point (the drone: 5.7 m long,
+                   # 1.3 m high; the V508 carrier's dock is 6.5 m under its hull)
+
+
+def drone_offsets() -> tuple[float, ...]:
+    """(kLaunchBelow, kDockBelow): m under the carrier's position its drones leave and dock (DRONE_SOURCES)."""
+    out = []
+    for name, path in DRONE_SOURCES.items():
+        with open(path, encoding='utf-8') as h:
+            m = re.search(name + r'=([0-9.]+)f', h.read())
+        if not m:
+            raise ValueError(f'{path}: no {name}')
+        out.append(float(m.group(1)))
+    return tuple(out)
+
+
+def check_drone_bay(game) -> None:
+    """The drones' launch and dock point (drone_offsets under the vehicle's position, the whole model's box centre) is under
+    the hull by DOCK_CLEAR or more and inside its footprint (x, z within the box): they leave from under its middle, not
+    out of its side or through its hull."""
+    import helicarrier_model as hm
+    (cx, cy, cz), (hx, hy, hz) = jet_models.model_box(game, hm.ARCHIVE)
+    for below in drone_offsets():
+        clear = (cy - hy) - (cy - below)
+        if clear < DOCK_CLEAR or abs(cx) > hx or abs(cz) > hz:
+            raise ValueError(f'无人机出入点（载具原点下 {below} m）离船底只有 {clear:.2f} m，或不在船体投影内（{cx}, {cz}）')
 
 
 class GameAssets(unittest.TestCase):
@@ -238,6 +272,14 @@ class GameAssets(unittest.TestCase):
         # The reason the table exists: the front pair hangs under the collision's bottom plane, the back pair never.
         self.assertLess(min(got['front']), -5.0)
         self.assertGreater(min(got['back']), 2.5)
+
+    def test_helicarrier_drone_bay(self):
+        """The drones leave and dock under the support Helicarrier's hull (check_drone_bay: the plugin's
+        kLaunchBelow / kDockBelow against the model pack's model)."""
+        import helicarrier_model as hm
+        if hm.model_dir() is None:
+            self.skipTest('no model pack helicarrier/ folder')
+        check_drone_bay(self.game)
 
     def test_helicarrier_reach_table_is_the_model(self):
         """src/nacelle_reach.h kHcFront / kHcBack hold the support Helicarrier's lift fans' lowest points as the model

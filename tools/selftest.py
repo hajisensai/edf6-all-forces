@@ -635,6 +635,27 @@ def worldmap_textures_in_model_pack() -> None:
 
 
 @test
+def release_reads_no_sources() -> None:
+    """No module the released installer carries (tools/build_release.py hidden imports) reads the repository's
+    sources, tests or docs: the frozen exe has none of them (2026-11-10: make_helicarrier read src/jet_carrier.cpp at
+    install and the install died). Checks that read them belong in the offline tests."""
+    rel = src('tools/build_release.py')
+    hidden = set(re.findall(r"'(\w+)'", rel.split("for mod in ('call_weapons'", 1)[1].split('):', 1)[0])) | {'call_weapons'}
+    bad = []
+    for mod in sorted(hidden):
+        for d in ('tools', 'pylib', 'testrange', 'autoturret/tools'):
+            path = os.path.join(ROOT, d, mod + '.py')
+            if not os.path.exists(path):
+                continue
+            for n, line in enumerate(open(path, encoding='utf-8'), 1):
+                code = line.split('#', 1)[0]
+                if re.search(r"'\.\.'\s*,\s*'(src|tests|docs)'|\.\./(src|tests|docs)/", code):
+                    bad.append(f'{d}/{mod}.py:{n}')
+    assert len(hidden) > 100, 'release_reads_no_sources: the scan reads build_release.py'
+    assert not bad, f'released modules read repository sources: {bad}'
+
+
+@test
 def release_imports() -> None:
     """Every project module tools/installer.py imports inside a function (tools/, pylib/, testrange/) is one of
     tools/build_release.py's PyInstaller hidden imports: a generator left out installs in a dev checkout and is missing
