@@ -468,6 +468,8 @@ DLL（RelWithDebInfo，Ninja）编译通过，无警告。
   单位列里目录条目的乘员单位显示「<名字>·乘员」，默认与任务乘员用自己的标签。hudtext 四语新增 5 条（`roomUnitCrewDefault`、
   `roomUnitCrewMission`、`roomUnitCrewOf`、`roomCrewRow`、`roomCrewDefault`）。`ViewRow` 加了 `key`（单位行与打开单位的每一行）。
 - 预览：光标在乘员行（行 / 字段层）→ 该乘员兵种的**队员**（不是队长），颜色 = 自己的，没设置时默认的（`CrewLookOf`）。
+- 载具预览（2026-11-10，测试站 #46）：光标在载具单位的机炮 / 挂点行，或停在它的单位 / 挂点 / 机炮 / 挂载 / 弹数页面（乘员按钮除外，仍是乘员）
+  → 该载具机体的模型（`room_ui_logic.h VehiclePreview` / `FocusPreview`，`PreviewSpec::body`）；实现与风险见 `docs/room-3d-preview-re.md` §6.1。
 - 保存：`SaveItems` 按 `CollectSave` 的行逐条配对（每个单位先挂载 / 预设、再乘员；乘员行的键必须是 `LoadoutKey(crew, key)`），
   每条带 `unitIndex`；`room_ui.cpp Save` 逐条 `SaveSupportLoadout`，每写成一条 `MarkItemSaved` 只标记那一部分（中途失败时，
   已写的部分不再算改动，没写的仍是改动）。**修了阶段 4 的一个缺陷**：以前按「每个改动单位一条」配对，乘员只改了的单位会被当成

@@ -81,6 +81,13 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 
 全屏 Ui3DSpace。`MENUMODELSETTING.camera_pos`：单人 [0]=(1.1,−0.9,−3.5)，双人 index 0 用 [1]、index 1 用 [2]（0x93F619）。视点 view+0x2B0 = +0x2C0→+0x2D0 与 +0x2E0→+0x2F0 按 +0x300/+0x308 插值；fov +0x260。菜单打开时把模型挪到右侧：每帧 Update 前给这四个点的 x 加偏移，关闭还原。M/L
 
+## 6.1 载具预览（2026-11-10，测试站 #46，只做了离线验证）
+
+- 同一条路（方案 A）：Desc 路径换成安装器生成的 `app:/MENUOBJECT/EDF6VC_MENU_V_<BODY>.SGO`（`tools/menu_preview.py build_vehicles`）：原版 `P505_RANGER.SGO` 其余键不动，`animation_model` 整个换成该机体基础 SGO（`support_loadout.BODIES`，Mods 里别的工具写的那份优先，否则 Root.cpk）的 `[模型, CAS, MAB]`。兵种号写游骑兵（只决定武器握持，载具没有武器），武器数 0。机体没装（基础 SGO 不在）就不生成，也不预览（日志一行）。
+- 挂载不上模型：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
+- 镜头：载具比士兵大，四个机位点在加右移之后整体乘一个倍数（`VehicleScale`：坦克 3、战机 6，按尺寸估的 L，待实机调）；离开菜单逐字节还原。模型在原地每帧转 0.01 rad（`kVehicleTurn`），菜单键不再转它。
+- **风险（L，需实机）**：菜单 SGO 的 `random_animation` 播 `_menu1/2/3`，`soldier_weapon_slot` 指 `weapon` 骨骼；载具 CAS 里没有这些动画、MAB 里没有这根骨骼。渲染器找不到动画 / 骨骼时是跳过还是出错没有静态核实；HQ / 房间里第一次把光标移到载具行时要盯日志与画面，出问题先把 `tools/menu_preview.py` 的载具文件撤掉（插件见文件缺失就不预览）。
+
 ## 7. 需实机验证
 
 - OnUpdate 中调 0x8BDE80 / 广播是否安全；

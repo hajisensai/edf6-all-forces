@@ -12,7 +12,7 @@ struct PreviewSpec {
     bool leader=false;
     SupportLook look{};                  // kStockColour = the template's colour
     // Not none: that vehicle body instead of a soldier (its generated menu SGO, tools/menu_preview.py; kind / leader /
-    // look unused). Its pylons are not on the model (docs/plan-2026-11-10-worldmap.md: the menu renderer hangs only
+    // look unused). Its pylons are not on the model (docs/room-3d-preview-re.md section 6.1: the menu renderer hangs only
     // WeaponTable rows); the menu's own rows show them.
     VehicleBody body=VehicleBody::none;
 };
