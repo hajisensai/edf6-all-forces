@@ -11,6 +11,8 @@ bool InstallDamageStats() noexcept;   // at load, after InstallSub (it checks th
 void ResetDamageStats() noexcept;     // mission.cpp MissionStart: a new book
 // The side an attacker stands for, as the book sorts it (an enemy by its team; world for none). Game thread.
 dmgstat::Side AttackerSide(unsigned char* attacker) noexcept;
+// Whether `victim` is a weak spot as a whole (its class is one of dmgnum::kWeakPartClasses). Game thread.
+bool WeakPartObject(const unsigned char* victim) noexcept;
 // dmgnum.cpp (README 伤害数字, docs/damage-numbers-re.md): the damage notice's colours (a weak spot, friendly fire) and the
 // NPCs' and support units' hits handed to the player's HUD. At load; off (logged) when the stock bytes differ.
 bool InstallDamageNumbers() noexcept;

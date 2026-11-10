@@ -32,11 +32,24 @@ inline Rgba FromRgb(std::uint32_t rgb) noexcept {
 enum class Kind : std::uint8_t { normal, weak, friendly };
 // A part multiplier above this is a weak spot (a float written by the game: 1 exactly for no part; armour below 1).
 inline constexpr float kWeakAbove=1.001f;
-// What the hit was, from the damage function's own two facts. Friendly fire first: a misfire on an ally's weak part
-// is still a misfire. A multiplier that is not a number (unreadable) counts as none.
-inline Kind Classify(bool friendlyFire,float partMultiplier) noexcept {
+// The victims that are a weak spot as a whole: a separate part object the boss takes its weak-spot damage through,
+// whose slot 17 accepts the hit without scaling it (docs/damage-numbers-re.md §3: EDF6_GrandMotherParts_Weak 0x37C7A0).
+inline constexpr const char* kWeakPartClasses[]={".?AVEDF6_GrandMotherParts_Weak@@"};
+inline bool WeakPartClass(const char* rtti) noexcept {
+    if(!rtti)return false;
+    for(const char* c:kWeakPartClasses) {
+        const char* a=rtti;
+        const char* b=c;
+        while(*a && *a==*b){++a;++b;}
+        if(*a==*b)return true;
+    }
+    return false;
+}
+// What the hit was, from the damage function's own facts. Friendly fire first: a misfire on an ally's weak part is
+// still a misfire. A multiplier that is not a number (unreadable) counts as none.
+inline Kind Classify(bool friendlyFire,float partMultiplier,bool weakPart) noexcept {
     if(friendlyFire)return Kind::friendly;
-    return partMultiplier>kWeakAbove ? Kind::weak : Kind::normal;   // NaN compares false: normal
+    return weakPart || partMultiplier>kWeakAbove ? Kind::weak : Kind::normal;   // NaN compares false: normal
 }
 
 struct Colors {

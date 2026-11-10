@@ -14,6 +14,8 @@
 //    attack): the attacker itself names the source (an enemy's kind is its weapon).
 // 0x54A586 itself is left alone: subcarrier.cpp checks that its call still reaches 0x547C30 (DamageCallReaches).
 #include "crew.h"
+#include "damagestats.h"
+#include "dmgnum.h"
 #include "edf/host.h"
 #include "edf/patch.h"
 #include "hudtext.h"
@@ -393,6 +395,8 @@ dmgstat::Side AttackerSide(unsigned char* attacker) noexcept {
     if(EnemyTeam(At<std::int32_t>(attacker,kTeam)))return dmgstat::Side::enemy;
     return SideOf(attacker,nullptr);
 }
+
+bool WeakPartObject(const unsigned char* victim) noexcept { return victim && dmgnum::WeakPartClass(ClassOf(victim)); }
 
 bool InstallDamageStats() noexcept {
     __try {

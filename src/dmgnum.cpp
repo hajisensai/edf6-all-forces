@@ -7,8 +7,11 @@
 // a vehicle's hit to its rider (0x62F4F0). Everything stays in the stock's own notice and HUD: the number's place,
 // size, merging and fading are the game's.
 #include "crew.h"
+#include "damagestats.h"
 #include "dmgnum.h"
 #include "memory.h"
+#include <cstddef>
+#include <cstring>
 
 namespace crew {
 namespace {
@@ -62,7 +65,7 @@ void __fastcall Hit(unsigned char* notice,unsigned char* victim,unsigned char* g
     Store(notice,dmgnum::kStockFill);   // the stock's, whatever happens below
     __try {
         const dmgnum::Colors colors=ColorsNow();
-        const dmgnum::Kind kind=dmgnum::Classify(frame[kFrameFriendly]!=0,At<float>(frame,kFramePart));
+        const dmgnum::Kind kind=dmgnum::Classify(frame[kFrameFriendly]!=0,At<float>(frame,kFramePart),WeakPartObject(victim));
         Store(notice,dmgnum::Fill(colors,kind,false));
         if(kind!=dmgnum::Kind::normal && colors.tint)++tinted;
         const Config& c=Cfg();
