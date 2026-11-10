@@ -2,6 +2,7 @@
 #include "mission_crew.h"
 #include "mission_crew_team.h"
 #include "mission_crew_quiet.h"
+#include "mission_crew_radar.h"
 #include "support_soldier.h"
 #include "support_loadout.h"
 #include "support_variants.h"
@@ -18,9 +19,11 @@ constexpr unsigned kSoldier=1,kLeader=2;
 constexpr std::size_t kRiding=0x1548;   // Human: the vehicle it rides (weak_ptr object; control block +0x1550)
 static_assert(kSoldier==kSupportRangerResource && kLeader==kSupportLeaderResource,"the crew are the rifle templates' soldier resources");
 // quiet[i]: this machine cleared crew[i]'s random-talk bit while it sat in the vehicle and owes it back
-// (mission_crew_quiet.h; 测试站 #41).
-struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15],quiet[15]; };
+// (mission_crew_quiet.h; 测试站 #41). aboard[i]: crew[i] sat in the deployment's own live vehicle at the last look (no
+// radar dot of its own then: mission_crew_radar.h).
+struct Deployment { std::uint64_t transaction; ObjRef vehicle; ObjRef crew[15]; unsigned count; bool applied,remote,restorePending; bool boarded[15],quiet[15],aboard[15]; };
 Deployment deployments[128]{};
+static_assert(sizeof(deployments)/sizeof(deployments[0])*15==crewradar::kMost,"the radar's hidden set holds every soldier");
 bool teamReady=false;
 std::uint64_t nextOffline=0x8000000000000000ULL;
 bool Exists(const ObjRef& r) noexcept {return r.obj && Readable(r.obj,kObjectFlags+4) && r.Is(r.obj);}
@@ -40,7 +43,18 @@ void QuietCrew(Deployment& d,bool release) noexcept {
         const crewquiet::Step step=crewquiet::Next(exists,aboard,flags,d.quiet[i]);
         if(step.write)Put<std::uint32_t>(h,kObjectFlags,step.flags);
         d.quiet[i]=step.quieted;
+        d.aboard[i]=aboard;
     }
+}
+// The radar's hidden set: every soldier seated in its deployment's vehicle now, published whole (mission_crew_radar.h).
+void PublishRadar() noexcept {
+    static const void* objects[crewradar::kMost];
+    unsigned count=0;
+    for(const auto& d:deployments) {
+        if(!d.transaction || !d.applied)continue;
+        for(unsigned i=0;i<d.count;++i)if(d.aboard[i] && d.crew[i].obj)objects[count++]=d.crew[i].obj;
+    }
+    MissionCrewRadarPublish(objects,count);
 }
 Deployment* Find(std::uint64_t tx) noexcept {
     for(auto& d:deployments)if(d.transaction==tx)return &d;
@@ -173,10 +187,12 @@ void DestroyMissionCrewPlan(std::uint64_t tx) noexcept {
     QuietCrew(*d,true);   // its soldiers' talk as it was, before they go (symmetric with the aboard clear)
     for(unsigned i=0;i<d->count;++i)DeleteSupportSoldier(d->crew[i]);
     *d=Deployment{};
+    PublishRadar();   // the deleted soldiers are out of the radar's hidden set before their objects are reused
     if(Alive(v))RetryMissionCrew(static_cast<unsigned char*>(const_cast<void*>(v.obj)));
 }
 void MissionCrewQuietTick() noexcept {
     for(auto& d:deployments)if(d.transaction && d.applied)QuietCrew(d,false);
+    PublishRadar();
 }
 bool MissionCrewRiding(const unsigned char* v,const unsigned char* h) noexcept {
     if(!v || !h)return false;
@@ -190,10 +206,12 @@ void ResetMissionCrewSupport() noexcept {
     // Mission teardown owns scene deletion; discard borrowed refs rather than deleting unrelated new objects.
     // A quieted soldier's bit is not given back either: its object is the teardown's (mission_crew_quiet.h).
     for(auto& d:deployments)d=Deployment{};
+    MissionCrewRadarPublish(nullptr,0);
     nextOffline=0x8000000000000000ULL;
 }
 void InstallMissionCrewSupport() noexcept {
     teamReady=InstallMissionCrewTeam(&TeamChanged);
+    InstallMissionCrewRadar();
     ConfigureMissionCrew(&Request,&ReadNativeObjectId,&Tick);
     SetNpcMissionCrew(&MissionCrewRiding);
 }

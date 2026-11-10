@@ -1,8 +1,10 @@
 #include "../src/mission_crew_support.cpp"
+#include "../src/mission_crew_radar.cpp"
 #include <cstdio>
 #include <cstdlib>
 namespace crew {
 unsigned char* image=nullptr;Config config{};
+void Log(const char*,...) noexcept {}
 const Config& Cfg() noexcept {return config;}
 NpcMissionCrewFn silentRegistered=nullptr;
 void SetNpcMissionCrew(NpcMissionCrewFn f) noexcept {silentRegistered=f;}
@@ -126,6 +128,7 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
   for(int i=0;i<2;++i)Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);
   MissionCrewQuietTick();
   Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"on foot by its vehicle: talk untouched");
+  Check(!MissionCrewRadarHidden(people[0]) && !MissionCrewRadarHidden(people[1]),"on foot: its own radar dot");
   Check(MissionCrewRiding(vehicle,people[0]) && MissionCrewRiding(vehicle,people[1]),"its own crew in its own vehicle is a silent boarding");
   unsigned char stranger[0x1800]{},otherCar[0x1000]{},sctrl[16]{},octrl[16]{};
   Put<void*>(stranger,kSelfCtrl,sctrl);Put<void*>(otherCar,kSelfCtrl,octrl);
@@ -133,18 +136,24 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
   Check(!MissionCrewRiding(otherCar,people[0]),"the mission crew boarding another vehicle sounds");
   aboard(0,true);aboard(1,true);MissionCrewQuietTick();
   Check(flags(0)==kOther && flags(1)==kOther,"seated in its vehicle: each soldier's talk bit cleared, nothing else");
+  Check(MissionCrewRadarHidden(people[0]) && MissionCrewRadarHidden(people[1]) && !MissionCrewRadarHidden(vehicle),
+        "seated in its vehicle: no radar dot of its own, the vehicle's dot stays");
   MissionCrewQuietTick();Check(flags(0)==kOther && deployments[0].quiet[0],"steady while aboard");
   aboard(0,false);MissionCrewQuietTick();
   Check(flags(0)==(kOther|kTalk) && !deployments[0].quiet[0] && flags(1)==kOther,"dismounted: its talk back, the one still aboard stays quiet");
+  Check(!MissionCrewRadarHidden(people[0]) && MissionCrewRadarHidden(people[1]),"dismounted: its dot back, the one aboard still hidden");
   aboard(0,true);MissionCrewQuietTick();Check(flags(0)==kOther,"back aboard: quiet again");
   people[1][kDead]=1;MissionCrewQuietTick();
   Check(flags(1)==(kOther|kTalk) && !deployments[0].quiet[1],"killed aboard: the bit given back (no longer a seated crew)");
+  Check(!MissionCrewRadarHidden(people[1]),"killed aboard: out of the radar's hidden set");
   people[1][kDead]=0;MissionCrewQuietTick();Check(flags(1)==kOther,"(alive again in the fixture) quiet again");
   vehicle[kDead]=1;MissionCrewQuietTick();
   Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"its vehicle destroyed: every soldier's talk back");
+  Check(!MissionCrewRadarHidden(people[0]) && !MissionCrewRadarHidden(people[1]),"its vehicle destroyed: every soldier's dot back");
   vehicle[kDead]=0;MissionCrewQuietTick();Check(flags(0)==kOther,"the vehicle back (fixture): quiet again");
   config.enabled=false;MissionCrewQuietTick();
   Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk),"the plugin turned off: every soldier's talk back");
+  Check(!MissionCrewRadarHidden(people[0]) && !MissionCrewRadarHidden(people[1]),"the plugin turned off: every dot back");
   config.enabled=true;MissionCrewQuietTick();Check(flags(0)==kOther && flags(1)==kOther,"turned on again: quiet again");
   // A bit some other code had cleared before the soldier sat down is not the plugin's to give back.
   aboard(0,false);MissionCrewQuietTick();Put<std::uint32_t>(people[0],kObjectFlags,kOther);aboard(0,true);MissionCrewQuietTick();
@@ -154,21 +163,26 @@ int main(){using namespace crew;image=static_cast<unsigned char*>(VirtualAlloc(n
   const auto tx=deployments[0].transaction;Check(flags(0)==kOther && flags(1)==kOther,"both quiet before the rollback");
   DestroyMissionCrewPlan(tx);
   Check(flags(0)==(kOther|kTalk) && flags(1)==(kOther|kTalk) && deleted==2,"rollback: every quieted soldier's talk back, then deleted");
+  Check(!MissionCrewRadarHidden(people[0]) && !MissionCrewRadarHidden(people[1]),"rollback: the deleted soldiers leave the hidden set at once");
   Check(!MissionCrewRiding(vehicle,people[0]),"a rolled-back crew is no longer a mission crew");
   // Mission end: the scene is the teardown's, nothing written through the old pointers.
   Reset();Request(vehicle,false);for(int i=0;i<2;++i){Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);aboard(i,true);}
   MissionCrewQuietTick();Check(flags(0)==kOther,"quiet before the mission ends");
-  ResetMissionCrewSupport();MissionCrewQuietTick();
+  Check(MissionCrewRadarHidden(people[0]),"hidden before the mission ends");
+  ResetMissionCrewSupport();
+  Check(!MissionCrewRadarHidden(people[0]) && !MissionCrewRadarHidden(people[1]),"mission reset: the hidden set cleared");MissionCrewQuietTick();
   Check(flags(0)==kOther && !MissionCrewRiding(vehicle,people[0]),"mission reset: forgotten without a write");
   // A peer's copy (remote deployment): its own copies are quieted the same way (the talk event is gated per machine).
   Reset();sessionFlag=true;Build(vehicle,&p);ApplyMissionCrewPlan(21,p,true);
   for(int i=0;i<2;++i){Put<std::uint32_t>(people[i],kObjectFlags,kOther|kTalk);aboard(i,true);}
   MissionCrewQuietTick();
   Check(flags(0)==kOther && flags(1)==kOther && MissionCrewRiding(vehicle,people[1]),"a peer's copies quiet in their vehicle too");
+  Check(MissionCrewRadarHidden(people[0]) && MissionCrewRadarHidden(people[1]),"a peer's copies: no dot of their own either");
   aboard(1,false);MissionCrewQuietTick();Check(flags(1)==(kOther|kTalk),"a peer's copy dismounted: talk back");
   // Not yet committed (a host's network transaction still pending): nothing is a mission crew yet.
   Reset();sessionFlag=true;Request(vehicle,false);
   Check(!MissionCrewRiding(vehicle,people[0]),"an uncommitted deployment quiets no one");
+  aboard(0,true);MissionCrewQuietTick();Check(!MissionCrewRadarHidden(people[0]),"an uncommitted deployment hides no dot");
  }
  VirtualFree(image,0,MEM_RELEASE);std::printf("mission_crew_support: %d checks passed\n",checks);
 }

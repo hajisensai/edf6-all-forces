@@ -8,6 +8,7 @@ namespace crew {
 bool SetTeamOverlay(const team_native::Overlay&) noexcept {return true;}
 void ClearTeamOverlay() noexcept {}
 int NativeTeamRows() noexcept {return team_native::kTeamCapacity;}
+void MissionCrewRadarFilter(void*,int) noexcept {}   // mission_crew_radar_test's concern
 }
 
 namespace native_live_fixture {

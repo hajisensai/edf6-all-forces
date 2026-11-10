@@ -2,6 +2,7 @@
 #include "pvp_native.h"
 #include "pvp_controlled_npc.h"
 #include "enemy_control_radar.h"
+#include "mission_crew_radar.h"
 #include "enemy_control_identity.h"
 #include "coop_extension_api.h"
 #include "crew.h"
@@ -290,6 +291,8 @@ void __fastcall RadarFriends(void* hud,void* list,int team) noexcept {
     int selected=team;
     __try {selected=RadarFriendTeam(hud,team);} __except(EXCEPTION_EXECUTE_HANDLER){}
     reinterpret_cast<void(__fastcall*)(void*,void*,int)>(image+0x82B220)(hud,list,selected);
+    // A mission AI vehicle's crew seated in it: the vehicle's dot only (测试站 #41, mission_crew_radar.h).
+    MissionCrewRadarFilter(list,selected);
 }
 bool InstallRadarFriend() noexcept {
     static bool installed=false;

@@ -6,6 +6,8 @@
 #include <new>
 namespace crew {
 bool EnemyControlRadarObserverTeam(const void*,int*) noexcept {return false;}
+// mission_crew_radar.cpp is not linked: the crew filter is mission_crew_radar_test's concern.
+void MissionCrewRadarFilter(void*,int) noexcept {}
 // team_native.cpp is not linked: the manager is a recorder. The overlay a match writes and the clears are what the
 // fixture checks; the live row count is what PvpNativePrepare reads.
 unsigned teamStubSets=0,teamStubClears=0;
