@@ -63,6 +63,13 @@ inline MapPoint Project(float lat,float lon) noexcept {
     u-=std::floor(u);
     return MapPoint{u,(90.f-lat)/180.f};
 }
+// The detail texture (Japan, kDetail* bounds; tools/worldmap_basemap.py): its (u, v) of a place inside it.
+inline bool InDetail(float lat,float lon) noexcept {
+    return lat<=kDetailNorth && lat>=kDetailSouth && lon>=kDetailWest && lon<=kDetailEast;
+}
+inline MapPoint DetailUV(float lat,float lon) noexcept {
+    return MapPoint{(lon-kDetailWest)/(kDetailEast-kDetailWest),(kDetailNorth-lat)/(kDetailNorth-kDetailSouth)};
+}
 
 // --- The view ---
 struct View {

@@ -534,3 +534,5 @@ inline constexpr Mission kMissions[]={
 };
 inline constexpr const wchar_t* kRangeKeyPrefix=L"EDF6/EDF6TR_";
 inline constexpr int kRangePlace=1;   // higashifuji
+// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.
+inline constexpr float kDetailNorth=47.000f,kDetailSouth=27.000f,kDetailWest=127.000f,kDetailEast=147.000f;

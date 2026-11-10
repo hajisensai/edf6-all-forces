@@ -45,6 +45,12 @@ void Projection() {
     Expect(Near(c.u,0.f) && Near(c.v,1.f),"180E wraps to u 0");
     const MapPoint t=Project(35.69f,139.75f);
     Expect(Near(t.u,(139.75f+180.f)/360.f) && Near(t.v,(90.f-35.69f)/180.f),"Tokyo");
+    bool inside=true;
+    for(const Place& p:kPlaces)inside=inside && InDetail(p.lat,p.lon);
+    Expect(inside,"every place on the detail texture");
+    const MapPoint d=DetailUV(kDetailNorth,kDetailWest),e=DetailUV(kDetailSouth,kDetailEast);
+    Expect(Near(d.u,0.f) && Near(d.v,0.f) && Near(e.u,1.f) && Near(e.v,1.f),"detail corners");
+    Expect(Near(kDetailNorth-kDetailSouth,kDetailEast-kDetailWest),"the detail texture square in degrees");
 }
 
 void Views() {

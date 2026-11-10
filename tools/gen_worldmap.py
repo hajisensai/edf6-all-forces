@@ -68,6 +68,9 @@ def render() -> str:
     lines.append('};')
     lines.append(f'inline constexpr const wchar_t* kRangeKeyPrefix={_w(worldmap.RANGE_KEY_PREFIX)};')
     lines.append(f'inline constexpr int kRangePlace={ids.index(worldmap.RANGE_PLACE)};   // {worldmap.RANGE_PLACE}')
+    lines.append('// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.')
+    lines.append(f'inline constexpr float kDetailNorth={_f(worldmap.DETAIL_NORTH)},kDetailSouth={_f(worldmap.DETAIL_SOUTH)},'
+                 f'kDetailWest={_f(worldmap.DETAIL_WEST)},kDetailEast={_f(worldmap.DETAIL_EAST)};')
     return '\n'.join(lines) + '\n'
 
 

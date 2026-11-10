@@ -16,6 +16,9 @@ from dataclasses import dataclass
 import math
 
 REGIONS = ('hokkaido', 'tohoku', 'kanto', 'chubu', 'kansai', 'chugoku', 'kyushu')
+# The detail texture's bounds (tools/worldmap_basemap.py derive: a square crop of Blue Marble tile D1, 20 x 20 degrees,
+# equirectangular): every place lies inside, so the zoomed-in view never needs the coarse world texture.
+DETAIL_NORTH, DETAIL_SOUTH, DETAIL_WEST, DETAIL_EAST = 47.0, 27.0, 127.0, 147.0
 
 
 @dataclass(frozen=True)

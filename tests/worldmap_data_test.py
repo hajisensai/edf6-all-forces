@@ -89,8 +89,20 @@ def check_parsers() -> None:
 
 def check_basemap() -> None:
     import worldmap_basemap as wb
-    check(wb.URL.startswith('https://') and len(wb.SHA256) == 64, 'a pinned https source')
-    check(wb.DERIVED[0] == 2 * wb.DERIVED[1] and wb.SIZE[0] == 2 * wb.SIZE[1], 'both 2:1 (equirectangular)')
+    check(all(len(src.sha256) == 64 and src.remote.endswith('.jpg') for src in wb.SOURCES), 'pinned sources')
+    check(wb.BASE_URL.startswith('https://'), 'over https')
+    check(wb.WORLD_SIZE[0] == 2 * wb.WORLD_SIZE[1] and wb.WORLD.size[0] == 2 * wb.WORLD.size[1], 'the world 2:1')
+    box = wb.crop_box(wb.TILE_D1, worldmap.DETAIL_NORTH, worldmap.DETAIL_SOUTH, worldmap.DETAIL_WEST, worldmap.DETAIL_EAST)
+    check(box == (8880, 10320, 13680, 15120), f'the Japan box in tile D1 (240 px / deg): {box}')
+    check(box[2] - box[0] == box[3] - box[1] and wb.JAPAN_SIZE[0] == wb.JAPAN_SIZE[1], 'square, so one scale')
+    for pid, p in worldmap.PLACES.items():
+        check(worldmap.DETAIL_SOUTH <= p.lat <= worldmap.DETAIL_NORTH and
+              worldmap.DETAIL_WEST <= p.lon <= worldmap.DETAIL_EAST, f'{pid}: on the detail texture')
+    try:
+        wb.crop_box(wb.TILE_D1, 10.0, -10.0, 100.0, 110.0)
+        check(False, 'a box outside the tile refused')
+    except ValueError:
+        check(True, 'a box outside the tile refused')
     try:
         from PIL import Image
     except ImportError:
@@ -100,7 +112,7 @@ def check_basemap() -> None:
     out = wb.resample(im, (16, 8))
     check(out.size == (16, 8) and out.mode == 'RGB', 'resample: the size asked')
     try:
-        wb.check(b'not it')
+        wb.check(wb.WORLD, b'not it')
         check(False, 'a wrong file refused')
     except SystemExit:
         check(True, 'a wrong file refused')
