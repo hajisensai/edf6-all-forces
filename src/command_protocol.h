@@ -18,9 +18,12 @@ namespace crew::command_net {
 // Version 9 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23) and
 // the focus any object's reference (a player's by its slot: an enemy player in PvP, which a NetId named on no other
 // machine); an older build is not spoken to (kMinVersion 9).
+// Version 10 (2026-11-10, test site #45): DISMOUNT ALL's choice in Command::param (mapcmd_logic.h DismountParamValid:
+// every rider but the driver, or only some classes' riders); an older build would refuse the order's parameter, so it
+// is not spoken to (kMinVersion 10; the room protocol went to 9 with it: an older build is not let into the room).
 // Negotiated, not assumed: every hello goes out as version kMinVersion with the sender's highest version in the hello's
 // formationTotal; the host answers each peer at the lower of the two and the client speaks that version from then on.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=9,kMinVersion=9,kMaxPeers=1024;
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=10,kMinVersion=10,kMaxPeers=1024;
 constexpr bool Compatible(std::uint32_t version) noexcept { return version>=kMinVersion && version<=kVersion; }
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;
@@ -37,7 +40,7 @@ struct Ways { std::uint32_t order=0; float current[3]{}; std::uint32_t n=0; floa
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };
 struct Request {
     std::uint32_t count=0;
-    mapcmd::Command command{};   // command.param: the formation order's (version 7), 0 for every other order
+    mapcmd::Command command{};   // command.param: the formation order's (version 7), DISMOUNT ALL's choice (version 10), 0 for every other order
     std::uint32_t flags=0;       // kQueued (version 7)
     unsigned char requester[32]{},focus[32]{},units[kCommandNetUnits][32]{};
     std::uint32_t formationTotal=0,formationSlots[kCommandNetUnits]{};

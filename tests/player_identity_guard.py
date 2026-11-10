@@ -103,7 +103,7 @@ PLAYER_NETID = re.compile(r'ReadNativeObjectId\(\s*(PlayerHuman\(\)|me|human|who
                           r'static_cast<const unsigned char\*>\(\s*(requester|actor|owner|ownerPlayer)\.obj\s*\))\s*,')
 VERSIONS = [
     ('src/mod_room.h', r'kAllForcesRoomProtocol=(\d+)', 9),
-    ('src/command_protocol.h', r'kMinVersion=(\d+)', 9),
+    ('src/command_protocol.h', r'kMinVersion=(\d+)', 10),
     ('src/player_vehicle_logic.h', r'kVersion=(\d+)', 3),
     ('src/barrage_net_protocol.h', r'kVersion=(\d+)', 4),
     ('src/ultimate_net_protocol.h', r'kVersion=(\d+)', 3),

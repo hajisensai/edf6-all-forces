@@ -962,6 +962,8 @@ void LoadConfig() noexcept {
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
     n.npcSquadJoinRange=ReadFloat(L"NpcSquadJoinRange",n.npcSquadJoinRange);
     n.npcBoarding=ReadBool(L"NpcBoarding",n.npcBoarding);
+    n.npcRideAlong=ReadBool(L"NpcRideAlong",n.npcRideAlong);
+    n.commandHintShown=ReadBool(L"CommandHintShown",n.commandHintShown);
     n.npcGunners=ReadBool(L"NpcGunners",n.npcGunners);
     n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
     n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
@@ -1043,7 +1045,8 @@ void LoadConfig() noexcept {
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npcBackpack=%d",n.npcBackpack);
-    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
+    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d rideAlong=%d commandHintShown=%d",n.npcMarkKey,n.npcMarkCone,
+        n.npcBoarding,n.npcGunners,n.npcRideAlong,n.commandHintShown);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);

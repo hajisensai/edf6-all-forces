@@ -33,6 +33,10 @@ namespace crew {
 //      And the support vehicles' and aircraft's weapons deal a request's damage at the online story's weapon level
 //      cap for the room's difficulty and mission (support_firepower.h, docs/feature-npc-weapon-tier.md §4.1), not the
 //      friend attack coefficient: every machine makes its own copy, so an older build's copies would hit by another rule.
+//      And the map's DISMOUNT ALL carries its choice (all but the driver, some classes' riders: map commands
+//      v10, mapcmd_logic.h DismountParamValid), and the squads following a player ride along with that player
+//      (src/ride_along.h; the host runs the guests' squads): an older build in the room would refuse the order or leave
+//      a guest's squad on foot.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

@@ -155,6 +155,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool seats; SeatPrompt seatPrompt;
                     bool lookHint,lookKeys;
                   bool entrance; BoardingEntrance boardingEntrance;
+                  bool cmdHint; CommandHint commandHint;   // the first-time "press M to command" (npcai.cpp, ride_along.h)
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo;
@@ -1245,6 +1246,19 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
     else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
     else if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
     else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
+}
+
+// The first-time hint over a squad the map can command (test site #45: 「玩家第一次靠近可指挥的 NPC，或看到原版招募图标的位置
+//时，在图标位置显示「按 M 键进行指挥」」; npcai.cpp NpcCommandHintFrame): a small chevron over its head, the line above it.
+void CommandHintMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CommandHint& h,
+                     Line* lines,int* at) noexcept {
+    float x,y,depth;
+    if(!Project(vp,h.at,width,height,&x,&y,&depth) || x<0.0f || x>width || y<0.0f || y>height)return;
+    Seg(drawer,ctx,x-9.0f*s,y-6.0f*s,x,y+3.0f*s,2.0f*s,kCyan);
+    Seg(drawer,ctx,x,y+3.0f*s,x+9.0f*s,y-6.0f*s,2.0f*s,kCyan);
+    wchar_t key[32];KeyName(h.key,key,32);
+    const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y-22.0f*s,30.0f*s,height-30.0f*s);
+    Label(text,lines,at,tx,ty,1,kLineScale,kCyan,Tr(Tx::cmdHintPressKey),key);
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
@@ -3584,6 +3598,7 @@ void HudPublish() noexcept {
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
     s.lookHint=VehicleLookHint(&s.lookKeys);
     s.entrance=PlayerBoardingEntrance(&s.boardingEntrance);
+    s.cmdHint=NpcCommandHint(&s.commandHint);
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
     s.sazabi=PlayerSazabiCue(&s.sazabiCue);   // the Sazabi's thrusters, weapons, flight, aim and lock (sazabi.cpp; SazabiHud)
@@ -4350,11 +4365,59 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
 alignas(16) const float kBtnFill[4]={0.03f,0.05f,0.06f,0.78f};
 alignas(16) const float kBtnLit[4]={0.10f,0.42f,0.50f,0.90f};
 constexpr float kBtnRowH=30.0f,kBtnGap=6.0f,kBtnPad=8.0f,kBtnIcon=18.0f,kBtnMargin=16.0f,kBtnBottom=142.0f;   // px at 1080 lines
+// The ALL OUT button's menu (map_buttons.h kDismountMenu; test site #45 「如何让某个角色单独下车」): over the button, a row a
+// choice -- everyone, everyone but the driver, one class's riders; a click on a row is that DISMOUNT ALL (mapcmd.cpp
+// PickDismount). Its rows go to mapcmd.cpp as the formation menu's do (one menu at a time).
+void MapDismountMenu(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapCommandReadout& c,
+                     const float* buttons,const int* ids,int n,Line* lines,int* at) noexcept {
+    int button=-1;
+    for(int i=0;i<n;++i)if(ids[i]==static_cast<int>(mapbtn::Id::dismountAll))button=i;
+    if(button<0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
+    static_assert(mapbtn::kDismountMenuRows<=kMapFormationEntries,"the menu's rows fit the formation menu's");
+    const int count=mapbtn::kDismountMenuRows;
+    int entries[mapbtn::kDismountMenuRows];
+    const float scale=kLineScale*0.7f,pad=kBtnPad*s,rowH=26.0f*s,gap=2.0f*s;
+    wchar_t word[mapbtn::kDismountMenuRows][64];float rowW=120.0f*s;
+    for(int i=0;i<count;++i) {
+        const std::uint32_t p=mapbtn::kDismountMenu[i];
+        entries[i]=mapbtn::DismountEntry(p);
+        const std::uint32_t cls=p&mapcmd::kDismountClasses;
+        if(!p)wcsncpy_s(word[i],Tr(Tx::dismountEveryone),_TRUNCATE);
+        else if(!cls)wcsncpy_s(word[i],Tr(Tx::dismountKeepDriver),_TRUNCATE);
+        else {
+            const Tx name=cls==mapcmd::kDismountRanger ? Tx::npcRanger : cls==mapcmd::kDismountWingDiver ? Tx::npcWingDiver :
+                          cls==mapcmd::kDismountFencer ? Tx::npcFencer : Tx::npcAirRaider;
+            _snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,Tr(Tx::dismountClass),Tr(name));
+        }
+        Line probe{};Format(probe,L"%ls",word[i]);probe.scale=scale;
+        if(text)MeasureAll(*text,&probe,1);
+        const float w=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*pad;
+        rowW=std::fmax(rowW,w);
+    }
+    float top=buttons[button*4+1];
+    for(int i=0;i<n;++i)top=std::fmin(top,buttons[i*4+1]);
+    const mapbtn::Rect at0{buttons[button*4],top,buttons[button*4+2],top+(buttons[button*4+3]-buttons[button*4+1])};
+    mapbtn::Rect row[mapbtn::kDismountMenuRows]{};
+    const int placed=mapbtn::MenuColumn(at0,count,rowW,rowH,gap,width,height,row);
+    if(placed<=0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
+    MapUiBox(drawer,ctx,row[0].x0-4.0f*s,row[0].y0-4.0f*s,row[0].x1+4.0f*s,row[placed-1].y1+4.0f*s,lines,*at);
+    float rects[mapbtn::kDismountMenuRows*4];
+    for(int i=0;i<placed;++i) {
+        const mapbtn::Rect& q=row[i];
+        const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,hover ? kMapBoxFill : kBtnFill);
+        Label(text,lines,at,q.x0+pad,(q.y0+q.y1)*0.5f,0,scale,kMapOrder,L"%ls",word[i]);
+        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+pad,q.x1-pad);
+        rects[i*4]=q.x0;rects[i*4+1]=q.y0;rects[i*4+2]=q.x1;rects[i*4+3]=q.y1;
+    }
+    MapCommandFormationButtons(rects,entries,placed);
+}
 // The formation button's menu (map_buttons.h MenuColumn; the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"):
 // over the button, a row a shape -- a selected guarding squad's defences, the march of the squads following the player --
 // the shape in use lit; a click on a row is that shape (mapcmd.cpp PickFormation).
 void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapCommandReadout& c,
                       const float* buttons,const int* ids,int n,Line* lines,int* at) noexcept {
+    if(!c.formationMenu && c.dismountMenu){MapDismountMenu(drawer,ctx,text,width,height,s,c,buttons,ids,n,lines,at);return;}
     int button=-1;
     for(int i=0;i<n;++i)if(ids[i]==static_cast<int>(mapbtn::Id::formation))button=i;
     if(!c.formationMenu || button<0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
@@ -5908,6 +5971,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.cmdHint)CommandHintMark(drawer,ctx,t,viewProj,width,height,s,snap.commandHint,lines,&at);
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);

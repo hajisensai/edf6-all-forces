@@ -6933,7 +6933,12 @@ def npc_ai_wired() -> None:
     # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
     # is taken before RideVehicle (callee-consumed). Existing riders/reservations and ownership stay protected.
     board = code.split('bool BoardSquad(', 1)[1].split('\n}\n', 1)[0]
-    assert 'AssignBoard(v,m[i],ms)' in board, 'squad boarding uses the shared real-seat allocator'
+    # The squad's seats handed out by distance (src/ride_along.h Assign; test site #45) under the same protections as
+    # one soldier's AssignBoard: on foot, its own authority, not scripted, the seat taking it and not reserved.
+    assert 'BoardInto(v,top,ms,ridealong::kBoardRoles,3)' in board, 'squad boarding uses the shared real-seat allocator'
+    into = code.split('int BoardInto(', 1)[1].split('\n}\n', 1)[0]
+    assert '!OnlineMaySeatNpc(v)' in into and '!HumanOnFoot(h)' in into and '!IsOnlineAuthority(h)' in into and 'npc::Scripted(' in into
+    assert '!SeatTakes(v,k,h)' in into and 'Reserved(v,k,ms,h)' in into and 'ridealong::Assign(' in into
     assign = code.split('bool AssignBoard(', 1)[1].split('\n}\n', 1)[0]
     assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms,h)' in assign and '!SeatTakes(v,k,h)' in assign
     assert '!IsOnlineAuthority(h)' in assign and '!OnlineMaySeatNpc(v)' in assign

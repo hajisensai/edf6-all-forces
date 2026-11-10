@@ -43,6 +43,25 @@ inline constexpr Order kLastOrder=Order::formation;
 inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
 inline bool LeavesSeat(int seatRole,bool all) noexcept { return all || seatRole>=kSeatPassenger; }
 inline bool DismountOrder(Order o) noexcept { return o==Order::dismount || o==Order::dismountAll; }
+// DISMOUNT ALL's choices (test site #45, 2026-11-10: 「如何让某个角色单独下车」, #44: 「预设下车指令：全体下车只留司机等」; the
+// map's ALL OUT button opens them as a menu, map_buttons.h DismountMenu). The order's `param` (command protocol v10):
+// 0 every rider off (as before); kDismountKeepDriver set: every rider but the driver; with class bits too, only the riders
+// of those classes, the driver kept (the vehicle stays driven). The class bits are npcai.cpp kSoldiers' order. DISMOUNT
+// (the passengers) takes no param.
+inline constexpr std::uint32_t kDismountKeepDriver=0x100u;
+inline constexpr std::uint32_t kDismountRanger=1u,kDismountWingDiver=2u,kDismountFencer=4u,kDismountAirRaider=8u,kDismountClasses=0xFu;
+inline bool DismountParamValid(Order o,std::uint32_t p) noexcept {
+    if(o!=Order::dismountAll)return p==0;
+    return p==0 || ((p&kDismountKeepDriver) && !(p&~(kDismountKeepDriver|kDismountClasses)));
+}
+// Whether a rider of class `cls` (0..3, npcai.cpp kSoldiers; -1 unknown) on a seat of `seatRole` gets off under the order.
+inline bool DismountLeaves(int seatRole,bool all,std::uint32_t param,int cls) noexcept {
+    if(!all)return LeavesSeat(seatRole,false);
+    if(!(param&kDismountKeepDriver))return true;
+    if(seatRole==kSeatDriver)return false;
+    const std::uint32_t classes=param&kDismountClasses;
+    return !classes || (cls>=0 && cls<4 && ((classes>>static_cast<unsigned>(cls))&1u));
+}
 // The orders that take the ground point under the pointer (and stand round it in a formation).
 inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
 // The orders that put a unit somewhere to stand: the point orders, and HOLD (its own spot).

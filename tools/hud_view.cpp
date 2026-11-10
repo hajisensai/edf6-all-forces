@@ -188,6 +188,7 @@ bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
+bool NpcCommandHint(CommandHint*) noexcept { return false; }   // npcai.cpp: the first-time "press M to command"
 bool hasLauncher=false;LauncherReadout sceneLauncher{};
 bool PlayerLauncher(LauncherReadout* o) noexcept {if(hasLauncher)*o=sceneLauncher;return hasLauncher;}
 // The stock heli gun's sight (helisight.cpp): on in the heli_gun_ladder scenes.

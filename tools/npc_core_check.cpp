@@ -33,6 +33,7 @@ bool NpcPackCanUse(unsigned char*,int) noexcept { return packCanUse; }
 bool NpcPackUse(unsigned char*,int slot) noexcept { ++packUses;packUseSlot=slot;return true; }
 bool NpcPackReload(unsigned char*) noexcept { ++packReloads;return true; }
 bool RealDriverNativeReady() noexcept { return true; }
+bool SaveIniFlag(const char*,const char*) noexcept { return true; }   // loadout_store.cpp: the ini, not written here
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
 int announcedBoards=0;
 bool AnnounceNpcBoarding(unsigned char*) noexcept { ++announcedBoards;return true; }

@@ -26,6 +26,9 @@ bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* va
 struct LoadoutSave { LoadoutField field; const wchar_t* unit; const wchar_t* value; };
 inline constexpr int kLoadoutSaveMost=128;   // room_menu.h SaveSet: 2 * kMostUnits lines
 bool SaveSupportLoadouts(const LoadoutSave* items,int count,int* failed,wchar_t* why,std::size_t capacity) noexcept;
+// One [VehicleCrew] key of EDF6VehicleCrew.ini set (ini_text.h Rewrite), the file replaced atomically; the config is not
+// reloaded (the caller keeps its own state). Any thread. False: not read / not written.
+bool SaveIniFlag(const char* key,const char* value) noexcept;
 bool StartVariantGeneration(wchar_t* why,std::size_t capacity) noexcept;
 GenerateStatus VariantGenerationStatus() noexcept;
 bool StartSaveBackup() noexcept;
