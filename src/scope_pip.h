@@ -66,17 +66,22 @@ inline float Unzoomed(float written,float camZoom) noexcept {
 
 // When the camera may keep the frame unmagnified (the lens draws the power): the picture in the picture is wanted, the
 // world's end is hooked (the lens pass has its place) and the pass has not refused this device's surface, and either the
-// lens drew within kLensFreshMs (wall) or the scope opened within kProbationMs (the first frames, before any pass ran).
-// Otherwise the stock zoom stays and the HUD draws the whole-screen eyepiece (mode 1's picture): a frame never shows the
-// unmagnified world through a lens that is not there.
+// lens drew since this scope opened (lensAt >= openedAt: the pass works on this view) or the scope opened within
+// kProbationMs (the first frames, before any pass ran). Otherwise the stock zoom stays and the HUD draws the
+// whole-screen eyepiece (mode 1's picture).
+// Not "the lens drew lately": a frame the stock zoom rendered never gets a lens (Magnification ~1), so once the camera
+// zoomed again (a pause: the soldier's frame stops publishing, the camera step still runs, docs/hud-re.md §10, so the
+// paused frames are the stock zoom's; a render hitch past kLensFreshMs) the lens could never draw again and the scope
+// stayed mode 1's until it closed. A surface the pass
+// cannot draw on refuses (lensRefused), which is what turns the picture in the picture off.
 constexpr unsigned long long kLensFreshMs=250,kProbationMs=500;
 constexpr bool LensDrew(unsigned long long now,unsigned long long lensAt) noexcept {
     return lensAt!=0 && now>=lensAt && now-lensAt<=kLensFreshMs;
 }
 constexpr bool KeepUnzoomed(bool wanted,bool hooked,bool refused,unsigned long long now,unsigned long long openedAt,
                             unsigned long long lensAt) noexcept {
-    return wanted && hooked && !refused &&
-           (LensDrew(now,lensAt) || (openedAt!=0 && now>=openedAt && now-openedAt<=kProbationMs));
+    return wanted && hooked && !refused && openedAt!=0 && now>=openedAt &&
+           ((lensAt!=0 && lensAt>=openedAt) || now-openedAt<=kProbationMs);
 }
 
 // The lens on a w x h target: centre, radius, magnification. Source() is the frame's pixel the lens shows at (x, y):

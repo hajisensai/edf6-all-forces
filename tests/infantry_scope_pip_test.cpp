@@ -1,7 +1,7 @@
 // The picture-in-picture scope's production flow (src/infantryscope.cpp, InfantryScope=2; testhub #32), offline:
 //  - the camera step (CamStepHook, chained over a stand-in of the stock step 0xF86A0 that writes pi/4 / cam+0x410 as
-//    0xF8906 does): the scoped soldier's camera keeps pi/4 while the lens may draw (the first kProbationMs, then while it
-//    drew within kLensFreshMs); its own write retracted before the next step (the no-target branch writes nothing);
+//    0xF8906 does): the scoped soldier's camera keeps pi/4 while the lens may draw (the first kProbationMs, then once it
+//    drew in this opening, a stall included); its own write retracted before the next step (the no-target branch writes nothing);
 //    another camera, mode 1, a foreign FOV, the world's end not hooked, a refused surface: the stock zoom stays;
 //  - InfantryScopeNow's lens flag (the HUD frames the lens only while it draws) and its FOV (the reticle's angles);
 //  - the world's end (InfantryScopeWorldEnd) on a real D3D11 WARP device: the scoped soldier's view gets the lens at the
@@ -90,9 +90,14 @@ void CameraChecks() {
     Open(now-10*scopepip::kProbationMs);
     Check(Step(camera)==scopepip::kBaseFov,"past the probation the lens drawing keeps the frame unmagnified");
 
-    // The lens stopped drawing past the probation: the stock zoom, nothing framed.
-    lensAt.store(GetTickCount64()-10*scopepip::kLensFreshMs);
-    Check(Step(camera)==kStockFov,"the lens stopped drawing: the stock zoom is back");
+    // The lens stopped drawing for a while (a pause: the cue goes stale, the camera step zooms; a hitch) after it drew
+    // in this opening: the frame stays unmagnified so the lens can draw again; the HUD frames none until it does.
+    lensAt.store(now-5*scopepip::kProbationMs);
+    Check(Step(camera)==scopepip::kBaseFov,"the lens drew in this opening, then stalled: still unmagnified (it can draw again)");
+    Check(!Lens(),"...and the HUD frames no lens until it draws again");
+    // No lens ever drew in this opening past its probation (one drawn before it proves nothing): the stock zoom.
+    Open(now-2*scopepip::kProbationMs);lensAt.store(now-3*scopepip::kProbationMs);
+    Check(Step(camera)==kStockFov,"no lens in this opening past the probation: the stock zoom is back");
     Check(!Lens(),"...and the HUD frames no lens (the whole-screen eyepiece)");
     {
         const Published p=Read();
@@ -218,6 +223,19 @@ int WorldEndChecks() {
     Check(outside,"outside the lens nothing is written (the world unmagnified)");
     Check(inside,"inside the lens the centre's neighbourhood scaled up by the magnification");
     Check(changed>0,"the lens changed the picture");
+
+    // A stall past the lens's freshness (a pause, a hitch): the camera keeps the frame unmagnified and the next world view
+    // draws the lens again (the stock-zoomed frames a stale lens used to bring back never get one).
+    {
+        Published p=Read();p.openedAt=GetTickCount64()-10*scopepip::kProbationMs;Publish(p);
+        lensAt.store(GetTickCount64()-10*scopepip::kLensFreshMs);
+        Check(Step(camera)==scopepip::kBaseFov && !Lens(),"stalled: unmagnified, no lens framed yet");
+        g.Restore();g.Bind(true);
+        End(g.context.Get(),view);
+        Check(Lens() && g.Read()!=g.start,"...the next world view draws the lens again, the HUD frames it");
+        Check(Step(camera)==scopepip::kBaseFov,"...and the camera stays unmagnified");
+        g.Restore();
+    }
 
     // A split screen's partial viewport: refused, the camera zooms again, the next mission tries again.
     g.Restore();g.Bind(false);

@@ -95,8 +95,9 @@ int main() {
     Check(KeepUnzoomed(true,true,false,t,t,0),"the scope just opened: the probation, before any lens drew");
     Check(KeepUnzoomed(true,true,false,t+kProbationMs,t,0) && !KeepUnzoomed(true,true,false,t+kProbationMs+1,t,0),
           "the probation ends: no lens drawn, the stock zoom");
-    Check(KeepUnzoomed(true,true,false,t+10000,t,t+10000-kLensFreshMs) && !KeepUnzoomed(true,true,false,t+10000,t,t+10000-kLensFreshMs-1),
-          "past the probation the lens keeps it while it drew lately");
+    Check(KeepUnzoomed(true,true,false,t+10000,t,t+10000-kLensFreshMs) && KeepUnzoomed(true,true,false,t+10000,t,t),
+          "past the probation the lens keeps it once it drew in this opening, however long ago (a pause, a hitch)");
+    Check(!KeepUnzoomed(true,true,false,t+10000,t,t-1),"a lens drawn before this opening proves nothing");
     Check(!KeepUnzoomed(false,true,false,t,t,t) && !KeepUnzoomed(true,false,false,t,t,t) && !KeepUnzoomed(true,true,true,t,t,t),
           "not wanted, the world's end not hooked, the surface refused: the stock zoom");
     Check(!KeepUnzoomed(true,true,false,t,0,0) && !LensDrew(t,0) && !LensDrew(t,t+1),"nothing opened, no lens, a clock gone back");
