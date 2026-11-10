@@ -155,15 +155,41 @@ void Loop() {
             if(!capped)++presentFrames;
             now+=cost(rng);
         }
-        const u64 passed=clock.last/tick;
-        Expect(steps==passed,"every tick that passed is stepped once",static_cast<double>(steps),static_cast<double>(passed));
-        const double tickRate=static_cast<double>(steps)/(static_cast<double>(now-clock.base)/static_cast<double>(freq));
+        // What the loop really stepped (after its min(n, 3)) against the ticks that passed: `steps` sums the clock's own
+        // counts and equals clock.last/tick by construction, so only `stepsSoFar` says whether the gate lost a tick.
+        const u64 passed=(now-clock.base)/tick;
+        Expect(steps==clock.last/tick,"the clock's counts are its boundaries",static_cast<double>(steps),static_cast<double>(clock.last/tick));
+        Expect(stepsSoFar==clock.last/tick,"no counted tick dropped by the loop's min(n, 3)",static_cast<double>(stepsSoFar),static_cast<double>(clock.last/tick));
+        Expect(stepsSoFar+1>=passed && stepsSoFar<=passed,"every tick that passed is stepped once",static_cast<double>(stepsSoFar),static_cast<double>(passed));
+        const double tickRate=static_cast<double>(stepsSoFar)/(static_cast<double>(now-clock.base)/static_cast<double>(freq));
         Expect(std::fabs(tickRate-59.94)<0.1,"the simulation keeps 59.94 Hz",tickRate,cap);
         Expect(continuous,"the shown time never goes back nor jumps",cap);
         const double rate=static_cast<double>(frames)/30.0;
         if(cap!=kUnlimited)Expect(rate<=cap+0.05 && rate>=std::min(cap,400)*0.9,"frames at the cap",rate,cap);
         Expect(presentFrames>0,"some frames only present",static_cast<double>(presentFrames));
     }
+}
+
+// The control for Loop: a gate that counts the ticks first and then skips the frame when its slot has not come drops
+// the ticks it counted (0x11DAE60 has already moved its boundary on), so the simulation runs slow. This is why Ready is
+// asked before the clock; the check above would not tell the two orders apart if it counted the clock's own sums.
+void LoopCountFirst() {
+    const u64 freq=10'000'000,tick=crew::pacing::TickPeriod(freq);
+    const int cap=61;
+    const u64 period=PresentPeriod(freq,cap);
+    GameClock clock{987654321,0,tick};
+    Gate g{};
+    u64 now=clock.base+11,stepped=0;
+    std::mt19937_64 rng(3);
+    std::uniform_int_distribution<u64> cost(freq/2000,freq/400);
+    while(now-clock.base<freq*30) {
+        const u64 n=clock.Count(now);
+        if(!Ready(g,now,cap,period)){now+=WaitCounts(g,now,cap);continue;}
+        stepped+=n<3 ? n : 3;
+        now+=cost(rng);
+    }
+    Expect(stepped<clock.last/tick*99/100,"counting before the gate loses ticks (the order Ready guards against)",
+           static_cast<double>(stepped),static_cast<double>(clock.last/tick));
 }
 
 void Alpha() {
@@ -291,6 +317,7 @@ int main() {
     CapSettings();
     Slots();
     Loop();
+    LoopCountFirst();
     Alpha();
     Rigid();
     InputEdges();

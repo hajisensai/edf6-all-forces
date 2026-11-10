@@ -1014,7 +1014,7 @@ target_compile_options(frame_pacing_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(frame_pacing_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The frame rate decoupling's pure parts (src/frame_rate_logic.h, docs/unlimited-fps-re.md): slots, the tick clock asked only
 # for a frame that runs, the render phase, the rigid interpolation, the input edges' shadow.
-# offline: cmake --build build --target frame_rate_check && buildrame_rate_check.exe
+# offline: cmake --build build --target frame_rate_check && build\frame_rate_check.exe
 add_executable(frame_rate_check EXCLUDE_FROM_ALL tools/frame_rate_check.cpp)
 target_compile_options(frame_rate_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(frame_rate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
