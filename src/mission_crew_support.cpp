@@ -6,6 +6,7 @@
 #include "support_soldier.h"
 #include "support_loadout.h"
 #include "support_variants.h"
+#include "npc_arms.h"
 #include "real_driver_native.h"
 #include "online_authority.h"
 #include "memory.h"
@@ -82,7 +83,14 @@ bool Build(unsigned char* v,SupportPlan* out) noexcept {
         unit.matrix[0]=unit.matrix[5]=unit.matrix[10]=unit.matrix[15]=1;
         std::memcpy(unit.matrix+12,at,12);
     }
-    return out->count>1;
+    if(out->count<2)return false;
+    // Their weapons: a player's, one tier below (the maintainer, 2026-11-10: 任务乘员 "改成拿玩家武器";
+    // docs/feature-npc-weapon-tier.md 2.4). Nobody called them, so the player whose weapons they take is the one whose
+    // machine builds this plan: this machine offline, the host online (only the host builds it: Request). The pick
+    // travels in the plan (Unit::arms), so every machine makes the same crew. All zero when the weapon hooks are not in
+    // here (npc_arms.h LocalRequesterArms, logged): the stock templates.
+    GiveLocalArms(out);
+    return true;
 }
 
 void BoardPending(Deployment& d) noexcept {
@@ -124,7 +132,7 @@ bool Apply(std::uint64_t tx,const SupportPlan& plan,bool remote,unsigned char* v
         // Coloured when the host applied its look and the file is here; else stock (and listed): colours never refuse.
         wchar_t path[128];
         const wchar_t* look=SupportSoldierLookPath(u.resourceId,u.variant,remote,path,sizeof(path)/sizeof(path[0]));
-        if(!ApplySupportSoldierResource(u.matrix,u.resourceId,InSession() ? u.netId : nullptr,false,&soldier,look)) {
+        if(!ApplySupportSoldierResource(u.matrix,u.resourceId,InSession() ? u.netId : nullptr,false,&soldier,look,u.arms)) {
             DestroyMissionCrewPlan(tx);return false;
         }
         d->crew[d->count++]=soldier;
@@ -144,7 +152,13 @@ bool Request(unsigned char* v,bool restored) noexcept {
         }
         return true; // the same unified network transaction is still being prepared
     }
+    // Online only the host builds a crew plan (its player's weapons go into it): another machine neither picks nor loads any.
+    if(InSession() && !OnlineHostOnly())return false;
     SupportPlan plan;if(!Build(v,&plan))return false;
+    // The weapons it gives loaded here first (the host's own pick: its mission preload has them, npc_arms.h
+    // PreloadNpcArms); pending: the mission crew asks again next frame (mission_crew.cpp: not dispatched). Each peer
+    // loads them before its READY (support_net.cpp Hooks::prepare).
+    if(NpcArmsLoaded(plan)!=support_net::PlanResult::ready)return false;
     if(!InSession())return Apply(++nextOffline,plan,false,v);
     unsigned char anchor[32]{};
     if(!OnlineHostOnly() || !PlayerHuman() || !ReadNativeObjectId(PlayerHuman(),anchor))return false;
@@ -166,6 +180,9 @@ bool ValidateMissionCrewPlan(const SupportPlan& p) noexcept {
         const auto& u=p.units[i];
         if((u.resourceId!=kSoldier && u.resourceId!=kLeader) || u.role!=1)return false;
         if(u.variant && !LookOfVariant(u.variant,nullptr))return false;   // a crew carries a look or nothing
+        // A player weapon (its kind's: ValidPlan) needs the weapon hooks here, else it would be another soldier than the
+        // host's: refused, never stock (as support_dispatch.cpp Validate).
+        if(u.arms && !SupportSoldierArmsReady())return false;
         bool entrance=false;
         for(unsigned seat=0;seat<SeatCount(v);++seat) {
             float at[3],reach=0;

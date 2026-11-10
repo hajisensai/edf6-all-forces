@@ -26,8 +26,12 @@ namespace crew {
 //      and the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
 //      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
 //      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
+//   9 (2026-11-10): a mission vehicle's crew (the host's player's weapons), a sea rescue's crew (the swimmer's) and the
+//      X-Morph infantry (the Ranger's assault rifles) carry player weapons too (docs/feature-npc-weapon-tier.md 2.4): a
+//      crew plan's units carry arms an 8 would build as stock soldiers, an X-Morph arms word an 8 refuses (the support
+//      wire keeps v2).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=8;
+constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

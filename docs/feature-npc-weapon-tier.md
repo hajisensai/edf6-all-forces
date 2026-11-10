@@ -1,6 +1,7 @@
 # 援军士兵：与玩家同数值的武器，低一档
 
-> 需求与原话：[feedback-2026-11-08-npc-weapon-tier.md](feedback-2026-11-08-npc-weapon-tier.md)。档位表（生成文件）：[npc-weapon-tiers.md](npc-weapon-tiers.md)。
+> 需求与原话：[feedback-2026-11-08-npc-weapon-tier.md](feedback-2026-11-08-npc-weapon-tier.md)；
+> 任务乘员 / 救援机组 / X-Morph 步兵（2026-11-10）：[feedback-2026-11-10-crew-player-arms.md](feedback-2026-11-10-crew-player-arms.md)。档位表（生成文件）：[npc-weapon-tiers.md](npc-weapon-tiers.md)。
 > EDF.dll TimeDateStamp `0x678CCB46`，地址都是 RVA。H = 指令直接读到（`tools/edfre.py` 只读反汇编，2026-11-09 复核）；
 > M = 有代码证据的推断；L = 推测。**没有开游戏实测。**
 
@@ -19,16 +20,16 @@
 
 ## 2. 新规则
 
-只对**本插件援军调度叫来的士兵**（`support_dispatch.cpp` 的步兵班、载具 / 运输机带来的士兵；单机与联机同一规则）：
+对**本插件造出的士兵**（`support_dispatch.cpp` 的步兵班、载具 / 运输机带来的士兵、X-Morph 步兵、海上救援机组，
+以及 `mission_crew_support.cpp` 给任务载具补的乘员；单机与联机同一规则，基准玩家见 §2.4）：
 
 1. **武器**：模板的主武器（`soldier_load_weapon` 第 0 把，14 个原版模板都是主武器；重装的第 1 把是 AI 盾，不动）换成 WEAPONTABLE
    的玩家武器，星级用叫援军玩家那把武器的星级（不是写死的 5）。
 2. **攻击系数**：这样的士兵在 OnLevel 里拿玩家的 1，不拿难度的系数；于是 `0x59ABB0` 写出的 `weapon+0x788` = 1 × `+0x398`，
    与玩家同一规则。
 3. **血量不改**：`0x59686D call 0xD7810` 不动，援军血量仍按原版随难度 / 进度缩放（维护者只说了伤害）。
-4. 不改：原版任务脚本生成的友军；任务载具的乘员（`mission_crew_support.cpp`，不是玩家叫来的，没有「叫援军的玩家」）；
-   海上救援的机组（`support_dispatch.cpp RescueHere`，只开飞机）；测试场行；X-Morph 步兵（不是 EDF 兵，用自己的 X-Morph 武器）。
-   这些仍是原版模板、原版规则。
+4. 不改：原版任务脚本生成的友军；测试场行。这些仍是原版模板、原版规则。
+   （2026-11-08 版本还把任务载具乘员、海上救援机组、X-Morph 步兵列为不改项；2026-11-10 维护者改为「拿玩家武器」，见 §2.4。）
 
 ### 2.1「低一档」（表驱动，`src/npc_tier.h`）
 
@@ -59,6 +60,24 @@
 所以背包武器也是 1 × `+0x398`，双重缩放消失。剩下一种情况：本机武器钩子没装上（字节不符，已记日志）时士兵退回原版、背包仍乘系数——
 这属于「安装 / 版本坏了」，不另写补偿。
 
+### 2.4 任务载具乘员、海上救援机组、X-Morph 步兵（2026-11-10）
+
+维护者：「任务载具乘员、海上救援机组、X-Morph 步兵目前按原版规则，不拿玩家武器。改成拿玩家武器」。三类都走 §2.2 的同一对钩子
+（武器载入换第 0 把、系数钩子对 `armed` 返回 1），只是「基准玩家」和「种类」要各定一条确定、各机一致的规则：
+
+| 对象 | 基准玩家（谁的武器） | 种类 / 系列 | 载入时机 | 代码 |
+|---|---|---|---|---|
+| 任务载具乘员（`kMissionCrewCatalog`） | **造这份计划的机器的玩家**：单机 = 本机玩家；联机只有房主造（`Request` 要求 `OnlineHostOnly`）= **房主** | 乘员是步枪模板（`kSupportRangerResource` / `kSupportLeaderResource`）→ `rifle` 系列 | 房主 / 单机：本机玩家的武器在任务开始随原版预载（`PreloadNpcArms`）；`Request` 先问 `NpcArmsLoaded`，pending 就不派（`mission_crew.cpp` 下一帧再问）。客户端：`Hooks::prepare` 里 `NpcArmsLoaded` 载完才 READY | `mission_crew_support.cpp Build / Request / Apply / ValidateMissionCrewPlan` |
+| 海上救援机组（救援目录项） | **落水求救的玩家**（请求发起者）：单机本机玩家；联机由求救的那台机器 `SubmitSupportRequest` 带上（不再对 `ownChannel` 例外） | 机组种类按 `SupportCfg().aircraftCrew`（默认步枪） | 单机 `RescueHere`：`GiveLocalArms` 后 `NpcArmsLoaded`，pending / refused 就不出动、写救援提示，`heli.cpp` 过重试间隔再叫；联机同援军（房主 BEGIN 前、各机 READY 前） | `support_dispatch.cpp RescueHere`、`support_net.cpp SubmitSupportRequest` |
+| X-Morph 步兵（`SupportWeapon::xmInfantry`） | 叫援军的玩家（它本来就是援军调度叫来的） | 它的士兵 SGO 是游骑兵 `N601_COMMON_RANGER_AF` 换模型（`pylib/xm_infantry.py STOCK`，第 0 把是 `AiSoldierRifle01`），原作是机枪步兵 → **游骑兵突击步枪系列**，与 `rifle` 同表（`tools/gen_npc_tiers.py RANGER_RIFLES`） | 同援军 | 只改生成表；`KindArmed(xmInfantry)` 变 true，`LocalRequesterArms` 自动给它挑 |
+
+- 为什么任务乘员用「造计划的机器」而不是「全体玩家里某规则」：乘员计划只有一个造它的人（房主），武器字随计划下发，
+  各机只照做、不各自重算，不需要再约定玩家排序；房主没装武器钩子 / 预载不符（`LocalRequesterArms` 全 0）时乘员是原版模板，
+  这时计划里本来就没有武器字，各机仍一致。客户端没有钩子而计划带武器：`ValidateMissionCrewPlan` 拒绝（不退回原版）。
+- `LocalRequesterArms` 现在也要求资源预载（`0x7A3780` / `0x7A3600`，字节同 `debug_spawn.cpp`，H）对得上：对不上就给不出武器、
+  全 0（任务开始记一行日志），否则任务乘员会每帧被 `NpcArmsLoaded` 拒绝、一直刷日志。
+- 共用的「把本机玩家的武器填进计划」收成 `npc_arms.h GiveLocalArms`（离线援军、离线救援、任务乘员三处）。
+
 ## 3. 联机
 
 - 发起方决定：`SubmitSupportRequest` 调 `LocalRequesterArms`，`RequesterArms`（每种类一个 64 位字：bit63 有、bit0-15 武器 id、
@@ -67,6 +86,9 @@
 - 每台机器 `Hooks::prepare`（`NpcArmsLoaded`）确认武器已载入才 READY；房主自己也在 BEGIN 前问一次（先派生 NetId，只派生一次）。
 - 编解码校验：武器必须是该种类系列里的、星级 ≤10、无关位为 0；载具不带；BEGIN 不带。
 - 支援线协议仍是 v2；**房间协议 `kAllForcesRoomProtocol` 7 → 8**（`src/mod_room.h`），旧版本不能进房。
+- 2026-11-10（§2.4）：**房间协议 8 → 9**。任务乘员的预备计划（`SubmitPrepared`，`t.external`，`Session::Advance` 不覆盖它的 `arms`）
+  每个 unit 消息带房主挑的武器字；8 的客户端会无视它造原版士兵（各机不一致），且会拒绝 X-Morph 种类的武器字，所以升版拒旧。
+  救援请求现在也带求救者的 `RequesterArms`。线格式不变（支援线仍 v2）。
 
 ## 4. 载具与战机（评估）
 
@@ -91,10 +113,17 @@
   系数钩子只对插件登记为带武器的士兵返回 1，原版 / 其他士兵走原函数；别种类武器、载入没生效、钩子没装上都不出动。
 - `tests/support_protocol_test.cpp Arms()`：请求 / unit / BEGIN 的编解码与非法值拒绝、支援线仍 v2、三机房间里每台造出同样武器、
   房主 BEGIN 等武器载入、载入失败则拒绝并通知请求方。
-- `tests/player_identity_guard.py`：房间协议号 8。
+- `tests/player_identity_guard.py`：房间协议号 9。
+- 2026-11-10（§2.4）：`tests/mission_crew_support_test.cpp`（乘员每席带造计划机器的步枪武器、载具不带；单机载入中不派 / 载不了不派且不退回原版；
+  房主载完才提交事务；客户端照房主的武器造、没钩子拒绝；没挑出武器则原版）；`tests/support_dispatch_test.cpp`（单机救援的驾驶员与炮手各带本机玩家
+  该种类的武器、载入中 / 载不了都不出动）；`tests/support_protocol_test.cpp ExistingArms()`（房主的乘员预备计划在三机房间里各机武器一致、
+  各机都问过载入、别种类武器拒绝）与 `Arms()`（X-Morph 步兵的步枪武器字往返、长矛拒绝）；`tests/npc_tier_test.cpp`（每个种类都带武器；
+  X-Morph 行与步枪行逐行一致、同一玩家挑出同一把）。
 
 ## 6. 需实机确认
 
 - 换上的玩家武器在 AI 士兵手里能正常开火（AI 用的射程 / 弹道参数来自武器本身；翼人能量、重装双手武器等）。
 - `DamageStats=1` 下同一把武器在玩家手上与援军手上每发伤害一致（简单 / 炼狱 × 首关 / 末关）。
 - 任务中途叫援军时武器按需载入（`NpcArmsLoaded` pending → ready）不卡顿；联机三机各自载入后同时出现。
+- §2.4：任务载具乘员换了武器后仍能正常登车、在车上开火 / 下车后用玩家武器；联机客户端载入房主的武器后乘员同时出现。
+- §2.4：救援直升机的驾驶员 / 炮手拿玩家武器后炮手座（门炮）照常开火；X-Morph 步兵的动力装甲模型拿玩家步枪时握持姿势正常。

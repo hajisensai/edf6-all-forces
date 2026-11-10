@@ -552,12 +552,11 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
         Note(note,size,running ? L"支援自动握手尚未完成：联机通道已连接，但部署协议未就绪" :
             L"支援联机通道未就绪：当前参与者或认证直连尚未同步");return false;
     }
-    // This player's soldier weapons (docs/feature-npc-weapon-tier.md), decided here and carried by the request; none for
-    // the sea rescue (its crew flies, offline as online: support_dispatch.cpp RescueHere) or the test range's rows.
+    // This player's soldier weapons (docs/feature-npc-weapon-tier.md), decided here and carried by the request: the sea
+    // rescue's crew too (2026-11-10, offline as online: support_dispatch.cpp RescueHere); none for the test range's rows.
     support_net::RequesterArms arms{};
     const auto catalog=static_cast<std::uint32_t>(catalogId);
-    if(!debugspawn::NetworkCatalog(catalog) && !(hooks.ownChannel && hooks.ownChannel(catalog)))
-        LocalRequesterArms(&arms);
+    if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
     if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms)) {
         Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;

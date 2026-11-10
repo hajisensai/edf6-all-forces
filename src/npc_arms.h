@@ -2,14 +2,28 @@
 // machine's player would give each soldier kind it calls, and the loads of the weapons a plan's soldiers carry.
 #pragma once
 #include "support_net.h"
+#include "support_call.h"
 #include <cstdint>
 
 namespace crew {
 // This machine's player (GameStatus slot 0, its current class: docs/loadout-re.md) as the requester: for each soldier kind
 // the weapon one tier below its own (npc_tier.h PickArms), packed (npctier::PackArms). All zero when the soldiers' weapon
-// hooks are not in (support_soldier.cpp: the profile did not match, logged) or the game status is not readable: the
-// soldiers then come as the stock templates, under the stock rule.
+// hooks are not in (support_soldier.cpp: the profile did not match, logged), the resource preload is not as read (logged
+// at the mission start) or the game status is not readable: the soldiers then come as the stock templates, under the
+// stock rule. The requester: whoever calls (support_dispatch.cpp, support_net.cpp), for a sea rescue the swimmer, for a
+// mission vehicle's crew the machine that builds its plan (offline this one, online the host: mission_crew_support.cpp).
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept;
+// Each soldier of `plan` given this machine's player's weapon of its kind (LocalRequesterArms; a unit not a soldier: 0):
+// the plans this machine builds as their requester (an offline call or rescue, a host's mission crew).
+inline void GiveLocalArms(support_net::Plan* plan) noexcept {
+    if(!plan)return;
+    support_net::RequesterArms arms;
+    LocalRequesterArms(&arms);
+    for(std::uint32_t i=0;i<plan->count && i<support_net::kMaxUnits;++i) {
+        auto& unit=plan->units[i];
+        unit.arms=IsSupportSoldierResource(unit.resourceId) ? arms.kind[static_cast<int>(SupportSoldierWeapon(unit.resourceId))] : 0;
+    }
+}
 // Mission start (after PreloadSupportSoldiers, before the game's WaitPreload): this machine's player's weapons for every
 // kind queued with the mission's own preload, so its own calls need no load.
 void PreloadNpcArms() noexcept;

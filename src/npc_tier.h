@@ -32,7 +32,7 @@ constexpr const TierRow* RowOf(SupportWeapon kind,int id) noexcept {
     for(const auto& r:kTierRows)if(r.kind==static_cast<int>(kind) && r.id==id)return &r;
     return nullptr;
 }
-// Whether `kind` carries player weapons at all (the X-Morph infantry does not).
+// Whether `kind` carries player weapons at all (every kind has since 2026-11-10: the X-Morph infantry the rifle's series).
 constexpr bool KindArmed(SupportWeapon kind) noexcept {
     for(const auto& r:kTierRows)if(r.kind==static_cast<int>(kind))return true;
     return false;

@@ -328,4 +328,56 @@ inline constexpr TierRow kTierRows[]={
     {13,0,800,796,3100,L"hWeapon105"},   // Dexter Automatic Shotgun ZG
     {13,0,1418,800,4170,L"MPACK_A_Weapon044"},   // Dexter Automatic Shotgun ZGXE
     {13,0,1515,1418,4400,L"MPACK_B_Weapon065"},   // Dexter Automatic Shotgun ZGXX
+    {14,0,0,-1,0,L"AssultRifle01"},   // Broken PA-11
+    {14,0,3,0,70,L"aWeapon003"},   // PA-11 LS
+    {14,0,6,3,200,L"aWeapon006"},   // PA-11 SLS
+    {14,1,1,-1,20,L"aWeapon001"},   // Minion Buster
+    {14,1,9,1,400,L"aWeapon009"},   // Minion Buster Burst
+    {14,1,15,9,850,L"aWeapon015"},   // Minion Buster MK2
+    {14,1,26,15,1570,L"aWeapon026"},   // Minion Buster MK3
+    {14,1,30,26,1970,L"aWeapon030"},   // Minion Blast
+    {14,1,42,30,3070,L"aWeapon042"},   // Minion Buster MKX
+    {14,2,2,-1,50,L"aWeapon002"},   // Slugger NN1
+    {14,2,18,2,980,L"aWeapon018"},   // Slugger NN2
+    {14,2,24,18,1370,L"aWeapon024"},   // Slugger NN3
+    {14,2,29,24,1880,L"aWeapon029"},   // Slugger NN3 SLS
+    {14,2,35,29,2480,L"aWeapon035"},   // Slugger NN4
+    {14,2,1376,35,4200,L"MPACK_A_Weapon002"},   // Slugger NN5
+    {14,3,4,-1,100,L"aWeapon004"},   // G&M-21S
+    {14,3,8,4,300,L"aWeapon008"},   // G&M-22S
+    {14,3,12,8,670,L"aWeapon012"},   // G&M-A23
+    {14,3,21,12,1180,L"aWeapon021"},   // G&M-A23 LS
+    {14,3,28,21,1770,L"aWeapon028"},   // G&M-24S
+    {14,3,37,28,2700,L"aWeapon037"},   // G&M-A25
+    {14,3,43,37,3180,L"aWeapon043"},   // G&M-A29
+    {14,4,5,-1,150,L"aWeapon005"},   // M1 Raven
+    {14,4,16,5,890,L"aWeapon016"},   // M2 Raven
+    {14,4,20,16,1070,L"aWeapon020"},   // M2R Raven
+    {14,4,22,20,1240,L"aWeapon022"},   // M2RER Raven
+    {14,4,32,22,2200,L"aWeapon032"},   // M3 Raven
+    {14,4,36,32,2580,L"aWeapon036"},   // M4 Raven
+    {14,4,44,36,3280,L"aWeapon044"},   // M5 Raven
+    {14,4,1452,44,4370,L"MPACK_B_Weapon002"},   // M9 Raven
+    {14,5,7,-1,250,L"aWeapon007"},   // T1 Stork
+    {14,5,11,7,570,L"aWeapon011"},   // T1 Stork S
+    {14,5,13,11,780,L"aWeapon013"},   // T1 Stork LS
+    {14,5,17,13,940,L"aWeapon017"},   // T2 Stork
+    {14,5,19,17,1050,L"aWeapon019"},   // T2 Stork KF
+    {14,5,23,19,1260,L"aWeapon023"},   // T3 Stork
+    {14,5,25,23,1470,L"aWeapon025"},   // T3 Stork Burst
+    {14,5,31,25,2070,L"aWeapon031"},   // T4 Stork
+    {14,5,34,31,2350,L"aWeapon034"},   // T4 Stork AE
+    {14,5,38,34,2790,L"aWeapon038"},   // T4 Stork MK2
+    {14,5,41,38,3010,L"aWeapon041"},   // T5 Stork
+    {14,5,45,41,3390,L"aWeapon045"},   // TZ Stork
+    {14,6,14,-1,800,L"aWeapon014"},   // Blazer
+    {14,6,1363,14,2740,L"add001"},   // Omega Blazer
+    {14,6,1364,1363,3800,L"add002"},   // EXA Blazer
+    {14,6,1453,1364,4500,L"MPACK_B_Weapon003"},   // Planet Blazer
+    {14,7,33,-1,2300,L"aWeapon033"},   // X400-Orchid
+    {14,7,39,33,2870,L"aWeapon039"},   // X500-Orchid
+    {14,7,1371,39,3200,L"dayone001"},   // X900-Orchid
+    {14,8,27,-1,1680,L"aWeapon027"},   // MXR Sirius
+    {14,9,1375,-1,4050,L"MPACK_A_Weapon001"},   // MA9E Slade
+    {14,9,1451,1375,4300,L"MPACK_B_Weapon001"},   // MA10E Slade
 };

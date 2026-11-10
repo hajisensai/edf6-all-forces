@@ -1484,6 +1484,26 @@ int main() {
      check(Validate(rp),"a peer accepts the host's rescue plan");}
     // The map's call and the rescue do not hold each other up (2026-10-10, the user: 「不用受限制吧」).
     check(SupportRescueAt(sea,note,128) && rescueDeployed==2,"a second rescue right after: no cooldown");
+    // 2026-11-10 (the maintainer: 海上救援机组 "改成拿玩家武器"; docs/feature-npc-weapon-tier.md 2.4): offline, the
+    // rescue's crew carries this player's (the swimmer's) weapon of its kind, loaded before it is made.
+    {
+        support_net::RequesterArms arms{};
+        for(int k=0;k<kSupportWeaponCount;++k)for(int r=0;r<npctier::kTierRowCount;++r)
+            if(npctier::kTierRows[r].kind==k && !arms.kind[k]){npctier::Arms a;a.on=true;a.id=npctier::kTierRows[r].id;arms.kind[k]=npctier::PackArms(a);}
+        ResetSupportDispatch();fixtureMs+=40000;made=0;resourceCount=0;localArms=arms;armsLoad=support_net::PlanResult::ready;armsAsked=0;
+        check(SupportRescueAt(sea,note,128) && made==3 && armsAsked==1 && resourceCount==2,"an armed rescue: its loads asked once, made");
+        bool same=true;
+        for(int i=0;i<resourceCount;++i)
+            same=same && IsSupportSoldierResource(lastResources[i]) && lastArms[i] &&
+                lastArms[i]==arms.kind[static_cast<int>(SupportSoldierWeapon(lastResources[i]))];
+        check(same,"its pilot and gunner each carry this player's weapon of their kind");
+        ResetSupportDispatch();fixtureMs+=40000;made=0;resourceCount=0;armsLoad=support_net::PlanResult::pending;
+        check(!SupportRescueAt(sea,note,128) && made==0 && resourceCount==0 && std::wcsstr(note,L"武器正在载入"),
+              "its weapons still loading: nothing made, the rescue asks again later (heli.cpp)");
+        armsLoad=support_net::PlanResult::refused;
+        check(!SupportRescueAt(sea,note,128) && made==0,"its weapons cannot be loaded: nothing made, never a stock crew");
+        armsLoad=support_net::PlanResult::ready;localArms={};armsAsked=0;
+    }
     ResetSupportDispatch();fixtureMs+=40000;made=0;routeResult=npc::navigation::Result::pending;
     check(SupportCallAt(21,target,note,128) && offlinePending,"a map call is planning its ground route");
     check(SupportRescueAt(sea,note,128) && made==3 && offlinePending && planning.catalog==21u,

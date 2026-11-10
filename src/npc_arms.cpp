@@ -92,7 +92,9 @@ bool Stars(const void* context,int id,std::uint8_t* out) noexcept {
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
     if(!out)return;
     *out=support_net::RequesterArms{};
-    if(!SupportSoldierArmsReady())return;
+    // Without the preload (its bytes not as read, logged by PreloadNpcArms) no weapon could be loaded for a soldier:
+    // none is given, as without the weapon hooks (a mission crew would otherwise ask for it every frame, refused).
+    if(!SupportSoldierArmsReady() || !Profile())return;
     Records records;
     npctier::Inventory inv;
     __try {
@@ -117,7 +119,10 @@ void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
 
 void PreloadNpcArms() noexcept {
     Reset();
-    if(!Profile() || !SupportSoldierArmsReady())return;
+    if(!Profile() || !SupportSoldierArmsReady()) {
+        if(!Profile())Log("SUPPORT arms: the resource preload (EDF+%X / EDF+%X) is not as read: soldiers keep their stock weapons",kPreload,kLoadDone);
+        return;
+    }
     support_net::RequesterArms arms;
     LocalRequesterArms(&arms);
     int queued=0;
