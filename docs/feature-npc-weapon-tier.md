@@ -68,7 +68,7 @@
 - 编解码校验：武器必须是该种类系列里的、星级 ≤10、无关位为 0；载具不带；BEGIN 不带。
 - 支援线协议仍是 v2；**房间协议 `kAllForcesRoomProtocol` 7 → 8**（`src/mod_room.h`），旧版本不能进房。
 
-## 4. 载具与战机（评估）
+## 4. 载具与战机
 
 | 对象 | 生成顺序 | 火力是否随难度 | 依据 |
 |---|---|---|---|
@@ -76,12 +76,63 @@
 | 援军飞机 / 直升机（`jet_spawn.cpp PrepareSupportAircraft`）、发射的战机（`SpawnJet`）、潜舰母舰（`subcarrier.cpp`） | CreateJet → SetTeam → `LevelVehicle`（SetLevel 1，置 bit3）→ `PrepareNpcVehicle`（`ApplyMissionSetup`）/ RideAi 的 setup | **是**（H 指令，M 顺序） | bit3 置位时 `0x62F89E..0x62F8CC`：xmm7 = `+0x49C`/10，xmm6 = `0xD7870`（友军攻击系数，全程序唯一调用点 `0x62F8CC`）；`0x62F9AA` `+0x678` = xmm6 × xmm7 × setup 伤害倍率；`0x633842` 建武器存进槽 `+0x40`，每帧 `0x630446` `weapon+0x788 = veh+0x398 × 槽+0x40` |
 | 玩家呼叫的载具 | 请求的 setup（`tools/call_weapons.py vehicle_sgo`：`[耐久, 伤害] = request_tier(曲线, 等级)`），不 SetLevel | 否 | `+0x678` = request_tier 伤害倍率 × `+0x67C` |
 
-结论：援军飞机类的火力受难度 + 进度缩放，地面援军载具（静态看）不受。**这一块本分支没有改代码**，原因：
+2026-11-08 的结论（当时没改代码）：援军飞机类的火力受难度 + 进度缩放，地面援军载具（静态看）不受。当时没改的原因：
 `+0x678` 的耐久与伤害共用同一个等级项 xmm7，只换 `0xD7870` 的返回值去不掉等级项，要么得返回「目标 / 等级」这种补偿系数（违背根因规则），
 要么改生成顺序（setup 在 SetLevel 之前）——那会同时改掉血量缩放（维护者只要求改伤害），且 SetLevel 同时承担 AI 表登记，
 飞机的 setup 还会被 RideAi（`0x633063` → slot 46）再跑一次，顺序依赖要实机确认。建议的做法（待维护者确认后另开分支）：
 援军飞机的 SGO（`pylib/vcobjects.py JET_TIER`）按对应玩家呼叫的等级取 `request_tier` 倍率，生成顺序改为「setup → SetLevel」，
-血量是否随之改为玩家曲线需要维护者决定。
+血量是否随之改为玩家曲线需要维护者决定。2026-11-10 维护者定了等级来源，实现见 §4.1（没有改生成顺序，也没有用补偿系数）。
+
+### 4.1 援军载具与战机的火力按等级（2026-11-10）
+
+维护者原话见 [feedback-2026-11-10-air-support-level.md](feedback-2026-11-10-air-support-level.md)：「援军载具和战机的火力 改成根据等级来。
+这个等级是类似联机模式的那个，等级会随着难度变化」。只改火力，血量维持原样。
+
+**等级（`src/support_level.h SupportLevel`）**：原版联机剧情（`DEFAULTPACKAGE/CONFIG.SGO` ModeList `GameMode_OnlineScenario`）
+成员 7[难度] 的元素 6，也就是联机房间的武器等级上限（[weapon-level-cap-re.md](weapon-level-cap-re.md) §1，H：本机 Root.cpk 读出、
+`EDF.dll 0xE2710` 逐条读过）。原始值是「界面等级 / 25」，按任务在列表中的位置（`0xD7B60` = `GS+0x48` / (任务数 − 1)，H）插值，
+`0xE2710` 的算法逐步照抄（进度夹到 [0, 1]、`floorf`、最后一格直接取末元素、×0.25×100 截断）：
+
+| 难度（`GS+0x4C`） | 元素 6 | 首关等级 | 末关等级 |
+|---|---|---|---|
+| 简单 / 普通 | `[0.1, 1.1]` | 2 | 27 |
+| 困难 | `[0.2, 2.1]` | 5 | 52 |
+| 硬核 | `[1.4, 3.1]` | 35 | 77 |
+| 炼狱 | `[2.4, 3.2, 3.999, 3.999]` | 60 | 99 |
+
+不论当前是哪个模式（离线剧情、任务包、EDF5 战役），都用联机剧情这张表（维护者说的「联机模式的那个」）；进度是当前模式自己列表里的位置。
+联机：难度与任务序号全房间相同，每台机器自己造的援军副本算出同一个等级，不需要额外同步字段。
+
+**伤害倍率（`LevelDamage`）**：= `tools/call_weapons.py request_tier(曲线, 等级 / 25)` 的伤害列，即玩家呼叫同等级的这种载具时它带的倍率：
+
+| 援军 | 曲线 | 原版请求 |
+|---|---|---|
+| 援军飞机 / 直升机、出击的战机、发射的战机（`SpawnJet` 友军）、潜舰母舰放出的 | N9 Eros（`EROS_REQUESTS` eWeapon394..399） | 插件所有飞机呼叫都用这条（`request_family`） |
+| 布莱克战车（`V505_TANK_MISSION`） | Blacker（`GROUND_VEHICLES['drill'].family`，EWEAPON418/421/425/428/433） | 伤害列（第 1 项是耐久列，不用） |
+| 救援装甲运兵车（`V507_RESCUETANK_AI`） | Grape（EWEAPON400/404/408/411/414/415，都带 `v507_rescuetank.sgo`） | |
+| 民用轻卡 | 无武器，不处理 | |
+
+三条曲线的点与联机上限表写死在 `support_level.h`，`tools/selftest.py support_level_tables_match_the_game` 有游戏时从本机 Root.cpk 读出逐项比对（无游戏只比族）。
+
+**写法（`src/support_firepower.cpp`）——只改伤害、不碰血量、不用补偿系数**：
+
+- 生成时（setup 之前）`MarkSupportFirepower(载具, 曲线)` 登记（ObjRef，按控制块判活，任务开始清空）。
+- 每次 mission setup（`real_driver_native.cpp` / `support_spawn.cpp` 的 `ApplyMissionSetup`，slot 46 → `0x62F800`）之后，
+  `ApplySupportFirepower` 对登记过的载具直接写 `+0x678 = LevelDamage × +0x67C`（`+0x67C` 构造时 1.0，`0x6295FA`，H；即未置 bit3 分支的规则，
+  玩家呼叫载具走的就是这条），并把每个武器槽 `+0x638[i]`（数量 `+0x648`，步长 0x48）的 `+0x40` 改成同值——setup 建武器时把
+  `+0x678` 抄进槽 `+0x40`（`0x633842` 读、`0x633936` 写，H），每帧 `0x6303C4..0x63044E` `weapon+0x788 = veh+0x398 × 槽+0x40`（H），所以两处都要写。
+- 飞机仍先 SetLevel(1)（bit3），setup 照原版算血量（`耐久 × setup 耐久 × 0xD78D0 友军 HP 系数 × 等级项`）；setup 写的 `+0x678` 随即被覆盖。
+  生成顺序不变，血量与原版一致；不需要「目标 / 等级」这种补偿系数，也不 hook `0xD7870`（它仍服务原版任务友军）。
+- 插件把原版 RideAi 槽换成自己的 `RideHook → PrepareNpcVehicle → ApplyMissionSetup`（`mission_crew.cpp`），所以援军飞机没有绕过这一步的 setup 路径（M：
+  `0x633063` 的原版 RideAi 不再被调用；`0x633280` 一类别的 setup 入口只用于调试生成）。
+- 登记失败（`0xD7B60` 特征码不符、登记表 128 满、对象已死）或写入失败（难度越界、武器槽不可读）：该载具不出动（生成路径删除它），日志一行，
+  不退回原版缩放。
+- 敌方 `SpawnJet`（对战里敌方队伍）不登记，仍按原版。
+
+**房间协议 `kAllForcesRoomProtocol` 8 → 9**：每台机器各自造援军副本，旧版副本按旧规则打伤害，结果不一致，所以旧版不能进房。
+
+**待实机确认**：`DamageStats=1` 下援军飞机 / 直升机 / 布莱克 / 救援装甲车每发伤害 = 武器 SGO 伤害 × 日志 `SUPPORT firepower ... damage x` 值；
+各难度首关 / 末关日志里的 `level=` 与上表一致；血量与改动前相同。
 
 ## 5. 测试
 
@@ -91,7 +142,11 @@
   系数钩子只对插件登记为带武器的士兵返回 1，原版 / 其他士兵走原函数；别种类武器、载入没生效、钩子没装上都不出动。
 - `tests/support_protocol_test.cpp Arms()`：请求 / unit / BEGIN 的编解码与非法值拒绝、支援线仍 v2、三机房间里每台造出同样武器、
   房主 BEGIN 等武器载入、载入失败则拒绝并通知请求方。
-- `tests/player_identity_guard.py`：房间协议号 8。
+- `tests/player_identity_guard.py`：房间协议号 9（§4.1）。
+- `tests/support_level_test.cpp`：等级表（各难度首末关、单调、`0xE2710` 的夹取 / 插值 / 无上限）、三条请求曲线插值与两端保持。
+- `tests/support_spawn_test.cpp`：地面援军在 setup 前登记、setup 后写火力；坦克 Blacker、运兵车 Grape、轻卡不登记；登记 / 写入失败即拒绝（含空投路径）。
+- `tests/real_driver_native_test.cpp`：spawned setup 之后恰好调一次火力步骤。
+- `tools/selftest.py support_level_tables_match_the_game`：表与本机游戏数据一致。
 
 ## 6. 需实机确认
 
