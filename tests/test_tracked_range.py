@@ -22,6 +22,7 @@ import make_vulcan
 import vcobjects as vc
 import xm_units
 import mdb
+import model_workers
 import rmpa
 import rootcpk
 import sgo
@@ -271,7 +272,9 @@ class NativeRangeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             plan = gen.Plan(vehicles={name: 1 for name in wanted})
             plan.waves.enabled = False
+            # its SGOs in this process, of self.game (made side by side, each process would build its vehicle again)
             with patch.object(gen, 'Game', return_value=self.game), \
+                 patch.object(model_workers, 'group_workers', return_value=1), \
                  patch.object(gen, 'register_pack', return_value=[]), \
                  patch.object(gen, 'placeable_derived', return_value=wanted), \
                  patch.object(make_vulcan, 'build', return_value=self.files['edf6tr_vulcan_mission']), \
