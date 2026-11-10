@@ -10,7 +10,7 @@ row only when every one of them is there, the same test the range's own tools ma
 
 The archive count is the distinct model archives (.MRAB / .RAB) the rows' SGOs name, through every SGO they name in turn
 (catalog_archives.json, `--archives`: that needs the game's Root.cpk, so it is a committed record; tools/selftest.py
-spawn_catalog_archives_recorded recomputes it where the game is).
+spawn_catalog_archives_recorded_<i> recomputes it where the game is).
 
   python tools/gen_spawn_catalog.py               write both
   python tools/gen_spawn_catalog.py --check       exit 1 when a committed file is not what this would write (CI)
