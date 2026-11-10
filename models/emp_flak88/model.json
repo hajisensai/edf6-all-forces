@@ -11,28 +11,36 @@
    "template": "v603_body",
    "albedo": "textures/flak88_1.png",
    "source": "Mat_pied_detail",
-   "normal": "textures/flak88_1_normal.png"
+   "normal": "textures/flak88_1_normal.png",
+   "roughness_metal": "textures/flak88_1_rm.png",
+   "occlusion": "textures/flak88_1_occ.png"
   },
   {
    "name": "edf6vc_flak88_2",
    "template": "v603_body",
    "albedo": "textures/flak88_2.png",
    "source": "Mat_pied",
-   "normal": "textures/flak88_2_normal.png"
+   "normal": "textures/flak88_2_normal.png",
+   "roughness_metal": "textures/flak88_2_rm.png",
+   "occlusion": "textures/flak88_2_occ.png"
   },
   {
    "name": "edf6vc_flak88_3",
    "template": "v603_body",
    "albedo": "textures/flak88_3.png",
    "source": "mat_sous_haut",
-   "normal": "textures/flak88_3_normal.png"
+   "normal": "textures/flak88_3_normal.png",
+   "roughness_metal": "textures/flak88_3_rm.png",
+   "occlusion": "textures/flak88_3_occ.png"
   },
   {
    "name": "edf6vc_flak88_0",
    "template": "v603_body",
    "albedo": "textures/flak88_0.png",
    "source": "Mat_haut",
-   "normal": "textures/flak88_0_normal.png"
+   "normal": "textures/flak88_0_normal.png",
+   "roughness_metal": "textures/flak88_0_rm.png",
+   "occlusion": "textures/flak88_0_occ.png"
   }
  ],
  "parts": [

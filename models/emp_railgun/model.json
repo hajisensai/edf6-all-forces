@@ -10,7 +10,9 @@
    "name": "edf6vc_railgun_0",
    "template": "v603_body",
    "albedo": "textures/railgun_0.png",
-   "source": "Material.001"
+   "source": "Material.001",
+   "roughness_metal": "textures/railgun_0_rm.png",
+   "occlusion": "textures/railgun_0_occ.png"
   }
  ],
  "parts": [

@@ -5,56 +5,63 @@
  "source": "https://sketchfab.com/3d-models/38-cm-sturmmorser-war-thunder-31033223348b4d0982ed4ee27b4f5afd",
  "prepared_from": "38_cm_Sturmmorser.obj",
  "winding_flipped": false,
- "auto_smooth_deg": 50.0,
+ "normals": "auto_smooth 45",
  "materials": [
   {
    "name": "wt_sturmmorser_sturmtiger_body_c_ger_camo_dunkelgelb",
    "template": "v603_body",
    "albedo": "textures/sturmmorser_sturmtiger_body_c_ger_camo_dunkelgelb.jpg",
    "normal": "textures/sturmmorser_sturmtiger_body_n_n.jpg",
-   "occlusion": "textures/sturmmorser_sturmtiger_body_ao_ao_occ.png"
+   "occlusion": "textures/sturmmorser_sturmtiger_body_ao_ao_occ.png",
+   "specular": "textures/sturmmorser_sturmtiger_body_n_s.jpg"
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_c.jpg",
    "normal": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_n.jpg",
-   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png",
+   "specular": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_s.jpg"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_c.jpg",
    "normal": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_n.jpg",
-   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png",
+   "specular": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_s.jpg"
   },
   {
    "name": "wt_sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb",
    "template": "v603_body",
    "albedo": "textures/sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb.jpg",
    "normal": "textures/sturmmorser_sturmtiger_gun_n_n.jpg",
-   "occlusion": "textures/sturmmorser_sturmtiger_gun_ao_ao_occ.png"
+   "occlusion": "textures/sturmmorser_sturmtiger_gun_ao_ao_occ.png",
+   "specular": "textures/sturmmorser_sturmtiger_gun_n_s.jpg"
   },
   {
    "name": "wt_380mm_spgr_4581_c_380mm_spgr_4581_c",
    "template": "v603_body",
    "albedo": "textures/380mm_spgr_4581_c_380mm_spgr_4581_c.jpg",
    "normal": "textures/380mm_spgr_4581_n_n.jpg",
-   "occlusion": "textures/380mm_spgr_4581_ao_ao_occ.png"
+   "occlusion": "textures/380mm_spgr_4581_ao_ao_occ.png",
+   "specular": "textures/380mm_spgr_4581_n_s.jpg"
   },
   {
    "name": "wt_mg_34_c",
    "template": "v603_body",
    "albedo": "textures/mg_34_c.jpg",
    "normal": "textures/mg_34_n_n.jpg",
-   "occlusion": "textures/mg_34_ao_ao_occ.png"
+   "occlusion": "textures/mg_34_ao_ao_occ.png",
+   "specular": "textures/mg_34_n_s.jpg"
   },
   {
    "name": "wt_net_f_c",
    "template": "v603_body",
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
-   "occlusion": "textures/net_f_ao_ao_occ.png"
+   "occlusion": "textures/net_f_ao_ao_occ.png",
+   "specular": "textures/net_f_n_s.jpg"
   }
  ],
  "parts": [
@@ -63,7 +70,7 @@
    "bone": "body",
    "material": 0,
    "triangles": 86045,
-   "vertices": 108407
+   "vertices": 110122
   },
   {
    "name": "body.wt_sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb",
@@ -77,7 +84,7 @@
    "bone": "body",
    "material": 5,
    "triangles": 4735,
-   "vertices": 5219
+   "vertices": 5362
   },
   {
    "name": "body.wt_net_f_c",
@@ -91,133 +98,133 @@
    "bone": "cannon_l",
    "material": 3,
    "triangles": 2104,
-   "vertices": 1943
+   "vertices": 1944
   },
   {
    "name": "cannon_slide_l.wt_sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb",
    "bone": "cannon_slide_l",
    "material": 3,
    "triangles": 6150,
-   "vertices": 5640
+   "vertices": 5838
   },
   {
    "name": "cannon_slide_l.wt_380mm_spgr_4581_c_380mm_spgr_4581_c",
    "bone": "cannon_slide_l",
    "material": 4,
    "triangles": 1676,
-   "vertices": 1474
+   "vertices": 3273
   },
   {
    "name": "catapi_body.v603_kyata_L",
    "bone": "catapi_body",
    "material": 1,
    "triangles": 4176,
-   "vertices": 4216
+   "vertices": 4278
   },
   {
    "name": "catapi_body.v603_kyata_R",
    "bone": "catapi_body",
    "material": 2,
    "triangles": 4176,
-   "vertices": 4216
+   "vertices": 4278
   },
   {
    "name": "wheel_A_l",
    "bone": "tire_moveA_l",
    "material": 0,
    "triangles": 4391,
-   "vertices": 5079
+   "vertices": 5078
   },
   {
    "name": "wheel_A_r",
    "bone": "tire_moveA_r",
    "material": 0,
    "triangles": 4391,
-   "vertices": 5079
+   "vertices": 5078
   },
   {
    "name": "wheel_B_l",
    "bone": "tire_moveB_l",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_B_r",
    "bone": "tire_moveB_r",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_C_l",
    "bone": "tire_moveC_l",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3146
+   "vertices": 3158
   },
   {
    "name": "wheel_C_r",
    "bone": "tire_moveC_r",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3146
+   "vertices": 3158
   },
   {
    "name": "wheel_D_l",
    "bone": "tire_moveD_l",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_D_r",
    "bone": "tire_moveD_r",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_E_l",
    "bone": "tire_moveE_l",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3144
+   "vertices": 3156
   },
   {
    "name": "wheel_E_r",
    "bone": "tire_moveE_r",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3144
+   "vertices": 3156
   },
   {
    "name": "wheel_F_l",
    "bone": "tire_moveF_l",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_F_r",
    "bone": "tire_moveF_r",
    "material": 0,
    "triangles": 2674,
-   "vertices": 3010
+   "vertices": 3022
   },
   {
    "name": "wheel_G_l",
    "bone": "tire_moveG_l",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3146
+   "vertices": 3158
   },
   {
    "name": "wheel_G_r",
    "bone": "tire_moveG_r",
    "material": 0,
    "triangles": 2812,
-   "vertices": 3146
+   "vertices": 3158
   },
   {
    "name": "wheel_H_l",

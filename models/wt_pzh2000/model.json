@@ -5,68 +5,77 @@
  "source": "https://sketchfab.com/3d-models/pzh-2000-war-thunder-remodel-3391b53c325c45f6a9aa769ba8c511ab",
  "prepared_from": "PzH_2000.obj",
  "winding_flipped": false,
- "auto_smooth_deg": 50.0,
+ "normals": "auto_smooth 45",
  "materials": [
   {
    "name": "wt_pzh_2000_body_c_ger_camo_bronzegruen",
    "template": "v603_body",
    "albedo": "textures/pzh_2000_body_c_ger_camo_bronzegruen.jpg",
    "normal": "textures/pzh_2000_body_n_n.jpg",
-   "occlusion": "textures/pzh_2000_body_ao_ao_occ.png"
+   "occlusion": "textures/pzh_2000_body_ao_ao_occ.png",
+   "specular": "textures/pzh_2000_body_n_s.jpg"
   },
   {
    "name": "wt_pzh_2000_turret_c_ger_camo_bronzegruen",
    "template": "v603_body",
    "albedo": "textures/pzh_2000_turret_c_ger_camo_bronzegruen.jpg",
    "normal": "textures/pzh_2000_turret_n_n.jpg",
-   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png"
+   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png",
+   "specular": "textures/pzh_2000_turret_n_s.jpg"
   },
   {
    "name": "wt_net_f_c",
    "template": "v603_body",
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
-   "occlusion": "textures/net_f_ao_ao_occ.png"
+   "occlusion": "textures/net_f_ao_ao_occ.png",
+   "specular": "textures/net_f_n_s.jpg"
   },
   {
    "name": "wt_side_glass_c",
    "template": "v603_body",
    "albedo": "textures/side_glass_c.jpg",
-   "normal": "textures/side_glass_n_n.jpg"
+   "normal": "textures/side_glass_n_n.jpg",
+   "specular": "textures/side_glass_n_s.jpg"
   },
   {
    "name": "wt_pzh_2000_gun_c_ger_camo_bronzegruen",
    "template": "v603_body",
    "albedo": "textures/pzh_2000_gun_c_ger_camo_bronzegruen.jpg",
    "normal": "textures/pzh_2000_gun_n_n.jpg",
-   "occlusion": "textures/pzh_2000_gun_ao_ao_occ.png"
+   "occlusion": "textures/pzh_2000_gun_ao_ao_occ.png",
+   "specular": "textures/pzh_2000_gun_n_s.jpg"
   },
   {
    "name": "wt_rifled_barrel_b_c",
    "template": "v603_body",
    "albedo": "textures/rifled_barrel_b_c.jpg",
    "normal": "textures/rifled_barrel_b_n_n.jpg",
-   "occlusion": "textures/rifled_barrel_b_n_ao_occ.png"
+   "occlusion": "textures/rifled_barrel_b_n_ao_occ.png",
+   "specular": "textures/rifled_barrel_b_n_s.jpg"
   },
   {
    "name": "wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
    "template": "v603_body",
    "albedo": "textures/mg_mount_leopard_2a7v_c_ger_camo_bronzegruen.jpg",
    "normal": "textures/mg_mount_leopard_2a7v_n_n.jpg",
-   "occlusion": "textures/mg_mount_leopard_2a7v_ao_ao_occ.png"
+   "occlusion": "textures/mg_mount_leopard_2a7v_ao_ao_occ.png",
+   "specular": "textures/mg_mount_leopard_2a7v_n_s.jpg"
   },
   {
    "name": "wt_mg_mg_42_c",
    "template": "v603_body",
    "albedo": "textures/mg_mg_42_c.jpg",
    "normal": "textures/mg_mg_42_n_n.jpg",
-   "occlusion": "textures/mg_mg_42_ao_ao_occ.png"
+   "occlusion": "textures/mg_mg_42_ao_ao_occ.png",
+   "specular": "textures/mg_mg_42_n_s.jpg"
   },
   {
    "name": "wt_pzh_2000_turret_c",
    "template": "v603_body",
    "albedo": "textures/pzh_2000_turret_c.jpg",
    "normal": "textures/pzh_2000_turret_n_n.jpg",
+   "specular": "textures/pzh_2000_turret_n_s.jpg",
    "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png"
   },
   {
@@ -74,69 +83,79 @@
    "template": "v603_body",
    "albedo": "textures/pzh_2000_add_c.jpg",
    "normal": "textures/pzh_2000_add_n_n.jpg",
-   "occlusion": "textures/pzh_2000_add_ao_ao_occ.png"
+   "occlusion": "textures/pzh_2000_add_ao_ao_occ.png",
+   "specular": "textures/pzh_2000_add_n_s.jpg"
   },
   {
    "name": "wt_schutzenpanzer_puma_igelpanzerung_c",
    "template": "v603_body",
    "albedo": "textures/schutzenpanzer_puma_igelpanzerung_c.jpg",
    "normal": "textures/schutzenpanzer_puma_igelpanzerung_n_n.jpg",
-   "occlusion": "textures/schutzenpanzer_puma_igelpanzerung_ao_ao_occ.png"
+   "occlusion": "textures/schutzenpanzer_puma_igelpanzerung_ao_ao_occ.png",
+   "specular": "textures/schutzenpanzer_puma_igelpanzerung_n_s.jpg"
   },
   {
    "name": "wt_schutzenpanzer_puma_igelpanzerunga_cap_c",
    "template": "v603_body",
    "albedo": "textures/schutzenpanzer_puma_igelpanzerunga_cap_c.jpg",
    "normal": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_n.jpg",
-   "occlusion": "textures/schutzenpanzer_puma_igelpanzerunga_cap_ao_ao_occ.png"
+   "occlusion": "textures/schutzenpanzer_puma_igelpanzerunga_cap_ao_ao_occ.png",
+   "specular": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_s.jpg"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
+   "specular": "textures/ger_pzh_2000_track_n_s.jpg"
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
+   "specular": "textures/ger_pzh_2000_track_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "occlusion": "textures/headlight_glass_n_ao_occ.png"
+   "occlusion": "textures/headlight_glass_n_ao_occ.png",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_headlight_glass_c_15",
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
-   "normal": "textures/headlight_glass_n_n.jpg"
+   "normal": "textures/headlight_glass_n_n.jpg",
+   "specular": "textures/headlight_glass_n_s.jpg"
   },
   {
    "name": "wt_ger_pzh_2000_phys_track_c",
    "template": "v603_body",
    "albedo": "textures/ger_pzh_2000_phys_track_c.jpg",
    "normal": "textures/ger_pzh_2000_phys_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_phys_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzh_2000_phys_track_ao_ao_occ.png",
+   "specular": "textures/ger_pzh_2000_phys_track_n_s.jpg"
   },
   {
    "name": "wt_chain_a_c",
    "template": "v603_body",
    "albedo": "textures/chain_a_c.jpg",
    "normal": "textures/chain_a_n_n.jpg",
-   "occlusion": "textures/_white_ao_ao_occ.png"
+   "occlusion": "textures/_white_ao_ao_occ.png",
+   "specular": "textures/chain_a_n_s.jpg"
   },
   {
    "name": "wt_mg_browning_m2hb_ammo_c",
    "template": "v603_body",
    "albedo": "textures/mg_browning_m2hb_ammo_c.jpg",
    "normal": "textures/mg_browning_m2hb_ammo_n_n.jpg",
-   "occlusion": "textures/mg_browning_m2hb_ammo_ao_ao_occ.png"
+   "occlusion": "textures/mg_browning_m2hb_ammo_ao_ao_occ.png",
+   "specular": "textures/mg_browning_m2hb_ammo_n_s.jpg"
   }
  ],
  "parts": [
@@ -145,7 +164,7 @@
    "bone": "body",
    "material": 0,
    "triangles": 116850,
-   "vertices": 164563
+   "vertices": 168543
   },
   {
    "name": "body.wt_net_f_c",
@@ -180,14 +199,14 @@
    "bone": "body",
    "material": 11,
    "triangles": 778,
-   "vertices": 863
+   "vertices": 871
   },
   {
    "name": "body.wt_headlight_glass_c",
    "bone": "body",
    "material": 14,
    "triangles": 216,
-   "vertices": 154
+   "vertices": 140
   },
   {
    "name": "body.wt_headlight_glass_c_15",
@@ -201,7 +220,7 @@
    "bone": "body",
    "material": 16,
    "triangles": 498,
-   "vertices": 756
+   "vertices": 748
   },
   {
    "name": "body.wt_chain_a_c",
@@ -215,14 +234,14 @@
    "bone": "cannon_l",
    "material": 4,
    "triangles": 4726,
-   "vertices": 5122
+   "vertices": 5263
   },
   {
    "name": "cannon_main.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
    "bone": "cannon_main",
    "material": 1,
    "triangles": 36937,
-   "vertices": 53533
+   "vertices": 55346
   },
   {
    "name": "cannon_main.wt_net_f_c",
@@ -243,14 +262,14 @@
    "bone": "cannon_main",
    "material": 6,
    "triangles": 2458,
-   "vertices": 3161
+   "vertices": 3341
   },
   {
    "name": "cannon_main.wt_mg_mg_42_c",
    "bone": "cannon_main",
    "material": 7,
    "triangles": 4058,
-   "vertices": 4484
+   "vertices": 4507
   },
   {
    "name": "cannon_main.wt_pzh_2000_turret_c",
@@ -278,21 +297,21 @@
    "bone": "cannon_main",
    "material": 11,
    "triangles": 1186,
-   "vertices": 1258
+   "vertices": 1278
   },
   {
    "name": "cannon_main.wt_mg_browning_m2hb_ammo_c",
    "bone": "cannon_main",
    "material": 18,
    "triangles": 828,
-   "vertices": 1368
+   "vertices": 1358
   },
   {
    "name": "cannon_slide_l.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
    "bone": "cannon_slide_l",
    "material": 4,
    "triangles": 4358,
-   "vertices": 4319
+   "vertices": 4418
   },
   {
    "name": "cannon_slide_l.wt_rifled_barrel_b_c",
@@ -320,7 +339,7 @@
    "bone": "doppler_radar",
    "material": 1,
    "triangles": 1110,
-   "vertices": 1110
+   "vertices": 1118
   },
   {
    "name": "doppler_radar.wt_side_glass_c",
@@ -334,14 +353,14 @@
    "bone": "tire_moveA_l",
    "material": 0,
    "triangles": 2680,
-   "vertices": 2902
+   "vertices": 2946
   },
   {
    "name": "wheel_A_r",
    "bone": "tire_moveA_r",
    "material": 0,
    "triangles": 2680,
-   "vertices": 2902
+   "vertices": 2946
   },
   {
    "name": "wheel_B_l",
@@ -432,21 +451,21 @@
    "bone": "tire_moveH_l",
    "material": 0,
    "triangles": 1318,
-   "vertices": 1822
+   "vertices": 1838
   },
   {
    "name": "wheel_H_r",
    "bone": "tire_moveH_r",
    "material": 0,
    "triangles": 1318,
-   "vertices": 1822
+   "vertices": 1838
   },
   {
    "name": "tracking_radar.wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
    "bone": "tracking_radar",
    "material": 6,
    "triangles": 985,
-   "vertices": 1104
+   "vertices": 1135
   }
  ],
  "origins": {
