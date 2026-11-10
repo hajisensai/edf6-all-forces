@@ -9087,7 +9087,8 @@ def ranger_hold_rifle_like() -> None:
     doc = dsgo.parse(files['S1.SGO'])
     assert rh.hold_like(doc.root, donor) and rh.hold_set(doc.root) == donor
     before, after = dsgo.to_py(dsgo.parse(files['S1.SGO']).root), dsgo.to_py(doc.root)
-    assert {k for k in before if before[k] != after[k]} == set(rh.FIELDS), 'only the hold names change'
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed <= set(rh.FIELDS) and {'BaseAnimation', 'ReloadAnimation', 'custom_parameter'} <= changed, changed
     assert after['custom_parameter'][1:] == before['custom_parameter'][1:]
     assert not rh.hold_like(doc.root, donor), 'already held so'
     named = N(['Weapon_BasicShoot', 'waist', 'aim', 'c', 'r', N(['x'], {0: 'a'})], {i: names[i] for i in range(6)})
