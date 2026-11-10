@@ -1244,11 +1244,25 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             led.put(OWNER, rel, aircraft_collision.build(game, key))
             held.add(ledger.key(rel))
     built = {**TRACKED_MISSION, **WALKER_MISSION}
+    cache = None
     for name in sorted(wanted & built.keys()):
         vehicle = built[name]
+        expected = set(range_files(name)[1:])
+        # The installer's files when its build cache says they are what this generator and its inputs make now (pylib/
+        # buildcache.py Cache.current, as the Dreadnought's above): every one of these was built again here, one after
+        # the other, on every install (2026-11-10: 6 minutes of a first install, all of an update's
+        # docs/feedback-2026-11-10-installer-en.md), else built here.
+        group = name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+        if cache is None:
+            import buildcache
+            cache = buildcache.Cache(game_root)
+        if cache.current(group) and {ledger.key(rel) for rel in expected} <= set(led.owned_by(group)):
+            for rel in sorted(expected):
+                led.need(OWNER, rel)
+                held.add(ledger.key(rel))
+            continue
         files = ground_tool(name).build(game.root)
         dependencies = {rel: data for rel, data in files.items() if rel != f'OBJECT/{vehicle.sgo}.SGO'}
-        expected = set(range_files(name)[1:])
         if set(dependencies) != expected:
             raise ValueError(f'{name}: builder dependencies differ from the range catalog')
         for rel, data in dependencies.items():

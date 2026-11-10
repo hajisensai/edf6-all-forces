@@ -244,7 +244,10 @@ class Cache:
         if not isinstance(outputs, dict) or not outputs:
             return False
         led = ledger.Ledger(self.game)
-        owned = {rel for rel in led.owned_by(group) if group != 'optics' or rel.endswith('.MRAB')}
+        # the optics own the stock SGOs they redirect too (make_optics.build_stock_redirects, not cached): their cached
+        # outputs are the 'models' scope, MRAB and RAB (a gold vehicle's guns). Counting only the MRABs, an update rebuilt
+        # all 52 optics models every time (2026-11-10).
+        owned = {rel for rel in led.owned_by(group) if group != 'optics' or rel.endswith(('.MRAB', '.RAB'))}
         if set(outputs) != owned:
             return False
         for rel, digest in outputs.items():
