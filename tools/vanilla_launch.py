@@ -97,7 +97,8 @@ def prepare(game: str) -> None:
     never overwritten: the ini now may be a vanilla one, which would be kept as 'the original' for good."""
     ini, state = _paths(game)
     if os.path.exists(state):
-        raise RuntimeError(f'{state} 已存在（上一次原版启动的 ini 还没恢复）：不覆盖')
+        raise RuntimeError(tr(f'{state} 已存在（上一次原版启动的 ini 还没恢复）：不覆盖',
+                              f'{state} is already there (the last vanilla launch has not put the ini back yet): not overwritten'))
     before = modfiles.read(ini)
     after = vanilla_ini((before or b'').decode('utf-8-sig', errors='replace')).encode('utf-8')
     modfiles.save_json(state, {'had': before is not None,
