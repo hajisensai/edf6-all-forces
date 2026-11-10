@@ -1,6 +1,7 @@
 // Ground support's audited stock resources. Positions are supplied by the entry planner: this API
 // never invents an entry, teleports towards the destination, or substitutes another vehicle.
 #pragma once
+#include "support_level.h"
 #include <cstdint>
 
 namespace crew {
@@ -16,13 +17,16 @@ struct SupportVehicleSpec {
     float halfWidth,halfLength,height; // conservative envelope about the native origin, metres
     unsigned vtable;
     bool wasteland;
+    // Its weapons' damage goes by the support level on this stock request curve (support_firepower.h); unarmed: none.
+    bool armed;
+    supportlevel::Curve curve;
 };
 constexpr int kSupportVehicleCount=static_cast<int>(SupportVehicleKind::count);
 // Bounds read from each stock MDB in Root.cpk; rounded OUT, including the tank's barrel.
 inline constexpr SupportVehicleSpec kSupportVehicles[]={
-    {L"布莱克战车",L"app:/Object/V505_TANK_MISSION.SGO",1,1.61f,5.60f,2.63f,0x17DADB0,false},
-    {L"救援装甲运兵车",L"app:/Object/V507_RESCUETANK_AI.SGO",5,3.19f,5.95f,6.68f,0x17DB590,false},
-    {L"民用轻卡",L"app:/Object/V512_KEITRUCK_BGP.SGO",5,1.04f,2.18f,2.65f,0x17E01B0,true},
+    {L"布莱克战车",L"app:/Object/V505_TANK_MISSION.SGO",1,1.61f,5.60f,2.63f,0x17DADB0,false,true,supportlevel::Curve::blacker},
+    {L"救援装甲运兵车",L"app:/Object/V507_RESCUETANK_AI.SGO",5,3.19f,5.95f,6.68f,0x17DB590,false,true,supportlevel::Curve::grape},
+    {L"民用轻卡",L"app:/Object/V512_KEITRUCK_BGP.SGO",5,1.04f,2.18f,2.65f,0x17E01B0,true,false,supportlevel::Curve::eros},
 };
 constexpr const SupportVehicleSpec* SupportVehicleInfo(SupportVehicleKind kind) noexcept {
     const auto i=static_cast<unsigned>(kind);

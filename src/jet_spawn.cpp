@@ -12,6 +12,7 @@
 #include "support_aircraft.h"
 #include "pvp.h"
 #include "support_drone.h"
+#include "support_firepower.h"
 #include "support_net.h"
 #include "support_soldier.h"
 #include "real_driver_native.h"
@@ -157,8 +158,13 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(!v)return nullptr;
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
-    LevelVehicle(v);
     const BodyRow& row=Row(b);
+    if(!LevelVehicle(v)) {
+        Log("JET launch: %p (%ls) its firepower not marked: deleted",v,row.file);
+        PvpForgetSupportObject(ObjRef::Of(v));
+        reinterpret_cast<DeleteFn>(image+kDelete)(v);
+        return nullptr;
+    }
     // A copy this machine just made: never registered, so its own here (online_authority.h). A drone gets the native
     // init alone (mission_setup, its weapons): no one is seated in it, JetFrame flies it (Unmanned); a crewed body asks
     // the soldiers near it to walk aboard (SeatNpcRider).
@@ -233,8 +239,15 @@ void FarRender(Jet& j,unsigned char* v) noexcept {
 
 }  // namespace jet
 
-void LevelVehicle(unsigned char* v) noexcept {
+// The level (SetLevel 1, as CreateFriend) still scales its durability with the difficulty; its weapons go by the support
+// level instead (the maintainer, 2026-11-10: 「援军载具和战机的火力 改成根据等级来」): marked here, before its mission
+// setup, which then writes them (support_firepower.h). Every aircraft the plugin makes friendly comes here (SpawnJet,
+// PrepareSupportAircraft, the submarine carrier) and is a jet or a heli: the Eros's request curve (support_level.h).
+// One SpawnJet makes for the enemy (its `team`) keeps the game's scaling, as an enemy a script spawns.
+bool LevelVehicle(unsigned char* v) noexcept {
     if(jet::levelOk)reinterpret_cast<jet::SetLevelFn>(image+jet::kSetLevel)(v,jet::kFriendLevel);
+    if(At<std::int32_t>(v,kTeam)!=jet::kTeamFriend)return true;
+    return MarkSupportFirepower(v,supportlevel::Curve::eros);
 }
 
 namespace jet {
@@ -304,8 +317,8 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     unsigned char* const vehicle=CreateJet(body,matrix,&param,variant);
     if(!vehicle)return nullptr;
     if(bodyPartOk)FixBodyPart506(vehicle,"SUPPORT");
-    SetJetTeam(vehicle,kTeamFriend);LevelVehicle(vehicle);
-    if(!PrepareNpcVehicle(vehicle,true)) {
+    SetJetTeam(vehicle,kTeamFriend);
+    if(!LevelVehicle(vehicle) || !PrepareNpcVehicle(vehicle,true)) {
         PvpForgetSupportObject(ObjRef::Of(vehicle));
         reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;
     }

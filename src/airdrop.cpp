@@ -24,7 +24,7 @@
 #include <cwchar>
 
 namespace crew {
-bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept;   // support_spawn.cpp
+bool ApplySupportVehicleSetup(unsigned char* vehicle,SupportVehicleKind kind) noexcept;   // support_spawn.cpp
 namespace {
 constexpr unsigned kCreateObject=scene::kCreateObject,kConfigure=0x5E8B40,kRelease=0x5E84D0,kVehicleCall=0x5E8FDC,kPreload=0x7A3780;
 constexpr unsigned kContainerParamVtable=0x17D7818,kContainerVtable=0x17D7CB8;
@@ -130,7 +130,7 @@ unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* par
             if(d.phase!=Phase::falling || sgo!=d.vehicleSgo || !Alive(d.box))continue;
             const auto spec=SupportVehicleInfo(d.kind);
             const bool same=v && spec && At<const void*>(v,0)==image+spec->vtable;
-            const bool setup=same && ApplySupportVehicleSetup(v);
+            const bool setup=same && ApplySupportVehicleSetup(v,d.kind);
             const float* at=v ? reinterpret_cast<const float*>(v+kPosition) : d.target;
             Log("AIRDROP vehicle %p (%ls) made by container %p at (%.0f,%.0f,%.0f), %.0f m from its point: %s",v,
                 spec ? spec->sgo : L"?",d.box.obj,at[0],at[1],at[2],Level(at,d.target),
