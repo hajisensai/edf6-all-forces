@@ -174,9 +174,12 @@ const EmcFile kEmcFiles[]={
     // the long-range barrages' (barrage.cpp; pylib/vcobjects.py BARRAGE_FILES, tools/make_barrage.py)
     {L"app:/object/edf6vc_barrage_round.sgo",L"EDF6VC_BARRAGE_ROUND.SGO","barrage round"},
     {L"app:/object/edf6vc_barrage_burst.sgo",L"EDF6VC_BARRAGE_BURST.SGO","barrage burst"},
+    // the Andryusha's bomblets (andryusha.cpp; pylib/vcobjects.py ANDRYUSHA_BOMBLET_FILES, tools/make_katyusha.py)
+    {L"app:/object/edf6vc_andryusha_blast.sgo",L"EDF6VC_ANDRYUSHA_BLAST.SGO","Andryusha bomblet blast"},
+    {L"app:/object/edf6vc_andryusha_fire.sgo",L"EDF6VC_ANDRYUSHA_FIRE.SGO","Andryusha bomblet fire"},
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::barrageBurst)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::andryushaFire)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
 // The Dreadnought's turrets' rounds (dreadnought_turrets.inc kGuns, DreadnoughtRound; tools/make_dreadnought.py
 // TURRET_ROUNDS): each kind of its secondary guns fires the round of the fixed emplacement made of that gun (tools/
@@ -695,9 +698,9 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d proteus shield %d dreadnought rounds %d%d%d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,charges,drillReady,
+    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d proteus shield %d dreadnought rounds %d%d%d andryusha bomblets %d%d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,charges,drillReady,
         emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6],emcReady[7],dnRoundReady[0],dnRoundReady[1],
-        dnRoundReady[2]);
+        dnRoundReady[2],emcReady[static_cast<int>(EmcRound::andryushaBlast)],emcReady[static_cast<int>(EmcRound::andryushaFire)]);
 }
 
 void ResetShells() noexcept {
@@ -880,6 +883,19 @@ bool BarrageFire(const unsigned char* by,const float* from,const float* aim,floa
 void BarrageBurst(const unsigned char* by,const float* at) noexcept {
     const float from[3]={at[0],at[1]+2.0f,at[2]},to[3]={at[0],at[1]-2.0f,at[2]};
     (void)EmcFire(EmcRound::barrageBurst,by,from,to,0.0f);
+}
+
+bool AndryushaBomblet(const unsigned char* by,const float* from,const float* aim,float blast,float fire) noexcept {
+    if(!by)return false;
+    bool any=false;
+    // Ballistic (straight false): each IFC solves the arc onto `aim` at its round's speed and gravity, the same for both
+    // files (vcobjects.check_andryusha), so the blast and the fire fly one arc and land together.
+    for(const auto kind:{EmcRound::andryushaBlast,EmcRound::andryushaFire}) {
+        const int i=static_cast<int>(kind);
+        if(!EmcRoundReady(kind))continue;
+        if(ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,aim,kind==EmcRound::andryushaBlast ? blast : fire,false,kEmcFiles[i].name))any=true;
+    }
+    return any;
 }
 
 void RoundDrop(RoundObj& r) noexcept {

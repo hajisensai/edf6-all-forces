@@ -44,6 +44,9 @@ HUDTEXT(rwsElevation,L"EL %+03d",L"俯仰 %+03d",L"俯仰 %+03d",L"俯仰 %+03d"
 
 // --- Aim marks and cues ---
 HUDTEXT(launcherLine,L"%d m   %.1f s   ELEV %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d")
+// The Andryusha's fuse under its impact line (andryusha.cpp AndryushaSeat), with the key that switches it.
+HUDTEXT(andryushaFuseImpact,L"FUSE IMPACT [%ls]",L"引信 碰炸 [%ls]",L"引信 碰炸 [%ls]",L"信管 着発 [%ls]")
+HUDTEXT(andryushaFuseAirburst,L"FUSE PROXIMITY [%ls]",L"引信 近炸 [%ls]",L"引信 近炸 [%ls]",L"信管 近接 [%ls]")
 HUDTEXT(padButton,L"button 0x%X",L"手柄键 0x%X",L"手把鍵 0x%X",L"ボタン 0x%X")
 HUDTEXT(gearPadHold,L"D-pad down hold",L"十字下长按",L"十字下長按",L"十字下長押し")
 HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 開 [%ls]",L"俯瞰カメラ オン [%ls]")

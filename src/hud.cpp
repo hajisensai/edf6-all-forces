@@ -717,6 +717,14 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
     line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
+    if(!l.fuse || *at>=kMaxLines)return;
+    wchar_t key[32]=L"";
+    if(l.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);else PadBitsName(Cfg().vehicleSecondarySwitchButton,key,32);
+    Line& fuse=lines[(*at)++];
+    Format(fuse,Tr(l.fuse==2 ? Tx::andryushaFuseAirburst : Tx::andryushaFuseImpact),key);
+    fuse.scale=kLineScale;fuse.rgba=l.fuse==2 ? kGreen : kYellow;fuse.w=fuse.h=0.0f;
+    if(text)MeasureAll(*text,&fuse,1);
+    fuse.x=sx-fuse.w*0.5f;fuse.y=line.y+line.h+4.0f*s;
 }
 
 // The artillery's high camera toggle (highcam.cpp, the user 2026-10-05): a line low on the screen naming its key,

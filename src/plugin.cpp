@@ -1389,6 +1389,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallBarrages();      // the long-range barrages' rounds: RocketBullet01's update (barrage.cpp)
+    InstallAndryusha();     // the Andryusha's carriers: GrenadeBullet01's update, chained (andryusha.cpp)
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallSupportUnitOnAllies();   // support units stick to allies (ini SupportUnitOnAllies, live)
     InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
