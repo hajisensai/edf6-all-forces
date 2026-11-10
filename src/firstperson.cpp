@@ -1047,9 +1047,6 @@ Flash* Relocate(unsigned char* w) noexcept {
     return &f;
 }
 
-// A round of `weapon` (heli.cpp's hook on 0x696FD0, every weapon class's one shot entry, after the round): for this
-// machine's first person, the hand that weapon is in takes a shot for its kick (Kicks) and its recoil (Hand), whether or
-// not the weapon has a muzzle flash.
 // The view and the shot agree only this far (cos 20 deg): past it the camera is not following the aim frame (a special
 // view the native camera turns by angles, cam+0x3F0) and the shot is left native.
 constexpr float kAimCamAgree=0.94f;
@@ -1086,6 +1083,9 @@ bool AimShot(const unsigned char* h,unsigned char* weapon,unsigned muzzle,FpShot
     return true;
 }
 
+// A round of `weapon` (heli.cpp's hook on 0x696FD0, every weapon class's one shot entry, after the round): for this
+// machine's first person, the hand that weapon is in takes a shot for its kick (Kicks) and its recoil (Hand), whether or
+// not the weapon has a muzzle flash.
 void Shot(const unsigned char* weapon) noexcept {
     const int hand=Current().on && !Current().overridden ? HandOfModel(weapon+kWeaponModel) : -1;
     if(hand<0)return;
