@@ -428,3 +428,7 @@ flags 别带 bit7/bit8（它们会改 `mgr+0x14FFC` 的剧情分支标志），�
 - 2026-10-25 起列表在第 0 行之后追加 7 行对战预制关（`EDF6/EDF6TR_PVP_*`，`tools/make_edf5_campaign.py` `PVP_PRESETS`，布置见 `testrange/gen.py` `PVP_PLANS`），行值同样抄 RM015，依次互为后继；第 0 行位置不变，存档按行号记的通关不受影响，新布局追加进 `edf5campaign/pack_layouts.json`。这几关都不会通关，所以插件在选关构建时总是打开测试场任务包的每一行（`src/edf5campaign.cpp` `OpenRows`：内容编号等于 `TestRangeContent` 就和 `PortedMissionsUnlocked` 一样走 `OpenAll`，不看该 ini 项），不写存档。**未实机**。
 - 关卡目录是新的（原版没有 `EDF6/EDF6TR_RANGE`）：放的是原版任务目录的三件 `MISSION.AC` / `MISSION.RMPA` / `MISSION.JSON`（后两件取自场地任务）。`EDF.dll` 里只按名字引用 `mission.bvm` 和 `.rmpa`，没有 `MISSION.JSON`；仍按原版目录的样子放齐（以前覆盖 RM015 时它从 Root.cpk 里落下来）。
 - 切到这个模式（`tests/autopilot` 的 `mission range`）：脚本的 `bool SetMode(int)` 原生实现 `0x70FAB0` 在 `modes[idx]` 非空时调用 `0xDC460(GS, idx)`；模式在 `GS+0x20`（数量 `GS+0x30`），每个模式的值在 `cfg + *(cfg+8)`（`cfg = *(mode+0x10)`）：`+0x68` 第 8 项、`+0x74` 第 9 项、`+0x80` 第 10 项（`0x8C4CA0` 按后两项找模式）。**未实测**：在 HQMain 协程开头调用是否安全。
+
+## 选关界面对象 `HUiHQMissionSelect`（2026-11-10，世界地图选关用）
+
+vtable 0x18052E8、构造 0x8A1530（即上文「选关构建」所在函数）、显示列表 `this+0x798`（每项 0x14 字节）、光标 `this+0x778`、确认回调 0x8A85C0，以及单机本部 / 联机房间 / 房间搜索 / 建房四个打开处：见 [plan-2026-11-10-worldmap.md](plan-2026-11-10-worldmap.md) §4。
