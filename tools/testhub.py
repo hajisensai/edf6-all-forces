@@ -16,10 +16,11 @@ Developer side:
   python tools/testhub.py case add TITLE [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py case set ID [--title T] [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py publish ZIP [--channel test] [--notes TEXT] [--commit SHA]
-  python tools/testhub.py share ZIP... --slot main|models [--version V] [--notes TEXT]
+  python tools/testhub.py share ZIP... --slot main|models [--version V] [--notes TEXT] [--part-mb N]
                                                          a share package to the public page /download (several
                                                          zips: one version of several files, e.g. the model pack's
-                                                         parts in order; --version required then)
+                                                         parts in order; --version required then; --part-mb: a
+                                                         slow uplink's smaller requests, default 64)
   python tools/testhub.py plan [--group G]                a group's level outline and proposals (players' text fenced)
   python tools/testhub.py digests [DIR]                   upload tools/make_mission_digest.py's output (default tmp/digests)
   case status: todo / verify (fixed, to be checked) / pass / fail / done / closed.
@@ -951,6 +952,7 @@ def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str, part_s
 
 
 SHARE_PART = 64 << 20         # the share package's parts (one request each; the page checks each part's SHA-256)
+SHARE_PARTS_MAX = 999         # parts per file the Worker takes (testhub/src/share.js checkFile; part-NNN)
 
 
 def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, part_size: int = SHARE_PART) -> dict:
@@ -966,6 +968,12 @@ def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, par
         if len(names) > 1:
             raise SystemExit('share: several zips are one version: --version required')
         version = re.sub(r'[^A-Za-z0-9._-]+', '-', names[0][:-4]).strip('-.')[:120]
+    # Smaller parts for a slow uplink (2026-11-10: ~90 KB/s, a 64 MB request cut off after ~75 s; the user: 「加小分片选项」).
+    # A rerun with another size replaces the parts already there (their hashes differ). The page downloads any size.
+    for zpath in zpaths:
+        if -(-os.path.getsize(zpath) // part_size) > SHARE_PARTS_MAX:
+            raise SystemExit(f'share: {os.path.basename(zpath)} needs over {SHARE_PARTS_MAX} parts of '
+                             f'{part_size >> 20} MB: a bigger --part-mb')
     files = []
     for k, (zpath, name) in enumerate(zip(zpaths, names)):
         size = os.path.getsize(zpath)
@@ -1026,6 +1034,8 @@ def main(argv: list[str]) -> int:
     p.add_argument('--slot', required=True, choices=('main', 'models'), help='main package or model pack')
     p.add_argument('--version', default='', help='default (one zip only): the zip name ([A-Za-z0-9._-] only)')
     p.add_argument('--notes', default='')
+    p.add_argument('--part-mb', type=int, default=SHARE_PART >> 20,
+                   help='MB per upload request (1-64, default 64; smaller for a slow uplink)')
     a = ap.parse_args(argv)
     # Players write emoji and the like; a pipe on a Chinese Windows console is GBK and would die on the first one.
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -1057,7 +1067,9 @@ def main(argv: list[str]) -> int:
     elif a.cmd == 'publish':
         _publish(hub, a.zip, a.channel, a.notes, a.commit)
     elif a.cmd == 'share':
-        _share(hub, a.zip, a.slot, a.version, a.notes)
+        if not 1 <= a.part_mb <= SHARE_PART >> 20:
+            raise SystemExit(f'share: --part-mb is 1 to {SHARE_PART >> 20}')
+        _share(hub, a.zip, a.slot, a.version, a.notes, a.part_mb << 20)
     return 0
 
 

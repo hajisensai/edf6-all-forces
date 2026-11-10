@@ -122,6 +122,6 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 每片开 4 条 Range 连接并发下载，校验后写进用户选的文件（Chrome / Edge 流式写盘，其他浏览器在内存里拼好再保存）。
 「普通下载」`/share/<slot>/<version>/<k>/file` 把文件 k 的各片按顺序拼成一个流，给 IDM 等下载工具和不支持分片的情况用。
 
-发布：`python tools/testhub.py share <zip>... --slot main|models [--version V] [--notes TEXT]`（开发者账号；多个 zip 即同一版的多个文件，按给出的顺序，必须带 `--version`）。每片上传时带 SHA-256，由 R2 校验；
+发布：`python tools/testhub.py share <zip>... --slot main|models [--version V] [--notes TEXT] [--part-mb N]`（开发者账号；多个 zip 即同一版的多个文件，按给出的顺序，必须带 `--version`；`--part-mb` 是每个上传请求的大小，默认 64，上行慢时用 8 之类的小值，避免单个请求太久被断开，每个文件最多 999 片）。每片上传时带 SHA-256，由 R2 校验；
 已存在且哈希相同的片会跳过，中断后原样重跑即可。最后一步 publish 一次带上全部文件，逐个核对分片首尾相接、大小与哈希，再切换该槽位的 `latest.json`；
 每个槽位只留这一版，旧版本全部删除（省 R2 空间；正在下载旧版的人会中断，刷新页面拿新版）。
