@@ -34,6 +34,7 @@ MODELS = ('gunship', 'transport')
 PREFIX = 'c130_'
 HULL = PREFIX + 'hull'
 PROPS = 4
+SKELETON_BONES = 5 + PROPS   # mdl, the model's, globalSRT, body, the hull, the propellers (check_archive holds it)
 
 
 def archive_name(model: str) -> str:
@@ -214,6 +215,7 @@ def check_archive(arc: bytes, model: str) -> None:
     _req(mdb_write(md) == data, 'model does not round-trip')
     names = [md.name_of(b.name) for b in md.bones]
     _req(names[:5] == ['mdl', model, 'globalSRT', 'body', HULL], f'{model}: bones {names[:6]}')
+    _req(len([n for n in names if not cockpits.grafted_bone(n)]) == SKELETON_BONES, f'{model}: {len(names)} bones {names}')
     _req(sorted(n for n in names if n.startswith(PREFIX + 'prop_')) == [f'{PREFIX}prop_{i}' for i in range(1, PROPS + 1)],
          f'{model}: propellers {names}')
     bad = om.texture_problems(rab, md, mdb_name(model))
