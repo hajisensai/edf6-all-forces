@@ -1,5 +1,5 @@
 // The high camera's toggle (README 高视角; docs/camera-re.md §5): while the player drives a vehicle turretcam.cpp places
-// the camera of, a key (ini HighCamKey, 'C') or pad button (ini HighCamButton, R3) switches between the vehicle's view and
+// the camera of, a key (ini HighCamKey, 'L') or pad button (ini HighCamButton, R3) switches between the vehicle's view and
 // an observation view over the current weapon's real predicted endpoint. Which vehicles offer it (HighCamClass): 1 those with an indirect-fire
 // weapon (the Katyusha, the self-propelled howitzer), 2 also the big ones (turretcam.cpp TurretCamLarge: a camera rig
 // kLargeRig m long or more: the Titan, the drill tank, the Proteus, the big mechs), 3 every vehicle turretcam.cpp serves.
