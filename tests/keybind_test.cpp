@@ -371,6 +371,14 @@ void Store() {
         Check(seededNow>0 && moved==2 && kb::SlotVk(st.data(),0x58)=='C' && kb::SlotVk(st.data(),0x59)=='L' &&
               kb::Seeded(st.data(),kb::Owner::crew),"the slots added since and the step, one marker");
     }
+    {   // the step's slots themselves seeded just now (the marker's end at them): the ini's keys are the player's, kept
+        auto st=seededBefore(0x04,'C');
+        *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(0x58);
+        int moved=-1;
+        kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.action==0x58 ? 0x04 : s.action==0x59 ? 'C' : s.defaultVk; },&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x58)==0x04 && kb::SlotVk(st.data(),0x59)=='C' && kb::Seeded(st.data(),kb::Owner::crew),
+              "slots seeded now from the ini: no step on them");
+    }
 }
 // The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
 // The stock defaults the plugin changes: Chat Enter, VoiceChat K, each in the four sets, each a key the stock dialog

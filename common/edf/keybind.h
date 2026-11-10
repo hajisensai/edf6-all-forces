@@ -291,16 +291,18 @@ inline bool CodeHeld(unsigned char* store,std::int32_t code,int except) noexcept
     for(const Slot& s:kSlots)if(s.action!=except && Read(store,0,s.action)==code)return true;
     return false;
 }
-// One step on a seeded store (player 0's, as seeded): the moves whose slot still holds the old default and whose new key
-// is free, until none is left to take. The slots moved.
-inline int ApplyStep(unsigned char* store,const Step& step) noexcept {
+// One step on a seeded store (player 0's, as seeded): the moves whose slot was seeded before `kept` (the marker's end then:
+// a slot from there on was seeded just now from the ini, which has the player's keys after the installer's same step),
+// still holds the old default and whose new key is free, until none is left to take. The slots moved.
+inline int ApplyStep(unsigned char* store,const Step& step,int kept) noexcept {
     bool done[8]{};
     int moved=0;
     for(bool again=true;again;) {
         again=false;
         for(int i=0;i<step.count && i<8;++i) {
             const Move& m=step.moves[i];
-            if(done[i] || Read(store,0,m.action)!=CodeOfVk(m.fromVk) || CodeHeld(store,CodeOfVk(m.toVk),m.action))continue;
+            if(done[i] || m.action>=kept || Read(store,0,m.action)!=CodeOfVk(m.fromVk) ||
+               CodeHeld(store,CodeOfVk(m.toVk),m.action))continue;
             WriteSynced(store,0,m.action,CodeOfVk(m.toVk));
             done[i]=again=true;
             ++moved;
@@ -319,7 +321,7 @@ template<class IniVk> int Seed(unsigned char* store,Owner owner,IniVk iniVk,int*
     for(const Slot& s:kSlots)
         if(s.owner==owner && s.action>=from){WriteSynced(store,0,s.action,CodeOfVk(iniVk(s)));++written;}
     if(owner==Owner::crew)
-        for(int i=steps;i<StepsOf(owner);++i)stepped+=ApplyStep(store,kCrewSteps[i]);
+        for(int i=steps;i<StepsOf(owner);++i)stepped+=ApplyStep(store,kCrewSteps[i],from);
     if(from<OwnerEnd(owner) || steps<StepsOf(owner))
         *SlotPtr(store,0,0,kMarkerAction[static_cast<int>(owner)])=MarkerOf(OwnerEnd(owner),StepsOf(owner));
     if(moved)*moved=stepped;
