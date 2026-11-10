@@ -5127,6 +5127,9 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(importlib.import_module('make_stock_stores'),
                           build=lambda game, overlay=None: (dict(stores), [], {}),
                           store_files=lambda: []))   # the fake make_jets writes no store weapons to need
+            # the stock shotguns held as the rifles (tools/make_stock_holds.py): written, gone again with uninstall 1
+            holds = {'WEAPON/FAKE_SHOTGUN.SGO': b'held'}
+            enter(patched(importlib.import_module('make_stock_holds'), build=lambda game: (dict(holds), [])))
             # the out-of-game loadouts' files (tools/support_loadout.py): written after the plugin's ini, gone with uninstall 1
             loadout = {'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}
             built_from: list[str] = []
@@ -5150,6 +5153,8 @@ def pack_install_upgrade_uninstall() -> None:
                 assert installer.check(game), 'check fails right after install'
                 for rel, data in stores.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
+                for rel, data in holds.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'held shotgun {rel} not installed'
                 for rel, data in loadout.items():
                     assert _read(os.path.join(mods, *rel.split('/'))) == data, f'loadout file {rel} not installed'
                 assert built_from and '[VehicleCrew]' in built_from[-1], 'the loadouts are built from the installed ini'
@@ -9017,6 +9022,7 @@ def ported_weapon_locators_fit_real() -> None:
     import edf5port
     import mab_legacy
     import ported_weapons as pw
+    import ranger_hold
     import rootcpk
     edf6 = rootcpk.DEFAULT_GAME
     if not os.path.isfile(os.path.join(edf6, 'Root.cpk')):
@@ -9047,7 +9053,9 @@ def ported_weapon_locators_fit_real() -> None:
         finally:
             edf5port.hold_as, edf5port.fit_locators = hold, fit
 
-    built = adopted = held_fields = moved = like = preferred = 0
+    built = adopted = held_fields = moved = like = preferred = red_governors = 0
+    # the Monsoon (暴雨, aWeapon057 on governor01): where its soldiers grip is what EDF4.1's red Governor takes
+    monsoon = dsgo.parse(stock('WEAPON/AWEAPON057.SGO')).root.get('animation_model').items[2].data
     for p in pw.PORTS:
         try:
             r = build(p, True, True)
@@ -9057,6 +9065,10 @@ def ported_weapon_locators_fit_real() -> None:
         if 'animation_model' not in r.names.values():
             continue
         doc = dsgo.Document(r, [])
+        if models.model_of(doc)[0].lower().endswith('/s_shotgun_governor02.rab'):
+            red_governors += 1
+            assert models.kin(doc) == 'app:/weapon/s_shotgun_governor01.rab', p.id
+            assert r.get('animation_model').items[2].data == monsoon, f'{p.id}: the red Governor not gripped as the Monsoon'
         b = r.get('animation_model').items[2].data
         bones = {n for n, _parent in models.bones(doc)}
         assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
@@ -9081,12 +9093,16 @@ def ported_weapon_locators_fit_real() -> None:
             for f in edf5port.HOLD:
                 if f not in donor.names.values():
                     continue
+                if p.category == ranger_hold.SHOTGUN and f in ranger_hold.FIELDS:
+                    continue   # a Ranger shotgun's names are the rifle-like set (below), its hand still EDF6's
                 if f == 'custom_parameter':
                     if edf5port._first_text(r.get(f)) is not None and not r.get(f).names:
                         assert r.get(f).items[0] == donor.get(f).items[0], f'{p.id}: recoil not EDF6\'s'
                     continue
                 assert edf5port._key(r.get(f)) == edf5port._key(donor.get(f)), \
                     f'{p.id} {f}: not as most of EDF6\'s weapons on its model hold it'
+        if p.category == ranger_hold.SHOTGUN:
+            assert ranger_hold.hold_set(r) == models.shotgun_hold(), f'{p.id}: a shotgun not held as the rifles'
         # fit_locators alone, hold_as off
         unheld = build(p, False, True).get('animation_model').items[2].data
         if unheld == raw_block:
@@ -9105,12 +9121,108 @@ def ported_weapon_locators_fit_real() -> None:
     if not built:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
+    assert red_governors >= 4, f'{red_governors} ported weapons on EDF4.1\'s red Governor (s_shotgun_governor02)'
     assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
         (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '
          f'block, {preferred} placed as the developers do: this check is (nearly) empty')
     print(f'  {built} weapons built: {adopted} on the developers\' MAB block, {held_fields} held as EDF6\'s weapons '
           f'on their model; fit_locators alone: {moved} moved, {like} against the developers\' strings, {preferred} '
           'locators where the developers put them')
+
+
+@test
+def ranger_hold_rifle_like() -> None:
+    """pylib/ranger_hold.py on a made-up table: the donor set is the shotgun set held in the rifles' commonest stance;
+    hold_like gives a shotgun exactly the five names (custom_parameter element 0 alone) and nothing else, and leaves a
+    gun without a full plain set (a named custom_parameter) as it is; no shotgun so held is NoDonor."""
+    import ranger_hold as rh
+    N = dsgo.Node
+    names = {0: 'xgs_scene_object_class', 1: 'BaseAnimation', 2: 'AimAnimation', 3: 'ChangeAnimation',
+             4: 'ReloadAnimation', 5: 'custom_parameter', 6: 'ReloadTime'}
+
+    def gun(cls: str, base: str, recoil: str, reload: str = 'r') -> bytes:
+        root = N([cls, base, 'aim', f'{base}_change1', reload, N([recoil, 1.0, 2.0]), 7.0], dict(names))
+        return dsgo.write(dsgo.Document(root, []))
+
+    files = {'R1.SGO': gun('Weapon_BasicShoot', 'assault', 'assault_recoil1'),
+             'R2.SGO': gun('Weapon_BasicShoot', 'assault', 'assault_recoil2'),
+             'R3.SGO': gun('Weapon_BasicShoot', 'sniper', 'sniper_recoil1'),
+             'S1.SGO': gun('Weapon_BasicSemiAuto', 'waist', 'waist_recoil2'),
+             'S2.SGO': gun('Weapon_BasicShoot', 'assault', 'waist_recoil1', 'assault_reload2'),
+             'S3.SGO': gun('Weapon_BasicShoot', 'assault', 'waist_recoil1', 'assault_reload2'),
+             'S4.SGO': gun('Weapon_BasicShoot', 'assault', 'waist_recoil9', 'assault_reload1'),
+             'X.SGO': gun('Weapon_Sub', 'assault', 'x')}
+    rows = [N([float(i), f'app:/weapon/{n.lower()}', float(c)])
+            for i, (n, c) in enumerate([('R1.SGO', 0), ('R2.SGO', 0), ('R3.SGO', 0), ('S1.SGO', 1), ('S2.SGO', 1),
+                                        ('S3.SGO', 1), ('S4.SGO', 1), ('X.SGO', 1), ('GONE.SGO', 1)])]
+    table = dsgo.Document(N([N(list(rows))], {0: 'table'}), [])
+    assert len(rh.rows_of(dsgo.parse(dsgo.write(table)))) == len(rows)
+    read = files.__getitem__
+    assert [n for n, _s in rh.category_sets(rows, read, rh.SHOTGUN)] == ['S1.SGO', 'S2.SGO', 'S3.SGO', 'S4.SGO']
+    donor = rh.rifle_like_set(rows, read)
+    assert donor == ('assault', 'aim', 'assault_change1', 'assault_reload2', 'waist_recoil1'), donor
+    doc = dsgo.parse(files['S1.SGO'])
+    assert rh.hold_like(doc.root, donor) and rh.hold_set(doc.root) == donor
+    before, after = dsgo.to_py(dsgo.parse(files['S1.SGO']).root), dsgo.to_py(doc.root)
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed <= set(rh.FIELDS) and {'BaseAnimation', 'ReloadAnimation', 'custom_parameter'} <= changed, changed
+    assert after['custom_parameter'][1:] == before['custom_parameter'][1:]
+    assert not rh.hold_like(doc.root, donor), 'already held so'
+    named = N(['Weapon_BasicShoot', 'waist', 'aim', 'c', 'r', N(['x'], {0: 'a'})], {i: names[i] for i in range(6)})
+    assert rh.hold_set(named) is None and not rh.hold_like(named, donor)
+    try:
+        rh.rifle_like_set(rows[:3], read)
+        raise AssertionError('no shotgun held as the rifles, yet a donor')
+    except rh.NoDonor:
+        pass
+
+
+@test
+def stock_holds_wired() -> None:
+    """tools/make_stock_holds.py (test site #32): a ledger owner, installed by the installer and removed by its uninstall,
+    bundled; the ported shotguns take the same set (tools/ported_weapons.py); the feedback, the RE note and the README
+    say so."""
+    import make_stock_holds as msh
+    assert msh.OWNER in ledger.OWNERS
+    inst = src('tools/installer.py')
+    assert 'make_stock_holds.build(game)' in inst and 'make_stock_holds.install(game, holds[0])' in inst
+    assert 'make_stock_holds.remove' in inst
+    rel = src('tools/build_release.py')
+    assert "'make_stock_holds'" in rel and "'ranger_hold'" in rel
+    assert 'ranger_hold.hold_like(doc.root, models.shotgun_hold())' in src('tools/ported_weapons.py')
+    assert '突击兵握持霰弹枪的姿势很怪' in src('docs/feedback-2026-11-10-shotgun-grip.md')
+    assert 'make_stock_holds' in src('docs/shotgun-grip-re.md') and 'make_stock_holds' in src('README.md')
+
+
+@test
+def stock_holds_build() -> None:
+    """With the game here (CI has none): the donor is EDF6's Destruction Blazer set; every stock Ranger shotgun not held
+    so is built, each the stock file with only the five hold names changed; the Monsoon (暴雨, aWeapon057) is one of
+    them; the three already held as the rifles are not rewritten."""
+    import rootcpk
+    import make_stock_holds as msh
+    import ranger_hold as rh
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        print('skip  stock_holds_build: needs EDF6 installed')
+        return
+    game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+    rows = rh.rows_of(dsgo.parse(game.read('WEAPON', 'WEAPONTABLE.SGO')))
+    read = lambda name: game.read('WEAPON', name)   # noqa: E731
+    donor = rh.rifle_like_set(rows, read)
+    assert donor == ('assault', 'aim', 'assault_change1', 'assault_reload2', 'waist_recoil1'), donor
+    shotguns = rh.category_sets(rows, read, rh.SHOTGUN)
+    files: dict[str, bytes] = {}
+    for name, _s in shotguns:
+        made = msh.held(read(name), donor)
+        if made is None:
+            continue
+        files[f'WEAPON/{name}'] = made
+        before, after = dsgo.to_py(dsgo.parse(read(name)).root), dsgo.to_py(dsgo.parse(made).root)
+        assert set(before) == set(after), name
+        assert {k for k in before if before[k] != after[k]} <= set(rh.FIELDS), name
+    msh.check(files, donor)
+    assert 'WEAPON/AWEAPON057.SGO' in files, 'the Monsoon'
+    assert len(shotguns) - len(files) == 3 and len(files) == 35, (len(shotguns), len(files))
 
 
 @test

@@ -207,6 +207,8 @@ class IncrementalTests(unittest.TestCase):
             loadout = stack.enter_context(patch.object(support_loadout, 'build',
                                                        return_value={'OBJECT/EDF6VC_LO_TANK_4000000000000C81.SGO': b'loaded tank'}))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
+            import make_stock_holds   # no Root.cpk here: its file stands in; its install (skip unchanged) runs for real
+            stack.enter_context(patch.object(make_stock_holds, 'build', return_value=({'WEAPON/FAKE_SHOTGUN.SGO': b'held'}, [])))
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
             stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g, campaign=True, test_range=True, root41=None, skip41=(): (
                 {rel: b'stub' for rel in make_edf5_campaign.FILES}, make_edf5_campaign.Contents(3, 6),
@@ -228,6 +230,7 @@ class IncrementalTests(unittest.TestCase):
                     stack.enter_context(patch.object(module, 'install_models' if group == 'optics' else 'install', write))
             installer.install(str(self.game))
             paths = list((self.game / 'Mods/OBJECT').glob('*')) + list((self.game / 'Mods/MAP').glob('*'))
+            paths.append(self.game / 'Mods/WEAPON/FAKE_SHOTGUN.SGO')
             timestamps = {p: p.stat().st_mtime_ns for p in paths}
             installer.install(str(self.game))
             self.assertTrue(all(b.call_count == 1 for b in builders.values()))

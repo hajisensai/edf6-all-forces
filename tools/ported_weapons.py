@@ -39,6 +39,7 @@ import edf5port  # noqa: E402
 import gamedir  # noqa: E402
 import mab_legacy  # noqa: E402
 import mdb  # noqa: E402
+import ranger_hold  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 from dsgo import Node  # noqa: E402
@@ -191,6 +192,7 @@ class Models:
         self._nodes: dict[str, dict[str, str]] | None = None
         self._peers: dict[str, list[Node]] = {}
         self.known: dict[str, set[str]] = {f: set() for f in edf5port.HOLD_NAMES}
+        self._shotgun_hold: ranger_hold.HoldSet | None = None
 
     @staticmethod
     def model_of(doc: dsgo.Document) -> tuple[str, str] | None:
@@ -254,12 +256,42 @@ class Models:
         return self._nodes.get(model[0].lower(), {})
 
     def peers(self, doc: dsgo.Document) -> list[Node]:
-        """EDF6's own weapons on this weapon's model."""
+        """EDF6's own weapons on this weapon's model; on none, those on the model it re-skins (kin)."""
         model = self.model_of(doc)
         if model is None:
             return []
         self._index()
-        return self._peers.get(model[0].lower(), [])
+        own = self._peers.get(model[0].lower(), [])
+        if own:
+            return own
+        kin = self.kin(doc)
+        return self._peers.get(kin, []) if kin is not None else []
+
+    def kin(self, doc: dsgo.Document) -> str | None:
+        """The model (its RAB path, lower case) this weapon's model re-skins, when no EDF6 weapon is on its own: a
+        model with EDF6 weapons on it whose name is a node of this one's. EDF6 ships EDF4.1's red Governor
+        (s_shotgun_governor02, no EDF6 weapon on it) with the nodes mdl / s_shotgun_governor02 / body / grip /
+        s_shotgun_governor01: governor01's mesh in another texture, its body and grip bones where governor01's are
+        (the same local matrices in EDF6's re-made governor01); the Monsoon's on governor01 carry the grip ('IK')
+        EDF6 re-placed for its soldiers (user 2026-11-10: hold the red 4.1 shotgun as the Monsoon, 暴雨)."""
+        model = self.model_of(doc)
+        if model is None:
+            return None
+        self._index()
+        rab = model[0].lower()
+        folder = rab[:rab.rfind('/') + 1]
+        stem = rab[len(folder):].rsplit('.', 1)[0]
+        found = sorted({f'{folder}{n.lower()}.rab' for n, _parent in self.bones(doc)
+                        if n.lower() != stem and f'{folder}{n.lower()}.rab' in self._peers})
+        return found[0] if len(found) == 1 else None
+
+    def shotgun_hold(self) -> ranger_hold.HoldSet:
+        """The hold EDF6's own shotguns held as its rifles use (ranger_hold.rifle_like_set on the stock table)."""
+        if self._shotgun_hold is None:
+            table = dsgo.parse(self.stock('WEAPON/WEAPONTABLE.SGO'))
+            self._shotgun_hold = ranger_hold.rifle_like_set(ranger_hold.rows_of(table),
+                                                            lambda name: self.stock(f'WEAPON/{name}'))
+        return self._shotgun_hold
 
 
 def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) -> bytes:  # noqa: ANN001 - stock(rel) -> bytes, the EDF6 file
@@ -296,6 +328,8 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
     template = dsgo.parse(stock(f'WEAPON/{p.template.upper()}.SGO')).root
     edf5port.hold_as(doc, models.peers(doc), template, models.known)
     edf5port.fit_locators(doc, models.bones(doc), models.preferred(doc))
+    if p.category == ranger_hold.SHOTGUN:   # a Ranger shotgun: held as the rifles (pylib/ranger_hold.py)
+        ranger_hold.hold_like(doc.root, models.shotgun_hold())
     return dsgo.write(doc)
 
 
