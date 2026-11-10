@@ -26,8 +26,12 @@ namespace crew {
 //      and the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
 //      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
 //      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
+//   9 (2026-11-10): the map's DISMOUNT ALL carries its choice (all but the driver, some classes' riders: map commands
+//      v10, mapcmd_logic.h DismountParamValid), and the squads following a player ride along with that player
+//      (src/ride_along.h; the host runs the guests' squads): an older build in the room would refuse the order or leave
+//      a guest's squad on foot.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=8;
+constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

@@ -86,8 +86,8 @@ void Codec() {
     Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
           mapcmd::kLastOrder==mapcmd::Order::formation,"HOLD is appended (13), the formation order after it (14)");
-    Check(kVersion==9 && kMinVersion==9 && Compatible(9) && !Compatible(8) && !Compatible(7) && !Compatible(10),
-          "the wire is version 9 (every object its reference); no older version spoken");
+    Check(kVersion==10 && kMinVersion==10 && Compatible(10) && !Compatible(9) && !Compatible(8) && !Compatible(11),
+          "the wire is version 10 (DISMOUNT ALL's choice); no older version spoken");
     {   // The requester only a player's reference, a unit only a NetId, the focus either (an enemy player in PvP).
         Request r=Make(2,mapcmd::Order::focus);
         Check(ValidRequest(r),"a focus by its NetId");
@@ -136,6 +136,15 @@ void Version8() {
     {std::uint32_t param;std::memcpy(&param,bytes+52,4);Check(param==m.request.command.param,"the parameter is the word after the point");}
     m.request.command.param=0;Check(!Encode(m,bytes,sizeof(bytes)),"a formation order saying nothing refused");
     m.request=Make(1,mapcmd::Order::guard);m.request.command.param=3;Check(!Encode(m,bytes,sizeof(bytes)),"a parameter on another order refused");
+    // Version 10: DISMOUNT ALL's choice (all but the driver, some classes' riders) in the same word; DISMOUNT takes none.
+    m.request=Make(1,mapcmd::Order::dismountAll);m.request.command.param=mapcmd::kDismountKeepDriver|mapcmd::kDismountWingDiver;
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.param==m.request.command.param,
+          "DISMOUNT ALL's choice round trips");
+    m.request.command.param=mapcmd::kDismountKeepDriver;Check(Encode(m,bytes,sizeof(bytes)),"all but the driver");
+    m.request.command.param=mapcmd::kDismountWingDiver;Check(!Encode(m,bytes,sizeof(bytes)),"a class without keeping the driver refused");
+    m.request.command.param=mapcmd::kDismountKeepDriver|0x10u;Check(!Encode(m,bytes,sizeof(bytes)),"an unknown class bit refused");
+    m.request=Make(1,mapcmd::Order::dismount);m.request.command.param=mapcmd::kDismountKeepDriver;
+    Check(!Encode(m,bytes,sizeof(bytes)),"DISMOUNT (the passengers) takes no choice");
     m.request=Make(1,mapcmd::Order::formation);m.request.command.param=mapcmd::FormationParam(2,-1);m.request.formationTotal=1;
     Check(!Encode(m,bytes,sizeof(bytes)),"no formation slots on the formation order");
     m=Message{};m.kind=Kind::request;m.epoch=7;m.sequence=5;m.request=Make(1,mapcmd::Order::hold);
@@ -145,12 +154,12 @@ void Version8() {
         Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
     }
     m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"nothing goes out at an older version");
-    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),8),"a request travels at version 9 alone");
+    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),9),"a request travels at version 10 alone");
 }
 // The negotiation: every hello at kMinVersion with the sender's highest in it; an older build is never answered.
 void Negotiation() {
     {   // queued and formation orders reach the executor with their flag and parameter
-        Room r;Check(r.nodes[1]->session->HostVersion()==kVersion,"both sides: version 8");
+        Room r;Check(r.nodes[1]->session->HostVersion()==kVersion,"both sides: version 10");
         Request q=Make(1,mapcmd::Order::attackMove);q.flags=kQueued;
         Check(r.nodes[1]->session->Submit(q,r.Name(1),r.now)!=0,"a queued attack-move submitted");r.Pump();
         Check(r.nodes[0]->executed==1 && r.nodes[0]->lastFlags==kQueued && r.nodes[0]->lastOrder==mapcmd::Order::attackMove,
@@ -161,13 +170,13 @@ void Negotiation() {
         for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(p.message.version==kMinVersion && p.message.request.formationTotal==kVersion,
             "a hello goes out at the lowest version, the sender's highest in it");
     }
-    {   // an older build (version 8 and before: its player's tag at bytes 0..3, its focus a NetId): no capability for its
-        // hello, its requests not run
+    {   // an older build (version 9 and before: version 9 had no DISMOUNT ALL choice, 8 named its player by a tag at
+        // bytes 0..3): no capability for its hello, its requests not run
         Room r(2);const auto before=r.sent.size();
-        Message hello;hello.version=8;hello.epoch=r.epoch;hello.request.formationTotal=8;
+        Message hello;hello.version=9;hello.epoch=r.epoch;hello.request.formationTotal=9;
         r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
         Check(r.sent.size()==before,"an older build's hello: not answered");
-        Message forged;forged.version=8;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
+        Message forged;forged.version=9;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
         r.nodes[0]->session->Receive(1,r.Name(1),forged,r.now);r.Pump();
         Check(r.nodes[0]->executed==0,"an older build's request is not executed");
     }

@@ -118,6 +118,14 @@ struct SquadSeats { int alive=0,aboard=0,onFoot=0; };
 bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept;
 int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept;
 int NpcSquadDismount(const void* top) noexcept;
+// src/ride_along.h (test site #45): the squads following a player get into that player's vehicle (passenger seats, then
+// the gunners') and out of it with them. map.cpp, once a frame beside TransportTick.
+void NpcRideAlongTick() noexcept;
+// The first-time hint over a squad the map can command, near the player on foot (ride_along.h HintStep; once ever:
+// CommandHintShown=1 written to the ini when it ends). map.cpp sets it each frame, hud.cpp draws it (game thread both).
+struct CommandHint { float at[3]; int key; };
+void NpcCommandHintFrame(const unsigned char* human,bool mapOpen) noexcept;
+bool NpcCommandHint(CommandHint* out) noexcept;
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;
 const void* NpcSquadTopOf(const void* human) noexcept;
 bool NpcSoldierFlies(const void* human) noexcept;

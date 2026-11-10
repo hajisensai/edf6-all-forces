@@ -755,9 +755,11 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
         FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
+        NpcRideAlongTick();   // the squads following a player in and out of its vehicle (ride_along.h)
         AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
+        NpcCommandHintFrame(human,open && game.open);   // the first-time "press M to command" (ride_along.h)
         DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
         Edf41Mother401DevTick();   // development only (Edf41Mother401Dev bit 32768); once a frame (the tick keeps its own frame check)
         InfantryScopeFrame(human);   // a scoped weapon open: the real optic's cue (infantryscope.cpp)

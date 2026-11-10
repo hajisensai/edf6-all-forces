@@ -355,6 +355,7 @@ HUDTEXT(areaTurning,L"AREA EDGE: TURNING BACK",L"接近边界：正在返航",L"
 HUDTEXT(areaAhead,L"AREA EDGE AHEAD: TURN BACK",L"前方边界：请返航",L"前方邊界：請返航",L"前方エリア境界：引き返せ")
 HUDTEXT(warnArea,L"AREA EDGE",L"区域边界",L"區域邊界",L"エリア境界")
 HUDTEXT(boardingEntry,L"BOARDING ENTRANCE  %d m",L"登乘入口  %d m",L"登乘入口  %d m",L"搭乗口  %d m")
+HUDTEXT(cmdHintPressKey,L"PRESS %ls TO COMMAND",L"按 %ls 键进行指挥",L"按 %ls 鍵進行指揮",L"%ls キーで指揮")
 HUDTEXT(boardingReady,L"BOARD AT THIS ENTRANCE",L"在此按上车键",L"在此按上車鍵",L"ここで搭乗ボタン")
 HUDTEXT(boardingHail,L"[%ls] CALL IT DOWN  %d m",L"[%ls] 呼叫降落  %d m",L"[%ls] 呼叫降落  %d m",L"[%ls] 着陸要請  %d m")
 HUDTEXT(boardingHailing,L"CALLED: LANDING  %d m",L"已呼叫：正在降落  %d m",L"已呼叫：正在降落  %d m",L"要請済み：着陸中  %d m")
@@ -493,6 +494,10 @@ HUDTEXT(squadMore,L"+%d MORE (%d riding, %d scripted): click to list",L"另有 %
         L"另有 %d 支（乘車 %d，腳本 %d）：點擊展開",L"他 %d 部隊（搭乗 %d、指示中 %d）：クリックで表示")
 // The formation menu's two sections (hud.cpp MapButtons): the march of the squads following the player, the defence of
 // the ones on a guard point.
+// The ALL OUT button's menu (hud.cpp MapDismountMenu, map_buttons.h kDismountMenu): who gets out of the vehicle.
+HUDTEXT(dismountEveryone,L"EVERYONE OUT",L"全体下车",L"全體下車",L"全員降車")
+HUDTEXT(dismountKeepDriver,L"ALL BUT THE DRIVER",L"全体下车（留司机）",L"全體下車（留駕駛）",L"運転手以外降車")
+HUDTEXT(dismountClass,L"%ls OUT",L"%ls下车",L"%ls下車",L"%ls降車")
 HUDTEXT(menuMarch,L"MARCH",L"行军",L"行軍",L"行軍")
 HUDTEXT(menuDefence,L"DEFENCE",L"守点",L"守點",L"防衛")
 HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收起：只列可指挥的小队",L"點擊收起：只列可指揮的小隊",

@@ -190,6 +190,7 @@ struct MapCommandReadout {
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
     // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
+    bool dismountMenu=false;   // the ALL OUT button's menu open (map_buttons.h kDismountMenu)
     SquadRow squad[16];
     bool squadSelected[16];
     std::uint16_t squadGroups[16]{}; // each row's RTS groups (CmdMark::groups)

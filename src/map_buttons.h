@@ -132,6 +132,20 @@ inline int MenuColumn(const Rect& button,int n,float rowW,float rowH,float gap,f
     return placed;
 }
 
+// --- The ALL OUT button's menu (test site #45, 2026-11-10: 「如何让某个角色单独下车」; #44: 「预设下车指令：全体下车只留司机等」) ---
+// The button opens a column like the formation menu's (MenuColumn, drawn over the same rows: one menu at a time): every
+// rider off, every rider but the driver, one class's riders (the driver kept). Each row is DISMOUNT ALL with its choice
+// (mapcmd_logic.h DismountParamValid), its entry code kMenuDismount | the choice. Shift+N gives every rider off at once.
+constexpr int kMenuDismount=0x10000;
+constexpr std::uint32_t kDismountMenu[]={0u,mapcmd::kDismountKeepDriver,mapcmd::kDismountKeepDriver|mapcmd::kDismountRanger,
+                                         mapcmd::kDismountKeepDriver|mapcmd::kDismountWingDiver,
+                                         mapcmd::kDismountKeepDriver|mapcmd::kDismountAirRaider,
+                                         mapcmd::kDismountKeepDriver|mapcmd::kDismountFencer};
+constexpr int kDismountMenuRows=static_cast<int>(sizeof(kDismountMenu)/sizeof(kDismountMenu[0]));
+inline int DismountEntry(std::uint32_t param) noexcept { return kMenuDismount|static_cast<int>(param&0xFFFFu); }
+inline bool MenuDismount(int entry) noexcept { return (entry&kMenuDismount)!=0; }
+inline std::uint32_t MenuDismountParam(int entry) noexcept { return static_cast<std::uint32_t>(entry)&0xFFFFu; }
+
 // --- The support bar ---
 // The catalog's entries a row (`names`, in catalog order): the consecutive ones whose names share what is before
 // their "·" (U+00B7) are one kind of support with variants; a name with none is a row of its own.

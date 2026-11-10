@@ -57,7 +57,8 @@ bool ValidRequest(const Request& r,std::uint32_t version) noexcept {
        !netref::IsPlayer(r.requester))return false;
     if(r.flags&~kQueued)return false;
     if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
-    if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) : r.command.param!=0)return false;
+    if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) :
+       !mapcmd::DismountParamValid(r.command.order,r.command.param))return false;   // DISMOUNT ALL's choice (v10), else none
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
     if(r.command.order==mapcmd::Order::focus) {if(!netref::Valid(r.focus,false) || !std::memcmp(r.focus,r.requester,32))return false;}
     else if(!Empty(r.focus))return false;

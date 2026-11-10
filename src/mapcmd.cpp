@@ -109,6 +109,7 @@ struct Game {
     int marchPace=-1;           // the paced march (P): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
+    bool dismountMenu=false;    // the ALL OUT button's menu open (map_buttons.h kDismountMenu): one menu at a time
     bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
     bool rightClick=false,rightOnUi=false;               // ...let go without a drag this frame
     ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
@@ -552,7 +553,7 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
 // One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
 void Arm(Game& g,bool order,Order o,int support) noexcept {
     g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
-    if(order || support>=0){g.formationMenu=false;g.place.armed=-1;}   // one thing armed at a time (the 「摆放」 row too)
+    if(order || support>=0){g.formationMenu=false;g.dismountMenu=false;g.place.armed=-1;}   // one thing armed at a time (the 「摆放」 row too)
     // A support with seats opens its composition from the load it brings uncomposed (SupportCallPreset); armed again it
     // keeps what was put together; anything else closes it.
     if(g.armedSupport!=g.composeEntry) {
@@ -579,6 +580,24 @@ void PickFormation(Game& g,int entry) noexcept {
     FormationNote(g,given,shape);
     Log("MAPCMD formation menu: %s %s, %d given, %d not",mapbtn::MenuGuard(entry) ? "defence" : "march",
         npc::formation::Name(npc::formation::FromInt(shape)),given,skipped);
+}
+// The ALL OUT menu's pick (map_buttons.h kDismountMenu): DISMOUNT ALL with its choice to the selection (a vehicle's: its
+// riding squads'), online their authority's (command protocol v10); the menu closed.
+void PickDismount(Game& g,int entry) noexcept {
+    using hudtext::Tr;using hudtext::Tx;
+    g.dismountMenu=false;
+    if(!Cfg().enabled){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
+    const Command c{Order::dismountAll,{0.0f,0.0f,0.0f},mapbtn::MenuDismountParam(entry)};
+    if(!mapcmd::DismountParamValid(c.order,c.param))return;
+    int skipped=0;
+    const int given=Dispatch(g,c,&skipped,{});
+    wchar_t tail[40]{};
+    if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
+    if(g.networkQueued)Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(c.order),g.networkQueued,given);
+    else if(!given && g.networkMessage[0])Note(g,L"%ls",g.networkMessage);
+    else if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
+    else Note(g,Tr(Tx::cmdOrderResult),OrderText(c.order),given,tail);
+    Log("MAPCMD ALL OUT menu: choice 0x%X, %d given, %d not (%s)",c.param,given,skipped,ReasonName(g.failure));
 }
 void CycleEnemy(Game& g,int direction) noexcept;
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
@@ -624,7 +643,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     }
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
     if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
-    if(hit.kind==Game::UiKind::formation){PickFormation(g,hit.entry);return;}
+    if(hit.kind==Game::UiKind::formation){if(mapbtn::MenuDismount(hit.entry))PickDismount(g,hit.entry);else PickFormation(g,hit.entry);return;}
     if(hit.kind==Game::UiKind::compose) {   // a kind: one more aboard; a taken seat: emptied
         if(g.composeEntry>=0 && !mapbtn::ComposeApply(g.compose,SupportCallSeats(g.composeEntry),hit.entry) && hit.entry>=0)
             Note(g,L"%ls",hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
@@ -1324,6 +1343,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     }
     // FOCUS FIRE's button with an enemy marked (Q, or the right button on one: that gives the order itself).
     if(!marked)r.allowedOrders&=~(std::uint32_t{1}<<static_cast<unsigned>(Order::focus));
+    // The ALL OUT menu while the selection still takes ALL OUT (a riding squad, a vehicle carrying one).
+    r.dismountMenu=g.dismountMenu && (r.allowedOrders&(std::uint32_t{1}<<static_cast<unsigned>(Order::dismountAll)))!=0;
     std::memcpy(r.point,point,12);
     r.pointer=pointer;r.px=g.pointer.x;r.py=g.pointer.y;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
     r.count=g.count;
@@ -1478,7 +1499,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const bool cancel=g.rightClick && (g.armedOrder || g.armedSupport>=0 || g.place.armed>=0);   // RTS: the right button leaves the targeting
     if(cancel && g.place.armed>=0){g.place.armed=-1;g.rightClick=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::placeStopped));}
     else if(cancel){Arm(g,false,Order::none,-1);g.rightClick=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
-    if(g.rightClick && g.formationMenu){g.formationMenu=false;g.rightClick=false;}   // ...and closes the formation menu
+    if(g.rightClick && (g.formationMenu || g.dismountMenu)){g.formationMenu=g.dismountMenu=false;g.rightClick=false;}   // ...and closes the formation menu
     const int supportCount=SupportMenuCount();
     if(supportCount>0) {
         const bool previous=k.supportPrev && !g.was.supportPrev,following=k.supportNext && !g.was.supportNext;
@@ -1594,10 +1615,12 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     p.focus=p.focus || rightFocus;
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
     p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
-    p.dismountAll=p.dismountAll || clicked(Id::dismountAll);p.withdraw=clicked(Id::withdraw);p.hold=p.hold || clicked(Id::hold);
+    // The ALL OUT button opens its menu (who gets out: kDismountMenu); Shift+N is every rider at once.
+    if(clicked(Id::dismountAll)){g.dismountMenu=!g.dismountMenu;if(g.dismountMenu){Arm(g,false,Order::none,-1);g.formationMenu=false;}}
+    p.withdraw=clicked(Id::withdraw);p.hold=p.hold || clicked(Id::hold);
     p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
     // The formation menu and an armed order or support (its composition panel) are one at a time, as Arm keeps them.
-    if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;if(g.formationMenu)Arm(g,false,Order::none,-1);}
+    if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;if(g.formationMenu){Arm(g,false,Order::none,-1);g.dismountMenu=false;}}
     if(g.formationMenu) {   // no squad that takes orders selected any more: nothing to arrange
         bool squads=false;
         for(int i=0;i<g.count && !squads;++i)squads=g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad && Picked(g.list[i]);
@@ -1821,7 +1844,7 @@ void SuspendMapCommands() noexcept {
     npcmark::Assign(g.enemyCandidate,{});g.enemyMenu={};g.enemyPadFire=false;g.enemy={};enemyHoldsPad.store(false);
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
-    g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;
+    g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;g.dismountMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
     AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
