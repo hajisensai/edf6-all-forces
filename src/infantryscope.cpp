@@ -49,6 +49,10 @@ bool camHooked=false;
 // refused this device's surface (until the next mission), the last frame it drew (GetTickCount64).
 std::atomic<bool> lensHooked{false},lensRefused{false};
 std::atomic<ULONGLONG> lensAt{0};
+// The scoped soldier's last world view: whether the lens drew in it, and the scope's FOV it drew (the HUD's reticle):
+// the HUD frames the lens only over a world the lens is in.
+std::atomic<bool> lensShown{false};
+std::atomic<float> lensShownFov{0.0f};
 // Game thread only: the camera's FOV this hook wrote, to retract before the next step (sightzoom.cpp's way).
 struct Unzoom { void* camera=nullptr; float before=0.0f,written=0.0f; };
 Unzoom unzoom{};
@@ -186,10 +190,11 @@ bool InfantryScopeNow(InfantryScopeCue* out) noexcept {
     if(!p.human || !Cfg().enabled || !Cfg().infantryScope || now-p.at>kFreshMs || !(p.cue.zoom>1.01f))return false;
     if(out) {
         *out=p.cue;
-        // The lens is what the HUD frames only while it draws, on the camera's unmagnified frame.
-        out->lens=PictureInPicture() && p.frameFov>0.0f && p.scopeFov>0.0f && now-p.fovAt<=kFreshMs &&
+        // The lens is what the HUD frames only while it draws: in the soldier's last world view, lately.
+        const float fov=lensShownFov.load(std::memory_order_acquire);
+        out->lens=PictureInPicture() && !lensRefused.load(std::memory_order_acquire) && lensShown.load(std::memory_order_acquire) && fov>0.0f &&
                   scopepip::LensDrew(now,lensAt.load(std::memory_order_acquire));
-        out->lensFov=out->lens ? p.scopeFov : 0.0f;
+        out->lensFov=out->lens ? fov : 0.0f;
     }
     return true;
 }
@@ -204,6 +209,16 @@ bool ViewOf(const void* view,const void* human) noexcept {
         return At<unsigned>(view,0)==0 && At<unsigned>(view,4)==0 && human==PlayerHuman();
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+// The world view's own projection's vertical scale (view+0x60, row-major, [5]; docs/fp-render-re.md 2026-10-17, read the
+// same way by firstperson.cpp DrawFrustum): the field the frame was really rendered with. The render thread runs 0-3
+// game steps behind the camera step (fp-render-re §17.2), so the camera's latest FOV is not this frame's. 0: unreadable.
+float ViewYScale(const void* view) noexcept {
+    __try {
+        if(!Readable(view,0xA0))return 0.0f;
+        const float y=std::fabs(At<float>(view,0x60+5*sizeof(float)));
+        return std::isfinite(y) && y>0.05f ? y : 0.0f;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return 0.0f; }
+}
 }  // namespace
 
 void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
@@ -215,19 +230,26 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
     if(!context || !view)return;
     const Published p=Read();
     const ULONGLONG now=GetTickCount64();
-    const bool want=ViewOf(view,p.cue.human) && p.cue.human && now-p.at<=kFreshMs && PictureInPicture() && p.frameFov>0.0f && p.scopeFov>0.0f &&
-                    now-p.fovAt<=kFreshMs && !lensRefused.load(std::memory_order_acquire);
-    if(!want) {
-        if(++idle>=kIdleViews){magnifier.Reset();idle=0;}
+    const bool mine=ViewOf(view,p.cue.human);
+    const bool want=mine && now-p.at<=kFreshMs && PictureInPicture() && !lensRefused.load(std::memory_order_acquire);
+    // The scope's FOV: the stock step's own (the camera publishes what it replaced), else the power's.
+    const float scopeFov=p.scopeFov>0.0f ? p.scopeFov : scopepip::ScopeFov(p.cue.zoom);
+    // The magnification this frame needs to show the stock zoom's picture: its own projection's against the scope's. A
+    // frame the stock zoom rendered (the camera zoomed again, or not unzoomed yet) needs none: no lens, nothing refused.
+    const float m=want ? scopepip::Magnification(ViewYScale(view),scopeFov) : 0.0f;
+    if(!(m>=scopepip::kLeast)) {
+        if(mine)lensShown.store(false,std::memory_order_release);
+        if(!want && ++idle>=kIdleViews){magnifier.Reset();idle=0;}
         return;
     }
     idle=0;
-    const float m=scopepip::Magnification(scopepip::YScale(p.frameFov),p.scopeFov);
-    if(!(m>=scopepip::kLeast))return;   // the frame is the stock zoom's already: no lens, nothing refused
     if(magnifier.Composite(context,m)) {
+        lensShownFov.store(scopeFov,std::memory_order_release);
+        lensShown.store(true,std::memory_order_release);
         lensAt.store(now,std::memory_order_release);
         return;
     }
+    lensShown.store(false,std::memory_order_release);
     // The surface is not one the pass draws on (multisampled, a split screen's partial viewport, an unknown format) or
     // the device would not give its resources: the whole-screen scope until the next mission (the camera zooms again).
     magnifier.Reset();
@@ -265,5 +287,6 @@ void ResetInfantryScope() noexcept {
     Publish(Published{});
     lensRefused.store(false,std::memory_order_release);
     lensAt.store(0,std::memory_order_release);
+    lensShown.store(false,std::memory_order_release);
 }
 }  // namespace crew

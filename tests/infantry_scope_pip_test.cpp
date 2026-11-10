@@ -53,6 +53,9 @@ void Open(ULONGLONG openedAt) {
     p.human=ObjRef::Of(soldier);p.cue=InfantryScopeCue{soldier,kZoom,scope::Look::marksman};p.at=GetTickCount64();p.openedAt=openedAt;
     Publish(p);
 }
+// The cue republished as the soldier's frame does (WARP's first shader compile can outlast its freshness).
+void Refresh() { Published p=Read();p.at=GetTickCount64();Publish(p); }
+void End(ID3D11DeviceContext* context,const void* view) { Refresh();InfantryScopeWorldEnd(context,view);Refresh(); }
 float Step(unsigned char* cam) { CamStepHook(cam,nullptr);return At<float>(cam,kCamFov); }
 bool Lens(float* fov=nullptr) {
     InfantryScopeCue c{};
@@ -78,9 +81,12 @@ void CameraChecks() {
     Check(!Lens(),"no lens drew yet: the HUD does not frame one");
 
     // The lens drew: the HUD frames it with the scope's FOV, the camera keeps the frame unmagnified past the probation.
-    lensAt.store(GetTickCount64());
+    lensAt.store(GetTickCount64());lensShown.store(true);lensShownFov.store(kStockFov);
     float fov=0.0f;
     Check(Lens(&fov) && fov==kStockFov,"the lens drew: the HUD frames it, the reticle at the scope's FOV");
+    lensShown.store(false);
+    Check(!Lens(),"the soldier's last world view had no lens: the HUD frames none");
+    lensShown.store(true);
     Open(now-10*scopepip::kProbationMs);
     Check(Step(camera)==scopepip::kBaseFov,"past the probation the lens drawing keeps the frame unmagnified");
 
@@ -166,7 +172,10 @@ struct Gpu {
 int WorldEndChecks() {
     Gpu g;
     if(!g.Make()){std::printf("SKIP world's end: no WARP device\n");return 0;}
+    // The world view's parameter block: its projection at +0x60 (row-major, [5] the vertical scale).
     alignas(16) unsigned char view[0x100]{};
+    const auto project=[&](float fov){Put<float>(view,0x60+5*sizeof(float),scopepip::YScale(fov));};
+    project(scopepip::kBaseFov);
     ResetInfantryScope();
     config.enabled=true;config.infantryScope=2;lensHooked.store(true);
     Open(GetTickCount64());
@@ -174,14 +183,24 @@ int WorldEndChecks() {
 
     // Another player's view (split screen's 2P): nothing drawn, no lens reported.
     viewOwner=stranger;g.Bind(true);
-    InfantryScopeWorldEnd(g.context.Get(),view);
+    End(g.context.Get(),view);
     Check(g.Read()==g.start && lensAt.load()==0,"another player's view: untouched");
 
     // The scoped soldier's view: the lens, at the focal ratio, round the centre; outside it nothing.
     viewOwner=soldier;g.Bind(true);
-    InfantryScopeWorldEnd(g.context.Get(),view);
+    End(g.context.Get(),view);
     const std::vector<std::uint8_t> after=g.Read();
     Check(lensAt.load()!=0 && Lens(),"the soldier's view: the lens drew, the HUD frames it");
+    // A frame the stock zoom rendered (in flight from before the camera unzoomed, or zoomed again): no lens, not refused.
+    {
+        g.Restore();g.Bind(true);project(kStockFov);
+        End(g.context.Get(),view);
+        Check(g.Read()==g.start && !lensRefused.load() && !Lens(),"a stock-zoomed frame: no lens, nothing refused, none framed");
+        project(scopepip::kBaseFov);g.Bind(true);
+        End(g.context.Get(),view);
+        g.Restore();g.Bind(true);
+        End(g.context.Get(),view);
+    }
     const scopepip::Lens l=scopepip::LensFor(static_cast<float>(g.w),static_cast<float>(g.h),
                                              scopepip::Magnification(scopepip::YScale(scopepip::kBaseFov),kStockFov));
     Check(l.m>kZoom && l.m<kZoom*1.1f,"the magnification is the focal ratio");
@@ -202,7 +221,7 @@ int WorldEndChecks() {
 
     // A split screen's partial viewport: refused, the camera zooms again, the next mission tries again.
     g.Restore();g.Bind(false);
-    InfantryScopeWorldEnd(g.context.Get(),view);
+    End(g.context.Get(),view);
     Check(lensRefused.load() && g.Read()==g.start,"a partial viewport: refused, nothing drawn");
     Open(GetTickCount64());
     Check(Step(camera)==kStockFov && !Lens(),"refused: the stock zoom, the whole-screen eyepiece");

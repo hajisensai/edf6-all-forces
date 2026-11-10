@@ -4,6 +4,7 @@
 //    the ratio of the focal lengths (a little more than the scope's power), the reticle's focal in the lens equals the
 //    stock zoomed frame's, a point at angle a off the axis lands where the stock zoom would have put it;
 //  - a frame the stock zoom already rendered (the camera step not yet un-zoomed) gets no lens (magnification 1);
+//  - the camera step unzooms only the stock step's own write, and only while the lens can draw (KeepUnzoomed);
 //  - the lens and its rim stay inside every view shape (landscape, portrait, split screens), smaller than the
 //    full-screen eyepiece's field (scopeview.h), its scissor covers it, Source keeps the centre fixed.
 //   cmake --build build --target scope_pip_check && build\scope_pip_check.exe      (exit code 1 on a failure)
@@ -83,6 +84,22 @@ int main() {
             Check(sx>=0 && sx<=w && sy>=0 && sy<=h,"the lens's edge samples inside the frame");
         }
     }
+    // The camera step: only the stock step's own zoomed FOV goes back to pi/4.
+    for(float zoom:{1.5f,4.0f,8.0f,12.0f})
+        Check(Unzoomed(kBaseFov/zoom,zoom)==kBaseFov,"the stock step's zoomed FOV is unzoomed to pi/4",zoom);
+    Check(Unzoomed(0.3f,4.0f)==0.0f,"a FOV another logic wrote (the close-up's easing) is left alone");
+    Check(Unzoomed(kBaseFov,1.0f)==0.0f && Unzoomed(kBaseFov/4.0f,0.0f)==0.0f && Unzoomed(NAN,4.0f)==0.0f,
+          "no zoom, no camera zoom, a broken FOV: nothing written");
+    // When the camera may keep the frame unmagnified.
+    const unsigned long long t=100000;
+    Check(KeepUnzoomed(true,true,false,t,t,0),"the scope just opened: the probation, before any lens drew");
+    Check(KeepUnzoomed(true,true,false,t+kProbationMs,t,0) && !KeepUnzoomed(true,true,false,t+kProbationMs+1,t,0),
+          "the probation ends: no lens drawn, the stock zoom");
+    Check(KeepUnzoomed(true,true,false,t+10000,t,t+10000-kLensFreshMs) && !KeepUnzoomed(true,true,false,t+10000,t,t+10000-kLensFreshMs-1),
+          "past the probation the lens keeps it while it drew lately");
+    Check(!KeepUnzoomed(false,true,false,t,t,t) && !KeepUnzoomed(true,false,false,t,t,t) && !KeepUnzoomed(true,true,true,t,t,t),
+          "not wanted, the world's end not hooked, the surface refused: the stock zoom");
+    Check(!KeepUnzoomed(true,true,false,t,0,0) && !LensDrew(t,0) && !LensDrew(t,t+1),"nothing opened, no lens, a clock gone back");
     for(int b=0;b<kFeathers;++b)
         Check(FeatherFrom(b)<FeatherTo(b) && FeatherTo(b)<=1.0f && (b==0 || kFeatherAlpha[b]>kFeatherAlpha[b-1]),"the vignette darkens outward");
 
