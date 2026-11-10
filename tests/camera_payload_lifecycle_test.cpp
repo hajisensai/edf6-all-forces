@@ -10,6 +10,7 @@
 
 namespace crew {
 bool VehicleLookActive(const void*) noexcept { return false; }
+bool VehicleLookOffered(const void*,unsigned,bool) noexcept { return true; }
 unsigned char* image=nullptr;
 Config config{};
 unsigned char* currentHuman=nullptr;
