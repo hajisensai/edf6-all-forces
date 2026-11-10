@@ -20,6 +20,22 @@ REGIONS = ('hokkaido', 'tohoku', 'kanto', 'chubu', 'kansai', 'chugoku', 'kyushu'
 # equirectangular): every place lies inside, so the zoomed-in view never needs the coarse world texture.
 DETAIL_NORTH, DETAIL_SOUTH, DETAIL_WEST, DETAIL_EAST = 47.0, 27.0, 127.0, 147.0
 
+# The two base map textures, the one place their paths are written (docs/plan-2026-11-10-worldmap.md §2):
+# tools/worldmap_basemap.py textures builds them into the model pack's folder TEXTURE_DIR (tools/build_release.py
+# RELEASE_MODELS), tools/worldmap_pack.py installs them under Mods at TEXTURES[kind], and tools/gen_worldmap.py hands
+# the plugin their app:/ paths (src/worldmap.inc kWorldTexture / kJapanTexture).
+TEXTURE_DIR = 'worldmap_tex'
+TEXTURE_INDEX = 'worldmap_tex.json'     # in TEXTURE_DIR: {'version', 'files': {name: {'sha256', 'size'}}}
+TEXTURE_VERSION = 1     # the index's version: raise when the textures' bytes change for the same sources
+TEXTURES = {'world': 'UI/EDF6VC_WORLDMAP_WORLD.DDS',    # under Mods; the whole Earth, 4096 x 2048
+            'japan': 'UI/EDF6VC_WORLDMAP_JAPAN.DDS'}    # DETAIL_* above, 4096 x 4096
+
+
+def app_path(rel: str) -> str:
+    """The game's name of a file under Mods (as src/room_ui_logic.h kWhiteTexture: app:/UI/EDF6VC_WHITE.dds)."""
+    stem, ext = rel.rsplit('.', 1)
+    return f'app:/{stem}.{ext.lower()}'
+
 
 @dataclass(frozen=True)
 class Place:

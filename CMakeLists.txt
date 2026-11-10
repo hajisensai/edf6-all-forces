@@ -987,6 +987,10 @@ set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # game installed, the mission table re-read from Root.cpk (read only).
 add_test(NAME worldmap_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_data_test.py")
 set_tests_properties(worldmap_data PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The world map's base textures in the model pack (tools/worldmap_basemap.py textures, tools/worldmap_pack.py install /
+# remove) on synthetic images; with the developer's model folder also that folder.
+add_test(NAME worldmap_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_worldmap_pack.py")
+set_tests_properties(worldmap_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The preview's signatures, vtable slots and tables against the game's EDF.dll / Root.cpk (read only; skipped without).
 add_test(NAME room_preview_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_preview_native_audit.py")
 set_tests_properties(room_preview_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

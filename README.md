@@ -521,6 +521,14 @@ EDF6AutoTurret 时，键仍按 ini。
 `MENU/MENU_BG01.SGO` / `.RAB` / `.CAS` 本部背景素材及全部清单文件的 SHA-256；旧清单漏掉新增必需素材也会失败。
 字幕插件文本仍可选；安装器读取玩家已有的部分素材包时，仍按资源组跳过缺失来源的功能。
 
+世界地图的卫星底图（NASA Blue Marble，`docs/plan-2026-11-10-worldmap.md` §2）随模型包发：模型包文件夹 `worldmap_tex`
+（`tools/build_release.py` `RELEASE_MODELS`）只放游戏贴图 `EDF6VC_WORLDMAP_WORLD.DDS`（全球 4096 × 2048）、`EDF6VC_WORLDMAP_JAPAN.DDS`
+（日本细节 4096 × 4096，北纬 27–47°、东经 127–147°）、`worldmap_tex.json`（版本与每个文件的 SHA-256 / 大小）和署名 `SOURCE.txt`，
+都是 DXT1 带完整 mip。开发者先 `python -B tools/worldmap_basemap.py fetch` / `derive`（原图与派生 PNG 留在外部素材目录 `worldmap`，不进包），
+再 `python -B tools/worldmap_basemap.py textures` 生成这个文件夹。安装器只校验哈希后复制到 `Mods/UI/`（台账归属 `worldmap`，卸载选 1 时删除），
+不做任何转换；模型包里没有这个文件夹或内容不对时说一行、不装底图（游戏内世界地图界面尚未实现，见计划 §6）。路径常量只在 `pylib/worldmap.py`
+（`TEXTURE_DIR` / `TEXTURES`），插件侧经 `src/worldmap.inc` 的 `kWorldTexture` / `kJapanTexture` 取得。
+
 - 与 `EDF6AutoTurret` 共存：两边都 hook 了坦克的第 55 槽，本插件会串在它后面，也就是先执行它、再执行本插件，所以加载顺序无所谓。
 - 炮塔的锁定框和自动瞄准提示（ini `TurretAimHud=1`）：坐在 EDF6AutoTurret 瞄准的炮位上（克卜勒、玻尔斯、自行榴弹炮的炮塔，泰坦和游骑兵坦克的炮手座 / 驾驶座）时，本插件画出它的锁定（黄色收缩方框、红色菱形，和战斗机一样），屏幕下方一行 `自动瞄准：开   [J] 关闭   [Q] 锁定（长按：清除）`（锁定后写「下一个」、变红；泰坦 / 游骑兵坦克驾驶座把锁定交给炮手时写「炮手：自动瞄准」）。**自动瞄准默认关闭**（2026-10-25 用户：「怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要开启，开启以后应该有被瞄准敌人的高亮圈之类的？」，`docs/feedback-2026-10-25-autoaim.md`）：关闭时这一行写 `自动瞄准：关   [J] 开启`，炮完全归你；按 J（EDF6AutoTurret 的 `AutoAimKey`，不用 V：V 是本插件的第一人称键，炮塔座位上会同时切换）切换时屏幕中间大字显示新状态（瞄具放大、高视角、第一人称里也显示）；每个任务开始回到 ini 默认（关）；开启后没锁定时，炮正转向的敌人（炮塔镜头下是此刻按 Q 会锁定的那个）画绿色高亮圈。炮塔座位上本插件的 Q 标记一律按锁定的规则拾取（视线 20° 内、看得见的第一个），不再另用 8°、不判遮挡的拾取，也不再对已框住的敌人提示「对准敌人才能标记」：自动瞄准关时 Q 标记 / 取消这个敌人，视线内没有敌人照旧标地面点派小队；自动瞄准开且用键鼠时 Q 是锁定，锁到谁就标记谁；用手柄时锁定是 X，键盘 Q 仍是标记。**只有一种自动瞄准**（2026-10-25 用户：「这个自动瞄准是不是多余了一个版本，删掉一个」）：原来 EDF6AutoTurret 还有按 V 切换的「预瞄圈」模式，屏幕下方同时写「自动瞄准 开」和「[Z] 自动瞄准 关」、切到预瞄圈又是另一套圈和十字；它的「往哪打」和本插件载具 HUD 自己的提前量标记（`docs/hud-re.md` §7.3）重复，炮塔镜头下「炮塔归你」也和不锁定时炮塔跟镜头走一样，所以连同 `AimMode` / `AimModeKey` / `AimModeButton`、开 / 关两行、切换横幅、瞄具 Z 与模式键的冲突提示一起删掉。坐在 EDF6AutoTurret 管的炮位上、或驾驶任何由炮塔镜头接管的地面载具时有这一行（2026-10-09 起所有地面载具驾驶座同一套自瞄：`common/edf/aimlink.h` V4，见 `docs/feedback-2026-10-09-aim.md`）（用法见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md)「玩家的炮塔」）。反过来，本插件把镜头视线和地图射线提供给它，它的「锁定离屏幕中心最近、看得见的敌人」靠这两样。两个插件互相按导出函数名查找（`common/edf/aimlink.h`），缺哪个都不影响另一个。
 

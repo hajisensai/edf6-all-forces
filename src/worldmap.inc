@@ -536,3 +536,6 @@ inline constexpr const wchar_t* kRangeKeyPrefix=L"EDF6/EDF6TR_";
 inline constexpr int kRangePlace=1;   // higashifuji
 // The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.
 inline constexpr float kDetailNorth=47.000f,kDetailSouth=27.000f,kDetailWest=127.000f,kDetailEast=147.000f;
+// The base map textures (model pack folder worldmap_tex, installed by tools/worldmap_pack.py).
+inline constexpr const wchar_t* kWorldTexture=L"app:/UI/EDF6VC_WORLDMAP_WORLD.dds";
+inline constexpr const wchar_t* kJapanTexture=L"app:/UI/EDF6VC_WORLDMAP_JAPAN.dds";
