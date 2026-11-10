@@ -54,7 +54,7 @@ max_files 的「空闲 loader 不占文件句柄」没有逐条读完 loader 状
 `testrange/catalog_archives.json`；全部行（`RangePlaceAll=1`）去重后的数目写进 `src/spawn_catalog_archives.h` 的 `kCatalogModelArchives`
 （2026-10-18：145；默认预载的行约 112 个，与 r6 的 123 次 `RandomAccessArchive::Open` 同一量级）。`src/fsbudget.cpp` 让 `num_loaders`
 = 游戏组好的值 + `kCatalogModelArchives`（本机 130 → 275）。清单变了而 json 没重算时 `gen_spawn_catalog.py --check`（CI）失败；
-`tools/selftest.py spawn_catalog_archives_recorded` 在有游戏的机器上重算 json 并比对。
+`tools/selftest.py spawn_catalog_archives_recorded_<i>`（分 4 片） 在有游戏的机器上重算 json 并比对。
 
 ## 修复
 

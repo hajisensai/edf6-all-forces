@@ -3040,26 +3040,33 @@ def spawn_catalog_rows_check_their_files() -> None:
     assert 'static_assert(FilesAgree(),' in src('src/debug_spawn.h')
 
 
-@test
-def spawn_catalog_archives_recorded() -> None:
+SPAWN_CATALOG_SHARDS = 4
+
+
+def spawn_catalog_archives(shard: int) -> None:
     """src/fsbudget.cpp adds one CriFsLoader per model archive the catalog's whole preload can hold open
     (src/spawn_catalog_archives.h, from testrange/catalog_archives.json; docs/cri-fs-loaders-re.md): the header is the
     record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
-    now, through every SGO they name."""
+    now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
+    one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
+    the sorted rows dealt round, so the generated vehicles' rows (edf6tr_<kind>_mission, one a kind, each building its
+    kind) spread evenly and no kind is built in two."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import catalog
     import gen_spawn_catalog as g
     rec = g.recorded()
-    union = g.archive_union(rec)
-    assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
-    assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
-    assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
+    if shard == 0:
+        union = g.archive_union(rec)
+        assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
+        assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
+        assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
     import rootcpk
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
     read = g.game_reader(rootcpk.DEFAULT_GAME)
     stale = []
-    for r in catalog.rows():
+    rows = sorted(catalog.rows(), key=lambda r: r.sgo)
+    for r in rows[shard::SPAWN_CATALOG_SHARDS]:
         try:
             now = g.row_archives(r, read)
         except (FileNotFoundError, KeyError):
@@ -3067,6 +3074,13 @@ def spawn_catalog_archives_recorded() -> None:
         if now != rec[r.sgo]:
             stale.append(r.sgo)
     assert not stale, f'testrange/catalog_archives.json is stale for {stale[:5]}: python tools/gen_spawn_catalog.py --archives'
+
+
+for _shard in range(SPAWN_CATALOG_SHARDS):
+    def _spawn_catalog_shard(shard: int = _shard) -> None:
+        spawn_catalog_archives(shard)
+    _spawn_catalog_shard.__name__ = f'spawn_catalog_archives_recorded_{_shard}'
+    test(_spawn_catalog_shard)
 
 
 @test
@@ -15132,7 +15146,7 @@ def edf41_ui_names() -> None:
 
 
 # The last run's seconds a test (build/selftest-cost.json, as ctest's CTestCostData): the longest are started first, so
-# the slowest (spawn_catalog_archives_recorded) does not start last and leave the other workers idle at the end.
+# the slowest (spawn_catalog_archives_recorded_<i>) do not start last and leave the other workers idle at the end.
 COST_FILE = os.path.join(ROOT, 'build', 'selftest-cost.json')
 _START_GAME: str | None = None
 

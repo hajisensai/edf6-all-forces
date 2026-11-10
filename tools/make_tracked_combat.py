@@ -480,7 +480,7 @@ def _assets(game: vc.Game, kind: str):
     (vc.Game is rootcpk's: Root.cpk, read only) and the repository's model folders, so it is the same build for the
     same archive (its path, size and time). Until 2026-10-25 it was shared by one Game object only: authored(),
     vehicle_sgo() and testrange's gen each open their own, and a reader of every kind's SGOs (gen_spawn_catalog,
-    tools/selftest.py spawn_catalog_archives_recorded) built each kind four or five times (85 builds, ~15 min)."""
+    tools/selftest.py spawn_catalog_archives_recorded_<i>) built each kind four or five times (85 builds, ~15 min)."""
     import tracked_combat_model as tracked
     import tracked_collision
     import wt_tracked
