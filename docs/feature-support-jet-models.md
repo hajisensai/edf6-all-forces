@@ -102,7 +102,7 @@
 - 插件按 mission_setup 标记认机体（`jet.cpp` `IsJetVehicle` / `CrewlessJet`、`playerjet_kinds.inc` `BoardRowOf`）。
   - 炮舰机：侧炮的出膛点按整机包围盒算（`src/gunmuzzle.h`），bomber401 是 51.9 × 4.0 × 16.2 m，C-130 是 40.3 × 11.6 × 29.6 m。
     同一个标记分不出两种外形，所以 C-130 炮舰机用 7065，`jet_bay.cpp AirframeOf` 按标记取 `kC130Gunship` 或 `kGunship`；
-    `kC130Gunship` = `make_c130.C130_AIRFRAME`，`make_c130.check_muzzle` 对模型、`selftest support_c130_models` 对头文件各校验一次。
+    `kC130Gunship` = `make_jets.muzzle_airframe(make_c130.C130_AIRFRAME)`：框以载具原点为中心（`veh+0x90` 是碰撞箱中心，炮舰机的碰撞箱就是整机包围盒，`make_jets.check_rigid_centre` 在生成时核对），`make_c130.check_muzzle` 对模型、`selftest support_c130_models` 对头文件各校验一次。（2026-11-10 审查更正：最初把框放在机腹原点上方 5.8 m，向下开火的出膛点会落进机身；bomber401 炮舰机的 `kGunship` 同因偏高 2.1 m，一并改正。）
   - 运输机：原来与打击机共用 7001，`BoardRowOf` 再按模型骨骼认成 bomber401；C-130 不是 bomber401，会被认成打击机（elevon 轰炸机），
     所以改用 7066，`kBoardable` 给它自己一行（按打击机的飞法）。
 - 质量：两者都按 AC-130 的 70 t（`JET_MASSES`，同 7011）；挂载同各自原来的（`stores.inc` 已重新生成）。
