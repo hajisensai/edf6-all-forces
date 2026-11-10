@@ -480,12 +480,25 @@ inline void DressCrewRows(roommenu::View& v,const roommenu::Menu& m,const CrewKi
     }
 }
 
-// --- The preview: the soldier under the cursor, in a squad's rows / fields; a crew row's crew (a member, not a leader) ---
+// --- The preview: the soldier under the cursor, in a squad's rows / fields; a crew row's crew (a member, not a leader);
+// a vehicle's gun / pylon rows its vehicle (room_preview.h PreviewSpec::body) ---
+inline roompreview::PreviewSpec VehiclePreview(const roommenu::Unit& u) noexcept {
+    roompreview::PreviewSpec p{};
+    p.body=u.body;
+    return p;
+}
+inline roompreview::PreviewSpec CrewPreview(const roommenu::Menu& m,const roommenu::Unit& u,const CrewKinds& kinds) noexcept {
+    return roompreview::PreviewSpec{CrewKindOf(u.key,kinds),false,CrewLookOf(u.crew,u.key && *u.key ? DefaultCrew(m) : CrewColour{})};
+}
 inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out,const CrewKinds& kinds=CrewKinds{}) noexcept {
     if(!m.open || m.level==roommenu::Level::units || m.unitAt<0 || m.unitAt>=m.unitCount)return false;
     const roommenu::Unit& u=m.unit[m.unitAt];
     if(m.rowAt>=0 && m.rowAt==roommenu::CrewRow(u)) {
-        if(out)*out=roompreview::PreviewSpec{CrewKindOf(u.key,kinds),false,CrewLookOf(u.crew,u.key && *u.key ? DefaultCrew(m) : CrewColour{})};
+        if(out)*out=CrewPreview(m,u,kinds);
+        return true;
+    }
+    if(u.kind==roommenu::UnitKind::vehicle && u.body!=VehicleBody::none && m.rowAt>=0) {
+        if(out)*out=VehiclePreview(u);
         return true;
     }
     if(!roommenu::IsSquad(u) || m.rowAt<0 || m.rowAt>=u.squad.count)return false;
@@ -500,6 +513,13 @@ inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,room
                          roompreview::PreviewSpec* out,const CrewKinds& kinds=CrewKinds{}) noexcept {
     using roomdialog::Do;using roomdialog::Page;
     const roommenu::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
+    // A vehicle's own pages (its rows, a pylon, the gun, a store, the rounds): the vehicle, whatever has the focus.
+    if(m.open && u && u->kind==roommenu::UnitKind::vehicle && u->body!=VehicleBody::none &&
+       (nav.page==Page::unit || nav.page==Page::pylon || nav.page==Page::gun || nav.page==Page::store || nav.page==Page::rounds)) {
+        const bool crewButton=nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg==roommenu::CrewRow(*u);
+        if(out)*out=crewButton ? CrewPreview(m,*u,kinds) : VehiclePreview(*u);
+        return true;
+    }
     if(m.open && u && roommenu::IsSquad(*u)) {
         if(nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg<u->squad.count) {
             if(out)*out=roompreview::PreviewSpec{u->squad.kind[focused.arg],focused.arg%4==0,u->squad.look[focused.arg]};
@@ -527,7 +547,7 @@ inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,room
     return PreviewFor(m,out,kinds);
 }
 inline bool SamePreview(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
-    return a.kind==b.kind && a.leader==b.leader && a.look==b.look;
+    return a.body==b.body && (a.body!=VehicleBody::none || (a.kind==b.kind && a.leader==b.leader && a.look==b.look));
 }
 
 // --- Saving: what loadout_store.h SaveSupportLoadout is called with, one per line of room_menu.h CollectSave ---

@@ -47,6 +47,24 @@ constexpr const wchar_t* MenuPathOf(SupportWeapon k,bool leader,bool generated) 
     return HeadOnlyLeader(k,leader) ? kMenuRangerLeader : kMenuRanger;
 }
 
+// A vehicle's menu SGO (tools/menu_preview.py vehicle_file): the stock P505 menu SGO with animation_model = the vehicle
+// body's own (support_loadout.h kVehicleBodies base: its model, CAS and MAB), no weapons. EDF6VC_MENU_V_<NAME>.SGO.
+inline constexpr const wchar_t* kMenuVehiclePrefix=L"EDF6VC_MENU_V_";
+// `body`'s generated file under Mods (`path` false: MENUOBJECT\<file>) or the path the Desc gets (app:/MENUOBJECT/<file>);
+// the length, 0 when `body` is no vehicle body or it does not fit.
+inline std::size_t VehicleMenuOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    if(!out || !capacity)return 0;
+    out[0]=0;
+    if(!row)return 0;
+    const wchar_t* parts[4]={path ? L"app:/MENUOBJECT/" : L"MENUOBJECT\\",kMenuVehiclePrefix,row->name,L".SGO"};
+    std::size_t n=0;
+    for(const wchar_t* part:parts)
+        for(const wchar_t* c=part;*c;++c){if(n+1>=capacity){out[0]=0;return 0;}out[n++]=*c;}
+    out[n]=0;
+    return n;
+}
+
 // The WeaponTable rows (WEAPON/WEAPONTABLE.SGO names, looked up at run time by 0xE1BA0) the menu hangs on the model in
 // place of the AI weapons (docs/room-3d-preview-re.md §5; the leaders' LAZR02 / IZNR02 / TB02 look as the 01s). A
 // Fencer's list is CONFIG's order, [0] left (the shield), [1] right; the menu shows the selected pair (Desc +0x50 = 0).
@@ -146,21 +164,73 @@ template<class Row> DescOverride OverrideOf(SupportWeapon kind,bool leader,const
     return o;
 }
 
-// --- The camera (view +0x2C0 / +0x2D0 / +0x2E0 / +0x2F0: the two pairs it interpolates between; set once, by the
-// view's constructor) moved along x while the menu is open, so the soldier stands beside the menu. Re-applied when the
-// game rewrote a point (its new value is the new base); restored only where the point still holds what was written.
+// A vehicle's override: the Ranger class number (the renderer's class only picks the weapons' grip, and there are none),
+// no weapons; its colours are the menu's channels, which a vehicle's materials do not take (they stay as the model has
+// them).
+inline DescOverride VehicleOverride() noexcept {
+    DescOverride o;
+    o.cls=kRangerClass;
+    o.colour[0]=kRangerStock.c[0];o.colour[1]=kRangerStock.c[1];
+    return o;
+}
+
+// --- Where the model stands (view +0x2C0 / +0x2D0 / +0x2E0 / +0x2F0, float4 each: the view's update 0x93CF99 lerps
+// +0x2C0 -> +0x2D0 and +0x2E0 -> +0x2F0 by the zoom +0x300, the two results by +0x308, into +0x2B0, the translation of the
+// model's matrix (the yaw +0x2A4 its rotation; docs/room-3d-preview-re.md section 6): the model's place in front of the
+// camera, MENUMODELSETTING camera_pos). While the menu is open each point's x moves by `dx` (the soldier beside the
+// menu) and then the whole xyz scales by `scale` (a vehicle, larger than a soldier, stands that much farther away and
+// so fits the frame; 1 a soldier). Re-applied when the game rewrote a point (its new value is the new base); restored
+// only where the point still holds what was written. w is never touched.
 inline constexpr float kCameraShiftX=-0.8f;
 struct CameraShift {
     bool on=false;
-    float written[4]{};
-    void Apply(float* const x[4],float dx) noexcept {
-        for(int i=0;i<4;++i)if(!on || *x[i]!=written[i]){*x[i]+=dx;written[i]=*x[i];}
+    float base[4][3]{};
+    float written[4][3]{};
+    static bool Same(const float* p,const float* q) noexcept { return p[0]==q[0] && p[1]==q[1] && p[2]==q[2]; }
+    void Apply(float* const p[4],float dx,float scale=1.f) noexcept {
+        for(int i=0;i<4;++i) {
+            if(on && !Same(p[i],written[i]))for(int c=0;c<3;++c)base[i][c]=p[i][c];   // the game's own new value
+            else if(!on)for(int c=0;c<3;++c)base[i][c]=p[i][c];
+            const float want[3]={(base[i][0]+dx)*scale,base[i][1]*scale,base[i][2]*scale};
+            for(int c=0;c<3;++c){p[i][c]=want[c];written[i][c]=want[c];}
+        }
         on=true;
     }
-    void Restore(float* const x[4],float dx) noexcept {
+    void Restore(float* const p[4]) noexcept {
         if(!on)return;
-        for(int i=0;i<4;++i)if(*x[i]==written[i])*x[i]-=dx;
+        for(int i=0;i<4;++i)if(Same(p[i],written[i]))for(int c=0;c<3;++c)p[i][c]=base[i][c];
         on=false;
+    }
+};
+// How much farther a vehicle stands than a soldier (its size against a soldier's ~1.8 m: the tank V505 about 7 m long,
+// the jets 15-20 m; the soldier's own placement, camera_pos [0] = (1.1, -0.9, -3.5), fills the frame with ~2 m).
+// Guessed from those sizes (L): to be tuned in the game.
+inline constexpr float kTankScale=3.0f,kJetScale=6.0f;
+constexpr float VehicleScale(VehicleBody b) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(b);
+    return !row ? 1.f : row->tank ? kTankScale : kJetScale;
+}
+// A vehicle turns slowly on its stand (the yaw +0x2A4 the menu otherwise holds): every pylon comes round. rad / frame.
+inline constexpr float kVehicleTurn=0.01f;
+inline constexpr float kTwoPi=6.28318531f;
+constexpr float Turned(float yaw,float by) noexcept {
+    float y=yaw+by;
+    return y>=kTwoPi ? y-kTwoPi : y<0.f ? y+kTwoPi : y;
+}
+// The turntable's lifecycle: the yaw the stand had when a vehicle first turned is kept, and put back as soon as no
+// vehicle turns any more (a soldier under the cursor again, the menu closed, the view forgotten), so the soldier and
+// afterwards the player's own model face where they faced before (the menu otherwise never turns the model).
+struct Turntable {
+    bool on=false;
+    float base=0.f;
+    // The yaw to hold this frame (`yaw` the one held so far): turning, it advances; stopping, the saved yaw.
+    float Hold(float yaw,bool turn) noexcept {
+        if(turn) {
+            if(!on){on=true;base=yaw;}
+            return Turned(yaw,kVehicleTurn);
+        }
+        if(on){on=false;return base;}
+        return yaw;
     }
 };
 
@@ -171,6 +241,7 @@ struct Want {
     bool on=false;
     SupportWeapon kind=SupportWeapon::rifle;
     bool leader=false;
+    VehicleBody body=VehicleBody::none;   // not none: that vehicle (kind / leader unused)
     Rgba colour[2]{};
 };
 struct Shown {
@@ -180,6 +251,12 @@ struct Shown {
 };
 inline constexpr int kNone=-1;
 constexpr int ModelKey(SupportWeapon k,bool leader) noexcept { return static_cast<int>(k)*2+(leader ? 1 : 0); }
+inline constexpr int kVehicleKeyBase=1000;
+constexpr int ModelKey(const Want& w) noexcept {
+    return w.body!=VehicleBody::none ? kVehicleKeyBase+static_cast<int>(w.body) : ModelKey(w.kind,w.leader);
+}
+// The class the shown model's Desc carries (view +0x180 once built).
+constexpr int ShownClassOf(const Want& w) noexcept { return w.body!=VehicleBody::none ? kRangerClass : MenuClassOf(w.kind); }
 inline constexpr unsigned kMostWaitFrames=180;   // a soldier build never run: give up waiting, put the player back
 struct Plan {
     bool locked=false;   // msg 8 sent (the room's outfit message 6 held), +0x3EC saved
@@ -195,8 +272,9 @@ inline Actions Step(Plan& p,const Want& w,const Shown& s) noexcept {
     Actions a;
     if(w.on) {
         if(!p.locked){a.lock=true;p.locked=true;}
-        const int key=ModelKey(w.kind,w.leader);
+        const int key=ModelKey(w);
         if(p.posted!=key){a.buildSoldier=true;p.posted=key;p.waited=0;return a;}
+        if(w.body!=VehicleBody::none)return a;   // a vehicle has no colour channels to send
         const bool soldierShown=s.cls==MenuClassOf(w.kind) && s.outfit==kSentinelOutfit;
         for(int ch=0;ch<2;++ch)a.recolour[ch]=soldierShown && s.colour[ch] && !SameRgba(w.colour[ch],s.colour[ch]);
         return a;

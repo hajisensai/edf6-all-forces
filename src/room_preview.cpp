@@ -1,4 +1,4 @@
-// The room / HQ 3D preview of a support soldier (room_preview.h; docs/room-3d-preview-re.md plan A). The game's own
+// The room / HQ 3D preview of a support soldier or vehicle (room_preview.h; docs/room-3d-preview-re.md plan A). The game's own
 // UiHQ_3DModelView (index 0) shows the soldier while the menu asks: its async build's Desc copy is rewritten on the
 // worker (path, class, colours, a sentinel outfit, the weapons), so the view builds and draws the soldier as it would the
 // player. GameStatus and the save are only read.
@@ -61,6 +61,7 @@ struct Ui {
     Want want;
     Plan plan;
     CameraShift camera;
+    Turntable turntable;         // a vehicle's turn; the stand's yaw put back after it
     std::int32_t savedHidden=0;
     unsigned posted=0;           // soldier builds asked for (shared.applied catches up)
     unsigned sinceTick=0;
@@ -98,14 +99,31 @@ int WeaponRow(const wchar_t* name) noexcept {
         return gs ? reinterpret_cast<RowFn>(image+kWeaponRow)(gs+kGsTables,name) : -1;
     } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
 }
-void SetOverride(const PreviewSpec& spec) noexcept {
-    const DescOverride ov=OverrideOf(spec.kind,spec.leader,spec.look,[](const wchar_t* n) noexcept {return WeaponRow(n);});
-    const wchar_t* file=MenuFileOf(spec.kind,spec.leader);
-    const wchar_t* path=MenuPathOf(spec.kind,spec.leader,file && Generated(file));
+// False: a vehicle whose menu SGO is not in Mods (its body not installed: nothing to show).
+bool SetOverride(const PreviewSpec& spec) noexcept {
+    DescOverride ov;
+    wchar_t vehicle[96];
+    const wchar_t* path=nullptr;
+    if(spec.body!=VehicleBody::none) {
+        wchar_t file[96];
+        if(!VehicleMenuOf(spec.body,false,file,std::size(file)) || !VehicleMenuOf(spec.body,true,vehicle,std::size(vehicle)))return false;
+        if(!Generated(file)) {
+            static bool said[kVehicleBodyLast+1]{};
+            bool& s=said[static_cast<int>(spec.body)];
+            if(!s){s=true;Log("ROOM preview: Mods\\%ls missing (install the plugin again): that vehicle not previewed",file);}
+            return false;
+        }
+        ov=VehicleOverride();path=vehicle;
+    } else {
+        ov=OverrideOf(spec.kind,spec.leader,spec.look,[](const wchar_t* n) noexcept {return WeaponRow(n);});
+        const wchar_t* file=MenuFileOf(spec.kind,spec.leader);
+        path=MenuPathOf(spec.kind,spec.leader,file && Generated(file));
+    }
     AcquireSRWLockExclusive(&shared.lock);
     shared.on=true;shared.ov=ov;
     wcscpy_s(shared.path,path);
     ReleaseSRWLockExclusive(&shared.lock);
+    return true;
 }
 void ClearOverride() noexcept {
     AcquireSRWLockExclusive(&shared.lock);
@@ -156,7 +174,7 @@ void BuildPlayer(unsigned char* view,std::int32_t who) noexcept {
     Send(view,kMsgBuild,&m);
 }
 void Recolour(unsigned char* view,std::int32_t who,int channel) noexcept {
-    ColourMsg m{who,MenuClassOf(ui.want.kind),kSentinelOutfit,channel,{}};
+    ColourMsg m{who,ShownClassOf(ui.want),kSentinelOutfit,channel,{}};
     std::memcpy(m.rgba,ui.want.colour[channel].v,sizeof(m.rgba));
     Send(view,kMsgColour,&m);
 }
@@ -167,7 +185,7 @@ void Execute(unsigned char* view,const Actions& a) noexcept {
         Put<std::int32_t>(view,kViewHidden,0);   // drawn (1: Draw skips it; 2 / 3 its fades)
         Send(view,kMsgLock,nullptr);
     }
-    if(a.buildSoldier){BuildMsg m{who,MenuClassOf(ui.want.kind),0};++ui.posted;Send(view,kMsgBuild,&m);}
+    if(a.buildSoldier){BuildMsg m{who,ShownClassOf(ui.want),0};++ui.posted;Send(view,kMsgBuild,&m);}
     for(int ch=0;ch<2;++ch)if(a.recolour[ch])Recolour(view,who,ch);
     if(a.buildPlayer){ClearOverride();BuildPlayer(view,who);}
     if(a.unlock){Send(view,kMsgUnlock,nullptr);Put<std::int32_t>(view,kViewHidden,ui.savedHidden);}
@@ -175,8 +193,8 @@ void Execute(unsigned char* view,const Actions& a) noexcept {
 void Camera(unsigned char* view) noexcept {
     float* x[4];
     for(int i=0;i<4;++i)x[i]=At4(view,kViewCamera[i]);
-    if(ui.menuOpen)ui.camera.Apply(x,kCameraShiftX);
-    else ui.camera.Restore(x,kCameraShiftX);
+    if(ui.menuOpen)ui.camera.Apply(x,kCameraShiftX,ui.want.on ? VehicleScale(ui.want.body) : 1.f);
+    else ui.camera.Restore(x);
 }
 bool Adopt(unsigned char* view) noexcept {
     if(ui.view)return ui.view==view;
@@ -199,7 +217,7 @@ void Forget() noexcept {
     AcquireSRWLockExclusive(&shared.lock);
     shared.armed=nullptr;shared.on=false;shared.applied=0;
     ReleaseSRWLockExclusive(&shared.lock);
-    ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.posted=0;
+    ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
 }
 
 std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
@@ -208,10 +226,16 @@ std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
         Frame(view);
         ours=ui.view==view && ui.menuOpen;
         if(ours){yaw=At<float>(view,kViewYaw);zoom=At<float>(view,kViewZoom);}
+        // The menu closed while a vehicle turned: the stand's own yaw back before the view's frame (the player's model).
+        else if(ui.view==view && ui.turntable.on)Put<float>(view,kViewYaw,ui.turntable.Hold(At<float>(view,kViewYaw),false));
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("ROOM preview: fault in the view's frame; preview off for this view");Forget();}
     const std::uintptr_t r=nextUpdate(view,ctx);
-    // While the menu is open its keys are the menu's: the view's own turn / zoom from them is put back.
-    if(ours){Put<float>(view,kViewYaw,yaw);Put<float>(view,kViewZoom,zoom);}
+    // While the menu is open its keys are the menu's: the view's own turn / zoom from them is put back; a vehicle turns
+    // slowly on its stand instead (every pylon comes round), and a soldier after it faces where the stand faced before.
+    if(ours) {
+        yaw=ui.turntable.Hold(yaw,ui.want.on && ui.want.body!=VehicleBody::none);
+        Put<float>(view,kViewYaw,yaw);Put<float>(view,kViewZoom,zoom);
+    }
     return r;
 }
 void* __fastcall Delete(unsigned char* view,unsigned flags) {
@@ -241,8 +265,8 @@ bool InstallPreviewHooks() noexcept {
 }
 void ShowPreview(const PreviewSpec& spec) noexcept {
     if(!installed || static_cast<int>(spec.kind)<0 || static_cast<int>(spec.kind)>=kSupportWeaponCount)return;
-    SetOverride(spec);
-    ui.want.on=true;ui.want.kind=spec.kind;ui.want.leader=spec.leader;
+    if(!SetOverride(spec)){ui.want.on=false;return;}
+    ui.want.on=true;ui.want.kind=spec.kind;ui.want.leader=spec.leader;ui.want.body=spec.body;
     const StockColours& stock=StockOf(spec.kind,spec.leader);
     ui.want.colour[0]=ColourOf(spec.look.primary,stock.c[0]);
     ui.want.colour[1]=ColourOf(spec.look.secondary,stock.c[1]);

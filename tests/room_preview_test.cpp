@@ -92,22 +92,82 @@ void Desc() {
 }
 
 void Camera() {
-    float p[4]={1.f,2.f,3.f,4.f};
-    float* x[4]={&p[0],&p[1],&p[2],&p[3]};
+    float pt[4][4]={{1.f,2.f,3.f,9.f},{2.f,2.f,2.f,9.f},{3.f,0.f,-1.f,9.f},{4.f,1.f,1.f,9.f}};
+    float* x[4]={pt[0],pt[1],pt[2],pt[3]};
     CameraShift s;
     s.Apply(x,-0.5f);
-    Expect(p[0]==0.5f && p[3]==3.5f,"shifted once");
+    Expect(pt[0][0]==0.5f && pt[3][0]==3.5f && pt[0][1]==2.f && pt[0][3]==9.f,"shifted once, y / z / w kept");
     s.Apply(x,-0.5f);
-    Expect(p[0]==0.5f,"not again next frame");
-    p[1]=10.f;   // the game wrote a new base
+    Expect(pt[0][0]==0.5f,"not again next frame");
+    pt[1][0]=10.f;   // the game wrote a new base
     s.Apply(x,-0.5f);
-    Expect(p[1]==9.5f && p[0]==0.5f,"a rewritten point re-based");
-    s.Restore(x,-0.5f);
-    Expect(p[0]==1.f && p[1]==10.f && p[3]==4.f,"restored exactly");
-    s.Restore(x,-0.5f);
-    Expect(p[0]==1.f,"restore twice: once");
-    s.Apply(x,-0.5f);p[2]=7.f;s.Restore(x,-0.5f);
-    Expect(p[2]==7.f && p[0]==1.f,"a point the game rewrote is left as the game wrote it");
+    Expect(pt[1][0]==9.5f && pt[0][0]==0.5f,"a rewritten point re-based");
+    s.Restore(x);
+    Expect(pt[0][0]==1.f && pt[1][0]==10.f && pt[3][0]==4.f,"restored exactly");
+    s.Restore(x);
+    Expect(pt[0][0]==1.f,"restore twice: once");
+    s.Apply(x,-0.5f);pt[2][0]=7.f;s.Restore(x);
+    Expect(pt[2][0]==7.f && pt[0][0]==1.f,"a point the game rewrote is left as the game wrote it");
+    // A vehicle: shifted, then the xyz scaled (farther along the same line of sight); back to a soldier: unscaled.
+    s.Apply(x,-0.5f,3.f);
+    Expect(pt[0][0]==1.5f && pt[0][1]==6.f && pt[0][2]==9.f && pt[0][3]==9.f,"vehicle: (x+dx, y, z) * scale, w kept");
+    s.Apply(x,-0.5f,3.f);
+    Expect(pt[0][0]==1.5f && pt[0][1]==6.f,"not scaled twice");
+    s.Apply(x,-0.5f,1.f);
+    Expect(pt[0][0]==0.5f && pt[0][1]==2.f && pt[0][2]==3.f,"back to a soldier: from the base");
+    s.Apply(x,-0.5f,3.f);s.Restore(x);
+    Expect(pt[0][0]==1.f && pt[0][1]==2.f && pt[0][2]==3.f && pt[1][0]==10.f,"restored from the scaled placement exactly");
+    Expect(VehicleScale(VehicleBody::tank)==kTankScale && VehicleScale(VehicleBody::strike)==kJetScale &&
+           VehicleScale(VehicleBody::rmultirole)==kJetScale && VehicleScale(VehicleBody::none)==1.f,"scale by body");
+    Expect(Turned(1.f,0.5f)==1.5f && Turned(6.28f,0.01f)<0.01f && Turned(0.f,-0.01f)>6.f,"the turntable wraps");
+    // The turntable: the stand's yaw saved when a vehicle first turns, put back once none does (soldier / closed).
+    Turntable t;
+    Expect(t.Hold(0.25f,false)==0.25f && !t.on,"no vehicle: the yaw held as it is");
+    float y=t.Hold(0.25f,true);
+    Expect(t.on && y==Turned(0.25f,kVehicleTurn),"a vehicle: turns from the stand's yaw");
+    for(int i=0;i<10;++i)y=t.Hold(y,true);
+    Expect(y!=0.25f && t.base==0.25f,"keeps turning, the stand's yaw kept");
+    Expect(t.Hold(y,false)==0.25f && !t.on,"a soldier again (or the menu closed): the stand's yaw back");
+    Expect(t.Hold(0.5f,false)==0.5f,"then held as it is");
+    y=t.Hold(0.5f,true);
+    Expect(t.base==0.5f,"another vehicle later: saved afresh");
+}
+
+void Vehicles() {
+    wchar_t b[96];
+    Expect(VehicleMenuOf(VehicleBody::tank,false,b,96)>0 && !std::wcscmp(b,L"MENUOBJECT\\EDF6VC_MENU_V_TANK.SGO"),"tank file under Mods");
+    Expect(VehicleMenuOf(VehicleBody::rmultirole,true,b,96)>0 && !std::wcscmp(b,L"app:/MENUOBJECT/EDF6VC_MENU_V_RMULTIROLE.SGO"),"path");
+    Expect(VehicleMenuOf(VehicleBody::none,true,b,96)==0 && b[0]==0,"no body: none");
+    Expect(VehicleMenuOf(VehicleBody::strike,true,b,10)==0 && b[0]==0,"too small: none");
+    for(const auto& row:kVehicleBodies) {
+        wchar_t f[96],q[96];
+        Expect(VehicleMenuOf(row.body,false,f,96)>0 && VehicleMenuOf(row.body,true,q,96)>0,"every body has a file");
+        Expect(!std::wcscmp(f+11,q+16),"the file and the path name the same file");
+    }
+    const DescOverride o=VehicleOverride();
+    Expect(o.cls==kRangerClass && o.weaponCount==0,"a vehicle: Ranger class, no weapons");
+    unsigned char d[kDescSize];std::memset(d,0xCD,sizeof(d));
+    RewriteDesc(d,o);
+    Expect(Int(d,kDescWeaponCount)==0 && Int(d,kDescOutfit)==kSentinelOutfit && d[kDescWeapons]==0xCD,"its Desc: no weapons written");
+    // The planner: a vehicle is its own model (one build), no colour messages; soldier -> vehicle -> soldier rebuilds.
+    Plan p;Want w;Shown s;float c0[4]={},c1[4]={};s.colour[0]=c0;s.colour[1]=c1;
+    w.on=true;w.kind=SupportWeapon::rifle;
+    Actions a=Step(p,w,s);
+    Expect(a.lock && a.buildSoldier,"a soldier first");
+    w.body=VehicleBody::tank;
+    a=Step(p,w,s);
+    Expect(a.buildSoldier && !a.lock,"the tank: its own build");
+    s.cls=0;s.outfit=kSentinelOutfit;c0[0]=0.5f;
+    a=Step(p,w,s);
+    Expect(!a.Any(),"the tank shown: no recolour");
+    w.body=VehicleBody::strike;
+    a=Step(p,w,s);
+    Expect(a.buildSoldier,"another body: rebuilt");
+    w.body=VehicleBody::none;
+    a=Step(p,w,s);
+    Expect(a.buildSoldier,"back to the soldier: rebuilt");
+    Expect(ModelKey(Want{true,SupportWeapon::rifle,false,VehicleBody::tank})!=ModelKey(SupportWeapon::rifle,false) &&
+           ShownClassOf(Want{true,SupportWeapon::fencerCannon,false,VehicleBody::tank})==kRangerClass,"vehicle keys and class");
 }
 
 void Planner() {
@@ -157,6 +217,7 @@ int main() {
     Colours();
     Desc();
     Camera();
+    Vehicles();
     Planner();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;

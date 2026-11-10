@@ -13,6 +13,11 @@ menu CAS, change_color, random_animation, soldier_weapon_slot), never an AI temp
               body, i.e. every colourable material (-> the plain file). leader_files() derives this from the data.
   Wing Diver / Fencer  the AI soldiers wear the player's p606 / p607: the stock MENUOBJECT/P606_WINGDIVER.SGO /
               P607_FENCER.SGO as they are, no file here (build checks the bodies still agree).
+  Vehicles    MENUOBJECT/EDF6VC_MENU_V_<BODY>.SGO, one a support_loadout.BODIES body (the tank, the jets): the stock
+              P505_RANGER.SGO with animation_model replaced whole by the body's own ([model], CAS, MAB of its base SGO as
+              the game loads it: the Mods copy other tools made, else Root.cpk), so the menu renderer draws the vehicle
+              (src/room_preview_logic.h VehicleMenuOf; it gets no weapons, its colour channels match no material). A
+              body whose base SGO is nowhere (its model not installed) gets no file: it is not deployed either.
 
 Written into <game>/Mods as this tool's in the ledger (pylib/ledger.py, owner OWNER); Root.cpk only read.
 
@@ -37,6 +42,7 @@ FOLDER = 'MENUOBJECT'
 RANGER = 'EDF6VC_MENU_RANGER.SGO'
 RANGER_LEADER = 'EDF6VC_MENU_RANGER_L.SGO'
 FILES = (RANGER, RANGER_LEADER)
+VEHICLE_PREFIX = 'EDF6VC_MENU_V_'   # src/room_preview_logic.h kMenuVehiclePrefix
 # What the plugin hands the view (the path form CONFIG.SGO SoldierInit uses, e.g. APP:/MENUOBJECT/P505_RANGER.SGO).
 MENU_PATHS = {name: f'app:/{FOLDER}/{name}' for name in FILES}
 STOCK_RANGER = 'P505_RANGER.SGO'
@@ -49,7 +55,36 @@ Templates = dict[str, dsgo.Node]
 
 
 def rels() -> list[str]:
+    """The soldiers' files (always made; loadout-generate remakes them when missing)."""
     return [f'{FOLDER}/{name}' for name in FILES]
+
+
+def vehicle_file(body: str) -> str:
+    """A support_loadout.BODIES body's menu SGO (src/room_preview_logic.h VehicleMenuOf)."""
+    return f'{VEHICLE_PREFIX}{body}.SGO'
+
+
+def vehicle_menu_sgo(stock: bytes, vehicle: bytes) -> bytes:
+    """The stock menu SGO with animation_model = the vehicle SGO's whole animation_model (model, CAS, MAB)."""
+    version, members = sgo.read(stock)
+    _, v = sgo.read(vehicle)
+    members['animation_model'] = list(v['animation_model'])
+    return sgo.write_depth_first(version, members)
+
+
+def build_vehicles(game: rootcpk.Game, root: str | None) -> dict[str, bytes]:
+    """{'MENUOBJECT/<vehicle_file>': bytes} for every body whose base SGO the game would load (support_loadout._source:
+    `root`'s Mods copy, else Root.cpk). A body without one is said and left out."""
+    import support_loadout
+    stock = game.read(FOLDER, STOCK_RANGER)
+    out: dict[str, bytes] = {}
+    for body, (base, _most, _tank) in support_loadout.BODIES.items():
+        data = support_loadout._source(root, game, 'OBJECT', base)
+        if data is None:
+            print(f'！ {base} 不在（该机体没有安装，也不会出动）：它的 3D 预览不生成')
+            continue
+        out[f'{FOLDER}/{vehicle_file(body)}'] = vehicle_menu_sgo(stock, data)
+    return out
 
 
 def _kinds() -> list[str]:
@@ -135,8 +170,9 @@ def menu_sgo(stock: bytes, archive: str, model: str, sel: list[Selector]) -> byt
     return sgo.write_depth_first(version, members)
 
 
-def build(game: rootcpk.Game) -> dict[str, bytes]:
-    """{'MENUOBJECT/<file>': bytes} for FILES, from Root.cpk (read only)."""
+def build(game: rootcpk.Game, root: str | None = None) -> dict[str, bytes]:
+    """{'MENUOBJECT/<file>': bytes} for FILES, from Root.cpk (read only); with the game directory `root` the vehicles'
+    too (build_vehicles: their bases may be other tools' Mods files)."""
     tpl = templates(game)
     check_stock_bodies(game, tpl)
     archive, model = ranger_body(tpl)
@@ -144,8 +180,11 @@ def build(game: rootcpk.Game) -> dict[str, bytes]:
     picked = leader_files(game, tpl)
     head = next((selectors(tpl[n], every) for n, f in picked.items() if f == RANGER_LEADER), [EVERY, EVERY])
     stock = game.read(FOLDER, STOCK_RANGER)
-    return {f'{FOLDER}/{RANGER}': menu_sgo(stock, archive, model, [EVERY, EVERY]),
-            f'{FOLDER}/{RANGER_LEADER}': menu_sgo(stock, archive, model, head)}
+    files = {f'{FOLDER}/{RANGER}': menu_sgo(stock, archive, model, [EVERY, EVERY]),
+             f'{FOLDER}/{RANGER_LEADER}': menu_sgo(stock, archive, model, head)}
+    if root is not None:
+        files.update(build_vehicles(game, root))
+    return files
 
 
 def missing(root: str) -> list[str]:
@@ -172,6 +211,6 @@ def install_new(root: str, files: dict[str, bytes]) -> list[str]:
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
-    """Releases this tool's files: (deleted, kept changed)."""
+    """Releases this tool's files (the vehicles' too: whatever the ledger has as OWNER's): (deleted, kept changed)."""
     led = ledger.Ledger(root)
     return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | {ledger.key(r) for r in rels()}), writer=True)

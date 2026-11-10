@@ -91,6 +91,9 @@ jobs:
           # src/pvp_units.inc: no game here, so it re-derives from the classes the committed file records.
           python tools/gen_pvp_units.py --check
           if ($LASTEXITCODE) { Write-Error 'src/pvp_units.inc is stale: run python tools/gen_pvp_units.py (with the game) and commit it'; exit 1 }
+          # src/worldmap.inc: from pylib/worldmap.py and the committed worldmap/missions.json (no game needed).
+          python tools/gen_worldmap.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/worldmap.inc is stale: run python tools/gen_worldmap.py and commit it'; exit 1 }
           # src/nozzles_gen.h is measured on the game's models (no Root.cpk here): checked against its own record of
           # what it was made from (tools/gen_nozzles.py --check).
           python tools/gen_nozzles.py --check

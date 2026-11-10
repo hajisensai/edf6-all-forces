@@ -754,6 +754,11 @@ add_test(NAME room_menu COMMAND room_menu_test)
 add_executable(room_preview_test tests/room_preview_test.cpp)
 target_compile_options(room_preview_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_preview COMMAND room_preview_test)
+# The world map mission select's pure logic (src/worldmap_logic.h + the generated src/worldmap.inc: the table,
+# projection, view, routes, marker fan, picking; docs/plan-2026-11-10-worldmap.md).
+add_executable(worldmap_test tests/worldmap_test.cpp)
+target_compile_options(worldmap_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME worldmap COMMAND worldmap_test)
 # The EDF4.1 outfit's pure logic (src/outfit41_logic.h: its files, the stored choice, the popup's layout).
 add_executable(outfit41_test tests/outfit41_test.cpp)
 target_include_directories(outfit41_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -978,6 +983,10 @@ set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=ut
 # game installed, the files built from Root.cpk (read only).
 add_test(NAME menu_preview COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_preview_test.py")
 set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The world map's data (pylib/worldmap.py, worldmap/missions.json, src/worldmap.inc current, the base map tool); with the
+# game installed, the mission table re-read from Root.cpk (read only).
+add_test(NAME worldmap_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_data_test.py")
+set_tests_properties(worldmap_data PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The preview's signatures, vtable slots and tables against the game's EDF.dll / Root.cpk (read only; skipped without).
 add_test(NAME room_preview_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_preview_native_audit.py")
 set_tests_properties(room_preview_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1214,7 +1223,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

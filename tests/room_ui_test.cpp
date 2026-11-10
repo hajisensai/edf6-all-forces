@@ -440,7 +440,13 @@ void Preview() {
     Expect(SamePreview(p,q),"same spec");
     q.look.secondary=0xFFFFFF;Expect(!SamePreview(p,q),"another colour");
     m.unitAt=1;m.rowAt=0;
-    Expect(!PreviewFor(m,&p),"a vehicle's gun row: none");
+    Expect(PreviewFor(m,&p) && p.body==VehicleBody::tank,"a vehicle's gun row: the vehicle");
+    roompreview::PreviewSpec soldier=q;
+    Expect(!SamePreview(p,soldier) && SamePreview(p,p),"a vehicle is not a soldier");
+    roompreview::PreviewSpec other=p;other.look.primary=0x123456;
+    Expect(SamePreview(p,other),"a vehicle: kind / look ignored");
+    other.body=VehicleBody::strike;
+    Expect(!SamePreview(p,other),"another vehicle body");
     // A crew row: the crew's kind, a member, in the colours it wears (its own, else the default's).
     roommenu::UnitSpec crewed[]={{L"TANK_CREWED",L"t",0,true},{L"STRIKE",L"j",0,true},{L"",L"d",0,true},{kCrewMissionKey,L"m",0,true}};
     roommenu::Load(m,crewed,4,nullptr,nullptr);
@@ -457,7 +463,7 @@ void Preview() {
     m.unitAt=1;m.rowAt=roommenu::CrewRow(m.unit[1]);
     Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::rocket,"the jet's crew: the aircraft kind");
     m.unitAt=1;m.rowAt=0;
-    Expect(!PreviewFor(m,&p,kinds),"the jet's guns row: none");
+    Expect(PreviewFor(m,&p,kinds) && p.body==VehicleBody::strike,"the jet's guns row: the jet");
     m.unitAt=2;m.rowAt=0;
     Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::flame && p.look.primary==0xABCDEF,"the default's own row");
     m.unitAt=3;m.rowAt=0;
@@ -555,6 +561,21 @@ void Focus() {
     Expect(u.squad.look[1].primary==0x112233 && u.squad.kind[1]==SupportWeapon::wingLance,"nothing edited by looking");
     Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::back,0},&p) && p.kind==SupportWeapon::wingLance,
            "another button: the page's own soldier");
+    // A vehicle's pages: the vehicle whatever has the focus, but its crew row's button the crew.
+    int tank=-1;for(int i=0;i<m.unitCount;++i)if(m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].body==VehicleBody::tank && tank<0)tank=i;
+    Expect(tank>=0,"the default units have a tank");
+    roomdialog::Nav vnav;vnav.unit=tank;m.unitAt=tank;m.rowAt=0;m.level=roommenu::Level::rows;
+    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::pylon,roomdialog::Page::gun,roomdialog::Page::store,roomdialog::Page::rounds}) {
+        vnav.page=page;
+        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,3},&p) && p.body==VehicleBody::tank,"a vehicle page: the vehicle");
+    }
+    if(m.unit[tank].hasCrew) {
+        vnav.page=roomdialog::Page::unit;
+        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::row,roommenu::CrewRow(m.unit[tank])},&p) && p.body==VehicleBody::none,
+               "the vehicle page's crew button: the crew");
+        vnav.page=roomdialog::Page::crewPrimary;m.rowAt=roommenu::CrewRow(m.unit[tank]);
+        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.body==VehicleBody::none,"the crew's colour page: the crew");
+    }
     m.open=false;
     Expect(!FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p),"closed: none");
 }

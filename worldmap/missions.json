@@ -1,0 +1,1982 @@
+{
+ "source": "tools/make_worldmap.py: EDF6 Root.cpk MISSION.AC / EDF5_OLD_SCRIPT MISSION.BVM, edf41port BVM; the first map each mission script loads",
+ "packs": [
+  {
+   "pack": "edf6",
+   "missions": [
+    {
+     "key": "EDF6/M000B",
+     "map": "ig_edfbasement01"
+    },
+    {
+     "key": "EDF6/M001",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M002",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M003",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M003_5",
+     "map": "ig_haikyo603"
+    },
+    {
+     "key": "EDF6/M004",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M005",
+     "map": "nw_danti01_haikyo"
+    },
+    {
+     "key": "EDF6/M006",
+     "map": "ig_crater601"
+    },
+    {
+     "key": "EDF6/M007",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M008",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M009",
+     "map": "nw_danti01_haikyo"
+    },
+    {
+     "key": "EDF6/M009_5",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M011",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/RM015",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/RM015_3",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M013_5",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M015_5",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6/RM010",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6/M017",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M018_5",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M027",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6/M027_5",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/RM019_5",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M028",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/RM025A",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M206",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M022_5",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/M029",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M029_1",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/RM041",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M029_4",
+     "map": "nw_seiyu_night"
+    },
+    {
+     "key": "EDF6/M205",
+     "map": "ig_mountainvillage"
+    },
+    {
+     "key": "EDF6/RM058",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M029_2",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6/RM090A",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M029_5",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/RM081",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M031B",
+     "map": "ig_edfbasement01"
+    },
+    {
+     "key": "EDF6/M032",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M003_5B",
+     "map": "ig_haikyo603"
+    },
+    {
+     "key": "EDF6/M034",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M035B",
+     "map": "nw_tikakyoju01"
+    },
+    {
+     "key": "EDF6/M036",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M037",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M038",
+     "map": "ig_cave604_2"
+    },
+    {
+     "key": "EDF6/M039",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/RM015B2",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/RM015_3B",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M046",
+     "map": "ig_mountainvillage"
+    },
+    {
+     "key": "EDF6/M140A",
+     "map": "ig_plateau"
+    },
+    {
+     "key": "EDF6/RM025B",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M047",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M047_5",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M048",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M203",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/RM020",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF6/M083_7",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6/M049_5",
+     "map": "ig_cave603"
+    },
+    {
+     "key": "EDF6/M049_6",
+     "map": "ig_cave603"
+    },
+    {
+     "key": "EDF6/M050",
+     "map": "ig_cave603"
+    },
+    {
+     "key": "EDF6/M051",
+     "map": "ig_mountainvillage"
+    },
+    {
+     "key": "EDF6/M048_5",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/RM034A",
+     "map": "ig_heigen507"
+    },
+    {
+     "key": "EDF6/M045",
+     "map": "ig_heigen601"
+    },
+    {
+     "key": "EDF6/M045_5",
+     "map": "ig_rockmaze01"
+    },
+    {
+     "key": "EDF6/M046_5",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/M253",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M029_7",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6/M049",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/RM044",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M052",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M250",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/RM090B",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M055",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M031C",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M071",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M061_5",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6/M062B",
+     "map": "nw_tikakyoju01"
+    },
+    {
+     "key": "EDF6/M063",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M064_5",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M065",
+     "map": "ig_cave604_2"
+    },
+    {
+     "key": "EDF6/M066",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/RM005",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/RM006",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/RM009",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/RM008",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6/M083_5",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M081",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M079_2",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF6/M207",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6/M080",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M108",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/M130D",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M083_4",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M070",
+     "map": "ig_terracemountain"
+    },
+    {
+     "key": "EDF6/M083_8",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6/RM034B",
+     "map": "ig_heigen507"
+    },
+    {
+     "key": "EDF6/M105",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M113",
+     "map": "ig_terracemountain"
+    },
+    {
+     "key": "EDF6/RM091",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF6/M204",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M029_6",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6/RM091_4",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M082",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6/M092",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M093_2",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M031D",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M092_5",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M093",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M094",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6/M095B",
+     "map": "nw_tikakyoju01"
+    },
+    {
+     "key": "EDF6/M096",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M097",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M098",
+     "map": "ig_cave604_2"
+    },
+    {
+     "key": "EDF6/M099",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/RM000",
+     "map": "edfroom601"
+    },
+    {
+     "key": "EDF6/RM003",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF6/RM016B",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M049_7",
+     "map": "ig_cave602_2"
+    },
+    {
+     "key": "EDF6/M083",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M107",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6/M112",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6/M049_8",
+     "map": "ig_cave602_2"
+    },
+    {
+     "key": "EDF6/M104",
+     "map": "ig_mountainvillage"
+    },
+    {
+     "key": "EDF6/M029_3",
+     "map": "ig_terracemountain"
+    },
+    {
+     "key": "EDF6/M254",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M117",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6/M115",
+     "map": "ig_rockmaze01"
+    },
+    {
+     "key": "EDF6/M051_5",
+     "map": "ig_plateau"
+    },
+    {
+     "key": "EDF6/M103",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6/M252",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6/M116",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/M031E",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M093_3",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M118",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6/M118_5",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6/M120",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6/M033_5",
+     "map": "ig_edfbasement01"
+    },
+    {
+     "key": "EDF6/M130C",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6/M131",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M140B",
+     "map": "ig_plateau"
+    },
+    {
+     "key": "EDF6/M114B",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6/M081B",
+     "map": "ig_crater601"
+    },
+    {
+     "key": "EDF6/M148",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6/M149",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6/M123",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6/M152",
+     "map": "nw_kousoubld601"
+    }
+   ]
+  },
+  {
+   "pack": "edf6dlc1",
+   "missions": [
+    {
+     "key": "EDF6_DLC/RM003",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF6_DLC/RM009B",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6_DLC/RM013B",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6_DLC/M111",
+     "map": "nw_rinkai02"
+    },
+    {
+     "key": "EDF6_DLC/M203",
+     "map": "nw_dlcmap602"
+    },
+    {
+     "key": "EDF6_DLC/M017",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6_DLC/M009",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6_DLC/M008",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6_DLC/M011",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6_DLC/M019",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6_DLC/M013",
+     "map": "nw_dlcmap601"
+    },
+    {
+     "key": "EDF6_DLC/M018",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6_DLC/M014_2",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6_DLC/M020",
+     "map": "ig_plateau"
+    },
+    {
+     "key": "EDF6_DLC/M021",
+     "map": "ig_cave605"
+    },
+    {
+     "key": "EDF6_DLC/M016",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6_DLC/M015",
+     "map": "nw_dlcmap601"
+    },
+    {
+     "key": "EDF6_DLC/M098",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF6_DLC/M099",
+     "map": "nw_dlcmap602"
+    }
+   ]
+  },
+  {
+   "pack": "edf6dlc2",
+   "missions": [
+    {
+     "key": "EDF6_DLC/M107",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6_DLC/M108",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6_DLC/M007",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF6_DLC/M304",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6_DLC/M501",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6_DLC/M310",
+     "map": "nw_danti601"
+    },
+    {
+     "key": "EDF6_DLC/M112",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6_DLC/M503",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6_DLC/M101",
+     "map": "ig_cave602_2"
+    },
+    {
+     "key": "EDF6_DLC/M311",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6_DLC/M312",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6_DLC/M305",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6_DLC/M300",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6_DLC/M010",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6_DLC/M313",
+     "map": "nw_kousoubld601"
+    },
+    {
+     "key": "EDF6_DLC/M309",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF6_DLC/M051",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6_DLC/M504",
+     "map": "ig_cave603"
+    },
+    {
+     "key": "EDF6_DLC/M050",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF6_DLC/M507",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6_DLC/M006",
+     "map": "nw_haikyo601"
+    },
+    {
+     "key": "EDF6_DLC/M052",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6_DLC/M303",
+     "map": "nw_dlcmap601"
+    },
+    {
+     "key": "EDF6_DLC/M109",
+     "map": "ig_mountainvillage"
+    },
+    {
+     "key": "EDF6_DLC/M314",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF6_DLC/M518",
+     "map": "nw_tikakyoju01"
+    },
+    {
+     "key": "EDF6_DLC/M515",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6_DLC/M308",
+     "map": "nw_rinkai01"
+    },
+    {
+     "key": "EDF6_DLC/M517",
+     "map": "ig_rockmaze01"
+    },
+    {
+     "key": "EDF6_DLC/M509",
+     "map": "ig_steepcoast"
+    },
+    {
+     "key": "EDF6_DLC/M522",
+     "map": "nw_dlcmap602"
+    },
+    {
+     "key": "EDF6_DLC/M512",
+     "map": "ig_cave601_2"
+    },
+    {
+     "key": "EDF6_DLC/M520",
+     "map": "nw_seiyu_night"
+    },
+    {
+     "key": "EDF6_DLC/M519",
+     "map": "nw_kokyujyutaku01"
+    },
+    {
+     "key": "EDF6_DLC/M315",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF6_DLC/M523",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF6_DLC/M521",
+     "map": "nw_haikyo602"
+    },
+    {
+     "key": "EDF6_DLC/M306",
+     "map": "nw_dlcmap602"
+    },
+    {
+     "key": "EDF6_DLC/M307",
+     "map": "nw_dlcmap602"
+    },
+    {
+     "key": "EDF6_DLC/M302",
+     "map": "nw_haikyo601"
+    }
+   ]
+  },
+  {
+   "pack": "edf5",
+   "missions": [
+    {
+     "key": "EDF5_OLD_SCRIPT/M000",
+     "map": "ig_edfroom01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M001",
+     "map": "ig_edfroom02"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M003",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M004",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M005",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M006",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M006_5",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M009",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M013",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M018",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M015_2",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M008",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M015",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M015_3",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M010",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M011",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M012",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M014",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M016",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M017",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M017_5",
+     "map": "nw_seiyu_night"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M007",
+     "map": "ig_2000mcity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M024",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M019_5",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M022",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M023",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M025",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M019",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M026",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M020_5",
+     "map": "ig_2000mcity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M021",
+     "map": "ig_2000mcity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M027",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M028",
+     "map": "ig_cave503"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M029",
+     "map": "ig_cave504"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M020",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M036",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M032_5",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M034",
+     "map": "ig_heigen507"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M034_3",
+     "map": "nw_suiden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M034_5",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M035",
+     "map": "ig_2000mcity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M007_5",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M033",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M037",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M031",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M041",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M042",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M046_1",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M047",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M047_2",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M091",
+     "map": "nw_seiyu_night"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M056",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M042_2",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M030",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M053",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M203",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M042_5",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M200",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M050",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M038",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M091_2",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M061",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M043",
+     "map": "nw_seiyu_night"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M058",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M045",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M063_5",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M044",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M065",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M076",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M046_3",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M091_3",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M201",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M051",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M068",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M048",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M202",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M074",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M091_4",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M067",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M072_1",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M072_2",
+     "map": "ig_edfroom02"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M072_3",
+     "map": "ig_base502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M072_4",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M064",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M059",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M057",
+     "map": "ig_cave503"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M063",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M054",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M039",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M049",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M062",
+     "map": "ig_cave503"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M069",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M055",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M075",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M066",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M073_5",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M054_5",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M046_2",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M204",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M079",
+     "map": "ig_heigen507"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M090",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M052",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M060",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M070",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M078",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M071",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M080",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M081",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M098",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/M099",
+     "map": "nw_traincity"
+    }
+   ]
+  },
+  {
+   "pack": "edf5dlc1",
+   "missions": [
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM011",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM013",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM005",
+     "map": "nw_henden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM018",
+     "map": "ig_desert508"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM019",
+     "map": "ng_dlc_edfroom03"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM020",
+     "map": "ig_desert508"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM008",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM003",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM014",
+     "map": "nw_danti01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM003_2",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM001",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM007",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM003_3",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM013_2",
+     "map": "nw_suiden"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM015",
+     "map": "ig_2000mcity"
+    }
+   ]
+  },
+  {
+   "pack": "edf5dlc2",
+   "missions": [
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM005_2",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM002",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM021",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM006_2",
+     "map": "nw_jyousuicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM009",
+     "map": "ig_sangaku506"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM007_2",
+     "map": "ig_cave501"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM010",
+     "map": "nw_europe01"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM014_2",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM012",
+     "map": "ig_kaigan502"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM022",
+     "map": "nw_seiyu"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM023",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM024",
+     "map": "nw_kitagunicity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM017",
+     "map": "nw_traincity"
+    },
+    {
+     "key": "EDF5_OLD_SCRIPT/DLC/DM016",
+     "map": "nw_jyousuicity"
+    }
+   ]
+  },
+  {
+   "pack": "edf41",
+   "missions": [
+    {
+     "key": "EDF41/M190",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M515",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M191",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M192",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M104",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M105",
+     "map": "nw_underground01"
+    },
+    {
+     "key": "EDF41/M106",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M107",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M108",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/M016",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M110",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M111_2",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M112",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M123",
+     "map": "sk_kaigan01"
+    },
+    {
+     "key": "EDF41/M115",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M117",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M118",
+     "map": "sk_valley01"
+    },
+    {
+     "key": "EDF41/M113",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/M015",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M008",
+     "map": "sk_stepmountain01"
+    },
+    {
+     "key": "EDF41/M116",
+     "map": "nw_underground01"
+    },
+    {
+     "key": "EDF41/M126",
+     "map": "ig_cave01"
+    },
+    {
+     "key": "EDF41/M131",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M130",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41/M405",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M120",
+     "map": "sk_kaigan01"
+    },
+    {
+     "key": "EDF41/MP001",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M150",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M119",
+     "map": "sk_heigen02"
+    },
+    {
+     "key": "EDF41/M124",
+     "map": "nw_underground01"
+    },
+    {
+     "key": "EDF41/M147",
+     "map": "ig_cave01"
+    },
+    {
+     "key": "EDF41/M127",
+     "map": "ig_cave01"
+    },
+    {
+     "key": "EDF41/M603",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M309",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M206",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M153",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M210",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M307",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/MP002",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M501",
+     "map": "sk_valley01"
+    },
+    {
+     "key": "EDF41/M128",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M137",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M012",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41/M009",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M019",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M205",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M129",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M135",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41/M516",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41/M133",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M121",
+     "map": "sk_valley01"
+    },
+    {
+     "key": "EDF41/M122",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/MP003",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M312",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M132",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M143",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/M144",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M602",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M306",
+     "map": "sk_stepmountain01"
+    },
+    {
+     "key": "EDF41/M162",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M164",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M601",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41/M308",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M140",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41/M134",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M517",
+     "map": "sk_stepmountain01"
+    },
+    {
+     "key": "EDF41/MP004",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M305",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M414",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M417",
+     "map": "sk_valley01"
+    },
+    {
+     "key": "EDF41/M007",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M145",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41/M141",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41/M146",
+     "map": "ig_hornetcave01"
+    },
+    {
+     "key": "EDF41/M158",
+     "map": "ig_hornetcave01"
+    },
+    {
+     "key": "EDF41/M412",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/M165",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41/M017",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41/M142",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M518",
+     "map": "sk_stepmountain01"
+    },
+    {
+     "key": "EDF41/M201",
+     "map": "sk_crater01"
+    },
+    {
+     "key": "EDF41/M304",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41/M138",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41/M166",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41/M149",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M411",
+     "map": "sk_kaigan01"
+    },
+    {
+     "key": "EDF41/M152",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M207",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41/M018",
+     "map": "nw_kousoubld01"
+    }
+   ]
+  },
+  {
+   "pack": "edf41mp01",
+   "missions": [
+    {
+     "key": "EDF41MP01/M710",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP01/M404",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M402",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41MP01/DM101",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M707",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41MP01/M801",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M996",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M418",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP01/M408",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP01/M802",
+     "map": "ig_cave01"
+    },
+    {
+     "key": "EDF41MP01/M511",
+     "map": "sk_sangaku02"
+    },
+    {
+     "key": "EDF41MP01/M416",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M403",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M995",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M509",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP01/M502",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41MP01/M401",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP01/M805",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M803",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M992",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M994",
+     "map": "ig_cave01"
+    },
+    {
+     "key": "EDF41MP01/M800",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP01/M203",
+     "map": "sk_heigen02"
+    },
+    {
+     "key": "EDF41MP01/M415",
+     "map": "sk_heigen02"
+    },
+    {
+     "key": "EDF41MP01/M807",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP01/M993",
+     "map": "nw_kousoubld01"
+    }
+   ]
+  },
+  {
+   "pack": "edf41mp02",
+   "missions": [
+    {
+     "key": "EDF41MP02/M709",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP02/M991",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP02/M706",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP02/M708",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP02/M999",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP02/M513",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP02/MP503",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP02/M997",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41MP02/M303",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41MP02/M301",
+     "map": "sk_stepmountain01"
+    },
+    {
+     "key": "EDF41MP02/M990",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41MP02/M998",
+     "map": "nw_soukogai01"
+    },
+    {
+     "key": "EDF41MP02/M510",
+     "map": "sk_crater01"
+    },
+    {
+     "key": "EDF41MP02/M311",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41MP02/M010",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP02/M508",
+     "map": "sk_kaigan01"
+    },
+    {
+     "key": "EDF41MP02/M507",
+     "map": "sk_sangaku01"
+    },
+    {
+     "key": "EDF41MP02/M506",
+     "map": "nw_kasenjiki01"
+    },
+    {
+     "key": "EDF41MP02/MP501",
+     "map": "nw_kousoubld01"
+    },
+    {
+     "key": "EDF41MP02/M808",
+     "map": "ig_wrecktown01"
+    },
+    {
+     "key": "EDF41MP02/M806",
+     "map": "nw_sinsuikouen"
+    },
+    {
+     "key": "EDF41MP02/DM202",
+     "map": "nw_hillycity_light"
+    },
+    {
+     "key": "EDF41MP02/M809",
+     "map": "nw_hillycity_light"
+    }
+   ]
+  }
+ ]
+}

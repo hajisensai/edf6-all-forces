@@ -1161,7 +1161,7 @@ def write_menu_preview(game: str) -> bool:
     import menu_preview
     import rootcpk
     try:
-        files = menu_preview.build(rootcpk.Game(game))
+        files = menu_preview.build(rootcpk.Game(game), game)
     except Exception as e:   # never stops the install: said, and the plugin logs the missing file
         print(f'！ 房间 3D 预览用的游骑兵菜单模型没有生成（预览将显示玩家的游骑兵）：{type(e).__name__}: {e}')
         return False
