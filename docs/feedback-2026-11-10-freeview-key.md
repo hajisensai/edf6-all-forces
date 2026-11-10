@@ -31,6 +31,6 @@
 ## 未处理（待定）
 
 - 手柄观察键 `FreeLookButton` 默认 L3，格雷普上 L3 同样是喇叭（座位按键位 0x40）。原话只说键鼠默认改 C，这里没改；
-  可选做法见 `keyconfig-re.md` §8 末尾。
+  可选做法见 `keyconfig-re.md` §8 末尾。（同日后续已处理：`feedback-2026-11-10-grape-l3.md`。）
 - 实机待确认：格雷普上按住 C 观察不再鸣笛、按中键照旧鸣笛；按 L 切高视角；旧 COMMON.CFG 启动后日志有
   `KEYCONFIG default steps 1..1 on the seeded store: 2 key(s) ...`，插件页「载具通用」显示 自由视角 C、高视角 L。

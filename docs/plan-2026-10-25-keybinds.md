@@ -42,7 +42,7 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 
 | 键 | 手柄 | ini | 作用 |
 |---|---|---|---|
-| C | L3 | `FreeLookKey/Button` | 按住自由视角（2026-11-10 起 C，原鼠标中键在格雷普上是喇叭：`feedback-2026-11-10-freeview-key.md`） |
+| C | L3 | `FreeLookKey/Button` | 按住自由视角（2026-11-10 起 C，原鼠标中键在格雷普上是喇叭：`feedback-2026-11-10-freeview-key.md`；手柄 L3 在有喇叭的格雷普 / 卡车驾驶座上让给喇叭：`feedback-2026-11-10-grape-l3.md`） |
 | L | R3 | `HighCamKey/Button` | 高视角（`HighCamClass=2` 的车） |
 | Z | R3 | `SightZoomKey/Button` | 瞄具放大（让位高视角，`sightzoom.cpp`） |
 | PgUp/PgDn、滚轮 | 十字上/下 | `SightRangeUp/DownKey` | 放大中调表尺 |

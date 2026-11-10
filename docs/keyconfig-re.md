@@ -225,5 +225,8 @@ V（语音）、Ctrl（Chat）、E（上车/下车）有重叠（`tests/keybind_
 一次性迁移（仍是旧默认值的槽才挪，新键被别的槽占着就不挪，玩家自己设的键不动），ini 由 `installer.py NEW_DEFAULTS_1110` 迁移。
 `tests/car_input_native_audit.py` 钉住上面的字节与「观察键不在喇叭默认键上」。
 
-**仍同键（未处理，待维护者定）**：手柄 `FreeLookButton` 默认 L3（座位位 0x40），格雷普上同样是喇叭；方案 §3.3 D 把 L3 定给了自由视角。
-可选：(a) 手柄观察键改到别的按钮；(b) 观察键按住期间在 Car 类车上屏蔽座位位 0x40。本次只按维护者原话改键鼠默认键。
+**手柄 L3（2026-11-10 已处理，`feedback-2026-11-10-grape-l3.md`）**：手柄 `FreeLookButton` 默认 L3（座位位 0x40），格雷普上同样是喇叭。
+Car 的玩家路径只读座位 0（`0x65A475 mov rdi,[rcx+0x608]`），喇叭只在 `veh+0x29B0` 置位时读（`0x65A5FC`）；607 / 60X 卡车第 55 槽也是
+`0x65A390`。处理：手柄观察键在「原版输入自己读的座位按键」上不提供（`seat_switch_logic.h CarPadReads` / `PadActionFree`，
+`crew.cpp StockPadReads`，`vehicle_look.cpp VehicleLookOffered`，炮塔镜头的 `turretcam.cpp FreeHeld` 同一判据），即有喇叭的
+Car 路径车的驾驶座上 L3 只是喇叭。没选的：(a) 全局换手柄键——载具上八个座位按键位都已有动作；(b) 屏蔽座位位 0x40——手柄就没有喇叭了。
