@@ -29,7 +29,7 @@ X-Morph 单位：`pylib/xm_units.py` `Arm.fire`（对应 `Store.key`，默认 2�
 arms=(Arm('mg', ..., fire=2),
       Arm('aam', ..., fire=3, auto=True),
       Arm('rockets', ..., fire=4))
-# 炮手座（EMP 坦克的两座防空机炮塔）：
+# 炮手座（蝎狮坦克即 EMP 坦克的两座防空机炮塔）：
 Arm('aa_l', ..., fire=0, auto=True, seat=1, turret={'low': -5, 'high': 80, 'yaw_rate': 90, 'pitch_rate': 60})
 # 非 X-Morph 车型直接在 STORES 里写：
 'APOC_SAM': Store('Apocalypse SAM', 'air', 0.0, 0.0, Missile(...), names, key=FIRE_SECONDARY, auto=True),
@@ -120,7 +120,7 @@ STOCK_MOUNTS = {
 - **同一门炮 / 同一发射架的另一种弹**（坦克 AP / HE / HEAT / 霰弹、炮射导弹 GLM、防空炮弹链、402 火箭车与直升机挂架上的几种弹）→ 不映射，留在主武器循环。
 - **独立挂载、无独立炮塔骨骼**（原版车的导弹架、火箭巢；X-Morph 固定火箭巢）→ 开火键（`key`）；能自己判射又适合无人值守的（防空导弹）再加 `auto`。
 - **有独立炮塔骨骼的副炮塔**（X-Morph 原作蓝图里 yaw 骨骼下另有俯仰骨骼 / 单骨炮塔，且是炮而不是要锁定的导弹）→ 炮手座（`seat` + `turret`），空座时 `auto`。只对 V603 车型可用，原版车模型没有插件的炮塔骨骼，不做炮手座。
-- 需要锁定的导弹塔（X-Morph 重型 / EMP 坦克的导弹塔）不做炮手座：空座时没有人的锁定可用来开火，保持开火键 + 自动。
+- 需要锁定的导弹塔（X-Morph 超重型斗牛犬坦克 / 蝎狮坦克的导弹塔）不做炮手座：空座时没有人的锁定可用来开火，保持开火键 + 自动。
 
 直升机、战机的挂载不在这次范围内（挂架上是同一发射位的几种弹）。
 

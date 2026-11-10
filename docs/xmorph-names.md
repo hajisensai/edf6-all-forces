@@ -89,7 +89,7 @@
 ### 发现
 
 - **地面履带 / 轮式单位**早就在 `model.json` 写了 `min_side: 1024`，放大到 1024 再压缩。
-- **飞机（`pylib/xm_air_model.py`）与步行机甲（`pylib/xm_rig.py`）没有放大**：256 的颜色图直接 DXT1，一个 4×4 块覆盖机身 4–8 cm，
+- **飞机（`pylib/xm_air_model.py`）与步行机甲（`pylib/xm_rig.py`，X-Morph 步兵的身体 `xm_infantry` 也走它，颜色图只有 128）没有放大**：256 的颜色图直接 DXT1，一个 4×4 块覆盖机身 4–8 cm，
   块状色斑与 mip 叠在一起，比地面单位更糊。**已修**：两条路径都读同一个 `xm_units.TEXTURE_MIN_SIDE = 1024`（`prep_xmorph.MIN_SIDE`
   也改成引用它），颜色与法线放大后再压缩。
 - 颜色图用 DXT1：原作颜色图本身就是 DXT1（无 alpha），我们的材质也不用颜色 alpha，不丢信息。法线是 BC5（比 DXT1 好得多，
