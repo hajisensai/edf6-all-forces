@@ -5,6 +5,7 @@
 #include "firstperson.h"
 #include "scope_pip.h"
 #include "scope_pip_gpu.h"
+#include "scope_lens.h"
 #include "thermal.h"
 #include "layout.h"
 #include "memory.h"
@@ -45,8 +46,9 @@ const unsigned char kFovWriteCode[]={0xF3,0x0F,0x10,0x05,0x12,0xD1,0x66,0x01,0xF
 using CamStepFn=void(__fastcall*)(void*,void*);
 CamStepFn nextCamStep=nullptr;
 bool camHooked=false;
-// The lens pass's state (render thread writes, game thread reads): the world's end hooked (thermal.cpp), the pass
-// refused this device's surface (until the next mission), the last frame it drew (GetTickCount64).
+// The lens pass's state (render thread writes, game thread reads): the world's end hooked (thermal.cpp) and the lens view
+// installed (scope_lens.cpp), the pass refused this device's surface (until the next mission), the last frame it drew
+// (GetTickCount64).
 std::atomic<bool> lensHooked{false},lensRefused{false};
 std::atomic<ULONGLONG> lensAt{0};
 // The scoped soldier's last world view: whether the lens drew in it, and the scope's FOV it drew (the HUD's reticle):
@@ -68,6 +70,11 @@ bool PictureInPicture() noexcept {
     const Config& c=Cfg();
     return c.enabled && scopepip::ModeOf(c.infantryScope)==scopepip::Mode::pictureInPicture;
 }
+// The lens refused this mission: its surface (the render thread) or its view (scope_lens.cpp: a split screen, viewport 3
+// in use).
+bool LensRefused() noexcept {
+    return lensRefused.load(std::memory_order_acquire) || scopelens::Refused();
+}
 Published Read() noexcept {
     AcquireSRWLockShared(&lock);
     const Published p=published;
@@ -88,9 +95,10 @@ void PublishFov(const void* human,float frameFov,float scopeFov) noexcept {
 }
 
 // The camera step (see kCamVtable): the stock step runs whole; after it, for the scoped soldier's camera in the picture
-// in the picture while the lens can draw (scope_pip.h KeepUnzoomed), the stock zoom's FOV goes back to pi/4. Before
-// the next step this hook's own write is retracted (only while the field still holds it): the stock step's no-target
-// branch does not write the FOV, so a closed scope, a mode change or a death never leaves the camera unmagnified.
+// in the picture while the lens can draw (scope_pip.h KeepUnzoomed), the stock zoom's FOV goes back to pi/4 and the lens
+// view is asked for at the stock zoom's FOV (scope_lens.cpp renders it in the next recording). Before the next step this
+// hook's own write is retracted (only while the field still holds it): the stock step's no-target branch does not write
+// the FOV, so a closed scope, a mode change or a death never leaves the camera unmagnified.
 void __fastcall CamStepHook(void* cam,void* step) {
     __try {
         auto c=static_cast<unsigned char*>(cam);
@@ -107,14 +115,14 @@ void __fastcall CamStepHook(void* cam,void* step) {
         auto c=static_cast<unsigned char*>(cam);
         if(At<const void*>(c,kCamTargetRef)!=p.cue.human && At<const void*>(c,kCamTarget)!=p.cue.human)return;
         const float before=At<float>(c,kCamFov);
-        const float wide=scopepip::KeepUnzoomed(true,lensHooked.load(std::memory_order_acquire),
-                                                lensRefused.load(std::memory_order_acquire),now,p.openedAt,
+        const float wide=scopepip::KeepUnzoomed(true,lensHooked.load(std::memory_order_acquire),LensRefused(),now,p.openedAt,
                                                 lensAt.load(std::memory_order_acquire)) ?
                          scopepip::Unzoomed(before,At<float>(c,kCamZoom)) : 0.0f;
         if(!(wide>0.0f)){PublishFov(p.cue.human,0.0f,0.0f);return;}
         unzoom=Unzoom{cam,before,wide};
         *reinterpret_cast<float*>(c+kCamFov)=wide;
         PublishFov(p.cue.human,wide,before);
+        scopelens::Want(cam,before);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -192,7 +200,7 @@ bool InfantryScopeNow(InfantryScopeCue* out) noexcept {
         *out=p.cue;
         // The lens is what the HUD frames only while it draws: in the soldier's last world view, lately.
         const float fov=lensShownFov.load(std::memory_order_acquire);
-        out->lens=PictureInPicture() && !lensRefused.load(std::memory_order_acquire) && lensShown.load(std::memory_order_acquire) && fov>0.0f &&
+        out->lens=PictureInPicture() && !LensRefused() && lensShown.load(std::memory_order_acquire) && fov>0.0f &&
                   scopepip::LensDrew(now,lensAt.load(std::memory_order_acquire));
         out->lensFov=out->lens ? fov : 0.0f;
     }
@@ -221,40 +229,73 @@ float ViewYScale(const void* view) noexcept {
 }
 }  // namespace
 
+namespace {
+// Render thread only: the lens's compositor (scope_pip_gpu.h), the world views since the lens last wanted it. Any
+// thread: whether this mission's first drawn lens / a mis-sized lens view was logged.
+scopepip::LensCompositor compositor;
+unsigned idleViews=0;
+std::atomic<bool> drawnLogged{false},lensSizeLogged{false};
+// The world view's viewport (view+0) and query (view+4: 0 the main view, 1 the distant view, 2 a shadow cascade).
+bool ViewIndex(const void* view,unsigned* index,unsigned* type) noexcept {
+    __try { *index=At<unsigned>(view,0);*type=At<unsigned>(view,4);return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+}  // namespace
+
 void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
     // Render thread only. The pass's device resources go after a while of no lens (kIdleViews world views: a few
     // seconds), not on every other view (split screen: the other player's view has none).
     constexpr unsigned kIdleViews=240;
-    static thread_local scopepip::Magnifier magnifier;
-    static thread_local unsigned idle=0;
-    if(!context || !view)return;
+    unsigned index=0,type=0;
+    if(!context || !view || !ViewIndex(view,&index,&type) || type!=0)return;
+    if(index==scopepip::kLensViewport) {
+        // The lens view's world (scope_lens.cpp): held for the lens command after it, when the main view's was.
+        if(!compositor.HoldsMain())return;
+        if(!compositor.CaptureLens(context,scopelens::Side(),ViewYScale(view))) {
+            compositor.Release();
+            if(!lensSizeLogged.exchange(true,std::memory_order_acq_rel))
+                Log("INFANTRYSCOPE the lens view's world target is not a %dx%d one the lens can sample: no lens this frame",
+                    scopelens::Side(),scopelens::Side());
+        }
+        return;
+    }
     const Published p=Read();
     const ULONGLONG now=GetTickCount64();
     const bool mine=ViewOf(view,p.cue.human);
-    const bool want=mine && now-p.at<=kFreshMs && PictureInPicture() && !lensRefused.load(std::memory_order_acquire);
-    // The scope's FOV: the stock step's own (the camera publishes what it replaced), else the power's.
-    const float scopeFov=p.scopeFov>0.0f ? p.scopeFov : scopepip::ScopeFov(p.cue.zoom);
-    // The magnification this frame needs to show the stock zoom's picture: its own projection's against the scope's. A
-    // frame the stock zoom rendered (the camera zoomed again, or not unzoomed yet) needs none: no lens, nothing refused.
-    const float m=want ? scopepip::Magnification(ViewYScale(view),scopeFov) : 0.0f;
-    if(!(m>=scopepip::kLeast)) {
+    const bool want=mine && now-p.at<=kFreshMs && PictureInPicture() && !LensRefused() && scopelens::Installed();
+    if(!want) {
+        if(index==0)compositor.Release();
         if(mine)lensShown.store(false,std::memory_order_release);
-        if(!want && ++idle>=kIdleViews){magnifier.Reset();idle=0;}
+        if(++idleViews>=kIdleViews){compositor.Reset();idleViews=0;}
         return;
     }
-    idle=0;
-    if(magnifier.Composite(context,m)) {
-        lensShownFov.store(scopeFov,std::memory_order_release);
-        lensShown.store(true,std::memory_order_release);
-        lensAt.store(now,std::memory_order_release);
-        return;
-    }
+    idleViews=0;
+    // The main view's world colour, held for the lens command (recorded after the lens view's world, before this view's
+    // post stage).
+    if(compositor.CaptureMain(context,ViewYScale(view)))return;
     lensShown.store(false,std::memory_order_release);
     // The surface is not one the pass draws on (multisampled, a split screen's partial viewport, an unknown format) or
     // the device would not give its resources: the whole-screen scope until the next mission (the camera zooms again).
-    magnifier.Reset();
+    compositor.Reset();
     if(!lensRefused.exchange(true,std::memory_order_acq_rel))
         Log("INFANTRYSCOPE the scope's lens cannot be drawn on this view's surface: the whole screen zooms (InfantryScope=1's picture) this mission");
+}
+
+void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept {
+    // Render thread, after the lens view's world: the lens drawn into the main view's world colour (both released).
+    float h=0.0f,r=0.0f,lensYScale=0.0f;
+    if(!context || !compositor.Composite(context,&h,&r,&lensYScale)) {
+        lensShown.store(false,std::memory_order_release);
+        return;
+    }
+    // The reticle's FOV: the lens view's own projection as rendered (it may be a step behind the camera).
+    const float fov=scopepip::LensShownFov(h,r,lensYScale);
+    lensShownFov.store(fov,std::memory_order_release);
+    lensShown.store(fov>0.0f,std::memory_order_release);
+    lensAt.store(GetTickCount64(),std::memory_order_release);
+    if(!drawnLogged.exchange(true,std::memory_order_acq_rel))
+        Log("INFANTRYSCOPE lens drawn: main height %.0f, lens radius %.0f, lens view %dx%d, scope fov %.4f",h,r,
+            scopelens::Side(),scopelens::Side(),fov);
 }
 
 bool InstallInfantryScope() noexcept {
@@ -279,12 +320,16 @@ bool InstallInfantryScope() noexcept {
     else camHooked=true;
     const bool worldEnd=thermal::GetStatus().installed;
     if(camHooked && !worldEnd)Log("INFANTRYSCOPE the world's end is not hooked (THERMAL): no picture in the picture");
-    lensHooked.store(camHooked && worldEnd,std::memory_order_release);
+    // The lens view (scope_lens.cpp): its own checks, its own log line when it is not there.
+    lensHooked.store(camHooked && worldEnd && scopelens::Install(),std::memory_order_release);
     return true;
 }
 
 void ResetInfantryScope() noexcept {
     Publish(Published{});
+    scopelens::Reset();
+    drawnLogged.store(false,std::memory_order_release);
+    lensSizeLogged.store(false,std::memory_order_release);
     lensRefused.store(false,std::memory_order_release);
     lensAt.store(0,std::memory_order_release);
     lensShown.store(false,std::memory_order_release);

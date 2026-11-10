@@ -2095,7 +2095,8 @@ target_compile_options(decal_depth_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks decal_depth_native_test)
 add_test(NAME decal_depth_native COMMAND decal_depth_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(decal_depth_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
-target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp
+    src/scope_lens.cpp)
 target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler)
 add_executable(debug_spawn_files_check EXCLUDE_FROM_ALL tests/debug_spawn_files_test.cpp)
 target_compile_options(debug_spawn_files_check PRIVATE /W4 /WX /utf-8 /permissive-)

@@ -33,6 +33,15 @@ bool HudScopeHoldsCrosshair(const void* who) noexcept{return who && who==scopeSo
 bool EnemyControlReplacesPlayerHud(const void* who) noexcept{return who && who==controlling;}
 const void* LocalViewPlayer(const void*) noexcept{return nullptr;}
 namespace thermal { Status GetStatus(const void*) noexcept{return Status{};} }
+// The lens view (scope_lens.cpp) is not part of the crosshair's draw.
+namespace scopelens {
+bool Install() noexcept{return false;}
+bool Installed() noexcept{return false;}
+void Want(const void*,float) noexcept{}
+bool Refused() noexcept{return false;}
+int Side() noexcept{return 0;}
+void Reset() noexcept{}
+}
 }
 bool Matches(unsigned,const unsigned char*,std::size_t) noexcept{return false;}
 
