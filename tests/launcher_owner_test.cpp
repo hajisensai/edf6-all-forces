@@ -40,6 +40,7 @@ void SetLauncherLoft(const void* vehicle,bool aim,float) noexcept {
     ++loftCalls;loftVehicle=vehicle;loftEnabled=aim;
 }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
+int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 
 namespace {
 int checks=0,failed=0;
