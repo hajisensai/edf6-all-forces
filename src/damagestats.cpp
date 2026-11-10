@@ -411,6 +411,7 @@ bool InstallDamageStats() noexcept {
 }
 
 void ResetDamageStats() noexcept {
+    LogDamageNumbers();
     AcquireSRWLockExclusive(&tagLock);
     std::memset(tags,0,sizeof(tags));
     ReleaseSRWLockExclusive(&tagLock);

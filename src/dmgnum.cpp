@@ -80,6 +80,11 @@ void __fastcall Hit(unsigned char* notice,unsigned char* victim,unsigned char* g
 }
 }  // namespace
 
+void LogDamageNumbers() noexcept {
+    if(tinted || allyShown)Log("DAMAGENUMBERS the mission before: %u tinted (weak spot / friendly fire), %u allies' numbers shown",tinted,allyShown);
+    tinted=allyShown=0;
+}
+
 bool InstallDamageNumbers() noexcept {
     __try {
         for(const Sig& s:kSigs)

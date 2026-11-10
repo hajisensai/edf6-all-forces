@@ -16,6 +16,7 @@ bool WeakPartObject(const unsigned char* victim) noexcept;
 // dmgnum.cpp (README 伤害数字, docs/damage-numbers-re.md): the damage notice's colours (a weak spot, friendly fire) and the
 // NPCs' and support units' hits handed to the player's HUD. At load; off (logged) when the stock bytes differ.
 bool InstallDamageNumbers() noexcept;
+void LogDamageNumbers() noexcept;     // ResetDamageStats (mission start, game thread): the last mission's counts, then zero
 // The draw thread's: the book (copied into `book` only when it changed since the last copy, `fresh` then true) and the
 // page's state, the mission's time so far; false when the statistics are off.
 bool DamageStatsRead(dmgstat::Book* book,bool* fresh,dmgstat::View* view,std::uint32_t* missionMs) noexcept;
