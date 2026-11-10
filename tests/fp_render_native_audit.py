@@ -232,3 +232,19 @@ if (game/'Root.cpk').is_file():
                     assert mesh.vsize in (60,64) and weights.fmt==1 and weights.offset==mesh.vsize-20
                     assert indices.fmt==21 and indices.offset==mesh.vsize-4
         print(stem,'base/LOD arm bones and skin declarations passed (each draw uses its own palette ordering)')
+# 2026-11-10 (docs/fp-soldier-re.md §2.5 / §8): the shot's rows the first person turns (firstperson.cpp kShotRows,
+# AimShot) and the third person's hidden weapon it follows (kWeaponHidden, Hands).
+call=lambda site,target:binary[site]==0xE8 and site+5+struct.unpack_from('<i',binary,site+1)[0]==target
+assert value('kShotRows')==0x50 and value('kWeaponHidden')==0x78C
+assert binary[0x697022:0x697030]==bytes.fromhex('4869d8f0000000480399d0010000'),'0x696FD0 picks entry [+0x1D0] + (index % count) * 0xF0'
+assert binary[0x6972BD:0x6972C1]==bytes.fromhex('4883c350') and binary[0x6972C5:0x6972C9]==bytes.fromhex('488d4330'),\
+    'the shot position is the entry +0x50 rows\' +0x30 (+0x80)'
+assert binary[0x6976B8:0x6976BC]==bytes.fromhex('4c8b4d08') and call(0x6976CA,0x691560),'each round is spread from the entry (r9)'
+for site,code in ((0x69169E,'440f595350'),(0x691684,'0f107360'),(0x69168B,'440f104b70')):
+    assert binary[site:site+len(code)//2]==bytes.fromhex(code),('0x691560 reads the entry rows +0x50/+0x60/+0x70',hex(site))
+assert binary[0x696160:0x696166]==bytes.fromhex('38918c070000') and binary[0x696175:0x69617C]==bytes.fromhex('4088bb8c070000'),\
+    '0x696150 keeps the weapon hidden flag at +0x78C'
+assert call(0x696180,0x6C04B0),'...and hides its model in Umbra'
+assert binary[0x59A96A:0x59A974]==bytes.fromhex('818bd005000080000000') and call(0x59AAE6,0x696150),\
+    'the appeal (0x59A880) marks +0x5D0 0x80 and hides each set\'s weapon'
+print('first-person aim rows and the hidden weapon flag passed')
