@@ -135,6 +135,8 @@ WT 涂装车按源的意思是哑光非金属（Sketchfab 上 glossiness 0.117�
 
 **做法**：`obj_model.precise_positions`（原 `cockpits.precise_template` 移过来，座舱改为调用它）把 position 加宽为 float4、vsize +8、后续元素偏移顺延；`obj_model.position_layout(template, extent)` 在模型最大坐标超过 `PRECISE_EXTENT = 16 m`（half 步长 ≥ 2⁻⁶ m，误差可达 7.8 mm）时使用。`obj_model.build_meshes`（无畏舰、C-130、沙扎比、钻地车等）和 `wt_tracked.build_with_info`（WT / 炮台 / X-Morph 履带）统一按模型尺度选布局，不按模型名特例；`wt_tracked.part_rows` 的退化三角判定改为按实际存储格式。16 m 以内的模型（全部 WT 车和炮台）产物不变。
 
+离线用本机 Root.cpk（只读）实际生成：无畏舰 71669 个三角全部写出（改前 343 个被 `drawn_triangles` 丢掉），position 为 (格式 1, vsize 68)，顶点缓冲 6.75 MB（vsize 60 → 68，+13%）；轰炸机（13.8 m）仍是 half4；C-130 运输型 / 炮艇型是混合的：伸出 16 m 的材质（机翼、机身）为 float4，其余仍是 half4（每个网格自带布局）。
+
 **待实机**：座舱网格已经用 float4 位置在载具 MDB 里正常显示，但载具外壳本体用 float4 还没有实机记录，需要实机看一次无畏舰和 C-130（阴影 / 深度 pass）。无畏舰顶点缓冲约 +13%。
 
 ## 5–9. 没做的

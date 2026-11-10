@@ -32,7 +32,7 @@ installer ──make_tracked_combat──> vulcan_model / bmpt_model ──> pyl
 ```
 
 - 坐标：战雷 OBJ 已是游戏坐标（+Y 上、+Z 前、+X 车左，`wheel_l_*` 在 +x），米，履带接地 y=0；UV 取 `(u, -v)`（左上原点）；
-  缠绕方向用车体有符号体积判定（实测本就是逆时针，不翻）；源文件无法线，按 50° 自动平滑生成。
+  缠绕方向用车体有符号体积判定（实测本就是逆时针，不翻）；源文件无法线，按 Sketchfab 的算法生成：位置焊接、沿边 45° 自动平滑（`pylib/mesh_normals.py`，与 Sketchfab 给同一上传生成的 glTF 法线逐角点对上，见 `docs/model-quality-1110.md` 第 2 条）。
 - 部件归属：`prep_wt_tracked.py` 的 `RULES`（按节点名正则）。未匹配的一律车体 `body`。
   - M163：`wheel_*_drive`→A（前主动轮），`wheel_*_01..05`→B..F，`wheel_*_back`→G（后诱导轮，外半边放 H，与原自建模型同一死亡物理方案），
     `gun_barrel`（六管）→ 旋转管 `edf6vc_m61_rotor`，`bone_gun / bone_roll_* / gun_mask_03_anim`（摇架、供弹槽）→ `cannon_r`（俯仰），
