@@ -52,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import cas_legacy  # noqa: E402
 import edf41src  # noqa: E402
+from i18n import tr  # noqa: E402
 import ledger  # noqa: E402
 import mdb  # noqa: E402
 import mdb_legacy  # noqa: E402
@@ -546,7 +547,7 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
     if stamp.get('version') == VERSION and stamp.get('source') == source and \
             all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in FILES):
         return [], []
-    say('  转换 4.1 的本部（出击界面）背景……')
+    say(tr('  转换 4.1 的本部（出击界面）背景……', '  Converting the 4.1 HQ (sortie screen) background...'))
     try:
         files = build(root, root41)
     except (ValueError, KeyError, IndexError, AssertionError, NotImplementedError, struct.error) as e:

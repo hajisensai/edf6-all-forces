@@ -70,6 +70,7 @@ for _p in (os.path.join(HERE, '..', 'pylib'),):
         sys.path.insert(0, _p)
 import cpk  # noqa: E402
 import dsgo  # noqa: E402
+from i18n import is_zh, tr  # noqa: E402
 import edf41kills  # noqa: E402
 import mdb  # noqa: E402
 import modfiles  # noqa: E402
@@ -1272,9 +1273,13 @@ def check(root: str) -> bool:
     files = manifest.get('files', {})
     if CONFIG not in files:
         if LEGACY_LIST in files:
-            print('任务包：EDF5 战役还是旧版（追加在 EDF6 离线任务列表末尾）；重新安装会改成独立任务包')
+            print(tr('任务包：EDF5 战役还是旧版（追加在 EDF6 离线任务列表末尾）；重新安装会改成独立任务包',
+                     'Mission packs: the EDF5 campaign is still the old kind (appended to EDF6\'s offline mission list); a '
+                     'reinstall turns it into packs of its own'))
             return False
-        print('任务包：未安装（测试场任务包由安装器写入；EDF5 战役可选，安装器菜单 6 管理）')
+        print(tr('任务包：未安装（测试场任务包由安装器写入；EDF5 战役可选，安装器菜单 6 管理）',
+                 'Mission packs: not installed (the installer writes the test range\'s pack; the EDF5 campaign is optional, '
+                 'menu 6 of the installer)'))
         return True
     # The installed packs' files must be as written; a record kept for a retired file another tool changed since
     # (a pack taken out, what it replaced kept to put back) is reported, not a fault.
@@ -1290,20 +1295,25 @@ def check(root: str) -> bool:
     bad = [rel for rel, e in files.items() if rel not in kept and (
         'also' in e or not managed(rel) or rel not in current or modfiles.sha256_file(rel_path(root, rel)) != e['sha'])]
     for rel in kept:
-        print('  保留（别的工具改过，卸载时不动）', rel)
+        print(tr('  保留（别的工具改过，卸载时不动）', '  Kept (changed by another tool; uninstall leaves it)'), rel)
     wanted_ids = ((INI_KEY, manifest.get('content', 0)), (RANGE_INI_KEY, manifest.get('range', 0)),
                   (EDF41_INI_KEY, manifest.get('edf41', 0)))
     values = {name: ini_value(root, name) for name, _ in wanted_ids}
     ids_ok = all(values[name] == want for name, want in wanted_ids)
-    packs = ((['EDF5 战役 3 个'] if enabled(root) else []) + (['测试场'] if range_installed(root) else [])
-             + ([p41.pack.name['SC'] for p41 in PACKS41
+    shown = 'SC' if is_zh() else 'EN'
+    packs = (([tr('EDF5 战役 3 个', 'the 3 EDF5 campaign packs')] if enabled(root) else [])
+             + ([tr('测试场', 'the test range')] if range_installed(root) else [])
+             + ([p41.pack.name[shown] for p41 in PACKS41
                  if any(managed(f) and f.upper().startswith(f'MISSION/{p41.folder}/') for f in files)]
                 if manifest.get('edf41') else []))
-    print(f'任务包：{"、".join(packs) or "无"}，{len(files)} 个文件，缺失、被改过或待还原 {len(bad)}；'
-          + '，'.join(f'{name}=' + ('（缺失）' if values[name] is None else str(values[name]))
-                     + ('' if values[name] == want else f'（应为 {want}）') for name, want in wanted_ids))
+    ids = tr('，', ', ').join(f'{name}=' + (tr('（缺失）', '(missing)') if values[name] is None else str(values[name]))
+                              + ('' if values[name] == want else tr(f'（应为 {want}）', f' (should be {want})'))
+                              for name, want in wanted_ids)
+    print(tr(f'任务包：{"、".join(packs) or "无"}，{len(files)} 个文件，缺失、被改过或待还原 {len(bad)}；',
+             f'Mission packs: {", ".join(packs) or "none"}, {len(files)} files, {len(bad)} missing, changed or to restore; ')
+          + ids)
     for rel in bad:
-        print('  缺失、被改过或待还原', rel)
+        print(tr('  缺失、被改过或待还原', '  Missing, changed or to restore'), rel)
     return not bad and ids_ok
 
 
@@ -1343,8 +1353,10 @@ def main(argv: list[str]) -> int:
 
 def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     content = built[1]
-    out = f'测试场任务包（内容编号 {content.range}，离线和在线的「任务包」里选「{RANGE.name["SC"]}」）'
-    out += ''.join(f'\n  注意：{note}' for note in built[2].get('notes', ()))
+    shown = 'SC' if is_zh() else 'EN'
+    out = tr(f'测试场任务包（内容编号 {content.range}，离线和在线的「任务包」里选「{RANGE.name["SC"]}」）',
+             f'The test range\'s pack (content id {content.range}; pick "{RANGE.name["EN"]}" under mission packs, offline and online)')
+    out += ''.join(tr(f'\n  注意：{note}', f'\n  Note: {note}') for note in built[2].get('notes', ()))
     if not content.campaign:
         return out
     rows = built[2]['rows']
@@ -1352,15 +1364,19 @@ def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     def count(group: str) -> str:
         n = sum(r['group'] == group and available(r) for r in rows)
         held = sum(r['group'] == group and not available(r) for r in rows)
-        return f'{n} 关' + (f'（另有 {held} 关缺资源，占位锁定）' if held else '')
-    counts = '、'.join(f'{pack.name["SC"]} {count(pack.group)}' for pack in PACKS)
+        return tr(f'{n} 关', f'{n} missions') + (tr(f'（另有 {held} 关缺资源，占位锁定）',
+                                                    f' ({held} more lack resources, locked placeholders)') if held else '')
+    counts = tr('、', ', ').join(f'{pack.name[shown]} {count(pack.group)}' for pack in PACKS)
     out41 = ''
     if content.edf41:
         for p41 in PACKS41:
             if any(r['group'] == p41.pack.group and available(r) for r in rows):
-                out41 += f'；{p41.pack.name["SC"]} {count(p41.pack.group)}（内容编号 {CONTENT[p41.pack.tag]}）'
-    return (f'EDF5 任务包：{counts}（离线模式的「任务包」列表里选择；内容编号 {content.campaign}–'
-            f'{content.campaign + len(PACKS) - 1}）{out41}；' + out)
+                out41 += tr(f'；{p41.pack.name["SC"]} {count(p41.pack.group)}（内容编号 {CONTENT[p41.pack.tag]}）',
+                            f'; {p41.pack.name["EN"]} {count(p41.pack.group)} (content id {CONTENT[p41.pack.tag]})')
+    last = content.campaign + len(PACKS) - 1
+    return tr(f'EDF5 任务包：{counts}（离线模式的「任务包」列表里选择；内容编号 {content.campaign}–{last}）{out41}；',
+              f'EDF5 mission packs: {counts} (picked from the offline "mission packs" list; content ids '
+              f'{content.campaign}-{last}){out41}; ') + out
 
 
 if __name__ == '__main__':

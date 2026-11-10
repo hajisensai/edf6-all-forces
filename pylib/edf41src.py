@@ -33,6 +33,7 @@ import sys
 from functools import lru_cache
 
 import gamedir
+from i18n import tr
 
 MANIFEST = 'EDF41ASSETS.json'
 KIND = 'edf41-assets'
@@ -84,8 +85,10 @@ def find(near: str | None = None) -> str | None:
 def describe(root41: str | None) -> str:
     """The source in words, for the installer's messages."""
     if not root41:
-        return f'没有找到 EDF4.1，也没有 EDF4.1 素材包（安装器旁的 {FOLDER} 文件夹）'
-    return f'EDF4.1 素材包 {root41}' if is_pack(root41) else f'已安装的 EDF4.1 {root41}'
+        return tr(f'没有找到 EDF4.1，也没有 EDF4.1 素材包（安装器旁的 {FOLDER} 文件夹）',
+                  f'no EDF4.1 found, and no EDF4.1 asset pack (the {FOLDER} folder beside the installer)')
+    return tr(f'EDF4.1 素材包 {root41}', f'the EDF4.1 asset pack {root41}') if is_pack(root41) else \
+        tr(f'已安装的 EDF4.1 {root41}', f'the installed EDF4.1 {root41}')
 
 
 def key(rel: str) -> str:

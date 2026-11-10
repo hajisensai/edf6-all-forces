@@ -58,6 +58,12 @@ REPORT_STATUSES = ('open', 'doing', 'verify', 'done', 'closed')
 RESULTS = {'1': ('pass', '修好了'), '2': ('fail', '还有问题'), '3': ('new', '发现新问题'), '4': ('info', '只是补充信息')}
 
 
+def _tr(zh: str, en: str) -> str:
+    """The player's messages in the installer's language: it puts its choice in EDF6_LANG (pylib/i18n.py); this module
+    stays standard library only, and run on its own (a developer) it speaks Chinese."""
+    return en if os.environ.get('EDF6_LANG') == 'en' else zh
+
+
 class HubError(Exception):
     pass
 
@@ -100,10 +106,10 @@ class Hub:
             except (ValueError, OSError):
                 msg = ''
             if e.code == 401:
-                raise HubError('账号或密码不对') from None
-            raise HubError(f'测试站返回 {e.code} {msg}'.strip()) from None
+                raise HubError(_tr('账号或密码不对', 'wrong account or password')) from None
+            raise HubError(_tr(f'测试站返回 {e.code} {msg}', f'the test site answered {e.code} {msg}').strip()) from None
         except urllib.error.URLError as e:
-            raise HubError(f'连不上测试站 {self.site}：{e.reason}') from None
+            raise HubError(_tr(f'连不上测试站 {self.site}：{e.reason}', f'cannot reach the test site {self.site}: {e.reason}')) from None
 
     def get_json(self, path: str):
         with self.request('GET', path) as r:
@@ -120,20 +126,21 @@ def hub_for_player(ask) -> Hub:
     cfg = _load_config()
     if cfg.get('user') and cfg.get('password'):
         return Hub(cfg['user'], cfg['password'])
-    print(f'第一次使用测试站（{SITE}）：输入开发者给你的账号和密码，之后会记住。')
+    print(_tr(f'第一次使用测试站（{SITE}）：输入开发者给你的账号和密码，之后会记住。',
+              f'First use of the test site ({SITE}): enter the account and password the developer gave you; they are remembered.'))
     while True:
-        user = ask('账号（直接回车取消）：')
+        user = ask(_tr('账号（直接回车取消）：', 'Account (just Enter to cancel): '))
         if not user:
-            raise HubError('已取消')
-        password = ask('密码：')
+            raise HubError(_tr('已取消', 'cancelled'))
+        password = ask(_tr('密码：', 'Password: '))
         hub = Hub(user, password)
         try:
             hub.get_json('/api/state')
         except HubError as e:
-            print(f'  {e}，请重新输入。')
+            print(_tr(f'  {e}，请重新输入。', f'  {e}; try again.'))
             continue
         _save_config({'user': user, 'password': password})
-        print(f'已保存到 {CONFIG}')
+        print(_tr(f'已保存到 {CONFIG}', f'Saved to {CONFIG}'))
         return hub
 
 
@@ -161,16 +168,17 @@ def download_latest(hub: Hub, into: str, current: str = '') -> str | None:
     b = hub.get_json('/api/latest')
     name = b['name']
     stem = name[:-4] if name.lower().endswith('.zip') else name
-    print(f'最新测试版：{name}（{b["size"] >> 20} MB，{time.strftime("%Y-%m-%d %H:%M", time.localtime(b["at"] / 1000))}）')
+    at = time.strftime("%Y-%m-%d %H:%M", time.localtime(b["at"] / 1000))
+    print(_tr(f'最新测试版：{name}（{b["size"] >> 20} MB，{at}）', f'Newest test build: {name} ({b["size"] >> 20} MB, {at})'))
     if b.get('notes'):
-        print('更新说明：\n  ' + b['notes'].strip().replace('\n', '\n  '))
+        print(_tr('更新说明：', 'Release notes:') + '\n  ' + b['notes'].strip().replace('\n', '\n  '))
     if current and stem == current:
-        print('你现在运行的就是这一版，不用下载。')
+        print(_tr('你现在运行的就是这一版，不用下载。', 'This is the build you are running; nothing to download.'))
         return None
     target = os.path.join(into, stem)
     exe = next(iter(glob.glob(os.path.join(target, '*.exe'))), None)
     if exe:
-        print(f'已经下载过：{target}')
+        print(_tr(f'已经下载过：{target}', f'Already downloaded: {target}'))
         return exe
     buf = io.BytesIO()
     digest = hashlib.sha256()
@@ -185,10 +193,11 @@ def download_latest(hub: Hub, into: str, current: str = '') -> str | None:
             _progress(buf.tell(), total)
     print()
     if digest.hexdigest() != b['sha256']:
-        raise HubError('下载的文件校验不对（可能下载中断了），请重试')
+        raise HubError(_tr('下载的文件校验不对（可能下载中断了），请重试',
+                           'the download does not check out (it may have been cut off); try again'))
     with zipfile.ZipFile(buf) as z:
         z.extractall(target)
-    print(f'已解压到 {target}')
+    print(_tr(f'已解压到 {target}', f'Unpacked into {target}'))
     return next(iter(glob.glob(os.path.join(target, '*.exe'))), None)
 
 
@@ -783,21 +792,23 @@ def send_logs(hub: Hub, game: str, ask, build: str = '') -> None:
     """Menu 4: pick the case, the result and a note; the logs go along."""
     st = hub.get_json('/api/state')
     cases = [c for c in st['cases'] if c['status'] != 'closed']
-    print('\n现在要测的：')
+    print(_tr('\n现在要测的：', '\nTo test now:'))
     for c in cases:
         print(f'  {c["id"]:>3}  {c["title"]}')
-    print('    0  其它 / 新问题')
-    pick = ask('测的是哪一项？输入编号：')
+    print(_tr('    0  其它 / 新问题', '    0  something else / a new problem'))
+    pick = ask(_tr('测的是哪一项？输入编号：', 'Which one did you test? Enter its number: '))
     case_id = int(pick) if pick.isdigit() and any(c['id'] == int(pick) for c in cases) else None
-    print('结果：1 修好了  2 还有问题  3 发现新问题  4 只是补充信息')
-    result = RESULTS.get(ask('输入 1-4（直接回车 = 4）：') or '4', RESULTS['4'])[0]
-    note = ask('一句话说说怎么测的、看到了什么（可以留空）：')
-    print('收集日志……')
+    print(_tr('结果：1 修好了  2 还有问题  3 发现新问题  4 只是补充信息',
+              'Result: 1 fixed  2 still broken  3 found a new problem  4 just more information'))
+    result = RESULTS.get(ask(_tr('输入 1-4（直接回车 = 4）：', 'Enter 1-4 (just Enter = 4): ')) or '4', RESULTS['4'])[0]
+    note = ask(_tr('一句话说说怎么测的、看到了什么（可以留空）：', 'In a sentence: how you tested and what you saw (may be empty): '))
+    print(_tr('收集日志……', 'Collecting the logs...'))
     data, names = collect(game, build)
     print('  ' + '、'.join(names))
     stamp = time.strftime('%Y%m%d-%H%M%S')
     rid = post_report(hub, case_id, result, note, build, [(f'logs-{stamp}.zip', data)])
-    print(f'已上传（#{rid}，{len(data) >> 10} KB）。录屏、截图可以到 {SITE} 的反馈里补充。')
+    print(_tr(f'已上传（#{rid}，{len(data) >> 10} KB）。录屏、截图可以到 {SITE} 的反馈里补充。',
+              f'Uploaded (#{rid}, {len(data) >> 10} KB). Recordings and screenshots can be added to the report on {SITE}.'))
 
 
 # ---------------------------------------------------------------- developer commands

@@ -38,6 +38,7 @@ from collections.abc import Callable, Iterator, Mapping
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
+from i18n import tr  # noqa: E402
 import mdb  # noqa: E402
 import rootcpk  # noqa: E402
 from modfiles import sha256  # noqa: E402
@@ -397,13 +398,15 @@ def status(root: str) -> list[str]:
     """Lines for the installer's check (reading only): each group installed, or why it is not."""
     reg = registry()
     if not reg:
-        return ['EDF5 任务包１的地图与要塞：安装包里没有这部分数据']
+        return [tr('EDF5 任务包１的地图与要塞：安装包里没有这部分数据',
+                   'EDF5 Mission Pack 1\'s maps and fortress: this package does not carry them')]
     led = ledger.Ledger(root)
     why = dict(unavailable(root))
     out = []
     for g, group in reg['groups'].items():
         ok = all(_in_place(led, rel, reg['files'][rel]['sha']) for rel in group['files'])
-        missions = '、'.join(group['missions'])
-        out.append(f'EDF5 任务包１ {g}（{missions}）：' + ('已安装' if ok else f'未安装：{why[g]}' if g in why
-                                                        else '未安装（选 1 安装）'))
+        missions = tr('、', ', ').join(group['missions'])
+        out.append(tr(f'EDF5 任务包１ {g}（{missions}）：', f'EDF5 Mission Pack 1 {g} ({missions}): ')
+                   + (tr('已安装', 'installed') if ok else tr('未安装：', 'not installed: ') + why[g] if g in why
+                      else tr('未安装（选 1 安装）', 'not installed (1 installs it)')))
     return out

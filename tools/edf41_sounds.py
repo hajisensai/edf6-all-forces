@@ -56,6 +56,7 @@ import awe  # noqa: E402
 import cpk  # noqa: E402
 import dsgo  # noqa: E402
 import edf41src  # noqa: E402
+from i18n import tr  # noqa: E402
 import ledger  # noqa: E402
 import rootcpk  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
@@ -443,7 +444,7 @@ def install(root6: str, root41: str | None, say: Callable[[str], None] = print) 
             skipped.append((group, '；'.join(bad)))
             wanted.difference_update(ledger.key(rel) for rel in rels)
             continue
-        say(f'  转换 4.1 的{group}……')
+        say(tr(f'  转换 4.1 的{group}……', f'  Converting 4.1: {group}...'))
         try:
             files = make(group, root6, root41)
         except (ValueError, KeyError, struct.error) as e:
