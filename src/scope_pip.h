@@ -1,11 +1,12 @@
 // A soldier's scope as a picture in the picture (testhub #32, 2026-11-10: "步兵瞄准太抽象了 应当是类似于写实战术类游戏那样的
-// 镜内放大效果（即倍镜外面是没缩放的，里面是缩放的样子）"; the maintainer: "32 改，应该改的都改"). InfantryScope=2: the view
-// round the scope keeps the stock camera's unmagnified field, only the lens, a circle round the screen's centre, shows
-// the scope's power. docs/scope-pip-re.md has the design, why this is a magnification of the frame's own centre and not
-// a second camera yet, and what is left for the game to show.
+// 镜内放大效果（即倍镜外面是没缩放的，里面是缩放的样子）"; the maintainer: "32 改，应该改的都改", then of the first
+// version's magnified centre: "画质不能接受"). InfantryScope=2: the view round the scope keeps the stock camera's
+// unmagnified field, only the lens, a circle round the screen's centre, shows the scope's power, rendered by a second
+// viewport of the engine's own (viewport 3, a TraceCamera at the lens's narrow field, scope_lens.cpp) at the lens's own
+// resolution. docs/scope-pip-re.md has the reverse engineering and the frame's order.
 //
-// Pure arithmetic shared by the camera step (infantryscope.cpp), the GPU pass (scope_pip_gpu.cpp) and the HUD (hud.cpp
-// InfantryScope); tools/scope_pip_check.cpp checks it offline.
+// Pure arithmetic shared by the camera step (infantryscope.cpp), the lens view (scope_lens.cpp), the GPU pass
+// (scope_pip_gpu.cpp) and the HUD (hud.cpp InfantryScope); tools/scope_pip_check.cpp checks it offline.
 #pragma once
 #include <cmath>
 
@@ -42,9 +43,10 @@ inline float RimOut(float r) noexcept { return r*(1.0f+kRim); }
 inline float ScopeFov(float zoom) noexcept { return zoom>0.0f ? kBaseFov/zoom : kBaseFov; }
 // A perspective projection's vertical scale (its [1][1], cot(fovY/2)) for a vertical FOV.
 inline float YScale(float fov) noexcept { return 1.0f/std::tan(0.5f*fov); }
-// The magnification the lens draws on a frame rendered with vertical scale `frameYScale` so that the lens shows what the
-// stock zoomed camera (vertical FOV `scopeFov`) would: the ratio of the two focal lengths. Not `zoom` itself: pi/4 / z is
-// an angle, and tan(pi/8) / tan(pi/8 / z) is a little more than z (4.2 at 4x, 8.5 at 8x). 0 when either is unusable.
+// The focal ratio of a picture with vertical scale `yScale` against the scope's (vertical FOV `scopeFov`): how much more
+// the stock zoomed camera magnifies than a frame rendered at `yScale`. ~1 for a frame the stock zoom rendered itself
+// (no lens then). Not `zoom` itself: pi/4 / z is an angle, and tan(pi/8) / tan(pi/8 / z) is a little more than z. 0 when
+// either is unusable.
 inline float Magnification(float frameYScale,float scopeFov) noexcept {
     if(!(frameYScale>0.0f) || !std::isfinite(frameYScale) || !(scopeFov>0.0f) || !(scopeFov<3.1f))return 0.0f;
     const float m=YScale(scopeFov)/frameYScale;
@@ -53,6 +55,36 @@ inline float Magnification(float frameYScale,float scopeFov) noexcept {
 // The px a unit of tan spans in the lens on a view `h` px high (the reticle's focal: its marks are angles at the
 // scope's own field of view, whatever the frame round the lens was rendered at).
 inline float LensFocal(float h,float scopeFov) noexcept { return 0.5f*h*YScale(scopeFov); }
+
+// The lens view (scope_lens.cpp, docs/scope-pip-re.md §3.2): a square S x S render whose texture spans the lens's
+// diameter (S = LensViewSide(r), the lens's px 1:1), at the vertical FOV that puts an angle where the stock zoom puts it
+// in the lens: r * cot(phi / 2) = LensFocal(h, scopeFov). Independent of S. 0 when unusable.
+inline int LensViewSide(float r) noexcept {
+    if(!(r>0.0f) || !std::isfinite(r) || r>8192.0f)return 0;
+    return static_cast<int>(std::ceil(2.0f*r));
+}
+inline float LensViewFov(float h,float r,float scopeFov) noexcept {
+    if(!(h>0.0f) || !(r>0.0f) || !(scopeFov>0.0f) || !(scopeFov<3.1f))return 0.0f;
+    const float phi=2.0f*std::atan(r*std::tan(0.5f*scopeFov)/(0.5f*h));
+    return std::isfinite(phi) && phi>0.0f ? phi : 0.0f;
+}
+// The scope's FOV the lens really shows, from the lens view's own projection (its [5], `lensYScale`) as rendered: the
+// HUD's reticle is cut to it (LensFocal(h, LensShownFov) = r * lensYScale), so the marks sit on the picture even when
+// the frame is a few steps behind the camera. 0 when unusable.
+inline float LensShownFov(float h,float r,float lensYScale) noexcept {
+    if(!(h>0.0f) || !(r>0.0f) || !(lensYScale>0.0f) || !std::isfinite(lensYScale))return 0.0f;
+    const float f=2.0f*std::atan(0.5f*h/(r*lensYScale));
+    return std::isfinite(f) && f>0.0f ? f : 0.0f;
+}
+// How much the lens magnifies over the frame round it: the lens's focal in the frame's px (r * lensYScale) against the
+// frame's own (0.5 * h * frameYScale). Under kLeast: no lens (the frame is the stock zoom's, or a scope of 1x).
+inline float LensPower(float h,float r,float frameYScale,float lensYScale) noexcept {
+    if(!(h>0.0f) || !(r>0.0f) || !(frameYScale>0.0f) || !(lensYScale>0.0f))return 0.0f;
+    const float p=r*lensYScale/(0.5f*h*frameYScale);
+    return std::isfinite(p) ? p : 0.0f;
+}
+// The lens views the engine's viewport kLensViewport (4 slots, 0..3; local split screens use 0 and 1).
+constexpr unsigned kLensViewport=3;
 
 // The camera step's FOV in the picture in the picture: the stock step wrote `written` = pi/4 / camZoom (its own write,
 // 0xF8906: the same float division) and the frame keeps the unmagnified pi/4; anything else (another camera logic's
@@ -84,16 +116,16 @@ constexpr bool KeepUnzoomed(bool wanted,bool hooked,bool refused,unsigned long l
            ((lensAt!=0 && lensAt>=openedAt) || now-openedAt<=kProbationMs);
 }
 
-// The lens on a w x h target: centre, radius, magnification. Source() is the frame's pixel the lens shows at (x, y):
-// the centre's neighbourhood scaled up by `m` (the GPU pass samples exactly this; scope_pip_gpu.cpp kShaders).
-struct Lens { float cx,cy,r,m; };
-inline Lens LensFor(float w,float h,float m) noexcept { return Lens{0.5f*w,0.5f*h,LensRadius(w,h),m}; }
+// The lens on a w x h target: centre and radius. LensSample() is where in the lens view's texture (0..1) the lens shows
+// at (x, y): the texture spans the lens's diameter (the GPU pass samples exactly this; scope_pip_gpu.cpp kShaders).
+struct Lens { float cx,cy,r; };
+inline Lens LensFor(float w,float h) noexcept { return Lens{0.5f*w,0.5f*h,LensRadius(w,h)}; }
 inline bool InLens(const Lens& l,float x,float y) noexcept {
     const float dx=x-l.cx,dy=y-l.cy;
     return dx*dx+dy*dy<=l.r*l.r;
 }
-inline void Source(const Lens& l,float x,float y,float* sx,float* sy) noexcept {
-    *sx=l.cx+(x-l.cx)/l.m;*sy=l.cy+(y-l.cy)/l.m;
+inline void LensSample(const Lens& l,float x,float y,float* u,float* v) noexcept {
+    *u=0.5f+(x-l.cx)/(2.0f*l.r);*v=0.5f+(y-l.cy)/(2.0f*l.r);
 }
 // The lens's bounding square clipped to the target (the GPU pass's scissor), integer px: left, top, right, bottom.
 inline void Scissor(const Lens& l,float w,float h,long* left,long* top,long* right,long* bottom) noexcept {

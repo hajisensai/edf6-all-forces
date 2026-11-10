@@ -706,6 +706,12 @@ target_link_libraries(infantry_scope_pip_test PRIVATE edf6common d3d11 d3dcompil
 target_compile_options(infantry_scope_pip_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME infantry_scope_pip COMMAND infantry_scope_pip_test)
 set_tests_properties(infantry_scope_pip PROPERTIES TIMEOUT 90)
+# The picture-in-picture scope's lens view (src/scope_lens.cpp: viewport 3's camera, the recording's held tail and the
+# lens command) on a stand-in of the engine's System and recording (its native anchors: scope_lens_native below).
+add_executable(scope_lens_test tests/scope_lens_test.cpp)
+target_link_libraries(scope_lens_test PRIVATE edf6common)
+target_compile_options(scope_lens_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME scope_lens COMMAND scope_lens_test)
 add_executable(highcam_input_test EXCLUDE_FROM_ALL tests/highcam_input_test.cpp)
 target_include_directories(highcam_input_test PRIVATE src common)
 target_link_libraries(highcam_input_test PRIVATE edf6common user32)
@@ -2103,7 +2109,8 @@ target_compile_options(decal_depth_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks decal_depth_native_test)
 add_test(NAME decal_depth_native COMMAND decal_depth_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(decal_depth_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
-target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp
+    src/scope_lens.cpp)
 target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler)
 add_executable(debug_spawn_files_check EXCLUDE_FROM_ALL tests/debug_spawn_files_test.cpp)
 target_compile_options(debug_spawn_files_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -2187,6 +2194,9 @@ add_dependencies(offline_checks thermal_models_test)
 add_test(NAME thermal_models COMMAND thermal_models_test)
 add_test(NAME thermal_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/thermal_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(thermal_native PROPERTIES SKIP_RETURN_CODE 77)
+# The picture-in-picture scope's lens view's native anchors (src/scope_lens.cpp, docs/scope-pip-re.md §4-§5).
+add_test(NAME scope_lens_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_lens_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(scope_lens_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(pvp_hud_layout_test EXCLUDE_FROM_ALL tests/pvp_hud_layout_test.cpp)
 target_include_directories(pvp_hud_layout_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(pvp_hud_layout_test PRIVATE edf6common)
