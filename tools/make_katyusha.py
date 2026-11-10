@@ -16,7 +16,16 @@
                                             rockets' high arc; EDF6VehicleCrew: the player's lifted onto the arc to where
                                             the camera looks, and the impact point on the HUD while the player rides it)
 
-The request is tools/calls.py EDF6VC_CALL_KATYUSHA (tools/call_weapons.py, the Naegling's request as its template).
+With it, the Andryusha (test site #37, docs/andryusha-re.md; pylib/vcobjects.py GROUND_VEHICLES['andryusha']), the same
+truck firing incendiary cluster carriers:
+
+  Mods/OBJECT/EDF6VC_ANDRYUSHA.SGO          the Katyusha's vehicle SGO drawing the same EDF6VC_KATYUSHA.MRAB, its weapon below
+  Mods/WEAPON/EDF6VC_ANDRYUSHA_ROCKETS.SGO  the Katyusha's rockets, ANDRYUSHA_SALVOS salvos only, each rocket a carrier the
+                                            plugin splits (src/andryusha.cpp: AmmoHitSizeAdjust its fuse's mark)
+  Mods/OBJECT/EDF6VC_ANDRYUSHA_BLAST.SGO,   a bomblet's burst and its fire (pylib/vcobjects.py andryusha_bomblets)
+             EDF6VC_ANDRYUSHA_FIRE.SGO
+
+The request is tools/calls.py EDF6VC_CALL_KATYUSHA (EDF6VC_CALL_ANDRYUSHA the Andryusha's) (tools/call_weapons.py, the Naegling's request as its template).
 The vehicle's launcher elevates to PITCH_STOP_DEG (the Naegling's 50 raised) so the rockets can be lobbed on the high
 arc; the rockets' speed and life fit that arc (pylib/ballistics.py envelope, check()). The model's elevation ram is
 telescopic for that range (pylib/katyusha_model.py RAM_ROD; EDF6VehicleCrew src/katyusha.cpp poses it), and the
@@ -50,6 +59,7 @@ import vcobjects as vc  # noqa: E402
 
 OWNER = 'katyusha'   # pylib/ledger.py
 VEHICLE = vc.GROUND_VEHICLES['katyusha']
+ANDRYUSHA = vc.GROUND_VEHICLES['andryusha']
 SGO_FILE = f'{VEHICLE.sgo}.SGO'
 MODEL_FILE = f'{VEHICLE.sgo}.MRAB'
 MODEL_MDB = 'Vehicle402_Rocket.mdb'   # the host's own model file name, inside the archive
@@ -117,6 +127,20 @@ ROCKETS = {
 }
 NAMES = {'ja': 'カチューシャ ロケット弾', 'en': 'Katyusha Rockets', 'cn': '喀秋莎火箭彈', 'kr': 'Katyusha Rockets',
          'sc': '喀秋莎火箭弹'}
+# The Andryusha's (test site #37, the player JOY: 「减少弹药数(参考现实存在的变体安德柳沙)」 / 「更接近血风暴那种子母弹模式，
+# 只是母弹本身会爆炸+子弹为燃烧」): the Katyusha's rockets, ANDRYUSHA_SALVOS salvos of the rack's 16 (the Katyusha's 10), each a
+# carrier: its own blast where it bursts (AmmoExplosion ANDRYUSHA_BLAST m, under the Katyusha's 12: the bomblets carry the
+# rest), then src/andryusha.cpp splits it into incendiary bomblets. AmmoHitSizeAdjust is the fuse's mark (src/andryusha.h
+# kMarkImpactBits: the SGO's, the impact fuse; the plugin writes kMarkAirburstBits on the rider's switch): the Katyusha's
+# contact factor (ROCKET_CONTACT / ROCKET_SIZE) with its low 12 bits replaced.
+ANDRYUSHA_SALVOS = 3
+ANDRYUSHA_MARK_IMPACT = struct.unpack('<f', struct.pack('<I', 0x3F8F4A36))[0]
+ANDRYUSHA_MARK_AIRBURST = struct.unpack('<f', struct.pack('<I', 0x3F8F4A37))[0]
+ANDRYUSHA_BLAST = 10.0
+ANDRYUSHA_ROCKETS = {**ROCKETS, 'AmmoCount': float(ANDRYUSHA_SALVOS * katyusha_model.ROCKET_COUNT),
+                     'AmmoHitSizeAdjust': ANDRYUSHA_MARK_IMPACT, 'AmmoExplosion': ANDRYUSHA_BLAST}
+ANDRYUSHA_NAMES = {'ja': 'アンドリューシャ 焼夷クラスター弾', 'en': 'Andryusha Incendiary Cluster Rockets',
+                   'cn': '安德柳沙燃燒子母火箭彈', 'kr': 'Andryusha Incendiary Cluster Rockets', 'sc': '安德柳沙燃烧子母火箭弹'}
 
 
 def _node(v: object) -> object:
@@ -128,7 +152,10 @@ def _node(v: object) -> object:
     return v
 
 
-def rockets_sgo(game: vc.Game) -> bytes:
+def rockets_sgo(game: vc.Game, spec: dict | None = None, names: dict | None = None) -> bytes:
+    """The launcher's weapon with `spec` (ROCKETS: the Katyusha's; ANDRYUSHA_ROCKETS) and `names` (NAMES)."""
+    spec = ROCKETS if spec is None else spec
+    names = NAMES if names is None else names
     doc = dsgo.parse(game.read('WEAPON', STOCK_WEAPON))
     r = doc.root
     if r.get('xgs_scene_object_class') != 'Weapon_VehicleShoot' or r.get('AmmoClass') != 'MissileBullet01':
@@ -137,7 +164,7 @@ def rockets_sgo(game: vc.Game) -> bytes:
     if abs(length * ROCKET_SIZE - katyusha_model.ROCKET_LEN) > 0.02:
         raise ValueError(f'{ROCKET_MODEL} 长 {length:.3f} m，AmmoSize {ROCKET_SIZE} 飞出去不是 M-13 的长度')
     stock_model = r.get('AmmoModel')
-    for key, value in ROCKETS.items():
+    for key, value in spec.items():
         if r.get(key) is None:
             raise ValueError(f'{STOCK_WEAPON} 缺少 {key}')
         r.set(key, _node(value))
@@ -145,7 +172,7 @@ def rockets_sgo(game: vc.Game) -> bytes:
     res = r.get('resource')
     res.items = [x for x in res.items if str(x).lower() != str(stock_model).lower()]
     res.items.insert(0, ROCKET_MODEL)
-    for lang, name in NAMES.items():
+    for lang, name in names.items():
         if r.get(f'name.{lang}') is not None:
             r.set(f'name.{lang}', name)
     model = r.get('animation_model')
@@ -198,22 +225,23 @@ def _raise_launcher(constraints: list) -> None:  # noqa: ANN001 - sgo values
     limit[1] = -PITCH_STOP_DEG
 
 
-def vehicle_sgo(game: vc.Game) -> bytes:
-    version, m = sgo.read(game.read('OBJECT', f'{VEHICLE.stock}.SGO'))
+def vehicle_sgo(game: vc.Game, vehicle: vc.GroundVehicle = VEHICLE) -> bytes:
+    """`vehicle`'s SGO (the Katyusha's, or the Andryusha's: the same truck and model, its own weapons)."""
+    version, m = sgo.read(game.read('OBJECT', f'{vehicle.stock}.SGO'))
     if m.get('xgs_scene_object_class') != 'Vehicle402_Rocket':
         raise ValueError(f'{VEHICLE.stock}.SGO 不是 Vehicle402_Rocket')
     model = m['animation_model']
     m['animation_model'] = [[f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB], model[1], model[2]]
     setup = m['vehicle_setup']
-    if len(setup[2]) != len(VEHICLE.weapons):
-        raise ValueError(f'{VEHICLE.stock}.SGO: {len(setup[2])} weapons, the Katyusha has {len(VEHICLE.weapons)}')
-    setup[2] = [[w, entry[1], entry[2]] for w, entry in zip(VEHICLE.weapons, setup[2])]
+    if len(setup[2]) != len(vehicle.weapons):
+        raise ValueError(f'{vehicle.stock}.SGO: {len(setup[2])} weapons, {vehicle.sgo} has {len(vehicle.weapons)}')
+    setup[2] = [[w, entry[1], entry[2]] for w, entry in zip(vehicle.weapons, setup[2])]
     for wheel in m['car_base_wheel']:
         wheel[8] = TYRE_RADIUS
     _raise_launcher(m['car_base_constraint_data'])
     cam = m['game_object_camera_setting']
     m['game_object_camera_setting'] = [list(CAMERA[0]), list(CAMERA[1]), cam[2], cam[3]]
-    m['game_object_durability'] = VEHICLE.durability
+    m['game_object_durability'] = vehicle.durability
     return sgo.write(version, m)
 
 
@@ -262,6 +290,30 @@ def check(files: dict[str, bytes]) -> None:
                               math.radians(PITCH_STOP_DEG))
     assert env['high_min_time'] * ballistics.FPS * 1.25 < w['AmmoAlive'], (env, w['AmmoAlive'])
     assert env['high_min_range'] < 0.5 * env['max_range'], env
+    check_andryusha(files, w)
+
+
+def check_andryusha(files: dict[str, bytes], katyusha: dict) -> None:
+    """The Andryusha: the Katyusha's truck (its SGO draws the same archive and model, the same launcher stop and camera)
+    with its own weapon, the Katyusha's rockets but fewer (whole salvos) and each a carrier: its mark the impact fuse's
+    (src/andryusha.h), its contact sphere the Katyusha's; and its bomblets (vcobjects.check_andryusha_bomblets)."""
+    a = sgo.load(data=files[f'OBJECT/{ANDRYUSHA.sgo}.SGO'])
+    k = sgo.load(data=files[f'OBJECT/{SGO_FILE}'])
+    assert ANDRYUSHA.model == VEHICLE.sgo and f'OBJECT/{ANDRYUSHA.sgo}.MRAB' not in files, 'one archive for both trucks'
+    assert _value(a['animation_model']) == _value(k['animation_model']), "the Andryusha draws the Katyusha's model"
+    assert [w[0] for w in a['vehicle_setup'][2]] == list(ANDRYUSHA.weapons)
+    assert _value(_pitch_limit(a['car_base_constraint_data'])) == [1.0, -PITCH_STOP_DEG, 0.0]
+    assert _value(a['game_object_camera_setting'])[:2] == _value(k['game_object_camera_setting'])[:2]
+    w = dsgo.to_py(dsgo.parse(files[f'WEAPON/{vc.ANDRYUSHA_ROCKETS}']).root)
+    assert w['LockonTargetType'] == MARK_KATYUSHA and w['AmmoClass'] == 'GrenadeBullet01', w['AmmoClass']
+    assert struct.unpack('<I', struct.pack('<f', w['AmmoHitSizeAdjust']))[0] == 0x3F8F4A36, w['AmmoHitSizeAdjust']
+    assert abs(w['AmmoSize'] * w['AmmoHitSizeAdjust'] - ROCKET_CONTACT) < 1e-3, (w['AmmoSize'], w['AmmoHitSizeAdjust'])
+    assert w['AmmoCount'] % w['FireBurstCount'] == 0 and 0 < w['AmmoCount'] <= katyusha['AmmoCount'] / 3, w['AmmoCount']
+    assert w['Ammo_CustomParameter'][0] == 0.0, 'the carrier bursts where it hits (its impact fuse)'
+    assert 0.0 < w['AmmoExplosion'] <= katyusha['AmmoExplosion'], w['AmmoExplosion']
+    for key in ('AmmoSpeed', 'AmmoGravityFactor', 'AmmoAlive', 'FireAccuracy', 'FireBurstCount', 'AmmoModel'):
+        assert w[key] == katyusha[key], (key, w[key], katyusha[key])   # the Katyusha's arc: its HUD and aim hold
+    vc.check_andryusha_bomblets({n: files[f'OBJECT/{n}'] for n in vc.ANDRYUSHA_BOMBLET_FILES})
 
 
 def build(root: str) -> dict[str, bytes]:
@@ -270,7 +322,10 @@ def build(root: str) -> dict[str, bytes]:
     arc = katyusha_model.build(game)
     katyusha_model.check(arc)
     files = {f'OBJECT/{MODEL_FILE}': arc, f'OBJECT/{SGO_FILE}': vehicle_sgo(game),
-             f'WEAPON/{vc.KATYUSHA_ROCKETS}': rockets_sgo(game)}
+             f'WEAPON/{vc.KATYUSHA_ROCKETS}': rockets_sgo(game),
+             f'OBJECT/{ANDRYUSHA.sgo}.SGO': vehicle_sgo(game, ANDRYUSHA),
+             f'WEAPON/{vc.ANDRYUSHA_ROCKETS}': rockets_sgo(game, ANDRYUSHA_ROCKETS, ANDRYUSHA_NAMES),
+             **{f'OBJECT/{n}': data for n, data in vc.andryusha_bomblets(game).items()}}
     check(files)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     # (pylib/model_lod.py)

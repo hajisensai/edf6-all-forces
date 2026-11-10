@@ -69,7 +69,7 @@ def model_stem(kind: str, vehicle: vc.GroundVehicle) -> str:
     import make_tracked_combat
     if kind in make_tracked_combat.KINDS:
         return make_tracked_combat.model_module(kind).OUT_ARC.rsplit('.', 1)[0].upper()
-    return vehicle.sgo.upper()
+    return (vehicle.model or vehicle.sgo).upper()   # one drawing another's model (the Andryusha the Katyusha's)
 
 
 for kind, vehicle in vc.GROUND_VEHICLES.items():

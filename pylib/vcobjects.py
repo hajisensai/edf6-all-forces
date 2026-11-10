@@ -896,6 +896,9 @@ class GroundVehicle:
     # Proteus's: [multipliers, params, params, [seat params], weapons, [x]]); there one entry a holder of the host's,
     # '' in `weapons` an empty one ([0.0]). None: the last entry (tools/call_weapons.py vehicle_sgo).
     weapons_at: int | None = None
+    # The OBJECT/<model>.MRAB the vehicle draws from when it is another vehicle's of the same tool (the Andryusha's is
+    # the Katyusha's: one archive, two SGOs); '' its own, OBJECT/<sgo>.MRAB.
+    model: str = ''
 
 
 def vehicle_fire_keys(vehicle: GroundVehicle) -> dict[int, list[str]]:
@@ -1025,12 +1028,19 @@ def dn_file(kind: str, ext: str) -> str:
 # wheels), the V607 truck under the Naegling's rack; its rockets are lobbed on the high arc and the EDF6AutoTurret
 # plugin aims them (LockonTargetType kMarkKatyusha); EDF6VehicleCrew shows its rider where they land.
 KATYUSHA_ROCKETS = 'EDF6VC_KATYUSHA_ROCKETS.SGO'
+# The Andryusha (test site #37, docs/andryusha-re.md; tools/make_katyusha.py builds it with the Katyusha): the same truck
+# and model, fewer rockets, each an incendiary cluster carrier src/andryusha.cpp splits (ANDRYUSHA_BOMBLET_FILES).
+ANDRYUSHA_ROCKETS = 'EDF6VC_ANDRYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'sedan': GroundVehicle('EDF6VC_SEDAN', 'V512_KEITRUCK', 'EWEAPON401',
                            ('EWEAPON401',), (), 300., 'make_sedan', (.8, 30., .0075, .7, .075, .3, .6)),
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
+    'andryusha': GroundVehicle('EDF6VC_ANDRYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
+                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
+                               ('app:/weapon/' + ANDRYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha',
+                               model='EDF6VC_KATYUSHA'),
     # The self-propelled artillery (tools/make_artillery.py): the Kepler's class (Vehicle603_Flak: a turret, twin guns),
     # the user's twin-gun tank model (an E551 hull, a twin-barrel turret; pylib/artillery_model.py); two large shells a
     # salvo, lobbed, aimed by EDF6AutoTurret.
@@ -2647,6 +2657,79 @@ BARRAGE_LIFE = 45 * 60       # frames: past the longest flight (the ballistic mi
 BARRAGE_SIZE, BARRAGE_BLAST = 6.0, 12.0   # the SGO's own (the plugin writes each round's)
 BARRAGE_BURST_RADIUS = 20.0
 BARRAGE_BURST_COLOUR = (3.0, 1.6, 0.6, 1.0)
+
+
+# ------------------------------------------------------------------------------------------ the Andryusha's bomblets
+# A bomblet of the Andryusha's (src/andryusha.cpp splits a carrier into andryusha.h kBomblets of them; src/jet_bay.cpp
+# AndryushaBomblet fires each through the EMC's table: EmcRound::andryushaBlast, andryushaFire; tools/make_katyusha.py
+# writes them) is two rounds on one arc, each a DemoIndirectFire of one round fired ballistically by the plugin (the IFC
+# solves the arc onto its aim; both at ANDRYUSHA_BOMBLET_SPEED and gravity 1, so they fly together):
+#   ANDRYUSHA_BLAST_FILE  its burst: a GrenadeBullet01 (impact fuse, a short smoke trail), ANDRYUSHA_BOMBLET_BLAST m
+#   ANDRYUSHA_FIRE_FILE   its fire: a NapalmBullet01 with the stock napalm pod's ground fire (ANDRYUSHA_NAPALM_STOCK's
+#                         Ammo_CustomParameter: FlameBullet02 burning on where it lands), no blast of its own
+# Both silent where they leave (a salvo is 128 bomblets); the burst keeps the stock blast's hit sound, quieter. The damage
+# is the plugin's (a share of the carrier's, andryusha.h).
+ANDRYUSHA_BLAST_FILE = 'EDF6VC_ANDRYUSHA_BLAST.SGO'
+ANDRYUSHA_FIRE_FILE = 'EDF6VC_ANDRYUSHA_FIRE.SGO'
+ANDRYUSHA_BOMBLET_FILES = (ANDRYUSHA_BLAST_FILE, ANDRYUSHA_FIRE_FILE)   # EmcRound's order (after the barrages')
+ANDRYUSHA_NAPALM_STOCK = 'V_506HELI_UNDER_NAPALM01.SGO'   # the N9 Eros's napalm drop pod (WEAPON, a NapalmBullet01)
+ANDRYUSHA_BOMBLET_SPEED = 0.5      # m a frame (30 m/s): reaches the impact ring (26 m) and the airburst's disc
+ANDRYUSHA_BOMBLET_LIFE = 600       # frames
+ANDRYUSHA_BOMBLET_BLAST = 6.0
+ANDRYUSHA_BLAST_CUSTOM = [0.0, -0.004, 1.0, 0.0, 0.05, 30.0]   # GrenadeBullet01: impact, no bounce, a half-second trail
+ANDRYUSHA_HIT_VOLUME = 0.4
+
+
+def andryusha_bomblets(game: Game) -> dict[str, bytes]:
+    """The Andryusha's bomblet SGOs (ANDRYUSHA_BOMBLET_FILES), {Mods/OBJECT file: bytes}."""
+    pod = dsgo.to_py(dsgo.parse(game.read('WEAPON', ANDRYUSHA_NAPALM_STOCK)).root)
+    cp = pod.get('Ammo_CustomParameter') if isinstance(pod, dict) else None
+    if (not isinstance(pod, dict) or pod.get('AmmoClass') != 'NapalmBullet01' or not isinstance(cp, list) or len(cp) < 5
+            or not isinstance(cp[4], list) or len(cp[4]) < 5 or cp[4][4] != 'FlameBullet02'):
+        raise ValueError(f'{ANDRYUSHA_NAPALM_STOCK} 不是预期的凝固汽油弹（NapalmBullet01 / FlameBullet02）')
+    out = {}
+    for name, cls, blast, custom, colour in (
+            (ANDRYUSHA_BLAST_FILE, 'GrenadeBullet01', ANDRYUSHA_BOMBLET_BLAST, ANDRYUSHA_BLAST_CUSTOM, None),
+            (ANDRYUSHA_FIRE_FILE, 'NapalmBullet01', 0.0, cp, pod.get('AmmoColor'))):
+        version, m = sgo.read(game.read('OBJECT', BARRAGE_STOCK))
+        p = m.get('indirect_fire_param')
+        if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+                or not isinstance(p[17], list) or len(p[17]) != 6 or not isinstance(p[18], list) or len(p[18]) != 6):
+            raise ValueError(f'{BARRAGE_STOCK} 不是预期的任务火箭弹（DemoIndirectFire）')
+        for i, value in ((2, 1), (3, 0), (5, ANDRYUSHA_BOMBLET_SPEED), (6, 1.0), (7, 1.0), (8, 1.0), (9, blast),
+                         (10, ANDRYUSHA_BOMBLET_LIFE), (11, 0), (15, 0)):
+            p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+        p[0] = [0.0, 0.0]
+        p[4] = cls
+        p[13] = copy.deepcopy(custom)
+        if colour is not None:
+            p[12] = [float(c) for c in colour]
+        p[14], p[16] = 0, 0
+        p[17][2] = 0.0
+        p[18][2] = ANDRYUSHA_HIT_VOLUME if blast > 0.0 else 0.0
+        m['indirect_fire_damage'] = 0.0
+        out[name] = sgo.write(version, m)
+    return out
+
+
+def check_andryusha_bomblets(files: dict[str, bytes]) -> None:
+    """The bomblets as src/jet_bay.cpp AndryushaBomblet fires them: one round each, ballistic at one speed and gravity
+    (the two fly one arc), no wait, damage 0 (the plugin's); the burst a GrenadeBullet01 with a blast and an impact fuse,
+    the fire a NapalmBullet01 whose custom parameter spawns FlameBullet02 where it lands."""
+    assert list(files) == list(ANDRYUSHA_BOMBLET_FILES), list(files)
+    ps = []
+    for name, cls in zip(ANDRYUSHA_BOMBLET_FILES, ('GrenadeBullet01', 'NapalmBullet01')):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == cls, (name, p[4])
+        assert p[2] == 1 and p[15] == 0 and p[11] == 0 and m['indirect_fire_damage'] == 0.0 and p[17][2] == 0.0, (name, p)
+        ps.append(p)
+    blast, fire = ps
+    assert blast[5] == fire[5] == ANDRYUSHA_BOMBLET_SPEED and blast[6] == fire[6] == 1.0, (blast[5:7], fire[5:7])
+    assert blast[9] == ANDRYUSHA_BOMBLET_BLAST and fire[9] == 0.0 and blast[13][0] == 0.0, (blast[9], fire[9], blast[13])
+    assert fire[13][4][4] == 'FlameBullet02', fire[13]
+    # The ring an impact throws them to is within their reach (src/andryusha.h kImpactRingMax 26 m: 30 m/s reaches ~60 m).
+    assert (ANDRYUSHA_BOMBLET_SPEED * 60.0) ** 2 / 14.7 > 2 * 26.0
 
 
 def barrage_rounds(game: Game) -> dict[str, bytes]:

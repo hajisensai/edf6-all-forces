@@ -143,6 +143,7 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_XM_MEDIUM_TRUCK_CARGO",L"EDF6VC_CALL_XM_MEDIUM_TRUCK_CARGO.SGO",L"EDF6VC_XM_MEDIUM_TRUCK_CARGO.SGO"},
     {L"EDF6VC_CALL_XM_SMALL_MECH",L"EDF6VC_CALL_XM_SMALL_MECH.SGO",L"EDF6VC_XM_SMALL_MECH.SGO"},
     {L"EDF6VC_CALL_XM_LARGE_MECH",L"EDF6VC_CALL_XM_LARGE_MECH.SGO",L"EDF6VC_XM_LARGE_MECH.SGO"},
+    {L"EDF6VC_CALL_ANDRYUSHA",L"EDF6VC_CALL_ANDRYUSHA.SGO",L"EDF6VC_ANDRYUSHA.SGO"},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
 // The rows of the supports moved to the map (2026-10-26): their placeholders' ids, un-owned at every save load.
