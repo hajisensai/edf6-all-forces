@@ -331,6 +331,13 @@ struct Config {
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
     int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)
+    // The damage numbers (dmgnum.cpp, dmgnum.h): weak spot / friendly fire hits in their own colours, the NPCs' and the
+    // support units' hits shown too.
+    bool damageNumberColors=true;   // ini DamageNumberColors
+    int damageNumberWeakColor=0xFFC800;      // ...0xRRGGBB
+    int damageNumberFriendlyColor=0xFF4040;
+    bool damageNumberAllies=true;   // ini DamageNumberAllies
+    int damageNumberAllyColor=0xFFFFFF;      // ...an ally's normal hit (0xFFFFFF: the stock white)
     // The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.
     bool debugSpawn=false;
     int debugSpawnKey=0x77;         // ...its menu opened / shut (F8; Windows virtual-key codes, 0: none)

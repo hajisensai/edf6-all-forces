@@ -388,6 +388,12 @@ template<class Fn> int Redirect(unsigned site,unsigned target,void* hook,Fn* nex
 }
 }  // namespace
 
+dmgstat::Side AttackerSide(unsigned char* attacker) noexcept {
+    if(!attacker || !Readable(attacker,kTeam+4))return dmgstat::Side::world;
+    if(EnemyTeam(At<std::int32_t>(attacker,kTeam)))return dmgstat::Side::enemy;
+    return SideOf(attacker,nullptr);
+}
+
 bool InstallDamageStats() noexcept {
     __try {
         if(!HookDamage()){Log("HOOK damageStats: 0x547C30's head is not the stock one: the statistics are off");return false;}
