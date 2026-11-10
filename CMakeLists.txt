@@ -1011,6 +1011,9 @@ add_test(NAME frozen_cockpit_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
 add_test(NAME bc5_normals COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bc5_normals.py")
+# The model conversion chain's quality fixes (docs/model-quality-1110.md): DXT1 candidates, auto-smoothed normals,
+# glTF surface maps, float positions past obj_model.PRECISE_EXTENT.
+add_test(NAME model_quality COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_quality.py")
 add_test(NAME model_workers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_workers.py")
 # Its two parallel jobs wait for each other however long the second worker takes to start: the hang guard is here.
 set_tests_properties(model_workers PROPERTIES TIMEOUT 600)

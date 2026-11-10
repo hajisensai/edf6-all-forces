@@ -5,14 +5,16 @@
                               normals (when given), texture coordinates (TEXCOORD_0, when given), triangle indices
                               into them, and each triangle's material
     scene.materials           name, base colour (linear RGBA), emissive colour (linear RGB), the base colour
-                              texture's image (its bytes and MIME type: from a buffer view, a file or a data URI)
-                              and the alpha mode
+                              texture's image (its bytes and MIME type: from a buffer view, a file or a data URI),
+                              the alpha mode, the normal map, and the surface maps with their factors: metallic-
+                              roughness, occlusion (its strength), or specular-glossiness (pylib/pbr_maps.py turns
+                              them into the game's parameter map)
     scene.mesh                each triangle's mesh node (tools/prep_sazabi_rifle.py picks the rifle out by it)
 
-Only what a static export uses: no skins, no animations, no sparse accessors, no Draco or meshopt compression, only
-the base colour texture (a normal or metallic map is ignored with its factors kept; a material in the older
-KHR_materials_pbrSpecularGlossiness workflow gives its diffuse texture and factor as the base colour), triangle
-primitives (mode 4) only. Anything else is an error, not a guess.
+Only what a static export uses: no skins, no animations, no sparse accessors, no Draco or meshopt compression (a
+material in the older KHR_materials_pbrSpecularGlossiness workflow gives its diffuse texture and factor as the base
+colour, its specular-glossiness map and factors as they are), triangle primitives (mode 4) only. Anything else is an
+error, not a guess.
 """
 from __future__ import annotations
 
@@ -49,6 +51,13 @@ class Material:
     alpha_mode: str = 'OPAQUE'      # OPAQUE, MASK, BLEND
     normal: bytes | None = None     # the normal texture's image file, None: none (its green: the source's own, which
                                     # glTF says is +Y up but downloads do not all keep: texfile_accel.directx_normals)
+    workflow: str = 'metal'         # 'metal' (metallic-roughness) or 'specular' (KHR_materials_pbrSpecularGlossiness)
+    metal_rough: bytes | None = None    # metallicRoughnessTexture's image (G roughness, B metalness, linear)
+    occlusion: bytes | None = None      # occlusionTexture's image (R), its strength
+    occlusion_strength: float = 1.0
+    spec_gloss: bytes | None = None     # specularGlossinessTexture's image (RGB specular, sRGB; A glossiness, linear)
+    specular: tuple[float, float, float] = (1.0, 1.0, 1.0)     # specularFactor, glossinessFactor
+    glossiness: float = 1.0
 
 
 @dataclass
@@ -141,18 +150,25 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
         if sg is not None:   # the older specular-glossiness workflow: its diffuse is the base colour
             base = tuple(float(x) for x in sg.get('diffuseFactor', (1.0, 1.0, 1.0, 1.0)))
             tex = sg.get('diffuseTexture', tex)
-        if tex is not None and buffers is not None:
-            source = g['textures'][tex['index']].get('source')
-            if source is not None:
-                texture, mime = _image(g, source, buffers, base_dir)
-        normal = None
-        ntex = m.get('normalTexture')
-        if ntex is not None and buffers is not None:
-            source = g['textures'][ntex['index']].get('source')
-            if source is not None:
-                normal = _image(g, source, buffers, base_dir)[0]
+
+        def image(ref: dict | None) -> tuple[bytes, str] | None:
+            if ref is None or buffers is None:
+                return None
+            source = g['textures'][ref['index']].get('source')
+            return None if source is None else _image(g, source, buffers, base_dir)
+
+        got = image(tex)
+        if got is not None:
+            texture, mime = got
+        maps = {k: (image(ref) or (None,))[0] for k, ref in (
+            ('normal', m.get('normalTexture')), ('metal_rough', None if sg else pbr.get('metallicRoughnessTexture')),
+            ('occlusion', m.get('occlusionTexture')), ('spec_gloss', (sg or {}).get('specularGlossinessTexture')))}
         out.append(Material(m.get('name', f'material{i}'), base, em, float(pbr.get('metallicFactor', 1.0)),
-                            float(pbr.get('roughnessFactor', 1.0)), texture, mime, m.get('alphaMode', 'OPAQUE'), normal))
+                            float(pbr.get('roughnessFactor', 1.0)), texture, mime, m.get('alphaMode', 'OPAQUE'),
+                            maps['normal'], 'specular' if sg is not None else 'metal', maps['metal_rough'],
+                            maps['occlusion'], float(m.get('occlusionTexture', {}).get('strength', 1.0)),
+                            maps['spec_gloss'], tuple(float(x) for x in (sg or {}).get('specularFactor', (1.0,) * 3)),
+                            float((sg or {}).get('glossinessFactor', 1.0))))
     return out
 
 

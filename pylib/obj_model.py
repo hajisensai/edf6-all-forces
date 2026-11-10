@@ -47,6 +47,11 @@ Vec3 = tuple[float, float, float]
 Vec2 = tuple[float, float]
 Skin = tuple[tuple[int, float], ...]       # (bone, weight) pairs, weights summing to 1
 MAX_VERTS = 0xFFFF                          # u16 index buffers: fewer than 65536 vertices per mesh
+# The stock vehicle layouts store positions as half4 (format 7), in model space: past PRECISE_EXTENT metres from the
+# origin a half's step is 2^-6 m or more (up to 7.8 mm off, 62.5 mm at the Dreadnought's 250 m: small faces tilt or
+# collapse), so a model reaching that far has its positions widened to float4 (precise_positions; the cockpits' layout,
+# docs/model-quality-1110.md 4).
+PRECISE_EXTENT = 16.0
 WELD = 1e-4                                 # m: positions closer than this are one point (stock vertices, half
                                             # floats, are >= 1e-3 apart; OBJ exports round to 1e-6)
 
@@ -727,6 +732,23 @@ def _row(elems: list, v: Vertex, tb: tuple[Vec3, Vec3], skin: Skin) -> list[tupl
     return row
 
 
+def precise_positions(mesh: Mesh) -> Mesh:
+    """`mesh`'s vertex layout with float4 positions (format 1) instead of half4 (format 7), the elements after them
+    moved 8 bytes on, every other element as it was; a layout already float stays. No vertices (vdata, indices)."""
+    position = next(e for e in mesh.elems if e.name.lower() == 'position')
+    if position.fmt != 7:
+        return mesh
+    elems = [replace(e, fmt=1) if e is position else
+             replace(e, offset=e.offset + 8 if e.offset > position.offset else e.offset) for e in mesh.elems]
+    return replace(mesh, vsize=mesh.vsize + 8, elems=elems, vdata=b'', indices=b'')
+
+
+def position_layout(template: Mesh, extent: float) -> Mesh:
+    """The layout a model whose vertices reach `extent` metres (the largest |coordinate|) packs into: `template`'s, its
+    positions widened past PRECISE_EXTENT."""
+    return precise_positions(template) if extent > PRECISE_EXTENT else template
+
+
 def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material: int) -> list[Mesh]:
     """Skinned meshes (material index `material`, mesh_index 0: the caller numbers them) of the pieces' triangles in
     `template`'s vertex layout, each with fewer than 65536 vertices (a piece is never split across meshes unless it
@@ -734,9 +756,12 @@ def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material
     Two kinds of triangle draw nothing and are not written (drawn_triangles): one with two corners at the same point as
     written (no area; the Sazabi's OBJ has 1,604), and one whose three vertices, packed, are those of one written before in
     the same turn (the same surface drawn twice). Every vertex's tangent frame is still taken over all of its piece's
-    triangles, so what is written is byte for byte what was, less those."""
+    triangles, so what is written is byte for byte what was, less those. Pieces reaching past PRECISE_EXTENT are
+    written with float positions (position_layout)."""
     if not any(e.name.lower() == 'blendindices' for e in template.elems):
         raise ObjError('the template mesh is not skinned')
+    template = position_layout(template, max((abs(c) for part, _s in pieces for v in part.verts for c in v.pos),
+                                             default=0.0))
     out: list[Mesh] = []
     rows: list[bytes] = []
     idx: list[int] = []

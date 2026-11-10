@@ -6,7 +6,8 @@ LICENSE.txt) into the model folders the installer builds the two tracked vehicle
                            (top-left origin), triangles; and per collision proxy the triangles it is fitted to
         model.json         the parts (bone, material), the materials (stock template, texture files), the bones' new
                            origins, the visual rotor, the muzzles and case ports (model space), the collision groups
-        textures/          the source's albedo and normal JPEGs as they are, and an occlusion PNG per material
+        textures/          the source's albedo, normal and specular (map_Ks) JPEGs as they are, an occlusion PNG per
+                           material, and a roughness / metalness map where the source has one (glb_to_wt_obj's map_RM)
         LICENSE.txt        the attribution the licence asks for
 
 The source is the Sketchfab "source" download's OBJ (its own zip inside the zip: M163.obj / BMPT.obj with their MTL and
@@ -20,8 +21,9 @@ It needs numpy, Pillow and scipy (the installer only reads the result). The sour
 What the source is (measured 2026-10-21, docs/wt-tracked-models.md): War Thunder's own node names survive as OBJ
 objects (`vehicle#bone_turret_59_0`: node, then the exporter's object and material numbers), one material each; +Y up,
 +Z forward, +X the vehicle's left (`wheel_l_*` are at +x): the game's axes, metres, the track's ground at y = 0. Its
-texture coordinates are the engine's with v negated (v' = -v: top-left origin). It has no normals: they are smoothed
-here within AUTO_SMOOTH. Its winding is counter-clockwise seen from outside like the game's (checked by the hull's
+texture coordinates are the engine's with v negated (v' = -v: top-left origin). It has no normals: they are made here
+as Sketchfab made them for the upload (pylib/mesh_normals.py: welded, smoothed along edges within 45 degrees), the
+normals its normal maps are seen with on the model's page; a source with `vn` keeps its own. Its winding is counter-clockwise seen from outside like the game's (checked by the hull's
 signed volume; a source that is not gets every triangle turned).
 
 Bones (the V603 skeleton the native Vehicle603_Flak drives; pylib/wt_tracked.py moves their origins here):
@@ -35,7 +37,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import re
 import shutil
@@ -46,9 +47,11 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
+sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 
-AUTO_SMOOTH = 50.0              # degrees: faces meeting sharper than this keep a hard edge (armour plates)
-OCC_FLOOR = 110                 # the occlusion map's black is this (stock body maps: occlusion mean ~198 of 255)
+import mesh_normals  # noqa: E402
+import pbr_maps  # noqa: E402
+
 MIN_HULL = 0.06                 # m: a collision piece smaller than this across is left out (bolts, handles)
 MAX_HULLS = 48                  # collision pieces a proxy keeps (the largest; a compressed mesh holds at most 127)
 IDLER_GAP = 0.04                # m: between the split idler's halves' collision (siblings collide)
@@ -303,13 +306,17 @@ class Source:
     objects: list[str]           # OBJ object names less the exporter's material number ('vehicle#wheel_l_01_72')
     materials: list[str]
     mtl: dict[str, dict[str, str]]   # material -> {'map_Kd': file, 'map_normal': file, 'map_ao': file, ...}
-    normals: np.ndarray | None = None   # (n, 3) per position, the source's own (None: smoothed here, AUTO_SMOOTH)
+    normals: np.ndarray | None = None   # (k, 3) the source's own (None: mesh_normals.auto_smooth here)
+    tri_n: np.ndarray | None = None     # (t, 3) rows of `normals` (None: by position, tri_v)
 
 
 def read_source(path: str) -> Source:
-    """The OBJ (triangles only: the WT export is), its MTL's texture maps."""
+    """The OBJ (triangles only: the WT export is), its MTL's texture maps; its `vn` normals when every face gives
+    them (tools/glb_to_wt_obj.py's: the glTF's own)."""
     pos: list[list[str]] = []
     uv: list[list[str]] = []
+    vn: list[list[str]] = []
+    tn: list[tuple[int, int, int]] = []
     tv: list[tuple[int, int, int]] = []
     tt: list[tuple[int, int, int]] = []
     to: list[int] = []
@@ -325,12 +332,16 @@ def read_source(path: str) -> Source:
                 pos.append(line.split()[1:4])
             elif line.startswith('vt '):
                 uv.append(line.split()[1:3])
+            elif line.startswith('vn '):
+                vn.append(line.split()[1:4])
             elif line.startswith('f '):
                 c = [x.split('/') for x in line.split()[1:]]
                 if len(c) != 3 or any(len(x) < 2 or not x[1] for x in c):
                     raise ValueError(f'{path}: a face that is not a textured triangle: {line.strip()}')
                 tv.append(tuple(int(x[0]) - 1 for x in c))      # type: ignore[arg-type]
                 tt.append(tuple(int(x[1]) - 1 for x in c))      # type: ignore[arg-type]
+                if all(len(x) > 2 and x[2] for x in c):
+                    tn.append(tuple(int(x[2]) - 1 for x in c))  # type: ignore[arg-type]
                 to.append(cur_o)
                 tm.append(cur_m)
             elif line.startswith(('o ', 'g ')):
@@ -359,9 +370,15 @@ def read_source(path: str) -> Source:
                     cur = mtl.setdefault(t[1].strip(), {})
                 elif cur is not None and t[0].startswith('map_') and len(t) > 1:
                     cur[t[0]] = t[1].strip()
+    if tn and len(tn) != len(tv):
+        raise ValueError(f'{path}: {len(tv) - len(tn)} faces without normals beside {len(tn)} with')
+    normals = np.asarray(vn, dtype=np.float64) if tn else None
+    if normals is not None:
+        normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-20)
     return Source(path, np.asarray(pos, dtype=np.float64), np.asarray(uv, dtype=np.float64),
                   np.asarray(tv, dtype=np.int64), np.asarray(tt, dtype=np.int64), np.asarray(to, dtype=np.int64),
-                  np.asarray(tm, dtype=np.int64), objects, materials, mtl)
+                  np.asarray(tm, dtype=np.int64), objects, materials, mtl, normals,
+                  np.asarray(tn, dtype=np.int64) if tn else None)
 
 
 def node(obj: str) -> str:
@@ -414,6 +431,8 @@ def drop(v: Vehicle, src: Source) -> None:
     if gone.any():
         keep = ~gone
         src.tri_v, src.tri_t, src.tri_obj, src.tri_mat = (a[keep] for a in (src.tri_v, src.tri_t, src.tri_obj, src.tri_mat))
+        if src.tri_n is not None:
+            src.tri_n = src.tri_n[keep]
 
 
 def box(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -437,46 +456,6 @@ def instances(src: Source, name: str) -> list[np.ndarray]:
 
 
 # ------------------------------------------------------------------------------------------ geometry
-
-def corner_normals(P: np.ndarray, tv: np.ndarray) -> np.ndarray:
-    """(normals, (t, 3) corner -> normal row): around each position the area-weighted face normals, grouped greedily
-    (a face joins the first group whose first face is within AUTO_SMOOTH of it). A zero-area face (the sources have
-    some) seeds no group: it joins the position's first, or stands up (+y) where the position has no other face."""
-    fn = np.cross(P[tv[:, 1]] - P[tv[:, 0]], P[tv[:, 2]] - P[tv[:, 0]])
-    area = np.linalg.norm(fn, axis=1)
-    unit = fn / np.maximum(area, 1e-20)[:, None]
-    flat = area <= 1e-20
-    cos_lim = math.cos(math.radians(AUTO_SMOOTH))
-    corners = tv.reshape(-1)
-    order = np.argsort(corners, kind='stable')
-    starts = np.flatnonzero(np.r_[True, corners[order][1:] != corners[order][:-1]])
-    ends = np.r_[starts[1:], len(order)]
-    normal_of = np.empty(len(corners), dtype=np.int64)
-    normals: list[np.ndarray] = []
-    for s, e in zip(starts, ends):
-        members = order[s:e]
-        members = members[np.argsort(flat[members // 3], kind='stable')]   # the zero-area faces last
-        faces = members // 3
-        groups: list[tuple[np.ndarray, np.ndarray, list[int]]] = []    # (accumulated normal, seed unit, members)
-        for c, f in zip(members, faces):
-            if flat[f]:
-                if not groups:
-                    groups.append((np.array((0.0, 1.0, 0.0)), np.array((0.0, 1.0, 0.0)), []))
-                groups[0][2].append(c)
-                continue
-            for acc, seed, mem in groups:
-                if float(seed @ unit[f]) >= cos_lim:
-                    acc += fn[f]
-                    mem.append(c)
-                    break
-            else:
-                groups.append((fn[f].copy(), unit[f], [c]))
-        for acc, seed, mem in groups:
-            n = np.linalg.norm(acc)
-            normal_of[mem] = len(normals)
-            normals.append(acc / n if n > 1e-20 else seed)
-    return np.asarray(normals), normal_of.reshape(-1, 3)
-
 
 def winding_flipped(src: Source, hull: str = 'x_root') -> bool:
     """Whether the triangles are clockwise seen from outside: the hull's (x_root) signed volume is negative."""
@@ -536,33 +515,39 @@ def collision_hulls(P: np.ndarray, T: np.ndarray) -> tuple[np.ndarray, np.ndarra
 
 # ------------------------------------------------------------------------------------------ materials
 
-def texture_set(src: Source, material: str) -> tuple[str, str | None, str | None]:
-    """(albedo, normal, occlusion) files of a source material, relative to the OBJ's folder. The BMPT's MTL leaves
-    out its occlusion maps: `<stem>_ao_ao.jpg` beside the albedo `<stem>_c*.jpg` is taken when it exists."""
+# model.json material key <- MTL map: the maps a source material has besides its albedo (map_Kd). map_Ks: War
+# Thunder's grey specular map (`<stem>_n_s`: roughness and metalness per texel, wt_tracked.SPECULAR_RM); map_RM:
+# tools/glb_to_wt_obj.py's roughness / metalness map (pylib/pbr_maps.py: R roughness, G metalness, the game's).
+MAPS = (('normal', 'map_normal'), ('occlusion', 'map_ao'), ('specular', 'map_Ks'), ('roughness_metal', 'map_RM'))
+
+
+def texture_set(src: Source, material: str) -> dict[str, str]:
+    """model.json key -> file (relative to the OBJ's folder) of a source material's maps: 'albedo' and those of MAPS
+    it has. The BMPT's MTL leaves out its occlusion maps: `<stem>_ao_ao.jpg` beside the albedo `<stem>_c*.jpg` is
+    taken when it exists."""
     m = src.mtl.get(material, {})
     albedo = m.get('map_Kd')
     if not albedo:
         raise ValueError(f'{material}: no map_Kd')
     folder = os.path.dirname(src.path)
-    normal = m.get('map_normal')
-    ao = m.get('map_ao')
-    if ao is None:
+    out = {'albedo': albedo, **{key: m[mtl] for key, mtl in MAPS if m.get(mtl)}}
+    if 'occlusion' not in out:
         stem = re.sub(r'_c(_[a-z_0-9]+)?\.jpg$', '', albedo)
         guess = stem + '_ao_ao.jpg'
-        ao = guess if os.path.isfile(os.path.join(folder, guess)) else None
-    for f in (albedo, normal, ao):
-        if f and not os.path.isfile(os.path.join(folder, f)):
+        if os.path.isfile(os.path.join(folder, guess)):
+            out['occlusion'] = guess
+    for f in out.values():
+        if not os.path.isfile(os.path.join(folder, f)):
             raise ValueError(f'{material}: {f} not found')
-    return albedo, normal, ao
+    return out
 
 
 def occlusion_png(src_file: str, out_file: str) -> None:
-    """The occlusion map rescaled so that its black is OCC_FLOOR (it multiplies the stock shader's lighting)."""
+    """The occlusion map rescaled so that its black is OCC_FLOOR (pbr_maps.occlusion_floor)."""
     from PIL import Image
     with Image.open(src_file) as im:
         g = np.asarray(im.convert('L'), dtype=np.float64)
-    out = (OCC_FLOOR + g * (255 - OCC_FLOOR) / 255).round().astype(np.uint8)
-    Image.fromarray(out, 'L').save(out_file, optimize=True)
+    Image.fromarray(pbr_maps.occlusion_floor(g), 'L').save(out_file, optimize=True)
 
 
 # ------------------------------------------------------------------------------------------ build
@@ -572,20 +557,23 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
     if winding_flipped(src, v.hull):
         src.tri_v = src.tri_v[:, ::-1].copy()
         src.tri_t = src.tri_t[:, ::-1].copy()
+        if src.tri_n is not None:
+            src.tri_n = src.tri_n[:, ::-1].copy()
         flipped = True
     else:
         flipped = False
     bones = triangle_bones(v, src)
     if src.normals is not None:     # the source's own: its normal maps were baked on them
-        normals, normal_of = src.normals, src.tri_v
+        normals = src.normals
+        normal_of = src.tri_n if src.tri_n is not None else src.tri_v
         # a corner whose own normal is degenerate (the X-Morph JAGUAR's mesh has zero ones) takes the faces' around it
         bad = np.linalg.norm(normals, axis=1)[normal_of] < 0.5
         if bad.any():
-            computed, computed_of = corner_normals(src.positions, src.tri_v)
-            normal_of = np.where(bad, computed_of.reshape(normal_of.shape) + len(normals), normal_of)
+            computed, computed_of = mesh_normals.auto_smooth(src.positions, src.tri_v)
+            normal_of = np.where(bad, computed_of + len(normals), normal_of)
             normals = np.vstack((normals, computed))
     else:
-        normals, normal_of = corner_normals(src.positions, src.tri_v)
+        normals, normal_of = mesh_normals.auto_smooth(src.positions, src.tri_v)
 
     # materials: one per distinct texture set; the tracks under the native names the SGO scrolls
     tex_dir = os.path.join(out, 'textures')
@@ -599,22 +587,22 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         sel = src.tri_mat == k
         if not sel.any():
             continue
-        albedo, normal, ao = texture_set(src, m)
+        maps = texture_set(src, m)
         for side in ('L', 'R', None):
             tsel = sel & (tri_node == f'track_{side.lower()}') if side else sel & ~np.isin(tri_node, ['track_l', 'track_r'])
             if not tsel.any():
                 continue
-            key = (albedo, normal, ao, side)
+            key = (tuple(sorted(maps.items())), side)
             if key not in mat_key:
                 files = {}
-                for kind, f in (('albedo', albedo), ('normal', normal)):
-                    if f:
+                for kind, f in maps.items():
+                    if kind == 'occlusion':
+                        files[kind] = 'textures/' + os.path.basename(f).rsplit('.', 1)[0] + '_occ.png'
+                        occlusion_png(os.path.join(folder, f), os.path.join(out, files[kind]))
+                    else:
                         files[kind] = 'textures/' + os.path.basename(f)
                         shutil.copyfile(os.path.join(folder, f), os.path.join(out, files[kind]))
-                if ao:
-                    files['occlusion'] = 'textures/' + os.path.basename(ao).rsplit('.', 1)[0] + '_occ.png'
-                    occlusion_png(os.path.join(folder, ao), os.path.join(out, files['occlusion']))
-                stem = re.sub(r'\.[a-z]+$', '', os.path.basename(albedo))
+                stem = re.sub(r'\.[a-z]+$', '', os.path.basename(maps['albedo']))
                 name = f'v603_kyata_{side}' if side else 'wt_' + stem
                 if any(s['name'] == name for s in mat_specs):
                     name += f'_{len(mat_specs)}'
@@ -752,7 +740,8 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
     os.makedirs(out, exist_ok=True)
     np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
     info = {'format': FORMAT, 'kind': v.kind, 'title': v.title, 'source': v.source_url,
-            'prepared_from': os.path.basename(src.path), 'winding_flipped': flipped, 'auto_smooth_deg': AUTO_SMOOTH,
+            'prepared_from': os.path.basename(src.path), 'winding_flipped': flipped,
+            'normals': 'source' if src.normals is not None else f'auto_smooth {mesh_normals.AUTO_SMOOTH:g}',
             'materials': mat_specs, 'parts': parts, 'origins': origins, 'visual_bones': visual,
             'wheels': wheels, 'muzzles': muzzles, 'ejections': ejections, 'collision': collision,
             'triangles': int(len(src.tri_v))}

@@ -62,6 +62,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path[:0] = [HERE, os.path.join(ROOT, 'pylib')]
 
+import mesh_normals              # noqa: E402
 import obj_model as om          # noqa: E402
 import prep_wt_tracked as prep  # noqa: E402
 import xm_model as xm           # noqa: E402
@@ -780,7 +781,7 @@ def prepare_car(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
             gear[f'{name}_{side}'] = {'centre': [float(c) * SCALE for c in wheel['centre']],
                                       'radius': wheel['radius'] * SCALE, 'half': wheel['half'] * SCALE}
     P = um.positions.astype(np.float64) * SCALE
-    normals, normal_of = prep.corner_normals(P, um.triangles)
+    normals, normal_of = mesh_normals.auto_smooth(P, um.triangles)
     out = os.path.join(out_root, xm_units.folder(unit.key))
     if os.path.isdir(out):
         shutil.rmtree(out)
