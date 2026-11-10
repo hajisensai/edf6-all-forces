@@ -61,6 +61,7 @@ struct Ui {
     Want want;
     Plan plan;
     CameraShift camera;
+    Turntable turntable;         // a vehicle's turn; the stand's yaw put back after it
     std::int32_t savedHidden=0;
     unsigned posted=0;           // soldier builds asked for (shared.applied catches up)
     unsigned sinceTick=0;
@@ -216,7 +217,7 @@ void Forget() noexcept {
     AcquireSRWLockExclusive(&shared.lock);
     shared.armed=nullptr;shared.on=false;shared.applied=0;
     ReleaseSRWLockExclusive(&shared.lock);
-    ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.posted=0;
+    ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
 }
 
 std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
@@ -225,12 +226,14 @@ std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
         Frame(view);
         ours=ui.view==view && ui.menuOpen;
         if(ours){yaw=At<float>(view,kViewYaw);zoom=At<float>(view,kViewZoom);}
+        // The menu closed while a vehicle turned: the stand's own yaw back before the view's frame (the player's model).
+        else if(ui.view==view && ui.turntable.on)Put<float>(view,kViewYaw,ui.turntable.Hold(At<float>(view,kViewYaw),false));
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("ROOM preview: fault in the view's frame; preview off for this view");Forget();}
     const std::uintptr_t r=nextUpdate(view,ctx);
     // While the menu is open its keys are the menu's: the view's own turn / zoom from them is put back; a vehicle turns
-    // slowly on its stand instead (every pylon comes round).
+    // slowly on its stand instead (every pylon comes round), and a soldier after it faces where the stand faced before.
     if(ours) {
-        if(ui.want.on && ui.want.body!=VehicleBody::none)yaw=Turned(yaw,kVehicleTurn);
+        yaw=ui.turntable.Hold(yaw,ui.want.on && ui.want.body!=VehicleBody::none);
         Put<float>(view,kViewYaw,yaw);Put<float>(view,kViewZoom,zoom);
     }
     return r;

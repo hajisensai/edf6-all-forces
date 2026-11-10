@@ -217,6 +217,22 @@ constexpr float Turned(float yaw,float by) noexcept {
     float y=yaw+by;
     return y>=kTwoPi ? y-kTwoPi : y<0.f ? y+kTwoPi : y;
 }
+// The turntable's lifecycle: the yaw the stand had when a vehicle first turned is kept, and put back as soon as no
+// vehicle turns any more (a soldier under the cursor again, the menu closed, the view forgotten), so the soldier and
+// afterwards the player's own model face where they faced before (the menu otherwise never turns the model).
+struct Turntable {
+    bool on=false;
+    float base=0.f;
+    // The yaw to hold this frame (`yaw` the one held so far): turning, it advances; stopping, the saved yaw.
+    float Hold(float yaw,bool turn) noexcept {
+        if(turn) {
+            if(!on){on=true;base=yaw;}
+            return Turned(yaw,kVehicleTurn);
+        }
+        if(on){on=false;return base;}
+        return yaw;
+    }
+};
 
 // --- The planner ---
 // What the menu asks for, what the view shows, what to send it. One step a view frame (the view's own update: the
