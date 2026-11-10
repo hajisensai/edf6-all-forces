@@ -53,6 +53,15 @@ MIN_TRIANGLES = {'gunship': 30000, 'transport': 20000}
 # The real C-130's span and length (m: 40.41 x 29.79, the source's Read-Me) the model keeps, within SIZE_SLACK.
 SIZE = {'span': 40.41, 'length': 29.79}
 SIZE_SLACK = 0.5
+# The windows (tools/prep_c130.py: c130.ac's vitres / hublotBD / hublotBG, material GLASS) are objects of their own laid in
+# the airframe's (AIRFRAME) openings, and their rims miss the frame's vertices: of their 548 vertices 464 lie within
+# 0.1 mm of one, the rest 0.26 .. 11.8 mm off (the windscreen's lower edge: 0.75 mm low, up to 2.9 mm aft). Stored as
+# half4 the cracks that leaves closed by chance (half steps 2 mm at y 2-4 m, 7.8 mm at z 8-16 m); as float4 (the model
+# passes obj_model.PRECISE_EXTENT) they stay open, wedges a ray from the flight deck threads (cockpits.exposed: the
+# deck's panel "seen from outside"), hairlines in the drawn hull. seal_windows puts every glass vertex on the frame's
+# nearest vertex: none of the glass's triangles collapses or turns over (the worst turns 6.5 degrees), its area -0.2 %.
+GLASS, AIRFRAME = 'glass', 'c130'
+SEAL = 0.015   # m: the furthest a glass vertex may be from the frame's nearest (11.8 mm measured, 2026-11-11)
 
 
 class C130ModelError(Exception):
@@ -133,6 +142,32 @@ def _textures(folder: str, model: str, material: str, made: bool = True) -> tupl
     return files, dict(zip(BODY_SLOTS, files))
 
 
+def seal_windows(parts: list[om.Part]) -> list[om.Part]:
+    """`parts` with every GLASS vertex moved onto the AIRFRAME's nearest vertex (the windows' rims onto the openings'
+    frames: see SEAL); a glass vertex further than SEAL from the frame, or a glass triangle that would collapse or turn
+    over, is a model folder this was not measured on."""
+    import numpy as np
+    frame = np.unique(np.array([v.pos for p in parts if p.material == AIRFRAME for v in p.verts], dtype=np.float64), axis=0)
+    _req(len(frame) > 0, f'no {AIRFRAME} material: the model folder is not tools/prep_c130.py\'s')
+    out = []
+    for p in parts:
+        if p.material != GLASS:
+            out.append(p)
+            continue
+        pos = np.array([v.pos for v in p.verts], dtype=np.float64)
+        near = np.empty(len(pos), dtype=np.int64)
+        for a in range(0, len(pos), 64):
+            near[a:a + 64] = (((pos[a:a + 64, None, :] - frame[None]) ** 2).sum(2)).argmin(1)
+        off = np.linalg.norm(frame[near] - pos, axis=1)
+        _req(off.max() <= SEAL, f'{p.name}: a window vertex {off.max() * 1000:.1f} mm from the airframe (at most '
+             f'{SEAL * 1000:g}): the model folder is not tools/prep_c130.py\'s')
+        tris = np.array(p.tris, dtype=np.int64).reshape(-1, 3)
+        was, now = (np.cross(q[tris[:, 1]] - q[tris[:, 0]], q[tris[:, 2]] - q[tris[:, 0]]) for q in (pos, frame[near]))
+        _req(bool(((was * now).sum(1) > 0).all()), f'{p.name}: sealing the windows would collapse or turn a triangle over')
+        out.append(replace(p, verts=[replace(v, pos=tuple(float(c) for c in frame[k])) for v, k in zip(p.verts, near)]))
+    return out
+
+
 def build_model(game, folder: str, model: str, textures: bool = True) -> tuple[Mdb, dict[str, bytes], dict]:  # noqa: ANN001
     """(model, its textures {file: DDS}, info): `game` a rootcpk.Game. Without `textures` the textures are named, not made
     (empty): the model alone, as jet_models measures it."""
@@ -143,7 +178,7 @@ def build_model(game, folder: str, model: str, textures: bool = True) -> tuple[M
     bones = skeleton(model, manifest)
     names = [n for n, _ in bones]
     obj = om.read_obj(os.path.join(folder, f'{model}.obj'))
-    parts = om.obj_parts(obj, om.Conversion(flip_v=True))
+    parts = seal_windows(om.obj_parts(obj, om.Conversion(flip_v=True)))
     lo = min(v.pos[1] for p in parts for v in p.verts)
     xs = [v.pos[0] for p in parts for v in p.verts]
     zs = [v.pos[2] for p in parts for v in p.verts]

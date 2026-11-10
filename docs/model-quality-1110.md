@@ -139,6 +139,8 @@ WT 涂装车按源的意思是哑光非金属（Sketchfab 上 glossiness 0.117�
 
 **按模型、不按材质选布局**（审查补正）：最初 `build_meshes` 按每次调用（一个材质）自己的最大坐标选布局，C-130 就成了机身 float4、玻璃 / 螺旋桨 half4。两种材质共有 171 个顶点（座舱玻璃与机身框等），half 量化后与 float 相差最多 3.9 mm（53 个超过 1 mm），改前两边同为 half、落在同一点，这样反而开出缝。现在 `build_meshes(..., extent=)` 必须传整个模型的 `obj_model.reach(...)`，一个模型的所有材质存法一致（与 `wt_tracked.build_with_info` 相同）；`tests/test_model_quality.py` 的 `test_one_model_one_position_format` 覆盖。
 
+**C-130 风挡缝**（2026-11-11 安装失败修正）：上面说的是同一点在两种存法下不一致；另有一类缝来自源模型本身。FlightGear C-130 的窗玻璃（`vitres` / `hublotBD` / `hublotBG`）是独立对象，边缘顶点并不落在机身窗框顶点上：548 个玻璃顶点中 464 个距最近的窗框顶点 < 0.1 mm，其余 0.26–11.8 mm（风挡下沿整体低 0.75 mm、向后最多 2.9 mm）。half 存储时这些缝被量化步长（y 2–4 m 处 2 mm、z 8–16 m 处 7.8 mm）碰巧并上；改成 float4 后缝原样保留，座舱适配的「从外面能否看到」射线（`cockpits.exposed`）从驾驶舱面板穿过风挡下沿的楔形缝射出，`fitted` 报 `seat 0 (plane_deck): parts away from the walls show outside the hull`，安装器生成 C-130 失败。修法是修模型数据而不是放宽检查：`c130_model.seal_windows` 把每个玻璃顶点并到机身最近的顶点上（全部在 15 mm 内，超出即报模型目录不对；没有玻璃三角形塌缩或翻面，最大偏转 6.5°，面积 -0.2%）。`tests/cockpit_build_test.py` 新增 `GENERATED_MODELS`：C-130 两型与空中航母按生成器的方式从模型目录建模型（不做贴图）后逐席位适配，有游戏文件时会跑到；之前生成模型只查骨骼数，所以这次没被测试发现。
+
 **待实机**：座舱网格已经用 float4 位置在载具 MDB 里正常显示，但载具外壳本体用 float4 还没有实机记录，需要实机看一次无畏舰和 C-130（阴影 / 深度 pass）。无畏舰顶点缓冲约 +13%。
 
 ## 5–9. 没做的

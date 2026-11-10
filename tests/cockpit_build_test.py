@@ -6,7 +6,8 @@ vc_eye_<seat> marker and the screens' vc_scr_ markers for every fitted seat, und
 
 The plugin's own vehicles (FITS stems their generators make) are left to their generators' builds, but for the ones that
 wear a stock model under a name of their own (tools/make_jets.py: the gunship, the transport plane, the transport
-helicopter), whose fits are laid out on that model as make_jets makes it. A kit no seat takes yet (ALTERNATES) is laid
+helicopter), whose fits are laid out on that model as make_jets makes it, and the ones whose model is built from the
+model folder without textures (GENERATED_MODELS: the C-130s, the Helicarrier), laid out on the model as built. A kit no seat takes yet (ALTERNATES) is laid
 out in the seats of the kit it stands beside.
 A kit that promises a closed tub (an aircraft cockpit: Kit.sill) is closed under its sill: every line of sight from the
 eye further down meets a front face of the kit (cockpits.leaks; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去"),
@@ -93,6 +94,21 @@ GENERATED_SKELETON = 32
 # SKELETON_BONES; twelve passengers' hold kits take 232 bones, more than 256 - GENERATED_SKELETON).
 import c130_model  # noqa: E402
 GENERATED_SKELETONS = {c130_model.archive_name(m).removesuffix('.MRAB'): c130_model.SKELETON_BONES for m in c130_model.MODELS}
+import helicarrier_model  # noqa: E402
+
+
+def _c130(model: str):  # noqa: ANN202
+    return lambda game, folder: c130_model.build_model(game, folder, model, textures=False)[0]
+
+
+# The generated models built from the model folder alone (no textures: what a cockpit is laid out in), {stem: (the
+# model folder, the model as its generator builds it, before cockpits.graft_files)}: their fits laid out on that model,
+# as the stock models' are. The C-130s past obj_model.PRECISE_EXTENT store float positions, which keep the source's
+# window seams open (half positions had closed them by chance): the flight deck's panel showed through them until
+# c130_model.seal_windows, and only a build with the game found it.
+GENERATED_MODELS = {c130_model.archive_name(m).removesuffix('.MRAB'): (c130_model.model_dir, _c130(m)) for m in c130_model.MODELS}
+GENERATED_MODELS[helicarrier_model.ARCHIVE.removesuffix('.MRAB')] = (
+    helicarrier_model.model_dir, lambda game, folder: helicarrier_model.build_model(game, folder, textures=False)[0])
 ROOM = dict(left=1.5, right=1.5, up=1.0, down=1.0, ahead=2.0, back=2.0)
 
 
@@ -161,9 +177,13 @@ def generated(stem: str, fits) -> None:  # noqa: ANN001
            f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton of {skeleton}')
 
 
-def fitted_model(game, stem: str, fits, copies) -> None:  # noqa: ANN001
+def fitted_model(stem: str, fits, model) -> None:  # noqa: ANN001 - model: () -> mdb.Mdb
     started = time.perf_counter()
-    md = copies()[stem] if stem in STOCK_COPY_STEMS else model_of(game, stem)
+    try:
+        md = model()
+    except Exception as e:  # noqa: BLE001 - reported, the count fails the test
+        expect(False, f'{stem}: its model: {e}')
+        return
     hull = cockpits.hull_triangles(md)
     separated=cockpit_shell.separate(md,fits,hull)
     expect(all(b.inv_bind==md.bones[b.parent].inv_bind for b in separated.bones[len(md.bones):]),
@@ -292,11 +312,21 @@ def units(game) -> list:  # noqa: ANN001 - rootcpk.Game
             out.append((f'{name} in the room {label}',
                         lambda n=name, la=label, r=room: closed(f'{n} in the room {la}', cockpit_kits.KITS[n](r))))
     stock = {m.stem: m for m in vehicle_optics.MODELS if m.cockpits}
+    def made(stem: str):  # noqa: ANN202 - () -> mdb.Mdb: a GENERATED_MODELS model as its generator builds it
+        folder_of, build = GENERATED_MODELS[stem]
+        folder = folder_of()
+        if folder is None:
+            raise ValueError('its model folder is missing')
+        return build(game, folder)
     for stem, fits in sorted(cockpit_fits.FITS.items()):
-        if stem not in stock and stem not in STOCK_COPY_STEMS:
+        if stem in GENERATED_MODELS:
+            out.append((stem, lambda s=stem, f=fits: generated(s, f)))
+            out.append((f'{stem} built', lambda s=stem, f=fits: fitted_model(s, f, lambda: made(s))))
+        elif stem not in stock and stem not in STOCK_COPY_STEMS:
             out.append((stem, lambda s=stem, f=fits: generated(s, f)))
         else:
-            out.append((stem, lambda s=stem, f=fits: fitted_model(game, s, f, copies)))
+            out.append((stem, lambda s=stem, f=fits: fitted_model(
+                s, f, lambda: copies()[s] if s in STOCK_COPY_STEMS else model_of(game, s))))
     out.append(('VEHICLE403_TANK built', lambda: built_blacker(game, stock['VEHICLE403_TANK'])))
     return out
 
