@@ -362,7 +362,7 @@ def restore_saves() -> int:
     them yet, so they are switched back under it. BUSY when a 原版启动 or the installer holds the saves."""
     with exclusive() as held:
         if not held:
-            print('EDF6VC_SAVE_RESTORE busy (原版启动 or the installer is switching the saves)')
+            print('EDF6VC_SAVE_RESTORE busy (a vanilla launch or the installer is switching the saves)')
             return BUSY
         with _lock:
             said = swap_out_saves(in_game=True)

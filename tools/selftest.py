@@ -42,6 +42,9 @@ from typing import Callable, Iterator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
+# The installer's messages in Chinese whatever this machine's display language (pylib/i18n.py; CI's windows-latest is
+# English): the tests below compare its Chinese words. installer_speaks_english checks the English side.
+os.environ['EDF6_LANG'] = 'zh'
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'autoturret', 'tools'))
@@ -15544,6 +15547,89 @@ def air_support_arrival_is_the_flight_controls() -> None:
     assert 'cmdMoving' in entry and 'Order::guard' in entry
     spawn = src('src/jet_spawn.cpp')
     assert 'SupportEntryOf(*j,target)' in spawn
+
+
+# The modules whose every player-facing line goes through pylib/i18n.py tr (testhub.py: _tr, standard library only), and in
+# support_loadout.py the menu 8 editor's functions only (its CLI main and its file builders' ValueErrors are a developer's).
+_I18N_MODULES = {'tools/installer.py': None, 'tools/support_config.py': None, 'tools/vanilla_launch.py': None,
+                 'pylib/modelpack.py': None, 'pylib/model_workers.py': None,
+                 'tools/support_loadout.py': ('edit', 'edit_vehicle', 'edit_crew', 'summary', '_describe_crew', 'describe',
+                                              'describe_vehicle', '_pick', 'parse_preset', 'parse_vehicle', 'parse_crew',
+                                              'kind', 'pack', '_colour', '_count'),
+                 'tools/testhub.py': ('hub_for_player', 'download_latest', 'send_logs')}
+_SAID = ('print', 'ask', 'input', 'say', 'SystemExit', 'Invalid', 'HubError', 'GameRunning')
+
+
+def _cjk_outside_tr(path: str, functions: tuple[str, ...] | None) -> list[str]:
+    """Each line of `path` (within `functions`, or the whole file) where a print / ask / ... says a Chinese literal not
+    given to tr (an untranslated message), or where tr's English side holds Chinese."""
+    import ast
+    tree = ast.parse(src(path))
+    cjk = re.compile(r'[一-鿿]')
+    bad: list[str] = []
+
+    def literals(node: ast.AST) -> list[ast.Constant]:
+        out: list[ast.Constant] = []
+        stack = [node]
+        while stack:
+            n = stack.pop()
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ('tr', '_tr'):
+                continue   # said in both languages (its English side checked on its own)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                out.append(n)
+            stack.extend(ast.iter_child_nodes(n))
+        return out
+
+    roots = [tree] if functions is None else [n for n in ast.walk(tree)
+                                              if isinstance(n, ast.FunctionDef) and n.name in functions]
+    assert functions is None or len(roots) == len(functions), f'{path}: not every function of {functions} found'
+    for root in roots:
+        for node in ast.walk(root):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id in ('tr', '_tr'):
+                assert len(node.args) == 2, f'{path}:{node.lineno}: tr(zh, en)'
+                if any(cjk.search(c.value) for c in literals(node.args[1])):
+                    bad.append(f'{path}:{node.lineno}: Chinese in the English side')
+            elif node.func.id in _SAID:
+                if any(cjk.search(c.value) for a in [*node.args, *(k.value for k in node.keywords)] for c in literals(a)):
+                    bad.append(f'{path}:{node.lineno}: {node.func.id}(...) says Chinese without tr')
+    return bad
+
+
+@test
+def installer_speaks_english() -> None:
+    """The maintainer, 2026-11-10: 「同时支持一下英文版本」. The installer's language follows Windows' display language
+    (Chinese for any Chinese LANGID, English otherwise), --lang zh|en overrides it and is handed to the processes it starts
+    (EDF6_LANG); every message the player reads in the installer's modules has its English side (_cjk_outside_tr), and the
+    real installer run with --lang en shows its banner and menu in English."""
+    import subprocess
+    import i18n
+    assert i18n.lang_of(0x0804) == i18n.lang_of(0x0404) == i18n.lang_of(0x0C04) == 'zh'
+    assert i18n.lang_of(0x0409) == i18n.lang_of(0x0411) == i18n.lang_of(0x0809) == 'en'
+    saved = os.environ.get(i18n.ENV)
+    try:
+        assert i18n.take_lang_arg(['--lang', 'en', 'check']) == ['check'] and i18n.lang() == 'en'
+        assert os.environ[i18n.ENV] == 'en' and i18n.tr('中', 'en') == 'en'
+        assert i18n.take_lang_arg(['install', '--lang=zh']) == ['install'] and i18n.tr('中', 'en') == '中'
+        try:
+            i18n.take_lang_arg(['--lang', 'fr'])
+            raise AssertionError('--lang fr accepted')
+        except SystemExit:
+            pass
+    finally:
+        i18n.set_lang(saved or 'zh')
+    bad = [why for path, functions in _I18N_MODULES.items() for why in _cjk_outside_tr(path, functions)]
+    assert not bad, '\n'.join(bad)
+    env = {k: v for k, v in os.environ.items() if k != i18n.ENV}
+    for argv, want in ((['--lang', 'en'], 'installer'), (['--lang', 'zh'], '安装程序')):
+        r = subprocess.run([sys.executable, os.path.join(HERE, 'installer.py'), *argv], input='', capture_output=True,
+                           text=True, encoding='utf-8', env={**env, 'PYTHONIOENCODING': 'utf-8'}, timeout=120)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert want in r.stdout, r.stdout
+        if argv[1] == 'en':
+            assert not re.search(r'[一-鿿]', r.stdout), r.stdout
+            assert 'Enter 1 install / update' in r.stdout, r.stdout
 
 
 def main(argv: list[str] | None = None) -> int:

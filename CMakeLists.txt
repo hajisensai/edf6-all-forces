@@ -2653,12 +2653,14 @@ add_test(NAME barrel_recoil COMMAND barrel_recoil_test)
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
+# And the installer's messages in Chinese (pylib/i18n.py EDF6_LANG) whatever the machine's display language: CI's
+# windows-latest is English, and the tests compare the Chinese words (tools/selftest.py installer_speaks_english: English).
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_test IN LISTS _all_tests)
   get_test_property(${_test} ENVIRONMENT _env)
   if(NOT _env)
     set(_env)
   endif()
-  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1)
+  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
 endforeach()

@@ -20,13 +20,17 @@ LANG_CHINESE = 0x04   # PRIMARYLANGID of a Chinese LANGID (zh-CN 0x0804, zh-TW 0
 _lang: str | None = None
 
 
+def lang_of(langid: int) -> str:
+    """'zh' for a Chinese Windows LANGID (any region), else 'en'."""
+    return 'zh' if langid & 0x3FF == LANG_CHINESE else 'en'
+
+
 def system_lang() -> str:
     """'zh' when Windows' display language (GetUserDefaultUILanguage) is Chinese, else 'en' (also off Windows)."""
     if os.name != 'nt':
         return 'en'
     import ctypes
-    langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
-    return 'zh' if langid & 0x3FF == LANG_CHINESE else 'en'
+    return lang_of(ctypes.windll.kernel32.GetUserDefaultUILanguage())
 
 
 def lang() -> str:
