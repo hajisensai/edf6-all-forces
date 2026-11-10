@@ -255,6 +255,8 @@ constexpr SupportLook CrewLookOf(const CrewColour& own,const CrewColour& fallbac
 enum class LoadRole : std::uint8_t { air, ground, bomb, rocket, gun };
 // `massKg`: what one round weighs, the very number the jets' flight model weighs it by (pylib/vcobjects.py STORES mass,
 // src/stores.inc kStores; tests/support_loadout_ini_test.py keeps the three equal). The tank's rounds have none there.
+// The pylons they hang on (StoreSpec::pylonMass, store_burden.h) weigh the jet in flight too but are not counted here nor
+// against payloadKg (docs/stores-re.md §12).
 struct LoadStore { std::uint8_t code; const wchar_t* name; const wchar_t* label; LoadRole role; bool jet,tank; int massKg; };
 inline constexpr LoadStore kLoadStores[]={
     {1,L"AAM_S",L"AIM-9X 近程空空导弹",LoadRole::air,true,false,85},
