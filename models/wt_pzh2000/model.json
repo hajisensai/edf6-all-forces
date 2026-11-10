@@ -107,16 +107,14 @@
    "template": "v603_kyata_R",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
-   "specular": "textures/ger_pzh_2000_track_n_s.jpg"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
-   "specular": "textures/ger_pzh_2000_track_n_s.jpg"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
   },
   {
    "name": "wt_headlight_glass_c",

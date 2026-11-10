@@ -20,16 +20,14 @@
    "template": "v603_kyata_L",
    "albedo": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_c.jpg",
    "normal": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_n.jpg",
-   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png",
-   "specular": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_s.jpg"
+   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_c.jpg",
    "normal": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_n.jpg",
-   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png",
-   "specular": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_n_s.jpg"
+   "occlusion": "textures/ger_pzkpfw_vi_ausf_h1_tiger_track_ao_ao_occ.png"
   },
   {
    "name": "wt_sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb",

@@ -404,16 +404,18 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     if m['template'] == LIGHT:
         _req(bool(m.get('specular')) and bool(m.get('emissive')), f'{stem}: a light material without its maps')
         out['param_r_m_light_hr'] = (f'{stem}_rml.dds', _specular_dds(path('specular'), path('emissive'), 0, side))
+    elif m['template'].startswith('v603_kyata'):
+        # the native track material: its own parameter slots (the V603 track map's mean, the occlusion apart)
+        _req(not (m.get('specular') or m.get('roughness_metal')), f'{stem}: a track material with surface maps')
+        out['param_r_m_xxx'] = ('edf6vc_wt_track_rmx.dds', texfile.solid_dxt1(TRACK_RMX))
+        occ = path('occlusion')
+        out['param_occ'] = (f'{stem}_occ.dds', _dds_of(occ) if occ else texfile.solid_dxt1((222, 219, 222)))
     elif m.get('specular'):
         out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
                                    _specular_dds(path('specular'), path('occlusion'), NO_OCCLUSION, side))
     elif m.get('roughness_metal'):
         out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
                                    _roughness_metal_dds(path('roughness_metal'), path('occlusion'), side))
-    elif m['template'].startswith('v603_kyata'):
-        out['param_r_m_xxx'] = ('edf6vc_wt_track_rmx.dds', texfile.solid_dxt1(TRACK_RMX))
-        occ = path('occlusion')
-        out['param_occ'] = (f'{stem}_occ.dds', _dds_of(occ) if occ else texfile.solid_dxt1((222, 219, 222)))
     else:
         out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds', _param_dds(path('occlusion'), PLAIN_RMO))
     return out

@@ -44,64 +44,56 @@
    "template": "v603_kyata_L",
    "albedo": "textures/m1_c.jpg",
    "normal": "textures/m1_n.png",
-   "occlusion": "textures/m1_ao_occ.png",
-   "roughness_metal": "textures/m1_rm.png"
+   "occlusion": "textures/m1_ao_occ.png"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/m1_c.jpg",
    "normal": "textures/m1_n.png",
-   "occlusion": "textures/m1_ao_occ.png",
-   "roughness_metal": "textures/m1_rm.png"
+   "occlusion": "textures/m1_ao_occ.png"
   },
   {
    "name": "v603_kyata_L_6",
    "template": "v603_kyata_L",
    "albedo": "textures/m2_c.jpg",
    "normal": "textures/m2_n.png",
-   "occlusion": "textures/m2_ao_occ.png",
-   "roughness_metal": "textures/m2_rm.png"
+   "occlusion": "textures/m2_ao_occ.png"
   },
   {
    "name": "v603_kyata_R_7",
    "template": "v603_kyata_R",
    "albedo": "textures/m2_c.jpg",
    "normal": "textures/m2_n.png",
-   "occlusion": "textures/m2_ao_occ.png",
-   "roughness_metal": "textures/m2_rm.png"
+   "occlusion": "textures/m2_ao_occ.png"
   },
   {
    "name": "v603_kyata_L_8",
    "template": "v603_kyata_L",
    "albedo": "textures/m3_c.jpg",
    "normal": "textures/m3_n.png",
-   "occlusion": "textures/m3_ao_occ.png",
-   "roughness_metal": "textures/m3_rm.png"
+   "occlusion": "textures/m3_ao_occ.png"
   },
   {
    "name": "v603_kyata_R_9",
    "template": "v603_kyata_R",
    "albedo": "textures/m3_c.jpg",
    "normal": "textures/m3_n.png",
-   "occlusion": "textures/m3_ao_occ.png",
-   "roughness_metal": "textures/m3_rm.png"
+   "occlusion": "textures/m3_ao_occ.png"
   },
   {
    "name": "v603_kyata_L_10",
    "template": "v603_kyata_L",
    "albedo": "textures/m4_c.jpg",
    "normal": "textures/m4_n.png",
-   "occlusion": "textures/m4_ao_occ.png",
-   "roughness_metal": "textures/m4_rm.png"
+   "occlusion": "textures/m4_ao_occ.png"
   },
   {
    "name": "v603_kyata_R_11",
    "template": "v603_kyata_R",
    "albedo": "textures/m4_c.jpg",
    "normal": "textures/m4_n.png",
-   "occlusion": "textures/m4_ao_occ.png",
-   "roughness_metal": "textures/m4_rm.png"
+   "occlusion": "textures/m4_ao_occ.png"
   },
   {
    "name": "wt_m4_c",

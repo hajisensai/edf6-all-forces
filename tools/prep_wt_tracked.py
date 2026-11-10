@@ -596,6 +596,8 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
             if key not in mat_key:
                 files = {}
                 for kind, f in maps.items():
+                    if side and kind in ('specular', 'roughness_metal'):
+                        continue    # a track keeps the native track material's parameter map (wt_tracked TRACK_RMX)
                     if kind == 'occlusion':
                         files[kind] = 'textures/' + os.path.basename(f).rsplit('.', 1)[0] + '_occ.png'
                         occlusion_png(os.path.join(folder, f), os.path.join(out, files[kind]))

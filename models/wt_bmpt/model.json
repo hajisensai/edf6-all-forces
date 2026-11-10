@@ -66,16 +66,14 @@
    "template": "v603_kyata_R",
    "albedo": "textures/ussr_t_72b3_2011_track_c.jpg",
    "normal": "textures/ussr_t_72b3_2011_track_n_n.jpg",
-   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png",
-   "specular": "textures/ussr_t_72b3_2011_track_n_s.jpg"
+   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png"
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ussr_t_72b3_2011_track_c.jpg",
    "normal": "textures/ussr_t_72b3_2011_track_n_n.jpg",
-   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png",
-   "specular": "textures/ussr_t_72b3_2011_track_n_s.jpg"
+   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png"
   },
   {
    "name": "wt_bmpt_terminator_turret_c_ussr_camo_green",

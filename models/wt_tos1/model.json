@@ -16,14 +16,12 @@
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
-   "albedo": "textures/m0_c.jpg",
-   "roughness_metal": "textures/m0_rm.png"
+   "albedo": "textures/m0_c.jpg"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
-   "albedo": "textures/m0_c.jpg",
-   "roughness_metal": "textures/m0_rm.png"
+   "albedo": "textures/m0_c.jpg"
   }
  ],
  "parts": [

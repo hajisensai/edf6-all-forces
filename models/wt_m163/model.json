@@ -59,16 +59,14 @@
    "template": "v603_kyata_L",
    "albedo": "textures/us_m163_vulcan_track_c.jpg",
    "normal": "textures/us_m163_vulcan_track_n_n.jpg",
-   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png",
-   "specular": "textures/us_m163_vulcan_track_n_s.jpg"
+   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/us_m163_vulcan_track_c.jpg",
    "normal": "textures/us_m163_vulcan_track_n_n.jpg",
-   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png",
-   "specular": "textures/us_m163_vulcan_track_n_s.jpg"
+   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png"
   },
   {
    "name": "wt_net_f_c",
