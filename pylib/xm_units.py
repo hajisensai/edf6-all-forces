@@ -75,6 +75,13 @@ SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人
 # tank 12.5 m, the Apocalypse's class. Every model folder is made at this size (tools/prep_xmorph.py); the rows' `eye`
 # and `camera` stay in the game's metres, read through eye() / camera().
 SCALE = 0.7
+# Every X-Morph map is resampled (Lanczos, a whole factor) to this on its shorter side before block compression, every
+# family alike (wt_tracked min_side: the ground units' folders say so in model.json; pylib/xm_air_model.py and
+# pylib/xm_rig.py, the aircraft's and the walkers', read it here). The packs hold the units' maps at 256..512 (the
+# battle tank's colour 256, H: every units*/*.dds in packs/*.zip, one size each, no larger copy in any pack): DXT1 / BC5
+# on them puts a 4x4 block over 4..8 cm of hull, and the game's bilinear magnification of 256 texels across a 9 m tank
+# is the blur (docs/xmorph-names.md 「贴图」).
+TEXTURE_MIN_SIDE = 1024
 EMPLACEMENT_BASE = 1.3   # m: an emplacement's model stands on its base this high (emplacement_model.BASE_TOP)
 
 DAMAGE = {'anti_core': 120.0, 'artillery': 120.0, 'laser': 120.0, 'anti_player': 30.0, 'emp': 30.0}

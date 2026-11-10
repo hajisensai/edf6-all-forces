@@ -105,7 +105,7 @@ MOUTHS = {'xm_medium_tank_aa': ('att_muzzle_1', 'att_muzzle_2'),
 # belt's upper run at 8 m (measured 2026-10-30).
 BELT_FLOOR = {'xm_highway_tank': 1.0}
 
-MIN_SIDE = 1024      # the maps (256..1024 in the packs) resampled to this before block compression (wt_tracked min_side)
+MIN_SIDE = xm_units.TEXTURE_MIN_SIDE   # the maps resampled to this before block compression (wt_tracked min_side)
 LIT = 16             # an emissive map with a texel over this lights its material (wt_tracked LIGHT)
 
 LICENSE = """X-Morph: Defense (c) EXOR Studios.

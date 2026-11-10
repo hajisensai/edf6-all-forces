@@ -31,6 +31,7 @@ import numpy as np
 import obj_model as om
 import texfile
 import texfile_accel
+import xm_units
 from dreadnought_model import BODY_AT, BODY_HOST, BODY_SLOTS, _host, _member, _with_frames
 from mdb import Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, mmul, rab_read, \
     rab_write
@@ -127,13 +128,16 @@ def skeleton(info: dict, stock: Mdb, holders: dict[str, tuple[float, float, floa
 
 def _textures(folder: str, key: str, material: dict) -> tuple[dict[str, bytes], dict[str, str]]:
     """({archive file: DDS}, {slot: file}) of one material: its colour, its normal map (flat where it has none) and the
-    painted metal's roughness map (ROUGH_METAL)."""
+    painted metal's roughness map (ROUGH_METAL). The colour and normal maps are resampled to xm_units.TEXTURE_MIN_SIDE
+    before block compression, as the ground units' (wt_tracked min_side)."""
+    import wt_tracked as wt
     stem = f'edf6vc_{key}_{material["name"]}'
+    side = xm_units.TEXTURE_MIN_SIDE
     flat = texfile.Image(4, 4, bytearray(bytes((128, 128, 255, 255)) * 16))
     rml = texfile.Image(4, 4, bytearray(bytes((*ROUGH_METAL, 255)) * 16))
-    nm = (texfile_accel.bc5_normal_file(os.path.join(folder, material['normal'])) if 'normal' in material
+    nm = (wt._normal_dds(os.path.join(folder, material['normal']), side) if 'normal' in material
           else texfile_accel.bc5_normal_dds(flat))
-    files = {f'{stem}_df.dds': texfile_accel.dxt1_dds(texfile.load_image(os.path.join(folder, material['albedo']))),
+    files = {f'{stem}_df.dds': wt._dds_of(os.path.join(folder, material['albedo']), side),
              f'{stem}_nm.dds': nm, f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
     return files, dict(zip(BODY_SLOTS, files))
 
