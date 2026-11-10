@@ -70,7 +70,7 @@
 ### 6.1 来源
 
 - FlightGear FGAddon 的 Lockheed C-130 Hercules：`https://svn.code.sf.net/p/flightgear/fgaddon/trunk/Aircraft/C130`（svn 直链，不用登录，
-  2026-11-10 下载到 `D:\APP\edf6-models\downloadslightgear_c130`），GPL v2（随模型复制 `COPYING`），`c130/SOURCE.txt` 记了来源与改动。
+  2026-11-10 下载到 `D:\APP\edf6-models\downloads\flightgear_c130`），GPL v2（随模型复制 `COPYING`），`c130/SOURCE.txt` 记了来源与改动。
   机体 `Models/c130.ac` + `texture.png`、螺旋桨 `Models/Propellers/propeller.ac`，炮舰机的火炮取它自带的 AC-130 内饰
   `Models/Interior/ac130/armament/gau12`（两门 GAU-12 25 mm 加特林）与 `armament/40`（40 mm 博福斯），按它的 `all-gau12.xml` /
   `all-bofors.xml` 摆在机身左侧。

@@ -637,7 +637,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
-            (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) +             (make_c130.install(game, c130) if c130 is not None else []) + \
+            (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) + \
+            (make_c130.install(game, c130) if c130 is not None else []) + \
             (make_proteus.install(game, proteus) if proteus is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
