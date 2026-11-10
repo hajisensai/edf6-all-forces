@@ -521,6 +521,8 @@ struct Jet {
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
     bool crewless=false;     // its body's BodyRow::crewless (NewEntry)
+    bool liftFans=false;     // its body is the support's Helicarrier (LiftFanJet, NewEntry): its thrusters reach as
+                             // nacelle_reach.h kHelicarrier, not the V508's pods (jet_flight.cpp Thrusters)
     bool supportMetadata=false; // remote carrier metadata alone never drives native input
     bool supportDrone=false,supportPending=false; // staged network drone: no AI/fire before every peer activates
     bool entered;            // ...its first attack run begun: its arrival over (Entering)
@@ -665,6 +667,7 @@ void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place 
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
 bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
 bool CrewlessJet(const unsigned char* v) noexcept;  // a jet body flown with no one in it (BodyRow::crewless)
+bool LiftFanJet(const unsigned char* v) noexcept;   // the support's Helicarrier (Body::supCarrier ..): its lift fans tilt
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept {

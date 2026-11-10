@@ -318,6 +318,7 @@ Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept {
     j->ref=ref;HoldRef(ref);
     j->role=role;j->carrier.drones=drones;j->carrier.sorties=kCarrierSorties;j->drone.slot=-1;
     j->crewless=CrewlessJet(v);
+    j->liftFans=LiftFanJet(v);
     j->bornAt=j->modeAt=j->seen=ms;
     j->lastStep=0;   // the first step is a frame long (GameStep)
     return j;
@@ -343,6 +344,12 @@ bool CrewlessJet(const unsigned char* v) noexcept {
     if(crew::BodyOf(v)!=PluginBody::jet)return false;
     const float k=BodyMark(v);
     for(const auto& b:kBodies)if(b.mark>0.0f && k==b.mark)return b.crewless;
+    return false;
+}
+bool LiftFanJet(const unsigned char* v) noexcept {
+    if(crew::BodyOf(v)!=PluginBody::jet)return false;
+    const float k=BodyMark(v);
+    for(const Body b:{Body::supCarrier,Body::supBlastCarrier,Body::supDollCarrier})if(k==Row(b).mark)return true;
     return false;
 }
 bool HostileJet(const unsigned char* v) noexcept {

@@ -122,7 +122,7 @@
   四个风扇就用这四个名字（`helicarrier_model.THRUSTERS`，轴心为轮毂：前 (±15.5, 8.9, 0.7)、后 (±13.8, 9.0, -23.0)，直径 8.7–9.7 m），
   所以巡航时风扇竖着、悬停时转平落回风扇圈里，插件逻辑不改。每个风扇下挂一根 `nozzle_<i>`（`jet_models.with_nozzles`，宽 = 风扇直径），尾焰沿用。
 - 着地倾转限幅：`src/nacelle_reach.h` 另给 `kHcFront` / `kHcBack`（`aircraft_collision.nacelle_lowest` 对新模型实测，`aircraft_collision_check`
-  在有模型包时逐项核对），`jet_flight.cpp NacelleReach` 按标记选表。风扇最低点离船底至少 5 m，实际不会限制倾转。
+  在有模型包时逐项核对），`jet.cpp NewEntry` 按标记记下 `Jet::liftFans`，`Thrusters` 据此选表。风扇最低点离船底至少 5 m，实际不会限制倾转。
 - 无人机：放出点 / 停靠点不改（`jet_carrier.cpp kLaunchBelow` 25 m、`jet_internal.h kDockBelow` 15 m，都在载具原点 = 碰撞箱中心之下）。
   新模型高 16.39 m，停靠点在船底下 6.8 m、放出点 16.8 m，都在船体投影内；`make_helicarrier.check_drone_bay` 生成时从源码读这两个常量核对
   （离船底不小于 5 m、在投影内）。

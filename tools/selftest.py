@@ -2810,7 +2810,7 @@ def support_helicarrier_models() -> None:
     HELICARRIER_MARKS' (tools/make_helicarrier.py writes the SGOs), each its kind's arms, durability and mass, boardable
     as itself with the drones (Airframe::rotor, Arm::drones), crewed; its four lift fans are the bones the plugin tilts
     (helicarrier_model.THRUSTERS: src/jet_flight.cpp Thrusters), their reach its own table (src/nacelle_reach.h
-    kHelicarrier, NacelleReach by its marks); the V508 carriers stay the requested and parked twins; the room protocol is
+    kHelicarrier, by Jet::liftFans: src/jet.cpp LiftFanJet); the V508 carriers stay the requested and parked twins; the room protocol is
     10 or later."""
     import helicarrier_model as hm
     import jet_models
@@ -2843,9 +2843,11 @@ def support_helicarrier_models() -> None:
     flight = src('src/jet_flight.cpp')
     for bone in hm.THRUSTERS:
         assert f'"{bone}"' in flight, f'src/jet_flight.cpp no longer tilts {bone}'
-    nacelle_fn = flight.split('const nacelle::Reach& NacelleReach(', 1)[1].split('\n}\n', 1)[0]
-    assert all(f'Body::{b}' in nacelle_fn for b, *_ in want.values()) and 'nacelle::kHelicarrier' in nacelle_fn
-    assert 'NacelleReach(BodyMark(v))' in flight, 'Thrusters reads the reach of the body it tilts'
+    jet_src = src('src/jet.cpp')
+    lift = jet_src.split('bool LiftFanJet(', 1)[1].split('\n}\n', 1)[0]
+    assert all(f'Body::{b}' in lift for b, *_ in want.values()), 'src/jet.cpp LiftFanJet: the Helicarrier bodies'
+    assert 'j->liftFans=LiftFanJet(v);' in jet_src, 'NewEntry marks the Helicarrier'
+    assert 'j.liftFans ? nacelle::kHelicarrier : nacelle::kV508' in flight, 'Thrusters reads the reach of the body it tilts'
     reach = src('src/nacelle_reach.h')
     for name in ('kHcFront', 'kHcBack'):
         vals = re.search(name + r'\[[^\]]*\]=\{([^}]*)\}', reach)
