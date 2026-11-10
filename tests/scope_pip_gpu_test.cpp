@@ -1,9 +1,13 @@
-// Real Direct3D11 WARP execution of the picture-in-picture scope's production pass (src/scope_pip_gpu.cpp):
-//  - inside the lens every pixel is the frame's own picture scaled up round the centre by the magnification
-//    (scope_pip.h Source, sampled bilinearly from a linear gradient: exact up to the target's precision);
-//  - outside it nothing is written; the native bindings (RTV, DSV, viewport, PS, constant buffer) are as they were;
-//  - unsupported surfaces (multisampled, a second RTV, a partial viewport, no magnification) change nothing;
-//  - a typeless target with a typed view, a resized target, the game's R16G16B16A16_FLOAT and an 8-bit one.
+// Real Direct3D11 WARP execution of the picture-in-picture scope's production pass (src/scope_pip_gpu.cpp
+// LensCompositor): the main view's world colour and the lens view's (S x S, docs/scope-pip-re.md §5.4) held at their
+// world ends, then the lens command composites:
+//  - inside the lens every pixel is the lens view's picture spanning the disc (scope_pip.h LensSample, sampled
+//    bilinearly from a linear gradient: exact up to the target's precision);
+//  - outside it nothing is written, the lens view's own target neither; the native bindings (RTV, DSV, viewport, PS,
+//    constant buffer) are as they were;
+//  - unsupported surfaces (multisampled, a second RTV, a partial viewport, a lens view not S x S, no main view held, a
+//    lens no stronger than the frame) change nothing;
+//  - a typeless target with a typed view, a resized lens view, the game's R16G16B16A16_FLOAT and an 8-bit one.
 #include "scope_pip.h"
 #include "scope_pip_gpu.h"
 #include <d3d11.h>
@@ -17,7 +21,8 @@
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
-using crew::scopepip::Magnifier;
+using crew::scopepip::LensCompositor;
+namespace pip=crew::scopepip;
 namespace {
 int checks=0;
 void Check(bool yes,const char* what) { ++checks;if(!yes){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);} }
@@ -52,15 +57,15 @@ struct Fixture {
     }
 };
 
-// A w x h target whose texel (i, j) holds ((i+0.5)/w, (j+0.5)/h, 0.25, 1): bilinear sampling at px (sx, sy) inside the
-// texel centres gives (sx/w, sy/h) exactly.
+// A w x h target whose texel (i, j) holds ((i+0.5)/w, (j+0.5)/h, blue, 1) (8-bit: i/(w-1), j/(h-1)): bilinear sampling at
+// px (sx, sy) inside the texel centres gives (sx/w, sy/h) exactly.
 struct Target {
     ComPtr<ID3D11Texture2D> texture;
     ComPtr<ID3D11RenderTargetView> rtv;
     UINT w=0,h=0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 };
-Target MakeTarget(Fixture& f,UINT w,UINT h,DXGI_FORMAT resourceFormat,DXGI_FORMAT viewFormat,UINT samples=1) {
+Target MakeTarget(Fixture& f,UINT w,UINT h,DXGI_FORMAT resourceFormat,DXGI_FORMAT viewFormat,UINT samples=1,float blue=0.25f) {
     Target t;t.w=w;t.h=h;t.format=viewFormat;
     D3D11_TEXTURE2D_DESC d{};d.Width=w;d.Height=h;d.MipLevels=d.ArraySize=1;d.Format=resourceFormat;d.SampleDesc.Count=samples;
     d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
@@ -71,14 +76,15 @@ Target MakeTarget(Fixture& f,UINT w,UINT h,DXGI_FORMAT resourceFormat,DXGI_FORMA
             halves.resize(static_cast<std::size_t>(w)*h*4);
             for(UINT j=0;j<h;++j)for(UINT i=0;i<w;++i) {
                 std::uint16_t* p=&halves[(static_cast<std::size_t>(j)*w+i)*4];
-                p[0]=FloatToHalf((i+0.5f)/w);p[1]=FloatToHalf((j+0.5f)/h);p[2]=FloatToHalf(0.25f);p[3]=FloatToHalf(1.0f);
+                p[0]=FloatToHalf((i+0.5f)/w);p[1]=FloatToHalf((j+0.5f)/h);p[2]=FloatToHalf(blue);p[3]=FloatToHalf(1.0f);
             }
             data.pSysMem=halves.data();data.SysMemPitch=w*8;
         } else {
             bytes.resize(static_cast<std::size_t>(w)*h*4);
             for(UINT j=0;j<h;++j)for(UINT i=0;i<w;++i) {
                 std::uint8_t* p=&bytes[(static_cast<std::size_t>(j)*w+i)*4];
-                p[0]=static_cast<std::uint8_t>(i*255/(w-1));p[1]=static_cast<std::uint8_t>(j*255/(h-1));p[2]=64;p[3]=255;
+                p[0]=static_cast<std::uint8_t>(i*255/(w-1));p[1]=static_cast<std::uint8_t>(j*255/(h-1));
+                p[2]=static_cast<std::uint8_t>(std::lround(blue*255.0f));p[3]=255;
             }
             data.pSysMem=bytes.data();data.SysMemPitch=w*4;
         }
@@ -153,25 +159,30 @@ void NativeIntact(Fixture& f,const Target& t,const Native& n) {
     Check(!rs,"the native (default) rasterizer state is back: no scissor left on");
 }
 
-// The lens drawn: inside (a pixel short of the edge) the source picture scaled up, outside untouched.
-void LensChecks(const Pixels& before,const Pixels& after,float m,float tolerance,const char* what) {
-    const float w=static_cast<float>(after.w),h=static_cast<float>(after.h);
-    const crew::scopepip::Lens lens=crew::scopepip::LensFor(w,h,m);
+// The lens drawn: inside (a pixel short of the edge) the lens view's gradient spanning the disc, outside untouched.
+void LensChecks(const Pixels& before,const Pixels& after,const Pixels& lens,float tolerance,const char* what) {
+    const float w=static_cast<float>(after.w),h=static_cast<float>(after.h),side=static_cast<float>(lens.w);
+    const pip::Lens l=pip::LensFor(w,h);
+    const bool half=tolerance<0.01f;
+    // The lens view's gradient at texture coordinate t (clamped at its edge texels).
+    const auto expect=[&](float t) {
+        const float x=std::fmin(std::fmax(t*side,0.5f),side-0.5f);
+        return half ? x/side : (x-0.5f)/(side-1.0f);
+    };
+    const float blue=lens.At(0,0)[2];
     int inside=0,outside=0;
     for(UINT y=0;y<after.h;++y)for(UINT x=0;x<after.w;++x) {
-        const float px=x+0.5f,py=y+0.5f,dx=px-lens.cx,dy=py-lens.cy,d=std::sqrt(dx*dx+dy*dy);
+        const float px=x+0.5f,py=y+0.5f,dx=px-l.cx,dy=py-l.cy,d=std::sqrt(dx*dx+dy*dy);
         const float* a=after.At(x,y);const float* b=before.At(x,y);
-        if(d<lens.r-1.0f) {
-            float sx,sy;crew::scopepip::Source(lens,px,py,&sx,&sy);
-            // The gradient's value at px s: an 8-bit target's texel i holds i/(w-1) at centre i+0.5.
-            const bool half=tolerance<0.01f;
-            const float ex=half ? sx/w : (sx-0.5f)/(w-1.0f),ey=half ? sy/h : (sy-0.5f)/(h-1.0f);
-            if(std::fabs(a[0]-ex)>tolerance || std::fabs(a[1]-ey)>tolerance || std::fabs(a[2]-b[2])>tolerance || a[3]!=b[3]) {
-                std::fprintf(stderr,"%s: (%u,%u) got %g %g want %g %g\n",what,x,y,a[0],a[1],ex,ey);
-                Check(false,"a lens pixel shows the centre's neighbourhood scaled up by the magnification");
+        if(d<l.r-1.0f) {
+            float u,v;pip::LensSample(l,px,py,&u,&v);
+            const float ex=expect(u),ey=expect(v);
+            if(std::fabs(a[0]-ex)>tolerance || std::fabs(a[1]-ey)>tolerance || std::fabs(a[2]-blue)>tolerance || a[3]!=b[3]) {
+                std::fprintf(stderr,"%s: (%u,%u) got %g %g %g want %g %g %g\n",what,x,y,a[0],a[1],a[2],ex,ey,blue);
+                Check(false,"a lens pixel shows the lens view's picture spanning the disc");
             }
             ++inside;
-        } else if(d>lens.r+1.0f) {
+        } else if(d>l.r+1.0f) {
             if(std::memcmp(a,b,sizeof(float)*4)!=0) {
                 std::fprintf(stderr,"%s: (%u,%u) outside the lens was changed\n",what,x,y);
                 Check(false,"no pixel outside the lens is written");
@@ -181,69 +192,113 @@ void LensChecks(const Pixels& before,const Pixels& after,float m,float tolerance
     }
     Check(inside>100 && outside>100,"both the lens and the view round it were sampled");
 }
+
+// The scope's power for these checks: 4x (pi/16 vertical), the frame unmagnified (pi/4).
+const float kScopeFov=pip::kBaseFov/4.0f;
+const float kMainY=pip::YScale(pip::kBaseFov);
+// The lens view's projection for a w x h main view: its side and its vertical scale.
+int SideFor(UINT w,UINT h) { return pip::LensViewSide(pip::LensRadius(static_cast<float>(w),static_cast<float>(h))); }
+float LensYFor(UINT w,UINT h) {
+    return pip::YScale(pip::LensViewFov(static_cast<float>(h),pip::LensRadius(static_cast<float>(w),static_cast<float>(h)),kScopeFov));
+}
+
+// One frame: the main view's world end, the lens view's, then the command with the lens view's native state bound.
+bool Frame(Fixture& f,LensCompositor& c,const Target& main,const Target& lens,int side,float lensY,
+           float* h=nullptr,float* r=nullptr,float* y=nullptr) {
+    Bind(f,main);
+    Check(c.CaptureMain(f.context.Get(),kMainY) && c.HoldsMain(),"the main view's world colour is held");
+    const Native n=Bind(f,lens);
+    Check(c.CaptureLens(f.context.Get(),side,lensY) && c.HoldsLens(),"the lens view's world colour is held");
+    float mh=0,mr=0,my=0;
+    const bool drew=c.Composite(f.context.Get(),&mh,&mr,&my);
+    NativeIntact(f,lens,n);
+    Check(!c.HoldsMain() && !c.HoldsLens(),"the composite releases both");
+    if(h)*h=mh;
+    if(r)*r=mr;
+    if(y)*y=my;
+    return drew;
+}
 }  // namespace
 
 int main() {
     Fixture f;
-    Magnifier magnifier;
-    // The game's world target (R16G16B16A16_FLOAT, docs/scope-pip-re.md §1: the viewport slot's 0xA targets), 4.2x.
+    LensCompositor c;
+    // The game's world targets (R16G16B16A16_FLOAT, docs/scope-pip-re.md §4.1: the viewport slots' 0xA targets), 4x.
     {
-        const Target t=MakeTarget(f,96,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
-        const Native n=Bind(f,t);
-        const Pixels before=Read(f,t);
-        Check(magnifier.Composite(f.context.Get(),4.2f),"the lens is drawn on the game's half-float world target");
-        NativeIntact(f,t,n);
-        LensChecks(before,Read(f,t),4.2f,0.004f,"half 4.2x");
-        // The same frame again at a different power: the copy is of the current picture, not of an older one.
-        const Pixels once=Read(f,t);
-        Check(magnifier.Composite(f.context.Get(),1.5f),"a second composite on the same target");
-        const Pixels twice=Read(f,t);
-        Check(!Same(once,twice),"the second pass magnified the already magnified picture (it copies the live target)");
+        const Target main=MakeTarget(f,96,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
+        const int side=SideFor(96,64);
+        const Target lens=MakeTarget(f,side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
+        const Pixels before=Read(f,main),lensBefore=Read(f,lens);
+        float h=0,r=0,y=0;
+        Check(Frame(f,c,main,lens,side,LensYFor(96,64),&h,&r,&y),"the lens is drawn on the game's half-float world target");
+        Check(h==64.0f && std::fabs(r-pip::LensRadius(96,64))<1e-4f && std::fabs(y-LensYFor(96,64))<1e-5f,
+              "the composite reports the geometry it drew with (the reticle's FOV)");
+        Check(std::fabs(pip::LensShownFov(h,r,y)-kScopeFov)<1e-5f,"...from which the scope's FOV comes back");
+        LensChecks(before,Read(f,main),lensBefore,0.004f,"half 4x");
+        Check(Same(lensBefore,Read(f,lens)),"the lens view's own target is not written");
+        // The command again with nothing held: nothing.
+        const Pixels once=Read(f,main);
+        Bind(f,lens);
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr),"a second command with nothing held draws nothing");
+        Check(Same(once,Read(f,main)),"...and writes nothing");
     }
-    // A typeless 8-bit target through a typed view, then a resized one: the private copy follows.
+    // A typeless 8-bit pair through typed views, then a resized lens view: the private copy follows.
     {
-        const Target t=MakeTarget(f,80,80,DXGI_FORMAT_R8G8B8A8_TYPELESS,DXGI_FORMAT_R8G8B8A8_UNORM);
-        const Native n=Bind(f,t);
-        const Pixels before=Read(f,t);
-        Check(magnifier.Composite(f.context.Get(),2.0f),"a typeless target's typed view is sampled");
-        NativeIntact(f,t,n);
-        LensChecks(before,Read(f,t),2.0f,2.5f/255.0f+0.004f,"8-bit 2x");
+        const Target main=MakeTarget(f,80,80,DXGI_FORMAT_R8G8B8A8_TYPELESS,DXGI_FORMAT_R8G8B8A8_UNORM);
+        const int side=SideFor(80,80);
+        const Target lens=MakeTarget(f,side,side,DXGI_FORMAT_R8G8B8A8_TYPELESS,DXGI_FORMAT_R8G8B8A8_UNORM,1,0.8f);
+        const Pixels before=Read(f,main),lensBefore=Read(f,lens);
+        Check(Frame(f,c,main,lens,side,LensYFor(80,80)),"a typeless target's typed view is sampled");
+        LensChecks(before,Read(f,main),lensBefore,2.5f/255.0f+0.004f,"8-bit");
         const Target big=MakeTarget(f,160,90,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
-        const Native nb=Bind(f,big);
-        const Pixels b2=Read(f,big);
-        Check(magnifier.Composite(f.context.Get(),8.5f),"a resized target gets a new private copy");
-        NativeIntact(f,big,nb);
-        LensChecks(b2,Read(f,big),8.5f,0.004f,"half 8.5x resized");
+        const int bigSide=SideFor(160,90);
+        const Target bigLens=MakeTarget(f,bigSide,bigSide,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
+        const Pixels b2=Read(f,big),l2=Read(f,bigLens);
+        Check(Frame(f,c,big,bigLens,bigSide,LensYFor(160,90)),"a resized lens view gets a new private copy");
+        LensChecks(b2,Read(f,big),l2,0.004f,"half resized");
     }
     // What is not supported changes nothing and says so.
     {
         const Target t=MakeTarget(f,64,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
+        const int side=SideFor(64,64);
+        const Target lens=MakeTarget(f,side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
+        const Target odd=MakeTarget(f,side+4,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
         Native n=Bind(f,t);
         const Pixels before=Read(f,t);
-        Check(!magnifier.Composite(f.context.Get(),1.0f),"no magnification: no lens");
-        Check(!magnifier.Composite(f.context.Get(),NAN),"a NaN magnification: no lens");
-        Check(Same(before,Read(f,t)),"nothing written without a magnification");
+        // A frame the stock zoom rendered (the lens no stronger than it): no lens.
+        Bind(f,t);Check(c.CaptureMain(f.context.Get(),pip::YScale(kScopeFov)),"a stock-zoomed main view is held");
+        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"its lens view too");
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr) && !c.HoldsMain(),"a lens no stronger than the frame: none, both released");
+        Check(Same(before,Read(f,t)),"nothing written over a stock-zoomed frame");
+        Bind(f,lens);
+        Check(!c.CaptureLens(f.context.Get(),side,LensYFor(64,64)) && !c.HoldsLens(),"a lens view with no main view held is not held");
+        Bind(f,t);
+        Check(!c.CaptureMain(f.context.Get(),NAN) && !c.HoldsMain(),"an unusable projection: nothing held");
+        Bind(f,t);Check(c.CaptureMain(f.context.Get(),kMainY),"held");
+        Bind(f,odd);Check(!c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"a lens view not S x S is not held");
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr),"...and nothing is drawn");
+        c.Release();
+        Check(!c.HoldsMain() && !c.HoldsLens(),"Release drops what was held");
         n=Bind(f,t,false);
-        Check(!magnifier.Composite(f.context.Get(),4.0f),"a partial viewport is refused");
-        Check(Same(before,Read(f,t)),"nothing written on a partial viewport");
+        Check(!c.CaptureMain(f.context.Get(),kMainY),"a partial viewport is refused");
         const Target second=MakeTarget(f,64,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
         n=Bind(f,t);
         ID3D11RenderTargetView* two[2]={t.rtv.Get(),second.rtv.Get()};
         f.context->OMSetRenderTargets(2,two,n.dsv.Get());
-        Check(!magnifier.Composite(f.context.Get(),4.0f),"a second render target bound is refused (not the world's end)");
-        Check(Same(before,Read(f,t)),"nothing written with two targets bound");
+        Check(!c.CaptureMain(f.context.Get(),kMainY),"a second render target bound is refused (not the world's end)");
         f.context->OMSetRenderTargets(0,nullptr,nullptr);
-        Check(!magnifier.Composite(f.context.Get(),4.0f),"no render target bound is refused");
+        Check(!c.CaptureMain(f.context.Get(),kMainY),"no render target bound is refused");
         UINT quality=0;
         if(SUCCEEDED(f.device->CheckMultisampleQualityLevels(DXGI_FORMAT_R16G16B16A16_FLOAT,4,&quality)) && quality>0) {
             const Target ms=MakeTarget(f,64,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,4);
             Bind(f,ms);
-            Check(!magnifier.Composite(f.context.Get(),4.0f),"a multisampled target is refused");
+            Check(!c.CaptureMain(f.context.Get(),kMainY),"a multisampled target is refused");
         }
-        magnifier.Reset();
-        n=Bind(f,t);
-        Check(magnifier.Composite(f.context.Get(),3.0f),"after Reset the pass builds itself again");
-        NativeIntact(f,t,n);
+        Check(Same(before,Read(f,t)),"nothing written by any refusal");
+        c.Reset();
+        const Pixels lensBefore=Read(f,lens);
+        Check(Frame(f,c,t,lens,side,LensYFor(64,64)),"after Reset the pass builds itself again");
+        LensChecks(before,Read(f,t),lensBefore,0.004f,"after reset");
     }
     std::printf("scope_pip_gpu: %d checks passed\n",checks);
     return 0;
