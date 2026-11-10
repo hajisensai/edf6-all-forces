@@ -514,7 +514,8 @@ EDF6AutoTurret 时，键仍按 ini。
 `model_workers.group_workers()` 组（每 4 个逻辑核一组、每组按 3 GiB 可用内存算、最多 4 组；内存或核数不够时退回在安装器进程里逐组生成），
 每组内部的模型任务照旧最多再开 2 个进程。生成阶段只读游戏和模型，全部生成完才开始写，所以并行不改变写入顺序和失败时「什么都不写」的行为；
 任一组失败，还没开始的组不再生成，错误原样报出。外部模型和座舱部件的内容摘要每次安装只算一遍（按路径、大小、修改时间记住），
-不再每组各算一遍。实测耗时见 `docs/feedback-2026-11-10-installer-en.md`。
+不再每组各算一遍。测试场关卡只登记安装器缓存里已是最新的履带载具文件，不再重建；它自己的载具 SGO（要用碰撞绑定）
+同样并行生成。实测耗时见 `docs/feedback-2026-11-10-installer-en.md`（16 核：首次安装约 39 分钟 → 11 分钟，更新约 13 分钟 → 3.5 分钟）。
 
 **开发者**：`build.cmd` 构建到 `build/Mods/Plugins/`（DLL 和 ini 都在那里，ini 由 CMake 自动复制）。
 `python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 `tools/installer.py` `PLUGINS` 列出的每个插件的 DLL 与 ini，
