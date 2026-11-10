@@ -1707,11 +1707,13 @@ def hand_copies_agree() -> None:
     import make_proteus
     # ...and the Dreadnought's fighters and its turrets' rounds: tools/make_dreadnought.py
     import make_dreadnought
+    import make_c130
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES)
                | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
                | set(make_dreadnought.SUPPORT_SGOS.values())   # the support aircraft in the fighters' models
+               | set(make_c130.SGOS)   # the support's gunship and paratroop plane in the C-130s: tools/make_c130.py
                # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
                | {f'EDF6VC_{k.upper()}.SGO' for k in vc.XM_JETS.values()})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
@@ -2620,14 +2622,13 @@ def every_npc_aircraft_boardable() -> None:
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
     # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
     # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
-    # The paratroop plane is the bomber401 strike jet with passenger seats (tools/make_jets.py TRANSPORT_PLANE_FILE).
-    boarded_as = {'transportPlane': 'bomber401'}
+    # (The paratroop plane, the bomber401 strike jet with passenger seats, was boarded as bomber401 until it became the
+    # model pack's C-130 under a mark of its own, tools/make_c130.py: no body is boarded as another now.)
+    boarded_as: dict[str, str] = {}
     marks = {body: mark for body, mark, _name, _hostile in rows}
     for body, twin in boarded_as.items():
         assert body not in boardable and twin in boardable and marks.get(body) == marks.get(twin), \
             f'{body} is boarded as {twin}: the same mark, no row of its own'
-    assert "bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), 0, TRANSPORT_PLANE_PASSENGERS" in src('tools/make_jets.py'), \
-        'the paratroop plane is the bomber401 airframe'
     board_row = src('src/playerjet_kinds.inc').split('const pjet::Boardable* BoardRowOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'BomberBody(v+kModelInst506)' in board_row and 'model==JetBody::bomber401 ? jet::Body::bomber401' in board_row
     for body, mark, _name, hostile in rows:
@@ -2688,8 +2689,8 @@ def support_jets_wear_their_models() -> None:
     SUPPORT_JETS' (tools/make_dreadnought.py writes those SGOs); each is its kind's durability and arms in that model,
     weighs what its kind weighs, is boardable, crewed (not BodyRow::crewless) and a support loadout's base
     (src/support_loadout.h kVehicleBodies, tools/support_loadout.py BODIES); its model has its exhausts measured
-    (jet_models.NOZZLE_EXITS). The gunship, the carriers and the transport plane keep their stock models (no model of
-    their kind in the pack)."""
+    (jet_models.NOZZLE_EXITS). The gunship and the transport plane fly the C-130s (support_c130_models); the carriers keep
+    their stock models (no model of their kind in the pack)."""
     import dreadnought_model as dm
     import jet_models
     import support_loadout as sl
@@ -2718,9 +2719,53 @@ def support_jets_wear_their_models() -> None:
     marks = [m for _n, m, *_r in vc.SUPPORT_JETS.values()]
     others = [j.mark for n, j in vc.JETS.items() if n not in {v[0] for v in vc.SUPPORT_JETS.values()}]
     assert len(set(marks)) == len(marks) and not set(marks) & set(others), 'a support mark another jet has'
-    assert launch['gunship'] == 'gunship' and launch['carrier'] == 'carrier', launch
+    assert launch['gunship'] == 'c130Gunship' and launch['carrier'] == 'carrier', launch
     # the room protocol names the change (an older build made the stock-bomber support aircraft)
     assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 8
+
+
+@test
+def support_c130_models() -> None:
+    """The support's gunship (the gunship calls, guarding / following, and the guided strike) and paratroop plane fly the
+    model pack's C-130s (the maintainer, 2026-11-10: 「没有模型来源的支援机型 直接去网站上拿呗」; docs/feature-support-jet-
+    models.md §6): src/jet_internal.h kLaunchRows sends JetRole::gunship to Body::c130Gunship, whose SGO, mark and role are
+    pylib/vcobjects.py C130_JETS' (tools/make_c130.py writes the SGOs), and Body::transportPlane is the C-130's SGO under
+    its own mark; each the arms and durability of what it replaced (the gunship's, the strike jet's), an AC-130's mass,
+    boardable as itself (no other body's mark), crewed; the AC-130's rounds leave off its own box (src/jet_bay.cpp
+    AirframeOf by its mark: gunmuzzle.h kC130Gunship, make_c130.C130_AIRFRAME); the shells preload with it; the room
+    protocol is 9 or later."""
+    import make_c130
+    import jet_models
+    table = re.sub(r'\s+', ' ', src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0])
+    rows = {b: (sgo_path, f, float(mark), role, rest) for b, sgo_path, f, mark, role, rest in re.findall(
+        r'\{Body::(\w+), ?L"([^"]*)", ?L"([^"]*)", ?(\d+)\.0f, ?Role::(\w+), ?Role::\w+, ?"\w+"([^}]*)\}', table)}
+    launch = dict(re.findall(r'\{JetRole::(\w+),Body::(\w+)\}', src('src/jet_internal.h').split('kLaunchRows[]={', 1)[1].split('};', 1)[0]))
+    boardable = dict(re.findall(r'\{Body::(\w+),Airframe::wing,Arm::(\w+),', src('src/playerjet_kinds.h')))
+    assert launch['gunship'] == 'c130Gunship', launch
+    want = {'c130Gunship': (make_c130.GUNSHIP_SGO, vc.C130_GUNSHIP_JET, 'gunship', 'shells', vc.GUNSHIP_JET),
+            'transportPlane': (make_c130.TRANSPORT_SGO, vc.C130_TRANSPORT_JET, 'strike', 'none', 'edf6tr_jet_strike_mission')}
+    for body, (file, name, role, arm, base) in want.items():
+        jet = vc.JETS[name]
+        assert make_c130.SGOS[file][0] == name and vc.C130_JETS[name][0] == jet.file, (body, file, name)
+        assert jet.file in jet_models.C130_FILES and jet.model == ('app:/object/' + jet.file.lower(), vc.C130_JETS[name][1])
+        assert rows[body][:4] == (f'app:/object/{file.lower()}', file, jet.mark, role), (body, rows[body][:4])
+        assert 'true' not in rows[body][4], f'{body}: crewless or hostile'
+        assert boardable.get(body) == arm and jet.mark in vc.BOARDABLE_MARKS, f'{body}: not boardable as itself'
+        assert (jet.durability, jet.weapons) == (vc.JETS[base].durability, vc.JETS[base].weapons), f'{name}: not the arms of {base}'
+        assert vc.JET_MASSES[jet.mark] == vc.JET_MASSES[7011.0], f'{name}: not an AC-130 mass'
+        others = [r[2] for b, r in rows.items() if b != body]
+        assert jet.mark not in others, f'{body}: mark {jet.mark} another body has'
+    assert 'Preloaded(Body::c130Gunship)' in src('src/jet_spawn.cpp'), 'the shells are preloaded with the AC-130'
+    bay = src('src/jet_bay.cpp')
+    assert 'BodyMark(v)==Row(Body::c130Gunship).mark ? gunmuzzle::kC130Gunship : gunmuzzle::kGunship' in bay
+    assert bay.count('AirframeOf(v)') == 2 and 'gunmuzzle::kGunship,r' not in bay, 'every gunship round off its own airframe'
+    num = r'(-?[\d.]+)f'
+    m = re.search(r'kC130Gunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', src('src/gunmuzzle.h'))
+    assert m, 'src/gunmuzzle.h kC130Gunship'
+    got = [float(m.group(k)) for k in range(1, 7)]
+    assert got == [v for part in make_c130.C130_AIRFRAME for v in part], (got, make_c130.C130_AIRFRAME)
+    assert 'check_muzzle(game)' in src('tools/make_c130.py'), 'tools/make_c130.py build holds the model to C130_AIRFRAME'
+    assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 9
 
 
 @test
@@ -2741,6 +2786,8 @@ def every_boardable_aircraft_requested() -> None:
            for b in ('dnFighter', 'dnDefender', 'dnBomber', 'dnInterceptor')},
         **{b: "a support call's aircraft (vcobjects.SUPPORT_JETS): its kind's request brings that kind's own twin"
            for b in ('supStrike', 'supFighter', 'supInterceptor', 'supMultirole')},
+        'c130Gunship': "the support's AC-130 (vcobjects.C130_JETS): the gunship request brings the gunship's own twin",
+        'transportPlane': "the paratroop plane (vcobjects.C130_JETS): it carries the support's paratroopers, not a pilot's",
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in
