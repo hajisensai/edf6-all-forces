@@ -15535,6 +15535,58 @@ def _rows_copy(rows: list) -> list:
 
 
 @test
+def share_publishes_every_file_of_a_version() -> None:
+    """testhub.py share: the model pack's parts (…-1of2.zip, …-2of2.zip, models-required.json's model_packs) are one
+    version of the slot on /download: every file's parts go up under its index (testhub/src/share.js: <version>/<k>/),
+    then one publish lists all files in order with their size and SHA-256; several zips need --version."""
+    import hashlib
+    import urllib.parse
+    import testhub
+
+    class FakeHub:
+        site = 'https://edf6.test'
+
+        def __init__(self) -> None:
+            self.calls: list[tuple] = []
+
+        def request(self, method, path, data=None, headers=None, timeout=60):
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(path).query))
+            assert method == 'PUT' and path.startswith('/api/share/part?'), path
+            assert hashlib.sha256(data).hexdigest() == q['sha256'], q
+            self.calls.append(('part', q['slot'], q['version'], q['file'], q['name'], len(data)))
+            return contextlib.nullcontext(io.BytesIO(b'{"ok": true}'))
+
+        def post_json(self, path, body):
+            self.calls.append(('publish', path, body))
+            return {'ok': True}
+
+    with tempfile.TemporaryDirectory() as work:
+        blobs = {'pack-1of2.zip': bytes(range(256)) * 10, 'pack-2of2.zip': b'z' * 700}
+        paths = []
+        for name, data in blobs.items():
+            paths.append(os.path.join(work, name))
+            with open(paths[-1], 'wb') as f:
+                f.write(data)
+        hub = FakeHub()
+        with contextlib.redirect_stdout(io.StringIO()):
+            testhub._share(hub, paths, 'models', 'm1', 'notes', part_size=1000)
+            try:
+                testhub._share(FakeHub(), paths, 'models', '', 'notes', part_size=1000)
+                raise AssertionError('several zips without --version')
+            except SystemExit:
+                pass
+    assert [c[:6] for c in hub.calls[:-1]] == [
+        ('part', 'models', 'm1', '0', 'part-000', 1000), ('part', 'models', 'm1', '0', 'part-001', 1000),
+        ('part', 'models', 'm1', '0', 'part-002', 560), ('part', 'models', 'm1', '1', 'part-000', 700)], hub.calls
+    kind, path, body = hub.calls[-1]
+    assert (kind, path, body['slot'], body['version'], body['notes']) == ('publish', '/api/share/publish', 'models', 'm1', 'notes')
+    assert [(f['name'], f['size_bytes'], f['sha256'], len(f['parts'])) for f in body['files']] == [
+        (n, len(d), hashlib.sha256(d).hexdigest(), -(-len(d) // 1000)) for n, d in blobs.items()]
+    assert body['files'][0]['parts'][2] == {'name': 'part-002', 'offset': 2000, 'length': 560,
+                                            'sha256': hashlib.sha256(blobs['pack-1of2.zip'][2000:]).hexdigest()}
+
+
+@test
 def plugin_crash_dump_is_collected() -> None:
     """docs/feedback-2026-10-18-crash-dump.md: reports #19 / #20 of a crash came with no dump. The plugin now writes
     its own (src/crash_dump.cpp) as <exe>.<pid>.plugin.dmp in %LOCALAPPDATA%'s CrashDumps; collect() finds it by the
