@@ -16,8 +16,8 @@ one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own mip l
     lod_level(width, height) -> int               the mip level the .lod member starts at (16x smaller, >= 16 px)
     lod_mips(width, height) -> int                the .lod member's mip count (full chain of its size minus one)
     pair_problem(hd, lod) -> str | None           what breaks the stock HD / .lod layout, None when nothing
-    dxt1_dds(image) -> bytes                      a DXT1 DDS with a full box-filtered mip chain (a simple range-fit
-                                                  encoder; DXT1 is what every stock albedo map is, and an uncompressed
+    dxt1_dds(image) -> bytes                      a DXT1 DDS with a full box-filtered mip chain (range fit, principal
+                                                  axis and least-squares refits, the best per block; DXT1 is what every stock albedo map is, and an uncompressed
                                                   DDS has no stock precedent the game is known to read)
     solid_dxt1(rgb, size) -> bytes                a one-colour DXT1 DDS (flat normal maps, neutral parameter maps)
     texture_pair(data) -> (hd, lod)               the two DDS files of one texture, from a DDS (sliced, not re-encoded)
@@ -535,31 +535,111 @@ def mip_chain(img: Image) -> list[Image]:
     return chain
 
 
+# DXT1 block encoding (docs/model-quality-1110.md 3): integers only, so that texfile_accel's numpy version gives the same
+# bytes. Candidates, the least error kept (the first of equals): the range fit (the extremes along the colour box's
+# longest axis), the extremes along the principal axis (DXT1_POWER power iterations of the covariance from the box's
+# axis, in 1/DXT1_UNIT steps), and DXT1_REFITS least-squares refits of the endpoints to the best one's indices; a block
+# the range fit already gives within DXT1_GOOD (thirds squared: 1296 = a mean squared error of 3 per 8-bit channel) keeps
+# it: the search gains it little (BMPT body: -0.04 dB) and costs a third of the encoding time.
+DXT1_GOOD = 1296
+DXT1_POWER = 4
+DXT1_UNIT = 1024
+DXT1_REFITS = 2
+_DXT1_WEIGHT = (3, 0, 2, 1)     # index -> colour0's weight in thirds (four-colour mode: 0 c0, 1 c1, 2 2/3 c0, 3 1/3 c0)
+_DXT1_INDEX = (1, 3, 2, 0)      # colour0's weight in thirds -> index
+
+
 def _rgb565(r: int, g: int, b: int) -> int:
     return ((r * 31 + 127) // 255) << 11 | ((g * 63 + 127) // 255) << 5 | ((b * 31 + 127) // 255)
 
 
+def _rgb888(c: int) -> tuple[int, int, int]:
+    """A 565 colour as the decoder expands it."""
+    r, g, b = c >> 11, (c >> 5) & 63, c & 31
+    return (r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)
+
+
+def _dxt1_fit(px: list[tuple[int, int, int]], c0: int, c1: int) -> tuple[int, int, int, int]:
+    """(error, colour0, colour1, indices) of the endpoints c0, c1 (swapped so that c0 >= c1; equal: one colour, all
+    index 0). The palette lies on one line, so a pixel's nearest entry is its projection's (s = 6 (p - e1).D against
+    |D|^2 x 1, 3, 5: the midpoints between the entries at 0, 1/3, 2/3, 1). The error is in thirds squared (3 p
+    against 3 x the entry), exact."""
+    if c0 < c1:
+        c0, c1 = c1, c0
+    e0, e1 = _rgb888(c0), _rgb888(c1)
+    if c0 == c1:
+        return sum((3 * p[c] - 3 * e0[c]) ** 2 for p in px for c in range(3)), c0, c1, 0
+    d = (e0[0] - e1[0], e0[1] - e1[1], e0[2] - e1[2])
+    dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    err, idx = 0, 0
+    for i, p in enumerate(px):
+        s = 6 * ((p[0] - e1[0]) * d[0] + (p[1] - e1[1]) * d[1] + (p[2] - e1[2]) * d[2])
+        w = 0 if s < dd else (1 if s < 3 * dd else (2 if s < 5 * dd else 3))
+        err += sum((3 * p[c] - w * e0[c] - (3 - w) * e1[c]) ** 2 for c in range(3))
+        idx |= _DXT1_INDEX[w] << (2 * i)
+    return err, c0, c1, idx
+
+
+def _dxt1_refit(px: list[tuple[int, int, int]], idx: int) -> tuple[int, int] | None:
+    """The 565 endpoints least-squares fitted to `idx`'s palette weights, None when they do not fix both."""
+    xx = xy = yy = 0
+    xp, yp = [0, 0, 0], [0, 0, 0]
+    for i, p in enumerate(px):
+        x = _DXT1_WEIGHT[(idx >> (2 * i)) & 3]
+        y = 3 - x
+        xx, xy, yy = xx + x * x, xy + x * y, yy + y * y
+        for c in range(3):
+            xp[c] += x * p[c]
+            yp[c] += y * p[c]
+    det = xx * yy - xy * xy
+    if det == 0:
+        return None
+    ends = []
+    for a, b in ((yy, -xy), (-xy, xx)):     # colour0's row, colour1's row of the inverse
+        q = []
+        for c, top in enumerate((31, 63, 31)):
+            num, den = 3 * (a * xp[c] + b * yp[c]) * top, det * 255
+            q.append(min(top, max(0, (2 * num + den) // (2 * den))))
+        ends.append(q[0] << 11 | q[1] << 5 | q[2])
+    return ends[0], ends[1]
+
+
 def _dxt1_block(px: list[tuple[int, int, int]]) -> bytes:
-    """One DXT1 block of 16 RGB pixels: the endpoints are the extremes along the colour box's longest axis
-    (four-colour mode, colour0 > colour1), each pixel the nearest of the four palette colours on that line."""
+    """One DXT1 block of 16 RGB pixels (four-colour mode, colour0 > colour1; one colour: colour0 = colour1, indices 0):
+    the best of the candidates above."""
     lo = [min(p[c] for p in px) for c in range(3)]
     hi = [max(p[c] for p in px) for c in range(3)]
     ax = max(range(3), key=lambda c: hi[c] - lo[c])
-    a = max(px, key=lambda p: p[ax])
-    b = min(px, key=lambda p: p[ax])
-    c0, c1 = _rgb565(*a), _rgb565(*b)
-    if c0 == c1:
-        return struct.pack('<HHI', c0, c1, 0)
-    if c0 < c1:
-        c0, c1, a, b = c1, c0, b, a
-    d = [a[c] - b[c] for c in range(3)]
-    dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] or 1
-    idx = 0
-    for i, p in enumerate(px):
-        t = ((p[0] - b[0]) * d[0] + (p[1] - b[1]) * d[1] + (p[2] - b[2]) * d[2]) * 3 / dd   # 0 = colour1, 3 = colour0
-        k = (1, 3, 2, 0)[0 if t < 0.5 else (1 if t < 1.5 else (2 if t < 2.5 else 3))]
-        idx |= k << (2 * i)
-    return struct.pack('<HHI', c0, c1, idx)
+    best = _dxt1_fit(px, _rgb565(*max(px, key=lambda p: p[ax])), _rgb565(*min(px, key=lambda p: p[ax])))
+    if best[0] <= DXT1_GOOD:
+        return struct.pack('<HHI', best[1], best[2], best[3])
+    s = [sum(p[c] for p in px) for c in range(3)]
+    d = [[16 * p[c] - s[c] for c in range(3)] for p in px]
+    cov = [[sum(r[j] * r[k] for r in d) for k in range(3)] for j in range(3)]
+    v = [DXT1_UNIT if c == ax else 0 for c in range(3)]
+    for _ in range(DXT1_POWER):
+        w = [cov[j][0] * v[0] + cov[j][1] * v[1] + cov[j][2] * v[2] for j in range(3)]
+        m = max(abs(x) for x in w)
+        if m == 0:
+            break
+        v = [x * DXT1_UNIT // m for x in w]
+    t = [r[0] * v[0] + r[1] * v[1] + r[2] * v[2] for r in d]
+    hi_i = max(range(16), key=lambda i: t[i])
+    lo_i = min(range(16), key=lambda i: t[i])
+    got = _dxt1_fit(px, _rgb565(*px[hi_i]), _rgb565(*px[lo_i]))
+    if got[0] < best[0]:
+        best = got
+    for _ in range(DXT1_REFITS):
+        if best[1] == best[2]:
+            break
+        ends = _dxt1_refit(px, best[3])
+        if ends is None:
+            break
+        got = _dxt1_fit(px, *ends)
+        if got[0] >= best[0]:
+            break
+        best = got
+    return struct.pack('<HHI', best[1], best[2], best[3])
 
 
 def _dxt1_level(img: Image) -> bytes:

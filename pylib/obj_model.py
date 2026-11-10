@@ -885,4 +885,5 @@ def texture_dds(path: str) -> bytes:
             data = h.read()
         texfile.texture_pair(data)
         return data
-    return texfile.dxt1_dds(texfile.load_image(path))
+    import texfile_accel
+    return texfile_accel.dxt1_dds(texfile.load_image(path))     # texfile.dxt1_dds's bytes, in numpy
