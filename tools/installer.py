@@ -540,6 +540,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_dreadnought
     import make_proteus
     import make_optics
+    import make_stock_holds
     import make_stock_stores
     import make_sidecar
     import make_sedan
@@ -594,6 +595,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
                                                                        if rel.upper().startswith('WEAPON/')})
         turret = ({**turret[0], **handed}, turret[1])
         stock = files, skipped
+    print('游骑兵的霰弹枪改成像突击步枪那样握持（原版霰弹枪与移植霰弹枪；只读 Root.cpk，不修改它）……')
+    holds = make_stock_holds.build(game)
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sedan = build_asset(cache, make_sedan, '民用轿车')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
@@ -647,6 +650,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         for path in make_stock_stores.remove(game)[0]:
             print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
+    for path in make_stock_holds.install(game, holds[0]):
+        print('写入', path)
+    for rel in holds[1]:
+        print('跳过（别的 mod 已经放了自己的武器文件，保持原样）', rel)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
@@ -830,6 +837,7 @@ def uninstall(game: str) -> None:
     import make_dreadnought
     import make_proteus
     import make_optics
+    import make_stock_holds
     import make_stock_stores
     import make_sidecar
     import make_sedan
@@ -865,7 +873,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

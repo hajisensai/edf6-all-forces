@@ -2,9 +2,9 @@
 手臂90度弯曲握持 建议改成和突击步枪差不多的姿势"; maintainer: "32 改，应该改的都改"; docs/feedback-2026-11-10-shotgun-grip.md).
 
 How a Ranger holds a weapon is five names in its weapon SGO (edf5port.HOLD_NAMES): BaseAnimation (the stance the arms
-keep), AimAnimation, ChangeAnimation, ReloadAnimation and the recoil clip (custom_parameter[0] of a
-Weapon_BasicShoot); where the left hand grips is the weapon's MAB block (animation_model[2], its 'IK' locator), not
-these. Every EDF6 Ranger shotgun (WEAPONTABLE category 1) is held 'waist' (hip level, the left forearm bent up to the
+keep), AimAnimation, ChangeAnimation, ReloadAnimation and the recoil clip (custom_parameter[0] of a Weapon_BasicShoot
+or Weapon_BasicSemiAuto); where the left hand grips is the weapon's MAB block (animation_model[2], its 'IK' locator),
+not these. Every EDF6 Ranger shotgun (WEAPONTABLE category 1) is held 'waist' (hip level, the left forearm bent up to the
 fore-end) but three: Destruction Blazer, Destruction Blazer G and Burst Blazer are held as the rifles (category 0, all
 'assault'), on the set ('assault', 'aim', 'assault_change1', 'assault_reload2', 'waist_recoil1') -- the developers'
 own way of holding a shotgun as a rifle. That set (derived from the table at build time, rifle_like_set) is what every
@@ -21,7 +21,8 @@ from dsgo import Node
 
 RIFLE = 0          # WEAPONTABLE category (row[2]) of the Ranger's assault rifles
 SHOTGUN = 1        # ... of its shotguns
-CLASS = 'Weapon_BasicShoot'
+# The classes a Ranger gun is (the SGN shotguns are semi-automatic); custom_parameter[0] is the recoil clip in both.
+CLASSES = ('Weapon_BasicShoot', 'Weapon_BasicSemiAuto')
 # The fields of a hold set, in order; the last is custom_parameter[0] (the recoil clip).
 FIELDS = ('BaseAnimation', 'AimAnimation', 'ChangeAnimation', 'ReloadAnimation', 'custom_parameter')
 HoldSet = tuple[str, str, str, str, str]
@@ -61,7 +62,7 @@ def sgo_name(row: Node) -> str:
 
 
 def category_sets(rows: Iterable[Node], read: Callable[[str], bytes], category: int) -> list[tuple[str, HoldSet]]:
-    """[(SGO file, its hold set)] of the table's rows of `category` that are a Weapon_BasicShoot with a full hold set;
+    """[(SGO file, its hold set)] of the table's rows of `category` that are a gun (CLASSES) with a full hold set;
     `read(name)` the file's bytes (KeyError: not there, skipped)."""
     out = []
     for row in rows:
@@ -72,7 +73,7 @@ def category_sets(rows: Iterable[Node], read: Callable[[str], bytes], category: 
             root = dsgo.parse(read(name)).root
         except (KeyError, ValueError):
             continue
-        if 'xgs_scene_object_class' not in root.names.values() or root.get('xgs_scene_object_class') != CLASS:
+        if 'xgs_scene_object_class' not in root.names.values() or root.get('xgs_scene_object_class') not in CLASSES:
             continue
         held = hold_set(root)
         if held is not None:
@@ -94,7 +95,7 @@ def rifle_like_set(rows: list[Node], read: Callable[[str], bytes]) -> HoldSet:
 
 
 def hold_like(root: Node, donor: HoldSet) -> bool:
-    """Gives the Weapon_BasicShoot `root` the hold set `donor` (only the names: of custom_parameter element 0 alone).
+    """Gives the gun `root` the hold set `donor` (only the names: of custom_parameter element 0 alone).
     False, and nothing changed, when it already has it or has no full plain hold set."""
     held = hold_set(root)
     if held is None or held == donor:
