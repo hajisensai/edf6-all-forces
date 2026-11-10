@@ -64,6 +64,8 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool InstallShotEntry() noexcept { return false; }   // heli.cpp: no shot entry hooked here
+float mapRayHit=-1.0f;int mapRays=0;   // heli.cpp MapRay: the aim's map hit along the view (metres, < 0 none)
+float MapRay(const float*,const float*,float*) noexcept { ++mapRays;return mapRayHit; }
 // heli.cpp's mouse-flown helicopter view (tested itself in heli_player_input_test): when it owns the seat it turns the
 // cockpit frame onto `heliFrame`.
 fpview::M4 heliFrame=fpview::Identity();bool heliFrameOwned=false;const void* heliFrameVehicle=nullptr;
@@ -972,6 +974,83 @@ int main() {
         SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){d.reloadLeft=9;const DrawSnap* const busy=SnapshotOf(0,&scratch);busyOk=busy && busy->reloadLeft==8;});
         const DrawSnap* const after=SnapshotOf(0,&scratch);
         check(busyOk && after && after->reloadLeft==9,"a busy writer's fallback (the last whole copy) is not cached as the newer count's");
+        for(auto& state:states)state=State{};
+        selected=&states[0];
+    }
+    {
+        // 2026-11-10 (test site #32): a stock action hides the weapons (0x696150: weapon +0x78C); the first person
+        // neither holds nor draws them and shows the arms as the action poses them (no IK, no viewmodel scale).
+        selected=&states[0];
+        Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
+        alignas(16) unsigned char set[kSetStride]{};
+        unsigned char* held=weapon;
+        Put<unsigned char**>(set,kSetWeapon,&held);
+        Put<unsigned char*>(human,kSets,set);Put<std::uint64_t>(human,kSetCount,1);
+        Put<void*>(weapon,kWeaponMount,nullptr);Put<void*>(model,kBaseLod+kLodInst,nullptr);
+        Put<std::uint8_t>(weapon,kWeaponHidden,0);
+        M4 anchor[2]={fpview::Identity(),fpview::Identity()};bool anchored[2]{};
+        Hands(human,anchor,anchored);
+        check(Current().inHandCount==1 && !Current().nativeArms,"a weapon the third person shows is in hand");
+        Put<std::uint8_t>(weapon,kWeaponHidden,1);
+        Hands(human,anchor,anchored);
+        check(Current().inHandCount==0 && Current().nativeArms && HandOfModel(model)<0,
+              "every weapon hidden (an appeal): none in hand (not placed, not force-submitted), the arms native");
+        const M4 eyeCam=fpview::Translate(0.0f,1.6f,0.0f);std::memcpy(cam+kCamMatrix,eyeCam.m,64);
+        Current().view[0]=Current().view[1]=fpview::Translate(1,2,3);
+        BuildViews(human,cam,anchor,anchor,anchored);
+        bool identity=true;
+        for(int k=0;k<2;++k)for(int i=0;i<16;++i)identity=identity && Current().view[k].m[i]==fpview::Identity().m[i];
+        check(identity && Current().viewOk[0] && Current().viewOk[1] && Current().shown[0] && Current().shown[1] && !Current().onOther[0],
+              "a stock action's arms: both shown, each through the identity (as the animation poses them)");
+        Publish();DrawSnap actionSnap{};TakeSnapshot(&actionSnap);
+        check(actionSnap.nativeArms,"the draws are told: no arm fit onto a weapon grip");
+        Put<std::uint8_t>(weapon,kWeaponHidden,0);
+        Hands(human,anchor,anchored);
+        check(Current().inHandCount==1 && !Current().nativeArms,"the action over: the weapon in hand again");
+
+        // The aim: a local round of the weapon in hand leaves its real muzzle toward the point the view meets.
+        alignas(16) unsigned char entry[edf::kMuzzleStride*2]{};
+        Put<unsigned char*>(weapon,edf::kMuzzles,entry);Put<std::uint64_t>(weapon,edf::kMuzzleCount,2);
+        const auto arm=[&](unsigned char* e){
+            const float rows[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0.25f,1.25f,0.4f,1};   // right, up, forward (the view's), position
+            std::memcpy(e+kShotRows,rows,sizeof(rows));
+        };
+        arm(entry);arm(entry+edf::kMuzzleStride);
+        const M4 still=fpview::Identity();
+        std::memcpy(human+kAim,still.m,64);std::memcpy(human+kBodyFrame,still.m,64);
+        Current().eyeLocal[0]=0;Current().eyeLocal[1]=1.6f;Current().eyeLocal[2]=0;
+        Current().aimOk=true;Current().aimCamDir[0]=0;Current().aimCamDir[1]=0;Current().aimCamDir[2]=1;Current().aimHitHave=false;
+        camOk=true;mapRayHit=6.0f;mapRays=0;
+        float before[12];std::memcpy(before,entry+edf::kMuzzleStride+kShotRows,sizeof(before));
+        FpShotAim aim{};
+        const bool turned=FirstPersonAimShot(weapon,3,false,&aim);   // 3 % 2: the second entry, as 0x696FD0 picks it
+        const float* f=reinterpret_cast<const float*>(entry+edf::kMuzzleStride+kShotRows+32);
+        // From (0.25, 1.25, 0.4) to (0, 1.6, 6): the forward row on that line.
+        const float want[3]={-0.25f,0.35f,5.6f};const float wl=std::sqrt(want[0]*want[0]+want[1]*want[1]+want[2]*want[2]);
+        check(turned && aim.rows==reinterpret_cast<float*>(entry+edf::kMuzzleStride+kShotRows) && mapRays==1 &&
+              std::fabs(f[0]-want[0]/wl)<1e-4f && std::fabs(f[1]-want[1]/wl)<1e-4f && std::fabs(f[2]-want[2]/wl)<1e-4f,
+              "a local round in first person leaves its real muzzle toward the map point under the crosshair (index modulo the count)");
+        check(std::memcmp(entry+kShotRows,before,sizeof(before))==0,"the other muzzle entry is untouched");
+        FpShotAim again{};FirstPersonAimShot(weapon,1,false,&again);
+        check(mapRays==1,"a second round along the same view reuses the step's map hit (one ray)");
+        FirstPersonAimRestore(again);FirstPersonAimRestore(aim);
+        check(std::memcmp(entry+edf::kMuzzleStride+kShotRows,before,sizeof(before))==0,"after the stock shot the rows are put back byte for byte");
+        FpShotAim replayed{};
+        check(!FirstPersonAimShot(weapon,1,true,&replayed) && !replayed.rows &&
+              std::memcmp(entry+edf::kMuzzleStride+kShotRows,before,sizeof(before))==0,"a replayed (remote) round is never turned");
+        Put<std::uint8_t>(weapon,kWeaponHidden,1);Hands(human,anchor,anchored);
+        FpShotAim hiddenAim{};
+        check(!FirstPersonAimShot(weapon,1,false,&hiddenAim) && !hiddenAim.rows,"a weapon not in hand (hidden) is not turned");
+        Put<std::uint8_t>(weapon,kWeaponHidden,0);Hands(human,anchor,anchored);
+        Current().aimCamDir[0]=1;Current().aimCamDir[2]=0;   // the camera turned away from the aim frame (a special view)
+        FpShotAim away{};
+        check(!FirstPersonAimShot(weapon,1,false,&away) && !away.rows,"a view not following the aim frame leaves the round native");
+        Current().aimCamDir[0]=0;Current().aimCamDir[2]=1;Current().riding=true;
+        FpShotAim riding{};
+        check(!FirstPersonAimShot(weapon,1,false,&riding) && !riding.rows,"riding: the on-foot aim is not used");
+        Put<unsigned char*>(human,kSets,nullptr);Put<std::uint64_t>(human,kSetCount,0);
+        Put<unsigned char*>(weapon,edf::kMuzzles,nullptr);Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);
+        camOk=false;mapRayHit=-1.0f;
         for(auto& state:states)state=State{};
         selected=&states[0];
     }

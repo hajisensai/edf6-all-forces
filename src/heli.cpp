@@ -796,7 +796,12 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
         RestoreMedicPermission(weapon);
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
+    // The first person's round leaves the real muzzle toward the crosshair's point (a local round of the weapon in hand
+    // only; its shot rows put back after the stock shot read them).
+    FpShotAim aim{};
+    FirstPersonAimShot(weapon,muzzle,replay,&aim);
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    FirstPersonAimRestore(aim);
     // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle
     // flash it used to wait for is missing on many weapons). It reads only this machine's first-person state.
     FirstPersonShot(weapon);

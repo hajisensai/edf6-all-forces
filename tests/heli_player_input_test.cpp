@@ -15,6 +15,13 @@ unsigned char* image=nullptr;
 // firstperson.cpp: the rounds the shot entry told the first person (after the stock shot, never for a refused one).
 int shotCalls=0;int firstPersonShots=0;const unsigned char* firstPersonShotWeapon=nullptr;int shotCallsAtFirstPersonShot=-1;
 void FirstPersonShot(const unsigned char* weapon) noexcept { ++firstPersonShots;firstPersonShotWeapon=weapon;shotCallsAtFirstPersonShot=shotCalls; }
+// ...and the aim's turn of each round (before the stock shot) and its rows put back (after it).
+int aimShots=0,aimRestores=0,shotCallsAtAim=-1,shotCallsAtRestore=-1;bool aimReplay=false;unsigned aimMuzzle=0;
+const unsigned char* aimWeapon=nullptr;
+bool FirstPersonAimShot(unsigned char* weapon,unsigned muzzle,bool replay,FpShotAim* out) noexcept {
+    ++aimShots;shotCallsAtAim=shotCalls;aimReplay=replay;aimMuzzle=muzzle;aimWeapon=weapon;out->rows=nullptr;return false;
+}
+void FirstPersonAimRestore(const FpShotAim&) noexcept { ++aimRestores;shotCallsAtRestore=shotCalls; }
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
@@ -140,7 +147,7 @@ void CheckMedicPermission() {
     reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,nullptr,&shotCounter,false);
     Check(shotCalls==1 && shotPermission==0 && firstPersonShots==1,
           "without the heli profile the entry still tells the first person, its medic work off");
-    shotCalls=0;firstPersonShots=0;medicOn=true;
+    shotCalls=0;firstPersonShots=0;aimShots=0;aimRestores=0;medicOn=true;
     // Invoke the installed entry, including the fifth (stack) replay argument.
     for(bool replay:{false,true}) {
         medicWeapon[kWeaponFriendlyDamage]=0; // RideAi or subsequent mission script cleared it.
@@ -151,6 +158,8 @@ void CheckMedicPermission() {
     Check(shotCalls==2,"native shot called exactly once per invocation");
     Check(firstPersonShots==2 && firstPersonShotWeapon==medicWeapon && shotCallsAtFirstPersonShot==2,
           "the first person is told of each round after the stock shot");
+    Check(aimShots==2 && aimRestores==2 && shotCallsAtAim==1 && shotCallsAtRestore==2 && aimMuzzle==3 && aimReplay &&
+          aimWeapon==medicWeapon,"the first person's aim turns each round before the stock shot and puts it back after");
     const int before=shotCalls;
     for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
         shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
@@ -158,6 +167,7 @@ void CheckMedicPermission() {
         Check(shotCalls==before && At<int>(medicWeapon,0xBD4)==0,"retired local/replay shot cannot reach native recoil marker");
     }
     Check(firstPersonShots==2,"a refused round tells the first person nothing");
+    Check(aimShots==2 && aimRestores==2,"a refused round is not turned by the first person's aim");
     Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
     for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
         shotFile=file;shotFileLength=std::wcslen(file);

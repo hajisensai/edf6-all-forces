@@ -55,6 +55,8 @@ bool AiGunner(const unsigned char*,const unsigned char*) noexcept {
 }
 bool IsSazabi(const void*) noexcept { return false; }
 void FirstPersonShot(const unsigned char*) noexcept { MissingDependency(); }   // firstperson.cpp: no medic shot here
+bool FirstPersonAimShot(unsigned char*,unsigned,bool,FpShotAim*) noexcept { MissingDependency();return false; }
+void FirstPersonAimRestore(const FpShotAim&) noexcept { MissingDependency(); }
 bool IsDreadnought(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
