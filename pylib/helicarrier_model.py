@@ -150,7 +150,9 @@ def build_model(game, folder: str, textures: bool = True) -> tuple[Mdb, dict[str
     md = Mdb(host_md.version, names, [], [], [], [])
     files, slots = _textures(folder, textures)
     md, mi = om.add_material(md, host_md, c130_model.BODY_HOST[2], f'hc_{MODEL}', slots)
-    meshes = om.build_meshes(host_mesh, [(p, om.rigid(p, b)) for p, b in pieces], mi)
+    # the whole model's reach (one material, one call): 80 m long, its positions float (obj_model.position_layout)
+    meshes = om.build_meshes(host_mesh, [(p, om.rigid(p, b)) for p, b in pieces], mi,
+                             extent=om.reach(p for p, _b in pieces))
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     skel = procmesh.bones(joints, MODEL, posed, 1.0)
