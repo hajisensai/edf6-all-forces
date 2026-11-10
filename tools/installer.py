@@ -538,8 +538,8 @@ def build_assets(cache: Any, assets: list[Asset]) -> dict[str, Any]:
     """Every group of `assets` (build_asset each): its files, None when the installed ones are current. The groups to
     build are built side by side, model_workers.group_workers() at a time, each in a process of its own
     (buildcache.build_group): they only read the game and the models (nothing is written before all are built), and one
-    after the other they left all but two of the cores idle (a first install: 39 minutes, 2026-11-10,
-    docs/feedback-2026-11-10-installer-en.md). One at a time (a small machine), here, in order, as before."""
+    after the other they left all but two of the cores idle (a first install's generating: 29 minutes; 4 at a time on
+    16 cores, under 6, 2026-11-10, docs/feedback-2026-11-10-installer-en.md). One at a time (a small machine), here, in order, as before."""
     import buildcache
     out: dict[str, Any] = {}
     todo: list[Asset] = []

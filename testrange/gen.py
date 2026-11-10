@@ -1278,8 +1278,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         expected = set(range_files(name)[1:])
         # The installer's files when its build cache says they are what this generator and its inputs make now (pylib/
         # buildcache.py Cache.current, as the Dreadnought's above): every one of these was built again here, one after
-        # the other, on every install (2026-11-10: 6 minutes of a first install, all of an update's
-        # docs/feedback-2026-11-10-installer-en.md), else built here.
+        # the other, on every install, the installer's cockpits grafted again too (2026-11-10: about 3 of an update's 13
+        # minutes, docs/feedback-2026-11-10-installer-en.md), else built here.
         group = name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
         if cache is None:
             import buildcache

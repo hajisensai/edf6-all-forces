@@ -15,8 +15,10 @@ from i18n import tr
 
 Job = tuple[Callable[..., bytes], tuple[Any, ...], str]
 # The installer's asset groups built side by side (group_workers): each group's process holds Root.cpk's index, its
-# models and its own model jobs' results (run_jobs: up to two more processes of its own), measured below 3 GiB together
-# for the largest groups (2026-11-10, docs/feedback-2026-11-10-installer-en.md); at most 4 at a time, one for every 4 cores.
+# models and its own model jobs' results (run_jobs: up to two more processes of its own). A first install, 4 at a time:
+# 5.4 GB private memory for the installer and all its processes at the peak, 4.5 GB of it the installer's own (every
+# group's files held until they are written), so 3 GiB a group leaves room (2026-11-10,
+# docs/feedback-2026-11-10-installer-en.md); at most 4 at a time, one for every 4 cores.
 GROUP_CAP = 4
 GROUP_MEMORY = 3 * 1024**3
 
