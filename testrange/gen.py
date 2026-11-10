@@ -1284,7 +1284,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         if cache is None:
             import buildcache
             cache = buildcache.Cache(game_root)
-        if cache.current(group) and {ledger.key(rel) for rel in expected} <= set(led.owned_by(group)):
+        owned = set(led.owned_by(group))
+        if cache.recorded(group) and {ledger.key(rel) for rel in expected} <= owned and cache.current(group):
             for rel in sorted(expected):
                 led.need(OWNER, rel)
                 held.add(ledger.key(rel))

@@ -31,7 +31,8 @@ class Builder:
 
 class RangeTrackedReuse(unittest.TestCase):
     def run_range(self, root: str, current: bool, builder: Builder) -> None:
-        cache = types.SimpleNamespace(current=lambda group, settings=None: current and group == GROUP)
+        cache = types.SimpleNamespace(recorded=lambda group: group == GROUP,
+                                      current=lambda group, settings=None: current and group == GROUP)
         with patch.object(gen, 'ground_tool', lambda name: builder), \
                 patch.object(gen, 'vehicle_sgo', lambda game, name, model=None: b'range sgo'), \
                 patch.object(buildcache, 'Cache', lambda game: cache):

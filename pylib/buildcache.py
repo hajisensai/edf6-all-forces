@@ -230,6 +230,11 @@ class Cache:
         except (OSError, ValueError):
             pass  # absent/corrupt cache is always a rebuild, never an install failure
 
+    def recorded(self, group: str) -> bool:
+        """Whether a build of `group` is on record here (current can only be true then; it also reads the game's
+        archives, a reader with no build of its own needs not)."""
+        return isinstance(self.entries.get(group), dict)
+
     def current(self, group: str, settings: dict[str, Any] | None = None) -> bool:
         """Whether `group`'s installed outputs are the ones its recipe, inputs and `settings` (the ini's choices its
         generator builds by: the Dreadnought's hangar modules) make."""

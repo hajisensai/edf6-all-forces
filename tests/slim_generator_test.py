@@ -65,8 +65,11 @@ check(not sl_imports & {'testhub', 'installer', 'tkinter', 'numpy', 'PIL', 'proc
       f'support_loadout pulls in nothing heavy: {sorted(sl_imports)}')
 vl_imports = imports_of(os.path.join(ROOT, 'tools', 'vanilla_launch.py'))
 check(vl_imports <= {'__future__', 'base64', 'contextlib', 'ctypes', 'hashlib', 'os', 're', 'shutil', 'subprocess', 'sys', 'threading', 'time', 'modfiles',
-                     'save_backup'},
+                     'save_backup', 'i18n'},
       f'vanilla_launch imports only the stdlib and modfiles: {sorted(vl_imports)}')
+# its messages' language (pylib/i18n.py, 2026-11-10): the stdlib only too
+i18n_imports = imports_of(os.path.join(ROOT, 'pylib', 'i18n.py'))
+check(i18n_imports <= {'__future__', 'ctypes', 'os', 'sys'}, f'i18n imports only the stdlib: {sorted(i18n_imports)}')
 sb_imports = imports_of(os.path.join(ROOT, 'tools', 'save_backup.py'))
 check(sb_imports <= {'__future__', 'datetime', 'hashlib', 'os', 'shutil'}, f'save_backup imports only the stdlib: {sorted(sb_imports)}')
 mp_imports = imports_of(os.path.join(ROOT, 'tools', 'menu_preview.py'))
