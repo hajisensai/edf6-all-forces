@@ -3170,6 +3170,44 @@ def range_online_mode_has_no_weapon_level_cap() -> None:
 
 
 @test
+def support_level_tables_match_the_game() -> None:
+    """src/support_level.h's tables are the stock game's (docs/feature-npc-weapon-tier.md §4.1): the support level is the
+    online story's weapon level cap (CONFIG.SGO ModeList GameMode_OnlineScenario, member 7 [difficulty] element 6, as
+    EDF.dll 0xE2710 reads it), the damage by level a request's (call_weapons.request_curve of the Eros's requests, the
+    Blacker's line and the Grape's: each request's vehicle setup damage at its WEAPONTABLE level). Without the game
+    (CI) only the families: the Eros's is the plugin's aircraft requests', the Blacker's the drill tank's line."""
+    import struct
+    text = open(os.path.join(ROOT, 'src', 'support_level.h'), encoding='utf-8').read()
+    f32 = lambda v: struct.unpack('<f', struct.pack('<f', float(v)))[0]  # noqa: E731
+    cap_src = re.search(r'kOnlineCap\[kDifficulties\]=\{(.*?)\};', text, re.S).group(1)
+    caps = [[f32(v.rstrip('f')) for v in re.findall(r'[-\d.]+f', body)][:int(n)]
+            for n, body in re.findall(r'\{(\d),\{([^}]*)\}\}', cap_src)]
+    assert len(caps) == 5 and all(caps), caps
+
+    def points(name: str) -> list[tuple[float, float]]:
+        body = re.search(r'Point ' + name + r'\[\]=\{(.*?)\};', text, re.S).group(1)
+        return [(f32(a), f32(b)) for a, b in re.findall(r'\{([-\d.]+)f,([-\d.]+)f\}', body)]
+    curves = {'eros': points('kEros'), 'blacker': points('kBlacker'), 'grape': points('kGrape')}
+    families = {'eros': cw.EROS_REQUESTS, 'blacker': vc.GROUND_VEHICLES['drill'].family,
+                'grape': ('EWEAPON400', 'EWEAPON404', 'EWEAPON408', 'EWEAPON411', 'EWEAPON414', 'EWEAPON415')}
+    for name, fam in families.items():
+        assert len(curves[name]) == len(fam), (name, curves[name], fam)
+    import rootcpk
+    import sgo
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    modes = sgo.plain(sgo.read(rootcpk.default().read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList'])
+    online = next(m for m in modes if m[0] == 'GameMode_OnlineScenario')
+    assert [[f32(v) for v in row[6]] for row in online[7]] == caps, "the online story's weapon level cap changed"
+    for name, fam in families.items():
+        stock = [(f32(level), f32(damage)) for level, _durability, damage in cw.request_curve(rootcpk.DEFAULT_GAME, fam)]
+        assert stock == curves[name], (name, stock, curves[name])
+    for w in families['grape']:   # the Grape's requests bring the rescue tank the ground support's transport is
+        node = dsgo.parse(cw.stock(rootcpk.DEFAULT_GAME, f'WEAPON/{w}.SGO')).root.get('Ammo_CustomParameter')
+        assert str(node.items[4].items[2]).lower().endswith('v507_rescuetank.sgo'), (w, node.items[4].items[2])
+
+
+@test
 def range_weapon_cap_in_pack_definition() -> None:
     """Each machine computes the online weapon cap from its own config.sgo (docs/weapon-level-cap-re.md), so a guest whose
     install predates the range's lifted cap keeps the stock cap in the host's room. The cap is part of the pack's

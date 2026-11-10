@@ -36,6 +36,7 @@
 #include "loadout_store.h"
 #include "room_ui.h"
 #include "support_soldier.h"
+#include "support_firepower.h"
 #include "airdrop.h"
 #include "player_vehicle.h"
 #include "support_config.h"
@@ -1328,6 +1329,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallAiWorldCapacity();  // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
+    Log("SUPPORT firepower=%d",InstallSupportFirepower());   // support vehicles' and aircraft's damage by level
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
     InstallBodyBox();       // physics bodies' world boxes: the shield, the missiles' warhead safety
     InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile

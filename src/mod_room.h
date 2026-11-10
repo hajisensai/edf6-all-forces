@@ -26,8 +26,11 @@ namespace crew {
 //      and the support deployment's strike jet, fighter, interceptor and multirole fly bodies of their own in the
 //      model pack's Dreadnought models (jet_internal.h Body::sup*, marks 7061-7064; every machine makes its own copy of a
 //      support aircraft from the plan, so an older build would make the stock-bomber one under another mark).
+//   9 (2026-11-10): the support vehicles' and aircraft's weapons deal a request's damage at the online story's weapon level
+//      cap for the room's difficulty and mission (support_firepower.h, docs/feature-npc-weapon-tier.md §4.1), not the
+//      friend attack coefficient: every machine makes its own copy, so an older build's copies would hit by another rule.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=8;
+constexpr std::int64_t kAllForcesRoomProtocol=9;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {
