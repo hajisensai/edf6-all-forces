@@ -141,7 +141,10 @@ class Unit:
     family: str
     like: str = ''           # the existing kind whose weapons / SGO tuning it starts from (tracked: make_tracked_combat)
     status: str = 'planned'  # 'ported': built and installed; 'planned': catalogued only
-    title_en: str = ''       # the game's own English name (gui localisation), the EDF names derive from it
+    # The game's own English name: the game has no unit-name table, so it is the name its gui localisation's callouts
+    # give the unit (gui/*_localizations.csv DIALOG lines tied to its waves: docs/xmorph-names.md); `texts` carry that
+    # name's official translations (CHINESE_SP / CHINESE_TR / JAPANESE columns of the same lines).
+    title_en: str = ''
     # The EDF side, a ported row's (check() holds a ported row to having them all):
     texts: dict = field(default_factory=dict)  # lang -> (request name, what it does): tools/calls.py KINDS (+ SOURCE)
     gun: tuple[str, ...] = ()  # its gun's name (EN, SC, JA, CN): make_tracked_combat NAMES
@@ -189,14 +192,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # round, the 2S6 / BMPT fire autocannon belts); the Apocalypse's missile pods are not the battle tank's and not
     # inherited (see `tracked` above). Both native holders sit on its one barrel, in turn (as the PzH 2000's): a round
     # every half FireInterval; a medium tank's numbers under the superheavy's.
-    _u('ground/medium_tank_regular', 'tracked', 'apocalypse', 'ported', 'Battle Tank',
-       texts={'SC': ('X-Morph 战斗坦克', '请求一辆人类军队的战斗坦克：中型坦克，炮塔上一门坦克炮为主攻击，每秒一发（与原作相同）；'
+    _u('ground/medium_tank_regular', 'tracked', 'apocalypse', 'ported', 'Tank',
+       texts={'SC': ('X-Morph 坦克', '请求一辆人类军队的坦克（原作的常规坦克部队）：中型坦克，炮塔上一门坦克炮为主攻击，每秒一发（与原作相同）；'
                                      '装甲中等。'),
-              'CN': ('X-Morph 戰鬥坦克', '請求一輛人類軍隊的戰鬥坦克：中型坦克，砲塔上一門坦克砲為主攻擊，每秒一發（與原作相同）；'
+              'CN': ('X-Morph 戰車', '請求一輛人類軍隊的戰車（原作的常規戰車部隊）：中型戰車，砲塔上一門坦克砲為主攻擊，每秒一發（與原作相同）；'
                                      '裝甲中等。'),
-              'JA': ('X-Morph バトルタンク', '人類軍のバトルタンクを要請する。中戦車で、砲塔の戦車砲（1 秒に 1 発、原作どおり）を主攻撃とする。'
+              'JA': ('X-Morph 戦車', '人類軍の戦車（原作の通常戦車部隊）を要請する。中戦車で、砲塔の戦車砲（1 秒に 1 発、原作どおり）を主攻撃とする。'
                                        '装甲は中程度。'),
-              'EN': ('X-Morph Battle Tank', "Requests the human army's battle tank: a medium tank, its turret's tank gun "
+              'EN': ('X-Morph Tank', "Requests the human army's tank (the game's regular tank brigades): a medium tank, its turret's tank gun "
                                             "on the primary attack, a round a second (as in the game); medium armour.")},
        gun=('Tank Gun', '坦克炮', '戦車砲', '坦克砲'),
        # main_weapon: fire_rate 1, one round (enemy_bullet_medium_anti_core: 5 anti_core, no Area). Its active_armor
@@ -210,16 +213,16 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The advanced tank: a laser cannon on its turret (the game's enemy_laser_medium, one a second), twice the battle
     # tank's armour (350 against 170) and a shield (not ported). The Brute's laser cannon's beam as its round
     # (make_tracked_combat SHELL_OF, as the laser turret's): straight, fast, through what it hits.
-    _u('ground/medium_tank_advanced', 'tracked', 'apocalypse', 'ported', 'Advanced Tank',
-       texts={'SC': ('X-Morph 先进坦克', '请求一辆人类军队的先进坦克：炮塔上一门激光炮为主攻击，与原作一样有目标就持续照射，光束穿透目标；'
-                                     '装甲约为战斗坦克的两倍。'),
-              'CN': ('X-Morph 先進坦克', '請求一輛人類軍隊的先進坦克：砲塔上一門雷射砲為主攻擊，與原作一樣有目標就持續照射，光束穿透目標；'
-                                     '裝甲約為戰鬥坦克的兩倍。'),
-              'JA': ('X-Morph アドバンスドタンク', '人類軍のアドバンスドタンクを要請する。砲塔のレーザー砲（原作どおり目標がいる間照射し続ける、貫通）を'
-                                          '主攻撃とする。装甲はバトルタンクの約 2 倍。'),
-              'EN': ('X-Morph Advanced Tank', "Requests the human army's advanced tank: its turret's laser cannon on the "
+    _u('ground/medium_tank_advanced', 'tracked', 'apocalypse', 'ported', 'Advanced Shielded Tank',
+       texts={'SC': ('X-Morph 高级铠甲坦克', '请求一辆人类军队的高级铠甲坦克：原作带护盾的新型坦克（护盾未移植），炮塔上一门激光炮为主攻击，与原作一样有目标就持续照射，光束穿透目标；'
+                                     '装甲约为坦克的两倍。'),
+              'CN': ('X-Morph 先進裝甲戰車', '請求一輛人類軍隊的先進裝甲戰車：原作帶護盾的新型戰車（護盾未移植），砲塔上一門雷射砲為主攻擊，與原作一樣有目標就持續照射，光束穿透目標；'
+                                     '裝甲約為戰車的兩倍。'),
+              'JA': ('X-Morph 新型シールド戦車', '人類軍の新型シールド戦車を要請する。原作ではシールドを張る新型戦車（シールドは未移植）。砲塔のレーザー砲（原作どおり目標がいる間照射し続ける、貫通）を'
+                                          '主攻撃とする。装甲は戦車の約 2 倍。'),
+              'EN': ('X-Morph Advanced Shielded Tank', "Requests the human army's advanced shielded tank (its shield is not ported): its turret's laser cannon on the "
                                               'primary attack, a beam held on its target as in the game, through what it hits; about '
-                                              "twice the battle tank's armour.")},
+                                              "twice the tank's armour.")},
        gun=('Laser Cannon', '激光炮', 'レーザー砲', '雷射砲'), shell='V_506HELI_LASERCANNON01_L.SGO',
        # main_weapon: BeamWeaponDef, fire_duration 100 (on while it has a target), enemy_laser_medium (10, reach 10:
        # the tank guns' 8): a stream of pulses every 4 frames, 1200 a second (the battle tank's gun 600)
@@ -234,13 +237,13 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The anti-air tank: twin flak guns either side of its turret (enemy_flak_medium, bursts) and AA missiles (not
     # ported); light armour. The Tunguska's 30 mm belt with a flak burst: fewer, harder-hitting rounds that burst.
     _u('ground/medium_tank_aa', 'tracked', 'tunguska', 'ported', 'Anti-Air Tank',
-       texts={'SC': ('X-Morph 防空坦克', '请求一辆人类军队的防空坦克：炮塔两侧的高射炮为主攻击，每两秒一发、在目标附近大范围爆炸，专打空中目标；副武器为炮塔上的导弹（两发一组，自动追踪地面目标）；'
+       texts={'SC': ('X-Morph 防空坦克', '请求一辆人类军队的防空坦克（原作还会为 30 米内的友军修理，未移植）：炮塔两侧的高射炮为主攻击，每两秒一发、在目标附近大范围爆炸，专打空中目标；副武器为炮塔上的导弹（两发一组，自动追踪地面目标）；'
                                      '装甲较薄。'),
-              'CN': ('X-Morph 防空坦克', '請求一輛人類軍隊的防空坦克：砲塔兩側的高射砲為主攻擊，每兩秒一發、在目標附近大範圍爆炸，專打空中目標；副武器為砲塔上的飛彈（兩發一組，自動追蹤地面目標）；'
+              'CN': ('X-Morph 防空戰車', '請求一輛人類軍隊的防空戰車（原作還會為 30 公尺內的友軍維修，未移植）：砲塔兩側的高射砲為主攻擊，每兩秒一發、在目標附近大範圍爆炸，專打空中目標；副武器為砲塔上的飛彈（兩發一組，自動追蹤地面目標）；'
                                      '裝甲較薄。'),
-              'JA': ('X-Morph 対空戦車', '人類軍の対空戦車を要請する。砲塔両側の高射砲（2 秒に 1 発、目標付近で広く炸裂）を主攻撃とし、空中目標に強い。副武器は砲塔のミサイル（2 発ずつ、地上目標を追尾）。'
+              'JA': ('X-Morph 対空戦車', '人類軍の対空戦車を要請する（原作では 30 m 内の味方を修理する。未移植）。砲塔両側の高射砲（2 秒に 1 発、目標付近で広く炸裂）を主攻撃とし、空中目標に強い。副武器は砲塔のミサイル（2 発ずつ、地上目標を追尾）。'
                                      '装甲は薄い。'),
-              'EN': ('X-Morph Anti-Air Tank', "Requests the human army's anti-air tank: the flak guns either side of its "
+              'EN': ('X-Morph Anti-Air Tank', "Requests the human army's anti-air tank (in the game it also repairs units within 30 m: not ported): the flak guns either side of its "
                                               'turret on the primary attack, a shell every 2 s bursting wide by its '
                                               'target, for air targets; its turret\'s missiles on the secondary (in '
                                               'pairs, homing on ground targets); light armour.')},
@@ -263,14 +266,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 6.15, -2.1), durability=1500.0, reload=10000, level=1.8, after='EDF6VC_CALL_XM_MEDIUM_TANK_ADVANCED'),
     # The heavy tank: a twin heavy gun (enemy_bullet_big_anti_core, a pair every 3 s), machine-gun and missile turrets
     # (not ported), seven times the battle tank's armour (1200). The Apocalypse's twin gun, the two barrels in turn.
-    _u('ground/large_tank', 'tracked', 'apocalypse', 'ported', 'Heavy Tank',
-       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；机枪塔（十发连射）是独立炮手座，坐上去自己瞄准开火，没人坐时是自动炮塔；'
+    _u('ground/large_tank', 'tracked', 'apocalypse', 'ported', 'Bulldog Super Heavy Tank',
+       texts={'SC': ('X-Morph 超重型斗牛犬坦克', '请求一辆人类军队的超重型斗牛犬坦克：原作里顶着防御塔火力突破的超重型坦克，炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；机枪塔（十发连射）是独立炮手座，坐上去自己瞄准开火，没人坐时是自动炮塔；'
                                      '防空导弹（五发连射）和车头火箭各用一个开火键、与主炮同时发射；装甲厚重。'),
-              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；機槍塔（十發連射）是獨立砲手座，坐上去自己瞄準開火，沒人坐時是自動砲塔；'
+              'CN': ('X-Morph 超級重裝猛犬戰車', '請求一輛人類軍隊的超級重裝猛犬戰車：原作裡頂著防禦塔火力突破的超重型戰車，砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；機槍塔（十發連射）是獨立砲手座，坐上去自己瞄準開火，沒人坐時是自動砲塔；'
                                      '防空飛彈（五發連射）和車頭火箭各用一個開火鍵、與主砲同時發射；裝甲厚重。'),
-              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。機銃塔（10 発連射）は独立した砲手席で、乗れば自分で狙って撃ち、無人なら自動砲塔になる。'
+              'JA': ('X-Morph 超重ブルドッグ戦車', '人類軍の超重ブルドッグ戦車を要請する。原作で塔の砲火に耐えて突破する超重戦車。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。機銃塔（10 発連射）は独立した砲手席で、乗れば自分で狙って撃ち、無人なら自動砲塔になる。'
                                     '対空ミサイル（5 発連射）と車体前部のロケットはそれぞれ専用の発射キーで主砲と同時に撃てる。装甲は厚い。'),
-              'EN': ('X-Morph Heavy Tank', "Requests the human army's heavy tank: its turret's twin heavy gun on the primary "
+              'EN': ('X-Morph Bulldog Super Heavy Tank', "Requests the human army's Bulldog super heavy tank, in the game the one that rides out the towers' fire: its turret's twin heavy gun on the primary "
                                            'attack, both barrels every 3 s; its machine-gun turret (bursts of ten) is a gunner seat of '
                                            'its own, an auto turret with nobody in it; AA missiles (bursts of five) and '
                                            'front rockets each on its own fire key with the gun; heavy armour.')},
@@ -306,14 +309,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 6.85, 2.9), durability=9000.0, reload=18000, level=3.5, after='EDF6VC_CALL_XM_MEDIUM_TANK_AA'),
     # The EMP tank: the heavy tank's twin gun on a bigger hull with EMP flak, gun turrets and missiles (not ported), the
     # most armour of the tracked units (2000).
-    _u('ground/large_tank_emp', 'tracked', 'apocalypse', 'ported', 'EMP Tank',
-       texts={'SC': ('X-Morph EMP 坦克', '请求一辆人类军队的 EMP 坦克：比重型坦克更大的车体，炮塔上的双管重炮为主攻击，每三秒两门齐射两轮；'
+    _u('ground/large_tank_emp', 'tracked', 'apocalypse', 'ported', 'Manticore Tank',
+       texts={'SC': ('X-Morph 蝎狮坦克', '请求一辆人类军队的蝎狮坦克：原作的重型防空坦克，EMP 炮能瘫痪敌方飞行器；比斗牛犬更大的车体，炮塔上的双管重炮为主攻击，每三秒两门齐射两轮；'
                                       '副武器与主炮同时发射： EMP 高射弹与导弹塔（二十发连射）各用一个开火键；两座防空机炮塔（十五发连射）各有炮手座位、各自转向，无人时自动开火；履带单位中装甲最厚。'),
-              'CN': ('X-Morph EMP 坦克', '請求一輛人類軍隊的 EMP 坦克：比重型坦克更大的車體，砲塔上的雙管重砲為主攻擊，每三秒兩門齊射兩輪；'
+              'CN': ('X-Morph 蠍獅坦克', '請求一輛人類軍隊的蠍獅坦克：原作的重型防空坦克，電磁脈衝砲能癱瘓敵方飛行器；比猛犬更大的車體，砲塔上的雙管重砲為主攻擊，每三秒兩門齊射兩輪；'
                                       '副武器與主砲同時發射： EMP 高射彈與飛彈塔（二十發連射）各用一個開火鍵；兩座防空機砲塔（十五發連射）各有砲手座位、各自轉向，無人時自動開火；履帶單位中裝甲最厚。'),
-              'JA': ('X-Morph EMP 戦車', '人類軍の EMP 戦車を要請する。重戦車より大きな車体で、砲塔の連装重砲（3 秒ごとに 2 門斉射を 2 回）を'
+              'JA': ('X-Morph マンティコア戦車', '人類軍のマンティコア戦車を要請する。原作の重対空戦車で、電磁パルス砲が敵機を無力化する。ブルドッグより大きな車体で、砲塔の連装重砲（3 秒ごとに 2 門斉射を 2 回）を'
                                       '主攻撃とする。EMP 炸裂弾とミサイル塔（20 発連射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空機関砲塔 2 基（15 発連射）はそれぞれ砲手席を持ち個別に旋回し、無人なら自動で撃つ。装甲は装軌車両で最も厚い。'),
-              'EN': ('X-Morph EMP Tank', "Requests the human army's EMP tank: a hull bigger than the heavy tank's, its "
+              'EN': ('X-Morph Manticore Tank', "Requests the human army's Manticore tank, in the game a heavy anti-air tank whose EMP cannon disables flyers: a hull bigger than the Bulldog's, its "
                                          "turret's twin heavy gun on the primary attack, both barrels twice every 3 s; "
                                          'each on its own fire key with the gun, EMP flak and a missile turret (bursts of '
                                          'twenty); two AA gun turrets (bursts of fifteen), each with its own gunner seat '
@@ -352,14 +355,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 9.05, 4.5), durability=12000.0, reload=22000, level=4.5, after='EDF6VC_CALL_XM_LARGE_TANK'),
     # The artillery: a howitzer at the back of the hull (enemy_artillery_medium, a shell every 3 s), light armour. The
     # PzH 2000's lobbed 155 mm shell (make_artillery.howitzer_sgo), a smaller gun's numbers.
-    _u('ground/medium_artillery_regular', 'tracked', 'pzh2000', 'ported', 'Artillery',
-       texts={'SC': ('X-Morph 自行火炮', '请求一辆人类军队的自行火炮：车体后部的榴弹炮为主攻击，曲射远程炮弹，约每三秒一发；'
+    _u('ground/medium_artillery_regular', 'tracked', 'pzh2000', 'ported', 'Mobile Artillery',
+       texts={'SC': ('X-Morph 移动火炮', '请求一辆人类军队的移动火炮（原作的移动炮兵）：车体后部的榴弹炮为主攻击，曲射远程炮弹，约每三秒一发；'
                                      '装甲较薄。'),
-              'CN': ('X-Morph 自走砲', '請求一輛人類軍隊的自走砲：車體後部的榴彈砲為主攻擊，曲射遠程砲彈，約每三秒一發；'
+              'CN': ('X-Morph 機動火炮', '請求一輛人類軍隊的機動火炮：車體後部的榴彈砲為主攻擊，曲射遠程砲彈，約每三秒一發；'
                                     '裝甲較薄。'),
-              'JA': ('X-Morph 自走砲', '人類軍の自走砲を要請する。車体後部の榴弾砲（曲射の遠距離砲弾、約 3 秒に 1 発）を主攻撃とする。'
+              'JA': ('X-Morph 自走砲', '人類軍の自走砲（原作の移動砲班）を要請する。車体後部の榴弾砲（曲射の遠距離砲弾、約 3 秒に 1 発）を主攻撃とする。'
                                     '装甲は薄い。'),
-              'EN': ('X-Morph Artillery', "Requests the human army's artillery: the howitzer at the back of its hull on the "
+              'EN': ('X-Morph Mobile Artillery', "Requests the human army's mobile artillery: the howitzer at the back of its hull on the "
                                           'primary attack, long-range shells on an arc, about one every three seconds; light '
                                           'armour.')},
        gun=('Howitzer', '榴弹炮', '榴弾砲', '榴彈砲'),
@@ -374,14 +377,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The shield generator: a hull carrying a shield dome for the units round it (not ported) and a small laser turret
     # (enemy_laser_medium, one a second); its armour between the battle and the advanced tank (250). The laser cannon's
     # beam as its round, as the advanced tank's.
-    _u('ground/medium_shield_generator', 'tracked', 'apocalypse', 'ported', 'Shield Generator',
-       texts={'SC': ('X-Morph 护盾车', '请求一辆人类军队的护盾车：车顶小型激光炮塔为主攻击，有目标就持续照射、光束穿透目标'
-                                    '（护盾罩未移植）；装甲中等。'),
-              'CN': ('X-Morph 護盾車', '請求一輛人類軍隊的護盾車：車頂小型雷射砲塔為主攻擊，有目標就持續照射、光束穿透目標'
-                                    '（護盾罩未移植）；裝甲中等。'),
-              'JA': ('X-Morph シールドジェネレーター', '人類軍のシールドジェネレーターを要請する。車体上の小型レーザー砲塔（目標がいる間照射し続ける、'
+    _u('ground/medium_shield_generator', 'tracked', 'apocalypse', 'ported', 'Tortuga Mobile Shield Generator',
+       texts={'SC': ('X-Morph 托尔图加移动护盾战车', '请求一辆人类军队的托尔图加移动护盾战车：原作用护盾罩保护附近地面部队（护盾罩未移植）；车顶小型激光炮塔为主攻击，'
+                                    '有目标就持续照射、光束穿透目标；装甲中等。'),
+              'CN': ('X-Morph 托爾圖加移動護盾戰車', '請求一輛人類軍隊的托爾圖加移動護盾戰車：原作用護盾罩保護附近地面部隊（護盾罩未移植）；車頂小型雷射砲塔為主攻擊，'
+                                    '有目標就持續照射、光束穿透目標；裝甲中等。'),
+              'JA': ('X-Morph トルトゥーガシールド戦車', '人類軍のトルトゥーガシールド戦車を要請する。原作ではシールドで周囲の地上部隊を守る。車体上の小型レーザー砲塔（目標がいる間照射し続ける、'
                                               '貫通）を主攻撃とする（シールドは未移植）。装甲は中程度。'),
-              'EN': ('X-Morph Shield Generator', "Requests the human army's shield generator: the small laser turret on its "
+              'EN': ('X-Morph Tortuga Mobile Shield Generator', "Requests the human army's Tortuga mobile shield generator, in the game shielding the ground units near it: the small laser turret on its "
                                                  'hull on the primary attack, a beam held on its target, through what it hits '
                                                  ' (its shield dome is not ported); medium armour.')},
        gun=('Laser Turret', '激光炮塔', 'レーザー砲塔', '雷射砲塔'), shell='V_506HELI_LASERCANNON01_L.SGO',
@@ -402,14 +405,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The TOS-1's lofted salvo made one round (EDF6AutoTurret's lofted mark: aimed at a ground point on the arc), the
     # upper pair of tubes the native holders' (prep_xmorph MOUTHS), in turn. The rack turns +-30 deg: it pivots at its
     # rear and sweeps the cab further round.
-    _u('ground/medium_missile_launcher', 'wheeled', 'tos1', 'ported', 'Missile Launcher',
-       texts={'SC': ('X-Morph 导弹发射车', '请求一辆人类军队的导弹发射车：卡车后部的发射架为主攻击，每五秒曲射一枚重型导弹，落点大范围爆炸；'
+    _u('ground/medium_missile_launcher', 'wheeled', 'tos1', 'ported', 'Ravager Mobile Missile Launcher',
+       texts={'SC': ('X-Morph 破坏者移动导弹发射器', '请求一辆人类军队的破坏者移动导弹发射器：原作的远程地对地导弹车，卡车后部的发射架为主攻击，每五秒曲射一枚重型导弹，落点大范围爆炸；'
                                      '发射架左右各可转 30 度；装甲很薄。'),
-              'CN': ('X-Morph 飛彈發射車', '請求一輛人類軍隊的飛彈發射車：卡車後部的發射架為主攻擊，每五秒曲射一枚重型飛彈，落點大範圍爆炸；'
+              'CN': ('X-Morph 破壞者移動導彈發射器', '請求一輛人類軍隊的破壞者移動導彈發射器：原作的遠程地對地導彈車，卡車後部的發射架為主攻擊，每五秒曲射一枚重型飛彈，落點大範圍爆炸；'
                                      '發射架左右各可轉 30 度；裝甲很薄。'),
-              'JA': ('X-Morph ミサイルランチャー', '人類軍のミサイルランチャーを要請する。トラック後部の発射機（5 秒ごとに重ミサイルを 1 発、'
+              'JA': ('X-Morph ラヴァジャー移動式ミサイル発射装置', '人類軍のラヴァジャー移動式ミサイル発射装置を要請する。原作の長距離地対地ミサイル車で、トラック後部の発射機（5 秒ごとに重ミサイルを 1 発、'
                                           '山なりに撃ち、着弾点で広く爆発）を主攻撃とする。発射機は左右 30 度まで旋回。装甲は非常に薄い。'),
-              'EN': ('X-Morph Missile Launcher', "Requests the human army's missile launcher: the rack on its truck's bed on "
+              'EN': ('X-Morph Ravager Mobile Missile Launcher', "Requests the human army's Ravager mobile missile launcher, the game's long-range surface-to-surface missile truck: the rack on its truck's bed on "
                                                  'the primary attack, a heavy missile every 5 s on a high arc, bursting wide '
                                                  'where it lands; the rack turns 30 deg either way; very light armour.')},
        gun=('Heavy Missiles', '重型导弹', '重ミサイル', '重型飛彈'),
@@ -428,13 +431,13 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # weapons on the same guns: anti-air rounds (main_weapon, both barrels) and ground rounds (core_weapon, the
     # barrels in turn). The 2S6's 30 mm belt as its round.
     _u('ground/medium_apc', 'wheeled', 'tunguska', 'ported', 'APC',
-       texts={'SC': ('X-Morph 装甲运兵车', '请求一辆人类军队的装甲运兵车：八轮，炮塔上的双联重机枪为主攻击，三发一组、两根枪管齐射（对空弹）；'
+       texts={'SC': ('X-Morph 运兵车', '请求一辆人类军队的运兵车（原作从后门放出步兵小队，未移植）：八轮，炮塔上的双联重机枪为主攻击，三发一组、两根枪管齐射（对空弹）；'
                                       '副武器为同一对枪管轮流射出的对地弹；装甲中等。'),
-              'CN': ('X-Morph 裝甲運兵車', '請求一輛人類軍隊的裝甲運兵車：八輪，砲塔上的雙聯重機槍為主攻擊，三發一組、兩根槍管齊射（對空彈）；'
+              'CN': ('X-Morph 裝甲運兵車', '請求一輛人類軍隊的裝甲運兵車（原作從後門放出步兵小隊，未移植）：八輪，砲塔上的雙聯重機槍為主攻擊，三發一組、兩根槍管齊射（對空彈）；'
                                       '副武器為同一對槍管輪流射出的對地彈；裝甲中等。'),
-              'JA': ('X-Morph 装甲兵員輸送車', '人類軍の装甲兵員輸送車を要請する。8 輪で、砲塔の連装重機関銃（3 発ずつ、2 門同時：対空弾）を'
+              'JA': ('X-Morph 装甲兵員輸送車', '人類軍の装甲兵員輸送車を要請する（原作では後部ドアから歩兵分隊を降ろす。未移植）。8 輪で、砲塔の連装重機関銃（3 発ずつ、2 門同時：対空弾）を'
                                          '主攻撃とする。副武器は同じ銃身から交互に撃つ対地弾。装甲は中程度。'),
-              'EN': ('X-Morph APC', "Requests the human army's APC: eight wheels, its turret's twin heavy machine gun on the "
+              'EN': ('X-Morph APC', "Requests the human army's APC (in the game it drops an infantry squad from its rear door: not ported): eight wheels, its turret's twin heavy machine gun on the "
                                     'primary attack, bursts of three from both barrels (anti-air rounds); on the secondary '
                                     'the same barrels\' ground rounds, in turn; medium armour.')},
        gun=('Twin Heavy MG', '双联重机枪', '連装重機関銃', '雙聯重機槍'),
@@ -473,7 +476,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The Humvee: a machine gun on its roof's turret, anti-air rounds (main_weapon) and ground rounds (core_weapon);
     # the lightest armour. The 2S6's 30 mm belt as its round, both holders on the one gun in turn.
     _u('ground/small_humvee', 'wheeled', 'tunguska', 'ported', 'Humvee',
-       texts={'SC': ('X-Morph 悍马', '请求一辆人类军队的悍马：车顶枪塔上的机枪为主攻击，三发一组（对空弹）；副武器为同一挺机枪的对地弹；'
+       texts={'SC': ('X-Morph 悍马', '请求一辆人类军队的悍马（原作的轻型地面部队）：车顶枪塔上的机枪为主攻击，三发一组（对空弹）；副武器为同一挺机枪的对地弹；'
                                   '装甲很薄、速度快。'),
               'CN': ('X-Morph 悍馬', '請求一輛人類軍隊的悍馬：車頂槍塔上的機槍為主攻擊，三發一組（對空彈）；副武器為同一挺機槍的對地彈；'
                                   '裝甲很薄、速度快。'),
@@ -501,14 +504,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The buggy: AA missile pods either side of its turret (bursts of five, homing on air units) and a machine gun at
     # the front (core_weapon, on an attachment of the hull: a fixed mount the game aims itself). The pods are the
     # native pair (the Titan's side missile, its lock-on: Unit.homing), the gun its secondary along the turret's aim.
-    _u('ground/small_buggy', 'wheeled', 'tunguska', 'ported', 'Buggy',
-       texts={'SC': ('X-Morph 越野车', '请求一辆人类军队的越野车：炮塔两侧的防空导弹为主攻击，五发连射、追踪空中目标；副武器为车头机枪'
+    _u('ground/small_buggy', 'wheeled', 'tunguska', 'ported', 'Mobile Missile Support Buggy',
+       texts={'SC': ('X-Morph 移动导弹支援车', '请求一辆人类军队的移动导弹支援车（越野车底盘）：炮塔两侧的防空导弹为主攻击，五发连射、追踪空中目标；副武器为车头机枪'
                                    '（六发连射，对地）；装甲很薄、速度快。'),
-              'CN': ('X-Morph 越野車', '請求一輛人類軍隊的越野車：砲塔兩側的防空飛彈為主攻擊，五發連射、追蹤空中目標；副武器為車頭機槍'
+              'CN': ('X-Morph 機動飛彈車', '請求一輛人類軍隊的機動飛彈車（越野車底盤）：砲塔兩側的防空飛彈為主攻擊，五發連射、追蹤空中目標；副武器為車頭機槍'
                                    '（六發連射，對地）；裝甲很薄、速度快。'),
-              'JA': ('X-Morph バギー', '人類軍のバギーを要請する。砲塔両側の対空ミサイル（5 発連射、空中目標を追尾）を主攻撃とし、'
+              'JA': ('X-Morph 移動ミサイル支援車', '人類軍の移動ミサイル支援車（バギー）を要請する。砲塔両側の対空ミサイル（5 発連射、空中目標を追尾）を主攻撃とし、'
                                     '副武器は車体前部の機関銃（6 発連射、対地）。装甲は非常に薄く、速い。'),
-              'EN': ('X-Morph Buggy', "Requests the human army's buggy: the AA missile pods either side of its turret on the "
+              'EN': ('X-Morph Mobile Missile Support Buggy', "Requests the human army's mobile missile support buggy: the AA missile pods either side of its turret on the "
                                       'primary attack, bursts of five homing on air targets; on the secondary its front '
                                       'machine gun (bursts of six, ground rounds); very light armour, fast.')},
        gun=('AA Missiles', '防空导弹', '対空ミサイル', '防空飛彈'), homing=True,
@@ -531,14 +534,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The light mech: two arm guns (weapon_enemy_mg_small, one round each every 0.4 s: enemy_bullet_small_anti_core, 2
     # anti_core), 45 health (a quarter of the battle tank's). On the Begaruta
     # (V504_BEGARUTA_BLUE; pylib/xm_walker.py: its hand holders).
-    _u('ground/small_mech', 'mech', '', 'ported', 'Light Mech',
-       texts={'SC': ('X-Morph 轻型机甲', '请求一台人类军队的轻型机甲：双足步行机甲，两臂各一挺机枪为主攻击，两挺同时开火，'
+    _u('ground/small_mech', 'mech', '', 'ported', 'Grasshopper Assault Infantry',
+       texts={'SC': ('X-Morph 蚱蜢突击步兵', '请求一台人类军队的蚱蜢突击步兵：双足步行机甲（原作靠喷气背包跳过激光围栏与地形），两臂各一挺机枪为主攻击，两挺同时开火，'
                                      '每 0.4 秒一发（与原作相同）；装甲较薄。'),
-              'CN': ('X-Morph 輕型機甲', '請求一台人類軍隊的輕型機甲：雙足步行機甲，兩臂各一挺機槍為主攻擊，兩挺同時開火，'
+              'CN': ('X-Morph 蚱蜢突擊步兵', '請求一台人類軍隊的蚱蜢突擊步兵：雙足步行機甲（原作靠噴射背包跳過雷射網與地形），兩臂各一挺機槍為主攻擊，兩挺同時開火，'
                                      '每 0.4 秒一發（與原作相同）；裝甲較薄。'),
-              'JA': ('X-Morph ライトメック', '人類軍のライトメックを要請する。二足歩行メックで、両腕の機関銃（2 挺同時、0.4 秒に 1 発、'
+              'JA': ('X-Morph グラスホッパー攻撃歩兵', '人類軍のグラスホッパー攻撃歩兵を要請する。二足歩行メック（原作ではジェットパックでレーザーフェンスや地形を飛び越える）で、両腕の機関銃（2 挺同時、0.4 秒に 1 発、'
                                        '原作どおり）を主攻撃とする。装甲は薄い。'),
-              'EN': ('X-Morph Light Mech', "Requests the human army's light mech: a two-legged walker, the machine guns "
+              'EN': ('X-Morph Grasshopper Assault Infantry', "Requests the human army's Grasshopper assault infantry: a two-legged walker (in the game it jumps laser fences and terrain on its jetpack), the machine guns "
                                            'on its arms on the primary attack, both at once, a round every 0.4 s (as in '
                                            'the game); light armour.')},
        gun=('Arm Machine Gun', '臂载机枪', '腕部機関銃', '臂載機槍'),
@@ -552,14 +555,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # the barrels in turn, every 6 s), AA missiles (three pairs 0.4 s apart every 4 s: enemy_missile_anti_aa_small, 8
     # anti_player, homing on air units), 600 health (3.5 times the battle tank's). On the Proteus Mk2 (its barrels' and
     # launcher's holders).
-    _u('ground/large_mech', 'mech', '', 'ported', 'Heavy Mech',
-       texts={'SC': ('X-Morph 重型机甲', '请求一台人类军队的重型机甲：大型双足步行机甲，炮塔两侧的重炮为主攻击，每六秒两门各连射两发；'
+    _u('ground/large_mech', 'mech', '', 'ported', 'Juggernaut',
+       texts={'SC': ('X-Morph 重甲兵', '请求一台人类军队的重甲兵（Juggernaut）：大型双足步行机甲（原作能跳过防御工事直扑核心），炮塔两侧的重炮为主攻击，每六秒两门各连射两发；'
                                      '副武器为防空导弹（三轮连射，每轮两发）；装甲厚重。'),
-              'CN': ('X-Morph 重型機甲', '請求一台人類軍隊的重型機甲：大型雙足步行機甲，砲塔兩側的重砲為主攻擊，每六秒兩門各連射兩發；'
+              'CN': ('X-Morph 重裝機甲', '請求一台人類軍隊的重裝機甲（Juggernaut）：大型雙足步行機甲（原作能躍過防禦工事直撲核心），砲塔兩側的重砲為主攻擊，每六秒兩門各連射兩發；'
                                      '副武器為防空飛彈（三輪連射，每輪兩發）；裝甲厚重。'),
-              'JA': ('X-Morph ヘビーメック', '人類軍のヘビーメックを要請する。大型の二足歩行メックで、砲塔両側の重砲（6 秒ごとに 2 門が'
+              'JA': ('X-Morph ジャガノート', '人類軍のジャガノートを要請する。大型の二足歩行メック（原作では防御を飛び越えてコアへ直行する）で、砲塔両側の重砲（6 秒ごとに 2 門が'
                                        '各 2 発連射）を主攻撃とする。副武器は対空ミサイル（2 発ずつ 3 回連射）。装甲は厚い。'),
-              'EN': ('X-Morph Heavy Mech', "Requests the human army's heavy mech: a big two-legged walker, the heavy "
+              'EN': ('X-Morph Juggernaut', "Requests the human army's Juggernaut: a big two-legged walker (in the game it jumps the defences straight for the core), the heavy "
                                            'guns either side of its turret on the primary attack, two rounds from each '
                                            'every 6 s; AA missiles on the secondary (three pairs in a burst); heavy '
                                            'armour.')},
@@ -628,14 +631,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # units' scale (about x6 at the top, x15 at the bottom), the light ones floored as the tracked ones are.
     # The light helicopter: a drone that rams the core (Behavior kamikaze, ContactDamageDealerDef const 22); it has no
     # gun. Its ram is a charge fired from its nose (22 -> 2640, a blast its size), one on each trigger.
-    _u('air/small_helicopter_core', 'heli', status='ported', title='Light Helicopter',
-       texts={'SC': ('X-Morph 轻型直升机', '请求一架人类军队的轻型直升机：原作里是撞向目标的自杀无人机，没有机炮；这里机炮键和导弹键各发射机首撞击炸药'
+    _u('air/small_helicopter_core', 'heli', status='ported', title='Drone',
+       texts={'SC': ('X-Morph 无人机', '请求一架人类军队的无人机：原作里是成群撞向目标的自杀无人机，没有机炮；这里机炮键和导弹键各发射机首撞击炸药'
                                        '（近距离、大威力，各一枚）；机体很小、装甲很薄。'),
-              'CN': ('X-Morph 輕型直升機', '請求一架人類軍隊的輕型直升機：原作裡是撞向目標的自殺無人機，沒有機砲；這裡機砲鍵和飛彈鍵各發射機首撞擊炸藥'
+              'CN': ('X-Morph 無人機', '請求一架人類軍隊的無人機：原作裡是成群撞向目標的自殺無人機，沒有機砲；這裡機砲鍵和飛彈鍵各發射機首撞擊炸藥'
                                        '（近距離、大威力，各一枚）；機體很小、裝甲很薄。'),
-              'JA': ('X-Morph 軽ヘリ', '人類軍の軽ヘリを要請する。原作では目標に体当たりする自爆ドローンで機銃はない。ここでは機銃キーとミサイルキーで'
+              'JA': ('X-Morph ドローン', '人類軍のドローンを要請する。原作では群れで目標に体当たりする自爆ドローンで機銃はない。ここでは機銃キーとミサイルキーで'
                                      '機首の体当たり爆薬（近距離・高威力、各 1 発）を撃つ。機体は小さく装甲は薄い。'),
-              'EN': ('X-Morph Light Helicopter', "Requests the human army's light helicopter: in the game a drone that rams its "
+              'EN': ('X-Morph Drone', "Requests the human army's drone: in the game one of a swarm that rams its "
                                                  'target, with no gun; here its gun and missile triggers fire ram charges from '
                                                  'its nose (short range, hard-hitting, one each); very small, thin armour.')},
        gun=('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
@@ -650,14 +653,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 3.2, -3.5), durability=800.0, reload=6000, level=0.8, after='EDF6VC_CALL_XM_HIGHWAY_TANK'),
     # The helicopter: a coaxial rotor, four missile pods (missiles: MissileWeaponDef, fire_rate 3, four 0.3 s apart:
     # enemy_missile_anti_core_small, 3 + Area 4). The outer pods on the gun trigger, the inner on the missile trigger.
-    _u('air/medium_helicopter_core', 'heli', status='ported', title='Helicopter',
-       texts={'SC': ('X-Morph 直升机', '请求一架人类军队的直升机：共轴双旋翼，机翼下四个导弹巢；机炮键发射外侧两巢、导弹键发射内侧两巢的导弹'
+    _u('air/medium_helicopter_core', 'heli', status='ported', title='Assault Helicopter',
+       texts={'SC': ('X-Morph 攻击型直升机', '请求一架人类军队的攻击型直升机：共轴双旋翼，机翼下四个导弹巢；机炮键发射外侧两巢、导弹键发射内侧两巢的导弹'
                                      '（每三秒一轮连射，与原作相同）；装甲较薄。'),
-              'CN': ('X-Morph 直升機', '請求一架人類軍隊的直升機：共軸雙旋翼，機翼下四個飛彈巢；機砲鍵發射外側兩巢、飛彈鍵發射內側兩巢的飛彈'
+              'CN': ('X-Morph 攻擊直升機', '請求一架人類軍隊的攻擊直升機：共軸雙旋翼，機翼下四個飛彈巢；機砲鍵發射外側兩巢、飛彈鍵發射內側兩巢的飛彈'
                                      '（每三秒一輪連射，與原作相同）；裝甲較薄。'),
-              'JA': ('X-Morph ヘリ', '人類軍のヘリを要請する。二重反転ローターで、翼下に 4 基のミサイルポッドを持つ。機銃キーで外側 2 基、'
+              'JA': ('X-Morph アサルトチョッパー', '人類軍のアサルトチョッパーを要請する。二重反転ローターで、翼下に 4 基のミサイルポッドを持つ。機銃キーで外側 2 基、'
                                     'ミサイルキーで内側 2 基のミサイルを撃つ（原作どおり 3 秒ごとの連射）。装甲は薄い。'),
-              'EN': ('X-Morph Helicopter', "Requests the human army's helicopter: coaxial rotors, four missile pods under its "
+              'EN': ('X-Morph Assault Helicopter', "Requests the human army's assault helicopter: coaxial rotors, four missile pods under its "
                                            'wings; the gun trigger fires the outer two, the missile trigger the inner two '
                                            '(a burst every 3 s, as in the game); light armour.')},
        gun=('Missile Pods', '导弹巢', 'ミサイルポッド', '飛彈巢'),
@@ -679,7 +682,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                        '四个导弹巢（每三秒十六发）为导弹键；装甲厚重。'),
               'CN': ('X-Morph 重型直升機', '請求一架人類軍隊的重型直升機：三旋翼大型機，機首機砲塔（六發連射，每兩秒一輪）為機砲鍵，'
                                        '四個飛彈巢（每三秒十六發）為飛彈鍵；裝甲厚重。'),
-              'JA': ('X-Morph 重ヘリ', '人類軍の重ヘリを要請する。3 ローターの大型機で、機首の機銃塔（6 発連射、2 秒ごと）を機銃キー、'
+              'JA': ('X-Morph ヘビーチョッパー', '人類軍のヘビーチョッパーを要請する。3 ローターの大型機で、機首の機銃塔（6 発連射、2 秒ごと）を機銃キー、'
                                      '4 基のミサイルポッド（3 秒ごとに 16 発）をミサイルキーで撃つ。装甲は厚い。'),
               'EN': ('X-Morph Heavy Helicopter', "Requests the human army's heavy helicopter: a big three-rotor craft, its nose "
                                                  'gun turret (bursts of six every 2 s) on the gun trigger, four missile pods '
@@ -704,7 +707,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                        '另有十个乘员座位，可以运送小队（与运输直升机相同）；装甲中等。'),
               'CN': ('X-Morph 運輸直升機', '請求一架人類軍隊的運輸直升機：縱列雙旋翼，原作裡沒有武器，這裡保留 EDF 直升機原有的機砲和飛彈；'
                                        '另有十個乘員座位，可以運送小隊（與運輸直升機相同）；裝甲中等。'),
-              'JA': ('X-Morph 輸送ヘリ', '人類軍の輸送ヘリを要請する。タンデムローター機で、原作では非武装。ここでは EDF のヘリ本来の機関砲とミサイルを'
+              'JA': ('X-Morph 輸送ヘリコプター', '人類軍の輸送ヘリコプターを要請する。タンデムローター機で、原作では非武装。ここでは EDF のヘリ本来の機関砲とミサイルを'
                                       '残す。乗員席が 10 あり、分隊を運べる（輸送ヘリと同じ）。装甲は中程度。'),
               'EN': ('X-Morph Transport Helicopter', "Requests the human army's transport helicopter: tandem rotors; unarmed in "
                                                      "the game, it keeps the EDF helicopter's own autocannons and missiles here; "
@@ -717,14 +720,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The gunship: four pairs of rotors (the rear pair spun), two gun turrets on its back (left_turret / right_turret:
     # fire_rate 1.5, six 0.1 s apart each: enemy_bullet_small_fast) and its launcher (missile_launcher: fire_rate 5,
     # enemy_missile_anti_core_launchers: a slow homing missile, 125 + Area 12, the game's heaviest round).
-    _u('air/large_gunship_core', 'heli', status='ported', title='Gunship',
-       texts={'SC': ('X-Morph 武装运输机', '请求一架人类军队的武装运输机：八旋翼巨型机，背上前后两座机炮塔（各六发连射，每一秒半一轮）为机炮键，'
+    _u('air/large_gunship_core', 'heli', status='ported', title='Vulture Missile Gunship',
+       texts={'SC': ('X-Morph 秃鹰导弹空中炮艇', '请求一架人类军队的秃鹰导弹空中炮艇：原作在远处向核心发射远程空对地导弹；八旋翼巨型机，背上前后两座机炮塔（各六发连射，每一秒半一轮）为机炮键，'
                                        '机腹发射器的重型导弹（每五秒一枚，大范围爆炸）为导弹键；直升机中装甲最厚。'),
-              'CN': ('X-Morph 武裝運輸機', '請求一架人類軍隊的武裝運輸機：八旋翼巨型機，背上前後兩座機砲塔（各六發連射，每一秒半一輪）為機砲鍵，'
+              'CN': ('X-Morph 禿鷹導彈空中炮艇', '請求一架人類軍隊的禿鷹導彈空中炮艇：原作在遠處向核心發射長射程空對地導彈；八旋翼巨型機，背上前後兩座機砲塔（各六發連射，每一秒半一輪）為機砲鍵，'
                                        '機腹發射器的重型飛彈（每五秒一枚，大範圍爆炸）為飛彈鍵；直升機中裝甲最厚。'),
-              'JA': ('X-Morph ガンシップ', '人類軍のガンシップを要請する。8 ローターの巨大機で、背中の前後 2 基の機銃塔（各 6 発連射、1.5 秒ごと）を'
+              'JA': ('X-Morph ヴァルチャーミサイルガンシップ', '人類軍のヴァルチャーミサイルガンシップを要請する。原作では遠距離から空対地ミサイルでコアを狙う。8 ローターの巨大機で、背中の前後 2 基の機銃塔（各 6 発連射、1.5 秒ごと）を'
                                        '機銃キー、機体下の発射機の重ミサイル（5 秒に 1 発、広い爆発）をミサイルキーで撃つ。ヘリで最も装甲が厚い。'),
-              'EN': ('X-Morph Gunship', "Requests the human army's gunship: a huge eight-rotor craft, the two gun turrets on its "
+              'EN': ('X-Morph Vulture Missile Gunship', "Requests the human army's Vulture missile gunship, in the game firing long-range air-to-ground missiles from afar: a huge eight-rotor craft, the two gun turrets on its "
                                         "back (bursts of six every 1.5 s each) on the gun trigger, its launcher's heavy missile "
                                         '(one every 5 s, a wide blast) on the missile trigger; the heaviest armour of the '
                                         'helicopters.')},
@@ -743,15 +746,15 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # (the Air Raider's EDF6VC_CALL_FLY_* way). Their gun pair on the gun trigger, their stores on the missile trigger.
     # The fighter: an air-superiority jet with no gun (main_weapon: fire_rate 3, two 0.4 s apart from its two wing rails:
     # enemy_missile_anti_aa_small, 8 anti_player, homing on flyers). Its gun trigger fires the jets' own guns.
-    _u('air/medium_fighter_aa', 'jet', status='ported', title='Fighter',
-       texts={'SC': ('X-Morph 战斗机', '请求一架人类军队的战斗机，空投到信号弹处后自己驾驶：原作只挂对空导弹，这里导弹键发射翼下对空导弹'
+    _u('air/medium_fighter_aa', 'jet', status='ported', title='Jet Fighter',
+       texts={'SC': ('X-Morph 喷气战斗机', '请求一架人类军队的喷气战斗机，空投到信号弹处后自己驾驶：原作只挂对空导弹，这里导弹键发射翼下对空导弹'
                                      '（每三秒两枚，追踪空中目标），机炮键是本插件喷气机的机炮；机体很小、装甲很薄。'),
-              'CN': ('X-Morph 戰鬥機', '請求一架人類軍隊的戰鬥機，空投到信號彈處後自己駕駛：原作只掛對空飛彈，這裡飛彈鍵發射翼下對空飛彈'
+              'CN': ('X-Morph 噴射戰鬥機', '請求一架人類軍隊的噴射戰鬥機，空投到信號彈處後自己駕駛：原作只掛對空飛彈，這裡飛彈鍵發射翼下對空飛彈'
                                      '（每三秒兩枚，追蹤空中目標），機砲鍵是本插件噴射機的機砲；機體很小、裝甲很薄。'),
-              'JA': ('X-Morph 戦闘機', '人類軍の戦闘機を要請し、信号弾の位置に届いた機体を自分で操縦する。原作は対空ミサイルのみで、ここではミサイル'
+              'JA': ('X-Morph ジェット戦闘機', '人類軍のジェット戦闘機を要請し、信号弾の位置に届いた機体を自分で操縦する。原作は対空ミサイルのみで、ここではミサイル'
                                      'キーで翼下の対空ミサイル（3 秒に 2 発、空中目標を追尾）、機銃キーで本プラグインのジェット機関砲を撃つ。'
                                      '機体は小さく装甲は薄い。'),
-              'EN': ('X-Morph Fighter', "Requests the human army's fighter, dropped empty at the flare for you to fly: in the "
+              'EN': ('X-Morph Jet Fighter', "Requests the human army's jet fighter, dropped empty at the flare for you to fly: in the "
                                         'game it carries only air-to-air missiles; here its missile trigger fires them from '
                                         'its wing rails (two every 3 s, homing on flyers) and its gun trigger the jets\' own '
                                         'cannon; very small, thin armour.')},
@@ -763,14 +766,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 2.6, -6.5), durability=1200.0, reload=7000, level=1.0, after='EDF6VC_CALL_XM_LARGE_GUNSHIP_CORE'),
     # The attack plane: two rocket pods under its wings (main_weapon: fire_rate 2, two 0.4 s apart: enemy_rocket_small,
     # 10 anti_player, barely guided), no gun.
-    _u('air/medium_gunship_aa', 'jet', status='ported', title='Attack Plane',
-       texts={'SC': ('X-Morph 攻击机', '请求一架人类军队的攻击机，空投到信号弹处后自己驾驶：导弹键发射翼下火箭弹（每两秒两枚，几乎不制导），'
+    _u('air/medium_gunship_aa', 'jet', status='ported', title='Gunship',
+       texts={'SC': ('X-Morph 空中炮艇', '请求一架人类军队的空中炮艇，空投到信号弹处后自己驾驶：导弹键发射翼下火箭弹（每两秒两枚，几乎不制导），'
                                      '机炮键是本插件喷气机的机炮（原作没有机炮）；机体小、装甲薄。'),
-              'CN': ('X-Morph 攻擊機', '請求一架人類軍隊的攻擊機，空投到信號彈處後自己駕駛：飛彈鍵發射翼下火箭彈（每兩秒兩枚，幾乎不制導），'
+              'CN': ('X-Morph 空中炮艇', '請求一架人類軍隊的空中炮艇，空投到信號彈處後自己駕駛：飛彈鍵發射翼下火箭彈（每兩秒兩枚，幾乎不制導），'
                                      '機砲鍵是本插件噴射機的機砲（原作沒有機砲）；機體小、裝甲薄。'),
-              'JA': ('X-Morph 攻撃機', '人類軍の攻撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで翼下のロケット弾（2 秒に 2 発、'
+              'JA': ('X-Morph ガンシップ', '人類軍のガンシップを要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで翼下のロケット弾（2 秒に 2 発、'
                                      'ほぼ無誘導）、機銃キーで本プラグインのジェット機関砲（原作に機銃はない）を撃つ。機体は小さく装甲は薄い。'),
-              'EN': ('X-Morph Attack Plane', "Requests the human army's attack plane, dropped empty at the flare for you to fly: "
+              'EN': ('X-Morph Gunship', "Requests the human army's gunship, dropped empty at the flare for you to fly: "
                                              'its missile trigger fires the rocket pods under its wings (two every 2 s, barely '
                                              'guided), its gun trigger the jets\' own cannon (it has no gun in the game); '
                                              'small, thin armour.')},
@@ -784,15 +787,15 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # nose (miniguns: fire_rate 1.5, ten 0.08 s apart; both enemy_bullet_small: 5 anti_player), eight rocket pods
     # (fire_rate 0.25 each) and four missile rails (fire_rate 3, two 0.4 s apart each). The miniguns are its gun pair
     # (the turret, which the game aims by itself, is not ported: EDF's aircraft guns fire along the nose).
-    _u('air/large_gunship_aa', 'jet', status='ported', title='Heavy Attack Plane',
-       texts={'SC': ('X-Morph 重型攻击机', '请求一架人类军队的重型攻击机，空投到信号弹处后自己驾驶：机炮键是机头两挺转管机枪（每一秒半十发连射），'
+    _u('air/large_gunship_aa', 'jet', status='ported', title='Heavy Assault Gunship',
+       texts={'SC': ('X-Morph 重型突击空中炮艇', '请求一架人类军队的重型突击空中炮艇，空投到信号弹处后自己驾驶：机炮键是机头两挺转管机枪（每一秒半十发连射），'
                                        '导弹键在八个火箭巢（快速连射）和四条对空导弹滑轨之间切换；固定翼中火力最猛。'),
-              'CN': ('X-Morph 重型攻擊機', '請求一架人類軍隊的重型攻擊機，空投到信號彈處後自己駕駛：機砲鍵是機頭兩挺轉管機槍（每一秒半十發連射），'
+              'CN': ('X-Morph 重裝攻擊炮艇', '請求一架人類軍隊的重裝攻擊炮艇，空投到信號彈處後自己駕駛：機砲鍵是機頭兩挺轉管機槍（每一秒半十發連射），'
                                        '飛彈鍵在八個火箭巢（快速連射）和四條對空飛彈滑軌之間切換；固定翼中火力最猛。'),
-              'JA': ('X-Morph 重攻撃機', '人類軍の重攻撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。機銃キーで機首の 2 門のミニガン'
+              'JA': ('X-Morph 重攻撃ガンシップ', '人類軍の重攻撃ガンシップを要請し、信号弾の位置に届いた機体を自分で操縦する。機銃キーで機首の 2 門のミニガン'
                                        '（1.5 秒ごとに 10 発連射）、ミサイルキーで 8 基のロケットポッド（高速連射）と 4 本の対空ミサイルを'
                                        '切り替えて撃つ。固定翼で最も火力が高い。'),
-              'EN': ('X-Morph Heavy Attack Plane', "Requests the human army's heavy attack plane, dropped empty at the flare for "
+              'EN': ('X-Morph Heavy Assault Gunship', "Requests the human army's heavy assault gunship, dropped empty at the flare for "
                                                    'you to fly: its gun trigger fires the two miniguns in its nose (bursts of '
                                                    'ten every 1.5 s), its missile trigger its eight rocket pods (a fast '
                                                    'ripple) or its four air-to-air missile rails, cycled; the heaviest fire of '
@@ -813,14 +816,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The bomber: a bomb bay (bombs: fire_rate 0.4 from two racks: enemy_bomb_big, 95 anti_core_bombs + Area 8) and two
     # gun turrets on its wings (left_turret / right_turret: fire_rate 1.3, three 0.2 s apart: enemy_bullet_small), which
     # here are its gun pair.
-    _u('air/large_bomber_core', 'jet', status='ported', title='Bomber',
-       texts={'SC': ('X-Morph 轰炸机', '请求一架人类军队的轰炸机，空投到信号弹处后自己驾驶：导弹键从弹舱投下重磅炸弹（每零点四秒一枚，大范围爆炸），'
+    _u('air/large_bomber_core', 'jet', status='ported', title='Heavy Bomber',
+       texts={'SC': ('X-Morph 重型轰炸机', '请求一架人类军队的重型轰炸机，空投到信号弹处后自己驾驶：导弹键从弹舱投下重磅炸弹（每零点四秒一枚，大范围爆炸），'
                                      '机炮键是两翼的机炮塔（每一秒多三发）；固定翼中装甲最厚。'),
-              'CN': ('X-Morph 轟炸機', '請求一架人類軍隊的轟炸機，空投到信號彈處後自己駕駛：飛彈鍵從彈艙投下重磅炸彈（每零點四秒一枚，大範圍爆炸），'
+              'CN': ('X-Morph 重型轟炸機', '請求一架人類軍隊的重型轟炸機，空投到信號彈處後自己駕駛：飛彈鍵從彈艙投下重磅炸彈（每零點四秒一枚，大範圍爆炸），'
                                      '機砲鍵是兩翼的機砲塔（每一秒多三發）；固定翼中裝甲最厚。'),
-              'JA': ('X-Morph 爆撃機', '人類軍の爆撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで爆弾倉から大型爆弾'
+              'JA': ('X-Morph 重装爆撃機', '人類軍の重装爆撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで爆弾倉から大型爆弾'
                                      '（0.4 秒に 1 発、広い爆発）を落とし、機銃キーで両翼の機銃塔（1.3 秒ごとに 3 発）を撃つ。固定翼で最も装甲が厚い。'),
-              'EN': ('X-Morph Bomber', "Requests the human army's bomber, dropped empty at the flare for you to fly: its missile "
+              'EN': ('X-Morph Heavy Bomber', "Requests the human army's heavy bomber, dropped empty at the flare for you to fly: its missile "
                                        'trigger drops heavy bombs from its bay (one every 0.4 s, a wide blast), its gun trigger '
                                        'fires the gun turrets on its wings (three every 1.3 s); the heaviest armour of the '
                                        'fixed-wing craft.')},
@@ -844,13 +847,13 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # laser pointer (a sight, no damage), its parts destroyed one by one (EDF: one durability), the side and front
     # turrets turning on their own (they fire along the main gun, as the heavy tank's machine-gun turret).
     _u('bosses/highway_tank', 'tracked', 'apocalypse', 'ported', 'JAGUAR Type S',
-       texts={'SC': ('X-Morph 美洲豹 S 型', '请求人类军队的原型超重型坦克「美洲豹 S 型」（原作首领）：全长约 32 米。主炮塔的巨炮为主攻击，'
+       texts={'SC': ('X-Morph 美洲虎 S 型坦克', '请求人类军队的原型超重型坦克「美洲虎 S 型」（原作首领）：全长约 32 米。主炮塔的巨炮为主攻击，'
                                        '约每十秒一发、命中处大范围冲击波；车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
                                        '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射，防空导弹和高射炮可当自动炮塔；装甲极厚。'),
-              'CN': ('X-Morph 美洲豹 S 型', '請求人類軍隊的原型超重型坦克「美洲豹 S 型」（原作首領）：全長約 32 公尺。主砲塔的巨砲為主攻擊，'
+              'CN': ('X-Morph JAGUAR S 型戰車', '請求人類軍隊的原型超重型戰車「JAGUAR S 型」（原作首領）：全長約 32 公尺。主砲塔的巨砲為主攻擊，'
                                        '約每十秒一發、命中處大範圍衝擊波；車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
                                        '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射，防空飛彈和高射砲可當自動砲塔；裝甲極厚。'),
-              'JA': ('X-Morph ジャガー S 型', '人類軍の試作超重戦車「ジャガー S 型」（原作のボス）を要請する。全長約 32 m。主砲塔の巨砲'
+              'JA': ('X-Morph ジャガータイプS', '人類軍の試作超重戦車「ジャガータイプS」（原作のボス）を要請する。全長約 32 m。主砲塔の巨砲'
                                         '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。車体前部の巡航ロケット 2 基（各 6 連射）、'
                                         '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空ミサイルと高射砲は自動砲塔にもなる。装甲は極めて厚い。'),
               'EN': ('X-Morph JAGUAR Type S', "Requests the human army's prototype super-heavy tank JAGUAR Type S (a boss in "
