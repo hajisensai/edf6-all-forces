@@ -525,6 +525,9 @@
   "edf41mp02/ufo401ace": [
    "OBJECT/UFO401.MRAB"
   ],
+  "edf6tr_andryusha_mission": [
+   "OBJECT/EDF6VC_KATYUSHA.MRAB"
+  ],
   "edf6tr_apocalypse_mission": [
    "OBJECT/EDF6VC_APOCALYPSE.MRAB",
    "WEAPON/BULLET_MEDIUMMISSILE01.RAB",

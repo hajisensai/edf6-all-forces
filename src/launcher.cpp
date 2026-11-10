@@ -19,6 +19,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "rounds.h"
+#include "seat_switch_logic.h"   // seatsw::kSeatPad
 #include "edf/katyusha_cab.h"
 #include "edf/weapon.h"
 #include <cmath>
@@ -205,6 +206,9 @@ void LauncherFrame(unsigned char* v) noexcept {
         }
         clear(true);return;
     }
+    // The Andryusha's fuse switch (andryusha.cpp): its weapon's own copy of the mark is what it writes.
+    r.fuse=AndryushaSeat(v,seat,const_cast<unsigned char*>(weapon));
+    r.keys=At<unsigned char>(seat,seatsw::kSeatPad)==0;
     latest=r;latestMs=GameMs();latestVehicle=v;
     DebugLog(v,weapon,r,aim,want,sight);
 }

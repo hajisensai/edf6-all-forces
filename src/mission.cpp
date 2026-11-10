@@ -141,6 +141,7 @@ void MissionStart() noexcept {
     ResetHud();
     ResetLauncher();
     ResetKatyushas();
+    ResetAndryusha();
     ResetHighCam();
     ResetSightZoom();
     ResetInfantryScope();

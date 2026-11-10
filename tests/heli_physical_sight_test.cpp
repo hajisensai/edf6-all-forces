@@ -25,6 +25,7 @@ bool HighCamOn(const void*) noexcept { UnexpectedSightBoundary();return false; }
 bool TurretCamHighTransition(const void*) noexcept { UnexpectedSightBoundary();return false; }
 void SetLauncherLoft(const void*,bool,float) noexcept { UnexpectedSightBoundary(); }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { UnexpectedSightBoundary();return false; }
+int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 bool terrain=true;
 int leftRays=0,rightRays=0,centerRays=0;
 // A floor only under the left barrel. Averaging the muzzles would query its missing center instead.

@@ -64,8 +64,11 @@ constexpr ULONGLONG kEnemyMs=150;        // the world snapshot the proximity fus
 using SpawnFn=void(__fastcall*)(void*,void*);
 using UpdateFn=void(__fastcall*)(void*,void*);
 using DtorFn=void*(__fastcall*)(void*,unsigned);
-UpdateFn originalUpdate=nullptr;
-DtorFn originalDtor=nullptr;
+// What the hooks call through: the stock update / dtor, or another plugin's hook ending in it (EDF6VehicleCrew wraps
+// the same update for the Andryusha's rockets, src/andryusha.cpp): both chain (edf::ChainVtableSlot), so the load order
+// does not matter. Set before the slot is written.
+void* originalUpdate=nullptr;
+void* originalDtor=nullptr;
 // The weapon classes whose spawn slot is routed through SpawnHook (one per class of flak-round gun: the
 // mod's flak guns are all one class, so this is a margin, not a limit anyone should meet).
 struct SpawnPatch { const void* vtable; SpawnFn original; };
@@ -447,7 +450,7 @@ void __fastcall UpdateHook(void* bullet,void* ctx) {
         ours=cfg.enabled && TakeRound(bullet,round);
         if(ours){ctrl=round.ctrl;Fuze(static_cast<unsigned char*>(bullet),round);}
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    originalUpdate(bullet,ctx);
+    reinterpret_cast<UpdateFn>(originalUpdate)(bullet,ctx);
     if(!ours)return;
     __try { if(At<std::uint32_t>(bullet,kCtl+kCtlFlags)&kRoundDead)Untag(bullet,ctrl); }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -456,7 +459,7 @@ void __fastcall UpdateHook(void* bullet,void* ctx) {
 void* __fastcall DtorHook(void* bullet,unsigned flags) {
     __try { Untag(bullet,At<const void*>(bullet,kBulletWeakCtrl)); }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
-    return originalDtor(bullet,flags);
+    return reinterpret_cast<DtorFn>(originalDtor)(bullet,flags);
 }
 
 // Gravity along the vehicle's down axis, m/s^2: the world gravity vector rotated into the vehicle
@@ -809,13 +812,14 @@ int HookGrenade() noexcept {
     const auto vtable=reinterpret_cast<void**>(image+kGrenadeVtable);
     const unsigned char age[]={0x8B,0x8D,0xF8,0x0A,0x00,0x00,0xFF,0xC1};   // mov ecx,[rbp+AF8] / inc ecx
     const unsigned char expire[]={0x3B,0x8D,0x08,0x0A,0x00,0x00};          // cmp ecx,[rbp+A08]
-    const bool layout=vtable[kGrenadeUpdateSlot]==image+kGrenadeUpdate && vtable[kGrenadeDtorSlot]==image+kGrenadeDtor
+    // The slots may hold another plugin's hook already (chained, see originalUpdate): the code they end in is checked.
+    const bool layout=vtable[kGrenadeUpdateSlot] && vtable[kGrenadeDtorSlot]
         && edf::Matches(image,0x236888,age,sizeof(age)) && edf::Matches(image,0x236899,expire,sizeof(expire));
     if(!layout){Log("HOOK grenade: unexpected layout, fuses off");return 0;}
-    originalUpdate=reinterpret_cast<UpdateFn>(image+kGrenadeUpdate);
-    originalDtor=reinterpret_cast<DtorFn>(image+kGrenadeDtor);
-    const bool update=edf::PatchVtableSlot(vtable+kGrenadeUpdateSlot,image+kGrenadeUpdate,reinterpret_cast<void*>(&UpdateHook));
-    const bool dtor=edf::PatchVtableSlot(vtable+kGrenadeDtorSlot,image+kGrenadeDtor,reinterpret_cast<void*>(&DtorHook));
+    if(vtable[kGrenadeUpdateSlot]!=image+kGrenadeUpdate || vtable[kGrenadeDtorSlot]!=image+kGrenadeDtor)
+        Log("HOOK grenade: chaining onto update=%p dtor=%p (another plugin's)",vtable[kGrenadeUpdateSlot],vtable[kGrenadeDtorSlot]);
+    const bool update=edf::ChainVtableSlot(vtable+kGrenadeUpdateSlot,reinterpret_cast<void*>(&UpdateHook),&originalUpdate);
+    const bool dtor=edf::ChainVtableSlot(vtable+kGrenadeDtorSlot,reinterpret_cast<void*>(&DtorHook),&originalDtor);
     proximityReady=update && dtor;
     Log("HOOK grenade update=%d dtor=%d",update,dtor);
     return static_cast<int>(update)+static_cast<int>(dtor);

@@ -85,6 +85,7 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
 int loftCalls=0;bool loftWanted=false;
 void SetLauncherLoft(const void*,bool aim,float) noexcept { ++loftCalls;loftWanted=aim; }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
+int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { return false; }

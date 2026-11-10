@@ -908,6 +908,7 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
     GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
     GuardedTick(kStepBarrage,&BarrageTick);         // the long-range barrages' rounds (barrage.cpp)
+    GuardedTick(kStepBarrage,&AndryushaTick);       // the Andryusha's airburst fuses and bomblets (andryusha.cpp)
     GuardedTick(kStepFollowUp,&SupportFollowUpTick); // the sorties' second waves (airstrike.cpp)
     GuardedTick(kStepFollowUp,&SupportPointsTick);   // the map's support pt from the team score (support_points.cpp)
     GuardedTick(kStepFollowUp,&SupportWarningTick);  // the supports' warnings on the ground (support_warning.cpp)

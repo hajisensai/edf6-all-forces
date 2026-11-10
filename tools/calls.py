@@ -329,6 +329,10 @@ CALLS: tuple[Call, ...] = (
          sortie='gunRun'),
     Call('EDF6VC_CALL_SORTIE_GUIDED', 7811, 'sortie_guided', False, 1, 3600, 1.7, 'jets', 'guided strike', 180, 'gunship',
          sortie='gunshipLap', then='EDF6VC_CALL_SORTIE_DIVE', then_after=25),
+    # Appended 2026-11-10 (test site #37, the player JOY; the maintainer: 「37 做」): the Andryusha, the Katyusha's truck
+    # firing incendiary cluster rockets with an impact or a proximity fuse (tools/make_katyusha.py, src/andryusha.cpp).
+    Call('EDF6VC_CALL_ANDRYUSHA', 0, 'andryusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_ANDRYUSHA',
+         ground='andryusha'),
 )
 
 
@@ -403,6 +407,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph wheeled units (2026-10-30)': IDS[:107],
     'X-Morph cargo truck (2026-10-30)': IDS[:108],
     'X-Morph walkers (2026-10-30)': IDS[:110],
+    'Andryusha (2026-11-10)': IDS[:111],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -789,6 +794,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Katyusha Rocket Truck', 'Requests a Katyusha rocket truck: a multiple rocket launcher on a truck bed '
                                         'that aims at ground targets by itself and lobs a 40-rocket salvo over an area. '
                                         'Slow to reload.'),
+    },
+    'andryusha': {
+        'SC': ('安德柳沙燃烧子母火箭炮车', '请求一辆安德柳沙：喀秋莎的变体，同一辆卡车和发射架，火箭弹只有 48 发（3 轮齐射），每发是燃烧子母弹：'
+                                '母弹先爆炸，再撒出 8 枚子弹，子弹落地爆炸后留下持续燃烧的火焰。T / 手柄十字键右在碰炸与近炸（离地约 35 米空爆）'
+                                '两种引信间切换。'),
+        'CN': ('安德柳沙燃燒子母火箭砲車', '請求一輛安德柳沙：喀秋莎的變體，同一輛卡車和發射架，火箭彈只有 48 發（3 輪齊射），每發是燃燒子母彈：'
+                                '母彈先爆炸，再撒出 8 枚子彈，子彈落地爆炸後留下持續燃燒的火焰。T / 手把十字鍵右在碰炸與近炸（離地約 35 公尺空爆）'
+                                '兩種引信間切換。'),
+        'JA': ('アンドリューシャ 焼夷クラスター砲車', 'カチューシャの派生型アンドリューシャを要請する。同じトラックと発射機で、ロケット弾は 48 発'
+                                       '（3 斉射）だけ。各弾は焼夷クラスター弾で、親弾が爆発したあと子弾 8 発を撒き、子弾は着弾して爆発し、'
+                                       'その場に燃え続ける炎を残す。T / 十字キー右で着発と近接（地上約 35 m で空中炸裂）の信管を切り替える。'),
+        'EN': ('Andryusha Incendiary Rocket Truck', "Requests an Andryusha, the Katyusha's variant: the same truck and launcher, "
+                                                    'only 48 rockets (3 salvos), each an incendiary cluster rocket: the carrier '
+                                                    'bursts, then scatters 8 bomblets that burst where they land and leave '
+                                                    'fires burning there. T / D-pad right switches the fuse between impact and '
+                                                    'proximity (an airburst about 35 m over the ground).'),
     },
     'sazabi': {
         'SC': ('沙扎比（MSN-04）', '请求一台由你自己驾驶的沙扎比（MSN-04，全高 25.6 米），空着送到信号弹处。能走能跑，'

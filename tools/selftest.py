@@ -1709,7 +1709,7 @@ def hand_copies_agree() -> None:
     import make_dreadnought
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
-               | set(vc.BARRAGE_FILES)
+               | set(vc.BARRAGE_FILES) | set(vc.ANDRYUSHA_BOMBLET_FILES)   # ...the Andryusha's: tools/make_katyusha.py
                | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
                | set(make_dreadnought.SUPPORT_SGOS.values())   # the support aircraft in the fighters' models
                # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
@@ -1727,7 +1727,7 @@ def ground_mission_builders_take_the_game_alone() -> None:
     import gen
     for name, tool in gen.GROUND_MISSION.items():
         builder = gen.ground_tool(name)   # its module, an X-Morph unit's builder (a bound vehicle_sgo: game first too)
-        params = list(inspect.signature(builder.vehicle_sgo).parameters.values())[1:]
+        params = list(inspect.signature(builder.vehicle_sgo).parameters.values())[1 + len(gen.GROUND_VARIANTS.get(name, ())):]
         assert all(p.default is not inspect.Parameter.empty for p in params), f'{tool}.vehicle_sgo for {name}: {params}'
 
 
@@ -1789,7 +1789,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst,\s+andryushaBlast, andryushaFire \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1906,7 +1906,7 @@ def barrage_copies_agree() -> None:
     bay = src('src/jet_bay.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_barrage_[a-z]+\.sgo)",L"(EDF6VC_BARRAGE_[A-Z]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.BARRAGE_FILES) and all(s == f.lower() for s, f in files), files
-    assert 'EmcRound::barrage,' not in src('src/crew.h') and 'barrage, barrageBurst };' in src('src/crew.h')
+    assert 'EmcRound::barrage,' not in src('src/crew.h') and 'barrage, barrageBurst,' in src('src/crew.h')
     assert [n.split('/', 1)[1] for n in make_barrage.names()] == list(vc.BARRAGE_FILES)
     # Called from the map's bar (2026-10-26), told to the peers by its own channel, its area warned of.
     assert 'BarrageStart(k.barrage,caller,target,heading,k.damage)' in src('src/airstrike.cpp')
@@ -2068,6 +2068,36 @@ def weapon_marks_agree() -> None:
     assert at_build.MARK_AIR == 7301.0 and at_build.MARK_GROUND == 7302.0
     assert make_artillery.MARK_GROUND == 7302.0 and make_katyusha.MARK_KATYUSHA == 7304.0
     assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_KATYUSHA
+
+
+@test
+def andryusha_marks_agree() -> None:
+    """The Andryusha's fuse marks (AmmoHitSizeAdjust's bits, test site #37): one copy in C++ (src/andryusha.h), the
+    weapon's SGO writes the impact one (tools/make_katyusha.py), both keep the Katyusha's contact sphere, neither is the
+    Katyusha's own factor nor in the barrages' mark range (src/barrage.cpp); the bomblets' files are the plugin's, in its
+    table's order (src/jet_bay.cpp kEmcFiles, EmcRound)."""
+    import struct
+    h = src('src/andryusha.h')
+    bits = dict(re.findall(r'(kMark\w+Bits)=(0x[0-9A-F]+)u', h))
+    assert bits == {'kMarkImpactBits': '0x3F8F4A36', 'kMarkAirburstBits': '0x3F8F4A37'}, bits
+    as_bits = lambda f: struct.unpack('<I', struct.pack('<f', f))[0]   # noqa: E731
+    assert as_bits(make_katyusha.ANDRYUSHA_MARK_IMPACT) == 0x3F8F4A36 and as_bits(make_katyusha.ANDRYUSHA_MARK_AIRBURST) == 0x3F8F4A37
+    assert make_katyusha.ANDRYUSHA_ROCKETS['AmmoHitSizeAdjust'] == make_katyusha.ANDRYUSHA_MARK_IMPACT
+    for mark in (make_katyusha.ANDRYUSHA_MARK_IMPACT, make_katyusha.ANDRYUSHA_MARK_AIRBURST):
+        assert abs(mark * make_katyusha.ROCKET_SIZE - make_katyusha.ROCKET_CONTACT) < 1e-3, mark
+        assert as_bits(mark) & 0xFFFFF000 != 0x3F801000, 'not a barrage mark'
+    assert as_bits(make_katyusha.ROCKETS['AmmoHitSizeAdjust']) not in (0x3F8F4A36, 0x3F8F4A37), "the Katyusha's own"
+    assert make_katyusha.ANDRYUSHA_ROCKETS['LockonTargetType'] == make_katyusha.MARK_KATYUSHA   # the Katyusha's aim and pose
+    bay = src('src/jet_bay.cpp')
+    files = re.findall(r'L"(EDF6VC_ANDRYUSHA_\w+\.SGO)"', bay)
+    assert files == list(vc.ANDRYUSHA_BOMBLET_FILES), files
+    enum = re.search(r'enum class EmcRound \{(.*?)\};', src('src/crew.h'), re.S).group(1)
+    assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,andryushaBlast,andryushaFire'), enum
+    # The fuse switch writes the weapon's template AmmoHitSizeAdjust: the template's AmmoSpeed / AmmoAlive offsets
+    # (common/edf/weapon.h) at the same distance from it as in the IFC's InitParam (docs/carrier-laser-re.md §3).
+    weapon = dict(re.findall(r'(kWeaponAmmo\w+)=(0x[0-9A-F]+)', src('common/edf/weapon.h')))
+    adjust = int(re.search(r'kWeaponHitAdjust=(0x[0-9A-F]+)', src('src/andryusha.cpp')).group(1), 16)
+    assert adjust - int(weapon['kWeaponAmmoSpeed'], 16) == 0x104 - 0xD4 and adjust - int(weapon['kWeaponAmmoAlive'], 16) == 0x104 - 0xD8
 
 
 @test
@@ -3665,7 +3695,7 @@ def proteus_wired() -> None:
     # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
-    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::barrageBurst)+1' in bay   # the Proteus's before the ultimate's
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::andryushaFire)+1' in bay   # the Proteus's before the ultimate's
     assert 'PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
@@ -6435,7 +6465,7 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]

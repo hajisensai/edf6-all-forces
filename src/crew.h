@@ -1040,7 +1040,8 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst };
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst,
+                      andryushaBlast, andryushaFire };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -1056,6 +1057,11 @@ bool EmcIfcOk() noexcept;                                    // RoundSize / Roun
 // fields not where they are written).
 bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
 void BarrageBurst(const unsigned char* by,const float* at) noexcept;
+// jet_bay.cpp: one of the Andryusha's bomblets (andryusha.cpp; docs/andryusha-re.md): two rounds of `by` on one arc from
+// `from` onto `aim` (the IFC's own ballistic solve, both at one speed and gravity): its blast (EmcRound::andryushaBlast,
+// GrenadeBullet01, `blast` damage) and its incendiary (EmcRound::andryushaFire, NapalmBullet01: the ground fire where it
+// lands, `fire` damage). False: neither fired (not preloaded this mission).
+bool AndryushaBomblet(const unsigned char* by,const float* from,const float* aim,float blast,float fire) noexcept;
 // barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): the map's bar
 // (airstrike.cpp SupportStrikeAt) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` (this machine's
 // player) with `damage` a round; it is told to every peer (barrage_net_protocol.h), which plays it on its copy of the caller.
@@ -1421,11 +1427,22 @@ struct LauncherReadout {
     int rings;
     float range,flight,elevation;
     bool reach;
+    int fuse;      // the Andryusha's fuse (andryusha.cpp AndryushaSeat: 1 impact, 2 airburst), 0 another launcher
+    bool keys;     // the rider plays on the keyboard (the fuse switch's key named), else the pad
 };
 // A round's arc as the game steps it (a frame: vel += drop, pos += vel; m/frame, m/frame^2) from `pos` for at most
 // `frames` frames: the first ground a map ray finds along it (`hit`) and the frames it took. launcher.cpp.
 bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept;
 void LauncherFrame(unsigned char* vehicle) noexcept;
+// andryusha.cpp: the Andryusha's incendiary cluster rockets (docs/andryusha-re.md, src/andryusha.h). InstallAndryusha wraps
+// GrenadeBullet01's update (chained with EDF6AutoTurret's); AndryushaTick (SharedFrameTick) runs the airburst fuses' ground
+// probes and splits the carriers that burst into bomblets (AndryushaBomblet); AndryushaSeat (LauncherFrame, the player
+// on seat 0 of a lofted launcher whose weapon is `weapon`) turns the fuse on VehicleSecondarySwitchKey / -Button and
+// returns it (andryusha::Fuse: 0 not the Andryusha's weapon, 1 impact, 2 airburst).
+bool InstallAndryusha() noexcept;
+void AndryushaTick() noexcept;
+int AndryushaSeat(const unsigned char* vehicle,const unsigned char* seat,unsigned char* weapon) noexcept;
+void ResetAndryusha() noexcept;
 bool PlayerLauncher(LauncherReadout* out) noexcept;
 // katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
 // is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;

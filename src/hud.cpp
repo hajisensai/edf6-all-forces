@@ -704,20 +704,34 @@ void ImpactMark(void* drawer,void* ctx,const float* vp,float width,float height,
 // as the ripple spreads, and under the cross the range, the flight time and the launcher's elevation (text later).
 void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const LauncherReadout& l,
                    Line* lines,int* at) noexcept {
-    if(!l.reach)return;
-    for(int i=0;i<l.rings && i<kLauncherRing;++i) {
-        float x,y,depth;
-        if(!Project(vp,l.ring[i],width,height,&x,&y,&depth))continue;
-        const float r=2.5f*s;
-        Rect(drawer,ctx,x-r,y-r,x+r,y+r,kYellow);
+    // The Andryusha's fuse line sits under the impact line; with no impact on the screen (out of reach, behind the
+    // camera) under the screen's centre, so the fuse and its switch are seen wherever the rider aims.
+    float fuseX=width*0.5f,fuseY=height*0.5f+40.0f*s;
+    if(l.reach) {
+        for(int i=0;i<l.rings && i<kLauncherRing;++i) {
+            float x,y,depth;
+            if(!Project(vp,l.ring[i],width,height,&x,&y,&depth))continue;
+            const float r=2.5f*s;
+            Rect(drawer,ctx,x-r,y-r,x+r,y+r,kYellow);
+        }
+        float sx,sy;
+        if(ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) && *at<kMaxLines) {
+            Line& line=lines[(*at)++];
+            Format(line,Tr(Tx::launcherLine),static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
+            line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
+            if(text)MeasureAll(*text,&line,1);
+            line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
+            fuseX=sx;fuseY=line.y+line.h+4.0f*s;
+        }
     }
-    float sx,sy;
-    if(!ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) || *at>=kMaxLines)return;
-    Line& line=lines[(*at)++];
-    Format(line,Tr(Tx::launcherLine),static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
-    line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
-    if(text)MeasureAll(*text,&line,1);
-    line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
+    if(!l.fuse || *at>=kMaxLines)return;
+    wchar_t key[32]=L"";
+    if(l.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);else PadBitsName(Cfg().vehicleSecondarySwitchButton,key,32);
+    Line& fuse=lines[(*at)++];
+    Format(fuse,Tr(l.fuse==2 ? Tx::andryushaFuseAirburst : Tx::andryushaFuseImpact),key);
+    fuse.scale=kLineScale;fuse.rgba=l.fuse==2 ? kGreen : kYellow;fuse.w=fuse.h=0.0f;
+    if(text)MeasureAll(*text,&fuse,1);
+    fuse.x=fuseX-fuse.w*0.5f;fuse.y=fuseY;
 }
 
 // The artillery's high camera toggle (highcam.cpp, the user 2026-10-05): a line low on the screen naming its key,
