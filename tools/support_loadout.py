@@ -48,6 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+from i18n import is_zh, tr  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 from modfiles import atomic_write, sha256, sha256_file  # noqa: E402
@@ -72,6 +73,16 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ('xminfantry', 'X-Morph 步兵', 'EDF6VC_XM_SMALL_INFANTRY'),
 )
 KIND_NAMES = tuple(k[0] for k in KINDS)
+# The kinds' labels in English (an English installer, pylib/i18n.py; shown only).
+KIND_LABELS_EN = {'rifle': 'Ranger: rifle', 'flame': 'Ranger: flamethrower', 'rocket': 'Ranger: rocket',
+                  'shotgun': 'Ranger: shotgun', 'sniper': 'Ranger: sniper', 'lance': 'Wing Diver: lance',
+                  'laser': 'Wing Diver: laser', 'monster': 'Wing Diver: sniper', 'izuna': 'Wing Diver: chain lightning',
+                  'thunderbow': 'Wing Diver: thunder bow', 'cannon': 'Fencer: heavy cannon', 'midcannon': 'Fencer: mid cannon',
+                  'pilebanker': 'Fencer: pile banker', 'fshotgun': 'Fencer: shotgun', 'xminfantry': 'X-Morph infantry'}
+
+
+def kind_label(name: str) -> str:
+    return next(label for n, label, _ in KINDS if n == name) if is_zh() else KIND_LABELS_EN[name]
 # support_call.h SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer (KINDS order: 5 Rangers, 5 Wing Divers, 4 Fencers; the
 # X-Morph infantry, last, is a Ranger's class).
 KIND_CLASS = {n: 0 if i < 5 or n == 'xminfantry' else 1 if i < 10 else 2 for i, n in enumerate(KIND_NAMES)}
@@ -167,9 +178,10 @@ def pack(text: str, k: str) -> str:
     """A preset's +PACK for kind `k` as the plugin reads it (PackNamed, PackFits): the canonical WEAPONTABLE name."""
     row = PACK_BY_NAME.get(text.strip().upper())
     if row is None:
-        raise Invalid(f'未知或不支持的背包武器：{text.strip()}')
+        raise Invalid(tr(f'未知或不支持的背包武器：{text.strip()}', f'unknown or unsupported backpack weapon: {text.strip()}'))
     if row[2] != KIND_CLASS[k]:
-        raise Invalid(('重装兵没有背包武器：' if KIND_CLASS[k] == 2 else '背包武器与兵种不符：') + text.strip())
+        raise Invalid((tr('重装兵没有背包武器：', 'Fencers carry no backpack weapon: ') if KIND_CLASS[k] == 2 else
+                       tr('背包武器与兵种不符：', 'the backpack weapon does not fit the class: ')) + text.strip())
     return row[1]
 
 
@@ -195,6 +207,11 @@ CREW_KEYS: tuple[str, ...] = ('TRANSPORT_CREWED', 'TRUCK_CREWED', 'SQUAD_HELI', 
                               'PLATOON_AIRDROP', 'TANK_CREWED', 'TANK_DELIVERY', 'STRIKE', 'STRIKE_F', 'FIGHTER', 'FIGHTER_F',
                               'INTERCEPTOR', 'INTERCEPTOR_F', 'MULTIROLE', 'MULTIROLE_F', '', MISSION)
 CREW_LABELS = {'': '所有支援乘员（默认）', MISSION: '任务载具的支援乘员'}
+LABELS_EN = {'SQUAD': 'Infantry squad', 'PLATOON': 'Infantry platoon', 'TRANSPORT_CREWED': 'APC, crewed (passengers)',
+             'TRUCK_CREWED': 'Light truck, crewed (passengers)', 'SQUAD_HELI': 'Helicopter insertion: squad',
+             'PLATOON_HELI': 'Helicopter insertion: platoon', 'SQUAD_AIRDROP': 'Airdrop: squad',
+             'PLATOON_AIRDROP': 'Airdrop: platoon'}
+CREW_LABELS_EN = {'': 'every support crew (default)', MISSION: 'the mission vehicles\' support crews'}
 
 # src/support_loadout.h kLoadStores: (code, name, label, role, on jets, on tanks).
 LOAD_STORES: tuple[tuple[int, str, str, str, bool, bool], ...] = (
@@ -210,6 +227,14 @@ LOAD_STORES: tuple[tuple[int, str, str, str, bool, bool], ...] = (
     (10, 'GLM', 'LAHAT 炮射导弹', 'ground', False, True),
 )
 STORE_CODE = {s[1]: s[0] for s in LOAD_STORES}
+STORE_LABELS_EN = {'AAM_S': 'AIM-9X short-range AAM', 'AAM_M': 'AIM-120 medium-range AAM', 'AAM_L': 'AIM-54 long-range AAM',
+                   'AGM': 'AGM-65 air-to-ground missile', 'AGM_L': 'AGM-114 light air-to-ground missile',
+                   'MK82': 'Mk 82 bomb', 'RKT': 'Hydra 70 rocket pod', 'AP': 'APFSDS round', 'HE': 'HE shell',
+                   'GLM': 'LAHAT gun-launched missile'}
+
+
+def store_label(name: str) -> str:
+    return next(s[2] for s in LOAD_STORES if s[1] == name) if is_zh() else STORE_LABELS_EN[name]
 STORE_BY_CODE = {s[0]: s for s in LOAD_STORES}
 ROUND_COUNTS = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 19, 20, 25, 30, 38, 40)   # kRoundCounts
 PYLONS_MOST = 7                                                            # kPylonsMost
@@ -253,6 +278,23 @@ VEHICLE_LABELS = {'TANK_CREWED': '坦克·有人', 'TANK_DELIVERY': '坦克·空
                   'INTERCEPTOR': '截击机·守点', 'INTERCEPTOR_F': '截击机·跟随', 'MULTIROLE': '多用途机·守点',
                   'MULTIROLE_F': '多用途机·跟随', 'OWN_PFIGHTER': '我召唤的·玩家战斗机', 'OWN_PSTRIKE': '我召唤的·玩家攻击机',
                   'OWN_FIGHTER': '我召唤的·制空战斗机', 'OWN_INTERCEPTOR': '我召唤的·截击机', 'OWN_MULTIROLE': '我召唤的·多用途机'}
+VEHICLE_LABELS_EN = {'TANK_CREWED': 'Tank, crewed', 'TANK_DELIVERY': 'Tank, delivered empty', 'STRIKE': 'Ground attack jet (hold)',
+                     'STRIKE_F': 'Ground attack jet (follow)', 'FIGHTER': 'Air superiority fighter (hold)',
+                     'FIGHTER_F': 'Air superiority fighter (follow)', 'INTERCEPTOR': 'Interceptor (hold)',
+                     'INTERCEPTOR_F': 'Interceptor (follow)', 'MULTIROLE': 'Multirole jet (hold)',
+                     'MULTIROLE_F': 'Multirole jet (follow)', 'OWN_PFIGHTER': 'My summons: player fighter',
+                     'OWN_PSTRIKE': 'My summons: player attack jet', 'OWN_FIGHTER': 'My summons: air superiority fighter',
+                     'OWN_INTERCEPTOR': 'My summons: interceptor', 'OWN_MULTIROLE': 'My summons: multirole jet'}
+
+
+def label(key: str) -> str:
+    return LABELS[key] if is_zh() else LABELS_EN[key]
+
+
+def vehicle_label(key: str) -> str:
+    return VEHICLE_LABELS[key] if is_zh() else VEHICLE_LABELS_EN[key]
+
+
 APPLIED, VEHICLE = 1 << 63, 1 << 62   # kVariantApplied, kVariantVehicle
 AP_CALL = 'EWEAPON419.SGO'                      # the stock Blacker A1 request: the AP gun's mount
 AP_GUN = 'app:/weapon/v_505tank_cannon01s.sgo'
@@ -294,21 +336,23 @@ def _colour(text: str) -> int:
     if t in ('X', 'x'):
         return STOCK
     if not re.fullmatch(r'[0-9A-Fa-f]{6}', t):
-        raise Invalid(f'颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：@{text}')
+        raise Invalid(tr(f'颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：@{text}',
+                         f'a colour is @RRGGBB or @RRGGBB:RRGGBB (X = stock): @{text}'))
     return int(t, 16)
 
 
 def _count(text: str, most: int, what: str) -> int:
     t = text.strip()
     if not t.isdigit() or len(t) > 5 or not 1 <= int(t) <= most:
-        raise Invalid(f'{what}应为 1 到 {most}：{text}')
+        raise Invalid(tr(f'{what}应为 1 到 {most}：{text}', f'{what} must be 1 to {most}: {text}'))
     return int(t)
 
 
 def kind(text: str) -> str:
     t = text.strip().lower()
     if t not in KIND_NAMES:
-        raise Invalid(f'未知兵种：{text}（可选 ' + ' / '.join(f'{n}={label}' for n, label, _ in KINDS) + '）')
+        raise Invalid(tr(f'未知兵种：{text}（可选 ', f'unknown class: {text} (one of ')
+                      + ' / '.join(f'{n}={kind_label(n)}' for n in KIND_NAMES) + tr('）', ')'))
     return t
 
 
@@ -321,18 +365,20 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
         name, at, colours = head.partition('@')
         k = kind(name)
         if not has_looks(k) and (at or plus):
-            raise Invalid('X-Morph 步兵没有涂装与背包：' + token.partition('*')[0].strip())
+            raise Invalid(tr('X-Morph 步兵没有涂装与背包：', 'X-Morph infantry has no colours and no backpack: ')
+                          + token.partition('*')[0].strip())
         look: Look = (STOCK, STOCK)
         if at:
             primary, colon, secondary = colours.partition(':')
             look = (_colour(primary), _colour(secondary) if colon else STOCK)
         carried = pack(packed, k) if plus else ''
-        count = _count(n, MOST, '人数 *') if star else 1
+        count = _count(n, MOST, tr('人数 *', 'the count *')) if star else 1
         if len(out) + count > MOST:
-            raise Invalid(f'超过 {MOST} 人')
+            raise Invalid(tr(f'超过 {MOST} 人', f'more than {MOST} soldiers'))
         out += [(k, look, carried)] * count
     if out and len(out) > seats:
-        raise Invalid('该单位没有可编组的座位' if seats <= 0 else f'人数 {len(out)} 超过该单位的座位数 {seats}')
+        raise Invalid(tr('该单位没有可编组的座位', 'this unit has no seats to fill') if seats <= 0 else
+                      tr(f'人数 {len(out)} 超过该单位的座位数 {seats}', f'{len(out)} soldiers, more than the unit\'s {seats} seats'))
     return out
 
 
@@ -380,7 +426,8 @@ def parse_crew(text: str) -> Look | None:
     try:
         return _colour(primary), (_colour(secondary) if colon else STOCK)
     except Invalid:
-        raise Invalid(f'乘员颜色应为 RRGGBB 或 RRGGBB:RRGGBB（X = 原色）：{t}') from None
+        raise Invalid(tr(f'乘员颜色应为 RRGGBB 或 RRGGBB:RRGGBB（X = 原色）：{t}',
+                         f'a crew colour is RRGGBB or RRGGBB:RRGGBB (X = stock): {t}')) from None
 
 
 def format_crew(look: Look | None) -> str:
@@ -440,16 +487,16 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
     if not tokens:
         return None
     if body not in BODIES:
-        raise Invalid('该单位没有可配置的挂点')
+        raise Invalid(tr('该单位没有可配置的挂点', 'this unit has no pylons to set'))
     _, most, tank = BODIES[body]
     out = Loadout(body)
     if not tank and len(tokens) == 1 and tokens[0].upper() == 'GUNS':
         return out
     if not tank and any(t.upper() == 'GUNS' for t in tokens):
-        raise Invalid('GUNS 表示只带机炮，不能再写挂载')
+        raise Invalid(tr('GUNS 表示只带机炮，不能再写挂载', 'GUNS means the guns only; no stores after it'))
     if tank:
         if tokens[0].upper() not in ('HE', 'AP'):
-            raise Invalid(f'坦克的第一项是主炮 HE 或 AP：{tokens[0]}')
+            raise Invalid(tr(f'坦克的第一项是主炮 HE 或 AP：{tokens[0]}', f'a tank\'s first item is its main gun, HE or AP: {tokens[0]}'))
         out.ap_gun = tokens[0].upper() == 'AP'
         tokens = tokens[1:]
     for token in tokens:
@@ -457,16 +504,20 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
         name = name.strip().upper()
         store = STORE_BY_CODE.get(STORE_CODE.get(name, 0))
         if store is None or not (store[5] if tank else store[4]):
-            raise Invalid(('坦克可挂：AP / HE / GLM，不能挂：' if tank else
-                           '飞机可挂：AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT，不能挂：') + name)
+            raise Invalid((tr('坦克可挂：AP / HE / GLM，不能挂：', 'a tank carries AP / HE / GLM, not: ') if tank else
+                           tr('飞机可挂：AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT，不能挂：',
+                              'a jet carries AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT, not: ')) + name)
         t = n.strip()
         if not colon or not t.isdigit() or int(t) not in ROUND_COUNTS:
-            raise Invalid('挂点写成 名称:数量，数量可选 ' + ' '.join(map(str, ROUND_COUNTS)) + f'：{token}')
+            raise Invalid(tr('挂点写成 名称:数量，数量可选 ', 'a pylon is NAME:COUNT, the count one of ')
+                          + ' '.join(map(str, ROUND_COUNTS)) + f': {token}')
         if len(out.pylons) >= most:
-            raise Invalid('坦克最多 4 个挂点' if tank else '飞机最多 5 个挂点')
+            raise Invalid(tr('坦克最多 4 个挂点', 'a tank has at most 4 pylons') if tank else
+                          tr('飞机最多 5 个挂点', 'a jet has at most 5 pylons'))
         out.pylons.append((name, int(t)))
     if not within_payload(out):
-        raise Invalid(f'挂载共重 {mass_kg(out)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg')
+        raise Invalid(tr(f'挂载共重 {mass_kg(out)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg',
+                         f'the stores weigh {mass_kg(out)} kg, more than the {PAYLOAD_KG[body]} kg this jet can carry'))
     return out
 
 
@@ -993,68 +1044,75 @@ def put(text: str, key: str, value: str) -> str:
 
 
 def describe(soldiers: list[Soldier]) -> str:
-    labels = {n: label for n, label, _ in KINDS}
     parts = []
     for i in range(0, len(soldiers), 4):
         squad = soldiers[i:i + 4]
-        parts.append('[' + '、'.join(labels[k] + ('' if look == (STOCK, STOCK) else f'@{_colour_text(look[0])}:{_colour_text(look[1])}')
+        parts.append('[' + tr('、', ', ').join(kind_label(k) + ('' if look == (STOCK, STOCK) else f'@{_colour_text(look[0])}:{_colour_text(look[1])}')
                                      + (f'+{carried}' if carried else '') for k, look, carried in squad) + ']')
     return ' '.join(parts)
 
 
 def describe_vehicle(l: Loadout | None) -> str:
     if l is None:
-        return '（原版挂载）'
-    labels = {s[1]: s[2] for s in LOAD_STORES}
-    head = (['主炮 ' + ('90mm 滑膛炮（AP，30 发）' if l.ap_gun else '105mm 榴弹炮（HE，25 发）')] if BODIES[l.body][2]
-            else ['机炮'])
-    return '，'.join(head + [f'挂点{i + 1} {labels[n]}×{r}' for i, (n, r) in enumerate(l.pylons)])
+        return tr('（原版挂载）', '(stock stores)')
+    head = ([tr('主炮 ', 'main gun ') + (tr('90mm 滑膛炮（AP，30 发）', '90mm smoothbore (AP, 30 rounds)') if l.ap_gun else
+                                       tr('105mm 榴弹炮（HE，25 发）', '105mm howitzer (HE, 25 rounds)'))] if BODIES[l.body][2]
+            else [tr('机炮', 'guns')])
+    return tr('，', ', ').join(head + [tr(f'挂点{i + 1} ', f'pylon {i + 1} ') + f'{store_label(n)}×{r}' for i, (n, r) in enumerate(l.pylons)])
 
 
 def summary(text: str) -> str:
-    rows = ['  小队预设（游戏外编辑，呼叫时套用；空 = 该单位自己的兵员）：']
+    rows = [tr('  小队预设（游戏外编辑，呼叫时套用；空 = 该单位自己的兵员）：',
+               '  Squad presets (edited outside the game, applied when called; empty = the unit\'s own soldiers):')]
     for i, key in enumerate(SEATS, 1):
         value = get(text, 'SupportPreset_' + key)
         try:
             soldiers = parse_preset(value, SEATS[key])
-            shown = describe(soldiers) if soldiers else '（默认兵员）'
+            shown = describe(soldiers) if soldiers else tr('（默认兵员）', '(default soldiers)')
         except Invalid as e:
-            shown = f'（无效，插件按默认兵员：{e}）'
-        rows.append(f'  {i:2d}. {LABELS[key]}（{key}，{SEATS[key]} 座）：{shown}')
-    rows.append('  载具挂载（战前配置每个挂点的武器）：')
+            shown = tr(f'（无效，插件按默认兵员：{e}）', f'(not valid, the plugin uses the default soldiers: {e})')
+        rows.append(f'  {i:2d}. {label(key)} ({key}, ' + tr(f'{SEATS[key]} 座', f'{SEATS[key]} seats') + f'): {shown}')
+    rows.append(tr('  载具挂载（战前配置每个挂点的武器）：', '  Vehicle stores (each pylon\'s weapon, set before the battle):'))
     for i, key in enumerate(VEHICLE_KEYS, 1):
         try:
             shown = describe_vehicle(parse_vehicle(get(text, 'SupportVehicle_' + key), VEHICLE_KEYS[key]))
         except Invalid as e:
-            shown = f'（无效，插件按原版挂载：{e}）'
-        rows.append(f'   v{i}. {VEHICLE_LABELS[key]}（{key}）：{shown}')
-    rows.append('  乘员颜色（载具驾驶员 / 机组 / 飞行员；空 = 用默认，默认空 = 原色）：')
+            shown = tr(f'（无效，插件按原版挂载：{e}）', f'(not valid, the plugin uses the stock stores: {e})')
+        rows.append(f'   v{i}. {vehicle_label(key)} ({key}): {shown}')
+    rows.append(tr('  乘员颜色（载具驾驶员 / 机组 / 飞行员；空 = 用默认，默认空 = 原色）：',
+                   '  Crew colours (vehicle drivers / crews / pilots; empty = the default, an empty default = stock):'))
     for i, key in enumerate(CREW_KEYS, 1):
-        rows.append(f'   c{i}. {_crew_label(key)}（{crew_key(key)}）：{_describe_crew(text, key)}')
+        rows.append(f'   c{i}. {_crew_label(key)} ({crew_key(key)}): {_describe_crew(text, key)}')
     return '\n'.join(rows)
 
 
 def _crew_label(key: str) -> str:
-    return CREW_LABELS.get(key) or VEHICLE_LABELS.get(key) or LABELS.get(key, key)
+    if is_zh():
+        return CREW_LABELS.get(key) or VEHICLE_LABELS.get(key) or LABELS.get(key, key)
+    return CREW_LABELS_EN.get(key) or VEHICLE_LABELS_EN.get(key) or LABELS_EN.get(key, key)
 
 
 def _describe_crew(text: str, key: str) -> str:
     try:
         look = parse_crew(get(text, crew_key(key)))
     except Invalid as e:
-        return f'（无效，插件按默认：{e}）'
+        return tr(f'（无效，插件按默认：{e}）', f'(not valid, the plugin uses the default: {e})')
     if look is None:
-        return '（原色）' if key == '' else '（默认）'
-    return '原色' if look == (STOCK, STOCK) else f'主色 {_colour_text(look[0])}，副色 {_colour_text(look[1])}'
+        return tr('（原色）', '(stock)') if key == '' else tr('（默认）', '(default)')
+    return tr('原色', 'stock') if look == (STOCK, STOCK) else \
+        tr(f'主色 {_colour_text(look[0])}，副色 {_colour_text(look[1])}', f'main {_colour_text(look[0])}, second {_colour_text(look[1])}')
 
 
-CREW_HELP = '  写法：RRGGBB 或 RRGGBB:RRGGBB（主色:副色，X = 原色；只写 X = 原色、不用默认）；直接回车 = 不改；- = 清除（用默认）。'
+def crew_help() -> str:
+    return tr('  写法：RRGGBB 或 RRGGBB:RRGGBB（主色:副色，X = 原色；只写 X = 原色、不用默认）；直接回车 = 不改；- = 清除（用默认）。',
+              '  Write RRGGBB or RRGGBB:RRGGBB (main:second, X = stock; X alone = stock, not the default); just Enter = no '
+              'change; - = clear (use the default).')
 
 
 def edit_crew(text: str, key: str, ask: Callable[[str], str]) -> str:
     """One crew's colours (SupportCrewColour[_<KEY>]): only a value the plugin accepts is written."""
-    print(CREW_HELP)
-    value = ask(f'{_crew_label(key)} 乘员颜色 = ').strip()
+    print(crew_help())
+    value = ask(tr(f'{_crew_label(key)} 乘员颜色 = ', f'{_crew_label(key)} crew colour = ')).strip()
     if not value:
         return text
     if value == '-':
@@ -1065,18 +1123,24 @@ def edit_crew(text: str, key: str, ask: Callable[[str], str]) -> str:
     return text
 
 
-HELP = ('  写法：兵种[@主色[:副色]][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
-        '  兵种：' + ' '.join(f'{n}={label}' for n, label, _ in KINDS) + '\n'
-        '  颜色：6 位十六进制 RRGGBB（如 1E3A8A），X = 保留原色；例：lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
-        '  直接回车 = 不改；输入 - = 清除（恢复该单位默认兵员）。')
+def preset_help() -> str:
+    kinds = ' '.join(f'{n}={kind_label(n)}' for n in KIND_NAMES)
+    return tr('  写法：兵种[@主色[:副色]][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
+              f'  兵种：{kinds}\n'
+              '  颜色：6 位十六进制 RRGGBB（如 1E3A8A），X = 保留原色；例：lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  直接回车 = 不改；输入 - = 清除（恢复该单位默认兵员）。',
+              '  Write CLASS[@MAIN[:SECOND]][*COUNT], comma separated, in seat order; the first of every 4 leads them.\n'
+              f'  Classes: {kinds}\n'
+              '  Colours: 6 hex digits RRGGBB (like 1E3A8A), X = keep stock; e.g. lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  Just Enter = no change; - = clear (the unit\'s default soldiers).')
 
 
 def _pick(ask: Callable[[str], str], options: list[tuple[str, str]], prompt: str) -> str:
-    for i, (_, label) in enumerate(options, 1):
-        print(f'    {i}. {label}')
+    for i, (_, shown) in enumerate(options, 1):
+        print(f'    {i}. {shown}')
     got = ask(prompt).strip()
     if not got.isdigit() or not 1 <= int(got) <= len(options):
-        raise Invalid(f'没有第 {got} 项')
+        raise Invalid(tr(f'没有第 {got} 项', f'there is no item {got}'))
     return options[int(got) - 1][0]
 
 
@@ -1088,12 +1152,15 @@ def edit_vehicle(text: str, key: str, ask: Callable[[str], str]) -> str:
         l = parse_vehicle(get(text, 'SupportVehicle_' + key), body) or Loadout(body)
     except Invalid:
         l = Loadout(body)
-    allowed = [(s[1], f'{s[1]}  {s[2]}') for s in LOAD_STORES if (s[5] if tank else s[4])]
+    allowed = [(s[1], f'{s[1]}  {store_label(s[1])}') for s in LOAD_STORES if (s[5] if tank else s[4])]
     changed = False
     while True:
-        print(f'  {VEHICLE_LABELS[key]}：{describe_vehicle(l)}')
-        menu = ('编号 = 改那个挂点；a 加挂点；d 删最后一个挂点；' + ('g 换主炮（HE / AP）；' if tank else 'g 只带机炮（清空挂点）；') +
-                's 恢复原版；回车保存并返回：')
+        print(f'  {vehicle_label(key)}: {describe_vehicle(l)}')
+        menu = tr('编号 = 改那个挂点；a 加挂点；d 删最后一个挂点；' + ('g 换主炮（HE / AP）；' if tank else 'g 只带机炮（清空挂点）；') +
+                  's 恢复原版；回车保存并返回：',
+                  'A number = change that pylon; a add a pylon; d delete the last pylon; '
+                  + ('g switch the main gun (HE / AP); ' if tank else 'g guns only (clear the pylons); ')
+                  + 's back to stock; Enter to save and go back: ')
         pick = ask(menu).strip().lower()
         if not pick:
             if changed:
@@ -1116,36 +1183,39 @@ def edit_vehicle(text: str, key: str, ask: Callable[[str], str]) -> str:
                 continue
             if pick == 'a' or (pick.isdigit() and 1 <= int(pick) <= len(l.pylons)):
                 if pick == 'a' and len(l.pylons) >= most:
-                    raise Invalid(f'最多 {most} 个挂点')
-                name = _pick(ask, allowed, '挂什么（编号）：')
-                rounds = ask('数量（' + ' '.join(map(str, ROUND_COUNTS)) + '）：').strip()
+                    raise Invalid(tr(f'最多 {most} 个挂点', f'at most {most} pylons'))
+                name = _pick(ask, allowed, tr('挂什么（编号）：', 'Which store (number): '))
+                rounds = ask(tr('数量（', 'Count (') + ' '.join(map(str, ROUND_COUNTS)) + tr('）：', '): ')).strip()
                 if not rounds.isdigit() or int(rounds) not in ROUND_COUNTS:
-                    raise Invalid(f'数量“{rounds}”不在可选范围内')
+                    raise Invalid(tr(f'数量“{rounds}”不在可选范围内', f'count "{rounds}" is not one of the choices'))
                 pylon = (name, int(rounds))
                 pylons = l.pylons + [pylon] if pick == 'a' else [pylon if i == int(pick) - 1 else p for i, p in enumerate(l.pylons)]
                 candidate = Loadout(body, l.ap_gun, pylons)
                 if not within_payload(candidate):   # the plugin would refuse it: over the jet's weight
-                    raise Invalid(f'挂载共重 {mass_kg(candidate)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg')
+                    raise Invalid(tr(f'挂载共重 {mass_kg(candidate)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg',
+                                     f'the stores weigh {mass_kg(candidate)} kg, more than the {PAYLOAD_KG[body]} kg this jet can carry'))
                 l.pylons = pylons
                 changed = True
                 continue
-            raise Invalid(f'不认识“{pick}”')
+            raise Invalid(tr(f'不认识“{pick}”', f'"{pick}" is not a choice'))
         except Invalid as e:
-            print(f'  未修改：{e}')
+            print(tr(f'  未修改：{e}', f'  Not changed: {e}'))
 
 
 def edit(text: str, ask: Callable[[str], str]) -> str:
     """The loadout menu: `ask(prompt) -> str` until an empty answer. Returns the edited text (validated values only)."""
     while True:
         print(summary(text))
-        pick = ask('输入编号编辑小队预设，v编号编辑载具挂载（如 v1），c编号编辑乘员颜色（如 c1），回车返回：').strip().lower()
+        pick = ask(tr('输入编号编辑小队预设，v编号编辑载具挂载（如 v1），c编号编辑乘员颜色（如 c1），回车返回：',
+                      'Enter a number to edit a squad preset, v and a number a vehicle\'s stores (like v1), c and a number '
+                      'a crew\'s colours (like c1), Enter to go back: ')).strip().lower()
         if not pick:
             return text
         try:
             if pick.isdigit() and 1 <= int(pick) <= len(SEATS):
                 key = list(SEATS)[int(pick) - 1]
-                print(HELP)
-                value = ask(f'{LABELS[key]}（最多 {SEATS[key]} 人）= ').strip()
+                print(preset_help())
+                value = ask(tr(f'{LABELS[key]}（最多 {SEATS[key]} 人）= ', f'{LABELS_EN[key]} (at most {SEATS[key]}) = ')).strip()
                 if not value:
                     continue
                 if value == '-':
@@ -1157,9 +1227,9 @@ def edit(text: str, ask: Callable[[str], str]) -> str:
             elif pick.startswith('c') and pick[1:].isdigit() and 1 <= int(pick[1:]) <= len(CREW_KEYS):
                 text = edit_crew(text, CREW_KEYS[int(pick[1:]) - 1], ask)
             else:
-                raise Invalid(f'不认识“{pick}”')
+                raise Invalid(tr(f'不认识“{pick}”', f'"{pick}" is not a choice'))
         except Invalid as e:
-            print(f'  未修改：{e}')
+            print(tr(f'  未修改：{e}', f'  Not changed: {e}'))
 
 
 def main(argv: list[str]) -> int:

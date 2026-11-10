@@ -36,6 +36,7 @@ import mdb  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
+from i18n import tr  # noqa: E402
 
 OWNER = 'menu_preview'   # pylib/ledger.py OWNERS
 FOLDER = 'MENUOBJECT'
@@ -81,7 +82,8 @@ def build_vehicles(game: rootcpk.Game, root: str | None) -> dict[str, bytes]:
     for body, (base, _most, _tank) in support_loadout.BODIES.items():
         data = support_loadout._source(root, game, 'OBJECT', base)
         if data is None:
-            print(f'！ {base} 不在（该机体没有安装，也不会出动）：它的 3D 预览不生成')
+            print(tr(f'！ {base} 不在（该机体没有安装，也不会出动）：它的 3D 预览不生成',
+                     f'! {base} is not there (that body is not installed and never goes out): no 3D preview for it'))
             continue
         out[f'{FOLDER}/{vehicle_file(body)}'] = vehicle_menu_sgo(stock, data)
     return out

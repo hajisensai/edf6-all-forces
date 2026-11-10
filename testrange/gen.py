@@ -1115,7 +1115,7 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')   # the stock model (the Proteus's shield is a round of its own)
     if sgo_name in GROUND_MISSION:
         # A tool making two vehicles (make_katyusha: the Katyusha and the Andryusha) is told which (GROUND_VARIANTS).
-        data = ground_tool(sgo_name).vehicle_sgo(game, *GROUND_VARIANTS.get(sgo_name, ()))
+        data = _GROUND_SGOS[sgo_name] if sgo_name in _GROUND_SGOS else ground_sgo(game, sgo_name)
         # The Freed bike's SGO (the sidecar's) is a script's already: it has its mission_setup next to vehicle_setup.
         data = data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
         return _with_player_recoil(game, sgo_name, data)
@@ -1124,6 +1124,34 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         data = _with_player_heli_motion(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
         return _with_player_recoil(game, sgo_name, data)
     return game.read('OBJECT', sgo_name.upper() + '.SGO')
+
+
+# The GROUND_MISSION vehicles' tool SGOs of the install running now (install: made side by side before its checks).
+_GROUND_SGOS: dict[str, bytes] = {}
+
+
+def ground_sgo(game: Game, sgo_name: str) -> bytes:
+    """A GROUND_MISSION vehicle's SGO as its tool makes it (vehicle_sgo before the mission setup and the recoil)."""
+    return ground_tool(sgo_name).vehicle_sgo(game, *GROUND_VARIANTS.get(sgo_name, ()))
+
+
+def _ground_sgo_job(cpk_root: str, sgo_name: str) -> bytes:
+    """ground_sgo in a process of its own (model_workers.run_jobs): its game the same Root.cpk, read only."""
+    return ground_sgo(Game(cpk_root), sgo_name)
+
+
+def _make_ground_sgos(game: Game, names: list[str]) -> dict[str, bytes]:
+    """ground_sgo of every one of `names`, side by side (model_workers.group_workers at a time; here, one after the
+    other, on a small machine). Each tracked vehicle's SGO carries its fitted collision's binding (make_tracked_combat
+    _assets: its model and collision built, a few seconds to a minute each): one after the other, 31 of them were most
+    of every install's range step (2026-11-10, docs/feedback-2026-11-10-installer-en.md). They read only Root.cpk and the
+    model folders, so the same bytes in any process."""
+    import model_workers
+    workers = model_workers.group_workers()
+    if workers <= 1 or len(names) <= 1:
+        return {}
+    jobs = [(_ground_sgo_job, (game.root, name), name) for name in names]
+    return dict(zip(names, model_workers.run_jobs(jobs, workers)))
 
 
 def has_mission_setup(game: Game, sgo_name: str) -> bool:
@@ -1244,11 +1272,26 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             led.put(OWNER, rel, aircraft_collision.build(game, key))
             held.add(ledger.key(rel))
     built = {**TRACKED_MISSION, **WALKER_MISSION}
+    cache = None
     for name in sorted(wanted & built.keys()):
         vehicle = built[name]
+        expected = set(range_files(name)[1:])
+        # The installer's files when its build cache says they are what this generator and its inputs make now (pylib/
+        # buildcache.py Cache.current, as the Dreadnought's above): every one of these was built again here, one after
+        # the other, on every install, the installer's cockpits grafted again too (2026-11-10: about 3 of an update's 13
+        # minutes, docs/feedback-2026-11-10-installer-en.md), else built here.
+        group = name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+        if cache is None:
+            import buildcache
+            cache = buildcache.Cache(game_root)
+        owned = set(led.owned_by(group))
+        if cache.recorded(group) and {ledger.key(rel) for rel in expected} <= owned and cache.current(group):
+            for rel in sorted(expected):
+                led.need(OWNER, rel)
+                held.add(ledger.key(rel))
+            continue
         files = ground_tool(name).build(game.root)
         dependencies = {rel: data for rel, data in files.items() if rel != f'OBJECT/{vehicle.sgo}.SGO'}
-        expected = set(range_files(name)[1:])
         if set(dependencies) != expected:
             raise ValueError(f'{name}: builder dependencies differ from the range catalog')
         for rel, data in dependencies.items():
@@ -1389,6 +1432,13 @@ def spawned(plan: Plan) -> set[str]:
 
 
 def install(game_root: str, plan: Plan) -> list[str]:
+    try:
+        return _install(game_root, plan)
+    finally:
+        _GROUND_SGOS.clear()
+
+
+def _install(game_root: str, plan: Plan) -> list[str]:
     """Writes the range's mission and the PvP presets' (PVP_PLANS; its pack registered last, when missing: a failure leaves a folder no mode names,
     never a mode naming a folder that is not there) and takes a range out of the story's missions it used to replace
     (LEGACY_SLOTS). Refuses to touch a folder another mod put there."""
@@ -1406,6 +1456,9 @@ def install(game_root: str, plan: Plan) -> list[str]:
         raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）：先运行 EDF6VehicleCrew 安装器选「安装」，'
                            '或换一种敌人')
     own = placeable_derived()
+    checked = {sgo_name for p in every
+               for sgo_name in (spawned(p) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(p)})) | own}
+    _GROUND_SGOS.update(_make_ground_sgos(game, sorted(checked & GROUND_MISSION.keys())))
     for p in every:
         for sgo_name in (spawned(p) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(p)})) | own:
             if not has_mission_setup(game, sgo_name):

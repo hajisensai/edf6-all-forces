@@ -48,6 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import bigmap  # noqa: E402
 import edf41src  # noqa: E402
+from i18n import tr  # noqa: E402
 import ledger  # noqa: E402
 import legacy_assets  # noqa: E402
 import map_legacy  # noqa: E402
@@ -341,7 +342,8 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print, *
         if name not in todo:
             wanted.update(ledger.key(rel) for rel in stamp[name].get('material_shaders', []))
             continue
-        say(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……')
+        say(tr(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……',
+               f'  Converting 4.1 map {name} (with the weather and path grid of EDF6 {MAPS[name][0]})...'))
         ok, files = next(results)
         if not ok:
             skipped.append((name, files))

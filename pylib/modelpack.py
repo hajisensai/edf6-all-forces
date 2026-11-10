@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 
+from i18n import tr
+
 MANIFEST = 'MODELS.json'            # in <models>/ of the model pack
 REQUIRED = 'models-required.json'   # next to the installer in the main pack
 PARTS = ('models', 'edf41')         # the model pack's folders, unpacked next to the installer
@@ -71,21 +73,30 @@ def problem(app_dir: str) -> str | None:
     except OSError:
         return None
     except (ValueError, KeyError):
-        return f'{REQUIRED} 损坏，请重新解压主包。'
+        return tr(f'{REQUIRED} 损坏，请重新解压主包。', f'{REQUIRED} is damaged; unpack the main package again.')
     try:
         with open(os.path.join(part_dir(app_dir, 'models'), MANIFEST), encoding='utf-8-sig') as f:
             have = json.load(f)
     except (OSError, ValueError):
-        return (f'这个安装器需要模型包 {want}，但安装器旁的 models 文件夹里没有它。'
-                f'请把“模型包”的全部 zip（分成几片的，每片都要）解压到安装器所在文件夹（合并进 models 和 edf41）后重试。')
+        return tr(f'这个安装器需要模型包 {want}，但安装器旁的 models 文件夹里没有它。'
+                  f'请把“模型包”的全部 zip（分成几片的，每片都要）解压到安装器所在文件夹（合并进 models 和 edf41）后重试。',
+                  f'This installer needs model pack {want}, but the models folder beside it does not have it. Unpack every '
+                  'zip of the "model pack" (each part, when it is split) into the installer\'s folder (merging into models and '
+                  'edf41), then try again.')
     if not isinstance(have, dict) or have.get('version') != want:
-        return (f'这个安装器需要模型包 {want}，但 models 文件夹是 {have.get("version") if isinstance(have, dict) else "?"}。'
-                f'请解压对应版本“模型包”的全部 zip（每片都要）覆盖进 models 和 edf41 后重试。')
+        version = have.get('version') if isinstance(have, dict) else '?'
+        return tr(f'这个安装器需要模型包 {want}，但 models 文件夹是 {version}。'
+                  f'请解压对应版本“模型包”的全部 zip（每片都要）覆盖进 models 和 edf41 后重试。',
+                  f'This installer needs model pack {want}, but the models folder holds {version}. Unpack every zip (each '
+                  'part) of the matching "model pack" over models and edf41, then try again.')
     files = have.get('files') if isinstance(have, dict) else None
     if not isinstance(files, dict) or any(str(rel).partition('/')[0] not in PARTS for rel in files):
-        return f'模型包 {want} 的 {MANIFEST} 损坏，请重新解压“模型包”的全部 zip。'
+        return tr(f'模型包 {want} 的 {MANIFEST} 损坏，请重新解压“模型包”的全部 zip。',
+                  f'The {MANIFEST} of model pack {want} is damaged; unpack every zip of the "model pack" again.')
     for rel, size in files.items():
         p = path_of(app_dir, rel)
         if not os.path.isfile(p) or os.path.getsize(p) != size:
-            return f'模型包 {want} 不完整（{rel} 缺失或大小不对）。模型包分成几片时每片都要解压，请重新解压“模型包”的全部 zip。'
+            return tr(f'模型包 {want} 不完整（{rel} 缺失或大小不对）。模型包分成几片时每片都要解压，请重新解压“模型包”的全部 zip。',
+                      f'Model pack {want} is incomplete ({rel} missing or of the wrong size). When the pack is split, every '
+                      'part must be unpacked; unpack every zip of the "model pack" again.')
     return None

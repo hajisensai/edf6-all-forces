@@ -27,10 +27,15 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
 import obj_model  # noqa: E402
 import worldmap  # noqa: E402
+from i18n import tr  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'worldmap'        # pylib/ledger.py OWNERS
-LABEL = '世界地图底图'
+
+
+def label() -> str:
+    """What the installer's lines call the textures (pylib/i18n.py: in the installer's language)."""
+    return tr('世界地图底图', 'World map base textures')
 
 
 def files() -> dict[str, str]:
@@ -42,17 +47,18 @@ def _index(folder: str | None) -> tuple[dict, str | None]:
     """(the index's files, None) or ({}, why not)."""
     where = f'{worldmap.TEXTURE_DIR}/{worldmap.TEXTURE_INDEX}'
     if folder is None or not os.path.isfile(os.path.join(folder, worldmap.TEXTURE_INDEX)):
-        return {}, f'模型包里没有 {where}'
+        return {}, tr(f'模型包里没有 {where}', f'the model pack has no {where}')
     try:
         with open(os.path.join(folder, worldmap.TEXTURE_INDEX), encoding='utf-8') as f:
             index = json.load(f)
     except (OSError, ValueError) as e:
-        return {}, f'{where} 读不了：{type(e).__name__}: {e}'
+        return {}, tr(f'{where} 读不了：{type(e).__name__}: {e}', f'{where} cannot be read: {type(e).__name__}: {e}')
     if not isinstance(index, dict) or index.get('version') != worldmap.TEXTURE_VERSION or not isinstance(index.get('files'), dict):
-        return {}, f'{where} 的版本不是 {worldmap.TEXTURE_VERSION}（模型包与安装器不配套）'
+        return {}, tr(f'{where} 的版本不是 {worldmap.TEXTURE_VERSION}（模型包与安装器不配套）',
+                      f'{where} is not version {worldmap.TEXTURE_VERSION} (the model pack does not match the installer)')
     missing = sorted(set(files()) - set(index['files']))
     if missing:
-        return {}, f"{where} 缺少 {', '.join(missing)}"
+        return {}, tr(f"{where} 缺少 {', '.join(missing)}", f"{where} lacks {', '.join(missing)}")
     return index['files'], None
 
 
@@ -75,22 +81,25 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
     if why is None:
         for name, rel in files().items():
             if _foreign(led, rel):
-                why = f'Mods 里的 {rel} 是别的 MOD 的，或装后被改过（不覆盖）'
+                why = tr(f'Mods 里的 {rel} 是别的 MOD 的，或装后被改过（不覆盖）',
+                         f'{rel} in Mods is another mod\'s, or was changed after it was installed (not written over)')
                 break
             entry = entries[name]
             path = os.path.join(folder, name)
             if not os.path.isfile(path) or os.path.getsize(path) != entry.get('size'):
-                why = f'模型包里的 {worldmap.TEXTURE_DIR}/{name} 缺失或大小不对'
+                why = tr(f'模型包里的 {worldmap.TEXTURE_DIR}/{name} 缺失或大小不对',
+                         f'{worldmap.TEXTURE_DIR}/{name} in the model pack is missing or of the wrong size')
                 break
             with open(path, 'rb') as f:
                 blob = f.read()
             if sha256(blob) != entry.get('sha256'):
-                why = f'模型包里的 {worldmap.TEXTURE_DIR}/{name} 内容不对'
+                why = tr(f'模型包里的 {worldmap.TEXTURE_DIR}/{name} 内容不对',
+                         f'{worldmap.TEXTURE_DIR}/{name} in the model pack holds other bytes')
                 break
             data[rel] = blob
     written: list[str] = []
     if why is not None:
-        skipped.append((LABEL, why))
+        skipped.append((label(), why))
         data = {}
     mine = set(led.owned_by(OWNER))
     for rel, blob in data.items():
@@ -99,7 +108,7 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
         written.append(led.put(OWNER, rel, blob))
     led.release(OWNER, sorted(mine - {ledger.key(rel) for rel in data}))
     if data:
-        say(f'  {LABEL}（NASA Blue Marble，{len(data)} 张贴图）')
+        say(tr(f'  {label()}（NASA Blue Marble，{len(data)} 张贴图）', f'  {label()} (NASA Blue Marble, {len(data)} textures)'))
     return written, skipped
 
 
@@ -115,15 +124,15 @@ def main(argv: list[str]) -> int:
     if argv[1] == 'install':
         written, skipped = install(argv[2])
         for path in written:
-            print('写入', path)
+            print(tr('写入', 'Writing'), path)
         for what, why in skipped:
-            print('跳过', what, why)
+            print(tr('跳过', 'Skipped'), what, why)
         return 0
     deleted, kept = remove(argv[2])
     for path in deleted:
-        print('删除', path)
+        print(tr('删除', 'Deleted'), path)
     for path in kept:
-        print('保留（之后被别的工具改过）', path)
+        print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     return 0
 
 

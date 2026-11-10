@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
 import obj_model  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
+from i18n import tr  # noqa: E402
 
 OWNER = 'xmmaps'      # pylib/ledger.py OWNERS
 VERSION = 2           # raise when the builder's output changes
@@ -168,7 +169,8 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
         if bad:
             skipped.append((name, f"模型包里的文件缺失或内容不对：{', '.join(bad)}"))
             continue
-        say(f"  X-Morph 地图 {name}（{entry['label']}，借用 EDF6 {donor} 的天气与寻路网格）")
+        say(tr(f"  X-Morph 地图 {name}（{entry['label']}，借用 EDF6 {donor} 的天气与寻路网格）",
+               f"  X-Morph map {name} ({entry['label']}, with the weather and path grid of EDF6 {donor})"))
         wanted.update(ledger.key(rel) for rel in files)
         mine = set(led.owned_by(OWNER))
         for rel, data in files.items():

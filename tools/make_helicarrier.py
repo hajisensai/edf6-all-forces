@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import aircraft_collision  # noqa: E402
 import helicarrier_model as hm  # noqa: E402
+from i18n import tr  # noqa: E402
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import make_jets  # noqa: E402
@@ -60,8 +61,11 @@ def build(root: str) -> dict[str, bytes]:
     """Every file this tool writes, {path under Mods: bytes}; none without the model folder."""
     game = vc.Game(root)
     if hm.model_dir() is None:
-        print(f'未找到空中航母模型（{hm.MODEL_SUBDIR}/{hm.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型目录）：'
-              '空中航母 / 自爆无人机母舰 / 人偶无人机母舰的支援与呼叫不会出动。放好模型包后重新安装即可。')
+        print(tr(f'未找到空中航母模型（{hm.MODEL_SUBDIR}/{hm.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型目录）：'
+                 '空中航母 / 自爆无人机母舰 / 人偶无人机母舰的支援与呼叫不会出动。放好模型包后重新安装即可。',
+                 f'The air carrier model was not found ({hm.MODEL_SUBDIR}/{hm.MANIFEST}; the environment variable '
+                 'EDF6VC_MODELS can name the model folder): the air carrier, blast drone carrier and doll drone carrier '
+                 'supports and calls will not deploy. Put the model pack in place and install again.'))
         return {}
     arc, _info, md = hm.build_archive(game)
     files: dict[str, bytes] = {f'OBJECT/{hm.ARCHIVE}': arc}

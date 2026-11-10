@@ -1308,6 +1308,7 @@ add_test(NAME proteus_assets COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 add_test(NAME proteus_text COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_text_test.py")
 add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_install_test.py")
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
+add_test(NAME range_tracked_reuse COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/range_tracked_reuse_test.py")
 add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
@@ -2671,12 +2672,14 @@ add_test(NAME barrel_recoil COMMAND barrel_recoil_test)
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
+# And the installer's messages in Chinese (pylib/i18n.py EDF6_LANG) whatever the machine's display language: CI's
+# windows-latest is English, and the tests compare the Chinese words (tools/selftest.py installer_speaks_english: English).
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_test IN LISTS _all_tests)
   get_test_property(${_test} ENVIRONMENT _env)
   if(NOT _env)
     set(_env)
   endif()
-  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1)
+  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
 endforeach()

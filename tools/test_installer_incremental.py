@@ -199,6 +199,8 @@ class IncrementalTests(unittest.TestCase):
                                       'install_autoturret': lambda g, files, force: None}.items():
                 stack.enter_context(patch.object(installer, name, replacement))
             stack.enter_context(patch.object(call_weapons, 'recover', lambda g: False))
+            # the stand-in builders below are this process's: the groups built here, one after the other (build_assets)
+            stack.enter_context(patch.object(installer.model_workers, 'group_workers', lambda: 1))
             import rootcpk   # the installer points it at its game: not this stand-in, for the tests after this one
             stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
             shared = stack.enter_context(patch.object(call_weapons, 'install'))
@@ -219,6 +221,9 @@ class IncrementalTests(unittest.TestCase):
                 module = buildcache.tool(group)   # make_<group>, an X-Morph unit's builder
                 files = {f'OBJECT/{group}.MRAB' if group == 'optics' else f'OBJECT/{group}.SGO': group.encode()}
                 if group == 'optics':
+                    # a gold vehicle's gun models are the optics' too (make_optics: 'models' are its MRAB and RAB): an
+                    # update rebuilt them all every time when only its MRABs counted (2026-11-10)
+                    files['WEAPON/EDF6VC_GOLD_OPTICS_GUN.RAB'] = b'gold gun'
                     stack.enter_context(patch.object(module, 'build_stock_redirects', return_value={}))
                     stack.enter_context(patch.object(module, 'install_stock_redirects', return_value=[]))
                 value = (b'mac', {'part': b'map'}) if group == 'bigmap' else files

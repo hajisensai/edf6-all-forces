@@ -31,6 +31,7 @@ import time
 
 import modfiles
 import save_backup
+from i18n import tr
 
 LAUNCHER = '原版启动.cmd'                                # in the game folder, beside EDF6.exe
 STATE = 'EDF6VehicleCrew.vanilla_launch.json'          # in Mods/Plugins: the ini as it was, while a vanilla run is on
@@ -96,7 +97,8 @@ def prepare(game: str) -> None:
     never overwritten: the ini now may be a vanilla one, which would be kept as 'the original' for good."""
     ini, state = _paths(game)
     if os.path.exists(state):
-        raise RuntimeError(f'{state} 已存在（上一次原版启动的 ini 还没恢复）：不覆盖')
+        raise RuntimeError(tr(f'{state} 已存在（上一次原版启动的 ini 还没恢复）：不覆盖',
+                              f'{state} is already there (the last vanilla launch has not put the ini back yet): not overwritten'))
     before = modfiles.read(ini)
     after = vanilla_ini((before or b'').decode('utf-8-sig', errors='replace')).encode('utf-8')
     modfiles.save_json(state, {'had': before is not None,
@@ -122,9 +124,9 @@ def _restore(game: str) -> str | None:
             modfiles.atomic_write(ini, base64.b64decode(saved.get('original', '')))
         else:
             os.remove(ini)
-        said = f'已恢复 {ini}（MOD 照常加载）'
+        said = tr(f'已恢复 {ini}（MOD 照常加载）', f'Restored {ini} (mods load as usual)')
     else:
-        said = f'{ini} 在原版启动后被改过，保留现在的内容'
+        said = tr(f'{ini} 在原版启动后被改过，保留现在的内容', f'{ini} was changed after the vanilla launch; kept as it is now')
     os.remove(state)
     return said
 
@@ -243,9 +245,11 @@ def switch(slot: str, to: str, keep: bool = False) -> bool:
 
 def first_vanilla_saves() -> bool:
     """No vanilla saves yet: True copies the mod's (asked once), False starts the vanilla game with none."""
-    print('原版第一次启动，还没有原版专用存档：')
-    pick = input('  回车 / 1 = 原版用全新的存档（推荐）；2 = 复制一份现在的 MOD 存档给原版用'
-                 '（存档里正装备着 MOD 新增的武器时原版会闪退）：').strip()
+    print(tr('原版第一次启动，还没有原版专用存档：', 'First vanilla launch; there are no vanilla saves yet:'))
+    pick = input(tr('  回车 / 1 = 原版用全新的存档（推荐）；2 = 复制一份现在的 MOD 存档给原版用'
+                    '（存档里正装备着 MOD 新增的武器时原版会闪退）：',
+                    '  Enter / 1 = the vanilla game starts with new saves (recommended); 2 = copy the current mod saves for it '
+                    '(the vanilla game crashes on a save with a mod weapon equipped): ')).strip()
     return pick == '2'
 
 
@@ -266,7 +270,9 @@ def swap_in_saves(keep: bool | None = None) -> None:
     Never while the game runs (GameRunning, nothing changed): a mod game started during launch's first-run prompt would
     go on playing on the vanilla set, and its progress be stored as the vanilla set's after it exits."""
     if modfiles.game_running():
-        raise GameRunning(f'{modfiles.PROCESS} 已经在运行（启动原版之前被正常启动了）：不切换存档。先退出游戏再原版启动。')
+        raise GameRunning(tr(f'{modfiles.PROCESS} 已经在运行（启动原版之前被正常启动了）：不切换存档。先退出游戏再原版启动。',
+                             f'{modfiles.PROCESS} is already running (started normally before the vanilla launch): the saves '
+                             'are not switched. Close the game, then launch vanilla.'))
     if keep is None:
         keep = first_time() and first_vanilla_saves()
     all_slots = slots()
@@ -288,14 +294,18 @@ def swap_out_saves(in_game: bool = False) -> str | None:
     if not pending and not os.path.exists(_p(ON)):
         return None
     if not in_game and modfiles.game_running():
-        return '游戏还在运行：存档等游戏退出后（下次 MOD 启动、原版启动或运行安装器时）再换回 MOD 存档'
+        return tr('游戏还在运行：存档等游戏退出后（下次 MOD 启动、原版启动或运行安装器时）再换回 MOD 存档',
+                  'The game is still running: the mod saves are switched back after it exits (at the next mod or vanilla '
+                  'launch, or installer run)')
     if pending:
         save_backup.backup(save_root())
     for s in pending:
         switch(s, 'mod')
     if os.path.exists(_p(ON)):
         _unlink(_p(ON))
-    return '已换回 MOD 存档（原版存档以 .edf6vanilla 留在各存档槽里，和 MOD 存档一起云同步）' if pending else None
+    return tr('已换回 MOD 存档（原版存档以 .edf6vanilla 留在各存档槽里，和 MOD 存档一起云同步）',
+              'Switched back to the mod saves (the vanilla saves stay in each slot as .edf6vanilla, cloud-synced with the '
+              'mod saves)') if pending else None
 
 
 def _restore_all(game: str) -> list[str]:
@@ -353,7 +363,7 @@ def restore_saves() -> int:
     them yet, so they are switched back under it. BUSY when a 原版启动 or the installer holds the saves."""
     with exclusive() as held:
         if not held:
-            print('EDF6VC_SAVE_RESTORE busy (原版启动 or the installer is switching the saves)')
+            print('EDF6VC_SAVE_RESTORE busy (a vanilla launch or the installer is switching the saves)')
             return BUSY
         with _lock:
             said = swap_out_saves(in_game=True)
@@ -378,7 +388,9 @@ def _start() -> set[int]:
     be taken for the vanilla game and waited on. The EDF6.exe PIDs before the start: launch waits for a new one."""
     before = game_pids()
     if before or modfiles.game_running():
-        raise GameRunning(f'{modfiles.PROCESS} 在原版启动之前已经运行：不启动，存档和 ini 换回 MOD 的。')
+        raise GameRunning(tr(f'{modfiles.PROCESS} 在原版启动之前已经运行：不启动，存档和 ini 换回 MOD 的。',
+                             f'{modfiles.PROCESS} was running before the vanilla launch: not starting; the saves and the ini '
+                             'are back to the mod\'s.'))
     os.startfile(STEAM_URL)
     return before
 
@@ -427,7 +439,8 @@ def launch(game: str) -> int:
     game = os.path.normpath(game)
     with exclusive() as held:
         if not held:
-            print('原版启动已经在运行（或安装器正在恢复存档）：不重复启动。')
+            print(tr('原版启动已经在运行（或安装器正在恢复存档）：不重复启动。',
+                     'A vanilla launch is already running (or the installer is restoring the saves): not starting another.'))
             return 1
         try:
             return _launch(game)
@@ -437,32 +450,38 @@ def launch(game: str) -> int:
 
 def _launch(game: str) -> int:
     if modfiles.game_running():
-        print(f'{modfiles.PROCESS} 已经在运行，先退出游戏再原版启动。')
+        print(tr(f'{modfiles.PROCESS} 已经在运行，先退出游戏再原版启动。',
+                 f'{modfiles.PROCESS} is already running; close the game, then launch vanilla.'))
         return 1
     _on_close(game)
     try:
         for said in _step(_restore_all, game):   # a run that did not get to put things back
             print(said)
-        print('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。')
-        print('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），启动前先备份，游戏退出后换回。')
+        print(tr('原版启动：这一次不加载任何 MOD（插件、Mods 文件夹都不读），游戏退出后自动恢复。',
+                 'Vanilla launch: no mods this once (neither the plugins nor the Mods folder are read); back to normal when '
+                 'the game exits.'))
+        print(tr('存档不共用：原版用自己的存档（和 MOD 存档都在存档槽里，一起云同步），启动前先备份，游戏退出后换回。',
+                 'Saves are not shared: the vanilla game uses its own (in the save slots beside the mod saves, cloud-synced '
+                 'together), backed up before the start and switched back after the game exits.'))
         if said := _step(save_backup.backup, save_root()):
-            print('已备份存档到', said)
+            print(tr('已备份存档到', 'Saves backed up to'), said)
         keep = _step(first_time) and first_vanilla_saves()   # asked outside the lock
         _step(swap_in_saves, keep)
         _step(prepare, game)
         before = _step(_start)
-        print('游戏运行期间请不要关闭这个窗口。')
+        print(tr('游戏运行期间请不要关闭这个窗口。', 'Do not close this window while the game runs.'))
         waited = 0.0
         while not (new := game_pids() - before):
             if waited >= START_TIMEOUT:
-                print(f'{int(START_TIMEOUT)} 秒内没有看到 {modfiles.PROCESS} 启动（Steam 没打开或启动被取消）。')
+                print(tr(f'{int(START_TIMEOUT)} 秒内没有看到 {modfiles.PROCESS} 启动（Steam 没打开或启动被取消）。',
+                         f'{modfiles.PROCESS} did not start within {int(START_TIMEOUT)} s (Steam not open, or the start was cancelled).'))
                 return 1
             time.sleep(POLL)
             waited += POLL
-        print(f'游戏已启动（PID {min(new)}），等它退出……')
+        print(tr(f'游戏已启动（PID {min(new)}），等它退出……', f'The game started (PID {min(new)}); waiting for it to exit...'))
         while modfiles.game_running():
             time.sleep(POLL)
-        print('游戏已退出。')
+        print(tr('游戏已退出。', 'The game has exited.'))
         return 0
     except GameRunning as e:
         print(e)

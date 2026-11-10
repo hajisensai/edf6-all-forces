@@ -478,6 +478,10 @@ EDF6AutoTurret 时，键仍按 ini。
 
 **玩家：解压即用，不需要 Python。** 前提是游戏目录已装好 EDFModLoader。
 
+0. **语言**：安装器（菜单、提问、进度、错误提示，以及菜单 7 / 8 的支援配置）跟随 Windows 显示语言，中文系统显示中文，其它语言显示英文；
+   命令行加 `--lang zh` / `--lang en` 可指定（例如 `EDF6VehicleCrew安装器.exe --lang en`）。发布包里附中文 `说明.txt` 和英文 `README.txt`。
+   日志里给开发者检索的固定关键字（`REFUSED`、`EDF6VC_*` 等）和写进游戏数据的文字（任务简报、ini 标记行）不随语言变化，
+   联机房间里各台机器生成的文件因此仍然一致（`docs/feedback-2026-11-10-installer-en.md`）。
 1. 退出游戏，解压发布包 `EDF6VehicleCrew-<版本>.zip`，双击 `EDF6VehicleCrew安装器.exe`，输入 1。
    它自动在 Steam 库里找游戏目录（也可以把 exe 放进游戏目录再运行；都找不到会让你粘贴路径），然后：
    先用你本机的 `Root.cpk`（只读，不修改）在内存里生成战机 / 直升机 / 无人机 / 潜水母舰和呼叫武器，并检查武器表；
@@ -507,6 +511,12 @@ EDF6AutoTurret 时，键仍按 ini。
 资源成功写入后即保存缓存；后续关卡安装失败时，重试仍能复用已完成的资源。资源生成或写入失败则不记录为成功。
 生成依据使用构建时打包的 Python 源码依赖指纹、CPK 路径 / 大小 / 修改与创建时间，以及外部模型、材质和贴图的内容摘要；
 输出每次按 SHA-256 与归属清单校验。CPK 不做全盘哈希，手工修改资源包并刻意保留全部时间戳后需删除缓存清单。
+需要生成的资源组同时生成（`installer.build_assets`）：每组一个独立进程（`buildcache.build_group`），同时最多
+`model_workers.group_workers()` 组（每 4 个逻辑核一组、每组按 3 GiB 可用内存算、最多 4 组；内存或核数不够时退回在安装器进程里逐组生成），
+每组内部的模型任务照旧最多再开 2 个进程。生成阶段只读游戏和模型，全部生成完才开始写，所以并行不改变写入顺序和失败时「什么都不写」的行为；
+任一组失败，还没开始的组不再生成，错误原样报出。外部模型和座舱部件的内容摘要每次安装只算一遍（按路径、大小、修改时间记住），
+不再每组各算一遍。测试场关卡只登记安装器缓存里已是最新的履带载具文件，不再重建；它自己的载具 SGO（要用碰撞绑定）
+同样并行生成。实测耗时见 `docs/feedback-2026-11-10-installer-en.md`（16 核：首次安装约 39 分钟 → 11 分钟，更新约 13 分钟 → 3.5 分钟）。
 
 **开发者**：`build.cmd` 构建到 `build/Mods/Plugins/`（DLL 和 ini 都在那里，ini 由 CMake 自动复制）。
 `python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 `tools/installer.py` `PLUGINS` 列出的每个插件的 DLL 与 ini，

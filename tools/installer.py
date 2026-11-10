@@ -59,6 +59,8 @@ import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 import modelpack  # noqa: E402
+import model_workers  # noqa: E402
+from i18n import take_lang_arg, tr  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
 PROCESS = modfiles.PROCESS
@@ -148,7 +150,8 @@ def plugin_files() -> dict[str, tuple[bytes, bytes]]:
     paths = [os.path.join(src, name + ext) for name, _ in PLUGINS for ext in PLUGIN_FILES]
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
-        raise SystemExit(f'找不到 {", ".join(missing)}：先运行 build.cmd 构建插件')
+        raise SystemExit(tr(f'找不到 {", ".join(missing)}：先运行 build.cmd 构建插件',
+                            f'{", ".join(missing)} not found: run build.cmd first to build the plugins'))
     out: dict[str, tuple[bytes, bytes]] = {}
     for name, _ in PLUGINS:
         dll, ini = (modfiles.read(os.path.join(src, name + ext)) for ext in PLUGIN_FILES)
@@ -166,22 +169,26 @@ def ask(prompt: str) -> str:
 def pick_game() -> str | None:
     found = gamedir.find()
     if found:
-        print(f'游戏目录：{found}')
+        print(tr(f'游戏目录：{found}', f'Game folder: {found}'))
         return found
-    print('没有自动找到游戏目录（需要同时有 EDF6.exe 和 Root.cpk）。')
+    print(tr('没有自动找到游戏目录（需要同时有 EDF6.exe 和 Root.cpk）。',
+             'The game folder was not found automatically (it is the one with both EDF6.exe and Root.cpk).'))
     while True:
-        path = ask('请把游戏目录粘贴到这里后回车（直接回车退出）：').strip('"')
+        path = ask(tr('请把游戏目录粘贴到这里后回车（直接回车退出）：',
+                      'Paste the game folder here and press Enter (just Enter to quit): ')).strip('"')
         if not path:
             return None
         if gamedir.is_game(path):
             return os.path.normpath(path)
-        print('这个目录里没有 EDF6.exe 和 Root.cpk，请重新输入。')
+        print(tr('这个目录里没有 EDF6.exe 和 Root.cpk，请重新输入。', 'That folder has no EDF6.exe and Root.cpk; try again.'))
 
 
 def check_loader(game: str) -> None:
     if not (os.path.isfile(os.path.join(game, 'winmm.dll')) or os.path.isfile(os.path.join(game, 'ModLoader.ini'))):
-        print('！ 没有发现 EDFModLoader（游戏目录里的 winmm.dll / ModLoader.ini）。'
-              '本插件靠它加载，请先装好 EDFModLoader，否则装了也不会生效。')
+        print(tr('！ 没有发现 EDFModLoader（游戏目录里的 winmm.dll / ModLoader.ini）。'
+                 '本插件靠它加载，请先装好 EDFModLoader，否则装了也不会生效。',
+                 '! EDFModLoader was not found (winmm.dll / ModLoader.ini in the game folder). The plugins are loaded by it: '
+                 'install EDFModLoader first, or this install will have no effect.'))
 
 
 # ---------------------------------------------------------------- the ini
@@ -317,7 +324,7 @@ def material_compat_wanted(ini_text: str) -> bool:
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN, section: str = SECTION) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
     modfiles.atomic_write(os.path.join(dst, name + '.dll'), dll)
-    print(f'写入 {os.path.join(dst, name + ".dll")}')
+    print(tr('写入', 'Writing'), os.path.join(dst, name + '.dll'))
     ini = os.path.join(dst, name + '.ini')
     if not os.path.isfile(ini):
         # A fresh install has already adopted this release's defaults. Record that
@@ -325,7 +332,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
         bom = shipped_ini.startswith(b'\xef\xbb\xbf')
         text, _ = apply_new_defaults(shipped_ini.decode('utf-8-sig'), section)
         modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
-        print(f'写入 {ini}')
+        print(tr('写入', 'Writing'), ini)
         return
     with open(ini, 'rb') as f:
         raw = f.read()
@@ -335,13 +342,17 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     if text != user:   # the migration marker itself must persist even when every default was already current
         modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
     if added:
-        print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
+        print(tr(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}',
+                 f'Kept your {ini}, adding the settings this version adds: {", ".join(added)}'))
     elif not flipped:
-        print(f'保留你的 {ini}（没有需要补的新设置）')
+        print(tr(f'保留你的 {ini}（没有需要补的新设置）', f'Kept your {ini} (no new settings to add)'))
     if flipped:
-        print(f'  这些设置的出厂默认值已更新，你的 ini 里还是旧默认值，已改成新默认值：{", ".join(flipped)}（想改就改回，之后安装不会再改）')
+        print(tr(f'  这些设置的出厂默认值已更新，你的 ini 里还是旧默认值，已改成新默认值：{", ".join(flipped)}（想改就改回，之后安装不会再改）',
+                 f'  These settings have new defaults and yours still had the old ones, so they now have the new ones: '
+                 f'{", ".join(flipped)} (change them back if you like; later installs will not touch them again)'))
     if gone:
-        print(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉')
+        print(tr(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉',
+                 f'  {", ".join(gone)}: no longer used by this version, you may delete them'))
 
 
 def remove_plugin(game: str) -> None:
@@ -351,7 +362,7 @@ def remove_plugin(game: str) -> None:
             path = os.path.join(game, 'Mods', 'Plugins', name + ext)
             if os.path.isfile(path):
                 os.remove(path)
-                print(f'删除 {path}')
+                print(tr('删除', 'Deleting'), path)
 
 
 # ---------------------------------------------------------------- install / uninstall
@@ -362,20 +373,22 @@ def misaligned(game: str, error: Exception) -> bool:
     call_weapons.repair can fix it (a first install kept the files as they were), after warning what a repair
     loses."""
     import call_weapons
-    print(f'\n！ {error}')
+    print('\n' + tr('！ ', '! ') + str(error))
     if not os.path.isfile(os.path.join(game, 'Mods', call_weapons.MANIFEST)):
         return False
     later = call_weapons.changed_since(game, call_weapons.load_manifest(game), call_weapons.SHARED)
     if later:
-        print('  注意：这些文件在本插件上次安装之后被别的工具改过，恢复会丢掉那些改动（之后重新运行那个 MOD 的安装即可补回）：'
-              + '、'.join(later))
+        print(tr('  注意：这些文件在本插件上次安装之后被别的工具改过，恢复会丢掉那些改动（之后重新运行那个 MOD 的安装即可补回）：'
+                 + '、'.join(later),
+                 '  Note: these files were changed by another tool after this plugin\'s last install; restoring them loses '
+                 'those changes (run that mod\'s install again afterwards to get them back): ' + ', '.join(later)))
     return True
 
 
 def repair_weapons(game: str) -> None:
     import call_weapons
     for rel in call_weapons.repair(game):
-        print(f'恢复 {rel}')
+        print(tr('恢复', 'Restoring'), rel)
 
 
 def stack_weapons(game: str) -> dict[str, bytes] | None:
@@ -387,7 +400,9 @@ def stack_weapons(game: str) -> dict[str, bytes] | None:
     except call_weapons.Misaligned as e:
         if not misaligned(game, e):
             return None
-        if ask('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子，然后继续安装；其它 = 取消：').lower() != 'y':
+        if ask(tr('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子，然后继续安装；其它 = 取消：',
+                  'Enter y to restore the weapon table and its texts to how they were before this plugin was first installed, '
+                  'then go on installing; anything else = cancel: ')).lower() != 'y':
             return None
         repair_weapons(game)
         return call_weapons.stack(game)
@@ -404,18 +419,30 @@ def retire_weapons(game: str) -> bool:
         # write past its records for each. A save with one of them equipped crashes once its row is gone.
         past = call_weapons.past_room_rows(game)
         if past:
-            print(f'武器表有 {call_weapons.NATIVE_WEAPONS + len(past)} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器：'
-                  f'卸载要删掉最后 {len(past)} 行（{", ".join(past[:6])}{" ……" if len(past) > 6 else ""}），否则游戏会写坏内存。')
-            if ask('请先在每个存档里卸下这些武器（装备着的存档在删行后会闪退）。已卸下输入 y 继续；其它 = 取消：').lower() != 'y':
+            more = ' ……' if len(past) > 6 else ''
+            print(tr(f'武器表有 {call_weapons.NATIVE_WEAPONS + len(past)} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器：'
+                     f'卸载要删掉最后 {len(past)} 行（{", ".join(past[:6])}{more}），否则游戏会写坏内存。',
+                     f'The weapon table has {call_weapons.NATIVE_WEAPONS + len(past)} rows, but without the plugin the game keeps only '
+                     f'{call_weapons.NATIVE_WEAPONS} weapons: uninstalling deletes the last {len(past)} rows '
+                     f'({", ".join(past[:6])}{more}), or the game would corrupt its memory.'))
+            if ask(tr('请先在每个存档里卸下这些武器（装备着的存档在删行后会闪退）。已卸下输入 y 继续；其它 = 取消：',
+                      'First unequip these weapons in every save (a save with one equipped crashes once its row is gone). '
+                      'Done: enter y to go on; anything else = cancel: ')).lower() != 'y':
                 return False
         call_weapons.uninstall(game, unequipped=bool(past))
         return True
     except call_weapons.Misaligned as e:
         repairable = misaligned(game, e)
-    print('  也可以跳过武器表：武器表和武器说明一个字节都不动，只删插件和生成的模型（呼叫武器的行留着，照原版 KM6 呼叫；'
-          '玩家喷气机请求要用的模型仍被这些行登记着，会保留）。')
-    prompt = ('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子（呼叫武器随之去掉），然后继续卸载；'
-              if repairable else '') + '输入 s 跳过武器表继续卸载；其它 = 取消：'
+    print(tr('  也可以跳过武器表：武器表和武器说明一个字节都不动，只删插件和生成的模型（呼叫武器的行留着，照原版 KM6 呼叫；'
+             '玩家喷气机请求要用的模型仍被这些行登记着，会保留）。',
+             '  You can also skip the weapon table: the table and its texts stay byte for byte, only the plugins and the '
+             'generated models go (the call weapons\' rows stay and call like the stock KM6; the models the player jet '
+             'requests need stay registered by those rows and are kept).'))
+    prompt = (tr('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子（呼叫武器随之去掉），然后继续卸载；',
+                 'Enter y to restore the weapon table and its texts to how they were before this plugin was first installed '
+                 '(the call weapons go with it), then go on uninstalling; ')
+              if repairable else '') + tr('输入 s 跳过武器表继续卸载；其它 = 取消：',
+                                          'enter s to skip the weapon table and go on uninstalling; anything else = cancel: ')
     choice = ask(prompt).lower()
     if choice == 'y' and repairable:
         repair_weapons(game)
@@ -423,7 +450,9 @@ def retire_weapons(game: str) -> bool:
     if choice == 's':
         rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
         if rows > call_weapons.NATIVE_WEAPONS:   # the table left as it is, without the plugin: the game writes past
-            print(f'不能跳过：武器表有 {rows} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器，会写坏内存。')
+            print(tr(f'不能跳过：武器表有 {rows} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器，会写坏内存。',
+                     f'Cannot skip: the weapon table has {rows} rows, and without the plugin the game keeps only '
+                     f'{call_weapons.NATIVE_WEAPONS} weapons; it would corrupt its memory.'))
             return False
     return choice == 's'
 
@@ -439,10 +468,12 @@ def build_autoturret(game: str) -> tuple[dict[str, bytes], bool] | None:
     problems = at_build.foreign(os.path.join(game, 'Mods'), files)
     if not problems:
         return files, False
-    print('\n！ EDF6AutoTurret 的车辆数据要替换下面这些不是它写的文件（别的 MOD 的，或它写之后被改过）：')
+    print(tr('\n！ EDF6AutoTurret 的车辆数据要替换下面这些不是它写的文件（别的 MOD 的，或它写之后被改过）：',
+             '\n! EDF6AutoTurret\'s vehicle data replaces these files it did not write (another mod\'s, or changed since it wrote them):'))
     for p in problems:
         print('  ', p)
-    if ask('输入 y 先备份这些文件再替换（卸载时按备份恢复）；其它 = 取消：').lower() != 'y':
+    if ask(tr('输入 y 先备份这些文件再替换（卸载时按备份恢复）；其它 = 取消：',
+              'Enter y to back these files up and replace them (uninstall restores the backups); anything else = cancel: ')).lower() != 'y':
         return None
     return files, True
 
@@ -451,8 +482,10 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
     """Writes EDF6AutoTurret's vehicle data and their WEAPONTEXT rows (after the call weapons: the rows go into the
     tables as call_weapons left them), recorded in its own manifest with backups (autoturret/tools/build.py)."""
     import build as at_build
-    print('写入 EDF6AutoTurret 的车辆数据（防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的武器说明行；'
-          '记录在 Mods/.edf6at_data.json）……')
+    print(tr('写入 EDF6AutoTurret 的车辆数据（防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的武器说明行；'
+             '记录在 Mods/.edf6at_data.json）……',
+             'Writing EDF6AutoTurret\'s vehicle data (the flak, the Bohr, the missions\' flak, the NPC Titan\'s side guns and '
+             'their weapon text rows; recorded in Mods/.edf6at_data.json)...'))
     import make_optics
     import ledger
     import rootcpk
@@ -476,7 +509,9 @@ def remove_autoturret(game: str) -> None:
     mods = os.path.join(game, 'Mods')
     if not at_build.installed(mods):
         return
-    print('恢复 EDF6AutoTurret 改过的车辆数据（按 Mods/.edf6at_data.json；之后被别的 MOD 改过的文件和行保持原样）……')
+    print(tr('恢复 EDF6AutoTurret 改过的车辆数据（按 Mods/.edf6at_data.json；之后被别的 MOD 改过的文件和行保持原样）……',
+             'Restoring the vehicle data EDF6AutoTurret changed (by Mods/.edf6at_data.json; files and rows another mod '
+             'changed since stay as they are)...'))
     at_build.uninstall(mods, force=False)
 
 
@@ -485,12 +520,60 @@ def build_asset(cache: Any, module: Any, label: str, builder: Any = None, settin
     installed outputs changed. `module`: the group's generator (a make_<group> module, or buildcache.tool's)."""
     started = time.perf_counter()
     if cache.current(module.OWNER, settings):
-        print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
+        print(tr(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）',
+                 f'{label}: verified, reusing the installed files ({time.perf_counter() - started:.1f} s)'), flush=True)
         return None
-    print(f'{label}：生成中（首次安装或输入/输出发生变化）……', flush=True)
+    print(tr(f'{label}：生成中（首次安装或输入/输出发生变化）……',
+             f'{label}: generating (first install, or its inputs / outputs changed)...'), flush=True)
     built = (builder or module.build)(cache.game)
-    print(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）', flush=True)
+    print(tr(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）',
+             f'{label}: generated ({time.perf_counter() - started:.1f} s)'), flush=True)
     return built
+
+
+Asset = tuple[str, str, tuple, 'dict | None']   # (group, label, its builder's extra arguments, settings: build_asset's)
+
+
+def build_assets(cache: Any, assets: list[Asset]) -> dict[str, Any]:
+    """Every group of `assets` (build_asset each): its files, None when the installed ones are current. The groups to
+    build are built side by side, model_workers.group_workers() at a time, each in a process of its own
+    (buildcache.build_group): they only read the game and the models (nothing is written before all are built), and one
+    after the other they left all but two of the cores idle (a first install's generating: 29 minutes; 4 at a time on
+    16 cores, under 6, 2026-11-10, docs/feedback-2026-11-10-installer-en.md). One at a time (a small machine), here, in order, as before."""
+    import buildcache
+    out: dict[str, Any] = {}
+    todo: list[Asset] = []
+    for group, label, args, settings in assets:
+        assert group in buildcache.GROUPS, group
+        started = time.perf_counter()
+        if cache.current(group, settings):
+            print(tr(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）',
+                     f'{label}: verified, reusing the installed files ({time.perf_counter() - started:.1f} s)'), flush=True)
+            out[group] = None
+        else:
+            todo.append((group, label, args, settings))
+    workers = model_workers.group_workers()
+    if workers <= 1 or len(todo) <= 1:
+        for group, label, args, _ in todo:
+            started = time.perf_counter()
+            print(tr(f'{label}：生成中（首次安装或输入/输出发生变化）……',
+                     f'{label}: generating (first install, or its inputs / outputs changed)...'), flush=True)
+            out[group] = buildcache.builder(group)(cache.game, *args)
+            print(tr(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）',
+                     f'{label}: generated ({time.perf_counter() - started:.1f} s)'), flush=True)
+        return out
+    started = time.perf_counter()
+    print(tr(f'生成 {len(todo)} 组资源（首次安装或输入/输出发生变化），{min(workers, len(todo))} 组同时进行：',
+             f'Generating {len(todo)} asset groups (first install, or their inputs / outputs changed), '
+             f'{min(workers, len(todo))} at a time:'), flush=True)
+    for _, label, _, _ in todo:
+        print('  ' + label, flush=True)
+    results = model_workers.run_jobs([(buildcache.build_group, (cache.game, group, args), label)
+                                      for group, label, args, _ in todo], workers)
+    out.update({group: files for (group, *_), files in zip(todo, results)})
+    print(tr(f'{len(todo)} 组资源生成完成（{time.perf_counter() - started:.1f} 秒）',
+             f'{len(todo)} asset groups generated ({time.perf_counter() - started:.1f} s)'), flush=True)
+    return out
 
 
 def find_edf41(game: str) -> str | None:
@@ -506,21 +589,24 @@ def build_packs(game: str, campaign: bool, root41: str | None = None,
     campaign is installed to keep; the opt-out (`campaign` False) is the packs rebuilt without it."""
     import make_edf5_campaign
     if campaign:
-        print('生成任务包：测试场，以及可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证；资源装不全的任务不会安装，并说明原因）……')
+        print(tr('生成任务包：测试场，以及可选实验 EDF5 战役（本篇、DLC1、DLC2 三个独立任务包；原始 BVM 脚本尚未逐关验证；资源装不全的任务不会安装，并说明原因）……',
+                 'Generating the mission packs: the test range, and the experimental EDF5 campaign (the main game, DLC1 and '
+                 'DLC2 as three packs; the original BVM scripts are not verified mission by mission; a mission whose '
+                 'resources are incomplete is left out, saying why)...'))
     else:
-        print('生成测试场任务包（EDF5 战役已停用）……')
+        print(tr('生成测试场任务包（EDF5 战役已停用）……', 'Generating the test range\'s mission pack (the EDF5 campaign is turned off)...'))
     try:
         return make_edf5_campaign.build(game, campaign=campaign, root41=root41, skip41=skip41 or {})
     except make_edf5_campaign.Refused as e:
-        print('！ 不安装任务包：', e)
+        print(tr('！ 不安装任务包：', '! Mission packs not installed:'), e)
     if not campaign or make_edf5_campaign.enabled(game):
         return None
     try:
         built = make_edf5_campaign.build(game, campaign=False)
     except make_edf5_campaign.Refused as e:
-        print('！ 测试场任务包也装不上：', e)
+        print(tr('！ 测试场任务包也装不上：', '! The test range\'s pack cannot be installed either:'), e)
         return None
-    print('  只装测试场任务包，不装 EDF5 战役。')
+    print(tr('  只装测试场任务包，不装 EDF5 战役。', '  Installing only the test range\'s pack, without the EDF5 campaign.'))
     return built
 
 
@@ -570,75 +656,94 @@ def install(game: str, campaign_requested: bool = False) -> None:
     stock_stores = make_stock_stores.wanted(planned)
     material_compat = material_compat_wanted(planned)
     if call_weapons.recover(game):
-        print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
-    print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
+        print(tr('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。',
+                 'The last run did not finish: the weapon table\'s files are back as they were before it.'))
+    print(tr('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……',
+             'Checking the weapon table and generating the call weapons (reading Root.cpk and the current table only)...'))
     weapons = stack_weapons(game)
     if weapons is None:
-        print('已取消，没有写入任何文件。')
+        print(tr('已取消，没有写入任何文件。', 'Cancelled; nothing was written.'))
         return
-    print('生成 EDF6AutoTurret 的车辆数据（只读 Root.cpk）……')
+    print(tr('生成 EDF6AutoTurret 的车辆数据（只读 Root.cpk）……', 'Generating EDF6AutoTurret\'s vehicle data (reading Root.cpk only)...'))
     turret = build_autoturret(game)
     if turret is None:
-        print('已取消，没有写入任何文件。')
+        print(tr('已取消，没有写入任何文件。', 'Cancelled; nothing was written.'))
         return
     cache = buildcache.Cache(game)
-    optics = build_asset(cache, make_optics, '载具实体瞄具模型', make_optics.build_models)
-    jets = build_asset(cache, make_jets, '战机、直升机、无人机')
-    sub = build_asset(cache, make_sub, '潜水母舰')
-    katyusha = build_asset(cache, make_katyusha, '喀秋莎火箭炮车')
-    artillery = build_asset(cache, make_artillery, '自行榴弹炮')
-    chute = build_asset(cache, make_chute, '降落伞')
-    drill = build_asset(cache, make_drill, '钻头战车')
-    emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
-    ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
-    barrage = build_asset(cache, make_barrage, '远程炮击弹药')
-    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its generator (its
-    # make_<kind> tool; an X-Morph unit's, make_xmorph's builder: buildcache.tool).
-    tracked = {kind: build_asset(cache, buildcache.tool(kind), label)
-               for kind, label in make_tracked_combat.LABELS.items()}
-    # ...and the X-Morph aircraft (the helicopters: the stock V506 in their own models, pylib/xm_heli.py; the jets: the
-    # plugin's aircraft in their own models, pylib/xm_jet.py), make_xmorph's too
-    tracked.update({u.key: build_asset(cache, buildcache.tool(u.key), xm_units.label(u))
-                    for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))})
-    # The X-Morph cars on the V512 (tools/make_xmorph.py CARS: pylib/car_model.py), each by its builder.
-    cars = {kind: build_asset(cache, buildcache.tool(kind), label) for kind, label in make_xmorph.CARS.items()}
-    # The X-Morph walkers and infantry (make_xmorph's own: pylib/xm_walker.py, xm_infantry.py), each its builder.
-    xmorph = {kind: build_asset(cache, buildcache.tool(kind), label) for kind, label in make_xmorph.LABELS.items() if kind in make_xmorph.OWN}
+    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
+    hangars = make_dreadnought.dm.hangars_wanted(planned)
+    # Every generated asset group (build_assets), each by its generator (tools/make_<group>.py; an X-Morph unit's,
+    # make_xmorph's builder: buildcache.tool): the vehicles and emplacements on the V603 (make_tracked_combat.LABELS) and
+    # the X-Morph aircraft (the helicopters: the stock V506 in their own models, pylib/xm_heli.py; the jets: the plugin's
+    # aircraft in their own models, pylib/xm_jet.py), the X-Morph cars on the V512 (make_xmorph.CARS: pylib/car_model.py)
+    # and its walkers and infantry (make_xmorph's own: pylib/xm_walker.py, xm_infantry.py).
+    tracked_kinds = [*make_tracked_combat.LABELS, *(u.key for u in (*xm_units.ported('heli'), *xm_units.ported('jet')))]
+    xmorph_kinds = [kind for kind in make_xmorph.LABELS if kind in make_xmorph.OWN]
+    assets: list[Asset] = [
+        ('optics', tr('载具实体瞄具模型', 'Vehicle sight models'), (), None),
+        ('jets', tr('战机、直升机、无人机', 'Jets, helicopters, drones'), (), None),
+        ('sub', tr('潜水母舰', 'Submarine carrier'), (), None),
+        ('katyusha', tr('喀秋莎火箭炮车', 'Katyusha rocket truck'), (), None),
+        ('artillery', tr('自行榴弹炮', 'Self-propelled howitzer'), (), None),
+        ('chute', tr('降落伞', 'Parachute'), (), None),
+        ('drill', tr('钻头战车', 'Drill tank'), (), None),
+        ('emc', tr('EMC 蓄力光束', 'EMC charged beam'), (), None),
+        ('ultimate', tr('终极支援「天罚」特效', 'Ultimate support "Judgement" effects'), (), None),
+        ('barrage', tr('远程炮击弹药', 'Long-range barrage shells'), (), None),
+        *((kind, label, (), None) for kind, label in make_tracked_combat.LABELS.items()),
+        *((u.key, xm_units.label(u), (), None) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))),
+        *((kind, label, (), None) for kind, label in make_xmorph.CARS.items()),
+        *((kind, make_xmorph.LABELS[kind], (), None) for kind in xmorph_kinds),
+        ('sidecar', tr('边三轮摩托', 'Sidecar motorcycle'), (), None),
+        ('sedan', tr('民用轿车', 'Civilian sedan'), (), None),
+        ('sazabi', tr('沙扎比（模型生成约 1.5 分钟）', 'Sazabi (about 1.5 minutes to generate)'), (), None),
+        ('dreadnought', tr(f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
+                           f'Dreadnought and its aircraft (hangar modules: {make_dreadnought.fitting_text(hangars)}; '
+                           'about 3 minutes to generate)'),
+         (hangars,), {'hangars': make_dreadnought.dm.hangars_text(hangars)}),
+        ('c130', tr('炮舰机与伞兵运输机（模型包的 C-130；模型与座舱生成约 4 分钟）',
+                    'Gunship and paratrooper transport (the model pack\'s C-130; about 4 minutes for the model and cockpit)'), (), None),
+        ('helicarrier', tr('空中航母与无人机母舰（模型包的 Helicarrier；模型与座舱生成约 1 分钟）',
+                           'Air carrier and drone carriers (the model pack\'s Helicarrier; about 1 minute for the model and cockpit)'), (), None),
+        ('proteus', tr('普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）',
+                       'Proteus shield (the stock Air Raider\'s EM bunker wall; also undoes the model older versions made)'), (), None),
+        ('bigmap', tr('大地图（3 x 3 无缝平原，只读 Chunk02.cpk）', 'Big map (a seamless 3 x 3 plain; reading Chunk02.cpk only)'), (), None),
+    ]
+    built = build_assets(cache, assets)
+    optics, jets, sub, katyusha, artillery, chute, drill, emc, ult, barrage = (
+        built[g] for g in ('optics', 'jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage'))
+    tracked = {kind: built[kind] for kind in tracked_kinds}
+    cars = {kind: built[kind] for kind in make_xmorph.CARS}
+    xmorph = {kind: built[kind] for kind in xmorph_kinds}
+    sidecar, sedan, sazabi, dreadnought, c130, helicarrier, proteus, bigmap = (
+        built[g] for g in ('sidecar', 'sedan', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'proteus', 'bigmap'))
     stock = None
     if stock_stores:
-        print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
+        print(tr('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……',
+                 'Giving the stock vehicles\' requests their stores (tanks, missile launcher, flak, bikes, helicopters; ini '
+                 'StockVehicleStores=1; reads Root.cpk without changing it)...'))
         # EDF6AutoTurret's flak / Bohr requests are its own: built on from its bytes and written back through its manifest
         files, skipped, handed = make_stock_stores.build(game, overlay={rel: data for rel, data in turret[0].items()
                                                                        if rel.upper().startswith('WEAPON/')})
         turret = ({**turret[0], **handed}, turret[1])
         stock = files, skipped
-    print('游骑兵的霰弹枪改成像突击步枪那样握持（原版霰弹枪与移植霰弹枪；只读 Root.cpk，不修改它）……')
+    print(tr('游骑兵的霰弹枪改成像突击步枪那样握持（原版霰弹枪与移植霰弹枪；只读 Root.cpk，不修改它）……',
+             'Making the Ranger hold shotguns like assault rifles (stock and ported shotguns; reads Root.cpk without changing it)...'))
     holds = make_stock_holds.build(game)
-    sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
-    sedan = build_asset(cache, make_sedan, '民用轿车')
-    sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
-    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
-    hangars = make_dreadnought.dm.hangars_wanted(planned)
-    dreadnought = build_asset(cache, make_dreadnought,
-                              f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
-                              lambda g: make_dreadnought.build(g, hangars),
-                              {'hangars': make_dreadnought.dm.hangars_text(hangars)})
-    c130 = build_asset(cache, make_c130, '炮舰机与伞兵运输机（模型包的 C-130；模型与座舱生成约 4 分钟）')
-    helicarrier = build_asset(cache, make_helicarrier, '空中航母与无人机母舰（模型包的 Helicarrier；模型与座舱生成约 1 分钟）')
-    proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
-    bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     root41 = find_edf41(game)
     want_campaign = campaign_requested or make_edf5_campaign.wanted(game)
     # What EDF4.1's objects and maps will leave out, as far as it can be told now; settled after they are written.
     skip41 = make_edf5_campaign.unavailable41(game, root41)
     campaign = build_packs(game, want_campaign, root41, skip41)
     room = build_room_layouts(game)
-    print('\n全部生成完毕，开始写入。')
+    print(tr('\n全部生成完毕，开始写入。', '\nEverything generated; writing.'))
     if campaign is None and not make_edf5_campaign.wanted(game) and make_edf5_campaign.enabled(game):
         # An opt-out (finished by the packs rebuilt without the campaign) that cannot be: refused before writing.
-        raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
+        raise make_edf5_campaign.Refused(tr('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。',
+                                            'Cannot finish turning the EDF5 campaign off: its mission list was changed by '
+                                            'another tool; the files it depends on are kept.'))
     for path in (make_optics.install_models(game, optics) if optics is not None else []):
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -658,94 +763,119 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
             (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) + \
-            (make_c130.install(game, c130) if c130 is not None else []) +             (make_helicarrier.install(game, helicarrier) if helicarrier is not None else []) + \
+            (make_c130.install(game, c130) if c130 is not None else []) + \
+            (make_helicarrier.install(game, helicarrier) if helicarrier is not None else []) + \
             (make_proteus.install(game, proteus) if proteus is not None else []):
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
         for path in make_stock_stores.install(game, files):
-            print('写入', path)
+            print(tr('写入', 'Writing'), path)
         for rel in skipped:
-            print('跳过（别的 mod 已经放了自己的请求文件，保持原样）', rel)
+            print(tr('跳过（别的 mod 已经放了自己的请求文件，保持原样）', 'Skipped (another mod placed its own request file, left as it is)'), rel)
     else:
         for path in make_stock_stores.remove(game)[0]:
-            print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
+            print(tr('删除（StockVehicleStores=0：原版载具的请求恢复原样）',
+                     'Deleting (StockVehicleStores=0: the stock vehicles\' requests back as they were)'), path)
     for path in make_stock_holds.install(game, holds[0]):
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for rel in holds[1]:
-        print('跳过（别的 mod 已经放了自己的武器文件，保持原样）', rel)
-    print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
+        print(tr('跳过（别的 mod 已经放了自己的武器文件，保持原样）', 'Skipped (another mod placed its own weapon file, left as it is)'), rel)
+    print(tr('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……',
+             'Writing the call weapons (only this plugin\'s rows of the weapon table change; all written or none)...'))
     call_weapons.install(game, weapons)
     # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
     # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
     # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
     objects41, skipped41 = edf41_objects.build(game, material_compat=material_compat)
-    print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
-          '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
+    count41 = len(edf41_objects.registry()["objects"])
+    print(tr(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {count41} 种，'
+             '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……',
+             f'Writing EDF4.1\'s enemies and NPCs (the {count41} kinds the 4.1 missions use that EDF6 lacks; converted '
+             'ahead of time, EDF4.1 not needed; under their 4.1 file names)...'))
     for obj, why in skipped41:
-        print('  跳过', obj, why)
+        print(tr('  跳过', '  Skipped'), obj, why)
     edf41_objects.install(game, objects41)
     outfits41, skipped_outfits = edf41_outfits.build(game, material_compat=material_compat)
-    print('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
-          f'不替换任何原版文件，在战前外观菜单里选「{edf41_outfits.ITEM_ZH}」才使用；'
-          'EDF4.1 任务包里外观为「配合任务」或外观更改未解锁时默认使用）……')
+    print(tr('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
+             f'不替换任何原版文件，在战前外观菜单里选「{edf41_outfits.ITEM_ZH}」才使用；'
+             'EDF4.1 任务包里外观为「配合任务」或外观更改未解锁时默认使用）……',
+             'Writing the EDF4.1 outfits (one each for the Ranger, Air Raider, Wing Diver and Fencer, as extra outfits; '
+             'converted ahead of time, EDF4.1 not needed; no stock file replaced: used when picked in the pre-mission '
+             'outfit menu, and by default in the EDF4.1 packs when the outfit is "match the mission" or outfit changes are '
+             'not unlocked)...'))
     for cls, why in skipped_outfits:
-        print('  跳过', cls, why)
+        print(tr('  跳过', '  Skipped'), cls, why)
     for path in edf41_outfits.install(game, outfits41):
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     # EDF5 Mission Pack 1's two maps and DLC fortress (pre-generated, the members EDF6 ships read from it): what the
     # campaign plan offered DM015 / DM018 / DM019 / DM020 on (make_edf5_campaign.plan asks edf5_dlc.offered)
     files5, skipped5 = edf5_dlc.build(game)
-    print('写入 EDF5 任务包１缺的两张地图和要塞（预先生成，不需要装 EDF5；EDF6 已有的部分从 EDF6 读取）……')
+    print(tr('写入 EDF5 任务包１缺的两张地图和要塞（预先生成，不需要装 EDF5；EDF6 已有的部分从 EDF6 读取）……',
+             'Writing the two maps and the fortress EDF5 Mission Pack 1 lacks (generated ahead of time, EDF5 not needed; '
+             'what EDF6 has is read from EDF6)...'))
     for group, why in skipped5:
-        print('  跳过', group, why)
+        print(tr('  跳过', '  Skipped'), group, why)
     for path in edf5_dlc.install(game, files5):
-        print('写入', path)
-    print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，16 张地图按空闲内存'
-          '分几个进程同时转换，共约 0.5–2 分钟，已转换且未变的跳过）……' if root41
-          else f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+        print(tr('写入', 'Writing'), path)
+    print((tr(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，16 张地图按空闲内存'
+              '分几个进程同时转换，共约 0.5–2 分钟，已转换且未变的跳过）……',
+              f'Converting EDF4.1\'s mission maps (the 4.1 story pack needs them; from {edf41src.describe(root41)}; the 16 '
+              'maps in a few processes at once by free memory, about 0.5-2 minutes; converted and unchanged ones skipped)...'))
+          if root41 else tr(f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。',
+                            f'{edf41src.describe(root41)}: skipping the 4.1 maps (the 4.1 story pack needs them).'))
     written41, skipped_maps = edf41_maps.install(game, root41, material_compat=material_compat)
     for name, why in skipped_maps:
-        print('  跳过', name, why)
-    print('安装 X-Morph: Defense 的 5 张地图（模型包的 xm_maps，借用 EDF6 地图的天气与寻路网格）……')
+        print(tr('  跳过', '  Skipped'), name, why)
+    print(tr('安装 X-Morph: Defense 的 5 张地图（模型包的 xm_maps，借用 EDF6 地图的天气与寻路网格）……',
+             'Installing the 5 X-Morph: Defense maps (the model pack\'s xm_maps, with EDF6 maps\' weather and path grids)...'))
     written_xm, skipped_xm = make_xm_maps.install(game)
     for path in written_xm:
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for name, why in skipped_xm:
-        print('  跳过', name, why)
-    print('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble；只复制，不转换）……')
+        print(tr('  跳过', '  Skipped'), name, why)
+    print(tr('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble；只复制，不转换）……',
+             'Installing the world map\'s satellite base textures (the model pack\'s worldmap_tex, NASA Blue Marble; copied as they are)...'))
     written_wm, skipped_wm = worldmap_pack.install(game)
     for path in written_wm:
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for name, why in skipped_wm:
-        print('  跳过', name, why)
+        print(tr('  跳过', '  Skipped'), name, why)
     # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
     # after the weapons' install, a map whose conversion failed) take their missions out of the pack, rebuilt here.
     left_out41 = {**dict(skipped41), **dict(skipped_maps)}
     if campaign is not None and root41 and left_out41.keys() != skip41.keys():
-        print('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……')
+        print(tr('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……',
+                 '  Not every 4.1 map or enemy was installed: regenerating the 4.1 story pack without the missions that use them...'))
         campaign = build_packs(game, want_campaign, root41, left_out41)
-    print(f'转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从{edf41src.describe(root41)}转换，'
-          '语音约 1.6 GB，已转换且未变的跳过）……' if root41 else f'{edf41src.describe(root41)}：跳过 4.1 的音效和语音。')
+    print((tr(f'转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从{edf41src.describe(root41)}转换，'
+              '语音约 1.6 GB，已转换且未变的跳过）……',
+              f'Converting EDF4.1\'s weapon sounds, voices and subtitles (the 4.1 weapons and mission radio need them; from '
+              f'{edf41src.describe(root41)}; about 1.6 GB of voices; converted and unchanged ones skipped)...'))
+          if root41 else tr(f'{edf41src.describe(root41)}：跳过 4.1 的音效和语音。',
+                            f'{edf41src.describe(root41)}: skipping the 4.1 sounds and voices.'))
     written_sound, skipped_sound = edf41_sounds.install(game, root41)
     for path in written_sound:
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for group, why in skipped_sound:
-        print('  跳过', group, why)
-    print(f'转换 EDF4.1 的本部（出击界面）背景（只在 4.1 的三个任务包显示；从{edf41src.describe(root41)}转换）……' if root41
-          else f'{edf41src.describe(root41)}：跳过 4.1 的本部背景。')
+        print(tr('  跳过', '  Skipped'), group, why)
+    print((tr(f'转换 EDF4.1 的本部（出击界面）背景（只在 4.1 的三个任务包显示；从{edf41src.describe(root41)}转换）……',
+              f'Converting EDF4.1\'s HQ (sortie screen) background (shown in the three 4.1 packs only; from '
+              f'{edf41src.describe(root41)})...'))
+          if root41 else tr(f'{edf41src.describe(root41)}：跳过 4.1 的本部背景。',
+                            f'{edf41src.describe(root41)}: skipping the 4.1 HQ background.'))
     written_bg, skipped_bg = edf41_menu_bg.install(game, root41)
     for path in written_bg:
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for why in skipped_bg:
-        print('  跳过 4.1 本部背景', why)
+        print(tr('  跳过 4.1 本部背景', '  Skipped the 4.1 HQ background'), why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
     stock_optics = {rel: data for rel, data in make_optics.build_stock_redirects(game).items()
                     if rel.upper() not in {p.upper() for p in turret[0]}}
     for path in make_optics.install_stock_redirects(game, stock_optics):
-        print('写入', path)
+        print(tr('写入', 'Writing'), path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
     # After the plugin's ini (the presets are the player's) and after every writer of V505_TANK_MISSION (AutoTurret's
@@ -754,20 +884,21 @@ def install(game: str, campaign_requested: bool = False) -> None:
     write_menu_preview(game)
     generator = install_generator(game, generator_source())
     if generator:
-        print('写入', generator, '（游戏内战前配置菜单保存后在后台用它生成新文件）')
+        print(tr('写入', 'Writing'), generator, tr('（游戏内战前配置菜单保存后在后台用它生成新文件）',
+                                                 '(the in-game loadout menu runs it in the background to make new files)'))
     if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', GENERATOR)):   # the launcher runs the generator
         write_launcher(game)
     if room is not None:   # the in-game menu's screen: HUiRoom's and HUiHQMain's layouts (never LYT_MAINFRAME: EDF6Coop's)
         write_room_layouts(game, room)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignContent and TestRangeContent there
         for path in make_edf5_campaign.install(game, campaign):
-            print('写入', path)
+            print(tr('写入', 'Writing'), path)
         print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
-            print('  跳过', group, path, why)
+            print(tr('  跳过', '  Skipped'), group, path, why)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
-            print('写入', path)
+            print(tr('写入', 'Writing'), path)
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
@@ -779,15 +910,22 @@ def install(game: str, campaign_requested: bool = False) -> None:
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
-    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包：测试场一关只有靶子、没有敌人，之后是几关对战预制关；联机时大家要有同样的关卡和物体）……')
+    print(tr('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包：测试场一关只有靶子、没有敌人，之后是几关对战预制关；联机时大家要有同样的关卡和物体）……',
+             'Writing the test range missions (the "EDF6VehicleCrew test range" pack: the range itself with targets and no '
+             'enemies, then a few preset versus missions; everyone in an online room needs the same missions and objects)...'))
     if make_edf5_campaign.range_installed(game):
         for line in gen.install(game, gen.target_range(gen.Plan())):
             print('  ', line)
     else:   # build_packs refused it (said why above): the mode table and the range as they were
-        print('！ 测试场任务包这次没有注册（原因见上），测试场保持原样；补齐上面缺的资源后再运行安装器。')
-    print('\n安装完成。启动游戏即可。')
-    print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
-    print('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。')
+        print(tr('！ 测试场任务包这次没有注册（原因见上），测试场保持原样；补齐上面缺的资源后再运行安装器。',
+                 '! The test range\'s pack was not registered this time (see why above) and the range stays as it was; '
+                 'run the installer again once the missing resources above are there.'))
+    print(tr('\n安装完成。启动游戏即可。', '\nInstall complete. Start the game.'))
+    print(tr('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。',
+             'For online play also update the matching EDF Coop: All Forces rooms are open only to players with compatible mods.'))
+    print(tr('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。',
+             'The models, stores, sights and test range were verified and installed; to update, run the installer, do not '
+             'replace only the DLLs.'))
 
 
 def build_room_layouts(game: str) -> dict[str, bytes] | None:
@@ -799,7 +937,9 @@ def build_room_layouts(game: str) -> dict[str, bytes] | None:
         import room_layout
         return room_layout.build(game)
     except Exception as e:   # never stops the install: said, as write_menu_preview
-        print(f'！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：{type(e).__name__}: {e}')
+        print(tr('！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：',
+                 '! The in-game loadout menu\'s screen layout was not generated (the room / HQ will not show the menu; '
+                 'nothing else is affected): ') + f'{type(e).__name__}: {e}')
         return None
 
 
@@ -811,12 +951,15 @@ def write_room_layouts(game: str, room: dict[str, bytes]) -> bool:
         import room_layout
         written, skipped = room_layout.install(game, room)
     except Exception as e:   # never stops the install: said, as write_menu_preview
-        print(f'！ 游戏内战前配置菜单的画面布局没有写入（房间 / HQ 里不显示这个菜单，其它不受影响）：{type(e).__name__}: {e}')
+        print(tr('！ 游戏内战前配置菜单的画面布局没有写入（房间 / HQ 里不显示这个菜单，其它不受影响）：',
+                 '! The in-game loadout menu\'s screen layout was not written (the room / HQ will not show the menu; '
+                 'nothing else is affected): ') + f'{type(e).__name__}: {e}')
         return False
     for path in written:
-        print('写入', path, '（游戏内战前配置菜单的画面）')
+        print(tr('写入', 'Writing'), path, tr('（游戏内战前配置菜单的画面）', '(the in-game loadout menu\'s screen)'))
     for path in skipped:
-        print('跳过（别的 mod 的布局，保持原样；这个画面里不显示游戏内战前配置菜单）', path)
+        print(tr('跳过（别的 mod 的布局，保持原样；这个画面里不显示游戏内战前配置菜单）',
+                 'Skipped (another mod\'s layout, left as it is; this screen will not show the in-game loadout menu)'), path)
     return True
 
 
@@ -830,12 +973,14 @@ def uninstall_stock_stores(game: str) -> None:
         try:
             install_autoturret(game, at_build.build_files(), False)
         except SystemExit as e:   # a file of its changed by someone else since: it refuses, and the vehicle stays
-            print('！ 没能重写 EDF6AutoTurret 的防空车请求：', e)
+            print(tr('！ 没能重写 EDF6AutoTurret 的防空车请求：', '! Could not rewrite EDF6AutoTurret\'s flak requests:'), e)
     deleted, kept = make_stock_stores.remove(game)
     for path in deleted:
-        print('删除（原版载具的挂载要插件才能用，随插件一起删）', path)
+        print(tr('删除（原版载具的挂载要插件才能用，随插件一起删）',
+                 'Deleting (the stock vehicles\' stores need the plugin, they go with it)'), path)
     for path in kept:
-        print('保留（之后被别的工具改过，或别的工具的请求还在用它）', path)
+        print(tr('保留（之后被别的工具改过，或别的工具的请求还在用它）',
+                 'Kept (changed by another tool since, or another tool\'s request still uses it)'), path)
 
 
 def uninstall(game: str) -> None:
@@ -874,28 +1019,41 @@ def uninstall(game: str) -> None:
     import buildcache
     import rootcpk
     rootcpk.use(game)
-    print('卸载会删掉插件（EDF6VehicleCrew、EDF6AutoTurret）。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
-    print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
-    choice = ask('输入 1 = 插件和呼叫武器、生成的模型、AutoTurret 的车辆数据一起删；'
-                 '输入 2 = 只删插件（武器、生成的模型和车辆数据留着，照原版 KM6 呼叫、炮照原版开火；'
-                 '原版载具的额外挂载要插件才能用，照样删掉）；其它 = 取消：')
+    print(tr('卸载会删掉插件（EDF6VehicleCrew、EDF6AutoTurret）。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，',
+             'Uninstalling deletes the plugins (EDF6VehicleCrew, EDF6AutoTurret). The call weapons can go too: their rows in '
+             'the weapon table become "uninstalled" placeholders'))
+    print(tr('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。',
+             'that work like the stock KM6 bomber call (the player jet requests like the stock N9 Eros), keeping the row '
+             'numbers, so a save with one equipped does not crash.'))
+    choice = ask(tr('输入 1 = 插件和呼叫武器、生成的模型、AutoTurret 的车辆数据一起删；'
+                    '输入 2 = 只删插件（武器、生成的模型和车辆数据留着，照原版 KM6 呼叫、炮照原版开火；'
+                    '原版载具的额外挂载要插件才能用，照样删掉）；其它 = 取消：',
+                    'Enter 1 = delete the plugins with the call weapons, the generated models and AutoTurret\'s vehicle data; '
+                    '2 = delete only the plugins (the weapons, generated models and vehicle data stay, calling like the stock '
+                    'KM6 and the guns firing as stock; the stock vehicles\' extra stores need the plugin and go anyway); '
+                    'anything else = cancel: '))
     if choice not in ('1', '2'):
-        print('已取消。')
+        print(tr('已取消。', 'Cancelled.'))
         return
     import make_edf5_campaign
     if make_edf5_campaign.removal_blocked(game):
-        print('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。')
+        print(tr('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。',
+                 'Uninstall cancelled: the EDF5 campaign\'s mode table (CONFIG.SGO) or an older mission list was changed by '
+                 'another tool and cannot be safely undone; the mission files and plugins are kept so saves still load.'))
         return
     if choice == '2':
         import call_weapons
         rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
         if rows > call_weapons.NATIVE_WEAPONS:
-            print(f'已取消：武器表有 {rows} 行，超过游戏自身能记录的 {call_weapons.NATIVE_WEAPONS} 把武器，只有插件在时才安全；'
-                  '只删插件会让游戏写坏内存。请选 1（删掉超出的行）。')
+            print(tr(f'已取消：武器表有 {rows} 行，超过游戏自身能记录的 {call_weapons.NATIVE_WEAPONS} 把武器，只有插件在时才安全；'
+                     '只删插件会让游戏写坏内存。请选 1（删掉超出的行）。',
+                     f'Cancelled: the weapon table has {rows} rows, more than the {call_weapons.NATIVE_WEAPONS} weapons the game '
+                     'itself keeps, safe only with the plugin; deleting only the plugins would make the game corrupt its '
+                     'memory. Choose 1 (deletes the extra rows).'))
             return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
-            print('已取消，没有删除任何文件。')
+            print(tr('已取消，没有删除任何文件。', 'Cancelled; nothing was deleted.'))
             return
         # First detach stock paths, preserving other writers' fields; consumers keep shared optic models.
         make_optics.remove(game)
@@ -906,42 +1064,44 @@ def uninstall(game: str) -> None:
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
-                print('删除', path)
+                print(tr('删除', 'Deleting'), path)
             for path in kept:
-                print('保留（之后被别的工具改过）', path)
+                print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     if choice == '2':   # the stock vehicles' stores need the plugin to fire: they go with it (with 1 they went above)
         uninstall_stock_stores(game)
     if gen.uninstall(game, unregister=False):   # its pack goes with the others just below
-        print('删除测试场关卡')
+        print(tr('删除测试场关卡', 'Deleting the test range missions'))
     # with 2 too: without the plugin the packs would stay listed as content the player does not own
     import make_edf5_campaign
     if make_edf5_campaign.installed(game):
-        print('任务包（测试场、EDF5 战役）：模式表、文本表还原成安装前的样子，删除各任务包的任务列表'
-              '（存档 DEFP_TR00.MST、DEFP_E5*.MST 留着，重新安装后照旧显示）。')
+        print(tr('任务包（测试场、EDF5 战役）：模式表、文本表还原成安装前的样子，删除各任务包的任务列表'
+                 '（存档 DEFP_TR00.MST、DEFP_E5*.MST 留着，重新安装后照旧显示）。',
+                 'Mission packs (test range, EDF5 campaign): the mode and text tables back as they were before the install, '
+                 'each pack\'s mission list deleted (the saves DEFP_TR00.MST, DEFP_E5*.MST stay and show again after a reinstall).'))
         done, kept = make_edf5_campaign.remove(game)
         for path in done:
-            print('还原', path)
+            print(tr('还原', 'Restoring'), path)
         for path in kept:
-            print('保留（之后被别的工具改过）', path)
+            print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     for path in make_bigmap.remove(game)[0]:
-        print('删除', path)
+        print(tr('删除', 'Deleting'), path)
     if choice == '1':
         for path in make_optics.remove(game)[0]:
-            print('还原/删除瞄具资源', path)
+            print(tr('还原/删除瞄具资源', 'Restoring / deleting sight files'), path)
     cache = os.path.join(game, 'Mods', buildcache.MANIFEST)
     if choice == '1' and os.path.isfile(cache):   # what it describes is gone; with 2 the models stay and it holds
         os.remove(cache)
-        print('删除', cache)
+        print(tr('删除', 'Deleting'), cache)
     remove_generator(game, lock=False)   # the lock: held by this flow, removed after it (write_game)
     remove_launcher(game)   # it runs the generator just removed
     import room_layout   # with 1 and 2: without the plugin the menu's panel would only cover the screen
     deleted, kept = room_layout.remove(game)
     for path in deleted:
-        print('删除', path)
+        print(tr('删除', 'Deleting'), path)
     for path in kept:
-        print('保留（之后被别的工具改过）', path)
+        print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     remove_plugin(game)
-    print('\n卸载完成。')
+    print(tr('\n卸载完成。', '\nUninstall complete.'))
 
 
 def _text(path: str) -> str | None:
@@ -961,10 +1121,14 @@ def check_range(game: str) -> bool:
                for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
                if not modfiles.read(os.path.join(gen.mission_dir(game, mission), name))]
     if not make_edf5_campaign.range_installed(game):
-        missing.append('任务包（模式表里没有测试场）')
+        missing.append(tr('任务包（模式表里没有测试场）', 'the mission pack (no test range in the mode table)'))
     legacy = [m for m in gen.LEGACY_SLOTS if gen.ours(game, m)]
-    print('\n测试场关卡：' + (f'缺失或为空：{", ".join(missing)}' if missing else '文件齐全，任务包已注册')
-          + (f'；旧版测试场还占着剧情关 {", ".join(legacy)}（重新安装会还原）' if legacy else ''))
+    print(tr('\n测试场关卡：', '\nTest range missions: ')
+          + (tr(f'缺失或为空：{", ".join(missing)}', f'missing or empty: {", ".join(missing)}') if missing
+             else tr('文件齐全，任务包已注册', 'all files there, the pack registered'))
+          + (tr(f'；旧版测试场还占着剧情关 {", ".join(legacy)}（重新安装会还原）',
+                f'; an old test range still occupies the story missions {", ".join(legacy)} (a reinstall restores them)')
+             if legacy else ''))
     return not missing and not legacy
 
 
@@ -984,26 +1148,32 @@ def check(game: str) -> bool:
         have = modfiles.read(os.path.join(game, 'Mods', 'Plugins', name + '.dll'))
         same = have == shipped[name][0]
         ok &= same
-        print(f'{name}.dll：' + ('与本安装包相同' if same else '缺失' if have is None else
-                                 '与本安装包不同（旧版本或别的构建：退出游戏后运行安装器选 1 更新）'))
+        print(f'{name}.dll: ' + (tr('与本安装包相同', 'the same as this package\'s') if same else tr('缺失', 'missing')
+                                 if have is None else
+                                 tr('与本安装包不同（旧版本或别的构建：退出游戏后运行安装器选 1 更新）',
+                                    'differs from this package\'s (an older version or another build: close the game and '
+                                    'run the installer, 1, to update)')))
         text = _text(os.path.join(game, 'Mods', 'Plugins', name + '.ini'))
         lacking = merge_ini(text, shipped[name][1].decode('utf-8'), section)[1] if text is not None else []
         ok &= text is not None and not lacking
-        print(f'{name}.ini：' + ('缺失' if text is None else f'缺少新版本的设置 {", ".join(lacking)}（选 1 会补上）'
-                                 if lacking else '完整'))
-    print('\nEDF6AutoTurret 车辆数据（Mods/.edf6at_data.json）：')
+        print(f'{name}.ini: ' + (tr('缺失', 'missing') if text is None else
+                                 tr(f'缺少新版本的设置 {", ".join(lacking)}（选 1 会补上）',
+                                    f'lacks this version\'s settings {", ".join(lacking)} (1 adds them)')
+                                 if lacking else tr('完整', 'complete')))
+    print(tr('\nEDF6AutoTurret 车辆数据（Mods/.edf6at_data.json）：', '\nEDF6AutoTurret vehicle data (Mods/.edf6at_data.json):'))
     ok &= at_build.check(os.path.join(game, 'Mods'))
-    print('\n呼叫武器：')
+    print(tr('\n呼叫武器：', '\nCall weapons:'))
     ok &= call_weapons.check(game)
     led = ledger.Ledger(game)
     gone = [k for k in sorted(led.files) if not os.path.isfile(led.disk(k))]
     changed = [k for k in sorted(led.files) if led.changed(k)]
     ok &= bool(led.files) and not gone and not changed
-    print(f'\n生成的文件（Mods/{ledger.MANIFEST}）：{len(led.files)} 个，缺失 {len(gone)}，被改过 {len(changed)}')
+    print(tr(f'\n生成的文件（Mods/{ledger.MANIFEST}）：{len(led.files)} 个，缺失 {len(gone)}，被改过 {len(changed)}',
+             f'\nGenerated files (Mods/{ledger.MANIFEST}): {len(led.files)}, {len(gone)} missing, {len(changed)} changed'))
     for k in gone:
-        print('  缺失', k)
+        print(tr('  缺失', '  Missing'), k)
     for k in changed:
-        print('  被改过', k)
+        print(tr('  被改过', '  Changed'), k)
     ok &= check_range(game)
     import edf5_dlc   # what of EDF5 Mission Pack 1's content is in (its files are in the ledger count above)
     print()
@@ -1014,13 +1184,20 @@ def check(game: str) -> bool:
     ok &= make_edf5_campaign.check(game)
     ok &= check_edf41_source(game)
     if os.path.isfile(os.path.join(game, 'Mods', 'Plugins', vanilla_launch.STATE)):   # the game may be running vanilla now
-        print(f'\n原版启动：{vanilla_launch.INI} 现在是原版设置（不加载 MOD）；游戏退出后会自动恢复，'
-              '没恢复的话下次原版启动或运行安装器选 1 时恢复。')
+        print(tr(f'\n原版启动：{vanilla_launch.INI} 现在是原版设置（不加载 MOD）；游戏退出后会自动恢复，'
+                 '没恢复的话下次原版启动或运行安装器选 1 时恢复。',
+                 f'\nVanilla launch: {vanilla_launch.INI} is set to vanilla now (no mods loaded); it is put back when the '
+                 'game exits, or else at the next vanilla launch or installer run (1).'))
     vanilla_slots = [s for s in vanilla_launch.slots() if vanilla_launch._mode(s) != 'mod']
     if vanilla_slots:
-        print(f'\n原版启动：{len(vanilla_slots)} 个存档槽现在是原版存档（MOD 存档以 .edf6mod 在同一槽里）；'
-              '游戏退出后下次原版启动或运行安装器选 1 时换回。')
-    print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
+        print(tr(f'\n原版启动：{len(vanilla_slots)} 个存档槽现在是原版存档（MOD 存档以 .edf6mod 在同一槽里）；'
+                 '游戏退出后下次原版启动或运行安装器选 1 时换回。',
+                 f'\nVanilla launch: {len(vanilla_slots)} save slots hold vanilla saves now (the mod saves are beside them '
+                 'as .edf6mod); switched back at the next vanilla launch or installer run (1) after the game exits.'))
+    print(tr('\n检查结果：', '\nResult: ') + (tr('全部是本安装包的，完整。', 'everything is this package\'s, complete.') if ok else
+                                              tr('有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。',
+                                                 'something is missing or differs (see above); close the game and run '
+                                                 'the installer, 1, to repair it.')))
     return ok
 
 
@@ -1030,15 +1207,16 @@ def check_edf41_source(game: str) -> bool:
     sounds would be left out."""
     root41 = find_edf41(game)
     print()
-    print(f'EDF4.1 来源：{edf41src.describe(root41)}')
+    print(tr('EDF4.1 来源：', 'EDF4.1 source: ') + edf41src.describe(root41))
     if not edf41src.is_pack(root41):
         return True
     faults = edf41src.check(root41)
-    print(f'  素材包：{len(faults)} 个问题' if faults else '  素材包：清单里的文件齐全，大小一致')
+    print(tr(f'  素材包：{len(faults)} 个问题', f'  Asset pack: {len(faults)} problems') if faults else
+          tr('  素材包：清单里的文件齐全，大小一致', '  Asset pack: every file of its list there, sizes right'))
     for why in faults[:20]:
         print('   ', why)
     if len(faults) > 20:
-        print(f'    ……另有 {len(faults) - 20} 个')
+        print(tr(f'    ……另有 {len(faults) - 20} 个', f'    ... and {len(faults) - 20} more'))
     return not faults
 
 
@@ -1064,9 +1242,9 @@ def download_latest() -> int:
     hub = testhub.hub_for_player(ask)
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
     exe = testhub.download_latest(hub, here, build_name())
-    if exe and ask('输入 y 现在打开新版安装器；其它 = 不打开：').lower() == 'y':
+    if exe and ask(tr('输入 y 现在打开新版安装器；其它 = 不打开：', 'Enter y to open the new installer now; anything else = do not: ')).lower() == 'y':
         os.startfile(exe)  # type: ignore[attr-defined]
-        print('新版安装器已在另一个窗口打开，这个窗口可以关掉了。')
+        print(tr('新版安装器已在另一个窗口打开，这个窗口可以关掉了。', 'The new installer is open in another window; you can close this one.'))
     return 0
 
 
@@ -1083,23 +1261,32 @@ def send_logs() -> int:
 def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
-    print('EDF5 战役默认开启：普通安装 / 更新会加上 EDF5 本篇、DLC1、DLC2 三个独立任务包（离线模式的「任务包」里选）；手动停用后保留停用选择。')
-    print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；资源装不全的任务不会安装（安装时说明原因）。')
-    print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
-    choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
+    print(tr('EDF5 战役默认开启：普通安装 / 更新会加上 EDF5 本篇、DLC1、DLC2 三个独立任务包（离线模式的「任务包」里选）；手动停用后保留停用选择。',
+             'The EDF5 campaign is on by default: an install / update adds the EDF5 main game, DLC1 and DLC2 as three mission '
+             'packs (picked under "mission packs" offline); once turned off by hand it stays off.'))
+    print(tr('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；资源装不全的任务不会安装（安装时说明原因）。',
+             'The original BVM scripts are not verified mission by mission, so not every mission is sure to play; a mission '
+             'whose resources are incomplete is not installed (the install says why).'))
+    print(tr('当前状态：', 'Now: ') + (tr('已启用', 'on') if make_edf5_campaign.enabled(game) else tr('未启用', 'off')))
+    choice = ask(tr('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：',
+                    'Enter 1 to turn on / update the experimental campaign (the plugins are updated too), 2 to turn it off '
+                    '(the plugins stay), anything else = cancel: '))
     if choice == '1':
         install(game, campaign_requested=True)
         return 0 if make_edf5_campaign.enabled(game) and make_edf5_campaign.check(game) else 1
     if choice == '2':   # the test range's pack stays: the packs are rebuilt without the campaign's
         try:
             for path in make_edf5_campaign.disable(game):
-                print('写入或还原', path)
+                print(tr('写入或还原', 'Writing or restoring'), path)
         except make_edf5_campaign.Refused as e:
-            print('未能停用：', e)
+            print(tr('未能停用：', 'Could not turn it off:'), e)
         if make_edf5_campaign.enabled(game):
-            print('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。')
+            print(tr('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。',
+                     'Could not turn it off: the mode table or an older mission list was changed by another tool; the '
+                     'mission files and plugins it depends on are kept.'))
             return 1
-        print('EDF5 战役已停用，后续普通更新不会重新启用（测试场任务包保留）。')
+        print(tr('EDF5 战役已停用，后续普通更新不会重新启用（测试场任务包保留）。',
+                 'The EDF5 campaign is off; later updates will not turn it back on (the test range\'s pack stays).'))
     return 0
 
 
@@ -1118,16 +1305,20 @@ def write_loadout_files(game: str) -> bool:
         text = (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
         files = support_loadout.build(game, text, pending=support_loadout.read_pending(game), errors=errors)
     except (OSError, ValueError, KeyError, AssertionError) as e:
-        print(f'！ 支援预设的文件没有生成（带颜色的士兵、配了挂载的载具将按原版出动，插件日志会说明）：{e}')
+        print(tr(f'！ 支援预设的文件没有生成（带颜色的士兵、配了挂载的载具将按原版出动，插件日志会说明）：{e}',
+                 f'! The support presets\' files were not generated (coloured soldiers and loaded vehicles go out stock; '
+                 f'the plugin log says so): {e}'))
         return False
-    print('生成支援预设用的文件（带颜色的士兵模板、配了挂载的坦克 / 战机；只读 Root.cpk）……')
+    print(tr('生成支援预设用的文件（带颜色的士兵模板、配了挂载的坦克 / 战机；只读 Root.cpk）……',
+             'Generating the support presets\' files (coloured soldier templates, tanks / jets with stores; reading Root.cpk only)...'))
     for name, why in errors.items():
-        print(f'！ {name} 没有生成（留在待生成清单里，插件按原版出动）：{why}')
+        print(tr(f'！ {name} 没有生成（留在待生成清单里，插件按原版出动）：{why}',
+                 f'! {name} not generated (left on the pending list; the plugin sends it out stock): {why}'))
     for written in support_loadout.install(game, files, keep=['OBJECT/' + name for name in errors]):
-        print('写入', written)
+        print(tr('写入', 'Writing'), written)
     cleanup_variants(game)   # before the pending list is cleared: what it names is still wanted this time
     for name in support_loadout.clear_pending(game, files):
-        print('已生成联机时房主预设需要、本机缺少的文件', name)
+        print(tr('已生成联机时房主预设需要、本机缺少的文件', 'Generated a file an online host\'s presets needed and this machine lacked:'), name)
     return not errors
 
 
@@ -1145,9 +1336,9 @@ def cleanup_variants(game: str) -> int:
         return 0
     deleted, kept = support_loadout.remove_stale(game, text, support_loadout.read_pending(game))
     for path in deleted:
-        print('删除（不再被 ini / 待生成清单引用的生成文件）', path)
+        print(tr('删除（不再被 ini / 待生成清单引用的生成文件）', 'Deleting (a generated file neither the ini nor the pending list names)'), path)
     for path in kept:
-        print('保留（之后被别的工具改过）', path)
+        print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     return len(deleted)
 
 
@@ -1161,7 +1352,9 @@ def offer_variant_cleanup(game: str) -> int:
     stale = support_loadout.stale(game, text, support_loadout.read_pending(game))
     if not stale:
         return 0
-    if ask(f'有 {len(stale)} 个生成的士兵 / 载具文件已不被 ini 或待生成清单引用（房间预同步等留下的）。输入 y 删除；其它 = 保留：').lower() != 'y':
+    if ask(tr(f'有 {len(stale)} 个生成的士兵 / 载具文件已不被 ini 或待生成清单引用（房间预同步等留下的）。输入 y 删除；其它 = 保留：',
+              f'{len(stale)} generated soldier / vehicle files are named by neither the ini nor the pending list any more '
+              '(left by a room\'s pre-sync and the like). Enter y to delete them; anything else = keep: ')).lower() != 'y':
         return 0
     return cleanup_variants(game)
 
@@ -1174,10 +1367,12 @@ def write_menu_preview(game: str) -> bool:
     try:
         files = menu_preview.build(rootcpk.Game(game), game)
     except Exception as e:   # never stops the install: said, and the plugin logs the missing file
-        print(f'！ 房间 3D 预览用的游骑兵菜单模型没有生成（预览将显示玩家的游骑兵）：{type(e).__name__}: {e}')
+        print(tr('！ 房间 3D 预览用的游骑兵菜单模型没有生成（预览将显示玩家的游骑兵）：',
+                 '! The Ranger menu model of the room\'s 3D preview was not generated (the preview shows the player\'s Ranger): ')
+              + f'{type(e).__name__}: {e}')
         return False
     for written in menu_preview.install(game, files):
-        print('写入', written)
+        print(tr('写入', 'Writing'), written)
     return True
 
 
@@ -1191,7 +1386,8 @@ def manage_support(game: str, loadout_only: bool = False) -> int:
     import support_loadout
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
     if not os.path.isfile(path):
-        print('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。')
+        print(tr('还没有安装插件（找不到 EDF6VehicleCrew.ini），请先选 1 安装。',
+                 'The plugin is not installed yet (no EDF6VehicleCrew.ini); install it first (1).'))
         return 1
     with open(path, 'rb') as f:
         raw = f.read()
@@ -1199,7 +1395,7 @@ def manage_support(game: str, loadout_only: bool = False) -> int:
     text = (raw[3:] if bom else raw).decode('utf-8', errors='replace')
     edited = (support_loadout.edit if loadout_only else support_config.edit)(text, ask)
     if edited == text:
-        print('没有改动。')
+        print(tr('没有改动。', 'No changes.'))
         if loadout_only and not modfiles.game_running():
             with wait_generate_lock(game) as held:
                 if held:
@@ -1211,12 +1407,15 @@ def manage_support(game: str, loadout_only: bool = False) -> int:
         if not held:
             return 1
         modfiles.atomic_write(path, (b'\xef\xbb\xbf' if bom else b'') + edited.encode('utf-8'))
-        print(f'已保存 {path}：下一次在地图呼叫支援时生效。')
+        print(tr(f'已保存 {path}：下一次在地图呼叫支援时生效。', f'Saved {path}: takes effect at the next support call on the map.'))
         # The presets' colours and the AP tank need generated files, read at a mission's start: written only with the game
         # closed (the installer never writes game files under a running game).
         if modfiles.game_running():
-            print('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
-                  '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。')
+            print(tr('游戏正在运行：带颜色的士兵模板 / 配了挂载的载具文件没有生成。退出游戏后再进菜单 7 保存一次（或选 1 安装）即可；'
+                     '在那之前这些士兵 / 坦克按原版出动（兵种、编组照常生效）。',
+                     'The game is running: the coloured soldier templates / loaded vehicle files were not generated. Close '
+                     'the game and save once more in menu 7 (or install, 1); until then those soldiers / tanks go out stock '
+                     '(classes and squads work as set).'))
         else:
             write_loadout_files(game)   # ...and the files no longer named go (cleanup_variants)
     return 0
@@ -1248,7 +1447,8 @@ def install_generator(game: str, exe: str | None) -> str | None:
     try:
         modfiles.atomic_write(dst, data)
     except OSError as e:   # the old copy still running (started by the game just closed): kept, said, the rest installed
-        print(f'！ 没能更新 {dst}（{e}）：它可能还在运行，稍后重新安装即可')
+        print(tr(f'！ 没能更新 {dst}（{e}）：它可能还在运行，稍后重新安装即可',
+                 f'! Could not update {dst} ({e}): it may still be running; install again later'))
         return None
     return dst
 
@@ -1259,14 +1459,15 @@ def write_launcher(game: str) -> None:
     data = vanilla_launch.launcher_text(GENERATOR)
     if modfiles.read(path) != data:
         modfiles.atomic_write(path, data)
-        print('写入', path, '（双击以原版启动游戏：这一次不加载任何 MOD，游戏退出后自动恢复）')
+        print(tr('写入', 'Writing'), path, tr('（双击以原版启动游戏：这一次不加载任何 MOD，游戏退出后自动恢复）',
+                                            '(double-click to start the game vanilla: no mods this once, back to normal when it exits)'))
 
 
 def remove_launcher(game: str) -> None:
     path = os.path.join(game, vanilla_launch.LAUNCHER)
     if os.path.isfile(path):
         os.remove(path)
-        print('删除', path)
+        print(tr('删除', 'Deleting'), path)
 
 
 def remove_generator(game: str, lock: bool = True) -> None:
@@ -1279,18 +1480,24 @@ def remove_generator(game: str, lock: bool = True) -> None:
             continue
         try:
             os.remove(path)
-            print('删除', path)
+            print(tr('删除', 'Deleting'), path)
         except OSError as e:
-            print(f'！ 没能删除 {path}（{e}）：生成器可能还在运行，结束后手动删除即可')
+            print(tr(f'！ 没能删除 {path}（{e}）：生成器可能还在运行，结束后手动删除即可',
+                     f'! Could not delete {path} ({e}): the generator may still be running; delete it by hand once it ends'))
 
 
 def main(argv: list[str]) -> int:
-    print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
+    argv = take_lang_arg(argv)
+    print(tr(f'== {PLUGIN} 安装程序 {build_name()} ==\n', f'== {PLUGIN} installer {build_name()} ==\n'))
     mode = argv[0] if argv else ''
     if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign', 'support', 'loadout'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
-                   '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），8 战前配置（小队编组 / 每人兵种与颜色 / 坦克与战机挂载），'
-                   '回车退出：')
+        pick = ask(tr('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，'
+                      '7 配置地图支援（可呼叫单位 / 兵员武器 / 架数），8 战前配置（小队编组 / 每人兵种与颜色 / 坦克与战机挂载），'
+                      '回车退出：',
+                      'Enter 1 install / update, 2 uninstall, 3 download the newest test build, 4 send the logs to the '
+                      'developer, 5 check the install, 6 manage the experimental EDF5 campaign, 7 configure map support '
+                      '(callable units / crew weapons / aircraft counts), 8 pre-battle loadouts (squads / each soldier\'s class '
+                      'and colour / tank and jet stores), Enter to quit: '))
         mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign', '7': 'support',
                 '8': 'loadout'}.get(pick, '')
         if not mode:
@@ -1306,10 +1513,11 @@ def main(argv: list[str]) -> int:
         try:
             return download_latest() if mode == 'update' else send_logs()
         except testhub.HubError as e:
-            print(f'\n没有完成：{e}')
+            print(tr(f'\n没有完成：{e}', f'\nNot done: {e}'))
             return 1
     if modfiles.game_running():
-        print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
+        print(tr(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。',
+                 f'{PROCESS} is running. Close the game first, then run this program (it will not close the game for you).'))
         return 1
     game = pick_game()
     if not game:
@@ -1319,7 +1527,7 @@ def main(argv: list[str]) -> int:
     import gamelease   # run from source (a developer's session): wait for the game like every other test step
     with gamelease.lease(game, f'installer.py {mode}'):
         if modfiles.game_running():
-            print(f'{PROCESS} 正在运行（排队期间别的会话启动了它）。')
+            print(tr(f'{PROCESS} 正在运行（排队期间别的会话启动了它）。', f'{PROCESS} is running (another session started it while queued).'))
             return 1
         return write_game(mode, game)
 
@@ -1331,7 +1539,8 @@ def write_game(mode: str, game: str) -> int:
     holding 原版启动's lock: refused while one runs (it would be switching the same ini and saves)."""
     with vanilla_launch.exclusive() as free:
         if not free:
-            print('原版启动正在运行：先退出游戏、关掉原版启动的窗口，再运行安装器。')
+            print(tr('原版启动正在运行：先退出游戏、关掉原版启动的窗口，再运行安装器。',
+                     'A vanilla launch is running: close the game and the vanilla launch\'s window, then run the installer.'))
             return 1
         for said in vanilla_launch.restore_all(game):
             print(said)
@@ -1346,13 +1555,14 @@ def write_game(mode: str, game: str) -> int:
         with contextlib.suppress(OSError):
             if os.path.isfile(lock) and not os.path.isfile(os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.dll')):
                 os.remove(lock)
-                print('删除', lock)
+                print(tr('删除', 'Deleting'), lock)
     return 0
 
 
 def offer_error_report(text: str) -> None:
     """After an installer error: the error and the logs to the test site, if the player wants."""
-    if not getattr(sys, 'frozen', False) or ask('输入 y 把这个错误和日志发给开发者；其它 = 不发：').lower() != 'y':
+    if not getattr(sys, 'frozen', False) or ask(tr('输入 y 把这个错误和日志发给开发者；其它 = 不发：',
+                                                   'Enter y to send this error and the logs to the developer; anything else = do not: ')).lower() != 'y':
         return
     try:
         import testhub
@@ -1362,9 +1572,9 @@ def offer_error_report(text: str) -> None:
         if game:
             files.append(('logs.zip', testhub.collect(game, build_name())[0]))
         rid = testhub.post_report(hub, None, 'new', '安装器出错（自动回传）', build_name(), files)
-        print(f'已发送（#{rid}）。')
+        print(tr(f'已发送（#{rid}）。', f'Sent (#{rid}).'))
     except Exception as e:   # a courtesy: its failure must not hide the error above
-        print(f'发送失败：{e}')
+        print(tr(f'发送失败：{e}', f'Sending failed: {e}'))
 
 
 def check_package() -> int:
@@ -1456,16 +1666,19 @@ def run() -> int:
         code = main(sys.argv[1:])
     except SystemExit as e:  # the tools report refusals this way
         if e.code not in (None, 0):
-            print(f'\n未完成：{e.code}')
+            print(tr(f'\n未完成：{e.code}', f'\nNot finished: {e.code}'))
         code = 0 if e.code in (None, 0) else 1
     except Exception:
         traceback.print_exc()
-        print('\n出错了，上面是错误信息。武器表和武器说明要么全部写入、要么已恢复原样；'
-              '生成的模型每个文件要么是新的要么是旧的。问题解决后重新运行安装即可。')
+        print(tr('\n出错了，上面是错误信息。武器表和武器说明要么全部写入、要么已恢复原样；'
+                 '生成的模型每个文件要么是新的要么是旧的。问题解决后重新运行安装即可。',
+                 '\nSomething went wrong; the error is above. The weapon table and its texts are either all written or back '
+                 'as they were; each generated model file is either the new one or the old one. Once the problem is solved, '
+                 'run the install again.'))
         offer_error_report(traceback.format_exc())
         code = 1
     if getattr(sys, 'frozen', False):
-        ask('\n按回车关闭窗口……')
+        ask(tr('\n按回车关闭窗口……', '\nPress Enter to close this window...'))
     return code
 
 

@@ -22,6 +22,7 @@ import make_vulcan
 import vcobjects as vc
 import xm_units
 import mdb
+import model_workers
 import rmpa
 import rootcpk
 import sgo
@@ -120,7 +121,7 @@ class UndeployedXMorphTests(unittest.TestCase):
 
     def test_install_does_not_stop_and_writes_no_undeployed_unit(self):
         unit = min(self.xm)
-        asked, written = [], []
+        asked, written, made = [], [], []
 
         def mission_setup(game, name):   # an undeployed unit's SGO cannot be made (no model folder), every other one can
             asked.append(name)
@@ -133,12 +134,15 @@ class UndeployedXMorphTests(unittest.TestCase):
             with patch.object(gen, 'Game', return_value=SimpleNamespace(root=root)), \
                  patch.dict(gen.PVP_PLANS, clear=True), \
                  patch.object(gen, 'has_mission_setup', side_effect=mission_setup), \
+                 patch.object(gen, '_make_ground_sgos', side_effect=lambda game, names: made.extend(names) or {}), \
                  patch.object(gen, '_range_files', return_value=('script', b'points', [], False)), \
                  patch.object(gen, '_write_derived', side_effect=lambda r, g, wanted, uses=(): written.extend(wanted)), \
                  patch.object(gen, '_write_mission'), \
                  patch.object(gen, 'register_pack', return_value=[]):
                 said = gen.install(root, plan)
         self.assertFalse(set(asked) & self.xm)
+        self.assertFalse(set(made) & self.xm)   # nor made side by side before the checks (gen._make_ground_sgos)
+        self.assertIn('edf6tr_vulcan_mission', made)
         self.assertFalse(set(written) & self.xm)
         self.assertIn('edf6tr_vulcan_mission', written)
         self.assertEqual([line for line in said if '模型包' in line],
@@ -271,7 +275,9 @@ class NativeRangeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             plan = gen.Plan(vehicles={name: 1 for name in wanted})
             plan.waves.enabled = False
+            # its SGOs in this process, of self.game (made side by side, each process would build its vehicle again)
             with patch.object(gen, 'Game', return_value=self.game), \
+                 patch.object(model_workers, 'group_workers', return_value=1), \
                  patch.object(gen, 'register_pack', return_value=[]), \
                  patch.object(gen, 'placeable_derived', return_value=wanted), \
                  patch.object(make_vulcan, 'build', return_value=self.files['edf6tr_vulcan_mission']), \
