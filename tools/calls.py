@@ -331,7 +331,7 @@ CALLS: tuple[Call, ...] = (
          sortie='gunshipLap', then='EDF6VC_CALL_SORTIE_DIVE', then_after=25),
     # Appended 2026-11-10 (test site #37, the player JOY; the maintainer: 「37 做」): the Andryusha, the Katyusha's truck
     # firing incendiary cluster rockets with an impact or a proximity fuse (tools/make_katyusha.py, src/andryusha.cpp).
-    Call('EDF6VC_CALL_ANDRYUSHA', 0, 'andryusha', False, 0, 8000, 1.2, 'vehicle', vehicle='EDF6VC_ANDRYUSHA',
+    Call('EDF6VC_CALL_ANDRYUSHA', 0, 'andryusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_ANDRYUSHA',
          ground='andryusha'),
 )
 
