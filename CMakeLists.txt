@@ -853,6 +853,10 @@ target_link_libraries(store_recoil_test PRIVATE edf6common)
 target_include_directories(store_recoil_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(store_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME store_recoil COMMAND store_recoil_test)
+# What stores and their pylons weigh, a jet's and a stock helicopter's (src/store_burden.h, test hub #39).
+add_executable(store_burden_test tests/store_burden_test.cpp)
+target_compile_options(store_burden_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME store_burden COMMAND store_burden_test)
 
 add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
 target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)

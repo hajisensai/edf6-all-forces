@@ -254,7 +254,11 @@ class Shell:
 class Store:
     """What a jet carries besides its guns (STORES): its weapon, its role for the plugin (src/stores.h StoreRole: air
     and ground missiles, bombs, rockets, a gun's rounds), and what one round adds to the jet: its mass and its drag (a
-    share of the clean jet's parasitic drag, with its pylon; 0 for the stock vehicles' rounds, nothing weighs them).
+    share of the clean jet's parasitic drag; 0 for the stock vehicles' rounds, nothing weighs them). What it hangs on
+    stays when its rounds are gone (test hub #39, the player: 「某些挂载投完以后应该只有挂架重量（如有的话）」): `per_pylon`
+    rounds a pylon (its rail, rack or pod) holds, each such pylon `pylon_mass` kg and `pylon_drag` of the clean jet's
+    drag, ceil(rounds / per_pylon) of them for a holder of `rounds` (src/stores.h StoreSpec, BurdenOf); per_pylon 0: no
+    pylon (a gun's rounds, a ship's cells).
     `names`: the weapon's name.<lang> rows (the stock HUD shows the game language's, weapon +0x1B0); a language not
     listed (and the cockpit) shows `name`."""
     name: str               # shown in the cockpit (and the weapon's name.* rows)
@@ -282,8 +286,15 @@ class Store:
     # Its own turret, turned apart from the vehicle's (Turret: src/seat_turret.cpp poses its bones), else None: it fires
     # along its holder's bone, which the seat's turret turns.
     turret: Turret | None = None
+    per_pylon: int = 0          # rounds one pylon (rail, rack, pod) holds; 0 none
+    pylon_mass: float = 0.0     # kg a pylon, loaded or spent
+    pylon_drag: float = 0.0     # a pylon's share of the clean jet's drag, loaded or spent
 
     def __post_init__(self) -> None:
+        if self.per_pylon < 0 or self.pylon_mass < 0.0 or self.pylon_drag < 0.0:
+            raise ValueError(f'{self.name}: a pylon weighs and drags nothing less than nothing')
+        if not self.per_pylon and (self.pylon_mass or self.pylon_drag):
+            raise ValueError(f'{self.name}: the pylon mass or drag needs its rounds a pylon (per_pylon)')
         if self.key not in (0, *FIRE_KEYS):
             raise ValueError(f'{self.name}: key {self.key} is none of 0, {FIRE_KEYS}')
         if self.auto and not self.key and not self.seat:
@@ -439,37 +450,43 @@ def _coax_store(tank: str, mount: CoaxMount) -> 'Store':
 
 STORES: dict[str, Store] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead. 3.02 m.
-    'AAM_S': Store('AIM-9X', 'air', 85.0, 0.006, Missile('AIM-9X', Look('bullet_rpg', 3.02), burn=5.0, top=850.0, accel=300.0,
-                   max_g=50.0, nav=4.0, life=12.0, damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
+    # Its rail (LAU-7 class, ~35 kg) one a pylon.
+    'AAM_S': Store('AIM-9X', 'air', 85.0, 0.004, Missile('AIM-9X', Look('bullet_rpg', 3.02), burn=5.0, top=850.0, accel=300.0,
+                   max_g=50.0, nav=4.0, life=12.0, damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0),
+                   per_pylon=1, pylon_mass=35.0, pylon_drag=0.002),
     # Medium-range air-to-air, active radar (AIM-120): a long burn, fast. 3.66 m.
-    'AAM_M': Store('AIM-120', 'air', 152.0, 0.010, Missile('AIM-120', Look('bullet_mediummissile01', 3.66), burn=8.0, top=1200.0,
+    'AAM_M': Store('AIM-120', 'air', 152.0, 0.007, Missile('AIM-120', Look('bullet_mediummissile01', 3.66), burn=8.0, top=1200.0,
                    accel=250.0, max_g=40.0, nav=4.0, life=16.0, damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35,
-                   lock_time=30.0)),
+                   lock_time=30.0), per_pylon=1, pylon_mass=45.0, pylon_drag=0.003),   # its LAU-127 rail, one a pylon
     # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile. 3.96 m.
-    'AAM_L': Store('AIM-54', 'air', 450.0, 0.025, Missile('AIM-54', Look('bullet_icbm01', 3.96), burn=20.0, top=1500.0, accel=150.0,
+    'AAM_L': Store('AIM-54', 'air', 450.0, 0.018, Missile('AIM-54', Look('bullet_icbm01', 3.96), burn=20.0, top=1500.0, accel=150.0,
                    max_g=25.0, nav=3.0, life=30.0, damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0,
-                   interval=90.0)),
+                   interval=90.0), per_pylon=1, pylon_mass=90.0, pylon_drag=0.007),   # its LAU-93 rail and pallet
     # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock. 2.49 m.
-    'AGM': Store('AGM-65', 'ground', 300.0, 0.020, Missile('AGM-65', Look('airtortoise_missile', 2.49), burn=3.5, top=320.0, accel=120.0,
+    'AGM': Store('AGM-65', 'ground', 300.0, 0.014, Missile('AGM-65', Look('airtortoise_missile', 2.49), burn=3.5, top=320.0, accel=120.0,
                  max_g=15.0, nav=3.0, life=15.0, damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0,
-                 interval=60.0)),
-    # Light air-to-ground (AGM-114 Hellfire): what a drone carries. 1.63 m.
-    'AGM_L': Store('AGM-114', 'ground', 50.0, 0.004, Missile('AGM-114', Look('bullet_icbm01', 1.63), burn=3.0, top=425.0,
+                 interval=60.0), per_pylon=1, pylon_mass=60.0, pylon_drag=0.006),   # its LAU-117 rail, one a pylon
+    # Light air-to-ground (AGM-114 Hellfire): what a drone carries, four to a launcher (M299, ~66 kg). 1.63 m.
+    'AGM_L': Store('AGM-114', 'ground', 50.0, 0.002, Missile('AGM-114', Look('bullet_icbm01', 1.63), burn=3.0, top=425.0,
                    accel=180.0, max_g=20.0, nav=3.0, life=12.0, damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3,
-                   lock_time=30.0)),
+                   lock_time=30.0), per_pylon=4, pylon_mass=66.0, pylon_drag=0.008),
     # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide cone),
     # very fast, very agile, fired two at a target (the submarine carrier, src/subcarrier.cpp: no mass that matters). 3.66 m.
     'ESSM': Store('RIM-162 ESSM', 'air', 0.0, 0.0, Missile('RIM-162 ESSM', Look('bullet_mediummissile01', 3.66), burn=4.0,
                   top=1300.0, accel=400.0, max_g=50.0, nav=4.0, life=15.0, damage=600.0, blast=15.0, lock_range=3000.0,
                   lock_cone=1.2, lock_time=20.0, burst=2.0, interval=120.0, eject=0.5)),
-    # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast. 2.22 m.
-    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', Look('bullet_icbm01', 2.22), damage=1500.0, blast=25.0)),
+    # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast. 2.22 m. One a
+    # pylon on its bomb rack (~50 kg).
+    'MK82': Store('Mk 82', 'bomb', 230.0, 0.011, Bomb('Mk 82', Look('bullet_icbm01', 2.22), damage=1500.0, blast=25.0),
+                  per_pylon=1, pylon_mass=50.0, pylon_drag=0.004),
     # Unguided 70 mm rockets (Hydra 70) from a pod of 19: a short burn to about Mach 2, a light warhead; a trigger pull
     # ripples 4. Strafing runs fire them before the guns (src/jet_combat.cpp kRocket*); the player fires them along
-    # the nose. A round's mass and drag carry its pod's share. About 1.4 m with its M151 warhead (the Mk 66 motor 1.06 m).
-    'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
+    # the nose. About 1.4 m with its M151 warhead (the Mk 66 motor 1.06 m). The pod (19 tubes, ~40 kg) stays when it is
+    # empty, and with it nearly all of its drag (a full pod's 0.0285: a round's 0.0002, the pod's 0.0247).
+    'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0002, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
                  accel=650.0, max_g=1.0, nav=1.0, life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0,
-                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False)),
+                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False),
+                 per_pylon=19, pylon_mass=40.0, pylon_drag=0.0247),
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
