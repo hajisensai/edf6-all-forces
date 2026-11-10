@@ -145,6 +145,7 @@ void DebugSpawnFrame(unsigned char *) noexcept{}
 void Edf41Mother401DevTick() noexcept{}   // crew.cpp's DebugSpawnTick calls it (edf41mother401.cpp, not linked here)
 void UltimateTick() noexcept{}   // crew.cpp's SharedFrameTick plays the ultimate's show (ultimate.cpp, not linked here)
 void BarrageTick() noexcept{}   // ...and the barrages' rounds (barrage.cpp, not linked here)
+void AndryushaTick() noexcept{}   // ...and the Andryusha's carriers (andryusha.cpp, not linked here)
 void SupportPointsTick() noexcept{}    // ...the map's support pt (support_points.cpp, not linked here)
 void SupportWarningTick() noexcept{}   // ...the supports' warnings (support_warning.cpp, not linked here)
 void SupportFollowUpTick() noexcept{}   // ...and the sorties' second waves (airstrike.cpp, not linked here)
