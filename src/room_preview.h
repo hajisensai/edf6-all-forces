@@ -1,4 +1,4 @@
-// The room / HQ menu's 3D preview of one support soldier (docs/room-3d-preview-re.md, plan A: the game's own
+// The room / HQ menu's 3D preview of one support soldier or vehicle (docs/room-3d-preview-re.md, plan A: the game's own
 // UiHQ_3DModelView shows the soldier instead of the player while the menu asks; the save is never written).
 // Contract between the menu screen (src/room_ui.cpp, stage 4) and the preview (src/room_preview.cpp, stage 7).
 // Every call comes from the game's UI thread (the HUiRoom / HUiHQMain OnUpdate wrappers).
@@ -11,6 +11,10 @@ struct PreviewSpec {
     SupportWeapon kind=SupportWeapon{};   // the soldier's class / weapon (support_loadout.h)
     bool leader=false;
     SupportLook look{};                  // kStockColour = the template's colour
+    // Not none: that vehicle body instead of a soldier (its generated menu SGO, tools/menu_preview.py; kind / leader /
+    // look unused). Its pylons are not on the model (docs/plan-2026-11-10-worldmap.md: the menu renderer hangs only
+    // WeaponTable rows); the menu's own rows show them.
+    VehicleBody body=VehicleBody::none;
 };
 
 // Installs the hooks the preview needs; false (and logged) when the code does not match: the menu then runs without it.

@@ -67,7 +67,7 @@ def check_generate(game: str) -> None:
     saved = mp.build, rootcpk.Game
     rootcpk.Game = lambda root, archive='Root.cpk': object()   # the fake game has no Root.cpk
 
-    def fake_build(_g: object) -> dict[str, bytes]:
+    def fake_build(_g: object, *_root: object) -> dict[str, bytes]:
         calls.append('build')
         return dict(FAKE)
     mp.build = fake_build
@@ -76,7 +76,7 @@ def check_generate(game: str) -> None:
         check(len(installer.generate_menu_preview(game, errors)) == 2 and not errors, 'loadout-generate makes them')
         check(installer.generate_menu_preview(game, errors) == [] and calls == ['build'], 'there already: not even built')
         mp.remove(game)
-        mp.build = lambda _g: (_ for _ in ()).throw(ValueError('bad'))
+        mp.build = lambda _g, *_r: (_ for _ in ()).throw(ValueError('bad'))
         check(installer.generate_menu_preview(game, errors) == [] and 'bad' in errors.get(mp.RANGER, ''), 'failure reported')
         with contextlib.redirect_stdout(io.StringIO()) as out:
             check(installer.write_menu_preview(game) is False, 'install: a failure returns False')
@@ -92,6 +92,11 @@ def check_wiring() -> None:
     body = {name: src.split(f'\ndef {name}(', 1)[1].split('\ndef ', 1)[0] for name in ('install', 'uninstall')}
     body['generate_variants'] = gen.split('\ndef generate_variants(', 1)[1].split('\ndef ', 1)[0]
     check('write_menu_preview(game)' in body['install'], 'install writes them')
+    wmp = src.split('\ndef write_menu_preview(', 1)[1].split('\ndef ', 1)[0]
+    check('menu_preview.build(rootcpk.Game(game), game)' in wmp, 'install builds the vehicles too (from the game directory)')
+    check(body['install'].index('write_menu_preview(game)') > body['install'].index('make_jets.install(game, jets)') and
+          body['install'].index('write_menu_preview(game)') > body['install'].index('make_dreadnought.install(game, dreadnought)'),
+          "after the jets' bases are written")
     check('menu_preview.remove' in body['uninstall'], 'uninstall removes them')
     check('generate_menu_preview(game, errors)' in body['generate_variants'], 'loadout-generate makes missing ones')
 
@@ -126,8 +131,59 @@ def check_real(game: object) -> None:
     check(picked['N601_COMMON_RANGER_AF_LEADER'] == mp.RANGER, 'AF leader colours head and body: every material')
 
 
+def check_vehicle_names() -> None:
+    import support_loadout
+    check(mp.vehicle_file('TANK') == 'EDF6VC_MENU_V_TANK.SGO', "the tank's file (room_preview_logic.h VehicleMenuOf)")
+    hdr = read(os.path.join(ROOT, 'src', 'room_preview_logic.h')).decode('utf-8')
+    check(f'kMenuVehiclePrefix=L"{mp.VEHICLE_PREFIX}"' in hdr, 'the prefix the plugin builds the names with')
+    loadout = read(os.path.join(ROOT, 'src', 'support_loadout.h')).decode('utf-8')
+    for body in support_loadout.BODIES:
+        check(f'L"{body}",' in loadout, f'{body}: a kVehicleBodies name (the plugin names its file from it)')
+
+
+def check_vehicles_fake(game_dir: str, game: object) -> None:
+    """A body whose base is a Mods file: built from it; one nowhere: left out."""
+    import support_loadout
+    os.makedirs(os.path.join(game_dir, 'Mods', 'OBJECT'), exist_ok=True)
+    stock = game.read('MENUOBJECT', mp.STOCK_RANGER)
+    version, fake_v = sgo.read(game.read('OBJECT', 'V505_TANK_MISSION.SGO'))
+    fake_v['animation_model'][0] = ['app:/object/fake_jet.mrab', 'fake_jet.mdb']
+    base = support_loadout.BODIES['STRIKE'][0]
+    with open(os.path.join(game_dir, 'Mods', 'OBJECT', base), 'wb') as f:
+        f.write(sgo.write_depth_first(version, fake_v))
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        files = mp.build_vehicles(game, game_dir)
+    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE')}
+    check(set(files) == want, f'the tank (Root.cpk) and the Mods strike jet only: {sorted(files)}')
+    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 2, 'every missing body said')
+    m = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("STRIKE")}'])[1]
+    check(m['animation_model'][0] == ['app:/object/fake_jet.mrab', 'fake_jet.mdb'], 'the Mods copy is the source')
+    tank = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'])[1]
+    src = sgo.read(game.read('OBJECT', 'V505_TANK_MISSION.SGO'))[1]
+    check(tank['animation_model'] == src['animation_model'], "the tank's whole animation_model (model, CAS, MAB)")
+    st = sgo.read(stock)[1]
+    check({k: v for k, v in tank.items() if k != 'animation_model'} == {k: v for k, v in st.items() if k != 'animation_model'},
+          "every other key the stock menu SGO's")
+    v2, mm = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'])
+    check(sgo.write_depth_first(v2, mm) == files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'], 'parses back exactly')
+    with contextlib.redirect_stdout(io.StringIO()):
+        both = mp.build(game, game_dir)
+    check(set(both) == set(mp.rels()) | want, 'build with the game directory: soldiers and vehicles')
+    check(set(mp.build(game)) == set(mp.rels()), 'build without it: the soldiers only (loadout-generate)')
+    written = mp.install(game_dir, both)
+    check(len(written) == len(both), 'install writes them all')
+    with contextlib.redirect_stdout(io.StringIO()):
+        fewer = {k: v for k, v in both.items() if 'STRIKE' not in k}
+    mp.install(game_dir, fewer)
+    check(not os.path.exists(os.path.join(game_dir, 'Mods', 'MENUOBJECT', mp.vehicle_file('STRIKE'))),
+          'a body gone from the build: its file released')
+    deleted, _kept = mp.remove(game_dir)
+    check(len(deleted) == len(fewer), "remove deletes the vehicles' too")
+
+
 def main() -> int:
     check_names()
+    check_vehicle_names()
     check_wiring()
     with tempfile.TemporaryDirectory(prefix='edf6vc-menu-') as game:
         check_install(game)
@@ -140,6 +196,8 @@ def main() -> int:
         real = None
     if real is not None:
         check_real(real)
+        with tempfile.TemporaryDirectory(prefix='edf6vc-menu-v-') as game:
+            check_vehicles_fake(game, real)
     print(f'menu_preview_test: {checks} checks passed')
     return 0
 
