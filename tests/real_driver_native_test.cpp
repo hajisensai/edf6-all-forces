@@ -2,12 +2,16 @@
 #include "../src/real_driver_native.cpp"
 #include <cstdio>
 #include <cstdlib>
+namespace {
+int checks=0,clears=0,setups=0,boards=0,exits=0,firepowers=0,firepowerAfter=-1;
+}
 namespace crew {
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
+// support_firepower.cpp: every mission setup is followed by the support firepower step (a no-op for an unmarked vehicle).
+bool ApplySupportFirepower(unsigned char*) noexcept { ++firepowers;firepowerAfter=setups;return true; }
 }
 namespace {
-int checks=0,clears=0,setups=0,boards=0,exits=0;
 unsigned char* owned=nullptr;
 bool Owns(unsigned char* seat) noexcept { return seat==owned; }
 void __fastcall Clear(void* input) { ++clears;std::memset(input,0,0x2A); }
@@ -76,7 +80,8 @@ int wmain(int argc,wchar_t** argv) {
         const unsigned char ret[]={0xC3};std::memcpy(image+kReadSetup,ret,1);
         void* vtable[47]{};vtable[46]=reinterpret_cast<void*>(&Apply);Put<void*>(vehicle,0,vtable);
         Check(PrepareNpcVehicle(vehicle,true) && setups==1,"spawned vehicle applies its mission setup exactly once");
-        Check(PrepareNpcVehicle(vehicle,false) && setups==1,"existing vehicle does not reapply setup");
+        Check(firepowers==1 && firepowerAfter==1,"the support firepower step runs once, after the setup");
+        Check(PrepareNpcVehicle(vehicle,false) && setups==1 && firepowers==1,"existing vehicle does not reapply setup");
     }
     ready=false;Put<float>(seat,0x2C4,.75f);owned=seat;hook(seat+0x2C0);
     Check(At<float>(seat,0x2C4)==0,"failed readiness preserves normal reset");

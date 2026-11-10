@@ -7,7 +7,8 @@
 #include <limits>
 
 namespace fixture {
-bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false;
+bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadClass=false,failMark=false,failFirepower=false;
+int marks=0,firepowers=0,markedAt=-1;crew::supportlevel::Curve lastCurve=crew::supportlevel::Curve::eros;
 const wchar_t* lastPath=nullptr;
 const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
 int checks=0,preloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
@@ -59,6 +60,18 @@ Rider SeatRider(const unsigned char*,const unsigned char*) noexcept { return fix
 namespace crew {
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
+// support_firepower.cpp: an armed hull is marked before its setup, its firepower written after it.
+bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
+    fixture::Check(v==fixture::object,"the made hull marked");
+    ++fixture::marks;fixture::markedAt=fixture::applies;fixture::lastCurve=curve;
+    return !fixture::failMark;
+}
+bool ApplySupportFirepower(unsigned char* v) noexcept {
+    fixture::Check(v==fixture::object && fixture::markedAt>=0 && fixture::applies>fixture::markedAt,"firepower written after its setup");
+    fixture::markedAt=-1;
+    ++fixture::firepowers;
+    return !fixture::failFirepower;
+}
 void NoteLocalCopy(const void* v,const void* owner) noexcept {
     fixture::Check(v==fixture::object && owner==fixture::expectedOwner,"copy owner recorded");
     fixture::Check(fixture::applies>0 && fixture::teams>0 && fixture::levels>0,"owner recorded after setup/team/level");
@@ -88,6 +101,8 @@ int main() {
     auto v=SpawnSupportVehicle(tank,manned,at,forward,fixture::expectedOwner);
     fixture::expectedOwner=nullptr;
     Check(v && fixture::applies==1 && fixture::disposals==1 && fixture::owners==1,"successful complete initialization");
+    Check(fixture::marks==1 && fixture::firepowers==1 && fixture::lastCurve==supportlevel::Curve::blacker,
+          "the tank's firepower by level on the Blacker's request curve");
     Check(fixture::lastPosition[0]==100 && fixture::lastPosition[1]==20 && fixture::lastPosition[2]==300,"entry retained exactly");
     Check(!DeleteSupportVehicle(v+16),"unowned hull cannot be rolled back");
     const void* oldControl=At<const void*>(v,kSelfCtrl);
@@ -115,10 +130,28 @@ int main() {
     fixture::failSetup=false;
     v=SpawnSupportVehicle(SupportVehicleKind::civilianTruck,SupportCrewMode::unmanned,at,forward,nullptr);
     Check(v && SeatCount(v)==5,"empty-delivery mode creates same real five-seat hull, no dummy");
+    Check(!kSupportVehicles[2].armed,"the light truck has no weapons to level");
     Check(DeleteSupportVehicle(v),"truck rollback");
+    // The transport: the Grape's curve; its firepower not marked / not written: refused, no partial hull.
+    v=SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr);
+    Check(v && fixture::lastCurve==supportlevel::Curve::grape,"the transport's firepower on the Grape's request curve");
+    Check(DeleteSupportVehicle(v),"transport rollback");
+    const int deletes=fixture::deletes;
     fixture::badClass=true;
     Check(!SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr),"wrong class rejected and deleted");
-    Check(fixture::deletes==7,"wrong class rollback once");
+    Check(fixture::deletes==deletes+1,"wrong class rollback once");
+    // The airdrop's container-made hull (ApplySupportVehicleSetup): not marked / its firepower not written: refused.
+    fixture::badClass=false;Put<const void*>(fixture::object,0,image+kSupportVehicles[1].vtable);
+    const int applies=fixture::applies;fixture::failMark=true;
+    Check(!ApplySupportVehicleSetup(fixture::object,SupportVehicleKind::transport) && fixture::applies==applies,
+          "an unmarked airdropped hull is refused before its setup");
+    fixture::failMark=false;fixture::failFirepower=true;
+    Check(!ApplySupportVehicleSetup(fixture::object,SupportVehicleKind::transport) && fixture::applies==applies+1,
+          "an airdropped hull whose firepower failed is refused");
+    fixture::failFirepower=false;
+    Check(ApplySupportVehicleSetup(fixture::object,SupportVehicleKind::transport) && fixture::lastCurve==supportlevel::Curve::grape,
+          "an airdropped transport fires on the Grape's curve");
+    fixture::markedAt=-1;
     fixture::signatures=false;PreloadSupportVehicles();
     Check(!SupportVehicleReady(SupportVehicleKind::civilianTruck,manned),"profile mismatch clears old mission readiness");
     Check(!SupportVehicleEnvironmentAllowed(tank,SupportEnvironment::underground),"no support hull underground (only soldiers and the drill request)");

@@ -1,6 +1,7 @@
 // See support_firepower.h. EDF.dll TimeDateStamp 0x678CCB46, RVAs.
 #include "support_firepower.h"
 #include "crew.h"
+#include "memory.h"
 
 namespace crew {
 namespace {
