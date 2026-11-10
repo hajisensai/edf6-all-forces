@@ -1446,6 +1446,9 @@ void LauncherFrame(unsigned char* vehicle) noexcept;
 bool InstallAndryusha() noexcept;
 void AndryushaTick() noexcept;
 int AndryushaSeat(const unsigned char* vehicle,const unsigned char* seat,unsigned char* weapon) noexcept;
+// Each vehicle's frame (crew.cpp, after LauncherFrame): an Andryusha's fuse sent to its copies by the machine that speaks
+// for it (andryusha_net.h: its player on the launcher's seat, else the machine that runs it); the copies write it.
+void AndryushaFrame(unsigned char* vehicle) noexcept;
 void ResetAndryusha() noexcept;
 bool PlayerLauncher(LauncherReadout* out) noexcept;
 // katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher

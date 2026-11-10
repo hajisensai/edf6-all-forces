@@ -39,8 +39,11 @@ namespace crew {
 //      a guest's squad on foot.
 //      And the support's gunship and paratroop plane fly the model pack's C-130s (jet_internal.h Body::c130Gunship,
 //      mark 7065; Body::transportPlane, now mark 7066): an older build would make the bomber401 ones under other marks.
+//   10 (2026-11-10): the Andryusha's fuse switch goes to the vehicle's copies (andryusha_net.h 'AFUZ' on tag 15): every
+//      machine writes the rider's fuse into its copy of the launcher, so its carriers burst and split alike. An older
+//      build ignores the block (seat_net.h) and keeps its copy's impact fuse: its bomblets would fall elsewhere.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=9;
+constexpr std::int64_t kAllForcesRoomProtocol=10;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

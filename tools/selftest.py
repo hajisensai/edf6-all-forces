@@ -2801,6 +2801,23 @@ def support_c130_models() -> None:
 
 
 @test
+def andryusha_fuse_online() -> None:
+    """The Andryusha's fuse switch goes online (2026-11-10 maintainer: 联机要同步): andryusha.cpp registers the 'AFUZ'
+    kind on the vehicles' tag 15 transport, every vehicle's frame runs AndryushaFrame after the switch, and the room
+    protocol moved past 9 (an older build keeps its copy's impact fuse)."""
+    cpp = src('src/andryusha.cpp')
+    assert 'seat_net::Register(andryusha_net::kMagic,&FuseReceived)' in cpp
+    assert 'gate->Admit(s.head,true,SpeaksHere(v),seat_net::SeatController(v,0))' in cpp, 'the speaker never applies its own'
+    crew = src('src/crew.cpp')
+    assert crew.index('&LauncherFrame,v);') < crew.index('&AndryushaFrame,v);'), 'the switch before its send'
+    assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 10
+    handlers = sum(src('src/' + f).count('seat_net::Register(') for f in os.listdir(os.path.join(ROOT, 'src'))
+                   if f.endswith('.cpp') and f != 'seat_net.cpp')
+    limit = int(re.search(r'kMostHandlers=(\d+)', src('src/seat_net_transport.h')).group(1))
+    assert handlers <= limit, f'tag 15 kinds {handlers} > seat_transport::kMostHandlers {limit}'
+
+
+@test
 def every_boardable_aircraft_requested() -> None:
     """The Air Raider requests every aircraft the player flies (src/playerjet_kinds.h kBoardable) empty, as a vehicle (the
     user, 2026-10-06: 「补上空袭的召唤飞机，空母载具」), but those LEFT_OUT says why not: each request of one of them
