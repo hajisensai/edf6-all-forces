@@ -67,6 +67,7 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
 PlayArea MapPlayArea() noexcept { return PlayArea{{-2400.0f,-2400.0f},{2400.0f,2400.0f},false,0.0f,false}; }
 void SetLauncherLoft(const void* vehicle,bool aim,float) noexcept { ++loftCalls;loftOwner=vehicle;loftAim=aim; }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
+int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { UnexpectedBoundary();return false; }
 bool IndirectFireSeat(const unsigned char*) noexcept { return true; }
 void StabStep(void*,const float*,AimStepFn) noexcept { UnexpectedBoundary(); }

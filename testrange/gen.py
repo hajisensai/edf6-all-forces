@@ -105,6 +105,7 @@ OWN_VEHICLES: list[tuple[str, str]] = [
     (parked_name('edf6tr_jet_doll_carrier_mission'), '人偶无人机母舰·停放（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
+    ('edf6tr_andryusha_mission', '安德柳沙燃烧子母火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
     *((f'edf6tr_{kind}_mission', f'{name}（自己驾驶；测试场生成）') for kind, name in TRACKED.items()),
     *((f'edf6tr_{kind}_mission', f'{name}（自己驾驶；测试场生成）') for kind, name in WALKERS.items()),
@@ -144,6 +145,7 @@ OPTIC_MISSION = {name: DERIVED_PREFIX + name for name in
 DERIVED: dict[str, str] = {
     **{private: source.upper() for source, private in {**PROTEUS_MISSION, **OPTIC_MISSION}.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
+    'edf6tr_andryusha_mission': 'EDF6VC_ANDRYUSHA',
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     **{f'edf6tr_{kind}_mission': GROUND_VEHICLES[kind].sgo for kind in (*TRACKED, *WALKERS)},
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
@@ -390,7 +392,8 @@ RANGE_NEW = ('v507_rescuetank_ai', 'edf6vc_sedan', 'vehicle301_tank',
 # The V603 kinds added 2026-10-24 (the quad Vulcan, the emplacements, the 2S6, the PzH 2000, the Sturmtiger and the
 # real guns: vcobjects.TRACKED past the M163 / BMPT): the plain's 36 spots are all taken, so the installer's range does
 # not place them; the M map's 「摆放」 does (their spawn catalog rows), and a range plan may hold them (GROUND_MISSION).
-CATALOG_ONLY = tuple(f'edf6tr_{kind}_mission' for kind in (*TRACKED, *WALKERS) if kind not in ('vulcan', 'bmpt'))
+CATALOG_ONLY = (tuple(f'edf6tr_{kind}_mission' for kind in (*TRACKED, *WALKERS) if kind not in ('vulcan', 'bmpt'))
+                + ('edf6tr_andryusha_mission',))   # the Katyusha's truck again: the M map's row, not the plan's
 RANGE_FRIENDS = {'edf6tr_jet_fighter_mission': 1}
 RANGE_WAVES = Waves(enabled=True, enemy=TARGET, per_wave=4, max_alive=24, first_delay=5.0, interval=5.0)
 
@@ -976,6 +979,7 @@ TRACKED_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for
 # weapons (no collision or animation of their own: the host's).
 WALKER_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in WALKERS}
 GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
+                                  'edf6tr_andryusha_mission': 'make_katyusha',
                                   'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar',
                                   # every vcobjects.TRACKED kind (tools/selftest.py holds them together); a literal: the
                                   # build cache reads the tools it names (pylib/buildcache.py source_recipes)
@@ -992,6 +996,10 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
 # the range (yet).
 GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph'
                        for u in xm_units.requested() if u.family in (*xm_units.V603, 'mech')})
+
+
+# GROUND_MISSION rows whose tool makes another vehicle by default: the vehicle_sgo argument naming theirs.
+GROUND_VARIANTS: dict[str, tuple] = {'edf6tr_andryusha_mission': (GROUND_VEHICLES['andryusha'],)}
 
 
 def ground_tool(sgo_name: str):  # noqa: ANN201 - a make_<kind> module or make_xmorph's builder (buildcache.tool)
@@ -1106,7 +1114,8 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
     if sgo_name in PROTEUS_MISSION.values() or sgo_name in OPTIC_MISSION.values():
         return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')   # the stock model (the Proteus's shield is a round of its own)
     if sgo_name in GROUND_MISSION:
-        data = ground_tool(sgo_name).vehicle_sgo(game)
+        # A tool making two vehicles (make_katyusha: the Katyusha and the Andryusha) is told which (GROUND_VARIANTS).
+        data = ground_tool(sgo_name).vehicle_sgo(game, *GROUND_VARIANTS.get(sgo_name, ()))
         # The Freed bike's SGO (the sidecar's) is a script's already: it has its mission_setup next to vehicle_setup.
         data = data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
         return _with_player_recoil(game, sgo_name, data)

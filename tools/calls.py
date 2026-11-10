@@ -407,6 +407,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph wheeled units (2026-10-30)': IDS[:107],
     'X-Morph cargo truck (2026-10-30)': IDS[:108],
     'X-Morph walkers (2026-10-30)': IDS[:110],
+    'Andryusha (2026-11-10)': IDS[:111],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row

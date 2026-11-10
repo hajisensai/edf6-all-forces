@@ -527,7 +527,7 @@ add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)
 target_compile_options(ultimate_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(ultimate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Andryusha's fuses and bomblets offline (tools/andryusha_check.cpp: src/andryusha.h; docs/andryusha-re.md).
-# cmake --build build --target andryusha_check && buildndryusha_check.exe
+# cmake --build build --target andryusha_check && build\andryusha_check.exe
 add_executable(andryusha_check EXCLUDE_FROM_ALL tools/andryusha_check.cpp)
 target_compile_options(andryusha_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(andryusha_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
