@@ -11,7 +11,7 @@
 // The support's Helicarrier (pylib/helicarrier_model.py, jet_internal.h Body::supCarrier ..) tilts its four lift fans under
 // the same bone names: kHcFront / kHcBack, its fans' lowest model y the same way (tools/aircraft_collision_check.py holds them
 // to the model pack's model when it is there). Its fans stand in rings high on its sponsons: 5 m over its bottom at the
-// least, so they never limit the tilt; ReachOf picks the table by the carrier's mark.
+// least, so they never limit the tilt; jet_flight.cpp NacelleReach picks the table by the carrier's mark.
 // Pure arithmetic: tools/jet_obstacle_sim.cpp --ground-settle-suite checks MostTilt.
 #pragma once
 #include <cmath>
