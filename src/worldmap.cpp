@@ -61,7 +61,8 @@ constexpr unsigned kNumber=0x52F50;     // double (const Handle*): a number node
 constexpr unsigned kNotOpenKey=0x1810C80;   // L"MissionSelect_NotOpenMissionTitle" (the locked row's title, 0x9591B6)
 constexpr std::size_t kTextTable=0x20B29A8,kTitles=0x248,kCurrent=0x48;   // [EDF+..]: texts; [GS]+0x248 the TXT list; GS+0x48
 constexpr std::size_t kButtons=0x770,kSelectMode=0x7B4;   // the select's HuiButtonListUtil; +0x7B4 bit 0: confirmable
-constexpr std::size_t kRepeat=0x4528;   // ui::Input: every pad's repeat mask (1 up, 2 down, 4 left, 8 right)
+constexpr std::size_t kRepeat=0x4528;
+constexpr unsigned kTransform=0x7F9E90;   // float* (HUiBase*, float out[16]): the screen's transform (HUiBase::Draw 0x7FAA0A)   // ui::Input: every pad's repeat mask (1 up, 2 down, 4 left, 8 right)
 constexpr unsigned kLeftBit=4,kRightBit=8;
 
 struct Sig { unsigned rva; const unsigned char* bytes; std::size_t size; };
@@ -104,6 +105,8 @@ const unsigned char kModeSig[]={0xF6,0x86,0xB4,0x07,0x00,0x00,0x01};
 // 0x8A5371 (the stock OnUpdate): lea r8,[r14+4528h] (the input's merged repeat mask)
 const unsigned char kRepeatSig[]={0x4D,0x8D,0x86,0x28,0x45,0x00,0x00};
 // 0xDC0B0: mov [rcx+48h],edx; test r8b,r8b; je; mov [rcx+57A4h],edx; ret (the current mission row, as the cursor sets it)
+// 0x7F9E90: mov rax,rsp; mov [rax+8],rbx; mov [rax+10h],rsi; mov [rax+18h],rdi; push rbp
+const unsigned char kTransformSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x70,0x10,0x48,0x89,0x78,0x18,0x55};
 const unsigned char kCurrentSig[]={0x89,0x51,0x48,0x45,0x84,0xC0,0x74,0x06,0x89,0x91,0xA4,0x57,0x00,0x00,0xC3};
 const Sig kSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{kDraw,kDrawSig,sizeof(kDrawSig)},{kGone,kGoneSig,sizeof(kGoneSig)},
     {kFind,kFindSig,sizeof(kFindSig)},{0x7E999C,kShowSig,sizeof(kShowSig)},{kRowCount,kRowCountSig,sizeof(kRowCountSig)},
@@ -114,7 +117,8 @@ const Sig kSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{kDraw,kDrawSig,sizeo
     {0x113E90B,kViewportSig,sizeof(kViewportSig)},{0x113E928,kDeviceSig,sizeof(kDeviceSig)},
     {kFocus,kFocusSig,sizeof(kFocusSig)},{kConfirm,kConfirmSig,sizeof(kConfirmSig)},{kTextOf,kTextOfSig,sizeof(kTextOfSig)},
     {kNumber,kNumberSig,sizeof(kNumberSig)},{0x9591AF,kNotOpenSig,sizeof(kNotOpenSig)},{0x958A66,kTitleSig,sizeof(kTitleSig)},
-    {0x8A26AA,kModeSig,sizeof(kModeSig)},{0x8A5371,kRepeatSig,sizeof(kRepeatSig)},{0xDC0B0,kCurrentSig,sizeof(kCurrentSig)}};
+    {0x8A26AA,kModeSig,sizeof(kModeSig)},{0x8A5371,kRepeatSig,sizeof(kRepeatSig)},{0xDC0B0,kCurrentSig,sizeof(kCurrentSig)},
+    {kTransform,kTransformSig,sizeof(kTransformSig)}};
 
 using UpdateFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
 using DrawFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
@@ -489,6 +493,10 @@ struct Shot {
     // The pins, the chosen place (the cursor's), the current mission's place and its routes' places.
     int pinCount=0;
     Pin pins[kPlaceCount]{};
+    // The pins as drawn: near ones one group (worldmap_logic.h GroupNear, at this view); pin i in group groupOf[i].
+    int groupCount=0;
+    Group groups[kPlaceCount]{};
+    int groupOf[kPlaceCount]{};
     int chosen=-1,current=-1;
     int targetCount=0;
     int targets[kMaxTargets]{},targetState[kMaxTargets]{};
@@ -611,6 +619,17 @@ void ReadPointer(const Screen& s) noexcept {
 void PinPixels(const View& v,const Screen& s,Pixel* at) noexcept {
     for(int i=0;i<rows.pinCount;++i)at[i]=ToScreen(v,s,PlacePoint(rows.pins[i].place));
 }
+// The pins as drawn at view v: near ones grouped (at the nearest view: set apart instead).
+struct Layout { int count=0; Group groups[kPlaceCount]; int groupOf[kPlaceCount]; };
+void LayOut(const View& v,const Screen& s,Layout& l) noexcept {
+    Pixel at[kPlaceCount];
+    PinPixels(v,s,at);
+    l.count=GroupNear(at,rows.pins,rows.pinCount,kGroupDistance,Nearest(v,s),l.groupOf,l.groups);
+}
+int GroupOfPlace(const Layout& l,int place) noexcept {
+    for(int i=0;i<rows.pinCount;++i)if(rows.pins[i].place==place)return l.groupOf[i];
+    return -1;
+}
 // The cursor to entry i: the native focus asked (it moves in the stock OnUpdate after this hook).
 void Choose(unsigned char* self,int entry,const char* why) noexcept {
     if(entry<0 || entry>=rows.n)return;
@@ -625,6 +644,25 @@ void Choose(unsigned char* self,int entry,const char* why) noexcept {
 int EntryOfPin(int k) noexcept {
     const int e=FirstEnterable(rows.place,rows.state,rows.n,rows.pins[k].place);
     return e>=0 ? e : rows.pins[k].first;
+}
+// Group k of layout l chosen: one place, its entry; several, the map opens it up (SplitView) and the cursor goes to
+// the first of its places in list order that has a mission to enter (else its first place's first entry).
+void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const char* why) noexcept {
+    MapPoint members[kPlaceCount];
+    int n=0,best=-1,bestEntry=-1;
+    for(int i=0;i<rows.pinCount;++i) {
+        if(l.groupOf[i]!=k)continue;
+        members[n++]=PlacePoint(rows.pins[i].place);
+        const int e=FirstEnterable(rows.place,rows.state,rows.n,rows.pins[i].place);
+        if(e>=0 && (bestEntry<0 || e<bestEntry)){bestEntry=e;best=i;}
+        if(best<0 && bestEntry<0)best=i;
+    }
+    if(n==0)return;
+    if(n>1) {
+        MoveTo(SplitView(ui.moving ? ui.to : ui.view,members,n,s),kFollowSeconds);
+        Log("WORLDMAP select %p: %s: a group of %d places opened",static_cast<void*>(self),why,n);
+    }
+    Choose(self,bestEntry>=0 ? bestEntry : EntryOfPin(best),why);
 }
 
 // This frame's map input; true when the stock OnUpdate must not get it (a click, a drag, the wheel, a stick, a zoom).
@@ -658,10 +696,12 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
             }
             used=true;
         } else if(overMap) {
+            Layout l;
+            LayOut(ui.view,s,l);
             Pixel at[kPlaceCount];
-            PinPixels(ui.view,s,at);
-            const int k=Pick(at,rows.pinCount,ui.pointer,22.f);
-            if(k>=0)Choose(self,EntryOfPin(k),"a pin clicked");
+            for(int k=0;k<l.count;++k)at[k]=l.groups[k].at;
+            const int k=Pick(at,l.count,ui.pointer,kPinRadius+9.f);
+            if(k>=0)ChooseGroup(self,l,k,s,"a pin clicked");
             else{ui.dragging=true;ui.dragAt=ui.pointer;}
             used=true;
         }
@@ -677,22 +717,16 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     const unsigned repeat=RepeatMask(ctx);
     const int dir=(repeat&kLeftBit) ? -1 : (repeat&kRightBit) ? 1 : 0;
     if(dir!=0 && rows.pinCount>0) {
-        Pixel at[kPlaceCount];
-        bool ok[kPlaceCount];
-        PinPixels(ui.view,s,at);
-        for(int i=0;i<rows.pinCount;++i)ok[i]=Enterable(rows.pins[i].state);
-        int from=PinOfPlace(EntryPlace(cursor));
-        int k=-1;
-        if(from>=0)k=Neighbour(at,ok,rows.pinCount,from,dir);
-        else {
-            // No pin chosen: the nearest to the map's focus that way.
-            Pixel withFocus[kPlaceCount+1];
-            bool okFocus[kPlaceCount+1];
-            for(int i=0;i<rows.pinCount;++i){withFocus[i]=at[i];okFocus[i]=ok[i];}
-            withFocus[rows.pinCount]=kMapFocus;okFocus[rows.pinCount]=false;
-            k=Neighbour(withFocus,okFocus,rows.pinCount+1,rows.pinCount,dir);
-        }
-        if(k>=0)Choose(self,EntryOfPin(k),dir<0 ? "left" : "right");
+        // Over the pins as drawn: a group is one stop (chosen, it opens up).
+        Layout l;
+        LayOut(ui.moving ? ui.to : ui.view,s,l);
+        Pixel at[kPlaceCount+1];
+        bool ok[kPlaceCount+1];
+        for(int k=0;k<l.count;++k){at[k]=l.groups[k].at;ok[k]=Enterable(l.groups[k].state);}
+        int from=GroupOfPlace(l,EntryPlace(cursor));
+        if(from<0){at[l.count]=kMapFocus;ok[l.count]=false;from=l.count;}   // none chosen: from the map's focus
+        const int k=Neighbour(at,ok,from==l.count ? l.count+1 : l.count,from,dir);
+        if(k>=0)ChooseGroup(self,l,k,s,dir<0 ? "left" : "right");
     }
     // R3 / R: back to the current mission.
     if(((r3 && !ui.r3Was) || (rKey && !ui.rKeyWas)) && rows.currentEntry>=0) {
@@ -734,9 +768,14 @@ void FollowCursor(unsigned char* self,const Screen& s) noexcept {
 }
 
 // The shot's pins and panel from the rows and the cursor.
-void Describe(Shot& out,unsigned char* self) noexcept {
+void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.pinCount=rows.pinCount;
     for(int i=0;i<rows.pinCount;++i)out.pins[i]=rows.pins[i];
+    static Layout lay;   // UI thread only
+    LayOut(out.view,s,lay);
+    out.groupCount=lay.count;
+    for(int k=0;k<lay.count;++k)out.groups[k]=lay.groups[k];
+    for(int i=0;i<rows.pinCount;++i)out.groupOf[i]=lay.groupOf[i];
     const int cursor=CursorIndex(self);
     out.chosen=EntryPlace(cursor);
     out.current=rows.currentPlace;
@@ -853,7 +892,7 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     static Shot on;   // UI thread only (4 KB: not on the game's stack)
     on=Shot{};
     on.on=true;on.select=self;on.view=ui.view;on.pointer=ui.pointer;on.pointerShown=ui.pointerShown;
-    if(ui.started)Describe(on,self);
+    if(ui.started)Describe(on,self,s);
     Publish(on);
     std::uint64_t result;
     if(used) {
@@ -921,13 +960,33 @@ std::uint32_t RouteColour(int state) noexcept {
     switch(state) { case 1: return 0xFFFFE680u; case 2: return 0xFFFFA040u; case 0: return 0xE0D8DCE0u; default: return 0xC0C04848u; }
 }
 
-// The routes (dashed great circles from the current mission's place), its ring, the pins.
+// The group drawing place p (-1: none).
+int DrawnGroup(int place) noexcept {
+    for(int i=0;i<drawn.pinCount;++i)if(drawn.pins[i].place==place)return drawn.groupOf[i];
+    return -1;
+}
+
+// The routes (dashed great circles from the current mission's place, under the pins and clear of them; one shorter
+// than two pin diameters not drawn, its end's pin ringed instead), the current mission's ring, the pins.
 void DrawMarks(const View& v,const Screen& s) noexcept {
     const Shot& d=drawn;
     const float now=Seconds();
-    if(d.current>=0) {
+    const float clear=kPinRadius+6.f;
+    int marked[kMaxTargets];
+    int markedCount=0;
+    const int fromGroup=d.current>=0 ? DrawnGroup(d.current) : -1;
+    if(d.current>=0 && fromGroup>=0) {
         const Place& from=kPlaces[d.current];
+        const Pixel a0=d.groups[fromGroup].at;
         for(int t=0;t<d.targetCount;++t) {
+            const int toGroup=DrawnGroup(d.targets[t]);
+            if(toGroup<0)continue;
+            const Pixel b0=d.groups[toGroup].at;
+            float cut=0.f;
+            if(toGroup==fromGroup || !RouteClear(a0,b0,clear,&cut)) {
+                if(markedCount<kMaxTargets)marked[markedCount++]=t;
+                continue;
+            }
             const Place& to=kPlaces[d.targets[t]];
             LatLon line[48];
             const int n=GreatCircle(LatLon{from.lat,from.lon},LatLon{to.lat,to.lon},line,48);
@@ -950,7 +1009,10 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
                             const float phase=std::fmod(along+a+2600.f,26.f);
                             const float step=phase<16.f ? 16.f-phase : 26.f-phase;
                             const float b=a+step<len ? a+step : len;
-                            if(phase<16.f)
+                            const float mx=p[i-1].x+dx*(a+b)*0.5f/len,my=p[i-1].y+dy*(a+b)*0.5f/len;
+                            const bool nearEnd=copy==0 && ((mx-a0.x)*(mx-a0.x)+(my-a0.y)*(my-a0.y)<clear*clear ||
+                                                           (mx-b0.x)*(mx-b0.x)+(my-b0.y)*(my-b0.y)<clear*clear);
+                            if(phase<16.f && !nearEnd)
                                 renderer->Line(p[i-1].x+dx*a/len,p[i-1].y+dy*a/len,p[i-1].x+dx*b/len,p[i-1].y+dy*b/len,
                                                pass==0 ? 7.f : 3.5f,pass==0 ? 0x90000000u : RouteColour(d.targetState[t]));
                             a=b;
@@ -961,7 +1023,7 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
             }
         }
         // The current mission's place: a steady ring and one pulsing out from it.
-        const Pixel c=ToScreen(v,s,PlacePoint(d.current));
+        const Pixel c=d.groups[fromGroup].at;
         if(Near(c,s,80.f)) {
             const float t=Pulse(now);
             const std::uint32_t a=static_cast<std::uint32_t>((1.f-t)*230.f);
@@ -971,23 +1033,34 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
     }
     ID3D11ShaderResourceView* const disc=labels->Disc(*renderer);
     ID3D11ShaderResourceView* const ring=labels->Ring(*renderer);
-    // The chosen place's pin last (on top).
+    const int chosenGroup=d.chosen>=0 ? DrawnGroup(d.chosen) : -1;
+    // A short route's end: its pin ringed in the route's colour.
+    for(int m=0;m<markedCount;++m) {
+        const int g=DrawnGroup(d.targets[marked[m]]);
+        if(g>=0 && g!=fromGroup)Sprite(ring,d.groups[g].at,kPinRadius+14.f,RouteColour(d.targetState[marked[m]]));
+    }
+    // The chosen group last (on top). A group of several places: a second ring round it in its colour.
     for(int pass=0;pass<2;++pass)
-        for(int i=0;i<d.pinCount;++i) {
-            const Pin& pin=d.pins[i];
-            const bool chosen=pin.place==d.chosen;
+        for(int k=0;k<d.groupCount;++k) {
+            const Group& g=d.groups[k];
+            const bool chosen=k==chosenGroup;
             if(chosen!=(pass==1))continue;
-            const Pixel c=ToScreen(v,s,PlacePoint(pin.place));
+            const Pixel c=g.at;
             if(!Near(c,s,40.f))continue;
-            const float r=chosen ? 17.f : 13.f;
+            const bool many=g.members>1;
+            const float r=kPinRadius+(chosen ? 4.f : 0.f)+(many ? 2.f : 0.f);
             Sprite(disc,c,r+3.f,0xB0000000u);
-            Sprite(disc,c,r,StateColour(pin.state));
-            if(chosen)Sprite(ring,c,r+9.f,0xFFFFFFFFu);
+            if(many) {
+                Sprite(disc,c,r+9.f,0x90000000u);
+                Sprite(ring,c,r+8.f,StateColour(g.state));
+            }
+            Sprite(disc,c,r,StateColour(g.state));
+            if(chosen)Sprite(ring,c,r+(many ? 14.f : 9.f),0xFFFFFFFFu);
             wchar_t count[8];
-            MissionNumber(pin.count-1,0,count,std::size(count));
+            MissionNumber(g.missions-1,0,count,std::size(count));
             const worldmaptext::Label l=labels->Get(*renderer,count,chosen ? 22.f : 18.f,true,drawn.lang,frame);
             if(l.view)renderer->Image(l.view,c.x-l.w*0.5f,c.y-l.h*0.5f,c.x+l.w*0.5f,c.y+l.h*0.5f,0.f,0.f,1.f,1.f,
-                                      pin.state==3 ? 0xFFFFFFFFu : 0xFF101010u);
+                                      g.state==3 ? 0xFFFFFFFFu : 0xFF101010u);
         }
 }
 
@@ -1156,6 +1229,36 @@ void DrawOver(unsigned char* ctx) noexcept {
     }
 }
 
+// The select's own transform (0x7F9E90, what the stock draw places its layout by; the 0.3 s slide in and out,
+// docs/worldmap-select-re.md §1.2): its translation in *x / *y; false when not readable.
+bool Translation(unsigned char* self,float* x,float* y) noexcept {
+    alignas(16) float m[16]{};
+    __try {
+        reinterpret_cast<float*(__fastcall*)(unsigned char*,float*)>(image+kTransform)(self,m);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
+    *x=m[12];*y=m[13];
+    return true;
+}
+// Render thread: the translation last seen, frames it has stayed, the select it is of.
+struct Slide { unsigned char* self=nullptr; float x=0.f,y=0.f; int still=0; bool logged=false; };
+Slide slide;
+// The select's windows are still (no slide): only then the empty frame is covered and the panel drawn (they would
+// not move with the windows; while the windows slide in or out, 0.3 s, the stock frame shows as it is).
+bool Still(unsigned char* self) noexcept {
+    float x=0.f,y=0.f;
+    if(!Translation(self,&x,&y))return true;
+    if(slide.self!=self){slide=Slide{};slide.self=self;slide.x=x;slide.y=y;Log("WORLDMAP select %p: transform translation (%.1f, %.1f) at its first draw",static_cast<void*>(self),static_cast<double>(x),static_cast<double>(y));return false;}
+    const bool same=std::fabs(x-slide.x)<0.01f && std::fabs(y-slide.y)<0.01f;
+    slide.x=x;slide.y=y;
+    slide.still=same ? slide.still+1 : 0;
+    if(slide.still==2 && !slide.logged) {
+        slide.logged=true;
+        Log("WORLDMAP select %p: transform still at (%.1f, %.1f): the panel shown",static_cast<void*>(self),static_cast<double>(x),
+            static_cast<double>(y));
+    }
+    return slide.still>=2;
+}
+
 std::uint64_t __fastcall DrawHook(unsigned char* self,unsigned char* ctx) {
     bool mapped=false;
     if(ctx) {
@@ -1164,7 +1267,7 @@ std::uint64_t __fastcall DrawHook(unsigned char* self,unsigned char* ctx) {
         if(mapped)DrawMap(self,ctx);
     }
     const std::uint64_t result=nextDraw(self,ctx);
-    if(mapped)DrawOver(ctx);
+    if(mapped && Still(self))DrawOver(ctx);
     return result;
 }
 

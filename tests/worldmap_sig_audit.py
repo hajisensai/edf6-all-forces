@@ -112,4 +112,6 @@ check(arrays['kRepeatSig'][3:7] == struct.pack('<I', consts['kRepeat']), 'the me
 # The confirm 0x8A85C0 is the constructor's cbRequestMission; 0x8A27B8 calls the focus 0x953350 on this+0x770.
 check(img[0x8A27B8:0x8A27BF] == bytes.fromhex('488d8e70070000') and struct.unpack_from('<I', img, 0x8A27BB)[0] == consts['kButtons'] and
       rel(0x8A27BF, 5, 1) == consts['kFocus'], 'the constructor: lea rcx,[rsi+770h]; call 0x953350 (the first focus)')
+# The screen's transform the stock draw places the layout by (the slide in / out).
+check(rel(0x7FAA0A, 5, 1) == consts['kTransform'], 'HUiBase::Draw calls 0x7F9E90 for its transform')
 print(f'worldmap_sig_audit: {checks} checks passed')
