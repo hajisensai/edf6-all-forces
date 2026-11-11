@@ -476,7 +476,7 @@ int PinOfPlace(int place) noexcept {
 int EntryPlace(int entry) noexcept { return entry>=0 && entry<rows.n ? rows.place[entry] : -1; }
 
 // --- What the UI thread hands the draw (under shotLock) ---
-constexpr int kShownLines=kPanelRows-1;   // the panel's last line: the keys
+constexpr int kShownLines=kPanelRows-2;   // the panel's last two lines: the keys
 struct PanelLine { wchar_t num[8]; wchar_t title[64]; int state; bool cursor; };
 struct Shot {
     bool on=false;
@@ -615,8 +615,9 @@ void Choose(unsigned char* self,int entry,const char* why) noexcept {
     Focus(self,entry);
     ui.focusing=entry;
     ui.focusFrames=0;
-    Log("WORLDMAP select %p: %s: entry %d (row %d, %ls)",static_cast<void*>(self),why,entry,rows.row[entry],
-        rows.place[entry]>=0 ? kPlaces[rows.place[entry]].id : L"-");
+    const wchar_t* const key=RowKey(rows.row[entry]);
+    Log("WORLDMAP select %p: %s: entry %d (row %d, key %ls, %ls)",static_cast<void*>(self),why,entry,rows.row[entry],
+        key ? key : L"-",rows.place[entry]>=0 ? kPlaces[rows.place[entry]].id : L"-");
 }
 // The entry to choose at pin k: its first enterable, else its first (a locked place's panel shown).
 int EntryOfPin(int k) noexcept {
@@ -988,14 +989,16 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
         }
 }
 
-// The keys the map adds, in the game's language (the stock key guide is the select's own text; not changed).
-const wchar_t* KeysLine(hudtext::Lang l) noexcept {
-    switch(l) {
-    case hudtext::Lang::zhCN: return L"←→ 切换地点   LB/LT·Q/E 缩放   R3·R 当前任务";
-    case hudtext::Lang::zhTW: return L"←→ 切換地點   LB/LT·Q/E 縮放   R3·R 目前任務";
-    case hudtext::Lang::ja: return L"←→ 地点   LB/LT・Q/E ズーム   R3・R 現在の任務";
-    default: return L"\x2190\x2192 Place   LB/LT, Q/E Zoom   R3, R Current";
-    }
+// The keys the map adds, in the game's language, two lines (the stock key guide is the main frame's text; not
+// changed): the panel's last two lines, left of the corner piece some HQ themes draw at the bottom right.
+const wchar_t* KeysLine(hudtext::Lang l,int line) noexcept {
+    static const wchar_t* const text[4][2]={
+        {L"←→ Place   R3, R Current mission",L"LB / LT, Q / E Zoom"},
+        {L"←→ 切换地点   R3·R 当前任务",L"LB/LT·Q/E 缩放"},
+        {L"←→ 切換地點   R3·R 目前任務",L"LB/LT·Q/E 縮放"},
+        {L"←→ 地点   R3・R 現在の任務",L"LB/LT・Q/E ズーム"}};
+    const int k=static_cast<int>(l);
+    return text[k>=0 && k<4 ? k : 0][line ? 1 : 0];
 }
 
 // The chosen place's panel: its name, its missions (number, title, state), the cursor's line lit, the keys.
@@ -1036,7 +1039,8 @@ void DrawPanel() noexcept {
         const float tri[4][2]={{ax-8.f,y-10.f},{ax+8.f,y-10.f},{ax,y},{ax,y}};
         renderer->Quad(tri,0xFFFFFFFFu);
     }
-    Text(KeysLine(d.lang),x,kPanel.y1-36.f,20.f,false,0xFFD0D8E0u,w);
+    Text(KeysLine(d.lang,0),x,kPanel.y1-62.f,20.f,false,0xFFD0D8E0u,300.f);
+    Text(KeysLine(d.lang,1),x,kPanel.y1-34.f,20.f,false,0xFFD0D8E0u,300.f);
 }
 
 // Where the select's window skins draw their large empty frame (Window02_SoldierSel1 / 2's .B / .c meshes reach x
