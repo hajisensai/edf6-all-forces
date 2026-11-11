@@ -602,4 +602,101 @@ inline float Pulse(float seconds,float period=1.6f) noexcept {
     return t-std::floor(t);
 }
 
+
+// --- Pins near each other on screen: groups ---
+// A pin's radius on screen (design px; the chosen one drawn larger), and how near two pins may come before they are
+// one group: 1.6 pin diameters (nearer, the numbers overlap and a click cannot tell them apart).
+inline constexpr float kPinRadius=13.f;
+inline constexpr float kGroupDistance=1.6f*2.f*kPinRadius;
+// Pins drawn as one: where (the members' mean), how many places, their missions summed, the best state (StateRank).
+struct Group { Pixel at; int members; int missions; int state; };
+// The pins at screen points `at` (pins[i] their places) grouped by single linkage under `distance` px (a chain of
+// near pins is one group). groupOf[i]: pin i's group; groups in order of their first pin; how many (at most n, n <= 64).
+// `fan`: the view can come no nearer (MostZoom), so no group: every pin its own, set apart (below).
+inline int GroupNear(const Pixel* at,const Pin* pins,int n,float distance,bool fan,int* groupOf,Group* out) noexcept {
+    if(n>64)n=64;
+    int parent[64];
+    for(int i=0;i<n;++i)parent[i]=i;
+    auto root=[&](int i) { while(parent[i]!=i)i=parent[i]=parent[parent[i]];return i; };
+    for(int i=0;i<n;++i)
+        for(int j=i+1;j<n;++j) {
+            const float dx=at[i].x-at[j].x,dy=at[i].y-at[j].y;
+            if(dx*dx+dy*dy<distance*distance) {
+                const int a=root(i),b=root(j);
+                if(a!=b)parent[a<b ? b : a]=a<b ? a : b;
+            }
+        }
+    int groups=0;
+    int index[64];
+    for(int i=0;i<n;++i) {
+        const int r=root(i);
+        if(r==i) {
+            index[i]=groups;
+            out[groups++]=Group{Pixel{0.f,0.f},0,0,pins[i].state};
+        }
+        Group& g=out[index[r]];
+        groupOf[i]=index[r];
+        g.at.x+=at[i].x;g.at.y+=at[i].y;
+        ++g.members;
+        g.missions+=pins[i].count;
+        if(StateRank(pins[i].state)<StateRank(g.state))g.state=pins[i].state;
+    }
+    for(int k=0;k<groups;++k){out[k].at.x/=static_cast<float>(out[k].members);out[k].at.y/=static_cast<float>(out[k].members);}
+    if(!fan)return groups;
+    // Each pin apart: from where it is (pins on one spot first set round it on the Fan spiral), every pair nearer than
+    // `distance` pushed apart along their line, a half each, until none is (or 80 rounds): the least move from the
+    // true places that keeps them apart, a fanned pin never landing on a neighbour.
+    Pixel q[64];
+    for(int i=0;i<n;++i) {
+        q[i]=at[i];
+        for(int j=0;j<i;++j)
+            if(std::fabs(at[i].x-at[j].x)+std::fabs(at[i].y-at[j].y)<0.01f){const Pixel f=Fan(i,1.f);q[i].x+=f.x;q[i].y+=f.y;break;}
+    }
+    for(int round=0;round<80;++round) {
+        bool moved=false;
+        for(int i=0;i<n;++i)
+            for(int j=i+1;j<n;++j) {
+                const float dx=q[j].x-q[i].x,dy=q[j].y-q[i].y,d=std::sqrt(dx*dx+dy*dy);
+                if(d>=distance || !(d>0.f))continue;
+                const float push=(distance-d)*0.51f/d;
+                q[i].x-=dx*push;q[i].y-=dy*push;q[j].x+=dx*push;q[j].y+=dy*push;
+                moved=true;
+            }
+        if(!moved)break;
+    }
+    for(int i=0;i<n;++i){out[i]=Group{q[i],1,pins[i].count,pins[i].state};groupOf[i]=i;}
+    return n;
+}
+// A group chosen: its places `p` (n >= 1) framed in `area` (as near as they fit, at most MostZoom), at least twice
+// as near as `now` (a group wider than the area still opens up). What still overlaps there is a smaller group, chosen
+// the same way again; at MostZoom the rest is fanned (GroupNear).
+inline View SplitView(const View& now,const MapPoint* p,int n,const Screen& s,Area area=kOpenArea) noexcept {
+    View v=FrameIn(p,n,s,area,40.f,0.01f);
+    if(v.zoom<now.zoom*2.f) {
+        v.zoom=now.zoom*2.f;
+        Clamp(v,s);
+        float lo=0.f,hi=0.f,top=p[0].v,bottom=p[0].v;
+        for(int i=1;i<n;++i) {
+            float du=p[i].u-p[0].u;
+            du-=std::floor(du+0.5f);
+            if(du<lo)lo=du;
+            if(du>hi)hi=du;
+            if(p[i].v<top)top=p[i].v;
+            if(p[i].v>bottom)bottom=p[i].v;
+        }
+        v=CentreOn(v,MapPoint{p[0].u+(lo+hi)*0.5f,(top+bottom)*0.5f},s,Pixel{(area.x0+area.x1)*0.5f,(area.y0+area.y1)*0.5f});
+    }
+    return v;
+}
+// The view can come no nearer (the groups are fanned out instead).
+inline bool Nearest(const View& v,const Screen& s) noexcept { return v.zoom>=MostZoom(s)*0.999f; }
+// A route on screen from a to b, its ends kept clear of the pins (`radius`): the share of the line to leave out at
+// each end; false when the line is shorter than two pin diameters (no line: its end pin is marked instead).
+inline bool RouteClear(Pixel a,Pixel b,float radius,float* cut) noexcept {
+    const float dx=b.x-a.x,dy=b.y-a.y,len=std::sqrt(dx*dx+dy*dy);
+    if(!(len>=4.f*radius)){*cut=0.f;return false;}
+    *cut=radius/len;
+    return true;
+}
+
 }  // namespace worldmap

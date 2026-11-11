@@ -373,6 +373,73 @@ void Stage2() {
     Expect(Near(Pulse(0.8f),0.5f) && Near(Pulse(1.6f),0.f) && Near(Pulse(2.4f),0.5f),"the ring's pulse");
 }
 
+// Pins near each other: grouped in the all-Japan view (the real places), apart once a group is chosen.
+void Groups() {
+    const Screen s{1920.f,1080.f};
+    // Every Japanese place, one mission each, open.
+    Pin pins[64];
+    MapPoint m[64];
+    int n=0;
+    for(int i=0;i<kPlaceCount && n<64;++i) {
+        if(kPlaces[i].region==Region::europe || kPlaces[i].region==Region::africa)continue;
+        pins[n]=Pin{i,1,1,n};
+        m[n]=Project(kPlaces[i].lat,kPlaces[i].lon);
+        ++n;
+    }
+    Expect(n>=30,"the Japanese places");
+    const View japan=FrameIn(m,n,s);
+    Pixel at[64];
+    for(int i=0;i<n;++i)at[i]=ToScreen(japan,s,m[i]);
+    int groupOf[64];
+    Group g[64];
+    const int groups=GroupNear(at,pins,n,kGroupDistance,false,groupOf,g);
+    int chiyoda=-1;
+    for(int i=0;i<n;++i)if(std::wcscmp(kPlaces[pins[i].place].id,L"chiyoda")==0)chiyoda=i;
+    Expect(chiyoda>=0 && groups<n && g[groupOf[chiyoda]].members>=3,"all Japan: Kanto's places one group of 3 or more");
+    int missions=0;
+    for(int k=0;k<groups;++k)missions+=g[k].missions;
+    Expect(missions==n,"every mission counted once");
+    bool apart=true;
+    // Kanto chosen, then the group chiyoda is in, again, until it stands alone: a few steps, every pin apart then.
+    const int kantoSize=g[groupOf[chiyoda]].members;
+    View v=japan;
+    int steps=0;
+    while(g[groupOf[chiyoda]].members>1 && steps<8) {
+        MapPoint members[64];
+        int k=0;
+        const int mine=groupOf[chiyoda];
+        for(int i=0;i<n;++i)if(groupOf[i]==mine)members[k++]=m[i];
+        const View next=SplitView(v,members,k,s);
+        Expect(next.zoom>v.zoom || Nearest(v,s),"a group chosen: nearer");
+        v=next;
+        ++steps;
+        for(int i=0;i<n;++i)at[i]=ToScreen(v,s,m[i]);
+        GroupNear(at,pins,n,kGroupDistance,Nearest(v,s),groupOf,g);
+    }
+    Expect(g[groupOf[chiyoda]].members==1,"chiyoda stands alone after choosing its groups");
+    Expect(In(Area{0.f,0.f,s.w,s.h},g[groupOf[chiyoda]].at),"and on screen");
+    for(int i=0;i<n;++i)at[i]=ToScreen(v,s,m[i]);
+    const int after=GroupNear(at,pins,n,kGroupDistance,Nearest(v,s),groupOf,g);
+    for(int a=0;a<after;++a)
+        for(int b=a+1;b<after;++b) {
+            const float dx=g[a].at.x-g[b].at.x,dy=g[a].at.y-g[b].at.y;
+            if(dx*dx+dy*dy<0.7f*kGroupDistance*0.7f*kGroupDistance)apart=false;
+        }
+    Expect(apart,"then no two pins nearer than 0.7 of the group distance");
+    std::printf("groups: all Japan %d of %d places, Kanto %d; chiyoda alone after %d choices at zoom %.1f (most %.1f)\n",groups,n,
+                kantoSize,steps,static_cast<double>(v.zoom),static_cast<double>(MostZoom(s)));
+    // Two pins on one spot at MostZoom: fanned apart.
+    const Pixel same[2]={{500.f,500.f},{500.f,500.f}};
+    const Pin two[2]={{1,2,0,0},{2,3,1,1}};
+    Expect(GroupNear(same,two,2,kGroupDistance,false,groupOf,g)==1 && g[0].missions==5 && g[0].state==1 && g[0].members==2,
+           "one spot: one group, missions summed, the best state");
+    Expect(GroupNear(same,two,2,kGroupDistance,true,groupOf,g)==2 && std::fabs(g[0].at.x-g[1].at.x)+std::fabs(g[0].at.y-g[1].at.y)>20.f,
+           "at the nearest view: fanned apart");
+    float cut=0.f;
+    Expect(!RouteClear(Pixel{0.f,0.f},Pixel{40.f,0.f},kPinRadius,&cut) && RouteClear(Pixel{0.f,0.f},Pixel{130.f,0.f},kPinRadius,&cut) &&
+           Near(cut,0.1f),"a route shorter than two pin diameters: no line; else its ends cleared");
+}
+
 int main() {
     Table();
     Projection();
@@ -385,6 +452,7 @@ int main() {
     Opening();
     Input();
     Stage2();
+    Groups();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }
