@@ -34,6 +34,7 @@ import argparse
 import base64
 import glob
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -70,6 +71,10 @@ def _tr(zh: str, en: str) -> str:
 
 class HubError(Exception):
     pass
+
+
+class HubUnreachable(HubError):
+    """The connection failed (no HTTP answer): worth sending the same request again."""
 
 
 # ---------------------------------------------------------------- the account
@@ -113,7 +118,7 @@ class Hub:
                 raise HubError(_tr('账号或密码不对', 'wrong account or password')) from None
             raise HubError(_tr(f'测试站返回 {e.code} {msg}', f'the test site answered {e.code} {msg}').strip()) from None
         except urllib.error.URLError as e:
-            raise HubError(_tr(f'连不上测试站 {self.site}：{e.reason}', f'cannot reach the test site {self.site}: {e.reason}')) from None
+            raise HubUnreachable(_tr(f'连不上测试站 {self.site}：{e.reason}', f'cannot reach the test site {self.site}: {e.reason}')) from None
 
     def get_json(self, path: str):
         with self.request('GET', path) as r:
@@ -956,6 +961,26 @@ SHARE_PART = 64 << 20         # the share package's parts (one request each; the
 SHARE_PARTS_MAX = 999         # parts per file the Worker takes (testhub/src/share.js checkFile; part-NNN)
 
 
+def _share_part(hub: Hub, q: str, data: bytes, tries: int = 30) -> dict:
+    """One part: ask, then send if missing. A dropped connection (2026-11-11 through the local proxy: an SSL EOF about
+    every two hundred requests) repeats this part only; rerunning the whole upload re-asked every part from the first and
+    never got through a thousand of them in a row. Answers from the site (4xx / 5xx) are not retried."""
+    for attempt in range(1, tries + 1):
+        try:
+            done = hub.get_json(f'/api/share/part?{q}')
+            if not (done.get('existed') and done.get('size') == len(data)):
+                with hub.request('PUT', f'/api/share/part?{q}', data, {'Content-Type': 'application/octet-stream'},
+                                 timeout=900) as r:
+                    done = json.loads(r.read().decode('utf-8'))
+            return done
+        except (HubUnreachable, OSError, http.client.HTTPException) as e:
+            if attempt == tries:
+                raise
+            print(f'    retry {attempt}: {e}', flush=True)
+            time.sleep(min(60, 2 * attempt))
+    raise AssertionError('unreachable')
+
+
 def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, part_size: int = SHARE_PART) -> dict:
     """A share package to its slot (main: the main package, models: the model pack) on the public page /download, as one
     version of one or more files in the given order (the model pack's ...-1of2.zip, ...-2of2.zip: models-required.json's
@@ -990,11 +1015,7 @@ def _share(hub: Hub, zpaths: list[str], slot: str, version: str, notes: str, par
                                             'sha256': part['sha256']})
                 # Ask first (GET, no body): a part already there with this hash and size is not sent again, so a
                 # resumed upload over a slow link costs one small request per finished part.
-                done = hub.get_json(f'/api/share/part?{q}')
-                if not (done.get('existed') and done.get('size') == len(data)):
-                    with hub.request('PUT', f'/api/share/part?{q}', data, {'Content-Type': 'application/octet-stream'},
-                                     timeout=900) as r:
-                        done = json.loads(r.read().decode('utf-8'))
+                done = _share_part(hub, q, data)
                 parts.append(part)
                 print(f"  {part['name']}: {(at + len(data)) >> 20}/{size >> 20} MB"
                       f"{' (already there)' if done.get('existed') else ''}", flush=True)
