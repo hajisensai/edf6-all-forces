@@ -132,6 +132,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
+# The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/worldmap_gpu.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
@@ -1069,6 +1071,9 @@ add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The world map select's code checks (src/worldmap.cpp InstallWorldMap) against the real EDF.dll, read as a file.
+add_test(NAME worldmap_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(worldmap_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The frame step's wait to the next tick boundary against the game's tick clock 0x11DAE60 (src/frame_pacing_logic.h),
 # offline: cmake --build build --target frame_pacing_check && build\frame_pacing_check.exe
 add_executable(frame_pacing_check EXCLUDE_FROM_ALL tools/frame_pacing_check.cpp)

@@ -55,6 +55,8 @@ void Tiles() {
     Expect(kTileCount==2731,"every level's tiles");
     Expect(TileIndex(0,0,0)==0 && TileIndex(1,0,0)==1 && TileIndex(1,1,0)==2 && TileIndex(2,0,0)==3,"table order");
     Expect(TileIndex(6,63,31)==kTileCount-1,"the last tile");
+    Expect(LevelOfIndex(0)==0 && LevelOfIndex(1)==1 && LevelOfIndex(2)==1 && LevelOfIndex(3)==2 &&
+           LevelOfIndex(kTileCount-1)==6 && LevelOfIndex(kTileCount)==-1 && LevelOfIndex(-1)==-1,"an entry's level");
     Expect(TileIndex(6,64,0)==-1 && TileIndex(7,0,0)==-1 && TileIndex(2,0,2)==-1,"outside");
     const Screen s{1920.f,1080.f};
     View v;Clamp(v,s);

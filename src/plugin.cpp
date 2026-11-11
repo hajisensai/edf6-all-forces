@@ -36,6 +36,7 @@
 #include "weapon_records.h"
 #include "loadout_store.h"
 #include "room_ui.h"
+#include "worldmap.h"
 #include "support_soldier.h"
 #include "support_firepower.h"
 #include "airdrop.h"
@@ -1410,6 +1411,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
     InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)
     Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)

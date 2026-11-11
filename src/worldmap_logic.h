@@ -78,6 +78,16 @@ inline int TileIndex(int level,int x,int y) noexcept {
     for(int z=0;z<level;++z)base+=TileColumns(z)*TileRows(z);
     return base+y*TileColumns(level)+x;
 }
+// The level of a table entry (-1: outside the table).
+inline int LevelOfIndex(int index) noexcept {
+    if(index<0)return -1;
+    int base=0;
+    for(int z=0;z<kTileLevels;++z) {
+        base+=TileColumns(z)*TileRows(z);
+        if(index<base)return z;
+    }
+    return -1;
+}
 inline constexpr int kTileCount=[] {
     int n=0;
     for(int z=0;z<kTileLevels;++z)n+=(1<<z)*(z>0 ? 1<<(z-1) : 1);
