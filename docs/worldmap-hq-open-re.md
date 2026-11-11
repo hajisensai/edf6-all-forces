@@ -172,8 +172,13 @@ string HQMain()
 - 事件参数对象：两字 `{ vptr = EDF+0x17FE090, HuiCallbackInfo* }`，vtable 是
   `ui::Callback::ResultImpl<ui::HuiCallbackInfo>`（COL `0x1CA4388`），槽 0 `0x84E780` 返回 `[this+8]`，槽 1 `0x84EA20`
   返回 true。`ButtonApply` 传的是按钮自己的 `HUiButton+0x2B0`（`0x84EC25`，绑定时参数解析在 `+0x2B8`）（H）。
-- 原版 `ButtonApply` 在触发前还做了 `0x83A0C0(window, button->[+0x110])`（把焦点移到该按钮，`0x84EC17..0x84EC20`）并写
-  `[button+0x2B0]`（`0x84EC32`）。实现时照抄这段顺序（M：两处写入的含义没细看，照原版顺序做即可，不要自己简化）。
+- 原版 `ButtonApply` 在触发前还做了 `0x83A0C0(window, button->[+0x110])`（`0x84EC17..0x84EC20`）并写
+  `[button+0x2B0]`（`0x84EC32`）。（2026-11-12 实现时反汇编核实，H：`0x83A0C0` **不是设焦点**，而是在 `window+0x470` 的
+  id → 名字表里按按钮 id 查出按钮名（`std::wstring*`，查不到返回 0）；`[button+0x2B0] = [button+0x110]` 是把 id 写进按钮的
+  `HuiCallbackInfo`；随后把 `"/" + 名字` 接到窗口的动作路径 `window+0x6B0` 上，`FireAction` 之后再恢复原值。）
+  实现（`src/room_ui.cpp` `AutoOpenMission`）因此不逐条照抄，而是**直接调原版 `ButtonApply`**，传一个槽 0 返回
+  `{按钮, 控制块}` 的 Callback；`ButtonApply` 在 cast 失败时会对空指针调 `HasAction`，所以插件先自己 cast + `HasAction` 再调。
+  实机（2026-11-12）：单机进本部自动开选关、返回落回本部、再点「出击」正常打开、选任务 → 难度 → 出击、撤退回本部再自动开一次，均正常。
 
 每帧逻辑（在原 `OnUpdate` 之后、`room_ui` 现有逻辑之前或之后均可，需与 F2 战前配置菜单互斥）：
 
