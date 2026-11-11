@@ -20,6 +20,7 @@
 #include "worldmap_tiles.h"
 #include "crew.h"
 #include "memory.h"
+#include "map.h"
 
 #include <Xinput.h>
 #include <atomic>
@@ -369,7 +370,7 @@ void ReadPointer(const Screen& s) noexcept {
 
 // This frame's pan / zoom; true when the map used input.
 bool TakeInput(const Screen& s,float dt,bool input) noexcept {
-    const bool front=InFront();
+    const bool front=InFront() && !MapHoldsKeys();   // (the mission's map view is never open over the select; the census)
     ReadPointer(s);
     const bool overMap=ui.pointerShown && !OverPanels(ui.pointer);
     wheelToMap.store(input && front && overMap,std::memory_order_relaxed);

@@ -6702,7 +6702,8 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp', 'andryusha.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp']), f'a new key reader: make it give way to the map ({readers})'
+    assert 'InFront() && !MapHoldsKeys()' in src('src/worldmap.cpp'), "the world map select's keys give way to the map"
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
