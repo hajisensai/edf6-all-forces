@@ -3,14 +3,16 @@
 //
 // ui::HUiHQMissionSelect's vtable 0x18052E8, three slots chained (read and chained, never assumed stock):
 //  - slot 1, OnUpdate 0x8A4F60 (UI thread): the list's elements hidden (shown flag +0x1F8), the map's input read
-//    (a left drag pans, the wheel zooms about the pointer, the right stick pans, LB / RB zoom; only while the select
+//    (a left drag pans, the wheel zooms about the pointer, the right stick pans, LB / LT zoom; only while the select
 //    owns the input: ctx+8, its ui::Input*, not null), the opening move (the whole Earth, then in about a second to
-//    the place of the row under the cursor +0x778), the view published for the draw. On a frame the map used input
+//    the current mission and its routes' ends), choosing (left / right, R3, a pin or panel line clicked: the native
+//    focus 0x953350; a second click: the stock confirm 0x8A85C0), the rows, pins and panel published for the draw. On a frame the map used input
 //    the stock OnUpdate gets a copy of its ctx with +8 null (§5.2: it then neither scrolls the hidden list nor
 //    presses its buttons; its cursor refresh still runs).
 //  - slot 2, Draw 0x7FA970 (the render command queue's thread): the map drawn into the select's viewport (ctx+0x398)
-//    on its D3D11 context (ctx+8) through worldmap_gpu.h, then the stock draw: the select's kept windows (thumbnail,
-//    medals, briefing) and every later screen (a dialog) over it.
+//    on its D3D11 context (ctx+8) through worldmap_gpu.h with the routes and pins, then the stock draw (the kept
+//    windows: thumbnail, medals, briefing), then the map again over their skins' empty frame on the right and the
+//    place's panel on it (docs/worldmap-select-re.md §8.1); every later screen (a dialog, the main frame) over all.
 //  - slot 5, the scalar deleting destructor 0x8A3650: the object's end. Every texture and the device state go with it
 //    (the next select makes them again); the tiles file stays open (worldmap_tiles.h: its table read once).
 // The tiles file (Mods/Plugins/EDF6VehicleCrew.worldmap.bin) is opened at the first select; when it cannot be (not
@@ -329,7 +331,7 @@ void Subclass() noexcept {
     if(!prevProc)return;
     const LONG_PTR was=unicodeProc ? SetWindowLongPtrW(w,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(&WheelProc))
                                    : SetWindowLongPtrA(w,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(&WheelProc));
-    if(!was){Log("WORLDMAP the window's procedure could not be subclassed (%lu): no wheel zoom (LB / RB, the stick)",GetLastError());return;}
+    if(!was){Log("WORLDMAP the window's procedure could not be subclassed (%lu): no wheel zoom (LB / LT, Q / E, the stick)",GetLastError());return;}
     prevProc=reinterpret_cast<WNDPROC>(was);
     subclassed=w;
     Log("WORLDMAP window %p subclassed for the wheel",static_cast<void*>(w));
@@ -1044,7 +1046,7 @@ void DrawPanel() noexcept {
 }
 
 // Where the select's window skins draw their large empty frame (Window02_SoldierSel1 / 2's .B / .c meshes reach x
-// 1920, y 113..956; docs/worldmap-select-re.md §7): the map drawn again over it after the stock draw. The kept windows
+// 1920, y 113..956; docs/worldmap-select-re.md §8.1): the map drawn again over it after the stock draw. The kept windows
 // (x 842..1382, y 223..851 with their borders) are left alone; the frame's left bar shows above and below them.
 constexpr Area kCovers[]={{1384.f,96.f,1920.f,984.f},{1336.f,96.f,1384.f,212.f},{1336.f,856.f,1384.f,984.f}};
 

@@ -4,8 +4,9 @@
 // the room creation open) keeps everything it does; its list is hidden and a satellite map of the whole Earth (the
 // JPEG tile pyramid Mods/Plugins/EDF6VehicleCrew.worldmap.bin) is drawn under its remaining windows. src/worldmap.cpp.
 //
-// Stage 1 (this): the base map, pan and zoom, the opening move to the current mission's place. Stage 2 (the pins, the
-// panel, the routes, choosing a mission) draws and reads input through the two hooks below.
+// The base map, pan and zoom, the opening move; one pin a place, the routes from the current mission, the chosen
+// place's panel (right, over the window skins' empty frame), choosing by left / right, pins and panel lines
+// (docs/plan-2026-11-10-worldmap.md §5). Further overlays can draw and read input through the two hooks below.
 #include "worldmap_gpu.h"
 #include "worldmap_logic.h"
 

@@ -345,7 +345,7 @@ inline int Victim(const int* level,const unsigned* used,int n,unsigned now,int r
 }
 
 // --- The opening animation ---
-// Where the map shows what it is about (a place framed, LB / RB's zoom): the middle of its open area, left of the
+// Where the map shows what it is about (a place framed, LB / LT's zoom): the middle of its open area, left of the
 // select's kept windows (OverPanels: x from 842).
 inline constexpr Pixel kMapFocus{421.f,540.f};
 // A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), the place at `at`
@@ -429,7 +429,7 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 
 // --- Stage 2: the pins, the panel, the routes, choosing (src/worldmap.cpp) ---
 // The panel of the chosen place: right of the kept windows, where their window skins draw a large empty frame (the
-// .B / .c meshes of Window02_SoldierSel1 / 2 reach x 1920; docs/worldmap-select-re.md §7): the map is drawn again
+// .B / .c meshes of Window02_SoldierSel1 / 2 reach x 1920; docs/worldmap-select-re.md §8.1): the map is drawn again
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
 inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
