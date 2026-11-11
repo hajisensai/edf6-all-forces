@@ -147,6 +147,24 @@ int CursorRow(const unsigned char* self) noexcept {
         return *reinterpret_cast<const int*>(begin+static_cast<std::size_t>(cursor)*kEntrySize);
     } __except(EXCEPTION_EXECUTE_HANDLER){ return -1; }
 }
+// The display list's states (docs/mission-list-re.md 0x8A1530: 0 cleared, 1 open, 2 open branch, 3 shown locked) counted
+// into n[4], the first locked entry's index in *locked (-1: none); false when the list is not readable.
+bool CountStates(const unsigned char* self,int* n,int* locked) noexcept {
+    n[0]=n[1]=n[2]=n[3]=0;
+    *locked=-1;
+    __try {
+        const unsigned char* begin=*reinterpret_cast<unsigned char* const*>(self+kEntries);
+        const unsigned char* end=*reinterpret_cast<unsigned char* const*>(self+kEntriesEnd);
+        if(!begin || end<begin)return false;
+        const std::size_t count=static_cast<std::size_t>(end-begin)/kEntrySize;
+        for(std::size_t i=0;i<count;++i) {
+            const int state=*reinterpret_cast<const int*>(begin+i*kEntrySize+8);
+            if(state>=0 && state<=3)++n[state];
+            if(state==3 && *locked<0)*locked=static_cast<int>(i);
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
+}
 const wchar_t* RowKey(int row) noexcept {
     __try {
         unsigned char* const gs=*reinterpret_cast<unsigned char**>(image+kGameStatus);
@@ -310,6 +328,11 @@ void ShowList(unsigned char* self,bool shown,bool report=false) noexcept {
 void Start(unsigned char* self,const Screen& s) noexcept {
     const int row=CursorRow(self);
     const wchar_t* key=RowKey(row);
+    int states[4],locked=-1;
+    if(CountStates(self,states,&locked))
+        Log("WORLDMAP select %p: %d rows shown (cleared %d, open %d, branch %d, locked %d; the first locked at %d), cursor %d",
+            static_cast<void*>(self),states[0]+states[1]+states[2]+states[3],states[0],states[1],states[2],states[3],locked,
+            *reinterpret_cast<const int*>(self+kCursor));
     const int place=key ? PlaceOfKey(key) : -1;
     if(place<0) {
         ui.view=Whole(0.5f,s);
