@@ -534,8 +534,8 @@ inline constexpr Mission kMissions[]={
 };
 inline constexpr const wchar_t* kRangeKeyPrefix=L"EDF6/EDF6TR_";
 inline constexpr int kRangePlace=1;   // higashifuji
-// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.
-inline constexpr float kDetailNorth=47.000f,kDetailSouth=27.000f,kDetailWest=127.000f,kDetailEast=147.000f;
-// The base map textures (model pack folder worldmap_tex, installed by tools/worldmap_pack.py).
-inline constexpr const wchar_t* kWorldTexture=L"app:/UI/EDF6VC_WORLDMAP_WORLD.dds";
-inline constexpr const wchar_t* kJapanTexture=L"app:/UI/EDF6VC_WORLDMAP_JAPAN.dds";
+// The base map: a JPEG tile pyramid in one file under Mods (pylib/worldmap.py TILE*, tools/worldmap_basemap.py
+// tiles, installed by tools/worldmap_pack.py from the model pack folder worldmap_tex).
+inline constexpr int kTile=1350,kTileLevels=7,kTilesFormat=1;
+inline constexpr char kTilesMagic[5]="EDWM";
+inline constexpr const wchar_t* kTilesFile=L"Plugins/EDF6VehicleCrew.worldmap.bin";   // under Mods

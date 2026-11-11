@@ -9,6 +9,8 @@
 //    crosses the antimeridian.
 //  - Markers on one place (several missions on one map) fan out on a golden-angle spiral in screen pixels, so they
 //    stay apart at every zoom.
+//  - The base map is a JPEG tile pyramid of the whole Earth (pylib/worldmap.py TILE*, kTile / kTileLevels): the view
+//    draws the coarsest level that is at least as sharp as the screen, never zooming past the deepest level's pixels.
 #pragma once
 #include <cmath>
 #include <cstddef>
@@ -63,13 +65,24 @@ inline MapPoint Project(float lat,float lon) noexcept {
     u-=std::floor(u);
     return MapPoint{u,(90.f-lat)/180.f};
 }
-// The detail texture (Japan, kDetail* bounds; tools/worldmap_basemap.py): its (u, v) of a place inside it.
-inline bool InDetail(float lat,float lon) noexcept {
-    return lat<=kDetailNorth && lat>=kDetailSouth && lon>=kDetailWest && lon<=kDetailEast;
+
+// --- The tile pyramid (pylib/worldmap.py tile_grid / tile_table) ---
+// Level z: 2^z columns, max(1, 2^(z-1)) rows; the whole map is kTile * 2^z px wide.
+inline int TileColumns(int level) noexcept { return 1<<level; }
+inline int TileRows(int level) noexcept { return level>0 ? 1<<(level-1) : 1; }
+// The tile's entry in the file's table (levels in order, rows top down, columns west to east); -1 outside the level.
+inline int TileIndex(int level,int x,int y) noexcept {
+    if(level<0 || level>=kTileLevels || x<0 || y<0 || x>=TileColumns(level) || y>=TileRows(level))return -1;
+    int base=0;
+    for(int z=0;z<level;++z)base+=TileColumns(z)*TileRows(z);
+    return base+y*TileColumns(level)+x;
 }
-inline MapPoint DetailUV(float lat,float lon) noexcept {
-    return MapPoint{(lon-kDetailWest)/(kDetailEast-kDetailWest),(kDetailNorth-lat)/(kDetailNorth-kDetailSouth)};
-}
+inline constexpr int kTileCount=[] {
+    int n=0;
+    for(int z=0;z<kTileLevels;++z)n+=(1<<z)*(z>0 ? 1<<(z-1) : 1);
+    return n;
+}();
+inline constexpr float kDeepestWidth=static_cast<float>(kTile)*static_cast<float>(1<<(kTileLevels-1));   // px
 
 // --- The view ---
 struct View {
@@ -77,13 +90,14 @@ struct View {
     float zoom=1.f;          // map widths across the screen: 1 the whole world, more nearer
 };
 struct Screen { float w; float h; };   // the layout the map is drawn on (1920 x 1080, src/hudscale.h)
-inline constexpr float kMostZoom=64.f;
+// The deepest level's pixels one to one on the screen: zooming further would only show them bigger (blurred).
+inline float MostZoom(const Screen& s) noexcept { return kDeepestWidth/s.w; }
 // The map is twice as wide as tall: zoom 1 shows the world's width; the least zoom keeps it filling the screen's height.
 inline float LeastZoom(const Screen& s) noexcept { return s.h*2.f/s.w>1.f ? s.h*2.f/s.w : 1.f; }
 inline void Clamp(View& v,const Screen& s) noexcept {
     const float least=LeastZoom(s);
     if(!(v.zoom>=least))v.zoom=least;
-    if(v.zoom>kMostZoom)v.zoom=kMostZoom;
+    if(v.zoom>MostZoom(s))v.zoom=MostZoom(s);
     v.cu-=std::floor(v.cu);
     const float halfV=s.h/(s.w*v.zoom);   // half the screen's height in v (the map's v spans half its u)
     if(v.cv<halfV)v.cv=halfV;
@@ -119,6 +133,27 @@ inline void Pan(View& v,const Screen& s,float dx,float dy) noexcept {
     v.cu-=dx/scale;v.cv-=dy/(scale*0.5f);
     Clamp(v,s);
 }
+// The level to draw: the coarsest whose pixels are no larger than the screen's (the map's on-screen width s.w * zoom).
+inline int LevelFor(const View& v,const Screen& s) noexcept {
+    const float want=s.w*v.zoom;
+    int z=0;
+    while(z<kTileLevels-1 && static_cast<float>(kTile)*static_cast<float>(1<<z)<want)++z;
+    return z;
+}
+// The tiles the view shows at `level`: columns x0..x1 (unwrapped: may run below 0 or past the last column across the
+// antimeridian; the tile is column x mod TileColumns), rows y0..y1 (clamped).
+struct TileSpan { int level,x0,x1,y0,y1; };
+inline TileSpan Visible(const View& v,const Screen& s,int level) noexcept {
+    const float scale=s.w*v.zoom;
+    const float cols=static_cast<float>(TileColumns(level)),rows=static_cast<float>(TileRows(level));
+    const float u0=v.cu-s.w*0.5f/scale,u1=v.cu+s.w*0.5f/scale;
+    const float v0=v.cv-s.h*0.5f/(scale*0.5f),v1=v.cv+s.h*0.5f/(scale*0.5f);
+    auto row=[&](float vv) {
+        const int y=static_cast<int>(std::floor(vv*rows));
+        return y<0 ? 0 : (y>=TileRows(level) ? TileRows(level)-1 : y);
+    };
+    return TileSpan{level,static_cast<int>(std::floor(u0*cols)),static_cast<int>(std::floor(u1*cols)),row(v0),row(v1)};
+}
 // The view framing every point in `p` (n >= 1) with `margin` (a share of the screen) on each side; u spread taken the
 // short way round.
 inline View Frame(const MapPoint* p,int n,const Screen& s,float margin=0.15f) noexcept {
@@ -136,7 +171,7 @@ inline View Frame(const MapPoint* p,int n,const Screen& s,float margin=0.15f) no
     v.cu=p[0].u+(lo+hi)*0.5f;v.cv=(top+bottom)*0.5f;
     const float spanU=hi-lo,spanV=bottom-top;
     const float fit=1.f-2.f*margin;
-    float zoom=kMostZoom;
+    float zoom=MostZoom(s);
     if(spanU>0.f && fit/spanU<zoom)zoom=fit/spanU;
     if(spanV>0.f && fit*s.h*2.f/(s.w*spanV)<zoom)zoom=fit*s.h*2.f/(s.w*spanV);
     v.zoom=zoom;

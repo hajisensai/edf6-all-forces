@@ -9,7 +9,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址为 RVA；证据级别 H（反汇编 / 
 | 部分 | 状态 |
 |---|---|
 | (a) 载具 3D 预览 | 代码完成、离线测试过；**未实机**。动画 / 骨骼缺失时渲染器的反应未核实（风险见 `room-3d-preview-re.md` §6.1） |
-| (b1) 底图素材 | NASA Blue Marble 已下载到外部素材目录 `D:\APP\edf6-models\worldmap\`，校验哈希，派生出世界图与日本细节图（PNG）；2026-11-10 维护者定「随模型包发」后已转成游戏贴图（DXT1 + mip）放进模型包文件夹 `worldmap_tex`，安装器复制到 `Mods/UI/`（§2）。**游戏是否正确显示没有实机验证**（界面未做） |
+| (b1) 底图素材（2026-11-11 改为全球 JPEG 瓦片，§2） | NASA Blue Marble 已下载到外部素材目录 `D:\APP\edf6-models\worldmap\`，校验哈希，派生出世界图与日本细节图（PNG）；2026-11-10 维护者定「随模型包发」后已转成游戏贴图（DXT1 + mip）放进模型包文件夹 `worldmap_tex`，安装器复制到 `Mods/UI/`（§2）。**游戏是否正确显示没有实机验证**（界面未做） |
 | (b2) 任务地点表 | 完成：9 个任务包、483 关，每关 → 所用地图 → 真实地点（45 处），生成 `src/worldmap.inc`，CI `--check` |
 | (b3) 纯逻辑 | 完成：投影、视图（拖动 / 以光标为中心缩放 / 框选）、到下一关的大圆航线（跨日界线断开）、同一地点多关的标记散开、点选、该画哪些航线 |
 | (b4) 原版选关界面逆向 | 关键对象与入口已定位（§4），够设计用；接管所需的绘制路径（§5）只做了方案 |
@@ -24,35 +24,31 @@ EDF.dll TimeDateStamp 0x678CCB46，地址为 RVA；证据级别 H（反汇编 / 
 菜单 SGO 生成：`tools/menu_preview.py build_vehicles`（安装时生成，台账 owner 同士兵预览）。
 离线：`room_preview`（vehicle 段）、`room_ui`（Preview / Focus 的载具段）、`menu_preview`（有游戏时含载具生成）。
 
-## 2. 底图：NASA Blue Marble（维护者：「真实的世界地图，天空中拍摄的那种」）
+## 2. 底图：NASA Blue Marble 全球 500 m，JPEG 瓦片金字塔（2026-11-11 改）
 
-- 来源：NASA Earth Observatory「Blue Marble Next Generation」地形 + 海底地形，2004 年 12 月，等经纬度投影（plate carrée）。
-  - 全球 5400 × 2700（每度 15 px，日本只有约 300 px 宽，缩放到日本会糊），
-  - 500 m 瓦片 D1（东经 90–180°、北纬 0–90°，21600 × 21600，每度 240 px）。
-- 许可：NASA 影像不受版权保护（NASA Media Usage Guidelines；Visible Earth：可自由使用，注明 NASA Earth Observatory）。
-  **可以入库**，但按维护者「大素材不进仓库」的做法，放在外部素材目录 `D:\APP\edf6-models\worldmap\`（同模型包）：
-  `bluemarble.jpg`、`bluemarble_d1.jpg`（原图，哈希写死在工具里）、`SOURCE.txt`（出处与署名）、
-  `bluemarble_4096.png`（世界，4096 × 2048）、`bluemarble_japan.png`（日本细节，北纬 27–47°、东经 127–147°，4096 × 4096，
-  每度约 205 px）。
-- 工具：`tools/worldmap_basemap.py fetch|derive [DIR]`（下载走 `assets.science.nasa.gov`，`eoimages.gsfc.nasa.gov` 在本机 TLS 握手失败）。
-  离线测试 `worldmap_data` 核对裁切框（D1 中 (8880,10320)-(13680,15120)）与所有地点都在细节图内。
-- 实际渲染核对（离线，PIL 画在派生图上）：45 个地点落在正确的地理位置（东京湾、富士山雪顶与御殿场相对位置正确）。
-- 游戏贴图与打包（2026-11-10 维护者答「底图要不要随模型包发」：「都要改」→ 随模型包发；已实现）：
-  - 格式：DXT1（BC1），旧式 124 字节头、完整 mip 到 1 × 1（世界 4096 × 2048 共 13 级 5.6 MB，日本 4096 × 4096 共 13 级 11.2 MB）。
-    依据：Root.cpk `UI/` 的 65 个 DDS 里 55 个是 BC7（DX10 头，如 `LOADINGIMAGE*.DDS`），另有 1 个 DXT1 带 mip（`LOCALENV_TRAIN_FINE_MENUMODEL.DDS`，
-    512 × 512，10 级），所以 UI 读 DXT1 有原版先例（H：文件头直接读出）；本仓库没有 BC7 编码器，DXT1 是计划原定的选择。
-    编码用 `texfile_accel.dxt1_dds`（range-fit + 2×2 盒式 mip），离线解码对比派生 PNG：日本 PSNR 38.1 dB、世界 36.2 dB，东京湾一带目视无明显块痕。
-  - 不装进 RAB：与房间菜单已在用的 `Mods/UI/EDF6VC_WHITE.DDS`（插件经 Skin_Texture 换贴图 0x7F63E0 绑定，发布版在用）同样做成 `Mods/UI/` 下的散文件
-    `EDF6VC_WORLDMAP_WORLD.DDS` / `EDF6VC_WORLDMAP_JAPAN.DDS`；游戏内路径 `app:/UI/EDF6VC_WORLDMAP_*.dds`（`src/worldmap.inc` 的 `kWorldTexture` / `kJapanTexture`）。
-    **这两张大图经 Skin_Texture 能否加载、4096 宽的 UI 贴图有无尺寸限制都未实机验证（M）**。
-  - 模型包：新文件夹 `D:\APP\edf6-models\worldmap_tex\`（只含发布文件：两张 DDS、`worldmap_tex.json` 版本与哈希、`SOURCE.txt` 署名 NASA Earth Observatory），
-    加进 `tools/build_release.py` 的 `RELEASE_MODELS`；`pylib/modelpack.py` 的 `models` 部分已覆盖所有 `RELEASE_MODELS` 文件夹，所以**不另加 `PARTS` 项**，
-    模型包版本因内容哈希变化会变一次。21600² 的原图与派生 PNG 留在 `worldmap\`，不进包。分享包 `run_export.py` 的 `EXTERNAL_MODELS` 要加 `worldmap_tex`（不在本仓库）。
-  - 生成：`python -B tools/worldmap_basemap.py textures [DIR] [OUT]`（开发者一次性，约 8 秒）。安装：`tools/worldmap_pack.py`（台账 owner `worldmap`）只校验
-    `worldmap_tex.json` 的版本、大小与 SHA-256 后复制，已装且相同的不重写，安装时不做任何编码；缺文件夹 / 版本不符 / 内容不对 / `Mods` 里有别的 MOD 的同名文件时
-    两张都不装、说一行原因并释放以前装的（不做替代）。卸载选 1 时释放。
-  - 测试：`worldmap_pack`（ctest：合成小图生成发布目录、DDS 头与 mip 数、安装 / 重装不重写 / 卸载、四种拒绝；有开发者模型目录时核对真实文件夹），
-    selftest `worldmap_textures_in_model_pack`。
+维护者原话：「真实的世界地图，天空中拍摄的那种」（11-10）；「放境外 要全球高清图」「换成 JPEG 全球240试试」「接进仓库」（11-11）。
+地点不再限定日本（境外地图配真实境外地点，地点表另改），所以底图从「全球 4096 + 日本细节」两张 DXT1 改成**全球原始精度**。
+
+- 来源：NASA Earth Observatory「Blue Marble Next Generation」地形 + 海底地形，2004 年 12 月，等经纬度投影。500 m 瓦片 A1..D2 共 8 块，
+  每块 21600 × 21600、90° × 90°，合起来 86400 × 43200（每度 240 px）。哈希写死在 `tools/worldmap_basemap.py` `SOURCES`。
+  许可：NASA 影像不受版权保护（注明 NASA Earth Observatory）。原图放外部素材目录 `D:\APP\edf6-models\worldmap\`，不进仓库。
+- 为什么 JPEG（11-11 实测）：同样的金字塔做成 DXT1 约 2.5 GB；JPEG 质量 85（4:2:0）共 **344 MB**，与原图 PSNR 东京湾 38.2 dB、
+  阿尔卑斯 35.3 dB、撒哈拉 40.5 dB，目视无差；单块 1350² 解码中位 3.1 ms（PIL / libjpeg-turbo，WIC 估计慢 2–3 倍）。
+  代价：游戏的贴图加载（Skin_Texture）读不了 JPEG，**地图改由插件自己画**：WIC 解码 + D3D11 绘制（`thermal_gpu.cpp` 已拿到设备），
+  UI 层次（对话框遮挡、淡入淡出）要自己对齐。原 §5「布局 Texture 元素 + Skin_Texture」的底图方案作废（标记、文字仍可走布局元素，待定）。
+- 布局（`pylib/worldmap.py` 唯一定义，`src/worldmap.inc` 的 `kTile*` 由 `gen_worldmap.py` 生成）：每块 1350 px（整除 21600，瓦片不跨原图），
+  第 z 级 2^z 列 × max(1, 2^(z−1)) 行，z = 0..6；第 0 级一块 1350 × 675 是整个地球，第 6 级就是原图精度（不放大任何像素），共 2731 块。
+  最大缩放 = 第 6 级像素与屏幕 1:1（1920 宽时 45 倍，`MostZoom`），不放出糊图。选级 `LevelFor`：屏幕上地图宽度不超过该级像素宽的最粗一级；
+  可见范围 `Visible`（列跨日界线时不取模，由调用方取模）。离线测试 `worldmap`（`Tiles`）。
+- 文件：`Mods/Plugins/EDF6VehicleCrew.worldmap.bin`，一个文件：`'EDWM'`、u32 格式 1、u32 1350、u32 7，然后每块（按级、行自上而下、
+  列自 180°W 向东）u64 偏移 + u32 大小，然后各块 JPEG。插件按偏移读取需要的块。做成一个文件是为了安装只校验、复制一次、台账一条。
+- 生成：`python -B tools/worldmap_basemap.py fetch`（下载并校验 8 块原图）→ `tiles`（约 1 分钟，内存峰值约一块解码后的原图 1.4 GB）。
+  模型包文件夹仍是 `worldmap_tex`（`RELEASE_MODELS`），版本 `TEXTURE_VERSION` 2；模型包版本随内容哈希变一次。
+- 安装：`tools/worldmap_pack.py`（台账 owner `worldmap`）只校验 `worldmap_tex.json` 的版本、大小与 SHA-256 后复制，已装且相同的不重写；
+  缺文件夹 / 版本不符 / 内容不对 / `Mods` 里有别的 MOD 的同名文件时不装、说一行原因并释放以前装的（含版本 1 的两张 DDS），不做替代。
+- 测试：`worldmap_pack`（ctest：8 块合成小原图生成金字塔，逐块核对尺寸、JPEG、所在原图；安装 / 重装不重写 / 卸载 / 释放旧 DDS、四种拒绝；
+  有开发者模型目录时核对真实文件的表）、`worldmap_data`（来源与布局）、selftest `worldmap_textures_in_model_pack`。
+- **未实机**：插件侧的瓦片读取、解码与绘制都还没写（§6）。
 
 ## 3. 任务地点表（维护者：「地图弄成实际地点，到下一关有指引路线」）
 
@@ -115,7 +111,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址为 RVA；证据级别 H（反汇编 / 
 
 ## 6. 待办（需要实机或维护者决定）
 
-1. ~~底图打包~~（2026-11-10 已做，§2）。剩：分享包 `run_export.py` 的 `EXTERNAL_MODELS` 加 `worldmap_tex`；实机确认两张 4096 贴图经 Skin_Texture 能显示。
+1. ~~底图打包~~（2026-11-11 改为全球 JPEG 瓦片，§2）。剩：分享包 `run_export.py` 的 `EXTERNAL_MODELS` 加 `worldmap_tex`；插件侧瓦片读取（WIC 解码、后台线程、显存缓存上限）与 D3D11 绘制，先实机验证拖动时补块的速度。
 2. 逆向 `lyt_HUiHQMissionSelect.sgo` 的元素名（哪些是列表、哪些要保留：标题、难度、兵种），写隐藏表。
 3. 实现 §5 的绘制与输入（新文件 `src/worldmap.cpp`，签名进 `room_ui_sigs` 同类的审计测试），先在测试场任务包上实机迭代。
 4. MAINSCRIPT `HQMain` 的流程逆向，做「单机进本部直接开地图」。

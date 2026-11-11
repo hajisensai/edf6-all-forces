@@ -45,12 +45,39 @@ void Projection() {
     Expect(Near(c.u,0.f) && Near(c.v,1.f),"180E wraps to u 0");
     const MapPoint t=Project(35.69f,139.75f);
     Expect(Near(t.u,(139.75f+180.f)/360.f) && Near(t.v,(90.f-35.69f)/180.f),"Tokyo");
-    bool inside=true;
-    for(const Place& p:kPlaces)inside=inside && InDetail(p.lat,p.lon);
-    Expect(inside,"every place on the detail texture");
-    const MapPoint d=DetailUV(kDetailNorth,kDetailWest),e=DetailUV(kDetailSouth,kDetailEast);
-    Expect(Near(d.u,0.f) && Near(d.v,0.f) && Near(e.u,1.f) && Near(e.v,1.f),"detail corners");
-    Expect(Near(kDetailNorth-kDetailSouth,kDetailEast-kDetailWest),"the detail texture square in degrees");
+}
+
+void Tiles() {
+    Expect(kTile==1350 && kTileLevels==7,"the pyramid of pylib/worldmap.py");
+    Expect(Near(kDeepestWidth,86400.f),"the deepest level: Blue Marble's 240 px / degree");
+    Expect(TileColumns(0)==1 && TileRows(0)==1 && TileColumns(6)==64 && TileRows(6)==32,"the grid");
+    Expect(kTileCount==2731,"every level's tiles");
+    Expect(TileIndex(0,0,0)==0 && TileIndex(1,0,0)==1 && TileIndex(1,1,0)==2 && TileIndex(2,0,0)==3,"table order");
+    Expect(TileIndex(6,63,31)==kTileCount-1,"the last tile");
+    Expect(TileIndex(6,64,0)==-1 && TileIndex(7,0,0)==-1 && TileIndex(2,0,2)==-1,"outside");
+    const Screen s{1920.f,1080.f};
+    View v;Clamp(v,s);
+    Expect(LevelFor(v,s)==1,"the whole world on 1920 px: level 1 (2700 px wide)");
+    v.zoom=MostZoom(s);
+    Expect(LevelFor(v,s)==kTileLevels-1,"fully zoomed in: the deepest level");
+    v.zoom=1350.f*8.f/1920.f;
+    Expect(LevelFor(v,s)==3,"exactly one level's width: that level");
+    v.zoom=1350.f*8.f/1920.f+0.01f;
+    Expect(LevelFor(v,s)==4,"a little more: the next");
+    // Tokyo at the deepest level: one screen spans 1920 / 1350 tiles, rows within the grid.
+    v.zoom=MostZoom(s);
+    const MapPoint t=Project(35.69f,139.75f);
+    v.cu=t.u;v.cv=t.v;Clamp(v,s);
+    const TileSpan a=Visible(v,s,kTileLevels-1);
+    const int tx=static_cast<int>(t.u*64.f),ty=static_cast<int>(t.v*32.f);
+    Expect(a.x0<=tx && tx<=a.x1 && a.y0<=ty && ty<=a.y1,"the centre's tile shown");
+    Expect(a.x1-a.x0<=2 && a.y1-a.y0<=1,"one screen: at most 3 x 2 tiles");
+    // Across the antimeridian columns run past the grid (the caller wraps them).
+    v.zoom=4.f;v.cu=0.999f;v.cv=0.5f;Clamp(v,s);
+    const TileSpan b=Visible(v,s,LevelFor(v,s));
+    Expect(b.x1>=TileColumns(b.level),"east of 180: past the last column");
+    v.cu=0.001f;Clamp(v,s);
+    Expect(Visible(v,s,LevelFor(v,s)).x0<0,"west of 180 W: below column 0");
 }
 
 void Views() {
@@ -59,7 +86,7 @@ void Views() {
     Clamp(v,s);
     Expect(Near(v.zoom,LeastZoom(s)) && v.zoom>=1.f,"zoom never below filling the height");
     v.zoom=1000.f;Clamp(v,s);
-    Expect(Near(v.zoom,kMostZoom),"zoom capped");
+    Expect(Near(v.zoom,MostZoom(s)) && Near(v.zoom,45.f),"zoom capped at the deepest level's pixels");
     v=View{};v.zoom=4.f;v.cv=0.f;Clamp(v,s);
     const float halfV=s.h/(s.w*4.f);
     Expect(Near(v.cv,halfV),"no sky above the north pole");
@@ -143,6 +170,7 @@ void Rows() {
 int main() {
     Table();
     Projection();
+    Tiles();
     Views();
     Routes();
     Markers();

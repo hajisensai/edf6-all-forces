@@ -16,25 +16,58 @@ from dataclasses import dataclass
 import math
 
 REGIONS = ('hokkaido', 'tohoku', 'kanto', 'chubu', 'kansai', 'chugoku', 'kyushu')
-# The detail texture's bounds (tools/worldmap_basemap.py derive: a square crop of Blue Marble tile D1, 20 x 20 degrees,
-# equirectangular): every place lies inside, so the zoomed-in view never needs the coarse world texture.
-DETAIL_NORTH, DETAIL_SOUTH, DETAIL_WEST, DETAIL_EAST = 47.0, 27.0, 127.0, 147.0
-
-# The two base map textures, the one place their paths are written (docs/plan-2026-11-10-worldmap.md §2):
-# tools/worldmap_basemap.py textures builds them into the model pack's folder TEXTURE_DIR (tools/build_release.py
-# RELEASE_MODELS), tools/worldmap_pack.py installs them under Mods at TEXTURES[kind], and tools/gen_worldmap.py hands
-# the plugin their app:/ paths (src/worldmap.inc kWorldTexture / kJapanTexture).
+# The base map, the one place its layout and paths are written (docs/plan-2026-11-10-worldmap.md §2): the whole Earth
+# from NASA Blue Marble's eight 500 m tiles (240 px / degree, 86400 x 43200 px), a JPEG tile pyramid the plugin decodes
+# itself (WIC) and draws (D3D11), so every place on Earth stays sharp when zoomed in (maintainer 2026-11-11: places
+# abroad, the whole globe in high resolution, JPEG).
+#  - Level z (0 .. TILE_LEVELS - 1) is TILE * 2**z by TILE * 2**z / 2 px: 2**z columns, max(1, 2**(z - 1)) rows of
+#    TILE x TILE tiles (level 0: one TILE x TILE/2 tile). The deepest level is the sources' own resolution: TILE = 1350
+#    divides their 21600 px, so no tile straddles two sources.
+#  - One file, TILES_FILE: b'EDWM', u32 TILES_FORMAT, u32 TILE, u32 TILE_LEVELS, then per tile (level by level, rows top
+#    down, columns west to east from 180 W) u64 offset (from the file's start) and u32 size, then the JPEG bytes.
+# tools/worldmap_basemap.py tiles builds it into the model pack's folder TEXTURE_DIR (tools/build_release.py
+# RELEASE_MODELS), tools/worldmap_pack.py installs it under Mods, tools/gen_worldmap.py hands the plugin the layout
+# (src/worldmap.inc kTile*).
+TILE = 1350
+TILE_LEVELS = 7
+TILE_QUALITY = 85       # JPEG quality (4:2:0): 2026-11-11 trial, PSNR 35-40 dB against the sources, 344 MB in all
+TILES_FORMAT = 1
+TILES_MAGIC = b'EDWM'
+TILES_FILE = 'Plugins/EDF6VehicleCrew.worldmap.bin'     # under Mods, beside the plugin that reads it
 TEXTURE_DIR = 'worldmap_tex'
 TEXTURE_INDEX = 'worldmap_tex.json'     # in TEXTURE_DIR: {'version', 'files': {name: {'sha256', 'size'}}}
-TEXTURE_VERSION = 1     # the index's version: raise when the textures' bytes change for the same sources
-TEXTURES = {'world': 'UI/EDF6VC_WORLDMAP_WORLD.DDS',    # under Mods; the whole Earth, 4096 x 2048
-            'japan': 'UI/EDF6VC_WORLDMAP_JAPAN.DDS'}    # DETAIL_* above, 4096 x 4096
+TEXTURE_VERSION = 2     # the index's version: raise when the shipped bytes change for the same sources (1: two DXT1 DDS)
 
 
-def app_path(rel: str) -> str:
-    """The game's name of a file under Mods (as src/room_ui_logic.h kWhiteTexture: app:/UI/EDF6VC_WHITE.dds)."""
-    stem, ext = rel.rsplit('.', 1)
-    return f'app:/{stem}.{ext.lower()}'
+def tile_grid(level: int) -> tuple[int, int]:
+    """(columns, rows) of tiles at `level`."""
+    return 1 << level, max(1, 1 << level >> 1)
+
+
+def tile_count() -> int:
+    return sum(c * r for c, r in map(tile_grid, range(TILE_LEVELS)))
+
+
+def tile_table(data: bytes, total: int | None = None) -> dict[tuple[int, int, int], tuple[int, int]]:
+    """{(level, column, row): (offset, size)} of a TILES_FILE (ValueError when it is not one of this layout); `data`
+    may be just its head (the table) when `total` gives the file's size."""
+    import struct
+    if len(data) < 16:
+        raise ValueError('too short')
+    magic, fmt, tile, levels = struct.unpack_from('<4sIII', data, 0)
+    if (magic, fmt, tile, levels) != (TILES_MAGIC, TILES_FORMAT, TILE, TILE_LEVELS):
+        raise ValueError(f'not this layout: {(magic, fmt, tile, levels)}')
+    out, at = {}, 16
+    for z in range(TILE_LEVELS):
+        cols, rows = tile_grid(z)
+        for y in range(rows):
+            for x in range(cols):
+                off, size = struct.unpack_from('<QI', data, at)
+                if off + size > (len(data) if total is None else total):
+                    raise ValueError(f'tile {(z, x, y)} past the end')
+                out[(z, x, y)] = (off, size)
+                at += 12
+    return out
 
 
 @dataclass(frozen=True)
