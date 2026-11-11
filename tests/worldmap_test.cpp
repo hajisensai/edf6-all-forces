@@ -19,10 +19,11 @@ void Table() {
     Expect(kPlaceCount>=40 && kMissionCount==483,"45 places, 483 missions (EDF6 206, EDF5 139, EDF4.1 138)");
     bool ranges=true,names=true;
     for(const Place& p:kPlaces) {
-        ranges=ranges && p.lat>=24.f && p.lat<=46.f && p.lon>=122.f && p.lon<=146.f;   // Japan
+        const bool japan=p.region!=Region::europe && p.region!=Region::africa;
+        ranges=ranges && (!japan || (p.lat>=24.f && p.lat<=46.f && p.lon>=122.f && p.lon<=146.f));
         for(const wchar_t* n:p.name)names=names && n && *n;
     }
-    Expect(ranges,"every place in Japan");
+    Expect(ranges,"every Japanese region's place in Japan");
     Expect(names,"every place named in the four HUD languages");
     bool inRange=true;
     for(const Mission& m:kMissions)inRange=inRange && m.place>=0 && m.place<kPlaceCount;
@@ -118,7 +119,11 @@ void Views() {
     const View f=Frame(pts,kPlaceCount,s);
     bool inside=true;
     for(int i=0;i<kPlaceCount;++i){const Pixel x=ToScreen(f,s,pts[i]);inside=inside && x.x>=0 && x.x<=s.w && x.y>=0 && x.y<=s.h;}
-    Expect(inside && f.zoom>8.f,"the framed view shows every place, zoomed in on Japan");
+    Expect(inside && f.zoom>1.f,"the framed view shows every place, Prague to Sapporo");
+    // Framing only the Japanese places zooms in on Japan.
+    int n=0;
+    for(int i=0;i<kPlaceCount;++i)if(kPlaces[i].region!=Region::europe && kPlaces[i].region!=Region::africa)pts[n++]=Project(kPlaces[i].lat,kPlaces[i].lon);
+    Expect(n>=40 && Frame(pts,n,s).zoom>8.f,"framing Japan: zoomed in");
 }
 
 void Routes() {

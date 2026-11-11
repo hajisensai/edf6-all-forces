@@ -32,7 +32,9 @@ def load(rel: str) -> dict:
 
 def check_places() -> None:
     for pid, p in worldmap.PLACES.items():
-        check(24.0 <= p.lat <= 46.0 and 122.0 <= p.lon <= 146.0, f'{pid}: in Japan')
+        check(-90.0 <= p.lat <= 90.0 and -180.0 <= p.lon < 180.0, f'{pid}: on Earth')
+        if p.region in worldmap.JAPAN_REGIONS:
+            check(24.0 <= p.lat <= 46.0 and 122.0 <= p.lon <= 146.0, f'{pid}: a Japanese region, in Japan')
         check(p.region in worldmap.REGIONS, f'{pid}: a known region')
         check(all(n.strip() for n in (p.sc, p.tc, p.en, p.ja, p.kr)), f'{pid}: named in five languages')
     for name, (pid, why) in worldmap.MAPS.items():
@@ -43,6 +45,8 @@ def check_places() -> None:
         check((p.lat, p.lon) not in coords, f'{pid}: not on top of {coords.get((p.lat, p.lon))}')
         coords[(p.lat, p.lon)] = pid
     check(worldmap.RANGE_PLACE in worldmap.PLACES, 'the range place exists')
+    abroad = {name: pid for name, (pid, _why) in worldmap.MAPS.items() if worldmap.PLACES[pid].region not in worldmap.JAPAN_REGIONS}
+    check(abroad == {'nw_europe01': 'prague', 'ig_desert508': 'ergchebbi'}, f'the maps abroad (maintainer 2026-11-11): {abroad}')
 
 
 def check_missions() -> None:

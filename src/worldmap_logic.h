@@ -18,7 +18,7 @@
 
 namespace worldmap {
 
-enum class Region : int { hokkaido, tohoku, kanto, chubu, kansai, chugoku, kyushu };
+enum class Region : int { hokkaido, tohoku, kanto, chubu, kansai, chugoku, kyushu, europe, africa };
 // Names in src/hudtext.h Lang order: en, zhCN, zhTW, ja.
 struct Place { float lat; float lon; Region region; const wchar_t* id; const wchar_t* name[4]; };
 struct Mission { const wchar_t* key; int place; };

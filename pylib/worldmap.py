@@ -4,8 +4,9 @@ Earth, so each mission's marker stands on a real location and the route to the n
 The games never name a real location (EDF6's briefings: "city", "town", "mountains", "Base 251"; tools/make_worldmap.py
 reads which map each mission loads instead). So the place is chosen from what the map *is* (its file name, romanised
 Japanese: haikyo = ruins, danti = housing estate, rinkai = waterfront, kitaguni = the snow country, sangaku =
-mountains, ...): a real Japanese location of that kind (the series is set in Japan). Every pairing is a design choice
-(evidence L), the meaning of the map name H/M (named in the column `why`).
+mountains, ...): a real Japanese location of that kind (the series is set in Japan), or, where the map is plainly
+not Japanese (a European old town, a sand desert), a real place abroad (maintainer 2026-11-11: 「放境外」). Every pairing is
+a design choice (evidence L), the meaning of the map name H/M (named in the column `why`).
 
 PLACES  place id -> Place (the names in the game's five text languages, latitude / longitude in degrees, its region).
 MAPS    map name (lower case, no .mac; worldmap/missions.json) -> place id. Several maps may share a place.
@@ -15,7 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-REGIONS = ('hokkaido', 'tohoku', 'kanto', 'chubu', 'kansai', 'chugoku', 'kyushu')
+REGIONS = ('hokkaido', 'tohoku', 'kanto', 'chubu', 'kansai', 'chugoku', 'kyushu', 'europe', 'africa')
+JAPAN_REGIONS = REGIONS[:7]
 # The base map, the one place its layout and paths are written (docs/plan-2026-11-10-worldmap.md §2): the whole Earth
 # from NASA Blue Marble's eight 500 m tiles (240 px / degree, 86400 x 43200 px), a JPEG tile pyramid the plugin decodes
 # itself (WIC) and draws (D3D11), so every place on Earth stays sharp when zoomed in (maintainer 2026-11-11: places
@@ -117,8 +119,6 @@ PLACES: dict[str, Place] = {
     'niigata': Place(37.850, 139.030, 'chubu', '越后平原水田', '越後平原水田', 'Echigo plain paddies', '越後平野の水田',
                      '에치고 평야 논'),
     'ichihara': Place(35.520, 140.080, 'kanto', '市原炼油厂', '市原煉油廠', 'Ichihara refinery', '市原製油所', '이치하라 정유소'),
-    'kitano': Place(34.700, 135.190, 'kansai', '神户·北野异人馆街', '神戶·北野異人館街', 'Kitano, Kobe (old foreign quarter)',
-                    '神戸・北野異人館街', '고베 기타노 이진칸'),
     'kyoto': Place(35.011, 135.768, 'kansai', '京都', '京都', 'Kyoto', '京都', '교토'),
     'sendai': Place(38.268, 140.870, 'tohoku', '仙台', '仙台', 'Sendai', '仙台', '센다이'),
     'namba': Place(34.666, 135.501, 'kansai', '大阪·难波', '大阪·難波', 'Namba, Osaka', '大阪・難波', '오사카 난바'),
@@ -128,7 +128,6 @@ PLACES: dict[str, Place] = {
     'akiyoshi': Place(34.230, 131.303, 'chugoku', '秋吉洞', '秋吉洞', 'Akiyoshi Cave', '秋芳洞', '아키요시동굴'),
     'ryusendo': Place(39.866, 141.800, 'tohoku', '龙泉洞', '龍泉洞', 'Ryusendo Cave', '龍泉洞', '류센도 동굴'),
     'aso': Place(32.884, 131.104, 'kyushu', '阿苏火山口', '阿蘇火山口', 'Aso crater', '阿蘇火口', '아소 분화구'),
-    'tottori': Place(35.540, 134.229, 'chugoku', '鸟取沙丘', '鳥取沙丘', 'Tottori Sand Dunes', '鳥取砂丘', '돗토리 사구'),
     'tokachi': Place(42.920, 143.200, 'hokkaido', '十胜平原', '十勝平原', 'Tokachi plain', '十勝平野', '도카치 평야'),
     'nasu': Place(36.950, 140.000, 'kanto', '那须平原', '那須平原', 'Nasu plain', '那須野が原', '나스 평원'),
     'kujukuri': Place(35.540, 140.450, 'kanto', '九十九里海岸', '九十九里海岸', 'Kujukuri beach', '九十九里浜', '구주쿠리 해변'),
@@ -142,6 +141,10 @@ PLACES: dict[str, Place] = {
     'hoshitoge': Place(37.100, 138.620, 'chubu', '星峠梯田', '星峠梯田', 'Hoshitoge terraces', '星峠の棚田', '호시토게 계단식 논'),
     'hakone': Place(35.232, 139.024, 'kanto', '箱根山', '箱根山', 'Hakone mountains', '箱根山', '하코네산'),
     'kurobe': Place(36.820, 137.580, 'chubu', '黑部峡谷', '黑部峽谷', 'Kurobe Gorge', '黒部峡谷', '구로베 협곡'),
+    # Abroad: maps that are plainly not Japan.
+    'prague': Place(50.087, 14.421, 'europe', '布拉格老城', '布拉格老城', 'Prague Old Town', 'プラハ旧市街', '프라하 구시가지'),
+    'ergchebbi': Place(31.150, -4.020, 'africa', '撒哈拉·舍比沙丘', '撒哈拉·舍比沙丘', 'Erg Chebbi, Sahara',
+                       'サハラ砂漠・シェビ砂丘', '사하라 셰르비 사구'),
 }
 
 # map -> (place, why: what the map name says; H = the name says it, M = read from its letters, L = not known)
@@ -171,7 +174,7 @@ MAPS: dict[str, tuple[str, str]] = {
     'nw_soukogai01': ('honmoku', 'soukogai: warehouse street (M)'),
     'nw_suiden': ('niigata', 'suiden: rice paddies (M)'),
     'nw_seiyu': ('ichihara', 'seiyu: oil refinery (M)'), 'nw_seiyu_night': ('ichihara', 'seiyu: oil refinery (M)'),
-    'nw_europe01': ('kitano', 'a European town (H): the old foreign quarter of a Japanese port'),
+    'nw_europe01': ('prague', 'a European town (H): a well-kept central European old town'),
     'nw_dlcmap601': ('kyoto', 'a mission pack map, kind not read (L)'),
     'nw_dlcmap602': ('sendai', 'a mission pack map, kind not read (L)'),
     'ig_2000mcity': ('namba', 'a 2000 m city (H)'),
@@ -185,7 +188,7 @@ MAPS: dict[str, tuple[str, str]] = {
     'ig_hornetcave01': ('ryusendo', 'a hornet cave (H)'),
     # Open country.
     'ig_crater601': ('aso', 'crater (H)'), 'sk_crater01': ('aso', 'crater (H)'),
-    'ig_desert508': ('tottori', 'desert (H)'),
+    'ig_desert508': ('ergchebbi', 'desert (H): sand dunes, so the Sahara'),
     'ig_heigen507': ('tokachi', 'heigen: plain (M)'), 'sk_heigen02': ('tokachi', 'heigen: plain (M)'),
     'ig_heigen601': ('nasu', 'heigen: plain (M)'),
     'ig_kaigan502': ('kujukuri', 'kaigan: coast (M)'), 'sk_kaigan01': ('kujukuri', 'kaigan: coast (M)'),

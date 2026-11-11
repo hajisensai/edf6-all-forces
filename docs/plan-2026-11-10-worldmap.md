@@ -116,5 +116,5 @@ EDF.dll TimeDateStamp 0x678CCB46，地址为 RVA；证据级别 H（反汇编 / 
 3. 实现 §5 的绘制与输入（新文件 `src/worldmap.cpp`，签名进 `room_ui_sigs` 同类的审计测试），先在测试场任务包上实机迭代。
 4. MAINSCRIPT `HQMain` 的流程逆向，做「单机进本部直接开地图」。
 5. 载具预览：实机确认载具菜单 SGO 不崩、镜头倍数与转速合适（`room-3d-preview-re.md` §6.1）。
-6. 维护者审一遍地点配对（`pylib/worldmap.py MAPS`），尤其 `nw_europe01` → 神户北野异人馆街（「欧洲风街区」的日本对应）、
-   任务包地图 `nw_dlcmap601/602`（内容没读，暂放京都 / 仙台）。
+6. 维护者审一遍地点配对（`pylib/worldmap.py MAPS`）。2026-11-11 起明显不是日本的地图放境外：`nw_europe01` → 布拉格老城、
+   `ig_desert508` → 撒哈拉舍比沙丘（都是 L）；任务包地图 `nw_dlcmap601/602`（内容没读）暂放京都 / 仙台。
