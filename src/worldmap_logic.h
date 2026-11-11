@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cwchar>
+#include <utility>
 
 namespace worldmap {
 
@@ -89,9 +90,13 @@ struct View {
     float cu=0.5f,cv=0.5f;   // the map point at the screen's centre
     float zoom=1.f;          // map widths across the screen: 1 the whole world, more nearer
 };
-struct Screen { float w; float h; };   // the layout the map is drawn on (1920 x 1080, src/hudscale.h)
+// The layout the map is drawn on (1920 x 1080 design units, src/hudscale.h); `px`: the width it is drawn at in real
+// pixels (the viewport, docs/worldmap-select-re.md §6), 0 when not known yet (then taken as `w`). Only the sharpness
+// (MostZoom, LevelFor) depends on it: positions are in design units.
+struct Screen { float w; float h; float px=0.f; };
+inline float PixelWidth(const Screen& s) noexcept { return s.px>0.f ? s.px : s.w; }
 // The deepest level's pixels one to one on the screen: zooming further would only show them bigger (blurred).
-inline float MostZoom(const Screen& s) noexcept { return kDeepestWidth/s.w; }
+inline float MostZoom(const Screen& s) noexcept { return kDeepestWidth/PixelWidth(s); }
 // The map is twice as wide as tall: zoom 1 shows the world's width; the least zoom keeps it filling the screen's height.
 inline float LeastZoom(const Screen& s) noexcept { return s.h*2.f/s.w>1.f ? s.h*2.f/s.w : 1.f; }
 inline void Clamp(View& v,const Screen& s) noexcept {
@@ -133,9 +138,10 @@ inline void Pan(View& v,const Screen& s,float dx,float dy) noexcept {
     v.cu-=dx/scale;v.cv-=dy/(scale*0.5f);
     Clamp(v,s);
 }
-// The level to draw: the coarsest whose pixels are no larger than the screen's (the map's on-screen width s.w * zoom).
+// The level to draw: the coarsest whose pixels are no larger than the screen's (the map's on-screen width in real
+// pixels, PixelWidth * zoom).
 inline int LevelFor(const View& v,const Screen& s) noexcept {
-    const float want=s.w*v.zoom;
+    const float want=PixelWidth(s)*v.zoom;
     int z=0;
     while(z<kTileLevels-1 && static_cast<float>(kTile)*static_cast<float>(1<<z)<want)++z;
     return z;
@@ -255,6 +261,148 @@ inline int RouteTargets(int from,const int* successors,int count,const int* stat
         if(!dup)out[n++]=to;
     }
     return n;
+}
+
+// --- Drawing the pyramid (src/worldmap.cpp, the select's draw) ---
+// A tile's part of the map: u0..u1 east (x may be unwrapped: past the grid across the antimeridian), v0..v1 south.
+struct MapRect { float u0,v0,u1,v1; };
+inline MapRect TileRect(int level,int x,int y) noexcept {
+    const float cols=static_cast<float>(TileColumns(level)),rows=static_cast<float>(TileRows(level));
+    return MapRect{static_cast<float>(x)/cols,static_cast<float>(y)/rows,
+                   static_cast<float>(x+1)/cols,static_cast<float>(y+1)/rows};
+}
+inline int WrapColumn(int level,int x) noexcept {
+    const int cols=TileColumns(level);
+    return ((x%cols)+cols)%cols;
+}
+// The tile (level, x, y) (x wrapped) drawn from the deepest of it and its ancestors whose table entry `has(index)`:
+// that level (-1: none, not even level 0), its tile in *ax / *ay, and the part of that tile's texture (0..1) that is
+// the wanted tile's area in *uv. A level's tile holds exactly 2 x 2 of the next one's (level 0's one tile: level 1's
+// two), so the ancestor d levels up is (x >> d, y >> d). This is the pyramid's normal coarse-to-fine: a deep tile
+// not decoded yet shows its area from the finest of what is there.
+template<class Has> int Cover(int level,int x,int y,Has has,int* ax,int* ay,MapRect* uv) noexcept {
+    for(int z=level;z>=0;--z) {
+        const int d=level-z,px=x>>d,py=y>>d;
+        if(!has(TileIndex(z,px,py)))continue;
+        if(ax)*ax=px;
+        if(ay)*ay=py;
+        if(uv) {
+            const MapRect t=TileRect(level,x,y),a=TileRect(z,px,py);
+            const float w=a.u1-a.u0,h=a.v1-a.v0;
+            *uv=MapRect{(t.u0-a.u0)/w,(t.v0-a.v0)/h,(t.u1-a.u0)/w,(t.v1-a.v0)/h};
+        }
+        return z;
+    }
+    return -1;
+}
+// A map u (unwrapped: the copy near the view's centre) and v to design pixels. The tiles' edges all come from this
+// one formula, so neighbours share their edge bit for bit (no gap, no overlap).
+inline Pixel ToScreenUnwrapped(const View& v,const Screen& s,float u,float vv) noexcept {
+    const float scale=s.w*v.zoom;
+    return Pixel{s.w*0.5f+(u-v.cu)*scale,s.h*0.5f+(vv-v.cv)*scale*0.5f};
+}
+// The tiles of `span` in the order to fetch them: nearest the screen's centre first. Writes at most `capacity`
+// {x (unwrapped), y} pairs into `xy`; returns how many.
+inline int CentreFirst(const View& v,const Screen& s,const TileSpan& span,int* xy,int capacity) noexcept {
+    int n=0;
+    for(int y=span.y0;y<=span.y1;++y)for(int x=span.x0;x<=span.x1 && n<capacity;++x){xy[2*n]=x;xy[2*n+1]=y;++n;}
+    auto dist=[&](int i) {
+        const MapRect r=TileRect(span.level,xy[2*i],xy[2*i+1]);
+        const Pixel c=ToScreenUnwrapped(v,s,(r.u0+r.u1)*0.5f,(r.v0+r.v1)*0.5f);
+        const float dx=c.x-s.w*0.5f,dy=c.y-s.h*0.5f;
+        return dx*dx+dy*dy;
+    };
+    for(int i=1;i<n;++i)   // insertion sort: a dozen tiles
+        for(int j=i;j>0 && dist(j)<dist(j-1);--j){std::swap(xy[2*j],xy[2*j-2]);std::swap(xy[2*j+1],xy[2*j-1]);}
+    return n;
+}
+
+// --- The texture cache's eviction ---
+// The cached tile to drop for a new one: never a resident one (levels below `resident`: 0 and 1, the three tiles
+// under everything) nor one drawn in frame `now`; of the rest the least recently drawn, a tie the deeper level (the
+// cheapest to be without: its parent shows its area). -1: none may go (the new tile waits).
+inline int Victim(const int* level,const unsigned* used,int n,unsigned now,int resident=2) noexcept {
+    int best=-1;
+    for(int i=0;i<n;++i) {
+        if(level[i]<resident || used[i]==now)continue;
+        if(best<0 || used[i]<used[best] || (used[i]==used[best] && level[i]>level[best]))best=i;
+    }
+    return best;
+}
+
+// --- The opening animation ---
+// A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), not past MostZoom.
+inline View FramePlace(MapPoint p,const Screen& s,float spanDeg=24.f) noexcept {
+    View v;
+    v.cu=p.u;v.cv=p.v;
+    v.zoom=360.f/spanDeg;
+    Clamp(v,s);
+    return v;
+}
+// The whole Earth as far as it fits (LeastZoom: the map's full height), centred on longitude `u`.
+inline View Whole(float u,const Screen& s) noexcept {
+    View v;
+    v.cu=u;v.cv=0.5f;v.zoom=LeastZoom(s);
+    Clamp(v,s);
+    return v;
+}
+inline float Ease(float t) noexcept {
+    t=t<0.f ? 0.f : t>1.f ? 1.f : t;
+    return t*t*(3.f-2.f*t);
+}
+// `a` to `b` at time t (0..1, eased): the centre the short way round, the zoom by its logarithm (a steady approach).
+inline View Blend(const View& a,const View& b,float t,const Screen& s) noexcept {
+    const float e=Ease(t);
+    float du=b.cu-a.cu;
+    du-=std::floor(du+0.5f);
+    View v;
+    v.cu=a.cu+du*e;
+    v.cv=a.cv+(b.cv-a.cv)*e;
+    v.zoom=a.zoom*std::pow(b.zoom/a.zoom,e);
+    Clamp(v,s);
+    return v;
+}
+
+// --- Input ---
+// What the map takes (src/worldmap.cpp reads the devices): a mouse drag pans, the wheel zooms about the pointer, the
+// right stick pans, LB / RB zoom out / in about the centre.
+inline constexpr float kStickDead=0.24f;
+inline constexpr float kStickPanPerSec=900.f;    // design pixels a second at full deflection
+inline constexpr float kHoldZoomPerSec=1.5f;     // octaves (x2) a second with LB / RB held
+inline constexpr float kWheelNotchZoom=0.5f;     // octaves a wheel notch (120)
+inline float Stick(short raw) noexcept {
+    const float f=static_cast<float>(raw)/32767.f;
+    const float a=f<0.f ? -f : f;
+    if(a<kStickDead)return 0.f;
+    float r=(a-kStickDead)/(1.f-kStickDead);
+    if(r>1.f)r=1.f;
+    return f<0.f ? -r : r;
+}
+// The drag to Pan for a stick (x right, y up as XInput gives it): the view moves the way it is pushed, so the map
+// goes the other way.
+inline Pixel StickPan(float x,float y,float dt) noexcept {
+    return Pixel{-x*kStickPanPerSec*dt,y*kStickPanPerSec*dt};
+}
+// The zoom factor for LB (out) / RB (in) held `dt` s; 1 with both or neither.
+inline float HoldZoom(bool out,bool in,float dt) noexcept {
+    const float dir=(in ? 1.f : 0.f)-(out ? 1.f : 0.f);
+    return std::exp2(dir*kHoldZoomPerSec*dt);
+}
+// The zoom factor for a wheel delta (WM_MOUSEWHEEL units: 120 a notch, forward positive: nearer).
+inline float WheelZoom(int delta) noexcept {
+    return std::exp2(static_cast<float>(delta)/120.f*kWheelNotchZoom);
+}
+// The select's windows the stock draw keeps over the map (lyt_HUiHQMissionSelect.sgo: Window02_SoldierSel1 at
+// (842, 223) 540 x 274, Window02_SoldierSel2 at (842, 497) 540 x 354; docs/worldmap-select-re.md §2): the mouse
+// there is theirs (the briefing's wheel / drag scroll), not the map's.
+inline bool OverPanels(Pixel p) noexcept { return p.x>=842.f && p.x<842.f+540.f && p.y>=223.f && p.y<497.f+354.f; }
+inline bool OnScreen(Pixel p,const Screen& s) noexcept { return p.x>=0.f && p.y>=0.f && p.x<s.w && p.y<s.h; }
+// A client pixel (cx, cy) of a cw x ch client area to design units, through the render target (rw x rh: the client
+// scaled to it) and the viewport the select is drawn in (vp: x, y, w, h in target pixels). Off screen when unknown.
+inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float rh,const float* vp,const Screen& s) noexcept {
+    if(!(cw>0.f) || !(ch>0.f) || !(vp[2]>0.f) || !(vp[3]>0.f))return Pixel{-1.f,-1.f};
+    const float rx=cx*rw/cw,ry=cy*rh/ch;
+    return Pixel{(rx-vp[0])*s.w/vp[2],(ry-vp[1])*s.h/vp[3]};
 }
 
 }  // namespace worldmap

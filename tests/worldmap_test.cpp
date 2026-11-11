@@ -170,6 +170,121 @@ void Rows() {
     Expect(RouteTargets(0,succ,5,state,6,out,1)==1,"capacity kept");
     Expect(Shown(0) && Shown(3) && !Shown(4) && Open(2) && !Open(0),"states");
 }
+
+// The select's draw: which texture covers a tile, the edges, the fetch order, the cache's eviction.
+void Drawing() {
+    const MapRect r=TileRect(2,3,1);
+    Expect(Near(r.u0,0.75f) && Near(r.u1,1.f) && Near(r.v0,0.5f) && Near(r.v1,1.f),"a tile's area");
+    Expect(Near(TileRect(0,0,0).v1,1.f) && Near(TileRect(1,1,0).u0,0.5f) && Near(TileRect(1,1,0).v1,1.f),
+           "level 0 the whole map, level 1 its halves");
+    Expect(WrapColumn(3,-1)==7 && WrapColumn(3,8)==0 && WrapColumn(3,5)==5,"columns wrap across the antimeridian");
+    // Only level 0 there: a level 3 tile is its part of level 0's one tile.
+    auto only0=[](int i) { return i==0; };
+    int ax=-1,ay=-1;
+    MapRect uv{};
+    Expect(Cover(3,5,2,only0,&ax,&ay,&uv)==0 && ax==0 && ay==0,"nothing finer: level 0");
+    Expect(Near(uv.u0,5.f/8.f) && Near(uv.u1,6.f/8.f) && Near(uv.v0,0.5f) && Near(uv.v1,0.75f),"...its part of level 0");
+    // Its level 2 parent there: the parent's quarter.
+    const int parent=TileIndex(2,2,1);
+    auto upTo2=[parent](int i) { return i==0 || i==parent; };
+    Expect(Cover(3,5,2,upTo2,&ax,&ay,&uv)==2 && ax==2 && ay==1,"the finest ancestor there");
+    Expect(Near(uv.u0,0.5f) && Near(uv.u1,1.f) && Near(uv.v0,0.f) && Near(uv.v1,0.5f),"...the right quarter");
+    auto all=[](int i) { return i>=0; };
+    Expect(Cover(3,5,2,all,&ax,&ay,&uv)==3 && Near(uv.u0,0.f) && Near(uv.v1,1.f),"the tile itself: all of it");
+    auto none=[](int) { return false; };
+    Expect(Cover(3,5,2,none,&ax,&ay,&uv)==-1,"nothing at all: -1");
+    // Neighbours share their edge exactly, also across the antimeridian (unwrapped columns).
+    const Screen s{1920.f,1080.f};
+    View v;v.zoom=6.f;v.cu=0.999f;v.cv=0.5f;Clamp(v,s);
+    const int level=LevelFor(v,s);
+    const TileSpan span=Visible(v,s,level);
+    bool shared=true;
+    for(int x=span.x0;x<span.x1;++x) {
+        const MapRect a=TileRect(level,x,span.y0),b=TileRect(level,x+1,span.y0);
+        shared=shared && ToScreenUnwrapped(v,s,a.u1,a.v0).x==ToScreenUnwrapped(v,s,b.u0,b.v0).x;
+    }
+    Expect(shared && span.x1>=TileColumns(level),"edges shared bit for bit, across 180");
+    // The covered tiles fill the screen.
+    const MapRect first=TileRect(level,span.x0,span.y0),last=TileRect(level,span.x1,span.y1);
+    const Pixel tl=ToScreenUnwrapped(v,s,first.u0,first.v0),br=ToScreenUnwrapped(v,s,last.u1,last.v1);
+    Expect(tl.x<=0.f && tl.y<=0.f && br.x>=s.w && br.y>=s.h,"the visible span covers the screen");
+    // Fetch order: the centre's tile first.
+    int xy[64];
+    const int n=CentreFirst(v,s,span,xy,32);
+    Expect(n==(span.x1-span.x0+1)*(span.y1-span.y0+1),"every visible tile listed");
+    const MapRect c=TileRect(level,xy[0],xy[1]);
+    const Pixel c0=ToScreenUnwrapped(v,s,c.u0,c.v0),c1=ToScreenUnwrapped(v,s,c.u1,c.v1);
+    Expect(c0.x<=s.w*0.5f && c1.x>=s.w*0.5f && c0.y<=s.h*0.5f && c1.y>=s.h*0.5f,"the first holds the centre");
+    Expect(CentreFirst(v,s,span,xy,1)==1,"capacity kept");
+    // At most a dozen tiles a screen at any zoom (the cache of 48 holds a screen's worth and their ancestors).
+    bool few=true;
+    for(float z=LeastZoom(s);z<=MostZoom(s);z*=1.07f) {
+        View w;w.zoom=z;w.cu=0.3f;w.cv=0.4f;Clamp(w,s);
+        const TileSpan t=Visible(w,s,LevelFor(w,s));
+        few=few && (t.x1-t.x0+1)*(t.y1-t.y0+1)<=12;
+    }
+    Expect(few,"at most 12 tiles on a 1920 x 1080 screen");
+    // A 2560 px wide viewport: sharpness by real pixels (one level finer sooner, the deepest zoom less far).
+    const Screen wide{1920.f,1080.f,2560.f};
+    Expect(Near(MostZoom(wide),86400.f/2560.f) && Near(MostZoom(s),45.f),"the most zoom by real pixels");
+    View z;z.zoom=1350.f*8.f/2560.f+0.01f;
+    Expect(LevelFor(z,wide)==4 && LevelFor(z,s)==3,"the level by real pixels");
+    // Eviction: resident levels and this frame's tiles stay; else the least recently drawn, a tie the deeper.
+    const int lv[5]={0,1,4,5,3};
+    const unsigned used[5]={1,1,7,7,9};
+    Expect(Victim(lv,used,5,9)==3,"oldest, then deeper");
+    const unsigned now[5]={1,1,9,9,9};
+    Expect(Victim(lv,now,5,9)==-1,"all drawn now or resident: none");
+    const unsigned old[5]={0,0,5,5,5};
+    Expect(Victim(lv,old,2,9)==-1,"levels 0 and 1 never go");
+}
+
+void Opening() {
+    const Screen s{1920.f,1080.f};
+    const MapPoint tokyo=Project(35.69f,139.75f);
+    const View to=FramePlace(tokyo,s);
+    Expect(Near(to.cu,tokyo.u) && Near(to.cv,tokyo.v) && Near(to.zoom,15.f),"a place's region: 24 degrees across");
+    const View from=Whole(tokyo.u,s);
+    Expect(Near(from.zoom,LeastZoom(s)) && Near(from.cv,0.5f),"the whole Earth first");
+    const View a=Blend(from,to,0.f,s),b=Blend(from,to,1.f,s),m=Blend(from,to,0.5f,s);
+    Expect(Near(a.zoom,from.zoom) && Near(b.zoom,to.zoom) && Near(b.cu,to.cu) && Near(b.cv,to.cv),"ends exact");
+    Expect(Near(m.zoom,std::sqrt(from.zoom*to.zoom),1e-2f),"zoom half way by its logarithm");
+    Expect(Near(Blend(from,to,2.f,s).zoom,to.zoom) && Near(Blend(from,to,-1.f,s).zoom,from.zoom),"time held to 0..1");
+    // Across the seam the short way: 170 E to 170 W passes 180.
+    View e=FramePlace(Project(0.f,170.f),s),w=FramePlace(Project(0.f,-170.f),s);
+    const View h=Blend(e,w,0.5f,s);
+    Expect(Near(h.cu,0.f,1e-3f) || Near(h.cu,1.f,1e-3f),"the short way across 180");
+    Expect(Near(Ease(0.5f),0.5f) && Ease(0.25f)<0.25f && Ease(0.75f)>0.75f,"eased");
+}
+
+void Input() {
+    Expect(Stick(0)==0.f && Stick(7000)==0.f && Near(Stick(32767),1.f) && Near(Stick(-32768),-1.f),"stick dead zone, ends");
+    Expect(Stick(20000)>0.f && Stick(20000)<1.f && Near(Stick(-20000),-Stick(20000)),"stick between");
+    const Pixel p=StickPan(1.f,0.f,0.5f);
+    Expect(Near(p.x,-450.f) && Near(p.y,0.f),"stick right: the map moves left (the view right)");
+    Expect(StickPan(0.f,1.f,1.f).y>0.f,"stick up: the map moves down (the view north)");
+    const Screen s{1920.f,1080.f};
+    View v;v.zoom=4.f;v.cu=0.5f;v.cv=0.5f;Clamp(v,s);
+    const Pixel d=StickPan(1.f,1.f,0.1f);
+    Pan(v,s,d.x,d.y);
+    Expect(v.cu>0.5f && v.cv<0.5f,"stick up-right: the view goes north-east");
+    Expect(Near(HoldZoom(false,true,1.f),std::exp2(kHoldZoomPerSec)) && Near(HoldZoom(true,false,1.f),std::exp2(-kHoldZoomPerSec)),
+           "RB in, LB out");
+    Expect(HoldZoom(true,true,1.f)==1.f && HoldZoom(false,false,1.f)==1.f,"both or neither: no zoom");
+    Expect(Near(WheelZoom(120),std::exp2(kWheelNotchZoom)) && Near(WheelZoom(-240),std::exp2(-2.f*kWheelNotchZoom)) &&
+           WheelZoom(0)==1.f,"the wheel's notches");
+    Expect(OverPanels(Pixel{1000.f,300.f}) && OverPanels(Pixel{1000.f,800.f}) && !OverPanels(Pixel{500.f,500.f}) &&
+           !OverPanels(Pixel{1000.f,900.f}),"the kept windows' area");
+    const float vp[4]={0.f,0.f,2560.f,1440.f};
+    const Pixel c=ClientToDesign(1280.f,720.f,2560.f,1440.f,2560.f,1440.f,vp,s);
+    Expect(Near(c.x,960.f) && Near(c.y,540.f),"client centre: design centre");
+    const Pixel half=ClientToDesign(640.f,360.f,1280.f,720.f,2560.f,1440.f,vp,s);
+    Expect(Near(half.x,960.f) && Near(half.y,540.f),"a client smaller than its target");
+    const float box[4]={0.f,180.f,2560.f,1080.f};
+    Expect(Near(ClientToDesign(0.f,180.f,2560.f,1440.f,2560.f,1440.f,box,s).y,0.f),"a letterboxed viewport");
+    const float none[4]={0.f,0.f,0.f,0.f};
+    Expect(!OnScreen(ClientToDesign(1.f,1.f,2560.f,1440.f,2560.f,1440.f,none,s),s),"no viewport yet: off screen");
+}
 }  // namespace
 
 int main() {
@@ -180,6 +295,9 @@ int main() {
     Routes();
     Markers();
     Rows();
+    Drawing();
+    Opening();
+    Input();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }
