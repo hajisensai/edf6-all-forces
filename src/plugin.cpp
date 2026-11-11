@@ -891,6 +891,7 @@ void LoadConfig() noexcept {
     n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
     n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
     n.roomLoadoutButton=ReadInt(L"RoomLoadoutButton",static_cast<DWORD>(n.roomLoadoutButton));
+    n.hqAutoMissionSelect=ReadBool(L"HqAutoMissionSelect",n.hqAutoMissionSelect);
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
     n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);
@@ -1093,6 +1094,7 @@ void LoadConfig() noexcept {
     Log("CONFIG enemyControl=%d",n.enemyControl);
     Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
+    Log("CONFIG hqAutoMissionSelect=%d",n.hqAutoMissionSelect);
     Log("CONFIG allClassesRide=%d",n.allClassesRide);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);

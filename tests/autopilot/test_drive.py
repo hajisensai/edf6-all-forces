@@ -176,6 +176,12 @@ class DriverTest(unittest.TestCase):
             with self.assertRaises(SystemExit, msg=bad):
                 drive.run_options(bad)
 
+    def test_hq_keeps_the_hq_menu(self):
+        self.assertEqual(drive.run_options(['--hq'])[1]['ini'], ('HqAutoMissionSelect=0',))
+        self.assertEqual(drive.run_options(['--hq', '--ini', 'A=1'])[1]['ini'], ('A=1', 'HqAutoMissionSelect=0'))
+        self.assertEqual(drive.run_options(['--hq', '--ini', 'HqAutoMissionSelect=1'])[1]['ini'], ('HqAutoMissionSelect=1',))
+        self.assertEqual(drive.run_options(['--ini', 'A=1'])[1]['ini'], ('A=1',))
+
     def test_cycle_command_text(self):
         self.assertEqual(drive.cycle_command(20, 20.0, False), 'cycle 20 20')
         self.assertEqual(drive.cycle_command(2, 45.5, True), 'cycle 2 45.5 reboot')

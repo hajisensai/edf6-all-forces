@@ -76,8 +76,43 @@ check(consts['kHqGone'] + 17 + struct.unpack_from('<i', hq_gone, 13)[0] == 0x180
 check(img[0x89F562:0x89F567] == bytes.fromhex('ba10080000') and img[0x89F55C:0x89F560] == bytes.fromhex('40f6c501'),
       'HUiHQMain is deleted with its size 0x810 when flags bit 0 is set')
 check('void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }' in src and
-      'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[1].gone(self,flags); }' in src,
+      'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }' in src,
       'both destructor hooks note the end and chain on')
+# The HQ's mission select pressed by the stock ButtonApply (docs/worldmap-hq-open-re.md §5.1; kAutoMissionSigs).
+def rel(at: int, size: int, disp: int) -> int:
+    return at + size + struct.unpack_from('<i', img, at + disp)[0]
+
+
+def wide(at: int) -> str:
+    end = at
+    while img[end:end + 2] != b'\0\0':
+        end += 2
+    return img[at:end].decode('utf-16-le')
+
+
+check(rel(0x848247, 7, 3) == consts['kButtonApply'], "the action table takes ButtonApply's address at 0x848247")
+reg = img[0x84824E:0x848600]
+names = [rel(0x84824E + i, 7, 3) for i in range(len(reg) - 7) if reg[i:i + 3] in (b'\x48\x8d\x15', b'\x4c\x8d\x05')]
+check(any(img[n:n + 24] == 'ButtonApply'.encode('utf-16-le') + b'\0\0' for n in names if 0 < n < len(img) - 24),
+      'ButtonApply is registered under the name "ButtonApply" right after its address')
+check(rel(0x84EBA3, 5, 1) == consts['kDynamicCast'] and rel(0x84EB90, 7, 3) == consts['kButtonType'] and
+      rel(0x84EB97, 7, 3) == consts['kComponentType'], 'ButtonApply casts Component -> HUiButton by __RTDynamicCast')
+pe.parse_data_directories([pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+iat = rel(consts['kDynamicCast'], 6, 2)
+check(any(imp.address - base == iat and imp.name == b'__RTDynamicCast' for e in pe.DIRECTORY_ENTRY_IMPORT for imp in e.imports),
+      "the thunk 0x12DA7AA jumps through __RTDynamicCast's import")
+check(wide(rel(0x84EC00, 7, 3)) == 'Click' and rel(0x84EC0A, 5, 1) == consts['kHasAction'], 'ButtonApply asks HasAction(button, "Click")')
+check(rel(0x84EC20, 5, 1) == 0x83A0C0 and img[0x83A0C0:0x83A0C7] == bytes.fromhex('488b8970040000'),
+      "then the window's id -> name map (0x83A0C0 reads window+0x470), not a focus call")
+check(wide(rel(0x84ED6F, 7, 3)) == 'Click' and rel(0x84ED79, 5, 1) == 0x7EAB90 and rel(0x84ED5C, 7, 3) == 0x17FE090,
+      'ButtonApply fires "Click" through FireAction with {0x17FE090, button+0x2B0}')
+check(struct.unpack_from('<Q', img, 0x17FE090)[0] - base == 0x84E780 and img[0x84E780:0x84E785] == bytes.fromhex('488b4108c3'),
+      "the event info's slot 0 returns its +8 (button+0x2B0)")
+check(img[0x84ED7F:0x84ED83] == bytes.fromhex('488d45e7') and img[0x84ECFA:0x84ED01] == bytes.fromhex('498d9eb0060000'),
+      "the window's action path (+0x6B0) is saved before and put back after the Click")
+check('ApplyInfo info{kApplyInfoVtable,&button};' in src and
+      'void* const kApplyInfoVtable[]={reinterpret_cast<void*>(&ApplyInfoTarget)};' in src,
+      "the plugin's info for ButtonApply: slot 0 gives the {button, control} pair it found")
 # The offsets the code uses are the ones the checked instructions name.
 check(consts['kPadTable'] == 0x1188315 + 7 + struct.unpack_from('<i', arrays['kPadBaseSig'], 3)[0], 'the pad table is the loop base')
 check(arrays['kTintSig'][4:8] == struct.pack('<I', consts['kTint']) and

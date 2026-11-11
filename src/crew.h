@@ -361,6 +361,8 @@ struct Config {
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
     int roomLoadoutKey=0x71;        // ...its key (F2; a Windows virtual-key code, 0: none)
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
+    bool hqAutoMissionSelect=true;  // the offline HQ opens its own mission select once per HQ screen (room_ui.cpp AutoOpenMission,
+                                    // docs/worldmap-hq-open-re.md; also with RoomLoadout=0; 0: the HQ as stock)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
