@@ -192,10 +192,19 @@ export async function publishShare(request, env) {
   if (!Array.isArray(m.files) || !m.files.length || m.files.length > MAX_FILES) {
     throw new HttpError(400, `files (1..${MAX_FILES}) required`);
   }
+  // What R2 holds for this version, from one listing (1000 keys a page): a head per part would be one subrequest each,
+  // and a model pack in 4 MB parts (over a thousand) runs past the Worker's subrequest limit, so the publish failed.
+  const held = new Map();
+  let cursor;
+  do {
+    const page = await env.FILES.list({ prefix: `${dir}/${version}/`, cursor });
+    for (const o of page.objects) held.set(o.key, o);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
   const files = [];
   const names = new Set();
   for (const [k, f] of m.files.entries()) {
-    const file = await checkFile(env, `${dir}/${version}/${k}`, f, `files[${k}]`);
+    const file = checkFile(held, `${dir}/${version}/${k}`, f, `files[${k}]`);
     if (names.has(file.name.toLowerCase())) throw new HttpError(400, `files[${k}]: ${file.name} listed twice`);
     names.add(file.name.toLowerCase());
     files.push({ ...file, part_base_urls: [`/${dir}/${version}/${k}`], url: `/${dir}/${version}/${k}/file` });
@@ -213,8 +222,9 @@ export async function publishShare(request, env) {
 }
 
 // One file of a publish: its name, size, whole SHA-256 (the uploader's: the Worker's CPU budget cannot hash GBs) and
-// its parts, contiguous from 0 to size_bytes, each held in R2 under `prefix` with that length and hash.
-async function checkFile(env, prefix, f, what) {
+// its parts, contiguous from 0 to size_bytes, each held in R2 under `prefix` with that length and hash (`held`: the
+// version's objects by key, from the listing; the hash is compared where R2 reports one, the upload already checked it).
+function checkFile(held, prefix, f, what) {
   if (!f || typeof f !== 'object') throw new HttpError(400, `${what}: not an object`);
   const name = String(f.name || '').split(/[\\/]/).pop().slice(0, 200);
   if (!/\.zip$/i.test(name)) throw new HttpError(400, `${what}: name=<file>.zip required`);
@@ -231,9 +241,9 @@ async function checkFile(env, prefix, f, what) {
     if (part.name !== `part-${String(i).padStart(3, '0')}` || part.offset !== at || !(part.length > 0) || !HEX64.test(part.sha256)) {
       throw new HttpError(400, `${what}.parts[${i}] out of order, not contiguous or without sha256`);
     }
-    const held = await env.FILES.head(`${prefix}/${part.name}`);
-    if (!held || held.size !== part.length) throw new HttpError(409, `${prefix}/${part.name} missing or not ${part.length} bytes`);
-    if (held.checksums?.sha256 && hex(held.checksums.sha256) !== part.sha256) {
+    const obj = held.get(`${prefix}/${part.name}`);
+    if (!obj || obj.size !== part.length) throw new HttpError(409, `${prefix}/${part.name} missing or not ${part.length} bytes`);
+    if (obj.checksums?.sha256 && hex(obj.checksums.sha256) !== part.sha256) {
       throw new HttpError(409, `${prefix}/${part.name}: sha256 differs from the upload`);
     }
     parts.push(part);

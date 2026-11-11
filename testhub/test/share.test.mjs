@@ -35,8 +35,13 @@ function r2() {
       objects.set(key, { bytes, sha });
       return meta(key, objects.get(key));
     },
-    async list({ prefix }) {
-      return { objects: [...objects.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false };
+    // Pages of `limit` (R2: 1000), so a listing longer than one page is followed by its cursor.
+    async list({ prefix, cursor, limit = 1000 }) {
+      const keys = [...objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+      const at = Number(cursor || 0);
+      const page = keys.slice(at, at + limit);
+      const truncated = at + limit < keys.length;
+      return { objects: page.map((key) => meta(key, objects.get(key))), truncated, cursor: truncated ? String(at + limit) : undefined };
     },
     async delete(keys) { for (const k of [].concat(keys)) objects.delete(k); },
   };
@@ -230,4 +235,22 @@ test('fushi.moe\'s page code downloads each file through the worker, part by par
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('a publish of over a thousand parts reads R2 by listing, not one head per part (the Worker subrequest limit)', async () => {
+  const e = env();
+  const one = zipOf(600 * 16, 5), two = zipOf(600 * 16, 7);   // 1200 keys under the version: two listing pages
+  let heads = 0, lists = 0;
+  const { head, list } = e.FILES;
+  e.FILES.head = (...a) => { heads++; return head(...a); };
+  e.FILES.list = (...a) => { lists++; return list(...a); };
+  const res = await share(e, [['a.zip', one], ['b.zip', two]], 'big', 16);
+  assert.equal(res.status, 200, await res.clone().text());
+  assert.deepEqual((await res.json()).files.map((f) => f.parts), [600, 600]);
+  const before = heads;
+  const files = (await (await call(e, '/share/main/manifest.json')).json()).files;
+  const again = await call(e, '/api/share/publish', { user: 'dev', method: 'POST', data: { slot: 'main', version: 'big', files } });
+  assert.equal(again.status, 200, await again.clone().text());
+  assert.equal(heads, before);
+  assert.ok(lists >= 2);
 });
