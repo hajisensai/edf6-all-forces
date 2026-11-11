@@ -294,8 +294,16 @@ Ui ui;
 std::atomic<unsigned char*> gone{nullptr};   // the select whose destructor ran (set there, taken by the next frame)
 constexpr float kMoveSeconds=1.0f;
 
-void ShowList(unsigned char* self,bool shown) noexcept {
-    for(const wchar_t* name:kHidden)SetShown(self,name,shown);
+// Each element's shown flag; the first time for a select, which of them its layout has (the log).
+void ShowList(unsigned char* self,bool shown,bool report=false) noexcept {
+    int found=0;
+    for(const wchar_t* name:kHidden) {
+        const bool there=SetShown(self,name,shown);
+        found+=there ? 1 : 0;
+        if(report && !there)Log("WORLDMAP select %p: its layout has no %ls (left as it is)",static_cast<void*>(self),name);
+    }
+    if(report)Log("WORLDMAP select %p: %d of %d list elements hidden",static_cast<void*>(self),found,
+                  static_cast<int>(std::size(kHidden)));
 }
 
 // The row under the cursor's place: the opening move's end (the whole Earth's centre when the key is not known).
@@ -366,7 +374,7 @@ bool TakeInput(const Screen& s,float dt,bool input) noexcept {
         const bool in=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
         if(out || in) {
             const float f=HoldZoom(out,in,dt);
-            if(f!=1.f)ZoomAt(ui.view,s,Pixel{s.w*0.5f,s.h*0.5f},f);
+            if(f!=1.f)ZoomAt(ui.view,s,kMapFocus,f);
             used=true;
         }
     }
@@ -406,7 +414,7 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     bool used=false;
     if(gs==kGpuReady) {
         // The list goes only once the map has been drawn (a device the draw cannot use keeps the stock list).
-        ShowList(self,false);
+        ShowList(self,false,!ui.hidden);
         ui.hidden=true;
         if(!ui.started){Start(self,s);Subclass();}
         used=TakeInput(s,dt,input);

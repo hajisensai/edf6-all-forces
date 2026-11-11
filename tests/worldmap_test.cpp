@@ -245,7 +245,12 @@ void Opening() {
     const Screen s{1920.f,1080.f};
     const MapPoint tokyo=Project(35.69f,139.75f);
     const View to=FramePlace(tokyo,s);
-    Expect(Near(to.cu,tokyo.u) && Near(to.cv,tokyo.v) && Near(to.zoom,15.f),"a place's region: 24 degrees across");
+    const Pixel at=ToScreen(to,s,tokyo);
+    Expect(Near(at.x,kMapFocus.x,0.05f) && Near(at.y,kMapFocus.y,0.05f) && Near(to.zoom,15.f),
+           "a place's region: 24 degrees across, the place at the open area's middle");
+    Expect(!OverPanels(kMapFocus),"the focus is not under the kept windows");
+    const View pole=FramePlace(Project(89.f,0.f),s);
+    Expect(Near(pole.cv,s.h/(s.w*pole.zoom)),"near a pole: clamped, no sky");
     const View from=Whole(tokyo.u,s);
     Expect(Near(from.zoom,LeastZoom(s)) && Near(from.cv,0.5f),"the whole Earth first");
     const View a=Blend(from,to,0.f,s),b=Blend(from,to,1.f,s),m=Blend(from,to,0.5f,s);
@@ -253,7 +258,8 @@ void Opening() {
     Expect(Near(m.zoom,std::sqrt(from.zoom*to.zoom),1e-2f),"zoom half way by its logarithm");
     Expect(Near(Blend(from,to,2.f,s).zoom,to.zoom) && Near(Blend(from,to,-1.f,s).zoom,from.zoom),"time held to 0..1");
     // Across the seam the short way: 170 E to 170 W passes 180.
-    View e=FramePlace(Project(0.f,170.f),s),w=FramePlace(Project(0.f,-170.f),s);
+    const Pixel mid{s.w*0.5f,s.h*0.5f};
+    View e=FramePlace(Project(0.f,170.f),s,24.f,mid),w=FramePlace(Project(0.f,-170.f),s,24.f,mid);
     const View h=Blend(e,w,0.5f,s);
     Expect(Near(h.cu,0.f,1e-3f) || Near(h.cu,1.f,1e-3f),"the short way across 180");
     Expect(Near(Ease(0.5f),0.5f) && Ease(0.25f)<0.25f && Ease(0.75f)>0.75f,"eased");

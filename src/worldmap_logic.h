@@ -341,11 +341,18 @@ inline int Victim(const int* level,const unsigned* used,int n,unsigned now,int r
 }
 
 // --- The opening animation ---
-// A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), not past MostZoom.
-inline View FramePlace(MapPoint p,const Screen& s,float spanDeg=24.f) noexcept {
+// Where the map shows what it is about (a place framed, LB / RB's zoom): the middle of its open area, left of the
+// select's kept windows (OverPanels: x from 842).
+inline constexpr Pixel kMapFocus{421.f,540.f};
+// A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), the place at `at`
+// (as far as the clamp lets it: not past a pole), not past MostZoom.
+inline View FramePlace(MapPoint p,const Screen& s,float spanDeg=24.f,Pixel at=kMapFocus) noexcept {
     View v;
-    v.cu=p.u;v.cv=p.v;
     v.zoom=360.f/spanDeg;
+    Clamp(v,s);
+    const float scale=s.w*v.zoom;
+    v.cu=p.u-(at.x-s.w*0.5f)/scale;
+    v.cv=p.v-(at.y-s.h*0.5f)/(scale*0.5f);
     Clamp(v,s);
     return v;
 }
