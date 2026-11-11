@@ -295,6 +295,83 @@ void Input() {
 }
 }  // namespace
 
+// Stage 2: pins by place, left / right, the panel, the opening frame, the route over the seam.
+void Stage2() {
+    // Entries: place / state. Place 7: cleared, open; place 3: locked only; place 9: branch, cleared; -1: unknown.
+    const int place[]={7,3,9,7,-1,9,3};
+    const int state[]={0,3,2,1,1,0,3};
+    Pin pins[8];
+    const int n=GroupPins(place,state,7,pins,8);
+    Expect(n==3 && pins[0].place==7 && pins[1].place==3 && pins[2].place==9,"a pin a place, in first-seen order, unknown left out");
+    Expect(pins[0].count==2 && pins[0].state==1 && pins[0].first==0,"open beats cleared; the count; the first entry");
+    Expect(pins[1].count==2 && pins[1].state==3,"a place with only locked rows still has its pin");
+    Expect(pins[2].state==2,"branch beats cleared");
+    Expect(GroupPins(place,state,7,pins,2)==2 && pins[0].count==2,"capacity: later places dropped, counts kept");
+    Expect(StateRank(1)<StateRank(2) && StateRank(2)<StateRank(0) && StateRank(0)<StateRank(3),"open > branch > cleared > locked");
+    Expect(StateColour(1)!=StateColour(2) && StateColour(0)!=StateColour(3),"each state its colour");
+    Expect(FirstEnterable(place,state,7,7)==3 && FirstEnterable(place,state,7,9)==2 && FirstEnterable(place,state,7,3)==-1,
+           "the first open row, else cleared; none when all locked");
+    const int cleared[]={5,5};
+    const int cs[]={0,0};
+    Expect(FirstEnterable(cleared,cs,2,5)==0,"all cleared: the first");
+    int at[4];
+    Expect(EntriesAt(place,7,7,at,4)==2 && at[0]==0 && at[1]==3,"a place's entries in list order");
+
+    // Left / right.
+    const Pixel p[]={{500.f,500.f},{600.f,505.f},{560.f,300.f},{300.f,500.f},{700.f,500.f}};
+    bool ok[]={true,true,true,true,false};
+    Expect(Neighbour(p,ok,5,0,1)==1,"right: the near one across beats the one up");
+    Expect(Neighbour(p,ok,5,0,-1)==3,"left");
+    Expect(Neighbour(p,ok,5,1,1)==-1,"nothing enterable further right");
+    Expect(Neighbour(p,ok,5,9,1)==-1,"no pin chosen");
+
+    // The panel.
+    Expect(ScrollFirst(5,4,18)==0 && ScrollFirst(40,0,18)==0 && ScrollFirst(40,20,18)==11 && ScrollFirst(40,39,18)==22,
+           "the window follows the cursor, clamped at both ends");
+    Expect(ScrollFirst(40,-1,18)==0,"no cursor: the top");
+    Expect(kPanelRows>=16,"the panel shows at least 16 missions");
+    Expect(PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*2.5f},5)==2 &&
+           PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*6.5f},5)==-1 &&
+           PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+5.f},5)==-1 && PanelLineAt(Pixel{100.f,500.f},5)==-1,"the line under the pointer");
+    Expect(!OverPanels(Pixel{kPanel.x0+1.f,500.f}) && OverPanel(Pixel{kPanel.x0+1.f,500.f}) && !In(kPanel,kMapFocus),
+           "the panel right of the kept windows");
+    wchar_t num[8];
+    Expect(MissionNumber(0,0,num,8)==1 && std::wcscmp(num,L"1")==0 && MissionNumber(146,0,num,8)==3 && std::wcscmp(num,L"147")==0,
+           "the number is row + 1");
+    Expect(MissionNumber(12,1,num,8)==3 && std::wcscmp(num,L"???")==0,"a branch row's number is ???");
+    Expect(MissionNumber(5,0,num,2)==0,"too small: nothing");
+
+    // The opening frame: the points inside the open area.
+    const Screen s{1920.f,1080.f};
+    const MapPoint tokyo=Project(35.68f,139.77f),sapporo=Project(43.06f,141.35f),prague=Project(50.09f,14.42f);
+    const MapPoint two[]={tokyo,sapporo};
+    const View v=FrameIn(two,2,s);
+    bool inside=true;
+    for(const MapPoint& m:two){const Pixel q=ToScreen(v,s,m);inside=inside && In(kOpenArea,q);}
+    Expect(inside,"both places inside the open area");
+    const View one=FrameIn(&tokyo,1,s);
+    Expect(Near(one.zoom,15.f) && In(kOpenArea,ToScreen(one,s,tokyo)),"one place: its region (24 degrees)");
+    const MapPoint far[]={tokyo,prague};
+    const View wide=FrameIn(far,2,s);
+    Expect(In(kOpenArea,ToScreen(wide,s,tokyo)) && In(kOpenArea,ToScreen(wide,s,prague)) && wide.zoom<4.f,"far apart: zoomed out to both");
+    const MapPoint seam[]={Project(60.f,179.f),Project(60.f,-179.f)};
+    const View sv=FrameIn(seam,2,s);
+    Expect(In(kOpenArea,ToScreen(sv,s,seam[0])) && In(kOpenArea,ToScreen(sv,s,seam[1])) && sv.zoom>10.f,"across the seam: the short way");
+    View c=CentreOn(one,prague,s);
+    const Pixel cp=ToScreen(c,s,prague);
+    Expect(Near(cp.x,kMapFocus.x,0.5f) && Near(cp.y,kMapFocus.y,0.5f) && Near(c.zoom,one.zoom),"panned to a place, the zoom kept");
+
+    // The route over the seam: continuous after Unwrap.
+    LatLon line[32];
+    const int k=GreatCircle(LatLon{35.f,139.f},LatLon{37.f,-122.f},line,32);
+    MapPoint m[32];
+    for(int i=0;i<k;++i)m[i]=Project(line[i].lat,line[i].lon);
+    Expect(SeamBreaks(m,k,nullptr)==1,"Tokyo to San Francisco crosses the seam once");
+    Unwrap(m,k);
+    Expect(SeamBreaks(m,k,nullptr)==0 && m[k-1].u>1.f,"unwrapped: continuous, going on east past u 1");
+    Expect(Near(Pulse(0.8f),0.5f) && Near(Pulse(1.6f),0.f) && Near(Pulse(2.4f),0.5f),"the ring's pulse");
+}
+
 int main() {
     Table();
     Projection();
@@ -306,6 +383,7 @@ int main() {
     Drawing();
     Opening();
     Input();
+    Stage2();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

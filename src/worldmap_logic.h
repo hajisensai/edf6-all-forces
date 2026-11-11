@@ -14,6 +14,7 @@
 #pragma once
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cwchar>
 #include <utility>
 
@@ -382,10 +383,10 @@ inline View Blend(const View& a,const View& b,float t,const Screen& s) noexcept 
 
 // --- Input ---
 // What the map takes (src/worldmap.cpp reads the devices): a mouse drag pans, the wheel zooms about the pointer, the
-// right stick pans, LB / RB zoom out / in about the centre.
+// right stick pans, LB / LT (keyboard Q / E) zoom out / in about the focus (RB / RT are the briefing's scroll).
 inline constexpr float kStickDead=0.24f;
 inline constexpr float kStickPanPerSec=900.f;    // design pixels a second at full deflection
-inline constexpr float kHoldZoomPerSec=1.5f;     // octaves (x2) a second with LB / RB held
+inline constexpr float kHoldZoomPerSec=1.5f;     // octaves (x2) a second with LB / LT held
 inline constexpr float kWheelNotchZoom=0.5f;     // octaves a wheel notch (120)
 inline float Stick(short raw) noexcept {
     const float f=static_cast<float>(raw)/32767.f;
@@ -400,7 +401,7 @@ inline float Stick(short raw) noexcept {
 inline Pixel StickPan(float x,float y,float dt) noexcept {
     return Pixel{-x*kStickPanPerSec*dt,y*kStickPanPerSec*dt};
 }
-// The zoom factor for LB (out) / RB (in) held `dt` s; 1 with both or neither.
+// The zoom factor for LB (out) / LT (in) held `dt` s; 1 with both or neither.
 inline float HoldZoom(bool out,bool in,float dt) noexcept {
     const float dir=(in ? 1.f : 0.f)-(out ? 1.f : 0.f);
     return std::exp2(dir*kHoldZoomPerSec*dt);
@@ -420,6 +421,182 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
     if(!(cw>0.f) || !(ch>0.f) || !(vp[2]>0.f) || !(vp[3]>0.f))return Pixel{-1.f,-1.f};
     const float rx=cx*rw/cw,ry=cy*rh/ch;
     return Pixel{(rx-vp[0])*s.w/vp[2],(ry-vp[1])*s.h/vp[3]};
+}
+
+
+// --- Stage 2: the pins, the panel, the routes, choosing (src/worldmap.cpp) ---
+// The panel of the chosen place: right of the kept windows, where their window skins draw a large empty frame (the
+// .B / .c meshes of Window02_SoldierSel1 / 2 reach x 1920; docs/worldmap-select-re.md §7): the map is drawn again
+// there over the stock draw and the panel on it. A heading (the place), then a line a mission.
+struct Area { float x0,y0,x1,y1; };
+inline constexpr Area kPanel{1396.f,128.f,1872.f,948.f};
+inline constexpr float kPanelHeading=60.f;   // the place's name
+inline constexpr float kPanelRow=40.f;       // a mission's line
+inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);
+// Where the map is seen whole: left of the kept windows, under the title bar, over the key guide.
+inline constexpr Area kOpenArea{36.f,140.f,806.f,930.f};
+inline bool In(Area a,Pixel p) noexcept { return p.x>=a.x0 && p.x<a.x1 && p.y>=a.y0 && p.y<a.y1; }
+// The mouse over the panel is the panel's (a line clicked), not the map's.
+inline bool OverPanel(Pixel p) noexcept { return In(kPanel,p); }
+
+// A state's worth for a place's pin (the one it shows): open 1 > branch 2 > cleared 0 > locked 3 (lower is better).
+inline int StateRank(int state) noexcept {
+    switch(state) { case 1: return 0; case 2: return 1; case 0: return 2; case 3: return 3; default: return 4; }
+}
+inline std::uint32_t StateColour(int state) noexcept {
+    switch(state) {
+    case 1: return 0xFFFFD23Cu;    // open: yellow
+    case 2: return 0xFFFF8C1Eu;    // open branch: orange
+    case 0: return 0xFFA8A8A8u;    // cleared: grey
+    default: return 0xFF9A2020u;   // locked: dark red
+    }
+}
+// May be chosen (the stock confirm takes it; a cleared one is played again); a locked one only says it is not open.
+inline bool Enterable(int state) noexcept { return state>=0 && state<=2; }
+
+// One pin a place: its missions on the display list counted, the best state, its first entry.
+struct Pin { int place; int count; int state; int first; };
+// The pins of a display list (entry i: place[i], -1 none; state[i]) in the order their places first appear; at most
+// `capacity`.
+inline int GroupPins(const int* place,const int* state,int n,Pin* out,int capacity) noexcept {
+    int pins=0;
+    for(int i=0;i<n;++i) {
+        if(place[i]<0 || !Shown(state[i]))continue;
+        int k=0;
+        while(k<pins && out[k].place!=place[i])++k;
+        if(k==pins) {
+            if(pins>=capacity)continue;
+            out[pins++]=Pin{place[i],0,state[i],i};
+        }
+        ++out[k].count;
+        if(StateRank(state[i])<StateRank(out[k].state))out[k].state=state[i];
+    }
+    return pins;
+}
+// The entry to put the cursor on at place `p`: its first open one (1 / 2), else its first cleared one; -1 when it has
+// only locked ones.
+inline int FirstEnterable(const int* place,const int* state,int n,int p) noexcept {
+    int cleared=-1;
+    for(int i=0;i<n;++i) {
+        if(place[i]!=p)continue;
+        if(Open(state[i]))return i;
+        if(state[i]==0 && cleared<0)cleared=i;
+    }
+    return cleared;
+}
+// The entries at place `p`, in list order, into out (at most capacity); how many.
+inline int EntriesAt(const int* place,int n,int p,int* out,int capacity) noexcept {
+    int k=0;
+    for(int i=0;i<n && k<capacity;++i)if(place[i]==p)out[k++]=i;
+    return k;
+}
+
+// Left / right: of the pins marked `ok`, the nearest to pin `from` on screen in direction `dir` (-1 left, +1 right):
+// ahead by more than 2 px, a vertical offset counting 2.5 times a horizontal one (a neighbour across wins over one far
+// up or down). -1: none that way.
+inline int Neighbour(const Pixel* at,const bool* ok,int n,int from,int dir) noexcept {
+    if(from<0 || from>=n)return -1;
+    int best=-1;
+    float bestScore=0.f;
+    for(int i=0;i<n;++i) {
+        if(i==from || !ok[i])continue;
+        const float dx=(at[i].x-at[from].x)*static_cast<float>(dir),dy=at[i].y-at[from].y;
+        if(dx<=2.f)continue;
+        const float score=dx+2.5f*(dy<0.f ? -dy : dy);
+        if(best<0 || score<bestScore){best=i;bestScore=score;}
+    }
+    return best;
+}
+
+// The panel's list: the first line shown so line `cursor` (of `count`; -1 none) is among `visible`, kept near the
+// middle while the list scrolls.
+inline int ScrollFirst(int count,int cursor,int visible) noexcept {
+    if(count<=visible || visible<=0 || cursor<0)return 0;
+    int first=cursor-visible/2;
+    if(first<0)first=0;
+    if(first>count-visible)first=count-visible;
+    return first;
+}
+// The panel line under `p` (0 = the first shown), -1 none.
+inline int PanelLineAt(Pixel p,int shown) noexcept {
+    if(!OverPanel(p))return -1;
+    const float y=p.y-(kPanel.y0+kPanelHeading);
+    if(y<0.f)return -1;
+    const int line=static_cast<int>(y/kPanelRow);
+    return line<shown ? line : -1;
+}
+// A row's stock number (MissionSelect_Format's %NUM%, docs/worldmap-select-re.md §4): row + 1, "???" for a branch
+// row (field 5 = 1). Written to out; its length (0: out too small).
+inline int MissionNumber(int row,int field5,wchar_t* out,std::size_t capacity) noexcept {
+    if(capacity<4)return 0;
+    if(field5==1){out[0]=out[1]=out[2]=L'?';out[3]=0;return 3;}
+    wchar_t tmp[12];
+    int k=0;
+    unsigned v=static_cast<unsigned>(row<0 ? 0 : row)+1u;
+    do{tmp[k++]=static_cast<wchar_t>(L'0'+v%10u);v/=10u;}while(v && k<12);
+    if(static_cast<std::size_t>(k)>=capacity)return 0;
+    for(int i=0;i<k;++i)out[i]=tmp[k-1-i];
+    out[k]=0;
+    return k;
+}
+
+// A view framing the points `p` (n >= 1) inside `area` (design units) `margin` px in from its edges, no nearer than
+// `spanDeg` degrees of longitude across the screen (one place alone shows its region), not past MostZoom.
+inline View FrameIn(const MapPoint* p,int n,const Screen& s,Area area=kOpenArea,float margin=60.f,float spanDeg=24.f) noexcept {
+    if(n<=0 || !p)return Whole(0.5f,s);
+    float lo=0.f,hi=0.f,top=p[0].v,bottom=p[0].v;
+    for(int i=1;i<n;++i) {
+        float du=p[i].u-p[0].u;
+        du-=std::floor(du+0.5f);
+        if(du<lo)lo=du;
+        if(du>hi)hi=du;
+        if(p[i].v<top)top=p[i].v;
+        if(p[i].v>bottom)bottom=p[i].v;
+    }
+    const float w=area.x1-area.x0-2.f*margin,h=area.y1-area.y0-2.f*margin;
+    float zoom=360.f/spanDeg;
+    // On screen a map width is s.w * zoom px, the map's height (v 0..1) half that.
+    if(hi-lo>0.f && w/(s.w*(hi-lo))<zoom)zoom=w/(s.w*(hi-lo));
+    if(bottom-top>0.f && h/(s.w*0.5f*(bottom-top))<zoom)zoom=h/(s.w*0.5f*(bottom-top));
+    View v;
+    v.zoom=zoom;
+    Clamp(v,s);
+    const float scale=s.w*v.zoom;
+    const Pixel at{(area.x0+area.x1)*0.5f,(area.y0+area.y1)*0.5f};
+    v.cu=p[0].u+(lo+hi)*0.5f-(at.x-s.w*0.5f)/scale;
+    v.cv=(top+bottom)*0.5f-(at.y-s.h*0.5f)/(scale*0.5f);
+    Clamp(v,s);
+    return v;
+}
+// `v` panned (its zoom kept) so `p` sits at `at`.
+inline View CentreOn(View v,MapPoint p,const Screen& s,Pixel at=kMapFocus) noexcept {
+    Clamp(v,s);
+    const float scale=s.w*v.zoom;
+    v.cu=p.u-(at.x-s.w*0.5f)/scale;
+    v.cv=p.v-(at.y-s.h*0.5f)/(scale*0.5f);
+    Clamp(v,s);
+    return v;
+}
+
+// A route's projected polyline made continuous across the antimeridian: where SeamBreaks finds a jump the points after
+// it shift a map width. The map wraps, so the line goes on over the seam (drawn at its copies u - 1, u, u + 1).
+inline void Unwrap(MapPoint* p,int n) noexcept {
+    bool breaks[128];
+    if(n>128)n=128;
+    if(n<2 || SeamBreaks(p,n,breaks)==0)return;
+    float shift=0.f;
+    float last=p[0].u;
+    for(int i=1;i<n;++i) {
+        const float raw=p[i].u;
+        if(breaks[i])shift+=raw<last ? 1.f : -1.f;
+        last=raw;
+        p[i].u=raw+shift;
+    }
+}
+// The current mission's ring: 0..1 over `period` seconds, then again.
+inline float Pulse(float seconds,float period=1.6f) noexcept {
+    const float t=seconds/period;
+    return t-std::floor(t);
 }
 
 }  // namespace worldmap
