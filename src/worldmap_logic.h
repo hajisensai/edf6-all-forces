@@ -258,15 +258,18 @@ inline int Pick(const Pixel* p,int n,Pixel at,float radius) noexcept {
 // --- Which rows show, which routes ---
 // The stock select builds one entry per row with a state (docs/mission-list-re.md, 0x8A1530: 0 cleared, 1 open, 2 open
 // branch, 3 shown locked, 4 hidden). The map shows 0..3 and routes from `from` (the current mission) to each of its
-// successors (MISSIONLIST field 3) that is open (1 / 2). Returns how many written to `out` (at most `capacity`).
+// successors (MISSIONLIST field 3) that is open (1 / 2), or with `openOnly` false that is shown at all (0..3: the
+// select's draw; in a linear run the current mission is the newest open one, so its successors are still locked and
+// an open-only route would almost never show). Returns how many written to `out` (at most `capacity`).
 inline bool Shown(int state) noexcept { return state>=0 && state<=3; }
 inline bool Open(int state) noexcept { return state==1 || state==2; }
-inline int RouteTargets(int from,const int* successors,int count,const int* state,int rows,int* out,int capacity) noexcept {
+inline int RouteTargets(int from,const int* successors,int count,const int* state,int rows,int* out,int capacity,
+                        bool openOnly=true) noexcept {
     if(from<0 || from>=rows || !successors || !state || !out)return 0;
     int n=0;
     for(int i=0;i<count && n<capacity;++i) {
         const int to=successors[i];
-        if(to<0 || to>=rows || to==from || !Open(state[to]))continue;
+        if(to<0 || to>=rows || to==from || !(openOnly ? Open(state[to]) : Shown(state[to])))continue;
         bool dup=false;
         for(int j=0;j<n;++j)dup=dup || out[j]==to;
         if(!dup)out[n++]=to;
@@ -429,7 +432,7 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 // .B / .c meshes of Window02_SoldierSel1 / 2 reach x 1920; docs/worldmap-select-re.md §7): the map is drawn again
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
-inline constexpr Area kPanel{1396.f,128.f,1872.f,948.f};
+inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
 inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);

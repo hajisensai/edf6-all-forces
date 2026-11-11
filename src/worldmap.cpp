@@ -397,7 +397,8 @@ struct Rows {
     int current=-1;          // the current mission's row (GS+0x48 before the select's first refresh), -1 none
     int currentEntry=-1;     // its display entry
     int currentPlace=-1;
-    int targets[kMaxTargets]{};   // the places of its open successors (the routes)
+    int targets[kMaxTargets]{};   // the places of its successors shown (the routes), each place's best state
+    int targetState[kMaxTargets]{};
     int targetCount=0;
     wchar_t notOpen[64]{};
 };
@@ -443,24 +444,29 @@ void LoadRows(unsigned char* self) noexcept {
     }
     r.pinCount=GroupPins(r.place,r.state,r.n,r.pins,kPlaceCount);
     if(r.currentEntry>=0)r.currentPlace=r.place[r.currentEntry];
-    // The routes: the current mission's successors that are open (worldmap_logic.h RouteTargets), by their places.
+    // The routes: the current mission's successors on the list (worldmap_logic.h RouteTargets, any shown state: see
+    // there), by their places.
     const int total=RowCount();
     static int stateOfRow[kMaxEntries];
     for(int i=0;i<kMaxEntries;++i)stateOfRow[i]=4;
     for(int i=0;i<r.n;++i)if(r.row[i]>=0 && r.row[i]<kMaxEntries)stateOfRow[r.row[i]]=r.state[i];
     int next[kMaxTargets],open[kMaxTargets];
     const int nextCount=r.current>=0 ? Successors(r.current,next,kMaxTargets) : 0;
-    const int openCount=RouteTargets(r.current,next,nextCount,stateOfRow,total<kMaxEntries ? total : kMaxEntries,open,kMaxTargets);
+    const int openCount=RouteTargets(r.current,next,nextCount,stateOfRow,total<kMaxEntries ? total : kMaxEntries,open,kMaxTargets,
+                                     false);
     for(int i=0;i<openCount;++i) {
         int place=-1;
         for(int e=0;e<r.n;++e)if(r.row[e]==open[i]){place=r.place[e];break;}
-        bool seen=place<0 || place==r.currentPlace;
-        for(int k=0;k<r.targetCount && !seen;++k)seen=r.targets[k]==place;
-        if(!seen)r.targets[r.targetCount++]=place;
+        if(place<0 || place==r.currentPlace)continue;
+        const int state=stateOfRow[open[i]];
+        int k=0;
+        while(k<r.targetCount && r.targets[k]!=place)++k;
+        if(k==r.targetCount){r.targets[r.targetCount]=place;r.targetState[r.targetCount++]=state;}
+        else if(StateRank(state)<StateRank(r.targetState[k]))r.targetState[k]=state;
     }
     NotOpenTitle(r.notOpen,std::size(r.notOpen));
     Log("WORLDMAP select %p: %d entries, %d pins (%d entries without a place), current row %d (entry %d, place %ls), "
-        "%d successors, %d open, %d route places",static_cast<void*>(self),r.n,r.pinCount,unknown,r.current,r.currentEntry,
+        "%d successors, %d shown, %d route places",static_cast<void*>(self),r.n,r.pinCount,unknown,r.current,r.currentEntry,
         r.currentPlace>=0 ? kPlaces[r.currentPlace].id : L"-",nextCount,openCount,r.targetCount);
 }
 int PinOfPlace(int place) noexcept {
@@ -483,7 +489,7 @@ struct Shot {
     Pin pins[kPlaceCount]{};
     int chosen=-1,current=-1;
     int targetCount=0;
-    int targets[kMaxTargets]{};
+    int targets[kMaxTargets]{},targetState[kMaxTargets]{};
     // The panel: the chosen place's missions from `first` (of `total`).
     int lines=0,first=0,total=0;
     PanelLine line[kShownLines]{};
@@ -732,7 +738,7 @@ void Describe(Shot& out,unsigned char* self) noexcept {
     out.chosen=EntryPlace(cursor);
     out.current=rows.currentPlace;
     out.targetCount=rows.targetCount;
-    for(int i=0;i<rows.targetCount;++i)out.targets[i]=rows.targets[i];
+    for(int i=0;i<rows.targetCount;++i){out.targets[i]=rows.targets[i];out.targetState[i]=rows.targetState[i];}
     out.lang=hudtext::InUse();
     ui.panelLines=0;
     if(out.chosen<0)return;
@@ -750,6 +756,10 @@ void Describe(Shot& out,unsigned char* self) noexcept {
         if(rows.state[e]==3)wcsncpy_s(l.title,rows.notOpen,_TRUNCATE);
         else if(rows.row[e]<total)Title(rows.row[e],l.title,std::size(l.title));
         else l.title[0]=0;
+        // The list's titles pad some names with daggers (U+2020) the stock button text does not show: left out.
+        wchar_t* w=l.title;
+        for(const wchar_t* c=l.title;*c;++c)if(*c!=static_cast<wchar_t>(0x2020))*w++=*c;
+        *w=0;
         l.state=rows.state[e];
         l.cursor=e==cursor;
         ui.panelEntry[out.lines]=e;
@@ -903,6 +913,11 @@ bool Near(Pixel p,const Screen& s,float margin) noexcept {
     return p.x>-margin && p.y>-margin && p.x<s.w+margin && p.y<s.h+margin;
 }
 
+// A route's colour by its end's state: open bright, cleared pale, locked dim.
+std::uint32_t RouteColour(int state) noexcept {
+    switch(state) { case 1: return 0xFFFFE680u; case 2: return 0xFFFFA040u; case 0: return 0xE0D8DCE0u; default: return 0xC0C04848u; }
+}
+
 // The routes (dashed great circles from the current mission's place), its ring, the pins.
 void DrawMarks(const View& v,const Screen& s) noexcept {
     const Shot& d=drawn;
@@ -934,7 +949,7 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
                             const float b=a+step<len ? a+step : len;
                             if(phase<16.f)
                                 renderer->Line(p[i-1].x+dx*a/len,p[i-1].y+dy*a/len,p[i-1].x+dx*b/len,p[i-1].y+dy*b/len,
-                                               pass==0 ? 7.f : 3.5f,pass==0 ? 0x90000000u : 0xFFFFE680u);
+                                               pass==0 ? 7.f : 3.5f,pass==0 ? 0x90000000u : RouteColour(d.targetState[t]));
                             a=b;
                         }
                         along+=len;
@@ -992,11 +1007,11 @@ void DrawPanel() noexcept {
     const float x=kPanel.x0+16.f,w=kPanel.x1-kPanel.x0-32.f;
     if(d.chosen>=0) {
         const int lang=static_cast<int>(d.lang);
-        Text(kPlaces[d.chosen].name[lang>=0 && lang<4 ? lang : 0],x,kPanel.y0+12.f,30.f,true,0xFFFFFFFFu,w-60.f);
+        const float named=Text(kPlaces[d.chosen].name[lang>=0 && lang<4 ? lang : 0],x,kPanel.y0+12.f,30.f,true,0xFFFFFFFFu,
+                               w-60.f);
         wchar_t count[8];
         MissionNumber(d.total-1,0,count,std::size(count));
-        const worldmaptext::Label l=labels->Get(*renderer,count,24.f,false,d.lang,frame);
-        if(l.view)Text(count,kPanel.x1-16.f-l.w,kPanel.y0+16.f,24.f,false,0xFFB8C4D0u);
+        Text(count,x+named+12.f,kPanel.y0+17.f,24.f,false,0xFFB8C4D0u);
     }
     renderer->Rect(x,kPanel.y0+kPanelHeading-6.f,x+w,kPanel.y0+kPanelHeading-4.f,0x80B8C4D0u);
     ID3D11ShaderResourceView* const disc=labels->Disc(*renderer);

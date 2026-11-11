@@ -170,6 +170,7 @@ void Rows() {
     Expect(RouteTargets(0,succ,5,state,6,out,4)==2 && out[0]==1 && out[1]==2,"open successors only, once each");
     Expect(RouteTargets(7,succ,5,state,6,out,4)==0,"from outside the list: none");
     Expect(RouteTargets(0,succ,5,state,6,out,1)==1,"capacity kept");
+    Expect(RouteTargets(0,succ,5,state,6,out,4,false)==3,"shown successors: open, cleared and locked; hidden and outside not");
     Expect(Shown(0) && Shown(3) && !Shown(4) && Open(2) && !Open(0),"states");
 }
 
@@ -329,7 +330,7 @@ void Stage2() {
     Expect(ScrollFirst(5,4,18)==0 && ScrollFirst(40,0,18)==0 && ScrollFirst(40,20,18)==11 && ScrollFirst(40,39,18)==22,
            "the window follows the cursor, clamped at both ends");
     Expect(ScrollFirst(40,-1,18)==0,"no cursor: the top");
-    Expect(kPanelRows>=16,"the panel shows at least 16 missions");
+    Expect(kPanelRows>=15,"the panel shows at least 14 missions and the keys");
     Expect(PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*2.5f},5)==2 &&
            PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*6.5f},5)==-1 &&
            PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+5.f},5)==-1 && PanelLineAt(Pixel{100.f,500.f},5)==-1,"the line under the pointer");
