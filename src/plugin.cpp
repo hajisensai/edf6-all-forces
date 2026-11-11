@@ -36,6 +36,7 @@
 #include "weapon_records.h"
 #include "loadout_store.h"
 #include "room_ui.h"
+#include "worldmap.h"
 #include "support_soldier.h"
 #include "support_firepower.h"
 #include "airdrop.h"
@@ -891,6 +892,7 @@ void LoadConfig() noexcept {
     n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
     n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
     n.roomLoadoutButton=ReadInt(L"RoomLoadoutButton",static_cast<DWORD>(n.roomLoadoutButton));
+    n.hqAutoMissionSelect=ReadBool(L"HqAutoMissionSelect",n.hqAutoMissionSelect);
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
     n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);
@@ -1093,6 +1095,7 @@ void LoadConfig() noexcept {
     Log("CONFIG enemyControl=%d",n.enemyControl);
     Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
+    Log("CONFIG hqAutoMissionSelect=%d",n.hqAutoMissionSelect);
     Log("CONFIG allClassesRide=%d",n.allClassesRide);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
@@ -1408,6 +1411,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
     InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)
     Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)

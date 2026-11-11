@@ -601,10 +601,10 @@ def release_models_whole_folders() -> None:
 
 @test
 def worldmap_textures_in_model_pack() -> None:
-    """The world map's base textures ride the model pack (docs/plan-2026-11-10-worldmap.md §2): their folder is a
+    """The world map's base map rides the model pack (docs/plan-2026-11-10-worldmap.md §2): its folder is a
     RELEASE_MODELS folder (so pylib/modelpack.py's models/ part and its version cover it), the installer copies it under
-    Mods as its own ledger owner and releases it on uninstall, and a model pack holding that folder installs the two
-    textures (tests/test_worldmap_pack.py has the refusals)."""
+    Mods as its own ledger owner and releases it on uninstall, and a model pack holding that folder installs the one
+    tiles file (tests/test_worldmap_pack.py has the pyramid's contents and the refusals)."""
     import build_release
     import worldmap
     import worldmap_basemap
@@ -615,23 +615,20 @@ def worldmap_textures_in_model_pack() -> None:
     inst = src('tools/installer.py')
     assert 'worldmap_pack.install(game)' in inst and 'worldmap_pack.remove,' in inst
     from PIL import Image
-    with tempfile.TemporaryDirectory() as work:
-        derived = os.path.join(work, 'worldmap')
-        os.makedirs(derived)
-        sizes = {'world': (16, 8), 'japan': (16, 16)}
-        for kind, size in sizes.items():
-            Image.new('RGB', size, (20, 60, 140)).save(os.path.join(derived, worldmap_basemap.TEXTURE_SOURCES[kind]))
-        with mock.patch.dict(worldmap_basemap.TEXTURE_SIZES, sizes):
-            worldmap_basemap.textures(derived)
+    with tempfile.TemporaryDirectory() as work, mock.patch.object(worldmap, 'TILE', 4):
+        side = 4 * worldmap_basemap.per_source(worldmap.TILE_LEVELS - 1)
+        images = {s.tile: Image.new('RGB', (side, side), (20, 60, 140)) for s in worldmap_basemap.SOURCES}
+        pack = os.path.join(work, worldmap.TEXTURE_DIR)
+        data = worldmap_basemap.pack(worldmap_basemap.pyramid(images))
+        assert len(worldmap.tile_table(data)) == worldmap.tile_count()
+        worldmap_basemap.write_release(data, pack)
         game = os.path.join(work, 'game')
         os.makedirs(game)
-        pack = os.path.join(work, worldmap.TEXTURE_DIR)
         with mock.patch.object(worldmap_pack.obj_model, 'model_dir', return_value=pack):
             written, skipped = worldmap_pack.install(game, say=lambda _s: None)
-        assert skipped == [] and len(written) == len(worldmap.TEXTURES), (written, skipped)
-        for rel in worldmap.TEXTURES.values():
-            assert os.path.isfile(os.path.join(game, 'Mods', *ledger.key(rel).split('/'))), rel
-        assert len(worldmap_pack.remove(game)[0]) == len(worldmap.TEXTURES)
+        assert skipped == [] and len(written) == 1, (written, skipped)
+        assert os.path.isfile(os.path.join(game, 'Mods', *ledger.key(worldmap.TILES_FILE).split('/')))
+        assert len(worldmap_pack.remove(game)[0]) == 1
 
 
 @test
@@ -6705,7 +6702,8 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp', 'andryusha.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp']), f'a new key reader: make it give way to the map ({readers})'
+    assert 'InFront() && !MapHoldsKeys()' in src('src/worldmap.cpp'), "the world map select's keys give way to the map"
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]

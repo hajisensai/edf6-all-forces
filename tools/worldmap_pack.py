@@ -1,13 +1,13 @@
-"""The world map's base textures from the model pack into Mods (docs/plan-2026-11-10-worldmap.md §2).
+"""The world map's base map from the model pack into Mods (docs/plan-2026-11-10-worldmap.md §2).
 
-The model pack's folder pylib/worldmap.py TEXTURE_DIR (built by the developer: tools/worldmap_basemap.py textures)
-holds the two DXT1 textures ready for the game and TEXTURE_INDEX ({'version', 'files': {name: {'sha256', 'size'}}}).
-The installer copies each to Mods/<worldmap.TEXTURES[kind]> as this tool's (ledger owner OWNER); nothing is encoded at
-install time. A file already installed with the same bytes is not written again.
+The model pack's folder pylib/worldmap.py TEXTURE_DIR (built by the developer: tools/worldmap_basemap.py tiles) holds
+the JPEG tile pyramid in one file (worldmap.TILES_FILE's name) and TEXTURE_INDEX ({'version', 'files': {name:
+{'sha256', 'size'}}}). The installer copies it to Mods/<worldmap.TILES_FILE> as this tool's (ledger owner OWNER);
+nothing is encoded at install time. A file already installed with the same bytes is not written again.
 
-Nothing is substituted when the folder is missing, of another worldmap.TEXTURE_VERSION, or holds other bytes: the textures are
-not installed (one line says why) and whatever this tool installed before is released, so the plugin finds no world
-map texture and does not show the map. A file of the same name in Mods that is not ours (another mod's) is never
+Nothing is substituted when the folder is missing, of another worldmap.TEXTURE_VERSION, or holds other bytes: the base map is
+not installed (one line says why) and whatever this tool installed before is released (the DXT1 textures of
+TEXTURE_VERSION 1 included), so the plugin finds no base map and does not show the map. A file of the same name in Mods that is not ours (another mod's) is never
 written over.
 
     python -B tools/worldmap_pack.py install GAME | remove GAME
@@ -34,13 +34,13 @@ OWNER = 'worldmap'        # pylib/ledger.py OWNERS
 
 
 def label() -> str:
-    """What the installer's lines call the textures (pylib/i18n.py: in the installer's language)."""
-    return tr('世界地图底图', 'World map base textures')
+    """What the installer's lines call the base map (pylib/i18n.py: in the installer's language)."""
+    return tr('世界地图底图', 'World map base map')
 
 
 def files() -> dict[str, str]:
     """{file name in the model pack folder: path under Mods}."""
-    return {rel.rsplit('/', 1)[1]: rel for rel in worldmap.TEXTURES.values()}
+    return {worldmap.TILES_FILE.rsplit('/', 1)[1]: worldmap.TILES_FILE}
 
 
 def _index(folder: str | None) -> tuple[dict, str | None]:
@@ -71,7 +71,7 @@ def _foreign(led: ledger.Ledger, rel: str) -> bool:
 
 
 def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
-    """Both textures written as OWNER's, or neither: (paths written, [(what, why not)]). Whatever OWNER installed
+    """Every file of files() written as OWNER's, or none: (paths written, [(what, why not)]). Whatever OWNER installed
     before and is not installed now is released."""
     led = ledger.Ledger(root)
     folder = obj_model.model_dir(worldmap.TEXTURE_DIR)
@@ -108,7 +108,8 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
         written.append(led.put(OWNER, rel, blob))
     led.release(OWNER, sorted(mine - {ledger.key(rel) for rel in data}))
     if data:
-        say(tr(f'  {label()}（NASA Blue Marble，{len(data)} 张贴图）', f'  {label()} (NASA Blue Marble, {len(data)} textures)'))
+        say(tr(f'  {label()}（NASA Blue Marble，全球 {worldmap.tile_count()} 块 JPEG 瓦片）',
+                f'  {label()} (NASA Blue Marble, {worldmap.tile_count()} JPEG tiles of the whole Earth)'))
     return written, skipped
 
 

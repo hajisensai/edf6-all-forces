@@ -132,7 +132,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
-target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
+# The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/worldmap_gpu.cpp src/worldmap_text.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
@@ -765,6 +767,10 @@ add_test(NAME room_preview COMMAND room_preview_test)
 add_executable(worldmap_test tests/worldmap_test.cpp)
 target_compile_options(worldmap_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME worldmap COMMAND worldmap_test)
+# The base map tiles file's reader and WIC decoder (src/worldmap_tiles.cpp); run as the test worldmap_tiles below.
+add_executable(worldmap_tiles_test tests/worldmap_tiles_test.cpp src/worldmap_tiles.cpp)
+target_compile_options(worldmap_tiles_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_link_libraries(worldmap_tiles_test PRIVATE windowscodecs ole32)
 # The EDF4.1 outfit's pure logic (src/outfit41_logic.h: its files, the stored choice, the popup's layout).
 add_executable(outfit41_test tests/outfit41_test.cpp)
 target_include_directories(outfit41_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -989,6 +995,9 @@ set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=ut
 # game installed, the files built from Root.cpk (read only).
 add_test(NAME menu_preview COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_preview_test.py")
 set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The base map tiles file's reader (worldmap_tiles_test above) on a small pyramid the script builds.
+add_test(NAME worldmap_tiles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_tiles_test.py" $<TARGET_FILE:worldmap_tiles_test>)
+set_tests_properties(worldmap_tiles PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The world map's data (pylib/worldmap.py, worldmap/missions.json, src/worldmap.inc current, the base map tool); with the
 # game installed, the mission table re-read from Root.cpk (read only).
 add_test(NAME worldmap_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_data_test.py")
@@ -1062,6 +1071,9 @@ add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The world map select's code checks (src/worldmap.cpp InstallWorldMap) against the real EDF.dll, read as a file.
+add_test(NAME worldmap_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(worldmap_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # The frame step's wait to the next tick boundary against the game's tick clock 0x11DAE60 (src/frame_pacing_logic.h),
 # offline: cmake --build build --target frame_pacing_check && build\frame_pacing_check.exe
 add_executable(frame_pacing_check EXCLUDE_FROM_ALL tools/frame_pacing_check.cpp)
@@ -1237,7 +1249,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -2112,7 +2124,7 @@ add_test(NAME decal_depth_native COMMAND decal_depth_native_test "${EDF6_NATIVE_
 set_tests_properties(decal_depth_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
 target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp
     src/scope_lens.cpp)
-target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler)
+target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler windowscodecs)
 add_executable(debug_spawn_files_check EXCLUDE_FROM_ALL tests/debug_spawn_files_test.cpp)
 target_compile_options(debug_spawn_files_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks debug_spawn_files_check)

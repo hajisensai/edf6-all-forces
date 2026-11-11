@@ -68,12 +68,11 @@ def render() -> str:
     lines.append('};')
     lines.append(f'inline constexpr const wchar_t* kRangeKeyPrefix={_w(worldmap.RANGE_KEY_PREFIX)};')
     lines.append(f'inline constexpr int kRangePlace={ids.index(worldmap.RANGE_PLACE)};   // {worldmap.RANGE_PLACE}')
-    lines.append('// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.')
-    lines.append(f'inline constexpr float kDetailNorth={_f(worldmap.DETAIL_NORTH)},kDetailSouth={_f(worldmap.DETAIL_SOUTH)},'
-                 f'kDetailWest={_f(worldmap.DETAIL_WEST)},kDetailEast={_f(worldmap.DETAIL_EAST)};')
-    lines.append('// The base map textures (model pack folder worldmap_tex, installed by tools/worldmap_pack.py).')
-    lines.append(f'inline constexpr const wchar_t* kWorldTexture={_w(worldmap.app_path(worldmap.TEXTURES["world"]))};')
-    lines.append(f'inline constexpr const wchar_t* kJapanTexture={_w(worldmap.app_path(worldmap.TEXTURES["japan"]))};')
+    lines.append('// The base map: a JPEG tile pyramid in one file under Mods (pylib/worldmap.py TILE*, tools/worldmap_basemap.py')
+    lines.append('// tiles, installed by tools/worldmap_pack.py from the model pack folder worldmap_tex).')
+    lines.append(f'inline constexpr int kTile={worldmap.TILE},kTileLevels={worldmap.TILE_LEVELS},kTilesFormat={worldmap.TILES_FORMAT};')
+    lines.append(f'inline constexpr char kTilesMagic[5]="{worldmap.TILES_MAGIC.decode()}";')
+    lines.append(f'inline constexpr const wchar_t* kTilesFile={_w(worldmap.TILES_FILE)};   // under Mods')
     return '\n'.join(lines) + '\n'
 
 

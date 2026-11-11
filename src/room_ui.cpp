@@ -153,6 +153,49 @@ const unsigned char kPadAbSig[]={0x0F,0xB7,0x44,0x24,0x64,0x66,0xC1,0xE8,0x0C,0x
     0x01,0x74,0x05,0x0F,0x28,0xCF,0xEB,0x03,0x0F,0x28,0xCE,0x4A,0x8B,0x4C,0x2B,0x78};
 const Sig kPadSigs[]={{0x1182A00,kPadWriterSig,sizeof(kPadWriterSig)},{0x1188315,kPadBaseSig,sizeof(kPadBaseSig)},
     {0x1188A4D,kPadAbSig,sizeof(kPadAbSig)}};
+// The HQ's own mission select opened by itself (docs/worldmap-hq-open-re.md §5.1): the HQ's ButtonGotoSelectMission
+// "pressed" the way the stock HUiLayout action ButtonApply (0x84EB40, the action table 0x847990 names it at 0x848247)
+// presses a button, by calling ButtonApply itself: (window, Callback* info), info's slot 0 giving {Component*, control}
+// (0x84EB6F); it casts that to HUiButton (__RTDynamicCast 0x84EBA3), returns unless it has a "Click" action (HasAction
+// 0x84EC0A), reads the button's name from the window's id map (0x83A0C0(window, button+0x110)), writes the id into the
+// button's HuiCallbackInfo (+0x2B0 = +0x110, 0x84EC32), appends "/" and the name to the window's action path (+0x6B0),
+// fires "Click" with {ResultImpl<HuiCallbackInfo> 0x17FE090, button+0x2B0} (FireAction 0x7EAB90, 0x84ED79) and puts
+// the path back: the button's own CallWindow (sgo_path lyt_HUiHQMissionSelect.sgo, result ReceiveResult, hide 1) runs as
+// when the player confirms it. The cast is checked first here (ButtonApply calls HasAction on a failed cast's null).
+constexpr unsigned kButtonApply=0x84EB40;
+constexpr unsigned kHasAction=0x7EA8D0;     // Component::HasAction(this, const wchar_t* event) -> bool
+constexpr unsigned kDynamicCast=0x12DA7AA;  // the __RTDynamicCast import thunk ButtonApply calls
+constexpr unsigned kComponentType=0x2062F00,kButtonType=0x2062F50;   // TypeDescriptors .?AVComponent@ui@@ / .?AVHUiButton@ui@@
+const unsigned char kButtonApplySig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x57,0x41,0x54,0x41,0x56,0x41,0x57,
+    0x48,0x8D,0x6C,0x24,0xC9};
+// 0x848247: lea rax,[ButtonApply] in the action table (the name it is registered under follows).
+const unsigned char kButtonApplyNamedSig[]={0x48,0x8D,0x05,0xF2,0x68,0x00,0x00};
+// 0x84EB6F: mov rax,[rdx]; mov rcx,rdx; call [rax]; mov rbx,[rax+8]: info's slot 0, a {object, control} pair.
+const unsigned char kApplyTargetSig[]={0x48,0x8B,0x02,0x48,0x8B,0xCA,0xFF,0x10,0x48,0x8B,0x58,0x08};
+// 0x84EB90: lea r9,[HUiButton's type]; lea r8,[Component's]; xor edx,edx; mov rcx,[rax]; call __RTDynamicCast.
+const unsigned char kApplyCastSig[]={0x4C,0x8D,0x0D,0xB9,0x43,0x81,0x01,0x4C,0x8D,0x05,0x62,0x43,0x81,0x01,0x33,0xD2,0x48,0x8B,0x08,
+    0xE8,0x02,0xBC,0xA8,0x00};
+// 0x84EC00: lea rdx,[L"Click" 0x17FE020]; mov rcx,rdi; call HasAction; test al,al; je out.
+const unsigned char kApplyHasClickSig[]={0x48,0x8D,0x15,0x19,0xF4,0xFA,0x00,0x48,0x8B,0xCF,0xE8,0xC1,0xBC,0xF9,0xFF,0x84,0xC0,0x0F,0x84,
+    0x13,0x02,0x00,0x00};
+// 0x84EC17: mov edx,[rdi+110h]; mov rcx,r14; call 0x83A0C0; lea r15,[rdi+2B0h]; mov edx,[rdi+110h]; mov [r15],edx.
+const unsigned char kApplyNameSig[]={0x8B,0x97,0x10,0x01,0x00,0x00,0x49,0x8B,0xCE,0xE8,0x9B,0xB4,0xFE,0xFF,0x4C,0x8D,0xBF,0xB0,0x02,0x00,
+    0x00,0x8B,0x97,0x10,0x01,0x00,0x00,0x41,0x89,0x17};
+// 0x84ED5C: lea rax,[0x17FE090]; mov [rbp-49h],rax; mov [rbp-41h],r15; lea r8,[rbp-49h]; lea rdx,[L"Click"]; mov rcx,rdi;
+// call FireAction 0x7EAB90.
+const unsigned char kApplyFireSig[]={0x48,0x8D,0x05,0x2D,0xF3,0xFA,0x00,0x48,0x89,0x45,0xB7,0x4C,0x89,0x7D,0xBF,0x4C,0x8D,0x45,0xB7,
+    0x48,0x8D,0x15,0xAA,0xF2,0xFA,0x00,0x48,0x8B,0xCF,0xE8,0x12,0xBE,0xF9,0xFF};
+const unsigned char kFireActionSig[]={0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+const unsigned char kHasActionSig[]={0x40,0x53,0x56,0x48,0x83,0xEC,0x68,0x48,0x8B,0x05,0x7A,0x47,0x80,0x01,0x48,0x33};
+const unsigned char kDynamicCastSig[]={0xFF,0x25,0xE8,0xB8,0x47,0x00};   // jmp [__RTDynamicCast's import]
+const unsigned char kComponentTypeSig[]={0x2E,0x3F,0x41,0x56,0x43,0x6F,0x6D,0x70,0x6F,0x6E,0x65,0x6E,0x74,0x40,0x75,0x69,0x40,0x40,0x00};
+const unsigned char kButtonTypeSig[]={0x2E,0x3F,0x41,0x56,0x48,0x55,0x69,0x42,0x75,0x74,0x74,0x6F,0x6E,0x40,0x75,0x69,0x40,0x40,0x00};
+const Sig kAutoMissionSigs[]={{kButtonApply,kButtonApplySig,sizeof(kButtonApplySig)},{0x848247,kButtonApplyNamedSig,sizeof(kButtonApplyNamedSig)},
+    {0x84EB6F,kApplyTargetSig,sizeof(kApplyTargetSig)},{0x84EB90,kApplyCastSig,sizeof(kApplyCastSig)},
+    {0x84EC00,kApplyHasClickSig,sizeof(kApplyHasClickSig)},{0x84EC17,kApplyNameSig,sizeof(kApplyNameSig)},
+    {0x84ED5C,kApplyFireSig,sizeof(kApplyFireSig)},{0x7EAB90,kFireActionSig,sizeof(kFireActionSig)},
+    {kHasAction,kHasActionSig,sizeof(kHasActionSig)},{kDynamicCast,kDynamicCastSig,sizeof(kDynamicCastSig)},
+    {0x2062F10,kComponentTypeSig,sizeof(kComponentTypeSig)},{0x2062F60,kButtonTypeSig,sizeof(kButtonTypeSig)}};
 
 // --- Game objects (MSVC std::shared_ptr / weak_ptr / string as EDF.dll builds them) ---
 struct ControlBlock { void** vtable; volatile long uses,weaks; };
@@ -197,11 +240,17 @@ using SetButtonTextFn=void(__fastcall*)(void*,const wchar_t*,const void*);
 using EnableComponentFn=void(__fastcall*)(void*,bool);
 using HasFocusFn=bool(__fastcall*)(void*);
 using FocusComponentFn=void(__fastcall*)(void*,bool);
+using DynamicCastFn=void*(__cdecl*)(void*,long,void*,void*,int);
+using HasActionFn=bool(__fastcall*)(void*,const wchar_t*);
+// ButtonApply's info: a ui::Callback whose slot 0 gives the {Component*, control} it presses (it takes and drops one use).
+struct ApplyInfo { void* const* vtable; Shared* target; };
+using ButtonApplyFn=void(__fastcall*)(unsigned char*,ApplyInfo*);
 
 struct Screen { const char* name; unsigned slot,stock,goneSlot,goneStock; bool room; UpdateFn next; GoneFn gone; bool ok; };
 Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,kRoomGoneSlot,kRoomGone,true,nullptr,nullptr,false},
                    {"hq",kHqSlot,kHqUpdate,kHqGoneSlot,kHqGone,false,nullptr,nullptr,false}};
 bool nativeEntryOk=false;
+bool autoMissionOk=false;   // HqAutoMissionSelect at load and kAutoMissionSigs checked
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
@@ -801,6 +850,42 @@ void DriveDialog(bool hasInput) noexcept {
     }
 }
 
+// --- The HQ's mission select opened by itself, once per HQ screen object ---
+// The HQ object it was tried on (opened or not), cleared by that object's destructor (HqGoneHook): a new HQ at its address
+// is a new HQ (every return from a mission builds one: docs/worldmap-hq-open-re.md §1).
+std::atomic<unsigned char*> autoTried{nullptr};
+Shared* __fastcall ApplyInfoTarget(ApplyInfo* info) noexcept { return info->target; }
+void* const kApplyInfoVtable[]={reinterpret_cast<void*>(&ApplyInfoTarget)};
+// `button` pressed by the stock ButtonApply (kAutoMissionSigs); nullptr when done, else why not.
+const char* Press(unsigned char* self,Shared& button) noexcept {
+    __try {
+        if(!button.object || !button.control)return "the layout has no ButtonGotoSelectMission";
+        void* const cast=reinterpret_cast<DynamicCastFn>(image+kDynamicCast)(button.object,0,image+kComponentType,image+kButtonType,0);
+        if(!cast)return "ButtonGotoSelectMission is not a HUiButton";
+        if(!reinterpret_cast<HasActionFn>(image+kHasAction)(cast,L"Click"))return "ButtonGotoSelectMission has no Click action";
+        ApplyInfo info{kApplyInfoVtable,&button};
+        reinterpret_cast<ButtonApplyFn>(image+kButtonApply)(self,&info);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ return "the press faulted"; }
+    return nullptr;
+}
+// After the HQ's own update (its frame done, as when the player's confirm is handled by it).
+void AutoOpenMission(unsigned char* self,void* ctx,bool menuBusy) noexcept {
+    if(!autoMissionOk)return;
+    bool hasInput=false;
+    __try { hasInput=reinterpret_cast<GetInputFn>(image+kGetInput)(self,ctx)!=nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){ hasInput=false; }
+    if(!AutoOpenDue(Cfg().enabled && Cfg().hqAutoMissionSelect,autoTried.load()==self,hasInput,menuBusy))return;
+    autoTried.store(self);   // once, whatever follows: a step that fails leaves the HQ as it is (the player clicks it)
+    Shared button=Find(self,L"ButtonGotoSelectMission");
+    const char* why=Press(self,button);
+    Release(button);
+    if(why)Log("HQAUTO the HQ %p: mission select not opened (%s): the HQ menu as it is",self,why);
+    else Log("HQAUTO the HQ %p: its mission select opened (ButtonGotoSelectMission pressed the stock ButtonApply way)",self);
+}
+void AutoGone(unsigned char* self) noexcept {
+    unsigned char* tried=self;
+    autoTried.compare_exchange_strong(tried,nullptr);
+}
+
 // --- One frame of either screen ---
 // Off (Enabled / RoomLoadout turned 0 since the load): the screen's own update with its own ctx, nothing read; the menu
 // dropped, the preview put back, and what the menu drew on this screen taken back (write-on-change: once).
@@ -890,9 +975,19 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
-std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx) { return Frame(screens[1],self,ctx); }
+std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx) {
+    const std::uint64_t result=Frame(screens[1],self,ctx);
+    AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched);
+    return result;
+}
+// RoomLoadout=0 at load: the HQ's own update and the mission select opened, nothing of the menu.
+std::uint64_t __fastcall HqAutoHook(unsigned char* self,void* ctx) {
+    const std::uint64_t result=screens[1].next(self,ctx);
+    AutoOpenMission(self,ctx,false);
+    return result;
+}
 void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }
-void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[1].gone(self,flags); }
+void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }
 
 bool AllMatch(const Sig* sigs,std::size_t n,const char* what,const char* then) noexcept {
     for(std::size_t i=0;i<n;++i)
@@ -949,13 +1044,22 @@ bool InstallRoomUi() noexcept {
     // RoomLoadout=0 at load: nothing is installed, nothing checked (crew.h: both screens untouched; the room pre-sync never
     // runs). Turning it on takes a restart. Enabled (the plugin's live switch) and RoomLoadout turned 0 later: the frames
     // pass straight through (Off).
-    if(!Cfg().roomLoadout) {
-        Log("HOOK roomui off (RoomLoadout=0 at load): nothing installed, both screens untouched, no room pre-sync");
+    // HqAutoMissionSelect=0 too: the same. RoomLoadout=0 with it on: only the HQ chained, for that alone (HqAutoHook).
+    if(!Cfg().roomLoadout && !Cfg().hqAutoMissionSelect) {
+        Log("HOOK roomui off (RoomLoadout=0 and HqAutoMissionSelect=0 at load): nothing installed, both screens untouched, no room pre-sync");
         return false;
     }
     if(!AllMatch(kDrawSigs,std::size(kDrawSigs),"the layout calls",kUntouched) ||
        !AllMatch(kScreenSigs,std::size(kScreenSigs),"the screens' updates",kUntouched))
         return false;
+    autoMissionOk=Cfg().hqAutoMissionSelect &&
+        AllMatch(kAutoMissionSigs,std::size(kAutoMissionSigs),"the HQ's mission select button press","the HQ opens on its menu as stock");
+    Log("HOOK roomui hq auto mission select=%d (HqAutoMissionSelect=%d)",autoMissionOk,Cfg().hqAutoMissionSelect);
+    if(!Cfg().roomLoadout) {
+        const bool hq=autoMissionOk && Chain(screens[1],reinterpret_cast<void*>(&HqAutoHook),reinterpret_cast<void*>(&HqGoneHook));
+        Log("HOOK roomui RoomLoadout=0 at load: no menu, the room untouched; the HQ chained for its mission select alone=%d",hq);
+        return hq;
+    }
     nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
