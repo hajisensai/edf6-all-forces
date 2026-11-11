@@ -96,4 +96,20 @@ check(rel(0xE0DBB, 5, 1) == consts['kChildIndex'] and img[0xE0DCA:0xE0DCD] == by
       'the key reader: child(row), child(2), text')
 # The shown flag every Component's constructor sets.
 check(arrays['kShowSig'][2:6] == struct.pack('<I', consts['kShown']), 'the shown flag offset')
+# Stage 2: the locked row's title key, read through the text table with 0x7A3500.
+check(rel(0x9591AF, 7, 3) == consts['kTextTable'] and rel(0x9591B6, 7, 3) == consts['kNotOpenKey'] and
+      rel(0x9591BD, 5, 1) == consts['kTextOf'], 'mov rcx,[texts]; lea rdx,[key]; call 0x7A3500')
+key = 'MissionSelect_NotOpenMissionTitle'.encode('utf-16-le') + bytes(2)
+check(img[consts['kNotOpenKey']:consts['kNotOpenKey'] + len(key)] == key, 'the key is L"MissionSelect_NotOpenMissionTitle"')
+# A row's title: [GS]+0x248 (the TXT list), as 0x958A60 reads it.
+check(rel(0x958A66, 7, 3) == consts['kGameStatus'] and arrays['kTitleSig'][13:17] == struct.pack('<I', consts['kTitles']),
+      'mov rax,[GS]; mov r10,[rax+248h]')
+# The current mission row GS+0x48 (0xDC0B0, called by the cursor refresh 0x8A5B2F) and ModeSave+0 at +0x57A4.
+check(arrays['kCurrentSig'][2] == consts['kCurrent'] and rel(0x8A5B2F, 5, 1) == 0xDC0B0, 'GS+0x48 written by the refresh')
+# The select's mode bit, the input's repeat mask.
+check(arrays['kModeSig'][2:6] == struct.pack('<I', consts['kSelectMode']), 'the confirmable bit +0x7B4')
+check(arrays['kRepeatSig'][3:7] == struct.pack('<I', consts['kRepeat']), 'the merged repeat mask +0x4528')
+# The confirm 0x8A85C0 is the constructor's cbRequestMission; 0x8A27B8 calls the focus 0x953350 on this+0x770.
+check(img[0x8A27B8:0x8A27BF] == bytes.fromhex('488d8e70070000') and struct.unpack_from('<I', img, 0x8A27BB)[0] == consts['kButtons'] and
+      rel(0x8A27BF, 5, 1) == consts['kFocus'], 'the constructor: lea rcx,[rsi+770h]; call 0x953350 (the first focus)')
 print(f'worldmap_sig_audit: {checks} checks passed')

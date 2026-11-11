@@ -360,5 +360,22 @@ void Renderer::Image(ID3D11ShaderResourceView* texture,float x0,float y0,float x
     impl_->Draw(xy,texels,tint,texture);
 }
 ID3D11Device* Renderer::Device() const noexcept { return impl_ && impl_->context ? impl_->device.Get() : nullptr; }
+void Renderer::Clip(float x0,float y0,float x1,float y1) noexcept {
+    if(!impl_ || !impl_->context)return;
+    const Viewport& v=impl_->viewport;
+    auto px=[&](float x) { return v.x+x*v.w/1920.f; };
+    auto py=[&](float y) { return v.y+y*v.h/1080.f; };
+    const float l=px(x0)>v.x ? px(x0) : v.x,t=py(y0)>v.y ? py(y0) : v.y;
+    const float r=px(x1)<v.x+v.w ? px(x1) : v.x+v.w,b=py(y1)<v.y+v.h ? py(y1) : v.y+v.h;
+    const D3D11_RECT rect{static_cast<LONG>(l),static_cast<LONG>(t),static_cast<LONG>(r>l ? r : l),static_cast<LONG>(b>t ? b : t)};
+    impl_->context->RSSetScissorRects(1,&rect);
+}
+void Renderer::Unclip() noexcept {
+    if(!impl_ || !impl_->context)return;
+    const Viewport& v=impl_->viewport;
+    const D3D11_RECT rect{static_cast<LONG>(v.x),static_cast<LONG>(v.y),static_cast<LONG>(v.x+v.w),static_cast<LONG>(v.y+v.h)};
+    impl_->context->RSSetScissorRects(1,&rect);
+}
+float Renderer::Scale() const noexcept { return impl_ && impl_->viewport.w>0.f ? impl_->viewport.w/1920.f : 1.f; }
 
 }  // namespace crew::worldmapgpu

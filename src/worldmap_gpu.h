@@ -42,6 +42,11 @@ public:
                        float v1,std::uint32_t tint=0xFFFFFFFFu) noexcept=0;
     // The device (stage 2's own textures: markers, labels). Valid between Begin and End.
     virtual ID3D11Device* Device() const noexcept=0;
+    // Drawing limited to the rectangle (design units; within the viewport) until Unclip (Begin: the whole viewport).
+    virtual void Clip(float x0,float y0,float x1,float y1) noexcept=0;
+    virtual void Unclip() noexcept=0;
+    // Target pixels a design unit across (a label rasterized at that size stays sharp).
+    virtual float Scale() const noexcept=0;
 protected:
     ~Painter()=default;
 };
@@ -83,6 +88,9 @@ public:
     void Image(ID3D11ShaderResourceView* texture,float x0,float y0,float x1,float y1,float u0,float v0,float u1,float v1,
                std::uint32_t tint=0xFFFFFFFFu) noexcept override;
     ID3D11Device* Device() const noexcept override;
+    void Clip(float x0,float y0,float x1,float y1) noexcept override;
+    void Unclip() noexcept override;
+    float Scale() const noexcept override;
 
 private:
     struct Impl;

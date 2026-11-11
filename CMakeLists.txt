@@ -133,7 +133,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/worldmap_gpu.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/worldmap_gpu.cpp src/worldmap_text.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
