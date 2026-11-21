@@ -427,3 +427,36 @@ def texture_images(packs: xp.Packs, material: str) -> dict:
         if kind in files:
             out[kind] = _image(packs.read(files[kind])).convert('RGB').getchannel('R')
     return out
+
+
+def _values(node: xp.Node, key: str) -> list[str]:
+    """Every value written under `key` in `node` and its descendants, depth first."""
+    out = list(node.values.get(key, []))
+    for c in node.children:
+        out += _values(c, key)
+    return out
+
+
+def txpk_frames(data: bytes) -> list[bytes]:
+    """The DDS files of an EXOR texture pack (.txpk, an animated texture's frames): 'TxPk', u16 frame count, u32 frame
+    size, the frames back to back (measured on the helis' rotor packs: 5 x 87536 bytes, each a 'DDS ' file)."""
+    _req(len(data) >= 10 and data[:4] == b'TxPk', 'not a TxPk texture pack')
+    n = int.from_bytes(data[4:6], 'little')
+    size = int.from_bytes(data[6:10], 'little')
+    _req(n > 0 and size > 128 and len(data) == 10 + n * size, f'TxPk of {n} x {size} bytes in {len(data)}')
+    frames = [data[10 + k * size:10 + (k + 1) * size] for k in range(n)]
+    _req(all(f[:4] == b'DDS ' for f in frames), 'a TxPk frame is no DDS file')
+    return frames
+
+
+def anim_frames(packs: xp.Packs, material: str) -> tuple[list, float]:
+    """([RGBA image a frame], seconds a frame) of a material whose texture is animated (an `anim_texture <x>.dds <n>
+    <seconds>` line: the helis' see-through rotor blurs, base/unlit_transparent_skinned); the frames are the pack
+    <x>.txpk's (txpk_frames), their alpha the blur's coverage."""
+    lines = _values(material_node(packs, material), 'anim_texture')
+    _req(len(lines) == 1, f'material {material}: {len(lines)} anim_texture lines')
+    words = lines[0].split()
+    _req(len(words) == 3 and words[0].endswith('.dds'), f'material {material}: anim_texture {lines[0]!r}')
+    frames = txpk_frames(packs.read(words[0][:-4] + '.txpk'))
+    _req(len(frames) == int(words[1]), f'material {material}: {len(frames)} frames, its script says {words[1]}')
+    return [_image(f).convert('RGBA') for f in frames], float(words[2])

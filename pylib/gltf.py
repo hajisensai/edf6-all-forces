@@ -4,7 +4,8 @@
     scene = read(path)        every mesh primitive of the default scene, its node transforms applied: positions,
                               normals (when given), texture coordinates (TEXCOORD_0, when given), triangle indices
                               into them, and each triangle's material
-    scene.materials           name, base colour (linear RGBA), emissive colour (linear RGB), the base colour
+    scene.materials           name, base colour (linear RGBA), emissive colour (linear RGB, times its
+                              KHR_materials_emissive_strength) and its texture's image, the base colour
                               texture's image (its bytes and MIME type: from a buffer view, a file or a data URI),
                               the alpha mode, the normal map, and the surface maps with their factors: metallic-
                               roughness, occlusion (its strength), or specular-glossiness (pylib/pbr_maps.py turns
@@ -31,6 +32,7 @@ NORMALIZED = {5121: 255.0, 5123: 65535.0, 5120: 127.0, 5122: 32767.0}   # a norm
 WIDTH = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
 TRIANGLES = 4
 GLB_MAGIC, GLB_JSON, GLB_BIN = 0x46546C67, 0x4E4F534A, 0x004E4942
+EMISSIVE_STRENGTH = 'KHR_materials_emissive_strength'   # emissiveFactor's multiplier (a laser emitter's 10)
 SPEC_GLOSS = 'KHR_materials_pbrSpecularGlossiness'   # Sketchfab's exports of older models: diffuse instead of base colour
 COMPRESSED = ('KHR_draco_mesh_compression', 'EXT_meshopt_compression')
 
@@ -58,6 +60,8 @@ class Material:
     spec_gloss: bytes | None = None     # specularGlossinessTexture's image (RGB specular, sRGB; A glossiness, linear)
     specular: tuple[float, float, float] = (1.0, 1.0, 1.0)     # specularFactor, glossinessFactor
     glossiness: float = 1.0
+    emissive_texture: bytes | None = None   # emissiveTexture's image (sRGB RGB, times `emissive`), None: none
+    alpha_cutoff: float = 0.5       # alphaCutoff (MASK only; glTF's default)
 
 
 @dataclass
@@ -143,7 +147,8 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
     for i, m in enumerate(g.get('materials', [])):
         pbr = m.get('pbrMetallicRoughness', {})
         base = tuple(float(x) for x in pbr.get('baseColorFactor', (1.0, 1.0, 1.0, 1.0)))
-        em = tuple(float(x) for x in m.get('emissiveFactor', (0.0, 0.0, 0.0)))
+        strength = float(m.get('extensions', {}).get(EMISSIVE_STRENGTH, {}).get('emissiveStrength', 1.0))
+        em = tuple(float(x) * strength for x in m.get('emissiveFactor', (0.0, 0.0, 0.0)))
         texture, mime = None, ''
         tex = pbr.get('baseColorTexture')
         sg = m.get('extensions', {}).get(SPEC_GLOSS)
@@ -167,13 +172,15 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
             texture, mime = got
         maps = {k: (image(ref) or (None,))[0] for k, ref in (
             ('normal', m.get('normalTexture')), ('metal_rough', None if sg else pbr.get('metallicRoughnessTexture')),
-            ('occlusion', m.get('occlusionTexture')), ('spec_gloss', (sg or {}).get('specularGlossinessTexture')))}
+            ('occlusion', m.get('occlusionTexture')), ('spec_gloss', (sg or {}).get('specularGlossinessTexture')),
+            ('emissive', m.get('emissiveTexture')))}
         out.append(Material(m.get('name', f'material{i}'), base, em, float(pbr.get('metallicFactor', 1.0)),
                             float(pbr.get('roughnessFactor', 1.0)), texture, mime, m.get('alphaMode', 'OPAQUE'),
                             maps['normal'], 'specular' if sg is not None else 'metal', maps['metal_rough'],
                             maps['occlusion'], float(m.get('occlusionTexture', {}).get('strength', 1.0)),
                             maps['spec_gloss'], tuple(float(x) for x in (sg or {}).get('specularFactor', (1.0,) * 3)),
-                            float((sg or {}).get('glossinessFactor', 1.0))))
+                            float((sg or {}).get('glossinessFactor', 1.0)), maps['emissive'],
+                            float(m.get('alphaCutoff', 0.5))))
     return out
 
 

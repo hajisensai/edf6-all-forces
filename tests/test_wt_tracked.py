@@ -318,6 +318,59 @@ class WtAssetTests(unittest.TestCase):
                 names = {md.name_of(m.name) for m in md.materials}
                 self.assertTrue({'v603_kyata_L', 'v603_kyata_R'} <= names)
 
+    def test_see_through_materials_sit_on_the_stock_hosts(self) -> None:
+        """docs/model-quality-1121-alpha.md: a model.json 'alpha' material is DXT5 on the reviewed Clip / Alpha host
+        (a track on its own material with alpha_clip), every other one BC7 (docs/model-quality-1121-bc7.md) on its template's shader."""
+        import alpha_maps
+        import texfile
+        import texfile_accel
+        import tracked_combat_model as t
+        host, _rab = t.stock(self.game)
+        shaders = {host.name_of(m.name): m.shader for m in host.materials}
+        seen = 0
+        for kind in self.files:
+            spec = wt.load(kind)
+            md, rab = self.model(kind)
+            mats = {md.name_of(m.name): m for m in md.materials}
+            files = {f.name.lower(): f for f in rab.files}
+            for m in spec.info['materials']:
+                with self.subTest(kind=kind, material=m['name']):
+                    al = alpha_maps.entry(m.get('alpha'))
+                    mat = mats[m['name']]
+                    params = {p.name: p.value for p in mat.params}
+                    albedo = md.textures[next(x.texture for x in mat.textures if x.kind == 'albedo')].filename
+                    dds = files[albedo.lower()].data
+                    info = texfile.dds_info(dds)
+                    on = wt.template(m)
+                    if al['mode'] == alpha_maps.OPAQUE:
+                        self.assertEqual((info.fourcc, info.dxgi), (texfile.DX10, texfile.DXGI_BC7_UNORM))
+                        if m['template'] != wt.LIGHT:
+                            self.assertEqual(mat.shader, shaders[m['template']])
+                        continue
+                    seen += 1
+                    self.assertEqual(info.fourcc, b'DXT5')
+                    if on == wt.ALPHA:
+                        self.assertEqual((mat.shader, mat.b3), (wt.ALPHA_SHADER, 2))
+                        self.assertAlmostEqual(params['diffuse'][3], al['factor'], places=6)
+                        self.assertEqual([params[k][0] for k in wt.FALL_OFF], list(wt.FALL_OFF.values()))
+                    else:
+                        self.assertEqual(mat.shader, wt.CLIP_SHADER if on == wt.CLIP else wt.TRACK_SHADER)
+                        self.assertAlmostEqual(params['alpha_clip'][0], al['cutoff'], places=6)
+                        # the cut-out kept: the map's coverage at the cutoff, within the block coding
+                        dec = texfile_accel.decode_dxt5(dds[128:], info.width, info.height)
+                        from PIL import Image
+                        with Image.open(os.path.join(spec.folder, al['map'])) as im:
+                            a = np.asarray(im.convert('L').resize((info.width, info.height)))
+                        self.assertLess(abs(texfile_accel.alpha_coverage(dec[..., 3], al['cutoff']) -
+                                            texfile_accel.alpha_coverage(a, al['cutoff'])), 0.03)
+                    if on in (wt.CLIP, wt.ALPHA):
+                        body = next(x for x in host.materials if host.name_of(x.name) == wt.BODY)
+                        own = {p.name: p.value for p in body.params}
+                        for k in wt.BODY_PARAMS:
+                            self.assertEqual(list(params[k][:3]), list(own[k][:3]), k)
+        if any(k in self.files for k in ('bmpt', 'vulcan')):
+            self.assertGreater(seen, 0)
+
     def test_model_json_matches_its_arrays(self) -> None:
         for kind in self.files:
             spec = wt.load(kind)

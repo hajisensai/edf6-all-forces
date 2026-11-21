@@ -700,6 +700,26 @@ bool SetRagdollLayer(void* ragdoll,int layer) noexcept {
     At<void(__fastcall*)(void*,int)>(kRagdollSetLayer)(ragdoll,layer);
     return RagdollLayer(ragdoll)==layer;
 }
+bool DisableRagdoll(void* ragdoll) noexcept {
+    // 0x6E97C0: mov [rsp+8],rbx; push rdi; sub rsp,20h; mov rbx,[rcx+78h]; mov rdi,rcx; mov rax,[rcx+88h] (the body loop)
+    static const unsigned char print[16]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0x59,0x78,0x48,0x8B};
+    static std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
+    if(!state.load()) {
+        const bool ok=Readable(image+0x6E97C0,sizeof(print)) && std::memcmp(image+0x6E97C0,print,sizeof(print))==0;
+        if(!ok)Log("EDF41CLASS Ragdoll::Disable (EDF.dll+0x6E97C0) is not what this was written for: ragdolls are left in the world");
+        state=ok ? 1 : 2;
+    }
+    const char* r=static_cast<const char*>(ragdoll);
+    if(state.load()!=1 || !ragdoll || !Readable(r+0x78,0x18))return false;
+    const char* bodies=*reinterpret_cast<const char* const*>(r+0x78);
+    const std::size_t n=*reinterpret_cast<const std::size_t*>(r+0x88);
+    if(!bodies || !n || n>4096 || !Readable(bodies,n*0xC0))return false;
+    bool on=false;
+    for(std::size_t i=0;i<n;++i)on=on || bodies[i*0xC0+0xA4]!=0;
+    if(!on)return false;
+    At<void(__fastcall*)(void*)>(0x6E97C0)(ragdoll);
+    return true;
+}
 int RagdollBody(void* ragdoll,const wchar_t* name) noexcept {
     if(!Prims() || !ragdoll || !Rd(ragdoll,0x90,"ragdoll"))return -1;
     return At<int(__fastcall*)(void*,const wchar_t*)>(kBodyByName)(ragdoll,name);

@@ -17,9 +17,11 @@ and stretched along it to the host's length (across it the pieces keep the rig's
 the host bends them at, in every pose its clips put them in (gaps() measures it). A piece with no far joint (a foot, a
 torso) is only moved. Every piece is rigid on its one host bone (weight 1), as X-Morph draws it.
 
-The pieces are drawn in the V603 body material (tracked_combat_model BODY_MATERIAL: albedo, normal, parameter map), the
-material every X-Morph unit is drawn in (pylib/wt_tracked.py), not the host's: the walkers' own (snd_BRDF_Common_Light,
-the Ranger's colour-change shader) glow or recolour through maps the X-Morph textures do not have.
+The pieces are drawn in the materials every X-Morph unit is drawn in (pylib/wt_tracked.py add_surface_material): the V603
+body material (tracked_combat_model BODY_MATERIAL: albedo, normal, the specular map's per-texel roughness / metalness),
+or, where the unit's emissive map lights it (tools/prep_xmorph.py material_maps), Retro-Balam's light material with the
+emissive map as its light mask; not the host's own (the Begaruta's snd_BRDF_Common_Light reads its own light mask, the
+Ranger's colour-change shader recolours through maps the X-Morph textures do not have).
 """
 from __future__ import annotations
 
@@ -39,7 +41,6 @@ from mdb import Mdb, Mesh, Rab, RabFile, bind_world, cmpl_compress, cmpl_decompr
     rab_read, rab_write
 
 FORMAT = 1           # tools/prep_xmorph.py WALKER_FORMAT
-PLAIN_RMO = wt.PLAIN_RMO
 
 
 class XmRigError(ValueError):
@@ -345,14 +346,11 @@ def points(spec: Spec, pl: Placement) -> dict[str, tuple[str, list[float]]]:
 # ------------------------------------------------------------------------------------------ the archive
 
 def _material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
-    import texfile
-    stem = m['name'].lower()
-    side = xm_units.TEXTURE_MIN_SIDE   # resampled before block compression, as every X-Morph map
-    out = {'albedo': (f'{stem}_col.dds', wt._dds_of(os.path.join(spec.folder, m['albedo']), side))}
-    out['normal'] = ((f'{stem}_nor.dds', wt._normal_dds(os.path.join(spec.folder, m['normal']), side)) if m.get('normal')
-                     else ('edf6vc_flat_nor.dds', texfile.solid_bc5()))
-    out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds', wt._param_dds(None, PLAIN_RMO))
-    return out
+    """slot kind -> (archive file, DDS) of one material, as every X-Morph unit's (wt_tracked.material_textures: the
+    specular map's per-texel roughness / metalness, a light material's emissive mask), resampled to
+    xm_units.TEXTURE_MIN_SIDE before block compression."""
+    return wt.material_textures(wt.Spec(spec.folder, {}, {}), {**m, 'template': m.get('template', t.BODY_MATERIAL),
+                                                              'min_side': xm_units.TEXTURE_MIN_SIDE})
 
 
 def skeleton(md: Mdb) -> Mdb:
@@ -406,15 +404,16 @@ def build(game, key: str, spec: Spec | None = None, model: str | None = None) ->
     pl = place(spec, rig, hmd)
     md = skeleton(hmd)
     v603, _v603_rab = t.stock(game)
-    template = next(me for me in v603.objects[0].meshes
-                    if v603.name_of(v603.materials[me.material].name) == t.BODY_MATERIAL)
     model = model or f'edf6vc_{key}.mdb'
     rab = Rab(hrab.version, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [])
-    mat_index, added = [], set()
+    mat_index, layouts, added = [], [], set()
     for m in spec.info['materials']:
         tex = _material_textures(spec, m)
-        md, mi = om.add_material(md, v603, t.BODY_MATERIAL, m['name'], {k: fn for k, (fn, _d) in tex.items()})
+        # the V603 body material or, lit, Retro-Balam's light material with the V603 body's colour parameters
+        md, mi, layout = wt.add_surface_material(game, md, v603, t.BODY_MATERIAL, m,
+                                                 {k: fn for k, (fn, _d) in tex.items()})
         mat_index.append(mi)
+        layouts.append(layout)
         for fn, dds in tex.values():
             if fn not in added:
                 om.add_texture(rab, fn, dds)
@@ -427,6 +426,7 @@ def build(game, key: str, spec: Spec | None = None, model: str | None = None) ->
         P = pl.apply(p['bone'], pos)
         N = pl.normals(p['bone'], nrm)
         near = md.bone_index(pl.bones[p['bone']])
+        template = layouts[p['material']]
         if p['bone'] in pl.blends:
             far = md.bone_index(pl.blends[p['bone']][0])
             rows, kept = _rows(template, P, N, uv, tris.astype(np.int64), near, far, pl.far_weight(p['bone'], P))

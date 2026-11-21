@@ -25,10 +25,24 @@ glTF sources', docs/model-quality-1110.md):
     'roughness_metal'  a map whose R and G are the parameter map's roughness and metalness as they are (a glTF
                  material's, pylib/pbr_maps.py), instead of PLAIN_RMO
     'emissive'   a grey light mask, with the template LIGHT: Retro-Balam's light material (the Dreadnought's lit
-                 hulls': dreadnought_model.LIGHT_HOST), the mask's texels glowing in their albedo's colour ('light':
-                 its light_color strength), the v603_body template's colour parameters kept
+                 hulls': dreadnought_model.LIGHT_HOST, shader snd_BRDF_Common_Light_NoOcc), the mask's texels glowing
+                 in their albedo's colour, the body template's colour parameters kept (add_surface_material); with a
+                 'specular' or a 'roughness_metal' map for its R and G
+    'light'      a light material's glow per unit of albedo (a number, or [r, g, b]; LIGHT_STRENGTH without): the
+                 shader writes mask x albedo x diffuse x light_color to the emissive target, so light_color is this
+                 over the template's diffuse (_lit; docs/xmorph-redo-1121.md)
     'min_side'   its maps smaller than this are resampled (Lanczos) to it before block compression: DXT1 / BC5 4x4
                  blocks on a 256 map are coarse against its detail, on the resampled one a quarter texel
+    'alpha'      see-through (pylib/alpha_maps.py; docs/model-quality-1121-alpha.md): the albedo becomes DXT5 with the
+                 opacity in A, and template() puts the material on a stock host that reads it: a 'mask' v603_body on
+                 CLIP_HOST (snd_BRDF_Chara_2ColorChange_Clip, the same G-buffer as v603_body's Common_Basic plus the
+                 discard; no colour change: its cm0 / cm1 mask is black), a 'blend' one on ALPHA_HOST
+                 (snd_BRDF_Common_Alpha: header b3 = 2, the translucent draw list), a 'mask' track on its own native
+                 track material (snd_BRDF_Mech_Catapillar's alpha_clip). Both hosts' vertex shaders are v603_body's
+                 (the same DXBC), so its vertex layout carries over; their colour parameters are v603_body's.
+
+    template(m) -> str      the host a model.json material is built on: its 'template', or CLIP / ALPHA by its alpha
+    layout_template(m)      the stock material whose vertex layout its meshes take
 """
 from __future__ import annotations
 
@@ -38,12 +52,13 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+import alpha_maps
 import cockpits
 import graft_pure as g
 import obj_model as om
 import tracked_combat_model as t
 import xm_units
-from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
+from mdb import Material, Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
 
 FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
            'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
@@ -69,9 +84,23 @@ TRACK_RMX = (189, 0, 0)   # the V603 track parameter map's mean
 # maps' mean (PLAIN_RMO) is about a mid grey's.
 SPECULAR_RM = ((215, 95), (20, 170))   # (roughness at 0, at 255), (metalness at 0, at 255)
 LIGHT = 'light'           # model.json template: Retro-Balam's light material (dreadnought_model.LIGHT_HOST)
-LIGHT_STRENGTH = 2.0      # its light_color (stock lights 1..30, the Dreadnought's 4: lamps; these are markings)
-BODY = 'v603_body'        # the template whose colour parameters a light material keeps
+LIGHT_STRENGTH = 2.0      # its glow per unit of albedo, an estimate (stock lights 0.43..30; these are markings)
+BODY = 'v603_body'        # the V603 template whose colour parameters a light material keeps
 NO_OCCLUSION = 200
+# see-through hosts (docs/model-quality-1121-alpha.md): (archive in OBJECT, model member, material)
+CLIP = 'clip'             # template(): a cut-out v603_body material, on CLIP_HOST
+ALPHA = 'alpha'           # template(): a translucent v603_body material, on ALPHA_HOST
+CLIP_HOST = ('P601_PROTO_RANGER.MRAB', 'p601_proto_ranger.mdb', 'dx11Shader3')    # EDF6's one 2ColorChange_Clip
+ALPHA_HOST = ('V613_BIKE.MRAB', 'v613_bike.mdb', 'v613_bikeGlassmat')     # an EDF6 vehicle's glass: b2 0, b3 2
+CLIP_SHADER, ALPHA_SHADER = 'snd_BRDF_Chara_2ColorChange_Clip', 'snd_BRDF_Common_Alpha'
+BASIC_SHADER = 'snd_BRDF_Common_Basic'   # an opaque body whose vertex shader both see-through hosts share
+TRACK_SHADER = 'snd_BRDF_Mech_Catapillar'
+NO_COLOUR_CHANGE = (0, 0, 0)    # param_cm0_cm1: R, G the change_color0 / 1 weights, 0: the albedo x diffuse as it is
+# v603_body's parameters a see-through host takes (the G-buffer the opaque material writes, with the same values)
+BODY_PARAMS = ('diffuse', 'specular_color', 'specular_diffuse_blend', 'normal_amount', 'metallic', 'roughness')
+# snd_BRDF_Common_Alpha's view fall-off, saturate((1 - (N.V)^amount) x scale + offset), held at 1: the opacity is the
+# source's (A x factor) from every side, as the source's own viewer shows it
+FALL_OFF = {'translucent_fall_off_amount': 1.0, 'translucent_fall_off_scale': 0.0, 'translucent_fall_off_offset': 1.0}
 HALF_TOL = 4e-3           # m: stored positions are half floats (2^-9 m steps at 2..4 m)
 
 
@@ -327,8 +356,15 @@ def _image(path: str, min_side: int = 0):  # noqa: ANN202 - texfile.Image
 
 
 def _dds_of(path: str, min_side: int = 0) -> bytes:
+    """A parameter map (the occlusion) as DXT1."""
     import texfile_accel
     return texfile_accel.dxt1_dds(_image(path, min_side))
+
+
+def _albedo_dds(path: str, min_side: int = 0) -> bytes:
+    """A colour map as BC7_UNORM, the format of the stock BC7 albedo maps (docs/model-quality-1121-bc7.md)."""
+    import texfile_accel
+    return texfile_accel.bc7_dds(_image(path, min_side))
 
 
 def _normal_dds(path: str, min_side: int = 0) -> bytes:
@@ -361,9 +397,10 @@ def _specular_dds(specular: str, blue: str | None, blue_default: int, min_side: 
     return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
-def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int) -> bytes:
-    """A parameter map from a roughness / metalness map (its R and G as they are: pylib/pbr_maps.py) and the occlusion
-    in B (NO_OCCLUSION without one), at the larger of the two's sizes (min_side at least)."""
+def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int, blue_default: int = NO_OCCLUSION) -> bytes:
+    """A parameter map from a roughness / metalness map (its R and G as they are: pylib/pbr_maps.py) and a grey map in
+    B (the occlusion, the light mask; blue_default without one), at the larger of the two's
+    sizes (min_side at least)."""
     import texfile_accel
     from PIL import Image
     rg = _pil(rm, min_side, 'RGB')
@@ -371,7 +408,7 @@ def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int) -> bytes
     size = max((rg.size, occ.size if occ else (0, 0)), key=lambda wh: wh[0] * wh[1])
     rgba = np.full((size[1], size[0], 4), 255, dtype=np.uint8)
     rgba[..., :2] = np.asarray(rg.resize(size, Image.LANCZOS))[..., :2]
-    rgba[..., 2] = np.asarray(occ.resize(size, Image.LANCZOS)) if occ else NO_OCCLUSION
+    rgba[..., 2] = np.asarray(occ.resize(size, Image.LANCZOS)) if occ else blue_default
     return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
@@ -390,20 +427,87 @@ def _param_dds(occlusion: str | None, rg: tuple[int, int]) -> bytes:
     return texfile_accel.dxt1_dds(texfile.Image(w, h, bytearray(rgba.tobytes())))
 
 
+def template(m: dict) -> str:
+    """The stock material a model.json material is built on: its 'template' (v603_body, the native tracks, LIGHT; another
+    builder's body: car_model's V512, xm_air_model's V505), a see-through body's CLIP ('mask') or ALPHA ('blend'). A
+    track cuts out on its own material (alpha_clip); it cannot blend, nor can a light material be see-through (no stock
+    host does either). A see-through body must be a snd_BRDF_Common_Basic one (add_surface_material checks it)."""
+    mode = alpha_maps.entry(m.get('alpha'))['mode']
+    if mode == alpha_maps.OPAQUE:
+        return m['template']
+    _req(m['template'] != LIGHT, f"{m['name']}: a light material cannot be see-through")
+    if m['template'].startswith('v603_kyata'):
+        _req(mode == alpha_maps.MASK, f"{m['name']}: a track material can cut out (mask), not blend")
+        return m['template']
+    return see_through_kind(m)  # type: ignore[return-value]
+
+
+def see_through_kind(m: dict) -> str | None:
+    """CLIP ('mask') or ALPHA ('blend') for a material whose opaque form is a snd_BRDF_Common_Basic one (v603_body here;
+    any builder's Common_Basic body: the X-Morph airframes' V505 hull is one too), None when it is opaque."""
+    mode = alpha_maps.entry(m.get('alpha'))['mode']
+    return None if mode == alpha_maps.OPAQUE else CLIP if mode == alpha_maps.MASK else ALPHA
+
+
+def layout_template(m: dict) -> str:
+    """The stock material whose mesh layout a model.json material's meshes take: CLIP_HOST's and ALPHA_HOST's vertex
+    shaders are v603_body's Common_Basic ones (the same DXBC in every technique but ZPass, whose Clip variant reads
+    the same POSITION / NORMAL / BINORMAL / TANGENT / TEXCOORD0 for its discard)."""
+    host = template(m)
+    return BODY if host in (CLIP, ALPHA) else host
+
+
+def albedo_dds(folder: str, m: dict, side: int = 0, *, swap_gb: bool = False) -> bytes:
+    """The colour map: BC7 when opaque (docs/model-quality-1121-bc7.md); DXT5 with the opacity in A when see-through (the 'alpha' map, or the
+    albedo file's own A), each mip of a cut-out keeping the top level's coverage at its cutoff. `swap_gb`: G and B
+    exchanged, for snd_BRDF_Mech_Catapillar, which reads the albedo as .xzy (its Deferred and Forward PS: `mul r0.xyz,
+    r0.xzyx, cb2[0].xyzx`), so a track shows the source's colours."""
+    import texfile_accel
+    al = alpha_maps.entry(m.get('alpha'))
+    albedo = os.path.join(folder, m['albedo'])
+    if al['mode'] == alpha_maps.OPAQUE and not swap_gb:
+        return _albedo_dds(albedo, side)
+    rgba = np.array(_pil(albedo, side, 'RGBA'))
+    if swap_gb:
+        rgba[..., [1, 2]] = rgba[..., [2, 1]]
+    if al['mode'] == alpha_maps.OPAQUE:
+        return texfile_accel.bc7_dds(_texfile(rgba))
+    if al['map']:
+        from PIL import Image
+        a = _pil(os.path.join(folder, al['map']), 0, 'L')
+        if a.size != (rgba.shape[1], rgba.shape[0]):
+            a = a.resize((rgba.shape[1], rgba.shape[0]), Image.LANCZOS)
+        rgba[..., 3] = np.asarray(a)
+    return texfile_accel.dxt5_dds(_texfile(rgba), al['cutoff'] if al['mode'] == alpha_maps.MASK else None)
+
+
+def clip_textures() -> dict[str, tuple[str, bytes]]:
+    """CLIP_HOST's slot that a Common_Basic material has not: param_cm0_cm1, black (no colour change)."""
+    import texfile
+    return {'param_cm0_cm1': ('edf6vc_no_colour_change.dds', texfile.solid_dxt1(NO_COLOUR_CHANGE))}
+
+
 def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     """slot kind -> (archive file name, DDS) of one model.json material."""
     import texfile
     stem = m['name'].lower()
     path = lambda key: os.path.join(spec.folder, m[key]) if m.get(key) else None   # noqa: E731
     side = int(m.get('min_side', 0))
-    out = {'albedo': (f'{stem}_col.dds', _dds_of(path('albedo'), side))}
+    host = template(m)
+    out = {'albedo': (f'{stem}_col.dds', albedo_dds(spec.folder, m, side, swap_gb=host.startswith('v603_kyata')))}
+    if host == CLIP:
+        out.update(clip_textures())
     if m.get('normal'):
         out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal'), side))
     else:
         out['normal'] = ('edf6vc_flat_nor.dds', texfile.solid_bc5())
     if m['template'] == LIGHT:
-        _req(bool(m.get('specular')) and bool(m.get('emissive')), f'{stem}: a light material without its maps')
-        out['param_r_m_light_hr'] = (f'{stem}_rml.dds', _specular_dds(path('specular'), path('emissive'), 0, side))
+        # snd_BRDF_Common_Light_NoOcc reads B as the light mask (0 unlit), R / G as the body's roughness / metalness
+        _req(bool(m.get('emissive')) and bool(m.get('specular') or m.get('roughness_metal')),
+             f'{stem}: a light material without its maps')
+        rml = (_specular_dds(path('specular'), path('emissive'), 0, side) if m.get('specular') else
+               _roughness_metal_dds(path('roughness_metal'), path('emissive'), side, 0))
+        out['param_r_m_light_hr'] = (f'{stem}_rml.dds', rml)
     elif m['template'].startswith('v603_kyata'):
         # the native track material: its own parameter slots (the V603 track map's mean, the occlusion apart)
         _req(not (m.get('specular') or m.get('roughness_metal')), f'{stem}: a track material with surface maps')
@@ -481,18 +585,110 @@ def ejection_local(game, kind: str) -> dict:  # noqa: ANN001
     return {side: a.muzzles[side]['local'] for side in spec.info['ejections']}
 
 
-def _lit(md: Mdb, index: int, host: Mdb, strength: float) -> Mdb:
-    """The light material `index` with the body template's colour parameters (BODY's diffuse and specular colour:
-    the light template's are Retro-Balam's brighter, glossier finish) and its light_color at `strength`."""
-    body = next(m for m in host.materials if host.name_of(m.name) == BODY)
-    own = {p.name: p for p in body.params}
+def light_rgb(light) -> tuple[float, float, float]:  # noqa: ANN001 - a number, [r, g, b] or None
+    """A material's 'light' (its glow per unit of albedo) as (r, g, b): LIGHT_STRENGTH where it says none."""
+    v = LIGHT_STRENGTH if light is None else light
+    rgb = (float(v),) * 3 if isinstance(v, (int, float)) else tuple(float(c) for c in v)
+    _req(len(rgb) == 3 and all(c >= 0.0 for c in rgb) and any(rgb), f'light {light!r}: not a glow')
+    return rgb   # type: ignore[return-value]
+
+
+def _lit(md: Mdb, index: int, host: Mdb, light, body: str = BODY) -> Mdb:  # noqa: ANN001 - light: light_rgb's
+    """The light material `index` with `host`'s template `body`'s colour parameters (its diffuse and specular colour:
+    the light template's are Retro-Balam's brighter, glossier finish) and the light_color that makes its glow `light`
+    per unit of albedo: snd_BRDF_Common_Light_NoOcc writes mask x albedo x diffuse x light_color to its emissive target
+    (o6; DX11.cpk, docs/xmorph-redo-1121.md), so light_color is the glow over the diffuse it keeps."""
+    src = next((m for m in host.materials if host.name_of(m.name) == body), None)
+    _req(src is not None, f'the host has no template material {body}')
+    own = {p.name: p for p in src.params}
+    _req('diffuse' in own and 'specular_color' in own, f'{body}: no diffuse / specular_color')
+    diffuse = own['diffuse'].value[:3]
+    _req(all(d > 0.0 for d in diffuse), f'{body}: diffuse {diffuse}')
+    colour = [c / d for c, d in zip(light_rgb(light), diffuse)]
     mats = list(md.materials)
     m = mats[index]
     _req(any(p.name == 'light_color' for p in m.params), 'the light template has no light_color')
-    params = [replace(p, value=[strength] * 3 + [0.0]) if p.name == 'light_color' else
+    params = [replace(p, value=colour + [0.0]) if p.name == 'light_color' else
               replace(p, value=list(own[p.name].value)) if p.name in ('diffuse', 'specular_color') else p
               for p in m.params]
     mats[index] = replace(m, params=params)
+    return replace(md, materials=mats)
+
+
+def add_surface_material(game, md: Mdb, host: Mdb, body: str, m: dict,  # noqa: ANN001 - rootcpk.Game
+                         slots: dict[str, str]) -> tuple[Mdb, int, Mesh]:
+    """`md` with the model.json material `m` (its textures: material_textures' `slots`) and its index, and the stock
+    mesh whose vertex layout its meshes take: a light material (template LIGHT) on Retro-Balam's light material
+    (dreadnought_model.LIGHT_HOST, _lit: `host`'s `body` colour parameters); a see-through one (its 'alpha', template()
+    CLIP / ALPHA) on CLIP_HOST's / ALPHA_HOST's material with `host`'s `body` parameters (see_through; `body` a
+    snd_BRDF_Common_Basic material, whose vertex shader the hosts share, so its mesh's layout is the one); a cut-out
+    track on its own track material with its alpha_clip; any other on `host`'s material `body`."""
+    on = template({**m, 'template': m.get('template', body)})    # a material without one: on the body
+    if on == LIGHT:
+        import dreadnought_model as dm
+        light_md, light_mesh = dm._host(game, dm.LIGHT_HOST)
+        md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
+        return _lit(md, mi, host, m.get('light'), body), mi, light_mesh
+    src = next((x for x in host.materials if host.name_of(x.name) == body), None)
+    _req(src is not None, f'the host has no material {body}')
+    mesh = next((me for o in host.objects for me in o.meshes if host.name_of(host.materials[me.material].name) == body),
+                None)
+    _req(mesh is not None, f'the host has no mesh in material {body}')
+    if on in (CLIP, ALPHA):
+        _req(src.shader == BASIC_SHADER, f"{m['name']}: its body {body} is {src.shader}, not {BASIC_SHADER}: no "
+                                         'see-through host shares its vertex shader')
+        md, mi = om.add_material(md, see_through_host(game, on), (CLIP_HOST if on == CLIP else ALPHA_HOST)[2],
+                                 m['name'], slots)
+        return see_through(md, mi, m, src), mi, mesh
+    md, mi = om.add_material(md, host, body, m['name'], slots)
+    if alpha_maps.entry(m.get('alpha'))['mode'] == alpha_maps.MASK:     # a cut-out track
+        md = see_through(md, mi, m)
+    return md, mi, mesh
+
+
+def see_through_host(game, which: str) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    """The stock model holding CLIP_HOST's / ALPHA_HOST's material, checked to be the shader reviewed for it."""
+    import dreadnought_model as dm
+    where, shader = (CLIP_HOST, CLIP_SHADER) if which == CLIP else (ALPHA_HOST, ALPHA_SHADER)
+    md, _mesh = dm._host(game, where)
+    mat = next(x for x in md.materials if md.name_of(x.name) == where[2])
+    _req(mat.shader == shader, f'{where[0]} {where[2]}: shader {mat.shader}, not the reviewed {shader}')
+    return md
+
+
+def see_through(md: Mdb, index: int, m: dict, body: Material | None = None) -> Mdb:
+    """The see-through material `index` (built on template(m)'s host) with its opacity parameters: CLIP / a track
+    alpha_clip = the cutoff; ALPHA diffuse.w = the factor and the view fall-off held at 1 (FALL_OFF). A CLIP or ALPHA
+    one takes v603_body's BODY_PARAMS values, so it lights as the opaque v603_body material would (the hosts' own are
+    a character's / a glass's finish)."""
+    al = alpha_maps.entry(m.get('alpha'))
+    on = see_through_kind(m) if body is not None else template(m)
+    mats = list(md.materials)
+    mat = mats[index]
+    names = {p.name for p in mat.params}
+    want = set()
+    if on in (CLIP, ALPHA):
+        _req(body is not None, f"{m['name']}: a see-through body material needs its opaque body's parameters")
+        own = {p.name: list(p.value) for p in body.params}   # type: ignore[union-attr]
+        want |= set(BODY_PARAMS)
+    if on == ALPHA:
+        want |= set(FALL_OFF)
+    else:
+        want.add('alpha_clip')
+    _req(want <= names, f"{m['name']}: the host material lacks {sorted(want - names)}")
+    params = []
+    for p in mat.params:
+        v = list(p.value)
+        if on in (CLIP, ALPHA) and p.name in BODY_PARAMS:
+            v = list(own[p.name])
+        if p.name == 'diffuse' and on == ALPHA:
+            v[3] = al['factor']
+        elif p.name in FALL_OFF and on == ALPHA:
+            v[0] = FALL_OFF[p.name]
+        elif p.name == 'alpha_clip' and on != ALPHA:
+            v[0] = al['cutoff']
+        params.append(replace(p, value=v))
+    mats[index] = replace(mat, params=params)
     return replace(md, materials=mats)
 
 
@@ -515,14 +711,10 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
     for m in spec.info['materials']:
         tex = {kind_: (same.setdefault(dds, fn), dds) for kind_, (fn, dds) in material_textures(spec, m).items()}
         slots = {kind_: fn for kind_, (fn, _d) in tex.items()}
-        if m['template'] == LIGHT:
-            import dreadnought_model as dm
-            light_md, light_mesh = dm._host(game, dm.LIGHT_HOST)
-            templates[LIGHT] = om.position_layout(light_mesh, extent)
-            md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
-            md = _lit(md, mi, host, float(m.get('light', LIGHT_STRENGTH)))
-        else:
-            md, mi = om.add_material(md, host, m['template'], m['name'], slots)
+        on = template(m)
+        md, mi, mesh = add_surface_material(game, md, host, BODY if on in (LIGHT, CLIP, ALPHA) else on, m, slots)
+        if on == LIGHT:
+            templates[LIGHT] = om.position_layout(mesh, extent)
         mat_index.append(mi)
         for fn, dds in tex.values():
             if fn not in added:
@@ -531,7 +723,7 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
     packed_parts = []
     for k, p in enumerate(spec.info['parts']):
         pos, nrm, uv, tris = spec.part(k)
-        tmpl = templates[spec.info['materials'][p['material']]['template']]
+        tmpl = templates[layout_template(spec.info['materials'][p['material']])]
         rows, kept = part_rows(tmpl, pos, nrm, uv, tris.astype(np.int64), md.bone_index(p['bone']))
         packed_parts.append((tmpl, mat_index[p['material']], rows, kept))
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(pack(packed_parts))]

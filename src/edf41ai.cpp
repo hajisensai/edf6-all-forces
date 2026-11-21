@@ -27,14 +27,17 @@
 //    spot against a wall for 140 s. No target: the class's own walk.
 //  - After the base update (the skeleton is built from the bones' locals at its start, 0x317B88 -> 0x1100B90, which
 //    writes only the world matrices, bone record +0xB0), the arms aim as 4.1's weapons did (hector::ArmAim): the arm
-//    bone's local (+0x70) becomes Rx(pitch) Ry(yaw) x the animation's, and its world and every bone below it (the guns'
-//    bones, mdb.graft_rigid / graft_skinned put them there; the muzzle locators hang on the arm bone) are moved to match
-//    now, so this frame's guns, muzzles and draw see it whichever comes first, the CAS's next write or the next build.
-//    An arm aims while its gun battery attacks: the condition the class's own per-gun aim (0x34F900) runs under.
-//    Then the weapon's own animation (SGO edf41_hector_anim, hector::StepOpenClose / StepRoll): its bones' locals from the
-//    4.1 clip and the world of every bone below the arm rebuilt from its parent's. And the head player (`head` of Hector.CAS)
-//    opens and closes as 4.1's head does (hector::StepHead; 0x1166FB0 finds the player, 0x116C2D0 sets its state). The
-//    functions only this calls are checked by their first bytes (kAnimPrints): on another build it is all left off.
+//    bone's local (+0x70) becomes Rx(pitch) Ry(yaw) x the animation's, and its world and every bone below it are moved to
+//    match now (the muzzle locators hang on the arm bone), so this frame's muzzles, weapons and draw see it whichever comes
+//    first, the CAS's next write or the next build. An arm aims while its gun battery attacks: the condition the class's
+//    own per-gun aim (0x34F900) runs under.
+//    Then the weapons (SGO edf41_hector_weapons; Weapons below): each arm's weapon is an object of its own, as in 4.1 (the
+//    plugin's class Hector41_Weapon / Hector401_Shield, an EventAnimationObject with the weapon's own model, ragdoll and
+//    material animation), made once and put on its arm bone's aimed world matrix every frame; its own animation (its SGO's
+//    edf41_weapon_anim, hector::StepOpenClose / StepRoll) is written into its own bones' locals and its skeleton rebuilt
+//    from that matrix (0x1100B90, edf41c::ModelMatrix). And the head player (`head` of Hector.CAS) opens and closes as
+//    4.1's head does (hector::StepHead; 0x1166FB0 finds the player, 0x116C2D0 sets its state). The functions only this
+//    calls are checked by their first bytes (kAnimPrints): on another build it is all left off.
 //  - 0x34FEFE (the gun loop of StartAttack(1) = 0x34FE90) and 0x34E123 (0x34E0D0): the call of the per-gun attack start
 //    0x34E180(gun). An attack picks its arms once (PickArms) and the arms not picked are not started.
 //  - The legs' animation (hector::PickGait / GaitRate, 4.1's 0x2220E0 / 0x2224E0): WalkingEnemyBase's walk state
@@ -90,10 +93,7 @@ constexpr std::size_t kGaitRateSites[]={0x5406F5,0x54083E};
 constexpr std::size_t kAxisXAt=0x60,kAxisZAt=0x80,kYawStepAt=0x1320,kEasedVelocityAt=0x1430,kWalkVectorAt=0x1290,
                       kMoveSpeedAt=0xF94,kWalkAnimAt=0xFD4,kTurnAnimAt=0xFD8;
 constexpr std::size_t kGaitStateAt[]={0x1000,0x101C,0x1020,0x1024,0x1028,0x1004,0x1008};  // hector::Gait order
-// material animation slots of the model component (+0x8A0): play 0x6C0200(model, slot, mode) -> 0x6DC830 (player [+0x10]
-// [slot].second: active byte, mode +4, clock reset), stop 0x6C04F0(model, slot) (active byte 0); players [+0x2A8], count +0x20
-constexpr std::size_t kMatPlay=0x6C0200,kMatStop=0x6C04F0,kModelAt=0x8A0,kMatPlayersAt=0x2A8,kMatCountAt=0x20;
-// first bytes of the functions only the weapon / head animation calls: on any other build those stay off
+// first bytes of the functions only the head animation and the weapons' SGO key read call: on any other build those stay off
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kAnimPrints[]={
     {kNodeText,{0x48,0x83,0xEC,0x28,0x4C,0x8B,0xD1,0xE8}},
@@ -101,8 +101,6 @@ constexpr Print kAnimPrints[]={
     {kCasSetState,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},
     {kChildCount,{0x48,0x8B,0x11,0x44,0x8B,0x49,0x08,0x4C}},
     {kChildIndex,{0x4C,0x8B,0x09,0x44,0x8B,0x51,0x08,0x44}},
-    {kMatPlay,{0x48,0x8B,0x89,0xA8,0x02,0x00,0x00,0x48}},
-    {kMatStop,{0x48,0x8B,0x81,0xA8,0x02,0x00,0x00,0x48}},
 };
 
 constexpr std::size_t kTreeAt=0xA8;          // the object's SGO tree
@@ -164,17 +162,7 @@ struct Entry {
     float base[hector::kArms][16]{};
     float written[hector::kArms][16]{};
     bool haveWritten[hector::kArms]{};
-    // the weapons' own animations (SGO edf41_hector_anim) and the head
-    struct ArmAnim {
-        hector::WeaponKind kind=hector::WeaponKind::None;
-        std::vector<int> bone;           // skeleton index of each animated bone
-        std::vector<float> clip[3];      // open, close, roll: frames, step, keys
-        hector::OpenClose oc;
-        hector::Barrels roll;
-        int lightSlot=-1;                // the charge light's material animation slot (edf41_hector_light), -1 none
-        bool lit=false;
-    } anim[hector::kArms];
-    bool animRead=false;
+    // the head
     int headPlayer=-2;                   // -2: not looked up, -1: none
     hector::Head head;
     // the weapons' charge and fire look (edf41_hector fx; tools/make_edf41_objects.py HECTOR_FX)
@@ -188,12 +176,12 @@ struct Entry {
         std::uint32_t shots=0;
     } fx[hector::kArms];
     bool fxRead=false;
-    // the shields (SGO edf41_hector_shield; Hector401_Shield below): the arms that hold one, the shield objects
-    bool shieldRead=false;
+    // the weapon objects (SGO edf41_hector_weapons; Weapons below): each arm's weapon SGO, the arms that hold a shield, the objects
+    bool weaponsRead=false;
     unsigned shieldMask=0;               // bit i: gun_control entry i is a shield (it never fires)
-    wchar_t shieldPath[128]{};
-    bool shieldMade[hector::kArms]{};
-    edf41c::WeakRef shield[hector::kArms];
+    wchar_t weaponPath[hector::kArms][128]{};
+    bool weaponMade[hector::kArms]{};
+    edf41c::WeakRef weapon[hector::kArms];
 };
 
 std::atomic<int> animState{0};          // 0 unchecked, 1 the functions are this build's, 2 they are not: no animation
@@ -223,7 +211,7 @@ bool AnimReady() noexcept {
     if(s)return s==1;
     for(const Print& p:kAnimPrints)
         if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
-            Log("EDF41AI the code at EDF.dll+0x%zX is not what this was written for: Hector's weapon and head animations are off",p.rva);
+            Log("EDF41AI the code at EDF.dll+0x%zX is not what this was written for: the Hector's head animation and weapon objects are off",p.rva);
             animState=2;
             return false;
         }
@@ -235,61 +223,6 @@ Handle At(const Handle& node,int i) noexcept {
     return Handle{node.tree,reinterpret_cast<ChildIndexFn>(image+kChildIndex)(&node,static_cast<std::uint32_t>(i)),0};
 }
 int CountOf(const Handle& node) noexcept { return reinterpret_cast<ChildCountFn>(image+kChildCount)(&node); }
-
-// The object's edf41_hector_anim (tools/make_edf41_objects.py hector_anim); an arm whose data does not fit stays None.
-void ReadAnim(void* self,Entry& e,void* skel) noexcept {
-    const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
-    Handle key{};
-    if(Child(root,L"edf41_hector_light",key) && CountOf(key)==hector::kArms) {
-        char* players=*reinterpret_cast<char**>(static_cast<char*>(self)+kModelAt+kMatPlayersAt);
-        const std::uint32_t slots=players && Readable(players+kMatCountAt,4) ? *reinterpret_cast<const std::uint32_t*>(players+kMatCountAt) : 0u;
-        for(int i=0;i<hector::kArms;++i) {
-            const Handle v=At(key,i);
-            const int slot=static_cast<int>(reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&v));
-            e.anim[i].lightSlot=slot>=0 && static_cast<std::uint32_t>(slot)<slots ? slot : -1;
-            if(slot>=0)Log("EDF41AI hector %p arm %d charge light slot %d of %u",self,i,slot,slots);
-        }
-    }
-    if(!Child(root,L"edf41_hector_anim",key) || CountOf(key)!=hector::kArms)return;
-    for(int i=0;i<hector::kArms;++i) {
-        Entry::ArmAnim& a=e.anim[i];
-        const Handle arm=At(key,i);
-        if(CountOf(arm)!=5)continue;
-        const Handle kind=At(arm,0),names=At(arm,1);
-        const int k=static_cast<int>(reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&kind));
-        const int nb=CountOf(names);
-        if(k<1 || k>2 || nb<=0 || nb>16)continue;
-        a.bone.assign(static_cast<std::size_t>(nb),-1);
-        bool ok=true;
-        for(int b=0;b<nb;++b) {
-            const Handle n=At(names,b);
-            const wchar_t* text=reinterpret_cast<const wchar_t*(__fastcall*)(const Handle*)>(image+kNodeText)(&n);
-            a.bone[static_cast<std::size_t>(b)]=text ? edf41c::BoneIndex(skel,text) : -1;
-            ok=ok && a.bone[static_cast<std::size_t>(b)]>=0;
-        }
-        for(int c=0;c<3 && ok;++c) {
-            const Handle clip=At(arm,2+c);
-            const int n=CountOf(clip);
-            if(n<=0)continue;
-            a.clip[c].resize(static_cast<std::size_t>(n));
-            for(int j=0;j<n;++j) {
-                const Handle v=At(clip,j);
-                a.clip[c][static_cast<std::size_t>(j)]=reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&v);
-            }
-            const float frames=a.clip[c][0];
-            if(!(frames>=1.0f) || static_cast<std::size_t>(n)!=2+static_cast<std::size_t>(frames)*static_cast<std::size_t>(nb)*hector::kKeyFloats)
-                ok=false;
-        }
-        const bool need=k==1 ? !a.clip[0].empty() && !a.clip[1].empty() : !a.clip[2].empty();
-        if(!ok || !need) {
-            Log("EDF41AI hector %p arm %d: its weapon animation does not fit the model (%d bones), left still",self,i,nb);
-            a=Entry::ArmAnim{};
-            continue;
-        }
-        a.kind=static_cast<hector::WeaponKind>(k);
-        Log("EDF41AI hector %p arm %d weapon animation %s, %d bones",self,i,k==1 ? "open/close" : "roll",nb);
-    }
-}
 
 hector::Clip ClipOf(const std::vector<float>& v) noexcept {
     hector::Clip c;
@@ -362,11 +295,11 @@ float FlatDistance(void* self,const float* target) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 
-void DropShields(Entry& e) noexcept;
+void DropWeapons(Entry& e) noexcept;
 void EraseEntry(const void* self) noexcept {
     const auto it=table.find(self);
     if(it==table.end())return;
-    DropShields(it->second);
+    DropWeapons(it->second);
     table.erase(it);
 }
 
@@ -374,7 +307,7 @@ void EraseEntry(const void* self) noexcept {
 void SweepGone() noexcept {
     for(auto it=table.begin();it!=table.end();) {
         if(ticks-it->second.seenAt<=kStaleTicks) { ++it; continue; }
-        DropShields(it->second);
+        DropWeapons(it->second);
         it=table.erase(it);
     }
 }
@@ -460,70 +393,6 @@ bool Finite16(const float* m) noexcept {
     return true;
 }
 
-// The arm's weapon pose (its own CAS clips, hector::StepOpenClose / StepRoll): the animated bones' locals, then the world of
-// every bone below the arm from its parent's (the arm's world is already the aimed one). Bones come after their parents in
-// the model (mdb.insert_bone); one that does not keeps the moved world.
-// 301 cannon's charge light: on while the arm's battery charges, off when it fires or the attack goes (4.1 0x2259A0 mode 1,
-// stopped on leaving the charge state 0x225AAB).
-void ChargeLight(void* self,Entry& e,int i) noexcept {
-    Entry::ArmAnim& a=e.anim[i];
-    if(a.lightSlot<0)return;
-    bool charging=false;
-    const char* base=static_cast<const char*>(self);
-    void* const* guns=*reinterpret_cast<void* const* const*>(base+kGunsAt);
-    if(guns && *reinterpret_cast<const std::uint64_t*>(base+kGunCountAt)==hector::kArms && Readable(guns,sizeof(void*)*2*hector::kArms)) {
-        const char* control=static_cast<const char*>(guns[2*i]);
-        const char* battery=control && Readable(control,sizeof(void*)) ? *reinterpret_cast<const char* const*>(control) : nullptr;
-        if(battery && Readable(battery,kBatteryChargeAt+4))
-            charging=*reinterpret_cast<const std::int32_t*>(battery+kBatteryChargeAt)>0;
-    }
-    char* model=static_cast<char*>(self)+kModelAt;
-    if(charging && !a.lit) {
-        reinterpret_cast<void(__fastcall*)(void*,std::uint32_t,std::int32_t)>(image+kMatPlay)(model,static_cast<std::uint32_t>(a.lightSlot),1);
-        a.lit=true;
-    } else if(!charging && a.lit) {
-        reinterpret_cast<void(__fastcall*)(void*,std::uint32_t)>(image+kMatStop)(model,static_cast<std::uint32_t>(a.lightSlot));
-        a.lit=false;
-    }
-}
-
-void PoseWeapon(Entry& e,int i,char* recs,std::int64_t count,bool attacking) noexcept {
-    Entry::ArmAnim& a=e.anim[i];
-    if(a.kind==hector::WeaponKind::None)return;
-    const int nb=static_cast<int>(a.bone.size());
-    int which=2;
-    float time=0.0f;
-    if(a.kind==hector::WeaponKind::OpenClose)
-        which=hector::StepOpenClose(a.oc,attacking,ClipOf(a.clip[0]).Length(),ClipOf(a.clip[1]).Length(),time);
-    else
-        time=hector::StepRoll(a.roll,attacking,ClipOf(a.clip[2]).Length());
-    const hector::Clip clip=ClipOf(a.clip[which]);
-    std::vector<int> changed;
-    for(const int b:e.below[i]) {
-        char* rec=recs+static_cast<std::size_t>(b)*kBoneSize;
-        const std::int32_t parent=*reinterpret_cast<const std::int32_t*>(rec+kBoneParentAt);
-        if(parent<0 || parent>=count || parent>=b)continue;
-        int k=-1;
-        for(int j=0;j<nb;++j)
-            if(a.bone[static_cast<std::size_t>(j)]==b)k=j;
-        const bool underChanged=std::find(changed.begin(),changed.end(),parent)!=changed.end();
-        if(k<0 && !underChanged)continue;
-        float local[16],world[16];
-        if(k>=0) {
-            float pose[hector::kKeyFloats];
-            hector::SamplePose(clip,nb,k,time,which==2,pose);
-            hector::PoseMatrix(pose,local);
-        } else {
-            std::memcpy(local,rec+kBoneLocalAt,sizeof(local));
-        }
-        hector::Mul4(local,reinterpret_cast<const float*>(recs+static_cast<std::size_t>(parent)*kBoneSize+kBoneWorldAt),world);
-        if(!Finite16(local) || !Finite16(world))continue;
-        if(k>=0)std::memcpy(rec+kBoneLocalAt,local,sizeof(local));
-        std::memcpy(rec+kBoneWorldAt,world,sizeof(world));
-        changed.push_back(b);
-    }
-}
-
 // The arms' aim, after the base update (see the header). Call with tableLock held.
 void AimArms(void* self,Entry& e) noexcept {
     char* skel=static_cast<char*>(self)+kSkeletonAt;
@@ -546,10 +415,6 @@ void AimArms(void* self,Entry& e) noexcept {
             }
         }
         Log("EDF41AI hector %p arm bones %d (%zu below) / %d (%zu below)",self,e.arm[0],e.below[0].size(),e.arm[1],e.below[1].size());
-    }
-    if(!e.animRead) {
-        e.animRead=true;
-        if(AnimReady())ReadAnim(self,e,skel);
     }
     const bool dead=*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)!=0;
     for(int i=0;i<hector::kArms;++i) {
@@ -594,7 +459,6 @@ void AimArms(void* self,Entry& e) noexcept {
             if(Finite16(moved))std::memcpy(w,moved,sizeof(moved));
         }
         std::memcpy(rec+kBoneWorldAt,world,sizeof(world));
-        PoseWeapon(e,i,recs,count,e.haveTarget && Attacking(self,i));
         std::memcpy(rec+kBoneLocalAt,local,sizeof(local));
         std::memcpy(e.written[i],local,sizeof(local));
         e.haveWritten[i]=true;
@@ -667,146 +531,276 @@ void Effects(void* self,Entry& e) noexcept {
     }
 }
 
-// ---- the shield (tools/make_edf41_objects.py hector_shield; docs/feedback-2026-11-08-edf41-hector-shield.md) ---------------------
-// 4.1 (EDF41.exe, H): the shield is an object of its own (Hector401_Shield, vtable 0xA98C10) whose ragdoll bodies all carry
-// property 2 (0x3342B0); bullets meet them only when hostile to the shield's team (0x169550) and the Hector refuses a hit
-// landing on them (slot 10 0x2210E0): it stops the player's bullets and takes nothing. Here: an EventAnimationObject of the
-// plugin's class Hector401_Shield (4.1's shield ragdoll on a meshless shield model; the mesh the player sees is part of the
-// body model), made by its Hector's update from the SGO edf41_hector_shield names, its matrix the arm bone's world after the
-// arms are aimed (the shield mesh hangs from that bone: mdb.graft_skinned puts the donor's model frame on it), the Hector's
-// team, not registered (no target, not counted), its bodies on the Hector's own ragdoll layer (WalkingEnemyBase +0xD80,
-// 0x53BCD9; EventAnimationObject's constructor put them on the map layer 0x11, which walkers and climbers take for ground),
-// refusing every hit (slot 16). It goes when its Hector dies or goes (its own update checks), or when the Hector's entry
-// here is dropped. Every machine makes its own for its own copy of the Hector: it takes no damage, so nothing of it travels.
+// ---- the weapons (tools/make_edf41_objects.py hector_weapons; docs/edf41-hector-split-models.md) ---------------------------------
+// 4.1 (EDF41.exe, H): every arm weapon is an object of its own (Hector301_Cannon ... Hector401_Shield) on its arm bone, with its own
+// model, ragdoll (owner = the Hector), CAS and material animation; the shield (vtable 0xA98C10) tags its ragdoll bodies with property
+// 2 (0x3342B0): bullets meet them only when hostile to the shield's team (0x169550) and the Hector refuses a hit landing on them (slot
+// 10 0x2210E0): it stops the player's bullets and takes nothing.
+// Here: an EventAnimationObject of the plugin's class Hector41_Weapon (the shield: Hector401_Shield; one cloned vtable for both) made
+// by its Hector's update from the SGO edf41_hector_weapons names for that arm (the weapon's own model archive, the still CAS, 4.1's
+// weapon ragdoll, its own material_animation and edf41_weapon_anim). Every frame, after the arms are aimed: its matrix (+0x60) is the
+// arm bone's world, its own animation (4.1's clips, hector::StepOpenClose / StepRoll, attacking as the arm's battery does) is written
+// into its bones' locals and its skeleton rebuilt from that matrix (0x1100B90, edf41c::ModelMatrix: whichever of the two updates runs
+// first this frame, the draw sees the arm's pose; the object's own Update rebuilds from the same matrix and locals). Its material
+// animation: [0] the glow, looped from the start; [1] the death block, played to its end and held when the Hector dies (4.1: each
+// weapon object plays its own, 0x2255D4 .. 0x22A289). Its ragdoll: a live shield's bodies on the Hector's own ragdoll layer
+// (WalkingEnemyBase +0xD80, 0x53BCD9; EventAnimationObject's constructor put them on the map layer 0x11, which walkers and climbers
+// take for ground), every other weapon's and a dead Hector's shield's out of the world (Ragdoll::Disable 0x6E97C0: the port's guns
+// took no hits before either). Every hit refused (slot 16), the Hector's team, not registered (no target, not counted). It stays on
+// its Hector's corpse (the arm bones the ragdoll moves) and goes when the Hector object goes (its own update checks), or when the
+// Hector's entry here is dropped. Every machine makes its own for its own copy of the Hector (a mission object on each machine): the
+// objects take no damage and carry no state of their own (pose, animation and death come from that machine's Hector), so nothing of
+// them travels and every machine shows the same weapons on the same arms.
 constexpr std::size_t kHectorRagdollAt=0xD80;   // WalkingEnemyBase's ragdoll component (0x53BCD9; the kind EAO has at +0xAA0)
 constexpr std::size_t kHectorTeamAt=0x314;
-constexpr int kShieldAccept=16;                  // slot 16 Accept(object, GDI*) -> bool (ApplyDamage 0x547C30 asks it)
-struct ShieldRec {
+constexpr int kWeaponAccept=16;                  // slot 16 Accept(object, GDI*) -> bool (ApplyDamage 0x547C30 asks it)
+constexpr int kWeaponAnimKinds[2]={0,2};         // material_animation load kinds of [glow, death] (the generator writes them too)
+struct WeaponRec {
     edf41c::WeakRef owner;
+    bool shield=false;                           // Hector401_Shield: its ragdoll stops hostile bullets while its Hector lives
     bool layered=false;
     bool gone=false;                             // DeleteObject asked
+    bool dead=false;                             // its Hector died: the death block played
+    bool disabledSaid=false;
+    edf41c::MaterialAnims mat;
+    // its own animation (edf41_weapon_anim): the bones it moves, the clips (open, close, roll: frames, step, keys)
+    hector::WeaponKind kind=hector::WeaponKind::None;
+    std::vector<int> bone;
+    std::vector<float> clip[3];
+    hector::OpenClose oc;
+    hector::Barrels roll;
 };
-std::mutex shieldLock;
-std::unordered_map<const void*,ShieldRec> shields;
-edf41c::Clone shieldClone{"EventAnimationObject (Hector401_Shield)",edf41c::kEaoVtable,45,edf41c::kEaoSlots,{},{},{}};
-std::atomic<int> shieldsMade{0};
+std::mutex weaponLock;
+std::unordered_map<const void*,WeaponRec> weapons;
+edf41c::Clone weaponClone{"EventAnimationObject (Hector41_Weapon / Hector401_Shield)",edf41c::kEaoVtable,45,edf41c::kEaoSlots,{},{},{}};
+std::atomic<int> weaponsMade{0};
 
-std::uint64_t __fastcall ShieldDtor(void* self,unsigned flags) {
-    {
-        std::lock_guard<std::mutex> hold(shieldLock);
-        const auto it=shields.find(self);
-        if(it!=shields.end()) { edf41c::WeakReset(it->second.owner); shields.erase(it); }
+hector::Clip ClipOf(const std::vector<float>& v) noexcept;
+
+// The weapon's edf41_weapon_anim ([kind, [bone], open, close, roll]; tools/make_edf41_objects.py weapon_anim) on its own skeleton;
+// none (301's weapons, the shield): no animation. Data that does not fit the model: logged, left still.
+void ReadWeaponAnim(void* obj,WeaponRec& r) noexcept {
+    const edf41c::SgoNode* key=edf41c::Key(obj,L"edf41_weapon_anim");
+    if(!key)return;
+    std::int32_t kind=0;
+    const edf41c::SgoNode* names=edf41c::Child(key,1);
+    const int nb=edf41c::Count(names);
+    bool ok=edf41c::Count(key)==5 && edf41c::Int(edf41c::Child(key,0),&kind) && kind>=1 && kind<=2 && nb>0 && nb<=16;
+    if(ok)r.bone.assign(static_cast<std::size_t>(nb),-1);
+    for(int b=0;b<nb && ok;++b) {
+        wchar_t text[64]{};
+        ok=edf41c::Text(edf41c::Child(names,b),text,64) &&
+           (r.bone[static_cast<std::size_t>(b)]=edf41c::BoneIndex(static_cast<char*>(obj)+edf41c::kEaoSkeleton,text))>=0;
     }
-    return reinterpret_cast<edf41c::DtorFn>(shieldClone.orig[edf41c::kSlotDtor])(self,flags);
+    for(int c=0;c<3 && ok;++c) {
+        const edf41c::SgoNode* clip=edf41c::Child(key,2+c);
+        const int n=edf41c::Count(clip);
+        if(n<0) { ok=false; break; }
+        r.clip[c].resize(static_cast<std::size_t>(n));
+        for(int j=0;j<n && ok;++j)ok=edf41c::Float(edf41c::Child(clip,j),&r.clip[c][static_cast<std::size_t>(j)]);
+        if(ok && n>0) {
+            const float frames=r.clip[c][0];
+            ok=frames>=1.0f && static_cast<std::size_t>(n)==2+static_cast<std::size_t>(frames)*static_cast<std::size_t>(nb)*hector::kKeyFloats;
+        }
+    }
+    ok=ok && (kind==1 ? !r.clip[0].empty() && !r.clip[1].empty() : !r.clip[2].empty());
+    if(!ok) {
+        Log("EDF41AI weapon %p: its edf41_weapon_anim does not fit its model (%d bones), left still",obj,nb);
+        r.bone.clear();
+        for(std::vector<float>& c:r.clip)c.clear();
+        return;
+    }
+    r.kind=static_cast<hector::WeaponKind>(kind);
+    Log("EDF41AI weapon %p animation %s, %d bones",obj,kind==1 ? "open/close" : "roll",nb);
 }
-std::uint64_t __fastcall ShieldUpdate(void* self,void* dt) {
+
+// The weapon's own animation this frame (4.1's state machine: open / close on the attack, the barrels' roll up and down) into its
+// bones' locals; the caller rebuilds its skeleton after. Call with weaponLock held.
+void WeaponPose(WeaponRec& r,char* obj,bool attacking) noexcept {
+    if(r.kind==hector::WeaponKind::None)return;
+    char* skel=obj+edf41c::kEaoSkeleton;
+    if(!Readable(skel,0x28))return;
+    char* recs=*reinterpret_cast<char**>(skel+0x10);
+    const std::int64_t count=*reinterpret_cast<const std::int64_t*>(skel+0x20);
+    if(!recs || count<=0 || count>1024 || !Readable(recs,static_cast<std::size_t>(count)*kBoneSize))return;
+    int which=2;
+    float time=0.0f;
+    if(r.kind==hector::WeaponKind::OpenClose)
+        which=hector::StepOpenClose(r.oc,attacking,ClipOf(r.clip[0]).Length(),ClipOf(r.clip[1]).Length(),time);
+    else
+        time=hector::StepRoll(r.roll,attacking,ClipOf(r.clip[2]).Length());
+    const hector::Clip clip=ClipOf(r.clip[which]);
+    const int nb=static_cast<int>(r.bone.size());
+    for(int k=0;k<nb;++k) {
+        const int b=r.bone[static_cast<std::size_t>(k)];
+        if(b<0 || b>=count)continue;
+        float pose[hector::kKeyFloats],local[16];
+        hector::SamplePose(clip,nb,k,time,which==2,pose);
+        hector::PoseMatrix(pose,local);
+        if(Finite16(local))std::memcpy(recs+static_cast<std::size_t>(b)*kBoneSize+kBoneLocalAt,local,sizeof(local));
+    }
+}
+
+std::uint64_t __fastcall WeaponDtor(void* self,unsigned flags) {
+    {
+        std::lock_guard<std::mutex> hold(weaponLock);
+        const auto it=weapons.find(self);
+        if(it!=weapons.end()) {
+            edf41c::MaterialAnimsFree(it->second.mat);   // before the model it is bound to goes
+            edf41c::WeakReset(it->second.owner);
+            weapons.erase(it);
+        }
+    }
+    return reinterpret_cast<edf41c::DtorFn>(weaponClone.orig[edf41c::kSlotDtor])(self,flags);
+}
+std::uint64_t __fastcall WeaponUpdate(void* self,void* dt) {
     bool drop=false;
     {
-        std::lock_guard<std::mutex> hold(shieldLock);
-        const auto it=shields.find(self);
-        if(it!=shields.end() && !it->second.gone) {
-            const ShieldRec& r=it->second;
-            drop=!edf41c::WeakAlive(r.owner) ||
-                 *reinterpret_cast<const std::uint8_t*>(static_cast<const char*>(r.owner.object)+kDestroyedAt)!=0;
+        std::lock_guard<std::mutex> hold(weaponLock);
+        const auto it=weapons.find(self);
+        if(it!=weapons.end() && !it->second.gone) {
+            drop=!edf41c::WeakAlive(it->second.owner);
             if(drop)it->second.gone=true;
         }
     }
-    if(drop)edf41c::DeleteObject(self);   // its Hector died or went: so does the shield
-    return reinterpret_cast<edf41c::UpdateFn>(shieldClone.orig[edf41c::kSlotUpdate])(self,dt);
+    if(drop)edf41c::DeleteObject(self);   // its Hector went (deleted, its corpse removed): so does the weapon
+    const std::uint64_t result=reinterpret_cast<edf41c::UpdateFn>(weaponClone.orig[edf41c::kSlotUpdate])(self,dt);
+    std::lock_guard<std::mutex> hold(weaponLock);
+    const auto it=weapons.find(self);
+    if(it!=weapons.end())edf41c::MaterialAnimsUpdate(it->second.mat,dt);   // with the Update's frame info, as the 401's parts
+    return result;
 }
-std::uint64_t __fastcall ShieldMessage(void* self,std::uint32_t msg,void* data) {
-    return reinterpret_cast<edf41c::MessageFn>(shieldClone.orig[edf41c::kSlotMessage])(self,msg,data);
+std::uint64_t __fastcall WeaponMessage(void* self,std::uint32_t msg,void* data) {
+    return reinterpret_cast<edf41c::MessageFn>(weaponClone.orig[edf41c::kSlotMessage])(self,msg,data);
 }
-bool __fastcall ShieldAccept(void*,void*) { return false; }   // 4.1: no hit on the shield counts (0x2210E0)
+bool __fastcall WeaponAccept(void*,void*) { return false; }   // 4.1: no hit on the shield counts (0x2210E0); the guns take none
 
-void CreateShield(void* info) noexcept {
-    void* obj=edf41c::CloneObject(shieldClone,edf41c::kEaoCtor,edf41c::kEaoSize,info);
+void MakeWeapon(void* info,bool shield) noexcept {
+    void* obj=edf41c::CloneObject(weaponClone,edf41c::kEaoCtor,edf41c::kEaoSize,info);
     if(!obj)return;
     // EventAnimationObject's constructor set +0x380 bit 0 (no HP loss); nothing aims at it and no count waits for it
     edf41c::SetFlag(obj,edf41c::kNoHpLoss|edf41c::kNotTarget|edf41c::kNotCounted,true);
-    std::lock_guard<std::mutex> hold(shieldLock);
-    shields[obj]=ShieldRec{};
+    std::lock_guard<std::mutex> hold(weaponLock);
+    WeaponRec& r=weapons[obj];   // in place: the material animation component is bound where it lives
+    r.shield=shield;
+    ReadWeaponAnim(obj,r);
+    const int anims=edf41c::MaterialAnimsLoad(r.mat,obj,edf41c::Key(obj,L"material_animation"),kWeaponAnimKinds,2);
+    if(anims>0)edf41c::MaterialAnimsPlay(r.mat,0,2);   // the glow, looped from the start (4.1's weapons: 0x2255D4 ...)
+    static std::atomic<int> said{0};
+    if(said.fetch_add(1)<16)Log("EDF41AI weapon %p (%s): %d material animations",obj,shield ? "shield" : "gun",anims);
+}
+void CreateWeapon(void* info) noexcept { MakeWeapon(info,false); }
+void CreateShield(void* info) noexcept { MakeWeapon(info,true); }
+
+// The game is shutting down: every weapon's material animation given back while the material data exists (edf41c::AtGameShutdown;
+// a weapon destroyed later only drops its record).
+void ShutdownWeapons() noexcept {
+    std::lock_guard<std::mutex> hold(weaponLock);
+    for(auto& kv:weapons)edf41c::MaterialAnimsFree(kv.second.mat);
 }
 
-// The shield arms and the SGO path of edf41_hector_shield ({arms: [entry...], sgo: path}); none: no shield.
-void ReadShield(void* self,Entry& e) noexcept {
-    e.shieldRead=true;
+// Each arm's weapon SGO and the shield arms of edf41_hector_weapons ({sgo: [arms_l's, arms_r's], shield: [entry...]}). A Hector
+// without it (the key is in every generated variant): its install is broken, logged, no weapon made.
+void ReadWeapons(void* self,Entry& e) noexcept {
+    e.weaponsRead=true;
     const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
-    Handle key{},arms{},path{};
-    if(!Child(root,L"edf41_hector_shield",key))return;
-    if(!AnimReady() || !Child(key,L"arms",arms) || !Child(key,L"sgo",path)) {
-        Log("EDF41AI hector %p: edf41_hector_shield is not {arms, sgo} (or the SGO readers are not this build's): no shield",self);
+    Handle key{},sgos{},shield{};
+    if(!Child(root,L"edf41_hector_weapons",key)) {
+        Log("EDF41AI hector %p: no edf41_hector_weapons in its SGO (an old or broken install): its weapons are not made",self);
         return;
     }
-    const int n=CountOf(arms);
+    if(!AnimReady() || !Child(key,L"sgo",sgos) || CountOf(sgos)!=hector::kArms || !Child(key,L"shield",shield)) {
+        Log("EDF41AI hector %p: edf41_hector_weapons is not {sgo: [2], shield} (or the SGO readers are not this build's): no weapons",self);
+        return;
+    }
+    for(int i=0;i<hector::kArms;++i) {
+        const Handle n=At(sgos,i);
+        const wchar_t* text=reinterpret_cast<const wchar_t*(__fastcall*)(const Handle*)>(image+kNodeText)(&n);
+        if(text)wcsncpy_s(e.weaponPath[i],text,_TRUNCATE);
+    }
+    const int n=CountOf(shield);
     for(int i=0;i<n && i<hector::kArms;++i) {
-        const Handle a=At(arms,i);
+        const Handle a=At(shield,i);
         const float v=reinterpret_cast<NodeFloatFn>(image+kNodeFloat)(&a);
         if(v>=0.0f && v<static_cast<float>(hector::kArms))e.shieldMask|=1u<<static_cast<int>(v);
     }
-    const wchar_t* text=reinterpret_cast<const wchar_t*(__fastcall*)(const Handle*)>(image+kNodeText)(&path);
-    if(text)wcsncpy_s(e.shieldPath,text,_TRUNCATE);
-    if(!e.shieldPath[0])e.shieldMask=0;
-    Log("EDF41AI hector %p shields: arms %s%s (%ls)",self,(e.shieldMask&1u) ? "L" : "",(e.shieldMask&2u) ? "R" : "",e.shieldPath);
+    Log("EDF41AI hector %p weapons: %ls / %ls, shield arms %s%s",self,e.weaponPath[0],e.weaponPath[1],
+        (e.shieldMask&1u) ? "L" : "",(e.shieldMask&2u) ? "R" : "");
 }
 
-void DropShields(Entry& e) noexcept {
+void DropWeapons(Entry& e) noexcept {
     for(int i=0;i<hector::kArms;++i) {
-        if(edf41c::WeakAlive(e.shield[i]))edf41c::DeleteObject(e.shield[i].object);
-        edf41c::WeakReset(e.shield[i]);
+        if(edf41c::WeakAlive(e.weapon[i]))edf41c::DeleteObject(e.weapon[i].object);
+        edf41c::WeakReset(e.weapon[i]);
     }
 }
 
-// After the arms are aimed (their world matrices are this frame's): each shield made once, then kept on its arm bone.
-void Shields(void* self,Entry& e) noexcept {
-    if(!e.shieldRead)ReadShield(self,e);
-    if(!e.shieldMask)return;
-    if(*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) { DropShields(e); return; }
+// After the arms are aimed (their world matrices are this frame's): each weapon made once, then kept on its arm bone, posed and,
+// when the Hector dies, given its death look. Call with tableLock held.
+void Weapons(void* self,Entry& e) noexcept {
+    if(!e.weaponsRead)ReadWeapons(self,e);
+    const bool dead=*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)!=0;
     char* skel=static_cast<char*>(self)+kSkeletonAt;
     char* recs=Readable(skel,0x28) ? *reinterpret_cast<char**>(skel+0x10) : nullptr;
     const std::int64_t count=recs ? *reinterpret_cast<const std::int64_t*>(skel+0x20) : 0;
     const std::int32_t team=*reinterpret_cast<const std::int32_t*>(static_cast<char*>(self)+kHectorTeamAt);
     for(int i=0;i<hector::kArms;++i) {
-        if(!(e.shieldMask&(1u<<i)) || e.arm[i]<0 || e.arm[i]>=count)continue;
+        if(!e.weaponPath[i][0] || e.arm[i]<0 || e.arm[i]>=count)continue;
         float m[16];
         std::memcpy(m,recs+static_cast<std::size_t>(e.arm[i])*kBoneSize+kBoneWorldAt,sizeof(m));
         if(!Finite16(m))continue;
-        if(!e.shieldMade[i]) {           // once: a shield the game would not make is not asked for again
-            e.shieldMade[i]=true;
-            void* obj=edf41c::CreateFromPath(m,e.shieldPath);
+        if(!e.weaponMade[i]) {           // once: a weapon the game would not make is not asked for again
+            e.weaponMade[i]=true;
+            void* obj=edf41c::CreateFromPath(m,e.weaponPath[i]);
             bool ours=false;
             if(obj) {
-                std::lock_guard<std::mutex> hold(shieldLock);
-                const auto it=shields.find(obj);
-                ours=it!=shields.end();
+                std::lock_guard<std::mutex> hold(weaponLock);
+                const auto it=weapons.find(obj);
+                ours=it!=weapons.end();
                 if(ours)edf41c::WeakSet(it->second.owner,self);
             }
             if(!ours) {
-                Log("EDF41AI hector %p arm %d: %ls made %p, no Hector401_Shield: this Hector's shield stops nothing",self,i,e.shieldPath,obj);
+                Log("EDF41AI hector %p arm %d: %ls made %p, not the plugin's weapon class: this arm shows no weapon",self,i,e.weaponPath[i],obj);
                 if(obj)edf41c::DeleteObject(obj);
                 continue;
             }
             edf41c::SetTeam(obj,team,false);
-            edf41c::WeakSet(e.shield[i],obj);
-            Log("EDF41AI hector %p arm %d: shield #%d %p made, team %d",self,i,++shieldsMade,obj,team);
+            edf41c::WeakSet(e.weapon[i],obj);
+            Log("EDF41AI hector %p arm %d: weapon #%d %p made (%ls), team %d",self,i,++weaponsMade,obj,e.weaponPath[i],team);
         }
-        if(!edf41c::WeakAlive(e.shield[i]))continue;
-        char* obj=static_cast<char*>(e.shield[i].object);
+        if(!edf41c::WeakAlive(e.weapon[i]))continue;
+        char* obj=static_cast<char*>(e.weapon[i].object);
         std::memcpy(obj+edf41c::kMatrixAt,m,sizeof(m));
         if(*reinterpret_cast<const std::int32_t*>(obj+kHectorTeamAt)!=team)edf41c::SetTeam(obj,team,false);
-        bool layered=true;
+        const bool attacking=!dead && e.haveTarget && Attacking(self,i);
         {
-            std::lock_guard<std::mutex> hold(shieldLock);
-            const auto it=shields.find(obj);
-            if(it!=shields.end()) { layered=it->second.layered; it->second.layered=true; }
+            std::lock_guard<std::mutex> hold(weaponLock);
+            const auto it=weapons.find(obj);
+            if(it!=weapons.end()) {
+                WeaponRec& r=it->second;
+                if(dead && !r.dead) {    // 4.1: each weapon plays its own death block when the Hector dies
+                    r.dead=true;
+                    edf41c::MaterialAnimsPlay(r.mat,1,1);
+                    Log("EDF41AI hector %p arm %d: died, weapon %p plays its death block",self,i,obj);
+                }
+                if(r.shield && !dead) {
+                    if(!r.layered) {     // once, after the constructor built its ragdoll on the map layer
+                        r.layered=true;
+                        const int from=edf41c::RagdollLayer(obj+edf41c::kEaoRagdoll);
+                        const int to=edf41c::RagdollLayer(static_cast<char*>(self)+kHectorRagdollAt);
+                        const bool moved=to>=0 && from>=0 && (from==to || edf41c::SetRagdollLayer(obj+edf41c::kEaoRagdoll,to));
+                        Log("EDF41AI hector %p arm %d: shield %p bodies on layer %d, the Hector's %d: %s",self,i,obj,from,to,
+                            moved ? "now the Hector's" : "LEFT where they are (walkers may take it for ground)");
+                    }
+                } else if(edf41c::DisableRagdoll(obj+edf41c::kEaoRagdoll) && !r.disabledSaid) {
+                    // every frame (cheap: a flag per body): whatever enables the bodies later, they stay out of the world
+                    r.disabledSaid=true;
+                    Log("EDF41AI hector %p arm %d: weapon %p ragdoll out of the world (%s)",self,i,obj,r.shield ? "its Hector died" : "a gun");
+                }
+                WeaponPose(r,obj,attacking);
+            }
         }
-        if(!layered) {                   // once, after the constructor built its ragdoll on the map layer
-            const int from=edf41c::RagdollLayer(obj+edf41c::kEaoRagdoll);
-            const int to=edf41c::RagdollLayer(static_cast<char*>(self)+kHectorRagdollAt);
-            const bool moved=to>=0 && from>=0 && (from==to || edf41c::SetRagdollLayer(obj+edf41c::kEaoRagdoll,to));
-            Log("EDF41AI hector %p arm %d: shield %p bodies on layer %d, the Hector's %d: %s",self,i,obj,from,to,
-                moved ? "now the Hector's" : "LEFT where they are (walkers may take it for ground)");
-        }
+        edf41c::ModelMatrix(obj,m);
     }
 }
 
@@ -816,11 +810,10 @@ std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     std::lock_guard<std::mutex> hold(tableLock);
     if(Entry* e=Find(self)) {
         AimArms(self,*e);
-        Shields(self,*e);
-        if(!*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt))Effects(self,*e);
-        if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) {
-            StepHead(self,*e);
-            for(int i=0;i<hector::kArms;++i)ChargeLight(self,*e,i);
+        Weapons(self,*e);
+        if(!*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) {
+            Effects(self,*e);
+            if(AnimReady())StepHead(self,*e);
         }
     }
     return result;
@@ -927,7 +920,7 @@ void __fastcall GunStartHook(void* gun) {
                 if(guns[2*i]==gun)index=i;
         // a shield arm's gun_control entry is there because the class wants one per arm; 4.1's shield has no weapon
         // (Hector401_Shield's vtable: no fire), so it never starts, whoever drives the Hector
-        if(e && !e->shieldRead)ReadShield(owner,*e);
+        if(e && !e->weaponsRead)ReadWeapons(owner,*e);
         if(index>=0 && (e->shieldMask&(1u<<index)))return;
         if(e && !EnemyControlTargetActive(owner) && e->haveTarget && count==hector::kArms && guns) {
             if(e->pickTick!=e->tick) {          // one pick per attack: the loop starts the arms in the same tick
@@ -964,15 +957,16 @@ bool InstallEdf41Ai() noexcept {
         gaits+=RedirectCall(image+site,image+kCasPlayState,reinterpret_cast<void*>(&GaitStateHook),changed) ? 1 : 0;
     for(const std::size_t site:kGaitRateSites)
         rates+=RedirectCall(image+site,image+kCasSetRate,reinterpret_cast<void*>(&GaitRateHook),changed) ? 1 : 0;
-    // the shields (4.1's Hector401_Shield as an object again: Shields above)
-    bool shield=edf41c::BuildClone(shieldClone,&ShieldDtor,&ShieldUpdate,&ShieldMessage);
-    if(shield) {
-        edf41c::SetSlot(shieldClone,kShieldAccept,reinterpret_cast<void*>(&ShieldAccept));
-        edf41c::AllowAnyTeam(shieldClone);   // EventAnimationObject's slot 22 takes team 6 only: the Hector's team would not take
-        shield=edf41c::AddFactory(L"Hector401_Shield",&CreateShield);
+    // the weapons (4.1's weapon objects as objects again: Weapons above)
+    bool weaponClasses=edf41c::BuildClone(weaponClone,&WeaponDtor,&WeaponUpdate,&WeaponMessage);
+    if(weaponClasses) {
+        edf41c::SetSlot(weaponClone,kWeaponAccept,reinterpret_cast<void*>(&WeaponAccept));
+        edf41c::AllowAnyTeam(weaponClone);   // EventAnimationObject's slot 22 takes team 6 only: the Hector's team would not take
+        weaponClasses=edf41c::AddFactory(L"Hector41_Weapon",&CreateWeapon) && edf41c::AddFactory(L"Hector401_Shield",&CreateShield);
+        edf41c::AtGameShutdown(&ShutdownWeapons);
     }
-    Log("EDF41AI hooked: update=%d walk=%d/3 face=%d/3 gun start=%d/2 gait state=%d/4 rate=%d/2 shield class=%d",ok ? 1 : 0,walks,faces,guns,
-        gaits,rates,shield ? 1 : 0);
+    Log("EDF41AI hooked: update=%d walk=%d/3 face=%d/3 gun start=%d/2 gait state=%d/4 rate=%d/2 weapon classes=%d",ok ? 1 : 0,walks,faces,
+        guns,gaits,rates,weaponClasses ? 1 : 0);
     return ok && walks==3 && faces==3 && guns==2 && gaits==4 && rates==2;
 }
 }  // namespace crew

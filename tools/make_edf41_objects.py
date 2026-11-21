@@ -147,9 +147,10 @@ DLC_EXCLUDED: dict[str, str] = {}
 
 @dataclass(frozen=True)
 class Gun:
-    """One weapon of a ported robot (EDF4.1's Hector): 4.1 hangs a separate weapon object on an arm bone; the class
-    it goes under has no sub-objects, so the weapon's mesh becomes part of the body model on that bone and the
-    class's own gun_control entry fires from a locator at the barrel's end (module docstring of Alias)."""
+    """One weapon of a ported robot (EDF4.1's Hector): 4.1 hangs a separate weapon object on an arm bone, and so does
+    the port (hector_weapons: the weapon an object of its own, the plugin's, with its own model archive, placed on the
+    arm bone every frame by src/edf41ai.cpp); the class's own gun_control entry fires from a locator at the barrel's
+    end on that arm bone (docs/edf41-hector-split-models.md)."""
     node: str                 # the arm bone the weapon hangs on: its +Z is the way the weapon points and fires
     mdb: str                  # 4.1's weapon model, a member of the object's model RAB (Hector301cannon.mdb)
     muzzle: str               # the MAB locator gun_control's muzzle.shape names; added at the barrel's end
@@ -184,9 +185,9 @@ class Alias:
                                   # the SGO path too: the keys of a template's look that 4.1's object does not share)
     fracture: bool = False    # a voxel-destruction body: animation_model[3] built from the model's extent and the
                               # template's tuning (fracture_block); FRACTURE_CLASSES need it
-    guns: tuple[Gun, ...] = ()    # the weapons: meshes merged into the model, muzzles added, gun_control rebuilt
-    shared_model: str = ''    # the model archive (Mods path) every alias naming it shares: one armed body each
-                              # (shared_member) and the textures once (shared_model_archive), not an archive per root
+    guns: tuple[Gun, ...] = ()    # the weapons: objects of their own (hector_weapons), muzzles added, gun_control rebuilt
+    shared_model: str = ''    # the model archive (Mods path) every alias naming it shares: the bodies once each, as 4.1
+                              # names them, with their textures (body_archive), not an archive per root
     eye: tuple[str, tuple[float, float, float]] | None = None   # (bone, position): the locator 目の基準位置
     prune: bool = False       # ship only the files the result names (the closure holds 4.1's weapon objects)
     material_from: str = ''   # a 4.1 SGO (OBJECT/<this>) whose bare blobs are material_animation here: the object's own
@@ -270,7 +271,6 @@ HECTOR_WEAPONS: dict[tuple[str, str], HectorWeapon] = {
 # charge.time frames (+0x140 -> +0x2E8, counted down to the first shot, 0x6D5474..0x6D556A) and plays the class's charge
 # sound meanwhile (no effect: HECTOR_FX).
 HECTOR_CHARGE: dict[str, float] = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}
-HECTOR_CHARGE_LIGHT_SLOT = 4      # where 301 cannon's charge light would go (not shipped: alias_dsgo, the M113 glare)
 
 # The weapons' look when they charge and fire, drawn by the plugin (src/edf41ai.cpp Effects), not by the battery: the battery's
 # own effects are esb files from an effect_arc (EDF+0x6D49C9 effect_arc, 0x6D7783 charge.effect.esb, 0x6D832D fire.effect.esb: no
@@ -314,7 +314,8 @@ ROOTS.update({root: v[3] for root, v in HECTOR_VARIANTS.items()})
 # What every Hector variant shares of 4.1's behaviour that Berserker's keys can say (see the Alias comment below).
 HECTOR_COMMON: tuple[tuple[str, object], ...] = (
     # 4.1's `resource` names its weapon objects (HECTOR301CC spells the key `resoruce`, which the class never reads);
-    # the guns are part of the body model here, so the list is the template's own: empty
+    # emptied here, then hector_weapons lists the port's weapon objects and their files (preloaded with the Hector: the
+    # plugin makes the objects from those SGOs when the Hector first updates)
     ('resource', []),
     ('WalkingEnemyBase/RandomAnimationTrack', []),
     ('WalkingEnemyBase/InterpolateNode', 'waist'),
@@ -361,9 +362,12 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
 )
 
 
-# The one model archive of every Hector variant. 4.1's Hector.mrab holds both generations' bodies, every weapon and their
-# textures (16 MB of each variant's 17); an archive per variant shipped those 21 times (347 MB in Mods for 27 MB of members).
-HECTOR_MODEL = 'OBJECT/HECTOR_VARIANTS.MRAB'
+# The body archive of every Hector variant: 4.1's two bodies (Hector301.mdb, Hector401.mdb, no weapon on them) once each,
+# their textures and the template's debris models (body_archive). 4.1's Hector.mrab holds both bodies and every weapon; the
+# weapons are objects of their own here, each with an archive of its own (hector_weapons, weapon_rel), as 4.1 loads them.
+# Until 2026-11-21 every variant had its own armed body (the weapons grafted on): 21 bodies of ~0.5 MB in one archive.
+HECTOR_MODEL = 'OBJECT/HECTOR_BODY.MRAB'
+HECTOR_BODIES = ('Hector301.mdb', 'Hector401.mdb')
 
 
 def hector_alias(generation: str, left: str, right: str) -> 'Alias':
@@ -530,7 +534,7 @@ ALIASES: dict[str, Alias] = {
     #   tilt tunings v_tilt_factor, v_tilt_lerp_factor (a missing one reads 0: no lean).
     #   MAB locators 目の基準位置 (the eye height, read unchecked in the constructor) and one muzzle per gun
     #   (砲台１, 砲台２ on the arm bones, at the barrel's end, firing along the arm's +Z, which the stand and walk poses
-    #   aim forward); the cannons' meshes become objects on bones gun_arms_l / gun_arms_r under the arm bones.
+    #   aim forward); the weapons are objects of their own on the arm bones (hector_weapons), as 4.1's are.
     #   The bone and ragdoll-body names the template's SGO gives in Berserker's terms: Hector's own.
     # What 4.1's Hector does that the class would otherwise do differently:
     #   weak_point is neutral (both multipliers 1.0): the template's noweak_damage_multiply 0.2 applies to every hit
@@ -1767,6 +1771,9 @@ KNOWN_SILENT: dict[str, tuple[frozenset[str], str]] = {
     'UfoCarrier508': (frozenset({'E4キャリア301ハッチオープンド', 'E4キャリア301ハッチクローズド', 'E4キャリア301ハッチ稼働オープン',
                                  'E4キャリア301ハッチ稼働クローズ', 'E4キャリアオープン一個', 'E4キャリアクローズ一個'}),
                       "MAB hatch events; 301's cues are in no EDF6 bank, 401's in tikyuu4_en_UFOcarrier401 under no preset"),
+    'Hector41_Weapon': (frozenset({'ヘクトルカノン開く', 'ヘクトルカノン閉じる', 'ヘクトルランチャ開く', 'ヘクトルランチャ閉じる'}),
+                        "4.1's open / close clip events in the weapon's MAB; the weapon's CAS is still (the plugin poses its bones, "
+                        'docs/edf41-hector-split-models.md), so no clip that carries them plays; silent before the split as well'),
     'EDF6_Berserker_Large': (frozenset({'歩行メカ衝突', 'ヘクトル衝突'}),
                              'ragdoll_contact; its cue en_Hector_down is in tikyuu4_en_Hector, no EDF6 preset names it'),
     'UfoMother301': (frozenset({'母船UFO弱点収納', '母船UFO弱点収納完了', '母船UFOハッチ閉じる稼動', '母船UFOハッチ閉じる停止',
@@ -3255,96 +3262,70 @@ def remove_key(node: dsgo.Node, key: str) -> None:
     node.names = {(i - 1 if i > at else i): n for i, n in node.names.items() if i != at}
 
 
-def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str, mdb_name: str,
-                 template_rab: str, fragments: list[str]) -> tuple[bytes, 'Armed']:
-    """(the object's own model archive, its body model with what armed_body says of it).
-
-    The archive is 4.1's (files[rab_rel], converted) with its model `mdb_name` holding every gun's mesh
-    (mdb.graft_rigid: a rigid object on a bone under the arm bone) and no other model, plus the debris models the
-    template's damage map names (`fragments`) with the textures they use, taken from the template's own archive: the
-    class loads those from the object's archive by name, and Hector's has none. An archive of its own because the
-    next Hector variant carries other guns (an alias with shared_model shares one: shared_model_archive)."""
+def own_model_archive(games: 'Games', files: dict[str, bytes], rab_rel: str, mdb_name: str, template_rab: str,
+                      fragments: list[str]) -> bytes:
+    """The object's own model archive: 4.1's (files[rab_rel], converted) with its model `mdb_name` and no other model,
+    plus the debris models the template's damage map names (`fragments`) with the textures they use, taken from the
+    template's own archive: the class loads those from the object's archive by name, and 4.1's has none."""
     rab = mdb.rab_read(files[rab_rel])
-    body_file, armed = armed_body(rab, a, mdb_name)
-    rab.files = [body_file if f.name.lower() == mdb_name.lower() else f for f in rab.files
-                 if not f.name.lower().endswith('.mdb') or f.name.lower() == mdb_name.lower()]
-    # 4.1's archive interleaves each model with its own textures (body textures, body model, then each gun's textures
-    # and model); with the guns' models gone the body model sits before the guns' and the shield's textures, which the
-    # engine then never binds (black guns, an invisible shield: mdb.insert_member). Back into folder order, stably.
+    rab.files = [f for f in rab.files if not f.name.lower().endswith('.mdb') or f.name.lower() == mdb_name.lower()]
+    # 4.1's archive interleaves each model with its own textures; with the other models gone a model can sit before
+    # textures it binds, which the engine then never binds (mdb.insert_member). Back into folder order, stably.
     rab.files.sort(key=lambda f: f.folder)
     add_fragments(games, rab, template_rab, fragments)
-    return mdb.rab_write(rab), armed
+    return mdb.rab_write(rab)
 
 
-@dataclass
-class Armed:
-    """armed_body's model: the body with its guns, each gun's barrel length, the body's (min, max) corner before the
-    guns, and {gun SGO: {4.1 material name: the gun's own name for it}} (gun_materials)."""
-    body: mdb.Mdb
-    barrel: list[float]
-    corner: tuple[list[float], list[float]]
-    renamed: dict[str, dict[str, str]]
-
-
-def armed_body(rab: mdb.Rab, a: Alias, mdb_name: str) -> tuple[mdb.RabFile, Armed]:
-    """(a copy of the member `mdb_name` of `rab` holding every gun of `a` (mdb.graft_rigid / graft_skinned: an object on
-    a bone under the arm bone), its guns' materials named apart (gun_materials), and what Armed says of it). `rab` is
-    not changed."""
+def part_archive(rab41: bytes, models: tuple[str, ...]) -> mdb.Rab:
+    """4.1's model archive (`rab41`, converted) cut down to the members `models` (any case) and the textures they bind:
+    for each texture filename stem.ext the members stem.ext and stem.lod.ext (TEXTURE) and stem.ext (HD-TEXTURE), in
+    folder order, so every texture comes ahead of the models (one after its model renders black: mdb.insert_member).
+    ValueError for a model the archive has not."""
+    rab = mdb.rab_read(rab41)
     by_name = {f.name.lower(): f for f in rab.files}
-    body_file = replace(by_name[mdb_name.lower()])
-    body = mdb.mdb_read(body_file.data)
-    corner = ([mdb.rigid_extent(body, ax)[0] for ax in range(3)], [mdb.rigid_extent(body, ax)[1] for ax in range(3)])
-    barrel = []
-    for gun in a.guns:
-        weapon = mdb.mdb_read(by_name[gun.mdb.lower()].data)
-        barrel.append(mdb.rigid_extent(weapon, 2)[1])
-        skinned = any(e.name.lower() == 'blendindices' for ob in weapon.objects for me in ob.meshes for e in me.elems)
-        if skinned:    # 4.1's Hector401 weapons: skin bones (gun_arms / gun_top ...) under the arm bone
-            mdb.graft_skinned(body, weapon, gun.node, 'gun_' + gun.node)
-        else:
-            mdb.graft_rigid(body, weapon, gun.node, 'gun_' + gun.node)
-    renamed = gun_materials(body, a.guns)
-    raw = mdb.mdb_write(body)
-    body_file.stored = mdb.cmpl_compress(raw) if body_file.stored[:4] == b'CMPL' else raw
-    return body_file, Armed(body, barrel, corner, renamed)
+    chosen: list[mdb.RabFile] = []
+    for name in models:
+        f = by_name.get(name.lower())
+        if f is None or not f.name.lower().endswith('.mdb'):
+            raise ValueError(f'no model {name} in the archive')
+        chosen.append(f)
+    wanted: set[str] = set()
+    for f in chosen:
+        for t in mdb.mdb_read(f.data).textures:
+            stem, ext = os.path.splitext(t.filename.lower())
+            wanted |= {stem + ext, stem + '.lod' + ext}
+    keep = {id(f) for f in chosen}
+    rab.files = sorted((f for f in rab.files if id(f) in keep or
+                        (not f.name.lower().endswith('.mdb') and f.name.lower() in wanted)), key=lambda f: f.folder)
+    return rab
 
 
-# shared_model_archive's results by (shared archive, SHA-256 of 4.1's archive): every root naming it gets the same bytes
-SHARED_MODELS: dict[tuple[str, str], tuple[bytes, dict[str, Armed]]] = {}
+# body_archive's results by (archive, SHA-256 of 4.1's archive): every root naming it gets the same bytes
+SHARED_MODELS: dict[tuple[str, str], bytes] = {}
 
 
-def shared_model_archive(games: 'Games', shared: str, rab41: bytes, template_rab: str,
-                         fragments: list[str]) -> tuple[bytes, dict[str, Armed]]:
-    """(the archive `shared`, {root: its armed body}) for every alias of ALIASES with that shared_model: 4.1's archive
-    (`rab41`, converted) without its own models, one armed body per root as shared_member(root) (the body member its
-    4.1 SGO names, with its guns: armed_body), and the template's debris models (add_fragments). Every root of the
-    group gets the same bytes, so the roots' closures agree on the file (build's clash check), and one root built alone
-    (--only) still finds its member there. The class loads the body animation_model[0][1] names; the textures, ahead
-    of every model, serve them all (mdb.insert_member)."""
+def body_archive(games: 'Games', shared: str, rab41: bytes, template_rab: str, fragments: list[str]) -> bytes:
+    """The archive `shared` (HECTOR_MODEL) every Hector variant names: 4.1's two bodies (HECTOR_BODIES, as 4.1's archive
+    holds them: no weapon on them), the textures they bind (part_archive) and the template's debris models
+    (add_fragments). Every variant gets the same bytes, so the roots' closures agree on the file (build's clash check),
+    and one root built alone (--only) still finds its body there."""
     key = (shared, hashlib.sha256(rab41).hexdigest())
     if key not in SHARED_MODELS:
-        rab = mdb.rab_read(rab41)
-        bodies, out = [], {}
-        for root in sorted(r for r, a in ALIASES.items() if a.shared_model == shared):
-            am = sgo.read(convert(games, 'OBJECT/' + root))[1]['animation_model']
-            member, out[root] = armed_body(rab, ALIASES[root], am[0][0][1])
-            bodies.append(replace(member, name=shared_member(root)))
-        rab.files = sorted((f for f in rab.files if not f.name.lower().endswith('.mdb')), key=lambda f: f.folder)
-        for f in bodies:
-            mdb.insert_member(rab, f)
+        rab = part_archive(rab41, HECTOR_BODIES)
         add_fragments(games, rab, template_rab, fragments)
-        SHARED_MODELS[key] = (mdb.rab_write(rab), out)
+        SHARED_MODELS[key] = mdb.rab_write(rab)
     return SHARED_MODELS[key]
 
 
-def shared_member(root: str) -> str:
-    """The body member of `root` in its shared model archive (HECTOR301CC.SGO -> HECTOR301CC.mdb)."""
-    return root.rsplit('/', 1)[-1].rsplit('.', 1)[0] + '.mdb'
+def model_corner(rab_bytes: bytes, name: str) -> tuple[list[float], list[float]]:
+    """The (min, max) corner of model `name` of an archive (every vertex in its bone's frame: mdb.rigid_extent)."""
+    md = mdb.mdb_read(next(f for f in mdb.rab_read(rab_bytes).files if f.name.lower() == name.lower()).data)
+    return ([mdb.rigid_extent(md, ax)[0] for ax in range(3)], [mdb.rigid_extent(md, ax)[1] for ax in range(3)])
 
 
 def add_fragments(games: 'Games', rab: mdb.Rab, template_rab: str, fragments: list[str]) -> None:
     """The template's debris models (`fragments`, by name) into `rab` with the textures they use, from the template's
-    own archive (merged_model)."""
+    own archive (own_model_archive, body_archive)."""
     donor = mdb.rab_read(games.read6(template_rab))
     have = {f.name.lower() for f in rab.files}
     members = {f.name.lower(): f for f in donor.files}
@@ -3379,7 +3360,8 @@ def missing_textures(rab_bytes: bytes, model: str) -> list[str]:
 def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_data: bytes) -> None:
     """alias() for a template in EDF6's DSGO form: `files` gets the object's DSGO (the template's keys, 4.1's value
     for each key both have, then a's drops and overrides), its CAS grafted, its MAB with the locators the class looks up,
-    and a model archive of its own with the guns' meshes. See Alias for the fields; the 4.1 object's own keys the
+    its model archive (its own, or the shared body archive) and, with guns, the weapon objects (hector_weapons). See
+    Alias for the fields; the 4.1 object's own keys the
     template has no use for (hector_*, resoruce, material_animation) do not come over: `material_animation` becomes
     the template's animation_model[4], the per-material table of the same blocks."""
     rel = 'OBJECT/' + root
@@ -3409,14 +3391,19 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     mrab, mdb_name = am[0][0][0], am[0][0][1]
     template_rab = rel_of(t_am.items[0].items[0])
     fragments = list(node_path(t_am, '3/3/6').items)
+    rab41 = files[rel_of(mrab)]
     if a.shared_model:
         rab_rel = a.shared_model
-        rab_bytes, armed_of = shared_model_archive(games, rab_rel, files[rel_of(mrab)], template_rab, fragments)
-        armed, mdb_name = armed_of[root], shared_member(root)
+        rab_bytes = body_archive(games, rab_rel, rab41, template_rab, fragments)
     else:
         rab_rel = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
-        rab_bytes, armed = merged_model(games, a, files, rel_of(mrab), mdb_name, template_rab, fragments)
-    barrel, (lo, hi) = armed.barrel, armed.corner
+        rab_bytes = own_model_archive(games, files, rel_of(mrab), mdb_name, template_rab, fragments)
+    if not any(f.name == mdb_name for f in mdb.rab_read(rab_bytes).files):
+        raise ValueError(f'{rab_rel}: no member {mdb_name}, which {rel} names')
+    lo, hi = model_corner(rab_bytes, mdb_name)
+    # each gun's muzzle: the barrel's end along +Z of the arm bone its object is placed on (the weapon model's frame is
+    # the arm bone's: hector_weapons; every 4.1 weapon's root and rigid bones have the identity local)
+    barrel = [weapon_barrel(rab41, gun.mdb) for gun in a.guns]
     for model in (mdb_name, *fragments):
         if missing_textures(rab_bytes, model):
             raise ValueError(f'{rab_rel}: {model} would render black: {missing_textures(rab_bytes, model)}')
@@ -3441,23 +3428,15 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     grid.items[2] = dsgo.Node([hi[0] + 0.25, hi[1] + 0.25, hi[2] + 0.25])
     # Berserker's base class enables material animation slots by number, unchecked (EDF+0x6dc830): 0 and 2 at spawn and on
     # a hit (0x348d1d, 0x33ef81 -> 0x6c0200), 1 and 3 elsewhere (BERSERKER_DEATH_SLOT). A list shorter than the template's
-    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). 4.1's glow
-    # (the body's and every gun's: hector_materials) serves every slot but the death one, which gets 4.1's death block;
-    # each keeps the template's mode.
-    light = None
+    # (4) hands it the memory past its end: a null player (M113) or whatever text follows (M131, "NT02"). The body's own
+    # 4.1 glow serves every slot but the death one, which gets 4.1's death block; each keeps the template's mode. The
+    # weapons' glow and death blocks are their own objects' (hector_weapons): nothing is merged or renamed here.
     if a.guns:
-        glow, death, light = hector_materials(files, rab_rel, armed, mine, a.guns)
+        glow, death = hector_blocks(mine['material_animation'], None, None, rel)
     else:
         glow = death = mine['material_animation'][0]
     slots = [dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
              for i, c in enumerate(t_am.get('material_animation').items)]
-    # 301 cannon's charge light (`light`) is not shipped. As a fifth entry played by the plugin (2026-10-17, 30c7b29c) it
-    # turned M113 purple-white from the first charges on and the whole screen white by 165 s (real run; the same mission
-    # with the earlier SGOs is normal): its light0_color goes to (10, 10, 100) in 120 frames (4.1 block 1; the glow block
-    # stays at 2 / 0.5 / 0.2), which 4.1 plays with the player word 1 (EDF41.exe 0x225603 -> 0x32FA93 +8) where every
-    # EDF6 entry has 0 or 2, and EDF6's meaning of that word is not known. Until it is, the charge shows only the class's
-    # own charge effect at the muzzle.
-    del light
     model.items[4] = dsgo.Node(slots)
     out.set('animation_model', model)
 
@@ -3468,9 +3447,10 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
             set_path(entry, 'gun_battery/muzzle/shape', gun.muzzle)
             entries.append(entry)
         out.set('gun_control', dsgo.Node(entries))
-        if all(g.fire for g in a.guns):
-            hector_fire(games, files, mine, out, a, barrel)
-            out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
+        if not all(g.fire for g in a.guns):
+            raise ValueError(f'{rel}: a gun without its HectorWeapon (what it fires and its object)')
+        hector_fire(games, files, mine, out, a, barrel)
+        hector_weapons(games, files, mine, out, a, rab41)
 
     cas = rel_of(am[1])
     template_cas = rel_of(t_am.items[1])
@@ -3596,31 +3576,35 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
     out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
                                         'ai': ai, 'fx': fx}))
-    hector_shield(games, files, out, a)
 
 
-# The 4.1 Hector's shield as the object 4.1 makes of it (docs/feedback-2026-11-08-edf41-hector-shield.md; EDF41.exe, H):
-# every arm weapon is an object of its own (Hector401_Shield: factory 0x3CB310, ctor 0x22A080, vtable 0xA98C10), attached by
-# 0x22A740, which builds the weapon's ragdoll from its SGO's `ragdoll` (0x3327E0, owner = the Hector, so a hit on it is a hit
-# on the Hector) and, for the shield only (+0x10C = 1, set by its ctor), tags every body with property 2 = the shield's team
-# (0x3342B0). Two readers of that tag: the bullet filter 0x169550 lets a bullet meet a tagged body only when the team table
-# says the bullet's team is hostile to the shield's (own and friendly fire passes), and the Hector's damage filter (vtable
-# 0xA987E0 slot 10, 0x2210E0) refuses a hit whose sub-hit nearest the hit centre is a tagged body. The shield has no HP and
-# no damage handler of its own (its 13-slot vtable): it stops hostile bullets and takes nothing, for good.
-# The port: the shield's mesh stays in the body model (alias_dsgo's armed body, the look and its glass animation), and
-# its collision is that object again: Hector401_Shield, an EventAnimationObject the plugin registers (src/edf41ai.cpp),
-# made from this SGO with 4.1's own shield ragdoll on a meshless copy of 4.1's shield model (its bones, which the ragdoll
-# binds to), placed every frame on the arm bone the shield's mesh hangs from (graft_skinned: the donor's model frame on the
-# arm bone), refusing every hit (slot 16), on the Hector's own body layer. The Hector's SGO names it in
-# edf41_hector_shield: {arms: [gun_control entry of each shielded arm], sgo: this SGO}.
+# The 4.1 Hector's weapons as the objects 4.1 makes of them (EDF41.exe, H; docs/edf41-hector-shield-re.md,
+# docs/edf41-hector-split-models.md): every arm weapon is an object of its own (Hector301_Cannon ... Hector401_Shield, the
+# SGOs the Hector's hector_weapon names: [arm bone, attach bone, index, SGO]) on its arm bone, with its own model (4.1's
+# Hector.mrab member Hector301cannon.mdb ...), its own ragdoll (0x22A740 -> 0x3327E0, owner = the Hector), its own CAS
+# (401's: open / close / fire) and its own material_animation (the glow, looped from the start; the death block, played
+# when the Hector dies: each weapon object plays its own, 0x2255D4 .. 0x22A289). The shield (factory 0x3CB310, ctor
+# 0x22A080, vtable 0xA98C10) also tags every body of its ragdoll with property 2 = its team (0x3342B0): the bullet filter
+# 0x169550 lets a bullet meet a tagged body only when the team table says it is hostile to the shield's (own and friendly
+# fire passes), and the Hector's damage filter (vtable 0xA987E0 slot 10, 0x2210E0) refuses a hit whose sub-hit nearest the
+# hit centre is a tagged body: it stops hostile bullets and takes nothing.
+# The port: each weapon is an EventAnimationObject of the plugin's (src/edf41ai.cpp: class Hector41_Weapon; the shield
+# Hector401_Shield) made from weapon_rel(w, 'SGO'), once per weapon kind whichever variants carry it: its model the
+# weapon's own archive (its mdb and the textures it binds, weapon_rel(w, 'MRAB')), the still CAS HECTOR_WEAPON_CAS
+# (EventAnimationObject's constructor plays main / default; the weapon's own clips are sampled into HECTOR_WEAPON_ANIM_KEY
+# and posed by the plugin on the object's bones), 4.1's weapon ragdoll (EventAnimationObject builds one from the SGO; the
+# plugin switches it off on every weapon but a live shield, whose bodies it moves to the Hector's layer and whose hits it
+# refuses), and its own material_animation [[glow, 0], [death, 2]] (the load kinds of the template's glow and death
+# slots). The Hector's SGO names them in HECTOR_WEAPONS_KEY {sgo: [arms_l's, arms_r's], shield: [gun_control entry of
+# each shield arm]} and preloads them (`resource`). The plugin makes them when the Hector first updates and puts each on
+# its arm bone every frame after the arms are aimed.
+HECTOR_WEAPON_CLASS = 'Hector41_Weapon'
 HECTOR_SHIELD_CLASS = 'Hector401_Shield'
-HECTOR_SHIELD_SGO41 = 'OBJECT/HECTOR401_SHIELD.SGO'              # 4.1's (the closure's: hector_materials reads its glass)
-HECTOR_SHIELD_SGO = 'OBJECT/HECTOR401_SHIELD_COLLISION.SGO'     # the object made of it (a path of its own: the closure
-                                                                 # of the next variant takes files' copy of 4.1's path)
-HECTOR_SHIELD_MRAB = 'OBJECT/HECTOR401_SHIELD.MRAB'              # the meshless model
-HECTOR_SHIELD_CAS = 'OBJECT/HECTOR401_SHIELD_STILL.CAS'           # main / default, nothing moves
-HECTOR_SHIELD_KEY = 'edf41_hector_shield'
-# 4.1's shield ragdoll: the bodies 4.1 tags (all of them), checked against the file (hector_shield)
+HECTOR_WEAPONS_KEY = 'edf41_hector_weapons'
+HECTOR_WEAPON_ANIM_KEY = 'edf41_weapon_anim'
+HECTOR_WEAPON_CAS = 'OBJECT/EDF41_HECTOR_WEAPON_STILL.CAS'      # main / default, nothing moves
+HECTOR_WEAPON_KINDS = (0, 2)       # material_animation load kinds of [glow, death] (the template's slots 0 and 3)
+# 4.1's shield ragdoll: the bodies 4.1 tags (all of them), checked against the file (weapon_object)
 HECTOR_SHIELD_BODIES = ('RagDollProxys.gun_arms', 'RagDollProxys.gun_shield')
 
 
@@ -3630,41 +3614,99 @@ def app_path(rel: str) -> str:
     return f'app:/{folder.capitalize()}/{name.lower()}'
 
 
-def hector_shield(games: 'Games', files: dict[str, bytes], out: dsgo.Node, a: Alias) -> None:
-    """The shield object of a Hector variant holding one (see above): files[HECTOR_SHIELD_SGO] made of 4.1's SGO for
-    EventAnimationObject (the meshless model, the still CAS, 4.1's ragdoll; no material, no range), those two files
-    added, and the variant's edf41_hector_shield. ValueError when 4.1's files are not what this was written for. The same
-    bytes whichever variant makes them (build's clash check)."""
-    arms = [i for i, g in enumerate(a.guns) if g.fire.cls == HECTOR_SHIELD_CLASS]
-    if not arms:
-        return
+def weapon_rel(w: HectorWeapon, ext: str) -> str:
+    """The port's object of 4.1 weapon `w` (OBJECT/EDF41_HECTOR301_CANNON.SGO, .MRAB): a path of its own (4.1's own path
+    is the closure's copy of 4.1's file, which the next variant's closure takes)."""
+    return f'OBJECT/EDF41_{w.sgo.rsplit(".", 1)[0]}.{ext}'
+
+
+def weapon_barrel(rab41: bytes, name: str) -> float:
+    """The barrel's end of 4.1's weapon model `name` (a member of 4.1's Hector archive `rab41`): its largest z."""
+    md = mdb.mdb_read(next(f for f in mdb.rab_read(rab41).files if f.name.lower() == name.lower()).data)
+    return mdb.rigid_extent(md, 2)[1]
+
+
+def hector_weapons(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.Node, a: Alias, rab41: bytes) -> None:
+    """A Hector variant's weapons as objects (see above): the files of each weapon it carries (weapon_object), the
+    variant's HECTOR_WEAPONS_KEY and its `resource` (every file of those objects, preloaded with the Hector). ValueError
+    when 4.1's files are not what this was written for."""
+    loop, death = hector_blocks(mine['material_animation'], None, None, 'the body')
+    sgos: list[str] = []
+    shield: list[float] = []
+    resource: list[str] = []
+    for i, gun in enumerate(a.guns):
+        w = gun.fire
+        if w.mdb.lower() != gun.mdb.lower():
+            raise ValueError(f'{gun.node}: model {gun.mdb}, its weapon {w.sgo} has {w.mdb}')
+        for path in weapon_object(games, files, w, rab41, loop, death):
+            if path not in resource:
+                resource.append(path)
+        sgos.append(app_path(weapon_rel(w, 'SGO')))
+        if w.cls == HECTOR_SHIELD_CLASS:
+            shield.append(float(i))
+    out.set(HECTOR_WEAPONS_KEY, dsgo_value({'sgo': sgos, 'shield': shield}))
+    out.set('resource', dsgo_value(resource))
+
+
+def weapon_object(games: 'Games', files: dict[str, bytes], w: HectorWeapon, rab41: bytes, loop: bytes,
+                  death: bytes) -> list[str]:
+    """The object of weapon `w` (see above): files[weapon_rel(w, 'SGO')] (classic SGO, made of 4.1's weapon SGO, which the
+    closure holds in `files` until prune), weapon_rel(w, 'MRAB') (4.1's weapon model and its textures: part_archive),
+    HECTOR_WEAPON_CAS and 4.1's weapon ragdoll. `loop` / `death`: the body's glow and death blocks (the weapon's are on
+    their timelines). Returns the app:/ paths the object loads, its SGO first. The same bytes whichever variant makes them
+    (build's clash check). ValueError when 4.1's files are not what this was written for."""
     import hk2014
-    version, mine = sgo.read(convert(games, HECTOR_SHIELD_SGO41))
-    if mine.get('xgs_scene_object_class') != HECTOR_SHIELD_CLASS:
-        raise ValueError(f'{HECTOR_SHIELD_SGO41}: class {mine.get("xgs_scene_object_class")}, not {HECTOR_SHIELD_CLASS}')
-    am = mine['animation_model']
-    entry = model_entries(am[0])[0]
-    rag = mine['ragdoll']
+    version, w41 = sgo.read(files['OBJECT/' + w.sgo])
+    if w41.get('xgs_scene_object_class') != w.cls:
+        raise ValueError(f'{w.sgo}: class {w41.get("xgs_scene_object_class")}, not {w.cls}')
+    am = w41['animation_model']
+    entry = model_entries(am[0])[0]          # [archive, model]; 4.1's second entry is the _light LOD no archive holds
+    if entry[1].lower() != w.mdb.lower():
+        raise ValueError(f'{w.sgo}: model {entry[1]}, the table says {w.mdb}')
+    rab = part_archive(rab41, (entry[1],))
+    name = next(f.name for f in rab.files if f.name.lower() == entry[1].lower())
+    model = mdb.mdb_read(next(f for f in rab.files if f.name == name).data)
+    mrab_rel = weapon_rel(w, 'MRAB')
+    files[mrab_rel] = mdb.rab_write(rab)
+    if missing_textures(files[mrab_rel], name):
+        raise ValueError(f'{mrab_rel}: {name} would render black: {missing_textures(files[mrab_rel], name)}')
+    rag = w41['ragdoll']
     shkt = rel_of(rag[0])
-    bodies = tuple(b.name for b in hk2014.rigid_bodies(hk2014.read(files.get(shkt) or convert(games, shkt))))
-    if bodies != HECTOR_SHIELD_BODIES:
-        raise ValueError(f'{shkt}: bodies {bodies}, not {HECTOR_SHIELD_BODIES}')
-    rab = convert(games, rel_of(entry[0]))
-    files[HECTOR_SHIELD_MRAB] = hidden_model(rab, entry[1], entry[1])
-    md = mdb.mdb_read(mdb.rab_read(files[HECTOR_SHIELD_MRAB]).files[0].data)
+    files[shkt] = files.get(shkt) or convert(games, shkt)
+    bodies = tuple(b.name for b in hk2014.rigid_bodies(hk2014.read(files[shkt])))
+    if not bodies or (w.cls == HECTOR_SHIELD_CLASS and bodies != HECTOR_SHIELD_BODIES):
+        raise ValueError(f'{shkt}: bodies {bodies}')
     for body in bodies:
-        if not has_bone(md, body.split('.', 1)[1]):
-            raise ValueError(f'{shkt}: body {body} has no bone of that name in {entry[1]}')
+        if not has_bone(model, body.split('.', 1)[-1]):
+            raise ValueError(f'{shkt}: body {body} has no bone of that name in {name}')
+    mats = [model.name_of(x.name) for x in model.materials]
+    anims: list = []
+    blocks = w41.get('material_animation', [])
+    if blocks:      # 301's gatling: 4.1 animates nothing on it
+        glow, end = hector_blocks(blocks, loop, death, w.sgo)
+        for blob, kind in ((glow, HECTOR_WEAPON_KINDS[0]), (end, HECTOR_WEAPON_KINDS[1])):
+            if blob is None:
+                continue
+            stray = [n for n, _c, _t in mtab_entries(blob) if mats.count(n) != 1]
+            if stray:      # EDF6 binds an entry to the first material of its name (EDF+0x110D570): one each
+                raise ValueError(f'{w.sgo}: its material animation names {stray}, its model has {mats}')
+            anims.append([blob, kind])
     flat = convert(games, MOTHER401_FLAT_CAS)
-    files[HECTOR_SHIELD_CAS] = cas_graft.hollow(cas_graft.alias_states(flat, {'main': [('default', 'close_state')]}))
-    files[HECTOR_SHIELD_SGO] = sgo.write_depth_first(version, {
-        'xgs_scene_object_class': HECTOR_SHIELD_CLASS,
-        'animation_model': [[[app_path(HECTOR_SHIELD_MRAB), entry[1]]], app_path(HECTOR_SHIELD_CAS), am[2]],
+    files[HECTOR_WEAPON_CAS] = cas_graft.hollow(cas_graft.alias_states(flat, {'main': [('default', 'close_state')]}))
+    members: dict[str, object] = {
+        'xgs_scene_object_class': HECTOR_SHIELD_CLASS if w.cls == HECTOR_SHIELD_CLASS else HECTOR_WEAPON_CLASS,
+        'animation_model': [[[app_path(mrab_rel), name]], app_path(HECTOR_WEAPON_CAS), mab_block(am[2])],
         'ragdoll': rag,
         # EventAnimationObject's durability (GameObjectBase reads it): any above 0; the plugin makes it take no damage
         'game_object_durability': 1.0,
-    })
-    out.set(HECTOR_SHIELD_KEY, dsgo_value({'arms': [float(i) for i in arms], 'sgo': app_path(HECTOR_SHIELD_SGO)}))
+    }
+    if anims:
+        members['material_animation'] = anims
+    anim = weapon_anim(files, w, {model.name_of(b.name): list(b.local) for b in model.bones})
+    if anim:
+        members[HECTOR_WEAPON_ANIM_KEY] = anim
+    files[weapon_rel(w, 'SGO')] = sgo.write_depth_first(version, members)
+    return [app_path(weapon_rel(w, 'SGO')), app_path(mrab_rel), app_path(HECTOR_WEAPON_CAS), rag[0]]
 
 
 # EDF6_Berserker_Large's material_animation slots (BerserkerBase, EDF.dll, enabled through 0x6DC830 / 0x6C0200(model,
@@ -3694,38 +3736,6 @@ def mtab_entries(blob: bytes) -> list[tuple[str, int, int]]:
     return out
 
 
-def mtab_merge(parts: list[tuple[bytes, dict[str, str]]]) -> bytes:
-    """One MTAB blob animating every material of `parts` ((blob, {its material name: the name here}); a name not in the
-    map stays). The blobs must share their timeline (+0 loop flag, +4 length in frames). Header: +8 the channel count
-    (the sum), +0xC the material count, 'MTAB', 0x200, +0x18 the table's offset (0x1C). Each blob is copied whole behind
-    the table (0x40-aligned: its own header and table are dead bytes there, its tracks and keys keep their relative
-    offsets) and the table's entries point into the copies; a renamed material's name is appended at the end."""
-    head = parts[0][0][:8]
-    for blob, _names in parts:
-        if blob[:8] != head or blob[16:24] != parts[0][0][16:24] or blob[16:20] != b'MTAB':
-            raise ValueError(f'MTAB blobs on different timelines or forms: {blob[:24].hex()} / {parts[0][0][:24].hex()}')
-    entries = [(e, i) for i, (blob, _n) in enumerate(parts) for e in mtab_entries(blob)]
-    channels = sum(struct.unpack_from('<i', blob, 8)[0] for blob, _n in parts)
-    out = bytearray(head + struct.pack('<ii', channels, len(entries)) + parts[0][0][16:24] + struct.pack('<i', 0x1c))
-    out += bytes(12 * len(entries))
-    at = []
-    for blob, _names in parts:
-        out += bytes(-len(out) % 0x40)
-        at.append(len(out))
-        out += blob
-    strings: dict[str, int] = {}
-    for k, ((name, count, tracks), i) in enumerate(entries):
-        entry = 0x1c + 12 * k
-        new = parts[i][1].get(name, name)
-        if new not in strings:
-            out += bytes(-len(out) % 4)
-            strings[new] = len(out)
-            out += new.encode('utf-16-le') + bytes(2)
-        struct.pack_into('<iii', out, entry, count, strings[new] - entry, at[i] + tracks - entry)
-    out += bytes(-len(out) % 4)
-    return bytes(out)
-
-
 def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: str) -> tuple[bytes, bytes | None]:
     """(the looping glow, the death block or None) of a 4.1 Hector part's material_animation. The body's: block 0 loops,
     block 1 is played once (`loop` and `death` None). A weapon's: the block on the body's glow's timeline, and the one
@@ -3742,83 +3752,13 @@ def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: s
     return glow[0], (end[0] if end else None)
 
 
-def gun_materials(md: mdb.Mdb, guns: tuple['Gun', ...]) -> dict[str, dict[str, str]]:
-    """{gun SGO: {4.1 material name: its name now}}: each gun's materials in the merged model `md` renamed in place to
-    `<name>.<weapon model>` (why: hector_materials), once per weapon (the same weapon on both arms shares them)."""
-    out: dict[str, dict[str, str]] = {}
-    for gun in guns:
-        if gun.fire is None or gun.fire.sgo in out:
-            continue      # the same weapon on both arms: one set of materials (_adopt_objects shares them)
-        stem = gun.mdb.rsplit('.', 1)[0].lower()
-        prefix = 'gun_' + gun.node
-        mats = sorted({me.material for ob in md.objects
-                       if (lambda n: n == prefix or n.startswith(prefix + '_'))(md.name_of(md.bones[ob.bone].name))
-                       for me in ob.meshes})
-        rename: dict[str, str] = {}
-        for i in mats:
-            old = md.name_of(md.materials[i].name)
-            rename[old] = f'{old}.{stem}'
-            md.materials[i].name = len(md.names)
-            md.names.append(rename[old])
-        out[gun.fire.sgo] = rename
-    return out
-
-
-def hector_materials(files: dict[str, bytes], rab_rel: str, armed: Armed, mine: dict, guns: tuple['Gun', ...]
-                     ) -> tuple[bytes, bytes, bytes | None]:
-    """(the glow blob, the death blob, the charge light or None) of a Hector variant, each animating the body's materials
-    and every gun's; the charge light is 301 cannon's third block (120 frames, EDF41.exe 0x2259A0 plays it in mode 1 when
-    the charge starts and stops it when the charge state is left, 0x225AAB) on that cannon's materials.
-
-    The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
-    (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
-    of that name (EDF+0x110D570, a linear scan returning the first match), so the body's blob lit the body only: the
-    guns' glow and the shield glass's animation were never played. So each gun's materials have a name of their own
-    (`<name>.<weapon model>`, gun_materials: armed.renamed) and the gun's own 4.1 blocks are merged in under those names."""
-    md = armed.body
-    loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
-    glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
-    death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
-    light_parts: list[tuple[bytes, dict[str, str]]] = []
-    done: set[str] = set()
-    for gun in guns:
-        if gun.fire is None or gun.fire.sgo in done:
-            continue      # the same weapon on both arms: one set of materials
-        done.add(gun.fire.sgo)
-        rename = armed.renamed[gun.fire.sgo]
-        blocks = sgo.read(files['OBJECT/' + gun.fire.sgo])[1].get('material_animation', [])
-        if not blocks:
-            continue      # 301's gatling: 4.1 animates nothing on it
-        glow, end = hector_blocks(blocks, loop, death, gun.fire.sgo)
-        if gun.fire.cls == 'Hector301_Cannon':
-            rest = [b for b in blocks if b is not glow and b is not end]
-            if len(rest) != 1 or rest[0][:4] != b'\0\0\0\0':
-                raise ValueError(f'{gun.fire.sgo}: {len(rest)} blocks besides glow and death, not its one charge light')
-            light_parts.append((rest[0], rename))
-        for parts, blob in ((glow_parts, glow), (death_parts, end)):
-            if blob is None:
-                continue
-            stray = [n for n, _c, _t in mtab_entries(blob) if n not in rename]
-            if stray:
-                raise ValueError(f'{gun.fire.sgo}: its blocks animate {stray}, its meshes use {sorted(rename)}')
-            parts.append((blob, rename))
-    blobs = mtab_merge(glow_parts), mtab_merge(death_parts)
-    light = mtab_merge(light_parts) if light_parts else None
-    names = [md.name_of(x.name) for x in md.materials]
-    for blob in blobs + ((light,) if light else ()):
-        for n, _c, _t in mtab_entries(blob):
-            if names.count(n) != 1:
-                raise ValueError(f'{rab_rel}: the material animation names {n!r}, the model has it {names.count(n)} times')
-    return blobs[0], blobs[1], light
-
-
-# The 4.1 weapons' own CAS animations, for the plugin to play on the merged bones (src/hector_ai.h, "the weapons' own
-# animations"): [arms_l, arms_r], each [kind, [bone], open, close, roll] with kind 0 none, 1 open / close (401 cannon,
-# launcher), 2 roll (401 gatling); a clip [frames, step, then per frame per bone tx ty tz qx qy qz qw] ([] when the kind has
-# none). The bones are the merged model's (mdb.graft_skinned: gun_<arm>_<weapon bone>), every weapon bone a clip moves.
-HECTOR_ANIM_KEY = 'edf41_hector_anim'
-HECTOR_LIGHT_KEY = 'edf41_hector_light'
+# The 4.1 weapons' own CAS animations, for the plugin to play on the weapon object's own bones (src/hector_ai.h, "the
+# weapons' own animations"; src/edf41ai.cpp WeaponPose): HECTOR_WEAPON_ANIM_KEY of the weapon's SGO, [kind, [bone], open,
+# close, roll] with kind 1 open / close (401 cannon, launcher), 2 roll (401 gatling); a clip [frames, step, then per frame
+# per bone tx ty tz qx qy qz qw] ([] when the kind has none). The bones are the weapon model's own, every one a clip moves
+# but gun_arms (the skin root, which hangs on the arm bone as the object does). The other weapons have no such key.
 HECTOR_ANIM_CLIPS = {1: ('open', 'close', None), 2: (None, None, 'fire')}
+HECTOR_ANIM_KINDS = {'Hector401_Cannon': 1, 'Hector401_Launcher': 1, 'Hector401_Gatling': 2}
 
 
 def mdb_bones(rab_bytes: bytes, mdb_name: str) -> dict[str, list[float]]:
@@ -3841,59 +3781,55 @@ def weapon_cas(data: bytes) -> bytes:
     return data if data[:8] == b'CAS\0\x04\x02\0\0' else cas_graft.cl.cas_from_legacy(data)
 
 
-def hector_anim(files: dict[str, bytes], a: Alias, bones: dict[str, list[float]]) -> list:
-    """HECTOR_ANIM_KEY's value for a Hector variant: each arm's weapon CAS (its SGO's animation_model[1], in `files` until
-    prune) sampled frame by frame. ValueError when a clip the weapon's class plays is missing or moves a bone the merged
-    model has not, or when a moved bone's clip pose and the model disagree where 4.1's data says they agree (the launcher's
-    model is posed open: its open clip ends on the model's locals, which checks the rotation convention)."""
-    arms: list = []
-    for gun in a.guns:
-        kind = {'Hector401_Cannon': 1, 'Hector401_Launcher': 1, 'Hector401_Gatling': 2}.get(gun.fire.cls, 0)
-        if not kind:
-            arms.append([0.0, [], [], [], []])
+def weapon_anim(files: dict[str, bytes], w: HectorWeapon, bones: dict[str, list[float]]) -> list:
+    """HECTOR_WEAPON_ANIM_KEY's value for weapon `w` ([] for a weapon whose class plays none): its CAS (its 4.1 SGO's
+    animation_model[1], in `files` until prune) sampled frame by frame on its model's bones (`bones`: name -> local).
+    ValueError when a clip the weapon's class plays is missing or moves a bone the model has not, or when a moved bone's
+    clip pose and the model disagree where 4.1's data says they agree (the launcher's model is posed open: its open clip
+    ends on the model's locals, which checks the rotation convention)."""
+    kind = HECTOR_ANIM_KINDS.get(w.cls, 0)
+    if not kind:
+        return []
+    am = sgo.read(files['OBJECT/' + w.sgo])[1]['animation_model']
+    cas_rel = rel_of(am[1])
+    pose = cas_pose.CasPose(weapon_cas(files[cas_rel]))
+    clips = {c.name: c for c in pose.clips}
+    want = [n for n in HECTOR_ANIM_CLIPS[kind] if n]
+    missing = [n for n in want if n not in clips]
+    if missing:
+        raise ValueError(f'{cas_rel}: no clip {missing}')
+    moved: list[str] = []
+    for n in want:
+        for t in clips[n].tracks:
+            if t.name.startswith('gun_') and t.name != 'gun_arms' and t.name not in moved:
+                moved.append(t.name)
+    absent = [n for n in moved if n not in bones]
+    if absent:
+        raise ValueError(f'{cas_rel}: the weapon model has no bone {absent}')
+    out: list = [float(kind), moved]
+    for name in HECTOR_ANIM_CLIPS[kind]:
+        if not name:
+            out.append([])
             continue
-        am = sgo.read(files['OBJECT/' + gun.fire.sgo])[1]['animation_model']
-        cas_rel = rel_of(am[1])
-        pose = cas_pose.CasPose(weapon_cas(files[cas_rel]))
-        clips = {c.name: c for c in pose.clips}
-        want = [n for n in HECTOR_ANIM_CLIPS[kind] if n]
-        missing = [n for n in want if n not in clips]
-        if missing:
-            raise ValueError(f'{cas_rel}: no clip {missing}')
-        moved: list[str] = []
-        for n in want:
-            for t in clips[n].tracks:
-                if t.name.startswith('gun_') and t.name != 'gun_arms' and t.name not in moved:
-                    moved.append(t.name)
-        merged = [f'gun_{gun.node}_{n}' for n in moved]
-        absent = [n for n in merged if n not in bones]
-        if absent:
-            raise ValueError(f'{cas_rel}: the merged model has no bone {absent}')
-        out: list = [float(kind), merged]
-        for name in HECTOR_ANIM_CLIPS[kind]:
-            if not name:
-                out.append([])
-                continue
-            clip = clips[name]
-            _duration, step, frames = cas_pose.clip_info(pose, clip)
-            tracks = {t.name: t for t in clip.tracks}
-            values: list[float] = [float(frames), float(step)]
-            for f in range(frames):
-                for n, full in zip(moved, merged):
-                    t = tracks.get(n)
-                    local = bones[full]
-                    tr = list(pose.translation(t.translation, f)) if t and t.translation >= 0 else local[12:15]
-                    ro = list(cas_rotation(pose, t.rotation, f)) if t and t.rotation >= 0 else [0.0, 0.0, 0.0, 1.0]
-                    values += [float(v) for v in tr + ro]
-            out.append(values)
-        if gun.fire.cls == 'Hector401_Launcher':      # the model is the open pose
-            last = out[2][2 + (int(out[2][0]) - 1) * len(merged) * 7:]
-            for i, full in enumerate(merged):
-                m = pose_matrix(last[i * 7:i * 7 + 7])
-                if max(abs(p - q) for p, q in zip(m, bones[full])) > 2e-3:
-                    raise ValueError(f'{cas_rel}: {full} open pose {m} is not the model\'s {bones[full]}')
-        arms.append(out)
-    return arms
+        clip = clips[name]
+        _duration, step, frames = cas_pose.clip_info(pose, clip)
+        tracks = {t.name: t for t in clip.tracks}
+        values: list[float] = [float(frames), float(step)]
+        for f in range(frames):
+            for n in moved:
+                t = tracks.get(n)
+                local = bones[n]
+                tr = list(pose.translation(t.translation, f)) if t and t.translation >= 0 else local[12:15]
+                ro = list(cas_rotation(pose, t.rotation, f)) if t and t.rotation >= 0 else [0.0, 0.0, 0.0, 1.0]
+                values += [float(v) for v in tr + ro]
+        out.append(values)
+    if w.cls == 'Hector401_Launcher':      # the model is the open pose
+        last = out[2][2 + (int(out[2][0]) - 1) * len(moved) * 7:]
+        for i, n in enumerate(moved):
+            m = pose_matrix(last[i * 7:i * 7 + 7])
+            if max(abs(p - q) for p, q in zip(m, bones[n])) > 2e-3:
+                raise ValueError(f'{cas_rel}: {n} open pose {m} is not the model\'s {bones[n]}')
+    return out
 
 
 def cas_rotation(pose: 'cas_pose.CasPose', channel: int, frame: int) -> tuple[float, float, float, float]:

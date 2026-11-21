@@ -23,7 +23,7 @@ class TextureAccelerationTests(unittest.TestCase):
                 path = Path(folder, mode + '.png')
                 image = Image.frombytes(mode, (17, 19), rng.randbytes(17 * 19 * len(mode)))
                 image.save(path)
-                expected = texfile.dxt1_dds(texfile.decode_png(path.read_bytes()))
+                expected = texfile.bc7_dds(texfile.decode_png(path.read_bytes()))
                 self.assertEqual(fast.texture_dds(str(path)), expected)
 
     def test_exact_mips_blocks_ties_and_odd_dimensions(self) -> None:
@@ -42,7 +42,7 @@ class TextureAccelerationTests(unittest.TestCase):
             a, b = Path(folder, 'a.png'), Path(folder, 'b.png')
             Image.new('RGB', (32, 32), (33, 44, 55)).save(a)
             b.write_bytes(a.read_bytes())
-            with patch.object(fast, 'dxt1_dds', wraps=fast.dxt1_dds) as encode:
+            with patch.object(fast, 'bc7_dds', wraps=fast.bc7_dds) as encode:
                 self.assertEqual(fast.texture_dds(str(a)), fast.texture_dds(str(b)))
                 self.assertEqual(encode.call_count, 1)
 

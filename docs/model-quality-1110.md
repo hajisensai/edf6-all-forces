@@ -14,9 +14,9 @@
 | 2 | 源法线被丢掉，按 50° 贪心分组重算，和法线贴图烘焙 / Sketchfab 显示用的法线不一致 | 已修 | `pylib/mesh_normals.py`（新）、`tools/prep_wt_tracked.py`、`tools/glb_to_wt_obj.py`、`tools/prep_glb_model.py`、`tools/prep_xmorph.py` |
 | 3 | DXT1 编码器只沿颜色包围盒最长轴取两端，不做主轴、不做最小二乘回拟 | 已修 | `pylib/texfile.py`、`pylib/texfile_accel.py`、`native/dxt1.cpp`（新）、`pylib/edf6native.py`、`pylib/obj_model.py` |
 | 4 | 大模型在模型空间用 half4 存位置，无畏舰误差达厘米级、343 个面塌成 0 面积 | 已修，待实机 | `pylib/obj_model.py`、`pylib/wt_tracked.py`、`pylib/cockpits.py` |
-| 5 | 透明 / 镂空（伪装网、玻璃、履带镂空、X-Morph 旋翼）全部按不透明画 | 没做 | 需要先逆向原版 Alpha / Clip 材质，并实机看排序和阴影 |
-| 6 | 游戏能读 DX10 头的 BC7，我们的颜色图只能走 BC1 | 没做 | 需要 DX10 头 / .lod 布局逆向 + BC7 native 编码器 |
-| 7 | 自发光丢失（X-Morph 空中 / 步行 / 步兵单位、glTF emissive） | 没做 | 见下 |
+| 5 | 透明 / 镂空（伪装网、玻璃、履带镂空、X-Morph 旋翼）全部按不透明画 | 已做（2026-11-21），待实机 | [model-quality-1121-alpha.md](model-quality-1121-alpha.md)；旋翼盘见 [xmorph-redo-1121.md](xmorph-redo-1121.md) 第 7 节 |
+| 6 | 游戏能读 DX10 头的 BC7，我们的颜色图只能走 BC1 | 已做（2026-11-21），待实机 | [model-quality-1121-bc7.md](model-quality-1121-bc7.md)：不透明颜色图 BC7，透明 / 镂空仍 DXT5（原版同类材质的格式） |
+| 7 | 自发光丢失（X-Morph 空中 / 步行 / 步兵单位、glTF emissive） | 已做（2026-11-21），待实机 | [xmorph-redo-1121.md](xmorph-redo-1121.md)（含 X-Morph 非履带单位的逐像素参数图） |
 | 8 | 源材质都是 doubleSided，转换后单面、背面剔除 | 没做 | 需要先渲染确认哪些开放块真的露背面 |
 | 9 | 外部材质沿用 v603_body 的 diffuse 0.842 等标量参数 | 没做 | 需要先逆向 BRDF_Common_Basic 里 diffuse 的作用 |
 | 10 | mip 在伽马空间盒滤波、法线通道约定、分辨率上限 | 排除，不改 | 与原版一致（审计已对照原版 mip 回归） |
@@ -144,6 +144,8 @@ WT 涂装车按源的意思是哑光非金属（Sketchfab 上 glossiness 0.117�
 **待实机**：座舱网格已经用 float4 位置在载具 MDB 里正常显示，但载具外壳本体用 float4 还没有实机记录，需要实机看一次无畏舰和 C-130（阴影 / 深度 pass）。无畏舰顶点缓冲约 +13%。
 
 ## 5–9. 没做的
+
+> 2026-11-21：第 5、6、7 条与第 1 条末尾的 X-Morph 非履带路径已做，见上表链接；下面保留当时的分析。第 8、9 条仍没做。
 
 - **5 透明 / 镂空**：伪装网（BMPT net_f / net_b 54–58% 像素 alpha<128）、车灯 / 观瞄玻璃（46–87%）、T-72 履带镂空（49%）、X-Morph 旋翼盘（`prep_xmorph` 直接丢弃）。原版玻璃用 `snd_BRDF_Common_Alpha`（透明度在 `diffuse.w`，b3=2，全仓 55 个材质），V603 履带的 `snd_BRDF_Mech_Catapillar` 带 `alpha_clip` 参数（原版为 0），另有 `*_Clip` 一族。`alpha_clip` 的语义（阈值方向、取哪个通道）和 b2 / b3 的含义要先从 DX11.cpk 的 shader 逆向，透明排序和阴影 pass 要实机确认；拿不准就上，可能出现透明件消失或排序错乱，所以本次不做。下一步：读取侧（`map_d` / `d`、glTF `alphaMode` / `alphaCutoff` / baseColor 的 A）写进 model.json 的 `alpha`，编码加 DXT5（alpha 走已有的 BC4 块编码），模板按 alpha 模式选原版 Alpha / Clip 宿主材质。
 - **6 BC7**：原版 OBJECT 里 69 张 DX10 头的 BC7_UNORM，引擎能采样；我们的 `texfile` 遇到 DX10 头直接拒绝。需要先统计原版 DX10 的 HD / .lod 布局（`pair_problem` 注释里的 62 对），再加 native BC7 编码器（bc7enc_rdo 等）；颜色图体积翻倍，模型包约 +20%。本次第 3 条已把 BC1 提高 1.3–2 dB，BC7 另开任务。

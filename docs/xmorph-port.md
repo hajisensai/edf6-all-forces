@@ -290,6 +290,8 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 
 ## 未做 / 风险
 
+- 2026-11-21：飞机、步行机甲、步兵、货车、炮台也改成逐像素粗糙度 / 金属度、发光图进 light 材质、网格自带法线，旋翼盘网格与帧保留待透明材质；
+  light 材质与 X-Morph 发光的逆向、`light` 语义（每单位 albedo 的发光）见 [xmorph-redo-1121.md](xmorph-redo-1121.md)。
 - **全部未进游戏看**：灯带的亮度（`light_color` 2.0，按无畏舰的 4 减半估的）、高光图到粗糙度 / 金属度的映射（`SPECULAR_RM`，按观感估的）
   都可能要按实机调；轮子随车速转的观感、填充轮是否真的看不见、负重轮比地面高出的履带厚度（车会下沉 2–6 cm）都要实机看。
 - 履带贴图滚动：已由 `make_tracked_combat.STATIC_TRACKS` 把 `tank_caterpillar_animation_info[0]` 置 0（`docs/model-lod.md` §3），贴图不动；
@@ -345,7 +347,8 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 - **模型**（`prep_xmorph.prepare_air` → `pylib/xm_air_model.py`）：MDB 保留 V506 的全部骨骼（mdl、globalSRT、body、rearWheelSus、
   rotor、bend_roterA–D、tailRotor：原版的音效 / 布娃娃 / 残骸效果引用它们），CAS 用 V506 的，`default` 片段经
   `cas_pose.retarget` 平移到我们的枢轴。整机往上抬到最低点 y = 0。贴图挂在 V505_TANK 的 `v505_tank` 宿主材质上；没有法线图的给平法线，
-  粗糙度用常量金属值。透明的旋翼模糊材质（`unlit_transparent`）丢弃。
+  粗糙度用常量金属值。透明的旋翼模糊材质（`unlit_transparent`）：帧图时间平均成一张 RGBA albedo，挂原版 Alpha 宿主半透明绘制
+  （2026-11-21，[xmorph-redo-1121.md](xmorph-redo-1121.md) 第 7 节）。
 - **旋翼**：骨骼名含 `rotor` 的子树各成一组（共轴的合并），主旋翼 = 半径最大的一组，映射到 V506 的 `rotor`（绕本地 y 转）；尾旋翼 =
   主旋翼的左右镜像伙伴（炮艇的成对旋翼：两侧都转），没有则取没有伙伴的最大一组（重型的尾桨、运输的后旋翼），映射到 `tailRotor`
   （绕本地 x 转）。每个旋翼挂在转过轴向的安装骨骼上（`xm_rotor_mount` / `xm_tail_mount`）。**其余旋翼静止**（炮艇前一对、重型两侧）：

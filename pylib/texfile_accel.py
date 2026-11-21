@@ -213,6 +213,121 @@ def dxt1_dds(image: texfile.Image) -> bytes:
     return texfile._header(image.width, image.height, len(levels), b'DXT1', 0, (0, 0, 0, 0), top) + b''.join(levels)
 
 
+# ------------------------------------------------------------------------------------------ DXT5 (BC3) colour + alpha
+#
+# The colour maps of the external models' see-through materials (docs/model-quality-1121-alpha.md): the stock
+# Alpha / Clip shaders read the albedo's A (snd_BRDF_Common_Alpha: alpha = A x diffuse.w x fall-off; the *_Clip
+# family and snd_BRDF_Mech_Catapillar: discard where A - alpha_clip < 0). A DXT5 block is BC4 of A (8 bytes) then a
+# DXT1 colour block (8 bytes) the decoder always reads in four-colour mode; _level's blocks are colour0 >= colour1
+# (equal: indices 0), the same colours there. Kept apart from the opaque maps' DXT1 path (dxt1_dds) and any other
+# colour format: the opaque maps' bytes do not change.
+
+DXT5_FOURCC = b'DXT5'
+COVERAGE_STEPS = 20     # bisection steps of a mip level's alpha scale (2^-20 of the 0..4 range)
+
+
+def alpha_coverage(alpha: Any, cutoff: float) -> float:
+    """The fraction of texels a Clip shader keeps: A / 255 >= cutoff (it discards A - alpha_clip < 0)."""
+    import numpy as np
+    return float((np.asarray(alpha, dtype=np.float64) >= cutoff * 255.0).mean())
+
+
+def _coverage_scaled(alpha: Any, cutoff: float, target: float) -> Any:
+    """`alpha` (a mip level's, uint8) times the scale whose coverage at `cutoff` is nearest `target` (the top level's):
+    box-filtered mips of a cut-out (a net's strands) fall under the cutoff and the cut-out thins away with distance;
+    this keeps the kept fraction (the standard coverage-preserving mip). A level with no texel left above zero stays."""
+    import numpy as np
+    a = alpha.astype(np.float64)
+    if not a.any() or cutoff <= 0.0:
+        return alpha
+    lo, hi = 0.0, 4.0
+    for _ in range(COVERAGE_STEPS):
+        mid = (lo + hi) / 2
+        if alpha_coverage(np.minimum(a * mid, 255.0), cutoff) < target:
+            lo = mid
+        else:
+            hi = mid
+    below, above = (alpha_coverage(np.minimum(a * s, 255.0), cutoff) for s in (lo, hi))
+    scale = lo if target - below < above - target else hi
+    return np.clip(np.rint(a * scale), 0, 255).astype(np.uint8)
+
+
+def dxt5_level(pixels: Any) -> bytes:
+    """One DXT5 level of an H x W x 4 uint8 array: per 4x4 block (row-major, edges repeated) A's BC4 block, then
+    _level's DXT1 colour block."""
+    import numpy as np
+    alpha = np.frombuffer(_bc4_blocks(_blocks16(np.ascontiguousarray(pixels[..., 3]))), np.uint8).reshape(-1, 8)
+    colour = np.frombuffer(_level(pixels), np.uint8).reshape(-1, 8)
+    return np.hstack((alpha, colour)).tobytes()
+
+
+def dxt5_dds(image: texfile.Image, cutoff: float | None = None) -> bytes:
+    """A DXT5 DDS of `image` (RGBA) with its whole mip chain (texfile._half's 2x2 box of every channel). `cutoff` (a
+    Clip material's alpha_clip): each mip level's alpha is rescaled to keep the top level's coverage at it
+    (_coverage_scaled); None (a blended material) keeps the box-filtered alpha."""
+    import numpy as np
+    pixels = np.frombuffer(image.rgba, dtype=np.uint8).reshape(image.height, image.width, 4)
+    target = alpha_coverage(pixels[..., 3], cutoff) if cutoff is not None else None
+    levels = []
+    while True:
+        level = pixels
+        if target is not None and levels:
+            level = pixels.copy()
+            level[..., 3] = _coverage_scaled(pixels[..., 3], cutoff, target)
+        levels.append(dxt5_level(level))
+        if pixels.shape[0] == 1 and pixels.shape[1] == 1:
+            break
+        pixels = _half(pixels)
+    top = max(1, (image.width + 3) // 4) * max(1, (image.height + 3) // 4) * 16
+    return texfile._header(image.width, image.height, len(levels), DXT5_FOURCC, 0, (0, 0, 0, 0), top) + b''.join(levels)
+
+
+# ------------------------------------------------------------------------------------------ BC7 colour maps
+#
+# The external models' colour maps (docs/model-quality-1121-bc7.md): BC7_UNORM behind a DX10 header, as 179 stock model
+# textures are, albedo maps among them. native/bc7.cpp encodes (pylib/bc7.py's encoder, the same bytes); there is no
+# Python fallback for installing: bc7.py takes hours on a model's maps, and an install without edf6cmpl.dll is broken.
+
+def _bc7_level(pixels: Any) -> bytes:
+    import ctypes
+    import numpy as np
+    import bc7  # noqa: F401 - the encoder's definition, native/bc7.cpp its port: buildcache keys the groups on it
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None:
+        raise texfile.TextureError(f'BC7 colour maps need {edf6native.NAME} (native/bc7.cpp): run build.cmd, or the '
+                                   'installation is incomplete')
+    height, width = pixels.shape[:2]
+    data = np.ascontiguousarray(pixels, dtype=np.uint8).tobytes()
+    out = ctypes.create_string_buffer(((width + 3) // 4) * ((height + 3) // 4) * 16)
+    size = lib.edf6_bc7_level(data, width, height, out, 0)
+    return out.raw[:size]
+
+
+def bc7_dds(image: texfile.Image) -> bytes:
+    """texfile.bc7_dds, byte for byte (bc7.py's encoder in native/bc7.cpp, the same box filter)."""
+    import numpy as np
+    pixels = np.frombuffer(image.rgba, dtype=np.uint8).reshape(image.height, image.width, 4)
+    levels = []
+    while True:
+        levels.append(_bc7_level(pixels))
+        if pixels.shape[0] == 1 and pixels.shape[1] == 1:
+            break
+        pixels = _half(pixels)
+    top = max(1, (image.width + 3) // 4) * max(1, (image.height + 3) // 4) * 16
+    return texfile._dx10_header(image.width, image.height, len(levels), texfile.DXGI_BC7_UNORM, top) + b''.join(levels)
+
+
+def decode_dxt5(data: bytes, width: int, height: int) -> Any:
+    """A DXT5 level as H x W x 4 float32 in 0..255 (RGB as decode_dxt1's four-colour mode, A as decode_bc4)."""
+    import numpy as np
+    bw, bh = max(1, (width + 3) // 4), max(1, (height + 3) // 4)
+    raw = np.frombuffer(data, np.uint8, bw * bh * 16).reshape(-1, 16)
+    a = decode_bc4(raw[:, :8].tobytes(), width, height)
+    rgb = decode_dxt1(raw[:, 8:].tobytes(), width, height, four_only=True)
+    return np.concatenate((rgb, a[..., None]), -1)
+
+
 # ------------------------------------------------------------------------------------------ BC5 normal maps
 #
 # What the stock vehicles' normal maps are (V505 / V601 / V603 / V614 body, kyata, light; V505 / V506 EDF6BENEFITS):
@@ -431,8 +546,9 @@ def decode_bc5(data: bytes, width: int, height: int) -> Any:
     return np.stack((r, g), -1)
 
 
-def decode_dxt1(data: bytes, width: int, height: int) -> Any:
-    """A DXT1 level as H x W x 3 float32 in 0..255 (the 4-colour mode as D3D; 3-colour mode: index 3 black)."""
+def decode_dxt1(data: bytes, width: int, height: int, four_only: bool = False) -> Any:
+    """A DXT1 level as H x W x 3 float32 in 0..255 (the 4-colour mode as D3D; 3-colour mode: index 3 black;
+    `four_only`: every block in the 4-colour mode, as a DXT5 block's colour half is read)."""
     import numpy as np
     bw, bh = max(1, (width + 3) // 4), max(1, (height + 3) // 4)
     raw = np.frombuffer(data, np.dtype([('c0', '<u2'), ('c1', '<u2'), ('i', '<u4')]), bw * bh)
@@ -441,7 +557,7 @@ def decode_dxt1(data: bytes, width: int, height: int) -> Any:
         c = c.astype(np.int32)
         return np.stack(((c >> 11) * 255.0 / 31, ((c >> 5) & 63) * 255.0 / 63, (c & 31) * 255.0 / 31), -1)
     a, b = rgb(raw['c0']), rgb(raw['c1'])
-    four = (raw['c0'] > raw['c1'])[:, None]
+    four = (raw['c0'] > raw['c1'])[:, None] | four_only
     pal = np.stack((a, b, np.where(four, (2 * a + b) / 3, (a + b) / 2), np.where(four, (a + 2 * b) / 3, 0.0)), 1)
     idx = ((raw['i'][:, None].astype(np.int64) >> (np.arange(16) * 2)) & 3)
     px = pal[np.arange(len(raw))[:, None], idx]
@@ -449,6 +565,7 @@ def decode_dxt1(data: bytes, width: int, height: int) -> Any:
 
 
 def texture_dds(path: str) -> bytes:
+    """A cockpit colour map file as a DDS: a .dds as it is (validated), a PNG / JPEG as BC7_UNORM."""
     data = Path(path).read_bytes()
     key = hashlib.sha256(data).hexdigest()
     cached = _dds_cache.get(key)
@@ -467,9 +584,9 @@ def texture_dds(path: str) -> bytes:
                 image = texfile.Image(source.width, source.height, bytearray(source.convert('RGBA').tobytes()))
         else:
             image = texfile.decode_png(data)
-        encoded = dxt1_dds(image)
+        encoded = bc7_dds(image)
     elif data[:2] == b'\xff\xd8':
-        encoded = dxt1_dds(texfile.decode_jpeg(data))
+        encoded = bc7_dds(texfile.decode_jpeg(data))
     else:
         raise texfile.TextureError(f'{path}: neither PNG nor JPEG')
     return _dds_cache.put(key, encoded)

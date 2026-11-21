@@ -223,8 +223,10 @@ def texture_name(kit: str, key: str) -> str:
 
 
 def albedo_dds(spec: KitMaterial, root: str) -> bytes:
+    """A kit's colour map as BC7_UNORM (docs/model-quality-1121-bc7.md): a flat colour, or its image file."""
     if isinstance(spec.albedo, tuple):
-        return texfile.solid_dxt1(spec.albedo)
+        from texfile_accel import bc7_dds
+        return bc7_dds(texfile.Image(16, 16, bytearray(bytes((*spec.albedo, 255)) * 256)))
     from texfile_accel import texture_dds
     return texture_dds(os.path.join(root, spec.albedo))
 

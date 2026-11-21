@@ -101,7 +101,7 @@ def _textures(folder: str, made: bool = True) -> tuple[dict[str, bytes], dict[st
     px = bytearray(rml.rgba)
     px[2::4] = b'\xff' * (len(px) // 4)
     rml = texfile.Image(rml.width, rml.height, px)
-    files = dict(zip(names, (texfile_accel.dxt1_dds(texfile.load_image(os.path.join(folder, f'{MODEL}_df.png'))),
+    files = dict(zip(names, (texfile_accel.bc7_dds(texfile.load_image(os.path.join(folder, f'{MODEL}_df.png'))),
                              texfile_accel.bc5_normal_file(os.path.join(folder, f'{MODEL}_nm.png')),
                              texfile_accel.dxt1_dds(rml))))
     return files, dict(zip(c130_model.BODY_SLOTS, names))
