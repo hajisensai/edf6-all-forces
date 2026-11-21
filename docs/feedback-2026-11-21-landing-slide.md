@@ -56,7 +56,8 @@
   - `CatchDoor` 断言改成检查目标点只前导一帧门的旋转。
   - 负对照新增 4 条：恢复编队写速度、自动驾驶首帧用机头 × 速度、接手用航向 × 速度、捕获不发请求。每条都必须让 fixture 断言失败。
 - `tests/wing_turn_test.cpp`（新 ctest `wing_turn`）：从静止起步、反向 160 m/s 召回、横向期望速度、正反向、四分之一转弯的转弯率。按 body506 `BodyAttitude` 的机头律对比新旧两种召回：旧律速度横穿机头最大 178 m/s，新律 4.5 m/s（只剩姿态滞后）。
-- `python tools/check.py`：结果见提交说明 / 回报。
+- `python tools/check.py`（2026-11-21，提交 16afc19a）：退出码 1。build、gen 通过；ctest 634/635，`playerjet_recovery`、`wing_turn`、`dreadnought_deck` 都通过，唯一失败的 `worldmap_pack` 是本机 `worldmap_tex.json` 版本与安装器不配套（数据问题）；selftest 343/345，失败的 `spawn_catalog_archives_recorded_1`（`testrange/catalog_archives.json` 对 `edf6tr_andryusha_mission` 过期）同一时段其他基于同一 origin/main 的分支也红，`installer_recovery_regressions` 是临时目录清理时报 WinError 145（目录非空，文件被占用），这次没有改安装器。三项都与本改动无关。
+- `tools/playerjet_recovery_check.py --negative-controls` 单独跑：生产路径 67 条断言通过，13 个负对照全部按预期失败（第一次跑时有一个负对照链接报 LNK1104，临时 exe 被占用，重跑通过）。
 
 ## 未做 / 未实机验证
 
