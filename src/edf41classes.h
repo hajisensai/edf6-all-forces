@@ -166,6 +166,10 @@ int RagdollBody(void* ragdoll,const wchar_t* name) noexcept;
 // (Added for the Hector's shield, src/edf41ai.cpp; edf41mother.cpp keeps its own copy with the area-query checks.)
 int RagdollLayer(void* ragdoll) noexcept;
 bool SetRagdollLayer(void* ragdoll,int layer) noexcept;
+// (Added for the Hector's weapon objects.) Ragdoll::Disable 0x6E97C0(ragdoll): every body whose enabled byte (+0xA4 of its 0xC0
+// record at [ragdoll+0x78], count [+0x88]) is set has it cleared and leaves the physics world (0x6ED480(body, 0)); its one stock
+// caller is 0x38B321. True when a body was enabled (and is not now); false too when the code is not this build's.
+bool DisableRagdoll(void* ragdoll) noexcept;
 // GDI (the data of 0xF0000000): +0x30 hit centre, +0x50 damage, +0x60 u16 flags (0x40 forced).
 constexpr std::size_t kGdiCentre=0x30,kGdiDamage=0x50,kGdiFlags=0x60;
 
