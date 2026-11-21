@@ -6440,7 +6440,7 @@ def stock_stores_build() -> None:
     got = dsgo.to_py(dsgo.parse(handed[flak]).root)
     mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
     assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
-    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2a_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
 
 
 @test
@@ -7126,14 +7126,18 @@ def npc_ai_wired() -> None:
     assert 'GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull)' in move_to
     assert move_to.index('GroundNavigateDeferred(soldier->navigation)') < move_to.index('GroundCoast(') < move_to.index('RouteStart(pos,from);')
     assert 'p.ahead=true;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
+    # 2026-11-21 (「npc 寻路好像不会绕开载具」): every route goes round the vehicles' bodies (RouteHull: HullClear).
+    assert move_to.index('hull=RouteHull(hull);') < move_to.index('GroundCoast(') < move_to.index('GroundNavigate(')
+    route_hull = code.split('Hull RouteHull(Hull hull) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'hull.clear=&HullClear;' in route_hull, 'every route sweeps the vehicles, not only the boarded one'
     # Testhub #31: a boarding soldier's route goes round its vehicle (the map ray sees no unit), not within the
     # boarding circle; a soldier stood against the hull until its order lapsed and was given again.
     board = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'MoveTo(h,pos,walkAt,stop,ms,1.0f,BoardHull(v,walkAt,npc::BoardRoom(at[1]-walkAt[1],reach)));' in board, \
         'Board: the route goes round the vehicle it walks to'
-    hull = code.split('bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'ObjectRay(from,b,at,&body)' in hull and 'if(owner==vehicle)return false;' in hull, \
-        'HullClear: the object layer, the owner of the body hit is the vehicle'
+    hull = code.split('bool HullClear(const void*,const float* a,const float* b) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'ObjectRay(from,b,at,&body)' in hull and 'if(owner && VehicleClassOf(owner)>=0)return false;' in hull, \
+        'HullClear: the object layer, the owner of the body hit is a vehicle (any: 2026-11-21)'
     assert 'hullOk=Matches(kBodyObject,kBodyObjectSig,' in code
     assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
     assert move_to.index('RouteStart(to,goal);') < move_to.index('GroundNavigate('), '...and ends on the floor under its goal'

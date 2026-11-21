@@ -30,11 +30,12 @@
 //    东西可以同时发射，不一定需要切换副挂载才行。多加几个按键的事情」): a vehicle's weapons that fire together each have a
 //    key of their own, the second trigger (the V603's otherwise unread one: its weapons one launcher's rounds, cycled on
 //    VehicleSecondarySwitchKey) or one of the extra keys VehicleFire3Key..6 (one weapon each), held at once with the
-//    primary; and an auto turret (StoreSpec::autoTurret) fires itself with the auto turrets on (VehicleAutoTurretKey):
-//    a missile once its lock holds, a gun laid on an enemy in its reach (HasShot), pulled only on the frames it can
-//    fire (SelfFire). An NPC crew fires them all (NpcSecondarySelect, NpcOwnWeaponsFire). A gunner seat's own turret
-//    fires itself only with nobody in that seat (UnmannedTurretsFire): its rider fires it on the seat's trigger. Every
-//    one of them is pulled through FireSeat (ControlOf: who pulls it).
+//    primary. An NPC crew fires them all (NpcSecondarySelect, NpcOwnWeaponsFire). An auto turret (StoreSpec::autoTurret)
+//    is a gunner seat's own turret alone: with nobody in that seat and the auto turrets on (VehicleAutoTurretKey) it lays
+//    itself on an enemy (seat_turret.cpp) and fires on a shot (HasShot, UnmannedTurretsFire); its rider fires it on the
+//    seat's trigger. A weapon on the driver's keys is the driver's to fire: it rides his aim, and pulling it by itself
+//    whenever that aim crossed an enemy was no turret (the player, 2026-11-21: 「载具的某些副炮塔能自动开火真的对劲吗，
+//    怎么感觉怪怪的」; vcobjects Store.auto). Every one of them is pulled through FireSeat (ControlOf: who pulls it).
 #include "crew.h"
 #include "jetaudio.h"
 #include "layout.h"
@@ -346,8 +347,8 @@ constexpr std::uint16_t SwitchButton(Class c) noexcept { return c==Class::car ? 
 // `cycle`: the seat's stock controls and the stores riding them (FireOf: the primary's / the secondary's cycle, PullHook's
 // redirect). `coax`: the coaxial gun (the second trigger where the class leaves it unread; an NPC crew's on a shot of its
 // own). `second`: the V603's otherwise unread second trigger, its weapons one launcher's rounds (their own cycle,
-// Switch). `key`: an extra fire key 3..kFireLastKey, one weapon each. `autoTurret`: an own-key weapon that fires itself
-// with the auto turrets on (it needs its key: fired by hand with them off).
+// Switch). `key`: an extra fire key 3..kFireLastKey, one weapon each, or a gunner seat's own trigger. `autoTurret`: a
+// gunner seat's own turret that lays and fires itself with nobody in the seat (StoreSpec::autoTurret: only those).
 // The second trigger only where the class's stock input leaves it unread: V603 consumes only its primary trigger (the
 // authored BMPT explicitly equips its spare secondary); a catalogue flag cannot claim an unread input on another class or
 // replace a native secondary weapon. The extra keys are no stock input at all: a catalogued store's holder is never
@@ -360,8 +361,8 @@ Control ControlOfSpec(Class c,const StoreSpec* spec) noexcept {
     // A gunner seat's own weapon (its own turret, seat_turret.cpp): that seat's primary trigger, which the V603 reads on
     // seat 0 alone (docs/independent-seat-re.md).
     if(spec->seat && c==Class::flak603)return {Source::key,kSeatTriggerKey,spec->autoTurret};
-    if(spec->fireKey==kSecondTriggerKey && c==Class::flak603)return {Source::second,kSecondTriggerKey,spec->autoTurret};
-    if(spec->fireKey>kSecondTriggerKey && spec->fireKey<=kFireLastKey)return {Source::key,spec->fireKey,spec->autoTurret};
+    if(spec->fireKey==kSecondTriggerKey && c==Class::flak603)return {Source::second,kSecondTriggerKey,false};
+    if(spec->fireKey>kSecondTriggerKey && spec->fireKey<=kFireLastKey)return {Source::key,spec->fireKey,false};
     if(spec->role==StoreRole::coax)return {Source::coax,0,false};
     return {};
 }
@@ -763,9 +764,9 @@ struct SeatIntent {
     const unsigned char* secondPick=nullptr;   // ...the round its cycle picked (Switch, NpcSecondarySelect); nullptr any
     bool coax=false;                           // the coax's trigger held (the player's second trigger, FireOf `secondary`)
     bool keys[kFireLastKey+1]{};               // the extra fire keys held
-    bool autoOn=false;                         // the auto turrets on: each fires itself on a shot at any enemy...
-    bool unmanned=false;                       // ...a gunner seat's own one only with nobody in its seat (UnmannedTurretsFire):
-                                               // its rider fires it on the seat's trigger (kSeatTriggerKey)
+    bool autoOn=false;                         // the auto turrets on: a gunner seat's own turret fires itself on a shot...
+    bool unmanned=false;                       // ...only with nobody in its seat (UnmannedTurretsFire): its rider fires it
+                                               // on the seat's trigger (kSeatTriggerKey)
     const void* crew=nullptr;                  // an NPC crew's target: its coax and extra-key weapons fire on a shot at it
     LineBlocked blocked=nullptr;
 };
@@ -781,12 +782,11 @@ bool FireSeat(const unsigned char* v,Class c,unsigned char* const* ws,const Payl
                                            (in.crew && SelfFire(v,ws[i],in.crew,in.blocked)));
                 break;
             case Source::second:   // one launcher's rounds: the round picked alone
-                pull=(!in.secondPick || ws[i]==in.secondPick) &&
-                     ((in.second && r.entry[i].rounds>0) || (k.autoTurret && in.autoOn && in.secondPick && SelfFire(v,ws[i],nullptr,in.blocked)));
+                pull=(!in.secondPick || ws[i]==in.secondPick) && in.second && r.entry[i].rounds>0;
                 break;
             case Source::key: {
                 // A gunner seat's own turret is its rider's to fire: by itself only with nobody in the seat.
-                const bool autoFire=k.autoTurret && in.autoOn && (k.key!=kSeatTriggerKey || in.unmanned);
+                const bool autoFire=k.autoTurret && in.autoOn && in.unmanned;
                 pull=!Spent(ws[i]) && (in.keys[k.key] || (autoFire && SelfFire(v,ws[i],nullptr,in.blocked)) ||
                                        (in.crew && SelfFire(v,ws[i],in.crew,in.blocked)));
                 break;
@@ -978,14 +978,12 @@ void PayloadFrame(unsigned char* v) noexcept {
     //    gunner keeps a round in the main gun's breech while he hoses infantry;
     //  - the intrinsic secondary (the BMPT's missiles) on its own trigger, only the round picked (Switch: p->secondary);
     //    optional add-on stores off or not, it never redirects a cannon source;
-    //  - the extra fire keys, each its one weapon, held at once with the triggers;
-    //  - the auto turrets with them on (their switch VehicleAutoTurretKey / -Button, only where the seat has one): each
-    //    fires itself when it has a shot (HasShot), whatever its key. The second trigger's is only the round picked.
-    // A gunner seat's own turret with this player in its seat is theirs to fire (FireSeat): no auto turret on this seat.
-    for(int i=0;i<r.count;++i)if(r.entry[i].key==kSeatTriggerKey)r.entry[i].autoTurret=false;
-    for(int i=0;i<r.count;++i)r.autoTurrets+=r.entry[i].autoTurret ? 1 : 0;
-    // The gunner seats' unmanned ones: their switch is this player's where this machine runs them (RunsUnmannedTurrets).
-    if(RunsUnmannedTurrets(v))r.autoTurrets+=SeatAutoTurrets(v,static_cast<unsigned>(seat));
+    //  - the extra fire keys, each its one weapon, held at once with the triggers.
+    // None of them fires itself: the auto turrets are the other gunner seats' own turrets with nobody in them
+    // (UnmannedTurretsFire). Their switch (VehicleAutoTurretKey / -Button) is this player's where this machine runs them
+    // (RunsUnmannedTurrets); a gunner seat's own turret with this player in it is theirs to fire (FireSeat).
+    for(int i=0;i<r.count;++i)r.entry[i].autoTurret=false;
+    if(RunsUnmannedTurrets(v))r.autoTurrets=SeatAutoTurrets(v,static_cast<unsigned>(seat));
     const bool autoDown=r.autoTurrets>0 && PlayerKeyHeld(s,Cfg().vehicleAutoTurretKey,Cfg().vehicleAutoTurretButton);
     if(autoDown && !autoTurretHeld) {
         autoTurretsSet=AutoTurretsOn() ? 0 : 1;
@@ -998,7 +996,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     in.keys[kSeatTriggerKey]=primary && !MapHoldsKeys();   // a gunner seat's own weapons (ControlOf)
     in.secondPick=p->secondary;
     for(unsigned char k=kSecondTriggerKey+1;k<=kFireLastKey;++k)in.keys[k]=PlayerKeyHeld(s,FireKeyVk(k),FireKeyButton(k));
-    in.autoOn=r.autoOn;in.blocked=&FriendInLine;
+    in.blocked=&FriendInLine;
     FireSeat(v,c,ws,r,in);
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
     if(r.choices>=2 || p->weapon)SendPick(v,static_cast<unsigned>(seat),p->weapon,false);   // this seat's pick to its copies

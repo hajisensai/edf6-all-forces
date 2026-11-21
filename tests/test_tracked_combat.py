@@ -64,13 +64,14 @@ class CatalogContractTests(unittest.TestCase):
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
         # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm). 2026-10-30 (#29): the PzH 2000's roof MG3.
         # 2026-10-30 (「不是只有两个攻击按键的…多加几个按键的事情」): each its own fire key (Store.key), the X-Morph arms
-        # past the first on the extra keys; the Apocalypse's anti-air missiles an auto turret.
+        # past the first on the extra keys. 2026-11-21 (「载具的某些副炮塔能自动开火真的对劲吗」): no weapon on a key is an auto
+        # turret (it rides the driver's aim); only a gunner seat's own turret is (below).
         self.assertEqual({kind: (store.key, store.auto) for kind, store in vc.STORES.items() if store.key},
-                         {'TUNGUSKA_SAM': (2, False), 'APOC_SAM': (2, True), 'PATRIOT_SAM': (2, False), 'PZH2000_MG': (2, False),
+                         {'TUNGUSKA_SAM': (2, False), 'APOC_SAM': (2, False), 'PATRIOT_SAM': (2, False), 'PZH2000_MG': (2, False),
                           'BMPT_ATGM': (2, False), 'BMPT_ATGMF': (2, False),
                           **{vc.xm_store(u, a): (a.fire, a.auto) for u in xm_units.v603() for a in u.arms if a.fire},
                           # the stock vehicles' independent weapons, each as its vehicles mount it (vc.STOCK_MOUNTS)
-                          'AGM_L_K3': (3, False), 'RKT_K3': (3, False), 'AAM_S_K2A': (2, True), 'AAM_M_K2A': (2, True),
+                          'AGM_L_K3': (3, False), 'RKT_K3': (3, False), 'AAM_S_K2': (2, False), 'AAM_M_K2': (2, False),
                           # 2026-11-08: the Grape's coax off the Car's throttle (docs/feedback-2026-11-08-grape-keys.md)
                           'MG401_K4': (4, False)})
         self.assertEqual({k: vc.vehicle_fire_keys(vc.GROUND_VEHICLES[k]) for k in ('bmpt', 'xm_large_tank', 'xm_large_tank_emp')},
@@ -79,6 +80,7 @@ class CatalogContractTests(unittest.TestCase):
                           'xm_large_tank_emp': {2: ['XM_LARGE_TANK_EMP_EMP'], 3: ['XM_LARGE_TANK_EMP_AAM']}})
         # 2026-10-30 (「一些应该是独立的座位」): the EMP tank's two AA gun turrets each their own gunner seat and turret, no
         # key (the seat's trigger fires it), an auto turret with nobody in it; their holders on those seats.
+        self.assertFalse([k for k, s in vc.STORES.items() if s.auto and not s.seat], 'an auto turret lays itself: a seat')
         self.assertEqual({kind: (store.seat, store.auto, store.turret.yaw, store.turret.pitch)
                           for kind, store in vc.STORES.items() if store.seat},
                          {'XM_LARGE_TANK_MG': (1, True, 'xm_mg', 'xm_mg_gun'),
