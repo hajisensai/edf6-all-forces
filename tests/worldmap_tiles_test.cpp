@@ -5,6 +5,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -60,21 +61,25 @@ int wmain(int argc,wchar_t** argv) {
     Expect(!DecodeJpeg(junk,sizeof junk,px) && px.w==0,"not a JPEG: refused");
     Expect(!store.Read(-1,bytes) && !store.Read(store.Count(),bytes),"outside the table");
 
-    // The background queue: the last Want wins, everything wanted comes back once, decoded.
-    const int first[3]={1,2,3},wanted[4]={base,base+1,base+cols,-5};
+    // Want replaces pending work. The worker may already have taken work from the first request.
+    const int first[3]={1,2,3};
+    const std::array<int,4> wanted={base,base+1,base+cols,-5};
     store.Want(first,3);
-    store.Want(wanted,4);
-    std::vector<int> got;
+    store.Want(wanted.data(),static_cast<int>(wanted.size()));
+    std::array<bool,3> decoded{};
+    std::size_t count=0;
     const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(20);
-    while(std::chrono::steady_clock::now()<until && got.size()<3) {
+    while(std::chrono::steady_clock::now()<until && count<decoded.size()) {
         TilePixels t;
         if(store.Take(t)) {
-            if(t.w==tile)got.push_back(t.index);
+            for(std::size_t i=0;i<decoded.size();++i) {
+                if(t.index!=wanted[i])continue;
+                Expect(t.w==tile && t.h==tile && !decoded[i],"requested tile decoded exactly once");
+                if(t.w==tile && t.h==tile && !decoded[i]){decoded[i]=true;++count;}
+            }
         } else std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    bool hasBase=false,hasCol=false;
-    for(int i:got){hasBase=hasBase || i==base;hasCol=hasCol || i==base+cols;}
-    Expect(hasBase && hasCol,"wanted tiles decoded on the worker");
+    Expect(count==decoded.size(),"wanted tiles decoded on the worker");
 
     // Cancel (the select gone): what was queued or decoded and not taken is dropped (at most the one being decoded
     // comes back), and nothing stays marked busy: the same tiles wanted again all come back.
