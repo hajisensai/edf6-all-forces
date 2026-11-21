@@ -14442,8 +14442,10 @@ def edf41_hector_alias() -> None:
         return
     data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
     assert not data['skipped'] and [o['object'] for o in data['objects']] == ['OBJECT/HECTOR301CC.SGO'], data['skipped']
+    cannon = m.HECTOR_WEAPONS[('301', 'C')]
     assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', m.HECTOR_MODEL,
-                          'OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT'}, sorted(files)
+                          'OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT', m.weapon_rel(cannon, 'SGO'), m.weapon_rel(cannon, 'MRAB'),
+                          m.HECTOR_WEAPON_CAS, 'OBJECT/RAGDOLL_HECTOR301CANNON.SHKT'}, sorted(files)
     root = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
     top = sgo.load(data=files['OBJECT/HECTOR301CC.SGO'])
     assert top['xgs_scene_object_class'] == 'EDF6_Berserker_Large'
@@ -14495,34 +14497,35 @@ def edf41_hector_alias() -> None:
     assert top['WalkingEnemyBase']['TurnSpeed'] == [0.3, 0.1], top['WalkingEnemyBase']['TurnSpeed']
     assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
     # the model, the MAB, the ragdoll
-    # one archive for every variant (a player's report, 2026-10-18: 21 archives each with the same body and textures):
-    # the textures once, an armed body per variant under its root's name, the SGO naming its own
+    # one body archive for every variant (a player's report, 2026-10-18: 21 archives each with the same body and textures;
+    # the user, 2026-11-21: the weapon models stored and loaded apart from the body): 4.1's two bodies once each, no weapon
+    # on them, the SGO naming its generation's
     rab = files[m.HECTOR_MODEL]
     archive = mdb.rab_read(rab)
     member = {f.name.lower(): f for f in archive.files}
     am = root.get('animation_model')
-    assert am.items[0].items[0].lower() == 'app:/object/hector_variants.mrab' and am.items[1] == 'app:/object/Hector.cas'
-    assert am.items[0].items[1] == 'HECTOR301CC.mdb', am.items[0].items[1]
+    assert am.items[0].items[0].lower() == 'app:/object/hector_body.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    assert am.items[0].items[1] == 'Hector301.mdb', am.items[0].items[1]
     model = mdb.mdb_read(member[am.items[0].items[1].lower()].data)
     bodies = sorted(f.name for f in archive.files if f.name.lower().endswith('.mdb') and 'fragment' not in f.name.lower())
-    assert bodies == sorted(m.shared_member(r) for r in m.HECTOR_VARIANTS), bodies
+    assert bodies == sorted(m.HECTOR_BODIES), bodies
     names = [f.name.lower() for f in archive.files]
     assert len(names) == len(set(names)) and mdb.folder_order_ok(archive)
     bones = {model.name_of(b.name) for b in model.bones}
-    assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
+    assert {'waist', 'arms_l', 'arms_r', 'Hector301'} <= bones and not any(b.startswith('gun_') for b in bones), sorted(bones)
+    assert not any('cannon' in n or 'gatling' in n or 'launcher' in n or 'shield' in n for n in names), names
     for body in bodies:
         assert not m.missing_textures(rab, body), (body, m.missing_textures(rab, body))
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
         assert not m.missing_textures(rab, frag)
     # the class enables slots 0..3 by number (EDF+0x6dc830): as many entries as the template's four, not one per material
-    # (two crashed the real game, M113 / M131); the model's materials are the two the glow blob names
-    # and no fifth: 301 cannon's charge light (light0_color up to 10 / 10 / 100) turned M113 white (2026-10-17 real run)
-    assert len(am.items[4].items) == 4 and len(model.materials) == 2 and 'edf41_hector_light' not in top
-    # each material its own name (EDF6 binds an MTAB entry to the first of a name: the guns' glow was never played),
-    # every slot animates the body's and the guns', slot 3 (played once at death) is 4.1's 180-frame death block
+    # (two crashed the real game, M113 / M131); the body's one material is what the glow blob names (the guns' glow is
+    # their own objects'), and no fifth: 301 cannon's charge light turned M113 white (2026-10-17 real run)
+    assert len(am.items[4].items) == 4 and len(model.materials) == 1 and 'edf41_hector_light' not in top
+    # every slot animates the body's material, slot 3 (played once at death) is 4.1's 180-frame death block
     mats = [model.name_of(x.name) for x in model.materials]
-    assert mats == ['ufosurface', 'ufosurface.hector301cannon'], mats
+    assert mats == ['ufosurface'], mats
     for i, slot in enumerate(am.items[4].items[:4]):
         blob = slot.items[0].data
         assert [n for n, _c, _t in m.mtab_entries(blob)] == mats, (i, m.mtab_entries(blob))
@@ -14552,9 +14555,19 @@ def edf41_hector_alias() -> None:
     # the file is a DSGO the writer reproduces
     assert dsgo.write(dsgo.parse(files['OBJECT/HECTOR301CC.SGO'])) == files['OBJECT/HECTOR301CC.SGO']
     assert struct.unpack_from('<I', cas, 4)[0] == 0x204
-    # the head player the plugin opens and closes (src/hector_ai.h StepHead), and no weapon animation on 301's guns
+    # the head player the plugin opens and closes (src/hector_ai.h StepHead)
     assert {'open', 'close'} <= cas_graft.states(cas)['head'], cas_graft.states(cas)
-    assert top['edf41_hector_anim'] == [[0.0, [], [], [], []]] * 2, top['edf41_hector_anim']
+    # the weapons: both arms the 301 cannon's object, preloaded with the Hector; no weapon animation on 301's guns
+    gun = m.app_path(m.weapon_rel(cannon, 'SGO'))
+    assert top[m.HECTOR_WEAPONS_KEY] == {'sgo': [gun, gun], 'shield': []}, top[m.HECTOR_WEAPONS_KEY]
+    assert top['resource'] == [gun, m.app_path(m.weapon_rel(cannon, 'MRAB')), m.app_path(m.HECTOR_WEAPON_CAS),
+                               'app:/object/Ragdoll_Hector301Cannon.shkt'], top['resource']
+    assert 'edf41_hector_anim' not in top and 'edf41_hector_shield' not in top
+    weapon = sgo.load(data=files[m.weapon_rel(cannon, 'SGO')])
+    assert weapon['xgs_scene_object_class'] == m.HECTOR_WEAPON_CLASS and m.HECTOR_WEAPON_ANIM_KEY not in weapon
+    # its glow (looped, 480 frames) and death (180) blocks on its own material, with the template's load kinds
+    assert [struct.unpack_from('<if', b, 0) for b, _k in weapon['material_animation']] == [(1, 480.0), (0, 180.0)]
+    assert [k for _b, k in weapon['material_animation']] == list(m.HECTOR_WEAPON_KINDS) == [0, 2]
 
 
 @test
@@ -14661,11 +14674,12 @@ def edf41_hector_gait() -> None:
 
 @test
 def edf41_hector_weapon_anim() -> None:
-    """tools/make_edf41_objects.py hector_anim on HECTOR401LS (launcher / shield) and HECTOR401GG (two gatlings), built from
-    the games: each 401 weapon's own CAS clips (4.1 plays them from the weapon's state machine; the class has nothing for
-    them) come in the SGO key edf41_hector_anim for the plugin, on the merged model's bones: the launcher's open / close
-    (its open clip ends on the model's bind pose, the rotation convention of src/hector_ai.h PoseMatrix, checked by the
-    generator and again here), the gatling's barrel roll (one turn a loop), nothing for the shield."""
+    """tools/make_edf41_objects.py weapon_anim on HECTOR401LS (launcher / shield) and HECTOR401GG (two gatlings), built
+    from the games: each 401 weapon's own CAS clips (4.1 plays them from the weapon's state machine; the class has nothing
+    for them) come in the weapon object's SGO key edf41_weapon_anim for the plugin, on the weapon model's own bones: the
+    launcher's open / close (its open clip ends on the model's bind pose, the rotation convention of src/hector_ai.h
+    PoseMatrix, checked by the generator and again here), the gatling's barrel roll (one turn a loop), nothing for the
+    shield."""
     import make_edf41_objects as m
     import mdb
     import rootcpk
@@ -14676,11 +14690,12 @@ def edf41_hector_weapon_anim() -> None:
         return
     data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR401LS.SGO', 'HECTOR401GG.SGO'))
     assert not data['skipped'], data['skipped']
-    ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])['edf41_hector_anim']
-    gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])['edf41_hector_anim']
-    kind, names, opened, closed, roll = ls[0]
-    assert kind == 1.0 and names == ['gun_arms_l_gun_bottom_l', 'gun_arms_l_gun_bottom_r', 'gun_arms_l_gun_top'], ls[0]
-    assert roll == [] and ls[1] == [0.0, [], [], [], []], ls[1]
+    launcher, shield, gatling = (m.HECTOR_WEAPONS[('401', x)] for x in 'LSG')
+    ls = sgo.load(data=files[m.weapon_rel(launcher, 'SGO')])[m.HECTOR_WEAPON_ANIM_KEY]
+    assert m.HECTOR_WEAPON_ANIM_KEY not in sgo.load(data=files[m.weapon_rel(shield, 'SGO')])
+    kind, names, opened, closed, roll = ls
+    assert kind == 1.0 and names == ['gun_bottom_l', 'gun_bottom_r', 'gun_top'], ls[:2]
+    assert roll == [], roll
     # the first shot when 4.1's would come: the launcher once open (120 frames), the shield and gatlings at once; no light
     top_ls = sgo.load(data=files['OBJECT/HECTOR401LS.SGO'])
     top_gg = sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])
@@ -14690,8 +14705,8 @@ def edf41_hector_weapon_anim() -> None:
     for clip in (opened, closed):
         frames, step = int(clip[0]), clip[1]
         assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
-    rab = mdb.rab_read(files[m.HECTOR_MODEL])
-    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401ls.mdb').data)
+    rab = mdb.rab_read(files[m.weapon_rel(launcher, 'MRAB')])
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == launcher.mdb.lower()).data)
     local = {md.name_of(b.name): b.local for b in md.bones}
     last = opened[2 + 30 * len(names) * 7:]
     for i, n in enumerate(names):
@@ -14700,66 +14715,27 @@ def edf41_hector_weapon_anim() -> None:
     # the close clip ends where the open one starts (closed)
     first_open, last_close = opened[2:2 + len(names) * 7], closed[2 + 30 * len(names) * 7:]
     assert max(abs(a - b) for a, b in zip(first_open, last_close)) < 1e-3
-    for arm, node in zip(gg, ('arms_l', 'arms_r')):
-        kind, names, opened, closed, roll = arm
-        assert kind == 2.0 and names == [f'gun_{node}_gun_rolling'] and opened == [] and closed == [], arm
-        frames, step = int(roll[0]), roll[1]
-        q0, q1 = roll[2 + 3:2 + 7], roll[2 + (frames - 1) * 7 + 3:2 + frames * 7]
-        assert frames == 8 and abs(abs(q0[3]) - 1.0) < 1e-3 and abs(abs(q1[3]) - 1.0) < 1e-3, (q0, q1)   # a whole turn
+    # both arms the one gatling object
+    assert sgo.load(data=files['OBJECT/HECTOR401GG.SGO'])[m.HECTOR_WEAPONS_KEY]['sgo'] == \
+        [m.app_path(m.weapon_rel(gatling, 'SGO'))] * 2
+    kind, names, opened, closed, roll = sgo.load(data=files[m.weapon_rel(gatling, 'SGO')])[m.HECTOR_WEAPON_ANIM_KEY]
+    assert kind == 2.0 and names == ['gun_rolling'] and opened == [] and closed == [], (kind, names)
+    frames, step = int(roll[0]), roll[1]
+    q0, q1 = roll[2 + 3:2 + 7], roll[2 + (frames - 1) * 7 + 3:2 + frames * 7]
+    assert frames == 8 and abs(abs(q0[3]) - 1.0) < 1e-3 and abs(abs(q1[3]) - 1.0) < 1e-3, (q0, q1)   # a whole turn
 
 
 @test
-def edf41_hector_material_merge() -> None:
-    """tools/make_edf41_objects.py mtab_merge on hand-made MTAB blobs: the merged blob names every part's materials (a
-    part's map renames them), its header sums the channels on the shared timeline, and every material's track, channel
-    and keys resolve to the same bytes as in its source (all offsets below the table are self-relative). Blobs on
-    different timelines are refused. Why: EDF6 binds an entry to the first material of its name (EDF+0x110D570), so the
-    Hector's guns (materials named like the body's) were only lit once they had names and entries of their own."""
-    import struct
-    import make_edf41_objects as m
-
-    def blob(loop: int, length: float, material: str, key: float) -> bytes:
-        b = struct.pack('<ifii', loop, length, 1, 1) + b'MTAB' + struct.pack('<ii', 0x200, 0x1c)
-        b += struct.pack('<iii', 1, 0x5c - 0x1c, 0x28 - 0x1c)            # 0x1c entry: 1 track, its name, its tracks
-        b += struct.pack('<iii', 1, 0x4c - 0x28, 0x34 - 0x28)            # 0x28 track: 1 channel, its name, its channels
-        b += struct.pack('<iiiii', 1, 1, 16, 0, 0x48 - 0x34)             # 0x34 channel: its keys
-        b += struct.pack('<f', key)                                       # 0x48 keys
-        b += b'light0_color\0\0\0\0'                                      # 0x4c track name
-        return b + material.encode('utf-16-le') + bytes(2)                # 0x5c material name
-
-    def resolve(b: bytes, tracks: int) -> tuple[bytes, float]:
-        count, name, chans = struct.unpack_from('<iii', b, tracks)
-        key_at = tracks + chans + struct.unpack_from('<i', b, tracks + chans + 16)[0]
-        return b[tracks + name:b.index(b'\0', tracks + name)], struct.unpack_from('<f', b, key_at)[0]
-
-    body, gun = blob(1, 480.0, 'ufosurface', 0.25), blob(1, 480.0, 'ufosurface', 0.75)
-    assert [(n, c) for n, c, _t in m.mtab_entries(body)] == [('ufosurface', 1)]
-    merged = m.mtab_merge([(body, {}), (gun, {'ufosurface': 'ufosurface.hector401cannon'})])
-    assert merged[:8] == body[:8] and struct.unpack_from('<ii', merged, 8) == (2, 2) and merged[16:20] == b'MTAB'
-    entries = m.mtab_entries(merged)
-    assert [n for n, _c, _t in entries] == ['ufosurface', 'ufosurface.hector401cannon'], entries
-    assert [resolve(merged, t) for _n, _c, t in entries] == [(b'light0_color', 0.25), (b'light0_color', 0.75)]
-    assert all(t % 4 == 0 for _n, _c, t in entries) and len(merged) % 4 == 0
-    for other in (blob(0, 480.0, 'ufosurface', 0.0), blob(1, 180.0, 'ufosurface', 0.0)):
-        try:
-            m.mtab_merge([(body, {}), (other, {})])
-        except ValueError:
-            continue
-        raise AssertionError('blobs on different timelines were merged')
-    assert m.BERSERKER_DEATH_SLOT == 3
-    import inspect
-    src_alias = inspect.getsource(m.alias_dsgo)
-    assert 'hector_materials(' in src_alias and 'BERSERKER_DEATH_SLOT' in src_alias
-
-
-@test
-def edf41_hector_shield() -> None:
-    """The Hector's shield is 4.1's object again (docs/feedback-2026-11-08-edf41-hector-shield.md): every generated variant
-    holding a shield (edf41port/objects, read back) names the shield SGO in edf41_hector_shield with exactly its shield arms,
-    the others have no such key; the shield SGO is the plugin's class Hector401_Shield on a meshless model whose bones
-    hold every body of 4.1's shield ragdoll (both shipped), with a CAS whose main player has `default` (EventAnimationObject's
-    constructor plays it); the body model has the arm bones the plugin places the shield on. The plugin registers that class,
-    reads that key, refuses every hit on the shield, puts its bodies on the Hector's layer and never starts a shield arm."""
+def edf41_hector_weapons() -> None:
+    """The Hector's weapons are objects of their own, stored apart from the body (the user, 2026-11-21; docs/edf41-hector-
+    split-models.md): every generated variant (edf41port/objects, read back) names its two arms' weapon SGOs in
+    edf41_hector_weapons with exactly its shield arms, and preloads every file of them (`resource`); the body archive holds
+    4.1's two bodies and no weapon. Each weapon SGO is the plugin's class (Hector401_Shield for the shield, Hector41_Weapon
+    for the rest) on its own archive (4.1's weapon model with its textures, nothing else), the still CAS whose main player
+    has `default` (EventAnimationObject's constructor plays it), 4.1's own weapon ragdoll (every body on a bone of the
+    model; the shield's exactly HECTOR_SHIELD_BODIES) and its own material animation (glow kind 0, death kind 2, each name
+    on exactly one of its materials). The plugin registers both classes, reads that key, refuses every hit on a weapon,
+    puts a live shield's bodies on the Hector's layer, switches the other ragdolls off and never starts a shield arm."""
     import cas_graft
     import dsgo
     import edf41_objects
@@ -14769,44 +14745,67 @@ def edf41_hector_shield() -> None:
     import sgo
     base = os.path.join(ROOT, 'edf41port', 'objects')
     shielded = 0
+    used: set[tuple[str, str]] = set()
     for name, (gen, left, right, _missions) in m.HECTOR_VARIANTS.items():
         with open(os.path.join(base, 'OBJECT', name), 'rb') as f:
-            top = dsgo.parse(f.read()).root
-        want = [float(i) for i, letter in enumerate((left, right)) if m.HECTOR_WEAPONS[(gen, letter)].cls == m.HECTOR_SHIELD_CLASS]
-        if not want:
-            assert m.HECTOR_SHIELD_KEY not in top.names.values(), name
-            continue
-        key = top.get(m.HECTOR_SHIELD_KEY)
-        shielded += 1
-        assert key.get('arms').items == want, (name, key.get('arms').items)
-        assert key.get('sgo') == 'app:/Object/hector401_shield_collision.sgo', name
+            top = sgo.load(data=f.read())
+        ws = [m.HECTOR_WEAPONS[(gen, letter)] for letter in (left, right)]
+        used |= {(gen, left), (gen, right)}
+        want = [float(i) for i, w in enumerate(ws) if w.cls == m.HECTOR_SHIELD_CLASS]
+        shielded += bool(want)
+        key = top[m.HECTOR_WEAPONS_KEY]
+        assert key == {'sgo': [m.app_path(m.weapon_rel(w, 'SGO')) for w in ws], 'shield': want}, (name, key)
+        archive, model = top['animation_model'][0][0]
+        assert (archive.lower(), model) == ('app:/object/hector_body.mrab', f'Hector{gen}.mdb'), (name, archive, model)
+        resource = top['resource']
+        assert len(resource) == len(set(resource)), name
+        for w in ws:
+            assert {m.app_path(m.weapon_rel(w, 'SGO')), m.app_path(m.weapon_rel(w, 'MRAB')),
+                    m.app_path(m.HECTOR_WEAPON_CAS)} <= set(resource), (name, resource)
     assert shielded == 5, shielded   # 401 CS, LS, SC, SG, SS (301 has no shield)
-    shield = sgo.load(data=edf41_objects.read(m.HECTOR_SHIELD_SGO))
-    assert shield['xgs_scene_object_class'] == m.HECTOR_SHIELD_CLASS == 'Hector401_Shield', shield
-    assert set(shield) == {'xgs_scene_object_class', 'animation_model', 'ragdoll', 'game_object_durability'}, sorted(shield)
-    assert shield['game_object_durability'] > 0
-    am = shield['animation_model']
-    assert am[0] == [['app:/Object/hector401_shield.mrab', 'Hector401Shield.mdb']] and am[1] == 'app:/Object/hector401_shield_still.cas', am[:2]
-    rab = mdb.rab_read(edf41_objects.read(m.rel_of(am[0][0][0])))
-    assert [f.name for f in rab.files] == ['Hector401Shield.mdb'], [f.name for f in rab.files]
-    md = mdb.mdb_read(rab.files[0].data)
-    assert not md.materials and not md.textures and all(not ob.meshes for ob in md.objects)   # meshless: the body draws it
-    bones = {md.name_of(b.name) for b in md.bones}
-    bodies = [b.name for b in hk2014.rigid_bodies(hk2014.read(edf41_objects.read(m.rel_of(shield['ragdoll'][0]))))]
-    assert tuple(bodies) == m.HECTOR_SHIELD_BODIES, bodies
-    assert {b.split('.', 1)[1] for b in bodies} <= bones, (bodies, sorted(bones))
-    assert 'default' in cas_graft.states(edf41_objects.read(m.rel_of(am[1])))['main']
-    # the arm bones the plugin puts the shield on, in the shared body model of every variant
+    assert used == set(m.HECTOR_WEAPONS), sorted(set(m.HECTOR_WEAPONS) - used)
     body_rab = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
-    body = next(f for f in body_rab.files if f.name.lower() == 'hector401cs.mdb')
-    names = {mdb.mdb_read(body.data).name_of(b.name) for b in mdb.mdb_read(body.data).bones}
-    assert {'arms_l', 'arms_r', 'gun_arms_r_gun_shield'} <= names, sorted(n for n in names if 'arms' in n)
+    assert sorted(f.name for f in body_rab.files if f.name.lower().endswith('.mdb') and 'fragment' not in f.name.lower()) \
+        == sorted(m.HECTOR_BODIES)
+    for f in body_rab.files:
+        if f.name.lower().endswith('.mdb'):
+            bones = {mdb.mdb_read(f.data).name_of(b.name) for b in mdb.mdb_read(f.data).bones}
+            assert not any(b.startswith('gun_') for b in bones), (f.name, sorted(bones))
+            if 'fragment' not in f.name.lower():
+                assert {'arms_l', 'arms_r'} <= bones, f.name      # the bones the plugin puts the weapons on
+    assert 'default' in cas_graft.states(edf41_objects.read(m.HECTOR_WEAPON_CAS))['main']
+    for w in m.HECTOR_WEAPONS.values():
+        weapon = sgo.load(data=edf41_objects.read(m.weapon_rel(w, 'SGO')))
+        cls = m.HECTOR_SHIELD_CLASS if w.cls == m.HECTOR_SHIELD_CLASS else m.HECTOR_WEAPON_CLASS
+        assert weapon['xgs_scene_object_class'] == cls, (w.sgo, weapon['xgs_scene_object_class'])
+        assert weapon['game_object_durability'] > 0
+        am = weapon['animation_model']
+        assert am[0] == [[m.app_path(m.weapon_rel(w, 'MRAB')), am[0][0][1]]] and am[0][0][1].lower() == w.mdb.lower(), am[0]
+        assert am[1] == m.app_path(m.HECTOR_WEAPON_CAS), am[1]
+        rab = mdb.rab_read(edf41_objects.read(m.weapon_rel(w, 'MRAB')))
+        models = [f.name for f in rab.files if f.name.lower().endswith('.mdb')]
+        assert models == [am[0][0][1]] and mdb.folder_order_ok(rab), (w.sgo, models)
+        md = mdb.mdb_read(next(f for f in rab.files if f.name == models[0]).data)
+        assert md.materials and any(ob.meshes for ob in md.objects), w.sgo     # the weapon draws itself now
+        bones = {md.name_of(b.name) for b in md.bones}
+        bodies = tuple(b.name for b in hk2014.rigid_bodies(hk2014.read(edf41_objects.read(m.rel_of(weapon['ragdoll'][0])))))
+        assert bodies and {b.split('.', 1)[-1] for b in bodies} <= bones, (w.sgo, bodies, sorted(bones))
+        if w.cls == m.HECTOR_SHIELD_CLASS:
+            assert bodies == m.HECTOR_SHIELD_BODIES, bodies
+        mats = [md.name_of(x.name) for x in md.materials]
+        blocks = weapon.get('material_animation', [])
+        assert [k for _b, k in blocks] in ([], [0], [0, 2], [2]), (w.sgo, blocks)
+        if w.cls != 'Hector301_Gatling':        # 4.1 animates nothing on 301's gatling
+            assert [k for _b, k in blocks] == [0, 2], w.sgo
+        for blob, _k in blocks:
+            assert all(mats.count(n) == 1 for n, _c, _t in m.mtab_entries(blob)), (w.sgo, mats)
     code = src('src/edf41ai.cpp')
-    assert 'AddFactory(L"Hector401_Shield",&CreateShield)' in code
-    assert 'L"edf41_hector_shield"' in code and 'L"arms"' in code and 'L"sgo"' in code
-    assert 'bool __fastcall ShieldAccept(void*,void*) { return false; }' in code
-    assert 'SetSlot(shieldClone,kShieldAccept,' in code and 'AllowAnyTeam(shieldClone)' in code
+    assert 'AddFactory(L"Hector41_Weapon",&CreateWeapon) && edf41c::AddFactory(L"Hector401_Shield",&CreateShield)' in code
+    assert 'L"edf41_hector_weapons"' in code and 'L"shield"' in code and 'L"sgo"' in code and 'L"edf41_weapon_anim"' in code
+    assert 'bool __fastcall WeaponAccept(void*,void*) { return false; }' in code
+    assert 'SetSlot(weaponClone,kWeaponAccept,' in code and 'AllowAnyTeam(weaponClone)' in code
     assert 'SetRagdollLayer(obj+edf41c::kEaoRagdoll,to)' in code and 'kHectorRagdollAt=0xD80' in code
+    assert 'DisableRagdoll(obj+edf41c::kEaoRagdoll)' in code
     assert 'if(index>=0 && (e->shieldMask&(1u<<index)))return;' in code   # a shield arm never fires
 
 
@@ -14854,7 +14853,7 @@ def edf41_hector_guns() -> None:
         assert key.get('ranges').items == [reach[(gen, left)], reach[(gen, right)]], name
         assert key.get('same_weapon') == (1.0 if left == right else 0.0), name
         assert key.get('ai').items == [720.0, 1440.0, 540.0, 720.0, 150.0, 20.0, 80.0], name
-        assert top.get('resource').items == [], name               # the weapon objects are not loaded
+        assert top.get('resource').items, name                     # the weapon objects, preloaded (edf41_hector_weapons)
         for entry, letter in zip(entries, (left, right)):
             w = m.HECTOR_WEAPONS[(gen, letter)]
             battery = entry.get('gun_battery')
@@ -14880,19 +14879,22 @@ def edf41_hector_guns() -> None:
                 assert bullet.get('explosion_radius') == w.radius[0] and bullet.get('custom_parameter').items[3] == 0.0
             if w.bullet == 'plasma':
                 assert bullet.get('gravity_factor') == 0.0 and isinstance(bullet.get('explosion_radius'), dsgo.Blob)
-    # 401's weapons are skinned: their bones come over with blend indices that stay inside the bone table
-    for name in ('HECTOR401CS.SGO', 'HECTOR401LG.SGO'):
-        import edf41_objects
-        archive = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
-        body = next(x for x in archive.files if x.name.lower() == m.shared_member(name).lower())
-        md = mdb.mdb_read(body.data)
+    # 401's weapons are skinned: each in its own archive, its blend indices inside its own bone table
+    import edf41_objects
+    for letter in 'CGLS':
+        w = m.HECTOR_WEAPONS[('401', letter)]
+        archive = mdb.rab_read(edf41_objects.read(m.weapon_rel(w, 'MRAB')))
+        md = mdb.mdb_read(next(x for x in archive.files if x.name.lower() == w.mdb.lower()).data)
         names = {md.name_of(b.name) for b in md.bones}
-        assert {'gun_arms_l_gun_arms', 'gun_arms_r_gun_arms'} <= names, name
+        assert 'gun_arms' in names, (w.sgo, sorted(names))
+        skinned = False
         for ob in md.objects:
             for me in ob.meshes:
                 for e in (x for x in me.elems if x.name.lower() == 'blendindices'):
+                    skinned = True
                     top_index = max(me.vdata[k * me.vsize + e.offset + j] for k in range(me.nverts) for j in range(4))
-                    assert top_index < len(md.bones), name
+                    assert top_index < len(md.bones), w.sgo
+        assert skinned, w.sgo
     edf41 = _edf41_root()
     if not _e5c_have_game() or not edf41:
         print('skip  edf41_hector_guns (table against 4.1): needs EDF6 and EDF4.1 installed')
