@@ -42,6 +42,9 @@ public:
     void Want(const int* indices,int n);
     // One decoded tile, if any is ready (false: none yet). A tile that failed to decode comes back with w == 0.
     bool Take(TilePixels& out);
+    // The select gone: nothing more wanted, the decoded tiles not taken dropped (a tile being decoded now still comes
+    // back ready; the next select takes or drops it).
+    void Cancel();
     // Synchronous read of one tile's JPEG bytes (tests; the decoder thread uses the same).
     bool Read(int index,std::vector<std::uint8_t>& out) const;
 

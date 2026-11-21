@@ -313,12 +313,17 @@ bool InFront() noexcept {
 bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
 
 std::atomic<int> wheel{0};            // WM_MOUSEWHEEL's delta since the UI thread last took it
-std::atomic<bool> wheelToMap{false};  // the select taken over and the pointer over the map (not its windows)
+// Until when (GetTickCount64) the wheel is the map's: the select taken over and the pointer over the map (not its
+// windows), as its last frame saw it. A deadline, not a flag: a select whose frames stop (hidden under another menu,
+// gone) gives the wheel back by itself.
+std::atomic<unsigned long long> wheelToMapUntil{0};
+constexpr unsigned long long kWheelHoldMs=250;
+bool WheelToMap() noexcept { return GetTickCount64()<wheelToMapUntil.load(std::memory_order_relaxed); }
 HWND subclassed=nullptr;
 WNDPROC prevProc=nullptr;
 bool unicodeProc=true;
 LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
-    if(msg==WM_MOUSEWHEEL && wheelToMap.load(std::memory_order_relaxed)) {
+    if(msg==WM_MOUSEWHEEL && WheelToMap()) {
         wheel.fetch_add(GET_WHEEL_DELTA_WPARAM(wp),std::memory_order_relaxed);
         return 0;   // the map's zoom, not the hidden list's scroll
     }
@@ -545,11 +550,12 @@ struct Ui {
     int lastCursor=-1,lastPlace=-1;   // the cursor's entry and place the map last followed
     int focusing=-1,focusFrames=0;    // an entry asked of the native focus, frames waited for +0x778 to follow
     bool focusLogged=false;
-    bool confirm=false;               // confirm entry +0x778 after the stock OnUpdate (a second click on its line)
+    int confirm=-1;                   // the entry a second click on its line confirms after the stock OnUpdate (-1: none)
     int panelFirst=0,panelLines=0;    // the panel's lines as last published (the mouse's hit test)
     int panelEntry[kShownLines]{};
 };
 Ui ui;
+std::atomic<unsigned> selectGeneration{0};   // bumped by each select's destructor (GoneHook)
 std::atomic<unsigned char*> gone{nullptr};   // the select whose destructor ran (set there, taken by the next frame)
 constexpr float kOpeningSeconds=1.0f,kFollowSeconds=0.5f;
 
@@ -671,7 +677,7 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     ReadPointer(s);
     const bool overMap=ui.pointerShown && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
     const bool overPanel=ui.pointerShown && OverPanel(ui.pointer);
-    wheelToMap.store(input && front && overMap,std::memory_order_relaxed);
+    wheelToMapUntil.store(input && front && overMap ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
     const int notches=wheel.exchange(0);
     XINPUT_STATE pad{};
     const bool havePad=(front || edf::PadSource()) && PadState(&pad);
@@ -691,7 +697,7 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
             const int line=PanelLineAt(ui.pointer,ui.panelLines);
             if(line>=0) {
                 const int entry=ui.panelEntry[line];
-                if(entry==cursor)ui.confirm=Confirmable(self);
+                if(entry==cursor)ui.confirm=Confirmable(self) ? entry : -1;
                 else Choose(self,entry,"a panel line clicked");
             }
             used=true;
@@ -716,7 +722,7 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     // that may be chosen. The stock OnUpdate still gets the input (up / down / confirm in the same frame are its).
     const unsigned repeat=RepeatMask(ctx);
     const int dir=(repeat&kLeftBit) ? -1 : (repeat&kRightBit) ? 1 : 0;
-    if(dir!=0 && rows.pinCount>0) {
+    if(dir!=0 && rows.pinCount>0 && ui.confirm<0) {   // (a confirm this frame: no other choice)
         // Over the pins as drawn: a group is one stop (chosen, it opens up).
         Layout l;
         LayOut(ui.moving ? ui.to : ui.view,s,l);
@@ -843,12 +849,19 @@ void AfterStock(unsigned char* self) noexcept {
             ui.focusing=-1;
         }
     }
-    if(ui.confirm) {
-        ui.confirm=false;
+    if(ui.confirm>=0) {
+        const int want=ui.confirm;
+        ui.confirm=-1;
         const int cursor=CursorIndex(self);
-        Log("WORLDMAP select %p: confirm entry %d (row %d) by a click",static_cast<void*>(self),cursor,
-            cursor>=0 && cursor<rows.n ? rows.row[cursor] : -1);
-        Confirm(self);
+        if(cursor!=want) {
+            // The stock OnUpdate moved the cursor off the clicked line: the line clicked is not what would start.
+            Log("WORLDMAP select %p: a click confirmed entry %d but the cursor is on %d: not confirmed",
+                static_cast<void*>(self),want,cursor);
+        } else {
+            Log("WORLDMAP select %p: confirm entry %d (row %d) by a click",static_cast<void*>(self),cursor,
+                cursor>=0 && cursor<rows.n ? rows.row[cursor] : -1);
+            Confirm(self);
+        }
     }
 }
 
@@ -1240,14 +1253,16 @@ bool Translation(unsigned char* self,float* x,float* y) noexcept {
     return true;
 }
 // Render thread: the translation last seen, frames it has stayed, the select it is of.
-struct Slide { unsigned char* self=nullptr; float x=0.f,y=0.f; int still=0; bool logged=false; };
+// (A select is told apart by its generation too: the next one may be allocated where the last was.)
+struct Slide { unsigned char* self=nullptr; unsigned generation=0; float x=0.f,y=0.f; int still=0; bool logged=false; };
 Slide slide;
 // The select's windows are still (no slide): only then the empty frame is covered and the panel drawn (they would
 // not move with the windows; while the windows slide in or out, 0.3 s, the stock frame shows as it is).
 bool Still(unsigned char* self) noexcept {
     float x=0.f,y=0.f;
     if(!Translation(self,&x,&y))return true;
-    if(slide.self!=self){slide=Slide{};slide.self=self;slide.x=x;slide.y=y;Log("WORLDMAP select %p: transform translation (%.1f, %.1f) at its first draw",static_cast<void*>(self),static_cast<double>(x),static_cast<double>(y));return false;}
+    const unsigned generation=selectGeneration.load();
+    if(slide.self!=self || slide.generation!=generation){slide=Slide{};slide.self=self;slide.generation=generation;slide.x=x;slide.y=y;Log("WORLDMAP select %p: transform translation (%.1f, %.1f) at its first draw",static_cast<void*>(self),static_cast<double>(x),static_cast<double>(y));return false;}
     const bool same=std::fabs(x-slide.x)<0.01f && std::fabs(y-slide.y)<0.01f;
     slide.x=x;slide.y=y;
     slide.still=same ? slide.still+1 : 0;
@@ -1279,7 +1294,9 @@ void* __fastcall GoneHook(unsigned char* self,unsigned flags) {
         ReleaseSRWLockExclusive(&shotLock);
         if(ours || ui.self==self) {
             gone.store(self);
-            wheelToMap.store(false);
+            wheelToMapUntil.store(0);
+            selectGeneration.fetch_add(1);
+            if(store)store->Cancel();   // the queued and decoded tiles not taken (up to the whole wanted set)
             std::lock_guard<std::mutex> hold(gpuLock);
             if(renderer)renderer->Reset();   // every texture and device object (made again by the next select)
             if(labels)labels->Reset();

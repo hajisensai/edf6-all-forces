@@ -126,3 +126,9 @@ EDF.dll TimeDateStamp `0x678CCB46`，RVA。证据为本机 EDF.dll 静态反汇�
 3. 原生按钮的说明框在房间与 HQ 都显示快捷键（10-19 已实现的部分，本次只是去掉了叠字的那一行）。
 4. 玩家召唤：运输机初始化时请求者确实是召唤玩家的士兵对象（离线探针 2026-10-10 已抓到过，`docs/airdrop-vehicle-re.md` §2.1）；挂载版 SGO（以请求机为底）被集装箱生成后玩家能正常上机、挂载能用；联机双机：各端同一架飞机、`have` / `decide` 时序、加入中的机器。
 5. 旧安装（没有 `EDF6VC_LOADOUTBOX.SGO`）回到原版说明对话框。
+
+## 2026-11-21 联机时客机的配置也生效
+
+房间里保存的配置从「只有房主的生效」改为「每个成员的用于他自己呼叫的支援」，见
+[feature-2026-10-12-room-loadout-menu.md](feature-2026-10-12-room-loadout-menu.md) 末节与
+[feedback-2026-11-21-worldmap-room.md](feedback-2026-11-21-worldmap-room.md)。

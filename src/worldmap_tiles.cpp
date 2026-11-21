@@ -140,6 +140,13 @@ bool TileStore::Take(TilePixels& out) {
     return true;
 }
 
+void TileStore::Cancel() {
+    std::lock_guard<std::mutex> hold(lock_);
+    queue_.clear();
+    for(const TilePixels& t:ready_)busy_.erase(std::remove(busy_.begin(),busy_.end(),t.index),busy_.end());
+    ready_.clear();
+}
+
 bool TileStore::Read(int index,std::vector<std::uint8_t>& out) const {
     if(!file_ || index<0 || index>=Count())return false;
     const Entry& e=entries_[static_cast<std::size_t>(index)];

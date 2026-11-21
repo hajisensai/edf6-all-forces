@@ -75,6 +75,28 @@ int wmain(int argc,wchar_t** argv) {
     bool hasBase=false,hasCol=false;
     for(int i:got){hasBase=hasBase || i==base;hasCol=hasCol || i==base+cols;}
     Expect(hasBase && hasCol,"wanted tiles decoded on the worker");
+
+    // Cancel (the select gone): what was queued or decoded and not taken is dropped (at most the one being decoded
+    // comes back), and nothing stays marked busy: the same tiles wanted again all come back.
+    {
+        TilePixels t;
+        while(store.Take(t)) {}
+        const int many[6]={base,base+1,base+2,base+cols,base+cols+1,base+cols+2};
+        store.Want(many,6);
+        store.Cancel();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        int after=0;
+        while(store.Take(t))++after;
+        Expect(after<=1,"cancelled: at most the tile being decoded comes back");
+        store.Want(many,6);
+        int again=0;
+        const auto by=std::chrono::steady_clock::now()+std::chrono::seconds(20);
+        while(std::chrono::steady_clock::now()<by && again<6) {
+            if(store.Take(t))++again;
+            else std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        Expect(again==6,"after a cancel the same tiles wanted again all come back");
+    }
     store.Close();
     Expect(!store.IsOpen(),"closed");
 
