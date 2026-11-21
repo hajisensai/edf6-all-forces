@@ -13,8 +13,8 @@
 namespace {
 
 // bc7.py's constants (POWER, UNIT, REFITS, GOOD, CANDIDATES, SOLID_REACH, WEIGHTS, P2, A2)
-constexpr int64_t POWER = 4, UNIT = 1024, REFITS = 2, GOOD = 16;
-constexpr int CANDIDATES = 2, SOLID_REACH = 2;
+constexpr int64_t POWER = 4, UNIT = 1024, REFITS = 2, GOOD = 32;
+constexpr int CANDIDATES = 1, SOLID_REACH = 2;
 constexpr int W2[4] = {0, 21, 43, 64};
 constexpr int W3[8] = {0, 9, 18, 27, 37, 46, 55, 64};
 constexpr int W4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};

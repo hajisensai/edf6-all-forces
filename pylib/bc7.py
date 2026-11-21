@@ -61,8 +61,10 @@ MODES = ((3, 4, 0, 0, 4, 0, 1, 0, 3, 0), (2, 6, 0, 0, 6, 0, 0, 1, 3, 0), (3, 6, 
 POWER = 4
 UNIT = 1024
 REFITS = 2
-GOOD = 16            # mode 6 within this (a mean squared error of 1/3 per channel) skips the two-subset search
-CANDIDATES = 2
+# mode 6 within GOOD (a mean squared error of 2/3 per channel) skips the two-subset search; below 48, the error of a
+# flat block mode 6 misses by one step everywhere (black: its codes are all odd), which mode 1 / 3 hit
+GOOD = 32
+CANDIDATES = 1
 SOLID_REACH = 2       # a one-colour subset tries codes this far either side of the nearest
 
 
