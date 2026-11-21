@@ -326,6 +326,103 @@ void Timing() {
     Combo z;Check(Begin(z,Act::dash,both,0)==0,"frame 0 is pressable");
 }
 
+// A walk dash that went nowhere (2026-11-21 r2b: a Wing Diver by a parked helicopter, a goal dash every few seconds, each
+// taken, none carrying her anywhere, the map ray clear=19 each time): the carry measured, the hold, its doubling, its end.
+void WingCarry() {
+    const float at[3]={-304.0f,1.0f,127.0f},west[3]={-1.0f,0.0f,0.0f},east[3]={1.0f,0.0f,0.0f},south[3]={0.0f,0.0f,-1.0f};
+    const float northWest[3]={-0.7071f,0.0f,0.7071f};
+    Carry c;Held h;
+    // When it is measured: the dash state seen and ended, or kCarryWaitMs after the press.
+    CarryStart(c,at,west,1000);
+    Check(!CarryDue(c,false,1001),"before the state shows: not yet");
+    Check(!CarryDue(c,true,1100),"in the dash state: not yet");
+    Check(CarryDue(c,false,1400),"the state ended: measure");
+    CarryStart(c,at,west,1000);
+    Check(!CarryDue(c,false,1000+kCarryWaitMs-1) && CarryDue(c,false,1000+kCarryWaitMs),"never seen: measured after the wait");
+    Carry idle;Check(!CarryDue(idle,false,100000),"nothing watched: nothing due");
+    // Blocked: under a quarter of the ~18 m estimate; a dash that carries clears the row.
+    Check(CarryBlocked(0.4f,kWingCarry) && CarryBlocked(4.0f,kWingCarry) && !CarryBlocked(kCarryShare*kWingCarry,kWingCarry) &&
+          !CarryBlocked(16.0f,kWingCarry),"under kCarryShare of the carry: blocked");
+    Check(CarryBlocked(std::nanf(""),kWingCarry) && !CarryBlocked(0.0f,0.0f),"not finite: blocked; no estimate: never");
+    CarryStart(c,at,west,1000);
+    Check(CarryEnd(c,h,0.6f,kWingCarry,2000) && !c.on && h.streak==1 && h.untilMs==2000+kHeldFirstMs,"0.6 m of 18: blocked, held 4 s");
+    // Held: from here, that way and within 90 deg of it; not across the other way, not from 5 m off, not once it ends.
+    Check(DashHeld(h,at,west,2500),"the same way from the same spot: held");
+    Check(DashHeld(h,at,northWest,2500),"45 deg off it (the route round swings): held");
+    Check(!DashHeld(h,at,east,2500) && DashHeld(h,at,south,2500),"the other way: free; 90 deg: held (the cone's edge)");
+    const float close[3]={at[0]+3.0f,at[1],at[2]+3.0f},moved[3]={at[0],at[1],at[2]+kHeldLeave};
+    Check(DashHeld(h,close,west,2500),"4.2 m off: still the spot");
+    Check(!DashHeld(h,moved,west,2500),"5 m off: the position changed, free again");
+    Check(!DashHeld(h,at,west,2000+kHeldFirstMs),"the hold over: free again");
+    // In the walk's reasons: blocked here, never an evade.
+    WingGoal g{false,Need::order,false,false,false,115.0f,30.0f,-1.0f,kWingClear};
+    g.held=DashHeld(h,at,west,2500);
+    Check(WingDecide(g,25.0f).block==Block::heldHere && std::string(BlockName(Block::heldHere))=="blocked here","held: no goal dash");
+    g.need=Need::keepUp;Check(WingDecide(g,25.0f).block==Block::heldHere,"held: no follow dash");
+    g.pressed=true;Check(WingDecide(g,25.0f).why==Why::evade,"held: a crowd's dash out still goes");
+    // In a row: the hold doubles, capped (never off for good); the walk's rest scales with the row; a carry clears both.
+    Check(HeldRestScale(Held{})==1.0f,"none blocked: the plain rest");
+    std::uint64_t last=0;
+    for(int k=2;k<=8;++k) {
+        const std::uint64_t t=10000ull*static_cast<std::uint64_t>(k);
+        CarryStart(c,at,west,t);
+        CarryEnd(c,h,0.0f,kWingCarry,t);
+        const std::uint64_t held=h.untilMs-t;
+        Check(h.streak==k && held==HeldMs(k) && held>=last && held<=kHeldMostMs,"blocked again: the hold doubles, capped",double(k),double(held));
+        last=held;
+    }
+    Check(HeldMs(1)==4000 && HeldMs(2)==8000 && HeldMs(3)==16000 && HeldMs(5)==64000 && HeldMs(50)==kHeldMostMs,"4, 8, 16 .. 64 s");
+    Check(HeldRestScale(h)==16.0f,"the walk's rest at most 16 x NpcWingDashSec");
+    Check(!DashHeld(h,at,west,80000+kHeldMostMs),"even the longest hold ends");
+    CarryStart(c,at,west,200000);
+    Check(!CarryEnd(c,h,17.0f,kWingCarry,201000) && h.streak==0 && !DashHeld(h,at,west,201001) && HeldRestScale(h)==1.0f,
+          "a dash that carries: the row cleared, free");
+    // Not a miss: the misses' count is the presses not taken (CountMiss), untouched here.
+    int misses=2;CountMiss(misses,Outcome::pending);Check(misses==2,"a blocked carry is no miss");
+}
+// The vehicles along the dash's line, which the map ray does not see: VehicleAlong over a stand-in object layer (bodies
+// as circles over the ground: a soldier's, the dasher's own, a parked helicopter's).
+struct Body { float x,z,r; std::uint32_t id; };
+float RayBodies(const Body* bodies,int n,const float* a,const float* b,float* hit,std::uint32_t* id) {
+    const float dx=b[0]-a[0],dz=b[2]-a[2],len=std::sqrt(dx*dx+dz*dz);
+    float best=-1.0f;
+    for(int i=0;i<n;++i) {
+        // Entry of a-b into the circle (a inside: no hit, as a ray from inside a body finds no face).
+        const float fx=a[0]-bodies[i].x,fz=a[2]-bodies[i].z,ux=dx/len,uz=dz/len;
+        const float bq=fx*ux+fz*uz,cq=fx*fx+fz*fz-bodies[i].r*bodies[i].r,disc=bq*bq-cq;
+        if(cq<=0.0f || disc<0.0f)continue;
+        const float t=-bq-std::sqrt(disc);
+        if(t<0.0f || t>len || (best>=0.0f && t>=best))continue;
+        best=t;*id=bodies[i].id;
+        hit[0]=a[0]+ux*t;hit[1]=a[1];hit[2]=a[2]+uz*t;
+    }
+    return best;
+}
+void WingVehicles() {
+    const float from[3]={0.0f,1.0f,0.0f},east[3]={1.0f,0.0f,0.0f},north[3]={0.0f,0.0f,1.0f};
+    const auto vehicle=[](std::uint32_t id) noexcept { return id>=100; };
+    const auto along=[&](const Body* b,int n,const float* dir,float most,int hits) {
+        return VehicleAlong(from,dir,most,hits,
+                            [b,n](const float* a,const float* to,float* hit,std::uint32_t* id) noexcept { return RayBodies(b,n,a,to,hit,id); },vehicle);
+    };
+    const Body heli[]={{7.0f,0.0f,3.0f,100}};
+    const float clear=along(heli,1,east,kWingClear+1.0f,4);
+    Check(std::fabs(clear-4.0f)<1e-3f,"a parked helicopter 7 m ahead (3 m round): 4 m free",clear);
+    WingGoal g{false,Need::order,false,false,false,115.0f,30.0f,-1.0f,clear};
+    Check(WingDecide(g,25.0f).block==Block::wall,"a vehicle on the dash's line: wall ahead");
+    Check(along(heli,1,north,kWingClear+1.0f,4)==kWingClear+1.0f,"beside the line: free all the way");
+    const Body beyond[]={{30.0f,0.0f,3.0f,100}};
+    Check(along(beyond,1,east,kWingClear+1.0f,4)==kWingClear+1.0f,"past the dash's reach: free");
+    // A soldier (not a vehicle) first on the line: passed, the vehicle behind it still found.
+    const Body crowd[]={{3.0f,0.0f,0.8f,1},{12.0f,0.0f,4.0f,101}};
+    Check(std::fabs(along(crowd,2,east,kWingClear+1.0f,4)-8.0f)<1e-3f,"a soldier passed, the truck behind it 8 m");
+    Check(along(crowd,2,east,kWingClear+1.0f,1)==kWingClear+1.0f,"no hits left past the soldier: as far as looked");
+    const Body friendOnly[]={{5.0f,0.0f,0.8f,2}};
+    Check(along(friendOnly,1,east,kWingClear+1.0f,4)==kWingClear+1.0f,"only a soldier ahead: no wall (it steps aside)");
+    // The map's wall nearer than the vehicle: the nearer one stands (ClearAhead hands VehicleAlong the map's as `most`).
+    Check(along(crowd,2,east,6.0f,4)==6.0f,"the map's wall at 6 m before the truck: 6 m");
+    Check(along(heli,1,east,0.0f,4)==0.0f,"nothing looked for: nothing free");
+}
 void Misses() {
     int n=0;
     bool off=false;
@@ -345,6 +442,8 @@ int main() {
     WingBudgets();
     WingRuns();
     WingReasons();
+    WingCarry();
+    WingVehicles();
     FencerHands();
     FencerChoices();
     Timing();

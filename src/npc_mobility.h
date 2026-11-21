@@ -128,9 +128,10 @@ inline const char* NeedName(Need n) noexcept {
     return "keep-up";
 }
 // Why a long walk was not dashed (the log's `because=`): none dashed it.
-enum class Block : std::uint8_t { none, tooNear, turn, wall, enemyAhead, firing, paced };
+enum class Block : std::uint8_t { none, tooNear, turn, wall, enemyAhead, firing, paced, heldHere };
 inline const char* BlockName(Block b) noexcept {
     switch(b) {
+    case Block::heldHere: return "blocked here";
     case Block::tooNear: return "near";
     case Block::turn: return "route turns";
     case Block::wall: return "wall ahead";
@@ -146,8 +147,9 @@ inline const char* BlockName(Block b) noexcept {
 // top's share of a full walk, which a full-stick dash would break out of); `firing` a trigger pulled this frame (a ready weapon's shot going out: between two shots of a single-shot,
 // charging or reloading weapon it is not); `threat` an enemy within twice the danger reach, `threatDot` the cosine between
 // the dash and the way to it; `left` m it still has to walk (to the goal less where its walk stops); `run` m the route
-// goes straight ahead (StraightRun); `clear` m free along the run at the waist.
-struct WingGoal { bool pressed; Need need; bool paced,firing,threat; float left,run,threatDot,clear; };
+// goes straight ahead (StraightRun); `clear` m free along the run at the waist (map and vehicles); `held` a dash from
+// here that way went nowhere a while ago (DashHeld below).
+struct WingGoal { bool pressed; Need need; bool paced,firing,threat; float left,run,threatDot,clear; bool held=false; };
 // m the dash carries: a static estimate (~17 m, docs/npc-mobility-re.md §3, L: the travel is not measured and scales
 // with SGO 0xC8 per energy core), a metre over. The full-stick dash goes this far along the run whatever the route does
 // after it, so both the straight run and the free way ahead are at least this: a shorter run turns (round what is in
@@ -164,8 +166,8 @@ struct WingVerdict { Why why; Block block; };
 // WingFar left, not a paced march's, along a route straight for kWingRun m and clear kWingClear m, not towards the
 // nearest enemy (unless the player ordered the walk: a falling back is not exempt), and not while a shot goes out unless
 // the walk outranks the shot: a falling back or an order, or a fight's walk past twice `range` (it is far out of place;
-// one frame's shot gives way, the aim is kept through the dash: §2, +0x5D0 bit 1 clear). Never a walk within WingFar
-// (its fixed launch overshoots it).
+// one frame's shot gives way, the aim is kept through the dash: §2, +0x5D0 bit 1 clear), and not where a dash that way
+// went nowhere a while ago (`held`: the hold below). Never a walk within WingFar (its fixed launch overshoots it).
 inline WingVerdict WingDecide(const WingGoal& g,float range) noexcept {
     if(g.pressed)return {Why::evade,Block::none};
     if(!(range>0.0f) || !std::isfinite(g.left) || g.left<=WingFar(g.need,range))return {Why::none,Block::tooNear};
@@ -175,7 +177,90 @@ inline WingVerdict WingDecide(const WingGoal& g,float range) noexcept {
     if(!(g.run>=kWingRun))return {Why::none,Block::turn};
     if(!(g.clear>=kWingClear))return {Why::none,Block::wall};
     if(g.need!=Need::order && g.threat && g.threatDot>=0.5f)return {Why::none,Block::enemyAhead};
+    if(g.held)return {Why::none,Block::heldHere};
     return {g.need==Need::keepUp ? Why::follow : Why::goal,Block::none};
+}
+
+// --- A walk's dash that went nowhere ---
+// 2026-11-21 (r2b): a Wing Diver ordered on stood ~70 s at one spot by a parked helicopter, a goal dash pressed every few
+// seconds (each taken: +0x5D0 0xE39, so never a miss) and each going nowhere, the map ray seeing nothing ahead (layer 22
+// has no vehicles). What the press does is not what the dash does: the carry is measured. The press's spot is kept and
+// the way it went; when the dash state ends (+0x5D0 no longer 0xE39) or kCarryWaitMs after the press, whichever first,
+// the horizontal metres from that spot are its carry. Under kCarryShare of the dash's estimate (kWingCarry) it was
+// blocked: the walk's dashes (goal / follow; a crowd's evade is not held) within kHeldCone of that way wait until the
+// soldier is kHeldLeave m from the spot or the hold ends. The hold doubles with each blocked dash in a row (kHeldFirstMs ..
+// kHeldMostMs: never off for good), a dash that carries clears the row; the walk's dashes in any way rest NpcWingDashSec
+// times HeldRestScale of the row. Not a miss (CountMiss: those are presses not taken).
+constexpr std::uint64_t kCarryWaitMs=1500;   // the dash measured at the latest this long after its press
+constexpr float kCarryShare=0.25f;           // under this share of the estimate: blocked (~4.5 m of 18)
+constexpr std::uint64_t kHeldFirstMs=4000,kHeldMostMs=64000;
+constexpr float kHeldLeave=5.0f;             // m from the blocked press's spot: the hold is lifted
+constexpr float kHeldCone=0.0f;              // cosine: within 90 deg of the blocked way (the route round it swings wide)
+constexpr int kHeldRestMost=4;               // the rest's scale at most 2^4
+struct Carry { bool on=false,seen=false; float from[3]{},dir[3]{}; std::uint64_t atMs=0; };
+struct Held { int streak=0; std::uint64_t untilMs=0; float at[3]{},dir[3]{}; };
+// The press taken at `from` along horizontal `dir`: its carry watched.
+inline void CarryStart(Carry& c,const float* from,const float* dir,std::uint64_t ms) noexcept {
+    c.on=true;c.seen=false;c.atMs=ms;
+    for(int i=0;i<3;++i){c.from[i]=from[i];c.dir[i]=dir[i];}
+}
+// The carry is due: the dash state seen and ended, or kCarryWaitMs gone.
+inline bool CarryDue(Carry& c,bool inState,std::uint64_t ms) noexcept {
+    if(!c.on)return false;
+    if(inState)c.seen=true;
+    return (c.seen && !inState) || ms-c.atMs>=kCarryWaitMs;
+}
+inline bool CarryBlocked(float moved,float expected) noexcept {
+    return std::isfinite(expected) && expected>0.0f && !(std::isfinite(moved) && moved>=kCarryShare*expected);
+}
+inline std::uint64_t HeldMs(int streak) noexcept {
+    std::uint64_t t=kHeldFirstMs;
+    for(int i=1;i<streak && t<kHeldMostMs;++i)t*=2;
+    return t<kHeldMostMs ? t : kHeldMostMs;
+}
+// The watched dash measured: `moved` m over the ground of `expected`. True when it was blocked (the hold set).
+inline bool CarryEnd(Carry& c,Held& h,float moved,float expected,std::uint64_t ms) noexcept {
+    c.on=false;
+    if(!CarryBlocked(moved,expected)){h.streak=0;h.untilMs=0;return false;}
+    ++h.streak;h.untilMs=ms+HeldMs(h.streak);
+    for(int i=0;i<3;++i){h.at[i]=c.from[i];h.dir[i]=c.dir[i];}
+    return true;
+}
+// A walk's dash from `pos` along `dir` is held (CarryEnd's hold, still on there and that way).
+inline bool DashHeld(const Held& h,const float* pos,const float* dir,std::uint64_t ms) noexcept {
+    if(!h.streak || ms>=h.untilMs)return false;
+    const float dx=pos[0]-h.at[0],dz=pos[2]-h.at[2];
+    if(!(dx*dx+dz*dz<kHeldLeave*kHeldLeave))return false;   // moved off (or not finite): lifted
+    return dir[0]*h.dir[0]+dir[2]*h.dir[2]>=kHeldCone;
+}
+// The walk's dashes rest `sec` times this: 2^streak (at most 2^kHeldRestMost), 1 with none blocked.
+inline float HeldRestScale(const Held& h) noexcept {
+    const int k=h.streak<kHeldRestMost ? h.streak : kHeldRestMost;
+    return static_cast<float>(1<<(k>0 ? k : 0));
+}
+
+// The first vehicle body along a ray the map ray does not see (layer 22: no units, no vehicles): `ray(a, b, hit, &body)`
+// casts the object layer from a towards b (m to the nearest body hit, < 0 none, its point in `hit`), `vehicle(body)` says
+// whether that body is a vehicle's (parked, driven, nobody's, aircraft included). A body that is not a vehicle's (a
+// soldier, the dasher's own) is passed kBodyPast m and the ray goes on, at most `hits` bodies. The metres from `a` to
+// the first vehicle body, `most` with none within `most` (or past `hits` others).
+constexpr float kBodyPast=0.05f;
+template<class Ray,class IsVehicle>
+inline float VehicleAlong(const float* a,const float* dir,float most,int hits,Ray&& ray,IsVehicle&& vehicle) noexcept {
+    if(!(most>0.0f))return most;
+    const float b[3]={a[0]+dir[0]*most,a[1]+dir[1]*most,a[2]+dir[2]*most};
+    float from[3]={a[0],a[1],a[2]},gone=0.0f;
+    for(int n=0;n<hits;++n) {
+        float at[3]{};std::uint32_t body=0;
+        const float d=ray(from,b,at,&body);
+        if(!(d>=0.0f) || !std::isfinite(at[0]+at[1]+at[2]))return most;
+        const float ex=at[0]-a[0],ey=at[1]-a[1],ez=at[2]-a[2];
+        gone=std::sqrt(ex*ex+ey*ey+ez*ez);
+        if(!(gone<most))return most;
+        if(vehicle(body))return gone;
+        for(int k=0;k<3;++k)from[k]=at[k]+dir[k]*kBodyPast;
+    }
+    return most;
 }
 
 // --- Fencer ---

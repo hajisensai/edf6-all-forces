@@ -189,6 +189,10 @@ struct Soldier {
     bool mobOff;
     ULONGLONG mobAt,mobLogAt,mobWhyAt,mobPosAt;
     float mobPos[3];
+    // The Wing Diver's walk dash watched for its carry, and the hold a dash that went nowhere put on its walk's dashes
+    // (npc_mobility.h CarryEnd / DashHeld; 2026-11-21 r2b: dashed into a parked helicopter over and over).
+    npc::mobility::Carry mobCarry;
+    npc::mobility::Held mobHeld;
 };
 // Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
 std::deque<Soldier> soldiers;
@@ -1226,6 +1230,26 @@ bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {
     }
     return true;
 }
+// Whether an object-layer body is a vehicle's (parked, driven, nobody's; aircraft too: KnownVehicle is every class).
+bool BodyIsVehicle(std::uint32_t body) noexcept {
+    const void* owner=nullptr;
+    __try { owner=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body); } __except(EXCEPTION_EXECUTE_HANDLER){owner=nullptr;}
+    return owner && KnownVehicle(owner);
+}
+// m to the first vehicle body along horizontal `dir` from `pos` at the knees and the chest, `most` with none that near.
+// The map ray the dashes' clear way was read with (layer 22) sees no vehicle: 2026-11-21 r2b, a Wing Diver dashed again
+// and again into the parked helicopter 7 m off her, clear=19 each time (npc_mobility.h VehicleAlong).
+constexpr float kBodyRayUp[]={0.5f,1.4f};
+float VehicleAhead(const float* pos,const float* dir,float most) noexcept {
+    if(!hullOk || !(most>0.0f))return most;
+    float nearest=most;
+    for(const float up:kBodyRayUp) {
+        const float from[3]={pos[0],pos[1]+up,pos[2]};
+        const float d=npc::mobility::VehicleAlong(from,dir,nearest,npc::navigation::kHullHits,ObjectRay,BodyIsVehicle);
+        if(d<nearest)nearest=d;
+    }
+    return nearest;
+}
 // `floor`, `room`: the boarding circle (npc_logic.h BoardRoom), where the route need not go round the vehicle.
 Hull BoardHull(const void* vehicle,const float* floor,float room) noexcept {
     if(!hullOk)return Hull{};
@@ -1556,12 +1580,13 @@ npc::mobility::Need NeedOf(const Soldier& s,const Plan& p) noexcept {
     if(std::strcmp(p.move,"move order")==0 || std::strcmp(p.move,"attack-move")==0)return npc::mobility::Need::order;
     return s.target.obj ? npc::mobility::Need::fight : npc::mobility::Need::keepUp;
 }
-// The m free along horizontal `dir` at the waist, up to `most`.
+// The m free along horizontal `dir`, up to `most`: the map at the waist (terrain, buildings) and the vehicles' bodies
+// (VehicleAhead: the map ray has none of them).
 float ClearAhead(const float* pos,const float* dir,float most) noexcept {
     const float from[3]={pos[0],pos[1]+1.0f,pos[2]},to[3]={from[0]+dir[0]*most,from[1],from[2]+dir[2]*most};
     float hit[3];
     const float wall=MapRay(from,to,hit);
-    return wall<0.0f || !std::isfinite(wall) ? most : wall;
+    return VehicleAhead(pos,dir,wall<0.0f || !std::isfinite(wall) ? most : wall);
 }
 // The nearest enemy within twice the danger reach, and the cosine between `dir` and the way to it.
 bool ThreatAhead(const float* pos,const float* dir,float* dot) noexcept {
@@ -1591,8 +1616,21 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     using namespace npc::mobility;
     const Config& c=Cfg();
     const ULONGLONG frame=GameFrame();
+    const bool dashing=At<std::uint32_t>(h,kActionLimits)==kWingDashLimits;
+    // The last walk dash's carry, once its state ended: one that went nowhere holds the walk's dashes from here that way.
+    if(CarryDue(s.mobCarry,dashing,ms)) {
+        const float moved=npc::Horiz(pos,s.mobCarry.from);
+        const ULONGLONG took=ms-s.mobCarry.atMs;
+        if(took>2*kCarryWaitMs)s.mobCarry.on=false;   // not driven in between (aboard, stock): no carry to judge
+        else if(CarryEnd(s.mobCarry,s.mobHeld,moved,kWingCarry,ms))
+            Log("WDDASH blocked %p moved=%.1f expected=%.0f in %llu ms streak=%d hold=%.0fs at=(%.0f,%.0f,%.0f) dir=(%.2f,%.2f)",h,moved,kWingCarry,took,
+                s.mobHeld.streak,static_cast<double>(HeldMs(s.mobHeld.streak))/1000.0,s.mobHeld.at[0],s.mobHeld.at[1],s.mobHeld.at[2],
+                s.mobHeld.dir[0],s.mobHeld.dir[2]);
+        else if(c.debug)Log("WDDASH carry %p moved=%.1f in %llu ms",h,moved,took);
+    }
     if(Busy(s.mob)) {
-        const Step st=Advance(s.mob,frame,At<std::uint32_t>(h,kActionLimits)==kWingDashLimits,false);
+        const Step st=Advance(s.mob,frame,dashing,false);
+        if(st.outcome==Outcome::missed)s.mobCarry.on=false;   // never dashed: nothing to measure
         if(st.outcome==Outcome::missed && c.debug && ms-s.mobLogAt>=kLogMs) {
             s.mobLogAt=ms;
             Log("WDDASH refused %p: limits 0x%X mask 0x%X state 0x%X overheat %d lock %p air frames %d",h,At<std::uint32_t>(h,kActionLimits),
@@ -1620,9 +1658,12 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
         // Only the plugin's own walk this frame (MoveTo); the stock's moves and a stand are not known here.
         const Way w=WayOf(s,pos);
         if(!w.walking || !DashFree(p))return;
+        // After dashes that went nowhere the walk's dashes rest longer, whichever way (the route round swings each time).
+        if(!Rested(ms-s.mobAt,c.npcWingDashSec*HeldRestScale(s.mobHeld)))return;
         g.left=w.goalDist-w.stop;g.run=w.run;g.paced=w.pace<1.0f;
         if(!(g.left>WingFar(g.need,c.npcWingDashFar)))return;   // a walk too short to dash: nothing to say
         std::memcpy(dir,w.runDir,12);
+        g.held=DashHeld(s.mobHeld,pos,dir,ms);
         // The ray and the nearest enemy only when the rest would let it dash (or a line is due).
         const bool say=c.debug && ms-s.mobWhyAt>=kLogMs;
         WingGoal open=g;open.clear=kWingClear;open.threat=false;
@@ -1648,6 +1689,7 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     Move(h,dir,1.0f);   // a full stick: +0x11E0 past 0.5 (0x583947), else the dash goes straight ahead
     h[kDashPress]=1;
     s.mobAt=ms;
+    if(v.why!=Why::evade)CarryStart(s.mobCarry,pos,dir,ms);   // the walk's dash: how far it carries (a crowd's is not held)
     if(c.debug)Log("WDDASH %p why=%s move=%s need=%s e=%.0f/%.0f C=%.1f left=%.0f run=%.0f clear=%.0f fire=%d air=%d stick=(%.2f,%.2f)",h,
                    WhyName(v.why),p.move,NeedName(g.need),st.energy,st.energyMax,st.cost,g.left,g.run,g.clear,g.firing,st.air,
                    At<float>(h,kMoveX),At<float>(h,kMoveZ));
@@ -2698,7 +2740,7 @@ bool InstallNpcAi() noexcept {
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
     __try { hullOk=Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) && Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)); }
     __except(EXCEPTION_EXECUTE_HANDLER){hullOk=false;}
-    if(!hullOk)Log("NPCAI body->object 0x108260 not as read: a boarding soldier's route does not see its vehicle");
+    if(!hullOk)Log("NPCAI body->object 0x108260 not as read: a boarding soldier's route does not see its vehicle, nor a dash's clear way the vehicles");
     __try { seatEventsOk=Matches(0x632AC6,kSeatSoundSig,sizeof(kSeatSoundSig)) && Matches(0x62F1AA,kSeatScanSig,sizeof(kSeatScanSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){seatEventsOk=false;}
     if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");
