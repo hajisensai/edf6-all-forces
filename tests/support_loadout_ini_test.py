@@ -121,10 +121,11 @@ check([k for k, _, _ in players] == list(sl.PLAYER_VEHICLE_KEYS) and
       all(sl.VEHICLE_KEYS[k].lower() == b and sl.BODIES[sl.VEHICLE_KEYS[k]][0] == twin for k, b, twin in players),
       "kPlayerVehicles == PLAYER_VEHICLE_KEYS: each key's body built on the twin its request makes")
 calls_src = read('tools/calls.py')
-check(all(f"vehicle='{twin[:-4]}'" in calls_src for _, _, twin in players), 'every twin is a vehicle request of tools/calls.py')
+check(all(f"vehicle='{twin[:-4]}'" in calls_src for _, b, twin in players if b != 'mech'),
+      'every jet twin is a vehicle request of tools/calls.py (the mech: the stock requests, pylib/mech_parts.py)')
 check(f'L"{sl.BODIES["TANK"][0]}"' in header and f'L"app:/Object/{sl.BODIES["TANK"][0]}"' in read('src/support_spawn.h'),
       'the loaded tank is made from the support tank')
-check(all(f'L"{base}"' in read('src/jet_internal.h') for name, (base, _, tank) in sl.BODIES.items() if not tank and name not in ('PFIGHTER', 'PSTRIKE', 'RFIGHTER', 'RINTERCEPTOR', 'RMULTIROLE')),
+check(all(f'L"{base}"' in read('src/jet_internal.h') for name, (base, _, tank) in sl.BODIES.items() if not tank and name not in ('PFIGHTER', 'PSTRIKE', 'RFIGHTER', 'RINTERCEPTOR', 'RMULTIROLE', 'MECH')),
       'a loaded jet is made from the plugin\'s jet of that body')
 check('kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62' in header and sl.APPLIED == 1 << 63 and sl.VEHICLE == 1 << 62, 'variant bits')
 check(f'L"Plugins\\\\{sl.PENDING}"' in read('src/support_variants.cpp'), 'the pending list is the one the plugin writes')

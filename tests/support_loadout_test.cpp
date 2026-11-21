@@ -231,6 +231,54 @@ int main() {
         Check(LookOfVariant(LookVariant(clook)|kVariantApplied,&cback) && cback==clook,"a crew seat's clook travels in its own variant");
     }
 
+    // The mech (src/mech_loadout.h, docs/feature-2026-11-21-mech-custom.md): request, frame, four slots, core.
+    {
+        bool mok=false;wchar_t mwhy[200];
+        VehicleLoadout m=Load(L"eweapon378, NIX_RED ,EMLASER,EMLASER,PBEAM,MIRAGE,-",VehicleBody::mech,&mok,mwhy);
+        Check(mok && m.body==VehicleBody::mech && m.count==1 && m.mech.request>=0 && !std::wcscmp(kMechRequests[m.mech.request].token,L"EWEAPON378") &&
+              !std::wcscmp(kMechFrames[m.mech.frame].token,L"NIX_RED") && m.mech.core==-1 && m.mech.weapon[3]>=0,
+              "a mech parses (any case, spaces), - the request's own core");
+        wchar_t mback[160];
+        Check(FormatMechLoadout(m.mech,mback,160) && !std::wcscmp(mback,L"EWEAPON378,NIX_RED,EMLASER,EMLASER,PBEAM,MIRAGE,-"),"and formats back");
+        VehicleLoadout again;
+        Check(LoadoutOfVariant(LoadoutVariant(m)|kVariantApplied,VehicleBody::mech,&again) && again.mech==m.mech &&
+              (LoadoutVariant(m)&(kVariantVehicle|kVariantMech))==(kVariantVehicle|kVariantMech),"a mech's variant round trip");
+        Check(LoadoutVariant(m)==0x600000185CB2C1D8ull,"its variant: tests/mech_parts_test.py holds the same number (pylib/mech_parts.py)");
+        Check(!LoadoutOfVariant(LoadoutVariant(m),VehicleBody::rfighter,&again),"a mech's variant is no jet's");
+        Check(!LoadoutOfVariant(LoadoutVariant(Load(L"AAM_S:2",VehicleBody::rfighter)),VehicleBody::mech,&again),"a jet's is no mech's");
+        wchar_t mfile[96];
+        Check(VehicleVariantFile(m,mfile,96) && !std::wcsncmp(mfile,L"EDF6VC_LO_MECH_6",16),"a mech's file");
+        struct Bad { const wchar_t* text; const wchar_t* says; };
+        const Bad mbad[]={
+            {L"EWEAPON356,-,SABER,-,-,-,-",L"等级"},              // a level 4.25 saber on the level 0.1 Nix A
+            {L"EWEAPON378,-,PBEAM,-,-,-,-",L"右臂装不了"},        // a shoulder weapon on an arm
+            {L"EWEAPON378,-,-,-,MIRAGE,-,-",L"右肩装不了"},       // the Mirage pod has only a left file
+            {L"EWEAPON378,-,-,-,-,-,-",L"至少"},                  // no weapon
+            {L"EWEAPON378,-,EMLASER,-,-,-",L"7 项"},              // six fields
+            {L"EWEAPON378,-,EMLASER,-,-,-,-,-",L"7 项"},          // eight
+            {L"EWEAPON999,-,EMLASER,-,-,-,-",L"机甲请求"},
+            {L"-,-,EMLASER,-,-,-,-",L"底座请求"},
+            {L"EWEAPON378,PINK,EMLASER,-,-,-,-",L"机体"},
+            {L"EWEAPON356,-,MACHINEGUN,-,-,-,MPACK_A_WEAPON075",L"核心"},
+        };
+        for(const Bad& b:mbad) {
+            const VehicleLoadout x=Load(b.text,VehicleBody::mech,&mok,mwhy);
+            Check(!mok && !x.On() && std::wcsstr(mwhy,b.says),"a malformed mech refused whole, the reason named");
+        }
+        Check(Load(L"",VehicleBody::mech,&mok).body==VehicleBody::none && mok,"empty: stock");
+        // Every stock request as it comes is a valid loadout; MechWithRequest keeps only what the new level allows.
+        for(int i=0;i<kMechRequestCount;++i)Check(MechValid(MechStock(i)),"each stock request is a valid mech");
+        MechLoadout hi=Load(L"MPACK_B_WEAPON109,-,HYPERLASER,MACHINEGUN,-,-,MPACK_A_WEAPON076",VehicleBody::mech).mech;
+        const MechLoadout lo=MechWithRequest(hi,1);   // EWEAPON356, level 0.1
+        Check(MechValid(lo) && lo.weapon[0]==-1 && lo.weapon[1]>=0 && lo.core==-1,"a lower request clears what is above it");
+        // The summon's identification: the vehicle file and the level, unique among the stock requests.
+        Check(MechRequestOf(L"app:/Object/v612_nix.sgo",kMechRequests[m.mech.request].level)==m.mech.request &&
+              MechRequestOf(L"app:/Object/v612_nix_black.sgo",kMechRequests[m.mech.request].level)<0,"a request by its vehicle and level");
+        for(int i=0;i<kMechRequestCount;++i)
+            for(int j=0;j<i;++j)Check(kMechRequests[i].level!=kMechRequests[j].level || _wcsicmp(kMechRequests[i].vehicle,kMechRequests[j].vehicle),
+                                      "no two stock requests share a vehicle and a level");
+    }
+
     // The jets' preference by their load.
     Check(LoadoutPrefer(Prefer::air,0,6)==Prefer::ground,"a fighter with bombs only goes for the ground");
     Check(LoadoutPrefer(Prefer::ground,4,0)==Prefer::air,"a strike jet with air-to-air only goes for flyers");

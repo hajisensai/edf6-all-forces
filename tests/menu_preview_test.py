@@ -153,9 +153,9 @@ def check_vehicles_fake(game_dir: str, game: object) -> None:
         f.write(sgo.write_depth_first(version, fake_v))
     with contextlib.redirect_stdout(io.StringIO()) as out:
         files = mp.build_vehicles(game, game_dir)
-    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE')}
-    check(set(files) == want, f'the tank (Root.cpk) and the Mods strike jet only: {sorted(files)}')
-    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 2, 'every missing body said')
+    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE', 'MECH')}
+    check(set(files) == want, f'the tank and the mech (Root.cpk) and the Mods strike jet only: {sorted(files)}')
+    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 3, 'every missing body said')
     m = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("STRIKE")}'])[1]
     check(m['animation_model'][0] == ['app:/object/fake_jet.mrab', 'fake_jet.mdb'], 'the Mods copy is the source')
     tank = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'])[1]

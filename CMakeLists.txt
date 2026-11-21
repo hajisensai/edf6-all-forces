@@ -981,6 +981,8 @@ set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=
 # The loadout editor and generator (tools/support_loadout.py) against src/support_loadout.h; with the game installed, the
 # files it makes from Root.cpk (read only).
 add_test(NAME support_loadout_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_loadout_ini_test.py")
+# The custom mech parts (pylib/mech_parts.py): the rules, and with the game every table entry against Root.cpk.
+add_test(NAME mech_parts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/mech_parts_test.py")
 set_tests_properties(support_loadout_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The installer's headless loadout-generate the in-game menu runs (no prompt, new files only, status file).
 add_test(NAME loadout_generate COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/loadout_generate_test.py")

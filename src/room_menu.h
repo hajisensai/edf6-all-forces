@@ -19,6 +19,9 @@
 // left / right change the field being edited (wrapping); add / remove a soldier or pylon; reset puts the unit stock.
 // Levels: the unit list (its last row is "save"), a unit's rows (soldiers; a vehicle's gun row then its pylons), the
 // fields of one row (kind / primary / secondary / backpack; store / rounds; the tank's gun).
+// The mech (OWN_MECH, docs/feature-2026-11-21-mech-custom.md §2.5): instead of pylons seven rows of one field each, the
+// request, the frame, the four weapon slots and the core (mech_loadout.h); left / right step over the values that keep it
+// valid (MechRowValues). A stock mech made explicit starts as MechStartRequest as it comes; add / remove are refused.
 // Crews (阶段 5): a unit whose spec says it brings a crew gets a crew-colour row (SupportCrewColour_<KEY>, support_loadout.h
 // CrewColour): the last row of its vehicle, or a unit of its own (a seated entry's crew, the default for every crew, the
 // mission vehicles' support crews). Its fields: the primary (default -> X -> the palette) and the secondary colour.
@@ -85,12 +88,12 @@ inline constexpr UnitSpec kDefaultUnits[]={
     {L"MULTIROLE_F",L"多用途机·跟随",0,true},
     {L"OWN_PFIGHTER",L"我召唤的·玩家战斗机",0,false},{L"OWN_PSTRIKE",L"我召唤的·玩家攻击机",0,false},
     {L"OWN_FIGHTER",L"我召唤的·制空战斗机",0,false},{L"OWN_INTERCEPTOR",L"我召唤的·截击机",0,false},
-    {L"OWN_MULTIROLE",L"我召唤的·多用途机",0,false},
+    {L"OWN_MULTIROLE",L"我召唤的·多用途机",0,false},{L"OWN_MECH",L"我召唤的·机甲",0,false},
     {L"",L"所有支援乘员（默认）",0,true},{kCrewMissionKey,L"任务载具的支援乘员",0,true},
 };
 inline constexpr int kDefaultUnitCount=static_cast<int>(sizeof(kDefaultUnits)/sizeof(kDefaultUnits[0]));
 
-inline constexpr int kMostUnits=56;   // the live catalog's 45 units, a player's 5 own summons, room to spare
+inline constexpr int kMostUnits=56;   // the live catalog's 45 units, a player's 6 own summons, room to spare
 enum class UnitKind : std::uint8_t { squad, vehicle, crew };
 struct Unit {
     const wchar_t* key=nullptr;
@@ -109,6 +112,67 @@ constexpr bool IsSquad(const Unit& u) noexcept { return u.kind==UnitKind::squad;
 constexpr bool IsCrewUnit(const Unit& u) noexcept { return u.kind==UnitKind::crew; }
 // A vehicle the player summons with a vehicle request (support_loadout.h kPlayerVehicles), not a support unit.
 constexpr bool IsPlayerVehicleUnit(const Unit& u) noexcept { return u.kind==UnitKind::vehicle && IsPlayerBody(u.body); }
+constexpr bool IsMech(const Unit& u) noexcept { return u.kind==UnitKind::vehicle && u.body==VehicleBody::mech; }
+
+// --- The mech's rows (each one field: its value a table index, -1 the request's own frame / core or an empty slot) ---
+inline constexpr int kMechRowRequest=0,kMechRowFrame=1,kMechRowWeapon=2,kMechRowCore=2+kMechSlots;
+static_assert(kMechRowCore+1==kMechFields,"request, frame, the slots, the core");
+// The request a stock mech starts from when the player customises it: Powered Exoskeleton Nix A (EWEAPON356), the first
+// Nix every player has (level 0.1, no DLC; the DLC metal coat comes before it in the table but not every player owns it).
+// The request names the call the loadout replaces, so the start is one every player can call; the request row then steps
+// through all 27.
+inline int MechStartRequest() noexcept {
+    static constexpr wchar_t kToken[]=L"EWEAPON356";
+    const int i=MechIndexOf(kMechRequests,kToken,kToken+(sizeof(kToken)/sizeof(kToken[0])-1));
+    return i>=0 ? i : 0;
+}
+// The value row `row` holds now.
+constexpr int MechRowValue(const MechLoadout& m,int row) noexcept {
+    return row==kMechRowRequest ? m.request : row==kMechRowFrame ? m.frame : row==kMechRowCore ? m.core :
+           row>=kMechRowWeapon && row<kMechRowCore ? m.weapon[row-kMechRowWeapon] : -1;
+}
+// Every value row `row` may take with the rest of `m` as it is, in table order (own / empty first): the request all of
+// them, the frame the request's own then the eight, a slot empty (unless it holds the only weapon) then the weapons it
+// allows at the request's level, the core the request's own then the cores its level allows. `out` holds at least
+// kMechValuesMost. Returns how many.
+inline constexpr int kMechValuesMost=1+(kMechRequestCount>kMechWeaponCount ? kMechRequestCount : kMechWeaponCount);
+inline int MechRowValues(const MechLoadout& m,int row,int* out) noexcept {
+    int n=0;
+    if(row==kMechRowRequest){for(int i=0;i<kMechRequestCount;++i)out[n++]=i;return n;}
+    if(!m.On())return 0;
+    if(row==kMechRowFrame){out[n++]=-1;for(int i=0;i<kMechFrameCount;++i)out[n++]=i;return n;}
+    if(row==kMechRowCore){out[n++]=-1;for(int i=0;i<kMechCoreCount;++i)if(MechCoreAllowed(i,m.request))out[n++]=i;return n;}
+    if(row<kMechRowWeapon || row>=kMechRowCore)return 0;
+    const int slot=row-kMechRowWeapon;
+    bool other=false;
+    for(int i=0;i<kMechSlots;++i)other=other || (i!=slot && m.weapon[i]>=0);
+    if(other)out[n++]=-1;
+    for(int w=0;w<kMechWeaponCount;++w)if(MechWeaponAllowed(w,slot,m.request))out[n++]=w;
+    return n;
+}
+// Row `row` of `m` set to `v`; false (m unchanged) when `v` is not one of its values. A new request clears what its
+// level does not allow (MechWithRequest).
+inline bool SetMechRow(MechLoadout& m,int row,int v) noexcept {
+    int values[kMechValuesMost];
+    const int n=MechRowValues(m,row,values);
+    bool ok=false;
+    for(int i=0;i<n;++i)ok=ok || values[i]==v;
+    if(!ok)return false;
+    if(row==kMechRowRequest)m=m.On() ? MechWithRequest(m,v) : MechStock(v);
+    else if(row==kMechRowFrame)m.frame=v;
+    else if(row==kMechRowCore)m.core=v;
+    else m.weapon[row-kMechRowWeapon]=v;
+    return true;
+}
+// A value's name in language `lang` (hudtext::Lang order: en, zh-CN, zh-TW, ja); nullptr for -1 (the request's own / an
+// empty slot: the caller's words).
+inline const wchar_t* MechValueLabel(int row,int v,int lang) noexcept {
+    const int l=lang>=0 && lang<4 ? lang : 0;
+    if(row==kMechRowRequest)return v>=0 && v<kMechRequestCount ? kMechRequests[v].label[l] : nullptr;
+    if(row==kMechRowFrame)return v>=0 && v<kMechFrameCount ? kMechFrames[v].label[l] : nullptr;
+    if(row==kMechRowCore)return v>=0 && v<kMechCoreCount ? kMechCores[v].label[l] : nullptr;
+    return v>=0 && v<kMechWeaponCount ? kMechWeapons[v].label[l] : nullptr;
+}
 
 // Reads one ini value (support_config.h SupportIniRead's shape: empty when absent); returns its length.
 using IniRead=std::size_t(*)(void* context,const wchar_t* key,wchar_t* out,std::size_t capacity) noexcept;
@@ -191,6 +255,7 @@ inline std::size_t SerialisePreset(const SupportPreset& p,wchar_t* out,std::size
 // A loadout (format_vehicle): a tank's gun then its pylons; a jet's pylons or GUNS; stock the empty value.
 inline std::size_t SerialiseVehicle(const VehicleLoadout& l,wchar_t* out,std::size_t capacity) noexcept {
     if(!out || !capacity)return 0;
+    if(l.body==VehicleBody::mech)return FormatMechLoadout(l.mech,out,capacity);   // the mech's seven fields
     detail::Text t{out,capacity};
     const VehicleBodyRow* row=VehicleBodyOf(l.body);
     if(row && row->tank)t.Puts(l.apGun ? L"AP" : L"HE");
@@ -223,7 +288,7 @@ inline bool SamePreset(const SupportPreset& a,const SupportPreset& b) noexcept {
     return true;
 }
 inline bool SameVehicle(const VehicleLoadout& a,const VehicleLoadout& b) noexcept {
-    if(a.body!=b.body || a.apGun!=b.apGun || a.count!=b.count)return false;
+    if(a.body!=b.body || a.apGun!=b.apGun || a.count!=b.count || a.mech!=b.mech)return false;
     for(int i=0;i<a.count;++i)if(a.store[i]!=b.store[i] || a.rounds[i]!=b.rounds[i])return false;
     return true;
 }
@@ -293,11 +358,14 @@ inline void Load(Menu& m,const UnitSpec* specs,int count,IniRead read,void* cont
 // A crew unit's only row; a vehicle with a crew: its last row. -1: none.
 inline int CrewRow(const Unit& u) noexcept {
     if(!u.hasCrew)return -1;
-    return IsCrewUnit(u) ? 0 : 1+(u.vehicle.On() ? u.vehicle.count : 0);
+    if(IsCrewUnit(u))return 0;
+    if(IsMech(u))return u.vehicle.On() ? kMechFields : 1;
+    return 1+(u.vehicle.On() ? u.vehicle.count : 0);
 }
 inline int RowCount(const Unit& u) noexcept {
     if(IsSquad(u))return u.squad.count>0 ? u.squad.count : 1;
     if(IsCrewUnit(u))return 1;
+    if(IsMech(u))return (u.vehicle.On() ? kMechFields : 1)+(u.hasCrew ? 1 : 0);
     return 1+(u.vehicle.On() ? u.vehicle.count : 0)+(u.hasCrew ? 1 : 0);
 }
 inline int MostRows(const Unit& u) noexcept {
@@ -307,7 +375,7 @@ inline int MostRows(const Unit& u) noexcept {
 }
 // Fields of row `r`: a soldier 3 (kind, primary, secondary) and a Ranger's or a Wing Diver's 4th, its backpack weapon (the
 // X-Morph infantry: the kind alone, SupportKindHasLooks); a
-// tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary, secondary); else 0.
+// tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary, secondary); a mech's row 1; else 0.
 inline constexpr int kPackField=3;
 inline bool CarriesPack(SupportWeapon kind) noexcept { return SupportKindHasLooks(kind) && CyclePack(0,SupportSoldierClass(kind),1)!=0; }
 inline int FieldCount(const Unit& u,int r) noexcept {
@@ -319,6 +387,7 @@ inline int FieldCount(const Unit& u,int r) noexcept {
     }
     if(r==CrewRow(u))return 2;
     if(!u.vehicle.On())return 0;
+    if(IsMech(u))return r>=0 && r<kMechFields ? 1 : 0;
     if(r==0)return VehicleBodyOf(u.body)->tank ? 1 : 0;
     return 2;
 }
@@ -379,10 +448,12 @@ inline bool CanAddPylon(const Unit& u) noexcept {
 // --- Editing (each keeps the unit a value its parser accepts) ---
 namespace detail {
 inline int Wrap(int v,int step,int n) noexcept { return n>0 ? ((v+step)%n+n)%n : 0; }
-// A stock vehicle made explicit: a tank's howitzer alone, a jet's guns alone (edit_vehicle's Loadout(body)).
+// A stock vehicle made explicit: a tank's howitzer alone, a jet's guns alone (edit_vehicle's Loadout(body)); a mech the
+// start request as it comes (MechStartRequest; ParseMechLoadout's shape: count 1, no pylons).
 inline void Materialise(Unit& u) noexcept {
     if(u.vehicle.On())return;
     u.vehicle=VehicleLoadout{};u.vehicle.body=u.body;
+    if(IsMech(u)){u.vehicle.count=1;u.vehicle.mech=MechStock(MechStartRequest());}
 }
 inline Act AddSoldier(Menu& m,Unit& u) noexcept {
     SupportPreset& p=u.squad;
@@ -395,7 +466,7 @@ inline Act AddSoldier(Menu& m,Unit& u) noexcept {
     return Act::changed;
 }
 inline Act AddPylon(Menu& m,Unit& u) noexcept {
-    if(IsCrewUnit(u))return Act::refused;
+    if(IsCrewUnit(u) || IsMech(u))return Act::refused;   // a mech has slots, not pylons
     Materialise(u);
     VehicleLoadout& l=u.vehicle;
     if(l.count>=MostRows(u))return Act::refused;
@@ -414,7 +485,7 @@ inline Act RemoveSoldier(Menu& m,Unit& u) noexcept {
     return Act::changed;
 }
 inline Act RemovePylon(Menu& m,Unit& u) noexcept {
-    if(IsCrewUnit(u))return Act::refused;
+    if(IsCrewUnit(u) || IsMech(u))return Act::refused;
     VehicleLoadout& l=u.vehicle;
     if(!l.On() || m.rowAt<1 || m.rowAt>l.count)return Act::refused;
     for(int i=m.rowAt-1;i+1<l.count;++i){l.store[i]=l.store[i+1];l.rounds[i]=l.rounds[i+1];}
@@ -481,9 +552,22 @@ inline void ChangeCrew(Menu& m,CrewColour& c,int step) noexcept {
     if(!at){c=CrewColour{};return;}
     c.set=true;c.look.primary=at==1 ? kStockColour : m.palette.rgb[at-2];
 }
+// A mech's row steps over its values (MechRowValues: never one the parser refuses); a value it holds that is not among
+// them (the menu never makes one) counts as before the first.
+inline void ChangeMech(Menu& m,Unit& u,int step) noexcept {
+    int values[kMechValuesMost];
+    const int n=MechRowValues(u.vehicle.mech,m.rowAt,values);
+    if(n<=0)return;
+    const int now=MechRowValue(u.vehicle.mech,m.rowAt);
+    int at=-1;
+    for(int i=0;i<n;++i)if(values[i]==now)at=i;
+    at=at<0 ? (step>0 ? 0 : n-1) : Wrap(at,step,n);
+    SetMechRow(u.vehicle.mech,m.rowAt,values[at]);
+}
 inline Act Change(Menu& m,Unit& u,int step) noexcept {
     if(IsSquad(u))ChangeSoldier(m,u,step);
     else if(m.rowAt==CrewRow(u))ChangeCrew(m,u.crew,step);
+    else if(IsMech(u))ChangeMech(m,u,step);
     else if(m.rowAt==0)u.vehicle.apGun=!u.vehicle.apGun;
     else ChangePylon(m,u,step);
     return Act::changed;
@@ -633,7 +717,7 @@ inline void MarkSaved(Menu& m) noexcept {
 
 // --- The snapshot the drawing layer consumes ---
 enum class RowText : std::uint8_t { squadUnit, vehicleUnit, save, ownLoad, soldier, stockVehicle, gunHE, gunAP, guns, pylon,
-                                    crewUnit, crew };
+                                    crewUnit, crew, stockMech, mechPart };
 struct ViewRow {
     RowText text=RowText::save;
     const wchar_t* label=nullptr;   // the unit's, the soldier kind's, the store's label; nullptr none
@@ -652,6 +736,8 @@ struct ViewRow {
     bool changed=false;             // a unit edited since it was loaded
     bool refused=false;             // a unit whose ini value the parser refused (a crew row: its crew value)
     bool inherit=false;             // a crew row wearing the default's colours (SupportCrewColour; the default's own: stock)
+    int part=-1;                    // a mech row's value (`index` its row, kMechRow*): a table index, -1 own / empty
+    int choice=0,choices=0;         // a mech row: its value's place among MechRowValues (1-based) and how many
 };
 struct ViewColumn { int count=0,first=0,total=0; ViewRow row[kPageMost]; };
 struct View { bool open=false,dirty=false; Level level=Level::units; ViewColumn units,rows; };
@@ -682,7 +768,14 @@ inline ViewRow CrewViewRow(const Unit& u,int i) noexcept {
 inline ViewRow VehicleRow(const Unit& u,int i) noexcept {
     if(i==CrewRow(u))return CrewViewRow(u,i);
     ViewRow r;r.index=i;
-    if(!u.vehicle.On()){r.text=RowText::stockVehicle;return r;}
+    if(!u.vehicle.On()){r.text=IsMech(u) ? RowText::stockMech : RowText::stockVehicle;return r;}
+    if(IsMech(u)) {
+        int values[kMechValuesMost];
+        r.text=RowText::mechPart;r.part=MechRowValue(u.vehicle.mech,i);
+        r.choices=MechRowValues(u.vehicle.mech,i,values);
+        for(int k=0;k<r.choices;++k)if(values[k]==r.part)r.choice=k+1;
+        return r;
+    }
     if(i==0){r.text=IsTank(u) ? (u.vehicle.apGun ? RowText::gunAP : RowText::gunHE) : RowText::guns;return r;}
     const LoadStore* s=LoadStoreOf(u.vehicle.store[i-1]);
     r.text=RowText::pylon;r.index=i-1;r.store=u.vehicle.store[i-1];r.label=s ? s->label : nullptr;

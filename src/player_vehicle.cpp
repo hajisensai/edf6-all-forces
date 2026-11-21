@@ -5,7 +5,13 @@
 //             one call site of the configure (watched here, a rel32 redirect; the plugin's own airdrops call 0x5E8B40
 //             directly and are not seen);
 //   0x5E8C00  the container's state once let go: landed, it makes the vehicle from its configured path (+0xB80) with
-//             CreateObject at 0x5E8FDC (airdrop.cpp redirects that call; its VehicleStep asks PlayerVehicleStepPath).
+//             CreateObject at 0x5E8FDC (airdrop.cpp redirects that call; its VehicleStep asks PlayerVehicleStepPath);
+//   0x5E9048  right after: the vehicle's level from the container's (+0xBA0 -> vehicle +0x67C), then the request's setup:
+//             a setup text (std::wstring +0xC38, its size +0xC48) parsed (0x62D890), else the setup variant +0xC58 (its
+//             type +0xC68, 0xFFFF none) handed to the vehicle's slot 46 (vtable +0x170). A mech (2026-11-21,
+//             docs/feature-2026-11-21-mech-custom.md) brings its own setup (its file's mission_setup), so PlayerVehicleMade
+//             empties the container's variant (destroyed by its type through 0x1765220, set 0xFFFF: the stock step and the
+//             container's destructor skip it) and applies the vehicle's own, the level written first as the stock does.
 // Every machine of the room runs its own transporter and container for every member's request (the vehicle is then
 // registered under the ID the container derives, the same everywhere): every machine swaps the path the same way, by the
 // requester machine's decision (player_vehicle_logic.h Engine). Game thread only (the transporter's init, the container's
@@ -13,6 +19,7 @@
 #include "player_vehicle.h"
 #include "player_vehicle_logic.h"
 #include "airdrop.h"
+#include "support_spawn.h"
 #include "airdrop_logic.h"
 #include "command_identity.h"
 #include "crew.h"
@@ -32,6 +39,17 @@ namespace {
 constexpr unsigned kConfigure=0x5E8B40,kConfigureCall=0x5E5687,kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
 constexpr std::size_t kContainerVehicleSgo=0xB80;   // the configured path (a std::wstring; 0x5E8BC7)
+// The mech's setup swap (0x5E9048, the top): the container's level, setup text size, setup variant and its type; the
+// vehicle's level; the variant destructors and the setup reader ApplyMissionSetup calls (support_spawn.cpp).
+constexpr unsigned kLanded=0x5E9048,kSetupDtors=0x1765220,kReadSetup=0x62D6E0;
+constexpr std::size_t kBoxLevel=0xBA0,kBoxSetupText=0xC48,kBoxSetup=0xC58,kBoxSetupType=0xC68,kVehicleLevel=0x67C;
+// mov ecx,[rdi+0BA0h]; mov [rax+67Ch],ecx; cmp qword [rdi+0C48h],0; jne; mov eax,0FFFFh; cmp [rdi+0C68h],ax; je;
+// mov rcx,[rsi]; mov rax,[rcx+170h]; lea rdx,[rdi+0C58h]
+const unsigned char kLandedSig[]={0x8B,0x8F,0xA0,0x0B,0x00,0x00,0x89,0x88,0x7C,0x06,0x00,0x00,0x48,0x83,0xBF,0x48,0x0C,0x00,0x00,0x00,
+                                  0x75,0x26,0xB8,0xFF,0xFF,0x00,0x00,0x66,0x39,0x87,0x68,0x0C,0x00,0x00,0x74,0x71,0x48,0x8B,0x0E,
+                                  0x48,0x8B,0x81,0x70,0x01,0x00,0x00,0x48,0x8D,0x97,0x58,0x0C,0x00,0x00};
+const unsigned char kReadSetupSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x40,0x48,0x8B,0xDA};
+using SetupFn=void(__fastcall*)(void*,void*);
 // mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; push rdi; sub rsp,20h; mov rax,[rdx+8]; mov rsi,rcx (airdrop.cpp)
 const unsigned char kConfigureSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48,
                                      0x83,0xEC,0x20,0x48,0x8B,0x42,0x08,0x48,0x8B,0xF1};
@@ -43,6 +61,8 @@ using ConfigureFn=void(*)(unsigned char*,const airdrop::SharedRef*,const wchar_t
 
 bool watching=false;      // the configure call redirected
 bool landing=false;       // airdrop.cpp's vehicle step calls PlayerVehicleStepPath (it reports through InstallAirdrop)
+bool mechSetup=false;     // the setup swap's code is the expected one (else a mech request lands stock)
+unsigned char* mechBox=nullptr;   // the container PlayerVehicleStepPath just swapped for a mech, until PlayerVehicleMade
 playerveh::Engine engine;
 std::uint32_t origin=0;
 bool haveSent=false;std::uint32_t haveGeneration=~0u;
@@ -112,11 +132,26 @@ void ConfigureHook(unsigned char* box,const airdrop::SharedRef* requester,const 
         p.box=box;p.path=ConfiguredPath(box);p.body=kPlayerVehicles[twin].body;
         p.local=who==PlayerHuman();
         if(p.local) {
-            const playerveh::Msg m=engine.Decide(p.requester,p.body,origin ? origin : 1,InSession());
+            // A mech: only a call of the loadout's base request (its vehicle file and level: mech_loadout.h
+            // MechRequestOf), and only while the setup swap is possible.
+            bool eligible=true;
+            int request=-1;
+            if(p.body==VehicleBody::mech) {
+                const VehicleLoadout& own=SupportCfg().playerVehicle[twin];
+                request=MechRequestOf(sgo,level);
+                eligible=mechSetup && own.On() && request>=0 && request==own.mech.request;
+            }
+            const playerveh::Msg m=engine.Decide(p.requester,p.body,origin ? origin : 1,InSession(),eligible);
             p.seq=m.seq;
             if(InSession())SendMsg(m);
-            Log("PLAYERVEH this player's %ls request #%u: %s",kPlayerVehicles[twin].twin,m.seq,
-                m.variant.bits ? "the loaded jet (every machine has it)" : "the stock twin (no loadout, not preloaded, or a machine lacks it)");
+            if(p.body==VehicleBody::mech)
+                Log("PLAYERVEH this player's mech request #%u (%ls, level %.3f: %ls): %s",m.seq,sgo,level,
+                    request>=0 ? kMechRequests[request].token : L"no stock request",
+                    m.variant.bits ? "the custom mech (every machine has it)" :
+                    !eligible ? (mechSetup ? "stock (not the loadout's base request)" : "stock (the setup swap is off)") :
+                    "stock (not preloaded, or a machine lacks it)");
+            else Log("PLAYERVEH this player's %ls request #%u: %s",kPlayerVehicles[twin].twin,m.seq,
+                     m.variant.bits ? "the loaded jet (every machine has it)" : "the stock twin (no loadout, not preloaded, or a machine lacks it)");
         } else p.seq=engine.Count(p.requester,p.body);
         Pending* slot=nullptr;
         for(auto& q:pending)if(!q.box){slot=&q;break;}
@@ -176,6 +211,9 @@ bool InstallPlayerVehicles() noexcept {
         return false;
     }
     bool changed=false;
+    mechSetup=Matches(kLanded,kLandedSig,sizeof(kLandedSig)) && Matches(kReadSetup,kReadSetupSig,sizeof(kReadSetupSig)) &&
+              Readable(image+kSetupDtors,8);
+    if(!mechSetup)Log("PLAYERVEH the container's setup step is not the expected code: mech requests land stock");
     watching=RedirectCall(image+kConfigureCall,image+kConfigure,reinterpret_cast<void*>(&ConfigureHook),changed);
     if(!watching)Log("PLAYERVEH the configure call not watched%s: the requests make the stock twins",changed ? " (half patched)" : "");
     landing=watching && AirdropWatching();
@@ -185,6 +223,7 @@ bool InstallPlayerVehicles() noexcept {
 
 void PreloadPlayerVehicles() noexcept {
     for(auto& p:pending)p=Pending{};
+    mechBox=nullptr;
     origin=plugin_net::NewOrigin();haveSent=false;
     playerveh::Variant preloaded[playerveh::kHaveMost];int n=0;
     const SupportConfig& cfg=SupportCfg();
@@ -214,6 +253,7 @@ void PreloadPlayerVehicles() noexcept {
 }
 
 const wchar_t* PlayerVehicleStepPath(const wchar_t* sgo) noexcept {
+    mechBox=nullptr;
     if(!landing || !sgo)return sgo;
     for(auto& p:pending) {
         if(!p.box || p.path!=sgo)continue;
@@ -226,9 +266,40 @@ const wchar_t* PlayerVehicleStepPath(const wchar_t* sgo) noexcept {
         if(!l.bits)return sgo;
         if(!playerveh::LoadedPath(playerveh::Variant{q.body,l.bits},swapped,std::size(swapped)))return sgo;
         Log("PLAYERVEH request #%u lands as %ls",q.seq,swapped);
+        if(q.body==VehicleBody::mech)mechBox=q.box;
         return swapped;
     }
     return sgo;
+}
+
+void PlayerVehicleMade(unsigned char* vehicle) noexcept {
+    unsigned char* const box=mechBox;
+    mechBox=nullptr;
+    if(!box)return;
+    if(!vehicle){Log("PLAYERVEH mech: CreateObject failed");return;}
+    bool emptied=false;
+    __try {
+        if(At<std::uint64_t>(box,kBoxSetupText)) {
+            Log("PLAYERVEH mech %p: its container carries a setup text: the request's setup applies (its stock weapons)",vehicle);
+            return;
+        }
+        Put<float>(vehicle,kVehicleLevel,At<float>(box,kBoxLevel));
+        const auto type=At<std::uint16_t>(box,kBoxSetupType);
+        if(type!=0xFFFF) {
+            const auto table=reinterpret_cast<SetupFn const*>(image+kSetupDtors);
+            if(!Readable(table+type,sizeof(void*)) || !table[type]) {
+                Log("PLAYERVEH mech %p: the container's setup (type %u) has no destructor: the request's setup applies",vehicle,type);
+                return;
+            }
+            alignas(16) unsigned char scratch[0x40]{};
+            table[type](box+kBoxSetup,scratch);
+            Put<std::uint16_t>(box,kBoxSetupType,0xFFFF);
+        }
+        emptied=true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("PLAYERVEH mech %p: setup swap fault",vehicle);}
+    if(!emptied)return;
+    const bool applied=ApplyMissionSetup(vehicle);
+    Log("PLAYERVEH mech %p: %s",vehicle,applied ? "its own setup applied (frame, weapons, core)" : "its own setup FAILED (no weapons)");
 }
 
 plugin_net::Channel PlayerVehicleNetChannel() noexcept {

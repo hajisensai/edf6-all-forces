@@ -331,7 +331,11 @@ void Walk() {
                 Expect(rm::IsSquad(u) && nav.row>=0 && nav.row<u.squad.count,"a soldier page's soldier exists");
             if(nav.page==Page::pylon || nav.page==Page::store || nav.page==Page::rounds)
                 Expect(u.kind==rm::UnitKind::vehicle && nav.row>=1 && nav.row<=u.vehicle.count,"a pylon page's pylon exists");
+            if(nav.page==Page::mech)
+                Expect(rm::IsMech(u) && u.vehicle.On() && nav.row>=0 && nav.row<kMechFields,"a mech page's row exists");
         }
+        for(int i=0;i<m.unitCount;++i)
+            if(rm::IsMech(m.unit[i]) && m.unit[i].vehicle.On())Expect(MechValid(m.unit[i].vehicle.mech),"no step leaves a mech invalid");
     }
     Expect(saves>0,"the walk saved");
 }
@@ -362,8 +366,79 @@ void KindsInstalled() {
     SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
 }
 
+// The mech (OWN_MECH): customise from the stock page, its seven rows each a value page listing exactly what the row may
+// take (in the HUD's language), a pick setting it and coming back, a new request clearing what its level does not allow,
+// no add-pylon button, reset back to stock, the save reading back.
+void Mech() {
+    hudtext::Use(hudtext::Lang::zhCN);
+    rm::Menu m=Fresh();Nav nav;Begin(m,nav);
+    const int mech=UnitOf(m,L"OWN_MECH",rm::UnitKind::vehicle);
+    Expect(mech>=0 && rm::IsMech(m.unit[mech]),"OWN_MECH is a unit of the menu");
+    Pick(m,nav,Do::open,mech);
+    rm::Unit& u=m.unit[mech];
+    Dialog d=Build(m,nav,Context{});
+    Expect(Find(d,Do::customise)>=0 && Find(d,Do::add)<0 && Find(d,Do::reset)<0,"a stock mech: customise, no add, nothing to reset");
+    Pick(m,nav,Do::customise);
+    Expect(u.vehicle.On() && u.vehicle.mech==MechStock(rm::MechStartRequest()),"customise: Nix A as it comes");
+    d=Build(m,nav,Context{});
+    bool rows=true;
+    for(int r=0;r<kMechFields;++r)rows=rows && Find(d,Do::row,r)>=0;
+    Expect(rows && Find(d,Do::row,kMechFields)<0 && Find(d,Do::add)<0 && Find(d,Do::reset)>=0,
+           "seven row buttons, no add-pylon, a reset");
+    Expect(HasText(d,L"右臂：机枪") && HasText(d,L"底座请求：战斗机体 尼克斯Ａ") && HasText(d,L"机体：（请求自己的）") &&
+           HasText(d,L"右肩：（空）"),"the rows in the HUD's language, the parts' own Chinese labels");
+    // Each row's page lists exactly MechRowValues, opens on the current one, and a pick sets it and comes back.
+    for(int r=0;r<kMechFields;++r) {
+        nav=Nav{Page::unit,mech,0,0};
+        Pick(m,nav,Do::row,r);
+        Expect(nav.page==Page::mech && nav.row==r && ValuePage(Page::mech),"a row opens its value page");
+        int values[rm::kMechValuesMost];
+        const int n=rm::MechRowValues(u.vehicle.mech,r,values);
+        int listed=0;bool same=true;
+        Entries(m,nav,[&](int i,Choice c,const wchar_t*) noexcept { same=same && c.what==Do::set && i<n && c.arg==values[i];++listed; });
+        Expect(same && listed==n,"the page lists the row's values, in order");
+        d=Build(m,nav,Context{});
+        Expect(d.cursor>=0 && d.item[d.cursor].choice.what==Do::set && d.item[d.cursor].choice.arg==rm::MechRowValue(u.vehicle.mech,r),
+               "the page opens on the current value");
+        const std::int32_t pick=values[n-1];
+        Pick(m,nav,Do::set,pick);
+        Expect(nav.page==Page::unit && rm::MechRowValue(u.vehicle.mech,r)==pick &&MechValid(u.vehicle.mech),
+               "a pick sets the row and comes back to the unit");
+    }
+    // From the last request (Eiren Assault, 4.5) with its late core to the metal coat (0.1): what it cannot hold is cleared.
+    nav=Nav{Page::unit,mech,0,0};
+    u.vehicle.mech=MechStock(kMechRequestCount-1);
+    u.vehicle.mech.core=kMechCoreCount-1;
+    Pick(m,nav,Do::row,rm::kMechRowRequest);
+    Pick(m,nav,Do::set,0);
+    Expect(u.vehicle.mech==MechStock(0),"a low request: late weapons and core cleared, nothing left -> its stock weapons");
+    // A value not offered changes nothing (a stale button): the only weapon's slot cannot be emptied.
+    u.vehicle.mech=MechStock(rm::MechStartRequest());u.vehicle.mech.weapon[1]=-1;
+    const MechLoadout before=u.vehicle.mech;
+    nav=Nav{Page::unit,mech,0,0};
+    Pick(m,nav,Do::row,rm::kMechRowWeapon);
+    bool empty=false;
+    Entries(m,nav,[&](int,Choice c,const wchar_t*) noexcept { empty=empty || (c.what==Do::set && c.arg==-1); });
+    Expect(!empty,"the only weapon's slot offers no empty");
+    Apply(m,nav,Choice{Do::set,-1});
+    Expect(u.vehicle.mech==before,"a set of empty there changes nothing");
+    // The page's value buttons describe the part and the level rule.
+    nav=Nav{Page::unit,mech,0,0};
+    Pick(m,nav,Do::row,rm::kMechRowCore);
+    d=Build(m,nav,Context{});
+    Expect(std::wcsstr(d.title,L"核心") && std::wcsstr(d.item[0].desc,hudtext::Tr(Tx::roomDescMechRule)),"the core page: its title, the rule");
+    rm::SaveSet set;
+    Expect(rm::CollectSave(m,&set) && set.count==1 && !std::wcscmp(set.line[0].key,L"SupportVehicle_OWN_MECH") &&
+           !std::wcscmp(set.line[0].value,L"EWEAPON356,-,MACHINEGUN,-,-,-,-"),"the save: the mech's value, read back by the parser");
+    Apply(m,nav,Choice{Do::back,0});
+    Pick(m,nav,Do::reset);
+    Expect(!u.vehicle.On() && rm::CollectSave(m,&set) && set.count==0,"reset: stock again, nothing to write");
+    hudtext::Use(hudtext::Lang::en);
+}
+
 int main() {
     KindsInstalled();
+    Mech();
     PackRoundTrip();
     UnitsPage();
     Squad();

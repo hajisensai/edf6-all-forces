@@ -13,6 +13,9 @@ void PreloadPlayerVehicles() noexcept;
 // The container's vehicle step (airdrop.cpp VehicleStep, before its CreateObject): the path it makes `sgo` from, swapped
 // for the loaded jet when this request was decided so; `sgo` itself otherwise.
 const wchar_t* PlayerVehicleStepPath(const wchar_t* sgo) noexcept;
+// Right after that CreateObject (`vehicle` its result, nullptr when it failed): a custom mech's own setup applied in
+// place of the request's (docs/feature-2026-11-21-mech-custom.md); nothing for anything else.
+void PlayerVehicleMade(unsigned char* vehicle) noexcept;
 // The PVEH channel (support_net.cpp registers it).
 plugin_net::Channel PlayerVehicleNetChannel() noexcept;
 }  // namespace crew
