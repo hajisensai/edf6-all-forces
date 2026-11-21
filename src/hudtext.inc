@@ -648,6 +648,8 @@ HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cove
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
 HUDTEXT(hostSettingsOn,L"on",L"开",L"開",L"オン")
 HUDTEXT(hostSettingsOff,L"off",L"关",L"關",L"オフ")
+HUDTEXT(hostScopeSpread,L"Host's scope spread: sniper unzoomed x%.2f (at least %.3f rad), others unzoomed x%.2f, zoomed x%.2f",L"按房主设置：狙击枪不开镜散布 ×%.2f（至少 %.3f 弧度），其他有镜武器不开镜 ×%.2f、开镜 ×%.2f",L"按房主設定：狙擊槍不開鏡散布 ×%.2f（至少 %.3f 弧度），其他有鏡武器不開鏡 ×%.2f、開鏡 ×%.2f",L"ホストの設定：狙撃銃スコープなし拡散 ×%.2f（最小 %.3f rad）、他のスコープ武器 なし ×%.2f・あり ×%.2f")
+HUDTEXT(hostScopeSpreadOff,L"Host's settings: scoped weapons spread as stock",L"按房主设置：开镜 / 不开镜精度差分关闭（原版散布）",L"按房主設定：開鏡 / 不開鏡精度差分關閉（原版散布）",L"ホストの設定：スコープ有無の精度差なし（原版の拡散）")
 HUDTEXT(buildsDiffer,L"%u member(s) run another All Forces build; may differ: %ls",L"%u 名成员的全军出击版本与本机不同，可能不一致：%ls",L"%u 名成員的全軍出擊版本與本機不同，可能不一致：%ls",L"%u 人の全軍出撃が別の版：食い違う恐れ：%ls")
 HUDTEXT(featHostSettings,L"recruit / cover",L"招募 / 掩护",L"招募 / 掩護",L"合流 / 援護")
 HUDTEXT(featCreditReload41,L"4.1 calls' score reload",L"4.1 呼叫积分装填",L"4.1 呼叫積分裝填",L"4.1 要請のポイント補充")
@@ -658,6 +660,7 @@ HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍�
 HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（已关闭）",L"408 砲手機槍（已關閉）",L"408 の銃手機銃（閉鎖）")
 HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
 HUDTEXT(featBikeRide,L"the 408's drive, SDL1 models and riding pose",L"408 驱动、SDL1 各型号性能与骑姿",L"408 驅動、SDL1 各型號性能與騎姿",L"408 の駆動・SDL1 各型の性能・乗車姿勢")
+HUDTEXT(featScopeSpread,L"scoped weapons' spread",L"开镜 / 不开镜精度差分",L"開鏡 / 不開鏡精度差分",L"スコープ有無の精度差")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.

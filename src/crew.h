@@ -290,6 +290,11 @@ struct Config {
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     int infantryScope=2;            // a soldier's scoped weapon zoomed (infantryscope.cpp, scope_pip.h Mode): 0 stock, 1 the whole
                                     // screen under a real optic's eyepiece and reticle, 2 the picture in the picture (the lens only)
+    bool scopeSpread=true;          // a player's scoped weapon spreads by the scope (scope_spread.cpp; online the host's: host_settings.h)
+    float scopeSniperHipSpread=4.0f;      // ...a sniper rifle (category 2 / 104) unzoomed: the stock cone x this (zoomed: the stock)
+    float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
+    float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
+    float scopeAimSpread=0.8f;            // ...and zoomed: x this
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)

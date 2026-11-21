@@ -14,8 +14,17 @@
 // the members whose build differs and what may then differ, and a feature every member must have (the 408's gunner
 // seat) is only opened when every member said it has it.
 //
-// The word: "1;v=<version>;f=<features, hex>;r=<VanillaRecruit 0|1>;c=<NpcFreeSquadCover 0|1>".
+// The scoped weapons' spread (ScopeSpread*, scope_spread_logic.h, 2026-11-21) is the host's too: a round's spread is
+// drawn on the shooter's machine and its hits on enemies are settled there (docs/scope-accuracy-re.md §4), so each machine
+// reading its own ini would let one member play the stock spread while the others are penalised unzoomed.
+//
+// The word: "2;v=<version>;f=<features, hex>;r=<VanillaRecruit 0|1>;c=<NpcFreeSquadCover 0|1>;
+//            s=<ScopeSpread 0|1>,<ScopeSniperHipSpread>,<ScopeSniperHipMinSpread>,<ScopeHipSpread>,<ScopeAimSpread>",
+// the four numbers in units of 1/10000 (whole numbers: no locale's decimal point in the word). "1;" was the word before
+// the s field. An older build never shares a room with this one: the "2;" word came with room protocol 11 (mod_room.h
+// kAllForcesRoomProtocol), so a build speaking "1;" is refused at the room's door rather than played by its own ini.
 #pragma once
+#include "scope_spread_logic.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -40,23 +49,33 @@ enum : std::uint32_t {
                                // EDF6's bike pose, each SDL1 model's request with its own grip / top speed / torque
                                // (edf41bike.car_drive); and the shipped SGO is the generator's, so the 64 bit's data is in it
                                // (builds 64 / 128 shipped the keyframed gun still: docs/edf41-bike-re.md 2026-10-25)
+    kFeatScopeSpread=512u,     // a player's scoped weapon spreads by the scope (scope_spread_logic.h), the host's values
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
                                          kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded|kFeatBikeGunMount|
-                                         kFeatBikeRide;
+                                         kFeatBikeRide|kFeatScopeSpread;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {
     char version[kVersionMost]{};
     std::uint32_t features=0;
     bool vanillaRecruit=false,npcFreeSquadCover=false;
+    scopespread::Params scope{};
 };
-inline constexpr std::size_t kWordMost=96;
+inline constexpr std::size_t kWordMost=128;
+// A ScopeSpread number in the word: 1/10000 units, rounded (every value is in [0, 20]: scope_spread_logic.h ranges).
+inline constexpr std::int32_t kScopeUnit=10000,kScopeMost=999999;
+constexpr std::int32_t ScopeToWord(float v) noexcept {
+    return !(v>0.0f) ? 0 : v*kScopeUnit+0.5f>=kScopeMost ? kScopeMost : static_cast<std::int32_t>(v*kScopeUnit+0.5f);
+}
+constexpr float ScopeFromWord(std::int32_t v) noexcept { return static_cast<float>(v)/kScopeUnit; }
 
 inline bool FormatWord(const Word& w,char* out,std::size_t size) noexcept {
     for(const char* p=w.version;*p;++p)if(*p==';' || *p<0x21 || *p>0x7E)return false;
-    const int n=std::snprintf(out,size,"1;v=%s;f=%X;r=%d;c=%d",w.version,static_cast<unsigned>(w.features),
-                              w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0);
+    const int n=std::snprintf(out,size,"2;v=%s;f=%X;r=%d;c=%d;s=%d,%d,%d,%d,%d",w.version,static_cast<unsigned>(w.features),
+                              w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0,w.scope.on ? 1 : 0,
+                              static_cast<int>(ScopeToWord(w.scope.sniperHip)),static_cast<int>(ScopeToWord(w.scope.sniperHipMin)),
+                              static_cast<int>(ScopeToWord(w.scope.hip)),static_cast<int>(ScopeToWord(w.scope.aim)));
     return n>0 && static_cast<std::size_t>(n)<size;
 }
 namespace detail {
@@ -73,12 +92,36 @@ inline bool Bit(std::string_view v,bool& out) noexcept {
     out=v=="1";
     return true;
 }
+// One whole number of the s field (decimal digits only, at most kScopeMost), the rest after its comma.
+inline bool Number(std::string_view& rest,bool last,std::int32_t& out) noexcept {
+    const std::size_t end=last ? rest.size() : rest.find(',');
+    if(end==std::string_view::npos || end==0 || end>6)return false;
+    std::int32_t v=0;
+    for(std::size_t i=0;i<end;++i) {
+        if(rest[i]<'0' || rest[i]>'9')return false;
+        v=v*10+(rest[i]-'0');
+    }
+    out=v;
+    rest.remove_prefix(last ? end : end+1);
+    return true;
+}
+inline bool Scope(std::string_view v,scopespread::Params& out) noexcept {
+    if(v.size()<2 || v[1]!=',' || !Bit(v.substr(0,1),out.on))return false;
+    v.remove_prefix(2);
+    std::int32_t n[4]{};
+    for(int i=0;i<4;++i)if(!Number(v,i==3,n[i]))return false;
+    if(!v.empty())return false;
+    out.sniperHip=ScopeFromWord(n[0]);out.sniperHipMin=ScopeFromWord(n[1]);
+    out.hip=ScopeFromWord(n[2]);out.aim=ScopeFromWord(n[3]);
+    out=scopespread::Clamped(out);   // a host's value outside the ranges is played at the range's end, as the ini's is
+    return true;
+}
 }  // namespace detail
 // Strict: anything else (another version's word) is no word at all.
 inline bool ParseWord(std::string_view text,Word& out) noexcept {
     Word w;
     std::string_view rest=text,v;
-    if(rest.substr(0,2)!="1;")return false;
+    if(rest.substr(0,2)!="2;")return false;
     rest.remove_prefix(2);
     if(!detail::Field(rest,"v=",v) || v.empty() || v.size()>=kVersionMost)return false;
     std::memcpy(w.version,v.data(),v.size());
@@ -91,18 +134,26 @@ inline bool ParseWord(std::string_view text,Word& out) noexcept {
     }
     w.features=f;
     if(!detail::Field(rest,"r=",v) || !detail::Bit(v,w.vanillaRecruit))return false;
-    if(!detail::Field(rest,"c=",v) || !detail::Bit(v,w.npcFreeSquadCover) || !rest.empty())return false;
+    if(!detail::Field(rest,"c=",v) || !detail::Bit(v,w.npcFreeSquadCover))return false;
+    if(!detail::Field(rest,"s=",v) || !detail::Scope(v,w.scope) || !rest.empty())return false;
     out=w;
     return true;
 }
 
 // What a machine plays by: the host's value as a guest in a room whose host published a word, else its own ini.
 enum class Source : std::uint8_t { local, host, localHostSilent };
-struct Effective { bool vanillaRecruit=false,npcFreeSquadCover=false; Source source=Source::local; };
-constexpr Effective Decide(bool inRoom,bool isHost,bool hostWord,const Word& host,bool localRecruit,bool localCover) noexcept {
-    if(!inRoom || isHost)return Effective{localRecruit,localCover,Source::local};
-    if(!hostWord)return Effective{localRecruit,localCover,Source::localHostSilent};
-    return Effective{host.vanillaRecruit,host.npcFreeSquadCover,Source::host};
+struct Effective { bool vanillaRecruit=false,npcFreeSquadCover=false; Source source=Source::local; scopespread::Params scope{}; };
+constexpr Effective Decide(bool inRoom,bool isHost,bool hostWord,const Word& host,bool localRecruit,bool localCover,
+                           const scopespread::Params& localScope=scopespread::Params{}) noexcept {
+    if(!inRoom || isHost)return Effective{localRecruit,localCover,Source::local,localScope};
+    if(!hostWord)return Effective{localRecruit,localCover,Source::localHostSilent,localScope};
+    return Effective{host.vanillaRecruit,host.npcFreeSquadCover,Source::host,host.scope};
+}
+// Whether two ScopeSpread settings play the same (the word's units: what a guest would see of this machine's).
+constexpr bool SameScope(const scopespread::Params& a,const scopespread::Params& b) noexcept {
+    return a.on==b.on && (!a.on || (ScopeToWord(a.sniperHip)==ScopeToWord(b.sniperHip) &&
+        ScopeToWord(a.sniperHipMin)==ScopeToWord(b.sniperHipMin) && ScopeToWord(a.hip)==ScopeToWord(b.hip) &&
+        ScopeToWord(a.aim)==ScopeToWord(b.aim)));
 }
 
 // The room's builds compared, for the menu and the log: members whose word is missing (an older All Forces) or whose

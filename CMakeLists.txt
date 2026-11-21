@@ -42,6 +42,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/storerecoil.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # A soldier's zoomed scope as a real optic (src/infantryscope.cpp: the cue, the stock crosshair's draw held back).
 target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
+# The player's scoped weapons spread by the scope (src/scope_spread.cpp: the weapon creation's call, the shot entry's round).
+target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)
 # First person on foot (src/firstperson.cpp: the camera at the head, the arms and weapon drawn as a viewmodel; the
 # arithmetic in src/fp_view.h, checked offline by tools/fp_view_check.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp src/fp_skin_gpu.cpp src/vehicle_look.cpp)
@@ -840,6 +842,11 @@ add_executable(coop_attr_test tests/coop_attr_test.cpp)
 target_include_directories(coop_attr_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(coop_attr_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME coop_attr COMMAND coop_attr_test)
+# The scoped weapons' spread rule (src/scope_spread_logic.h); its guard and native audit are with the Python tests below.
+add_executable(scope_spread_test tests/scope_spread_test.cpp)
+target_include_directories(scope_spread_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(scope_spread_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME scope_spread COMMAND scope_spread_test)
 add_executable(room_ui_test tests/room_ui_test.cpp)
 target_compile_options(room_ui_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_ui COMMAND room_ui_test)
@@ -2163,6 +2170,11 @@ add_test(NAME lock_cue COMMAND lock_cue_test)
 # the units) and the stock SGOs' tops (docs/vehicle-top-speed-re.md); without the game: skipped (77).
 add_test(NAME drive_gear_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drive_gear_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(drive_gear_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The scoped weapons' spread: its wiring and the weapon table's sniper categories (offline), and the native sites it stands
+# on (src/scope_spread.cpp, docs/scope-accuracy-re.md: read-only, EDF6_NATIVE_DLL unset skips).
+add_test(NAME scope_spread_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_guard.py")
+add_test(NAME scope_spread_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(scope_spread_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The Car's (Grape's) seat inputs and the 505 / 601 / 603's against the keys of the plugin's add-on weapons
 # (docs/stock-payload-re.md §2.1): read-only, the game's EDF.dll found like drive_gear_native.
 add_test(NAME car_input_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/car_input_native_audit.py" "${EDF6_NATIVE_DLL}")
