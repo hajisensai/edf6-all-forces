@@ -49,20 +49,20 @@ void WingBudgets() {
 }
 
 void WingReasons() {
-    const float far=25.0f;
+    const float range=25.0f;
     WingGoal g{true,false,false,0.0f,0.0f,0.0f,0.0f};
-    Check(WingWhy(g,far)==Why::evade,"pressed by a crowd: dash away (whatever the way)");
+    Check(WingWhy(g,range)==Why::evade,"pressed by a crowd: dash away (whatever the way)");
     g=WingGoal{false,true,false,30.0f,0.0f,40.0f,20.0f};
-    Check(WingWhy(g,far)==Why::goal,"a fight's goal 30 m off, clear: dash");
-    g.goalDist=20.0f;Check(WingWhy(g,far)==Why::none,"20 m: walk (the dash overshoots)");
+    Check(WingWhy(g,range)==Why::goal,"a fight's goal 30 m off, clear: dash");
+    g.goalDist=20.0f;Check(WingWhy(g,range)==Why::none,"20 m: walk (the dash overshoots)");
     g.goalDist=30.0f;g.threat=true;g.threatDot=0.9f;
-    Check(WingWhy(g,far)==Why::none,"never towards the nearest enemy");
-    g.threatDot=0.2f;Check(WingWhy(g,far)==Why::goal,"across or away from it: dash");
-    g.threat=false;g.clear=10.0f;Check(WingWhy(g,far)==Why::none,"a wall 10 m ahead: no dash");
-    g.clear=40.0f;g.wayDist=5.0f;Check(WingWhy(g,far)==Why::none,"the route turns 5 m ahead: no dash");
+    Check(WingWhy(g,range)==Why::none,"never towards the nearest enemy");
+    g.threatDot=0.2f;Check(WingWhy(g,range)==Why::goal,"across or away from it: dash");
+    g.threat=false;g.clear=10.0f;Check(WingWhy(g,range)==Why::none,"a wall 10 m ahead: no dash");
+    g.clear=40.0f;g.wayDist=5.0f;Check(WingWhy(g,range)==Why::none,"the route turns 5 m ahead: no dash");
     g=WingGoal{false,false,false,40.0f,0.0f,40.0f,20.0f};
-    Check(WingWhy(g,far)==Why::none,"keeping up 40 m behind: walk");
-    g.goalDist=60.0f;Check(WingWhy(g,far)==Why::follow,"keeping up 60 m behind: dash");
+    Check(WingWhy(g,range)==Why::none,"keeping up 40 m behind: walk");
+    g.goalDist=60.0f;Check(WingWhy(g,range)==Why::follow,"keeping up 60 m behind: dash");
     Check(WingWhy(g,0.0f)==Why::none,"no range: no dash");
     Check(Rested(1500,1.5f) && !Rested(1499,1.5f) && Rested(0,0.0f) && !Rested(100000,std::nanf("")),"the cooldown");
 }

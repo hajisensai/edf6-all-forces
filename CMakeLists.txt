@@ -1363,6 +1363,10 @@ set_tests_properties(edf41tank_pose_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRO
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_cover_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# The soldiers' own dashes (src/npcai.cpp Mobility; docs/npc-mobility-re.md): the signatures it checks, the states the
+# presses enter, the only writers of d7B / d72, the Wing Diver's energy spend run on a stand-in.
+add_test(NAME npc_mobility_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_mobility_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_mobility_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):
 # the copy against fake visitors, its wiring in jet_bay.cpp / make_proteus.py, and the contract on the real EDF.dll.
 add_executable(ifc_model_test EXCLUDE_FROM_ALL tests/ifc_model_test.cpp)

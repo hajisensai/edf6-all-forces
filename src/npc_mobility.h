@@ -65,14 +65,14 @@ inline const char* WhyName(Why w) noexcept {
 // dash at the waist, `wayDist` m to the route's next corner.
 struct WingGoal { bool pressed,urgent,threat; float goalDist,threatDot,clear,wayDist; };
 constexpr float kWingClear=15.0f,kWingWay=8.0f;
-// Why to dash now, none when not: out of the crowd first; to a fight's goal past `far` m (not towards the enemy); a walk
+// Why to dash now, none when not: out of the crowd first; to a fight's goal past `range` m (not towards the enemy); a walk
 // to keep up past twice that. Never to a goal within reach of a walk (its fixed launch speed overshoots), along a way
 // blocked ahead or turning soon.
-inline Why WingWhy(const WingGoal& g,float far) noexcept {
+inline Why WingWhy(const WingGoal& g,float range) noexcept {
     if(g.pressed)return Why::evade;
-    if(!(far>0.0f) || !std::isfinite(g.goalDist) || g.clear<kWingClear || g.wayDist<kWingWay)return Why::none;
-    if(g.urgent)return g.goalDist>far && (!g.threat || g.threatDot<0.5f) ? Why::goal : Why::none;
-    return g.goalDist>2.0f*far && (!g.threat || g.threatDot<0.5f) ? Why::follow : Why::none;
+    if(!(range>0.0f) || !std::isfinite(g.goalDist) || g.clear<kWingClear || g.wayDist<kWingWay)return Why::none;
+    if(g.urgent)return g.goalDist>range && (!g.threat || g.threatDot<0.5f) ? Why::goal : Why::none;
+    return g.goalDist>2.0f*range && (!g.threat || g.threatDot<0.5f) ? Why::follow : Why::none;
 }
 
 // --- Fencer ---

@@ -97,12 +97,14 @@ constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
 constexpr unsigned kOneTeamWalk=0x5E0D60;
 const unsigned char kOneTeamWalkSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x18,0x41,0x56};
 
-struct SoldierClass { unsigned vtable,think; bool rolls; const char* name; };
-// Slot 68 of the Ranger and the Air Raider rolls sideways on the evade press; the Wing Diver's and the Fencer's jump /
-// boost (§3.1): the Wing Diver's jump takes it off the ground (an evade too), the Fencer only backs off.
+// How a class gets out of a crowd and over the ground (§3.6, docs/npc-mobility-re.md): slot 68 of the Ranger and the Air
+// Raider rolls sideways on the evade press (d76); the Wing Diver dashes (d7B, Mobility; her d76 is a take-off, used only
+// with her dash off); the Fencer dashes / boosts with its weapons' secondary press (d72+k, Mobility), else backs off.
+enum class Agility : std::uint8_t { roll, wingDash, fencer };
+struct SoldierClass { unsigned vtable,think; Agility agility; const char* name; };
 constexpr int kClasses=4;
-const SoldierClass kSoldiers[kClasses]={{0x17CDF28,0x596B50,true,"Ranger"},{0x17D0FF8,0x580460,true,"WingDiver"},
-                                         {0x17CF5B8,0x567080,false,"Fencer"},{0x17CF100,0x596B50,true,"AirRaider"}};
+const SoldierClass kSoldiers[kClasses]={{0x17CDF28,0x596B50,Agility::roll,"Ranger"},{0x17D0FF8,0x580460,Agility::wingDash,"WingDiver"},
+                                         {0x17CF5B8,0x567080,Agility::fencer,"Fencer"},{0x17CF100,0x596B50,Agility::roll,"AirRaider"}};
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
 const Signature kSignatures[]={
     {0x596B50,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56},16},   // Think
@@ -171,6 +173,20 @@ struct Soldier {
     ULONGLONG packReloadAt[2];
     ULONGLONG climbSince;    // its action limits have read as the climb's (kClimbLimits) since then; 0: not
     bool climbSaid;          // that stretch logged (StuckClimb)
+    // Its own dashes (Mobility, docs/npc-mobility-re.md): this frame's crowd response (Evade) and walk (MoveTo: the goal,
+    // the route's next corner, the way to it); the press in flight, the uses before it, its stick; consecutive misses
+    // (kMissOff: off for this soldier); the last one's time; the walk's progress (stuck); the hands last logged.
+    ULONGLONG evadeFrame;
+    npc::Move evadeMove;
+    float evadeDir[3];
+    ULONGLONG moveFrame;
+    float moveGoal[3],moveWay[3],moveDir[3];
+    npc::mobility::Combo mob;
+    int mobDashBefore,mobBoostBefore,mobMiss,mobHands;
+    float mobDir[3];
+    bool mobOff;
+    ULONGLONG mobAt,mobLogAt,mobPosAt;
+    float mobPos[3];
 };
 // Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
 std::deque<Soldier> soldiers;
@@ -767,6 +783,9 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     const float d=npc::Horiz(pos,waypoint);
     if(!(pace>0.0f)){Stand(h);return;}
     Move(h,dir,(d/6.0f+0.3f)*(pace<1.0f ? pace : 1.0f));
+    // The walk this frame, for its own dashes (Mobility): along the route, never straight at the goal.
+    soldier->moveFrame=GameFrame();
+    std::memcpy(soldier->moveGoal,to,12);std::memcpy(soldier->moveWay,waypoint,12);std::memcpy(soldier->moveDir,dir,12);
 }
 void Look(unsigned char* h,const float* dir) noexcept {
     // The native action may freeze look even while the script's control mask permits it.
@@ -917,15 +936,18 @@ const Enemy* NearestEnemy(const float* pos) noexcept {
     const int i=npc::grid::NearestHoriz(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },pos);
     return i>=0 ? &world.enemy[static_cast<std::size_t>(i)] : nullptr;
 }
-// Crowded (§3.6): back off, side-step or roll; true when it moved.
+// Crowded (§3.6): back off, side-step or roll; true when it moved. The response is kept for Mobility (a dash out of it).
+bool WingDashOn() noexcept;
 bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,ULONGLONG ms,const char** what) noexcept {
     if(!Cfg().npcEvade)return false;
     npc::Threat threats[kMaxThreats];
     const float reach=Cfg().npcDangerRange*2.0f;
     const int n=ThreatsNear(pos,reach,threats);
-    const bool rollReady=c.rolls && (At<std::uint32_t>(h,kControlMask)&kMaskRoll) && ms-s.rollAt>=static_cast<ULONGLONG>(Cfg().npcRollSec*1000.0f);
+    const bool rolls=c.agility==Agility::roll || (c.agility==Agility::wingDash && !WingDashOn());
+    const bool rollReady=rolls && (At<std::uint32_t>(h,kControlMask)&kMaskRoll) && ms-s.rollAt>=static_cast<ULONGLONG>(Cfg().npcRollSec*1000.0f);
     const npc::Evade e=npc::CrowdResponse(pos,threats,n,Cfg().npcDangerRange,Cfg().npcCrowd,Cfg().npcGrabRange,rollReady);
     if(e.move==npc::Move::hold)return false;
+    s.evadeFrame=GameFrame();s.evadeMove=e.move;std::memcpy(s.evadeDir,e.dir,sizeof(s.evadeDir));
     if(e.move==npc::Move::roll) {
         float x,z,rx,rz;
         npc::LocalMove(At<float>(h,kViewYaw),e.dir,1.0f,&x,&z);
@@ -1421,6 +1443,257 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
     }
 }
 
+// --- Their own dashes (docs/npc-mobility-re.md; npc_mobility.h) ---
+// After Drive (its move written, the walk recorded by MoveTo, the crowd response by Evade), on the soldiers this machine
+// runs and never a script's unit: one press a frame into the block the stock clears at the next Think (0x596BAE), taken by
+// that frame's slot 5 (0x59ABB0 / PaleWing 0x5808B0), after slot 4 has turned this frame's stick into +0x11E0, the
+// direction both dashes launch along.
+constexpr std::size_t kSecondary=0xD72;       // WeaponSet k's secondary action pressed at +k (Fencer: dash / boost)
+constexpr std::size_t kDashPress=0xD7B;       // dash pressed (the Wing Diver's: PaleWing slot 5 reads it, 0x580B06)
+constexpr unsigned kMaskSecondary=0x100,kMaskDash=0x400;   // +0x158C bits 8 / 9 keep d72 / d73, bit 10 d7B (0x573B46..)
+constexpr std::size_t kSupport=0x711;         // CharacterControl_Walk support: 2 on the ground (0x573F7C)
+constexpr std::size_t kAirFrames=0x1264;      // frames off the ground in a row (0x573F85; 0 on the ground)
+constexpr std::size_t kHumanState=0x39C;      // anything but bit 1: downed, grabbed, aboard (0x580B30)
+constexpr std::size_t kActionHolder=0x1A28;   // the action lock's holder: a weapon reloading / switching (0x590A43)
+// The Wing Diver: energy +0x308 of +0x304 (0x54A2E0), overheated +0x2FC, the dash's cost +0x2380 (0x580BA3), both dash
+// states' action limits 0xE39 (0x58387B, 0x583DBB).
+constexpr std::size_t kEnergyMax=0x304,kEnergy=0x308,kOverheat=0x2FC,kDashCost=0x2380;
+constexpr std::uint32_t kWingDashLimits=0xE39;
+// The Fencer: a weapon's SecondaryFire_Type +0x690 (0x6985A4); the swaps +0x2082 (dash -> boost) / +0x2083 (boost ->
+// dash, 0x5672B1); the action cancel window +0x2041 (a press there is that, 0x5672DA); dashes left / most +0x207C /
+// +0x2078, free to chain +0x2080 (0x567365); boosts left / most +0x2068 / +0x2064; the dash state's limits 0xA38 (0x569DD7).
+constexpr std::size_t kSecondaryType=0x690;
+constexpr std::size_t kDashToBoost=0x2082,kBoostToDash=0x2083,kCancelWindow=0x2041,kDashChain=0x2080;
+constexpr std::size_t kDashLeft=0x207C,kDashMost=0x2078,kBoostLeft=0x2068,kBoostMost=0x2064;
+constexpr std::uint32_t kFencerDashLimits=0xA38;
+constexpr ULONGLONG kFencerGapMs=500;   // between two of a Fencer's own moves (the stock chain interval +0x2074: 0.5 s)
+const Signature kWingDashSigs[]={
+    {0x580B06,{0x44,0x38,0xBF,0x7B,0x0D,0x00,0x00,0x0F,0x84,0xEF,0x00,0x00,0x00,0xF6,0x87,0xD0},16},   // d7B, then +0x5D0 & 4
+    {0x580B20,{0xF7,0x87,0x8C,0x15,0x00,0x00,0x00,0x04,0x00,0x00,0x0F,0x84,0xD2,0x00,0x00,0x00},16},   // mask bit 10
+    {0x580B30,{0xF7,0x87,0x9C,0x03,0x00,0x00,0xFD,0xFF,0xFF,0xFF},10},                                 // +0x39C & ~2
+    {0x580B40,{0x44,0x39,0xBF,0xFC,0x02,0x00,0x00},7},                                                 // not overheated
+    {0x580BA3,{0xF3,0x0F,0x10,0x8F,0x80,0x23,0x00,0x00},8},                                            // the cost +0x2380
+    {0x54A2E0,{0xF3,0x0F,0x10,0x81,0x08,0x03,0x00,0x00,0x0F,0x2F,0xC8,0x72,0x0B,0xC7,0x81,0x08},16},   // cost >= energy: 0
+    {0x54A2F8,{0xF3,0x0F,0x10,0x91,0x04,0x03,0x00,0x00},8},                                            // the tank +0x304
+    {0x5804B6,{0x83,0xB9,0xFC,0x02,0x00,0x00,0x01},7},                                                 // overheated: free
+    {0x58387B,{0xC7,0x87,0xD0,0x05,0x00,0x00,0x39,0x0E,0x00,0x00},10},                                 // 0x583820: 0xE39
+    {0x583DBB,{0xC7,0x87,0xD0,0x05,0x00,0x00,0x39,0x0E,0x00,0x00},10},                                 // 0x583D60: 0xE39
+    {0x573B60,{0x0F,0xBA,0xE0,0x0A,0x72,0x09,0x66,0xC7,0x86,0x7B,0x0D,0x00,0x00,0x00,0x00},15},        // bit 10 keeps d7B
+    {0x590A43,{0x48,0x8B,0x89,0x28,0x1A,0x00,0x00,0x48,0x3B,0xCE},10},                                 // lock holder +0x1A28
+    {0x573F7C,{0x80,0xBE,0x11,0x07,0x00,0x00,0x02},7},                                                 // +0x711 == 2
+};
+const Signature kFencerMoveSigs[]={
+    {0x59AE21,{0x41,0x8B,0x90,0x90,0x06,0x00,0x00,0x83,0xFA,0x06},10},                                 // type 6: the shield
+    {0x59AE42,{0x41,0x80,0xBC,0x1E,0x72,0x0D,0x00,0x00,0x00},9},                                       // d72 + set
+    {0x573B46,{0x0F,0xBA,0xE0,0x08,0x72,0x07,0xC6,0x86,0x72,0x0D,0x00,0x00,0x00},13},                  // bit 8 keeps d72
+    {0x573B53,{0x0F,0xBA,0xE0,0x09,0x72,0x07,0xC6,0x86,0x73,0x0D,0x00,0x00,0x00},13},                  // bit 9 keeps d73
+    {0x6985A4,{0x48,0x63,0x81,0x90,0x06,0x00,0x00},7},                                                 // SecondaryFire_Type
+    {0x5672B1,{0x41,0x8B,0x08,0x33,0xF6,0x8B,0xC1,0x40,0x38,0xB3,0x82,0x20,0x00,0x00,0x74,0x06},16},   // dash -> boost
+    {0x5672C7,{0x40,0x38,0xB3,0x83,0x20,0x00,0x00},7},                                                 // boost -> dash
+    {0x5672DA,{0x40,0x38,0xB3,0x41,0x20,0x00,0x00},7},                                                 // the cancel window
+    {0x56732E,{0x39,0xB3,0x7C,0x20,0x00,0x00},6},                                                      // dashes left
+    {0x567365,{0x40,0x38,0xB3,0x80,0x20,0x00,0x00},7},                                                 // free to chain
+    {0x569DD7,{0xC7,0x83,0xD0,0x05,0x00,0x00,0x38,0x0A,0x00,0x00},10},                                 // the dash: 0xA38
+    {0x569F52,{0x8B,0x83,0x7C,0x20,0x00,0x00},6},                                                      // a dash used
+    {0x566C39,{0x39,0xAB,0x68,0x20,0x00,0x00},6},                                                      // boosts left
+    {0x566C62,{0xFF,0x8B,0x68,0x20,0x00,0x00},6},                                                      // a boost used
+    {0x590A43,{0x48,0x8B,0x89,0x28,0x1A,0x00,0x00,0x48,0x3B,0xCE},10},                                 // lock holder +0x1A28
+    {0x573F7C,{0x80,0xBE,0x11,0x07,0x00,0x00,0x02},7},                                                 // +0x711 == 2
+};
+bool wingDashOk=false,fencerMoveOk=false;
+bool WingDashOn() noexcept { return wingDashOk && Cfg().npcWingDash; }
+// Each checked on its own: a mismatch turns that one off (a line logged), never the rest of the AI.
+bool MobilitySigs(const Signature* sigs,std::size_t n,const char* what) noexcept {
+    for(std::size_t i=0;i<n;++i) {
+        bool same=false;
+        __try { same=Matches(sigs[i].rva,sigs[i].bytes,sigs[i].size); } __except(EXCEPTION_EXECUTE_HANDLER){same=false;}
+        if(!same){Log("NPCAI %s off: signature %#zx not as docs/npc-mobility-re.md reads it",what,sigs[i].rva);return false;}
+    }
+    return true;
+}
+void InstallMobility() noexcept {
+    wingDashOk=MobilitySigs(kWingDashSigs,sizeof(kWingDashSigs)/sizeof(kWingDashSigs[0]),"wing dash");
+    fencerMoveOk=MobilitySigs(kFencerMoveSigs,sizeof(kFencerMoveSigs)/sizeof(kFencerMoveSigs[0]),"fencer dash / boost");
+    Log("NPCAI own dashes: Wing Diver %s, Fencer %s",wingDashOk ? "on" : "off",fencerMoveOk ? "on" : "off");
+}
+
+// This frame's walk (MoveTo), when it walked: how far its goal, the route's next corner and its rise, the way to it.
+struct Way { bool walking; float goalDist,wayDist,rise; float dir[3]; };
+Way WayOf(const Soldier& s,const float* pos) noexcept {
+    Way w{};
+    if(s.moveFrame!=GameFrame() || s.moveFrame==0)return w;
+    w.walking=true;
+    w.goalDist=npc::Horiz(pos,s.moveGoal);w.wayDist=npc::Horiz(pos,s.moveWay);w.rise=s.moveWay[1]-pos[1];
+    std::memcpy(w.dir,s.moveDir,12);
+    return w;
+}
+// The walks no dash is for: to a box, its seat, the support route's quiet walk.
+bool DashFree(const Plan& p) noexcept {
+    static const char* const kQuiet[]={"to a box","to its seat","support route","support follow","attack-move stand"};
+    for(const char* m:kQuiet)if(std::strcmp(p.move,m)==0)return false;
+    return true;
+}
+// A walk that is a fight's or an order's (not keeping up with someone): a target, falling back, a move order.
+bool Urgent(const Soldier& s,const Plan& p) noexcept {
+    return s.target.obj || std::strcmp(p.move,"fall back")==0 || std::strcmp(p.move,"move order")==0 ||
+           std::strcmp(p.move,"attack-move")==0;
+}
+// The m free along horizontal `dir` at the waist, up to `most`.
+float ClearAhead(const float* pos,const float* dir,float most) noexcept {
+    const float from[3]={pos[0],pos[1]+1.0f,pos[2]},to[3]={from[0]+dir[0]*most,from[1],from[2]+dir[2]*most};
+    float hit[3];
+    const float wall=MapRay(from,to,hit);
+    return wall<0.0f || !std::isfinite(wall) ? most : wall;
+}
+// The nearest enemy within twice the danger reach, and the cosine between `dir` and the way to it.
+bool ThreatAhead(const float* pos,const float* dir,float* dot) noexcept {
+    const Enemy* e=NearestEnemy(pos);
+    *dot=-1.0f;
+    if(!e || npc::Horiz(pos,e->aim)>=Cfg().npcDangerRange*2.0f)return false;
+    float to[3];
+    if(npc::HorizDir(pos,e->aim,to))*dot=to[0]*dir[0]+to[2]*dir[2];
+    return true;
+}
+// The press in flight ended: misses counted (kMissOff in a row: off for this soldier, one line).
+void MobilityOutcome(Soldier& s,const unsigned char* h,npc::mobility::Outcome o,const char* what) noexcept {
+    if(o==npc::mobility::Outcome::pending)return;
+    if(npc::mobility::CountMiss(s.mobMiss,o) && !s.mobOff) {
+        s.mobOff=true;
+        Log("NPCAI %s %p: %d presses in a row not taken (limits 0x%X mask 0x%X state 0x%X lock %p): its own dashes off for it",what,h,
+            s.mobMiss,At<std::uint32_t>(h,kActionLimits),At<std::uint32_t>(h,kControlMask),At<std::uint32_t>(h,kHumanState),
+            At<const void*>(h,kActionHolder));
+    }
+}
+
+// The Wing Diver's dash (d7B): its gates and budget read first (never pressed to be refused, never the stock's
+// overheat), out of a crowd, else along the route to a far goal; NpcWingDashSec between two, taken or not.
+void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+    const Config& c=Cfg();
+    const ULONGLONG frame=GameFrame();
+    if(npc::mobility::Busy(s.mob)) {
+        const npc::mobility::Step st=npc::mobility::Advance(s.mob,frame,At<std::uint32_t>(h,kActionLimits)==kWingDashLimits,false);
+        if(st.outcome==npc::mobility::Outcome::missed && c.debug && ms-s.mobLogAt>=kLogMs) {
+            s.mobLogAt=ms;
+            Log("WDDASH refused %p: limits 0x%X mask 0x%X state 0x%X overheat %d lock %p air frames %d",h,At<std::uint32_t>(h,kActionLimits),
+                At<std::uint32_t>(h,kControlMask),At<std::uint32_t>(h,kHumanState),At<std::int32_t>(h,kOverheat),
+                At<const void*>(h,kActionHolder),At<std::int32_t>(h,kAirFrames));
+        }
+        MobilityOutcome(s,h,st.outcome,"WingDiver");
+        return;
+    }
+    if(!WingDashOn() || s.mobOff || h[kJumpPress])return;
+    const unsigned mask=At<std::uint32_t>(h,kControlMask);
+    if(!(mask&kMaskMove) || !npc::mobility::Rested(ms-s.mobAt,c.npcWingDashSec))return;
+    const npc::mobility::WingState st{(mask&kMaskDash)!=0,(At<std::uint32_t>(h,kActionLimits)&4)!=0,(At<std::uint32_t>(h,kHumanState)&~2u)!=0,
+                                      At<std::int32_t>(h,kOverheat)!=0,At<const void*>(h,kActionHolder)!=nullptr,h[kSupport]!=2,
+                                      At<float>(h,kEnergy),At<float>(h,kEnergyMax),At<float>(h,kDashCost)};
+    if(!npc::mobility::WingReady(st,c.npcWingDashReserve))return;
+    const bool evading=s.evadeFrame==frame && (s.evadeMove==npc::Move::back || s.evadeMove==npc::Move::roll);
+    const Way w=WayOf(s,pos);
+    npc::mobility::WingGoal g{evading,Urgent(s,p),false,0.0f,-1.0f,0.0f,0.0f};
+    float dir[3];
+    if(evading)std::memcpy(dir,s.evadeDir,12);
+    else {
+        if(!w.walking || !DashFree(p) || p.fire)return;   // a shot going out stays where it is
+        std::memcpy(dir,w.dir,12);
+        g.goalDist=w.goalDist;g.wayDist=w.wayDist;
+        if(g.goalDist<=c.npcWingDashFar)return;   // the ray below only for a goal it may dash to
+        g.threat=ThreatAhead(pos,dir,&g.threatDot);
+        g.clear=ClearAhead(pos,dir,npc::mobility::kWingClear+1.0f);
+    }
+    const npc::mobility::Why why=npc::mobility::WingWhy(g,c.npcWingDashFar);
+    if(why==npc::mobility::Why::none)return;
+    if(npc::mobility::Begin(s.mob,npc::mobility::Act::dash,npc::mobility::Ability{0,-1},frame)<0)return;
+    Move(h,dir,1.0f);   // a full stick: +0x11E0 past 0.5 (0x583947), else the dash goes straight ahead
+    h[kDashPress]=1;
+    s.mobAt=ms;
+    if(c.debug)Log("WDDASH %p why=%s e=%.0f/%.0f C=%.1f goal=%.0f clear=%.0f air=%d stick=(%.2f,%.2f)",h,npc::mobility::WhyName(why),
+                   st.energy,st.energyMax,st.cost,g.goalDist,g.clear,st.air,At<float>(h,kMoveX),At<float>(h,kMoveZ));
+}
+
+// The Fencer's dash / boost (d72+k, the hand whose weapon does it): the stock's own presses on those hands taken off (it
+// presses every other frame while far from its target, 0x566699 / 0x56706C, spending the uses wherever the plugin's
+// stick points), then one of dash-jump / dash / boost chosen for the way (npc_mobility.h Choose) and pressed, the
+// dash-jump's boost in the dash's carry window. Nothing pressed while a weapon holds the action lock (a reload), in the
+// action cancel window, or on a hand whose trigger is held.
+void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+    using namespace npc::mobility;
+    const Config& c=Cfg();
+    if(!fencerMoveOk || !c.npcFencerMobility || s.mobOff)return;   // left stock
+    const unsigned mask=At<std::uint32_t>(h,kControlMask);
+    if(!(mask&kMaskMove))return;
+    Kind kinds[kHands]{};
+    for(int k=0;k<kHands;++k) {
+        const unsigned char* w=SetWeapon(h,k);
+        if(!w || !Readable(w,kSecondaryType+4) || !(mask&(kMaskSecondary<<k)))continue;
+        kinds[k]=Effective(At<std::int32_t>(w,kSecondaryType),h[kDashToBoost]!=0,h[kBoostToDash]!=0);
+    }
+    const Ability a=AbilityOf(kinds[0],kinds[1]);
+    const int hands=(a.dashSet+1)|((a.boostSet+1)<<2)|(h[kDashToBoost] ? 16 : 0)|(h[kBoostToDash] ? 32 : 0);
+    if(c.debug && hands!=s.mobHands)Log("FENCERMOVE %p hands: dash=set %d %d/%d boost=set %d %d/%d convert=%d/%d",h,a.dashSet,
+                                        At<std::int32_t>(h,kDashLeft),At<std::int32_t>(h,kDashMost),a.boostSet,At<std::int32_t>(h,kBoostLeft),
+                                        At<std::int32_t>(h,kBoostMost),h[kDashToBoost],h[kBoostToDash]);
+    s.mobHands=hands;
+    if(!Any(a))return;
+    if(a.dashSet>=0)h[kSecondary+a.dashSet]=0;
+    if(a.boostSet>=0)h[kSecondary+a.boostSet]=0;
+    const ULONGLONG frame=GameFrame();
+    const int dashLeft=At<std::int32_t>(h,kDashLeft),boostLeft=At<std::int32_t>(h,kBoostLeft);
+    if(Busy(s.mob)) {
+        const Step st=Advance(s.mob,frame,dashLeft<s.mobDashBefore,boostLeft<s.mobBoostBefore);
+        if(st.press>=0){Move(h,s.mobDir,1.0f);h[kSecondary+st.press]=1;}
+        if(st.outcome!=Outcome::pending)s.mobAt=ms;
+        if(st.outcome==Outcome::missed && c.debug)Log("FENCERMOVE %p: press not taken (limits 0x%X dash %d boost %d cancel %d)",h,
+                                                      At<std::uint32_t>(h,kActionLimits),dashLeft,boostLeft,h[kCancelWindow]);
+        MobilityOutcome(s,h,st.outcome,"Fencer");
+        return;
+    }
+    const std::uint32_t limits=At<std::uint32_t>(h,kActionLimits);
+    if(h[kCancelWindow] || (limits&4) || At<const void*>(h,kActionHolder) || (At<std::uint32_t>(h,kHumanState)&~2u))return;
+    // Stuck: it has wanted to walk kStuckMs and got under kStuckLeast m from where it was.
+    const Way w=WayOf(s,pos);
+    bool stuck=false;
+    if(!w.walking)s.mobPosAt=0;
+    else if(!s.mobPosAt || npc::Horiz(pos,s.mobPos)>=kStuckLeast){std::memcpy(s.mobPos,pos,12);s.mobPosAt=ms;}
+    else stuck=Stuck(npc::Horiz(pos,s.mobPos),ms-s.mobPosAt);
+    if(!Rested(ms-s.mobAt,static_cast<float>(kFencerGapMs)/1000.0f))return;
+    Situation sit{};
+    sit.evade=s.evadeFrame==frame && s.evadeMove==npc::Move::back && Rested(ms-s.rollAt,c.npcRollSec);
+    sit.landed=h[kSupport]==2;
+    sit.dashBusy=limits==kFencerDashLimits && !h[kDashChain];
+    sit.dashLeft=dashLeft;sit.boostLeft=boostLeft;
+    float dir[3]={0.0f,0.0f,0.0f},dot=-1.0f;
+    if(sit.evade)std::memcpy(dir,s.evadeDir,12);
+    else if(w.walking && DashFree(p)) {
+        std::memcpy(dir,w.dir,12);
+        sit.goalDist=w.goalDist;sit.wayDist=w.wayDist;sit.rise=w.rise;sit.stuck=stuck;
+        sit.clear=ClearAhead(pos,dir,kDashJumpClear);
+    }
+    sit.threatNear=ThreatAhead(pos,dir,&dot);
+    Ability use=a;   // a hand whose trigger is held (a charge, a swing) is left to it
+    if(use.dashSet>=0 && h[kTrigger+use.dashSet])use.dashSet=-1;
+    if(use.boostSet>=0 && h[kTrigger+use.boostSet])use.boostSet=-1;
+    const Act act=Choose(use,sit,Ranges{c.npcFencerDashJumpRange,c.npcFencerDashRange,c.npcFencerDashReserve});
+    if(act==Act::none)return;
+    const int set=Begin(s.mob,act,use,frame);
+    if(set<0)return;
+    s.mobDashBefore=dashLeft;s.mobBoostBefore=boostLeft;
+    // Up a ledge right ahead: the stick at rest, the boost straight up (0x566C97: (0, 25.2, 0)); else along the way.
+    const bool up=act==Act::boost && sit.rise>kBoostRise && sit.wayDist<kBoostStraightUp;
+    if(up){Stand(h);s.mobDir[0]=s.mobDir[1]=s.mobDir[2]=0.0f;}
+    else{Move(h,dir,1.0f);std::memcpy(s.mobDir,dir,12);}
+    h[kSecondary+set]=1;
+    if(sit.evade)s.rollAt=ms;
+    if(c.debug)Log("FENCERMOVE %p %s why=%s set=%d dash=%d boost=%d goal=%.0f way=%.0f rise=%.1f clear=%.0f stuck=%d near=%d",h,ActName(act),
+                   sit.evade ? "dodge" : up ? "boost-up" : act==Act::boost ? (stuck ? "boost-stuck" : "boost-ledge") : "way",set,dashLeft,boostLeft,sit.goalDist,
+                   sit.wayDist,sit.rise,sit.clear,stuck,sit.threatNear);
+}
+
+void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+    if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms);
+    else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms);
+}
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -1589,6 +1862,7 @@ void Think(unsigned char* h,int cls) noexcept {
     }
     s->unarmedSaid=false;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
+    if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);   // a script's unit keeps its stock moves
     if(Cfg().debug && ms-s->loggedAt>kLogMs) {
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
@@ -2397,6 +2671,7 @@ bool InstallNpcAi() noexcept {
     InstallNpcBackpack();
     InstallBargaControlKind();
     InstallBoxes();
+    InstallMobility();
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
         auto slot=reinterpret_cast<void**>(image+kSoldiers[i].vtable)+kSlotThink;
