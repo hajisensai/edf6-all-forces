@@ -4008,8 +4008,10 @@ def hud_scale_one_source() -> None:
     assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
     assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
     assert 's=hudscale::FitMap(s,width,height);' in hud and 'if(text)text->s=s;' in hud, 'map panel fitting must share geometry and font scale'
+    # a 3D world line (src/world_text.h) carries its own grid-snapped font scale; every other line is times the HUD's
+    assert 'float FontOf(const Text& t,const Line& l) noexcept { return l.world.on ? l.world.fd : hudscale::Font(l.scale,t.s); }' in hud
     for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
-        assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
+        assert 'Font(t,FontOf(t,l))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
     assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
     assert 'L"HudScale"' in plugin and 'Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax)' in plugin
     assert re.search(r'^HudScale=1\.0', ini, re.M) and '`HudScale`' in readme
