@@ -49,10 +49,17 @@ constexpr float kApproachOut=60.0f*kSize,kApproachUp=8.0f*kSize;   // m outboard
 constexpr float kApproachSpeed=70.0f,kFinalSpeed=12.0f;  // m/s over the ship's: closing, the last stretch
 constexpr float kFarSpeed=160.0f,kFarOff=500.0f;   // ...and from farther out than kFarOff (escorts 1.5-2 km out took 30 s)
 constexpr float kRecoverAccel=22.0f;         // m/s^2 a held fighter's velocity changes at most
+// Its capture (the user's test hub #42: no velocity out of nowhere, but for a capture that holds a craft's speed): only
+// within kCaptureRange of its bay's mouth does the hangar move a fighter in any direction (nose outboard, backing in);
+// farther out it flies home as the wing it is (FlyTo: wing_turn.h), its path turned at most kRecoverTurn across it.
+constexpr float kCaptureRange=kApproachOut*1.5f;
+constexpr float kRecoverTurn=30.0f;          // m/s^2 (~3 g) across its path flying home
+constexpr float kGravity=9.8f;               // m/s^2: the bank of that turn (its lift against gravity)
 constexpr float kTouch=1.5f;                 // m from its spot (and as slow, kFinalSpeed / 3): there
 static_assert(kTouch<=dreadnought::kOnSpot && kFinalSpeed/3.0f<=dreadnought::kOnSpotSpeed,"a touch at its mouth is on its spot");
 constexpr float kLined=6.0f*kSize;           // m off its mouth's line outboard it may be to come straight in
 constexpr float kHoldGainJet=1.2f,kHoldMostJet=1.5f;   // a held fighter's attitude (BodyAttitude): 1/s, rad/s
+constexpr float kWingGainJet=6.0f;           // ...flying home as a wing (FlyTo): its nose on its path, 1/s
 constexpr float kPinGain=8.0f;               // 1/s a held fighter is pulled onto its spot
 constexpr ULONGLONG kEscortGapMs=1200;       // ms between an escort flight's fighters going out
 constexpr ULONGLONG kBoardWaitMs=5000;       // ms a fighter out for a player waits at its mouth for them (boarding.cpp presses
@@ -216,9 +223,13 @@ void HoldJet(unsigned char* f,const float* vel,const float* nose,const float* up
     BodyAttitude(f,nose,up,kHoldGainJet,kHoldMostJet,omega);
     JetHangarHold(f,vel,omega);
 }
-// ...flown toward `to` (moving with the ship at `ship`): its velocity the ship's plus the closing (what stops it there,
-// at most `most` m/s), changing at kRecoverAccel at most. Its distance to `to`.
-float FlyTo(unsigned char* f,const float* to,const float* ship,const float* nose,const float* up,float most,float dt) noexcept {
+// ...flown toward `to` (moving with the ship at `ship`) at what stops it there (at most `most` m/s over the ship's).
+// `capture` (within kCaptureRange of its mouth): the hangar's hold, its velocity closing on that at kRecoverAccel in any
+// direction, its nose and up as given. Else it flies there as a wing (wing_turn.h Step, over the ship's motion): its speed
+// along its path at kRecoverAccel, its path turned at kRecoverTurn, its nose along its path, banked into the turn; `nose`
+// and `up` are not used. Its distance to `to`.
+float FlyTo(unsigned char* f,const float* to,const float* ship,const float* nose,const float* up,float most,float dt,
+            bool capture) noexcept {
     const float* p=reinterpret_cast<const float*>(f+kPosition);
     const float d[3]={to[0]-p[0],to[1]-p[1],to[2]-p[2]};
     const float dist=vec::Len(d);
@@ -226,8 +237,27 @@ float FlyTo(unsigned char* f,const float* to,const float* ship,const float* nose
     float vel[3],want[3];
     if(!JetMotion(f,vel))std::memcpy(vel,ship,12);
     for(int i=0;i<3;++i)want[i]=ship[i]+(dist>1e-3f ? d[i]/dist*closing : 0.0f);
-    Approach(vel,want,kRecoverAccel,dt);
-    HoldJet(f,vel,nose,up);
+    if(capture) {
+        Approach(vel,want,kRecoverAccel,dt);
+        HoldJet(f,vel,nose,up);
+        return dist;
+    }
+    float rel[3],wantRel[3],lateral[3];
+    for(int i=0;i<3;++i){rel[i]=vel[i]-ship[i];wantRel[i]=want[i]-ship[i];}
+    wing::Step(rel,wantRel,kRecoverAccel,kRecoverTurn,dt,lateral);
+    for(int i=0;i<3;++i)vel[i]=ship[i]+rel[i];
+    // Its nose along its path (still: as it lies), its up its lift's: the turn's pull plus gravity held, across the nose.
+    float n[3]={vel[0],vel[1],vel[2]};
+    if(!vec::Normalize(n)){const float* a=Axis3(f,2);n[0]=a[0];n[1]=a[1];n[2]=a[2];vec::Normalize(n);}
+    float u[3]={lateral[0],lateral[1]+kGravity,lateral[2]};
+    const float along=u[0]*n[0]+u[1]*n[1]+u[2]*n[2];
+    for(int i=0;i<3;++i)u[i]-=n[i]*along;
+    if(!vec::Normalize(u)){u[0]=0.0f;u[1]=1.0f;u[2]=0.0f;}
+    // Its nose kept on its path at kWingGainJet (the NPC wing's own attitude gain, jet_flight.cpp kAttGain): at the hold's
+    // 1.2/s it trailed a 160 m/s turn by 7 degrees, a crab of 20 m/s across its nose.
+    float omega[3];
+    BodyAttitude(f,n,u,kWingGainJet,kHoldMostJet,omega);
+    JetHangarHold(f,vel,omega);
     return dist;
 }
 // ...held on `at` with the ship.
@@ -389,7 +419,8 @@ void BayFrame(Hangar& h,int i,unsigned char* v,const float* ship,float dt,ULONGL
             const bool close=vec::Len(to)<kApproachOut*1.5f && out>=10.0f;
             if(close)std::memcpy(face,outboard,12);
             else{const float d[3]={aim[0]-p[0],0.0f,aim[2]-p[2]};Level(v,d,face);}
-            const float d=FlyTo(f,aim,ship,face,close ? up : wup,lined ? kFinalSpeed : vec::Len(to)>kFarOff ? kFarSpeed : kApproachSpeed,dt);
+            const float d=FlyTo(f,aim,ship,face,close ? up : wup,lined ? kFinalSpeed : vec::Len(to)>kFarOff ? kFarSpeed : kApproachSpeed,dt,
+                                vec::Len(to)<kCaptureRange);
             if(lined && d<kTouch && Relative(f,ship)<kFinalSpeed/3.0f) {
                 if(b.home && Flown(f)) {   // its player brought home: put out onto the bridge here, then in
                     b.job=BayJob::alight;b.at=ms;

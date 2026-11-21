@@ -28,7 +28,7 @@ PlayerFix player{};
 ULONGLONG recoveryTime=10000;
 bool testGearDown=true,testDoor=true;
 float doorOffset[3]={8.65f,-1.38f,1.8f};
-int boardPresses=0;
+int boardPresses=0,boardRequests=0;
 unsigned char recoveryBone[0x200]{};
 bool ramScenario=false,ramDeathWorks=true;
 int ramEnemyCount=0,ramBlasts=0,ramDeaths=0,ramVisits=0;
@@ -60,6 +60,9 @@ bool SeatPoint(const unsigned char* v,unsigned,float* at,float* reach) noexcept 
     return true;
 }
 void PressBoardButton(unsigned char*) noexcept { ++boardPresses; }
+// The catch's capture (boarding.cpp): counted, never under way across frames here.
+void BoardingRequest(unsigned char*) noexcept { ++boardRequests; }
+bool BoardingUnderway() noexcept { return false; }
 // Unrelated stores, weapons, spawning and NPC paths must not be reached by these recovery scenarios.
 void MissingRecoveryDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
 int ReadStores(unsigned char*,Store* out,int most) noexcept {
@@ -296,27 +299,68 @@ int main() {
     Put<void*>(recoverySeat,kSeatRiderCtrl,recoveryCtrl);EnsurePilot(recoveryVehicle);
     Check(npcResumes==1,"a real pilot who actually boarded completes delayed handback");
     jet::jets[0]=jet::Jet{};rescueChoiceScenario=false;
-    // Descending parachute and an offset native door: repeated production Catch -> AutoFly physics steps must put
-    // the door in reach, not leave it six metres ahead. Begin with the body centre near the human but the door far.
-    ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=j.vel[2]=0.0f;j.vel[1]=-6.0f;
-    float* body=reinterpret_cast<float*>(recoveryVehicle+kPosition);body[0]=0;body[1]=300;body[2]=0;
+    // Descending parachute and an offset native door (test hub #42: no velocity out of nowhere): the catch jet is a wing
+    // all the way in. Repeated production Catch -> AutoFly physics steps fly a pass at the door's point, never slower
+    // than the wing flies and never a velocity change past what its lift and engine give, and the player is captured as
+    // the door goes by. (Until 2026-11-21 its last 250 m were a formation that wrote the velocity whole: the parachute's
+    // 6 m/s down plus a closing term, the jet sliding under the player with its nose held still.)
+    ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=90.0f;j.vel[1]=0.0f;j.vel[2]=0.0f;j.stall=false;
+    float* body=reinterpret_cast<float*>(recoveryVehicle+kPosition);body[0]=-900;body[1]=300;body[2]=40;
     float* human=reinterpret_cast<float*>(recoveryHuman+kPosition);human[0]=0;human[1]=300;human[2]=0;
     float* humanVelocity=reinterpret_cast<float*>(recoveryHuman+kHumanVel);humanVelocity[1]=-6.0f;
     bail=Bailout{};bail.state=Eject::chute;bail.caught=ObjRef::Of(recoveryVehicle);bail.caughtAt=recoveryTime;
-    catchFlight=CatchFlight{recoveryVehicle,{0,300,0},150.0f,{0,-6,0},{0,0,1}};
-    for(int frame=0;frame<600;++frame) {
+    catchFlight=CatchFlight{recoveryVehicle,{0,300,0}};
+    boardRequests=0;
+    float slowest=1e9f,hardest=0.0f,capturedGap=-1.0f;
+    for(int frame=0;frame<60*30 && !boardRequests;++frame) {
         Put<float>(recoveryBone,kBoneWorld506+0x34,body[1]-1.38f);
         Catch(recoveryHuman,recoveryTime);
+        if(boardRequests){float at[3],r=0.0f;SeatPoint(recoveryVehicle,0,at,&r);capturedGap=vec::Dist(at,human);break;}
+        const float was[3]={j.vel[0],j.vel[1],j.vel[2]};
         AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+        slowest=std::fmin(slowest,vec::Len(j.vel));
+        const float dv[3]={j.vel[0]-was[0],j.vel[1]-was[1],j.vel[2]-was[2]};
+        hardest=std::fmax(hardest,vec::Len(dv)*60.0f);
         for(int i=0;i<3;++i){body[i]+=j.vel[i]/60.0f;human[i]+=humanVelocity[i]/60.0f;}
         recoveryTime+=16;
     }
-    float door[3],reach=0.0f;SeatPoint(recoveryVehicle,0,door,&reach);
-    Check(vec::Dist(door,human)<0.1f && boardPresses>0,"descending native door converges inside actual boarding reach");
-    Check(std::fabs(j.vel[1]+6.0f)<0.01f,"close catch follows parachute speed without Air's 25 m/s stall floor");
-    for(int i=0;i<3;++i){catchFlight.target[i]=body[i];catchFlight.drift[i]=humanVelocity[i];j.vel[i]=30.0f;}
-    AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
-    Check(vec::Dist(j.vel,humanVelocity)<0.001f,"zero catch error still replaces stale velocity with parachute drift");
+    Check(boardRequests>0 && capturedGap>=0.0f && capturedGap<pjet::kCaptureRange,
+          "the catch jet's pass takes the parachuting player aboard within its capture");
+    Check(slowest>=kStallFloor,"the catch jet never flies slower than a wing flies (no parachute-speed formation)");
+    Check(hardest<=(j.kind->maxG+2.0f)*kG,"no velocity out of nowhere: each frame's change within its lift and engine");
+    Check(j.phase==Phase::air && j.autopilot,"it flies on through the capture as it flew");
+    // Its first frame on the autopilot goes on from the velocity its NPC flight had (jet.cpp's entry), not its nose times
+    // a catch speed: an aircraft flying +x with its body's rows still +z was turned 90 degrees and sped up in one frame.
+    {
+        ResetJet(j);j.autopilot=false;j.vel[0]=j.vel[1]=j.vel[2]=0.0f;
+        body[0]=-900;body[1]=300;body[2]=0;
+        jet::Jet flying{};flying.m.vel[0]=120.0f;flying.m.vel[1]=-2.0f;flying.m.vel[2]=0.0f;
+        jet::seedScenario=true;jet::seedJet=&flying;
+        catchFlight=CatchFlight{recoveryVehicle,{0,300,0}};
+        AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+        jet::seedScenario=false;jet::seedJet=nullptr;
+        Check(j.autopilot && vec::Dist(j.vel,flying.m.vel)<(j.kind->maxG+2.0f)*kG/60.0f,
+              "the autopilot's first frame flies on from the NPC flight's velocity");
+    }
+    // The player takes the catch jet over at the velocity it flies (Board), not a heading times a speed.
+    {
+        ResetJet(j);j.autopilot=true;j.driven=false;j.fresh=true;
+        const float flown[3]={70.0f,-1.0f,40.0f};
+        std::memcpy(j.sent,flown,12);std::memcpy(j.measured,flown,12);
+        jet::seedScenario=true;jet::seedJet=nullptr;
+        const float at[3]={0.0f,400.0f,0.0f};
+        Board(j,recoveryVehicle,at,400.0f);
+        jet::seedScenario=false;
+        Check(vec::Dist(j.vel,flown)<0.001f && j.phase==Phase::air && !j.autopilot,"taken over at the velocity it flew");
+    }
+    // A target on its very position (nothing to aim at): still a frame of flight, never the stale velocity left as it was.
+    ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=j.vel[1]=0.0f;j.vel[2]=150.0f;
+    for(int i=0;i<3;++i)catchFlight.target[i]=body[i];
+    {
+        const float stale[3]={j.vel[0],j.vel[1],j.vel[2]};
+        AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+        Check(j.active && vec::Dist(j.vel,stale)>0.001f,"zero catch error still runs the wing's flight");
+    }
     const float pilotVelocity[3]={j.vel[0],j.vel[1],j.vel[2]};
     Put<void*>(recoverySeat,kSeatRiderCtrl,nullptr);
     AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
@@ -331,16 +375,18 @@ int main() {
           "no crewed rescue aircraft means no aircraft is spawned in the air");
     Put<void*>(recoverySeat,kSeatRiderCtrl,recoveryCtrl);
     bail.caught=ObjRef::Of(recoveryVehicle);bail.caughtAt=recoveryTime;
-    catchFlight=CatchFlight{recoveryVehicle,{0,300,0},150.0f,{0,-6,0},{0,0,1}};
-    testDoor=false;const int presses=boardPresses;Catch(recoveryHuman,recoveryTime);
-    Check(!catchFlight.hasDoor && boardPresses==presses,"an unreadable door never falls back to boarding by body centre");
+    catchFlight=CatchFlight{recoveryVehicle,{0,300,0}};
+    for(int i=0;i<3;++i)body[i]=human[i];   // the body on the player: only an unreadable door keeps it from boarding
+    testDoor=false;const int presses=boardPresses,requests=boardRequests;Catch(recoveryHuman,recoveryTime);
+    Check(!catchFlight.hasDoor && boardPresses==presses && boardRequests==requests,
+          "an unreadable door never falls back to boarding by body centre");
     Check(vec::Dist(catchFlight.target,human)>kCatchBelow-0.001f && vec::Dist(catchFlight.target,human)<kCatchBelow+0.001f &&
           catchFlight.target[1]<human[1],"with no door the jet is still sent for the player, under them");
     // No door known (the first frames of a jet just made: hasDoor starts false) is a flight like any other: Air steers,
     // and the velocity is never last frame's left as it was (2026-10-07 review: up to 45 s with no terrain or stall step).
     ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=j.vel[1]=0.0f;j.vel[2]=150.0f;
     body[0]=0;body[1]=300;body[2]=0;
-    catchFlight=CatchFlight{recoveryVehicle,{-1500,300,0},150.0f,{0,0,0},{0,0,1}};
+    catchFlight=CatchFlight{recoveryVehicle,{-1500,300,0}};
     const float stale[3]={j.vel[0],j.vel[1],j.vel[2]};
     AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
     Check(!catchFlight.hasDoor && vec::Dist(j.vel,stale)>0.001f,"no door: the first frame already runs the flight");
@@ -353,8 +399,10 @@ int main() {
     testDoor=true;
 
     const float at[3]={0,0,0},offsetDoor[3]={20,-2,0},p[3]={20,-2,0},velocity[3]={0,-6,0},spin[3]={0,0.5f,0};
-    float target[3],drift[3];pjet::CatchDoor(p,velocity,at,offsetDoor,velocity,spin,1.0f/60.0f,target,drift);
-    Check(std::fabs(drift[2]-10.0f)<0.001f,"door rotation is cancelled in formation translation feed-forward");
+    float target[3];pjet::CatchDoor(p,velocity,at,offsetDoor,velocity,spin,1.0f/60.0f,target);
+    // The door's own rotation (0.5 rad/s round y, 20 m out: 10 m/s along z) is relative motion led one step: 1/6 m.
+    Check(std::fabs(target[0])<0.001f && std::fabs(target[1])<0.001f && std::fabs(target[2]-10.0f/60.0f)<0.001f,
+          "the body's target leads the door's rotation by one physics step only");
     // Real EnemyRam and Blocked, with only enemy enumeration, native charge creation and native death replaced.
     ramScenario=true;recoveryConfig.playerJetRamDamage=1.0f;
     const float ramPos[3]={0,0,0};
