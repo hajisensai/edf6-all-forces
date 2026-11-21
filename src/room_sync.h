@@ -5,10 +5,11 @@
 // Contract between the menu screen (src/room_ui.cpp, stage 4) and the sync (src/room_sync.cpp, stage 6).
 // Every call comes from the game's UI thread (the HUiRoom OnUpdate wrapper; offline HQ never calls it).
 #pragma once
-#include "support_config.h"
 #include "support_loadout.h"
 #include <cstddef>
 #include <cstdint>
+
+namespace crew { struct SupportConfig; }   // support_config.h (not included: the NPC fixtures #define `vehicle`)
 
 namespace crew::roomsync {
 
