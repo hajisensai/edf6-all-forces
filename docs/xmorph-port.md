@@ -285,6 +285,8 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 
 ## 未做 / 风险
 
+- 2026-11-21：飞机、步行机甲、步兵、货车、炮台也改成逐像素粗糙度 / 金属度、发光图进 light 材质、网格自带法线，旋翼盘网格与帧保留待透明材质；
+  light 材质与 X-Morph 发光的逆向、`light` 语义（每单位 albedo 的发光）见 [xmorph-redo-1121.md](xmorph-redo-1121.md)。
 - **全部未进游戏看**：灯带的亮度（`light_color` 2.0，按无畏舰的 4 减半估的）、高光图到粗糙度 / 金属度的映射（`SPECULAR_RM`，按观感估的）
   都可能要按实机调；轮子随车速转的观感、填充轮是否真的看不见、负重轮比地面高出的履带厚度（车会下沉 2–6 cm）都要实机看。
 - 履带贴图滚动：已由 `make_tracked_combat.STATIC_TRACKS` 把 `tank_caterpillar_animation_info[0]` 置 0（`docs/model-lod.md` §3），贴图不动；
