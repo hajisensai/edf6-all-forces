@@ -3,7 +3,7 @@
 Every guard scope_lens.cpp checks at install is compared with the DLL, every redirected call site is shown to call the
 callee scope_lens.cpp chains to, and the facts the design rests on are read from the code itself: the slot layout, the
 camera queue's join, the TraceCamera factory and its stereo_camera caller, the command ring's one-unit command, the
-post's block copied whole when recorded, the recording before the screen HUD. No binary is loaded or executed. Missing
+the recording before the screen HUD. No binary is loaded or executed. Missing
 --dll skips with 77.
 """
 from pathlib import Path
@@ -61,20 +61,20 @@ def rip(at, size):
 # 1. Every guard of kGuards, byte for byte.
 table = re.search(r'const Guard kGuards\[\]=\{(.*?)\n\};', source, re.S).group(1)
 guards = re.findall(r'\{([^,]+),(k\w+),sizeof\(\2\),"([^"]+)"\}', table)
-assert len(guards) == 22, len(guards)
+assert len(guards) == 18, len(guards)
 for expression, name, what in guards:
     at = evaluate(expression)
     expected = signature(name)
     assert binary[at:at + len(expected)] == expected, (what, hex(at))
 
-# 2. The eight redirected calls: each guard ends in the call, which calls the callee scope_lens.cpp chains to.
-for site, callee in (('kProjectCall', 'kProject'), ('kGbufferCall', 'kGbuffer'), ('kPostCall', 'kPost'),
+# 2. The seven redirected calls: each guard ends in the call, which calls the callee scope_lens.cpp chains to.
+for site, callee in (('kProjectCall', 'kProject'), ('kPostCall', 'kPost'),
                      ('kPlainCall', 'kPlain'), ('kCopyCall', 'kCopy'), ('kHistoryCall', 'kHistory'),
                      ('kModeCall', 'kModeTail'), ('kSubmitCall', 'kSubmit')):
     call(value(site), value(callee))
     assert any(evaluate(e) + len(signature(n)) == value(site) + 5 for e, n, _ in guards), site
 # All inside the recording 0x11978D0, which System::update calls after the camera queue's join.
-for site in ('kProjectCall', 'kGbufferCall', 'kPostCall', 'kPlainCall', 'kCopyCall', 'kHistoryCall', 'kModeCall',
+for site in ('kProjectCall', 'kPostCall', 'kPlainCall', 'kCopyCall', 'kHistoryCall', 'kModeCall',
              'kSubmitCall'):
     assert 0x11978D0 < value(site) < 0x11988D0, site
 call(0x1198F61, 0x1195A80)
@@ -95,24 +95,10 @@ assert binary[0x1198681:0x1198689] == bytes.fromhex('83bc3bd004000000')        #
 assert binary[0x11987A4:0x11987AC] == bytes.fromhex('83bc3bd004000003')        # cmp [rbx+rdi+4D0h],3
 assert binary[0x11986F4:0x11986FC] == bytes.fromhex('80bc3b9805000000')        # cmp [rbx+rdi+598h],0: +0xC8 the history
 assert binary[0x11986E8:0x11986EF] == bytes.fromhex('4c8db1c0050000')          # lea r14,[rcx+5C0h]: +0xF0 a colour
-# The post's block: system+0x2A0 written for the slot, then system+0x280 passed in r9.
-assert binary[0x119872A:0x1198731] == bytes.fromhex('48898fa0020000')
-assert binary[0x1198731:0x1198738] == bytes.fromhex('4c8d8f80020000')
-# 0x112C230 copies its r9 block (0x48 bytes) when it records: movups [rsi], [rsi+10h], [rsi+20h], [rsi+30h], movsd [rsi+40h].
-assert binary[0x112C253:0x112C256] == bytes.fromhex('498bf1')                  # mov rsi,r9
-for at, pattern in ((0x112C368, '0f1006'), (0x112C36F, '0f104e10'), (0x112C377, '0f104620'), (0x112C37F, '0f104e30'),
-                    (0x112C387, 'f20f104640')):
-    assert binary[at:at + len(pattern) // 2] == bytes.fromhex(pattern), hex(at)
-# 0x112B230's argument is three 0x20-byte handles copied with 0x8F000 (+0, +0x20, +0x40).
-call(0x112B2B2, 0x8F000)
-call(0x112B2BF, 0x8F000)
-call(0x112B2CC, 0x8F000)
-assert binary[0x112B2B7:0x112B2BB] == bytes.fromhex('488d5720') and binary[0x112B2C4:0x112B2C8] == bytes.fromhex('488d5740')
-# The recording's locals: constructed 0x1120500, destroyed 0x11207A0 at the slot's end.
-call(0x11987DE, 0x11207A0)
-call(0x11987E7, 0x11207A0)
-call(0x11987F0, 0x11207A0)
-assert value('kHandleNew') == 0x1120500 and value('kHandleAssign') == 0x8F000 and value('kHandleFree') == 0x11207A0
+# Viewport 0's tail is recorded where the engine records it, inside its own iteration, right after its world (2026-11-21:
+# holding it until after viewport 3's world ran the post stage on viewport 3's renderer state - a frozen screen with a
+# black S x S block top left in the game). The lens command goes in before it; nothing of viewport 0's is re-recorded.
+assert 'kGbufferCall' not in source and 'kPostBlock' not in source and 'kHandleNew' not in source
 
 # 4. Viewport set (0x1198C40): rect -> +0x34, target size -> +0x44 / +0x48, then the targets (0x11997A0).
 assert binary[0x1198C6A:0x1198C6E] == bytes.fromhex('0f114134')
@@ -165,4 +151,4 @@ assert rip(0x1198894, 7) == value('kCommands')                                 #
 assert binary[0x111B8FE:0x111B905] == bytes.fromhex('488db340010000')          # rsi = context+0x140
 assert binary[0x1118AC0:0x1118AC4] == bytes.fromhex('488b4908')                # a command's D3D context: +8
 
-print('scope lens native anchors passed:', len(guards), 'guards, 8 redirected calls, slots, camera, ring')
+print('scope lens native anchors passed:', len(guards), 'guards, 7 redirected calls, slots, camera, ring')

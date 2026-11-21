@@ -1,12 +1,14 @@
 // The picture-in-picture scope's lens view (src/scope_lens.cpp, the production hooks), offline, on a stand-in of the
 // engine's System (4 viewport slots), its render recording 0x11978D0 (the slot loop: lock the current camera, the
-// projection 0x118DFF0, the G-buffer set 0x112B230, the tail calls, the submit 0x111B410), its camera calls (the
+// projection 0x118DFF0, the tail calls, the submit 0x111B410), its camera calls (the
 // factory 0x82F60, the queue's join 0x1195A80, set camera 0x1193FA0, set viewport 0x1198C40) and its command ring:
 //  - nothing wanted, a stale want, another camera, a stock-zoomed frame: the recording passes through untouched;
 //  - wanted: the lens camera made once (following viewport 0's camera, viewport 3 set to S x S), armed only once the
-//    engine took it in; then viewport 0's tail held and recorded after viewport 3's world, its G-buffer set again first
-//    (the engine's own handle copy, balanced), the post's 0x48-byte block as it was for viewport 0; viewport 3's tail
-//    never recorded, one lens command in its place, which calls InfantryScopeLensCommand with the device context;
+//    engine took it in; viewport 0's tail always where the engine records it, right after its own world (2026-11-21:
+//    holding it until after viewport 3's world ran viewport 0's post stage on viewport 3's renderer state: a frozen
+//    screen with a black S x S block top left); viewport 3's tail never recorded; from the second armed recording on,
+//    one lens command right before viewport 0's tail (drawing the lens view the last recording rendered), which calls
+//    InfantryScopeLensCommand with the device context;
 //  - the lens camera aimed as viewport 0's camera, at the lens's field; taken off viewport 3 at the submit;
 //  - a resize, the mission's cameras going (recreated), a split screen, viewport 3 in use, a camera that never joins:
 //    refused once, logged, until the mission's reset (which lets the weak reference go).
@@ -53,14 +55,11 @@ unsigned char* SlotAt(unsigned i){return sys+0x4D0+i*0x188;}
 void SetSlotCamera(unsigned i,void* object,Control* control){Put<void*>(SlotAt(i),8,object);Put<void*>(SlotAt(i),0x10,control);}
 
 // What the stand-in recorders saw, in order.
-enum class Kind { project,gbuffer,tail,submit };
-struct Event { Kind kind; int slot; unsigned tail; void* c; unsigned char block[0x48]; unsigned char handles[0x60]; float fov; };
+enum class Kind { project,command,tail,submit };
+struct Event { Kind kind; int slot; unsigned tail; void* c; unsigned char block[0x48]; float fov; };
 std::vector<Event> events;
 int recordingSlot=-1;   // the slot the stand-in loop is in (the recorders do not know it; the events say)
 void __fastcall Project(void* camera,const int*) { Event e{};e.kind=Kind::project;e.slot=recordingSlot;e.c=camera;e.fov=At<float>(camera,0x24);events.push_back(e); }
-void __fastcall Gbuffer(void*,void*,void* c,void*) {
-    Event e{};e.kind=Kind::gbuffer;e.slot=recordingSlot;e.c=c;std::memcpy(e.handles,c,sizeof(e.handles));events.push_back(e);
-}
 template<unsigned T> void __fastcall Recorder(void*,void*,void* c,void* d) {
     Event e{};e.kind=Kind::tail;e.slot=recordingSlot;e.tail=T;e.c=c;
     if constexpr(T==post)std::memcpy(e.block,d,sizeof(e.block));
@@ -112,26 +111,21 @@ void Teardown() {
 alignas(16) unsigned char ring[16*64]{};
 int allocated=0,committed=0;
 void* __fastcall Alloc(void*,int n){void* u=ring+16*allocated;allocated+=n;return u;}
-void __fastcall Commit(void*,int n){committed+=n;}
-int handlesMade=0,handlesAssigned=0,handlesFreed=0;
-void* __fastcall HandleNew(void* h){++handlesMade;std::memset(h,0,0x20);return h;}
-void* __fastcall HandleAssign(void* h,const void* from){++handlesAssigned;std::memcpy(h,from,0x20);return h;}
-void* __fastcall HandleFree(void* h){++handlesFreed;std::memset(h,0xDD,0x20);return h;}
+void __fastcall Commit(void*,int n){committed+=n;Event e{};e.kind=Kind::command;e.slot=recordingSlot;events.push_back(e);}
 const unsigned char kDescVtableStandIn[8]{};
 
 void Wire() {
     systemRef=&sysRef;
     crew::scopelens::commands=commandContext;
-    project=&Project;gbuffer=&Gbuffer;
+    project=&Project;
     tails[post]=&Recorder<post>;tails[plain]=&Recorder<plain>;tails[copy]=&Recorder<copy>;
     tails[history]=&Recorder<history>;tails[modeTail]=&Recorder<modeTail>;
     submit=&Submit;setViewport=&SetViewport;setCamera=&SetCamera;factory=&Factory;alloc=&Alloc;commit=&Commit;
-    handleNew=&HandleNew;handleAssign=&HandleAssign;handleFree=&HandleFree;descVtable=kDescVtableStandIn;
+    descVtable=kDescVtableStandIn;
     installed.store(true);
 }
 
-// One recording, as 0x11978D0 runs it: per slot whose current camera locks, the projection, the G-buffer set (its
-// local handles marked with the slot), the tail (the post's block system+0x280 marked with the slot, as 0x119872A
+// One recording, as 0x11978D0 runs it: per slot whose current camera locks, the projection, the tail (the post's block system+0x280 marked with the slot, as 0x119872A
 // writes system+0x2A0), the submit.
 void Record(bool full=true) {
     events.clear();
@@ -142,9 +136,6 @@ void Record(bool full=true) {
         recordingSlot=static_cast<int>(i);
         ++control->uses;
         ProjectHook(object,reinterpret_cast<const int*>(s+0x34));
-        alignas(16) unsigned char handles[0x60];std::memset(handles,0x10+static_cast<int>(i),sizeof(handles));
-        GbufferHook(commandContext+0x2AA0,commandContext,handles,nullptr);
-        std::memset(handles,0xEE,sizeof(handles));   // the locals die with the slot's iteration
         void* colour=s+0xF0;
         if(full){std::memset(sys+0x280,0x40+static_cast<int>(i),0x48);TailHook<post>(commandContext+0x2AA0,commandContext,colour,sys+0x280);}
         else TailHook<plain>(commandContext+0x2AA0,commandContext,colour,nullptr);
@@ -156,14 +147,14 @@ void Record(bool full=true) {
     recordingSlot=-1;
     SubmitHook(commandContext);
 }
-// The recorded events as a compact string: P<slot> projection, G<slot> G-buffer, T<slot><tail> tail, S submit.
+// The recorded events as a compact string: P<slot> projection, C<slot> lens command, T<slot><tail> tail, S submit.
 std::string Trace() {
     std::string out;
     for(const Event& e:events) {
         const char slot=e.slot<0 ? '-' : static_cast<char>('0'+e.slot);
         switch(e.kind) {
         case Kind::project: out+="P";out+=slot;break;
-        case Kind::gbuffer: out+="G";out+=slot;break;
+        case Kind::command: out+="C";out+=slot;break;
         case Kind::tail: out+="T";out+=slot;out+=static_cast<char>('a'+e.tail);break;
         case Kind::submit: out+="S";break;
         }
@@ -186,7 +177,7 @@ void Main(int w,int h) {
 int wmain() {
     Wire();
     Main(1920,1080);
-    const std::string passThrough="P0 G0 T0a T0c S ";
+    const std::string passThrough="P0 T0a T0c S ";
 
     // Nothing wanted: the recording as it was.
     Record();
@@ -202,11 +193,13 @@ int wmain() {
     Record();
     Check(factories==1 && Trace()==passThrough,"a camera in the queue is not made twice");
 
-    // Joined: armed.
+    // Joined: armed. The first armed recording has no lens view rendered before it: no command; viewport 3 renders.
     Join();
     Record();
-    Check(Trace()=="P0 G0 P3 G3 G- T-a T-c S ","armed: viewport 0's tail held after viewport 3's world, its G-buffer set again first, viewport 3's tail never recorded");
+    Check(Trace()=="P0 T0a T0c P3 S " && allocated==0,"armed: viewport 0's tail in place, viewport 3's world after it, its tail never recorded; no lens view yet, no command");
     Check(Side()==lensSide,"the lens view's side is published");
+    Record();
+    Check(Trace()=="P0 C0 T0a T0c P3 S ","armed again: the lens command (the last recording's lens view) right before viewport 0's tail");
     {
         const Event* lensProject=Find(Kind::project,1);
         Check(lensProject && lensProject->c==lensCam,"viewport 3 renders the lens camera");
@@ -214,16 +207,10 @@ int wmain() {
               At<float>(lensCam,0x2C)==4000.0f,"the lens camera is aimed as viewport 0's camera (its matrix, +0x20, near, far)");
         const float r=scopepip::LensRadius(1920,1080);
         Check(lensProject && std::fabs(lensProject->fov-scopepip::LensViewFov(1080,r,kScopeFov))<1e-6f,"...at the lens's field");
-        const Event* replayG=Find(Kind::gbuffer,2);
-        bool slot0Handles=replayG!=nullptr;
-        for(int k=0;replayG && k<0x60;++k)slot0Handles=slot0Handles && replayG->handles[k]==0x10;
-        Check(slot0Handles,"the G-buffer set again with viewport 0's handles (copied before its locals died)");
-        Check(handlesMade==3 && handlesAssigned==3 && handlesFreed==3,"the handle copies made, assigned and freed with the engine's own functions");
-        const Event* replayPost=Find(Kind::tail,0);
-        bool slot0Block=replayPost!=nullptr;
-        for(int k=0;replayPost && k<0x48;++k)slot0Block=slot0Block && replayPost->block[k]==0x40;
-        Check(slot0Block,"the post's block is viewport 0's, as it was when its call came (viewport 3's iteration rewrote system+0x280)");
-        Check(replayPost && replayPost->c==SlotAt(0)+0xF0,"...on viewport 0's colour");
+        const Event* post0=Find(Kind::tail,0);
+        bool slot0Block=post0!=nullptr;
+        for(int k=0;post0 && k<0x48;++k)slot0Block=slot0Block && post0->block[k]==0x40;
+        Check(slot0Block && post0->slot==0 && post0->c==SlotAt(0)+0xF0,"viewport 0's post recorded in its own iteration, its own block, its own colour");
     }
     Check(allocated==1 && committed==1,"one lens command in the ring");
     {
@@ -240,11 +227,11 @@ int wmain() {
     // The simple post path and the history copy are held as well.
     SlotAt(0)[0xC8]=1;
     Record();
-    Check(Trace()=="P0 G0 P3 G3 G- T-a T-c T-d S ","the history copy is held with the rest");
+    Check(Trace()=="P0 C0 T0a T0c T0d P3 S ","the history copy in place with the rest");
     SlotAt(0)[0xC8]=0;
     Record(false);
-    Check(Trace()=="P0 G0 P3 G3 G- T-b T-c S ","the simple post path is held with the rest");
-    Check(allocated==3,"one lens command per armed recording");
+    Check(Trace()=="P0 C0 T0b T0c P3 S ","the simple post path: the command before it");
+    Check(allocated==3,"one lens command per armed recording after the first");
 
     // A stock-zoomed frame, another camera, a stale want: not armed.
     Put<float>(cam0,0x24,kScopeFov);
@@ -259,7 +246,9 @@ int wmain() {
     Check(Trace()==passThrough,"a stale want: no lens view");
     Want(cam0,kScopeFov);
     Record();
-    Check(Trace()=="P0 G0 P3 G3 G- T-a T-c S ","wanted again: armed again");
+    Check(Trace()=="P0 T0a T0c P3 S ","wanted again: armed again (no lens view the last recording: no command)");
+    Record();
+    Check(Trace()=="P0 C0 T0a T0c P3 S ","...then the command");
 
     // A resize: viewport 3 set to the new side, armed again the next recording.
     Put<int>(SlotAt(0),0x44,1280);Put<int>(SlotAt(0),0x48,720);
@@ -268,7 +257,9 @@ int wmain() {
     const int smaller=scopepip::LensViewSide(scopepip::LensRadius(1280,720));
     Check(viewportSets==sets+1 && At<int>(SlotAt(3),0x3C)==smaller && Trace()==passThrough,"a resize: viewport 3 resized, no lens that recording");
     Record();
-    Check(Trace()=="P0 G0 P3 G3 G- T-a T-c S " && Side()==smaller,"...then armed at the new side");
+    Check(Trace()=="P0 T0a T0c P3 S " && Side()==smaller,"...then armed at the new side (no command: no lens view at that side yet)");
+    Record();
+    Check(Trace()=="P0 C0 T0a T0c P3 S ","...then the command");
 
     // The mission's cameras gone: the weak reference dropped, the camera made again.
     Teardown();
@@ -276,7 +267,7 @@ int wmain() {
     Check(factories==2 && lensControl.uses==1,"the mission's cameras gone: the lens camera made again");
     Join();
     Record();
-    Check(Trace()=="P0 G0 P3 G3 G- T-a T-c S ","...and armed once it joined");
+    Check(Trace()=="P0 T0a T0c P3 S ","...and armed once it joined");
 
     // Viewport 0 not rendered (its camera did not lock) while the queue made the lens camera current: viewport 3's tail
     // is still never recorded, no command, taken off at the submit.
@@ -286,7 +277,10 @@ int wmain() {
         alignas(16) void* w[2]={lensCam,&lensControl};++lensControl.weaks;SetCamera(SlotAt(3),w);
         const int before=allocated;
         Record();
-        Check(Trace()=="P3 G3 S " && allocated==before && !CurrentOf(SlotAt(3)),"an unarmed lens view never reaches the screen");
+        Check(Trace()=="P3 S " && allocated==before && !CurrentOf(SlotAt(3)),"an unarmed lens view never reaches the screen");
+        control0.uses=1;
+        Record();
+        Check(Trace()=="P0 T0a T0c P3 S ","an unarmed lens view is no lens view for the next recording's command");
         control0.uses=1;(void)saved;
     }
 
@@ -301,7 +295,7 @@ int wmain() {
         SetSlotCamera(1,otherCam,&otherControl);
         const int before=logs;
         Record();Record();
-        Check(Refused() && logs==before+1 && Trace()=="P0 G0 T0a T0c P1 G1 T1a T1c S " && factories==2,"a split screen: refused once, no camera made, both players' views as they were");
+        Check(Refused() && logs==before+1 && Trace()=="P0 T0a T0c P1 T1a T1c S " && factories==2,"a split screen: refused once, no camera made, both players' views as they were");
         SetSlotCamera(1,nullptr,nullptr);
         Record();
         Check(Refused() && Trace()==passThrough,"...until the mission's reset");

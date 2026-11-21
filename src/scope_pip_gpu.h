@@ -2,9 +2,9 @@
 // The picture-in-picture scope's GPU pass (scope_pip.h; docs/scope-pip-re.md §5.4). The lens view (viewport 3, a
 // TraceCamera at the lens's narrow field, scope_lens.cpp) renders the world into its own S x S colour target; the main
 // view (viewport 0) into its own. At each one's world end (thermal.cpp EndHook, the Commander's world end 0x11E3AE2 ->
-// 0x11B63A0) the bound colour target is held; then the lens command (recorded by scope_lens.cpp after the lens view,
-// before the main view's deferred post stage) copies the lens view's picture and draws it into the main view's world
-// colour as the lens's disc. Only the lens's pixels are written (scissor + discard); every other pixel, the depth and
+// 0x11B63A0) the bound colour target is held: the lens view's after the last recording's main view, the main view's in
+// this one; then the lens command (recorded by scope_lens.cpp right after the main view's world, before its post stage)
+// copies the lens view's picture and draws it into the main view's world colour as the lens's disc. Only the lens's pixels are written (scissor + discard); every other pixel, the depth and
 // every native binding stay as they were (D3D11.1 SwapDeviceContextState round the pass, as the thermal composite does).
 //
 // Render-thread only. Never reads pixels back to the CPU, never hooks COM.
@@ -24,11 +24,12 @@ public:
     LensCompositor& operator=(LensCompositor&&) = delete;
 
     // The main view's world end: its colour target (RTV0, no other RTV, one full-size viewport) held for the lens, with
-    // the view's projection's vertical scale. False, nothing held, when the surface is not one this supports
+    // the view's projection's vertical scale. False, no main view held, when the surface is not one this supports
     // (multisampled, an array or mip chain, a format it cannot sample, a partial viewport) or the scale is unusable.
+    // A held lens view stays (it was rendered after the last main view, for this one).
     bool CaptureMain(ID3D11DeviceContext* context, float yScale) noexcept;
     // The lens view's world end: its colour texture held (the same checks, and square: `side` x `side`), with its
-    // projection's vertical scale.
+    // projection's vertical scale. It replaces any lens view held; false: none held.
     bool CaptureLens(ID3D11DeviceContext* context, int side, float yScale) noexcept;
     // Both held on this device: the lens view's picture drawn into the main view's colour as the lens (scope_pip.h
     // LensFor / LensSample) when it magnifies over the frame (LensPower >= kLeast). Both released either way. True when

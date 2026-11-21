@@ -34,7 +34,6 @@ using scopepip::kLensViewport;
 
 // The recording's calls (docs/scope-pip-re.md §4.3, §5.1): the call site, its callee.
 constexpr unsigned kProjectCall=0x1197B50,kProject=0x118DFF0;
-constexpr unsigned kGbufferCall=0x119863C,kGbuffer=0x112B230;
 constexpr unsigned kPostCall=0x1198742,kPost=0x112C230;            // the full post stage and composite (dl set)
 constexpr unsigned kPlainCall=0x1198753,kPlain=0x112C460;          // the simple one (dl clear)
 constexpr unsigned kCopyCall=0x1198777,kCopy=0x11B6E20;
@@ -43,16 +42,10 @@ constexpr unsigned kModeCall=0x11987BF,kModeTail=0x112A7F0;
 constexpr unsigned kSubmitCall=0x119889B,kSubmit=0x111B410;
 // Callees the plugin calls itself.
 constexpr unsigned kSetViewport=0x1198C40,kSetCamera=0x1193FA0,kFactory=0x82F60,kAlloc=0x51D00,kCommit=0x51D60;
-constexpr unsigned kHandleNew=0x1120500,kHandleAssign=0x8F000,kHandleFree=0x11207A0;
-constexpr std::size_t kHandle=0x20,kHandles=3;          // 0x112B230's argument: three 0x20-byte texture handles
-constexpr std::size_t kPostBlock=0x48;                  // 0x112C230's r9: system+0x280, copied whole when recorded
 
 struct Guard { unsigned rva; const unsigned char* bytes; std::size_t size; const char* what; };
 // lea rdx,[rdi+504h]; add rdx,r14; mov rcx,rsi; call 0x118DFF0 (the slot's rect, the slot's locked camera)
 const unsigned char kProjectCode[]={0x48,0x8D,0x97,0x04,0x05,0x00,0x00,0x49,0x03,0xD6,0x48,0x8B,0xCE,0xE8,0x9B,0x64,0xFF,0xFF};
-// lea r8,[rbp-60h]; lea rdx,[0x2136FF0]; lea rcx,[0x2139A90]; call 0x112B230
-const unsigned char kGbufferCode[]={0x4C,0x8D,0x45,0xA0,0x48,0x8D,0x15,0xBB,0xE9,0xF9,0x00,0x48,0x8D,0x0D,0x54,0x14,0xFA,0x00,
-                                    0xE8,0xEF,0x2B,0xF9,0xFF};
 // mov r8,rsi; lea rcx,[0x2139A90]; call 0x112C230
 const unsigned char kPostCode[]={0x4C,0x8B,0xC6,0x48,0x8D,0x0D,0x4E,0x13,0xFA,0x00,0xE8,0xE9,0x3A,0xF9,0xFF};
 // mov r8,r14; lea rcx,[0x2139A90]; call 0x112C460
@@ -88,12 +81,8 @@ const unsigned char kCommitCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,
 // The render thread's dispatcher: fn = one unit read; if(!fn) done; fn(context+0x140, reader).
 const unsigned char kDispatchCode[]={0xE8,0x52,0x65,0xF3,0xFE,0xBA,0x01,0x00,0x00,0x00,0x48,0x8B,0xCB,0x48,0x8B,0x38,0xE8,0xB2,
                                      0x65,0xF3,0xFE,0x48,0x85,0xFF,0x74,0x2A,0x48,0x8B,0xD3,0x48,0x8B,0xCE,0xFF,0xD7};
-const unsigned char kHandleNewCode[]={0x48,0x8D,0x05,0x11,0xE8,0x67,0x00,0x48,0x89,0x01,0x33,0xC0,0x48,0x89,0x41,0x10};
-const unsigned char kHandleAssignCode[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0x01,0x48,0x8B,0xDA};
-const unsigned char kHandleFreeCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8D,0x05};
 const Guard kGuards[]={
     {kProjectCall-13,kProjectCode,sizeof(kProjectCode),"projection call"},
-    {kGbufferCall-18,kGbufferCode,sizeof(kGbufferCode),"G-buffer call"},
     {kPostCall-10,kPostCode,sizeof(kPostCode),"post call"},
     {kPlainCall-10,kPlainCode,sizeof(kPlainCode),"plain post call"},
     {kCopyCall-24,kCopyCode,sizeof(kCopyCode),"copy call"},
@@ -111,9 +100,6 @@ const Guard kGuards[]={
     {kAlloc,kAllocCode,sizeof(kAllocCode),"ring alloc"},
     {kCommit,kCommitCode,sizeof(kCommitCode),"ring commit"},
     {0x111B939,kDispatchCode,sizeof(kDispatchCode),"dispatcher"},
-    {kHandleNew,kHandleNewCode,sizeof(kHandleNewCode),"handle new"},
-    {kHandleAssign,kHandleAssignCode,sizeof(kHandleAssignCode),"handle assign"},
-    {kHandleFree,kHandleFreeCode,sizeof(kHandleFreeCode),"handle free"},
 };
 
 using ProjectFn=void(__fastcall*)(void* camera,const int* rect);
@@ -124,15 +110,12 @@ using SetCameraFn=void(__fastcall*)(void* slot,void* weak);
 using FactoryFn=void(__fastcall*)(void* system,void* out,unsigned slot,const float* world,void* desc);
 using AllocFn=void*(__fastcall*)(void* ring,int units);
 using CommitFn=void(__fastcall*)(void* ring,int units);
-using HandleFn=void*(__fastcall*)(void* handle);
-using AssignFn=void*(__fastcall*)(void* handle,const void* from);
 using ControlFn=void(__fastcall*)(void* control);
 
 // The native entries (set by Install; tests set stand-ins).
 unsigned char* const* systemRef=nullptr;
 void* commands=nullptr;
 ProjectFn project=nullptr;
-TailFn gbuffer=nullptr;
 enum Tail : unsigned { post,plain,copy,history,modeTail,kTails };
 TailFn tails[kTails]{};
 SubmitFn submit=nullptr;
@@ -141,8 +124,6 @@ SetCameraFn setCamera=nullptr;
 FactoryFn factory=nullptr;
 AllocFn alloc=nullptr;
 CommitFn commit=nullptr;
-HandleFn handleNew=nullptr,handleFree=nullptr;
-AssignFn handleAssign=nullptr;
 const void* descVtable=nullptr;
 std::atomic<bool> installed{false};
 
@@ -159,20 +140,15 @@ Weak lens{};                 // the lens camera: the plugin's weak_ptr (viewport
 ULONGLONG createdAt=0;
 bool readyLogged=false;
 // This recording (0x11978D0): the slot being recorded, whether the lens is armed, viewport 0's camera and the lens's
-// field, whether viewport 3 records the lens camera and the lens command went in.
+// field, whether viewport 3 records the lens camera, whether the lens command went in.
 int slotNow=-1;
 bool armed=false,lensSlot=false,commandIn=false;
 unsigned char* mainCamera=nullptr;
 float lensFov=0.0f;
-// Viewport 0's held tail, in recording order (the five calls run at most once each per slot).
-struct Held { void* a; void* b; void* c; void* d; unsigned char block[kPostBlock]; Tail tail; };
-constexpr int kMostHeld=8;
-Held held[kMostHeld]{};
-int heldCount=0;
-// Viewport 0's G-buffer handles (0x112B230's argument), copied with the engine's own handle functions.
-alignas(16) unsigned char gbufferCopy[kHandles*kHandle]{};
-void* gbufferOwner=nullptr;
-bool gbufferHeld=false;
+// Whether the last recording rendered the lens view (armed, viewport 3 recorded the lens camera) at side lensLastSide:
+// its world colour is what this recording's lens command draws (docs/scope-pip-re.md §5.3).
+bool lensLast=false;
+int lensLastSide=0;
 
 unsigned char* System() noexcept {
     return systemRef ? *systemRef : nullptr;
@@ -290,7 +266,7 @@ void Aim(unsigned char* camera) noexcept {
 }
 
 void Forget() noexcept {
-    slotNow=-1;armed=false;lensSlot=false;commandIn=false;mainCamera=nullptr;heldCount=0;
+    slotNow=-1;armed=false;lensSlot=false;commandIn=false;mainCamera=nullptr;
 }
 
 void __fastcall LensCommand(void* native,void*) {
@@ -321,30 +297,13 @@ void __fastcall ProjectHook(void* camera,const int* rect) {
     project(camera,rect);
 }
 
-void __fastcall GbufferHook(void* a,void* b,void* c,void* d) {
-    gbuffer(a,b,c,d);
-    if(slotNow!=0 || !armed || gbufferHeld)return;
-    __try {
-        for(std::size_t k=0;k<kHandles;++k) {
-            handleNew(gbufferCopy+k*kHandle);
-            handleAssign(gbufferCopy+k*kHandle,static_cast<unsigned char*>(c)+k*kHandle);
-        }
-        gbufferOwner=a;gbufferHeld=true;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-}
-
 void OnTail(Tail t,void* a,void* b,void* c,void* d) noexcept {
-    if(slotNow==static_cast<int>(kLensViewport) && lensSlot) {
-        // The lens view never reaches the screen: its first tail call becomes the lens command (armed), the rest none.
-        if(armed && !commandIn){commandIn=true;RecordLensCommand();}
-        return;
-    }
-    if(slotNow==0 && armed && heldCount<kMostHeld) {
-        Held& h=held[heldCount++];
-        h.tail=t;h.a=a;h.b=b;h.c=c;h.d=d;
-        if(t==post){std::memcpy(h.block,d,kPostBlock);h.d=h.block;}
-        return;
-    }
+    // The lens view never reaches the screen: none of its tail is recorded.
+    if(slotNow==static_cast<int>(kLensViewport) && lensSlot)return;
+    // Viewport 0's tail stays where the engine records it, right after its own world (every renderer state it reads is
+    // viewport 0's, as in a split screen). Armed, and the last recording rendered the lens at this side: the lens command
+    // goes in first, drawing that lens view's world colour into viewport 0's before its post stage.
+    if(slotNow==0 && armed && !commandIn && lensLast && lensLastSide==Side()){commandIn=true;RecordLensCommand();}
     tails[t](a,b,c,d);
 }
 template<Tail T> void __fastcall TailHook(void* a,void* b,void* c,void* d) {
@@ -353,16 +312,10 @@ template<Tail T> void __fastcall TailHook(void* a,void* b,void* c,void* d) {
 
 void __fastcall SubmitHook(void* commandContext) {
     __try {
-        if(gbufferHeld) {
-            gbuffer(gbufferOwner,commandContext,gbufferCopy,nullptr);
-            for(std::size_t k=0;k<kHandles;++k)handleFree(gbufferCopy+k*kHandle);
-            gbufferHeld=false;gbufferOwner=nullptr;
-        }
-        for(int k=0;k<heldCount;++k){const Held& h=held[k];tails[h.tail](h.a,h.b,h.c,h.d);}
-        heldCount=0;
+        lensLast=armed && lensSlot;lensLastSide=lensLast ? Side() : 0;
         if(unsigned char* const system=System())TakeOff(system);
         Forget();
-    } __except(EXCEPTION_EXECUTE_HANDLER) { heldCount=0;Forget(); }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { lensLast=false;Forget(); }
     submit(commandContext);
 }
 }  // namespace
@@ -378,7 +331,6 @@ bool Install() noexcept {
     systemRef=reinterpret_cast<unsigned char* const*>(image+kSystemRef);
     commands=image+kCommands;
     project=reinterpret_cast<ProjectFn>(image+kProject);
-    gbuffer=reinterpret_cast<TailFn>(image+kGbuffer);
     tails[post]=reinterpret_cast<TailFn>(image+kPost);
     tails[plain]=reinterpret_cast<TailFn>(image+kPlain);
     tails[copy]=reinterpret_cast<TailFn>(image+kCopy);
@@ -390,14 +342,10 @@ bool Install() noexcept {
     factory=reinterpret_cast<FactoryFn>(image+kFactory);
     alloc=reinterpret_cast<AllocFn>(image+kAlloc);
     commit=reinterpret_cast<CommitFn>(image+kCommit);
-    handleNew=reinterpret_cast<HandleFn>(image+kHandleNew);
-    handleAssign=reinterpret_cast<AssignFn>(image+kHandleAssign);
-    handleFree=reinterpret_cast<HandleFn>(image+kHandleFree);
     descVtable=image+kDescVtable;
     // Every redirect passes through until `installed`: one that fails leaves the others inert.
     bool changed=false;
     const bool ok=RedirectCall(image+kProjectCall,image+kProject,reinterpret_cast<void*>(&ProjectHook),changed) &&
-        RedirectCall(image+kGbufferCall,image+kGbuffer,reinterpret_cast<void*>(&GbufferHook),changed) &&
         RedirectCall(image+kPostCall,image+kPost,reinterpret_cast<void*>(&TailHook<post>),changed) &&
         RedirectCall(image+kPlainCall,image+kPlain,reinterpret_cast<void*>(&TailHook<plain>),changed) &&
         RedirectCall(image+kCopyCall,image+kCopy,reinterpret_cast<void*>(&TailHook<copy>),changed) &&
@@ -420,7 +368,7 @@ int Side() noexcept { return side.load(std::memory_order_acquire); }
 
 void Reset() noexcept {
     __try { Drop(lens); } __except(EXCEPTION_EXECUTE_HANDLER) { lens=Weak{}; }
-    readyLogged=false;createdAt=0;
+    readyLogged=false;createdAt=0;lensLast=false;lensLastSide=0;
     wantCamera.store(nullptr,std::memory_order_release);
     refused.store(false,std::memory_order_release);
     side.store(0,std::memory_order_release);

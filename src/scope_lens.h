@@ -9,12 +9,17 @@
 //    unmagnified, the lens camera is made viewport 3's current camera for this recording ("armed");
 //  - viewport 3's projection: the lens camera takes viewport 0's camera's world matrix, near / far and +0x20 exactly
 //    (not the TraceCamera's own 0.2 m eye offset) and the lens's field (scope_pip.h LensViewFov);
-//  - while armed, viewport 0's tail (post stage and its composite to the screen: 0x1198742 / 0x1198753 / 0x1198777 /
-//    0x119879F / 0x11987BF) is held and recorded after viewport 3's world, its G-buffer set (0x119863C) recorded again
-//    before it; viewport 3's tail is never recorded (the lens view never reaches the screen), its first call replaced by
-//    one command of the plugin's own (InfantryScopeLensCommand: the lens drawn into viewport 0's world colour);
-//  - the loop's submit (0x119889B -> 0x111B410): the held tail recorded, viewport 3's current camera taken off again
-//    (no HUD stage, no other code ever sees a fourth player's camera).
+//  - viewport 0's tail (post stage and its composite to the screen: 0x1198742 / 0x1198753 / 0x1198777 / 0x119879F /
+//    0x11987BF) stays where the engine records it, right after viewport 0's own world, so every renderer state it reads is
+//    viewport 0's (as in a split screen, each viewport's world and tail in turn). While armed and the last recording
+//    rendered the lens view at this side, one command of the plugin's own goes in right before that tail
+//    (InfantryScopeLensCommand: the lens view's world colour from the last recording drawn into viewport 0's): the lens
+//    is one frame behind the frame round it. 2026-11-21: the first version held viewport 0's tail until after viewport
+//    3's world (to have no frame of lag); in the game its post stage then ran on viewport 3's renderer state and wrote
+//    only an S x S square top left (black), the rest of the screen never redrawn: a frozen picture;
+//  - viewport 3's tail is never recorded (the lens view never reaches the screen);
+//  - the loop's submit (0x119889B -> 0x111B410): viewport 3's current camera taken off again (no HUD stage, no other code
+//    ever sees a fourth player's camera).
 // Refused (logged once, until the next mission): a local split screen (viewport 1 or 2 has a camera), viewport 3 used by
 // something else, the camera never joining the viewport. Then InfantryScope=2 shows mode 1's picture.
 // Addresses: RVAs into EDF.dll TimeDateStamp 0x678CCB46, checked byte by byte at install (tests/scope_lens_native_audit.py).
@@ -39,7 +44,7 @@ int Side() noexcept;
 void Reset() noexcept;
 }  // namespace scopelens
 
-// Render thread, the lens command (recorded by scope_lens.cpp after the lens view's world, before viewport 0's post
-// stage): infantryscope.cpp composites the lens.
+// Render thread, the lens command (recorded by scope_lens.cpp right after viewport 0's world, before its post stage; the
+// lens view it draws was rendered by the last recording): infantryscope.cpp composites the lens.
 void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept;
 }  // namespace crew
