@@ -126,6 +126,8 @@ bool DeleteSupportSoldier(const ObjRef&) noexcept{return false;}
 bool HoldSupportSoldier(const ObjRef&,bool) noexcept{return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept{return false;}
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t*) noexcept{return nullptr;}
+bool SupportDrillTransportReady() noexcept{return false;}
+unsigned char* SpawnSupportDrillTransport(const float*,const float*,const void*) noexcept{return nullptr;}
 bool SupportVariantReady(const wchar_t*) noexcept{return false;}
 void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
 void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}

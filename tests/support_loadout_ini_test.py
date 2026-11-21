@@ -251,8 +251,10 @@ check(not {'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP'} & set(sl.VEHICL
       all(k in sc.UNIT_KEYS for k in ('TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')),
       'the container deliveries (a transport helicopter\'s pilot) are aircraft crews')
 dispatch = read('src/support_dispatch.cpp')
-check(dispatch.count('SupportCfg().vehicleCrew') == 1 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch,
-      'the ground crews are SupportVehicleCrewWeapon\'s (the only plan using it), every other crew SupportAircraftCrewWeapon\'s')
+# The ground vehicles' drivers: a support hull's, and underground the drill transport's (support_dispatch.cpp DrillPlan).
+check(dispatch.count('SupportCfg().vehicleCrew') == 2 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch and
+      'crew[0]=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().vehicleCrew,false)' in dispatch,
+      'the ground crews (a support hull\'s, the drill transport\'s driver) are SupportVehicleCrewWeapon\'s, every other crew SupportAircraftCrewWeapon\'s')
 for value, canonical in (('1E3A8A', '1E3A8A'), ('1e3a8a:ffffff', '1E3A8A:FFFFFF'), ('X', 'X'), ('x:X', 'X'), ('X:FFFFFF', 'X:FFFFFF'),
                          (' 101010 ', '101010'), ('', '')):
     look = sl.parse_crew(value)

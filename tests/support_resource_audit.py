@@ -40,8 +40,15 @@ def main():
         assert pe.get_data(addresses[name[:-3]], len(data)) == data, name
         checks += 1
     game = rootcpk.Game(str(args.game))
-    rows = re.findall(r'L"app:/Object/([^"]+)",(\d+),([\d.]+)f,([\d.]+)f,([\d.]+)f,(0x[0-9A-Fa-f]+)', header)
+    row_re = r'L"app:/Object/([^"]+)",(\d+),([\d.]+)f,([\d.]+)f,([\d.]+)f,(0x[0-9A-Fa-f]+)'
+    stock = re.search(r'kSupportVehicles\[\]=\{(.*?)\n\};', header, re.S)
+    assert stock
+    rows = re.findall(row_re, stock.group(1))
     assert len(rows) == 3
+    # The drill transport (kSupportDrillTransport) is the installer's SGO, not Root.cpk's: the Blacker's class (the drill
+    # tank's host, tools/make_drill.py) with 13 seats (make_drill.TRANSPORT_PASSENGERS and the driver's).
+    drill = re.search(r'kSupportDrillTransport=\s*\{L"[^"]+",' + row_re, header)
+    assert drill and drill.group(1) == 'EDF6VC_DRILL_TRANSPORT.SGO' and drill.group(2) == '13' and drill.group(6) == rows[0][5], drill
     expected = [('Vehicle505_Tank', 0x61B060), ('Vehicle507_Rescuetank', 0x61C430), ('Vehicle_Car', 0x65A910)]
     for row, (native_class, setup_rva) in zip(rows, expected):
         name, seats, half_width, half_length, height, vtable = row
