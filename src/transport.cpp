@@ -205,6 +205,12 @@ transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
     if(t.t.carrier==Carrier::heli && t.t.hover) {
         const float clear=GroundClearance(vp);
         view.hovering=transport::Hovering(view.vehicleToDrop,view.speed,clear==kNoGround ? -1.0f : clear);
+        for(const auto& j:jumpers) {
+            if(j.descent==transport::Descent::rope && j.carrier.Is(v) && Live(j.human)) {
+                view.ropeOccupied=true;
+                break;
+            }
+        }
     }
     view.driven=NpcDriver(v);
     return view;
@@ -436,6 +442,8 @@ void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
         return;
     }
     case transport::Descent::rope: {
+        // The slot can be reused when the carrier is destroyed during a descent.
+        if(j.rope>=0 && (!ropes[j.rope].on || !j.carrier.Is(ropes[j.rope].heli.obj)))j.rope=-1;
         if(j.rope<0)j.rope=RopeFor(j.carrier,p,ms);
         float anchor[3]={p[0],p[1],p[2]};
         if(j.rope>=0 && ropes[j.rope].on && Live(ropes[j.rope].heli)){RopeTop(ropes[j.rope],anchor);ropes[j.rope].used=ms;}

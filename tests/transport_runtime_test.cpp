@@ -351,7 +351,7 @@ void HeliAssault() {
     Check(TransportDeliver(heli.m,tops,2,target),"a helicopter assault handed over (two squads aboard)");
     Check(TransportOf(soldier[1].m)==heli.m,"both paired with it");
     Check(kept>0,"its helicopter kept for them (no leaving for fuel or ammo)");
-    bool everGrounded=false,jetsHeld=false,ropeHeight=true;
+    bool everGrounded=false,jetsHeld=false,ropeHeight=true,withdrewDuringRappel=false;
     int ropeFrames=0;float fencerFastest=0.0f,ranger=0.0f,fencer=0.0f;
     float firstOutAt[3]{};bool firstOut=false;
     for(int i=0;i<40000 && !(Done(soldier[0].m) && Done(soldier[1].m));++i) {
@@ -362,6 +362,13 @@ void HeliAssault() {
         everGrounded=everGrounded || heliGround;
         if(!firstOut && jumperOut[0]){firstOut=true;std::memcpy(firstOutAt,PosOf(heli),12);}
         if(seatKicks>0 && ferryHover!=transport::kRopeHeight)ropeHeight=false;
+        if(withdrawals) {
+            for(int j=0;j<kJumperRows;++j) {
+                const auto descent=transport::DescentOf(NpcSoldierClass(jumper[j]->m),true);
+                if(descent==transport::Descent::rope &&
+                   GroundClearance(PosOf(*jumper[j]))>=kChuteLand)withdrewDuringRappel=true;
+            }
+        }
         // A frame's way down the rope: its sink (gravity's share comes after the descent's own step in this model).
         if(rangerFalling && !jumper[0]->m[0x711] && std::fabs(ranger-PosOf(*jumper[0])[1]-transport::kRopeSink*0.016f)<0.005f)++ropeFrames;
         if(fencerFalling && !jumper[2]->m[0x711])fencerFastest=std::fmax(fencerFastest,(fencer-PosOf(*jumper[2])[1])/0.016f);
@@ -376,6 +383,7 @@ void HeliAssault() {
     Check(std::hypot(firstOutAt[0]+60.0f,firstOutAt[2])<transport::kHoverNear && std::fabs(firstOutAt[1]-transport::kRopeHeight)<1.0f,
           "the hover 60 m short of the point at the rope height",firstOutAt[0],firstOutAt[1]);
     Check(ropeHeight,"held at the rope height while they go down");
+    Check(!withdrewDuringRappel,"the helicopter waits until its rope riders are down");
     Check(seatKicks==8 && squads[0].dismounts==squads[1].dismounts,"all eight out of their seats, one by one",seatKicks);
     Check(ropeFrames>60,"a Ranger down the rope at its sink",ropeFrames);
     Check(ropeMakes>=1 && ropeMakes<=2,"a rope or two under its doors (riders share them)",ropeMakes);

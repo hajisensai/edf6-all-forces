@@ -51,6 +51,7 @@ struct View {
     float speed=0.0f;              // m/s, the vehicle's
     bool grounded=true;            // a helicopter on the ground (a ground vehicle always)
     bool hovering=false;           // a helicopter held over the drop point at its rope height (Hovering)
+    bool ropeOccupied=false;       // someone is still descending from this helicopter
     std::uint64_t ms=0;
 };
 
@@ -132,6 +133,7 @@ inline Step Advance(const Trip& trip,const View& v,const Tuning& t) noexcept {
         if(v.grounded || age>t.landMs)return {Phase::unloading,Act::unload};
         return {Phase::landing,Act::land};
     case Phase::unloading:
+        if(trip.hover && !v.aboardAny && v.ropeOccupied && age<=t.ropeMs)return {Phase::unloading,Act::rope};
         if(!v.aboardAny)return {Phase::none,Act::release};
         if(trip.hover)return age>t.ropeMs ? Step{Phase::landing,Act::settle} : Step{Phase::unloading,Act::rope};
         if(age>t.unloadMs)return {Phase::none,Act::release};
