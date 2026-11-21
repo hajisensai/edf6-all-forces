@@ -55,6 +55,7 @@
 #include "sightzoom.h"
 #include "turretaim.h"
 #include "seat_turret.h"
+#include "chase_cam.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -76,8 +77,9 @@ const unsigned char kAimStepCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24
 // The seat's camera (0x62B430 from the MAB locator's own SGO): Type at +0x200 (1: the eye / look-at locators), the eye
 // point {locator, bone} at +0x208, the look-at's at +0x218; a bone's world rows at +0xB0 (translation +0xE0).
 constexpr std::size_t kSeatCamType=0x200,kSeatCamEye=0x208,kSeatCamLook=0x218,kPointBone=0x8,kBoneOrigin=0xE0;
-// The camera: its eased eye and look-at (state 2).
-constexpr std::size_t kCamEye=0x630,kCamLook=0x640,kCamCollisionMargin=0x528;
+// The camera: its eased eye and look-at (state 2), the per-tick shares it eases them by (copied from the seat's +0x228
+// Param on entering state 2: docs/camera-re.md §3b), the soldier it follows (the player riding: firstperson.cpp).
+constexpr std::size_t kCamEye=0x630,kCamLook=0x640,kCamEaseEye=0x650,kCamEaseLook=0x654,kCamCollisionMargin=0x528,kCamTarget=0x360;
 const unsigned char kCollisionMarginCode[]={0xC7,0x87,0x28,0x05,0,0,0xCD,0xCC,0xCC,0x3D}; // F5058: 0.1 m
 // game_object_camera_setting as the object holds it (0x54DDF0): look-at, eye, in its frame.
 constexpr std::size_t kObjCamLook=0x170,kObjCamEye=0x180;
@@ -97,6 +99,12 @@ constexpr float kOnTarget=0.0087f;             // rad (0.5 deg): the turret is o
 constexpr float kPivotReach=40.0f;             // m: a turret pivot farther from the muzzle than this is not one (TurretPivot)
 constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a big vehicle (HighCamClass 2)
 constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
+// The chase follower's clock (chase_cam.h): the scene's steps (GameFrame), each 1/60 s of game time (System::Update adds
+// n / 60 to its time for n steps, docs/unlimited-fps-re.md §1), the camera stepped once in each. Not the wall clock: a
+// catch-up frame runs several steps within a millisecond and the clock's 16 / 17 ms reads are off the steps the vehicle
+// moved by; a sprung point on a fast vehicle would shake by the difference. The pause menu's camera steps add none.
+constexpr float kStepSeconds=1.0f/60.0f;
+constexpr ULONGLONG kChaseGapSteps=60;          // a longer gap than this (1 s) is a new start, not a step
 
 using PointFn=float*(__fastcall*)(const void*,float*);
 AimStepFn nextAim=nullptr;
@@ -142,6 +150,9 @@ struct CamSide {
     float highLift;            // m the eye is raised over what is under it (tcam::HighLift)
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
+    chase::Spring chase;       // the normal rig's sprung hull origin (chase_cam.h; not the high view's: its centre eases)
+    bool chaseStarted;
+    ULONGLONG chaseStep;       // GameFrame of its last step
 };
 // The rig's numbers the game thread reads (benign races: floats it only steers by): the stock locators' base pitch
 // against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles), the
@@ -678,6 +689,132 @@ void PublishObservation(const unsigned char* seat,bool observing) noexcept {
     ReleaseSRWLockExclusive(&lock);
 }
 
+// --- the chase follower (chase_cam.h; README 载具镜头跟随) ---
+// 2026-11-21 (「载具/玩家之类的视角优化一下」): every camera this hook places was on its vehicle's origin exactly each tick
+// (Place below writes the eased points too, so the native per-tick ease cam+0x650 / +0x654 did nothing), and the player's
+// jets kept the stock locators welded to `mdl` with no roll. The follower gives them inertia and roll:
+//  - the cameras whose direction is the player's input (the Sazabi, the mouse-flown heli, the gunship's gun seat, a
+//    Dreadnought's or a gunner seat's turret; the turret view in Camera) spring the vehicle's origin only, eye and look-at
+//    moved by the one offset: the screen's centre keeps the input's direction (the turret's PublishNormalRay, the
+//    Dreadnought's CameraRay aim: the same ray, laid from the drawn eye); a heli rolls by a share of its bank;
+//  - the player's jets (stock locators, PlayerJetChase): the locators held in the craft's frame, that frame eased onto the
+//    craft's attitude with part of the bank kept, the look-at leading along the path (chase::FollowCraft);
+//  - never first person (the cockpit's eye is the seat's bone), the mounted optic, nor the turret's high view (its centre
+//    eases on its own); a take-over, another seat or vehicle, first person in between start it over on the vehicle.
+// One follower per camera (split screen: each local player's own), stepped on the scene's steps (kStepSeconds). The roll
+// is the native step's rows turned after it (firstperson.cpp CameraAfterNative -> ChaseCamUp), in its write transaction.
+enum class ChaseKind { ground,heli,air,jet,rotor };
+const char* const kChaseNames[]={"ground","heli","air","jet","rotor"};
+const chase::Tuning& TuningOf(ChaseKind k) noexcept {
+    switch(k) {
+    case ChaseKind::heli:return chase::kHeli;
+    case ChaseKind::air:return chase::kAir;
+    case ChaseKind::jet:return chase::kJet;
+    case ChaseKind::rotor:return chase::kRotor;
+    default:return chase::kGround;
+    }
+}
+struct Follower {
+    const unsigned char* cam;
+    const unsigned char* seat;
+    ObjRef vehicle;
+    ChaseKind kind;
+    bool started;
+    ULONGLONG step;            // GameFrame of its last step
+    chase::Chase chase;
+    bool up;                   // `upDir` is this step's roll for CameraAfterNative (ChaseCamUp), taken at `upStep`
+    float upDir[3];
+    ULONGLONG upStep;
+};
+constexpr int kFollowers=4;
+Follower followers[kFollowers]{};
+
+// Game seconds since the last step (0 on a start or a step not taken yet: the follower holds), the steps counted.
+float StepSeconds(bool& started,ULONGLONG& last) noexcept {
+    const ULONGLONG now=GameFrame();
+    const bool had=started;const ULONGLONG was=last;
+    started=true;last=now;
+    if(!had || now<was)return 0.0f;
+    return now-was>kChaseGapSteps ? 2.0f*chase::kMostDt : static_cast<float>(now-was)*kStepSeconds;
+}
+
+Follower* FollowerOf(const unsigned char* cam) noexcept {
+    Follower* spare=nullptr;
+    for(Follower& f:followers) {
+        if(f.cam==cam)return &f;
+        if(!spare || !f.cam || (spare->cam && f.step<spare->step))spare=&f;
+    }
+    *spare=Follower{};spare->cam=cam;
+    return spare;
+}
+void ForgetFollower(const unsigned char* cam) noexcept {
+    for(Follower& f:followers)if(f.cam==cam)f=Follower{};
+}
+
+// The vehicle `seat` is in when its rider is the player this camera follows (its seat index in `index`), else null.
+unsigned char* RiddenBy(const unsigned char* cam,const unsigned char* seat,unsigned* index) noexcept {
+    const auto rider=At<const unsigned char*>(seat,kSeatRider);
+    if(!rider || rider!=At<const unsigned char*>(cam,kCamTarget) || !Readable(rider,kHumanVehicleCtrl+8) || !IsPlayer(rider))return nullptr;
+    const auto ctrl=At<const unsigned char*>(rider,kHumanVehicleCtrl);
+    if(!Readable(ctrl,16) || At<std::int32_t>(ctrl,8)==0)return nullptr;
+    const auto v=At<unsigned char*>(rider,kHumanVehicleCtrl-8);
+    if(!Readable(v,kMatrix+64) || v[kDead])return nullptr;
+    const unsigned n=SeatCount(v);
+    for(unsigned i=0;i<n && i<16;++i)if(SeatAt(v,i)==seat){*index=i;return v;}
+    return nullptr;
+}
+
+// The follower of `cam` onto this step's `eye` / `look` (placed off `v`, the player's at its seat `index`): both replaced
+// by the followed ones. False: it does not follow here (the plugin's switch off, first person, the optic, refused input)
+// and has left them as they were.
+bool Follow(unsigned char* cam,const unsigned char* seat,unsigned char* v,unsigned index,ChaseKind kind,float* eye,float* look) noexcept {
+    const Config& c=Cfg();
+    if(!c.enabled || !c.chaseCam || FirstPersonVehicleView(v,index) || SightZoomMounted(v))return false;
+    Follower& f=*FollowerOf(cam);
+    if(f.seat!=seat || !f.vehicle.Is(v) || f.kind!=kind){f=Follower{};f.cam=cam;f.seat=seat;f.vehicle=ObjRef::Of(v);f.kind=kind;}
+    const bool fresh=!f.chase.anchor.valid;
+    const float dt=StepSeconds(f.started,f.step);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    chase::Placement placed{};
+    const bool craft=kind==ChaseKind::jet || kind==ChaseKind::rotor;
+    if(!(craft ? chase::FollowCraft(f.chase,TuningOf(kind),m,eye,look,dt,&placed) : chase::FollowAnchor(f.chase,TuningOf(kind),m,eye,look,dt,&placed))) {
+        f=Follower{};
+        return false;
+    }
+    // Whether the native ease is near 1 (the "picture stuck on the screen") or not: once a take, from the camera itself.
+    if(fresh && c.debug)Log("CHASE cam=%p v=%p seat %u: the %s follower takes the camera; native ease eye %.3f look %.3f (cam+0x650 / +0x654)",
+                            static_cast<const void*>(cam),static_cast<const void*>(v),index,kChaseNames[static_cast<int>(kind)],
+                            At<float>(cam,kCamEaseEye),At<float>(cam,kCamEaseLook));
+    std::memcpy(eye,placed.eye,12);std::memcpy(look,placed.look,12);
+    f.up=placed.hasUp;f.upStep=GameFrame();
+    if(placed.hasUp)std::memcpy(f.upDir,placed.up,12);
+    return true;
+}
+bool FollowSeat(unsigned char* cam,const unsigned char* seat,ChaseKind kind,float* eye,float* look) noexcept {
+    unsigned index=0;
+    unsigned char* const v=RiddenBy(cam,seat,&index);
+    return v && Follow(cam,seat,v,index,kind,eye,look);
+}
+
+// The player's jet at its seat 0 in third person: the stock locators' targets (`stockEye` / `stockLook`) chased.
+bool PlayerJetChase(unsigned char* cam,const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    unsigned index=0;
+    unsigned char* const v=RiddenBy(cam,seat,&index);
+    if(!v || index!=0 || !IsPlayerJet(v))return false;
+    std::memcpy(eye,stockEye,12);std::memcpy(look,stockLook,12);
+    return Follow(cam,seat,v,index,PlayerRotorCraft(v) ? ChaseKind::rotor : ChaseKind::jet,eye,look);
+}
+
+// The turret's normal rig: its hull origin sprung (kGround), into `at`; false: the hull's own (the switch off, refused).
+bool TurretAnchor(const float* origin,float* at) noexcept {
+    const float dt=StepSeconds(camSide.chaseStarted,camSide.chaseStep);
+    if(!Cfg().chaseCam || chase::Follow(camSide.chase,chase::kGround,origin,dt,at)==chase::Step::refused) {
+        camSide.chase=chase::Spring{};
+        return false;
+    }
+    return true;
+}
+
 void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noexcept {
     const Config& c=Cfg();
     AcquireSRWLockShared(&lock);
@@ -738,8 +875,9 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         camSide.rig=back ? was.rig : a ? rigA : want;camSide.offset=back ? was.offset : viewed ? 0.0f : baseA;
         std::memcpy(camSide.eye,cam+kCamEye,12);std::memcpy(camSide.look,cam+kCamLook,12);
         camSide.point=point;
-        if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f",s.v,viewed ? "view" : "coupled",
-                       s.high ? ", high" : "",b && (!a || rigB.radius>=rigA.radius) ? "authored" : "stock",normal.radius,normal.up,normal.rise,a ? rigA.radius : 0.0f);
+        if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f, native ease eye %.3f look %.3f (cam+0x650 / +0x654)",
+                       s.v,viewed ? "view" : "coupled",s.high ? ", high" : "",b && (!a || rigB.radius>=rigA.radius) ? "authored" : "stock",normal.radius,
+                       normal.up,normal.rise,a ? rigA.radius : 0.0f,At<float>(cam,kCamEaseEye),At<float>(cam,kCamEaseLook));
     }
     tcam::Ease(camSide.rig,want,kRigEase);
     camSide.offset+=(offset-camSide.offset)*kRigEase;
@@ -756,6 +894,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         // time and wobbles with every change of speed); the heading is the gun's traverse (tcam::GunHeading), not the
         // hull-to-landing line that swung the orbit by the landing's sideways wobble.
         const float hull[3]={m[12],m[13],m[14]};
+        camSide.chase=chase::Spring{};   // the normal rig's follower starts over on the hull when it is back (the carry eases)
         float rel[3]={0.0f,0.0f,0.0f};
         if(s.focusValid)for(int i=0;i<3;++i)rel[i]=s.focus[i]-hull[i];
         if(!camSide.highSet) {   // entering it: on the landing at once
@@ -784,7 +923,10 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         pitch=vec::Clamp(pitch,-kViewMost,kViewMost);
         float d[3];
         tcam::Dir(yaw,pitch,d);
-        tcam::Place(camSide.rig,m+12,yaw,d,eye,look);
+        // The rig round the hull's sprung origin (TurretAnchor): the view's direction is still exactly the input's, so
+        // the ray PublishNormalRay hands the turret is the screen's centre, from the eye as drawn.
+        float anchor[3];
+        tcam::Place(camSide.rig,TurretAnchor(m+12,anchor) ? anchor : m+12,yaw,d,eye,look);
     }
     // A switch between the shot observation and the rig: from where the camera was, the old placement's offset eased out
     // (carried in the hull's motion, not lagging it).
@@ -811,26 +953,33 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
 float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) {
     float* const r=reinterpret_cast<PointFn>(image+kPoint)(point,lookOut);
     __try {
+        const unsigned char* const seat=static_cast<const unsigned char*>(point)-kSeatCamLook;
         float eye[3],look[3];
+        bool followed=false;   // the chase follower placed this step (else it starts over next time)
         // the player's Sazabi first: its own rig, the screen's centre its aim (sazabi.cpp, sazabi_camera.inc); a turret
         // seat's pointer kept past its vehicle (a stale `shared`) must never stand in its way
-        if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,reinterpret_cast<const float*>(cam+kCamEye),
-                        reinterpret_cast<const float*>(cam+kCamLook),eye,look))
+        if(SazabiCamera(seat,reinterpret_cast<const float*>(cam+kCamEye),reinterpret_cast<const float*>(cam+kCamLook),eye,look)) {
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
             Place(lookOut+12,lookOut+28,cam,eye,look);
-        else if(PlayerHeliCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,
-                                 lookOut+28,lookOut+12,eye,look))
+        } else if(PlayerHeliCamera(seat,lookOut+28,lookOut+12,eye,look)) {
+            followed=FollowSeat(cam,seat,ChaseKind::heli,eye,look);
             Place(lookOut+12,lookOut+28,cam,eye,look);
-        else if(GunshipGunnerCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+28,lookOut+12,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
-        else if(DreadnoughtCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
-        else if(SeatTurretCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // a gunner seat's own turret: the gunner's view (seat_turret.cpp)
-        else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
-            Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
+        } else if(GunshipGunnerCamera(seat,lookOut+28,lookOut+12,eye,look)) {   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
+            followed=FollowSeat(cam,seat,ChaseKind::air,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(DreadnoughtCamera(seat,eye,look)) {   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(SeatTurretCamera(seat,eye,look)) {   // a gunner seat's own turret: the gunner's view (seat_turret.cpp)
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(shared.seat && seat==shared.seat)Camera(seat,lookOut+12,cam);
+        // the player's jet on its stock locators: chased (PlayerJetChase); the native ease then has nothing left to do
+        else if(PlayerJetChase(cam,seat,lookOut+28,lookOut+12,eye,look)){followed=true;Place(lookOut+12,lookOut+28,cam,eye,look);}
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
-        else if(Cfg().enabled)ProteusViewLift(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,lookOut+28);
-    } __except(EXCEPTION_EXECUTE_HANDLER){}
+        else if(Cfg().enabled)ProteusViewLift(seat,lookOut+12,lookOut+28);
+        if(!followed)ForgetFollower(cam);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ForgetFollower(cam);}
     return r;
 }
 
@@ -995,8 +1144,16 @@ void ResetTurretCam() noexcept {
     shared=Shared{};
     ReleaseSRWLockExclusive(&lock);
     game=GameSide{};camSide=CamSide{};rigInfo=RigInfo{};
+    for(Follower& f:followers)f=Follower{};
     AcquireSRWLockExclusive(&outLock);
     out=Out{};
     ReleaseSRWLockExclusive(&outLock);
+}
+
+void ChaseCamUp(const unsigned char* cam,float* rows) noexcept {
+    for(Follower& f:followers)if(f.cam==cam && f.up) {
+        f.up=false;
+        if(rows && f.upStep==GameFrame())chase::UpRows(rows,f.upDir);
+    }
 }
 }  // namespace crew

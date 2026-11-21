@@ -27,6 +27,8 @@ unsigned char* image=nullptr;
 Config config{};
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; }
+ULONGLONG stepNow=100;   // the scene's step (crew.cpp GameFrame): the chase follower's clock, 1/60 s a step
+ULONGLONG GameFrame() noexcept { return stepNow; }
 void Log(const char*,...) noexcept {}
 bool mapKeys=false,mapView=false;
 bool MapHoldsKeys() noexcept { return mapKeys; }
@@ -98,7 +100,9 @@ bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) 
 bool indirectFixture=false;
 bool IndirectFireSeat(const unsigned char*) noexcept { if(!indirectFixture)Unexpected();return true; }
 void StabStep(void*,const float*,AimStepFn) noexcept { Unexpected(); }
-bool IsPlayerJet(const void*) noexcept { return false; }
+bool jetFixture=false;   // playerjet.cpp IsPlayerJet / PlayerRotorCraft: the chase fixture's craft
+bool IsPlayerJet(const void*) noexcept { return jetFixture; }
+bool PlayerRotorCraft(const void*) noexcept { return false; }
 bool IsHelicopter(const void*) noexcept { return false; }
 bool ProteusViewLift(const unsigned char*,float*,float*) noexcept { Unexpected();return false; }
 
@@ -137,6 +141,115 @@ struct Weapon {
         Put<int>(data,edf::kWeaponAmmoAlive,1200);Put<void*>(holder,kHolderWeapon,data);Put<void*>(holder,kHolderCtrl,weaponControl);Put<int>(weaponControl,8,1);
     }
 };
+// 2026-11-21 (「载具/玩家之类的视角优化一下」): the chase follower (chase_cam.h) as the camera hook runs it.
+void ChaseChecks(unsigned char* vehicle,unsigned char* seat,unsigned char* human,unsigned char* control,unsigned char* gun) {
+    float* const m=reinterpret_cast<float*>(vehicle+kMatrix);
+    struct Trace { float dir[3],eye[3]; bool ray; };
+    // The turret's normal view on a hull that drives 15 m/s for 1.5 s over a rough patch and stops: once with the follower,
+    // once without, the same input.
+    const auto drive=[&](bool chaseOn,std::vector<Trace>& trace,bool high) {
+        ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;selectedGun=gun;config.decoupledTurretCam=true;config.chaseCam=chaseOn;
+        highOn=false;mountedOptic=false;firstPersonVehicle=nullptr;mapKeys=mapView=observation=false;owner=0;
+        Put<void*>(seat,kSeatRider,human);localHuman=human;
+        Put<float>(seat,kSeatStick,0);Put<float>(seat,kSeatStick+4,0);
+        Matrix(vehicle+kMatrix);
+        unsigned char camera[0x700]{};float targets[20]{};
+        const float noInput[2]{};float noCommand[2]{};
+        for(int frameIndex=0;frameIndex<200;++frameIndex) {
+            ++stepNow;
+            if(frameIndex>=20 && frameIndex<110)m[14]+=0.25f;
+            if(frameIndex>=40 && frameIndex<70)m[13]+=frameIndex%2 ? 0.08f : -0.08f;
+            highOn=high && frameIndex>=120 && frameIndex<150;
+            TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);std::memset(targets,0,sizeof(targets));Camera(seat,targets,camera);
+            if(high && frameIndex==140)Check(!camSide.chase.valid,"the high view never runs the follower (its own centre eases)");
+            if(high && frameIndex==150)Check(camSide.chase.valid && vec::Dist(camSide.chase.pos,m+12)<1e-4f,
+                                             "back from the high view the follower starts over on the hull");
+            AcquireSRWLockShared(&lock);const Shared s=shared;ReleaseSRWLockShared(&lock);
+            Trace t{};t.ray=s.normalRay && !s.resume;std::memcpy(t.dir,s.normalDir,12);std::memcpy(t.eye,s.normalEye,12);trace.push_back(t);
+        }
+    };
+    std::vector<Trace> on,off,highTrace;
+    drive(true,on,false);drive(false,off,false);
+    bool sameRay=on.size()==off.size(),rays=true;float jolt[2]={0.0f,0.0f};
+    for(std::size_t i=20;i<on.size() && i<off.size();++i) {
+        rays=rays && on[i].ray && off[i].ray;
+        sameRay=sameRay && vec::Dist(on[i].dir,off[i].dir)<1e-5f;
+        if(i>40 && i<70){jolt[0]=std::fmax(jolt[0],std::fabs(on[i].eye[1]-on[i-1].eye[1]));jolt[1]=std::fmax(jolt[1],std::fabs(off[i].eye[1]-off[i-1].eye[1]));}
+    }
+    Check(rays,"the normal view publishes its own ray every frame with the follower on");
+    Check(sameRay,"the follower lags the eye only: the ray handed to the turret (PublishNormalRay / AimPoint) keeps the view's direction");
+    const float behind=off[100].eye[2]-on[100].eye[2];
+    Check(behind>1.0f && behind<2.0f,"driving 15 m/s the eye trails the hull by about v / omega (kGround), not rigidly on it");
+    Check(jolt[0]<0.5f*jolt[1],"a jolting hull shakes the followed eye less than half as much");
+    Check(vec::Dist(on.back().eye,off.back().eye)<1e-3f,"stopped, the followed eye settles where the rigid one is");
+    drive(true,highTrace,true);
+    config.chaseCam=true;highOn=false;
+
+    // The camera hook's own followers: a seat whose rider is this camera's player.
+    unsigned char rider[0x1600]{},riderCtrl[0x10]{},chaseCamera[0x700]{};
+    rider[kHumanPlayer]=1;Put<void*>(rider,kHumanPad,control);
+    Put<std::int32_t>(riderCtrl,8,1);Put<void*>(rider,kHumanVehicleCtrl-8,vehicle);Put<void*>(rider,kHumanVehicleCtrl,riderCtrl);
+    Put<void*>(seat,kSeatRider,rider);Put<void*>(chaseCamera,kCamTarget,rider);
+    ResetTurretCam();Matrix(vehicle+kMatrix);jetFixture=true;
+    float stockEye[3]={0,5,-20},stockLook[3]={0,2,10},eye[3],look[3];
+    ++stepNow;
+    Check(PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look) && vec::Dist(eye,stockEye)<1e-5f && vec::Dist(look,stockLook)<1e-5f,
+          "the player's jet: chased from the stock locators' points, on them as it starts");
+    for(int i=0;i<240;++i) {
+        ++stepNow;m[14]+=100.0f/60.0f;stockEye[2]+=100.0f/60.0f;stockLook[2]+=100.0f/60.0f;
+        PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);
+    }
+    Check(vec::Dist(eye,stockEye)<1e-2f && vec::Dist(look,stockLook)<1e-2f,"flying straight at 100 m/s: on the stock points, no lag for the speed");
+    const auto viewRows=[&](float* rows) {
+        float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
+        float l[3],u[3];chase::LevelFrame(f,l,u);
+        std::memset(rows,0,64);
+        for(int i=0;i<3;++i){rows[i]=l[i];rows[4+i]=u[i];rows[8+i]=f[i];rows[12+i]=eye[i];}
+    };
+    const auto bankOf=[](const float* rows){return std::atan2(rows[1],rows[5])*180.0f/tcam::kPi;};   // cockpit_instruments.h BankOf
+    float rows[16];viewRows(rows);ChaseCamUp(chaseCamera,rows);
+    Check(std::fabs(bankOf(rows))<1e-3f,"wings level: the picture is not rolled");
+    // Banked 30 deg (right wing down), the locators turning with the airframe round its origin.
+    const float b=30.0f*tcam::kPi/180.0f,origin[3]={m[12],m[13],m[14]};
+    m[0]=std::cos(b);m[1]=std::sin(b);m[2]=0;m[4]=-std::sin(b);m[5]=std::cos(b);m[6]=0;
+    for(int i=0;i<3;++i){stockEye[i]=origin[i]+m[4+i]*5.0f-m[8+i]*20.0f;stockLook[i]=origin[i]+m[4+i]*2.0f+m[8+i]*10.0f;}
+    for(int i=0;i<300;++i){++stepNow;PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);}
+    viewRows(rows);ChaseCamUp(chaseCamera,rows);
+    Check(std::fabs(bankOf(rows)-0.4f*30.0f)<1.5f,"banked 30 deg: the picture rolls about 40% of it (kJet), the same way as BankOf");
+    Check(std::fabs((eye[0]-origin[0])+5.0f*std::sin(0.4f*b))<0.05f,"the eye over the craft swings round it by that share, not welded to the airframe");
+    float again[16];viewRows(again);std::memcpy(rows,again,64);ChaseCamUp(chaseCamera,rows);
+    Check(std::memcmp(rows,again,64)==0,"a step's roll is used once");
+    PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);++stepNow;viewRows(rows);std::memcpy(again,rows,64);ChaseCamUp(chaseCamera,rows);
+    Check(std::memcmp(rows,again,64)==0,"a roll from an earlier step is never applied");
+    firstPersonVehicle=vehicle;firstPersonSeat=0;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"first person: no chase (the cockpit's bone)");
+    firstPersonVehicle=nullptr;mountedOptic=true;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"the mounted optic: no chase");
+    mountedOptic=false;config.chaseCam=false;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"ChaseCam=0: no chase");
+    config.chaseCam=true;Put<void*>(chaseCamera,kCamTarget,human);
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"another player's camera never follows this seat");
+    Put<void*>(chaseCamera,kCamTarget,rider);jetFixture=false;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"not one of the player's jets: not chased as one");
+    // A ground seat (the Sazabi's, a gunner's): the origin sprung, the direction the input's.
+    Matrix(vehicle+kMatrix);ForgetFollower(chaseCamera);
+    bool direction=true;float trail=0.0f;
+    for(int i=0;i<120;++i) {
+        ++stepNow;m[12]+=0.2f;
+        const float yaw=0.02f*i;
+        float e[3]={m[12]-20.0f*std::sin(yaw),m[13]+6.0f,m[14]-20.0f*std::cos(yaw)},l[3]={m[12],m[13]+2.0f,m[14]};
+        const float want[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]},rigid[3]={e[0],e[1],e[2]};
+        direction=direction && FollowSeat(chaseCamera,seat,ChaseKind::ground,e,l);
+        const float got[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]};
+        direction=direction && vec::Dist(want,got)<1e-4f;
+        trail=vec::Dist(rigid,e);
+    }
+    Check(direction,"a ground seat's follower keeps the input's view direction exactly");
+    Check(trail>0.5f,"... and lags the moving vehicle");
+    ResetTurretCam();
+    Put<void*>(seat,kSeatRider,human);
+}
+
 void Run() {
     config.debug=false;
     std::vector<unsigned char> module(0x20B2960);
@@ -530,6 +643,7 @@ void Run() {
     Readout(seat,intent,false,commandPoint,false,false);Check(!out.r.aimValid,"missing current camera target cannot publish stale mouse intent");
     intent.physicalOnly=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"fixed gun physical endpoint is not a movable command circle");
     intent.physicalOnly=false;intent.high=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"high camera ballistic focus is not mouse intent");
+    ChaseChecks(vehicle,seat,human,control,primary.data);
     DWORD ignored=0;VirtualProtect(image+kPoint,14,protection,&ignored);
     image=nullptr;
 }

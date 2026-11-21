@@ -1846,13 +1846,18 @@ void CameraAfterNative(unsigned char* cam) noexcept {
             // interrupted FP-key gesture. The map/TV chain still runs outside this step and has final precedence.
             CancelToggle(human);if(Current().on)Leave();
             std::memcpy(cam+kCamMatrix,controlled.m,64);
+            ChaseCamUp(cam,nullptr);
         } else {
             Camera(cam);
-            if(!Current().on || Current().cam!=cam || !Current().riding)
+            if(!Current().on || Current().cam!=cam || !Current().riding) {
                 VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix),true);   // third person: round the vehicle
+                // The chase follower's partial bank (turretcam.cpp): the native rows have none (LookTo takes a direction);
+                // turned about the forward row, so the screen's centre and the eye stay where the step put them.
+                ChaseCamUp(cam,reinterpret_cast<float*>(cam+kCamMatrix));
+            } else ChaseCamUp(cam,nullptr);   // first person: the cockpit bone's own frame
         }
     }
-    __except(EXCEPTION_EXECUTE_HANDLER){CancelToggle(nullptr);const auto key=Current().key;const bool overridden=Current().overridden;Current()=State{};Current().cam=cam;Current().key=key;Current().overridden=overridden;ClearViews(static_cast<int>(selected-states));}
+    __except(EXCEPTION_EXECUTE_HANDLER){ChaseCamUp(cam,nullptr);CancelToggle(nullptr);const auto key=Current().key;const bool overridden=Current().overridden;Current()=State{};Current().cam=cam;Current().key=key;Current().overridden=overridden;ClearViews(static_cast<int>(selected-states));}
     // One transaction for the final local view, irrespective of its owner. Rotation and eye are separate fields;
     // another layer moving only the eye must not leave our old rotation as next frame's native starting frame.
     Current().cameraApplied={cam,fpview::CameraWriteOf(native,MatrixAt(cam+kCamMatrix))};
