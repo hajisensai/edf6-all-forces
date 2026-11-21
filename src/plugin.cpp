@@ -474,6 +474,12 @@ void Validate(Config& n) noexcept {
     Fix("NpcGrabRange",n.npcGrabRange,0.5f,n.npcDangerRange);
     Fix("NpcCrowd",n.npcCrowd,0.2f,20.0f);
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
+    Fix("NpcWingDashFar",n.npcWingDashFar,5.0f,500.0f);
+    Fix("NpcWingDashSec",n.npcWingDashSec,0.3f,30.0f);
+    Fix("NpcWingDashReserve",n.npcWingDashReserve,0.0f,0.9f);
+    Fix("NpcFencerDashRange",n.npcFencerDashRange,5.0f,200.0f);
+    Fix("NpcFencerDashJumpRange",n.npcFencerDashJumpRange,n.npcFencerDashRange,500.0f);
+    n.npcFencerDashReserve=static_cast<int>(FixInt("NpcFencerDashReserve",n.npcFencerDashReserve,0,8));
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
@@ -965,6 +971,14 @@ void LoadConfig() noexcept {
     n.npcGrabRange=ReadFloat(L"NpcGrabRange",n.npcGrabRange);
     n.npcCrowd=ReadFloat(L"NpcCrowd",n.npcCrowd);
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
+    n.npcWingDash=ReadBool(L"NpcWingDash",n.npcWingDash);
+    n.npcWingDashFar=ReadFloat(L"NpcWingDashFar",n.npcWingDashFar);
+    n.npcWingDashSec=ReadFloat(L"NpcWingDashSec",n.npcWingDashSec);
+    n.npcWingDashReserve=ReadFloat(L"NpcWingDashReserve",n.npcWingDashReserve);
+    n.npcFencerMobility=ReadBool(L"NpcFencerMobility",n.npcFencerMobility);
+    n.npcFencerDashJumpRange=ReadFloat(L"NpcFencerDashJumpRange",n.npcFencerDashJumpRange);
+    n.npcFencerDashRange=ReadFloat(L"NpcFencerDashRange",n.npcFencerDashRange);
+    n.npcFencerDashReserve=ReadInt(L"NpcFencerDashReserve",static_cast<DWORD>(n.npcFencerDashReserve));
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
@@ -1055,6 +1069,9 @@ void LoadConfig() noexcept {
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npcBackpack=%d",n.npcBackpack);
+    Log("CONFIG npc wingDash=%d far=%.0f sec=%.1f reserve=%.2f fencerMobility=%d dashJump=%.0f dash=%.0f reserve=%d",n.npcWingDash,
+        n.npcWingDashFar,n.npcWingDashSec,n.npcWingDashReserve,n.npcFencerMobility,n.npcFencerDashJumpRange,n.npcFencerDashRange,
+        n.npcFencerDashReserve);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d rideAlong=%d commandHintShown=%d",n.npcMarkKey,n.npcMarkCone,
         n.npcBoarding,n.npcGunners,n.npcRideAlong,n.commandHintShown);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);

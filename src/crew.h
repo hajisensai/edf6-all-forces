@@ -483,6 +483,15 @@ struct Config {
     float npcGrabRange=4.0f;        // ...m: one this near makes them roll (or back off)
     float npcCrowd=1.5f;            // ...the pressure (enemies near, nearer weigh more) they back off from
     float npcRollSec=2.5f;          // ...s between two rolls
+    // Their own dashes (npcai.cpp Mobility, docs/npc-mobility-re.md):
+    bool npcWingDash=true;          // ...a Wing Diver dashes (the stock dash): out of a crowd, to a far goal, to keep up
+    float npcWingDashFar=25.0f;     // ...m: a fight's goal farther than this is dashed to (keeping up: twice this)
+    float npcWingDashSec=1.5f;      // ...s between two of her dashes
+    float npcWingDashReserve=0.5f;  // ...share of her energy kept after a dash (in the air at least 0.6), and one more dash
+    bool npcFencerMobility=true;    // ...a Fencer whose weapons dash / boost uses them: dash-jump, dash only or boost only
+    float npcFencerDashJumpRange=45.0f;   // ...m: a goal this far, the way clear and both hands able: the dash-jump
+    float npcFencerDashRange=15.0f; // ...m: a goal this far: a dash
+    int npcFencerDashReserve=1;     // ...dashes kept for dodging while an enemy is near
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
            // ...m from their anchor (the player they follow, their leader, their post) they go to fight
