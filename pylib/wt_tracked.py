@@ -356,8 +356,15 @@ def _image(path: str, min_side: int = 0):  # noqa: ANN202 - texfile.Image
 
 
 def _dds_of(path: str, min_side: int = 0) -> bytes:
+    """A parameter map (the occlusion) as DXT1."""
     import texfile_accel
     return texfile_accel.dxt1_dds(_image(path, min_side))
+
+
+def _albedo_dds(path: str, min_side: int = 0) -> bytes:
+    """A colour map as BC7_UNORM, the format of the stock BC7 albedo maps (docs/model-quality-1121-bc7.md)."""
+    import texfile_accel
+    return texfile_accel.bc7_dds(_image(path, min_side))
 
 
 def _normal_dds(path: str, min_side: int = 0) -> bytes:
@@ -451,7 +458,7 @@ def layout_template(m: dict) -> str:
 
 
 def albedo_dds(folder: str, m: dict, side: int = 0, *, swap_gb: bool = False) -> bytes:
-    """The colour map: DXT1 as before when opaque; DXT5 with the opacity in A when see-through (the 'alpha' map, or the
+    """The colour map: BC7 when opaque (docs/model-quality-1121-bc7.md); DXT5 with the opacity in A when see-through (the 'alpha' map, or the
     albedo file's own A), each mip of a cut-out keeping the top level's coverage at its cutoff. `swap_gb`: G and B
     exchanged, for snd_BRDF_Mech_Catapillar, which reads the albedo as .xzy (its Deferred and Forward PS: `mul r0.xyz,
     r0.xzyx, cb2[0].xyzx`), so a track shows the source's colours."""
@@ -459,12 +466,12 @@ def albedo_dds(folder: str, m: dict, side: int = 0, *, swap_gb: bool = False) ->
     al = alpha_maps.entry(m.get('alpha'))
     albedo = os.path.join(folder, m['albedo'])
     if al['mode'] == alpha_maps.OPAQUE and not swap_gb:
-        return _dds_of(albedo, side)
+        return _albedo_dds(albedo, side)
     rgba = np.array(_pil(albedo, side, 'RGBA'))
     if swap_gb:
         rgba[..., [1, 2]] = rgba[..., [2, 1]]
     if al['mode'] == alpha_maps.OPAQUE:
-        return texfile_accel.dxt1_dds(_texfile(rgba))
+        return texfile_accel.bc7_dds(_texfile(rgba))
     if al['map']:
         from PIL import Image
         a = _pil(os.path.join(folder, al['map']), 0, 'L')

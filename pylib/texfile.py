@@ -3,11 +3,14 @@ read / slice DDS files, and write the DDS files the game's model archives hold.
 
 What the game's archives hold (every stock OBJECT/*.MRAB checked, pylib/mdb.py RAB members): each texture twice,
 `<stem>.dds` in the HD-TEXTURE folder (flag 1) and `<stem>.lod.dds` in the TEXTURE folder (flag 0), both CMPL-compressed
-DDS files with the legacy 124-byte header (no DX10 header), a full mip chain (flags 0xA1007, caps 0x401008), in DXT1 /
-DXT3 / BC5U. The `.lod` member is the same picture 16x smaller per side (2048 -> 128, 1024x512 -> 64x32), but never
-below 16 pixels on its shorter side (64 -> 16), with one mip level fewer than a full chain: it ends at 2 pixels on its
-longer side (128x128: 7 levels, 128 .. 2; 64x32: 6, 64x32 .. 2x1), where the HD file's chain goes on to 1x1 (every
-one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own mip levels from lod_level() on, that long.
+DDS files with the legacy 124-byte header, a full mip chain (flags 0xA1007, caps 0x401008), in DXT1 / DXT3 / BC5U,
+or BC7 behind a DX10 header (179 of them in OBJECT / WEAPON, albedo maps among them: every one DXGI 98 BC7_UNORM,
+dimension 3, no flags, array size 1; the legacy part as a DXT1 file's with FourCC 'DX10' and depth 1; the .lod pairs
+the same as everyone's: docs/model-quality-1121-bc7.md). The `.lod` member is the same picture 16x smaller per side
+(2048 -> 128, 1024x512 -> 64x32), but never below 16 pixels on its shorter side (64 -> 16), with one mip level fewer
+than a full chain: it ends at 2 pixels on its longer side (128x128: 7 levels, 128 .. 2; 64x32: 6, 64x32 .. 2x1), where
+the HD file's chain goes on to 1x1 (every one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own
+mip levels from lod_level() on, that long.
 
     load_image(path) -> Image                     PNG (8 / 16 bit, gray / RGB / palette / alpha, not interlaced) or
                                                   baseline JPEG (Huffman, any sampling, restart markers), as RGBA8
@@ -17,8 +20,11 @@ one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own mip l
     lod_mips(width, height) -> int                the .lod member's mip count (full chain of its size minus one)
     pair_problem(hd, lod) -> str | None           what breaks the stock HD / .lod layout, None when nothing
     dxt1_dds(image) -> bytes                      a DXT1 DDS with a full box-filtered mip chain (range fit, principal
-                                                  axis and least-squares refits, the best per block; DXT1 is what every stock albedo map is, and an uncompressed
-                                                  DDS has no stock precedent the game is known to read)
+                                                  axis and least-squares refits, the best per block; the parameter maps,
+                                                  and an uncompressed DDS has no stock precedent the game is known to read)
+    bc7_dds(image) -> bytes                       the same as BC7 (DX10 header, BC7_UNORM), pylib/bc7.py's reference
+                                                  encoder (slow: texfile_accel.bc7_dds is the native one, the same bytes)
+    bc7_level(data, width, height) -> bytearray   a BC7 mip level decoded to RGBA8
     solid_dxt1(rgb, size) -> bytes                a one-colour DXT1 DDS (flat normal maps, neutral parameter maps)
     texture_pair(data) -> (hd, lod)               the two DDS files of one texture, from a DDS (sliced, not re-encoded)
 """
@@ -34,6 +40,9 @@ DDSD = 0x1 | 0x2 | 0x4 | 0x1000 | 0x20000          # caps, height, width, pixel 
 DDSD_LINEARSIZE, DDSD_PITCH = 0x80000, 0x8
 CAPS = 0x401008                                     # complex, texture, mipmap (every stock file)
 BLOCK_BYTES = {b'DXT1': 8, b'BC4U': 8, b'ATI1': 8, b'DXT3': 16, b'DXT5': 16, b'BC5U': 16, b'ATI2': 16}
+DX10 = b'DX10'
+DXGI_BC7_UNORM = 98                                 # the only DX10 format of the stock model archives
+DX10_TEXTURE2D = 3
 
 
 class TextureError(Exception):
@@ -404,8 +413,14 @@ class DdsInfo:
     width: int
     height: int
     mips: int
-    fourcc: bytes            # b'' for an uncompressed file
+    fourcc: bytes            # b'' for an uncompressed file, DX10 for a DX10 header (dxgi says what)
     bits: int                # bits per pixel of an uncompressed file (0 for block formats)
+    dxgi: int = 0            # the DX10 header's format (DXGI_BC7_UNORM), 0 without one
+
+    @property
+    def data_at(self) -> int:
+        """Where the first mip level starts: after the 128-byte header, and the 20-byte DX10 one."""
+        return 148 if self.fourcc == DX10 else 128
 
 
 def dds_info(data: bytes) -> DdsInfo:
@@ -415,8 +430,15 @@ def dds_info(data: bytes) -> DdsInfo:
     mips = max(1, struct.unpack_from('<I', data, 28)[0])
     pf_flags, fourcc, bits = struct.unpack_from('<I4sI', data, 80)
     if pf_flags & 0x4:
-        if fourcc == b'DX10':
-            raise TextureError('DDS: DX10 headers are not supported (save it as DXT1 / DXT5 / BC5 or uncompressed)')
+        if fourcc == DX10:
+            if len(data) < 148:
+                raise TextureError('DDS: DX10 header cut short')
+            dxgi, dim, misc, size = struct.unpack_from('<4I', data, 128)
+            if (dxgi, dim, misc & 0x4, size) != (DXGI_BC7_UNORM, DX10_TEXTURE2D, 0, 1):
+                raise TextureError(f'DDS: DX10 format {dxgi} dimension {dim} flags {misc:#x} array {size}: only a 2D '
+                                   'BC7_UNORM (98) texture is supported, the one DX10 format of the stock models '
+                                   '(save it as BC7_UNORM, DXT1 / DXT5 / BC5 or uncompressed)')
+            return DdsInfo(width, height, mips, DX10, 0, dxgi)
         if fourcc not in BLOCK_BYTES:
             raise TextureError(f'DDS: unsupported format {fourcc!r}')
         return DdsInfo(width, height, mips, fourcc, 0)
@@ -425,7 +447,7 @@ def dds_info(data: bytes) -> DdsInfo:
 
 def level_size(info: DdsInfo, w: int, h: int) -> int:
     if info.fourcc:
-        return max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * BLOCK_BYTES[info.fourcc]
+        return max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * (16 if info.fourcc == DX10 else BLOCK_BYTES[info.fourcc])
     return w * h * info.bits // 8
 
 
@@ -446,6 +468,13 @@ def _header(width: int, height: int, mips: int, fourcc: bytes, bits: int, masks:
             struct.pack('<5I', CAPS, 0, 0, 0, 0))
 
 
+def _dx10_header(width: int, height: int, mips: int, dxgi: int, top: int) -> bytes:
+    """The 148-byte header of a stock BC7 texture: the legacy part with FourCC DX10 and depth 1 (every stock one),
+    then format, dimension 3 (2D), no flags, array size 1, alpha mode 0."""
+    return (_header(width, height, mips, DX10, 0, (0, 0, 0, 0), top, 1) +
+            struct.pack('<5I', dxgi, DX10_TEXTURE2D, 0, 1, 0))
+
+
 def dds_tail(data: bytes, level: int, count: int | None = None) -> bytes:
     """A DDS of `count` mip levels (default: all the rest) from level `level` of `data` (same format; the header's
     size / pitch / mip count updated)."""
@@ -453,7 +482,7 @@ def dds_tail(data: bytes, level: int, count: int | None = None) -> bytes:
     count = info.mips - level if count is None else count
     if count < 1 or level + count > info.mips:
         raise TextureError(f'DDS has {info.mips} mip levels, levels {level}..{level + count - 1} asked')
-    pos, w, h = 128, info.width, info.height
+    pos, w, h = info.data_at, info.width, info.height
     for _ in range(level):
         pos += level_size(info, w, h)
         w, h = max(1, w // 2), max(1, h // 2)
@@ -463,6 +492,8 @@ def dds_tail(data: bytes, level: int, count: int | None = None) -> bytes:
     for _ in range(count):
         end += level_size(info, lw, lh)
         lw, lh = max(1, lw // 2), max(1, lh // 2)
+    if info.fourcc == DX10:
+        return _dx10_header(w, h, count, info.dxgi, top) + data[pos:end]
     depth = struct.unpack_from('<I', data, 24)[0]
     return _header(w, h, count, info.fourcc, info.bits, masks, top, depth) + data[pos:end]
 
@@ -487,22 +518,22 @@ def texture_pair(data: bytes) -> tuple[bytes, bytes]:
 def pair_problem(hd: bytes, lod: bytes) -> str | None:
     """What makes (hd, lod) differ from every stock HD / .lod pair, None when nothing: a header dds_info refuses,
     other formats, a .lod neither lod_level() halvings of the HD size nor the stock size (each side / 16, at least
-    16: all 2176 non-DX10 stock pairs; the same as lod_level()'s unless a side is below 256) or not lod_mips()
-    levels (2176 of 2176), a file shorter than its mip chain."""
+    16: all 2176 non-DX10 stock pairs and the 178 BC7 ones of OBJECT / WEAPON; the same as lod_level()'s unless a side
+    is below 256) or not lod_mips() levels (2176 + 178 of them), a file shorter than its mip chain."""
     try:
         a, b = dds_info(hd), dds_info(lod)
     except TextureError as e:
         return str(e)
     k = lod_level(a.width, a.height)
-    if (a.fourcc, a.bits) != (b.fourcc, b.bits):
-        return f'HD {a.fourcc!r} / .lod {b.fourcc!r}'
+    if (a.fourcc, a.bits, a.dxgi) != (b.fourcc, b.bits, b.dxgi):
+        return f'HD {a.fourcc!r} {a.dxgi or ""} / .lod {b.fourcc!r} {b.dxgi or ""}'
     stock = (max(16, a.width >> 4), max(16, a.height >> 4))     # every stock .lod (resampled: 64x32 -> 16x16)
     if (b.width, b.height) not in ((max(1, a.width >> k), max(1, a.height >> k)), stock):
         return f'.lod {b.width}x{b.height} is neither HD {a.width}x{a.height} / {1 << k} nor {stock[0]}x{stock[1]}'
     if b.mips != lod_mips(b.width, b.height):
         return f'.lod has {b.mips} mip levels, the stock layout {lod_mips(b.width, b.height)}'
     for data, i in ((hd, a), (lod, b)):
-        need, w, h = 128, i.width, i.height
+        need, w, h = i.data_at, i.width, i.height
         for _ in range(i.mips):
             need += level_size(i, w, h)
             w, h = max(1, w // 2), max(1, h // 2)
@@ -663,6 +694,22 @@ def dxt1_dds(img: Image) -> bytes:
     body = b''.join(_dxt1_level(m) for m in chain)
     top = max(1, (img.width + 3) // 4) * max(1, (img.height + 3) // 4) * 8
     return _header(img.width, img.height, len(chain), b'DXT1', 0, (0, 0, 0, 0), top) + body
+
+
+def bc7_dds(img: Image) -> bytes:
+    """A BC7 DDS of `img` (alpha dropped: every block decodes to 255) with its whole mip chain: bc7.py's reference
+    encoder, slow (texfile_accel.bc7_dds is native/bc7.cpp, the same bytes)."""
+    import bc7
+    chain = mip_chain(img)
+    body = b''.join(bc7.encode_level(bytes(m.rgba), m.width, m.height) for m in chain)
+    top = max(1, (img.width + 3) // 4) * max(1, (img.height + 3) // 4) * 16
+    return _dx10_header(img.width, img.height, len(chain), DXGI_BC7_UNORM, top) + body
+
+
+def bc7_level(data: bytes, width: int, height: int) -> bytearray:
+    """One BC7 mip level (any mode) as width x height RGBA8."""
+    import bc7
+    return bc7.decode_level(data, width, height)
 
 
 def solid_dxt1(rgb: tuple[int, int, int], size: int = 16) -> bytes:

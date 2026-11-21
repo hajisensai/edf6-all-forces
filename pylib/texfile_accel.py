@@ -282,6 +282,42 @@ def dxt5_dds(image: texfile.Image, cutoff: float | None = None) -> bytes:
     return texfile._header(image.width, image.height, len(levels), DXT5_FOURCC, 0, (0, 0, 0, 0), top) + b''.join(levels)
 
 
+# ------------------------------------------------------------------------------------------ BC7 colour maps
+#
+# The external models' colour maps (docs/model-quality-1121-bc7.md): BC7_UNORM behind a DX10 header, as 179 stock model
+# textures are, albedo maps among them. native/bc7.cpp encodes (pylib/bc7.py's encoder, the same bytes); there is no
+# Python fallback for installing: bc7.py takes hours on a model's maps, and an install without edf6cmpl.dll is broken.
+
+def _bc7_level(pixels: Any) -> bytes:
+    import ctypes
+    import numpy as np
+    import bc7  # noqa: F401 - the encoder's definition, native/bc7.cpp its port: buildcache keys the groups on it
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None:
+        raise texfile.TextureError(f'BC7 colour maps need {edf6native.NAME} (native/bc7.cpp): run build.cmd, or the '
+                                   'installation is incomplete')
+    height, width = pixels.shape[:2]
+    data = np.ascontiguousarray(pixels, dtype=np.uint8).tobytes()
+    out = ctypes.create_string_buffer(((width + 3) // 4) * ((height + 3) // 4) * 16)
+    size = lib.edf6_bc7_level(data, width, height, out, 0)
+    return out.raw[:size]
+
+
+def bc7_dds(image: texfile.Image) -> bytes:
+    """texfile.bc7_dds, byte for byte (bc7.py's encoder in native/bc7.cpp, the same box filter)."""
+    import numpy as np
+    pixels = np.frombuffer(image.rgba, dtype=np.uint8).reshape(image.height, image.width, 4)
+    levels = []
+    while True:
+        levels.append(_bc7_level(pixels))
+        if pixels.shape[0] == 1 and pixels.shape[1] == 1:
+            break
+        pixels = _half(pixels)
+    top = max(1, (image.width + 3) // 4) * max(1, (image.height + 3) // 4) * 16
+    return texfile._dx10_header(image.width, image.height, len(levels), texfile.DXGI_BC7_UNORM, top) + b''.join(levels)
+
+
 def decode_dxt5(data: bytes, width: int, height: int) -> Any:
     """A DXT5 level as H x W x 4 float32 in 0..255 (RGB as decode_dxt1's four-colour mode, A as decode_bc4)."""
     import numpy as np
@@ -529,6 +565,7 @@ def decode_dxt1(data: bytes, width: int, height: int, four_only: bool = False) -
 
 
 def texture_dds(path: str) -> bytes:
+    """A cockpit colour map file as a DDS: a .dds as it is (validated), a PNG / JPEG as BC7_UNORM."""
     data = Path(path).read_bytes()
     key = hashlib.sha256(data).hexdigest()
     cached = _dds_cache.get(key)
@@ -547,9 +584,9 @@ def texture_dds(path: str) -> bytes:
                 image = texfile.Image(source.width, source.height, bytearray(source.convert('RGBA').tobytes()))
         else:
             image = texfile.decode_png(data)
-        encoded = dxt1_dds(image)
+        encoded = bc7_dds(image)
     elif data[:2] == b'\xff\xd8':
-        encoded = dxt1_dds(texfile.decode_jpeg(data))
+        encoded = bc7_dds(texfile.decode_jpeg(data))
     else:
         raise texfile.TextureError(f'{path}: neither PNG nor JPEG')
     return _dds_cache.put(key, encoded)
