@@ -133,7 +133,7 @@ void Path() {
     }
 }
 // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer kind's two hands from the requester's Fencer loadout.
-void Hands() {
+void HandWeapons() {
     // The table: every Fencer hand weapon once (docs/weapons.csv categories 200-205), every series weapon of a Fencer kind
     // among them, the path of each fits the soldier's buffer.
     Check(kFencerHandCount==216,"216 Fencer hand weapons");
@@ -191,7 +191,7 @@ void Hands() {
 }  // namespace
 
 int main() {
-    Table();Tier();Pick();Pack();Path();Hands();
+    Table();Tier();Pick();Pack();Path();HandWeapons();
     std::printf("npc_tier_test: %d checks passed\n",checks);
     return 0;
 }
