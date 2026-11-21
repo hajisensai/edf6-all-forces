@@ -1156,6 +1156,9 @@ add_test(NAME pn COMMAND pn_test)
 add_executable(fuze_test tests/fuze_test.cpp)
 target_compile_options(fuze_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME fuze COMMAND fuze_test)
+# What an unarmed missile's dud (no burst, blast sound or fireball) rests on in EDF.dll (skipped without the game).
+add_test(NAME missile_dud_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/missile_dud_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(missile_dud_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
 # The first person's arithmetic (src/fp_view.h: the viewmodel transform, the collapse, the eye) offline
 # (tools/fp_view_check.cpp). cmake --build build --target fp_view_check && buildp_view_check.exe
