@@ -280,6 +280,23 @@ inline float ViewRayStart(const float* eye,const float* dir,float reach,const fl
 // whose range means nothing.
 inline bool BallisticAim(bool viewHit) noexcept { return viewHit; }
 
+// The high view's range for a lofted gun no other module poses (turretcam.cpp HighLoft; the user, 2026-11-21:
+// 「重型导弹这种开启俯瞰视角应该高抛弹道」). The high camera observes the real shot's landing, so the landing can never be
+// the gun's target (camera -> gun -> landing -> camera); the player's native pitch input keeps the meaning it has for
+// any gun there, nearer / farther, but as a range of its own: set once on entry from where the gun's elevation then
+// throws over level ground (turretcam.cpp), then moved only by the input (`input` -1..1 a frame as the aim gets it: a
+// positive one lowers a gun, so it brings the range in), full input crossing the whole reach `most` in kLoftSweep frames,
+// held within [`least`, `most`]. The gun is laid onto its high arc to that range; the camera only watches it land.
+constexpr float kLoftLeast=30.0f;     // m: the nearest range the input brings the high view's lofted gun to
+constexpr float kLoftSweep=240.0f;    // frames: full input from the nearest range to the farthest
+struct LoftRange { bool set; float range; };
+inline float StepLoftRange(LoftRange& r,float input,float least,float most) noexcept {
+    const float in=std::isfinite(input) ? vec::Clamp(input,-1.0f,1.0f) : 0.0f;
+    const float at=std::isfinite(r.range) ? r.range : most;
+    r.range=vec::Clamp(at-in*(most-least)/kLoftSweep,least,most);
+    return r.range;
+}
+
 // Each rig parameter `a` eased toward `b` by `k` (0..1).
 inline void Ease(Rig& a,const Rig& b,float k) noexcept {
     a.up+=(b.up-a.up)*k;a.ahead+=(b.ahead-a.ahead)*k;a.side+=(b.side-a.side)*k;

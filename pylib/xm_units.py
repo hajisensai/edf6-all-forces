@@ -162,6 +162,9 @@ class Unit:
     # and lock-on, as the Patriot's) where its `like`'s is a gun's
     homing: bool = False
     traverse: float = 0.0    # its turret's stops, deg either side (make_tracked_combat TURRET_LIMITS); 0: free
+    # its gun's elevation stop, deg up (make_tracked_combat PITCH_LIMITS: the V603's pitch hinge [1, -elevation, 5]);
+    # 0: the V603's own 60
+    elevation: float = 0.0
     cab: str = ''            # a car's driver's cockpit kit (pylib/cockpit_kits_ground.py KITS; cockpit_fits_plugin)
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
     # (camera, eye: measured on the model at the game's size, metres; read through camera() / eye(), at SCALE)
@@ -169,7 +172,8 @@ class Unit:
     # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m; a car's: its driver's eye
     eye: tuple[float, ...] = ()
     # The bone the eye rides: the turret (cannon_main), or the gun's pitch hinge (cannon_l) where the raised gun or its
-    # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5..60 deg).
+    # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5 deg up to
+    # its elevation stop).
     eye_bone: str = 'cannon_main'
     durability: float = 0.0  # vcobjects GroundVehicle.durability
     reload: int = 0          # its request (tools/calls.py Call): ReloadTime base
@@ -425,14 +429,22 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        gun=('Heavy Missiles', '重型导弹', '重ミサイル', '重型飛彈'),
        # main_weapon: MissileWeaponDef, fire_rate 5, muzzles_per_fire 1 (enemy_missile_anti_core_launchers: 125, Area
        # 12): one missile every 5 s, the two holders in turn
+       # Its flight (the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the TOS-1's 6 m a frame, 0.6 g and 600
+       # frames could not loft at all (above ~7 deg the missile's life ran out in the air, where it vanishes unburst; the
+       # V603's 60 deg stop only reached a high arc 12.7 km out). Derived as tools/make_katyusha.py derives the
+       # Katyusha's (pylib/ballistics.py envelope, the game's 14.7 m/s^2): the most range the plugins' sight reaches
+       # (kSightFar, 3 km: ~2995 m at 45 deg at 6 m a frame under 2.94 g), the rack raised to 80 deg (`elevation`)
+       # for a high arc from ~1025 m out to it, 11.8..16.4 s in the air on flat ground; it lives 25 s, so a lofted
+       # missile never expires in the air, even onto a target well below (tools/selftest.py lofted_envelope_within_life).
        guns={'AmmoCount': 16.0, 'AmmoDamage': 15000.0, 'AmmoExplosion': 18.0, 'FireInterval': 600.0,
-             'FireBurstCount': 1.0, 'FireBurstInterval': 0.0, 'FireAccuracy': 0.01},
+             'FireBurstCount': 1.0, 'FireBurstInterval': 0.0, 'FireAccuracy': 0.01,
+             'AmmoSpeed': 6.0, 'AmmoGravityFactor': 2.94, 'AmmoAlive': 1500.0},
        # models/xm_medium_missile_launcher: 12.3 m long (z -7.0..5.3); the cab in front (roof ~3.4), the rack on the
        # bed y 1.5..3.7, z -7.0..0.7, its pivot y 2.37, z -5.2; the upper tubes' mouths y 3.1, z 0.8
        camera={'model_eye': (0., 4.2, -3.0), 'model_look_at': (0., 3.0, 10.), 'third_person_distance': 13.,
                'third_person_height': 5.4},
        # the eye rides the rack (cannon_l): on the turret the raised rack swung through its view from 32 deg up
-       eye=(0.0, 4.1, -4.6), eye_bone='cannon_l', durability=800.0, reload=16000, level=2.5, traverse=30.0,
+       eye=(0.0, 4.1, -4.6), eye_bone='cannon_l', durability=800.0, reload=16000, level=2.5, traverse=30.0, elevation=80.0,
        after='EDF6VC_CALL_XM_LARGE_BOMBER_CORE'),
     # The APC: eight wheels, a turret with twin heavy machine guns (bursts of three, every 1.3 s) and a radar; two
     # weapons on the same guns: anti-air rounds (main_weapon, both barrels) and ground rounds (core_weapon, the

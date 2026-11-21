@@ -100,4 +100,36 @@ bool BallisticArc(double x,double y,double speed,double drop,bool high,float& el
     frames=static_cast<float>(n);
     return true;
 }
+
+float LevelRange(double speed,double drop,float elevation) noexcept {
+    if(!(speed>0.0) || !(drop>0.0) || !std::isfinite(elevation))return 0.0f;
+    const double n=2.0*speed*std::sin(elevation)/drop-1.0;
+    return n>0.0 ? static_cast<float>(speed*std::cos(elevation)*n) : 0.0f;
+}
+
+float LoftFarthest(double speed,double drop,std::int32_t alive,float* reach) noexcept {
+    if(reach)*reach=0.0f;
+    if(!(speed>0.0) || !(drop>0.0) || alive<=0)return 0.0f;
+    constexpr double kQuarter=0.78539816339744831;
+    // 2 v sin e / drop - 1 <= alive: the steepest elevation whose round is back down within its life.
+    const double most=(static_cast<double>(alive)+1.0)*drop/(2.0*speed);
+    const float e=static_cast<float>(most>=std::sin(kQuarter) ? kQuarter : std::asin(most));
+    if(reach)*reach=LevelRange(speed,drop,e);
+    return e;
+}
+
+LoftArc LoftElevation(double x,double y,double speed,double drop,std::int32_t alive,float lowest,float highest,
+                      float& elevation) noexcept {
+    float e=0.0f,frames=0.0f;
+    if(BallisticArc(x,y,speed,drop,true,e,frames) && e>=lowest && e<=highest && frames<=static_cast<float>(alive)) {
+        elevation=e;
+        return LoftArc::high;
+    }
+    if(BallisticArc(x,y,speed,drop,false,e,frames) && frames<=static_cast<float>(alive)) {
+        elevation=e;
+        return LoftArc::low;
+    }
+    elevation=LoftFarthest(speed,drop,alive,nullptr);
+    return LoftArc::farthest;
+}
 }  // namespace edf
