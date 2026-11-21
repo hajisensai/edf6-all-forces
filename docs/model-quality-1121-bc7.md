@@ -105,7 +105,18 @@ native 版的划分打分按「已保留的第 CANDIDATES 名」剪枝（打分�
 
 整车安装（`make_tracked_combat.build`，含座舱嫁接与 LOD，见下）：
 
-BENCH_TABLE
+| 模型 | BC7 墙钟 / 产物 | DXT1 墙钟 / 产物 | 体积增幅 |
+|---|---|---|---|
+| bmpt | 118.3 s / 67.9 MB | 83.9 s / 56.5 MB | +20% |
+| tunguska | 90.0 s / 46.8 MB | 112.0 s / 36.1 MB | +30% |
+| flak88（emplacement） | 15.1 s / 9.6 MB | 13.2 s / 7.4 MB | +30% |
+| c130 | 30.1 s / 12.9 MB | 26.8 s / 8.7 MB | +48% |
+| helicarrier | 6.4 s / 2.8 MB | 4.8 s / 2.0 MB | +40% |
+| dreadnought | 38.4 s / 38.1 MB | 29.0 s / 29.2 MB | +31% |
+| sazabi | 13.7 s / 11.2 MB | 12.4 s / 11.2 MB | ≈0 |
+| 合计 | 312 s / 189.4 MB | 282 s / 151.1 MB | +25% |
+
+（产物 = 该模型全部 MRAB 字节数，含 HD 与 .lod。墙钟在本机有其他会话跑测试时测得，噪声很大，tunguska 的 BC7 甚至比 DXT1 快，只能看出量级：多线程后整车墙钟多 10–40%。sazabi 的贴图大多是参数图 / 法线，颜色图是小调色板，几乎不变。）
 
 模型包（`D:\APP\edf6-models`、仓库 `models/`）存的是源 PNG / JPG，不含编好的 DDS，**模型包体积不变**；变大的是安装到 `Mods/OBJECT` 的 MRAB（颜色图约 ×2.4，见上表）。1110 文档估的「模型包 +20%」实际体现在安装产物上。
 
