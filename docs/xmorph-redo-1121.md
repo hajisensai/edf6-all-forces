@@ -78,8 +78,8 @@ X-Morph 的高光图是「高光强度」，不是粗糙度 / 金属度；`SPECU
   `part_arrays`（网格自带法线）给飞机、步行、步兵、货车、炮台共用；`select` 对非 V603 家族取 `status == 'ported'`。
 - 旋翼盘：`prepare_air` 把 `unlit_transparent` 材质写成 `{"transparent": {"blend": "alpha", "frames": [textures/<k>_frame<i>.png…], "frame_time": s}}`，
   网格照常作为部件写进 model.npz（挂在主旋翼 / 尾旋翼骨骼上）；帧来自 `<贴图>.txpk`（`xm_model.txpk_frames`：`'TxPk'`、u16 帧数、u32 每帧字节、
-  帧首尾相接，每帧一个 DXT5 DDS；实测小 / 中型直升机各 5 帧 256²），解成 RGBA PNG（alpha 即旋翼覆盖）。`xm_air_model._parts` / `build_model`
-  跳过 transparent 材质（不绘制，与以前丢弃时外观相同）。接 alpha 接口时只要在 `build_model` 里给它选原版 Alpha 宿主材质。
+  帧首尾相接，每帧一个 DXT5 DDS；实测小 / 中型直升机各 5 帧 256²），解成 RGBA PNG（alpha 即旋翼覆盖）。**已由第 7 节接上 alpha 接口绘制**
+  （本节原写「跳过 transparent 材质」，以第 7 节为准）。
 - 飞机比例：`xm_units.AIR_SCALE = 1.0`（见第 6 节风险）。
 - glTF（`pylib/gltf.py`、`tools/prep_glb_model.py`）：`emissiveFactor × KHR_materials_emissive_strength`；有发光的材质写
   `template: light`、整面遮罩 `<name>_emissive.png`、`light = 发光 / albedo 线性均值`（逐通道）。albedo 在某通道为 0 却要在该通道发光、
@@ -145,7 +145,7 @@ X-Morph 的高光图是「高光强度」，不是粗糙度 / 金属度；`SPECU
 - **飞机比例 1.0 与地面 0.7 不一致**：飞机分支按「比例 1.0 照原作」做、模型包和直升机 `eye` 都按 1.0 量；但合并后的 `prepare_air` 读的是
   `SCALE`（0.7），用现行代码重新 prep 会把飞机缩小 30% 而 `xm_heli._camera` 的 `eye` 不跟着缩。本次显式写 `xm_units.AIR_SCALE = 1.0`
   保持已发布的尺寸。要不要统一成 0.7（战斗机会只有 EDF 战机的约四分之一）由维护者决定；统一时 `xm_heli._camera` 要改读 `xm_units.eye()`。
-- 旋翼盘透明：只保留网格和帧（`transparent`），没有绘制，等 alpha 接口（下一阶段）。
+- 旋翼盘透明：已做，见第 7 节。
 - `SPECULAR_RM` 本身仍是观感估计（X-Morph 的高光图是强度、光泽度是每材质常数 60）。
 - light 材质没有遮蔽（NoOcc）：发光单位的材质失去 B 通道遮蔽，这与 10-30 履带一致（X-Morph 单位本来就没有 AO 图）。
 - [xmorph-names.md](xmorph-names.md)「4. 待办」1、2 没做，证据缺口：
@@ -156,3 +156,66 @@ X-Morph 的高光图是「高光强度」，不是粗糙度 / 金属度；`SPECU
     （导弹）由 slot 57 消费（`src/heli.cpp` 注释、`docs/heli-input-re.md`），武器数组变短或换占位武器后 slot 57 / HUD / `src/heli.cpp`
     的 Loadout 是否越界没有逆向，证据仍是 L，所以没改。
 - 全部未实机：发光、粗糙度 / 金属度、网格法线下的明暗都只做了离线核对（MDB 读回、`make_xmorph --check`）。
+
+## 7. 旋翼盘（2026-11-21，分支 feat/1121-xm-rotor-alpha，基于 alpha 分支的透明接口）
+
+### 逆向 / 数据（X-Morph 侧）
+
+- 【H】两个有旋翼盘的单位：`xm_small_helicopter_core`（材质 `units_air/small_helicopter_core_rotor`）、`xm_medium_helicopter_core`
+  （`units_air/medium_helicopter_core_rotor`），都是 `: base/unlit_transparent_skinned`，块内只覆写 `depth_write off`。其余 13 个飞机文件夹没有
+  transparent 材质（逐个读 model.json），不受影响。
+- 【H】`materials/scripts/base.material`：`base/unlit_transparent_skinned : base/unlit_skinned : base/unlit`，`render_group 60`、
+  `transparency_casts_shadows off`、`depth_write off`、`scene_blend alpha_blend`；`base/unlit` 只有 `unlit_VP` / `unlit_FP`
+  （`cGlobalBloom 0`）和 diffuse 贴图，**没有 `cull_hardware none`**，即 Ogre 默认剔除背面（同文件里需要双面的材质都显式写了
+  `cull_hardware none`，如 `base/default_alpha_test_nocull`、植被）。
+- 【H】网格：小型直升机是两片背靠背的方片（相距 4 cm，各 2 三角形），蒙在主旋翼子树的骨骼上（prep 归到 `rotor`，随主旋翼转）；中型直升机是一片朝上（+y）的
+  方片（10.7 × 10.7 m，y = 2.672），蒙在 `body` 上（不转），中心离共轴旋翼轴 7 cm。
+- 【H】帧：各 5 帧 256² RGBA（`TxPk`，第 4 节），小型 0.1 s / 帧、中型 0.2 s / 帧；A 均值 小型 46.6 / 255、中型 31–51，A > 240 的 texel ≤ 1 %。
+
+### 做法（契约）
+
+- `prep_xmorph.rotor_blur`：除了照旧写出 5 帧 PNG 和 `transparent` 记录，再写 `textures/<unit>_<k>.png` = 帧的**时间平均**
+  （`blur_average`），材质加 `albedo`、`alpha`（`alpha_maps.classify` 读平均图的 A：两机都判成 `{"mode": "blend", "factor": 1.0}`；
+  判不出 blend 就报错拒绝）、`min_side`。依据：alpha 混合对 dst 是线性的，第 k 帧给出 a_k·c_k + (1−a_k)·dst，一个循环平均为
+  mean(a)·(Σa_k c_k / Σa_k) + (1−mean(a))·dst，正好是一张 A = mean(a)、RGB = 按 A 加权平均色的贴图混合一次的结果（H，数学恒等；单测
+  `test_blur_average_is_what_the_loop_blends`）。EDF6 材质不能逐帧换贴图，这是不引入新机制下与原作平均观感一致的唯一做法。
+- `prep_xmorph.two_sided`：透明部件若所有面朝同一侧（没有一对面法线点积 < −0.5），追加一份反绕序、法线取反的面（独立顶点）；
+  已经背靠背的（小型）原样不动。依据：原作是俯视相机 + 背面剔除，中型的单片盘从下面看不到；EDF6 相机会在机腹下方。
+- `xm_air_model`：不再跳过 transparent 材质；`model_files` 把旋翼盘 albedo 计入安装缓存哈希；transparent 材质没有 blend `alpha`
+  （旧 prep 的文件夹）直接报错（不兼容旧模型包）。材质经 `wt_tracked.add_surface_material` 挂到 `ALPHA_HOST`
+  （V613 `v613_bikeGlassmat`，`snd_BRDF_Common_Alpha`，b3 = 2 → 透明列表），BODY_PARAMS 取 V505 `v505_tank`（飞机的机身宿主），
+  diffuse.w = 1、视角衰减钉成 1（`FALL_OFF`）。顶点布局取 V505 机身网格（Alpha 宿主与 Common_Basic 同一份 VS，alpha 分支 H）。
+- 合并 alpha 分支时把两边的材质入口统一成 `wt_tracked.add_surface_material`：light → 巴拉姆 light 宿主；see-through（`template()` 为
+  CLIP / ALPHA）→ Clip / Alpha 宿主 + 宿主 `body` 材质参数，并核对 `body` 是 `snd_BRDF_Common_Basic`（`BASIC_SHADER`，V505 `v505_tank`
+  已核对为此着色器）；镂空履带 → 自身履带材质 + alpha_clip；其余 → 宿主 `body`。`template()` 不再只认 `v603_body`，任何非 light、
+  非履带的机身模板都能透明（Common_Basic 由上面核对）。材质没写 `template` 时按调用方的 `body`。
+- `prep_glb_model`：同时发光又透明的 glTF 材质在 prep 时就报错（没有原版宿主同时做两件事，以前要到安装时才在 `template()` 失败）。
+
+### 前后对比
+
+| | 改前（f8bec8cb 的模型包） | 改后 |
+| --- | --- | --- |
+| 小型直升机旋翼盘 | 不绘制 | 4 三角形（原样背靠背两片），Alpha 宿主，随 `rotor` 转 |
+| 中型直升机旋翼盘 | 不绘制 | 4 三角形（2 + 补的背面 2），Alpha 宿主，挂机身不转 |
+| 模型包 triangles（model.json） | 1447 / 3858（不含盘） | 1451 / 3862（含盘） |
+| 平均图 | — | A 均值 46.6 / 35.3，RGB 均值 (154,140,130) / (163,144,125) |
+| MRAB | — | 2.00 MB / 1.83 MB，其中盘的 DXT5 albedo 各 1.40 MB（256² 按 `TEXTURE_MIN_SIDE` 统一放大到 1024²） |
+
+model.npz 里只有中型的 `p1_*`（盘）变了（4 → 8 顶点、2 → 4 三角形），其余数组逐字节相同；其余贴图逐字节相同，新增平均图一张。
+
+### 产物
+
+- 模型包重新 prep：`python tools/prep_xmorph.py heli small_helicopter_core medium_helicopter_core`。`_backup-1121\<文件夹>` 已存在
+  （xm 分支 prep 前的状态），按规则不覆盖；另把本次 prep 前（f8bec8cb 状态）整份复制到 `_backup-1121\<文件夹>@f8bec8cb`。
+  模型包内容哈希随之变化，需要发新模型包。
+- 验证：`make_xmorph.py --kind xm_small_helicopter_core|xm_medium_helicopter_core|xm_large_helicopter_core --check` 均退出码 0；
+  `tests/test_xmorph.py` `RotorBlurTests`（含用真 Root.cpk + 模型包构建两机、读回材质的 `test_heli_blurs_build_on_the_alpha_host`）。
+
+### 没做 / 风险
+
+- **全部未实机**：排序（透明列表里与原版玻璃、特效的先后）、阴影（Alpha 宿主的 ZPass 输出常量，盘会不会投阴影 U）、背面剔除是否真的发生
+  （若 EDF6 对 Common_Alpha 不剔除，小型的两片和中型补的背面会叠成 1−(1−a)² 的不透明度，约 +60 % 视觉浓度）都没确认。
+- **受光**：原作盘是 unlit，EDF6 没有「不受光 + 半透明」的原版宿主，这里受光（V505 机身参数）。阴面 / 夜间会比原作暗（M）。
+- **旋翼叶片照画**：原作有 `rotor_scale` 骨骼，可能在高速时把实体叶片缩掉只留盘；EDF6 的 V506 CAS 不会，叶片与盘同时可见（U，没逆向原作动画）。
+- 中型的盘挂机身不转：时间平均已含转动，观感上与原作一致；没把它挪到 `rotor` 骨骼。
+- 盘贴图按统一规则放大到 1024²，每机多 1.4 MB；软边模糊图放大没有细节收益，若要省体积需另定「透明盘不放大」规则（未改，保持 xm 分支的统一规则）。
