@@ -113,6 +113,8 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
 // Host planner: resolve a transport-authenticated peer to its sealed current-world native player.
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept;
+// Peer `peer`'s EOS ProductUserId text (the transport's authenticated id; 0 is this machine), nullptr when there is none.
+const char* SupportPeerPuid(std::uint32_t peer) noexcept;
 // The plan's requester is this machine's own player (its native network ID). Game thread.
 bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept;
 // Called before native player construction once this world has sealed its

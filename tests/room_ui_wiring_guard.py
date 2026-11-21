@@ -76,7 +76,7 @@ for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', '
 check(frame.find('PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room)') < pass_at, 'the switches planned first')
 check(src.count('roomsync::TickRoomSync()') == 1 and 'if(sw.tick)roomsync::TickRoomSync();' in frame,
       'the pre-sync ticks only where PlanSwitches says (never on a bare screen.room)')
-check(src.count('roomsync::LeaveRoomSync()') == 2 and re.search(r'if\(sw\.leave\) \{[^}]*roomsync::LeaveRoomSync\(\);\s*roomsync::ForgetRoomHostList\(\);', frame) is not None and
+check(src.count('roomsync::LeaveRoomSync()') == 2 and re.search(r'if\(sw\.leave\) \{[^}]*roomsync::LeaveRoomSync\(\);\s*roomsync::ForgetRoomList\(\);', frame) is not None and
       'if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();' in src, 'withdrawn only on the plan\'s leave or a forgotten syncing screen')
 off = body(src, 'std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept')
 for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', 'DrawMenu', 'ShowPreview', 'memset'):
@@ -127,12 +127,13 @@ variants = open(os.path.join(ROOT, 'src', 'support_variants.cpp'), encoding='utf
 preload = body(variants, 'void PreloadSupportVariants() noexcept')
 check('FindFirstFile' not in variants and 'FindNextFile' not in variants, 'no directory scan of Mods/OBJECT')
 check('variants::MissionVariants(&wanted' in preload and 'ForEachConfiguredVariant' in preload and
-      'roomsync::ForEachRoomHostVariant' in preload and 'PendingText()' in preload,
-      'the preload set: configuration + the room host\'s list + the pending list')
-check('variants::HelloBloom(ready,&hostList,bloom)' in preload, 'the hello names the host list\'s files when there is one')
+      'roomsync::ForEachRoomVariant' in preload and 'PendingText()' in preload,
+      'the preload set: configuration + the room\'s set (every member\'s loadout) + the pending list')
+check('variants::HelloBloom(ready,&hostList,bloom)' in preload, 'the hello names the room set\'s files when there is one')
 sync = open(os.path.join(ROOT, 'src', 'room_sync.cpp'), encoding='utf-8').read()
-check('engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList();' in sync and 'AcquireSRWLockShared(&hostLock)' in sync,
-      'the host list handed to the mission start under a lock (another thread)')
+check('engine.Tick(Api(),GetTickCount64(),TheEnv());PublishRoomList();PublishPlayers();PublishMembers();' in sync and
+      'AcquireSRWLockShared(&roomLock)' in sync and 'AcquireSRWLockShared(&membersLock)' in sync,
+      'the room\'s set and the members\' loadouts handed to the mission start / the host\'s plans under a lock (other threads)')
 check('struct Switches' in logic and 'inline SwitchPlan PlanSwitches(' in logic, 'room_ui_logic.h PlanSwitches')
 check('bool roomPreSync=true;' in crew and 'n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);' in plugin,
       'RoomPreSync read, default 1')

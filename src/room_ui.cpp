@@ -757,7 +757,7 @@ void DrawMenu(unsigned char* self) noexcept {
     roomsync::SyncLine sync[kStatusLines]{};
     int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
     if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
-    const Status s=ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
+    const Status s=ComposeStatus(st.room,st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
     for(int i=0;i<kStatusLines;++i) {
         StatusName(i,name);
         SetText(self,kSlotStatus+i,name,i<s.count ? s.text[i] : nullptr,StatusColour(i<s.count && s.warn[i]));
@@ -800,7 +800,7 @@ Status MenuStatus() noexcept {
     int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
     if(st.room)syncCount+=HostSettingsLines(sync+syncCount,kStatusLines-syncCount);   // the host's settings, the builds that differ
     if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
-    return ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
+    return ComposeStatus(st.room,st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
 }
 // Each frame while the menu is open: the dialog's pick taken; once the game has closed it (picked, or its own cancel),
 // the menu steps (Apply / Cancel) and the next page opens as a new dialog, when the screen is the input owner again.
@@ -919,7 +919,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const SwitchPlan sw=PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room);
     if(sw.leave) {   // a switch turned off: withdrawn, and the next mission does not take the host's list either
         roomsync::LeaveRoomSync();
-        roomsync::ForgetRoomHostList();
+        roomsync::ForgetRoomList();
         Log("ROOMSYNC stopped (Enabled / RoomLoadout / RoomPreSync off): this machine's keys withdrawn, the host's list dropped");
     }
     if(sw.pass)return Off(screen,self,ctx);

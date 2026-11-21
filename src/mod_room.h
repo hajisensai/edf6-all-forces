@@ -45,8 +45,13 @@ namespace crew {
 //      And the Andryusha's fuse switch goes to the vehicle's copies (andryusha_net.h 'AFUZ' on tag 15): every
 //      machine writes the rider's fuse into its copy of the launcher, so its carriers burst and split alike. An older
 //      build ignores the block (seat_net.h) and keeps its copy's impact fuse: its bomblets would fall elsewhere.
+//  11 (2026-11-21): every member's own support loadout applies to the supports that member calls (member_config.h): every
+//      member publishes it in the room (EDF6X_VCCFG, room_sync_logic.h; the host's file list EDF6X_VCVARIANTS and the
+//      pack marker EDF6X_VCPACKS are gone), every machine generates every member's files, and the host plans a member's
+//      request with that member's loadout (support_dispatch.cpp PlanForRequester). An older build would neither publish
+//      its loadout (its calls would come with the defaults) nor generate the others' files (stock where a plan wants them).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=10;
+constexpr std::int64_t kAllForcesRoomProtocol=11;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {
