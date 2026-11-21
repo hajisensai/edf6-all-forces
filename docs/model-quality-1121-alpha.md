@@ -75,7 +75,7 @@ CLIP / ALPHA 材质的 `diffuse`（RGB）、`specular_color`、`specular_diffuse
 生成侧（`pylib/wt_tracked.py`）：
 
 - `template(m)`：材质建在哪个宿主上（`v603_body` / 履带 / `light` / `CLIP` / `ALPHA`）；`layout_template(m)`：网格用哪个原版材质的顶点布局（CLIP / ALPHA → `v603_body`）。
-- `albedo_dds(folder, m, side, swap_gb=)`：不透明时与原来同一条 DXT1 路径、字节不变；透明时 DXT5（`texfile_accel.dxt5_dds`），`mask` 每级 mip 按 cutoff 保持顶层覆盖率。
+- `albedo_dds(folder, m, side, swap_gb=)`：不透明时走颜色图的常规路径（与 BC7 分支合并后为 BC7，见 [model-quality-1121-bc7.md](model-quality-1121-bc7.md)）；透明时 DXT5（`texfile_accel.dxt5_dds`），`mask` 每级 mip 按 cutoff 保持顶层覆盖率。
 - `see_through_host(game, CLIP|ALPHA)`、`see_through(md, index, m, body=None)`、`clip_textures()`：建材质、写透明参数，供其他建模路径复用。
 
 ## 3. 编码：DXT5
@@ -105,7 +105,7 @@ CLIP / ALPHA 材质的 `diffuse`（RGB）、`specular_color`、`specular_diffuse
 ## 5. 测试
 
 - `tests/test_model_quality.py` 的 `Alpha`：分类规则、契约校验、glTF 读取、DXT5 块布局（颜色半块与 DXT1 路径逐字节相同、四色模式、HD / .lod 对合法）、mask mip 覆盖率、宿主选择、albedo 的 alpha 图与履带 G / B 互换、WT MTL 的 `map_d` / `d`。
-- `tests/test_wt_tracked.py` 的 `test_see_through_materials_sit_on_the_stock_hosts`（需要游戏文件）：每个带 `alpha` 的材质是 DXT5、在审过的宿主着色器上（ALPHA 的 b3 = 2、diffuse.w = factor、fall-off 恒 1；CLIP / 履带的 alpha_clip = cutoff 且解码后覆盖率与 map 相差 < 3 %），CLIP / ALPHA 的受光参数等于 `v603_body`；其余材质仍是 DXT1、原模板着色器。
+- `tests/test_wt_tracked.py` 的 `test_see_through_materials_sit_on_the_stock_hosts`（需要游戏文件）：每个带 `alpha` 的材质是 DXT5、在审过的宿主着色器上（ALPHA 的 b3 = 2、diffuse.w = factor、fall-off 恒 1；CLIP / 履带的 alpha_clip = cutoff 且解码后覆盖率与 map 相差 < 3 %），CLIP / ALPHA 的受光参数等于 `v603_body`；其余材质是 BC7（合并 BC7 分支后）、原模板着色器。
 
 ## 6. X-Morph 怎么接
 

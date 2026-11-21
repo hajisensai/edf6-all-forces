@@ -354,7 +354,7 @@ class Alpha(unittest.TestCase):
             Image.fromarray(rgba[..., :3], 'RGB').save(os.path.join(d, 'c.png'))
             Image.fromarray(rgba[..., 3], 'L').save(os.path.join(d, 'a.png'))
             m = {'name': 'n', 'template': 'v603_body', 'albedo': 'c.png'}
-            self.assertEqual(texfile.dds_info(wt.albedo_dds(d, m)).fourcc, b'DXT1')     # opaque: as before
+            self.assertEqual(texfile.dds_info(wt.albedo_dds(d, m)).fourcc, texfile.DX10)     # opaque: BC7
             dds = wt.albedo_dds(d, {**m, 'alpha': {'mode': 'mask', 'map': 'a.png'}})
             dec = texfile_accel.decode_dxt5(dds[128:], 32, 32)
             self.assertTrue(np.array_equal(dec[..., 3], rgba[..., 3]))

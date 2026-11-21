@@ -1771,6 +1771,9 @@ KNOWN_SILENT: dict[str, tuple[frozenset[str], str]] = {
     'UfoCarrier508': (frozenset({'E4キャリア301ハッチオープンド', 'E4キャリア301ハッチクローズド', 'E4キャリア301ハッチ稼働オープン',
                                  'E4キャリア301ハッチ稼働クローズ', 'E4キャリアオープン一個', 'E4キャリアクローズ一個'}),
                       "MAB hatch events; 301's cues are in no EDF6 bank, 401's in tikyuu4_en_UFOcarrier401 under no preset"),
+    'Hector41_Weapon': (frozenset({'ヘクトルカノン開く', 'ヘクトルカノン閉じる', 'ヘクトルランチャ開く', 'ヘクトルランチャ閉じる'}),
+                        "4.1's open / close clip events in the weapon's MAB; the weapon's CAS is still (the plugin poses its bones, "
+                        'docs/edf41-hector-split-models.md), so no clip that carries them plays; silent before the split as well'),
     'EDF6_Berserker_Large': (frozenset({'歩行メカ衝突', 'ヘクトル衝突'}),
                              'ragdoll_contact; its cue en_Hector_down is in tikyuu4_en_Hector, no EDF6 preset names it'),
     'UfoMother301': (frozenset({'母船UFO弱点収納', '母船UFO弱点収納完了', '母船UFOハッチ閉じる稼動', '母船UFOハッチ閉じる停止',

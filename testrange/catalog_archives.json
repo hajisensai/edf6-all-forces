@@ -526,7 +526,9 @@
    "OBJECT/UFO401.MRAB"
   ],
   "edf6tr_andryusha_mission": [
-   "OBJECT/EDF6VC_KATYUSHA.MRAB"
+   "OBJECT/EDF6VC_KATYUSHA.MRAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/V_NULL.RAB"
   ],
   "edf6tr_apocalypse_mission": [
    "OBJECT/EDF6VC_APOCALYPSE.MRAB",

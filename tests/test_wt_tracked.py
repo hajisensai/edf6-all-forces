@@ -320,7 +320,7 @@ class WtAssetTests(unittest.TestCase):
 
     def test_see_through_materials_sit_on_the_stock_hosts(self) -> None:
         """docs/model-quality-1121-alpha.md: a model.json 'alpha' material is DXT5 on the reviewed Clip / Alpha host
-        (a track on its own material with alpha_clip), every other one as before (DXT1, its template's shader)."""
+        (a track on its own material with alpha_clip), every other one BC7 (docs/model-quality-1121-bc7.md) on its template's shader."""
         import alpha_maps
         import texfile
         import texfile_accel
@@ -343,7 +343,7 @@ class WtAssetTests(unittest.TestCase):
                     info = texfile.dds_info(dds)
                     on = wt.template(m)
                     if al['mode'] == alpha_maps.OPAQUE:
-                        self.assertEqual(info.fourcc, b'DXT1')
+                        self.assertEqual((info.fourcc, info.dxgi), (texfile.DX10, texfile.DXGI_BC7_UNORM))
                         if m['template'] != wt.LIGHT:
                             self.assertEqual(mat.shader, shaders[m['template']])
                         continue
