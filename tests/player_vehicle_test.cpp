@@ -31,8 +31,11 @@ void RoomValue() {
     Check(ParseValue(value,back,&n) && n==2 && Same(back[0],Of(own[0])) && Same(back[1],Of(own[3])),"own value reads back");
     Check(std::strlen(value)<=kValueMost,"fits the attribute");
     VehicleLoadout all[kPlayerVehicleCount]{};
-    for(int i=0;i<kPlayerVehicleCount;++i)all[i]=Jet(kPlayerVehicles[i].body,L"AAM_S:2,AAM_S:2,AAM_S:2,AAM_S:2,AAM_S:2");
-    Check(OwnValue(all,kPlayerVehicleCount,value,sizeof(value)) && std::strlen(value)<=kValueMost,"all five fit");
+    for(int i=0;i<kPlayerVehicleCount;++i)
+        all[i]=kPlayerVehicles[i].body==VehicleBody::mech ? Jet(VehicleBody::mech,L"MPACK_B_WEAPON109,OLDROBOT,HYPERLASER,SABER,PBEAM,POWERDYNE_GC,MPACK_A_WEAPON076")
+                                                          : Jet(kPlayerVehicles[i].body,L"AAM_S:2,AAM_S:2,AAM_S:2,AAM_S:2,AAM_S:2");
+    Check(OwnValue(all,kPlayerVehicleCount,value,sizeof(value)) && std::strlen(value)<=kValueMost,"all six fit (the mech too)");
+    Check(ParseValue(value,back,&n) && n==kPlayerVehicleCount && Same(back[n-1],Of(all[kPlayerVehicleCount-1])),"the mech's token reads back");
     VehicleLoadout none[kPlayerVehicleCount]{};
     none[1]=Jet(VehicleBody::pstrike,L"GUNS");
     Check(!OwnValue(none,kPlayerVehicleCount,value,sizeof(value)),"guns alone / stock: nothing published (the stock twin's guns)");
@@ -65,7 +68,8 @@ void Wire() {
     Check(!Decode(bytes,size-1,back),"a have of the wrong size refused");
     bytes[4]=1;Check(!Decode(bytes,size,back),"an older version (the requester its NetId) refused");
     bytes[4]=2;Check(!Decode(bytes,size,back),"version 2 (the player's tag at bytes 0..3) refused");
-    bytes[4]=4;Check(!Decode(bytes,size,back),"a newer version refused");
+    bytes[4]=3;Check(!Decode(bytes,size,back),"version 3 (no mech) refused");
+    bytes[4]=5;Check(!Decode(bytes,size,back),"a newer version refused");
     // The requester: a player's reference (net_object_ref.h), mission player 1.
     Msg d;d.kind=Kind::decide;d.origin=9;d.seq=3;d.variant=m.have[0];crew::netref::MakePlayer(1,d.requester);
     size=Encode(d,bytes,sizeof(bytes));
@@ -93,6 +97,13 @@ void Paths() {
     Check(TwinOfPath(L"app:/object/edf6vc_pjet_fighter.sgo")==0 && TwinOfPath(L"APP:/OBJECT/EDF6VC_FLY_MULTIROLE.SGO")==4 &&
           TwinOfPath(L"app:/object/edf6vc_fly_gunship.sgo")<0 && TwinOfPath(L"app:/object/edf6vc_jet_fighter.sgo")<0 && TwinOfPath(nullptr)<0,
           "the twins a request makes, nothing else");
+    // The mech: any of its frames' requests, whichever its loadout's frame (docs/feature-2026-11-21-mech-custom.md).
+    const int mech=PlayerVehicleOfBody(VehicleBody::mech);
+    Check(mech>=0 && TwinOfPath(L"app:/Object/v612_nix_red.sgo")==mech && TwinOfPath(L"APP:/OBJECT/V504_BEGARUTA_BLUE.SGO")==mech &&
+          TwinOfPath(L"app:/object/v608_oldrobot.sgo")==mech && TwinOfPath(L"app:/object/v614_proteus_mk2_call.sgo")<0,
+          "every mech frame's request is the mech's, the Proteus not");
+    const Variant mv=Of(Jet(VehicleBody::mech,L"EWEAPON378,NIX_RED,EMLASER,EMLASER,PBEAM,MIRAGE,-"));
+    Check(Valid(mv) && LoadedPath(mv,path,160) && !std::wcsncmp(path,L"app:/object/edf6vc_lo_mech_",27),"a mech's lower-case path");
     for(int i=0;i<kPlayerVehicleCount;++i) {
         const VehicleBodyRow* row=VehicleBodyOf(kPlayerVehicles[i].body);
         Check(row && !_wcsicmp(row->base,kPlayerVehicles[i].twin) && VehicleBodyOfKey(kPlayerVehicles[i].key)==kPlayerVehicles[i].body &&
@@ -282,6 +293,21 @@ void Machines() {
      e.Begin(own,kPlayerVehicleCount,nullptr,0);
      const Msg s=e.Decide(id,VehicleBody::pfighter,1,false);
      Check(s.variant.bits==0,"offline without the file: stock");}
+    // The mech: only its base request gets it (eligible), every other mech request is stock but still numbered.
+    {Engine e;const VehicleLoadout m=Jet(VehicleBody::mech,L"EWEAPON362,OLDROBOT,HEAVYREVCANNON,-,HOWITZER,HOWITZER,-");
+     const Variant mv=Of(m);const int at=PlayerVehicleOfBody(VehicleBody::mech);
+     VehicleLoadout own[kPlayerVehicleCount]{};own[at]=m;
+     e.Begin(own,kPlayerVehicleCount,&mv,1);
+     unsigned char id[32]{};crew::netref::MakePlayer(1,id);
+     const Msg other=e.Decide(id,VehicleBody::mech,1,false,false);
+     const Msg base=e.Decide(id,VehicleBody::mech,1,false,true);
+     Check(other.variant.bits==0 && base.variant.bits==mv.bits && base.seq==other.seq+1 &&
+           e.Land(id,VehicleBody::mech,base.seq).bits==mv.bits && e.Land(id,VehicleBody::mech,other.seq).found,
+           "a mech: the base request custom, another mech request stock, both numbered");
+     Msg h;h.kind=Kind::have;h.origin=3;h.count=1;h.have[0]=mv;
+     unsigned char bytes[kMostSize];Msg back;
+     const std::size_t size=Encode(h,bytes,sizeof(bytes));
+     Check(size && Decode(bytes,size,back) && Same(back.have[0],mv),"a mech travels in a have");}
 }
 }  // namespace
 

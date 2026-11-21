@@ -159,11 +159,11 @@ def check_vehicles_fake(game_dir: str, game: object) -> None:
         f.write(sgo.write_depth_first(version, jet_v))
     with contextlib.redirect_stdout(io.StringIO()) as out:
         files = mp.build_vehicles(game, game_dir)
-    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE', 'INTERCEPTOR')}
+    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE', 'INTERCEPTOR', 'MECH')}
     jet_cas = f'MENUOBJECT/{mp.vehicle_cas_file("INTERCEPTOR")}'
     check(set(files) == want | {jet_cas},
-          f'the tank (Root.cpk), the Mods strike jet and interceptor, its menu CAS: {sorted(files)}')
-    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 3, 'every missing body said')
+          f'the stock tank and mech, two Mods jets and the interceptor menu CAS: {sorted(files)}')
+    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 4, 'every missing body said')
     heli = game.read('OBJECT', 'V506_HELI.CAS')
     check([n for _, n in mp.anmgroups(heli)] == ['Roter', 'Main'], "the jets' CAS as the game ships it (no `main`)")
     check([n for _, n in mp.anmgroups(files[jet_cas])] == ['Roter', 'main'] and len(files[jet_cas]) == len(heli) and

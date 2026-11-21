@@ -204,11 +204,12 @@ struct CameraShift {
 };
 // How much farther a vehicle stands than a soldier (its size against a soldier's ~1.8 m: the tank V505 about 7 m long,
 // the jets 15-20 m; the soldier's own placement, camera_pos [0] = (1.1, -0.9, -3.5), fills the frame with ~2 m).
-// Guessed from those sizes (L): to be tuned in the game.
+// The mech (a Nix stands about 5 m) is framed as the tank, not as a jet. Guessed from those sizes (L): to be tuned in the
+// game.
 inline constexpr float kTankScale=3.0f,kJetScale=6.0f;
 constexpr float VehicleScale(VehicleBody b) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(b);
-    return !row ? 1.f : row->tank ? kTankScale : kJetScale;
+    return !row ? 1.f : row->tank || b==VehicleBody::mech ? kTankScale : kJetScale;
 }
 // A vehicle turns slowly on its stand (the yaw +0x2A4 the menu otherwise holds): every pylon comes round. rad / frame.
 inline constexpr float kVehicleTurn=0.01f;

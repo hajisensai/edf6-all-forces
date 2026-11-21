@@ -26,6 +26,7 @@
 // variant (support_net.h Unit::variant, sent in the unit message's unused `challenge`) and each peer's hello (an
 // extension word and a Bloom filter of the files it has, in the hello's unused unit fields): support_protocol.h.
 #pragma once
+#include "mech_loadout.h"
 #include "npc_pack_table.h"
 #include "support_call.h"
 #include <cstddef>
@@ -289,9 +290,11 @@ constexpr const LoadStore* LoadStoreOf(int code) noexcept {
 // The last five (2026-10-25, the user: "换载具要能换自己召唤的啊，不只是npc的载具"): the jets a player summons
 // with a vehicle request (tools/calls.py: the player fighter / strike jet, the requested twins of the fighter, the
 // interceptor and the multirole jet), the twin the request brings their base (player_vehicle_logic.h).
+// The mech (2026-11-21, docs/feature-2026-11-21-mech-custom.md): a player's mech request, its four weapon slots, frame
+// and core (mech_loadout.h) instead of pylons; its base is whichever frame the loadout names.
 enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole,
-                                        pfighter, pstrike, rfighter, rinterceptor, rmultirole };
-inline constexpr int kVehicleBodyLast=static_cast<int>(VehicleBody::rmultirole);
+                                        pfighter, pstrike, rfighter, rinterceptor, rmultirole, mech };
+inline constexpr int kVehicleBodyLast=static_cast<int>(VehicleBody::mech);
 // `most` pylons: a tank's stock gun and 4 (src/payload.h kMostPayload 8 a seat), a jet's 5 (its guns L / R, the fuel tank
 // and 5 make 8 holders: src/jet_combat.cpp ReadArms reads at most 8, src/stores.h kMostStores 7 stores).
 // `payloadKg`: the most its pylons may weigh (the stores' massKg x rounds), 0 = not weighed (2026-10-25, the user: "支援
@@ -317,6 +320,8 @@ inline constexpr VehicleBodyRow kVehicleBodies[]={
     {VehicleBody::rfighter,L"RFIGHTER",L"EDF6VC_FLY_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
     {VehicleBody::rinterceptor,L"RINTERCEPTOR",L"EDF6VC_FLY_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
     {VehicleBody::rmultirole,L"RMULTIROLE",L"EDF6VC_FLY_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    // No pylons (VehicleLoadout::mech): built on the frame the loadout names; the Nix stands for the family here.
+    {VehicleBody::mech,L"MECH",L"V504_BEGARUTA.SGO",0,false,0},
 };
 constexpr const VehicleBodyRow* VehicleBodyOf(VehicleBody b) noexcept {
     for(const auto& r:kVehicleBodies)if(r.body==b)return &r;
@@ -333,10 +338,12 @@ inline constexpr VehicleKey kVehicleKeys[]={
     // A player's own summons (kPlayerVehicles): SupportVehicle_OWN_<...>, the same grammar and weight.
     {L"OWN_PFIGHTER",VehicleBody::pfighter},{L"OWN_PSTRIKE",VehicleBody::pstrike},{L"OWN_FIGHTER",VehicleBody::rfighter},
     {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor},{L"OWN_MULTIROLE",VehicleBody::rmultirole},
+    {L"OWN_MECH",VehicleBody::mech},
 };
 // The vehicles a player summons with a vehicle request and may load before the battle: the key of its
 // SupportVehicle_<KEY>, its body, the twin the request's container makes (its CreateObject path's file name: tools/calls.py
-// `vehicle`, written by tools/make_jets.py). Not support catalog entries: never in a host's support list.
+// `vehicle`, written by tools/make_jets.py). Not support catalog entries: never in a host's support list. The mech's
+// "twin" stands for its whole family: any mech frame's request (mech_loadout.h IsMechFrameFile, playerveh::TwinOfPath).
 struct PlayerVehicle { const wchar_t* key; VehicleBody body; const wchar_t* twin; };
 inline constexpr PlayerVehicle kPlayerVehicles[]={
     {L"OWN_PFIGHTER",VehicleBody::pfighter,L"EDF6VC_PJET_FIGHTER.SGO"},
@@ -344,6 +351,7 @@ inline constexpr PlayerVehicle kPlayerVehicles[]={
     {L"OWN_FIGHTER",VehicleBody::rfighter,L"EDF6VC_FLY_FIGHTER.SGO"},
     {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor,L"EDF6VC_FLY_INTERCEPTOR.SGO"},
     {L"OWN_MULTIROLE",VehicleBody::rmultirole,L"EDF6VC_FLY_MULTIROLE.SGO"},
+    {L"OWN_MECH",VehicleBody::mech,L"V504_BEGARUTA.SGO"},
 };
 inline constexpr int kPlayerVehicleCount=static_cast<int>(sizeof(kPlayerVehicles)/sizeof(kPlayerVehicles[0]));
 // The player vehicle `key` names, or -1.
@@ -357,7 +365,7 @@ inline int PlayerVehicleOfBody(VehicleBody body) noexcept {
 }
 constexpr bool IsPlayerBody(VehicleBody b) noexcept {
     return b==VehicleBody::pfighter || b==VehicleBody::pstrike || b==VehicleBody::rfighter || b==VehicleBody::rinterceptor ||
-           b==VehicleBody::rmultirole;
+           b==VehicleBody::rmultirole || b==VehicleBody::mech;
 }
 inline VehicleBody VehicleBodyOfKey(const wchar_t* key) noexcept {
     if(!key)return VehicleBody::none;
@@ -372,6 +380,7 @@ struct VehicleLoadout {
     int count=0;                          // pylons
     std::uint8_t store[kPylonsMost]{};    // kLoadStores code
     std::uint8_t rounds[kPylonsMost]{};   // kRoundCounts code
+    MechLoadout mech{};                   // a mech's (body mech: count 1, no pylons)
     constexpr bool On() const noexcept { return body!=VehicleBody::none; }
 };
 // What `l`'s pylons weigh (kg): each store's massKg x its rounds.
@@ -392,8 +401,62 @@ constexpr bool WithinPayload(const VehicleLoadout& l) noexcept {
     return budget<=0 || LoadoutMassKg(l)<=budget;
 }
 // `text` (one SupportVehicle_<KEY> value) for `body`. Empty: true, no loadout. False: *out none, `why` says why.
+// The mech's value (mech_loadout.h): request, frame, right arm, left arm, right shoulder, left shoulder, core; - empty
+// (the frame / core: the request's own). Empty: true, no loadout. False: *out none, `why` says why.
+inline bool ParseMechLoadout(const wchar_t* text,VehicleLoadout* out,wchar_t* why,std::size_t whyCapacity) noexcept {
+    using namespace loadout_detail;
+    static constexpr const wchar_t* kSlotFault[kMechSlots]={L"右臂装不了：",L"左臂装不了：",L"右肩装不了：",L"左肩装不了："};
+    if(why && whyCapacity)why[0]=0;
+    MechLoadout m;
+    int tokens=0;
+    bool parsed=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
+        const int at=tokens++;
+        if(at>=kMechFields)return true;   // counted: refused below
+        const bool none=b-a==1 && *a==L'-';
+        if(at==0) {
+            if(none){Say(why,whyCapacity,L"机甲的第一项是底座请求");return false;}
+            m.request=MechIndexOf(kMechRequests,a,b);
+            if(m.request<0){Say(why,whyCapacity,L"未知的机甲请求：",a,b);return false;}
+        } else if(at==1) {
+            if(!none && (m.frame=MechIndexOf(kMechFrames,a,b))<0){Say(why,whyCapacity,L"未知的机体：",a,b);return false;}
+        } else if(at==kMechFields-1) {
+            if(!none && (m.core=MechIndexOf(kMechCores,a,b))<0){Say(why,whyCapacity,L"未知的核心：",a,b);return false;}
+            if(m.core>=0 && !MechCoreAllowed(m.core,m.request)){Say(why,whyCapacity,L"核心等级高于底座请求：",a,b);return false;}
+        } else if(!none) {
+            const int slot=at-2,w=MechIndexOf(kMechWeapons,a,b);
+            if(w<0){Say(why,whyCapacity,L"未知的机甲武器：",a,b);return false;}
+            if(!MechWeaponFits(w,slot)){Say(why,whyCapacity,kSlotFault[slot],a,b);return false;}
+            if(!MechWeaponAllowed(w,slot,m.request)){Say(why,whyCapacity,L"武器等级高于底座请求：",a,b);return false;}
+            m.weapon[slot]=w;
+        }
+        return true;
+    });
+    if(parsed && tokens && tokens!=kMechFields) {
+        parsed=false;Say(why,whyCapacity,L"机甲写成 底座请求,机体,右臂,左臂,右肩,左肩,核心（7 项，空槽写 -）");
+    }
+    if(parsed && tokens && MechCheck(m)==MechFault::noWeapon){parsed=false;Say(why,whyCapacity,L"至少装一件武器");}
+    VehicleLoadout l{};
+    if(parsed && tokens){l.body=VehicleBody::mech;l.count=1;l.mech=m;}
+    if(out)*out=parsed ? l : VehicleLoadout{};
+    return parsed;
+}
+// The value of a mech loadout (what ParseMechLoadout reads back), 0 when it is none or does not fit.
+inline std::size_t FormatMechLoadout(const MechLoadout& m,wchar_t* out,std::size_t capacity) noexcept {
+    if(!out || !capacity || !MechValid(m)){if(out && capacity)out[0]=0;return 0;}
+    const auto token=[](const wchar_t* t) noexcept { return t ? t : L"-"; };
+    const int n=std::swprintf(out,capacity,L"%ls,%ls,%ls,%ls,%ls,%ls,%ls",kMechRequests[m.request].token,
+                              token(m.frame>=0 ? kMechFrames[m.frame].token : nullptr),
+                              token(m.weapon[0]>=0 ? kMechWeapons[m.weapon[0]].token : nullptr),
+                              token(m.weapon[1]>=0 ? kMechWeapons[m.weapon[1]].token : nullptr),
+                              token(m.weapon[2]>=0 ? kMechWeapons[m.weapon[2]].token : nullptr),
+                              token(m.weapon[3]>=0 ? kMechWeapons[m.weapon[3]].token : nullptr),
+                              token(m.core>=0 ? kMechCores[m.core].token : nullptr));
+    if(n<=0 || static_cast<std::size_t>(n)>=capacity){out[0]=0;return 0;}
+    return static_cast<std::size_t>(n);
+}
 inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoadout* out,wchar_t* why,std::size_t whyCapacity) noexcept {
     using namespace loadout_detail;
+    if(body==VehicleBody::mech)return ParseMechLoadout(text,out,why,whyCapacity);
     VehicleLoadout l{};
     if(why && whyCapacity)why[0]=0;
     const VehicleBodyRow* row=VehicleBodyOf(body);
@@ -439,7 +502,8 @@ inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoad
 // A look: bit 0 primary set, bit 1 secondary set, bits 2-25 primary, 26-49 secondary, 50-57 the backpack weapon
 // (npc_pack_table.h code; sent only to peers that announced kExtBackpack, support_protocol.h). A loadout: bits 0-2 pylons,
 // bit 3 the tank's AP gun, bits 4-59 a pylon a byte (store code, then the round code in the high nibble).
-inline constexpr std::uint64_t kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62;
+// A mech loadout (body mech): bits 62 and 61, bits 0-37 mech_loadout.h MechVariantBits.
+inline constexpr std::uint64_t kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62,kVariantMech=1ull<<61;
 constexpr std::uint64_t LookVariant(const SupportLook& l) noexcept {
     if(!l.On())return 0;
     std::uint64_t v=0;
@@ -463,6 +527,7 @@ constexpr bool LookOfVariant(std::uint64_t v,SupportLook* out) noexcept {
     return true;
 }
 constexpr std::uint64_t LoadoutVariant(const VehicleLoadout& l) noexcept {
+    if(l.body==VehicleBody::mech)return MechValid(l.mech) ? kVariantVehicle|kVariantMech|MechVariantBits(l.mech) : 0;
     if(!l.On() || l.count<0 || l.count>kPylonsMost)return 0;
     std::uint64_t v=kVariantVehicle|static_cast<std::uint64_t>(l.count)|(l.apGun ? 8ull : 0ull);
     for(int i=0;i<l.count;++i)
@@ -473,6 +538,14 @@ constexpr std::uint64_t LoadoutVariant(const VehicleLoadout& l) noexcept {
 inline bool LoadoutOfVariant(std::uint64_t v,VehicleBody body,VehicleLoadout* out) noexcept {
     const std::uint64_t bits=v&~kVariantApplied;
     const VehicleBodyRow* row=VehicleBodyOf(body);
+    if(body==VehicleBody::mech) {
+        VehicleLoadout l{};
+        if((bits&(kVariantVehicle|kVariantMech))!=(kVariantVehicle|kVariantMech) ||
+           !MechOfVariantBits(bits&~(kVariantVehicle|kVariantMech),&l.mech))return false;
+        l.body=body;l.count=1;
+        if(out)*out=l;
+        return true;
+    }
     if(!row || !(bits&kVariantVehicle) || ((bits>>60)&3u))return false;
     VehicleLoadout l{};l.body=body;l.count=static_cast<int>(bits&7u);l.apGun=(bits&8u)!=0;
     if(l.count>row->most || (l.apGun && !row->tank))return false;

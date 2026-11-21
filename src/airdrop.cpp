@@ -125,6 +125,7 @@ unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* par
     // A player's request of a jet they load before the battle: the loaded jet's path, decided alike on every machine
     // (player_vehicle.cpp); any other container's path as it is.
     unsigned char* const v=reinterpret_cast<CreateFn>(image+kCreateObject)(mgr,m,PlayerVehicleStepPath(sgo),param);
+    PlayerVehicleMade(v);   // a custom mech's own setup (before the stock step that would apply the request's)
     __try {
         for(auto& d:drops) {
             if(d.phase!=Phase::falling || sgo!=d.vehicleSgo || !Alive(d.box))continue;

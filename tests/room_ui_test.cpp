@@ -337,7 +337,7 @@ void Catalog() {
     Expect(CatalogUnits(10,KeyAt,SeatsAt,NameAt,specs,3)==3,"capacity kept");
     roommenu::Menu m;
     roommenu::Load(m,specs,n,nullptr,nullptr);
-    Expect(m.unitCount==13+own,"units: 2 jets, gunship crew, 2 squads, 2 tanks, APC riders + APC crew, 2 crews, the player's 5, default, mission");
+    Expect(m.unitCount==13+own,"units: 2 jets, gunship crew, 2 squads, 2 tanks, APC riders + APC crew, 2 crews, the player's 6, default, mission");
     int crews=0,vehiclesWithCrew=0;
     for(int i=0;i<m.unitCount;++i){crews+=roommenu::IsCrewUnit(m.unit[i]);vehiclesWithCrew+=m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].hasCrew;}
     int playerVehicles=0;
@@ -590,6 +590,58 @@ void AutoOpen() {
     Expect(!AutoOpenDue(true,false,false,true) && !AutoOpenDue(false,true,false,true),"nothing due: never");
 }
 
+// The mech (OWN_MECH): its unit label, its rows' lines in each language (the parts' own four labels; the request's own /
+// empty in words), the note while a row is changed, its preview the mech body on every one of its pages.
+void Mech() {
+    roommenu::Menu m;m.open=true;
+    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
+    int mech=-1;for(int i=0;i<m.unitCount;++i)if(roommenu::IsMech(m.unit[i]))mech=i;
+    Expect(mech>=0 && Same(m.unit[mech].key,L"OWN_MECH"),"the default units have the mech");
+    hudtext::Use(hudtext::Lang::ja);
+    Expect(Same(UnitLabel(L"OWN_MECH",L"x"),L"自分の要請・コンバットフレーム"),"its label in the HUD's language");
+    roommenu::Unit& u=m.unit[mech];
+    m.unitAt=mech;m.level=roommenu::Level::rows;m.rowAt=0;
+    wchar_t out[kLineMost];
+    roommenu::View v=roommenu::Snapshot(m);
+    hudtext::Use(hudtext::Lang::en);
+    RowLine(v.rows.row[0],out,kLineMost);
+    Expect(v.rows.count==1 && Has(out,hudtext::Tr(Tx::roomStockMech)),"a stock mech's one row");
+    roommenu::detail::Materialise(u);
+    u.vehicle.mech.weapon[2]=-1;
+    m.rowAt=roommenu::kMechRowWeapon;
+    v=roommenu::Snapshot(m);
+    const struct { hudtext::Lang lang; const wchar_t* request; const wchar_t* arm; const wchar_t* frame; const wchar_t* shoulder; } kLangs[]={
+        {hudtext::Lang::en,L"Base request: Powered Exoskeleton Nix A",L"Right arm: Machine Gun",L"Frame: (the request's own)",L"Right shoulder: (empty)"},
+        {hudtext::Lang::zhCN,L"底座请求：战斗机体 尼克斯Ａ",L"右臂：机枪",L"机体：（请求自己的）",L"右肩：（空）"},
+        {hudtext::Lang::zhTW,L"底座請求：戰鬥機體 尼克斯Ａ",L"右臂：機鎗",L"機體：（請求自己的）",L"右肩：（空）"},
+        {hudtext::Lang::ja,L"ベースの要請：コンバットフレーム ニクスＡ",L"右腕：マシンガン",L"機体：（要請のもの）",L"右肩：（なし）"}};
+    for(const auto& l:kLangs) {
+        hudtext::Use(l.lang);
+        bool ok=v.rows.count==kMechFields;
+        RowLine(v.rows.row[0],out,kLineMost);ok=ok && Has(out,l.request);
+        RowLine(v.rows.row[1],out,kLineMost);ok=ok && Has(out,l.frame);
+        RowLine(v.rows.row[2],out,kLineMost);ok=ok && Has(out,l.arm) && Has(out,kCursor);
+        RowLine(v.rows.row[4],out,kLineMost);ok=ok && Has(out,l.shoulder);
+        Expect(ok,"the mech's rows in each language");
+    }
+    hudtext::Use(hudtext::Lang::en);
+    NoteLine(v.rows.row[2],out,kLineMost);
+    Expect(out[0]==0,"no note while not changed");
+    m.level=roommenu::Level::fields;
+    v=roommenu::Snapshot(m);
+    NoteLine(v.rows.row[2],out,kLineMost);
+    wchar_t want[32];std::swprintf(want,32,L"< %d / %d >",v.rows.row[2].choice,v.rows.row[2].choices);
+    Expect(v.rows.row[2].choice>=1 && Same(out,want),"changing: the value's place among its row's values");
+    Expect(!LookOf(&v.rows.row[2]).icon && !LookOf(&v.rows.row[2]).primary,"a mech row: no chips, no icon");
+    roompreview::PreviewSpec p{};
+    Expect(PreviewFor(m,&p) && p.body==VehicleBody::mech,"its rows: the mech");
+    roomdialog::Nav nav;nav.unit=mech;
+    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::mech}) {
+        nav.page=page;nav.row=roommenu::kMechRowCore;
+        Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,-1},&p) && p.body==VehicleBody::mech,"its dialog pages: the mech");
+    }
+}
+
 int main() {
     Names();
     NativeButton();
@@ -606,6 +658,7 @@ int main() {
     Preview();
     Focus();
     Save();
+    Mech();
     std::printf("room_ui: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

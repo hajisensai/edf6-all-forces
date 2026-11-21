@@ -113,6 +113,7 @@ void ExhaustiveRoundTrip() {
     for(const auto& body:kVehicleBodies)
         for(const auto& store:kLoadStores)for(int r=0;r<16;++r) {
             if(!(body.tank ? store.tank : store.jet))continue;
+            if(body.body==VehicleBody::mech)continue;   // no pylons: its slots go round in MechRows
             VehicleLoadout a{};a.body=body.body;a.apGun=body.tank && r%2;a.count=body.most;
             for(int i=0;i<a.count;++i){a.store[i]=store.code;a.rounds[i]=static_cast<std::uint8_t>(r);}
             wchar_t out[kValueMost],why[8];VehicleLoadout back;
@@ -146,7 +147,7 @@ void LoadsTheIni() {
     Set(ini,L"SupportVehicle_FIGHTER",L"MK82:6,MK82:6");
     Set(ini,L"SupportVehicle_STRIKE",L"AP:4");   // a tank round on a jet: refused
     Menu m;Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
-    Expect(m.unitCount==26+kPlayerVehicleCount,"8 squads, 10 vehicles, 6 seated entries' crews, the player's 5 own summons, the default and the mission crews");
+    Expect(m.unitCount==26+kPlayerVehicleCount,"8 squads, 10 vehicles, 6 seated entries' crews, the player's 6 own summons, the default and the mission crews");
     const Unit& squad=m.unit[UnitIndex(m,L"SQUAD",true)];
     Expect(squad.squad.count==4 && squad.squad.kind[0]==SupportWeapon::wingLance && !squad.refused,"the squad's preset loaded");
     const Unit& apc=m.unit[UnitIndex(m,L"TRANSPORT_CREWED",true)];
@@ -624,6 +625,149 @@ void XmInfantryNotInstalled() {
     Expect(m.unit[0].squad.kind[0]==SupportWeapon::rifle,"right from the last installed kind: the rifle again");
 }
 
+// The mech (OWN_MECH, mech_loadout.h): a stock row until customised (from Nix A as it comes), then seven rows of one field
+// each, every left / right a value the parser takes (a slot skips empty when it holds the only weapon, a new request
+// clears what its level does not allow), add / remove refused, reset back to stock, a save that reads back.
+template<class Row,std::size_t N> int TokenOf(const Row (&table)[N],const wchar_t* token) {
+    return MechIndexOf(table,token,token+std::wcslen(token));
+}
+bool MechSaves(const Unit& u) {
+    wchar_t out[kValueMost],why[64];VehicleLoadout back;
+    if(!SerialiseVehicle(u.vehicle,out,kValueMost))return false;
+    return ParseVehicleLoadout(out,VehicleBody::mech,&back,why,64) && SameVehicle(back,u.vehicle);
+}
+// Row `row`'s field opened (the menu's own keys reach it from the rows level).
+void MechField(Menu& m,int row) {
+    m.level=Level::rows;m.rowAt=row;
+    Tap(m,&Keys::confirm);
+}
+void MechRows() {
+    Ini ini;Menu m;
+    OpenAt(m,ini,L"OWN_MECH",false);
+    Unit& u=m.unit[m.unitAt];
+    Expect(IsMech(u) && IsPlayerVehicleUnit(u) && !u.hasCrew && !u.refused,"OWN_MECH: the player's mech, no crew row");
+    Expect(RowCount(u)==1 && Snapshot(m).rows.row[0].text==RowText::stockMech,"a stock mech: one stock row");
+    Expect(Tap(m,&Keys::add)==Act::refused && !u.vehicle.On(),"add refused on a stock mech (and it stays stock)");
+    Expect(Tap(m,&Keys::remove)==Act::refused,"remove refused on a stock mech");
+    Expect(!std::wcscmp(kMechRequests[MechStartRequest()].token,L"EWEAPON356"),"the start request: Nix A");
+    Expect(Tap(m,&Keys::confirm)==Act::changed && u.vehicle.On() && u.vehicle.body==VehicleBody::mech && u.vehicle.count==1 &&
+           u.vehicle.mech==MechStock(MechStartRequest()),"confirm on the stock row: Nix A as it comes");
+    Expect(RowCount(u)==kMechFields && FieldCount(u,0)==1 && FieldCount(u,6)==1 && FieldCount(u,7)==0,"seven rows of one field");
+    SaveSet s;
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportVehicle_OWN_MECH",L"EWEAPON356,-,MACHINEGUN,ROCKETCANNON,-,-,-"),
+           "its value: the request's own frame and core, its stock weapons");
+    View v=Snapshot(m);
+    bool rows=v.rows.total==kMechFields;
+    for(int r=0;r<kMechFields && r<v.rows.count;++r)
+        rows=rows && v.rows.row[r].text==RowText::mechPart && v.rows.row[r].index==r && v.rows.row[r].part==MechRowValue(u.vehicle.mech,r) &&
+             v.rows.row[r].choice>=1 && v.rows.row[r].choice<=v.rows.row[r].choices;
+    Expect(rows && v.rows.row[2].part==TokenOf(kMechWeapons,L"MACHINEGUN") && v.rows.row[4].part==-1,"the snapshot: each row its value and place");
+    for(int r=0;r<kMechFields;++r) {
+        m.level=Level::rows;m.rowAt=r;
+        Expect(Tap(m,&Keys::add)==Act::refused && Tap(m,&Keys::remove)==Act::refused && RowCount(u)==kMechFields,"add / remove refused on every row");
+    }
+    // The request: right goes through all 27 (wrapping), every one a valid loadout.
+    MechField(m,kMechRowRequest);
+    Expect(m.level==Level::fields && m.fieldAt==0,"a row's one field opens");
+    bool seen[64]{};bool valid=true;
+    for(int i=0;i<kMechRequestCount;++i){Tap(m,&Keys::right);seen[u.vehicle.mech.request]=true;valid=valid && MechValid(u.vehicle.mech) && MechSaves(u);}
+    int requests=0;for(bool b:seen)requests+=b;
+    Expect(requests==kMechRequestCount && valid && u.vehicle.mech.request==MechStartRequest(),"the request goes round all 27 and back");
+    Tap(m,&Keys::left);Tap(m,&Keys::left);
+    Expect(u.vehicle.mech.request==kMechRequestCount-1,"left from the second wraps to the last");
+    // A new request clears what its level does not allow: Eiren Assault (4.5) -> right wraps to the metal coat (0.1).
+    u.vehicle.mech=MechStock(TokenOf(kMechRequests,L"MPACK_B_WEAPON109"));
+    u.vehicle.mech.core=TokenOf(kMechCores,L"MPACK_A_WEAPON076");
+    Tap(m,&Keys::right);
+    Expect(u.vehicle.mech.request==0 && u.vehicle.mech.core==-1 && u.vehicle.mech==MechStock(0),
+           "to a low request: the late weapons and core cleared, nothing left -> its stock weapons");
+    MechLoadout x=MechStock(TokenOf(kMechRequests,L"MPACK_B_WEAPON109"));
+    x.frame=TokenOf(kMechFrames,L"OLDROBOT");
+    Expect(SetMechRow(x,kMechRowRequest,TokenOf(kMechRequests,L"EWEAPON357")) && x.frame==TokenOf(kMechFrames,L"OLDROBOT") &&
+           x.weapon[0]==-1 && x.weapon[1]==-1 && x.weapon[2]==TokenOf(kMechWeapons,L"EXPLOSION") && x.weapon[3]==-1 && MechValid(x),
+           "the Grenadier (0.2): the hyper lasers and Powerdyne GC cleared, the Explosion (0.2) and the frame kept");
+    Expect(!SetMechRow(x,kMechRowWeapon,TokenOf(kMechWeapons,L"HYPERLASER")) && !SetMechRow(x,kMechRowWeapon+2,-1) &&
+           !SetMechRow(x,kMechRowWeapon+3,TokenOf(kMechWeapons,L"PBEAM")) && !SetMechRow(x,kMechRowCore,TokenOf(kMechCores,L"EWEAPON361")),
+           "a value its row does not offer is refused (above the level, emptying the only weapon, the wrong side, a late core)");
+    // Every weapon slot of the top request goes round exactly its values: empty, then what that side may hold.
+    u.vehicle.mech=MechStock(TokenOf(kMechRequests,L"MPACK_B_WEAPON109"));
+    for(int slot=0;slot<kMechSlots;++slot) {
+        const int row=kMechRowWeapon+slot;
+        MechField(m,row);
+        int values[kMechValuesMost];
+        const int n=MechRowValues(u.vehicle.mech,row,values);
+        bool got[kMechWeaponCount+1]{};bool ok=true;
+        for(int i=0;i<n;++i) {
+            Tap(m,&Keys::right);
+            got[u.vehicle.mech.weapon[slot]+1]=true;
+            ok=ok && MechValid(u.vehicle.mech) && MechSaves(u);
+        }
+        int count=0;for(bool b:got)count+=b;
+        bool fits=true;
+        for(int w=0;w<kMechWeaponCount;++w)fits=fits && got[w+1]==MechWeaponAllowed(w,slot,u.vehicle.mech.request);
+        Expect(ok && count==n && got[0] && fits,"a slot goes round empty and every weapon that side allows, each valid");
+    }
+    Expect(TokenOf(kMechWeapons,L"PBEAM")>=0 && !MechWeaponFits(TokenOf(kMechWeapons,L"PBEAM"),3),"the particle beam: right shoulder only");
+    // The only weapon: its slot never goes empty, the others may.
+    u.vehicle.mech=MechStock(MechStartRequest());
+    u.vehicle.mech.weapon[1]=-1;
+    MechField(m,kMechRowWeapon);
+    bool never=true;
+    for(int i=0;i<10;++i){Tap(m,&Keys::right);never=never && u.vehicle.mech.weapon[0]>=0 && MechValid(u.vehicle.mech);}
+    for(int i=0;i<10;++i){Tap(m,&Keys::left);never=never && u.vehicle.mech.weapon[0]>=0 && MechValid(u.vehicle.mech);}
+    Expect(never,"the only weapon's slot skips empty both ways");
+    MechField(m,kMechRowWeapon+1);
+    int values[kMechValuesMost];
+    Expect(MechRowValues(u.vehicle.mech,kMechRowWeapon+1,values)>0 && values[0]==-1,"another slot may stay empty");
+    // The frame: the request's own and the eight; the core: the request's own and what its level allows.
+    MechField(m,kMechRowFrame);
+    bool frames[kMechFrameCount+1]{};
+    for(int i=0;i<=kMechFrameCount;++i){Tap(m,&Keys::right);frames[u.vehicle.mech.frame+1]=true;}
+    int fc=0;for(bool b:frames)fc+=b;
+    Expect(fc==kMechFrameCount+1 && u.vehicle.mech.frame==-1,"the frame goes round the request's own and all eight");
+    MechField(m,kMechRowCore);
+    Expect(MechRowValues(u.vehicle.mech,kMechRowCore,values)==2 && values[0]==-1 && kMechCores[values[1]].level<=10,
+           "Nix A's level (0.1) allows its own core and one at 0.1");
+    Tap(m,&Keys::right);
+    const int lowCore=u.vehicle.mech.core;
+    Tap(m,&Keys::right);
+    Expect(lowCore>=0 && u.vehicle.mech.core==-1,"the core goes round");
+    // Random edits over every row: never an invalid loadout, always a value that reads back.
+    std::uint32_t seed=777;
+    int bad=0;
+    for(int i=0;i<5000;++i) {
+        seed=seed*1664525u+1013904223u;
+        MechField(m,static_cast<int>((seed>>16)%kMechFields));
+        Tap(m,(seed>>8)&1 ? &Keys::right : &Keys::left);
+        bad+=!(MechValid(u.vehicle.mech) && MechSaves(u) && RowCount(u)==kMechFields);
+    }
+    Expect(bad==0,"5000 random edits: every loadout valid and read back");
+    Expect(CollectSave(m,&s) && s.count==1,"the edited mech saves");
+    // Reset: stock, the empty value.
+    m.level=Level::rows;
+    Expect(Tap(m,&Keys::reset)==Act::changed && !u.vehicle.On() && RowCount(u)==1,"reset: the stock mech");
+    Expect(CollectSave(m,&s) && s.count==0,"reset to what the ini held (nothing): nothing to write");
+    // From the ini: a loadout loads (and is not rewritten); one the parser refuses is shown stock.
+    Set(ini,L"SupportVehicle_OWN_MECH",L"EWEAPON378,NIX_RED,EMLASER,EMLASER,PBEAM,MIRAGE,-");
+    OpenAt(m,ini,L"OWN_MECH",false);
+    const Unit& loaded=m.unit[m.unitAt];
+    Expect(loaded.vehicle.On() && !loaded.refused && RowCount(loaded)==kMechFields && loaded.vehicle.mech.frame==TokenOf(kMechFrames,L"NIX_RED") &&
+           !Dirty(m),"an ini mech loads, seven rows, not dirty");
+    Tap(m,&Keys::reset);
+    Expect(CollectSave(m,&s) && SaysValue(s,L"SupportVehicle_OWN_MECH",L""),"reset writes the empty value");
+    Set(ini,L"SupportVehicle_OWN_MECH",L"EWEAPON356,-,HYPERLASER,-,-,-,-");
+    OpenAt(m,ini,L"OWN_MECH",false);
+    Expect(m.unit[m.unitAt].refused && !m.unit[m.unitAt].vehicle.On(),"a weapon above its request's level: refused, shown stock");
+    // Round trips: every request's stock loadout and each with every frame serialise to what the parser reads back.
+    int trips=0;
+    for(int r=0;r<kMechRequestCount;++r)for(int f=-1;f<kMechFrameCount;++f) {
+        VehicleLoadout a{};a.body=VehicleBody::mech;a.count=1;a.mech=MechStock(r);a.mech.frame=f;
+        wchar_t out[kValueMost],why[64];VehicleLoadout back;
+        trips+=SerialiseVehicle(a,out,kValueMost)>0 && ParseVehicleLoadout(out,VehicleBody::mech,&back,why,64) && SameVehicle(a,back);
+    }
+    Expect(trips==kMechRequestCount*(kMechFrameCount+1),"every request with every frame round-trips");
+}
+
 int main() {
     XmInfantryNotInstalled();
     SetSupportKindInstalled(SupportWeapon::xmInfantry,true);   // the rest: the model pack installed
@@ -641,6 +785,7 @@ int main() {
     CrewColours();
     RandomPresses();
     SnapshotAndScroll();
+    MechRows();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }
