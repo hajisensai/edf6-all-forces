@@ -28,14 +28,24 @@
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "specular": "textures/headlight_glass_n_s.jpg"
+   "specular": "textures/headlight_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/headlight_glass_c_a.png"
+   }
   },
   {
    "name": "wt_us_turret_glass_c",
    "template": "v603_body",
    "albedo": "textures/us_turret_glass_c.jpg",
    "normal": "textures/us_turret_glass_n_n.jpg",
-   "specular": "textures/us_turret_glass_n_s.jpg"
+   "specular": "textures/us_turret_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/us_turret_glass_c_a.png"
+   }
   },
   {
    "name": "wt_net_f_c",
@@ -43,7 +53,12 @@
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
    "occlusion": "textures/net_f_ao_ao_occ.png",
-   "specular": "textures/net_f_n_s.jpg"
+   "specular": "textures/net_f_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/net_f_c_a.png"
+   }
   },
   {
    "name": "wt_bmpt_terminator_armor_c_ussr_camo_green",
@@ -66,14 +81,24 @@
    "template": "v603_kyata_R",
    "albedo": "textures/ussr_t_72b3_2011_track_c.jpg",
    "normal": "textures/ussr_t_72b3_2011_track_n_n.jpg",
-   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png"
+   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/ussr_t_72b3_2011_track_c_a.png"
+   }
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ussr_t_72b3_2011_track_c.jpg",
    "normal": "textures/ussr_t_72b3_2011_track_n_n.jpg",
-   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png"
+   "occlusion": "textures/ussr_t_72b3_2011_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/ussr_t_72b3_2011_track_c_a.png"
+   }
   },
   {
    "name": "wt_bmpt_terminator_turret_c_ussr_camo_green",
@@ -88,7 +113,12 @@
    "template": "v603_body",
    "albedo": "textures/optic_glass_c.jpg",
    "normal": "textures/optic_glass_n_n.jpg",
-   "specular": "textures/optic_glass_n_s.jpg"
+   "specular": "textures/optic_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/optic_glass_c_a.png"
+   }
   },
   {
    "name": "wt_bmpt_2a42_twingun_c_ussr_camo_green",
@@ -144,7 +174,12 @@
    "albedo": "textures/net_b_c.jpg",
    "normal": "textures/net_b_n_n.jpg",
    "occlusion": "textures/net_b_ao_ao_occ.png",
-   "specular": "textures/net_b_n_s.jpg"
+   "specular": "textures/net_b_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/net_b_c_a.png"
+   }
   }
  ],
  "parts": [
