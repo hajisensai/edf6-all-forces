@@ -61,8 +61,8 @@ struct BasicState {
     // legWalked: the last leg was walked to its end (only such a leg counts as one more no nearer: a search again from
     // where the actor was held, blocked by a friend or a closed edge, ends where the last one did and is no leg walked).
     float legBest=1e30f;int legStale=0;bool legWalked=false;
-    // crew::GroundNavigate's Hull::object this route was searched round (none: nullptr). Another one is another
-    // search: a route found blind to a vehicle (a move order's) is not walked into it when the soldier is sent to board it.
+    // crew::GroundNavigate's Hull::object this route was searched for (the vehicle boarded; none: nullptr). Another one
+    // is another search: a route whose room by the seat is another vehicle's is not walked when the soldier boards this one.
     const void* hull{};
 };
 using State=BasicState<kNodes>;
@@ -222,8 +222,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
 // Ground/clear are real scene queries in production, deterministic geometry in
 // tests. Sample each half metre at both footprint sides and the centre; sweep
 // ankles/waist/head plus vertical headroom, so corners cannot be cut diagonally.
-// `hull(a, b)`: whether the segment misses a body `clear` (the map's) does not see -- the vehicle a soldier walks round to
-// board it (crew::Hull). Swept on the centre line only (the floor-up headroom and the three heights): the actor's
+// `hull(a, b)`: whether the segment misses a body `clear` (the map's) does not see -- the vehicles (crew::Hull). Swept on the centre line only (the floor-up headroom and the three heights): the actor's
 // centre is never inside such a body, so each of these segments starts outside it, while a side sample of an actor
 // pressed against it may start inside, where a ray finds no surface to tell, and every edge from there would read as
 // open or as shut. A route that passes a corner of it nearer than p.radius slides along it in the game's own collision.
@@ -284,13 +283,16 @@ namespace crew {
 // frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own
 // work for it (npcai.cpp MoveTo: the two floor rays of its ends) and take the pending.
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
-// A body the route must go round that the map ray (layer 22: terrain and buildings, no units; docs/raycast-re.md) does
-// not see: the vehicle a soldier walks to board (npcai.cpp Board). Its seat's riding point is often on the far side of
-// it, and a route blind to it ran straight into its hull: the soldier stood pressed against it until the order was
-// dropped and given again, over and over (testhub #31, docs/feedback-2026-11-08-board-path.md). `clear(object, a, b)`:
-// whether the segment a-b misses `object`'s bodies (at most npc::navigation::kHullHits rays). No object: none.
-// `inside`, `room`: a circle (horizontal metres round `inside`) where the route need not miss it: a boarding soldier's
-// seat takes it as it steps in there (npc_logic.h BoardRoom), and the riding point is often against the hull or in it.
+// The bodies the route must go round that the map ray (layer 22: terrain and buildings, no units or vehicles;
+// docs/raycast-re.md §3) does not see: the vehicles' (npcai.cpp HullClear, every soldier's route through MoveTo). Blind
+// to them, a route ran straight into a parked or driven vehicle in its way and the soldier stood pressed against its hull
+// (2026-11-21: 「npc 寻路好像不会绕开载具」), the vehicle it walked to board included (its seat's riding point often on
+// the far side: testhub #31, docs/feedback-2026-11-08-board-path.md). `clear(object, a, b)`: whether the segment a-b
+// misses every vehicle's bodies (at most npc::navigation::kHullHits rays). No clear: the map ray alone.
+// `object`: the vehicle boarded (none: nullptr), the route's identity (BasicState::hull): one searched with another
+// is searched again. `inside`, `room`: a circle (horizontal metres round `inside`) where the route need not miss the
+// bodies: a boarding soldier's seat takes it as it steps in there (npc_logic.h BoardRoom), and the riding point is often
+// against the hull or in it.
 struct Hull {
     bool (*clear)(const void* object,const float* a,const float* b) noexcept=nullptr;
     const void* object=nullptr;

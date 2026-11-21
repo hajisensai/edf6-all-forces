@@ -221,9 +221,10 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     }
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
 }
-// The object layer (a boarding route's hull, npcai.cpp HullClear): no bodies here (the body->object check is not
-// installed in the fixture's image either, so Board routes without a hull).
+// The object layer (the routes' vehicle bodies, npcai.cpp HullClear): no bodies here (the body->object check is not
+// installed in the fixture's image either, so the routes go without the vehicles' query).
 float ObjectRay(const float*,const float*,float*,std::uint32_t*) noexcept { return -1.0f; }
+int VehicleClassOf(const void*) noexcept { return -1; }   // HullClear's owner test: never reached without a body
 bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
     if(!door)return false;std::memcpy(at,doorAt,12);*reach=doorReach;return true;
 }

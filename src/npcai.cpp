@@ -753,7 +753,9 @@ void RouteStart(const float* pos,float* from) noexcept {
 // began again a second later, for each such soldier, out of the budget all of them share.
 // `pace`: the share of its full walk (the paced march: mapcmd.cpp MapPaceScale), 0 it stands.
 // `ms`: the caller's game clock (its Think's, read once there: GameMs asks the pause state of System, a Readable each).
-// `hull`: a vehicle the route goes round (Board: the one it walks to), which the map ray the routes use does not see.
+// `hull`: the vehicle boarded and its room by the seat (Board: BoardHull). Every route goes round the vehicles' bodies,
+// which the map ray the routes use does not see (HullClear; 2026-11-21: 「npc 寻路好像不会绕开载具」).
+Hull RouteHull(Hull hull) noexcept;
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {
     Soldier* const soldier=Entry(h,ms);
     // Its turn first: one waiting behind the caller the route budget denied last frame stands, the call's pending
@@ -762,7 +764,7 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     if(!soldier || GroundNavigateDeferred(soldier->navigation)){Stand(h);return;}
     float waypoint[3],dir[3],from[3],goal[3];
     RouteStart(pos,from);RouteStart(to,goal);
-    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull)!=npc::navigation::Result::moving ||
+    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),RouteHull(hull))!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
     if(!(pace>0.0f)){Stand(h);return;}
@@ -1164,8 +1166,9 @@ void __fastcall RemoteRide(void* human,SharedRef* vehicle,int seat) noexcept {
     if(v && MissionCrewAboard(v,h))QuietRide(v,h);
 }
 
-// A boarding soldier's route goes round its vehicle (ground_navigation.h crew::Hull; testhub #31: the riding point on the
-// far side, the route through the hull, the soldier pressed against it until the order was dropped and given again).
+// A soldier's route goes round the vehicles (ground_navigation.h crew::Hull; testhub #31: a boarding one's riding point on
+// the far side, the route through the hull, the soldier pressed against it until the order was dropped and given again;
+// 2026-11-21: every route ran into the vehicles in its way, parked, driven, empty or not).
 // The routes' map ray (layer 22) meets no unit; the bullets' object layer 11 (heli.cpp ObjectRay) meets the vehicles'
 // bodies, and 0x108260(body id) gives a vehicle's body its vehicle (docs/bullet-pass-re.md, docs/boarding-re.md).
 constexpr unsigned kBodyObject=0x108260;
@@ -1174,9 +1177,10 @@ const unsigned char kBodyObjectSig2[]={0x8B,0xD1,0x48,0x8D,0x48,0x10,0xE8};   //
 using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
 bool hullOk=false;
 constexpr float kHullPast=0.05f;   // m past another object's body (a soldier, the walker's own) the ray goes on from
-// Whether a-b misses `vehicle`'s bodies: the nearest object hit each ray, past the others' (at most kHullHits; a
-// crowd beyond that along half a metre is left to the next check, the route's every 100 ms).
-bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {
+// Whether a-b misses every vehicle's bodies: the nearest object hit each ray, past the others' (a soldier, the walker's
+// own; at most kHullHits: a crowd beyond that along half a metre is left to the next check, the route's every 100 ms).
+// The vehicle boarded is one of them (crew::Hull::object: the route's identity, not a filter).
+bool HullClear(const void*,const float* a,const float* b) noexcept {
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
     if(!(length>1e-3f) || !std::isfinite(length))return true;
@@ -1187,7 +1191,7 @@ bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {
         if(ObjectRay(from,b,at,&body)<0.0f || !std::isfinite(at[0]+at[1]+at[2]))return true;
         const void* owner=nullptr;
         __try { owner=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body); } __except(EXCEPTION_EXECUTE_HANDLER){owner=nullptr;}
-        if(owner==vehicle)return false;
+        if(owner && VehicleClassOf(owner)>=0)return false;
         for(int k=0;k<3;++k)from[k]=at[k]+unit[k]*kHullPast;
         if((b[0]-from[0])*unit[0]+(b[1]-from[1])*unit[1]+(b[2]-from[2])*unit[2]<=0.0f)return true;
     }
@@ -1198,6 +1202,11 @@ Hull BoardHull(const void* vehicle,const float* floor,float room) noexcept {
     if(!hullOk)return Hull{};
     Hull hull{&HullClear,vehicle};
     hull.inside[0]=floor[0];hull.inside[1]=floor[1];hull.inside[2]=floor[2];hull.room=room;
+    return hull;
+}
+// Every soldier's route (MoveTo) round the vehicles' bodies; `hull` the boarding's (BoardHull) or none.
+Hull RouteHull(Hull hull) noexcept {
+    if(hullOk && !hull.clear)hull.clear=&HullClear;
     return hull;
 }
 

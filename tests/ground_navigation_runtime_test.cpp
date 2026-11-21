@@ -197,5 +197,83 @@ void HullRoute() {
     Next();crew::GroundNavigate(*s,from,seat,0.1f,frame*16,next);
     Check(s->hull==nullptr,"without it again: the route is no longer the hull's");
 }
+// 2026-11-21 (「npc 寻路好像不会绕开载具」): every soldier's route (npcai.cpp MoveTo: RouteHull) goes round the vehicles'
+// bodies, not only the one it boards -- a move order's, no vehicle boarded (Hull::object none). Two parked vehicles side by
+// side, touching, across the straight line to the goal: the map ray alone routes
+// through them; with the vehicles' query the route goes round their boxes, its every segment clear of both.
+const Box parked[2]={{4.0f,-1.4f,1.6f},{4.0f,1.6f,1.6f}};
+int vehicleRays=0;
+bool VehiclesMiss(const void* object,const float* a,const float* b) noexcept {
+    bool miss=true;
+    for(const Box& box:parked)miss=HullMiss(&box,a,b) && miss;
+    queries-=1;hullRays-=2;++vehicleRays;   // one query of the adapter's (HullMiss counted each box)
+    return object==nullptr && miss;
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+bool ThroughParked(const State& s,const float* from) {
+    Point at{from[0],from[1],from[2]};
+    for(int i=0;i<s.length;++i) {
+        for(float h:{0.3f,1.2f,1.8f}) {
+            const float a[3]={at.x,h,at.z},b[3]={s.path[i].x,h,s.path[i].z};
+            const int keep=queries,rays=hullRays;
+            for(const Box& box:parked)if(!HullMiss(&box,a,b)){queries=keep;hullRays=rays;return true;}
+            queries=keep;hullRays=rays;
+        }
+        at=s.path[i];
+    }
+    return false;
+}
+void VehicleRoute() {
+    Settle();Scene(0,crew::Sea::land);
+    const float from[3]={-1.0f,0,0.1f},goal[3]={9.0f,0,0.1f};float next[3]{};
+    auto s=std::make_unique<State>();
+    Check(Advance(*s,from,goal,next)==Result::moving && ThroughParked(*s,from),
+          "negative control: the map ray alone routes a move order through the parked vehicles");
+    const crew::Hull vehicles{&VehiclesMiss,nullptr};
+    *s={};vehicleRays=0;Result r=Result::pending;
+    for(int i=0;i<400 && r==Result::pending;++i) {
+        Next();r=crew::GroundNavigate(*s,from,goal,0.1f,frame*16,next,{},vehicles);
+        Check(queries<=4096,"the vehicles' rays inside the shared world query budget");
+    }
+    Check(r==Result::moving && s->hull==nullptr && !ThroughParked(*s,from),
+          "with the vehicles' query, a move order's route goes round the parked vehicles' boxes");
+    Check(vehicleRays>0,"the production adapter asks the vehicles' query without a vehicle boarded");
+    // Walking it: each waypoint's leg from where the walker stands is still clear (the edge rechecked as it goes).
+    float at[3]={from[0],from[1],from[2]};bool clear=true,arrived=false;
+    for(int f=0;f<600 && !arrived;++f) {
+        Next();const Result w=crew::GroundNavigate(*s,at,goal,0.3f,frame*16,next,{},vehicles);
+        if(w==Result::arrived){arrived=true;break;}
+        if(w!=Result::moving)continue;
+        const float dx=next[0]-at[0],dz=next[2]-at[2],d=std::sqrt(dx*dx+dz*dz),k=d>0.25f ? 0.25f/d : 1.0f;
+        const float to[3]={at[0]+dx*k,0.5f,at[2]+dz*k},a[3]={at[0],0.5f,at[2]};
+        const int keep=queries,rays=hullRays;
+        for(const Box& box:parked)clear=HullMiss(&box,a,to) && clear;
+        queries=keep;hullRays=rays;
+        at[0]=to[0];at[2]=to[2];
+    }
+    Check(arrived && clear,"the walker following the route arrives without entering a vehicle's box");
+    // The worst of the vehicles' rays is room asked for, the unspent given back: a population with the query is still
+    // served within the frames Fairness gives one without it.
+    auto states=std::make_unique<State[]>(32);
+    const float distant[3]={100,0,40};
+    for(int f=0;f<16;++f){Next();for(int i=0;i<32;++i)crew::GroundNavigate(states[i],from,distant,0.1f,frame*16,next,{},vehicles);Check(queries<=4096,"population with the vehicles' query: budget");}
+    bool every=true;for(int i=0;i<32;++i)every &= states[i].count>1;
+    Check(every,"the vehicles' query's unspent rays given back: every actor of the population served");
+    // One frame of the shared budget on open ground: an edge of 4 half-metre steps casts 20 map queries a step and,
+    // with the vehicles' query, 4 of its calls (kHullHits rays each) -- 36, where its worst is 52. Charged what it
+    // cast, a population searches over 20/36 of the edges it does without the query; charged the worst, 20/52.
+    auto nodes=[&](bool query) {
+        Settle();Scene(0,crew::Sea::land);
+        auto population=std::make_unique<State[]>(64);
+        Next();int total=0;
+        for(int i=0;i<64;++i) {
+            crew::GroundNavigate(population[i],from,distant,0.1f,frame*16,next,{},query ? vehicles : crew::Hull{});
+            total+=population[i].count-1;
+        }
+        return total;
+    };
+    const int blind=nodes(false),seeing=nodes(true);
+    std::printf("one frame's budget: %d nodes without the vehicles' query, %d with it\n",blind,seeing);
+    Check(blind>0 && seeing*100>=blind*50,"the vehicles' unspent rays given back to the frame's shared budget");
+}
+}
+int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
