@@ -50,7 +50,7 @@ RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'c130', 'h
 # run_export.py EXTERNAL_MODELS lists the same folders, CLAUDE.md)
 RELEASE_MODELS += tuple(xm_units.folder(u.key) for u in xm_units.ported())
 RELEASE_MODELS += ('xm_maps',)   # tools/make_xm_maps.py MODEL_DIR: X-Morph's maps, built by the developer
-RELEASE_MODELS += ('worldmap_tex',)   # pylib/worldmap.py TEXTURE_DIR: the world map's NASA Blue Marble textures (tools/worldmap_basemap.py textures)
+RELEASE_MODELS += ('worldmap_tex',)   # pylib/worldmap.py TEXTURE_DIR: the world map's NASA Blue Marble JPEG tile pyramid (tools/worldmap_basemap.py tiles)
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 

@@ -1,37 +1,37 @@
-"""Developer tool: the world map's base images, NASA Blue Marble Next Generation (topography + bathymetry, December
-2004, equirectangular), kept OUTSIDE the repository like the model pack (docs/plan-2026-11-10-worldmap.md §2).
+"""Developer tool: the world map's base map, NASA Blue Marble Next Generation (topography + bathymetry, December 2004,
+equirectangular) at its full 500 m resolution over the whole Earth, kept OUTSIDE the repository like the model pack
+(docs/plan-2026-11-10-worldmap.md §2).
 
-  python -B tools/worldmap_basemap.py fetch [DIR]     download both sources into DIR (default D:\\APP\\edf6-models\\worldmap),
-                                                      check their SHA-256, write SOURCE.txt (where from, the licence)
-  python -B tools/worldmap_basemap.py derive [DIR]    the two textures' images, still equirectangular:
-                                                        bluemarble_4096.png    the world, 4096 x 2048
-                                                        bluemarble_japan.png   pylib/worldmap.py DETAIL_* (20 x 20 deg,
-                                                                               every place inside) cut from tile D1 at
-                                                                               240 px / deg, 4096 x 4096
-  python -B tools/worldmap_basemap.py textures [DIR] [OUT]
-                                                      the game textures from the two derived PNGs into the model pack
-                                                      folder OUT (default DIR/../worldmap_tex, pylib/worldmap.py
-                                                      TEXTURE_DIR): only what the release ships, never the sources
-                                                        EDF6VC_WORLDMAP_WORLD.DDS / _JAPAN.DDS   DXT1, full mip chain
-                                                        worldmap_tex.json   worldmap.TEXTURE_VERSION, each file's SHA-256 / size
+  python -B tools/worldmap_basemap.py fetch [DIR]     download the eight 500 m tiles (A1..D2) into DIR (default
+                                                      D:\\APP\\edf6-models\\worldmap), check their SHA-256, write SOURCE.txt
+  python -B tools/worldmap_basemap.py tiles [DIR] [OUT]
+                                                      the JPEG tile pyramid (pylib/worldmap.py TILE, TILE_LEVELS: the
+                                                      layout and the file format are written there) into the model pack
+                                                      folder OUT (default DIR/../worldmap_tex, worldmap.TEXTURE_DIR): only
+                                                      what the release ships, never the sources
+                                                        EDF6VehicleCrew.worldmap.bin   every tile in one file (~344 MB)
+                                                        worldmap_tex.json   worldmap.TEXTURE_VERSION, the file's SHA-256 / size
                                                         SOURCE.txt          where from, the credit
 
-Sources: the whole world at 5400 x 2700 (15 px / degree: Japan would be ~300 px wide) and the 500 m tile D1
-(90-180 E, 0-90 N, 21600 x 21600) for the zoomed-in view.
+Sources: eight 21600 x 21600 tiles, each 90 x 90 degrees (A..D west to east from 180 W, 1 north / 2 south of the
+equator), 240 px / degree: together 86400 x 43200 px. The deepest pyramid level is that resolution (nothing upsampled),
+each level above it half as wide, down to one 1350 x 675 tile of the whole Earth.
 Licence: NASA imagery is not copyrighted (NASA Media Usage Guidelines; Visible Earth: free to use, credit NASA Earth
 Observatory). It could be committed; it is not, by the maintainer's rule for large assets (2026-11-10).
-The game textures (`textures`): loose DDS files under Mods/UI, as the loadout menu's EDF6VC_WHITE.DDS (tools/room_layout.py)
-that the plugin already binds through Skin_Texture; DXT1 (BC1) with the legacy 124-byte header and a full mip chain to
-1 x 1, the layout of Root.cpk's own UI/LOCALENV_TRAIN_FINE_MENUMODEL.DDS (512 x 512, DXT1, 10 levels). The stock
-loading pictures are BC7 (DX10 header); no BC7 encoder is in this project, and DXT1 at 4096 is the plan's choice (§2).
-They are built once by the developer and shipped whole: the installer only checks their hashes and copies them
+Why JPEG (maintainer 2026-11-11, "换成 JPEG 全球240"): the same pyramid as DXT1 game textures would be ~2.5 GB, as JPEG
+quality 85 344 MB at PSNR 35-40 dB against the sources (2026-11-11 trial: Tokyo Bay 38.2, the Alps 35.3, the Sahara
+40.5). The plugin decodes the tiles it shows itself (WIC) and draws them (D3D11); the game's texture loader never sees them.
+Built once by the developer (about a minute) and shipped whole: the installer only checks the hash and copies the file
 (tools/worldmap_pack.py), it encodes nothing.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import io
+import json
 import os
+import struct
 import sys
 import urllib.request
 
@@ -40,32 +40,41 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import worldmap  # noqa: E402
 
 BASE_URL = 'https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/december/'
-
-
-@dataclass(frozen=True)
-class Source:
-    name: str          # in DIR
-    remote: str        # under BASE_URL
-    sha256: str
-    size: tuple[int, int]
-    north: float       # the image's bounds, degrees
-    west: float
-    degrees: tuple[float, float]   # (east-west, north-south) it spans
-
-
-WORLD = Source('bluemarble.jpg', 'world.topo.bathy.200412.3x5400x2700.jpg',
-               'a9f0088972dee0254610af851c4d6838ca3f2cf79176987e0a5713e2c15ec042', (5400, 2700), 90.0, -180.0,
-               (360.0, 180.0))
-TILE_D1 = Source('bluemarble_d1.jpg', 'world.topo.bathy.200412.3x21600x21600.D1.jpg',
-                 'aff73b464c202319799d29a5f592392618291dabc3ada501d3f0e72852c3a431', (21600, 21600), 90.0, 90.0,
-                 (90.0, 90.0))
-SOURCES = (WORLD, TILE_D1)
-WORLD_OUT, WORLD_SIZE = 'bluemarble_4096.png', (4096, 2048)
-JAPAN_OUT, JAPAN_SIZE = 'bluemarble_japan.png', (4096, 4096)
+PAGE_URL = 'https://visibleearth.nasa.gov/collection/1484/blue-marble'
 DEFAULT_DIR = r'D:\APP\edf6-models\worldmap'
 CREDIT = ('NASA Earth Observatory, Blue Marble Next Generation (Reto Stockli, NASA GSFC), world.topo.bathy.200412 '
           '(December 2004), equirectangular. Public domain (NASA imagery is not copyrighted; credit NASA Earth '
           'Observatory).')
+COLUMNS, ROWS = 4, 2    # the sources: A..D west to east, 1..2 north to south
+SOURCE_PX = 21600
+
+
+@dataclass(frozen=True)
+class Source:
+    tile: str          # A1 .. D2
+    sha256: str
+
+    @property
+    def name(self) -> str:          # in DIR
+        return f'bluemarble_{self.tile.lower()}.jpg'
+
+    @property
+    def remote(self) -> str:        # under BASE_URL
+        return f'world.topo.bathy.200412.3x21600x21600.{self.tile}.jpg'
+
+    @property
+    def cell(self) -> tuple[int, int]:      # (column, row) among the sources
+        return 'ABCD'.index(self.tile[0]), int(self.tile[1]) - 1
+
+
+SOURCES = (Source('A1', 'b9bf1203de698f78bc588d3222e3ac97dc9f56d681fdcdc9a3c5025e47259cc0'),
+           Source('B1', '819ca802a3f7a891a64c54c453c66f25a31dc768eedb1670ee774de5d1829ae2'),
+           Source('C1', 'e1864a8a30f630185830293a2fda5b22f156ba5c03a3956490bea647a66bc950'),
+           Source('D1', 'aff73b464c202319799d29a5f592392618291dabc3ada501d3f0e72852c3a431'),
+           Source('A2', 'bc8a13d73d55908114d31e89bb893593122a77412befb6d2cc560de5c1b43690'),
+           Source('B2', 'c6b3cd26536de394586433a6cd9ea40bab9fac93fd44cb7fa3ab230737f6877c'),
+           Source('C2', '4e71626be3b7b18d28d0f2ba32ca4d6f1c153edddd7c22943a473dc989d237b6'),
+           Source('D2', '9e65f151aa0054336102f803e231c962e897c8d5ecec8079c175aa7a24451707'))
 
 
 def check(src: Source, data: bytes) -> None:
@@ -78,11 +87,14 @@ def fetch(folder: str) -> list[str]:
     os.makedirs(folder, exist_ok=True)
     out = []
     for src in SOURCES:
+        path = os.path.join(folder, src.name)
+        if os.path.isfile(path) and hashlib.sha256(open(path, 'rb').read()).hexdigest() == src.sha256:
+            out.append(path)
+            continue
         req = urllib.request.Request(BASE_URL + src.remote, headers={'User-Agent': 'edf6-all-forces worldmap_basemap'})
-        with urllib.request.urlopen(req, timeout=900) as r:
+        with urllib.request.urlopen(req, timeout=1800) as r:
             data = r.read()
         check(src, data)
-        path = os.path.join(folder, src.name)
         with open(path, 'wb') as f:
             f.write(data)
         out.append(path)
@@ -93,119 +105,128 @@ def fetch(folder: str) -> list[str]:
     return out
 
 
-def crop_box(src: Source, north: float, south: float, west: float, east: float) -> tuple[int, int, int, int]:
-    """The pixel box (left, top, right, bottom) of a lat / lon box inside an equirectangular `src` (ValueError when it
-    is not inside)."""
-    w, h = src.size
-    sx, sy = w / src.degrees[0], h / src.degrees[1]
-    box = (round((west - src.west) * sx), round((src.north - north) * sy), round((east - src.west) * sx),
-           round((src.north - south) * sy))
-    if box[0] < 0 or box[1] < 0 or box[2] > w or box[3] > h or box[0] >= box[2] or box[1] >= box[3]:
-        raise ValueError(f'{(north, south, west, east)} is not inside {src.name}')
-    return box
+# ------------------------------------------------------------------------------------------ the tile pyramid
+
+def per_source(level: int) -> int:
+    """Tiles across one source at `level` (0: the level is coarser than one tile per source)."""
+    cols = worldmap.tile_grid(level)[0]
+    return cols // COLUMNS if cols >= COLUMNS else 0
 
 
-def resample(image: 'object', size: tuple[int, int]) -> 'object':
-    """The image at `size` (Lanczos); an equirectangular box stays one (the bounds are unchanged)."""
+def jpeg(image: 'object') -> bytes:
+    buf = io.BytesIO()
+    image.convert('RGB').save(buf, 'JPEG', quality=worldmap.TILE_QUALITY, subsampling=2, optimize=True)
+    return buf.getvalue()
+
+
+def pyramid(images: dict[str, 'object']) -> dict[tuple[int, int, int], bytes]:
+    """{(level, column, row): JPEG} from the eight source images ({tile: PIL image}, each TILE * per_source(deepest) px
+    square; taken out of `images` one at a time, so only one is ever decoded). Levels with at least one tile per source are cut from each source alone; the coarser ones from a mosaic of
+    the eight at half a tile each."""
     from PIL import Image
-    return image.convert('RGB').resize(size, Image.Resampling.LANCZOS)
-
-
-def _open(folder: str, src: Source) -> 'object':
-    from PIL import Image
-    Image.MAX_IMAGE_PIXELS = None   # tile D1 is 466 megapixels: ours, its hash checked
-    path = os.path.join(folder, src.name)
-    with open(path, 'rb') as f:
-        check(src, f.read())
-    im = Image.open(path)
-    if im.size != src.size:
-        raise SystemExit(f'{path}: {im.size}, expected {src.size}')
-    return im
-
-
-def derive(folder: str) -> list[str]:
-    out = []
-    with _open(folder, WORLD) as im:
-        path = os.path.join(folder, WORLD_OUT)
-        resample(im, WORLD_SIZE).save(path, optimize=True)
-        out.append(path)
-    with _open(folder, TILE_D1) as im:
-        box = crop_box(TILE_D1, worldmap.DETAIL_NORTH, worldmap.DETAIL_SOUTH, worldmap.DETAIL_WEST, worldmap.DETAIL_EAST)
-        path = os.path.join(folder, JAPAN_OUT)
-        resample(im.crop(box), JAPAN_SIZE).save(path, optimize=True)
-        out.append(path)
+    t, deepest = worldmap.TILE, worldmap.TILE_LEVELS - 1
+    side = t * per_source(deepest)
+    if per_source(deepest) < 1 or sorted(images) != sorted(s.tile for s in SOURCES):
+        raise SystemExit(f'need the eight sources {[s.tile for s in SOURCES]} and a pyramid of at least one tile each')
+    out: dict[tuple[int, int, int], bytes] = {}
+    mosaic = Image.new('RGB', (COLUMNS * t // 2, ROWS * t // 2))
+    for src in SOURCES:
+        im = images.pop(src.tile)      # dropped once cut: a decoded source is 1.4 GB
+        if im.mode != 'RGB':
+            im = im.convert('RGB')
+        if im.size != (side, side):
+            raise SystemExit(f'{src.name}: {im.size}, expected {(side, side)}')
+        sx, sy = src.cell
+        level = deepest
+        while per_source(level):
+            n = per_source(level)
+            for ty in range(n):
+                for tx in range(n):
+                    out[(level, sx * n + tx, sy * n + ty)] = jpeg(im.crop((tx * t, ty * t, tx * t + t, ty * t + t)))
+            if n == 1:
+                break
+            im = im.resize((im.width // 2, im.height // 2), Image.Resampling.LANCZOS)
+            level -= 1
+        mosaic.paste(im.resize((t // 2, t // 2), Image.Resampling.LANCZOS), (sx * t // 2, sy * t // 2))
+    level = min(lv for lv, _x, _y in out) - 1
+    while level >= 0:
+        cols, rows = worldmap.tile_grid(level)
+        if mosaic.size != (cols * t, rows * t if level else t // 2):
+            mosaic = mosaic.resize((cols * t, rows * t if level else t // 2), Image.Resampling.LANCZOS)
+        for ty in range(rows):
+            for tx in range(cols):
+                out[(level, tx, ty)] = jpeg(mosaic.crop((tx * t, ty * t, tx * t + t, min(mosaic.height, ty * t + t))))
+        level -= 1
     return out
 
 
-# ------------------------------------------------------------------------------------------ game textures
+def pack(tiles: dict[tuple[int, int, int], bytes]) -> bytes:
+    """The file pylib/worldmap.py describes (TILES_FILE) from every tile of the pyramid."""
+    order = [(z, x, y) for z in range(worldmap.TILE_LEVELS)
+             for y in range(worldmap.tile_grid(z)[1]) for x in range(worldmap.tile_grid(z)[0])]
+    if sorted(order) != sorted(tiles):
+        raise SystemExit('the pyramid is not complete')
+    head = struct.pack('<4sIII', worldmap.TILES_MAGIC, worldmap.TILES_FORMAT, worldmap.TILE, worldmap.TILE_LEVELS)
+    offset = len(head) + 12 * len(order)
+    table, body = [], []
+    for k in order:
+        table.append(struct.pack('<QI', offset, len(tiles[k])))
+        body.append(tiles[k])
+        offset += len(tiles[k])
+    return b''.join([head, *table, *body])
 
-TEXTURE_SOURCES = {'world': WORLD_OUT, 'japan': JAPAN_OUT}   # pylib/worldmap.py TEXTURES kind -> derived PNG
-TEXTURE_SIZES = {'world': WORLD_SIZE, 'japan': JAPAN_SIZE}
-PAGE_URL = 'https://visibleearth.nasa.gov/collection/1484/blue-marble'
 
-
-def texture_dds(image: 'object') -> bytes:
-    """A PIL image as the DXT1 DDS the game reads (texfile_accel.dxt1_dds: range-fit blocks, a 2x2 box-filtered mip
-    chain to 1 x 1, the legacy header); alpha dropped."""
-    import texfile
-    import texfile_accel
-    rgba = image.convert('RGBA')
-    return texfile_accel.dxt1_dds(texfile.Image(rgba.width, rgba.height, bytearray(rgba.tobytes())))
-
-
-def texture_source_text() -> str:
-    lines = ['World map base textures for EDF6 All Forces (tools/worldmap_basemap.py textures).', '',
+def source_text(name: str) -> str:
+    lines = ['World map base map for EDF6 All Forces (tools/worldmap_basemap.py tiles).', '',
              f'Credit: {CREDIT}', f'Collection page: {PAGE_URL}', 'Author: Reto Stockli, NASA Goddard Space Flight Center',
              '(NASA Earth Observatory). No Sketchfab uid: not a Sketchfab model.', '', 'Sources:']
     for src in SOURCES:
         lines.append(f'  {BASE_URL}{src.remote}')
         lines.append(f'    sha256 {src.sha256}')
-    lines += ['', 'Files:']
-    for kind, rel in worldmap.TEXTURES.items():
-        w, h = TEXTURE_SIZES[kind]
-        lines.append(f'  {rel.rsplit("/", 1)[1]}  {w} x {h} DXT1 + mips, from {TEXTURE_SOURCES[kind]} '
-                     f'(equirectangular; installed as Mods/{rel})')
+    cols, rows = worldmap.tile_grid(worldmap.TILE_LEVELS - 1)
+    lines += ['', 'Files:',
+              f'  {name}  {worldmap.tile_count()} JPEG tiles (quality {worldmap.TILE_QUALITY}) of {worldmap.TILE} px, '
+              f'{worldmap.TILE_LEVELS} levels, the deepest {cols * worldmap.TILE} x {rows * worldmap.TILE} '
+              f'(equirectangular; installed as Mods/{worldmap.TILES_FILE})']
     return '\n'.join(lines) + '\n'
 
 
-def textures(folder: str, out: str | None = None) -> list[str]:
-    """The release folder (pylib/worldmap.py TEXTURE_DIR) from `folder`'s derived PNGs (run `derive` first)."""
-    import json
-    from PIL import Image
-    out = out or os.path.join(os.path.dirname(os.path.abspath(folder)), worldmap.TEXTURE_DIR)
+def write_release(data: bytes, out: str) -> list[str]:
     os.makedirs(out, exist_ok=True)
-    files = {}
-    written = []
-    for kind, rel in worldmap.TEXTURES.items():
-        path = os.path.join(folder, TEXTURE_SOURCES[kind])
-        with Image.open(path) as im:
-            if im.size != TEXTURE_SIZES[kind]:
-                raise SystemExit(f'{path}: {im.size}, expected {TEXTURE_SIZES[kind]} (run derive)')
-            data = texture_dds(im)
-        name = rel.rsplit('/', 1)[1]
-        with open(os.path.join(out, name), 'wb') as f:
-            f.write(data)
-        files[name] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
-        written.append(os.path.join(out, name))
-    with open(os.path.join(out, 'SOURCE.txt'), 'w', encoding='utf-8', newline='\n') as f:
-        f.write(texture_source_text())
-    written.append(os.path.join(out, 'SOURCE.txt'))
-    with open(os.path.join(out, worldmap.TEXTURE_INDEX), 'w', encoding='utf-8', newline='\n') as f:
-        json.dump({'version': worldmap.TEXTURE_VERSION, 'files': files}, f, indent=1, sort_keys=True)
+    name = worldmap.TILES_FILE.rsplit('/', 1)[1]
+    paths = [os.path.join(out, name), os.path.join(out, 'SOURCE.txt'), os.path.join(out, worldmap.TEXTURE_INDEX)]
+    with open(paths[0], 'wb') as f:
+        f.write(data)
+    with open(paths[1], 'w', encoding='utf-8', newline='\n') as f:
+        f.write(source_text(name))
+    with open(paths[2], 'w', encoding='utf-8', newline='\n') as f:
+        json.dump({'version': worldmap.TEXTURE_VERSION,
+                   'files': {name: {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}}},
+                  f, indent=1, sort_keys=True)
         f.write('\n')
-    written.append(os.path.join(out, worldmap.TEXTURE_INDEX))
-    return written
+    return paths
+
+
+def tiles(folder: str, out: str | None = None) -> list[str]:
+    """The release folder (worldmap.TEXTURE_DIR) from the eight sources in `folder` (run `fetch` first)."""
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None   # 466 megapixels each: ours, their hashes checked
+    out = out or os.path.join(os.path.dirname(os.path.abspath(folder)), worldmap.TEXTURE_DIR)
+    images = {}
+    for src in SOURCES:
+        path = os.path.join(folder, src.name)
+        with open(path, 'rb') as f:
+            check(src, f.read())
+        images[src.tile] = Image.open(path)     # decoded lazily, one at a time, by pyramid()
+    return write_release(pack(pyramid(images)), out)
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] not in ('fetch', 'derive', 'textures'):
+    if len(argv) < 2 or argv[1] not in ('fetch', 'tiles'):
         print(__doc__)
         return 2
     folder = argv[2] if len(argv) > 2 else DEFAULT_DIR
-    if argv[1] == 'textures':
-        paths = textures(folder, argv[3] if len(argv) > 3 else None)
-    else:
-        paths = fetch(folder) if argv[1] == 'fetch' else derive(folder)
+    paths = fetch(folder) if argv[1] == 'fetch' else tiles(folder, argv[3] if len(argv) > 3 else None)
     for path in paths:
         print(path)
     return 0

@@ -580,6 +580,16 @@ void Focus() {
     Expect(!FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p),"closed: none");
 }
 
+// The HQ's mission select opened by itself: once per HQ object, only with the HQ the input owner and the F2 menu down.
+void AutoOpen() {
+    Expect(AutoOpenDue(true,false,true,false),"a fresh HQ the input owner, the menu down: opened");
+    Expect(!AutoOpenDue(false,false,true,false),"HqAutoMissionSelect / Enabled off: never");
+    Expect(!AutoOpenDue(true,true,true,false),"this HQ object tried already (opened, or a step failed): never again");
+    Expect(!AutoOpenDue(true,false,false,false),"something of the game's over the HQ (opening, notice, sub-screen, transition): waited");
+    Expect(!AutoOpenDue(true,false,true,true),"the F2 menu up or its key still held: waited");
+    Expect(!AutoOpenDue(true,false,false,true) && !AutoOpenDue(false,true,false,true),"nothing due: never");
+}
+
 int main() {
     Names();
     NativeButton();
@@ -588,6 +598,7 @@ int main() {
     Colours();
     GateAndPlan();
     SwitchesPlan();
+    AutoOpen();
     Looks();
     Texts();
     Catalog();

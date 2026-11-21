@@ -184,6 +184,15 @@ inline Plan PlanFrame(bool hasInput,bool open) noexcept {
     return Plan{hasInput,hasInput && open};
 }
 
+// --- The HQ opens its own mission select by itself (docs/worldmap-hq-open-re.md §5.1) ---
+// Once per HQ screen object (`tried`: this object was tried already, opened or not; a new object, even at a dead one's
+// address, is untried): Enabled && HqAutoMissionSelect (`on`), only while the HQ itself would read input (`hasInput`:
+// 0x8DAD00 with the real ctx, nothing of the game's over it: the opening, a notice, a sub-screen, a transition) and never
+// while the support loadout menu (F2) is up or its closing key still held (`menuBusy`): that frame is simply waited out.
+inline bool AutoOpenDue(bool on,bool tried,bool hasInput,bool menuBusy) noexcept {
+    return on && !tried && hasInput && !menuBusy;
+}
+
 // --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---
 // Off: the screen's own update is chained with its own ctx and nothing else runs (no key read, no input taken, no
 // pre-sync, no preview; only what the plugin drew on this screen earlier is taken back). The room pre-sync runs only on

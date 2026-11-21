@@ -411,6 +411,7 @@ bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     return std::memcmp(local,plan.requester,sizeof(local))==0;
 }
+const char* SupportPeerPuid(std::uint32_t peer) noexcept { return running ? PeerPuid(peer) : nullptr; }
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept {
     if(!out)return false;
     *out={};unsigned char identity[32]{};

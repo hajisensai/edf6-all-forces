@@ -24,7 +24,6 @@ inline constexpr Place kPlaces[]={
     {35.420f,139.663f,Region::kanto,L"honmoku",{L"Honmoku warehouses, Yokohama",L"横滨·本牧仓库街",L"橫濱·本牧倉庫街",L"横浜・本牧倉庫街"}},
     {37.850f,139.030f,Region::chubu,L"niigata",{L"Echigo plain paddies",L"越后平原水田",L"越後平原水田",L"越後平野の水田"}},
     {35.520f,140.080f,Region::kanto,L"ichihara",{L"Ichihara refinery",L"市原炼油厂",L"市原煉油廠",L"市原製油所"}},
-    {34.700f,135.190f,Region::kansai,L"kitano",{L"Kitano, Kobe (old foreign quarter)",L"神户·北野异人馆街",L"神戶·北野異人館街",L"神戸・北野異人館街"}},
     {35.011f,135.768f,Region::kansai,L"kyoto",{L"Kyoto",L"京都",L"京都",L"京都"}},
     {38.268f,140.870f,Region::tohoku,L"sendai",{L"Sendai",L"仙台",L"仙台",L"仙台"}},
     {34.666f,135.501f,Region::kansai,L"namba",{L"Namba, Osaka",L"大阪·难波",L"大阪·難波",L"大阪・難波"}},
@@ -33,7 +32,6 @@ inline constexpr Place kPlaces[]={
     {34.230f,131.303f,Region::chugoku,L"akiyoshi",{L"Akiyoshi Cave",L"秋吉洞",L"秋吉洞",L"秋芳洞"}},
     {39.866f,141.800f,Region::tohoku,L"ryusendo",{L"Ryusendo Cave",L"龙泉洞",L"龍泉洞",L"龍泉洞"}},
     {32.884f,131.104f,Region::kyushu,L"aso",{L"Aso crater",L"阿苏火山口",L"阿蘇火山口",L"阿蘇火口"}},
-    {35.540f,134.229f,Region::chugoku,L"tottori",{L"Tottori Sand Dunes",L"鸟取沙丘",L"鳥取沙丘",L"鳥取砂丘"}},
     {42.920f,143.200f,Region::hokkaido,L"tokachi",{L"Tokachi plain",L"十胜平原",L"十勝平原",L"十勝平野"}},
     {36.950f,140.000f,Region::kanto,L"nasu",{L"Nasu plain",L"那须平原",L"那須平原",L"那須野が原"}},
     {35.540f,140.450f,Region::kanto,L"kujukuri",{L"Kujukuri beach",L"九十九里海岸",L"九十九里海岸",L"九十九里浜"}},
@@ -46,6 +44,8 @@ inline constexpr Place kPlaces[]={
     {37.100f,138.620f,Region::chubu,L"hoshitoge",{L"Hoshitoge terraces",L"星峠梯田",L"星峠梯田",L"星峠の棚田"}},
     {35.232f,139.024f,Region::kanto,L"hakone",{L"Hakone mountains",L"箱根山",L"箱根山",L"箱根山"}},
     {36.820f,137.580f,Region::chubu,L"kurobe",{L"Kurobe Gorge",L"黑部峡谷",L"黑部峽谷",L"黒部峡谷"}},
+    {50.087f,14.421f,Region::europe,L"prague",{L"Prague Old Town",L"布拉格老城",L"布拉格老城",L"プラハ旧市街"}},
+    {31.150f,-4.020f,Region::africa,L"ergchebbi",{L"Erg Chebbi, Sahara",L"撒哈拉·舍比沙丘",L"撒哈拉·舍比沙丘",L"サハラ砂漠・シェビ砂丘"}},
 };
 inline constexpr Mission kMissions[]={
     {L"EDF6/M000B",0},   // ig_edfbasement01
@@ -55,7 +55,7 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M003_5",4},   // ig_haikyo603
     {L"EDF6/M004",2},   // nw_haikyo601
     {L"EDF6/M005",5},   // nw_danti01_haikyo
-    {L"EDF6/M006",31},   // ig_crater601
+    {L"EDF6/M006",30},   // ig_crater601
     {L"EDF6/M007",2},   // nw_haikyo601
     {L"EDF6/M008",2},   // nw_haikyo601
     {L"EDF6/M009",5},   // nw_danti01_haikyo
@@ -65,10 +65,10 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/RM015_3",5},   // nw_danti01
     {L"EDF6/M013_5",11},   // nw_rinkai02
     {L"EDF6/M015_5",14},   // nw_kitagunicity
-    {L"EDF6/RM010",23},   // nw_europe01
+    {L"EDF6/RM010",43},   // nw_europe01
     {L"EDF6/M017",5},   // nw_danti01
     {L"EDF6/M018_5",11},   // nw_rinkai02
-    {L"EDF6/M027",23},   // nw_europe01
+    {L"EDF6/M027",43},   // nw_europe01
     {L"EDF6/M027_5",12},   // nw_henden
     {L"EDF6/RM019_5",13},   // nw_jyousuicity
     {L"EDF6/M028",13},   // nw_jyousuicity
@@ -79,9 +79,9 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M029_1",9},   // nw_traincity
     {L"EDF6/RM041",13},   // nw_jyousuicity
     {L"EDF6/M029_4",22},   // nw_seiyu_night
-    {L"EDF6/M205",37},   // ig_mountainvillage
+    {L"EDF6/M205",35},   // ig_mountainvillage
     {L"EDF6/RM058",9},   // nw_traincity
-    {L"EDF6/M029_2",36},   // ig_steepcoast
+    {L"EDF6/M029_2",34},   // ig_steepcoast
     {L"EDF6/RM090A",9},   // nw_traincity
     {L"EDF6/M029_5",11},   // nw_rinkai02
     {L"EDF6/RM081",13},   // nw_jyousuicity
@@ -92,30 +92,30 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M035B",15},   // nw_tikakyoju01
     {L"EDF6/M036",3},   // nw_haikyo602
     {L"EDF6/M037",3},   // nw_haikyo602
-    {L"EDF6/M038",28},   // ig_cave604_2
+    {L"EDF6/M038",27},   // ig_cave604_2
     {L"EDF6/M039",3},   // nw_haikyo602
     {L"EDF6/RM015B2",12},   // nw_henden
     {L"EDF6/RM015_3B",5},   // nw_danti01
-    {L"EDF6/M046",37},   // ig_mountainvillage
-    {L"EDF6/M140A",38},   // ig_plateau
+    {L"EDF6/M046",35},   // ig_mountainvillage
+    {L"EDF6/M140A",36},   // ig_plateau
     {L"EDF6/RM025B",13},   // nw_jyousuicity
     {L"EDF6/M047",11},   // nw_rinkai02
     {L"EDF6/M047_5",12},   // nw_henden
     {L"EDF6/M048",11},   // nw_rinkai02
     {L"EDF6/M203",5},   // nw_danti01
-    {L"EDF6/RM020",35},   // ig_kaigan502
-    {L"EDF6/M083_7",23},   // nw_europe01
-    {L"EDF6/M049_5",28},   // ig_cave603
-    {L"EDF6/M049_6",28},   // ig_cave603
-    {L"EDF6/M050",28},   // ig_cave603
-    {L"EDF6/M051",37},   // ig_mountainvillage
+    {L"EDF6/RM020",33},   // ig_kaigan502
+    {L"EDF6/M083_7",43},   // nw_europe01
+    {L"EDF6/M049_5",27},   // ig_cave603
+    {L"EDF6/M049_6",27},   // ig_cave603
+    {L"EDF6/M050",27},   // ig_cave603
+    {L"EDF6/M051",35},   // ig_mountainvillage
     {L"EDF6/M048_5",9},   // nw_traincity
-    {L"EDF6/RM034A",33},   // ig_heigen507
-    {L"EDF6/M045",34},   // ig_heigen601
-    {L"EDF6/M045_5",39},   // ig_rockmaze01
+    {L"EDF6/RM034A",31},   // ig_heigen507
+    {L"EDF6/M045",32},   // ig_heigen601
+    {L"EDF6/M045_5",37},   // ig_rockmaze01
     {L"EDF6/M046_5",8},   // nw_kokyujyutaku01
     {L"EDF6/M253",11},   // nw_rinkai02
-    {L"EDF6/M029_7",36},   // ig_steepcoast
+    {L"EDF6/M029_7",34},   // ig_steepcoast
     {L"EDF6/M049",13},   // nw_jyousuicity
     {L"EDF6/RM044",9},   // nw_traincity
     {L"EDF6/M052",9},   // nw_traincity
@@ -128,7 +128,7 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M062B",15},   // nw_tikakyoju01
     {L"EDF6/M063",3},   // nw_haikyo602
     {L"EDF6/M064_5",3},   // nw_haikyo602
-    {L"EDF6/M065",28},   // ig_cave604_2
+    {L"EDF6/M065",27},   // ig_cave604_2
     {L"EDF6/M066",3},   // nw_haikyo602
     {L"EDF6/RM005",5},   // nw_danti01
     {L"EDF6/RM006",5},   // nw_danti01
@@ -136,22 +136,22 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/RM008",13},   // nw_jyousuicity
     {L"EDF6/M083_5",11},   // nw_rinkai02
     {L"EDF6/M081",5},   // nw_danti01
-    {L"EDF6/M079_2",35},   // ig_kaigan502
+    {L"EDF6/M079_2",33},   // ig_kaigan502
     {L"EDF6/M207",14},   // nw_kitagunicity
     {L"EDF6/M080",9},   // nw_traincity
     {L"EDF6/M108",8},   // nw_kokyujyutaku01
     {L"EDF6/M130D",5},   // nw_danti01
     {L"EDF6/M083_4",5},   // nw_danti01
-    {L"EDF6/M070",42},   // ig_terracemountain
+    {L"EDF6/M070",40},   // ig_terracemountain
     {L"EDF6/M083_8",14},   // nw_kitagunicity
-    {L"EDF6/RM034B",33},   // ig_heigen507
+    {L"EDF6/RM034B",31},   // ig_heigen507
     {L"EDF6/M105",11},   // nw_rinkai02
-    {L"EDF6/M113",42},   // ig_terracemountain
+    {L"EDF6/M113",40},   // ig_terracemountain
     {L"EDF6/RM091",22},   // nw_seiyu
     {L"EDF6/M204",12},   // nw_henden
-    {L"EDF6/M029_6",36},   // ig_steepcoast
+    {L"EDF6/M029_6",34},   // ig_steepcoast
     {L"EDF6/RM091_4",12},   // nw_henden
-    {L"EDF6/M082",36},   // ig_steepcoast
+    {L"EDF6/M082",34},   // ig_steepcoast
     {L"EDF6/M092",11},   // nw_rinkai02
     {L"EDF6/M093_2",11},   // nw_rinkai02
     {L"EDF6/M031D",7},   // nw_kousoubld601
@@ -161,22 +161,22 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M095B",15},   // nw_tikakyoju01
     {L"EDF6/M096",3},   // nw_haikyo602
     {L"EDF6/M097",3},   // nw_haikyo602
-    {L"EDF6/M098",28},   // ig_cave604_2
+    {L"EDF6/M098",27},   // ig_cave604_2
     {L"EDF6/M099",3},   // nw_haikyo602
     {L"EDF6/RM000",0},   // edfroom601
     {L"EDF6/RM003",1},   // ig_base502
     {L"EDF6/RM016B",9},   // nw_traincity
-    {L"EDF6/M049_7",28},   // ig_cave602_2
+    {L"EDF6/M049_7",27},   // ig_cave602_2
     {L"EDF6/M083",11},   // nw_rinkai02
-    {L"EDF6/M107",23},   // nw_europe01
+    {L"EDF6/M107",43},   // nw_europe01
     {L"EDF6/M112",5},   // nw_danti01
-    {L"EDF6/M049_8",28},   // ig_cave602_2
-    {L"EDF6/M104",37},   // ig_mountainvillage
-    {L"EDF6/M029_3",42},   // ig_terracemountain
+    {L"EDF6/M049_8",27},   // ig_cave602_2
+    {L"EDF6/M104",35},   // ig_mountainvillage
+    {L"EDF6/M029_3",40},   // ig_terracemountain
     {L"EDF6/M254",9},   // nw_traincity
     {L"EDF6/M117",9},   // nw_traincity
-    {L"EDF6/M115",39},   // ig_rockmaze01
-    {L"EDF6/M051_5",38},   // ig_plateau
+    {L"EDF6/M115",37},   // ig_rockmaze01
+    {L"EDF6/M051_5",36},   // ig_plateau
     {L"EDF6/M103",11},   // nw_rinkai02
     {L"EDF6/M252",12},   // nw_henden
     {L"EDF6/M116",8},   // nw_kokyujyutaku01
@@ -188,9 +188,9 @@ inline constexpr Mission kMissions[]={
     {L"EDF6/M033_5",0},   // ig_edfbasement01
     {L"EDF6/M130C",3},   // nw_haikyo602
     {L"EDF6/M131",7},   // nw_kousoubld601
-    {L"EDF6/M140B",38},   // ig_plateau
+    {L"EDF6/M140B",36},   // ig_plateau
     {L"EDF6/M114B",8},   // nw_kokyujyutaku01
-    {L"EDF6/M081B",31},   // ig_crater601
+    {L"EDF6/M081B",30},   // ig_crater601
     {L"EDF6/M148",7},   // nw_kousoubld601
     {L"EDF6/M149",6},   // nw_danti601
     {L"EDF6/M123",10},   // nw_rinkai01
@@ -199,21 +199,21 @@ inline constexpr Mission kMissions[]={
     {L"EDF6_DLC/RM009B",12},   // nw_henden
     {L"EDF6_DLC/RM013B",9},   // nw_traincity
     {L"EDF6_DLC/M111",11},   // nw_rinkai02
-    {L"EDF6_DLC/M203",25},   // nw_dlcmap602
+    {L"EDF6_DLC/M203",24},   // nw_dlcmap602
     {L"EDF6_DLC/M017",8},   // nw_kokyujyutaku01
     {L"EDF6_DLC/M009",13},   // nw_jyousuicity
     {L"EDF6_DLC/M008",9},   // nw_traincity
     {L"EDF6_DLC/M011",8},   // nw_kokyujyutaku01
     {L"EDF6_DLC/M019",5},   // nw_danti01
-    {L"EDF6_DLC/M013",24},   // nw_dlcmap601
+    {L"EDF6_DLC/M013",23},   // nw_dlcmap601
     {L"EDF6_DLC/M018",9},   // nw_traincity
     {L"EDF6_DLC/M014_2",14},   // nw_kitagunicity
-    {L"EDF6_DLC/M020",38},   // ig_plateau
-    {L"EDF6_DLC/M021",28},   // ig_cave605
+    {L"EDF6_DLC/M020",36},   // ig_plateau
+    {L"EDF6_DLC/M021",27},   // ig_cave605
     {L"EDF6_DLC/M016",14},   // nw_kitagunicity
-    {L"EDF6_DLC/M015",24},   // nw_dlcmap601
+    {L"EDF6_DLC/M015",23},   // nw_dlcmap601
     {L"EDF6_DLC/M098",1},   // ig_base502
-    {L"EDF6_DLC/M099",25},   // nw_dlcmap602
+    {L"EDF6_DLC/M099",24},   // nw_dlcmap602
     {L"EDF6_DLC/M107",8},   // nw_kokyujyutaku01
     {L"EDF6_DLC/M108",6},   // nw_danti601
     {L"EDF6_DLC/M007",14},   // nw_kitagunicity
@@ -222,7 +222,7 @@ inline constexpr Mission kMissions[]={
     {L"EDF6_DLC/M310",6},   // nw_danti601
     {L"EDF6_DLC/M112",10},   // nw_rinkai01
     {L"EDF6_DLC/M503",10},   // nw_rinkai01
-    {L"EDF6_DLC/M101",28},   // ig_cave602_2
+    {L"EDF6_DLC/M101",27},   // ig_cave602_2
     {L"EDF6_DLC/M311",9},   // nw_traincity
     {L"EDF6_DLC/M312",12},   // nw_henden
     {L"EDF6_DLC/M305",13},   // nw_jyousuicity
@@ -230,29 +230,29 @@ inline constexpr Mission kMissions[]={
     {L"EDF6_DLC/M010",8},   // nw_kokyujyutaku01
     {L"EDF6_DLC/M313",7},   // nw_kousoubld601
     {L"EDF6_DLC/M309",5},   // nw_danti01
-    {L"EDF6_DLC/M051",23},   // nw_europe01
-    {L"EDF6_DLC/M504",28},   // ig_cave603
+    {L"EDF6_DLC/M051",43},   // nw_europe01
+    {L"EDF6_DLC/M504",27},   // ig_cave603
     {L"EDF6_DLC/M050",13},   // nw_jyousuicity
-    {L"EDF6_DLC/M507",23},   // nw_europe01
+    {L"EDF6_DLC/M507",43},   // nw_europe01
     {L"EDF6_DLC/M006",2},   // nw_haikyo601
     {L"EDF6_DLC/M052",10},   // nw_rinkai01
-    {L"EDF6_DLC/M303",24},   // nw_dlcmap601
-    {L"EDF6_DLC/M109",37},   // ig_mountainvillage
-    {L"EDF6_DLC/M314",23},   // nw_europe01
+    {L"EDF6_DLC/M303",23},   // nw_dlcmap601
+    {L"EDF6_DLC/M109",35},   // ig_mountainvillage
+    {L"EDF6_DLC/M314",43},   // nw_europe01
     {L"EDF6_DLC/M518",15},   // nw_tikakyoju01
-    {L"EDF6_DLC/M515",36},   // ig_steepcoast
+    {L"EDF6_DLC/M515",34},   // ig_steepcoast
     {L"EDF6_DLC/M308",10},   // nw_rinkai01
-    {L"EDF6_DLC/M517",39},   // ig_rockmaze01
-    {L"EDF6_DLC/M509",36},   // ig_steepcoast
-    {L"EDF6_DLC/M522",25},   // nw_dlcmap602
-    {L"EDF6_DLC/M512",28},   // ig_cave601_2
+    {L"EDF6_DLC/M517",37},   // ig_rockmaze01
+    {L"EDF6_DLC/M509",34},   // ig_steepcoast
+    {L"EDF6_DLC/M522",24},   // nw_dlcmap602
+    {L"EDF6_DLC/M512",27},   // ig_cave601_2
     {L"EDF6_DLC/M520",22},   // nw_seiyu_night
     {L"EDF6_DLC/M519",8},   // nw_kokyujyutaku01
     {L"EDF6_DLC/M315",12},   // nw_henden
     {L"EDF6_DLC/M523",9},   // nw_traincity
     {L"EDF6_DLC/M521",3},   // nw_haikyo602
-    {L"EDF6_DLC/M306",25},   // nw_dlcmap602
-    {L"EDF6_DLC/M307",25},   // nw_dlcmap602
+    {L"EDF6_DLC/M306",24},   // nw_dlcmap602
+    {L"EDF6_DLC/M307",24},   // nw_dlcmap602
     {L"EDF6_DLC/M302",2},   // nw_haikyo601
     {L"EDF5_OLD_SCRIPT/M000",0},   // ig_edfroom01
     {L"EDF5_OLD_SCRIPT/M001",0},   // ig_edfroom02
@@ -263,40 +263,40 @@ inline constexpr Mission kMissions[]={
     {L"EDF5_OLD_SCRIPT/M006_5",22},   // nw_seiyu
     {L"EDF5_OLD_SCRIPT/M009",12},   // nw_henden
     {L"EDF5_OLD_SCRIPT/M013",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M018",40},   // ig_sangaku506
-    {L"EDF5_OLD_SCRIPT/M015_2",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M018",38},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M015_2",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M008",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M015",12},   // nw_henden
     {L"EDF5_OLD_SCRIPT/M015_3",5},   // nw_danti01
-    {L"EDF5_OLD_SCRIPT/M010",23},   // nw_europe01
-    {L"EDF5_OLD_SCRIPT/M011",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M010",43},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M011",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/M012",13},   // nw_jyousuicity
-    {L"EDF5_OLD_SCRIPT/M014",29},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/M014",28},   // ig_cave501
     {L"EDF5_OLD_SCRIPT/M016",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M017",35},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M017",33},   // ig_kaigan502
     {L"EDF5_OLD_SCRIPT/M017_5",22},   // nw_seiyu_night
-    {L"EDF5_OLD_SCRIPT/M007",26},   // ig_2000mcity
-    {L"EDF5_OLD_SCRIPT/M024",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M007",25},   // ig_2000mcity
+    {L"EDF5_OLD_SCRIPT/M024",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M019_5",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M022",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M023",5},   // nw_danti01
     {L"EDF5_OLD_SCRIPT/M025",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M019",9},   // nw_traincity
     {L"EDF5_OLD_SCRIPT/M026",14},   // nw_kitagunicity
-    {L"EDF5_OLD_SCRIPT/M020_5",26},   // ig_2000mcity
-    {L"EDF5_OLD_SCRIPT/M021",26},   // ig_2000mcity
-    {L"EDF5_OLD_SCRIPT/M027",29},   // ig_cave501
-    {L"EDF5_OLD_SCRIPT/M028",29},   // ig_cave503
-    {L"EDF5_OLD_SCRIPT/M029",29},   // ig_cave504
-    {L"EDF5_OLD_SCRIPT/M020",35},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M020_5",25},   // ig_2000mcity
+    {L"EDF5_OLD_SCRIPT/M021",25},   // ig_2000mcity
+    {L"EDF5_OLD_SCRIPT/M027",28},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/M028",28},   // ig_cave503
+    {L"EDF5_OLD_SCRIPT/M029",28},   // ig_cave504
+    {L"EDF5_OLD_SCRIPT/M020",33},   // ig_kaigan502
     {L"EDF5_OLD_SCRIPT/M036",5},   // nw_danti01
     {L"EDF5_OLD_SCRIPT/M032_5",13},   // nw_jyousuicity
-    {L"EDF5_OLD_SCRIPT/M034",33},   // ig_heigen507
+    {L"EDF5_OLD_SCRIPT/M034",31},   // ig_heigen507
     {L"EDF5_OLD_SCRIPT/M034_3",21},   // nw_suiden
     {L"EDF5_OLD_SCRIPT/M034_5",14},   // nw_kitagunicity
-    {L"EDF5_OLD_SCRIPT/M035",26},   // ig_2000mcity
-    {L"EDF5_OLD_SCRIPT/M007_5",23},   // nw_europe01
-    {L"EDF5_OLD_SCRIPT/M033",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M035",25},   // ig_2000mcity
+    {L"EDF5_OLD_SCRIPT/M007_5",43},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M033",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/M037",12},   // nw_henden
     {L"EDF5_OLD_SCRIPT/M031",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M041",13},   // nw_jyousuicity
@@ -305,16 +305,16 @@ inline constexpr Mission kMissions[]={
     {L"EDF5_OLD_SCRIPT/M047",5},   // nw_danti01
     {L"EDF5_OLD_SCRIPT/M047_2",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M091",22},   // nw_seiyu_night
-    {L"EDF5_OLD_SCRIPT/M056",29},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/M056",28},   // ig_cave501
     {L"EDF5_OLD_SCRIPT/M042_2",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M030",9},   // nw_traincity
     {L"EDF5_OLD_SCRIPT/M053",9},   // nw_traincity
     {L"EDF5_OLD_SCRIPT/M203",14},   // nw_kitagunicity
-    {L"EDF5_OLD_SCRIPT/M042_5",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M042_5",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/M200",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M050",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M038",40},   // ig_sangaku506
-    {L"EDF5_OLD_SCRIPT/M091_2",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M038",38},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M091_2",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M061",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M043",22},   // nw_seiyu_night
     {L"EDF5_OLD_SCRIPT/M058",9},   // nw_traincity
@@ -327,36 +327,36 @@ inline constexpr Mission kMissions[]={
     {L"EDF5_OLD_SCRIPT/M091_3",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M201",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M051",22},   // nw_seiyu
-    {L"EDF5_OLD_SCRIPT/M068",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/M068",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/M048",12},   // nw_henden
     {L"EDF5_OLD_SCRIPT/M202",5},   // nw_danti01
-    {L"EDF5_OLD_SCRIPT/M074",35},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M074",33},   // ig_kaigan502
     {L"EDF5_OLD_SCRIPT/M091_4",12},   // nw_henden
-    {L"EDF5_OLD_SCRIPT/M067",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M067",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M072_1",1},   // ig_base502
     {L"EDF5_OLD_SCRIPT/M072_2",0},   // ig_edfroom02
     {L"EDF5_OLD_SCRIPT/M072_3",1},   // ig_base502
     {L"EDF5_OLD_SCRIPT/M072_4",22},   // nw_seiyu
     {L"EDF5_OLD_SCRIPT/M064",13},   // nw_jyousuicity
     {L"EDF5_OLD_SCRIPT/M059",13},   // nw_jyousuicity
-    {L"EDF5_OLD_SCRIPT/M057",29},   // ig_cave503
-    {L"EDF5_OLD_SCRIPT/M063",35},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M057",28},   // ig_cave503
+    {L"EDF5_OLD_SCRIPT/M063",33},   // ig_kaigan502
     {L"EDF5_OLD_SCRIPT/M054",13},   // nw_jyousuicity
-    {L"EDF5_OLD_SCRIPT/M039",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M039",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M049",14},   // nw_kitagunicity
-    {L"EDF5_OLD_SCRIPT/M062",29},   // ig_cave503
+    {L"EDF5_OLD_SCRIPT/M062",28},   // ig_cave503
     {L"EDF5_OLD_SCRIPT/M069",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M055",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M055",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M075",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M066",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M066",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M073_5",22},   // nw_seiyu
     {L"EDF5_OLD_SCRIPT/M054_5",14},   // nw_kitagunicity
-    {L"EDF5_OLD_SCRIPT/M046_2",35},   // ig_kaigan502
-    {L"EDF5_OLD_SCRIPT/M204",29},   // ig_cave501
-    {L"EDF5_OLD_SCRIPT/M079",33},   // ig_heigen507
+    {L"EDF5_OLD_SCRIPT/M046_2",33},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M204",28},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/M079",31},   // ig_heigen507
     {L"EDF5_OLD_SCRIPT/M090",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/M052",35},   // ig_kaigan502
-    {L"EDF5_OLD_SCRIPT/M060",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/M052",33},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/M060",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/M070",9},   // nw_traincity
     {L"EDF5_OLD_SCRIPT/M078",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/M071",13},   // nw_jyousuicity
@@ -367,27 +367,27 @@ inline constexpr Mission kMissions[]={
     {L"EDF5_OLD_SCRIPT/DLC/DM011",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/DLC/DM013",12},   // nw_henden
     {L"EDF5_OLD_SCRIPT/DLC/DM005",12},   // nw_henden
-    {L"EDF5_OLD_SCRIPT/DLC/DM018",32},   // ig_desert508
+    {L"EDF5_OLD_SCRIPT/DLC/DM018",44},   // ig_desert508
     {L"EDF5_OLD_SCRIPT/DLC/DM019",0},   // ng_dlc_edfroom03
-    {L"EDF5_OLD_SCRIPT/DLC/DM020",32},   // ig_desert508
-    {L"EDF5_OLD_SCRIPT/DLC/DM008",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/DLC/DM020",44},   // ig_desert508
+    {L"EDF5_OLD_SCRIPT/DLC/DM008",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/DLC/DM003",5},   // nw_danti01
     {L"EDF5_OLD_SCRIPT/DLC/DM014",5},   // nw_danti01
     {L"EDF5_OLD_SCRIPT/DLC/DM003_2",9},   // nw_traincity
-    {L"EDF5_OLD_SCRIPT/DLC/DM001",29},   // ig_cave501
-    {L"EDF5_OLD_SCRIPT/DLC/DM007",29},   // ig_cave501
-    {L"EDF5_OLD_SCRIPT/DLC/DM003_3",40},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/DLC/DM001",28},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/DLC/DM007",28},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/DLC/DM003_3",38},   // ig_sangaku506
     {L"EDF5_OLD_SCRIPT/DLC/DM013_2",21},   // nw_suiden
-    {L"EDF5_OLD_SCRIPT/DLC/DM015",26},   // ig_2000mcity
-    {L"EDF5_OLD_SCRIPT/DLC/DM005_2",23},   // nw_europe01
-    {L"EDF5_OLD_SCRIPT/DLC/DM002",23},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/DLC/DM015",25},   // ig_2000mcity
+    {L"EDF5_OLD_SCRIPT/DLC/DM005_2",43},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/DLC/DM002",43},   // nw_europe01
     {L"EDF5_OLD_SCRIPT/DLC/DM021",14},   // nw_kitagunicity
     {L"EDF5_OLD_SCRIPT/DLC/DM006_2",13},   // nw_jyousuicity
-    {L"EDF5_OLD_SCRIPT/DLC/DM009",40},   // ig_sangaku506
-    {L"EDF5_OLD_SCRIPT/DLC/DM007_2",29},   // ig_cave501
-    {L"EDF5_OLD_SCRIPT/DLC/DM010",23},   // nw_europe01
-    {L"EDF5_OLD_SCRIPT/DLC/DM014_2",35},   // ig_kaigan502
-    {L"EDF5_OLD_SCRIPT/DLC/DM012",35},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/DLC/DM009",38},   // ig_sangaku506
+    {L"EDF5_OLD_SCRIPT/DLC/DM007_2",28},   // ig_cave501
+    {L"EDF5_OLD_SCRIPT/DLC/DM010",43},   // nw_europe01
+    {L"EDF5_OLD_SCRIPT/DLC/DM014_2",33},   // ig_kaigan502
+    {L"EDF5_OLD_SCRIPT/DLC/DM012",33},   // ig_kaigan502
     {L"EDF5_OLD_SCRIPT/DLC/DM022",22},   // nw_seiyu
     {L"EDF5_OLD_SCRIPT/DLC/DM023",9},   // nw_traincity
     {L"EDF5_OLD_SCRIPT/DLC/DM024",14},   // nw_kitagunicity
@@ -406,136 +406,136 @@ inline constexpr Mission kMissions[]={
     {L"EDF41/M110",7},   // nw_kousoubld01
     {L"EDF41/M111_2",17},   // nw_hillycity_light
     {L"EDF41/M112",18},   // nw_kasenjiki01
-    {L"EDF41/M123",35},   // sk_kaigan01
+    {L"EDF41/M123",33},   // sk_kaigan01
     {L"EDF41/M115",19},   // nw_sinsuikouen
     {L"EDF41/M117",7},   // nw_kousoubld01
-    {L"EDF41/M118",44},   // sk_valley01
+    {L"EDF41/M118",42},   // sk_valley01
     {L"EDF41/M113",20},   // nw_soukogai01
     {L"EDF41/M015",18},   // nw_kasenjiki01
-    {L"EDF41/M008",43},   // sk_stepmountain01
+    {L"EDF41/M008",41},   // sk_stepmountain01
     {L"EDF41/M116",16},   // nw_underground01
-    {L"EDF41/M126",29},   // ig_cave01
+    {L"EDF41/M126",28},   // ig_cave01
     {L"EDF41/M131",7},   // nw_kousoubld01
-    {L"EDF41/M130",41},   // sk_sangaku02
+    {L"EDF41/M130",39},   // sk_sangaku02
     {L"EDF41/M405",17},   // nw_hillycity_light
-    {L"EDF41/M120",35},   // sk_kaigan01
+    {L"EDF41/M120",33},   // sk_kaigan01
     {L"EDF41/MP001",18},   // nw_kasenjiki01
     {L"EDF41/M150",18},   // nw_kasenjiki01
-    {L"EDF41/M119",33},   // sk_heigen02
+    {L"EDF41/M119",31},   // sk_heigen02
     {L"EDF41/M124",16},   // nw_underground01
-    {L"EDF41/M147",29},   // ig_cave01
-    {L"EDF41/M127",29},   // ig_cave01
+    {L"EDF41/M147",28},   // ig_cave01
+    {L"EDF41/M127",28},   // ig_cave01
     {L"EDF41/M603",17},   // nw_hillycity_light
     {L"EDF41/M309",7},   // nw_kousoubld01
     {L"EDF41/M206",18},   // nw_kasenjiki01
-    {L"EDF41/M153",27},   // ig_wrecktown01
+    {L"EDF41/M153",26},   // ig_wrecktown01
     {L"EDF41/M210",19},   // nw_sinsuikouen
     {L"EDF41/M307",20},   // nw_soukogai01
     {L"EDF41/MP002",7},   // nw_kousoubld01
-    {L"EDF41/M501",44},   // sk_valley01
+    {L"EDF41/M501",42},   // sk_valley01
     {L"EDF41/M128",19},   // nw_sinsuikouen
     {L"EDF41/M137",18},   // nw_kasenjiki01
-    {L"EDF41/M012",41},   // sk_sangaku02
+    {L"EDF41/M012",39},   // sk_sangaku02
     {L"EDF41/M009",7},   // nw_kousoubld01
     {L"EDF41/M019",19},   // nw_sinsuikouen
     {L"EDF41/M205",19},   // nw_sinsuikouen
     {L"EDF41/M129",18},   // nw_kasenjiki01
-    {L"EDF41/M135",41},   // sk_sangaku02
-    {L"EDF41/M516",41},   // sk_sangaku02
+    {L"EDF41/M135",39},   // sk_sangaku02
+    {L"EDF41/M516",39},   // sk_sangaku02
     {L"EDF41/M133",18},   // nw_kasenjiki01
-    {L"EDF41/M121",44},   // sk_valley01
+    {L"EDF41/M121",42},   // sk_valley01
     {L"EDF41/M122",17},   // nw_hillycity_light
     {L"EDF41/MP003",17},   // nw_hillycity_light
     {L"EDF41/M312",7},   // nw_kousoubld01
-    {L"EDF41/M132",27},   // ig_wrecktown01
+    {L"EDF41/M132",26},   // ig_wrecktown01
     {L"EDF41/M143",20},   // nw_soukogai01
     {L"EDF41/M144",17},   // nw_hillycity_light
     {L"EDF41/M602",19},   // nw_sinsuikouen
-    {L"EDF41/M306",43},   // sk_stepmountain01
+    {L"EDF41/M306",41},   // sk_stepmountain01
     {L"EDF41/M162",7},   // nw_kousoubld01
     {L"EDF41/M164",17},   // nw_hillycity_light
-    {L"EDF41/M601",40},   // sk_sangaku01
+    {L"EDF41/M601",38},   // sk_sangaku01
     {L"EDF41/M308",19},   // nw_sinsuikouen
-    {L"EDF41/M140",40},   // sk_sangaku01
+    {L"EDF41/M140",38},   // sk_sangaku01
     {L"EDF41/M134",7},   // nw_kousoubld01
-    {L"EDF41/M517",43},   // sk_stepmountain01
-    {L"EDF41/MP004",27},   // ig_wrecktown01
+    {L"EDF41/M517",41},   // sk_stepmountain01
+    {L"EDF41/MP004",26},   // ig_wrecktown01
     {L"EDF41/M305",7},   // nw_kousoubld01
     {L"EDF41/M414",18},   // nw_kasenjiki01
-    {L"EDF41/M417",44},   // sk_valley01
+    {L"EDF41/M417",42},   // sk_valley01
     {L"EDF41/M007",17},   // nw_hillycity_light
-    {L"EDF41/M145",40},   // sk_sangaku01
-    {L"EDF41/M141",40},   // sk_sangaku01
-    {L"EDF41/M146",30},   // ig_hornetcave01
-    {L"EDF41/M158",30},   // ig_hornetcave01
+    {L"EDF41/M145",38},   // sk_sangaku01
+    {L"EDF41/M141",38},   // sk_sangaku01
+    {L"EDF41/M146",29},   // ig_hornetcave01
+    {L"EDF41/M158",29},   // ig_hornetcave01
     {L"EDF41/M412",20},   // nw_soukogai01
     {L"EDF41/M165",19},   // nw_sinsuikouen
     {L"EDF41/M017",20},   // nw_soukogai01
     {L"EDF41/M142",7},   // nw_kousoubld01
-    {L"EDF41/M518",43},   // sk_stepmountain01
-    {L"EDF41/M201",31},   // sk_crater01
+    {L"EDF41/M518",41},   // sk_stepmountain01
+    {L"EDF41/M201",30},   // sk_crater01
     {L"EDF41/M304",17},   // nw_hillycity_light
     {L"EDF41/M138",7},   // nw_kousoubld01
     {L"EDF41/M166",18},   // nw_kasenjiki01
-    {L"EDF41/M149",27},   // ig_wrecktown01
-    {L"EDF41/M411",35},   // sk_kaigan01
-    {L"EDF41/M152",27},   // ig_wrecktown01
-    {L"EDF41/M207",27},   // ig_wrecktown01
+    {L"EDF41/M149",26},   // ig_wrecktown01
+    {L"EDF41/M411",33},   // sk_kaigan01
+    {L"EDF41/M152",26},   // ig_wrecktown01
+    {L"EDF41/M207",26},   // ig_wrecktown01
     {L"EDF41/M018",7},   // nw_kousoubld01
     {L"EDF41MP01/M710",19},   // nw_sinsuikouen
     {L"EDF41MP01/M404",17},   // nw_hillycity_light
-    {L"EDF41MP01/M402",41},   // sk_sangaku02
+    {L"EDF41MP01/M402",39},   // sk_sangaku02
     {L"EDF41MP01/DM101",7},   // nw_kousoubld01
     {L"EDF41MP01/M707",20},   // nw_soukogai01
     {L"EDF41MP01/M801",7},   // nw_kousoubld01
     {L"EDF41MP01/M996",17},   // nw_hillycity_light
-    {L"EDF41MP01/M418",40},   // sk_sangaku01
-    {L"EDF41MP01/M408",40},   // sk_sangaku01
-    {L"EDF41MP01/M802",29},   // ig_cave01
-    {L"EDF41MP01/M511",41},   // sk_sangaku02
+    {L"EDF41MP01/M418",38},   // sk_sangaku01
+    {L"EDF41MP01/M408",38},   // sk_sangaku01
+    {L"EDF41MP01/M802",28},   // ig_cave01
+    {L"EDF41MP01/M511",39},   // sk_sangaku02
     {L"EDF41MP01/M416",7},   // nw_kousoubld01
     {L"EDF41MP01/M403",17},   // nw_hillycity_light
     {L"EDF41MP01/M995",7},   // nw_kousoubld01
     {L"EDF41MP01/M509",19},   // nw_sinsuikouen
     {L"EDF41MP01/M502",20},   // nw_soukogai01
-    {L"EDF41MP01/M401",40},   // sk_sangaku01
+    {L"EDF41MP01/M401",38},   // sk_sangaku01
     {L"EDF41MP01/M805",7},   // nw_kousoubld01
     {L"EDF41MP01/M803",17},   // nw_hillycity_light
     {L"EDF41MP01/M992",17},   // nw_hillycity_light
-    {L"EDF41MP01/M994",29},   // ig_cave01
+    {L"EDF41MP01/M994",28},   // ig_cave01
     {L"EDF41MP01/M800",17},   // nw_hillycity_light
-    {L"EDF41MP01/M203",33},   // sk_heigen02
-    {L"EDF41MP01/M415",33},   // sk_heigen02
+    {L"EDF41MP01/M203",31},   // sk_heigen02
+    {L"EDF41MP01/M415",31},   // sk_heigen02
     {L"EDF41MP01/M807",7},   // nw_kousoubld01
     {L"EDF41MP01/M993",7},   // nw_kousoubld01
     {L"EDF41MP02/M709",19},   // nw_sinsuikouen
     {L"EDF41MP02/M991",17},   // nw_hillycity_light
-    {L"EDF41MP02/M706",40},   // sk_sangaku01
+    {L"EDF41MP02/M706",38},   // sk_sangaku01
     {L"EDF41MP02/M708",17},   // nw_hillycity_light
     {L"EDF41MP02/M999",19},   // nw_sinsuikouen
-    {L"EDF41MP02/M513",40},   // sk_sangaku01
+    {L"EDF41MP02/M513",38},   // sk_sangaku01
     {L"EDF41MP02/MP503",19},   // nw_sinsuikouen
     {L"EDF41MP02/M997",18},   // nw_kasenjiki01
-    {L"EDF41MP02/M303",27},   // ig_wrecktown01
-    {L"EDF41MP02/M301",43},   // sk_stepmountain01
-    {L"EDF41MP02/M990",27},   // ig_wrecktown01
+    {L"EDF41MP02/M303",26},   // ig_wrecktown01
+    {L"EDF41MP02/M301",41},   // sk_stepmountain01
+    {L"EDF41MP02/M990",26},   // ig_wrecktown01
     {L"EDF41MP02/M998",20},   // nw_soukogai01
-    {L"EDF41MP02/M510",31},   // sk_crater01
+    {L"EDF41MP02/M510",30},   // sk_crater01
     {L"EDF41MP02/M311",18},   // nw_kasenjiki01
     {L"EDF41MP02/M010",17},   // nw_hillycity_light
-    {L"EDF41MP02/M508",35},   // sk_kaigan01
-    {L"EDF41MP02/M507",40},   // sk_sangaku01
+    {L"EDF41MP02/M508",33},   // sk_kaigan01
+    {L"EDF41MP02/M507",38},   // sk_sangaku01
     {L"EDF41MP02/M506",18},   // nw_kasenjiki01
     {L"EDF41MP02/MP501",7},   // nw_kousoubld01
-    {L"EDF41MP02/M808",27},   // ig_wrecktown01
+    {L"EDF41MP02/M808",26},   // ig_wrecktown01
     {L"EDF41MP02/M806",19},   // nw_sinsuikouen
     {L"EDF41MP02/DM202",17},   // nw_hillycity_light
     {L"EDF41MP02/M809",17},   // nw_hillycity_light
 };
 inline constexpr const wchar_t* kRangeKeyPrefix=L"EDF6/EDF6TR_";
 inline constexpr int kRangePlace=1;   // higashifuji
-// The detail texture (tools/worldmap_basemap.py): north, south, west, east in degrees.
-inline constexpr float kDetailNorth=47.000f,kDetailSouth=27.000f,kDetailWest=127.000f,kDetailEast=147.000f;
-// The base map textures (model pack folder worldmap_tex, installed by tools/worldmap_pack.py).
-inline constexpr const wchar_t* kWorldTexture=L"app:/UI/EDF6VC_WORLDMAP_WORLD.dds";
-inline constexpr const wchar_t* kJapanTexture=L"app:/UI/EDF6VC_WORLDMAP_JAPAN.dds";
+// The base map: a JPEG tile pyramid in one file under Mods (pylib/worldmap.py TILE*, tools/worldmap_basemap.py
+// tiles, installed by tools/worldmap_pack.py from the model pack folder worldmap_tex).
+inline constexpr int kTile=1350,kTileLevels=7,kTilesFormat=1;
+inline constexpr char kTilesMagic[5]="EDWM";
+inline constexpr const wchar_t* kTilesFile=L"Plugins/EDF6VehicleCrew.worldmap.bin";   // under Mods

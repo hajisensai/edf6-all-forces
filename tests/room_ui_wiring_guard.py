@@ -39,10 +39,33 @@ def body(text: str, head: str) -> str:
 
 
 install = body(src, 'bool InstallRoomUi() noexcept')
-off_at = install.find('if(!Cfg().roomLoadout)')
+off_at = install.find('if(!Cfg().roomLoadout && !Cfg().hqAutoMissionSelect)')
 check(off_at >= 0 and off_at < install.find('AllMatch(') and off_at < install.find('InstallPreviewHooks') and
-      off_at < install.find('Chain('), 'RoomLoadout=0 at load: InstallRoomUi returns before checking or patching anything')
+      off_at < install.find('Chain('),
+      'RoomLoadout=0 and HqAutoMissionSelect=0 at load: InstallRoomUi returns before checking or patching anything')
 check('return false;' in install[off_at:install.find('}', off_at) + 1], '...returning false')
+# RoomLoadout=0 with HqAutoMissionSelect=1: only the HQ chained, by the hook that runs nothing of the menu.
+alone_at = install.find('if(!Cfg().roomLoadout) {')
+alone = install[alone_at:install.find('}', alone_at) + 1]
+check(alone_at > 0 and alone_at < install.find('InstallPreviewHooks') and alone_at < install.find('InstallNativeDialog') and
+      alone_at < install.find('nativeEntryOk=') and alone_at < install.find('padOk=') and
+      'Chain(screens[1],reinterpret_cast<void*>(&HqAutoHook),reinterpret_cast<void*>(&HqGoneHook))' in alone and
+      'screens[0]' not in alone and 'return hq;' in alone, 'RoomLoadout=0: the HQ alone, before any of the menu is installed')
+auto_hook = body(src, 'std::uint64_t __fastcall HqAutoHook(unsigned char* self,void* ctx)')
+check('screens[1].next(self,ctx)' in auto_hook and 'Frame(' not in auto_hook and 'AutoOpenMission(self,ctx,false)' in auto_hook,
+      'the HQ-alone hook chains with the real ctx and only opens the mission select')
+hq_hook = body(src, 'std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx)')
+check(hq_hook.find('Frame(screens[1],self,ctx)') < hq_hook.find('AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched)'),
+      'the HQ opens its mission select after its frame, never with the F2 menu (or its closing key) up')
+check('AutoGone(self)' in body(src, 'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags)') and
+      'AutoGone' not in body(src, 'void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags)'),
+      "the HQ's destructor ends its 'tried' mark (a new HQ at its address opens again)")
+auto = body(src, 'void AutoOpenMission(unsigned char* self,void* ctx,bool menuBusy) noexcept')
+check(auto.find('AutoOpenDue(') < auto.find('autoTried.store(self)') < auto.find('Press(self,button)') and
+      'Cfg().enabled && Cfg().hqAutoMissionSelect' in auto, 'tried once per HQ object, before the press, with both switches')
+check('bool hqAutoMissionSelect=true;' in crew and 'n.hqAutoMissionSelect=ReadBool(L"HqAutoMissionSelect",n.hqAutoMissionSelect);' in plugin,
+      'HqAutoMissionSelect read, default 1')
+check(re.search(r'^HqAutoMissionSelect=1\r?$', ini, re.M) is not None, 'the shipped ini has HqAutoMissionSelect=1')
 
 frame = body(src, 'std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept')
 pass_at = frame.find('if(sw.pass)return Off(screen,self,ctx);')
@@ -53,7 +76,7 @@ for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', '
 check(frame.find('PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room)') < pass_at, 'the switches planned first')
 check(src.count('roomsync::TickRoomSync()') == 1 and 'if(sw.tick)roomsync::TickRoomSync();' in frame,
       'the pre-sync ticks only where PlanSwitches says (never on a bare screen.room)')
-check(src.count('roomsync::LeaveRoomSync()') == 2 and re.search(r'if\(sw\.leave\) \{[^}]*roomsync::LeaveRoomSync\(\);\s*roomsync::ForgetRoomHostList\(\);', frame) is not None and
+check(src.count('roomsync::LeaveRoomSync()') == 2 and re.search(r'if\(sw\.leave\) \{[^}]*roomsync::LeaveRoomSync\(\);\s*roomsync::ForgetRoomList\(\);', frame) is not None and
       'if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();' in src, 'withdrawn only on the plan\'s leave or a forgotten syncing screen')
 off = body(src, 'std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept')
 for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', 'DrawMenu', 'ShowPreview', 'memset'):
@@ -104,12 +127,13 @@ variants = open(os.path.join(ROOT, 'src', 'support_variants.cpp'), encoding='utf
 preload = body(variants, 'void PreloadSupportVariants() noexcept')
 check('FindFirstFile' not in variants and 'FindNextFile' not in variants, 'no directory scan of Mods/OBJECT')
 check('variants::MissionVariants(&wanted' in preload and 'ForEachConfiguredVariant' in preload and
-      'roomsync::ForEachRoomHostVariant' in preload and 'PendingText()' in preload,
-      'the preload set: configuration + the room host\'s list + the pending list')
-check('variants::HelloBloom(ready,&hostList,bloom)' in preload, 'the hello names the host list\'s files when there is one')
+      'roomsync::ForEachRoomVariant' in preload and 'PendingText()' in preload,
+      'the preload set: configuration + the room\'s set (every member\'s loadout) + the pending list')
+check('variants::HelloBloom(ready,&hostList,bloom)' in preload, 'the hello names the room set\'s files when there is one')
 sync = open(os.path.join(ROOT, 'src', 'room_sync.cpp'), encoding='utf-8').read()
-check('engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList();' in sync and 'AcquireSRWLockShared(&hostLock)' in sync,
-      'the host list handed to the mission start under a lock (another thread)')
+check('engine.Tick(Api(),GetTickCount64(),TheEnv());PublishRoomList();PublishPlayers();PublishMembers();' in sync and
+      'AcquireSRWLockShared(&roomLock)' in sync and 'AcquireSRWLockShared(&membersLock)' in sync,
+      'the room\'s set and the members\' loadouts handed to the mission start / the host\'s plans under a lock (other threads)')
 check('struct Switches' in logic and 'inline SwitchPlan PlanSwitches(' in logic, 'room_ui_logic.h PlanSwitches')
 check('bool roomPreSync=true;' in crew and 'n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);' in plugin,
       'RoomPreSync read, default 1')

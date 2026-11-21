@@ -13,6 +13,11 @@ using namespace crew::enemy_native;
 int checks=0,failures=0;
 void Check(bool ok,const char* what,int line){++checks;if(!ok){++failures;std::fprintf(stderr,"line %d: %s\n",line,what);}}
 #define CHECK(value) Check((value),#value,__LINE__)
+// Readable caches page protections until GetTickCount64 advances.
+void WaitForMemoryTick() {
+    const auto tick=GetTickCount64();
+    while(GetTickCount64()==tick)Sleep(1);
+}
 constexpr std::size_t kRows=sizeof(kPoseRows)/sizeof(kPoseRows[0]);
 bool Expected(const char* name){
     const char* const names[]={"AlienTrailer","EDF6_Berserker_Large","EDF6_Berserker_Middle","EDF6_Berserker_TypeA",
@@ -127,27 +132,27 @@ void ImageCases(Fixture& fixture){
     for(const auto field:fields){const auto value=At<std::uint32_t>(image,field);Put<std::uint32_t>(image,field,value^1u);CHECK(!EnemyControlNativeNetworkPoseReady(lease));Put<std::uint32_t>(image,field,value);}
     Put<std::uint32_t>(image,0x3C,0x1001);CHECK(!EnemyControlNativeNetworkPoseReady(lease));Put<std::uint32_t>(image,0x3C,0x100);
     auto* saved=image;image=nullptr;CHECK(!EnemyControlNativeNetworkPoseReady(lease));image=reinterpret_cast<unsigned char*>(1);CHECK(!EnemyControlNativeNetworkPoseReady(lease));image=saved;
-    DWORD old=0;CHECK(VirtualProtect(image,kPoseImageSize,PAGE_READONLY,&old)!=0);Sleep(2);
-    CHECK(EnemyControlNativeNetworkPoseReady(lease));CHECK(VirtualProtect(image,kPoseImageSize,old,&old)!=0);Sleep(2);
+    DWORD old=0;CHECK(VirtualProtect(image,kPoseImageSize,PAGE_READONLY,&old)!=0);WaitForMemoryTick();
+    CHECK(EnemyControlNativeNetworkPoseReady(lease));CHECK(VirtualProtect(image,kPoseImageSize,old,&old)!=0);WaitForMemoryTick();
 }
 void ReadBoundaries(Fixture& fixture){
     auto lease=fixture.Lease();DWORD previous=0;
-    CHECK(VirtualProtect(fixture.control,0x1000,PAGE_NOACCESS,&previous)!=0);Sleep(2);CHECK(!EnemyControlNativeNetworkPoseReady(lease));
-    CHECK(VirtualProtect(fixture.control,0x1000,previous,&previous)!=0);Sleep(2);
+    CHECK(VirtualProtect(fixture.control,0x1000,PAGE_NOACCESS,&previous)!=0);WaitForMemoryTick();CHECK(!EnemyControlNativeNetworkPoseReady(lease));
+    CHECK(VirtualProtect(fixture.control,0x1000,previous,&previous)!=0);WaitForMemoryTick();
     auto* primaryCol=const_cast<unsigned char*>(At<const unsigned char*>(image+kPoseRows[0].primary-8,0));
-    CHECK(VirtualProtect(primaryCol,0x1000,PAGE_NOACCESS,&previous)!=0);Sleep(2);CHECK(!EnemyControlNativeNetworkPoseReady(lease));
-    CHECK(VirtualProtect(primaryCol,0x1000,previous,&previous)!=0);Sleep(2);
+    CHECK(VirtualProtect(primaryCol,0x1000,PAGE_NOACCESS,&previous)!=0);WaitForMemoryTick();CHECK(!EnemyControlNativeNetworkPoseReady(lease));
+    CHECK(VirtualProtect(primaryCol,0x1000,previous,&previous)!=0);WaitForMemoryTick();
     const auto codePage=kPoseRows[0].slot[2]&~0xFFFu;
-    CHECK(VirtualProtect(image+codePage,0x1000,PAGE_NOACCESS,&previous)!=0);Sleep(2);CHECK(!EnemyControlNativeNetworkPoseReady(lease));
-    CHECK(VirtualProtect(image+codePage,0x1000,previous,&previous)!=0);Sleep(2);
+    CHECK(VirtualProtect(image+codePage,0x1000,PAGE_NOACCESS,&previous)!=0);WaitForMemoryTick();CHECK(!EnemyControlNativeNetworkPoseReady(lease));
+    CHECK(VirtualProtect(image+codePage,0x1000,previous,&previous)!=0);WaitForMemoryTick();
     auto* pages=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));CHECK(pages!=nullptr);if(!pages)std::exit(2);
-    CHECK(VirtualProtect(pages+0x1000,0x1000,PAGE_NOACCESS,&previous)!=0);Sleep(2);
+    CHECK(VirtualProtect(pages+0x1000,0x1000,PAGE_NOACCESS,&previous)!=0);WaitForMemoryTick();
     lease.object=pages+0x1000-0x128;CHECK(!EnemyControlNativeNetworkPoseReady(lease));lease=fixture.Lease();
     lease.control=pages+0x1000-10;Put<const void*>(fixture.object,0x30,lease.control);CHECK(!EnemyControlNativeNetworkPoseReady(lease));
     lease=fixture.Lease();lease.profile=reinterpret_cast<const NativeProfile*>(pages+0x1000-sizeof(NativeProfile)+1);CHECK(!EnemyControlNativeNetworkPoseReady(lease));
     CHECK(VirtualFree(pages,0,MEM_RELEASE)!=0);
-    lease=fixture.Lease();CHECK(VirtualProtect(fixture.object,Fixture::kObjectSize,PAGE_READONLY,&previous)!=0);Sleep(2);
-    CHECK(EnemyControlNativeNetworkPoseReady(lease));CHECK(VirtualProtect(fixture.object,Fixture::kObjectSize,previous,&previous)!=0);Sleep(2);
+    lease=fixture.Lease();CHECK(VirtualProtect(fixture.object,Fixture::kObjectSize,PAGE_READONLY,&previous)!=0);WaitForMemoryTick();
+    CHECK(EnemyControlNativeNetworkPoseReady(lease));CHECK(VirtualProtect(fixture.object,Fixture::kObjectSize,previous,&previous)!=0);WaitForMemoryTick();
     CHECK(EnemyControlNativeNetworkPoseReady(lease));
 }
 }

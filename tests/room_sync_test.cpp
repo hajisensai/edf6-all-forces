@@ -20,6 +20,7 @@
 #include <cstring>
 #include <cwchar>
 #include <iterator>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -143,6 +144,11 @@ const char* ValueOf(int member,const char* key) {
 struct Machine {
     std::vector<std::wstring> files,pending,config;
     std::string ownPlayer;   // its EDF6X_VCPVEH value (player_vehicle_logic.h OwnValue); empty: none
+    // Its configuration line (member_config.h's, which the engine only carries): `line` when set, else its files' names
+    // joined by ','; `leftOut` the entries the writer says did not fit. A line it reads names the files lineSets gives
+    // for it, else its ','-separated names; one with "BAD" in it does not read (member_config.h refuses it).
+    std::string line;int leftOut=0;
+    std::map<std::string,std::vector<std::wstring>> lineSets;
     bool generatorInstalled=true,generatorFails=false;
     Gen state=Gen::idle;
     int starts=0;
@@ -176,6 +182,30 @@ void Configured(void* c,void (*each)(void*,const wchar_t*),void* set) noexcept {
     for(const auto& f:static_cast<Machine*>(c)->config)each(set,f.c_str());
 }
 void LogLine(void* c,const char* text) noexcept { static_cast<Machine*>(c)->log.push_back(text); }
+std::size_t OwnConfig(void* c,char* out,std::size_t capacity,int* leftOut) noexcept {
+    const auto* m=static_cast<Machine*>(c);
+    std::string line=m->line;
+    if(line.empty())
+        for(const auto& f:m->config){if(!line.empty())line+=',';for(wchar_t ch:f)line+=static_cast<char>(ch&0x7F);}
+    if(line.size()+1>capacity)line.resize(capacity-1);
+    std::snprintf(out,capacity,"%s",line.c_str());
+    if(leftOut)*leftOut=m->leftOut;
+    return line.size();
+}
+bool MemberVariants(void* c,const char* line,void (*each)(void*,const wchar_t*),void* set) noexcept {
+    const auto* m=static_cast<Machine*>(c);
+    if(std::strstr(line,"BAD"))return false;
+    std::vector<std::wstring> names;
+    if(const auto it=m->lineSets.find(line);it!=m->lineSets.end())names=it->second;
+    else for(const char* s=line;*s;) {
+        const char* end=s;while(*end && *end!=',')++end;
+        std::wstring n;for(const char* k=s;k<end;++k)n+=static_cast<wchar_t>(*k);
+        if(!n.empty())names.push_back(n);
+        s=*end ? end+1 : end;
+    }
+    if(each)for(const auto& n:names)each(set,n.c_str());
+    return true;
+}
 bool OwnPlayer(void* c,char* value,std::size_t capacity) noexcept {
     const auto* m=static_cast<Machine*>(c);
     if(m->ownPlayer.empty())return false;
@@ -185,7 +215,7 @@ bool OwnPlayer(void* c,char* value,std::size_t capacity) noexcept {
 Env EnvOf(Machine& m) {
     Env e;
     e.context=&m;e.fileThere=FileThere;e.noteMissing=NoteMissing;e.startGeneration=StartGeneration;e.generation=Generation;
-    e.configured=Configured;e.log=LogLine;e.ownPlayer=OwnPlayer;
+    e.configured=Configured;e.ownConfig=OwnConfig;e.memberVariants=MemberVariants;e.log=LogLine;e.ownPlayer=OwnPlayer;
     return e;
 }
 void Tick(Machine& m,int member,std::uint64_t now,const EDF6CoopMemberAttributeApi* api=&kFakeApi) {
@@ -337,75 +367,63 @@ VariantSet BigSet(int soldiers) {
 }
 bool Printable(const char* v) { return ValidValue(v); }
 
-void ListCoding() {
-    VariantSet set;
-    set.Add(Soldier(SupportWeapon::rifle,true,0x1E3A8A,kStockColour));
-    set.Add(Soldier(SupportWeapon::rifle,false,0x1E3A8A,kStockColour));
-    set.Add(Vehicle(VehicleBody::tank,L"HE,AP:25"));
-    set.Add(Soldier(SupportWeapon::rifle,true,0x1E3A8A,kStockColour));   // twice: once
-    Expect(set.count==3,"a set keeps each variant once");
-    ListValues v;EncodeList(set,&v);
-    Expect(v.parts==1 && v.listed==3,"a small list is one value");
-    char expect[128];
-    std::snprintf(expect,sizeof(expect),"1;%016llX;3;1;a1E3A8AX,A1E3A8AX,14000000000000C81",static_cast<unsigned long long>(v.hash));
-    Expect(!std::strcmp(v.value[0],expect),"the value as documented (sorted: soldiers by kind, member before leader, then vehicles)");
-    const char* values[kListParts]={v.value[0]};
-    VariantSet back;std::uint64_t hash=0;
-    Expect(DecodeList(values,1,&back,&hash)==ListState::ok && back.count==3 && hash==v.hash,"it decodes");
-    for(int i=0;i<3;++i)Expect(back.ref[i]==set.ref[i],"the same variants, in order");
-    // Empty: still a list (nothing needed).
-    VariantSet none;ListValues e;EncodeList(none,&e);
+// A member's configuration line (member_config.h writes and reads its content; the engine only carries it).
+void ConfigCoding() {
+    const std::string small="Q=shotgun|P0=rifle@1E3A8A*2,rocket";
+    ConfigValues v;
+    Expect(EncodeConfig(small.c_str(),&v) && v.parts==1,"a short line is one value");
+    char expect[160];
+    std::snprintf(expect,sizeof(expect),"1;%016llX;1;%s",static_cast<unsigned long long>(v.hash),small.c_str());
+    Expect(!std::strcmp(v.value[0],expect),"the value as documented: \"1;<hash>;<parts>;<line>\"");
+    const char* values[kConfigParts]={v.value[0]};
+    static char line[kConfigLineMost+1];std::uint64_t hash=0;
+    Expect(DecodeConfig(values,1,line,&hash)==ListState::ok && small==line && hash==v.hash,"it decodes to the same line");
+    // Empty: still a configuration (nothing but defaults).
+    ConfigValues e;
+    Expect(EncodeConfig("",&e) && e.parts==1,"an empty line encodes");
     values[0]=e.value[0];
-    Expect(DecodeList(values,1,&back,&hash)==ListState::ok && back.count==0,"an empty list decodes as nothing needed");
-
-    // Long: split over parts, each within Coop's limits, the first ones listed.
-    for(const int soldiers:{60,150,260,500}) {
-        const VariantSet big=BigSet(soldiers);
-        ListValues l;EncodeList(big,&l);
-        bool fits=l.parts>=1 && l.parts<=kListParts;
-        for(int p=0;p<l.parts;++p)fits=fits && std::strlen(l.value[p])<=kValueMost && Printable(l.value[p]);
-        Expect(fits,"every part printable, <= 999 bytes, at most kListParts");
-        const char* parts[kListParts]{};
+    Expect(DecodeConfig(values,1,line,&hash)==ListState::ok && !line[0],"and decodes as defaults");
+    // Long: split over parts, each within Coop's limits; the longest line fits the budget with its headers.
+    for(const std::size_t length:{900ul,1500ul,2900ul,static_cast<unsigned long>(kConfigLineMost)}) {
+        std::string big;
+        for(std::size_t i=0;big.size()<length;++i)big+=static_cast<char>('A'+i%26);
+        big.resize(length);
+        ConfigValues l;
+        Expect(EncodeConfig(big.c_str(),&l),"a line up to kConfigLineMost encodes");
+        std::size_t total=0;bool fits=l.parts>=1 && l.parts<=kConfigParts;
+        for(int p=0;p<l.parts;++p){fits=fits && std::strlen(l.value[p])<=kValueMost && Printable(l.value[p]);total+=std::strlen(l.value[p]);}
+        Expect(fits && total<=kConfigBudget,"every part printable, <= 999 bytes, at most kConfigParts, within the budget");
+        const char* parts[kConfigParts]{};
         for(int p=0;p<l.parts;++p)parts[p]=l.value[p];
-        VariantSet got;std::uint64_t h=0;
-        const ListState st=DecodeList(parts,l.parts,&got,&h);
-        bool same=st==ListState::ok && got.count==l.listed && h==l.hash;
-        for(int i=0;same && i<l.listed;++i)same=got.ref[i]==big.ref[i];
-        Expect(same,"a long list decodes to its listed prefix");
-        if(soldiers<=150)Expect(l.listed==big.count,"150 soldiers and 2 vehicles fit");
-        if(soldiers==500)Expect(l.listed<big.count && l.parts==kListParts,"500 do not: the rest left out, all parts used");
-        if(soldiers==260 && l.parts>1) {
-            // A part missing, or still the previous list's: waiting. Tampered: refused.
-            Expect(DecodeList(parts,1,&got,&h)==ListState::waiting,"a part not there yet: waiting");
+        Expect(DecodeConfig(parts,l.parts,line,&hash)==ListState::ok && big==line && hash==l.hash,"and decodes whole");
+        if(l.parts>1) {
+            Expect(DecodeConfig(parts,1,line,&hash)==ListState::waiting && !line[0],"a part not there yet: waiting");
             std::string other=parts[1];other[0]=other[0]=='0' ? '1' : '0';
-            const char* swapped[kListParts]={parts[0],other.c_str(),parts[2],parts[3]};
-            Expect(DecodeList(swapped,l.parts,&got,&h)==ListState::waiting,"a part of another list: waiting");
+            const char* swapped[kConfigParts]={parts[0],other.c_str(),parts[2],parts[3]};
+            Expect(DecodeConfig(swapped,l.parts,line,&hash)==ListState::waiting,"a part of another line: waiting");
             std::string tampered=parts[1];tampered[tampered.size()-2]=tampered[tampered.size()-2]=='A' ? 'B' : 'A';
-            const char* bad[kListParts]={parts[0],tampered.c_str(),parts[2],parts[3]};
-            Expect(DecodeList(bad,l.parts,&got,&h)==ListState::bad && got.count==0,"a tampered part: the whole list refused");
+            const char* bad[kConfigParts]={parts[0],tampered.c_str(),parts[2],parts[3]};
+            Expect(DecodeConfig(bad,l.parts,line,&hash)==ListState::bad && !line[0],"a tampered part: the whole line refused");
         }
     }
+    std::string tooLong(kConfigLineMost+1,'x');
+    ConfigValues t;
+    Expect(!EncodeConfig(tooLong.c_str(),&t) && !EncodeConfig("tab\there",&t),"a line past the budget or not printable: not encoded");
     // Hostile or broken headers.
-    std::string good=v.value[0];
+    const std::string good=v.value[0];
     const auto refusedValue=[&](const std::string& value,const char* what) {
-        const char* vs[kListParts]={value.c_str()};
-        VariantSet got;std::uint64_t h=0;
-        Expect(DecodeList(vs,1,&got,&h)==ListState::bad && got.count==0,what);
+        const char* vs[kConfigParts]={value.c_str()};
+        Expect(DecodeConfig(vs,1,line,&hash)==ListState::bad && !line[0],what);
     };
-    refusedValue(good+",a1E3A8AX","a duplicate token: refused");
-    refusedValue(good+",","an empty token: refused");
-    refusedValue(good+",..\\..\\Windows\\x","a path among the tokens: refused");
+    refusedValue(good+"x","a line that is not the hash's: refused");
     refusedValue("2"+good.substr(1),"another version: refused");
-    std::string count=good;count[20]='4';
-    refusedValue(count,"a count that is not the tokens': refused");
     std::string hashed=good;hashed[2]=hashed[2]=='0' ? '1' : '0';
-    refusedValue(hashed,"a hash that is not the tokens': refused");
-    refusedValue("1;0000000000000000;0;5;","more parts than there are keys: refused");
-    refusedValue("1;0000000000000000;00;1;","a padded count: refused");
+    refusedValue(hashed,"a hash that is not the line's: refused");
+    refusedValue("1;0000000000000000;5;","more parts than there are keys: refused");
+    refusedValue("1;0000000000000000;01;","a padded count: refused");
     refusedValue("garbage","junk: refused");
-    const char* nothing[kListParts]{};
-    VariantSet got;std::uint64_t h=0;
-    Expect(DecodeList(nothing,1,&got,&h)==ListState::none,"no value: none");
+    const char* nothing[kConfigParts]{};
+    Expect(DecodeConfig(nothing,1,line,&hash)==ListState::none,"no value: none");
 }
 
 void HaveAndPlan() {
@@ -419,7 +437,7 @@ void HaveAndPlan() {
     int refused=0;
     for(const char* b:bad)if(!ParseHave(b,&back))++refused;else std::printf("  accepted readiness %s\n",b);
     Expect(refused==static_cast<int>(std::size(bad)),"contradicting or malformed readiness refused");
-    Expect(ParseHave("1;0000000000000000;0;w",&back) && back.state==Ready::noList,"no list yet");
+    Expect(ParseHave("1;0000000000000000;0;w",&back) && back.state==Ready::noList,"no set yet");
 
     GenPlan p;
     Expect(!ShouldStart(p,1,0,Gen::idle,0),"nothing missing: no start");
@@ -442,6 +460,18 @@ void ResetLobby(int members) {
     lobby=FakeLobby{};
     for(int i=0;i<members;++i){FakeMember m;m.id="PUID"+std::to_string(i);m.ordinal=static_cast<std::uint32_t>(i);m.host=i==0;lobby.member.push_back(m);}
 }
+std::string LineOf(const Machine& m) {
+    std::string out;
+    for(const auto& f:m.config){if(!out.empty())out+=',';for(wchar_t c:f)out+=static_cast<char>(c&0x7F);}
+    return out;
+}
+// The other members' lines this machine keeps for the host's plans (room_sync.cpp RoomMemberConfig).
+std::string KeptLine(const Machine& m,const char* id) {
+    static MemberLine copy[kMembersMost];
+    m.engine.CopyMembers(copy,kMembersMost);
+    for(const auto& l:copy)if(l.id[0] && l.ok && !std::strcmp(l.id,id))return l.line;
+    return "-";
+}
 
 void Rooms() {
     // Host (member 1), a client with the plugin (2), a member without it (3: never ticks, publishes nothing).
@@ -453,15 +483,16 @@ void Rooms() {
     client.files={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};
     std::uint64_t now=100000;
     Tick(host,0,now);
-    const char* list=ValueOf(0,kKeyList);
-    Expect(list && !std::strncmp(list,"1;",2) && std::strstr(list,";3;1;a1E3A8AX,A1E3A8AX,14000000000000C81"),
-           "the host lists its configuration's three files (duplicates once, a name its naming does not write dropped)");
+    const char* cfg=ValueOf(0,kKeyConfig);
+    Expect(cfg && !std::strncmp(cfg,"1;",2) && std::strstr(cfg,";1;EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO,"),"the host publishes its configuration line");
+    Expect(host.engine.Target().count==3,"its room set: its configuration's three files (duplicates once, a name its naming does not write dropped)");
     Expect(host.engine.Now().own==Ready::ready && ValueOf(0,kKeyHave) && std::strstr(ValueOf(0,kKeyHave),";0;r"),
            "the host has them: ready");
     Expect(host.pending.empty() && host.starts==0,"the host neither notes nor generates what it has");
     Tick(client,1,now+3);
+    Expect(ValueOf(1,kKeyConfig) && std::strlen(ValueOf(1,kKeyConfig))==kConfigHeader,"the client publishes its (empty) configuration too");
     Expect(client.pending==std::vector<std::wstring>({L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO",L"EDF6VC_LO_TANK_4000000000000C81.SGO"}),
-           "the client notes exactly the two it lacks on its pending list");
+           "the client notes exactly the two of the host's it lacks on its pending list");
     Expect(client.starts==1 && client.engine.Now().own==Ready::generating,"and starts the generator once");
     Expect(ValueOf(1,kKeyHave) && std::strstr(ValueOf(1,kKeyHave),";2;g"),"its readiness: 2 missing, generating");
     Expect(HasLine(client,L"This PC: 2 files missing, generating"),"its line says so");
@@ -474,6 +505,7 @@ void Rooms() {
     Expect(host.engine.State()==SyncState::waiting,"waiting");
     Expect(HasLine(host,L"成员 2 缺 2 个文件，生成中",hudtext::Lang::zhCN),"in Chinese too");
     Expect(HasLine(host,L"メンバー 2：2 個のファイルが不足、生成中",hudtext::Lang::ja),"in Japanese too");
+    Expect(KeptLine(host,"PUID1").empty() && KeptLine(client,"PUID0")==LineOf(host),"each keeps the other's line for the plans");
     client.Finish();
     Tick(client,1,now+2000);
     Expect(client.engine.Now().own==Ready::ready && client.starts==1 && std::strstr(ValueOf(1,kKeyHave),";0;r"),"made: ready");
@@ -484,61 +516,97 @@ void Rooms() {
     Tick(client,1,now+3000);
     Expect(client.engine.State()==SyncState::ready,"the client agrees");
 
-    // The host changes its configuration: a new list; the client's readiness is about the old one until it rechecks.
-    host.config.push_back(Name(Vehicle(VehicleBody::fighter,L"AAM_M:4,AAM_S:2")));
-    Tick(host,0,now+4000);
-    Expect(HasLine(host,L"This PC: 1 files missing, generating") && host.starts==1 && host.pending.empty(),
-           "the host lacks its new file: its own generator, no pending list (its ini names it)");
-    Expect(HasLine(host,L"Member 2: checking the list"),"the client's readiness is the old list's: checking");
-    client.generatorFails=true;
-    Tick(client,1,now+5000);
-    Expect(client.pending.size()==3 && client.starts==1,"the client notes the new one at once; the generator not again within 5 s of the last start");
-    Tick(client,1,now+6000);
-    Expect(client.starts==2,"then it starts");
-    client.Finish();
+    // The client configures its own support in the room (2026-11-21): the host generates the client's files too, by
+    // its pending list (its own ini does not name them), and both report ready for the same, larger set.
+    const std::wstring sniper=L"EDF6VC_NPC_SNIPER_X_FFFFFF.SGO";
+    client.config={sniper};client.files.push_back(sniper);
+    Tick(client,1,now+4000);
+    Tick(host,0,now+5000);
+    Expect(host.pending==std::vector<std::wstring>({sniper}) && host.starts==1,"the host notes the client's file and generates it");
+    Expect(host.engine.Target().count==4 && KeptLine(host,"PUID1")==LineOf(client),"its room set holds it; the client's line kept");
+    Expect(HasLine(host,L"This PC: 1 files missing, generating") && host.engine.State()==SyncState::waiting,
+           "the host says it is making it (the client, which has it, is already ready for the new set)");
+    host.Finish();
+    Tick(host,0,now+6000);
     Tick(client,1,now+7000);
-    Tick(client,1,now+20000);
+    Tick(host,0,now+8000);
+    Expect(host.engine.State()==SyncState::ready && HasLine(host,L"All members ready (4 files)"),"made: everyone ready for the 4");
+    Expect(client.pending.size()==2,"the client did not note its own file (its ini names it)");
+
+    // The host changes its configuration: a new set; the client's readiness is about the old one until it rechecks.
+    host.config.push_back(Name(Vehicle(VehicleBody::fighter,L"AAM_M:4,AAM_S:2")));
+    const int hostStarts=host.starts;
+    Tick(host,0,now+11000);
+    Expect(HasLine(host,L"This PC: 1 files missing, generating") && host.starts==hostStarts+1 && host.pending.size()==1,
+           "the host lacks its new file: its own generator, not its pending list (its ini names it)");
+    Expect(HasLine(host,L"Member 2: checking the list"),"the client's readiness is the old set's: checking");
+    client.generatorFails=true;
+    Tick(client,1,now+12000);
+    Expect(client.pending.size()==3 && client.starts==2,"the client notes the new one and starts its generator");
+    client.Finish();
+    Tick(client,1,now+13000);
+    Tick(client,1,now+30000);
     Expect(client.starts==2 && client.engine.Now().own==Ready::failed,"failed: not retried for the same set");
     Expect(HasLine(client,L"This PC: 1 files missing, generation failed: FileNotFoundError: EDF6VC_JET_FIGHTER.SGO"),"the reason said");
-    Tick(host,0,now+20000);
+    Tick(host,0,now+30000);
     Expect(HasLine(host,L"Member 2: 1 files missing, generation failed"),"the host sees it failed");
 
-    // Leaving withdraws everything this machine published.
+    // Leaving withdraws everything this machine published, and keeps the others' lines and the set for the mission.
     lobby.current=1;client.engine.Leave(&kFakeApi);
     Expect(lobby.member[1].values.empty(),"the client's keys withdrawn");
     lobby.current=0;host.engine.Leave(&kFakeApi);
     Expect(lobby.member[0].values.empty(),"the host's keys withdrawn");
-    Expect(keysSeen.size()<=kListParts+3,"the list, readiness, pack marker and player loadouts fit Coop's 16-key limit");
+    Expect(KeptLine(host,"PUID1")==LineOf(client),"the client's line kept for the mission's plans");
+    Expect(keysSeen.size()<=kConfigParts+2,"the configuration, readiness and player loadouts fit Coop's 16-key limit");
     Expect(lobby.refused==0,"Coop never refused a key or value");
 }
 
-void BackpackCompatibility() {
-    ResetLobby(3);
-    static Machine host,client;host=Machine{};client=Machine{};
-    const std::wstring complete=L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
-                       compatible=L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO";
-    host.config={complete,compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"};host.files=host.config;
-    Tick(host,0,1000);Tick(client,1,1000);
-    const char* list=ValueOf(0,kKeyList);
-    Expect(ValueOf(0,kKeyPacks) && ValueOf(1,kKeyPacks) && list && !std::strchr(list,'+'),
-           "an older member without the pack marker: every published token uses the old grammar");
-    Expect(client.pending==std::vector<std::wstring>({compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"}),
-           "the compatible list still generates the soldier's colours and the vehicle");
-    client.Finish();client.pending.clear();Tick(client,1,2000);
-    Expect(client.engine.HasHostList() && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
-           "after generation clears pending, the validated compatible host list retains mission preloads");
-    lobby.member[2].present=false;
-    Tick(host,0,3000);Tick(client,1,3000);
-    list=ValueOf(0,kKeyList);
-    Expect(list && std::strchr(list,'+') && host.engine.Target().count==3 && client.engine.HostList().count==3,
-           "every remaining member reads packs: the full list adds the backpack resource");
-    Expect(client.pending==std::vector<std::wstring>({complete}),"only the newly usable pack needs generating");
-    client.Finish();Tick(client,1,9000);
-    lobby.member[2].present=true;Tick(host,0,10000);Tick(client,1,10000);
-    Expect(!std::strchr(ValueOf(0,kKeyList),'+') && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
-           "an older member joins: downgrade to its readable list without losing the generated colours");
-    lobby.current=0;host.engine.Leave(&kFakeApi);
-    Expect(!ValueOf(0,kKeyPacks),"leaving withdraws the pack capability marker too");
+// Another member's line that does not read (Env::memberVariants: member_config.h refuses it): said, nothing noted from it,
+// nothing kept for the plans (its calls use the defaults).
+void BadMember() {
+    ResetLobby(2);
+    static Machine host;host=Machine{};
+    host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};host.files=host.config;
+    lobby.current=1;
+    ConfigValues v;EncodeConfig("BAD=..\\..\\Windows\\x",&v);
+    Publish(kKeyConfig,v.value[0]);
+    Tick(host,0,1000);
+    Expect(host.pending.empty() && host.starts==0 && host.engine.Target().count==1,"a line that does not read: nothing noted, nothing started");
+    Expect(HasLine(host,L"Member 2's loadout does not read: their calls use the defaults"),"said");
+    Expect(KeptLine(host,"PUID1")=="-","and nothing kept for the plans");
+    bool logged=false;for(const auto& t:host.log)logged|=t.find("configuration does not read")!=std::string::npos;
+    Expect(logged,"logged");
+    // A tampered value (hash wrong): the same.
+    lobby.current=1;Publish(kKeyConfig,"1;0000000000000000;1;EDF6VC_NPC_SNIPER_X_FFFFFF.SGO");
+    Tick(host,0,3000);
+    Expect(host.pending.empty() && HasLine(host,L"Member 2's loadout does not read: their calls use the defaults"),"a tampered value: refused whole");
+}
+
+// A member's line over several parts, replaced part by part: waiting while incomplete, the last complete one standing.
+void PartsInFlight() {
+    ResetLobby(2);
+    static Machine host;host=Machine{};
+    std::string line;
+    const VariantSet big=BigSet(60);
+    std::vector<std::wstring> names;
+    for(int i=0;i<big.count;++i){names.push_back(Name(big.ref[i]));if(i)line+=',';for(wchar_t c:names.back())line+=static_cast<char>(c);}
+    ConfigValues v;
+    Expect(EncodeConfig(line.c_str(),&v) && v.parts>1,"a 62-file line takes several parts");
+    lobby.current=1;Publish(kKeyConfig,v.value[0]);   // the header first: its parts not there yet
+    Tick(host,0,1000);
+    Expect(host.engine.Now().list==ListState::waiting && HasLine(host,L"Waiting for the members' loadouts") && host.pending.empty(),
+           "a line whose parts are on their way: waiting, nothing noted");
+    lobby.current=1;
+    for(int p=1;p<v.parts;++p){char key[33];PartKey(p,key,sizeof(key));Publish(key,v.value[p]);}
+    Tick(host,0,3000);
+    Expect(host.engine.Now().list==ListState::ok && static_cast<int>(host.pending.size())==big.count,"complete: read, every file noted");
+    // Replaced: the new header before its parts: the last complete line stands meanwhile.
+    std::string shorter=line+",EDF6VC_NPC_SNIPER_X_FFFFFF.SGO";
+    ConfigValues w;EncodeConfig(shorter.c_str(),&w);
+    lobby.current=1;Publish(kKeyConfig,w.value[0]);
+    Tick(host,0,5000);
+    Expect(host.engine.Now().list==ListState::ok && host.engine.Target().count==big.count && KeptLine(host,"PUID1")==line,
+           "a line being replaced: the last complete one stands");
 }
 
 void LongList() {
@@ -547,11 +615,11 @@ void LongList() {
     const VariantSet big=BigSet(200);
     for(int i=0;i<big.count;++i)host.config.push_back(Name(big.ref[i]));
     host.files=host.config;
+    host.line="BIG";client.lineSets["BIG"]=host.config;   // the line stands for 202 files (a full configuration's)
     Tick(host,0,1000);
-    Expect(ValueOf(0,"EDF6X_VCVAR1") && !ValueOf(0,"EDF6X_VCVAR3"),"202 files: several values, not every part");
     Tick(client,1,1000);
     Expect(client.engine.Now().list==ListState::ok && static_cast<int>(client.pending.size())==kNotesPerRoom,
-           "the client reads every part and notes the first kNotesPerRoom (128) files: no more a room");
+           "the client reads the line and notes the first kNotesPerRoom (128) files: no more a room");
     Expect(client.engine.Now().ownMissing==big.count && client.engine.Now().ownCapped==big.count-kNotesPerRoom,
            "the rest counted missing, over the room's limit");
     Expect(HasLine(client,L"This PC: 74 files over this room's limit of 128: they come stock"),"said, with the limit");
@@ -563,72 +631,63 @@ void LongList() {
     Expect(client.starts==1 && static_cast<int>(client.pending.size())==kNotesPerRoom,
            "made what it noted: never started again for files it may not make, nothing more noted");
     Expect(client.engine.Now().own==Ready::failed && std::strstr(ValueOf(1,kKeyHave),";74;f"),
-           "its readiness: 74 missing, failed (the host keeps those stock)");
-    Expect(!HasLine(client,L"This PC: 74 files missing, generating"),"not said to be generating them");
-    // A new list in the same room: still no more than kNotesPerRoom notes this room.
+           "its readiness: 74 missing, failed (those calls come stock)");
+    // A changed line in the same room: still no more than kNotesPerRoom notes this room.
     host.config.push_back(Name(Soldier(SupportWeapon::sniper,false,0x0A0B0C,kStockColour)));
-    host.files=host.config;
+    host.files=host.config;host.line="BIG2";client.lineSets["BIG2"]=host.config;
     Tick(host,0,22000);
     Tick(client,1,22000);
-    Expect(static_cast<int>(client.pending.size())==kNotesPerRoom,"a changed list in the same room: the room's limit holds");
+    Expect(static_cast<int>(client.pending.size())==kNotesPerRoom,"a changed line in the same room: the room's limit holds");
     lobby.current=1;client.engine.Leave(&kFakeApi);
     Tick(client,1,24000);
     Expect(static_cast<int>(client.pending.size())==kNotesPerRoom+75,"a new room (left and back): a new limit, the other 75 noted");
-    // Fewer: the parts no longer needed are withdrawn.
-    host.config.resize(3);host.files=host.config;
-    Tick(host,0,3000);
-    Expect(!ValueOf(0,"EDF6X_VCVAR1"),"a shorter list: the extra parts withdrawn");
-    Tick(client,1,3000);
-    Expect(client.engine.Now().list==ListState::ok && client.engine.Target().count==3,"and the client follows");
+    // Too long a configuration: the writer leaves entries out, said.
+    host.line.clear();host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};host.leftOut=3;
+    Tick(host,0,26000);
+    Expect(HasLine(host,L"3 of this PC's loadout entries did not fit (too long): those calls use the defaults"),"entries left out: said");
 }
 
-// The host's list a client validated is what its next mission preloads (support_variants.h): kept when the room is left
-// (a mission starting leaves it), replaced by the next room's tick, dropped on a bad / no list, on the host, by
-// ForgetHostList (the switch turned off).
+// The room's set is what the next mission preloads (support_variants.h): kept when the room is left (a mission starting
+// leaves it), replaced by the next room's complete tick, dropped by ForgetRoomList (the switch turned off). The host
+// keeps one too now (it plans every member's calls with their files).
 void MissionList() {
     ResetLobby(2);
     static Machine host,client;host=Machine{};client=Machine{};
     host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO",L"EDF6VC_LO_TANK_4000000000000C81.SGO"};host.files=host.config;
-    Tick(host,0,1000);
-    Expect(!host.engine.HasHostList(),"the host keeps no host list (its own configuration is its list)");
-    Tick(client,1,1000);
-    Expect(client.engine.HasHostList() && client.engine.HostList().count==2 && client.engine.HostListHash()!=0,
-           "the client keeps the validated list");
+    client.config={L"EDF6VC_NPC_SNIPER_X_FFFFFF.SGO"};client.files=client.config;
+    Tick(host,0,1000);Tick(client,1,1000);Tick(host,0,2000);
+    Expect(host.engine.HasRoomList() && host.engine.RoomList().count==3 && host.engine.RoomListHash()!=0,
+           "the host keeps the room's set: its own and the client's files");
+    Expect(client.engine.HasRoomList() && client.engine.RoomList().count==3,"the client the same set");
+    Expect(host.engine.RoomListHash()==client.engine.RoomListHash(),"the same hash on both");
     lobby.current=1;client.engine.Leave(&kFakeApi);
-    Expect(client.engine.HasHostList() && client.engine.HostList().count==2,"the room left (a mission starts): still there");
-    client.engine.ForgetHostList();
-    Expect(!client.engine.HasHostList() && client.engine.HostList().count==0 && !client.engine.HostListHash(),"forgotten on demand");
+    Expect(client.engine.HasRoomList() && client.engine.RoomList().count==3 && KeptLine(client,"PUID0")==LineOf(host),
+           "the room left (a mission starts): still there, the host's line too");
+    client.engine.ForgetRoomList();
+    Expect(!client.engine.HasRoomList() && client.engine.RoomList().count==0 && !client.engine.RoomListHash() &&
+           KeptLine(client,"PUID0")=="-","forgotten on demand, the lines too");
     Tick(client,1,3000);
-    Expect(client.engine.HasHostList(),"the next tick in the room: back");
-    lobby.current=0;Publish(kKeyList,"1;0000000000000000;1;1;..\\x");
-    Tick(client,1,5000);
-    Expect(!client.engine.HasHostList(),"the host's list turned bad: dropped (never a stale one)");
-    lobby.member[0].values.clear();
-    Tick(client,1,7000);
-    Expect(!client.engine.HasHostList(),"no list (an older host): none");
+    Expect(client.engine.HasRoomList() && KeptLine(client,"PUID0")==LineOf(host),"the next tick in the room: back");
 }
 
 // Coop's 4096-byte budget (every value of this process), its error codes, an older table without lastError, and its
 // pacing (values seen by the others only when the merged update goes out).
 void Budget() {
-    // The longest list: within kListBudget in all, the readiness beside it within Coop's budget.
-    const VariantSet big=BigSet(500);
-    ListValues l;EncodeList(big,&l);
-    std::size_t total=0;
-    for(int p=0;p<l.parts;++p)total+=std::strlen(l.value[p]);
-    Expect(total<=kListBudget && total+kHaveMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && l.listed<big.count && l.listed>200,
-           "a 502-file list: listed as far as 3800 bytes go (over 200 files), the rest left out");
+    // The longest line, the readiness and the player loadouts beside it: within Coop's budget, nothing refused.
     ResetLobby(2);
     static Machine host;host=Machine{};
-    for(int i=0;i<big.count;++i)host.config.push_back(Name(big.ref[i]));
-    host.files=host.config;
+    host.line=std::string(kConfigLineMost,'P');
+    host.ownPlayer="1;"+std::string(playerveh::kValueMost-2,'6');
     Tick(host,0,1000);
     std::size_t published=0;
     for(const auto& kv:lobby.member[0].values)published+=kv.second.size();
-    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave),
-           "the host publishes its longest list and its readiness within Coop's budget, nothing refused");
-    Expect(host.engine.Now().leftOut==big.count-l.listed,"what did not fit is counted as left out (said, as before)");
-    // Another plugin of this process takes most of the budget: our list is refused, said, logged, retried.
+    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave) && ValueOf(0,"EDF6X_VCCFG3"),
+           "the longest line in every part, its readiness and the player loadouts within Coop's budget");
+    // Fewer: the parts no longer needed are withdrawn.
+    host.line="short";
+    Tick(host,0,3000);
+    Expect(!ValueOf(0,"EDF6X_VCCFG1") && !ValueOf(0,"EDF6X_VCCFG3"),"a shorter line: the extra parts withdrawn");
+    // Another plugin of this process takes most of the budget: our line is refused, said, logged, retried.
     lobby.current=0;
     host=Machine{};
     host.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};host.files=host.config;
@@ -636,15 +695,15 @@ void Budget() {
     Publish("EDF6X_OTHER",std::string(999,'a').c_str());Publish("EDF6X_OTHER2",std::string(999,'b').c_str());
     Publish("EDF6X_OTHER3",std::string(999,'c').c_str());Publish("EDF6X_OTHER4",std::string(999,'d').c_str());Publish("EDF6X_OTHER5",std::string(90,'e').c_str());
     const int refusedBefore=lobby.refused;
-    Tick(host,0,3000);
-    Expect(lobby.refused>refusedBefore && !ValueOf(0,kKeyList),"over the budget: Coop refuses the list");
+    Tick(host,0,5000);
+    Expect(lobby.refused>refusedBefore && !ValueOf(0,kKeyConfig),"over the budget: Coop refuses the line");
     Expect(HasLine(host,L"EDF6Coop refused this PC's pre-sync value (error 5; 5 = its 4096-byte budget is full): the others do not see it"),
            "said on a line with its error (never lost silently)");
-    bool logged=false;for(const auto& t:host.log)logged|=t.find("refused EDF6X_VCVARIANTS")!=std::string::npos && t.find("error 5")!=std::string::npos;
+    bool logged=false;for(const auto& t:host.log)logged|=t.find("refused EDF6X_VCCFG")!=std::string::npos && t.find("error 5")!=std::string::npos;
     Expect(logged,"and logged with the key and the error");
     lobby.current=0;Clear("EDF6X_OTHER");Clear("EDF6X_OTHER2");
-    Tick(host,0,5000);
-    Expect(ValueOf(0,kKeyList) && !HasLine(host,L"EDF6Coop refused this PC's pre-sync value (error 5; 5 = its 4096-byte budget is full): the others do not see it"),
+    Tick(host,0,7000);
+    Expect(ValueOf(0,kKeyConfig) && !HasLine(host,L"EDF6Coop refused this PC's pre-sync value (error 5; 5 = its 4096-byte budget is full): the others do not see it"),
            "room again: retried and published, the line gone");
     // An older Coop table (no lastError): still used; a refusal says error 0.
     ResetLobby(2);
@@ -662,12 +721,12 @@ void Budget() {
     h.config={L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};h.files=h.config;
     Tick(h,0,1000);
     Tick(c,1,1000);
-    Expect(c.engine.Now().list==ListState::none && c.pending.empty(),"the host's list not sent yet: nothing for the client");
+    Expect(c.engine.Target().count==0 && c.pending.empty(),"the host's line not sent yet: nothing for the client");
     lobby.Send();
     Tick(c,1,2000);
     Tick(h,0,2000);
     Expect(c.engine.Now().list==ListState::ok && c.pending.size()==1,"sent: the client reads it");
-    Expect(HasLine(h,L"Member 2: checking the list"),"the client's readiness that went out is from before the list: checking");
+    Expect(HasLine(h,L"Member 2: checking the list"),"the client's readiness that went out is from before the line: checking");
     lobby.Send();
     Tick(h,0,3000);
     Expect(HasLine(h,L"Member 2: 1 files missing, generating"),"seen a send later");
@@ -681,41 +740,19 @@ void Budget() {
     lobby.paced=false;
 }
 
-void Hostile() {
-    ResetLobby(2);
-    static Machine client;client=Machine{};
-    lobby.current=0;
-    Publish(kKeyList,"1;0000000000000000;1;1;..\\..\\Windows\\System32\\x");
-    Tick(client,1,1000);
-    Expect(client.engine.Now().list==ListState::bad && client.pending.empty() && client.starts==0,
-           "a hostile list: nothing noted, nothing started");
-    Expect(HasLine(client,L"The host's file list is malformed: ignored"),"said");
-    // A valid list from a member who is not the host: ignored.
-    ResetLobby(3);
-    client=Machine{};
-    VariantSet set;set.Add(Soldier(SupportWeapon::sniper,false,0x123456,kStockColour));
-    ListValues v;EncodeList(set,&v);
-    lobby.current=2;Publish(kKeyList,v.value[0]);
-    Tick(client,1,1000);
-    Expect(client.engine.Now().list==ListState::none && client.pending.empty(),"a non-host's list: ignored");
-    Expect(HasLine(client,L"The host has no pre-sync (older All Forces): missing files go on the pending list"),"the host has none: said");
-}
-
+// The host's seat changing changes nothing: every member reads every member's line, whoever hosts.
 void Migration() {
     ResetLobby(2);
     static Machine a,b;a=Machine{};b=Machine{};
     a.config={L"EDF6VC_NPC_LANCE_1E3A8A_X.SGO"};a.files=a.config;
     b.config={L"EDF6VC_NPC_SNIPER_X_FFFFFF.SGO"};b.files=b.config;
-    Tick(a,0,1000);Tick(b,1,1000);
-    Expect(b.pending.size()==1,"b notes a's file");
+    Tick(a,0,1000);Tick(b,1,1000);Tick(a,0,2000);
+    Expect(b.pending==std::vector<std::wstring>({L"EDF6VC_NPC_LANCE_1E3A8A_X.SGO"}) &&
+           a.pending==std::vector<std::wstring>({L"EDF6VC_NPC_SNIPER_X_FFFFFF.SGO"}),"each notes the other's file");
     lobby.member[0].host=false;lobby.member[1].host=true;   // a leaves the host's seat to b
     Tick(a,0,3000);Tick(b,1,3000);
-    Expect(!ValueOf(0,kKeyList),"the old host withdraws its list");
-    Expect(ValueOf(1,kKeyList) && std::strstr(ValueOf(1,kKeyList),";1;1;eXFFFFFF"),
-           "the new host lists its own");
-    Tick(a,0,5000);
-    Expect(a.engine.Now().list==ListState::ok && a.pending==std::vector<std::wstring>({L"EDF6VC_NPC_SNIPER_X_FFFFFF.SGO"}),
-           "and the old one now follows it");
+    Expect(ValueOf(0,kKeyConfig) && ValueOf(1,kKeyConfig) && a.engine.Target().count==2 && b.engine.Target().count==2,
+           "both still publish and read each other's");
 }
 
 void NoCoop() {
@@ -793,14 +830,14 @@ void PlayerLoadouts() {
 
 int main() {
     NamesAndTokens();
-    ListCoding();
+    ConfigCoding();
     HaveAndPlan();
     Rooms();
-    BackpackCompatibility();
+    BadMember();
+    PartsInFlight();
     LongList();
     MissionList();
     Budget();
-    Hostile();
     Migration();
     NoCoop();
     PlayerLoadouts();
