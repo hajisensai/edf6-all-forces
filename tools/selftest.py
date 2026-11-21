@@ -9320,6 +9320,14 @@ def ported_weapons_held_as_edf6() -> None:
         ['bag', 'assault_change1', 'assault_reload1']
     assert doc.root.get('custom_parameter').items[0] == 'assault_recoil1'
     assert edf5port.plays('ChangeAnimation', '', frozenset()) and not edf5port.plays('BaseAnimation', 'bag', engineer - {'bag_stand'})
+    # the per-layer rule the real-game check applies: whole-body recoil (custom_parameter[2] != 0) is a main-layer state,
+    # upper-body (== 0) a weapon-layer one; a whole-body recoil set only in the weapon layer is a mismatch
+    main, upper = frozenset({'bag_whole_recoil1'}), frozenset({'assault_recoil1'})
+    assert edf5port.recoil_in_layer(dsgo.Node(['bag_whole_recoil1', 0.0, 2.0, 1.0]), main, upper)
+    assert edf5port.recoil_in_layer(dsgo.Node(['assault_recoil1', 0.0, 0.0, 1.0]), main, upper)
+    assert edf5port.recoil_in_layer(dsgo.Node(['assault_recoil1', 0.0, 2.0, 1.0]), main, upper) is False,         'whole-body recoil on a weapon-layer state passed'
+    assert edf5port.recoil_in_layer(dsgo.Node(['bag_whole_recoil1', 0.0, 0.0, 1.0]), main, upper) is False,         'upper-body recoil on a main-layer state passed'
+    assert edf5port.recoil_in_layer(dsgo.Node(['call', 1.0], {0: 'motion', 1: 'speed'}), main, upper) is None
     # a Weapon_Sub's named custom_parameter (the call it makes) is never taken over
     sub = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', ours_block)
     named = dsgo.Node(['vehicle_call', 1.0], {0: 'motion', 1: 'speed'})
@@ -9377,7 +9385,7 @@ def ported_weapon_locators_fit_real() -> None:
         finally:
             edf5port.hold_as, edf5port.fit_locators = hold, fit
 
-    built = adopted = held_fields = moved = like = preferred = red_governors = sentries = 0
+    built = adopted = held_fields = moved = like = preferred = red_governors = sentries = checked_layers = 0
     # the Monsoon (暴雨, aWeapon057 on governor01): where its soldiers grip is what EDF4.1's red Governor takes
     monsoon = dsgo.parse(stock('WEAPON/AWEAPON057.SGO')).root.get('animation_model').items[2].data
     for p in pw.PORTS:
@@ -9397,6 +9405,13 @@ def ported_weapon_locators_fit_real() -> None:
         bones = {n for n, _parent in models.bones(doc)}
         assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
         states = models.soldier_states(p.category)
+        cp = r.get('custom_parameter') if 'custom_parameter' in r.names.values() else None
+        in_layer = edf5port.recoil_in_layer(cp, models.soldier_states(p.category, 'main'),
+                                            models.soldier_states(p.category, 'weapon'))             if r.get('xgs_scene_object_class') == 'Weapon_BasicShoot' else None
+        if in_layer is not None:
+            checked_layers += 1
+            assert in_layer, (f'{p.id}: recoil {cp.items[0]!r} (whole body {cp.items[2]}) not in the layer of its soldier '
+                              'it asks for (main when whole-body, else weapon)')
         for f in edf5port.HOLD_NAMES:
             name = edf5port._first_text(r.get(f)) if f in r.names.values() else None
             if name is not None:
@@ -9458,6 +9473,7 @@ def ported_weapon_locators_fit_real() -> None:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
     assert red_governors >= 4, f'{red_governors} ported weapons on EDF4.1\'s red Governor (s_shotgun_governor02)'
+    assert checked_layers > 100, f'{checked_layers} recoil names checked against their layer: this check is (nearly) empty'
     assert sentries >= 4, f'{sentries} EDF5 Air Raider sentry guns checked (ZE-GUN, ZE-GUN 2A, FZ-GUN M2 / MX)'
     assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
         (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '

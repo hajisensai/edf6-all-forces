@@ -196,16 +196,18 @@ class Models:
         self._peers: dict[str, list[Node]] = {}
         self.known: dict[str, set[str]] = {f: set() for f in edf5port.HOLD_NAMES}
         self._shotgun_hold: ranger_hold.HoldSet | None = None
-        self._states: dict[str, frozenset[str]] = {}
+        self._states: dict[str, dict[str, frozenset[str]]] = {}
 
-    def soldier_states(self, category: int) -> frozenset[str]:
-        """Every animation state (all players) of the CAS of the soldier whose weapons category `category` is
-        (SOLDIER_CAS): what edf5port.hold_as asks a holding name of (edf5port.plays)."""
+    def soldier_states(self, category: int, layer: str | None = None) -> frozenset[str]:
+        """The animation states of the CAS of the soldier whose weapons category `category` is (SOLDIER_CAS): those of
+        player (layer) `layer` ('main' the whole body, 'weapon' the upper body), every player's when None. What
+        edf5port.hold_as asks a holding name of (edf5port.plays)."""
         cas = SOLDIER_CAS[min(category // 100, 3)]
         if cas not in self._states:
             import cas_graft
-            self._states[cas] = frozenset().union(*cas_graft.states(self.stock(f'OBJECT/{cas}')).values())
-        return self._states[cas]
+            self._states[cas] = {k: frozenset(v) for k, v in cas_graft.states(self.stock(f'OBJECT/{cas}')).items()}
+        by_layer = self._states[cas]
+        return frozenset().union(*by_layer.values()) if layer is None else by_layer.get(layer, frozenset())
 
     @staticmethod
     def model_of(doc: dsgo.Document) -> tuple[str, str] | None:

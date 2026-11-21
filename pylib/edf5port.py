@@ -198,7 +198,11 @@ def plays(f: str, name: str, states: set[str] | frozenset[str]) -> bool:
     'bag_stand' / 'bag_walk_f' / ..., ChangeAnimation 'bag_change1' the weapon player's 'bag_change1_up' / '_down'; the
     aim, reload and recoil names (custom_parameter[0]) are states themselves (EDF6ENGINEER.CAS: 'bag_reload1',
     'bag_whole_recoil1'). '' plays nothing (EDF6's thrown sentry guns have no change / reload animation). Holds for every
-    holding name of every EDF6 weapon of the Ranger, Wing Diver and Air Raider on their soldier's CAS (2026-11-21)."""
+    holding name of every EDF6 weapon of the Ranger, Wing Diver and Air Raider on their soldier's CAS, bar a few names
+    in no player's states that the original already uses (the Weapon_Accessory 'none' cases, the Fencer's recoil
+    names attach_recoil_shoulder and waist_recoil_H / M): `known` carries those, not this rule (2026-11-21).
+    `states` is the union of the layers: which layer a recoil name must be in is the caller's to check
+    (custom_parameter[2] 0 the weapon layer, else main)."""
     if name == '':
         return True
     if f == 'BaseAnimation':
@@ -206,6 +210,14 @@ def plays(f: str, name: str, states: set[str] | frozenset[str]) -> bool:
     if f == 'ChangeAnimation':
         return f'{name}_up' in states or f'{name}_down' in states
     return name in states
+
+
+def recoil_in_layer(cp: dsgo.Value, main: set[str] | frozenset[str], weapon: set[str] | frozenset[str]) -> bool | None:
+    """A Weapon_BasicShoot's list-form custom_parameter [recoil animation, _, whole body, _]: is the recoil in the layer
+    it asks for ('main' when element 2 is not 0, else 'weapon')? None when `cp` is not that form (named, short, '')."""
+    if not isinstance(cp, Node) or cp.names or len(cp.items) < 3 or not isinstance(cp.items[0], str) or not cp.items[0]             or not isinstance(cp.items[2], (int, float)):
+        return None
+    return cp.items[0] in (main if cp.items[2] != 0 else weapon)
 
 
 def hold_as(doc: dsgo.Document, peers: list[Node], template: Node, known: dict[str, set[str]],
