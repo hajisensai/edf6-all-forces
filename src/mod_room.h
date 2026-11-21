@@ -45,8 +45,11 @@ namespace crew {
 //      And the Andryusha's fuse switch goes to the vehicle's copies (andryusha_net.h 'AFUZ' on tag 15): every
 //      machine writes the rider's fuse into its copy of the launcher, so its carriers burst and split alike. An older
 //      build ignores the block (seat_net.h) and keeps its copy's impact fuse: its bomblets would fall elsewhere.
+//  11 (2026-11-21): underground an infantry call comes in a drill transport (support_spawn.h kSupportDrillTransport,
+//      resource 0x20100; docs/insertion-re.md §5): an older build's Validate refuses an infantry plan that has a hull, so
+//      the transaction would fail with no reason anyone sees.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=10;
+constexpr std::int64_t kAllForcesRoomProtocol=11;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

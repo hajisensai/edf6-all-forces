@@ -3,7 +3,9 @@
 // shows anew; every plugin store and every stock round class gets the picture of its kind.
 //   cmake --build build --target hud_cue_check && build\hud_cue_check.exe      (exit code 1 on a failure)
 #include "../src/hud_cue.h"
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 int failures=0,cases=0;
@@ -70,6 +72,81 @@ int main() {
         const float unknown[3]={0.0f,0.0f,0.0f};
         int u[3];SideOrder(unknown,3,u);
         Check(u[0]==0 && u[1]==1 && u[2]==2,"no muzzle read: as the seat lists them");
+    }
+
+    // The sides in the hull's frame (HullSide; the user, 2026-11-21: 「载具的挂载不要跟随视角变位置」). A tank whose turret
+    // turns about a pivot 1 m behind and 0.3 m left of the hull's origin, carrying the main gun on the bore line (0.1 m
+    // left of the pivot), a launcher 1.2 m left of the bore and a coax 0.3 m right of it; a hull machine gun 1.5 m right
+    // of the origin, fixed. Turning the turret (and so the bore) any way keeps every side and the strip's order.
+    {
+        const float centre[3]={10.0f,2.0f,-4.0f},pivot[3]={10.3f,3.0f,-5.0f};   // the hull level, its nose +z, its left +x
+        const float left[3]={1.0f,0.0f,0.0f},up[3]={0.0f,1.0f,0.0f};
+        // In the turret's own frame (turned 0: across +x, along +z): offsets of the muzzles from the pivot.
+        const float gun[3]={0.1f,0.2f,4.0f},launcher[3]={1.3f,0.6f,0.5f},coax[3]={-0.2f,0.1f,1.5f};
+        const float hullGun[3]={8.5f,2.5f,-1.0f},hullBore[3]={0.0f,0.0f,1.0f};
+        const float yaws[4]={0.0f,90.0f,180.0f,-90.0f};
+        float first[4]={};int firstOrder[4]={};bool same=true,orderSame=true,hullSame=true;
+        for(int y=0;y<4;++y) {
+            const float ang=yaws[y]*3.14159265f/180.0f,co=std::cos(ang),si=std::sin(ang);
+            // A yaw left by `ang` about the hull's up: the turret's across (+x) goes to (c, 0, -s), its along (+z) to (s, 0, c).
+            const auto turn=[&](const float* o,float* world){
+                world[0]=pivot[0]+o[0]*co+o[2]*si;world[1]=pivot[1]+o[1];world[2]=pivot[2]-o[0]*si+o[2]*co;
+            };
+            const float bore[3]={si,0.0f,co};
+            float mg[3],ml[3],mc[3];turn(gun,mg);turn(launcher,ml);turn(coax,mc);
+            float side[4]={HullSide(mg,bore,pivot,centre,left,up),HullSide(ml,bore,pivot,centre,left,up),
+                           HullSide(mc,bore,pivot,centre,left,up),HullSide(hullGun,hullBore,nullptr,centre,left,up)};
+            int order[4];SideOrder(side,4,order);
+            if(y==0) {
+                Check(std::fabs(side[0]-0.4f)<1e-4f && std::fabs(side[1]-1.6f)<1e-4f && std::fabs(side[2]-0.1f)<1e-4f,
+                      "the turret's weapons: across the bore from the pivot plus the pivot's place on the hull");
+                Check(std::fabs(side[3]+1.5f)<1e-4f,"a hull-fixed weapon: its muzzle across the hull from the origin");
+                std::memcpy(first,side,sizeof first);std::memcpy(firstOrder,order,sizeof firstOrder);
+                Check(order[0]==1 && order[1]==0 && order[2]==2 && order[3]==3,"the launcher left, the gun and coax middle, the hull gun right");
+                continue;
+            }
+            for(int i=0;i<4;++i)if(std::fabs(side[i]-first[i])>1e-4f)(i==3 ? hullSame : same)=false;
+            for(int i=0;i<4;++i)if(order[i]!=firstOrder[i])orderSame=false;
+        }
+        Check(same,"the turret turned 90 / 180 / -90: its weapons' sides stay");
+        Check(hullSame,"the hull-fixed weapon's side stays");
+        Check(orderSame,"so the strip's order stays");
+        {   // What the bore-only reading did: the same gun turned 90 left read 1 m off (the pivot 1 m behind the origin).
+            const float bore[3]={1.0f,0.0f,0.0f};
+            const float mg[3]={pivot[0]+gun[2],pivot[1]+gun[1],pivot[2]-gun[0]};
+            const float across[3]={bore[2],0.0f,-bore[0]};
+            const float old=(mg[0]-centre[0])*across[0]+(mg[2]-centre[2])*across[2];
+            Check(std::fabs(old-first[0])>0.5f && std::fabs(HullSide(mg,bore,pivot,centre,left,up)-first[0])<1e-4f,
+                  "  where across the bore alone it moved by the pivot's offset");
+        }
+        // The view is no input: the camera turning round the vehicle (free look) cannot change a side (2026-10-21).
+        // A bore straight up (a mortar): read across the hull's left.
+        const float upBore[3]={0.0f,1.0f,0.0f},mortar[3]={10.9f,4.0f,-5.0f};
+        Check(std::fabs(HullSide(mortar,upBore,pivot,centre,left,up)-0.9f)<1e-4f,"a bore straight up: across the hull's left");
+        // A tilted hull (rolled, pitched): the frame is the hull's, the sides stay the same.
+        const float ang=0.3f,co=std::cos(ang),si=std::sin(ang);   // rolled about the nose (+z): left (c, s, 0), up (-s, c, 0)
+        const float rl[3]={co,si,0.0f},ru[3]={-si,co,0.0f};
+        const auto roll=[&](const float* o,float* w){w[0]=centre[0]+o[0]*co-o[1]*si;w[1]=centre[1]+o[0]*si+o[1]*co;w[2]=centre[2]+o[2];};
+        const float hp[3]={pivot[0]-centre[0],pivot[1]-centre[1],pivot[2]-centre[2]};
+        const float hm[3]={hp[0]+gun[0],hp[1]+gun[1],hp[2]+gun[2]},hb[3]={0.0f,0.0f,1.0f};
+        float wp[3],wm[3],wb[3]={hb[0]*co-hb[1]*si,hb[0]*si+hb[1]*co,hb[2]};roll(hp,wp);roll(hm,wm);
+        Check(std::fabs(HullSide(wm,wb,wp,centre,rl,ru)-first[0])<1e-4f,"a rolled hull: the same side");
+        const float zero[3]={};
+        Check(HullSide(mortar,upBore,pivot,centre,zero,up)==0.0f,"no hull frame: unknown (0)");
+    }
+    {   // A Nix (2026-10-12): the arms hang off the torso, which the seat's yaw axis turns; the right arm listed first.
+        const float centre[3]={0,0,0},pivot[3]={0,3,-0.6f},left[3]={1,0,0},up[3]={0,1,0};
+        const float yaws[3]={0.0f,1.2f,-2.5f};
+        bool kept=true;
+        for(const float ang:yaws) {
+            const float co=std::cos(ang),si=std::sin(ang),bore[3]={si,0,co};
+            const float right[3]={pivot[0]-2.1f*co+1.0f*si,pivot[1],pivot[2]+2.1f*si+1.0f*co};
+            const float leftArm[3]={pivot[0]+2.2f*co+1.0f*si,pivot[1],pivot[2]-2.2f*si+1.0f*co};
+            const float side[2]={HullSide(right,bore,pivot,centre,left,up),HullSide(leftArm,bore,pivot,centre,left,up)};
+            int o[2];SideOrder(side,2,o);
+            if(!(o[0]==1 && o[1]==0))kept=false;
+        }
+        Check(kept,"a Nix's rifles: the left arm's on the left however the torso turns");
     }
 
     // The turret aim overlay follows the fire-control pick when the turret is laid by it (vhud.h sight / turret).

@@ -123,8 +123,8 @@ void EndBoarding(unsigned char* v,bool seated) noexcept {
     boarding=Boarding{};
 }
 
-// A new vehicle to board (the round's ask): refused (logged) or taken on, the friends' team moved to nobody's.
-void StartBoarding(unsigned char* human,unsigned char* v,ULONGLONG ms) noexcept {
+// A new vehicle to board (the round's ask): refused (logged, false) or taken on, the friends' team moved to nobody's.
+bool StartBoarding(unsigned char* human,unsigned char* v,ULONGLONG ms) noexcept {
     if(boarding.ref.obj)EndBoarding(const_cast<unsigned char*>(static_cast<const unsigned char*>(boarding.ref.obj)),false);
     const std::int32_t team=At<std::int32_t>(v,kTeam),playerTeam=At<std::int32_t>(human,kTeam);
     const char* refused=nullptr;
@@ -133,10 +133,11 @@ void StartBoarding(unsigned char* human,unsigned char* v,ULONGLONG ms) noexcept 
     else if(!Friendly(team,playerTeam))refused="not on the player's side";
     else if(!HumanOnFoot(human))refused="the player is in a vehicle";
     else if(SeatCount(v)==0)refused="no seats";
-    if(refused){Log("BOARDING v=%p team=%d: %s",v,team,refused);return;}
+    if(refused){Log("BOARDING v=%p team=%d: %s",v,team,refused);return false;}
     const bool moved=team!=playerTeam && team!=kTeamVehicle;
     if(moved)SetObjectTeam(v,kTeamVehicle);
     boarding=Boarding{ObjRef::Of(v),team,moved,ms,0};
+    return true;
 }
 
 // A frame of it: a press per seat, the driver's first, until one seats the player.
@@ -226,10 +227,14 @@ bool BoardingUnderway() noexcept { return boarding.ref.obj!=nullptr; }
 // A board request of the plugin's own (the Dreadnought's hangars, dreadnought_hangar.inc; sazabi.cpp's SazabiTestBoard,
 // crew.cpp's TestBoardVehicle): the player into `v` as a boarding gun round at it
 // would put them (StartBoarding; BoardingTick presses on until they are in or kTryMs is out).
-void BoardingRequest(unsigned char* v) noexcept {
-    unsigned char* const human=ready ? PlayerHuman() : nullptr;
-    if(human && v)StartBoarding(human,v,GameMs());
+// False (logged) when nothing will press for it: the hook not in (the HOOK line at load says so), no player, or refused.
+bool BoardingRequest(unsigned char* v) noexcept {
+    if(!ready){Log("BOARDING v=%p: not taken on: the boarding hook is not in",v);return false;}
+    unsigned char* const human=PlayerHuman();
+    if(!human || !v){Log("BOARDING v=%p: not taken on: no player (or no vehicle)",v);return false;}
+    return StartBoarding(human,v,GameMs());
 }
+bool BoardingReady() noexcept { return ready; }
 
 void ResetBoarding() noexcept {
     boarding=Boarding{};   // the mission's objects are gone: nothing to give a team back to

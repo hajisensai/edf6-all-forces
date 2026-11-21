@@ -27,11 +27,13 @@
 //  - The rig (docs/camera-re.md §5): the stock locators' (A) or the vehicle's game_object_camera_setting (B, +0x170 /
 //    +0x180, the authored third-person framing the riding camera never reads), whichever puts the eye farther back; the
 //    eye never under the rig's own height over its point. The high view looks down on the shot's predicted landing
-//    (ShotFocus) from HighCamHeight / HighCamBack (scaled up for a big vehicle), along the line from the hull to it
-//    (tcam::OrbitPlace, tcam::ShotHeading): the landing and its surroundings in the screen's middle, where the HUD draws
-//    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase). With no
-//    landing to show (no readable gun) it looks down on the hull. Free look turns it round its centre; native input
-//    controls the gun.
+//    (ShotFocus) from HighCamHeight / HighCamBack (scaled up for a big vehicle), from behind along the gun's traverse
+//    (tcam::OrbitPlace, tcam::GunHeading): the landing and its surroundings in the screen's middle, where the HUD draws
+//    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase) in the hull's
+//    frame of motion. The game's collision runs from a pivot at the eye (tcam::HighPivot), the eye kept over what is
+//    under it (tcam::HighLift). With no landing to show (no readable gun) it looks down on the hull. Free look turns it
+//    round its centre; native input controls the gun, but for a lofted gun no other module poses (HighLoft: the V603's
+//    launchers) the pitch input sets a range the gun is laid onto on its high arc (the camera never the target).
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -54,6 +56,7 @@
 #include "sightzoom.h"
 #include "turretaim.h"
 #include "seat_turret.h"
+#include "chase_cam.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -75,8 +78,9 @@ const unsigned char kAimStepCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24
 // The seat's camera (0x62B430 from the MAB locator's own SGO): Type at +0x200 (1: the eye / look-at locators), the eye
 // point {locator, bone} at +0x208, the look-at's at +0x218; a bone's world rows at +0xB0 (translation +0xE0).
 constexpr std::size_t kSeatCamType=0x200,kSeatCamEye=0x208,kSeatCamLook=0x218,kPointBone=0x8,kBoneOrigin=0xE0;
-// The camera: its eased eye and look-at (state 2).
-constexpr std::size_t kCamEye=0x630,kCamLook=0x640,kCamCollisionMargin=0x528;
+// The camera: its eased eye and look-at (state 2), the per-tick shares it eases them by (copied from the seat's +0x228
+// Param on entering state 2: docs/camera-re.md §3b), the soldier it follows (the player riding: firstperson.cpp).
+constexpr std::size_t kCamEye=0x630,kCamLook=0x640,kCamEaseEye=0x650,kCamEaseLook=0x654,kCamCollisionMargin=0x528,kCamTarget=0x360;
 const unsigned char kCollisionMarginCode[]={0xC7,0x87,0x28,0x05,0,0,0xCD,0xCC,0xCC,0x3D}; // F5058: 0.1 m
 // game_object_camera_setting as the object holds it (0x54DDF0): look-at, eye, in its frame.
 constexpr std::size_t kObjCamLook=0x170,kObjCamEye=0x180;
@@ -96,6 +100,12 @@ constexpr float kOnTarget=0.0087f;             // rad (0.5 deg): the turret is o
 constexpr float kPivotReach=40.0f;             // m: a turret pivot farther from the muzzle than this is not one (TurretPivot)
 constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a big vehicle (HighCamClass 2)
 constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
+// The chase follower's clock (chase_cam.h): the scene's steps (GameFrame), each 1/60 s of game time (System::Update adds
+// n / 60 to its time for n steps, docs/unlimited-fps-re.md §1), the camera stepped once in each. Not the wall clock: a
+// catch-up frame runs several steps within a millisecond and the clock's 16 / 17 ms reads are off the steps the vehicle
+// moved by; a sprung point on a fast vehicle would shake by the difference. The pause menu's camera steps add none.
+constexpr float kStepSeconds=1.0f/60.0f;
+constexpr ULONGLONG kChaseGapSteps=60;          // a longer gap than this (1 s) is a new start, not a step
 
 using PointFn=float*(__fastcall*)(const void*,float*);
 AimStepFn nextAim=nullptr;
@@ -136,10 +146,14 @@ struct CamSide {
     float eye[3],look[3];      // the last placement
     bool point;                // that placement was the high view's (tcam::OrbitPlace)
     bool highSet;              // highYaw / highCentre hold this high view's
-    float highYaw;             // the high view's heading (tcam::ShotHeading; on entry the view's own)
-    float highCentre[3];       // what it looks at, eased: the shot's landing, else the hull's origin
+    float highYaw;             // the high view's heading (tcam::GunHeading; on entry the view's own)
+    float highCentre[3];       // what it looks at, as an offset from the hull's origin, eased: the shot's landing, else 0
+    float highLift;            // m the eye is raised over what is under it (tcam::HighLift)
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
+    chase::Spring chase;       // the normal rig's sprung hull origin (chase_cam.h; not the high view's: its centre eases)
+    bool chaseStarted;
+    ULONGLONG chaseStep;       // GameFrame of its last step
 };
 // The rig's numbers the game thread reads (benign races: floats it only steers by): the stock locators' base pitch
 // against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles), the
@@ -154,6 +168,8 @@ struct GameSide {
     float aim[3];bool hasAim;  // the point under the screen's centre this frame
     bool aimHit,holdHit;       // ... a real map hit (else kAimFar along an empty view) / the held point's
     tcam::SteerState steer;    // the turret command's last wants and their drift (turretcam.h SteerAxes)
+    tcam::LoftRange loft;      // the high view's range for a lofted gun (HighLoft) and its pitch command's state
+    tcam::SteerState loftSteer;
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
 };
@@ -384,11 +400,29 @@ bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noe
     return std::isfinite(pivot[0]+pivot[1]+pivot[2]) && vec::Dist(pivot,muzzle)<kPivotReach;
 }
 
+// Whether katyusha.cpp poses this vehicle's lofted launcher itself (its Rack: the Katyusha's rack bone lifted off the
+// aim axes onto the arc, launcher.cpp LoftWant). Only then is the arc not the axes' to lay.
+bool PosedLauncher(const void* v) noexcept {
+    LoftReadout l{};
+    return LauncherLoft(v,&l);
+}
+
+// A lofted gun's elevation (rad, up) to `y` up `x` across with its round falling `drop` m/frame^2 (edf::LoftElevation:
+// the high arc within the pitch axis' stops while the round lives to come down there, else the low arc, else the
+// farthest within its life).
+float LoftedElevation(const unsigned char* seat,const RoundModel& model,double drop,float x,float y) noexcept {
+    const float* pitch=AxisAt(seat,1);   // the stops, negative up
+    float e=0.0f;
+    edf::LoftElevation(x,y,model.speed,drop,model.alive,-pitch[1],-pitch[0],e);
+    return e;
+}
+
 // The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`, seen in `frame` (world rows x, up, nose:
 // the frame the stabilizer's held axes are seen in, else the hull's now; stab.h HeldIn): the bore line through `p` from
 // the bore's point at the turret's pivot (turretcam.h AimOrigin: not from the muzzle, which swings with the gun), with
-// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
-// the bore line (turretcam.h BallisticAim).
+// `ballistic` the low arc for a gun whose rounds drop, the high arc for a lofted launcher (LoftedElevation; the user,
+// 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」: the V603's lofted guns are laid by their axes; the Katyusha's arc
+// is katyusha.cpp's, PosedLauncher: it gets the line), else the bore line (turretcam.h BallisticAim).
 bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
     const unsigned char* gun=TurretGun(shared.v,seat);
     float muzzle[3],dir[3];
@@ -403,10 +437,12 @@ bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ball
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
     const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
     // Guided rounds and motor-driven rockets do not follow the fixed-gravity arc solved here.
-    if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && arc && !(lofted && PosedLauncher(shared.v)) && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const double drop=model.factor*-(g[0]*frame[3]+g[1]*frame[4]+g[2]*frame[5])/3600.0;
-        float e=0.0f;
-        if(drop>0.0 && edf::BallisticArc(x,l[1],model.speed,drop,false,e,frames) && std::isfinite(e))elevation=e;
+        float e=elevation;
+        if(drop>0.0 && lofted && model.alive>0)e=LoftedElevation(seat,model,drop,x,l[1]);
+        else if(drop>0.0 && !lofted && !edf::BallisticArc(x,l[1],model.speed,drop,false,e,frames))e=elevation;
+        if(std::isfinite(e))elevation=e;
     }
     want[0]=std::atan2(l[0],l[2]);
     want[1]=-elevation;
@@ -426,10 +462,54 @@ void SteeringOf(const unsigned char* v,const unsigned char* seat,Steering* s) no
 }
 
 // The input that turns each axis onto `want` (turretcam.h SteerAxes), and whether it is on.
-bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in) noexcept {
+bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in,tcam::SteerState& state=game.steer) noexcept {
     const tcam::Axis axes[2]={{AxisAt(seat,0)[0],AxisAt(seat,0)[1],AxisAt(seat,0)[2],At<float>(AxisAt(seat,0),kAxisRate)},
                               {AxisAt(seat,1)[0],AxisAt(seat,1)[1],AxisAt(seat,1)[2],At<float>(AxisAt(seat,1),kAxisRate)}};
-    return tcam::SteerAxes(game.steer,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
+    return tcam::SteerAxes(state,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
+}
+
+// The high view of a lofted gun no other module poses (the V603's TOS-1 and X-Morph missile launcher, whose aim axis is
+// the rack; the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the yaw input stays native; the pitch input
+// moves the range (tcam::StepLoftRange, set on entry from where the gun's elevation then throws over level ground) and
+// the pitch axis is steered onto the high arc (LoftedElevation, as Wants lays it in the normal view) to the ground that
+// range out along the gun's traverse (a map ray straight down; none: level with the gun). Neither the camera nor the
+// landing it watches (ShotFocus, from the real muzzles) is an input: no loop. False (native input) for any other gun.
+bool HighLoft(unsigned char* seat,const Shared& s,const float* in,float* cmd) noexcept {
+    const unsigned char* gun=TurretGun(s.v,seat);
+    RoundModel model{};
+    float muzzle[3],dir[3],g[3];
+    if(!gun || !edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark)) || PosedLauncher(s.v) || !ReadRound(gun,&model) ||
+       model.kind!=RoundKind::arc || !(model.speed>0.0f) || !(model.factor>0.0f) || model.alive<=0 ||
+       !edf::MeanMuzzle(gun,16,muzzle,dir) || !edf::WorldGravity(image,g))return false;
+    Steering st{};
+    SteeringOf(s.v,seat,&st);
+    const double drop=model.factor*-(g[0]*st.frame[3]+g[1]*st.frame[4]+g[2]*st.frame[5])/3600.0;
+    float reach=0.0f;
+    const float farthest=edf::LoftFarthest(model.speed,drop,model.alive,&reach);
+    if(!(reach>tcam::kLoftLeast) || !std::isfinite(st.held[0]) || !std::isfinite(st.held[1]))return false;
+    if(!game.loft.set) {
+        const float e=-st.held[1];
+        game.loft.set=true;game.loft.range=edf::LevelRange(model.speed,drop,e<farthest ? e : farthest);
+        game.loftSteer=tcam::SteerState{};
+    }
+    const float range=tcam::StepLoftRange(game.loft,in[1],tcam::kLoftLeast,reach);
+    float pivot[3],origin[3];
+    tcam::AimOrigin(muzzle,dir,TurretPivot(seat,muzzle,pivot) ? pivot : nullptr,origin);
+    const float sy=std::sin(st.held[0]),cy=std::cos(st.held[0]);
+    float p[3];
+    for(int i=0;i<3;++i)p[i]=origin[i]+(st.frame[i]*sy+st.frame[6+i]*cy)*range;
+    const float top[3]={p[0],p[1]+kGroundProbe,p[2]},bottom[3]={p[0],p[1]-kGroundProbe,p[2]};
+    float ground[3];
+    if(MapRay(top,bottom,ground)>=0.0f && std::isfinite(ground[1]))p[1]=ground[1];
+    float l[3],x=0.0f;
+    tcam::LocalTo(st.frame,origin,p,l,&x);
+    const float e=LoftedElevation(seat,model,drop,x,l[1]);
+    if(!std::isfinite(e))return false;
+    const float want[2]={st.held[0],-e};
+    float steer[2]={0.0f,0.0f};
+    Steer(seat,st,want,steer,game.loftSteer);
+    cmd[0]=in[0];cmd[1]=steer[1];
+    return true;
 }
 
 void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic,bool commandValid=false) noexcept {
@@ -454,10 +534,14 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     RoundModel model{};
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
     const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
-    if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && arc && !(lofted && PosedLauncher(s.v)) && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const float vel[3]={dir[0]*model.speed,dir[1]*model.speed,dir[2]*model.speed};
         const float drop[3]={g[0]*model.factor/3600.0f,g[1]*model.factor/3600.0f,g[2]*model.factor/3600.0f};
-        sight::RoundAfter(muzzle,vel,drop,range/model.speed,r.gun);
+        // A lofted round's flight to the point is far longer than the straight range over its speed (a high arc
+        // climbs and comes back down): where it is when it has come the point's distance across the ground.
+        const float flat=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+        const float frames=lofted && flat>1e-4f ? tcam::AcrossDistance(muzzle,holdAt)/flat : range/model.speed;
+        sight::RoundAfter(muzzle,vel,drop,frames,r.gun);
     } else for(int i=0;i<3;++i)r.gun[i]=muzzle[i]+dir[i]*range;
     Publish(r);
 }
@@ -483,7 +567,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const bool press=held && (!game.held || leavingHigh),release=!held && game.held && !leavingHigh;
     game.held=held;
     if(s.high) {
-        if(!s.highView){s.orbitYaw=0.0f;s.orbitPitch=0.0f;}
+        if(!s.highView){s.orbitYaw=0.0f;s.orbitPitch=0.0f;game.loft=tcam::LoftRange{};}
         s.highView=true;s.view=true;s.steering=false;s.free=held;s.returning=false;
         game.steer.hasWant=false;
         const float stick[2]={-At<float>(seat,kSeatStick),At<float>(seat,kSeatStick+4)};
@@ -495,6 +579,10 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         }   // let go: the view stays where free look turned it (a world-held heading, nothing to swing back onto)
         // The stock axis step (and stabilizer) owns gun motion. Looking round must not feed the observation back.
         cmd[0]=held && !foreign ? 0.0f : in[0];cmd[1]=held && !foreign ? 0.0f : in[1];
+        // A lofted gun's pitch lays its high arc to the range the native pitch input sets (HighLoft); another hand's
+        // input keeps the gun, the range set anew from the gun when it gives it back.
+        if(foreign)game.loft=tcam::LoftRange{};
+        else if(!held)HighLoft(seat,s,in,cmd);
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat) {
             shared.aimMs=s.aimMs;shared.view=s.view;shared.highView=true;shared.steering=false;
@@ -641,14 +729,11 @@ void Place(float* lookOut,float* eyeOut,unsigned char* cam,const float* eye,cons
     if(surfaceFocus) {
         // F6760 queries desired-look -> look, then look -> eye. A ballistic intersection lies ON a collider;
         // a zero-distance hit can collapse eye and look before native LookTo (0/-90 degree snapping).
-        // Move only the collision pivot toward the eye by the native retreat margin. The real projectile
-        // focus stays unchanged and collinear, so it still projects to the same optical centre.
-        float towardEye[3]={eye[0]-focus[0],eye[1]-focus[1],eye[2]-focus[2]};
-        const float distance=vec::Len(towardEye),margin=At<float>(cam,kCamCollisionMargin);
-        if(distance>1e-5f && std::isfinite(margin) && margin>0.0f) {
-            const float share=std::fmin(margin,distance*0.5f)/distance;
-            for(int i=0;i<3;++i)collisionLook[i]+=towardEye[i]*share;
-        }
+        // The pivot is put at the eye's end of the same optical ray (tcam::HighPivot): neither that collapse nor a
+        // building or slope between the landing and the eye can pull the eye in. The real projectile focus stays
+        // unchanged and collinear, so it still projects to the same optical centre.
+        const float margin=At<float>(cam,kCamCollisionMargin);
+        tcam::HighPivot(eye,focus,std::isfinite(margin) ? std::fmax(tcam::kHighPivot,4.0f*margin) : tcam::kHighPivot,collisionLook);
     }
     const float* look=collisionLook;
     std::memcpy(lookOut,look,12);lookOut[3]=1.0f;
@@ -677,6 +762,132 @@ void PublishObservation(const unsigned char* seat,bool observing) noexcept {
     AcquireSRWLockExclusive(&lock);
     if(shared.seat==seat)shared.observing=observing;
     ReleaseSRWLockExclusive(&lock);
+}
+
+// --- the chase follower (chase_cam.h; README 载具镜头跟随) ---
+// 2026-11-21 (「载具/玩家之类的视角优化一下」): every camera this hook places was on its vehicle's origin exactly each tick
+// (Place below writes the eased points too, so the native per-tick ease cam+0x650 / +0x654 did nothing), and the player's
+// jets kept the stock locators welded to `mdl` with no roll. The follower gives them inertia and roll:
+//  - the cameras whose direction is the player's input (the Sazabi, the mouse-flown heli, the gunship's gun seat, a
+//    Dreadnought's or a gunner seat's turret; the turret view in Camera) spring the vehicle's origin only, eye and look-at
+//    moved by the one offset: the screen's centre keeps the input's direction (the turret's PublishNormalRay, the
+//    Dreadnought's CameraRay aim: the same ray, laid from the drawn eye); a heli rolls by a share of its bank;
+//  - the player's jets (stock locators, PlayerJetChase): the locators held in the craft's frame, that frame eased onto the
+//    craft's attitude with part of the bank kept, the look-at leading along the path (chase::FollowCraft);
+//  - never first person (the cockpit's eye is the seat's bone), the mounted optic, nor the turret's high view (its centre
+//    eases on its own); a take-over, another seat or vehicle, first person in between start it over on the vehicle.
+// One follower per camera (split screen: each local player's own), stepped on the scene's steps (kStepSeconds). The roll
+// is the native step's rows turned after it (firstperson.cpp CameraAfterNative -> ChaseCamUp), in its write transaction.
+enum class ChaseKind { ground,heli,air,jet,rotor };
+const char* const kChaseNames[]={"ground","heli","air","jet","rotor"};
+const chase::Tuning& TuningOf(ChaseKind k) noexcept {
+    switch(k) {
+    case ChaseKind::heli:return chase::kHeli;
+    case ChaseKind::air:return chase::kAir;
+    case ChaseKind::jet:return chase::kJet;
+    case ChaseKind::rotor:return chase::kRotor;
+    default:return chase::kGround;
+    }
+}
+struct Follower {
+    const unsigned char* cam;
+    const unsigned char* seat;
+    ObjRef vehicle;
+    ChaseKind kind;
+    bool started;
+    ULONGLONG step;            // GameFrame of its last step
+    chase::Chase chase;
+    bool up;                   // `upDir` is this step's roll for CameraAfterNative (ChaseCamUp), taken at `upStep`
+    float upDir[3];
+    ULONGLONG upStep;
+};
+constexpr int kFollowers=4;
+Follower followers[kFollowers]{};
+
+// Game seconds since the last step (0 on a start or a step not taken yet: the follower holds), the steps counted.
+float StepSeconds(bool& started,ULONGLONG& last) noexcept {
+    const ULONGLONG now=GameFrame();
+    const bool had=started;const ULONGLONG was=last;
+    started=true;last=now;
+    if(!had || now<was)return 0.0f;
+    return now-was>kChaseGapSteps ? 2.0f*chase::kMostDt : static_cast<float>(now-was)*kStepSeconds;
+}
+
+Follower* FollowerOf(const unsigned char* cam) noexcept {
+    Follower* spare=nullptr;
+    for(Follower& f:followers) {
+        if(f.cam==cam)return &f;
+        if(!spare || !f.cam || (spare->cam && f.step<spare->step))spare=&f;
+    }
+    *spare=Follower{};spare->cam=cam;
+    return spare;
+}
+void ForgetFollower(const unsigned char* cam) noexcept {
+    for(Follower& f:followers)if(f.cam==cam)f=Follower{};
+}
+
+// The vehicle `seat` is in when its rider is the player this camera follows (its seat index in `index`), else null.
+unsigned char* RiddenBy(const unsigned char* cam,const unsigned char* seat,unsigned* index) noexcept {
+    const auto rider=At<const unsigned char*>(seat,kSeatRider);
+    if(!rider || rider!=At<const unsigned char*>(cam,kCamTarget) || !Readable(rider,kHumanVehicleCtrl+8) || !IsPlayer(rider))return nullptr;
+    const auto ctrl=At<const unsigned char*>(rider,kHumanVehicleCtrl);
+    if(!Readable(ctrl,16) || At<std::int32_t>(ctrl,8)==0)return nullptr;
+    const auto v=At<unsigned char*>(rider,kHumanVehicleCtrl-8);
+    if(!Readable(v,kMatrix+64) || v[kDead])return nullptr;
+    const unsigned n=SeatCount(v);
+    for(unsigned i=0;i<n && i<16;++i)if(SeatAt(v,i)==seat){*index=i;return v;}
+    return nullptr;
+}
+
+// The follower of `cam` onto this step's `eye` / `look` (placed off `v`, the player's at its seat `index`): both replaced
+// by the followed ones. False: it does not follow here (the plugin's switch off, first person, the optic, refused input)
+// and has left them as they were.
+bool Follow(unsigned char* cam,const unsigned char* seat,unsigned char* v,unsigned index,ChaseKind kind,float* eye,float* look) noexcept {
+    const Config& c=Cfg();
+    if(!c.enabled || !c.chaseCam || FirstPersonVehicleView(v,index) || SightZoomMounted(v))return false;
+    Follower& f=*FollowerOf(cam);
+    if(f.seat!=seat || !f.vehicle.Is(v) || f.kind!=kind){f=Follower{};f.cam=cam;f.seat=seat;f.vehicle=ObjRef::Of(v);f.kind=kind;}
+    const bool fresh=!f.chase.anchor.valid;
+    const float dt=StepSeconds(f.started,f.step);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    chase::Placement placed{};
+    const bool craft=kind==ChaseKind::jet || kind==ChaseKind::rotor;
+    if(!(craft ? chase::FollowCraft(f.chase,TuningOf(kind),m,eye,look,dt,&placed) : chase::FollowAnchor(f.chase,TuningOf(kind),m,eye,look,dt,&placed))) {
+        f=Follower{};
+        return false;
+    }
+    // Whether the native ease is near 1 (the "picture stuck on the screen") or not: once a take, from the camera itself.
+    if(fresh && c.debug)Log("CHASE cam=%p v=%p seat %u: the %s follower takes the camera; native ease eye %.3f look %.3f (cam+0x650 / +0x654)",
+                            static_cast<const void*>(cam),static_cast<const void*>(v),index,kChaseNames[static_cast<int>(kind)],
+                            At<float>(cam,kCamEaseEye),At<float>(cam,kCamEaseLook));
+    std::memcpy(eye,placed.eye,12);std::memcpy(look,placed.look,12);
+    f.up=placed.hasUp;f.upStep=GameFrame();
+    if(placed.hasUp)std::memcpy(f.upDir,placed.up,12);
+    return true;
+}
+bool FollowSeat(unsigned char* cam,const unsigned char* seat,ChaseKind kind,float* eye,float* look) noexcept {
+    unsigned index=0;
+    unsigned char* const v=RiddenBy(cam,seat,&index);
+    return v && Follow(cam,seat,v,index,kind,eye,look);
+}
+
+// The player's jet at its seat 0 in third person: the stock locators' targets (`stockEye` / `stockLook`) chased.
+bool PlayerJetChase(unsigned char* cam,const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept {
+    unsigned index=0;
+    unsigned char* const v=RiddenBy(cam,seat,&index);
+    if(!v || index!=0 || !IsPlayerJet(v))return false;
+    std::memcpy(eye,stockEye,12);std::memcpy(look,stockLook,12);
+    return Follow(cam,seat,v,index,PlayerRotorCraft(v) ? ChaseKind::rotor : ChaseKind::jet,eye,look);
+}
+
+// The turret's normal rig: its hull origin sprung (kGround), into `at`; false: the hull's own (the switch off, refused).
+bool TurretAnchor(const float* origin,float* at) noexcept {
+    const float dt=StepSeconds(camSide.chaseStarted,camSide.chaseStep);
+    if(!Cfg().chaseCam || chase::Follow(camSide.chase,chase::kGround,origin,dt,at)==chase::Step::refused) {
+        camSide.chase=chase::Spring{};
+        return false;
+    }
+    return true;
 }
 
 void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noexcept {
@@ -739,8 +950,9 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         camSide.rig=back ? was.rig : a ? rigA : want;camSide.offset=back ? was.offset : viewed ? 0.0f : baseA;
         std::memcpy(camSide.eye,cam+kCamEye,12);std::memcpy(camSide.look,cam+kCamLook,12);
         camSide.point=point;
-        if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f",s.v,viewed ? "view" : "coupled",
-                       s.high ? ", high" : "",b && (!a || rigB.radius>=rigA.radius) ? "authored" : "stock",normal.radius,normal.up,normal.rise,a ? rigA.radius : 0.0f);
+        if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f, native ease eye %.3f look %.3f (cam+0x650 / +0x654)",
+                       s.v,viewed ? "view" : "coupled",s.high ? ", high" : "",b && (!a || rigB.radius>=rigA.radius) ? "authored" : "stock",normal.radius,
+                       normal.up,normal.rise,a ? rigA.radius : 0.0f,At<float>(cam,kCamEaseEye),At<float>(cam,kCamEaseLook));
     }
     tcam::Ease(camSide.rig,want,kRigEase);
     camSide.offset+=(offset-camSide.offset)*kRigEase;
@@ -752,17 +964,29 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         // behind it along the line the shot flies; with no landing to show, at the hull. Eased (kRigEase a frame, as the
         // rig's own moves): the landing of a gun rocked over the ground runs up and down that line (the 2026-10-23
         // complaint "会随着炮塔上下摇晃"), and the view follows it without jerking; the HUD's mark stays exact.
+        // 2026-11-21 ("俯瞰视角移动的时候会白屏一下……并且这个俯瞰视角会抖动。某些载具上"): the landing is eased as an offset
+        // from the hull, not as a world point (a world point eased behind a driving hull trails it by speed x the ease's
+        // time and wobbles with every change of speed); the heading is the gun's traverse (tcam::GunHeading), not the
+        // hull-to-landing line that swung the orbit by the landing's sideways wobble.
         const float hull[3]={m[12],m[13],m[14]};
-        const float* landing=s.focusValid ? s.focus : hull;
-        if(!camSide.highSet) {   // entering it: on the landing at once, the heading the camera faces now until it has one
+        camSide.chase=chase::Spring{};   // the normal rig's follower starts over on the hull when it is back (the carry eases)
+        float rel[3]={0.0f,0.0f,0.0f};
+        if(s.focusValid)for(int i=0;i<3;++i)rel[i]=s.focus[i]-hull[i];
+        if(!camSide.highSet) {   // entering it: on the landing at once
+            std::memcpy(camSide.highCentre,rel,12);camSide.highSet=true;camSide.highLift=0.0f;
             const float d[3]={camSide.look[0]-camSide.eye[0],0.0f,camSide.look[2]-camSide.eye[2]};
-            float a3[3];AxesDir(s.v,seat,a3);
-            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : tcam::YawOf(a3);
-            std::memcpy(camSide.highCentre,landing,12);camSide.highSet=true;
+            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : 0.0f;
         }
-        for(int i=0;i<3;++i)camSide.highCentre[i]+=(landing[i]-camSide.highCentre[i])*kRigEase;
-        camSide.highYaw=tcam::ShotHeading(hull,camSide.highCentre,camSide.highYaw);
-        tcam::OrbitPlace(camSide.highCentre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+        for(int i=0;i<3;++i)camSide.highCentre[i]+=(rel[i]-camSide.highCentre[i])*kRigEase;
+        camSide.highYaw=tcam::GunHeading(m,AxisAt(seat,0)[2],camSide.highYaw);
+        const float centre[3]={hull[0]+camSide.highCentre[0],hull[1]+camSide.highCentre[1],hull[2]+camSide.highCentre[2]};
+        tcam::OrbitPlace(centre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+        // The eye over whatever is under it (a hill or a tower behind the landing): the collision no longer does it.
+        const float top[3]={eye[0],eye[1]+kGroundProbe,eye[2]},bottom[3]={eye[0],eye[1]-tcam::kHighClear,eye[2]};
+        float under[3];
+        const bool ground=MapRay(top,bottom,under)>=0.0f && std::isfinite(under[1]);
+        camSide.highLift=tcam::HighLift(eye[1],ground,ground ? under[1] : 0.0f,tcam::kHighClear,camSide.highLift,kRigEase);
+        eye[1]+=camSide.highLift;
     } else {
         camSide.highSet=false;
         float yaw,pitch;
@@ -774,7 +998,10 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         pitch=vec::Clamp(pitch,-kViewMost,kViewMost);
         float d[3];
         tcam::Dir(yaw,pitch,d);
-        tcam::Place(camSide.rig,m+12,yaw,d,eye,look);
+        // The rig round the hull's sprung origin (TurretAnchor): the view's direction is still exactly the input's, so
+        // the ray PublishNormalRay hands the turret is the screen's centre, from the eye as drawn.
+        float anchor[3];
+        tcam::Place(camSide.rig,TurretAnchor(m+12,anchor) ? anchor : m+12,yaw,d,eye,look);
     }
     // A switch between the shot observation and the rig: from where the camera was, the old placement's offset eased out
     // (carried in the hull's motion, not lagging it).
@@ -801,26 +1028,33 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
 float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) {
     float* const r=reinterpret_cast<PointFn>(image+kPoint)(point,lookOut);
     __try {
+        const unsigned char* const seat=static_cast<const unsigned char*>(point)-kSeatCamLook;
         float eye[3],look[3];
+        bool followed=false;   // the chase follower placed this step (else it starts over next time)
         // the player's Sazabi first: its own rig, the screen's centre its aim (sazabi.cpp, sazabi_camera.inc); a turret
         // seat's pointer kept past its vehicle (a stale `shared`) must never stand in its way
-        if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,reinterpret_cast<const float*>(cam+kCamEye),
-                        reinterpret_cast<const float*>(cam+kCamLook),eye,look))
+        if(SazabiCamera(seat,reinterpret_cast<const float*>(cam+kCamEye),reinterpret_cast<const float*>(cam+kCamLook),eye,look)) {
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
             Place(lookOut+12,lookOut+28,cam,eye,look);
-        else if(PlayerHeliCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,
-                                 lookOut+28,lookOut+12,eye,look))
+        } else if(PlayerHeliCamera(seat,lookOut+28,lookOut+12,eye,look)) {
+            followed=FollowSeat(cam,seat,ChaseKind::heli,eye,look);
             Place(lookOut+12,lookOut+28,cam,eye,look);
-        else if(GunshipGunnerCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+28,lookOut+12,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
-        else if(DreadnoughtCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
-        else if(SeatTurretCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
-            Place(lookOut+12,lookOut+28,cam,eye,look);   // a gunner seat's own turret: the gunner's view (seat_turret.cpp)
-        else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
-            Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
+        } else if(GunshipGunnerCamera(seat,lookOut+28,lookOut+12,eye,look)) {   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
+            followed=FollowSeat(cam,seat,ChaseKind::air,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(DreadnoughtCamera(seat,eye,look)) {   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(SeatTurretCamera(seat,eye,look)) {   // a gunner seat's own turret: the gunner's view (seat_turret.cpp)
+            followed=FollowSeat(cam,seat,ChaseKind::ground,eye,look);
+            Place(lookOut+12,lookOut+28,cam,eye,look);
+        } else if(shared.seat && seat==shared.seat)Camera(seat,lookOut+12,cam);
+        // the player's jet on its stock locators: chased (PlayerJetChase); the native ease then has nothing left to do
+        else if(PlayerJetChase(cam,seat,lookOut+28,lookOut+12,eye,look)){followed=true;Place(lookOut+12,lookOut+28,cam,eye,look);}
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
-        else if(Cfg().enabled)ProteusViewLift(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,lookOut+28);
-    } __except(EXCEPTION_EXECUTE_HANDLER){}
+        else if(Cfg().enabled)ProteusViewLift(seat,lookOut+12,lookOut+28);
+        if(!followed)ForgetFollower(cam);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ForgetFollower(cam);}
     return r;
 }
 
@@ -985,8 +1219,16 @@ void ResetTurretCam() noexcept {
     shared=Shared{};
     ReleaseSRWLockExclusive(&lock);
     game=GameSide{};camSide=CamSide{};rigInfo=RigInfo{};
+    for(Follower& f:followers)f=Follower{};
     AcquireSRWLockExclusive(&outLock);
     out=Out{};
     ReleaseSRWLockExclusive(&outLock);
+}
+
+void ChaseCamUp(const unsigned char* cam,float* rows) noexcept {
+    for(Follower& f:followers)if(f.cam==cam && f.up) {
+        f.up=false;
+        if(rows && f.upStep==GameFrame())chase::UpRows(rows,f.upDir);
+    }
 }
 }  // namespace crew

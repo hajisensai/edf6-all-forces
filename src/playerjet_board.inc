@@ -95,15 +95,10 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
     // takes it in
     if(!eject && DreadnoughtTakesBack(v)){HandBack(j,v,"its pilot put aboard their dreadnought at its bay");return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch && CrewedPilot(v)) {
-        // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
+        // The jet itself comes back for them (Catch: it flies a pass at the parachute and captures them as it goes by),
+        // flying on from the velocity it has (AutoFly).
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
-        const float speed=std::fmax(Len(j.vel),j.kind->rotate+kCatchOver);
-        // Its heading level along its flight (the catch's formation attitude and the speed the player takes it over
-        // at: AutoFly, Board); the drift Catch refreshes every frame.
-        float f[3]={j.vel[0],0.0f,j.vel[2]};
-        if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
-        catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f},speed,{0.0f,0.0f,0.0f},
-                                {f[0],0.0f,f[2]}};
+        catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f}};
         bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();bail.self=true;
         Log("PJET v=%p left in the air: it comes back to catch the player",v);
         return;
@@ -658,7 +653,21 @@ void PickSpot(PJet& j,const float* pos) noexcept {
     j.hail.stop[0]=player.pos[0]+from[0]*out;j.hail.stop[1]=player.pos[1];j.hail.stop[2]=player.pos[2]+from[2]*out;
 }
 
-// kHailRotor: over to its spot at its height, then straight down onto it, its nose on the player; set down: it waits.
+// The point a hailed rotor craft at `pos` flying at `vel` turns its nose to (into `face`): the way it flies while it flies
+// faster than kHailFaceSpeed on the level, else the player (heli.cpp's NPC helis' rule, kFaceSpeed). Test hub #42
+// (「平移过来」): its nose was on the player all the way in. From afar that is also the way it flies (its spot is on the
+// player's near side, kSpotGap past its own size from them); but a spot round the player's side or far side (PickSpot's
+// other angles, the near side's ground not level) took it past the player in its last 100 m, at up to tens of m/s
+// (sqrt(2 brake d)), its nose on the player: across its path, sliding sideways. (The first fix, 16afc19a, turned its nose
+// to the spot beyond kSpotDescend: from afar a fraction of a degree off the player, and in those last 100 m nothing.)
+constexpr float kHailFaceSpeed=3.0f;   // m/s on the level
+void HailFace(const float* pos,const float* vel,const float* playerAt,float* face) noexcept {
+    if(std::hypot(vel[0],vel[2])>kHailFaceSpeed){face[0]=pos[0]+vel[0];face[1]=pos[1];face[2]=pos[2]+vel[2];}
+    else std::memcpy(face,playerAt,12);
+}
+
+// kHailRotor: over to its spot at its height, then straight down onto it, its nose the way it flies (HailFace), on the
+// player once slow; set down: it waits.
 void RotorHail(PJet& j,unsigned char* v,const float* pos,float clear,float dt,ULONGLONG ms) noexcept {
     jet::Jet* const e=jet::FindJet(v);
     if(!e){HandBack(j,v,"its flight is gone");return;}
@@ -672,7 +681,9 @@ void RotorHail(PJet& j,unsigned char* v,const float* pos,float clear,float dt,UL
     const float rest=RestOver(v,pos);   // its position over its bottom: down is the spot plus that
     const float height=off>kSpotDescend ? std::fmax(pos[1],spot[1]+rest+kSpotOver) : spot[1]+rest;
     const float vz=Clamp((height-pos[1])*0.5f,-HoverClimb(k),HoverClimb(k));
-    HoverTo(*e,k,v,pos,want,vz,player.pos,dt);
+    float face[3];
+    HailFace(pos,e->m.vel,player.pos,face);
+    HoverTo(*e,k,v,pos,want,vz,face,dt);
     HoverDone(j,*e,k,v,pos,clear,off<4.0f,dt,ms);
     if(j.phase!=Phase::parked)return;
     j.hail.phase=kHailWait;j.hail.at=ms;j.autopilot=false;

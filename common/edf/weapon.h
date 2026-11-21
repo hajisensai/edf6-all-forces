@@ -74,4 +74,21 @@ bool WorldGravity(const unsigned char* image,float* g) noexcept;
 // tools/selftest.py lofted_arc_solver: the miss is under 5 cm against the per-frame step). No drop, or a point
 // straight over the muzzle: the straight line to it.
 bool BallisticArc(double x,double y,double speed,double drop,bool high,float& elevation,float& frames) noexcept;
+
+// A lofted launcher's laying (EDF6VehicleCrew launcher.cpp LoftWant and turretcam.cpp, the normal view and the high
+// one; the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the elevation (rad, up) that drops its round on a
+// point `x` across and `y` up. The high arc while it is within the launcher's stops [`lowest`, `highest`] and the round
+// still flies when it comes down there (frames <= `alive`: a round whose life ends in the air vanishes without
+// bursting, docs/carrier-laser-re.md), else the low arc while the round lives to land (the stops are the caller's to
+// clamp it to), else (out of reach, or past the round's life) LoftFarthest's elevation. Which of the three it is.
+enum class LoftArc : unsigned char { high, low, farthest };
+LoftArc LoftElevation(double x,double y,double speed,double drop,std::int32_t alive,float lowest,float highest,
+                      float& elevation) noexcept;
+// The elevation (rad) that throws farthest over level ground within the round's life: 45 deg while that round's flight
+// (the per-frame step: 2 v sin e / drop - 1 frames back down to the muzzle's height) is within `alive` frames, else the
+// steepest whose flight is. `reach`: its range, m (null: not wanted). 0 with no speed, no drop or no life.
+float LoftFarthest(double speed,double drop,std::int32_t alive,float* reach) noexcept;
+// How far across level ground a round leaving at `elevation` comes back down to the muzzle's height (the same step);
+// 0 when it never rises. Its flight is the caller's to keep within the life (LoftFarthest).
+float LevelRange(double speed,double drop,float elevation) noexcept;
 }  // namespace edf

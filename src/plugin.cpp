@@ -817,6 +817,7 @@ void LoadConfig() noexcept {
     n.highCamClass=ReadInt(L"HighCamClass",static_cast<DWORD>(n.highCamClass));
     n.decoupledTurretCam=ReadBool(L"DecoupledTurretCam",n.decoupledTurretCam);
     n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
+    n.chaseCam=ReadBool(L"ChaseCam",n.chaseCam);
     n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
     n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
     n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);

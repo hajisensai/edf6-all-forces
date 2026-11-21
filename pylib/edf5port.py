@@ -192,17 +192,52 @@ def _hold_field(r: Node, f: str, theirs: dsgo.Value) -> None:
         ours.items[0] = theirs.items[0]
 
 
-def hold_as(doc: dsgo.Document, peers: list[Node], template: Node, known: dict[str, set[str]]) -> None:
+def plays(f: str, name: str, states: set[str] | frozenset[str]) -> bool:
+    """Does a soldier whose CAS has the animation states `states` (every player's: main, weapon, ...) play the HOLD
+    name `name` of field `f`? The game builds the state names from it: BaseAnimation 'bag' is the main player's
+    'bag_stand' / 'bag_walk_f' / ..., ChangeAnimation 'bag_change1' the weapon player's 'bag_change1_up' / '_down'; the
+    aim, reload and recoil names (custom_parameter[0]) are states themselves (EDF6ENGINEER.CAS: 'bag_reload1',
+    'bag_whole_recoil1'). '' plays nothing (EDF6's thrown sentry guns have no change / reload animation). Holds for every
+    holding name of every EDF6 weapon of the Ranger, Wing Diver and Air Raider on their soldier's CAS, bar a few names
+    in no player's states that the original already uses (the Weapon_Accessory 'none' cases, the Fencer's recoil
+    names attach_recoil_shoulder and waist_recoil_H / M): `known` carries those, not this rule (2026-11-21).
+    `states` is the union of the layers: which layer a recoil name must be in is the caller's to check
+    (custom_parameter[2] 0 the weapon layer, else main)."""
+    if name == '':
+        return True
+    if f == 'BaseAnimation':
+        return f'{name}_stand' in states
+    if f == 'ChangeAnimation':
+        return f'{name}_up' in states or f'{name}_down' in states
+    return name in states
+
+
+def recoil_in_layer(cp: dsgo.Value, main: set[str] | frozenset[str], weapon: set[str] | frozenset[str]) -> bool | None:
+    """A Weapon_BasicShoot's list-form custom_parameter [recoil animation, _, whole body, _]: is the recoil in the layer
+    it asks for ('main' when element 2 is not 0, else 'weapon')? None when `cp` is not that form (named, short, '')."""
+    if not isinstance(cp, Node) or cp.names or len(cp.items) < 3 or not isinstance(cp.items[0], str) or not cp.items[0]             or not isinstance(cp.items[2], (int, float)):
+        return None
+    return cp.items[0] in (main if cp.items[2] != 0 else weapon)
+
+
+def hold_as(doc: dsgo.Document, peers: list[Node], template: Node, known: dict[str, set[str]],
+            states: set[str] | frozenset[str] = frozenset()) -> None:
     """Hold the weapon `doc` as EDF6 holds its own (user 2026-10-10: a 4.1 weapon's hands look wrong in EDF6).
     EDF6 re-made the models it shares with 4.1 / EDF5 and their soldiers' animations: the developers' own weapons on a
     model name the hand, the holding animations and the MAB block (its muzzles, grips and IK, re-placed: 149 of the
     4.1 ports differ from a developer block on their model in the locator positions alone, by 1.5 on the median) the
-    re-made model goes with; 4.1's name animations EDF6's soldiers do not have (assault2, bag_*, throw_recoil2 / 3) and
+    re-made model goes with; 4.1's name animations no EDF6 weapon uses (assault2, bag_*, throw_recoil2 / 3) and
     put 16 weapons in the right hand EDF6 holds them in the left.
       `peers` EDF6's weapons on this weapon's model; those of its class give the HOLD fields (the set most of them
               have), any whose locators include all of this weapon's give the MAB block (the most common such).
       without a peer of its class, a HOLD name no EDF6 weapon uses (`known`: per HOLD_NAMES field, the names EDF6's
-              weapons use) takes `template`'s (the EDF6 weapon the port's row is built on, of its category).
+              weapons use) and its soldier does not play (`states`, the animation states of the CAS of the soldier
+              whose category the weapon is in; plays) takes `template`'s (the EDF6 weapon the port's row is built on, of
+              its category). No EDF6 weapon uses the Air Raider's 'bag' set, but EDF6ENGINEER.CAS still has all of it
+              (bag_stand, bag_walk_*, bag_change1_up / _down, bag_reload1, bag_whole_recoil1): EDF5's sentry guns are
+              held and set down with it. Taking the template's there held a ZE-GUN as a rifle ('assault') and played
+              the upper-body 'assault_recoil1' where the weapon asks for a whole-body recoil (custom_parameter[2] 2),
+              which the main player has no state for (feedback #31, docs/feedback-2026-11-21-edf5-sentry.md).
     Nothing that is the weapon's own numbers (damage, rate, ammo, range ...) changes."""
     r = doc.root
     cls = r.get('xgs_scene_object_class')
@@ -216,7 +251,10 @@ def hold_as(doc: dsgo.Document, peers: list[Node], template: Node, known: dict[s
                 _hold_field(r, f, donor.get(f))
     else:
         for f in HOLD_NAMES:
-            if f in r.names.values() and _first_text(r.get(f)) not in known.get(f, set()) and f in template.names.values():
+            if f not in r.names.values() or f not in template.names.values():
+                continue
+            name = _first_text(r.get(f))
+            if name not in known.get(f, set()) and not (name is not None and plays(f, name, states)):
                 _hold_field(r, f, template.get(f))
     if 'animation_model' not in r.names.values():
         return

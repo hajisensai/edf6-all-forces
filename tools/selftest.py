@@ -2193,7 +2193,7 @@ def cab_floor_katyusha_only() -> None:
     plugin = src('autoturret/src/plugin.cpp')
     assert plugin.count('edf::katyusha::CabFloor(') == 1 and 'shot.cab ? edf::katyusha::CabFloor(' in plugin
     assert 'shot.cab=shot.cab || role.cab;' in plugin and 'if(target==kMarkKatyusha)return Mark::katyusha;' in plugin
-    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    loft = src('src/launcher.cpp').split('bool LoftTo(', 1)[1].split('\n}\n', 1)[0]
     assert 'const bool katyusha=edf::RoleOf(At<std::int32_t>(weapon,edf::kWeaponMark)).cab;' in loft
     assert 'katyusha ? edf::katyusha::CabFloor(' in loft and src('src/launcher.cpp').count('CabFloor(') == 1
     assert 'At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkKatyusha)return w;' in src('src/katyusha.cpp')
@@ -2326,7 +2326,8 @@ def gun_stabilizer_wired() -> None:
     steering = tc.split('void SteeringOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'StabHeld(seat+kSeatAim,s->held,s->hull,s->frame)' in steering
     steer = tc.split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
-    assert 'tcam::SteerAxes(game.steer,want,s.held,s.hull,' in steer
+    # the state the command's drift is kept in: the normal view's (game.steer) unless the high view's lofted gun's
+    assert 'tcam::SteerState& state=game.steer' in steer and 'tcam::SteerAxes(state,want,s.held,s.hull,' in steer
     axes = src('src/turretcam.h').split('inline bool SteerAxes(', 1)[1].split('\n}\n', 1)[0]
     assert 'target-held[i]' in axes and '-hull[i];' in axes
     # The wants are seen in the frame the held axes are (stab.h HeldIn), from the bore's point at the turret's pivot
@@ -2349,6 +2350,49 @@ def gun_stabilizer_wired() -> None:
     assert '0x17D8B50' not in vts, 'the rocket artillery (402) fires from a halt: no stabilizer'
     assert 'IsDrillTank(v)' in code and 'IndirectFireSeat(seat)' in code
     assert all(m in table for m in ('"504 Begaruta",{0.0f,0.0f}', '"Begaruta",{0.0f,0.0f}', '"612 Nix",{0.0f,0.0f}')), 'mech pilots: none'
+
+
+@test
+def lofted_envelope_within_life() -> None:
+    """Every weapon a generator writes with a lofted mark (7303 / 7304: EDF6AutoTurret and EDF6VehicleCrew lay it on
+    its high arc, common/edf/weapon.h LoftElevation) can fly that arc: over level ground its high arc within its
+    elevation stop (the Katyusha's PITCH_STOP_DEG; a V603 kind's make_tracked_combat.elevation_stop) reaches from the
+    stop's range out to the most range, and the longest of those flights (the one at the stop, pylib/ballistics.py
+    envelope) is back down within AmmoAlive: a round whose life ends in the air vanishes unburst. The user, 2026-11-21:
+    「重型导弹这种开启俯瞰视角应该高抛弹道」: the X-Morph missile launcher's heavy missile had the TOS-1's flight (6 m a
+    frame, 0.6 g, 600 frames under a 60 deg stop), whose every arc above ~7 deg ran out in the air. LOFT_PENDING: a
+    weapon known to fail, held to still failing (its fix is the maintainer's call; drop it from the list with the fix)."""
+    import math
+    import make_tracked_combat as tc
+    loft_pending = {
+        # TOS-1: 6 m a frame, 0.6 g, 600 frames, the V603's 60 deg: its high arc only starts 12.7 km out (70 s up)
+        "make_tracked_combat.GUNS['tos1']",
+    }
+    weapons = {f'make_tracked_combat.GUNS[{k!r}]': (g, tc.elevation_stop(k)) for k, g in tc.GUNS.items()
+               if g.get('LockonTargetType') in (7303.0, 7304.0)}
+    weapons['make_katyusha.ROCKETS'] = (make_katyusha.ROCKETS, make_katyusha.PITCH_STOP_DEG)
+    weapons['make_katyusha.ANDRYUSHA_ROCKETS'] = (make_katyusha.ANDRYUSHA_ROCKETS, make_katyusha.PITCH_STOP_DEG)
+    assert "make_tracked_combat.GUNS['xm_medium_missile_launcher']" in weapons, sorted(weapons)
+    failing = set()
+    for name, (gun, stop) in sorted(weapons.items()):
+        speed, alive = gun['AmmoSpeed'], gun['AmmoAlive']
+        drop = ballistics.drop_per_frame(factor=gun.get('AmmoGravityFactor', 1.0))
+        assert stop > 45.0, f'{name}: an elevation stop of {stop} deg leaves it no high arc'
+        env = ballistics.envelope(speed, drop, math.radians(stop))
+        frames = env['high_min_time'] * ballistics.FPS
+        if frames > alive:
+            failing.add(name)
+            print(f'  {name}: the high arc at its {stop:.0f} deg stop flies {frames:.0f} frames ({env["high_min_range"]:.0f} m), '
+                  f'AmmoAlive {alive:.0f}')
+    assert failing == loft_pending, f'lofted weapons whose high arc outlives the round: {sorted(failing)}, ' \
+                                    f'known {sorted(loft_pending)}'
+    # The heavy missile's numbers as pylib/xm_units.py derives them: the sight's 3 km, a high arc from ~1 km at 80 deg.
+    gun = tc.GUNS['xm_medium_missile_launcher']
+    env = ballistics.envelope(gun['AmmoSpeed'], ballistics.drop_per_frame(factor=gun['AmmoGravityFactor']),
+                              math.radians(tc.elevation_stop('xm_medium_missile_launcher')))
+    assert tc.PITCH_LIMITS['xm_medium_missile_launcher'] == [1.0, -80.0, 5.0], tc.PITCH_LIMITS
+    assert 2900.0 < env['max_range'] <= 3000.0 and 950.0 < env['high_min_range'] < 1100.0, env
+    assert gun['AmmoAlive'] >= 600.0   # src/highcam.cpp IndirectFireSeat: a lofted gun living 600 frames offers the high view
 
 
 @test
@@ -2553,7 +2597,11 @@ def katyusha_pose_agrees() -> None:
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
     assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
-    assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
+    # EDF6VehicleCrew's lofted laying (launcher.cpp, turretcam.cpp) goes through the one solver (LoftElevation's two roots)
+    loft_solver = src('common/weapon.cpp').split('LoftArc LoftElevation(', 1)[1].split('\n}\n', 1)[0]
+    assert loft_solver.count('BallisticArc(') == 2 and 'frames<=static_cast<float>(alive)' in loft_solver
+    assert 'edf::BallisticArc(' in at and 'edf::LoftElevation(' in src('src/launcher.cpp')
+    assert 'edf::LoftElevation(' in src('src/turretcam.cpp')
     P, E, M = (0.0, 2.25, -2.05), (0.0, 2.56, -3.51), (0.0, 2.28, -3.55)   # the built model's, rounded
     d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
     assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
@@ -2608,7 +2656,7 @@ def katyusha_fires_over_its_cab() -> None:
     assert 'edf::katyusha::CabFloor(r.azimuth)' in launcher and 'edf::katyusha::StepElevation(' in launcher
     assert 'if(!aim && !r.held && r.stock>=r.floor)return;' in launcher, 'the stock pose under the floor is not held'
     assert 'L"Rocketcannon_base"' in kat and 'L"body"' in kat
-    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    loft = src('src/launcher.cpp').split('bool LoftTo(', 1)[1].split('\n}\n', 1)[0]
     assert 'edf::katyusha::CabFloor(std::atan2(across,ahead))' in loft and 'lowest=cab>stop ? cab : stop' in loft
     ballistic = src('autoturret/src/plugin.cpp').split('bool Ballistic(', 1)[1].split('\n}\n', 1)[0]
     assert 'edf::katyusha::CabFloor(std::atan2(local[0],local[2]))' in ballistic and ballistic.count('elevation>=cab') == 2
@@ -7067,8 +7115,19 @@ def npc_ai_wired() -> None:
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
+    assert 'route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);' in move_to
+    assert "if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}" in move_to
+    # Testhub #41 / #47: the stick eased only on the route's last edge by what is left of it (FinalLeft), not by the
+    # distance to the next 2 m waypoint (followers walked at 37-77 % of their speed) nor the straight one to the goal (a
+    # goal behind a wall); a soldier waiting its route turn walks its fresh path on (GroundCoast, given the call's own
+    # stop / goal / hull) instead of standing.
+    assert 'npc::navigation::FinalLeft(soldier->navigation,' in move_to
+    assert 'npc::Horiz(pos,waypoint)' not in move_to and 'npc::Horiz(pos,to)' not in move_to
+    assert 'GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull)' in move_to
+    assert move_to.index('GroundNavigateDeferred(soldier->navigation)') < move_to.index('GroundCoast(') < move_to.index('RouteStart(pos,from);')
+    assert 'p.ahead=true;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
     # 2026-11-21 (「npc 寻路好像不会绕开载具」): every route goes round the vehicles' bodies (RouteHull: HullClear).
-    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),RouteHull(hull))!=npc::navigation::Result::moving' in move_to
+    assert move_to.index('hull=RouteHull(hull);') < move_to.index('GroundCoast(') < move_to.index('GroundNavigate(')
     route_hull = code.split('Hull RouteHull(Hull hull) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'hull.clear=&HullClear;' in route_hull, 'every route sweeps the vehicles, not only the boarded one'
     # Testhub #31: a boarding soldier's route goes round its vehicle (the map ray sees no unit), not within the
@@ -9259,7 +9318,9 @@ def ported_weapons_held_as_edf6() -> None:
     """pylib/edf5port.py hold_as on hand-made weapons: with EDF6 weapons of its class on its model, the weapon takes the
     hand and holding animations most of them have, of custom_parameter only the animation (element 0; a Weapon_Sub's
     named form, the call it makes, untouched), and the MAB block of one whose locators include all of its own; without
-    one of its class, only a holding animation no EDF6 weapon uses takes the template's; its numbers never change."""
+    one of its class, only a holding animation no EDF6 weapon uses and its soldier's CAS does not play takes the
+    template's; its numbers never change."""
+    import copy
     import edf5port
     import struct
     import mab
@@ -9300,6 +9361,35 @@ def ported_weapons_held_as_edf6() -> None:
     doc = dsgo.Document(weapon('Weapon_Throw', 'arms_r', 'bag', 'assault_recoil1', ours_block), [])
     edf5port.hold_as(doc, peers, template, known)
     assert doc.root.get('BaseAnimation') == 'assault' and doc.root.get('ModelConstraint').items == ['arms_r']
+    # ... unless its soldier plays them (feedback #31: EDF6ENGINEER.CAS has EDF5's whole 'bag' set no EDF6 weapon uses)
+    engineer = frozenset({'bag_stand', 'bag_walk_f', 'bag_change1_up', 'bag_change1_down', 'bag_reload1',
+                          'bag_whole_recoil1'})
+    case = weapon('Weapon_BasicShoot', 'arms_r', 'bag', 'bag_whole_recoil1', ours_block)
+    case.set('ChangeAnimation', 'bag_change1')
+    case.set('ReloadAnimation', 'bag_reload1')
+    case.set('custom_parameter', dsgo.Node(['bag_whole_recoil1', 0.0, 2.0, 1.0]))
+    rifle = weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', theirs_block)
+    rifle.set('ChangeAnimation', 'assault_change1')
+    rifle.set('ReloadAnimation', 'assault_reload1')
+    doc = dsgo.Document(copy.deepcopy(case), [])
+    edf5port.hold_as(doc, [], rifle, known, engineer)
+    assert [doc.root.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+        ['bag', 'bag_change1', 'bag_reload1'], 'a holding set its soldier plays was replaced'
+    assert doc.root.get('custom_parameter').items == ['bag_whole_recoil1', 0.0, 2.0, 1.0]
+    doc = dsgo.Document(copy.deepcopy(case), [])
+    edf5port.hold_as(doc, [], rifle, known, frozenset({'bag_stand'}))   # only the stance played: the rest goes
+    assert [doc.root.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+        ['bag', 'assault_change1', 'assault_reload1']
+    assert doc.root.get('custom_parameter').items[0] == 'assault_recoil1'
+    assert edf5port.plays('ChangeAnimation', '', frozenset()) and not edf5port.plays('BaseAnimation', 'bag', engineer - {'bag_stand'})
+    # the per-layer rule the real-game check applies: whole-body recoil (custom_parameter[2] != 0) is a main-layer state,
+    # upper-body (== 0) a weapon-layer one; a whole-body recoil set only in the weapon layer is a mismatch
+    main, upper = frozenset({'bag_whole_recoil1'}), frozenset({'assault_recoil1'})
+    assert edf5port.recoil_in_layer(dsgo.Node(['bag_whole_recoil1', 0.0, 2.0, 1.0]), main, upper)
+    assert edf5port.recoil_in_layer(dsgo.Node(['assault_recoil1', 0.0, 0.0, 1.0]), main, upper)
+    assert edf5port.recoil_in_layer(dsgo.Node(['assault_recoil1', 0.0, 2.0, 1.0]), main, upper) is False,         'whole-body recoil on a weapon-layer state passed'
+    assert edf5port.recoil_in_layer(dsgo.Node(['bag_whole_recoil1', 0.0, 0.0, 1.0]), main, upper) is False,         'upper-body recoil on a main-layer state passed'
+    assert edf5port.recoil_in_layer(dsgo.Node(['call', 1.0], {0: 'motion', 1: 'speed'}), main, upper) is None
     # a Weapon_Sub's named custom_parameter (the call it makes) is never taken over
     sub = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', ours_block)
     named = dsgo.Node(['vehicle_call', 1.0], {0: 'motion', 1: 'speed'})
@@ -9357,7 +9447,7 @@ def ported_weapon_locators_fit_real() -> None:
         finally:
             edf5port.hold_as, edf5port.fit_locators = hold, fit
 
-    built = adopted = held_fields = moved = like = preferred = red_governors = 0
+    built = adopted = held_fields = moved = like = preferred = red_governors = sentries = checked_layers = 0
     # the Monsoon (暴雨, aWeapon057 on governor01): where its soldiers grip is what EDF4.1's red Governor takes
     monsoon = dsgo.parse(stock('WEAPON/AWEAPON057.SGO')).root.get('animation_model').items[2].data
     for p in pw.PORTS:
@@ -9376,9 +9466,28 @@ def ported_weapon_locators_fit_real() -> None:
         b = r.get('animation_model').items[2].data
         bones = {n for n, _parent in models.bones(doc)}
         assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
+        states = models.soldier_states(p.category)
+        cp = r.get('custom_parameter') if 'custom_parameter' in r.names.values() else None
+        in_layer = edf5port.recoil_in_layer(cp, models.soldier_states(p.category, 'main'),
+                                            models.soldier_states(p.category, 'weapon'))             if r.get('xgs_scene_object_class') == 'Weapon_BasicShoot' else None
+        if in_layer is not None:
+            checked_layers += 1
+            assert in_layer, (f'{p.id}: recoil {cp.items[0]!r} (whole body {cp.items[2]}) not in the layer of its soldier '
+                              'it asks for (main when whole-body, else weapon)')
         for f in edf5port.HOLD_NAMES:
-            if f in r.names.values() and edf5port._first_text(r.get(f)) is not None:
-                assert edf5port._first_text(r.get(f)) in models.known[f], f'{p.id} {f}: an animation EDF6 has not'
+            name = edf5port._first_text(r.get(f)) if f in r.names.values() else None
+            if name is not None:
+                assert name in models.known[f] or edf5port.plays(f, name, states), \
+                    f'{p.id} {f}: {name!r}, an animation no EDF6 weapon uses and its soldier does not play'
+        if 'AmmoClass' in r.names.values() and r.get('AmmoClass') == 'SentryGunBullet01' and p.cls == 'Weapon_BasicShoot':
+            # EDF5's Air Raider sentry guns (feedback #31): carried and set down with the Air Raider's own 'bag' set
+            # (EDF6ENGINEER.CAS), not held as a rifle with an upper-body recoil where they ask for a whole-body one
+            sentries += 1
+            assert p.category // 100 == 3, f'{p.id}: a sentry gun on soldier {p.category // 100}'
+            assert [r.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+                ['bag', 'bag_change1', 'bag_reload1'], f'{p.id}: not carried as EDF5\'s case'
+            assert r.get('custom_parameter').items[0] == 'bag_whole_recoil1', f'{p.id}: not set down with the whole body'
+            assert 'bag_whole_recoil1' in states and 'bag_stand' in states
         raw = build(p, False, False)
         raw_block = raw.get('animation_model').items[2].data
         peers = models.peers(doc)
@@ -9426,6 +9535,8 @@ def ported_weapon_locators_fit_real() -> None:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
     assert red_governors >= 4, f'{red_governors} ported weapons on EDF4.1\'s red Governor (s_shotgun_governor02)'
+    assert checked_layers > 100, f'{checked_layers} recoil names checked against their layer: this check is (nearly) empty'
+    assert sentries >= 4, f'{sentries} EDF5 Air Raider sentry guns checked (ZE-GUN, ZE-GUN 2A, FZ-GUN M2 / MX)'
     assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
         (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '
          f'block, {preferred} placed as the developers do: this check is (nearly) empty')

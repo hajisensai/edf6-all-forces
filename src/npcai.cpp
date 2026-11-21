@@ -741,7 +741,9 @@ void Stand(unsigned char* h) noexcept { Put<float>(h,kMoveX,0.0f);Put<float>(h,k
 //    height for a route's first edge, so every search from there failed (the log's Wing Divers, 20-30 m up, never moved).
 constexpr float kRouteHorizon=48.0f;
 constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its route starts from is looked for
-npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;return p; }
+//  - with the next leg (and the route on to a goal that moved) searched from the end of the one it walks while it walks
+//    it (Profile::ahead; testhub #41 / #47: followers stood at every leg's end and whenever their point moved 16 m).
+npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;p.ahead=true;return p; }
 void RouteStart(const float* pos,float* from) noexcept {
     from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
     const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
@@ -756,19 +758,36 @@ void RouteStart(const float* pos,float* from) noexcept {
 // `hull`: the vehicle boarded and its room by the seat (Board: BoardHull). Every route goes round the vehicles' bodies,
 // which the map ray the routes use does not see (HullClear; 2026-11-21: 「npc 寻路好像不会绕开载具」).
 Hull RouteHull(Hull hull) noexcept;
+// The stick: full along the route, eased only on its last edge to the goal by what is left of that edge (kEaseMetres
+// short of `stop`, never under kEaseLeast; npc::navigation::FinalLeft). Not by the straight distance to the goal: one 3 m
+// behind a wall, 40 m round it, was walked to at 0.3 stick the whole way (review 2026-11-21). The walk is the stick times the class's speed, no floor or cap on it (0x56D350: +0xD50 x +0x11C4 x +0x126C,
+// its length capped at +0x11C0, which the human's constructor sets FLT_MAX at 0x56A7C6). The ease was the distance to the
+// next waypoint before (c21f4992), and the waypoints are the route's 2 m cells: every soldier walked its routes at 37-77 %
+// of its speed, slowing at every corner (testhub #41 / #47: "很难让他们跟着玩家"; docs/feedback-2026-10-12-npc-fire.md had
+// measured 2.0-2.3 m/s, a Ranger's full walk being 0.1 m a frame, 6 m/s).
+constexpr float kEaseMetres=6.0f,kEaseLeast=0.3f;
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {
     Soldier* const soldier=Entry(h,ms);
-    // Its turn first: one waiting behind the caller the route budget denied last frame stands, the call's pending
-    // (ground_navigation.h GroundNavigateDeferred), without the two floor rays of its ends the call would not look at
-    // (stress:100 2026-11-08: RouteStart 1.6 ms a frame).
-    if(!soldier || GroundNavigateDeferred(soldier->navigation)){Stand(h);return;}
+    if(!soldier){Stand(h);return;}
+    hull=RouteHull(hull);
     float waypoint[3],dir[3],from[3],goal[3];
-    RouteStart(pos,from);RouteStart(to,goal);
-    if(GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),RouteHull(hull))!=npc::navigation::Result::moving ||
-       !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
-    const float d=npc::Horiz(pos,waypoint);
+    npc::navigation::Result route;
+    // Its turn first: one waiting behind the caller the route budget denied last frame walks on along the path it has,
+    // checked a moment ago, without a query (ground_navigation.h Coast), else stands; without the two floor rays of its
+    // ends the call would look at (stress:100 2026-11-08: RouteStart 1.6 ms a frame). It stood every such frame before,
+    // however good its path: the soldiers ahead of the denied one in the update order, every frame the budget ran out.
+    // It walks on only for the route the last call was for (the same hull, stop, goal): a soldier just sent to board,
+    // an attack-move's stand or a new order waits its turn standing.
+    if(GroundNavigateDeferred(soldier->navigation))route=GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull);
+    else {
+        RouteStart(pos,from);RouteStart(to,goal);
+        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);
+    }
+    if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     if(!(pace>0.0f)){Stand(h);return;}
-    Move(h,dir,(d/6.0f+0.3f)*(pace<1.0f ? pace : 1.0f));
+    const float left=npc::navigation::FinalLeft(soldier->navigation,{pos[0],pos[1],pos[2]});
+    const float ease=left<0.0f ? 1.0f : (std::min)(1.0f,(std::max)(kEaseLeast,(left-stop)/kEaseMetres+kEaseLeast));
+    Move(h,dir,ease*(pace<1.0f ? pace : 1.0f));
 }
 void Look(unsigned char* h,const float* dir) noexcept {
     // The native action may freeze look even while the script's control mask permits it.

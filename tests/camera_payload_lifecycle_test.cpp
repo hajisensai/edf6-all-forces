@@ -17,6 +17,7 @@ unsigned char* currentHuman=nullptr;
 ULONGLONG clockMs=1000;
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return clockMs; }
+ULONGLONG GameFrame() noexcept { return clockMs/16; }   // the chase follower's clock (turretcam.cpp)
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
@@ -25,6 +26,7 @@ bool MapOwnsView() noexcept { return false; }
 bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool IsPlayerJet(const void*) noexcept { return false; }
+bool PlayerRotorCraft(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
@@ -156,8 +158,9 @@ void CheckNativeLifecycle(unsigned vt,const wchar_t* path,bool lofted,bool custo
     if(lofted) {
         highMode=false;LauncherFrame(v.vehicle);
         Check(LauncherAt(-4) && loftOwner==v.vehicle && loftAim,"Katyusha real payload selection publishes actual launcher impact and spread");
-        highMode=true;LauncherFrame(v.vehicle);
-        Check(LauncherAt(-4) && !loftAim,"Katyusha high mode retains real preview without camera-driven loft");
+        const int seen=cameraReads;highMode=true;LauncherFrame(v.vehicle);
+        Check(LauncherAt(-4) && loftAim && cameraReads==seen,
+              "Katyusha high mode retains real preview and lofts onto its axis' range, not a camera ray (2026-11-21)");
     }
     VehicleFixture p2(vt,path,lofted);
     const int reads=cameraReads,lofts=loftCalls;

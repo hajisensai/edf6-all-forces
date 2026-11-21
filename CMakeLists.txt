@@ -706,7 +706,7 @@ target_link_libraries(infantry_scope_pip_test PRIVATE edf6common d3d11 d3dcompil
 target_compile_options(infantry_scope_pip_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME infantry_scope_pip COMMAND infantry_scope_pip_test)
 set_tests_properties(infantry_scope_pip PROPERTIES TIMEOUT 90)
-# The picture-in-picture scope's lens view (src/scope_lens.cpp: viewport 3's camera, the recording's held tail and the
+# The picture-in-picture scope's lens view (src/scope_lens.cpp: viewport 3's camera, viewport 0's tail in place and the
 # lens command) on a stand-in of the engine's System and recording (its native anchors: scope_lens_native below).
 add_executable(scope_lens_test tests/scope_lens_test.cpp)
 target_link_libraries(scope_lens_test PRIVATE edf6common)
@@ -947,6 +947,15 @@ add_test(NAME dreadnought_net COMMAND dreadnought_net_test)
 add_executable(dreadnought_deck_test tests/dreadnought_deck_test.cpp)
 target_compile_options(dreadnought_deck_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME dreadnought_deck COMMAND dreadnought_deck_test)
+# A wing's velocity steered as a wing (src/wing_turn.h: the Dreadnought's hangar flying a fighter home; test hub #42).
+add_executable(wing_turn_test tests/wing_turn_test.cpp)
+target_compile_options(wing_turn_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME wing_turn COMMAND wing_turn_test)
+# ...and the hangar's whole flight home: its capture, its nose, its speed held (src/hangar_recover.h; test hub #42). Its
+# negative controls run under playerjet_recovery (tools/playerjet_recovery_check.py).
+add_executable(hangar_recover_test tests/hangar_recover_test.cpp)
+target_compile_options(hangar_recover_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME hangar_recover COMMAND hangar_recover_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 # In COCKPIT_BUILD_SHARDS parts run side by side (its units: tests/cockpit_build_test.py units; all in one run took ~15 min).
@@ -1156,6 +1165,9 @@ add_test(NAME pn COMMAND pn_test)
 add_executable(fuze_test tests/fuze_test.cpp)
 target_compile_options(fuze_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME fuze COMMAND fuze_test)
+# What an unarmed missile's dud (no burst, blast sound or fireball) rests on in EDF.dll (skipped without the game).
+add_test(NAME missile_dud_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/missile_dud_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(missile_dud_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
 # The first person's arithmetic (src/fp_view.h: the viewmodel transform, the collapse, the eye) offline
 # (tools/fp_view_check.cpp). cmake --build build --target fp_view_check && buildp_view_check.exe
@@ -2032,6 +2044,14 @@ target_link_libraries(vehicle_look_test PRIVATE edf6common user32)
 target_compile_options(vehicle_look_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks vehicle_look_test)
 add_test(NAME vehicle_look COMMAND vehicle_look_test)
+
+# The vehicle cameras' chase follower (src/chase_cam.h): pure math, header-only.
+add_executable(chase_cam_test EXCLUDE_FROM_ALL tests/chase_cam_test.cpp)
+target_include_directories(chase_cam_test PRIVATE src common)
+target_link_libraries(chase_cam_test PRIVATE edf6common user32)
+target_compile_options(chase_cam_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks chase_cam_test)
+add_test(NAME chase_cam COMMAND chase_cam_test)
 
 add_test(NAME sedan_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sedan_build_test.py")
 set_tests_properties(sedan_build PROPERTIES SKIP_RETURN_CODE 77)

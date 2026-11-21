@@ -349,6 +349,15 @@ bool DeleteSupportSoldier(const ObjRef& ref) noexcept {
 int registered=0;bool registerSupportOk=true;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return registerSupportOk;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
+// The drill transport (support_spawn.h): preloaded or not, and the hulls made (13 seats, as the SGO's).
+bool drillReady=true;int drillSpawns=0;float drillSpawnAt[3]{};
+bool SupportDrillTransportReady() noexcept {return drillReady;}
+unsigned char* SpawnSupportDrillTransport(const float* entry,const float*,const void*) noexcept {
+    ++drillSpawns;std::memcpy(drillSpawnAt,entry,12);
+    auto hull=Make(true);auto* v=static_cast<unsigned char*>(const_cast<void*>(hull.obj));
+    Put<std::uint64_t>(v,kSeatCount,kSupportDrillTransport.seats);
+    std::memcpy(v+kPosition,entry,12);return v;
+}
 std::wstring lastHullVariant;
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t* variant) noexcept {
     lastHullVariant=variant ? variant : L"";return nullptr;
@@ -402,7 +411,8 @@ void ReportSupportFailure(std::uint64_t id) noexcept {Destroy(id);}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept {return p.count>0 && p.count<=kMaxUnits;}}
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boardRequests;return count;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
-bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {return true;}
+int vehiclePosts=0;
+bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {++vehiclePosts;return true;}
 #endif
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
 // The stock get-off before a seated soldier is deleted (support_dispatch.cpp Unseat): the seat cleared, counted.
@@ -446,8 +456,12 @@ bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrai
 float MapRay(const float*,const float*,float*) noexcept {return -1;}
 #endif
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
-npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float*,float,std::uint64_t,float* waypoint,npc::navigation::Profile) noexcept {
-    std::memcpy(waypoint,from,12);return routeResult;
+// `vehicleRoutesBlocked`: no route for a hull's profile (wider than a soldier's), the soldiers' as routeResult.
+bool vehicleRoutesBlocked=false;float routeTo[3]{};float routeRadius=0;
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float,std::uint64_t,float* waypoint,npc::navigation::Profile profile) noexcept {
+    std::memcpy(waypoint,from,12);std::memcpy(routeTo,to,12);routeRadius=profile.radius;
+    if(vehicleRoutesBlocked && profile.radius>npc::navigation::Profile{}.radius)return npc::navigation::Result::blocked;
+    return routeResult;
 }
 #endif
 }
@@ -1534,6 +1548,102 @@ int main() {
     check(!SupportCallAt(0,target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"an air call underground: refused, said why");
     check(!SupportCallAt(GroundStart(),target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"a tank underground: refused");
     check(SupportCallAt(AirCount(),target,note,128) && offlinePending,"the infantry underground: planned");
+    // Underground the infantry calls come in the drill transport (the user: 「地底可以用钻地坦克」; docs/insertion-re.md §5):
+    // planned as its hull, its driver and the call's soldiers (a leader every four), made beside it and boarded, driven in;
+    // at the point its passengers are up to three squads handed to it (TransportDeliver), and then it drives back to its
+    // entry, where its driver and the hull are deleted (never the soldiers it delivered).
+    {
+        ResetSupportDispatch();made=deleted=followed=delivered=boardRequests=unseated=0;resourceCount=0;drillSpawns=0;
+        fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        check(SupportCallAt(AirCount()+1,target,note,128),"a platoon underground: taken");
+        SupportDispatchTick();
+        auto& d=deployments[0];
+        check(d.used && drillSpawns==1 && made==14 && d.plan.count==14 && DrillPlan(d.plan) &&
+              d.plan.units[0].resourceId==kSupportDrillTransportResource && !d.plan.units[0].role,
+              "planned and made: one drill transport, its driver and twelve soldiers");
+        bool shape=d.plan.units[1].role==1 && !IsSupportLeaderResource(d.plan.units[1].resourceId);
+        for(unsigned i=2;i<14;++i)shape=shape && d.plan.units[i].role==1 && IsSupportLeaderResource(d.plan.units[i].resourceId)==((i-2)%4==0);
+        check(shape,"its driver, then the platoon aboard (role 1): a leader every four");
+        float most=0;
+        for(unsigned i=1;i<14;++i)most=std::fmax(most,support::FlatDistance(d.plan.units[i].matrix+12,d.plan.units[0].matrix+12));
+        check(most<20.0f,"its thirteen gather on both sides of it (not a 27 m file)");
+        check(d.assigned && boardRequests==1 && !d.started,"all thirteen asked aboard at once; not off before they are seated");
+        const SupportPlan drillPlan=d.plan;
+        check(Validate(drillPlan),"a peer validates the drill transport's plan underground");
+        {
+            SupportPlan wrong=drillPlan;std::swap(wrong.units[2],wrong.units[3]);
+            check(!Validate(wrong),"a leader out of place: refused");
+            wrong=drillPlan;wrong.units[1].role=0;check(!Validate(wrong),"a driver not aboard: refused");
+            wrong=drillPlan;wrong.count=2;check(!Validate(wrong),"no soldier aboard: refused");
+            wrong=drillPlan;wrong.catalogId=static_cast<unsigned>(GroundStart()+2);check(!Validate(wrong),"a drill transport for another entry: refused");
+            drillReady=false;check(!Validate(drillPlan),"a peer without the drill transport preloaded refuses it");drillReady=true;
+            missionUnderground=false;check(!Validate(drillPlan),"above ground no infantry plan brings a hull");missionUnderground=true;
+        }
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(d.objects[0].obj));
+        for(unsigned i=1;i<14;++i)Put<const void*>(SeatAt(v,i-1),kSeatRider,d.objects[i].obj);
+        fixtureMs+=16;SupportDispatchTick();
+        check(d.started && !d.delivered && !delivered,"seated: it drives off along its route, nobody off yet");
+        // One soldier of the second squad lost on the way: the rest are still carried (not delivered where they sit).
+        static_cast<unsigned char*>(const_cast<void*>(d.objects[6].obj))[kDead]=1;
+        fixtureMs+=16;SupportDispatchTick();
+        check(!d.delivered && d.lost,"a passenger lost on the way: it drives on with the rest");
+        routeResult=npc::navigation::Result::arrived;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(d.delivered && delivered==1 && deliveredHull==d.objects[0].obj && deliveredSquads==3 && !deliveredHere &&
+              deliveredTops[0]==d.objects[2].obj && deliveredTops[1]==d.objects[7].obj && deliveredTops[2]==d.objects[10].obj,
+              "arrived: three squads handed to it (the lost leader's next soldier leads its squad), the driver not among them");
+        check(followed==8 && std::wcsstr(status,L"钻地"),"each other soldier follows its squad's leader; the HUD says the drill transport came");
+        bool carried=!d.carried[0] && !d.carried[1];
+        for(unsigned i=2;i<14;++i)carried=carried && d.carried[i]==(i!=6);
+        check(carried,"the delivered soldiers are the player's now (never deleted with it)");
+        // The delivery's end (transport.cpp EndTrip -> SupportWithdrawVehicle): they got off, it drives back to its entry.
+        for(unsigned i=1;i<13;++i)Put<const void*>(SeatAt(v,i),kSeatRider,nullptr);
+        check(SupportWithdrawVehicle(v) && d.withdrawing,"it goes back");
+        routeResult=npc::navigation::Result::moving;vehiclePosts=0;
+        fixtureMs+=16;SupportDispatchTick();
+        check(d.withdrawing && vehiclePosts==1 && !std::memcmp(routeTo,d.plan.units[0].matrix+12,12) &&
+              routeRadius==VehicleRouteProfile(kSupportDrillTransport).radius,"driven back to the entry it came in at, on its own profile");
+        routeResult=npc::navigation::Result::arrived;deleted=0;
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==1 && d.withdrawing,"out at its entry: its driver deleted");
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==2 && !d.withdrawing,"then the drill transport");
+        routeResult=npc::navigation::Result::pending;
+    }
+    // A squad: four aboard, one squad handed over.
+    {
+        ResetSupportDispatch();made=followed=delivered=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        auto& d=deployments[0];
+        check(drillSpawns==1 && made==6 && d.plan.count==6 && DrillPlan(d.plan),"a squad underground: the drill transport, its driver, four");
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(d.objects[0].obj));
+        for(unsigned i=1;i<6;++i)Put<const void*>(SeatAt(v,i-1),kSeatRider,d.objects[i].obj);
+        fixtureMs+=16;SupportDispatchTick();routeResult=npc::navigation::Result::arrived;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(d.delivered && deliveredSquads==1 && deliveredTops[0]==d.objects[2].obj && followed==3,"arrived: one squad, its leader on top");
+        routeResult=npc::navigation::Result::pending;
+    }
+    // No entry with a route the drill transport can drive (a cave narrower than it): the soldiers walk in instead.
+    {
+        ResetSupportDispatch();made=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;vehicleRoutesBlocked=true;
+        SupportCallAt(AirCount(),target,note,128);
+        for(int i=0;i<64 && offlinePending;++i){fixtureMs+=16;SupportDispatchTick();}
+        check(!drillSpawns && made==4 && !DrillPlan(deployments[0].plan) && !deployments[0].plan.units[0].role,
+              "no drill route from any entry: the squad walks in");
+        vehicleRoutesBlocked=false;routeResult=npc::navigation::Result::pending;
+    }
+    // Its SGO not preloaded (a broken install): refused, said why, nothing made (no walking stand-in).
+    {
+        ResetSupportDispatch();made=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;drillReady=false;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        check(!made && !offlinePending && std::wcsstr(status,L"钻地运兵车"),"the drill transport not installed: refused, said why");
+        drillReady=true;
+        // NpcBoarding off (no NPC boards anything): the soldiers walk in.
+        config.npcBoarding=false;ResetSupportDispatch();made=0;fixtureMs+=40000;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        check(made==4 && !drillSpawns && !DrillPlan(deployments[0].plan),"NpcBoarding off: they walk in");
+        config.npcBoarding=true;routeResult=npc::navigation::Result::pending;
+    }
     missionUnderground=false;
     ResetSupportDispatch();fixtureMs+=40000;made=0;
     // Takeoff from the carrier's deck (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」): the deck spot nearest the

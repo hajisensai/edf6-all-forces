@@ -29,6 +29,7 @@
 #include "vecmath.h"
 #include "edf/weapon.h"
 #include "weapon_mount.h"
+#include "hud_cue.h"
 #include "drivegear.h"
 #include <cmath>
 #include <cstring>
@@ -103,23 +104,42 @@ void Reload(const unsigned char* w,StockArm& a) noexcept {
     a.reloadSec=left>0 ? static_cast<float>(left)/60.0f : 0.0f;
 }
 
-// How far left of the vehicle's middle `centre` its weapon `w`'s first muzzle is, m, across the weapon's own bore (the
-// strip's order, hud_cue.h SideOrder); 0 unknown. Left is up x bore: (bore z, 0, -bore x), as the hull's row 0 is its left
-// (turretcam.h) for its row 1 up and row 2 its nose; a bore straight up or down (no level left) is read across `hull`.
-// Not across the camera's view: holding the free-look key (vehicle_look.cpp) turns the camera round the vehicle, and the
-// strip's left-to-right order turned with it (the user, 2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化，应该挂载
-// 顺序不动才对"). The bore turns with the turret, the torso, the arm the weapon is on, never with the look.
-float SideOf(const unsigned char* w,const float* centre,const float* hull) noexcept {
-    const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
-    const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
-    if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride))return 0.0f;
-    float pos[3],dir[3];
-    if(!edf::MuzzleFrame(w,muzzles,pos,dir))return 0.0f;
-    float left[3]={dir[2],0.0f,-dir[0]};
-    if(!vec::Normalize(left)){left[0]=hull[2];left[1]=0.0f;left[2]=-hull[0];if(!vec::Normalize(left))return 0.0f;}
-    const float off[3]={pos[0]-centre[0],pos[1]-centre[1],pos[2]-centre[2]};
-    const float side=vec::Dot(off,left);
-    return std::isfinite(side) ? side : 0.0f;
+// How far left of vehicle `v`'s middle the weapon in `holder` (of `seat`) is, m, in the hull's frame (the strip's order,
+// hud_cue.h SideOrder / HullSide); 0 unknown. Its first muzzle, and the pivot the seat's yaw axis turns it about
+// (weapon_mount.h YawPivot: the root-most yaw-turned bone of its mount bone's ancestry; none for a hull-fixed weapon).
+// Neither the camera's view (2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化，应该挂载顺序不动才对") nor the bore alone:
+// in the turret camera the mouse turns the turret, and across the bore a turret whose yaw axis is off the hull's origin
+// carried its weapons' sides round with it (2026-11-21: 「载具的挂载不要跟随视角变位置」). A mount whose ancestry cannot be
+// read is unknown (0), never guessed hull-fixed.
+float SideOf(const unsigned char* v,const unsigned char* seat,const unsigned char* holder) noexcept {
+    __try {
+        if(!Readable(v+kMatrix,48) || !Readable(holder,kHolderWeapon+8))return 0.0f;
+        const unsigned char* const w=At<const unsigned char*>(holder,kHolderWeapon);
+        if(!Readable(w,edf::kMuzzleCount+8))return 0.0f;
+        const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
+        const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
+        if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride))return 0.0f;
+        float pos[3],dir[3],pivot[3];
+        if(!edf::MuzzleFrame(w,muzzles,pos,dir))return 0.0f;
+        const int turned=weaponmount::YawPivot(v,seat,holder,pivot);
+        if(turned<0)return 0.0f;
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        return hudcue::HullSide(pos,dir,turned ? pivot : nullptr,reinterpret_cast<const float*>(v+kPosition),m,m+4);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0.0f;}
+}
+
+// The seat of `v` and its holder that hold weapon `w` (a Proteus seat's borrowed mounts are another seat's): false if none.
+bool HolderOf(unsigned char* v,const unsigned char* w,const unsigned char** seat,const unsigned char** holder) noexcept {
+    const unsigned seats=SeatCount(v);
+    for(unsigned s=0;s<seats;++s) {
+        const unsigned char* const at=SeatAt(v,s);
+        const auto holders=At<unsigned char* const*>(at,kSeatWeapons);
+        const auto n=At<std::uint64_t>(at,kSeatWeaponCount);
+        if(n>16 || !Readable(holders,n*8))continue;
+        for(std::uint64_t i=0;i<n;++i)
+            if(Readable(holders[i],kHolderWeapon+8) && At<const unsigned char*>(holders[i],kHolderWeapon)==w){*seat=at;*holder=holders[i];return true;}
+    }
+    return false;
 }
 
 // The enemy under the view (see the top): each enemy's lock point off the camera's ray (`eye`, `look`), the nearest
@@ -395,7 +415,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             // The range to what it is aimed at: the pick's, and every gun on a trigger (each keeps its own sight, hud.cpp
             // OtherTriggerSight: the Titan's Requiem cannon while its machine gun is picked).
             Arm(w,!r.heli && (a.coFired || a.armed),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
-            a.side=SideOf(w,r.pos,r.hull);
+            a.side=SideOf(v,seat,holders[i]);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     // A Proteus seat also works the stock mounts it borrows (proteus.cpp: the driver both cannons with nobody at the
@@ -406,7 +426,8 @@ void StockHudFrame(unsigned char* v) noexcept {
         for(int i=0;i<lent && r.arms<kStockArms;++i) {
             auto& a=r.arm[r.arms++];a.coFired=true;
             Arm(borrowed[i],true,a,false);
-            a.side=SideOf(borrowed[i],r.pos,r.hull);
+            const unsigned char *lender=nullptr,*holder=nullptr;
+            a.side=HolderOf(v,borrowed[i],&lender,&holder) ? SideOf(v,lender,holder) : 0.0f;
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     }

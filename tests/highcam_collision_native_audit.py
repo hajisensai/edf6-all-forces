@@ -177,9 +177,9 @@ def run(path: Path, pefile, capstone) -> None:
                     require(direction(collapsed_eye, actual_look)[1] < -0.99999, "surface contact must reproduce -90 degree collapse")
                 checks += 1
                 # Keep the same optical ray through the impact, but put collision look in free space on that ray.
-                # The final case is the production fix: retreat the pivot exactly one native camera margin (0.1 m)
-                # from the impact toward the unchanged eye, rather than relying on an arbitrarily distant pivot.
-                production_fraction = 1.0 - ct.c_float.from_address(cam + 0x528).value / distance(eye, plane_point)
+                # The final case is production (2026-11-21, tcam::HighPivot): the pivot at the eye's end of the optical
+                # ray, max(2 m, 4 x the native margin) from the eye, so nothing between the impact and the eye is swept.
+                production_fraction = max(2.0, 4.0 * ct.c_float.from_address(cam + 0x528).value) / distance(eye, plane_point)
                 for fraction in (0.05, 0.25, 0.75, production_fraction):
                     pivot = tuple(eye[i] + (plane_point[i] - eye[i]) * fraction for i in range(3))
                     stable_eye, stable_look = invoke(eye, pivot)

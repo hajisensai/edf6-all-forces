@@ -5,7 +5,13 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "support_firepower.h"
+#include "mod_file.h"
 #include <cmath>
+
+// Whether the installer wrote Mods/<dir>/<file> (the offline test supplies its own answer).
+#ifndef EDF6_SUPPORT_SPAWN_MOD_FILE
+#define EDF6_SUPPORT_SPAWN_MOD_FILE(dir,file) ModFileIn(dir,file)
+#endif
 
 namespace crew {
 namespace {
@@ -22,6 +28,7 @@ struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 using CreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using SetupFn=void(__fastcall*)(void*,void*);
 bool profile=false,preloaded[kSupportVehicleCount]{},broken[kSupportVehicleCount]{};
+bool drillPreloaded=false,drillBroken=false;   // the drill transport (support_spawn.h kSupportDrillTransport)
 // Only support-created objects may be rolled back; ObjRef rejects expired/reused addresses.
 ObjRef created[64]{};
 
@@ -74,6 +81,7 @@ bool ApplyMissionSetup(unsigned char* v) noexcept {
 
 void PreloadSupportVehicles() noexcept {
     for(auto& p:preloaded)p=false;
+    drillPreloaded=false;
     for(auto& ref:created)ref=ObjRef{};
     profile=CheckProfile();
     if(!profile){Log("SUPPORT ground: native spawn profile mismatch, disabled");return;}
@@ -87,8 +95,15 @@ void PreloadSupportVehicles() noexcept {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kSupportVehicles[i].sgo,2,-1);
             preloaded[i]=true;
         }
+        // The drill transport is the installer's file (tools/make_drill.py), not Root.cpk's: not there, a broken install
+        // (logged; underground the infantry calls are then refused, support_dispatch.cpp).
+        if(!drillBroken && EDF6_SUPPORT_SPAWN_MOD_FILE(L"OBJECT",kSupportDrillTransportFile)) {
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kSupportDrillTransport.sgo,2,-1);
+            drillPreloaded=true;
+        } else if(!drillBroken)Log("SUPPORT ground: Mods/OBJECT/%ls not installed: no drill transport underground (reinstall)",kSupportDrillTransportFile);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         for(auto& p:preloaded)p=false;
+        drillPreloaded=false;
         Log("SUPPORT ground: mission preload fault, all ground calls disabled for this mission");
     }
 }
@@ -99,17 +114,21 @@ bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept 
            !broken[static_cast<unsigned>(kind)] && (!row->armed || SupportFirepowerReady());
 }
 
-unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,const float* entry,
-                                   const float* heading,const void* owner,const wchar_t* variant) noexcept {
-    if(!SupportVehicleReady(kind,mode) || !Finite3(entry) || !Finite3(heading))return nullptr;
+bool SupportDrillTransportReady() noexcept {return profile && drillPreloaded && !drillBroken;}
+
+namespace {
+// One hull of `row` (a stock row, or the drill transport): created at the entry, checked to be the class and seats the
+// row says, its firepower marked, its mission setup applied, friend team, level 1. A failure of the resource itself (not
+// of a loaded variant or of the firepower mark) sets `rowBroken` and clears `rowReady`: it stays off until restart.
+unsigned char* MakeHull(const SupportVehicleSpec& row,bool& rowReady,bool& rowBroken,const float* entry,const float* heading,
+                        const void* owner,const wchar_t* variant) noexcept {
+    if(!Finite3(entry) || !Finite3(heading))return nullptr;
     const float length=std::hypot(heading[0],heading[2]);
     if(!std::isfinite(length) || length<0.001f)return nullptr;
     ObjRef* slot=nullptr;
     for(auto& ref:created)if(!ref){slot=&ref;break;}
     if(!slot)return nullptr;
-    const auto row=SupportVehicleInfo(kind);
-    const auto index=static_cast<unsigned>(kind);
-    const wchar_t* const sgo=variant ? variant : row->sgo;
+    const wchar_t* const sgo=variant ? variant : row.sgo;
     const float x=heading[0]/length,z=heading[2]/length;
     alignas(16) const float matrix[]={z,0,-x,0, 0,1,0,0, x,0,z,0, entry[0],entry[1],entry[2],1};
     InitParam param{image+kInitVtable,{}};
@@ -121,8 +140,8 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
         v=reinterpret_cast<CreateFn>(image+kCreate)(mgr,matrix,sgo,&param);
         if(!v)return nullptr;
         // Its firepower by level (support_firepower.h): marked before the setup, which writes it.
-        const bool same=At<const void*>(v,0)==image+row->vtable && SeatCount(v)==row->seats;
-        unmarked=same && !MarkFirepower(v,*row);
+        const bool same=At<const void*>(v,0)==image+row.vtable && SeatCount(v)==row.seats;
+        unmarked=same && !MarkFirepower(v,row);
         if(same && !unmarked && ApplyMissionSetup(v)) {
             reinterpret_cast<void(*)(void*,std::int32_t,bool)>(image+kSetTeam)(v,2,true);
             reinterpret_cast<void(__fastcall*)(void*,float)>(image+kSetLevel)(v,1.0f);
@@ -139,14 +158,27 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
         // the resource is not broken.
         if(unmarked)Log("SUPPORT ground: %ls its firepower not marked: refused",sgo);
         else if(variant)Log("SUPPORT ground: %ls is not the stock hull's class / seats / setup: refused",sgo);
-        else {broken[index]=true;preloaded[index]=false;}
+        else {rowBroken=true;rowReady=false;}
         if(v)NativeDelete(v);
         *slot=ObjRef{};
         return nullptr;
     }
     Log("SUPPORT ground: %ls hull=%p seats=%u at verified entry (%.1f,%.1f,%.1f), awaiting real crew",
-        sgo,v,row->seats,entry[0],entry[1],entry[2]);
+        sgo,v,row.seats,entry[0],entry[1],entry[2]);
     return v;
+}
+}  // namespace
+
+unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,const float* entry,
+                                   const float* heading,const void* owner,const wchar_t* variant) noexcept {
+    if(!SupportVehicleReady(kind,mode))return nullptr;
+    const auto index=static_cast<unsigned>(kind);
+    return MakeHull(*SupportVehicleInfo(kind),preloaded[index],broken[index],entry,heading,owner,variant);
+}
+
+unsigned char* SpawnSupportDrillTransport(const float* entry,const float* heading,const void* owner) noexcept {
+    if(!SupportDrillTransportReady())return nullptr;
+    return MakeHull(kSupportDrillTransport,drillPreloaded,drillBroken,entry,heading,owner,nullptr);
 }
 
 // airdrop.cpp: a vehicle the game's container made for the plugin's transport plane gets the same setup step.

@@ -17,7 +17,8 @@
 //  - fuses by proximity: closer than kFuseShare of its blast radius (AmmoExplosion) to the target within the coming
 //    frame, it goes off now (core +0xAF4 |= 0x20, its age set to its life: the stock expiry blasts it there);
 //  - arms its warhead only while its burst cannot reach its launcher (fuze.h: the blast's own box query against the
-//    launcher's bodies, Launcher): unarmed, the proximity fuse holds and a hit is single-target, no burst.
+//    launcher's bodies, Launcher): unarmed, the proximity fuse holds and a hit is a dud: single-target damage, no burst,
+//    no blast sound, no fireball (fuze.h HitFlags / HitFireball).
 // Docs: docs/missile-re.md. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "fuze.h"
@@ -34,13 +35,28 @@ namespace {
 using vec::Clamp;using vec::Dot;using vec::Len;using vec::Normalize;
 constexpr std::size_t kVtable=0x17A1C10,kUpdate=0x26A880,kSlotUpdate=5;
 const unsigned char kUpdateSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
+// What an unarmed round's dud rests on (fuze.h), checked before the hook: the class's update draws its hit's fireball
+// from the recorded hits (cmp [B+0x818],0 = core+0x6D8) at size core+0xA20 (movss xmm3,[B+0xB60]); the hit plays
+// AmmoHitSe only with flag 0x400 (bt eax,0xA) and takes the area damage only with 0x10 (test al,0x10); the burst radius
+// is core+0x788, copied from core+0xA20 once (movss [rbx+0x788],xmm0). tests/missile_dud_native_audit.py reads the same.
+struct Site { std::size_t at; const unsigned char* code; std::size_t size; };
+const unsigned char kHitsSig[]={0x48,0x83,0xB9,0x18,0x08,0x00,0x00,0x00},kFireballSig[]={0xF3,0x0F,0x10,0x99,0x60,0x0B,0x00,0x00};
+const unsigned char kSoundSig[]={0x0F,0xBA,0xE0,0x0A,0x73},kAreaSig[]={0xA8,0x10,0x0F,0x84};
+const unsigned char kRadiusSig[]={0xF3,0x0F,0x11,0x83,0x88,0x07,0x00,0x00};
+const Site kDudSites[]={{0x26A8AC,kHitsSig,sizeof(kHitsSig)},{0x26A8C1,kFireballSig,sizeof(kFireballSig)},
+                        {0x2325CD,kSoundSig,sizeof(kSoundSig)},{0x232616,kAreaSig,sizeof(kAreaSig)},
+                        {0x2320BD,kRadiusSig,sizeof(kRadiusSig)}};
 // The round (B): its lock entry (+0x10 the aim point, +0x29 valid), velocities (m a frame), CP[4] / CP[6] / CP[8] /
-// CP[9]; its core (B + 0x140): position, flags (bit 0 dead, 0x20 blast on expiry), age and life (frames), blast radius.
+// CP[9]; its core (B + 0x140): position, flags (bit 0 dead, 0x20 blast on expiry), age and life (frames), blast radius
+// (the burst's, GDI+0x58: copied from AmmoExplosion core+0xA20 by the init, 0x2320BD), the size its hit's fireball is drawn
+// from (core+0xA20, 0x26A8C1; fuze.h), and the hits it recorded (the count of the list at core+0x6C0, 0x230CA0): one
+// there and the class's update draws the fireball and ends it this frame (0x26A8AC).
 constexpr std::size_t kLock=0xB10,kLockCtrl=0xB18,kLockAim=0x10,kLockValid=0x29;   // B+0xB18: the entry's control block
 constexpr std::size_t kGuidance=0x1390;   // CP[3]: burn frames, g limit, navigation constant
 constexpr std::size_t kIgnition=0x13AC,kFlown=0x1400;   // CP[7][0] (frames before ignition), frames since launch
 constexpr std::size_t kOwn=0x13D0,kInherited=0x13E0,kAccel=0x13A0,kHomingDelay=0x13B8,kHomingFrames=0x13BC;
-constexpr std::size_t kCore=0x140,kPos=kCore+0xB80,kFlags=kCore+0xAF4,kAge=kCore+0xAF8,kLife=kCore+0xA08,kBlast=kCore+0xA20;
+constexpr std::size_t kCore=0x140,kPos=kCore+0xB80,kFlags=kCore+0xAF4,kAge=kCore+0xAF8,kLife=kCore+0xA08,kBlast=kCore+0x788;
+constexpr std::size_t kFireball=kCore+0xA20,kHits=kCore+0x6D8;
 // The friendly-fire flag (byte, from weapon+0x8B6; docs/swarm-team-re.md 友伤标志 A26): its burst has no team filter.
 constexpr std::size_t kFriendlyFire=kCore+0xA26;
 // Its owner (core+0x9A8 / +0x9B0, a weak reference: object, control block; docs/bullet-pass-re.md): the vehicle offline,
@@ -236,6 +252,7 @@ bool Arm(unsigned char* b,Round& round) noexcept {
     int n=0;
     const bool armed=!selfHarm || !LauncherInReach(b,{pos,next},blast,&n);
     Put<std::uint32_t>(b,kFlags,fuze::HitFlags(At<std::uint32_t>(b,kFlags),explosive,armed));
+    Put<float>(b,kFireball,fuze::HitFireball(blast,explosive,armed));
     if(armed && !round.armed && explosive && Cfg().debug) {
         if(selfHarm)Log("MISSILE %p armed at age %d: its %.0f m blast clear of the %d bodies of its launcher",b,
                         At<std::int32_t>(b,kAge),blast,n);
@@ -287,6 +304,9 @@ void Guide(unsigned char* b) noexcept {
     if(At<const void*>(b,0)!=image+kVtable)return;
     if(At<std::int32_t>(b,kHomingDelay)!=kNoStockHoming || At<std::int32_t>(b,kHomingFrames)!=kPluginMark)return;
     if(At<std::uint32_t>(b,kFlags)&kDead)return;
+    // It struck last frame: the stock step now draws the hit's fireball and ends it (0x26A8AC), as armed or not as it
+    // was when it struck (re-judged from where the hit left it, a dud could turn into a fireball here).
+    if(At<std::size_t>(b,kHits)!=0)return;
     // Its warhead's safety every frame it lives, before anything else here can leave it to the stock step.
     const std::int32_t age=At<std::int32_t>(b,kAge);
     const bool armed=Arm(b,RoundOf(b,age,GameFrame()));
@@ -343,6 +363,8 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
 bool InstallMissiles() noexcept {
     __try {
         if(!Matches(kUpdate,kUpdateSig,sizeof(kUpdateSig))){Log("HOOK missiles=0 (unexpected EDF.dll code: stock pursuit)");return false;}
+        for(const auto& site:kDudSites)
+            if(!Matches(site.at,site.code,site.size)){Log("HOOK missiles=0 (unexpected EDF.dll code at %#x: the hit's fuze)",static_cast<unsigned>(site.at));return false;}
         const auto slot=reinterpret_cast<void**>(image+kVtable)+kSlotUpdate;
         void* const current=*slot;
         if(current!=image+kUpdate)Log("MISSILE update: chaining onto %p (another plugin)",current);
