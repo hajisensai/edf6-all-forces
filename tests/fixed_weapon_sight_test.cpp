@@ -144,7 +144,7 @@ void Run(){
         const float off[3]={pos[0]-pivot[0],pos[1]-pivot[1],pos[2]-pivot[2]};
         bool kept=true;
         for(const float deg:{90.0f,180.0f,-90.0f}) {
-            const float a=deg*3.14159265f/180.0f,c=std::cos(a),s=std::sin(a);
+            const float ang=deg*3.14159265f/180.0f,c=std::cos(ang),s=std::sin(ang);
             const float rows[16]={c,0,-s,0, 0,1,0,0, s,0,c,0, pivot[0]+off[0]*c+off[2]*s,pivot[1]+off[1],pivot[2]-off[0]*s+off[2]*c,1};
             std::memcpy(f.own+weaponmount::kStride+edf::kBoneRows,rows,64);
             if(std::fabs(SideOf(f.vehicle,f.seat,f.holder)-s0)>1e-4f)kept=false;

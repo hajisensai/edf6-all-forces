@@ -87,12 +87,12 @@ int main() {
         const float yaws[4]={0.0f,90.0f,180.0f,-90.0f};
         float first[4]={};int firstOrder[4]={};bool same=true,orderSame=true,hullSame=true;
         for(int y=0;y<4;++y) {
-            const float a=yaws[y]*3.14159265f/180.0f,c=std::cos(a),s=std::sin(a);
-            // A yaw left by `a` about the hull's up: the turret's across (+x) goes to (c, 0, -s), its along (+z) to (s, 0, c).
+            const float ang=yaws[y]*3.14159265f/180.0f,co=std::cos(ang),si=std::sin(ang);
+            // A yaw left by `ang` about the hull's up: the turret's across (+x) goes to (c, 0, -s), its along (+z) to (s, 0, c).
             const auto turn=[&](const float* o,float* world){
-                world[0]=pivot[0]+o[0]*c+o[2]*s;world[1]=pivot[1]+o[1];world[2]=pivot[2]-o[0]*s+o[2]*c;
+                world[0]=pivot[0]+o[0]*co+o[2]*si;world[1]=pivot[1]+o[1];world[2]=pivot[2]-o[0]*si+o[2]*co;
             };
-            const float bore[3]={s,0.0f,c};
+            const float bore[3]={si,0.0f,co};
             float mg[3],ml[3],mc[3];turn(gun,mg);turn(launcher,ml);turn(coax,mc);
             float side[4]={HullSide(mg,bore,pivot,centre,left,up),HullSide(ml,bore,pivot,centre,left,up),
                            HullSide(mc,bore,pivot,centre,left,up),HullSide(hullGun,hullBore,nullptr,centre,left,up)};
@@ -124,12 +124,12 @@ int main() {
         const float upBore[3]={0.0f,1.0f,0.0f},mortar[3]={10.9f,4.0f,-5.0f};
         Check(std::fabs(HullSide(mortar,upBore,pivot,centre,left,up)-0.9f)<1e-4f,"a bore straight up: across the hull's left");
         // A tilted hull (rolled, pitched): the frame is the hull's, the sides stay the same.
-        const float a=0.3f,c=std::cos(a),s=std::sin(a);   // rolled about the nose (+z): left (c, s, 0), up (-s, c, 0)
-        const float rl[3]={c,s,0.0f},ru[3]={-s,c,0.0f};
-        const auto roll=[&](const float* o,float* w){w[0]=centre[0]+o[0]*c-o[1]*s;w[1]=centre[1]+o[0]*s+o[1]*c;w[2]=centre[2]+o[2];};
+        const float ang=0.3f,co=std::cos(ang),si=std::sin(ang);   // rolled about the nose (+z): left (c, s, 0), up (-s, c, 0)
+        const float rl[3]={co,si,0.0f},ru[3]={-si,co,0.0f};
+        const auto roll=[&](const float* o,float* w){w[0]=centre[0]+o[0]*co-o[1]*si;w[1]=centre[1]+o[0]*si+o[1]*co;w[2]=centre[2]+o[2];};
         const float hp[3]={pivot[0]-centre[0],pivot[1]-centre[1],pivot[2]-centre[2]};
         const float hm[3]={hp[0]+gun[0],hp[1]+gun[1],hp[2]+gun[2]},hb[3]={0.0f,0.0f,1.0f};
-        float wp[3],wm[3],wb[3]={hb[0]*c-hb[1]*s,hb[0]*s+hb[1]*c,hb[2]};roll(hp,wp);roll(hm,wm);
+        float wp[3],wm[3],wb[3]={hb[0]*co-hb[1]*si,hb[0]*si+hb[1]*co,hb[2]};roll(hp,wp);roll(hm,wm);
         Check(std::fabs(HullSide(wm,wb,wp,centre,rl,ru)-first[0])<1e-4f,"a rolled hull: the same side");
         const float zero[3]={};
         Check(HullSide(mortar,upBore,pivot,centre,zero,up)==0.0f,"no hull frame: unknown (0)");
@@ -138,10 +138,10 @@ int main() {
         const float centre[3]={0,0,0},pivot[3]={0,3,-0.6f},left[3]={1,0,0},up[3]={0,1,0};
         const float yaws[3]={0.0f,1.2f,-2.5f};
         bool kept=true;
-        for(const float a:yaws) {
-            const float c=std::cos(a),s=std::sin(a),bore[3]={s,0,c};
-            const float right[3]={pivot[0]-2.1f*c+1.0f*s,pivot[1],pivot[2]+2.1f*s+1.0f*c};
-            const float leftArm[3]={pivot[0]+2.2f*c+1.0f*s,pivot[1],pivot[2]-2.2f*s+1.0f*c};
+        for(const float ang:yaws) {
+            const float co=std::cos(ang),si=std::sin(ang),bore[3]={si,0,co};
+            const float right[3]={pivot[0]-2.1f*co+1.0f*si,pivot[1],pivot[2]+2.1f*si+1.0f*co};
+            const float leftArm[3]={pivot[0]+2.2f*co+1.0f*si,pivot[1],pivot[2]-2.2f*si+1.0f*co};
             const float side[2]={HullSide(right,bore,pivot,centre,left,up),HullSide(leftArm,bore,pivot,centre,left,up)};
             int o[2];SideOrder(side,2,o);
             if(!(o[0]==1 && o[1]==0))kept=false;
