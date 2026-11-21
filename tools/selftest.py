@@ -14566,7 +14566,7 @@ def edf41_hector_alias() -> None:
     weapon = sgo.load(data=files[m.weapon_rel(cannon, 'SGO')])
     assert weapon['xgs_scene_object_class'] == m.HECTOR_WEAPON_CLASS and m.HECTOR_WEAPON_ANIM_KEY not in weapon
     # its glow (looped, 480 frames) and death (180) blocks on its own material, with the template's load kinds
-    assert [struct.unpack_from('<if', b, 0) for b, _k in weapon['material_animation']] == [(1, 480.0), (0, 180.0)]
+    assert [struct.unpack_from('<if', bytes.fromhex(b[4:]), 0) for b, _k in weapon['material_animation']] == [(1, 480.0), (0, 180.0)]
     assert [k for _b, k in weapon['material_animation']] == list(m.HECTOR_WEAPON_KINDS) == [0, 2]
 
 
@@ -14755,7 +14755,7 @@ def edf41_hector_weapons() -> None:
         shielded += bool(want)
         key = top[m.HECTOR_WEAPONS_KEY]
         assert key == {'sgo': [m.app_path(m.weapon_rel(w, 'SGO')) for w in ws], 'shield': want}, (name, key)
-        archive, model = top['animation_model'][0][0]
+        archive, model = top['animation_model'][0][:2]
         assert (archive.lower(), model) == ('app:/object/hector_body.mrab', f'Hector{gen}.mdb'), (name, archive, model)
         resource = top['resource']
         assert len(resource) == len(set(resource)), name
@@ -14798,7 +14798,7 @@ def edf41_hector_weapons() -> None:
         if w.cls != 'Hector301_Gatling':        # 4.1 animates nothing on 301's gatling
             assert [k for _b, k in blocks] == [0, 2], w.sgo
         for blob, _k in blocks:
-            assert all(mats.count(n) == 1 for n, _c, _t in m.mtab_entries(blob)), (w.sgo, mats)
+            assert all(mats.count(n) == 1 for n, _c, _t in m.mtab_entries(bytes.fromhex(blob[4:]))), (w.sgo, mats)
     code = src('src/edf41ai.cpp')
     assert 'AddFactory(L"Hector41_Weapon",&CreateWeapon) && edf41c::AddFactory(L"Hector401_Shield",&CreateShield)' in code
     assert 'L"edf41_hector_weapons"' in code and 'L"shield"' in code and 'L"sgo"' in code and 'L"edf41_weapon_anim"' in code
