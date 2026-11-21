@@ -16,6 +16,7 @@ bool highMode=false,highTransition=false;
 int cameraCalls=0,loftCalls=0;
 const void* loftVehicle=nullptr;
 bool loftEnabled=false;
+float loftWant=0.0f;
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; } // cleanup assertions never rely on freshness expiry
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
@@ -36,8 +37,8 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     for(int i=0;i<3;++i){hit[i]=from[i]+share*(to[i]-from[i]);const float d=hit[i]-from[i];length2+=d*d;}
     return std::sqrt(length2);
 }
-void SetLauncherLoft(const void* vehicle,bool aim,float) noexcept {
-    ++loftCalls;loftVehicle=vehicle;loftEnabled=aim;
+void SetLauncherLoft(const void* vehicle,bool aim,float elevation) noexcept {
+    ++loftCalls;loftVehicle=vehicle;loftEnabled=aim;loftWant=elevation;
 }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
 int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
@@ -117,13 +118,29 @@ void Run() {
     Check(loftCalls==loftBefore && cameraCalls==cameraBefore && loftVehicle==owner.vehicle,
           "foreign callbacks never aim their launchers through the current player's camera");
 
+    // The high view (2026-11-21, 「重型导弹这种开启俯瞰视角应该高抛弹道」): the loft's target is the range the native pitch
+    // axis names (AxisLoftWant: the axis' level-ground reach), the high arc laid onto it; no camera ray is read.
+    float* pitchAxis=reinterpret_cast<float*>(owner.seat+kSeatAim+kAimAxes+kAxisStride);
+    pitchAxis[2]=-0.6f;
     highMode=true;const int highReads=cameraCalls;LauncherFrame(owner.vehicle);
-    Check(PreviewAt(-4) && !loftEnabled && cameraCalls==highReads,
-          "high mode preserves physical preview while suppressing camera-driven loft");
+    const double drop=9.8/3600.0;
+    const float reach=edf::LevelRange(2.0,drop,0.6f);
+    float high=0.0f,frames=0.0f;
+    edf::BallisticArc(reach,-8.0,2.0,drop,true,high,frames);
+    Check(PreviewAt(-4) && loftEnabled && cameraCalls==highReads && std::fabs(loftWant-high)<1e-3f && high>0.8f && frames<=1500.0f,
+          "high mode preserves physical preview and lofts onto the high arc to the axis' range, no camera read");
+    pitchAxis[2]=-0.3f;LauncherFrame(owner.vehicle);
+    Check(loftEnabled && loftWant>high+0.01f && cameraCalls==highReads,"high mode: the axis lowered brings the range in, a steeper high arc");
+    pitchAxis[2]=-0.6f;
     highMode=false;highTransition=true;LauncherFrame(owner.vehicle);
-    Check(PreviewAt(-4) && !loftEnabled && cameraCalls==highReads,
-          "return transition also preserves preview without feeding the camera back into the launcher");
+    Check(PreviewAt(-4) && loftEnabled && std::fabs(loftWant-high)<1e-3f && cameraCalls==highReads,
+          "return transition keeps the axis-named loft without feeding the camera back into the launcher");
     highTransition=false;
+    // The high arc's flight past the rocket's life (it would vanish in the air): the low arc instead.
+    Put<int>(first.weapon,edf::kWeaponAmmoAlive,static_cast<int>(frames)-50);highMode=true;LauncherFrame(owner.vehicle);
+    float low=0.0f;edf::BallisticArc(reach,-8.0,2.0,drop,false,low,frames);
+    Check(loftEnabled && std::fabs(loftWant-low)<1e-3f,"a high arc outliving the rocket's life is not laid: the low arc");
+    Put<int>(first.weapon,edf::kWeaponAmmoAlive,1500);highMode=false;pitchAxis[2]=0.0f;
 
     selectedWeapon=nullptr;LauncherFrame(owner.vehicle);
     Check(PreviewAbsent(),"no selected fire-control weapon clears this owner's preview immediately");
