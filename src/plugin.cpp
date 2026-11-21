@@ -57,6 +57,7 @@
 #include "enemy_control_radar.h"
 #include "pvp_controlled_spawn.h"
 #include "scope_pip.h"
+#include "scope_spread.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
 #include "seat_turret.h"
@@ -436,6 +437,10 @@ void Validate(Config& n) noexcept {
     Fix("ProteusShieldSlow",n.proteusShieldSlow,0.0f,1.0f);
     Fix("ProteusWalkGunRate",n.proteusWalkGunRate,0.1f,5.0f);
     Fix("ProteusWalkGunSpread",n.proteusWalkGunSpread,0.0f,10.0f);
+    Fix("ScopeSniperHipSpread",n.scopeSniperHipSpread,scopespread::kSniperHipRange.lo,scopespread::kSniperHipRange.hi);
+    Fix("ScopeSniperHipMinSpread",n.scopeSniperHipMinSpread,scopespread::kSniperHipMinRange.lo,scopespread::kSniperHipMinRange.hi);
+    Fix("ScopeHipSpread",n.scopeHipSpread,scopespread::kHipRange.lo,scopespread::kHipRange.hi);
+    Fix("ScopeAimSpread",n.scopeAimSpread,scopespread::kAimRange.lo,scopespread::kAimRange.hi);
     Fix("ProteusDeploySec",n.proteusDeploySec,0.0f,10.0f);
     Fix("ProteusStowSec",n.proteusStowSec,0.0f,10.0f);
     Fix("ProteusDeployTurn",n.proteusDeployTurn,0.0f,2.0f);
@@ -828,6 +833,11 @@ void LoadConfig() noexcept {
     n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
     n.infantryScope=static_cast<int>(FixInt("InfantryScope",ReadInt(L"InfantryScope",static_cast<DWORD>(n.infantryScope)),
                                             scopepip::kModeLowest,scopepip::kModeHighest));
+    n.scopeSpread=ReadBool(L"ScopeSpread",n.scopeSpread);
+    n.scopeSniperHipSpread=ReadFloat(L"ScopeSniperHipSpread",n.scopeSniperHipSpread);
+    n.scopeSniperHipMinSpread=ReadFloat(L"ScopeSniperHipMinSpread",n.scopeSniperHipMinSpread);
+    n.scopeHipSpread=ReadFloat(L"ScopeHipSpread",n.scopeHipSpread);
+    n.scopeAimSpread=ReadFloat(L"ScopeAimSpread",n.scopeAimSpread);
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
@@ -1072,6 +1082,8 @@ void LoadConfig() noexcept {
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
+    Log("CONFIG scopeSpread=%d sniperHip x%.2f min %.4f rad, others hip x%.2f aim x%.2f",n.scopeSpread,n.scopeSniperHipSpread,
+        n.scopeSniperHipMinSpread,n.scopeHipSpread,n.scopeAimSpread);
     Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
         n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
@@ -1386,6 +1398,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
+    InstallScopeSpread();   // the player's scoped weapons spread by the scope (the shot entry's hook, the weapon creation's call)
     Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
     Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
     Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
