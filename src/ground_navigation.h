@@ -35,6 +35,13 @@ struct Profile {
     // When the bounded search runs out of nodes (or of ground) before the horizon, it walks to the node nearest the
     // goal if that is nearer than where it stands; else blocked as before. Never a straight-line fallback.
     float horizon=0.0f;
+    // With a horizon: the next leg (and a route to a goal that moved) is searched from the end of the path being walked
+    // while the actor walks it, instead of the actor standing at each leg's end and at each move of its goal until a new
+    // search from where it stands is done. Testhub #41 / #47 (2026-11-21): soldiers following the player stood every
+    // kRouteHorizon m and whenever the point they followed moved 16 m, for as long as a search under the budget all of
+    // them share took -- "经常完全停住", "地下关卡几乎跟不上". The path ahead was already checked edge by edge; a leg searched
+    // ahead starts at its end, so the walk goes on without a gap. Off for the routes that must be whole (support entries).
+    bool ahead=false;
 };
 enum class Edge { blocked,open,pending };
 enum class Result { pending,moving,arrived,blocked };
@@ -64,6 +71,9 @@ struct BasicState {
     // crew::GroundNavigate's Hull::object this route was searched round (none: nullptr). Another one is another
     // search: a route found blind to a vehicle (a move order's) is not walked into it when the soldier is sent to board it.
     const void* hull{};
+    // Profile::ahead: the search in `nodes` runs from path[length-1] (`origin`) while the path is walked; what it finds
+    // is appended to the rest of the path (Path). aheadFailed: it found nothing; none again until this path is replaced.
+    bool searchingAhead{},aheadFailed{};
 };
 using State=BasicState<kNodes>;
 using RouteState=BasicState<kRouteNodes>;
@@ -72,19 +82,43 @@ inline void Begin(State& s,Point from,Point goal,Profile p,std::uint64_t ms) noe
     s.count=1;s.active=-1;s.direction=0;s.length=s.cursor=0;s.partial=false;
     s.origin=from;s.goal=goal;s.profile=p;s.failed=false;s.initialized=true;
     s.progress=from;s.progressAt=ms;s.lastAt=ms;s.checked=false;
+    s.searchingAhead=s.aheadFailed=false;
     // The cells are placed as the search places them (origin + index * cell), so a cell's estimate is whole steps.
     s.aim={from.x+std::round((goal.x-from.x)/p.cell)*p.cell,goal.y,from.z+std::round((goal.z-from.z)/p.cell)*p.cell};
     s.nodes[0]={from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false};
 }
+// Profile::ahead: a search to `goal` from the end of the path being walked, the path kept (its end now a corner). The
+// actor's progress clock is the walk's, untouched; the leg it walks meanwhile is one walked (Partial's legStale).
 template<class State>
-inline void Fail(State& s,std::uint64_t ms) noexcept {s.failed=true;s.retryAt=ms+1000;s.length=0;}
+inline void BeginAhead(State& s,Point goal,Profile p) noexcept {
+    const Point from=s.path[s.length-1];
+    s.count=1;s.active=-1;s.direction=0;s.partial=true;
+    s.origin=from;s.goal=goal;s.profile=p;s.failed=false;
+    s.searchingAhead=true;s.aheadFailed=false;s.legWalked=true;
+    s.aim={from.x+std::round((goal.x-from.x)/p.cell)*p.cell,goal.y,from.z+std::round((goal.z-from.z)/p.cell)*p.cell};
+    s.nodes[0]={from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false};
+}
+// The search ahead found nothing (or no room): the path being walked stays, and at its end the search begins again from
+// there as without Profile::ahead.
+template<class State>
+inline void AheadFailed(State& s) noexcept {s.searchingAhead=false;s.aheadFailed=true;}
+template<class State>
+inline void Fail(State& s,std::uint64_t ms) noexcept {s.failed=true;s.retryAt=ms+1000;s.length=0;s.searchingAhead=false;}
+// The route to node `end`, then `goal`. Searching ahead: appended to the rest of the path being walked (whose last point
+// is the search's origin, node 0, so the walk goes on from it without a gap).
 template<class State>
 inline bool Path(State& s,int end,Point goal) noexcept {
     int ids[kPath],n=0;
     for(int i=end;i>=0;i=s.nodes[i].parent) {if(n==kPath-1)return false;ids[n++]=i;}
-    s.length=0;
+    int keep=0;
+    if(s.searchingAhead) {
+        keep=s.length-s.cursor;
+        if(keep<1 || keep+n>kPath)return false;
+        for(int i=0;i<keep;++i)s.path[i]=s.path[s.cursor+i];
+    }
+    s.length=keep;
     for(int i=n-2;i>=0;--i)s.path[s.length++]=s.nodes[ids[i]].at;
-    s.path[s.length++]=goal;s.cursor=0;s.checked=false;return true;
+    s.path[s.length++]=goal;s.cursor=0;s.checked=false;s.partial=false;s.searchingAhead=s.aheadFailed=false;return true;
 }
 // Profile::horizon: the route's prefix up to node `end` (never the start) to walk now, the search resumed from its end.
 constexpr int kLegsStale=3;   // legs in a row that end no nearer the goal: the goal is not reached this way
@@ -96,8 +130,10 @@ inline bool Partial(State& s,int end,Point from,std::uint64_t ms) noexcept {
     if(left<s.legBest-s.profile.cell){s.legBest=left;s.legStale=0;}
     else if(s.legStale>=kLegsStale)return false;
     else if(walked)++s.legStale;
+    const bool ahead=s.searchingAhead;
     if(!Path(s,s.nodes[end].parent,s.nodes[end].at))return false;
-    s.partial=true;s.progress=from;s.progressAt=ms;
+    s.partial=true;
+    if(!ahead){s.progress=from;s.progressAt=ms;}   // a leg found ahead: the actor has been walking all along
     return true;
 }
 // The node the search reached nearest the goal, when it is nearer it than the start by more than a cell; else -1.
@@ -112,51 +148,28 @@ inline int NearestGoal(const State& s) noexcept {
 template<class State>
 inline bool PartialOrFail(State& s,Point from,std::uint64_t ms) noexcept {
     if(s.profile.horizon>0.0f && Partial(s,NearestGoal(s),from,ms))return true;
+    if(s.searchingAhead){AheadFailed(s);return true;}
     Fail(s,ms);return false;
 }
-// edge(from,to,projected) must check the entire segment and project its endpoint
-// to connected ground. pending consumes no search state: work resumes next call.
-// The caller supplies a per-call edge budget AND a shared world-query budget.
+// Profile::ahead: whether the path being walked wants a search ahead from its end: a leg's end is near (half the horizon
+// left to walk), or a whole route's end is off where the goal is now (it moved since the route was found, by up to 8
+// cells or a step's height, which Navigate does not take as another goal) and still nearer it than the actor at `from`
+// (a goal moved back behind the actor is searched for from its end as before, once it is there).
+template<class State>
+inline bool WantsAhead(const State& s,Point from,Point goal,float stop) noexcept {
+    const Profile& p=s.profile;
+    if(!p.ahead || !(p.horizon>0.0f) || s.searchingAhead || s.aheadFailed || s.cursor>=s.length)return false;
+    const Point end=s.path[s.length-1];
+    if(!s.partial)return (Horizontal(end,goal)>(std::max)(stop,p.cell) || std::fabs(end.y-goal.y)>p.step) &&
+                         Horizontal(end,goal)<Horizontal(from,goal);
+    float left=0.0f;
+    for(int i=s.cursor+1;i<s.length;++i){left+=Horizontal(s.path[i-1],s.path[i]);if(left>p.horizon*0.5f)return false;}
+    return true;
+}
+// The search's part of Navigate: up to `budget` edges. Searching ahead (Profile::ahead) what it finds is appended to
+// the path being walked; a search ahead that finds nothing leaves that path alone (AheadFailed).
 template<class State,class Query>
-Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point& next,Query edge,
-                Profile p={},int budget=4) noexcept {
-    next=from;
-    if(!Finite(from)||!Finite(goal)||!std::isfinite(stop)||!(p.cell>0.0f && p.cell<=8.0f)||
-       !(p.step>0.0f && p.step<=1.0f)||!(p.radius>0.0f && p.radius<=10.0f)||
-       !(p.height>p.step && p.height<=20.0f)||!(p.maxWaterDepth>=0.0f && p.maxWaterDepth<=2.0f)||
-       !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell)||!(p.greed>=1.0f && p.greed<=4.0f))return Result::blocked;
-    if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step) {
-        Point supported{};const Edge e=edge(from,from,supported);
-        return e==Edge::open ? Result::arrived : e==Edge::pending ? Result::pending : Result::blocked;
-    }
-    const bool changed=!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step||
-        p.radius!=s.profile.radius||p.height!=s.profile.height||p.step!=s.profile.step||p.cell!=s.profile.cell||
-        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||p.greed!=s.profile.greed||
-        p.horizon!=s.profile.horizon||
-        ms<s.lastAt||ms-s.lastAt>2000;
-    if(!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step){s.legBest=1e30f;s.legStale=0;s.legWalked=false;}
-    if(changed)Begin(s,from,goal,p,ms);
-    s.lastAt=ms;
-    if(s.failed) {if(ms<s.retryAt)return Result::blocked;Begin(s,from,goal,p,ms);}
-    if(Horizontal(from,s.progress)>0.3f) {s.progress=from;s.progressAt=ms;}
-    else if(s.length && ms-s.progressAt>=1500)Begin(s,from,goal,p,ms);
-    if(s.length) {
-        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length && !s.partial ? stop : p.waypointRadius) &&
-              std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
-        if(s.cursor==s.length){s.legWalked=s.partial;Begin(s,from,goal,p,ms);}
-        else {
-            // Validate the next edge repeatedly: destroyed/new obstacles invalidate
-            // cached routes. No straight-line fallback on a blocked or deferred query.
-            Point projected{};
-            if(!s.checked || ms-s.checkedAt>=100 || Horizontal(from,s.path[s.cursor])>p.cell*2) {
-                const Edge e=edge(from,s.path[s.cursor],projected);
-                if(e==Edge::pending)return Result::pending;
-                if(e==Edge::blocked || std::fabs(projected.y-s.path[s.cursor].y)>p.step)Begin(s,from,goal,p,ms);
-                else {s.checked=true;s.checkedAt=ms;}
-            }
-            if(s.length){next=s.path[s.cursor];return Result::moving;}
-        }
-    }
+Result Search(State& s,Point from,std::uint64_t ms,Query& edge,const Profile& p,int budget) noexcept {
     constexpr int dx[8]={1,1,0,-1,-1,-1,0,1},dz[8]={0,1,1,1,0,-1,-1,-1};
     while(budget>0) {
         if(s.active<0) {
@@ -184,10 +197,15 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
                 if(e==Edge::pending)return Result::pending;
                 --budget;
                 if(e==Edge::open && std::fabs(projected.y-s.goal.y)<=p.step) {
-                    if(!Path(s,s.active,projected)){Fail(s,ms);return Result::blocked;}
+                    const bool ahead=s.searchingAhead;
+                    if(!Path(s,s.active,projected)) {
+                        if(ahead){AheadFailed(s);return Result::pending;}
+                        Fail(s,ms);return Result::blocked;
+                    }
                     // Planning is not failed movement. A long bounded search may itself take over
-                    // the stuck interval; start that clock only once there is a route to follow.
-                    s.progress=from;s.progressAt=ms;
+                    // the stuck interval; start that clock only once there is a route to follow
+                    // (searched ahead: the actor has been walking meanwhile, its clock is the walk's).
+                    if(!ahead){s.progress=from;s.progressAt=ms;}
                     // First path edge is checked from the actor's CURRENT position on
                     // the next call, since it may have moved while search was pending.
                     return Result::pending;
@@ -218,6 +236,87 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
         if(s.direction==8){s.nodes[s.active].closed=true;s.active=-1;}
     }
     return Result::pending;
+}
+// The edge to the path's waypoint found open from where the actor stood at most this long ago is walked on without a
+// query when the shared budget has none for it this frame (Navigate's check of it deferred; Coast).
+constexpr std::uint64_t kCheckedFresh=500;
+template<class State>
+inline bool Fresh(const State& s,std::uint64_t ms) noexcept {
+    return s.checked && s.cursor<s.length && ms>=s.checkedAt && ms-s.checkedAt<kCheckedFresh;
+}
+// Its turn under the shared budget is behind another caller's (crew::GroundNavigateDeferred): the path already found
+// is walked on, without a query, towards a waypoint whose edge is Fresh and not yet reached; else pending (it stands).
+// The goal is not looked at (it is the next call's), nor is anything searched.
+template<class State>
+inline Result Coast(State& s,Point from,std::uint64_t ms,Point& next) noexcept {
+    next=from;
+    if(!s.initialized || s.failed || !Finite(from) || !Fresh(s,ms) || ms<s.lastAt)return Result::pending;
+    if(Horizontal(from,s.path[s.cursor])<=s.profile.waypointRadius)return Result::pending;
+    s.lastAt=ms;next=s.path[s.cursor];return Result::moving;
+}
+// edge(from,to,projected) must check the entire segment and project its endpoint
+// to connected ground. pending consumes no search state: work resumes next call.
+// The caller supplies a per-call edge budget AND a shared world-query budget.
+template<class State,class Query>
+Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point& next,Query edge,
+                Profile p={},int budget=4) noexcept {
+    next=from;
+    if(!Finite(from)||!Finite(goal)||!std::isfinite(stop)||!(p.cell>0.0f && p.cell<=8.0f)||
+       !(p.step>0.0f && p.step<=1.0f)||!(p.radius>0.0f && p.radius<=10.0f)||
+       !(p.height>p.step && p.height<=20.0f)||!(p.maxWaterDepth>=0.0f && p.maxWaterDepth<=2.0f)||
+       !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell)||!(p.greed>=1.0f && p.greed<=4.0f))return Result::blocked;
+    if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step) {
+        Point supported{};const Edge e=edge(from,from,supported);
+        return e==Edge::open ? Result::arrived : e==Edge::pending ? Result::pending : Result::blocked;
+    }
+    const bool moved=!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step;
+    const bool other=!s.initialized||
+        p.radius!=s.profile.radius||p.height!=s.profile.height||p.step!=s.profile.step||p.cell!=s.profile.cell||
+        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||p.greed!=s.profile.greed||
+        p.horizon!=s.profile.horizon||p.ahead!=s.profile.ahead||
+        ms<s.lastAt||ms-s.lastAt>2000;
+    if(moved){s.legBest=1e30f;s.legStale=0;s.legWalked=false;}
+    // Another goal: searched from here, the actor standing until the search is done; with Profile::ahead, while the
+    // path it walks still ends nearer the new goal than it stands, it walks on and the route on is searched from there.
+    if(other || (moved && !(p.ahead && p.horizon>0.0f && !s.failed && s.cursor<s.length &&
+                            Horizontal(s.path[s.length-1],goal)<Horizontal(from,goal))))Begin(s,from,goal,p,ms);
+    else if(moved)BeginAhead(s,goal,p);
+    s.lastAt=ms;
+    if(s.failed) {if(ms<s.retryAt)return Result::blocked;Begin(s,from,goal,p,ms);}
+    if(Horizontal(from,s.progress)>0.3f) {s.progress=from;s.progressAt=ms;}
+    else if(s.length && ms-s.progressAt>=1500)Begin(s,from,goal,p,ms);
+    if(s.length) {
+        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length && !s.partial ? stop : p.waypointRadius) &&
+              std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
+        if(s.cursor==s.length) {
+            // The end of the path reached while its search ahead goes on: that search's origin is here, it goes on
+            // with the actor standing (its leg walked, the stuck clock started afresh as any search's).
+            if(s.searchingAhead){s.searchingAhead=false;s.length=s.cursor=0;s.legWalked=true;s.progress=from;s.progressAt=ms;}
+            else {s.legWalked=s.partial;Begin(s,from,goal,p,ms);}
+        }
+        else {
+            // Validate the next edge repeatedly: destroyed/new obstacles invalidate
+            // cached routes. No straight-line fallback on a blocked or deferred query.
+            Point projected{};
+            if(!s.checked || ms-s.checkedAt>=100 || Horizontal(from,s.path[s.cursor])>p.cell*2) {
+                const Edge e=edge(from,s.path[s.cursor],projected);
+                if(e==Edge::pending) {
+                    // No query this frame (the shared budget): the edge found open from here kCheckedFresh ago at most is
+                    // walked on; one never checked from here waits.
+                    if(!Fresh(s,ms))return Result::pending;
+                    next=s.path[s.cursor];return Result::moving;
+                }
+                if(e==Edge::blocked || std::fabs(projected.y-s.path[s.cursor].y)>p.step)Begin(s,from,goal,p,ms);
+                else {s.checked=true;s.checkedAt=ms;}
+            }
+            if(s.length) {
+                if(WantsAhead(s,from,goal,stop))BeginAhead(s,goal,p);
+                if(s.searchingAhead)Search(s,from,ms,edge,p,budget);
+                next=s.path[s.cursor];return Result::moving;
+            }
+        }
+    }
+    return Search(s,from,ms,edge,p,budget);
 }
 // Ground/clear are real scene queries in production, deterministic geometry in
 // tests. Sample each half metre at both footprint sides and the centre; sweep

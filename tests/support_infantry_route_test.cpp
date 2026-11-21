@@ -224,6 +224,11 @@ int main() {
     Check(ordinaryLongMoving && fine->navigation.partial && !fine->navigation.failed && fine->navigation.profile.cell==2 &&
           fine->navigation.profile.horizon>0.0f && fine->navigation.length<npc::navigation::kPath,
         "ordinary MoveTo walks the same direct 900m order in legs: a first leg under its horizon, not the whole route");
+    // Testhub #41 / #47: the stick was eased by the distance to the next waypoint (the route's 2 m cells), so every
+    // soldier walked its routes at 37-77 % of its speed; 900 m from its goal it is at full stick.
+    Check(std::hypot(At<float>(units[0],kMoveX),At<float>(units[0],kMoveZ))>0.99f,
+        "...at full stick far from its goal: eased only over the last metres, not at every waypoint");
+    Check(fine->navigation.profile.ahead,"...with the next leg searched while it walks this one (Profile::ahead)");
     fine->navigation={};
     Think(units[0],0); // the isolated negative-control loop did not run the normal Think registration
     const auto originalNodeLimit=npc::navigation::kNodes;
