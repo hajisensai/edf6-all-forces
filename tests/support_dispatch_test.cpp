@@ -462,6 +462,12 @@ npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float*
 #endif
 }
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
+// A test ini of this process's own (%TEMP%\<stem>_<pid>.ini): `ctest -R` runs from other worktrees / sessions at the
+// same time neither overwrite nor delete it (a fixed shared name did).
+static void TestIniPath(wchar_t (&path)[MAX_PATH],const wchar_t* stem) {
+    wchar_t dir[MAX_PATH];GetTempPathW(MAX_PATH,dir);
+    swprintf_s(path,L"%ls%ls_%lu.ini",dir,stem,static_cast<unsigned long>(GetCurrentProcessId()));
+}
 int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
@@ -939,7 +945,7 @@ int main() {
     check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
     testOnline=false;
     // Out-of-mission configuration (support_config.h), read from a real ini as plugin.cpp does.
-    wchar_t ini[MAX_PATH];GetTempPathW(MAX_PATH,ini);wcscat_s(ini,L"edf6_support_dispatch_test.ini");
+    wchar_t ini[MAX_PATH];TestIniPath(ini,L"edf6_support_dispatch_test");
     FILE* f=nullptr;_wfopen_s(&f,ini,L"wb");check(f!=nullptr,"config ini written");
     const char text[]="[VehicleCrew]\r\nSupportDisabled=FIGHTER\r\nSupportSquadWeapon=shotgun\r\nSupportSquadLeaderWeapon=sniper\r\n"
                       "SupportPlatoonWeapons=flame,rocket,rifle\r\nSupportAircraftCrewWeapon=rocket\r\nSupportAircraftCount_HELI=3\r\n";
@@ -1231,7 +1237,7 @@ int main() {
     }
     {
         // Out-of-game loadouts (support_loadout.h, docs/feature-2026-10-09-loadout-editor.md), from a real ini.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_loadout_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_loadout_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"loadout ini written");
         const char loadText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=lance@1E3A8A*2,cannon,rifle@X:FFFFFF\r\n"
                               "SupportVehicle_TANK_CREWED=HE,AP:25\r\nSupportVehicle_STRIKE=MK82:6,MK82:6\r\n"
@@ -1321,7 +1327,7 @@ int main() {
     {
         // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
         // compatible resource still supplies its colours immediately (no pending-list round trip).
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_backpack_compat_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_backpack_compat_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
         const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
         std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
@@ -1346,7 +1352,7 @@ int main() {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
         // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
         // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_crew_colour_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_crew_colour_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"crew colour ini written");
         const char crewText[]="[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\n"
                               "SupportCrewColour_SQUAD=123456\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_MISSION=FFFFFF\r\n"
@@ -1454,7 +1460,7 @@ int main() {
     // (#R:L) carries those (PresetHandArms) and keeps them past GiveLocalArms; every other Fencer this player's own two
     // (its kind's main hand and the slot beside it), a Ranger only its main hand.
     {
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_hands_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_hands_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"hands ini written");
         const char handsText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#772:715,pilebanker,rifle*2\r\n";
         std::fwrite(handsText,1,sizeof(handsText)-1,out);std::fclose(out);
