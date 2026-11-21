@@ -62,6 +62,7 @@ bool TransportOrder(const void*,const mapcmd::Command&) noexcept {++transportOrd
 void TransportCancel(const void*) noexcept {++transportCancels;}
 NpcCommandReason TransportWithdraw(const void*) noexcept {return transportWithdraw;}
 void TransportSucceed(const void*,const void* lead) noexcept {transportSucceededTo=lead;}
+void TransportJumperIntent(unsigned char*) noexcept {}
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;
