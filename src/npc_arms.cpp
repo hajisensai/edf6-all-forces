@@ -87,7 +87,38 @@ bool Stars(const void* context,int id,std::uint8_t* out) noexcept {
     std::memcpy(out,r+kRecordStars,npctier::kStarCount);
     return true;
 }
+// This machine's player's inventory (GameStatus slot 0) and its class; false: not readable.
+bool ReadInventory(Records& records,npctier::Inventory& inv,int* cls) noexcept {
+    __try {
+        records.gs=At<unsigned char*>(image,kGameStatus);
+        if(!records.gs || !Readable(records.gs+kClass,4) || !Readable(records.gs+kWeapons,4*kClassStride))return false;
+        const auto c=At<std::int32_t>(records.gs,kClass);
+        if(cls)*cls=c;
+        if(c>=0 && c<4)
+            for(int i=0;i<kSlotsPerClass[c];++i)inv.equipped[i]=At<std::int32_t>(records.gs,kWeapons+c*kClassStride+i*4);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    inv.context=&records;inv.owned=&Owned;inv.stars=&Stars;
+    return true;
+}
 }  // namespace
+
+bool LocalPlayerLoadout(int* cls,int* equipped,int slots) noexcept {
+    Records records;npctier::Inventory inv;int c=-1;
+    if(!ReadInventory(records,inv,&c) || c<0 || c>=4)return false;
+    if(cls)*cls=c;
+    for(int i=0;equipped && i<slots;++i)equipped[i]=i<npctier::kWeaponSlots ? inv.equipped[i] : -1;
+    return true;
+}
+
+void CommanderRequesterArms(int kind,support_net::RequesterArms* out) noexcept {
+    if(!out)return;
+    *out=support_net::RequesterArms{};
+    if(kind<0 || kind>=static_cast<int>(support_net::kArmsKinds) || !SupportSoldierArmsReady() || !Profile())return;
+    Records records;npctier::Inventory inv;
+    if(!ReadInventory(records,inv,nullptr))return;
+    out->kind[kind]=npctier::PackArms(npctier::PickBase(static_cast<SupportWeapon>(kind),inv));
+    Log("COMMANDER arms: kind %d carries the player's weapon %u",kind,static_cast<unsigned>(out->kind[kind]&0xFFFFu));
+}
 
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
     if(!out)return;
@@ -97,14 +128,7 @@ void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
     if(!SupportSoldierArmsReady() || !Profile())return;
     Records records;
     npctier::Inventory inv;
-    __try {
-        records.gs=At<unsigned char*>(image,kGameStatus);
-        if(!records.gs || !Readable(records.gs+kClass,4) || !Readable(records.gs+kWeapons,4*kClassStride))return;
-        const auto cls=At<std::int32_t>(records.gs,kClass);
-        if(cls>=0 && cls<4)
-            for(int i=0;i<kSlotsPerClass[cls];++i)inv.equipped[i]=At<std::int32_t>(records.gs,kWeapons+cls*kClassStride+i*4);
-    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
-    inv.context=&records;inv.owned=&Owned;inv.stars=&Stars;
+    if(!ReadInventory(records,inv,nullptr))return;
     for(int k=0;k<kSupportWeaponCount;++k) {
         const auto kind=static_cast<SupportWeapon>(k);
         if(!npctier::KindArmed(kind))continue;

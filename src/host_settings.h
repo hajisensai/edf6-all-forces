@@ -19,6 +19,10 @@ bool NpcFreeSquadCoverInEffect() noexcept;
 // The 408's sidecar gunner seat (edf41bike.cpp) this mission: offline always; online only when every member of the room
 // said its build has it (host_settings_logic.h kFeatBikeGunner), as edf5online_room.h does for the player count.
 bool Edf41BikeGunnerAllowed() noexcept;
+// The commander mode this mission (commander.cpp, docs/feature-2026-11-21-commander-mode.md): offline this machine's
+// ini CommanderMode at the mission's start; online decided at the mission's sync by the host's word, and only when every
+// member's build has it (host_settings_logic.h CommanderAtSync). Any thread.
+bool CommanderModeInEffect() noexcept;
 // The room menu's status lines (UI thread): the host's settings when they are not this machine's, the builds that
 // differ. Returns how many (at most `capacity`).
 int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept;

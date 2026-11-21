@@ -94,8 +94,9 @@ constexpr Arms TierDown(const Arms& base) noexcept {
     for(int i=0;i<kStarCount;++i)if(a.stars[i])--a.stars[i];
     return a;
 }
-// The weapon one tier below the requester's for `kind` (the rule above). Off for a kind carrying none.
-inline Arms PickArms(SupportWeapon kind,const Inventory& inv) noexcept {
+// The requester's own weapon for `kind` (the rule's base, above): what a commander's NPC carries (commander.cpp, the
+// player's own soldier: no tier down). Off for a kind carrying none.
+inline Arms PickBase(SupportWeapon kind,const Inventory& inv) noexcept {
     Arms base;
     const auto read=[&](int id) noexcept {
         Arms a;a.on=true;a.id=static_cast<std::uint16_t>(id);
@@ -118,8 +119,10 @@ inline Arms PickArms(SupportWeapon kind,const Inventory& inv) noexcept {
         if(!low)return Arms{};
         base.on=true;base.id=low->id;   // 0 stars
     }
-    return TierDown(base);
+    return base;
 }
+// The weapon one tier below the requester's for `kind` (the rule above). Off for a kind carrying none.
+inline Arms PickArms(SupportWeapon kind,const Inventory& inv) noexcept { return TierDown(PickBase(kind,inv)); }
 
 // The CreateObject path of `a`'s weapon (app:/weapon/<WEAPONTABLE name lower case>.sgo, the form the stock soldier
 // templates' soldier_load_weapon uses). 0 when off, unknown or it does not fit.

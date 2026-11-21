@@ -96,6 +96,12 @@ bool ApplySupportSoldierResource(const float*,std::uint32_t,const unsigned char*
 bool CreateSupportSoldierUnregistered(const float*,std::uint32_t,const unsigned char*,bool,ObjRef*,const wchar_t*,std::uint64_t) noexcept{return false;}
 bool SupportSoldierArmsReady() noexcept{return true;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept{*out=support_net::RequesterArms{};}
+// commander.h: the commander mode's catalog (none in these tests).
+support_net::PlanResult PlanCommander(std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
+bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void DestroyCommanderPlan(std::uint64_t) noexcept {}
+bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept{return support_net::PlanResult::ready;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
 bool SupportPeersAcceptRescue() noexcept{return true;}

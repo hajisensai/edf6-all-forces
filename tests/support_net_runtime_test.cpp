@@ -173,6 +173,7 @@ support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* at,std
 }
 // npc_arms.h: this player's soldier weapons (none here) and their loads (all here).
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=support_net::RequesterArms{};}
+void CommanderRequesterArms(int,support_net::RequesterArms* out) noexcept {*out=support_net::RequesterArms{};}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {return support_net::PlanResult::ready;}
 support_net::PlanResult PrepareRangeEnemy(const support_net::Plan& plan) noexcept {
     return debugspawn::NetworkPlanRow(plan)>=0 ? support_net::PlanResult::ready : support_net::PlanResult::refused;

@@ -312,6 +312,12 @@ bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResu
 int armsAsked=0;
 bool SupportSoldierArmsReady() noexcept {return armsReady;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+// commander.h: the commander mode's catalog (none in these tests).
+support_net::PlanResult PlanCommander(std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
+bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void DestroyCommanderPlan(std::uint64_t) noexcept {}
+bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}

@@ -13,6 +13,12 @@ namespace crew {
 // stock rule. The requester: whoever calls (support_dispatch.cpp, support_net.cpp), for a sea rescue the swimmer, for a
 // mission vehicle's crew the machine that builds its plan (offline this one, online the host: mission_crew_support.cpp).
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept;
+// The commander mode (commander.cpp): this machine's player's class (docs/loadout-re.md: 0 Ranger, 1 Wing Diver, 2 Air
+// Raider, 3 Fencer) and its class's equipped weapon ids (-1 empty; `slots` of them). False: GameStatus not readable.
+bool LocalPlayerLoadout(int* cls,int* equipped,int slots) noexcept;
+// A commander's NPC request: kind `kind` carries this player's own weapon of that kind's series (npc_tier.h PickBase: the
+// equipped one, else the best owned; no tier down), every other kind none. All zero as LocalRequesterArms' are.
+void CommanderRequesterArms(int kind,support_net::RequesterArms* out) noexcept;
 // Each soldier of `plan` given this machine's player's weapon of its kind (LocalRequesterArms; a unit not a soldier: 0):
 // the plans this machine builds as their requester (an offline call or rescue, a host's mission crew).
 inline void GiveLocalArms(support_net::Plan* plan) noexcept {
