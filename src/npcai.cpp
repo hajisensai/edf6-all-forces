@@ -3577,9 +3577,6 @@ const void* NpcSquadTopOf(const void* human) noexcept {
         return TopNpc(h);
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
-bool NpcSoldierFlies(const void* human) noexcept {
-    return human && Readable(human,8) && At<const void*>(human,0)==image+kSoldiers[1].vtable;   // the Wing Diver
-}
 int NpcSoldierClass(const void* human) noexcept {
     if(!human || !Readable(human,8))return -1;
     for(int c=0;c<kClasses;++c)if(At<const void*>(human,0)==image+kSoldiers[c].vtable)return c;
