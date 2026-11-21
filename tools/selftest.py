@@ -584,6 +584,32 @@ def chute_wired_through() -> None:
 
 
 @test
+def rope_geometry_and_build() -> None:
+    """pylib/chute_model.py rope(): from the object's origin ROPE_LENGTH straight down, ROPE_WIDTH across, every triangle
+    wound as the stock models'; build / check / sgo of it on the stand-in Root.cpk; src/transport_logic.h kRopeLength and
+    src/playerjet.cpp's rope SGO agree with it; tools/make_chute.py writes both the canopy and the rope."""
+    import chute_model as cm
+    import make_chute
+    verts, tris = cm.rope()
+    ys = [v[0][1] for v in verts]
+    assert abs(max(ys)) < 1e-6 and abs(min(ys) + cm.ROPE_LENGTH) < 1e-6, (max(ys), min(ys))
+    assert all(abs(v[0][0]) <= cm.ROPE_WIDTH / 2 + 1e-6 and abs(v[0][2]) <= cm.ROPE_WIDTH / 2 + 1e-6 for v in verts)
+    assert not [t for t in tris if cm.facing(verts, t) <= 0]
+    game = _chute_game()
+    arc = cm.build(game, cm.ROPE)
+    cm.check(arc, cm.ROPE)
+    v = dsgo.to_py(dsgo.parse(cm.sgo(game, cm.ROPE)).root)
+    assert v['animation_model'] == [[f'app:/Object/{cm.ROPE_ARC.lower()}', cm.ROPE_MDB], 0.0, 0.0], v
+    logic = src('src/transport_logic.h')
+    length = re.search(r'kRopeLength=([\d.]+)f', logic)
+    assert length and float(length.group(1)) == cm.ROPE_LENGTH, length
+    text = src('src/playerjet.cpp')
+    assert f'kRopeSgo=L"app:/object/{cm.ROPE_SGO.lower()}"' in text and f'kRopeFile=L"{cm.ROPE_SGO}"' in text
+    assert set(cm.FILES) == {cm.CHUTE, cm.ROPE} and 'chute_model.FILES.items()' in src('tools/make_chute.py')
+    assert make_chute.OWNER in ledger.OWNERS
+
+
+@test
 def release_models_whole_folders() -> None:
     """tools/build_release.py ships every RELEASE_MODELS folder whole, its subfolders too: the cockpits' cut interiors
     (models/cockpits/parts/<vehicle>/, textures/, in the repo since #230) are below the folder's top (it once took the top

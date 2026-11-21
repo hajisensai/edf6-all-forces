@@ -1,7 +1,8 @@
 // Execute src/transport.cpp itself against stand-ins: vehicles and squads are memory blocks a small world model moves
 // in answer to the calls transport.cpp makes (a route post drives the truck, a ferry flies the helicopter, boarding seats
 // a squad near its vehicle). Checks a whole ground trip, an empty vehicle, a near order, a helicopter assault with two
-// squads, WITHDRAW, a leader's succession and the paratroop drop. No game is loaded.
+// squads (by hovering: down ropes, jets and a hard landing by class; a hover never held: it lands them), WITHDRAW, a
+// leader's succession and the paratroop drop. No game is loaded.
 #include "../src/transport.cpp"
 #include <cstdio>
 #include <cstdlib>
@@ -35,7 +36,7 @@ struct SquadModel { Obj* top; int alive; int aboard; Obj* in; mapcmd::Command or
 SquadModel squads[3]{};
 SquadModel* SquadOf(const void* top) noexcept {for(auto& q:squads)if(q.top && q.top->m==top)return &q;return nullptr;}
 bool truckDriver=true,heliDriver=true;
-float truckPost[3]{},ferryAt[3]{};bool ferryOn=false,ferryLand=false,heliGround=false;
+float truckPost[3]{},ferryAt[3]{},ferryHover=0.0f;bool ferryOn=false,ferryLand=false,heliGround=false;
 int routePosts=0,ferries=0,ferryReleases=0,heliGuards=0,withdrawals=0,canopies=0,canopyFrees=0,jetLeaves=0,moves=0;
 mapcmd::Command lastHeliCommand{};
 bool withdrawOk=true;
@@ -44,10 +45,10 @@ bool IsJet(const void* v) noexcept {return v==plane.m;}
 bool IsHelicopter(const void* v) noexcept {return v==heli.m;}
 bool NpcDrivable(const unsigned char* v) noexcept {return v==truck.m;}
 bool NpcDriver(const unsigned char* v) noexcept {return v==truck.m ? truckDriver : v==heli.m ? heliDriver : v==plane.m;}
-bool HeliFerry(const void* v,const float* at,bool land) noexcept {
+bool HeliFerry(const void* v,const float* at,bool land,float hover) noexcept {
     if(v!=heli.m)return false;
     if(!at){ferryOn=false;++ferryReleases;return true;}
-    ++ferries;ferryOn=true;ferryLand=land;std::memcpy(ferryAt,at,12);return true;
+    ++ferries;ferryOn=true;ferryLand=land;ferryHover=hover;std::memcpy(ferryAt,at,12);return true;
 }
 bool HeliGrounded(const void* v) noexcept {return v==heli.m && heliGround;}
 int kept=0;
@@ -95,18 +96,39 @@ bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool) noexcept {
     if(!q)return false;
     q->order=c;++q->orders;if(c.order==mapcmd::Order::move)++moves;return true;
 }
-// --- The paratroopers ---
-Obj* jumper[4]{};bool jumperFlies[4]{};bool jumperOut[4]{};
-const void* NpcSquadTopOf(const void* h) noexcept {for(int i=0;i<4;++i)if(jumper[i] && jumper[i]->m==h)return squads[0].top->m;return nullptr;}
-bool NpcSoldierFlies(const void* h) noexcept {for(int i=0;i<4;++i)if(jumper[i] && jumper[i]->m==h)return jumperFlies[i];return false;}
+// --- The paratroopers (a plane's stick, a hovering helicopter's riders): seated in its seats, each of a squad and a class
+// (npcai.cpp kSoldiers order: 0 Ranger, 1 Wing Diver, 2 Fencer, 3 Air Raider) ---
+constexpr int kJumperRows=8;
+Obj* jumper[kJumperRows]{};int jumperClass[kJumperRows]{},jumperSquad[kJumperRows]{};bool jumperOut[kJumperRows]{};
+int JumperOf(const void* h) noexcept {for(int i=0;i<kJumperRows;++i)if(jumper[i] && jumper[i]->m==h)return i;return -1;}
+const void* NpcSquadTopOf(const void* h) noexcept {const int i=JumperOf(h);return i>=0 ? squads[jumperSquad[i]].top->m : nullptr;}
+int NpcSoldierClass(const void* h) noexcept {const int i=JumperOf(h);return i>=0 ? jumperClass[i] : -1;}
 bool IsSoldierClass(const void* h) noexcept {for(const auto& o:soldier)if(o.m==h)return true;return false;}
 bool HumanOnFoot(const unsigned char* h) noexcept {
-    for(int i=0;i<4;++i)if(jumper[i] && jumper[i]->m==h)return jumperOut[i];
+    if(const int i=JumperOf(h);i>=0)return jumperOut[i];
     const SquadModel* q=SquadOf(h);return !q || q->aboard==0;
 }
+float* VelOf(Obj& o) noexcept {return reinterpret_cast<float*>(o.m+0x6B0);}
+// The ropes (playerjet.cpp RopeMake): made / freed, and where each was last put.
+int ropeMakes=0,ropeFrees=0;unsigned char ropeObj[2][0x20]{};
+ObjRef RopeMake(const float*) noexcept {const int k=ropeMakes++%2;return ObjRef{ropeObj[k],ropeObj[k]};}
+bool RopeMove(const ObjRef&,const float*) noexcept {return true;}
+void RopeFree(const ObjRef& r) noexcept {if(r)++ropeFrees;}
 // A truck's / helicopter's seated soldiers (LeaveMidUnload): the get-off clears the seat; `refuses` stays (a player).
 int seatKicks=0;const void* refuses=nullptr;
 bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
+    if(v==heli.m && to<0) {   // a rider out of the hovering helicopter: out beside its door, its squad one fewer aboard
+        unsigned char* seat=SeatAt(v,from);
+        const int i=JumperOf(At<const void*>(seat,kSeatRider));
+        if(i>=0) {
+            jumperOut[i]=true;Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,kSeatRiderCtrl,nullptr);++seatKicks;
+            const float* hp=PosOf(heli);Place(*jumper[i],hp[0]+(i%2 ? 1.5f : -1.5f),hp[1]-1.0f,hp[2]);
+            VelOf(*jumper[i])[0]=VelOf(*jumper[i])[1]=VelOf(*jumper[i])[2]=0.0f;jumper[i]->m[0x711]=0;
+            SquadModel& q=squads[jumperSquad[i]];
+            if(--q.aboard==0)q.in=nullptr;
+            return true;
+        }
+    }
     if((v==truck.m || v==heli.m) && to<0) {
         unsigned char* seat=SeatAt(v,from);
         const void* h=At<const void*>(seat,kSeatRider);
@@ -116,7 +138,7 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
     }
     if(v!=plane.m || to>=0)return false;
     unsigned char* seat=SeatAt(v,from);
-    for(int i=0;i<4;++i)if(jumper[i] && At<const void*>(seat,kSeatRider)==jumper[i]->m) {
+    for(int i=0;i<kJumperRows;++i)if(jumper[i] && At<const void*>(seat,kSeatRider)==jumper[i]->m) {
         jumperOut[i]=true;Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,kSeatRiderCtrl,nullptr);
         reinterpret_cast<float*>(jumper[i]->m+0x6B0)[1]=-30.0f;   // falling out of it
         return true;
@@ -125,6 +147,8 @@ bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
 }
 float ground=0.0f;
 float GroundClearance(const float* p) noexcept {return p[1]-ground;}
+// The riders out of the helicopter fall as bodies do (gravity, and the ground stops them: the walk's support then).
+bool jumpersFall=false;
 ObjRef ChuteCanopyMake(const float*,const float*) noexcept {++canopies;return ObjRef{&canopies,&canopies};}
 bool ChuteCanopyMove(const ObjRef&,const float*,const float*) noexcept {return true;}
 void ChuteCanopyFree(const ObjRef& c) noexcept {if(c)++canopyFrees;}
@@ -167,7 +191,7 @@ void Step(int frames=1) {
         }
         float* hp=PosOf(heli);
         if(ferryOn && heliDriver) {
-            const float goal[3]={ferryAt[0],ferryLand ? ferryAt[1] : ferryAt[1]+40.0f,ferryAt[2]};
+            const float goal[3]={ferryAt[0],ferryLand ? ferryAt[1] : ferryAt[1]+(ferryHover>0.0f ? ferryHover : 40.0f),ferryAt[2]};
             const float dx=goal[0]-hp[0],dy=goal[1]-hp[1],dz=goal[2]-hp[2],d=std::sqrt(dx*dx+dy*dy+dz*dz);
             const float step=std::fmin(d,0.5f);   // 30 m/s
             if(d>0.01f){hp[0]+=dx/d*step;hp[1]+=dy/d*step;hp[2]+=dz/d*step;}
@@ -176,6 +200,13 @@ void Step(int frames=1) {
         float* pp=PosOf(plane);
         for(int i=0;i<3;++i)pp[i]+=planeVel[i]*0.016f;
         for(auto& q:squads)if(q.top && q.in && q.aboard>0){const float* vp=PosOf(*q.in);Place(*q.top,vp[0],vp[1],vp[2]);}
+        if(jumpersFall)for(int i=0;i<kJumperRows;++i) {
+            if(!jumper[i] || !jumperOut[i] || jumper[i]->m[0x711])continue;
+            float* p=PosOf(*jumper[i]);float* v=VelOf(*jumper[i]);
+            for(int k=0;k<3;++k)p[k]+=v[k]*0.016f;
+            v[1]-=9.8f*0.016f;
+            if(p[1]<=ground){p[1]=ground;v[0]=v[1]=v[2]=0.0f;jumper[i]->m[0x711]=1;}
+        }
     }
 }
 void Reset() {
@@ -183,6 +214,8 @@ void Reset() {
     for(auto& q:squads)q=SquadModel{};
     truckDriver=heliDriver=true;ferryOn=ferryLand=heliGround=false;
     routePosts=ferries=ferryReleases=heliGuards=withdrawals=canopies=canopyFrees=jetLeaves=moves=heliLeaves=0;withdrawOk=true;
+    ropeMakes=ropeFrees=0;jumpersFall=false;ground=0.0f;ferryHover=0.0f;
+    for(int i=0;i<kJumperRows;++i){jumper[i]=nullptr;jumperOut[i]=false;jumperClass[i]=0;jumperSquad[i]=0;}
     planeFerries=true;ferryDones=0;planeVel[0]=planeVel[1]=planeVel[2]=0.0f;
     seatKicks=seatedAtWithdraw=0;refuses=nullptr;dismountStalls=false;
     std::memset(truckSeats,0,sizeof(truckSeats));std::memset(heliSeats,0,sizeof(heliSeats));
@@ -292,29 +325,91 @@ void LeaveMidUnload() {
     Check(withdrawals==1 && seatedAtWithdraw==0 && Passengers(heli.m)==0,"the helicopter goes back empty",withdrawals,seatedAtWithdraw);
 }
 
-void HeliAssault() {
-    Reset();
+// Two squads of four aboard the helicopter, seated past its pilot: squad 0 two Rangers, a Wing Diver and a Fencer; squad 1
+// Air Raiders and Rangers.
+void SeatAssault() {
     MakeVehicle(heli,heliSeats,13);Place(heli,-1400,150,0);heliGround=false;
     MakeObj(soldier[0]);MakeObj(soldier[1]);
     squads[0]={&soldier[0],4,4,&heli,{},0,0,0};squads[1]={&soldier[1],4,4,&heli,{},0,0,0};
+    const int classes[kJumperRows]={0,1,2,0,3,0,3,0};
+    for(int i=0;i<kJumperRows;++i) {
+        MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperClass[i]=classes[i];jumperSquad[i]=i/4;
+        unsigned char* seat=SeatAt(heli.m,static_cast<unsigned>(i+1));
+        Put<void*>(seat,kSeatRider,jumper[i]->m);Put<void*>(seat,kSeatRiderCtrl,soldier[8+i].ctrl);
+        Place(*jumper[i],-1400,150,0);
+    }
+    jumpersFall=true;
+}
+
+// 2026-11-21 「突击索降」 and the rest by class: the helicopter does not land; it hovers kRopeHeight over the drop point and
+// they go down one after another, Rangers / Air Raiders down a rope, the Wing Diver on her jets, the Fencer free.
+void HeliAssault() {
+    Reset();
+    SeatAssault();
     const void* tops[2]={soldier[0].m,soldier[1].m};
     const float target[3]={0,0,0};
     Check(TransportDeliver(heli.m,tops,2,target),"a helicopter assault handed over (two squads aboard)");
     Check(TransportOf(soldier[1].m)==heli.m,"both paired with it");
     Check(kept>0,"its helicopter kept for them (no leaving for fuel or ammo)");
-    bool landedFirst=true;
+    bool everGrounded=false,jetsHeld=false,ropeHeight=true;
+    int ropeFrames=0;float fencerFastest=0.0f,ranger=0.0f,fencer=0.0f;
+    float firstOutAt[3]{};bool firstOut=false;
     for(int i=0;i<40000 && !(Done(soldier[0].m) && Done(soldier[1].m));++i) {
+        const bool rangerFalling=jumperOut[0] && !jumper[0]->m[0x711],fencerFalling=jumperOut[2] && !jumper[2]->m[0x711];
+        if(rangerFalling)ranger=PosOf(*jumper[0])[1];
+        if(fencerFalling)fencer=PosOf(*jumper[2])[1];
         Step();
-        if((squads[0].dismounts || squads[1].dismounts) && !heliGround && ferryOn)landedFirst=false;
+        everGrounded=everGrounded || heliGround;
+        if(!firstOut && jumperOut[0]){firstOut=true;std::memcpy(firstOutAt,PosOf(heli),12);}
+        if(seatKicks>0 && ferryHover!=transport::kRopeHeight)ropeHeight=false;
+        // A frame's way down the rope: its sink (gravity's share comes after the descent's own step in this model).
+        if(rangerFalling && !jumper[0]->m[0x711] && std::fabs(ranger-PosOf(*jumper[0])[1]-transport::kRopeSink*0.016f)<0.005f)++ropeFrames;
+        if(fencerFalling && !jumper[2]->m[0x711])fencerFastest=std::fmax(fencerFastest,(fencer-PosOf(*jumper[2])[1])/0.016f);
+        if(jumperOut[1] && !jumper[1]->m[0x711]) {   // the Wing Diver's intent after her AI's Think (npcai.cpp)
+            jumper[1]->m[0xD76]=jumper[1]->m[0xD77]=0;
+            TransportJumperIntent(jumper[1]->m);
+            jetsHeld=jetsHeld || jumper[1]->m[0xD77];
+        }
     }
     Check(Done(soldier[0].m) && Done(soldier[1].m),"the assault ends");
-    Check(squads[0].dismounts>0 && squads[1].dismounts>0 && landedFirst,"both squads got off, on the ground");
-    const float* hp=PosOf(heli);
-    Check(std::hypot(hp[0]+60.0f,hp[2])<5.0f,"it landed 60 m short of the point on its way in",hp[0],hp[2]);
+    Check(firstOut && !everGrounded,"they went down from a hover: it never landed");
+    Check(std::hypot(firstOutAt[0]+60.0f,firstOutAt[2])<transport::kHoverNear && std::fabs(firstOutAt[1]-transport::kRopeHeight)<1.0f,
+          "the hover 60 m short of the point at the rope height",firstOutAt[0],firstOutAt[1]);
+    Check(ropeHeight,"held at the rope height while they go down");
+    Check(seatKicks==8 && squads[0].dismounts==squads[1].dismounts,"all eight out of their seats, one by one",seatKicks);
+    Check(ropeFrames>60,"a Ranger down the rope at its sink",ropeFrames);
+    Check(ropeMakes>=1 && ropeMakes<=2,"a rope or two under its doors (riders share them)",ropeMakes);
+    Check(fencerFastest>12.0f,"the Fencer falls free (no rope, no canopy)",fencerFastest);
+    Check(jetsHeld,"the Wing Diver's jets: the jump held by her intent");
+    Check(canopies==0,"no canopy from a helicopter");
     Check(squads[0].order.order==mapcmd::Order::guard && squads[1].order.order==mapcmd::Order::guard,"each guards the point");
     // 2026-10-10 "载具送过来以后就会直接回去": once they are off it goes back, no longer their transport.
     Check(withdrawals==1 && !TransportOf(soldier[0].m) && !TransportOf(soldier[1].m),"delivered: the helicopter goes back, the pairs gone");
     Check(!TransportOrder(soldier[0].m,mapcmd::Command{mapcmd::Order::move,{0,0,1200}}),"a later far order: they walk");
+    for(int i=0;i<400;++i)Step();
+    for(int i=0;i<kJumperRows;++i)Check(jumper[i]->m[0x711]!=0,"each down on the ground",i);
+    Check(ropeFrees==ropeMakes,"the ropes go once unused",ropeFrees,ropeMakes);
+}
+
+// No hover to be had (the ground under the drop point is within kHoverLow of the rope height): it lands them instead.
+void HeliHoverNeverHeld() {
+    Reset();
+    SeatAssault();
+    ground=transport::kRopeHeight-transport::kHoverLow+1.0f;
+    for(auto& q:squads)if(q.top)Place(*q.top,-1400,150,0);
+    const void* tops[2]={soldier[0].m,soldier[1].m};
+    const float target[3]={0,0,0};
+    TransportDeliver(heli.m,tops,2,target);
+    bool landedFirst=true;int kicksAloft=0;
+    for(int i=0;i<40000 && !(Done(soldier[0].m) && Done(soldier[1].m));++i) {
+        const int kicks=seatKicks;
+        Step();
+        if(!heliGround)kicksAloft+=seatKicks-kicks;
+        if((squads[0].dismounts || squads[1].dismounts) && !heliGround && ferryOn)landedFirst=false;
+    }
+    Check(Done(soldier[0].m) && Done(soldier[1].m) && kicksAloft==0 && ropeMakes==0,"no hover: nobody went down a rope",kicksAloft);
+    Check(squads[0].dismounts>0 && landedFirst,"it landed them instead, then they got off");
+    Check(withdrawals==1,"and went back");
 }
 
 void Withdraw() {
@@ -354,7 +449,8 @@ void Stick(float x,float across,float speed) {
     MakeVehicle(plane,planeSeats,5);Place(plane,x,150,across);planeVel[0]=speed;
     MakeObj(soldier[0]);squads[0]={&soldier[0],4,4,&plane,{},0,0,0};
     for(int i=0;i<4;++i) {
-        MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperFlies[i]=i==2;   // the third: a Wing Diver
+        // A Ranger, an Air Raider, a Wing Diver and a Fencer.
+        MakeObj(soldier[8+i]);jumper[i]=&soldier[8+i];jumperOut[i]=false;jumperClass[i]=i==0 ? 0 : i==1 ? 3 : i==2 ? 1 : 2;jumperSquad[i]=0;
         unsigned char* seat=SeatAt(plane.m,static_cast<unsigned>(i+1));
         Put<void*>(seat,kSeatRider,jumper[i]->m);Put<void*>(seat,kSeatRiderCtrl,seatCtrl[i]);Put<int>(seatCtrl[i],8,1);
         Place(*jumper[i],0,150,0);
@@ -381,15 +477,16 @@ void Paradrop() {
     Check(jumperOut[1] && jumperOut[2] && jumperOut[3],"the stick goes on");
     Check(ferryDones==1 && jetLeaves==0 && squads[0].order.order==mapcmd::Order::guard,
           "all out: the plane flies on along its line to be deleted off the map, the squad guards the point");
-    // Under the canopy: falling no faster than the sink; the Wing Diver has none.
-    for(int i=0;i<4;++i)reinterpret_cast<float*>(jumper[i]->m+0x6B0)[1]=-30.0f;
+    // Under the canopy: falling no faster than the sink; the Wing Diver (her jets) and the Fencer (a hard landing) have none.
+    for(int i=0;i<4;++i)reinterpret_cast<float*>(jumper[i]->m+0x6B0)[1]=-40.0f;
     Step(1);
-    Check(canopies==3,"a canopy over each but the Wing Diver",canopies);
-    Check(reinterpret_cast<float*>(jumper[0]->m+0x6B0)[1]==-6.0f && reinterpret_cast<float*>(jumper[2]->m+0x6B0)[1]==-30.0f,
-          "the fall held to 6 m/s, the Wing Diver's untouched");
+    Check(canopies==2,"a canopy over the Ranger and the Air Raider only",canopies);
+    Check(VelOf(*jumper[0])[1]==-6.0f && VelOf(*jumper[1])[1]==-6.0f,"the fall held to 6 m/s under a canopy");
+    Check(VelOf(*jumper[2])[1]==-40.0f,"the Wing Diver's fall her own (her jets are her intent)");
+    Check(VelOf(*jumper[3])[1]==-transport::kHardFallMost,"the Fencer's free fall held at the hard-fall most",VelOf(*jumper[3])[1]);
     for(int i=0;i<4;++i)Place(*jumper[i],0,0.5f,0);
     Step(30);
-    Check(canopyFrees==3,"down: the canopies gone",canopyFrees);
+    Check(canopyFrees==2,"down: the canopies gone",canopyFrees);
     // A pass 150 m abeam: no stick (the line brings it over the point on the next); a pass that is past the window: none.
     Stick(-1500,150,speed);TransportParadrop(plane.m,target);
     for(int i=0;i<1500;++i)Step();
@@ -438,7 +535,7 @@ void SuccessionMidTrip() {
 // The stick's squads are kept by identity: a top freed and its memory reused before the plane is empty gets no order.
 void ParadropReusedTop() {
     Stick(-400,0,98.0f);planeFerries=false;
-    for(int i=0;i<4;++i)jumperFlies[i]=false;
+    for(int i=0;i<4;++i)jumperClass[i]=0;
     const float target[3]={0,0,0};
     TransportParadrop(plane.m,target);
     for(int i=0;i<400 && !jumperOut[3];++i)Step();
@@ -452,7 +549,7 @@ void ParadropReusedTop() {
 
 int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
-    GroundTrip();EmptyTruck();DeliverHere();HeliAssault();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();LeaveMidUnload();
+    GroundTrip();EmptyTruck();DeliverHere();HeliAssault();HeliHoverNeverHeld();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();LeaveMidUnload();
     std::printf("transport_runtime: %d checks, %d failed\n",checks,failed);
     return failed ? 1 : 0;
 }

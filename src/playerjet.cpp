@@ -1783,6 +1783,38 @@ void ChuteCanopyFree(const ObjRef& canopy) noexcept {
     farobj::Drop(c);
 }
 
+// The rope (EDF6VC_ROPE.SGO, pylib/chute_model.py rope(): its top at the object's origin, hanging down its -y), upright
+// at `top`. Preloaded with the canopy (PreloadPlayerJets), when installed.
+const wchar_t* const kRopeSgo=L"app:/object/edf6vc_rope.sgo";
+const wchar_t* const kRopeFile=L"EDF6VC_ROPE.SGO";
+bool ropePreloaded=false;
+namespace {
+void RopePose(const float* top,float* m) noexcept {
+    const float pose[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, top[0],top[1],top[2],1};
+    std::memcpy(m,pose,sizeof(pose));
+}
+}  // namespace
+ObjRef RopeMake(const float* top) noexcept {
+    if(!top || !chuteOk || !ropePreloaded || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))return {};
+    alignas(16) float m[16];RopePose(top,m);
+    farobj::Made why=farobj::Made::none;
+    const ObjRef r=farobj::Make(kRopeSgo,m,&why);
+    if(why==farobj::Made::faulted){ropePreloaded=false;Log("ROPE not made: the game faulted: off this mission");}
+    return r;
+}
+bool RopeMove(const ObjRef& rope,const float* top) noexcept {
+    __try {
+        if(!top || !farobj::Live(rope))return false;
+        alignas(16) float m[16];RopePose(top,m);
+        std::memcpy(static_cast<unsigned char*>(const_cast<void*>(rope.obj))+kMatrix,m,sizeof(m));
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void RopeFree(const ObjRef& rope) noexcept {
+    ObjRef r=rope;
+    farobj::Drop(r);
+}
+
 // The 506 physics step (body506.cpp), after the stock one: the player jet's velocity and spin.
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     PJet* j=Find(v);
@@ -1859,9 +1891,16 @@ void PreloadPlayerJets() noexcept {
             chutePreloaded=true;
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
+    ropePreloaded=false;   // a helicopter's rope (RopeMake: transport.cpp's rope descent), when installed
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
+        __try {
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kRopeSgo,2,-1);
+            ropePreloaded=true;
+        } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
     bail=Bailout{};catchFlight=CatchFlight{};
-    Log("PJET preload for the catch: %s (twins %s); the parachute's canopy=%d",line,twins ? "on" : "off: PlayerJetAll / PlayerJetCatch",
-        chutePreloaded);
+    Log("PJET preload for the catch: %s (twins %s); the parachute's canopy=%d, the rope=%d",line,twins ? "on" : "off: PlayerJetAll / PlayerJetCatch",
+        chutePreloaded,ropePreloaded);
 }
 
 // The guns' rounds for the cockpit's stores line (the stock gauge's gun panels gone, stockgauge.cpp): seat 0's weapons

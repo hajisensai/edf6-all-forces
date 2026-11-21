@@ -129,6 +129,9 @@ bool NpcCommandHint(CommandHint* out) noexcept;
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;
 const void* NpcSquadTopOf(const void* human) noexcept;
 bool NpcSoldierFlies(const void* human) noexcept;
+// Its class in npcai.cpp kSoldiers' order (0 Ranger, 1 Wing Diver, 2 Fencer, 3 Air Raider; transport_logic.h DescentOf),
+// -1 for no soldier of these.
+int NpcSoldierClass(const void* human) noexcept;
 
 // npc_backpack.cpp: an NPC soldier's backpack weapon (its sub weapon slots; docs/npc-backpack-re.md). Game thread.
 //  - InstallNpcBackpack: the code it rests on as read (from InstallNpcAi); false: no NPC uses one;

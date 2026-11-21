@@ -6,6 +6,10 @@ Root.cpk (pure Python: pylib + graft_pure, no numpy / PIL, so the installer can 
     sgo(game)       -> bytes                  the object that shows it (a stock FarEventObject's SGO, its model ours)
     check(arc)      -> None                   raises ChuteCheckError on any self-check failure
 
+The same for a helicopter's rope (src/transport.cpp's rope descent, src/playerjet.cpp RopeMake), EDF6VC_ROPE.MRAB / .SGO:
+rope() its geometry, build(game, ROPE) / sgo(game, ROPE) / check(arc, ROPE). Its top at the object's origin, hanging
+ROPE_LENGTH down its -y: two crossed double-sided strips ROPE_WIDTH wide, in the same fabric.
+
 The model, in the object's frame (y up, +z its front; the plugin puts the object CANOPY_UP over the player's feet):
   - a dome canopy: half an ellipsoid RADIUS across the rim and HEIGHT tall, its rim RIM_Y up, open underneath, two
     shells (the outside facing out, the inside facing in, SHELL_GAP apart) so it shows from above and from below
@@ -36,6 +40,13 @@ from mdb_jet import pack_vertex
 OUT_ARC = 'EDF6VC_CHUTE.MRAB'
 OUT_MDB = 'edf6vc_chute.mdb'
 SGO_FILE = 'EDF6VC_CHUTE.SGO'
+CHUTE, ROPE = 'chute', 'rope'
+ROPE_ARC, ROPE_MDB, ROPE_SGO = 'EDF6VC_ROPE.MRAB', 'edf6vc_rope.mdb', 'EDF6VC_ROPE.SGO'
+ROPE_LENGTH = 28.0       # src/transport_logic.h kRopeLength (the helicopter holds kRopeHeight 18 m over the ground)
+ROPE_WIDTH = 0.08        # a fast rope's few cm, made a little wider so it shows from the ground
+# kind -> (archive, model member, SGO, object bone name, skin bone name)
+FILES = {CHUTE: (OUT_ARC, OUT_MDB, SGO_FILE, 'edf6vc_chute', 'canopy'),
+         ROPE: (ROPE_ARC, ROPE_MDB, ROPE_SGO, 'edf6vc_rope', 'rope')}
 DONOR_ARC, DONOR_MDB = 'VEHICLE401_STRIKER.MRAB', 'Vehicle401_STRIKER.mdb'
 FABRIC = 'v401_interiorSheet_col.DDS'      # the albedo of the donor material taken
 STOCK_SGO = 'EV601_PLANT.SGO'              # a stock FarEventObject (the far-off plant): its SGO, its model ours
@@ -126,9 +137,9 @@ def _dome(verts: list[Vertex], tris: list[Tri], inside: bool) -> None:
 
 
 def _strip(verts: list[Vertex], tris: list[Tri], top: tuple[float, float, float], bottom: tuple[float, float, float],
-           side: tuple[float, float, float]) -> None:
-    """A double-sided strip from `top` to `bottom`, LINE_WIDTH wide along `side`."""
-    h = LINE_WIDTH / 2
+           side: tuple[float, float, float], width: float = LINE_WIDTH) -> None:
+    """A double-sided strip from `top` to `bottom`, `width` wide along `side`."""
+    h = width / 2
     along = _norm(_sub(bottom, top))
     n = _norm(_cross(side, along))
     length = math.dist(top, bottom)
@@ -157,6 +168,16 @@ def canopy() -> tuple[list[Vertex], list[Tri]]:
         out = _norm(_cross(across, _norm(_sub(riser, rim))))     # off the line's plane
         _strip(verts, tris, rim, riser, across)
         _strip(verts, tris, rim, riser, out)
+    return verts, tris
+
+
+def rope() -> tuple[list[Vertex], list[Tri]]:
+    """The rope, in the object's frame: from its origin ROPE_LENGTH straight down, two crossed strips ROPE_WIDTH wide."""
+    verts: list[Vertex] = []
+    tris: list[Tri] = []
+    top, bottom = (0.0, 0.0, 0.0), (0.0, -ROPE_LENGTH, 0.0)
+    _strip(verts, tris, top, bottom, (1.0, 0.0, 0.0), ROPE_WIDTH)
+    _strip(verts, tris, top, bottom, (0.0, 0.0, 1.0), ROPE_WIDTH)
     return verts, tris
 
 
@@ -197,8 +218,8 @@ def _row(elems: list, v: Vertex, occ: tuple[float, float], bone: int) -> list[tu
     return out
 
 
-def model(donor: Mdb, occ: tuple[float, float]) -> Mdb:
-    """The chute's model from the donor's fabric material and its seat mesh's layout (see the module doc)."""
+def model(donor: Mdb, occ: tuple[float, float], kind: str = CHUTE) -> Mdb:
+    """The chute's (the rope's) model from the donor's fabric material and its seat mesh's layout (see the module doc)."""
     mats = [m for m in donor.materials if any(donor.textures[x.texture].filename.lower() == FABRIC.lower() and x.kind == 'albedo'
                                               for x in m.textures)]
     _req(len(mats) == 1, f'{DONOR_MDB}: {len(mats)} materials with {FABRIC}')
@@ -221,24 +242,25 @@ def model(donor: Mdb, occ: tuple[float, float]) -> Mdb:
         t = donor.textures[x.texture]
         slots.append(replace(x, texture=len(textures)))
         textures.append(Texture(len(textures), t.name, t.filename, t.unk))
-    verts, tris = canopy()
+    verts, tris = canopy() if kind == CHUTE else rope()
     vdata = b''.join(pack_vertex(tmpl.elems, tmpl.vsize, _row(tmpl.elems, v, occ, 2)) for v in verts)
     _req(len(verts) < 0x10000, f'{len(verts)} vertices')
     mesh = Mesh(tmpl.flags, 0, tmpl.unk08, tmpl.vsize, list(tmpl.elems), 0, vdata,
                 struct.pack(f'<{3 * len(tris)}H', *(i for t in tris for i in t)))
-    md = Mdb(donor.version, ['mdl', 'edf6vc_chute', 'canopy', donor.name_of(mat.name)], bones,
+    obj_bone, skin_bone = FILES[kind][3:]
+    md = Mdb(donor.version, ['mdl', obj_bone, skin_bone, donor.name_of(mat.name)], bones,
              [Object(1, 1, [mesh])], [replace(mat, index=0, name=3, textures=slots)], textures)
     return g.recompute_bounds(g.relink(md))
 
 
-def build(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
+def build(game, kind: str = CHUTE) -> bytes:  # noqa: ANN001 - rootcpk.Game
     """The finished archive: the model, then the donor's fabric texture members (low and high detail) in the
     donor's folder order (TEXTURE lods, MODEL, HD-TEXTURE)."""
     donor_rab = rab_read(game.read('OBJECT', DONOR_ARC))
     donor = mdb_read(member(donor_rab, DONOR_MDB).data)
     occ_tex = next(donor.textures[x.texture].filename for m in donor.materials for x in m.textures if x.kind == 'param_occ')
     occ = brightest_block(member(donor_rab, occ_tex).data)
-    md = model(donor, occ)
+    md = model(donor, occ, kind)
     data = mdb_write(md)
     stored = cmpl_compress(data)
     _req(cmpl_decompress(stored) == data, 'CMPL round trip failed')
@@ -246,13 +268,13 @@ def build(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
     tex = [f for t in md.textures for f in g.texture_members(donor_rab, t.filename)]
     seen: set[str] = set()
     tex = [f for f in tex if not (f.name.lower() in seen or seen.add(f.name.lower()))]
-    model_file = RabFile(OUT_MDB, donor_rab.folders.index('MODEL'), 0, stored)
+    model_file = RabFile(FILES[kind][1], donor_rab.folders.index('MODEL'), 0, stored)
     order = {name: k for k, name in enumerate(donor_rab.folders)}
     files = sorted(tex + [model_file], key=lambda f: (order[donor_rab.folders[f.folder]], f is not model_file and f.name.lower()))
     return rab_write(Rab(donor_rab.version, list(donor_rab.folders), files))
 
 
-def sgo(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
+def sgo(game, kind: str = CHUTE) -> bytes:  # noqa: ANN001 - rootcpk.Game
     """The stock FarEventObject's SGO with this model (no cas, no animation data, no damage grid, no ragdoll) and only
     a unit scale in its setting (no default animation)."""
     import dsgo
@@ -264,7 +286,8 @@ def sgo(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
         _req(False, f'{STOCK_SGO} has a ragdoll')
     except KeyError:
         pass
-    r.set('animation_model', dsgo.Node([dsgo.Node([f'app:/Object/{OUT_ARC.lower()}', OUT_MDB]), 0.0, 0.0]))
+    arc, mdb = FILES[kind][:2]
+    r.set('animation_model', dsgo.Node([dsgo.Node([f'app:/Object/{arc.lower()}', mdb]), 0.0, 0.0]))
     r.set('setting', dsgo.Node([dsgo.Node([1.0, 1.0, 1.0])], {0: 'scale'}))
     return dsgo.compact(doc)
 
@@ -272,14 +295,14 @@ def sgo(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
 # ------------------------------------------------------------------------------------------ check
 
 
-def check(arc: bytes) -> None:
+def check(arc: bytes, kind: str = CHUTE) -> None:
     """Re-read `arc` and raise ChuteCheckError unless: the archive and model round-trip; one object on a kind-2 bone,
     one mesh skinned to the kind-3 bone only, indices in range; every texture (and its .lod) is a member; the canopy
-    spans 2 x RADIUS, its crown HEIGHT over the rim, the lines down to RISER_Y; every triangle faces as its vertices'
-    normals (the stock winding)."""
+    spans 2 x RADIUS, its crown HEIGHT over the rim, the lines down to RISER_Y (the rope: from its origin ROPE_LENGTH
+    down, ROPE_WIDTH across); every triangle faces as its vertices' normals (the stock winding)."""
     rab = rab_read(arc)
     _req(rab_write(rab) == arc, 'archive does not round-trip')
-    data = member(rab, OUT_MDB).data
+    data = member(rab, FILES[kind][1]).data
     md = mdb_read(data)
     _req(mdb_write(md) == data, 'model does not round-trip')
     _req([b.kind for b in md.bones] == [0, 2, 3], f'bone kinds {[b.kind for b in md.bones]}')
@@ -293,13 +316,17 @@ def check(arc: bytes) -> None:
     idx = struct.unpack(f'<{len(me.indices) // 2}H', me.indices)
     _req(idx and len(idx) % 3 == 0 and max(idx) < nv, 'index buffer')
     bi = read_elem(me, g.elem_name(me, 'BLENDINDICES') or '') or []
-    _req({int(v[0]) for v in bi} == {2}, 'skinned to a bone other than canopy')
+    _req({int(v[0]) for v in bi} == {2}, 'skinned to a bone other than its skin bone')
     p = g.mesh_positions(me)
     xs = [v[0] for v in p]
     ys = [v[1] for v in p]
-    _req(abs(max(xs) - min(xs) - 2 * RADIUS) < 0.05, f'span {max(xs) - min(xs):.2f} m')
-    _req(abs(max(ys) - RIM_Y - HEIGHT) < 0.02, f'crown {max(ys):.2f} m')
-    _req(abs(min(ys) - RISER_Y) < 0.02, f'riser {min(ys):.2f} m')
+    if kind == ROPE:
+        _req(abs(max(xs) - min(xs) - ROPE_WIDTH) < 0.005, f'rope width {max(xs) - min(xs):.3f} m')
+        _req(abs(max(ys)) < 0.01 and abs(min(ys) + ROPE_LENGTH) < 0.01, f'rope {max(ys):.2f}..{min(ys):.2f} m')
+    else:
+        _req(abs(max(xs) - min(xs) - 2 * RADIUS) < 0.05, f'span {max(xs) - min(xs):.2f} m')
+        _req(abs(max(ys) - RIM_Y - HEIGHT) < 0.02, f'crown {max(ys):.2f} m')
+        _req(abs(min(ys) - RISER_Y) < 0.02, f'riser {min(ys):.2f} m')
     n = read_elem(me, g.elem_name(me, 'normal') or '') or []
     verts = [((v[0], v[1], v[2]), (m[0], m[1], m[2]), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0)) for v, m in zip(p, n)]
     bad = sum(1 for k in range(0, len(idx), 3) if facing(verts, (idx[k], idx[k + 1], idx[k + 2])) <= 0)

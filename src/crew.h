@@ -1512,6 +1512,12 @@ void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and p
 ObjRef ChuteCanopyMake(const float* feet,const float* drift) noexcept;
 bool ChuteCanopyMove(const ObjRef& canopy,const float* feet,const float* drift) noexcept;
 void ChuteCanopyFree(const ObjRef& canopy) noexcept;
+// playerjet.cpp: a helicopter's rope (transport.cpp's rope descent; transport_logic.h kRopeLength long), hanging straight
+// down from `top`, moved there each frame, deleted. EDF6VC_ROPE.SGO (tools/make_chute.py), a FarEventObject as the
+// canopy is; an empty ref: not made (not installed, not preloaded, or the game made nothing).
+ObjRef RopeMake(const float* top) noexcept;
+bool RopeMove(const ObjRef& rope,const float* top) noexcept;
+void RopeFree(const ObjRef& rope) noexcept;
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool PassThrough() noexcept;   // jet_hooks.cpp: the addBody hook is in
  bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
