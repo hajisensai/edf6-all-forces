@@ -1,43 +1,42 @@
-// The room pre-sync's logic (src/room_sync.h; docs/feature-2026-10-12-room-loadout-menu.md 阶段 6), free of the game and
-// of Windows: tests/room_sync_test.cpp drives it offline against a fake EDF6Coop member attribute table. src/room_sync.cpp
-// only wires the real things into Env (the files in Mods/OBJECT, the pending list, the background generator, the config).
+// The room pre-sync's logic (src/room_sync.h; docs/feature-2026-10-12-room-loadout-menu.md 阶段 6, reworked 2026-11-21:
+// docs/feedback-2026-11-21-worldmap-room.md), free of the game and of Windows: tests/room_sync_test.cpp drives it offline
+// against a fake EDF6Coop member attribute table. src/room_sync.cpp only wires the real things into Env (the files in
+// Mods/OBJECT, the pending list, the background generator, the configuration and its line, member_config.h).
+//
+// In an online room every member's own support loadout applies to the supports that member calls (the host plans a
+// member's request with that member's configuration, support_dispatch.cpp PlanForRequester). So every member publishes
+// its configuration, and every machine makes the variant files of every member's configuration before the mission.
 //
 // What travels (EDF6CoopGetMemberAttributeApi v1, src/coop_member_attribute_api.h; values unauthenticated, printable
 // ASCII, at most 999 bytes):
-//   EDF6X_VCVARIANTS  the host's list: "1;<hash>;<listed>;<parts>;<tokens>"
-//   EDF6X_VCVAR1..3   its further parts when the tokens do not fit one value: "<hash>;<tokens>"
+//   EDF6X_VCCFG       every member's own configuration: "1;<hash>;<parts>;<line>"
+//   EDF6X_VCCFG1..3   its further parts when the line does not fit one value: "<hash>;<line continued>"
 //   EDF6X_VCHAVE      every member's readiness: "1;<hash>;<missing>;<state>"
-//   EDF6X_VCPACKS     "1" when this member can read backpack tokens in the host's list
 //   EDF6X_VCPVEH      every member's own player loadouts (player_vehicle_logic.h: the jets it summons itself), "1;<tokens>":
-//                     every other member generates their files like the host's list's, and preloads them for the mission
-// <hash> is 16 upper-case hex digits: FNV-1a 64 of the listed tokens joined by ',' (ListHash), so a reader knows the parts
-// belong together and that a member's readiness is about the list the host has now. <tokens> are ','-separated, sorted,
-// unique, each one generated variant file in short form, never its name:
+//                     every other member generates their files too, and preloads them for the mission
+// <line> is member_config.h's (Env::ownConfig writes it, Env::memberVariants reads one: this file only carries it), its
+// <hash> 16 upper-case hex digits, FNV-1a 64 of the whole line, so a reader knows the parts belong together. The parts
+// are cut anywhere (the line is put back together before it is read). The whole configuration, headers included, stays
+// within kConfigBudget (Coop's budget: EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE 4096 bytes of every value this process
+// publishes); entries that do not fit are left out by the writer and said on a status line.
+// Every machine derives the files of the room: its own configuration's (Env::configured, its own ini, which the generator
+// reads), and every other member's line's (Env::memberVariants: refused whole when it does not read, that member said on
+// a line). The union, sorted, is the room's set (Target); its hash (ListHash over the tokens below) is what a member's
+// readiness names, so a member that sees the same configurations reports ready for the same set.
+// Tokens (the hash's spelling, and EDF6X_VCPVEH's vehicles), each one generated variant file in short form:
 //   a soldier   one letter, the kind (support_call.h SupportWeapon: a = rifle ... n = fshotgun; upper case = the leader's
 //               template), then the primary and the secondary colour, each 6 upper-case hex digits or X (stock):
 //               "a1E3A8AX" = EDF6VC_NPC_RIFLE_1E3A8A_X.SGO; a backpack weapon (npc_pack_table.h) adds '+' and its code in
-//               2 upper-case hex digits: "aXX+01" = EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO. Only listed when every
-//               room member publishes EDF6X_VCPACKS=1: an older build cannot parse these tokens. Otherwise the host
-//               lists the colours without the pack, exactly as its mission planner downgrades that soldier.
+//               2 upper-case hex digits: "aXX+01" = EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO.
 //   a vehicle   one character, '0' + the body (support_loadout.h VehicleBody 1 tank ... 5 multirole; 6 .. 10, ':', a
-//               player's own summons, only in EDF6X_VCPVEH below), then the loadout's 64-bit
-//               variant (LoadoutVariant, applied bit clear) in 16 upper-case hex digits:
-//               "14000000000000C81" = EDF6VC_LO_TANK_4000000000000C81.SGO
-// A reader turns a token into a VariantRef, the VariantRef into its file name through support_loadout.h's own naming
-// (SupportLookFile / VehicleVariantFile: the one place the grammar lives), and keeps it only when that name parses back
-// (ParseVariantFile) to the same VariantRef and the token re-encodes to the same text: anything else (a path, another
-// name, a malformed colour, a pylon a body cannot carry) refuses the whole list. A name is only ever a file to generate.
-// The pylon weapons a vehicle carries (EDF6VC_<STORE>_<n>.SGO) are not listed: the generator writes them with the vehicle.
-// Up to kListParts values (16 distinct extension keys a process, Coop's limit; this uses five) and kListBudget bytes in
-// all (Coop's budget: EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE 4096 bytes of every value this process publishes, so the
-// list leaves room for EDF6X_VCHAVE, at most kHaveMost, and a little for another plugin), about 230 tokens; a longer set
-// is listed as far as it fits and the host says how many are left out (those still go through the pending list). A
-// publish Coop refuses anyway (lastError: the budget taken by another plugin, ...) is said on a status line and logged,
-// never lost silently; it is tried again each tick.
+//               player's own summons), then the loadout's 64-bit variant (LoadoutVariant, applied bit clear) in 16
+//               upper-case hex digits: "14000000000000C81" = EDF6VC_LO_TANK_4000000000000C81.SGO
+// A file name only ever reaches the pending list after it parses back (ParseVariantFile) to what it names.
 // Coop sends extension values at most once every 2 s, merged (the last value wins), and other members read them a beat
-// or more later: nothing here assumes a published value is visible at once. A member's readiness names the list hash
-// it is about; a value of another list, or none yet, reads as "checking" until the current one arrives.
-// <state>: r ready, g generating (or about to), f the generator failed, n no generator installed, w no list to check yet.
+// or more later: nothing here assumes a published value is visible at once. A member's line being replaced part by part
+// reads as waiting; its last complete line stands meanwhile. A member's readiness of another set, or none yet, reads as
+// "checking" until the current one arrives.
+// <state>: r ready, g generating (or about to), f the generator failed, n no generator installed, w no set to check yet.
 #pragma once
 #include "coop_member_attribute_api.h"
 #include "hudtext.h"
@@ -50,18 +49,20 @@
 #include <cstring>
 #include <cwchar>
 #include <initializer_list>
+#include <memory>
+#include <new>
 
 namespace crew::roomsync {
 
-inline constexpr char kKeyList[]="EDF6X_VCVARIANTS";
+inline constexpr char kKeyConfig[]="EDF6X_VCCFG";
 inline constexpr char kKeyHave[]="EDF6X_VCHAVE";
-inline constexpr char kKeyPacks[]="EDF6X_VCPACKS";     // "1": this member reads backpack tokens
-inline constexpr int kListParts=4;                    // EDF6X_VCVARIANTS + EDF6X_VCVAR1..3
+inline constexpr int kConfigParts=4;                  // EDF6X_VCCFG + EDF6X_VCCFG1..3
 inline constexpr std::size_t kValueMost=EDF6COOP_MEMBER_ATTRIBUTE_MAX_VALUE;
-inline constexpr int kSetMost=512;                    // the bounded list, including compatible looks; excess is said
-static_assert(kSetMost<=kHostVariantsMost,"the mission preload holds a whole host list (support_variants.h)");
-// A client generates at most this many files a room (each one a name the host's validated list gave): a host cannot make
-// a member write more than this per room, whatever it lists or how often it changes its list. The rest come stock.
+inline constexpr int kSetMost=512;                    // the room's set; excess is said
+static_assert(kSetMost<=kHostVariantsMost,"the mission preload holds the room's whole set (support_variants.h)");
+// A machine generates at most this many files a room for other members' configurations (each one a name a validated
+// line gave): no member can make another write more than this per room, whatever it publishes or how often it changes
+// it. The rest come stock.
 inline constexpr int kNotesPerRoom=128;
 inline constexpr int kMembersMost=64;                 // Coop lists at most Epic's 64
 inline constexpr std::uint64_t kTickMs=1000;
@@ -69,16 +70,21 @@ inline constexpr std::uint64_t kStartGapMs=5000;      // between two generator s
 inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
-inline constexpr std::size_t kListBudget=3800;        // all list values together (header bytes included)
-static_assert(kListBudget+kHaveMost+1+playerveh::kValueMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
-              "the list, readiness, pack marker and own player loadouts fit Coop's budget");
+inline constexpr std::size_t kConfigBudget=3800;      // all configuration values together (header bytes included)
+static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
+              "the configuration, readiness and own player loadouts fit Coop's budget");
+// "1;" + 16 + ";" + 1 digit + ";": 21 bytes; a further part's "<16 hex>;": 17.
+inline constexpr std::size_t kConfigHeader=21,kPartHeader=17;
+// The longest line: the budget less every header.
+inline constexpr std::size_t kConfigLineMost=kConfigBudget-kConfigHeader-(kConfigParts-1)*kPartHeader;
+static_assert(kConfigLineMost<=(kValueMost-kConfigHeader)+(kConfigParts-1)*(kValueMost-kPartHeader),"the parts can carry it");
 inline constexpr int kPlayerSetMost=kMembersMost*kPlayerVehicleCount;   // every other member's player loadouts
 static_assert(kPlayerSetMost<=kSetMost,"a VariantSet holds them");
 
-// The part key i (0 = kKeyList).
+// The part key i (0 = kKeyConfig).
 inline void PartKey(int i,char* out,std::size_t capacity) noexcept {
-    if(i<=0)std::snprintf(out,capacity,"%s",kKeyList);
-    else std::snprintf(out,capacity,"EDF6X_VCVAR%d",i);
+    if(i<=0)std::snprintf(out,capacity,"%s",kKeyConfig);
+    else std::snprintf(out,capacity,"%s%d",kKeyConfig,i);
 }
 
 // --- One generated variant file, by what it is ---
@@ -289,57 +295,7 @@ inline std::uint64_t ListHash(const VariantSet& set,int n) noexcept {
     return h;
 }
 
-// --- The host's list: encode / decode ---
-struct ListValues {
-    int parts=0;                       // values written (1..kListParts); keys PartKey(0..parts-1)
-    int listed=0;                      // variants in them (the first `listed` of the set)
-    std::uint64_t hash=0;              // ListHash(set, listed)
-    char value[kListParts][kValueMost+1]{};
-};
-// Header room: "1;" + 16 + ";" + up to 3 digits + ";" + 1 digit + ";": 25 bytes.
-inline constexpr std::size_t kHeaderMost=25,kPartHeader=17;
-inline void EncodeList(const VariantSet& set,ListValues* out) noexcept {
-    ListValues& v=*out;
-    v=ListValues{};
-    // Lay the tokens out first (each part's room), then write the header with the counts.
-    int partOf[kSetMost];
-    std::size_t used[kListParts]{};
-    std::size_t total=kHeaderMost;   // every value's bytes so far (each header at its most): within kListBudget
-    int part=0,listed=0;
-    for(int i=0;i<set.count;++i) {
-        char t[24];const std::size_t len=TokenOf(set.ref[i],t,sizeof(t));
-        if(!len)break;
-        const std::size_t room=kValueMost-(part ? kPartHeader : kHeaderMost);
-        const std::size_t need=len+(used[part] ? 1 : 0);
-        if(used[part]+need>room) {
-            if(part+1>=kListParts || total+kPartHeader+len>kListBudget)break;
-            ++part;
-            if(len>kValueMost-kPartHeader)break;
-            used[part]=len;total+=kPartHeader+len;
-        } else {
-            if(total+need>kListBudget)break;
-            used[part]+=need;total+=need;
-        }
-        partOf[i]=part;++listed;
-    }
-    v.listed=listed;
-    v.parts=listed ? partOf[listed-1]+1 : 1;
-    v.hash=ListHash(set,listed);
-    char hash[17];std::snprintf(hash,sizeof(hash),"%016llX",static_cast<unsigned long long>(v.hash));
-    std::snprintf(v.value[0],sizeof(v.value[0]),"1;%s;%d;%d;",hash,listed,v.parts);
-    for(int p=1;p<v.parts;++p)std::snprintf(v.value[p],sizeof(v.value[p]),"%s;",hash);
-    bool first[kListParts]={true,true,true,true};
-    for(int i=0;i<listed;++i) {
-        char* dst=v.value[partOf[i]];
-        std::size_t at=std::strlen(dst);
-        if(!first[partOf[i]])dst[at++]=',';
-        first[partOf[i]]=false;
-        TokenOf(set.ref[i],dst+at,kValueMost+1-at);
-    }
-}
 
-enum class ListState : std::uint8_t { none, waiting, bad, ok };
-struct ListHeader { std::uint64_t hash=0; int listed=0,parts=0; const char* tokens=nullptr; };
 inline bool ParseHash(const char* s,std::uint64_t* out) noexcept {
     std::uint64_t v=0;
     for(int i=0;i<16;++i) {
@@ -356,63 +312,73 @@ inline bool ParseCount(const char*& s,int most,int* out) noexcept {
     if(!digits || v>most || (digits>1 && s[-digits]=='0'))return false;
     *out=v;return true;
 }
-// "1;<hash>;<listed>;<parts>;<tokens>".
-inline bool ParseListHeader(const char* value,ListHeader* out) noexcept {
-    if(!value || std::strncmp(value,"1;",2))return false;
-    ListHeader h;
-    const char* s=value+2;
-    if(!ParseHash(s,&h.hash) || s[16]!=';')return false;
-    s+=17;
-    if(!ParseCount(s,kSetMost,&h.listed) || *s++!=';' || !ParseCount(s,kListParts,&h.parts) || *s++!=';' || h.parts<1)return false;
-    h.tokens=s;
-    *out=h;return true;
+inline bool Printable(const char* s,std::size_t n) noexcept {
+    for(std::size_t i=0;i<n;++i)if(s[i]<0x20 || s[i]>0x7E)return false;
+    return true;
 }
-// "<hash>;<tokens>" of the list `hash`: its tokens, nullptr when it is another list's (or not one).
-inline const char* PartTokens(const char* value,std::uint64_t hash) noexcept {
-    std::uint64_t h=0;
-    if(!value || std::strlen(value)<17 || !ParseHash(value,&h) || value[16]!=';' || h!=hash)return nullptr;
-    return value+17;
-}
-// Adds the ','-separated tokens to `set`; false on the first malformed one (or an empty token, or more than kSetMost).
-inline bool AddTokens(const char* tokens,VariantSet* set,int* added) noexcept {
-    if(!tokens || !*tokens)return true;
-    const char* s=tokens;
-    for(;;) {
-        const char* end=s;while(*end && *end!=',')++end;
-        VariantRef r;
-        if(!ParseToken(s,static_cast<std::size_t>(end-s),&r) || set->Has(r) || !set->Add(r))return false;
-        ++*added;
-        if(!*end)return true;
-        s=end+1;
+
+// --- A member's configuration line: encode / decode ---
+struct ConfigValues {
+    int parts=0;                       // values written (1..kConfigParts); keys PartKey(0..parts-1)
+    std::uint64_t hash=0;              // Fnv of the whole line
+    char value[kConfigParts][kValueMost+1]{};
+};
+// `line` (printable ASCII, at most kConfigLineMost bytes: Env::ownConfig is given that room) into its values. False for
+// a line that is not one (its values left empty).
+inline bool EncodeConfig(const char* line,ConfigValues* out) noexcept {
+    ConfigValues& v=*out;
+    v=ConfigValues{};
+    const std::size_t n=line ? std::strlen(line) : 0;
+    if(n>kConfigLineMost || (n && !Printable(line,n)))return false;
+    v.hash=Fnv(kFnvBasis,line ? line : "",n);
+    char hash[17];std::snprintf(hash,sizeof(hash),"%016llX",static_cast<unsigned long long>(v.hash));
+    const std::size_t first=kValueMost-kConfigHeader,rest=kValueMost-kPartHeader;
+    v.parts=n<=first ? 1 : 1+static_cast<int>((n-first+rest-1)/rest);
+    if(v.parts>kConfigParts){v=ConfigValues{};return false;}
+    std::size_t at=0;
+    for(int p=0;p<v.parts;++p) {
+        const std::size_t head=p ? kPartHeader : kConfigHeader;
+        std::size_t take=n-at;
+        if(take>kValueMost-head)take=kValueMost-head;
+        if(p)std::snprintf(v.value[p],sizeof(v.value[p]),"%s;",hash);
+        else std::snprintf(v.value[p],sizeof(v.value[p]),"1;%s;%d;",hash,v.parts);
+        const std::size_t w=std::strlen(v.value[p]);
+        std::memcpy(v.value[p]+w,line+at,take);v.value[p][w+take]=0;
+        at+=take;
     }
+    return at==n;
 }
-// DecodeList's work; `set` may be left partly filled on a failure.
-inline ListState DecodeListInto(const char* const* value,int have,VariantSet* set,std::uint64_t* hash) noexcept {
+
+enum class ListState : std::uint8_t { none, waiting, bad, ok };
+// A member's values (value[i] of PartKey(i), nullptr where it has none) back into its line (out: kConfigLineMost+1
+// bytes): ok only when every part is there, of the same line, the bytes printable and the hash as the header says;
+// waiting while a part is missing or still another line's; bad for anything else. `out` is empty unless ok.
+inline ListState DecodeConfig(const char* const* value,int have,char* out,std::uint64_t* hash) noexcept {
+    out[0]=0;*hash=0;
     if(have<1 || !value[0])return ListState::none;
-    ListHeader h;
-    if(!ParseListHeader(value[0],&h))return ListState::bad;
-    int added=0;
-    if(!AddTokens(h.tokens,set,&added))return ListState::bad;
-    for(int p=1;p<h.parts;++p) {
-        if(p>=have || !value[p])return ListState::waiting;
-        const char* tokens=PartTokens(value[p],h.hash);
-        if(!tokens) {
-            std::uint64_t other=0;   // another list's part (the host changed it; the rest is on its way) or junk
-            return std::strlen(value[p])>=17 && ParseHash(value[p],&other) && value[p][16]==';' ? ListState::waiting : ListState::bad;
-        }
-        if(!AddTokens(tokens,set,&added))return ListState::bad;
+    const char* s=value[0];
+    std::uint64_t h=0;int parts=0;
+    if(std::strncmp(s,"1;",2) || std::strlen(s)<kConfigHeader || !ParseHash(s+2,&h) || s[18]!=';')return ListState::bad;
+    s+=19;
+    if(!ParseCount(s,kConfigParts,&parts) || *s++!=';' || parts<1)return ListState::bad;
+    std::size_t used=0;
+    const auto add=[&](const char* text) noexcept {
+        const std::size_t n=std::strlen(text);
+        if(used+n>kConfigLineMost || !Printable(text,n))return false;
+        std::memcpy(out+used,text,n);used+=n;out[used]=0;
+        return true;
+    };
+    if(!add(s)){out[0]=0;return ListState::bad;}
+    for(int p=1;p<parts;++p) {
+        if(p>=have || !value[p]){out[0]=0;return ListState::waiting;}
+        std::uint64_t other=0;
+        if(std::strlen(value[p])<kPartHeader || !ParseHash(value[p],&other) || value[p][16]!=';'){out[0]=0;return ListState::bad;}
+        if(other!=h){out[0]=0;return ListState::waiting;}   // another line's part: the rest is on its way
+        if(!add(value[p]+kPartHeader)){out[0]=0;return ListState::bad;}
     }
-    if(added!=h.listed || ListHash(*set,set->count)!=h.hash)return ListState::bad;
-    *hash=h.hash;
+    if(Fnv(kFnvBasis,out,used)!=h){out[0]=0;return ListState::bad;}
+    *hash=h;
     return ListState::ok;
-}
-// The host's values (value[i] of PartKey(i), nullptr where it has none) into `set`: ok only when every part is there,
-// of the same list, every token valid, the count and the hash as the header says. Anything else: `set` empty.
-inline ListState DecodeList(const char* const* value,int have,VariantSet* set,std::uint64_t* hash) noexcept {
-    set->count=0;*hash=0;
-    const ListState state=DecodeListInto(value,have,set,hash);
-    if(state!=ListState::ok)set->count=0;
-    return state;
 }
 
 // --- Readiness: "1;<hash>;<missing>;<state>" ---
@@ -488,8 +454,11 @@ struct Situation {
     std::uint32_t refused=0;        // a publish Coop refused this tick: its lastError (0 when it has none to give)
     bool anyRefused=false;
     int members=0;                  // the room's, this machine included
-    ListState list=ListState::none; // the host's list (this machine's own when it is the host)
-    int listed=0,leftOut=0;         // variants listed / the host's that did not fit
+    ListState list=ListState::none; // the room's set: ok, or waiting while a member's configuration is on its way
+    int listed=0,leftOut=0;         // variants in the room's set / that did not fit it
+    int configLeftOut=0;            // this machine's configuration entries that did not fit its values
+    int badCount=0;                 // members whose configuration does not read (their calls come with the defaults)
+    std::uint32_t bad[kMembersMost]{};   // their ordinals
     int ownMissing=0;
     int ownCapped=0;                // of those, over kNotesPerRoom: never generated in this room
     Ready own=Ready::noList;
@@ -516,12 +485,9 @@ inline int SelectLines(const Situation& s,LineSpec* out,int capacity) noexcept {
     if(!s.api){put(Tx::roomSyncCoopOld,true);return n;}
     if(!s.inRoom)return n;
     if(s.anyRefused)put(Tx::roomSyncPublishRefused,true,static_cast<int>(s.refused));
-    switch(s.list) {
-        case ListState::none:if(!s.isHost)put(Tx::roomSyncHostOld,true);break;
-        case ListState::bad:put(Tx::roomSyncHostBad,true);break;
-        case ListState::waiting:put(Tx::roomSyncHostWaiting,false);break;
-        case ListState::ok:break;
-    }
+    if(s.configLeftOut)put(Tx::roomSyncConfigLeftOut,true,s.configLeftOut);
+    for(int i=0;i<s.badCount;++i)put(Tx::roomSyncMemberConfigBad,true,static_cast<int>(s.bad[i])+1);
+    if(s.list==ListState::waiting)put(Tx::roomSyncConfigWaiting,false);
     if(s.leftOut)put(Tx::roomSyncLeftOut,true,s.leftOut);
     if(s.list==ListState::ok && s.ownCapped)put(Tx::roomSyncSelfCapped,true,s.ownCapped,kNotesPerRoom);
     if(s.list==ListState::ok && s.ownMissing>s.ownCapped) {
@@ -555,6 +521,7 @@ inline void FormatLine(const LineSpec& l,hudtext::Lang lang,SyncLine* out) noexc
         case hudtext::Tx::roomSyncSelfFailed:_snwprintf_s(out->text,_TRUNCATE,format,l.a,l.s ? l.s : L"");break;
         case hudtext::Tx::roomSyncMemberGenerating:case hudtext::Tx::roomSyncMemberFailed:case hudtext::Tx::roomSyncSelfCapped:
             _snwprintf_s(out->text,_TRUNCATE,format,l.a,l.b);break;
+        case hudtext::Tx::roomSyncConfigWaiting:_snwprintf_s(out->text,_TRUNCATE,L"%ls",format);break;
         default:_snwprintf_s(out->text,_TRUNCATE,format,l.a);break;
     }
     out->warn=l.warn;
@@ -565,16 +532,32 @@ struct Env {
     void* context=nullptr;
     // Mods/OBJECT/<file> there.
     bool (*fileThere)(void* context,const wchar_t* file)=nullptr;
-    // A file the host's list wants and this machine lacks: support_variants.h NoteMissingVariant (the pending list).
+    // A file another member's configuration wants and this machine lacks: support_variants.h NoteMissingVariant.
     void (*noteMissing)(void* context,const wchar_t* file)=nullptr;
     // loadout_store.h StartVariantGeneration / VariantGenerationStatus.
     bool (*startGeneration)(void* context)=nullptr;
     GenStatus (*generation)(void* context)=nullptr;
-    // The host's own list: every file the current configuration can need (support_variants.h ForEachConfiguredVariant).
+    // This machine's own files: every one its configuration can need (support_variants.h ForEachConfiguredVariant).
     void (*configured)(void* context,void (*each)(void* set,const wchar_t* file),void* set)=nullptr;
+    // This machine's configuration as its line (member_config.h Encode) into out (capacity: kConfigLineMost+1); its
+    // length; *leftOut: the entries that did not fit.
+    std::size_t (*ownConfig)(void* context,char* out,std::size_t capacity,int* leftOut)=nullptr;
+    // Another member's line read (member_config.h Decode): each file its configuration can need; false when the line
+    // does not read (nothing given then).
+    bool (*memberVariants)(void* context,const char* line,void (*each)(void* set,const wchar_t* file),void* set)=nullptr;
     // This machine's own player loadouts as its EDF6X_VCPVEH value (player_vehicle_logic.h OwnValue); false: none.
     bool (*ownPlayer)(void* context,char* value,std::size_t capacity)=nullptr;
     void (*log)(void* context,const char* text)=nullptr;
+};
+
+// Another member's configuration line as the last room published it, for the host's plans (room_sync.h
+// RoomMemberConfig) and the mission's preload.
+struct MemberLine {
+    char id[EDF6COOP_MEMBER_ID_SIZE]{};
+    std::uint32_t ordinal=0;
+    bool ok=false;                  // read: `line` is its configuration
+    std::uint64_t hash=0;
+    char line[kConfigLineMost+1]{};
 };
 
 class Engine {
@@ -595,36 +578,45 @@ public:
             return;
         }
         s.isHost=room.isHost!=0;s.members=static_cast<int>(room.memberCount);
-        Publish(api,kKeyPacks,"1",packsPublished_,env);
         PlayerLoadouts(api,env);
-        if(s.isHost)HostList(api,env);
-        else ReadHostList(api);
-        s.list=list_;s.listed=target_.count;s.leftOut=leftOut_;
-        // The list the next mission's plans come from: a client's validated one; none on the host or without a list.
-        if(!s.isHost && list_==ListState::ok){hostList_=target_;hostListHash_=listHash_;hostListOk_=true;}
-        else ForgetHostList();
+        OwnConfig(api,env);
+        Configs(api,env);
+        s.list=list_;s.listed=target_.count;s.leftOut=leftOut_;s.configLeftOut=configLeftOut_;
+        // The set the next mission preloads: the room's, once it is complete.
+        if(list_==ListState::ok){roomList_=target_;roomListHash_=listHash_;roomListOk_=true;}
         Readiness(api,now,env);
         ReadMembers(api);
         lines_=SelectLines(s,line_,kLinesMost);
     }
-    // The room is gone: every key this machine published withdrawn, the state forgotten.
+    // The room is gone: every key this machine published withdrawn, the state forgotten (not RoomList / the members'
+    // lines: the mission starting from that room needs them).
     void Leave(const EDF6CoopMemberAttributeApi* api) noexcept {
         if(api) {
-            for(int p=0;p<kListParts;++p)if(listPublished_[p][0]){char key[33];PartKey(p,key,sizeof(key));api->clear(key);}
+            for(int p=0;p<kConfigParts;++p)if(configPublished_[p][0]){char key[33];PartKey(p,key,sizeof(key));api->clear(key);}
             if(havePublished_[0])api->clear(kKeyHave);
-            if(packsPublished_[0])api->clear(kKeyPacks);
             if(playerPublished_[0])api->clear(playerveh::kKey);
         }
         Reset();
     }
-    // The host's list last validated in a room (a client's; empty: none, or this machine the host): the mission that
-    // starts from that room preloads its files (support_variants.h PreloadSupportVariants) and tells the host it has
-    // exactly those (its hello's filter). Kept when the room is left (a mission starting leaves it); replaced by the next
-    // tick in a room, dropped by ForgetHostList.
-    const VariantSet& HostList() const noexcept { return hostList_; }
-    std::uint64_t HostListHash() const noexcept { return hostListOk_ ? hostListHash_ : 0; }
-    bool HasHostList() const noexcept { return hostListOk_; }
-    void ForgetHostList() noexcept { hostListOk_=false;hostListHash_=0;hostList_.count=0; }
+    // The room's set last complete in a room (every member's configuration's files, this machine's own included): the
+    // mission that starts from that room preloads its files (support_variants.h PreloadSupportVariants) and tells the
+    // host it has exactly those (its hello's filter). Kept when the room is left (a mission starting leaves it);
+    // replaced by the next complete tick in a room, dropped by ForgetRoomList.
+    const VariantSet& RoomList() const noexcept { return roomList_; }
+    std::uint64_t RoomListHash() const noexcept { return roomListOk_ ? roomListHash_ : 0; }
+    bool HasRoomList() const noexcept { return roomListOk_; }
+    void ForgetRoomList() noexcept {
+        roomListOk_=false;roomListHash_=0;roomList_.count=0;
+        if(lines()){for(int i=0;i<kMembersMost;++i)members_[i]=MemberLine{};}
+        ++membersVersion_;
+    }
+    // The other members' lines as the last room published them (kept when the room is left, as RoomList), copied into
+    // out[0..capacity) (the rest of out cleared): room_sync.cpp keeps them for the host's plans.
+    void CopyMembers(MemberLine* out,int capacity) const noexcept {
+        for(int i=0;out && i<capacity;++i)out[i]=members_ && i<kMembersMost ? members_[i] : MemberLine{};
+    }
+    // Bumped each time the members' lines change (0: never set): room_sync.cpp copies them for other threads only then.
+    std::uint64_t MembersVersion() const noexcept { return membersVersion_; }
     SyncState State() const noexcept { return StateOf(situation_); }
     int Lines(SyncLine* out,int capacity,hudtext::Lang lang) const noexcept {
         int n=0;
@@ -632,7 +624,7 @@ public:
         return n;
     }
     const Situation& Now() const noexcept { return situation_; }
-    // Every other member's player loadouts the last room published (validated; kept when the room is left, as HostList):
+    // Every other member's player loadouts the last room published (validated; kept when the room is left, as RoomList):
     // the mission preloads their files (player_vehicle.cpp).
     const VariantSet& MemberPlayerVehicles() const noexcept { return memberPlayers_; }
     // Bumped each time MemberPlayerVehicles() changes (0: never set): room_sync.cpp copies it for other threads only then,
@@ -642,14 +634,19 @@ public:
 private:
     // Everything a room leaves behind, but the tick clock and the situation the caller is filling.
     void Reset() noexcept {
-        anyPublished_=false;listHash_=0;loggedHash_=0;list_=ListState::none;leftOut_=0;unnamed_=0;full_=0;cappedLogged_=0;
-        refusedLogged_=false;refusedCode_=0;
-        own_.count=0;decoded_.count=0;target_.count=0;noted_.count=0;
+        anyPublished_=false;listHash_=0;loggedHash_=0;loggedOwn_=0;list_=ListState::none;leftOut_=0;configLeftOut_=0;
+        unnamed_=0;cappedLogged_=0;refusedLogged_=false;refusedCode_=0;badLogged_=0;
+        own_.count=0;target_.count=0;noted_.count=0;
         plan_=GenPlan{};
-        for(auto& v:listPublished_)v[0]=0;
-        havePublished_[0]=0;packsPublished_[0]=0;genMessage_[0]=0;playerPublished_[0]=0;players_.count=0;
+        for(auto& v:configPublished_)v[0]=0;
+        havePublished_[0]=0;genMessage_[0]=0;playerPublished_[0]=0;players_.count=0;
     }
     void Log(const Env& env,const char* text) noexcept { if(env.log)env.log(env.context,text); }
+    // The members' lines, on the heap the first time (64 of them, ~240 KB: not on a test's stack).
+    MemberLine* lines() noexcept {
+        if(!members_)members_.reset(new(std::nothrow) MemberLine[kMembersMost]);
+        return members_.get();
+    }
     // Coop keeps a value published before its lobby glue runs and sends it later (1); 0 is a refusal (lastError says
     // why: the budget, the key limit...): said on a line, logged once per new reason, tried again next tick.
     bool Publish(const EDF6CoopMemberAttributeApi* api,const char* key,const char* value,char* cache,const Env& env) noexcept {
@@ -670,46 +667,136 @@ private:
         return true;
     }
     void Withdraw(const EDF6CoopMemberAttributeApi* api,int part) noexcept {
-        if(!listPublished_[part][0])return;
+        if(!configPublished_[part][0])return;
         char key[33];PartKey(part,key,sizeof(key));
-        if(api->clear(key))listPublished_[part][0]=0;
+        if(api->clear(key))configPublished_[part][0]=0;
     }
-    static void AddConfigured(void* context,const wchar_t* file) noexcept {
-        auto* self=static_cast<Engine*>(context);
+    // A file of a configuration into a set (`own_` or `others_`): a name it cannot be is counted, never kept.
+    struct Collect { Engine* self; VariantSet* set; int full; };
+    static void AddFile(void* context,const wchar_t* file) noexcept {
+        auto* c=static_cast<Collect*>(context);
         VariantRef r;
-        if(!ParseVariantFile(file,&r)){++self->unnamed_;return;}
-        SupportLook look;
-        if(!self->allowPacks_ && !r.vehicle && LookOfVariant(r.bits,&look) && look.pack)return;
-        if(!self->own_.Add(r))++self->full_;
+        if(!ParseVariantFile(file,&r)){++c->self->unnamed_;return;}
+        if(!c->set->Add(r))++c->full;
     }
-    struct PackMembers { int count=0;bool all=true; };
-    static void TakePackMember(void* context,const EDF6CoopMemberValue* m) noexcept {
-        auto* p=static_cast<PackMembers*>(context);
-        if(!m)return;
-        ++p->count;
-        if(!m->isSelf && (!m->hasValue || !m->value || std::strcmp(m->value,"1")))p->all=false;
-    }
-    void HostList(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
-        PackMembers members;
-        allowPacks_=api->snapshot(kKeyPacks,&Engine::TakePackMember,&members,nullptr) &&
-                    members.count==situation_.members && members.all;
-        own_.count=0;unnamed_=0;full_=0;
-        if(env.configured)env.configured(env.context,&Engine::AddConfigured,this);
-        EncodeList(own_,&values_);
-        for(int p=values_.parts;p<kListParts;++p)Withdraw(api,p);   // first: their bytes leave Coop's budget
-        for(int p=0;p<values_.parts;++p) {
+    // This machine's configuration line published (Env::ownConfig), the parts it no longer needs withdrawn first (their
+    // bytes leave Coop's budget).
+    void OwnConfig(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
+        static char line[kConfigLineMost+1];   // UI thread only (src/room_sync.h); the test ticks one engine at a time
+        line[0]=0;int leftOut=0;
+        if(env.ownConfig)env.ownConfig(env.context,line,sizeof(line),&leftOut);
+        line[kConfigLineMost]=0;
+        if(!EncodeConfig(line,&values_)){line[0]=0;++leftOut;EncodeConfig(line,&values_);}
+        configLeftOut_=leftOut;
+        for(int p=values_.parts;p<kConfigParts;++p)Withdraw(api,p);
+        // The further parts first, the header last: a reader that sees the new header finds its parts already there
+        // (or reads waiting, never a mix).
+        for(int p=values_.parts-1;p>=0;--p) {
             char key[33];PartKey(p,key,sizeof(key));
-            Publish(api,key,values_.value[p],listPublished_[p],env);
+            Publish(api,key,values_.value[p],configPublished_[p],env);
         }
-        target_.count=0;
-        for(int i=0;i<values_.listed;++i)target_.Add(own_.ref[i]);
-        listHash_=values_.hash;list_=ListState::ok;
-        leftOut_=own_.count-values_.listed+full_;
-        if(values_.hash!=loggedHash_) {
-            loggedHash_=values_.hash;
+        if(values_.hash!=loggedOwn_) {
+            loggedOwn_=values_.hash;
             char text[160];
-            std::snprintf(text,sizeof(text),"ROOMSYNC host list %016llX: %d variant files in %d value(s), %d left out, %d unnamed",
-                          static_cast<unsigned long long>(values_.hash),values_.listed,values_.parts,leftOut_,unnamed_);
+            std::snprintf(text,sizeof(text),"ROOMSYNC own configuration %016llX: %u bytes in %d value(s), %d entries left out",
+                          static_cast<unsigned long long>(values_.hash),static_cast<unsigned>(std::strlen(line)),values_.parts,leftOut);
+            Log(env,text);
+        }
+    }
+    // Every member's parts, by member, as Coop has them now.
+    struct Parts {
+        char id[EDF6COOP_MEMBER_ID_SIZE];
+        std::uint32_t ordinal;
+        bool self,has[kConfigParts];
+        char value[kConfigParts][kValueMost+1];
+    };
+    struct PartsTable { int count=0;int part=0;Parts row[kMembersMost]; };
+    static void TakePart(void* context,const EDF6CoopMemberValue* m) noexcept {
+        auto* t=static_cast<PartsTable*>(context);
+        if(!m || !m->memberId)return;
+        Parts* row=nullptr;
+        for(int i=0;i<t->count;++i)if(!std::strcmp(t->row[i].id,m->memberId))row=&t->row[i];
+        if(!row) {
+            if(t->count>=kMembersMost)return;
+            row=&t->row[t->count++];
+            std::snprintf(row->id,sizeof(row->id),"%s",m->memberId);
+            row->ordinal=m->ordinal;row->self=m->isSelf!=0;
+            for(bool& h:row->has)h=false;
+        }
+        if(m->hasValue && m->value && m->valueBytes<=kValueMost) {
+            std::snprintf(row->value[t->part],sizeof(row->value[t->part]),"%s",m->value);row->has[t->part]=true;
+        }
+    }
+    // Every other member's line read; the room's set: this machine's own files and every readable line's.
+    void Configs(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
+        Situation& s=situation_;
+        MemberLine* kept=lines();
+        static PartsTable table;   // UI thread only, as OwnConfig's line
+        table.count=0;
+        for(int p=0;p<kConfigParts;++p) {
+            char key[33];PartKey(p,key,sizeof(key));
+            table.part=p;
+            api->snapshot(key,&Engine::TakePart,&table,nullptr);
+        }
+        own_.count=0;others_.count=0;unnamed_=0;
+        Collect ownSet{this,&own_,0},otherSet{this,&others_,0};
+        if(env.configured)env.configured(env.context,&Engine::AddFile,&ownSet);
+        bool waiting=false,changed=false;
+        static MemberLine next[kMembersMost];   // UI thread only
+        int nextCount=0;
+        static char line[kConfigLineMost+1];
+        for(int i=0;i<table.count;++i) {
+            const Parts& row=table.row[i];
+            if(row.self)continue;
+            const char* value[kConfigParts]{};
+            for(int p=0;p<kConfigParts;++p)value[p]=row.has[p] ? row.value[p] : nullptr;
+            std::uint64_t hash=0;
+            ListState state=DecodeConfig(value,kConfigParts,line,&hash);
+            const MemberLine* before=nullptr;
+            for(int k=0;kept && k<kMembersMost;++k)if(kept[k].id[0] && !std::strcmp(kept[k].id,row.id))before=&kept[k];
+            MemberLine m;
+            std::snprintf(m.id,sizeof(m.id),"%s",row.id);m.ordinal=row.ordinal;
+            if(state==ListState::waiting && before && before->ok) {
+                m=*before;state=ListState::ok;   // its last complete line stands meanwhile
+            } else if(state==ListState::ok) {
+                m.hash=hash;
+                std::snprintf(m.line,sizeof(m.line),"%s",line);
+            }
+            // Read (a refused line gives nothing): its files join the room's set.
+            if(state==ListState::ok)m.ok=env.memberVariants && env.memberVariants(env.context,m.line,&Engine::AddFile,&otherSet);
+            if(state==ListState::waiting)waiting=true;
+            if(((state==ListState::ok && !m.ok) || state==ListState::bad) && s.badCount<kMembersMost)s.bad[s.badCount++]=row.ordinal;
+            if(!before || before->ok!=m.ok || before->hash!=m.hash)changed=true;
+            if(nextCount<kMembersMost)next[nextCount++]=m;
+        }
+        // Members gone from the room are forgotten with it (the next mission's room is this one's members).
+        int keptCount=0;
+        for(int k=0;kept && k<kMembersMost;++k)keptCount+=kept[k].id[0]!=0;
+        if(keptCount!=nextCount)changed=true;
+        if(kept && changed) {
+            for(int k=0;k<kMembersMost;++k)kept[k]=k<nextCount ? next[k] : MemberLine{};
+            ++membersVersion_;
+        }
+        if(s.badCount && s.badCount!=badLogged_) {
+            badLogged_=s.badCount;
+            char text[96];std::snprintf(text,sizeof(text),"ROOMSYNC %d member(s)' configuration does not read: their calls use the defaults",s.badCount);
+            Log(env,text);
+        }
+        // The room's set: own first (its files are this machine's own ini's), then the others'.
+        VariantSet next2;
+        int full=ownSet.full+otherSet.full;
+        for(int i=0;i<own_.count;++i)if(!next2.Add(own_.ref[i]))++full;
+        for(int i=0;i<others_.count;++i)if(!next2.Add(others_.ref[i]))++full;
+        // A line being replaced part by part, with none complete before: wait for it, keep the last set meanwhile.
+        if(waiting && list_==ListState::ok)return;
+        list_=waiting ? ListState::waiting : ListState::ok;
+        if(list_!=ListState::ok){target_.count=0;listHash_=0;leftOut_=0;return;}
+        target_=next2;leftOut_=full;listHash_=ListHash(target_,target_.count);
+        if(listHash_!=loggedHash_) {
+            loggedHash_=listHash_;
+            char text[160];
+            std::snprintf(text,sizeof(text),"ROOMSYNC room set %016llX: %d variant files (%d own, %d of %d other member(s)), %d left out, %d unnamed",
+                          static_cast<unsigned long long>(listHash_),target_.count,own_.count,others_.count,nextCount,leftOut_,unnamed_);
             Log(env,text);
         }
     }
@@ -735,49 +822,15 @@ private:
             Log(env,text);
         }
     }
-    struct HostValue { char value[kValueMost+1]; bool has; };
-    static void TakeHost(void* context,const EDF6CoopMemberValue* m) noexcept {
-        auto* out=static_cast<HostValue*>(context);
-        if(!m || !m->isHost || m->isSelf || !m->hasValue || !m->value)return;
-        if(m->valueBytes>kValueMost)return;
-        std::snprintf(out->value,sizeof(out->value),"%s",m->value);out->has=true;
-    }
-    void ReadHostList(const EDF6CoopMemberAttributeApi* api) noexcept {
-        // No longer the host (it moved): this machine's list withdrawn.
-        for(int p=0;p<kListParts;++p)Withdraw(api,p);
-        static HostValue part[kListParts];   // UI thread only (src/room_sync.h); the test ticks one engine at a time
-        const char* value[kListParts]{};
-        int have=0;
-        part[0]=HostValue{};
-        api->snapshot(kKeyList,&Engine::TakeHost,&part[0],nullptr);
-        if(part[0].has) {
-            value[0]=part[0].value;have=1;
-            ListHeader h;
-            if(ParseListHeader(part[0].value,&h))
-                for(int p=1;p<h.parts;++p) {
-                    char key[33];PartKey(p,key,sizeof(key));
-                    part[p]=HostValue{};
-                    api->snapshot(key,&Engine::TakeHost,&part[p],nullptr);
-                    value[p]=part[p].has ? part[p].value : nullptr;have=p+1;
-                }
-        }
-        std::uint64_t hash=0;
-        const ListState state=DecodeList(value,have,&decoded_,&hash);
-        // A list being replaced part by part: keep checking against the last complete one meanwhile.
-        if(state==ListState::waiting && list_==ListState::ok)return;
-        list_=state;leftOut_=0;
-        if(state==ListState::ok){target_=decoded_;listHash_=hash;}
-        else {target_.count=0;listHash_=0;}
-    }
     void Readiness(const EDF6CoopMemberAttributeApi* api,std::uint64_t now,const Env& env) noexcept {
         Situation& s=situation_;
         Have have;
         if(list_==ListState::ok) {
-            // `fixable`: the missing files the generator can make (the host's own ini names its own; a client's are the
-            // ones on its pending list: at most kNotesPerRoom a room); the rest (`capped`) stay missing, stock.
+            // `fixable`: the missing files the generator can make (this machine's own ini names its own; the others' go
+            // on its pending list: at most kNotesPerRoom a room); the rest (`capped`) stay missing, stock.
             int missing=0,capped=0;std::uint64_t missingHash=kFnvBasis;
-            // The host's list, then every other member's player loadouts (EDF6X_VCPVEH): their files are generated
-            // the same way (pending list, kNotesPerRoom), but only the host list's count in this machine's readiness.
+            // The room's set, then every other member's player loadouts (EDF6X_VCPVEH): their files are generated the
+            // same way (pending list, kNotesPerRoom), but only the room set's count in this machine's readiness.
             int listMissing=0;
             for(int i=0;i<target_.count+players_.count;++i) {
                 const VariantRef& ref=i<target_.count ? target_.ref[i] : players_.ref[i-target_.count];
@@ -787,10 +840,10 @@ private:
                 if(env.fileThere && env.fileThere(env.context,file))continue;
                 ++missing;
                 if(i<target_.count)++listMissing;
-                // The host's own list is its own ini: the generator reads that. A client's goes on the pending list
-                // (the generator reads it too, and the installer's menus as before), never more than kNotesPerRoom;
-                // another member's player loadout likewise, on the host too.
-                if((!s.isHost || i>=target_.count) && !noted_.Has(ref)) {
+                // This machine's own configuration is its own ini: the generator reads that. Another member's goes on
+                // the pending list (the generator reads it too, and the installer's menus as before), never more than
+                // kNotesPerRoom a room.
+                if(!own_.Has(ref) && !noted_.Has(ref)) {
                     if(noted_.count>=kNotesPerRoom){++capped;continue;}
                     noted_.Add(ref);
                     if(env.noteMissing)env.noteMissing(env.context,file);
@@ -835,25 +888,25 @@ private:
     }
 
     bool ticked_=false,anyPublished_=false;
-    bool allowPacks_=false;
-    std::uint64_t lastTick_=0,listHash_=0,loggedHash_=0;
+    std::uint64_t lastTick_=0,listHash_=0,loggedHash_=0,loggedOwn_=0;
     ListState list_=ListState::none;
-    int leftOut_=0,unnamed_=0,full_=0,cappedLogged_=0;
+    int leftOut_=0,configLeftOut_=0,unnamed_=0,cappedLogged_=0,badLogged_=0;
     bool refusedLogged_=false;
     std::uint32_t refusedCode_=0;
-    VariantSet own_,decoded_,target_,noted_;
-    VariantSet hostList_;               // HostList(): not cleared by Reset (a mission start leaves the room)
+    VariantSet own_,others_,target_,noted_;
+    VariantSet roomList_;               // RoomList(): not cleared by Reset (a mission start leaves the room)
+    std::uint64_t roomListHash_=0;
+    bool roomListOk_=false;
+    std::unique_ptr<MemberLine[]> members_;   // the other members' lines (kept, as roomList_)
+    std::uint64_t membersVersion_=0;
     VariantSet players_,memberPlayers_; // the other members' player loadouts: this tick's, and the last room's (kept)
     std::uint64_t memberPlayersVersion_=0;
     int playersBad_=0;bool playersBadLogged_=false;
     char playerPublished_[playerveh::kValueMost+1]{};
-    std::uint64_t hostListHash_=0;
-    bool hostListOk_=false;
-    ListValues values_;
+    ConfigValues values_;
     GenPlan plan_;
-    char listPublished_[kListParts][kValueMost+1]{};
+    char configPublished_[kConfigParts][kValueMost+1]{};
     char havePublished_[kValueMost+1]{};
-    char packsPublished_[kValueMost+1]{};
     wchar_t genMessage_[200]{};
     Situation situation_;
     LineSpec line_[kLinesMost];

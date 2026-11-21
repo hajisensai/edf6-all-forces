@@ -19,10 +19,13 @@ struct Unit {
     // under the stock rule). Filled by the host's Session from the request's RequesterArms (Session::Advance), never by a
     // planner; on the wire in the unit message's `request` (low word) and its last reserved word (high word).
     std::uint64_t arms=0;
-    // Never on the wire, always 0: keeps a Unit a multiple of 16 bytes so every unit's matrix has the alignment of the
-    // first (tests/support_soldier_create_native_test.cpp places a Plan so that none is 16-aligned, the case the native
-    // CreateObject copy in support_soldier.cpp exists for).
-    std::uint64_t spare=0;
+    // A Fencer kind's second hand (WeaponSet 1, in place of the template's AI shield; npc_tier.h PackArms of a Fencer hand
+    // weapon, UnpackHand; 0: the shield stays; never without `arms`): the requester's (RequesterArms::offhand, given with
+    // `arms` by the host's Session) or a preset's (the planner gave both: Session::Advance keeps them). On the wire in the
+    // unit message's tail (support_protocol.cpp, v3). Also keeps a Unit a multiple of 16 bytes so every unit's matrix has
+    // the alignment of the first (tests/support_soldier_create_native_test.cpp places a Plan so that none is 16-aligned,
+    // the case the native CreateObject copy in support_soldier.cpp exists for).
+    std::uint64_t offhand=0;
 };
 static_assert(sizeof(Unit)%16==0,"every Unit.matrix shares one alignment");
 // The requesting player's weapon for each soldier kind (SupportWeapon order; npc_tier.h PackArms, 0: none): decided by
@@ -31,6 +34,9 @@ static_assert(sizeof(Unit)%16==0,"every Unit.matrix shares one alignment");
 constexpr std::uint32_t kArmsKinds=15;
 struct RequesterArms {
     std::uint64_t kind[kArmsKinds]{};
+    // A Fencer kind's second hand (npc_tier.h PickHands: the other slot of the requester's group), 0 for every other kind
+    // and when none; on the wire for the four Fencer kinds only (support_protocol.cpp kOffhandKinds).
+    std::uint64_t offhand[kArmsKinds]{};
 };
 struct Plan {
     std::uint32_t catalogId=0,count=0;
@@ -113,6 +119,8 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
 // Host planner: resolve a transport-authenticated peer to its sealed current-world native player.
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept;
+// Peer `peer`'s EOS ProductUserId text (the transport's authenticated id; 0 is this machine), nullptr when there is none.
+const char* SupportPeerPuid(std::uint32_t peer) noexcept;
 // The plan's requester is this machine's own player (its native network ID). Game thread.
 bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept;
 // Called before native player construction once this world has sealed its

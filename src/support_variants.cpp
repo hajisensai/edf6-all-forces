@@ -81,7 +81,7 @@ void PreloadSupportVariants() noexcept {
     if(!image || !Matches(kPreload,kPreloadSig,sizeof(kPreloadSig))){Log("SUPPORT variants: preload profile mismatch, none loaded");return;}
     void* const mgr=PreloadManager();
     if(!mgr)return;
-    roomsync::ForEachRoomHostVariant([](void*,const wchar_t* file) noexcept { hostList.Add(file); },nullptr);
+    roomsync::ForEachRoomVariant([](void*,const wchar_t* file) noexcept { hostList.Add(file); },nullptr);
     const std::string pending=PendingText();
     const variants::MissionParts parts=variants::MissionVariants(&wanted,
         [](auto&& put){ForEachConfiguredVariant([](void* c,const wchar_t* f){(*static_cast<decltype(&put)>(c))(f);},&put);},
@@ -90,9 +90,9 @@ void PreloadSupportVariants() noexcept {
     for(int i=0;i<wanted.count;++i)
         if(PreloadOne(wanted.name[i],mgr))ready.Add(wanted.name[i]);
     variants::HelloBloom(ready,&hostList,bloom);
-    Log("SUPPORT variants: %d of %d wanted files preloaded (configured %d, the room host's list %d, pending %d; %d over a bound)%s",
+    Log("SUPPORT variants: %d of %d wanted files preloaded (configured %d, the room's set %d, pending %d; %d over a bound)%s",
         ready.count,wanted.count,parts.configured,parts.host,parts.pending,parts.dropped,
-        hostList.count ? "; the hello names the host's list's alone" : "");
+        hostList.count ? "; the hello names the room set's alone" : "");
 }
 bool SupportVariantReady(const wchar_t* file) noexcept {
     return file && ready.Has(file);
@@ -145,9 +145,9 @@ int GiveCrew(const SupportConfig& cfg,int i,EachVariant each,void* context) noex
 }
 }  // namespace
 
-int ForEachConfiguredVariant(EachVariant each,void* context) noexcept {
+int ForEachConfiguredVariant(EachVariant each,void* context) noexcept { return ForEachConfiguredVariant(SupportCfg(),each,context); }
+int ForEachConfiguredVariant(const SupportConfig& cfg,EachVariant each,void* context) noexcept {
     if(!each)return 0;
-    const SupportConfig& cfg=SupportCfg();
     const int units=SupportCallCount()<kSupportConfigUnits ? SupportCallCount() : kSupportConfigUnits;
     int given=0;
     wchar_t file[96];

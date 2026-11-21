@@ -121,10 +121,11 @@ check([k for k, _, _ in players] == list(sl.PLAYER_VEHICLE_KEYS) and
       all(sl.VEHICLE_KEYS[k].lower() == b and sl.BODIES[sl.VEHICLE_KEYS[k]][0] == twin for k, b, twin in players),
       "kPlayerVehicles == PLAYER_VEHICLE_KEYS: each key's body built on the twin its request makes")
 calls_src = read('tools/calls.py')
-check(all(f"vehicle='{twin[:-4]}'" in calls_src for _, _, twin in players), 'every twin is a vehicle request of tools/calls.py')
+check(all(f"vehicle='{twin[:-4]}'" in calls_src for _, b, twin in players if b != 'mech'),
+      'every jet twin is a vehicle request of tools/calls.py (the mech: the stock requests, pylib/mech_parts.py)')
 check(f'L"{sl.BODIES["TANK"][0]}"' in header and f'L"app:/Object/{sl.BODIES["TANK"][0]}"' in read('src/support_spawn.h'),
       'the loaded tank is made from the support tank')
-check(all(f'L"{base}"' in read('src/jet_internal.h') for name, (base, _, tank) in sl.BODIES.items() if not tank and name not in ('PFIGHTER', 'PSTRIKE', 'RFIGHTER', 'RINTERCEPTOR', 'RMULTIROLE')),
+check(all(f'L"{base}"' in read('src/jet_internal.h') for name, (base, _, tank) in sl.BODIES.items() if not tank and name not in ('PFIGHTER', 'PSTRIKE', 'RFIGHTER', 'RINTERCEPTOR', 'RMULTIROLE', 'MECH')),
       'a loaded jet is made from the plugin\'s jet of that body')
 check('kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62' in header and sl.APPLIED == 1 << 63 and sl.VEHICLE == 1 << 62, 'variant bits')
 check(f'L"Plugins\\\\{sl.PENDING}"' in read('src/support_variants.cpp'), 'the pending list is the one the plugin writes')
@@ -139,7 +140,8 @@ check(sl.SEATS['TRANSPORT_CREWED'] == int(rows_seats['V507_RESCUETANK_AI']) - 1 
 
 # The same values, the same verdict (tests/support_loadout_test.cpp has the C++ side of each).
 p = sl.parse_preset('rifle@1E3A8A*2, rocket ，sniper@x:ffffff', 4)
-check(p == [('rifle', (0x1E3A8A, -1), '')] * 2 + [('rocket', (-1, -1), ''), ('sniper', (-1, 0xFFFFFF), '')], 'a preset parses as in the plugin')
+check(p == [('rifle', (0x1E3A8A, -1), '', None)] * 2 + [('rocket', (-1, -1), '', None), ('sniper', (-1, 0xFFFFFF), '', None)],
+      'a preset parses as in the plugin')
 for bad, seats in (('rifle*5', 4), ('rifle@12345', 12), ('rifle@GGGGGG', 12), ('rifle@123456:', 12), ('rifle*0', 12),
                    ('bogus', 12), ('rifle*13', 12), ('@123456', 12)):
     check(refused(sl.parse_preset, bad, seats), f'preset {bad!r} refused as in the plugin')
@@ -175,7 +177,8 @@ check([(int(c), n, int(k), u, int(cat), float(lift), float(area), label) for c, 
       list(sl.PACKS) and len(sl.PACKS) == 74, 'the backpack weapons equal the plugin\'s table')
 check('#include "npc_pack_table.h"' in header and 'look.pack=pack->code;' in header, 'the plugin\'s preset reads the same table')
 pp = sl.parse_preset('rifle+ahandgrenade01*2, lance@1E3A8A+pWeapon216 ,cannon', 4)
-check(pp == [('rifle', (-1, -1), 'aHandGrenade01')] * 2 + [('lance', (0x1E3A8A, -1), 'pWeapon216'), ('cannon', (-1, -1), '')],
+check(pp == [('rifle', (-1, -1), 'aHandGrenade01', None)] * 2 + [('lance', (0x1E3A8A, -1), 'pWeapon216', None),
+             ('cannon', (-1, -1), '', None)],
       'a preset with backpack weapons parses as in the plugin (tools/npc_backpack_check.cpp Grammar)')
 check(sl.format_preset(pp) == 'rifle+aHandGrenade01*2,lance@1E3A8A+pWeapon216,cannon', 'its shortest spelling')
 for bad in ('cannon+aHandGrenade01', 'rifle+pWeapon216', 'lance+aHandGrenade01', 'rifle+bogus', 'rifle+', 'rifle+aWeapon261',
@@ -190,6 +193,23 @@ check(sl.decode_name('edf6vc_npc_thunderbow_l_1e3a8a_x_pweapon216.sgo') == ('npc
 check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=rifle+aHandGrenade01*4,lance+pWeapon216\r\n') ==
       ['EDF6VC_NPC_RIFLE_L_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_LANCE_L_X_X_PWEAPON216.SGO'],
       'a pack alone wants its file (a leader every four)')
+# A Fencer's two hands (#R:L, 2026-11-21; docs/feature-npc-weapon-tier.md 2.5): the same rows, grammar and verdicts as the
+# plugin (tests/support_loadout_test.cpp FencerHands), and no file for them (they are weapon words, not a look).
+inc_hands = sorted(int(r) for r in re.findall(r'^\s*\{(\d+),L"\w+"\},', read('src/npc_tiers.inc').split('kFencerHands')[1], re.M))
+check(len(inc_hands) == 216 and [r for r in range(2000) if sl.fencer_hand(r)] == inc_hands,
+      'the preset\'s Fencer hand rows are the plugin\'s kFencerHands')
+fh = sl.parse_preset('pilebanker#715:773*2, cannon@1E3A8A# 803 : 690 ,cannon', 4)
+check(fh == [('pilebanker', (-1, -1), '', (715, 773))] * 2 + [('cannon', (0x1E3A8A, -1), '', (803, 690)),
+                                                               ('cannon', (-1, -1), '', None)], 'a preset with hands parses as in the plugin')
+check(sl.format_preset(fh) == 'pilebanker#715:773*2,cannon@1E3A8A#803:690,cannon', 'its shortest spelling keeps the hands')
+for bad in ('rifle#715:773', 'lance#715:773', 'pilebanker#715', 'pilebanker#715:', 'pilebanker#:773', 'pilebanker#715:26',
+            'pilebanker#26:773', 'pilebanker#x:773', 'pilebanker#７１５:７７３', 'pilebanker#715:7²',
+            'pilebanker#¹:773', 'pilebanker#715:773*²', 'pilebanker#715:773*２',
+            'pilebanker#715:773@FFFFFF', 'xminfantry#715:773', 'pilebanker#715:773+aHandGrenade01'):
+    check(refused(sl.parse_preset, bad, 4), f'preset {bad!r} refused as in the plugin')
+check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#715:773*4\r\n') == [], 'hands alone want no file')
+check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=cannon@1E3A8A#715:773\r\n') == ['EDF6VC_NPC_CANNON_L_1E3A8A_X.SGO'],
+      'coloured hands want the colour\'s file alone')
 packed_ini = '[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n'
 packed_names = ['EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO',
                 'EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_1E3A8A_X.SGO']
@@ -252,9 +272,9 @@ check(not {'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP'} & set(sl.VEHICL
       'the container deliveries (a transport helicopter\'s pilot) are aircraft crews')
 dispatch = read('src/support_dispatch.cpp')
 # The ground vehicles' drivers: a support hull's, and underground the drill transport's (support_dispatch.cpp DrillPlan).
-check(dispatch.count('SupportCfg().vehicleCrew') == 2 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch and
-      'crew[0]=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().vehicleCrew,false)' in dispatch,
-      'the ground crews (a support hull\'s, the drill transport\'s driver) are SupportVehicleCrewWeapon\'s, every other crew SupportAircraftCrewWeapon\'s')
+check(dispatch.count('PlanCfg().vehicleCrew') == 2 and 'crew[i]=i>0 && composed ? SupportLoadoutResource' in dispatch and
+      'driver=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().vehicleCrew,false)' in dispatch,
+      'support hulls and drill transport drivers use the requesting member\'s SupportVehicleCrewWeapon')
 for value, canonical in (('1E3A8A', '1E3A8A'), ('1e3a8a:ffffff', '1E3A8A:FFFFFF'), ('X', 'X'), ('x:X', 'X'), ('X:FFFFFF', 'X:FFFFFF'),
                          (' 101010 ', '101010'), ('', '')):
     look = sl.parse_crew(value)

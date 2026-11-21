@@ -14,6 +14,8 @@
 //   crew       a crew's two colours
 //   kind / primary / secondary / pack / gun / store / rounds / crewPrimary / crewSecondary: pick one value
 //   discard    closing with unsaved edits: discard them or keep editing
+//   mech       a mech's row (request / frame / a weapon slot / core: room_menu.h kMechRow*): pick one of the values its
+//              row offers now (room_menu.h MechRowValues); the unit page lists the seven rows
 // A long list is shown kPerPage at a time with "previous" / "next" buttons; every page ends in "back" (the units page in
 // "close"), and the dialog's own cancel does the same.
 // No game memory, no Windows API.
@@ -31,7 +33,7 @@ using hudtext::Tx;
 namespace rm=roommenu;
 
 enum class Page : std::uint8_t { units, unit, soldier, pylon, crew, kind, primary, secondary, pack, gun, store, rounds,
-                                 crewPrimary, crewSecondary, discard };
+                                 crewPrimary, crewSecondary, discard, mech };
 // Where the player is: the page, its unit and row (a soldier / a pylon: the unit's row as room_menu.h numbers them), and
 // the first entry a long page shows.
 struct Nav { Page page=Page::units; int unit=0,row=0,first=0; };
@@ -113,6 +115,21 @@ inline void CrewPrimaryName(const rm::Palette& p,const CrewColour& c,bool ownDef
     if(!c.set){detail::Put(out,n,L"%ls",hudtext::Tr(ownDefault ? Tx::roomStockColour : Tx::roomCrewDefault));return;}
     ColourName(p,c.look.primary,out,n);
 }
+// A mech row's name ("Right arm") and a value of it in the HUD's language (the parts tables' own four labels; -1 the
+// request's own frame / core or an empty slot).
+inline const wchar_t* MechRowName(int row) noexcept {
+    static constexpr Tx kRows[kMechFields]={Tx::roomMechRequest,Tx::roomMechFrame,Tx::roomMechRightArm,Tx::roomMechLeftArm,
+                                            Tx::roomMechRightShoulder,Tx::roomMechLeftShoulder,Tx::roomMechCore};
+    return row>=0 && row<kMechFields ? hudtext::Tr(kRows[row]) : L"?";
+}
+inline const wchar_t* MechValueName(int row,int v) noexcept {
+    if(const wchar_t* label=rm::MechValueLabel(row,v,static_cast<int>(hudtext::InUse())))return label;
+    return v==-1 ? hudtext::Tr(row==rm::kMechRowFrame || row==rm::kMechRowCore ? Tx::roomMechOwn : Tx::roomMechEmpty) : L"?";
+}
+// "Right arm: Machine Gun".
+inline void MechLine(const MechLoadout& m,int row,wchar_t* out,std::size_t n) noexcept {
+    detail::Put(out,n,hudtext::Tr(Tx::roomMechPart),MechRowName(row),MechValueName(row,rm::MechRowValue(m,row)));
+}
 inline const wchar_t* UnitName(const rm::Unit& u) noexcept { return u.label ? u.label : u.key ? u.key : L"?"; }
 inline bool OwnDefault(const rm::Unit& u) noexcept { return !u.key || !*u.key; }   // the default's own crew row
 // A unit as the units page lists it: its name, "(edited)" / "(ini value invalid)".
@@ -189,6 +206,13 @@ template<class Put> int Entries(const rm::Menu& m,const Nav& nav,Put put) noexce
             detail::Put(text,kTextMost,L"×%d",kRoundCounts[r]);emit({Do::set,r},text);
         }
         break;
+    case Page::mech: {   // the values this row offers now (never one the parser refuses)
+        if(!u || !rm::IsMech(*u) || !u->vehicle.On())break;
+        int list[rm::kMechValuesMost];
+        const int count=rm::MechRowValues(u->vehicle.mech,nav.row,list);
+        for(int i=0;i<count;++i)emit({Do::set,list[i]},MechValueName(nav.row,list[i]));
+        break;
+    }
     case Page::gun:
         emit({Do::set,0},hudtext::Tr(Tx::roomGunHe));
         emit({Do::set,1},hudtext::Tr(Tx::roomGunAp));
@@ -199,7 +223,9 @@ template<class Put> int Entries(const rm::Menu& m,const Nav& nav,Put put) noexce
             for(int i=0;i<u->squad.count;++i){SoldierLine(*u,i,text,kTextMost);emit({Do::row,i},text);}
         } else if(u->kind==rm::UnitKind::vehicle) {
             if(!u->vehicle.On())emit({Do::customise,0},hudtext::Tr(Tx::roomDlgCustomise));
-            else {
+            else if(rm::IsMech(*u)) {
+                for(int r=0;r<kMechFields;++r){MechLine(u->vehicle.mech,r,text,kTextMost);emit({Do::row,r},text);}
+            } else {
                 if(rm::IsTank(*u))emit({Do::field,FieldArg(Page::gun)},hudtext::Tr(u->vehicle.apGun ? Tx::roomGunAp : Tx::roomGunHe));
                 for(int i=0;i<u->vehicle.count;++i) {
                     detail::Put(text,kTextMost,hudtext::Tr(Tx::roomDlgPylon),i+1,StoreName(u->vehicle.store[i]),
@@ -330,6 +356,12 @@ inline void TitleText(Dialog& d,const rm::Menu& m,const Nav& nav,const Context& 
         return;
     }
     case Page::gun: Put(d.title,kTitleMost,L"%ls\n%ls",name,hudtext::Tr(Tx::roomDlgPickGun)); return;
+    case Page::mech: {
+        wchar_t line[kTextMost];
+        if(rm::IsMech(*u) && u->vehicle.On())MechLine(u->vehicle.mech,nav.row,line,kTextMost);else line[0]=0;
+        Put(d.title,kTitleMost,L"%ls\n%ls\n%ls",name,line,hudtext::Tr(Tx::roomDlgPickMech));
+        return;
+    }
     case Page::crew: case Page::crewPrimary: case Page::crewSecondary:
         Put(d.title,kTitleMost,L"%ls\n%ls",name,hudtext::Tr(nav.page==Page::crewPrimary ? Tx::roomDlgPickPrimary :
                                                             nav.page==Page::crewSecondary ? Tx::roomDlgPickSecondary : Tx::roomDlgCrew));
@@ -348,6 +380,7 @@ inline int Current(const rm::Menu& m,const Nav& nav) noexcept {
     case Page::secondary: if(nav.row<0 || nav.row>=u->squad.count)return -1; want=u->squad.look[nav.row].secondary; break;
     case Page::pack: if(nav.row<0 || nav.row>=u->squad.count)return -1; want=u->squad.look[nav.row].pack; break;
     case Page::gun: want=u->vehicle.apGun ? 1 : 0; break;
+    case Page::mech: if(!rm::IsMech(*u) || !u->vehicle.On() || nav.row<0 || nav.row>=kMechFields)return -1; want=rm::MechRowValue(u->vehicle.mech,nav.row); break;
     case Page::store: if(nav.row<1 || nav.row>u->vehicle.count)return -1; want=u->vehicle.store[nav.row-1]; break;
     case Page::rounds: if(nav.row<1 || nav.row>u->vehicle.count)return -1; want=u->vehicle.rounds[nav.row-1]&0xF; break;
     case Page::crewPrimary: want=u->crew.set ? u->crew.look.primary : -2; break;
@@ -364,7 +397,7 @@ inline int Current(const rm::Menu& m,const Nav& nav) noexcept {
 // Whether `p` lists values (picking one sets it and goes back).
 constexpr bool ValuePage(Page p) noexcept {
     return p==Page::kind || p==Page::primary || p==Page::secondary || p==Page::pack || p==Page::gun || p==Page::store ||
-           p==Page::rounds || p==Page::crewPrimary || p==Page::crewSecondary;
+           p==Page::rounds || p==Page::crewPrimary || p==Page::crewSecondary || p==Page::mech;
 }
 // The page to show: its title, the entries from nav.first (kPerPage of them), previous / next, its actions, back / close.
 // `cursor` the button the dialog opens on: a value page's current value, else `wantCursor` when it is on the page.
@@ -422,6 +455,10 @@ inline void SoldierDesc(const rm::Menu& m,const rm::Unit& u,int i,wchar_t* out,s
 // A vehicle's load: the gun (a tank), each pylon with its weight, the weight against what it may carry.
 inline void VehicleDesc(const rm::Unit& u,wchar_t* out,std::size_t n) noexcept {
     if(!u.vehicle.On()){Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescStockVehicle));return;}
+    if(rm::IsMech(u)) {   // its seven rows
+        for(int r=0;r<kMechFields;++r){wchar_t line[kTextMost];MechLine(u.vehicle.mech,r,line,kTextMost);Line(out,n,L"%ls",line);}
+        return;
+    }
     if(rm::IsTank(u))Line(out,n,L"%ls",hudtext::Tr(u.vehicle.apGun ? Tx::roomDescGunAp : Tx::roomDescGunHe));
     if(!u.vehicle.count && !rm::IsTank(u))Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescGunsOnly));
     for(int i=0;i<u.vehicle.count;++i) {
@@ -508,6 +545,10 @@ inline void Describe(const rm::Menu& m,const Nav& nav,Choice c,wchar_t* out,std:
         }
         case Page::pack: Line(out,n,L"%ls",PackName(c.arg)); return;
         case Page::gun: Line(out,n,L"%ls",hudtext::Tr(c.arg ? Tx::roomDescGunAp : Tx::roomDescGunHe)); return;
+        case Page::mech:
+            Line(out,n,hudtext::Tr(Tx::roomMechPart),MechRowName(nav.row),MechValueName(nav.row,c.arg));
+            Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescMechRule));
+            return;
         case Page::store: {
             const LoadStore* st=LoadStoreOf(c.arg);
             const int most=nav.row>=1 ? rm::MostRoundsFitting(*u,nav.row-1,static_cast<std::uint8_t>(c.arg)) : -1;
@@ -537,7 +578,7 @@ namespace detail {
 constexpr Page Parent(Page p) noexcept {
     switch(p) {
     case Page::unit: case Page::discard: return Page::units;
-    case Page::soldier: case Page::pylon: case Page::crew: case Page::gun: return Page::unit;
+    case Page::soldier: case Page::pylon: case Page::crew: case Page::gun: case Page::mech: return Page::unit;
     case Page::kind: case Page::primary: case Page::secondary: case Page::pack: return Page::soldier;
     case Page::store: case Page::rounds: return Page::pylon;
     case Page::crewPrimary: case Page::crewSecondary: return Page::crew;
@@ -583,6 +624,7 @@ inline void Set(rm::Menu& m,const Nav& nav,std::int32_t v) noexcept {
             u.squad.look[nav.row].pack=static_cast<std::uint8_t>(v);
         return;
     case Page::gun: if(u.vehicle.On())u.vehicle.apGun=v!=0; return;
+    case Page::mech: if(rm::IsMech(u) && u.vehicle.On())rm::SetMechRow(u.vehicle.mech,nav.row,v); return;   // a value not offered: unchanged
     case Page::store: {   // a store whose rounds would not fit the weight takes as many as do
         if(nav.row<1 || nav.row>u.vehicle.count)return;
         std::uint8_t allowed[kLoadStoreCount];
@@ -648,6 +690,13 @@ inline Result Apply(rm::Menu& m,Nav& nav,Choice c) noexcept {
         if(!u)return Result::show;
         if(rm::IsSquad(*u)){detail::Go(m,nav,Page::soldier,c.arg);return Result::show;}
         if(c.arg==rm::CrewRow(*u)){detail::Go(m,nav,Page::crew,c.arg);return Result::show;}
+        if(rm::IsMech(*u)) {   // a mech's row is one field: straight to its values, on the page holding the current one
+            if(!u->vehicle.On() || c.arg<0 || c.arg>=kMechFields)return Result::show;
+            detail::Go(m,nav,Page::mech,c.arg);
+            const int current=detail::Current(m,nav);
+            if(current>0)nav.first=current/kPerPage*kPerPage;
+            return Result::show;
+        }
         detail::Go(m,nav,Page::pylon,c.arg);
         return Result::show;
     case Do::add:

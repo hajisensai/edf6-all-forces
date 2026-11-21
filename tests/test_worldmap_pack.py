@@ -1,15 +1,17 @@
-"""The world map's base textures in the model pack (docs/plan-2026-11-10-worldmap.md §2): tools/worldmap_basemap.py
-textures builds the release folder from small synthetic images (DXT1, full mip chain, index, credit, nothing else), and
-tools/worldmap_pack.py installs it under Mods as its ledger owner, refuses a missing / wrong / foreign set without a
-substitute, and releases what it installed. With the developer's model folder present also that folder is
-consistent (its index, the two 4096 textures)."""
+"""The world map's base map in the model pack (docs/plan-2026-11-10-worldmap.md §2): tools/worldmap_basemap.py tiles
+builds the release folder (the JPEG tile pyramid in one file, index, credit, nothing else) from eight small synthetic
+sources, every tile in place and decodable at its level's size and showing its part of the Earth; tools/worldmap_pack.py
+installs it under Mods as its ledger owner, refuses a missing / wrong / foreign file without a substitute, and releases
+what it installed (the DXT1 textures of TEXTURE_VERSION 1 included). With the developer's model folder present also
+that folder is consistent (its index, the real pyramid's table)."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
-import struct
 import sys
 import tempfile
 import unittest
@@ -22,70 +24,85 @@ sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
 import build_release  # noqa: E402
 import ledger  # noqa: E402
 import obj_model  # noqa: E402
-import texfile  # noqa: E402
 import worldmap  # noqa: E402
 import worldmap_basemap as wb  # noqa: E402
 import worldmap_pack  # noqa: E402
 
-SMALL = {'world': (64, 32), 'japan': (64, 64)}
+SMALL_TILE = 8      # sources of 8 * 16 = 128 px
+
+
+def colour(tile: str) -> tuple[int, int, int]:
+    c, r = wb.Source(tile, '').cell
+    return (40 + 60 * c, 200 - 120 * r, 90)
+
+
+@contextlib.contextmanager
+def small():
+    with mock.patch.object(worldmap, 'TILE', SMALL_TILE):
+        yield
+
+
+def sources() -> dict:
+    from PIL import Image
+    side = SMALL_TILE * wb.per_source(worldmap.TILE_LEVELS - 1)
+    return {s.tile: Image.new('RGB', (side, side), colour(s.tile)) for s in wb.SOURCES}
 
 
 def build_small(work: str) -> str:
-    """The release folder from two synthetic derived PNGs; returns its path."""
-    from PIL import Image
-    src = os.path.join(work, 'worldmap')
-    os.makedirs(src)
-    for kind, (w, h) in SMALL.items():
-        im = Image.new('RGB', (w, h), (10, 40, 120))
-        for x in range(w // 2):
-            im.putpixel((x, x % h), (200, 180, 90))
-        im.save(os.path.join(src, wb.TEXTURE_SOURCES[kind]))
-    with mock.patch.dict(wb.TEXTURE_SIZES, SMALL):
-        wb.textures(src)
-    return os.path.join(work, worldmap.TEXTURE_DIR)
+    """The release folder from eight flat-coloured sources; returns its path."""
+    out = os.path.join(work, worldmap.TEXTURE_DIR)
+    with small():
+        wb.write_release(wb.pack(wb.pyramid(sources())), out)
+    return out
 
 
-def full_chain(w: int, h: int) -> int:
-    n = 1
-    while w > 1 or h > 1:
-        w, h, n = max(1, w // 2), max(1, h // 2), n + 1
-    return n
+def tiles_name() -> str:
+    return worldmap.TILES_FILE.rsplit('/', 1)[1]
 
 
 class Build(unittest.TestCase):
     def test_release_folder(self) -> None:
+        from PIL import Image
         with tempfile.TemporaryDirectory() as work:
             out = build_small(work)
-            names = set(worldmap_pack.files()) | {'SOURCE.txt', worldmap.TEXTURE_INDEX}
-            self.assertEqual(set(os.listdir(out)), names, 'only the shipped files, never the sources')
+            self.assertEqual(set(os.listdir(out)), {tiles_name(), 'SOURCE.txt', worldmap.TEXTURE_INDEX},
+                             'only the shipped files, never the sources')
+            data = Path(out, tiles_name()).read_bytes()
             with open(os.path.join(out, worldmap.TEXTURE_INDEX), encoding='utf-8') as f:
                 index = json.load(f)
-            self.assertEqual(index['version'], worldmap.TEXTURE_VERSION)
-            for kind, rel in worldmap.TEXTURES.items():
-                name = rel.rsplit('/', 1)[1]
-                data = Path(out, name).read_bytes()
-                self.assertEqual(index['files'][name], {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)})
-                info = texfile.dds_info(data)
-                w, h = SMALL[kind]
-                self.assertEqual((info.width, info.height, info.fourcc), (w, h, b'DXT1'))
-                self.assertEqual(info.mips, full_chain(w, h), 'a full mip chain to 1 x 1')
-                self.assertEqual(struct.unpack_from('<I', data, 0x6C)[0], texfile.CAPS, 'the stock mipmapped caps')
-                body = sum(max(1, (max(1, w >> i) + 3) // 4) * max(1, (max(1, h >> i) + 3) // 4) * 8
-                           for i in range(info.mips))
-                self.assertEqual(len(data), 128 + body, 'the legacy header, no DX10 header')
+            self.assertEqual(index, {'version': worldmap.TEXTURE_VERSION,
+                                     'files': {tiles_name(): {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}}})
+            with small():
+                table = worldmap.tile_table(data)
+            self.assertEqual(len(table), worldmap.tile_count())
+            self.assertEqual(worldmap.tile_count(), 2731)
+            for (z, x, y), (off, size) in table.items():
+                im = Image.open(io.BytesIO(data[off:off + size]))
+                self.assertEqual(im.format, 'JPEG')
+                self.assertEqual(im.size, (SMALL_TILE, SMALL_TILE if z else SMALL_TILE // 2), (z, x, y))
+                if z >= 2:      # one source per tile from level 2 on: its colour, west to east, north to south
+                    cols = worldmap.tile_grid(z)[0]
+                    tile = 'ABCD'[x * 4 // cols] + str(y * 2 // worldmap.tile_grid(z)[1] + 1)
+                    got = im.convert('RGB').getpixel((SMALL_TILE // 2, SMALL_TILE // 2))
+                    self.assertTrue(all(abs(a - b) <= 8 for a, b in zip(got, colour(tile))), ((z, x, y), got, tile))
             credit = Path(out, 'SOURCE.txt').read_text(encoding='utf-8')
             self.assertIn('NASA Earth Observatory', credit)
             self.assertIn(wb.PAGE_URL, credit)
 
     def test_wrong_size_refused(self) -> None:
         from PIL import Image
+        with small():
+            images = {s.tile: Image.new('RGB', (8, 8)) for s in wb.SOURCES}
+            with self.assertRaises(SystemExit):
+                wb.pyramid(images)
+
+    def test_not_this_layout(self) -> None:
         with tempfile.TemporaryDirectory() as work:
-            src = os.path.join(work, 'worldmap')
-            os.makedirs(src)
-            for kind in SMALL:
-                Image.new('RGB', (8, 8)).save(os.path.join(src, wb.TEXTURE_SOURCES[kind]))
-            with mock.patch.dict(wb.TEXTURE_SIZES, SMALL), self.assertRaises(SystemExit):
-                wb.textures(src)
+            data = Path(build_small(work), tiles_name()).read_bytes()
+        with self.assertRaises(ValueError):
+            worldmap.tile_table(data)       # built with an 8 px tile, read as the real 1350
+        with small(), self.assertRaises(ValueError):
+            worldmap.tile_table(data[:1000])
 
 
 class Install(unittest.TestCase):
@@ -101,18 +118,28 @@ class Install(unittest.TestCase):
             written, skipped = self.run_install(game, pack)
             self.assertEqual(skipped, [])
             led = ledger.Ledger(game)
-            self.assertEqual(sorted(led.owned_by(worldmap_pack.OWNER)), sorted(ledger.key(r) for r in worldmap.TEXTURES.values()))
-            for name, rel in worldmap_pack.files().items():
-                self.assertEqual(Path(led.disk(rel)).read_bytes(), Path(pack, name).read_bytes())
-            self.assertEqual(len(written), 2)
+            self.assertEqual(led.owned_by(worldmap_pack.OWNER), [ledger.key(worldmap.TILES_FILE)])
+            self.assertEqual(Path(led.disk(worldmap.TILES_FILE)).read_bytes(), Path(pack, tiles_name()).read_bytes())
+            self.assertEqual(len(written), 1)
             again, skipped = self.run_install(game, pack)
             self.assertEqual((again, skipped), ([], []), 'the same bytes are not written again')
             deleted, kept = worldmap_pack.remove(game)
-            self.assertEqual((len(deleted), kept), (2, []))
-            self.assertFalse(any(os.path.exists(led.disk(r)) for r in worldmap.TEXTURES.values()))
+            self.assertEqual((len(deleted), kept), (1, []))
+            self.assertFalse(os.path.exists(led.disk(worldmap.TILES_FILE)))
+
+    def test_version_1_textures_released(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            pack = build_small(work)
+            game = os.path.join(work, 'game')
+            os.makedirs(game)
+            old = [ledger.Ledger(game).put(worldmap_pack.OWNER, rel, b'dxt1')
+                   for rel in ('UI/EDF6VC_WORLDMAP_WORLD.DDS', 'UI/EDF6VC_WORLDMAP_JAPAN.DDS')]
+            written, skipped = self.run_install(game, pack)
+            self.assertEqual((len(written), skipped), (1, []))
+            self.assertFalse(any(os.path.exists(p) for p in old), 'the old DXT1 textures go')
 
     def check_refused(self, game: str, folder: str | None, needle: str) -> None:
-        old = ledger.Ledger(game).put(worldmap_pack.OWNER, worldmap.TEXTURES['world'], b'old texture')
+        old = ledger.Ledger(game).put(worldmap_pack.OWNER, worldmap.TILES_FILE, b'old tiles')
         written, skipped = self.run_install(game, folder)
         self.assertEqual(written, [])
         self.assertEqual(len(skipped), 1, skipped)
@@ -129,7 +156,7 @@ class Install(unittest.TestCase):
             pack = build_small(work)
             p = os.path.join(pack, worldmap.TEXTURE_INDEX)
             index = json.loads(Path(p).read_text(encoding='utf-8'))
-            index['version'] = worldmap.TEXTURE_VERSION + 1
+            index['version'] = 1
             Path(p).write_text(json.dumps(index), encoding='utf-8')
             game = os.path.join(work, 'game')
             os.makedirs(game)
@@ -138,10 +165,9 @@ class Install(unittest.TestCase):
     def test_wrong_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as work:
             pack = build_small(work)
-            name = next(iter(worldmap_pack.files()))
-            data = bytearray(Path(pack, name).read_bytes())
+            data = bytearray(Path(pack, tiles_name()).read_bytes())
             data[-1] ^= 0xFF
-            Path(pack, name).write_bytes(bytes(data))
+            Path(pack, tiles_name()).write_bytes(bytes(data))
             game = os.path.join(work, 'game')
             os.makedirs(game)
             self.check_refused(game, pack, '内容不对')
@@ -151,15 +177,13 @@ class Install(unittest.TestCase):
             pack = build_small(work)
             game = os.path.join(work, 'game')
             os.makedirs(game)
-            led = ledger.Ledger(game)
-            theirs = led.disk(worldmap.TEXTURES['japan'])
+            theirs = ledger.Ledger(game).disk(worldmap.TILES_FILE)
             os.makedirs(os.path.dirname(theirs), exist_ok=True)
             Path(theirs).write_bytes(b'another mod')
             written, skipped = self.run_install(game, pack)
             self.assertEqual(written, [])
             self.assertEqual(len(skipped), 1)
             self.assertEqual(Path(theirs).read_bytes(), b'another mod')
-            self.assertFalse(os.path.exists(led.disk(worldmap.TEXTURES['world'])), 'both or neither')
 
 
 class Wiring(unittest.TestCase):
@@ -170,9 +194,17 @@ class Wiring(unittest.TestCase):
         self.assertIn('worldmap_pack.install(game)', inst)
         self.assertIn('worldmap_pack.remove,', inst)
         inc = (ROOT / 'src' / 'worldmap.inc').read_text(encoding='utf-8')
-        for kind, name in (('world', 'kWorldTexture'), ('japan', 'kJapanTexture')):
-            self.assertIn(f'{name}=L"{worldmap.app_path(worldmap.TEXTURES[kind])}"', inc)
-        self.assertEqual(worldmap.app_path('UI/EDF6VC_WORLDMAP_WORLD.DDS'), 'app:/UI/EDF6VC_WORLDMAP_WORLD.dds')
+        self.assertIn(f'kTile={worldmap.TILE},kTileLevels={worldmap.TILE_LEVELS},kTilesFormat={worldmap.TILES_FORMAT};', inc)
+        self.assertIn(f'kTilesMagic[5]="{worldmap.TILES_MAGIC.decode()}"', inc)
+        self.assertIn(f'kTilesFile=L"{worldmap.TILES_FILE}"', inc)
+        self.assertTrue(worldmap.TILES_FILE.startswith('Plugins/EDF6VehicleCrew.'), 'beside the plugin that reads it')
+
+    def test_sources(self) -> None:
+        self.assertEqual(sorted(s.tile for s in wb.SOURCES), sorted(c + r for c in 'ABCD' for r in '12'))
+        self.assertTrue(all(len(s.sha256) == 64 for s in wb.SOURCES))
+        self.assertEqual(wb.SOURCE_PX, worldmap.TILE * wb.per_source(worldmap.TILE_LEVELS - 1),
+                         'the deepest level is the sources\' own resolution')
+        self.assertEqual(wb.SOURCE_PX * wb.COLUMNS, 360 * 240)
 
 
 class DeveloperFolder(unittest.TestCase):
@@ -184,15 +216,13 @@ class DeveloperFolder(unittest.TestCase):
             self.skipTest(f'no {worldmap.TEXTURE_DIR} in {obj_model.model_roots()}')
         entries, why = worldmap_pack._index(folder)
         self.assertIsNone(why)
-        self.assertEqual(sorted(os.listdir(folder)), sorted([*worldmap_pack.files(), 'SOURCE.txt', worldmap.TEXTURE_INDEX]))
-        for kind, rel in worldmap.TEXTURES.items():
-            name = rel.rsplit('/', 1)[1]
-            with open(os.path.join(folder, name), 'rb') as f:
-                head = f.read(128)
-            self.assertEqual(os.path.getsize(os.path.join(folder, name)), entries[name]['size'])
-            info = texfile.dds_info(head + bytes(8))
-            self.assertEqual((info.width, info.height, info.fourcc), (*wb.TEXTURE_SIZES[kind], b'DXT1'))
-            self.assertEqual(info.mips, full_chain(info.width, info.height))
+        self.assertEqual(sorted(os.listdir(folder)), sorted([tiles_name(), 'SOURCE.txt', worldmap.TEXTURE_INDEX]))
+        path = os.path.join(folder, tiles_name())
+        self.assertEqual(os.path.getsize(path), entries[tiles_name()]['size'])
+        with open(path, 'rb') as f:
+            head = f.read(16 + 12 * worldmap.tile_count())
+        table = worldmap.tile_table(head, os.path.getsize(path))
+        self.assertEqual(len(table), worldmap.tile_count())
 
 
 if __name__ == '__main__':

@@ -113,7 +113,7 @@ bool NpcPingReadout(NpcPing* out) noexcept;
 //  - every riding member off (and walks to seats cancelled): how many;
 //  - its order set as the map gives one (a point order's guard / move / attack-move, or none), for the trip's hold and
 //    the order it carries out once off (`keepBoarding`: walks to seats go on);
-//  - the top of `human`'s squad (nullptr: no NPC soldier); whether `human` is a Wing Diver (she flies down, no canopy).
+//  - the top of `human`'s squad (nullptr: no NPC soldier).
 struct SquadSeats { int alive=0,aboard=0,onFoot=0; };
 bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept;
 int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept;
@@ -128,7 +128,9 @@ void NpcCommandHintFrame(const unsigned char* human,bool mapOpen) noexcept;
 bool NpcCommandHint(CommandHint* out) noexcept;
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;
 const void* NpcSquadTopOf(const void* human) noexcept;
-bool NpcSoldierFlies(const void* human) noexcept;
+// Its class in npcai.cpp kSoldiers' order (0 Ranger, 1 Wing Diver, 2 Fencer, 3 Air Raider; transport_logic.h DescentOf),
+// -1 for no soldier of these.
+int NpcSoldierClass(const void* human) noexcept;
 
 // npc_backpack.cpp: an NPC soldier's backpack weapon (its sub weapon slots; docs/npc-backpack-re.md). Game thread.
 //  - InstallNpcBackpack: the code it rests on as read (from InstallNpcAi); false: no NPC uses one;

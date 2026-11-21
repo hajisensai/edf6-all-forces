@@ -50,6 +50,25 @@ int main() {
     p=Preset(L"rifle*5",4,&ok,why);Check(!ok && p.count==0 && std::wcsstr(why,L"座位"),"more than the seats refused");
     const wchar_t* broken[]={L"rifle@12345",L"rifle@GGGGGG",L"rifle@123456:",L"rifle*0",L"bogus",L"rifle*13",L"@123456"};
     for(const wchar_t* text:broken){p=Preset(text,12,&ok);Check(!ok && p.count==0,"a malformed preset refused whole");}
+    // A Fencer's two hands (#R:L, 2026-11-21; docs/feature-npc-weapon-tier.md 2.5): weapon rows of Fencer hand weapons, both;
+    // tests/support_loadout_ini_test.py has the installer's side of each verdict.
+    p=Preset(L"pilebanker#715:773*2, cannon@1E3A8A# 803 : 690 ,cannon",4,&ok);
+    Check(ok && p.count==4 && p.hands[0]==FencerHands{715,773} && p.hands[1]==p.hands[0] && p.hands[2]==FencerHands{803,690} &&
+          !p.hands[3].On() && p.look[2].primary==0x1E3A8A && !p.look[0].On(),"hands parse, after the colours, a look unchanged by them");
+    const wchar_t* badHands[]={L"rifle#715:773",L"lance#715:773",L"pilebanker#715",L"pilebanker#715:",L"pilebanker#:773",L"pilebanker#715:26",
+                               L"pilebanker#26:773",L"pilebanker#x:773",L"pilebanker#715:773@FFFFFF",L"xminfantry#715:773",
+                               L"pilebanker#715:773+aHandGrenade01",L"pilebanker#123456:773",
+                               L"pilebanker#７１５:７７３",L"pilebanker#715:7²",L"pilebanker#715:773*２"};
+    for(const wchar_t* text:badHands){p=Preset(text,4,&ok,why);Check(!ok && p.count==0 && why[0],"a malformed hand refused whole, the reason named");}
+    p=Preset(L"rifle#715:773",4,&ok,why);Check(!ok && std::wcsstr(why,L"重装"),"hands on a Ranger: only a Fencer takes them");
+    p=Preset(L"pilebanker#715:773,rifle",12,&ok);
+    {SupportLoadout l=PresetLoadout(p);
+     Check(PresetHandsFor(p,l,0)==FencerHands{715,773} && !PresetHandsFor(p,l,1).On(),"a seat's hands");
+     l.soldier[0]=SupportWeapon::fencerCannon;
+     Check(!PresetHandsFor(p,l,0).On(),"a seat changed on the panel: the requester's own pick");}
+    Check(HandsFit(FencerHands{715,773},SupportWeapon::fencerShotgun) && !HandsFit(FencerHands{715,773},SupportWeapon::rifle) &&
+          !HandsFit(FencerHands{715,-1},SupportWeapon::fencerShotgun) && HandsFit(FencerHands{},SupportWeapon::rifle) &&
+          !HandsFit(FencerHands{-1,773},SupportWeapon::fencerShotgun),"HandsFit: both Fencer hand weapons on a Fencer, or none");
     p=Preset(L"rifle@1E3A8A*2,rocket,sniper@X:FFFFFF",12,&ok);
     SupportLoadout load=PresetLoadout(p);
     load.soldier[0]=SupportWeapon::flame;
@@ -229,6 +248,54 @@ int main() {
         // On the wire a crew seat's own 64-bit variant: a clook, exactly a squad soldier's.
         SupportLook cback;
         Check(LookOfVariant(LookVariant(clook)|kVariantApplied,&cback) && cback==clook,"a crew seat's clook travels in its own variant");
+    }
+
+    // The mech (src/mech_loadout.h, docs/feature-2026-11-21-mech-custom.md): request, frame, four slots, core.
+    {
+        bool mok=false;wchar_t mwhy[200];
+        VehicleLoadout m=Load(L"eweapon378, NIX_RED ,EMLASER,EMLASER,PBEAM,MIRAGE,-",VehicleBody::mech,&mok,mwhy);
+        Check(mok && m.body==VehicleBody::mech && m.count==1 && m.mech.request>=0 && !std::wcscmp(kMechRequests[m.mech.request].token,L"EWEAPON378") &&
+              !std::wcscmp(kMechFrames[m.mech.frame].token,L"NIX_RED") && m.mech.core==-1 && m.mech.weapon[3]>=0,
+              "a mech parses (any case, spaces), - the request's own core");
+        wchar_t mback[160];
+        Check(FormatMechLoadout(m.mech,mback,160) && !std::wcscmp(mback,L"EWEAPON378,NIX_RED,EMLASER,EMLASER,PBEAM,MIRAGE,-"),"and formats back");
+        VehicleLoadout again;
+        Check(LoadoutOfVariant(LoadoutVariant(m)|kVariantApplied,VehicleBody::mech,&again) && again.mech==m.mech &&
+              (LoadoutVariant(m)&(kVariantVehicle|kVariantMech))==(kVariantVehicle|kVariantMech),"a mech's variant round trip");
+        Check(LoadoutVariant(m)==0x600000185CB2C1D8ull,"its variant: tests/mech_parts_test.py holds the same number (pylib/mech_parts.py)");
+        Check(!LoadoutOfVariant(LoadoutVariant(m),VehicleBody::rfighter,&again),"a mech's variant is no jet's");
+        Check(!LoadoutOfVariant(LoadoutVariant(Load(L"AAM_S:2",VehicleBody::rfighter)),VehicleBody::mech,&again),"a jet's is no mech's");
+        wchar_t mfile[96];
+        Check(VehicleVariantFile(m,mfile,96) && !std::wcsncmp(mfile,L"EDF6VC_LO_MECH_6",16),"a mech's file");
+        struct Bad { const wchar_t* text; const wchar_t* says; };
+        const Bad mbad[]={
+            {L"EWEAPON356,-,SABER,-,-,-,-",L"等级"},              // a level 4.25 saber on the level 0.1 Nix A
+            {L"EWEAPON378,-,PBEAM,-,-,-,-",L"右臂装不了"},        // a shoulder weapon on an arm
+            {L"EWEAPON378,-,-,-,MIRAGE,-,-",L"右肩装不了"},       // the Mirage pod has only a left file
+            {L"EWEAPON378,-,-,-,-,-,-",L"至少"},                  // no weapon
+            {L"EWEAPON378,-,EMLASER,-,-,-",L"7 项"},              // six fields
+            {L"EWEAPON378,-,EMLASER,-,-,-,-,-",L"7 项"},          // eight
+            {L"EWEAPON999,-,EMLASER,-,-,-,-",L"机甲请求"},
+            {L"-,-,EMLASER,-,-,-,-",L"底座请求"},
+            {L"EWEAPON378,PINK,EMLASER,-,-,-,-",L"机体"},
+            {L"EWEAPON356,-,MACHINEGUN,-,-,-,MPACK_A_WEAPON075",L"核心"},
+        };
+        for(const Bad& b:mbad) {
+            const VehicleLoadout x=Load(b.text,VehicleBody::mech,&mok,mwhy);
+            Check(!mok && !x.On() && std::wcsstr(mwhy,b.says),"a malformed mech refused whole, the reason named");
+        }
+        Check(Load(L"",VehicleBody::mech,&mok).body==VehicleBody::none && mok,"empty: stock");
+        // Every stock request as it comes is a valid loadout; MechWithRequest keeps only what the new level allows.
+        for(int i=0;i<kMechRequestCount;++i)Check(MechValid(MechStock(i)),"each stock request is a valid mech");
+        MechLoadout hi=Load(L"MPACK_B_WEAPON109,-,HYPERLASER,MACHINEGUN,-,-,MPACK_A_WEAPON076",VehicleBody::mech).mech;
+        const MechLoadout lo=MechWithRequest(hi,1);   // EWEAPON356, level 0.1
+        Check(MechValid(lo) && lo.weapon[0]==-1 && lo.weapon[1]>=0 && lo.core==-1,"a lower request clears what is above it");
+        // The summon's identification: the vehicle file and the level, unique among the stock requests.
+        Check(MechRequestOf(L"app:/Object/v612_nix.sgo",kMechRequests[m.mech.request].level)==m.mech.request &&
+              MechRequestOf(L"app:/Object/v612_nix_black.sgo",kMechRequests[m.mech.request].level)<0,"a request by its vehicle and level");
+        for(int i=0;i<kMechRequestCount;++i)
+            for(int j=0;j<i;++j)Check(kMechRequests[i].level!=kMechRequests[j].level || _wcsicmp(kMechRequests[i].vehicle,kMechRequests[j].vehicle),
+                                      "no two stock requests share a vehicle and a level");
     }
 
     // The jets' preference by their load.

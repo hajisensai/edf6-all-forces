@@ -174,16 +174,27 @@ TUNGUSKA = Vehicle(
         (r'^gun_barrel_0[16]$', 'cannon_slide_r'),
         (r'^gun_02$', 'cannon_l'),                               # each gun's housing elevates on its own side
         (r'^gun_01$', 'cannon_r'),
+        # The eight 9M311 containers elevate with the guns, as on the real 2S6 (each side's four on its gun mount): on
+        # the turret they stayed level while the guns rose at an aircraft, and the missiles left level, not along the
+        # launcher the player aimed (the player, 2026-11-21: 「类似通古斯卡的导弹没有跟随发射架方向射出去」). All eight on
+        # cannon_l, the missiles' one holder bone (make_tracked_combat: a store's muzzles on one bone): cannon_r turns
+        # about the same trunnion line by the same angle.
+        (r'^9m311_rocket$', 'cannon_l'),
         (r'^antenna_target_location$', 'doppler_radar'),         # the search radar on the turret's back
         (r'^antenna_target_tagging$', 'tracking_radar'),         # the tracking radar in front
         (r'^(bone_turret|ex_armor_[lr]_.*|hatch_(0[789]|10)|ex_lantern_01|ex_mount_lantern|optic_turret_05|roll_.*|'
-         r'turret_add|antenna_0[12]|antenna_target_.*_mount|bone_commander_sight_h|9m311_rocket)$', 'cannon_main'),
+         r'turret_add|antenna_0[12]|antenna_target_.*_mount|bone_commander_sight_h)$', 'cannon_main'),
     ],
     turret=(0.0, 1.88, 0.90),        # ring circle fit at y 1.85..2.0: centre z ~0.94, r ~1.19; the hull roof 1.88
     trunnion={'cannon_l': (2.59, -0.15), 'cannon_r': (2.59, -0.15)},   # the barrels' axis through the housings' middle
     barrels={'left': 'gun_barrel_02', 'right': 'gun_barrel_01'},
-    missiles='9m311_rocket', missiles_keep=4, hull='root',
-    collision={'cannon_l': [r'^(gun_02|gun_barrel_0[25])$'], 'cannon_r': [r'^(gun_01|gun_barrel_0[16])$']},
+    missiles='9m311_rocket', missile_bone='cannon_l', missiles_keep=4, hull='root',
+    # The containers' collision stays the turret's (as the BMPT's launchers): on cannon_l the right four would join the
+    # left gun's body across the turret, wrapping the right gun's (its sibling: D93250 lets siblings collide).
+    collision={'cannon_l': [r'^(gun_02|gun_barrel_0[25])$'], 'cannon_r': [r'^(gun_01|gun_barrel_0[16])$'],
+               'cannon_main': [r'^(bone_turret|ex_armor_[lr]_.*|hatch_(0[789]|10)|ex_lantern_01|ex_mount_lantern|'
+                               r'optic_turret_05|roll_.*|turret_add|antenna_0[12]|antenna_target_.*_mount|'
+                               r'bone_commander_sight_h|9m311_rocket)$']},
 )
 
 # The PzH 2000 (2026-10-24: an upgrade of the self-propelled howitzer, 「升级版（定位相近但是数值高）」: its turret turns,

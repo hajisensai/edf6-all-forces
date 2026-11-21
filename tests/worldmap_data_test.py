@@ -1,5 +1,5 @@
 """The world map's data (docs/plan-2026-11-10-worldmap.md §3): pylib/worldmap.py places, worldmap/missions.json,
-src/worldmap.inc, tools/worldmap_basemap.py. With the game (EDF6 Root.cpk) also that the committed mission table is
+src/worldmap.inc, tools/worldmap_basemap.py's sources and pyramid layout. With the game (EDF6 Root.cpk) also that the committed mission table is
 what tools/make_worldmap.py reads today."""
 from __future__ import annotations
 
@@ -32,7 +32,9 @@ def load(rel: str) -> dict:
 
 def check_places() -> None:
     for pid, p in worldmap.PLACES.items():
-        check(24.0 <= p.lat <= 46.0 and 122.0 <= p.lon <= 146.0, f'{pid}: in Japan')
+        check(-90.0 <= p.lat <= 90.0 and -180.0 <= p.lon < 180.0, f'{pid}: on Earth')
+        if p.region in worldmap.JAPAN_REGIONS:
+            check(24.0 <= p.lat <= 46.0 and 122.0 <= p.lon <= 146.0, f'{pid}: a Japanese region, in Japan')
         check(p.region in worldmap.REGIONS, f'{pid}: a known region')
         check(all(n.strip() for n in (p.sc, p.tc, p.en, p.ja, p.kr)), f'{pid}: named in five languages')
     for name, (pid, why) in worldmap.MAPS.items():
@@ -43,6 +45,8 @@ def check_places() -> None:
         check((p.lat, p.lon) not in coords, f'{pid}: not on top of {coords.get((p.lat, p.lon))}')
         coords[(p.lat, p.lon)] = pid
     check(worldmap.RANGE_PLACE in worldmap.PLACES, 'the range place exists')
+    abroad = {name: pid for name, (pid, _why) in worldmap.MAPS.items() if worldmap.PLACES[pid].region not in worldmap.JAPAN_REGIONS}
+    check(abroad == {'nw_europe01': 'prague', 'ig_desert508': 'ergchebbi'}, f'the maps abroad (maintainer 2026-11-11): {abroad}')
 
 
 def check_missions() -> None:
@@ -89,30 +93,15 @@ def check_parsers() -> None:
 
 def check_basemap() -> None:
     import worldmap_basemap as wb
-    check(all(len(src.sha256) == 64 and src.remote.endswith('.jpg') for src in wb.SOURCES), 'pinned sources')
+    check(len(wb.SOURCES) == 8 and all(len(src.sha256) == 64 for src in wb.SOURCES), 'eight pinned sources')
     check(wb.BASE_URL.startswith('https://'), 'over https')
-    check(wb.WORLD_SIZE[0] == 2 * wb.WORLD_SIZE[1] and wb.WORLD.size[0] == 2 * wb.WORLD.size[1], 'the world 2:1')
-    box = wb.crop_box(wb.TILE_D1, worldmap.DETAIL_NORTH, worldmap.DETAIL_SOUTH, worldmap.DETAIL_WEST, worldmap.DETAIL_EAST)
-    check(box == (8880, 10320, 13680, 15120), f'the Japan box in tile D1 (240 px / deg): {box}')
-    check(box[2] - box[0] == box[3] - box[1] and wb.JAPAN_SIZE[0] == wb.JAPAN_SIZE[1], 'square, so one scale')
-    for pid, p in worldmap.PLACES.items():
-        check(worldmap.DETAIL_SOUTH <= p.lat <= worldmap.DETAIL_NORTH and
-              worldmap.DETAIL_WEST <= p.lon <= worldmap.DETAIL_EAST, f'{pid}: on the detail texture')
+    check(sorted(src.cell for src in wb.SOURCES) == [(c, r) for c in range(4) for r in range(2)], 'A..D x 1..2')
+    check(wb.Source('D1', '').name == 'bluemarble_d1.jpg', 'the D1 name the first trial downloaded')
+    check(worldmap.tile_grid(0) == (1, 1) and worldmap.tile_grid(worldmap.TILE_LEVELS - 1) == (64, 32), 'the grid')
+    check(worldmap.TILE * worldmap.tile_grid(worldmap.TILE_LEVELS - 1)[0] == 360 * 240, 'the deepest level: 240 px / deg')
+    check(wb.per_source(worldmap.TILE_LEVELS - 1) * worldmap.TILE == wb.SOURCE_PX, 'tiles align with the sources')
     try:
-        wb.crop_box(wb.TILE_D1, 10.0, -10.0, 100.0, 110.0)
-        check(False, 'a box outside the tile refused')
-    except ValueError:
-        check(True, 'a box outside the tile refused')
-    try:
-        from PIL import Image
-    except ImportError:
-        return
-    im = Image.new('RGB', (54, 27), (10, 20, 30))
-    im.putpixel((0, 0), (255, 0, 0))
-    out = wb.resample(im, (16, 8))
-    check(out.size == (16, 8) and out.mode == 'RGB', 'resample: the size asked')
-    try:
-        wb.check(wb.WORLD, b'not it')
+        wb.check(wb.SOURCES[0], b'not it')
         check(False, 'a wrong file refused')
     except SystemExit:
         check(True, 'a wrong file refused')

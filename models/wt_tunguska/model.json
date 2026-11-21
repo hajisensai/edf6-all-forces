@@ -181,6 +181,13 @@
    "vertices": 5739
   },
   {
+   "name": "cannon_l.wt_9m311_rocket_c_ussr_camo_green",
+   "bone": "cannon_l",
+   "material": 11,
+   "triangles": 21760,
+   "vertices": 25404
+  },
+  {
    "name": "cannon_main.wt_net_b_c",
    "bone": "cannon_main",
    "material": 3,
@@ -200,13 +207,6 @@
    "material": 10,
    "triangles": 20,
    "vertices": 24
-  },
-  {
-   "name": "cannon_main.wt_9m311_rocket_c_ussr_camo_green",
-   "bone": "cannon_main",
-   "material": 11,
-   "triangles": 21760,
-   "vertices": 25404
   },
   {
    "name": "cannon_r.wt_2s6_gun_c_ussr_camo_green",
@@ -701,7 +701,7 @@
   ],
   "missiles": [
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      1.339849,
      2.2739245,
@@ -709,7 +709,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      1.339849,
      2.4907909999999998,
@@ -717,7 +717,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      -1.3308355,
      2.2739255,
@@ -725,7 +725,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      -1.3308355,
      2.490792,

@@ -9,8 +9,11 @@
 //    the order it carries out once off. The vehicle comes for them (pickup) or they walk to an empty one, they board, it
 //    goes (a ground vehicle along a ground route: GroundNavigate, as a support vehicle comes in; a helicopter's ferry:
 //    heli.cpp HeliFerry), stops / lands short of the order's point, they get off, it waits there.
-//  - Drops: a transport plane's passengers jump over its point one after another (a stick); a canopy over each but a Wing
-//    Diver (playerjet.cpp ChuteCanopyMake), the fall held as the player's parachute holds it.
+//  - Drops: a transport plane's passengers jump over its point one after another (a stick); a support helicopter's go
+//    down from its hover over the drop point (Trip::hover, Act::rope). Each comes down by class (transport_logic.h
+//    DescentOf, JumpFrame): a canopy over a Ranger / an Air Raider out of a plane (playerjet.cpp ChuteCanopyMake, the
+//    fall held as the player's parachute holds it), a rope under the helicopter for them out of a helicopter (RopeMake),
+//    a Wing Diver's own jets (TransportJumperIntent), a Fencer's free fall onto his feet.
 // No soldier or vehicle is made or teleported here: the soldiers board and get off by the stock ride (npcai.cpp), the
 // vehicles are driven / flown by their NPC drivers through the plugin's own controllers.
 #include "crew.h"
@@ -34,7 +37,7 @@ using transport::Carrier;
 using transport::Phase;
 // kDrops: one a deployment (support_dispatch.cpp kDeployments): a plane with no drop would fly its call with its soldiers
 // aboard and never let them out.
-constexpr int kPairs=32,kTrips=8,kRiders=4,kDrops=16,kJumpers=32,kDropTops=16;
+constexpr int kPairs=32,kTrips=8,kRiders=4,kDrops=16,kJumpers=32,kDropTops=16,kRopes=8,kRopesPerHeli=2;
 constexpr ULONGLONG kBoardEveryMs=2000,kUnloadEveryMs=1500,kWalkEveryMs=3000,kLogMs=2000;
 constexpr ULONGLONG kJumpMostMs=180000;              // a jump not down after this long is let go
 constexpr float kChuteSink=6.0f,kChuteBleed=0.6f;    // as the player's parachute (playerjet.cpp EjectTick)
@@ -43,6 +46,12 @@ constexpr float kHeliBeside=25.0f;                   // m from the squad a helic
 constexpr float kVehicleHold=1.0f;                   // m: a held vehicle's route post radius (npcpost.cpp)
 // The soldier's walk controller (playerjet.cpp: kHumanVel, kHumanSupport).
 constexpr std::size_t kHumanVel=0x6B0,kHumanSupport=0x711;
+// The soldier's intent block (docs/npc-ai-design.md §3.1): the jump pressed this frame / held.
+constexpr std::size_t kIntentJumpPress=0xD76,kIntentJumpHold=0xD77;
+// A rope: kRopeShare m (level) from where a jumper got out it is his (else a new one, kRopesPerHeli a helicopter); its top
+// kRopeTop m over the helicopter's origin; gone kRopeKeepMs after its last use.
+constexpr float kRopeShare=3.0f,kRopeTop=1.0f;
+constexpr ULONGLONG kRopeKeepMs=3000;
 
 struct Pair { ObjRef top,vehicle; };
 struct TripRider { ObjRef top; mapcmd::Command after; };
@@ -58,7 +67,13 @@ struct Trip {
     bool leave;   // a support delivery: once over, the vehicle goes back (SupportWithdrawVehicle), unpaired
 };
 // `wayLogged`: its way out of the plane logged (the drift StickLead assumes, transport_logic.h kJumpInherit).
-struct Jumper { ObjRef human,canopy; ULONGLONG at; bool flies,wayLogged; };
+// `descent`: how it comes down (DescentOf); `carrier`: what it jumped from; `burning`: a Wing Diver's jets on, `pressed`:
+// their jump pressed since (TransportJumperIntent); `rope`: the rope it goes down (index into ropes, -1 none yet).
+struct Jumper { ObjRef human,canopy,carrier; ULONGLONG at; transport::Descent descent; bool wayLogged,burning,pressed;
+                int rope; };
+// A helicopter's rope: the object (empty when not made: not installed; the descent goes on all the same), the helicopter it
+// hangs from, its place off the helicopter's origin (level), its last use.
+struct Rope { ObjRef obj,heli; float off[2]; ULONGLONG used; bool on; };
 // tops: the squads that jumped, by identity (a squad's top killed on the way down may be freed and its memory reused
 // before the stick ends: a bare pointer would hand the guard order to whatever lives there then).
 // `seen` / `seenAt`: the plane's place last frame (its way: StickStarts).
@@ -68,7 +83,10 @@ Pair pairs[kPairs]{};
 Trip trips[kTrips]{};
 Drop drops[kDrops]{};
 Jumper jumpers[kJumpers]{};
+Rope ropes[kRopes]{};
 transport::Tuning tuning{};
+Jumper* FreeJumper() noexcept;
+int NextJumper(unsigned char* vehicle) noexcept;
 
 bool Live(const ObjRef& r) noexcept {
     return r && Readable(r.obj,kDead+1) && r.Is(r.obj) && !static_cast<const unsigned char*>(r.obj)[kDead];
@@ -126,7 +144,10 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
         if(off)NpcSquadDismount(r.top.obj);
         NpcSquadSetOrder(r.top.obj,r.after,false);
     }
-    const bool still=v && (t.t.carrier==Carrier::heli ? HeliGrounded(v) : t.speed<=tuning.stopped);
+    // A hovering delivery whose riders are all out (down its ropes) need not land to go back; one that ends any other way
+    // in the air (an order, a succession) is not at rest: nobody is put out of it up there.
+    const bool hoverDone=v && t.t.hover && t.t.phase==Phase::unloading && NextJumper(v)<0;
+    const bool still=v && (t.t.carrier==Carrier::heli ? HeliGrounded(v) || hoverDone : t.speed<=tuning.stopped);
     int left=0;
     if(v && t.leave && still) {
         // Nobody may go back with it: the riders still listed get off, and so does anyone else in a seat past the
@@ -181,6 +202,16 @@ transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
     std::memcpy(t.sample,vp,12);t.sampleAt=ms;
     view.speed=t.speed;
     view.grounded=t.t.carrier==Carrier::heli ? HeliGrounded(v) : true;
+    if(t.t.carrier==Carrier::heli && t.t.hover) {
+        const float clear=GroundClearance(vp);
+        view.hovering=transport::Hovering(view.vehicleToDrop,view.speed,clear==kNoGround ? -1.0f : clear);
+        for(const auto& j:jumpers) {
+            if(j.descent==transport::Descent::rope && j.carrier.Is(v) && Live(j.human)) {
+                view.ropeOccupied=true;
+                break;
+            }
+        }
+    }
     view.driven=NpcDriver(v);
     return view;
 }
@@ -246,6 +277,30 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
             t.actAt=ms;
             for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDismount(t.riders[i].top.obj);
         }
+        return;
+    case Act::hover:
+        HeliFerry(v,t.t.drop,false,transport::kRopeHeight);
+        return;
+    case Act::rope:
+        HeliFerry(v,t.t.drop,false,transport::kRopeHeight);
+        if(fresh || ms-t.actAt>=transport::kRopeEveryMs) {
+            const int seat=NextJumper(v);
+            Jumper* const slot=seat>=0 ? FreeJumper() : nullptr;
+            if(!slot)return;   // every place taken by those still coming down: the next waits for one
+            auto* h=At<unsigned char*>(SeatAt(v,static_cast<unsigned>(seat)),kSeatRider);
+            if(!NpcMoveSeat(v,static_cast<unsigned>(seat),-1)){t.actAt=ms;return;}
+            t.actAt=ms;
+            const auto descent=transport::DescentOf(NpcSoldierClass(h),true);
+            *slot=Jumper{ObjRef::Of(h),{},t.vehicle,ms,descent,false,false,false,-1};
+            Log("TRANSPORT v=%p hovering %.0f m from the drop: %p (seat %d) goes down (%s)",v,view.vehicleToDrop,h,seat,
+                transport::kDescentNames[static_cast<int>(descent)]);
+        }
+        return;
+    case Act::settle:
+        // No hover came about (or they did not get down in time): it lands them as any other trip.
+        Log("TRANSPORT v=%p no hover for the ropes (%s): it lands them",v,t.t.phase==Phase::unloading ? "too slow" : "never held");
+        t.t.hover=false;t.t.phase=Phase::landing;t.t.since=ms;t.last=Act::none;
+        HeliFerry(v,t.t.drop,true);
         return;
     case Act::release: EndTrip(t,false,"done");return;
     case Act::abort: EndTrip(t,view.aboardAny && (heli ? view.grounded : view.speed<=tuning.stopped),"cannot go on");return;
@@ -317,6 +372,41 @@ void LeaveTrips(const void* top) noexcept {
 }
 
 // --- The drop ---
+// A rope's top: kRopeTop over its helicopter's origin, at its place off it.
+void RopeTop(const Rope& r,float* top) noexcept {
+    const float* hp=Pos(r.heli.obj);
+    top[0]=hp[0]+r.off[0];top[1]=hp[1]+kRopeTop;top[2]=hp[2]+r.off[1];
+}
+// The rope for a jumper just out of helicopter `heli` at `p`: one of its within kRopeShare (level), else a new one there
+// (kRopesPerHeli at most: then the nearest of its). -1: no place for one (it goes down all the same, onto where it got out).
+int RopeFor(const ObjRef& heli,const float* p,ULONGLONG ms) noexcept {
+    if(!Live(heli))return -1;
+    const float* hp=Pos(heli.obj);
+    int nearest=-1,mine=0;float best=1e9f;
+    for(int i=0;i<kRopes;++i) {
+        const Rope& r=ropes[i];
+        if(!r.on || !r.heli.Is(heli.obj))continue;
+        ++mine;
+        float top[3];RopeTop(r,top);
+        const float d=transport::Level(top,p);
+        if(d<best){best=d;nearest=i;}
+    }
+    if(nearest>=0 && (best<=kRopeShare || mine>=kRopesPerHeli)){ropes[nearest].used=ms;return nearest;}
+    for(int i=0;i<kRopes;++i)if(!ropes[i].on) {
+        Rope& r=ropes[i];
+        r=Rope{};r.on=true;r.heli=heli;r.off[0]=p[0]-hp[0];r.off[1]=p[2]-hp[2];r.used=ms;
+        float top[3];RopeTop(r,top);
+        r.obj=RopeMake(top);
+        Log("TRANSPORT rope %d under heli %p at (%.0f,%.0f,%.0f)%s",i,heli.obj,top[0],top[1],top[2],r.obj ? "" : " (not shown: EDF6VC_ROPE.SGO not made)");
+        return i;
+    }
+    return nearest;
+}
+void RopeFrame(Rope& r,ULONGLONG ms) noexcept {
+    if(!Live(r.heli) || ms-r.used>kRopeKeepMs){RopeFree(r.obj);r=Rope{};return;}
+    if(r.obj){float top[3];RopeTop(r,top);RopeMove(r.obj,top);}
+}
+
 void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
     if(!Live(j.human) || !HumanOnFoot(static_cast<const unsigned char*>(j.human.obj)) || ms-j.at>kJumpMostMs) {
         ChuteCanopyFree(j.canopy);j=Jumper{};return;
@@ -324,17 +414,43 @@ void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
     auto* h=static_cast<unsigned char*>(const_cast<void*>(j.human.obj));
     const float* p=Pos(h);
     const float clear=GroundClearance(p);
-    if(ms-j.at>300 && transport::Landed(h[kHumanSupport]!=0,clear==kNoGround ? -1.0f : clear,kChuteLand)) {
+    const float clearance=clear==kNoGround ? -1.0f : clear;
+    if(ms-j.at>300 && transport::Landed(h[kHumanSupport]!=0,clearance,kChuteLand)) {
         ChuteCanopyFree(j.canopy);
-        Log("TRANSPORT paratrooper %p down at (%.0f,%.0f,%.0f) after %.0f s",h,p[0],p[1],p[2],static_cast<float>(ms-j.at)*0.001f);
+        Log("TRANSPORT %s %p down at (%.0f,%.0f,%.0f) after %.1f s",transport::kDescentNames[static_cast<int>(j.descent)],h,p[0],p[1],p[2],
+            static_cast<float>(ms-j.at)*0.001f);
         j=Jumper{};return;
     }
-    if(j.flies)return;   // a Wing Diver flies down on her own
     float* const vel=reinterpret_cast<float*>(h+kHumanVel);
-    if(!j.wayLogged){j.wayLogged=true;Log("TRANSPORT paratrooper %p out at %.0f m/s level, %.0f m/s down",h,std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]),-vel[1]);}
-    transport::ChuteStep(vel,kChuteSink,kChuteBleed);
-    if(!j.canopy && vel[1]<=0.0f)j.canopy=ChuteCanopyMake(p,vel);
-    else if(j.canopy)ChuteCanopyMove(j.canopy,p,vel);
+    if(!j.wayLogged){j.wayLogged=true;Log("TRANSPORT jumper %p (%s) out at %.0f m/s level, %.0f m/s down, %.0f m up",h,
+                                          transport::kDescentNames[static_cast<int>(j.descent)],std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]),-vel[1],clearance);}
+    switch(j.descent) {
+    case transport::Descent::canopy:
+        transport::ChuteStep(vel,kChuteSink,kChuteBleed);
+        if(!j.canopy && vel[1]<=0.0f)j.canopy=ChuteCanopyMake(p,vel);
+        else if(j.canopy)ChuteCanopyMove(j.canopy,p,vel);
+        return;
+    case transport::Descent::hardLanding:
+        transport::FreeFallStep(vel,kChuteBleed);
+        return;
+    case transport::Descent::jets: {
+        // Her jets are her own flight (the intent TransportJumperIntent writes from this): only the plane's way is bled.
+        const bool burn=transport::JetBurn(j.burning,vel[1],clearance,ms-j.at);
+        if(burn && !j.burning)j.pressed=false;
+        j.burning=burn;
+        if(!burn)transport::DriftBleed(vel,kChuteBleed);
+        return;
+    }
+    case transport::Descent::rope: {
+        // The slot can be reused when the carrier is destroyed during a descent.
+        if(j.rope>=0 && (!ropes[j.rope].on || !j.carrier.Is(ropes[j.rope].heli.obj)))j.rope=-1;
+        if(j.rope<0)j.rope=RopeFor(j.carrier,p,ms);
+        float anchor[3]={p[0],p[1],p[2]};
+        if(j.rope>=0 && ropes[j.rope].on && Live(ropes[j.rope].heli)){RopeTop(ropes[j.rope],anchor);ropes[j.rope].used=ms;}
+        transport::RopeStep(vel,p,anchor);
+        return;
+    }
+    }
 }
 
 // A free jumper's place: a soldier is let out only with one (with none it would fall without its canopy).
@@ -390,10 +506,12 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
     const void* top=NpcSquadTopOf(h);
     if(!NpcMoveSeat(plane,static_cast<unsigned>(seat),-1)){d.lastJump=ms;return;}
     ++d.jumped;d.lastJump=ms;
-    *slot=Jumper{ObjRef::Of(h),{},ms,NpcSoldierFlies(h),false};
+    const auto descent=transport::DescentOf(NpcSoldierClass(h),false);
+    *slot=Jumper{ObjRef::Of(h),{},d.plane,ms,descent,false,false,false,-1};
     bool known=false;for(int i=0;i<d.topCount;++i)known=known || d.tops[i].Is(top);
     if(top && !known && d.topCount<kDropTops)d.tops[d.topCount++]=ObjRef::Of(top);
-    Log("TRANSPORT jump %d from plane %p (seat %d) %.0f m from the point%s",d.jumped,plane,seat,dist,NpcSoldierFlies(h) ? ", a Wing Diver: no canopy" : "");
+    Log("TRANSPORT jump %d from plane %p (seat %d) %.0f m from the point (%s)",d.jumped,plane,seat,dist,
+        transport::kDescentNames[static_cast<int>(descent)]);
 }
 }  // namespace
 
@@ -520,13 +638,14 @@ bool TransportDeliver(const void* vehicle,const void* const* tops,int count,cons
         }
         if(Trip* t=carried>0 ? TripOf(v) : nullptr) {
             t->leave=true;
+            t->t.hover=t->t.carrier==Carrier::heli && !here;   // it hovers and they go down from it (Act::rope)
             if(here) {   // off where it stands: the drop point is the vehicle's own place
                 std::memcpy(t->t.drop,Pos(v),12);
                 t->t.phase=transport::Begin(t->t.carrier,ViewOf(*t,ms),tuning);t->t.since=ms;t->last=Act::none;
             }
         }
         Log("TRANSPORT v=%p delivers %d squad(s) to (%.0f,%.0f,%.0f)%s: it goes back after",v,carried,target[0],target[1],target[2],
-            here ? ", off where it stands" : "");
+            here ? ", off where it stands" : IsHelicopter(v) ? ", down its ropes from a hover" : "");
         return carried>0;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -554,6 +673,20 @@ void TransportTick() noexcept {
         for(auto& t:trips)if(t.count>0)TripFrame(t,ms);
         for(auto& d:drops)if(d.plane)DropFrame(d,ms);
         for(auto& j:jumpers)if(j.human)JumpFrame(j,ms);
+        for(auto& r:ropes)if(r.on)RopeFrame(r,ms);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
+void TransportJumperIntent(unsigned char* human) noexcept {
+    __try {
+        for(auto& j:jumpers) {
+            if(!j.human.Is(human) || j.descent!=transport::Descent::jets || !j.burning)continue;
+            // Pressed on the first frame her jets are on, held after (a Wing Diver flies on the jump held: insertion-re.md §2;
+            // the stock Think clears the block every frame, so the hold is written every frame).
+            if(!j.pressed){human[kIntentJumpPress]=1;j.pressed=true;}
+            human[kIntentJumpHold]=1;
+            return;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
@@ -562,6 +695,7 @@ void ResetTransports() noexcept {
     for(auto& t:trips){t.count=0;t.t=transport::Trip{};t.nav.initialized=false;}
     for(auto& d:drops)d=Drop{};
     for(auto& j:jumpers)j=Jumper{};   // the canopies went with the last mission's objects
+    for(auto& r:ropes)r=Rope{};       // so did the ropes
 }
 
 int TransportLinks(TransportLink* out,int most) noexcept {

@@ -584,6 +584,32 @@ def chute_wired_through() -> None:
 
 
 @test
+def rope_geometry_and_build() -> None:
+    """pylib/chute_model.py rope(): from the object's origin ROPE_LENGTH straight down, ROPE_WIDTH across, every triangle
+    wound as the stock models'; build / check / sgo of it on the stand-in Root.cpk; src/transport_logic.h kRopeLength and
+    src/playerjet.cpp's rope SGO agree with it; tools/make_chute.py writes both the canopy and the rope."""
+    import chute_model as cm
+    import make_chute
+    verts, tris = cm.rope()
+    ys = [v[0][1] for v in verts]
+    assert abs(max(ys)) < 1e-6 and abs(min(ys) + cm.ROPE_LENGTH) < 1e-6, (max(ys), min(ys))
+    assert all(abs(v[0][0]) <= cm.ROPE_WIDTH / 2 + 1e-6 and abs(v[0][2]) <= cm.ROPE_WIDTH / 2 + 1e-6 for v in verts)
+    assert not [t for t in tris if cm.facing(verts, t) <= 0]
+    game = _chute_game()
+    arc = cm.build(game, cm.ROPE)
+    cm.check(arc, cm.ROPE)
+    v = dsgo.to_py(dsgo.parse(cm.sgo(game, cm.ROPE)).root)
+    assert v['animation_model'] == [[f'app:/Object/{cm.ROPE_ARC.lower()}', cm.ROPE_MDB], 0.0, 0.0], v
+    logic = src('src/transport_logic.h')
+    length = re.search(r'kRopeLength=([\d.]+)f', logic)
+    assert length and float(length.group(1)) == cm.ROPE_LENGTH, length
+    text = src('src/playerjet.cpp')
+    assert f'kRopeSgo=L"app:/object/{cm.ROPE_SGO.lower()}"' in text and f'kRopeFile=L"{cm.ROPE_SGO}"' in text
+    assert set(cm.FILES) == {cm.CHUTE, cm.ROPE} and 'chute_model.FILES.items()' in src('tools/make_chute.py')
+    assert make_chute.OWNER in ledger.OWNERS
+
+
+@test
 def release_models_whole_folders() -> None:
     """tools/build_release.py ships every RELEASE_MODELS folder whole, its subfolders too: the cockpits' cut interiors
     (models/cockpits/parts/<vehicle>/, textures/, in the repo since #230) are below the folder's top (it once took the top
@@ -601,10 +627,10 @@ def release_models_whole_folders() -> None:
 
 @test
 def worldmap_textures_in_model_pack() -> None:
-    """The world map's base textures ride the model pack (docs/plan-2026-11-10-worldmap.md §2): their folder is a
+    """The world map's base map rides the model pack (docs/plan-2026-11-10-worldmap.md §2): its folder is a
     RELEASE_MODELS folder (so pylib/modelpack.py's models/ part and its version cover it), the installer copies it under
-    Mods as its own ledger owner and releases it on uninstall, and a model pack holding that folder installs the two
-    textures (tests/test_worldmap_pack.py has the refusals)."""
+    Mods as its own ledger owner and releases it on uninstall, and a model pack holding that folder installs the one
+    tiles file (tests/test_worldmap_pack.py has the pyramid's contents and the refusals)."""
     import build_release
     import worldmap
     import worldmap_basemap
@@ -615,23 +641,20 @@ def worldmap_textures_in_model_pack() -> None:
     inst = src('tools/installer.py')
     assert 'worldmap_pack.install(game)' in inst and 'worldmap_pack.remove,' in inst
     from PIL import Image
-    with tempfile.TemporaryDirectory() as work:
-        derived = os.path.join(work, 'worldmap')
-        os.makedirs(derived)
-        sizes = {'world': (16, 8), 'japan': (16, 16)}
-        for kind, size in sizes.items():
-            Image.new('RGB', size, (20, 60, 140)).save(os.path.join(derived, worldmap_basemap.TEXTURE_SOURCES[kind]))
-        with mock.patch.dict(worldmap_basemap.TEXTURE_SIZES, sizes):
-            worldmap_basemap.textures(derived)
+    with tempfile.TemporaryDirectory() as work, mock.patch.object(worldmap, 'TILE', 4):
+        side = 4 * worldmap_basemap.per_source(worldmap.TILE_LEVELS - 1)
+        images = {s.tile: Image.new('RGB', (side, side), (20, 60, 140)) for s in worldmap_basemap.SOURCES}
+        pack = os.path.join(work, worldmap.TEXTURE_DIR)
+        data = worldmap_basemap.pack(worldmap_basemap.pyramid(images))
+        assert len(worldmap.tile_table(data)) == worldmap.tile_count()
+        worldmap_basemap.write_release(data, pack)
         game = os.path.join(work, 'game')
         os.makedirs(game)
-        pack = os.path.join(work, worldmap.TEXTURE_DIR)
         with mock.patch.object(worldmap_pack.obj_model, 'model_dir', return_value=pack):
             written, skipped = worldmap_pack.install(game, say=lambda _s: None)
-        assert skipped == [] and len(written) == len(worldmap.TEXTURES), (written, skipped)
-        for rel in worldmap.TEXTURES.values():
-            assert os.path.isfile(os.path.join(game, 'Mods', *ledger.key(rel).split('/'))), rel
-        assert len(worldmap_pack.remove(game)[0]) == len(worldmap.TEXTURES)
+        assert skipped == [] and len(written) == 1, (written, skipped)
+        assert os.path.isfile(os.path.join(game, 'Mods', *ledger.key(worldmap.TILES_FILE).split('/')))
+        assert len(worldmap_pack.remove(game)[0]) == 1
 
 
 @test
@@ -6440,7 +6463,7 @@ def stock_stores_build() -> None:
     got = dsgo.to_py(dsgo.parse(handed[flak]).root)
     mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
     assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
-    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2a_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
 
 
 @test
@@ -6753,7 +6776,8 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp', 'andryusha.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp']), f'a new key reader: make it give way to the map ({readers})'
+    assert 'InFront() && !MapHoldsKeys()' in src('src/worldmap.cpp'), "the world map select's keys give way to the map"
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
@@ -7101,6 +7125,21 @@ def npc_ai_wired() -> None:
     for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
                 'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    # The soldiers' own dashes (docs/npc-mobility-re.md): after Drive, never for a script's unit; each feature behind its
+    # own signatures; keys read, range-checked, shipped and documented; the offline check runs under CTest.
+    assert 'if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);' in think, 'Mobility: after Drive, not for a script unit'
+    assert 'Mobility(' not in scripted and 'kDashPress' not in scripted and 'kSecondary' not in scripted
+    assert 'InstallMobility();' in code and 'MobilitySigs(kWingDashSigs' in code and 'MobilitySigs(kFencerMoveSigs' in code
+    assert 'npc_mobility_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1] and 'tests/npc_mobility_native_audit.py' in cmake
+    for key, default in (('NpcWingDash', '1'), ('NpcWingDashFar', '25'), ('NpcWingDashSec', '1.5'), ('NpcWingDashReserve', '0.5'),
+                         ('NpcFencerMobility', '1'), ('NpcFencerDashJumpRange', '45'), ('NpcFencerDashRange', '15'),
+                         ('NpcFencerDashReserve', '1')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcWingDashFar', 'NpcWingDashSec', 'NpcWingDashReserve', 'NpcFencerDashJumpRange', 'NpcFencerDashRange'):
+        assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    assert 'FixInt("NpcFencerDashReserve"' in plugin
     # The tanks' post (§8): seat 0's stick written before stock input; script routes relinquish our post, and only
     # the real driver's authority writes it (that may be a client). Keys stay shipped and documented.
     post = src('src/npcpost.cpp')
@@ -7126,14 +7165,18 @@ def npc_ai_wired() -> None:
     assert 'GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull)' in move_to
     assert move_to.index('GroundNavigateDeferred(soldier->navigation)') < move_to.index('GroundCoast(') < move_to.index('RouteStart(pos,from);')
     assert 'p.ahead=true;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
+    # 2026-11-21 (「npc 寻路好像不会绕开载具」): every route goes round the vehicles' bodies (RouteHull: HullClear).
+    assert move_to.index('hull=RouteHull(hull);') < move_to.index('GroundCoast(') < move_to.index('GroundNavigate(')
+    route_hull = code.split('Hull RouteHull(Hull hull) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'hull.clear=&HullClear;' in route_hull, 'every route sweeps the vehicles, not only the boarded one'
     # Testhub #31: a boarding soldier's route goes round its vehicle (the map ray sees no unit), not within the
     # boarding circle; a soldier stood against the hull until its order lapsed and was given again.
     board = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'MoveTo(h,pos,walkAt,stop,ms,1.0f,BoardHull(v,walkAt,npc::BoardRoom(at[1]-walkAt[1],reach)));' in board, \
         'Board: the route goes round the vehicle it walks to'
-    hull = code.split('bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'ObjectRay(from,b,at,&body)' in hull and 'if(owner==vehicle)return false;' in hull, \
-        'HullClear: the object layer, the owner of the body hit is the vehicle'
+    hull = code.split('bool HullClear(const void*,const float* a,const float* b) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'ObjectRay(from,b,at,&body)' in hull and 'if(owner && VehicleClassOf(owner)>=0)return false;' in hull, \
+        'HullClear: the object layer, the owner of the body hit is a vehicle (any: 2026-11-21)'
     assert 'hullOk=Matches(kBodyObject,kBodyObjectSig,' in code
     assert move_to.index('RouteStart(pos,from);') < move_to.index('GroundNavigate('), 'the route starts from the floor'
     assert move_to.index('RouteStart(to,goal);') < move_to.index('GroundNavigate('), '...and ends on the floor under its goal'

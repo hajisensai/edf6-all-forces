@@ -18,6 +18,13 @@ menu CAS, change_color, random_animation, soldier_weapon_slot), never an AI temp
               the game loads it: the Mods copy other tools made, else Root.cpk), so the menu renderer draws the vehicle
               (src/room_preview_logic.h VehicleMenuOf; it gets no weapons, its colour channels match no material). A
               body whose base SGO is nowhere (its model not installed) gets no file: it is not deployed either.
+              The menu renderer plays the CAS anmgroup named exactly `main` (EDF.dll: the build 0x93F910 looks it up
+              case-sensitively at 0x93FB85 and keeps the index at model+0xE0; the view's update 0x93D640 indexes the
+              anmgroups with it at 0x93EBAC without a check, so a CAS without one reads index -1 and crashes the game:
+              test site #50, the jets' v506_heli.cas has `Roter` and `Main`). A body whose CAS has no `main` gets
+              MENUOBJECT/EDF6VC_MENU_V_<BODY>.CAS too: its CAS with that one anmgroup's name lower-cased in place
+              (same length), which its menu SGO names; the body's own CAS is untouched (the helicopter / jet code
+              looks `Main` up as it is).
 
 Written into <game>/Mods as this tool's in the ledger (pylib/ledger.py, owner OWNER); Root.cpk only read.
 
@@ -65,11 +72,64 @@ def vehicle_file(body: str) -> str:
     return f'{VEHICLE_PREFIX}{body}.SGO'
 
 
-def vehicle_menu_sgo(stock: bytes, vehicle: bytes) -> bytes:
-    """The stock menu SGO with animation_model = the vehicle SGO's whole animation_model (model, CAS, MAB)."""
+MENU_ANMGROUP = 'main'   # the anmgroup the menu renderer plays (exact name; module docstring)
+
+
+def vehicle_cas_file(body: str) -> str:
+    """A body's menu CAS, when its own CAS has no MENU_ANMGROUP."""
+    return f'{VEHICLE_PREFIX}{body}.CAS'
+
+
+def cas_ref(path: str) -> tuple[str, str]:
+    """An SGO's CAS path ('app:/object/v506_heli.cas') as (folder, name) of the archive / Mods ('OBJECT', 'V506_HELI.CAS')."""
+    head = 'app:/'
+    if not path.lower().startswith(head) or path.count('/') != 2:
+        raise ValueError(f'CAS path {path!r} is not app:/<folder>/<name>')
+    folder, name = path[len(head):].split('/')
+    return folder.upper(), name.upper()
+
+
+def anmgroups(cas: bytes) -> list[tuple[int, str]]:
+    """A CAS's anmgroups: (where its name string is, the name)."""
+    import cas_legacy
+    lay = cas_legacy.cas_layout(cas)
+    out = []
+    for at, _ in lay.tree.anmgroups:
+        to = at + cas_legacy._u(cas, '<i', at)[0]
+        out.append((to, cas_legacy._text(cas, to)))
+    return out
+
+
+def menu_cas(cas: bytes) -> bytes | None:
+    """None when the CAS has an anmgroup named exactly MENU_ANMGROUP; else the CAS with the one anmgroup named so
+    ignoring case renamed to it in place (ValueError: none / more than one, or its name string shared with another
+    field: renaming would rename that too)."""
+    import cas_legacy
+    groups = anmgroups(cas)
+    if any(n == MENU_ANMGROUP for _, n in groups):
+        return None
+    hits = [(to, n) for to, n in groups if n.lower() == MENU_ANMGROUP]
+    if len(hits) != 1:
+        raise ValueError(f'CAS anmgroups {[n for _, n in groups]}: not exactly one named {MENU_ANMGROUP!r} ignoring case')
+    to, _ = hits[0]
+    lay = cas_legacy.cas_layout(cas)
+    users = sum(1 for f in lay.string_fields if f + cas_legacy._u(cas, '<i', f)[0] == to)
+    canm = {c.name_at for c in lay.canm.clips} | set(lay.canm.name_ats)
+    if users != 1 or to in canm:
+        raise ValueError(f'CAS anmgroup name at {to:#x} is shared ({users} fields, CANM {to in canm})')
+    out = bytearray(cas)
+    out[to:to + 2 * len(MENU_ANMGROUP)] = MENU_ANMGROUP.encode('utf-16le')
+    return bytes(out)
+
+
+def vehicle_menu_sgo(stock: bytes, vehicle: bytes, cas_path: str | None = None) -> bytes:
+    """The stock menu SGO with animation_model = the vehicle SGO's whole animation_model (model, CAS, MAB); with
+    `cas_path` its CAS that one instead (the body's menu CAS)."""
     version, members = sgo.read(stock)
     _, v = sgo.read(vehicle)
     members['animation_model'] = list(v['animation_model'])
+    if cas_path is not None:
+        members['animation_model'][1] = cas_path
     return sgo.write_depth_first(version, members)
 
 
@@ -85,7 +145,16 @@ def build_vehicles(game: rootcpk.Game, root: str | None) -> dict[str, bytes]:
             print(tr(f'！ {base} 不在（该机体没有安装，也不会出动）：它的 3D 预览不生成',
                      f'! {base} is not there (that body is not installed and never goes out): no 3D preview for it'))
             continue
-        out[f'{FOLDER}/{vehicle_file(body)}'] = vehicle_menu_sgo(stock, data)
+        cas_path = sgo.read(data)[1]['animation_model'][1]
+        cas = support_loadout._source(root, game, *cas_ref(cas_path))
+        if cas is None:
+            raise ValueError(f'{base}: its CAS {cas_path} is nowhere')
+        renamed = menu_cas(cas)
+        menu_path = None
+        if renamed is not None:
+            out[f'{FOLDER}/{vehicle_cas_file(body)}'] = renamed
+            menu_path = f'app:/{FOLDER.lower()}/{vehicle_cas_file(body).lower()}'
+        out[f'{FOLDER}/{vehicle_file(body)}'] = vehicle_menu_sgo(stock, data, menu_path)
     return out
 
 

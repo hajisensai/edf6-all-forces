@@ -834,8 +834,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(tr('写入', 'Writing'), path)
     for name, why in skipped_xm:
         print(tr('  跳过', '  Skipped'), name, why)
-    print(tr('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble；只复制，不转换）……',
-             'Installing the world map\'s satellite base textures (the model pack\'s worldmap_tex, NASA Blue Marble; copied as they are)...'))
+    print(tr('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble 全球瓦片；只复制，不转换）……',
+             'Installing the world map\'s satellite base map (the model pack\'s worldmap_tex, NASA Blue Marble tiles of the whole Earth; copied as it is)...'))
     written_wm, skipped_wm = worldmap_pack.install(game)
     for path in written_wm:
         print(tr('写入', 'Writing'), path)

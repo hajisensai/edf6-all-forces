@@ -275,8 +275,12 @@ class Store:
     # one launcher's rounds, cycled by VehicleSecondarySwitchKey); 3..6 VehicleFire<n>Key, one weapon a key on a
     # vehicle. Every key fires at once with the primary and the others (src/payload.cpp OwnKey).
     key: int = 0
-    # An automatic turret (needs a key or a seat: by hand when they are off): with the vehicle's auto turrets on
-    # (VehicleAutoTurretKey) it fires itself, a missile once locked, a gun laid on an enemy in its reach.
+    # An automatic turret: a gunner seat's own turret (needs `seat`) that, with nobody in that seat and the vehicle's auto
+    # turrets on (VehicleAutoTurretKey), turns onto an enemy in its reach and fires itself (src/seat_turret.cpp,
+    # src/payload.cpp UnmannedTurretsFire). Only a turret that lays itself: a weapon on the driver's key fires along the
+    # driver's aim, and pulling its trigger by itself whenever that aim happened onto an enemy or a lock was "an auto
+    # turret" that never turned, firing its rounds off on its own (the player, 2026-11-21: 「载具的某些副炮塔能自动开火真的
+    # 对劲吗，怎么感觉怪怪的」; docs/feedback-2026-11-21-vehicle-weapons.md).
     auto: bool = False
     # The crew seat that mans it (docs/multi-weapon-keys.md「独立座位」; the user, 2026-10-30: 「一些应该是独立的座位」): 0 the
     # seat its key is on (the driver's); n >= 1 its own gunner seat n (its holder on that seat: vehicle_weapon_setting
@@ -297,8 +301,9 @@ class Store:
             raise ValueError(f'{self.name}: the pylon mass or drag needs its rounds a pylon (per_pylon)')
         if self.key not in (0, *FIRE_KEYS):
             raise ValueError(f'{self.name}: key {self.key} is none of 0, {FIRE_KEYS}')
-        if self.auto and not self.key and not self.seat:
-            raise ValueError(f'{self.name}: an auto turret needs its own key or seat (fired by hand with the turrets off)')
+        if self.auto and not self.seat:
+            raise ValueError(f"{self.name}: an auto turret is a gunner seat's own turret (seat): on the driver's key "
+                             "it only fires along the driver's aim")
         if (self.key or self.seat) and (self.group or self.native_control):
             raise ValueError(f'{self.name}: a weapon on its own key is no belt of the primary')
         if not 0 <= self.seat <= MOST_GUNNER_SEAT:
@@ -569,15 +574,14 @@ STORES: dict[str, Store] = {
                                   nav=4.0, life=14.0, damage=500.0, blast=9.0, lock_range=2500.0, lock_cone=0.5,
                                   lock_time=15.0),
                           _local('9M311', '9M311', '9M311', '9M311', '9M311'), key=FIRE_SECONDARY),
-    # The Apocalypse's anti-air missiles (its pods beside the turret; Red Alert 2's own were anti-air, firing at aircraft
-    # by themselves while its guns took the ground): on the V603's otherwise unread secondary as the BMPT's Ataka, an
-    # auto turret (fired by hand with the auto turrets off).
+    # The Apocalypse's anti-air missiles (its pods beside the turret, fixed to it: Red Alert 2's own were anti-air): on the
+    # V603's otherwise unread secondary as the BMPT's Ataka, fired by the driver on his own lock (no auto turret: the pods
+    # do not lay themselves, Store.auto).
     'APOC_SAM': Store('Apocalypse SAM', 'air', 0.0, 0.0,
                       Missile('Apocalypse SAM', Look('bullet_mediummissile01', 3.0), burn=4.0, top=1000.0, accel=320.0,
                               max_g=35.0, nav=4.0, life=15.0, damage=700.0, blast=12.0, lock_range=2600.0,
                               lock_cone=0.6, lock_time=15.0),
-                      _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), key=FIRE_SECONDARY,
-                      auto=True),
+                      _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), key=FIRE_SECONDARY),
     # The Patriot's PAC-3 (tools/make_patriot.py, models/emp_patriot): a hit-to-kill anti-air missile from the pack's
     # four tubes, on the V603's otherwise unread secondary as the BMPT's Ataka.
     'PATRIOT_SAM': Store('PAC-3', 'air', 0.0, 0.0,
@@ -662,10 +666,9 @@ STORES.update({xm_store(u, a): _xm_arm(a) for u in xm_units.v603() for a in u.ar
 
 @dataclass(frozen=True)
 class Mounting:
-    """The control a stock vehicle's independent weapon is on (STOCK_MOUNTS): its own fire key (Store.key) and whether it is
-    a switchable auto turret (Store.auto)."""
+    """The control a stock vehicle's independent weapon is on (STOCK_MOUNTS): its own fire key (Store.key). No auto turret:
+    a stock vehicle's mount has no turret of its own to lay (Store.auto)."""
     key: int
-    auto: bool = False
 
     def __post_init__(self):
         if self.key not in FIRE_KEYS:
@@ -687,18 +690,18 @@ STOCK_MOUNTS: dict[str, dict[str, Mounting]] = {
     'ifv': {'AGM_L': Mounting(3), 'MG401': Mounting(4)},
     'railgun': {'AGM_L': Mounting(3)},          # the 403's missiles beside its rail gun
     'superheavy': {'AGM_L': Mounting(3)},       # the 404's missiles beside the driver's front gatling
-    'flak': {'AAM_S': Mounting(FIRE_SECONDARY, auto=True),   # the Kepler's SAM launcher: one launcher's two rounds on the
-             'AAM_M': Mounting(FIRE_SECONDARY, auto=True)},  # second trigger (T switches them), firing itself on a lock
+    'flak': {'AAM_S': Mounting(FIRE_SECONDARY),   # the Kepler's SAM launcher: one launcher's two rounds on the
+             'AAM_M': Mounting(FIRE_SECONDARY)},  # second trigger (T switches them)
     'bike': {'RKT': Mounting(3)},               # the bike's rocket pod beside its guns
 }
 
 
 def mounted(kind: str, how: Mounting) -> str:
-    """The store kind `kind` as a vehicle mounts it on `how` (STOCK_MOUNTS): <KIND>_K<key>, an A for an auto turret."""
-    return f'{kind}_K{how.key}{"A" if how.auto else ""}'
+    """The store kind `kind` as a vehicle mounts it on `how` (STOCK_MOUNTS): <KIND>_K<key>."""
+    return f'{kind}_K{how.key}'
 
 
-STORES.update({mounted(k, how): replace(STORES[k], key=how.key, auto=how.auto)
+STORES.update({mounted(k, how): replace(STORES[k], key=how.key)
                for mounts in STOCK_MOUNTS.values() for k, how in mounts.items()})
 
 

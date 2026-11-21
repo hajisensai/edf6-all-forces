@@ -205,6 +205,12 @@ for body in extra:
     for path in r['soldier_load_weapon']:
         folder,file=path.removeprefix('app:/').split('/',1)
         assert g.read(folder,file),(body,path)
+    if body.startswith('N607_'):
+        # docs/feature-npc-weapon-tier.md 2.5: a support Fencer's second hand replaces the template's second load (index
+        # 1, its AI shield), the weapon of WeaponSet 1; WeaponSet 0 holds index 0 (support_soldier.cpp LoadWeaponHook).
+        loads,sets=r['soldier_load_weapon'],r['soldier_weapon_slot']
+        assert len(loads)>=2 and 'shield' in loads[1].lower(),(body,loads)
+        assert len(sets)>=2 and sets[0][0][0]==0 and 1 not in sets[0][0] and sets[1][0][0]==1 and 0 not in sets[1][0],(body,sets)
     checks+=1
     print('PASS real Root template',body,':',cls,', its CAS and stock weapons present')
 print(checks,'native/resource checks passed; complete game constructor and live co-op remain unverified')

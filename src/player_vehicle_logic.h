@@ -31,7 +31,7 @@
 namespace crew::playerveh {
 
 inline constexpr char kKey[]="EDF6X_VCPVEH";           // the room's member attribute: "1;<tokens>"
-inline constexpr std::size_t kValueMost=128;           // 5 tokens of 17 characters, their commas and the header
+inline constexpr std::size_t kValueMost=128;           // 6 tokens of 17 characters, their commas and the header
 inline constexpr int kPeersMost=64;
 inline constexpr int kHaveMost=100;                    // the variants a have names (kMaxPayload 1024: 16 + 9 x 100)
 inline constexpr int kDecisionsMost=128;
@@ -108,8 +108,9 @@ inline bool ParseValue(const char* value,Variant* out,int* count) noexcept {
 // The requester is the player's requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 // Version 2 (2026-10-31): that ID; version 1 sent the NetId, which a guest did not find for the host's player.
 // Version 3 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23).
+// Version 4 (2026-11-21): the mech (body 11, support_loadout.h VehicleBody::mech; docs/feature-2026-11-21-mech-custom.md).
 inline constexpr std::uint32_t kMagic=0x48455650u;   // "PVEH"
-inline constexpr std::uint32_t kVersion=3;
+inline constexpr std::uint32_t kVersion=4;
 inline constexpr std::size_t kHead=16;                // magic, version, kind @8, origin @12
 inline constexpr std::size_t kDecideSize=kHead+8+4+4+wire::kIdBytes;   // body @16, seq @20, bits @24, requester @32
 inline constexpr std::size_t kSyncSize=kHead+8+wire::kIdBytes;          // body @16, next seq @20, requester @24
@@ -232,14 +233,16 @@ public:
     }
     // This machine's player requested `body`: the decision (bits 0 = the stock twin) and the message telling the room.
     // `id`: the requester's native ID. Online: the loaded jet only when every peer announced the channel and has it.
-    Msg Decide(const unsigned char* id,VehicleBody body,std::uint32_t origin,bool online) noexcept {
+    // `eligible` false: this request is not the one the loadout is for (a mech's base request: player_vehicle.cpp), the
+    // stock one (still numbered, so every machine's count stays in step).
+    Msg Decide(const unsigned char* id,VehicleBody body,std::uint32_t origin,bool online,bool eligible=true) noexcept {
         Msg m;m.kind=Kind::decide;m.origin=origin;m.variant.body=body;
         std::memcpy(m.requester,id,wire::kIdBytes);
         Counter& c=CounterOf(id,body);
         m.seq=c.next++;
         const int at=PlayerVehicleOfBody(body);
         Variant want=at>=0 ? own_[at] : Variant{};
-        if(want.bits && !Preloaded(want))want.bits=0;
+        if(!eligible || (want.bits && !Preloaded(want)))want.bits=0;
         for(int i=0;online && want.bits && i<peers_;++i)
             if(!peer_[i].feature || !peer_[i].heard || !PeerHas(peer_[i],want))want.bits=0;
         m.variant.bits=want.bits;
@@ -331,10 +334,11 @@ inline bool LoadedPath(const Variant& v,wchar_t* out,std::size_t capacity) noexc
     for(wchar_t* c=out;*c;++c)if(*c>=L'A' && *c<=L'Z')*c=static_cast<wchar_t>(*c-L'A'+L'a');
     return true;
 }
-// Which player vehicle a container's configured path makes (its file name, any case, against kPlayerVehicles' twins);
-// -1 none.
+// Which player vehicle a container's configured path makes (its file name, any case, against kPlayerVehicles' twins; any
+// mech frame: the mech); -1 none.
 inline int TwinOfPath(const wchar_t* path) noexcept {
     if(!path)return -1;
+    if(IsMechFrameFile(path))return PlayerVehicleOfBody(VehicleBody::mech);
     const wchar_t* name=path;
     for(const wchar_t* c=path;*c;++c)if(*c==L'/' || *c==L'\\')name=c+1;
     for(int i=0;i<kPlayerVehicleCount;++i)if(!_wcsicmp(name,kPlayerVehicles[i].twin))return i;

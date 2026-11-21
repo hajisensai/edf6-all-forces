@@ -51,6 +51,17 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool peersNew=true;
 bool SupportPeersAcceptVariants() noexcept {return peersNew;}
+// Room members' loadouts (room_sync.h RoomMemberConfig): peer 2 has published one, every other peer none.
+const char* SupportPeerPuid(std::uint32_t peer) noexcept {return peer==2 ? "member2puid" : peer==3 ? "member3puid" : nullptr;}
+SupportConfig memberConfig;
+int memberLookups=0;
+namespace roomsync {
+bool RoomMemberConfig(const char* puid,SupportConfig* out) noexcept {
+    ++memberLookups;
+    if(!puid || std::strcmp(puid,"member2puid"))return false;
+    *out=memberConfig;return true;
+}
+}
 std::set<const void*> heldObjects;
 bool HoldSupportSoldier(const ObjRef& ref,bool hold) noexcept {
     held+=hold ? 1 : -1;
@@ -312,21 +323,37 @@ bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResu
 int armsAsked=0;
 bool SupportSoldierArmsReady() noexcept {return armsReady;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+// commander.h: the commander mode's catalog (none in these tests).
+support_net::PlanResult PlanCommander(std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
+bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void DestroyCommanderPlan(std::uint64_t) noexcept {}
+bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+// npc_arms.h PresetHandArms: a preset's two Fencer hands, star 0 = 1 (this machine's player's, a star less), or none.
+bool presetHandsOk=true;int presetHandsAsked=0;
+bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept {
+    ++presetHandsAsked;*arms=0;*offhand=0;
+    if(!presetHandsOk)return false;
+    npctier::Arms r;r.on=true;r.id=static_cast<std::uint16_t>(right);r.stars[0]=1;
+    npctier::Arms l;l.on=true;l.id=static_cast<std::uint16_t>(left);l.stars[0]=1;
+    *arms=npctier::PackArms(r);*offhand=npctier::PackArms(l);return true;
+}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
-std::wstring lastLooks[16];std::uint64_t lastArms[16]{};
+std::wstring lastLooks[16];std::uint64_t lastArms[16]{},lastOffhand[16]{};
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look,std::uint64_t weapon) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
     if(nativeFail)return false;
-    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastResources[resourceCount++]=resource;}
+    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastOffhand[resourceCount]=offhand;
+                         lastResources[resourceCount++]=resource;}
     lastLocal=local;lastId=id;
     *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look,std::uint64_t weapon) noexcept {
-    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon);
+                                      const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon,offhand);
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
@@ -466,10 +493,36 @@ npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float*
 #endif
 }
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
+// A test ini of this process's own (%TEMP%\<stem>_<pid>.ini): `ctest -R` runs from other worktrees / sessions at the
+// same time neither overwrite nor delete it (a fixed shared name did).
+static void TestIniPath(wchar_t (&path)[MAX_PATH],const wchar_t* stem) {
+    wchar_t dir[MAX_PATH];GetTempPathW(MAX_PATH,dir);
+    swprintf_s(path,L"%ls%ls_%lu.ini",dir,stem,static_cast<unsigned long>(GetCurrentProcessId()));
+}
 int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    {
+        // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
+        // member's, the defaults for a member who published none that reads (never this machine's).
+        memberConfig=SupportConfig{};memberConfig.squad=SupportWeapon::shotgun;memberConfig.aircraft[1]=3;
+        const float at[3]={1,2,3};
+        check(LoadoutOfPeer(0,1,at,0)==nullptr,"this machine's own request: its own configuration");
+        const SupportConfig* m=LoadoutOfPeer(2,1,at,7);
+        check(m && m->squad==SupportWeapon::shotgun && m->aircraft[1]==3 && memberLookups==1,"a member's request: that member's loadout");
+        check(LoadoutOfPeer(2,1,at,7)==m && memberLookups==1,"the same request planning across frames: looked up once");
+        {
+            planConfig=m;
+            check(&PlanCfg()==m,"PlanCfg is the requester's while planning");
+            planConfig=nullptr;
+            check(&PlanCfg()==&SupportCfg(),"and this machine's otherwise");
+        }
+        const SupportConfig* none=LoadoutOfPeer(3,1,at,7);
+        check(none && none->squad==SupportWeapon::rifle && none->aircraft[1]==0 && memberLookups==2,
+              "a member with no loadout that reads: the defaults");
+        check(LoadoutOfPeer(9,1,at,7)==nullptr,"a peer without a PUID (not online): this machine's");
+    }
     ResetSupportDispatch();
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
@@ -943,7 +996,7 @@ int main() {
     check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
     testOnline=false;
     // Out-of-mission configuration (support_config.h), read from a real ini as plugin.cpp does.
-    wchar_t ini[MAX_PATH];GetTempPathW(MAX_PATH,ini);wcscat_s(ini,L"edf6_support_dispatch_test.ini");
+    wchar_t ini[MAX_PATH];TestIniPath(ini,L"edf6_support_dispatch_test");
     FILE* f=nullptr;_wfopen_s(&f,ini,L"wb");check(f!=nullptr,"config ini written");
     const char text[]="[VehicleCrew]\r\nSupportDisabled=FIGHTER\r\nSupportSquadWeapon=shotgun\r\nSupportSquadLeaderWeapon=sniper\r\n"
                       "SupportPlatoonWeapons=flame,rocket,rifle\r\nSupportAircraftCrewWeapon=rocket\r\nSupportAircraftCount_HELI=3\r\n";
@@ -1235,7 +1288,7 @@ int main() {
     }
     {
         // Out-of-game loadouts (support_loadout.h, docs/feature-2026-10-09-loadout-editor.md), from a real ini.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_loadout_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_loadout_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"loadout ini written");
         const char loadText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=lance@1E3A8A*2,cannon,rifle@X:FFFFFF\r\n"
                               "SupportVehicle_TANK_CREWED=HE,AP:25\r\nSupportVehicle_STRIKE=MK82:6,MK82:6\r\n"
@@ -1325,7 +1378,7 @@ int main() {
     {
         // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
         // compatible resource still supplies its colours immediately (no pending-list round trip).
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_backpack_compat_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_backpack_compat_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
         const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
         std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
@@ -1350,7 +1403,7 @@ int main() {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
         // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
         // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_crew_colour_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_crew_colour_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"crew colour ini written");
         const char crewText[]="[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\n"
                               "SupportCrewColour_SQUAD=123456\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_MISSION=FFFFFF\r\n"
@@ -1453,6 +1506,38 @@ int main() {
         bool none=plan.count>=2;for(unsigned i=0;i<plan.count;++i)none=none && !plan.units[i].variant;
         check(none,"no crew colour configured: no variant anywhere (the plan as it always was)");
         ResetSupportDispatch();
+    }
+    // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer's two hands. Offline, a soldier whose preset names them
+    // (#R:L) carries those (PresetHandArms) and keeps them past GiveLocalArms; every other Fencer this player's own two
+    // (its kind's main hand and the slot beside it), a Ranger only its main hand.
+    {
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_hands_test");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"hands ini written");
+        const char handsText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#772:715,pilebanker,rifle*2\r\n";
+        std::fwrite(handsText,1,sizeof(handsText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        check(SupportCfg().preset[21].count==4 && SupportCfg().preset[21].hands[0]==FencerHands{772,715},"the preset's hands read from the ini");
+        const int pile=static_cast<int>(SupportWeapon::fencerPileBanker);
+        support_net::RequesterArms arms{};
+        npctier::Arms spear;spear.on=true;spear.id=715;npctier::Arms dexter;dexter.on=true;dexter.id=773;
+        npctier::Arms rifle;rifle.on=true;rifle.id=26;
+        arms.kind[pile]=npctier::PackArms(spear);arms.offhand[pile]=npctier::PackArms(dexter);arms.kind[0]=npctier::PackArms(rifle);
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        localArms=arms;armsLoad=support_net::PlanResult::ready;armsAsked=0;presetHandsAsked=0;
+        check(SupportCallAt(21,target,note,128),"a preset squad with hands is called");SupportDispatchTick();
+        check(made==4 && resourceCount==4 && presetHandsAsked==1,"made; the preset's hands asked for once");
+        check((lastArms[0]&0xFFFFu)==772 && (lastOffhand[0]&0xFFFFu)==715 && ((lastArms[0]>>16)&0xF)==1,
+              "seat 0: the preset's Galleon and spear (this player's stars), not the requester's pick");
+        check(lastArms[1]==arms.kind[pile] && lastOffhand[1]==arms.offhand[pile],"seat 1 (no #): this player's spear and the Dexter beside it");
+        check(lastArms[2]==arms.kind[0] && !lastOffhand[2] && lastArms[3]==arms.kind[0] && !lastOffhand[3],"the rifles: a main hand only");
+        check(Validate(deployments[0].plan),"the plan validates");
+        // The preset's hands cannot be given here: the requester's pick instead (logged), never a half-armed soldier.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;presetHandsOk=false;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(made==4 && lastArms[0]==arms.kind[pile] && lastOffhand[0]==arms.offhand[pile],"no preset hands here: the requester's two");
+        presetHandsOk=true;localArms={};
+        LoadSupportConfig(L"Z:\\nonexistent\\edf6_none.ini");
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
     }
     // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」; 2026-10-10: no support
     // limits, a gunner, takeoff from the carrier, the requester's own) ----

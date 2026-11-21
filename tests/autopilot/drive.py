@@ -39,7 +39,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            byte for byte afterwards (repeatable)
           --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
           --hq             the mission's pack and row made current, then the HQ (sortie) menu itself instead of the
-                           mission: SECONDS there (its pictures with --shots), quit the same way
+                           mission: SECONDS there (its pictures with --shots), quit the same way; the HQ menu as stock
+                           (--ini HqAutoMissionSelect=0 added: the plugin would open the mission select over it), unless
+                           --ini HqAutoMissionSelect=... is given (=1: to see that mission select open by itself)
           --cycle N        leave the mission and enter the same one again N times in this one launch (the plugin's
                            `cycle` command: the pause menu's withdraw on the game thread, the result screen skipped,
                            nothing saved; docs/mission-cycle-re.md), then quit as soon as the plugin logs
@@ -948,6 +950,8 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     options['extra'] = tuple(extra)
     options['keys'] = tuple(keys)
     options['place'] = tuple(place)
+    if options['hq'] and not any(s.partition('=')[0].strip().lower() == 'hqautomissionselect' for s in ini):
+        ini.append('HqAutoMissionSelect=0')   # the HQ menu itself, not the mission select the plugin opens over it
     options['ini'] = tuple(ini)
     if (cycle_stay != 20.0 or cycle_reboot) and not cycle_count:
         raise SystemExit('--cycle-stay / --cycle-reboot go with --cycle N')

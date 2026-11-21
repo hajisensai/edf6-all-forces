@@ -6,7 +6,8 @@
 // What is preloaded is exactly what a plan of this mission can ask for (support_variants_logic.h MissionVariants), never
 // a scan of the directory (generated files pile up there: a room's pre-sync only ever adds them):
 //   this machine's own configuration (ForEachConfiguredVariant)
-//   + the host's list the last room validated (room_sync.h ForEachRoomHostVariant; a client's)
+//   + the room's set the last room completed (room_sync.h ForEachRoomVariant: every member's loadout's files; the host
+//     plans each member's calls with that member's loadout)
 //   + the last kPendingPreloadMost names on the pending list (a host's plan asked for them before; now generated)
 // each one whose file is there. Each part is bounded, so the whole always fits kSupportVariantsMost.
 #pragma once
@@ -51,4 +52,7 @@ const wchar_t* SupportSoldierLookPath(std::uint32_t resource,std::uint64_t varia
 // VehicleVariantFile), and every crew's colours (SupportCrewColour_*, the mission crews' too: SupportCrewVariant's
 // files). A name possibly more than once. The room pre-sync's host list (room_sync.cpp). Returns how many were given.
 int ForEachConfiguredVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept;
+// The same for `config` (another room member's loadout, member_config.h).
+struct SupportConfig;
+int ForEachConfiguredVariant(const SupportConfig& config,void (*each)(void* context,const wchar_t* file),void* context) noexcept;
 }  // namespace crew

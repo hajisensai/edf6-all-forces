@@ -37,6 +37,7 @@
 #include "map_marks.h"
 #include "map_camera_state.h"
 #include "map_stock_hud.h"
+#include "commander.h"
 #include "playarea.h"
 #include "memory.h"
 #include "turretaim.h"
@@ -529,7 +530,8 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     ReleaseSRWLockExclusive(&lock);
 }
 
-std::atomic<bool> commander{false};
+std::atomic<bool> commander{false};       // a PvP commander (pvp.cpp, every PvP tick)
+std::atomic<bool> commanderMode{false};   // the commander mode (commander.cpp): its own owner, so neither clears the other
 // The map shut (any reason but a closing key: that one drains first, see Frame); its hold let go.
 void Close(const char* why) noexcept {
     if(game.draining){game.draining=false;holds.store(false);}
@@ -674,7 +676,8 @@ bool Frame(unsigned char* human) noexcept {
         Log("MAP key edge: map %d, pad map %d, stats %d, esc %d, pad close %d (open %d, front %d, pad read %d)",k.map && !game.was.map,
             k.padMap && !game.was.padMap,stats,k.esc && !game.was.esc,k.padClose && !game.was.padClose,game.open,front,pad);
     game.was=k;
-    const bool keepOpen=commander.load(std::memory_order_acquire);   // a PvP commander's view: the map keys do not shut it
+    // A PvP commander's view, or the commander mode's: the map keys do not shut it.
+    const bool keepOpen=commander.load(std::memory_order_acquire) || commanderMode.load(std::memory_order_acquire);
     if(game.open && stats && !DamageStatsShown())DamageStatsShow(true);
     else if(game.open && (stats || (!keepOpen && (toggle || close)))) {
         Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");
@@ -753,6 +756,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         // so they go on with every map shut, the player dead or watching (a vehicle's input ticks it too: crew.cpp).
         MapCommandQueueTick();
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
+        CommanderFrame(human);   // the commander mode (commander.cpp): before Frame, which reads its map lock
         FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
         NpcRideAlongTick();   // the squads following a player in and out of its vehicle (ride_along.h)
@@ -1047,6 +1051,7 @@ bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* 
     return true;
 }
 void MapSetCommander(bool on) noexcept { commander.store(on,std::memory_order_release); }
+void MapSetCommanderMode(bool on) noexcept { commanderMode.store(on,std::memory_order_release); }
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).

@@ -25,7 +25,7 @@ bool SamePlanSpecs(const Plan& a,const Plan& b) noexcept {
        std::memcmp(a.requester,b.requester,sizeof(a.requester)) || a.team!=b.team)return false;
     for(std::uint32_t i=0;i<kMaxUnits;++i) {
         const auto& x=a.units[i];const auto& y=b.units[i];
-        if(x.resourceId!=y.resourceId || x.role!=y.role || x.variant!=y.variant || x.arms!=y.arms ||
+        if(x.resourceId!=y.resourceId || x.role!=y.role || x.variant!=y.variant || x.arms!=y.arms || x.offhand!=y.offhand ||
            std::memcmp(x.matrix,y.matrix,sizeof(x.matrix)) || std::memcmp(x.netId,y.netId,sizeof(x.netId)))return false;
     }
     return true;
@@ -70,6 +70,8 @@ struct Node {
     std::vector<std::uint64_t> destroyedTokens;
     std::vector<std::string> refusals;   // the host's causes (Hooks::refused)
     PlanResult prepare=PlanResult::ready;int prepares=0;   // Hooks::prepare: the soldiers' weapons loaded here (npc_arms.h)
+    // The planner's soldiers: this resource (0: rifles, i%2+1) and these weapon words (a preset's Fencer hands).
+    std::uint32_t soldier=0;std::uint64_t planArms=0,planOff=0;
 };
 Node* current=nullptr;
 struct Packet { unsigned from,to;Message message; };
@@ -128,7 +130,8 @@ PlanResult PlanCall(std::uint32_t catalog,const float* at,std::uint64_t loadout,
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
     std::memcpy(p->requester,current->requester,sizeof(p->requester));p->team=current->team;
     for(unsigned i=0;i<p->count;++i) {
-        auto& u=p->units[i];u.resourceId=i%2+1;u.variant=current->variant;
+        auto& u=p->units[i];u.resourceId=current->soldier ? current->soldier : i%2+1;u.variant=current->variant;
+        u.arms=current->planArms;u.offhand=current->planOff;
         u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;
         u.matrix[12]=at[0]+static_cast<float>(i);u.matrix[13]=at[1];u.matrix[14]=at[2];
     }
@@ -141,7 +144,8 @@ PlanResult PlanForRequester(std::uint32_t requester,std::uint32_t catalog,const 
 bool Validate(const Plan& p) noexcept {
     ++current->validations;
     if(current->reject || (current->rejectValidationAt && current->validations>=current->rejectValidationAt))return false;
-    for(unsigned i=0;i<p.count;++i)if(p.units[i].resourceId>2 && p.units[i].resourceId!=kExistingVehicle) {
+    for(unsigned i=0;i<p.count;++i)if(p.units[i].resourceId>2 && p.units[i].resourceId!=kExistingVehicle &&
+                                       !crew::IsSupportSoldierResource(p.units[i].resourceId)) {
         if(!current->allowDynamic || p.count!=1 || p.catalogId!=kPreparedDroneCatalog || p.units[i].role || !p.units[i].variant ||
            !p.requester[0] || (p.units[i].resourceId!=crew::kSupportSubDroneResource && !crew::IsCarrierDroneResource(p.units[i].resourceId)))return false;
     }
@@ -188,10 +192,12 @@ void Codec() {
     unsigned char bytes[kWireSize];std::memset(bytes,0xCC,sizeof(bytes));
     Check(Encode(m,bytes,sizeof(bytes)),"encode full high ordinal and matrix");
     Check(bytes[0]=='S' && bytes[1]=='P' && bytes[2]=='R' && bytes[3]=='T',"wire is explicitly little endian");
-    Check(bytes[172]==0 && bytes[175]==0,"wire has no uninitialized padding");
+    Check(bytes[172]==0 && bytes[175]==0 && bytes[176]==0 && bytes[199]==0,"wire has no uninitialized padding");
     Message out;Check(Decode(bytes,sizeof(bytes),out) && !std::memcmp(out.unit.netId,m.unit.netId,32),"identity exact roundtrip");
     for(std::size_t n=0;n<sizeof(bytes);++n)Check(!Decode(bytes,n,out),"all truncations rejected");
     bytes[175]=1;Check(!Decode(bytes,sizeof(bytes),out),"reserved tail rejected");bytes[175]=0;
+    bytes[199]=1;Check(!Decode(bytes,sizeof(bytes),out),"the v3 tail past a unit's offhand stays zero");bytes[199]=0;
+    bytes[176]=1;Check(!Decode(bytes,sizeof(bytes),out),"an offhand without a weapon refused");bytes[176]=0;
     m.unit.matrix[0]=std::numeric_limits<float>::quiet_NaN();Check(!Encode(m,bytes,sizeof(bytes)),"NaN cannot reach native spawn");
     m.unit.matrix[0]=2;Check(!Encode(m,bytes,sizeof(bytes)),"nonrigid matrix rejected");
     m.unit.matrix[0]=1;m.unit.netId[12]=4;Check(!Encode(m,bytes,sizeof(bytes)),"wrong native identity type rejected");
@@ -208,7 +214,7 @@ void Capabilities() {
     unsigned char bytes[kWireSize];Message out;
     Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCapabilities,
           "a capability hello round-trips on the unchanged v2 wire (an older host's same bounds accept it)");
-    Check(bytes[4]==2 && bytes[5]==0,"wire version stays 2: older peers keep talking");
+    Check(bytes[4]==3 && bytes[5]==0,"wire version 3 (2026-11-21: the Fencer second hands; the room protocol keeps older builds out)");
     Message welcome;welcome.kind=Kind::welcome;welcome.epoch=5;welcome.challenge=7;welcome.request=1;welcome.catalog=kCapabilities;welcome.ok=1;
     Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.catalog==kCapabilities && out.ok==1,
           "a welcome with the host's capabilities passes the unchanged bounds an older guest checks");
@@ -245,7 +251,8 @@ void Capabilities() {
 // 2026-11-08 (docs/feature-npc-weapon-tier.md): a support soldier carries the requester's weapon one tier below its own.
 // The requester decides it (npc_arms.h LocalRequesterArms) and its request carries it in the unit fields a request left
 // zero; the host gives each planned soldier its kind's, every unit message carries it, every peer builds the same soldier.
-// The wire stays v2: the room protocol (mod_room.h 8) keeps older builds out.
+// The wire stayed v2 then (the room protocol, mod_room.h 8, kept older builds out); v3 (2026-11-21) adds the Fencers'
+// second hands in a tail (FencerHands below).
 bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status) {
     for(const auto& n:r.nodes[node]->notices)if(n.first==request && n.second==status)return true;
     return false;
@@ -264,7 +271,7 @@ void Arms() {
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out),"a request with arms round-trips");
      bool same=true;for(std::uint32_t k=0;k<kArmsKinds;++k)same=same && out.arms.kind[k]==arms.kind[k];
      Check(same && out.request==4,"every kind's arms exact");
-     Check(bytes[4]==2 && bytes[5]==0,"the support wire stays v2");
+     Check(bytes[4]==3 && bytes[5]==0,"the support wire is v3");
      bytes[68+6*kArmsKinds]=1;Check(!Decode(bytes,sizeof(bytes),out),"the request's unused unit bytes stay zero");
      Check(Encode(m,bytes,sizeof(bytes)),"re-encode");bytes[68]=0xFF;bytes[69]=0xFF;
      Check(!Decode(bytes,sizeof(bytes),out),"none (0xFFFF) with stars refused");
@@ -312,6 +319,69 @@ void Arms() {
     {Room r(3);const float at[3]={10,20,30};
      RequesterArms bad=arms;bad.kind[2]=arms.kind[0];
      r.With(1);Check(!current->session->Submit(5,at,r.now,0,&bad),"arms of the wrong kind never submitted");}
+}
+// 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a support Fencer's second hand (WeaponSet 1, in place of the AI
+// shield). The requester's (RequesterArms::offhand: the other slot of its Fencer group) rides in the v3 tail of its
+// request, the host gives it with the main hand, every unit message carries it in its tail; a preset's two hands the
+// planner gave are kept as planned.
+void FencerHands() {
+    using crew::SupportWeapon;
+    const auto pile=static_cast<std::uint32_t>(SupportWeapon::fencerPileBanker);
+    crew::npctier::Arms spear;spear.on=true;spear.id=715;spear.stars[0]=3;
+    crew::npctier::Arms dexter;dexter.on=true;dexter.id=773;dexter.stars[1]=4;
+    crew::npctier::Arms galleon;galleon.on=true;galleon.id=772;
+    RequesterArms arms=SomeArms();
+    arms.kind[pile]=crew::npctier::PackArms(spear);arms.offhand[pile]=crew::npctier::PackArms(dexter);
+    unsigned char bytes[kWireSize];Message out;
+    {Message m;m.kind=Kind::request;m.epoch=3;m.request=4;m.catalog=5;m.arms=arms;
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out),"a request with a second hand round-trips");
+     bool same=true;for(std::uint32_t k=0;k<kArmsKinds;++k)same=same && out.arms.kind[k]==arms.kind[k] && out.arms.offhand[k]==arms.offhand[k];
+     Check(same,"every main and second hand exact");
+     Check(bytes[176+12]==(773&0xFF) && bytes[176+13]==(773>>8) && bytes[176]==0xFF && bytes[177]==0xFF,
+           "the pile banker's second hand in the tail's third entry, the others none (0xFFFF)");
+     bytes[176]=0;Check(!Decode(bytes,sizeof(bytes),out),"a cannon second hand that is no Fencer weapon refused");bytes[176]=0xFF;
+     bytes[199]=1;Check(!Decode(bytes,sizeof(bytes),out),"none (0xFFFF) with stars refused in the tail");
+     RequesterArms bad=arms;bad.offhand[0]=arms.offhand[pile];m.arms=bad;
+     Check(!Encode(m,bytes,sizeof(bytes)),"a Ranger kind's second hand never leaves");
+     bad=arms;bad.kind[pile]=0;m.arms=bad;Check(!Encode(m,bytes,sizeof(bytes)),"a second hand without a main one never leaves");
+     bad=arms;bad.offhand[pile]=arms.kind[0];m.arms=bad;Check(!Encode(m,bytes,sizeof(bytes)),"a rifle in a Fencer's hand never leaves");
+     bad=arms;bad.kind[pile]=crew::npctier::PackArms(galleon);m.arms=bad;
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.arms.kind[pile]==bad.kind[pile],
+           "a Fencer kind's main hand may be any Fencer hand weapon (a preset's)");}
+    {Message m;m.kind=Kind::unit;m.epoch=22;m.transaction=1;m.index=3;m.unit.resourceId=crew::SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     m.unit.matrix[0]=m.unit.matrix[5]=m.unit.matrix[10]=m.unit.matrix[15]=1;Derive(0x40000007,m.unit.netId);
+     m.unit.arms=arms.kind[pile];m.unit.offhand=arms.offhand[pile];
+     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.unit.arms==arms.kind[pile] &&
+           out.unit.offhand==arms.offhand[pile],"a unit's two hands round-trip");
+     m.unit.arms=0;Check(!Encode(m,bytes,sizeof(bytes)),"a unit's second hand without a main one refused");
+     m.unit.resourceId=crew::kSupportRangerResource;m.unit.arms=arms.kind[0];Check(!Encode(m,bytes,sizeof(bytes)),"a Ranger with a second hand refused");
+     Message b;b.kind=Kind::begin;b.epoch=22;b.transaction=1;b.count=1;b.catalog=5;b.unit.offhand=arms.offhand[pile];
+     Check(!Encode(b,bytes,sizeof(bytes)),"a BEGIN carries no second hand");}
+    // The requester's two hands: every peer's every pile banker gets both.
+    {Room r(3);const float at[3]={10,20,30};
+     for(auto& n:r.nodes)n->soldier=crew::SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     r.With(1);Check(current->session->Submit(5,at,r.now,0,&arms),"a guest submits with its Fencer hands");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"every peer spawns once");
+     bool given=true;
+     for(std::uint32_t i=0;i<r.nodes[0]->last.count;++i)
+         given=given && r.nodes[0]->last.units[i].arms==arms.kind[pile] && r.nodes[0]->last.units[i].offhand==arms.offhand[pile];
+     Check(given,"every pile banker the requester's spear and shotgun");
+     Check(SamePlanSpecs(r.nodes[0]->last,r.nodes[1]->last) && SamePlanSpecs(r.nodes[0]->last,r.nodes[2]->last),"every peer the same hands");}
+    // A preset's hands (the host's planner gave both words): kept, the requester's not put over them.
+    {Room r(3);const float at[3]={10,20,30};
+     for(auto& n:r.nodes)n->soldier=crew::SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     r.nodes[0]->planArms=crew::npctier::PackArms(galleon);r.nodes[0]->planOff=crew::npctier::PackArms(spear);
+     r.With(1);Check(current->session->Submit(5,at,r.now,0,&arms),"a guest calls the host's preset");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"every peer spawns the preset once");
+     Check(r.nodes[2]->last.units[0].arms==crew::npctier::PackArms(galleon) && r.nodes[2]->last.units[0].offhand==crew::npctier::PackArms(spear) &&
+           SamePlanSpecs(r.nodes[0]->last,r.nodes[2]->last),"the preset's hands on every peer");}
+    // A planner's main hand alone (no second): the requester's pick replaces it, as for every other soldier.
+    {Room r(3);const float at[3]={10,20,30};
+     for(auto& n:r.nodes)n->soldier=crew::SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     r.nodes[0]->planArms=crew::npctier::PackArms(galleon);
+     r.With(1);Check(current->session->Submit(5,at,r.now,0,&arms),"a guest submits");r.Settle();
+     Check(r.nodes[1]->last.units[0].arms==arms.kind[pile] && r.nodes[1]->last.units[0].offhand==arms.offhand[pile],
+           "no second hand planned: the requester's two");}
 }
 void Loadout() {
     // A composed load (support_call.h PackSupportLoadout) rides in the request's challenge: the host's plan sees it; an
@@ -725,8 +795,8 @@ void TransportResume() {
      Check(r.nodes[0]->session->Suspended() && !r.nodes[0]->session->Ready() && r.nodes[0]->active[1],"stays suspended, the support kept");}
 }
 void PvpSupportCodec() {
-    static_assert(kVersion==2 && kWireSize==176 && (kFeatures&kWelcomeCatalogMask)<1024 &&
-                  WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"PvP detail does not change the v2 ABI");
+    static_assert(kVersion==3 && kWireSize==200 && (kFeatures&kWelcomeCatalogMask)<1024 &&
+                  WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"PvP detail does not change the ABI");
     Message begin;begin.kind=Kind::begin;begin.epoch=22;begin.transaction=1;begin.catalog=5;begin.count=1;
     unsigned char wire[kWireSize]{};Message decoded;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");
@@ -737,7 +807,7 @@ void PvpSupportCodec() {
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.role==2 &&
         decoded.unit.resourceId==kBeginRequesterMetadata && !std::memcmp(decoded.unit.netId,begin.unit.netId,32),
         "BEGIN requester identity and authorized side cross the unchanged real v2 codec");
-    Check(wire[4]==2 && wire[172]==0 && wire[175]==0,"metadata preserves v2 and the reserved tail");
+    Check(wire[4]==3 && wire[172]==0 && wire[175]==0 && wire[199]==0,"metadata preserves v3 and the reserved tail");
     begin.unit.role=0;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.netId[0]==41,
         "team zero retains requester ownership for a later PvP activation");
@@ -1170,4 +1240,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Arms();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ExistingArms();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Arms();FencerHands();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ExistingArms();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

@@ -2,34 +2,49 @@
 // side into it: EDF6Coop's member attribute table (resolved from the loaded EDF6Coop.dll; none, or an older Coop
 // without the export: SyncState::unavailable and nothing else changes, the pending list does the work as before), the
 // files in Mods/OBJECT, the pending list (support_variants.h NoteMissingVariant), the background generator
-// (loadout_store.h) and the host's configuration (support_variants.h ForEachConfiguredVariant). UI thread only.
+// (loadout_store.h), this machine's configuration (support_variants.h ForEachConfiguredVariant) and the members' lines
+// (member_config.h). UI thread only, but RoomMemberConfig / ForEachRoomVariant / ForEachRoomPlayerVehicle (copies).
 #include "room_sync.h"
 #include "room_sync_logic.h"
 #include "coop_attr.h"
 #include "crew.h"
 #include "loadout_store.h"
+#include "member_config.h"
 #include "support_config.h"
 #include "support_variants.h"
 #include <Windows.h>
 #include <cstddef>
+#include <cstring>
 #include <cwchar>
 #include <iterator>
 
 namespace crew::roomsync {
 namespace {
 Engine engine;   // the UI thread's (room_sync.h)
-// The engine's HostList() copied for other threads (ForEachRoomHostVariant), under its lock, when its hash changes.
-SRWLOCK hostLock=SRWLOCK_INIT;
-VariantSet hostCopy;
-std::uint64_t hostCopyHash=0;
-void PublishHostList() noexcept {
-    const std::uint64_t hash=engine.HostListHash();
-    if(hash==hostCopyHash)return;
-    AcquireSRWLockExclusive(&hostLock);
-    hostCopy=engine.HostList();
-    if(!hash)hostCopy.count=0;
-    hostCopyHash=hash;
-    ReleaseSRWLockExclusive(&hostLock);
+// The engine's RoomList() copied for other threads (ForEachRoomVariant), under its lock, when its hash changes.
+SRWLOCK roomLock=SRWLOCK_INIT;
+VariantSet roomCopy;
+std::uint64_t roomCopyHash=0;
+void PublishRoomList() noexcept {
+    const std::uint64_t hash=engine.RoomListHash();
+    if(hash==roomCopyHash)return;
+    AcquireSRWLockExclusive(&roomLock);
+    roomCopy=engine.RoomList();
+    if(!hash)roomCopy.count=0;
+    roomCopyHash=hash;
+    ReleaseSRWLockExclusive(&roomLock);
+}
+// The members' lines (Engine::MemberLines), copied for the host's plans (another thread) when they change.
+SRWLOCK membersLock=SRWLOCK_INIT;
+MemberLine membersCopy[kMembersMost];
+std::uint64_t membersCopyVersion=0;
+void PublishMembers() noexcept {
+    const std::uint64_t version=engine.MembersVersion();
+    if(version==membersCopyVersion)return;
+    AcquireSRWLockExclusive(&membersLock);
+    engine.CopyMembers(membersCopy,kMembersMost);
+    membersCopyVersion=version;
+    ReleaseSRWLockExclusive(&membersLock);
 }
 // The other members' player loadouts the last room published (MemberPlayerVehicles), for the mission's start.
 SRWLOCK playersLock=SRWLOCK_INIT;
@@ -96,6 +111,16 @@ GenStatus Generation(void*) noexcept {
     return g;
 }
 void Configured(void*,void (*each)(void*,const wchar_t*),void* set) noexcept { ForEachConfiguredVariant(each,set); }
+int Units() noexcept { return SupportCallCount()<kSupportConfigUnits ? SupportCallCount() : kSupportConfigUnits; }
+std::size_t OwnConfig(void*,char* out,std::size_t capacity,int* leftOut) noexcept {
+    return memberconfig::Encode(SupportCfg(),Units(),out,capacity,leftOut);
+}
+bool MemberVariants(void*,const char* line,void (*each)(void*,const wchar_t*),void* set) noexcept {
+    static SupportConfig config;   // UI thread only; ~13 KB off the stack
+    if(!memberconfig::Decode(line,Units(),&SupportCallSeats,&config))return false;
+    if(each)ForEachConfiguredVariant(config,each,set);
+    return true;
+}
 void LogLine(void*,const char* text) noexcept { Log("%s",text); }
 bool OwnPlayer(void*,char* value,std::size_t capacity) noexcept {
     return playerveh::OwnValue(SupportCfg().playerVehicle,kPlayerVehicleCount,value,capacity);
@@ -104,24 +129,34 @@ bool OwnPlayer(void*,char* value,std::size_t capacity) noexcept {
 Env TheEnv() noexcept {
     Env env;
     env.fileThere=FileThere;env.noteMissing=NoteMissing;env.startGeneration=StartGeneration;env.generation=Generation;
-    env.configured=Configured;env.log=LogLine;env.ownPlayer=OwnPlayer;
+    env.configured=Configured;env.ownConfig=OwnConfig;env.memberVariants=MemberVariants;env.log=LogLine;env.ownPlayer=OwnPlayer;
     return env;
 }
 }  // namespace
 
-void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList();PublishPlayers(); }
+void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv());PublishRoomList();PublishPlayers();PublishMembers(); }
 void LeaveRoomSync() noexcept { engine.Leave(Api()); }
-void ForgetRoomHostList() noexcept { engine.ForgetHostList();PublishHostList(); }
-int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept {
+void ForgetRoomList() noexcept { engine.ForgetRoomList();PublishRoomList();PublishMembers(); }
+int ForEachRoomVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept {
     if(!each)return 0;
     int given=0;
-    AcquireSRWLockShared(&hostLock);
-    for(int i=0;i<hostCopy.count;++i) {
+    AcquireSRWLockShared(&roomLock);
+    for(int i=0;i<roomCopy.count;++i) {
         wchar_t file[96];
-        if(VariantFileOf(hostCopy.ref[i],file,96)){each(context,file);++given;}
+        if(VariantFileOf(roomCopy.ref[i],file,96)){each(context,file);++given;}
     }
-    ReleaseSRWLockShared(&hostLock);
+    ReleaseSRWLockShared(&roomLock);
     return given;
+}
+bool RoomMemberConfig(const char* puid,SupportConfig* out) noexcept {
+    if(!puid || !*puid || !out)return false;
+    static thread_local char line[kConfigLineMost+1];
+    bool found=false;
+    AcquireSRWLockShared(&membersLock);
+    for(const auto& m:membersCopy)
+        if(m.id[0] && m.ok && !std::strcmp(m.id,puid)){std::memcpy(line,m.line,sizeof(line));found=true;break;}
+    ReleaseSRWLockShared(&membersLock);
+    return found && memberconfig::Decode(line,Units(),&SupportCallSeats,out);
 }
 int ForEachRoomPlayerVehicle(void (*each)(void* context,VehicleBody body,std::uint64_t bits),void* context) noexcept {
     if(!each)return 0;
