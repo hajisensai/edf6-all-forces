@@ -126,9 +126,11 @@ constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264
                       kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
                       kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
-// A weapon the third person hides (H, docs/fp-soldier-re.md §8): 0x696150(weapon, hide) writes +0x78C and hides its model
-// in Umbra (0x6C04B0 -> 0x11B3480); the appeal (0x59A880) calls it for every set's weapon. Hidden is not in hand here.
-constexpr std::size_t kWeaponHidden=0x78C;
+// A weapon the third person shows (H, docs/fp-soldier-re.md §8): 0x696150(weapon, shown) writes +0x78C and shows / hides its
+// model in Umbra (0x6C04B0 -> 0x11B3480). 1 = shown: the weapon switch hides every weapon with 0 and shows the chosen one
+// with 1 (0x590C2D / 0x590CEF), the ride's entry hides with 0 and its exit shows with 1 (0x5A16E4 / 0x5A18B4), an appeal
+// (0x59A880) hides each set's weapon only for its argument "0". A weapon at 0 is not in hand here.
+constexpr std::size_t kWeaponShown=0x78C;
 // A muzzle entry's shot matrix (H, fp-soldier-re.md §2.1-2.2): rows right / up / forward at +0x50 / +0x60 / +0x70 (read
 // by 0x691560 for each round: 0x69168B), the position at +0x80 (0x6972C5, pulled back out of a wall by 0x696FD0).
 constexpr std::size_t kShotRows=0x50;
@@ -992,8 +994,8 @@ void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
         if(!w)continue;
-        // The third person hides it (an appeal, 0x696150): neither drawn nor posed here, as there.
-        armed[k]=true;hidden[k]=At<std::uint8_t>(w,kWeaponHidden)!=0;
+        // The third person hides it (0x696150 with 0: a switch, an appeal "0"): neither drawn nor posed here, as there.
+        armed[k]=true;hidden[k]=At<std::uint8_t>(w,kWeaponShown)==0;
         if(hidden[k])continue;
         const int hand=HandOf(w);
         Current().inHand[Current().inHandCount]=w+kWeaponModel;Current().inHandCtrls[Current().inHandCount]=At<const void*>(w,kSelfCtrl);Current().handOf[Current().inHandCount++]=hand;

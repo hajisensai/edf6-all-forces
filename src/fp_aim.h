@@ -79,7 +79,7 @@ inline Result Converge(float* rows,const float* muzzle,const float* eye,const fl
     return Result::turned;
 }
 
-// The stock action's arms (an appeal: 0x59A880 hides every weapon set's weapon through 0x696150, weapon +0x78C = 1,
+// The stock action's arms (an appeal "0": 0x59A880 hides every weapon set's weapon through 0x696150, weapon +0x78C = 0,
 // and plays the body's animation): the first person shows the arms as that animation poses them and no viewmodel.
 // `sets` hand sets, each with a weapon (`armed`) the third person hides (`hidden`): native arms when at least one set is
 // armed and every armed set's weapon is hidden.
