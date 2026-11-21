@@ -4,6 +4,8 @@
                                   (pylib/chute_model.py; built from the player's own Root.cpk)
   Mods/OBJECT/EDF6VC_CHUTE.SGO    the stock far-off plant's FarEventObject with that model: render only, no physics
                                   (pylib/chute_model.py sgo)
+  Mods/OBJECT/EDF6VC_ROPE.MRAB    a helicopter's fast rope (pylib/chute_model.py rope(): src/transport.cpp's rope descent)
+  Mods/OBJECT/EDF6VC_ROPE.SGO     the same FarEventObject with that model
 
 The plugin preloads the SGO at a mission's start when the file is there and keeps one over the player while their
 parachute is open. Built in memory first, then written atomically and recorded in the ledger as this tool's
@@ -30,11 +32,14 @@ OWNER = 'chute'   # pylib/ledger.py
 def build(root: str) -> dict[str, bytes]:
     """Every file this tool writes, {path under Mods: bytes}, checked, from the game's Root.cpk (only read)."""
     game = vc.Game(root)
-    arc = chute_model.build(game)
-    chute_model.check(arc)
-    # its model merged by material and given its LODs when its SGO is a vehicle's (pylib/model_lod.py)
-    files = model_lod.finish({f'OBJECT/{chute_model.OUT_ARC}': arc, f'OBJECT/{chute_model.SGO_FILE}': chute_model.sgo(game)})
-    chute_model.check(files[f'OBJECT/{chute_model.OUT_ARC}'])   # what is written is held to the same contract
+    files: dict[str, bytes] = {}
+    for kind, (arc_name, _mdb, sgo_name, *_bones) in chute_model.FILES.items():
+        arc = chute_model.build(game, kind)
+        chute_model.check(arc, kind)
+        # its model merged by material and given its LODs when its SGO is a vehicle's (pylib/model_lod.py)
+        made = model_lod.finish({f'OBJECT/{arc_name}': arc, f'OBJECT/{sgo_name}': chute_model.sgo(game, kind)})
+        chute_model.check(made[f'OBJECT/{arc_name}'], kind)   # what is written is held to the same contract
+        files.update(made)
     return files
 
 

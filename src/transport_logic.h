@@ -10,8 +10,12 @@
 //  - a support delivery (a crewed truck / APC, a transport helicopter) goes back once its passengers are off (the same
 //    day: "载具送过来以后就会直接回去"): it is not left as their transport;
 //  - its transport is withdrawn on order (a support vehicle leaves the field and is removed);
-//  - a paratroop drop: a transport plane flies over the point and its passengers jump one after another (a stick); every
-//    class but the Wing Diver comes down under a parachute, a Wing Diver flies down on her own.
+//  - a paratroop drop: a transport plane flies over the point and its passengers jump one after another (a stick);
+//  - a helicopter's support delivery (2026-11-21, the user: 「直升机/固定翼 飞翼喷射一下落，剑兵硬着陆，突击索降，空袭降落伞
+//    进场动画」) does not land: it hovers kRopeHeight over its drop point and they go down from it one after another;
+//  - how each comes down, by class (DescentOf): a Wing Diver on her own jets (out of the door with a burst, falling, and
+//    braking with bursts near the ground: JetBurn), a Fencer falling straight down onto his feet (a hard landing:
+//    FreeFallStep), the Ranger and the Air Raider under a parachute from a plane and down a rope from a helicopter.
 // One trip a pair at a time; its phases below (Advance). No game, no Windows.
 #pragma once
 #include <cmath>
@@ -33,7 +37,8 @@ struct Tuning {
     float groundArrive=8.0f;       // m: the vehicle this near the drop point is there
     float heliArrive=30.0f;        // m (level): a helicopter this near starts down
     float stopped=0.8f;            // m/s: a ground vehicle slower than this has stopped
-    std::uint64_t pickupMs=90000,boardMs=25000,moveMs=240000,landMs=30000,unloadMs=10000;
+    // ropeMs: a hovering helicopter's whole load down its ropes within this (else it lands them: Act::settle).
+    std::uint64_t pickupMs=90000,boardMs=25000,moveMs=240000,landMs=30000,unloadMs=10000,ropeMs=20000;
 };
 
 // What a trip sees this frame (transport.cpp reads it from the game).
@@ -45,6 +50,8 @@ struct View {
     float vehicleToDrop=0.0f;      // m (level) from the vehicle to the drop point
     float speed=0.0f;              // m/s, the vehicle's
     bool grounded=true;            // a helicopter on the ground (a ground vehicle always)
+    bool hovering=false;           // a helicopter held over the drop point at its rope height (Hovering)
+    bool ropeOccupied=false;       // someone is still descending from this helicopter
     std::uint64_t ms=0;
 };
 
@@ -53,10 +60,13 @@ struct View {
 //  vehicle holds (a helicopter stays down); goTo: the vehicle to the drop point; land: the helicopter down at the drop
 //  point; unload: the members off, the vehicle holds; release: the trip is over, the squad takes its order on foot, the
 //  vehicle waits where it is; abort: the trip cannot go on (the vehicle lost, nobody to drive it, too long): the same.
-enum class Act : std::uint8_t { none, comeTo, board, goTo, land, unload, release, abort };
-const char* const kActNames[]={"none","come to","board","go to","land","unload","release","abort"};
+//  A hovering trip (Trip::hover, a helicopter's support delivery): hover: the helicopter held kRopeHeight over the drop
+//  point; rope: they go down from it one after another (transport.cpp, by class: DescentOf); settle: the hover did not
+//  come about or they did not get down in time: the trip lands them as any other (its hover off, the landing phase anew).
+enum class Act : std::uint8_t { none, comeTo, board, goTo, land, unload, release, abort, hover, rope, settle };
+const char* const kActNames[]={"none","come to","board","go to","land","unload","release","abort","hover","rope","settle"};
 
-struct Trip { Phase phase=Phase::none; Carrier carrier=Carrier::ground; float drop[3]{}; std::uint64_t since=0; };
+struct Trip { Phase phase=Phase::none; Carrier carrier=Carrier::ground; float drop[3]{}; std::uint64_t since=0; bool hover=false; };
 struct Step { Phase next; Act act; };
 
 inline float Level(const float* a,const float* b) noexcept { return std::hypot(a[0]-b[0],a[2]-b[2]); }
@@ -109,16 +119,24 @@ inline Step Advance(const Trip& trip,const View& v,const Tuning& t) noexcept {
                                                                                      : Step{Phase::none,Act::abort};
         if(!v.aboardAny)return {Phase::none,Act::release};   // everyone got off on the way (killed, thrown out)
         if(heli) {
-            if(v.vehicleToDrop<=t.heliArrive || age>t.moveMs)return {Phase::landing,Act::land};
+            if(v.vehicleToDrop<=t.heliArrive || age>t.moveMs)return {Phase::landing,trip.hover ? Act::hover : Act::land};
             return {Phase::moving,Act::goTo};
         }
         if((v.vehicleToDrop<=t.groundArrive || age>t.moveMs) && v.speed<=t.stopped)return {Phase::unloading,Act::unload};
         return {Phase::moving,Act::goTo};
     case Phase::landing:
+        if(trip.hover) {
+            if(v.hovering)return {Phase::unloading,Act::rope};
+            if(age>t.landMs)return {Phase::landing,Act::settle};
+            return {Phase::landing,Act::hover};
+        }
         if(v.grounded || age>t.landMs)return {Phase::unloading,Act::unload};
         return {Phase::landing,Act::land};
     case Phase::unloading:
-        if(!v.aboardAny || age>t.unloadMs)return {Phase::none,Act::release};
+        if(trip.hover && !v.aboardAny && v.ropeOccupied && age<=t.ropeMs)return {Phase::unloading,Act::rope};
+        if(!v.aboardAny)return {Phase::none,Act::release};
+        if(trip.hover)return age>t.ropeMs ? Step{Phase::landing,Act::settle} : Step{Phase::unloading,Act::rope};
+        if(age>t.unloadMs)return {Phase::none,Act::release};
         return {Phase::unloading,Act::unload};
     default: return {Phase::none,Act::none};
     }
@@ -158,4 +176,71 @@ inline void ChuteStep(float* vel,float sink,float bleed) noexcept {
 }
 // A jumper is down: standing (the walk's support), or this near the ground.
 inline bool Landed(bool support,float clearance,float close) noexcept { return support || (clearance>=0.0f && clearance<close); }
+
+// --- How each comes down (2026-11-21: 「飞翼喷射一下落，剑兵硬着陆，突击索降，空袭降落伞」) ---
+// The soldier's class as npcai.cpp kSoldiers orders them (NpcSoldierClass): 0 Ranger, 1 Wing Diver, 2 Fencer, 3 Air Raider.
+enum class Descent : std::uint8_t { canopy, jets, hardLanding, rope };
+const char* const kDescentNames[]={"parachute","jets","hard landing","rope"};
+inline constexpr int kRanger=0,kWingDiver=1,kFencer=2,kAirRaider=3;
+// A Wing Diver on her jets and a Fencer onto his feet from either; the others (and a class not known) under a canopy
+// from a plane, down a rope from a hovering helicopter.
+inline Descent DescentOf(int soldierClass,bool fromHeli) noexcept {
+    if(soldierClass==kWingDiver)return Descent::jets;
+    if(soldierClass==kFencer)return Descent::hardLanding;
+    return fromHeli ? Descent::rope : Descent::canopy;
+}
+// Every jumper out of a plane carries its way (kJumpInherit); it is bled off as a canopy bleeds it (ChuteStep's
+// `bleed`) down to kDriftFloor m/s level whatever its descent, so the stick's lead (StickLead) holds for all of them. A
+// Wing Diver's own flight below that is hers.
+inline constexpr float kDriftFloor=6.0f;
+inline void DriftBleed(float* vel,float bleed) noexcept {
+    const float level=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+    if(!(level>kDriftFloor))return;
+    float keep=1.0f-bleed/60.0f;
+    if(level*keep<kDriftFloor)keep=kDriftFloor/level;
+    vel[0]*=keep;vel[2]*=keep;
+}
+// A Fencer's fall (no canopy, no jets: he lands on his feet at speed, as a player falling off a tower does), held to
+// kHardFallMost m/s: the walk's controller takes a frame's step of that onto the ground (0.5 m at 60 Hz).
+inline constexpr float kHardFallMost=30.0f;
+inline void FreeFallStep(float* vel,float bleed) noexcept {
+    if(vel[1]<-kHardFallMost)vel[1]=-kHardFallMost;
+    DriftBleed(vel,bleed);
+}
+// A Wing Diver's jets (her own flight, the jump held: docs/insertion-re.md §2): a burst out of the door
+// (kJetKickMs), then falling free until the ground comes within what her jets need to take her fall down to kJetSinkMost
+// (its stopping distance at an assumed net kJetDecel m/s2, plus kJetMargin); then she burns while falling faster than
+// kJetSinkEase and lets go below it, so she comes down in bursts (she never hovers: a burst ends once slow). Low down
+// (within kJetMargin) she burns at anything past kJetSinkMost. The ground not known under her (clearance < 0): by her
+// fall alone.
+inline constexpr std::uint64_t kJetKickMs=450;
+inline constexpr float kJetDecel=8.0f,kJetMargin=12.0f,kJetSinkMost=9.0f,kJetSinkEase=3.0f;
+inline bool JetBurn(bool burning,float vy,float clearance,std::uint64_t sinceOut) noexcept {
+    if(sinceOut<kJetKickMs)return true;
+    if(burning)return vy<-kJetSinkEase;
+    if(!(vy<-kJetSinkMost))return false;
+    if(clearance<0.0f)return true;
+    const float over=-vy-kJetSinkMost;   // what the jets must take off her fall
+    const float stop=(vy*vy-kJetSinkMost*kJetSinkMost)/(2.0f*kJetDecel);
+    return over>0.0f && clearance<=stop+kJetMargin;
+}
+// The rope (a helicopter's): down it at kRopeSink m/s, drawn onto it level (`anchor`: the rope's x / z) at kRopeGain a
+// second of the gap, no faster than kRopePull m/s. The helicopter holds kRopeHeight over its drop point; the rope hangs
+// kRopeLength from its door (src/playerjet.cpp RopeMake, pylib/chute_model.py ROPE_LENGTH).
+inline constexpr float kRopeSink=5.0f,kRopeGain=4.0f,kRopePull=3.0f,kRopeHeight=18.0f,kRopeLength=28.0f;
+inline void RopeStep(float* vel,const float* pos,const float* anchor) noexcept {
+    float dx=(anchor[0]-pos[0])*kRopeGain,dz=(anchor[2]-pos[2])*kRopeGain;
+    const float l=std::sqrt(dx*dx+dz*dz);
+    if(l>kRopePull){dx*=kRopePull/l;dz*=kRopePull/l;}
+    vel[0]=dx;vel[1]=-kRopeSink;vel[2]=dz;
+}
+// The helicopter is held for the ropes: within kHoverNear m (level) of the drop point, slower than kHoverStill m/s, and
+// its height over the ground under it (clearance; < 0 not known) within kHoverBand of kRopeHeight, never below
+// kHoverLow (nobody goes down a rope from a helicopter all but on the ground: it lands them, Act::settle).
+inline constexpr float kHoverNear=8.0f,kHoverStill=3.0f,kHoverBand=8.0f,kHoverLow=6.0f;
+inline bool Hovering(float level,float speed,float clearance) noexcept {
+    return level<=kHoverNear && speed<=kHoverStill && clearance>=kHoverLow && clearance<=kRopeHeight+kHoverBand;
+}
+// The ropes' one after another: kRopeEveryMs apart.
+inline constexpr std::uint64_t kRopeEveryMs=600;
 }  // namespace transport

@@ -35,12 +35,16 @@ void TransportSucceed(const void* dead,const void* lead) noexcept;
 // support_dispatch.cpp: a deployment's soldiers aboard their transport, the squads' tops `tops` (a crewed APC / truck
 // arrived, a helicopter assault): on a trip to `target`, where they get off and guard it; then the vehicle goes back
 // (SupportWithdrawVehicle) -- it is not left as their transport. `here`: they get off where the vehicle stands (a ground
-// vehicle that found no route on: they walk the rest) and still guard `target`.
+// vehicle that found no route on: they walk the rest) and still guard `target`. A helicopter does not land for it: it
+// hovers over the drop point and they go down from it by class (transport_logic.h Trip::hover, DescentOf).
 bool TransportDeliver(const void* vehicle,const void* const* tops,int count,const float* target,bool here=false) noexcept;
 // support_dispatch.cpp: a transport plane over `target`: its passengers jump there (transport_logic.h JumpNow), then it
 // is sent off (jet.cpp JetWithdrawNow). Each squad guards `target` once down.
 bool TransportParadrop(const void* plane,const float* target) noexcept;
-// Once a frame (map.cpp, after SupportDispatchTick): the trips, the drops, the canopies.
+// npcai.cpp, after the AI's Think wrote a soldier's intent (h+0xD50..): a jumper's own part of it (a Wing Diver's jets:
+// the jump pressed / held, transport_logic.h JetBurn). Nothing for anyone else.
+void TransportJumperIntent(unsigned char* human) noexcept;
+// Once a frame (map.cpp, after SupportDispatchTick): the trips, the drops, the canopies and ropes.
 void TransportTick() noexcept;
 void ResetTransports() noexcept;   // mission.cpp: a new mission
 // The map's lines (game thread, mapcmd.cpp Publish): a paired squad on foot and its transport.

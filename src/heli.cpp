@@ -3387,7 +3387,7 @@ SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept 
     } __except(EXCEPTION_EXECUTE_HANDLER){return SupportEntry::gone;}
 }
 
-bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
+bool HeliFerry(const void* vehicle,const float* at,bool land,float hover) noexcept {
     __try {
         Heli* const h=Find(vehicle);
         if(!h || h->leaving || h->reap)return false;
@@ -3396,11 +3396,12 @@ bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
             h->ferry=h->ferryLand=false;return true;
         }
         if(!std::isfinite(at[0]+at[1]+at[2]))return false;
-        const bool same=h->ferry && h->ferryLand==land && Dist2(h->ferryAt,at)<1.0f;
+        const float over=hover>0.0f ? hover : Cfg().heliHeight;
+        const bool same=h->ferry && h->ferryLand==land && Dist2(h->ferryAt,at)<1.0f && std::fabs(h->hold[1]-at[1]-over)<0.5f;
         h->ferry=true;h->ferryLand=land;std::memcpy(h->ferryAt,at,12);
-        h->hold[0]=at[0];h->hold[1]=at[1]+Cfg().heliHeight;h->hold[2]=at[2];
+        h->hold[0]=at[0];h->hold[1]=at[1]+over;h->hold[2]=at[2];
         h->target=ObjRef{};h->tracked=ObjRef{};h->focus={};h->extend=false;h->circleUntil=0;
-        if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s",vehicle,at[0],at[1],at[2],land ? ", landing there" : "");
+        if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s, %.0f m over it",vehicle,at[0],at[1],at[2],land ? ", landing there" : "",over);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

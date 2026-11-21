@@ -100,7 +100,8 @@ bool HeliLeft(const void* vehicle) noexcept;
 // transport.cpp: a transport helicopter carrying a squad. A ferry to `at` (held HeliHeight over it; `land`: down on it and
 // staying down), fighting nothing and following nobody meanwhile; nullptr ends it (its post / follow as before). Whether it
 // stood on the ground last frame. Sent off now (StartLeave; deleted out there, its crew by support_dispatch.cpp Retire).
-bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept;
+// `hover` > 0: held that many m over `at` instead of HeliHeight (a rope descent's hover: transport_logic.h kRopeHeight).
+bool HeliFerry(const void* vehicle,const float* at,bool land,float hover=0.0f) noexcept;
 bool HeliGrounded(const void* vehicle) noexcept;
 // A squad's transport now: no leaving for fuel or ammo (only badly damaged, or on WITHDRAW).
 bool HeliKeep(const void* vehicle) noexcept;
