@@ -1,7 +1,7 @@
 """The installer's native helpers (native/*.cpp, one DLL: edf6cmpl.dll), loaded with ctypes. Every function there is a
-port of a pure Python reference that stays the fallback (a dev checkout without build.cmd) and the definition of the
-bytes: the native one gives the same bytes on every input it accepts, and hands back what it does not (tests/
-test_native_*.py compare the two).
+port of a pure Python reference, the definition of the bytes: the native one gives the same bytes on every input it
+accepts, and hands back what it does not (tests/test_native_*.py compare the two). The reference stays the fallback
+(a dev checkout without build.cmd), all but BC7's, which is too slow to install with.
 
   cmpl.cpp         mdb.cmpl_compress / cmpl_decompress        (models, map parts)
   crilayla.cpp     crilayla.decompress                        (every compressed file read from a game's CPK)

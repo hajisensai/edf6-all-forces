@@ -6,10 +6,11 @@ What the game's archives hold (every stock OBJECT/*.MRAB checked, pylib/mdb.py R
 DDS files with the legacy 124-byte header, a full mip chain (flags 0xA1007, caps 0x401008), in DXT1 / DXT3 / BC5U,
 or BC7 behind a DX10 header (179 of them in OBJECT / WEAPON, albedo maps among them: every one DXGI 98 BC7_UNORM,
 dimension 3, no flags, array size 1; the legacy part as a DXT1 file's with FourCC 'DX10' and depth 1; the .lod pairs
-the same as everyone's: docs/model-quality-1121-bc7.md). The `.lod` member is the same picture 16x smaller per side (2048 -> 128, 1024x512 -> 64x32), but never
-below 16 pixels on its shorter side (64 -> 16), with one mip level fewer than a full chain: it ends at 2 pixels on its
-longer side (128x128: 7 levels, 128 .. 2; 64x32: 6, 64x32 .. 2x1), where the HD file's chain goes on to 1x1 (every
-one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own mip levels from lod_level() on, that long.
+the same as everyone's: docs/model-quality-1121-bc7.md). The `.lod` member is the same picture 16x smaller per side
+(2048 -> 128, 1024x512 -> 64x32), but never below 16 pixels on its shorter side (64 -> 16), with one mip level fewer
+than a full chain: it ends at 2 pixels on its longer side (128x128: 7 levels, 128 .. 2; 64x32: 6, 64x32 .. 2x1), where
+the HD file's chain goes on to 1x1 (every one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own
+mip levels from lod_level() on, that long.
 
     load_image(path) -> Image                     PNG (8 / 16 bit, gray / RGB / palette / alpha, not interlaced) or
                                                   baseline JPEG (Huffman, any sampling, restart markers), as RGBA8
