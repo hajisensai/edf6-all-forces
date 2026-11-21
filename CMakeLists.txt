@@ -947,6 +947,15 @@ add_test(NAME dreadnought_net COMMAND dreadnought_net_test)
 add_executable(dreadnought_deck_test tests/dreadnought_deck_test.cpp)
 target_compile_options(dreadnought_deck_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME dreadnought_deck COMMAND dreadnought_deck_test)
+# A wing's velocity steered as a wing (src/wing_turn.h: the Dreadnought's hangar flying a fighter home; test hub #42).
+add_executable(wing_turn_test tests/wing_turn_test.cpp)
+target_compile_options(wing_turn_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME wing_turn COMMAND wing_turn_test)
+# ...and the hangar's whole flight home: its capture, its nose, its speed held (src/hangar_recover.h; test hub #42). Its
+# negative controls run under playerjet_recovery (tools/playerjet_recovery_check.py).
+add_executable(hangar_recover_test tests/hangar_recover_test.cpp)
+target_compile_options(hangar_recover_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME hangar_recover COMMAND hangar_recover_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 # In COCKPIT_BUILD_SHARDS parts run side by side (its units: tests/cockpit_build_test.py units; all in one run took ~15 min).

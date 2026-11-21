@@ -9,7 +9,7 @@ VehicleLookInput::~VehicleLookInput() noexcept {}
 DriveGearInput::DriveGearInput(unsigned char*) noexcept {}
 DriveGearInput::~DriveGearInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
-void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
+bool BoardingRequest(unsigned char*) noexcept { return false; }   // TestBoardVehicle (off here)
 bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }

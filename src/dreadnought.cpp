@@ -39,6 +39,7 @@
 #include "online_authority.h"
 #include "turretcam.h"
 #include "vecmath.h"
+#include "hangar_recover.h"
 #include <cmath>
 #include <cstring>
 
