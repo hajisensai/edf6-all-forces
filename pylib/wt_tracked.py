@@ -54,7 +54,7 @@ import graft_pure as g
 import obj_model as om
 import tracked_combat_model as t
 import xm_units
-from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
+from mdb import Material, Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
 
 FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
            'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
@@ -426,7 +426,14 @@ def template(m: dict) -> str:
         _req(mode == alpha_maps.MASK, f"{m['name']}: a track material can cut out (mask), not blend")
         return m['template']
     _req(m['template'] == BODY, f"{m['name']}: no see-through host for template {m['template']}")
-    return CLIP if mode == alpha_maps.MASK else ALPHA
+    return see_through_kind(m)  # type: ignore[return-value]
+
+
+def see_through_kind(m: dict) -> str | None:
+    """CLIP ('mask') or ALPHA ('blend') for a material whose opaque form is a snd_BRDF_Common_Basic one (v603_body here;
+    any builder's Common_Basic body: the X-Morph airframes' V505 hull is one too), None when it is opaque."""
+    mode = alpha_maps.entry(m.get('alpha'))['mode']
+    return None if mode == alpha_maps.OPAQUE else CLIP if mode == alpha_maps.MASK else ALPHA
 
 
 def layout_template(m: dict) -> str:
@@ -437,14 +444,14 @@ def layout_template(m: dict) -> str:
     return BODY if host in (CLIP, ALPHA) else host
 
 
-def _albedo_dds(spec: Spec, m: dict, side: int, *, swap_gb: bool = False) -> bytes:
+def albedo_dds(folder: str, m: dict, side: int = 0, *, swap_gb: bool = False) -> bytes:
     """The colour map: DXT1 as before when opaque; DXT5 with the opacity in A when see-through (the 'alpha' map, or the
     albedo file's own A), each mip of a cut-out keeping the top level's coverage at its cutoff. `swap_gb`: G and B
     exchanged, for snd_BRDF_Mech_Catapillar, which reads the albedo as .xzy (its Deferred and Forward PS: `mul r0.xyz,
     r0.xzyx, cb2[0].xyzx`), so a track shows the source's colours."""
     import texfile_accel
     al = alpha_maps.entry(m.get('alpha'))
-    albedo = os.path.join(spec.folder, m['albedo'])
+    albedo = os.path.join(folder, m['albedo'])
     if al['mode'] == alpha_maps.OPAQUE and not swap_gb:
         return _dds_of(albedo, side)
     rgba = np.array(_pil(albedo, side, 'RGBA'))
@@ -454,11 +461,17 @@ def _albedo_dds(spec: Spec, m: dict, side: int, *, swap_gb: bool = False) -> byt
         return texfile_accel.dxt1_dds(_texfile(rgba))
     if al['map']:
         from PIL import Image
-        a = _pil(os.path.join(spec.folder, al['map']), 0, 'L')
+        a = _pil(os.path.join(folder, al['map']), 0, 'L')
         if a.size != (rgba.shape[1], rgba.shape[0]):
             a = a.resize((rgba.shape[1], rgba.shape[0]), Image.LANCZOS)
         rgba[..., 3] = np.asarray(a)
     return texfile_accel.dxt5_dds(_texfile(rgba), al['cutoff'] if al['mode'] == alpha_maps.MASK else None)
+
+
+def clip_textures() -> dict[str, tuple[str, bytes]]:
+    """CLIP_HOST's slot that a Common_Basic material has not: param_cm0_cm1, black (no colour change)."""
+    import texfile
+    return {'param_cm0_cm1': ('edf6vc_no_colour_change.dds', texfile.solid_dxt1(NO_COLOUR_CHANGE))}
 
 
 def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
@@ -468,9 +481,9 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     path = lambda key: os.path.join(spec.folder, m[key]) if m.get(key) else None   # noqa: E731
     side = int(m.get('min_side', 0))
     host = template(m)
-    out = {'albedo': (f'{stem}_col.dds', _albedo_dds(spec, m, side, swap_gb=host.startswith('v603_kyata')))}
+    out = {'albedo': (f'{stem}_col.dds', albedo_dds(spec.folder, m, side, swap_gb=host.startswith('v603_kyata')))}
     if host == CLIP:
-        out['param_cm0_cm1'] = ('edf6vc_no_colour_change.dds', texfile.solid_dxt1(NO_COLOUR_CHANGE))
+        out.update(clip_textures())
     if m.get('normal'):
         out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal'), side))
     else:
@@ -580,20 +593,20 @@ def see_through_host(game, which: str) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     return md
 
 
-def see_through(md: Mdb, index: int, host: Mdb, m: dict) -> Mdb:
+def see_through(md: Mdb, index: int, m: dict, body: Material | None = None) -> Mdb:
     """The see-through material `index` (built on template(m)'s host) with its opacity parameters: CLIP / a track
     alpha_clip = the cutoff; ALPHA diffuse.w = the factor and the view fall-off held at 1 (FALL_OFF). A CLIP or ALPHA
     one takes v603_body's BODY_PARAMS values, so it lights as the opaque v603_body material would (the hosts' own are
     a character's / a glass's finish)."""
     al = alpha_maps.entry(m.get('alpha'))
-    on = template(m)
+    on = see_through_kind(m) if body is not None else template(m)
     mats = list(md.materials)
     mat = mats[index]
     names = {p.name for p in mat.params}
     want = set()
     if on in (CLIP, ALPHA):
-        body = next(x for x in host.materials if host.name_of(x.name) == BODY)
-        own = {p.name: list(p.value) for p in body.params}
+        _req(body is not None, f"{m['name']}: a see-through body material needs its opaque body's parameters")
+        own = {p.name: list(p.value) for p in body.params}   # type: ignore[union-attr]
         want |= set(BODY_PARAMS)
     if on == ALPHA:
         want |= set(FALL_OFF)
@@ -645,11 +658,11 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
         elif on in (CLIP, ALPHA):
             see_md = see_through_host(game, on)
             md, mi = om.add_material(md, see_md, (CLIP_HOST if on == CLIP else ALPHA_HOST)[2], m['name'], slots)
-            md = see_through(md, mi, host, m)
+            md = see_through(md, mi, m, next(x for x in host.materials if host.name_of(x.name) == BODY))
         else:
             md, mi = om.add_material(md, host, m['template'], m['name'], slots)
             if alpha_maps.entry(m.get('alpha'))['mode'] == alpha_maps.MASK:     # a cut-out track
-                md = see_through(md, mi, host, m)
+                md = see_through(md, mi, m)
         mat_index.append(mi)
         for fn, dds in tex.values():
             if fn not in added:

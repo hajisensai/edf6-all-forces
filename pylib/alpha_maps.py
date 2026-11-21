@@ -65,6 +65,25 @@ def classify(alpha: np.ndarray | None, factor: float = 1.0, declared: str | None
     return {'mode': MASK, 'cutoff': CUTOFF}
 
 
+def texture_alpha(image: bytes | None) -> np.ndarray | None:
+    """The A channel of an image file's bytes (uint8), None when it has none (a JPEG, an RGB PNG) or there is none."""
+    if image is None:
+        return None
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(image)) as im:
+        if im.mode not in ('RGBA', 'LA', 'PA') and not (im.mode == 'P' and 'transparency' in im.info):
+            return None
+        return np.asarray(im.convert('RGBA'))[..., 3].copy()
+
+
+def of_gltf(material) -> dict | None:  # noqa: ANN001 - gltf.Material
+    """A glTF material's 'alpha' entry: its alphaMode, alphaCutoff, base colour factor's A and base colour texture's A
+    (classify: Sketchfab's BLEND on a black-and-white map is a cut-out)."""
+    return classify(texture_alpha(material.texture), float(material.base[3]), material.alpha_mode,
+                    material.alpha_cutoff)
+
+
 def entry(spec: dict | None) -> dict:
     """A material's model.json 'alpha' checked, with its defaults: {'mode', 'cutoff', 'factor', 'map'} (map None:
     the albedo's own A). None / left out: opaque."""
