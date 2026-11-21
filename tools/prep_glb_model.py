@@ -255,6 +255,32 @@ def _surface(mat: gltf.Material, out_dir: str, name: str) -> dict[str, str]:
     return out
 
 
+def _emissive(mat: gltf.Material, out_dir: str, name: str, albedo: str) -> dict:
+    """A glowing material's model.json keys (none for one that does not glow): the light template (wt_tracked LIGHT:
+    snd_BRDF_Common_Light_NoOcc, whose glow is mask x albedo x its light colour), its mask (textures/<name>_emissive.png,
+    the whole material: glTF's emissiveFactor is uniform) and 'light', its glow per unit of albedo: the factor (times
+    KHR_materials_emissive_strength, gltf.read) over the albedo's linear mean, channel by channel. A glow on a channel
+    the albedo has none of cannot be drawn so, nor an emissiveTexture (its colour need not be the albedo's): both
+    refused, no source has them (docs/xmorph-redo-1121.md)."""
+    from PIL import Image
+    if not any(c > 0.0 for c in mat.emissive):
+        return {}
+    if mat.emissive_texture is not None:
+        raise ValueError(f'material {mat.name}: an emissiveTexture is not read (the light shader glows in the albedo\'s '
+                         'colour, a texture\'s own colours are not that)')
+    with Image.open(os.path.join(out_dir, albedo)) as im:
+        mean = (np.asarray(im.convert('RGB'), dtype=np.float64) / 255.0) ** 2.2   # _plain's gamma, undone
+    a = mean.reshape(-1, 3).mean(0)
+    light = []
+    for c, e in enumerate(mat.emissive):
+        if e > 0.0 and a[c] <= 1e-3:
+            raise ValueError(f'material {mat.name}: glows on channel {c} ({e}) where its albedo has none')
+        light.append(round(e / a[c], 4) if e > 0.0 else 0.0)
+    rel = f'textures/{name}_emissive.png'
+    Image.new('L', (4, 4), 255).save(os.path.join(out_dir, rel))
+    return {'template': 'light', 'emissive': rel, 'light': light}
+
+
 def _plain(mat: gltf.Material, out_dir: str, name: str) -> str:
     """A material with no texture: its base colour as a 4 x 4 image."""
     from PIL import Image
@@ -452,6 +478,7 @@ def prepare(m: Model, src: str, out: str) -> dict:
                 if normal:
                     materials[-1]['normal'] = normal
                 materials[-1].update(_surface(mat, out, name))
+                materials[-1].update(_emissive(mat, out, name, albedo))
             tri = scene.triangles[sel]
             idx, inv = np.unique(tri, return_inverse=True)
             if N is not None and np.isfinite(N[idx]).all() and np.any(N[idx]):

@@ -36,10 +36,16 @@
   },
   {
    "name": "edf6vc_laser_4",
-   "template": "v603_body",
+   "template": "light",
    "albedo": "textures/laser_4.png",
    "source": "phong4",
-   "roughness_metal": "textures/laser_4_rm.png"
+   "roughness_metal": "textures/laser_4_rm.png",
+   "emissive": "textures/laser_4_emissive.png",
+   "light": [
+    10.0,
+    0.0,
+    0.0
+   ]
   }
  ],
  "parts": [

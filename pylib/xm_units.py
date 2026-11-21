@@ -75,6 +75,11 @@ SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人
 # tank 12.5 m, the Apocalypse's class. Every model folder is made at this size (tools/prep_xmorph.py); the rows' `eye`
 # and `camera` stay in the game's metres, read through eye() / camera().
 SCALE = 0.7
+# The aircraft (families heli and jet: tools/prep_xmorph.py prepare_air) at the game's own size: their branch's choice
+# (docs/xmorph-port.md 「直升机」「固定翼」: 比例 1.0 照原作, the fighter already a third of an EDF one), the folders the
+# model pack ships and the rows' heli eyes and sizes were measured on. Unifying them with SCALE is the maintainer's call
+# (docs/xmorph-redo-1121.md).
+AIR_SCALE = 1.0
 # Every X-Morph map is resampled (Lanczos, a whole factor) to this on its shorter side before block compression, every
 # family alike (wt_tracked min_side: the ground units' folders say so in model.json; pylib/xm_air_model.py and
 # pylib/xm_rig.py, the aircraft's and the walkers', read it here). The packs hold the units' maps at 256..512 (the

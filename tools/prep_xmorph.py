@@ -62,7 +62,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path[:0] = [HERE, os.path.join(ROOT, 'pylib')]
 
-import mesh_normals              # noqa: E402
 import obj_model as om          # noqa: E402
 import prep_wt_tracked as prep  # noqa: E402
 import xm_model as xm           # noqa: E402
@@ -725,6 +724,30 @@ def finish_materials(materials: list[dict], staging: str, out: str) -> None:
         material_maps(m, stem, out, imgs)
 
 
+def unit_material(packs: xp.Packs, source: str, stem: str, out: str, entry: dict) -> dict:
+    """`entry` (a folder material: its name, its template where the family's builder takes one) given its source
+    material's maps as textures/<stem>.png (the diffuse map: 'albedo'), textures/<stem>_normal.png (DirectX green
+    already, xm_model.normal_rgb: 'normal', where the material script declares one) and its specular / emissive maps
+    (material_maps): every family's material, as the tracked ones' (finish_materials)."""
+    imgs = xm.texture_images(packs, source)
+    entry['albedo'] = f'textures/{stem}.png'
+    imgs['diffuse'].save(os.path.join(out, entry['albedo']), optimize=True)
+    if 'normal' in imgs:
+        entry['normal'] = f'textures/{stem}_normal.png'
+        imgs['normal'].save(os.path.join(out, entry['normal']), optimize=True)
+    material_maps(entry, stem, out, imgs)
+    return entry
+
+
+def part_arrays(um: xm.UnitModel, P: np.ndarray, sel: np.ndarray) -> tuple[np.ndarray, ...]:
+    """(positions, normals, uvs, triangles) of the triangles `sel` of `um` (P: its positions as placed), one vertex a
+    mesh vertex they use, with the mesh's own normals (its normal maps were baked on them, as the tracked folders'
+    prep_wt_tracked.Source.normals; xm_model.load refuses a submesh without)."""
+    _req(um.normals is not None, f'{um.entity}: no mesh normals')
+    idx, inv = np.unique(um.triangles[sel], return_inverse=True)
+    return P[idx], um.normals[idx], um.uvs[idx], inv.reshape(-1, 3)
+
+
 def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     out = os.path.join(out_root, xm_units.folder(unit.key))
     with tempfile.TemporaryDirectory(prefix='prep_xmorph_') as staging:
@@ -781,7 +804,6 @@ def prepare_car(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
             gear[f'{name}_{side}'] = {'centre': [float(c) * SCALE for c in wheel['centre']],
                                       'radius': wheel['radius'] * SCALE, 'half': wheel['half'] * SCALE}
     P = um.positions.astype(np.float64) * SCALE
-    normals, normal_of = mesh_normals.auto_smooth(P, um.triangles)
     out = os.path.join(out_root, xm_units.folder(unit.key))
     if os.path.isdir(out):
         shutil.rmtree(out)
@@ -789,26 +811,19 @@ def prepare_car(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     materials = []
     for m in um.materials:
         stem = m.split('/')[-1]
-        imgs = xm.texture_images(packs, m)
-        entry = {'name': f'xm_{stem}', 'albedo': f'textures/{stem}.png'}
-        imgs['diffuse'].save(os.path.join(out, entry['albedo']), optimize=True)
-        if 'normal' in imgs:
-            entry['normal'] = f'textures/{stem}_normal.png'
-            imgs['normal'].save(os.path.join(out, entry['normal']), optimize=True)
-        materials.append(entry)
+        materials.append(unit_material(packs, m, stem, out, {'name': f'xm_{stem}'}))
     arrays: dict[str, np.ndarray] = {}
     parts = []
     for b, mat in sorted({(b, int(m)) for b, m in zip(tri_bone, um.tri_material)}):
         sel = np.flatnonzero((tri_bone == b) & (um.tri_material == mat))
-        corner = np.stack((um.triangles[sel], normal_of[sel]), axis=-1).reshape(-1, 2)
-        uniq, inverse = np.unique(corner, axis=0, return_inverse=True)
+        pos, nrm, uv, tri = part_arrays(um, P, sel)
         k = len(parts)
-        arrays[f'p{k}_pos'] = P[uniq[:, 0]].astype(np.float32)
-        arrays[f'p{k}_nrm'] = normals[uniq[:, 1]].astype(np.float32)
-        arrays[f'p{k}_uv'] = um.uvs[uniq[:, 0]].astype(np.float32)
-        arrays[f'p{k}_tri'] = inverse.reshape(-1, 3).astype(np.uint32)
+        arrays[f'p{k}_pos'] = pos.astype(np.float32)
+        arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
+        arrays[f'p{k}_uv'] = uv.astype(np.float32)
+        arrays[f'p{k}_tri'] = tri.astype(np.uint32)
         parts.append({'name': f'{b}.{materials[mat]["name"]}', 'bone': b, 'material': mat, 'triangles': int(len(sel)),
-                      'vertices': int(len(uniq))})
+                      'vertices': int(len(pos))})
     np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
     title = f'{unit.title_en or unit.key} (X-Morph: Defense)'
     info = {'format': CAR_FORMAT, 'kind': unit.key, 'title': title,
@@ -847,34 +862,21 @@ def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> 
     materials, arrays, parts = [], {}, []
     for mi, m in enumerate(um.materials):
         stem = f'{unit.key}_{mi}'
-        imgs = xm.texture_images(packs, m)
-        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
-        materials.append({'name': f'edf6vc_{stem}', 'template': 'v603_body', 'albedo': f'textures/{stem}.png',
-                          'source': m})
-        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb), as the folders keep it
-            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
-            materials[-1]['normal'] = f'textures/{stem}_normal.png'
-        material_maps(materials[-1], stem, out, imgs)
+        materials.append(unit_material(packs, m, stem, out, {'name': f'edf6vc_{stem}', 'template': 'v603_body',
+                                                              'source': m}))
     for rl in glb.ROLES:
         for mi in range(len(um.materials)):
             sel = np.flatnonzero((role == rl) & (um.tri_material == mi))
             if not len(sel):
                 continue
-            tri = um.triangles[sel]
-            idx, inv = np.unique(tri, return_inverse=True)
-            pos, t = P[idx], inv.reshape(-1, 3)
-            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
-            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
-            for c in range(3):
-                np.add.at(nrm, t[:, c], fn)
-            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            pos, nrm, uv, t = part_arrays(um, P, sel)
             k = len(parts)
             arrays[f'p{k}_pos'] = pos.astype(np.float32)
             arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
-            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin, as the folders keep them
+            arrays[f'p{k}_uv'] = uv.astype(np.float32)   # Ogre's top-left origin, as the folders keep them
             arrays[f'p{k}_tri'] = t.astype(np.uint32)
             parts.append({'name': f'{rl}.{materials[mi]["name"]}', 'role': rl, 'material': mi,
-                          'triangles': int(len(sel)), 'vertices': int(len(idx))})
+                          'triangles': int(len(sel)), 'vertices': int(len(pos))})
     _req({p['role'] for p in parts} >= {'base', 'turret', 'gun'}, f'{unit.key}: a role without mesh {parts}')
     yaw, pitch = um.bind[r['yaw']] * SCALE, um.bind[r['pitch']] * SCALE
     mouths = {s: [float(c) for c in r['mouths'][s] * SCALE] for s in ('left', 'right')}
@@ -903,16 +905,16 @@ MIRROR = 0.3         # m: a rotor's centre this close to another's mirrored in x
 MAIN, TAIL = 'rotor', 'tailRotor'   # the V506's spun bones (its CAS: rotor about its local y, tailRotor about its x)
 
 
-def rotor_groups(um: xm.UnitModel) -> list[dict]:
+def rotor_groups(um: xm.UnitModel, scale: float) -> list[dict]:
     """The airframe's rotors: every rotor bone with mesh and the bones under it (a hub's blades), coaxial ones merged;
-    each {'bones', 'centre' (EDF), 'axis' (unit, EDF: the disc's normal, the least spread of its vertices), 'radius'},
-    in skeleton order."""
+    each {'bones', 'centre' (EDF, metres at `scale`), 'axis' (unit, EDF: the disc's normal, the least spread of its
+    vertices), 'radius'}, in skeleton order."""
     have = set(um.tri_bone)
     tops = [b for b in um.bones if ROTOR.search(b) and not any(ROTOR.search(a) for a in _ancestors(um, b))]
     groups = []
     for b in tops:
         bones = [x for x in um.subtree(b) if x in have]
-        p = um.bone_points(bones) * SCALE
+        p = um.bone_points(bones) * scale
         if len(p) < 3:
             continue
         c = p.mean(0)
@@ -972,21 +974,37 @@ def _frame(axis, slot: int) -> list[list[float]]:  # noqa: ANN001
     return rows.tolist()
 
 
+def rotor_blur(packs: xp.Packs, source: str, stem: str, out: str, entry: dict) -> dict:
+    """`entry` (a see-through material: a heli rotor's blur, alpha blended in X-Morph, base/unlit_transparent_skinned)
+    given its animated texture's frames as textures/<stem>_frame<k>.png (RGBA: the alpha is the blur's coverage,
+    xm_model.anim_frames) under 'transparent' {'blend': 'alpha', 'frames': [...], 'frame_time': s}: the folder keeps
+    its mesh and frames for a see-through material; nothing draws it yet (xm_air_model's materials are opaque)."""
+    frames, period = xm.anim_frames(packs, source)
+    rels = []
+    for k, im in enumerate(frames):
+        rels.append(f'textures/{stem}_frame{k}.png')
+        im.save(os.path.join(out, rels[-1]), optimize=True)
+    entry['transparent'] = {'blend': 'alpha', 'frames': rels, 'frame_time': period}
+    return entry
+
+
 def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     """An aircraft (a heli or a jet) into the folder pylib/xm_air_model.py builds its V506 model from: one part a bone
-    and material (xm_hull: the airframe; rotor / tailRotor: the two rotors the V506 animation spins, spun_rotors), each
-    spun rotor's centre and frame, every attachment's point (the weapons' muzzles, the exits, the engines), the
-    blueprint's weapons and the textures (the diffuse map, the normal map where the material names one)."""
+    and material (xm_hull: the airframe; rotor / tailRotor: the two rotors the V506 animation spins, spun_rotors), with
+    the mesh's own normals (part_arrays), each spun rotor's centre and frame, every attachment's point (the weapons'
+    muzzles, the exits, the engines), the blueprint's weapons and the materials' maps (unit_material: the diffuse, normal,
+    specular and emissive maps; a rotor blur's frames, rotor_blur)."""
     um = xm.load(packs, unit.entity)
     # stood on its lowest point (the game's origin is on the ground where it makes a vehicle: vcobjects.on_origin); the
     # small heli hangs 0.72 m under X-Morph's ground
-    lift = -float(um.positions[np.unique(um.triangles)][:, 1].min()) * SCALE
-    um.positions = um.positions + np.array([0.0, lift / SCALE, 0.0])
+    scale = xm_units.AIR_SCALE
+    lift = -float(um.positions[np.unique(um.triangles)][:, 1].min()) * scale
+    um.positions = um.positions + np.array([0.0, lift / scale, 0.0])
     out = os.path.join(out_root, xm_units.folder(unit.key))
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(os.path.join(out, 'textures'))
-    groups = rotor_groups(um) if unit.family == 'heli' else []
+    groups = rotor_groups(um, scale) if unit.family == 'heli' else []
     main, tail = spun_rotors(groups)
     bone_of = {b: 'xm_hull' for b in um.bones}
     rotors = {}
@@ -999,51 +1017,43 @@ def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
                         'radius': round(g['radius'], 3), 'from': g['bones']}
     still = [{'from': g['bones'], 'centre': [round(float(c), 3) for c in g['centre']], 'radius': round(g['radius'], 3)}
              for g in groups if g is not main and g is not tail]
-    P = um.positions * SCALE
-    materials, arrays, parts, dropped = [], {}, [], []
+    P = um.positions * scale
+    materials, arrays, parts, see_through = [], {}, [], []
     for mi, m in enumerate(um.materials):
         stem = f'{unit.key}_{mi}'
         if 'transparent' in (xm.material_node(packs, m).get('type') or ''):
-            # a rotor's blur (a quad or two in an animated see-through texture): EDF's hull material is opaque
-            dropped.append(m)
-            materials.append({'name': f'xm_{mi}', 'source': m, 'dropped': True})
+            # a rotor's blur (a quad or two in an animated see-through texture, base/unlit_transparent_skinned): its
+            # mesh and frames are kept (rotor_blur) for a see-through material; xm_air_model does not draw it (its
+            # materials are opaque)
+            see_through.append(m)
+            materials.append(rotor_blur(packs, m, stem, out, {'name': f'xm_{mi}', 'source': m}))
             continue
-        imgs = xm.texture_images(packs, m)
-        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
-        materials.append({'name': f'xm_{mi}', 'albedo': f'textures/{stem}.png', 'source': m})
-        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb)
-            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
-            materials[-1]['normal'] = f'textures/{stem}_normal.png'
+        materials.append(unit_material(packs, m, stem, out, {'name': f'xm_{mi}', 'source': m}))
     tri_bone = np.asarray([bone_of[b] for b in um.tri_bone], dtype=object)
     for bone in ('xm_hull', MAIN, TAIL):
         for mi in range(len(um.materials)):
             sel = np.flatnonzero((tri_bone == bone) & (um.tri_material == mi))
-            if not len(sel) or materials[mi].get('dropped'):
+            if not len(sel):
                 continue
-            tri = um.triangles[sel]
-            idx, inv = np.unique(tri, return_inverse=True)
-            pos, t = P[idx], inv.reshape(-1, 3)
-            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
-            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
-            for c in range(3):
-                np.add.at(nrm, t[:, c], fn)
-            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            pos, nrm, uv, t = part_arrays(um, P, sel)
             k = len(parts)
             arrays[f'p{k}_pos'] = pos.astype(np.float32)
             arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
-            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin
+            arrays[f'p{k}_uv'] = uv.astype(np.float32)   # Ogre's top-left origin
             arrays[f'p{k}_tri'] = t.astype(np.uint32)
-            parts.append({'bone': bone, 'material': mi, 'triangles': int(len(sel)), 'vertices': int(len(idx))})
-    _req(any(p['bone'] == 'xm_hull' for p in parts), f'{unit.key}: no airframe mesh')
-    points = {a: [round(float(c), 4) for c in um.point(a) * SCALE + np.array([0.0, lift, 0.0])] for a in sorted(um.attachments)}
+            parts.append({'bone': bone, 'material': mi, 'triangles': int(len(sel)), 'vertices': int(len(pos))})
+    _req(any(p['bone'] == 'xm_hull' and not materials[p['material']].get('transparent') for p in parts),
+         f'{unit.key}: no airframe mesh')
+    points = {a: [round(float(c), 4) for c in um.point(a) * scale + np.array([0.0, lift, 0.0])] for a in sorted(um.attachments)}
     weapons = [{'name': w.name, 'turret': w.turret, 'muzzles': [m for m, _r in w.muzzles]} for w in um.weapons()]
     np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
     used = np.unique(um.triangles)
     lo, hi = P[used].min(0), P[used].max(0)
     info = {'format': 1, 'kind': unit.key, 'family': unit.family, 'title': f'{unit.title_en or unit.key} (X-Morph: Defense)',
-            'prepared_from': um.mesh_path, 'scale': SCALE, 'lift': round(lift, 4), 'materials': materials, 'parts': parts, 'rotors': rotors,
-            'still_rotors': still, 'dropped_materials': dropped, 'attachments': points, 'weapons': weapons,
-            'triangles': int(sum(p['triangles'] for p in parts)), 'bounds': [lo.tolist(), hi.tolist()],
+            'prepared_from': um.mesh_path, 'scale': scale, 'lift': round(lift, 4), 'materials': materials, 'parts': parts, 'rotors': rotors,
+            'still_rotors': still, 'transparent_materials': see_through, 'attachments': points, 'weapons': weapons,
+            'triangles': int(sum(p['triangles'] for p in parts if not materials[p['material']].get('transparent'))),
+            'bounds': [lo.tolist(), hi.tolist()], 'normals': 'source',
             'size': (hi - lo).tolist(), 'xmorph': {'entity': unit.entity, 'bones': {b: bone_of[b] for b in um.bones}}}
     with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:
         json.dump(info, f, indent=1)
@@ -1072,32 +1082,20 @@ def prepare_walker(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     materials, arrays, parts = [], {}, []
     for mi, m in enumerate(um.materials):
         stem = f'{unit.key}_{mi}'
-        imgs = xm.texture_images(packs, m)
-        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
-        materials.append({'name': f'edf6vc_{stem}', 'albedo': f'textures/{stem}.png', 'source': m})
-        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb)
-            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
-            materials[-1]['normal'] = f'textures/{stem}_normal.png'
+        materials.append(unit_material(packs, m, stem, out, {'name': f'edf6vc_{stem}', 'source': m}))
     for b in um.bones:
         for mi in range(len(um.materials)):
             sel = np.flatnonzero((um.tri_bone == b) & (um.tri_material == mi))
             if not len(sel):
                 continue
-            tri = um.triangles[sel]
-            idx, inv = np.unique(tri, return_inverse=True)
-            pos, t = P[idx], inv.reshape(-1, 3)
-            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
-            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
-            for c in range(3):
-                np.add.at(nrm, t[:, c], fn)
-            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            pos, nrm, uv, t = part_arrays(um, P, sel)
             k = len(parts)
             arrays[f'p{k}_pos'] = pos.astype(np.float32)
             arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
-            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin, as the folders keep them
+            arrays[f'p{k}_uv'] = uv.astype(np.float32)   # Ogre's top-left origin, as the folders keep them
             arrays[f'p{k}_tri'] = t.astype(np.uint32)
             parts.append({'name': f'{b}.{materials[mi]["name"]}', 'bone': b, 'material': mi,
-                          'triangles': int(len(sel)), 'vertices': int(len(idx))})
+                          'triangles': int(len(sel)), 'vertices': int(len(pos))})
     _req(bool(parts), f'{unit.key}: no mesh')
     np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
     used = np.unique(um.triangles)
@@ -1124,8 +1122,10 @@ PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacemen
 
 
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:
-    # the family's rows that name a `like` (their EDF counterpart: a row that has none is not ported yet)
-    units = [u for u in xm_units.UNITS.values() if u.family == family and u.like]
+    # the family's rows that name a `like` (a V603 unit's EDF counterpart: one that has none is not ported yet); the
+    # other families' rows need none (xm_units' registry check), their ported ones
+    units = [u for u in xm_units.UNITS.values() if u.family == family and
+             (u.like if u.family in xm_units.V603 else u.status == 'ported')]
     if not names:
         return units
     want = {n if n.startswith('xm_') else 'xm_' + n for n in names}

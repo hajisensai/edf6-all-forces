@@ -133,20 +133,24 @@ def model(game, kind: str):  # noqa: ANN001, ANN201 - (MRAB bytes, Mdb)
     spec = load(kind)
     md = skeleton(host, spec)
     rab.files = [f for f in rab.files if f.name.lower() == HOST_MDB]
-    mat_index = []
+    mat_index, layouts = [], []
     added: set[str] = set()
     for m in spec.info['materials']:
-        tex = wt.material_textures(spec, {**m, 'template': TEMPLATE})
-        md, mi = om.add_material(md, host, TEMPLATE, m['name'], {k: fn for k, (fn, _d) in tex.items()})
+        # the V512 body material or, lit (its emissive map: tools/prep_xmorph.py material_maps), Retro-Balam's light
+        # material with the V512 body's colour parameters (wt_tracked.add_surface_material)
+        m = {**m, 'template': m.get('template', TEMPLATE)}
+        tex = wt.material_textures(spec, m)
+        md, mi, layout = wt.add_surface_material(game, md, host, TEMPLATE, m, {k: fn for k, (fn, _d) in tex.items()})
         mat_index.append(mi)
+        layouts.append(layout)
         for fn, dds in tex.values():
             if fn not in added:
                 om.add_texture(rab, fn, dds)
                 added.add(fn)
-    template = next(me for me in host.objects[0].meshes if host.name_of(host.materials[me.material].name) == TEMPLATE)
     packed = []
     for k, p in enumerate(spec.info['parts']):
         pos, nrm, uv, tris = spec.part(k)
+        template = layouts[p['material']]
         rows, kept = wt.part_rows(template, pos, nrm, uv, tris.astype(np.int64), md.bone_index(p['bone']))
         packed.append((template, mat_index[p['material']], rows, kept))
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(wt.pack(packed))]

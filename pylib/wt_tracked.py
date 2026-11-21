@@ -25,8 +25,12 @@ glTF sources', docs/model-quality-1110.md):
     'roughness_metal'  a map whose R and G are the parameter map's roughness and metalness as they are (a glTF
                  material's, pylib/pbr_maps.py), instead of PLAIN_RMO
     'emissive'   a grey light mask, with the template LIGHT: Retro-Balam's light material (the Dreadnought's lit
-                 hulls': dreadnought_model.LIGHT_HOST), the mask's texels glowing in their albedo's colour ('light':
-                 its light_color strength), the v603_body template's colour parameters kept
+                 hulls': dreadnought_model.LIGHT_HOST, shader snd_BRDF_Common_Light_NoOcc), the mask's texels glowing
+                 in their albedo's colour, the body template's colour parameters kept (add_surface_material); with a
+                 'specular' or a 'roughness_metal' map for its R and G
+    'light'      a light material's glow per unit of albedo (a number, or [r, g, b]; LIGHT_STRENGTH without): the
+                 shader writes mask x albedo x diffuse x light_color to the emissive target, so light_color is this
+                 over the template's diffuse (_lit; docs/xmorph-redo-1121.md)
     'min_side'   its maps smaller than this are resampled (Lanczos) to it before block compression: DXT1 / BC5 4x4
                  blocks on a 256 map are coarse against its detail, on the resampled one a quarter texel
 """
@@ -69,8 +73,8 @@ TRACK_RMX = (189, 0, 0)   # the V603 track parameter map's mean
 # maps' mean (PLAIN_RMO) is about a mid grey's.
 SPECULAR_RM = ((215, 95), (20, 170))   # (roughness at 0, at 255), (metalness at 0, at 255)
 LIGHT = 'light'           # model.json template: Retro-Balam's light material (dreadnought_model.LIGHT_HOST)
-LIGHT_STRENGTH = 2.0      # its light_color (stock lights 1..30, the Dreadnought's 4: lamps; these are markings)
-BODY = 'v603_body'        # the template whose colour parameters a light material keeps
+LIGHT_STRENGTH = 2.0      # its glow per unit of albedo, an estimate (stock lights 0.43..30; these are markings)
+BODY = 'v603_body'        # the V603 template whose colour parameters a light material keeps
 NO_OCCLUSION = 200
 HALF_TOL = 4e-3           # m: stored positions are half floats (2^-9 m steps at 2..4 m)
 
@@ -361,9 +365,10 @@ def _specular_dds(specular: str, blue: str | None, blue_default: int, min_side: 
     return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
-def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int) -> bytes:
-    """A parameter map from a roughness / metalness map (its R and G as they are: pylib/pbr_maps.py) and the occlusion
-    in B (NO_OCCLUSION without one), at the larger of the two's sizes (min_side at least)."""
+def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int, blue_default: int = NO_OCCLUSION) -> bytes:
+    """A parameter map from a roughness / metalness map (its R and G as they are: pylib/pbr_maps.py) and a grey map in
+    B (the occlusion, the light mask; blue_default without one), at the larger of the two's
+    sizes (min_side at least)."""
     import texfile_accel
     from PIL import Image
     rg = _pil(rm, min_side, 'RGB')
@@ -371,7 +376,7 @@ def _roughness_metal_dds(rm: str, occlusion: str | None, min_side: int) -> bytes
     size = max((rg.size, occ.size if occ else (0, 0)), key=lambda wh: wh[0] * wh[1])
     rgba = np.full((size[1], size[0], 4), 255, dtype=np.uint8)
     rgba[..., :2] = np.asarray(rg.resize(size, Image.LANCZOS))[..., :2]
-    rgba[..., 2] = np.asarray(occ.resize(size, Image.LANCZOS)) if occ else NO_OCCLUSION
+    rgba[..., 2] = np.asarray(occ.resize(size, Image.LANCZOS)) if occ else blue_default
     return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
@@ -402,8 +407,12 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     else:
         out['normal'] = ('edf6vc_flat_nor.dds', texfile.solid_bc5())
     if m['template'] == LIGHT:
-        _req(bool(m.get('specular')) and bool(m.get('emissive')), f'{stem}: a light material without its maps')
-        out['param_r_m_light_hr'] = (f'{stem}_rml.dds', _specular_dds(path('specular'), path('emissive'), 0, side))
+        # snd_BRDF_Common_Light_NoOcc reads B as the light mask (0 unlit), R / G as the body's roughness / metalness
+        _req(bool(m.get('emissive')) and bool(m.get('specular') or m.get('roughness_metal')),
+             f'{stem}: a light material without its maps')
+        rml = (_specular_dds(path('specular'), path('emissive'), 0, side) if m.get('specular') else
+               _roughness_metal_dds(path('roughness_metal'), path('emissive'), side, 0))
+        out['param_r_m_light_hr'] = (f'{stem}_rml.dds', rml)
     elif m['template'].startswith('v603_kyata'):
         # the native track material: its own parameter slots (the V603 track map's mean, the occlusion apart)
         _req(not (m.get('specular') or m.get('roughness_metal')), f'{stem}: a track material with surface maps')
@@ -481,19 +490,51 @@ def ejection_local(game, kind: str) -> dict:  # noqa: ANN001
     return {side: a.muzzles[side]['local'] for side in spec.info['ejections']}
 
 
-def _lit(md: Mdb, index: int, host: Mdb, strength: float) -> Mdb:
-    """The light material `index` with the body template's colour parameters (BODY's diffuse and specular colour:
-    the light template's are Retro-Balam's brighter, glossier finish) and its light_color at `strength`."""
-    body = next(m for m in host.materials if host.name_of(m.name) == BODY)
-    own = {p.name: p for p in body.params}
+def light_rgb(light) -> tuple[float, float, float]:  # noqa: ANN001 - a number, [r, g, b] or None
+    """A material's 'light' (its glow per unit of albedo) as (r, g, b): LIGHT_STRENGTH where it says none."""
+    v = LIGHT_STRENGTH if light is None else light
+    rgb = (float(v),) * 3 if isinstance(v, (int, float)) else tuple(float(c) for c in v)
+    _req(len(rgb) == 3 and all(c >= 0.0 for c in rgb) and any(rgb), f'light {light!r}: not a glow')
+    return rgb   # type: ignore[return-value]
+
+
+def _lit(md: Mdb, index: int, host: Mdb, light, body: str = BODY) -> Mdb:  # noqa: ANN001 - light: light_rgb's
+    """The light material `index` with `host`'s template `body`'s colour parameters (its diffuse and specular colour:
+    the light template's are Retro-Balam's brighter, glossier finish) and the light_color that makes its glow `light`
+    per unit of albedo: snd_BRDF_Common_Light_NoOcc writes mask x albedo x diffuse x light_color to its emissive target
+    (o6; DX11.cpk, docs/xmorph-redo-1121.md), so light_color is the glow over the diffuse it keeps."""
+    src = next((m for m in host.materials if host.name_of(m.name) == body), None)
+    _req(src is not None, f'the host has no template material {body}')
+    own = {p.name: p for p in src.params}
+    _req('diffuse' in own and 'specular_color' in own, f'{body}: no diffuse / specular_color')
+    diffuse = own['diffuse'].value[:3]
+    _req(all(d > 0.0 for d in diffuse), f'{body}: diffuse {diffuse}')
+    colour = [c / d for c, d in zip(light_rgb(light), diffuse)]
     mats = list(md.materials)
     m = mats[index]
     _req(any(p.name == 'light_color' for p in m.params), 'the light template has no light_color')
-    params = [replace(p, value=[strength] * 3 + [0.0]) if p.name == 'light_color' else
+    params = [replace(p, value=colour + [0.0]) if p.name == 'light_color' else
               replace(p, value=list(own[p.name].value)) if p.name in ('diffuse', 'specular_color') else p
               for p in m.params]
     mats[index] = replace(m, params=params)
     return replace(md, materials=mats)
+
+
+def add_surface_material(game, md: Mdb, host: Mdb, body: str, m: dict,  # noqa: ANN001 - rootcpk.Game
+                         slots: dict[str, str]) -> tuple[Mdb, int, Mesh]:
+    """`md` with the model.json material `m` (its textures: material_textures' `slots`) and its index, and the stock
+    mesh whose vertex layout its meshes take: a light material (template LIGHT) on Retro-Balam's light material
+    (dreadnought_model.LIGHT_HOST, _lit: `host`'s `body` colour parameters), any other on `host`'s material `body`."""
+    if m.get('template') == LIGHT:
+        import dreadnought_model as dm
+        light_md, light_mesh = dm._host(game, dm.LIGHT_HOST)
+        md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
+        return _lit(md, mi, host, m.get('light'), body), mi, light_mesh
+    md, mi = om.add_material(md, host, body, m['name'], slots)
+    mesh = next((me for o in host.objects for me in o.meshes if host.name_of(host.materials[me.material].name) == body),
+                None)
+    _req(mesh is not None, f'the host has no mesh in material {body}')
+    return md, mi, mesh
 
 
 def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001 - rootcpk.Game
@@ -515,14 +556,10 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
     for m in spec.info['materials']:
         tex = {kind_: (same.setdefault(dds, fn), dds) for kind_, (fn, dds) in material_textures(spec, m).items()}
         slots = {kind_: fn for kind_, (fn, _d) in tex.items()}
-        if m['template'] == LIGHT:
-            import dreadnought_model as dm
-            light_md, light_mesh = dm._host(game, dm.LIGHT_HOST)
-            templates[LIGHT] = om.position_layout(light_mesh, extent)
-            md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
-            md = _lit(md, mi, host, float(m.get('light', LIGHT_STRENGTH)))
-        else:
-            md, mi = om.add_material(md, host, m['template'], m['name'], slots)
+        lit = m['template'] == LIGHT
+        md, mi, mesh = add_surface_material(game, md, host, BODY if lit else m['template'], m, slots)
+        if lit:
+            templates[LIGHT] = om.position_layout(mesh, extent)
         mat_index.append(mi)
         for fn, dds in tex.values():
             if fn not in added:
