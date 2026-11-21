@@ -706,7 +706,7 @@ target_link_libraries(infantry_scope_pip_test PRIVATE edf6common d3d11 d3dcompil
 target_compile_options(infantry_scope_pip_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME infantry_scope_pip COMMAND infantry_scope_pip_test)
 set_tests_properties(infantry_scope_pip PROPERTIES TIMEOUT 90)
-# The picture-in-picture scope's lens view (src/scope_lens.cpp: viewport 3's camera, the recording's held tail and the
+# The picture-in-picture scope's lens view (src/scope_lens.cpp: viewport 3's camera, viewport 0's tail in place and the
 # lens command) on a stand-in of the engine's System and recording (its native anchors: scope_lens_native below).
 add_executable(scope_lens_test tests/scope_lens_test.cpp)
 target_link_libraries(scope_lens_test PRIVATE edf6common)

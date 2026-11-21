@@ -249,8 +249,8 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
     unsigned index=0,type=0;
     if(!context || !view || !ViewIndex(view,&index,&type) || type!=0)return;
     if(index==scopepip::kLensViewport) {
-        // The lens view's world (scope_lens.cpp): held for the lens command after it, when the main view's was.
-        if(!compositor.HoldsMain())return;
+        // The lens view's world (scope_lens.cpp): held for the next recording's lens command (right after that
+        // recording's main view's world, before its post stage).
         if(!compositor.CaptureLens(context,scopelens::Side(),ViewYScale(view))) {
             compositor.Release();
             if(!lensSizeLogged.exchange(true,std::memory_order_acq_rel))
@@ -270,8 +270,8 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
         return;
     }
     idleViews=0;
-    // The main view's world colour, held for the lens command (recorded after the lens view's world, before this view's
-    // post stage).
+    // The main view's world colour, held for the lens command (recorded right after it, before this view's post stage;
+    // the lens view it draws was rendered after the last recording's main view).
     if(compositor.CaptureMain(context,ViewYScale(view)))return;
     lensShown.store(false,std::memory_order_release);
     // The surface is not one the pass draws on (multisampled, a split screen's partial viewport, an unknown format) or
@@ -282,7 +282,8 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
 }
 
 void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept {
-    // Render thread, after the lens view's world: the lens drawn into the main view's world colour (both released).
+    // Render thread, after the main view's world: the lens view the last recording rendered drawn into the main view's
+    // world colour (both released).
     float h=0.0f,r=0.0f,lensYScale=0.0f;
     const bool heldMain=compositor.HoldsMain(),heldLens=compositor.HoldsLens();
     if(!context || !compositor.Composite(context,&h,&r,&lensYScale)) {

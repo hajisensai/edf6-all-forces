@@ -1,11 +1,11 @@
 // Real Direct3D11 WARP execution of the picture-in-picture scope's production pass (src/scope_pip_gpu.cpp
-// LensCompositor): the main view's world colour and the lens view's (S x S, docs/scope-pip-re.md §5.4) held at their
-// world ends, then the lens command composites:
+// LensCompositor): the lens view's world colour (S x S, docs/scope-pip-re.md §5.4, rendered after the last recording's
+// main view) and the main view's held at their world ends, then the lens command composites:
 //  - inside the lens every pixel is the lens view's picture spanning the disc (scope_pip.h LensSample, sampled
 //    bilinearly from a linear gradient: exact up to the target's precision);
 //  - outside it nothing is written, the lens view's own target neither; the native bindings (RTV, DSV, viewport, PS,
 //    constant buffer) are as they were;
-//  - unsupported surfaces (multisampled, a second RTV, a partial viewport, a lens view not S x S, no main view held, a
+//  - unsupported surfaces (multisampled, a second RTV, a partial viewport, a lens view not S x S, no lens view held, a
 //    lens no stronger than the frame) change nothing;
 //  - a typeless target with a typed view, a resized lens view, the game's R16G16B16A16_FLOAT and an 8-bit one.
 #include "scope_pip.h"
@@ -202,16 +202,18 @@ float LensYFor(UINT w,UINT h) {
     return pip::YScale(pip::LensViewFov(static_cast<float>(h),pip::LensRadius(static_cast<float>(w),static_cast<float>(h)),kScopeFov));
 }
 
-// One frame: the main view's world end, the lens view's, then the command with the lens view's native state bound.
+// One frame: the lens view's world end (the last recording's), the main view's, then the command with the main view's
+// native state bound (it comes right after the main view's world, before its post stage).
 bool Frame(Fixture& f,LensCompositor& c,const Target& main,const Target& lens,int side,float lensY,
            float* h=nullptr,float* r=nullptr,float* y=nullptr) {
-    Bind(f,main);
-    Check(c.CaptureMain(f.context.Get(),kMainY) && c.HoldsMain(),"the main view's world colour is held");
-    const Native n=Bind(f,lens);
+    Bind(f,lens);
     Check(c.CaptureLens(f.context.Get(),side,lensY) && c.HoldsLens(),"the lens view's world colour is held");
+    const Native n=Bind(f,main);
+    Check(c.CaptureMain(f.context.Get(),kMainY) && c.HoldsMain() && c.HoldsLens(),
+          "the main view's world colour is held, the lens view's kept");
     float mh=0,mr=0,my=0;
     const bool drew=c.Composite(f.context.Get(),&mh,&mr,&my);
-    NativeIntact(f,lens,n);
+    NativeIntact(f,main,n);
     Check(!c.HoldsMain() && !c.HoldsLens(),"the composite releases both");
     if(h)*h=mh;
     if(r)*r=mr;
@@ -266,16 +268,18 @@ int main() {
         Native n=Bind(f,t);
         const Pixels before=Read(f,t);
         // A frame the stock zoom rendered (the lens no stronger than it): no lens.
-        Bind(f,t);Check(c.CaptureMain(f.context.Get(),pip::YScale(kScopeFov)),"a stock-zoomed main view is held");
-        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"its lens view too");
-        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr) && !c.HoldsMain(),"a lens no stronger than the frame: none, both released");
+        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"a lens view is held");
+        Bind(f,t);Check(c.CaptureMain(f.context.Get(),pip::YScale(kScopeFov)),"a stock-zoomed main view too");
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr) && !c.HoldsMain() && !c.HoldsLens(),"a lens no stronger than the frame: none, both released");
         Check(Same(before,Read(f,t)),"nothing written over a stock-zoomed frame");
-        Bind(f,lens);
-        Check(!c.CaptureLens(f.context.Get(),side,LensYFor(64,64)) && !c.HoldsLens(),"a lens view with no main view held is not held");
+        Bind(f,t);Check(c.CaptureMain(f.context.Get(),kMainY),"a main view with no lens view held");
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr) && !c.HoldsMain(),"...draws nothing (the lens view not rendered last recording)");
+        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"held");
         Bind(f,t);
-        Check(!c.CaptureMain(f.context.Get(),NAN) && !c.HoldsMain(),"an unusable projection: nothing held");
+        Check(!c.CaptureMain(f.context.Get(),NAN) && !c.HoldsMain() && c.HoldsLens(),"an unusable projection: no main view held (the lens view kept)");
+        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"held");
+        Bind(f,odd);Check(!c.CaptureLens(f.context.Get(),side,LensYFor(64,64)) && !c.HoldsLens(),"a lens view not S x S is not held (the older one dropped)");
         Bind(f,t);Check(c.CaptureMain(f.context.Get(),kMainY),"held");
-        Bind(f,odd);Check(!c.CaptureLens(f.context.Get(),side,LensYFor(64,64)),"a lens view not S x S is not held");
         Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr),"...and nothing is drawn");
         c.Release();
         Check(!c.HoldsMain() && !c.HoldsLens(),"Release drops what was held");

@@ -978,7 +978,7 @@ int main() {
         selected=&states[0];
     }
     {
-        // 2026-11-10 (test site #32): a stock action hides the weapons (0x696150: weapon +0x78C); the first person
+        // 2026-11-10 (test site #32): a stock action hides the weapons (0x696150: weapon +0x78C = 0); the first person
         // neither holds nor draws them and shows the arms as the action poses them (no IK, no viewmodel scale).
         selected=&states[0];
         Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
@@ -987,11 +987,11 @@ int main() {
         Put<unsigned char**>(set,kSetWeapon,&held);
         Put<unsigned char*>(human,kSets,set);Put<std::uint64_t>(human,kSetCount,1);
         Put<void*>(weapon,kWeaponMount,nullptr);Put<void*>(model,kBaseLod+kLodInst,nullptr);
-        Put<std::uint8_t>(weapon,kWeaponHidden,0);
+        Put<std::uint8_t>(weapon,kWeaponShown,1);
         M4 anchor[2]={fpview::Identity(),fpview::Identity()};bool anchored[2]{};
         Hands(human,anchor,anchored);
         check(Current().inHandCount==1 && !Current().nativeArms,"a weapon the third person shows is in hand");
-        Put<std::uint8_t>(weapon,kWeaponHidden,1);
+        Put<std::uint8_t>(weapon,kWeaponShown,0);
         Hands(human,anchor,anchored);
         check(Current().inHandCount==0 && Current().nativeArms && HandOfModel(model)<0,
               "every weapon hidden (an appeal): none in hand (not placed, not force-submitted), the arms native");
@@ -1004,7 +1004,7 @@ int main() {
               "a stock action's arms: both shown, each through the identity (as the animation poses them)");
         Publish();DrawSnap actionSnap{};TakeSnapshot(&actionSnap);
         check(actionSnap.nativeArms,"the draws are told: no arm fit onto a weapon grip");
-        Put<std::uint8_t>(weapon,kWeaponHidden,0);
+        Put<std::uint8_t>(weapon,kWeaponShown,1);
         Hands(human,anchor,anchored);
         check(Current().inHandCount==1 && !Current().nativeArms,"the action over: the weapon in hand again");
 
@@ -1038,10 +1038,10 @@ int main() {
         FpShotAim replayed{};
         check(!FirstPersonAimShot(weapon,1,true,&replayed) && !replayed.rows &&
               std::memcmp(entry+edf::kMuzzleStride+kShotRows,before,sizeof(before))==0,"a replayed (remote) round is never turned");
-        Put<std::uint8_t>(weapon,kWeaponHidden,1);Hands(human,anchor,anchored);
+        Put<std::uint8_t>(weapon,kWeaponShown,0);Hands(human,anchor,anchored);
         FpShotAim hiddenAim{};
         check(!FirstPersonAimShot(weapon,1,false,&hiddenAim) && !hiddenAim.rows,"a weapon not in hand (hidden) is not turned");
-        Put<std::uint8_t>(weapon,kWeaponHidden,0);Hands(human,anchor,anchored);
+        Put<std::uint8_t>(weapon,kWeaponShown,1);Hands(human,anchor,anchored);
         Current().aimCamDir[0]=1;Current().aimCamDir[2]=0;   // the camera turned away from the aim frame (a special view)
         FpShotAim away{};
         check(!FirstPersonAimShot(weapon,1,false,&away) && !away.rows,"a view not following the aim frame leaves the round native");
