@@ -30,7 +30,7 @@ unsigned lastSupportTeam=0,lastSupportOwner=0;
 unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
-struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
+struct Packet { EDF6CoopPeer sender;unsigned char bytes[200]; };   // support_protocol.h kWireSize (asserted below)
 std::deque<Packet> incoming;
 HMODULE WINAPI Module(LPCWSTR name) {
     if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);
@@ -196,6 +196,7 @@ support_net::PlanResult PlanPvpUnit(const char*,const float*,std::uint64_t,suppo
 }
 namespace fixture {
 using namespace crew::support_net;
+static_assert(sizeof(Packet::bytes)==kWireSize,"a test packet holds one support message");
 int checks=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);} }
 std::uint32_t EDF6COOP_CALL Snapshot(EDF6CoopSnapshot* out) {

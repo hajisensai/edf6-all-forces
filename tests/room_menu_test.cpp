@@ -86,6 +86,12 @@ void GrammarExamples() {
     PresetRoundTrip(L"rifle+ahandgrenade01*2,lance@1E3A8A+pweapon216",12,L"rifle+aHandGrenade01*2,lance@1E3A8A+pWeapon216");
     PresetRoundTrip(L"rifle@X:X+aHandGrenade01,rifle+aHandGrenade01",12,L"rifle+aHandGrenade01*2");
     PresetRoundTrip(L"thunderbow@FFFFFF:FFFFFF+pHandGrenade01*12",12,L"thunderbow@FFFFFF:FFFFFF+pHandGrenade01*12");
+    // A Fencer's two hands (#R:L, 2026-11-21): kept through the menu's spelling, after the colours; a run only of equal hands.
+    PresetRoundTrip(L"pilebanker# 715 : 773 ,pilebanker#715:773,cannon@1E3A8A#803:690",12,L"pilebanker#715:773*2,cannon@1E3A8A#803:690");
+    PresetRoundTrip(L"pilebanker#715:773,pilebanker",12,L"pilebanker#715:773,pilebanker");
+    {SupportPreset p,q;wchar_t why[160];
+     Expect(ParseSupportPreset(L"pilebanker#715:773",12,&p,why,160) && ParseSupportPreset(L"pilebanker",12,&q,why,160) && !SamePreset(p,q),
+            "different hands: a different preset (the menu saves the change)");}
     VehicleRoundTrip(L"AP,AP:30",VehicleBody::tank,L"AP,AP:30");
     VehicleRoundTrip(L"HE,AP:25",VehicleBody::tank,L"HE,AP:25");
     VehicleRoundTrip(L"HE,AP:25,GLM:4",VehicleBody::tank,L"HE,AP:25,GLM:4");

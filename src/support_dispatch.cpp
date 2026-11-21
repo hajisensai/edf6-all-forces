@@ -398,6 +398,18 @@ std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,in
     if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
     return DecideVariant(catalog,file,LookVariant(look));
 }
+// Soldier `i` of a composed load, a Fencer whose preset names both hands (support_loadout.h #R:L, PresetHandsFor): those
+// as its weapon words (npc_arms.h PresetHandArms: this machine's player's stars, each one less), kept by GiveLocalArms
+// and the host's Session (docs/feature-npc-weapon-tier.md 2.5). Without them (none named, or no weapon can be given
+// here: logged) the requester's own pick fills it later.
+void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_net::Unit& unit) noexcept {
+    if(catalog>=static_cast<unsigned>(kSupportConfigUnits) || !IsSupportSoldierResource(unit.resourceId))return;
+    const FencerHands h=PresetHandsFor(SupportCfg().preset[catalog],load,i);
+    if(!h.On() || !HandsFit(h,SupportSoldierWeapon(unit.resourceId)))return;
+    if(!PresetHandArms(h.right,h.left,&unit.arms,&unit.offhand))
+        Log("SUPPORT plan catalog=%u: soldier %d's preset hands %d:%d not given (the weapon hooks / preload are not in): the requester's pick",
+            catalog,i,h.right,h.left);
+}
 // The entry's tank / jets: its SupportVehicle_<key> pylons as a variant of the hull.
 std::uint64_t HullVariant(std::uint32_t catalog) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
@@ -626,7 +638,10 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             if(!AddUnit(plan,resource,1,route.from,route.heading)) {
                 Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
-            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+            if(composed) {
+                plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+                PresetHands(catalog,load,static_cast<int>(i),plan.units[plan.count-1]);
+            }
         }
         Log("SUPPORT plan catalog=%u ready: a transport %s in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u soldiers aboard",catalog,
             plane ? "plane (paratroop drop)" : "helicopter (air assault)",route.from[0],route.from[1],route.from[2],route.heading[0],
@@ -730,9 +745,11 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         // The hull's pylons (SupportVehicle_<key>); its crew's colours (SupportCrewColour: the driver, and every seat when
         // the call brings its own crew), a composed load's passengers' the preset's (unit 1 is the driver, 2.. the load).
         plan.units[plan.count-count-1].variant=HullVariant(catalog);
-        for(unsigned i=0;i<count;++i)
+        for(unsigned i=0;i<count;++i) {
             plan.units[plan.count-count+i].variant=i>0 && composed ? SoldierVariant(catalog,load,static_cast<int>(i-1),crew[i]) :
                                                                        SupportCrewVariant(catalog,crew[i]);
+            if(i>0 && composed)PresetHands(catalog,load,static_cast<int>(i-1),plan.units[plan.count-count+i]);
+        }
     } else {
         const bool platoon=catalog!=static_cast<unsigned>(AirCount());
         const unsigned count=composed ? static_cast<unsigned>(load.count) : platoon ? 12u : 4u;
@@ -741,7 +758,10 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return nextEdge("no level ground for the squad");
             const auto resource=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
             if(!AddUnit(plan,resource,0,at,heading))return nextEdge("plan full");
-            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+            if(composed) {
+                plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+                PresetHands(catalog,load,static_cast<int>(i),plan.units[plan.count-1]);
+            }
         }
     }
     Log("SUPPORT plan catalog=%u ready: entry (%.0f,%.0f,%.0f), %.0f m to the target, %u units",catalog,entry[0],entry[1],entry[2],
@@ -1183,7 +1203,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         const wchar_t* const made=here && (unit.variant&kVariantApplied) ? path : nullptr;
         if(unit.resourceId<kAircraft) {
             if(!(aboard ? CreateSupportSoldierUnregistered : ApplySupportSoldierResource)(unit.matrix,unit.resourceId,
-                    networked ? unit.netId : nullptr,!networked,&object,made,unit.arms)) {
+                    networked ? unit.netId : nullptr,!networked,&object,made,unit.arms,unit.offhand)) {
                 Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
                 Destroy(id);return false;
             }

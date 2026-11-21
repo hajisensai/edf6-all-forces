@@ -270,8 +270,8 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
     if(note && size)swprintf_s(note,size,L"%ls",text);
 }
-// A header of another build: the map command protocol's magic with another version (support's own wire is v2 in every
-// build that has the extension). Only read: the message is still dropped as before.
+// A header of another build: the map command protocol's magic with another version (support's own wire: v3 since
+// 2026-11-21, older builds kept out of the room by mod_room.h). Only read: the message is still dropped as before.
 void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
     if(!peer || peer>support_net::kMaxPeers || count<8)return;
     std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);

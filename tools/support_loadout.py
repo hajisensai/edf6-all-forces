@@ -172,6 +172,28 @@ PACKS: tuple[tuple[int, str, int, str, int, float, float, str], ...] = (
     (74, 'pWeapon245', 1, 'direct', 116, 0.0, 0.0, 'Power Spear S3'),
 )
 PACK_BY_NAME = {p[1].upper(): p for p in PACKS}
+# src/npc_tiers.inc kFencerHands (tools/gen_npc_tiers.py fencer_hands; tests/support_loadout_ini_test.py compares): the
+# weapon table rows of the Fencer's hand weapons (categories 200-205), what a preset's #R:L may name.
+FENCER_HAND_RANGES: tuple[tuple[int, int], ...] = (
+    (690, 865), (1359, 1361), (1368, 1369), (1373, 1374), (1413, 1427), (1508, 1525))
+
+
+def fencer_hand(row: int) -> bool:
+    return any(a <= row <= b for a, b in FENCER_HAND_RANGES)
+
+
+def hands(text: str, k: str) -> tuple[int, int]:
+    """A preset's #R:L for kind `k` as the plugin reads it (ParseSupportPreset, HandsFit): (right, left) weapon rows."""
+    if KIND_CLASS[k] != 2:
+        raise Invalid(tr('只有重装兵能指定左右手武器：#', 'only a Fencer takes its two hands: #') + text)
+    right, colon, left = text.partition(':')
+    ok = colon and all(t.strip().isdigit() and len(t.strip()) <= 5 for t in (right, left))
+    if not ok:
+        raise Invalid(tr('左右手应为 #右手行号:左手行号（武器表行号）：#', 'the hands are #RIGHT:LEFT (weapon table rows): #') + text)
+    r, l = int(right.strip()), int(left.strip())
+    if not fencer_hand(r) or not fencer_hand(l):
+        raise Invalid(tr('不是重装兵的手持武器（武器表 200-205 类）：#', 'not a Fencer hand weapon (weapon table 200-205): #') + text)
+    return r, l
 
 
 def pack(text: str, k: str) -> str:
@@ -310,7 +332,8 @@ class Invalid(ValueError):
 
 
 Look = tuple[int, int]   # (primary, secondary), 0xRRGGBB or STOCK
-Soldier = tuple[str, Look, str]   # (kind, look, backpack weapon: its WEAPONTABLE name, '' none)
+Hands = tuple[int, int] | None   # a Fencer's (right, left) weapon table rows (#R:L), None: the requester's own pick
+Soldier = tuple[str, Look, str, Hands]   # (kind, look, backpack weapon: its WEAPONTABLE name, '' none; hands)
 Pylon = tuple[str, int]  # (store name, rounds)
 
 
@@ -362,6 +385,7 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
     for token in _tokens(text):
         head, star, n = token.partition('*')
         head, plus, packed = head.partition('+')
+        head, sharp, held = head.partition('#')
         name, at, colours = head.partition('@')
         k = kind(name)
         if not has_looks(k) and (at or plus):
@@ -371,11 +395,12 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
         if at:
             primary, colon, secondary = colours.partition(':')
             look = (_colour(primary), _colour(secondary) if colon else STOCK)
+        two = hands(held, k) if sharp else None
         carried = pack(packed, k) if plus else ''
         count = _count(n, MOST, tr('人数 *', 'the count *')) if star else 1
         if len(out) + count > MOST:
             raise Invalid(tr(f'超过 {MOST} 人', f'more than {MOST} soldiers'))
-        out += [(k, look, carried)] * count
+        out += [(k, look, carried, two)] * count
     if out and len(out) > seats:
         raise Invalid(tr('该单位没有可编组的座位', 'this unit has no seats to fill') if seats <= 0 else
                       tr(f'人数 {len(out)} 超过该单位的座位数 {seats}', f'{len(out)} soldiers, more than the unit\'s {seats} seats'))
@@ -394,8 +419,9 @@ def format_preset(soldiers: list[Soldier]) -> str:
         j = i
         while j < len(soldiers) and soldiers[j] == soldiers[i]:
             j += 1
-        k, (p, s), carried = soldiers[i]
+        k, (p, s), carried, two = soldiers[i]
         token = k + ('' if (p, s) == (STOCK, STOCK) else '@' + _colour_text(p) + ('' if s == STOCK else ':' + _colour_text(s)))
+        token += f'#{two[0]}:{two[1]}' if two else ''
         token += '+' + carried if carried else ''
         out.append(token + (f'*{j - i}' if j - i > 1 else ''))
         i = j
@@ -669,7 +695,7 @@ def wanted_files(text: str, pending: list[str] = ()) -> list[str]:
     order."""
     out: list[str] = []
     for soldiers in presets(text).values():
-        for i, (k, look, carried) in enumerate(soldiers):
+        for i, (k, look, carried, _) in enumerate(soldiers):
             if look != (STOCK, STOCK) or carried:
                 out.append(look_file(k, i % 4 == 0, look, carried))
             if carried and look != (STOCK, STOCK):
@@ -1048,7 +1074,8 @@ def describe(soldiers: list[Soldier]) -> str:
     for i in range(0, len(soldiers), 4):
         squad = soldiers[i:i + 4]
         parts.append('[' + tr('、', ', ').join(kind_label(k) + ('' if look == (STOCK, STOCK) else f'@{_colour_text(look[0])}:{_colour_text(look[1])}')
-                                     + (f'+{carried}' if carried else '') for k, look, carried in squad) + ']')
+                                     + (f'#{two[0]}:{two[1]}' if two else '') + (f'+{carried}' if carried else '')
+                                     for k, look, carried, two in squad) + ']')
     return ' '.join(parts)
 
 
@@ -1125,13 +1152,15 @@ def edit_crew(text: str, key: str, ask: Callable[[str], str]) -> str:
 
 def preset_help() -> str:
     kinds = ' '.join(f'{n}={kind_label(n)}' for n in KIND_NAMES)
-    return tr('  写法：兵种[@主色[:副色]][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
+    return tr('  写法：兵种[@主色[:副色]][#右手:左手][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
               f'  兵种：{kinds}\n'
               '  颜色：6 位十六进制 RRGGBB（如 1E3A8A），X = 保留原色；例：lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  重装兵左右手：#右手行号:左手行号（武器表行号，任意重装手持武器），例：pilebanker#715:773*4（爆破长枪 + 德克斯特霰弹：冲跳）\n'
               '  直接回车 = 不改；输入 - = 清除（恢复该单位默认兵员）。',
-              '  Write CLASS[@MAIN[:SECOND]][*COUNT], comma separated, in seat order; the first of every 4 leads them.\n'
+              '  Write CLASS[@MAIN[:SECOND]][#RIGHT:LEFT][*COUNT], comma separated, in seat order; the first of every 4 leads them.\n'
               f'  Classes: {kinds}\n'
               '  Colours: 6 hex digits RRGGBB (like 1E3A8A), X = keep stock; e.g. lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  A Fencer\'s hands: #RIGHT:LEFT weapon table rows (any Fencer hand weapon), e.g. pilebanker#715:773*4 (spear + shotgun: dash-jump)\n'
               '  Just Enter = no change; - = clear (the unit\'s default soldiers).')
 
 

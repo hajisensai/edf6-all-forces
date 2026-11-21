@@ -132,7 +132,7 @@ bool Apply(std::uint64_t tx,const SupportPlan& plan,bool remote,unsigned char* v
         // Coloured when the host applied its look and the file is here; else stock (and listed): colours never refuse.
         wchar_t path[128];
         const wchar_t* look=SupportSoldierLookPath(u.resourceId,u.variant,remote,path,sizeof(path)/sizeof(path[0]));
-        if(!ApplySupportSoldierResource(u.matrix,u.resourceId,InSession() ? u.netId : nullptr,false,&soldier,look,u.arms)) {
+        if(!ApplySupportSoldierResource(u.matrix,u.resourceId,InSession() ? u.netId : nullptr,false,&soldier,look,u.arms,u.offhand)) {
             DestroyMissionCrewPlan(tx);return false;
         }
         d->crew[d->count++]=soldier;

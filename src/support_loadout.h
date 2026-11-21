@@ -9,6 +9,11 @@
 //       kind      one of kSupportKindNames (the 15 kinds: 5 Ranger, 5 Wing Diver, 4 Fencer weapons, the X-Morph infantry)
 //       @RRGGBB   its primary colour (soldier_color change_color0); @RRGGBB:RRGGBB primary and secondary (change_color1);
 //                 X a colour left stock (@X:FFFFFF). No @: the stock look.
+//       #R:L      a Fencer's two hands (2026-11-21, docs/feature-npc-weapon-tier.md 2.5): weapon table row ids of any
+//                 Fencer hand weapons (npc_tier.h kFencerHands), R in WeaponSet 0 (the template's main weapon), L in
+//                 WeaponSet 1 (in place of its AI shield), e.g. pilebanker#715:773; with the planning machine's player's
+//                 stars, each one less (npc_tier.h PresetHand). No #: the requester's own pick (npc_tier.h PickHands).
+//                 Not a look: no file is generated for it, it travels in the plan unit's weapon words.
 //       +PACK     its backpack weapon (npc_pack_table.h kPackWeapons: the WEAPONTABLE name, e.g. +aHandGrenade01,
 //                 +pWeapon216), one of its class's; none: no backpack (docs/npc-backpack-re.md)
 //       *n        n soldiers of that spec (1-12)
@@ -27,6 +32,7 @@
 // extension word and a Bloom filter of the files it has, in the hello's unused unit fields): support_protocol.h.
 #pragma once
 #include "npc_pack_table.h"
+#include "npc_tier.h"
 #include "support_call.h"
 #include <cstddef>
 #include <cstdint>
@@ -68,10 +74,23 @@ struct SupportLook {
         return primary==o.primary && secondary==o.secondary && pack==o.pack;
     }
 };
+// A preset Fencer's two hands (#R:L): weapon table rows of Fencer hand weapons (npc_tier.h HandOf), both or neither
+// (-1: the requester's own pick). The interface a preset editor sets (docs/feature-npc-weapon-tier.md 2.5).
+struct FencerHands {
+    std::int32_t right=-1,left=-1;
+    constexpr bool On() const noexcept { return right>=0; }
+    constexpr bool operator==(const FencerHands& o) const noexcept { return right==o.right && left==o.left; }
+};
+// Whether `h` may go on a soldier of `kind`: none, or both hands Fencer hand weapons on a Fencer kind.
+constexpr bool HandsFit(const FencerHands& h,SupportWeapon kind) noexcept {
+    if(!h.On())return h.left<0;
+    return npctier::FencerKind(kind) && npctier::HandOf(h.right) && h.left>=0 && npctier::HandOf(h.left);
+}
 struct SupportPreset {
     int count=0;   // 0: none (the entry's own load)
     SupportWeapon kind[kSupportLoadoutMost]{};
     SupportLook look[kSupportLoadoutMost]{};
+    FencerHands hands[kSupportLoadoutMost]{};
 };
 
 namespace loadout_detail {
@@ -128,6 +147,14 @@ template<class Each> bool Tokens(const wchar_t* text,Each each) noexcept {
 }
 }  // namespace loadout_detail
 
+// A weapon table row id: digits only, at most 5.
+inline bool RowId(const wchar_t* a,const wchar_t* b,std::int32_t* out) noexcept {
+    loadout_detail::Trim(a,b);
+    if(a==b || b-a>5)return false;
+    std::int32_t v=0;
+    for(;a<b;++a){if(*a<L'0' || *a>L'9')return false;v=v*10+(*a-L'0');}
+    *out=v;return true;
+}
 inline bool ParseSupportKind(const wchar_t* a,const wchar_t* b,SupportWeapon* out) noexcept {
     loadout_detail::Trim(a,b);
     for(const auto& k:kSupportKindNames)if(loadout_detail::Same(a,b,k.name)){*out=k.kind;return true;}
@@ -142,21 +169,31 @@ inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* 
     bool parsed=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
         const wchar_t* star=Find(a,b,L'*');
         const wchar_t* plus=Find(a,star,L'+');
-        const wchar_t* at=Find(a,plus,L'@');
+        const wchar_t* hash=Find(a,plus,L'#');
+        const wchar_t* at=Find(a,hash,L'@');
         SupportWeapon kind;
         if(!ParseSupportKind(a,at,&kind)){Say(why,whyCapacity,L"未知兵种：",a,at);return false;}
         // A kind whose bodies this install lacks (support_call.h SupportKindInstalled: the X-Morph model pack) is never
         // composed: the value is refused whole, the reason named, like any other fault.
         if(!SupportKindInstalled(kind)){Say(why,whyCapacity,L"该兵种未安装（缺少 X-Morph 模型包）：",a,at);return false;}
         SupportLook look;
-        if(!SupportKindHasLooks(kind) && (at<plus || plus<star)) {
+        if(!SupportKindHasLooks(kind) && (at<hash || plus<star)) {
             Say(why,whyCapacity,L"X-Morph 步兵没有涂装与背包：",a,star);return false;
         }
-        if(at<plus) {
-            const wchar_t* colon=Find(at+1,plus,L':');
-            if(!Colour(at+1,colon,&look.primary) || (colon<plus && !Colour(colon+1,plus,&look.secondary))) {
-                Say(why,whyCapacity,L"颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：",at,plus);return false;
+        if(at<hash) {
+            const wchar_t* colon=Find(at+1,hash,L':');
+            if(!Colour(at+1,colon,&look.primary) || (colon<hash && !Colour(colon+1,hash,&look.secondary))) {
+                Say(why,whyCapacity,L"颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：",at,hash);return false;
             }
+        }
+        FencerHands hands;
+        if(hash<plus) {
+            if(!npctier::FencerKind(kind)){Say(why,whyCapacity,L"只有重装兵能指定左右手武器：",hash,plus);return false;}
+            const wchar_t* colon=Find(hash+1,plus,L':');
+            if(colon==plus || !RowId(hash+1,colon,&hands.right) || !RowId(colon+1,plus,&hands.left)) {
+                Say(why,whyCapacity,L"左右手应为 #右手行号:左手行号（武器表行号）：",hash,plus);return false;
+            }
+            if(!HandsFit(hands,kind)){Say(why,whyCapacity,L"不是重装兵的手持武器（武器表 200-205 类）：",hash,plus);return false;}
         }
         if(plus<star) {
             const wchar_t *pa=plus+1,*pb=star;Trim(pa,pb);
@@ -171,7 +208,7 @@ inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* 
         int n=1;
         if(star<b && !Count(star+1,b,kSupportLoadoutMost,&n)){Say(why,whyCapacity,L"人数应为 *1 到 *12：",star,b);return false;}
         if(p.count+n>kSupportLoadoutMost){Say(why,whyCapacity,L"超过 12 人");return false;}
-        for(int i=0;i<n;++i){p.kind[p.count]=kind;p.look[p.count]=look;++p.count;}
+        for(int i=0;i<n;++i){p.kind[p.count]=kind;p.look[p.count]=look;p.hands[p.count]=hands;++p.count;}
         return true;
     });
     if(parsed && p.count>0 && p.count>seatCount) {
@@ -192,6 +229,10 @@ constexpr SupportLoadout PresetLoadout(const SupportPreset& p) noexcept {
 // have changed the load on the bar's composition panel: a changed seat comes stock).
 constexpr SupportLook PresetLookFor(const SupportPreset& p,const SupportLoadout& load,int i) noexcept {
     return i>=0 && i<p.count && i<load.count && load.soldier[i]==p.kind[i] ? p.look[i] : SupportLook{};
+}
+// The same for a Fencer's hands (#R:L): none where the seat's kind changed.
+constexpr FencerHands PresetHandsFor(const SupportPreset& p,const SupportLoadout& load,int i) noexcept {
+    return i>=0 && i<p.count && i<load.count && load.soldier[i]==p.kind[i] ? p.hands[i] : FencerHands{};
 }
 
 // --- Crew colours (docs/feature-2026-10-12-room-loadout-menu.md 阶段 5) ---

@@ -312,21 +312,31 @@ bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResu
 int armsAsked=0;
 bool SupportSoldierArmsReady() noexcept {return armsReady;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+// npc_arms.h PresetHandArms: a preset's two Fencer hands, star 0 = 1 (this machine's player's, a star less), or none.
+bool presetHandsOk=true;int presetHandsAsked=0;
+bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept {
+    ++presetHandsAsked;*arms=0;*offhand=0;
+    if(!presetHandsOk)return false;
+    npctier::Arms r;r.on=true;r.id=static_cast<std::uint16_t>(right);r.stars[0]=1;
+    npctier::Arms l;l.on=true;l.id=static_cast<std::uint16_t>(left);l.stars[0]=1;
+    *arms=npctier::PackArms(r);*offhand=npctier::PackArms(l);return true;
+}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
-std::wstring lastLooks[16];std::uint64_t lastArms[16]{};
+std::wstring lastLooks[16];std::uint64_t lastArms[16]{},lastOffhand[16]{};
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look,std::uint64_t weapon) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
     if(nativeFail)return false;
-    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastResources[resourceCount++]=resource;}
+    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastOffhand[resourceCount]=offhand;
+                         lastResources[resourceCount++]=resource;}
     lastLocal=local;lastId=id;
     *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look,std::uint64_t weapon) noexcept {
-    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon);
+                                      const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon,offhand);
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
@@ -1439,6 +1449,38 @@ int main() {
         bool none=plan.count>=2;for(unsigned i=0;i<plan.count;++i)none=none && !plan.units[i].variant;
         check(none,"no crew colour configured: no variant anywhere (the plan as it always was)");
         ResetSupportDispatch();
+    }
+    // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer's two hands. Offline, a soldier whose preset names them
+    // (#R:L) carries those (PresetHandArms) and keeps them past GiveLocalArms; every other Fencer this player's own two
+    // (its kind's main hand and the slot beside it), a Ranger only its main hand.
+    {
+        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_hands_test.ini");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"hands ini written");
+        const char handsText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#772:715,pilebanker,rifle*2\r\n";
+        std::fwrite(handsText,1,sizeof(handsText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        check(SupportCfg().preset[21].count==4 && SupportCfg().preset[21].hands[0]==FencerHands{772,715},"the preset's hands read from the ini");
+        const int pile=static_cast<int>(SupportWeapon::fencerPileBanker);
+        support_net::RequesterArms arms{};
+        npctier::Arms spear;spear.on=true;spear.id=715;npctier::Arms dexter;dexter.on=true;dexter.id=773;
+        npctier::Arms rifle;rifle.on=true;rifle.id=26;
+        arms.kind[pile]=npctier::PackArms(spear);arms.offhand[pile]=npctier::PackArms(dexter);arms.kind[0]=npctier::PackArms(rifle);
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        localArms=arms;armsLoad=support_net::PlanResult::ready;armsAsked=0;presetHandsAsked=0;
+        check(SupportCallAt(21,target,note,128),"a preset squad with hands is called");SupportDispatchTick();
+        check(made==4 && resourceCount==4 && presetHandsAsked==1,"made; the preset's hands asked for once");
+        check((lastArms[0]&0xFFFFu)==772 && (lastOffhand[0]&0xFFFFu)==715 && ((lastArms[0]>>16)&0xF)==1,
+              "seat 0: the preset's Galleon and spear (this player's stars), not the requester's pick");
+        check(lastArms[1]==arms.kind[pile] && lastOffhand[1]==arms.offhand[pile],"seat 1 (no #): this player's spear and the Dexter beside it");
+        check(lastArms[2]==arms.kind[0] && !lastOffhand[2] && lastArms[3]==arms.kind[0] && !lastOffhand[3],"the rifles: a main hand only");
+        check(Validate(deployments[0].plan),"the plan validates");
+        // The preset's hands cannot be given here: the requester's pick instead (logged), never a half-armed soldier.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;presetHandsOk=false;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(made==4 && lastArms[0]==arms.kind[pile] && lastOffhand[0]==arms.offhand[pile],"no preset hands here: the requester's two");
+        presetHandsOk=true;localArms={};
+        LoadSupportConfig(L"Z:\\nonexistent\\edf6_none.ini");
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
     }
     // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」; 2026-10-10: no support
     // limits, a gunner, takeoff from the carrier, the requester's own) ----

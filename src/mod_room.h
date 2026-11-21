@@ -49,6 +49,8 @@ namespace crew {
 //      scope_spread_logic.h): a round's spread is drawn and its hits settled on the shooter's machine, so every member
 //      plays by the host's ScopeSpread*. An older build reads no "2;" word (it would take its own ini for the host's
 //      VanillaRecruit / NpcFreeSquadCover) and draws the stock spread while the others are penalised unzoomed.
+//      The same (unreleased) step: the support wire goes to v3 (support_protocol.h: 200 bytes, a support Fencer's second
+//      hand, docs/feature-npc-weapon-tier.md 2.5): an older build's decoder drops every support message of this one.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=11;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
