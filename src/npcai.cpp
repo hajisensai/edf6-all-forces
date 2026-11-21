@@ -175,14 +175,14 @@ struct Soldier {
     bool climbSaid;          // that stretch logged (StuckClimb)
     // Its own dashes (Mobility, docs/npc-mobility-re.md): this frame's crowd response (Evade) and walk (MoveTo: the goal
     // and where the walk stops short of it, the route's next corner, the way to it, the route straight ahead and its way:
-    // npc_mobility.h StraightRun); the press in flight, the uses before it, its stick; consecutive misses (kMissOff: off
-    // for this soldier); the last one's time; the last "no dash" line (WingDash, Debug); the walk's progress (stuck); the
+    // npc_mobility.h StraightRun; its pace, the paced march's share); the press in flight, the uses before it, its stick;
+    // consecutive misses (kMissOff: off for this soldier); the last one's time; the last "no dash" line (WingDash, Debug); the walk's progress (stuck); the
     // hands last logged.
     ULONGLONG evadeFrame;
     npc::Move evadeMove;
     float evadeDir[3];
     ULONGLONG moveFrame;
-    float moveGoal[3],moveWay[3],moveDir[3],moveStop,moveRun,moveRunDir[3];
+    float moveGoal[3],moveWay[3],moveDir[3],moveStop,moveRun,moveRunDir[3],movePace;
     npc::mobility::Combo mob;
     int mobDashBefore,mobBoostBefore,mobMiss,mobHands;
     float mobDir[3];
@@ -790,6 +790,7 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     soldier->moveFrame=GameFrame();
     std::memcpy(soldier->moveGoal,to,12);std::memcpy(soldier->moveWay,waypoint,12);std::memcpy(soldier->moveDir,dir,12);
     soldier->moveStop=std::isfinite(stop) ? stop : 0.0f;
+    soldier->movePace=pace;
     const npc::navigation::State& route=soldier->navigation;
     const int ahead=route.cursor>=0 && route.cursor<route.length ? route.length-route.cursor : 0;
     soldier->moveRun=npc::mobility::StraightRun(pos,route.path+(ahead ? route.cursor : 0),ahead,npc::mobility::kRunLook,
@@ -1530,14 +1531,15 @@ void InstallMobility() noexcept {
 }
 
 // This frame's walk (MoveTo), when it walked: how far its goal and where the walk stops short of it, the route's next
-// corner and its rise, the way to it; the route straight ahead (StraightRun) and the way along it.
-struct Way { bool walking; float goalDist,stop,wayDist,rise,run; float dir[3],runDir[3]; };
+// corner and its rise, the way to it; the route straight ahead (StraightRun) and the way along it; its pace (under 1: a
+// paced march's, MapPaceScale).
+struct Way { bool walking; float goalDist,stop,wayDist,rise,run,pace; float dir[3],runDir[3]; };
 Way WayOf(const Soldier& s,const float* pos) noexcept {
     Way w{};
     if(s.moveFrame!=GameFrame() || s.moveFrame==0)return w;
     w.walking=true;
     w.goalDist=npc::Horiz(pos,s.moveGoal);w.stop=s.moveStop;w.wayDist=npc::Horiz(pos,s.moveWay);w.rise=s.moveWay[1]-pos[1];
-    w.run=s.moveRun;
+    w.run=s.moveRun;w.pace=s.movePace;
     std::memcpy(w.dir,s.moveDir,12);std::memcpy(w.runDir,s.moveRunDir,12);
     return w;
 }
@@ -1547,11 +1549,11 @@ bool DashFree(const Plan& p) noexcept {
     for(const char* m:kQuiet)if(std::strcmp(p.move,m)==0)return false;
     return true;
 }
-// What a walk is for (npc_mobility.h Need): falling back or the player's move / attack-move order; a fight's (a target:
+// What a walk is for (npc_mobility.h Need): falling back; the player's move / attack-move order; a fight's (a target:
 // its combat spot); else keeping up (a formation, its post).
 npc::mobility::Need NeedOf(const Soldier& s,const Plan& p) noexcept {
-    if(std::strcmp(p.move,"fall back")==0 || std::strcmp(p.move,"move order")==0 || std::strcmp(p.move,"attack-move")==0)
-        return npc::mobility::Need::order;
+    if(std::strcmp(p.move,"fall back")==0)return npc::mobility::Need::retreat;
+    if(std::strcmp(p.move,"move order")==0 || std::strcmp(p.move,"attack-move")==0)return npc::mobility::Need::order;
     return s.target.obj ? npc::mobility::Need::fight : npc::mobility::Need::keepUp;
 }
 // The m free along horizontal `dir` at the waist, up to `most`.
@@ -1609,7 +1611,7 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
                        At<float>(h,kEnergy),At<float>(h,kEnergyMax),At<float>(h,kDashCost)};
     const char* const gate=WingGate(st,c.npcWingDashReserve);
     const bool evading=s.evadeFrame==frame && (s.evadeMove==npc::Move::back || s.evadeMove==npc::Move::roll);
-    WingGoal g{evading,NeedOf(s,p),p.fire,false,0.0f,0.0f,-1.0f,-1.0f};
+    WingGoal g{evading,NeedOf(s,p),false,p.fire,false,0.0f,0.0f,-1.0f,-1.0f};
     float dir[3];
     if(evading) {
         if(gate)return;   // backs off on foot (Evade's stick stays)
@@ -1618,7 +1620,7 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
         // Only the plugin's own walk this frame (MoveTo); the stock's moves and a stand are not known here.
         const Way w=WayOf(s,pos);
         if(!w.walking || !DashFree(p))return;
-        g.left=w.goalDist-w.stop;g.run=w.run;
+        g.left=w.goalDist-w.stop;g.run=w.run;g.paced=w.pace<1.0f;
         if(!(g.left>WingFar(g.need,c.npcWingDashFar)))return;   // a walk too short to dash: nothing to say
         std::memcpy(dir,w.runDir,12);
         // The ray and the nearest enemy only when the rest would let it dash (or a line is due).

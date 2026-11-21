@@ -72,24 +72,37 @@ inline const char* WhyName(Why w) noexcept {
 
 // The route straight ahead (the dash's direction and whether a dash fits it). The ground route is a chain of 2 m grid
 // cells (ground_navigation.h Navigate: every cell of the path, no corners collapsed), so its next waypoint is always
-// within ~3 m and the way to it one of 8 grid directions: neither says where the walk goes over the dash's ~17 m. The run
-// is the farthest point of the path ahead, up to `most` m, every point before which lies within `slack` m of the line
-// from `from` to it (a straight corridor, the walk's own): its length over the ground, `dir` the horizontal way along it
-// (0 and dir untouched with no path). P: any point with x / z (navigation::Point).
+// within ~3 m and the way to it one of 8 grid directions: neither says where the walk goes over the dash's ~17 m. Off the
+// grid's axes and diagonals the open-ground route is not even near the line: the search's tie rule (the farthest along
+// among equally short) puts the diagonal cells of a 15 deg walk together, 5 of them and then 14 straight, its corner 6 m
+// off the line (npc_mobility_check WingRuns, Navigate itself). The run is the farthest point of the path ahead, up to
+// `most` m, to which the path goes straight: every point before it within `slack` m of the line from `from` (ahead of
+// it), or the path to it no longer than the shortest 8-way grid walk there (Octile, kRunTaut over: the walk does not
+// turn round anything, its cells are one of the grid's equally short walks between the two ends, and on open ground the
+// line between them is the walk's own way; what stands on that line the caller's ray sees). Its length over the ground,
+// `dir` the horizontal way along it (0 and dir untouched with no path). P: any point with x / z (navigation::Point).
+constexpr float kRunTaut=0.5f;   // m a path may run over the shortest grid walk (the cells are placed from where it began)
+inline float Octile(float dx,float dz) noexcept {
+    dx=std::fabs(dx);dz=std::fabs(dz);
+    return (dx>dz ? dx : dz)+0.41421356f*(dx>dz ? dz : dx);
+}
 template<class P>
 inline float StraightRun(const float* from,const P* pts,int n,float most,float slack,float* dir) noexcept {
     if(!pts || n<=0 || !(most>0.0f) || !(slack>=0.0f))return 0.0f;
-    float bestX=0.0f,bestZ=0.0f,best=0.0f;
+    float bestX=0.0f,bestZ=0.0f,best=0.0f,walked=0.0f,lastX=0.0f,lastZ=0.0f;
     for(int k=0;k<n;++k) {
         const float ex=pts[k].x-from[0],ez=pts[k].z-from[2],len=std::sqrt(ex*ex+ez*ez);
         if(!std::isfinite(len))break;
+        walked+=std::sqrt((ex-lastX)*(ex-lastX)+(ez-lastZ)*(ez-lastZ));lastX=ex;lastZ=ez;
         if(len<1e-3f)continue;
-        bool straight=true;
-        for(int i=0;i<k && straight;++i) {   // each point before it within `slack` of the line from `from` (ahead of it)
+        bool straight=walked<=Octile(ex,ez)+kRunTaut;
+        for(int i=0;i<k && !straight;++i) {   // else each point before it within `slack` of the line from `from`
             const float px=pts[i].x-from[0],pz=pts[i].z-from[2];
             const float along=(px*ex+pz*ez)/len,off=std::fabs(px*ez-pz*ex)/len;
-            straight=off<=slack && along>=-slack && along<=len+slack;
+            if(!(off<=slack && along>=-slack && along<=len+slack))break;
+            if(i==k-1)straight=true;
         }
+        if(!straight && k==0)straight=true;   // the first point: the line to it is the walk itself
         if(!straight)break;
         if(len>=most){bestX=ex/len*most;bestZ=ez/len*most;best=most;break;}
         bestX=ex;bestZ=ez;best=len;
@@ -101,11 +114,21 @@ inline float StraightRun(const float* from,const P* pts,int n,float most,float s
 constexpr float kRunLook=30.0f,kRunSlack=1.5f;   // m: how far the run is looked for; off its line a cell may lie
 
 // What the walk is for: keeping up (a formation, its post, a support follow), a fight (to its combat spot), a falling
-// back or the player's order (a move / attack-move), the last the dash's first call.
-enum class Need : std::uint8_t { keepUp, fight, order };
-inline const char* NeedName(Need n) noexcept { return n==Need::order ? "order" : n==Need::fight ? "fight" : "keep-up"; }
+// back (low on health, away from the threat), the player's order (a move / attack-move). A falling back and an order
+// outrank a shot; only the order may dash towards the nearest enemy (the player sent it that way; a falling back's goal
+// behind the player is kept off only the one threat it fled, npcai.cpp FallBack, not every enemy).
+enum class Need : std::uint8_t { keepUp, fight, retreat, order };
+inline const char* NeedName(Need n) noexcept {
+    switch(n) {
+    case Need::order: return "order";
+    case Need::retreat: return "retreat";
+    case Need::fight: return "fight";
+    case Need::keepUp: break;
+    }
+    return "keep-up";
+}
 // Why a long walk was not dashed (the log's `because=`): none dashed it.
-enum class Block : std::uint8_t { none, tooNear, turn, wall, enemyAhead, firing };
+enum class Block : std::uint8_t { none, tooNear, turn, wall, enemyAhead, firing, paced };
 inline const char* BlockName(Block b) noexcept {
     switch(b) {
     case Block::tooNear: return "near";
@@ -113,30 +136,41 @@ inline const char* BlockName(Block b) noexcept {
     case Block::wall: return "wall ahead";
     case Block::enemyAhead: return "towards enemy";
     case Block::firing: return "firing";
+    case Block::paced: return "paced march";
     case Block::none: break;
     }
     return "none";
 }
 // Its situation this frame: `pressed` the crowd response backs it off (a crowd, or one in grab range); `need` what the
-// walk is for; `firing` a trigger pulled this frame (a ready weapon's shot going out: between two shots of a single-shot,
+// walk is for; `paced` the walk is a paced march's (MoveTo's pace under 1: mapcmd.cpp MapPaceScale, the squad at its
+// top's share of a full walk, which a full-stick dash would break out of); `firing` a trigger pulled this frame (a ready weapon's shot going out: between two shots of a single-shot,
 // charging or reloading weapon it is not); `threat` an enemy within twice the danger reach, `threatDot` the cosine between
 // the dash and the way to it; `left` m it still has to walk (to the goal less where its walk stops); `run` m the route
 // goes straight ahead (StraightRun); `clear` m free along the run at the waist.
-struct WingGoal { bool pressed; Need need; bool firing,threat; float left,run,threatDot,clear; };
-constexpr float kWingClear=15.0f;   // m free ahead: the dash carries ~17 m (docs/npc-mobility-re.md §2, L)
-constexpr float kWingRun=12.0f;     // m of straight route: shorter, the dash would leave the walk's way
-// How far a walk must have left before a dash: `range` for a fight's or an order's, twice that to keep up.
+struct WingGoal { bool pressed; Need need; bool paced,firing,threat; float left,run,threatDot,clear; };
+// m the dash carries: a static estimate (~17 m, docs/npc-mobility-re.md §3, L: the travel is not measured and scales
+// with SGO 0xC8 per energy core), a metre over. The full-stick dash goes this far along the run whatever the route does
+// after it, so both the straight run and the free way ahead are at least this: a shorter run turns (round what is in
+// the way) before the dash ends, and the dash would leave the walk's way past the corner. Re-check once measured.
+constexpr float kWingCarry=18.0f;
+constexpr float kWingClear=kWingCarry;   // m free ahead along the run
+constexpr float kWingRun=kWingCarry;     // m of straight route
+static_assert(kWingRun<=kRunLook,"the run is looked for at least as far as a dash needs");
+// How far a walk must have left before a dash: `range` for a fight's, a falling back's or an order's, twice that to
+// keep up.
 inline float WingFar(Need n,float range) noexcept { return n==Need::keepUp ? 2.0f*range : range; }
 struct WingVerdict { Why why; Block block; };
 // Why to dash now (`why`), or the first reason not to (`block`): out of the crowd first; else a walk with more than
-// WingFar left, along a route straight for kWingRun m and clear kWingClear m, not towards the nearest enemy (unless the
-// player ordered the walk), and not while a shot goes out unless the walk outranks the shot: a falling back or an order,
-// or a fight's walk past twice `range` (it is far out of place; one frame's shot gives way, the aim is kept through the
-// dash: §2, +0x5D0 bit 1 clear). Never a walk within WingFar (its fixed launch overshoots it).
+// WingFar left, not a paced march's, along a route straight for kWingRun m and clear kWingClear m, not towards the
+// nearest enemy (unless the player ordered the walk: a falling back is not exempt), and not while a shot goes out unless
+// the walk outranks the shot: a falling back or an order, or a fight's walk past twice `range` (it is far out of place;
+// one frame's shot gives way, the aim is kept through the dash: §2, +0x5D0 bit 1 clear). Never a walk within WingFar
+// (its fixed launch overshoots it).
 inline WingVerdict WingDecide(const WingGoal& g,float range) noexcept {
     if(g.pressed)return {Why::evade,Block::none};
     if(!(range>0.0f) || !std::isfinite(g.left) || g.left<=WingFar(g.need,range))return {Why::none,Block::tooNear};
-    const bool priority=g.need==Need::order || g.left>2.0f*range;
+    if(g.paced)return {Why::none,Block::paced};
+    const bool priority=g.need==Need::order || g.need==Need::retreat || g.left>2.0f*range;
     if(g.firing && !priority)return {Why::none,Block::firing};
     if(!(g.run>=kWingRun))return {Why::none,Block::turn};
     if(!(g.clear>=kWingClear))return {Why::none,Block::wall};
