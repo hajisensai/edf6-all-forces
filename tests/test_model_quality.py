@@ -147,6 +147,40 @@ class Surface(unittest.TestCase):
         with self.assertRaises(gltf.GltfError):
             gltf._materials(g, [])
 
+    def test_emissive_strength_and_texture_read(self) -> None:
+        """emissiveFactor comes times KHR_materials_emissive_strength (the laser turret's emitter: (1, 0, 0) x 10);
+        an emissiveTexture's image is kept (prep_glb_model refuses it: docs/xmorph-redo-1121.md)."""
+        import base64
+        uri = 'data:image/png;base64,' + base64.b64encode(_png(np.full((2, 2, 4), 255))).decode()
+        g = {'images': [{'uri': uri}], 'textures': [{'source': 0}],
+             'materials': [{'name': 'emitter', 'emissiveFactor': [1.0, 0.0, 0.0],
+                            'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 10.0}}},
+                           {'name': 'textured', 'emissiveFactor': [1.0, 1.0, 1.0], 'emissiveTexture': {'index': 0}}]}
+        a, b = gltf._materials(g, [])
+        self.assertEqual((a.emissive, a.emissive_texture), ((10.0, 0.0, 0.0), None))
+        self.assertEqual(b.emissive, (1.0, 1.0, 1.0))
+        self.assertIsNotNone(b.emissive_texture)
+
+    def test_glowing_material_on_the_light_template(self) -> None:
+        """prep_glb_model._emissive: a glowing material takes the light template (wt_tracked LIGHT), its whole surface
+        the mask, its glow per unit of albedo the factor over the albedo's linear mean; a glow the albedo cannot carry
+        (a channel it has none of, an emissiveTexture's own colours) is refused."""
+        from PIL import Image
+        import prep_glb_model as glb
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'textures'))
+            red = gltf.Material('emitter', (1.0, 0.0, 0.0, 1.0), (10.0, 0.0, 0.0))
+            albedo = glb._plain(red, d, 'e')
+            got = glb._emissive(red, d, 'e', albedo)
+            self.assertEqual(got, {'template': 'light', 'emissive': 'textures/e_emissive.png', 'light': [10.0, 0.0, 0.0]})
+            with Image.open(os.path.join(d, got['emissive'])) as im:
+                self.assertEqual(im.getextrema(), (255, 255))
+            self.assertEqual(glb._emissive(gltf.Material('dark', (1, 1, 1, 1), (0.0, 0.0, 0.0)), d, 'e', albedo), {})
+            with self.assertRaises(ValueError):
+                glb._emissive(gltf.Material('green glow', (1, 0, 0, 1), (0.0, 1.0, 0.0)), d, 'e', albedo)
+            with self.assertRaises(ValueError):
+                glb._emissive(gltf.Material('tex', (1, 0, 0, 1), (1.0, 0.0, 0.0), emissive_texture=b'png'), d, 'e', albedo)
+
     def test_metallic_roughness_map_and_factors(self) -> None:
         mr = np.zeros((4, 4, 4), dtype=np.uint8)
         mr[..., 1], mr[..., 2], mr[..., 3] = 200, 100, 255

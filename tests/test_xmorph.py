@@ -225,13 +225,146 @@ class TextureSideTests(unittest.TestCase):
             Image.new('RGBA', (64, 64), (90, 100, 110, 255)).save(os.path.join(d, 'col.png'))
             Image.new('RGBA', (64, 64), (128, 128, 255, 255)).save(os.path.join(d, 'nor.png'))
             material = {'name': 'hull', 'albedo': 'col.png', 'normal': 'nor.png'}
-            files, _slots = xm_air_model._textures(d, 'xm_test', material)
-            self.assertEqual(self._side(files['edf6vc_xm_test_hull_df.dds']), (side, side))
-            self.assertEqual(self._side(files['edf6vc_xm_test_hull_nm.dds']), (side, side))
+            files = xm_air_model._textures(d, 'xm_test', material)
+            self.assertEqual(files['albedo'][0], 'edf6vc_xm_test_hull_col.dds')
+            for slot in ('albedo', 'normal'):
+                self.assertEqual(self._side(files[slot][1]), (side, side))
             spec = xm_rig.Spec(d, {}, {})
             out = xm_rig._material_textures(spec, material)
             self.assertEqual(self._side(out['albedo'][1]), (side, side))
             self.assertEqual(self._side(out['normal'][1]), (side, side))
+
+
+class SurfaceMapTests(unittest.TestCase):
+    """Every family's materials read the X-Morph specular map as per-texel roughness / metalness (wt_tracked.SPECULAR_RM)
+    and a lit emissive map as the light material's mask (docs/xmorph-redo-1121.md): the aircraft's (xm_air_model), the
+    walkers' (xm_rig) and the car's (car_model, wt_tracked.material_textures) as the tracked ones'."""
+
+    @staticmethod
+    def _decoded(dds: bytes) -> np.ndarray:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(dds)) as im:     # the top level of the DXT1 chain
+            return np.asarray(im.convert('RGBA'))
+
+    def _folder(self, d: str) -> dict:
+        from PIL import Image
+        Image.new('RGB', (64, 64), (90, 100, 110)).save(os.path.join(d, 'col.png'))
+        spec = np.zeros((64, 64), np.uint8)
+        spec[:, 32:] = 255                         # left half matte paint, right half bare metal
+        Image.fromarray(spec, 'L').save(os.path.join(d, 'spec.png'))
+        glow = np.zeros((64, 64), np.uint8)
+        glow[:16] = 255                            # the top quarter a light strip
+        Image.fromarray(glow, 'L').save(os.path.join(d, 'glow.png'))
+        return {'name': 'hull', 'albedo': 'col.png', 'specular': 'spec.png'}
+
+    def _check_rm(self, rgba: np.ndarray, blue_lit: bool) -> None:
+        import wt_tracked as wt
+        (r0, r1), (m0, m1) = wt.SPECULAR_RM
+        h, w = rgba.shape[:2]
+        left, right = rgba[h // 2 + 8, w // 8], rgba[h // 2 + 8, w - w // 8]
+        for got, want in ((left[:2], (r0, m0)), (right[:2], (r1, m1))):
+            self.assertLessEqual(max(abs(int(a) - b) for a, b in zip(got, want)), 6, (got, want))
+        if blue_lit:
+            self.assertGreater(int(rgba[2, w // 2, 2]), 240)        # in the strip: the light mask
+            self.assertLess(int(rgba[h - 3, w // 2, 2]), 10)        # outside it: unlit
+        else:
+            import wt_tracked as wt
+            self.assertLessEqual(abs(int(rgba[h // 2, w // 2, 2]) - wt.NO_OCCLUSION), 6)
+
+    def test_families_take_the_specular_map(self) -> None:
+        import xm_air_model
+        import xm_rig
+        with tempfile.TemporaryDirectory() as d:
+            m = self._folder(d)
+            for out in (xm_air_model._textures(d, 'xm_test', m), xm_rig._material_textures(xm_rig.Spec(d, {}, {}), m)):
+                self.assertEqual(set(out), {'albedo', 'normal', 'param_r_m_occ_hr'})
+                self._check_rm(self._decoded(out['param_r_m_occ_hr'][1]), False)
+
+    def test_lit_material_takes_the_light_mask(self) -> None:
+        import wt_tracked as wt
+        import xm_air_model
+        import xm_rig
+        with tempfile.TemporaryDirectory() as d:
+            m = {**self._folder(d), 'emissive': 'glow.png', 'template': wt.LIGHT}
+            for out in (xm_air_model._textures(d, 'xm_test', m), xm_rig._material_textures(xm_rig.Spec(d, {}, {}), m)):
+                self.assertEqual(set(out), {'albedo', 'normal', 'param_r_m_light_hr'})
+                self._check_rm(self._decoded(out['param_r_m_light_hr'][1]), True)
+
+    def test_material_maps_lights_only_a_lit_map(self) -> None:
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'textures'))
+            dark = Image.new('L', (8, 8), px.LIT)            # nothing over LIT: no light material
+            spec = Image.new('L', (8, 8), 100)
+            m = {'name': 'a'}
+            px.material_maps(m, 'a', d, {'specular': spec, 'emissive': dark})
+            self.assertEqual((m.get('template'), 'emissive' in m, m['specular'], m['min_side']),
+                             (None, False, 'textures/a_specular.png', px.MIN_SIDE))
+            m = {'name': 'b'}
+            px.material_maps(m, 'b', d, {'specular': spec, 'emissive': Image.new('L', (8, 8), px.LIT + 1)})
+            self.assertEqual((m['template'], m['emissive']), ('light', 'textures/b_emissive.png'))
+
+    def test_light_per_unit_albedo(self) -> None:
+        import wt_tracked as wt
+        self.assertEqual(wt.light_rgb(None), (wt.LIGHT_STRENGTH,) * 3)
+        self.assertEqual(wt.light_rgb([10, 0, 0]), (10.0, 0.0, 0.0))
+        for bad in ([0, 0, 0], [-1, 1, 1], [1, 1]):
+            with self.assertRaises(wt.WtModelError):
+                wt.light_rgb(bad)
+
+
+class RotorBlurTests(unittest.TestCase):
+    """A heli rotor's see-through blur is kept (its mesh and its animated texture's frames: xm_model.anim_frames,
+    prep_xmorph.rotor_blur) for a see-through material, not drawn by xm_air_model (its materials are opaque)."""
+
+    def test_txpk_frames(self) -> None:
+        f = b'DDS ' + bytes(range(200))     # the frames are cut, not decoded, here
+        data = b'TxPk' + struct.pack('<HI', 3, len(f)) + f * 3
+        self.assertEqual(xm.txpk_frames(data), [f, f, f])
+        for bad in (data[:-1], b'TxPq' + data[4:], b'TxPk' + struct.pack('<HI', 3, len(f)) + b'XDS ' + f[4:] + f * 2):
+            with self.assertRaises(xm.XmModelError):
+                xm.txpk_frames(bad)
+
+    def test_anim_texture_line_is_found(self) -> None:
+        node = xp.parse('material units_air/x_rotor : base/unlit_transparent_skinned\n{\n technique base\n {\n'
+                        '  pass 0\n  {\n   texture_unit diffuse\n   {\n'
+                        '    anim_texture materials/textures/units_air/x_rotor.dds 5 0.2\n   }\n  }\n }\n}\n')
+        self.assertEqual(xm._values(node, 'anim_texture'), ['materials/textures/units_air/x_rotor.dds 5 0.2'])
+
+    def test_air_model_skips_the_blur(self) -> None:
+        import xm_air_model
+        with tempfile.TemporaryDirectory() as d:
+            P = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], np.float32)
+            arrays = {}
+            for k in range(2):
+                arrays.update({f'p{k}_pos': P, f'p{k}_nrm': np.tile([0, 0, 1.0], (3, 1)).astype(np.float32),
+                               f'p{k}_uv': np.zeros((3, 2), np.float32), f'p{k}_tri': np.array([[0, 1, 2]], np.uint32)})
+            np.savez(os.path.join(d, 'model.npz'), **arrays)
+            info = {'materials': [{'name': 'xm_0', 'albedo': 'a.png', 'specular': 's.png'},
+                                  {'name': 'xm_1', 'transparent': {'blend': 'alpha', 'frames': ['f0.png'],
+                                                                   'frame_time': 0.2}}],
+                    'parts': [{'bone': 'xm_hull', 'material': 0}, {'bone': 'rotor', 'material': 1}]}
+            parts = xm_air_model._parts(d, info)
+            self.assertEqual([(p.material, b) for p, b in parts], [('xm_0', 'xm_hull')])
+
+
+class PrepSelectTests(unittest.TestCase):
+    def test_every_ported_family_is_selected(self) -> None:
+        # the aircraft and walkers name no `like` (only the V603 families need one): their ported rows are prepared
+        import xm_units
+        for family in ('heli', 'jet', 'mech', 'infantry', 'car', 'tracked', 'wheeled', 'emplacement'):
+            with self.subTest(family=family):
+                self.assertEqual({u.key for u in px.select(family, [])},
+                                 {u.key for u in xm_units.ported(family)})
+
+    def test_parts_keep_the_mesh_normals(self) -> None:
+        um = synthetic_unit()
+        um.normals = np.tile([0.0, 0.0, 1.0], (len(um.positions), 1))     # not the faces': the mesh's own
+        sel = np.flatnonzero(um.tri_bone == 'turret_1')
+        pos, nrm, uv, tri = px.part_arrays(um, um.positions * 0.5, sel)
+        self.assertTrue(np.array_equal(nrm, np.tile([0.0, 0.0, 1.0], (len(pos), 1))))
+        self.assertTrue(np.allclose(pos[tri].reshape(-1, 3), um.positions[um.triangles[sel]].reshape(-1, 3) * 0.5))
 
 
 def _box(c, h) -> tuple[np.ndarray, np.ndarray]:  # noqa: ANN001
