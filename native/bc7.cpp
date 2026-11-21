@@ -85,25 +85,30 @@ struct Fit {
 using Px = int[16][3];
 
 void line_ends(const Px& px, const int* members, int n, int* e0, int* e1) {
-    int64_t s[3] = {0, 0, 0};
-    for (int k = 0; k < n; ++k)
-        for (int c = 0; c < 3; ++c) s[c] += px[members[k]][c];
-    int64_t cov[3][3] = {};
+    // bc7.py's sum of (n p - s)(n p - s)^T over the members is n^2 sum(p p^T) - n s s^T: the same integers, one pass
+    int32_t s32[3] = {0, 0, 0}, pp[6] = {0, 0, 0, 0, 0, 0}, mn[3] = {255, 255, 255}, mx[3] = {0, 0, 0};
     for (int k = 0; k < n; ++k) {
-        int64_t d[3];
-        for (int c = 0; c < 3; ++c) d[c] = n * px[members[k]][c] - s[c];
-        for (int a = 0; a < 3; ++a)
-            for (int b = 0; b < 3; ++b) cov[a][b] += d[a] * d[b];
-    }
-    int span[3];
-    for (int c = 0; c < 3; ++c) {
-        int lo = 255, hi = 0;
-        for (int k = 0; k < n; ++k) {
-            lo = std::min(lo, px[members[k]][c]);
-            hi = std::max(hi, px[members[k]][c]);
+        const int* q = px[members[k]];
+        s32[0] += q[0];
+        s32[1] += q[1];
+        s32[2] += q[2];
+        pp[0] += q[0] * q[0];
+        pp[1] += q[0] * q[1];
+        pp[2] += q[0] * q[2];
+        pp[3] += q[1] * q[1];
+        pp[4] += q[1] * q[2];
+        pp[5] += q[2] * q[2];
+        for (int c = 0; c < 3; ++c) {
+            mn[c] = std::min(mn[c], q[c]);
+            mx[c] = std::max(mx[c], q[c]);
         }
-        span[c] = hi - lo;
     }
+    const int64_t s[3] = {s32[0], s32[1], s32[2]};
+    static const int AT[3][3] = {{0, 1, 2}, {1, 3, 4}, {2, 4, 5}};
+    int64_t cov[3][3];
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b) cov[a][b] = (int64_t)n * n * pp[AT[a][b]] - n * s[a] * s[b];
+    const int span[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
     int axis = 0;
     for (int c = 1; c < 3; ++c)
         if (span[c] > span[axis]) axis = c;
@@ -131,7 +136,10 @@ void line_ends(const Px& px, const int* members, int n, int* e0, int* e1) {
     }
 }
 
-int64_t assign(const Px& px, const int* members, int n, const int* e0, const int* e1, int ibits, int* idx) {
+// The squared error of the nearest palette entry per member (the lower index of equals), the indices into `idx` when
+// given. Stops once the error reaches `bound` (the partition ranking's cut: it can no longer place), returning it.
+int64_t assign(const Px& px, const int* members, int n, const int* e0, const int* e1, int ibits, int* idx,
+               int64_t bound = INT64_MAX) {
     const int* ws = weights(ibits);
     const int count = 1 << ibits;
     int pal[16][3];
@@ -140,15 +148,20 @@ int64_t assign(const Px& px, const int* members, int n, const int* e0, const int
     int64_t err = 0;
     for (int k = 0; k < n; ++k) {
         const int* p = px[members[k]];
-        int64_t best = INT64_MAX;
+        int32_t best = INT32_MAX;  // at most 3 x 255^2
         int at = 0;
         for (int j = 0; j < count; ++j) {
-            int64_t d0 = p[0] - pal[j][0], d1 = p[1] - pal[j][1], d2 = p[2] - pal[j][2];
-            int64_t d = d0 * d0 + d1 * d1 + d2 * d2;
-            if (d < best) { best = d; at = j; }
+            const int32_t d0 = p[0] - pal[j][0], d1 = p[1] - pal[j][1], d2 = p[2] - pal[j][2];
+            const int32_t d = d0 * d0 + d1 * d1 + d2 * d2;
+            if (d < best) {
+                best = d;
+                at = j;
+                if (d == 0) break;  // nothing later is less
+            }
         }
         err += best;
         if (idx) idx[k] = at;
+        if (err >= bound) return err;
     }
     return err;
 }
@@ -339,23 +352,34 @@ void encode_block(const Px& px, uint8_t* out) {
     int best_mode = 6, best_part = 0;
     Fit best_fits[2] = {six, Fit{}};
     if (six.err > GOOD) {
-        int64_t score[64];
-        int order[64];
+        // bc7.py scores all 64 and sorts by (score, partition); the first CANDIDATES of that are kept here as they
+        // come (partitions in order: a later one of an equal score never displaces), and a partition's scoring stops
+        // once it reaches the last kept score: the same partitions, in the same order.
+        int64_t kept_score[CANDIDATES];
+        int kept[CANDIDATES], nkept = 0;
         for (int p = 0; p < 64; ++p) {
-            score[p] = 0;
-            order[p] = p;
-            for (int s = 0; s < 2; ++s) {
+            const int64_t bound = nkept == CANDIDATES ? kept_score[CANDIDATES - 1] : INT64_MAX;
+            int64_t score = 0;
+            for (int s = 0; s < 2 && score < bound; ++s) {
                 int members[16], n = 0;
                 for (int i = 0; i < 16; ++i)
                     if (((P2[p] >> i) & 1) == s) members[n++] = i;
                 int e0[3], e1[3];
                 line_ends(px, members, n, e0, e1);
-                score[p] += assign(px, members, n, e0, e1, 3, nullptr);
+                score += assign(px, members, n, e0, e1, 3, nullptr, bound == INT64_MAX ? INT64_MAX : bound - score);
             }
+            if (score >= bound) continue;
+            int at = nkept < CANDIDATES ? nkept++ : CANDIDATES - 1;
+            while (at > 0 && kept_score[at - 1] > score) {
+                kept_score[at] = kept_score[at - 1];
+                kept[at] = kept[at - 1];
+                --at;
+            }
+            kept_score[at] = score;
+            kept[at] = p;
         }
-        std::sort(order, order + 64, [&](int a, int b) { return score[a] != score[b] ? score[a] < score[b] : a < b; });
-        for (int r = 0; r < CANDIDATES; ++r) {
-            const int p = order[r];
+        for (int r = 0; r < nkept; ++r) {
+            const int p = kept[r];
             int groups[2][16], counts[2] = {0, 0};
             for (int i = 0; i < 16; ++i) {
                 int s = (P2[p] >> i) & 1;
