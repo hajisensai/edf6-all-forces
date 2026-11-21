@@ -21,7 +21,8 @@
 // The word: "2;v=<version>;f=<features, hex>;r=<VanillaRecruit 0|1>;c=<NpcFreeSquadCover 0|1>;
 //            s=<ScopeSpread 0|1>,<ScopeSniperHipSpread>,<ScopeSniperHipMinSpread>,<ScopeHipSpread>,<ScopeAimSpread>",
 // the four numbers in units of 1/10000 (whole numbers: no locale's decimal point in the word). "1;" was the word before
-// the s field; an older build's word is no word here and ours none there (the builds notice names that member).
+// the s field. An older build never shares a room with this one: the "2;" word came with room protocol 11 (mod_room.h
+// kAllForcesRoomProtocol), so a build speaking "1;" is refused at the room's door rather than played by its own ini.
 #pragma once
 #include "scope_spread_logic.h"
 #include <cstddef>
