@@ -49,6 +49,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 
+import alpha_maps  # noqa: E402
 import mesh_normals  # noqa: E402
 import pbr_maps  # noqa: E402
 
@@ -368,7 +369,7 @@ def read_source(path: str) -> Source:
                     continue
                 if t[0] == 'newmtl':
                     cur = mtl.setdefault(t[1].strip(), {})
-                elif cur is not None and t[0].startswith('map_') and len(t) > 1:
+                elif cur is not None and (t[0].startswith('map_') or t[0] in ('d', 'Tr')) and len(t) > 1:
                     cur[t[0]] = t[1].strip()
     if tn and len(tn) != len(tv):
         raise ValueError(f'{path}: {len(tv) - len(tn)} faces without normals beside {len(tn)} with')
@@ -542,6 +543,24 @@ def texture_set(src: Source, material: str) -> dict[str, str]:
     return out
 
 
+def alpha_of(src: Source, material: str) -> dict | None:
+    """The source material's model.json 'alpha' without its map (pylib/alpha_maps.py), None: opaque. Its opacity is the
+    MTL's `d` (or 1 - `Tr`) times its `map_d` (a grey map; War Thunder's `<stem>_c_a.png`): a `d` under 1 blends (War
+    Thunder's glass, `d 0.15`), a map_d alone is classified by its texels (a net's or a track's black and white cut out,
+    a grey map blends)."""
+    from PIL import Image
+    m = src.mtl.get(material, {})
+    factor = float(m['d']) if 'd' in m else 1.0 - float(m['Tr']) if 'Tr' in m else 1.0
+    alpha = None
+    if m.get('map_d'):
+        path = os.path.join(os.path.dirname(src.path), m['map_d'])
+        if not os.path.isfile(path):
+            raise ValueError(f'{material}: {m["map_d"]} not found')
+        with Image.open(path) as im:
+            alpha = np.asarray(im.convert('L'))
+    return alpha_maps.classify(alpha, factor)
+
+
 def occlusion_png(src_file: str, out_file: str) -> None:
     """The occlusion map rescaled so that its black is OCC_FLOOR (pbr_maps.occlusion_floor)."""
     from PIL import Image
@@ -588,11 +607,14 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         if not sel.any():
             continue
         maps = texture_set(src, m)
+        alpha = alpha_of(src, m)
         for side in ('L', 'R', None):
             tsel = sel & (tri_node == f'track_{side.lower()}') if side else sel & ~np.isin(tri_node, ['track_l', 'track_r'])
             if not tsel.any():
                 continue
-            key = (tuple(sorted(maps.items())), side)
+            if side and alpha and alpha['mode'] != alpha_maps.MASK:
+                raise ValueError(f'{m}: a track material that blends (the native track material can only cut out)')
+            key = (tuple(sorted(maps.items())), json.dumps(alpha, sort_keys=True), side)
             if key not in mat_key:
                 files = {}
                 for kind, f in maps.items():
@@ -610,6 +632,12 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
                     name += f'_{len(mat_specs)}'
                 mat_key[key] = len(mat_specs)
                 mat_specs.append({'name': name, 'template': f'v603_kyata_{side}' if side else 'v603_body', **files})
+                if alpha:
+                    entry = dict(alpha)
+                    if src.mtl[m].get('map_d'):
+                        entry['map'] = 'textures/' + os.path.basename(src.mtl[m]['map_d'])
+                        shutil.copyfile(os.path.join(folder, src.mtl[m]['map_d']), os.path.join(out, entry['map']))
+                    mat_specs[-1]['alpha'] = entry
             tri_material[tsel] = mat_key[key]
 
     # parts: one per (bone, material), wheels named as tracked_collision reads them

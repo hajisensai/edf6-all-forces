@@ -37,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 
+import alpha_maps  # noqa: E402
 import gltf  # noqa: E402
 import mesh_normals  # noqa: E402
 import pbr_maps  # noqa: E402
@@ -205,15 +206,16 @@ def role_of(m: Model, path: str) -> str | None:
     return 'base'
 
 
-def _texture(mat: gltf.Material, out_dir: str, name: str) -> str | None:
-    """The material's base colour as a file in textures/ (PNG, its own size), None: it has none."""
+def _texture(mat: gltf.Material, out_dir: str, name: str, alpha: dict | None = None) -> str | None:
+    """The material's base colour as a file in textures/ (PNG, its own size), None: it has none. See-through (`alpha`,
+    pylib/alpha_maps.py): RGBA, its A the opacity model.json's 'alpha' reads (no separate map)."""
     from PIL import Image
     if mat.texture is None:
         return None
     with Image.open(io.BytesIO(mat.texture)) as im:
         im = im.convert('RGBA')
         rel = f'textures/{name}.png'
-        im.convert('RGB').save(os.path.join(out_dir, rel), optimize=True)
+        (im if alpha else im.convert('RGB')).save(os.path.join(out_dir, rel), optimize=True)
     return rel
 
 
@@ -470,16 +472,24 @@ def prepare(m: Model, src: str, out: str) -> dict:
             if mi not in mat_of:
                 name = f'{m.kind}_{mi}'
                 mat = scene.materials[mi]
-                albedo = _texture(mat, out, name) or _plain(mat, out, name)
+                alpha = alpha_maps.of_gltf(mat)
+                albedo = _texture(mat, out, name, alpha) or _plain(mat, out, name)
                 mat_of[mi] = len(materials)
                 materials.append({'name': f'edf6vc_{name}', 'template': 'v603_body', 'albedo': albedo,
                                   'source': mat.name})
+                if alpha:
+                    if mat.texture is None and alpha['mode'] == alpha_maps.MASK:
+                        raise ValueError(f'{m.kind}: material {mat.name} cuts out (MASK) with no base colour texture')
+                    materials[-1]['alpha'] = alpha
                 normal = _normal(mat, m, out, name)
                 if normal:
                     materials[-1]['normal'] = normal
                 materials[-1].update(_surface(mat, out, name))
                 materials[-1].update(_emissive(mat, out, name, albedo))
-            tri = scene.triangles[sel]
+                if alpha and materials[-1]['template'] == 'light':
+                    # no stock host both glows and is see-through (wt_tracked.template refuses it at install)
+                    raise ValueError(f'{m.kind}: material {mat.name} glows and is see-through ({alpha["mode"]})')
+            tri =scene.triangles[sel]
             idx, inv = np.unique(tri, return_inverse=True)
             if N is not None and np.isfinite(N[idx]).all() and np.any(N[idx]):
                 nrm = N[idx]            # the source's own

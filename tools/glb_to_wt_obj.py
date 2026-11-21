@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 
+import alpha_maps  # noqa: E402
 import gltf  # noqa: E402
 import pbr_maps  # noqa: E402
 import texfile_accel  # noqa: E402
@@ -166,6 +167,20 @@ def convert(kind: str, src: str, out: str) -> dict:
             c = tuple(int(round(255 * min(1.0, max(0.0, v)) ** (1 / 2.2))) for v in m.base[:3])
             Image.new('RGB', (4, 4), c).save(os.path.join(out, 'textures', f'{name}_c.jpg'))
         mtl.append(f'newmtl {name}\nmap_Kd textures/{name}_c.jpg\n')
+        # its opacity as War Thunder's exports give it (prep_wt_tracked.alpha_of reads it back): `d` the factor and
+        # `map_d` the base colour's A, a cut-out's (MASK) cut at its cutoff, so that the map alone says mask
+        alpha = alpha_maps.of_gltf(m)
+        if alpha:
+            a = alpha_maps.texture_alpha(m.texture)
+            if alpha['mode'] == alpha_maps.MASK:
+                if a is None:
+                    raise SystemExit(f'{kind}: material {m.name} cuts out (MASK) with no base colour alpha')
+                a = np.where(a >= alpha['cutoff'] * 255.0, 255, 0).astype(np.uint8)
+            else:
+                mtl[-1] += f'd {alpha["factor"]:.6g}\n'
+            if a is not None:
+                Image.fromarray(a, 'L').save(os.path.join(out, 'textures', f'{name}_a.png'), optimize=True)
+                mtl[-1] += f'map_d textures/{name}_a.png\n'
         if m.normal is not None:     # the normal map in the game's green, lossless (decoded to be flipped)
             if not s.normal_green:
                 raise SystemExit(f'{kind}: material {m.name} has a normal map; measure its green (Source.normal_green)')

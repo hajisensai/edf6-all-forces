@@ -61,6 +61,7 @@ class Material:
     specular: tuple[float, float, float] = (1.0, 1.0, 1.0)     # specularFactor, glossinessFactor
     glossiness: float = 1.0
     emissive_texture: bytes | None = None   # emissiveTexture's image (sRGB RGB, times `emissive`), None: none
+    alpha_cutoff: float = 0.5       # alphaCutoff (MASK only; glTF's default)
 
 
 @dataclass
@@ -178,7 +179,8 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
                             maps['normal'], 'specular' if sg is not None else 'metal', maps['metal_rough'],
                             maps['occlusion'], float(m.get('occlusionTexture', {}).get('strength', 1.0)),
                             maps['spec_gloss'], tuple(float(x) for x in (sg or {}).get('specularFactor', (1.0,) * 3)),
-                            float((sg or {}).get('glossinessFactor', 1.0)), maps['emissive']))
+                            float((sg or {}).get('glossinessFactor', 1.0)), maps['emissive'],
+                            float(m.get('alphaCutoff', 0.5))))
     return out
 
 
