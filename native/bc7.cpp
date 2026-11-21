@@ -12,9 +12,9 @@
 
 namespace {
 
-// bc7.py's constants (POWER, UNIT, REFITS, GOOD, CANDIDATES, WEIGHTS, P2, A2)
-constexpr int64_t POWER = 4, UNIT = 1024, REFITS = 2, GOOD = 96;
-constexpr int CANDIDATES = 2;
+// bc7.py's constants (POWER, UNIT, REFITS, GOOD, CANDIDATES, SOLID_REACH, WEIGHTS, P2, A2)
+constexpr int64_t POWER = 4, UNIT = 1024, REFITS = 2, GOOD = 16;
+constexpr int CANDIDATES = 2, SOLID_REACH = 2;
 constexpr int W2[4] = {0, 21, 43, 64};
 constexpr int W3[8] = {0, 9, 18, 27, 37, 46, 55, 64};
 constexpr int W4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
@@ -201,7 +201,56 @@ bool refit(const Px& px, const int* members, int n, const int* idx, int ibits, i
     return true;
 }
 
+// bc7._solid: a subset of one colour
+Fit solid(const Px& px, const int* members, int n, int mode) {
+    static const int PB[3][4][2] = {{{1, 1}}, {{0, 0}, {1, 1}}, {{0, 0}, {0, 1}, {1, 0}, {1, 1}}};
+    static const int PN[3] = {1, 2, 4};
+    const Kind kd = kind_of(mode);
+    const int* t = px[members[0]];
+    const int top = (1 << kd.cbits) - 1;
+    const int* ws = weights(kd.ibits);
+    Fit best{};
+    bool have = false;
+    for (int k = 0; k < PN[kd.how]; ++k) {
+        const int p0 = PB[kd.how][k][0], p1 = PB[kd.how][k][1];
+        for (int j = 0; j < (1 << kd.ibits); ++j) {
+            const int w = ws[j];
+            Fit got{};
+            got.p0 = p0;
+            got.p1 = p1;
+            for (int c = 0; c < 3; ++c) {
+                const int b0 = QUANT.t[kd.cbits - 6][p0][t[c]], b1 = QUANT.t[kd.cbits - 6][p1][t[c]];
+                int dbest = -1, c0 = 0, c1 = 0;
+                for (int a0 = std::max(0, b0 - SOLID_REACH); a0 <= std::min(top, b0 + SOLID_REACH); ++a0) {
+                    const int x0 = expand((a0 << 1) | p0, kd.cbits + 1);
+                    for (int a1 = std::max(0, b1 - SOLID_REACH); a1 <= std::min(top, b1 + SOLID_REACH); ++a1) {
+                        const int x1 = expand((a1 << 1) | p1, kd.cbits + 1);
+                        int d = (((64 - w) * x0 + w * x1 + 32) >> 6) - t[c];
+                        if (d < 0) d = -d;
+                        if (dbest < 0 || d < dbest) { dbest = d; c0 = a0; c1 = a1; }
+                    }
+                }
+                got.err += (int64_t)dbest * dbest;
+                got.q0[c] = c0;
+                got.q1[c] = c1;
+            }
+            got.err *= n;
+            for (int m = 0; m < n; ++m) got.idx[m] = j;
+            if (!have || got.err < best.err) {
+                best = got;
+                have = true;
+            }
+        }
+    }
+    return best;
+}
+
 Fit fit(const Px& px, const int* members, int n, int mode) {
+    bool flat = true;
+    for (int k = 1; k < n && flat; ++k)
+        for (int c = 0; c < 3; ++c)
+            if (px[members[k]][c] != px[members[0]][c]) flat = false;
+    if (flat) return solid(px, members, n, mode);
     int e0[3], e1[3];
     line_ends(px, members, n, e0, e1);
     Fit best = quantize(px, members, n, e0, e1, mode);

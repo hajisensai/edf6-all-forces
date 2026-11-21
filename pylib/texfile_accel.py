@@ -484,6 +484,7 @@ def decode_dxt1(data: bytes, width: int, height: int) -> Any:
 
 
 def texture_dds(path: str) -> bytes:
+    """A cockpit colour map file as a DDS: a .dds as it is (validated), a PNG / JPEG as BC7_UNORM."""
     data = Path(path).read_bytes()
     key = hashlib.sha256(data).hexdigest()
     cached = _dds_cache.get(key)
@@ -502,9 +503,9 @@ def texture_dds(path: str) -> bytes:
                 image = texfile.Image(source.width, source.height, bytearray(source.convert('RGBA').tobytes()))
         else:
             image = texfile.decode_png(data)
-        encoded = dxt1_dds(image)
+        encoded = bc7_dds(image)
     elif data[:2] == b'\xff\xd8':
-        encoded = dxt1_dds(texfile.decode_jpeg(data))
+        encoded = bc7_dds(texfile.decode_jpeg(data))
     else:
         raise texfile.TextureError(f'{path}: neither PNG nor JPEG')
     return _dds_cache.put(key, encoded)

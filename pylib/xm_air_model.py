@@ -137,7 +137,7 @@ def _textures(folder: str, key: str, material: dict) -> tuple[dict[str, bytes], 
     rml = texfile.Image(4, 4, bytearray(bytes((*ROUGH_METAL, 255)) * 16))
     nm = (wt._normal_dds(os.path.join(folder, material['normal']), side) if 'normal' in material
           else texfile_accel.bc5_normal_dds(flat))
-    files = {f'{stem}_df.dds': wt._dds_of(os.path.join(folder, material['albedo']), side),
+    files = {f'{stem}_df.dds': wt._albedo_dds(os.path.join(folder, material['albedo']), side),
              f'{stem}_nm.dds': nm, f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
     return files, dict(zip(BODY_SLOTS, files))
 

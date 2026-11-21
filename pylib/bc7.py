@@ -16,7 +16,9 @@ axis, in 1/UNIT steps), the extremes of the pixels' projections on the line thro
 choice quantized (nearest code, the lower of equals), the nearest palette entry per pixel (the lower index of equals),
 then up to REFITS least-squares refits of the endpoints to the indices while they lower the error. A block mode 6
 already gives within GOOD keeps it; otherwise each partition is scored by the unquantized 3-bit fit of both subsets and
-the CANDIDATES best (the lower partition of equals) are encoded in modes 1 and 3.
+the CANDIDATES best (the lower partition of equals) are encoded in modes 1 and 3. A subset of one colour skips all
+that: every p-bit choice and index with the codes near its own that interpolate nearest (_solid; exact but for
+black in mode 6, whose p-bit 1 makes every code odd).
 
     encode_block(px) -> bytes            16 (r, g, b) pixels, row-major -> one 16-byte block
     encode_level(rgba, w, h) -> bytes    a mip level, blocks row by row, edge pixels repeated past the image
@@ -59,8 +61,9 @@ MODES = ((3, 4, 0, 0, 4, 0, 1, 0, 3, 0), (2, 6, 0, 0, 6, 0, 0, 1, 3, 0), (3, 6, 
 POWER = 4
 UNIT = 1024
 REFITS = 2
-GOOD = 96            # mode 6 within this (a mean squared error of 2 per channel) skips the two-subset search
+GOOD = 16            # mode 6 within this (a mean squared error of 1/3 per channel) skips the two-subset search
 CANDIDATES = 2
+SOLID_REACH = 2       # a one-colour subset tries codes this far either side of the nearest
 
 
 def subset(subsets: int, partition: int, i: int) -> int:
@@ -285,7 +288,37 @@ def _refit(px, members, idx, ibits):  # noqa: ANN001, ANN202
     return e0, e1
 
 
+def _solid(px, members, mode):  # noqa: ANN001, ANN202
+    """A subset of one colour: per p-bit choice and palette index, each channel's pair of codes (within SOLID_REACH of
+    the nearest one) whose interpolation comes nearest (the first of equals), the least error kept."""
+    t = px[members[0]]
+    cbits, how, ibits = _KIND[mode]
+    top = (1 << cbits) - 1
+    best = None
+    for p0, p1 in _PBITS[how]:
+        for j, w in enumerate(WEIGHTS[ibits]):
+            err, q0, q1 = 0, [0, 0, 0], [0, 0, 0]
+            for c in range(3):
+                b0, b1 = _QUANT[cbits, p0][t[c]], _QUANT[cbits, p1][t[c]]
+                got = None
+                for a0 in range(max(0, b0 - SOLID_REACH), min(top, b0 + SOLID_REACH) + 1):
+                    x0 = _expand((a0 << 1) | p0, cbits + 1)
+                    for a1 in range(max(0, b1 - SOLID_REACH), min(top, b1 + SOLID_REACH) + 1):
+                        x1 = _expand((a1 << 1) | p1, cbits + 1)
+                        d = abs((((64 - w) * x0 + w * x1 + 32) >> 6) - t[c])
+                        if got is None or d < got[0]:
+                            got = (d, a0, a1)
+                err += got[0] * got[0]
+                q0[c], q1[c] = got[1], got[2]
+            err *= len(members)
+            if best is None or err < best[0]:
+                best = (err, q0, q1, p0, p1, [j] * len(members))
+    return best
+
+
 def _fit(px, members, mode):  # noqa: ANN001, ANN202
+    if all(px[i] == px[members[0]] for i in members):
+        return _solid(px, members, mode)
     e0, e1 = _line_ends(px, members)
     best = _quantize(px, members, e0, e1, mode)
     for _ in range(REFITS):

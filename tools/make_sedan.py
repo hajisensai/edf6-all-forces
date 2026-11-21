@@ -149,8 +149,9 @@ def model(game):
     output = Rab(arc.version, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [RabFile(MODEL, 1, 0, cmpl_compress(mdb_write(host)))])
     graft.copy_texture_members(output, arc, [t.filename for t in host.textures if t.filename.lower() in {f.name.lower() for f in arc.files}])
     graft.copy_texture_members(output, city, [t.filename for t in host.textures if t.filename.lower() in {f.name.lower() for f in city.files}])
-    # Map assets use an extra final .lod mip and one BC7/DX10 glass texture. Normalize
-    # those to the vehicle loader's HD/.lod contract; RGBA preserves the glass alpha.
+    # Map assets use an extra final .lod mip: every texture is re-paired to the vehicle loader's HD/.lod contract
+    # (cockpits.add_textures -> texfile.texture_pair). The BC7_UNORM window glass stays BC7 (alpha kept; texfile
+    # reads DX10 BC7 since docs/model-quality-1121-bc7.md); a texture texfile refuses, and the fpr maps, become RGBA.
     for texture in host.textures:
         member = next((f for f in output.files if f.name.lower() == texture.filename.lower()), None)
         if member is None:continue

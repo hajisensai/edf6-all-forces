@@ -327,8 +327,15 @@ def _image(path: str, min_side: int = 0):  # noqa: ANN202 - texfile.Image
 
 
 def _dds_of(path: str, min_side: int = 0) -> bytes:
+    """A parameter map (the occlusion) as DXT1."""
     import texfile_accel
     return texfile_accel.dxt1_dds(_image(path, min_side))
+
+
+def _albedo_dds(path: str, min_side: int = 0) -> bytes:
+    """A colour map as BC7_UNORM, the format of the stock BC7 albedo maps (docs/model-quality-1121-bc7.md)."""
+    import texfile_accel
+    return texfile_accel.bc7_dds(_image(path, min_side))
 
 
 def _normal_dds(path: str, min_side: int = 0) -> bytes:
@@ -396,7 +403,7 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     stem = m['name'].lower()
     path = lambda key: os.path.join(spec.folder, m[key]) if m.get(key) else None   # noqa: E731
     side = int(m.get('min_side', 0))
-    out = {'albedo': (f'{stem}_col.dds', _dds_of(path('albedo'), side))}
+    out = {'albedo': (f'{stem}_col.dds', _albedo_dds(path('albedo'), side))}
     if m.get('normal'):
         out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal'), side))
     else:

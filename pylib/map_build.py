@@ -54,11 +54,12 @@ def _dxt5_dds(rgba: np.ndarray) -> bytes:
 
 
 def texture_dds(image, mode: str) -> bytes:  # noqa: ANN001 - PIL image
-    """The DDS of a scene texture: DXT1 when opaque, DXT5 when its alpha counts (clip / blend)."""
+    """The DDS of a scene texture: BC7_UNORM when opaque (docs/model-quality-1121-bc7.md), DXT5 when its alpha
+    counts (clip / blend: the BC7 encoder is opaque only)."""
     rgba = np.asarray(image.convert('RGBA'), dtype=np.uint8)
     if mode == 'opaque':
         h, w = rgba.shape[:2]
-        return texfile_accel.dxt1_dds(texfile.Image(w, h, bytearray(rgba.tobytes())))
+        return texfile_accel.bc7_dds(texfile.Image(w, h, bytearray(rgba.tobytes())))
     return _dxt5_dds(np.ascontiguousarray(rgba))
 
 

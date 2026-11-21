@@ -348,7 +348,7 @@ def _material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     import texfile
     stem = m['name'].lower()
     side = xm_units.TEXTURE_MIN_SIDE   # resampled before block compression, as every X-Morph map
-    out = {'albedo': (f'{stem}_col.dds', wt._dds_of(os.path.join(spec.folder, m['albedo']), side))}
+    out = {'albedo': (f'{stem}_col.dds', wt._albedo_dds(os.path.join(spec.folder, m['albedo']), side))}
     out['normal'] = ((f'{stem}_nor.dds', wt._normal_dds(os.path.join(spec.folder, m['normal']), side)) if m.get('normal')
                      else ('edf6vc_flat_nor.dds', texfile.solid_bc5()))
     out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds', wt._param_dds(None, PLAIN_RMO))
