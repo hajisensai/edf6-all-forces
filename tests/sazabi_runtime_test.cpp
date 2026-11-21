@@ -47,7 +47,7 @@ void NozzleFlames(const unsigned char*,const float (*)[16],int,const float (*)[2
 void FlareFlames(const unsigned char*,const float (*)[3],const float (*)[3],int,ULONGLONG) noexcept {}
 PluginBody BodyOf(const void*) noexcept { return PluginBody::sazabi; }
 bool Body506Ok() noexcept { return true; }
-void BoardingRequest(unsigned char*) noexcept {}
+bool BoardingRequest(unsigned char*) noexcept { return false; }
 bool DrillCharge(const unsigned char*,const float*,const float*,float) noexcept { return false; }
 bool EmcRoundReady(EmcRound) noexcept { return false; }
 RoundObj EmcFire(EmcRound,const unsigned char*,const float*,const float*,float damage) noexcept {

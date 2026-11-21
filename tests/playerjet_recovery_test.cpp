@@ -47,7 +47,8 @@ float GearDragShare(const void*) noexcept { return 0.0f; }
 GearState GearStep(unsigned char*,bool,float,bool) noexcept { return GearState{}; }
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 void BodyAttitude(const unsigned char*,const float*,const float*,float,float,float* omega) noexcept { omega[0]=omega[1]=omega[2]=0.0f; }
-float GroundClearance(const float*) noexcept { return 500.0f; }
+float testGround=-1.0e9f;   // the ground's height in the catch scenes that set one (else 500 m under everything)
+float GroundClearance(const float* p) noexcept { return testGround>-1.0e8f ? p[1]-testGround : 500.0f; }
 Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 PlayArea MapPlayArea() noexcept { return PlayArea{{-2000,-2000},{2000,2000},false,0.0f,false}; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
@@ -61,7 +62,9 @@ bool SeatPoint(const unsigned char* v,unsigned,float* at,float* reach) noexcept 
 }
 void PressBoardButton(unsigned char*) noexcept { ++boardPresses; }
 // The catch's capture (boarding.cpp): counted, never under way across frames here.
-void BoardingRequest(unsigned char*) noexcept { ++boardRequests; }
+bool boardRefuses=false,boardReady=true;
+bool BoardingRequest(unsigned char*) noexcept { ++boardRequests;return !boardRefuses; }
+bool BoardingReady() noexcept { return boardReady; }
 bool BoardingUnderway() noexcept { return false; }
 // Unrelated stores, weapons, spawning and NPC paths must not be reached by these recovery scenarios.
 void MissingRecoveryDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
@@ -287,6 +290,19 @@ int main() {
     const float origin[3]={0,0,0};
     Check(CatchChoice(origin)==&jet::jets[0] && HailChoice(origin,nullptr,nullptr)==&jet::jets[0],
           "existing real-piloted aircraft is eligible for catch and hail");
+    // The catch's capture is the boarding gun's way in: with its hook not in no jet is sent (it used to fly in and wait
+    // out kCatchMostMs with nothing to take the player aboard); with it, the same parachute gets one.
+    {
+        const float zero[3]={0,0,0};
+        std::memcpy(recoveryHuman+kPosition,zero,12);
+        bail=Bailout{};bail.state=Eject::chute;bail.catchWith=pjet::kCatchPlayerFighter;bail.at=recoveryTime-kCatchAfterMs-1;
+        boardReady=false;Catch(recoveryHuman,recoveryTime);boardReady=true;
+        Check(!bail.caught && !catchFlight.v && bail.catchWith==pjet::kCatchNone,"no boarding hook: no catch jet sent");
+        bail=Bailout{};bail.state=Eject::chute;bail.catchWith=pjet::kCatchPlayerFighter;bail.at=recoveryTime-kCatchAfterMs-1;
+        Catch(recoveryHuman,recoveryTime);
+        Check(bail.caught && catchFlight.v==recoveryVehicle,"with the boarding hook: the catch jet is sent");
+        bail=Bailout{};catchFlight=CatchFlight{};
+    }
     recoveryAuthority=false;
     Check(!CatchChoice(origin) && !HailChoice(origin,nullptr,nullptr),"another machine's real pilot is not locally commandeered");
     recoveryAuthority=true;Put<void*>(recoverySeat,kSeatRiderCtrl,nullptr);
@@ -329,6 +345,122 @@ int main() {
     Check(slowest>=kStallFloor,"the catch jet never flies slower than a wing flies (no parachute-speed formation)");
     Check(hardest<=(j.kind->maxG+2.0f)*kG,"no velocity out of nowhere: each frame's change within its lift and engine");
     Check(j.phase==Phase::air && j.autopilot,"it flies on through the capture as it flew");
+    // The catches that are hard for a wing (review 2026-11-21): the production Catch -> AutoFly steps, the parachute as
+    // EjectTick holds it (6 m/s down, its carried speed bled at kChuteBleed), until the capture, the parachute down, or
+    // kCatchMostMs. Each must capture within kCatchMostMs, never under the stall floor, never a velocity change past its
+    // lift and engine, never under kCatchFloor over the ground (less a frame's sink), and not go round more than
+    // `laps` times.
+    struct CatchRun { bool captured=false,landed=false,gaveUp=false; float seconds=0.0f,gap=-1.0f,slowest=1e9f,hardest=0.0f;
+                      float lowest=1e9f,turned=0.0f; };
+    const auto runCatch=[&](const float* bodyAt,const float* bodyVel,const float* humanAt,const float* humanVel0,
+                            const char* name) {
+        CatchRun r;
+        ResetJet(j);j.autopilot=true;j.driven=false;j.stall=false;
+        for(int i=0;i<3;++i){body[i]=bodyAt[i];j.vel[i]=bodyVel[i];human[i]=humanAt[i];humanVelocity[i]=humanVel0[i];}
+        bail=Bailout{};bail.state=Eject::chute;bail.caught=ObjRef::Of(recoveryVehicle);bail.caughtAt=recoveryTime;
+        catchFlight=CatchFlight{recoveryVehicle,{human[0],human[1]-kCatchBelow,human[2]}};
+        boardRequests=0;
+        float heading=std::atan2(j.vel[2],j.vel[0]);
+        const ULONGLONG start=recoveryTime;
+        for(int frame=0;frame<60*50;++frame) {
+            Put<float>(recoveryBone,kBoneWorld506+0x34,body[1]-1.38f);
+            Catch(recoveryHuman,recoveryTime);
+            r.seconds=static_cast<float>(recoveryTime-start)*0.001f;
+            if(boardRequests){float at[3],reach=0.0f;SeatPoint(recoveryVehicle,0,at,&reach);r.gap=vec::Dist(at,human);r.captured=true;break;}
+            if(!bail.caught){r.gaveUp=true;break;}
+            const float was[3]={j.vel[0],j.vel[1],j.vel[2]};
+            AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+            r.slowest=std::fmin(r.slowest,vec::Len(j.vel));
+            const float dv[3]={j.vel[0]-was[0],j.vel[1]-was[1],j.vel[2]-was[2]};
+            r.hardest=std::fmax(r.hardest,vec::Len(dv)*60.0f);
+            const float now=std::atan2(j.vel[2],j.vel[0]);
+            float turn=now-heading;
+            while(turn>kWatchPi)turn-=2.0f*kWatchPi;
+            while(turn< -kWatchPi)turn+=2.0f*kWatchPi;
+            r.turned+=std::fabs(turn);heading=now;
+            for(int i=0;i<3;++i)body[i]+=j.vel[i]/60.0f;
+            if(testGround>-1.0e8f)r.lowest=std::fmin(r.lowest,body[1]-1.38f-testGround);
+            humanVelocity[0]*=1.0f-kChuteBleed/60.0f;humanVelocity[2]*=1.0f-kChuteBleed/60.0f;
+            for(int i=0;i<3;++i)human[i]+=humanVelocity[i]/60.0f;
+            recoveryTime+=16;
+            if(testGround>-1.0e8f && human[1]-testGround<kChuteLand){r.landed=true;break;}   // EjectTick: landed
+        }
+        std::printf("catch %-38s captured %d (gap %.1f m) in %.1f s, landed %d, gave up %d, slowest %.0f, hardest %.0f m/s^2, "
+                    "lowest %.0f m, turned %.0f deg\n",name,r.captured,r.gap,r.seconds,r.landed,r.gaveUp,r.slowest,r.hardest,
+                    r.lowest,r.turned*57.2958f);
+        return r;
+    };
+    const auto wingOk=[&](const CatchRun& r) {
+        return r.slowest>=kStallFloor && r.hardest<=(j.kind->maxG+2.0f)*kG;
+    };
+    {   // the jet the player left: flying on away from them at 150 m/s, 500 m past them, they drift after it
+        const float at[3]={600,400,0},v[3]={150,0,0},h[3]={100,420,0},hv[3]={40,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"self, 500 m past and flying away");
+        Check(r.captured && r.seconds*1000.0f<kCatchMostMs && r.gap<pjet::kCaptureRange,"the jet left turns round and captures its pilot");
+        Check(wingOk(r),"turning round for its pilot it flies as a wing");
+        Check(r.turned<2.0f*kWatchPi*1.5f,"its pilot captured within a lap and a half");
+    }
+    {   // passing abeam, 250 m off, its turn wider than that: it cannot turn in on the first pass
+        const float at[3]={-300,300,-250},v[3]={150,0,0},h[3]={0,300,0},hv[3]={0,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"abeam 250 m, turn wider than that");
+        Check(r.captured && r.seconds*1000.0f<kCatchMostMs && r.gap<pjet::kCaptureRange,"abeam and too close to turn in: it comes round and captures");
+        Check(wingOk(r),"coming round it flies as a wing");
+        Check(r.turned<2.0f*kWatchPi*1.5f,"abeam: captured within a lap and a half");
+    }
+    {   // straight overhead the wrong way, 150 m up and 100 m past
+        const float at[3]={100,450,0},v[3]={160,0,0},h[3]={0,300,0},hv[3]={-20,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"overhead, past and flying away");
+        Check(r.captured && r.seconds*1000.0f<kCatchMostMs,"overhead and past: it comes round and captures");
+        Check(wingOk(r),"overhead: it flies as a wing");
+    }
+    testGround=0.0f;
+    {   // a low parachute (just over kCatchClear at the send) and the jet near: caught before it is down, never under
+        // kCatchFloor
+        const float at[3]={-500,60,0},v[3]={120,0,0},h[3]={0,kCatchClear+20.0f,0},hv[3]={0,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"low parachute, jet 500 m out");
+        Check(wingOk(r) && r.lowest>=kCatchFloor-2.0f,"low: the jet keeps over kCatchFloor");
+        Check(r.captured,"a low parachute with the jet near: captured before it is down");
+    }
+    {   // at kCatchFloor already (the jet comes no lower): the jet passes at its floor, the door within
+        // kCaptureRange of them (down to ~10 m over the ground at best)
+        const float at[3]={-250,40,0},v[3]={120,0,0},h[3]={0,kCatchFloor,0},hv[3]={0,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"parachute at kCatchFloor, jet 250 m out");
+        Check(wingOk(r) && r.lowest>=kCatchFloor-2.0f,"under the floor: the jet keeps over kCatchFloor");
+        Check(r.captured && r.gap<pjet::kCaptureRange,"under the floor: captured from the jet's floor");
+    }
+    {   // diving on a low parachute from high: its dive eased onto kCatchFloor, not levelled only once under it
+        const float at[3]={-400,200,0},v[3]={110,-50,0},h[3]={0,kCatchFloor+2.0f,0},hv[3]={0,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"diving from 200 m on a low parachute");
+        Check(wingOk(r) && r.lowest>=kCatchFloor,"diving on a low parachute: the jet eases onto kCatchFloor, never under it");
+    }
+    {   // a low parachute and the jet far: it cannot be there before the parachute is down. The catch ends with the
+        // parachute, the jet never under kCatchFloor chasing it.
+        const float at[3]={-1500,200,0},v[3]={120,0,0},h[3]={0,kCatchClear+5.0f,0},hv[3]={0,-6,0};
+        const CatchRun r=runCatch(at,v,h,hv,"low parachute, jet 1.5 km out");
+        Check(wingOk(r) && r.lowest>=kCatchFloor-2.0f,"low and far: the jet keeps over kCatchFloor");
+        Check(!r.captured && (r.landed || r.gaveUp),"low and far: no capture, the catch over by the parachute's landing");
+    }
+    testGround=-1.0e9f;
+    // A hailed rotor craft's nose (HailFace, test hub #42): the way it flies while faster than kHailFaceSpeed, so a spot
+    // round the player's side does not take it past them sideways at speed; slow, on the player.
+    {
+        const float at[3]={100,30,0},playerAt[3]={0,0,0},past[3]={0,0,-25},slow[3]={0,0,-2};
+        float face[3];
+        HailFace(at,past,playerAt,face);
+        Check(std::fabs(face[0]-at[0])<1e-4f && face[2]<at[2],"a rotor craft passing the player at 25 m/s faces the way it flies");
+        HailFace(at,slow,playerAt,face);
+        Check(vec::Dist(face,playerAt)<1e-4f,"a rotor craft slower than kHailFaceSpeed faces the player");
+    }
+    // A capture refused (boarding.cpp: not a board-able friend, the player in a vehicle, no seats; or no hook) ends the
+    // catch at once, logged, the parachute going on: it used to press on silently until kCatchMostMs.
+    {
+        const float at[3]={-900,300,40},v[3]={90,0,0},h[3]={0,300,0},hv[3]={0,-6,0};
+        boardRefuses=true;
+        const CatchRun r=runCatch(at,v,h,hv,"capture refused");
+        boardRefuses=false;
+        Check(r.captured && !bail.caught && !catchFlight.v && bail.state==Eject::chute,
+              "a refused capture ends the catch, the parachute goes on");
+    }
     // Its first frame on the autopilot goes on from the velocity its NPC flight had (jet.cpp's entry), not its nose times
     // a catch speed: an aircraft flying +x with its body's rows still +z was turned 90 degrees and sped up in one frame.
     {

@@ -14,7 +14,8 @@ inline float Len3(const float* a) noexcept { return std::sqrt(a[0]*a[0]+a[1]*a[1
 // One step of `dt` s: `vel` (m/s) toward `want`, its speed by at most `accel` m/s^2 along the path, its path turned toward
 // want's direction at most `turn` m/s^2 across it (a rate of turn / speed rad/s). `lateral` (may be null) gets the
 // acceleration across the path this step took (the lift a wing would bank into). From (near) rest it starts along `want`.
-inline void Step(float* vel,const float* want,float accel,float turn,float dt,float* lateral) noexcept {
+// `rate` (rad/s) caps the path's turn when slow (turn / speed grows without bound): no faster than its nose can follow.
+inline void Step(float* vel,const float* want,float accel,float turn,float dt,float* lateral,float rate=1e9f) noexcept {
     if(lateral)lateral[0]=lateral[1]=lateral[2]=0.0f;
     const float speed=Len3(vel),wantSpeed=Len3(want);
     float next=wantSpeed-speed;
@@ -30,7 +31,7 @@ inline void Step(float* vel,const float* want,float accel,float turn,float dt,fl
         const float to[3]={want[0]/wantSpeed,want[1]/wantSpeed,want[2]/wantSpeed};
         float c=dir[0]*to[0]+dir[1]*to[1]+dir[2]*to[2];
         c=c>1.0f ? 1.0f : c< -1.0f ? -1.0f : c;
-        const float angle=std::acos(c),step=turn*dt/speed;
+        const float angle=std::acos(c),step=std::fmin(turn/speed,rate)*dt;
         if(angle<=step)for(int i=0;i<3;++i)dir[i]=to[i];
         else {
             // The unit across the path toward `to` (straight back: turned round over the world's up, else across x).

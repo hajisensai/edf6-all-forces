@@ -1221,7 +1221,8 @@ void Proximity(PJet& j,const float* pos,float clear) noexcept {
 // its last kCatchHoming m wrote its velocity whole (the parachute's drift plus a closing term, its nose held on a fixed
 // heading): a jet at 100+ m/s took a new speed and direction in one frame and slid sideways and down under the player
 // (test hub #42, docs/feedback-2026-11-21-landing-slide.md).
-struct CatchFlight { const void* v; float target[3]; bool hasDoor=false; } catchFlight{};
+// `extending`: going straight on to have room to turn in (pjet_catch.h CatchAim).
+struct CatchFlight { const void* v; float target[3]; bool hasDoor=false,extending=false; } catchFlight{};
 // The board press is retried; a refusal says which of the stock button's gates holds (docs/rescue-re.md: +0x128
 // bit 0, +0x5D0 bit 2, +0x39C) every kCatchSayMs.
 constexpr ULONGLONG kCatchSayMs=2000;
@@ -1287,6 +1288,7 @@ enum class Eject { none, pending, chute };
 constexpr ULONGLONG kCatchAfterMs=4000,kCatchMostMs=45000;
 constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchFloor=30.0f;
 constexpr float kCatchHoming=250.0f;
+constexpr float kCatchEase=150.0f;   // m of run over which its dive toward the player eases off onto kCatchFloor
 struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
     float heading[3],speed;          // the jet left: its nose, its speed (the catch)
@@ -1333,6 +1335,11 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     const float* hv=reinterpret_cast<const float*>(h+kHumanVel);
     if(!bail.caught) {
         if(!Cfg().playerJetCatch || ms-bail.at<kCatchAfterMs || bail.catchWith==pjet::kCatchNone)return;
+        if(!BoardingReady()) {   // its capture is the boarding gun's way in (Catch below): without it no jet is sent
+            bail.catchWith=pjet::kCatchNone;
+            Log("PJET catch: the boarding hook is not in (no capture to take the player aboard); the parachute goes on");
+            return;
+        }
         const float clear=GroundClearance(p);
         if(clear!=kNoGround && clear<kCatchClear) {
             bail.catchWith=pjet::kCatchNone;
@@ -1390,7 +1397,11 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     // riding point and the board button pressed, until seated or its try is out), the jet flying on as it flies.
     if(!catchReachAt){catchReachAt=ms;Log("PJET catch: the door passes %.1f m from the player (capture %.1f m): boarding",gap,
                                           std::fmax(reach,pjet::kCaptureRange));}
-    if(!BoardingUnderway())BoardingRequest(v);
+    if(!BoardingUnderway() && !BoardingRequest(v)) {   // refused (logged by boarding.cpp): nothing will take them in
+        Log("PJET catch: the capture was refused; the catch is off, the parachute goes on");
+        bail.caught=ObjRef{};bail.catchWith=pjet::kCatchNone;bail.self=false;catchFlight=CatchFlight{};
+        return;
+    }
     if(ms-catchReachAt>1000 && ms-catchSaidAt>kCatchSayMs) {
         catchSaidAt=ms;
         Log("PJET catch: not aboard yet, %.1f m from the seat; gates +0x128=%02x +0x5D0=%08x +0x39C=%d",gap,
@@ -1631,8 +1642,19 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     float to[3]={catchFlight.target[0]-pos[0],catchFlight.target[1]-pos[1],catchFlight.target[2]-pos[2]};
     if(clear!=kNoGround && clear<kCatchFloor && to[1]<0.0f)to[1]=0.0f;   // not into the ground
     const float dist=Len(to);
-    if(Normalize(to)){std::memcpy(j.aim,to,12);j.hasAim=true;}
-    j.throttle=dist>kCatchHoming ? 1.0f : 0.7f;
+    // Its pass planned on its tightest turn at its lift now (Air: maxG, less under its corner speed; pjet_catch.h
+    // CatchAim: straight on while they are inside that turn, banked turns, no loops). Full throttle
+    // only on its way straight at them from beyond kCatchHoming; turning, and its pass, at its corner speed (its
+    // tightest turn: at full throttle a fighter ran up to 250 m/s, its turn 1 km across, and never came round).
+    const float speed=Len(j.vel),share=j.kind ? std::fmin(1.0f,speed/j.kind->corner) : 1.0f;
+    const float radius=j.kind ? speed*speed/std::fmax(j.kind->maxG*kG*share*share,1.0f) : 0.0f;
+    const bool onIt=pjet::CatchAim(j.vel,to,radius,&catchFlight.extending,j.aim);j.hasAim=true;
+    if(clear!=kNoGround) {   // its floor: its dive eased off over kCatchEase m of run toward kCatchFloor, under it a climb
+        const float run=std::hypot(j.aim[0],j.aim[2]),least=Clamp((kCatchFloor-clear)/kCatchEase,-pjet::kCatchSlope,pjet::kCatchSlope);
+        if(run>1e-4f && j.aim[1]/run<least){j.aim[1]=least*run;Normalize(j.aim);}
+    }
+    const float corner=j.kind ? Clamp((j.kind->corner-j.kind->minAir)/(j.kind->top-j.kind->minAir),0.0f,1.0f) : 0.7f;
+    j.throttle=onIt && dist>kCatchHoming ? 1.0f : corner;
     Stick s{};
     s.keys=true;
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);

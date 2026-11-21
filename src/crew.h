@@ -960,7 +960,10 @@ bool IsDreadnought(const void* vehicle) noexcept;
 // `human` at a Dreadnought's bridge on the keyboard, and `vk` one of its strafe keys (dreadnought.cpp): the bridge holds the
 // key, the Q mark yields to it (npcai.cpp; plan-2026-10-25-keybinds.md §3.3 B).
 bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept;
-void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+// boarding.cpp: the player into it (the boarding gun's path). False, logged: not taken on (the boarding hook not in, no
+// player, or refused: not a board-able friend, the player in a vehicle, no seats); nothing will press for it.
+bool BoardingRequest(unsigned char* vehicle) noexcept;
+bool BoardingReady() noexcept;                           // boarding.cpp: its hook is in (BoardingRequest can take one on)
 bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
 // fresh for kSazabiCueMs). False with none (not riding one).
