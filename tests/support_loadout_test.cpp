@@ -50,6 +50,25 @@ int main() {
     p=Preset(L"rifle*5",4,&ok,why);Check(!ok && p.count==0 && std::wcsstr(why,L"座位"),"more than the seats refused");
     const wchar_t* broken[]={L"rifle@12345",L"rifle@GGGGGG",L"rifle@123456:",L"rifle*0",L"bogus",L"rifle*13",L"@123456"};
     for(const wchar_t* text:broken){p=Preset(text,12,&ok);Check(!ok && p.count==0,"a malformed preset refused whole");}
+    // A Fencer's two hands (#R:L, 2026-11-21; docs/feature-npc-weapon-tier.md 2.5): weapon rows of Fencer hand weapons, both;
+    // tests/support_loadout_ini_test.py has the installer's side of each verdict.
+    p=Preset(L"pilebanker#715:773*2, cannon@1E3A8A# 803 : 690 ,cannon",4,&ok);
+    Check(ok && p.count==4 && p.hands[0]==FencerHands{715,773} && p.hands[1]==p.hands[0] && p.hands[2]==FencerHands{803,690} &&
+          !p.hands[3].On() && p.look[2].primary==0x1E3A8A && !p.look[0].On(),"hands parse, after the colours, a look unchanged by them");
+    const wchar_t* badHands[]={L"rifle#715:773",L"lance#715:773",L"pilebanker#715",L"pilebanker#715:",L"pilebanker#:773",L"pilebanker#715:26",
+                               L"pilebanker#26:773",L"pilebanker#x:773",L"pilebanker#715:773@FFFFFF",L"xminfantry#715:773",
+                               L"pilebanker#715:773+aHandGrenade01",L"pilebanker#123456:773",
+                               L"pilebanker#７１５:７７３",L"pilebanker#715:7²",L"pilebanker#715:773*２"};
+    for(const wchar_t* text:badHands){p=Preset(text,4,&ok,why);Check(!ok && p.count==0 && why[0],"a malformed hand refused whole, the reason named");}
+    p=Preset(L"rifle#715:773",4,&ok,why);Check(!ok && std::wcsstr(why,L"重装"),"hands on a Ranger: only a Fencer takes them");
+    p=Preset(L"pilebanker#715:773,rifle",12,&ok);
+    {SupportLoadout l=PresetLoadout(p);
+     Check(PresetHandsFor(p,l,0)==FencerHands{715,773} && !PresetHandsFor(p,l,1).On(),"a seat's hands");
+     l.soldier[0]=SupportWeapon::fencerCannon;
+     Check(!PresetHandsFor(p,l,0).On(),"a seat changed on the panel: the requester's own pick");}
+    Check(HandsFit(FencerHands{715,773},SupportWeapon::fencerShotgun) && !HandsFit(FencerHands{715,773},SupportWeapon::rifle) &&
+          !HandsFit(FencerHands{715,-1},SupportWeapon::fencerShotgun) && HandsFit(FencerHands{},SupportWeapon::rifle) &&
+          !HandsFit(FencerHands{-1,773},SupportWeapon::fencerShotgun),"HandsFit: both Fencer hand weapons on a Fencer, or none");
     p=Preset(L"rifle@1E3A8A*2,rocket,sniper@X:FFFFFF",12,&ok);
     SupportLoadout load=PresetLoadout(p);
     load.soldier[0]=SupportWeapon::flame;

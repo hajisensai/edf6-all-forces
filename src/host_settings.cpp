@@ -18,11 +18,21 @@ std::atomic<int> hostRecruit{-1},hostCover{-1};   // the host's values as a gues
 std::atomic<bool> hostSilent{false};              // a guest whose host published no word (an older All Forces)
 std::atomic<bool> bikeGunner{true};               // this mission's 408 gunner seat (Edf41BikeGunnerAllowed)
 std::atomic<bool> commander{false};               // this mission's commander mode (CommanderModeInEffect)
+// The host's ScopeSpread values as a guest (hostScopeSet), under scopeLock: read by every player round (scope_spread.cpp).
+bool hostScopeSet=false;
+scopespread::Params hostScope{};
+SRWLOCK scopeLock=SRWLOCK_INIT;
 // The builds (the menu's lines; the UI thread's).
 Builds builds{};
 SRWLOCK lock=SRWLOCK_INIT;   // the tick (UI thread) and the mission sync (the script's thread) both read
 
 coopattr::Publisher publisher{kKey};
+
+// This machine's ScopeSpread values (EDF6VehicleCrew.ini; plugin.cpp clamps them to scope_spread_logic.h's ranges).
+scopespread::Params LocalScope() noexcept {
+    const Config& c=Cfg();
+    return scopespread::Params{c.scopeSpread,c.scopeSniperHipSpread,c.scopeSniperHipMinSpread,c.scopeHipSpread,c.scopeAimSpread};
+}
 coopattr::Beat beat;
 
 Word Mine() noexcept {
@@ -32,6 +42,7 @@ Word Mine() noexcept {
     w.vanillaRecruit=Cfg().vanillaRecruit;
     w.npcFreeSquadCover=Cfg().npcFreeSquadCover;
     w.commander=Cfg().commanderMode;
+    w.scope=LocalScope();
     return w;
 }
 
@@ -61,7 +72,19 @@ void Read(bool mission) noexcept {
             surveyed=t->snapshot(kKey,&CountMember,&survey,nullptr)!=0;
         } __except(EXCEPTION_EXECUTE_HANDLER){hostWord=false;surveyed=false;}
     }
-    const Effective e=Decide(room.inRoom!=0,room.isHost!=0,hostWord,host,Cfg().vanillaRecruit,Cfg().npcFreeSquadCover);
+    const scopespread::Params mine=LocalScope();
+    const Effective e=Decide(room.inRoom!=0,room.isHost!=0,hostWord,host,Cfg().vanillaRecruit,Cfg().npcFreeSquadCover,mine);
+    {
+        const bool set=e.source==Source::host;
+        AcquireSRWLockExclusive(&scopeLock);
+        const bool changed=set!=hostScopeSet || (set && !SameScope(hostScope,e.scope));
+        hostScopeSet=set;hostScope=e.scope;
+        ReleaseSRWLockExclusive(&scopeLock);
+        if(changed && set)
+            Log("HOSTCFG playing by the host's ScopeSpread=%d sniper unzoomed x%.2f min %.4f rad, others unzoomed x%.2f zoomed x%.2f (this machine's ini: %d x%.2f %.4f x%.2f x%.2f)",
+                e.scope.on,e.scope.sniperHip,e.scope.sniperHipMin,e.scope.hip,e.scope.aim,mine.on,mine.sniperHip,mine.sniperHipMin,mine.hip,mine.aim);
+        else if(changed)Log("HOSTCFG ScopeSpread from this machine's ini");
+    }
     const int r=e.source==Source::host ? (e.vanillaRecruit ? 1 : 0) : -1,c=e.source==Source::host ? (e.npcFreeSquadCover ? 1 : 0) : -1;
     const bool silent=e.source==Source::localHostSilent;
     const int wasR=hostRecruit.exchange(r),wasC=hostCover.exchange(c);
@@ -138,6 +161,13 @@ bool NpcFreeSquadCoverInEffect() noexcept {
 }
 bool Edf41BikeGunnerAllowed() noexcept { return bikeGunner.load(std::memory_order_relaxed); }
 bool CommanderModeInEffect() noexcept { return commander.load(std::memory_order_relaxed); }
+scopespread::Params ScopeSpreadInEffect() noexcept {
+    AcquireSRWLockShared(&scopeLock);
+    const bool set=hostScopeSet;
+    const scopespread::Params host=hostScope;
+    ReleaseSRWLockShared(&scopeLock);
+    return set ? host : LocalScope();
+}
 
 int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
     using hudtext::Tr;using hudtext::Tx;
@@ -151,6 +181,15 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         _snwprintf_s(out[n].text,_TRUNCATE,L"%ls",Tr(Tx::hostSettingsSilent));
         out[n++].warn=true;
     }
+    AcquireSRWLockShared(&scopeLock);
+    const bool scopeSet=hostScopeSet;
+    const scopespread::Params scope=hostScope;
+    ReleaseSRWLockShared(&scopeLock);
+    if(n<capacity && scopeSet && !SameScope(scope,LocalScope())) {
+        if(scope.on)_snwprintf_s(out[n].text,_TRUNCATE,Tr(Tx::hostScopeSpread),scope.sniperHip,scope.sniperHipMin,scope.hip,scope.aim);
+        else _snwprintf_s(out[n].text,_TRUNCATE,L"%ls",Tr(Tx::hostScopeSpreadOff));
+        out[n++].warn=false;
+    }
     AcquireSRWLockShared(&lock);
     const Builds b=builds;
     ReleaseSRWLockShared(&lock);
@@ -159,6 +198,7 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
             {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},{kFeatBikeGunMount,Tx::featBikeGunMount},
             {kFeatBikeRide,Tx::featBikeRide},{kFeatCommander,Tx::featCommander},
+            {kFeatScopeSpread,Tx::featScopeSpread},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

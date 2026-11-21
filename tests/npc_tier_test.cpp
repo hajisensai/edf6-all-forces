@@ -132,10 +132,66 @@ void Path() {
         Check(ArmsPath(static_cast<SupportWeapon>(r.kind),x,out,96)>0,"every row's path fits the soldier's buffer");
     }
 }
+// 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer kind's two hands from the requester's Fencer loadout.
+void HandWeapons() {
+    // The table: every Fencer hand weapon once (docs/weapons.csv categories 200-205), every series weapon of a Fencer kind
+    // among them, the path of each fits the soldier's buffer.
+    Check(kFencerHandCount==216,"216 Fencer hand weapons");
+    std::set<int> ids;
+    for(const auto& h:kFencerHands)Check(ids.insert(h.id).second && h.sgo && h.sgo[0],"each hand weapon once, named");
+    for(const auto& r:kTierRows)
+        if(FencerKind(static_cast<SupportWeapon>(r.kind)))Check(HandOf(r.id)!=nullptr,"a Fencer series weapon is a hand weapon");
+    wchar_t out[96];
+    for(const auto& h:kFencerHands)Check(HandPath(Make(h.id,0),out,96)>0,"every hand weapon's path fits");
+    Check(HandPath(Make(715,0),out,96)>0 && !wcscmp(out,L"app:/weapon/hpilebanker01.sgo"),"a hand's path, lower case");
+    Check(HandPath(Make(26,0),out,96)==0 && out[0]==0,"a rifle is no hand weapon");
+    Check(FencerKind(SupportWeapon::fencerCannon) && FencerKind(SupportWeapon::fencerShotgun) && !FencerKind(SupportWeapon::wingLance) &&
+          !FencerKind(SupportWeapon::xmInfantry),"the four Fencer kinds");
+    // Main hand: a Fencer kind may hold any Fencer hand weapon (a preset's), its series' as before; others only theirs.
+    Check(UnpackArms(PackArms(Make(773,2)),SupportWeapon::fencerPileBanker,nullptr),"a shotgun in a pile banker's main hand");
+    Check(!UnpackArms(PackArms(Make(26,2)),SupportWeapon::fencerPileBanker,nullptr),"a rifle in a Fencer's main hand refused");
+    Check(!UnpackArms(PackArms(Make(773,2)),SupportWeapon::rifle,nullptr),"a Fencer weapon in a Ranger's refused");
+    Check(ArmsPath(SupportWeapon::fencerPileBanker,Make(773,0),out,96)>0 && !wcscmp(out,L"app:/weapon/hweapon078.sgo"),
+          "a preset main hand's path");
+    // Second hand: Fencer kinds only, Fencer hand weapons only.
+    Arms h;
+    Check(UnpackHand(PackArms(Make(773,4)),SupportWeapon::fencerCannon,&h) && h==Make(773,4),"a second hand round trip");
+    Check(UnpackHand(0,SupportWeapon::rifle,&h) && !h.on,"none: any kind");
+    Check(!UnpackHand(PackArms(Make(773,4)),SupportWeapon::rifle,nullptr),"a Ranger has no second hand");
+    Check(!UnpackHand(PackArms(Make(26,4)),SupportWeapon::fencerCannon,nullptr),"a rifle is no second hand");
+    Check(!UnpackHand(PackArms(Make(773,4))|(1ull<<50),SupportWeapon::fencerCannon,nullptr),"reserved bits refused");
+    // PickHands: the series weapon's group, the other slot as the second hand, the same model, a star less.
+    Fake f;f.star=5;
+    Inventory inv=Inv(f);
+    inv.fencer[0]=773;inv.fencer[1]=715;inv.fencer[2]=690;inv.fencer[3]=803;   // 1L Dexter, 1R spear | 2L hammer, 2R NC101
+    Hands two=PickHands(SupportWeapon::fencerPileBanker,inv);
+    Check(two.main==Make(715,4) && two.off==Make(773,4),"the spear's group: the spear (first of its series: a star less), the Dexter beside it");
+    two=PickHands(SupportWeapon::fencerShotgun,inv);
+    Check(two.main==Make(773,4) && two.off==Make(715,4),"the Dexter's group, the other way round: the Dexter, then the spear");
+    two=PickHands(SupportWeapon::fencerCannon,inv);
+    Check(two.main.on && two.main.id==803 && two.off==Make(690,4),"group 2 for the cannon: the NC101, the hammer beside it");
+    Check(PickArms(SupportWeapon::fencerPileBanker,inv)==Make(715,4),"PickArms is PickHands' main hand");
+    inv.fencer[0]=-1;two=PickHands(SupportWeapon::fencerPileBanker,inv);
+    Check(two.main==Make(715,4) && !two.off.on,"the slot beside it empty: no second hand (the AI shield stays)");
+    inv.fencer[0]=1234;two=PickHands(SupportWeapon::fencerPileBanker,inv);
+    Check(!two.off.on,"a slot holding no Fencer hand weapon: no second hand");
+    // Equipped in another class only: the Fencer loadout is what counts for a Fencer kind; none there: owned, no second.
+    Fake g;g.star=3;g.owned={803};
+    Inventory ginv=Inv(g);ginv.equipped[0]=715;
+    two=PickHands(SupportWeapon::fencerPileBanker,ginv);
+    Check(two.main.on && !two.off.on,"a spear in the current (non-Fencer) slots is not the Fencer's: its lowest, no second hand");
+    two=PickHands(SupportWeapon::fencerCannon,ginv);
+    Check(two.main==Make(803,2) && !two.off.on,"owned only: the owned one, no second hand");
+    two=PickHands(SupportWeapon::rifle,inv);
+    Check(!two.off.on,"a Ranger kind: never a second hand");
+    // A preset's hand: the planning machine's stars, a star less; not a hand weapon: none.
+    Check(PresetHand(Inv(f),773)==Make(773,4) && !PresetHand(Inv(f),26).on && !PresetHand(Inv(f),-1).on,"a preset hand");
+    Inventory norec;Check(PresetHand(norec,773)==Make(773,0),"no record: 0 stars");
+}
 }  // namespace
 
 int main() {
-    Table();Tier();Pick();Pack();Path();
+    Table();Tier();Pick();Pack();Path();HandWeapons();
     std::printf("npc_tier_test: %d checks passed\n",checks);
     return 0;
 }

@@ -42,6 +42,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/storerecoil.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # A soldier's zoomed scope as a real optic (src/infantryscope.cpp: the cue, the stock crosshair's draw held back).
 target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
+# The player's scoped weapons spread by the scope (src/scope_spread.cpp: the weapon creation's call, the shot entry's round).
+target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)
 # First person on foot (src/firstperson.cpp: the camera at the head, the arms and weapon drawn as a viewmodel; the
 # arithmetic in src/fp_view.h, checked offline by tools/fp_view_check.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp src/fp_skin_gpu.cpp src/vehicle_look.cpp)
@@ -657,6 +659,11 @@ target_compile_options(npc_backpack_native_check PRIVATE /W4 /WX /utf-8 /permiss
 add_executable(npc_ai_check EXCLUDE_FROM_ALL tools/npc_ai_check.cpp)
 target_compile_options(npc_ai_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(npc_ai_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The soldiers' own dashes (src/npc_mobility.h; docs/npc-mobility-re.md) offline:
+# cmake --build build --target npc_mobility_check && build\npc_mobility_check.exe
+add_executable(npc_mobility_check EXCLUDE_FROM_ALL tools/npc_mobility_check.cpp)
+target_compile_options(npc_mobility_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(npc_mobility_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
 # not part of the plugin.
 add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
@@ -847,6 +854,11 @@ add_executable(coop_attr_test tests/coop_attr_test.cpp)
 target_include_directories(coop_attr_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(coop_attr_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME coop_attr COMMAND coop_attr_test)
+# The scoped weapons' spread rule (src/scope_spread_logic.h); its guard and native audit are with the Python tests below.
+add_executable(scope_spread_test tests/scope_spread_test.cpp)
+target_include_directories(scope_spread_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(scope_spread_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME scope_spread COMMAND scope_spread_test)
 add_executable(room_ui_test tests/room_ui_test.cpp)
 target_compile_options(room_ui_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_ui COMMAND room_ui_test)
@@ -1213,7 +1225,7 @@ set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
@@ -1390,6 +1402,10 @@ set_tests_properties(edf41tank_pose_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRO
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_cover_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# The soldiers' own dashes (src/npcai.cpp Mobility; docs/npc-mobility-re.md): the signatures it checks, the states the
+# presses enter, the only writers of d7B / d72, the Wing Diver's energy spend run on a stand-in.
+add_test(NAME npc_mobility_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_mobility_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_mobility_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):
 # the copy against fake visitors, its wiring in jet_bay.cpp / make_proteus.py, and the contract on the real EDF.dll.
 add_executable(ifc_model_test EXCLUDE_FROM_ALL tests/ifc_model_test.cpp)
@@ -2211,6 +2227,11 @@ add_test(NAME lock_cue COMMAND lock_cue_test)
 # the units) and the stock SGOs' tops (docs/vehicle-top-speed-re.md); without the game: skipped (77).
 add_test(NAME drive_gear_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/drive_gear_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(drive_gear_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The scoped weapons' spread: its wiring and the weapon table's sniper categories (offline), and the native sites it stands
+# on (src/scope_spread.cpp, docs/scope-accuracy-re.md: read-only, EDF6_NATIVE_DLL unset skips).
+add_test(NAME scope_spread_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_guard.py")
+add_test(NAME scope_spread_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(scope_spread_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The Car's (Grape's) seat inputs and the 505 / 601 / 603's against the keys of the plugin's add-on weapons
 # (docs/stock-payload-re.md §2.1): read-only, the game's EDF.dll found like drive_gear_native.
 add_test(NAME car_input_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/car_input_native_audit.py" "${EDF6_NATIVE_DLL}")

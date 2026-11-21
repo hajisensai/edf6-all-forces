@@ -291,6 +291,11 @@ struct Config {
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     int infantryScope=2;            // a soldier's scoped weapon zoomed (infantryscope.cpp, scope_pip.h Mode): 0 stock, 1 the whole
                                     // screen under a real optic's eyepiece and reticle, 2 the picture in the picture (the lens only)
+    bool scopeSpread=true;          // a player's scoped weapon spreads by the scope (scope_spread.cpp; online the host's: host_settings.h)
+    float scopeSniperHipSpread=4.0f;      // ...a sniper rifle (category 2 / 104) unzoomed: the stock cone x this (zoomed: the stock)
+    float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
+    float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
+    float scopeAimSpread=0.8f;            // ...and zoomed: x this
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
@@ -481,6 +486,15 @@ struct Config {
     float npcGrabRange=4.0f;        // ...m: one this near makes them roll (or back off)
     float npcCrowd=1.5f;            // ...the pressure (enemies near, nearer weigh more) they back off from
     float npcRollSec=2.5f;          // ...s between two rolls
+    // Their own dashes (npcai.cpp Mobility, docs/npc-mobility-re.md):
+    bool npcWingDash=true;          // ...a Wing Diver dashes (the stock dash): out of a crowd, to a far goal, to keep up
+    float npcWingDashFar=25.0f;     // ...m: a fight's / order's walk with more than this left is dashed (keeping up: twice)
+    float npcWingDashSec=1.5f;      // ...s between two of her dashes
+    float npcWingDashReserve=0.5f;  // ...share of her energy kept after a dash (in the air at least 0.6), and one more dash
+    bool npcFencerMobility=true;    // ...a Fencer whose weapons dash / boost uses them: dash-jump, dash only or boost only
+    float npcFencerDashJumpRange=45.0f;   // ...m: a goal this far, the way clear and both hands able: the dash-jump
+    float npcFencerDashRange=15.0f; // ...m: a goal this far: a dash
+    int npcFencerDashReserve=1;     // ...dashes kept for dodging while an enemy is near
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
            // ...m from their anchor (the player they follow, their leader, their post) they go to fight

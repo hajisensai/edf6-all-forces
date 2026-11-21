@@ -29,7 +29,7 @@ unsigned char registeredId[32]{};
 void Check(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
 // The human's constructor's soldier_load_weapon loop (support_soldier.cpp kLoadWeaponSite): its main weapon (index 0)
 // and a second one (a Fencer's AI shield), each through the hooked call when simulateLoad.
-bool simulateLoad=false;int loads=0;wchar_t loadPaths[8][96]{};std::uint8_t loadStars[8][8]{};void* loadHuman[8]{};
+bool simulateLoad=false;int templateLoads=2;int loads=0;wchar_t loadPaths[8][96]{};std::uint8_t loadStars[8][8]{};void* loadHuman[8]{};
 void* __fastcall FakeLoad(void* human,const support_native::MsvcWide* path,const void* stars) {
     if(loads<8){wcscpy_s(loadPaths[loads],path->ptr);std::memcpy(loadStars[loads],stars,8);loadHuman[loads]=human;}
     ++loads;return nullptr;
@@ -39,7 +39,8 @@ void LoadTemplateWeapons(void* human) {
     alignas(8) std::uint8_t five[8];std::memset(five,5,sizeof five);
     const wchar_t* main=L"app:/weapon/aisoldierrifle01.sgo";const wchar_t* second=L"app:/weapon/aiheavyshield01.sgo";
     const support_native::MsvcWide a{main,0,wcslen(main),wcslen(main)},b{second,0,wcslen(second),wcslen(second)};
-    support_native::LoadWeaponHook(human,&a,five);support_native::LoadWeaponHook(human,&b,five);
+    support_native::LoadWeaponHook(human,&a,five);
+    if(templateLoads>1)support_native::LoadWeaponHook(human,&b,five);
 }
 unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,support_native::InitParam* init) {
     if(made==failAt)return nullptr;
@@ -262,6 +263,38 @@ int main() {
      Check(!SupportSoldierArmsReady(),"the hooks not in: not ready");
      Check(!ApplySupportSoldierResource(poses[4],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&plain,nullptr,packed) &&
            made==madeBefore+1,"the hooks not in: an armed soldier is refused before anything is made");
+     Check(!support_native::arming.on,"no arming left behind");}
+    // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer given a second hand gets it in place of its template's
+    // second weapon (the AI shield, WeaponSet 1), its stars too; anything it cannot build: not spawned.
+    support_native::arms=true;simulateLoad=true;loads=0;
+    {npctier::Arms spear;spear.on=true;spear.id=715;spear.stars[0]=3;
+     npctier::Arms dexter;dexter.on=true;dexter.id=773;dexter.stars[1]=4;
+     const std::uint32_t pile=SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     ObjRef fencer;
+     Check(ApplySupportSoldierResource(poses[0],pile,nullptr,true,&fencer,nullptr,npctier::PackArms(spear),npctier::PackArms(dexter)),
+           "a pile banker with a spear and a shotgun spawns");
+     Check(loads==2 && !wcscmp(loadPaths[0],L"app:/weapon/hpilebanker01.sgo") && loadStars[0][0]==3 &&
+           !wcscmp(loadPaths[1],L"app:/weapon/hweapon078.sgo") && loadStars[1][1]==4 && loadStars[1][0]==0 &&
+           loadHuman[0]==fencer.obj && loadHuman[1]==fencer.obj,"both loads replaced: the main hand, then the second (not the AI shield)");
+     Check(support_native::CoefHook(nullptr,0.3f,fencer.obj)==1.0f,"the two-handed Fencer: a player's attack coefficient");
+     loads=0;
+     npctier::Arms galleon;galleon.on=true;galleon.id=772;
+     Check(ApplySupportSoldierResource(poses[1],pile,nullptr,true,&fencer,nullptr,npctier::PackArms(galleon)) && loads==2 &&
+           !wcscmp(loadPaths[0],L"app:/weapon/hweapon077.sgo") && !wcscmp(loadPaths[1],L"app:/weapon/aiheavyshield01.sgo"),
+           "a Fencer kind's main hand any Fencer weapon; no second hand: the AI shield stays");
+     const int madeBefore=made;
+     Check(!ApplySupportSoldierResource(poses[2],pile,nullptr,true,&fencer,nullptr,0,npctier::PackArms(dexter)) && made==madeBefore,
+           "a second hand without a main one: not spawned");
+     Check(!ApplySupportSoldierResource(poses[2],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&fencer,nullptr,
+                                        npctier::PackArms(npctier::Arms{true,26,{}}),npctier::PackArms(dexter)) && made==madeBefore,
+           "a Ranger with a second hand: not spawned");
+     npctier::Arms rifle;rifle.on=true;rifle.id=26;
+     Check(!ApplySupportSoldierResource(poses[2],pile,nullptr,true,&fencer,nullptr,npctier::PackArms(spear),npctier::PackArms(rifle)) &&
+           made==madeBefore,"a rifle in a Fencer's second hand: not spawned");
+     templateLoads=1;const int del=deleted;
+     Check(!ApplySupportSoldierResource(poses[3],pile,nullptr,true,&fencer,nullptr,npctier::PackArms(spear),npctier::PackArms(dexter)) &&
+           made==madeBefore+1 && deleted==del+1,"a template whose second load never comes: deleted, never half armed");
+     templateLoads=2;
      Check(!support_native::arming.on,"no arming left behind");}
     simulateLoad=false;support_native::arms=false;
     ResetSupportSoldiers();VirtualFree(image,0,MEM_RELEASE);

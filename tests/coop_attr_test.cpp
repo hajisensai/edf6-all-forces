@@ -10,6 +10,7 @@
 // cmake --build build --target coop_attr_test && build\coop_attr_test.exe
 #include "coop_attr.h"
 #include "host_settings_logic.h"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -129,17 +130,25 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"2;v=0.8.0;f=3FF;r=1;c=0;m=0"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"3;v=0.8.0;f=7FF;r=1;c=0;m=0;s=1,40000,150,12500,8000"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
-           !back.npcFreeSquadCover,"parsed back");
+           !back.npcFreeSquadCover && !back.commander,"parsed back");
+    Expect(back.scope.on && back.scope.sniperHip==4.0f && std::fabs(back.scope.sniperHipMin-0.015f)<1e-6f &&
+           back.scope.hip==1.25f && back.scope.aim==0.8f,"the scope spread parsed back");
     w.commander=true;
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"2;v=0.8.0;f=3FF;r=1;c=0;m=1") && ParseWord(text,back) && back.commander,
-           "the commander mode in the word");
-    for(const char* bad:{"","1;v=1;f=1;r=0;c=0;m=0","2;v=;f=1;r=0;c=0;m=0","2;v=1;f=G;r=0;c=0;m=0","2;v=1;f=1;r=2;c=0;m=0",
-                         "2;v=1;f=1;r=0;c=0;m=0;x=1","2;v=1;f=123456789;r=0;c=0;m=0","2;v=1;r=0;f=1;c=0;m=0",
-                         "2;v=1;f=1;r=0;c=0","2;v=1;f=1;r=0;c=0;m=2"})
+    Expect(FormatWord(w,text,sizeof(text)) && ParseWord(text,back) && back.commander && back.scope.on,
+           "commander and scope settings round trip together");
+    for(const char* bad:{"","2;v=1;f=1;r=0;c=0;m=0","3;v=1;f=1;r=0;c=0;m=2;s=1,1,1,1,1","1;v=1;f=1;r=0;c=0","3;v=1;f=1;r=0;c=0","3;v=;f=1;r=0;c=0;m=0;s=1,1,1,1,1","3;v=1;f=G;r=0;c=0;m=0;s=1,1,1,1,1",
+                         "3;v=1;f=1;r=2;c=0;m=0;s=1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;x=1","3;v=1;f=123456789;r=0;c=0;m=0;s=1,1,1,1,1",
+                         "3;v=1;r=0;f=1;c=0;m=0;s=1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=2,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1",
+                         "3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,-1,1,1",
+                         "3;v=1;f=1;r=0;c=0;m=0;s=1,1,1.5,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1234567,1,1"})
         Expect(!ParseWord(bad,back),"another version's word is no word");
+    // A host's value outside the ranges is played at the range's end, as this machine's ini would be.
+    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=1,999999,0,0,999999",back) && back.scope.sniperHip==20.0f && back.scope.sniperHipMin==0.0f &&
+           back.scope.hip==1.0f && back.scope.aim==1.0f,"the host's scope spread clamped");
+    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=0,40000,150,12500,8000",back) && !back.scope.on,"the host's scope spread off");
     strcpy_s(w.version,"a;b");
     Expect(!FormatWord(w,text,sizeof(text)),"a version that would break the word is not sent");
 
@@ -152,6 +161,19 @@ void WordAndRoom() {
     Expect(e.source==Source::localHostSilent && e.vanillaRecruit && !e.npcFreeSquadCover,"a silent host: this machine's ini, said");
     e=Decide(false,false,true,host,false,true);
     Expect(e.source==Source::local && e.npcFreeSquadCover,"no room: this machine's ini");
+    // ScopeSpread is the host's as well (a round's spread is drawn and its hits settled on the shooter's machine).
+    crew::scopespread::Params mine;mine.hip=2.0f;
+    host.scope.on=false;
+    e=Decide(true,false,true,host,false,false,mine);
+    Expect(!e.scope.on,"a guest plays by the host's scope spread");
+    e=Decide(true,true,true,host,false,false,mine);
+    Expect(e.scope.on && e.scope.hip==2.0f,"the host by its own scope spread");
+    e=Decide(true,false,false,host,false,false,mine);
+    Expect(e.scope.on && e.scope.hip==2.0f,"a silent host: this machine's scope spread");
+    Expect(SameScope(crew::scopespread::Params{},crew::scopespread::Params{}) && !SameScope(mine,crew::scopespread::Params{}),
+           "the same scope spread told apart from another");
+    crew::scopespread::Params offA,offB;offA.on=offB.on=false;offB.hip=3.0f;
+    Expect(SameScope(offA,offB),"two off settings play the same");
 
     Builds b;
     hostcfg::Word older;strcpy_s(older.version,"0.8.0");older.features=kFeatures&~kFeatBikeGunner;

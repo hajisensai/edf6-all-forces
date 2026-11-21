@@ -58,6 +58,7 @@
 #include "enemy_control_radar.h"
 #include "pvp_controlled_spawn.h"
 #include "scope_pip.h"
+#include "scope_spread.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
 #include "seat_turret.h"
@@ -437,6 +438,10 @@ void Validate(Config& n) noexcept {
     Fix("ProteusShieldSlow",n.proteusShieldSlow,0.0f,1.0f);
     Fix("ProteusWalkGunRate",n.proteusWalkGunRate,0.1f,5.0f);
     Fix("ProteusWalkGunSpread",n.proteusWalkGunSpread,0.0f,10.0f);
+    Fix("ScopeSniperHipSpread",n.scopeSniperHipSpread,scopespread::kSniperHipRange.lo,scopespread::kSniperHipRange.hi);
+    Fix("ScopeSniperHipMinSpread",n.scopeSniperHipMinSpread,scopespread::kSniperHipMinRange.lo,scopespread::kSniperHipMinRange.hi);
+    Fix("ScopeHipSpread",n.scopeHipSpread,scopespread::kHipRange.lo,scopespread::kHipRange.hi);
+    Fix("ScopeAimSpread",n.scopeAimSpread,scopespread::kAimRange.lo,scopespread::kAimRange.hi);
     Fix("ProteusDeploySec",n.proteusDeploySec,0.0f,10.0f);
     Fix("ProteusStowSec",n.proteusStowSec,0.0f,10.0f);
     Fix("ProteusDeployTurn",n.proteusDeployTurn,0.0f,2.0f);
@@ -470,6 +475,12 @@ void Validate(Config& n) noexcept {
     Fix("NpcGrabRange",n.npcGrabRange,0.5f,n.npcDangerRange);
     Fix("NpcCrowd",n.npcCrowd,0.2f,20.0f);
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
+    Fix("NpcWingDashFar",n.npcWingDashFar,5.0f,500.0f);
+    Fix("NpcWingDashSec",n.npcWingDashSec,0.3f,30.0f);
+    Fix("NpcWingDashReserve",n.npcWingDashReserve,0.0f,0.9f);
+    Fix("NpcFencerDashRange",n.npcFencerDashRange,5.0f,200.0f);
+    Fix("NpcFencerDashJumpRange",n.npcFencerDashJumpRange,n.npcFencerDashRange,500.0f);
+    n.npcFencerDashReserve=static_cast<int>(FixInt("NpcFencerDashReserve",n.npcFencerDashReserve,0,8));
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
@@ -830,6 +841,11 @@ void LoadConfig() noexcept {
     n.sightRangePad=ReadBool(L"SightRangePad",n.sightRangePad);
     n.infantryScope=static_cast<int>(FixInt("InfantryScope",ReadInt(L"InfantryScope",static_cast<DWORD>(n.infantryScope)),
                                             scopepip::kModeLowest,scopepip::kModeHighest));
+    n.scopeSpread=ReadBool(L"ScopeSpread",n.scopeSpread);
+    n.scopeSniperHipSpread=ReadFloat(L"ScopeSniperHipSpread",n.scopeSniperHipSpread);
+    n.scopeSniperHipMinSpread=ReadFloat(L"ScopeSniperHipMinSpread",n.scopeSniperHipMinSpread);
+    n.scopeHipSpread=ReadFloat(L"ScopeHipSpread",n.scopeHipSpread);
+    n.scopeAimSpread=ReadFloat(L"ScopeAimSpread",n.scopeAimSpread);
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
@@ -958,6 +974,14 @@ void LoadConfig() noexcept {
     n.npcGrabRange=ReadFloat(L"NpcGrabRange",n.npcGrabRange);
     n.npcCrowd=ReadFloat(L"NpcCrowd",n.npcCrowd);
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
+    n.npcWingDash=ReadBool(L"NpcWingDash",n.npcWingDash);
+    n.npcWingDashFar=ReadFloat(L"NpcWingDashFar",n.npcWingDashFar);
+    n.npcWingDashSec=ReadFloat(L"NpcWingDashSec",n.npcWingDashSec);
+    n.npcWingDashReserve=ReadFloat(L"NpcWingDashReserve",n.npcWingDashReserve);
+    n.npcFencerMobility=ReadBool(L"NpcFencerMobility",n.npcFencerMobility);
+    n.npcFencerDashJumpRange=ReadFloat(L"NpcFencerDashJumpRange",n.npcFencerDashJumpRange);
+    n.npcFencerDashRange=ReadFloat(L"NpcFencerDashRange",n.npcFencerDashRange);
+    n.npcFencerDashReserve=ReadInt(L"NpcFencerDashReserve",static_cast<DWORD>(n.npcFencerDashReserve));
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
     n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
@@ -1049,6 +1073,9 @@ void LoadConfig() noexcept {
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npcBackpack=%d",n.npcBackpack);
+    Log("CONFIG npc wingDash=%d far=%.0f sec=%.1f reserve=%.2f fencerMobility=%d dashJump=%.0f dash=%.0f reserve=%d",n.npcWingDash,
+        n.npcWingDashFar,n.npcWingDashSec,n.npcWingDashReserve,n.npcFencerMobility,n.npcFencerDashJumpRange,n.npcFencerDashRange,
+        n.npcFencerDashReserve);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d rideAlong=%d commandHintShown=%d",n.npcMarkKey,n.npcMarkCone,
         n.npcBoarding,n.npcGunners,n.npcRideAlong,n.commandHintShown);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
@@ -1076,6 +1103,8 @@ void LoadConfig() noexcept {
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
     Log("CONFIG sightZoom=%d key=0x%X button=0x%X infantryScope=%d",n.sightZoom,n.sightZoomKey,n.sightZoomButton,n.infantryScope);
+    Log("CONFIG scopeSpread=%d sniperHip x%.2f min %.4f rad, others hip x%.2f aim x%.2f",n.scopeSpread,n.scopeSniperHipSpread,
+        n.scopeSniperHipMinSpread,n.scopeHipSpread,n.scopeAimSpread);
     Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
         n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
@@ -1391,6 +1420,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
+    InstallScopeSpread();   // the player's scoped weapons spread by the scope (the shot entry's hook, the weapon creation's call)
     Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
     Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
     Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());

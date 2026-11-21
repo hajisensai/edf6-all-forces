@@ -55,8 +55,9 @@ namespace crew {
 //      its loadout (its calls would come with the defaults) nor generate the others' files (stock where a plan wants them).
 //  13 (2026-11-21): commander mode adds a catalog and host settings field. Older builds cannot negotiate it.
 //  14 (2026-11-21): custom mechs add a vehicle body to PVEH v4. Every member must use the same channel version.
+//  15 (2026-11-21): host settings v3 synchronizes scope spread and support wire v3 carries both Fencer hands.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=14;
+constexpr std::int64_t kAllForcesRoomProtocol=15;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

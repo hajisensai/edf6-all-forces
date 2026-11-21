@@ -16,6 +16,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
+#include "npc_mobility.h"   // the soldiers' own dashes (Wing Diver dash, Fencer dash / boost / dash-jump)
 
 namespace npc {
 constexpr float kPi=3.14159265f;

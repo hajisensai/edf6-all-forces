@@ -22,6 +22,13 @@ bool FirstPersonAimShot(unsigned char* weapon,unsigned muzzle,bool replay,FpShot
     ++aimShots;shotCallsAtAim=shotCalls;aimReplay=replay;aimMuzzle=muzzle;aimWeapon=weapon;out->rows=nullptr;return false;
 }
 void FirstPersonAimRestore(const FpShotAim&) noexcept { ++aimRestores;shotCallsAtRestore=shotCalls; }
+// scope_spread.cpp: each round's cone by the scope (before the stock shot) and put back (after it), replay passed on.
+int scopeShots=0,scopeRestores=0,shotCallsAtScope=-1,shotCallsAtScopeRestore=-1;bool scopeReplay=false;
+const unsigned char* scopeWeapon=nullptr;
+void ScopeSpreadShot(unsigned char* weapon,bool replay,ScopeShot* out) noexcept {
+    ++scopeShots;shotCallsAtScope=shotCalls;scopeReplay=replay;scopeWeapon=weapon;*out=ScopeShot{};
+}
+void ScopeSpreadRestore(const ScopeShot&) noexcept { ++scopeRestores;shotCallsAtScopeRestore=shotCalls; }
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
@@ -150,7 +157,7 @@ void CheckMedicPermission() {
     reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,nullptr,&shotCounter,false);
     Check(shotCalls==1 && shotPermission==0 && firstPersonShots==1,
           "without the heli profile the entry still tells the first person, its medic work off");
-    shotCalls=0;firstPersonShots=0;aimShots=0;aimRestores=0;medicOn=true;
+    shotCalls=0;firstPersonShots=0;aimShots=0;aimRestores=0;scopeShots=0;scopeRestores=0;medicOn=true;
     // Invoke the installed entry, including the fifth (stack) replay argument.
     for(bool replay:{false,true}) {
         medicWeapon[kWeaponFriendlyDamage]=0; // RideAi or subsequent mission script cleared it.
@@ -163,6 +170,8 @@ void CheckMedicPermission() {
           "the first person is told of each round after the stock shot");
     Check(aimShots==2 && aimRestores==2 && shotCallsAtAim==1 && shotCallsAtRestore==2 && aimMuzzle==3 && aimReplay &&
           aimWeapon==medicWeapon,"the first person's aim turns each round before the stock shot and puts it back after");
+    Check(scopeShots==2 && scopeRestores==2 && shotCallsAtScope==1 && shotCallsAtScopeRestore==2 && scopeReplay &&
+          scopeWeapon==medicWeapon,"the scope's cone is set before each stock shot and put back after it");
     const int before=shotCalls;
     for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
         shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
@@ -171,6 +180,7 @@ void CheckMedicPermission() {
     }
     Check(firstPersonShots==2,"a refused round tells the first person nothing");
     Check(aimShots==2 && aimRestores==2,"a refused round is not turned by the first person's aim");
+    Check(scopeShots==2 && scopeRestores==2,"a refused round's cone is not touched by the scope");
     Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
     for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
         shotFile=file;shotFileLength=std::wcslen(file);

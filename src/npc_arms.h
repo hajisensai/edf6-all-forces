@@ -19,17 +19,28 @@ bool LocalPlayerLoadout(int* cls,int* equipped,int slots) noexcept;
 // A commander's NPC request: kind `kind` carries this player's own weapon of that kind's series (npc_tier.h PickBase: the
 // equipped one, else the best owned; no tier down), every other kind none. All zero as LocalRequesterArms' are.
 void CommanderRequesterArms(int kind,support_net::RequesterArms* out) noexcept;
-// Each soldier of `plan` given this machine's player's weapon of its kind (LocalRequesterArms; a unit not a soldier: 0):
-// the plans this machine builds as their requester (an offline call or rescue, a host's mission crew).
+// Each soldier of `plan` given this machine's player's weapons of its kind (LocalRequesterArms: its main hand and, a
+// Fencer kind's, its second hand; a unit not a soldier: 0): the plans this machine builds as their requester (an offline
+// call or rescue, a host's mission crew). A Fencer the planner already gave both hands (a preset's #R:L,
+// PresetHandArms) keeps them, as the host's Session keeps them (support_protocol.cpp Advance).
 inline void GiveLocalArms(support_net::Plan* plan) noexcept {
     if(!plan)return;
     support_net::RequesterArms arms;
     LocalRequesterArms(&arms);
     for(std::uint32_t i=0;i<plan->count && i<support_net::kMaxUnits;++i) {
         auto& unit=plan->units[i];
-        unit.arms=IsSupportSoldierResource(unit.resourceId) ? arms.kind[static_cast<int>(SupportSoldierWeapon(unit.resourceId))] : 0;
+        const bool soldier=IsSupportSoldierResource(unit.resourceId);
+        if(soldier && unit.arms && unit.offhand)continue;
+        const int k=static_cast<int>(SupportSoldierWeapon(unit.resourceId));
+        unit.arms=soldier ? arms.kind[k] : 0;
+        unit.offhand=soldier ? arms.offhand[k] : 0;
     }
 }
+// A preset's two Fencer hands (support_loadout.h FencerHands: weapon ids) as the words of a unit (npc_tier.h PresetHand:
+// this machine's player's stars, each one less): the planner (offline, or the host) gives them to that soldier. False
+// (both 0) when the soldiers' weapon hooks or the preload are not in (as LocalRequesterArms: the soldier is then the
+// stock template), the game status is not readable or an id is no Fencer hand weapon.
+bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept;
 // Mission start (after PreloadSupportSoldiers, before the game's WaitPreload): this machine's player's weapons for every
 // kind queued with the mission's own preload, so its own calls need no load.
 void PreloadNpcArms() noexcept;

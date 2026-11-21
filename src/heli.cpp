@@ -58,6 +58,7 @@
 #include "log_once.h"
 #include "profile_sigs.h"
 #include "firstperson.h"
+#include "scope_spread.h"
 #include "enemy_points.h"
 #include "npc_logic.h"
 #include "fp_view.h"
@@ -805,7 +806,12 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     // only; its shot rows put back after the stock shot read them).
     FpShotAim aim{};
     FirstPersonAimShot(weapon,muzzle,replay,&aim);
+    // A local player's round of a scoped weapon: its cone by the scope (scope_spread.h; +0xE14 / +0x378 for this round
+    // only, put back after the stock shot read them).
+    ScopeShot scope{};
+    ScopeSpreadShot(weapon,replay,&scope);
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    ScopeSpreadRestore(scope);
     FirstPersonAimRestore(aim);
     // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle
     // flash it used to wait for is missing on many weapons). It reads only this machine's first-person state.

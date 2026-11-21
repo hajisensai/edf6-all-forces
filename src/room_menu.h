@@ -223,7 +223,7 @@ struct Text {
     std::size_t End() noexcept {out[n]=0;return fits ? n : 0;}
 };
 inline bool SameSoldier(const SupportPreset& p,int a,int b) noexcept {
-    return p.kind[a]==p.kind[b] && p.look[a]==p.look[b];
+    return p.kind[a]==p.kind[b] && p.look[a]==p.look[b] && p.hands[a]==p.hands[b];
 }
 inline void SoldierToken(Text& t,const SupportPreset& p,int i,int run) noexcept {
     t.Puts(SupportKindIniName(p.kind[i]));
@@ -232,6 +232,8 @@ inline void SoldierToken(Text& t,const SupportPreset& p,int i,int run) noexcept 
         t.Put(L'@');t.Colour(l.primary);
         if(l.secondary!=kStockColour){t.Put(L':');t.Colour(l.secondary);}
     }
+    // A Fencer's hands (support_loadout.h #R:L): the menu shows no field for them yet, but keeps them as the ini has them.
+    if(p.hands[i].On()){t.Put(L'#');t.Int(p.hands[i].right);t.Put(L':');t.Int(p.hands[i].left);}
     if(const PackWeapon* pack=l.pack ? PackOf(l.pack) : nullptr){t.Put(L'+');t.Puts(pack->sgo);}
     if(run>1){t.Put(L'*');t.Int(run);}
 }
@@ -284,7 +286,7 @@ inline std::size_t SerialiseCrew(const CrewColour& c,wchar_t* out,std::size_t ca
 }
 inline bool SamePreset(const SupportPreset& a,const SupportPreset& b) noexcept {
     if(a.count!=b.count)return false;
-    for(int i=0;i<a.count;++i)if(a.kind[i]!=b.kind[i] || !(a.look[i]==b.look[i]))return false;
+    for(int i=0;i<a.count;++i)if(a.kind[i]!=b.kind[i] || !(a.look[i]==b.look[i]) || !(a.hands[i]==b.hands[i]))return false;
     return true;
 }
 inline bool SameVehicle(const VehicleLoadout& a,const VehicleLoadout& b) noexcept {
@@ -459,9 +461,10 @@ inline Act AddSoldier(Menu& m,Unit& u) noexcept {
     SupportPreset& p=u.squad;
     if(p.count>=u.seats)return Act::refused;
     const int at=p.count ? m.rowAt+1 : 0;
-    for(int i=p.count;i>at;--i){p.kind[i]=p.kind[i-1];p.look[i]=p.look[i-1];}
+    for(int i=p.count;i>at;--i){p.kind[i]=p.kind[i-1];p.look[i]=p.look[i-1];p.hands[i]=p.hands[i-1];}
     p.kind[at]=p.count ? p.kind[m.rowAt] : SupportWeapon::rifle;
     p.look[at]=p.count ? p.look[m.rowAt] : SupportLook{};
+    p.hands[at]=p.count ? p.hands[m.rowAt] : FencerHands{};
     ++p.count;m.rowAt=at;
     return Act::changed;
 }
@@ -479,8 +482,8 @@ inline Act AddPylon(Menu& m,Unit& u) noexcept {
 inline Act RemoveSoldier(Menu& m,Unit& u) noexcept {
     SupportPreset& p=u.squad;
     if(p.count<=0)return Act::refused;
-    for(int i=m.rowAt;i+1<p.count;++i){p.kind[i]=p.kind[i+1];p.look[i]=p.look[i+1];}
-    --p.count;p.kind[p.count]=SupportWeapon::rifle;p.look[p.count]=SupportLook{};
+    for(int i=m.rowAt;i+1<p.count;++i){p.kind[i]=p.kind[i+1];p.look[i]=p.look[i+1];p.hands[i]=p.hands[i+1];}
+    --p.count;p.kind[p.count]=SupportWeapon::rifle;p.look[p.count]=SupportLook{};p.hands[p.count]=FencerHands{};
     if(m.rowAt>=RowCount(u))m.rowAt=RowCount(u)-1;
     return Act::changed;
 }
@@ -493,7 +496,8 @@ inline Act RemovePylon(Menu& m,Unit& u) noexcept {
     if(m.rowAt>l.count)m.rowAt=l.count;
     return Act::changed;
 }
-// A new kind keeps the soldier's backpack weapon only when its class may carry it (a Fencer none).
+// A new kind keeps the soldier's backpack weapon only when its class may carry it (a Fencer none), its hands (#R:L) only
+// when it is still a Fencer.
 inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt;
     SupportLook& l=u.squad.look[i];
@@ -507,6 +511,7 @@ inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
         u.squad.kind[i]=static_cast<SupportWeapon>(k);
         if(!SupportKindHasLooks(u.squad.kind[i]))l=SupportLook{};
         else if(!PackFits(l.pack,SupportSoldierClass(u.squad.kind[i])))l.pack=0;
+        if(!HandsFit(u.squad.hands[i],u.squad.kind[i]))u.squad.hands[i]=FencerHands{};
         if(m.fieldAt>=FieldCount(u,i))m.fieldAt=0;
     }
     else if(m.fieldAt==1)l.primary=CycleColour(m.palette,l.primary,step);
