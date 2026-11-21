@@ -57,7 +57,8 @@ int main() {
           !p.hands[3].On() && p.look[2].primary==0x1E3A8A && !p.look[0].On(),"hands parse, after the colours, a look unchanged by them");
     const wchar_t* badHands[]={L"rifle#715:773",L"lance#715:773",L"pilebanker#715",L"pilebanker#715:",L"pilebanker#:773",L"pilebanker#715:26",
                                L"pilebanker#26:773",L"pilebanker#x:773",L"pilebanker#715:773@FFFFFF",L"xminfantry#715:773",
-                               L"pilebanker#715:773+aHandGrenade01",L"pilebanker#123456:773"};
+                               L"pilebanker#715:773+aHandGrenade01",L"pilebanker#123456:773",
+                               L"pilebanker#７１５:７７３",L"pilebanker#715:7²",L"pilebanker#715:773*２"};
     for(const wchar_t* text:badHands){p=Preset(text,4,&ok,why);Check(!ok && p.count==0 && why[0],"a malformed hand refused whole, the reason named");}
     p=Preset(L"rifle#715:773",4,&ok,why);Check(!ok && std::wcsstr(why,L"重装"),"hands on a Ranger: only a Fencer takes them");
     p=Preset(L"pilebanker#715:773,rifle",12,&ok);

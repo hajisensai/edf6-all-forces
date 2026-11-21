@@ -182,12 +182,19 @@ def fencer_hand(row: int) -> bool:
     return any(a <= row <= b for a, b in FENCER_HAND_RANGES)
 
 
+def ascii_number(t: str, most: int) -> bool:
+    """1..`most` ASCII digits, as the plugin's parsers take them (support_loadout.h RowId: L'0'..L'9' only). str.isdigit
+    would also pass full-width digits (int() reads them, the plugin refuses) and superscripts (int() raises a bare
+    ValueError the callers do not catch)."""
+    return re.fullmatch(r'[0-9]{1,%d}' % most, t) is not None
+
+
 def hands(text: str, k: str) -> tuple[int, int]:
     """A preset's #R:L for kind `k` as the plugin reads it (ParseSupportPreset, HandsFit): (right, left) weapon rows."""
     if KIND_CLASS[k] != 2:
         raise Invalid(tr('只有重装兵能指定左右手武器：#', 'only a Fencer takes its two hands: #') + text)
     right, colon, left = text.partition(':')
-    ok = colon and all(t.strip().isdigit() and len(t.strip()) <= 5 for t in (right, left))
+    ok = colon and all(ascii_number(t.strip(), 5) for t in (right, left))
     if not ok:
         raise Invalid(tr('左右手应为 #右手行号:左手行号（武器表行号）：#', 'the hands are #RIGHT:LEFT (weapon table rows): #') + text)
     r, l = int(right.strip()), int(left.strip())
@@ -366,7 +373,7 @@ def _colour(text: str) -> int:
 
 def _count(text: str, most: int, what: str) -> int:
     t = text.strip()
-    if not t.isdigit() or len(t) > 5 or not 1 <= int(t) <= most:
+    if not ascii_number(t, 5) or not 1 <= int(t) <= most:
         raise Invalid(tr(f'{what}应为 1 到 {most}：{text}', f'{what} must be 1 to {most}: {text}'))
     return int(t)
 
@@ -534,7 +541,7 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
                            tr('飞机可挂：AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT，不能挂：',
                               'a jet carries AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT, not: ')) + name)
         t = n.strip()
-        if not colon or not t.isdigit() or int(t) not in ROUND_COUNTS:
+        if not colon or not ascii_number(t, 5) or int(t) not in ROUND_COUNTS:
             raise Invalid(tr('挂点写成 名称:数量，数量可选 ', 'a pylon is NAME:COUNT, the count one of ')
                           + ' '.join(map(str, ROUND_COUNTS)) + f': {token}')
         if len(out.pylons) >= most:

@@ -202,7 +202,9 @@ check(fh == [('pilebanker', (-1, -1), '', (715, 773))] * 2 + [('cannon', (0x1E3A
                                                                ('cannon', (-1, -1), '', None)], 'a preset with hands parses as in the plugin')
 check(sl.format_preset(fh) == 'pilebanker#715:773*2,cannon@1E3A8A#803:690,cannon', 'its shortest spelling keeps the hands')
 for bad in ('rifle#715:773', 'lance#715:773', 'pilebanker#715', 'pilebanker#715:', 'pilebanker#:773', 'pilebanker#715:26',
-            'pilebanker#26:773', 'pilebanker#x:773', 'pilebanker#715:773@FFFFFF', 'xminfantry#715:773', 'pilebanker#715:773+aHandGrenade01'):
+            'pilebanker#26:773', 'pilebanker#x:773', 'pilebanker#７１５:７７３', 'pilebanker#715:7²',
+            'pilebanker#¹:773', 'pilebanker#715:773*²', 'pilebanker#715:773*２',
+            'pilebanker#715:773@FFFFFF', 'xminfantry#715:773', 'pilebanker#715:773+aHandGrenade01'):
     check(refused(sl.parse_preset, bad, 4), f'preset {bad!r} refused as in the plugin')
 check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#715:773*4\r\n') == [], 'hands alone want no file')
 check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=cannon@1E3A8A#715:773\r\n') == ['EDF6VC_NPC_CANNON_L_1E3A8A_X.SGO'],
