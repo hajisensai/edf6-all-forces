@@ -51,6 +51,17 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool peersNew=true;
 bool SupportPeersAcceptVariants() noexcept {return peersNew;}
+// Room members' loadouts (room_sync.h RoomMemberConfig): peer 2 has published one, every other peer none.
+const char* SupportPeerPuid(std::uint32_t peer) noexcept {return peer==2 ? "member2puid" : peer==3 ? "member3puid" : nullptr;}
+SupportConfig memberConfig;
+int memberLookups=0;
+namespace roomsync {
+bool RoomMemberConfig(const char* puid,SupportConfig* out) noexcept {
+    ++memberLookups;
+    if(!puid || std::strcmp(puid,"member2puid"))return false;
+    *out=memberConfig;return true;
+}
+}
 std::set<const void*> heldObjects;
 bool HoldSupportSoldier(const ObjRef& ref,bool hold) noexcept {
     held+=hold ? 1 : -1;
@@ -456,6 +467,26 @@ int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    {
+        // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
+        // member's, the defaults for a member who published none that reads (never this machine's).
+        memberConfig=SupportConfig{};memberConfig.squad=SupportWeapon::shotgun;memberConfig.aircraft[1]=3;
+        const float at[3]={1,2,3};
+        check(LoadoutOfPeer(0,1,at,0)==nullptr,"this machine's own request: its own configuration");
+        const SupportConfig* m=LoadoutOfPeer(2,1,at,7);
+        check(m && m->squad==SupportWeapon::shotgun && m->aircraft[1]==3 && memberLookups==1,"a member's request: that member's loadout");
+        check(LoadoutOfPeer(2,1,at,7)==m && memberLookups==1,"the same request planning across frames: looked up once");
+        {
+            planConfig=m;
+            check(&PlanCfg()==m,"PlanCfg is the requester's while planning");
+            planConfig=nullptr;
+            check(&PlanCfg()==&SupportCfg(),"and this machine's otherwise");
+        }
+        const SupportConfig* none=LoadoutOfPeer(3,1,at,7);
+        check(none && none->squad==SupportWeapon::rifle && none->aircraft[1]==0 && memberLookups==2,
+              "a member with no loadout that reads: the defaults");
+        check(LoadoutOfPeer(9,1,at,7)==nullptr,"a peer without a PUID (not online): this machine's");
+    }
     ResetSupportDispatch();
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
