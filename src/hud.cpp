@@ -328,9 +328,11 @@ float DepthScale(float depth,float readTo) noexcept {
     return kNearScale+(kFarScale-kNearScale)*f;
 }
 
-// A line standing in the world (WorldLabel, src/world_text.h): its anchor and where that is on the screen as laid out, a
-// glyph pixel's screen pixels, the font scale it is rasterized at (on the glyph grid), its shimmer's phase. Off: a 2D line.
-struct WorldAt { bool on; float anchor[3],ax,ay,unitPx,fd,phase; };
+// A line standing in the world (WorldLabel, src/world_text.h): its plate's orientation, the point its text is laid out
+// from (its height's middle, `align` as Label's along the plate), its size in glyph pixels at its font scale (`fd`, on the
+// glyph grid), the metres a glyph pixel, its shimmer's phase and its anchor's depth (the far ones drawn first, with fewer
+// layers). Off: a 2D line.
+struct WorldAt { bool on; worldtext::Standee plate; float at[3],w,h,mpp,fd,phase,depth; int align; };
 // A line of text to draw once the quads are down: where, its size (measured; a world line's on the screen), its scale and
 // colour, and whether it stands in the world.
 struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; WorldAt world; };
@@ -389,6 +391,11 @@ void Measure(Text& t,Line& l) noexcept {
     l.w=std::isfinite(size[0]) && size[0]>0.0f ? size[0] : 0.0f;
     l.h=std::isfinite(size[1]) && size[1]>0.0f ? size[1] : 0.0f;
 }
+// The outline of the font begun (draw reads it from the font each time: docs/world-text-re.md §1.2, 0x113B7D0).
+void Outline(Text& t,const float* outline,float wide) noexcept {
+    std::memcpy(t.font+0x1C,outline,16);
+    Put<float>(t.font,0x2C,wide);
+}
 void Draw(Text& t,const Line& l) noexcept {
     Font(t,FontOf(t,l));
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
@@ -428,17 +435,24 @@ void MeasureAll(Text& t,Line* lines,int n) noexcept {
     __except(TextFault(GetExceptionInformation())) {}
     EndOwed(t);
 }
-// A world line (docs/world-text-re.md §5.1): begun with its own font (its glow the outline; the system constants written,
-// the depth test off), the renderer's view an identity and its projection the camera's viewProj, drawn at its billboard.
-void DrawWorld(Text& t,const Line& l,ULONGLONG now) noexcept {
-    worldtext::Frame f;
-    if(!l.text[0] || !t.vp || !worldtext::FrameAt(t.vp,t.width,t.height,l.world.anchor,&f))return;
-    alignas(16) float m[16],rgba[4],glow[4];
-    worldtext::Billboard(f,l.world.anchor,l.world.ax,l.world.ay,l.x,l.y,l.world.unitPx,m);
+alignas(16) const float kClear[4]={0.0f,0.0f,0.0f,0.0f};
+// A world line (docs/world-text-re.md §5.1 / §6): its plate laid out for the camera (from behind: the face the back side,
+// the text mirrored along it so it reads left to right), begun once with its own font (the system constants written, the
+// depth test off), the renderer's view an identity and its projection the camera's viewProj, then its layers drawn from
+// the furthest to the face (no depth test: the nearer over the further), the ones behind darker and fainter with no
+// outline, the face in its own colour with the glow round it. `labels`: the world lines this frame (fewer layers with many).
+void DrawWorld(Text& t,const Line& l,ULONGLONG now,int labels) noexcept {
+    const WorldAt& w=l.world;
+    float eye[3];
+    if(!l.text[0] || !t.vp || !worldtext::EyeOf(t.vp,eye))return;
+    const int layers=worldtext::LayersFor(w.depth,labels);
+    worldtext::Plate p;
+    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,layers,worldtext::Behind(w.plate,w.at,eye),&p);
+    alignas(16) float m[16],rgba[4],glow[4],layer[4];
     std::memcpy(rgba,l.rgba,16);
-    rgba[3]*=worldtext::Shimmer(now,l.world.phase);
+    rgba[3]*=worldtext::Shimmer(now,w.phase);
     worldtext::Glow(rgba,glow);
-    Font(t,l.world.fd,glow,worldtext::kGlowWidth,3);
+    Font(t,w.fd,glow,worldtext::kGlowWidth,3);
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     unsigned char* const core=At<unsigned char*>(t.renderer,kRendererCore);
@@ -446,19 +460,25 @@ void DrawWorld(Text& t,const Line& l,ULONGLONG now) noexcept {
         alignas(16) const float id[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
         std::memcpy(core+kCoreView,id,64);
         std::memcpy(core+kCoreProjection,t.vp,64);
-        reinterpret_cast<TextDrawFn>(image+kTextDraw)(t.renderer,t.ctx,m,rgba,l.text,-1);
+        for(int k=layers-1;k>=0;--k) {
+            worldtext::LayerColour(rgba,k,layers,layer);
+            if(k)Outline(t,kClear,0.0f);
+            else Outline(t,glow,worldtext::kGlowWidth);
+            worldtext::LayerMatrix(p,k,m);
+            reinterpret_cast<TextDrawFn>(image+kTextDraw)(t.renderer,t.ctx,m,layer,l.text,-1);
+        }
     }
     t.begun=false;
     reinterpret_cast<TextEndFn>(image+kTextEnd)(t.renderer,t.ctx);
 }
 // After the world lines: the system constants (xgl_system, global, docs/world-text-re.md §1.4) the HUD's orthographic
 // again, as every plain text draw leaves them, for whatever the game draws after (§5.1 step 5): a begin of its own and a
-// non-empty, invisible string drawn (an empty one returns before it writes anything, 0x113B542). Run whatever became of
-// the world lines, a fault among them too.
-alignas(16) const float kClear[4]={0.0f,0.0f,0.0f,0.0f};
+// non-empty, invisible string drawn (an empty one returns before it writes anything, 0x113B542): its colour and its
+// outline both clear and the outline no width (a black outline round an invisible "." is a dot at the top left). Run
+// whatever became of the world lines, a fault among them too.
 void RestoreOrtho(Text& t) noexcept {
     __try {
-        Font(t,hudscale::Font(kLineScale,t.s),kOutline,1.7f,1);   // the most common size: no glyph set of its own
+        Font(t,hudscale::Font(kLineScale,t.s),kClear,0.0f,1);   // the most common size: no glyph set of its own
         reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
         t.begun=true;
         alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
@@ -468,20 +488,22 @@ void RestoreOrtho(Text& t) noexcept {
     } __except(TextFault(GetExceptionInformation())) {}
     EndOwed(t);
 }
-// The lines: the world ones first (under the HUD's own text), the system constants put back, then the 2D ones.
+// The lines: the world ones first (under the HUD's own text; the furthest first, so a nearer plate is drawn over it), the
+// system constants put back, then the 2D ones.
 void DrawAll(Text& t,const Line* lines,int n) noexcept {
     if(!t.made)return;
-    bool world=false;
+    int order[kMaxLines],worlds=0;
+    for(int i=0;i<n && i<kMaxLines;++i) {
+        if(!lines[i].world.on)continue;
+        int k=worlds++;
+        for(;k>0 && lines[order[k-1]].world.depth<lines[i].world.depth;--k)order[k]=order[k-1];
+        order[k]=i;
+    }
     const ULONGLONG now=GetTickCount64();
-    __try {
-        for(int i=0;i<n && textOk;++i) {
-            if(!lines[i].world.on)continue;
-            world=true;
-            DrawWorld(t,lines[i],now);
-        }
-    } __except(TextFault(GetExceptionInformation())) {}
+    __try { for(int i=0;i<worlds && textOk;++i)DrawWorld(t,lines[order[i]],now,worlds); }
+    __except(TextFault(GetExceptionInformation())) {}
     EndOwed(t);
-    if(world)RestoreOrtho(t);
+    if(worlds)RestoreOrtho(t);
     __try { for(int i=0;i<n && textOk;++i)if(!lines[i].world.on)Draw(t,lines[i]); }
     __except(TextFault(GetExceptionInformation())) {}
     EndOwed(t);
@@ -1312,12 +1334,49 @@ void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,
 bool WorldText() noexcept { return worldTextOk && Cfg().worldText3D; }
 // The depth (m) a world label is its 2D size at: the player's view's kViewRef, the map's camera distance (MapScreen).
 float worldRef=worldtext::kViewRef;
+// The plates' orientations (world_text.h Facings): a label's key to the way it was made facing; the draw thread's own.
+// The keys (worldtext::Key): a kind of label each and what it is of (an object's identity where the HUD has one, else
+// its place's 4 m cell for a label of a place, or 0 for a label there is one of at a time). kGroundKey: a plate lying on the
+// ground north up (the map's grid), kept by no key.
+worldtext::Facings worldFacings{};
+constexpr std::uint64_t kGroundKey=0;
+enum WorldKind : unsigned { kWorldQMark=1,kWorldWarning,kWorldEntrance,kWorldCommandHint,kWorldPing,kWorldMapMarker,kWorldMapTarget,
+                            kWorldMapHover,kWorldMapUnit };
+constexpr float kWorldCell=4.0f;
+std::uint64_t WorldKey(WorldKind kind,std::uint64_t of) noexcept { return worldtext::Key(kind,of); }
+std::uint64_t WorldKeyAt(WorldKind kind,const float* place) noexcept { return worldtext::Key(kind,worldtext::Cell(place,kWorldCell)); }
+// A label's plate: on the ground north up, else upright as it was made facing (now, from `f`'s camera, when it is new).
+bool PlateOf(const worldtext::Frame& f,std::uint64_t key,worldtext::Standee* plate) noexcept {
+    if(key==kGroundKey){*plate=worldtext::Ground(f.hand);return true;}
+    worldtext::Standee fresh;
+    if(!worldtext::Upright(f,&fresh))return false;
+    *plate=worldtext::FacingOf(worldFacings,key,GetTickCount64(),fresh);
+    return true;
+}
+// A world line's face on the screen, its bounding box (what lays out by the lines' boxes and the offline checks read).
+bool PlateBounds(const float* vp,float width,float height,const WorldAt& w,const float* eye,Line& l) noexcept {
+    worldtext::Plate p;
+    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,1,worldtext::Behind(w.plate,w.at,eye),&p);
+    float m[16];worldtext::LayerMatrix(p,0,m);
+    float x0=1e30f,y0=1e30f,x1=-1e30f,y1=-1e30f;
+    for(int i=0;i<4;++i) {
+        float q[3],sx,sy;
+        worldtext::Local(m,(i&1) ? w.w : 0.0f,(i&2) ? w.h : 0.0f,q);
+        if(!worldtext::ToScreen(vp,width,height,q,&sx,&sy))return false;
+        x0=sx<x0 ? sx : x0;y0=sy<y0 ? sy : y0;x1=sx>x1 ? sx : x1;y1=sy>y1 ? sy : y1;
+    }
+    l.x=x0;l.y=y0;l.w=x1-x0;l.h=y1-y0;
+    return true;
+}
 // A label of something in the world: its anchor `anchor` (world), the line (dx, dy) px from where that is on the screen,
-// `align` as Label's. With the world text on it stands in the world there (a billboard facing the camera, its size
-// following the perspective within world_text.h's bounds, a glow round it, drawn first and seen through walls), else it is
-// Label's flat line at the anchor's projection. Nothing while the anchor is off the screen (as Project says).
-void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,float dx,float dy,
-                int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
+// `align` as Label's. With the world text on it stands in the world there as a hologram plate (world_text.h: upright and
+// facing the way the camera looked when the label of `key` first showed, or on the ground north up for kGroundKey; its
+// metres following the perspective within world_text.h's bounds on the screen, layered for its thickness, a glow round
+// its face, drawn first and seen through walls); the offset becomes metres along the plate at the anchor's depth (near
+// the 2D offset square on, not to the pixel). Else it is Label's flat line at the anchor's projection. Nothing while the
+// anchor is off the screen (as Project says).
+void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
+                float dx,float dy,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
     float x,y,depth;
     if(*at>=kMaxLines || !Project(vp,anchor,width,height,&x,&y,&depth))return;
     Line& l=lines[(*at)++];
@@ -1326,12 +1385,26 @@ void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float
     va_end(args);
     l.scale=scale;l.rgba=rgba;l.w=l.h=0.0f;l.world.on=false;
     worldtext::Frame f;
-    if(text && WorldText() && worldtext::FrameAt(vp,width,height,anchor,&f)) {
-        const auto fit=worldtext::FontFor(hudscale::Font(scale,text->s),worldtext::SizeFactor(f.depth,worldRef),kTextScaleStep);
-        l.world=WorldAt{true,{anchor[0],anchor[1],anchor[2]},x,y,fit.unitPx,fit.fd,worldtext::PhaseOf(anchor)};
-        MeasureAll(*text,&l,1);                 // glyph pixels at its font scale...
-        l.w*=fit.unitPx;l.h*=fit.unitPx;        // ...and on the screen
-    } else if(text)MeasureAll(*text,&l,1);
+    worldtext::Standee plate;
+    float eye[3];
+    if(text && WorldText() && worldtext::FrameAt(vp,width,height,anchor,&f) && worldtext::EyeOf(vp,eye) && PlateOf(f,key,&plate)) {
+        const float facing=worldtext::Facing(f,plate);
+        const auto fit=worldtext::FontFor(hudscale::Font(scale,text->s),worldtext::SizeFactor(f.depth,worldRef,facing),kTextScaleStep);
+        WorldAt& w=l.world;
+        w.on=true;w.plate=plate;w.fd=fit.fd;w.mpp=fit.unitPx/f.pxY;w.align=align;w.depth=f.depth;w.phase=worldtext::PhaseOf(anchor);
+        MeasureAll(*text,&l,1);   // glyph pixels at its font scale
+        w.w=l.w;w.h=l.h;
+        // The offset along the plate as it reads from the camera's side (its right mirrored from behind), its down
+        // foreshortened as the plate shows it.
+        const float side=worldtext::Behind(plate,anchor,eye) ? -1.0f : 1.0f;
+        const float shows=facing>worldtext::kLeastFacing ? facing : worldtext::kLeastFacing;
+        for(int i=0;i<3;++i)w.at[i]=anchor[i]+plate.right[i]*side*dx/f.pxX+plate.down[i]*dy/(f.pxY*shows);
+        if(PlateBounds(vp,width,height,w,eye,l))return;
+        l.w*=fit.unitPx;l.h*=fit.unitPx;
+        worldtext::Place(x,y,dx,dy,align,l.w,l.h,&l.x,&l.y);
+        return;
+    }
+    if(text)MeasureAll(*text,&l,1);
     worldtext::Place(x,y,dx,dy,align,l.w,l.h,&l.x,&l.y);
 }
 
@@ -1348,10 +1421,10 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y+30.0f*s,30.0f*s,height-30.0f*s);
     const int metres=static_cast<int>(std::ceil(e.distance));
     const float dx=tx-x,dy=ty-y;
-    if(e.hail && e.coming)WorldLabel(text,lines,at,vp,width,height,e.at,dx,dy,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
-    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);WorldLabel(text,lines,at,vp,width,height,e.at,dx,dy,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
-    else if(e.inReach)WorldLabel(text,lines,at,vp,width,height,e.at,dx,dy,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
-    else WorldLabel(text,lines,at,vp,width,height,e.at,dx,dy,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
+    if(e.hail && e.coming)WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
+    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
+    else if(e.inReach)WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
+    else WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
 }
 
 // The first-time hint over a squad the map can command (test site #45: 「玩家第一次靠近可指挥的 NPC，或看到原版招募图标的位置
@@ -1364,7 +1437,7 @@ void CommandHintMark(void* drawer,void* ctx,Text* text,const float* vp,float wid
     Seg(drawer,ctx,x,y+3.0f*s,x+9.0f*s,y-6.0f*s,2.0f*s,kCyan);
     wchar_t key[32];KeyName(h.key,key,32);
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y-22.0f*s,30.0f*s,height-30.0f*s);
-    WorldLabel(text,lines,at,vp,width,height,h.at,tx-x,ty-y,1,kLineScale,kCyan,Tr(Tx::cmdHintPressKey),key);
+    WorldLabel(text,lines,at,vp,width,height,h.at,WorldKey(kWorldCommandHint,0),tx-x,ty-y,1,kLineScale,kCyan,Tr(Tx::cmdHintPressKey),key);
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
@@ -3902,7 +3975,7 @@ void MapGrid(void* drawer,void* ctx,Text* text,const float* vp,float width,float
             // +x is west of +z (north), -x east; +z north, -z south.
             const wchar_t* side=Tr(axis==0 ? (k>0 ? Tx::compassW : Tx::compassE) : (k>0 ? Tx::compassN : Tx::compassS));
             wchar_t d[24];MapDistance(d,_countof(d),std::fabs(static_cast<float>(k))*step);
-            WorldLabel(text,lines,at,vp,width,height,p,4.0f*s,-10.0f*s,0,kLineScale*0.7f,kMapAxis,L"%ls %ls",side,d);
+            WorldLabel(text,lines,at,vp,width,height,p,kGroundKey,4.0f*s,-10.0f*s,0,kLineScale*0.7f,kMapAxis,L"%ls %ls",side,d);
         }
     }
 }
@@ -4094,7 +4167,7 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
             if(kind==MapKind::marker && MapLabelFree(p.ix,p.iy-24.0f*s,width,height,s)) {
                 wchar_t d[24];MapDistance(d,_countof(d),vec::Flat(u.pos,m.me));
                 const float top[3]={u.pos[0],u.pos[1]+pin,u.pos[2]};
-                WorldLabel(text,lines,at,vp,width,height,top,0.0f,-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
+                WorldLabel(text,lines,at,vp,width,height,top,WorldKeyAt(kWorldMapMarker,u.pos),0.0f,-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
             }
         }
     }
@@ -5333,14 +5406,14 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         MapEnemyControlReadout picked{};float tx,ty,td;
         if(ReadMapEnemyControl(&picked) && picked.visible && picked.marked && Project(vp,picked.markAt,width,height,&tx,&ty,&td)) {
             MapBrackets(drawer,ctx,tx,ty,26.0f*s,2.5f*s,kCyan);
-            WorldLabel(text,lines,at,vp,width,height,picked.markAt,0.0f,34.0f*s,1,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlTargetMark));
+            WorldLabel(text,lines,at,vp,width,height,picked.markAt,WorldKey(kWorldMapTarget,0),0.0f,34.0f*s,1,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlTargetMark));
         }
     }
     // The enemy under the pointer: amber brackets on it, what the right button (or H) and Q do with it.
     float hx,hy,hd;
     if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
         MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
-        WorldLabel(text,lines,at,vp,width,height,c.hoverAt,0.0f,-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+        WorldLabel(text,lines,at,vp,width,height,c.hoverAt,WorldKey(kWorldMapHover,0),0.0f,-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
     }
     // The transports' pairs (transport.cpp): a thin line from a squad on foot to its vehicle (bright on a trip).
     for(int i=0;i<c.links && i<kMapTransportLinks;++i) {
@@ -5384,16 +5457,16 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         if(u.selected)MapBrackets(drawer,ctx,ux,uy,20.0f*s,2.5f*s,kWhite);
         if(u.groups) {   // its RTS groups by its mark (Ctrl+1-9)
             wchar_t digits[16];MapGroupDigits(u.groups,digits,_countof(digits));
-            WorldLabel(text,lines,at,vp,width,height,body,15.0f*s,-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
+            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),15.0f*s,-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
         }
-        if(u.now.order==Order::follow)WorldLabel(text,lines,at,vp,width,height,body,0.0f,22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
+        if(u.now.order==Order::follow)WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),0.0f,22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
             wchar_t kind[48];
             MapUnitName(u.name,kind,_countof(kind));
             if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)
                 _snwprintf_s(one,_countof(one),_TRUNCATE,Tr(u.owner==kCmdOwnerHeli ? Tx::unitHeli : Tx::unitJet),kind);
             else _snwprintf_s(one,_countof(one),_TRUNCATE,L"%ls",kind);
-            WorldLabel(text,lines,at,vp,width,height,body,0.0f,-28.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
+            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),0.0f,-28.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
         }
     }
     const float panelBottom=MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
@@ -5550,13 +5623,16 @@ void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
         // An enemy's words under it; a point's over it (the selected units' word, NpcPingHud, goes under).
         const float ly=m.enemy ? r+12.0f*s : -r-12.0f*s;   // from the mark
         const float d=cam ? vec::Dist(eye,m.at) : -1.0f;
-        if(m.own && d>=0.0f)WorldLabel(text,lines,at,vp,width,height,m.at,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::npcMarkRange),d);
-        else if(m.own)WorldLabel(text,lines,at,vp,width,height,m.at,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls",Tr(Tx::npcMark));
+        // Its plate kept by whose mark it is and what (a marked enemy's goes along with it; a point's is of its place).
+        const std::uint64_t of=(m.own ? 1u : 0u)|(m.enemy ? 2u : 0u)|(static_cast<std::uint64_t>(m.slot+1)&0xFFu)<<2;
+        const std::uint64_t key=WorldKey(kWorldQMark,m.enemy ? of : of^worldtext::Cell(m.at,kWorldCell)*0x100000001B3ull);
+        if(m.own && d>=0.0f)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::npcMarkRange),d);
+        else if(m.own)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls",Tr(Tx::npcMark));
         // Its player's name as the game's name tag shows it (any script: the game's font draws it; FitName cut it to
         // kQMarkName - 1 characters, so a long one never runs past the mark); not read: P<n>.
-        else if(m.name[0])WorldLabel(text,lines,at,vp,width,height,m.at,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls %.0f m",m.name,d>=0.0f ? d : 0.0f);
-        else if(m.slot>=0)WorldLabel(text,lines,at,vp,width,height,m.at,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkPlayer),m.slot+1,d>=0.0f ? d : 0.0f);
-        else WorldLabel(text,lines,at,vp,width,height,m.at,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkAlly),d>=0.0f ? d : 0.0f);
+        else if(m.name[0])WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls %.0f m",m.name,d>=0.0f ? d : 0.0f);
+        else if(m.slot>=0)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkPlayer),m.slot+1,d>=0.0f ? d : 0.0f);
+        else WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkAlly),d>=0.0f ? d : 0.0f);
     }
 }
 
@@ -5597,7 +5673,7 @@ void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float widt
                 }
             }
         }
-        if(v.text[0])WorldLabel(text,lines,at,vp,width,height,v.label,0.0f,-14.0f*s,1,kLineScale*0.7f,rgba,L"%ls",v.text);
+        if(v.text[0])WorldLabel(text,lines,at,vp,width,height,v.label,WorldKeyAt(kWorldWarning,v.label),0.0f,-14.0f*s,1,kLineScale*0.7f,rgba,L"%ls",v.text);
     }
 }
 
@@ -5676,8 +5752,8 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
         Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
     }
-    if(p.given>=0)WorldLabel(text,lines,at,vp,width,height,p.at,0.0f,26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
-    else WorldLabel(text,lines,at,vp,width,height,p.at,0.0f,26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
+    if(p.given>=0)WorldLabel(text,lines,at,vp,width,height,p.at,WorldKeyAt(kWorldPing,p.at),0.0f,26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
+    else WorldLabel(text,lines,at,vp,width,height,p.at,WorldKeyAt(kWorldPing,p.at),0.0f,26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy :
                   p.given==kPingCleared ? Tx::npcPingCleared : Tx::npcPingNoUnit));
 }

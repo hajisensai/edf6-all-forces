@@ -1178,7 +1178,7 @@ set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 add_executable(fp_aim_check EXCLUDE_FROM_ALL tools/fp_aim_check.cpp)
 target_compile_options(fp_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# The HUD's world text (src/world_text.h: the billboard, its size held, the font on the glyph grid) offline.
+# The HUD's world text (src/world_text.h: the fixed hologram plates, their layers, size held, facings kept) offline.
 add_executable(world_text_check EXCLUDE_FROM_ALL tools/world_text_check.cpp)
 target_compile_options(world_text_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(world_text_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
