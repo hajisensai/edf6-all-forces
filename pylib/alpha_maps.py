@@ -13,6 +13,8 @@ is, as model.json's 'alpha' (pylib/wt_tracked.py builds it on the stock Clip / A
                    file's own alpha channel (a glTF base colour PNG)
 
     classify(alpha, factor=1.0, declared=None, cutoff=None) -> dict | None   the 'alpha' entry (no 'map'), None: opaque
+    texture_alpha(image_bytes) -> ndarray | None                              the A channel of an image (None: no alpha)
+    of_gltf(material) -> dict | None                                          classify a gltf.Material (baseColor A x factor)
     entry(spec) -> dict                                                       a model.json 'alpha' checked, defaults in
 
 War Thunder's exports (OBJ + MTL) give `map_d` (a grey map) on every see-through material and `d 0.15` on the glass
