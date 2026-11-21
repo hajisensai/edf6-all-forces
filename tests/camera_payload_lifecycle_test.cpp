@@ -17,6 +17,7 @@ unsigned char* currentHuman=nullptr;
 ULONGLONG clockMs=1000;
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return clockMs; }
+ULONGLONG GameFrame() noexcept { return clockMs/16; }   // the chase follower's clock (turretcam.cpp)
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
@@ -25,6 +26,7 @@ bool MapOwnsView() noexcept { return false; }
 bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool IsPlayerJet(const void*) noexcept { return false; }
+bool PlayerRotorCraft(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
