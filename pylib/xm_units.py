@@ -107,7 +107,8 @@ class Arm:
     numbers: dict = field(default_factory=dict)   # a gun's SGO numbers over the template's (Shell.extra)
     fire: int = 2            # its fire key (vcobjects Store.key: 2 the second trigger, 3..6 VehicleFire<n>Key), one a unit;
                              # 0 with a `seat` (that seat's trigger fires it)
-    auto: bool = False       # an auto turret (vcobjects Store.auto): it fires itself with the auto turrets on
+    auto: bool = False       # an auto turret (vcobjects Store.auto): its own `seat` and `turret`, laying and firing itself
+                             # with nobody in the seat and the auto turrets on; never an arm on a fire key
     # Its own gunner seat (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): 0 none (on the driver's key); n
     # the vehicle's seat n, one arm a seat, numbered from 1 in arms order. Needs `turret`.
     seat: int = 0
@@ -301,7 +302,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 5.0, 'burst_gap': 18.0,
-                          'interval': 240.0}, fire=3, auto=True),
+                          'interval': 240.0}, fire=3),
              Arm('rockets', ('front_missile_1', 'front_missile_2'), 'air', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 40,
                  # front_missile_1 / _2: fire_rate 2, two 0.4 s apart each (enemy_rocket_small: speed 60, accel 50,
                  # turning 15 deg/s: barely guided; 10 anti_player): both pods, four every 2 s
@@ -354,7 +355,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 20.0, 'burst_gap': 6.0,
-                          'interval': 300.0}, fire=3, auto=True)),
+                          'interval': 300.0}, fire=3)),
        # xm_large_tank_emp at the game's size: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
        # y 6.5, their muzzles z 9.3
        camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,
@@ -856,19 +857,19 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     _u('bosses/highway_tank', 'tracked', 'apocalypse', 'ported', 'JAGUAR Type S',
        texts={'SC': ('X-Morph 美洲虎 S 型坦克', '请求人类军队的原型超重型坦克「美洲虎 S 型」（原作首领）：全长约 32 米。主炮塔的巨炮为主攻击，'
                                        '约每十秒一发、命中处大范围冲击波；车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
-                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射，防空导弹和高射炮可当自动炮塔；装甲极厚。'),
+                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射；装甲极厚。'),
               'CN': ('X-Morph JAGUAR S 型戰車', '請求人類軍隊的原型超重型戰車「JAGUAR S 型」（原作首領）：全長約 32 公尺。主砲塔的巨砲為主攻擊，'
                                        '約每十秒一發、命中處大範圍衝擊波；車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
-                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射，防空飛彈和高射砲可當自動砲塔；裝甲極厚。'),
+                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射；裝甲極厚。'),
               'JA': ('X-Morph ジャガータイプS', '人類軍の試作超重戦車「ジャガータイプS」（原作のボス）を要請する。全長約 32 m。主砲塔の巨砲'
                                         '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。車体前部の巡航ロケット 2 基（各 6 連射）、'
-                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空ミサイルと高射砲は自動砲塔にもなる。装甲は極めて厚い。'),
+                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。装甲は極めて厚い。'),
               'EN': ('X-Morph JAGUAR Type S', "Requests the human army's prototype super-heavy tank JAGUAR Type S (a boss in "
                                               "the game): about 32 m long. Its main turret's great gun on the primary attack, a "
                                               'round about every 10 s with a wide shock wave where it hits; each on its own '
                                               'fire key with the gun: the two front cruise rocket pods (six each), the AA missiles on '
                                               "the main turret (twelve), the four side turrets' flak, the front mortar and "
-                                              "the front turret's laser (a 3 s beam); the AA missiles and the flak can be auto turrets; extremely heavy armour.")},
+                                              "the front turret's laser (a 3 s beam); extremely heavy armour.")},
        gun=('Great Gun', '巨炮', '巨砲', '巨砲'),
        # main_turret_projectile: fire_rate 10, 500 (anti_core: DAMAGE) and a ShockWave radius 16 (x BLAST)
        guns={'AmmoCount': 20.0, 'AmmoDamage': 60000.0, 'AmmoExplosion': 24.0, 'FireInterval': 1200.0},
@@ -887,7 +888,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 450.0, 'blast': 4.5,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 12.0, 'burst_gap': 30.0,
-                          'interval': 1680.0}, fire=3, auto=True),
+                          'interval': 1680.0}, fire=3),
              Arm('flak', ('side_left_front_turret', 'side_right_front_turret', 'side_left_back_turret',
                           'side_right_back_turret'), 'gun',
                  ('Flak', '高射砲', '高射砲', '高射炮', '고사포'), 120, 'cannon_l',
@@ -895,7 +896,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  # 20 anti_player, Area 12): the four together a shell every 2.25 s
                  shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                  numbers={'AmmoDamage': 600.0, 'AmmoExplosion': 18.0, 'AmmoSpeed': 30.0, 'FireInterval': 135.0,
-                          'FireBurstCount': 1.0}, fire=4, auto=True),
+                          'FireBurstCount': 1.0}, fire=4),
              Arm('mortar', ('front_mortar',), 'gun', ('Mortar', '迫撃砲', '迫擊砲', '迫击炮', '박격포'), 10, 'cannon_l',
                  # front_mortar: ArtilleryWeaponDef, fire_rate 18 (enemy_artillery_boss_tank: 333 artillery, Area 10):
                  # the grenade launcher's lobbed round
