@@ -51,6 +51,11 @@ namespace crew {
 //      VanillaRecruit / NpcFreeSquadCover) and draws the stock spread while the others are penalised unzoomed.
 //      The same (unreleased) step: the support wire goes to v3 (support_protocol.h: 200 bytes, a support Fencer's second
 //      hand, docs/feature-npc-weapon-tier.md 2.5): an older build's decoder drops every support message of this one.
+//      MERGE CHECK (2026-11-21): two other unmerged branches also step to 11 on their own, without this support wire
+//      v3 or scope spread: claude/worldmap-room-loadout (members' own support loadouts, EDF6X_VCCFG) and
+//      feat/1121-drill-transport (underground infantry in a drill transport). A number must name one wire: whichever of
+//      the three reaches main second takes 12 (the third 13) and adds its own line here, keeping the earlier lines.
+//      Before merging, read main's kAllForcesRoomProtocol: if it is already 11 (or more), this step is not 11.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=11;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

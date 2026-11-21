@@ -341,6 +341,13 @@ unsigned AirCrew(std::uint32_t catalog,const SupportAircraft& spec) noexcept {
 }
 // The aircraft one call brings: the configured number (SupportAircraftCount_<key>) or the call's own, never past the
 // plan's 16 units (each aircraft with its real crew).
+// The configuration a plan's soldiers take their preset from (colours and backpack: SoldierVariant; a Fencer's two hands:
+// PresetHands): one source for both, so a soldier's look and its hands never come from different loadouts. Here that is
+// this machine's (the planner's: alone = this player, online = the host). MERGE POINT with claude/worldmap-room-loadout,
+// which defines its own PlanCfg (the requester's published loadout while the host plans that member's request): keep
+// that one and drop this, and both SoldierVariant and PresetHands follow the requester. The hands' stars stay the
+// planner's player's records (npc_arms.h PresetHandArms; docs/feature-npc-weapon-tier.md 2.5).
+const SupportConfig& PlanCfg() noexcept { return SupportCfg(); }
 // Whether this plan may use the configuration's weapons and aircraft counts: every peer of the session accepts them
 // (support_net.h SupportPeersAcceptVariants). Otherwise an older peer's Validate refuses the plan mid-transaction
 // with no reason anyone sees, so the host plans its protocol v2 plan and says why (once a request, logged).
@@ -387,7 +394,7 @@ std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint6
 // bits: the soldier then comes with its colours alone, said once a request.
 std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    auto look=PresetLookFor(PlanCfg().preset[catalog],load,i);
     if(look.pack && !SupportPeersApplyBackpacks()) {
         Log("SUPPORT plan catalog=%u: soldier %d without its backpack weapon: a peer runs an older All Forces (no backpacks)",catalog,i);
         NoteVariant(L"房间里有旧版全军出击：支援士兵本次不带背包武器（全员更新后生效）%ls",L"");
@@ -404,7 +411,7 @@ std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,in
 // here: logged) the requester's own pick fills it later.
 void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_net::Unit& unit) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits) || !IsSupportSoldierResource(unit.resourceId))return;
-    const FencerHands h=PresetHandsFor(SupportCfg().preset[catalog],load,i);
+    const FencerHands h=PresetHandsFor(PlanCfg().preset[catalog],load,i);
     if(!h.On() || !HandsFit(h,SupportSoldierWeapon(unit.resourceId)))return;
     if(!PresetHandArms(h.right,h.left,&unit.arms,&unit.offhand))
         Log("SUPPORT plan catalog=%u: soldier %d's preset hands %d:%d not given (the weapon hooks / preload are not in): the requester's pick",

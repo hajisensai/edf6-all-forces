@@ -114,7 +114,8 @@
 由 `tools/gen_npc_tiers.py` 生成）、只用于剑兵种类、两只都要写。右手进 WeaponSet 0（模板主武器位），左手进 WeaponSet 1（替换 AI 盾）。
 例：`SupportPreset_SQUAD=pilebanker#715:773*4`。
 
-- 星级：**造计划那台机器的玩家**（单机 = 本机；联机 = 房主，预设本来就是房主 ini 里的）该武器记录的星级，各 -1（`npc_arms.h PresetHandArms`）；没有记录 = 0 星。
+- 预设来源：和颜色 / 背包同一个（`support_dispatch.cpp PlanCfg`，`SoldierVariant` 与 `PresetHands` 共用），不会出现颜色来自一份配置、两只手来自另一份。本分支里它是规划机本机的配置（单机 = 本机；联机 = 房主 ini）。**与 `claude/worldmap-room-loadout` 的合并点**：那边的 `PlanCfg` 在房主规划某成员的呼叫时返回该成员公布的配置，合并时保留那边的定义、删掉这边的，两只手随之改为呼叫者的预设。
+- 星级：**造计划那台机器的玩家**（单机 = 本机；联机 = 房主）该武器记录的星级，各 -1（`npc_arms.h PresetHandArms`）；没有记录 = 0 星。合并 worldmap-room-loadout 后预设来自呼叫者、星级仍是房主的记录（`RequesterArms` 只带每种类一把挑选武器，不带预设手的星级）。
 - 写了 `#` 的座位不再按第 1–3 条挑；构成面板把那个座位改成别的兵种时，`#` 随之失效（`PresetHandsFor`，同颜色规则）。
 - 不是外观：不生成文件、不进 64 位 variant，走单位的武器字（下面「联机」）；`#` 与颜色可以同写（只有颜色要生成文件）。
 - 本机武器钩子 / 预载不在（`PresetHandArms` false，记一行日志）：这名士兵退回叫援军玩家的挑选，不会半装备。
