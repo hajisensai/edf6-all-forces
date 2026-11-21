@@ -315,8 +315,9 @@ class SurfaceMapTests(unittest.TestCase):
 
 
 class RotorBlurTests(unittest.TestCase):
-    """A heli rotor's see-through blur is kept (its mesh and its animated texture's frames: xm_model.anim_frames,
-    prep_xmorph.rotor_blur) for a see-through material, not drawn by xm_air_model (its materials are opaque)."""
+    """A heli rotor's see-through blur (docs/xmorph-redo-1121.md 「旋翼盘」): its animated texture's frames
+    (xm_model.anim_frames) averaged into one RGBA albedo (prep_xmorph.blur_average) with a blend 'alpha', its mesh seen
+    from both sides (two_sided), drawn by xm_air_model on the stock Alpha host (wt_tracked.add_surface_material)."""
 
     def test_txpk_frames(self) -> None:
         f = b'DDS ' + bytes(range(200))     # the frames are cut, not decoded, here
@@ -332,7 +333,35 @@ class RotorBlurTests(unittest.TestCase):
                         '    anim_texture materials/textures/units_air/x_rotor.dds 5 0.2\n   }\n  }\n }\n}\n')
         self.assertEqual(xm._values(node, 'anim_texture'), ['materials/textures/units_air/x_rotor.dds 5 0.2'])
 
-    def test_air_model_skips_the_blur(self) -> None:
+    def test_blur_average_is_what_the_loop_blends(self) -> None:
+        from PIL import Image
+        rng = np.random.default_rng(7)
+        frames = [rng.integers(0, 256, (4, 4, 4), dtype=np.uint8) for _ in range(5)]
+        frames[0][0, 0, 3] = frames[1][0, 0, 3] = frames[2][0, 0, 3] = frames[3][0, 0, 3] = frames[4][0, 0, 3] = 0
+        avg = px.blur_average([Image.fromarray(f, 'RGBA') for f in frames]).astype(np.float64)
+        dst = np.array([30.0, 200.0, 90.0])
+        f = np.stack(frames).astype(np.float64)
+        a = f[..., 3:] / 255.0
+        loop = (a * f[..., :3] + (1 - a) * dst).mean(0)             # the five frames blended, averaged
+        once = avg[..., 3:] / 255.0 * avg[..., :3] + (1 - avg[..., 3:] / 255.0) * dst
+        self.assertLess(float(np.abs(loop - once).max()), 1.0)      # within the 8-bit rounding
+        self.assertTrue(np.array_equal(avg[0, 0, :3], np.rint(f[:, 0, 0, :3].mean(0))))   # no frame covers it
+
+    def test_one_sided_blur_gets_its_back(self) -> None:
+        P = np.array([[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]], float)    # one quad facing up (+y)
+        N = np.tile([0.0, 1.0, 0.0], (4, 1))
+        UV = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], float)
+        T = np.array([[0, 1, 2], [2, 3, 0]])
+        pos, nrm, uv, tri = px.two_sided(P, N, UV, T)
+        self.assertEqual((len(pos), len(tri)), (8, 4))
+        f = np.cross(pos[tri[:, 1]] - pos[tri[:, 0]], pos[tri[:, 2]] - pos[tri[:, 0]])
+        self.assertEqual(np.sign(f[:, 1]).tolist(), [1, 1, -1, -1])
+        self.assertTrue(np.array_equal(nrm[4:], -N) and np.array_equal(uv[4:], UV))
+        # already back to back (the small heli's two quads): as it is
+        again = px.two_sided(pos, nrm, uv, tri)
+        self.assertTrue(all(np.array_equal(x, y) for x, y in zip(again, (pos, nrm, uv, tri))))
+
+    def test_air_model_draws_the_blur(self) -> None:
         import xm_air_model
         with tempfile.TemporaryDirectory() as d:
             P = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], np.float32)
@@ -342,11 +371,71 @@ class RotorBlurTests(unittest.TestCase):
                                f'p{k}_uv': np.zeros((3, 2), np.float32), f'p{k}_tri': np.array([[0, 1, 2]], np.uint32)})
             np.savez(os.path.join(d, 'model.npz'), **arrays)
             info = {'materials': [{'name': 'xm_0', 'albedo': 'a.png', 'specular': 's.png'},
-                                  {'name': 'xm_1', 'transparent': {'blend': 'alpha', 'frames': ['f0.png'],
-                                                                   'frame_time': 0.2}}],
+                                  {'name': 'xm_1', 'albedo': 'b.png', 'alpha': {'mode': 'blend', 'factor': 1.0},
+                                   'transparent': {'blend': 'alpha', 'frames': ['f0.png'], 'frame_time': 0.2}}],
                     'parts': [{'bone': 'xm_hull', 'material': 0}, {'bone': 'rotor', 'material': 1}]}
             parts = xm_air_model._parts(d, info)
-            self.assertEqual([(p.material, b) for p, b in parts], [('xm_0', 'xm_hull')])
+            self.assertEqual([(p.material, b) for p, b in parts], [('xm_0', 'xm_hull'), ('xm_1', 'rotor')])
+            with open(os.path.join(d, 'model.json'), 'w', encoding='utf-8') as h:
+                import json
+                json.dump({'format': 1, 'family': 'heli', **info}, h)
+            self.assertIn(os.path.join(d, 'b.png'), xm_air_model.model_files(d))   # the installer's cache hashes it
+
+    def test_see_through_body_on_any_common_basic_host(self) -> None:
+        # the V505 hull (xm_air_model's body) takes a see-through material as v603_body does; a track cannot blend
+        import wt_tracked as wt
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank', 'alpha': {'mode': 'blend'}}), wt.ALPHA)
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank', 'alpha': {'mode': 'mask'}}), wt.CLIP)
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank'}), 'v505_tank')
+        for bad in ({'template': wt.LIGHT, 'alpha': {'mode': 'blend'}},
+                    {'template': 'v603_kyata_L', 'alpha': {'mode': 'blend'}}):
+            with self.assertRaises(wt.WtModelError):
+                wt.template({'name': 'b', **bad})
+
+    def test_heli_blurs_build_on_the_alpha_host(self) -> None:
+        """The model pack's helis with a blur: its material on snd_BRDF_Common_Alpha (b3 2: the translucent list),
+        diffuse.w 1 and the view fall-off held at 1, the V505 body's other colour parameters; its albedo DXT5."""
+        import alpha_maps
+        import obj_model
+        import rootcpk
+        import texfile
+        import wt_tracked as wt
+        import xm_air_model as xa
+        import xm_heli
+        import xm_units
+        from dreadnought_model import BODY_HOST, _host
+        if not (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file():
+            self.skipTest('EDF6 is not installed')
+        game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+        body_md, _m = _host(game, BODY_HOST)
+        body = next(x for x in body_md.materials if body_md.name_of(x.name) == BODY_HOST[2])
+        self.assertEqual(body.shader, wt.BASIC_SHADER)
+        own = {p.name: list(p.value) for p in body.params}
+        seen = 0
+        for key in ('xm_small_helicopter_core', 'xm_medium_helicopter_core'):
+            folder = obj_model.model_dir(xm_units.folder(key))
+            if folder is None:
+                continue
+            info = xa.read_info(folder)
+            md, tex, _anim, _out = xa.build_model(game, folder, key, xm_heli.holders(xm_units.UNITS[key], info))
+            for m in info['materials']:
+                if not m.get('transparent'):
+                    continue
+                with self.subTest(key=key, material=m['name']):
+                    seen += 1
+                    self.assertEqual(alpha_maps.entry(m['alpha'])['mode'], alpha_maps.BLEND)
+                    mat = next(x for x in md.materials if md.name_of(x.name) == f'{key}_{m["name"]}')
+                    self.assertEqual((mat.shader, mat.b3), (wt.ALPHA_SHADER, 2))
+                    params = {p.name: list(p.value) for p in mat.params}
+                    self.assertEqual(params['diffuse'][:3], own['diffuse'][:3])
+                    self.assertAlmostEqual(params['diffuse'][3], 1.0, places=6)
+                    self.assertEqual([params[k][0] for k in wt.FALL_OFF], list(wt.FALL_OFF.values()))
+                    albedo = md.textures[next(x.texture for x in mat.textures if x.kind == 'albedo')].filename
+                    self.assertEqual(texfile.dds_info(tex[albedo]).fourcc, b'DXT5')
+                    drawn = [me for me in md.objects[0].meshes if me.material == md.materials.index(mat)]
+                    self.assertTrue(drawn)
+        if not seen:
+            self.skipTest('the model pack\'s heli folders are not here')
 
 
 class PrepSelectTests(unittest.TestCase):
