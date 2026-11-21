@@ -4,17 +4,19 @@
 // perspective.
 //
 // The user, 2026-11-21: 「固定朝向的，但是有厚度吧」. So the plate does not turn with the camera (a billboard parallel to the
-// screen looks exactly like the scaled 2D text it replaced): it stands upright (its local y down the world's -Y), facing
-// the way the camera looked level when the label first showed (Upright, kept by the label's key in a Facings cache), or
-// lies on the ground north up (Ground: the map's grid labels). Its thickness is the same text drawn again in layers
+// screen looks exactly like the scaled 2D text it replaced): it faces the camera square on as the camera was when the
+// label first showed, yaw and pitch both (FacingCamera: its up the world's up as far as the view allows, no roll), and
+// keeps that (by the label's key in a Facings cache: the map's view and the player's each their own); or it lies on the
+// ground north up (Ground: the map's grid labels). An upright plate under the map's look down (30-88 degrees) squashed to
+// a line, and growing it for that stretched it sideways: a plate made square on reads wherever it was made. Its thickness is the same text drawn again in layers
 // behind its face along its normal (real metres apart: the perspective shows their sides), the ones further back darker
 // and fainter, the face last in its own colour with a glow round it. Seen from behind, the face is the side nearest the
 // camera and the text runs mirrored along the plate, so it still reads left to right (the plate itself never moves).
 //
 // Its size is in metres (the perspective makes it larger near, smaller far): the label's 2D size at `ref` m in the plane
 // facing the camera, and past that, for reading, its metres grown with the depth so its height on the screen stays at
-// least kFarLeast of the 2D label's (and at most kNearMost up close), a plate seen at a slant (the map's look down at an
-// upright one) grown for its foreshortening down to kLeastFacing. The font scale the glyphs are rasterized at stays the
+// least kFarLeast of the 2D label's (and at most kNearMost up close), as the plate would be seen square on (one seen at a
+// slant shows shorter or narrower, never grown for it). The font scale the glyphs are rasterized at stays the
 // label's nominal one snapped to the glyph cache's grid (docs/hud-re.md §2.1, kTextScaleStep), whatever the depth: every
 // other factor is in `m` (a font scale changing with the depth would move through the cache's sizes as the label moves).
 //
@@ -31,8 +33,9 @@
 namespace crew::worldtext {
 // The label's height on the screen against its 2D height: at least this far off, at most this near.
 constexpr float kFarLeast=0.85f,kNearMost=1.8f;
-// A plate seen at a slant: grown for its foreshortening down to this share of its height showing (edge-on: no more).
-constexpr float kLeastFacing=0.3f;
+// Seen nearly edge-on (the cosine between its normal and the way to the eye within this), the plate keeps the side it
+// showed last (its face does not jump between its two sides as the camera passes its edge).
+constexpr float kFlipBand=0.1f;
 // The depth (m) a label is its 2D size at in the player's own view; the map's view uses its camera's distance instead.
 constexpr float kViewRef=30.0f;
 // The glow: the outline in the label's own colour, lightened toward white this much, at this share of its alpha, this wide
@@ -112,20 +115,20 @@ inline bool EyeOf(const float* vp,float* eye) noexcept {
 // A plate's orientation (world, unit): its text's right and down, its normal out of its face (right x down along the
 // normal with the screen's handedness: seen from the normal's side it reads as the screen would).
 struct Standee { float right[3],down[3],normal[3]; };
-// Upright, facing the camera of `f` level: its normal the camera's level backward (straight up or down: the screen's
-// down, level, the side the camera tilts from), its down the world's -Y. False: no level way (a rolled camera on its side
-// looking straight down).
-inline bool Upright(const Frame& f,Standee* s) noexcept {
-    // -forward, plus the screen's down as much as the camera looks up or down (both point back toward the camera then).
-    float n[3]={-f.forward[0]-f.forward[1]*f.down[0],0.0f,-f.forward[2]-f.forward[1]*f.down[2]};
-    const float l=std::sqrt(Dot(n,n));
-    if(!(l>1e-4f))return false;
-    n[0]/=l;n[2]/=l;
-    // right = sigma (n.z, 0, -n.x): right x down . n = -sigma, so sigma = -hand.
-    const float sigma=-f.hand;
-    const float r[3]={sigma*n[2],0.0f,-sigma*n[0]};
-    for(int i=0;i<3;++i){s->right[i]=r[i];s->normal[i]=n[i];}
-    s->down[0]=0.0f;s->down[1]=-1.0f;s->down[2]=0.0f;
+// Square on to the camera of `f`: its normal back along the camera's forward, its right the camera's right made level
+// (no roll: the world's up as its up as far as the view's pitch allows), its down to read with the screen's handedness.
+// False: no right (a camera rolled onto its side looking straight up or down).
+inline bool FacingCamera(const Frame& f,Standee* s) noexcept {
+    const float n[3]={-f.forward[0],-f.forward[1],-f.forward[2]};
+    float r[3]={f.right[0],0.0f,f.right[2]};
+    const float rn=Dot(r,n);
+    for(int i=0;i<3;++i)r[i]-=rn*n[i];
+    float l=std::sqrt(Dot(r,r));
+    if(!(l>1e-3f)){for(int i=0;i<3;++i)r[i]=f.right[i];l=1.0f;}
+    for(float& v:r)v/=l;
+    // right x down . n = hand: down = hand (n x right) (right x (n x right) = n for unit, square vectors).
+    float d[3];Cross(n,r,d);
+    for(int i=0;i<3;++i){s->right[i]=r[i];s->down[i]=d[i]*f.hand;s->normal[i]=n[i];}
     return true;
 }
 // Lying on the ground, north up: its down south (-Z), its normal up, its right east or west as the screen's handedness
@@ -137,28 +140,27 @@ inline Standee Ground(float hand) noexcept {
     s.normal[1]=1.0f;
     return s;
 }
-// How much of a metre down the plate shows on the screen against one in the plane facing the camera (1: square to the
-// view, 0: edge-on from above / below): its down's part in the screen's plane.
-inline float Facing(const Frame& f,const Standee& s) noexcept {
-    const float x=Dot(s.down,f.right),y=Dot(s.down,f.down);
-    const float v=std::sqrt(x*x+y*y);
-    return v>1.0f ? 1.0f : v;
-}
 // Whether the camera at `eye` is behind the plate at `at` (on its normal's other side).
 inline bool Behind(const Standee& s,const float* at,const float* eye) noexcept {
     const float d[3]={eye[0]-at[0],eye[1]-at[1],eye[2]-at[2]};
     return Dot(s.normal,d)<0.0f;
 }
+// The same with the side it showed last (`was`) kept while the way to the eye is within kFlipBand of its edge.
+inline bool BehindHeld(const Standee& s,const float* at,const float* eye,bool was) noexcept {
+    const float d[3]={eye[0]-at[0],eye[1]-at[1],eye[2]-at[2]};
+    const float l=std::sqrt(Dot(d,d));
+    if(!(l>1e-6f))return was;
+    const float c=Dot(s.normal,d)/l;
+    return c<-kFlipBand ? true : c>kFlipBand ? false : was;
+}
 
-// The label's size against its 2D size at `depth` m, its 2D size at `ref` m in the plane facing the camera, the plate
-// showing `facing` of its height: the perspective's (its metres fixed) while its height on the screen stays within
-// [kFarLeast, kNearMost] of the 2D height, else grown / shrunk to the bound.
-inline float SizeFactor(float depth,float ref,float facing) noexcept {
-    const float fa=facing<kLeastFacing || !(facing==facing) ? kLeastFacing : facing>1.0f ? 1.0f : facing;
-    if(!(depth>0.0f) || !(ref>0.0f))return kNearMost/fa;
-    const float shown=ref/depth*fa;
-    const float held=shown<kFarLeast ? kFarLeast : shown>kNearMost ? kNearMost : shown;
-    return held/fa;
+// The label's size against its 2D size at `depth` m, its 2D size at `ref` m (both square on): the perspective's (its
+// metres fixed) while its height square on stays within [kFarLeast, kNearMost] of the 2D height, else grown / shrunk to
+// the bound. A plate seen at a slant is not grown for it: it shows narrower or shorter, never wider than square on.
+inline float SizeFactor(float depth,float ref) noexcept {
+    if(!(depth>0.0f) || !(ref>0.0f))return kNearMost;
+    const float k=ref/depth;
+    return k<kFarLeast ? kFarLeast : k>kNearMost ? kNearMost : k;
 }
 
 // A font scale on the glyph cache's grid (docs/hud-re.md §2.1): the nearest grid point, one step at least.
@@ -231,25 +233,28 @@ inline int LayersFor(float depth,int labels) noexcept {
 }
 
 // The facings: a label's key to its plate's orientation, made the first time it is asked for (the caller's `fresh`: the
-// camera's level way then) and kept while it is asked for again within kForgetMs; at most kFacingSlots (the one asked
-// for longest ago given up for a new one). The draw thread's own.
-struct FacingSlot { std::uint64_t key; unsigned long long seen; Standee s; bool used; };
+// camera square on then) and kept while it is asked for again within kForgetMs, with the side it showed last (`back`,
+// BehindHeld). At most kFacingSlots: a new key takes a free or forgotten slot, else the one asked for in the oldest
+// frame; when every slot was asked for in this frame already (more labels than slots), none: the caller draws that
+// one square on to the camera now, uncached (no slot given up and made again every frame). The draw thread's own.
+struct FacingSlot { std::uint64_t key; unsigned long long seen,frame; Standee s; bool used,back; };
 struct Facings { FacingSlot slot[kFacingSlots]; };
-inline const Standee& FacingOf(Facings& c,std::uint64_t key,unsigned long long now,const Standee& fresh) noexcept {
+inline FacingSlot* FacingOf(Facings& c,std::uint64_t key,unsigned long long now,unsigned long long frame,const Standee& fresh) noexcept {
     FacingSlot* pick=nullptr;
     const auto stale=[now](const FacingSlot& f){ return !f.used || now<f.seen || now-f.seen>kForgetMs; };
     for(FacingSlot& f:c.slot)if(f.used && f.key==key){pick=&f;break;}
-    if(pick && stale(*pick))pick->s=fresh;   // back after long away: a new label there
+    if(pick && stale(*pick)){pick->s=fresh;pick->back=false;}   // back after long away: a new label there
     if(!pick) {
         for(FacingSlot& f:c.slot)if(stale(f)){pick=&f;break;}
         if(!pick) {
             pick=&c.slot[0];
-            for(FacingSlot& f:c.slot)if(f.seen<pick->seen)pick=&f;
+            for(FacingSlot& f:c.slot)if(f.frame<pick->frame)pick=&f;
+            if(pick->frame==frame)return nullptr;
         }
-        pick->key=key;pick->used=true;pick->s=fresh;
+        pick->key=key;pick->used=true;pick->s=fresh;pick->back=false;
     }
-    pick->seen=now;
-    return pick->s;
+    pick->seen=now;pick->frame=frame;
+    return pick;
 }
 // How many facings are kept now (not forgotten).
 inline int FacingsKept(const Facings& c,unsigned long long now) noexcept {

@@ -1111,7 +1111,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
                 if(!std::isfinite(d) || d>=best || d>=most*most)continue;
                 best=d;found=true;
                 std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
-                out->hail=out->coming=false;
+                out->hail=out->coming=false;out->of=reinterpret_cast<std::uintptr_t>(v)*8u+i;
             }
         }
         if(found)return true;
@@ -1120,6 +1120,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
         float at[3],distance=0.0f;bool coming=false;
         if(!Cfg().playerJet || !PlayerJetHailHint(pos,at,&distance,&coming))return false;
         std::memcpy(out->at,at,12);out->reach=0.0f;out->distance=distance;out->inReach=false;out->hail=true;out->coming=coming;
+        out->of=1;   // the one carrier the hail calls (a seat's are vehicle x 8 + seat: never 1)
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

@@ -108,8 +108,9 @@ float Width(const wchar_t* text) {
     return w*kGlyphH*fontScale;
 }
 // The text lines a scene drew (while `recording`) and its glyphs: (character, font scale in kTextScaleStep units).
-// `world`: a world line's face (hud.cpp WorldLabel), its box the face's on the screen.
-struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; };
+// `world`: a world line's face (hud.cpp WorldLabel), its box the face's on the screen; `key` its label's (one object's
+// labels share it: a unit's group digits, follow word and name).
+struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
 
@@ -212,7 +213,7 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
     tallest=std::fmax(tallest,y1-y0);
     if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
-        drew.push_back(Drew{x0,y0,x1,y1,text,world});
+        drew.push_back(Drew{x0,y0,x1,y1,text,world,world ? worldDrawingKey : 0});
         const int step=static_cast<int>(std::lround(fontScale/kTextScaleStep));
         for(const wchar_t* c=text;*c;++c)if(*c!=L' ')glyphs.insert({*c,step});
     }
@@ -565,9 +566,9 @@ template<class F> void Record(const wchar_t* name,F draw,int width,int height=10
         for(std::size_t k=0;k<i;++k) {
             const Drew& b=drew[k];
             if(b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
-            // Two plates in the world may cross on the screen as the view has them (drawn far to near): only a 2D line
-            // over another line counts.
-            if(a.world && b.world)continue;
+            // Two plates of different things may cross on the screen as the view has them (drawn far to near); a 2D
+            // line over any line, or two plates of one thing (laid out apart round it), count.
+            if(a.world && b.world && a.key!=b.key)continue;
             if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1)t.overlaps.insert({static_cast<int>(k),static_cast<int>(i)});
         }
     }
@@ -592,11 +593,12 @@ template<class F> void Record(const wchar_t* name,F draw,int width,int height=10
 // `worldN` of them, `layersN` layers behind those, the HUD's projection put back after them: `restored`) against the same
 // scene flat (`flat`, none a world line: `flatN`). Each plate's face near where the flat line is (the plate stands at its
 // anchor, its offset in metres along it: near the 2D offset, not to the pixel), its height on the screen within
-// world_text.h's bounds of the flat one's (a little more for the perspective across a plate made facing level). Returns
-// its failures.
+// world_text.h's bounds of the flat one's (a little more for the perspective across the plate). The map's grid labels
+// lie on the ground north up (turned on the screen with the map's heading, foreshortened by its look down: world_text_check
+// checks their shape): counted, not held to the flat lines' boxes. Returns its failures.
 int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int worldN,int layersN,bool restored,
                          const std::vector<Drew>& flat,int flatN) {
-    int bad=0,matched=0;
+    int bad=0,matched=0,ground=0;
     const auto fail=[&](const char* what,const std::wstring& text,float a=0.0f,float b=0.0f){
         ++bad;std::printf("FAIL  world text %ls: %s \"%s\" (%.2f, %.2f)\n",name,what,Narrow(text).c_str(),a,b);};
     if(worldN<=0)fail("no world line drawn",L"");
@@ -605,6 +607,7 @@ int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int 
     if(flatN!=0)fail("a world line drawn with WorldText3D=0",L"");
     for(const Drew& w:world) {
         if(w.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+        if(w.world && w.key==kGroundKey){++ground;continue;}
         for(const Drew& f:flat) {
             if(f.text!=w.text)continue;
             ++matched;
@@ -616,8 +619,8 @@ int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int 
             break;
         }
     }
-    std::printf("%s  world text %ls: %d plates, %d layers behind them, %d against the flat ones, restored %d\n",bad ? "FAIL" : "ok  ",
-                name,worldN,layersN,matched,restored);
+    std::printf("%s  world text %ls: %d plates (%d on the ground), %d layers behind them, %d against the flat ones, "
+                "restored %d\n",bad ? "FAIL" : "ok  ",name,worldN,ground,layersN,matched,restored);
     return bad;
 }
 // The stand-in catches the two ways the world lines' restore can go wrong (the real path drawn, then each mistake):
@@ -2754,6 +2757,11 @@ int Scenes(const std::wstring& dir) {
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
     // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
     MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
+    {   // The map's labels at 60 degrees down standing in the world (made square on to the map's camera), and flat.
+        const std::vector<Drew> world=drew;const int worldN=worldDraws,layersN=worldLayers;const bool restored=!lastDrawWorld;
+        config.worldText3D=false;MapScene(dir,L"map_mid_flat",700.0f,60.0f,20.0f,false);config.worldText3D=true;
+        failed+=WorldTextAgainstFlat(L"map_mid",world,worldN,layersN,restored,drew,worldDraws);
+    }
     MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
     MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);
     MapScene(dir,L"map_nine_squads",700.0f,60.0f,20.0f,false,9);

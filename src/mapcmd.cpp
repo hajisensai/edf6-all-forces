@@ -883,7 +883,7 @@ void EnemyControlCard(Game& g) noexcept {
         float position[3];
         if(g.enemyCandidate && ReadPosition(g.enemyCandidate.obj,position)) {
             for(int i=0;i<3;++i)g.enemy.markAt[i]=position[i]+g.enemyAimOffset[i];
-            g.enemy.marked=true;
+            g.enemy.marked=true;g.enemy.markOf=reinterpret_cast<std::uintptr_t>(g.enemyCandidate.obj);
         }
         EnemyControlDescribe(g.requester,g.enemyCandidate,&snapshot);
     }
@@ -1355,6 +1355,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;m.riding=e.owner==Owner::squad && e.u.riding;
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
+        m.of=reinterpret_cast<std::uintptr_t>(e.id.obj);
         m.groups=groups[i];m.ways=0;
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
@@ -1374,6 +1375,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     }
     r.hover=static_cast<bool>(g.hover);
     std::memcpy(r.hoverAt,g.hoverAt,12);
+    r.hoverOf=reinterpret_cast<std::uintptr_t>(g.hover.obj);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;

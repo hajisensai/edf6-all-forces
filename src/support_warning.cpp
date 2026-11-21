@@ -82,9 +82,12 @@ Kept& Claim() noexcept {
     nextSlot=(nextSlot+1)%kKept;
     return k;
 }
+std::uint32_t madeCount=0;   // the warnings made: each one's id (WarningView::id); the preview's is its own
+constexpr std::uint32_t kPreviewWarning=0xFFFFFFFFu;
 void Put(Kept& slot,const Kept& made) noexcept {
     AcquireSRWLockExclusive(&lock);
     slot=made;
+    slot.view.id=&slot==&preview ? kPreviewWarning : (++madeCount==kPreviewWarning ? ++madeCount : madeCount);
     ReleaseSRWLockExclusive(&lock);
 }
 

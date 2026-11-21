@@ -1,15 +1,18 @@
 // The world text's math (src/world_text.h, docs/world-text-re.md §5 / §6) checked offline, through cameras of both
 // handednesses (the test's D3D-like one and the game's, whose right looking north is east, -X: map_cam.h Right):
 //  - the camera's frame read off a viewProj (plain, off-centre / jittered, rolled, zoomed, the map's), its eye;
-//  - an upright plate made facing the camera reads left to right and top down there, its normal level and fixed: the
-//    facings cache hands the same plate back whatever the camera does later;
+//  - a plate made square on to the camera (yaw and pitch, no roll) reads left to right and top down there at its 2D
+//    shape (the map's 60 / 80 / 88 degree looks down too), its normal fixed: the facings cache hands the same plate back
+//    whatever the camera does later; seen at a slant it shows narrower / shorter, never wider or taller than square on;
 //  - seen at a slant its corners go through the viewProj in perspective (the edge nearer the camera the taller);
 //  - seen from behind its face is the side nearest the camera and it still reads left to right, over the same span;
 //  - its layers: the face nearest the camera, each next one further (drawn last to first: the nearer over the further);
 //  - the map's grid labels lie on the ground north up and read from above;
-//  - the size: metres fixed between the bounds, held at kFarLeast / kNearMost of the 2D height on the screen (a slanted
-//    plate grown for its foreshortening), the font scale the nominal one on the grid whatever the depth;
-//  - the facings cache: at most kFacingSlots, one not asked for in kForgetMs made anew and given up first;
+//  - near edge-on it keeps the side it showed last (no face jumping between its sides);
+//  - the size: metres fixed between the bounds, held at kFarLeast / kNearMost of the 2D height square on, the font scale
+//    the nominal one on the grid whatever the depth;
+//  - the facings cache: at most kFacingSlots, one not asked for in kForgetMs made anew; past its slots in one frame the
+//    rest uncached (none given up and made again every frame), the slot of the oldest frame given up the next;
 //  - a point behind the camera or a viewProj without perspective refused; the glow and the shimmer.
 //   cmake --build build --target world_text_check && build\world_text_check.exe      (exit code 1 on a failure)
 #include "../src/world_text.h"
@@ -89,6 +92,11 @@ bool See(const Standee& s,const float* at,float w,float h,int align,float mpp,in
 }
 // It reads: left to right along both edges, top over bottom on both sides.
 bool Reads(const Seen& v) { return v.x[1]>v.x[0] && v.x[3]>v.x[2] && v.y[2]>v.y[0] && v.y[3]>v.y[1]; }
+// Its size on the screen: the mean of its top and bottom edges across, of its left and right ones down.
+void SizeOf(const Seen& v,float* w,float* h) {
+    const auto len=[&](int a,int b){ return std::sqrt((v.x[a]-v.x[b])*(v.x[a]-v.x[b])+(v.y[a]-v.y[b])*(v.y[a]-v.y[b])); };
+    *w=0.5f*(len(0,1)+len(2,3));*h=0.5f*(len(0,2)+len(1,3));
+}
 // Its layers: the face nearest the camera, each next one further (its middle's distance from the eye: the layers are
 // parallel planes, the further along the eye's ray under the nearer).
 bool LayersBackward(const Plate& p,float w,float h,int layers,const float* vp) {
@@ -103,56 +111,74 @@ bool LayersBackward(const Plate& p,float w,float h,int layers,const float* vp) {
     return true;
 }
 
-void UprightChecks(bool game) {
+void FacingChecks(bool game) {
     const char* const hand=game ? "game-handed" : "D3D-handed";
     const float at[3]={40.0f,2.0f,90.0f};
     const float w=180.0f*0.4375f,h=32.0f*0.4375f;   // a label as the game measures it at fd 0.4375
+    const float h2d=32.0f*0.42f;
     float eye[3],vp[16];
-    // Made facing a camera south-west of it, a little above.
+    // Made square on to a camera south-west of it, a little above.
     Orbit(at,30.0f,25.0f,8.0f,eye,vp,game);
     FrameChecks(hand,vp,1920.0f,1080.0f,at,eye);
     Frame f{};
     Check(FrameAt(vp,1920.0f,1080.0f,at,&f) && f.hand==(game ? -1.0f : 1.0f),"handedness read off the viewProj",f.hand);
     Standee made{};
-    Check(Upright(f,&made),"upright made");
-    Check(std::fabs(made.normal[1])<1e-6f && std::fabs(Dot(made.normal,made.normal)-1.0f)<1e-5f && made.down[1]==-1.0f &&
-          std::fabs(Dot(made.right,made.normal))<1e-6f && std::fabs(made.right[1])<1e-6f,"upright: level normal, down -Y");
+    Check(FacingCamera(f,&made),"made square on");
+    Check(Dot(made.normal,f.forward)<-0.9999f && std::fabs(made.right[1])<1e-6f && std::fabs(Dot(made.right,made.normal))<1e-5f &&
+          std::fabs(Dot(made.down,made.normal))<1e-5f && made.down[1]<0.0f,"square on: normal back at the camera, right level, down down");
     Check(!Behind(made,at,eye),"made facing the camera");
     Facings cache{};
     const std::uint64_t key=Key(3,42);
-    Standee s=FacingOf(cache,key,1000,made);
-    const float mpp=SizeFactor(f.depth,kViewRef,Facing(f,s))*0.42f/0.4375f/f.pxY;
+    FacingSlot* slot=FacingOf(cache,key,1000,1,made);
+    Check(slot!=nullptr,"cached");
+    if(!slot)return;
+    Standee s=slot->s;
+    const float mpp=SizeFactor(f.depth,kViewRef)*0.42f/0.4375f/f.pxY;
     Seen v;
     for(int align=0;align<3;++align) {
         Check(See(s,at,w,h,align,mpp,8,vp,eye,&v) && Reads(v),"reads where it was made",v.x[1]-v.x[0],v.y[2]-v.y[0]);
         Check(LayersBackward(v.p,w,h,8,vp),"layers: the face nearest");
     }
-    // Square on, at the reference: the 2D height on the screen (it was made facing level; the camera 8 degrees up).
+    // Square on, at the reference: the 2D height and shape on the screen.
     See(s,at,w,h,1,mpp,8,vp,eye,&v);
-    const float h2d=32.0f*0.42f,shown=v.y[2]-v.y[0];
-    Check(shown>h2d*0.95f && shown<h2d*1.05f,"its 2D height square on at the reference",shown,h2d);
+    float sw,sh;SizeOf(v,&sw,&sh);
+    Check(sh>h2d*0.97f && sh<h2d*1.03f,"its 2D height square on at the reference",sh,h2d);
+    Check(std::fabs((sw/sh)/(w/h)-1.0f)<0.02f,"its 2D shape square on",sw/sh,w/h);
     // The camera walks round to 55 degrees on its right side: the same plate (its normal fixed), now in perspective.
     const float made0[3]={s.normal[0],s.normal[1],s.normal[2]};
     float eye2[3],vp2[16];
     Orbit(at,22.0f,25.0f+55.0f,4.0f,eye2,vp2,game);
     Frame f2{};FrameAt(vp2,1920.0f,1080.0f,at,&f2);
-    Standee other{};Upright(f2,&other);
-    s=FacingOf(cache,key,1400,other);
+    Standee other{};FacingCamera(f2,&other);
+    slot=FacingOf(cache,key,1400,2,other);
+    s=slot->s;
     Check(std::fabs(Dot(s.normal,made0)-1.0f)<1e-6f && std::fabs(Dot(other.normal,made0))<0.9f,"normal fixed as the camera turns");
     Check(See(s,at,w*3.0f,h,1,mpp,8,vp2,eye2,&v) && Reads(v),"reads at 55 degrees");
-    // The edge nearer the camera the taller on the screen (the perspective, not an affine flattening).
-    {
+    {   // The edge nearer the camera the taller on the screen (the perspective, not an affine flattening).
         float m[16],l[3],r[3];LayerMatrix(v.p,0,m);Local(m,0.0f,h*0.5f,l);Local(m,w*3.0f,h*0.5f,r);
         const float dl=DepthOf(vp2,l),dr=DepthOf(vp2,r),hl=v.y[2]-v.y[0],hr=v.y[3]-v.y[1];
         Check(std::fabs(dl-dr)>0.3f && ((dl<dr)==(hl>hr)),"the nearer edge taller",hl,hr);
         Check(std::fabs(hl/hr-dr/dl)<0.03f,"edge heights as 1 / depth",hl/hr,dr/dl);
+        // Narrower than square on, never wider: at most its square-on shape.
+        SizeOf(v,&sw,&sh);
+        Check(sw/sh<(w*3.0f/h)*0.8f,"at 55 degrees narrower than square on",sw/sh,w*3.0f/h);
     }
     Check(LayersBackward(v.p,w,h,8,vp2),"layers at 55 degrees: the face nearest");
+    // Looked down at from 50 degrees above (made level): shorter, never wider or taller than square on at that depth.
+    {
+        float e5[3],v5[16];Orbit(at,30.0f,25.0f,58.0f,e5,v5,game);
+        Frame f5{};FrameAt(v5,1920.0f,1080.0f,at,&f5);
+        Check(See(s,at,w,h,1,mpp,8,v5,e5,&v) && Reads(v),"reads looked down at");
+        SizeOf(v,&sw,&sh);
+        const float squareW=w*mpp*f5.pxX,squareH=h*mpp*f5.pxY;
+        Check(sw<=squareW*1.03f && sh<=squareH*1.03f,"looked down at: never larger than square on",sw/squareW,sh/squareH);
+        Check(sh<squareH*0.75f && sw/sh>(w/h)*1.3f,"looked down at: foreshortened",sh/squareH,sw/sh);
+    }
     // From behind (160 degrees round): the face the side nearest the camera, reading left to right, the same span.
     float eye3[3],vp3[16];
     Orbit(at,25.0f,25.0f+160.0f,6.0f,eye3,vp3,game);
-    s=FacingOf(cache,key,1800,other);
-    Check(Behind(s,at,eye3),"behind it");
+    s=FacingOf(cache,key,1800,3,other)->s;
+    Check(Behind(s,at,eye3) && BehindHeld(s,at,eye3,false),"behind it");
     Seen b;
     Check(See(s,at,w,h,0,mpp,8,vp3,eye3,&b) && b.p.back && Reads(b),"reads from behind",b.x[1]-b.x[0],b.y[2]-b.y[0]);
     Check(LayersBackward(b.p,w,h,8,vp3),"layers from behind: the face nearest");
@@ -168,15 +194,32 @@ void UprightChecks(bool game) {
         float mlast[16],q[3];LayerMatrix(front,7,mlast);Local(mlast,0.0f,0.0f,q);
         Check(std::fabs((Dot(f0,s.normal)-Dot(q,s.normal))-thick)<1e-4f,"layers span the thickness",Dot(f0,s.normal)-Dot(q,s.normal),thick);
     }
-    // Nearly edge-on: still the same plate, its layers' edges apart on the screen (its thickness shows).
+    // Nearly edge-on (88 degrees round): the side it showed last kept either way, its layers' edges apart (its thickness).
     float eye4[3],vp4[16];
     Orbit(at,12.0f,25.0f+88.0f,3.0f,eye4,vp4,game);
+    Check(!BehindHeld(s,at,eye4,false) && BehindHeld(s,at,eye4,true),"edge-on: the side shown last kept");
+    Orbit(at,12.0f,25.0f+92.0f,3.0f,eye4,vp4,game);
+    Check(!BehindHeld(s,at,eye4,false) && BehindHeld(s,at,eye4,true),"just past the edge: the side shown last kept");
     {
-        Plate p;Lay(s,at,w,h,1,mpp,8,Behind(s,at,eye4),&p);
+        Plate p;Lay(s,at,w,h,1,mpp,8,false,&p);
         float m0[16],m7[16],a0[3],a7[3],x0=0,y0=0,x7=0,y7=0;
         LayerMatrix(p,0,m0);LayerMatrix(p,7,m7);Local(m0,0.0f,0.0f,a0);Local(m7,0.0f,0.0f,a7);
         ToScreen(vp4,1920.0f,1080.0f,a0,&x0,&y0);ToScreen(vp4,1920.0f,1080.0f,a7,&x7,&y7);
         Check(std::fabs(x7-x0)>2.0f,"edge-on: the layers apart",x7-x0);
+    }
+    // The map's looks down (map_cam.h: 30-88 degrees): a label new there square on, its 2D shape, its height held.
+    for(float pitch : {30.0f,60.0f,80.0f,88.0f})for(float yaw : {0.0f,135.0f}) {
+        float em[3],vm[16];Orbit(at,800.0f,yaw,pitch,em,vm,game);
+        Frame fm{};FrameAt(vm,1920.0f,1080.0f,at,&fm);
+        Standee sm{};
+        Check(FacingCamera(fm,&sm),"map: made square on",pitch);
+        const float k=SizeFactor(fm.depth,800.0f);
+        const float mm=k*0.42f/0.4375f/fm.pxY;
+        Seen q;
+        Check(See(sm,at,w,h,1,mm,6,vm,em,&q) && Reads(q),"map: a new label reads",pitch,yaw);
+        SizeOf(q,&sw,&sh);
+        Check(std::fabs((sw/sh)/(w/h)-1.0f)<0.03f,"map: its 2D shape",pitch,(sw/sh)/(w/h));
+        Check(std::fabs(sh/(h2d*k)-1.0f)<0.03f && sh>=h2d*kFarLeast*0.97f,"map: its height held",pitch,sh/h2d);
     }
 }
 
@@ -192,7 +235,7 @@ void GroundChecks(bool game) {
     const Standee g=Ground(f.hand);
     Check(g.down[2]==-1.0f && g.normal[1]==1.0f && std::fabs(g.right[0])==1.0f,"ground: down south, normal up");
     Check(g.right[0]==(game ? -1.0f : 1.0f),"ground: right east in the game's handedness (map_cam.h Right)",g.right[0]);
-    const float mpp=SizeFactor(f.depth,1500.0f,Facing(f,g))*0.3f/0.3125f/f.pxY;
+    const float mpp=SizeFactor(f.depth,1500.0f)*0.3f/0.3125f/f.pxY;
     Seen v;
     Check(See(g,at,w,h,0,mpp,6,vp,eye,&v) && Reads(v) && !v.p.back,"map straight down: reads, north up",v.x[1]-v.x[0],v.y[2]-v.y[0]);
     {   // Its top is north: the local up (-y) along +Z.
@@ -204,25 +247,26 @@ void GroundChecks(bool game) {
     FrameAt(vp,1920.0f,1080.0f,at,&f);
     Check(Ground(f.hand).right[0]==g.right[0],"the same ground plate from any map camera");
     Check(See(g,at,w,h,1,mpp,6,vp,eye,&v) && Reads(v),"map 60 degrees: reads");
-    Check(std::fabs(Facing(f,g)-0.866f)<0.01f,"map 60 degrees: the plate's height foreshortened",Facing(f,g));
+    {   // Lying flat, seen 60 degrees down: as tall as sin 60 of its width's share (foreshortened, not grown for it).
+        float sw,sh;SizeOf(v,&sw,&sh);
+        Check(std::fabs((sh/sw)/(h/w)-0.866f)<0.03f,"map 60 degrees: the ground label foreshortened, not grown",(sh/sw)/(h/w));
+    }
 }
 
 void SizeChecks() {
     // The size: metres fixed (the perspective) between the bounds, held at both ends of the height on the screen.
-    Check(std::fabs(SizeFactor(kViewRef,kViewRef,1.0f)-1.0f)<1e-6f,"at the reference: the 2D size");
-    // Its metres (the factor x the depth: the factor is against the 2D size in the plane facing the camera) fixed between
-    // the depths where the perspective alone keeps its height within the bounds.
+    Check(std::fabs(SizeFactor(kViewRef,kViewRef)-1.0f)<1e-6f,"at the reference: the 2D size");
+    // Its metres (the factor x the depth: the factor is against the 2D size square on) fixed between the depths where
+    // the perspective alone keeps its height within the bounds.
     for(float d=kViewRef/kNearMost*1.01f;d<kViewRef/kFarLeast*0.99f;d+=0.5f)
-        Check(std::fabs(SizeFactor(d,kViewRef,1.0f)*d-kViewRef)<1e-3f,"between the bounds: its metres as at the reference",d);
-    for(float facing=0.1f;facing<=1.0f;facing+=0.15f)for(float d=0.5f;d<8000.0f;d*=1.3f) {
-        const float k=SizeFactor(d,kViewRef,facing);
-        const float fa=facing<kLeastFacing ? kLeastFacing : facing;
-        const float shown=k*fa;   // its height on the screen against the 2D one: the factor x the share showing
-        Check(shown>=kFarLeast-1e-4f && shown<=kNearMost+1e-4f,"its height on the screen held",d,shown);
+        Check(std::fabs(SizeFactor(d,kViewRef)*d-kViewRef)<1e-3f,"between the bounds: its metres as at the reference",d);
+    for(float d=0.5f;d<8000.0f;d*=1.3f) {
+        const float k=SizeFactor(d,kViewRef);
+        Check(k>=kFarLeast-1e-4f && k<=kNearMost+1e-4f,"its height square on held",d,k);
         // The metres (factor x depth) never shrink going further off: near large, far small on the screen, never smaller.
-        Check(SizeFactor(d*1.3f,kViewRef,facing)*d*1.3f>=k*d-1e-3f,"its metres never shrink further off",d,k);
+        Check(SizeFactor(d*1.3f,kViewRef)*d*1.3f>=k*d-1e-3f,"its metres never shrink further off",d,k);
     }
-    Check(SizeFactor(5000.0f,kViewRef,1.0f)==kFarLeast && SizeFactor(1.0f,kViewRef,1.0f)==kNearMost,"held at both ends");
+    Check(SizeFactor(5000.0f,kViewRef)==kFarLeast && SizeFactor(1.0f,kViewRef)==kNearMost,"held at both ends");
     // The font scale: the nominal one on the grid whatever the depth; the rest in the matrix.
     const float step=1.0f/32.0f;
     for(float want=0.01f;want<3.0f;want+=0.0173f) {
@@ -239,8 +283,8 @@ void SizeChecks() {
     for(float d : {300.0f,2000.0f,5.0f}) {
         float eye[3],vp[16];Orbit(at,d,0.0f,0.0f,eye,vp,true);
         Frame f{};FrameAt(vp,1920.0f,1080.0f,at,&f);
-        Standee s{};Upright(f,&s);
-        const Fit fit=FontFor(0.42f,SizeFactor(f.depth,kViewRef,Facing(f,s)),step);
+        Standee s{};FacingCamera(f,&s);
+        const Fit fit=FontFor(0.42f,SizeFactor(f.depth,kViewRef),step);
         Seen v;
         See(s,at,180.0f*fit.fd,32.0f*fit.fd,1,fit.unitPx/f.pxY,LayersFor(f.depth,1),vp,eye,&v);
         const float k=(v.y[2]-v.y[0])/(32.0f*0.42f);
@@ -268,18 +312,24 @@ void CacheChecks() {
     a.normal[0]=1.0f;b.normal[2]=1.0f;
     Facings c{};
     // Kept while asked for; made anew after kForgetMs away.
-    Check(FacingOf(c,Key(1,7),100,a).normal[0]==1.0f,"cache: made");
-    Check(FacingOf(c,Key(1,7),100+kForgetMs,b).normal[0]==1.0f,"cache: kept while asked for");
-    Check(FacingOf(c,Key(1,7),100+kForgetMs*2+1,b).normal[2]==1.0f,"cache: made anew after long away");
+    unsigned long long frame=1;
+    Check(FacingOf(c,Key(1,7),100,frame++,a)->s.normal[0]==1.0f,"cache: made");
+    Check(FacingOf(c,Key(1,7),100+kForgetMs,frame++,b)->s.normal[0]==1.0f,"cache: kept while asked for");
+    FacingOf(c,Key(1,7),100+kForgetMs,frame,b)->back=true;
+    Check(FacingOf(c,Key(1,7),100+kForgetMs,frame++,b)->back,"cache: the side shown last kept");
+    FacingSlot* again=FacingOf(c,Key(1,7),100+kForgetMs*2+1,frame++,b);
+    Check(again->s.normal[2]==1.0f && !again->back,"cache: made anew after long away");
     Check(FacingsKept(c,100+kForgetMs*2+1)==1 && FacingsKept(c,100+kForgetMs*3+2)==0,"cache: forgotten");
-    // At most kFacingSlots: one more given the slot asked for longest ago; the newer ones kept.
+    // At most kFacingSlots. Past them in one frame: the rest uncached, none given up (no slot made again every frame).
     Facings d{};
-    for(int i=0;i<kFacingSlots;++i)FacingOf(d,Key(2,static_cast<std::uint64_t>(i)),1000+static_cast<unsigned long long>(i),a);
-    Check(FacingsKept(d,1000+kFacingSlots)==kFacingSlots,"cache: full");
-    FacingOf(d,Key(2,9999),2000,b);
-    Check(FacingsKept(d,2000)==kFacingSlots,"cache: never more than its slots");
-    Check(FacingOf(d,Key(2,1),2001,b).normal[0]==1.0f,"cache: a newer one kept");
-    Check(FacingOf(d,Key(2,0),2002,b).normal[2]==1.0f,"cache: the oldest given up");
+    for(int i=0;i<kFacingSlots;++i)FacingOf(d,Key(2,static_cast<std::uint64_t>(i)),1000,11,a);
+    Check(FacingsKept(d,1000)==kFacingSlots,"cache: full");
+    Check(FacingOf(d,Key(2,9999),1000,11,b)==nullptr,"cache: full this frame: the new one uncached");
+    Check(FacingOf(d,Key(2,1),1000,11,b)->s.normal[0]==1.0f,"cache: full this frame: the kept ones still there");
+    // The next frame: the slot asked for in the oldest frame given up for a new one, the newer kept.
+    FacingSlot* fresh=FacingOf(d,Key(2,9999),1016,12,b);
+    Check(fresh && fresh->s.normal[2]==1.0f && FacingsKept(d,1016)==kFacingSlots,"cache: next frame: one of the oldest frame given up");
+    Check(FacingOf(d,Key(2,kFacingSlots-1),1016,12,b)->s.normal[0]==1.0f,"cache: next frame: a newer one kept");
     // Keys: apart by kind and by what; a place's cell steady within it.
     const float p[3]={10.2f,1.0f,-33.7f},q[3]={11.9f,1.5f,-32.1f},r[3]={14.1f,1.0f,-33.7f};
     Check(Key(1,5)!=Key(2,5) && Key(1,5)!=Key(1,6) && Key(1,0)!=0,"keys apart");
@@ -298,13 +348,14 @@ int main() {
         Camera(eye,look,0.0f,fov,w,h*0.5f,0.0007f,-0.0004f,vp,g);FrameChecks("jittered",vp,w,h*0.5f,atRef,eye);
         Camera(eye,look,0.35f,fov,w,h,0.0f,0.0f,vp,g);FrameChecks("rolled",vp,w,h,atRef,eye);
         Camera(eye,look,0.0f,fov/6.0f,w,h,0.0f,0.0f,vp,g);FrameChecks("zoomed",vp,w,h,far1,eye);
-        UprightChecks(g);
+        FacingChecks(g);
         GroundChecks(g);
-        // Upright from straight above (the map looking down): still a plate, facing the screen's bottom.
+        // Made under the map's look straight down: square on, lying face up.
         const float top[3]={0.0f,1500.0f,0.0f},down[3]={0.0f,-1.0f,0.0f},ground1[3]={60.0f,0.0f,40.0f};
         Camera(top,down,0.0f,fov,w,h,0.0f,0.0f,vp,g);
         Frame f{};Standee s{};
-        Check(FrameAt(vp,w,h,ground1,&f) && Upright(f,&s) && std::fabs(s.normal[1])<1e-6f,"upright from straight above");
+        Check(FrameAt(vp,w,h,ground1,&f) && FacingCamera(f,&s) && s.normal[1]>0.999f && std::fabs(s.down[1])<1e-5f,
+              "square on from straight above: lying face up");
     }
     SizeChecks();
     CacheChecks();

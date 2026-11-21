@@ -123,7 +123,8 @@ int NpcSquadDismount(const void* top) noexcept;
 void NpcRideAlongTick() noexcept;
 // The first-time hint over a squad the map can command, near the player on foot (ride_along.h HintStep; once ever:
 // CommandHintShown=1 written to the ini when it ends). map.cpp sets it each frame, hud.cpp draws it (game thread both).
-struct CommandHint { float at[3]; int key; };
+// `of`: the squad it is over (the HUD's world label keeps its facing by it).
+struct CommandHint { float at[3]; int key; std::uint64_t of=0; };
 void NpcCommandHintFrame(const unsigned char* human,bool mapOpen) noexcept;
 bool NpcCommandHint(CommandHint* out) noexcept;
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;

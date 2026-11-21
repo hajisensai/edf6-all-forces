@@ -331,8 +331,9 @@ float DepthScale(float depth,float readTo) noexcept {
 // A line standing in the world (WorldLabel, src/world_text.h): its plate's orientation, the point its text is laid out
 // from (its height's middle, `align` as Label's along the plate), its size in glyph pixels at its font scale (`fd`, on the
 // glyph grid), the metres a glyph pixel, its shimmer's phase and its anchor's depth (the far ones drawn first, with fewer
-// layers). Off: a 2D line.
-struct WorldAt { bool on; worldtext::Standee plate; float at[3],w,h,mpp,fd,phase,depth; int align; };
+// layers), whether the camera is behind it (held near its edge: world_text.h BehindHeld) and its key (WorldLabel's).
+// Off: a 2D line.
+struct WorldAt { bool on,back; worldtext::Standee plate; float at[3],w,h,mpp,fd,phase,depth; int align; std::uint64_t key; };
 // A line of text to draw once the quads are down: where, its size (measured; a world line's on the screen), its scale and
 // colour, and whether it stands in the world.
 struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; WorldAt world; };
@@ -436,6 +437,7 @@ void MeasureAll(Text& t,Line* lines,int n) noexcept {
     EndOwed(t);
 }
 alignas(16) const float kClear[4]={0.0f,0.0f,0.0f,0.0f};
+std::uint64_t worldDrawingKey=0;   // the key of the world line being drawn (for tools/hud_view's stand-in to tell plates apart)
 // A world line (docs/world-text-re.md §5.1 / §6): its plate laid out for the camera (from behind: the face the back side,
 // the text mirrored along it so it reads left to right), begun once with its own font (the system constants written, the
 // depth test off), the renderer's view an identity and its projection the camera's viewProj, then its layers drawn from
@@ -443,16 +445,16 @@ alignas(16) const float kClear[4]={0.0f,0.0f,0.0f,0.0f};
 // outline, the face in its own colour with the glow round it. `labels`: the world lines this frame (fewer layers with many).
 void DrawWorld(Text& t,const Line& l,ULONGLONG now,int labels) noexcept {
     const WorldAt& w=l.world;
-    float eye[3];
-    if(!l.text[0] || !t.vp || !worldtext::EyeOf(t.vp,eye))return;
+    if(!l.text[0] || !t.vp)return;
     const int layers=worldtext::LayersFor(w.depth,labels);
     worldtext::Plate p;
-    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,layers,worldtext::Behind(w.plate,w.at,eye),&p);
+    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,layers,w.back,&p);
     alignas(16) float m[16],rgba[4],glow[4],layer[4];
     std::memcpy(rgba,l.rgba,16);
     rgba[3]*=worldtext::Shimmer(now,w.phase);
     worldtext::Glow(rgba,glow);
     Font(t,w.fd,glow,worldtext::kGlowWidth,3);
+    worldDrawingKey=w.key;
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     unsigned char* const core=At<unsigned char*>(t.renderer,kRendererCore);
@@ -1334,29 +1336,36 @@ void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,
 bool WorldText() noexcept { return worldTextOk && Cfg().worldText3D; }
 // The depth (m) a world label is its 2D size at: the player's view's kViewRef, the map's camera distance (MapScreen).
 float worldRef=worldtext::kViewRef;
-// The plates' orientations (world_text.h Facings): a label's key to the way it was made facing; the draw thread's own.
-// The keys (worldtext::Key): a kind of label each and what it is of (an object's identity where the HUD has one, else
-// its place's 4 m cell for a label of a place, or 0 for a label there is one of at a time). kGroundKey: a plate lying on the
-// ground north up (the map's grid), kept by no key.
+// The plates' orientations (world_text.h Facings): a label's key to the way it was made facing; the draw thread's own,
+// asked once a frame per key at most kFacingSlots (past that a label is drawn square on to the camera, uncached).
+// The keys (worldtext::Key): a kind of label each and the identity of what it is of (WorldKey: the object, the warning,
+// the mark's making; never a list index or a moving place), the map's view and the player's apart (a label gets a facing
+// of its own in each, made square on to that view's camera when it first shows there: worldMapView). kGroundKey: a plate
+// lying on the ground north up (the map's grid), kept by no key.
 worldtext::Facings worldFacings{};
+unsigned long long worldFrame=0;   // HudDraw's frames (the facings' least-recent order)
+bool worldMapView=false;           // this frame is the map's (MapScreen)
 constexpr std::uint64_t kGroundKey=0;
 enum WorldKind : unsigned { kWorldQMark=1,kWorldWarning,kWorldEntrance,kWorldCommandHint,kWorldPing,kWorldMapMarker,kWorldMapTarget,
                             kWorldMapHover,kWorldMapUnit };
-constexpr float kWorldCell=4.0f;
 std::uint64_t WorldKey(WorldKind kind,std::uint64_t of) noexcept { return worldtext::Key(kind,of); }
-std::uint64_t WorldKeyAt(WorldKind kind,const float* place) noexcept { return worldtext::Key(kind,worldtext::Cell(place,kWorldCell)); }
-// A label's plate: on the ground north up, else upright as it was made facing (now, from `f`'s camera, when it is new).
-bool PlateOf(const worldtext::Frame& f,std::uint64_t key,worldtext::Standee* plate) noexcept {
-    if(key==kGroundKey){*plate=worldtext::Ground(f.hand);return true;}
+// A label's plate (its back side held from the last frame near its edge): on the ground north up, else square on to
+// the camera as it was when it first showed in this view (now, from `f`'s, when it is new or there is no slot for it).
+bool PlateOf(const worldtext::Frame& f,std::uint64_t key,const float* at,const float* eye,worldtext::Standee* plate,bool* behind) noexcept {
+    if(key==kGroundKey){*plate=worldtext::Ground(f.hand);*behind=worldtext::Behind(*plate,at,eye);return true;}
     worldtext::Standee fresh;
-    if(!worldtext::Upright(f,&fresh))return false;
-    *plate=worldtext::FacingOf(worldFacings,key,GetTickCount64(),fresh);
+    if(!worldtext::FacingCamera(f,&fresh))return false;
+    worldtext::FacingSlot* const slot=worldtext::FacingOf(worldFacings,worldMapView ? key^0x4000000000000000ull : key,GetTickCount64(),
+                                                          worldFrame,fresh);
+    if(!slot){*plate=fresh;*behind=false;return true;}
+    *plate=slot->s;
+    *behind=slot->back=worldtext::BehindHeld(slot->s,at,eye,slot->back);
     return true;
 }
 // A world line's face on the screen, its bounding box (what lays out by the lines' boxes and the offline checks read).
-bool PlateBounds(const float* vp,float width,float height,const WorldAt& w,const float* eye,Line& l) noexcept {
+bool PlateBounds(const float* vp,float width,float height,const WorldAt& w,Line& l) noexcept {
     worldtext::Plate p;
-    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,1,worldtext::Behind(w.plate,w.at,eye),&p);
+    worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,1,w.back,&p);
     float m[16];worldtext::LayerMatrix(p,0,m);
     float x0=1e30f,y0=1e30f,x1=-1e30f,y1=-1e30f;
     for(int i=0;i<4;++i) {
@@ -1368,13 +1377,21 @@ bool PlateBounds(const float* vp,float width,float height,const WorldAt& w,const
     l.x=x0;l.y=y0;l.w=x1-x0;l.h=y1-y0;
     return true;
 }
+// The world point (dx, dy) px from `anchor` on the screen, in the plane through it facing the camera: a label kept on the
+// screen by moving its place there (EntranceMark / CommandHintMark clamp it in), its plate then standing there with no
+// offset of its own. `anchor` itself when the camera has no frame there.
+void ScreenShifted(const float* vp,float width,float height,const float* anchor,float dx,float dy,float* out) noexcept {
+    worldtext::Frame f;
+    const bool ok=worldtext::FrameAt(vp,width,height,anchor,&f);
+    for(int i=0;i<3;++i)out[i]=ok ? anchor[i]+f.right[i]*dx/f.pxX+f.down[i]*dy/f.pxY : anchor[i];
+}
 // A label of something in the world: its anchor `anchor` (world), the line (dx, dy) px from where that is on the screen,
-// `align` as Label's. With the world text on it stands in the world there as a hologram plate (world_text.h: upright and
-// facing the way the camera looked when the label of `key` first showed, or on the ground north up for kGroundKey; its
-// metres following the perspective within world_text.h's bounds on the screen, layered for its thickness, a glow round
-// its face, drawn first and seen through walls); the offset becomes metres along the plate at the anchor's depth (near
-// the 2D offset square on, not to the pixel). Else it is Label's flat line at the anchor's projection. Nothing while the
-// anchor is off the screen (as Project says).
+// `align` as Label's. With the world text on it stands in the world there as a hologram plate (world_text.h: square on to
+// the camera as it was when the label of `key` first showed in this view, kept so; or on the ground north up for
+// kGroundKey; its metres following the perspective while its height square on stays within world_text.h's bounds,
+// layered for its thickness, a glow round its face, drawn first and seen through walls); the offset becomes metres along
+// the plate at the anchor's depth (the 2D offset square on, not to the pixel at a slant). Else it is Label's flat line at
+// the anchor's projection. Nothing while the anchor is off the screen (as Project says).
 void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
                 float dx,float dy,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
     float x,y,depth;
@@ -1387,19 +1404,19 @@ void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float
     worldtext::Frame f;
     worldtext::Standee plate;
     float eye[3];
-    if(text && WorldText() && worldtext::FrameAt(vp,width,height,anchor,&f) && worldtext::EyeOf(vp,eye) && PlateOf(f,key,&plate)) {
-        const float facing=worldtext::Facing(f,plate);
-        const auto fit=worldtext::FontFor(hudscale::Font(scale,text->s),worldtext::SizeFactor(f.depth,worldRef,facing),kTextScaleStep);
+    bool behind=false;
+    if(text && WorldText() && worldtext::FrameAt(vp,width,height,anchor,&f) && worldtext::EyeOf(vp,eye) &&
+       PlateOf(f,key,anchor,eye,&plate,&behind)) {
+        const auto fit=worldtext::FontFor(hudscale::Font(scale,text->s),worldtext::SizeFactor(f.depth,worldRef),kTextScaleStep);
         WorldAt& w=l.world;
-        w.on=true;w.plate=plate;w.fd=fit.fd;w.mpp=fit.unitPx/f.pxY;w.align=align;w.depth=f.depth;w.phase=worldtext::PhaseOf(anchor);
+        w.on=true;w.back=behind;w.plate=plate;w.fd=fit.fd;w.mpp=fit.unitPx/f.pxY;w.align=align;w.depth=f.depth;
+        w.phase=worldtext::PhaseOf(anchor);w.key=key;
         MeasureAll(*text,&l,1);   // glyph pixels at its font scale
         w.w=l.w;w.h=l.h;
-        // The offset along the plate as it reads from the camera's side (its right mirrored from behind), its down
-        // foreshortened as the plate shows it.
-        const float side=worldtext::Behind(plate,anchor,eye) ? -1.0f : 1.0f;
-        const float shows=facing>worldtext::kLeastFacing ? facing : worldtext::kLeastFacing;
-        for(int i=0;i<3;++i)w.at[i]=anchor[i]+plate.right[i]*side*dx/f.pxX+plate.down[i]*dy/(f.pxY*shows);
-        if(PlateBounds(vp,width,height,w,eye,l))return;
+        // The offset along the plate as it reads from the camera's side (its right mirrored from behind).
+        const float side=behind ? -1.0f : 1.0f;
+        for(int i=0;i<3;++i)w.at[i]=anchor[i]+plate.right[i]*side*dx/f.pxX+plate.down[i]*dy/f.pxY;
+        if(PlateBounds(vp,width,height,w,l))return;
         l.w*=fit.unitPx;l.h*=fit.unitPx;
         worldtext::Place(x,y,dx,dy,align,l.w,l.h,&l.x,&l.y);
         return;
@@ -1420,11 +1437,14 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
     Seg(drawer,ctx,x+14.0f*s,y,x+20.0f*s,y,2.0f*s,colour);
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y+30.0f*s,30.0f*s,height-30.0f*s);
     const int metres=static_cast<int>(std::ceil(e.distance));
-    const float dx=tx-x,dy=ty-y;
-    if(e.hail && e.coming)WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
-    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
-    else if(e.inReach)WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
-    else WorldLabel(text,lines,at,vp,width,height,e.at,WorldKey(kWorldEntrance,0),dx,dy,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
+    // Kept on the screen as the 2D line was (clamped in): its place moved there, the plate standing on it.
+    float on[3];ScreenShifted(vp,width,height,e.at,tx-x,ty-y,on);
+    const std::uint64_t of=WorldKey(kWorldEntrance,e.of);
+    const float dx=0.0f,dy=0.0f;
+    if(e.hail && e.coming)WorldLabel(text,lines,at,vp,width,height,on,of,dx,dy,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
+    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);WorldLabel(text,lines,at,vp,width,height,on,of,dx,dy,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
+    else if(e.inReach)WorldLabel(text,lines,at,vp,width,height,on,of,dx,dy,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
+    else WorldLabel(text,lines,at,vp,width,height,on,of,dx,dy,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
 }
 
 // The first-time hint over a squad the map can command (test site #45: 「玩家第一次靠近可指挥的 NPC，或看到原版招募图标的位置
@@ -1437,7 +1457,8 @@ void CommandHintMark(void* drawer,void* ctx,Text* text,const float* vp,float wid
     Seg(drawer,ctx,x,y+3.0f*s,x+9.0f*s,y-6.0f*s,2.0f*s,kCyan);
     wchar_t key[32];KeyName(h.key,key,32);
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y-22.0f*s,30.0f*s,height-30.0f*s);
-    WorldLabel(text,lines,at,vp,width,height,h.at,WorldKey(kWorldCommandHint,0),tx-x,ty-y,1,kLineScale,kCyan,Tr(Tx::cmdHintPressKey),key);
+    float on[3];ScreenShifted(vp,width,height,h.at,tx-x,ty-y,on);   // kept on the screen as the 2D line was (clamped in)
+    WorldLabel(text,lines,at,vp,width,height,on,WorldKey(kWorldCommandHint,h.of),0.0f,0.0f,1,kLineScale,kCyan,Tr(Tx::cmdHintPressKey),key);
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
@@ -4167,7 +4188,7 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
             if(kind==MapKind::marker && MapLabelFree(p.ix,p.iy-24.0f*s,width,height,s)) {
                 wchar_t d[24];MapDistance(d,_countof(d),vec::Flat(u.pos,m.me));
                 const float top[3]={u.pos[0],u.pos[1]+pin,u.pos[2]};
-                WorldLabel(text,lines,at,vp,width,height,top,WorldKeyAt(kWorldMapMarker,u.pos),0.0f,-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
+                WorldLabel(text,lines,at,vp,width,height,top,WorldKey(kWorldMapMarker,u.of),0.0f,-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
             }
         }
     }
@@ -5406,14 +5427,14 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         MapEnemyControlReadout picked{};float tx,ty,td;
         if(ReadMapEnemyControl(&picked) && picked.visible && picked.marked && Project(vp,picked.markAt,width,height,&tx,&ty,&td)) {
             MapBrackets(drawer,ctx,tx,ty,26.0f*s,2.5f*s,kCyan);
-            WorldLabel(text,lines,at,vp,width,height,picked.markAt,WorldKey(kWorldMapTarget,0),0.0f,34.0f*s,1,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlTargetMark));
+            WorldLabel(text,lines,at,vp,width,height,picked.markAt,WorldKey(kWorldMapTarget,picked.markOf),0.0f,34.0f*s,1,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlTargetMark));
         }
     }
     // The enemy under the pointer: amber brackets on it, what the right button (or H) and Q do with it.
     float hx,hy,hd;
     if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
         MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
-        WorldLabel(text,lines,at,vp,width,height,c.hoverAt,WorldKey(kWorldMapHover,0),0.0f,-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+        WorldLabel(text,lines,at,vp,width,height,c.hoverAt,WorldKey(kWorldMapHover,c.hoverOf),0.0f,-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
     }
     // The transports' pairs (transport.cpp): a thin line from a squad on foot to its vehicle (bright on a trip).
     for(int i=0;i<c.links && i<kMapTransportLinks;++i) {
@@ -5457,16 +5478,16 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         if(u.selected)MapBrackets(drawer,ctx,ux,uy,20.0f*s,2.5f*s,kWhite);
         if(u.groups) {   // its RTS groups by its mark (Ctrl+1-9)
             wchar_t digits[16];MapGroupDigits(u.groups,digits,_countof(digits));
-            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),15.0f*s,-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
+            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of),15.0f*s,-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
         }
-        if(u.now.order==Order::follow)WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),0.0f,22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
+        if(u.now.order==Order::follow)WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of),0.0f,22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
             wchar_t kind[48];
             MapUnitName(u.name,kind,_countof(kind));
             if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)
                 _snwprintf_s(one,_countof(one),_TRUNCATE,Tr(u.owner==kCmdOwnerHeli ? Tx::unitHeli : Tx::unitJet),kind);
             else _snwprintf_s(one,_countof(one),_TRUNCATE,L"%ls",kind);
-            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,static_cast<std::uint64_t>(i)),0.0f,-28.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
+            WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of),0.0f,-28.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
         }
     }
     const float panelBottom=MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
@@ -5556,6 +5577,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     if(text)text->s=s;
     // Its world labels their 2D size at the focus (the camera's distance), larger nearer, smaller past it.
     worldRef=mapcam::Distance(mapcam::View{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height});
+    worldMapView=true;   // its labels' facings its own (made square on to the map's camera)
     mapUiPanelCount=0;mapTip.on=false;
     bool fresh=false;
     dmgstat::View statsView{};
@@ -5623,9 +5645,9 @@ void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
         // An enemy's words under it; a point's over it (the selected units' word, NpcPingHud, goes under).
         const float ly=m.enemy ? r+12.0f*s : -r-12.0f*s;   // from the mark
         const float d=cam ? vec::Dist(eye,m.at) : -1.0f;
-        // Its plate kept by whose mark it is and what (a marked enemy's goes along with it; a point's is of its place).
-        const std::uint64_t of=(m.own ? 1u : 0u)|(m.enemy ? 2u : 0u)|(static_cast<std::uint64_t>(m.slot+1)&0xFFu)<<2;
-        const std::uint64_t key=WorldKey(kWorldQMark,m.enemy ? of : of^worldtext::Cell(m.at,kWorldCell)*0x100000001B3ull);
+        // Its plate kept by whose mark it is and what it is of (the enemy marked, the point's making).
+        const std::uint64_t whose=(m.own ? 1u : 0u)|(m.enemy ? 2u : 0u)|(static_cast<std::uint64_t>(m.slot+1)&0xFFu)<<2;
+        const std::uint64_t key=WorldKey(kWorldQMark,m.of*0x100000001B3ull^whose);
         if(m.own && d>=0.0f)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::npcMarkRange),d);
         else if(m.own)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls",Tr(Tx::npcMark));
         // Its player's name as the game's name tag shows it (any script: the game's font draws it; FitName cut it to
@@ -5673,7 +5695,7 @@ void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float widt
                 }
             }
         }
-        if(v.text[0])WorldLabel(text,lines,at,vp,width,height,v.label,WorldKeyAt(kWorldWarning,v.label),0.0f,-14.0f*s,1,kLineScale*0.7f,rgba,L"%ls",v.text);
+        if(v.text[0])WorldLabel(text,lines,at,vp,width,height,v.label,WorldKey(kWorldWarning,v.id),0.0f,-14.0f*s,1,kLineScale*0.7f,rgba,L"%ls",v.text);
     }
 }
 
@@ -5752,8 +5774,8 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
         Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
     }
-    if(p.given>=0)WorldLabel(text,lines,at,vp,width,height,p.at,WorldKeyAt(kWorldPing,p.at),0.0f,26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
-    else WorldLabel(text,lines,at,vp,width,height,p.at,WorldKeyAt(kWorldPing,p.at),0.0f,26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
+    if(p.given>=0)WorldLabel(text,lines,at,vp,width,height,p.at,WorldKey(kWorldPing,p.wall),0.0f,26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
+    else WorldLabel(text,lines,at,vp,width,height,p.at,WorldKey(kWorldPing,p.wall),0.0f,26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy :
                   p.given==kPingCleared ? Tx::npcPingCleared : Tx::npcPingNoUnit));
 }
@@ -6041,7 +6063,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text text{};
         text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
         text.vp=viewProj;text.width=width;text.height=height;
-        worldRef=worldtext::kViewRef;
+        worldRef=worldtext::kViewRef;worldMapView=false;++worldFrame;
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines]{};   // zeroed: no line is a world one unless WorldLabel made it so
         int at=0,shown=0;

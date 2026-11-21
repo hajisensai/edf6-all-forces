@@ -45,7 +45,9 @@ int QMarkTeamEnemies(const void** out,int max) noexcept;
 // enemy (else a point on the ground); `slot` the marker's mission player slot (-1 not known); `name` its player's name
 // as the game's name tag shows it (empty: not read, P<slot+1> shown); `at` where it is.
 constexpr std::size_t kQMarkName=20;
-struct QMarkView { bool own,enemy; int slot; float at[3]; wchar_t name[kQMarkName]; };
+// `of`: what the mark is of, steady while it stands (the enemy marked; a point's own: its making), for the HUD's world
+// label to keep its facing by (hud.cpp WorldLabel); 0 not known.
+struct QMarkView { bool own,enemy; int slot; float at[3]; wchar_t name[kQMarkName]; std::uint64_t of=0; };
 constexpr int kQMarkViews=16;
 int QMarkViews(QMarkView* out,int max) noexcept;
 }  // namespace crew
