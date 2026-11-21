@@ -26,6 +26,8 @@ import time
 import uuid
 from typing import IO, Callable, Iterator
 
+import heartbeat
+
 ENV = 'EDF6_GAME_LEASE'       # the token of the lease this process runs under
 DIR_ENV = 'EDF6_QUEUE_DIR'    # where the queues live (tests point it elsewhere)
 LOCK_AT = 0x7FFF0000          # the locked byte: past any content, so the content stays readable
@@ -143,22 +145,24 @@ def _wait_turn(game: str, info: dict, wait_max: float | None, say: Callable[[str
         _write(ticket, info)
         start = time.time()
         shown = None
-        while True:
-            line = [w['ticket'] for w in waiters(game)]
-            if line and line[0] == name:
-                slot = open(_slot_path(game), 'a+b')
-                if _try_lock(slot):
-                    return slot
-                slot.close()
-            if wait_max is not None and time.time() - start > wait_max:
-                raise WaitExpired(f'still waiting for the game after {wait_max / 60:.1f} min')
-            h = holder(game)
-            now = (line.index(name) if name in line else -1, (h or {}).get('token'))
-            if now != shown:
-                shown = now
-                who = f"{h.get('label')} (pid {h.get('pid')}, {h.get('branch') or h.get('cwd')})" if h else 'nobody'
-                say(f'[game queue] waiting: {now[0]} ahead of us; the game is held by {who}')
-            time.sleep(POLL)
+        # another session's game run can take an hour: a line every few minutes for whoever watches the wait
+        with heartbeat.beating('[game queue] still waiting', lambda: '' if shown is None else f'{shown[0]} ahead of us', say):
+            while True:
+                line = [w['ticket'] for w in waiters(game)]
+                if line and line[0] == name:
+                    slot = open(_slot_path(game), 'a+b')
+                    if _try_lock(slot):
+                        return slot
+                    slot.close()
+                if wait_max is not None and time.time() - start > wait_max:
+                    raise WaitExpired(f'still waiting for the game after {wait_max / 60:.1f} min')
+                h = holder(game)
+                now = (line.index(name) if name in line else -1, (h or {}).get('token'))
+                if now != shown:
+                    shown = now
+                    who = f"{h.get('label')} (pid {h.get('pid')}, {h.get('branch') or h.get('cwd')})" if h else 'nobody'
+                    say(f'[game queue] waiting: {now[0]} ahead of us; the game is held by {who}')
+                time.sleep(POLL)
     finally:
         ticket.close()
         with contextlib.suppress(OSError):

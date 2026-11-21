@@ -16,7 +16,9 @@ Each part's output goes to build/check-<part>.log; the failures' tails are print
 """
 from __future__ import annotations
 
+import contextlib
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,6 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, 'build')
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import checklock  # noqa: E402
+import heartbeat  # noqa: E402
 
 # (a generator's command line, the files it rewrites that must then be unchanged in git; None: it checks itself)
 GENERATED = [
@@ -78,6 +81,28 @@ def gen_checks(log: str) -> tuple[int, float]:
     return (1 if failed else 0), time.perf_counter() - started
 
 
+def progress(results: dict[str, tuple[int, float]], logs: dict[str, str]) -> str:
+    """What a heartbeat line says: each part done (ok / FAIL) or running, with ctest's and selftest's count so far."""
+    said = []
+    for part, log in logs.items():
+        if part in results:
+            said.append(f"{part} {'ok' if not results[part][0] else 'FAIL'}")
+            continue
+        try:
+            with open(log, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue   # not started (or not asked for)
+        if part == 'ctest':
+            done = re.findall(r'^\s*(\d+)/(\d+) Test\s+#', text, re.M)
+            said.append(f'ctest {done[-1][0]}/{done[-1][1]}' if done else 'ctest running')
+        elif part == 'selftest':
+            said.append(f"selftest {len(re.findall(r'^(?:ok  |FAIL)  ', text, re.M))} done")
+        else:
+            said.append(f'{part} running')
+    return ', '.join(said)
+
+
 def main(argv: list[str]) -> int:
     known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority'}
     if any(a.startswith('-') and a not in known for a in argv):
@@ -92,7 +117,13 @@ def main(argv: list[str]) -> int:
     results: dict[str, tuple[int, float]] = {}
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
     started = time.perf_counter()
-    with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
+    # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py),
+    # from when the slot is ours (checklock says its own while waiting)
+    with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'), \
+            heartbeat.beating('check.py', lambda: progress(results, logs)):
+        for log in logs.values():   # a part's log is this run's from its start on: progress() never reads a stale one
+            with contextlib.suppress(OSError):
+                os.remove(log)
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
         print(f'check.py: {ROOT}, {jobs} processes, below-normal priority; logs build/check-*.log', flush=True)
