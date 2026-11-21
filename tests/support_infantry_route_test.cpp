@@ -229,6 +229,23 @@ int main() {
     Check(std::hypot(At<float>(units[0],kMoveX),At<float>(units[0],kMoveZ))>0.99f,
         "...at full stick far from its goal: eased only over the last metres, not at every waypoint");
     Check(fine->navigation.profile.ahead,"...with the next leg searched while it walks this one (Profile::ahead)");
+    {   // Review 2026-11-21: eased by the straight distance to the goal, one 3 m behind a wall and 40 m round it was walked
+        // to at 0.3-0.6 stick the whole way. Eased only on the route's last edge, by what is left of it.
+        auto& nav=fine->navigation;const auto profile=nav.profile;
+        const float* const p0=Pos(units[0]);const npc::navigation::Point at{p0[0],0,p0[2]};
+        const float goal[3]={p0[0]+3.0f,0,p0[2]};
+        auto route=[&](std::initializer_list<npc::navigation::Point> round) {
+            npc::navigation::Begin(nav,at,{goal[0],goal[1],goal[2]},profile,npcFixtureMs);nav.hull=nullptr;
+            for(const auto& q:round)nav.path[nav.length++]={at.x+q.x,0,at.z+q.z};
+            npcFixtureMs+=16;++frame;world.frame=frame;
+            MoveTo(units[0],p0,goal,1.0f,npcFixtureMs);
+            return std::hypot(At<float>(units[0],kMoveX),At<float>(units[0],kMoveZ));
+        };
+        const float roundWall=route({{0,0,5},{0,0,10},{0,0,15},{0,0,20},{3,0,20},{3,0,15},{3,0,10},{3,0,5},{3,0,0}});
+        Check(roundWall>0.99f && nav.length==9 && nav.cursor==0,"a goal 3 m off, 40 m round a wall: full stick (the route's first edge)");
+        const float last=route({{3,0,0}});
+        Check(std::fabs(last-((3.0f-1.0f)/6.0f+0.3f))<0.01f,"its last edge, 3 m of it left: eased by what is left of it");
+    }
     fine->navigation={};
     Think(units[0],0); // the isolated negative-control loop did not run the normal Think registration
     const auto originalNodeLimit=npc::navigation::kNodes;

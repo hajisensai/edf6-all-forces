@@ -74,6 +74,8 @@ struct BasicState {
     // Profile::ahead: the search in `nodes` runs from path[length-1] (`origin`) while the path is walked; what it finds
     // is appended to the rest of the path (Path). aheadFailed: it found nothing; none again until this path is replaced.
     bool searchingAhead{},aheadFailed{};
+    // The goal and stop of the last Navigate call (Coast walks on only for the same ones).
+    Point target{};float stop{};
 };
 using State=BasicState<kNodes>;
 using RouteState=BasicState<kRouteNodes>;
@@ -118,7 +120,10 @@ inline bool Path(State& s,int end,Point goal) noexcept {
     }
     s.length=keep;
     for(int i=n-2;i>=0;--i)s.path[s.length++]=s.nodes[ids[i]].at;
-    s.path[s.length++]=goal;s.cursor=0;s.checked=false;s.partial=false;s.searchingAhead=s.aheadFailed=false;return true;
+    // Appended: the waypoint walked to is the same one (path[0] now), its edge's check still the actor's (Fresh); a
+    // check dropped here stood every soldier whose search ahead ended on a frame the shared budget had none left.
+    s.path[s.length++]=goal;s.cursor=0;if(!keep)s.checked=false;
+    s.partial=false;s.searchingAhead=s.aheadFailed=false;return true;
 }
 // Profile::horizon: the route's prefix up to node `end` (never the start) to walk now, the search resumed from its end.
 constexpr int kLegsStale=3;   // legs in a row that end no nearer the goal: the goal is not reached this way
@@ -155,6 +160,12 @@ inline bool PartialOrFail(State& s,Point from,std::uint64_t ms) noexcept {
 // left to walk), or a whole route's end is off where the goal is now (it moved since the route was found, by up to 8
 // cells or a step's height, which Navigate does not take as another goal) and still nearer it than the actor at `from`
 // (a goal moved back behind the actor is searched for from its end as before, once it is there).
+// A whole route searched on once its end is off by a cell (or the stop), not by more: review 2026-11-21 took the
+// searches every 2 m the player goes for ones that run the shared budget out; measured (ground_navigation_runtime_test
+// SquadAhead, 32 soldiers following on open ground), searching on only once the end is off by a quarter of the path still
+// to walk (a cell .. 8 cells) stood them 486 frames in all and cost 2.08 M world queries, by a cell 43 frames and 1.25 M:
+// a search from the end to a point a cell off is one node's edges, one further off is more of them per metre, and the
+// squad's goals all move together, so its bigger searches come at once.
 template<class State>
 inline bool WantsAhead(const State& s,Point from,Point goal,float stop) noexcept {
     const Profile& p=s.profile;
@@ -165,6 +176,13 @@ inline bool WantsAhead(const State& s,Point from,Point goal,float stop) noexcept
     float left=0.0f;
     for(int i=s.cursor+1;i<s.length;++i){left+=Horizontal(s.path[i-1],s.path[i]);if(left>p.horizon*0.5f)return false;}
     return true;
+}
+// The rest of the path while the actor walks its last edge to the goal (no leg to follow, none searched ahead): the
+// distance to ease the walk over; else -1 (the walk need not ease: there is more path, round whatever the goal is behind).
+template<class State>
+inline float FinalLeft(const State& s,Point from) noexcept {
+    if(!s.initialized || s.failed || s.partial || s.searchingAhead || s.length<1 || s.cursor!=s.length-1)return -1.0f;
+    return Horizontal(from,s.path[s.cursor]);
 }
 // The search's part of Navigate: up to `budget` edges. Searching ahead (Profile::ahead) what it finds is appended to
 // the path being walked; a search ahead that finds nothing leaves that path alone (AheadFailed).
@@ -240,18 +258,28 @@ Result Search(State& s,Point from,std::uint64_t ms,Query& edge,const Profile& p,
 // The edge to the path's waypoint found open from where the actor stood at most this long ago is walked on without a
 // query when the shared budget has none for it this frame (Navigate's check of it deferred; Coast).
 constexpr std::uint64_t kCheckedFresh=500;
+// Only for Profile::ahead (the soldiers' routes): the support, vehicle and transport routes wait for every check as
+// before.
 template<class State>
 inline bool Fresh(const State& s,std::uint64_t ms) noexcept {
-    return s.checked && s.cursor<s.length && ms>=s.checkedAt && ms-s.checkedAt<kCheckedFresh;
+    return s.profile.ahead && s.checked && s.cursor<s.length && ms>=s.checkedAt && ms-s.checkedAt<kCheckedFresh;
 }
-// Its turn under the shared budget is behind another caller's (crew::GroundNavigateDeferred): the path already found
-// is walked on, without a query, towards a waypoint whose edge is Fresh and not yet reached; else pending (it stands).
-// The goal is not looked at (it is the next call's), nor is anything searched.
+// Its turn under the shared budget is behind another caller's (crew::GroundCoast after GroundNavigateDeferred): the
+// path already found is walked on, without a query, towards a waypoint whose edge is Fresh and not yet reached; else
+// pending (it stands). Nothing is searched, and it walks on only for what the last Navigate call was for: the same
+// `hull` (crew::Hull::object, none nullptr: another one is another route, crew::GroundNavigate), the same stop, a goal
+// within a cell of that call's (not a new order, a reversed one; height by a step: `goal` here is the caller's, not
+// projected to its floor, so a goal in the air waits too) and as Navigate would take it, the same goal as the route's
+// (Navigate's 8 cells / a step); and not already where it would stop (an attack-move's stand: MoveTo(h, pos, pos, 1e9f)).
 template<class State>
-inline Result Coast(State& s,Point from,std::uint64_t ms,Point& next) noexcept {
+inline Result Coast(State& s,Point from,Point goal,float stop,const void* hull,std::uint64_t ms,Point& next) noexcept {
     next=from;
-    if(!s.initialized || s.failed || !Finite(from) || !Fresh(s,ms) || ms<s.lastAt)return Result::pending;
-    if(Horizontal(from,s.path[s.cursor])<=s.profile.waypointRadius)return Result::pending;
+    if(!s.initialized || s.failed || !Finite(from) || !Finite(goal) || !Fresh(s,ms) || ms<s.lastAt)return Result::pending;
+    const Profile& p=s.profile;
+    if(hull!=s.hull || !(stop==s.stop) || Horizontal(goal,s.target)>p.cell || std::fabs(goal.y-s.target.y)>p.step ||
+       Horizontal(goal,s.goal)>p.cell*8.0f || std::fabs(goal.y-s.goal.y)>p.step || Horizontal(from,goal)<=stop)
+        return Result::pending;
+    if(Horizontal(from,s.path[s.cursor])<=p.waypointRadius)return Result::pending;
     s.lastAt=ms;next=s.path[s.cursor];return Result::moving;
 }
 // edge(from,to,projected) must check the entire segment and project its endpoint
@@ -265,6 +293,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
        !(p.step>0.0f && p.step<=1.0f)||!(p.radius>0.0f && p.radius<=10.0f)||
        !(p.height>p.step && p.height<=20.0f)||!(p.maxWaterDepth>=0.0f && p.maxWaterDepth<=2.0f)||
        !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell)||!(p.greed>=1.0f && p.greed<=4.0f))return Result::blocked;
+    s.target=goal;s.stop=stop;
     if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step) {
         Point supported{};const Edge e=edge(from,from,supported);
         return e==Edge::open ? Result::arrived : e==Edge::pending ? Result::pending : Result::blocked;
@@ -301,8 +330,8 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
             if(!s.checked || ms-s.checkedAt>=100 || Horizontal(from,s.path[s.cursor])>p.cell*2) {
                 const Edge e=edge(from,s.path[s.cursor],projected);
                 if(e==Edge::pending) {
-                    // No query this frame (the shared budget): the edge found open from here kCheckedFresh ago at most is
-                    // walked on; one never checked from here waits.
+                    // No query this frame (the shared budget): with Profile::ahead the edge found open from here
+                    // kCheckedFresh ago at most is walked on (Fresh); one never checked from here, or any other route's, waits.
                     if(!Fresh(s,ms))return Result::pending;
                     next=s.path[s.cursor];return Result::moving;
                 }
@@ -399,4 +428,8 @@ npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={}) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
+// A caller GroundNavigateDeferred keeps waiting this frame: npc::navigation::Coast with the arguments it would have
+// called GroundNavigate with (`to` its own, not projected to its floor; `hull` normalised as GroundNavigate does).
+npc::navigation::Result GroundCoast(npc::navigation::State&,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,Hull hull={}) noexcept;
 }

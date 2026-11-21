@@ -197,5 +197,74 @@ void HullRoute() {
     Next();crew::GroundNavigate(*s,from,seat,0.1f,frame*16,next);
     Check(s->hull==nullptr,"without it again: the route is no longer the hull's");
 }
+// Review 2026-11-21 (testhub #41 / #47): Profile::ahead under the budget all soldiers share. A squad of 32 following the
+// player (their slots 30 m ahead, moving on at a soldier's pace, then stopping), each as npcai.cpp MoveTo calls: its turn
+// first (GroundNavigateDeferred), then GroundCoast or GroundNavigate with the soldiers' profile (SoldierRoute: a 48 m
+// horizon) with Profile::ahead on or off. The frames a soldier stood, short of its slot, once it had first moved.
+struct SquadRun { int stood=0,moving=0,arrived=0;long long queries=0;float behind=0.0f; };
+SquadRun Squad(bool ahead) {
+    constexpr int kSoldiers=32,kFrames=1600,kWalk=1200;
+    Settle();Scene(0,crew::Sea::land);
+    Profile p;p.horizon=48.0f;p.ahead=ahead;
+    auto states=std::make_unique<State[]>(kSoldiers);
+    std::vector<std::array<float,3>> at(kSoldiers);
+    std::vector<bool> started(kSoldiers,false);
+    auto slot=[](int i,int f,float* to){
+        const float lead=30.0f+0.1f*static_cast<float>(f<kWalk ? f : kWalk);
+        to[0]=lead-static_cast<float>(i%8)*2.0f;to[1]=0;to[2]=static_cast<float>(i/8)*3.0f;
+    };
+    for(int i=0;i<kSoldiers;++i)at[static_cast<std::size_t>(i)]={-static_cast<float>(i%8)*2.0f,0,static_cast<float>(i/8)*3.0f};
+    SquadRun run;bool budget=true;
+    for(int f=0;f<kFrames;++f) {
+        Next();
+        for(int i=0;i<kSoldiers;++i) {
+            float* const from=at[static_cast<std::size_t>(i)].data();
+            float to[3],next[3];slot(i,f,to);
+            const Result r=crew::GroundNavigateDeferred(states[i]) ? crew::GroundCoast(states[i],from,to,1.0f,frame*16,next)
+                                                                    : crew::GroundNavigate(states[i],from,to,1.0f,frame*16,next,p);
+            budget=budget && queries<=4096;
+            if(r==Result::moving) {
+                started[static_cast<std::size_t>(i)]=true;++run.moving;
+                const float dx=next[0]-from[0],dz=next[2]-from[2],d=std::sqrt(dx*dx+dz*dz);
+                const float k=d>0.1f ? 0.1f/d : 1.0f;
+                from[0]+=dx*k;from[2]+=dz*k;
+            } else if(r==Result::arrived)++run.arrived;
+            else if(started[static_cast<std::size_t>(i)])++run.stood;
+        }
+        run.queries+=queries;
+    }
+    Check(budget,"the squad inside the shared world query budget");
+    for(int i=0;i<kSoldiers;++i) {
+        float to[3];slot(i,kFrames,to);const float* const a=at[static_cast<std::size_t>(i)].data();
+        run.behind+=std::sqrt((to[0]-a[0])*(to[0]-a[0])+(to[2]-a[2])*(to[2]-a[2]))/static_cast<float>(kSoldiers);
+    }
+    return run;
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+void SquadAhead() {
+    const SquadRun off=Squad(false),on=Squad(true);
+    std::printf("squad of 32 under the shared budget: stood %d frames without searching ahead, %d with (moving %d / %d, "
+                "%.1f / %.1f m behind at the end, %lld / %lld world queries)\n",off.stood,on.stood,off.moving,on.moving,
+                off.behind,on.behind,off.queries,on.queries);
+    Check(off.stood>0,"negative control: without searching ahead the squad stands under the shared budget");
+    Check(on.stood<off.stood && on.moving>off.moving,"searching ahead, the squad stands fewer frames in all and walks more");
+    Check(on.behind<=off.behind+0.5f,"...and ends no further behind its slots");
+    Check(on.queries<off.queries,"...for fewer world queries in all (its searches ahead are short: from its path's end)");
+}
+// GroundCoast: Coast for a caller kept waiting, given GroundNavigate's own arguments; another hull (normalised as
+// GroundNavigate does: no query, no body) is another route, which it does not walk on.
+void CoastHull() {
+    Settle();Scene(0,crew::Sea::land);
+    Profile p;p.horizon=48.0f;p.ahead=true;
+    auto s=std::make_unique<State>();const float from[3]={0,0,0},to[3]={12,0,0};float next[3]{};
+    Check(Advance(*s,from,to,next,p)==Result::moving,"a soldier's route");
+    Next();Check(crew::GroundNavigate(*s,from,to,0.1f,frame*16,next,p)==Result::moving && s->checked,"its first edge checked");
+    const auto at=frame*16;
+    static const Box vehicle{6,6,1.0f};
+    crew::Hull hull{&HullMiss,&vehicle};
+    Check(crew::GroundCoast(*s,from,to,0.1f,at+16,next,hull)==Result::pending,"GroundCoast: not round a hull the route was not searched round");
+    crew::Hull blind{};blind.object=&vehicle;   // no query: no body, as GroundNavigate takes it
+    Check(crew::GroundCoast(*s,from,to,0.1f,at+32,next,blind)==Result::moving && next[0]==s->path[s->cursor].x,
+        "GroundCoast: a hull without its query is none (GroundNavigate's), walked on");
+}
+}
+int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

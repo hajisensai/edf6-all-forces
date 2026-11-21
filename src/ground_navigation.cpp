@@ -80,6 +80,13 @@ npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull) noexcept {
     return Navigate(state,from,to,stop,ms,waypoint,profile,hull);
 }
+npc::navigation::Result GroundCoast(npc::navigation::State& state,const float* from,const float* to,float stop,
+    std::uint64_t ms,float* waypoint,Hull hull) noexcept {
+    npc::navigation::Point next{};
+    const auto result=npc::navigation::Coast(state,{from[0],from[1],from[2]},{to[0],to[1],to[2]},stop,
+        hull.clear ? hull.object : nullptr,ms,next);
+    waypoint[0]=next.x;waypoint[1]=next.y;waypoint[2]=next.z;return result;
+}
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState& state,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile) noexcept {
     return Navigate(state,from,to,stop,ms,waypoint,profile,Hull{});

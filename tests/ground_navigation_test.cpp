@@ -311,6 +311,21 @@ void Ahead() {
         Check(after.last==Result::arrived && after.stood==0 && after.valid,"searched ahead: 300 m in legs without one frame stood");
         std::printf("ahead: 300 m walk stood %d frames before, %d searched ahead\n",before.stood,after.stood);
     }
+    {   // a leg found ahead appended: the waypoint walked to is the same one, its edge's check kept (Fresh, were the next
+        // recheck deferred by the shared budget); dropped, the soldier stood that frame if the budget had none left
+        HorizonField f;f.wallHalf=0.0f;auto s=std::make_unique<State>();std::uint64_t ms=1;Point at{},next{};
+        bool appended=false,kept=false;
+        for(int i=0;i<8000 && !appended;++i) {
+            ms+=16;const bool searching=s->searchingAhead;
+            const Result r=Navigate(*s,at,{300,0,0},1.0f,ms,next,[&](Point a,Point b,Point& c){return f(a,b,c);},ahead);
+            if(searching && !s->searchingAhead && s->length){appended=true;kept=s->checked;}
+            if(r==Result::moving) {
+                const float d=Horizontal(at,next);
+                if(d<=0.1f)at=next;else{at.x+=(next.x-at.x)/d*0.1f;at.z+=(next.z-at.z)/d*0.1f;}
+            }
+        }
+        Check(appended && kept,"a leg found ahead appended: the check of the edge being walked kept");
+    }
     {   // round a 120 m wall to a goal 200 m away: the legs searched ahead still go round it, every waypoint walkable
         HorizonField f;
         const auto goal=[](int){return Point{200,0,0};};
@@ -334,29 +349,77 @@ void Ahead() {
         const Pace r=Follow(f,{},goal,ahead,40000);
         Check(r.last==Result::blocked && r.at.x<100.0f && r.at.x>80.0f && r.valid,"searched ahead, a sealed wall: up to it, then blocked");
     }
-    {   // the edge's check deferred by the shared budget: walked on while it was found open within kCheckedFresh, then waits
-        World w;w.wall=false;auto s=std::make_unique<State>();std::uint64_t ms=1;Point next{},from{};
-        Check(Plan(*s,w,from,{12,0,0},next,ms)==Result::moving,"a route to walk");
+    // The edge's check deferred by the shared budget: with Profile::ahead (the soldiers' routes) walked on while it was
+    // found open within kCheckedFresh, then waits; review 2026-11-21: without it (support, vehicle, transport routes) it
+    // waits at once, as before.
+    World w;
+    auto nav=[&](State& s,Point from,Point goal,float stop,std::uint64_t ms,Point& next,const Profile& p){
+        return Navigate(s,from,goal,stop,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);},p);
+    };
+    auto plan=[&](State& s,Point from,Point goal,std::uint64_t& ms,Point& next,const Profile& p){
+        Result r=Result::pending;
+        for(int i=0;i<20000 && r==Result::pending;++i){ms+=16;r=nav(s,from,goal,0.2f,ms,next,p);}
+        return r;
+    };
+    Profile soldier;soldier.horizon=48.0f;soldier.ahead=true;   // npcai.cpp SoldierRoute
+    const Point from{},goal{12,0,0};
+    for(const bool on:{true,false}) {
+        const Profile p=on ? soldier : Profile{};
+        w=World{};w.wall=false;auto s=std::make_unique<State>();std::uint64_t ms=1;Point next{};
+        Check(plan(*s,from,goal,ms,next,p)==Result::moving,"a route to walk");
         ms+=16;
-        Check(Navigate(*s,from,{12,0,0},0.2f,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);})==Result::moving,"its first edge checked");
+        Check(nav(*s,from,goal,0.2f,ms,next,p)==Result::moving,"its first edge checked");
         w.allow=w.calls;   // the budget gone: every query pending
         ms+=200;
-        Check(Navigate(*s,from,{12,0,0},0.2f,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);})==Result::moving,
-            "the recheck deferred 200 ms after the check: walked on");
-        ms+=400;
-        Check(Navigate(*s,from,{12,0,0},0.2f,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);})==Result::pending,
-            "deferred kCheckedFresh after the check: it waits");
-        // Coast (a caller behind another's turn): no query at all, the same freshness
-        auto c=std::make_unique<State>();ms=1;w.allow=100000;
-        Check(Plan(*c,w,from,{12,0,0},next,ms)==Result::moving,"another route");
-        ms+=16;Navigate(*c,from,{12,0,0},0.2f,ms,next,[&](Point a,Point b,Point& q){return w(a,b,q);});
+        const Result deferred=nav(*s,from,goal,0.2f,ms,next,p);
+        if(on) {
+            Check(deferred==Result::moving,"Profile::ahead: the recheck deferred 200 ms after the check, walked on");
+            ms+=400;
+            Check(nav(*s,from,goal,0.2f,ms,next,p)==Result::pending,"...deferred kCheckedFresh after the check: it waits");
+        } else Check(deferred==Result::pending,"without Profile::ahead (support / vehicle / transport routes): the deferred recheck waits");
+    }
+    {   // Coast (a caller behind another's turn): no query at all, the same freshness, for the last call's route only
+        w=World{};w.wall=false;auto c=std::make_unique<State>();std::uint64_t ms=1;Point next{};
+        Check(plan(*c,from,goal,ms,next,soldier)==Result::moving,"another route");
+        ms+=16;nav(*c,from,goal,0.2f,ms,next,soldier);
         const int calls=w.calls;Point coast{};
-        Check(Coast(*c,from,ms+100,coast)==Result::moving && Horizontal(coast,c->path[c->cursor])<1e-6f && w.calls==calls,
-            "Coast walks on to the checked waypoint without a query");
-        Check(Coast(*c,from,ms+100+kCheckedFresh,coast)==Result::pending,"...and not once the check is stale");
-        Check(Coast(*c,c->path[c->cursor],ms+120,coast)==Result::pending,"...nor at its waypoint (the next one is unchecked)");
+        Check(Coast(*c,from,goal,0.2f,nullptr,ms+100,coast)==Result::moving && Horizontal(coast,c->path[c->cursor])<1e-6f &&
+              w.calls==calls,"Coast walks on to the checked waypoint without a query");
+        Check(Coast(*c,from,goal,0.2f,nullptr,ms+100+kCheckedFresh,coast)==Result::pending,"...and not once the check is stale");
+        Check(Coast(*c,c->path[c->cursor],goal,0.2f,nullptr,ms+110,coast)==Result::pending,"...nor at its waypoint (the next one is unchecked)");
         auto none=std::make_unique<State>();
-        Check(Coast(*none,from,ms,coast)==Result::pending,"...nor with no path");
+        Check(Coast(*none,from,goal,0.2f,nullptr,ms,coast)==Result::pending,"...nor with no path");
+        // Review 2026-11-21: Coast went by the path alone, round GroundNavigate's resets.
+        const int body=0;
+        Check(Coast(*c,from,goal,0.2f,&body,ms+120,coast)==Result::pending,"...nor round another hull (a soldier just sent to board it)");
+        Check(Coast(*c,from,from,1e9f,nullptr,ms+130,coast)==Result::pending,"...nor for an attack-move's stand (MoveTo(h, pos, pos, 1e9f))");
+        Check(Coast(*c,from,goal,1e9f,nullptr,ms+140,coast)==Result::pending,"...nor for another stop");
+        Check(Coast(*c,from,{-12,0,0},0.2f,nullptr,ms+150,coast)==Result::pending,"...nor for a reversed order");
+        Check(Coast(*c,from,{12,0,5},0.2f,nullptr,ms+160,coast)==Result::pending,"...nor for a goal moved more than a cell since the last call");
+        Check(Coast(*c,from,{12,1,0},0.2f,nullptr,ms+170,coast)==Result::pending,"...nor for a goal a step higher");
+        Check(Coast(*c,from,{12,0,1},0.2f,nullptr,ms+180,coast)==Result::moving,"...but a goal drifted under a cell since the last call: walked on");
+        auto other=std::make_unique<State>();ms=1;
+        Check(plan(*other,from,goal,ms,next,Profile{})==Result::moving,"a route without Profile::ahead");
+        ms+=16;nav(*other,from,goal,0.2f,ms,next,Profile{});
+        Check(Coast(*other,from,goal,0.2f,nullptr,ms+100,coast)==Result::pending,"...is not walked on by Coast");
+    }
+    {   // A whole route's end off its moved goal by more than a cell (the stop if more) is searched on from there (review
+        // 2026-11-21 kept: ground_navigation_runtime_test SquadAhead measured a looser threshold standing more, WantsAhead).
+        const auto owned=std::make_unique<State>();State& s=*owned;
+        Begin(s,{},{30,0,0},soldier,1);
+        for(int i=1;i<=15;++i)s.path[s.length++]={2.0f*static_cast<float>(i),0,0};
+        Check(Horizontal(s.path[s.length-1],{30,0,0})<1e-6f && !s.partial,"a whole 30 m route");
+        Check(!WantsAhead(s,{},{31.5f,0,0},1.0f),"its goal 1.5 m on, within a cell: walked on");
+        Check(WantsAhead(s,{},{33,0,0},1.0f),"...3 m on: searched ahead");
+        Check(!WantsAhead(s,{},{33,0,0},4.0f),"...3 m on, within a 4 m stop: walked on");
+        s.cursor=12;
+        Check(!WantsAhead(s,{24,0,0},{10,0,0},1.0f),"...moved back behind the soldier: not from the end");
+        // FinalLeft (npcai.cpp MoveTo's ease): only on the last edge of a whole route, by what is left of it.
+        Check(FinalLeft(s,{24,0,0})<0.0f,"FinalLeft: more edges to walk, no ease");
+        s.cursor=s.length-1;
+        Check(std::fabs(FinalLeft(s,{27,0,0})-3.0f)<1e-4f,"FinalLeft: the last edge, what is left of it");
+        s.partial=true;
+        Check(FinalLeft(s,{27,0,0})<0.0f,"FinalLeft: a leg's end is a corner, no ease");
     }
 }
 }
