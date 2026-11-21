@@ -27,11 +27,12 @@
 //  - The rig (docs/camera-re.md §5): the stock locators' (A) or the vehicle's game_object_camera_setting (B, +0x170 /
 //    +0x180, the authored third-person framing the riding camera never reads), whichever puts the eye farther back; the
 //    eye never under the rig's own height over its point. The high view looks down on the shot's predicted landing
-//    (ShotFocus) from HighCamHeight / HighCamBack (scaled up for a big vehicle), along the line from the hull to it
-//    (tcam::OrbitPlace, tcam::ShotHeading): the landing and its surroundings in the screen's middle, where the HUD draws
-//    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase). With no
-//    landing to show (no readable gun) it looks down on the hull. Free look turns it round its centre; native input
-//    controls the gun.
+//    (ShotFocus) from HighCamHeight / HighCamBack (scaled up for a big vehicle), from behind along the gun's traverse
+//    (tcam::OrbitPlace, tcam::GunHeading): the landing and its surroundings in the screen's middle, where the HUD draws
+//    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase) in the hull's
+//    frame of motion. The game's collision runs from a pivot at the eye (tcam::HighPivot), the eye kept over what is
+//    under it (tcam::HighLift). With no landing to show (no readable gun) it looks down on the hull. Free look turns it
+//    round its centre; native input controls the gun.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -136,8 +137,9 @@ struct CamSide {
     float eye[3],look[3];      // the last placement
     bool point;                // that placement was the high view's (tcam::OrbitPlace)
     bool highSet;              // highYaw / highCentre hold this high view's
-    float highYaw;             // the high view's heading (tcam::ShotHeading; on entry the view's own)
-    float highCentre[3];       // what it looks at, eased: the shot's landing, else the hull's origin
+    float highYaw;             // the high view's heading (tcam::GunHeading; on entry the view's own)
+    float highCentre[3];       // what it looks at, as an offset from the hull's origin, eased: the shot's landing, else 0
+    float highLift;            // m the eye is raised over what is under it (tcam::HighLift)
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
 };
@@ -641,14 +643,11 @@ void Place(float* lookOut,float* eyeOut,unsigned char* cam,const float* eye,cons
     if(surfaceFocus) {
         // F6760 queries desired-look -> look, then look -> eye. A ballistic intersection lies ON a collider;
         // a zero-distance hit can collapse eye and look before native LookTo (0/-90 degree snapping).
-        // Move only the collision pivot toward the eye by the native retreat margin. The real projectile
-        // focus stays unchanged and collinear, so it still projects to the same optical centre.
-        float towardEye[3]={eye[0]-focus[0],eye[1]-focus[1],eye[2]-focus[2]};
-        const float distance=vec::Len(towardEye),margin=At<float>(cam,kCamCollisionMargin);
-        if(distance>1e-5f && std::isfinite(margin) && margin>0.0f) {
-            const float share=std::fmin(margin,distance*0.5f)/distance;
-            for(int i=0;i<3;++i)collisionLook[i]+=towardEye[i]*share;
-        }
+        // The pivot is put at the eye's end of the same optical ray (tcam::HighPivot): neither that collapse nor a
+        // building or slope between the landing and the eye can pull the eye in. The real projectile focus stays
+        // unchanged and collinear, so it still projects to the same optical centre.
+        const float margin=At<float>(cam,kCamCollisionMargin);
+        tcam::HighPivot(eye,focus,std::isfinite(margin) ? std::fmax(tcam::kHighPivot,4.0f*margin) : tcam::kHighPivot,collisionLook);
     }
     const float* look=collisionLook;
     std::memcpy(lookOut,look,12);lookOut[3]=1.0f;
@@ -752,17 +751,28 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         // behind it along the line the shot flies; with no landing to show, at the hull. Eased (kRigEase a frame, as the
         // rig's own moves): the landing of a gun rocked over the ground runs up and down that line (the 2026-10-23
         // complaint "会随着炮塔上下摇晃"), and the view follows it without jerking; the HUD's mark stays exact.
+        // 2026-11-21 ("俯瞰视角移动的时候会白屏一下……并且这个俯瞰视角会抖动。某些载具上"): the landing is eased as an offset
+        // from the hull, not as a world point (a world point eased behind a driving hull trails it by speed x the ease's
+        // time and wobbles with every change of speed); the heading is the gun's traverse (tcam::GunHeading), not the
+        // hull-to-landing line that swung the orbit by the landing's sideways wobble.
         const float hull[3]={m[12],m[13],m[14]};
-        const float* landing=s.focusValid ? s.focus : hull;
-        if(!camSide.highSet) {   // entering it: on the landing at once, the heading the camera faces now until it has one
+        float rel[3]={0.0f,0.0f,0.0f};
+        if(s.focusValid)for(int i=0;i<3;++i)rel[i]=s.focus[i]-hull[i];
+        if(!camSide.highSet) {   // entering it: on the landing at once
+            std::memcpy(camSide.highCentre,rel,12);camSide.highSet=true;camSide.highLift=0.0f;
             const float d[3]={camSide.look[0]-camSide.eye[0],0.0f,camSide.look[2]-camSide.eye[2]};
-            float a3[3];AxesDir(s.v,seat,a3);
-            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : tcam::YawOf(a3);
-            std::memcpy(camSide.highCentre,landing,12);camSide.highSet=true;
+            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : 0.0f;
         }
-        for(int i=0;i<3;++i)camSide.highCentre[i]+=(landing[i]-camSide.highCentre[i])*kRigEase;
-        camSide.highYaw=tcam::ShotHeading(hull,camSide.highCentre,camSide.highYaw);
-        tcam::OrbitPlace(camSide.highCentre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+        for(int i=0;i<3;++i)camSide.highCentre[i]+=(rel[i]-camSide.highCentre[i])*kRigEase;
+        camSide.highYaw=tcam::GunHeading(m,AxisAt(seat,0)[2],camSide.highYaw);
+        const float centre[3]={hull[0]+camSide.highCentre[0],hull[1]+camSide.highCentre[1],hull[2]+camSide.highCentre[2]};
+        tcam::OrbitPlace(centre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+        // The eye over whatever is under it (a hill or a tower behind the landing): the collision no longer does it.
+        const float top[3]={eye[0],eye[1]+kGroundProbe,eye[2]},bottom[3]={eye[0],eye[1]-tcam::kHighClear,eye[2]};
+        float under[3];
+        const bool ground=MapRay(top,bottom,under)>=0.0f && std::isfinite(under[1]);
+        camSide.highLift=tcam::HighLift(eye[1],ground,ground ? under[1] : 0.0f,tcam::kHighClear,camSide.highLift,kRigEase);
+        eye[1]+=camSide.highLift;
     } else {
         camSide.highSet=false;
         float yaw,pitch;

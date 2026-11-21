@@ -102,6 +102,47 @@ inline float ShotHeading(const float* hull,const float* at,float held) noexcept 
     return d[0]*d[0]+d[2]*d[2]>kHeadingNear*kHeadingNear ? YawOf(d) : held;
 }
 
+// The high view's heading as turretcam.cpp uses it (2026-11-21, the user: "俯瞰视角移动的时候会白屏一下……并且这个俯瞰视角会
+// 抖动。某些载具上"): the gun's traverse in the world, the hull's rows `m` (x right, y up, z nose, 4 floats a row) turned
+// by the yaw axis' angle `yawAxis` (right positive, as the seat's aim holds it), flattened onto the ground. Not the line
+// from the hull to the landing (ShotHeading): that line's direction is the landing's sideways offset over its distance,
+// so a landing a few tens of metres out swung the whole 100 m orbit by its every wobble (the eased centre trailing a
+// moving hull, the gun rocked by the suspension), and it turned with the hull's roll. The traverse moves only when the
+// turret turns. `held` when the gun's line has no direction across the ground (a hull on its side).
+inline float GunHeading(const float* m,float yawAxis,float held) noexcept {
+    const float s=std::sin(yawAxis),c=std::cos(yawAxis);
+    const float d[3]={m[0]*s+m[8]*c,0.0f,m[2]*s+m[10]*c};
+    return d[0]*d[0]+d[2]*d[2]>1e-4f ? YawOf(d) : held;
+}
+
+// The high view's collision pivot: the point the game's camera collision (0xF6760: desired-look -> look, then look ->
+// eye, the eye pulled to the first hit + its normal x 0.1 m) runs from, `reach` m from the eye on the eye's line to the
+// observed point (half way when nearer). Before, the pivot was the landing itself (0.1 m off its surface): any building or
+// slope between the landing and the eye 100 m up and behind it pulled the eye onto that wall, the next frame free again:
+// the screen went white/grey for a frame (the eye inside or against the wall) and the view shook between the two eyes as
+// the landing moved along the street. An observation camera high over the ground is not a chase camera that must keep
+// its target in sight; the native collision now only guards the eye's own few metres (and turretcam.cpp keeps the eye over
+// the ground under it: HighClear). On the same optical ray, so the observed point stays in the screen's centre.
+constexpr float kHighPivot=2.0f;
+inline void HighPivot(const float* eye,const float* focus,float reach,float* out) noexcept {
+    const float d[3]={focus[0]-eye[0],focus[1]-eye[1],focus[2]-eye[2]};
+    const float len=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(len>1e-5f)){for(int i=0;i<3;++i)out[i]=focus[i];return;}
+    const float k=std::fmin(reach,len*0.5f)/len;
+    for(int i=0;i<3;++i)out[i]=eye[i]+d[i]*k;
+}
+
+// The high view's eye over what is under it: at least `clear` m over the highest surface under the eye (`ground`, a map
+// ray straight down: terrain or a roof), the lift raised at once and let down eased by `ease` a frame (`lift` the last
+// frame's). With the collision pivot at the eye (HighPivot) nothing else keeps it out of a hill or a tower behind the
+// landing; raised at once so it is never inside one, let down eased so passing a roof's edge does not drop the view.
+constexpr float kHighClear=6.0f;
+inline float HighLift(float eyeY,bool hasGround,float ground,float clear,float lift,float ease) noexcept {
+    const float need=hasGround ? std::fmax(0.0f,ground+clear-eyeY) : 0.0f;
+    const float down=lift*(1.0f-ease);
+    return std::fmax(need,down<1e-3f ? 0.0f : down);
+}
+
 // The point the high view observes (the user, 2026-10-09: "这个俯瞰视角有问题，计算明显不对，稍微远就跳到了指数级别的
 // 距离"): the shot's real landing `at` (`landed`) while it is within `most` m of the muzzle across the ground; otherwise
 // (the round's life ends in the air, it passes the search's reach, or it lands farther) the ground point under where the

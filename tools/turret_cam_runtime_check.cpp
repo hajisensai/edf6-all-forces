@@ -400,7 +400,15 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true,clear=true;
+        // The optical ray (eye through the written look) passes within this many m of the shot's landing (across the
+        // ground): the collision pivot sits at the eye's end of that ray (tcam::HighPivot), not on the landing.
+        const auto offRay=[&](const float* e,const float* l)->float {
+            float d[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]};
+            if(!vec::Normalize(d) || !(d[1]<-1e-3f))return 1e9f;
+            const float t=(shared.focus[1]-e[1])/d[1];
+            return std::hypot(e[0]+d[0]*t-shared.focus[0],e[2]+d[2]*t-shared.focus[2]);
+        };
         const float wantPitch=-std::atan2(45.f,35.f);
         float settledEye[3]{},lastLook[3]{};
         for(int frameIndex=0;frameIndex<120;++frameIndex) {
@@ -410,6 +418,26 @@ void Run() {
             realFocus=realFocus && shared.focusValid && shared.focusHit && std::fabs(shared.focus[1])<1e-4f;
             float targets[20]{};targets[1]=2;Camera(seat,targets,camera);
             auto eye=reinterpret_cast<float*>(camera+kCamEye);auto look=reinterpret_cast<float*>(camera+kCamLook);
+            // 2026-11-21 ("俯瞰视角移动的时候会白屏一下……会抖动"): a building 30 m tall 10 m in front of the landing (between
+            // it and the eye) must not be on the segment the game's collision sweeps (look -> eye): before, the pivot was
+            // the landing and that segment ran through the wall, pulling the eye onto it.
+            if(frameIndex>20) {
+                // The point observed: where the optical ray meets the landing's ground (the eased centre while the gun rocks).
+                float ray[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(ray);
+                const float reach=(shared.focus[1]-eye[1])/ray[1];
+                const float seen[3]={eye[0]+ray[0]*reach,shared.focus[1],eye[2]+ray[2]*reach};
+                const float h[2]={eye[0]-seen[0],eye[2]-seen[2]};
+                const float run=std::hypot(h[0],h[1]);
+                const float wallAt=10.0f,wallTop=seen[1]+30.0f;
+                const auto crosses=[&](const float* from)->bool {
+                    const float a=(from[0]-seen[0])*h[0]/run+(from[2]-seen[2])*h[1]/run;
+                    const float b=run;
+                    if(!(a<wallAt && b>wallAt))return false;
+                    const float t=(wallAt-a)/(b-a);
+                    return from[1]+(eye[1]-from[1])*t<wallTop;
+                };
+                clear=clear && !crosses(look) && crosses(seen);
+            }
             NativeCameraClip(eye,look,targets,floorY,At<float>(camera,0x528),frameIndex%3);
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
@@ -418,17 +446,18 @@ void Run() {
             // landing (the screen's middle, where the HUD's mark is) and holds still there. From frame 40 the gun rocks
             // (its muzzle moved every frame, the landing with it): the view follows eased, never a jump to each new
             // landing; once the gun is steady again (frame 70) it settles back on the landing.
-            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && offRay(eye,look)<0.5f;
             if(frameIndex==30)std::memcpy(settledEye,eye,12);
             if(frameIndex>30 && frameIndex<=40)still=still && vec::Dist(eye,settledEye)<1e-2f;
             if(frameIndex>40 && frameIndex<70)eased=eased && std::hypot(look[0]-lastLook[0],look[2]-lastLook[2])<12.0f;
-            if(frameIndex>110)back=back && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex>110)back=back && offRay(eye,look)<0.5f;
             std::memcpy(lastLook,look,12);
             if(frameIndex>=40 && frameIndex<70)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
             if(frameIndex==70)Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         }
         Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         Check(onFocus,"the high view looks at the shot's landing, not the vehicle");
+        Check(clear,"the high view's collision sweep stays at the eye: a building before the landing never pulls the eye in");
         Check(still,"a steady gun holds the high view still");
         Check(eased,"a rocking gun's landing is followed eased, without jumps");
         Check(back,"the high view settles back on the landing");
