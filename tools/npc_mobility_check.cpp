@@ -274,6 +274,15 @@ void FencerChoices() {
     s=Open(20.0f);s.stuck=true;s.landed=false;Check(Choose(both,s,r)==Act::none,"stuck in the air: nothing");
     s=Open(20.0f);s.stuck=true;Check(Choose(dashOnly,s,r)==Act::none,"stuck with only a dash: nothing");
     s=Open(std::nanf(""));Check(Choose(both,s,r)==Act::none,"no goal: nothing");
+    // A vehicle on the way stops the dashes only: never a boost at it (kBlocked reads the map's wall alone).
+    s=Open(60.0f);s.vehicle=2.0f;Check(Choose(both,s,r)==Act::none,"a parked car 2 m ahead: no dash, no boost into it");
+    s=Open(60.0f);s.vehicle=20.0f;Check(Choose(both,s,r)==Act::dash,"a vehicle at 20 m: dash, no dash-jump");
+    s.vehicle=10.0f;Check(Choose(both,s,r)==Act::none,"a vehicle at 10 m: neither (walked)");
+    s=Open(60.0f);s.vehicle=40.0f;Check(Choose(both,s,r)==Act::dashJump,"a vehicle past the dash-jump's reach: dash-jump");
+    s=Open(60.0f);s.vehicle=std::nanf("");Check(Choose(both,s,r)==Act::dashJump,"no look (NaN): the map's clear way stands");
+    s=Open(20.0f);s.vehicle=1.0f;s.clear=2.0f;Check(Choose(both,s,r)==Act::boost,"the map's wall at the waist still boosted over");
+    s=Open(20.0f);s.vehicle=1.0f;s.stuck=true;Check(Choose(both,s,r)==Act::boost,"stuck (walk going nowhere): boost as before");
+    s=Open(30.0f);s.evade=true;s.vehicle=1.0f;Check(Choose(both,s,r)==Act::dash,"a crowd's dash out: no vehicle weighed (WingDash / FencerMove look only for a walk)");
 }
 
 void Timing() {
@@ -326,59 +335,85 @@ void Timing() {
     Combo z;Check(Begin(z,Act::dash,both,0)==0,"frame 0 is pressable");
 }
 
-// A walk dash that went nowhere (2026-11-21 r2b: a Wing Diver by a parked helicopter, a goal dash every few seconds, each
-// taken, none carrying her anywhere, the map ray clear=19 each time): the carry measured, the hold, its doubling, its end.
+// How far a walk dash carried (2026-11-21 r2b: a Wing Diver by a parked helicopter, eight goal dashes taken there, none
+// carrying her anywhere): measured for the log only, nothing held on it. CarryTick / CarryPress are the whole wiring
+// npcai.cpp WingDash runs (CarryTick each frame after Advance, before anything is pressed; CarryPress on each press).
 void WingCarry() {
-    const float at[3]={-304.0f,1.0f,127.0f},west[3]={-1.0f,0.0f,0.0f},east[3]={1.0f,0.0f,0.0f},south[3]={0.0f,0.0f,-1.0f};
-    const float northWest[3]={-0.7071f,0.0f,0.7071f};
-    Carry c;Held h;
+    const float at[3]={-304.0f,1.0f,127.0f},off[3]={-290.0f,1.0f,120.0f};
+    Carry c;
     // When it is measured: the dash state seen and ended, or kCarryWaitMs after the press.
-    CarryStart(c,at,west,1000);
-    Check(!CarryDue(c,false,1001),"before the state shows: not yet");
-    Check(!CarryDue(c,true,1100),"in the dash state: not yet");
-    Check(CarryDue(c,false,1400),"the state ended: measure");
-    CarryStart(c,at,west,1000);
-    Check(!CarryDue(c,false,1000+kCarryWaitMs-1) && CarryDue(c,false,1000+kCarryWaitMs),"never seen: measured after the wait");
-    Carry idle;Check(!CarryDue(idle,false,100000),"nothing watched: nothing due");
-    // Blocked: under a quarter of the ~18 m estimate; a dash that carries clears the row.
+    CarryStart(c,at,1000);
+    Check(CarryTick(c,false,false,1001)==CarryNow::none,"before the state shows: not yet");
+    Check(CarryTick(c,true,false,1100)==CarryNow::none,"in the dash state: not yet");
+    Check(CarryTick(c,false,false,1400)==CarryNow::measure && !c.on,"the state ended: measured, the watch over");
+    Check(CarryTick(c,false,false,1500)==CarryNow::none,"measured once");
+    CarryStart(c,at,1000);
+    Check(CarryTick(c,false,false,1000+kCarryWaitMs-1)==CarryNow::none,"never seen: not before the wait");
+    Check(CarryTick(c,false,false,1000+kCarryWaitMs)==CarryNow::measure,"never seen: measured after the wait");
+    Carry idle;Check(CarryTick(idle,false,false,100000)==CarryNow::none,"nothing watched: nothing due");
+    // Not driven in between (aboard, the stock's walk): its first frame back is past twice the wait, dropped.
+    CarryStart(c,at,1000);
+    Check(CarryTick(c,false,false,1000+2*kCarryWaitMs+1)==CarryNow::dropped && !c.on,"back after 3 s: dropped, not judged");
+    // Blocked: under a quarter of the ~18 m estimate.
     Check(CarryBlocked(0.4f,kWingCarry) && CarryBlocked(4.0f,kWingCarry) && !CarryBlocked(kCarryShare*kWingCarry,kWingCarry) &&
           !CarryBlocked(16.0f,kWingCarry),"under kCarryShare of the carry: blocked");
     Check(CarryBlocked(std::nanf(""),kWingCarry) && !CarryBlocked(0.0f,0.0f),"not finite: blocked; no estimate: never");
-    CarryStart(c,at,west,1000);
-    Check(CarryEnd(c,h,0.6f,kWingCarry,2000) && !c.on && h.streak==1 && h.untilMs==2000+kHeldFirstMs,"0.6 m of 18: blocked, held 4 s");
-    // Held: from here, that way and within 90 deg of it; not across the other way, not from 5 m off, not once it ends.
-    Check(DashHeld(h,at,west,2500),"the same way from the same spot: held");
-    Check(DashHeld(h,at,northWest,2500),"45 deg off it (the route round swings): held");
-    Check(!DashHeld(h,at,east,2500) && DashHeld(h,at,south,2500),"the other way: free; 90 deg: held (the cone's edge)");
-    const float close[3]={at[0]+3.0f,at[1],at[2]+3.0f},moved[3]={at[0],at[1],at[2]+kHeldLeave};
-    Check(DashHeld(h,close,west,2500),"4.2 m off: still the spot");
-    Check(!DashHeld(h,moved,west,2500),"5 m off: the position changed, free again");
-    Check(!DashHeld(h,at,west,2000+kHeldFirstMs),"the hold over: free again");
-    // In the walk's reasons: blocked here, never an evade.
-    WingGoal g{false,Need::order,false,false,false,115.0f,30.0f,-1.0f,kWingClear};
-    g.held=DashHeld(h,at,west,2500);
-    Check(WingDecide(g,25.0f).block==Block::heldHere && std::string(BlockName(Block::heldHere))=="blocked here","held: no goal dash");
-    g.need=Need::keepUp;Check(WingDecide(g,25.0f).block==Block::heldHere,"held: no follow dash");
-    g.pressed=true;Check(WingDecide(g,25.0f).why==Why::evade,"held: a crowd's dash out still goes");
-    // In a row: the hold doubles, capped (never off for good); the walk's rest scales with the row; a carry clears both.
-    Check(HeldRestScale(Held{})==1.0f,"none blocked: the plain rest");
-    std::uint64_t last=0;
-    for(int k=2;k<=8;++k) {
-        const std::uint64_t t=10000ull*static_cast<std::uint64_t>(k);
-        CarryStart(c,at,west,t);
-        CarryEnd(c,h,0.0f,kWingCarry,t);
-        const std::uint64_t held=h.untilMs-t;
-        Check(h.streak==k && held==HeldMs(k) && held>=last && held<=kHeldMostMs,"blocked again: the hold doubles, capped",double(k),double(held));
-        last=held;
+
+    // The press as WingDash runs it: Begin, CarryPress, then each frame Advance and CarryTick on its outcome.
+    // A press not taken (Advance's miss): nothing measured then or after, however long the soldier stands there.
+    {
+        Combo m;Carry k,was;
+        const std::uint64_t f0=100,t0=5000;
+        Check(Begin(m,Act::dash,Ability{0,-1},f0)==0,"the walk dash pressed");
+        Check(CarryPress(k,true,at,t0,was)==CarryNow::none && k.on,"its carry watched");
+        CarryNow seen=CarryNow::none;
+        for(std::uint64_t f=f0+1;f<=f0+kConfirmFrames+1;++f) {
+            const Step st=Advance(m,f,false,false);
+            const CarryNow n=CarryTick(k,false,st.outcome==Outcome::missed,t0+(f-f0)*16);
+            if(n!=CarryNow::none)seen=n;
+        }
+        Check(!Busy(m) && seen==CarryNow::dropped && !k.on,"not taken: the watch dropped, no carry");
+        bool any=false;
+        for(std::uint64_t t=t0+100;t<t0+10000;t+=100)any|=CarryTick(k,false,false,t)!=CarryNow::none;
+        Check(!any,"and never a blocked line after it");
     }
-    Check(HeldMs(1)==4000 && HeldMs(2)==8000 && HeldMs(3)==16000 && HeldMs(5)==64000 && HeldMs(50)==kHeldMostMs,"4, 8, 16 .. 64 s");
-    Check(HeldRestScale(h)==16.0f,"the walk's rest at most 16 x NpcWingDashSec");
-    Check(!DashHeld(h,at,west,80000+kHeldMostMs),"even the longest hold ends");
-    CarryStart(c,at,west,200000);
-    Check(!CarryEnd(c,h,17.0f,kWingCarry,201000) && h.streak==0 && !DashHeld(h,at,west,201001) && HeldRestScale(h)==1.0f,
-          "a dash that carries: the row cleared, free");
-    // Not a miss: the misses' count is the presses not taken (CountMiss), untouched here.
-    int misses=2;CountMiss(misses,Outcome::pending);Check(misses==2,"a blocked carry is no miss");
+    // A press taken: the state shows, ends, and the carry is measured once.
+    {
+        Combo m;Carry k,was;
+        const std::uint64_t f0=200,t0=9000;
+        Begin(m,Act::dash,Ability{0,-1},f0);CarryPress(k,true,at,t0,was);
+        const Step st=Advance(m,f0+1,true,false);
+        Check(st.outcome==Outcome::done && CarryTick(k,true,false,t0+16)==CarryNow::none,"taken, dashing: not yet");
+        Check(CarryTick(k,false,false,t0+900)==CarryNow::measure && k.from[0]==at[0] && k.atMs==t0,"the state ended: this press's carry");
+    }
+    // NpcWingDashSec down to 0.3 s, under the wait: a press with the last one still watched has it measured first, from
+    // its own spot and time, never written over unjudged; a crowd's press settles it too but is not watched.
+    {
+        Carry k,was;
+        CarryPress(k,true,at,1000,was);
+        Check(CarryPress(k,true,off,1300,was)==CarryNow::measure && was.from[0]==at[0] && was.atMs==1000,"0.3 s on: the last measured first");
+        Check(k.on && k.from[0]==off[0] && k.atMs==1300,"then the new one watched");
+        Check(CarryPress(k,false,at,1600,was)==CarryNow::measure && was.atMs==1300 && !k.on,"a crowd's press: the last measured, none watched");
+        Check(CarryPress(k,true,at,2000,was)==CarryNow::none,"nothing watched before: nothing to measure");
+        CarryPress(k,true,at,10000,was);
+        Check(CarryPress(k,true,at,10000+2*kCarryWaitMs+1,was)==CarryNow::dropped,"the last one 3 s stale: dropped");
+    }
+    // Nothing held: the walk's reasons are the same after a dash that went nowhere (the misses' count is CountMiss's).
+    WingGoal g{false,Need::order,false,false,false,115.0f,30.0f,-1.0f,kWingClear};
+    Check(WingDecide(g,25.0f).why==Why::goal,"a blocked carry puts no hold on the walk's dash");
+}
+// The vehicle look reused while fresh: a quarter second, within a metre and ~14 deg, the same reach.
+void VehicleLooks() {
+    const float at[3]={0.0f,1.0f,0.0f},east[3]={1.0f,0.0f,0.0f},north[3]={0.0f,0.0f,1.0f};
+    const float nudge[3]={0.6f,1.0f,0.6f},walked[3]={1.0f,1.0f,0.0f},tilt[3]={0.98f,0.0f,0.199f};
+    VehicleLook l;
+    Check(!LookFresh(l,at,east,19.0f,0),"none cast yet: cast");
+    LookKeep(l,at,east,19.0f,4.0f,1000);
+    Check(LookFresh(l,at,east,19.0f,1000+kVehicleLookMs-1) && l.m==4.0f,"within 250 ms: reused");
+    Check(!LookFresh(l,at,east,19.0f,1000+kVehicleLookMs),"250 ms on: cast again");
+    Check(LookFresh(l,nudge,east,19.0f,1100) && !LookFresh(l,walked,east,19.0f,1100),"0.85 m off: reused; 1 m: cast again");
+    Check(LookFresh(l,at,tilt,19.0f,1100) && !LookFresh(l,at,north,19.0f,1100),"11 deg: reused; 90 deg: cast again");
+    Check(!LookFresh(l,at,east,25.0f,1100),"another reach: cast again");
 }
 // The vehicles along the dash's line, which the map ray does not see: VehicleAlong over a stand-in object layer (bodies
 // as circles over the ground: a soldier's, the dasher's own, a parked helicopter's).
@@ -443,6 +478,7 @@ int main() {
     WingRuns();
     WingReasons();
     WingCarry();
+    VehicleLooks();
     WingVehicles();
     FencerHands();
     FencerChoices();

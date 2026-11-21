@@ -189,10 +189,10 @@ struct Soldier {
     bool mobOff;
     ULONGLONG mobAt,mobLogAt,mobWhyAt,mobPosAt;
     float mobPos[3];
-    // The Wing Diver's walk dash watched for its carry, and the hold a dash that went nowhere put on its walk's dashes
-    // (npc_mobility.h CarryEnd / DashHeld; 2026-11-21 r2b: dashed into a parked helicopter over and over).
+    // The Wing Diver's walk dash watched for how far it carried (npc_mobility.h CarryTick: logged only), and the last
+    // look for vehicles along a dash's way (VehicleNear: not cast every frame).
     npc::mobility::Carry mobCarry;
-    npc::mobility::Held mobHeld;
+    npc::mobility::VehicleLook mobLook;
 };
 // Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
 std::deque<Soldier> soldiers;
@@ -1230,11 +1230,13 @@ bool HullClear(const void* vehicle,const float* a,const float* b) noexcept {
     }
     return true;
 }
-// Whether an object-layer body is a vehicle's (parked, driven, nobody's; aircraft too: KnownVehicle is every class).
+// Whether an object-layer body is a vehicle's (parked, driven, nobody's; aircraft too: KnownVehicle is every class). A
+// soldier the plugin drives (the dasher itself, its squad: the bodies a walking squad's rays meet first) is told by the
+// soldiers' index, without KnownVehicle's Readable (a working-set call each).
 bool BodyIsVehicle(std::uint32_t body) noexcept {
     const void* owner=nullptr;
     __try { owner=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body); } __except(EXCEPTION_EXECUTE_HANDLER){owner=nullptr;}
-    return owner && KnownVehicle(owner);
+    return owner && !FindSoldier(owner) && KnownVehicle(owner);
 }
 // m to the first vehicle body along horizontal `dir` from `pos` at the knees and the chest, `most` with none that near.
 // The map ray the dashes' clear way was read with (layer 22) sees no vehicle: 2026-11-21 r2b, a Wing Diver dashed again
@@ -1249,6 +1251,13 @@ float VehicleAhead(const float* pos,const float* dir,float most) noexcept {
         if(d<nearest)nearest=d;
     }
     return nearest;
+}
+// VehicleAhead for a dash being weighed, the soldier's last look reused while fresh (npc_mobility.h LookFresh).
+float VehicleNear(Soldier& s,const float* pos,const float* dir,float most,ULONGLONG ms) noexcept {
+    if(npc::mobility::LookFresh(s.mobLook,pos,dir,most,ms))return s.mobLook.m;
+    const float m=VehicleAhead(pos,dir,most);
+    npc::mobility::LookKeep(s.mobLook,pos,dir,most,m,ms);
+    return m;
 }
 // `floor`, `room`: the boarding circle (npc_logic.h BoardRoom), where the route need not go round the vehicle.
 Hull BoardHull(const void* vehicle,const float* floor,float room) noexcept {
@@ -1580,13 +1589,12 @@ npc::mobility::Need NeedOf(const Soldier& s,const Plan& p) noexcept {
     if(std::strcmp(p.move,"move order")==0 || std::strcmp(p.move,"attack-move")==0)return npc::mobility::Need::order;
     return s.target.obj ? npc::mobility::Need::fight : npc::mobility::Need::keepUp;
 }
-// The m free along horizontal `dir`, up to `most`: the map at the waist (terrain, buildings) and the vehicles' bodies
-// (VehicleAhead: the map ray has none of them).
+// The m free along horizontal `dir` at the waist on the map (terrain, buildings: no vehicles, VehicleNear), up to `most`.
 float ClearAhead(const float* pos,const float* dir,float most) noexcept {
     const float from[3]={pos[0],pos[1]+1.0f,pos[2]},to[3]={from[0]+dir[0]*most,from[1],from[2]+dir[2]*most};
     float hit[3];
     const float wall=MapRay(from,to,hit);
-    return VehicleAhead(pos,dir,wall<0.0f || !std::isfinite(wall) ? most : wall);
+    return wall<0.0f || !std::isfinite(wall) ? most : wall;
 }
 // The nearest enemy within twice the danger reach, and the cosine between `dir` and the way to it.
 bool ThreatAhead(const float* pos,const float* dir,float* dot) noexcept {
@@ -1617,27 +1625,28 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     const Config& c=Cfg();
     const ULONGLONG frame=GameFrame();
     const bool dashing=At<std::uint32_t>(h,kActionLimits)==kWingDashLimits;
-    // The last walk dash's carry, once its state ended: one that went nowhere holds the walk's dashes from here that way.
-    if(CarryDue(s.mobCarry,dashing,ms)) {
-        const float moved=npc::Horiz(pos,s.mobCarry.from);
-        const ULONGLONG took=ms-s.mobCarry.atMs;
-        if(took>2*kCarryWaitMs)s.mobCarry.on=false;   // not driven in between (aboard, stock): no carry to judge
-        else if(CarryEnd(s.mobCarry,s.mobHeld,moved,kWingCarry,ms))
-            Log("WDDASH blocked %p moved=%.1f expected=%.0f in %llu ms streak=%d hold=%.0fs at=(%.0f,%.0f,%.0f) dir=(%.2f,%.2f)",h,moved,kWingCarry,took,
-                s.mobHeld.streak,static_cast<double>(HeldMs(s.mobHeld.streak))/1000.0,s.mobHeld.at[0],s.mobHeld.at[1],s.mobHeld.at[2],
-                s.mobHeld.dir[0],s.mobHeld.dir[2]);
-        else if(c.debug)Log("WDDASH carry %p moved=%.1f in %llu ms",h,moved,took);
+    // How far the last walk dash carried, once its state ended (npc_mobility.h CarryTick): logged, nothing held on it.
+    const auto carried=[&](const Carry& was) noexcept {
+        if(!c.debug)return;
+        const float moved=npc::Horiz(pos,was.from);
+        const bool blocked=CarryBlocked(moved,kWingCarry);
+        Log("WDDASH %s %p moved=%.1f expected=%.0f in %llu ms from=(%.0f,%.0f,%.0f)",blocked ? "blocked" : "carry",h,moved,kWingCarry,
+            ms-was.atMs,was.from[0],was.from[1],was.from[2]);
+    };
+    const bool busy=Busy(s.mob);
+    const Step step=busy ? Advance(s.mob,frame,dashing,false) : Step{};
+    {
+        const Carry was=s.mobCarry;
+        if(CarryTick(s.mobCarry,dashing,step.outcome==Outcome::missed,ms)==CarryNow::measure)carried(was);
     }
-    if(Busy(s.mob)) {
-        const Step st=Advance(s.mob,frame,dashing,false);
-        if(st.outcome==Outcome::missed)s.mobCarry.on=false;   // never dashed: nothing to measure
-        if(st.outcome==Outcome::missed && c.debug && ms-s.mobLogAt>=kLogMs) {
+    if(busy) {
+        if(step.outcome==Outcome::missed && c.debug && ms-s.mobLogAt>=kLogMs) {
             s.mobLogAt=ms;
             Log("WDDASH refused %p: limits 0x%X mask 0x%X state 0x%X overheat %d lock %p air frames %d",h,At<std::uint32_t>(h,kActionLimits),
                 At<std::uint32_t>(h,kControlMask),At<std::uint32_t>(h,kHumanState),At<std::int32_t>(h,kOverheat),
                 At<const void*>(h,kActionHolder),At<std::int32_t>(h,kAirFrames));
         }
-        MobilityOutcome(s,h,st.outcome,"WingDiver");
+        MobilityOutcome(s,h,step.outcome,"WingDiver");
         return;
     }
     if(!WingDashOn() || s.mobOff || h[kJumpPress])return;
@@ -1658,19 +1667,18 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
         // Only the plugin's own walk this frame (MoveTo); the stock's moves and a stand are not known here.
         const Way w=WayOf(s,pos);
         if(!w.walking || !DashFree(p))return;
-        // After dashes that went nowhere the walk's dashes rest longer, whichever way (the route round swings each time).
-        if(!Rested(ms-s.mobAt,c.npcWingDashSec*HeldRestScale(s.mobHeld)))return;
         g.left=w.goalDist-w.stop;g.run=w.run;g.paced=w.pace<1.0f;
         if(!(g.left>WingFar(g.need,c.npcWingDashFar)))return;   // a walk too short to dash: nothing to say
         std::memcpy(dir,w.runDir,12);
-        g.held=DashHeld(s.mobHeld,pos,dir,ms);
         // The ray and the nearest enemy only when the rest would let it dash (or a line is due).
         const bool say=c.debug && ms-s.mobWhyAt>=kLogMs;
         WingGoal open=g;open.clear=kWingClear;open.threat=false;
         const WingVerdict first=WingDecide(open,c.npcWingDashFar);
         if((!gate && first.why!=Why::none) || say) {
             g.threat=ThreatAhead(pos,dir,&g.threatDot);
+            // The map's wall, then (when the map leaves the dash its way) the vehicles' bodies the map has none of.
             g.clear=ClearAhead(pos,dir,kWingClear+1.0f);
+            if(g.clear>=kWingClear)g.clear=std::fmin(g.clear,VehicleNear(s,pos,dir,kWingClear+1.0f,ms));
         }
         const WingVerdict v=first.why==Why::none ? first : WingDecide(g,c.npcWingDashFar);
         if(gate || v.why==Why::none) {
@@ -1689,10 +1697,14 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     Move(h,dir,1.0f);   // a full stick: +0x11E0 past 0.5 (0x583947), else the dash goes straight ahead
     h[kDashPress]=1;
     s.mobAt=ms;
-    if(v.why!=Why::evade)CarryStart(s.mobCarry,pos,dir,ms);   // the walk's dash: how far it carries (a crowd's is not held)
-    if(c.debug)Log("WDDASH %p why=%s move=%s need=%s e=%.0f/%.0f C=%.1f left=%.0f run=%.0f clear=%.0f fire=%d air=%d stick=(%.2f,%.2f)",h,
+    {   // the walk's dash watched for its carry (a crowd's is not: it goes wherever the crowd lets it); the last first
+        Carry was;
+        if(CarryPress(s.mobCarry,v.why!=Why::evade,pos,ms,was)==CarryNow::measure)carried(was);
+    }
+    // `stick` is the view-local stick Move wrote (LocalMove off the view yaw), `dir` the dash's way over the ground.
+    if(c.debug)Log("WDDASH %p why=%s move=%s need=%s e=%.0f/%.0f C=%.1f left=%.0f run=%.0f clear=%.0f fire=%d air=%d stick=(%.2f,%.2f) dir=(%.2f,%.2f) at=(%.0f,%.0f,%.0f)",h,
                    WhyName(v.why),p.move,NeedName(g.need),st.energy,st.energyMax,st.cost,g.left,g.run,g.clear,g.firing,st.air,
-                   At<float>(h,kMoveX),At<float>(h,kMoveZ));
+                   At<float>(h,kMoveX),At<float>(h,kMoveZ),dir[0],dir[2],pos[0],pos[1],pos[2]);
 }
 
 // The Fencer's dash / boost (d72+k, the hand whose weapon does it): the stock's own presses on those hands taken off (it
@@ -1757,7 +1769,11 @@ void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
     Ability use=a;   // a hand whose trigger is held (a charge, a swing) is left to it
     if(use.dashSet>=0 && h[kTrigger+use.dashSet])use.dashSet=-1;
     if(use.boostSet>=0 && h[kTrigger+use.boostSet])use.boostSet=-1;
-    const Act act=Choose(use,sit,Ranges{c.npcFencerDashJumpRange,c.npcFencerDashRange,c.npcFencerDashReserve});
+    const Ranges ranges{c.npcFencerDashJumpRange,c.npcFencerDashRange,c.npcFencerDashReserve};
+    Act act=Choose(use,sit,ranges);
+    // A walk's dash / dash-jump only: the vehicles' bodies along the way (the map ray has none), looked for once it would
+    // go (they stop the dashes, never make a boost: Situation::vehicle).
+    if(!sit.evade && (act==Act::dash || act==Act::dashJump)){sit.vehicle=VehicleNear(s,pos,dir,kDashJumpClear,ms);act=Choose(use,sit,ranges);}
     if(act==Act::none)return;
     const int set=Begin(s.mob,act,use,frame);
     if(set<0)return;
@@ -1768,9 +1784,9 @@ void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
     else{Move(h,dir,1.0f);std::memcpy(s.mobDir,dir,12);}
     h[kSecondary+set]=1;
     if(sit.evade)s.rollAt=ms;
-    if(c.debug)Log("FENCERMOVE %p %s why=%s set=%d dash=%d boost=%d goal=%.0f way=%.0f rise=%.1f clear=%.0f stuck=%d near=%d",h,ActName(act),
+    if(c.debug)Log("FENCERMOVE %p %s why=%s set=%d dash=%d boost=%d goal=%.0f way=%.0f rise=%.1f clear=%.0f vehicle=%.0f stuck=%d near=%d",h,ActName(act),
                    sit.evade ? "dodge" : up ? "boost-up" : act==Act::boost ? (stuck ? "boost-stuck" : "boost-ledge") : "way",set,dashLeft,boostLeft,sit.goalDist,
-                   sit.wayDist,sit.rise,sit.clear,stuck,sit.threatNear);
+                   sit.wayDist,sit.rise,sit.clear,std::isfinite(sit.vehicle) ? sit.vehicle : -1.0f,stuck,sit.threatNear);
 }
 
 void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
