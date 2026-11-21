@@ -78,6 +78,75 @@
   全 0（任务开始记一行日志），否则任务乘员会每帧被 `NpcArmsLoaded` 拒绝、一直刷日志。
 - 共用的「把本机玩家的武器填进计划」收成 `npc_arms.h GiveLocalArms`（离线援军、离线救援、任务乘员三处）。
 
+### 2.5 剑兵的两只手（2026-11-21）
+
+玩家原话见 [feedback-2026-11-21-npc-mobility.md](feedback-2026-11-21-npc-mobility.md)：「NPC剑兵(如果配装合适)增加冲跳(冲刺快速接喷射)」。
+冲刺 / 推进跳是两只手武器的副功能（`SecondaryFire_Type` 5 / 4，[npc-mobility-re.md](npc-mobility-re.md) §4），而在这之前**没有任何入口**
+能让 NPC 剑兵一手冲刺、一手推进跳：§2 只换第 0 把（主手，WeaponSet 0），第 1 把（AI 盾，WeaponSet 1，type 6）一直是模板的；
+调试召唤（`debug_spawn.cpp`）用原版模板；装备编辑器只能在 14 个 AI 兵种里选；换算参数 306 / 307 没有 NPC 入口。
+10 轮实机 `hands:` 日志全是「中炮 / 霰弹 boost=set 0、打桩 dash=set 0」，从没有一名剑兵同时有两种。
+
+**NPC 剑兵两只手从哪来（盘点）**
+
+| 来源 | 主手（WeaponSet 0，`soldier_load_weapon` 第 0 把） | 副手（WeaponSet 1，第 1 把） |
+|---|---|---|
+| 原版模板（`N607_AIHEAVYARMOR_SC/SMC/SP/SSG`，`support_soldier.cpp kBodies`） | AI 武器（`AiHeavyCannon01` 等） | `AiHeavyShield01*`（盾，type 6）；SP 另有第 3 把 `AiHeavyDash01`（副武器槽的配件，冲刺 4 次，不在任何 WeaponSet） |
+| 构造时的载入点 `0x5944A9`（`soldier_load_weapon` 循环，每把一次 `0x58F360`） | 插件 `LoadWeaponHook` 换成玩家武器 | 2026-11-21 起同一个钩子换第二次载入 |
+| 本插件援军 / 乘员 / 救援（`support_net.h Unit::arms` / `Unit::offhand`） | 叫援军玩家的系列武器低一档（§2.1） | 见下 |
+| 调试召唤、原版任务友军、测试场 | 模板 | 模板（不改） |
+
+**规则**（`src/npc_tier.h PickHands`，纯逻辑）：
+
+1. 叫援军玩家的**剑兵配装**（GameStatus 兵种 3 的 6 格的前 4 格 Slot1L / 1R / 2L / 2R，`docs/loadout-re.md` 1.2；**不论他当前玩什么兵种**，
+   GameStatus 每个兵种各存一套）里，按 1L、1R、2L、2R 的顺序找第一把属于该剑兵种类系列的武器（§2.1 的基准，剑兵种类只看这 4 格）。
+2. 找到了：取**它所在的那组**（1L+1R 或 2L+2R）。主手 = 它的低一档（§2.1）；副手 = 同组另一格的武器，**同型号**、星级各 -1
+   （与系列第一把的低一档同规则；副手型号是玩家自己选的，不按系列降型号）。那一格空着或不是剑兵手持武器：没有副手（模板的 AI 盾保留）。
+3. 没找到（基准来自「已拥有最高」或「最低 0 星」）：只有主手，副手不给，AI 盾保留。
+4. 玩家能控制的方式就是摆配装：**想要冲跳的援军，就在剑兵的同一组里放一把冲刺武器（如爆破长枪）和一把推进跳武器（如德克斯特霰弹、
+   加农重炮系列），然后叫那把系列武器对应的剑兵种类**。例：1L 德克斯特自动霰弹枪（773）、1R 爆破长枪（715）→ 叫「重装·打桩」，
+   援军主手长枪（冲刺）、副手霰弹（推进跳）；叫「重装·霰弹」则主手霰弹、副手长枪。
+   为什么不按「哪组有冲刺 + 推进跳」自动挑：武器的 `SecondaryFire_Type` 在武器 SGO 里，只有造出来的武器对象上才读得到（`+0x690`），
+   离线表（`docs/weapons.csv`）没有这一列；按槽顺序的规则确定、各机一致，玩家看配装就知道援军拿什么。
+5. NPC 的哪只手冲刺 / 推进跳仍由 `FencerMove` 每帧从两只手的武器读出（`npc_mobility.h Effective`），不是这里决定。
+
+**预设 / ini 指定两只手**（`src/support_loadout.h ParseSupportPreset`）：`SupportPreset_<KEY>=兵种[@主色[:副色]][#右手:左手][+背包][*人数]`，
+`#右手:左手` 是两个武器表行号（`docs/weapons.csv` 的 id），必须都是剑兵手持武器（类别 200–205，`src/npc_tiers.inc kFencerHands`，216 把，
+由 `tools/gen_npc_tiers.py` 生成）、只用于剑兵种类、两只都要写。右手进 WeaponSet 0（模板主武器位），左手进 WeaponSet 1（替换 AI 盾）。
+例：`SupportPreset_SQUAD=pilebanker#715:773*4`。
+
+- 星级：**造计划那台机器的玩家**（单机 = 本机；联机 = 房主，预设本来就是房主 ini 里的）该武器记录的星级，各 -1（`npc_arms.h PresetHandArms`）；没有记录 = 0 星。
+- 写了 `#` 的座位不再按第 1–3 条挑；构成面板把那个座位改成别的兵种时，`#` 随之失效（`PresetHandsFor`，同颜色规则）。
+- 不是外观：不生成文件、不进 64 位 variant，走单位的武器字（下面「联机」）；`#` 与颜色可以同写（只有颜色要生成文件）。
+- 本机武器钩子 / 预载不在（`PresetHandArms` false，记一行日志）：这名士兵退回叫援军玩家的挑选，不会半装备。
+- 安装器菜单 8 的编辑器（`tools/support_loadout.py parse_preset / format_preset`）同语法同结论（`tests/support_loadout_ini_test.py` 对照 C++）。
+- 房间内配置菜单（`src/room_menu.h`）目前**不显示**这个字段，但读入、增删座位、换兵种（仍是剑兵时保留，改成非剑兵时清掉）、保存时都原样保留，
+  不会把 ini 里的 `#` 丢掉。
+
+**给房间 / 编辑器界面的接口**（另一个会话在做房间内 NPC / 挂载界面，这里只提供数据层）：
+
+- 数据：`SupportPreset::hands[i]`（`FencerHands{right,left}`，武器表行号，`-1` = 没指定；`On()` 两只都有）。合法性 `HandsFit(hands, kind)`；
+  可选武器全集 `npctier::kFencerHands`（`{id, WEAPONTABLE 名}`，按 id 排）；显示名可按 id 查 `docs/weapons.csv` 同源的武器文本。
+- 读写：`ParseSupportPreset` / `SerialisePreset`（`#R:L` 放在颜色之后、背包之前）/ `SamePreset`（比较含两只手）；保存走既有的
+  `loadout_store.h SaveSupportLoadout(s)`（`LoadoutField::preset`），不需要新键。
+- 界面要加的只是「每名剑兵一栏：左右手各选一把 `kFencerHands` 或『按玩家配装』（-1）」；改成非剑兵时清空（`ChangeSoldier` 已做）。
+
+**实现**：
+
+- `support_soldier.cpp LoadWeaponHook`：`Arming` 记两份载入；同一个 human 的第 1 次载入换主手、第 2 次换副手（有副手时）。`Spawn` 核对
+  「替换次数 = 应替换次数且是同一个 human」，否则删掉、不出动（模板只有一次载入时也是这样，绝不退回 AI 盾）。成功时记一行
+  `SUPPORT soldier <模板>: hands <主手 id> (set 0) / <副手 id> (set 1)`。系数钩子不变（整名士兵 armed → 1）。
+- `npc_arms.cpp`：`LocalRequesterArms` 额外读兵种 3 的 4 格，按 `PickHands` 填 `RequesterArms::offhand[k]`（`Debug=1` 下日志
+  `SUPPORT arms: kind <k> gets weapon <id> stars <hex>, second hand <id|65535> stars <hex>`）；`PreloadNpcArms` 与 `NpcArmsLoaded` 两只手都预载 / 按需载入。
+- `support_dispatch.cpp PresetHands`：离线 / 房主规划时给写了 `#` 的座位填两只手；`GiveLocalArms`（离线、救援、任务乘员）与
+  `Session::Advance`（联机）对「主手、副手都已填」的士兵保留规划器给的，其他士兵照旧填请求者的（现在含副手）。
+- 校验：主手对剑兵种类放宽为「任意剑兵手持武器」（`UnpackArms` / `MainSgo`，预设的右手不一定在该种类系列里）；副手只许剑兵种类、
+  只许剑兵手持武器、必须有主手（`UnpackHand`、`support_protocol.cpp UnitArms / ValidArms`）。
+
+**306 / 307 换算参数**：它们是 `custom_parameter` 键，只由第 82 槽 `0x567690` 从**副武器**（支援装备 / 配件，`h+0x1A00`）读进 `+0x2082` / `+0x2083`
+（[npc-mobility-re.md](npc-mobility-re.md) §4.5）。援军剑兵不带玩家的支援装备，模板的配件只有 SP 的 `AiHeavyDash01`（冲刺次数），实机 `hands:` 日志
+`convert=0/0`，所以两只手的武器原始类型就是实际效果，按装备本来就正确，不需要另设。玩家自己装了 306 / 307 的支援装备时，援军的手与玩家
+本人的冲刺 / 推进跳分配可能不同（援军按武器原始类型）——这是有意的：援军没有那件装备。
+
 ## 3. 联机
 
 - 发起方决定：`SubmitSupportRequest` 调 `LocalRequesterArms`，`RequesterArms`（每种类一个 64 位字：bit63 有、bit0-15 武器 id、
@@ -89,6 +158,12 @@
 - 2026-11-10（§2.4）：**房间协议 8 → 9**。任务乘员的预备计划（`SubmitPrepared`，`t.external`，`Session::Advance` 不覆盖它的 `arms`）
   每个 unit 消息带房主挑的武器字；8 的客户端会无视它造原版士兵（各机不一致），且会拒绝 X-Morph 种类的武器字，所以升版拒旧。
   救援请求现在也带求救者的 `RequesterArms`。线格式不变（支援线仍 v2）。
+- 2026-11-21（§2.5）：**支援线 v2 → v3**（`support_protocol.h kVersion` 3，`kWireSize` 176 → 200）。剑兵副手放在新增的 24 字节尾部：
+  请求消息 = 四个剑兵种类（重炮、中炮、打桩、霰弹，`kOffhandKinds`）各 6 字节（u16 id，0xFFFF 无；u32 星级）；单位消息 = 该单位的
+  `Unit::offhand`（u64，原来不上线的 `spare` 位，大小不变），其余 16 字节为 0；其他消息尾部全 0，解码逐字节校验。
+  请求原有的 104 字节单位区只剩 14 字节，放不下四个副手，所以加长而不是挤进别的字段。
+  房间协议仍是 **11**：11 是本分支里开镜散布那一步升的、还没有任何发布版，这次并在同一步（`mod_room.h` 注释已记）；旧版的
+  支援消息长度不同，解码直接丢弃，房间协议把旧版挡在门外。预设的两只手由房主规划器填进单位（各机照单位造，不各自读 ini）。
 
 ## 4. 载具与战机
 
@@ -188,6 +263,13 @@
   `+0x678` 与每个武器槽 `+0x40` 写成同值、槽数之外不动；未登记的不动；无等级拒绝；同地址重登记替换；槽数异常报失败；表满拒绝、死对象槽复用、任务开始清空。
 - `tests/real_driver_native_test.cpp`：spawned setup 之后恰好调一次火力步骤。
 - `tools/selftest.py support_level_tables_match_the_game`：表与本机游戏数据一致。
+- 2026-11-21（§2.5）：`tests/npc_tier_test.cpp Hands()`（216 把剑兵手持武器表、主手放宽 / 副手只许剑兵、`PickHands` 取系列武器所在组的另一格为副手、
+  旁边空 / 非手持武器 / 只在别的兵种槽 / 只是已拥有时不给副手、预设手的星级）；`tests/support_loadout_test.cpp` 与 `tests/support_loadout_ini_test.py`
+  （`#R:L` 语法与拒绝项两边同结论、Python 行号表 = `kFencerHands`、只写两只手不生成文件）；`tests/room_menu_test.cpp`（房间菜单拼写保留 `#R:L`）；
+  `tests/support_soldier_test.cpp`（第 0、1 次载入换成主手、副手；没副手 AI 盾保留；模板只载一次时删掉）；`tests/npc_arms_test.cpp`（两只手都排载入、
+  副手单独 / 非剑兵武器拒绝、从剑兵配装读出两组、`PresetHandArms`）；`tests/support_protocol_test.cpp FencerHands()`（v3 尾部编解码与拒绝项、
+  三机房间各机两只手一致、规划器给的预设手保留、只给主手时仍按请求者）；`tests/support_dispatch_test.cpp`（离线预设座位用预设手、其他剑兵用玩家两手、
+  步枪只主手、预设手给不了时退回玩家挑选）；`tests/support_soldier_native_audit.py`（有游戏时：四个剑兵模板第 1 把是盾、WeaponSet 1 = 下标 1）。
 
 ## 6. 需实机确认
 
@@ -196,3 +278,5 @@
 - 任务中途叫援军时武器按需载入（`NpcArmsLoaded` pending → ready）不卡顿；联机三机各自载入后同时出现。
 - §2.4：任务载具乘员换了武器后仍能正常登车、在车上开火 / 下车后用玩家武器；联机客户端载入房主的武器后乘员同时出现。
 - §2.4：救援直升机的驾驶员 / 炮手拿玩家武器后炮手座（门炮）照常开火；X-Morph 步兵的动力装甲模型拿玩家步枪时握持姿势正常。
+- §2.5：两只手都是玩家武器的剑兵能正常持握、开火（WeaponSet 1 原来是盾）；`Debug=1` 下 `FENCERMOVE <h> hands: dash=set 0 … boost=set 1 … convert=0/0`，
+  远距离移动时出现 `FENCERMOVE <h> dashjump why=way …`；联机三机的援军两手一致。
