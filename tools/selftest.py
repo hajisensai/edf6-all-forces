@@ -9256,7 +9256,9 @@ def ported_weapons_held_as_edf6() -> None:
     """pylib/edf5port.py hold_as on hand-made weapons: with EDF6 weapons of its class on its model, the weapon takes the
     hand and holding animations most of them have, of custom_parameter only the animation (element 0; a Weapon_Sub's
     named form, the call it makes, untouched), and the MAB block of one whose locators include all of its own; without
-    one of its class, only a holding animation no EDF6 weapon uses takes the template's; its numbers never change."""
+    one of its class, only a holding animation no EDF6 weapon uses and its soldier's CAS does not play takes the
+    template's; its numbers never change."""
+    import copy
     import edf5port
     import struct
     import mab
@@ -9297,6 +9299,27 @@ def ported_weapons_held_as_edf6() -> None:
     doc = dsgo.Document(weapon('Weapon_Throw', 'arms_r', 'bag', 'assault_recoil1', ours_block), [])
     edf5port.hold_as(doc, peers, template, known)
     assert doc.root.get('BaseAnimation') == 'assault' and doc.root.get('ModelConstraint').items == ['arms_r']
+    # ... unless its soldier plays them (feedback #31: EDF6ENGINEER.CAS has EDF5's whole 'bag' set no EDF6 weapon uses)
+    engineer = frozenset({'bag_stand', 'bag_walk_f', 'bag_change1_up', 'bag_change1_down', 'bag_reload1',
+                          'bag_whole_recoil1'})
+    case = weapon('Weapon_BasicShoot', 'arms_r', 'bag', 'bag_whole_recoil1', ours_block)
+    case.set('ChangeAnimation', 'bag_change1')
+    case.set('ReloadAnimation', 'bag_reload1')
+    case.set('custom_parameter', dsgo.Node(['bag_whole_recoil1', 0.0, 2.0, 1.0]))
+    rifle = weapon('Weapon_BasicShoot', 'arms_r', 'assault', 'assault_recoil1', theirs_block)
+    rifle.set('ChangeAnimation', 'assault_change1')
+    rifle.set('ReloadAnimation', 'assault_reload1')
+    doc = dsgo.Document(copy.deepcopy(case), [])
+    edf5port.hold_as(doc, [], rifle, known, engineer)
+    assert [doc.root.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+        ['bag', 'bag_change1', 'bag_reload1'], 'a holding set its soldier plays was replaced'
+    assert doc.root.get('custom_parameter').items == ['bag_whole_recoil1', 0.0, 2.0, 1.0]
+    doc = dsgo.Document(copy.deepcopy(case), [])
+    edf5port.hold_as(doc, [], rifle, known, frozenset({'bag_stand'}))   # only the stance played: the rest goes
+    assert [doc.root.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+        ['bag', 'assault_change1', 'assault_reload1']
+    assert doc.root.get('custom_parameter').items[0] == 'assault_recoil1'
+    assert edf5port.plays('ChangeAnimation', '', frozenset()) and not edf5port.plays('BaseAnimation', 'bag', engineer - {'bag_stand'})
     # a Weapon_Sub's named custom_parameter (the call it makes) is never taken over
     sub = weapon('Weapon_Sub', 'arms_r', 'assault', 'assault_recoil1', ours_block)
     named = dsgo.Node(['vehicle_call', 1.0], {0: 'motion', 1: 'speed'})
@@ -9354,7 +9377,7 @@ def ported_weapon_locators_fit_real() -> None:
         finally:
             edf5port.hold_as, edf5port.fit_locators = hold, fit
 
-    built = adopted = held_fields = moved = like = preferred = red_governors = 0
+    built = adopted = held_fields = moved = like = preferred = red_governors = sentries = 0
     # the Monsoon (暴雨, aWeapon057 on governor01): where its soldiers grip is what EDF4.1's red Governor takes
     monsoon = dsgo.parse(stock('WEAPON/AWEAPON057.SGO')).root.get('animation_model').items[2].data
     for p in pw.PORTS:
@@ -9373,9 +9396,21 @@ def ported_weapon_locators_fit_real() -> None:
         b = r.get('animation_model').items[2].data
         bones = {n for n, _parent in models.bones(doc)}
         assert {n for _l, n in mab_legacy.mab_locator_nodes(b)} <= bones, f'{p.id}: locator node(s) not in its model'
+        states = models.soldier_states(p.category)
         for f in edf5port.HOLD_NAMES:
-            if f in r.names.values() and edf5port._first_text(r.get(f)) is not None:
-                assert edf5port._first_text(r.get(f)) in models.known[f], f'{p.id} {f}: an animation EDF6 has not'
+            name = edf5port._first_text(r.get(f)) if f in r.names.values() else None
+            if name is not None:
+                assert name in models.known[f] or edf5port.plays(f, name, states), \
+                    f'{p.id} {f}: {name!r}, an animation no EDF6 weapon uses and its soldier does not play'
+        if 'AmmoClass' in r.names.values() and r.get('AmmoClass') == 'SentryGunBullet01' and p.cls == 'Weapon_BasicShoot':
+            # EDF5's Air Raider sentry guns (feedback #31): carried and set down with the Air Raider's own 'bag' set
+            # (EDF6ENGINEER.CAS), not held as a rifle with an upper-body recoil where they ask for a whole-body one
+            sentries += 1
+            assert p.category // 100 == 3, f'{p.id}: a sentry gun on soldier {p.category // 100}'
+            assert [r.get(f) for f in ('BaseAnimation', 'ChangeAnimation', 'ReloadAnimation')] == \
+                ['bag', 'bag_change1', 'bag_reload1'], f'{p.id}: not carried as EDF5\'s case'
+            assert r.get('custom_parameter').items[0] == 'bag_whole_recoil1', f'{p.id}: not set down with the whole body'
+            assert 'bag_whole_recoil1' in states and 'bag_stand' in states
         raw = build(p, False, False)
         raw_block = raw.get('animation_model').items[2].data
         peers = models.peers(doc)
@@ -9423,6 +9458,7 @@ def ported_weapon_locators_fit_real() -> None:
         print('skip  ported_weapon_locators_fit_real: no ported weapon could be built')
         return
     assert red_governors >= 4, f'{red_governors} ported weapons on EDF4.1\'s red Governor (s_shotgun_governor02)'
+    assert sentries >= 4, f'{sentries} EDF5 Air Raider sentry guns checked (ZE-GUN, ZE-GUN 2A, FZ-GUN M2 / MX)'
     assert adopted > 150 and held_fields > 100 and moved and like and preferred, \
         (f'{adopted} developer blocks taken, {held_fields} held as EDF6\'s, {moved} fitted, {like} beside a developer '
          f'block, {preferred} placed as the developers do: this check is (nearly) empty')

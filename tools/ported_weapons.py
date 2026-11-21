@@ -49,6 +49,9 @@ DATA = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.join(HERE, '..
 ACQUIRE = 0.0     # WEAPONTABLE column 5: dropped in missions like any weapon
 PACK = 0.0        # column 8: no EDF6 DLC pack (the earlier games' packs are not EDF6's)
 SOURCE = 1.0      # column 3: 1 every non-pack weapon, 3 a pack's
+# The soldier's CAS (OBJECT/) by weapon category // 100 (300 and up the Air Raider): its animation states are what a
+# ported weapon's holding names must play (Models.soldier_states, edf5port.plays).
+SOLDIER_CAS = ('EDF6ARMYSOLDIER.CAS', 'EDF6_WINGDIVER.CAS', 'EDF6HEAVYARMOR.CAS', 'EDF6ENGINEER.CAS')
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,16 @@ class Models:
         self._peers: dict[str, list[Node]] = {}
         self.known: dict[str, set[str]] = {f: set() for f in edf5port.HOLD_NAMES}
         self._shotgun_hold: ranger_hold.HoldSet | None = None
+        self._states: dict[str, frozenset[str]] = {}
+
+    def soldier_states(self, category: int) -> frozenset[str]:
+        """Every animation state (all players) of the CAS of the soldier whose weapons category `category` is
+        (SOLDIER_CAS): what edf5port.hold_as asks a holding name of (edf5port.plays)."""
+        cas = SOLDIER_CAS[min(category // 100, 3)]
+        if cas not in self._states:
+            import cas_graft
+            self._states[cas] = frozenset().union(*cas_graft.states(self.stock(f'OBJECT/{cas}')).values())
+        return self._states[cas]
 
     @staticmethod
     def model_of(doc: dsgo.Document) -> tuple[str, str] | None:
@@ -326,7 +339,7 @@ def build_sgo(p: Port, stock, root: str | None, models: Models | None = None) ->
     # Held as EDF6's own weapons on its model are (after to_sub: a vehicle call is held as a Weapon_Sub), then every
     # locator on a bone the model has.
     template = dsgo.parse(stock(f'WEAPON/{p.template.upper()}.SGO')).root
-    edf5port.hold_as(doc, models.peers(doc), template, models.known)
+    edf5port.hold_as(doc, models.peers(doc), template, models.known, models.soldier_states(p.category))
     edf5port.fit_locators(doc, models.bones(doc), models.preferred(doc))
     if p.category == ranger_hold.SHOTGUN:   # a Ranger shotgun: held as the rifles (pylib/ranger_hold.py)
         ranger_hold.hold_like(doc.root, models.shotgun_hold())
