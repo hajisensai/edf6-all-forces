@@ -128,15 +128,40 @@ void Run(){
     terrain=false;StockArm sky{};Arm(f.weapon,true,sky);
     Check(sky.paths==2&&!sky.hit&&!sky.path[1].hit&&sky.flight==5,"no terrain keeps explicit finite lifetime endpoints");
     Check(sky.path[0].at[0]<0&&sky.path[1].at[0]>0&&sky.at[2]>500,"no-hit path still follows actual barrels");
-    {   // The loadout strip's left-to-right order (SideOf -> hud_cue.h SideOrder) is read across the weapon's own bore, never
-        // across a view the free-look key turns round the vehicle (2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化").
-        const float centre[3]={0,5,0},ahead[3]={0,0,1},behind[3]={0,0,-1},across[3]={1,0,0};
-        float pos[3],dir[3];
+    {   // The loadout strip's left-to-right order (SideOf -> hud_cue.h SideOrder) is read in the hull's frame: never across
+        // a view the free-look key turns round the vehicle (2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化"; SideOf
+        // takes no view at all), nor across the bore alone, which the mouse turns with the turret (2026-11-21:
+        // 「载具的挂载不要跟随视角变位置」). The fixture's mount bone 3 hangs under bone 2 (the pitch axis) under bone 1 (the
+        // yaw axis, mapping[0]): bone 1's origin, 1 m behind and 1 m right of the hull's origin, is the pivot.
+        Matrix(f.vehicle+kMatrix,0,5,0);const float centre[3]={0,5,0};std::memcpy(f.vehicle+kPosition,centre,12);
+        const float pivot[3]={-1,5,-1};std::memcpy(f.bones+weaponmount::kStride+weaponmount::kBoneOrigin,pivot,12);
+        float pos[3],dir[3],got[3];
         Check(edf::MuzzleFrame(f.weapon,f.muzzle,pos,dir),"fixture muzzle frame");
-        const float want=(pos[0]-centre[0])*dir[2]-(pos[2]-centre[2])*dir[0];
-        const float s0=SideOf(f.weapon,centre,ahead),s1=SideOf(f.weapon,centre,behind),s2=SideOf(f.weapon,centre,across);
-        Check(want<-1.0f && std::fabs(s0-want)<1e-4f,"a gun right of the middle reads right across its bore");
-        Check(s0==s1 && s0==s2,"whatever way the view looks, the weapon's side stays");
+        Check(weaponmount::YawPivot(f.vehicle,f.seat,f.holder,got)==1 && got[0]==-1 && got[2]==-1,"the yaw-turned ancestor's origin is the pivot");
+        const float s0=SideOf(f.vehicle,f.seat,f.holder);
+        Check(std::fabs(s0-(-3.0f))<1e-4f,"a gun right of the middle reads right in the hull");
+        // Turn the turret (the muzzle's bone round the pivot, the bore with it) 90 / 180 / -90: the side stays.
+        const float off[3]={pos[0]-pivot[0],pos[1]-pivot[1],pos[2]-pivot[2]};
+        bool kept=true;
+        for(const float deg:{90.0f,180.0f,-90.0f}) {
+            const float ang=deg*3.14159265f/180.0f,c=std::cos(ang),s=std::sin(ang);
+            const float rows[16]={c,0,-s,0, 0,1,0,0, s,0,c,0, pivot[0]+off[0]*c+off[2]*s,pivot[1]+off[1],pivot[2]-off[0]*s+off[2]*c,1};
+            std::memcpy(f.own+weaponmount::kStride+edf::kBoneRows,rows,64);
+            if(std::fabs(SideOf(f.vehicle,f.seat,f.holder)-s0)>1e-4f)kept=false;
+            const float bore[3]={s,0,c},old[3]={bore[2],0,-bore[0]};   // across the bore alone it moved by the pivot's offset
+            const float moved=(rows[12]-centre[0])*old[0]+(rows[14]-centre[2])*old[2];
+            if(deg==90.0f)Check(std::fabs(moved-s0)>0.5f,"  (the bore-only reading moved with the turret)");
+        }
+        Check(kept,"the turret turned any way: the weapon's side stays");
+        Matrix(f.own+weaponmount::kStride+edf::kBoneRows,-3);
+        // A hull-fixed mount (bone 0, no axis turns it): its muzzle across the hull's left from the origin.
+        Put<void*>(f.holder,0x18,f.bones);
+        Check(weaponmount::YawPivot(f.vehicle,f.seat,f.holder,got)==0,"a hull-fixed mount has no pivot");
+        Check(std::fabs(SideOf(f.vehicle,f.seat,f.holder)-(-3.0f))<1e-4f,"a hull-fixed gun: across the hull from the origin");
+        // A mount whose bone is not the vehicle's: unknown (0), not guessed hull-fixed.
+        Put<void*>(f.holder,0x18,f.bones+1);
+        Check(weaponmount::YawPivot(f.vehicle,f.seat,f.holder,got)<0 && SideOf(f.vehicle,f.seat,f.holder)==0.0f,"an unreadable mount: unknown");
+        Put<void*>(f.holder,0x18,f.bones+3*weaponmount::kStride);
     }
     Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,1);Put<float>(f.weapon,edf::kWeaponOwnerVel,12);StockArm moving{};Arm(f.weapon,true,moving);
     Check(moving.at[0]>sky.at[0]+50,"physical path retains inherited vehicle velocity");

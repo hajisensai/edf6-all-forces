@@ -6,7 +6,8 @@ sensor screen, and an open_rider at an open mount, its vc_gaze_ marker: the M163
 user 2026-10-31 「第一人称四管防空车视角不随炮管往上抬」; src/fp_view.h GunCameraSeat) looks from its eye marker along the
 gun's bore (GunCameraFrame / vhud.cpp SeatGunLine); the eye moves only with the bone its fit names
 (pylib/cockpit_fits_plugin.py).
-pylib/cockpit_sweep.py aim_blocked raises the gun through the V603's elevation range on the vehicle's own model
+pylib/cockpit_sweep.py aim_blocked raises the gun through its elevation range (the V603's, or the raised stop of
+tools/make_tracked_combat.py PITCH_LIMITS) on the vehicle's own model
 (models/<folder>: wt_tracked.load, the emplacements' too) and casts the aim line from the eye: it must meet nothing of
 the vehicle. The TOS-1's and the Patriot's eyes on the turret (cannon_main) met their own launcher packs from 31 / 26
 deg up; the check is held to catch that fit.
@@ -29,6 +30,7 @@ import cockpit_fits  # noqa: E402
 import cockpit_kits  # noqa: E402
 import cockpit_sweep  # noqa: E402
 import emplacement_model as em  # noqa: E402
+import make_tracked_combat  # noqa: E402
 import rootcpk  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import wt_tracked as wt  # noqa: E402
@@ -75,7 +77,10 @@ def main() -> int:
         seen += 1
         swept |= {f.kit for f in cameras}
         for fit in cameras:
-            blocked = cockpit_sweep.aim_blocked(spec, fit)
+            # the kind's own elevation range: the V603's -5..60, or up to its raised stop (PITCH_LIMITS: the X-Morph
+            # missile launcher's rack lofts to 80)
+            blocked = cockpit_sweep.aim_blocked(
+                spec, fit, cockpit_sweep.elevations(hi=make_tracked_combat.elevation_stop(kind)))
             check(not blocked, f'{stem} seat {fit.seat} (eye {fit.eye} on {fit.bone}): the aim line meets the vehicle '
                                f'at {describe(blocked) if blocked else ""}')
             if stem == 'EDF6VC_TOS1':

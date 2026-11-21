@@ -79,6 +79,14 @@ bool VehicleLookCamera(const unsigned char*,float* matrix,bool orbit) noexcept {
     lookOrbit=orbit ? 1 : 0;
     if(!observeCamera)return false;matrix[8]+=.1f;return true;
 }
+// turretcam.cpp ChaseCamUp: the chase follower's roll, `chaseRoll` rad about the forward row when rows are handed over.
+float chaseRoll=0.0f;int chaseRows=0,chaseNull=0;
+void ChaseCamUp(const unsigned char*,float* rows) noexcept {
+    if(!rows){++chaseNull;return;}
+    ++chaseRows;
+    const float c=std::cos(chaseRoll),s=std::sin(chaseRoll);
+    for(int i=0;i<3;++i){const float l=rows[i],u=rows[4+i];rows[i]=l*c+u*s;rows[4+i]=u*c-l*s;}
+}
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 bool IsSazabi(const void*) noexcept { return sazabi; }
@@ -550,6 +558,14 @@ int main() {
     check(std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f,
           "a native camera branch that leaves its matrix untouched cannot accumulate observation rotations");
     check(lookOrbit==1,"third person observes round the vehicle (2026-10-21: \"应该是绕着车转，而不是车后面原地转\")");
+    // The chase follower's roll (turretcam.cpp ChaseCamUp) in third person: after the observation, inside the same write
+    // transaction, so it is taken back before the next native step and never accumulates.
+    chaseRoll=0.3f;chaseRows=0;
+    for(int i=0;i<5;++i)CamStepHook(cam,nullptr);
+    check(chaseRows==5 && std::fabs(At<float>(cam,kCamMatrix+16)+std::sin(.3f))<1e-6f && std::fabs(At<float>(cam,kCamMatrix+20)-std::cos(.3f))<1e-6f &&
+          std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f,"third person: the chase roll turns the rows once a step about the forward row, never accumulating");
+    chaseRoll=0.0f;CamStepHook(cam,nullptr);
+    check(std::fabs(At<float>(cam,kCamMatrix+16))<1e-6f && std::fabs(At<float>(cam,kCamMatrix+20)-1.0f)<1e-6f,"... and it is gone the step it is not asked");
     // The outer layer/physics changes only translation between steps. Rotation is still ours and must be
     // retracted independently; whole-matrix memcmp used to accumulate another .1 of left turn each iteration.
     bool stableRotation=true;
@@ -611,6 +627,8 @@ int main() {
     enemyCamera=true;enemyCameraHuman=p1;keyDown=true;{StateScope scope(a);Current().key={};Toggle(p1);}++renderFrame;CamStepHook(c1,nullptr);
     check(!a->on && At<float>(c1,kCamEyeRow)==70 && At<float>(c1,kCamEyeRow+4)==80 && At<float>(c1,kCamEyeRow+8)==90,
           "the local enemy-control camera takes priority over the human first-person eye and model");
+    {const int rows=chaseRows,none=chaseNull;++renderFrame;CamStepHook(c1,nullptr);
+     check(chaseRows==rows && chaseNull==none+1,"a controlled enemy's view: the chase roll is used up, never applied");}
     ++renderFrame;CamStepHook(c2,nullptr);
     check(b->on && At<float>(c2,kCamEyeRow)!=70,"another local camera retains its own first-person source during P1 enemy control");
     enemyCamera=false;enemyCameraHuman=nullptr;keyDown=false;++renderFrame;CamStepHook(c1,nullptr);

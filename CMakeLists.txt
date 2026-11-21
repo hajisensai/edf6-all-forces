@@ -2036,6 +2036,14 @@ target_compile_options(vehicle_look_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks vehicle_look_test)
 add_test(NAME vehicle_look COMMAND vehicle_look_test)
 
+# The vehicle cameras' chase follower (src/chase_cam.h): pure math, header-only.
+add_executable(chase_cam_test EXCLUDE_FROM_ALL tests/chase_cam_test.cpp)
+target_include_directories(chase_cam_test PRIVATE src common)
+target_link_libraries(chase_cam_test PRIVATE edf6common user32)
+target_compile_options(chase_cam_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks chase_cam_test)
+add_test(NAME chase_cam COMMAND chase_cam_test)
+
 add_test(NAME sedan_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sedan_build_test.py")
 set_tests_properties(sedan_build PROPERTIES SKIP_RETURN_CODE 77)
 # The X-Morph cars on the V512 (pylib/car_model.py): skipped without Root.cpk or the model pack's car folders.

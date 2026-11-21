@@ -159,6 +159,12 @@ GUNS['sturmtiger'] = {'AmmoCount': 7.0, 'AmmoDamage': 6000.0, 'AmmoSpeed': 3.2, 
 HOWITZERS = ('pzh2000', 'sturmtiger')      # built on make_artillery.howitzer_sgo
 # A kind whose turret hinge (and its seat's yaw axis) has stops (make_artillery.turret_constraint): [1, min, max] deg.
 TURRET_LIMITS = {'sturmtiger': [1.0, -10.0, 10.0]}
+# A kind whose gun elevates past the V603's 60 deg (its pitch hinge PITCH_CONSTRAINT, where the seat's pitch axis takes
+# its stops: docs/artillery-re.md §6.1, constraint 1 -> aim axis 1): [1, -up, down] deg, negative up. The X-Morph
+# missile launcher's rack lofts its missiles (xm_units Unit.elevation).
+PITCH_CONSTRAINT = ('cannon_r', 'cannon_main')
+V603_PITCH_LIMIT = [1.0, -60.0, 5.0]
+PITCH_LIMITS: dict[str, list[float]] = {}
 # The kinds built from their War Thunder model folders alone (wt_tracked.Model) and their vehicle cameras.
 WT_ONLY = {'tunguska': {'model_eye': (0., 2.9, .9), 'model_look_at': (0., 2.6, 7.),
                         'third_person_distance': 8., 'third_person_height': 3.6},
@@ -238,6 +244,8 @@ for _xm in xm_units.v603():
         MISSILE_SHELL += (_xm.key,) if _xm.key not in MISSILE_SHELL else ()
     if _xm.traverse:
         TURRET_LIMITS[_xm.key] = [1.0, -_xm.traverse, _xm.traverse]
+    if _xm.elevation:
+        PITCH_LIMITS[_xm.key] = [1.0, -_xm.elevation, V603_PITCH_LIMIT[2]]
 # The kinds whose track faces are a fixed part of the body's texture atlas (the X-Morph units: tools/prep_xmorph.py
 # puts their belts' running faces under v603_kyata_L / _R only because the native class binds those two names): their
 # SGO keeps the two tank_caterpillar_animation rows (the class reads exactly two, EDF.dll 0x67E4B0) but scrolls them at
@@ -247,6 +255,19 @@ for _xm in xm_units.v603():
 # hidden in its hubs (tools/prep_xmorph.py wheeled): the two names still, nothing to scroll.
 STATIC_TRACKS = tuple(u.key for u in xm_units.hulls())
 ONE_CRADLE += tuple(u.key for u in xm_units.ported('emplacement'))   # as every emplacement: both holders on its cradle
+
+
+def elevation_stop(kind: str) -> float:
+    """The degrees up `kind`'s gun elevates to: its PITCH_LIMITS', else the V603's own."""
+    return -(PITCH_LIMITS.get(kind) or V603_PITCH_LIMIT)[1]
+
+
+def pitch_constraint(r: dsgo.Node) -> dsgo.Node:
+    """The [axis, [_, limits, motor]] node of the V603's gun pitch hinge (PITCH_CONSTRAINT, axis 0)."""
+    hits = [e for e in r.get('car_base_constraint_data').items if tuple(e.items[:2]) == PITCH_CONSTRAINT]
+    if len(hits) != 1 or hits[0].items[3].items[0] != 0.0:
+        raise ValueError(f'the V603 pitch constraint {PITCH_CONSTRAINT} is not one pitch hinge')
+    return hits[0].items[3]
 
 
 def _node(value: object) -> object:
@@ -565,6 +586,12 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         if dsgo.to_py(joint.items[1].items[1]) != [0.0]:
             raise ValueError(f'{kind}: the native turret hinge already has stops')
         joint.items[1].items[1] = _node(TURRET_LIMITS[kind])
+    if kind in PITCH_LIMITS:
+        joint = pitch_constraint(r)
+        if dsgo.to_py(joint.items[1].items[1]) != V603_PITCH_LIMIT:
+            raise ValueError(f'{kind}: the native pitch hinge stops at {dsgo.to_py(joint.items[1].items[1])}, '
+                             f'not {V603_PITCH_LIMIT}')
+        joint.items[1].items[1] = _node(PITCH_LIMITS[kind])
     if kind in STATIC_TRACKS:
         r.get('tank_caterpillar_animation_info').items[0] = 0.0
     camera = r.get('game_object_camera_setting')
@@ -707,10 +734,13 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         if dsgo.to_py(r.get('tank_caterpillar_animation_info')) != want:
             raise ValueError(f'{kind}: track scroll {dsgo.to_py(r.get("tank_caterpillar_animation_info"))}, not {want}')
         for key in ('car_base_rigid_body', 'car_base_constraint_data', 'tank_caterpillar_animation'):
-            if key == 'car_base_constraint_data' and kind in TURRET_LIMITS:
+            if key == 'car_base_constraint_data' and (kind in TURRET_LIMITS or kind in PITCH_LIMITS):
                 import make_artillery
-                if dsgo.to_py(make_artillery.turret_constraint(r).items[1].items[1]) != TURRET_LIMITS[kind]:
+                if (kind in TURRET_LIMITS and
+                        dsgo.to_py(make_artillery.turret_constraint(r).items[1].items[1]) != TURRET_LIMITS[kind]):
                     raise ValueError(f'{kind}: the turret hinge lost its stops')
+                if dsgo.to_py(pitch_constraint(r).items[1].items[1]) != PITCH_LIMITS.get(kind, V603_PITCH_LIMIT):
+                    raise ValueError(f'{kind}: the pitch hinge lost its stops')
                 continue
             if dsgo.to_py(r.get(key)) != dsgo.to_py(original.get(key)):
                 raise ValueError(f'{kind}: native {key} changed without refitting its contract')

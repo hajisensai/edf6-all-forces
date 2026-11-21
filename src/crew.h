@@ -278,6 +278,7 @@ struct Config {
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
+    bool chaseCam=true;             // the vehicle cameras' chase follower: inertia, a jet's / heli's partial roll (turretcam.cpp, chase_cam.h)
     int freeLookKey=0x43;           // ...free look while held: the camera turns, the turret holds ('C'; 0 none). Not the
                                     // middle button: on the drive page that is the Grape's horn (docs/keyconfig-re.md §8)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
@@ -1207,6 +1208,11 @@ bool TurretCamSteers(const void* vehicle) noexcept;
 // (the user, 2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了").
 bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept;
 void ResetTurretCam() noexcept;
+// The chase follower's roll (turretcam.cpp, chase_cam.h; README 载具镜头跟随): from the camera step after the native one
+// (firstperson.cpp CameraAfterNative), with the camera's rows (+0x220) in third person to turn them about their forward
+// row onto this step's followed up (a jet's or a heli's partial bank), null where another view owns them (first person,
+// a controlled enemy): either way this step's roll is used up.
+void ChaseCamUp(const unsigned char* cam,float* rows) noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
 // in free look), `gun` where the gun's round would be at that point's range as it points now (on its arc), the muzzle
