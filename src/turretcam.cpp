@@ -32,7 +32,8 @@
 //    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase) in the hull's
 //    frame of motion. The game's collision runs from a pivot at the eye (tcam::HighPivot), the eye kept over what is
 //    under it (tcam::HighLift). With no landing to show (no readable gun) it looks down on the hull. Free look turns it
-//    round its centre; native input controls the gun.
+//    round its centre; native input controls the gun, but for a lofted gun no other module poses (HighLoft: the V603's
+//    launchers) the pitch input sets a range the gun is laid onto on its high arc (the camera never the target).
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -156,6 +157,8 @@ struct GameSide {
     float aim[3];bool hasAim;  // the point under the screen's centre this frame
     bool aimHit,holdHit;       // ... a real map hit (else kAimFar along an empty view) / the held point's
     tcam::SteerState steer;    // the turret command's last wants and their drift (turretcam.h SteerAxes)
+    tcam::LoftRange loft;      // the high view's range for a lofted gun (HighLoft) and its pitch command's state
+    tcam::SteerState loftSteer;
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
 };
@@ -386,11 +389,29 @@ bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noe
     return std::isfinite(pivot[0]+pivot[1]+pivot[2]) && vec::Dist(pivot,muzzle)<kPivotReach;
 }
 
+// Whether katyusha.cpp poses this vehicle's lofted launcher itself (its Rack: the Katyusha's rack bone lifted off the
+// aim axes onto the arc, launcher.cpp LoftWant). Only then is the arc not the axes' to lay.
+bool PosedLauncher(const void* v) noexcept {
+    LoftReadout l{};
+    return LauncherLoft(v,&l);
+}
+
+// A lofted gun's elevation (rad, up) to `y` up `x` across with its round falling `drop` m/frame^2 (edf::LoftElevation:
+// the high arc within the pitch axis' stops while the round lives to come down there, else the low arc, else the
+// farthest within its life).
+float LoftedElevation(const unsigned char* seat,const RoundModel& model,double drop,float x,float y) noexcept {
+    const float* pitch=AxisAt(seat,1);   // the stops, negative up
+    float e=0.0f;
+    edf::LoftElevation(x,y,model.speed,drop,model.alive,-pitch[1],-pitch[0],e);
+    return e;
+}
+
 // The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`, seen in `frame` (world rows x, up, nose:
 // the frame the stabilizer's held axes are seen in, else the hull's now; stab.h HeldIn): the bore line through `p` from
 // the bore's point at the turret's pivot (turretcam.h AimOrigin: not from the muzzle, which swings with the gun), with
-// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
-// the bore line (turretcam.h BallisticAim).
+// `ballistic` the low arc for a gun whose rounds drop, the high arc for a lofted launcher (LoftedElevation; the user,
+// 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」: the V603's lofted guns are laid by their axes; the Katyusha's arc
+// is katyusha.cpp's, PosedLauncher: it gets the line), else the bore line (turretcam.h BallisticAim).
 bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
     const unsigned char* gun=TurretGun(shared.v,seat);
     float muzzle[3],dir[3];
@@ -405,10 +426,12 @@ bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ball
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
     const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
     // Guided rounds and motor-driven rockets do not follow the fixed-gravity arc solved here.
-    if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && arc && !(lofted && PosedLauncher(shared.v)) && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const double drop=model.factor*-(g[0]*frame[3]+g[1]*frame[4]+g[2]*frame[5])/3600.0;
-        float e=0.0f;
-        if(drop>0.0 && edf::BallisticArc(x,l[1],model.speed,drop,false,e,frames) && std::isfinite(e))elevation=e;
+        float e=elevation;
+        if(drop>0.0 && lofted && model.alive>0)e=LoftedElevation(seat,model,drop,x,l[1]);
+        else if(drop>0.0 && !lofted && !edf::BallisticArc(x,l[1],model.speed,drop,false,e,frames))e=elevation;
+        if(std::isfinite(e))elevation=e;
     }
     want[0]=std::atan2(l[0],l[2]);
     want[1]=-elevation;
@@ -428,10 +451,54 @@ void SteeringOf(const unsigned char* v,const unsigned char* seat,Steering* s) no
 }
 
 // The input that turns each axis onto `want` (turretcam.h SteerAxes), and whether it is on.
-bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in) noexcept {
+bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in,tcam::SteerState& state=game.steer) noexcept {
     const tcam::Axis axes[2]={{AxisAt(seat,0)[0],AxisAt(seat,0)[1],AxisAt(seat,0)[2],At<float>(AxisAt(seat,0),kAxisRate)},
                               {AxisAt(seat,1)[0],AxisAt(seat,1)[1],AxisAt(seat,1)[2],At<float>(AxisAt(seat,1),kAxisRate)}};
-    return tcam::SteerAxes(game.steer,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
+    return tcam::SteerAxes(state,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
+}
+
+// The high view of a lofted gun no other module poses (the V603's TOS-1 and X-Morph missile launcher, whose aim axis is
+// the rack; the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the yaw input stays native; the pitch input
+// moves the range (tcam::StepLoftRange, set on entry from where the gun's elevation then throws over level ground) and
+// the pitch axis is steered onto the high arc (LoftedElevation, as Wants lays it in the normal view) to the ground that
+// range out along the gun's traverse (a map ray straight down; none: level with the gun). Neither the camera nor the
+// landing it watches (ShotFocus, from the real muzzles) is an input: no loop. False (native input) for any other gun.
+bool HighLoft(unsigned char* seat,const Shared& s,const float* in,float* cmd) noexcept {
+    const unsigned char* gun=TurretGun(s.v,seat);
+    RoundModel model{};
+    float muzzle[3],dir[3],g[3];
+    if(!gun || !edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark)) || PosedLauncher(s.v) || !ReadRound(gun,&model) ||
+       model.kind!=RoundKind::arc || !(model.speed>0.0f) || !(model.factor>0.0f) || model.alive<=0 ||
+       !edf::MeanMuzzle(gun,16,muzzle,dir) || !edf::WorldGravity(image,g))return false;
+    Steering st{};
+    SteeringOf(s.v,seat,&st);
+    const double drop=model.factor*-(g[0]*st.frame[3]+g[1]*st.frame[4]+g[2]*st.frame[5])/3600.0;
+    float reach=0.0f;
+    const float farthest=edf::LoftFarthest(model.speed,drop,model.alive,&reach);
+    if(!(reach>tcam::kLoftLeast) || !std::isfinite(st.held[0]) || !std::isfinite(st.held[1]))return false;
+    if(!game.loft.set) {
+        const float e=-st.held[1];
+        game.loft.set=true;game.loft.range=edf::LevelRange(model.speed,drop,e<farthest ? e : farthest);
+        game.loftSteer=tcam::SteerState{};
+    }
+    const float range=tcam::StepLoftRange(game.loft,in[1],tcam::kLoftLeast,reach);
+    float pivot[3],origin[3];
+    tcam::AimOrigin(muzzle,dir,TurretPivot(seat,muzzle,pivot) ? pivot : nullptr,origin);
+    const float sy=std::sin(st.held[0]),cy=std::cos(st.held[0]);
+    float p[3];
+    for(int i=0;i<3;++i)p[i]=origin[i]+(st.frame[i]*sy+st.frame[6+i]*cy)*range;
+    const float top[3]={p[0],p[1]+kGroundProbe,p[2]},bottom[3]={p[0],p[1]-kGroundProbe,p[2]};
+    float ground[3];
+    if(MapRay(top,bottom,ground)>=0.0f && std::isfinite(ground[1]))p[1]=ground[1];
+    float l[3],x=0.0f;
+    tcam::LocalTo(st.frame,origin,p,l,&x);
+    const float e=LoftedElevation(seat,model,drop,x,l[1]);
+    if(!std::isfinite(e))return false;
+    const float want[2]={st.held[0],-e};
+    float steer[2]={0.0f,0.0f};
+    Steer(seat,st,want,steer,game.loftSteer);
+    cmd[0]=in[0];cmd[1]=steer[1];
+    return true;
 }
 
 void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic,bool commandValid=false) noexcept {
@@ -456,10 +523,14 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     RoundModel model{};
     const bool arc=ReadRound(gun,&model) && model.kind==RoundKind::arc;
     const bool lofted=edf::Lofted(At<std::int32_t>(gun,edf::kWeaponMark));
-    if(ballistic && arc && !lofted && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && arc && !(lofted && PosedLauncher(s.v)) && model.speed>0.0f && model.factor>0.0f && edf::WorldGravity(image,g)) {
         const float vel[3]={dir[0]*model.speed,dir[1]*model.speed,dir[2]*model.speed};
         const float drop[3]={g[0]*model.factor/3600.0f,g[1]*model.factor/3600.0f,g[2]*model.factor/3600.0f};
-        sight::RoundAfter(muzzle,vel,drop,range/model.speed,r.gun);
+        // A lofted round's flight to the point is far longer than the straight range over its speed (a high arc
+        // climbs and comes back down): where it is when it has come the point's distance across the ground.
+        const float flat=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+        const float frames=lofted && flat>1e-4f ? tcam::AcrossDistance(muzzle,holdAt)/flat : range/model.speed;
+        sight::RoundAfter(muzzle,vel,drop,frames,r.gun);
     } else for(int i=0;i<3;++i)r.gun[i]=muzzle[i]+dir[i]*range;
     Publish(r);
 }
@@ -485,7 +556,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const bool press=held && (!game.held || leavingHigh),release=!held && game.held && !leavingHigh;
     game.held=held;
     if(s.high) {
-        if(!s.highView){s.orbitYaw=0.0f;s.orbitPitch=0.0f;}
+        if(!s.highView){s.orbitYaw=0.0f;s.orbitPitch=0.0f;game.loft=tcam::LoftRange{};}
         s.highView=true;s.view=true;s.steering=false;s.free=held;s.returning=false;
         game.steer.hasWant=false;
         const float stick[2]={-At<float>(seat,kSeatStick),At<float>(seat,kSeatStick+4)};
@@ -497,6 +568,10 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         }   // let go: the view stays where free look turned it (a world-held heading, nothing to swing back onto)
         // The stock axis step (and stabilizer) owns gun motion. Looking round must not feed the observation back.
         cmd[0]=held && !foreign ? 0.0f : in[0];cmd[1]=held && !foreign ? 0.0f : in[1];
+        // A lofted gun's pitch lays its high arc to the range the native pitch input sets (HighLoft); another hand's
+        // input keeps the gun, the range set anew from the gun when it gives it back.
+        if(foreign)game.loft=tcam::LoftRange{};
+        else if(!held)HighLoft(seat,s,in,cmd);
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat) {
             shared.aimMs=s.aimMs;shared.view=s.view;shared.highView=true;shared.steering=false;

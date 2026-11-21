@@ -2193,7 +2193,7 @@ def cab_floor_katyusha_only() -> None:
     plugin = src('autoturret/src/plugin.cpp')
     assert plugin.count('edf::katyusha::CabFloor(') == 1 and 'shot.cab ? edf::katyusha::CabFloor(' in plugin
     assert 'shot.cab=shot.cab || role.cab;' in plugin and 'if(target==kMarkKatyusha)return Mark::katyusha;' in plugin
-    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    loft = src('src/launcher.cpp').split('bool LoftTo(', 1)[1].split('\n}\n', 1)[0]
     assert 'const bool katyusha=edf::RoleOf(At<std::int32_t>(weapon,edf::kWeaponMark)).cab;' in loft
     assert 'katyusha ? edf::katyusha::CabFloor(' in loft and src('src/launcher.cpp').count('CabFloor(') == 1
     assert 'At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkKatyusha)return w;' in src('src/katyusha.cpp')
@@ -2326,7 +2326,8 @@ def gun_stabilizer_wired() -> None:
     steering = tc.split('void SteeringOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'StabHeld(seat+kSeatAim,s->held,s->hull,s->frame)' in steering
     steer = tc.split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
-    assert 'tcam::SteerAxes(game.steer,want,s.held,s.hull,' in steer
+    # the state the command's drift is kept in: the normal view's (game.steer) unless the high view's lofted gun's
+    assert 'tcam::SteerState& state=game.steer' in steer and 'tcam::SteerAxes(state,want,s.held,s.hull,' in steer
     axes = src('src/turretcam.h').split('inline bool SteerAxes(', 1)[1].split('\n}\n', 1)[0]
     assert 'target-held[i]' in axes and '-hull[i];' in axes
     # The wants are seen in the frame the held axes are (stab.h HeldIn), from the bore's point at the turret's pivot
@@ -2349,6 +2350,49 @@ def gun_stabilizer_wired() -> None:
     assert '0x17D8B50' not in vts, 'the rocket artillery (402) fires from a halt: no stabilizer'
     assert 'IsDrillTank(v)' in code and 'IndirectFireSeat(seat)' in code
     assert all(m in table for m in ('"504 Begaruta",{0.0f,0.0f}', '"Begaruta",{0.0f,0.0f}', '"612 Nix",{0.0f,0.0f}')), 'mech pilots: none'
+
+
+@test
+def lofted_envelope_within_life() -> None:
+    """Every weapon a generator writes with a lofted mark (7303 / 7304: EDF6AutoTurret and EDF6VehicleCrew lay it on
+    its high arc, common/edf/weapon.h LoftElevation) can fly that arc: over level ground its high arc within its
+    elevation stop (the Katyusha's PITCH_STOP_DEG; a V603 kind's make_tracked_combat.elevation_stop) reaches from the
+    stop's range out to the most range, and the longest of those flights (the one at the stop, pylib/ballistics.py
+    envelope) is back down within AmmoAlive: a round whose life ends in the air vanishes unburst. The user, 2026-11-21:
+    「重型导弹这种开启俯瞰视角应该高抛弹道」: the X-Morph missile launcher's heavy missile had the TOS-1's flight (6 m a
+    frame, 0.6 g, 600 frames under a 60 deg stop), whose every arc above ~7 deg ran out in the air. LOFT_PENDING: a
+    weapon known to fail, held to still failing (its fix is the maintainer's call; drop it from the list with the fix)."""
+    import math
+    import make_tracked_combat as tc
+    loft_pending = {
+        # TOS-1: 6 m a frame, 0.6 g, 600 frames, the V603's 60 deg: its high arc only starts 12.7 km out (70 s up)
+        "make_tracked_combat.GUNS['tos1']",
+    }
+    weapons = {f'make_tracked_combat.GUNS[{k!r}]': (g, tc.elevation_stop(k)) for k, g in tc.GUNS.items()
+               if g.get('LockonTargetType') in (7303.0, 7304.0)}
+    weapons['make_katyusha.ROCKETS'] = (make_katyusha.ROCKETS, make_katyusha.PITCH_STOP_DEG)
+    weapons['make_katyusha.ANDRYUSHA_ROCKETS'] = (make_katyusha.ANDRYUSHA_ROCKETS, make_katyusha.PITCH_STOP_DEG)
+    assert "make_tracked_combat.GUNS['xm_medium_missile_launcher']" in weapons, sorted(weapons)
+    failing = set()
+    for name, (gun, stop) in sorted(weapons.items()):
+        speed, alive = gun['AmmoSpeed'], gun['AmmoAlive']
+        drop = ballistics.drop_per_frame(factor=gun.get('AmmoGravityFactor', 1.0))
+        assert stop > 45.0, f'{name}: an elevation stop of {stop} deg leaves it no high arc'
+        env = ballistics.envelope(speed, drop, math.radians(stop))
+        frames = env['high_min_time'] * ballistics.FPS
+        if frames > alive:
+            failing.add(name)
+            print(f'  {name}: the high arc at its {stop:.0f} deg stop flies {frames:.0f} frames ({env["high_min_range"]:.0f} m), '
+                  f'AmmoAlive {alive:.0f}')
+    assert failing == loft_pending, f'lofted weapons whose high arc outlives the round: {sorted(failing)}, ' \
+                                    f'known {sorted(loft_pending)}'
+    # The heavy missile's numbers as pylib/xm_units.py derives them: the sight's 3 km, a high arc from ~1 km at 80 deg.
+    gun = tc.GUNS['xm_medium_missile_launcher']
+    env = ballistics.envelope(gun['AmmoSpeed'], ballistics.drop_per_frame(factor=gun['AmmoGravityFactor']),
+                              math.radians(tc.elevation_stop('xm_medium_missile_launcher')))
+    assert tc.PITCH_LIMITS['xm_medium_missile_launcher'] == [1.0, -80.0, 5.0], tc.PITCH_LIMITS
+    assert 2900.0 < env['max_range'] <= 3000.0 and 950.0 < env['high_min_range'] < 1100.0, env
+    assert gun['AmmoAlive'] >= 600.0   # src/highcam.cpp IndirectFireSeat: a lofted gun living 600 frames offers the high view
 
 
 @test
@@ -2553,7 +2597,11 @@ def katyusha_pose_agrees() -> None:
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
     assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
-    assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
+    # EDF6VehicleCrew's lofted laying (launcher.cpp, turretcam.cpp) goes through the one solver (LoftElevation's two roots)
+    loft_solver = src('common/weapon.cpp').split('LoftArc LoftElevation(', 1)[1].split('\n}\n', 1)[0]
+    assert loft_solver.count('BallisticArc(') == 2 and 'frames<=static_cast<float>(alive)' in loft_solver
+    assert 'edf::BallisticArc(' in at and 'edf::LoftElevation(' in src('src/launcher.cpp')
+    assert 'edf::LoftElevation(' in src('src/turretcam.cpp')
     P, E, M = (0.0, 2.25, -2.05), (0.0, 2.56, -3.51), (0.0, 2.28, -3.55)   # the built model's, rounded
     d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
     assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
@@ -2608,7 +2656,7 @@ def katyusha_fires_over_its_cab() -> None:
     assert 'edf::katyusha::CabFloor(r.azimuth)' in launcher and 'edf::katyusha::StepElevation(' in launcher
     assert 'if(!aim && !r.held && r.stock>=r.floor)return;' in launcher, 'the stock pose under the floor is not held'
     assert 'L"Rocketcannon_base"' in kat and 'L"body"' in kat
-    loft = src('src/launcher.cpp').split('bool LoftWant(', 1)[1].split('\n}\n', 1)[0]
+    loft = src('src/launcher.cpp').split('bool LoftTo(', 1)[1].split('\n}\n', 1)[0]
     assert 'edf::katyusha::CabFloor(std::atan2(across,ahead))' in loft and 'lowest=cab>stop ? cab : stop' in loft
     ballistic = src('autoturret/src/plugin.cpp').split('bool Ballistic(', 1)[1].split('\n}\n', 1)[0]
     assert 'edf::katyusha::CabFloor(std::atan2(local[0],local[2]))' in ballistic and ballistic.count('elevation>=cab') == 2

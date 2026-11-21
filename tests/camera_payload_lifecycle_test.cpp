@@ -156,8 +156,9 @@ void CheckNativeLifecycle(unsigned vt,const wchar_t* path,bool lofted,bool custo
     if(lofted) {
         highMode=false;LauncherFrame(v.vehicle);
         Check(LauncherAt(-4) && loftOwner==v.vehicle && loftAim,"Katyusha real payload selection publishes actual launcher impact and spread");
-        highMode=true;LauncherFrame(v.vehicle);
-        Check(LauncherAt(-4) && !loftAim,"Katyusha high mode retains real preview without camera-driven loft");
+        const int seen=cameraReads;highMode=true;LauncherFrame(v.vehicle);
+        Check(LauncherAt(-4) && loftAim && cameraReads==seen,
+              "Katyusha high mode retains real preview and lofts onto its axis' range, not a camera ray (2026-11-21)");
     }
     VehicleFixture p2(vt,path,lofted);
     const int reads=cameraReads,lofts=loftCalls;

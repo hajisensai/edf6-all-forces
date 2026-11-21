@@ -14,7 +14,10 @@
 // (hud.cpp HudPublish) and drawn by it. Works whether EDF6AutoTurret is installed or not: it reads only the weapon.
 // The loft (LoftWant): the player aims the launcher with the camera at a ground point; the elevation that drops the
 // rockets there (the high arc while the launcher can reach it, else the low one) goes to katyusha.cpp, which lifts the
-// launcher's bone alone, so the camera keeps looking where the player looks (katyusha.cpp's file comment).
+// launcher's bone alone, so the camera keeps looking where the player looks (katyusha.cpp's file comment). In the high
+// view the point is the one the player's native pitch names (AxisLoftWant), the camera only observing the landing.
+// katyusha.cpp poses only the Katyusha's rack: a lofted gun on another class (the V603's TOS-1 and the X-Morph missile
+// launcher) is laid onto the same arc by its aim axes, turretcam.cpp (Wants, HighLoft).
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
@@ -114,20 +117,18 @@ bool Solve(const unsigned char* weapon,LauncherReadout& r) noexcept {
     return true;
 }
 
-// The elevation (rad up, on the vehicle) the launcher needs to drop its rockets where the player's camera looks (the
-// first ground along the screen's centre: CameraRay + MapRay): the high arc while the launcher's stops allow it, else
-// the low one, else (out of reach) 45 deg, the farthest it throws. The Katyusha's (kMarkKatyusha) lowest stop toward the
+// The elevation (rad up, on the vehicle) the launcher needs to drop its rockets on the ground point `hit`
+// (edf::LoftElevation: the high arc while the launcher's stops allow it and the rocket lives to come down there, else
+// the low one, else the farthest it throws within its life). The Katyusha's (kMarkKatyusha) lowest stop toward the
 // point is the floor over the cab there (common/edf/katyusha_cab.h, test site #36), the pose's own (katyusha.cpp
 // Launcher; another lofted launcher's is its axis' stop alone): a low arc under
 // it is lifted onto it, and the impact mark (Solve, from the muzzles as posed) shows where that lands. Solved as EDF6AutoTurret solves (edf::BallisticArc:
-// from the launcher's muzzles, in the vehicle's frame, gravity along the vehicle's down). False when the camera looks
-// at no ground: the launcher then stays where the player aims it (the stock pose).
-bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,float* want,float* range) noexcept {
-    float eye[3],dir[3],pos[3],rail[3],g[3],hit[3];
-    if(!CameraRay(eye,dir) || !edf::MeanMuzzle(weapon,kMostMuzzles,pos,rail) || !edf::WorldGravity(image,g))return false;
-    const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
-    if(MapRay(eye,end,hit)<0.0f)return false;
+// from the launcher's muzzles, in the vehicle's frame, gravity along the vehicle's down).
+bool LoftTo(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,const float* hit,float* want,float* range) noexcept {
+    float pos[3],rail[3],g[3];
+    if(!edf::MeanMuzzle(weapon,kMostMuzzles,pos,rail) || !edf::WorldGravity(image,g))return false;
     const float speed=At<float>(weapon,edf::kWeaponAmmoSpeed),factor=At<float>(weapon,edf::kWeaponAmmoGravity);
+    const std::int32_t alive=At<std::int32_t>(weapon,edf::kWeaponAmmoAlive);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float d[3]={hit[0]-pos[0],hit[1]-pos[1],hit[2]-pos[2]};
     const float across=d[0]*m[0]+d[1]*m[1]+d[2]*m[2],up=d[0]*m[4]+d[1]*m[5]+d[2]*m[6],ahead=d[0]*m[8]+d[1]*m[9]+d[2]*m[10];
@@ -139,13 +140,51 @@ bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned ch
     const bool katyusha=edf::RoleOf(At<std::int32_t>(weapon,edf::kWeaponMark)).cab;
     const float cab=katyusha ? edf::katyusha::CabFloor(std::atan2(across,ahead)) : stop;
     const float lowest=cab>stop ? cab : stop;
-    float e=0.0f,frames=0.0f;
-    if(!(edf::BallisticArc(x,up,speed,drop,true,e,frames) && e>=lowest && e<=highest)
-       && !edf::BallisticArc(x,up,speed,drop,false,e,frames))e=0.25f*kPi;
+    if(!std::isfinite(speed) || !(speed>0.0f) || !std::isfinite(factor) || alive<=0)return false;
+    float e=0.0f;
+    edf::LoftElevation(x,up,speed,drop,alive,lowest,highest,e);
     if(!std::isfinite(e) || !(highest>lowest))return false;
     *want=e<lowest ? lowest : e>highest ? highest : e;
     *range=static_cast<float>(x);
     return true;
+}
+
+// LoftTo the ground point where the player's camera looks (the first ground along the screen's centre: CameraRay +
+// MapRay). False when the camera looks at no ground: the launcher then stays where the player aims it (the stock pose).
+bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,float* want,float* range) noexcept {
+    float eye[3],dir[3],hit[3];
+    if(!CameraRay(eye,dir))return false;
+    const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
+    if(MapRay(eye,end,hit)<0.0f)return false;
+    return LoftTo(v,seat,weapon,hit,want,range);
+}
+
+// The high view's target (the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the high camera observes the
+// real rail's landing (turretcam.cpp ShotFocus), so it can never be the target (camera -> loft -> landing -> camera).
+// The player's own native pitch input still means the range there: the launcher's aim axis (the stock pose, which
+// katyusha.cpp lifts the bone off and the input alone moves) at elevation e names the point its low arc reaches over
+// level ground (edf::LevelRange, e at most the farthest within the rocket's life: up to there the range grows with
+// the axis), along the axes' heading from the muzzles, on the ground there (a map ray straight down; none: level with
+// the muzzles). LoftTo then lays the high arc onto it; the impact mark and the camera follow the rail as posed.
+bool AxisLoftWant(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,float* want,float* range) noexcept {
+    float pos[3],rail[3],g[3];
+    if(!edf::MeanMuzzle(weapon,kMostMuzzles,pos,rail) || !edf::WorldGravity(image,g))return false;
+    const float speed=At<float>(weapon,edf::kWeaponAmmoSpeed),factor=At<float>(weapon,edf::kWeaponAmmoGravity);
+    const std::int32_t alive=At<std::int32_t>(weapon,edf::kWeaponAmmoAlive);
+    if(!std::isfinite(speed) || !(speed>0.0f) || !std::isfinite(factor) || alive<=0)return false;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
+    const float farthest=edf::LoftFarthest(speed,drop,alive,nullptr);
+    const float yaw=At<float>(seat+kSeatAim+kAimAxes,kAxisAngle),elevation=-At<float>(seat+kSeatAim+kAimAxes+kAxisStride,kAxisAngle);
+    if(!std::isfinite(yaw) || !std::isfinite(elevation))return false;
+    const float x=edf::LevelRange(speed,drop,elevation<farthest ? elevation : farthest);
+    // The axes' heading across the hull's ground plane (yaw: toward the hull's +x, its left, as the aim holds it).
+    const float h[3]={m[0]*std::sin(yaw)+m[8]*std::cos(yaw),m[1]*std::sin(yaw)+m[9]*std::cos(yaw),m[2]*std::sin(yaw)+m[10]*std::cos(yaw)};
+    float hit[3]={pos[0]+h[0]*x,pos[1]+h[1]*x,pos[2]+h[2]*x};
+    const float top[3]={hit[0],hit[1]+kSightFar,hit[2]},bottom[3]={hit[0],hit[1]-kSightFar,hit[2]};
+    float ground[3];
+    if(MapRay(top,bottom,ground)>=0.0f && std::isfinite(ground[1]))hit[1]=ground[1];
+    return LoftTo(v,seat,weapon,hit,want,range);
 }
 
 void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherReadout& r,bool aim,float want,float sight) noexcept {
@@ -190,10 +229,11 @@ void LauncherFrame(unsigned char* v) noexcept {
     const unsigned char* weapon=LoftedLauncher(v,seat);
     if(!weapon){clear(true);return;}
     float want=0.0f,sight=0.0f;
-    // The high camera observes the real rail's projectile. Feeding that observation back into LoftWant would
-    // override the player's native pitch and move the rail again as the camera blends. Release the held loft;
-    // katyusha.cpp eases it back to the native pose at its stock rate, which the impact prediction follows.
-    const bool aim=!HighCamOn(v) && !TurretCamHighTransition(v) && LoftWant(v,seat,weapon,&want,&sight);
+    // The high camera observes the real rail's projectile: feeding that observation back into LoftWant would move
+    // the rail again as the camera follows it. In the high view, and while the camera blends back out of it, the
+    // target is the one the player's native pitch names (AxisLoftWant), never a camera ray.
+    const bool high=HighCamOn(v) || TurretCamHighTransition(v);
+    const bool aim=high ? AxisLoftWant(v,seat,weapon,&want,&sight) : LoftWant(v,seat,weapon,&want,&sight);
     SetLauncherLoft(v,aim,want);
     LauncherReadout r{};
     if(!Solve(weapon,r)) {

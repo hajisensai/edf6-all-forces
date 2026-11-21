@@ -47,7 +47,12 @@ bool PlayerTurretLead(const void*,unsigned,const void* gun,float* point) noexcep
     ++leadAsks;leadGun=gun;if(leadOn)std::memcpy(point,leadPoint,12);return leadOn;
 }
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
-bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
+// stab.cpp StabHeld with no stabilizer holding the gun: the axes as they are, no hull turn.
+bool StabHeld(const void* aim,float* held,float* hull,float*) noexcept {
+    const auto* a=static_cast<const unsigned char*>(aim);
+    held[0]=At<float>(a,kAimAxes+kAxisAngle);held[1]=At<float>(a,kAimAxes+kAxisStride+kAxisAngle);hull[0]=hull[1]=0.0f;
+    return false;
+}
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool mountedOptic=false;
 bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
@@ -85,9 +90,12 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     for(int i=0;i<3;++i)hit[i]=from[i]+t*(to[i]-from[i]);
     return vec::Dist(from,hit);
 }
-int loftCalls=0;bool loftWanted=false;
-void SetLauncherLoft(const void*,bool aim,float) noexcept { ++loftCalls;loftWanted=aim; }
-bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
+int loftCalls=0;bool loftWanted=false;float loftElevation=0.0f;
+void SetLauncherLoft(const void*,bool aim,float elevation) noexcept { ++loftCalls;loftWanted=aim;loftElevation=elevation; }
+// katyusha.cpp's Rack (the Katyusha's rack posed off its axes): only `rackPosed` vehicles have one; the V603's lofted
+// guns (the TOS-1, the X-Morph missile launcher) do not.
+bool rackPosed=false;
+bool LauncherLoft(const void*,LoftReadout* readout) noexcept { if(rackPosed)*readout=LoftReadout{}; return rackPosed; }
 int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
@@ -225,14 +233,23 @@ void Run() {
     Check(cameraReads==0 && !shared.highView && !shared.returning,
           "leaving coupled high mode seeds native axes without sampling the observation camera");
     terrain=true;Put<int>(picked.data,edf::kWeaponAmmoAlive,1200);Put<int>(picked.data,edf::kWeaponMark,edf::kMarkLofted);
+    // 2026-11-21 (「重型导弹这种开启俯瞰视角应该高抛弹道」): the high view lofts onto the range the native pitch axis names
+    // (launcher.cpp AxisLoftWant), never onto a camera ray: the camera observes the landing.
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.3f);
     LauncherFrame(vehicle);
-    Check(loftCalls==1 && !loftWanted && cameraReads==0,"high launcher releases camera-driven loft without consuming CameraRay");
+    const float highLoft=loftElevation;
+    Check(loftCalls==1 && loftWanted && highLoft>0.79f && cameraReads==0,"high launcher lofts onto its axis' range without consuming CameraRay");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.15f);LauncherFrame(vehicle);
+    Check(loftCalls==2 && loftWanted && loftElevation>highLoft+0.01f && cameraReads==0,
+          "high launcher: the axis lowered names a nearer range, the high arc to it is steeper");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.3f);
     highOn=false;PublishObservation(seat,true);LauncherFrame(vehicle);
-    Check(loftCalls==2 && !loftWanted && cameraReads==0,
-          "exiting high camera keeps loft released while the camera blends even after native aim resumes");
+    Check(loftCalls==3 && loftWanted && std::fabs(loftElevation-highLoft)<1e-5f && cameraReads==0,
+          "exiting high camera keeps the axis-named loft while the camera blends even after native aim resumes");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,0.0f);
     Check(TurretCamHighTransition(vehicle) && !TurretCamHighTransition(human),"observation belongs only to this vehicle");
     PublishObservation(seat,false);LauncherFrame(vehicle);
-    Check(loftCalls==3 && cameraReads>0,"normal launcher retains the existing camera-to-loft path once blending ends");
+    Check(loftCalls==4 && cameraReads>0,"normal launcher retains the existing camera-to-loft path once blending ends");
     // Identical real muzzle and target: only a freely falling shell may request a low arc or a dropped reticle.
     selectedGun=primary.data;shared.high=false;
     const float frame[9]={1,0,0,0,1,0,0,0,1},target[3]={-4,8,210};
@@ -254,10 +271,99 @@ void Run() {
     Readout(seat,shared,true,target,true);
     Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"propelled rocket reticle remains on its bore line");
     motorWeapon=nullptr;Put<int>(primary.data,edf::kWeaponMark,edf::kMarkLofted);
+    // The Katyusha's rack is katyusha.cpp's to pose (its Rack): its axes get the bore line.
+    rackPosed=true;
     Check(Wants(seat,frame,target,true,shellWant) && std::fabs(shellWant[1]-boreWant[1])<1e-6f,
-          "lofted launcher retains its independent elevation controller");
+          "a posed lofted launcher (the Katyusha's rack) retains its independent elevation controller");
     Readout(seat,shared,true,target,true);
-    Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"lofted launcher readout matches its independent bore-line command");
+    Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"a posed lofted launcher's readout matches its independent bore-line command");
+    rackPosed=false;
+    // A lofted gun nothing else poses (the V603's TOS-1 / X-Morph missile launcher, 2026-11-21: 「重型导弹这种开启俯瞰视角
+    // 应该高抛弹道」): its axes lay the high arc within the pitch stops (here up to 1.5 rad) while the round lives to come
+    // down (here 2 m a frame, 1 g of 9.8: 800 m out the high arc flies 1409 frames), else the low arc.
+    {
+        const double drop=9.8/3600.0;
+        const float farPoint[3]={-4,8,810},nearPoint[3]={-4,8,210};
+        float high=0.0f,low=0.0f,n=0.0f,nearLow=0.0f,nearHigh=0.0f,want[2]{};
+        edf::BallisticArc(800.0,0.0,2.0,drop,true,high,n);edf::BallisticArc(800.0,0.0,2.0,drop,false,low,n);
+        edf::BallisticArc(200.0,0.0,2.0,drop,false,nearLow,n);edf::BallisticArc(200.0,0.0,2.0,drop,true,nearHigh,n);
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+        Check(Wants(seat,frame,farPoint,true,want) && std::fabs(want[1]+low)<1e-4f && low<0.5f,
+              "unposed lofted gun: a high arc past the round's life falls back to the low arc");
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1500);
+        Check(Wants(seat,frame,farPoint,true,want) && std::fabs(want[1]+high)<1e-4f && high>1.0f && high<1.5f,
+              "unposed lofted gun: its axes lay the high arc while the round lives to land");
+        Check(nearHigh>1.5f && Wants(seat,frame,nearPoint,true,want) && std::fabs(want[1]+nearLow)<1e-4f,
+              "unposed lofted gun: a high arc over the pitch stop falls back to the low arc");
+        Check(Wants(seat,frame,farPoint,false,want) && std::fabs(want[1]-boreWant[1])<1e-6f,
+              "unposed lofted gun: a view with no real hit keeps the bore line (no made-up range)");
+        // The readout: the round on the bore's arc where it has come the point's distance across (a high arc's flight
+        // is far longer than the straight range over its speed): laid on the high arc, the mark is on the point.
+        Put<float>(primary.bone,edf::kBoneRows+0x24,std::sin(high));Put<float>(primary.bone,edf::kBoneRows+0x28,std::cos(high));
+        Readout(seat,shared,true,farPoint,true);
+        Check(vec::Dist(out.r.gun,farPoint)<3.0f,"unposed lofted gun laid on its high arc: the readout's mark is on the point");
+        Matrix(primary.bone+edf::kBoneRows,-4,8,10);
+        Put<float>(primary.bone,edf::kBoneRows+0x24,std::sin(0.2f));Put<float>(primary.bone,edf::kBoneRows+0x28,std::cos(0.2f));
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+    }
+    // The high view of that gun (HighLoft, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the yaw input stays native,
+    // the pitch input moves a range (set on entry from where the gun's elevation throws over level ground) and the pitch
+    // axis is steered onto the high arc to the ground there. The camera's ray and the observed landing (ShotFocus) are
+    // never inputs: a different observed focus gives the same command.
+    {
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1500);
+        const float params[3]={0.3f,0.1f,0.02f};std::memcpy(seat+kSeatAim+kAimParams,params,12);
+        float* pitchAxis=reinterpret_cast<float*>(seat+kSeatAim+kAimAxes+kAxisStride);
+        pitchAxis[2]=-0.5f;Put<float>(pitchAxis,kAxisRate,0.0f);
+        game=GameSide{};shared.high=true;shared.highView=false;shared.observing=false;shared.decoupled=true;
+        shared.focusValid=true;shared.focusHit=true;shared.focus[0]=900;shared.focus[1]=-25;shared.focus[2]=-300;
+        cameraReads=0;owner=0;Put<std::uint16_t>(seat,kSeatButtons,0);
+        const double drop=9.8/3600.0;
+        const float rest[2]{};float cmd[2]{9,9};
+        Aim(seat,rest,cmd);
+        const float entry=edf::LevelRange(2.0,drop,0.5f);
+        Check(game.loft.set && std::fabs(game.loft.range-entry)<1e-3f*entry && entry>1000.0f,
+              "high view, lofted gun: the range is set on entry from where its elevation throws over level ground");
+        float expect=0.0f;
+        Check(edf::LoftElevation(entry,floorY-8.0,2.0,drop,1500,-0.5f,1.5f,expect)==edf::LoftArc::high && cmd[1]<0.0f && cmd[0]==0.0f,
+              "high view, lofted gun: the pitch is steered up toward the high arc to that range, the yaw input native");
+        const GameSide before=game;const float angle=pitchAxis[2];
+        Aim(seat,rest,cmd);const float firstCmd=cmd[1];
+        game=before;pitchAxis[2]=angle;shared.focus[0]=-700;shared.focus[2]=1200;shared.focusHit=false;
+        Aim(seat,rest,cmd);
+        Check(cmd[1]==firstCmd && cameraReads==0,"high view, lofted gun: the observed landing and the camera are never its target (no loop)");
+        bool native=true;
+        for(int f=0;f<600;++f) {
+            const float yawIn[2]={0.4f,0.0f};
+            Aim(seat,yawIn,cmd);native=native && cmd[0]==0.4f;
+            tcam::Axis x{pitchAxis[0],pitchAxis[1],pitchAxis[2],At<float>(pitchAxis,kAxisRate)};
+            tcam::AxisStep(x,cmd[1],params);pitchAxis[2]=x.angle;Put<float>(pitchAxis,kAxisRate,x.rate);
+        }
+        Check(native && std::fabs(pitchAxis[2]+expect)<0.01f && expect>0.8f,
+              "high view, lofted gun: the axis settles on the high arc to the input's range");
+        const float settled=game.loft.range;
+        for(int f=0;f<30;++f){const float up[2]={0.0f,-1.0f};Aim(seat,up,cmd);}
+        const float farther=game.loft.range;
+        for(int f=0;f<60;++f){const float down[2]={0.0f,1.0f};Aim(seat,down,cmd);}
+        Check(farther>settled+100.0f && game.loft.range<farther-200.0f && cameraReads==0,
+              "high view, lofted gun: the native pitch input moves the range (raise: farther, lower: nearer)");
+        for(int f=0;f<2000;++f){const float down[2]={0.0f,1.0f};Aim(seat,down,cmd);}
+        Check(std::fabs(game.loft.range-tcam::kLoftLeast)<1e-3f,"high view, lofted gun: the range stops at its nearest");
+        const float held=game.loft.range;
+        config.freeLookButton=0x10;Put<std::uint16_t>(seat,kSeatButtons,0x10);
+        const float in[2]={0.3f,-0.6f};Aim(seat,in,cmd);
+        Check(cmd[0]==0.0f && cmd[1]==0.0f && game.loft.range==held,"high view, lofted gun: free look holds the gun and the range");
+        Put<std::uint16_t>(seat,kSeatButtons,0);
+        owner=1;Aim(seat,in,cmd);
+        Check(cmd[0]==in[0] && cmd[1]==in[1] && !game.loft.set,"high view, lofted gun: another hand's input keeps the gun; the range is set anew after");
+        owner=0;rackPosed=true;Aim(seat,in,cmd);
+        Check(cmd[0]==in[0] && cmd[1]==in[1],"high view: the Katyusha's posed rack keeps its native axes (katyusha.cpp lifts the rack)");
+        rackPosed=false;
+        const float zero[3]{};std::memcpy(seat+kSeatAim+kAimParams,zero,12);
+        pitchAxis[2]=0.0f;Put<float>(pitchAxis,kAxisRate,0.0f);
+        game=GameSide{};shared.high=false;shared.highView=false;shared.focusValid=false;
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+    }
     // Exercise the production frame sampler too: a closed toggle is not sufficient while the displayed camera is
     // still blending out. Nonzero stick and a new free-look press used to clear the timer and consume that old ray.
     lookOk=true;nextAim=&UnexpectedAim;shared.ref=ObjRef::Of(vehicle);Put<int>(seat,kSeatCamType,1);
