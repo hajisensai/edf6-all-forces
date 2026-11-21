@@ -17,6 +17,7 @@ using namespace hostcfg;
 std::atomic<int> hostRecruit{-1},hostCover{-1};   // the host's values as a guest; -1: this machine's ini
 std::atomic<bool> hostSilent{false};              // a guest whose host published no word (an older All Forces)
 std::atomic<bool> bikeGunner{true};               // this mission's 408 gunner seat (Edf41BikeGunnerAllowed)
+std::atomic<bool> commander{false};               // this mission's commander mode (CommanderModeInEffect)
 // The builds (the menu's lines; the UI thread's).
 Builds builds{};
 SRWLOCK lock=SRWLOCK_INIT;   // the tick (UI thread) and the mission sync (the script's thread) both read
@@ -30,6 +31,7 @@ Word Mine() noexcept {
     w.features=kFeatures;
     w.vanillaRecruit=Cfg().vanillaRecruit;
     w.npcFreeSquadCover=Cfg().npcFreeSquadCover;
+    w.commander=Cfg().commanderMode;
     return w;
 }
 
@@ -85,6 +87,14 @@ void Read(bool mission) noexcept {
         if(bikeGunner.exchange(allowed)!=allowed || !allowed)
             Log("HOSTCFG this mission's 408 sidecar gunner seat: %s",allowed ? "open" :
                 "closed (a member's All Forces does not have it: the 408 drives as a stock Car for everyone)");
+        // The commander mode: the host's word (the host: its ini), every member's build having it; kept for the mission.
+        const bool command=CommanderAtSync(room.inRoom!=0,room.isHost!=0,Cfg().commanderMode,hostWord,host.commander,surveyed,
+                                           survey.builds.silent,survey.common);
+        commander.store(command);
+        const bool wanted=room.isHost ? Cfg().commanderMode : hostWord && host.commander;
+        if(command || wanted || Cfg().commanderMode)
+            Log("HOSTCFG this mission's commander mode: %s",command ? "on" : wanted ?
+                "off (a member's All Forces does not have it, or the room was not read)" : "off (the host's setting)");
     } else {
         // The room / HQ frame (no mission decided here): out of a room the seat is this machine's again, so the last
         // online mission's closed seat does not follow into an offline one.
@@ -112,6 +122,8 @@ void HostSettingsRoomTick() noexcept {
 void HostSettingsMissionSync() noexcept { Read(true); }
 
 void HostSettingsOfflineMission() noexcept {
+    const bool command=CommanderAtSync(false,false,Cfg().commanderMode,false,false,false,0,0);
+    if(commander.exchange(command)!=command || command)Log("HOSTCFG an offline mission: commander mode %s (this machine's ini)",command ? "on" : "off");
     const bool open=BikeGunnerOffline();
     if(bikeGunner.exchange(open)!=open)Log("HOSTCFG an offline mission: the 408 sidecar gunner seat is this machine's (open)");
 }
@@ -125,6 +137,7 @@ bool NpcFreeSquadCoverInEffect() noexcept {
     return h>=0 ? h!=0 : Cfg().npcFreeSquadCover;
 }
 bool Edf41BikeGunnerAllowed() noexcept { return bikeGunner.load(std::memory_order_relaxed); }
+bool CommanderModeInEffect() noexcept { return commander.load(std::memory_order_relaxed); }
 
 int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
     using hudtext::Tr;using hudtext::Tx;
@@ -145,7 +158,7 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         wchar_t names[96]{};
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
             {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},{kFeatBikeGunMount,Tx::featBikeGunMount},
-            {kFeatBikeRide,Tx::featBikeRide},
+            {kFeatBikeRide,Tx::featBikeRide},{kFeatCommander,Tx::featCommander},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

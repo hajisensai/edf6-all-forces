@@ -658,6 +658,7 @@ HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍�
 HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（已关闭）",L"408 砲手機槍（已關閉）",L"408 の銃手機銃（閉鎖）")
 HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
 HUDTEXT(featBikeRide,L"the 408's drive, SDL1 models and riding pose",L"408 驱动、SDL1 各型号性能与骑姿",L"408 驅動、SDL1 各型號性能與騎姿",L"408 の駆動・SDL1 各型の性能・乗車姿勢")
+HUDTEXT(featCommander,L"the commander mode",L"指挥官模式",L"指揮官模式",L"指揮官モード")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.

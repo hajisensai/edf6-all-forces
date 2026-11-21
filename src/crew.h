@@ -515,6 +515,10 @@ struct Config {
     bool npcFreeSquadCover=false;   // the stock's cover of a squad with +0x540 (seen at 1/3 the range; for a while damage
                                     // taken x0.01, dealt x0.1; npcai.cpp CoverRoot): false = no squad has it (the user
                                     // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
+    bool commanderMode=false;       // the commander mode (commander.cpp, docs/feature-2026-11-21-commander-mode.md): no
+                                    // player soldier to play, an NPC of the player's class and weapon at its start, the M
+                                    // map the only view; every friendly NPC soldier dead = the mission lost. Online the
+                                    // host's (host_settings.h CommanderModeInEffect)
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, two keys of their own shift War Thunder's cruise gears; W / S override them

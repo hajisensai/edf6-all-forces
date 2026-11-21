@@ -32,6 +32,8 @@
 #include "helipad.h"
 #include "support_points.h"
 #include "support_warning.h"
+#include "commander.h"
+#include "commander_logic.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -145,6 +147,8 @@ void Refuse(std::uint32_t catalog,const char* cause,const wchar_t* text) noexcep
 bool LocalAuthority() noexcept {return !InSession();}
 void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexcept {
     using support_net::RequestStatus;
+    // A commander's NPC request (commander.cpp): its own, never the map's line nor a paid call's.
+    if(CommanderRequestNotice(request,state))return;
     // The rescue's own request: told to the rescue only (its id taken from the accepted notice of its submission).
     if(rescueSubmitting && state==RequestStatus::accepted && request){rescueRequest=request;rescueEnded=false;return;}
     if(request && request==rescueRequest) {
@@ -823,6 +827,7 @@ const SupportConfig* LoadoutOfPeer(std::uint32_t peer,std::uint32_t catalog,cons
 }
 support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
                                          std::uint64_t loadout,SupportPlan* out) noexcept {
+    if(catalog==commander::kCatalog)return PlanCommander(peer,target,loadout,out);   // a commander's NPC (commander.cpp)
     struct Scope {
         explicit Scope(const SupportConfig* c) noexcept { planConfig=c; }
         ~Scope() { planConfig=nullptr; }
@@ -839,6 +844,7 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
 }
 bool Validate(const SupportPlan& plan) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
+    if(plan.catalogId==commander::kCatalog)return ValidateCommanderPlan(plan);
     const bool dynamicDrone=plan.count==1 &&
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
     if(int strike=0;!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
@@ -1222,6 +1228,7 @@ void Destroy(std::uint64_t id) noexcept {
         return;
     }
     DestroyMissionCrewPlan(id);
+    DestroyCommanderPlan(id);
 }
 // `networked`: a committed support_net transaction (registered IDs on every peer); else this machine's own
 // deployment (LocalAuthority): unregistered objects only it simulates.
@@ -1353,6 +1360,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
 }
 bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
+    if(plan.catalogId==commander::kCatalog)return ApplyCommanderPlan(id,plan,remote);
     return SpawnDeployment(id,plan,remote,InSession());
 }
 bool Assign(Deployment& deployed) noexcept {

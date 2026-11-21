@@ -129,12 +129,16 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"1;v=0.8.0;f=1FF;r=1;c=0"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"2;v=0.8.0;f=3FF;r=1;c=0;m=0"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
            !back.npcFreeSquadCover,"parsed back");
-    for(const char* bad:{"","2;v=1;f=1;r=0;c=0","1;v=;f=1;r=0;c=0","1;v=1;f=G;r=0;c=0","1;v=1;f=1;r=2;c=0","1;v=1;f=1;r=0;c=0;x=1",
-                         "1;v=1;f=123456789;r=0;c=0","1;v=1;r=0;f=1;c=0"})
+    w.commander=true;
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"2;v=0.8.0;f=3FF;r=1;c=0;m=1") && ParseWord(text,back) && back.commander,
+           "the commander mode in the word");
+    for(const char* bad:{"","1;v=1;f=1;r=0;c=0;m=0","2;v=;f=1;r=0;c=0;m=0","2;v=1;f=G;r=0;c=0;m=0","2;v=1;f=1;r=2;c=0;m=0",
+                         "2;v=1;f=1;r=0;c=0;m=0;x=1","2;v=1;f=123456789;r=0;c=0;m=0","2;v=1;r=0;f=1;c=0;m=0",
+                         "2;v=1;f=1;r=0;c=0","2;v=1;f=1;r=0;c=0;m=2"})
         Expect(!ParseWord(bad,back),"another version's word is no word");
     strcpy_s(w.version,"a;b");
     Expect(!FormatWord(w,text,sizeof(text)),"a version that would break the word is not sent");
@@ -193,6 +197,19 @@ void GunnerSeat() {
     Expect(seat,"an offline mission straight after a closed online one: open");
     Expect(BikeGunnerOutOfMission(true,true) && BikeGunnerOutOfMission(false,true),"an open seat stays open");
 }
+// The commander mode (docs/feature-2026-11-21-commander-mode.md): the host's word, every member's build.
+void Commander() {
+    using namespace crew::hostcfg;
+    Expect(CommanderAtSync(false,false,true,false,false,false,5,0) && !CommanderAtSync(false,false,false,true,true,true,0,kFeatures),
+           "offline: this machine's ini alone");
+    Expect(CommanderAtSync(true,true,true,false,false,true,0,kFeatures),"the host by its own ini, every member has it");
+    Expect(!CommanderAtSync(true,true,true,false,false,true,1,kFeatures),"a member without a word (an older build): off for all");
+    Expect(!CommanderAtSync(true,true,true,false,false,true,0,kFeatures&~kFeatCommander),"a member's build without it: off for all");
+    Expect(!CommanderAtSync(true,true,true,false,false,false,0,kFeatures),"the room not read: off");
+    Expect(CommanderAtSync(true,false,false,true,true,true,0,kFeatures),"a guest by the host's word, whatever its own ini");
+    Expect(!CommanderAtSync(true,false,true,true,false,true,0,kFeatures),"a guest whose host has it off: off");
+    Expect(!CommanderAtSync(true,false,true,false,false,true,0,kFeatures),"a guest whose host published no word: off");
+}
 }  // namespace
 
 // The room protocol's EDF6Coop: 2.7.0 and later (coop_attr.h kRoomCoop*).
@@ -215,6 +232,7 @@ int main() {
     Reading();
     WordAndRoom();
     GunnerSeat();
+    Commander();
     std::printf("coop_attr_test: %d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }

@@ -14,7 +14,9 @@
 // the members whose build differs and what may then differ, and a feature every member must have (the 408's gunner
 // seat) is only opened when every member said it has it.
 //
-// The word: "1;v=<version>;f=<features, hex>;r=<VanillaRecruit 0|1>;c=<NpcFreeSquadCover 0|1>".
+// The word: "2;v=<version>;f=<features, hex>;r=<VanillaRecruit 0|1>;c=<NpcFreeSquadCover 0|1>;m=<CommanderMode 0|1>".
+// CommanderMode (docs/feature-2026-11-21-commander-mode.md) is the host's too: every member's player becomes a commander
+// and its NPC a shared object; it is decided once at the mission's sync (CommanderAtSync) and kept for that mission.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -40,23 +42,25 @@ enum : std::uint32_t {
                                // EDF6's bike pose, each SDL1 model's request with its own grip / top speed / torque
                                // (edf41bike.car_drive); and the shipped SGO is the generator's, so the 64 bit's data is in it
                                // (builds 64 / 128 shipped the keyframed gun still: docs/edf41-bike-re.md 2026-10-25)
+    kFeatCommander=512u,       // the commander mode (commander.cpp): the commander's NPC request (support catalog
+                               // kCommanderCatalog), the players' NoTarget / NoHpLoss and the NPC-wipe failure
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
                                          kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded|kFeatBikeGunMount|
-                                         kFeatBikeRide;
+                                         kFeatBikeRide|kFeatCommander;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {
     char version[kVersionMost]{};
     std::uint32_t features=0;
-    bool vanillaRecruit=false,npcFreeSquadCover=false;
+    bool vanillaRecruit=false,npcFreeSquadCover=false,commander=false;
 };
 inline constexpr std::size_t kWordMost=96;
 
 inline bool FormatWord(const Word& w,char* out,std::size_t size) noexcept {
     for(const char* p=w.version;*p;++p)if(*p==';' || *p<0x21 || *p>0x7E)return false;
-    const int n=std::snprintf(out,size,"1;v=%s;f=%X;r=%d;c=%d",w.version,static_cast<unsigned>(w.features),
-                              w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0);
+    const int n=std::snprintf(out,size,"2;v=%s;f=%X;r=%d;c=%d;m=%d",w.version,static_cast<unsigned>(w.features),
+                              w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0,w.commander ? 1 : 0);
     return n>0 && static_cast<std::size_t>(n)<size;
 }
 namespace detail {
@@ -78,7 +82,7 @@ inline bool Bit(std::string_view v,bool& out) noexcept {
 inline bool ParseWord(std::string_view text,Word& out) noexcept {
     Word w;
     std::string_view rest=text,v;
-    if(rest.substr(0,2)!="1;")return false;
+    if(rest.substr(0,2)!="2;")return false;
     rest.remove_prefix(2);
     if(!detail::Field(rest,"v=",v) || v.empty() || v.size()>=kVersionMost)return false;
     std::memcpy(w.version,v.data(),v.size());
@@ -91,7 +95,8 @@ inline bool ParseWord(std::string_view text,Word& out) noexcept {
     }
     w.features=f;
     if(!detail::Field(rest,"r=",v) || !detail::Bit(v,w.vanillaRecruit))return false;
-    if(!detail::Field(rest,"c=",v) || !detail::Bit(v,w.npcFreeSquadCover) || !rest.empty())return false;
+    if(!detail::Field(rest,"c=",v) || !detail::Bit(v,w.npcFreeSquadCover))return false;
+    if(!detail::Field(rest,"m=",v) || !detail::Bit(v,w.commander) || !rest.empty())return false;
     out=w;
     return true;
 }
@@ -138,4 +143,15 @@ constexpr bool BikeGunnerAtSync(bool inRoom,bool surveyed,std::uint32_t silent,s
 constexpr bool BikeGunnerOutOfMission(bool inRoom,bool current) noexcept { return inRoom ? current : kBikeGunnerLocal; }
 // At an offline mission's start: this machine's.
 constexpr bool BikeGunnerOffline() noexcept { return kBikeGunnerLocal; }
+
+// The commander mode for a mission (decided at its sync, kept for it; offline at its start: this machine's ini). Online
+// the host's word decides (the host: its own ini), and only when every member's build has it (kFeatCommander) and the room
+// was read: a member that would play an ordinary soldier in a commanders' room is no such mission, so it is off for all.
+// A guest whose host published no word (an older All Forces): off.
+constexpr bool CommanderAtSync(bool inRoom,bool isHost,bool local,bool hostWord,bool hostCommander,bool surveyed,
+                               std::uint32_t silent,std::uint32_t common) noexcept {
+    if(!inRoom)return local;
+    const bool wanted=isHost ? local : hostWord && hostCommander;
+    return wanted && surveyed && silent==0 && EveryoneHas(common,kFeatCommander);
+}
 }  // namespace crew::hostcfg

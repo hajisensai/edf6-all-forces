@@ -53,8 +53,9 @@ namespace crew {
 //      pack marker EDF6X_VCPACKS are gone), every machine generates every member's files, and the host plans a member's
 //      request with that member's loadout (support_dispatch.cpp PlanForRequester). An older build would neither publish
 //      its loadout (its calls would come with the defaults) nor generate the others' files (stock where a plan wants them).
+//  13 (2026-11-21): commander mode adds a catalog and host settings field. Older builds cannot negotiate it.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=12;
+constexpr std::int64_t kAllForcesRoomProtocol=13;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

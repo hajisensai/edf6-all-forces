@@ -20,6 +20,7 @@
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "npc_arms.h"
+#include "commander_logic.h"
 #include "command_identity.h"
 #include "net_object_ref.h"
 #include "version_notice.h"
@@ -557,7 +558,9 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     // rescue's crew too (2026-11-10, offline as online: support_dispatch.cpp RescueHere); none for the test range's rows.
     support_net::RequesterArms arms{};
     const auto catalog=static_cast<std::uint32_t>(catalogId);
-    if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
+    // A commander's NPC (commander.cpp): the kind in `loadout` carries the player's own weapon, not one below it.
+    if(catalog==commander::kCatalog)CommanderRequesterArms(static_cast<int>(loadout),&arms);
+    else if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
     if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms)) {
         Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
