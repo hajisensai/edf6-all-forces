@@ -222,6 +222,7 @@ def dxt1_dds(image: texfile.Image) -> bytes:
 def _bc7_level(pixels: Any) -> bytes:
     import ctypes
     import numpy as np
+    import bc7  # noqa: F401 - the encoder's definition, native/bc7.cpp its port: buildcache keys the groups on it
     import edf6native
     lib = edf6native.lib()
     if lib is None:

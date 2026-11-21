@@ -1640,6 +1640,8 @@ def check_package() -> int:
     importlib.import_module('PIL.Image')
     sample = texfile.Image(1, 1, bytearray((33, 44, 55, 255)))
     assert texfile_accel.dxt1_dds(sample) == texfile.dxt1_dds(sample)
+    sample = texfile.Image(5, 3, bytearray(range(60)))   # the colour maps' BC7: native/bc7.cpp bundled, as bc7.py
+    assert texfile_accel.bc7_dds(sample) == texfile.bc7_dds(sample)
     import mdb
     assert mdb.native_cmpl(), 'edf6cmpl.dll not bundled: models would use the pure Python CMPL encoder'
     probe = bytes(range(256)) * 40 + b'EDF6' * 300
