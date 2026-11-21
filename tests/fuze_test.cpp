@@ -32,12 +32,27 @@ int main() {
     // Nothing to burst, or no launcher left: nothing to hold.
     Check(Armed(early,0.0f,boxes,2),"a round with no blast is never held");
     Check(Armed(early,blast,boxes,0),"a round whose launcher is gone is armed");
-    // The hit's area damage follows the arming, and a round with no blast keeps its flags.
+    // The hit's area damage and blast sound follow the arming, and a round with no blast keeps its flags.
     constexpr std::uint32_t stock=0x610;   // the Apocalypse missile's flags as the stock init leaves them (the log)
-    Check(HitFlags(stock,true,false)==0x600,"unarmed: its hit is single-target (0x10 off)");
-    Check(HitFlags(0x600,true,true)==0x610,"armed again: its hit bursts");
-    Check(HitFlags(0x600,false,true)==0x600,"no blast: the flags are left as they are");
-    Check(HitFlags(stock|0x20,true,false)==0x620,"other flags (blast on expiry) are untouched");
+    Check(kHitSound==0x400 && kAreaOnHit==0x10,"the stock bits: 0x400 the hit's sound (0x2325CD), 0x10 its area damage (0x232616)");
+    Check(HitFlags(stock,true,false)==0x200,"unarmed: its hit is single-target (0x10 off) and silent (0x400 off)");
+    Check(HitFlags(0x200,true,true)==0x610,"armed again: its hit bursts with its blast sound");
+    Check(HitFlags(stock,true,true)==stock,"armed from the pod: the stock flags as they were");
+    Check(HitFlags(0x600,false,true)==0x600 && HitFlags(0x600,false,false)==0x600,"no blast: the flags are left as they are");
+    Check(HitFlags(stock|0x20,true,false)==0x220,"other flags (blast on expiry, 0x200) are untouched");
+    // The hit's fireball (drawn at a fifth of core+0xA20, 0x26A8C1): none for a dud, the blast's own armed.
+    Check(HitFireball(blast,true,false)==0.0f,"unarmed: no fireball where it strikes (2026-10-26: the stock one, sized by its 12 m blast)");
+    Check(HitFireball(blast,true,true)==blast,"armed: the stock fireball, sized by its blast");
+    Check(HitFireball(0.0f,false,false)==0.0f && HitFireball(0.0f,false,true)==0.0f,"no blast: left as it is");
+    // A whole flight: unarmed out of the pod, armed past its own tank, the fireball back with the arming.
+    std::uint32_t flags=stock;float fireball=blast;
+    const float* const flight[]={early,clear};
+    for(const float* at:flight) {
+        const bool armed=Armed(at,blast,boxes,2);
+        flags=HitFlags(flags,true,armed);fireball=HitFireball(blast,true,armed);
+        if(at==early)Check(flags==0x200 && fireball==0.0f,"by its own tank: a dud (no area damage, sound or fireball)");
+        else Check(flags==stock && fireball==blast,"clear of it: the stock burst, sound and fireball");
+    }
     std::printf("fuze: %d checks passed\n",checks);
     return 0;
 }
