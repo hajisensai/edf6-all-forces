@@ -1,5 +1,14 @@
 // Runs the production transaction against explicitly synthetic native-service callbacks. No game
 // process, DLL entry point, renderer, Havok, or installation is touched.
+#include <cwchar>
+// Whether the installer wrote Mods/OBJECT/<file>: the fixture's answer (the drill transport's SGO).
+namespace fixture {
+bool drillFile=true;int drillFileAsked=0;
+inline bool DrillFileThere(const wchar_t* dir,const wchar_t* file) noexcept {
+    ++drillFileAsked;return drillFile && dir && file && std::wcscmp(dir,L"OBJECT")==0 && std::wcscmp(file,L"EDF6VC_DRILL_TRANSPORT.SGO")==0;
+}
+}
+#define EDF6_SUPPORT_SPAWN_MOD_FILE(dir,file) fixture::DrillFileThere(dir,file)
 #include "../src/support_spawn.cpp"
 #include <cstdio>
 #include <cstdlib>
@@ -13,7 +22,7 @@ int marks=0,firepowers=0,markedAt=-1;crew::supportlevel::Curve lastCurve=crew::s
 const wchar_t* lastPath=nullptr;
 const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
 int checks=0,preloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
-alignas(16) unsigned char object[0x2000]{},seats[5*edf::kSeatStride]{};
+alignas(16) unsigned char object[0x2000]{},seats[13*edf::kSeatStride]{};
 const void* expectedOwner=nullptr;
 float lastPosition[3]{};
 void Check(bool ok,const char* what) { ++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);} }
@@ -36,7 +45,9 @@ unsigned char* Create(void*,const float* matrix,const wchar_t* path,crew::InitPa
     lastPath=path;
     // A loaded tank (support_loadout.h VehicleVariantFile): the stock tank's class and seats, holders past the stock one.
     const bool loaded=std::wcscmp(path,kLoaded)==0;
-    for(const auto& row:crew::kSupportVehicles)if(std::wcscmp(path,row.sgo)==0 || (loaded && &row==&crew::kSupportVehicles[0])) {
+    const crew::SupportVehicleSpec* const rows[]={&crew::kSupportVehicles[0],&crew::kSupportVehicles[1],&crew::kSupportVehicles[2],
+                                                &crew::kSupportDrillTransport};
+    for(const auto* each:rows)if(const auto& row=*each;std::wcscmp(path,row.sgo)==0 || (loaded && &row==&crew::kSupportVehicles[0])) {
         edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass || (loaded && variantBadClass) ? 8 : 0));
         edf::Put<unsigned>(object,edf::kSeatCount,row.seats);
         edf::Put<unsigned char*>(object,edf::kSeats,seats);
@@ -69,7 +80,9 @@ bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
 }
 bool SupportFirepowerReady() noexcept { return fixture::firepowerReady; }
 bool ApplySupportFirepower(unsigned char* v) noexcept {
-    fixture::Check(v==fixture::object && fixture::markedAt>=0 && fixture::applies>fixture::markedAt,"firepower written after its setup");
+    // An unarmed hull (the light truck, the drill transport) was never marked: the real one leaves it as the game's.
+    if(fixture::markedAt<0)return true;
+    fixture::Check(v==fixture::object && fixture::applies>fixture::markedAt,"firepower written after its setup");
     fixture::markedAt=-1;
     ++fixture::firepowers;
     return !fixture::failFirepower;
@@ -92,7 +105,9 @@ int main() {
     const float at[]={100,20,300},forward[]={1,0,1},zero[]={0,0,0};
     const auto tank=SupportVehicleKind::tank;const auto manned=SupportCrewMode::soldiers;
     Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"no spawn before mission preload");
-    PreloadSupportVehicles();Check(fixture::preloads==3,"all audited resources preloaded");
+    Check(!SupportDrillTransportReady() && !SpawnSupportDrillTransport(at,forward,nullptr),"no drill transport before mission preload");
+    PreloadSupportVehicles();Check(fixture::preloads==4,"all audited resources preloaded, and the installer's drill transport");
+    Check(SupportDrillTransportReady(),"the drill transport preloaded");
     Check(!SpawnSupportVehicle(static_cast<SupportVehicleKind>(255),manned,at,forward,nullptr),"reject invalid resource");
     Check(!SpawnSupportVehicle(tank,static_cast<SupportCrewMode>(255),at,forward,nullptr),"reject invalid mode");
     Check(!SpawnSupportVehicle(tank,manned,at,zero,nullptr),"reject missing heading without inventing one");
@@ -157,10 +172,32 @@ int main() {
     v=SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr);
     Check(v && fixture::lastCurve==supportlevel::Curve::grape,"the transport's firepower on the Grape's request curve");
     Check(DeleteSupportVehicle(v),"transport rollback");
+    // The drill transport (underground infantry, support_dispatch.cpp DrillPlan): its own SGO, the Blacker's class with
+    // thirteen seats, no firepower to level (its one weapon is the drill's bit); rolled back as any support hull.
+    {
+        const int marks=fixture::marks;
+        v=SpawnSupportDrillTransport(at,forward,nullptr);
+        Check(v && fixture::lastPath && std::wcscmp(fixture::lastPath,L"app:/Object/EDF6VC_DRILL_TRANSPORT.SGO")==0 && SeatCount(v)==13 &&
+              fixture::marks==marks && fixture::lastPosition[0]==at[0] && fixture::lastPosition[2]==at[2],
+              "the drill transport made from its own SGO at the entry: thirteen seats, nothing marked");
+        Check(DeleteSupportVehicle(v),"drill transport rollback");
+        Check(kSupportDrillTransport.vtable==kSupportVehicles[0].vtable && !kSupportDrillTransport.armed &&
+              kSupportDrillTransport.seats==13 && kSupportDrillTransportResource>=0x20000u+kSupportVehicleCount &&
+              kSupportDrillTransportResource<0x30000u,"the Blacker's class, unarmed, a ground hull resource past the kinds'");
+        // Not installed (a broken install): not preloaded, refused; the stock hulls stay callable.
+        fixture::drillFile=false;const int preloads=fixture::preloads;PreloadSupportVehicles();
+        Check(fixture::preloads==preloads+2 && !SupportDrillTransportReady() && !SpawnSupportDrillTransport(at,forward,nullptr) &&
+              SupportVehicleReady(SupportVehicleKind::transport,manned),"its SGO not installed: not preloaded, refused, the stock hulls stay");
+        fixture::drillFile=true;PreloadSupportVehicles();
+        Check(SupportDrillTransportReady(),"installed again: preloaded at the next mission");
+    }
     const int deletes=fixture::deletes;
     fixture::badClass=true;
     Check(!SpawnSupportVehicle(SupportVehicleKind::transport,manned,at,forward,nullptr),"wrong class rejected and deleted");
     Check(fixture::deletes==deletes+1,"wrong class rollback once");
+    // A drill transport the game made of another class: deleted, and off until restart (as a stock row).
+    Check(!SpawnSupportDrillTransport(at,forward,nullptr) && fixture::deletes==deletes+2,"a drill transport of another class: rejected, deleted");
+    PreloadSupportVehicles();Check(!SupportDrillTransportReady(),"a broken drill transport stays off across mission reset");
     // The airdrop's container-made hull (ApplySupportVehicleSetup): not marked / its firepower not written: refused.
     fixture::badClass=false;Put<const void*>(fixture::object,0,image+kSupportVehicles[1].vtable);
     const int applies=fixture::applies;fixture::failMark=true;
