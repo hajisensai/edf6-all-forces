@@ -974,18 +974,60 @@ def _frame(axis, slot: int) -> list[list[float]]:  # noqa: ANN001
     return rows.tolist()
 
 
+def blur_average(frames: list) -> np.ndarray:
+    """The time average of an alpha-blended animated texture's RGBA frames (uint8 h x w x 4): what its loop leaves on
+    whatever is behind it, averaged over the loop, is one alpha-blended texture's. Over a frame k (colour c_k, alpha
+    a_k) the result is a_k c_k + (1 - a_k) dst, so over the loop mean(a) x (sum a_k c_k / sum a_k) + (1 - mean(a))
+    dst: A = mean(a), RGB = the alpha-weighted mean colour (the plain mean where no frame covers the texel)."""
+    stack = np.stack([np.asarray(im.convert('RGBA'), dtype=np.float64) for im in frames])
+    _req(stack.ndim == 4 and stack.shape[0] >= 1, 'no frames')
+    a = stack[..., 3:4] / 255.0
+    w = a.sum(0)
+    rgb = np.where(w > 0, (stack[..., :3] * a).sum(0) / np.maximum(w, 1e-12), stack[..., :3].mean(0))
+    out = np.concatenate([rgb, a.mean(0) * 255.0], axis=-1)
+    return np.clip(np.rint(out), 0, 255).astype(np.uint8)
+
+
 def rotor_blur(packs: xp.Packs, source: str, stem: str, out: str, entry: dict) -> dict:
-    """`entry` (a see-through material: a heli rotor's blur, alpha blended in X-Morph, base/unlit_transparent_skinned)
-    given its animated texture's frames as textures/<stem>_frame<k>.png (RGBA: the alpha is the blur's coverage,
-    xm_model.anim_frames) under 'transparent' {'blend': 'alpha', 'frames': [...], 'frame_time': s}: the folder keeps
-    its mesh and frames for a see-through material; nothing draws it yet (xm_air_model's materials are opaque)."""
+    """`entry` (a see-through material: a heli rotor's blur, alpha blended and unlit in X-Morph,
+    base/unlit_transparent_skinned) drawn as a translucent body material (model.json 'alpha', pylib/alpha_maps.py;
+    wt_tracked ALPHA: snd_BRDF_Common_Alpha): its albedo textures/<stem>.png the time average of its animated texture's
+    frames (blur_average: EDF6's materials show one texture, and the average is what the loop blends), its 'alpha' read
+    off that average (alpha_maps.classify: a blend, the source's coverage in A). The frames themselves are kept, as
+    textures/<stem>_frame<k>.png (RGBA, xm_model.anim_frames), under 'transparent' {'blend': 'alpha', 'frames': [...],
+    'frame_time': s}: the record of what the average is of."""
+    import alpha_maps
+    from PIL import Image
     frames, period = xm.anim_frames(packs, source)
     rels = []
     for k, im in enumerate(frames):
         rels.append(f'textures/{stem}_frame{k}.png')
         im.save(os.path.join(out, rels[-1]), optimize=True)
     entry['transparent'] = {'blend': 'alpha', 'frames': rels, 'frame_time': period}
+    avg = blur_average(frames)
+    alpha = alpha_maps.classify(avg[..., 3])
+    _req(alpha is not None and alpha['mode'] == alpha_maps.BLEND,
+         f'{source}: its frames\' average is not translucent ({alpha}): not a rotor blur')
+    entry['albedo'] = f'textures/{stem}.png'
+    Image.fromarray(avg, 'RGBA').save(os.path.join(out, entry['albedo']), optimize=True)
+    entry['alpha'] = alpha
+    entry['min_side'] = MIN_SIDE
     return entry
+
+
+def two_sided(pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tri: np.ndarray) -> tuple[np.ndarray, ...]:
+    """A see-through part seen from both sides: X-Morph's camera looks down on its units and Ogre culls back faces
+    (base/unlit declares no cull_hardware), so a blur may be one quad facing up (the medium heli's), which EDF6's camera
+    sees from under too. A part all of whose faces point one way (no face against another) gets each face again, wound
+    the other way, on vertices of its own with the normals turned; one with faces both ways (the small heli's two quads
+    back to back) is left as it is."""
+    f = np.cross(pos[tri[:, 1]] - pos[tri[:, 0]], pos[tri[:, 2]] - pos[tri[:, 0]])
+    f = f / np.maximum(np.linalg.norm(f, axis=1, keepdims=True), 1e-12)
+    if len(f) and float((f @ f.T).min()) < -0.5:
+        return pos, nrm, uv, tri
+    n = len(pos)
+    return (np.vstack([pos, pos]), np.vstack([nrm, -nrm]), np.vstack([uv, uv]),
+            np.vstack([tri, tri[:, ::-1] + n]))
 
 
 def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
@@ -1022,9 +1064,8 @@ def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     for mi, m in enumerate(um.materials):
         stem = f'{unit.key}_{mi}'
         if 'transparent' in (xm.material_node(packs, m).get('type') or ''):
-            # a rotor's blur (a quad or two in an animated see-through texture, base/unlit_transparent_skinned): its
-            # mesh and frames are kept (rotor_blur) for a see-through material; xm_air_model does not draw it (its
-            # materials are opaque)
+            # a rotor's blur (a quad or two in an animated see-through texture, base/unlit_transparent_skinned): a
+            # translucent material (rotor_blur), its mesh seen from both sides (two_sided)
             see_through.append(m)
             materials.append(rotor_blur(packs, m, stem, out, {'name': f'xm_{mi}', 'source': m}))
             continue
@@ -1036,12 +1077,14 @@ def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
             if not len(sel):
                 continue
             pos, nrm, uv, t = part_arrays(um, P, sel)
+            if materials[mi].get('transparent'):
+                pos, nrm, uv, t = two_sided(pos, nrm, uv, t)
             k = len(parts)
             arrays[f'p{k}_pos'] = pos.astype(np.float32)
             arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
             arrays[f'p{k}_uv'] = uv.astype(np.float32)   # Ogre's top-left origin
             arrays[f'p{k}_tri'] = t.astype(np.uint32)
-            parts.append({'bone': bone, 'material': mi, 'triangles': int(len(sel)), 'vertices': int(len(pos))})
+            parts.append({'bone': bone, 'material': mi, 'triangles': int(len(t)), 'vertices': int(len(pos))})
     _req(any(p['bone'] == 'xm_hull' and not materials[p['material']].get('transparent') for p in parts),
          f'{unit.key}: no airframe mesh')
     points = {a: [round(float(c), 4) for c in um.point(a) * scale + np.array([0.0, lift, 0.0])] for a in sorted(um.attachments)}
@@ -1052,7 +1095,7 @@ def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     info = {'format': 1, 'kind': unit.key, 'family': unit.family, 'title': f'{unit.title_en or unit.key} (X-Morph: Defense)',
             'prepared_from': um.mesh_path, 'scale': scale, 'lift': round(lift, 4), 'materials': materials, 'parts': parts, 'rotors': rotors,
             'still_rotors': still, 'transparent_materials': see_through, 'attachments': points, 'weapons': weapons,
-            'triangles': int(sum(p['triangles'] for p in parts if not materials[p['material']].get('transparent'))),
+            'triangles': int(sum(p['triangles'] for p in parts)),
             'bounds': [lo.tolist(), hi.tolist()], 'normals': 'source',
             'size': (hi - lo).tolist(), 'xmorph': {'entity': unit.entity, 'bones': {b: bone_of[b] for b in um.bones}}}
     with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:

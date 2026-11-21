@@ -76,8 +76,7 @@ def read_info(folder: str) -> dict:
 def model_files(folder: str) -> list[str]:
     """Every file of the folder the archive is made from (the installer's cache hashes them)."""
     info = read_info(folder)
-    names = ['model.json', 'model.npz'] + [m[k] for m in info['materials'] if not m.get('transparent')
-                                           for k in TEXTURE_KEYS if k in m]
+    names = ['model.json', 'model.npz'] + [m[k] for m in info['materials'] for k in TEXTURE_KEYS if k in m]
     return [os.path.join(folder, n) for n in names]
 
 
@@ -137,13 +136,11 @@ def _textures(folder: str, key: str, material: dict) -> dict[str, tuple[str, byt
 
 
 def _parts(folder: str, info: dict) -> list[tuple[om.Part, str]]:
-    """(part, its bone) of every part the folder has but a see-through one's (a rotor's blur), in model space as
+    """(part, its bone) of every part the folder has (a rotor's blur too: a translucent material), in model space as
     prepared."""
     arr = np.load(os.path.join(folder, 'model.npz'))
     out = []
     for k, p in enumerate(info['parts']):
-        if info['materials'][p['material']].get('transparent'):
-            continue
         pos, nrm, uv, tri = (arr[f'p{k}_{s}'] for s in ('pos', 'nrm', 'uv', 'tri'))
         verts = [om.Vertex(tuple(map(float, a)), tuple(map(float, n)), (float(t[0]), float(t[1])))
                  for a, n, t in zip(pos, nrm, uv)]
@@ -171,11 +168,13 @@ def build_model(game, folder: str, key: str,  # noqa: ANN001 - rootcpk.Game
     meshes = []
     extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for m in info['materials']:
-        if m.get('transparent'):
-            continue     # a rotor's blur: kept in the folder for a see-through material, not drawn (opaque) here
+        # a rotor's blur (tools/prep_xmorph.py rotor_blur): a translucent body material (its 'alpha', ALPHA_HOST)
+        _req(not m.get('transparent') or m.get('alpha', {}).get('mode') == 'blend',
+             f'{folder}: material {m["name"]} is a rotor blur with no blend alpha: not the current prep_xmorph folder')
         files = _textures(folder, key, m)
         tex.update(files.values())
-        # the body template (V505's) or, lit, Retro-Balam's light material with the V505's colour parameters
+        # the body template (V505's); lit, Retro-Balam's light material with the V505's colour parameters; see-through,
+        # the stock Alpha host with the V505's (wt_tracked.add_surface_material)
         md, mi, tmpl = wt.add_surface_material(game, md, body_md, BODY_HOST[2], {**m, 'name': f'{key}_{m["name"]}'},
                                                {k: fn for k, (fn, _d) in files.items()})
         group = [(p, b) for p, b in pieces if p.material == m['name']]
