@@ -58,7 +58,9 @@
 | +0xD70 / +0xD71 | 第 0 / 1 个 WeaponSet 扳机（按住） |
 | +0xD74 / +0xD81 | 下一把 / 上一把武器 |
 | +0xD75 | 换弹 |
+| +0xD72 / +0xD73 | 第 0 / 1 个 WeaponSet 的副功能键（按下）：做什么由那只手武器的 `SecondaryFire_Type` 定（剑兵 5 = 冲刺、4 = 推进跳、6 = 盾，换算见 [npc-mobility-re.md](npc-mobility-re.md) §4）；掩码 `+0x158C` bit 8 / 9 |
 | +0xD76 / +0xD77 | 跳 / 回避：按下 / 按住 |
+| +0xD7B / +0xD7C | 冲刺 / 推进键：按下 / 按住（飞翼冲刺只读按下，`0x580B06`；原版 AI 从不写；掩码 bit 10）（[npc-mobility-re.md](npc-mobility-re.md) §3） |
 | +0xD82..+0xD84 | 直接选第 0..2 把（M：对应 `h+0x1950` 武器数组的前三项） |
 
 - 原版看向目标的写法（`0x5A2B50` MoveAndLook，`0x5A2FFB`）：`0x4E100(out, dir)` 给出 out[0] = −atan2(dy, 水平距离)（pitch）、out[1] = atan2(dx, dz)（yaw），`d60 = wrap(out[0] − h+0x1240) × 增益`、`d64 = wrap(out[1] − h+0x1244) × 增益`。插件按同一公式写（`npc_logic.h` `AimDelta`），符号不用学习。
@@ -66,7 +68,7 @@
 - **原版交战距离 = max(25, 0.5 × 真实射程)**（`0x590201..0x59024C`，常量 `0x1C36990`=0.5、`0x17A099C`=25），朝向点积 > 0.8 才开火。真实射程 `weapon+0x224` = AmmoAlive × AmmoSpeed（`0x68DB1B`）。这就是「射程太短」（B3）的根因。
 - **原版不换武器**（Ranger / Fencer / Air Raider 的 AI 从不写 d74/d81/d82；PaleWing 自己的状态机会，M）——「全程一把枪」（B2）的根因。
 - **原版没有友军火线检查**：唯一的门是 `h+0x1CEC` 地图视线（layer 22，只打地图）——「挡枪线、打玩家」（B1）的根因。
-- 翻滚：第 65/66 槽收到 d76 且 |d50.x| > 0.35（常量 `0x1790138`）、`h+0x158C & 0x800` 时进侧翻（Ranger `0x552B10`）。Wing Diver / Fencer 的第 68 槽是跳跃 / 推进（M）。原版 AI 只在寻路要求跳时置 d76——「不会翻滚」（B5）的根因。
+- 翻滚：第 65/66 槽收到 d76 且 |d50.x| > 0.35（常量 `0x1790138`）、`h+0x158C & 0x800` 时进侧翻（Ranger `0x552B10`）。Wing Diver / Fencer 的第 68 槽是跳跃 / 推进（M）。原版 AI 只在寻路要求跳时置 d76——「不会翻滚」（B5）的根因。飞翼冲刺（d7B）和剑兵冲刺 / 推进跳（d72+k）见 [npc-mobility-re.md](npc-mobility-re.md)。
 
 ### 3.2 接管点
 
@@ -119,7 +121,8 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 
 ### 3.6 机动（B4、B5）
 
-- `CrowdResponse`：`NpcDangerRange` 米内的敌人按距离加权施压；压力 ≥ `NpcCrowd` 或有敌人进 `NpcGrabRange` → 后撤（加权反方向）；进抓取距离且翻滚冷却好 → 翻滚（d76 一帧 + |d50.x| ≥ 0.6）；只有一只正面冲来 → 横移让开。翻滚只给 Ranger / Air Raider（第 68 槽是侧翻），Wing Diver 同一输入是起跳（也是脱离），Fencer 只后撤。
+- `CrowdResponse`：`NpcDangerRange` 米内的敌人按距离加权施压；压力 ≥ `NpcCrowd` 或有敌人进 `NpcGrabRange` → 后撤（加权反方向）；进抓取距离且翻滚冷却好 → 翻滚（d76 一帧 + |d50.x| ≥ 0.6）；只有一只正面冲来 → 横移让开。翻滚只给 Ranger / Air Raider（第 68 槽是侧翻）。Wing Diver 被逼后撤时按原版冲刺（d7B）冲出去，能量或冷却不够就照常后撤（`NpcWingDash=0` 时才保留旧的 d76 起跳脱离）；Fencer 有冲刺手时朝后撤方向冲一次（冷却 `NpcRollSec`），没有就只后撤。
+- 机动（`Mobility`，`src/npc_mobility.h`，[npc-mobility-re.md](npc-mobility-re.md)）：飞翼在能量预算内冲向远处的目标点 / 追上队伍；剑兵按配装判定冲刺 / 推进跳，按距离、高差、前方障碍、卡住、剩余次数选冲跳 / 只冲 / 只跳 / 不动。
 - 掩体：低血后撤时在玩家身后半圆上取几个候选点，选从最近威胁看过去被地图挡住（`MapRay` 命中）的那个；都不挡就取正后方。
 - 转移位置：战位每 `NpcRepositionSec` 秒（或战位离开视线）重新选。
 
@@ -365,7 +368,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
 枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
-ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
+ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcWingDash`、`NpcWingDashFar`、`NpcWingDashSec`、`NpcWingDashReserve`、`NpcFencerMobility`、`NpcFencerDashJumpRange`、`NpcFencerDashRange`、`NpcFencerDashReserve`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
 

@@ -7053,6 +7053,21 @@ def npc_ai_wired() -> None:
     for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
                 'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    # The soldiers' own dashes (docs/npc-mobility-re.md): after Drive, never for a script's unit; each feature behind its
+    # own signatures; keys read, range-checked, shipped and documented; the offline check runs under CTest.
+    assert 'if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);' in think, 'Mobility: after Drive, not for a script unit'
+    assert 'Mobility(' not in scripted and 'kDashPress' not in scripted and 'kSecondary' not in scripted
+    assert 'InstallMobility();' in code and 'MobilitySigs(kWingDashSigs' in code and 'MobilitySigs(kFencerMoveSigs' in code
+    assert 'npc_mobility_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1] and 'tests/npc_mobility_native_audit.py' in cmake
+    for key, default in (('NpcWingDash', '1'), ('NpcWingDashFar', '25'), ('NpcWingDashSec', '1.5'), ('NpcWingDashReserve', '0.5'),
+                         ('NpcFencerMobility', '1'), ('NpcFencerDashJumpRange', '45'), ('NpcFencerDashRange', '15'),
+                         ('NpcFencerDashReserve', '1')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcWingDashFar', 'NpcWingDashSec', 'NpcWingDashReserve', 'NpcFencerDashJumpRange', 'NpcFencerDashRange'):
+        assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    assert 'FixInt("NpcFencerDashReserve"' in plugin
     # The tanks' post (§8): seat 0's stick written before stock input; script routes relinquish our post, and only
     # the real driver's authority writes it (that may be a client). Keys stay shipped and documented.
     post = src('src/npcpost.cpp')
