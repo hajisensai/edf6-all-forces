@@ -213,6 +213,41 @@ def dxt1_dds(image: texfile.Image) -> bytes:
     return texfile._header(image.width, image.height, len(levels), b'DXT1', 0, (0, 0, 0, 0), top) + b''.join(levels)
 
 
+# ------------------------------------------------------------------------------------------ BC7 colour maps
+#
+# The external models' colour maps (docs/model-quality-1121-bc7.md): BC7_UNORM behind a DX10 header, as 179 stock model
+# textures are, albedo maps among them. native/bc7.cpp encodes (pylib/bc7.py's encoder, the same bytes); there is no
+# Python fallback for installing: bc7.py takes hours on a model's maps, and an install without edf6cmpl.dll is broken.
+
+def _bc7_level(pixels: Any) -> bytes:
+    import ctypes
+    import numpy as np
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None:
+        raise texfile.TextureError(f'BC7 colour maps need {edf6native.NAME} (native/bc7.cpp): run build.cmd, or the '
+                                   'installation is incomplete')
+    height, width = pixels.shape[:2]
+    data = np.ascontiguousarray(pixels, dtype=np.uint8).tobytes()
+    out = ctypes.create_string_buffer(((width + 3) // 4) * ((height + 3) // 4) * 16)
+    size = lib.edf6_bc7_level(data, width, height, out, 0)
+    return out.raw[:size]
+
+
+def bc7_dds(image: texfile.Image) -> bytes:
+    """texfile.bc7_dds, byte for byte (bc7.py's encoder in native/bc7.cpp, the same box filter)."""
+    import numpy as np
+    pixels = np.frombuffer(image.rgba, dtype=np.uint8).reshape(image.height, image.width, 4)
+    levels = []
+    while True:
+        levels.append(_bc7_level(pixels))
+        if pixels.shape[0] == 1 and pixels.shape[1] == 1:
+            break
+        pixels = _half(pixels)
+    top = max(1, (image.width + 3) // 4) * max(1, (image.height + 3) // 4) * 16
+    return texfile._dx10_header(image.width, image.height, len(levels), texfile.DXGI_BC7_UNORM, top) + b''.join(levels)
+
+
 # ------------------------------------------------------------------------------------------ BC5 normal maps
 #
 # What the stock vehicles' normal maps are (V505 / V601 / V603 / V614 body, kyata, light; V505 / V506 EDF6BENEFITS):
