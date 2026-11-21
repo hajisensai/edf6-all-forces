@@ -7067,7 +7067,17 @@ def npc_ai_wired() -> None:
     assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
     move_to = code.split('void MoveTo(', 1)[1].split('\n}\n', 1)[0]
     # Routed (2026-10-09): in kRouteHorizon legs, from the floor under the soldier (RouteStart), still stood while not moving.
-    assert 'GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull)!=npc::navigation::Result::moving' in move_to
+    assert 'route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);' in move_to
+    assert "if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}" in move_to
+    # Testhub #41 / #47: the stick eased only on the route's last edge by what is left of it (FinalLeft), not by the
+    # distance to the next 2 m waypoint (followers walked at 37-77 % of their speed) nor the straight one to the goal (a
+    # goal behind a wall); a soldier waiting its route turn walks its fresh path on (GroundCoast, given the call's own
+    # stop / goal / hull) instead of standing.
+    assert 'npc::navigation::FinalLeft(soldier->navigation,' in move_to
+    assert 'npc::Horiz(pos,waypoint)' not in move_to and 'npc::Horiz(pos,to)' not in move_to
+    assert 'GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull)' in move_to
+    assert move_to.index('GroundNavigateDeferred(soldier->navigation)') < move_to.index('GroundCoast(') < move_to.index('RouteStart(pos,from);')
+    assert 'p.ahead=true;' in code.split('npc::navigation::Profile SoldierRoute()', 1)[1].split('\n', 1)[0]
     # Testhub #31: a boarding soldier's route goes round its vehicle (the map ray sees no unit), not within the
     # boarding circle; a soldier stood against the hull until its order lapsed and was given again.
     board = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
