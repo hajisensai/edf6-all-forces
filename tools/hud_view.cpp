@@ -137,23 +137,48 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
                      rgba[0],rgba[1],rgba[2],rgba[3]);
 }
 int activeTextRenderers=0;
-void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;return r; }
-void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
+// The renderer's Core (*(renderer+0x18), docs/world-text-re.md §1): its projection (+0x2F0) and view (+0x330). The stand-in
+// begin leaves the projection zero for "the HUD's orthographic" (the game's begin writes that there); a world line's
+// (hud.cpp DrawWorld) writes the camera's viewProj over it, which the stand-in draw then puts the glyphs' corners through,
+// as the game's vertex shader does.
+alignas(16) unsigned char textCore[0x400]{};
+float recordW=1920.0f,recordH=1080.0f;   // the screen being recorded (Record): a world line's viewport
+int worldDraws=0;                        // world lines drawn while recording
+bool lastDrawWorld=false;                // the last text draw left the camera's projection in (no restore after it)
+void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;*reinterpret_cast<void**>(static_cast<unsigned char*>(r)+0x18)=textCore;return r; }
+void __fastcall BeginRec(void*,void*,void* font) {
+    fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4);
+    std::memset(textCore+kCoreProjection,0,64);
+}
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
     size[0]=Width(text);size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
-    tallest=std::fmax(tallest,kGlyphH*fontScale);
-    if(boxing){++drawn;Grow(m[12],m[13]);Grow(m[12]+Width(text),m[13]+kGlyphH*fontScale);}
+    // Where its glyphs land: a world line's corners through m and the camera's viewProj (the view an identity), else m's
+    // translation in pixels.
+    const float* proj=reinterpret_cast<const float*>(textCore+kCoreProjection);
+    bool world=false;
+    for(int i=0;i<16;++i)world=world || proj[i]!=0.0f;
+    lastDrawWorld=world;
+    float x0=m[12],y0=m[13],x1=m[12]+Width(text),y1=m[13]+kGlyphH*fontScale;
+    if(world) {
+        float p[3];
+        worldtext::Local(m,0.0f,0.0f,p);worldtext::ToScreen(proj,recordW,recordH,p,&x0,&y0);
+        worldtext::Local(m,Width(text),kGlyphH*fontScale,p);worldtext::ToScreen(proj,recordW,recordH,p,&x1,&y1);
+        if(recording)++worldDraws;
+    }
+    if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    tallest=std::fmax(tallest,y1-y0);
+    if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
-        drew.push_back(Drew{m[12],m[13],m[12]+Width(text),m[13]+kGlyphH*fontScale,text});
+        drew.push_back(Drew{x0,y0,x1,y1,text});
         const int step=static_cast<int>(std::lround(fontScale/kTextScaleStep));
         for(const wchar_t* c=text;*c;++c)if(*c!=L' ')glyphs.insert({*c,step});
     }
     if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
-    std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",m[12],m[13],kGlyphH*fontScale,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
+    std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",x0,y0,y1-y0,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
 }
 void __fastcall EndRec(void*,void*) {}
 void __fastcall FreeRec(void*) { --activeTextRenderers; }
@@ -465,6 +490,7 @@ std::string Narrow(const std::wstring& w) {
 // `draw` recorded as scene `name` on a screen `width` x `height`: its text on the screen, its overlaps none English lacks.
 template<class F> void Record(const wchar_t* name,F draw,int width,int height=1080) {
     drew.clear();glyphs.clear();panels.clear();recording=true;sceneTick=GetTickCount64();
+    recordW=static_cast<float>(width);recordH=static_cast<float>(height);worldDraws=0;lastDrawWorld=false;
     draw();
     recording=false;
     SceneText t;
@@ -508,6 +534,34 @@ template<class F> void Record(const wchar_t* name,F draw,int width,int height=10
     std::printf("      %s %ls: %zu lines, %zu glyphs, %zu overlapping pairs\n",hudtext::Name(hudtext::InUse()),name,drew.size(),glyphs.size(),
                 t.overlaps.size());
     if(glyphs.size()>mostGlyphs){mostGlyphs=glyphs.size();mostGlyphsAt=Narrow(name)+" ("+hudtext::Name(hudtext::InUse())+")";}
+}
+
+// The world text (src/world_text.h, hud.cpp WorldLabel): a scene's labels drawn as billboards (`world`, `worldN` of them,
+// the HUD's projection put back after them: `restored`) against the same scene flat (`flat`, none a world line: `flatN`).
+// Each world label's middle where the flat one's is (it stands at its anchor's place on the screen), its height within
+// world_text.h's bounds of the flat one's (the font scale's half grid step either way). Returns its failures.
+int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int worldN,bool restored,const std::vector<Drew>& flat,int flatN) {
+    int bad=0,matched=0;
+    const auto fail=[&](const char* what,const std::wstring& text){++bad;std::printf("FAIL  world text %ls: %s \"%s\"\n",name,what,Narrow(text).c_str());};
+    if(worldN<=0)fail("no world line drawn",L"");
+    if(!restored)fail("the camera's projection left in after the world lines",L"");
+    if(flatN!=0)fail("a world line drawn with WorldText3D=0",L"");
+    for(const Drew& w:world) {
+        if(w.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+        for(const Drew& f:flat) {
+            if(f.text!=w.text)continue;
+            ++matched;
+            const float wx=(w.x0+w.x1)*0.5f,wy=(w.y0+w.y1)*0.5f,fx=(f.x0+f.x1)*0.5f,fy=(f.y0+f.y1)*0.5f;
+            const float k=(w.y1-w.y0)/(f.y1-f.y0);
+            // Its height centred on its place; across: its middle (align 1), its left (0) or its right (2) there.
+            const bool centred=std::fabs(wy-fy)<1.0f && (std::fabs(wx-fx)<1.0f || std::fabs(w.x0-f.x0)<1.0f || std::fabs(w.x1-f.x1)<1.0f);
+            if(!centred)fail("not where the flat line is",w.text);
+            if(!(k>=worldtext::kFarLeast*0.93f && k<=worldtext::kNearMost*1.07f))fail("size out of its bounds",w.text);
+            break;
+        }
+    }
+    std::printf("%s  world text %ls: %d world lines, %d against the flat ones, restored %d\n",bad ? "FAIL" : "ok  ",name,worldN,matched,restored);
+    return bad;
 }
 
 // A unit at (x, y, z) heading `headingDeg` (compass: 0 +z, growing to its right, -x), on flat ground at 0.
@@ -1070,7 +1124,7 @@ template<class F> Box Measured(F draw,float s=1.0f) {
     static unsigned char ctx[16]{};
     Text text{};
     text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
-    Line lines[kMaxLines];
+    Line lines[kMaxLines]{};
     int at=0;
     box=Box{};boxing=true;
     draw(&text,lines,&at);
@@ -2480,6 +2534,11 @@ int Scenes(const std::wstring& dir) {
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
     Scene(dir,L"npc_mark",ground);
+    {   // the marks' words standing in the world, and flat (WorldText3D=0)
+        const std::vector<Drew> world=drew;const int worldN=worldDraws;const bool restored=!lastDrawWorld;
+        config.worldText3D=false;Scene(dir,L"npc_mark_flat",ground);config.worldText3D=true;
+        failed+=WorldTextAgainstFlat(L"npc_mark",world,worldN,restored,drew,worldDraws);
+    }
     // The formation banner just after the key (the longest name: bounding overwatch) with the mark up: on the screen,
     // apart from the mark's text, naming the shape and the key.
     sceneFormation=static_cast<int>(npc::formation::Shape::bounding);
@@ -2726,7 +2785,7 @@ int wmain(int argc,wchar_t** argv) {
     *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
     *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
     SetScreen(1920,1080);
-    quadOk=textOk=uiOk=true;
+    quadOk=textOk=uiOk=worldTextOk=true;
     int failed=PhysicalInstrumentFeedChecks();
     for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
         const hudtext::Lang lang=static_cast<hudtext::Lang>(l);

@@ -1,0 +1,174 @@
+# 世界空间文字（全息式 3D 文字）逆向笔记
+
+EDF.dll（Steam，TimeDateStamp `0x678CCB46`），地址均为 RVA。可信度：H = 反汇编逐条确认；M = 由调用方式 / 布局推断、未进游戏验证；L = 猜测。
+只读研究，未改代码。插件现有 HUD 文字路径见 `docs/hud-re.md` §2 / §2.1（本文沿用其中的 make / begin / measure / draw / end 名称）。
+
+## 0. 结论
+
+| # | 结论 | 可信度 |
+|---|---|---|
+| 1 | 原版**有**完整的「世界空间文字」绘制代码：`debug::Server`（`Module_3DMessageServer`）的绘制 `0xC4AC0`，它造一个朝向镜头的 billboard 世界矩阵，直接交给同一个文字 draw `0x113C520`，并在 begin 前给字体描述 `fd+0x30` 置位 `1`（不覆盖系统常量，沿用当前 3D 镜头）。但这是**调试模块，零售版里没被构造**（构造函数 `0xC3450` 没有任何直接 / 间接引用），脚本接口 `TestDrawText` 也是空函数 | 代码 H；「零售版不运行」H（静态无引用） |
+| 2 | 零售版实际在用的「世界标签」全部是**先投影到屏幕再画 2D**：多人名牌（`0x804C90`，`0x7FFBD0` 投到整数像素再平移）、伤害数字（`ui::DamageNumberDrawTexture`，世界点经 `0x81EC50` 换成 1920 基准的 UI 坐标，按距离缩放精灵）。没有 SGO / 脚本可配的 3D 文字对象，effect 系统（`efs`）也没有文字节点 | 名牌 H；伤害数字 M；「没有 3D 文字对象」M（RTTI / 脚本声明扫描为空） |
+| 3 | `0x113C520` 的 `m` **不是**只认平移：它被转置后整块写进顶点着色器的 `xgl_transform.g_xgl_world`，字形四边形的每个顶点都在 GPU 上乘 `m`。旋转 / 缩放 / 剪切都照样生效 | H |
+| 4 | `m` 本身带不了透视：VS 只用 `g_xgl_world` 的前三列，乘完把 w 强制成 1。但 VS 最后一步乘的是**完整 4×4 的 `g_xgl_projection`**，而文字渲染器在 draw 时才把自己存的 view（`core+0x330`）/ projection（`core+0x2F0`）写进系统常量。begin 之后、draw 之前改这两块，就是逐顶点 w 的真透视 | VS 数学 H；槽位对应 M |
+| 5 | 原版 begin 默认关深度测试和深度写入、用普通 alpha 混合（SRC_ALPHA / INV_SRC_ALPHA），所以文字天然「穿墙可见」；`fd+0x30` 置位 `2` 时 begin 不动深度状态 | 代码 H；字段语义 M |
+
+推荐方案（§5）：**在现有 HUD 钩子里继续调原版文字路径**，每条世界标签用 billboard 世界矩阵当 `m`，begin 之后把渲染器的 view 写成单位阵、projection 写成镜头 viewProj，得到真透视、任意视角（包括地图俯视）都正对镜头的 3D 文字；画完用一次普通 2D 文字把系统常量恢复成正交。
+
+## 1. 文字 draw `0x113C520` 的内部（问题 2）
+
+`0x113C520` / `0x113B4A0` / `0x113C6F0` 都是一行转发：`mov rcx,[rcx+18h]; jmp core_fn`，真正的实现吃的是渲染器 `+0x18` 指向的 Core（`xgl::ren::FontRenderer::Core`），下面记作 `core`。
+
+### 1.1 begin 核心 `0x113B2A0`
+
+| 地址 | 内容 | 可信度 |
+|---|---|---|
+| `0x113B2C3` | `0x11388E0(core, fd)`：记下 fd（draw 时从 `core+0x180` 取回这个**指针**，读的是调用方的 fd） | H |
+| `0x113B2D2..0x113B2F6` | `ctx+0x1D0 = 3`、`ctx+0x1D4 = 1`，脏位 `ctx+0x78 |= 4`（光栅化状态） | H；语义 M |
+| `0x113B302` | `test byte [fd+30h],2`：**为 0 时**把 `ctx+0x198`、`ctx+0x19C` 清 0（脏位 2）；为 1 时不动 | H |
+| `0x113B32C..0x113B3B5` | `ctx+0x84 = 1`，`ctx+0x88..0x9C = 5,6,1,5,6,1`（脏位 0x10） | H |
+| `0x113B3B9..0x113B3FA` | 用 `ctx+0x3A0`（宽）/ `ctx+0x3A4`（高）调 `0x4E000` 建正交投影 | H |
+| `0x113B40F..0x113B433` | 正交投影写 `core+0x2F0..0x32F`（projection） | H |
+| `0x113B466..0x113B486` | `core+0x330..0x36F` 置单位阵（view） | H |
+
+字段语义（M）：`ctx+0x198` / `+0x19C` 与四边形绘制器 `0x11541C0` 写的是同一对——绘制器「无深度」标志 `drawer+0xFAC` 为 1 时两者都清 0，为 0 时分别取 `drawer+0xFB1` / `drawer+0xFB0`（`0x1154229`、`0x115449F`），对应 D3D11 的 DepthEnable / DepthWriteMask。
+`ctx+0x84` = BlendEnable，`ctx+0x88..` = SrcBlend 5（SRC_ALPHA）、DestBlend 6（INV_SRC_ALPHA）、BlendOp 1（ADD）及 alpha 三项；四边形绘制器的混合模式 2 走 `0x15E550(ctx,0,2,2,…)`（ONE / ONE，加色），模式 1 走 `(…,5,6,…)`（`0x11543C2`、`0x1154439`）。
+
+### 1.2 draw 核心 `0x113B4B0`
+
+参数：`rcx = core`、`rdx = ctx`（`r13`）、`r8 = m`、`r9 = rgba`、`[rsp+28h] = str`、`[rsp+30h] = 长度`。
+
+| 地址 | 内容 | 可信度 |
+|---|---|---|
+| `0x113B542` | `str[0] == 0` 直接返回（**空串什么都不上传**） | H |
+| `0x113B5DF..0x113B728` | 取 `core+0x330`（view）和 `core+0x2F0`（projection），算 `view × projection`（行向量约定）放栈上 | H |
+| `0x113B72C..0x113B7CB` | 把 `m` **转置**到 `rbp+0x40` | H |
+| `0x113B7D0..0x113B85A` | `rbp+0x80` = rgba、`+0x90` = 描边色（fd+0x1C）、`+0xA0` = 描边宽 | H |
+| `0x113B8CE` | `0x113F860(core+0, ctx, mᵀ)`：写 `xgl_transform`（`g_xgl_world`） | H（布局与 VS 的 cb1 对上） |
+| `0x113B8E1` | `0x113F860(core+0x28, ctx, rbp+0x80)`：写 `xgl_user_param`（字色 / 描边色 / 描边宽） | H |
+| `0x113B932` | `test byte [fd+30h],1`：**为 1 时跳过下面四块系统常量** | H |
+| `0x113B93C..0x113BCE8` | 写材质的系统常量四个槽：`core+0x1D8` ← viewᵀ、`+0x1E0` ← view（未转置）、`+0x1E8` ← projectionᵀ、`+0x1F0` ← (view×projection)ᵀ | 写入 H；对应 `g_xgl_view` / `g_xgl_view_inverse` / `g_xgl_projection` / `g_xgl_view_projection` 是按顺序推断，M |
+| `0x113BD11` | `0x1151330`：应用材质 pass（逐个 `BufferApply_*`） | H |
+| `0x113BE9B..0x113C366` | 逐字：查字形缓存 `0x117B340`，在 CPU 上生成每字 6 个顶点（两个三角形），**位置只是字距累加的像素坐标，CPU 端不乘任何矩阵** | H |
+| `0x113BF4A` / `0x113C449` | `0x113D4D0(ctx, 顶点数, 顶点, 28)` 提交 | H |
+
+顶点 28 字节：`float3 位置`（z 恒 0）+ `float2 UV` + `4×int16` 字形在贴图里的像素矩形（`UV_MIN_MAX`）。x 向右、y 向下，单位 = 栅格化像素 × fd 缩放。
+
+### 1.3 顶点着色器（DXBC 内嵌在 `0x1FDDAA0` / `0x1FDEAD0`，两份相同）
+
+用系统自带的 `d3dcompiler_47.dll` 的 `D3DDisassemble` 反汇编（只读内存镜像里的字节）：
+
+```
+r1 = float4(v0.xyz, 1)
+r0.xyz = dp4(r1, g_xgl_world 的 3 行);   r0.w = 1      // 只用 world 的前三列
+r1.xyz = dp4(r0, g_xgl_view 的 3 行);    r1.w = 1      // view 也只用前三列
+o0     = dp4(r1, g_xgl_projection 4 行)                // 完整 4×4：逐顶点 w
+```
+
+像素着色器 `0x1FD8750`（无描边）/ `0x1FDCE80`（描边，8 方向取样）按 `UV_MIN_MAX` 夹住取样，缩放时不会串到相邻字形。
+
+结论：
+- `m` 是**行向量约定**的 4×4（`p' = p × m`，第 4 行是平移），旋转 / 缩放 / 剪切逐顶点生效（H）。
+- `m` 和 view 的第 4 列被丢掉，**只靠 `m` 做不出透视**；把「文字平面在锚点处的局部轴投到屏幕」的仿射当 `m`，得到的是锚点处的一阶近似（远离锚点的字会偏，字越长、离镜头越近偏得越多）（H，数学推论）。
+- 真透视：begin 之后、draw 之前写 `core+0x2F0`（projection，完整 4×4）即可，w 来自这一块（VS 数学 H，槽位对应 M）。
+
+### 1.4 系统常量是全局共用的（M）
+
+`0x1127440` 在设备初始化时按名字登记全局常量缓冲：`0x115AD20(device+0x580, ctx, "xgl_system", 1, 0x260)`，结果存 `device+0x270`（`0x11275BD`）。
+材质按名字绑定常量缓冲，所以文字 draw 写的四个槽很可能就是**全局** `xgl_system` 的影子（材质内按名字解析到全局缓冲的那一步未逐条核对）。佐证：
+
+- 调试 3D 文字（§2.1）置位 `fd+0x30 |= 1` 后不写这四块，仍能画在世界里——说明「不写」= 沿用当前 pass 的镜头。
+- 四边形 `0xC2FB0` 只写 `xgl_transform`（`0xC306E` / `device+0x548`），不碰 `xgl_system`；HUD 里它的 `m` 是像素平移，3D 调试服务器里同一个函数的 `m` 是世界矩阵——镜头完全来自当前 `xgl_system`。
+
+推论：在 HUD pass 里，原版每次画字都会把 `xgl_system` 改写成「渲染目标像素正交」；原版名牌 `0x804C90` 画完字再画四边形仍然正确，所以 HUD pass 的镜头本来就等价于这个正交（M）。
+
+## 2. 原版的世界空间文字路径（问题 1）
+
+### 2.1 `debug::Server`：真正的 3D 文字（调试用，零售版不运行）
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 类 | `debug::Module_3DMessageServer`（vtable `0x1765D58`）持有 `debug::Server`（3D，vtable `0x1765DA0`，`+0x40`）与 `debug::Server2D`（`0x1765DC8`，`+0x50`）；节点类 `Module_3DMessageServer::internal_Node` | H（RTTI） |
+| 绘制 | 两个 Server 的 slot 1 都是 `0xC4AC0`；3D 版由模块 slot 4 `0xC49C0` 调（`0x1156240` 推 GPU 事件名 "Module_3DMessageServer"），2D 版经 `0xC4A20` 登记到 `0x2139898` 的回调表 | H |
+| 区别 | slot 3（`+0x18`）取镜头矩阵：3D 版 `0xC48B0` 从镜头管理器 `*(0x20B2958)`（`0x1195BE0(mgr,0)`）拷镜头 `+0x220..+0x25F`；2D 版 `0xC4880` 返回常量矩阵。slot 2（`+0x10`）各返回一个常量缩放 | H；「+0x220 是 view」M |
+| 字体描述 | `0x1137C20` 初始化 fd，缩放 0.4（`0xC4E91/0xC4E9B`），**`fd+0x30 |= 1`（`0xC4EA5`）**，`0x113A3A0(&fd,1,色)` 设描边 | H |
+| 节点字段 | `+0x50..+0x8F` 4×4 变换（前三行长度平均当大小，第 4 行 `+0x80` 是位置）、`+0x90` 宽字符串、`+0xB0` 边距、`+0xC0` RGBA、`+0x108` 自定义绘制器、`+0x110/+0x114` 水平 / 垂直对齐（0 左上、1 居中、2 右下） | H（读取处），语义 M |
+| billboard | 镜头矩阵求逆（`0x71810`）得镜头的世界朝向，取它的右 / 上 / 前三行 × 缩放当 `m` 的前三行，第 4 行 = 节点位置（`0xC51E4..0xC53C5`）；缩放按视深乘 `k / 镜头[+0x2C]`（`0xC517E..0xC5196`），即**屏幕上大小近似恒定** | H（运算）；「恒定屏幕大小」M |
+| 底框 | 先用四边形绘制器 `*(0x2139A78)`：`0x1155E70(drawer,1)`（无深度）、`0x1155E90(drawer,ctx,0,1,0)`（不写深度、alpha 混合、不剔除）、`0x1155D50` 画填充矩形、`0xC2FB0` 拓扑 3 画 5 点边框，都用同一个 billboard `m` | H |
+| 画字 | `0x113B4A0` begin → `0x113C520(r, ctx, m=billboard 加对齐偏移, rgba, str, -1)` → end → `0x1138630` 释放 | H |
+| 零售版是否运行 | 构造函数 `0xC3450`（写 vtable `0x1765D58` 的唯一一处 `0xC357C`）没有 `call/jmp rel32`、rip 相对或绝对地址引用；脚本 `void TestDrawText(const string &in)` 的实现 `0x1F5DC0` 是 `ret 0` | H（静态） |
+
+这条路径的价值是**配方**：原版自己就是「billboard 世界矩阵当 `m` + 不覆盖 `xgl_system`」在 3D pass 里画字。但它挂在调试系统上，零售版没有对应的 3D pass 调用点可以直接复用。
+
+### 2.2 多人名牌 `0x804C90`（`HudPlayer_MultiPlayStatus`）：投影后 2D
+
+`0x804EBF` 调 `0x7FFBD0` 把世界点投到整数像素（`0x804EC9/0x804ED4` 负数即屏幕外跳过），`0x8062DE..0x806333` 的 `m` = 单位阵 + 平移，字号固定 0.666（`docs/hud-re.md` §2）。（H）
+
+### 2.3 伤害数字（`ui::HUiHudDamage` / `ui::DamageNumberDrawTexture`）：投影后 2D
+
+UI 层的精灵，不走 `0x113C520`（它的调用方里没有）。数字条目的世界位置在 `0x81E970` 经 `0x81EC50` 换成以 1920（`0x780`）为基准、按分屏人数切分的 UI 坐标；`0x81F050` 按距离算缩放。绘制主体 `0x821100`。（M：投影函数内部未逐条读）
+
+### 2.4 其它 `0x113C520` 调用方（全部 2D UI）
+
+`0x808410` 救援提示、`0x863DC0` `HuiTextureButtonTextField`、`0x94DE10`、`0x961AB0`（`UiVoiceChat_Notify`）、`0x1171F17`（字体库内部）、`0x113C530`（软键盘 GUI）。（H 调用点；用途按所属 vtable）
+
+### 2.5 扫描为空的方向
+
+- RTTI 里与文字相关的类只有 UI（`ui::TextField`、`HUiTextField`、`HUiMissionStoryText`、`StoryMessageWindow` 等）与字体库（`xgl::ren::font::FontObject / Preprocesser / Resource`、`FontRenderer::Core`）；没有 Billboard / Hologram / Label 类型的世界对象。`efs` 节点只有 Sprite / Line / Ring / Quad / Particle，没有文字节点。（M）
+- 任务脚本声明里没有 3D 文字接口；`DispRouteGuideTo*`（路线引导，`0x1B4000` 等）是标记对象，不是文字；`Dialog::AddText` / `FontColor` 等是 2D 故事窗。（M）
+
+## 3. 能挂文字的原版 3D pass（问题 3）
+
+- 零售版里**没有找到**现成的、在 3D 镜头下画文字的调用点（唯一的 `Module_3DMessageServer` 不运行）。（M）
+- 不需要另找 3D pass：文字渲染器自己带 view / projection 两块（§1.2），在 HUD pass 里把 projection 换成镜头 viewProj 就是 3D 文字。HUD pass 有没有绑定场景深度缓冲**不知道**（L），所以「被墙挡住」不可靠；但全息效果要的正是穿墙可见，begin 默认关深度（§1.1）正好满足。
+- 发光感：begin 写死普通 alpha 混合；要加色混合，在 begin 之后把 `ctx+0x8C`（DestBlend）改成 2（ONE）并 `ctx+0x78 |= 0x10`（M：draw 提交时才按脏位应用，未实测）。描边（fd+0x18 = 1）可用发光色当描边色做光晕（字形 PS 8 方向取样，H）。
+
+## 4. 矩阵约定小结
+
+| 项 | 约定 | 可信度 |
+|---|---|---|
+| 所有 CPU 侧矩阵 | 行主序 4×4、行向量 `p' = p × M`，第 4 行平移 | H |
+| draw 的 `m` | → `g_xgl_world`；只用前三列（仿射） | H |
+| `core+0x330` | → `g_xgl_view`；VS 只用前三列 | 写入 H，槽名 M |
+| `core+0x2F0` | → `g_xgl_projection`；完整 4×4，透视来源 | 写入 H，槽名 M |
+| 文字局部坐标 | x 右、y 下，单位 = 字形像素 × fd 缩放；z = 0 | H |
+| 镜头 viewProj | 插件已有（`0x804300` 的 rdx，`docs/hud-re.md` §0）：`clip = p × vp`，与上面同约定 | H |
+
+## 5. 推荐方案（问题 4）
+
+### 5.1 做法
+
+沿用 `src/hud.cpp` 现有的 make / begin / draw / end 序列和 `GaugeHook` 挂点，不新挂钩：
+
+1. begin 照常（`fd+0x30` **不**置位 1，让 draw 写系统常量；需要被遮挡时再试置位 2）。
+2. begin 之后、draw 之前，写渲染器 core（`*(renderer+0x18)`）：`core+0x330..0x36F` = 单位阵，`core+0x2F0..0x32F` = 镜头 viewProj。view 用单位阵是因为 draw 把**未转置**的 view 当 `view_inverse` 写（`0x113BA9E`），单位阵时这一槽恰好也对；字体 VS 不读它，但别的材质可能读。
+3. `m` = 文字局部 → 世界：第 0 行 = 镜头右向 × 每像素米数，第 1 行 = 镜头**下**向 × 每像素米数（局部 y 向下），第 2 行 = 镜头前向，第 3 行 = 锚点世界坐标 − 居中偏移。镜头朝向取 view 的逆（原版 §2.1 就这样做）。这样任何视角（地图俯视也一样）文字都正对镜头、可读；想要固定朝向的「立牌」就换成固定轴，但背面和侧面会读不了。
+4. 大小：每像素米数按「想要的世界尺寸 / 文字量出的像素宽」定，远处自然变小；想要像原版调试文字那样屏幕上大小近似恒定，就按视深乘系数（§2.1）。fd 缩放只决定栅格化分辨率，仍要吸附到 `kTextScaleStep` 的档位（`docs/hud-re.md` §2.1），按「预计屏幕像素高」选档，放大太多会糊。
+5. 这一批 3D 文字画完后，**必须**再做一次普通 begin（正交）+ draw 一个非空、alpha = 0 的串（空串在 `0x113B542` 直接返回，什么都不写），把 `xgl_system` 恢复成 HUD 正交；或者把 3D 文字排在同一帧的 2D 文字之前，由下一行普通文字恢复。
+
+### 5.2 风险
+
+| 风险 | 说明 | 可信度 |
+|---|---|---|
+| 系统常量污染 | 若 `xgl_system` 是全局的（§1.4），第 2 步之后原版后续 HUD 元素会用错镜头，直到下一次普通文字 draw。§5.1 第 5 步就是为此；漏掉会让 HUD 飞掉 | M |
+| 槽位对应 | `core+0x1D8/0x1E8` ↔ `g_xgl_view/g_xgl_projection` 是按顺序推断，实际偏移在运行时的材质常量表里（`[material]+0x138`）。第一次实测时在日志里核对：view 置单位阵、projection 置正交，结果应与原版完全一致 | M |
+| 依赖 core 内部布局 | `core+0x2F0/+0x330/+0x180` 不是参数而是成员；`InstallHud` 应核对 `0x113B40F..0x113B433`（写 `+0x2F0`）、`0x113B466..0x113B486`（写 `+0x330`）、`0x113B5DF`（`lea r15,[r14+330h]`）、`0x113B932`（`test byte [rsi+30h],1`）这些字节，对不上就关掉 3D 文字，只留现在的 2D 标签 | H（地址），做法 M |
+| 近平面 | 真透视下镜头后方的字由 GPU 裁剪，比现在 CPU 投影更稳；但锚点在镜头后方时仍应在 CPU 侧先剔除，省得白排版 | H |
+| 深度 | HUD pass 是否有场景深度未知；置位 `fd+0x30 & 2` 前要实测，否则可能整片被挡或完全无效 | L |
+| 字形缓存 | 字号仍受 §2.1 的格点约束；3D 文字的缩放放在 `m` 里、不要连续改 fd 缩放 | H |
+| 线程 | 与现有 HUD 文字同线程、同一把字形锁（`docs/hud-re.md` §2.2），不新增风险 | H |
+
+### 5.3 不推荐
+
+- 只改 `m` 做仿射近似：能画出倾斜 / 缩放的字，但不是透视，长文字和近处会明显变形；既然 projection 可写，没必要。
+- 复活 `Module_3DMessageServer`：零售版没有构造和注册路径，要自己造对象、找 3D pass 调用点，风险和工作量都大于 §5.1。
+
+## 6. 实现（2026-11-21，`src/world_text.h`、`hud.cpp WorldLabel / DrawWorld / RestoreOrtho`，ini `WorldText3D`）
+
+- 纯数学在 `src/world_text.h`（离线 `tools/world_text_check.cpp`）：从 vp 的列取镜头前向（w 列）、右（x 列去掉前向分量）、上（y 列去掉前两者），`m` = 右 / 下 × 每字形像素米数、第 4 行 = 锚点按屏幕偏移平移到文字左上角（同一深度平面内，所以屏幕上大小处处一致，不变形）。检查逐角核对：字形四角经 `m` 和完整 vp 投影后落在 HUD 排版给的屏幕矩形上（误差 < 0.05 px），含抖动 / 偏心投影、滚转、6 倍变焦、地图 60° 与正俯视。
+- 大小：屏幕高 = 平面字高 × clamp(`ref` / 深度, 0.6, 1.5)；`ref` 平时 30 m，地图里 = 地图镜头到焦点的距离。fd 字号吸附到 `kTextScaleStep`，剩下不到半档的比例放进 `m`。
+- 绘制顺序：一帧的文字里先画全部世界文字（fd+0x30 清 bit 0 / bit 1：draw 写系统常量、begin 关深度；描边用同色提亮半透明、宽 2.4 做发光；alpha 轻微闪烁 ±6%），再用一次正交 begin + alpha=0 的 `"."` 恢复 `xgl_system`（有世界文字就做，与世界文字分开的 `__try`，前面 SEH 出错也照做），最后画 2D 文字。
+- 不做加色混合（§3 的 `ctx+0x8C` / `ctx+0x78`）：只有 M 级推测，且混合状态写在 HUD 上下文里，begin 会重置文字自己的，但其后原版 HUD 四边形是否每次重设混合未核对，猜错会把整个原版 HUD 变成加色；发光描边已经给出全息感。
+- 迁移的标签：Q 标记的距离 / 名字、支援警告的名称与倒计时、登机入口、指挥提示、标点结果、地图网格距离、目标点距离、单位编组号 / 跟随 / 单位名、悬停敌人提示、敌体操控目标提示。没迁：载具状态行与潜舰血条文字（跟 2D 血条成组）、瞄准 / 弹着类标签（属于准星）、屏幕面板。
+- 安装期核对 §5.2 的四处字节，任何一处不符记 `HUD world text off ... (EDF+地址)`，世界标签退回平面字；`HOOK hud ... worldText=1` 表示启用。
+- 仍需实机确认：projection 槽位对应（§5.2，若不对字会飞到别处或消失，恢复后原版 HUD 应不受影响）、恢复后的原版 HUD 是否完全正常、分屏时 vp 的 NDC 与文字正交像素是否同一视口（M）。
