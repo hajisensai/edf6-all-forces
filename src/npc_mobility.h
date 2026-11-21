@@ -32,9 +32,12 @@ inline bool Rested(std::uint64_t sinceMs,float sec) noexcept {
 // --- Wing Diver ---
 // What 0x580B06..0x580B94 asks before the dash (H), read off the soldier: control mask bit 10 (+0x158C & 0x400), no
 // occupying action (+0x5D0 & 4), not downed / grabbed / aboard (+0x39C & ~2), not overheated (+0x2FC). `locked`: the
-// action lock held by a weapon (+0x1A28: a reload or a switch; 0x590A10 would cut it, the plugin waits instead).
+// action lock held by a weapon (+0x1A28: a reload or a switch; 0x590A10 would cut it, the plugin waits instead), or its
+// level +0x1A30 at 2 or more with no holder (0x590D70(h,2) refuses that too: 0x590A10(h,0,2) leaves it so).
 // `air`: not supported (+0x711 != 2). Energy +0x308 of +0x304, the dash's cost +0x2380 (loaded per energy core).
 struct WingState { bool permitted,busy,downed,overheated,locked,air; float energy,energyMax,cost; };
+// `locked` as 0x590D70(h,2) and 0x590A43 read it: a holder at +0x1A28, or the level +0x1A30 at 2 or more.
+inline bool WingLocked(bool holder,std::int32_t level) noexcept { return holder || level>=2; }
 constexpr float kAirReserve=0.6f;   // share of the tank kept in the air: dashing down out of the sky she must fly again
 inline float WingReserve(float reserve,bool air) noexcept { return air && reserve<kAirReserve ? kAirReserve : reserve; }
 // The energy left after the dash keeps at least `reserve` of the tank and one more dash. Never true when the dash costs

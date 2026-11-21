@@ -46,6 +46,9 @@ void WingBudgets() {
     g=s;g.downed=true;Check(!WingReady(g,0.5f),"downed / grabbed: no dash");
     g=s;g.overheated=true;Check(!WingReady(g,0.5f),"overheated: no dash");
     g=s;g.locked=true;Check(!WingReady(g,0.5f),"a weapon holds the lock (reload): no dash");
+    Check(WingLocked(true,0) && WingLocked(true,1),"a holder at +0x1A28: locked");
+    Check(WingLocked(false,2) && WingLocked(false,3),"no holder, level +0x1A30 >= 2 (0x590A10(h,0,2)): 0x590D70(h,2) refuses");
+    Check(!WingLocked(false,0) && !WingLocked(false,1),"no holder, level under 2: free");
 }
 
 void WingReasons() {

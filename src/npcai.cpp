@@ -943,7 +943,8 @@ bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,UL
     npc::Threat threats[kMaxThreats];
     const float reach=Cfg().npcDangerRange*2.0f;
     const int n=ThreatsNear(pos,reach,threats);
-    const bool rolls=c.agility==Agility::roll || (c.agility==Agility::wingDash && !WingDashOn());
+    // A Wing Diver whose own dashes are off (all of them, or hers after kMissOff misses) keeps the stock roll.
+    const bool rolls=c.agility==Agility::roll || (c.agility==Agility::wingDash && (!WingDashOn() || s.mobOff));
     const bool rollReady=rolls && (At<std::uint32_t>(h,kControlMask)&kMaskRoll) && ms-s.rollAt>=static_cast<ULONGLONG>(Cfg().npcRollSec*1000.0f);
     const npc::Evade e=npc::CrowdResponse(pos,threats,n,Cfg().npcDangerRange,Cfg().npcCrowd,Cfg().npcGrabRange,rollReady);
     if(e.move==npc::Move::hold)return false;
@@ -1455,6 +1456,7 @@ constexpr std::size_t kSupport=0x711;         // CharacterControl_Walk support: 
 constexpr std::size_t kAirFrames=0x1264;      // frames off the ground in a row (0x573F85; 0 on the ground)
 constexpr std::size_t kHumanState=0x39C;      // anything but bit 1: downed, grabbed, aboard (0x580B30)
 constexpr std::size_t kActionHolder=0x1A28;   // the action lock's holder: a weapon reloading / switching (0x590A43)
+constexpr std::size_t kActionLevel=0x1A30;    // the lock's level: 0x590D70(h,2) refuses the dash at >= 2, holder or not
 // The Wing Diver: energy +0x308 of +0x304 (0x54A2E0), overheated +0x2FC, the dash's cost +0x2380 (0x580BA3), both dash
 // states' action limits 0xE39 (0x58387B, 0x583DBB).
 constexpr std::size_t kEnergyMax=0x304,kEnergy=0x308,kOverheat=0x2FC,kDashCost=0x2380;
@@ -1480,6 +1482,7 @@ const Signature kWingDashSigs[]={
     {0x583DBB,{0xC7,0x87,0xD0,0x05,0x00,0x00,0x39,0x0E,0x00,0x00},10},                                 // 0x583D60: 0xE39
     {0x573B60,{0x0F,0xBA,0xE0,0x0A,0x72,0x09,0x66,0xC7,0x86,0x7B,0x0D,0x00,0x00,0x00,0x00},15},        // bit 10 keeps d7B
     {0x590A43,{0x48,0x8B,0x89,0x28,0x1A,0x00,0x00,0x48,0x3B,0xCE},10},                                 // lock holder +0x1A28
+    {0x590D79,{0x39,0x91,0x30,0x1A,0x00,0x00,0x7D,0x03},8},                                            // level +0x1A30 < 2
     {0x573F7C,{0x80,0xBE,0x11,0x07,0x00,0x00,0x02},7},                                                 // +0x711 == 2
 };
 const Signature kFencerMoveSigs[]={
@@ -1585,7 +1588,8 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     const unsigned mask=At<std::uint32_t>(h,kControlMask);
     if(!(mask&kMaskMove) || !npc::mobility::Rested(ms-s.mobAt,c.npcWingDashSec))return;
     const npc::mobility::WingState st{(mask&kMaskDash)!=0,(At<std::uint32_t>(h,kActionLimits)&4)!=0,(At<std::uint32_t>(h,kHumanState)&~2u)!=0,
-                                      At<std::int32_t>(h,kOverheat)!=0,At<const void*>(h,kActionHolder)!=nullptr,h[kSupport]!=2,
+                                      At<std::int32_t>(h,kOverheat)!=0,
+                                      npc::mobility::WingLocked(At<const void*>(h,kActionHolder)!=nullptr,At<std::int32_t>(h,kActionLevel)),h[kSupport]!=2,
                                       At<float>(h,kEnergy),At<float>(h,kEnergyMax),At<float>(h,kDashCost)};
     if(!npc::mobility::WingReady(st,c.npcWingDashReserve))return;
     const bool evading=s.evadeFrame==frame && (s.evadeMove==npc::Move::back || s.evadeMove==npc::Move::roll);
