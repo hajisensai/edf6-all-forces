@@ -1,11 +1,13 @@
 // The NPC soldiers' own dashes (src/npc_mobility.h, docs/npc-mobility-re.md) checked offline: the Wing Diver's gates,
-// energy budget and reasons to dash; the Fencer's hands (SecondaryFire_Type and the swap flags), the choice of
+// energy budget, the route's straight run on real 2 m grid routes and the reasons to dash (the 2026-11-21 drive.py
+// walks: falling back 37 m while firing, to its combat spot, keeping up); the Fencer's hands (SecondaryFire_Type and the swap flags), the choice of
 // dash-jump / dash / boost / nothing by distance, rise, walls, uses left and the reserve, the dash-jump's timing (the
 // boost inside the dash's carry window, never one set two frames running), the misses that turn it off.
 //   cmake --build build --target npc_mobility_check && build\npc_mobility_check.exe      (exit code 1 on a failure)
 #include "../src/npc_logic.h"
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 namespace {
 int failures=0,cases=0;
@@ -51,23 +53,95 @@ void WingBudgets() {
     Check(!WingLocked(false,0) && !WingLocked(false,1),"no holder, level under 2: free");
 }
 
+// A route as ground_navigation.h's Navigate leaves it: one point a 2 m grid cell, 8 directions, from the cell after
+// `from`'s to `to`'s (diagonal steps first, then straight: one of the shortest grid walks).
+struct Pt { float x,y,z; };
+int GridPath(const float* from,const float* to,Pt* out,int most) {
+    const float cell=2.0f;
+    int x=static_cast<int>(std::lround(from[0]/cell)),z=static_cast<int>(std::lround(from[2]/cell));
+    const int gx=static_cast<int>(std::lround(to[0]/cell)),gz=static_cast<int>(std::lround(to[2]/cell));
+    int n=0;
+    while((x!=gx || z!=gz) && n<most) {
+        x+=gx>x ? 1 : gx<x ? -1 : 0;z+=gz>z ? 1 : gz<z ? -1 : 0;
+        out[n++]=Pt{static_cast<float>(x)*cell,0.0f,static_cast<float>(z)*cell};
+    }
+    return n;
+}
+
+void WingRuns() {
+    Pt path[256];float dir[3]={0.0f,0.0f,0.0f};
+    // run10 15:16:00-04: falling back from (-271,2,208) to (-245,15,234): the route is a diagonal of 2 m cells. Its next
+    // waypoint is under 3 m off (the old "route turns within 8 m" refused every walk on that), its run the whole look.
+    const float from[3]={-271.0f,2.0f,208.0f},back[3]={-245.0f,15.0f,234.0f};
+    int n=GridPath(from,back,path,256);
+    const float first=std::hypot(path[0].x-from[0],path[0].z-from[2]);
+    Check(first<3.0f,"the next waypoint is the next 2 m cell",first);
+    float run=StraightRun(from,path,n,kRunLook,kRunSlack,dir);
+    Check(run==kRunLook,"the fall back's 37 m diagonal: straight as far as it looks (30 m)",run);
+    Check(dir[0]>0.6f && dir[2]>0.6f && dir[1]==0.0f,"its way: along the walk (north-east)",dir[0],dir[2]);
+    // A straight road 40 m east: the run is the look.
+    const float o[3]={0.3f,0.0f,0.4f},east[3]={40.0f,0.0f,0.0f};
+    n=GridPath(o,east,path,256);
+    run=StraightRun(o,path,n,kRunLook,kRunSlack,dir);
+    Check(run==kRunLook && dir[0]>0.99f,"40 m east: the run is all it looks (30 m), east",run,dir[0]);
+    // To its combat spot 30 m east, 10 m north: diagonal for 10 m, then east. The run follows the first leg's way.
+    const float spot[3]={30.0f,0.0f,10.0f};
+    n=GridPath(o,spot,path,256);
+    run=StraightRun(o,path,n,kRunLook,kRunSlack,dir);
+    Check(run>=kWingRun && run<20.0f && dir[2]>0.3f,"diagonal then east: the run is the first leg, a little past it",run,dir[2]);
+    // Round a corner 6 m ahead: 3 cells east, then 20 m north.
+    int k=0;
+    for(int i=1;i<=3;++i)path[k++]=Pt{2.0f*i,0.0f,0.0f};
+    for(int i=1;i<=10;++i)path[k++]=Pt{6.0f,0.0f,2.0f*i};
+    const float zero[3]={0.0f,0.0f,0.0f};
+    run=StraightRun(zero,path,k,kRunLook,kRunSlack,dir);
+    Check(run<kWingRun,"a corner 6 m ahead: too short a run to dash",run);
+    Check(StraightRun(zero,path,0,kRunLook,kRunSlack,dir)==0.0f,"no route: no run");
+    // A zig-zag of cells (the grid's own walk along 1:2) stays one straight run.
+    k=0;
+    for(int i=1;i<=16;++i)path[k++]=Pt{2.0f*i,0.0f,2.0f*((i+1)/2)};
+    run=StraightRun(zero,path,k,kRunLook,kRunSlack,dir);
+    Check(run>=kWingRun,"a 1:2 zig-zag of cells: straight",run);
+}
+
 void WingReasons() {
     const float range=25.0f;
-    WingGoal g{true,false,false,0.0f,0.0f,0.0f,0.0f};
-    Check(WingWhy(g,range)==Why::evade,"pressed by a crowd: dash away (whatever the way)");
-    g=WingGoal{false,true,false,30.0f,0.0f,40.0f,20.0f};
-    Check(WingWhy(g,range)==Why::goal,"a fight's goal 30 m off, clear: dash");
-    g.goalDist=20.0f;Check(WingWhy(g,range)==Why::none,"20 m: walk (the dash overshoots)");
-    g.goalDist=30.0f;g.threat=true;g.threatDot=0.9f;
-    Check(WingWhy(g,range)==Why::none,"never towards the nearest enemy");
-    g.threatDot=0.2f;Check(WingWhy(g,range)==Why::goal,"across or away from it: dash");
-    g.threat=false;g.clear=10.0f;Check(WingWhy(g,range)==Why::none,"a wall 10 m ahead: no dash");
-    g.clear=40.0f;g.wayDist=5.0f;Check(WingWhy(g,range)==Why::none,"the route turns 5 m ahead: no dash");
-    g=WingGoal{false,false,false,40.0f,0.0f,40.0f,20.0f};
-    Check(WingWhy(g,range)==Why::none,"keeping up 40 m behind: walk");
-    g.goalDist=60.0f;Check(WingWhy(g,range)==Why::follow,"keeping up 60 m behind: dash");
-    Check(WingWhy(g,0.0f)==Why::none,"no range: no dash");
+    // WingGoal: pressed, need, firing, threat, left, run, threatDot, clear.
+    WingGoal g{true,Need::fight,true,false,0.0f,0.0f,0.0f,0.0f};
+    Check(WingDecide(g,range).why==Why::evade,"pressed by a crowd: dash away (whatever the way, firing or not)");
+    // run10: falling back 37 m, a laser's trigger held all the way (fire=1): the order outranks the shot.
+    g=WingGoal{false,Need::order,true,false,37.0f,30.0f,-1.0f,16.0f};
+    Check(WingDecide(g,range).why==Why::goal,"falling back 37 m while firing: dash");
+    g.left=20.0f;Check(WingDecide(g,range).block==Block::tooNear,"falling back 20 m: walk (the dash overshoots)");
+    // To its combat spot (a fight's walk), 30 m.
+    g=WingGoal{false,Need::fight,false,false,30.0f,30.0f,-1.0f,16.0f};
+    Check(WingDecide(g,range).why==Why::goal,"to its combat spot 30 m, not firing (between two shots): dash");
+    g.firing=true;Check(WingDecide(g,range).block==Block::firing,"to its combat spot 30 m, a shot going out: the shot first");
+    g.left=55.0f;Check(WingDecide(g,range).why==Why::goal,"55 m out of place: the walk first, firing or not");
+    g.left=30.0f;g.firing=false;g.threat=true;g.threatDot=0.9f;
+    Check(WingDecide(g,range).block==Block::enemyAhead,"never towards the nearest enemy on its own");
+    g.threatDot=0.2f;Check(WingDecide(g,range).why==Why::goal,"across or away from it: dash");
+    g.need=Need::order;g.threatDot=0.9f;Check(WingDecide(g,range).why==Why::goal,"the player's order: towards it too");
+    g=WingGoal{false,Need::fight,false,false,30.0f,30.0f,-1.0f,10.0f};
+    Check(WingDecide(g,range).block==Block::wall,"a wall 10 m ahead: no dash");
+    g.clear=16.0f;g.run=6.0f;Check(WingDecide(g,range).block==Block::turn,"the route turns 6 m ahead: no dash");
+    g.run=kWingRun;Check(WingDecide(g,range).why==Why::goal,"12 m straight: dash");
+    // Keeping up (a formation behind its player, its post): twice the range.
+    g=WingGoal{false,Need::keepUp,false,false,40.0f,30.0f,-1.0f,16.0f};
+    Check(WingDecide(g,range).block==Block::tooNear,"keeping up 40 m behind: walk");
+    g.left=60.0f;Check(WingDecide(g,range).why==Why::follow,"keeping up 60 m behind: dash");
+    g.firing=true;Check(WingDecide(g,range).why==Why::follow,"60 m is past twice the range: a shot does not hold it");
+    Check(WingFar(Need::keepUp,range)==50.0f && WingFar(Need::fight,range)==25.0f && WingFar(Need::order,range)==25.0f,"how far");
+    Check(WingDecide(g,0.0f).why==Why::none,"no range: no dash");
+    g.left=std::nanf("");Check(WingDecide(g,range).why==Why::none,"not finite: no dash");
     Check(Rested(1500,1.5f) && !Rested(1499,1.5f) && Rested(0,0.0f) && !Rested(100000,std::nanf("")),"the cooldown");
+    // The gates named for the log, in 0x580B06's order, the budget last.
+    WingState s{true,false,false,false,false,false,80.0f,100.0f,20.0f};
+    Check(WingGate(s,0.5f)==nullptr,"all open: no gate");
+    WingState t=s;t.locked=true;Check(WingGate(t,0.5f) && WingGate(t,0.5f)[0]=='w',"a reload: weapon lock");
+    t=s;t.air=true;t.energy=79.0f;Check(WingGate(t,0.5f) && std::string(WingGate(t,0.5f))=="energy (air)","in the air short: energy (air)");
+    t=s;t.permitted=false;t.overheated=true;Check(std::string(WingGate(t,0.5f))=="not permitted","the first refusing gate");
+    Check(std::string(BlockName(Block::firing))=="firing" && std::string(NeedName(Need::order))=="order","the log's names");
 }
 
 void FencerHands() {
@@ -198,6 +272,7 @@ void Misses() {
 
 int main() {
     WingBudgets();
+    WingRuns();
     WingReasons();
     FencerHands();
     FencerChoices();

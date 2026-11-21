@@ -104,11 +104,12 @@ EDF.dll Steam 版（TimeDateStamp `0x678CCB46`），地址均为 RVA。全部是
 
 ## 5 插件怎么用（`src/npcai.cpp` Mobility）
 
-- 只对本机拥有、非脚本控制、在走路的士兵（与 Think 包裹同条件）；`Drive` 写完移动后调 `Mobility`。`MoveTo` 把本帧的目标、下一个路点和方向记进士兵表，`Evade` 记下被围时的反应。
-- 飞翼：先按 §3.2 预检（含第 7 条等级 `+0x1A30 < 2`，再加 `+0x1A28` 为空），能量预算 `能量 − C ≥ max(NpcWingDashReserve × 上限, C)`（空中预留至少 0.6），所以绝不会触发清 0 或过热；理由按优先级：被围后撤（`evade`）、战斗 / 撤退 / 命令的目标点超过 `NpcWingDashFar` 且前方 15 m 通畅、不朝最近的敌人（`goal`）、跟随时超过两倍（`follow`）。按键那帧写满杆、`d7B = 1`，间隔 `NpcWingDashSec`。飞翼不再按 `d76` 侧推（那是起飞）；冲刺关掉时（全局关，或这名士兵连续未生效被单独关掉 `mobOff`）才保留旧的起跳脱离。
+- 只对本机拥有、非脚本控制、在走路的士兵（与 Think 包裹同条件）；`Drive` 写完移动后调 `Mobility`。`MoveTo` 把本帧的目标、停步距离、下一个路点和方向，以及路线「前方直段」（`StraightRun`）记进士兵表，`Evade` 记下被围时的反应。
+- 飞翼：先按 §3.2 预检（含第 7 条等级 `+0x1A30 < 2`，再加 `+0x1A28` 为空），能量预算 `能量 − C ≥ max(NpcWingDashReserve × 上限, C)`（空中预留至少 0.6），所以绝不会触发清 0 或过热；理由按优先级（`npc_mobility.h WingDecide`）：被围后撤（`evade`）；否则这段移动还剩的距离（到目标减停步距离）超过 `NpcWingDashFar`（保持队形 / 驻守时两倍），路线前方直段 ≥ 12 m、沿直段 15 m 通畅、不朝最近的敌人（玩家的移动命令除外）时冲：撤退 / 移动命令 / 移动攻击（`need=order`）与战斗位（`need=fight`）记 `goal`，保持队形记 `follow`。开火与冲刺的取舍：本帧扳机在按（就绪武器的一发正在出膛）时只有位移优先级高才冲——撤退、玩家命令，或离位超过两倍 `NpcWingDashFar`；非连发武器两发之间、蓄力 / 换弹时扳机不在按，照常可冲。冲刺方向沿路线直段（满杆），`d7B = 1`，间隔 `NpcWingDashSec`。飞翼不再按 `d76` 侧推（那是起飞）；冲刺关掉时（全局关，或这名士兵连续未生效被单独关掉 `mobOff`）才保留旧的起跳脱离。
 - 剑兵：按两只手的 `SecondaryFire_Type` 与换算标志判定能力，按距离 / 高差 / 前方障碍 / 卡住 / 剩余次数 / 附近敌人选「冲跳 / 只冲 / 只跳 / 不动」（`npc_mobility.h Choose`），冲跳的推进跳按 §4.4 的窗口。按住扳机的那只手、动作取消窗口、武器持锁（换弹）时都不按。
 - 校验：每次按下后 3 帧内没看到生效（飞翼 `+0x5D0 == 0xE39`，剑兵次数减少）算一次未生效，连续 5 次就对该士兵关掉并记一行日志。签名表 `kWingDashSigs` / `kFencerMoveSigs` 在安装时逐条核对，不符只关对应功能（`NPCAI wing dash off: signature …`）。
-- `Debug=1` 日志：`WDDASH <h> why=… e=…/… C=… goal=… clear=… air=… stick=(x,z)`、`WDDASH refused …`、`FENCERMOVE <h> hands: …`、`FENCERMOVE <h> <act> why=dodge|way|boost-up|boost-ledge|boost-stuck …`。
+- 路线是 2 m 网格的逐格路点（`ground_navigation.h Navigate` 不合并拐点），下一个路点永远在 3 m 内、方向只有 8 个：旧版「下一个路点 ≥ 8 m 才冲」因此对任何移动都不成立，2026-11-21 四轮实机战斗 `why=goal` / `follow` 一次都没出现（run10 把 `NpcWingDashFar` 降到 8 也没有）。现在由 `StraightRun` 从路线上找最远的一点，使之前每一格都在「当前位置 → 该点」连线 1.5 m 走廊内（最多看 30 m），它的长度就是直段，方向就是冲刺方向。
+- `Debug=1` 日志：`WDDASH <h> why=… move=… need=… e=…/… C=… left=… run=… clear=… fire=… air=… stick=(x,z)`、`WDDASH skip <h> move=… need=… because=… left=… run=… clear=… fire=… enemy=… e=…/… C=… air=…`（剩余距离够冲却没冲时，每士兵每 2 s 最多一行；`because` 是 `firing` / `route turns` / `wall ahead` / `towards enemy` 或原版门槛 `not permitted` / `busy` / `downed` / `overheated` / `weapon lock` / `energy` / `energy (air)`）、`WDDASH refused …`、`FENCERMOVE <h> hands: …`、`FENCERMOVE <h> <act> why=dodge|way|boost-up|boost-ledge|boost-stuck …`。
 
 ## 6 待实测
 

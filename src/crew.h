@@ -485,7 +485,7 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     // Their own dashes (npcai.cpp Mobility, docs/npc-mobility-re.md):
     bool npcWingDash=true;          // ...a Wing Diver dashes (the stock dash): out of a crowd, to a far goal, to keep up
-    float npcWingDashFar=25.0f;     // ...m: a fight's goal farther than this is dashed to (keeping up: twice this)
+    float npcWingDashFar=25.0f;     // ...m: a fight's / order's walk with more than this left is dashed (keeping up: twice)
     float npcWingDashSec=1.5f;      // ...s between two of her dashes
     float npcWingDashReserve=0.5f;  // ...share of her energy kept after a dash (in the air at least 0.6), and one more dash
     bool npcFencerMobility=true;    // ...a Fencer whose weapons dash / boost uses them: dash-jump, dash only or boost only

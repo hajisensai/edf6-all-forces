@@ -48,10 +48,17 @@ inline bool WingBudget(float energy,float energyMax,float cost,float reserve) no
     const float share=reserve*energyMax,keep=share>cost ? share : cost;
     return energy-cost>=keep;
 }
-inline bool WingReady(const WingState& s,float reserve) noexcept {
-    return s.permitted && !s.busy && !s.downed && !s.overheated && !s.locked &&
-           WingBudget(s.energy,s.energyMax,s.cost,WingReserve(reserve,s.air));
+// The first gate that refuses the dash now (its name, for the log), nullptr when every one is open.
+inline const char* WingGate(const WingState& s,float reserve) noexcept {
+    if(!s.permitted)return "not permitted";
+    if(s.busy)return "busy";
+    if(s.downed)return "downed";
+    if(s.overheated)return "overheated";
+    if(s.locked)return "weapon lock";
+    if(!WingBudget(s.energy,s.energyMax,s.cost,WingReserve(reserve,s.air)))return s.air ? "energy (air)" : "energy";
+    return nullptr;
 }
+inline bool WingReady(const WingState& s,float reserve) noexcept { return WingGate(s,reserve)==nullptr; }
 enum class Why : std::uint8_t { none, evade, goal, follow };
 inline const char* WhyName(Why w) noexcept {
     switch(w) {
@@ -62,20 +69,79 @@ inline const char* WhyName(Why w) noexcept {
     }
     return "none";
 }
-// Its situation this frame: `pressed` the crowd response backs it off (a crowd, or one in grab range); `goalDist` m to
-// where it walks (0: nowhere), `urgent` that walk is a fight's (a target, falling back) rather than keeping up; `threat`
-// an enemy within the danger reach, `threatDot` the cosine between the dash and the way to it; `clear` m free along the
-// dash at the waist, `wayDist` m to the route's next corner.
-struct WingGoal { bool pressed,urgent,threat; float goalDist,threatDot,clear,wayDist; };
-constexpr float kWingClear=15.0f,kWingWay=8.0f;
-// Why to dash now, none when not: out of the crowd first; to a fight's goal past `range` m (not towards the enemy); a walk
-// to keep up past twice that. Never to a goal within reach of a walk (its fixed launch speed overshoots), along a way
-// blocked ahead or turning soon.
-inline Why WingWhy(const WingGoal& g,float range) noexcept {
-    if(g.pressed)return Why::evade;
-    if(!(range>0.0f) || !std::isfinite(g.goalDist) || g.clear<kWingClear || g.wayDist<kWingWay)return Why::none;
-    if(g.urgent)return g.goalDist>range && (!g.threat || g.threatDot<0.5f) ? Why::goal : Why::none;
-    return g.goalDist>2.0f*range && (!g.threat || g.threatDot<0.5f) ? Why::follow : Why::none;
+
+// The route straight ahead (the dash's direction and whether a dash fits it). The ground route is a chain of 2 m grid
+// cells (ground_navigation.h Navigate: every cell of the path, no corners collapsed), so its next waypoint is always
+// within ~3 m and the way to it one of 8 grid directions: neither says where the walk goes over the dash's ~17 m. The run
+// is the farthest point of the path ahead, up to `most` m, every point before which lies within `slack` m of the line
+// from `from` to it (a straight corridor, the walk's own): its length over the ground, `dir` the horizontal way along it
+// (0 and dir untouched with no path). P: any point with x / z (navigation::Point).
+template<class P>
+inline float StraightRun(const float* from,const P* pts,int n,float most,float slack,float* dir) noexcept {
+    if(!pts || n<=0 || !(most>0.0f) || !(slack>=0.0f))return 0.0f;
+    float bestX=0.0f,bestZ=0.0f,best=0.0f;
+    for(int k=0;k<n;++k) {
+        const float ex=pts[k].x-from[0],ez=pts[k].z-from[2],len=std::sqrt(ex*ex+ez*ez);
+        if(!std::isfinite(len))break;
+        if(len<1e-3f)continue;
+        bool straight=true;
+        for(int i=0;i<k && straight;++i) {   // each point before it within `slack` of the line from `from` (ahead of it)
+            const float px=pts[i].x-from[0],pz=pts[i].z-from[2];
+            const float along=(px*ex+pz*ez)/len,off=std::fabs(px*ez-pz*ex)/len;
+            straight=off<=slack && along>=-slack && along<=len+slack;
+        }
+        if(!straight)break;
+        if(len>=most){bestX=ex/len*most;bestZ=ez/len*most;best=most;break;}
+        bestX=ex;bestZ=ez;best=len;
+    }
+    if(!(best>0.0f))return 0.0f;
+    dir[0]=bestX/best;dir[1]=0.0f;dir[2]=bestZ/best;
+    return best;
+}
+constexpr float kRunLook=30.0f,kRunSlack=1.5f;   // m: how far the run is looked for; off its line a cell may lie
+
+// What the walk is for: keeping up (a formation, its post, a support follow), a fight (to its combat spot), a falling
+// back or the player's order (a move / attack-move), the last the dash's first call.
+enum class Need : std::uint8_t { keepUp, fight, order };
+inline const char* NeedName(Need n) noexcept { return n==Need::order ? "order" : n==Need::fight ? "fight" : "keep-up"; }
+// Why a long walk was not dashed (the log's `because=`): none dashed it.
+enum class Block : std::uint8_t { none, tooNear, turn, wall, enemyAhead, firing };
+inline const char* BlockName(Block b) noexcept {
+    switch(b) {
+    case Block::tooNear: return "near";
+    case Block::turn: return "route turns";
+    case Block::wall: return "wall ahead";
+    case Block::enemyAhead: return "towards enemy";
+    case Block::firing: return "firing";
+    case Block::none: break;
+    }
+    return "none";
+}
+// Its situation this frame: `pressed` the crowd response backs it off (a crowd, or one in grab range); `need` what the
+// walk is for; `firing` a trigger pulled this frame (a ready weapon's shot going out: between two shots of a single-shot,
+// charging or reloading weapon it is not); `threat` an enemy within twice the danger reach, `threatDot` the cosine between
+// the dash and the way to it; `left` m it still has to walk (to the goal less where its walk stops); `run` m the route
+// goes straight ahead (StraightRun); `clear` m free along the run at the waist.
+struct WingGoal { bool pressed; Need need; bool firing,threat; float left,run,threatDot,clear; };
+constexpr float kWingClear=15.0f;   // m free ahead: the dash carries ~17 m (docs/npc-mobility-re.md §2, L)
+constexpr float kWingRun=12.0f;     // m of straight route: shorter, the dash would leave the walk's way
+// How far a walk must have left before a dash: `range` for a fight's or an order's, twice that to keep up.
+inline float WingFar(Need n,float range) noexcept { return n==Need::keepUp ? 2.0f*range : range; }
+struct WingVerdict { Why why; Block block; };
+// Why to dash now (`why`), or the first reason not to (`block`): out of the crowd first; else a walk with more than
+// WingFar left, along a route straight for kWingRun m and clear kWingClear m, not towards the nearest enemy (unless the
+// player ordered the walk), and not while a shot goes out unless the walk outranks the shot: a falling back or an order,
+// or a fight's walk past twice `range` (it is far out of place; one frame's shot gives way, the aim is kept through the
+// dash: §2, +0x5D0 bit 1 clear). Never a walk within WingFar (its fixed launch overshoots it).
+inline WingVerdict WingDecide(const WingGoal& g,float range) noexcept {
+    if(g.pressed)return {Why::evade,Block::none};
+    if(!(range>0.0f) || !std::isfinite(g.left) || g.left<=WingFar(g.need,range))return {Why::none,Block::tooNear};
+    const bool priority=g.need==Need::order || g.left>2.0f*range;
+    if(g.firing && !priority)return {Why::none,Block::firing};
+    if(!(g.run>=kWingRun))return {Why::none,Block::turn};
+    if(!(g.clear>=kWingClear))return {Why::none,Block::wall};
+    if(g.need!=Need::order && g.threat && g.threatDot>=0.5f)return {Why::none,Block::enemyAhead};
+    return {g.need==Need::keepUp ? Why::follow : Why::goal,Block::none};
 }
 
 // --- Fencer ---
