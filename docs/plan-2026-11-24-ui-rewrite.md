@@ -100,6 +100,8 @@
 - 带记忆方案出击：本部等生成器完成（地图「本关出动」行显示进度 / 失败），房间里房主的开始由 room_sync 闸门挂起到全员文件就绪（整备状态条显示挂起原因）。
 - 失去输入不再静默保存（放弃并下次说明）；切方案原子化；武器写入单一路径；状态条；载具页开火键显示真实按键；小队页签可用键盘 / 手柄切换。
 - 已做（2026-11-24，feat/ui3-hostrules）：房主的 SupportDisabled / SupportPtScale 经房间字 v4 同步给成员，客人的「我的呼叫 / 房主规则」面板显示房主的规则与价格；房间协议 16（见 `docs/armory-re.md` §6）。
+- 已做（2026-11-24，feat/ui3-graft）：机甲 / 喷气机的菜单键指向合并模型（机体 + 所装武器 / 外挂弹体，`pylib/menu_graft.py`，一个 `.MRAB`），战斗键不动；标注框按模型上的骨骼点投影排布（`src/menu_callouts.h`，`docs/unified-model-re.md` §3.1 / §6、`docs/room-3d-preview-re.md` §6.4），未实机。
+- 已做（2026-11-24，feat/ui3-squad）：小队页签同屏显示 4 人（另建 3 个 `UiHQ_3DModelView`，签名守护），脚下选中圈，点列选人（`docs/room-3d-preview-re.md` §6.3），未实机；实机待查项见同文 §7。
 
 ## 3. 风险（直说）
 
