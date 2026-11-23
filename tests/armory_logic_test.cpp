@@ -264,6 +264,24 @@ void Scripted() {
         r.a.hole=skin::Rect{};
         Build(r.s,r.pages,3,r.ps,r.w,&v);
         Check(v.layer[0].holeQuads==0 && v.layer[0].hole.W()==0,"no hole");
+        // the status strip: the lines under the hint bar, side by side, a warning in its colour, at most kStatusMost
+        StatusLines st;
+        for(int i=0;i<kStatusMost+2;++i)st.Add(i==1 ? L"warn" : L"line",i==1);
+        st.Add(L"",false);
+        Check(st.n==kStatusMost,"status lines capped");
+        Build(r.s,r.pages,3,r.ps,r.w,&v,&st);
+        int under=0,warned=0;
+        float lastX=-1;
+        bool ordered=true;
+        for(int i=0;i<v.layer[0].nt;++i){
+            const Text& t=v.layer[0].texts[i];
+            if(t.y<skin::layout::kHint.y1)continue;
+            ++under;
+            if(t.argb==kStatusWarn)++warned;
+            ordered=ordered && t.x>lastX && t.maxW>0;
+            lastX=t.x;
+        }
+        Check(under==kStatusMost && warned==1 && ordered,"status strip under the hint bar");
     }
     // sub tabs
     {

@@ -9,6 +9,7 @@
 #include "armory_draw.h"
 #include "armory_logic.h"
 #include "armory_presets.h"
+#include "host_settings.h"
 #include "ini_text.h"
 #include "loadout_file.h"
 #include "loadout_store.h"
@@ -16,6 +17,9 @@
 #include "player_slots.h"
 #include "room_dialog_logic.h"
 #include "room_preview.h"
+#include "room_pvp.h"
+#include "room_sync.h"
+#include "room_ui_logic.h"
 #include "support_call.h"
 #include "support_config.h"
 #include "support_pages.h"
@@ -290,6 +294,18 @@ bool latched=false;           // closed with one of its keys still held: the scr
 bool pvpAsked=false;
 rm::IniRead iniRead=nullptr;  // room_ui's ini reader (a preset switch reloads the support pages through it)
 void* iniContext=nullptr;
+bool openRoomNow=false;       // the screen it is open on is the room (the status strip's room lines)
+// The status strip under the hint bar (ar::StatusLines; the old room menu's status lines, room_ui_logic.h
+// ComposeStatus): the last save's result while open, the generator, the PvP start held, the host's settings and the
+// room's sync. The generator's state is read from its status file: polled at most every kGenPollMs.
+wchar_t saveNote[ar::kTextMost]{};
+bool saveWarn=false;
+constexpr ULONGLONG kGenPollMs=500;
+ULONGLONG genPolled=0;
+GenerateStatus genNow{};
+// Edits dropped because the game took the screen away (a dialog, a transition, the screen ending): said at the next
+// open (docs/armory-re.md).
+int editsDropped=0;
 
 // The pages' saver: the lines written as one batch through the loadout store (all or none), the variants then generated
 // (the same path as a preset switch, armory_presets.cpp Switch).
@@ -302,10 +318,20 @@ bool SaveSupport(void*,const crew::roomui::SaveItem* items,int n,wchar_t* why,st
     if(!SaveSupportLoadouts(lines,n,&failed,why,cap)) {
         Log("ARMORY support save refused at %d (%ls): %ls (nothing written)",failed,
             failed>=0 && failed<n && items[failed].unit ? items[failed].unit : L"-",why ? why : L"");
+        _snwprintf_s(saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaveFailed),why && *why ? why : L"-");
+        saveWarn=true;
         return false;
     }
     wchar_t gen[160]{};
-    if(!StartVariantGeneration(gen,std::size(gen)))Log("ARMORY the variant generator not started: %ls",gen);
+    if(!StartVariantGeneration(gen,std::size(gen))) {
+        Log("ARMORY the variant generator not started: %ls",gen);
+        _snwprintf_s(saveNote,_TRUNCATE,hudtext::Tr(Tx::roomGenStartFailed),gen);
+        saveWarn=true;
+    } else {
+        _snwprintf_s(saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaved),n);
+        saveWarn=false;
+    }
+    genPolled=0;   // the generator just started: its line now, not half a second late
     Log("ARMORY support saved: %d lines",n);
     return true;
 }
@@ -417,8 +443,28 @@ void FillWords() noexcept {
     words.unsavedActions[ar::kUnsavedBack]=hudtext::Tr(Tx::spUnsavedBack);
 }
 
+// The status strip, in order: the start held (the room's PvP lock), the last save, the generator, the room's sync, the
+// host's settings (as many as ar::kStatusMost).
+void FillStatus(ar::StatusLines* out) noexcept {
+    *out=ar::StatusLines{};
+    wchar_t line[ar::kTextMost];
+    if(openRoomNow && RoomPvpWaitingLine(line,std::size(line)))out->Add(line,true);
+    out->Add(saveNote,saveWarn);
+    const ULONGLONG now=GetTickCount64();
+    if(!genPolled || now-genPolled>=kGenPollMs){genNow=VariantGenerationStatus();genPolled=now;}
+    if(crew::roomui::GenerateLine(genNow,line,std::size(line)))
+        out->Add(line,genNow.state==GenerateState::failed || genNow.state==GenerateState::missing);
+    if(!openRoomNow)return;
+    roomsync::SyncLine sync[ar::kStatusMost]{};
+    const int nsync=roomsync::RoomSyncLines(sync,ar::kStatusMost);
+    for(int i=0;i<nsync;++i)out->Add(sync[i].text,sync[i].warn);
+    const int nhost=HostSettingsLines(sync,ar::kStatusMost);
+    for(int i=0;i<nhost;++i)out->Add(sync[i].text,sync[i].warn);
+}
+ar::StatusLines statusLines;
+
 void Publish(bool open) noexcept {
-    if(open)ar::Build(state,kPages,kPageCount,presets,words,&building);
+    if(open){FillStatus(&statusLines);ar::Build(state,kPages,kPageCount,presets,words,&building,&statusLines);}
     else building.Clear();
     building.open=open;
     {
@@ -426,6 +472,17 @@ void Publish(bool open) noexcept {
         std::memcpy(static_cast<void*>(&published),&building,sizeof(ar::View));
     }
     drawOn.store(open ? openOn : nullptr);
+}
+
+// The game took the screen away under an open 整备 (no input: a dialog / transition over it; the screen changed or
+// ended; Forget): there is nobody to ask "save or discard" (Popup::unsaved), and saving silently is not what the
+// player chose. The pages' unsaved edits are discarded, logged, and said at the next open.
+void DropEdits(const char* why) noexcept {
+    if(!state.open)return;
+    int dropped=0;
+    for(ar::Page* p:kPages)
+        if(p->Dirty()){p->Discard();++dropped;Log("ARMORY unsaved edits on the %ls page discarded (%s)",p->Name(),why);}
+    editsDropped+=dropped;
 }
 
 void CloseNow(const char* why) noexcept {
@@ -537,18 +594,27 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
     pvpAsked=false;
     mapAsked=false;
     openRoom=room;
+    openRoomNow=room;
+    saveNote[0]=0;saveWarn=false;genPolled=0;
     if(tab>=0 && tab<kPageCount)state.tab=tab;
     wchar_t why[160]{};
-    if(!armorypresets::Load(why,std::size(why))) {
-        wchar_t note[ar::kTextMost];
-        _snwprintf_s(note,_TRUNCATE,hudtext::Tr(Tx::armoryPresetsOff),why);
-        ar::Note(state,note);
-    }
+    const bool presetsOn=armorypresets::Load(why,std::size(why));
     armorypresets::Fill(&presets);
     openOn=self;
     gone.store(nullptr);
     latched=true;
-    ar::Open(state,ReadInput(true),state.tab);
+    ar::Open(state,ReadInput(true),state.tab);   // resets the state, its note too: the notes below come after
+    if(!presetsOn) {
+        wchar_t note[ar::kTextMost];
+        _snwprintf_s(note,_TRUNCATE,hudtext::Tr(Tx::armoryPresetsOff),why);
+        ar::Note(state,note);
+    }
+    if(editsDropped) {
+        wchar_t note[ar::kTextMost];
+        _snwprintf_s(note,_TRUNCATE,hudtext::Tr(Tx::armoryEditsDropped),editsDropped);
+        ar::Note(state,note);
+        editsDropped=0;
+    }
     wantText.store(true);
     Publish(true);
     Log("ARMORY opened on the %s screen %p (%d presets)",room ? "room" : "HQ",static_cast<void*>(self),presets.count);
@@ -556,14 +622,18 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
 bool IsOpen() noexcept { return state.open; }
 
 bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
-    if(state.open && (self!=openOn || gone.load()==openOn)){CloseNow("its screen changed or ended");latched=false;}
+    if(state.open && (self!=openOn || gone.load()==openOn)) {
+        DropEdits("its screen changed or ended");
+        CloseNow("its screen changed or ended");
+        latched=false;
+    }
     if(!state.open) {
         if(!latched)return false;
         latched=AnyHeld(ReadInput(toggleDown));
         return latched;
     }
     if(!hasInput) {   // something of the game's opened over the screen (a dialog, a sub-screen, a transition)
-        for(ar::Page* p:kPages)p->Commit(nullptr,0);
+        DropEdits("the screen lost its input");
         CloseNow("the screen lost its input");
         latched=false;
         return false;
@@ -638,6 +708,7 @@ int TakeOpenAsk() noexcept {
 }
 
 void Forget() noexcept {
+    DropEdits("forgotten");
     CloseNow("forgotten: a mission starting, the screen left or the plugin off");
     latched=false;
     pvpAsked=false;

@@ -199,6 +199,22 @@ struct Words {
     const wchar_t* unsavedActions[3]{};       // save and close, discard and close, back
 };
 
+// The status strip under the hint bar (the old room menu's status lines): the start held back and why, the last
+// save's result, the variant generator, the host's settings, the room's sync, the PvP wait. The runtime fills it each
+// frame (armory.cpp FillStatus); at most kStatusMost, in the order added, a warning drawn orange-red.
+inline constexpr int kStatusMost=4;
+struct StatusLines {
+    wchar_t text[kStatusMost][kTextMost]{};
+    bool warn[kStatusMost]{};
+    int n=0;
+    void Add(const wchar_t* line,bool isWarn) noexcept {
+        if(n>=kStatusMost || !line || !*line)return;
+        CopyText(text[n],kTextMost,line);
+        warn[n++]=isWarn;
+    }
+};
+inline constexpr std::uint32_t kStatusWarn=0xFFE05A3Cu;
+
 enum class Popup : std::uint8_t { none,actions,confirmDelete,rename,unsaved };
 enum PopupAction : int { kActNew,kActCopy,kActRename,kActDelete,kActStore,kActCount };
 enum UnsavedAction : int { kUnsavedSave,kUnsavedDiscard,kUnsavedBack,kUnsavedCount };
@@ -597,7 +613,8 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
 }
 
 // The frame's picture of the screen (the UI thread builds it, the render thread paints it: src/armory_draw.cpp).
-inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps,const Words& w,View* out) noexcept {
+inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps,const Words& w,View* out,
+                  const StatusLines* status=nullptr) noexcept {
     using namespace detail;
     namespace L=skin::layout;
     out->Clear();
@@ -694,6 +711,13 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     base.Say(own ? own : w.hints[hint],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
     if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
     else if(page.Dirty())base.Say(w.unsaved,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+    // status strip: under the hint bar, the lines side by side
+    if(status && status->n>0){
+        const float x0=L::kHint.x0+40, width=(L::kHint.x1-40-x0)/static_cast<float>(status->n);
+        for(int i=0;i<status->n;++i)
+            base.Say(status->text[i],x0+width*static_cast<float>(i),L::kHint.y1+8,20,status->warn[i] ? kStatusWarn : skin::kText,
+                     Align::left,status->warn[i],width-24);
+    }
     // popup
     if(s.popup==Popup::none)return;
     Layer& top=out->layer[1];

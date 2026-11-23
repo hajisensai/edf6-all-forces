@@ -1231,6 +1231,7 @@ HUDTEXT(armoryPvp,L"Versus settings",L"对战设置",L"對戰設定",L"対戦設
 HUDTEXT(armoryPvpOpen,L"Open",L"打开",L"開啟",L"開く")
 HUDTEXT(armoryWorldMap,L"Missions: pick on the world map (mission select)",L"任务：在世界地图（任务选择）里挑选",L"任務：在世界地圖（任務選擇）裡挑選",L"ミッション：世界地図（ミッション選択）で選ぶ")
 HUDTEXT(armoryPresetsOff,L"Presets unavailable: %ls",L"方案不可用：%ls",L"方案不可用：%ls",L"プリセット使用不可：%ls")
+HUDTEXT(armoryEditsDropped,L"The game closed the armory: %d page(s) of unsaved edits discarded",L"游戏界面打断了整备：%d 页未保存的修改已放弃",L"遊戲介面打斷了整備：%d 頁未儲存的修改已放棄",L"ゲーム画面に整備を中断されました：未保存の変更 %d ページ分を破棄しました")
 HUDTEXT(armoryWpNone,L"No weapons here (filters?)",L"没有符合的武器（看看筛选）",L"沒有符合的武器（看看篩選）",L"該当する武器なし（絞り込みを確認）")
 HUDTEXT(armoryWpAll,L"All",L"全部",L"全部",L"すべて")
 HUDTEXT(armoryWpSearch,L"Search (Tab)",L"搜索（Tab）",L"搜尋（Tab）",L"検索（Tab）")
