@@ -45,6 +45,21 @@ bool InstallPreviewHooks() noexcept {UnexpectedRoomDependency();return false;}
 void ShowPreview(const PreviewSpec&) noexcept {UnexpectedRoomDependency();}
 void HidePreview() noexcept {++nativePreviewHides;}
 void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
+void SetViewPlacement(const ViewRect&,const ViewCamera&) noexcept {UnexpectedRoomDependency();}
+void ClearViewPlacement() noexcept {}
+}
+// The 整备 menu (armory.cpp): never opened by this fixture, so dropping / forgetting it is a no-op.
+namespace armoryui {
+bool Install() noexcept {UnexpectedRoomDependency();return false;}
+void Open(unsigned char*,bool,const roommenu::Menu*,roommenu::IniRead,void*,bool,int) noexcept {UnexpectedRoomDependency();}
+bool IsOpen() noexcept {return false;}
+bool Frame(unsigned char*,bool,bool) noexcept {UnexpectedRoomDependency();return false;}
+bool PreviewWanted(roompreview::PreviewSpec*,roompreview::ViewRect*,roompreview::ViewCamera*,bool*) noexcept {UnexpectedRoomDependency();return false;}
+bool TakePvpRequest() noexcept {UnexpectedRoomDependency();return false;}
+bool TakeMapRequest() noexcept {UnexpectedRoomDependency();return false;}
+int TakeOpenAsk() noexcept {UnexpectedRoomDependency();return -1;}
+void Forget() noexcept {}
+void ScreenGone(unsigned char*) noexcept {}
 }
 // The native dialogs (room_dialog.cpp): not ready here, so the menu keeps its overlay path this fixture drives; with no
 // dialog open, closing / forgetting one is a no-op.
@@ -437,14 +452,14 @@ void ScreenLifecycle() {
     const wchar_t* caption=st.nativeLabel;
     NativeEntryDisplay(fixture.screen,false);
     st.menu.open=true;st.previewShown=true;st.switches.syncing=true;
-    st.gate.latched=true;st.written.valid=true;st.drew=true;
+    st.gate.latched=true;st.written.valid=true;
     st.nativeEntry.requested=true;
     ForgetMenu();
     Check(st.self==fixture.screen && followed.load()==fixture.screen && st.nativeEntry.attempted &&
           st.nativeEntry.ready && st.nativeLabel==caption,
           "mission reset preserves a retained native room's button and weak action identity");
     Check(!st.menu.open && !st.previewShown && !st.nativeEntry.enabled && !st.nativeEntry.requested &&
-          !st.gate.latched && !st.written.valid && !st.drew,
+          !st.gate.latched && !st.written.valid,
           "mission reset drops menu, preview, input and queued requests without extending native state");
     Check(nativePreviewHides==1 && nativeSyncLeaves==1,"mission reset releases active preview and room synchronization once");
     EnsureNativeEntry(fixture.screen);ForgetMenu();EnsureNativeEntry(fixture.screen);
