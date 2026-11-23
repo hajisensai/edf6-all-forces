@@ -8,9 +8,11 @@
 //   中间   头两行页面自己画：类别标签（A / D、右摇杆左右，或点），来源开关 EDF6 / EDF5 / EDF4.1 与搜索框（点）。
 //          下面是本槽的武器列表：同系列两把以上折叠成「▸ 系列名 持有 n/m Lv a–b」，确认键展开 / 折叠；单把或展开后的
 //          成员确认键直接装备（像原版一样立即写进 GameStatus，没有「保存」一步）；超过等级上限、未持有、本兵种别的槽
-//          已装（不可重复的槽）的灰显，确认时在提示栏说原因。◆ 本槽装着，★ 收藏。
+//          已装（不可重复的槽）的灰显，确认时在提示栏说原因。◆ 本槽装着，★ 收藏；值前的 NEW / UP 与原版选择界面同一判定
+//          （WeaponRecord flags，只读不清，wlist::BadgeOf）。
 //   详情   上方 7 行留给 3D 预览（Hole：玩家拿着光标所指的武器，只能显示当前兵种），下面是操作与筛选：装备 / 展开、
-//          收藏、来源、显示未持有、只看收藏，以及与本槽当前装备的属性对比（现在只有等级，▲ 光标这把更好 ▼ 更差）。
+//          收藏、来源、显示未持有、只看收藏，以及与本槽当前装备的对比：等级，和原版说明栏的每一行属性（数据与格式同
+//          0xD8A90 / 0xD9B80，按标签配对；▲ 光标这把更好 ▼ 更差 = 相同，说不出方向的不标）。
 // 搜索不做屏幕键盘：键盘按 Tab（或点搜索框）直接打字，Enter 保留、Esc 清空；手柄用首字跳转（PgUp / PgDn、右摇杆
 // 上下）在列表里按名字首字循环跳。搜索的匹配不分大小写与全半角，片假名与平假名等同（wlist::Fold）。
 #include "armory_logic.h"
@@ -19,6 +21,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -39,6 +43,8 @@ public:
     // 3D 预览让玩家拿这一把（cls 是当前兵种时才有意义）；row -1 空手。
     virtual void Preview(int cls,int slot,int row) noexcept=0;
     virtual void SaveFavourites(const std::set<std::wstring>& ids) noexcept=0;
+    // 原版说明栏的属性（wlist::WeaponSpec，按该行当前星级）；false：读不到。
+    virtual bool ReadSpec(int row,wlist::WeaponSpec* out) noexcept=0;
 protected:
     ~Game()=default;
 };
@@ -64,6 +70,8 @@ struct Texts {
     const wchar_t* on=L"On";
     const wchar_t* off=L"Off";
     const wchar_t* level=L"Level";
+    const wchar_t* badgeNew=L"NEW";             // 原版 WeaponNew
+    const wchar_t* badgeUp=L"UP";               // 原版 WeaponUp
     const wchar_t* previewOther=L"";            // 不是当前兵种：3D 预览只显示当前兵种
     const wchar_t* verdict[8]{};                // wlist::Verdict 顺序：装备不了的原因（ok / same / header 不用）
     const wchar_t* hints[3]{};                  // 三列的提示栏
@@ -72,7 +80,7 @@ struct Texts {
 };
 
 // 详情列的一行是什么。
-enum class Field : std::uint8_t { act, favourite, source, unowned, favouritesOnly, stat };
+enum class Field : std::uint8_t { act, favourite, source, unowned, favouritesOnly, level, spec };
 
 // 来源开关：EDF6 / EDF5 / EDF4.1（别的 mod 追加的行跟 EDF6 一起开关）。
 inline constexpr unsigned kSourceBits[3]={(1u<<wlist::kSourceEdf6)|(1u<<wlist::kSourceOther),1u<<wlist::kSourceEdf5,
@@ -119,6 +127,7 @@ public:
             have_[c]=Ready() && game_->Read(c,&loadout_[c]);
             if(!have_[c])loadout_[c]=wlist::Loadout{};
         }
+        specs_.clear();   // 星级可能变了
         ++gen_;
     }
 
@@ -157,6 +166,7 @@ public:
             else
                 std::swprintf(out->value,kTextMost,L"%ls %d/%d  Lv%d\x2013%d",texts_->owned,ln->owned,ln->shown,
                               ln->levelMin,ln->levelMax);
+            Prefix(out->value,ln->badge);
             const int cap=loadout_[p.sub].levelCap;
             out->dim=ln->owned==0 || (cap>=0 && static_cast<unsigned>(ln->levelMin)>static_cast<unsigned>(cap));
         }else{
@@ -165,6 +175,7 @@ public:
             if(ln->favourite)label+=L"\x2605";
             label+=e.Name(texts_->lang);
             std::swprintf(out->value,kTextMost,L"Lv%d",e.level);
+            Prefix(out->value,ln->badge);
             out->dim=ln->verdict!=wlist::Verdict::ok && ln->verdict!=wlist::Verdict::same;
             out->acts=true;
         }
@@ -205,14 +216,24 @@ public:
             CopyText(out->value,kTextMost,favouritesOnly_ ? texts_->on : texts_->off);
             out->steps=out->acts=true;
             break;
-        case Field::stat:{
-            const wlist::StatDiff d=Compare(p);
+        case Field::level:{
+            const wlist::Entry* e=catalog_->ByRow(Equipped(p.sub,p.row));
             CopyText(out->label,kTextMost,texts_->level);
-            wchar_t a[16]=L"\x2014", b[16]=L"\x2014";
-            if(d.equipped)std::swprintf(a,16,L"%d",static_cast<int>(*d.equipped));
-            if(d.candidate)std::swprintf(b,16,L"%d",static_cast<int>(*d.candidate));
-            std::swprintf(out->value,kTextMost,L"%ls \x2192 %ls %ls",a,b,
-                          d.better>0 ? L"\x25B2" : d.better<0 ? L"\x25BC" : L"=");
+            std::optional<std::wstring> a,b;
+            if(e)a=std::to_wstring(e->level);
+            if(ln)b=std::to_wstring(catalog_->entries[ln->entry].level);
+            const int better=a && b && e->level!=catalog_->entries[ln->entry].level ?
+                             (catalog_->entries[ln->entry].level>e->level ? 1 : -1) : 0;
+            CopyName(out->value,Versus(a,b,better));
+            out->dim=true;
+            break;
+        }
+        case Field::spec:{
+            const std::vector<wlist::SpecDiff>& ds=Diffs(p);
+            const std::size_t at=static_cast<std::size_t>(p.field-SpecStart(fs));
+            if(at>=ds.size())break;
+            CopyName(out->label,ds[at].label);
+            CopyName(out->value,Versus(ds[at].equipped,ds[at].candidate,ds[at].better));
             out->dim=true;
             break;
         }
@@ -241,7 +262,7 @@ public:
         switch(fs[static_cast<std::size_t>(p.field)]){
         case Field::act:return Act(p);
         case Field::source:return false;
-        case Field::stat:return false;
+        case Field::level:case Field::spec:return false;
         default:return Step(p,1);
         }
     }
@@ -409,6 +430,11 @@ private:
     bool lastKnown_=false;
     wlist::LineKey lastKey_{};
     Field lastField_=Field::act;
+    // 属性：每行一份（Refresh 清）；当前对比
+    mutable std::map<int,std::optional<wlist::WeaponSpec>> specs_;
+    mutable std::vector<wlist::SpecDiff> diffs_;
+    mutable int diffHad_=-2,diffWant_=-2;
+    mutable unsigned diffGen_=0;
     // 3D 预览当前让玩家拿着的
     int shownClass_=-1,shownSlot_=-1,shownRow_=-1;
 
@@ -449,19 +475,53 @@ private:
         fs.push_back(Field::source);
         fs.push_back(Field::unowned);
         fs.push_back(Field::favouritesOnly);
-        if(ln && ln->kind!=wlist::LineKind::series)fs.push_back(Field::stat);
+        if(ln && ln->kind!=wlist::LineKind::series){
+            fs.push_back(Field::level);
+            fs.insert(fs.end(),Diffs(p).size(),Field::spec);
+        }
         return fs;
     }
-    wlist::StatDiff Compare(const Pos& p) const {
+    static int SpecStart(const std::vector<Field>& fs) noexcept {
+        for(std::size_t i=0;i<fs.size();++i)if(fs[i]==Field::spec)return static_cast<int>(i);
+        return static_cast<int>(fs.size());
+    }
+    // 一行武器的属性（读一次，Refresh 时清）；读不到为空。
+    const wlist::WeaponSpec* SpecOf(int row) const {
+        if(row<0 || !Ready())return nullptr;
+        auto it=specs_.find(row);
+        if(it==specs_.end()){
+            wlist::WeaponSpec spec;
+            std::optional<wlist::WeaponSpec> got;
+            if(game_->ReadSpec(row,&spec))got=std::move(spec);
+            it=specs_.emplace(row,std::move(got)).first;
+        }
+        return it->second ? &*it->second : nullptr;
+    }
+    // 本槽装着的 vs 光标所在的（光标是武器行时）。
+    const std::vector<wlist::SpecDiff>& Diffs(const Pos& p) const {
         const wlist::Line* ln=LineAt(p);
-        const wlist::Entry* had=catalog_->ByRow(Equipped(p.sub,p.row));
-        const wlist::WeaponStats a=had ? wlist::StatsOf(*had) : wlist::WeaponStats{};
-        const wlist::WeaponStats b=ln ? wlist::StatsOf(catalog_->entries[ln->entry]) : wlist::WeaponStats{};
-        for(const wlist::StatDiff& d:wlist::CompareStats(a,b))
-            if(d.stat==wlist::Stat::level)return d;
-        wlist::StatDiff d;
-        d.equipped=a[wlist::Stat::level];d.candidate=b[wlist::Stat::level];
-        return d;
+        const int had=Equipped(p.sub,p.row);
+        const int want=ln && ln->kind!=wlist::LineKind::series ? ln->row : -1;
+        if(had!=diffHad_ || want!=diffWant_ || gen_!=diffGen_){
+            diffs_=want>=0 ? wlist::CompareSpecs(SpecOf(had),SpecOf(want)) : std::vector<wlist::SpecDiff>{};
+            diffHad_=had;diffWant_=want;diffGen_=gen_;
+        }
+        return diffs_;
+    }
+    static std::wstring Versus(const std::optional<std::wstring>& a,const std::optional<std::wstring>& b,int better) {
+        std::wstring v=a ? *a : L"\x2014";
+        v+=L" \x2192 ";
+        v+=b ? *b : L"\x2014";
+        if(a && b)v+=better>0 ? L" \x25B2" : better<0 ? L" \x25BC" : *a==*b ? L" =" : L"";
+        return v;
+    }
+    void Prefix(wchar_t* value,wlist::Badge badge) const noexcept {
+        const wchar_t* tag=badge==wlist::Badge::fresh ? texts_->badgeNew : badge==wlist::Badge::up ? texts_->badgeUp : nullptr;
+        if(!tag || !tag[0])return;
+        std::wstring v(tag);
+        v+=L"  ";
+        v+=value;
+        CopyName(value,v);
     }
     void SourceText(wchar_t* out) const noexcept {
         if(sources_==0xFu){CopyText(out,kTextMost,texts_->all);return;}

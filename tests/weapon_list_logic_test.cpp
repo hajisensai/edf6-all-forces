@@ -1,6 +1,6 @@
 // 武器页纯逻辑（src/weapon_list_logic.h）与生成数据（src/weapon_series.inc）离线测试：生成数据自洽（系列连续、按等级排、
 // 槽位与 SoldierInit 规则一致、名字齐全）；小表上的折叠 / 展开、持有 / 上限 / 重复 / 槽位判定、搜索（全半角、大小写）、
-// 来源与收藏筛选、光标移动与重建后归位、收藏读写、属性对比；以及在整份生成数据上随机筛选后列表的不变式。
+// 来源与收藏筛选、NEW / UP 标记、光标移动与重建后归位、收藏读写、属性格式（同原版 0xD9B80）与对比；以及在整份生成数据上随机筛选后列表的不变式。
 #include "../src/weapon_list_logic.h"
 #include <cstdio>
 #include <cstdlib>
@@ -281,17 +281,72 @@ void ClassSlots() {
     }
 }
 
-void Stats() {
-    WeaponStats a,b;
-    a[Stat::level]=10;b[Stat::level]=20;
-    a[Stat::reload]=2.0;b[Stat::reload]=1.5;
-    b[Stat::damage]=100;
-    const auto d=CompareStats(a,b);
-    Check(d.size()==3,"stats present on either side");
-    Check(d[0].stat==Stat::level && d[0].better==1,"higher level better");
-    Check(d[1].stat==Stat::damage && d[1].better==0 && !d[1].equipped,"one-sided");
-    Check(d[2].stat==Stat::reload && d[2].better==1,"shorter reload better");
-    Check(CompareStats(a,a)[0].better==0,"equal");
+SpecParam Arr(float v,int curve,int type=0,bool isFloat=true) {
+    SpecParam p;
+    p.value=v;p.curve=curve;p.type=type;p.isFloat=isFloat;p.star=5;p.maxStar=5;
+    return p;
+}
+SpecLine Spec(const wchar_t* label,const wchar_t* format,std::vector<SpecParam> params) {
+    SpecLine ln;
+    ln.label=label;ln.format=format;ln.params=std::move(params);ln.nodes=2+static_cast<int>(ln.params.size());
+    return ln;
+}
+
+void Badges() {
+    Check(BadgeOf(0)==Badge::none && BadgeOf(1)==Badge::none,"no bits");
+    Check(BadgeOf(1|4)==Badge::fresh && BadgeOf(1|4|8)==Badge::fresh,"bit2 without bit1: NEW (state 1)");
+    Check(BadgeOf(1|2|4)==Badge::none && BadgeOf(1|2|4|8)==Badge::up,"bit1: 2 + bit3");
+    Check(BadgeOf(1|8)==Badge::up,"bit3 alone: state 4");
+    // 列表：成员的标记，系列行取 NEW 优先。
+    Catalog c=Small();
+    Loadout l;
+    l.owned=[](int){return true;};
+    l.badge=[](int row){return row==101 ? Badge::up : row==102 ? Badge::fresh : Badge::none;};
+    Filter f;
+    ExpandState x;
+    auto lines=BuildList(c,l,f,x);
+    Check(!lines.empty() && lines[0].kind==LineKind::series && lines[0].badge==Badge::fresh,"series takes NEW first");
+    x.Open(lines[0].series);
+    lines=BuildList(c,l,f,x);
+    Check(lines[1].badge==Badge::none && lines[2].badge==Badge::up && lines[3].badge==Badge::fresh,"children");
+    l.badge=nullptr;
+    Check(BuildList(c,l,f,x)[0].badge==Badge::none,"no reader: no badge");
+}
+
+void Specs() {
+    // 格式与 0xD9B80 相同：小数按大小取位数，整数四舍五入，60/值，精度等级。
+    Check(FormatSpecParam(Arr(123.4f,0))==L"123.4" && FormatSpecParam(Arr(0.5f,0))==L"0.50" &&
+          FormatSpecParam(Arr(0.05f,0))==L"0.050","decimals by size");
+    Check(FormatSpecParam(Arr(-2.0f,0))==L"-2.000","negative stays %.3f (the stock compares 0.1 <= v)");
+    Check(FormatSpecParam(Arr(2.5f,0,0,false))==L"3" && FormatSpecParam(Arr(-2.5f,0,0,false))==L"-3","round half away");
+    Check(FormatSpecParam(Arr(6.0f,1,6))==L"10.0" && FormatSpecParam(Arr(240.4f,1,7))==L"0.25","60/value");
+    Check(FormatSpecParam(Arr(0.0f,1,3))==L"S++" && FormatSpecParam(Arr(0.0005f,1,3))==L"S+" &&
+          FormatSpecParam(Arr(0.12f,1,3))==L"C+" && FormatSpecParam(Arr(1.0e8f,1,3))==L"Z","rank upper_bound");
+    Check(FormatSpecLine(Spec(L"Damage",L"$0 x $1",{Arr(10,0,0,false),Arr(3,0,0,false)}))==L"10 x 3","$n");
+    Check(FormatSpecLine(Spec(L"x",L"a$xb$9c$",{Arr(1,0)}))==L"abc","$ + non-digit dropped, out of range empty, $ at end");
+    SpecLine verbatim=Spec(L"Note",L"$0 kept",{});
+    Check(FormatSpecLine(verbatim)==L"$0 kept","two nodes: the format as is");
+    verbatim.nodes=1;
+    Check(FormatSpecLine(verbatim).empty(),"one node: no value");
+    // 对比：按标签配对，方向看曲线。
+    const WeaponSpec had{Spec(L"Damage",L"$0",{Arr(100,0)}),Spec(L"Reload",L"$0",{Arr(2.0f,1)}),
+                         Spec(L"Ammo",L"$0",{Arr(30,0,0,false)}),Spec(L"Only",L"$0",{Arr(1,0)})};
+    const WeaponSpec want{Spec(L"Reload",L"$0",{Arr(1.5f,1)}),Spec(L"Damage",L"$0",{Arr(90,0)}),
+                          Spec(L"Ammo",L"$0",{Arr(30,0,0,false)}),Spec(L"New",L"$0",{Arr(5,0)})};
+    const auto d=CompareSpecs(&had,&want);
+    Check(d.size()==5,"candidate lines, then the equipped-only one");
+    Check(d[0].label==L"Reload" && d[0].better==1 && *d[0].equipped==L"2.0" && *d[0].candidate==L"1.5","lower is better");
+    Check(d[1].label==L"Damage" && d[1].better==-1,"higher is better");
+    Check(d[2].better==0,"equal");
+    Check(d[3].label==L"New" && !d[3].equipped && d[3].better==0,"candidate only");
+    Check(d[4].label==L"Only" && !d[4].candidate,"equipped only");
+    // 标量没有方向；混合结论不给方向；一边是标量时用另一边的曲线。
+    SpecParam scalar;scalar.value=5;
+    Check(CompareSpecLine(Spec(L"s",L"$0",{scalar}),Spec(L"s",L"$0",{Arr(1,-1)}))==0,"scalars: no direction");
+    Check(CompareSpecLine(Spec(L"s",L"$0",{scalar}),Spec(L"s",L"$0",{Arr(9,0)}))==1,"one-sided curve");
+    Check(CompareSpecLine(Spec(L"m",L"$0$1",{Arr(1,0),Arr(1,0)}),Spec(L"m",L"$0$1",{Arr(2,0),Arr(0,0)}))==0,"mixed");
+    Check(CompareSpecs(nullptr,&want).size()==4 && CompareSpecs(&had,nullptr).size()==4 &&
+          CompareSpecs(nullptr,nullptr).empty(),"missing sides");
 }
 
 // 整份生成数据，全部行都在表里，随机持有 / 筛选 / 展开：列表不变式。
@@ -350,7 +405,8 @@ int main() {
     Lists();
     RawRows();
     ClassSlots();
-    Stats();
+    Badges();
+    Specs();
     Fuzz();
     std::printf("weapon_list_logic: %d checks passed\n",checks);
     return 0;

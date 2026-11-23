@@ -1,5 +1,5 @@
 // 整备界面武器页的纯逻辑（docs/plan-2026-11-24-ui-rewrite.md 阶段 5）：按（兵种, 槽）把武器表折叠成系列列表，
-// 带持有、等级上限、来源筛选、游戏语言名搜索、收藏、展开 / 折叠、光标，以及装备判定与属性对比。
+// 带持有、等级上限、来源筛选、游戏语言名搜索、收藏、NEW / UP 标记、展开 / 折叠、光标，以及装备判定与属性对比。
 // 无游戏依赖：运行时数据（行号、持有位、上限、当前装备）由 weapon_equip.h 读出后传进来；离线测试
 // tests/weapon_list_logic_test.cpp。
 //
@@ -14,6 +14,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cwchar>
 #include <functional>
 #include <iterator>
 #include <optional>
@@ -26,6 +28,16 @@
 namespace crew::wlist {
 
 inline constexpr int kSlotsMost=6;
+
+// ---- NEW / UP 标记（原版 0x8B519A..0x8B51D5，docs/weapon-select-re.md §5） ----
+
+enum class Badge : std::uint8_t { none, fresh, up };
+// WeaponRecord flags → 原版条目状态：(flags&6)==4 → 1（WeaponNew）；bit1 → 2+bit3；否则 bit3 ? 4 : 0。3 / 4 显示 WeaponUp。
+// 原版选择界面只读不清：bit2 / bit3 由出击时的 SetUsedWeapon（0x70FAF0 → 0xDF600 / 0xDF620）清掉。
+inline Badge BadgeOf(std::uint32_t flags) noexcept {
+    if((flags&6u)==4u)return Badge::fresh;
+    return (flags&8u) ? Badge::up : Badge::none;
+}
 
 // ---- 目录：生成数据 + 运行时行号 ----
 
@@ -146,6 +158,7 @@ struct Loadout {
     int levelCap=-1;                      // -1：没有上限（GS+0x14FC8 为 0，或 0xD8850 返回 -1）
     std::array<int,kSlotsMost> equipped{-1,-1,-1,-1,-1,-1};   // 当前兵种各槽的行（-1 空）
     std::set<std::wstring> favourites;    // WEAPONTABLE 名
+    std::function<Badge(int row)> badge;  // WeaponRecord flags 的 NEW / UP（BadgeOf）；空：不标
 };
 
 struct Filter {
@@ -267,6 +280,7 @@ struct Line {
     bool expanded=false;          // series
     bool equippedHere=false;      // 本槽装着（series：某个成员）
     bool favourite=false;
+    Badge badge=Badge::none;      // series：可见成员里有 NEW 取 NEW，否则有 UP 取 UP
     Verdict verdict=Verdict::header;
 };
 
@@ -310,6 +324,7 @@ inline std::vector<Line> BuildList(const Catalog& c,const Loadout& l,const Filte
             ln.owned=(l.owned && l.owned(e.row))?1:0;
             ln.equippedHere=e.row==here;
             ln.favourite=l.favourites.count(std::wstring(e.Id()))!=0;
+            ln.badge=l.badge ? l.badge(e.row) : Badge::none;
             ln.verdict=CheckEquip(c,l,f.cls,f.slot,e.row);
             return ln;
         };
@@ -328,6 +343,8 @@ inline std::vector<Line> BuildList(const Catalog& c,const Loadout& l,const Filte
             head.levelMax=(std::max)(head.levelMax,e.level);
             head.equippedHere=head.equippedHere || e.row==here;
             head.favourite=head.favourite || l.favourites.count(std::wstring(e.Id()))!=0;
+            const Badge b=l.badge ? l.badge(e.row) : Badge::none;
+            if(b==Badge::fresh || (b==Badge::up && head.badge==Badge::none))head.badge=b;
         }
         head.expanded=x.IsOpen(s) || !needle.empty();
         out.push_back(head);
@@ -432,42 +449,123 @@ inline void ToggleFavourite(std::set<std::wstring>* favs,std::wstring_view id) {
     if(!favs->erase(key))favs->insert(std::move(key));
 }
 
-// ---- 属性对比（装着的 vs 光标所在的） ----
+// ---- 属性（原版说明栏 0xD8A90 的数据与格式，docs/weapon-select-re.md §4） ----
+//
+// WEAPONTEXT.<语言>.SGO 的 text_table[row] = [名字, 说明, 属性表]；属性表每项 = [标签, 格式, 参数 0, 参数 1, ...]。
+// 参数是数组 [基值, 曲线|显示类型<<2, 星级下标, 星级上限, 幅度, 指数, 是否小数] 时由 0xD7CE0 按该行武器记录的星级算值，
+// 是标量时就是它本身（显示类型 0、小数）。运行时读取见 weapon_equip.h ReadSpec。
 
-enum class Stat { level, damage, ammo, reload, range, fireRate, count };
-struct WeaponStats {
-    std::array<std::optional<double>,static_cast<std::size_t>(Stat::count)> v{};
-    std::optional<double>& operator[](Stat s) { return v[static_cast<std::size_t>(s)]; }
-    const std::optional<double>& operator[](Stat s) const { return v[static_cast<std::size_t>(s)]; }
+struct SpecParam {
+    float value=0;               // 0xD7CE0 +0
+    int type=0;                  // +4：显示类型（round(n[1])>>2）。3 精度等级，6 / 7 显示 60/值
+    int star=0,maxStar=0;        // +8 / +9
+    bool isFloat=true;           // +0xC：round(n[6])!=0；标量恒为真
+    int curve=-1;                // round(n[1])&3：0 星级越高值越大，1 越高越小；-1 标量或别的曲线
 };
-inline bool HigherIsBetter(Stat s) noexcept { return s!=Stat::reload; }
+struct SpecLine {
+    std::wstring label;          // 子节点 0
+    std::wstring format;         // 子节点 1
+    int nodes=0;                 // 子节点数：<2 无值，==2 格式原样，>2 替换 $n
+    std::vector<SpecParam> params;   // 子节点 2..
+};
+using WeaponSpec=std::vector<SpecLine>;
 
-struct StatDiff {
-    Stat stat=Stat::level;
-    std::optional<double> equipped,candidate;
-    int better=0;                 // +1 光标这把更好，-1 更差，0 相同或缺一边
-};
-// 两边都没有的项不出；只有一边有的项出，better=0。
-inline std::vector<StatDiff> CompareStats(const WeaponStats& equipped,const WeaponStats& candidate) {
-    std::vector<StatDiff> out;
-    for(int i=0;i<static_cast<int>(Stat::count);++i){
-        const Stat s=static_cast<Stat>(i);
-        if(!equipped[s] && !candidate[s])continue;
-        StatDiff d;
-        d.stat=s;d.equipped=equipped[s];d.candidate=candidate[s];
-        if(d.equipped && d.candidate && *d.equipped!=*d.candidate){
-            const bool up=*d.candidate>*d.equipped;
-            d.better=(up==HigherIsBetter(s))?1:-1;
-        }
-        out.push_back(d);
+// 0x1767DE0：21 项 {标签, 阈值}，显示类型 3 取第一个阈值大于值的项（upper_bound），都不大于取最后一项。
+struct SpecRank { const wchar_t* label; float below; };
+inline constexpr SpecRank kSpecRanks[21]={
+    {L"S++",0.0005f},{L"S+",0.0025f},{L"S",0.005f},{L"A+",0.01f},{L"A",0.015f},{L"A-",0.02f},{L"B+",0.03f},{L"B",0.05f},
+    {L"B-",0.1f},{L"C+",0.15f},{L"C",0.2f},{L"C-",0.25f},{L"D",0.3f},{L"E",0.4f},{L"F",0.5f},{L"G",0.6f},{L"I",0.8f},
+    {L"J",1.0f},{L"K",1.2f},{L"L",1.4f},{L"Z",10000000.0f}};
+
+// 0xD9B80 的四舍五入：|x| 加 0.5 截断，符号跟 x。
+inline int SpecRound(float v) noexcept { return static_cast<int>(v>=0.0f ? v+0.5f : v-0.5f); }
+// 小数按大小取位数：>=1 "%.1f"，>=0.1 "%.2f"，否则 "%.3f"（0x1767FC0 / FB0 / FA0）。
+inline std::wstring SpecDecimal(float v) {
+    wchar_t buf[64];
+    const wchar_t* fmt=v>=0.1f ? (v>=1.0f ? L"%.1f" : L"%.2f") : L"%.3f";
+    std::swprintf(buf,std::size(buf),fmt,static_cast<double>(v));
+    return buf;
+}
+inline std::wstring FormatSpecParam(const SpecParam& p) {
+    if(p.type==3){
+        const SpecRank* r=std::upper_bound(std::begin(kSpecRanks),std::end(kSpecRanks),p.value,
+                                           [](float v,const SpecRank& k){return v<k.below;});
+        return r==std::end(kSpecRanks) ? std::end(kSpecRanks)[-1].label : r->label;
+    }
+    if(p.type==6 || p.type==7)return SpecDecimal(60.0f/static_cast<float>(SpecRound(p.value)));
+    if(!p.isFloat){
+        wchar_t buf[16];
+        std::swprintf(buf,std::size(buf),L"%d",SpecRound(p.value));
+        return buf;
+    }
+    return SpecDecimal(p.value);
+}
+// 一行的值文字。"$d"（d 为数字）换成参数 d；"$" 后跟别的字符时两个字符都丢掉（原版同样跳过）。
+// 原版对越界的 $d 不检查（0x52DE0 读到别的节点）；这里不输出。
+inline std::wstring FormatSpecLine(const SpecLine& ln) {
+    if(ln.nodes<2)return {};
+    if(ln.nodes==2)return ln.format;
+    std::wstring out;
+    for(std::size_t i=0;i<ln.format.size();++i){
+        const wchar_t ch=ln.format[i];
+        if(ch!=L'$'){out.push_back(ch);continue;}
+        if(++i>=ln.format.size())break;
+        const wchar_t d=ln.format[i];
+        if(d<L'0' || d>L'9')continue;
+        const std::size_t at=static_cast<std::size_t>(d-L'0');
+        if(at<ln.params.size())out+=FormatSpecParam(ln.params[at]);
     }
     return out;
 }
-// 目前离线能给的：显示等级（Entry::level）。伤害 / 弹数等的运行时读取见 weapon_equip.h（未做）。
-inline WeaponStats StatsOf(const Entry& e) {
-    WeaponStats s;
-    s[Stat::level]=static_cast<double>(e.level);
-    return s;
+
+// 对比一行：参数按下标配对，方向取有曲线的一边（0 大者好，1 小者好）；各参数结论一致才给方向。
+struct SpecDiff {
+    std::wstring label;
+    std::optional<std::wstring> equipped,candidate;   // 值文字；缺一边为空
+    int better=0;                 // +1 光标这把更好，-1 更差，0 相同、说不出或缺一边
+};
+inline int CompareSpecLine(const SpecLine& a,const SpecLine& b) noexcept {
+    const std::size_t n=(std::min)(a.params.size(),b.params.size());
+    int verdict=0;
+    for(std::size_t i=0;i<n;++i){
+        const SpecParam& x=a.params[i];
+        const SpecParam& y=b.params[i];
+        const int curve=y.curve>=0 ? y.curve : x.curve;
+        if(curve<0 || x.value==y.value)continue;
+        const int sign=((y.value>x.value)==(curve==0)) ? 1 : -1;
+        if(verdict!=0 && verdict!=sign)return 0;
+        verdict=sign;
+    }
+    return verdict;
+}
+// 按候选的行序，标签相同的配对；只在装着那把里有的行接在后面。
+inline std::vector<SpecDiff> CompareSpecs(const WeaponSpec* equipped,const WeaponSpec* candidate) {
+    std::vector<SpecDiff> out;
+    std::vector<bool> used(equipped ? equipped->size() : 0,false);
+    if(candidate)
+        for(const SpecLine& c:*candidate){
+            SpecDiff d;
+            d.label=c.label;
+            d.candidate=FormatSpecLine(c);
+            if(equipped)
+                for(std::size_t i=0;i<equipped->size();++i){
+                    if(used[i] || (*equipped)[i].label!=c.label)continue;
+                    used[i]=true;
+                    d.equipped=FormatSpecLine((*equipped)[i]);
+                    if(*d.equipped!=*d.candidate)d.better=CompareSpecLine((*equipped)[i],c);
+                    break;
+                }
+            out.push_back(std::move(d));
+        }
+    if(equipped)
+        for(std::size_t i=0;i<equipped->size();++i){
+            if(used[i])continue;
+            SpecDiff d;
+            d.label=(*equipped)[i].label;
+            d.equipped=FormatSpecLine((*equipped)[i]);
+            out.push_back(std::move(d));
+        }
+    return out;
 }
 
 }  // namespace crew::wlist

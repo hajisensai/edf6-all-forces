@@ -1245,6 +1245,8 @@ HUDTEXT(armoryWpFavOnly,L"Favourites only",L"只看收藏",L"只看收藏",L"お
 HUDTEXT(armoryWpOn,L"On",L"开",L"開",L"オン")
 HUDTEXT(armoryWpOff,L"Off",L"关",L"關",L"オフ")
 HUDTEXT(armoryWpLevel,L"Level",L"等级",L"等級",L"レベル")
+HUDTEXT(armoryWpNew,L"NEW",L"新",L"新",L"新")
+HUDTEXT(armoryWpUp,L"UP",L"提升",L"提升",L"アップ")
 HUDTEXT(armoryWpPreviewOther,L"3D preview shows the current class only",L"3D 预览只显示当前兵种",L"3D 預覽只顯示目前兵種",L"3D プレビューは現在の兵科のみ")
 HUDTEXT(armoryWpNotOwned,L"Not owned yet",L"尚未持有",L"尚未持有",L"未所持")
 HUDTEXT(armoryWpCapped,L"Over the level cap",L"超过等级上限",L"超過等級上限",L"レベル上限超過")
