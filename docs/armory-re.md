@@ -11,12 +11,13 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
 | `ui::HUiHQMain`（离线 HQ） | `0x1804DD8` | `0x1804DE8` | `HUiBase::Draw 0x7FA970` | H |
 | `ui::HUiRoom`（联机房间） | `0x180AC40` | `0x180AC50` | `HUiBase::Draw 0x7FA970` | H |
 
+- vtable 由 RTTI 确认（`vtable[-1]` 的 CompleteObjectLocator → `.?AVHUiHQMain@ui@@` / `.?AVHUiRoom@ui@@`），离线审计 `tests/armory_native_audit.py`（ctest `armory_native`，`EDF6_NATIVE_DLL`）逐项核对本节与 §2、§4 的地址。H
 - 两个画面都没有重写 Draw，槽里都是基类的 `0x7FA970`（入口字节 `48 89 5C 24 18 48 89 74 24 20 55 57 41 56 48 8D` 作为签名检查）。插件读槽里**当前**的值并链在它后面（别的插件可能先挂了），先调原函数、再画整备。H
 - OnUpdate 槽（`0x1804DE0` / `0x180AC48`）与析构槽沿用 `docs/room-ui-re.md`，由 `room_ui.cpp` 挂；整备的生命周期跟随它们（§3）。H
 
 ## 2. 绘制上下文（与世界地图共用的约定）
 
-- Draw 的第二个参数（ctx）`+8` 是 `ID3D11DeviceContext*`（`0x113E928: mov rcx,[rcx+8]`），`+0x398` 是当前视口 `int[4]`（`0x113E90B: movups [rcx+398h],xmm0`）。两处都在安装时按字节核对，不符则整备不安装（日志 `REFUSED`，房间 / HQ 不再能打开整备，不退回旧对话框）。H（`worldmap.cpp` 已在实机用同一约定画选关地图）
+- Draw 的第二个参数（ctx）`+8` 是 `ID3D11DeviceContext*`（`0x113E928: mov rcx,[rcx+8]`），`+0x398` 是当前视口 `int[4]` `{x, y, w, h}`（`0x113E90B: movups [rcx+398h],xmm0`，后面 `+0x3A8` 是 `float minZ, maxZ`）。两处在同一个视口设置函数 `0x113E8F0` 里：存好视口后 `0x113E984 call [rax+160h]` 即 `ID3D11DeviceContext::RSSetViewports`（vtable 第 44 项）。两处都在安装时按字节核对，不符则整备不安装（日志 `REFUSED`，房间 / HQ 不再能打开整备，不退回旧对话框）。H（`worldmap.cpp` 已在实机用同一约定画选关地图）
 - 整备在视口里按设计分辨率（`ui_gpu` 的 Painter，1920×1080 等比）铺满整个视口；鼠标坐标经 `::worldmap::ClientToDesign` 换算到设计坐标。H（同世界地图）
 - **整备画在画面自己的 Draw 之后**；在它之后绘制的东西（`HUiMainFrame` 的顶栏 / 底栏、EDF6Coop 的叠加文字、游戏的弹窗）仍会画在整备上面。整备打开时这些是否遮挡、遮挡多少，没有实机看过。**L**
 - 绘制线程：Draw 在渲染时调用，与 UI 线程（OnUpdate）不一定是同一线程。UI 线程每帧把 `View` 发布到 `published`（`viewLock`），Draw 侧拷贝成 `painting` 后在 `gpuLock` 下画。M

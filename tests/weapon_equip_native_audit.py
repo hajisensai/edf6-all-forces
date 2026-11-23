@@ -2,7 +2,7 @@
 the 3D preview's OnMessage sends message 4 where docs/weapon-select-re.md says, and the generated weapon data
 (src/weapon_series.inc, tools/gen_weapon_series.py) is the game's: SoldierInit's slot rules, the stock rows' names and
 order (WEAPONTABLE), their Chinese names (WEAPONTEXT.SC / .CN into docs/weapon-names-zh.csv) and their levels (col4 with
-GetRow's formula). Without the game: the source checks only."""
+GetRow's formula). The EDF.dll as the argument (else the game gamedir finds); without one: the source checks only."""
 from __future__ import annotations
 
 import os
@@ -88,8 +88,10 @@ def audit_data(game) -> None:
 
 def main() -> int:
     audit_source()
-    game_dir = gamedir.find()
-    dll = os.path.join(game_dir, 'EDF.dll') if game_dir else ''
+    # An EDF.dll path as the argument (ctest: EDF6_NATIVE_DLL; its directory is the game's), else the game gamedir finds.
+    arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ''
+    game_dir = os.path.dirname(os.path.abspath(arg)) if arg else gamedir.find()
+    dll = arg or (os.path.join(game_dir, 'EDF.dll') if game_dir else '')
     if dll and os.path.isfile(dll):
         import room_preview_sigs
         import rootcpk
