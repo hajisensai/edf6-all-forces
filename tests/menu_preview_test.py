@@ -58,7 +58,7 @@ def check_names() -> None:
     import support_loadout
     names = mp.template_names()
     check(len(names) == 28 and len(set(names)) == 28, f'14 templates and their _LEADER: {len(names)}')
-    check(mp.rels() == [f'OBJECT/{n}.SGO' for n in names] + ['MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS'], 'the Mods paths')
+    check(mp.rels() == [f'OBJECT/{n}.SGO' for n in names] + ['OBJECT/V504_BEGARUTA.SGO', 'MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS'], 'the Mods paths')
     check(mp.OWNER in ledger.OWNERS, 'a ledger owner')
     hdr = read(os.path.join(ROOT, 'src', 'room_preview_logic.h')).decode('utf-8')
     table = hdr.split('kSoldierTemplates[kSupportWeaponCount]={', 1)[1].split('};', 1)[0]
@@ -225,7 +225,7 @@ def check_real(game: object, game_dir: str) -> None:
           'a jet naming its battle CAS in the menu: refused (the -1 index)')
     head = {f'N601_COMMON_RANGER_{k}_LEADER' for k in ('FL', 'RL', 'SG', 'SN')}
     for rel, data in files.items():
-        if not rel.startswith('OBJECT/'):
+        if not rel.startswith('OBJECT/') or rel == mp.MECH_BASE:
             continue
         name = rel[len('OBJECT/'):-len('.SGO')]
         battle = game.read('OBJECT', name + '.SGO')
@@ -278,6 +278,45 @@ def check_real(game: object, game_dir: str) -> None:
         check(mm.menu_problems(made, read_cas) == [], f'{rel}: unified')
         m = mm.members_of(made)
         check(m[mm.MENU_MODEL] == m['animation_model'], f"{rel}: the tank's own CAS (has `main`) for the menu too")
+    check_vehicle_bases(game, game_dir, files, read_cas)
+
+
+def check_vehicle_bases(game: object, game_dir: str, files: dict[str, bytes], read_cas) -> None:
+    """The tank's and the mech's bases (stock SGOs) made unified by their writers, and a loaded mech."""
+    import support_loadout
+    import mech_parts
+    for rel in (mp.TANK_BASE, mp.MECH_BASE):
+        folder, name = rel.split('/')
+        battle = support_loadout._source(game_dir, game, folder, name)
+        made = mp.unify_vehicle(game, rel, battle, game_dir)
+        m = mm.members_of(made)
+        check(mm.menu_problems(made, read_cas) == [] and mm.battle_equal(battle, made) == [],
+              f'{rel}: unified, every battle key equal')
+        check(m[mm.MENU_MODEL] == m['animation_model'], f'{rel}: its own model, CAS (has `main`) and MAB')
+        check(mp.unify_vehicle(game, rel, made, game_dir) == made, f'{rel}: unified again, the same bytes')
+        # A file built on the unified base whose model changed: the menu keys follow the battle model.
+        version, members = sgo.read(made)
+        moved = dict(members)
+        moved['animation_model'] = [['app:/object/x.mrab', 'x.mdb'], *members['animation_model'][1:]]
+        again = mm.members_of(mp.unify_vehicle(game, rel, sgo.write_depth_first(version, moved), game_dir))
+        check(again[mm.MENU_MODEL][0] == ['app:/object/x.mrab', 'x.mdb'], f"{rel}: a variant never keeps the base's model")
+    check(files[mp.MECH_BASE] == mp.unify_vehicle(game, mp.MECH_BASE, game.read('OBJECT', 'V504_BEGARUTA.SGO'), game_dir),
+          "the mech's base: this tool's, the stock file unified")
+    # A loaded mech (frame + core + four weapons, support_loadout's EDF6VC_LO_MECH_*): the battle variant is the
+    # menu's file.
+    full = max((r for r in mech_parts.REQUESTS if '-' not in r.slots), key=lambda r: r.level)
+    core = next(c for c in mech_parts.CORES if c.token != full.core and c.level <= full.level)
+    mech = mech_parts.Mech(full.token, frame=mech_parts.FRAMES[1].token, weapons=tuple(full.slots), core=core.token)
+    text = '[VehicleCrew]\nSupportVehicle_OWN_MECH=' + mech_parts.format_mech(mech) + '\n'
+    errors: dict[str, str] = {}
+    with contextlib.redirect_stdout(io.StringIO()):
+        out = support_loadout.build(game_dir, text, game, errors=errors)
+    mechs = {k: v for k, v in out.items() if k.startswith('OBJECT/EDF6VC_LO_MECH_')}
+    check(not errors and len(mechs) == 1, f'one loaded mech: {sorted(out)} {errors}')
+    for rel, made in mechs.items():
+        check(mm.menu_problems(made, read_cas) == [], f'{rel}: unified')
+        m = mm.members_of(made)
+        check(m[mm.MENU_MODEL] == m['animation_model'], f'{rel}: the frame its loadout names, for the menu too')
 
 
 def synthetic_jet(game: object) -> tuple[int, dict]:

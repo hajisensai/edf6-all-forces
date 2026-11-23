@@ -26,6 +26,7 @@ MENU_MODEL = 'menu_animation_model'   # src/room_preview_logic.h kMenuModelKey
 BATTLE_MODEL = 'animation_model'
 SOLDIER_KEYS = ('soldier_weapon_slot', 'soldier_weapon_grab_adjust')
 ADDED = (MENU_MODEL, 'change_color', 'random_animation')   # what a soldier's battle file gains
+VEHICLE_ADDED = (*ADDED, *SOLDIER_KEYS)   # what a vehicle's battle file gains (vehicle_menu_keys)
 MENU_NEEDS = (MENU_MODEL, 'change_color', 'random_animation', 'soldier_weapon_slot')
 MENU_ANMGROUP = 'main'   # the anmgroup the menu plays, looked up case-sensitively (EDF.dll 0x93FB85; -1 crashes it)
 CHANNELS = ('change_color0', 'change_color1')
