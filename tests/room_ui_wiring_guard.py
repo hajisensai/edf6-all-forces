@@ -55,8 +55,8 @@ auto_hook = body(src, 'std::uint64_t __fastcall HqAutoHook(unsigned char* self,v
 check('screens[1].next(self,ctx)' in auto_hook and 'Frame(' not in auto_hook and 'AutoOpenMission(self,ctx,false)' in auto_hook,
       'the HQ-alone hook chains with the real ctx and only opens the mission select')
 hq_hook = body(src, 'std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx)')
-check(hq_hook.find('Frame(screens[1],self,ctx)') < hq_hook.find('AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched)'),
-      'the HQ opens its mission select after its frame, never with the F2 menu (or its closing key) up')
+check(hq_hook.find('Frame(screens[1],self,ctx)') < hq_hook.find('AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched || st.armoryTake || armoryui::IsOpen())'),
+      'the HQ opens its mission select after its frame, never with 整备 / the 对战 pages (or a closing key) up')
 check('AutoGone(self)' in body(src, 'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags)') and
       'AutoGone' not in body(src, 'void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags)'),
       "the HQ's destructor ends its 'tried' mark (a new HQ at its address opens again)")
@@ -70,7 +70,7 @@ check(re.search(r'^HqAutoMissionSelect=1\r?$', ini, re.M) is not None, 'the ship
 frame = body(src, 'std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept')
 pass_at = frame.find('if(sw.pass)return Off(screen,self,ctx);')
 check(pass_at >= 0, 'an off frame goes to Off')
-for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', 'FollowPreview', 'DrawMenu'):
+for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'armoryui::Frame(', 'TakeInput', 'OpenArmory(', 'DriveDialog('):
     at = frame.find(call)
     check(at > pass_at, f'{call} only after the off frame has returned')
 check(frame.find('PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room)') < pass_at, 'the switches planned first')
@@ -79,11 +79,21 @@ check(src.count('roomsync::TickRoomSync()') == 1 and 'if(sw.tick)roomsync::TickR
 check(src.count('roomsync::LeaveRoomSync()') == 2 and re.search(r'if\(sw\.leave\) \{[^}]*roomsync::LeaveRoomSync\(\);\s*roomsync::ForgetRoomList\(\);', frame) is not None and
       'if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();' in src, 'withdrawn only on the plan\'s leave or a forgotten syncing screen')
 off = body(src, 'std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept')
-for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'rm::Step', 'TakeInput', 'DrawMenu', 'ShowPreview', 'memset'):
+for call in ('ReadRaw(', 'kGetInput', 'TickRoomSync', 'armoryui::Frame(', 'OpenArmory(', 'TakeInput', 'ShowPreview', 'memset'):
     check(call not in off, f'an off frame does not call {call}')
-check('screen.next(self,ctx)' in off and 'if(st.drew)Draw(self,false);' in off,
-      'an off frame chains with the real ctx and only takes back what it drew')
-check('st.drew=true' in frame, 'a drawn screen remembered (else an off frame never touches it)')
+check('screen.next(self,ctx)' in off and 'armoryui::Forget();' in off,
+      'an off frame chains with the real ctx and closes 整备 (nothing committed)')
+# 整备 (armory.h): its input claim joins the gate's, its screen identity follows the destructors and the forgetting.
+check(frame.find('st.armoryTake=armoryui::Frame(self,hasInput,down.toggle);') < frame.find('const bool take=') and
+      'TakeInput(st.gate,st.menu.open,AnyDown(down)) || st.armoryTake' in frame,
+      "整备's frame before the input decision; its claim takes the screen's input")
+check(frame.find('const bool take=') < frame.find('screen.next(self,copy)'), 'the input decided before the screen updates')
+for hook in ('void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags)', 'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags)'):
+    check('armoryui::ScreenGone(self);' in body(src, hook), f'{hook}: 整备 never draws on a destroyed screen')
+check('armoryui::Forget();' in body(src, 'void ForgetMenu() noexcept'), 'a forgotten screen closes 整备')
+check(install.find('armoryui::Install()') > install.find('if(!Cfg().roomLoadout) {'), '整备 installed only with RoomLoadout=1')
+check('roomdialog::Build(' not in src and 'roomdialog::Apply(' not in src and 'OpenMenu' not in src and 'DrawMenu' not in src,
+      'the loadout dialog chain and the layout overlay are gone (整备 replaces them)')
 
 follow = body(src, 'void Follow(unsigned char* self,bool room) noexcept')
 check(follow.find('followedGone.exchange(false)') < follow.find('if(self==st.self)return;'),
@@ -111,9 +121,8 @@ check('s.next=reinterpret_cast<UpdateFn>(current);' in chain and 'screen.next(se
       'the room chains the current slot, including a Coop already loaded')
 
 # A menu save is one write and one reload (not one per key on the UI thread), all lines or none.
-save = body(src, 'void Save() noexcept')
-check(save.count('SaveSupportLoadouts(') == 1 and 'SaveSupportLoadout(' not in save, 'the menu saves every line in one call')
-check(save.index('SaveSupportLoadouts(') < save.index('MarkItemSaved'), 'lines marked saved only after the one write succeeded')
+presets = open(os.path.join(ROOT, 'src', 'armory_presets.cpp'), encoding='utf-8').read()
+check(presets.count('SaveSupportLoadouts(') == 1 and 'SaveSupportLoadout(' not in presets, 'a preset switch saves every line in one call')
 store = open(os.path.join(ROOT, 'src', 'loadout_store.cpp'), encoding='utf-8').read()
 many = body(store, 'bool SaveSupportLoadouts(')
 check(many.count('ReadFileBytes(') == 1 and many.count('ReplaceFileAtomic(') == 1 and many.count('ReloadConfigNow()') == 1 and

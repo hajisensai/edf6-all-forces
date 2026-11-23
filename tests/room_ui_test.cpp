@@ -540,46 +540,6 @@ void Save() {
 }
 }  // namespace
 
-// The model follows the description dialog's cursor (FocusPreview).
-void Focus() {
-    roommenu::Menu m;m.open=true;
-    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
-    int squad=-1;for(int i=0;i<m.unitCount;++i)if(roommenu::IsSquad(m.unit[i]) && squad<0)squad=i;
-    roommenu::Unit& u=m.unit[squad];
-    u.squad.count=2;u.squad.kind[0]=SupportWeapon::rifle;u.squad.kind[1]=SupportWeapon::wingLance;u.squad.look[1].primary=0x112233;
-    roomdialog::Nav nav;nav.page=roomdialog::Page::unit;nav.unit=squad;
-    m.level=roommenu::Level::rows;m.unitAt=squad;m.rowAt=0;
-    roompreview::PreviewSpec p{};
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p) && p.kind==SupportWeapon::wingLance && !p.leader &&
-           p.look.primary==0x112233,"the unit page: the soldier the focused button opens");
-    nav.page=roomdialog::Page::kind;nav.row=1;m.level=roommenu::Level::fields;m.rowAt=1;
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,static_cast<int>(SupportWeapon::fencerCannon)},&p) &&
-           p.kind==SupportWeapon::fencerCannon && p.look.primary==0x112233,"the class page: that soldier as the focused class");
-    nav.page=roomdialog::Page::primary;
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.look.primary==0x445566 &&
-           p.kind==SupportWeapon::wingLance,"the colour page: wearing the focused colour");
-    Expect(u.squad.look[1].primary==0x112233 && u.squad.kind[1]==SupportWeapon::wingLance,"nothing edited by looking");
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::back,0},&p) && p.kind==SupportWeapon::wingLance,
-           "another button: the page's own soldier");
-    // A vehicle's pages: the vehicle whatever has the focus, but its crew row's button the crew.
-    int tank=-1;for(int i=0;i<m.unitCount;++i)if(m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].body==VehicleBody::tank && tank<0)tank=i;
-    Expect(tank>=0,"the default units have a tank");
-    roomdialog::Nav vnav;vnav.unit=tank;m.unitAt=tank;m.rowAt=0;m.level=roommenu::Level::rows;
-    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::pylon,roomdialog::Page::gun,roomdialog::Page::store,roomdialog::Page::rounds}) {
-        vnav.page=page;
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,3},&p) && p.body==VehicleBody::tank,"a vehicle page: the vehicle");
-    }
-    if(m.unit[tank].hasCrew) {
-        vnav.page=roomdialog::Page::unit;
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::row,roommenu::CrewRow(m.unit[tank])},&p) && p.body==VehicleBody::none,
-               "the vehicle page's crew button: the crew");
-        vnav.page=roomdialog::Page::crewPrimary;m.rowAt=roommenu::CrewRow(m.unit[tank]);
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.body==VehicleBody::none,"the crew's colour page: the crew");
-    }
-    m.open=false;
-    Expect(!FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p),"closed: none");
-}
-
 // The HQ's mission select opened by itself: once per HQ object, only with the HQ the input owner and the F2 menu down.
 void AutoOpen() {
     Expect(AutoOpenDue(true,false,true,false),"a fresh HQ the input owner, the menu down: opened");
@@ -635,11 +595,6 @@ void Mech() {
     Expect(!LookOf(&v.rows.row[2]).icon && !LookOf(&v.rows.row[2]).primary,"a mech row: no chips, no icon");
     roompreview::PreviewSpec p{};
     Expect(PreviewFor(m,&p) && p.body==VehicleBody::mech,"its rows: the mech");
-    roomdialog::Nav nav;nav.unit=mech;
-    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::mech}) {
-        nav.page=page;nav.row=roommenu::kMechRowCore;
-        Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,-1},&p) && p.body==VehicleBody::mech,"its dialog pages: the mech");
-    }
 }
 
 int main() {
@@ -656,7 +611,6 @@ int main() {
     Catalog();
     Crews();
     Preview();
-    Focus();
     Save();
     Mech();
     std::printf("room_ui: %d checks, %d failed\n",checks,failures);

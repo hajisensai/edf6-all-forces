@@ -3,28 +3,24 @@
 //
 // Each frame of HUiRoom::OnUpdate (slot EDF+0x180AC48) / HUiHQMain::OnUpdate (slot EDF+0x1804DE0), on the UI thread:
 //   1. the toggle (keyboard VK + a pad combination read from the game's own pad table, room_ui_logic.h KeysDown /
-//      PadBits) and, open, the menu's keys step
-//      room_menu.h Step; only while the screen itself would read input (0x8DAD00 with the real ctx: no sub-screen,
-//      dialog or transition over it), otherwise the menu is hidden and frozen;
+//      PadBits) opens 整备 (armory.h) over the menu model (room_menu.h, loaded from the ini), and armory.h Frame steps
+//      it; only while the screen itself would read input (0x8DAD00 with the real ctx: no sub-screen, dialog or
+//      transition over it), otherwise 整备 closes;
 //   2. while open (and after closing until the closing key is up) the screen's update runs on a copy of its ctx with
 //      +8 (the effective UiInput*) null: the game's own "not the input owner" state (network, members, chat run on);
-//   3. after it: the room's pre-sync ticked (room_sync.h), the preview (room_preview.h) shown for the soldier under the
-//      cursor, and the menu drawn into the elements tools/room_layout.py added (room_ui_logic.h decides what): texts by
-//      HUiTextField::SetText, the panel, the chips and the icons by their texture skins (the panel and the chips bind
-//      kWhiteTexture and tint it: Skin_Texture +0xF0 / +0x100), every element's shown flag (+0x1F8), each written only
-//      when it changes (Written). The layout draws nothing by itself (empty texts, texture skins with no texture): without
-//      the plugin the screen looks stock. While the menu is not shown everything the plugin set is taken back (texts
-//      emptied, tints transparent, elements and the root hidden).
-// 2026-10-19 (the user: "房间界面f2太垃圾了，换成游戏自带的那种"): the menu itself is the game's own dialog box
-// (room_dialog.h: HUiDialogBox, the window the soldier screen's outfit popup is; room_dialog_logic.h the pages), so the
-// game draws it and moves through it with the mouse, the keyboard and the pad, with its own confirm / cancel and sounds.
-// The overlay above (the layout's elements) draws the whole menu only when the dialog's code did not check out
-// (NativeDialogReady false: the menu as before, never no menu). The closed page draws nothing of ours (2026-10-25: the
-// entry line it used to draw sat in HUiMainFrame's guide band, over EDF6Coop's label): the entry is the native button.
+//   3. after it: the room's pre-sync ticked (room_sync.h), the 对战 pages' dialogs driven; 整备 itself is painted by
+//      armory.cpp from the screen's Draw slot.
+// 2026-11-24 (docs/plan-2026-11-24-ui-rewrite.md 阶段 2): the loadout menu is the 整备 screen (armory.h), drawn by the
+// plugin over the whole screen; the dialog chain (room_dialog_logic.h loadout pages) and the layout overlay are gone. This
+// file keeps what the screen frame owns: the toggle, the native 整备 button, the input taken away while 整备 (or the
+// 对战 pages, still the game's own dialogs: room_pvp_dialog.h) is up, the room's pre-sync, the HQ's auto mission select.
+// The closed page draws nothing of ours (2026-10-25: the entry line it used to draw sat in HUiMainFrame's guide band,
+// over EDF6Coop's label): the entry is the native button.
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "keyconfig.h"
 #include "room_ui.h"
+#include "armory.h"
 #include "room_dialog.h"
 #include "room_dialog_logic.h"
 #include "pvp.h"
@@ -253,18 +249,11 @@ bool nativeEntryOk=false;
 bool autoMissionOk=false;   // HqAutoMissionSelect at load and kAutoMissionSigs checked
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
-// What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
-// changes). Invalid when the screen object changes and when the menu opens: everything written afresh.
-enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotHelp2, kSlotHelp3, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
-                  kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotNativeDesc=kSlotStatus+kStatusLines, kSlotCount };
-enum class RootState : std::uint8_t { unknown, found, missing };
-// The texture-skinned elements: the panel, each row's two chips and its icon.
-enum TexSlot : int { kTexBack, kTexChip, kTexIcon=kTexChip+2*kRows, kTexCount=kTexIcon+kRows };
+// What was last written into the screen's texts (re-laid only when it changes): the native button's description.
+// Invalid when the screen object changes: written afresh.
+enum Slot : int { kSlotNativeDesc, kSlotCount };
 struct Written {
     std::uint64_t key[kSlotCount];     // texts and shown flags: Hash
-    std::uint64_t tex[kTexCount];      // a textured element's (path, tint, shown): Hash
-    const wchar_t* bound[kTexCount];   // the texture it was given (paths are the constants room_ui_logic.h names)
-    RootState root;                    // whether this screen's layout has the menu (vcRoot)
     bool valid;
 };
 
@@ -279,29 +268,20 @@ struct State {
     bool nativeFocused=false;
     Gate gate{};
     bool previewShown=false;
-    roompreview::PreviewSpec preview{};
-    wchar_t saveNote[kLineMost]{};
-    bool saveWarn=false;
-    bool missingLogged=false;
-    bool drew=false;               // the menu was drawn on this screen object (off: taken back, else never touched)
     Switches switches{};
-    GenerateStatus gen{};
-    ULONGLONG genAt=0;
     rm::UnitSpec specs[rm::kMostUnits]{};
     int specCount=0;
     Written written{};
-    // The native dialogs (room_dialog.h): where the player is, the dialog shown, the button picked in it.
-    roomdialog::Nav nav{};
+    bool armoryTake=false;         // armory.h Frame this frame: 整备 open, or its closing key still held
+    // The 对战 pages (room_pvp_dialog.h, the game's own dialogs, room_dialog.h): the dialog shown, the button picked in
+    // it, where in the pages. st.menu.open is true exactly while they are up (opened from 整备's 对战设置 row).
     nativedialog::Handle dialog{};
-    const wchar_t* dialogLayout=nullptr;   // the pages' layout (LoadoutBoxLayout), chosen when the menu opens
     bool hasPick=false;
     roomdialog::Choice pick{};
-    // The 对战 pages (room_pvp_dialog.h) shown instead of the loadout pages, and where in them.
     bool pvpPages=false;
     roompvp::Nav pvpNav{};
 };
 State st;
-rm::SaveSet saveSet;   // big: not on the stack
 // MissionStart (room_ui.h ResetRoomUi) asks; the next screen frame (the UI thread: room_sync.h's and room_preview.h's
 // contract) does it.
 std::atomic<bool> resetAsked{false};
@@ -311,11 +291,6 @@ std::atomic<unsigned char*> followed{nullptr};
 std::atomic<bool> followedGone{false};
 // The thread the screens' frames run on (the UI thread): a destructor hook running there may touch the menu's state.
 std::atomic<DWORD> uiThread{0};
-
-void NoteSave(Tx t,const wchar_t* arg,bool warn) noexcept {
-    _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(t),arg ? arg : L"");
-    st.saveWarn=warn;
-}
 
 // --- Input ---
 bool KeyDown(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
@@ -364,12 +339,6 @@ std::size_t IniRead(void*,const wchar_t* key,wchar_t* out,std::size_t capacity) 
     return GetPrivateProfileStringW(L"VehicleCrew",key,L"",out,static_cast<DWORD>(capacity),path);
 }
 
-// --- The crews' kinds (what SupportVehicleCrewWeapon / SupportAircraftCrewWeapon say now) ---
-CrewKinds Kinds() noexcept {
-    const SupportConfig& c=SupportCfg();
-    return CrewKinds{c.vehicleCrew,c.aircraftCrew};
-}
-
 // --- The preview ---
 void HidePreview() noexcept {
     if(!st.previewShown)return;
@@ -377,18 +346,6 @@ void HidePreview() noexcept {
     st.previewShown=false;
 }
 roomdialog::Dialog page;   // big: not on the stack; the dialog shown now (its buttons' descriptions live here)
-void FollowPreview(bool shown) noexcept {
-    roompreview::PreviewSpec p{};
-    // The description dialog reports its focused button: the model follows the cursor (FocusPreview).
-    const int focused=st.dialog.control ? nativedialog::FocusedButton(st.dialog) : -1;
-    const bool found=shown && (focused>=0 && focused<page.count ? FocusPreview(st.menu,st.nav,page.item[focused].choice,&p,Kinds())
-                                                               : PreviewFor(st.menu,&p,Kinds()));
-    if(!found){HidePreview();return;}
-    if(st.previewShown && SamePreview(p,st.preview))return;
-    roompreview::ShowPreview(p);
-    st.preview=p;st.previewShown=true;
-}
-
 // --- The menu's actions ---
 void Opened() noexcept {
     st.specCount=SupportCallCount()>0 ?
@@ -396,66 +353,24 @@ void Opened() noexcept {
         DefaultUnits(st.specs,rm::kMostUnits);
     rm::Load(st.menu,st.specs,st.specCount,&IniRead,nullptr);
     st.menu.pageRows=kRows;
-    st.saveNote[0]=0;st.saveWarn=false;
-    st.written.valid=false;   // everything written afresh once
     int refused=0;
     for(int i=0;i<st.menu.unitCount;++i)refused+=st.menu.unit[i].refused+st.menu.unit[i].crewRefused;
     Log("ROOMUI menu opened on the %s screen %p: %d units (%d values the parsers refused, shown stock)",st.room ? "room" : "HQ",
         st.self,st.menu.unitCount,refused);
 }
-SaveItem saveItems[2*rm::kMostUnits];   // rm::SaveSet::line's size   // one per line: a unit's preset / loadout and its crew's colours
-void Save() noexcept {
-    const int n=rm::CollectSave(st.menu,&saveSet) ? SaveItems(st.menu,saveSet,saveItems,static_cast<int>(std::size(saveItems))) : -1;
-    if(n<0){NoteSave(Tx::roomSaveRefused,nullptr,true);Log("ROOMUI save refused: a value would not read back as edited");return;}
-    // All lines in one write (all or none: a refused one leaves the file and every edit as they were).
-    static LoadoutSave lines[kLoadoutSaveMost];
-    static_assert(std::size(saveItems)<=kLoadoutSaveMost,"a whole save fits one SaveSupportLoadouts");
-    for(int at=0;at<n;++at)lines[at]=LoadoutSave{saveItems[at].field,saveItems[at].unit,saveItems[at].value};
-    wchar_t why[160]{};
-    int failed=-1;
-    if(!SaveSupportLoadouts(lines,n,&failed,why,std::size(why))) {
-        if(failed>=0)Log("ROOMUI save refused at %ls (field %d)=%ls: %ls (nothing written, %d lines)",saveItems[failed].unit,
-                         static_cast<int>(saveItems[failed].field),saveItems[failed].value,why,n);
-        else Log("ROOMUI save failed: %ls (nothing written, %d lines)",why,n);
-        NoteSave(Tx::roomSaveFailed,why,true);
-        return;   // every line stays edited
-    }
-    for(int at=0;at<n;++at)MarkItemSaved(st.menu,saveItems[at]);
-    int units=0;
-    for(int at=0;at<n;++at)units+=at==0 || saveItems[at].unitIndex!=saveItems[at-1].unitIndex;
-    rm::MarkSaved(st.menu);
-    st.menu.open=true;   // stays up on the unit list: the generator's progress is shown
-    _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(Tx::roomSaved),units);
-    st.saveWarn=false;
-    why[0]=0;
-    if(!StartVariantGeneration(why,std::size(why))) {
-        Log("ROOMUI generator not started: %ls",why);
-        NoteSave(Tx::roomGenStartFailed,why,true);
-    }
-    st.genAt=0;   // read its status now
-    Log("ROOMUI saved %d units (%d lines), generator started",units,n);
-}
-void Act(rm::Act a) noexcept {
-    switch(a) {
-    case rm::Act::opened: Opened(); break;
-    case rm::Act::save: Save(); break;
-    case rm::Act::closed: Log("ROOMUI menu closed"); break;
-    default: break;
-    }
-}
-
 // --- The screen object changed (another room, the HQ, a new instance, one ended by its destructor): its menu goes ---
 // The old object is never touched (it may be gone): nothing drawn is taken back from it.
 // MissionStart drops mission/menu state but does not prove the native room object died: online rooms can be retained.
 // Keep its native button/action identity until Follow observes a different object or its chained destructor.
 void ForgetMenu() noexcept {
+    armoryui::Forget();st.armoryTake=false;
     nativedialog::CloseDialog(st.dialog);   // the screen it stood over is going: nothing of ours left on top
     st.hasPick=false;st.pvpPages=false;
     HidePreview();
     if(st.menu.open)rm::Discard(st.menu);
     if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
     NativeEntryInput(st.nativeEntry,false);
-    st.gate=Gate{};st.missingLogged=false;st.written.valid=false;st.drew=false;
+    st.gate=Gate{};st.written.valid=false;
 }
 void Forget() noexcept {
     ForgetMenu();
@@ -499,9 +414,6 @@ std::uint64_t Hash(const wchar_t* text,std::uint32_t colour,bool shown) noexcept
 void Validate() noexcept {
     if(st.written.valid)return;
     for(auto& k:st.written.key)k=~0ull;
-    for(auto& k:st.written.tex)k=~0ull;
-    for(auto& p:st.written.bound)p=nullptr;
-    st.written.root=RootState::unknown;
     st.written.valid=true;
 }
 // True (and remembered) when `key` is not what slot `i` was last given.
@@ -651,202 +563,41 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
     Release(node);
     if(!done)st.written.key[slot]=~0ull;   // tried again next frame
 }
-// A texture-skinned element (the panel, a chip, an icon: the game's own icon call 0x8C4256: by name, its Skin_Texture
-// 0x953D80, the texture 0x7F63E0): `path` bound once, tinted `rgba` (both tint float4s), and shown. Not shown: the tint
-// transparent and the element hidden (a texture bound stays bound: nothing draws it). A texture the game cannot load
-// leaves the element hidden and is not tried again until what it should show changes.
-void SetTextured(unsigned char* self,int t,const wchar_t* name,const wchar_t* path,std::uint32_t rgba,bool shown) noexcept {
-    shown=shown && path;
-    const std::uint64_t key=shown ? Hash(path,rgba,true) : Hash(nullptr,0,false);
-    if(st.written.tex[t]==key)return;
-    Shared c=Find(self,name);
-    const bool found=c.object!=nullptr;
-    bool reached=!found,drawn=false;   // no such element: nothing to retry
-    __try {
-        if(found && c.control) {
-            InterlockedIncrement(&c.control->uses);   // the callee's by-value copy: it releases it
-            Shared copy=c,tex{};
-            reinterpret_cast<TextureSkinFn>(image+kTextureSkin)(&tex,&copy);
-            if(tex.object) {
-                reached=true;
-                if(shown && st.written.bound[t]!=path) {
-                    const WideString w=Wide(path);
-                    if(reinterpret_cast<SetTextureFn>(image+kSetTexture)(tex.object,&w))st.written.bound[t]=path;
-                    else Log("ROOMUI texture %ls not loaded into %ls (the element stays hidden)",path,name);
-                }
-                drawn=shown && st.written.bound[t]==path;
-                float colour[4];
-                ChipColour(drawn ? rgba : 0u,colour);
-                unsigned char* const skin=static_cast<unsigned char*>(tex.object);
-                std::memcpy(skin+kTint,colour,sizeof(colour));
-                std::memcpy(skin+kTintFrom,colour,sizeof(colour));
-            }
-            Release(tex);
-        }
-        if(found)Show(c.object,drawn);
-    } __except(EXCEPTION_EXECUTE_HANDLER){ reached=false; }
-    Release(c);
-    if(reached)st.written.tex[t]=key;
-}
-
-// Row `i` of the row column; nullptr: the row empty (every part emptied and hidden).
-void DrawRow(unsigned char* self,int i,const ViewRow* r) noexcept {
-    wchar_t name[kNameMost],line[kLineMost];
-    const Look l=LookOf(r);
-    RowName(i,Part::box,name);
-    if(Changed(kSlotBox+i,l.shown ? 1 : 2))SetShown(self,name,l.shown);
-    line[0]=0;
-    if(r)RowLine(*r,line,kLineMost);
-    RowName(i,Part::text,name);SetText(self,kSlotText+i,name,line,RowColour(r));
-    line[0]=0;
-    if(r)NoteLine(*r,line,kLineMost);
-    RowName(i,Part::note,name);SetText(self,kSlotNote+i,name,line,RowColour(r));
-    RowName(i,Part::primary,name);SetTextured(self,kTexChip+2*i,name,kWhiteTexture,l.primaryRgba,l.primary);
-    RowName(i,Part::secondary,name);SetTextured(self,kTexChip+2*i+1,name,kWhiteTexture,l.secondaryRgba,l.secondary);
-    RowName(i,Part::icon,name);SetTextured(self,kTexIcon+i,name,l.icon,kIconColour,l.icon!=nullptr);
-}
-// Everything the menu sets taken back: texts empty, tints transparent, elements hidden (the layout's own look: nothing).
-void ClearMenu(unsigned char* self) noexcept {
-    wchar_t name[kNameMost];
-    SetText(self,kSlotHead,kHeadName,nullptr);
-    SetText(self,kSlotHint,kHintName,nullptr);
-    SetText(self,kSlotHelp2,kHelp2Name,nullptr);
-    SetText(self,kSlotHelp3,kHelp3Name,nullptr);
-    SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,false);
-    for(int i=0;i<kRows;++i){UnitName(i,name);SetText(self,kSlotUnit+i,name,nullptr);DrawRow(self,i,nullptr);}
-    for(int i=0;i<kStatusLines;++i){StatusName(i,name);SetText(self,kSlotStatus+i,name,nullptr);}
-}
-// The root's shown flag, and while the menu is not shown everything it set taken back; false when this screen's layout
-// has no menu elements (not looked up again until the screen object changes or the menu opens).
-bool Draw(unsigned char* self,bool shown) noexcept {
-    Validate();
-    if(st.written.root==RootState::missing)return false;
-    if(Changed(kSlotRoot,shown ? 1 : 2) || st.written.root==RootState::unknown) {
-        if(!SetShown(self,kRootName,shown)) {
-            if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, "
-                                     "or another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
-            st.missingLogged=true;
-            st.written.root=RootState::missing;
-            return false;
-        }
-        st.written.root=RootState::found;
-    }
-    if(!shown)ClearMenu(self);
-    return true;
-}
-// The host's held PvP start as a status line (room_pvp.h RoomPvpWaitingLine): 1 written, 0 none.
-int PvpWaiting(roomsync::SyncLine* out) noexcept {
-    if(!RoomPvpWaitingLine(out->text,sizeof(out->text)/sizeof(out->text[0])))return 0;
-    out->warn=true;return 1;
-}
-void DrawMenu(unsigned char* self) noexcept {
-    rm::View v=rm::Snapshot(st.menu);
-    DressCrewRows(v,st.menu,Kinds());
-    SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,true);
-    SetText(self,kSlotHead,kHeadName,Title(v.dirty));
-    wchar_t name[kNameMost],line[kLineMost];
-    for(int i=0;i<kRows;++i) {
-        UnitName(i,name);
-        if(i<v.units.count){UnitLine(v.units.row[i],line,kLineMost);SetText(self,kSlotUnit+i,name,line,RowColour(&v.units.row[i]));}
-        else SetText(self,kSlotUnit+i,name,nullptr);
-    }
-    for(int i=0;i<kRows;++i)DrawRow(self,i,i<v.rows.count ? &v.rows.row[i] : nullptr);
-    // The status lines: the client's note, the save, the generator (read twice a second), the room's sync.
-    const ULONGLONG now=GetTickCount64();
-    if(!st.genAt || now-st.genAt>500){st.gen=VariantGenerationStatus();st.genAt=now;}
-    roomsync::SyncLine sync[kStatusLines]{};
-    int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
-    if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
-    const Status s=ComposeStatus(st.room,st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
-    for(int i=0;i<kStatusLines;++i) {
-        StatusName(i,name);
-        SetText(self,kSlotStatus+i,name,i<s.count ? s.text[i] : nullptr,StatusColour(i<s.count && s.warn[i]));
-    }
-    wchar_t key[128];
-    ToggleName(key,128);
-    HelpLine(v.level,0,key,line,kLineMost);SetText(self,kSlotHint,kHintName,line);
-    HelpLine(v.level,1,key,line,kLineMost);SetText(self,kSlotHelp2,kHelp2Name,line);
-    HelpLine(v.level,2,key,line,kLineMost);SetText(self,kSlotHelp3,kHelp3Name,line);
-}
-
-// --- The menu as the game's dialogs (room_dialog_logic.h pages, room_dialog.h windows) ---
-bool Dialogs() noexcept { return nativedialog::NativeDialogReady(); }
-// The menu's wide dialog layout (tools/room_layout.py loadout_box) when the installer put it beside the game
-// (Mods\UI\, which EDFModLoader serves for app:/UI/: docs/room-ui-re.md §4), else nullptr: the stock dialog box.
-// Asked when the menu opens: a reinstall while the game runs takes effect the next time.
-const wchar_t* LoadoutBoxLayout() noexcept {
-    wchar_t path[MAX_PATH];
-    const DWORD n=GetModuleFileNameW(nullptr,path,static_cast<DWORD>(std::size(path)));
-    wchar_t* slash=n && n<std::size(path) ? wcsrchr(path,L'\\') : nullptr;
-    if(!slash)return nullptr;
-    *slash=0;
-    if(wcscat_s(path,L"\\Mods\\") || wcscat_s(path,kLoadoutBoxFile))return nullptr;
-    const DWORD a=GetFileAttributesW(path);
-    return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY) ? kLoadoutBoxLayout : nullptr;
-}
-void OpenMenu() noexcept {
-    st.menu.open=true;st.menu.level=rm::Level::units;
-    st.dialogLayout=LoadoutBoxLayout();
-    Log("ROOMUI menu pages in %ls",st.dialogLayout ? st.dialogLayout : L"the stock dialog box (Mods\\UI\\EDF6VC_LOADOUTBOX.SGO not installed)");
+// --- 整备 opened (armory.h) over st.menu loaded from the ini now (Opened) ---
+void OpenArmory(unsigned char* self) noexcept {
     Opened();
-    roomdialog::Begin(st.menu,st.nav);
-    st.hasPick=false;st.pvpPages=false;
+    armoryui::Open(self,st.room,&st.menu);
 }
-// The status lines the units page's message carries (ComposeStatus, as the overlay showed them).
-Status MenuStatus() noexcept {
-    const ULONGLONG now=GetTickCount64();
-    if(!st.genAt || now-st.genAt>500){st.gen=VariantGenerationStatus();st.genAt=now;}
-    roomsync::SyncLine sync[kStatusLines]{};
-    int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
-    if(st.room)syncCount+=HostSettingsLines(sync+syncCount,kStatusLines-syncCount);   // the host's settings, the builds that differ
-    if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
-    return ComposeStatus(st.room,st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
-}
-// Each frame while the menu is open: the dialog's pick taken; once the game has closed it (picked, or its own cancel),
-// the menu steps (Apply / Cancel) and the next page opens as a new dialog, when the screen is the input owner again.
+// --- The 对战 pages as the game's dialogs (room_pvp_dialog.h pages, room_dialog.h windows) ---
+// Each frame while the 对战 pages are up: the dialog's pick taken; once the game has closed it (picked, or its own
+// cancel) the pages step (room_pvp_dialog.h Apply / Cancel, the change published by room_pvp.cpp) and the next page
+// opens as a new dialog when the screen is the input owner again; back from the first page: closed.
 void DriveDialog(bool hasInput) noexcept {
     if(st.dialog.control) {
         std::uint64_t id=0;
         if(nativedialog::TakePicked(st.dialog,&id)){st.pick=roomdialog::Unpack(id);st.hasPick=true;}
         if(nativedialog::DialogAlive(st.dialog))return;   // open, or still closing
         nativedialog::ForgetDialog(st.dialog);
-        if(st.pvpPages) {   // the 对战 pages: their change published by room_pvp.cpp, back to the units page from the first
-            roompvp::Action action{};
-            const roompvp::Result pr=st.hasPick ? roompvp::Apply(RoomPvpView(),st.pvpNav,st.pick,&action) : roompvp::Cancel(st.pvpNav);
-            st.hasPick=false;
-            RoomPvpChange(action);
-            if(pr==roompvp::Result::back)st.pvpPages=false;
-        } else {
-            const roomdialog::Result r=st.hasPick ? roomdialog::Apply(st.menu,st.nav,st.pick) : roomdialog::Cancel(st.menu,st.nav);
-            st.hasPick=false;
-            if(r==roomdialog::Result::pvp){st.pvpPages=true;st.pvpNav=roompvp::Nav{};}
-            if(r==roomdialog::Result::save) {
-                Save();
-                st.menu.open=true;st.nav=roomdialog::Nav{};   // the units page again, its message the save's result
-            }
-            if(r==roomdialog::Result::close || !st.menu.open) {
-                st.menu.open=false;
-                Log("ROOMUI menu closed");
-                return;
-            }
+        roompvp::Action action{};
+        const roompvp::Result pr=st.hasPick ? roompvp::Apply(RoomPvpView(),st.pvpNav,st.pick,&action) : roompvp::Cancel(st.pvpNav);
+        st.hasPick=false;
+        RoomPvpChange(action);
+        if(pr==roompvp::Result::back) {
+            st.menu.open=false;st.pvpPages=false;
+            Log("ROOMUI the 对战 pages closed");
+            return;
         }
     }
     if(!hasInput)return;   // something of the game's over the screen: the next page waits for it
-    const Status s=MenuStatus();
-    roomdialog::Context ctx;
-    for(int i=0;i<s.count && i<4;++i)ctx.status[ctx.statusCount++]=s.text[i];
-    static wchar_t pvpLine[roomdialog::kTextMost];
-    RoomPvpSummary(pvpLine,roomdialog::kTextMost);
-    ctx.pvp=pvpLine;
-    page=st.pvpPages ? roompvp::Build(RoomPvpView(),st.pvpNav) : roomdialog::Build(st.menu,st.nav,ctx);
+    page=roompvp::Build(RoomPvpView(),st.pvpNav);
     nativedialog::Button buttons[roomdialog::kItemsMost];
     // Each button's description beside the list (the description dialog: HUiDescriptionDialog); `page` keeps the texts
     // until this dialog is gone (the next page is built only after it closed).
     for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice),
                                                                  page.item[i].desc[0] ? page.item[i].desc : nullptr};
-    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog,st.dialogLayout)) {
-        rm::Discard(st.menu);   // never a menu open with nothing on screen: closed, its edits dropped (logged)
-        Log("ROOMUI the game opened no dialog: the menu closed, its edits dropped");
+    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog,nullptr)) {
+        st.menu.open=false;st.pvpPages=false;
+        Log("ROOMUI the game opened no dialog: the 对战 pages closed");
     }
 }
 
@@ -890,16 +641,16 @@ void AutoGone(unsigned char* self) noexcept {
 // Off (Enabled / RoomLoadout turned 0 since the load): the screen's own update with its own ctx, nothing read; the menu
 // dropped, the preview put back, and what the menu drew on this screen taken back (write-on-change: once).
 std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
+    if(armoryui::IsOpen())Log("ROOMUI 整备 closed: RoomLoadout / Enabled turned off");
+    armoryui::Forget();st.armoryTake=false;
     nativedialog::CloseDialog(st.dialog);
-    st.hasPick=false;
-    if(st.menu.open){rm::Discard(st.menu);Log("ROOMUI menu closed: RoomLoadout / Enabled turned off");}
+    st.hasPick=false;st.pvpPages=false;
+    if(st.menu.open){rm::Discard(st.menu);Log("ROOMUI the 对战 pages closed: RoomLoadout / Enabled turned off");}
     st.held=rm::Keys{};st.gate=Gate{};
     NativeEntryInput(st.nativeEntry,false);NativeEntryDisplay(self,false);
     HidePreview();
     roompreview::TickPreview(false);
-    const std::uint64_t result=screen.next(self,ctx);
-    if(st.drew)Draw(self,false);
-    return result;
+    return screen.next(self,ctx);
 }
 std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     uiThread.store(GetCurrentThreadId());
@@ -930,13 +681,17 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const rm::Keys down=KeysDown(ReadRaw(),static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
     const rm::Keys press=rm::Presses(st.held,down);
     const Plan plan=PlanFrame(hasInput,st.menu.open);
-    const bool dialogs=Dialogs();
-    if(dialogs) {
-        // The dialogs own every key while open (the game's focus, confirm, cancel); the toggle only opens.
-        if(plan.step && press.toggle && !st.menu.open)OpenMenu();
-    } else if(plan.step)Act(rm::Step(st.menu,press));
-    const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down));
-    NativeEntryInput(st.nativeEntry,hasInput && !st.menu.open && !st.gate.latched && Foreground());
+    // The toggle only opens 整备 (its own keys close it, armory_logic.h); the 对战 dialogs own every key while up.
+    if(plan.step && press.toggle && !st.menu.open && !armoryui::IsOpen() && !st.armoryTake)OpenArmory(self);
+    st.armoryTake=armoryui::Frame(self,hasInput,down.toggle);
+    if(armoryui::TakePvpRequest()) {
+        if(st.room && nativedialog::NativeDialogReady()) {
+            st.menu.open=true;st.pvpPages=true;st.pvpNav=roompvp::Nav{};st.hasPick=false;
+            Log("ROOMUI the 对战 pages opened from 整备");
+        } else Log("ROOMUI the 对战 pages asked but the game's dialog did not check out (room=%d): not opened",st.room);
+    }
+    const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down)) || st.armoryTake;
+    NativeEntryInput(st.nativeEntry,hasInput && !st.menu.open && !armoryui::IsOpen() && !st.gate.latched && !st.armoryTake && Foreground());
     NativeEntryDisplay(self,st.nativeEntry.enabled);
     std::uint64_t result;
     if(take && ctx) {
@@ -945,10 +700,8 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         std::memset(copy+kCtxInput,0,sizeof(void*));
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
-    if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open)) {
-        rm::Keys clicked;clicked.toggle=true;
-        if(dialogs)OpenMenu();
-        else Act(rm::Step(st.menu,clicked));
+    if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open && !armoryui::IsOpen())) {
+        OpenArmory(self);
         st.gate.latched=true;
         NativeEntryInput(st.nativeEntry,false);
         NativeEntryDisplay(self,false);
@@ -961,23 +714,18 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         SetText(self,kSlotNativeDesc,L"MenuDescText",line);
     }
     if(sw.tick)roomsync::TickRoomSync();
-    if(dialogs && st.menu.open)DriveDialog(hasInput);
-    Plan display=PlanFrame(hasInput,st.menu.open);
-    // The dialogs: the soldier being edited stays on the 3D view under them; the overlay shows nothing of the menu.
-    // Closed, nothing of ours is drawn on the screen: the entry is the native button (its description, MenuDescText,
-    // names the shortcut on focus), never a line of our own in HUiMainFrame's guide band (2026-10-25: it covered EDF6Coop's
-    // label there).
-    const bool preview=dialogs ? st.menu.open : display.show;
-    if(dialogs)display.show=false;
-    FollowPreview(preview);
-    roompreview::TickPreview(preview);
-    if(Draw(self,display.show) && display.show){DrawMenu(self);st.drew=true;}
+    if(st.menu.open && st.pvpPages)DriveDialog(hasInput);
+    // The 3D preview is 阶段 4 (in 整备's centre column): until then never shown. Closed, nothing of ours is drawn on the
+    // screen: the entry is the native button (its description, MenuDescText, names the shortcut on focus), never a line
+    // of our own in HUiMainFrame's guide band (2026-10-25: it covered EDF6Coop's label there).
+    HidePreview();
+    roompreview::TickPreview(false);
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
 std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx) {
     const std::uint64_t result=Frame(screens[1],self,ctx);
-    AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched);
+    AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched || st.armoryTake || armoryui::IsOpen());
     return result;
 }
 // RoomLoadout=0 at load: the HQ's own update and the mission select opened, nothing of the menu.
@@ -986,8 +734,8 @@ std::uint64_t __fastcall HqAutoHook(unsigned char* self,void* ctx) {
     AutoOpenMission(self,ctx,false);
     return result;
 }
-void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }
-void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }
+void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { armoryui::ScreenGone(self); NoteGone(self); return screens[0].gone(self,flags); }
+void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { armoryui::ScreenGone(self); NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }
 
 bool AllMatch(const Sig* sigs,std::size_t n,const char* what,const char* then) noexcept {
     for(std::size_t i=0;i<n;++i)
@@ -1063,7 +811,8 @@ bool InstallRoomUi() noexcept {
     nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
-    Log("HOOK roomui native dialogs=%d (0: the menu drawn by the layout overlay as before)",nativedialog::InstallNativeDialog());
+    Log("HOOK roomui native dialogs=%d (0: the room's 对战 pages are not opened)",nativedialog::InstallNativeDialog());
+    if(!armoryui::Install())Log("HOOK roomui 整备 not installed (its draw contract did not check out): the loadout screen is not opened");
     const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook),reinterpret_cast<void*>(&RoomGoneHook));
     const bool hq=Chain(screens[1],reinterpret_cast<void*>(&HqHook),reinterpret_cast<void*>(&HqGoneHook));
     Log("HOOK roomui room=%d hq=%d (the support loadout menu in the online room and the offline HQ)",room,hq);

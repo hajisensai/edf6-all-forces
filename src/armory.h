@@ -1,0 +1,38 @@
+// 整备 (docs/plan-2026-11-24-ui-rewrite.md, docs/armory-re.md): the full-screen loadout screen over the offline HQ
+// (ui::HUiHQMain) and the online room (ui::HUiRoom). armory_logic.h is its state machine, armory_skin.h its look,
+// armory_draw.cpp its painter, armory_presets.h its presets; this is the game side:
+//  - both screens' Draw (vtable slot 2, stock HUiBase::Draw 0x7FA970) chained: after the screen's own draw, while the
+//    screen is open on that screen object, the frame's View (built on the UI thread) painted over the whole viewport;
+//  - room_ui.cpp's frame (the UI thread) drives it: it opens it (F2 / L3+R3 / the native 整备 button), calls Frame each
+//    frame before the screen's own update and takes the screen's input away (ctx+8 null) while Frame says so;
+//  - its own input: the keyboard, the mouse (pointer in design units through the drawn viewport, buttons, the wheel and
+//    typed characters by a window subclass) and the first XInput pad.
+#pragma once
+#include "room_menu.h"
+
+namespace crew::armoryui {
+
+// At load (room_ui.cpp InstallRoomUi, RoomLoadout=1): checks the draw contract and chains both Draw slots. False
+// (logged REFUSED): the screen cannot be drawn, room_ui never opens it.
+bool Install() noexcept;
+bool Installed() noexcept;
+
+// --- The UI thread (room_ui.cpp Frame) ---
+// Opened on screen object `self` over `units` (room_ui's menu, loaded from the ini just now; it must stay alive and
+// unchanged while open). The keys held now count as already down (the key that opened it does nothing inside).
+void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept;
+bool IsOpen() noexcept;
+// One frame. `hasInput`: the screen would read input this frame (nothing of the game's over it); `toggleDown`: the
+// open / close key or pad combination is held (room_ui's KeysDown). Closed when the screen lost its input (a game
+// dialog, a sub-screen) or by its own keys. Returns true while the screen's input must be taken away: open, or one of
+// its keys still held after it closed (the room / HQ would read the key that closed it).
+bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept;
+// The 对战设置 row picked (the room's PvP pages, room_ui.cpp's native dialogs): true once per request.
+bool TakePvpRequest() noexcept;
+// Closed at once, nothing committed (a mission starting, the screen forgotten, the plugin turned off).
+void Forget() noexcept;
+
+// --- Any thread: the screen object's destructor ran (room_ui.cpp's destructor hooks): never drawn on it again ---
+void ScreenGone(unsigned char* self) noexcept;
+
+}  // namespace crew::armoryui

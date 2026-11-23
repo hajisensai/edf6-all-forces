@@ -520,48 +520,6 @@ inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out,con
     if(out)*out=roompreview::PreviewSpec{u.squad.kind[m.rowAt],m.rowAt%4==0,u.squad.look[m.rowAt]};
     return true;
 }
-// The soldier the 3D view shows while button `focused` of the description dialog has the focus (the game reports it:
-// room_dialog.h FocusedButton): on a squad's page the soldier the button opens; on a class / colour / backpack page the
-// page's soldier wearing the value the button would set (the stock equipment screen's way: the model follows the
-// cursor); anything else the page's own (PreviewFor). False: none.
-inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,roomdialog::Choice focused,
-                         roompreview::PreviewSpec* out,const CrewKinds& kinds=CrewKinds{}) noexcept {
-    using roomdialog::Do;using roomdialog::Page;
-    const roommenu::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
-    // A vehicle's own pages (its rows, a pylon, the gun, a store, the rounds): the vehicle, whatever has the focus.
-    if(m.open && u && u->kind==roommenu::UnitKind::vehicle && u->body!=VehicleBody::none &&
-       (nav.page==Page::unit || nav.page==Page::pylon || nav.page==Page::gun || nav.page==Page::store || nav.page==Page::rounds ||
-        nav.page==Page::mech)) {
-        const bool crewButton=nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg==roommenu::CrewRow(*u);
-        if(out)*out=crewButton ? CrewPreview(m,*u,kinds) : VehiclePreview(*u);
-        return true;
-    }
-    if(m.open && u && roommenu::IsSquad(*u)) {
-        if(nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg<u->squad.count) {
-            if(out)*out=roompreview::PreviewSpec{u->squad.kind[focused.arg],focused.arg%4==0,u->squad.look[focused.arg]};
-            return true;
-        }
-        const int row=nav.row;
-        if(focused.what==Do::set && row>=0 && row<u->squad.count) {
-            roompreview::PreviewSpec p{u->squad.kind[row],row%4==0,u->squad.look[row]};
-            switch(nav.page) {
-            case Page::kind:
-                if(focused.arg<0 || focused.arg>=kSupportWeaponCount)return PreviewFor(m,out,kinds);
-                p.kind=static_cast<SupportWeapon>(focused.arg);
-                if(!SupportKindHasLooks(p.kind))p.look=SupportLook{};
-                else if(!PackFits(p.look.pack,SupportSoldierClass(p.kind)))p.look.pack=0;
-                break;
-            case Page::primary: p.look.primary=focused.arg; break;
-            case Page::secondary: p.look.secondary=focused.arg; break;
-            case Page::pack: if(PackFits(focused.arg,SupportSoldierClass(p.kind)))p.look.pack=static_cast<std::uint8_t>(focused.arg); break;
-            default: return PreviewFor(m,out,kinds);
-            }
-            if(out)*out=p;
-            return true;
-        }
-    }
-    return PreviewFor(m,out,kinds);
-}
 inline bool SamePreview(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
     return a.body==b.body && (a.body!=VehicleBody::none || (a.kind==b.kind && a.leader==b.leader && a.look==b.look));
 }
