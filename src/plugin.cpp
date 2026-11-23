@@ -34,6 +34,7 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
 #include "worldmap.h"
@@ -1442,6 +1443,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
+    wequip::InstallWeaponEquip();   // the 整备 weapons page's equip (weapon_equip.cpp): signatures only, no patch
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
     InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)

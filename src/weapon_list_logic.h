@@ -130,7 +130,7 @@ struct Catalog {
     int SlotCount(int cls) const noexcept {
         int n=0;
         for(const auto& r:rules)
-            if(r.cls==cls)n=std::max(n,r.slot+1);
+            if(r.cls==cls)n=(std::max)(n,r.slot+1);
         return n;
     }
     const Entry* ByRow(int row) const noexcept {
@@ -161,21 +161,34 @@ struct Filter {
 
 enum class Verdict { ok, same, header, notOwned, capped, wrongSlot, duplicate, absent };
 
-// 规则同原版（文件头）。same：本槽已经装着这一行。
+// 规则同原版（文件头），只用表里读到的事实：category / level 是表行的 +0x10 / +0x20，owned 是持有位，levelCap -1 为
+// 无上限，equipped 是本兵种各槽当前的行。weapon_equip.cpp 写之前用它判一次，列表用 CheckEquip。
+// same：本槽已经装着这一行。
+inline Verdict CheckEquipRow(const WeaponSlotRule* rules,std::size_t ruleCount,int cls,int slot,int row,int category,
+                             int level,bool owned,int levelCap,const std::array<int,kSlotsMost>& equipped) noexcept {
+    const WeaponSlotRule* rule=nullptr;
+    int slots=0;
+    for(std::size_t i=0;i<ruleCount;++i){
+        if(rules[i].cls!=cls)continue;
+        slots=(std::max)(slots,rules[i].slot+1);
+        if(rules[i].slot==slot)rule=rules+i;
+    }
+    if(!rule || row<0)return Verdict::absent;
+    if(!Catalog::Takes(*rule,category))return Verdict::wrongSlot;
+    if(slot<kSlotsMost && equipped[static_cast<std::size_t>(slot)]==row)return Verdict::same;
+    if(!owned)return Verdict::notOwned;
+    if(levelCap>=0 && static_cast<unsigned>(level)>static_cast<unsigned>(levelCap))return Verdict::capped;
+    if(!rule->allowDuplicate)
+        for(int s=0;s<(std::min)(slots,kSlotsMost);++s)
+            if(s!=slot && equipped[static_cast<std::size_t>(s)]==row)return Verdict::duplicate;
+    return Verdict::ok;
+}
 inline Verdict CheckEquip(const Catalog& c,const Loadout& l,int cls,int slot,int row) {
     const Entry* e=c.ByRow(row);
-    const WeaponSlotRule* rule=c.Rule(cls,slot);
-    if(!e || !rule)return Verdict::absent;
-    if(e->cls!=cls || !Catalog::Takes(*rule,e->category))return Verdict::wrongSlot;
-    if(slot>=0 && slot<kSlotsMost && l.equipped[static_cast<std::size_t>(slot)]==row)return Verdict::same;
-    if(!l.owned || !l.owned(row))return Verdict::notOwned;
-    if(l.levelCap>=0 && static_cast<unsigned>(e->level)>static_cast<unsigned>(l.levelCap))return Verdict::capped;
-    if(!rule->allowDuplicate){
-        const int slots=std::min(c.SlotCount(cls),kSlotsMost);
-        for(int s=0;s<slots;++s)
-            if(s!=slot && l.equipped[static_cast<std::size_t>(s)]==row)return Verdict::duplicate;
-    }
-    return Verdict::ok;
+    if(!e)return Verdict::absent;
+    if(e->cls!=cls)return c.Rule(cls,slot)?Verdict::wrongSlot:Verdict::absent;
+    return CheckEquipRow(c.rules.data(),c.rules.size(),cls,slot,row,e->category,e->level,l.owned && l.owned(row),
+                         l.levelCap,l.equipped);
 }
 
 // ---- 搜索 ----
@@ -273,8 +286,8 @@ inline std::vector<Line> BuildList(const Catalog& c,const Loadout& l,const Filte
         for(const std::uint32_t ei:shown){
             const Entry& e=c.entries[ei];
             head.owned+=(l.owned && l.owned(e.row))?1:0;
-            head.levelMin=std::min(head.levelMin,e.level);
-            head.levelMax=std::max(head.levelMax,e.level);
+            head.levelMin=(std::min)(head.levelMin,e.level);
+            head.levelMax=(std::max)(head.levelMax,e.level);
             head.equippedHere=head.equippedHere || e.row==here;
             head.favourite=head.favourite || l.favourites.count(std::wstring(e.Id()))!=0;
         }

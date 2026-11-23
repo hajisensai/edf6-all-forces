@@ -202,6 +202,24 @@ void Lists() {
     f.category=-1;
 }
 
+// 写入前的判定（weapon_equip.cpp 用的那一个），用生成的 SoldierInit 规则。
+void RawRows() {
+    const std::array<int,kSlotsMost> eq{10,11,12,13,14,15};
+    const WeaponSlotRule* r=kWeaponSlotRules;
+    const std::size_t n=std::size(kWeaponSlotRules);
+    Check(CheckEquipRow(r,n,3,1,10,200,5,true,-1,eq)==Verdict::ok,"Fencer hand slots may repeat");
+    Check(CheckEquipRow(r,n,3,5,14,206,5,true,-1,eq)==Verdict::duplicate,"Fencer support slots may not");
+    Check(CheckEquipRow(r,n,0,1,10,0,5,true,-1,eq)==Verdict::duplicate,"Ranger main slots may not");
+    Check(CheckEquipRow(r,n,0,0,99,7,5,true,-1,eq)==Verdict::wrongSlot,"support category in a main slot");
+    Check(CheckEquipRow(r,n,0,3,99,7,5,true,-1,eq)==Verdict::ok,"support category in its slot");
+    Check(CheckEquipRow(r,n,0,4,99,0,5,true,-1,eq)==Verdict::absent,"Ranger has four slots");
+    Check(CheckEquipRow(r,n,0,0,99,0,101,true,100,eq)==Verdict::capped,"over the cap");
+    Check(CheckEquipRow(r,n,0,0,99,0,100,true,100,eq)==Verdict::ok,"at the cap");
+    Check(CheckEquipRow(r,n,0,0,99,0,0,false,-1,eq)==Verdict::notOwned,"not owned");
+    Check(CheckEquipRow(r,n,0,0,10,0,0,false,-1,eq)==Verdict::same,"already there");
+    Check(CheckEquipRow(r,n,0,0,-1,0,0,true,-1,eq)==Verdict::absent,"no row");
+}
+
 void Stats() {
     WeaponStats a,b;
     a[Stat::level]=10;b[Stat::level]=20;
@@ -269,6 +287,7 @@ void Fuzz() {
 int main() {
     Generated();
     Lists();
+    RawRows();
     Stats();
     Fuzz();
     std::printf("weapon_list_logic: %d checks passed\n",checks);

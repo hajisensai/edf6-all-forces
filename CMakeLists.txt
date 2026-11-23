@@ -142,6 +142,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+# 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
+target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
@@ -1089,6 +1091,9 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The native dialogs' code checks (src/room_dialog.cpp, tools/room_dialog_sigs.py) against EDF.dll (skipped without the game).
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
+add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py")
+set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
 set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
