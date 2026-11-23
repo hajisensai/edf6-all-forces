@@ -26,6 +26,10 @@ public:
     int steps=0,acts=0,commits=0;
     bool failCommit=false;
     bool dirty=false;
+    float top1=0;               // ColumnTop(1)
+    skin::Rect hole{};          // Hole (W 0: none)
+    skin::Rect owned{};         // Click takes clicks inside it
+    int cycles=0,ownClicks=0,discards=0;
     const wchar_t* Name() const noexcept override { return name; }
     int Subs() const noexcept override { return subs; }
     const wchar_t* SubName(int) const noexcept override { return L"S"; }
@@ -51,6 +55,15 @@ public:
         ++commits; dirty=false; return true;
     }
     bool Dirty() const noexcept override { return dirty; }
+    void Discard() noexcept override { ++discards; dirty=false; }
+    float ColumnTop(int column) const noexcept override { return column==1 ? top1 : 0; }
+    bool Hole(const Pos&,skin::Rect* r) const noexcept override { *r=hole; return hole.W()>0; }
+    bool Click(Pos&,float x,float y) noexcept override {
+        if(!owned.Contains(x,y))return false;
+        ++ownClicks;
+        return true;
+    }
+    bool Cycle(const Pos&,int d) noexcept override { cycles+=d; return true; }
 };
 
 Words MakeWords() {
@@ -160,7 +173,65 @@ void Scripted() {
         r.Tap(kConfirm);
         Check(r.s.column==0,"no items: stays in the list");
         Effects fx=r.Tap(kCancel);
-        Check(fx.close && !r.s.open,"cancel in the list closes");
+        Check(!fx.close && r.s.open && r.s.popup==Popup::unsaved && r.s.popupCursor==kUnsavedSave,
+              "cancel in the list with edits asks first");
+        fx=r.Tap(kConfirm);
+        Check(fx.close && !r.s.open && r.a.commits==1 && !r.a.dirty,"save and close commits");
+    }
+    // the close prompt: discard, back, toggle; a clean page closes at once
+    {
+        Rig r;
+        r.a.dirty=true;
+        r.Tap(kToggle);
+        Check(r.s.open && r.s.popup==Popup::unsaved,"toggle with edits asks first");
+        r.Tap(kCancel);
+        Check(r.s.open && r.s.popup==Popup::none && r.a.dirty,"cancel the prompt: back, edits kept");
+        r.Tap(kToggle);
+        r.Tap(kToggle);
+        Check(r.s.open && r.s.popup==Popup::none,"toggle on the prompt: back");
+        r.Tap(kCancel);
+        r.Tap(kDown);
+        Check(r.s.popupCursor==kUnsavedDiscard,"prompt cursor");
+        Effects fx=r.Tap(kConfirm);
+        Check(fx.close && !r.s.open && r.a.discards==1 && r.a.commits==0,"discard and close");
+        Rig q;
+        q.a.dirty=true;
+        q.Tap(kCancel);
+        const skin::Rect line=detail::UnsavedLine(kUnsavedBack);
+        q.Click((line.x0+line.x1)/2,(line.y0+line.y1)/2);
+        Check(q.s.open && q.s.popup==Popup::none,"click back");
+        q.a.failCommit=true;
+        q.Tap(kCancel);
+        fx=q.Tap(kConfirm);
+        Check(!fx.close && q.s.open && q.s.note[0]==L'b',"a failed save keeps the screen, says why");
+    }
+    // page extras: an action item, a reserved column top, an owned click, Z / C without sub tabs, the hole
+    {
+        Rig r;
+        r.Tap(kConfirm);
+        r.Tap(kDown);
+        Check(r.s.column==1 && r.s.pos.item==1,"on an item without fields");
+        r.Tap(kConfirm);
+        Check(r.a.acts==1 && r.s.column==1,"confirm on an item without fields activates it");
+        const skin::Rect plain=detail::LineRect(r.a,1,1);
+        r.a.top1=400;
+        const skin::Rect lowered=detail::LineRect(r.a,1,1);
+        Check(lowered.y0>=plain.y0+400 && detail::Visible(r.a,1)==detail::Visible(r.a,0)-7,"column top takes whole rows");
+        r.Click((lowered.x0+lowered.x1)/2,(lowered.y0+lowered.y1)/2);
+        Check(r.a.acts==2,"second click on an action item activates it");
+        r.a.owned=skin::Rect{700,150,800,200};
+        r.Click(750,170);
+        Check(r.a.ownClicks==1 && r.a.acts==2 && r.s.column==1,"the page's own click comes first");
+        r.Tap(kSubNext);r.Tap(kSubNext);r.Tap(kSubPrev);
+        Check(r.a.cycles==1,"Z / C cycle a page without sub tabs");
+        r.a.hole=skin::Rect{640,130,1270,520};
+        static View v;
+        Build(r.s,r.pages,3,r.ps,r.w,&v);
+        Check(v.layer[0].holeQuads>300 && v.layer[0].holeQuads<v.layer[0].quads.n && v.layer[0].hole.x0==640,
+              "hole: the background before the rows");
+        r.a.hole=skin::Rect{};
+        Build(r.s,r.pages,3,r.ps,r.w,&v);
+        Check(v.layer[0].holeQuads==0 && v.layer[0].hole.W()==0,"no hole");
     }
     // sub tabs
     {
@@ -264,6 +335,11 @@ void Scripted() {
         r.Tap(kPresetMenu);
         Build(r.s,r.pages,3,r.ps,r.w,&v);
         Check(v.layer[1].quads.n>0 && v.layer[1].nt==1+kActCount,"popup layer");
+        r.s.popup=Popup::none;
+        r.a.dirty=true;
+        r.Tap(kToggle);
+        Build(r.s,r.pages,3,r.ps,r.w,&v);
+        Check(r.s.popup==Popup::unsaved && v.layer[1].nt==1+kUnsavedCount,"close prompt layer");
         Close(r.s);
         Build(r.s,r.pages,3,r.ps,r.w,&v);
         Check(!v.open && v.layer[0].quads.n==0,"closed: nothing");
@@ -284,6 +360,8 @@ void RandomWalk() {
                 r.ps.current=r.ps.count ? static_cast<int>(rng()%r.ps.count) : -1;}
             if(rng()%211==0)r.a.rows=static_cast<int>(rng()%30);
             r.b.failCommit=rng()%13==0;
+            if(rng()%101==0)r.a.top1=static_cast<float>(rng()%800);
+            if(rng()%103==0)r.a.hole=rng()%2 ? skin::Rect{640,130,1270,520} : skin::Rect{};
             for(int k=0;k<kKeyCount;++k)
                 if(rng()%9==0)r.in.held[k]=!r.in.held[k];
             if(r.in.held[kToggle] && rng()%2)r.in.held[kToggle]=false;
