@@ -10,7 +10,7 @@
 //    the stock OnUpdate gets a copy of its ctx with +8 null (§5.2: it then neither scrolls the hidden list nor
 //    presses its buttons; its cursor refresh still runs).
 //  - slot 2, Draw 0x7FA970 (the render command queue's thread): the map drawn into the select's viewport (ctx+0x398)
-//    on its D3D11 context (ctx+8) through worldmap_gpu.h with the routes and pins, then the stock draw (the kept
+//    on its D3D11 context (ctx+8) through ui_gpu.h (the shared private pipeline; the tiles' cache is this file's TileCache) with the routes and pins, then the stock draw (the kept
 //    windows: thumbnail, medals, briefing), then the map again over their skins' empty frame on the right and the
 //    place's panel on it (docs/worldmap-select-re.md §8.1); every later screen (a dialog, the main frame) over all.
 //  - slot 5, the scalar deleting destructor 0x8A3650: the object's end. Every texture and the device state go with it
@@ -19,13 +19,15 @@
 // installed, another layout) the log says why once and every select stays stock. The same when the draw cannot run
 // on this device (the list is hidden only once the map has been drawn).
 #include "worldmap.h"
-#include "worldmap_text.h"
+#include "ui_text.h"
 #include "worldmap_tiles.h"
 #include "crew.h"
 #include "memory.h"
 #include "map.h"
 
 #include <Xinput.h>
+#include <d3d11.h>
+#include <wrl/client.h>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -33,11 +35,12 @@
 #include <iterator>
 #include <mutex>
 #include <new>
+#include <vector>
 
 namespace crew {
 namespace {
 using namespace worldmap;
-namespace gpu=worldmapgpu;
+namespace gpu=uigpu;
 
 // --- The game's side (EDF.dll 0x678CCB46) ---
 constexpr unsigned kUpdateSlot=0x18052F0,kUpdate=0x8A4F60;   // vtable 0x18052E8 slot 1: OnUpdate(this, UpdateContext*)
@@ -519,10 +522,67 @@ void Publish(const Shot& s) noexcept { AcquireSRWLockExclusive(&shotLock);shot=s
 void Read(Shot& s) noexcept { AcquireSRWLockShared(&shotLock);s=shot;ReleaseSRWLockShared(&shotLock); }
 Geometry ReadGeometry() noexcept { AcquireSRWLockShared(&shotLock);const Geometry g=geometry;ReleaseSRWLockShared(&shotLock);return g; }
 
+// The base map's tiles on the device (render thread, under gpuLock): one immutable B8G8R8A8 texture each (no mip chain:
+// worldmap_logic.h LevelFor draws the coarsest level whose pixels are no larger than the screen's, so a tile is shown
+// between 1x and 2x minified, where a bilinear sample needs no mips), at most kCacheTiles of them (1350 x 1350 x 4 =
+// 7.3 MB each), evicted by worldmap_logic.h Victim. Viewed in the target's colour space at upload (a tile is read as it
+// is written): a target of the other space, or another device, drops them all.
+constexpr int kCacheTiles=48;
+class TileCache {
+public:
+    // Before the frame's tile calls (after the renderer's Begin).
+    void Bind(gpu::Painter& paint) noexcept {
+        ID3D11Device* const d=paint.Device();
+        if(d!=device || paint.Srgb()!=srgb){tiles.clear();device=d;srgb=paint.Srgb();}
+    }
+    bool Has(int index) const noexcept {
+        for(const Tile& t:tiles)if(t.index==index)return true;
+        return false;
+    }
+    // `tile` as a texture. False: not made (no device, a failed device call, or the cache full of tiles that may not go).
+    bool Upload(const TilePixels& tile,int level,unsigned frame) noexcept {
+        if(!device || tile.w<=0 || tile.h<=0 ||
+           tile.bgra.size()!=static_cast<std::size_t>(tile.w)*static_cast<std::size_t>(tile.h))return false;
+        if(Has(tile.index))return true;
+        std::size_t slot=tiles.size();
+        if(tiles.size()>=static_cast<std::size_t>(kCacheTiles)) {
+            int levels[kCacheTiles];
+            unsigned used[kCacheTiles];
+            const int n=kCacheTiles;
+            for(int i=0;i<n;++i){levels[i]=tiles[static_cast<std::size_t>(i)].level;used[i]=tiles[static_cast<std::size_t>(i)].used;}
+            const int victim=Victim(levels,used,n,frame);
+            if(victim<0)return false;
+            slot=static_cast<std::size_t>(victim);
+        }
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+        view.Attach(gpu::MakeImage(device,tile.bgra.data(),tile.w,tile.h,srgb));
+        if(!view)return false;
+        Tile t{tile.index,level,frame,std::move(view)};
+        try {
+            if(slot<tiles.size())tiles[slot]=std::move(t);
+            else tiles.push_back(std::move(t));
+        } catch(...) { return false; }
+        return true;
+    }
+    // The cached tile's (u0, v0)..(u1, v1) over the rectangle, marked drawn in `frame`.
+    void Draw(gpu::Painter& paint,int index,float x0,float y0,float x1,float y1,float u0,float v0,float u1,float v1,
+              unsigned frame) noexcept {
+        for(Tile& t:tiles)
+            if(t.index==index){t.used=frame;paint.Image(t.view.Get(),x0,y0,x1,y1,u0,v0,u1,v1,0xFFFFFFFFu);return;}
+    }
+    void Reset() noexcept { tiles.clear();device=nullptr; }
+private:
+    struct Tile { int index; int level; unsigned used; Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view; };
+    std::vector<Tile> tiles;
+    ID3D11Device* device=nullptr;   // compared only (the renderer holds it)
+    bool srgb=false;
+};
+
 // --- The draw's state (render thread; the destructor takes gpuLock to release it) ---
 std::mutex gpuLock;
 gpu::Renderer* renderer=nullptr;            // never freed (no device calls at the DLL's unload)
-worldmaptext::Labels* labels=nullptr;       // the same
+uitext::Labels* labels=nullptr;       // the same
+TileCache* cache=nullptr;              // the same
 enum : int { kGpuUnknown, kGpuReady, kGpuBroken };
 std::atomic<int> gpuState{kGpuUnknown};
 unsigned frame=0;
@@ -936,7 +996,7 @@ int DrawTiles(const View& v,const Screen& screen,int* xy) noexcept {
     const int level=LevelFor(v,screen);
     const TileSpan span=Visible(v,screen,level);
     const int n=CentreFirst(v,screen,span,xy,kMostVisible);
-    auto has=[](int i) { return i>=0 && renderer->Has(i); };
+    auto has=[](int i) { return i>=0 && cache->Has(i); };
     for(int i=0;i<n;++i) {
         const int x=xy[2*i],y=xy[2*i+1];
         int ax=0,ay=0;
@@ -945,7 +1005,7 @@ int DrawTiles(const View& v,const Screen& screen,int* xy) noexcept {
         if(z<0)continue;
         const MapRect r=TileRect(level,x,y);
         const Pixel p0=ToScreenUnwrapped(v,screen,r.u0,r.v0),p1=ToScreenUnwrapped(v,screen,r.u1,r.v1);
-        renderer->DrawTile(TileIndex(z,ax,ay),p0.x,p0.y,p1.x,p1.y,uv.u0,uv.v0,uv.u1,uv.v1,frame);
+        cache->Draw(*renderer,TileIndex(z,ax,ay),p0.x,p0.y,p1.x,p1.y,uv.u0,uv.v0,uv.u1,uv.v1,frame);
     }
     return n;
 }
@@ -954,7 +1014,7 @@ float Seconds() noexcept { return static_cast<float>(GetTickCount64()%1000000ull
 
 // A label at (x, y) (its top left), shadowed; at most `maxW` wide (cut at its right); its width.
 float Text(const wchar_t* text,float x,float y,float size,bool bold,std::uint32_t argb,float maxW=4000.f) noexcept {
-    const worldmaptext::Label l=labels->Get(*renderer,text,size,bold,drawn.lang,frame);
+    const uitext::Label l=labels->Get(*renderer,text,size,bold,drawn.lang,frame);
     if(!l.view)return 0.f;
     const float w=l.w<maxW ? l.w : maxW,u1=l.w>0.f ? w/l.w : 1.f;
     renderer->Image(l.view,x+1.5f,y+1.5f,x+1.5f+w,y+1.5f+l.h,0.f,0.f,u1,1.f,0xC0000000u);
@@ -1071,7 +1131,7 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
             if(chosen)Sprite(ring,c,r+(many ? 14.f : 9.f),0xFFFFFFFFu);
             wchar_t count[8];
             MissionNumber(g.missions-1,0,count,std::size(count));
-            const worldmaptext::Label l=labels->Get(*renderer,count,chosen ? 22.f : 18.f,true,drawn.lang,frame);
+            const uitext::Label l=labels->Get(*renderer,count,chosen ? 22.f : 18.f,true,drawn.lang,frame);
             if(l.view)renderer->Image(l.view,c.x-l.w*0.5f,c.y-l.h*0.5f,c.x+l.w*0.5f,c.y+l.h*0.5f,0.f,0.f,1.f,1.f,
                                       g.state==3 ? 0xFFFFFFFFu : 0xFF101010u);
         }
@@ -1143,8 +1203,9 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
     if(!ReadDrawCtx(ctx,&device,vp))return;
     std::lock_guard<std::mutex> hold(gpuLock);
     if(!renderer)renderer=new(std::nothrow) gpu::Renderer();
-    if(!labels)labels=new(std::nothrow) worldmaptext::Labels();
-    if(!renderer || !labels)return;
+    if(!labels)labels=new(std::nothrow) uitext::Labels();
+    if(!cache)cache=new(std::nothrow) TileCache();
+    if(!renderer || !labels || !cache)return;
     const gpu::Viewport viewport{static_cast<float>(vp[0]),static_cast<float>(vp[1]),static_cast<float>(vp[2]),
                                  static_cast<float>(vp[3])};
     const gpu::Renderer::Begun begun=renderer->Begin(device,viewport);
@@ -1153,9 +1214,11 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
             Log("WORLDMAP the map cannot be drawn on this device: %s: the mission select stays stock",renderer->Why());
         renderer->Reset();
         labels->Reset();
+        cache->Reset();
         return;
     }
     if(begun!=gpu::Renderer::Begun::ok)return;
+    cache->Bind(*renderer);
     struct Ender { gpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
     ++frame;
     const Screen screen{1920.f,1080.f,viewport.w};
@@ -1181,15 +1244,15 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
             failed[tile.index]=true;
             continue;
         }
-        renderer->Upload(tile,LevelOfIndex(tile.index),frame);
+        cache->Upload(tile,LevelOfIndex(tile.index),frame);
     }
     const int level=LevelFor(v,screen);
     int want[3+kMostVisible];
     int wanted=0;
-    for(int i=0;i<3;++i)if(!renderer->Has(i) && !failed[i])want[wanted++]=i;
+    for(int i=0;i<3;++i)if(!cache->Has(i) && !failed[i])want[wanted++]=i;
     for(int i=0;i<n;++i) {
         const int index=TileIndex(level,WrapColumn(level,xy[2*i]),xy[2*i+1]);
-        if(index>=0 && !failed[index] && !renderer->Has(index))want[wanted++]=index;
+        if(index>=0 && !failed[index] && !cache->Has(index))want[wanted++]=index;
     }
     store->Want(want,wanted);
     // The viewport and the target's size for the UI thread (the pointer, the sharpness).
@@ -1215,11 +1278,12 @@ void DrawOver(unsigned char* ctx) noexcept {
     int vp[4]{};
     if(!ReadDrawCtx(ctx,&device,vp))return;
     std::lock_guard<std::mutex> hold(gpuLock);
-    if(!renderer || !labels || gpuState.load()!=kGpuReady)return;
+    if(!renderer || !labels || !cache || gpuState.load()!=kGpuReady)return;
     const gpu::Viewport viewport{static_cast<float>(vp[0]),static_cast<float>(vp[1]),static_cast<float>(vp[2]),
                                  static_cast<float>(vp[3])};
     if(renderer->Begin(device,viewport)!=gpu::Renderer::Begun::ok)return;
     struct Ender { gpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
+    cache->Bind(*renderer);
     const Screen screen{1920.f,1080.f,viewport.w};
     View v=drawn.view;
     Clamp(v,screen);
@@ -1300,6 +1364,7 @@ void* __fastcall GoneHook(unsigned char* self,unsigned flags) {
             std::lock_guard<std::mutex> hold(gpuLock);
             if(renderer)renderer->Reset();   // every texture and device object (made again by the next select)
             if(labels)labels->Reset();
+            if(cache)cache->Reset();
             Log("WORLDMAP select %p gone: its textures released",static_cast<void*>(self));
         }
     }
