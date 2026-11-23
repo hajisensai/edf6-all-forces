@@ -88,6 +88,45 @@ int main() {
         Check(DiamondAt(126,126)==kDiamondDark && DiamondAt(114,114)==kDiamondDark && DiamondAt(42,42)==kDiamondDark,
               "dark diamonds half a period off diagonally");
     }
+    // a hole for the 3D view: the diamonds round it still the checker, nothing over it; a panel round it the same
+    {
+        const Rect all{0,0,kWidth,kHeight}, hole{1328,130,1792,530};
+        float poly[4][2]={{100,0},{200,100},{100,200},{0,100}}, cut[12][2];
+        Check(ClipToRect(poly,4,Rect{100,0,300,300},cut)==3,"clip: a diamond halved is a triangle");
+        Check(ClipToRect(poly,4,Rect{300,300,400,400},cut)==0,"clip: outside is nothing");
+        Check(ClipToRect(poly,4,Rect{50,50,150,150},cut)==4,"clip: inside a diamond is the rect");
+        Check(ClipToRect(poly,4,Rect{0,0,200,200},cut)==4,"clip: round the diamond is the diamond");
+        Check(ClipToRect(poly,4,Rect{0,0,150,200},cut)==5,"clip: a corner cut off is a pentagon");
+        Quads q;
+        DiamondsAround(&q,all,hole);
+        AllWellFormed(q,"holed diamond quads well formed");
+        for(int i=0;i<q.n;++i)
+            for(const auto& c:q.q[i].xy)
+                Check(!(c[0]>hole.x0+0.01f && c[0]<hole.x1-0.01f && c[1]>hole.y0+0.01f && c[1]<hole.y1-0.01f),
+                      "no diamond corner inside the hole");
+        for(float y=3.71f;y<kHeight;y+=17.29f)
+            for(float x=2.37f;x<kWidth;x+=13.13f){
+                bool any=false, lit=false;
+                for(int i=0;i<q.n;++i)
+                    if(Covers(q.q[i],x,y)){any=true;lit=lit || q.q[i].argb[0]==kDiamondLight;}
+                if(hole.Contains(x,y)){Check(!any,"the hole left clear");continue;}
+                Check(any,"round the hole covered");
+                Check((lit ? kDiamondLight : kDiamondDark)==DiamondAt(x,y),"round the hole: the same checker");
+            }
+        Quads pa;
+        const Rect col=layout::kDetails;
+        PanelAround(&pa,col,hole);
+        AllWellFormed(pa,"holed panel well formed");
+        for(float y=col.y0+1;y<col.y1;y+=7.3f)
+            for(float x=col.x0+1;x<col.x1;x+=7.1f){
+                bool any=false;
+                for(int i=0;i<pa.n;++i)any=any || Covers(pa.q[i],x,y);
+                Check(any!=hole.Contains(x,y),"panel round the hole, not over it");
+            }
+        Quads plain;
+        PanelAround(&plain,layout::kList,hole);
+        Check(plain.n==9,"a column clear of the hole: the plain panel");
+    }
     // panel brackets
     {
         Quads q;
