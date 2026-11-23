@@ -1,7 +1,7 @@
 // 整备武器页（src/weapon_page_logic.h）离线测试：在框架（armory_logic.h）里用键盘 / 鼠标驱动，假的游戏侧接小表。
 // 覆盖：槽行显示当前装备、换槽时光标落到装备上（系列自动展开）、系列折叠 / 展开、类别标签（A / D 与点击）、来源开关
 // （芯片与详情字段）、搜索（Tab 打字、Enter 保留、Esc 清空、打字时框架按键不动）、首字跳转、确认键装备（立即写、
-// 重读后列表与槽行跟着变）、装备不了时提示原因（上限 / 重复 / 未持有）、收藏与只看收藏、属性对比（等级 ▲▼）、3D 预览
+// 重读后列表与槽行跟着变）、装备不了时提示原因（上限 / 重复 / 未持有）、收藏与只看收藏、NEW / UP 标记、属性对比（等级与说明栏属性 ▲▼，按标签配对、读一次缓存）、3D 预览
 // （光标试拿、换槽与关闭时换回、只在当前兵种留洞）、以及随机操作下的不变式与 View 容量。
 #include "../src/weapon_page_logic.h"
 #include <cstdio>
@@ -52,6 +52,15 @@ int Row(const wchar_t* id) {
     return -1;
 }
 
+wlist::SpecLine SpecRow(const wchar_t* label,float value,int curve) {
+    wlist::SpecLine ln;
+    ln.label=label;ln.format=L"$0";ln.nodes=3;
+    wlist::SpecParam p;
+    p.value=value;p.curve=curve;
+    ln.params.push_back(p);
+    return ln;
+}
+
 class FakeGame final : public wpage::Game {
 public:
     bool ready=true;
@@ -63,12 +72,23 @@ public:
     std::vector<std::array<int,3>> previews;
     std::set<std::wstring> saved;
     int saves=0,equips=0;
-    FakeGame() { for(auto& c:equipped)c.fill(-1); }
+    std::map<int,wlist::Badge> badges;
+    std::map<int,wlist::WeaponSpec> specs;
+    int specReads=0;
+    FakeGame() {
+        for(auto& c:equipped)c.fill(-1);
+        specs[Row(L"A1")]={SpecRow(L"Damage",100.0f,0),SpecRow(L"Reload",2.0f,1)};
+        specs[Row(L"B1")]={SpecRow(L"Reload",1.5f,1),SpecRow(L"Damage",90.0f,0),SpecRow(L"Zoom",2.0f,-1)};
+    }
     bool Ready() const noexcept override { return ready; }
     int CurrentClass() const noexcept override { return current; }
     bool Read(int cls,wlist::Loadout* out) noexcept override {
         out->owned=[this](int row){ return owned.count(row)!=0; };
         out->levelCap=cap;
+        out->badge=[this](int row){
+            const auto it=badges.find(row);
+            return it==badges.end() ? wlist::Badge::none : it->second;
+        };
         out->equipped=equipped[static_cast<std::size_t>(cls)];
         return true;
     }
@@ -82,6 +102,13 @@ public:
     }
     void Preview(int cls,int slot,int row) noexcept override { previews.push_back({cls,slot,row}); }
     void SaveFavourites(const std::set<std::wstring>& ids) noexcept override { saved=ids; ++saves; }
+    bool ReadSpec(int row,wlist::WeaponSpec* out) noexcept override {
+        ++specReads;
+        const auto it=specs.find(row);
+        if(it==specs.end())return false;
+        *out=it->second;
+        return true;
+    }
 };
 
 wpage::Texts MakeTexts() {
@@ -321,11 +348,26 @@ void Equipping() {
     Check(!r.game.previews.empty() && r.game.previews.back()==std::array<int,3>{0,0,Row(L"B1")},"cursor previews");
     // 属性对比
     r.Tap(kRight);
-    const int st=r.Field(wpage::Field::stat);
+    const int st=r.Field(wpage::Field::level);
     Pos sp=r.s.pos;sp.field=st;
     Line sl;
     r.page.FieldLine(sp,&sl);
     Check(st>=0 && Has(sl.value,L"5 \x2192 8 \x25B2"),"level compare: better");
+    // 说明栏属性：候选的行序，标签配对，只在装着那把里有的接在后面。
+    std::map<std::wstring,std::wstring> spec;
+    std::vector<std::wstring> order;
+    for(int i=st+1;i<r.page.Fields(r.s.pos);++i){
+        Pos q=r.s.pos;q.field=i;
+        Line l;
+        r.page.FieldLine(q,&l);
+        spec[l.label]=l.value;order.emplace_back(l.label);
+    }
+    Check(order==std::vector<std::wstring>{L"Reload",L"Damage",L"Zoom"},"spec rows after the level, candidate order");
+    Check(spec[L"Reload"]==L"2.0 \x2192 1.5 \x25B2" && spec[L"Damage"]==L"100.0 \x2192 90.0 \x25BC","spec compare");
+    Check(spec[L"Zoom"]==L"\x2014 \x2192 2.0","candidate-only row");
+    const int reads=r.game.specReads;
+    for(int i=0;i<10;++i)r.page.Fields(r.s.pos);
+    Check(reads>=2 && r.game.specReads==reads,"each row's spec read once (cached)");
     r.Tap(kCancel);
     r.Tap(kConfirm);
     Check(r.game.equipped[0][0]==Row(L"B1") && r.s.column==1,"confirm equips at once");
@@ -362,6 +404,22 @@ void Equipping() {
     // 关闭：预览换回装备
     r.Tap(kToggle);
     Check(!r.s.open && r.game.previews.back()==std::array<int,3>{0,1,Row(L"R1")},"close restores the preview");
+}
+
+void Badges() {
+    Rig r;
+    r.game.badges[Row(L"A2")]=wlist::Badge::fresh;
+    r.game.badges[Row(L"B1")]=wlist::Badge::up;
+    r.page.Refresh();
+    r.Tap(kConfirm);
+    bool fresh=false,up=false;
+    const std::vector<wlist::Line> lines=r.page.Lines(r.s.pos);
+    for(int i=0;i<static_cast<int>(lines.size());++i){
+        const Line l=r.ItemL(i);
+        if(lines[static_cast<std::size_t>(i)].row==Row(L"B1"))up=std::wcsncmp(l.value,L"UP  ",4)==0;
+        if(lines[static_cast<std::size_t>(i)].kind==wlist::LineKind::series)fresh=std::wcsncmp(l.value,L"NEW  ",5)==0;
+    }
+    Check(fresh && up,"NEW on the series holding A2, UP on PA-11");
 }
 
 void Favourites() {
@@ -445,6 +503,7 @@ int main() {
     Jump();
     Equipping();
     Favourites();
+    Badges();
     NotReady();
     RandomWalk();
     std::printf("weapon_page_logic: %d checks passed\n",checks);

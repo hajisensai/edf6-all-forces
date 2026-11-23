@@ -28,6 +28,12 @@ struct RowFacts {
 bool ReadRow(int row,RowFacts* out) noexcept;
 
 bool Owned(int row) noexcept;                             // WeaponRecord flags bit0（weapon_records.h，含搬家后的行）
+// WeaponRecord flags 的 NEW / UP（原版选择界面同一判定，wlist::BadgeOf）。只读：原版只在出击时清（docs/weapon-select-re.md §5）。
+wlist::Badge Badge(int row) noexcept;
+// 原版说明栏 0xD8A90 的属性：WEAPONTEXT text_table[row] 的属性表，每个参数由原生 0xD7CE0 按该行 WeaponRecord 的星级
+// 求值（与原版界面显示的数一致；格式化见 wlist::FormatSpecLine）。文字表未载入时像原版一样先调 0xD9350 载入。
+// 表里没有这一行 / 读不到：false。
+bool ReadSpec(int row,wlist::WeaponSpec* out);
 int LevelCap() noexcept;                                  // -1：不封顶（GS+0x14FC8 为 0，或 0xD8850 返回 -1）
 int CurrentClass(int player) noexcept;                    // GS+0x6E90+player*0x3E60；-1 读不到
 // 某兵种 6 个槽当前的行（-1 空；该兵种没有的槽也是 GS 里的原值）。
@@ -36,7 +42,7 @@ bool ReadEquipped(int player,int cls,std::array<int,wlist::kSlotsMost>* out) noe
 // 当前表的目录：生成数据按名字找行（表里没有的不列）；表里有、生成数据里没有的行（别的 mod 追加）作为来源
 // kSourceOther 的单行系列，名字用它的 WEAPONTABLE 名。表未就绪时返回 false。
 bool BuildCatalog(wlist::Catalog* out);
-// player 在 cls 兵种的装备、持有位快照（按当前 RowCount）与等级上限；favourites 不动（由页面从 ini 读）。
+// player 在 cls 兵种的装备、持有位与 NEW / UP 快照（按当前 RowCount）与等级上限；favourites 不动（由页面从 ini 读）。
 bool ReadLoadout(int player,int cls,wlist::Loadout* out);
 
 struct EquipResult {

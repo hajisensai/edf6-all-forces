@@ -241,6 +241,9 @@ public:
                 Log("ARMORY the weapon favourites could not be written to the ini");
         } catch(...) {}
     }
+    bool ReadSpec(int row,wlist::WeaponSpec* out) noexcept override {
+        try { return wequip::ReadSpec(row,out); } catch(...) { return false; }
+    }
 };
 
 // The mission: where missions are picked, and in the room the 对战 pages.
@@ -409,6 +412,8 @@ void FillWeaponTexts() noexcept {
     t.on=hudtext::Tr(Tx::armoryWpOn);
     t.off=hudtext::Tr(Tx::armoryWpOff);
     t.level=hudtext::Tr(Tx::armoryWpLevel);
+    t.badgeNew=hudtext::Tr(Tx::armoryWpNew);
+    t.badgeUp=hudtext::Tr(Tx::armoryWpUp);
     t.previewOther=hudtext::Tr(Tx::armoryWpPreviewOther);
     t.verdict[static_cast<int>(wlist::Verdict::notOwned)]=hudtext::Tr(Tx::armoryWpNotOwned);
     t.verdict[static_cast<int>(wlist::Verdict::capped)]=hudtext::Tr(Tx::armoryWpCapped);

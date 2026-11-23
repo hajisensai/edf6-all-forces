@@ -27,6 +27,19 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x0E1BA0, 0x14, 'WeaponTable FindRow(cfg, const wchar_t*): -1 when not there'),
     (0x0E20B9, 0x28, 'GetRow: +0x20 = max(0, (int)(col4 * 0.25f * 100.0f)), the level shown and capped'),
     (0x0D8850, 0x30, 'the weapon level cap (GS): difficulty GS+0x4C, progress 0xD7B60, jmp 0xE2710'),
+    # The stock description panel's spec reading (0xD8A90), called by ReadSpec.
+    (0x052DE0, 0x1A, 'SGO node child index (node*, i): no bounds check'),
+    (0x052F50, 0x21, 'SGO node number as double (node*)'),
+    (0x053060, 0x1F, 'SGO node child count (node*)'),
+    (0x0551E0, 0x22, 'SGO node wide string (node*)'),
+    (0x0D91C0, 0x1E, 'SGO node is an array (kind 3); a null doc is not'),
+    (0x0D7CE0, 0x23, 'spec param (out {f32 value, u32 type, u8 star, u8 max, u32 isFloat}, node*, u8 stars[8])'),
+    (0x0D9350, 0x2D, 'WEAPONTEXT text_table loaded into GS+0xD0 (GS)'),
+    (0x0D8AC8, 0x30, 'description panel: handle GS+0xD0, 0xD9350(GS) when null'),
+    # The stock formatting (0xD9B80) wlist::FormatSpecLine repeats.
+    (0x0D9E04, 0x2C, "format: '$' then a digit d: child d+2 through 0xD7CE0; otherwise both skipped"),
+    (0x0D9EC0, 0x20, 'format: type 3, upper_bound over the 21 {label, f32} at 0x1767DE0'),
+    (0x0D9F49, 0x2D, 'format: types 6 / 7 60/round(v); isFloat 0 "%d" of round(v)'),
     # The stock screen (HUiHQWeaponSelect) whose rules the write repeats.
     (0x8BC850, 0x29, 'the cap predicate: byte GS+0x14FC8 && (unsigned)level > 0xD8850(GS)'),
     (0x8B5145, 0x3C, 'list build: +0xE528 (the slot may repeat) 0: an item in the class\'s other slots (and not this '

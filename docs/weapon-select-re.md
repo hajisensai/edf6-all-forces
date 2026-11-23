@@ -15,6 +15,9 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
 | 武器表 | `cfg=GS+0x130`；`[cfg+0x188]` 为空表示未载入；RowCount `0xE23F0`、FindRow `0xE1BA0`（区分大小写，-1）、GetRow `0xE1CF0`（不查上界） | H | `docs/loadout-re.md` §8.1 |
 | 行的显示等级 | Row `+0x20 = max(0, (int)(col4 * 0.25f * 100.0f))`，常量 `0x1765A14`=0.25、`0x1765A68`=100.0 | H | `0xE20B9..0xE20DD`，审计核对两个常量与 rip 相对引用 |
 | 等级上限 | `0xD8850(GS)` 返回整数上限（-1 无）；只在字节 `GS+0x14FC8` 非 0 时生效；判定 `(unsigned)level > (unsigned)cap` | H | `0x8BC850..0x8BC879`；`docs/weapon-level-cap-re.md` |
+| NEW / UP | 同一记录 flags：`(flags&6)==4` NEW；否则 bit3 UP（bit1 用过不影响 UP）。记录按武器行、不分玩家，1P / 2P 读同一份 | H | §7 |
+| 说明栏文字表 | WEAPONTEXT `text_table` 句柄 `GS+0xD0 {doc*, u32 节点 +0xD8}`，为空时 `0xD9350(GS)` 载入 | H | `0xD8ACF..0xD8AE0`；§8 |
+| 武器星级 | 记录 `+4` 起 8 字节（`WeaponRecord`，与 flags 同一条） | H | `0xD8A90` 传给 `0xD7CE0`；`weapon_records` 也改写这一处 |
 
 ## 2. 原版列表 `HUiHQWeaponSelect`（构造 / 列表构建 `0x8B4280`）
 
@@ -44,7 +47,14 @@ SoldierInit（CONFIG.SGO，`[槽名, 默认, [类别], 可重复, 支援槽]`，
 
 1. 选中项 = `list[this+0xE548].items[this+0xE54C]`（每项 0x90 字节）；项 `+0x54 & 6` 非 0 拒绝（跳 `0x8BDA66`）。**H**
 2. 项 `+0` 的行号写进快照的槽（`0x8BD7A0 mov [rbx+rdx*4+0x800], r8d`）。**H**
-3. 快照整块写回：`memcpy([this+0x7F0] ?: GS+0x6E68, this+0x800, 0xDCE8)`（`0x8BD7E3..0x8BD7FE`）。**H**（代码）/ **M**（`+0x7F0` 何时非空：弱引用 `+0x7F8` 指向的另一份 GS 块，推测是分屏 2P 或别处打开界面时的目标；HQ 离线路径为空，写回 GS）
+3. 快照整块写回：`memcpy([this+0x7F0] ?: GS+0x6E68, this+0x800, 0xDCE8)`（`0x8BD7E3..0x8BD7FE`）。**H**。
+   `+0x7F0` 在原版里始终为空，确认总是写 `GS+0x6E68`（**H**）：
+   - 构造 `0x8B4280` 对传入参数 `dynamic_cast` 成 `HUiHQWeaponSelect::InitParam`（RTTI `.?AUInitParam@HUiHQWeaponSelect@ui@@`，
+     vtable `0x1805838`，COL `0x1CAA848`），把 InitParam `+0x28` 拷到 `+0x7B0`（玩家）、`+0xE8` 到 `+0x7B4`（槽）、
+     `+0xF0 / +0xF8` 的弱引用拷到 `+0x7F0 / +0x7F8`；弱引用为空或 lock 失败时快照取自 `GS+0x6E68`（`0x8B4921`、`0x8B4993`）。
+   - InitParam 全程序只有一处构造：`0x8AA250` 里的 `0x8AA2C9`。它把 `+0xF0 / +0xF8` 清零（`movdqa [rbp+0x60], xmm0`）后再没写过，
+     只填 `+0x28 = [r15+0x798]`（玩家）与 `+0xE8 = edx`（槽）。1P / 2P 都走这条路径。
+   - 所以插件直接写 GS（§5）与原版确认的写入目标相同，联机下成员装备也由 `MissionSync`（`0x78E9A0`）从 GS 打包（`docs/loadout-re.md` §6）。
 4. 调 `0x811FC0` 与若干文本 / UI 处理（取弱引用、刷新说明文字）。**M**
 5. `0x8BDA4D call 0x8BB920(this, &[this+0x7B0] 玩家, _, &[this+0x7B4] 槽, &行)` 发消息 4；`0x8BDA52` 置 `this+0xE628 = 1`（界面自己的预览标志，`0x8BCBE0` 清掉；**不是**存档标志）；`0x8BDA5C call 0x7E2EB0` 关窗（vtable `+0x38` 再 `+0x40`）。**H**
 6. **确认路径上没有存档 / 自动存档 / 脏标记调用**：上面就是全部写操作。装备只在 GS 里，随游戏自己的下一次存档（任务开始 / 返回据点等的 MAIN.GST 存档作业）写盘。**M**（没找到任何调用；「何时存档」没有逐一追）
@@ -77,10 +87,50 @@ SoldierInit（CONFIG.SGO，`[槽名, 默认, [类别], 可重复, 支援槽]`，
 
 ## 6. 未知 / 未做
 
-- 武器属性（伤害、弹数、换弹、射程、射速）：原版说明栏由 `0xD8A90` 按星级算，未逆向，`wlist::CompareStats` 目前只有等级一项有数据。**L**
-- `this+0x7F0` 目标的确切来源（§3.3）；插件始终写 GS，联机房间里成员装备由 `MissionSync`（`0x78E9A0`）从 GS 打包（`docs/loadout-re.md` §6），所以 GS 是联机下也会被同步的那一份。**M**
-- 原版在列表里对 NEW / UP 的处理（`0x8B51A0`）与清 NEW 位：插件页面暂不清 NEW。**M**
+- 说明栏的星级条（每种类型的平均星数 / 上限，§8.4）没有做，插件页面只对比文字。
+- 属性按武器**当前**星级读（与原版说明栏相同）；没有「满星时」的预测。
+- 以上全部为静态逆向 + 离线测试，未实机核对页面显示与原版说明栏逐字一致。**M**
 - 整备方案切换现在也按原版规则判等级上限与重复（以前只判找得到 / 持有 / 类别）：超上限或会重复的槽留原值，日志
   `ARMORY the player's loadout switched ... refused by the select rules`。H（代码）
 - 3D 预览只能显示玩家**当前兵种**（视图只有一个模型，`kViewShownClass` 不等于要显示的兵种时消息 4 被丢弃）：看别的兵种的槽时
   详情列不留洞、显示文字提示。方案切换改了兵种时，视图是否随 `GS+0x6E90` 重建成新兵种，未知。**L**
+
+## 7. NEW / UP（原版 `0x8B51A0` 列表构建，`0x8B519A..0x8B51D5`）
+
+- 每项的状态从快照 `this+0x84E8 + row*0xC` 读记录 flags（快照基址 `this+0x800` 对应 `GS+0x6E68`，即 `GS+0xEB50` 的记录，
+  按武器行、不乘玩家步长，1P / 2P 同一份）：`(flags&6)==4` → 1（NEW）；bit1 为 0 时 bit3 → 4（UP）否则 0；bit1 为 1 时
+  `2 + bit3`（用过；带 bit3 仍是 UP）。**H**
+- 原版选择界面只读这些位，不清。清除只在出击时的 `SetUsedWeapon`（`0x70FAF0`，经 `0xDF600` / `0xDF620`）。**H**
+- 插件：`wlist::BadgeOf(flags)`（NEW 优先，其次 bit3 UP），`wequip::Badge(row)` 经 `crew::WeaponRecord` 读；系列行有一把
+  NEW 就标 NEW，否则有 UP 标 UP。只读不写，与原版一致。
+
+## 8. 武器属性（原版说明栏 `0xD8A90`）
+
+### 8.1 数据
+
+- `0xD8A90(GS, row, ...)`：取 `GS+0xD0` 文字表（空则 `0xD9350(GS)` 载入，§1），`row >=` 表项数时不显示；
+  `text_table[row] = [名字, 说明, 属性表]`，项数不足 3 不显示属性。**H**
+- 属性表每项 `[标签, 格式, 参数...]`；参数是数组时为 `[基础值, 曲线|类型<<2, 星级下标, 最大星, d, 指数, 是否小数]`。**H**
+- `0xD7CE0(out16, node*, stars[8])` 按星级算出一个参数：`{f32 值; u32 类型; u8 星; u8 上限; u32 是否小数 @+0xC}`。**H**
+- SGO 节点访问：子节点 `0x52DE0`（不查界）、数值 `0x52F50`、子项数 `0x53060`、宽字符串 `0x551E0`、是数组 `0xD91C0`。**H**
+
+### 8.2 格式（`0xD9B80`）
+
+- 节点数 <2 无值；=2 原样输出格式；>2 时格式里 `$d`（d 为数字）换成参数 d（子节点 d+2，经 `0xD7CE0`）；`$` 后跟非数字时两个字符
+  都丢掉（`0xD9E04`）。**H**
+- 类型 3：在 `0x1767DE0` 的 21 项 `{wchar* 标签, f32 下界}`（S++ 0.0005 … L 1.4、Z 1e7）里 upper_bound 取评级，越界取 Z（`0xD9EC0`）。**H**
+- 类型 6 / 7：`60 / (float)round(v)`（射速换算）；是否小数为 0：`"%d"`（`0x1765CE0`）of round(v)；否则 v>=1 `"%.1f"`、
+  v>=0.1 `"%.2f"`、其余 `"%.3f"`（`0x1767FC0 / FB0 / FA0`）。round = |x|+0.5 截断、符号跟 x（`0xD9F49`）。**H**
+
+### 8.3 插件
+
+- `wequip::ReadSpec(row)`：照 8.1 的路径读（SEH 内只碰 POD，最多 48 行，超出记日志不显示；每行取前 10 个参数，`$d` 只有一位数字），参数值调原版 `0xD7CE0`
+  （与原版同值），曲线取数组的第 2 项（`curve` 方向：0 越大越好，1 越小越好，其余不判）。
+- `wlist::FormatSpecLine` / `FormatSpecParam` 复现 8.2（纯逻辑，`weapon_list_logic_test` Specs）；`wlist::CompareSpecs` 按标签配对
+  （候选的行序，只在装着那把里有的接在后面），▲▼= 由曲线方向判。页面每行只读一次，`Refresh` 清缓存。
+- 签名：上面每个被调函数与 `0xD8AC8`、`0xD9E04`、`0xD9EC0`、`0xD9F49` 的分支进 `weapon_equip_signatures.inc`；
+  `weapon_equip_native_audit.py` 核对评级表 21 项（标签与 f32 下界）与四个格式串都与 `kSpecRanks` / 源码一致，且被 `0xD9B80` 引用。
+
+### 8.4 没做
+
+- 说明栏的星级条：原版按类型对参数的星 / 上限求和平均，插件页面不画。
