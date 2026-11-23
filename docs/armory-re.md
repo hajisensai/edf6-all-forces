@@ -45,6 +45,20 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
 ## 5. 未验证 / 待办
 
 - 以上运行时行为**全部未实机测试**（本阶段只做了离线构建与离线测试）。
-- 各页目前是占位：支援小队 / 载具页只读显示 `room_menu.h` 模型的单位与士兵行；玩家页显示 4 个兵种的槽位武器名；任务页有「世界地图」（灰）和房间里的「对战设置」（打开原生对战对话框页）。编辑在阶段 3 / 5 做。
+- 支援编成 / 载具页已可编辑（阶段 3，见 §6）；玩家页仍只读显示 4 个兵种的槽位武器名；任务页有「世界地图」（灰）和房间里的「对战设置」（打开原生对战对话框页）。玩家页编辑在阶段 5 做。
 - 旧菜单单位页标题里的状态行（保存结果、生成器进度、房间同步、房主设置、PvP 等待）整备里还没有显示位置。
-- 3D 预览（阶段 4）未接：整备打开时预览一直隐藏。
+- 3D 预览只在支援编成 / 载具页的中栏视口里显示（§6）；其他页、关闭时一直隐藏。
+
+## 6. 支援编成 / 载具页（阶段 3，`src/support_pages.h`）
+
+- 数据：打开整备时拷一份 `room_ui` 刚从 ini 读的 `roommenu::Menu`，两页共用（`sp::Model`）；编辑一律走 `room_menu.h`（`detail::Change`、`AddSoldier`、`Materialise`、挂载增删），与旧菜单同一套解析 / 校验。H（代码）
+- 保存：每页 `Commit` 只写**自己那页**改过的单位（`CollectSave` → `roomui::SaveItems` → 按页过滤），一次 `SaveSupportLoadouts`（全成或全不成），成功后 `StartVariantGeneration`，与预设切换同一路径（`armory.cpp SaveSupport`）。离开页 / 关闭时有改动就弹「保存并关闭 / 放弃 / 返回」。预设切换后两页从 ini 重读（`sp::Reload`），未保存的编辑丢弃。H（代码；离线测试 `support_pages`）
+- 开火键列：喷气机 / 直升机等的挂载显示「随主武器循环」，坦克的显示「随主炮」，依据 `docs/multi-weapon-keys.md` 的默认 `key=0`（挂载跟主武器循环）。**M**：那份表里把部分挂载映射到额外键 3～6 / 副扳机的车型（派生种类 `<KIND>_K<key>`）在本页**没有区分**，仍显示默认文字。
+- 3D 视口：`room_ui.cpp DrivePreview` 每帧问 `armoryui::PreviewWanted`，变了才 `ShowPreview` / `SetViewPlacement`（相机为页面当前视角预设），否则 `HidePreview` + `ClearViewPlacement`。页面在视口处给 `Build` 留洞（`Hole`），模型在 3D 阶段画在所有 UI 之下。H（代码）；模型是否确实出现在洞里、位置 / 大小是否对：**L**（未实机）
+- 视口的限制（代码事实，H）：
+  - 原版视图一次只显示**一个模型**：小队页显示选中的那名士兵，不能 4 人同框；视口左上写明「只显示选中的士兵」。
+  - 有菜单版统一模型文件的只有 `VehicleUnified` 的喷气机机体（`docs/unified-model-re.md`）；坦克、机甲、其他载具没有，视口显示不透明框与「没有菜单模型」。乘员行显示乘员士兵。
+  - 挂载**不画在模型上**（菜单渲染器只挂 WeaponTable 行），视口里用文字列出挂载。
+  - 地面橙环与机甲 6 个槽位标注是 2D 叠加，位置由 `rp::Place` 投影原点算出：与模型是否对齐 **L**（未实机）。
+- 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自本机** `SupportCfg()` 与呼叫目录（`SupportCallKey` 按单位键匹配 → `Enabled` / `SupportCallPt` / `SupportCallPrice`）。H（代码）。房主的 `SupportDisabled` **没有同步给客人**（`host_settings.h` / `room_sync.h` 里没有这一项，2026-11-24 查），所以客人看到的是自己 ini 的规则，不一定是房主的。面板只读，不提供 `SupportDisabled` 编辑。H（代码检索）
+- 小队页签（第 1/2/3 小队）只响应鼠标点击；Z / C 在单列页面上切换视角预设。H（代码）
