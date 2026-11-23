@@ -311,12 +311,18 @@ def check_vehicle_bases(game: object, game_dir: str, files: dict[str, bytes], re
     errors: dict[str, str] = {}
     with contextlib.redirect_stdout(io.StringIO()):
         out = support_loadout.build(game_dir, text, game, errors=errors)
-    mechs = {k: v for k, v in out.items() if k.startswith('OBJECT/EDF6VC_LO_MECH_')}
+    import menu_graft
+    mechs = {k: v for k, v in out.items() if k.startswith('OBJECT/EDF6VC_LO_MECH_') and k.endswith('.SGO')}
     check(not errors and len(mechs) == 1, f'one loaded mech: {sorted(out)} {errors}')
     for rel, made in mechs.items():
         check(mm.menu_problems(made, read_cas) == [], f'{rel}: unified')
         m = mm.members_of(made)
-        check(m[mm.MENU_MODEL] == m['animation_model'], f'{rel}: the frame its loadout names, for the menu too')
+        name = rel.split('/')[1]
+        check(m[mm.MENU_MODEL][0] == menu_graft.menu_model_ref(name) and
+              m[mm.MENU_MODEL][1:] == m['animation_model'][1:],
+              f'{rel}: the menu draws its merged model (frame + weapons) with the frame CAS and MAB')
+        check(menu_graft.archive_rel(name) in out and menu_graft.callouts_rel(name) in out,
+              f'{rel}: its merged model and callouts written beside it')
 
 
 def synthetic_jet(game: object) -> tuple[int, dict]:

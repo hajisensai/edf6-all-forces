@@ -1054,6 +1054,10 @@ set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=ut
 # game installed, the files built from Root.cpk (read only).
 add_test(NAME menu_preview COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_preview_test.py")
 set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The loaded mechs' and jets' merged menu models and callouts (pylib/menu_graft.py): every variant's battle keys equal,
+# the menu key on the merged archive, the grafted bones and the callout points; with the game installed (read only).
+add_test(NAME menu_graft COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_graft_test.py")
+set_tests_properties(menu_graft PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The base map tiles file's reader (worldmap_tiles_test above) on a small pyramid the script builds.
 add_test(NAME worldmap_tiles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_tiles_test.py" $<TARGET_FILE:worldmap_tiles_test>)
 set_tests_properties(worldmap_tiles PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

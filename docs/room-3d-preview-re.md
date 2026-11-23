@@ -90,7 +90,7 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 > 2026-11-24 晚：坦克基础由 AutoTurret 安装时写入统一版、机甲基础由 `tools/menu_preview.py` 写入统一版，带配置的载具预览自己的 `EDF6VC_LO_*` 变体（`docs/unified-model-re.md` §3.1）；每个机体都预览。
 
 - 同一条路（方案 A）：Desc 路径换成安装器生成的 `app:/MENUOBJECT/EDF6VC_MENU_V_<BODY>.SGO`（`tools/menu_preview.py build_vehicles`）：原版 `P505_RANGER.SGO` 其余键不动，`animation_model` 整个换成该机体基础 SGO（`support_loadout.BODIES`，Mods 里别的工具写的那份优先，否则 Root.cpk）的 `[模型, CAS, MAB]`。兵种号写游骑兵（只决定武器握持，载具没有武器），武器数 0。机体没装（基础 SGO 不在）就不生成，也不预览（日志一行）。
-- 挂载不上模型：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
+- 挂载不上模型（2026-11-24 已改：带配置的机甲 / 喷气机预览合并模型，武器和外挂嫁接在机体骨骼上，见 `docs/unified-model-re.md` §3.1 与下文 §6.4）：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
 - 镜头：载具比士兵大，四个机位点在加右移之后整体乘一个倍数（`VehicleScale`：坦克 3、战机 6，按尺寸估的 L，待实机调）；离开菜单逐字节还原。模型在原地每帧转 0.01 rad（`kVehicleTurn`），菜单键不再转它；转台开始时记下原来的朝向（`Turntable`），光标回到士兵或菜单关闭时还原，士兵和关菜单后玩家自己的模型仍朝原来的方向（菜单本来从不转模型）。
 - **风险（L，需实机）**：菜单 SGO 的 `random_animation` 播 `_menu1/2/3`，`soldier_weapon_slot` 指 `weapon` 骨骼；载具 CAS 里没有这些动画、MAB 里没有这根骨骼。渲染器找不到动画 / 骨骼时是跳过还是出错没有静态核实；HQ / 房间里第一次把光标移到载具行时要盯日志与画面，出问题先把 `tools/menu_preview.py` 的载具文件撤掉（插件见文件缺失就不预览）。
 - **已确认的崩溃（2026-11-21，测试站 #50，dump 核对）**：菜单渲染器播放 CAS 里**名字正好是 `main`** 的 anmgroup，查找时区分大小写。异步构建 `0x93F910` 在 `0x93FB85` 查 `L"main"`，在 `0x93FB95` 把下标存进 `model+0xE0`；视图更新 `0x93D640` 在 `0x93EBAC` 直接拿它去调 `0x93D2F0` → `0x11664F0`，不检查 -1。战机的 `v506_heli.cas` 只有 `Roter` / `Main`，所以下标是 -1，在 `EDF.dll+0x116650D` 读野指针（打开 F2 菜单约 20 ms 后崩溃，edx=0xFFFFFFFF）。修法：`build_vehicles` 给 CAS 里没有 `main` 的机体另生成 `MENUOBJECT/EDF6VC_MENU_V_<BODY>.CAS`（把那个 anmgroup 的名字原位改成小写，长度不变，并核对该名字字符串没被别的字段共用），菜单 SGO 的 `animation_model[1]` 指向它。机体自己的 CAS 不动，因为直升机 / 战机代码照原样查 `Main`。`tests/menu_preview_test.py` 断言每个菜单 SGO 引用的 CAS 都有 `main`。坦克的 `v505_tank.cas` 本来就有 `main`，照用原 CAS。如果状态名不存在，`0x93D2F0` 在 `0x93D31E` 会安全返回；改名之后 `_menu1/2/3` 的行为未实机验证。
@@ -122,6 +122,19 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 - **方案 (a) 生成「四人一体」文件不可行**（H）：四人各自兵种不同、每人主 / 副色共 8 个颜色通道，菜单只有 `change_color0/1` 两个；小队组成是运行时的，CAS 轨道按骨骼名驱动，四个同名骨架无法在一个模型里各播各的。
 - **方案 (b) 用下标 2 / 3 再建视图不安全**（H）：下标 3 越界读 GameStatus，下标 ≥ 1 还会换成分屏视口与 `camera_pos[1/2]`。
 - 可行的 (b) 变体（M，未实现）：多建 3 个视图，**全部用下标 0、玩家数 1**（`camera_pos[0]`、GameStatus 槽 0 有效、视口与单视图相同），每个视图的异步构建（`view+0xD0`）各自挂上 Desc override（现在的 override 是全局一份，要改成按视图），摆放钩子按视图给各自的矩阵，屏幕位置由 `preview_camera.h` 算出供地面圈使用。风险：视图由插件创建就要由插件析构（生命周期），构造末尾那次 msg 3 构建会先按玩家自己的外观建一次再被 override 竞争。没有游戏不能验证这两点，所以本轮没有实现，小队页仍只显示所选士兵（`Tx::spOnlySelected`）。
+
+## 6.4 标注框贴着模型（2026-11-24，离线实现，待实机）
+
+- 机甲的 6 个槽位标注（4 个武器槽、机体、核心）和喷气机每个挂架的标注，原来是 `support_pages.h` 里写死的矩形；现在按模型的真实骨骼位置排布：
+  - 生成器写 `OBJECT/<变体>_CALLOUTS.TXT`（`docs/unified-model-re.md` §3.1）。
+  - 插件 `src/menu_callouts.h` 严格解析（首行、CRLF、标签不重复、三个有限数，任何不符整份拒绝）。
+  - 插件用本帧画模型的那个矩阵（`PreviewPlacement`：`WorldMatrix` 钩子画本视图模型时记下的 `Place()` 矩阵，含转台 yaw，最多晚一帧）和同一宽高比，经 `preview_camera.h ScreenOf` 投影到屏幕。
+- 排布（`support_pages.h CalloutSpots`）：点在视口左半的框放左列，右半的放右列。每列按点的高度用 `menucallouts::Stack` 排开：保持顺序、间隔 6、不出视口；右列止于视图按钮上方。从框的内侧边画引线到点，点上画一个小方块。点在相机背后时不投影，点不在视口内时不画引线。
+- 拿不到矩阵（模型本帧没画、不在显示）或标注文件缺失 / 解析失败（安装坏了，`PreviewCallouts` 每个文件只记一行日志）时：机甲退回原来的示意位置（`SchematicCallout`）；喷气机不画标注，挂架改为列表显示。坦克没有标注：弹药从主炮发射，模型上没有挂载物。点击标注选中对应行：机甲是该槽的行，喷气机是挂架 `1+i`。
+- **需实机核对（L）**：
+  - 标注点是绑定姿势。菜单播放 CAS（`main`）时手臂 / 机身若明显偏离绑定姿势，引线会指偏；偏差大的话，要改成读运行时骨骼矩阵。
+  - `PreviewPlacement` 用的是上一次 `WorldMatrix` 记下的矩阵。UI 在 3D 之后画，所以通常是同一帧；如果某些帧引线抖动，查记录时机。
+  - 宽高比与 `SetViewPlacement` 用的是同一个值；窗口改尺寸时，要看引线是否仍落在模型上。
 
 ## 7. 需实机验证
 

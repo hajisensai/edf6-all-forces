@@ -346,9 +346,12 @@ def relink(md: Mdb) -> Mdb:
 # ------------------------------------------------------------------------------------------ archives
 
 def texture_members(rab: Rab, filename: str) -> list[RabFile]:
-    """Every archive member that is texture `filename` (e.g. 'x.DDS'): itself and its 'x.lod.DDS' variant."""
+    """Every archive member that is texture `filename` (e.g. 'x.DDS'): itself and its 'x.lod.DDS' variant. Texture
+    members only: a store's round archive names its model and its texture alike (bullet_icbm01.mdb and
+    bullet_icbm01.dds), and the model is no part of the texture."""
     stem = filename.rsplit('.', 1)[0].lower()
-    return [f for f in rab.files if f.name.lower().rsplit('.', 1)[0] in (stem, stem + '.lod')]
+    return [f for f in rab.files
+            if is_texture_member(f.name) and f.name.lower().rsplit('.', 1)[0] in (stem, stem + '.lod')]
 
 
 def is_texture_member(name: str) -> bool:

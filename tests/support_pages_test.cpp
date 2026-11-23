@@ -1,7 +1,9 @@
 // 整备's 支援编成 / 载具 pages (src/support_pages.h): rows and items of the default units, every edit through room_menu.h's
 // editors (each one a value its parser takes back), each page saving only its own units, the 3D viewport's hole and
-// the squad ring, the mech callouts, the view buttons, the online panel, and the pages inside the framework's Build.
+// the squad ring, the callouts (src/menu_callouts.h: the file, the stacking; placed on the model or schematic), the view
+// buttons, the online panel, and the pages inside the framework's Build.
 #include "../src/support_pages.h"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -226,7 +228,7 @@ void Vehicles() {
     Expect(UnitOf(page,mech).vehicle.mech.frame!=frame,"the frame steps");
     for(int k=0;k<sp::kMechCallouts;++k){
         ar::Pos c{0,mech,0,0};
-        const skin::Rect r=sp::Callout(k);
+        const skin::Rect r=sp::SchematicCallout(k);
         Expect(page.Click(c,(r.x0+r.x1)/2,(r.y0+r.y1)/2) && c.item==sp::kCalloutRow[k],"a callout picks its slot");
     }
     Expect(rm::CollectSave(model.menu,&model.set),"every vehicle edit reads back");
@@ -283,7 +285,7 @@ void Viewport() {
     sp::FeetOnScreen(squads.Camera(),16.f/9.f,feet);
     Expect(sp::kView.Contains(feet[0],feet[1]) && feet[1]>(sp::kView.y0+sp::kView.y1)/2,"the ring is in the viewport's lower half");
     for(int k=0;k<sp::kMechCallouts;++k){
-        const skin::Rect r=sp::Callout(k);
+        const skin::Rect r=sp::SchematicCallout(k);
         Expect(r.x0>=sp::kView.x0 && r.x1<=sp::kView.x1 && r.y1<sp::CamButton(0).y0,"a callout inside the viewport, over the buttons");
     }
 }
@@ -331,7 +333,14 @@ void InBuild() {
     st.tab=1;st.pos=ar::Pos{0,jet,1,0};st.column=1;
     ar::Build(st,pages,2,ps,w,&built);
     Expect(base.holeQuads>0,"a jet: the hole");
-    Expect(HasText(base,hudtext::Tr(Tx::spPylonsOffModel)),"the pylons are said to be off the model");
+    Expect(!HasText(base,hudtext::Tr(Tx::spPylonsOffModel)),"a jet's stores hang on its model: not said to be off it");
+    // a tank's rounds: listed, off the model (they leave from the main gun)
+    const int tank=RowOf(vehicles,L"TANK_CREWED");
+    vehicles.Activate(ar::Pos{0,tank,0,0});
+    vehicles.Activate(ar::Pos{0,tank,vehicles.Items(ar::Pos{0,tank,0,0})-2,0});
+    st.pos=ar::Pos{0,tank,1,0};
+    ar::Build(st,pages,2,ps,w,&built);
+    Expect(HasText(base,hudtext::Tr(Tx::spPylonsOffModel)),"a tank's rounds are said to be off the model");
     // the mech: callouts and no hole
     const int mech=RowOf(vehicles,L"OWN_MECH");
     vehicles.Activate(ar::Pos{0,mech,0,0});
@@ -342,6 +351,141 @@ void InBuild() {
     ar::Build(st,pages,2,ps,w,&built);
     Expect(base.holeQuads==0 && HasText(base,hudtext::Tr(Tx::spNotGenerated)),"its file not made yet: no hole, said so");
     model.env.fileThere=nullptr;
+}
+
+// The callouts file (menu_callouts.h) and the boxes placed by the model (CalloutSpots).
+namespace mc=crew::menucallouts;
+namespace rp=crew::roompreview;
+bool ParseText(const char* t,mc::Callouts* c) { return mc::Parse(t,std::strlen(t),c); }
+mc::Callouts fakeCallouts;
+bool fakePlacedOk=true,fakeCalloutsOk=true;
+wchar_t askedCallouts[96];
+bool FakePlaced(rp::Matrix4* m,float* aspect) noexcept {
+    if(!fakePlacedOk)return false;
+    *aspect=16.f/9.f;
+    *m=rp::Place(sp::ViewRectOf(),rp::PresetOf(rp::CameraPreset::front),rp::ModelFrame{4.f,2.f},0.f,*aspect);
+    return true;
+}
+bool FakeCallouts(const wchar_t* file,mc::Callouts* out) noexcept {
+    wcscpy_s(askedCallouts,file);
+    if(!fakeCalloutsOk)return false;
+    *out=fakeCallouts;
+    return true;
+}
+void Set(int tag,float x,float y,float z) { fakeCallouts.p[tag][0]=x;fakeCallouts.p[tag][1]=y;fakeCallouts.p[tag][2]=z;fakeCallouts.have[tag]=true; }
+// `n` spots: inside the viewport, the right column over the view buttons, no two of a column overlapping, each box on
+// its point's side, its point where the matrix projects it.
+void ExpectPlaced(const sp::CalloutSpot* s,int n,const int* tags,const char* what) {
+    rp::Matrix4 m;float aspect=0;
+    FakePlaced(&m,&aspect);
+    const float mid=(sp::kView.x0+sp::kView.x1)/2;
+    for(int k=0;k<n;++k){
+        const skin::Rect& b=s[k].box;
+        Expect(s[k].anchored,what);
+        Expect(b.x0>=sp::kView.x0 && b.x1<=sp::kView.x1 && b.y0>=sp::kView.y0 && b.y1<=sp::kView.y1,what);
+        if(b.x0>=mid)Expect(b.y1<=sp::CamButton(0).y0,what);
+        Expect(((b.x0+b.x1)/2<mid)==(s[k].ax<mid),what);
+        float xy[2];
+        rp::ScreenOf(m,fakeCallouts.p[tags[k]],aspect,xy);
+        Expect(std::fabs(xy[0]-s[k].ax)<0.01f && std::fabs(xy[1]-s[k].ay)<0.01f,what);
+        for(int j=0;j<k;++j){
+            const skin::Rect& o=s[j].box;
+            Expect(o.x0!=b.x0 || o.y1<=b.y0 || b.y1<=o.y0,what);
+        }
+    }
+}
+
+void Callouts() {
+    // the file
+    mc::Callouts c;
+    Expect(ParseText("# EDF6VC callouts 1\r\nweapon0 -2.4200 5.7600 2.4300\r\nframe 0.0000 5.2800 0.0000\r\npylon6 1 2 3\r\n",&c) &&
+           c.have[mc::kWeapon0] && c.have[mc::kFrame] && c.have[mc::kPylon0+6] && !c.have[mc::kCore] &&
+           c.p[mc::kWeapon0][0]==-2.42f && c.p[mc::kWeapon0][2]==2.43f,"a callouts file read");
+    Expect(ParseText("# EDF6VC callouts 1\r\n",&c) && !c.have[mc::kFrame],"no points: read, none had");
+    Expect(!ParseText("# EDF6VC callouts 2\r\nframe 0 1 0\r\n",&c),"another header: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\nframe 0 1 0\n",&c),"LF lines: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nframe 0 1 0",&c),"no last line end: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nwing 0 1 0\r\n",&c),"an unknown tag: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\npylon7 0 1 0\r\n",&c),"a pylon past the most: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nframe 0 1 0\r\nframe 0 1 0\r\n",&c),"a tag twice: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nframe 0 1\r\n",&c),"two numbers: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nframe 0 1 0 4\r\n",&c),"four numbers: refused");
+    Expect(!ParseText("# EDF6VC callouts 1\r\nframe 0 nan 0\r\n",&c) && !c.have[mc::kFrame],"not finite: refused, nothing kept");
+    wchar_t f[96];
+    Expect(mc::FileOf(L"OBJECT\\EDF6VC_LO_MECH_6000001648C3005B.SGO",f,96) &&
+           !std::wcscmp(f,L"OBJECT\\EDF6VC_LO_MECH_6000001648C3005B_CALLOUTS.TXT"),"the callouts file beside the unified file");
+    Expect(!mc::FileOf(L"OBJECT\\X.MRAB",f,96) && !mc::FileOf(L"OBJECT\\EDF6VC_LO_MECH_6000001648C3005B.SGO",f,20),
+           "not an SGO, or no room: none");
+    // the stacking: in order, apart, inside, each at its point when there is room
+    {
+        const float want[4]={300,180,305,600};
+        float y0[4];
+        mc::Stack(want,4,30,6,140,460,y0);
+        Expect(y0[1]==165 && y0[0]==285 && y0[2]==285+36 && y0[3]==460-30,"stacked near their points, apart, inside");
+        const float crowd[7]={200,200,200,200,200,200,200};
+        float y1[7];
+        mc::Stack(crowd,7,30,6,140,422,y1);
+        bool apart=true;
+        for(int k=1;k<7;++k)apart=apart && y1[k]>=y1[k-1]+36-0.001f;
+        Expect(apart && y1[0]>=140 && y1[6]+30<=422,"seven at one height: a column of them, ties in order");
+    }
+    // a mech placed by its model
+    Fresh(true);
+    sp::VehiclePage page;page.Bind(&model);
+    model.env.placed=&FakePlaced;model.env.callouts=&FakeCallouts;
+    const int mech=RowOf(page,L"OWN_MECH");
+    page.Activate(ar::Pos{0,mech,0,0});
+    fakeCallouts=mc::Callouts{};
+    Set(mc::kWeapon0,-1.2f,3.f,0.f);Set(mc::kWeapon0+1,1.2f,3.f,0.f);Set(mc::kWeapon0+2,-1.f,3.8f,-0.3f);
+    Set(mc::kWeapon0+3,1.f,3.8f,-0.3f);Set(mc::kFrame,0.1f,2.5f,0.f);Set(mc::kCore,-0.1f,3.2f,0.f);
+    sp::CalloutSpot s[sp::kCalloutSpotsMost];
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,mech),true,s)==sp::kMechCallouts,"a mech: six callouts");
+    Expect(!std::wcsncmp(askedCallouts,L"OBJECT\\EDF6VC_LO_MECH_",22),"its loaded variant's callouts asked for");
+    int tags[sp::kCalloutSpotsMost];
+    for(int k=0;k<sp::kMechCallouts;++k){tags[k]=sp::CalloutTagOf(sp::kCalloutRow[k]);Expect(s[k].item==sp::kCalloutRow[k],"a mech callout's row");}
+    ExpectPlaced(s,sp::kMechCallouts,tags,"a mech's callouts placed by its model");
+    for(int k=0;k<sp::kMechCallouts;++k){
+        ar::Pos at{0,mech,0,0};
+        Expect(page.Click(at,(s[k].box.x0+s[k].box.x1)/2,(s[k].box.y0+s[k].box.y1)/2) && at.item==s[k].item,"a placed callout picks its row");
+    }
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,mech),false,s)==sp::kMechCallouts && !s[0].anchored &&
+           s[0].box.x0==sp::SchematicCallout(0).x0 && s[3].box.y0==sp::SchematicCallout(3).y0,"not shown: schematic");
+    fakeCallouts.have[mc::kCore]=false;
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,mech),true,s)==sp::kMechCallouts && !s[5].anchored &&
+           s[5].box.y0==sp::SchematicCallout(5).y0,"a point missing: schematic");
+    fakeCallouts.have[mc::kCore]=true;
+    fakePlacedOk=false;
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,mech),true,s)==sp::kMechCallouts && !s[1].anchored,"not drawn this frame: schematic");
+    fakePlacedOk=true;fakeCalloutsOk=false;
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,mech),true,s)==sp::kMechCallouts && !s[2].anchored,"no callouts file: schematic");
+    fakeCalloutsOk=true;
+    // drawn: a leader and a dot each
+    {
+        ar::Layer layer;
+        static_cast<const ar::Page&>(page).Draw(ar::Pos{0,mech,rm::kMechRowCore,0},0,&layer);
+        Expect(layer.quads.dropped==0 && layer.quads.n>=6*6,"the callouts drawn: boxes, frames, leaders, dots");
+    }
+    // a jet: one callout a pylon, its item
+    const int jet=RowOf(page,L"FIGHTER");
+    page.Activate(ar::Pos{0,jet,0,0});
+    for(int i=0;i<3;++i)page.Activate(ar::Pos{0,jet,page.Items(ar::Pos{0,jet,0,0})-2,0});
+    Expect(UnitOf(page,jet).vehicle.count==3,"three pylons");
+    Set(mc::kPylon0,0.f,0.2f,0.f);Set(mc::kPylon0+1,3.f,0.6f,0.f);Set(mc::kPylon0+2,-3.f,0.6f,0.f);
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,jet),true,s)==3,"a jet: a callout a pylon");
+    for(int k=0;k<3;++k){tags[k]=mc::kPylon0+k;Expect(s[k].item==k+1 && sp::VehiclePage::ItemOf(UnitOf(page,jet),s[k].item).kind==sp::It::pylon,"a pylon callout's item");}
+    ExpectPlaced(s,3,tags,"a jet's callouts placed by its model");
+    for(int k=0;k<3;++k){
+        ar::Pos at{0,jet,0,0};
+        Expect(page.Click(at,(s[k].box.x0+s[k].box.x1)/2,(s[k].box.y0+s[k].box.y1)/2) && at.item==k+1,"a pylon callout picks its pylon");
+    }
+    fakeCallouts.have[mc::kPylon0+2]=false;
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,jet),true,s)==0,"a pylon's point missing: listed instead");
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,jet),false,s)==0,"not shown: listed");
+    // a tank: none
+    const int tank=RowOf(page,L"TANK_CREWED");
+    page.Activate(ar::Pos{0,tank,0,0});
+    page.Activate(ar::Pos{0,tank,page.Items(ar::Pos{0,tank,0,0})-2,0});
+    Expect(sp::CalloutSpots(model.env,UnitOf(page,tank),true,s)==0,"a tank: no callouts");
 }
 
 // Random edits on both pages: every state one the parsers take back, the cursor maps never out of range.
@@ -382,6 +526,7 @@ int main() {
     Vehicles();
     Viewport();
     InBuild();
+    Callouts();
     RandomWalk();
     if(failures){std::printf("%d failure(s)\n",failures);return 1;}
     std::printf("support_pages: all passed\n");

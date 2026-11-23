@@ -90,7 +90,12 @@ struct Ui {
     // ShowPlayerWeapon, sent from the update: one per slot (a preset switch shows all four in one frame), the latest
     // row of a slot wins.
     struct Weapon { bool pending=false;std::int32_t row=0,cls=0; } weapon[kWeaponSlots];
+    // The placement drew the model (WorldMatrix: placedMatrix below) at view update `drawnAt` (PreviewPlacement).
+    unsigned frames=0,drawnAt=0;
+    bool drawn=false;
+    float placedAspect=16.f/9.f;
 } ui;
+Matrix4 placedMatrix;   // Ui's, apart: its 16-byte alignment would pad Ui
 bool installed=false;
 
 using Signature=CodeSignature;
@@ -124,6 +129,7 @@ void* __fastcall WorldMatrix(void* obj,const float* m) {
         if(ours)placed=Place(ui.place.rect,ui.place.camera,FrameOf(ui.want.on ? ui.want.body : VehicleBody::none),
                              At<float>(ui.view,kViewYaw),ui.place.aspect);
     } __except(EXCEPTION_EXECUTE_HANDLER){ours=false;}
+    if(ours){placedMatrix=placed;ui.placedAspect=ui.place.aspect;ui.drawnAt=ui.frames;ui.drawn=true;}
     return set(obj,ours ? &placed.m[0][0] : m);
 }
 // The screen's aspect: the process's visible top-level window (the swap chain fills its client area; M).
@@ -193,6 +199,23 @@ bool Generated(const wchar_t* file) noexcept {
     if(wcscat_s(path,L"\\Mods\\") || wcscat_s(path,file))return false;
     const DWORD a=GetFileAttributesW(path);
     return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY);
+}
+// Mods\<file> read whole into `out` (at most `cap` bytes); -1: not there, unreadable or larger.
+long ReadModsFile(const wchar_t* file,char* out,std::size_t cap) noexcept {
+    wchar_t path[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,path,static_cast<DWORD>(std::size(path)));
+    wchar_t* slash=n && n<std::size(path) ? wcsrchr(path,L'\\') : nullptr;
+    if(!slash)return -1;
+    *slash=0;
+    if(wcscat_s(path,L"\\Mods\\") || wcscat_s(path,file))return -1;
+    const HANDLE h=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE)return -1;
+    LARGE_INTEGER size{};
+    DWORD got=0;
+    const bool ok=GetFileSizeEx(h,&size) && size.QuadPart>=0 && size.QuadPart<=static_cast<LONGLONG>(cap) &&
+        ReadFile(h,out,static_cast<DWORD>(size.QuadPart),&got,nullptr) && got==static_cast<DWORD>(size.QuadPart);
+    CloseHandle(h);
+    return ok ? static_cast<long>(got) : -1;
 }
 int WeaponRow(const wchar_t* name) noexcept {
     __try {
@@ -316,6 +339,7 @@ bool Adopt(unsigned char* view) noexcept {
 }
 void Frame(unsigned char* view) noexcept {
     if(!Adopt(view))return;
+    ++ui.frames;
     if(++ui.sinceTick>kOrphanFrames){ui.want.on=false;ui.menuOpen=false;}
     const Actions a=Step(ui.plan,ui.want,ReadShown(view));
     if(a.Any())Execute(view,a);
@@ -328,7 +352,7 @@ void Forget() noexcept {
     shared.armed=nullptr;shared.on=false;shared.applied=0;
     ReleaseSRWLockExclusive(&shared.lock);
     ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
-    ui.place.forced=false;
+    ui.place.forced=false;ui.drawn=false;
     for(auto& w:ui.weapon)w.pending=false;
 }
 
@@ -389,6 +413,29 @@ void ShowPreview(const PreviewSpec& spec) noexcept {
 }
 void HidePreview() noexcept { ui.want.on=false; }
 bool PreviewFileThere(const wchar_t* modsFile) noexcept { return Generated(modsFile); }
+bool PreviewPlacement(Matrix4* matrix,float* aspect) noexcept {
+    // Drawn in this or the last view update (the armory draws between two), the vehicle the menu asks for.
+    if(!ui.drawn || !ui.place.on || !ui.view || !ui.want.on || ui.want.body==VehicleBody::none || ui.frames-ui.drawnAt>1)
+        return false;
+    *matrix=placedMatrix;*aspect=ui.placedAspect;
+    return true;
+}
+bool PreviewCallouts(const wchar_t* modsFile,menucallouts::Callouts* out) noexcept {
+    static wchar_t last[96]{};
+    static menucallouts::Callouts cached;
+    static bool ok=false;
+    if(!modsFile || wcslen(modsFile)>=std::size(last))return false;
+    if(_wcsicmp(last,modsFile)!=0) {
+        wcscpy_s(last,modsFile);
+        static char text[menucallouts::kFileMost];
+        wchar_t file[128]{};
+        const long n=menucallouts::FileOf(modsFile,file,std::size(file)) ? ReadModsFile(file,text,sizeof(text)) : -1;
+        ok=n>=0 && menucallouts::Parse(text,static_cast<std::size_t>(n),&cached);
+        if(!ok)Log("ROOM preview: Mods\\%ls missing or not a callouts file (install the plugin again): callouts unplaced",file);
+    }
+    if(ok)*out=cached;
+    return ok;
+}
 float ScreenAspectNow() noexcept { return ScreenAspect(); }
 void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept {
     ui.place.rect=rect;ui.place.camera=camera;ui.place.aspect=ScreenAspect();ui.place.on=rect.w>0 && rect.h>0;
