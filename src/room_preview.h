@@ -12,11 +12,16 @@ struct PreviewSpec {
     SupportWeapon kind=SupportWeapon{};   // the soldier's class / weapon (support_loadout.h)
     bool leader=false;
     SupportLook look{};                  // kStockColour = the template's colour
-    // Not none: that vehicle body instead of a soldier (its unified model file, Mods/OBJECT/EDF6VC_FLY_*.SGO: the battle
-    // keys plus the menu's, docs/unified-model-re.md; kind / leader / look unused). Its pylons are not on the model (the
-    // menu renderer hangs only WeaponTable rows); the menu's own rows show them.
+    // Not none: that vehicle body instead of a soldier, from the unified model file the battle spawns for it
+    // (room_preview_logic.h VehicleFileOf: `load`'s variant EDF6VC_LO_*.SGO when on, else the body's base; the battle
+    // keys plus the menu's, docs/unified-model-re.md; kind / leader / look unused). A mech's loaded file is its frame
+    // with its core and weapons as the battle has them. Pylon stores are not on the model (the menu renderer hangs
+    // only WeaponTable rows); the menu's own rows show them.
     VehicleBody body=VehicleBody::none;
+    VehicleLoadout load{};   // off: the stock vehicle
 };
+// Whether Mods\<modsFile> (OBJECT\EDF6VC_LO_TANK_<hex>.SGO) is there: support_pages.h Env::fileThere.
+bool PreviewFileThere(const wchar_t* modsFile) noexcept;
 
 // Installs the hooks the preview needs; false (and logged) when the code does not match: the menu then runs without it.
 bool InstallPreviewHooks() noexcept;

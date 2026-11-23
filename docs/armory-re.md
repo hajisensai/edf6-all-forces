@@ -63,7 +63,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
 - 3D 视口：`room_ui.cpp DrivePreview` 每帧问 `armoryui::PreviewWanted`，变了才 `ShowPreview` / `SetViewPlacement`（相机为页面当前视角预设），否则 `HidePreview` + `ClearViewPlacement`。页面在视口处给 `Build` 留洞（`Hole`），模型在 3D 阶段画在所有 UI 之下。H（代码）；模型是否确实出现在洞里、位置 / 大小是否对：**L**（未实机）
 - 视口的限制（代码事实，H）：
   - 原版视图一次只显示**一个模型**：小队页显示选中的那名士兵，不能 4 人同框；视口左上写明「只显示选中的士兵」。
-  - 有菜单版统一模型文件的只有 `VehicleUnified` 的喷气机机体（`docs/unified-model-re.md`）；坦克、机甲、其他载具没有，视口显示不透明框与「没有菜单模型」。乘员行显示乘员士兵。
+  - 每个支援载具机体都有统一模型文件（`docs/unified-model-re.md` §3.1）：预览战斗会刷出的那个文件（有配置用 `EDF6VC_LO_*` 变体，否则基础文件）。配置刚改、还没生成文件时视口显示「这套配置的模型还没生成」。乘员行显示乘员士兵。
   - 挂载**不画在模型上**（菜单渲染器只挂 WeaponTable 行），视口里用文字列出挂载。
   - 地面橙环与机甲 6 个槽位标注是 2D 叠加，位置由 `rp::Place` 投影原点算出：与模型是否对齐 **L**（未实机）。
 - 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自本机** `SupportCfg()` 与呼叫目录（`SupportCallKey` 按单位键匹配 → `Enabled` / `SupportCallPt` / `SupportCallPrice`）。H（代码）。房主的 `SupportDisabled` **没有同步给客人**（`host_settings.h` / `room_sync.h` 里没有这一项，2026-11-24 查），所以客人看到的是自己 ini 的规则，不一定是房主的。面板只读，不提供 `SupportDisabled` 编辑。H（代码检索）

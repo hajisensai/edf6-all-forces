@@ -212,9 +212,13 @@ bool SetOverride(const PreviewSpec& spec) noexcept {
     DescOverride ov;
     wchar_t file[96],path[96];
     if(spec.body!=VehicleBody::none) {
-        if(!VehicleFileOf(spec.body,false,file,std::size(file)) || !VehicleFileOf(spec.body,true,path,std::size(path)))return false;
+        if(!VehicleFileOf(spec.body,spec.load,false,file,std::size(file)) || !VehicleFileOf(spec.body,spec.load,true,path,std::size(path)))
+            return false;
+        // A loaded variant not there yet (edited, not generated) is the page's to say (support_pages.h FileThere).
         static bool said[kVehicleBodyLast+1]{},saidCas=false;
-        if(!Present(file,said[static_cast<int>(spec.body)]) || !Present(kJetMenuCas,saidCas))return false;
+        if(!spec.load.On() && !Present(file,said[static_cast<int>(spec.body)]))return false;
+        if(spec.load.On() && !Generated(file))return false;
+        if(VehicleJet(spec.body) && !Present(kJetMenuCas,saidCas))return false;
         ov=VehicleOverride();
     } else {
         if(!SoldierFileOf(spec.kind,spec.leader,false,file,std::size(file)) || !SoldierFileOf(spec.kind,spec.leader,true,path,std::size(path)))
@@ -384,6 +388,7 @@ void ShowPreview(const PreviewSpec& spec) noexcept {
     ui.sinceTick=0;
 }
 void HidePreview() noexcept { ui.want.on=false; }
+bool PreviewFileThere(const wchar_t* modsFile) noexcept { return Generated(modsFile); }
 float ScreenAspectNow() noexcept { return ScreenAspect(); }
 void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept {
     ui.place.rect=rect;ui.place.camera=camera;ui.place.aspect=ScreenAspect();ui.place.on=rect.w>0 && rect.h>0;

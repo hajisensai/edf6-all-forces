@@ -59,21 +59,31 @@ inline std::size_t SoldierFileOf(SupportWeapon k,bool leader,bool path,wchar_t* 
     return path ? detail::Join(out,capacity,{L"app:/object/",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},true)
                 : detail::Join(out,capacity,{L"OBJECT\\",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},false);
 }
-// The vehicle bodies whose battle file is a unified one: the jets (pylib/vcobjects.py jet_sgo). The tank's and the
-// mech's base files are stock SGOs other writers layer (AutoTurret, the optics redirect): not unified, not previewed.
-constexpr bool VehicleUnified(VehicleBody body) noexcept {
+// Every support vehicle body's battle file is a unified one (docs/unified-model-re.md): the jets' bases as
+// pylib/vcobjects.py jet_sgo makes them, the tank's base as AutoTurret's install writes it, the mech's base by
+// tools/menu_preview.py, each loaded variant (EDF6VC_LO_*) by tools/support_loadout.py. So every body is previewed.
+constexpr bool VehicleUnified(VehicleBody body) noexcept { return VehicleBodyOf(body)!=nullptr; }
+// Whether `body` flies on a jet CAS (its menu file names the renamed menu copy kJetMenuCas, not its battle CAS).
+constexpr bool VehicleJet(VehicleBody body) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(body);
     return row && !row->tank && body!=VehicleBody::mech;
 }
 // The jets' menu CAS (tools/menu_preview.py jet_cas_rel; pylib/menu_model.py menu_cas_name) under Mods: a jet's unified
 // file names it, so a jet is previewed only when it is there (a CAS without `main` crashes the renderer).
 inline constexpr const wchar_t* kJetMenuCas=L"MENUOBJECT\\EDF6VC_MENU_V506_HELI.CAS";
-// A body's unified file, as SoldierFileOf (OBJECT\EDF6VC_DN_SUPPORT_STRIKE.SGO / app:/object/edf6vc_dn_support_strike.sgo);
-// 0 for a body VehicleUnified refuses.
+// The unified file the battle spawns for `body` with loadout `load` (as SoldierFileOf: `path` false the Mods-relative
+// OBJECT\EDF6VC_LO_TANK_<hex>.SGO, true app:/object/edf6vc_lo_tank_<hex>.sgo): the loaded variant
+// (support_loadout.h VehicleVariantFile) when `load` is on and names one, else the body's base. 0 when there is none.
+inline std::size_t VehicleFileOf(VehicleBody body,const VehicleLoadout& load,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    if(!row || (load.On() && load.body!=body)){if(out && capacity)out[0]=0;return 0;}
+    wchar_t variant[96];
+    const wchar_t* name=load.On() && VehicleVariantFile(load,variant,sizeof(variant)/sizeof(variant[0])) ? variant : row->base;
+    return path ? detail::Join(out,capacity,{L"app:/object/",name},true) : detail::Join(out,capacity,{L"OBJECT\\",name},false);
+}
+// The body's base file (no loadout).
 inline std::size_t VehicleFileOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
-    const VehicleBodyRow* row=VehicleUnified(body) ? VehicleBodyOf(body) : nullptr;
-    if(!row){if(out && capacity)out[0]=0;return 0;}
-    return path ? detail::Join(out,capacity,{L"app:/object/",row->base},true) : detail::Join(out,capacity,{L"OBJECT\\",row->base},false);
+    return VehicleFileOf(body,VehicleLoadout{},path,out,capacity);
 }
 
 // The WeaponTable rows (WEAPON/WEAPONTABLE.SGO names, looked up at run time by 0xE1BA0) the menu hangs on the model in

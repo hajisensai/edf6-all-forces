@@ -35,6 +35,17 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。证据等级：H = 反汇�
 - 构建 0x93F910 在 0x93FB85 **区分大小写**查 anmgroup `main`，下标存 model+0xE0；更新 0x93D640 在 0x93EBAC 不检查就用它当下标。CAS 没有 `main` → 下标 -1 → EDF.dll+0x116650D 越界读崩（测试站 #50：v506_heli.cas 只有 `Roter` / `Main`）。（H）
 - 统一文件里 `menu_animation_model` 的 CAS 必须有恰好叫 `main` 的组：生成器 `menu_model.menu_problems` 读 CAS 核对，不满足就拒绝写出文件（不靠运行期兜底）。没有 `main` 的载具 CAS 由 `tools/menu_preview.py` 生成一份只把那个组名改成小写的动画资源 `MENUOBJECT/EDF6VC_MENU_<CAS 名>.CAS`（同长度原位改，原 CAS 不动，直升机 / 战机代码照旧按 `Main` 查），`menu_animation_model` 指向它；这是动画资源，不是第二份模型文件。
 
+### 3.1 每个可预览单位的文件由谁写
+
+- 士兵：14 个 AI 模板及 `_LEADER`（`tools/menu_preview.py build`）；换色 / 背包变体 `EDF6VC_NPC_*`（`tools/support_loadout.py soldier_file` 调 `unify_soldier`）。预览的换色走 `change_color0/1` 两个通道，与战斗变体同色。
+- 喷气机基础文件：`pylib/vcobjects.py jet_sgo` 生成时即统一；菜单 CAS 一律指向自己战斗 CAS 的改名副本（506 的，运输机 / 无人机 / X-Morph 战机各自的重定向 CAS 也是只有 `Main`）。
+- 坦克基础 `V505_TANK_MISSION.SGO`：写它的是 AutoTurret（后坐力），安装器 `install_autoturret` 在交给 AutoTurret 写之前统一（AutoTurret 清单记录的就是统一后的字节，不在它的文件上再叠一层哈希）。
+- 机甲基础 `V504_BEGARUTA.SGO`：没有别的写入者，由 `tools/menu_preview.py` 以自己的名义写入统一版（`rels()` 含它，卸载时放回原版）。
+- 带配置的载具 `EDF6VC_LO_<BODY>_<hex>.SGO`（坦克换炮 / 挂架、喷气机挂架、机甲的机体 + 核心 + 4 把武器）：`support_loadout._build_one` 生成后调 `unify_vehicle`。`unify_vehicle` 每次从战斗键重新推导菜单键（建在已统一的基础文件上、模型换了的变体不会沿用基础文件的菜单模型）。
+- 安装结束 `write_menu_preview` 用 `menu_preview.base_problems` 核对每个支援载具基础文件（Mods 优先，否则 Root.cpk）都是统一文件，否则报出。
+- 插件侧（`src/room_preview_logic.h VehicleFileOf`）预览的就是战斗会刷出的那个文件：有配置用 `VehicleVariantFile`，否则基础文件；所有机体都预览，不再有「没有菜单模型」的框。刚改、还没保存生成的配置没有文件，视口显示「这套配置的模型还没生成」。
+- 挂架外挂（导弹 / 炸弹）不在模型上：菜单渲染器只挂 WeaponTable 行（Desc 武器），载具文件本身不含挂载物网格；菜单行列出挂架内容。
+
 ## 4. 消息 4（玩家武器）
 
 - OnMessage 0x93B320 跳转表 0x93C2E4：msg3 0x93B376，msg4 0x93B895，msg5 0x93C202，msg6 0x93BCA5，msg7 0x93C1C7，msg8 0x93C24B，msg9 0x93C255，msg10 0x93C25F（H）。

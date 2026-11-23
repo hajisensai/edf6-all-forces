@@ -447,6 +447,15 @@ void Preview() {
     Expect(SamePreview(p,other),"a vehicle: kind / look ignored");
     other.body=VehicleBody::strike;
     Expect(!SamePreview(p,other),"another vehicle body");
+    // A loadout: its own file, so another loadout is another preview; the stock vehicle (no loadout) is the base.
+    Expect(!p.load.On(),"a stock tank: no loadout, the base file");
+    m.unit[1].vehicle.body=VehicleBody::tank;m.unit[1].vehicle.apGun=true;
+    roompreview::PreviewSpec loaded{};
+    Expect(PreviewFor(m,&loaded) && loaded.load.On() && loaded.load.apGun,"a loaded tank: its loadout with it");
+    Expect(!SamePreview(p,loaded),"stock and loaded: two files");
+    roompreview::PreviewSpec he=loaded;he.load.apGun=false;
+    Expect(!SamePreview(loaded,he) && SamePreview(loaded,loaded),"another loadout: another file");
+    m.unit[1].vehicle=VehicleLoadout{};
     // A crew row: the crew's kind, a member, in the colours it wears (its own, else the default's).
     roommenu::UnitSpec crewed[]={{L"TANK_CREWED",L"t",0,true},{L"STRIKE",L"j",0,true},{L"",L"d",0,true},{kCrewMissionKey,L"m",0,true}};
     roommenu::Load(m,crewed,4,nullptr,nullptr);

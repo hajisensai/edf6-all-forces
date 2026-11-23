@@ -146,9 +146,30 @@ void Camera() {
 
 void Vehicles() {
     wchar_t b[96];
-    Expect(!VehicleUnified(VehicleBody::tank) && VehicleFileOf(VehicleBody::tank,false,b,96)==0 && b[0]==0,
-           "the tank's base: no unified file, not previewed");
-    Expect(!VehicleUnified(VehicleBody::mech) && VehicleFileOf(VehicleBody::mech,true,b,96)==0,"the mech's base: neither");
+    Expect(VehicleUnified(VehicleBody::tank) && VehicleFileOf(VehicleBody::tank,false,b,96)>0 &&
+           !std::wcscmp(b,L"OBJECT\\V505_TANK_MISSION.SGO"),"the tank's base: unified (AutoTurret's install), previewed");
+    Expect(VehicleUnified(VehicleBody::mech) && VehicleFileOf(VehicleBody::mech,true,b,96)>0 &&
+           !std::wcscmp(b,L"app:/object/v504_begaruta.sgo"),"the mech's base too (tools/menu_preview.py)");
+    Expect(!VehicleJet(VehicleBody::tank) && !VehicleJet(VehicleBody::mech) && VehicleJet(VehicleBody::strike),
+           "only the jets need the jet menu CAS");
+    // A loadout: the variant the battle spawns (support_loadout.h VehicleVariantFile), never the base.
+    VehicleLoadout tank{};tank.body=VehicleBody::tank;tank.apGun=true;
+    wchar_t lo[96],want[96];
+    Expect(VehicleVariantFile(tank,lo,96)>0 && VehicleFileOf(VehicleBody::tank,tank,false,b,96)>0 && !std::wcsncmp(b,L"OBJECT\\",7) &&
+           !std::wcscmp(b+7,lo),"a loaded tank: its EDF6VC_LO_ file");
+    Expect(VehicleVariantFile(tank,want,96,true)>0 && VehicleFileOf(VehicleBody::tank,tank,true,b,96)>0 && !std::wcscmp(b,want),
+           "and its app:/ path, as the battle names it");
+    VehicleLoadout mech{};mech.body=VehicleBody::mech;mech.count=1;
+    for(int r=kMechRequestCount-1;r>=0 && !mech.mech.On();--r) {   // a request with four weapons, on another frame
+        MechLoadout m=MechStock(r);m.frame=(MechFrameOf(m)+1)%kMechFrameCount;
+        bool four=true;
+        for(int i=0;i<kMechSlots;++i)four=four && m.weapon[i]>=0;
+        if(four && MechValid(m))mech.mech=m;
+    }
+    Expect(mech.mech.On(),"a four-weapon mech on another frame");
+    Expect(VehicleVariantFile(mech,lo,96)>0 && VehicleFileOf(VehicleBody::mech,mech,false,b,96)>0 && !std::wcscmp(b+7,lo) &&
+           !std::wcsncmp(lo,L"EDF6VC_LO_MECH_",15),"a loaded mech: frame + core + four weapons, the battle's file");
+    Expect(VehicleFileOf(VehicleBody::strike,tank,false,b,96)==0 && b[0]==0,"a loadout of another body: none");
     Expect(VehicleFileOf(VehicleBody::rmultirole,false,b,96)>0 && !std::wcscmp(b,L"OBJECT\\EDF6VC_FLY_MULTIROLE.SGO"),"jet file under Mods");
     Expect(VehicleFileOf(VehicleBody::strike,true,b,96)>0 && !std::wcscmp(b,L"app:/object/edf6vc_dn_support_strike.sgo"),"path");
     Expect(VehicleFileOf(VehicleBody::none,true,b,96)==0 && b[0]==0,"no body: none");
@@ -157,9 +178,8 @@ void Vehicles() {
     for(const auto& row:kVehicleBodies) {
         wchar_t f[96],q[96];
         const bool unified=!row.tank && row.body!=VehicleBody::mech;
-        Expect(VehicleUnified(row.body)==unified,"every jet unified, tanks / mech not");
-        if(!unified)continue;
-        Expect(VehicleFileOf(row.body,false,f,96)>0 && VehicleFileOf(row.body,true,q,96)>0,"every jet has a file");
+        Expect(VehicleUnified(row.body) && VehicleJet(row.body)==unified,"every body unified, the jets on the jet CAS");
+        Expect(VehicleFileOf(row.body,false,f,96)>0 && VehicleFileOf(row.body,true,q,96)>0,"every body has a file");
         Expect(!std::wcscmp(f+7,row.base) && std::wcslen(q+12)==std::wcslen(row.base),"the file and the path name its base");
     }
     const DescOverride o=VehicleOverride();
