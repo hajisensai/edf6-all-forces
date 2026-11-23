@@ -247,6 +247,7 @@ Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,kRoomGoneSlot,kRoomGone,true,nu
                    {"hq",kHqSlot,kHqUpdate,kHqGoneSlot,kHqGone,false,nullptr,nullptr,false}};
 bool nativeEntryOk=false;
 bool autoMissionOk=false;   // HqAutoMissionSelect at load and kAutoMissionSigs checked
+bool previewOk=false;   // room_preview.h InstallPreviewHooks: the 整备 pages' 3D viewport
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into the screen's texts (re-laid only when it changes): the native button's description.
@@ -268,6 +269,10 @@ struct State {
     bool nativeFocused=false;
     Gate gate{};
     bool previewShown=false;
+    roompreview::PreviewSpec previewSpec{};   // what was asked of the preview last (asked again only on a change)
+    bool placed=false;                        // SetViewPlacement in force (the 整备 viewport)
+    roompreview::ViewRect placedRect{};
+    roompreview::ViewCamera placedView{};
     Switches switches{};
     rm::UnitSpec specs[rm::kMostUnits]{};
     int specCount=0;
@@ -341,9 +346,36 @@ std::size_t IniRead(void*,const wchar_t* key,wchar_t* out,std::size_t capacity) 
 
 // --- The preview ---
 void HidePreview() noexcept {
+    if(st.placed){roompreview::ClearViewPlacement();st.placed=false;}
     if(!st.previewShown)return;
     roompreview::HidePreview();
     st.previewShown=false;
+}
+bool SameSpec(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
+    return a.kind==b.kind && a.leader==b.leader && a.body==b.body && a.look.primary==b.look.primary &&
+           a.look.secondary==b.look.secondary && a.look.pack==b.look.pack;
+}
+bool SameView(const roompreview::ViewRect& r,const roompreview::ViewCamera& c,const roompreview::ViewRect& r2,
+              const roompreview::ViewCamera& c2) noexcept {
+    return r.x==r2.x && r.y==r2.y && r.w==r2.w && r.h==r2.h && c.yaw==c2.yaw && c.pitch==c2.pitch &&
+           c.distance==c2.distance && c.lift==c2.lift && c.followStand==c2.followStand;
+}
+// Each frame's end: the 整备 page's 3D viewport (armory.h PreviewWanted) shown and placed, else nothing of ours.
+void DrivePreview() noexcept {
+    roompreview::PreviewSpec spec{};
+    roompreview::ViewRect rect{};
+    roompreview::ViewCamera view{};
+    if(!previewOk || !armoryui::PreviewWanted(&spec,&rect,&view)) {
+        HidePreview();
+        roompreview::TickPreview(false);
+        return;
+    }
+    if(!st.previewShown || !SameSpec(spec,st.previewSpec)){roompreview::ShowPreview(spec);st.previewSpec=spec;st.previewShown=true;}
+    if(!st.placed || !SameView(rect,view,st.placedRect,st.placedView)) {
+        roompreview::SetViewPlacement(rect,view);
+        st.placedRect=rect;st.placedView=view;st.placed=true;
+    }
+    roompreview::TickPreview(true);
 }
 roomdialog::Dialog page;   // big: not on the stack; the dialog shown now (its buttons' descriptions live here)
 // --- The menu's actions ---
@@ -566,7 +598,7 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
 // --- 整备 opened (armory.h) over st.menu loaded from the ini now (Opened) ---
 void OpenArmory(unsigned char* self) noexcept {
     Opened();
-    armoryui::Open(self,st.room,&st.menu);
+    armoryui::Open(self,st.room,&st.menu,&IniRead,nullptr,previewOk);
 }
 // --- The 对战 pages as the game's dialogs (room_pvp_dialog.h pages, room_dialog.h windows) ---
 // Each frame while the 对战 pages are up: the dialog's pick taken; once the game has closed it (picked, or its own
@@ -715,11 +747,10 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     }
     if(sw.tick)roomsync::TickRoomSync();
     if(st.menu.open && st.pvpPages)DriveDialog(hasInput);
-    // The 3D preview is 阶段 4 (in 整备's centre column): until then never shown. Closed, nothing of ours is drawn on the
+    // The 3D preview shows only in 整备's viewport (the 支援编成 / 载具 pages). Closed, nothing of ours is drawn on the
     // screen: the entry is the native button (its description, MenuDescText, names the shortcut on focus), never a line
     // of our own in HUiMainFrame's guide band (2026-10-25: it covered EDF6Coop's label there).
-    HidePreview();
-    roompreview::TickPreview(false);
+    DrivePreview();
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
@@ -810,7 +841,8 @@ bool InstallRoomUi() noexcept {
     }
     nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
-    Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
+    previewOk=roompreview::InstallPreviewHooks();
+    Log("HOOK roomui preview=%d (0: 整备's viewport stays an opaque box)",previewOk);
     Log("HOOK roomui native dialogs=%d (0: the room's 对战 pages are not opened)",nativedialog::InstallNativeDialog());
     if(!armoryui::Install())Log("HOOK roomui 整备 not installed (its draw contract did not check out): the loadout screen is not opened");
     const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook),reinterpret_cast<void*>(&RoomGoneHook));

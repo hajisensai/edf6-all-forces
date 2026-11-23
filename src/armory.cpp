@@ -9,8 +9,14 @@
 #include "armory_draw.h"
 #include "armory_logic.h"
 #include "armory_presets.h"
+#include "loadout_store.h"
+#include "online_authority.h"
 #include "player_slots.h"
 #include "room_dialog_logic.h"
+#include "room_preview.h"
+#include "support_call.h"
+#include "support_config.h"
+#include "support_pages.h"
 #include "worldmap_logic.h"
 #include "crew.h"
 #include "hudtext.h"
@@ -32,6 +38,7 @@ namespace crew::armoryui {
 namespace {
 namespace ar=crew::armory;
 namespace rm=crew::roommenu;
+namespace sp=crew::supportpages;
 using hudtext::Tx;
 
 // --- The draw contract (docs/armory-re.md §1) ---
@@ -196,46 +203,6 @@ void ReadOnly(ar::Line* out) noexcept {
     out->dim=true;
 }
 
-// The support units of one kind, from room_ui's menu (loaded from the ini when the screen opened).
-class UnitsPage final : public ar::Page {
-public:
-    UnitsPage(Tx name,bool squads) noexcept : name(name),squads(squads) {}
-    void Bind(const rm::Menu* m) noexcept {
-        menu=m;n=0;
-        if(!m)return;
-        for(int i=0;i<m->unitCount && n<rm::kMostUnits;++i)
-            if(rm::IsSquad(m->unit[i])==squads && !rm::IsCrewUnit(m->unit[i]))index[n++]=i;
-    }
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(name); }
-    int Rows(int) const noexcept override { return n; }
-    void RowLine(int,int row,ar::Line* out) const noexcept override {
-        if(const rm::Unit* u=Unit(row))roomdialog::UnitLine(*u,out->label,ar::kTextMost);
-    }
-    int Items(const ar::Pos& p) const noexcept override {
-        const rm::Unit* u=Unit(p.row);
-        if(!u)return 0;
-        return squads && u->squad.count>0 ? u->squad.count : 1;
-    }
-    void ItemLine(const ar::Pos& p,ar::Line* out) const noexcept override {
-        const rm::Unit* u=Unit(p.row);
-        if(!u)return;
-        if(squads && u->squad.count>0){roomdialog::SoldierLine(*u,p.item,out->label,ar::kTextMost);return;}
-        ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryLoadout));
-        ar::CopyText(out->value,ar::kTextMost,squads ? hudtext::Tr(Tx::armoryStockLoad) : hudtext::Tr(Tx::armoryReadOnly));
-    }
-    int Fields(const ar::Pos& p) const noexcept override { return Unit(p.row) ? 1 : 0; }
-    void FieldLine(const ar::Pos&,ar::Line* out) const noexcept override { ReadOnly(out); }
-private:
-    const rm::Unit* Unit(int row) const noexcept {
-        return menu && row>=0 && row<n ? &menu->unit[index[row]] : nullptr;
-    }
-    Tx name;
-    bool squads;
-    const rm::Menu* menu=nullptr;
-    int index[rm::kMostUnits]{};
-    int n=0;
-};
-
 // The player's class and weapons now (GameStatus), one row per class.
 class PlayerPage final : public ar::Page {
 public:
@@ -292,7 +259,9 @@ private:
 };
 
 // --- The UI thread's state ---
-UnitsPage squadPage(Tx::armoryTabSquad,true),vehiclePage(Tx::armoryTabVehicle,false);
+sp::Model support;            // the 支援编成 / 载具 pages' working copy (big: static)
+sp::SquadPage squadPage;
+sp::VehiclePage vehiclePage;
 PlayerPage playerPage;
 MissionPage missionPage;
 ar::Page* const kPages[]={&squadPage,&vehiclePage,&playerPage,&missionPage};
@@ -305,6 +274,50 @@ ar::View building;            // big: not on the stack
 unsigned char* openOn=nullptr;
 bool latched=false;           // closed with one of its keys still held: the screen's input stays taken until they are up
 bool pvpAsked=false;
+rm::IniRead iniRead=nullptr;  // room_ui's ini reader (a preset switch reloads the support pages through it)
+void* iniContext=nullptr;
+
+// The pages' saver: the lines written as one batch through the loadout store (all or none), the variants then generated
+// (the same path as a preset switch, armory_presets.cpp Switch).
+bool SaveSupport(void*,const crew::roomui::SaveItem* items,int n,wchar_t* why,std::size_t cap) noexcept {
+    static LoadoutSave lines[kLoadoutSaveMost];
+    if(n<=0)return true;
+    if(n>kLoadoutSaveMost){if(why && cap)wcsncpy_s(why,cap,L"too many lines in one save",_TRUNCATE);return false;}
+    for(int i=0;i<n;++i)lines[i]=LoadoutSave{items[i].field,items[i].unit,items[i].value};
+    int failed=-1;
+    if(!SaveSupportLoadouts(lines,n,&failed,why,cap)) {
+        Log("ARMORY support save refused at %d (%ls): %ls (nothing written)",failed,
+            failed>=0 && failed<n && items[failed].unit ? items[failed].unit : L"-",why ? why : L"");
+        return false;
+    }
+    wchar_t gen[160]{};
+    if(!StartVariantGeneration(gen,std::size(gen)))Log("ARMORY the variant generator not started: %ls",gen);
+    Log("ARMORY support saved: %d lines",n);
+    return true;
+}
+
+// The pages' environment: online or not, who hosts, the crew kinds and each unit's call rule. The rules are this
+// machine's (SupportCfg / the catalog): the host's SupportDisabled is not synced to guests (docs/armory-re.md).
+void FillEnv(bool room,bool previewOn) noexcept {
+    sp::Env& e=support.env;
+    e=sp::Env{};
+    e.online=room;
+    e.host=OnlineHostOnly();
+    e.previewOn=previewOn;
+    e.kinds=crew::roomui::CrewKinds{SupportCfg().vehicleCrew,SupportCfg().aircraftCrew};
+    for(int i=0;i<support.menu.unitCount && i<rm::kMostUnits;++i) {
+        const wchar_t* key=support.menu.unit[i].key;
+        if(!key || !*key)continue;
+        for(int c=0;c<SupportCallCount();++c) {
+            const wchar_t* k=SupportCallKey(c);
+            if(k && _wcsicmp(k,key)==0){e.rule[i]=sp::HostRule{true,SupportCfg().Enabled(c),SupportCallPt(c),SupportCallPrice(c)};break;}
+        }
+    }
+}
+void BindSupport() noexcept {
+    squadPage.Bind(&support);
+    vehiclePage.Bind(&support);
+}
 
 void FillWords() noexcept {
     words.title=hudtext::Tr(Tx::armoryTitle);
@@ -324,6 +337,11 @@ void FillWords() noexcept {
     static constexpr Tx kSuggest[]={Tx::armorySuggest1,Tx::armorySuggest2,Tx::armorySuggest3,Tx::armorySuggest4};
     words.nsuggest=static_cast<int>(std::size(kSuggest));
     for(int i=0;i<words.nsuggest;++i)words.suggest[i]=hudtext::Tr(kSuggest[i]);
+    words.unsaved=hudtext::Tr(Tx::spUnsaved);
+    words.unsavedTitle=hudtext::Tr(Tx::spUnsavedTitle);
+    words.unsavedActions[ar::kUnsavedSave]=hudtext::Tr(Tx::spUnsavedSave);
+    words.unsavedActions[ar::kUnsavedDiscard]=hudtext::Tr(Tx::spUnsavedDiscard);
+    words.unsavedActions[ar::kUnsavedBack]=hudtext::Tr(Tx::spUnsavedBack);
 }
 
 void Publish(bool open) noexcept {
@@ -422,12 +440,16 @@ bool Install() noexcept {
 }
 bool Installed() noexcept { return installed; }
 
-void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept {
+void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn) noexcept {
     if(!installed || !self)return;
     Subclass();
     FillWords();
-    squadPage.Bind(units);
-    vehiclePage.Bind(units);
+    iniRead=read;iniContext=readContext;
+    sp::Bind(support,units);
+    support.saver=&SaveSupport;support.saverContext=nullptr;
+    FillEnv(room,previewOn);
+    BindSupport();
+    squadPage.aspect=previewOn ? roompreview::ScreenAspectNow() : 16.f/9.f;
     playerPage.Refresh();
     missionPage.Bind(room);
     missionPage.asked=false;
@@ -470,7 +492,11 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         if(!armorypresets::Apply(fx,why,std::size(why))) {
             Log("ARMORY preset op %d refused: %ls",static_cast<int>(fx.op),why);
             ar::Note(state,why);
-        } else if(fx.op==ar::Op::switchTo)playerPage.Refresh();
+        } else if(fx.op==ar::Op::switchTo) {
+            playerPage.Refresh();
+            if(iniRead)sp::Reload(support,iniRead,iniContext);   // the preset rewrote the support keys: shown as written
+            BindSupport();
+        }
         armorypresets::Fill(&presets);
     }
     if(missionPage.asked){missionPage.asked=false;pvpAsked=true;ar::Close(state);}
@@ -480,6 +506,16 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         return true;   // this frame's keys were ours
     }
     Publish(true);
+    return true;
+}
+
+bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,roompreview::ViewCamera* camera) noexcept {
+    if(!state.open || !support.env.previewOn)return false;   // as the page's Hole: the popups are drawn over the model
+    const sp::UnitsPage* page=state.tab==0 ? static_cast<const sp::UnitsPage*>(&squadPage) :
+                              state.tab==1 ? static_cast<const sp::UnitsPage*>(&vehiclePage) : nullptr;
+    if(!page || !page->PreviewOf(state.pos,spec))return false;
+    if(rect)*rect=sp::ViewRectOf();
+    if(camera)*camera=page->Camera();
     return true;
 }
 

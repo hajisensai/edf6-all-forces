@@ -375,6 +375,7 @@ void ShowPreview(const PreviewSpec& spec) noexcept {
     ui.sinceTick=0;
 }
 void HidePreview() noexcept { ui.want.on=false; }
+float ScreenAspectNow() noexcept { return ScreenAspect(); }
 void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept {
     ui.place.rect=rect;ui.place.camera=camera;ui.place.aspect=ScreenAspect();ui.place.on=rect.w>0 && rect.h>0;
 }

@@ -9,6 +9,7 @@
 //    typed characters by a window subclass) and the first XInput pad.
 #pragma once
 #include "room_menu.h"
+#include "room_preview.h"
 
 namespace crew::armoryui {
 
@@ -18,15 +19,20 @@ bool Install() noexcept;
 bool Installed() noexcept;
 
 // --- The UI thread (room_ui.cpp Frame) ---
-// Opened on screen object `self` over `units` (room_ui's menu, loaded from the ini just now; it must stay alive and
-// unchanged while open). The keys held now count as already down (the key that opened it does nothing inside).
-void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept;
+// Opened on screen object `self` over a copy of `units` (room_ui's menu, loaded from the ini just now through `read`;
+// the 支援编成 / 载具 pages edit the copy and save their own lines, src/support_pages.h). `read` reloads them after a
+// preset switch; `previewOn`: the 3D preview's hooks are in (room_preview.h InstallPreviewHooks). The keys held now
+// count as already down (the key that opened it does nothing inside).
+void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn) noexcept;
 bool IsOpen() noexcept;
 // One frame. `hasInput`: the screen would read input this frame (nothing of the game's over it); `toggleDown`: the
 // open / close key or pad combination is held (room_ui's KeysDown). Closed when the screen lost its input (a game
 // dialog, a sub-screen) or by its own keys. Returns true while the screen's input must be taken away: open, or one of
 // its keys still held after it closed (the room / HQ would read the key that closed it).
 bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept;
+// What the 3D viewport of the page open now shows, where and from which camera (room_preview.h ShowPreview /
+// SetViewPlacement); false: nothing (closed, another page, no model for the row, the preview's hooks not in).
+bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,roompreview::ViewCamera* camera) noexcept;
 // The 对战设置 row picked (the room's PvP pages, room_ui.cpp's native dialogs): true once per request.
 bool TakePvpRequest() noexcept;
 // Closed at once, nothing committed (a mission starting, the screen forgotten, the plugin turned off).
