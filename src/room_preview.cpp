@@ -9,6 +9,7 @@
 // reads only the override, under `shared.lock`, and the Desc copy it is handed.
 #include "room_preview.h"
 #include "room_preview_logic.h"
+#include "preview_camera.h"
 #include "code_signatures.h"
 #include "crew.h"
 #include "edf/memory.h"
@@ -37,6 +38,14 @@ constexpr unsigned kMsgBuild=3,kMsgColour=5,kMsgLock=8,kMsgUnlock=9;
 // The unified model file (docs/unified-model-re.md): the model slot load 0x93AA00 asks 0x6BF380 for "animation_model" at
 // this call; the hook asks for kMenuModelKey instead when the document has it.
 constexpr std::size_t kMenuModelCall=0x93AD30,kModelLoad=0x6BF380,kFindMember=0x179EBA8,kDocTag=0x10;
+// The placement (docs/room-3d-preview-re.md section 6.2): the update hands the model matrix to SetWorldMatrix at this
+// call, on the object [[view+0x120]+0x88]+0xA0; msg 4 a player weapon {player, slot, row, 0}; +0x304 the msg 7 selection
+// (2: another player's, the update clears +0x30C and Draw skips the view).
+constexpr std::size_t kWorldMatrixCall=0x93D1A1,kSetWorldMatrix=0x1100B90,kViewScene=0x120,kSceneModel=0x88,kModelMatrix=0xA0,
+    kViewSelect=0x304;
+constexpr unsigned kMsgWeapon=4;
+constexpr std::int32_t kSelectOther=2,kSelectNone=0;
+constexpr int kWeaponSlots=4;
 
 using UpdateFn=std::uintptr_t(__fastcall*)(unsigned char*,void*);
 using DeleteFn=void*(__fastcall*)(unsigned char*,unsigned);
@@ -70,6 +79,15 @@ struct Ui {
     unsigned posted=0;           // soldier builds asked for (shared.applied catches up)
     unsigned sinceTick=0;
     bool menuOpen=false;
+    // SetViewPlacement: the rect / camera, and the selection / hidden state forced visible while placed (put back after).
+    struct Placement {
+        bool on=false,forced=false;
+        ViewRect rect;
+        ViewCamera camera;
+        float aspect=16.f/9.f;
+        std::int32_t savedSelect=0,savedHidden=0;
+    } place;
+    struct Weapon { bool pending=false;std::int32_t slot=0,row=0,cls=0; } weapon;   // ShowPlayerWeapon, sent from the update
 } ui;
 bool installed=false;
 
@@ -84,6 +102,63 @@ float* At4(unsigned char* view,std::size_t off) noexcept { return reinterpret_ca
 bool Send(unsigned char* view,unsigned id,void* payload) noexcept {
     const auto vt=At<void* const*>(view,0);
     return reinterpret_cast<MessageFn>(vt[kSlotMessage])(view,id,payload);
+}
+
+// --- The placement: the model matrix the update hands SetWorldMatrix (UI thread, inside the view's update) ---
+using WorldMatrixFn=void*(__fastcall*)(void*,const float*);
+ModelFrame FrameOf(VehicleBody body) noexcept {
+    // A soldier ~1.8 m with its feet at the origin; a vehicle framed by the size VehicleScale gives it (L, as there).
+    const float scale=body==VehicleBody::none ? 1.f : VehicleScale(body);
+    return {1.8f*scale,0.9f*scale};
+}
+void* __fastcall WorldMatrix(void* obj,const float* m) {
+    const auto set=reinterpret_cast<WorldMatrixFn>(image+kSetWorldMatrix);
+    if(!ui.place.on || !ui.view)return set(obj,m);
+    Matrix4 placed;
+    bool ours=false;
+    __try {
+        unsigned char* scene=At<unsigned char*>(ui.view,kViewScene);
+        ours=scene && obj==At<unsigned char*>(scene,kSceneModel)+kModelMatrix;
+        if(ours)placed=Place(ui.place.rect,ui.place.camera,FrameOf(ui.want.on ? ui.want.body : VehicleBody::none),
+                             At<float>(ui.view,kViewYaw),ui.place.aspect);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ours=false;}
+    return set(obj,ours ? &placed.m[0][0] : m);
+}
+// The screen's aspect: the process's visible top-level window (the swap chain fills its client area; M).
+BOOL CALLBACK FindGameWindow(HWND w,LPARAM out) {
+    DWORD pid=0;
+    GetWindowThreadProcessId(w,&pid);
+    if(pid!=GetCurrentProcessId() || !IsWindowVisible(w) || GetWindow(w,GW_OWNER))return TRUE;
+    *reinterpret_cast<HWND*>(out)=w;
+    return FALSE;
+}
+float ScreenAspect() noexcept {
+    HWND w=nullptr;
+    EnumWindows(&FindGameWindow,reinterpret_cast<LPARAM>(&w));
+    RECT r{};
+    if(!w || !GetClientRect(w,&r) || r.right<=0 || r.bottom<=0)return 16.f/9.f;
+    return static_cast<float>(r.right)/static_cast<float>(r.bottom);
+}
+// While placed the view stays drawn under another screen (the armory covering the HQ): its selection not "another
+// player's" (+0x304 2) and its hidden state not 1 (Draw skips it). Both put back when the placement ends.
+void HoldVisible(unsigned char* view) noexcept {
+    if(ui.place.on) {
+        if(!ui.place.forced){ui.place.savedSelect=At<std::int32_t>(view,kViewSelect);ui.place.savedHidden=At<std::int32_t>(view,kViewHidden);ui.place.forced=true;}
+        if(At<std::int32_t>(view,kViewSelect)==kSelectOther)Put<std::int32_t>(view,kViewSelect,kSelectNone);
+        if(At<std::int32_t>(view,kViewHidden)==1)Put<std::int32_t>(view,kViewHidden,0);
+    } else if(ui.place.forced) {
+        Put<std::int32_t>(view,kViewSelect,ui.place.savedSelect);
+        if(!ui.plan.locked)Put<std::int32_t>(view,kViewHidden,ui.place.savedHidden);
+        ui.place.forced=false;
+    }
+}
+// ShowPlayerWeapon: msg 4 to the player's own model only (a support soldier shown: its weapons are the override's).
+void SendWeapon(unsigned char* view) noexcept {
+    if(!ui.weapon.pending || ui.want.on || ui.plan.locked)return;
+    ui.weapon.pending=false;
+    if(At<std::int32_t>(view,kViewShownClass)!=ui.weapon.cls)return;   // another class shown: its slots differ
+    std::int32_t m[4]={At<std::int32_t>(view,kViewPlayer),ui.weapon.slot,ui.weapon.row,0};
+    Send(view,kMsgWeapon,m);
 }
 
 // --- The unified model file: the menu reads menu_animation_model (worker thread; reads the document only) ---
@@ -232,6 +307,8 @@ void Frame(unsigned char* view) noexcept {
     if(++ui.sinceTick>kOrphanFrames){ui.want.on=false;ui.menuOpen=false;}
     const Actions a=Step(ui.plan,ui.want,ReadShown(view));
     if(a.Any())Execute(view,a);
+    HoldVisible(view);
+    SendWeapon(view);
     Camera(view);
 }
 void Forget() noexcept {
@@ -239,6 +316,7 @@ void Forget() noexcept {
     shared.armed=nullptr;shared.on=false;shared.applied=0;
     ReleaseSRWLockExclusive(&shared.lock);
     ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
+    ui.place.forced=false;ui.weapon.pending=false;
 }
 
 std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
@@ -270,6 +348,7 @@ bool Chain(std::size_t vtable,std::size_t slot,void* hook,void** next) noexcept 
 bool Hook() noexcept {
     bool changed=false;
     if(!edf::RedirectCall(image+kMenuModelCall,image+kModelLoad,reinterpret_cast<void*>(&MenuModelLoad),changed))return false;
+    if(!edf::RedirectCall(image+kWorldMatrixCall,image+kSetWorldMatrix,reinterpret_cast<void*>(&WorldMatrix),changed))return false;
     // The build hooks first: armed stays null (no rewrite) until the view's update adopts a view.
     if(!Chain(kBuildVtable1,kSlotDoCall,reinterpret_cast<void*>(&Build1),reinterpret_cast<void**>(&nextBuild1)))return false;
     if(!Chain(kBuildVtable3,kSlotDoCall,reinterpret_cast<void*>(&Build3),reinterpret_cast<void**>(&nextBuild3)))return false;
@@ -296,6 +375,14 @@ void ShowPreview(const PreviewSpec& spec) noexcept {
     ui.sinceTick=0;
 }
 void HidePreview() noexcept { ui.want.on=false; }
+void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept {
+    ui.place.rect=rect;ui.place.camera=camera;ui.place.aspect=ScreenAspect();ui.place.on=rect.w>0 && rect.h>0;
+}
+void ClearViewPlacement() noexcept { ui.place.on=false; }
+void ShowPlayerWeapon(int cls,int slot,int row) noexcept {
+    if(slot<0 || slot>=kWeaponSlots || row<0)return;
+    ui.weapon={true,slot,row,cls};
+}
 void TickPreview(bool menuOpen) noexcept {
     ui.menuOpen=menuOpen;
     ui.sinceTick=0;

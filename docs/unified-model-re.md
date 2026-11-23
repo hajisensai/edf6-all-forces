@@ -42,7 +42,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。证据等级：H = 反汇�
 
 ## 5. 绘制顺序
 
-- 世界 / HUD 与 UI 共用一条渲染队列，UI 总在本帧 3D 场景之后画（docs/worldmap-select-re.md，H）。模型视图画在 3D 场景里（M），所以整备界面盖在 HQ 上时，皮肤要给视口**留洞**（不画不透明底），视图本身继续更新、继续画。
+- 世界 / HUD 与 UI 共用一条渲染队列，UI 总在本帧 3D 场景之后画（docs/worldmap-select-re.md，H）。模型视图画在 3D 场景里（M），所以整备界面盖在 HQ 上时，皮肤要给视口**留洞**（不画不透明底），视图本身继续更新、继续画。具体的可见条件（`+0x304 ≠ 2`、`+0x3EC ≠ 1`）与摆放见 `docs/room-3d-preview-re.md` §6.2。
 
 ## 6. 未做 / 未验证
 

@@ -2,7 +2,8 @@
 the vtable slots the hooks chain hold the functions the docs name, the OnMessage jump table sends 3 / 5 / 8 / 9 where
 room_preview.cpp expects, and src/room_preview_logic.h's tables are the game data's (the AI templates' soldier_color,
 the WeaponTable names, CONFIG.SGO's stock menu SGOs, tools/menu_preview.py's names), and the
-unified model file's hook site (the call, its key, the member-lookup table). Without the game: skipped."""
+unified model file's hook site (the call, its key, the member-lookup table), and the placement's (the model matrix call,
+msg 4 / 7). Without the game: skipped."""
 from __future__ import annotations
 
 import os
@@ -66,6 +67,16 @@ def audit_code(img: bytes, base: int) -> None:
     for const, value in (('kMenuModelCall', site), ('kModelLoad', target), ('kFindMember', sigs.FIND_MEMBER)):
         check(re.search(const + r'=0x([0-9A-Fa-f]+)', cpp) is not None and
               int(re.search(const + r'=0x([0-9A-Fa-f]+)', cpp).group(1), 16) == value, f'room_preview.cpp {const} = {value:#x}')
+    # The placement (docs/room-3d-preview-re.md section 6.2): the model matrix call, msg 4 / 7 in the jump table, the cpp.
+    wsite, wtarget = sigs.WORLD_MATRIX_CALL
+    check(img[wsite] == 0xE8 and wsite + 5 + struct.unpack_from('<i', img, wsite + 1)[0] == wtarget,
+          f'{wsite:#x} is call {wtarget:#x} (SetWorldMatrix; the placement hook redirects it)')
+    for msg, at in (sigs.MSG_WEAPON, sigs.MSG_SELECT):
+        check(struct.unpack_from('<i', img, table + (msg - 3) * 4)[0] == at, f'OnMessage id {msg} -> {at:#x}')
+    for const, value in (('kWorldMatrixCall', wsite), ('kSetWorldMatrix', wtarget)):
+        found = re.search(const + r'=0x([0-9A-Fa-f]+)', cpp)
+        check(found is not None and int(found.group(1), 16) == value, f'room_preview.cpp {const} = {value:#x}')
+    check(f'kMsgWeapon={sigs.MSG_WEAPON[0]};' in cpp, 'room_preview.cpp kMsgWeapon is msg 4')
     text = logic_text()
     check('kDocClassic=0,kDocDsgo=2' in text and set(sigs.FIND_MEMBER_ENTRIES) >= {0, 2}, 'the tags the hook asks')
 
