@@ -22,5 +22,21 @@
         ]
       }
     ]
+  },
+  "autoCompactWindow": 300000,
+  "permissions": {
+    "deny": [
+      "SuggestPluginInstall",
+      "SearchPlugins",
+      "SuggestSkills",
+      "mcp__visualize",
+      "mcp__claude_ai_Claude_Docs"
+    ]
+  },
+  "enabledPlugins": {
+    "flutter-all@flutter-claude-code": false,
+    "rust-fushi-lsp@local-plugins": false,
+    "dart-lsp@local-plugins": false,
+    "frontend-design@claude-plugins-official": false
   }
 }

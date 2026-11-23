@@ -2,6 +2,7 @@
 name: scout
 description: 只读侦察（Sonnet，由 tools/claude_hooks/subagent_model_router.py 钉死）。用于文件/符号定位、grep 扫面、读已有日志 / CI 日志并摘取原文、列清单。不跑测试（跑测试归 worker，伪红分型归 reviewer）、不做根因结论、不改文件。
 model: sonnet
+autoCompactWindow: 200000
 tools: Read, Grep, Glob, Bash, PowerShell
 ---
 
