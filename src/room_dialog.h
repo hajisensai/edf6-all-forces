@@ -30,10 +30,9 @@ bool DescriptionDialogReady() noexcept;
 // yet or a plain dialog.
 int FocusedButton(const Handle& h) noexcept;
 // Opens one; `cursor` the button focused first. Buttons with descriptions (and DescriptionDialogReady): an
-// HUiDescriptionDialog from `layout` (room_ui_logic.h kLoadoutBoxLayout, the menu's wide copy of the game's
-// LYT_HUIDESCDIALOGBOX; nullptr: that stock file); else the plain dialog box from the game's LYT_HUIDIALOGBOX (`layout`
-// ignored). False when the game refused (nothing open then, nothing held).
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept;
+// HUiDescriptionDialog from the game's LYT_HUIDESCDIALOGBOX; else the plain dialog box from its LYT_HUIDIALOGBOX.
+// False when the game refused (nothing open then, nothing held).
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept;
 // The game still holds it (open or still closing).
 bool DialogAlive(const Handle& h) noexcept;
 // The button picked in this dialog (its id), once: false while none was.

@@ -168,12 +168,12 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-layout-') as temp:
             room_layout.build = boom
             with quiet() as out:
                 got = installer.build_room_layouts(game)
-            check(got is None and type(error).__name__ in out.getvalue() and '画面布局没有生成' in out.getvalue(),
+            check(got is None and type(error).__name__ in out.getvalue() and '按钮布局没有生成' in out.getvalue(),
                   f'building the layouts raising {type(error).__name__}: said, None, the install goes on')
             room_layout.install = boom
             with quiet() as out:
                 ok = installer.write_room_layouts(game, {'UI/LYT_HUIHQMAIN.SGO': b'x'})
-            check(not ok and '画面布局没有写入' in out.getvalue(),
+            check(not ok and '按钮布局没有写入' in out.getvalue(),
                   f'writing them raising {type(error).__name__}: said, False, the install goes on')
     finally:
         room_layout.build, room_layout.install = real_build, real_install

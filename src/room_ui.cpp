@@ -62,11 +62,7 @@ constexpr unsigned kComponentAt=0x839560;   // HUiLayout: (this, shared_ptr<ui::
 constexpr unsigned kTextAt=0x8859C0;        // HUiLayout: (this, shared_ptr<HUiTextField>* out, index), null if no TextField
 constexpr unsigned kSetText=0x863690;       // HUiTextField::SetText(this, const wchar_t*): the literal text
 constexpr unsigned kFind=0x839FD0;          // HUiLayout: (this, shared_ptr<ui::Component>* out, const std::wstring* name)
-constexpr unsigned kTextureSkin=0x953D80;   // (shared_ptr<Skin_Texture>* out, shared_ptr<Component>* by value: released by it)
-constexpr unsigned kSetTexture=0x7F63E0;    // Skin_Texture: (this, const std::wstring* path) -> bool
 constexpr std::size_t kShown=0x1F8;         // a Component's shown flag (its constructor sets 1: 0x7E999C)
-constexpr std::size_t kTint=0xF0,kTintFrom=0x100;   // Skin_Texture: RGBA float4s drawn lerp(+0x100, +0xF0, +0xE4) (0x7F707F,
-                                                    // 0x7F70FC; the constructor sets both 1,1,1,1: 0x7F5CD2)
 constexpr std::size_t kTextFont=0x228;      // HUiTextField: SetText returns at once while it is null (0x863690)
 constexpr std::size_t kFontColour=0x2B0;    // HUiTextField: font colour RGBA float4 (0x8BC68C; drawn by 0x7F890C)
 constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8;
@@ -86,23 +82,12 @@ const unsigned char kComponentAtSig[]={0x40,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0
 const unsigned char kTextAtSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x48};
 const unsigned char kSetTextSig[]={0x48,0x83,0xB9,0x28,0x02,0x00,0x00,0x00,0x74,0x11,0x48,0x85,0xD2,0x75,0x07,0x48};
 const unsigned char kFindSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x40,0x48};
-const unsigned char kTextureSkinSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
-const unsigned char kSetTextureSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
-// Skin_Texture's draw (vtable 0x17F6228 slot 3, 0x7F7040): movss xmm3..6,[rdi+100h..10Ch] (0x7F707F), then
-// movss xmm0/xmm1,[rdi+0F0h/0F4h] (0x7F70FC): the tint pair; its constructor's mov dword [rbx+0F0h],1.0 (0x7F5CD2).
-const unsigned char kTintFromSig[]={0xF3,0x0F,0x10,0x9F,0x00,0x01,0x00,0x00,0xF3,0x0F,0x10,0xA7,0x04,0x01,0x00,0x00,
-    0xF3,0x0F,0x10,0xAF,0x08,0x01,0x00,0x00,0xF3,0x0F,0x10,0xB7,0x0C,0x01,0x00,0x00};
-const unsigned char kTintSig[]={0xF3,0x0F,0x10,0x87,0xF0,0x00,0x00,0x00,0xF3,0x0F,0x10,0x8F,0xF4,0x00,0x00,0x00};
-const unsigned char kTintInitSig[]={0xC7,0x83,0xF0,0x00,0x00,0x00,0x00,0x00,0x80,0x3F};
 const unsigned char kFontColourSig[]={0x89,0x81,0xB0,0x02,0x00,0x00};                       // 0x8BC68C: mov [rcx+2B0h],eax
 const unsigned char kFontDrawSig[]={0xF3,0x0F,0x10,0x9B,0xBC,0x02,0x00,0x00};               // 0x7F890C: movss xmm3,[rbx+2BCh]
 const unsigned char kShowSig[]={0xC6,0x87,0xF8,0x01,0x00,0x00,0x01};                        // 0x7E999C: mov byte [rdi+1F8h],1
 const Sig kDrawSigs[]={{kGetInput,kGetInputSig,sizeof(kGetInputSig)},{kFindIndex,kFindIndexSig,sizeof(kFindIndexSig)},
     {kComponentAt,kComponentAtSig,sizeof(kComponentAtSig)},{kTextAt,kTextAtSig,sizeof(kTextAtSig)},
-    {kSetText,kSetTextSig,sizeof(kSetTextSig)},{kFind,kFindSig,sizeof(kFindSig)},
-    {kTextureSkin,kTextureSkinSig,sizeof(kTextureSkinSig)},{kSetTexture,kSetTextureSig,sizeof(kSetTextureSig)},
-    {0x7F707F,kTintFromSig,sizeof(kTintFromSig)},{0x7F70FC,kTintSig,sizeof(kTintSig)},{0x7F5CD2,kTintInitSig,sizeof(kTintInitSig)},
-    {0x8BC68C,kFontColourSig,sizeof(kFontColourSig)},
+    {kSetText,kSetTextSig,sizeof(kSetTextSig)},{kFind,kFindSig,sizeof(kFindSig)},{0x8BC68C,kFontColourSig,sizeof(kFontColourSig)},
     {0x7F890C,kFontDrawSig,sizeof(kFontDrawSig)},{0x7E999C,kShowSig,sizeof(kShowSig)}};
 // These contracts are independent of the hotkey overlay: a refused native entry keeps the existing menu usable.
 const unsigned char kCreateButtonSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C};
@@ -204,8 +189,7 @@ void Release(Shared& p) noexcept {
         if(InterlockedDecrement(&c->weaks)==0)reinterpret_cast<void(__fastcall*)(ControlBlock*)>(c->vtable[1])(c);   // _Delete_this
     }
 }
-// std::wstring: at most 7 characters in place (every element name room_ui_logic.h makes), else a pointer (capacity > 7:
-// the callee only reads it; 0x7F63E0 copies the path first).
+// std::wstring: at most 7 characters in place, else a pointer (capacity > 7: the callees only read it).
 struct WideString { union { wchar_t text[8]; const wchar_t* ptr; }; std::uint64_t size,capacity; };
 WideString Wide(const wchar_t* s) noexcept {
     WideString w{};
@@ -222,8 +206,6 @@ using FindIndexFn=int(__fastcall*)(unsigned char*,const WideString*);
 using AtFn=Shared*(__fastcall*)(unsigned char*,Shared*,int);
 using SetTextFn=void(__fastcall*)(void*,const wchar_t*);
 using FindFn=Shared*(__fastcall*)(unsigned char*,Shared*,const WideString*);
-using TextureSkinFn=Shared*(__fastcall*)(Shared*,Shared*);
-using SetTextureFn=bool(__fastcall*)(void*,const WideString*);
 using CreateButtonFn=Shared*(__fastcall*)(unsigned char*,Shared*,Shared*,const wchar_t*);
 using ScreenWeakFn=Shared*(__fastcall*)(unsigned char*,Shared*);
 using NativeClickFn=void(__fastcall*)(unsigned char*,void*);
@@ -251,12 +233,11 @@ bool previewOk=false;   // room_preview.h InstallPreviewHooks: the 整备 pages'
 bool pressOk=false;         // kAutoMissionSigs checked (the stock ButtonApply press: 整备's 任务 tab opens the world map)
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
-// What was last written into the screen's texts (re-laid only when it changes): the native button's description.
-// Invalid when the screen object changes: written afresh.
+// What was last written into the screen's texts (re-laid only when it changes): the native button's description,
+// written afresh each time the button takes the focus (NativeEntryFocused forgets its key).
 enum Slot : int { kSlotNativeDesc, kSlotCount };
 struct Written {
     std::uint64_t key[kSlotCount];     // texts and shown flags: Hash
-    bool valid;
 };
 
 // --- The menu's state: the UI thread's alone ---
@@ -411,7 +392,7 @@ void ForgetMenu() noexcept {
     if(st.menu.open)rm::Discard(st.menu);
     if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
     NativeEntryInput(st.nativeEntry,false);
-    st.gate=Gate{};st.written.valid=false;
+    st.gate=Gate{};
 }
 void Forget() noexcept {
     ForgetMenu();
@@ -451,12 +432,6 @@ std::uint64_t Hash(const wchar_t* text,std::uint32_t colour,bool shown) noexcept
     mix(colour);mix(shown ? 0x5A : 0xA5);
     return h;
 }
-// Every element unknown: the next frame writes each once (the root looked up again).
-void Validate() noexcept {
-    if(st.written.valid)return;
-    for(auto& k:st.written.key)k=~0ull;
-    st.written.valid=true;
-}
 // True (and remembered) when `key` is not what slot `i` was last given.
 bool Changed(int i,std::uint64_t key) noexcept {
     if(st.written.key[i]==key)return false;
@@ -473,14 +448,6 @@ Shared Find(unsigned char* self,const wchar_t* name) noexcept {
 }
 void Show(void* component,bool shown) noexcept {
     __try { static_cast<unsigned char*>(component)[kShown]=shown ? 1 : 0; } __except(EXCEPTION_EXECUTE_HANDLER){}
-}
-// The shown flag of `name`; false when the layout has no such element.
-bool SetShown(unsigned char* self,const wchar_t* name,bool shown) noexcept {
-    Shared c=Find(self,name);
-    const bool found=c.object!=nullptr;
-    if(found)Show(c.object,shown);
-    Release(c);
-    return found;
 }
 // Called by the game's own weak-screen member callback, after native Button mouse/keyboard/pad activation.
 // Only queue here: changing the preview/menu while Component::Click is traversing its action list would be reentrant.
@@ -595,7 +562,7 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
         if(done) {
             reinterpret_cast<SetTextFn>(image+kSetText)(field.object,shown ? text : L"");
             float colour[4];
-            ChipColour(rgba,colour);
+            RgbaFloat(rgba,colour);
             std::memcpy(static_cast<unsigned char*>(field.object)+kFontColour,colour,sizeof(colour));
         }
         if(node.object)Show(node.object,shown);
@@ -636,7 +603,7 @@ void DriveDialog(bool hasInput) noexcept {
     // until this dialog is gone (the next page is built only after it closed).
     for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice),
                                                                  page.item[i].desc[0] ? page.item[i].desc : nullptr};
-    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog,nullptr)) {
+    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog)) {
         st.menu.open=false;st.pvpPages=false;
         Log("ROOMUI the game opened no dialog: the 对战 pages closed");
     }
