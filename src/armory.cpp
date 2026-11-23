@@ -10,6 +10,7 @@
 #include "armory_logic.h"
 #include "armory_presets.h"
 #include "host_settings.h"
+#include "hud.h"
 #include "ini_text.h"
 #include "loadout_file.h"
 #include "loadout_store.h"
@@ -31,6 +32,7 @@
 #include "map.h"
 #include "memory.h"
 #include "ui_gpu.h"
+#include "stores.h"
 #include "ui_text.h"
 #include <Windows.h>
 #include <Xinput.h>
@@ -336,6 +338,30 @@ bool SaveSupport(void*,const crew::roomui::SaveItem* items,int n,wchar_t* why,st
     return true;
 }
 
+// The vehicle page's fire keys (sp::Env::storeKey): each pylon store's own key (its StoreSpec, stores.inc, the files
+// support_loadout.py writes for a pylon: EDF6VC_<NAME>_<rounds>.SGO) and this machine's bindings, named as the HUD names
+// them (hud.cpp PayloadControls).
+static_assert(sp::kOwnKeysLast==kFireLastKey && sp::kFirstOwnKey==kSecondTriggerKey+1,"stores.h's fire keys");
+void FillFireKeys(sp::Env& e) noexcept {
+    for(const LoadStore& s:kLoadStores) {
+        wchar_t prefix[48];
+        _snwprintf_s(prefix,_TRUNCATE,L"EDF6VC_%ls_",s.name);
+        const StoreSpec* spec=StoreSpecOfPrefix(prefix);
+        if(!spec){Log("ARMORY the pylon store %ls has no StoreSpec (stores.inc): its fire key shown as the cycle's",s.name);continue;}
+        e.storeKey[s.code]=!spec->nativeControl && spec->fireKey>=sp::kFirstOwnKey && spec->fireKey<=sp::kOwnKeysLast ?
+                           spec->fireKey : 0;
+    }
+    wchar_t k[sp::kKeyNameMost],b[sp::kKeyNameMost];
+    ControlKeyName(Cfg().playerJetSwitchKey,k,sp::kKeyNameMost);
+    _snwprintf_s(e.switchKey,_TRUNCATE,L"%ls / LB",k);
+    for(int n=sp::kFirstOwnKey;n<=sp::kOwnKeysLast;++n) {
+        ControlKeyName(FireKeyVk(static_cast<unsigned char>(n)),k,sp::kKeyNameMost);
+        const int pad=FireKeyButton(static_cast<unsigned char>(n));
+        if(pad>0){ControlPadName(pad,b,sp::kKeyNameMost);_snwprintf_s(e.ownKey[n],_TRUNCATE,L"%ls / %ls",k,b);}
+        else wcsncpy_s(e.ownKey[n],k,_TRUNCATE);
+    }
+}
+
 // The pages' environment: online or not, who hosts, the crew kinds and each unit's call rule. The rules are this
 // machine's (SupportCfg / the catalog): the host's SupportDisabled is not synced to guests (docs/armory-re.md).
 void FillEnv(bool room,bool previewOn) noexcept {
@@ -353,6 +379,7 @@ void FillEnv(bool room,bool previewOn) noexcept {
             if(k && _wcsicmp(k,key)==0){e.rule[i]=sp::HostRule{true,SupportCfg().Enabled(c),SupportCallPt(c),SupportCallPrice(c)};break;}
         }
     }
+    FillFireKeys(e);
 }
 void BindSupport() noexcept {
     squadPage.Bind(&support);

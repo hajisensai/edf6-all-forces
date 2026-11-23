@@ -175,8 +175,15 @@ void Vehicles() {
     Expect(page.Activate(ar::Pos{0,jet,addAt,0}) && UnitOf(page,jet).vehicle.count==1,"a pylon added");
     ar::Pos pylon{0,jet,1,0};
     Expect(sp::VehiclePage::ItemOf(UnitOf(page,jet),1).kind==sp::It::pylon && page.Fields(pylon)==4,"a pylon: 挂载 弹数 开火键 移除");
+    // the fire keys as this machine binds them (the runtime fills them: armory.cpp FillFireKeys)
+    wcscpy_s(model.env.switchKey,L"R / LB");
+    wcscpy_s(model.env.ownKey[3],L"X / pad");
+    for(auto& k:model.env.storeKey)k=3;   // a jet ignores the stores' own keys (jet_combat.cpp)
     const ar::Line fire=LineOf(page,ar::Pos{0,jet,1,2},2);
-    Expect(!fire.steps && std::wcscmp(fire.value,hudtext::Tr(Tx::spFireWithPrimary))==0,"a jet's store fires with the main weapon");
+    wchar_t want[ar::kTextMost];
+    std::swprintf(want,ar::kTextMost,hudtext::Tr(Tx::spFireWithPrimary),L"R / LB");
+    Expect(!fire.steps && std::wcscmp(fire.value,want)==0,"a jet's store fires with the main weapon, its switch named");
+    for(auto& k:model.env.storeKey)k=0;
     const std::uint8_t store=UnitOf(page,jet).vehicle.store[0];
     page.Step(pylon,1);
     Expect(UnitOf(page,jet).vehicle.store[0]!=store,"the store steps");
@@ -191,7 +198,16 @@ void Vehicles() {
     Expect(page.Step(gun,1) && UnitOf(page,tank).vehicle.apGun!=ap,"HE / AP");
     const int tankAdd=page.Items(gun)-2;
     Expect(page.Activate(ar::Pos{0,tank,tankAdd,0}),"rounds added");
-    Expect(std::wcscmp(LineOf(page,ar::Pos{0,tank,1,2},2).value,hudtext::Tr(Tx::spFireWithGun))==0,"a tank's rounds ride the main gun");
+    std::swprintf(want,ar::kTextMost,hudtext::Tr(Tx::spFireWithGun),L"R / LB");
+    Expect(std::wcscmp(LineOf(page,ar::Pos{0,tank,1,2},2).value,want)==0,"a tank's rounds ride the main gun");
+    // a store with its own key (StoreSpec::fireKey 3..6) on the tank: that key, as bound
+    model.env.storeKey[UnitOf(page,tank).vehicle.store[0]]=3;
+    std::swprintf(want,ar::kTextMost,hudtext::Tr(Tx::spFireOwnKey),3,L"X / pad");
+    Expect(std::wcscmp(LineOf(page,ar::Pos{0,tank,1,2},2).value,want)==0,"a store on its own fire key: the key named");
+    model.env.storeKey[UnitOf(page,tank).vehicle.store[0]]=2;   // the second trigger: read on the V603 alone
+    std::swprintf(want,ar::kTextMost,hudtext::Tr(Tx::spFireWithGun),L"R / LB");
+    Expect(std::wcscmp(LineOf(page,ar::Pos{0,tank,1,2},2).value,want)==0,"not an own key on the tank: the main gun's cycle");
+    for(auto& k:model.env.storeKey)k=0;
     // the crew row
     const int crewAt=page.Items(gun)-3;
     Expect(sp::VehiclePage::ItemOf(UnitOf(page,tank),crewAt).kind==sp::It::crew,"the crew's colours");

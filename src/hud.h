@@ -25,4 +25,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
 // Whether the stock crosshair's draw for `soldier` gives way to the vehicle sight's field HudDraw drew for that soldier
 // (scope_hold.h; infantryscope.cpp CrossDrawHook asks it). Any thread.
 bool HudScopeHoldsCrosshair(const void* soldier) noexcept;
+// A keyboard / mouse binding (a Windows virtual key) and a pad binding (MapButton's XInput bits) named as the HUD names
+// them (the 整备 vehicle page's fire keys, armory.cpp). 0: "unbound".
+void ControlKeyName(int vk,wchar_t* out,int size) noexcept;
+void ControlPadName(int mask,wchar_t* out,int size) noexcept;
 }  // namespace crew

@@ -69,12 +69,21 @@ inline skin::Rect Callout(int k) noexcept {   // 左肩 右肩 / 左臂 右臂 /
 // ---- what the runtime gives ------------------------------------------------------------------------------------------
 // The host's rules for a unit (support_call.h / support_config.h; listed false: not in the call catalog, OWN_*).
 struct HostRule { bool listed=false,enabled=true; std::uint32_t pt=0; std::int32_t price=0; };
+inline constexpr int kKeyNameMost=32,kFirstOwnKey=3,kOwnKeysLast=6;   // stores.h kFireLastKey
 struct Env {
     bool online=false;     // the room screen (online): the rules panel shows
     bool host=true;        // this machine hosts the room (online_authority.h OnlineHostOnly)
     bool previewOn=false;  // the 3D preview's hooks are in (room_preview.h InstallPreviewHooks)
     roomui::CrewKinds kinds{};
     HostRule rule[rm::kMostUnits]{};   // by the menu's unit index
+    // The fire keys a pylon's store is on (docs/multi-weapon-keys.md): the runtime fills them from the stores' own
+    // StoreSpec::fireKey (stores.inc) and this machine's bindings. On the support tank (payload.cpp ControlOfSpec, a
+    // tank class): 3..kOwnKeysLast its own VehicleFire<n>Key, anything else (0; the second trigger, read on the V603
+    // alone) the main gun's cycle. A jet's stores (jet_combat.cpp: no StoreSpec::fireKey there) always the main weapon's
+    // cycle. By LoadStore code.
+    unsigned char storeKey[kLoadStoreCount+1]{};
+    wchar_t switchKey[kKeyNameMost]{};                 // the main weapon's cycle: PlayerJetSwitchKey / LB, named
+    wchar_t ownKey[kOwnKeysLast+1][kKeyNameMost]{};    // VehicleFire<n>Key / -Button, named, by n
 };
 // Writes `n` lines (all or none); false: nothing written, `why` says why.
 using Saver=bool(*)(void* context,const roomui::SaveItem* items,int n,wchar_t* why,std::size_t capacity) noexcept;
@@ -409,6 +418,13 @@ private:
 };
 
 // ---- 载具: the vehicles, the mech, the crews -------------------------------------------------------------------------
+// The fire key pylon `i` of vehicle unit `u` fires on, as the page says it (Env::storeKey).
+inline void PylonFireKey(const Env& e,const rm::Unit& u,int i,wchar_t* out,std::size_t cap) noexcept {
+    const int code=i>=0 && i<u.vehicle.count ? u.vehicle.store[i] : 0;
+    const int key=rm::IsTank(u) && code>=1 && code<=kLoadStoreCount ? e.storeKey[code] : 0;
+    if(key>=kFirstOwnKey && key<=kOwnKeysLast)_snwprintf_s(out,cap,_TRUNCATE,hudtext::Tr(Tx::spFireOwnKey),key,e.ownKey[key]);
+    else _snwprintf_s(out,cap,_TRUNCATE,hudtext::Tr(rm::IsTank(u) ? Tx::spFireWithGun : Tx::spFireWithPrimary),e.switchKey);
+}
 enum class It : std::uint8_t { gun, stock, pylon, mech, crew, addPylon, reset };
 struct ItemRef { It kind=It::reset; int row=0; };   // row: the room_menu.h row it edits
 
@@ -497,8 +513,7 @@ public:
                 ar::CopyText(out->value,ar::kTextMost,roomdialog::StoreName(u->vehicle.store[i]));}
             else if(p.field==1){detail::Say(out,Tx::spRounds);out->steps=true;
                 detail::Put(out->value,L"%d",kRoundCounts[u->vehicle.rounds[i]&0xF]);}
-            else if(p.field==2){detail::Say(out,Tx::spFireKey);
-                ar::CopyText(out->value,ar::kTextMost,hudtext::Tr(FireKey(*u)));}
+            else if(p.field==2){detail::Say(out,Tx::spFireKey);PylonFireKey(model->env,*u,i,out->value,ar::kTextMost);}
             else {detail::Say(out,Tx::spRemove);out->acts=true;}
             break;
         }
@@ -524,7 +539,6 @@ public:
     }
     // The key a pylon's store fires with (docs/multi-weapon-keys.md: a jet's stores cycle with its main weapon; a tank's
     // extra rounds ride its main gun's control, src/payload.cpp).
-    static Tx FireKey(const rm::Unit& u) noexcept { return rm::IsTank(u) ? Tx::spFireWithGun : Tx::spFireWithPrimary; }
     bool Step(const ar::Pos& p,int delta) noexcept override {
         const rm::Unit* u0=UnitAt(p.row);
         if(!u0)return false;
@@ -600,9 +614,10 @@ protected:
         const float x=kView.x0+14,w=kView.W()*0.62f;
         if(shown){out->Say(hudtext::Tr(Tx::spPylonsOffModel),x,y,18,kNoteColour,ar::Align::left,false,kView.W()-28);y+=28;}
         for(int i=0;i<u->vehicle.count;++i){
-            wchar_t s[ar::kTextMost];
+            wchar_t s[ar::kTextMost],key[ar::kTextMost];
+            PylonFireKey(model->env,*u,i,key,ar::kTextMost);
             detail::Put(s,L"#%d  %ls ×%d  ·  %ls",i+1,roomdialog::StoreName(u->vehicle.store[i]),
-                        kRoundCounts[u->vehicle.rounds[i]&0xF],hudtext::Tr(FireKey(*u)));
+                        kRoundCounts[u->vehicle.rounds[i]&0xF],key);
             const ItemRef at=ItemOf(*u,p.item);
             const bool sel=at.kind==It::pylon && at.row==i+1;
             out->Say(s,x,y,20,sel ? skin::kCursor : skin::kText,ar::Align::left,sel,w);

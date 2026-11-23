@@ -114,6 +114,13 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept {
 
 bool IsStoreWeapon(const unsigned char* w) noexcept { return StoreOf(w)!=nullptr; }
 
+const StoreSpec* StoreSpecOfPrefix(const wchar_t* prefix) noexcept {
+    if(!prefix)return nullptr;
+    for(const StoreSpec& s:kStores)
+        if(_wcsicmp(s.prefix,prefix)==0)return &s;
+    return nullptr;
+}
+
 unsigned TwinPairOf(const unsigned char* w) noexcept {
     std::size_t length=0;
     const wchar_t* name=WeaponFile(w,&length);
