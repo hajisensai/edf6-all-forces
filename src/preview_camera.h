@@ -1,6 +1,6 @@
 // Where the room / HQ 3D preview stands on screen and how it is looked at (docs/room-3d-preview-re.md section 6.2). Pure.
 //
-// The view's camera never moves: its Draw 0x93C3A0 writes an identity camera matrix and the fov (+0x260, MENUMODELSETTING
+// The view's camera never moves: its Draw 0x93C370 writes an identity camera matrix and the fov (+0x260, MENUMODELSETTING
 // camera_fov 0.6, vertical) every frame, the Ui3DSpace is the whole screen (no viewport rect), the camera looks down -Z
 // (H). Everything is the model's world matrix, built by the view's update at 0x93D073 from its yaw +0x2A4 and translation
 // +0x2B0 and handed to SetWorldMatrix 0x1100B90 at 0x93D1A1 (row vectors: v' = v * M). So a placement is a model matrix:
