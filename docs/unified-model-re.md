@@ -44,7 +44,16 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。证据等级：H = 反汇�
 - 带配置的载具 `EDF6VC_LO_<BODY>_<hex>.SGO`（坦克换炮 / 挂架、喷气机挂架、机甲的机体 + 核心 + 4 把武器）：`support_loadout._build_one` 生成后调 `unify_vehicle`。`unify_vehicle` 每次从战斗键重新推导菜单键（建在已统一的基础文件上、模型换了的变体不会沿用基础文件的菜单模型）。
 - 安装结束 `write_menu_preview` 用 `menu_preview.base_problems` 核对每个支援载具基础文件（Mods 优先，否则 Root.cpk）都是统一文件，否则报出。
 - 插件侧（`src/room_preview_logic.h VehicleFileOf`）预览的就是战斗会刷出的那个文件：有配置用 `VehicleVariantFile`，否则基础文件；所有机体都预览，不再有「没有菜单模型」的框。刚改、还没保存生成的配置没有文件，视口显示「这套配置的模型还没生成」。
-- 挂架外挂（导弹 / 炸弹）不在模型上：菜单渲染器只挂 WeaponTable 行（Desc 武器），载具文件本身不含挂载物网格；菜单行列出挂架内容。
+- **带配置的机甲 / 喷气机：菜单键指向合并模型**（2026-11-24，`pylib/menu_graft.py`）。战斗里机甲的 4 把武器、喷气机挂架上的外挂都是各自独立的模型，由战斗代码按 `vehicle_weapon_setting` 挂到机体骨骼上；菜单渲染器只画 `menu_animation_model` 一个模型（外加 WeaponTable 行的 Desc 武器），所以原来预览的是光机体。现在 `support_loadout._build_one` 为每个 `EDF6VC_LO_MECH_*` / 喷气机 `EDF6VC_LO_*` 另写两个文件：
+  - `OBJECT/<同名>.MRAB`：机体 RAB 的拷贝，只留一个 `.mdb`（`<同名小写>.mdb`），里面是机体网格加嫁接上去的武器 / 外挂网格，嫁接件的贴图作为成员一并放入（`graft_pure.texture_members` 只收贴图，不收同名 `.mdb`）。
+    - 机甲：每个装了武器的槽，取武器 SGO 自己的 `animation_model` 模型，挂到该槽所在行（`mech_parts.row_of`）的骨骼下，模型原点对齐骨骼（战斗代码的放法）。刚体件作为一根刚体网格骨骼 `edf6vc_slot<s>`（`mdb.graft_rigid`）挂上；蒙皮件（504 的导弹舱）连同自己的骨骼一起挂上（`graft_skinned`，骨骼名前缀 `edf6vc_slot<s>_`）。
+    - 喷气机：每个挂架一枚外挂弹体（`vcobjects.STORES[kind].weapon.look`，按 AmmoSize 缩放，和飞行中一样大），作为刚体骨骼 `edf6vc_pylon<i>` 挂在外挂所在行的骨骼下（`hp_store`，没有就是 `body`）。
+      - 战斗代码从这一根骨骼发射全部弹药，所以挂架的位置由菜单决定：奇数个时第一个在中线，其余按左右对称成对，从翼根向外排（半翼展的 `PYLON_SPREAD` 0.15–0.75）。
+      - 每个挂架的顶部贴在机体该处的下表面（`jet_hardpoints.airframe`，不含起落架），z 取挂点骨骼的 z；那条线没有碰到机体时保持挂点骨骼的高度。
+  - `OBJECT/<同名>_CALLOUTS.TXT`：标注点（模型空间、绑定姿势，CRLF，首行 `# EDF6VC callouts 1`，每行 `<tag> x y z`）。机甲是 `weapon0..3`（装了武器的取武器中心，空槽取该行骨骼原点）、`frame`（`koshi`）、`core`（`body`，608 没有 body 时取 `mune`）；喷气机是 `pylon<i>`。插件读法见 `docs/room-3d-preview-re.md` §6.4。
+  - 统一文件里**只有菜单键** `menu_animation_model[0]` 换成 `[app:/object/<同名小写>.mrab, <同名小写>.mdb]`，CAS 和 MAB 仍用机体自己的；战斗键逐字节不变（`unify_vehicle(..., menu=menu_graft.menu_model_ref(file))`）。`tests/menu_graft_test.py` 覆盖 8 种机体（满武器）、每把武器装在它能装的每个槽、空槽机甲、每种喷气机挂满（外挂轮换）、FIGHTER 2 挂架和坦克，逐个核对：去掉菜单键后与战斗文件逐字节相同（DSGO 的字符串池是整份文件共用的，按战斗树引用的字符串重写后比较），菜单键指向合并档案，档案只有一个模型、目录顺序正确、贴图都在，嫁接骨骼齐全，标注点在模型包围盒内。
+  - 坦克不合并：它的弹药从主炮发射，没有挂架可显示，菜单仍是坦克自己的模型。
+  - 安装 / 清理：`support_loadout.menu_files(name)` 给出这两个文件，`missing_names` / `install` / `stale` 把它们和统一文件当作一组处理（缺任何一个就重新生成）。
 
 ## 4. 消息 4（玩家武器）
 
@@ -57,5 +66,11 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。证据等级：H = 反汇�
 
 ## 6. 未做 / 未验证
 
+- **合并菜单模型（§3.1，L，全部离线推出，需实机逐项看）**：
+  - 菜单渲染器能否从 `Mods` 加载 `OBJECT/*.MRAB`，并接受比 CAS 多出来的骨骼（`edf6vc_slot*` / `edf6vc_pylon*`）。原版菜单只加载过 `.rab`；MRAB 是战斗里用过的格式，菜单路径没有核对。
+  - CAS 按骨骼名驱动：嫁接骨骼不在 CAS 里，应该保持绑定姿势跟着父骨骼走。实机看武器是否跟着手臂 / 肩部动，有没有飞到原点。
+  - 蒙皮件（504 导弹舱）是否显示，骨骼权重有没有错位。
+  - 喷气机外挂的位置是菜单自己选的（不是战斗里的发射点），看有没有穿进机身、左右是否对称。
+  - 合并档案 10–19 MB（机甲），首次预览的加载时间。
 - DSGO `0.0` 选择子走「全部材质」：M，需实机看颜色。
 - 钩子改的是菜单唯一的 `animation_model` 读点；其他 UI（若有）读 `animation_model` 仍拿战斗 CAS（未发现其他菜单读者，M）。

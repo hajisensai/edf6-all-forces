@@ -3,6 +3,7 @@
 // Contract between the menu screen (src/room_ui.cpp, stage 4) and the preview (src/room_preview.cpp, stage 7).
 // Every call comes from the game's UI thread (the HUiRoom / HUiHQMain OnUpdate wrappers).
 #pragma once
+#include "menu_callouts.h"
 #include "preview_camera.h"
 #include "support_loadout.h"
 
@@ -15,13 +16,22 @@ struct PreviewSpec {
     // Not none: that vehicle body instead of a soldier, from the unified model file the battle spawns for it
     // (room_preview_logic.h VehicleFileOf: `load`'s variant EDF6VC_LO_*.SGO when on, else the body's base; the battle
     // keys plus the menu's, docs/unified-model-re.md; kind / leader / look unused). A mech's loaded file is its frame
-    // with its core and weapons as the battle has them. Pylon stores are not on the model (the menu renderer hangs
-    // only WeaponTable rows); the menu's own rows show them.
+    // with its core and weapons as the battle has them; a loaded mech's or jet's menu key names its merged archive
+    // (pylib/menu_graft.py): the frame with its four weapons, a jet with one store a pylon, on the bones the battle hangs
+    // them from (docs/unified-model-re.md section 3.1).
     VehicleBody body=VehicleBody::none;
     VehicleLoadout load{};   // off: the stock vehicle
 };
 // Whether Mods\<modsFile> (OBJECT\EDF6VC_LO_TANK_<hex>.SGO) is there: support_pages.h Env::fileThere.
 bool PreviewFileThere(const wchar_t* modsFile) noexcept;
+// The model matrix and screen aspect the view drew the previewed vehicle with in its last update (preview_camera.h
+// Place with that frame's stand yaw: a vehicle turns); false: no vehicle placed and drawn now. support_pages.h
+// Env::placed.
+bool PreviewPlacement(Matrix4* matrix,float* aspect) noexcept;
+// The callouts of unified file Mods\<modsFile> (OBJECT\EDF6VC_LO_*.SGO; menu_callouts.h FileOf), read once per file (the
+// last one kept); false, logged once a file, when that file is missing or not a callouts file: the install is broken,
+// the callouts stay in their schematic places. support_pages.h Env::callouts.
+bool PreviewCallouts(const wchar_t* modsFile,menucallouts::Callouts* out) noexcept;
 
 // Installs the hooks the preview needs; false (and logged) when the code does not match: the menu then runs without it.
 bool InstallPreviewHooks() noexcept;

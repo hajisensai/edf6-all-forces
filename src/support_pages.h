@@ -15,6 +15,7 @@
 #include "armory_logic.h"
 #include "armory_skin.h"
 #include "hudtext.h"
+#include "menu_callouts.h"
 #include "preview_camera.h"
 #include "room_dialog_logic.h"
 #include "room_menu.h"
@@ -56,15 +57,23 @@ inline skin::Rect CamButton(int k) noexcept {
     const float x1=kView.x1-8-static_cast<float>(rp::kCameraPresetCount-1-k)*(kCamW+6);
     return skin::Rect{x1-kCamW,kView.y1-8-kCamH,x1,kView.y1-8};
 }
-// The mech's six slot callouts around the viewport (the schematic: its left on the left).
+// The callouts in the viewport (docs/room-3d-preview-re.md section 6.3): a mech's six (its four slots, frame, core), a
+// jet's pylons. On the model (the preview drawn and its callouts file read: CalloutSpots) each box sits in the column on
+// its point's side, as near the point's height as the others allow, a leader line to the point; else a mech's stand
+// in their schematic places (its left on the left) and a jet's pylons are listed.
 inline constexpr int kMechCallouts=6;
 inline constexpr int kCalloutRow[kMechCallouts]={rm::kMechRowWeapon+3,rm::kMechRowWeapon+2,rm::kMechRowWeapon+1,
                                                  rm::kMechRowWeapon,rm::kMechRowFrame,rm::kMechRowCore};
-inline skin::Rect Callout(int k) noexcept {   // 左肩 右肩 / 左臂 右臂 / 机体 核心
-    const float w=300,h=40;
-    const float x=k%2==0 ? kView.x0+10 : kView.x1-10-w;
-    const float y=kView.y0+14+static_cast<float>(k/2)*(h+56);
-    return skin::Rect{x,y,x+w,y+h};
+inline constexpr float kCalloutW=220,kCalloutH=36,kPylonCalloutW=200,kPylonCalloutH=30,kCalloutGap=6,kCalloutInset=10;
+inline skin::Rect SchematicCallout(int k) noexcept {   // 左肩 右肩 / 左臂 右臂 / 机体 核心
+    const float x=k%2==0 ? kView.x0+kCalloutInset : kView.x1-kCalloutInset-kCalloutW;
+    const float y=kView.y0+14+static_cast<float>(k/2)*(kCalloutH+60);
+    return skin::Rect{x,y,x+kCalloutW,y+kCalloutH};
+}
+// The callout tag (menu_callouts.h) of mech row `row`.
+inline int CalloutTagOf(int row) noexcept {
+    namespace mc=crew::menucallouts;
+    return row==rm::kMechRowFrame ? mc::kFrame : row==rm::kMechRowCore ? mc::kCore : mc::kWeapon0+(row-rm::kMechRowWeapon);
 }
 
 // ---- what the runtime gives ------------------------------------------------------------------------------------------
@@ -78,6 +87,10 @@ struct Env {
     // Whether Mods\<file> is there (room_preview.h PreviewFileThere): a vehicle's loadout just edited has no file until
     // it is saved and the generator made it. Null: every file is.
     bool (*fileThere)(const wchar_t* modsFile) noexcept=nullptr;
+    // The matrix the view drew the previewed vehicle with (room_preview.h PreviewPlacement) and a unified file's callout
+    // points (PreviewCallouts). Null, or false: the callouts stay schematic.
+    bool (*placed)(rp::Matrix4* matrix,float* aspect) noexcept=nullptr;
+    bool (*callouts)(const wchar_t* modsFile,crew::menucallouts::Callouts* out) noexcept=nullptr;
     roomui::CrewKinds kinds{};
     HostRule rule[rm::kMostUnits]{};   // by the menu's unit index
     // The fire keys a pylon's store is on (docs/multi-weapon-keys.md): the runtime fills them from the stores' own
@@ -136,6 +149,13 @@ inline void Ring(skin::Quads* q,float cx,float cy,float rx,float ry,float width,
         q->Add(cx+ca*rx,cy+sa*ry,cx+cb*rx,cy+sb*ry,cx+ca*(rx-width),cy+sa*(ry-width*0.3f),
                cx+cb*(rx-width),cy+sb*(ry-width*0.3f),c,c,c,c);
     }
+}
+// A line `width` wide from (x0, y0) to (x1, y1): a callout's leader.
+inline void Leader(skin::Quads* q,float x0,float y0,float x1,float y1,float width,std::uint32_t c) noexcept {
+    const float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
+    if(len<0.5f)return;
+    const float nx=-dy/len*width*0.5f,ny=dx/len*width*0.5f;
+    q->Add(x0+nx,y0+ny,x1+nx,y1+ny,x0-nx,y0-ny,x1-nx,y1-ny,c,c,c,c);
 }
 }  // namespace detail
 
@@ -429,6 +449,62 @@ inline void PylonFireKey(const Env& e,const rm::Unit& u,int i,wchar_t* out,std::
     if(key>=kFirstOwnKey && key<=kOwnKeysLast)_snwprintf_s(out,cap,_TRUNCATE,hudtext::Tr(Tx::spFireOwnKey),key,e.ownKey[key]);
     else _snwprintf_s(out,cap,_TRUNCATE,hudtext::Tr(rm::IsTank(u) ? Tx::spFireWithGun : Tx::spFireWithPrimary),e.switchKey);
 }
+// One callout: the VehiclePage item it picks and the room_menu.h row that item edits, its box, the point its leader
+// goes to (anchored: on the model, inside the viewport).
+struct CalloutSpot { skin::Rect box; int item=0,row=0; bool anchored=false; float ax=0,ay=0; };
+inline constexpr int kCalloutSpotsMost=kMechCallouts>crew::menucallouts::kPylonCallouts ? kMechCallouts :
+    crew::menucallouts::kPylonCallouts;
+// Unit `u`'s callouts (`shown`: its model drawn in the viewport): a mech's six (item = its row), a jet's pylons (item
+// 1+i: after the gun row). Placed by the model (the view's matrix, Env::placed, and every point of its callouts file,
+// Env::callouts): each box in the column on its point's side, stacked near the point's height (menu_callouts.h Stack;
+// the right column above the view buttons). Else a mech's in their schematic places, none for a jet (its pylons
+// listed). None for a tank (its rounds leave from the main gun: nothing hangs on it) or a stock vehicle. Returns the
+// count written to `out` (kCalloutSpotsMost).
+inline int CalloutSpots(const Env& e,const rm::Unit& u,bool shown,CalloutSpot* out) noexcept {
+    namespace mc=crew::menucallouts;
+    if(rm::IsCrewUnit(u) || !u.vehicle.On() || rm::IsTank(u))return 0;
+    const bool mech=rm::IsMech(u);
+    const int n=mech ? kMechCallouts : u.vehicle.count<mc::kPylonCallouts ? u.vehicle.count : mc::kPylonCallouts;
+    int tag[kCalloutSpotsMost]{};
+    for(int k=0;k<n;++k) {
+        out[k]=CalloutSpot{};
+        out[k].row=mech ? kCalloutRow[k] : k+1;
+        out[k].item=out[k].row;
+        tag[k]=mech ? CalloutTagOf(out[k].row) : mc::kPylon0+k;
+    }
+    rp::Matrix4 m;
+    float aspect=16.f/9.f;
+    static mc::Callouts c;   // off the stack; the UI thread's
+    wchar_t file[96];
+    const rp::PreviewSpec spec=roomui::VehiclePreview(u);
+    bool on=shown && e.placed && e.callouts && roompreview::VehicleFileOf(spec.body,spec.load,false,file,96) &&
+        e.placed(&m,&aspect) && e.callouts(file,&c);
+    for(int k=0;on && k<n;++k) {
+        float xy[2]{};
+        on=c.have[tag[k]] && mc::Project(m,c.p[tag[k]],aspect,xy);
+        out[k].ax=xy[0];out[k].ay=xy[1];
+    }
+    if(!on) {
+        if(!mech)return 0;
+        for(int k=0;k<n;++k){out[k].box=SchematicCallout(k);out[k].ax=out[k].ay=0;}
+        return n;
+    }
+    const float mid=(kView.x0+kView.x1)*0.5f,w=mech ? kCalloutW : kPylonCalloutW,h=mech ? kCalloutH : kPylonCalloutH;
+    for(int side=0;side<2;++side) {
+        int idx[kCalloutSpotsMost]{},k2=0;
+        float want[kCalloutSpotsMost]{},y0[kCalloutSpotsMost]{};
+        for(int k=0;k<n;++k)if((out[k].ax<mid)==(side==0)){idx[k2]=k;want[k2]=out[k].ay;++k2;}
+        const float bottom=side==0 ? kView.y1-kCalloutInset : CamButton(0).y0-kCalloutGap;
+        mc::Stack(want,k2,h,kCalloutGap,kView.y0+kCalloutInset,bottom,y0);
+        const float x0=side==0 ? kView.x0+kCalloutInset : kView.x1-kCalloutInset-w;
+        for(int j=0;j<k2;++j) {
+            CalloutSpot& s=out[idx[j]];
+            s.box=skin::Rect{x0,y0[j],x0+w,y0[j]+h};
+            s.anchored=kView.Contains(s.ax,s.ay);
+        }
+    }
+    return n;
+}
 enum class It : std::uint8_t { gun, stock, pylon, mech, crew, addPylon, reset };
 struct ItemRef { It kind=It::reset; int row=0; };   // row: the room_menu.h row it edits
 
@@ -594,45 +670,60 @@ protected:
         if(!roompreview::VehicleFileOf(spec.body,spec.load,false,file,sizeof(file)/sizeof(file[0])))return false;
         return !model->env.fileThere || model->env.fileThere(file);
     }
-    // A mech's slot callout picks its row.
+    // A callout picks its item: a mech's slot row, a jet's pylon.
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {
         const rm::Unit* u=UnitAt(p.row);
-        if(!u || !rm::IsMech(*u) || !u->vehicle.On())return false;
-        for(int k=0;k<kMechCallouts;++k)
-            if(Callout(k).Contains(x,y)){p.item=kCalloutRow[k];p.field=0;return true;}
+        if(!u)return false;
+        CalloutSpot s[kCalloutSpotsMost];
+        const int spots=CalloutSpots(model->env,*u,model->env.previewOn && PreviewOf(p,nullptr),s);
+        for(int k=0;k<spots;++k)
+            if(s[k].box.Contains(x,y)){p.item=s[k].item;p.field=0;return true;}
         return false;
     }
     void DrawInView(const ar::Pos& p,bool shown,ar::Layer* out) const noexcept override {
         const rm::Unit* u=UnitAt(p.row);
         if(!u || rm::IsCrewUnit(*u))return;
-        if(rm::IsMech(*u)){
-            if(!u->vehicle.On())return;
-            const ItemRef at=ItemOf(*u,p.item);
-            for(int k=0;k<kMechCallouts;++k){
-                const skin::Rect r=Callout(k);
-                const int row=kCalloutRow[k];
-                out->quads.Box(r,0xC0141310u);
-                detail::Frame(&out->quads,r,at.kind==It::mech && at.row==row ? skin::kCursor : skin::kCellEdge,
-                              at.kind==It::mech && at.row==row ? 3.f : 1.f);
-                wchar_t s[ar::kTextMost];
-                detail::Put(s,L"%ls：%ls",roomdialog::MechRowName(row),roomdialog::MechValueName(row,rm::MechRowValue(u->vehicle.mech,row)));
-                out->Say(s,r.x0+10,r.y0+8,20,skin::kText,ar::Align::left,false,r.W()-20);
-            }
-            return;
+        const ItemRef at=ItemOf(*u,p.item);
+        const bool mech=rm::IsMech(*u);
+        CalloutSpot s[kCalloutSpotsMost];
+        const int spots=CalloutSpots(model->env,*u,shown,s);
+        for(int k=0;k<spots;++k) {   // the leaders first: the boxes over them
+            if(!s[k].anchored)continue;
+            const bool sel=at.kind==(mech ? It::mech : It::pylon) && at.row==s[k].row;
+            const std::uint32_t c=sel ? skin::kCursor : skin::kCellEdge;
+            const float ex=s[k].box.x0<(kView.x0+kView.x1)*0.5f ? s[k].box.x1 : s[k].box.x0;
+            detail::Leader(&out->quads,ex,(s[k].box.y0+s[k].box.y1)*0.5f,s[k].ax,s[k].ay,sel ? 2.5f : 1.5f,c);
+            out->quads.Box(skin::Rect{s[k].ax-4,s[k].ay-4,s[k].ax+4,s[k].ay+4},c);
         }
+        for(int k=0;k<spots;++k) {
+            const skin::Rect r=s[k].box;
+            const bool sel=at.kind==(mech ? It::mech : It::pylon) && at.row==s[k].row;
+            out->quads.Box(r,0xC0141310u);
+            detail::Frame(&out->quads,r,sel ? skin::kCursor : skin::kCellEdge,sel ? 3.f : 1.f);
+            wchar_t t[ar::kTextMost];
+            if(mech)detail::Put(t,L"%ls：%ls",roomdialog::MechRowName(s[k].row),
+                                roomdialog::MechValueName(s[k].row,rm::MechRowValue(u->vehicle.mech,s[k].row)));
+            else {
+                const int i=s[k].row-1;
+                detail::Put(t,L"#%d %ls ×%d",i+1,roomdialog::StoreName(u->vehicle.store[i]),
+                            kRoundCounts[u->vehicle.rounds[i]&0xF]);
+            }
+            out->Say(t,r.x0+8,r.y0+(r.H()-20)*0.5f,mech ? 18.f : 16.f,skin::kText,ar::Align::left,false,r.W()-16);
+        }
+        if(mech || spots>0)return;
         if(!u->vehicle.On() || u->vehicle.count<=0)return;
-        // the hardpoints: #, 挂载, 弹数, 开火键 (listed: the menu renderer hangs no pylons on the model)
+        // the hardpoints listed: #, 挂载, 弹数, 开火键 (a tank's: nothing hangs on its model; a jet's while its model is
+        // not drawn or its callouts are not read)
         float y=kView.y0+12;
         const float x=kView.x0+14,w=kView.W()*0.62f;
-        if(shown){out->Say(hudtext::Tr(Tx::spPylonsOffModel),x,y,18,kNoteColour,ar::Align::left,false,kView.W()-28);y+=28;}
+        if(shown && rm::IsTank(*u)){out->Say(hudtext::Tr(Tx::spPylonsOffModel),x,y,18,kNoteColour,ar::Align::left,false,kView.W()-28);y+=28;}
         for(int i=0;i<u->vehicle.count;++i){
-            wchar_t s[ar::kTextMost],key[ar::kTextMost];
+            wchar_t line[ar::kTextMost],key[ar::kTextMost];
             PylonFireKey(model->env,*u,i,key,ar::kTextMost);
-            detail::Put(s,L"#%d  %ls ×%d  ·  %ls",i+1,roomdialog::StoreName(u->vehicle.store[i]),
+            detail::Put(line,L"#%d  %ls ×%d  ·  %ls",i+1,roomdialog::StoreName(u->vehicle.store[i]),
                         kRoundCounts[u->vehicle.rounds[i]&0xF],key);
-            const ItemRef at=ItemOf(*u,p.item);
             const bool sel=at.kind==It::pylon && at.row==i+1;
-            out->Say(s,x,y,20,sel ? skin::kCursor : skin::kText,ar::Align::left,sel,w);
+            out->Say(line,x,y,20,sel ? skin::kCursor : skin::kText,ar::Align::left,sel,w);
             y+=30;
         }
     }
