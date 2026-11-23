@@ -47,7 +47,28 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x03D450, 24, 'std::wstring::assign(ptr, len)'),
     (0x0E1BA0, 20, 'WeaponTable row by name'),
     (0x0D8700, 0x28, 'the player outfit (GS, player)'),
+    (0x93AD16, 0x1F, 'model slot load: 0x6BF380(model, ?, doc, L"animation_model", 0) (the unified file hook redirects the call)'),
+    (0x6BF3AB, 0x2E, '0x6BF380: the member lookup through table 0x179EBA8[doc tag] (index at query +8, -1 none)'),
+    (0x238F90, 0x25, 'member lookup, classic SGO (tag 0)'),
+    (0x239060, 0x22, 'member lookup, DSGO (tag 2)'),
+    (0x93D188, 0x1E, 'update: SetWorldMatrix(([view+0x120]+0x88)+0xA0, &matrix) (the placement hook redirects the call)'),
+    (0x1100B90, 0x10, 'SetWorldMatrix: four movaps rows (the matrix 16-byte aligned)'),
+    (0x93B895, 0x3B, 'msg 4: {player, slot, row}: +0x368 = slot, +0x36C[slot] = row, then the Desc rebuilt'),
+    (0x93C1C7, 0x35, 'msg 7: {0} / {1, player}: +0x304 = 0 / 1 (this player) / 2 (another: hidden)'),
+    (0x93CF1F, 0x22, 'update: +0x30C = 1, 0 when +0x304 is 2 (Draw skips it)'),
 )
+
+# The model matrix call the placement hook redirects (docs/room-3d-preview-re.md section 6.2): call site, target.
+WORLD_MATRIX_CALL = (0x93D1A1, 0x1100B90)
+# OnMessage ids the preview sends besides 3 / 5 / 8 / 9: msg 4 (a player weapon) and msg 7 (the view's selection).
+MSG_WEAPON = (4, 0x93B895)
+MSG_SELECT = (7, 0x93C1C7)
+
+# The model-slot load call the unified file hook redirects (docs/unified-model-re.md section 2): call site, target.
+MENU_MODEL_CALL = (0x93AD30, 0x6BF380)
+# The member lookup table (image VAs at the default base 0x180000000): tag -> function. Tags 0 and 2 are the hook's.
+FIND_MEMBER = 0x179EBA8
+FIND_MEMBER_ENTRIES = {0: 0x238F90, 1: 0x238DF0, 2: 0x239060}
 
 # vtable slots the hooks chain: (vtable rva, slot, the function the slot holds)
 SLOTS: tuple[tuple[int, int, int], ...] = (

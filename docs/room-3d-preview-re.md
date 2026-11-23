@@ -39,6 +39,8 @@ Draw 0x93C370 每帧对 i=0,1 读菜单 SGO `change_color[i]`，`0x6C3160(model,
 
 渲染器只认菜单 SGO（`animation_model` 菜单 CAS、`change_color`、`random_animation`、`soldier_weapon_slot`）。
 
+> 2026-11-24 起改为**统一模型文件**（`docs/unified-model-re.md`）：每个支援兵种 / 机体只有一个文件，战斗键原样、另加菜单键，菜单读 `menu_animation_model`（0x93AD30 的钩子）。下面几条是当时的背景，单独的菜单 SGO 已删除。
+
 - N601_* / EDF6VC_NPC_* 是 DSGO（`soldier_color`），不能直接用。M
 - 翼人 / 重装 NPC 身体就是玩家模型 p606/p607：用原版 `MENUOBJECT/P606_WINGDIVER.SGO` / `P607_FENCER.SGO`。H
 - 游骑兵 NPC 身体是 `n601_common_ranger`：复制 `MENUOBJECT/P505_RANGER.SGO`，只改 `animation_model[0]` 为 n601 的 mrab/mdb（同 EDF6ArmySoldier 骨架）。M
@@ -83,11 +85,25 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 
 ## 6.1 载具预览（2026-11-10，测试站 #46，只做了离线验证）
 
+> 2026-11-24：本节的「单独菜单 SGO `EDF6VC_MENU_V_<BODY>.SGO`」已换成统一文件 `OBJECT/EDF6VC_FLY_*.SGO`（战斗键 + 菜单键），战机 CAS 的小写 `main` 副本改名为 `MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS`；坦克 / 机甲基础文件有别的工具分层写入，暂不统一、不预览。见 `docs/unified-model-re.md`。
+
 - 同一条路（方案 A）：Desc 路径换成安装器生成的 `app:/MENUOBJECT/EDF6VC_MENU_V_<BODY>.SGO`（`tools/menu_preview.py build_vehicles`）：原版 `P505_RANGER.SGO` 其余键不动，`animation_model` 整个换成该机体基础 SGO（`support_loadout.BODIES`，Mods 里别的工具写的那份优先，否则 Root.cpk）的 `[模型, CAS, MAB]`。兵种号写游骑兵（只决定武器握持，载具没有武器），武器数 0。机体没装（基础 SGO 不在）就不生成，也不预览（日志一行）。
 - 挂载不上模型：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
 - 镜头：载具比士兵大，四个机位点在加右移之后整体乘一个倍数（`VehicleScale`：坦克 3、战机 6，按尺寸估的 L，待实机调）；离开菜单逐字节还原。模型在原地每帧转 0.01 rad（`kVehicleTurn`），菜单键不再转它；转台开始时记下原来的朝向（`Turntable`），光标回到士兵或菜单关闭时还原，士兵和关菜单后玩家自己的模型仍朝原来的方向（菜单本来从不转模型）。
 - **风险（L，需实机）**：菜单 SGO 的 `random_animation` 播 `_menu1/2/3`，`soldier_weapon_slot` 指 `weapon` 骨骼；载具 CAS 里没有这些动画、MAB 里没有这根骨骼。渲染器找不到动画 / 骨骼时是跳过还是出错没有静态核实；HQ / 房间里第一次把光标移到载具行时要盯日志与画面，出问题先把 `tools/menu_preview.py` 的载具文件撤掉（插件见文件缺失就不预览）。
 - **已确认的崩溃（2026-11-21，测试站 #50，dump 核对）**：菜单渲染器播放 CAS 里**名字正好是 `main`** 的 anmgroup，查找时区分大小写。异步构建 `0x93F910` 在 `0x93FB85` 查 `L"main"`，在 `0x93FB95` 把下标存进 `model+0xE0`；视图更新 `0x93D640` 在 `0x93EBAC` 直接拿它去调 `0x93D2F0` → `0x11664F0`，不检查 -1。战机的 `v506_heli.cas` 只有 `Roter` / `Main`，所以下标是 -1，在 `EDF.dll+0x116650D` 读野指针（打开 F2 菜单约 20 ms 后崩溃，edx=0xFFFFFFFF）。修法：`build_vehicles` 给 CAS 里没有 `main` 的机体另生成 `MENUOBJECT/EDF6VC_MENU_V_<BODY>.CAS`（把那个 anmgroup 的名字原位改成小写，长度不变，并核对该名字字符串没被别的字段共用），菜单 SGO 的 `animation_model[1]` 指向它。机体自己的 CAS 不动，因为直升机 / 战机代码照原样查 `Main`。`tests/menu_preview_test.py` 断言每个菜单 SGO 引用的 CAS 都有 `main`。坦克的 `v505_tank.cas` 本来就有 `main`，照用原 CAS。如果状态名不存在，`0x93D2F0` 在 `0x93D31E` 会安全返回；改名之后 `_menu1/2/3` 的行为未实机验证。
+
+## 6.2 摆放与机位（2026-11-24，静态逆向）
+
+- **相机不动**（H）：Draw `0x93C370 / 0x93C3A0` 在 `+0x214 == 0`、`+0x3EC == 1` 或 `+0x30C == 0` 时跳过；否则每帧把相机对象 `+0xC0` 写成 fov（view `+0x260`，`MENUMODELSETTING.camera_fov` 0.6，竖直），`+0x80..+0xB0` 写成单位矩阵。Ui3DSpace 全屏、没有视口矩形。所以「把视图放进某个矩形」只能靠模型的世界矩阵。
+- **更新 `0x93CEC0`**（H）：yaw `+0x2A4 += 输入 × 0.025`；缩放 `+0x308 += 输入 × 0.01`，夹 [0,1]；`+0x304` 是 msg 7 的选中态：0 时 `+0x300 -= 4·dt`，1 时 `+= 4·dt`，2 时 `+0x30C = 0`（`0x93CF1F` 每帧先写 1 再判断，所以 `+0x30C` 只由 `+0x304` 决定）。`+0x2B0 = lerp(lerp(+0x2C0,+0x2D0,+0x300), lerp(+0x2E0,+0x2F0,+0x300), +0x308)`；然后 `+0x3EC` 2→0、3→1。
+- **msg 7**（`0x93C1C7`，H）：`{0}` → `+0x304 = 0`；`{1, player}` → 是本视图的玩家（`+0x2AC`）则 1，否则 2（隐藏）。
+- **模型矩阵**（H）：`0x93D073` 用 `cosf`（IAT `0x12DA8B2`）/ `sinf`（`0x12DA8B8`）按 `+0x2A4` 造行向量矩阵 row0 (c,0,−s,0)、row1 (0,1,0,0)、row2 (s,0,c,0)、row3 = `+0x2B0`，在 **`0x93D1A1` `call 0x1100B90`** 交给 SetWorldMatrix（rcx = `[[view+0x120]+0x88]+0xA0`，rdx = 矩阵）。`0x1100B90` 用 `movaps` 拷四行（矩阵须 16 字节对齐）、置 `+0xB0` 脏标记，再跳 `0x1100010`。
+- **相机初始化 `0x93F4F0`**（M）：`+0x2B0 / +0x2C0 = camera_pos`（单人 [0]；双人按 `+0x2AC` 取 [1] / [2]），`+0x2E0 = pos + normalize(pos.xz) × camera_move_length(2.0)`。投影核对：(1.1, −0.9, −3.5) 在 16:9、fov 0.6 下 NDC x ≈ 0.57，与 HQ 里士兵在右侧一致（`tests/preview_camera_test.cpp` 断言）。
+- **实现**（`src/preview_camera.h` 纯计算 + `room_preview.cpp`）：`SetViewPlacement(rect, camera)` 后，`0x93D1A1` 的调用被改到 `WorldMatrix`：对象是本视图的才换成 `Place()` 的矩阵（模型绕中心先 yaw 后 pitch，中心投影到矩形中心，距离使模型尺寸填满矩形高度 / `distance`），否则原样转发。预设：自由（跟随原版转台 yaw，玩家输入照常转）/ 正面 / 侧面 / 俯视（pitch 1.2）/ 特写（距离 0.5，瞄准点抬高 0.3 倍身高）。屏幕宽高比取本进程可见顶层窗口的客户区（M：假定交换链填满客户区）。
+- **绘制顺序**（M）：模型在 3D 场景里画，UI 总在本帧 3D 之后（`docs/worldmap-select-re.md`，H）。整备界面盖在 HQ 上时，皮肤要给矩形**留洞**；视图要继续画，需 `+0x304 ≠ 2` 且 `+0x3EC ≠ 1`：摆放期间每帧把 2 改 0、1 改 0，清除摆放时还原进入时的值（锁住期间 `+0x3EC` 由 msg 8/9 那套负责）。
+- **正面朝向**（L）：yaw 0 时模型朝 +Z（朝相机）是按原版默认画面推的，未实机核对；不对就改 `kCameraPresets` 的 yaw。
+- **msg 4**（`0x93B895`，H）：`{player, slot, row, 0}`，player 须等于 `+0x2AC`；`+0x368 = slot`、`+0x36C + slot*4 = row`，再按 `+0x318` 的 Desc 重建。`ShowPlayerWeapon(cls, slot, row)` 只在视图显示的是玩家自己的模型、且显示兵种（`+0x180`）等于 `cls` 时，于下一次视图更新里发送；slot 限 0..3（M：数组到 `+0x3EC` 前最多 32 项，实际槽数未逐兵种核对）。
 
 ## 7. 需实机验证
 
@@ -97,5 +113,6 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 - `change_color` 网格选择 0 是否覆盖所有网格；
 - Fencer 选中槽 0 时左右手实际武器；
 - 镜头偏移方向；msg 10 的取值含义；
+- 6.2 的摆放：矩阵钩子画面、正面朝向、宽高比、整备界面盖住时视图是否继续画、msg 4 换武器；
 - 关闭画面时工作线程 0x93F910 与析构竞争（关闭前解除 override 并等 Async+0x9C）；
 - 离线双人分屏只改 index 0。

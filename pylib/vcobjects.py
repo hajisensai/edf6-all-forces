@@ -2006,6 +2006,14 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
             se[i] = cue
         m['ragdoll_contact'][0] = contact
         m['vehicle_damage_effect'] = [0.0]   # the 506's damage smoke: none (a scale of 1.0 when the key is missing)
+    # A unified model file (pylib/menu_model.py, docs/unified-model-re.md): the room / HQ 3D preview reads this very file.
+    # The 506's CAS has `Main`, not the menu's case-sensitive `main`: its menu CAS is tools/menu_preview.py's renamed copy.
+    import menu_model
+    menu_cas = m['animation_model'][1]
+    if menu_cas.lower() == menu_model.JET_CAS:
+        menu_cas = menu_model.menu_cas_path(menu_cas)
+    _, stock_menu = sgo.read(game.read(menu_model.MENU_FOLDER, menu_model.VEHICLE_STOCK))
+    m = menu_model.add_sgo(m, menu_model.vehicle_menu_keys(stock_menu, m['animation_model'], menu_cas))
     out = sgo.write(version, m)
     if door:
         check_door(out, mdl_at(jet), access_box)

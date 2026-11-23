@@ -18,7 +18,8 @@ alone: a peer that lacked one in an online room listed it in Mods/Plugins/EDF6Ve
 (src/support_variants.cpp), and this tool makes every name listed there too, then clears the list.
   OBJECT/EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>[_<PACK>].SGO   a coloured soldier: the stock AI template of that
       kind (its _LEADER for a leader) with its soldier_color entries recoloured (change_color0 = primary, change_color1 =
-      secondary; a face's own entry is kept). Nothing else changes: the same class, model, CAS, AI weapon. With a
+      secondary; a face's own entry is kept) and the menu keys of a unified model file (tools/menu_preview.py
+      unify_soldier: the 3D preview reads the same file). Nothing else changes: the same class, model, CAS, AI weapon. With a
       backpack weapon (PACK its upper-case WEAPONTABLE name, docs/npc-backpack-re.md) the template also loads that
       weapon after its own (soldier_load_weapon), its weapon sets keep only its own weapons (soldier_weapon_slot) and
       the new one is its sub weapon slot (soldier_sub_weapon_slot, as the player templates hold their backpack).
@@ -806,7 +807,10 @@ def soldier_file(game: rootcpk.Game, k: str, leader: bool, look: Look, carried: 
     data = game.read('OBJECT', template + '.SGO')
     if look != (STOCK, STOCK):
         data = recolour(data, look)
-    return with_pack(data, carried) if carried else data
+    if carried:
+        data = with_pack(data, carried)
+    import menu_preview   # a unified model file as its template (docs/unified-model-re.md): the 3D preview reads it too
+    return menu_preview.unify_soldier(game, template, data)
 
 
 def _as_sgo(v: object) -> sgo.Value:
@@ -930,6 +934,7 @@ def check_vehicle(made: bytes, base: bytes, l: Loadout) -> None:
 
 def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, bytes]) -> dict[str, bytes]:
     """`file` (a wanted_files name) and the pylon weapons it carries that neither the disk nor `out` has yet."""
+    import menu_preview
     what = decode_name(file)
     if what[0] == 'npc':
         return {'OBJECT/' + file: soldier_file(game, *what[1:])}
@@ -937,11 +942,12 @@ def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, b
     if l.mech is not None:   # the frame with its setup (pylib/mech_parts.py); its weapons are the game's own
         made = mech_parts.mech_sgo(game, l.mech)
         mech_parts.check_sgo(made, game.read('OBJECT', l.mech.frame_file()), l.mech)
-        return {'OBJECT/' + file: made}
+        return {'OBJECT/' + file: menu_preview.unify_vehicle(game, file, made, root)}
     tank = BODIES[l.body][2]
     made = tank_sgo(root, game, l) if tank else jet_sgo(root, game, l)
     check_vehicle(made, _source(root, game, 'OBJECT', BODIES[l.body][0]), l)
-    one = {'OBJECT/' + file: made}
+    # A unified model file (docs/unified-model-re.md): a jet's base already is one (pylib/vcobjects.py jet_sgo).
+    one = {'OBJECT/' + file: menu_preview.unify_vehicle(game, file, made, root)}
     for name, rounds in l.pylons:
         weapon = store_file(name, rounds)
         there = root and os.path.isfile(os.path.join(root, 'Mods', 'WEAPON', weapon))
