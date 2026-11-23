@@ -129,7 +129,7 @@ public:
         return texts_ && sub>=0 && sub<kClasses ? texts_->cls[sub] : L"";
     }
     int Rows(int sub) const noexcept override {
-        return Ready() && sub>=0 && sub<kClasses && have_[sub] ? std::min(catalog_->SlotCount(sub),wlist::kSlotsMost) : 0;
+        return Ready() && sub>=0 && sub<kClasses && have_[sub] ? (std::min)(catalog_->SlotCount(sub),wlist::kSlotsMost) : 0;
     }
     void RowLine(int sub,int row,Line* out) const noexcept override {
         std::swprintf(out->label,kTextMost,texts_->slotFormat,row+1);
