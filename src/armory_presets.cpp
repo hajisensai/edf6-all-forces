@@ -191,6 +191,8 @@ bool SwitchTo(int index,wchar_t* why,std::size_t cap) {
 bool ReadPlayer(preset::Player* out) noexcept {
     try {
         *out=preset::Player{};
+        // RowCount / GetRow are called below: only once weapon_equip_signatures.inc checked them (the same RVAs)
+        if(!wequip::Ready())return false;
         unsigned char* const gs=GameStatus();
         void* const table=Table(gs);
         if(!table || !Readable(gs+kClass,4) || !Readable(gs+kWeapons,playerslots::kClasses*kClassStride))return false;
@@ -272,8 +274,10 @@ bool Apply(const armory::Effects& fx,wchar_t* why,std::size_t cap) noexcept {
         case armory::Op::add: {
             std::vector<preset::Entry> support;
             if(!ReadSupport(&support,why,cap))return false;
+            // The player's loadout unreadable (no weapon table yet, weapon_equip refused): refused, never stored as "no
+            // player" (that would wipe the weapons a stored preset held).
             preset::Player now;
-            if(!ReadPlayer(&now))now=preset::Player{};   // before the weapon table: the support alone
+            if(!ReadPlayer(&now)){Say(why,cap,L"the player's loadout could not be read (no weapon table): not stored");return false;}
             if(fx.op==armory::Op::store)ok=preset::StorePreset(book,fx.index,std::move(support),now);
             else {
                 const int at=preset::AddPreset(book,name,std::move(support),now);

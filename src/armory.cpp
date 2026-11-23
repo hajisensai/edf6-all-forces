@@ -648,6 +648,9 @@ void ScreenGone(unsigned char* self) noexcept {
     gone.store(self);
     unsigned char* expected=self;
     if(drawOn.compare_exchange_strong(expected,nullptr)) {
+        // open on it: the window procedure stops taking the wheel / WM_CHAR now, not at the next HQ / room frame (none
+        // runs in a mission: a screen ended under an open 整备 would otherwise eat them through the whole mission)
+        wantText.store(false);
         std::lock_guard<std::mutex> hold(gpuLock);
         if(renderer)renderer->Reset();
         if(labels)labels->Reset();
