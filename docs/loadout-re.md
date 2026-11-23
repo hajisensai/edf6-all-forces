@@ -237,7 +237,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 `Row`（`0xE1D48..0xE22C7` 逐列填，`table[id][col]`）：`+0x00 wchar_t* name`(col0)、`+0x08 wchar_t* path`(col1)、`+0x10 int category`(col2)、
 `+0x14 float`(col3)、`+0x18 float level`(col4)、`+0x1C int acquire`(col5)、`+0x20 int` 等级显示值、`+0x24 bool`(col7≠0)、
 `+0x28 int content`(col8，内容包号)、`+0x2C int8 n`、`+0x2D int8[n]`(col6 各难度掉落参数)。两个字符串指针指进 SGO 数据本身，
-**不分配内存、没有析构**（游戏在 `0xDC170`/`0xAF150` 里把 Row 放栈上反复覆盖，不清理）。游戏的栈上 Row 留 0x38 字节，插件用 0x100 字节缓冲更稳（col6 元素数由表决定）。
+**不分配内存、没有析构**（游戏在 `0xDC170`/`0xAF150` 里把 Row 放栈上反复覆盖，不清理）。游戏的栈上 Row 留 0x38 字节，插件用 0x100 字节缓冲更稳：col6 的元素数由表决定、GetRow 不截断（`0xE22C7` 把它存成 int8，`0xE2382` 按有符号字节比较循环，最多 127 个；不足 8 个时 `0xE23AA` 用 0 补到 8），所以 Row 最长 `0x2D+0x7F = 0xAC` 字节。（`tests/armory_native_audit.py` 核对 Row+0 / +0x10 与这个上界。）
 
 **表加载前调用**：`[cfg+0x188]` 为 0，三个函数都会读 `[0+0x18]` → 访问违例。插件必须先判 `*(void**)(cfg+0x188) != nullptr`，
 最可靠的是只在 8.3 的 hook 点里调（那时游戏自己刚用过这些函数）。WeaponTable 跟着模式走（每次 `SetMode` 重读 CONFIG），

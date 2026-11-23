@@ -287,7 +287,7 @@ int FocusedButton(const Handle& h) noexcept {
     return d && h.control ? d->focused : -1;
 }
 
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept {
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept {
     if(out){Unregister(*out);DropDescs(out->serial);*out=Handle{};}
     if(!ready || !buttons || count<=0 || !out)return false;
     void* system=gd::Field<void*>(image,kSystem);
@@ -297,8 +297,7 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
     if(!serial)serial=1;
     const gd::ItemOps ops=gd::GameOps(image);
     // Descriptions given and the description dialog ready: HUiDescriptionDialog with its InitParam, the texts kept by
-    // serial before it opens (it asks for the first focused button's at once). Else the plain dialog box, and only the
-    // stock layout (the menu's own layout is a description dialog's).
+    // serial before it opens (it asks for the first focused button's at once). Else the plain dialog box.
     bool desc=false;
     for(int i=0;descReady && i<count;++i)desc|=buttons[i].desc!=nullptr;
     if(count>kDescButtonsMost)desc=false;
@@ -307,8 +306,7 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
         d->count=count;
         for(int i=0;i<count;++i)d->text[i]=buttons[i].desc;
     }
-    const wchar_t* name=desc ? (layout && *layout ? layout : gd::Field<const wchar_t*>(image,kDescLayoutName))
-                             : gd::Field<const wchar_t*>(image,kLayoutName);
+    const wchar_t* name=gd::Field<const wchar_t*>(image,desc ? kDescLayoutName : kLayoutName);
     alignas(16) unsigned char param[kParamSize];
     alignas(16) unsigned char item[gd::kItemSize];
     Shared weak{};

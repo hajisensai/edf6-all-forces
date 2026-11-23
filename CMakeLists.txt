@@ -1107,14 +1107,15 @@ add_test(NAME edf41_install_safety COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 set_tests_properties(edf41_install_safety PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME optics_model_reference COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_optics_model_reference.py")
 set_tests_properties(optics_model_reference PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
-# The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.
+# The room / HQ layout patch (tools/room_layout.py): stock members unchanged, vcRoot / vcLoad as src/room_ui*.{h,cpp} name them,
+# the old dialog menu's files released at install.
 add_test(NAME room_layout COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_layout_test.py")
 set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The native dialogs' code checks (src/room_dialog.cpp, tools/room_dialog_sigs.py) against EDF.dll (skipped without the game).
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
-add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py")
+add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
@@ -1134,6 +1135,10 @@ add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# 整备's own addresses (src/armory.cpp: the Draw slots, HUiBase::Draw, the draw context's +8 / +0x398;
+# src/armory_presets.cpp: the weapon table, GameStatus and the player offsets) against the real EDF.dll, read as a file.
+add_test(NAME armory_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/armory_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(armory_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The world map select's code checks (src/worldmap.cpp InstallWorldMap) against the real EDF.dll, read as a file.
 add_test(NAME worldmap_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(worldmap_sigs PROPERTIES SKIP_RETURN_CODE 77)

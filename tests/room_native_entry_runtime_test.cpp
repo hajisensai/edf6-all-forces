@@ -68,7 +68,7 @@ bool InstallNativeDialog() noexcept {UnexpectedRoomDependency();return false;}
 bool NativeDialogReady() noexcept {return false;}
 bool DescriptionDialogReady() noexcept {return false;}
 int FocusedButton(const Handle&) noexcept {return -1;}
-bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*,const wchar_t*) noexcept {UnexpectedRoomDependency();return false;}
+bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*) noexcept {UnexpectedRoomDependency();return false;}
 bool DialogAlive(const Handle&) noexcept {UnexpectedRoomDependency();return false;}
 bool TakePicked(Handle&,std::uint64_t*) noexcept {UnexpectedRoomDependency();return false;}
 void RequestCloseDialogs() noexcept {}
@@ -452,14 +452,14 @@ void ScreenLifecycle() {
     const wchar_t* caption=st.nativeLabel;
     NativeEntryDisplay(fixture.screen,false);
     st.menu.open=true;st.previewShown=true;st.switches.syncing=true;
-    st.gate.latched=true;st.written.valid=true;
+    st.gate.latched=true;
     st.nativeEntry.requested=true;
     ForgetMenu();
     Check(st.self==fixture.screen && followed.load()==fixture.screen && st.nativeEntry.attempted &&
           st.nativeEntry.ready && st.nativeLabel==caption,
           "mission reset preserves a retained native room's button and weak action identity");
     Check(!st.menu.open && !st.previewShown && !st.nativeEntry.enabled && !st.nativeEntry.requested &&
-          !st.gate.latched && !st.written.valid,
+          !st.gate.latched,
           "mission reset drops menu, preview, input and queued requests without extending native state");
     Check(nativePreviewHides==1 && nativeSyncLeaves==1,"mission reset releases active preview and room synchronization once");
     EnsureNativeEntry(fixture.screen);ForgetMenu();EnsureNativeEntry(fixture.screen);
