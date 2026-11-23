@@ -35,8 +35,10 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept;
 // What the 3D viewport of the page open now shows, where and from which camera (room_preview.h ShowPreview /
 // SetViewPlacement); false: nothing (closed, another page, no model for the row, the preview's hooks not in, a popup
 // over the weapons page). `*own` true: the player's own model (the weapons page; `*spec` unused, no override shown).
+// `*squad`: the soldiers side by side (支援编成, the cursor's squad tab: room_preview.h ShowSquad), count 0 for one
+// model; with a squad `*spec` is its first soldier (the game's index-0 view, the leftmost column).
 bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,roompreview::ViewCamera* camera,
-                   bool* own) noexcept;
+                   bool* own,roompreview::SquadSpec* squad) noexcept;
 // The 对战设置 row picked (the room's PvP pages, room_ui.cpp's native dialogs): true once per request.
 bool TakePvpRequest() noexcept;
 // The world map asked (the HQ's 任务 tab chosen, or the 任务 page's world map row): true once per request; room_ui

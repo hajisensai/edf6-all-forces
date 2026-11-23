@@ -252,6 +252,7 @@ struct State {
     Gate gate{};
     bool previewShown=false;
     roompreview::PreviewSpec previewSpec{};   // what was asked of the preview last (asked again only on a change)
+    roompreview::SquadSpec squad{};           // the squad side by side asked last (count 0: none)
     bool placed=false;                        // SetViewPlacement in force (the 整备 viewport)
     roompreview::ViewRect placedRect{};
     roompreview::ViewCamera placedView{};
@@ -330,12 +331,17 @@ std::size_t IniRead(void*,const wchar_t* key,wchar_t* out,std::size_t capacity) 
 void HidePreview() noexcept {
     if(st.placed){roompreview::ClearViewPlacement();st.placed=false;}
     if(!st.previewShown)return;
-    roompreview::HidePreview();
-    st.previewShown=false;
+    roompreview::HidePreview();   // the squad with it
+    st.previewShown=false;st.squad.count=0;
 }
 bool SameSpec(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
     return a.kind==b.kind && a.leader==b.leader && a.body==b.body && a.look.primary==b.look.primary &&
            a.look.secondary==b.look.secondary && a.look.pack==b.look.pack;
+}
+bool SameSquad(const roompreview::SquadSpec& a,const roompreview::SquadSpec& b) noexcept {
+    if(a.count!=b.count)return false;
+    for(int i=0;i<a.count && i<roompreview::kSquadMost;++i)if(!SameSpec(a.soldier[i],b.soldier[i]))return false;
+    return true;
 }
 bool SameView(const roompreview::ViewRect& r,const roompreview::ViewCamera& c,const roompreview::ViewRect& r2,
               const roompreview::ViewCamera& c2) noexcept {
@@ -350,16 +356,25 @@ void DrivePreview() noexcept {
     roompreview::ViewRect rect{};
     roompreview::ViewCamera view{};
     bool own=false;
-    if(!previewOk || !armoryui::PreviewWanted(&spec,&rect,&view,&own)) {
+    static roompreview::SquadSpec squad;   // big for the stack's taste; one caller, the frame's
+    if(!previewOk || !armoryui::PreviewWanted(&spec,&rect,&view,&own,&squad)) {
         HidePreview();
         roompreview::TickPreview(false);
         return;
     }
     if(own) {
         // the player's own model (the weapons page): no override; its weapons come by ShowPlayerWeapon (msg 4)
-        if(st.previewShown){roompreview::HidePreview();st.previewShown=false;}
-    } else if(!st.previewShown || !SameSpec(spec,st.previewSpec)) {
-        roompreview::ShowPreview(spec);st.previewSpec=spec;st.previewShown=true;
+        if(st.previewShown){roompreview::HidePreview();st.previewShown=false;st.squad.count=0;}
+    } else {
+        if(!st.previewShown || !SameSpec(spec,st.previewSpec)) {
+            roompreview::ShowPreview(spec);st.previewSpec=spec;st.previewShown=true;
+        }
+        // the squad side by side: asked after ShowPreview (soldier 0 is its), again only on a change
+        if(!SameSquad(squad,st.squad)) {
+            if(squad.count>=2)roompreview::ShowSquad(squad);
+            else roompreview::HideSquad();
+            st.squad=squad;
+        }
     }
     if(!st.placed || !SameView(rect,view,st.placedRect,st.placedView)) {
         roompreview::SetViewPlacement(rect,view);
