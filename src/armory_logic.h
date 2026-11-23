@@ -14,10 +14,21 @@
 //                    right click on a chip opens the popup for that preset
 //   columns          right / confirm moves list -> centre -> details, left / cancel back; in details left / right
 //                    step the field, confirm activates it; cancel in the list closes the screen; the toggle key closes
-//   mouse            click a row / item / field focuses it (a second click on the focused field activates it), the
-//                    wheel moves the cursor (on a details field: steps it)
-// A page's edits are committed (Page::Commit) before the tab changes, before any preset operation and at close; a
-// failed commit keeps the screen where it is and shows why.
+//   mouse            click a row / item / field focuses it (a second click on the focused field activates it, as
+//                    on a focused item that has no fields), the wheel moves the cursor (on a details field: steps it)
+//   page extras      Z / C on a page without sub tabs: Page::Cycle (the 3D view's camera); a click the page owns
+//                    (Page::Click: its tabs / buttons drawn over its columns) before the columns see it; confirm on a
+//                    centre item without fields: Page::Activate (an action item)
+// A page's edits are committed (Page::Commit) before the tab changes and before any preset operation; a failed commit
+// keeps the screen where it is and shows why. Closing with edits (Page::Dirty) asks first: save and close / discard
+// and close / back (Popup::unsaved); the tab of a page with edits carries the unsaved mark.
+// A page may reserve the top of a column (Page::ColumnTop: the 3D view over the centre rows, a panel over the details)
+// and name a rect of the screen left uncovered (Page::Hole): the game draws the 3D preview before any UI layer, so
+// the background and the panels are cut round it here (skin::DiamondsAround / PanelAround) and every quad before the
+// lines (Layer::holeQuads) is painted clipped round it (src/armory_draw.cpp).
+// A page may also take keys first (Page::Key), take typed text (Page::Typing / Type: its search box), reserve header
+// lines (Page::Header), move the cursor after its lines change (Page::Relocate), post a note (Page::TakeNote) and
+// replace the hint bar's text (Page::Hint).
 #include "armory_skin.h"
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +54,7 @@ struct Line {
     bool steps=false;   // left / right change it (Page::Step)
     bool acts=false;    // confirm does something (Page::Activate)
     bool dim=false;     // shown greyed (unavailable)
+    std::uint32_t chip=0;   // a colour swatch (0xAARRGGBB) beside the value; 0 none
 };
 
 // Where the cursor is on a page.
@@ -63,6 +75,9 @@ struct Layer {
     Text texts[kTextMost];
     int nt=0;
     int droppedTexts=0;
+    // The rect left uncovered (W / H 0: none): quads [0, holeQuads) are painted around it, the rest over it.
+    skin::Rect hole{};
+    int holeQuads=0;
     void Say(const wchar_t* s,float x,float y,float size,std::uint32_t argb,Align a=Align::left,bool bold=false,
              float maxW=0) noexcept {
         if(nt>=kTextMost){++droppedTexts;return;}
@@ -75,7 +90,10 @@ struct Layer {
 struct View {
     Layer layer[2];
     bool open=false;
-    void Clear() noexcept { for(Layer& l:layer){l.quads.n=0;l.quads.dropped=0;l.nt=0;l.droppedTexts=0;} open=false; }
+    void Clear() noexcept {
+        for(Layer& l:layer){l.quads.n=0;l.quads.dropped=0;l.nt=0;l.droppedTexts=0;l.hole=skin::Rect{};l.holeQuads=0;}
+        open=false;
+    }
 };
 
 // ---- input ------------------------------------------------------------------------------------------------------------
@@ -138,6 +156,13 @@ public:
     virtual bool TakeNote(wchar_t* /*out*/,std::size_t /*cap*/) noexcept { return false; }
     // The hint bar text instead of Words::hints[column]; nullptr keeps that.
     virtual const wchar_t* Hint(const Pos&,int /*column*/) const noexcept { return nullptr; }
+    // Design units reserved at the top of column 0..2 (its rows start below, after Header's lines; Draw fills it).
+    // 0: none.
+    virtual float ColumnTop(int /*column*/) const noexcept { return 0; }
+    // A click on something the page drew (its own tabs / buttons); it may move `p`. True: taken.
+    virtual bool Click(Pos& /*p*/,float /*x*/,float /*y*/) noexcept { return false; }
+    // Z / C on a page without sub tabs. True when something changed.
+    virtual bool Cycle(const Pos&,int /*delta*/) noexcept { return false; }
 protected:
     ~Page()=default;
 };
@@ -169,10 +194,14 @@ struct Words {
     const wchar_t* hints[5]{};        // list, centre, details, popup, rename
     const wchar_t* suggest[kSuggestMost]{};   // names a pad cycles for a rename / new preset
     int nsuggest=0;
+    const wchar_t* unsaved=L"*";              // the hint bar's mark of a page with edits not yet written
+    const wchar_t* unsavedTitle=L"";          // the close prompt's question
+    const wchar_t* unsavedActions[3]{};       // save and close, discard and close, back
 };
 
-enum class Popup : std::uint8_t { none,actions,confirmDelete,rename };
+enum class Popup : std::uint8_t { none,actions,confirmDelete,rename,unsaved };
 enum PopupAction : int { kActNew,kActCopy,kActRename,kActDelete,kActStore,kActCount };
+enum UnsavedAction : int { kUnsavedSave,kUnsavedDiscard,kUnsavedBack,kUnsavedCount };
 
 struct State {
     bool open=false;
@@ -215,14 +244,25 @@ namespace detail {
 inline int Clamp(int v,int lo,int hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
 inline int Wrap(int v,int n) noexcept { return n<=0 ? 0 : ((v%n)+n)%n; }
 inline int FirstListRow(const Page& p) noexcept { return p.Subs()>0 ? 1 : 0; }
-// The first layout row of a column the state's lines use (sub tabs, then the page's header).
+// Rows the page's reserved top of `column` takes from it (whole rows: the rows keep their pitch).
+inline int TopRows(const Page& p,int column) noexcept {
+    const float top=p.ColumnTop(column);
+    if(top<=0)return 0;
+    const float pitch=skin::layout::kRowHeight+skin::layout::kRowGap;
+    return static_cast<int>((top+pitch-1)/pitch);
+}
+// The first layout row of a column the state's lines use (sub tabs, the page's header lines, its reserved top).
 inline int FirstRow(const Page& p,int column) noexcept {
     const int h=p.Header(column);
-    return (column==0 ? FirstListRow(p) : 0)+(h>0 ? h : 0);
+    return (column==0 ? FirstListRow(p) : 0)+(h>0 ? h : 0)+TopRows(p,column);
 }
 inline int Visible(const Page& p,int column) noexcept {
     const int v=skin::layout::RowsIn(column)-FirstRow(p,column);
     return v>1 ? v : 1;
+}
+// The rect of visible line `v` of `column` (under the sub tabs, the page's header and its reserved top).
+inline skin::Rect LineRect(const Page& p,int column,int v) noexcept {
+    return skin::layout::Row(column,v+FirstRow(p,column));
 }
 inline int Count(const Page& p,const Pos& pos,int column) noexcept {
     return column==0 ? p.Rows(pos.sub) : column==1 ? p.Items(pos) : p.Fields(pos);
@@ -316,6 +356,43 @@ inline void StartRename(State& s,const Presets& ps,int action,int target) noexce
     else CopyText(s.renameText,kTextMost,target>=0 && target<ps.count ? ps.names[target] : L"");
 }
 
+inline skin::Rect UnsavedLine(int i) noexcept { return PopupLine(i+1); }
+// The close prompt (Popup::unsaved): save and close, discard and close, back.
+inline void UnsavedStep(State& s,Page& p,const Input& in,Effects* fx) noexcept {
+    int pick=-1;
+    if(Pressed(s,in,kUp))s.popupCursor=Wrap(s.popupCursor-1,kUnsavedCount);
+    if(Pressed(s,in,kDown))s.popupCursor=Wrap(s.popupCursor+1,kUnsavedCount);
+    if(in.wheel)s.popupCursor=Wrap(s.popupCursor-in.wheel,kUnsavedCount);
+    if(Pressed(s,in,kConfirm))pick=s.popupCursor;
+    if(Pressed(s,in,kMouseLeft) && in.pointer){
+        for(int i=0;i<kUnsavedCount;++i)
+            if(UnsavedLine(i).Contains(in.x,in.y)){pick=i;s.popupCursor=i;}
+        if(pick<0 && !PopupBox().Contains(in.x,in.y))pick=kUnsavedBack;
+    }
+    if(Pressed(s,in,kCancel))pick=kUnsavedBack;
+    switch(pick){
+    case kUnsavedSave:
+        s.popup=Popup::none;
+        if(CommitPage(s,p)){fx->close=true;Close(s);}
+        break;
+    case kUnsavedDiscard:
+        p.Discard();
+        fx->close=true;
+        Close(s);
+        break;
+    case kUnsavedBack:
+        s.popup=Popup::none;
+        break;
+    default:
+        break;
+    }
+}
+// Close asked: a page with edits asks first; otherwise commit (a page may write what is not an edit) and close.
+inline void AskClose(State& s,Page& p,Effects* fx) noexcept {
+    if(p.Dirty()){s.popup=Popup::unsaved;s.popupCursor=kUnsavedSave;return;}
+    if(CommitPage(s,p)){fx->close=true;Close(s);}
+}
+
 inline void PopupStep(State& s,const Input& in,const Presets& ps,const Words& w,Effects* fx) noexcept {
     // the book may have changed under the popup (an operation of the last frame): its target must still be there, a
     // new / copied preset must still have room
@@ -398,10 +475,11 @@ inline void ClickColumns(State& s,Page& p,const Input& in) noexcept {
     for(int c=0;c<3;++c){
         const int n=Count(p,s.pos,c), vis=Visible(p,c);
         for(int v=0;v<vis && s.top[c]+v<n;++v){
-            if(!skin::layout::Row(c,v+FirstRow(p,c)).Contains(in.x,in.y))continue;
+            if(!LineRect(p,c,v).Contains(in.x,in.y))continue;
             const int i=s.top[c]+v;
             int& at=Index(s.pos,c);
             if(c==2 && s.column==2 && at==i){p.Activate(s.pos);return;}
+            if(c==1 && s.column==1 && at==i && p.Fields(s.pos)<=0){p.Activate(s.pos);return;}
             if(at!=i){
                 at=i;
                 if(c==0){s.pos.item=0;s.pos.field=0;s.top[1]=s.top[2]=0;}
@@ -424,8 +502,13 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
     Clamp(s,page);
     if(s.noteFrames>0 && --s.noteFrames==0)s.note[0]=0;
 
-    if(Pressed(s,in,kToggle) && s.popup!=Popup::rename){
-        if(CommitPage(s,page)){fx.close=true;Close(s);}
+    if(Pressed(s,in,kToggle) && s.popup==Popup::unsaved){
+        s.popup=Popup::none;
+    }else if(Pressed(s,in,kToggle) && s.popup!=Popup::rename){
+        s.popup=Popup::none;
+        AskClose(s,page,&fx);
+    }else if(s.popup==Popup::unsaved){
+        UnsavedStep(s,page,in,&fx);
     }else if(s.popup!=Popup::none){
         PopupStep(s,in,ps,w,&fx);
     }else if(page.Typing()){
@@ -460,7 +543,7 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
             }else if(tab>=0 && left){
                 if(tab!=s.tab && CommitPage(s,page)){s.tab=tab;s.column=0;s.pos=Pos{};s.top[0]=s.top[1]=s.top[2]=0;}
             }else if(left){
-                ClickColumns(s,page,use);
+                if(!page.Click(s.pos,use.x,use.y))ClickColumns(s,page,use);
             }
         }
         // page tabs, sub tabs
@@ -474,6 +557,8 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
         if(ds && now.Subs()>1 && s.popup==Popup::none){
             s.pos=Pos{Wrap(s.pos.sub+ds,now.Subs()),0,0,0};
             s.column=0;s.top[0]=s.top[1]=s.top[2]=0;
+        }else if(ds && now.Subs()<=1 && s.popup==Popup::none){
+            now.Cycle(s.pos,ds);
         }
         // columns
         if(s.popup==Popup::none && fx.op==Op::none){
@@ -489,11 +574,13 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
                 if(Pressed(s,use,kConfirm))now.Activate(s.pos);
                 if(Pressed(s,use,kCancel))s.column=1;
             }else{
-                if((Pressed(s,use,kRight) || Pressed(s,use,kConfirm)) && Count(now,s.pos,s.column+1)>0)++s.column;
+                const bool deeper=Count(now,s.pos,s.column+1)>0;
+                if((Pressed(s,use,kRight) || Pressed(s,use,kConfirm)) && deeper)++s.column;
+                else if(Pressed(s,use,kConfirm) && s.column==1)now.Activate(s.pos);   // an item that acts itself
                 if(Pressed(s,use,kLeft) && s.column>0)--s.column;
                 if(Pressed(s,use,kCancel)){
                     if(s.column>0)--s.column;
-                    else if(CommitPage(s,now)){fx.close=true;Close(s);}
+                    else AskClose(s,now,&fx);
                 }
             }
         }
@@ -529,6 +616,9 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
         const skin::Rect r=L::Tab(i);
         skin::Tab(&base.quads,r,i==s.tab);
         base.Say(pages[i]->Name(),(r.x0+r.x1)/2,r.y0+12,26,skin::TextOn(i==s.tab),Align::centre,i==s.tab,r.W()-24);
+        if(pages[i]->Dirty())   // the unsaved mark: an orange corner on the tab
+            base.quads.Add(r.x1-24,r.y0,r.x1,r.y0,r.x1,r.y0+24,r.x1,r.y0+24,skin::kCursor,skin::kCursor,skin::kCursor,
+                           skin::kCursor);
     }
     const int chips=ps.count+(ps.count<kPresetMost ? 1 : 0);
     for(int i=0;i<chips;++i){
@@ -555,6 +645,9 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
             skin::Tab(&base.quads,r,i==s.pos.sub);
             base.Say(page.SubName(i),(r.x0+r.x1)/2,r.y0+12,24,skin::TextOn(i==s.pos.sub),Align::centre,false,r.W()-12);
         }
+    // what is painted around the page's hole: everything so far (the background and the panels are already cut round
+    // it above; the bars, the tabs' marks and the sub tabs are clipped to it by the painter, src/armory_draw.cpp)
+    if(holed && hole.W()>0 && hole.H()>0){base.hole=hole;base.holeQuads=base.quads.n;}
     for(int c=0;c<3;++c){
         if(c>s.column+1 || (c>0 && Count(page,s.pos,c)<=0))continue;
         const int n=Count(page,s.pos,c), vis=Visible(page,c);
@@ -566,7 +659,7 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
             if(c==0)page.RowLine(p.sub,i,&line);
             else if(c==1)page.ItemLine(p,&line);
             else page.FieldLine(p,&line);
-            const skin::Rect r=L::Row(c,v+FirstRow(page,c));
+            const skin::Rect r=LineRect(page,c,v);
             const bool at=IndexOf(s.pos,c)==i;
             const bool beige=c==0 && at;
             if(c==0)skin::Button(&base.quads,r,beige);
@@ -586,6 +679,11 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
                 }
                 base.Say(arrows ? v2 : line.value,r.x1-22,r.y0+12,26,col,Align::right,false,r.W()*0.5f-30);
             }
+            if(line.chip){   // the colour swatch left of the value, edged so a dark colour still shows
+                const float x=r.x0+r.W()*0.5f-40, y=r.y0+11;
+                base.quads.Box(skin::Rect{x-2,y-2,x+32,y+32},skin::kCellEdge);
+                base.quads.Box(skin::Rect{x,y,x+30,y+30},line.chip);
+            }
             if(at && c==s.column && s.popup==Popup::none)skin::Cursor(&base.quads,r);
         }
         page.Draw(s.pos,c,&base);
@@ -595,6 +693,7 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     const wchar_t* own=s.popup==Popup::none ? page.Hint(s.pos,s.column) : nullptr;
     base.Say(own ? own : w.hints[hint],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
     if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+    else if(page.Dirty())base.Say(w.unsaved,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
     // popup
     if(s.popup==Popup::none)return;
     Layer& top=out->layer[1];
@@ -609,6 +708,15 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
             const bool at=i==s.popupCursor;
             skin::Button(&top.quads,r,at);
             top.Say(w.actions[i],(r.x0+r.x1)/2,r.y0+12,26,skin::TextOn(at),Align::centre,at);
+            if(at)skin::Cursor(&top.quads,r);
+        }
+    }else if(s.popup==Popup::unsaved){
+        top.Say(w.unsavedTitle,(box.x0+box.x1)/2,box.y0+16,28,skin::kText,Align::centre,true,box.W()-40);
+        for(int i=0;i<kUnsavedCount;++i){
+            const skin::Rect r=UnsavedLine(i);
+            const bool at=i==s.popupCursor;
+            skin::Button(&top.quads,r,at);
+            top.Say(w.unsavedActions[i],(r.x0+r.x1)/2,r.y0+12,26,skin::TextOn(at),Align::centre,at);
             if(at)skin::Cursor(&top.quads,r);
         }
     }else if(s.popup==Popup::confirmDelete){

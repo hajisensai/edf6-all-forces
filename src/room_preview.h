@@ -35,6 +35,8 @@ void TickPreview(bool menuOpen) noexcept;
 void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept;
 // The game's own placement back (and the view's selection / hidden state as they were). Idempotent.
 void ClearViewPlacement() noexcept;
+// The screen's aspect now (the game's visible top-level window's client area; 16:9 when none is found).
+float ScreenAspectNow() noexcept;
 // The plugin's only msg 4 sender. Shows WeaponTable row `row` in weapon slot `slot` (0..3) of the player's own model
 // (OnMessage 4 {player, slot, row}); one pending row per slot (the latest wins),
 // when the view shows class `cls` and no support soldier is previewed; sent from the view's next update.

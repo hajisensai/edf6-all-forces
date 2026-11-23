@@ -45,11 +45,26 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
 ## 5. 未验证 / 待办
 
 - 以上运行时行为**全部未实机测试**（本阶段只做了离线构建与离线测试）。
-- 页签顺序：武器 / 小队 / 载具 / 任务。支援小队 / 载具页仍只读显示 `room_menu.h` 模型的单位与士兵行（阶段 3 做编辑）；任务页有「世界地图」（灰）和房间里的「对战设置」（打开原生对战对话框页）。
+- 页签顺序：武器 / 支援编成 / 载具 / 任务。支援编成 / 载具页可编辑（阶段 3，见 §6）；任务页有「世界地图」和房间里的「对战设置」（打开原生对战对话框页）。
 - 武器页（阶段 5，`weapon_page_logic.h`，离线测试 `weapon_page_logic_test`）：列表列 = 兵种分页（Z / C、LT / RT）下每槽一行；中间列头两行是类别标签（A / D、右摇杆左右，或点）与来源开关 EDF6 / EDF5 / EDF4.1 + 搜索框；下面是系列折叠的武器列表（「▸ 系列 持有 n/m Lv a–b」，超上限 / 未持有 / 重复的灰显）；详情列上方 7 行（设计坐标 {1328,130,1792,530}）留洞给 3D 预览（`Page::Hole` → 背景菱形与面板绕开它画，`roompreview::SetViewPlacement` 把玩家模型放进去，镜头「正面」），下面是装备 / 展开、收藏、来源、显示未持有、只看收藏与属性对比（目前只有等级，▲▼）。确认即写 GS（同原版，无「保存」步骤）。光标所指的武器经 `ShowPlayerWeapon` 让玩家试拿，换槽 / 离开本页时换回已装备的。收藏存 ini `[VehicleCrew] WeaponFavourites`（逗号分隔的武器 id）。
 - 搜索**没有屏幕键盘**：键盘按 Tab（或点搜索框）直接打字（窗口子类化拿 WM_CHAR，与方案改名同一路径），Enter 保留、Esc 清空、Backspace 删字；手柄用首字跳转（PgUp / PgDn，右摇杆上下）在列表里按名字首字循环跳。匹配不分大小写与全半角，片假名 = 平假名。
 - 新增按键（`armory_logic.h Key`）：`kAltPrev / kAltNext`（A / D，右摇杆左右）、`kJumpPrev / kJumpNext`（PgUp / PgDn，右摇杆上下，阈值 16000）、`kSearch`（Tab）。这些只给页面（`Page::Key`）用，框架本身不处理；页面拿走的键当帧不再给框架。
 - 3D 预览留洞未实机：HQ 画面在整备之后画的东西（顶栏 / 底栏、弹窗）可能盖住洞；洞只在看**当前兵种**时留（视图只能显示当前兵种的玩家模型）。L
 - 只处理 1P（GS 玩家 0）；分屏 2P 的装备整备不改。
+- 3D 预览：武器页（玩家本人模型拿着光标所指的武器，放在详情列的洞里）与支援编成 / 载具页（中栏视口，§6）。三页共用原版那一个视图，放置只由 `room_ui.cpp DrivePreview` 按 `armoryui::PreviewWanted` 设 / 清（`own` = 玩家本人模型、不挂 override；此时 `TickPreview(false)`，与武器页原先的行为一致），各页不再自己调 `SetViewPlacement` / `ClearViewPlacement`，避免切页那一帧互相清掉。H（代码）；实机效果 L（未实机）。
+- 武器页的洞在预览钩子没装上（`InstallPreviewHooks` 失败）时仍然留着，洞里没有模型、露出 HQ 画面。L（代码推断，未处理）
 - 旧菜单单位页标题里的状态行（保存结果、生成器进度、房间同步、房主设置、PvP 等待）整备里还没有显示位置。
-- 3D 预览只在武器页接上（留洞放置 + 试拿）；其它页整备打开时预览照原样（不放置）。
+
+## 6. 支援编成 / 载具页（阶段 3，`src/support_pages.h`）
+
+- 数据：打开整备时拷一份 `room_ui` 刚从 ini 读的 `roommenu::Menu`，两页共用（`sp::Model`）；编辑一律走 `room_menu.h`（`detail::Change`、`AddSoldier`、`Materialise`、挂载增删），与旧菜单同一套解析 / 校验。H（代码）
+- 保存：每页 `Commit` 只写**自己那页**改过的单位（`CollectSave` → `roomui::SaveItems` → 按页过滤），一次 `SaveSupportLoadouts`（全成或全不成），成功后 `StartVariantGeneration`，与预设切换同一路径（`armory.cpp SaveSupport`）。离开页 / 关闭时有改动就弹「保存并关闭 / 放弃 / 返回」。预设切换后两页从 ini 重读（`sp::Reload`），未保存的编辑丢弃。H（代码；离线测试 `support_pages`）
+- 开火键列：喷气机 / 直升机等的挂载显示「随主武器循环」，坦克的显示「随主炮」，依据 `docs/multi-weapon-keys.md` 的默认 `key=0`（挂载跟主武器循环）。**M**：那份表里把部分挂载映射到额外键 3～6 / 副扳机的车型（派生种类 `<KIND>_K<key>`）在本页**没有区分**，仍显示默认文字。
+- 3D 视口：`room_ui.cpp DrivePreview` 每帧问 `armoryui::PreviewWanted`，变了才 `ShowPreview` / `SetViewPlacement`（相机为页面当前视角预设），否则 `HidePreview` + `ClearViewPlacement`。页面在视口处给 `Build` 留洞（`Hole`），模型在 3D 阶段画在所有 UI 之下。H（代码）；模型是否确实出现在洞里、位置 / 大小是否对：**L**（未实机）
+- 视口的限制（代码事实，H）：
+  - 原版视图一次只显示**一个模型**：小队页显示选中的那名士兵，不能 4 人同框；视口左上写明「只显示选中的士兵」。
+  - 有菜单版统一模型文件的只有 `VehicleUnified` 的喷气机机体（`docs/unified-model-re.md`）；坦克、机甲、其他载具没有，视口显示不透明框与「没有菜单模型」。乘员行显示乘员士兵。
+  - 挂载**不画在模型上**（菜单渲染器只挂 WeaponTable 行），视口里用文字列出挂载。
+  - 地面橙环与机甲 6 个槽位标注是 2D 叠加，位置由 `rp::Place` 投影原点算出：与模型是否对齐 **L**（未实机）。
+- 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自本机** `SupportCfg()` 与呼叫目录（`SupportCallKey` 按单位键匹配 → `Enabled` / `SupportCallPt` / `SupportCallPrice`）。H（代码）。房主的 `SupportDisabled` **没有同步给客人**（`host_settings.h` / `room_sync.h` 里没有这一项，2026-11-24 查），所以客人看到的是自己 ini 的规则，不一定是房主的。面板只读，不提供 `SupportDisabled` 编辑。H（代码检索）
+- 小队页签（第 1/2/3 小队）只响应鼠标点击；Z / C 在单列页面上切换视角预设。H（代码）
