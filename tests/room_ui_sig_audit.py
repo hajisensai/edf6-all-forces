@@ -75,8 +75,8 @@ check(consts['kHqGone'] + 17 + struct.unpack_from('<i', hq_gone, 13)[0] == 0x180
       '~HUiHQMain (inline in its deleting destructor) stores HUiHQMain\'s vtable first')
 check(img[0x89F562:0x89F567] == bytes.fromhex('ba10080000') and img[0x89F55C:0x89F560] == bytes.fromhex('40f6c501'),
       'HUiHQMain is deleted with its size 0x810 when flags bit 0 is set')
-check('void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); return screens[0].gone(self,flags); }' in src and
-      'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }' in src,
+check('void* __fastcall RoomGoneHook(unsigned char* self,unsigned flags) { armoryui::ScreenGone(self); NoteGone(self); return screens[0].gone(self,flags); }' in src and
+      'void* __fastcall HqGoneHook(unsigned char* self,unsigned flags) { armoryui::ScreenGone(self); NoteGone(self); AutoGone(self); return screens[1].gone(self,flags); }' in src,
       'both destructor hooks note the end and chain on')
 # The HQ's mission select pressed by the stock ButtonApply (docs/worldmap-hq-open-re.md §5.1; kAutoMissionSigs).
 def rel(at: int, size: int, disp: int) -> int:
