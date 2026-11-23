@@ -191,6 +191,44 @@ inline Verdict CheckEquip(const Catalog& c,const Loadout& l,int cls,int slot,int
                          l.levelCap,l.equipped);
 }
 
+// 一次写一个兵种的几个槽（整备方案切换，weapon_equip.cpp SetClassSlots）：want[s] 为 -1 的槽不动。重复按「写完以后」
+// 判：两槽互换也能写。某槽被拒（不在表里 / 没持有 / 超上限 / 类别不符 / 重复）就留原值，再重判其它槽（留下的原值可能
+// 和别的槽重复），直到不再变化；只会由「要写」退回「原值」，所以最多 kSlotsMost 轮。
+// facts(row, &category, &level, &owned)：false = 表里没有这一行（absent）。
+// verdict[s]：ok 要写，same 本来就是（want -1 的槽也记 same），其余是被拒的原因。
+struct ClassPlan {
+    std::array<int,kSlotsMost> slots{};              // 写完以后各槽的行
+    std::array<Verdict,kSlotsMost> verdict{};
+    int changed=0;                                   // slots 与 current 不同的槽数
+};
+template<class Facts>
+ClassPlan PlanClassSlots(const WeaponSlotRule* rules,std::size_t ruleCount,int cls,const std::array<int,kSlotsMost>& current,
+                         const std::array<int,kSlotsMost>& want,int levelCap,Facts&& facts) {
+    ClassPlan p;
+    p.slots=current;
+    p.verdict.fill(Verdict::same);
+    for(std::size_t s=0;s<want.size();++s)
+        if(want[s]>=0)p.slots[s]=want[s];
+    for(bool again=true;again;){
+        again=false;
+        for(std::size_t s=0;s<want.size();++s){
+            if(want[s]<0 || want[s]==current[s] || p.slots[s]!=want[s])continue;
+            std::array<int,kSlotsMost> probe=p.slots;
+            probe[s]=current[s];
+            int category=-1,level=0;
+            bool owned=false;
+            const Verdict v=facts(want[s],&category,&level,&owned)
+                ? CheckEquipRow(rules,ruleCount,cls,static_cast<int>(s),want[s],category,level,owned,levelCap,probe)
+                : Verdict::absent;
+            p.verdict[s]=v;
+            if(v!=Verdict::ok){p.slots[s]=current[s];again=true;}
+        }
+    }
+    for(std::size_t s=0;s<want.size();++s)
+        if(p.slots[s]!=current[s])++p.changed;
+    return p;
+}
+
 // ---- 搜索 ----
 
 inline wchar_t FoldChar(wchar_t ch) noexcept {

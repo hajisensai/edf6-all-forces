@@ -13,26 +13,22 @@ namespace crew::wequip {
 namespace {
 // EDF.dll 0x678CCB46 RVAs（weapon_equip_signatures.inc 逐一核对）。
 constexpr std::size_t kGameStatus=0x20B2890;      // GS*
-constexpr std::size_t kUiSystem=0x20B2960,kUiSystemAdjust=0x88;   // [0x20B2960] - 0x88（0x8BB972..0x8BB9DF）
-constexpr std::size_t kRowCount=0xE23F0,kGetRow=0xE1CF0,kFindRow=0xE1BA0,kLevelCap=0xD8850,kBroadcast=0x119D1B0;
+constexpr std::size_t kRowCount=0xE23F0,kGetRow=0xE1CF0,kFindRow=0xE1BA0,kLevelCap=0xD8850;
 constexpr std::size_t kGsTable=0x130,kTableRows=0x188;   // cfg = GS+0x130；[cfg+0x188] 为空：表未载入
 constexpr std::size_t kGsCapOn=0x14FC8;           // 字节：等级上限生效（0x8BC863）
 constexpr std::size_t kGsClass=0x6E90,kGsEquipped=0x6E98,kGsPlayerStride=0x3E60,kGsClassStride=0x18;
 constexpr std::size_t kRowName=0x00,kRowCategory=0x10,kRowLevel=0x20;
-constexpr unsigned kMsgSwapWeapon=4;               // 3D 预览：换某槽武器（docs/room-3d-preview-re.md）
 constexpr int kClasses=4;
 
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 using FindRowFn=int(__fastcall*)(void*,const wchar_t*);
 using LevelCapFn=int(__fastcall*)(void*);
-using BroadcastFn=void(__fastcall*)(void*,unsigned,void*);
 
 using Signature=CodeSignature;
 #include "weapon_equip_signatures.inc"
 
 bool ready=false;
-bool noSystemLogged=false;
 
 unsigned char* Gs() noexcept { return At<unsigned char*>(image,kGameStatus); }
 // cfg（表已载入）或空。
@@ -68,17 +64,6 @@ int* EquippedCell(int who,int cls,int slot) noexcept {
     unsigned char* at=gs+kGsEquipped+static_cast<std::size_t>(who)*kGsPlayerStride+static_cast<std::size_t>(cls)*kGsClassStride+
                       static_cast<std::size_t>(slot)*4;
     return reinterpret_cast<int*>(at);
-}
-// 原版 0x8BB920 的消息 4：{who, slot, row, class} 经 UI 系统广播（3D 预览 OnMessage 换该槽武器）。
-bool Broadcast(int who,int slot,int row,int cls) noexcept {
-    __try {
-        void* system=At<void*>(image,kUiSystem);
-        if(!system)return false;
-        std::int32_t payload[4]={who,slot,row,cls};
-        reinterpret_cast<BroadcastFn>(image+kBroadcast)(static_cast<unsigned char*>(system)-kUiSystemAdjust,kMsgSwapWeapon,
-                                                       payload);
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 }  // namespace
 
@@ -175,15 +160,37 @@ EquipResult Equip(int who,int cls,int slot,int row) noexcept {
     if(!cell || !Readable(cell,sizeof(int),true))return r;
     *cell=row;
     r.written=true;
-    if(CurrentClass(who)==cls){
-        r.previewNotified=Broadcast(who,slot,row,cls);
-        if(!r.previewNotified && !noSystemLogged){
-            noSystemLogged=true;
-            Log("WEQUIP no UI system at EDF+0x%zX: the 3D preview not told of the change",kUiSystem);
-        }
-    }
     Log("WEQUIP player %d class %d slot %d = row %d (%ls)",who,cls,slot,row,f.id);
     return r;
+}
+
+wlist::ClassPlan SetClassSlots(int who,int cls,const std::array<int,wlist::kSlotsMost>& want) noexcept {
+    wlist::ClassPlan p;
+    p.verdict.fill(wlist::Verdict::absent);
+    std::array<int,wlist::kSlotsMost> current{};
+    if(!ready || !ReadEquipped(who,cls,&current))return p;
+    int* cells=EquippedCell(who,cls,0);
+    if(!cells || !Readable(cells,sizeof(int)*wlist::kSlotsMost,true))return p;
+    p=wlist::PlanClassSlots(wlist::kWeaponSlotRules,std::size(wlist::kWeaponSlotRules),cls,current,want,LevelCap(),
+                            [](int row,int* category,int* level,bool* owned){
+                                RowFacts f;
+                                if(!ReadRow(row,&f))return false;
+                                *category=f.category;*level=f.level;*owned=Owned(row);
+                                return true;
+                            });
+    for(std::size_t s=0;s<current.size();++s)
+        if(p.slots[s]!=current[s])cells[s]=p.slots[s];
+    Log("WEQUIP player %d class %d: %d slots written",who,cls,p.changed);
+    return p;
+}
+
+bool SetClass(int who,int cls) noexcept {
+    unsigned char* gs=ready?Gs():nullptr;
+    if(!gs || who<0 || who>=kPlayers || cls<0 || cls>=kClasses)return false;
+    unsigned char* at=gs+kGsClass+static_cast<std::size_t>(who)*kGsPlayerStride;
+    if(!Readable(at,4,true))return false;
+    Put<std::int32_t>(at,0,cls);
+    return true;
 }
 
 }  // namespace crew::wequip

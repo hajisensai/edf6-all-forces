@@ -87,7 +87,9 @@ struct Ui {
         float aspect=16.f/9.f;
         std::int32_t savedSelect=0,savedHidden=0;
     } place;
-    struct Weapon { bool pending=false;std::int32_t slot=0,row=0,cls=0; } weapon;   // ShowPlayerWeapon, sent from the update
+    // ShowPlayerWeapon, sent from the update: one per slot (a preset switch shows all four in one frame), the latest
+    // row of a slot wins.
+    struct Weapon { bool pending=false;std::int32_t row=0,cls=0; } weapon[kWeaponSlots];
 } ui;
 bool installed=false;
 
@@ -153,12 +155,18 @@ void HoldVisible(unsigned char* view) noexcept {
     }
 }
 // ShowPlayerWeapon: msg 4 to the player's own model only (a support soldier shown: its weapons are the override's).
+// The only sender of msg 4 in the plugin (weapon_equip.cpp writes the slot, its callers tell the view here).
 void SendWeapon(unsigned char* view) noexcept {
-    if(!ui.weapon.pending || ui.want.on || ui.plan.locked)return;
-    ui.weapon.pending=false;
-    if(At<std::int32_t>(view,kViewShownClass)!=ui.weapon.cls)return;   // another class shown: its slots differ
-    std::int32_t m[4]={At<std::int32_t>(view,kViewPlayer),ui.weapon.slot,ui.weapon.row,0};
-    Send(view,kMsgWeapon,m);
+    if(ui.want.on || ui.plan.locked)return;
+    const std::int32_t shown=At<std::int32_t>(view,kViewShownClass);
+    for(std::int32_t slot=0;slot<kWeaponSlots;++slot){
+        Ui::Weapon& w=ui.weapon[slot];
+        if(!w.pending)continue;
+        w.pending=false;
+        if(shown!=w.cls)continue;   // another class shown: its slots differ
+        std::int32_t m[4]={At<std::int32_t>(view,kViewPlayer),slot,w.row,0};
+        Send(view,kMsgWeapon,m);
+    }
 }
 
 // --- The unified model file: the menu reads menu_animation_model (worker thread; reads the document only) ---
@@ -316,7 +324,8 @@ void Forget() noexcept {
     shared.armed=nullptr;shared.on=false;shared.applied=0;
     ReleaseSRWLockExclusive(&shared.lock);
     ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
-    ui.place.forced=false;ui.weapon.pending=false;
+    ui.place.forced=false;
+    for(auto& w:ui.weapon)w.pending=false;
 }
 
 std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
@@ -381,7 +390,7 @@ void SetViewPlacement(const ViewRect& rect,const ViewCamera& camera) noexcept {
 void ClearViewPlacement() noexcept { ui.place.on=false; }
 void ShowPlayerWeapon(int cls,int slot,int row) noexcept {
     if(slot<0 || slot>=kWeaponSlots || row<0)return;
-    ui.weapon={true,slot,row,cls};
+    ui.weapon[slot]={true,row,cls};
 }
 void TickPreview(bool menuOpen) noexcept {
     ui.menuOpen=menuOpen;
