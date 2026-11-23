@@ -22,8 +22,10 @@ bool Installed() noexcept;
 // Opened on screen object `self` over a copy of `units` (room_ui's menu, loaded from the ini just now through `read`;
 // the 支援编成 / 载具 pages edit the copy and save their own lines, src/support_pages.h). `read` reloads them after a
 // preset switch; `previewOn`: the 3D preview's hooks are in (room_preview.h InstallPreviewHooks). The keys held now
-// count as already down (the key that opened it does nothing inside).
-void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn) noexcept;
+// count as already down (the key that opened it does nothing inside). `tab` >= 0: opened at that page (armory.cpp
+// kPages: 0 武器, 1 支援编成, 2 载具, 3 任务), else at the last one.
+void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn,
+          int tab=-1) noexcept;
 bool IsOpen() noexcept;
 // One frame. `hasInput`: the screen would read input this frame (nothing of the game's over it); `toggleDown`: the
 // open / close key or pad combination is held (room_ui's KeysDown). Closed when the screen lost its input (a game
@@ -37,6 +39,13 @@ bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,ro
                    bool* own) noexcept;
 // The 对战设置 row picked (the room's PvP pages, room_ui.cpp's native dialogs): true once per request.
 bool TakePvpRequest() noexcept;
+// The world map asked (the HQ's 任务 tab chosen, or the 任务 page's world map row): true once per request; room_ui
+// presses the screen's own mission select button (closed already).
+bool TakeMapRequest() noexcept;
+// The world map's title bar (worldmap.cpp): a tab other than the map's clicked; the select is closed the stock way and
+// the next frame its screen (the HQ / the room) has its input, room_ui opens 整备 at `tab` (TakeOpenAsk: once, -1 none).
+void AskOpen(int tab) noexcept;
+int TakeOpenAsk() noexcept;
 // Closed at once, nothing committed (a mission starting, the screen forgotten, the plugin turned off).
 void Forget() noexcept;
 

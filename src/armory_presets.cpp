@@ -243,6 +243,22 @@ void Fill(armory::Presets* out) noexcept {
     }
 }
 
+int MissionPreset(const wchar_t* key) noexcept {
+    if(!readable || !key || !*key)return -1;
+    try { return preset::MissionPreset(book,Utf8(key)); } catch(...) { return -1; }
+}
+
+bool RememberMission(const wchar_t* key,int index,wchar_t* why,std::size_t cap) noexcept {
+    if(!readable){Say(why,cap,L"EDF6VehicleCrew.presets.ini did not read: presets off");return false;}
+    try {
+        const preset::Book before=book;
+        if(!preset::RememberMission(book,Utf8(key),index)){Say(why,cap,L"refused (no such preset, a bad key or the book full)");return false;}
+        if(!Save(why,cap)){book=before;return false;}
+        Log("ARMORY mission %ls starts with preset %d",key,index+1);
+        return true;
+    } catch(...) { Say(why,cap,L"out of memory");return false; }
+}
+
 bool Apply(const armory::Effects& fx,wchar_t* why,std::size_t cap) noexcept {
     if(fx.op==armory::Op::none)return true;
     if(!readable){Say(why,cap,L"EDF6VehicleCrew.presets.ini did not read: presets off");return false;}

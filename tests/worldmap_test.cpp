@@ -330,10 +330,13 @@ void Stage2() {
     Expect(ScrollFirst(5,4,18)==0 && ScrollFirst(40,0,18)==0 && ScrollFirst(40,20,18)==11 && ScrollFirst(40,39,18)==22,
            "the window follows the cursor, clamped at both ends");
     Expect(ScrollFirst(40,-1,18)==0,"no cursor: the top");
-    Expect(kPanelRows>=15,"the panel shows at least 14 missions and the keys");
-    Expect(PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*2.5f},5)==2 &&
-           PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+kPanelHeading+kPanelRow*6.5f},5)==-1 &&
-           PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+5.f},5)==-1 && PanelLineAt(Pixel{100.f,500.f},5)==-1,"the line under the pointer");
+    Expect(kPanelRows>=15 && kPanelLines==kPanelRows-3,"the panel shows 本关出动, at least 12 missions and the keys");
+    Expect(PanelLineAt(Pixel{kPanel.x0+10.f,kPanelFirstLine+kPanelRow*2.5f},5)==2 &&
+           PanelLineAt(Pixel{kPanel.x0+10.f,kPanelFirstLine+kPanelRow*6.5f},5)==-1 &&
+           PanelLineAt(Pixel{kPanel.x0+10.f,kPanel.y0+5.f},5)==-1 && PanelLineAt(Pixel{100.f,500.f},5)==-1 &&
+           PanelLineAt(Pixel{kPanel.x0+10.f,kLaunchRow.y0+5.f},5)==-1,"the line under the pointer (本关出动 is no line)");
+    Expect(PanelLineTop(0)==kLaunchRow.y1 && PanelLineTop(kPanelLines)+2.f*kPanelRow<=kPanel.y1,
+           "the lines under 本关出动, the two key rows under the last line");
     Expect(!OverPanels(Pixel{kPanel.x0+1.f,500.f}) && OverPanel(Pixel{kPanel.x0+1.f,500.f}) && !In(kPanel,kMapFocus),
            "the panel right of the kept windows");
     wchar_t num[8];
@@ -440,6 +443,34 @@ void Groups() {
            Near(cut,0.1f),"a route shorter than two pin diameters: no line; else its ends cleared");
 }
 
+// Stage 6 (docs/plan-2026-11-24-ui-rewrite.md): the 整备 tab bar and chips, 本关出动, the campaign's progress.
+void Stage6() {
+    namespace L=crew::armory::skin::layout;
+    // The tabs and chips are the 整备 screen's own rectangles: the same spot is the same tab / chip on both screens.
+    bool tabs=true;
+    for(int i=0;i<kTabCount;++i){
+        const auto r=L::Tab(i);
+        tabs=tabs && TitleTabAt(Pixel{(r.x0+r.x1)/2,(r.y0+r.y1)/2})==i;
+    }
+    Expect(tabs && TitleTabAt(Pixel{100.f,50.f})==-1 && TitleTabAt(Pixel{500.f,500.f})==-1,"a tab under the pointer");
+    const auto c2=L::Chip(2,3);
+    Expect(TitleChipAt(3,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==2 && TitleChipAt(0,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==-1,
+           "a chip under the pointer (none without presets)");
+    const auto last=L::Chip(7,8),tab3=L::Tab(kMapTab);
+    Expect(last.x1<=L::kTitle.x1 && L::Chip(0,8).x0>tab3.x1,"eight chips clear of the four tabs");
+    Expect(OverTitle(Pixel{1000.f,50.f}) && !OverTitle(Pixel{1000.f,200.f}),"the title bar");
+    Expect(kProgressBar.y0>=L::kTitle.y1 && kProgressBar.y1<=kOpenArea.y0 && kProgressBar.x1<=kOpenArea.x1,
+           "the progress bar between the title bar and the open area");
+    // 本关出动: the remembered preset while the book has it, else the one in force.
+    Expect(LaunchPreset(2,0,3)==2 && LaunchPreset(5,1,3)==1 && LaunchPreset(-1,1,3)==1 && LaunchPreset(-1,-1,3)==-1 &&
+           LaunchPreset(0,0,0)==-1,"the launch preset");
+    Expect(StepPreset(0,1,3)==1 && StepPreset(2,1,3)==0 && StepPreset(0,-1,3)==2 && StepPreset(-1,1,3)==0 &&
+           StepPreset(-1,-1,3)==2 && StepPreset(0,1,0)==-1,"本关出动 stepped, wrapping");
+    const int states[]={0,0,1,2,3,4,0};
+    const Progress p=CountProgress(states,7);
+    Expect(p.cleared==3 && p.shown==6 && Near(ProgressShare(p),0.5f) && ProgressShare(Progress{})==0.f,"the campaign's progress");
+}
+
 int main() {
     Table();
     Projection();
@@ -453,6 +484,7 @@ int main() {
     Input();
     Stage2();
     Groups();
+    Stage6();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

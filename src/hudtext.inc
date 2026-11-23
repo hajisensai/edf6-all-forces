@@ -1292,3 +1292,7 @@ HUDTEXT(spUnsavedTitle,L"Save the changes?",L"保存修改？",L"儲存修改？
 HUDTEXT(spUnsavedSave,L"Save and close",L"保存并关闭",L"儲存並關閉",L"保存して閉じる")
 HUDTEXT(spUnsavedDiscard,L"Discard and close",L"放弃修改并关闭",L"放棄修改並關閉",L"破棄して閉じる")
 HUDTEXT(spUnsavedBack,L"Back",L"返回",L"返回",L"戻る")
+HUDTEXT(mapLaunch,L"Deploy with",L"本关出动",L"本關出動",L"出撃プリセット")
+HUDTEXT(mapLaunchKeys,L"1-8 / click: preset",L"1-8 / 点击：选方案",L"1-8 / 點擊：選方案",L"1-8 / クリック：プリセット")
+HUDTEXT(mapLaunchNone,L"As equipped (no presets: make them in the armory)",L"当前装备（还没有方案：在整备里新建）",L"目前裝備（還沒有方案：在整備裡新建）",L"現在の装備（プリセットなし：整備で作成）")
+HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")

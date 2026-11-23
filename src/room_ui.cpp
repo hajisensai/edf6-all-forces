@@ -248,6 +248,7 @@ Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,kRoomGoneSlot,kRoomGone,true,nu
 bool nativeEntryOk=false;
 bool autoMissionOk=false;   // HqAutoMissionSelect at load and kAutoMissionSigs checked
 bool previewOk=false;   // room_preview.h InstallPreviewHooks: the 整备 pages' 3D viewport
+bool pressOk=false;         // kAutoMissionSigs checked (the stock ButtonApply press: 整备's 任务 tab opens the world map)
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into the screen's texts (re-laid only when it changes): the native button's description.
@@ -604,9 +605,9 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
     if(!done)st.written.key[slot]=~0ull;   // tried again next frame
 }
 // --- 整备 opened (armory.h) over st.menu loaded from the ini now (Opened) ---
-void OpenArmory(unsigned char* self) noexcept {
+void OpenArmory(unsigned char* self,int tab=-1) noexcept {
     Opened();
-    armoryui::Open(self,st.room,&st.menu,&IniRead,nullptr,previewOk);
+    armoryui::Open(self,st.room,&st.menu,&IniRead,nullptr,previewOk,tab);
 }
 // --- The 对战 pages as the game's dialogs (room_pvp_dialog.h pages, room_dialog.h windows) ---
 // Each frame while the 对战 pages are up: the dialog's pick taken; once the game has closed it (picked, or its own
@@ -672,6 +673,20 @@ void AutoOpenMission(unsigned char* self,void* ctx,bool menuBusy) noexcept {
     if(why)Log("HQAUTO the HQ %p: mission select not opened (%s): the HQ menu as it is",self,why);
     else Log("HQAUTO the HQ %p: its mission select opened (ButtonGotoSelectMission pressed the stock ButtonApply way)",self);
 }
+// 整备 asked for the world map (armory.h TakeMapRequest): the screen's own mission select button pressed the stock way,
+// after the screen's own update (as when the player confirms it). Disabled (a room guest before the host's pick): not.
+void OpenMissionSelect(unsigned char* self) noexcept {
+    if(!pressOk){Log("ROOMUI 整备 asked for the world map: the button press did not check out at load: not opened");return;}
+    const wchar_t* const name=st.room ? L"Button_Mission" : L"ButtonGotoSelectMission";
+    Shared button=Find(self,name);
+    bool enabled=false;
+    __try { enabled=button.object && button.control && static_cast<const unsigned char*>(button.object)[kComponentEnabled]; }
+    __except(EXCEPTION_EXECUTE_HANDLER){ enabled=false; }
+    const char* why=enabled ? Press(self,button) : "the button is missing or disabled";
+    Release(button);
+    if(why)Log("ROOMUI 整备 asked for the world map: %ls not pressed (%s)",name,why);
+    else Log("ROOMUI 整备 asked for the world map: %ls pressed (the stock ButtonApply way)",name);
+}
 void AutoGone(unsigned char* self) noexcept {
     unsigned char* tried=self;
     autoTried.compare_exchange_strong(tried,nullptr);
@@ -723,7 +738,14 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const Plan plan=PlanFrame(hasInput,st.menu.open);
     // The toggle only opens 整备 (its own keys close it, armory_logic.h); the 对战 dialogs own every key while up.
     if(plan.step && press.toggle && !st.menu.open && !armoryui::IsOpen() && !st.armoryTake)OpenArmory(self);
+    // The world map's title bar asked 整备 at a tab (its select closed the stock way): the first frame this screen has its
+    // input again.
+    if(hasInput && !st.menu.open && !armoryui::IsOpen() && !st.armoryTake) {
+        const int tab=armoryui::TakeOpenAsk();
+        if(tab>=0){OpenArmory(self,tab);Log("ROOMUI 整备 opened at tab %d from the world map",tab);}
+    }
     st.armoryTake=armoryui::Frame(self,hasInput,down.toggle);
+    const bool mapAsked=armoryui::TakeMapRequest();
     if(armoryui::TakePvpRequest()) {
         if(st.room && nativedialog::NativeDialogReady()) {
             st.menu.open=true;st.pvpPages=true;st.pvpNav=roompvp::Nav{};st.hasPick=false;
@@ -740,6 +762,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         std::memset(copy+kCtxInput,0,sizeof(void*));
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
+    if(mapAsked)OpenMissionSelect(self);
     if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open && !armoryui::IsOpen())) {
         OpenArmory(self);
         st.gate.latched=true;
@@ -839,8 +862,9 @@ bool InstallRoomUi() noexcept {
     if(!AllMatch(kDrawSigs,std::size(kDrawSigs),"the layout calls",kUntouched) ||
        !AllMatch(kScreenSigs,std::size(kScreenSigs),"the screens' updates",kUntouched))
         return false;
-    autoMissionOk=Cfg().hqAutoMissionSelect &&
-        AllMatch(kAutoMissionSigs,std::size(kAutoMissionSigs),"the HQ's mission select button press","the HQ opens on its menu as stock");
+    pressOk=AllMatch(kAutoMissionSigs,std::size(kAutoMissionSigs),"the HQ's mission select button press",
+                     "the HQ opens on its menu as stock; 整备's 任务 tab does not open the world map");
+    autoMissionOk=Cfg().hqAutoMissionSelect && pressOk;
     Log("HOOK roomui hq auto mission select=%d (HqAutoMissionSelect=%d)",autoMissionOk,Cfg().hqAutoMissionSelect);
     if(!Cfg().roomLoadout) {
         const bool hq=autoMissionOk && Chain(screens[1],reinterpret_cast<void*>(&HqAutoHook),reinterpret_cast<void*>(&HqGoneHook));
