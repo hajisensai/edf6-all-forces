@@ -36,7 +36,12 @@
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "specular": "textures/headlight_glass_n_s.jpg"
+   "specular": "textures/headlight_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/headlight_glass_c_a.png"
+   }
   },
   {
    "name": "wt_m163_vulcan_turret_c_us_camo_olive",
@@ -59,14 +64,24 @@
    "template": "v603_kyata_L",
    "albedo": "textures/us_m163_vulcan_track_c.jpg",
    "normal": "textures/us_m163_vulcan_track_n_n.jpg",
-   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png"
+   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/us_m163_vulcan_track_c_a.png"
+   }
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/us_m163_vulcan_track_c.jpg",
    "normal": "textures/us_m163_vulcan_track_n_n.jpg",
-   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png"
+   "occlusion": "textures/us_m163_vulcan_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/us_m163_vulcan_track_c_a.png"
+   }
   },
   {
    "name": "wt_net_f_c",
@@ -74,7 +89,12 @@
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
    "occlusion": "textures/net_f_ao_ao_occ.png",
-   "specular": "textures/net_f_n_s.jpg"
+   "specular": "textures/net_f_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/net_f_c_a.png"
+   }
   },
   {
    "name": "wt_m163_vulcan_ammo_c",
@@ -82,7 +102,12 @@
    "albedo": "textures/m163_vulcan_ammo_c.jpg",
    "normal": "textures/m163_vulcan_ammo_n_n.jpg",
    "occlusion": "textures/m163_vulcan_ammo_ao_ao_occ.png",
-   "specular": "textures/m163_vulcan_ammo_n_s.jpg"
+   "specular": "textures/m163_vulcan_ammo_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/m163_vulcan_ammo_c_a.png"
+   }
   }
  ],
  "parts": [

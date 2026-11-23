@@ -834,8 +834,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(tr('写入', 'Writing'), path)
     for name, why in skipped_xm:
         print(tr('  跳过', '  Skipped'), name, why)
-    print(tr('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble；只复制，不转换）……',
-             'Installing the world map\'s satellite base textures (the model pack\'s worldmap_tex, NASA Blue Marble; copied as they are)...'))
+    print(tr('安装世界地图的卫星底图（模型包的 worldmap_tex，NASA Blue Marble 全球瓦片；只复制，不转换）……',
+             'Installing the world map\'s satellite base map (the model pack\'s worldmap_tex, NASA Blue Marble tiles of the whole Earth; copied as it is)...'))
     written_wm, skipped_wm = worldmap_pack.install(game)
     for path in written_wm:
         print(tr('写入', 'Writing'), path)
@@ -1640,6 +1640,8 @@ def check_package() -> int:
     importlib.import_module('PIL.Image')
     sample = texfile.Image(1, 1, bytearray((33, 44, 55, 255)))
     assert texfile_accel.dxt1_dds(sample) == texfile.dxt1_dds(sample)
+    sample = texfile.Image(5, 3, bytearray(range(60)))   # the colour maps' BC7: native/bc7.cpp bundled, as bc7.py
+    assert texfile_accel.bc7_dds(sample) == texfile.bc7_dds(sample)
     import mdb
     assert mdb.native_cmpl(), 'edf6cmpl.dll not bundled: models would use the pure Python CMPL encoder'
     probe = bytes(range(256)) * 40 + b'EDF6' * 300

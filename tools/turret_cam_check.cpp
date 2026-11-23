@@ -211,6 +211,68 @@ void HighView() {
     std::printf("high view: %d placements\n",cases);
 }
 
+// 2026-11-21 ("俯瞰视角移动的时候会白屏一下……并且这个俯瞰视角会抖动。某些载具上"): the high view's heading is the gun's
+// traverse (tcam::GunHeading), steady under a landing that wobbles sideways near the hull and under the hull's roll, where
+// the hull-to-landing line (tcam::ShotHeading) swung the 105 m orbit by metres a frame; the collision pivot sits on the
+// optical ray at the eye (tcam::HighPivot); the eye's lift over a roof rises at once and comes down eased (tcam::HighLift).
+void HighViewSteady() {
+    int cases=0;
+    for(float hullYaw:{-2.0f,0.0f,0.9f})
+        for(float axis:{-1.2f,0.0f,0.5f,3.0f})
+            for(float roll:{0.0f,0.08f,-0.12f}) {
+                // The hull's rows: yawed by hullYaw (YawOf's sense: x = -sin, z = cos), rolled about its nose.
+                const float fx[3]={std::cos(hullYaw),0.0f,std::sin(hullYaw)},fz[3]={-std::sin(hullYaw),0.0f,std::cos(hullYaw)};
+                float m[16]={};
+                for(int i=0;i<3;++i){m[i]=fx[i]*std::cos(roll);m[8+i]=fz[i];}
+                m[1]=std::sin(roll);m[4]=0;m[5]=1;m[15]=1;
+                float level[16]={};for(int i=0;i<3;++i){level[i]=fx[i];level[8+i]=fz[i];}level[5]=1;
+                const float h=tcam::GunHeading(m,axis,7.0f),flat=tcam::GunHeading(level,axis,7.0f);
+                Expect(std::fabs(tcam::Wrap(flat-(hullYaw-axis)))<1e-4f || std::fabs(tcam::Wrap(flat-(hullYaw+axis)))<1e-4f,
+                       "the heading is the hull's turned by the traverse");
+                Expect(std::fabs(tcam::Wrap(h-flat))<0.01f,"the hull's roll does not turn the high view");
+                ++cases;
+            }
+    {   // A landing 5 m out (a gun laid down at the ground before the hull) wobbling 0.6 m sideways: the old line swung the eye.
+        const float hull[3]={0.0f,0.0f,0.0f};
+        float m[16]={};m[0]=1;m[5]=1;m[10]=1;m[15]=1;
+        float worst=0.0f,worstOld=0.0f,prev[3]={},prevOld[3]={};
+        for(int f=0;f<40;++f) {
+            const float wobble=(f%2 ? 0.6f : -0.6f);
+            const float at[3]={wobble,0.0f,5.0f};
+            float eye[3],look[3],eyeOld[3],lookOld[3];
+            tcam::OrbitPlace(at,tcam::GunHeading(m,0.0f,0.0f),90.0f,55.0f,0.0f,0.0f,eye,look);
+            tcam::OrbitPlace(at,tcam::ShotHeading(hull,at,0.0f),90.0f,55.0f,0.0f,0.0f,eyeOld,lookOld);
+            if(f){worst=std::fmax(worst,vec::Dist(eye,prev));worstOld=std::fmax(worstOld,vec::Dist(eyeOld,prevOld));}
+            std::memcpy(prev,eye,12);std::memcpy(prevOld,eyeOld,12);
+        }
+        Expect(worst<1.21f,"the eye moves no more than the landing's own wobble");
+        Expect(worstOld>10.0f,"(the hull-to-landing heading swung the eye by more than 10 m a frame: the shake reproduced)");
+        std::printf("high view wobble: eye step %.1f m (old heading %.1f m)\n",worst,worstOld);
+    }
+    for(float reach:{2.0f,0.4f}) {   // the pivot: on the optical ray, `reach` m from the eye (half way when closer)
+        const float eye[3]={10.0f,95.0f,-60.0f},focus[3]={30.0f,2.0f,40.0f};
+        float p[3];tcam::HighPivot(eye,focus,reach,p);
+        Expect(std::fabs(vec::Dist(eye,p)-reach)<1e-4f,"the collision pivot is at the eye");
+        float a[3]={p[0]-eye[0],p[1]-eye[1],p[2]-eye[2]},b[3]={focus[0]-eye[0],focus[1]-eye[1],focus[2]-eye[2]};
+        vec::Normalize(a);vec::Normalize(b);
+        Expect(vec::Dot(a,b)>0.999999f,"the collision pivot keeps the landing in the screen's centre");
+        const float close[3]={eye[0]+0.5f,eye[1],eye[2]};
+        tcam::HighPivot(eye,close,reach,p);
+        Expect(std::fabs(vec::Dist(eye,p)-0.25f)<1e-4f,"a point nearer than the pivot: half way");
+        ++cases;
+    }
+    {   // passing over a 40 m roof under a 30 m eye: up at once, down eased, nothing without ground
+        float lift=tcam::HighLift(30.0f,true,40.0f,tcam::kHighClear,0.0f,0.12f);
+        Expect(std::fabs(lift-16.0f)<1e-4f,"the eye is raised over a roof at once");
+        const float next=tcam::HighLift(30.0f,true,0.0f,tcam::kHighClear,lift,0.12f);
+        Expect(next<lift && next>lift*0.8f,"past the roof the eye comes down eased");
+        Expect(tcam::HighLift(30.0f,false,0.0f,tcam::kHighClear,0.0f,0.12f)==0.0f,"no ground under the eye: no lift");
+        Expect(tcam::HighLift(90.0f,true,0.0f,tcam::kHighClear,0.0f,0.12f)==0.0f,"an eye high over the ground: no lift");
+        ++cases;
+    }
+    std::printf("high view steadiness: %d cases\n",cases);
+}
+
 // --- the high view's observed point (tcam::HighFocus) ---
 // A gun: AmmoSpeed (m/frame), AmmoGravityFactor, AmmoAlive (frames); its muzzle `up` m over flat ground (y = 0).
 struct Gun { const char* name; float speed,factor; int alive; float up; };
@@ -361,6 +423,7 @@ int main() {
     Sweep();
     Rigs();
     HighView();
+    HighViewSteady();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }

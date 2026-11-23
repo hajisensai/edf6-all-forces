@@ -81,6 +81,9 @@ SERIES: tuple[tuple[str, str, str, int, tuple[tuple[str, str], ...]], ...] = (
     ('xminfantry', 'X-Morph 步兵', 'Ranger', 0, RANGER_RIFLES),
 )
 KIND_NAMES = tuple(k[0] for k in SERIES)
+# The weapon table categories of the Fencer's four hand slots (docs/loadout-re.md 1.2: Slot1L/1R/2L/2R take 200-205;
+# 206-209 are the two support-equipment slots).
+FENCER_HANDS = range(200, 206)
 
 
 def rows() -> list[dict]:
@@ -125,7 +128,20 @@ def render() -> str:
     for r in table():
         lines.append(f'    {{{r["kind"]},{r["series"]},{r["id"]},{r["prev"]},{r["level"]},L"{r["sgo"]}"}},   // {r["name"]}')
     lines.append('};')
+    lines += ['// Every Fencer hand weapon (docs/weapons.csv class Fencer, categories 200-205: what the hand slots Slot1L/1R/2L/2R',
+              '// take), {weapon id, WEAPONTABLE name}: what a support Fencer may hold in either hand (npc_tier.h PickHands,',
+              '// support_loadout.h ParseSupportPreset #R:L; docs/feature-npc-weapon-tier.md 2.5).',
+              'inline constexpr HandRow kFencerHands[]={']
+    for w in fencer_hands():
+        lines.append(f'    {{{w["id"]},L"{w["sgo_name"]}"}},   // {w["name_en"]}')
+    lines.append('};')
     return '\n'.join(lines) + '\n'
+
+
+def fencer_hands() -> list[dict]:
+    """The Fencer's hand weapons (the categories FENCER_HANDS), by id."""
+    return sorted((w for w in rows() if w['class'] == 'Fencer' and int(w['category']) in FENCER_HANDS),
+                  key=lambda w: int(w['id']))
 
 
 def render_doc() -> str:

@@ -220,8 +220,10 @@ def palette(colours: dict[str, Colour]) -> tuple[dict[str, tuple[float, float]],
             row = (y * PALETTE + cx * CELL) * 4
             for k, rgba in px.items():
                 img[k][row:row + CELL * 4] = rgba * CELL
-    tex = {name: texfile.dxt1_dds(texfile.Image(PALETTE, PALETTE, img[k]))
-           for name, k in ((TEX_ALBEDO, 'df'), (TEX_RMO, 'rmo'), (TEX_RML, 'rml'))}
+    import texfile_accel
+    tex = {name: encode(texfile.Image(PALETTE, PALETTE, img[k]))     # the colour map BC7 (docs/model-quality-1121-bc7.md)
+           for name, k, encode in ((TEX_ALBEDO, 'df', texfile_accel.bc7_dds), (TEX_RMO, 'rmo', texfile.dxt1_dds),
+                                   (TEX_RML, 'rml', texfile.dxt1_dds))}
     tex[TEX_NORMAL] = texfile.solid_bc5(FLAT_NORMAL)
     return uv, tex
 

@@ -360,10 +360,14 @@ def spec(kind: str) -> wt.Spec:
         c = np.asarray(_wheel_origin(w))
         hit(w, c - 0.15, c + 0.15)
     arrays.update(carr)
+    # A launcher's tube mouths ride the guns' elevation hinge (cannon_l: it lays them, no recoil travel): the round
+    # leaves along its holder bone's forward row (muzzle mode 0, 0x633DD0). On the turret the Patriot's PAC-3 left level
+    # while its canister pack stood raised at the target (the player, 2026-11-21: 「类似通古斯卡的导弹没有跟随发射架方向
+    # 射出去」).
     info = {'format': wt.FORMAT, 'kind': kind, 'title': src.title, 'source': src.source,
             'materials': materials, 'parts': parts, 'origins': origins, 'visual_bones': visual, 'wheels': {},
             'muzzles': {side: [{'bone': 'cannon_slide_l', 'point': np.asarray(p).tolist()}]
-                        for side, p in src.mouths.items()} | ({'missiles': [{'bone': 'cannon_main', 'point': np.asarray(p).tolist()}
+                        for side, p in src.mouths.items()} | ({'missiles': [{'bone': 'cannon_l', 'point': np.asarray(p).tolist()}
                                                                              for p in src.tubes]} if src.tubes else {}),
             'ejections': {side: {'bone': 'cannon_slide_l', 'point': cradle.tolist()} for side in ('left', 'right')},
             'collision': collision, 'triangles': int(sum(p['triangles'] for p in parts)),

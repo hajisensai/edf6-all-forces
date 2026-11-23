@@ -29,14 +29,24 @@
    "albedo": "textures/net_f_c.jpg",
    "normal": "textures/net_f_n_n.jpg",
    "occlusion": "textures/net_f_ao_ao_occ.png",
-   "specular": "textures/net_f_n_s.jpg"
+   "specular": "textures/net_f_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/net_f_c_a.png"
+   }
   },
   {
    "name": "wt_side_glass_c",
    "template": "v603_body",
    "albedo": "textures/side_glass_c.jpg",
    "normal": "textures/side_glass_n_n.jpg",
-   "specular": "textures/side_glass_n_s.jpg"
+   "specular": "textures/side_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/side_glass_c_a.png"
+   }
   },
   {
    "name": "wt_pzh_2000_gun_c_ger_camo_bronzegruen",
@@ -68,7 +78,12 @@
    "albedo": "textures/mg_mg_42_c.jpg",
    "normal": "textures/mg_mg_42_n_n.jpg",
    "occlusion": "textures/mg_mg_42_ao_ao_occ.png",
-   "specular": "textures/mg_mg_42_n_s.jpg"
+   "specular": "textures/mg_mg_42_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/mg_mg_42_c_a.png"
+   }
   },
   {
    "name": "wt_pzh_2000_turret_c",
@@ -76,7 +91,12 @@
    "albedo": "textures/pzh_2000_turret_c.jpg",
    "normal": "textures/pzh_2000_turret_n_n.jpg",
    "specular": "textures/pzh_2000_turret_n_s.jpg",
-   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png"
+   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/pzh_2000_turret_c_a.png"
+   }
   },
   {
    "name": "wt_pzh_2000_add_c",
@@ -92,7 +112,12 @@
    "albedo": "textures/schutzenpanzer_puma_igelpanzerung_c.jpg",
    "normal": "textures/schutzenpanzer_puma_igelpanzerung_n_n.jpg",
    "occlusion": "textures/schutzenpanzer_puma_igelpanzerung_ao_ao_occ.png",
-   "specular": "textures/schutzenpanzer_puma_igelpanzerung_n_s.jpg"
+   "specular": "textures/schutzenpanzer_puma_igelpanzerung_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/schutzenpanzer_puma_igelpanzerung_c_a.png"
+   }
   },
   {
    "name": "wt_schutzenpanzer_puma_igelpanzerunga_cap_c",
@@ -100,21 +125,36 @@
    "albedo": "textures/schutzenpanzer_puma_igelpanzerunga_cap_c.jpg",
    "normal": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_n.jpg",
    "occlusion": "textures/schutzenpanzer_puma_igelpanzerunga_cap_ao_ao_occ.png",
-   "specular": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_s.jpg"
+   "specular": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/schutzenpanzer_puma_igelpanzerunga_cap_c_a.png"
+   }
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/ger_pzh_2000_track_c_a.png"
+   }
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
    "albedo": "textures/ger_pzh_2000_track_c.jpg",
    "normal": "textures/ger_pzh_2000_track_n_n.jpg",
-   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/ger_pzh_2000_track_c_a.png"
+   }
   },
   {
    "name": "wt_headlight_glass_c",
@@ -129,7 +169,12 @@
    "template": "v603_body",
    "albedo": "textures/headlight_glass_c.jpg",
    "normal": "textures/headlight_glass_n_n.jpg",
-   "specular": "textures/headlight_glass_n_s.jpg"
+   "specular": "textures/headlight_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.15,
+    "map": "textures/headlight_glass_c_a.png"
+   }
   },
   {
    "name": "wt_ger_pzh_2000_phys_track_c",
@@ -145,7 +190,12 @@
    "albedo": "textures/chain_a_c.jpg",
    "normal": "textures/chain_a_n_n.jpg",
    "occlusion": "textures/_white_ao_ao_occ.png",
-   "specular": "textures/chain_a_n_s.jpg"
+   "specular": "textures/chain_a_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/chain_a_c_a.png"
+   }
   },
   {
    "name": "wt_mg_browning_m2hb_ammo_c",
@@ -153,7 +203,12 @@
    "albedo": "textures/mg_browning_m2hb_ammo_c.jpg",
    "normal": "textures/mg_browning_m2hb_ammo_n_n.jpg",
    "occlusion": "textures/mg_browning_m2hb_ammo_ao_ao_occ.png",
-   "specular": "textures/mg_browning_m2hb_ammo_n_s.jpg"
+   "specular": "textures/mg_browning_m2hb_ammo_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/mg_browning_m2hb_ammo_c_a.png"
+   }
   }
  ],
  "parts": [

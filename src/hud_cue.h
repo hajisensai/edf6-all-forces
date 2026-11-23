@@ -8,6 +8,7 @@
 #pragma once
 #include "cockpit_fields.inc"
 #include "reticle.h"
+#include <cmath>
 #include <cstring>
 
 namespace crew::hudcue {
@@ -92,10 +93,48 @@ constexpr float CellLoad(int ammo,float reload,float cycleSec,float cycle) noexc
                    : cycleSec>=0.0f ? (cycle<0.0f ? 0.0f : cycle>1.0f ? 1.0f : cycle) : -1.0f;
 }
 
+// Where on the vehicle a weapon is, m to the left of its middle (+ left; SideOrder's `side`), measured in the hull's own
+// frame so that no turn of the turret or of the view moves it (the user, 2026-11-21: 「载具的挂载不要跟随视角变位置」).
+// `muzzle`, `bore`: the weapon's first muzzle and its direction; `centre`: the vehicle's origin; `hullLeft`, `hullUp`:
+// the hull matrix's rows 0 and 1 (turretcam.h: row 0 its left, row 1 its up). `pivot`: the world origin of the bone the
+// seat's yaw axis turns the weapon about (weapon_mount.h YawPivot), or null for a weapon fixed to the hull.
+//  - Hull-fixed: (muzzle - centre) . hullLeft.
+//  - On a turret: (muzzle - pivot) . across + (pivot - centre) . hullLeft, `across` = hullUp x bore (the bore's level
+//    left in the hull, which turns with the turret). The first term turns with the gun round the pivot and so stays;
+//    the second is where the pivot sits on the hull. Across the bore alone (2026-10-21's fix) a turret whose yaw axis is
+//    off the hull's origin carried the axis's offset round with it: a gun behind the origin read left with the turret
+//    turned right, right with it turned left, and the strip regrouped as the mouse turned the turret.
+//  - A bore straight up or down (no level left) is read across `hullLeft`.
+// 0 when the inputs give no finite answer (SideOrder's "unknown").
+inline float HullSide(const float* muzzle,const float* bore,const float* pivot,const float* centre,const float* hullLeft,
+                      const float* hullUp) noexcept {
+    const auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
+    const auto unit=[&](float* a){
+        const float l=a[0]*a[0]+a[1]*a[1]+a[2]*a[2];
+        if(!(l>1e-6f) || !(l<1e30f))return false;
+        const float s=1.0f/std::sqrt(l);a[0]*=s;a[1]*=s;a[2]*=s;return true;
+    };
+    float left[3]={hullLeft[0],hullLeft[1],hullLeft[2]};
+    if(!unit(left))return 0.0f;
+    float side;
+    if(!pivot) {
+        const float off[3]={muzzle[0]-centre[0],muzzle[1]-centre[1],muzzle[2]-centre[2]};
+        side=dot(off,left);
+    } else {
+        float across[3]={hullUp[1]*bore[2]-hullUp[2]*bore[1],hullUp[2]*bore[0]-hullUp[0]*bore[2],hullUp[0]*bore[1]-hullUp[1]*bore[0]};
+        if(!unit(across)){across[0]=left[0];across[1]=left[1];across[2]=left[2];}
+        const float arm[3]={muzzle[0]-pivot[0],muzzle[1]-pivot[1],muzzle[2]-pivot[2]};
+        const float seat[3]={pivot[0]-centre[0],pivot[1]-centre[1],pivot[2]-centre[2]};
+        side=dot(arm,across)+dot(seat,left);
+    }
+    return std::isfinite(side) ? side : 0.0f;
+}
+
 // The order the loadout strip lays a seat's weapons out in, left to right on the screen (the user, 2026-10-12, a Nix:
 // 「左侧武器放在右边右侧武器放在左边」: the seat lists its right arm's gun first, and the strip drew the list's order). `side`
-// is each weapon's muzzle off the vehicle's middle across its own bore, m (+ its left: vhud.cpp SideOf; 0 unknown): not
-// across the view, which the free-look key turns round the vehicle (2026-10-21: the strip reordered while looking round).
+// is each weapon's muzzle off the vehicle's middle in the hull's frame, m (+ its left: HullSide, vhud.cpp SideOf; 0
+// unknown): not across the view, which the free-look key turns round the vehicle (2026-10-21: the strip reordered while
+// looking round), nor across the bore alone, which the turret turns with the mouse (2026-11-21).
 // Those more than kSideApart to the left first, then those about the middle, then those to the right, each group in the
 // seat's own order (stable: a turret's stores on one gun keep their R order, and a seat with no muzzle read is as listed).
 constexpr float kSideApart=0.5f;

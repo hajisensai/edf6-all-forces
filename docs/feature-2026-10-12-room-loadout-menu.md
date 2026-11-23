@@ -688,3 +688,12 @@ pending 清空后仍保留两者。配置来源上限增为 1666，另加房主�
 
 生成 / 清理、无 pending 时的配置预载、旧成员加入 / 离开的清单切换、旧 peer 首次计划保留颜色及真实 Bloom 假阳性拒绝均有通过的
 定向离线回归。详见 [NPC 背包位武器 §5](npc-backpack-re.md#5-联机协议)；实际 EOS 节流、房主迁移及双机投掷效果仍需实测。
+
+## 2026-11-21 每个成员的配置用于他自己的呼叫（房间协议 12，取代上面的房主清单）
+
+玩家：「要能在房间里面用界面调npc、挂载等」。此前联机只有房主配置生效、客机标「本局以房主配置为准」；现在每个成员公布自己的配置行
+`EDF6X_VCCFG`（+ `EDF6X_VCCFG1..3`，`src/member_config.h` 编码、`room_sync_logic.h` 分段），每台机器生成全房间成员配置的变体文件并集，
+房主规划某成员的呼叫时用该成员的配置（`support_dispatch.cpp PlanForRequester` → `roomsync::RoomMemberConfig`）。
+上文的 `EDF6X_VCVARIANTS*` 房主清单、`EDF6X_VCPACKS` 背包协商、`HostList` / `ForEachRoomHostVariant`（现 `ForEachRoomVariant`）、
+`kListBudget` 与客机「以房主配置为准」均已删除。停用（`SupportDisabled`）仍是房主规则。
+详见 [feedback-2026-11-21-worldmap-room.md](feedback-2026-11-21-worldmap-room.md)。

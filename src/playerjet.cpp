@@ -1215,16 +1215,14 @@ void Proximity(PJet& j,const float* pos,float clear) noexcept {
     j.gpws=GpwsOf(j.impactIn,rising);
 }
 
-// The caught jet's speed for its boarding (see kCatchAfterMs).
-// The catch's jet flying in (see kCatchFrom): the jet, where it makes for (under the parachuting player, led by their
-// drift), its speed there.
-// `drift`: the player's velocity (the formation's); `heading`: the way it flew in, level (its nose in the formation).
-struct CatchFlight { const void* v; float target[3],speed; float drift[3],heading[3]; bool hasDoor=false; } catchFlight{};
-// The catch's last stretch (the user, 2026-10-05: "the catch jet twitches under my feet": it made straight for its
-// point at full speed and overshot it every frame): within kCatchHoming it flies in formation, the player's drift
-// plus a correction at kCatchGain of the gap, no more than a stop at kCatchBrake would allow, its nose level along
-// its heading.
-constexpr float kCatchGain=1.5f,kCatchBrake=40.0f;
+// The catch's jet flying in (see kCatchAfterMs): the jet, and where its body makes for (its door on the parachuting
+// player, led one physics step: pjet_catch.h CatchDoor). It flies there as the wing it is (AutoFly: Air), at its own
+// speed; passing within pjet::kCaptureRange of the player it takes them aboard (Catch). No formation: until 2026-11-21
+// its last kCatchHoming m wrote its velocity whole (the parachute's drift plus a closing term, its nose held on a fixed
+// heading): a jet at 100+ m/s took a new speed and direction in one frame and slid sideways and down under the player
+// (test hub #42, docs/feedback-2026-11-21-landing-slide.md).
+// `extending`: going straight on to have room to turn in (pjet_catch.h CatchAim).
+struct CatchFlight { const void* v; float target[3]; bool hasDoor=false,extending=false; } catchFlight{};
 // The board press is retried; a refusal says which of the stock button's gates holds (docs/rescue-re.md: +0x128
 // bit 0, +0x5D0 bit 2, +0x39C) every kCatchSayMs.
 constexpr ULONGLONG kCatchSayMs=2000;
@@ -1252,8 +1250,8 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.hasUp=false;j.hasAim=false;
     std::memcpy(j.vel,j.measured,12);
     j.throttle=air ? 0.5f : 0.0f;
-    if(j.autopilot) {   // the catch's jet: the player takes it over in flight, as fast as it flew in
-        for(int i=0;i<3;++i)j.vel[i]=catchFlight.heading[i]*catchFlight.speed;   // (its formation speed would stall)
+    if(j.autopilot) {   // the catch's jet: the player takes it over in flight, at the velocity its own flight left it
+        std::memcpy(j.vel,j.sent,12);
         j.phase=Phase::air;j.throttle=1.0f;j.autopilot=false;
         catchFlight=CatchFlight{};
     }
@@ -1288,8 +1286,9 @@ enum class Eject { none, pending, chute };
 // It guides that aircraft to the native boarding door; without one the existing parachute continues.
 // Aircraft are never created in the air as a substitute for a missing pilot or rescue service.
 constexpr ULONGLONG kCatchAfterMs=4000,kCatchMostMs=45000;
-constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchOver=40.0f,kCatchFloor=30.0f;
+constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchFloor=30.0f;
 constexpr float kCatchHoming=250.0f;
+constexpr float kCatchEase=150.0f;   // m of run over which its dive toward the player eases off onto kCatchFloor
 struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
     float heading[3],speed;          // the jet left: its nose, its speed (the catch)
@@ -1336,6 +1335,11 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     const float* hv=reinterpret_cast<const float*>(h+kHumanVel);
     if(!bail.caught) {
         if(!Cfg().playerJetCatch || ms-bail.at<kCatchAfterMs || bail.catchWith==pjet::kCatchNone)return;
+        if(!BoardingReady()) {   // its capture is the boarding gun's way in (Catch below): without it no jet is sent
+            bail.catchWith=pjet::kCatchNone;
+            Log("PJET catch: the boarding hook is not in (no capture to take the player aboard); the parachute goes on");
+            return;
+        }
         const float clear=GroundClearance(p);
         if(clear!=kNoGround && clear<kCatchClear) {
             bail.catchWith=pjet::kCatchNone;
@@ -1348,12 +1352,7 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         bail.catchWith=pjet::kCatchNone;
         if(!rescue){Log("PJET catch: no existing crewed aircraft available; parachute continues");return;}
         unsigned char* const v=rescue->Vehicle();
-        float f[3]={rescue->m.vel[0],0.0f,rescue->m.vel[2]};
-        if(!Normalize(f)){const auto* basis=reinterpret_cast<const float*>(v+kMatrix);f[0]=basis[8];f[2]=basis[10];}
-        if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
-        const Kind* const k=KindOf(v);
-        const float speed=std::fmax(Len(rescue->m.vel),(k ? k->rotate : 75.0f)+kCatchOver);
-        catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]},speed,{hv[0],hv[1],hv[2]},{f[0],0.0f,f[2]}};
+        catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]}};
         catchReachAt=0;bail.caught=ObjRef::Of(v);bail.caughtAt=ms;
         Log("PJET catch: existing crewed aircraft %p sent to the parachuting player",v);
         return;
@@ -1369,32 +1368,40 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         bail.caught=ObjRef{};bail.catchWith=pjet::kCatchNone;bail.self=false;catchFlight=CatchFlight{};
         return;
     }
-    // Only the native boarding point is a valid rendezvous. Relative motion predicts its next physics step, while
-    // the player's velocity (minus the door's rotation) is supplied separately as formation feed-forward.
+    // Only the native boarding point is a valid rendezvous: the body's target is where its door is on the player, one
+    // physics step ahead of their relative motion (pjet_catch.h CatchDoor).
     const float* vp=reinterpret_cast<const float*>(v+kPosition);
     float seatAt[3],reach=0.0f;
     catchFlight.hasDoor=SeatPoint(v,0,seatAt,&reach) && reach>0.0f;
     if(!catchFlight.hasDoor) {
-        // No door to read (its seats not set up yet, or unreadable): no boarding and no formation on a guess, but the
+        // No door to read (its seats not set up yet, or unreadable): no boarding on a guess, but the
         // jet still flies (AutoFly's Air) for the player as it was made to: its body kCatchBelow under them.
-        for(int i=0;i<3;++i){catchFlight.target[i]=p[i];catchFlight.drift[i]=hv[i];}
+        std::memcpy(catchFlight.target,p,12);
         catchFlight.target[1]-=kCatchBelow;
         return;
     }
     const PJet* j=Find(v);
     const float zero[3]={0.0f,0.0f,0.0f};
-    pjet::CatchDoor(p,hv,vp,seatAt,j ? j->vel : zero,j ? j->omega : zero,GameStep(0),catchFlight.target,catchFlight.drift);
+    pjet::CatchDoor(p,hv,vp,seatAt,j ? j->vel : zero,j ? j->omega : zero,GameStep(0),catchFlight.target);
     const float d[3]={p[0]-seatAt[0],p[1]-seatAt[1],p[2]-seatAt[2]};
     const float gap=Len(d);
-    if(gap>=reach) {
+    if(!pjet::CaptureDoor(gap,reach)) {
         if(ms-catchSaidAt>kCatchSayMs) {
             catchSaidAt=ms;
-            Log("PJET catch: native door gap %.2f m (reach %.2f), player y %.2f door y %.2f body y %.2f",gap,reach,p[1],seatAt[1],vp[1]);
+            Log("PJET catch: native door gap %.2f m (capture %.1f m), player y %.2f door y %.2f body y %.2f",gap,
+                std::fmax(reach,pjet::kCaptureRange),p[1],seatAt[1],vp[1]);
         }
         return;
     }
-    if(!catchReachAt){catchReachAt=ms;Log("PJET catch: the seat in reach (%.1f m, reach %.1f m): boarding",gap,reach);}
-    PressBoardButton(h);
+    // Passing within its capture: the player is taken into its seat (boarding.cpp BoardingRequest: put on the seat's
+    // riding point and the board button pressed, until seated or its try is out), the jet flying on as it flies.
+    if(!catchReachAt){catchReachAt=ms;Log("PJET catch: the door passes %.1f m from the player (capture %.1f m): boarding",gap,
+                                          std::fmax(reach,pjet::kCaptureRange));}
+    if(!BoardingUnderway() && !BoardingRequest(v)) {   // refused (logged by boarding.cpp): nothing will take them in
+        Log("PJET catch: the capture was refused; the catch is off, the parachute goes on");
+        bail.caught=ObjRef{};bail.catchWith=pjet::kCatchNone;bail.self=false;catchFlight=CatchFlight{};
+        return;
+    }
     if(ms-catchReachAt>1000 && ms-catchSaidAt>kCatchSayMs) {
         catchSaidAt=ms;
         Log("PJET catch: not aboard yet, %.1f m from the seat; gates +0x128=%02x +0x5D0=%08x +0x39C=%d",gap,
@@ -1616,39 +1623,45 @@ float Measure(PJet& j,const float* pos,ULONGLONG ms) noexcept {
     return dt;
 }
 
-// The catch's jet with no one aboard (see kCatchFrom): the player jet's own flight (Air) with the mouse aim's steering
-// at the target, the throttle full until kCatchHoming, then the speed it flies in at; its last kCatchHoming m in
-// formation on the door (Catch). Never under kCatchFloor over the ground. With no door known (Catch: a jet just made,
-// or one whose seat cannot be read) it is the flight all the way, its terrain, stall and crash with it: never a frame
-// without one, its velocity left as it was.
+// The catch's jet with no one aboard (see kCatchAfterMs): the player jet's own flight (Air) with the mouse aim's
+// steering at the target (where its door is on the player), the throttle full until kCatchHoming, then 0.7: a pass at
+// them at its own speed, the player captured into its seat as it goes by (Catch), round again if it misses. Never under
+// kCatchFloor over the ground. The flight all the way, its terrain, stall and crash with it: never a frame without one,
+// and never a velocity it did not fly to (its first frame goes on from the velocity its NPC flight had, jet.cpp's entry).
 void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     if(!CrewedPilot(v)){j.autopilot=false;j.active=false;return;}
     if(!j.autopilot) {
         j.autopilot=true;j.driven=false;j.phase=Phase::air;j.hasUp=false;
-        const float* m=reinterpret_cast<const float*>(v+kMatrix);
-        for(int i=0;i<3;++i)j.vel[i]=m[8+i]*catchFlight.speed;
+        // An NPC's aircraft: the velocity its flight gave it (a player jet the player just left keeps the one it flew).
+        if(const jet::Jet* const e=jet::FindJet(v);e && std::isfinite(e->m.vel[0]+e->m.vel[1]+e->m.vel[2]))std::memcpy(j.vel,e->m.vel,12);
         j.throttle=1.0f;j.keys=true;j.mouseFlies=true;
-        Log("PJET catch: v=%p on the autopilot",v);
+        Log("PJET catch: v=%p on the autopilot at %.0f m/s",v,Len(j.vel));
     }
     bool water=false;
     const float clear=FloorClear(j,v,pos,Clear(pos,&water));
     float to[3]={catchFlight.target[0]-pos[0],catchFlight.target[1]-pos[1],catchFlight.target[2]-pos[2]};
     if(clear!=kNoGround && clear<kCatchFloor && to[1]<0.0f)to[1]=0.0f;   // not into the ground
     const float dist=Len(to);
-    if(Normalize(to)){std::memcpy(j.aim,to,12);j.hasAim=true;}
-    j.throttle=dist>kCatchHoming ? 1.0f : 0.7f;
+    // Its pass planned on its tightest turn at its lift now (Air: maxG, less under its corner speed; pjet_catch.h
+    // CatchAim: straight on while they are inside that turn, banked turns, no loops). Full throttle
+    // only on its way straight at them from beyond kCatchHoming; turning, and its pass, at its corner speed (its
+    // tightest turn: at full throttle a fighter ran up to 250 m/s, its turn 1 km across, and never came round).
+    const float speed=Len(j.vel),share=j.kind ? std::fmin(1.0f,speed/j.kind->corner) : 1.0f;
+    const float radius=j.kind ? speed*speed/std::fmax(j.kind->maxG*kG*share*share,1.0f) : 0.0f;
+    const bool onIt=pjet::CatchAim(j.vel,to,radius,&catchFlight.extending,j.aim);j.hasAim=true;
+    if(clear!=kNoGround) {   // its floor: its dive eased off over kCatchEase m of run toward kCatchFloor, under it a climb
+        const float run=std::hypot(j.aim[0],j.aim[2]),least=Clamp((kCatchFloor-clear)/kCatchEase,-pjet::kCatchSlope,pjet::kCatchSlope);
+        if(run>1e-4f && j.aim[1]/run<least){j.aim[1]=least*run;Normalize(j.aim);}
+    }
+    const float corner=j.kind ? Clamp((j.kind->corner-j.kind->minAir)/(j.kind->top-j.kind->minAir),0.0f,1.0f) : 0.7f;
+    j.throttle=onIt && dist>kCatchHoming ? 1.0f : corner;
     Stick s{};
     s.keys=true;
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     j.clear=clear;j.climb=j.vel[1];
-    if(catchFlight.hasDoor && dist<kCatchHoming) {   // formation is not an airborne wing: no Air's stall floor or landing/crash step
-        pjet::CatchVelocity(pos,catchFlight.target,catchFlight.drift,catchFlight.speed,kCatchGain,kCatchBrake,j.vel);
-        if(clear!=kNoGround)j.vel[1]=std::fmax(j.vel[1],std::fmin((kCatchFloor-clear)/dt,kUnderClimb));
-        const float up[3]={0.0f,1.0f,0.0f};
-        if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,BodyCap(*j.kind),j.omega);
-    } else Air(j,v,s,pos,clear,water,dt,ms);
+    Air(j,v,s,pos,clear,water,dt,ms);
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);
@@ -1783,6 +1796,38 @@ void ChuteCanopyFree(const ObjRef& canopy) noexcept {
     farobj::Drop(c);
 }
 
+// The rope (EDF6VC_ROPE.SGO, pylib/chute_model.py rope(): its top at the object's origin, hanging down its -y), upright
+// at `top`. Preloaded with the canopy (PreloadPlayerJets), when installed.
+const wchar_t* const kRopeSgo=L"app:/object/edf6vc_rope.sgo";
+const wchar_t* const kRopeFile=L"EDF6VC_ROPE.SGO";
+bool ropePreloaded=false;
+namespace {
+void RopePose(const float* top,float* m) noexcept {
+    const float pose[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, top[0],top[1],top[2],1};
+    std::memcpy(m,pose,sizeof(pose));
+}
+}  // namespace
+ObjRef RopeMake(const float* top) noexcept {
+    if(!top || !chuteOk || !ropePreloaded || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))return {};
+    alignas(16) float m[16];RopePose(top,m);
+    farobj::Made why=farobj::Made::none;
+    const ObjRef r=farobj::Make(kRopeSgo,m,&why);
+    if(why==farobj::Made::faulted){ropePreloaded=false;Log("ROPE not made: the game faulted: off this mission");}
+    return r;
+}
+bool RopeMove(const ObjRef& rope,const float* top) noexcept {
+    __try {
+        if(!top || !farobj::Live(rope))return false;
+        alignas(16) float m[16];RopePose(top,m);
+        std::memcpy(static_cast<unsigned char*>(const_cast<void*>(rope.obj))+kMatrix,m,sizeof(m));
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void RopeFree(const ObjRef& rope) noexcept {
+    ObjRef r=rope;
+    farobj::Drop(r);
+}
+
 // The 506 physics step (body506.cpp), after the stock one: the player jet's velocity and spin.
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     PJet* j=Find(v);
@@ -1859,9 +1904,16 @@ void PreloadPlayerJets() noexcept {
             chutePreloaded=true;
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
+    ropePreloaded=false;   // a helicopter's rope (RopeMake: transport.cpp's rope descent), when installed
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
+        __try {
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kRopeSgo,2,-1);
+            ropePreloaded=true;
+        } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
     bail=Bailout{};catchFlight=CatchFlight{};
-    Log("PJET preload for the catch: %s (twins %s); the parachute's canopy=%d",line,twins ? "on" : "off: PlayerJetAll / PlayerJetCatch",
-        chutePreloaded);
+    Log("PJET preload for the catch: %s (twins %s); the parachute's canopy=%d, the rope=%d",line,twins ? "on" : "off: PlayerJetAll / PlayerJetCatch",
+        chutePreloaded,ropePreloaded);
 }
 
 // The guns' rounds for the cockpit's stores line (the stock gauge's gun panels gone, stockgauge.cpp): seat 0's weapons

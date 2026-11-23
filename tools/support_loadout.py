@@ -48,6 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import mech_parts  # noqa: E402
 from i18n import is_zh, tr  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
@@ -172,6 +173,35 @@ PACKS: tuple[tuple[int, str, int, str, int, float, float, str], ...] = (
     (74, 'pWeapon245', 1, 'direct', 116, 0.0, 0.0, 'Power Spear S3'),
 )
 PACK_BY_NAME = {p[1].upper(): p for p in PACKS}
+# src/npc_tiers.inc kFencerHands (tools/gen_npc_tiers.py fencer_hands; tests/support_loadout_ini_test.py compares): the
+# weapon table rows of the Fencer's hand weapons (categories 200-205), what a preset's #R:L may name.
+FENCER_HAND_RANGES: tuple[tuple[int, int], ...] = (
+    (690, 865), (1359, 1361), (1368, 1369), (1373, 1374), (1413, 1427), (1508, 1525))
+
+
+def fencer_hand(row: int) -> bool:
+    return any(a <= row <= b for a, b in FENCER_HAND_RANGES)
+
+
+def ascii_number(t: str, most: int) -> bool:
+    """1..`most` ASCII digits, as the plugin's parsers take them (support_loadout.h RowId: L'0'..L'9' only). str.isdigit
+    would also pass full-width digits (int() reads them, the plugin refuses) and superscripts (int() raises a bare
+    ValueError the callers do not catch)."""
+    return re.fullmatch(r'[0-9]{1,%d}' % most, t) is not None
+
+
+def hands(text: str, k: str) -> tuple[int, int]:
+    """A preset's #R:L for kind `k` as the plugin reads it (ParseSupportPreset, HandsFit): (right, left) weapon rows."""
+    if KIND_CLASS[k] != 2:
+        raise Invalid(tr('只有重装兵能指定左右手武器：#', 'only a Fencer takes its two hands: #') + text)
+    right, colon, left = text.partition(':')
+    ok = colon and all(ascii_number(t.strip(), 5) for t in (right, left))
+    if not ok:
+        raise Invalid(tr('左右手应为 #右手行号:左手行号（武器表行号）：#', 'the hands are #RIGHT:LEFT (weapon table rows): #') + text)
+    r, l = int(right.strip()), int(left.strip())
+    if not fencer_hand(r) or not fencer_hand(l):
+        raise Invalid(tr('不是重装兵的手持武器（武器表 200-205 类）：#', 'not a Fencer hand weapon (weapon table 200-205): #') + text)
+    return r, l
 
 
 def pack(text: str, k: str) -> str:
@@ -249,7 +279,7 @@ PAYLOAD_KG = {'TANK': 0, 'STRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100, 'FIGHTE
               'INTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100, 'MULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100,
               'PFIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100, 'PSTRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100,
               'RFIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100, 'RINTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100,
-              'RMULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100}
+              'RMULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100, 'MECH': 0}
 # src/support_loadout.h kVehicleBodies: name -> (base file, most pylons, tank).
 BODIES: dict[str, tuple[str, int, bool]] = {
     'TANK': ('V505_TANK_MISSION.SGO', 4, True),
@@ -263,6 +293,8 @@ BODIES: dict[str, tuple[str, int, bool]] = {
     'RFIGHTER': ('EDF6VC_FLY_FIGHTER.SGO', 5, False),
     'RINTERCEPTOR': ('EDF6VC_FLY_INTERCEPTOR.SGO', 5, False),
     'RMULTIROLE': ('EDF6VC_FLY_MULTIROLE.SGO', 5, False),
+    # A player's mech (pylib/mech_parts.py): no pylons, built on the frame its loadout names.
+    'MECH': ('V504_BEGARUTA.SGO', 0, False),
 }
 # kVehicleKeys: catalog key -> body.
 VEHICLE_KEYS: dict[str, str] = {
@@ -270,21 +302,23 @@ VEHICLE_KEYS: dict[str, str] = {
     'FIGHTER_F': 'FIGHTER', 'INTERCEPTOR': 'INTERCEPTOR', 'INTERCEPTOR_F': 'INTERCEPTOR', 'MULTIROLE': 'MULTIROLE',
     'MULTIROLE_F': 'MULTIROLE',
     'OWN_PFIGHTER': 'PFIGHTER', 'OWN_PSTRIKE': 'PSTRIKE', 'OWN_FIGHTER': 'RFIGHTER', 'OWN_INTERCEPTOR': 'RINTERCEPTOR',
-    'OWN_MULTIROLE': 'RMULTIROLE',
+    'OWN_MULTIROLE': 'RMULTIROLE', 'OWN_MECH': 'MECH',
 }
-PLAYER_VEHICLE_KEYS = ('OWN_PFIGHTER', 'OWN_PSTRIKE', 'OWN_FIGHTER', 'OWN_INTERCEPTOR', 'OWN_MULTIROLE')   # kPlayerVehicles
+PLAYER_VEHICLE_KEYS = ('OWN_PFIGHTER', 'OWN_PSTRIKE', 'OWN_FIGHTER', 'OWN_INTERCEPTOR', 'OWN_MULTIROLE', 'OWN_MECH')   # kPlayerVehicles
 VEHICLE_LABELS = {'TANK_CREWED': '坦克·有人', 'TANK_DELIVERY': '坦克·空车交付', 'STRIKE': '对地攻击机·守点',
                   'STRIKE_F': '对地攻击机·跟随', 'FIGHTER': '制空战斗机·守点', 'FIGHTER_F': '制空战斗机·跟随',
                   'INTERCEPTOR': '截击机·守点', 'INTERCEPTOR_F': '截击机·跟随', 'MULTIROLE': '多用途机·守点',
                   'MULTIROLE_F': '多用途机·跟随', 'OWN_PFIGHTER': '我召唤的·玩家战斗机', 'OWN_PSTRIKE': '我召唤的·玩家攻击机',
-                  'OWN_FIGHTER': '我召唤的·制空战斗机', 'OWN_INTERCEPTOR': '我召唤的·截击机', 'OWN_MULTIROLE': '我召唤的·多用途机'}
+                  'OWN_FIGHTER': '我召唤的·制空战斗机', 'OWN_INTERCEPTOR': '我召唤的·截击机', 'OWN_MULTIROLE': '我召唤的·多用途机',
+                  'OWN_MECH': '我召唤的·机甲'}
 VEHICLE_LABELS_EN = {'TANK_CREWED': 'Tank, crewed', 'TANK_DELIVERY': 'Tank, delivered empty', 'STRIKE': 'Ground attack jet (hold)',
                      'STRIKE_F': 'Ground attack jet (follow)', 'FIGHTER': 'Air superiority fighter (hold)',
                      'FIGHTER_F': 'Air superiority fighter (follow)', 'INTERCEPTOR': 'Interceptor (hold)',
                      'INTERCEPTOR_F': 'Interceptor (follow)', 'MULTIROLE': 'Multirole jet (hold)',
                      'MULTIROLE_F': 'Multirole jet (follow)', 'OWN_PFIGHTER': 'My summons: player fighter',
                      'OWN_PSTRIKE': 'My summons: player attack jet', 'OWN_FIGHTER': 'My summons: air superiority fighter',
-                     'OWN_INTERCEPTOR': 'My summons: interceptor', 'OWN_MULTIROLE': 'My summons: multirole jet'}
+                     'OWN_INTERCEPTOR': 'My summons: interceptor', 'OWN_MULTIROLE': 'My summons: multirole jet',
+                     'OWN_MECH': 'My summons: mech'}
 
 
 def label(key: str) -> str:
@@ -310,21 +344,24 @@ class Invalid(ValueError):
 
 
 Look = tuple[int, int]   # (primary, secondary), 0xRRGGBB or STOCK
-Soldier = tuple[str, Look, str]   # (kind, look, backpack weapon: its WEAPONTABLE name, '' none)
+Hands = tuple[int, int] | None   # a Fencer's (right, left) weapon table rows (#R:L), None: the requester's own pick
+Soldier = tuple[str, Look, str, Hands]   # (kind, look, backpack weapon: its WEAPONTABLE name, '' none; hands)
 Pylon = tuple[str, int]  # (store name, rounds)
 
 
 class Loadout:
     """A vehicle's pylons (support_loadout.h VehicleLoadout): its body, a tank's AP main gun, the pylons in order."""
 
-    def __init__(self, body: str, ap_gun: bool = False, pylons: list[Pylon] | None = None) -> None:
-        self.body, self.ap_gun, self.pylons = body, ap_gun, list(pylons or [])
+    def __init__(self, body: str, ap_gun: bool = False, pylons: list[Pylon] | None = None,
+                 mech: mech_parts.Mech | None = None) -> None:
+        self.body, self.ap_gun, self.pylons, self.mech = body, ap_gun, list(pylons or []), mech   # mech: body MECH's
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Loadout) and (self.body, self.ap_gun, self.pylons) == (other.body, other.ap_gun, other.pylons)
+        return isinstance(other, Loadout) and (self.body, self.ap_gun, self.pylons, self.mech) == (
+            other.body, other.ap_gun, other.pylons, other.mech)
 
     def __repr__(self) -> str:
-        return f'Loadout({self.body!r}, {self.ap_gun}, {self.pylons})'
+        return f'Loadout({self.body!r}, {self.ap_gun}, {self.pylons}, {self.mech!r})'
 
 
 def _tokens(text: str) -> list[str]:
@@ -343,7 +380,7 @@ def _colour(text: str) -> int:
 
 def _count(text: str, most: int, what: str) -> int:
     t = text.strip()
-    if not t.isdigit() or len(t) > 5 or not 1 <= int(t) <= most:
+    if not ascii_number(t, 5) or not 1 <= int(t) <= most:
         raise Invalid(tr(f'{what}应为 1 到 {most}：{text}', f'{what} must be 1 to {most}: {text}'))
     return int(t)
 
@@ -362,6 +399,7 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
     for token in _tokens(text):
         head, star, n = token.partition('*')
         head, plus, packed = head.partition('+')
+        head, sharp, held = head.partition('#')
         name, at, colours = head.partition('@')
         k = kind(name)
         if not has_looks(k) and (at or plus):
@@ -371,11 +409,12 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
         if at:
             primary, colon, secondary = colours.partition(':')
             look = (_colour(primary), _colour(secondary) if colon else STOCK)
+        two = hands(held, k) if sharp else None
         carried = pack(packed, k) if plus else ''
         count = _count(n, MOST, tr('人数 *', 'the count *')) if star else 1
         if len(out) + count > MOST:
             raise Invalid(tr(f'超过 {MOST} 人', f'more than {MOST} soldiers'))
-        out += [(k, look, carried)] * count
+        out += [(k, look, carried, two)] * count
     if out and len(out) > seats:
         raise Invalid(tr('该单位没有可编组的座位', 'this unit has no seats to fill') if seats <= 0 else
                       tr(f'人数 {len(out)} 超过该单位的座位数 {seats}', f'{len(out)} soldiers, more than the unit\'s {seats} seats'))
@@ -394,8 +433,9 @@ def format_preset(soldiers: list[Soldier]) -> str:
         j = i
         while j < len(soldiers) and soldiers[j] == soldiers[i]:
             j += 1
-        k, (p, s), carried = soldiers[i]
+        k, (p, s), carried, two = soldiers[i]
         token = k + ('' if (p, s) == (STOCK, STOCK) else '@' + _colour_text(p) + ('' if s == STOCK else ':' + _colour_text(s)))
+        token += f'#{two[0]}:{two[1]}' if two else ''
         token += '+' + carried if carried else ''
         out.append(token + (f'*{j - i}' if j - i > 1 else ''))
         i = j
@@ -488,6 +528,11 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
         return None
     if body not in BODIES:
         raise Invalid(tr('该单位没有可配置的挂点', 'this unit has no pylons to set'))
+    if body == 'MECH':
+        try:
+            return Loadout(body, mech=mech_parts.parse(tokens))
+        except mech_parts.Invalid as e:
+            raise Invalid(tr(e.args[0], e.args[1])) from None
     _, most, tank = BODIES[body]
     out = Loadout(body)
     if not tank and len(tokens) == 1 and tokens[0].upper() == 'GUNS':
@@ -508,7 +553,7 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
                            tr('飞机可挂：AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT，不能挂：',
                               'a jet carries AAM_S / AAM_M / AAM_L / AGM / AGM_L / MK82 / RKT, not: ')) + name)
         t = n.strip()
-        if not colon or not t.isdigit() or int(t) not in ROUND_COUNTS:
+        if not colon or not ascii_number(t, 5) or int(t) not in ROUND_COUNTS:
             raise Invalid(tr('挂点写成 名称:数量，数量可选 ', 'a pylon is NAME:COUNT, the count one of ')
                           + ' '.join(map(str, ROUND_COUNTS)) + f': {token}')
         if len(out.pylons) >= most:
@@ -532,12 +577,16 @@ def within_payload(l: Loadout) -> bool:
 
 
 def format_vehicle(l: Loadout) -> str:
-    parts = (['AP' if l.ap_gun else 'HE'] if BODIES[l.body][2] else []) + [f'{n}:{r}' for n, r in l.pylons]
+    if l.mech is not None:
+        return mech_parts.format_mech(l.mech)
+    parts =(['AP' if l.ap_gun else 'HE'] if BODIES[l.body][2] else []) + [f'{n}:{r}' for n, r in l.pylons]
     return ','.join(parts) or 'GUNS'
 
 
 def variant(l: Loadout) -> int:
     """support_loadout.h LoadoutVariant."""
+    if l.mech is not None:
+        return mech_parts.variant(l.mech)
     v = VEHICLE | len(l.pylons) | (8 if l.ap_gun else 0)
     for i, (name, rounds) in enumerate(l.pylons):
         v |= (STORE_CODE[name] | ROUND_COUNTS.index(rounds) << 4) << (4 + 8 * i)
@@ -547,6 +596,9 @@ def variant(l: Loadout) -> int:
 def of_variant(v: int, body: str) -> Loadout | None:
     """support_loadout.h LoadoutOfVariant: None when it does not decode for `body`."""
     bits = v & ~APPLIED
+    if body == 'MECH':
+        m = mech_parts.of_variant(bits)
+        return Loadout(body, mech=m) if m is not None else None
     if body not in BODIES or not bits & VEHICLE or (bits >> 60) & 3:
         return None
     _, most, tank = BODIES[body]
@@ -669,7 +721,7 @@ def wanted_files(text: str, pending: list[str] = ()) -> list[str]:
     order."""
     out: list[str] = []
     for soldiers in presets(text).values():
-        for i, (k, look, carried) in enumerate(soldiers):
+        for i, (k, look, carried, _) in enumerate(soldiers):
             if look != (STOCK, STOCK) or carried:
                 out.append(look_file(k, i % 4 == 0, look, carried))
             if carried and look != (STOCK, STOCK):
@@ -882,6 +934,10 @@ def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, b
     if what[0] == 'npc':
         return {'OBJECT/' + file: soldier_file(game, *what[1:])}
     l = what[1]
+    if l.mech is not None:   # the frame with its setup (pylib/mech_parts.py); its weapons are the game's own
+        made = mech_parts.mech_sgo(game, l.mech)
+        mech_parts.check_sgo(made, game.read('OBJECT', l.mech.frame_file()), l.mech)
+        return {'OBJECT/' + file: made}
     tank = BODIES[l.body][2]
     made = tank_sgo(root, game, l) if tank else jet_sgo(root, game, l)
     check_vehicle(made, _source(root, game, 'OBJECT', BODIES[l.body][0]), l)
@@ -1048,14 +1104,17 @@ def describe(soldiers: list[Soldier]) -> str:
     for i in range(0, len(soldiers), 4):
         squad = soldiers[i:i + 4]
         parts.append('[' + tr('、', ', ').join(kind_label(k) + ('' if look == (STOCK, STOCK) else f'@{_colour_text(look[0])}:{_colour_text(look[1])}')
-                                     + (f'+{carried}' if carried else '') for k, look, carried in squad) + ']')
+                                     + (f'#{two[0]}:{two[1]}' if two else '') + (f'+{carried}' if carried else '')
+                                     for k, look, carried, two in squad) + ']')
     return ' '.join(parts)
 
 
 def describe_vehicle(l: Loadout | None) -> str:
     if l is None:
         return tr('（原版挂载）', '(stock stores)')
-    head = ([tr('主炮 ', 'main gun ') + (tr('90mm 滑膛炮（AP，30 发）', '90mm smoothbore (AP, 30 rounds)') if l.ap_gun else
+    if l.mech is not None:
+        return describe_mech(l.mech)
+    head =([tr('主炮 ', 'main gun ') + (tr('90mm 滑膛炮（AP，30 发）', '90mm smoothbore (AP, 30 rounds)') if l.ap_gun else
                                        tr('105mm 榴弹炮（HE，25 发）', '105mm howitzer (HE, 25 rounds)'))] if BODIES[l.body][2]
             else [tr('机炮', 'guns')])
     return tr('，', ', ').join(head + [tr(f'挂点{i + 1} ', f'pylon {i + 1} ') + f'{store_label(n)}×{r}' for i, (n, r) in enumerate(l.pylons)])
@@ -1125,13 +1184,15 @@ def edit_crew(text: str, key: str, ask: Callable[[str], str]) -> str:
 
 def preset_help() -> str:
     kinds = ' '.join(f'{n}={kind_label(n)}' for n in KIND_NAMES)
-    return tr('  写法：兵种[@主色[:副色]][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
+    return tr('  写法：兵种[@主色[:副色]][#右手:左手][*人数]，逗号分隔，按座位顺序，每 4 人第一位是队长。\n'
               f'  兵种：{kinds}\n'
               '  颜色：6 位十六进制 RRGGBB（如 1E3A8A），X = 保留原色；例：lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  重装兵左右手：#右手行号:左手行号（武器表行号，任意重装手持武器），例：pilebanker#715:773*4（爆破长枪 + 德克斯特霰弹：冲跳）\n'
               '  直接回车 = 不改；输入 - = 清除（恢复该单位默认兵员）。',
-              '  Write CLASS[@MAIN[:SECOND]][*COUNT], comma separated, in seat order; the first of every 4 leads them.\n'
+              '  Write CLASS[@MAIN[:SECOND]][#RIGHT:LEFT][*COUNT], comma separated, in seat order; the first of every 4 leads them.\n'
               f'  Classes: {kinds}\n'
               '  Colours: 6 hex digits RRGGBB (like 1E3A8A), X = keep stock; e.g. lance@1E3A8A*4,cannon*4,rifle@X:FFFFFF*4\n'
+              '  A Fencer\'s hands: #RIGHT:LEFT weapon table rows (any Fencer hand weapon), e.g. pilebanker#715:773*4 (spear + shotgun: dash-jump)\n'
               '  Just Enter = no change; - = clear (the unit\'s default soldiers).')
 
 
@@ -1144,9 +1205,91 @@ def _pick(ask: Callable[[str], str], options: list[tuple[str, str]], prompt: str
     return options[int(got) - 1][0]
 
 
+def _mech_label(part: object) -> str:
+    return part.labels[1] if is_zh() else part.labels[0]
+
+
+def describe_mech(m: mech_parts.Mech) -> str:
+    req = mech_parts.REQUEST_BY[m.request]
+    frame = mech_parts.FRAME_BY[m.frame or req.frame]
+    core = mech_parts.CORE_BY[m.core or req.core]
+    slots = [tr(mech_parts.SLOT_LABELS[i][1], mech_parts.SLOT_LABELS[i][0]) + ' '
+             + (_mech_label(mech_parts.WEAPON_BY[t]) if t else tr('空', 'empty')) for i, t in enumerate(m.weapons)]
+    return tr('，', ', ').join([tr('底座 ', 'request ') + _mech_label(req), tr('机体 ', 'frame ') + _mech_label(frame), *slots,
+                               tr('核心 ', 'core ') + _mech_label(core)])
+
+
+def edit_mech(text: str, key: str, ask: Callable[[str], str]) -> str:
+    """The mech's seven fields (pylib/mech_parts.py), until an empty answer. Writes only a loadout the plugin accepts."""
+    try:
+        l = parse_vehicle(get(text, 'SupportVehicle_' + key), 'MECH')
+    except Invalid:
+        l = None
+    m = l.mech if l is not None else None
+    changed = False
+    while True:
+        print(f'  {vehicle_label(key)}: ' + (describe_mech(m) if m else tr('（原版）', '(stock)')))
+        pick = ask(tr('r 换底座请求；f 机体；1-4 武器槽（右臂 / 左臂 / 右肩 / 左肩）；c 核心；s 恢复原版；回车保存并返回：',
+                      'r request; f frame; 1-4 a weapon slot (right arm / left arm / right shoulder / left shoulder); c core; '
+                      's back to stock; Enter to save and go back: ')).strip().lower()
+        if not pick:
+            if changed and m:
+                text = put(text, 'SupportVehicle_' + key, mech_parts.format_mech(m))
+                assert parse_vehicle(get(text, 'SupportVehicle_' + key), 'MECH') == Loadout('MECH', mech=m)
+            return text
+        try:
+            if pick == 's':
+                return put(text, 'SupportVehicle_' + key, '')
+            if pick == 'r':
+                token = _pick(ask, [(r.token, f'{_mech_label(r)}  Lv{r.level:g}') for r in mech_parts.REQUESTS],
+                              tr('哪个请求（编号）：', 'Which request (number): '))
+                req = mech_parts.REQUEST_BY[token]
+                if m is None:
+                    m = mech_parts.Mech(token, weapons=tuple('' if s == mech_parts.NONE else s for s in req.slots))
+                else:   # what no longer fits its level cleared; nothing left: its stock weapons
+                    weapons = tuple(t if t and mech_parts.allowed(mech_parts.WEAPON_BY[t], i, req) else ''
+                                    for i, t in enumerate(m.weapons))
+                    if not any(weapons):
+                        weapons = tuple('' if s == mech_parts.NONE else s for s in req.slots)
+                    core = m.core if m.core and mech_parts.core_allowed(mech_parts.CORE_BY[m.core], req) else ''
+                    m = mech_parts.Mech(token, m.frame, weapons, core)
+                changed = True
+                continue
+            if m is None:
+                raise Invalid(tr('先选底座请求（r）', 'pick the request first (r)'))
+            req = mech_parts.REQUEST_BY[m.request]
+            if pick == 'f':
+                options = [('', tr('（请求自己的）', '(the request\'s own)'))] + [(f.token, _mech_label(f)) for f in mech_parts.FRAMES]
+                candidate = mech_parts.Mech(m.request, _pick(ask, options, tr('哪个机体（编号）：', 'Which frame (number): ')),
+                                            m.weapons, m.core)
+            elif pick == 'c':
+                options = [('', tr('（请求自己的）', '(the request\'s own)'))] + [
+                    (c.token, f'{_mech_label(c)}  Lv{c.level:g}') for c in mech_parts.CORES if mech_parts.core_allowed(c, req)]
+                candidate = mech_parts.Mech(m.request, m.frame, m.weapons, _pick(ask, options, tr('哪个核心（编号）：', 'Which core (number): ')))
+            elif pick in ('1', '2', '3', '4'):
+                slot = int(pick) - 1
+                options = [('', tr('（空）', '(empty)'))] + [
+                    (w.token, f'{_mech_label(w)}  Lv{w.level:g}') for w in mech_parts.WEAPONS if mech_parts.allowed(w, slot, req)]
+                weapons = list(m.weapons)
+                weapons[slot] = _pick(ask, options, tr('装什么（编号）：', 'Which weapon (number): '))
+                candidate = mech_parts.Mech(m.request, m.frame, tuple(weapons), m.core)
+            else:
+                raise Invalid(tr(f'不认识“{pick}”', f'"{pick}" is not a choice'))
+            try:
+                mech_parts.check(candidate)
+            except mech_parts.Invalid as e:
+                raise Invalid(tr(e.args[0], e.args[1])) from None
+            m = candidate
+            changed = True
+        except Invalid as e:
+            print(tr(f'  未修改：{e}', f'  Not changed: {e}'))
+
+
 def edit_vehicle(text: str, key: str, ask: Callable[[str], str]) -> str:
     """载具 → 挂点 → 武器: one vehicle's pylons, until an empty answer. Writes only a loadout the plugin accepts."""
     body = VEHICLE_KEYS[key]
+    if body == 'MECH':
+        return edit_mech(text, key, ask)
     _, most, tank = BODIES[body]
     try:
         l = parse_vehicle(get(text, 'SupportVehicle_' + key), body) or Loadout(body)

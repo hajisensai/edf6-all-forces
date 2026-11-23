@@ -58,7 +58,9 @@
 | +0xD70 / +0xD71 | 第 0 / 1 个 WeaponSet 扳机（按住） |
 | +0xD74 / +0xD81 | 下一把 / 上一把武器 |
 | +0xD75 | 换弹 |
+| +0xD72 / +0xD73 | 第 0 / 1 个 WeaponSet 的副功能键（按下）：做什么由那只手武器的 `SecondaryFire_Type` 定（剑兵 5 = 冲刺、4 = 推进跳、6 = 盾，换算见 [npc-mobility-re.md](npc-mobility-re.md) §4）；掩码 `+0x158C` bit 8 / 9 |
 | +0xD76 / +0xD77 | 跳 / 回避：按下 / 按住 |
+| +0xD7B / +0xD7C | 冲刺 / 推进键：按下 / 按住（飞翼冲刺只读按下，`0x580B06`；原版 AI 从不写；掩码 bit 10）（[npc-mobility-re.md](npc-mobility-re.md) §3） |
 | +0xD82..+0xD84 | 直接选第 0..2 把（M：对应 `h+0x1950` 武器数组的前三项） |
 
 - 原版看向目标的写法（`0x5A2B50` MoveAndLook，`0x5A2FFB`）：`0x4E100(out, dir)` 给出 out[0] = −atan2(dy, 水平距离)（pitch）、out[1] = atan2(dx, dz)（yaw），`d60 = wrap(out[0] − h+0x1240) × 增益`、`d64 = wrap(out[1] − h+0x1244) × 增益`。插件按同一公式写（`npc_logic.h` `AimDelta`），符号不用学习。
@@ -66,7 +68,7 @@
 - **原版交战距离 = max(25, 0.5 × 真实射程)**（`0x590201..0x59024C`，常量 `0x1C36990`=0.5、`0x17A099C`=25），朝向点积 > 0.8 才开火。真实射程 `weapon+0x224` = AmmoAlive × AmmoSpeed（`0x68DB1B`）。这就是「射程太短」（B3）的根因。
 - **原版不换武器**（Ranger / Fencer / Air Raider 的 AI 从不写 d74/d81/d82；PaleWing 自己的状态机会，M）——「全程一把枪」（B2）的根因。
 - **原版没有友军火线检查**：唯一的门是 `h+0x1CEC` 地图视线（layer 22，只打地图）——「挡枪线、打玩家」（B1）的根因。
-- 翻滚：第 65/66 槽收到 d76 且 |d50.x| > 0.35（常量 `0x1790138`）、`h+0x158C & 0x800` 时进侧翻（Ranger `0x552B10`）。Wing Diver / Fencer 的第 68 槽是跳跃 / 推进（M）。原版 AI 只在寻路要求跳时置 d76——「不会翻滚」（B5）的根因。
+- 翻滚：第 65/66 槽收到 d76 且 |d50.x| > 0.35（常量 `0x1790138`）、`h+0x158C & 0x800` 时进侧翻（Ranger `0x552B10`）。Wing Diver / Fencer 的第 68 槽是跳跃 / 推进（M）。原版 AI 只在寻路要求跳时置 d76——「不会翻滚」（B5）的根因。飞翼冲刺（d7B）和剑兵冲刺 / 推进跳（d72+k）见 [npc-mobility-re.md](npc-mobility-re.md)。
 
 ### 3.2 接管点
 
@@ -119,7 +121,8 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 
 ### 3.6 机动（B4、B5）
 
-- `CrowdResponse`：`NpcDangerRange` 米内的敌人按距离加权施压；压力 ≥ `NpcCrowd` 或有敌人进 `NpcGrabRange` → 后撤（加权反方向）；进抓取距离且翻滚冷却好 → 翻滚（d76 一帧 + |d50.x| ≥ 0.6）；只有一只正面冲来 → 横移让开。翻滚只给 Ranger / Air Raider（第 68 槽是侧翻），Wing Diver 同一输入是起跳（也是脱离），Fencer 只后撤。
+- `CrowdResponse`：`NpcDangerRange` 米内的敌人按距离加权施压；压力 ≥ `NpcCrowd` 或有敌人进 `NpcGrabRange` → 后撤（加权反方向）；进抓取距离且翻滚冷却好 → 翻滚（d76 一帧 + |d50.x| ≥ 0.6）；只有一只正面冲来 → 横移让开。翻滚只给 Ranger / Air Raider（第 68 槽是侧翻）。Wing Diver 被逼后撤时按原版冲刺（d7B）冲出去，能量或冷却不够就照常后撤（`NpcWingDash=0` 时才保留旧的 d76 起跳脱离）；Fencer 有冲刺手时朝后撤方向冲一次（冷却 `NpcRollSec`），没有就只后撤。
+- 机动（`Mobility`，`src/npc_mobility.h`，[npc-mobility-re.md](npc-mobility-re.md)）：飞翼在能量预算内冲向远处的目标点 / 追上队伍；剑兵按配装判定冲刺 / 推进跳，按距离、高差、前方障碍、卡住、剩余次数选冲跳 / 只冲 / 只跳 / 不动。
 - 掩体：低血后撤时在玩家身后半圆上取几个候选点，选从最近威胁看过去被地图挡住（`MapRay` 命中）的那个；都不挡就取正后方。
 - 转移位置：战位每 `NpcRepositionSec` 秒（或战位离开视线）重新选。
 
@@ -268,10 +271,15 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - **防御**（`NpcGuardFormation`，地图里选中警戒中的小队按 T）：每个警戒小队自己一份（`Members`），锚点 = 警戒点，朝向 = 下令时玩家→ 警戒点（`SquadCommand` 记在 `Squad::guardFwd`）。
 - 地图 T：选中的小队里警戒中的各自循环防御方案（`CycleGuardFormation`），其余（跟随玩家的）只循环一次行进编队（`CycleMarchFormation`），离线 `map_command_runtime_check` `FormationKey`。
 - 地面寻路：`src/ground_navigation.h` 的增量 A* + `ground_navigation.cpp` 的实际 `MapFloorRay` / `MapRay` 查询，统一接入 `MoveTo`（编队、驻守、交战位置、拾箱、登车）。只改输入方向，不瞬移，不写位置。脚底每 0.5 米沿连接地面采样，左右身体宽度和中心检查支撑、竖直净空及足/腰/头轨迹；单步落差不超过 0.55 米，不能通过同 XZ 的上下层切换楼层。
+- 载具当障碍（2026-11-21 反馈「npc 寻路好像不会绕开载具」）：`MapRay` 是 layer 22，只与地图 / 建筑层碰撞，**看不见载具与角色**（`docs/raycast-re.md` §3），原先只有上车路线对要上的那辆车加了 `crew::Hull`，其余路线（编队、驻守、交战位置、拾箱、跟随队长、移动令）径直穿过停着的 / 行驶中的 / 空的载具，士兵贴着车身站住。现在 `MoveTo` 的每条路线都带 `RouteHull`：每段中心线的竖直净空与足/腰/头三条扫掠再沿子弹的物体层 layer 11（`ObjectRay`）各打一条，跳过士兵等非载具刚体（最多 `kHullHits` 个），碰到 `0x108260` 映射出的对象是载具类（`VehicleClassOf`）就算挡住；上车时只在座位的上车圆（`BoardRoom`）内放行。预算按最坏量预留、按实际打的射线计入（没打的退回），离线 `ground_navigation_runtime_test` `VehicleRoute` 覆盖：无上车目标的移动令绕开两辆并排停放的车、沿路行走不进车体、32 人口同样被预算轮到。原版跟随状态（SoldierBase 90 `0x590280`，插件选「原版」行进队形时）不经过本寻路，插件不改它。
 - 水深使用真实 `SeaAt` 查询：`Profile.maxWaterDepth` 默认 0.35 米，只允许干地/浅水，拒绝把深水海底当陆地。有效水区列表返回 `land` 的干燥地下正常可达；`unknown` 表示探针不可用，返回 `pending` 而不是猜成地下/干地。当前位置已在终点半径内也必须通过脚底与水深检查。`SeaAt` 是 XZ 最高水面探针，上层水池与下层干洞重叠时仍可能保守拒绝，未声称实现水体 3D 包含测试。
 - `Profile.waypointRadius` 默认 0.45 米；车辆调用者显式用 1.5 米中途路点半径、驾驶停止 1.0 米、网格 4 米。终点仍由调用者的最终停止半径决定。跳过中途点后必须从实际当前位置重新检查到新路点的完整路段，不能直接切墙角。`ground_navigation_runtime_test` 链接真正 `ground_navigation.cpp`，仅替换 EDF 的地图/水/帧入口，核对深浅水、地下、未知探针恢复、抵达验证、路点抄角和 32 调用者预算公平性；不是原生水体或游戏地图实测。
 - 每次最多 4 条边，所有调用共享每帧 4096 次逻辑碰撞查询预算，预算耗尽的首个调用者下一帧优先，避免 NPC 更新顺序使队尾永久饥饿。1536 节点、512 路径点和空间范围均有上限；复杂/过长路线超出上限会明确等待，不声称求解任意全图路线。状态跟 Soldier 的 ObjRef 生命周期重置；小幅移动目标先完成已验证路线，目标移动超过 16 米或改变楼层立即重算。
 - 缓存路径每 100ms 复查下一段；1.5 秒没有移动 0.3 米时重规划；找不到路径等待 1 秒后重试。`pending/blocked` 只站立，不回退原版跟随。打仗仍先散开交战，目标消失再归队。离线 `ground_navigation_test` 执行同一规划器/净空采样，覆盖墙、L 拐角、缺口、低顶、上下层、动态阻挡与预算恢复。没有做游戏内验收；射线采样不是完整 Havok 胶囊扫掠，不宣称对任意小障碍完全精确。
+- 2026-11-21（测试站 #41 / #47，`docs/feedback-2026-11-21-npc-ground-nav.md`）：**部分修复**，只修了插件寻路自身的站等和减速；台阶 / 窄道 / 不会跑 / 多层地下仍未解决，下一步先只读实测原版导航代理（`[human+0x850]`）。
+  - 士兵路线 `Profile::ahead`：下一段路、以及移动后目标的路，从当前路径终点边走边搜，接在剩余路径后面（保留正在走的边的核对），不再在每段末尾、目标每移动 16 m 时站着等搜索。
+  - 只对开了 `ahead` 的士兵路线：共用预算轮空、或复查被推迟时，500 ms 内核对过的边继续走（`Coast` / `kCheckedFresh`）；`Coast` 只在 hull、stop、目标与上次导航相同时滑行。支援、运输路线行为不变。
+  - 摇杆路上满，只在完整路线最后一条边按剩下的长度减速（`FinalLeft`），不按到下一个 2 m 路点的距离（以前全程只有 37–77% 速度，`0x56D350` 线性、不封顶），也不按到终点的直线距离（墙后的目标）。
 - 联机：只驱动本机权威的 NPC（同 §9）；地图指令联机不可用，步行键的行进编队只影响本机玩家招募的小队。
 
 ### 6.4.1 编组（2026-10-08 用户：「支持编组」）
@@ -365,7 +373,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
 枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
-ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
+ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcWingDash`、`NpcWingDashFar`、`NpcWingDashSec`、`NpcWingDashReserve`、`NpcFencerMobility`、`NpcFencerDashJumpRange`、`NpcFencerDashRange`、`NpcFencerDashReserve`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
 

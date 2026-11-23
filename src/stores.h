@@ -44,7 +44,8 @@ struct StoreSpec {
     // right, payload.cpp Switch, cycles the weapons on it, never R / LB); 3..kFireLastKey VehicleFire<n>Key, one weapon
     // a key. Each fires at once with the primary and the other keys.
     unsigned char fireKey=0;
-    bool autoTurret=false;   // fires itself with the vehicle's auto turrets on (VehicleAutoTurretKey; payload.cpp ControlOf, FireSeat)
+    bool autoTurret=false;   // a gunner seat's own turret (seat >= 1) that lays and fires itself with nobody in it and the
+                             // vehicle's auto turrets on (VehicleAutoTurretKey; payload.cpp ControlOf, UnmannedTurretsFire)
     // The gunner seat that mans it (pylib/vcobjects.py Store.seat): 0 the seat its key is on; n >= 1 seat n's own weapon
     // (its holder on that seat), fired by that seat's primary trigger (kSeatTriggerKey) and aimed by its rider, an auto
     // turret by itself with nobody in it.

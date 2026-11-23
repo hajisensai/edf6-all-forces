@@ -151,11 +151,32 @@ def check_vehicles_fake(game_dir: str, game: object) -> None:
     base = support_loadout.BODIES['STRIKE'][0]
     with open(os.path.join(game_dir, 'Mods', 'OBJECT', base), 'wb') as f:
         f.write(sgo.write_depth_first(version, fake_v))
+    # A jet with the jets' own CAS (v506_heli.cas: anmgroups Roter, Main; test site #50: no `main` crashed the preview).
+    jet_v = dict(fake_v)
+    jet_v['animation_model'] = list(fake_v['animation_model'])
+    jet_v['animation_model'][1] = 'app:/object/v506_heli.cas'
+    with open(os.path.join(game_dir, 'Mods', 'OBJECT', support_loadout.BODIES['INTERCEPTOR'][0]), 'wb') as f:
+        f.write(sgo.write_depth_first(version, jet_v))
     with contextlib.redirect_stdout(io.StringIO()) as out:
         files = mp.build_vehicles(game, game_dir)
-    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE')}
-    check(set(files) == want, f'the tank (Root.cpk) and the Mods strike jet only: {sorted(files)}')
-    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 2, 'every missing body said')
+    want = {f'MENUOBJECT/{mp.vehicle_file(b)}' for b in ('TANK', 'STRIKE', 'INTERCEPTOR', 'MECH')}
+    jet_cas = f'MENUOBJECT/{mp.vehicle_cas_file("INTERCEPTOR")}'
+    check(set(files) == want | {jet_cas},
+          f'the stock tank and mech, two Mods jets and the interceptor menu CAS: {sorted(files)}')
+    check(out.getvalue().count('3D 预览不生成') == len(support_loadout.BODIES) - 4, 'every missing body said')
+    heli = game.read('OBJECT', 'V506_HELI.CAS')
+    check([n for _, n in mp.anmgroups(heli)] == ['Roter', 'Main'], "the jets' CAS as the game ships it (no `main`)")
+    check([n for _, n in mp.anmgroups(files[jet_cas])] == ['Roter', 'main'] and len(files[jet_cas]) == len(heli) and
+          sum(a != b for a, b in zip(files[jet_cas], heli)) == 1, 'the menu CAS: only that name lower-cased, in place')
+    jm = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("INTERCEPTOR")}'])[1]['animation_model']
+    check(jm[1] == f'app:/menuobject/{mp.vehicle_cas_file("INTERCEPTOR").lower()}' and jm[0] == jet_v['animation_model'][0] and
+          jm[2:] == jet_v['animation_model'][2:], "the jet's menu SGO names its menu CAS, the rest its own")
+    for rel, data in files.items():
+        if rel.endswith('.SGO'):
+            folder, name = mp.cas_ref(sgo.read(data)[1]['animation_model'][1])
+            cas = files.get(f'{folder}/{name}') or game.read(folder, name)
+            check(mp.MENU_ANMGROUP in [n for _, n in mp.anmgroups(cas)], f'{rel}: its CAS plays `main` (no -1 index)')
+    check(mp.menu_cas(game.read('OBJECT', 'V505_TANK.CAS')) is None, "the tank's CAS has `main`: used as it is")
     m = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("STRIKE")}'])[1]
     check(m['animation_model'][0] == ['app:/object/fake_jet.mrab', 'fake_jet.mdb'], 'the Mods copy is the source')
     tank = sgo.read(files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'])[1]
@@ -168,7 +189,7 @@ def check_vehicles_fake(game_dir: str, game: object) -> None:
     check(sgo.write_depth_first(v2, mm) == files[f'MENUOBJECT/{mp.vehicle_file("TANK")}'], 'parses back exactly')
     with contextlib.redirect_stdout(io.StringIO()):
         both = mp.build(game, game_dir)
-    check(set(both) == set(mp.rels()) | want, 'build with the game directory: soldiers and vehicles')
+    check(set(both) == set(mp.rels()) | want | {jet_cas}, 'build with the game directory: soldiers and vehicles')
     check(set(mp.build(game)) == set(mp.rels()), 'build without it: the soldiers only (loadout-generate)')
     written = mp.install(game_dir, both)
     check(len(written) == len(both), 'install writes them all')

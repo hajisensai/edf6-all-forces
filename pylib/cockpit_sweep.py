@@ -23,8 +23,8 @@ import math
 import numpy as np
 
 # The Vehicle603_Flak's gun elevation: car_base_constraint_data's pitch hinge [1, -60, 5] (degrees, negative up:
-# autoturret/docs/re-notes.md, tools/make_katyusha.py), which every plugin V603 vehicle keeps
-# (tools/make_tracked_combat.py changes only the turret hinge, TURRET_LIMITS).
+# autoturret/docs/re-notes.md, tools/make_katyusha.py), which every plugin V603 vehicle keeps but those
+# tools/make_tracked_combat.py PITCH_LIMITS raises (make_tracked_combat.elevation_stop: the sweep's top for a kind).
 V603_ELEVATION = (-5.0, 60.0)
 # The V603's pitch hinges, and the bones that turn with them (hinge of each).
 V603_HINGE_OF = {'cannon_l': 'cannon_l', 'cannon_r': 'cannon_r', 'cannon_slide_l': 'cannon_l',

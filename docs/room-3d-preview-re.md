@@ -87,6 +87,7 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 - 挂载不上模型：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
 - 镜头：载具比士兵大，四个机位点在加右移之后整体乘一个倍数（`VehicleScale`：坦克 3、战机 6，按尺寸估的 L，待实机调）；离开菜单逐字节还原。模型在原地每帧转 0.01 rad（`kVehicleTurn`），菜单键不再转它；转台开始时记下原来的朝向（`Turntable`），光标回到士兵或菜单关闭时还原，士兵和关菜单后玩家自己的模型仍朝原来的方向（菜单本来从不转模型）。
 - **风险（L，需实机）**：菜单 SGO 的 `random_animation` 播 `_menu1/2/3`，`soldier_weapon_slot` 指 `weapon` 骨骼；载具 CAS 里没有这些动画、MAB 里没有这根骨骼。渲染器找不到动画 / 骨骼时是跳过还是出错没有静态核实；HQ / 房间里第一次把光标移到载具行时要盯日志与画面，出问题先把 `tools/menu_preview.py` 的载具文件撤掉（插件见文件缺失就不预览）。
+- **已确认的崩溃（2026-11-21，测试站 #50，dump 核对）**：菜单渲染器播放 CAS 里**名字正好是 `main`** 的 anmgroup，查找时区分大小写。异步构建 `0x93F910` 在 `0x93FB85` 查 `L"main"`，在 `0x93FB95` 把下标存进 `model+0xE0`；视图更新 `0x93D640` 在 `0x93EBAC` 直接拿它去调 `0x93D2F0` → `0x11664F0`，不检查 -1。战机的 `v506_heli.cas` 只有 `Roter` / `Main`，所以下标是 -1，在 `EDF.dll+0x116650D` 读野指针（打开 F2 菜单约 20 ms 后崩溃，edx=0xFFFFFFFF）。修法：`build_vehicles` 给 CAS 里没有 `main` 的机体另生成 `MENUOBJECT/EDF6VC_MENU_V_<BODY>.CAS`（把那个 anmgroup 的名字原位改成小写，长度不变，并核对该名字字符串没被别的字段共用），菜单 SGO 的 `animation_model[1]` 指向它。机体自己的 CAS 不动，因为直升机 / 战机代码照原样查 `Main`。`tests/menu_preview_test.py` 断言每个菜单 SGO 引用的 CAS 都有 `main`。坦克的 `v505_tank.cas` 本来就有 `main`，照用原 CAS。如果状态名不存在，`0x93D2F0` 在 `0x93D31E` 会安全返回；改名之后 `_menu1/2/3` 的行为未实机验证。
 
 ## 7. 需实机验证
 

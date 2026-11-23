@@ -82,6 +82,38 @@ int main() {
     Check(NpcArmsLoaded(third)==PlanResult::refused && queued==6,"no preload manager: refused");
     Put<void*>(image,kPreloadMgr,preloadMgr);
     Check(NpcArmsLoaded(third)==PlanResult::ready && queued==7,"the manager back: queued, then (done) ready");
+    // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer's second hand is loaded as its main one; a second hand
+    // alone, or one that is no Fencer hand weapon, refused.
+    {PreloadNpcArms();done=false;
+     support_net::Plan fencer{};fencer.count=1;fencer.units[0].resourceId=SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     npctier::Arms spear;spear.on=true;spear.id=715;npctier::Arms dexter;dexter.on=true;dexter.id=773;
+     fencer.units[0].arms=npctier::PackArms(spear);fencer.units[0].offhand=npctier::PackArms(dexter);
+     const int before=queued;
+     Check(NpcArmsLoaded(fencer)==PlanResult::pending && queued==before+2,"both hands queued");
+     done=true;Check(NpcArmsLoaded(fencer)==PlanResult::ready && queued==before+2,"both loaded: ready");
+     auto alone=fencer;alone.units[0].arms=0;
+     Check(NpcArmsLoaded(alone)==PlanResult::refused,"a second hand alone refused");
+     auto rifle=fencer;npctier::Arms r;r.on=true;r.id=26;rifle.units[0].offhand=npctier::PackArms(r);
+     Check(NpcArmsLoaded(rifle)==PlanResult::refused,"a rifle as a second hand refused");}
+    // The requester's two hands from its Fencer loadout (whatever class it plays now): GameStatus class 3's slots 1L..2R.
+    {alignas(16) static unsigned char gs[0x7000]{};
+     Put<void*>(image,kGameStatus,gs);Put<std::int32_t>(gs,kClass,0);   // playing a Ranger
+     const std::int32_t fencerSlots[4]={773,715,690,803};
+     for(int i=0;i<4;++i)Put<std::int32_t>(gs,kWeapons+3*kClassStride+i*4,fencerSlots[i]);
+     support_net::RequesterArms arms;
+     armsReady=false;LocalRequesterArms(&arms);
+     Check(!arms.kind[0] && !arms.offhand[static_cast<int>(SupportWeapon::fencerPileBanker)],"the weapon hooks not in: none");
+     armsReady=true;LocalRequesterArms(&arms);
+     const int pile=static_cast<int>(SupportWeapon::fencerPileBanker),cannon=static_cast<int>(SupportWeapon::fencerCannon);
+     Check((arms.kind[pile]&0xFFFFu)==715 && (arms.offhand[pile]&0xFFFFu)==773 && (arms.offhand[pile]&npctier::kArmsOn),
+           "the pile banker: the spear and the Dexter beside it (group 1)");
+     Check((arms.kind[cannon]&0xFFFFu)==803 && (arms.offhand[cannon]&0xFFFFu)==690,"the cannon: group 2's NC101 and hammer");
+     Check(arms.kind[0] && !arms.offhand[0],"a Ranger kind: no second hand");
+     std::uint64_t a=0,b=0;
+     Check(PresetHandArms(772,715,&a,&b) && (a&0xFFFFu)==772 && (b&0xFFFFu)==715,"a preset's two hands as unit words");
+     Check(!PresetHandArms(26,715,&a,&b) && !a && !b,"a preset hand that is no Fencer weapon: none");
+     armsReady=false;Check(!PresetHandArms(772,715,&a,&b),"the hooks not in: no preset hands");
+     Put<void*>(image,kGameStatus,nullptr);}
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_arms_test: %d checks passed\n",checks);
 }

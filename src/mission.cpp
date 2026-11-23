@@ -39,6 +39,7 @@
 #include "support_points.h"
 #include "support_warning.h"
 #include "player_vehicle.h"
+#include "commander.h"
 #include <iterator>
 
 namespace crew {
@@ -111,6 +112,7 @@ void MissionStart() noexcept {
     ResetEnemyControl(); // release native player-mode leases before scene/team identities are reset
     if(!EnemyControlNativePvpReset())Log("ENEMY CONTROL pending native ownership restore retained across mission reset");
     ResetPvp();  // true world boundary: restore teams and release support-owner weak identities
+    ResetCommander();   // the commander mode's last mission dropped, its map lock let go (commander.cpp)
     ResetPlayer();
     ResetFirstPerson();
     thermal::Reset();

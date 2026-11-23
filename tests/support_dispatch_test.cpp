@@ -51,6 +51,17 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool peersNew=true;
 bool SupportPeersAcceptVariants() noexcept {return peersNew;}
+// Room members' loadouts (room_sync.h RoomMemberConfig): peer 2 has published one, every other peer none.
+const char* SupportPeerPuid(std::uint32_t peer) noexcept {return peer==2 ? "member2puid" : peer==3 ? "member3puid" : nullptr;}
+SupportConfig memberConfig;
+int memberLookups=0;
+namespace roomsync {
+bool RoomMemberConfig(const char* puid,SupportConfig* out) noexcept {
+    ++memberLookups;
+    if(!puid || std::strcmp(puid,"member2puid"))return false;
+    *out=memberConfig;return true;
+}
+}
 std::set<const void*> heldObjects;
 bool HoldSupportSoldier(const ObjRef& ref,bool hold) noexcept {
     held+=hold ? 1 : -1;
@@ -312,21 +323,37 @@ bool armsReady=true;support_net::RequesterArms localArms{};support_net::PlanResu
 int armsAsked=0;
 bool SupportSoldierArmsReady() noexcept {return armsReady;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
+// commander.h: the commander mode's catalog (none in these tests).
+support_net::PlanResult PlanCommander(std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
+bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void DestroyCommanderPlan(std::uint64_t) noexcept {}
+bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+// npc_arms.h PresetHandArms: a preset's two Fencer hands, star 0 = 1 (this machine's player's, a star less), or none.
+bool presetHandsOk=true;int presetHandsAsked=0;
+bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept {
+    ++presetHandsAsked;*arms=0;*offhand=0;
+    if(!presetHandsOk)return false;
+    npctier::Arms r;r.on=true;r.id=static_cast<std::uint16_t>(right);r.stars[0]=1;
+    npctier::Arms l;l.on=true;l.id=static_cast<std::uint16_t>(left);l.stars[0]=1;
+    *arms=npctier::PackArms(r);*offhand=npctier::PackArms(l);return true;
+}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
 const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 std::uint32_t lastResources[16]{};int resourceCount=0;bool lastLocal=false;const unsigned char* lastId=nullptr;
-std::wstring lastLooks[16];std::uint64_t lastArms[16]{};
+std::wstring lastLooks[16];std::uint64_t lastArms[16]{},lastOffhand[16]{};
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look,std::uint64_t weapon) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
     if(nativeFail)return false;
-    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastResources[resourceCount++]=resource;}
+    if(resourceCount<16){lastLooks[resourceCount]=look ? look : L"";lastArms[resourceCount]=weapon;lastOffhand[resourceCount]=offhand;
+                         lastResources[resourceCount++]=resource;}
     lastLocal=local;lastId=id;
     *out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look,std::uint64_t weapon) noexcept {
-    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon);
+                                      const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
+    return ApplySupportSoldierResource(matrix,resource,id,local,out,look,weapon,offhand);
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
@@ -349,6 +376,15 @@ bool DeleteSupportSoldier(const ObjRef& ref) noexcept {
 int registered=0;bool registerSupportOk=true;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return registerSupportOk;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
+// The drill transport (support_spawn.h): preloaded or not, and the hulls made (13 seats, as the SGO's).
+bool drillReady=true;int drillSpawns=0;float drillSpawnAt[3]{};
+bool SupportDrillTransportReady() noexcept {return drillReady;}
+unsigned char* SpawnSupportDrillTransport(const float* entry,const float*,const void*) noexcept {
+    ++drillSpawns;std::memcpy(drillSpawnAt,entry,12);
+    auto hull=Make(true);auto* v=static_cast<unsigned char*>(const_cast<void*>(hull.obj));
+    Put<std::uint64_t>(v,kSeatCount,kSupportDrillTransport.seats);
+    std::memcpy(v+kPosition,entry,12);return v;
+}
 std::wstring lastHullVariant;
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t* variant) noexcept {
     lastHullVariant=variant ? variant : L"";return nullptr;
@@ -402,7 +438,8 @@ void ReportSupportFailure(std::uint64_t id) noexcept {Destroy(id);}
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept {return p.count>0 && p.count<=kMaxUnits;}}
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int count) noexcept {++boardRequests;return count;}
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
-bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {return true;}
+int vehiclePosts=0;
+bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept {++vehiclePosts;return true;}
 #endif
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept {++releases;return true;}
 // The stock get-off before a seated soldier is deleted (support_dispatch.cpp Unseat): the seat cleared, counted.
@@ -446,16 +483,46 @@ bool MapGroundNear(float,float,float,float* y,bool) noexcept {*y=0;return terrai
 float MapRay(const float*,const float*,float*) noexcept {return -1;}
 #endif
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
-npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float*,float,std::uint64_t,float* waypoint,npc::navigation::Profile) noexcept {
-    std::memcpy(waypoint,from,12);return routeResult;
+// `vehicleRoutesBlocked`: no route for a hull's profile (wider than a soldier's), the soldiers' as routeResult.
+bool vehicleRoutesBlocked=false;float routeTo[3]{};float routeRadius=0;
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float,std::uint64_t,float* waypoint,npc::navigation::Profile profile) noexcept {
+    std::memcpy(waypoint,from,12);std::memcpy(routeTo,to,12);routeRadius=profile.radius;
+    if(vehicleRoutesBlocked && profile.radius>npc::navigation::Profile{}.radius)return npc::navigation::Result::blocked;
+    return routeResult;
 }
 #endif
 }
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
+// A test ini of this process's own (%TEMP%\<stem>_<pid>.ini): `ctest -R` runs from other worktrees / sessions at the
+// same time neither overwrite nor delete it (a fixed shared name did).
+static void TestIniPath(wchar_t (&path)[MAX_PATH],const wchar_t* stem) {
+    wchar_t dir[MAX_PATH];GetTempPathW(MAX_PATH,dir);
+    swprintf_s(path,L"%ls%ls_%lu.ini",dir,stem,static_cast<unsigned long>(GetCurrentProcessId()));
+}
 int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    {
+        // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
+        // member's, the defaults for a member who published none that reads (never this machine's).
+        memberConfig=SupportConfig{};memberConfig.squad=SupportWeapon::shotgun;memberConfig.aircraft[1]=3;
+        const float at[3]={1,2,3};
+        check(LoadoutOfPeer(0,1,at,0)==nullptr,"this machine's own request: its own configuration");
+        const SupportConfig* m=LoadoutOfPeer(2,1,at,7);
+        check(m && m->squad==SupportWeapon::shotgun && m->aircraft[1]==3 && memberLookups==1,"a member's request: that member's loadout");
+        check(LoadoutOfPeer(2,1,at,7)==m && memberLookups==1,"the same request planning across frames: looked up once");
+        {
+            planConfig=m;
+            check(&PlanCfg()==m,"PlanCfg is the requester's while planning");
+            planConfig=nullptr;
+            check(&PlanCfg()==&SupportCfg(),"and this machine's otherwise");
+        }
+        const SupportConfig* none=LoadoutOfPeer(3,1,at,7);
+        check(none && none->squad==SupportWeapon::rifle && none->aircraft[1]==0 && memberLookups==2,
+              "a member with no loadout that reads: the defaults");
+        check(LoadoutOfPeer(9,1,at,7)==nullptr,"a peer without a PUID (not online): this machine's");
+    }
     ResetSupportDispatch();
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
@@ -929,7 +996,7 @@ int main() {
     check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
     testOnline=false;
     // Out-of-mission configuration (support_config.h), read from a real ini as plugin.cpp does.
-    wchar_t ini[MAX_PATH];GetTempPathW(MAX_PATH,ini);wcscat_s(ini,L"edf6_support_dispatch_test.ini");
+    wchar_t ini[MAX_PATH];TestIniPath(ini,L"edf6_support_dispatch_test");
     FILE* f=nullptr;_wfopen_s(&f,ini,L"wb");check(f!=nullptr,"config ini written");
     const char text[]="[VehicleCrew]\r\nSupportDisabled=FIGHTER\r\nSupportSquadWeapon=shotgun\r\nSupportSquadLeaderWeapon=sniper\r\n"
                       "SupportPlatoonWeapons=flame,rocket,rifle\r\nSupportAircraftCrewWeapon=rocket\r\nSupportAircraftCount_HELI=3\r\n";
@@ -1221,7 +1288,7 @@ int main() {
     }
     {
         // Out-of-game loadouts (support_loadout.h, docs/feature-2026-10-09-loadout-editor.md), from a real ini.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_support_loadout_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_loadout_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"loadout ini written");
         const char loadText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=lance@1E3A8A*2,cannon,rifle@X:FFFFFF\r\n"
                               "SupportVehicle_TANK_CREWED=HE,AP:25\r\nSupportVehicle_STRIKE=MK82:6,MK82:6\r\n"
@@ -1311,7 +1378,7 @@ int main() {
     {
         // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
         // compatible resource still supplies its colours immediately (no pending-list round trip).
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_backpack_compat_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_backpack_compat_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
         const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
         std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
@@ -1336,7 +1403,7 @@ int main() {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
         // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
         // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
-        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_crew_colour_test.ini");
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_crew_colour_test");
         FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"crew colour ini written");
         const char crewText[]="[VehicleCrew]\r\nSupportCrewColour=1E3A8A\r\nSupportCrewColour_TANK_CREWED=X:FFFFFF\r\n"
                               "SupportCrewColour_SQUAD=123456\r\nSupportCrewColour_FIGHTER=bogus\r\nSupportCrewColour_MISSION=FFFFFF\r\n"
@@ -1440,6 +1507,38 @@ int main() {
         check(none,"no crew colour configured: no variant anywhere (the plan as it always was)");
         ResetSupportDispatch();
     }
+    // 2026-11-21 (docs/feature-npc-weapon-tier.md 2.5): a Fencer's two hands. Offline, a soldier whose preset names them
+    // (#R:L) carries those (PresetHandArms) and keeps them past GiveLocalArms; every other Fencer this player's own two
+    // (its kind's main hand and the slot beside it), a Ranger only its main hand.
+    {
+        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_support_hands_test");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"hands ini written");
+        const char handsText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=pilebanker#772:715,pilebanker,rifle*2\r\n";
+        std::fwrite(handsText,1,sizeof(handsText)-1,out);std::fclose(out);
+        LoadSupportConfig(path);DeleteFileW(path);
+        check(SupportCfg().preset[21].count==4 && SupportCfg().preset[21].hands[0]==FencerHands{772,715},"the preset's hands read from the ini");
+        const int pile=static_cast<int>(SupportWeapon::fencerPileBanker);
+        support_net::RequesterArms arms{};
+        npctier::Arms spear;spear.on=true;spear.id=715;npctier::Arms dexter;dexter.on=true;dexter.id=773;
+        npctier::Arms rifle;rifle.on=true;rifle.id=26;
+        arms.kind[pile]=npctier::PackArms(spear);arms.offhand[pile]=npctier::PackArms(dexter);arms.kind[0]=npctier::PackArms(rifle);
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        localArms=arms;armsLoad=support_net::PlanResult::ready;armsAsked=0;presetHandsAsked=0;
+        check(SupportCallAt(21,target,note,128),"a preset squad with hands is called");SupportDispatchTick();
+        check(made==4 && resourceCount==4 && presetHandsAsked==1,"made; the preset's hands asked for once");
+        check((lastArms[0]&0xFFFFu)==772 && (lastOffhand[0]&0xFFFFu)==715 && ((lastArms[0]>>16)&0xF)==1,
+              "seat 0: the preset's Galleon and spear (this player's stars), not the requester's pick");
+        check(lastArms[1]==arms.kind[pile] && lastOffhand[1]==arms.offhand[pile],"seat 1 (no #): this player's spear and the Dexter beside it");
+        check(lastArms[2]==arms.kind[0] && !lastOffhand[2] && lastArms[3]==arms.kind[0] && !lastOffhand[3],"the rifles: a main hand only");
+        check(Validate(deployments[0].plan),"the plan validates");
+        // The preset's hands cannot be given here: the requester's pick instead (logged), never a half-armed soldier.
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;presetHandsOk=false;
+        SupportCallAt(21,target,note,128);SupportDispatchTick();
+        check(made==4 && lastArms[0]==arms.kind[pile] && lastOffhand[0]==arms.offhand[pile],"no preset hands here: the requester's two");
+        presetHandsOk=true;localArms={};
+        LoadSupportConfig(L"Z:\\nonexistent\\edf6_none.ini");
+        ResetSupportDispatch();made=0;resourceCount=0;fixtureMs+=40000;
+    }
     // ---- The sea rescue entry (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」; 2026-10-10: no support
     // limits, a gunner, takeoff from the carrier, the requester's own) ----
     {
@@ -1534,6 +1633,102 @@ int main() {
     check(!SupportCallAt(0,target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"an air call underground: refused, said why");
     check(!SupportCallAt(GroundStart(),target,note,128) && !offlinePending && std::wcsstr(status,L"地下"),"a tank underground: refused");
     check(SupportCallAt(AirCount(),target,note,128) && offlinePending,"the infantry underground: planned");
+    // Underground the infantry calls come in the drill transport (the user: 「地底可以用钻地坦克」; docs/insertion-re.md §5):
+    // planned as its hull, its driver and the call's soldiers (a leader every four), made beside it and boarded, driven in;
+    // at the point its passengers are up to three squads handed to it (TransportDeliver), and then it drives back to its
+    // entry, where its driver and the hull are deleted (never the soldiers it delivered).
+    {
+        ResetSupportDispatch();made=deleted=followed=delivered=boardRequests=unseated=0;resourceCount=0;drillSpawns=0;
+        fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        check(SupportCallAt(AirCount()+1,target,note,128),"a platoon underground: taken");
+        SupportDispatchTick();
+        auto& d=deployments[0];
+        check(d.used && drillSpawns==1 && made==14 && d.plan.count==14 && DrillPlan(d.plan) &&
+              d.plan.units[0].resourceId==kSupportDrillTransportResource && !d.plan.units[0].role,
+              "planned and made: one drill transport, its driver and twelve soldiers");
+        bool shape=d.plan.units[1].role==1 && !IsSupportLeaderResource(d.plan.units[1].resourceId);
+        for(unsigned i=2;i<14;++i)shape=shape && d.plan.units[i].role==1 && IsSupportLeaderResource(d.plan.units[i].resourceId)==((i-2)%4==0);
+        check(shape,"its driver, then the platoon aboard (role 1): a leader every four");
+        float most=0;
+        for(unsigned i=1;i<14;++i)most=std::fmax(most,support::FlatDistance(d.plan.units[i].matrix+12,d.plan.units[0].matrix+12));
+        check(most<20.0f,"its thirteen gather on both sides of it (not a 27 m file)");
+        check(d.assigned && boardRequests==1 && !d.started,"all thirteen asked aboard at once; not off before they are seated");
+        const SupportPlan drillPlan=d.plan;
+        check(Validate(drillPlan),"a peer validates the drill transport's plan underground");
+        {
+            SupportPlan wrong=drillPlan;std::swap(wrong.units[2],wrong.units[3]);
+            check(!Validate(wrong),"a leader out of place: refused");
+            wrong=drillPlan;wrong.units[1].role=0;check(!Validate(wrong),"a driver not aboard: refused");
+            wrong=drillPlan;wrong.count=2;check(!Validate(wrong),"no soldier aboard: refused");
+            wrong=drillPlan;wrong.catalogId=static_cast<unsigned>(GroundStart()+2);check(!Validate(wrong),"a drill transport for another entry: refused");
+            drillReady=false;check(!Validate(drillPlan),"a peer without the drill transport preloaded refuses it");drillReady=true;
+            missionUnderground=false;check(!Validate(drillPlan),"above ground no infantry plan brings a hull");missionUnderground=true;
+        }
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(d.objects[0].obj));
+        for(unsigned i=1;i<14;++i)Put<const void*>(SeatAt(v,i-1),kSeatRider,d.objects[i].obj);
+        fixtureMs+=16;SupportDispatchTick();
+        check(d.started && !d.delivered && !delivered,"seated: it drives off along its route, nobody off yet");
+        // One soldier of the second squad lost on the way: the rest are still carried (not delivered where they sit).
+        static_cast<unsigned char*>(const_cast<void*>(d.objects[6].obj))[kDead]=1;
+        fixtureMs+=16;SupportDispatchTick();
+        check(!d.delivered && d.lost,"a passenger lost on the way: it drives on with the rest");
+        routeResult=npc::navigation::Result::arrived;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(d.delivered && delivered==1 && deliveredHull==d.objects[0].obj && deliveredSquads==3 && !deliveredHere &&
+              deliveredTops[0]==d.objects[2].obj && deliveredTops[1]==d.objects[7].obj && deliveredTops[2]==d.objects[10].obj,
+              "arrived: three squads handed to it (the lost leader's next soldier leads its squad), the driver not among them");
+        check(followed==8 && std::wcsstr(status,L"钻地"),"each other soldier follows its squad's leader; the HUD says the drill transport came");
+        bool carried=!d.carried[0] && !d.carried[1];
+        for(unsigned i=2;i<14;++i)carried=carried && d.carried[i]==(i!=6);
+        check(carried,"the delivered soldiers are the player's now (never deleted with it)");
+        // The delivery's end (transport.cpp EndTrip -> SupportWithdrawVehicle): they got off, it drives back to its entry.
+        for(unsigned i=1;i<13;++i)Put<const void*>(SeatAt(v,i),kSeatRider,nullptr);
+        check(SupportWithdrawVehicle(v) && d.withdrawing,"it goes back");
+        routeResult=npc::navigation::Result::moving;vehiclePosts=0;
+        fixtureMs+=16;SupportDispatchTick();
+        check(d.withdrawing && vehiclePosts==1 && !std::memcmp(routeTo,d.plan.units[0].matrix+12,12) &&
+              routeRadius==VehicleRouteProfile(kSupportDrillTransport).radius,"driven back to the entry it came in at, on its own profile");
+        routeResult=npc::navigation::Result::arrived;deleted=0;
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==1 && d.withdrawing,"out at its entry: its driver deleted");
+        fixtureMs+=16;SupportDispatchTick();
+        check(deleted==2 && !d.withdrawing,"then the drill transport");
+        routeResult=npc::navigation::Result::pending;
+    }
+    // A squad: four aboard, one squad handed over.
+    {
+        ResetSupportDispatch();made=followed=delivered=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        auto& d=deployments[0];
+        check(drillSpawns==1 && made==6 && d.plan.count==6 && DrillPlan(d.plan),"a squad underground: the drill transport, its driver, four");
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(d.objects[0].obj));
+        for(unsigned i=1;i<6;++i)Put<const void*>(SeatAt(v,i-1),kSeatRider,d.objects[i].obj);
+        fixtureMs+=16;SupportDispatchTick();routeResult=npc::navigation::Result::arrived;
+        fixtureMs+=16;SupportDispatchTick();fixtureMs+=16;SupportDispatchTick();
+        check(d.delivered && deliveredSquads==1 && deliveredTops[0]==d.objects[2].obj && followed==3,"arrived: one squad, its leader on top");
+        routeResult=npc::navigation::Result::pending;
+    }
+    // No entry with a route the drill transport can drive (a cave narrower than it): the soldiers walk in instead.
+    {
+        ResetSupportDispatch();made=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;vehicleRoutesBlocked=true;
+        SupportCallAt(AirCount(),target,note,128);
+        for(int i=0;i<64 && offlinePending;++i){fixtureMs+=16;SupportDispatchTick();}
+        check(!drillSpawns && made==4 && !DrillPlan(deployments[0].plan) && !deployments[0].plan.units[0].role,
+              "no drill route from any entry: the squad walks in");
+        vehicleRoutesBlocked=false;routeResult=npc::navigation::Result::pending;
+    }
+    // Its SGO not preloaded (a broken install): refused, said why, nothing made (no walking stand-in).
+    {
+        ResetSupportDispatch();made=0;drillSpawns=0;fixtureMs+=40000;routeResult=npc::navigation::Result::moving;drillReady=false;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        check(!made && !offlinePending && std::wcsstr(status,L"钻地运兵车"),"the drill transport not installed: refused, said why");
+        drillReady=true;
+        // NpcBoarding off (no NPC boards anything): the soldiers walk in.
+        config.npcBoarding=false;ResetSupportDispatch();made=0;fixtureMs+=40000;
+        SupportCallAt(AirCount(),target,note,128);SupportDispatchTick();
+        check(made==4 && !drillSpawns && !DrillPlan(deployments[0].plan),"NpcBoarding off: they walk in");
+        config.npcBoarding=true;routeResult=npc::navigation::Result::pending;
+    }
     missionUnderground=false;
     ResetSupportDispatch();fixtureMs+=40000;made=0;
     // Takeoff from the carrier's deck (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」): the deck spot nearest the

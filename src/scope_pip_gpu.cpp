@@ -264,10 +264,18 @@ struct LensCompositor::Impl final {
         return true;
     }
 
-    void Release() noexcept {
+    void ReleaseMain() noexcept {
         mainView.Reset();
         mainWidth = mainHeight = 0;
         mainYScale = 0.0f;
+    }
+
+    void Release() noexcept {
+        ReleaseMain();
+        ReleaseLens();
+    }
+
+    void ReleaseLens() noexcept {
         lensTexture.Reset();
         lensDesc = D3D11_TEXTURE2D_DESC{};
         lensViewFormat = DXGI_FORMAT_UNKNOWN;
@@ -289,7 +297,7 @@ bool LensCompositor::Ready(ID3D11DeviceContext* context) noexcept {
 }
 
 bool LensCompositor::CaptureMain(ID3D11DeviceContext* context, float yScale) noexcept {
-    if (impl_) impl_->Release();
+    if (impl_) impl_->ReleaseMain();
     if (!context || !UsableScale(yScale) || !Ready(context)) return false;
     BoundColor bound;
     if (!Bound(context, &bound)) return false;
@@ -301,9 +309,8 @@ bool LensCompositor::CaptureMain(ID3D11DeviceContext* context, float yScale) noe
 }
 
 bool LensCompositor::CaptureLens(ID3D11DeviceContext* context, int side, float yScale) noexcept {
-    if (!impl_ || !impl_->mainView) return false;
-    impl_->lensTexture.Reset();
-    if (!context || side <= 0 || !UsableScale(yScale) || !Ready(context) || !impl_->mainView) return false;
+    if (impl_) impl_->ReleaseLens();
+    if (!context || side <= 0 || !UsableScale(yScale) || !Ready(context)) return false;
     BoundColor bound;
     if (!Bound(context, &bound) || bound.desc.Width != static_cast<UINT>(side) ||
         bound.desc.Height != static_cast<UINT>(side)) return false;

@@ -27,6 +27,8 @@ unsigned char* image=nullptr;
 Config config{};
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; }
+ULONGLONG stepNow=100;   // the scene's step (crew.cpp GameFrame): the chase follower's clock, 1/60 s a step
+ULONGLONG GameFrame() noexcept { return stepNow; }
 void Log(const char*,...) noexcept {}
 bool mapKeys=false,mapView=false;
 bool MapHoldsKeys() noexcept { return mapKeys; }
@@ -47,7 +49,12 @@ bool PlayerTurretLead(const void*,unsigned,const void* gun,float* point) noexcep
     ++leadAsks;leadGun=gun;if(leadOn)std::memcpy(point,leadPoint,12);return leadOn;
 }
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
-bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
+// stab.cpp StabHeld with no stabilizer holding the gun: the axes as they are, no hull turn.
+bool StabHeld(const void* aim,float* held,float* hull,float*) noexcept {
+    const auto* a=static_cast<const unsigned char*>(aim);
+    held[0]=At<float>(a,kAimAxes+kAxisAngle);held[1]=At<float>(a,kAimAxes+kAxisStride+kAxisAngle);hull[0]=hull[1]=0.0f;
+    return false;
+}
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool mountedOptic=false;
 bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
@@ -85,9 +92,12 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     for(int i=0;i<3;++i)hit[i]=from[i]+t*(to[i]-from[i]);
     return vec::Dist(from,hit);
 }
-int loftCalls=0;bool loftWanted=false;
-void SetLauncherLoft(const void*,bool aim,float) noexcept { ++loftCalls;loftWanted=aim; }
-bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
+int loftCalls=0;bool loftWanted=false;float loftElevation=0.0f;
+void SetLauncherLoft(const void*,bool aim,float elevation) noexcept { ++loftCalls;loftWanted=aim;loftElevation=elevation; }
+// katyusha.cpp's Rack (the Katyusha's rack posed off its axes): only `rackPosed` vehicles have one; the V603's lofted
+// guns (the TOS-1, the X-Morph missile launcher) do not.
+bool rackPosed=false;
+bool LauncherLoft(const void*,LoftReadout* readout) noexcept { if(rackPosed)*readout=LoftReadout{}; return rackPosed; }
 int AndryushaSeat(const unsigned char*,const unsigned char*,unsigned char*) noexcept { return 0; }   // andryusha.cpp: not an Andryusha
 void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
@@ -98,7 +108,9 @@ bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) 
 bool indirectFixture=false;
 bool IndirectFireSeat(const unsigned char*) noexcept { if(!indirectFixture)Unexpected();return true; }
 void StabStep(void*,const float*,AimStepFn) noexcept { Unexpected(); }
-bool IsPlayerJet(const void*) noexcept { return false; }
+bool jetFixture=false;   // playerjet.cpp IsPlayerJet / PlayerRotorCraft: the chase fixture's craft
+bool IsPlayerJet(const void*) noexcept { return jetFixture; }
+bool PlayerRotorCraft(const void*) noexcept { return false; }
 bool IsHelicopter(const void*) noexcept { return false; }
 bool ProteusViewLift(const unsigned char*,float*,float*) noexcept { Unexpected();return false; }
 
@@ -137,6 +149,115 @@ struct Weapon {
         Put<int>(data,edf::kWeaponAmmoAlive,1200);Put<void*>(holder,kHolderWeapon,data);Put<void*>(holder,kHolderCtrl,weaponControl);Put<int>(weaponControl,8,1);
     }
 };
+// 2026-11-21 (「载具/玩家之类的视角优化一下」): the chase follower (chase_cam.h) as the camera hook runs it.
+void ChaseChecks(unsigned char* vehicle,unsigned char* seat,unsigned char* human,unsigned char* control,unsigned char* gun) {
+    float* const m=reinterpret_cast<float*>(vehicle+kMatrix);
+    struct Trace { float dir[3],eye[3]; bool ray; };
+    // The turret's normal view on a hull that drives 15 m/s for 1.5 s over a rough patch and stops: once with the follower,
+    // once without, the same input.
+    const auto drive=[&](bool chaseOn,std::vector<Trace>& trace,bool high) {
+        ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;selectedGun=gun;config.decoupledTurretCam=true;config.chaseCam=chaseOn;
+        highOn=false;mountedOptic=false;firstPersonVehicle=nullptr;mapKeys=mapView=observation=false;owner=0;
+        Put<void*>(seat,kSeatRider,human);localHuman=human;
+        Put<float>(seat,kSeatStick,0);Put<float>(seat,kSeatStick+4,0);
+        Matrix(vehicle+kMatrix);
+        unsigned char camera[0x700]{};float targets[20]{};
+        const float noInput[2]{};float noCommand[2]{};
+        for(int frameIndex=0;frameIndex<200;++frameIndex) {
+            ++stepNow;
+            if(frameIndex>=20 && frameIndex<110)m[14]+=0.25f;
+            if(frameIndex>=40 && frameIndex<70)m[13]+=frameIndex%2 ? 0.08f : -0.08f;
+            highOn=high && frameIndex>=120 && frameIndex<150;
+            TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);std::memset(targets,0,sizeof(targets));Camera(seat,targets,camera);
+            if(high && frameIndex==140)Check(!camSide.chase.valid,"the high view never runs the follower (its own centre eases)");
+            if(high && frameIndex==150)Check(camSide.chase.valid && vec::Dist(camSide.chase.pos,m+12)<1e-4f,
+                                             "back from the high view the follower starts over on the hull");
+            AcquireSRWLockShared(&lock);const Shared s=shared;ReleaseSRWLockShared(&lock);
+            Trace t{};t.ray=s.normalRay && !s.resume;std::memcpy(t.dir,s.normalDir,12);std::memcpy(t.eye,s.normalEye,12);trace.push_back(t);
+        }
+    };
+    std::vector<Trace> on,off,highTrace;
+    drive(true,on,false);drive(false,off,false);
+    bool sameRay=on.size()==off.size(),rays=true;float jolt[2]={0.0f,0.0f};
+    for(std::size_t i=20;i<on.size() && i<off.size();++i) {
+        rays=rays && on[i].ray && off[i].ray;
+        sameRay=sameRay && vec::Dist(on[i].dir,off[i].dir)<1e-5f;
+        if(i>40 && i<70){jolt[0]=std::fmax(jolt[0],std::fabs(on[i].eye[1]-on[i-1].eye[1]));jolt[1]=std::fmax(jolt[1],std::fabs(off[i].eye[1]-off[i-1].eye[1]));}
+    }
+    Check(rays,"the normal view publishes its own ray every frame with the follower on");
+    Check(sameRay,"the follower lags the eye only: the ray handed to the turret (PublishNormalRay / AimPoint) keeps the view's direction");
+    const float behind=off[100].eye[2]-on[100].eye[2];
+    Check(behind>1.0f && behind<2.0f,"driving 15 m/s the eye trails the hull by about v / omega (kGround), not rigidly on it");
+    Check(jolt[0]<0.5f*jolt[1],"a jolting hull shakes the followed eye less than half as much");
+    Check(vec::Dist(on.back().eye,off.back().eye)<1e-3f,"stopped, the followed eye settles where the rigid one is");
+    drive(true,highTrace,true);
+    config.chaseCam=true;highOn=false;
+
+    // The camera hook's own followers: a seat whose rider is this camera's player.
+    unsigned char rider[0x1600]{},riderCtrl[0x10]{},chaseCamera[0x700]{};
+    rider[kHumanPlayer]=1;Put<void*>(rider,kHumanPad,control);
+    Put<std::int32_t>(riderCtrl,8,1);Put<void*>(rider,kHumanVehicleCtrl-8,vehicle);Put<void*>(rider,kHumanVehicleCtrl,riderCtrl);
+    Put<void*>(seat,kSeatRider,rider);Put<void*>(chaseCamera,kCamTarget,rider);
+    ResetTurretCam();Matrix(vehicle+kMatrix);jetFixture=true;
+    float stockEye[3]={0,5,-20},stockLook[3]={0,2,10},eye[3],look[3];
+    ++stepNow;
+    Check(PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look) && vec::Dist(eye,stockEye)<1e-5f && vec::Dist(look,stockLook)<1e-5f,
+          "the player's jet: chased from the stock locators' points, on them as it starts");
+    for(int i=0;i<240;++i) {
+        ++stepNow;m[14]+=100.0f/60.0f;stockEye[2]+=100.0f/60.0f;stockLook[2]+=100.0f/60.0f;
+        PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);
+    }
+    Check(vec::Dist(eye,stockEye)<1e-2f && vec::Dist(look,stockLook)<1e-2f,"flying straight at 100 m/s: on the stock points, no lag for the speed");
+    const auto viewRows=[&](float* rows) {
+        float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
+        float l[3],u[3];chase::LevelFrame(f,l,u);
+        std::memset(rows,0,64);
+        for(int i=0;i<3;++i){rows[i]=l[i];rows[4+i]=u[i];rows[8+i]=f[i];rows[12+i]=eye[i];}
+    };
+    const auto bankOf=[](const float* rows){return std::atan2(rows[1],rows[5])*180.0f/tcam::kPi;};   // cockpit_instruments.h BankOf
+    float rows[16];viewRows(rows);ChaseCamUp(chaseCamera,rows);
+    Check(std::fabs(bankOf(rows))<1e-3f,"wings level: the picture is not rolled");
+    // Banked 30 deg (right wing down), the locators turning with the airframe round its origin.
+    const float b=30.0f*tcam::kPi/180.0f,origin[3]={m[12],m[13],m[14]};
+    m[0]=std::cos(b);m[1]=std::sin(b);m[2]=0;m[4]=-std::sin(b);m[5]=std::cos(b);m[6]=0;
+    for(int i=0;i<3;++i){stockEye[i]=origin[i]+m[4+i]*5.0f-m[8+i]*20.0f;stockLook[i]=origin[i]+m[4+i]*2.0f+m[8+i]*10.0f;}
+    for(int i=0;i<300;++i){++stepNow;PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);}
+    viewRows(rows);ChaseCamUp(chaseCamera,rows);
+    Check(std::fabs(bankOf(rows)-0.4f*30.0f)<1.5f,"banked 30 deg: the picture rolls about 40% of it (kJet), the same way as BankOf");
+    Check(std::fabs((eye[0]-origin[0])+5.0f*std::sin(0.4f*b))<0.05f,"the eye over the craft swings round it by that share, not welded to the airframe");
+    float again[16];viewRows(again);std::memcpy(rows,again,64);ChaseCamUp(chaseCamera,rows);
+    Check(std::memcmp(rows,again,64)==0,"a step's roll is used once");
+    PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look);++stepNow;viewRows(rows);std::memcpy(again,rows,64);ChaseCamUp(chaseCamera,rows);
+    Check(std::memcmp(rows,again,64)==0,"a roll from an earlier step is never applied");
+    firstPersonVehicle=vehicle;firstPersonSeat=0;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"first person: no chase (the cockpit's bone)");
+    firstPersonVehicle=nullptr;mountedOptic=true;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"the mounted optic: no chase");
+    mountedOptic=false;config.chaseCam=false;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"ChaseCam=0: no chase");
+    config.chaseCam=true;Put<void*>(chaseCamera,kCamTarget,human);
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"another player's camera never follows this seat");
+    Put<void*>(chaseCamera,kCamTarget,rider);jetFixture=false;
+    Check(!PlayerJetChase(chaseCamera,seat,stockEye,stockLook,eye,look),"not one of the player's jets: not chased as one");
+    // A ground seat (the Sazabi's, a gunner's): the origin sprung, the direction the input's.
+    Matrix(vehicle+kMatrix);ForgetFollower(chaseCamera);
+    bool direction=true;float trail=0.0f;
+    for(int i=0;i<120;++i) {
+        ++stepNow;m[12]+=0.2f;
+        const float yaw=0.02f*i;
+        float e[3]={m[12]-20.0f*std::sin(yaw),m[13]+6.0f,m[14]-20.0f*std::cos(yaw)},l[3]={m[12],m[13]+2.0f,m[14]};
+        const float want[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]},rigid[3]={e[0],e[1],e[2]};
+        direction=direction && FollowSeat(chaseCamera,seat,ChaseKind::ground,e,l);
+        const float got[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]};
+        direction=direction && vec::Dist(want,got)<1e-4f;
+        trail=vec::Dist(rigid,e);
+    }
+    Check(direction,"a ground seat's follower keeps the input's view direction exactly");
+    Check(trail>0.5f,"... and lags the moving vehicle");
+    ResetTurretCam();
+    Put<void*>(seat,kSeatRider,human);
+}
+
 void Run() {
     config.debug=false;
     std::vector<unsigned char> module(0x20B2960);
@@ -225,14 +346,23 @@ void Run() {
     Check(cameraReads==0 && !shared.highView && !shared.returning,
           "leaving coupled high mode seeds native axes without sampling the observation camera");
     terrain=true;Put<int>(picked.data,edf::kWeaponAmmoAlive,1200);Put<int>(picked.data,edf::kWeaponMark,edf::kMarkLofted);
+    // 2026-11-21 (「重型导弹这种开启俯瞰视角应该高抛弹道」): the high view lofts onto the range the native pitch axis names
+    // (launcher.cpp AxisLoftWant), never onto a camera ray: the camera observes the landing.
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.3f);
     LauncherFrame(vehicle);
-    Check(loftCalls==1 && !loftWanted && cameraReads==0,"high launcher releases camera-driven loft without consuming CameraRay");
+    const float highLoft=loftElevation;
+    Check(loftCalls==1 && loftWanted && highLoft>0.79f && cameraReads==0,"high launcher lofts onto its axis' range without consuming CameraRay");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.15f);LauncherFrame(vehicle);
+    Check(loftCalls==2 && loftWanted && loftElevation>highLoft+0.01f && cameraReads==0,
+          "high launcher: the axis lowered names a nearer range, the high arc to it is steeper");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,-0.3f);
     highOn=false;PublishObservation(seat,true);LauncherFrame(vehicle);
-    Check(loftCalls==2 && !loftWanted && cameraReads==0,
-          "exiting high camera keeps loft released while the camera blends even after native aim resumes");
+    Check(loftCalls==3 && loftWanted && std::fabs(loftElevation-highLoft)<1e-5f && cameraReads==0,
+          "exiting high camera keeps the axis-named loft while the camera blends even after native aim resumes");
+    Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,0.0f);
     Check(TurretCamHighTransition(vehicle) && !TurretCamHighTransition(human),"observation belongs only to this vehicle");
     PublishObservation(seat,false);LauncherFrame(vehicle);
-    Check(loftCalls==3 && cameraReads>0,"normal launcher retains the existing camera-to-loft path once blending ends");
+    Check(loftCalls==4 && cameraReads>0,"normal launcher retains the existing camera-to-loft path once blending ends");
     // Identical real muzzle and target: only a freely falling shell may request a low arc or a dropped reticle.
     selectedGun=primary.data;shared.high=false;
     const float frame[9]={1,0,0,0,1,0,0,0,1},target[3]={-4,8,210};
@@ -254,10 +384,99 @@ void Run() {
     Readout(seat,shared,true,target,true);
     Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"propelled rocket reticle remains on its bore line");
     motorWeapon=nullptr;Put<int>(primary.data,edf::kWeaponMark,edf::kMarkLofted);
+    // The Katyusha's rack is katyusha.cpp's to pose (its Rack): its axes get the bore line.
+    rackPosed=true;
     Check(Wants(seat,frame,target,true,shellWant) && std::fabs(shellWant[1]-boreWant[1])<1e-6f,
-          "lofted launcher retains its independent elevation controller");
+          "a posed lofted launcher (the Katyusha's rack) retains its independent elevation controller");
     Readout(seat,shared,true,target,true);
-    Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"lofted launcher readout matches its independent bore-line command");
+    Check(vec::Dist(out.r.gun,boreReadout.gun)<1e-5f,"a posed lofted launcher's readout matches its independent bore-line command");
+    rackPosed=false;
+    // A lofted gun nothing else poses (the V603's TOS-1 / X-Morph missile launcher, 2026-11-21: 「重型导弹这种开启俯瞰视角
+    // 应该高抛弹道」): its axes lay the high arc within the pitch stops (here up to 1.5 rad) while the round lives to come
+    // down (here 2 m a frame, 1 g of 9.8: 800 m out the high arc flies 1409 frames), else the low arc.
+    {
+        const double drop=9.8/3600.0;
+        const float farPoint[3]={-4,8,810},nearPoint[3]={-4,8,210};
+        float high=0.0f,low=0.0f,n=0.0f,nearLow=0.0f,nearHigh=0.0f,want[2]{};
+        edf::BallisticArc(800.0,0.0,2.0,drop,true,high,n);edf::BallisticArc(800.0,0.0,2.0,drop,false,low,n);
+        edf::BallisticArc(200.0,0.0,2.0,drop,false,nearLow,n);edf::BallisticArc(200.0,0.0,2.0,drop,true,nearHigh,n);
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+        Check(Wants(seat,frame,farPoint,true,want) && std::fabs(want[1]+low)<1e-4f && low<0.5f,
+              "unposed lofted gun: a high arc past the round's life falls back to the low arc");
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1500);
+        Check(Wants(seat,frame,farPoint,true,want) && std::fabs(want[1]+high)<1e-4f && high>1.0f && high<1.5f,
+              "unposed lofted gun: its axes lay the high arc while the round lives to land");
+        Check(nearHigh>1.5f && Wants(seat,frame,nearPoint,true,want) && std::fabs(want[1]+nearLow)<1e-4f,
+              "unposed lofted gun: a high arc over the pitch stop falls back to the low arc");
+        Check(Wants(seat,frame,farPoint,false,want) && std::fabs(want[1]-boreWant[1])<1e-6f,
+              "unposed lofted gun: a view with no real hit keeps the bore line (no made-up range)");
+        // The readout: the round on the bore's arc where it has come the point's distance across (a high arc's flight
+        // is far longer than the straight range over its speed): laid on the high arc, the mark is on the point.
+        Put<float>(primary.bone,edf::kBoneRows+0x24,std::sin(high));Put<float>(primary.bone,edf::kBoneRows+0x28,std::cos(high));
+        Readout(seat,shared,true,farPoint,true);
+        Check(vec::Dist(out.r.gun,farPoint)<3.0f,"unposed lofted gun laid on its high arc: the readout's mark is on the point");
+        Matrix(primary.bone+edf::kBoneRows,-4,8,10);
+        Put<float>(primary.bone,edf::kBoneRows+0x24,std::sin(0.2f));Put<float>(primary.bone,edf::kBoneRows+0x28,std::cos(0.2f));
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+    }
+    // The high view of that gun (HighLoft, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the yaw input stays native,
+    // the pitch input moves a range (set on entry from where the gun's elevation throws over level ground) and the pitch
+    // axis is steered onto the high arc to the ground there. The camera's ray and the observed landing (ShotFocus) are
+    // never inputs: a different observed focus gives the same command.
+    {
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1500);
+        const float params[3]={0.3f,0.1f,0.02f};std::memcpy(seat+kSeatAim+kAimParams,params,12);
+        float* pitchAxis=reinterpret_cast<float*>(seat+kSeatAim+kAimAxes+kAxisStride);
+        pitchAxis[2]=-0.5f;Put<float>(pitchAxis,kAxisRate,0.0f);
+        game=GameSide{};shared.high=true;shared.highView=false;shared.observing=false;shared.decoupled=true;
+        shared.focusValid=true;shared.focusHit=true;shared.focus[0]=900;shared.focus[1]=-25;shared.focus[2]=-300;
+        cameraReads=0;owner=0;Put<std::uint16_t>(seat,kSeatButtons,0);
+        const double drop=9.8/3600.0;
+        const float rest[2]{};float cmd[2]{9,9};
+        Aim(seat,rest,cmd);
+        const float entry=edf::LevelRange(2.0,drop,0.5f);
+        Check(game.loft.set && std::fabs(game.loft.range-entry)<1e-3f*entry && entry>1000.0f,
+              "high view, lofted gun: the range is set on entry from where its elevation throws over level ground");
+        float expect=0.0f;
+        Check(edf::LoftElevation(entry,floorY-8.0,2.0,drop,1500,-0.5f,1.5f,expect)==edf::LoftArc::high && cmd[1]<0.0f && cmd[0]==0.0f,
+              "high view, lofted gun: the pitch is steered up toward the high arc to that range, the yaw input native");
+        const GameSide before=game;const float angle=pitchAxis[2];
+        Aim(seat,rest,cmd);const float firstCmd=cmd[1];
+        game=before;pitchAxis[2]=angle;shared.focus[0]=-700;shared.focus[2]=1200;shared.focusHit=false;
+        Aim(seat,rest,cmd);
+        Check(cmd[1]==firstCmd && cameraReads==0,"high view, lofted gun: the observed landing and the camera are never its target (no loop)");
+        bool native=true;
+        for(int f=0;f<600;++f) {
+            const float yawIn[2]={0.4f,0.0f};
+            Aim(seat,yawIn,cmd);native=native && cmd[0]==0.4f;
+            tcam::Axis x{pitchAxis[0],pitchAxis[1],pitchAxis[2],At<float>(pitchAxis,kAxisRate)};
+            tcam::AxisStep(x,cmd[1],params);pitchAxis[2]=x.angle;Put<float>(pitchAxis,kAxisRate,x.rate);
+        }
+        Check(native && std::fabs(pitchAxis[2]+expect)<0.01f && expect>0.8f,
+              "high view, lofted gun: the axis settles on the high arc to the input's range");
+        const float settled=game.loft.range;
+        for(int f=0;f<30;++f){const float up[2]={0.0f,-1.0f};Aim(seat,up,cmd);}
+        const float farther=game.loft.range;
+        for(int f=0;f<60;++f){const float down[2]={0.0f,1.0f};Aim(seat,down,cmd);}
+        Check(farther>settled+100.0f && game.loft.range<farther-200.0f && cameraReads==0,
+              "high view, lofted gun: the native pitch input moves the range (raise: farther, lower: nearer)");
+        for(int f=0;f<2000;++f){const float down[2]={0.0f,1.0f};Aim(seat,down,cmd);}
+        Check(std::fabs(game.loft.range-tcam::kLoftLeast)<1e-3f,"high view, lofted gun: the range stops at its nearest");
+        const float held=game.loft.range;
+        config.freeLookButton=0x10;Put<std::uint16_t>(seat,kSeatButtons,0x10);
+        const float in[2]={0.3f,-0.6f};Aim(seat,in,cmd);
+        Check(cmd[0]==0.0f && cmd[1]==0.0f && game.loft.range==held,"high view, lofted gun: free look holds the gun and the range");
+        Put<std::uint16_t>(seat,kSeatButtons,0);
+        owner=1;Aim(seat,in,cmd);
+        Check(cmd[0]==in[0] && cmd[1]==in[1] && !game.loft.set,"high view, lofted gun: another hand's input keeps the gun; the range is set anew after");
+        owner=0;rackPosed=true;Aim(seat,in,cmd);
+        Check(cmd[0]==in[0] && cmd[1]==in[1],"high view: the Katyusha's posed rack keeps its native axes (katyusha.cpp lifts the rack)");
+        rackPosed=false;
+        const float zero[3]{};std::memcpy(seat+kSeatAim+kAimParams,zero,12);
+        pitchAxis[2]=0.0f;Put<float>(pitchAxis,kAxisRate,0.0f);
+        game=GameSide{};shared.high=false;shared.highView=false;shared.focusValid=false;
+        Put<int>(primary.data,edf::kWeaponAmmoAlive,1200);
+    }
     // Exercise the production frame sampler too: a closed toggle is not sufficient while the displayed camera is
     // still blending out. Nonzero stick and a new free-look press used to clear the timer and consume that old ray.
     lookOk=true;nextAim=&UnexpectedAim;shared.ref=ObjRef::Of(vehicle);Put<int>(seat,kSeatCamType,1);
@@ -400,7 +619,15 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true,clear=true;
+        // The optical ray (eye through the written look) passes within this many m of the shot's landing (across the
+        // ground): the collision pivot sits at the eye's end of that ray (tcam::HighPivot), not on the landing.
+        const auto offRay=[&](const float* e,const float* l)->float {
+            float d[3]={l[0]-e[0],l[1]-e[1],l[2]-e[2]};
+            if(!vec::Normalize(d) || !(d[1]<-1e-3f))return 1e9f;
+            const float t=(shared.focus[1]-e[1])/d[1];
+            return std::hypot(e[0]+d[0]*t-shared.focus[0],e[2]+d[2]*t-shared.focus[2]);
+        };
         const float wantPitch=-std::atan2(45.f,35.f);
         float settledEye[3]{},lastLook[3]{};
         for(int frameIndex=0;frameIndex<120;++frameIndex) {
@@ -410,6 +637,26 @@ void Run() {
             realFocus=realFocus && shared.focusValid && shared.focusHit && std::fabs(shared.focus[1])<1e-4f;
             float targets[20]{};targets[1]=2;Camera(seat,targets,camera);
             auto eye=reinterpret_cast<float*>(camera+kCamEye);auto look=reinterpret_cast<float*>(camera+kCamLook);
+            // 2026-11-21 ("俯瞰视角移动的时候会白屏一下……会抖动"): a building 30 m tall 10 m in front of the landing (between
+            // it and the eye) must not be on the segment the game's collision sweeps (look -> eye): before, the pivot was
+            // the landing and that segment ran through the wall, pulling the eye onto it.
+            if(frameIndex>20) {
+                // The point observed: where the optical ray meets the landing's ground (the eased centre while the gun rocks).
+                float ray[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(ray);
+                const float reach=(shared.focus[1]-eye[1])/ray[1];
+                const float seen[3]={eye[0]+ray[0]*reach,shared.focus[1],eye[2]+ray[2]*reach};
+                const float h[2]={eye[0]-seen[0],eye[2]-seen[2]};
+                const float run=std::hypot(h[0],h[1]);
+                const float wallAt=10.0f,wallTop=seen[1]+30.0f;
+                const auto crosses=[&](const float* from)->bool {
+                    const float a=(from[0]-seen[0])*h[0]/run+(from[2]-seen[2])*h[1]/run;
+                    const float b=run;
+                    if(!(a<wallAt && b>wallAt))return false;
+                    const float t=(wallAt-a)/(b-a);
+                    return from[1]+(eye[1]-from[1])*t<wallTop;
+                };
+                clear=clear && !crosses(look) && crosses(seen);
+            }
             NativeCameraClip(eye,look,targets,floorY,At<float>(camera,0x528),frameIndex%3);
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
@@ -418,17 +665,18 @@ void Run() {
             // landing (the screen's middle, where the HUD's mark is) and holds still there. From frame 40 the gun rocks
             // (its muzzle moved every frame, the landing with it): the view follows eased, never a jump to each new
             // landing; once the gun is steady again (frame 70) it settles back on the landing.
-            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && offRay(eye,look)<0.5f;
             if(frameIndex==30)std::memcpy(settledEye,eye,12);
             if(frameIndex>30 && frameIndex<=40)still=still && vec::Dist(eye,settledEye)<1e-2f;
             if(frameIndex>40 && frameIndex<70)eased=eased && std::hypot(look[0]-lastLook[0],look[2]-lastLook[2])<12.0f;
-            if(frameIndex>110)back=back && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex>110)back=back && offRay(eye,look)<0.5f;
             std::memcpy(lastLook,look,12);
             if(frameIndex>=40 && frameIndex<70)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
             if(frameIndex==70)Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         }
         Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         Check(onFocus,"the high view looks at the shot's landing, not the vehicle");
+        Check(clear,"the high view's collision sweep stays at the eye: a building before the landing never pulls the eye in");
         Check(still,"a steady gun holds the high view still");
         Check(eased,"a rocking gun's landing is followed eased, without jumps");
         Check(back,"the high view settles back on the landing");
@@ -501,6 +749,7 @@ void Run() {
     Readout(seat,intent,false,commandPoint,false,false);Check(!out.r.aimValid,"missing current camera target cannot publish stale mouse intent");
     intent.physicalOnly=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"fixed gun physical endpoint is not a movable command circle");
     intent.physicalOnly=false;intent.high=true;Readout(seat,intent,false,commandPoint,false,true);Check(!out.r.aimValid,"high camera ballistic focus is not mouse intent");
+    ChaseChecks(vehicle,seat,human,control,primary.data);
     DWORD ignored=0;VirtualProtect(image+kPoint,14,protection,&ignored);
     image=nullptr;
 }

@@ -18,14 +18,15 @@ void Jump(std::size_t at,void* destination){unsigned char code[14]={0xFF,0x25,0,
 crew::Handle* __fastcall Child(const crew::Handle* parent,crew::Handle* out,const wchar_t* name){
  *out={};unsigned index=0;
  if(parent->tree==object+crew::kTreeAt && marked && std::wcscmp(name,L"edf41_hector")==0)index=1;
- else if(parent->tree==object+crew::kTreeAt && shieldKey && std::wcscmp(name,L"edf41_hector_shield")==0)index=5;   // {arms: [1], sgo}
- else if(parent->index==5){if(std::wcscmp(name,L"arms")==0)index=6;else if(std::wcscmp(name,L"sgo")==0)index=7;}
+ else if(parent->tree==object+crew::kTreeAt && shieldKey && std::wcscmp(name,L"edf41_hector_weapons")==0)index=5;   // {sgo: [2], shield: [1]}
+ else if(parent->index==5){if(std::wcscmp(name,L"shield")==0)index=6;else if(std::wcscmp(name,L"sgo")==0)index=7;}
  else if(parent->index==1){if(std::wcscmp(name,L"ranges")==0)index=2;else if(std::wcscmp(name,L"same_weapon")==0)index=3;else if(std::wcscmp(name,L"ai")==0)index=4;}
  if(index)*out={reinterpret_cast<void*>(1),index,0};return out;
 }
-int __fastcall Count(const crew::Handle* handle){return handle->index==2 ? 2 : handle->index==4 ? 7 : handle->index==6 ? 1 : 0;}
-std::uint32_t __fastcall Index(const crew::Handle* handle,std::uint32_t index){return handle->index==2 ? 20+index : handle->index==6 ? 60+index : 40+index;}
-const wchar_t* __fastcall Text(const crew::Handle* handle){return handle->index==7 ? L"app:/Object/HECTOR401_SHIELD_COLLISION.SGO" : nullptr;}
+int __fastcall Count(const crew::Handle* handle){return handle->index==2 ? 2 : handle->index==4 ? 7 : handle->index==6 ? 1 : handle->index==7 ? 2 : 0;}
+std::uint32_t __fastcall Index(const crew::Handle* handle,std::uint32_t index){return handle->index==2 ? 20+index : handle->index==6 ? 60+index : handle->index==7 ? 70+index : 40+index;}
+const wchar_t kGun[]=L"app:/Object/edf41_hector401_launcher.sgo",kShield[]=L"app:/Object/edf41_hector401_shield.sgo";
+const wchar_t* __fastcall Text(const crew::Handle* handle){return handle->index==70 ? kGun : handle->index==71 ? kShield : nullptr;}
 float __fastcall Number(const crew::Handle* handle){
  if(handle->index==60)return 1;   // the shield is on arms_r (gun_control entry 1)
  if(handle->index==20)return 100;if(handle->index==21)return 200;if(handle->index==3)return 0;
@@ -55,18 +56,34 @@ int BoneIndex(void*,const wchar_t*) noexcept {return -1;}
 bool Particle(const float*,int,float,const float*,const wchar_t*) noexcept {return true;}
 void StencilLight(const float*,const float*,float,int) noexcept {}
 bool AimPoint(const void*,float* out) noexcept {out[0]=10;out[1]=100;out[2]=20;return true;}
-// the shield (edf41ai Shields): made only once the fixture's object carries edf41_hector_shield; CreateFromPath stands for
-// the factory (CreateShield registers the object), DeleteObject records what goes
+// the weapons (edf41ai Weapons): made only once the fixture's object carries edf41_hector_weapons; CreateFromPath stands for
+// the factory (MakeWeapon registers the object), DeleteObject records what goes
 const std::uint32_t kEaoSlots[45]{};
 bool BuildClone(Clone&,DtorFn,UpdateFn,MessageFn) noexcept {return false;}
 void SetSlot(Clone&,int,void*) noexcept {}
 void AllowAnyTeam(Clone&) noexcept {}
 bool AddFactory(const wchar_t*,CreateFn) noexcept {return false;}
-void* CloneObject(Clone&,std::size_t,std::size_t,void*) noexcept {fixture::Check(false,"no shield object is made");return nullptr;}
+void AtGameShutdown(void(*)() noexcept) noexcept {}
+void* CloneObject(Clone&,std::size_t,std::size_t,void*) noexcept {fixture::Check(false,"no weapon object is made");return nullptr;}
 void* CreateFromPath(const float*,const wchar_t* path) noexcept {
- fixture::Check(fixture::shieldKey && std::wcscmp(path,L"app:/Object/HECTOR401_SHIELD_COLLISION.SGO")==0,"a shield is asked for only by its edf41_hector_shield path");
- ++fixture::created;crew::shields[fixture::shieldObject]=crew::ShieldRec{};return fixture::shieldObject;
+ fixture::Check(fixture::shieldKey && std::wcscmp(path,fixture::kShield)==0,"only the arm with a bone asks for its weapon, by its edf41_hector_weapons path");
+ ++fixture::created;crew::weapons[fixture::shieldObject].shield=true;return fixture::shieldObject;
 }
+int modelMatrices=0;
+bool ModelMatrix(void*,const float*) noexcept {++modelMatrices;return true;}
+int disabled=0;
+bool DisableRagdoll(void*) noexcept {++disabled;return false;}
+const SgoNode* Key(const void*,const wchar_t*) noexcept {return nullptr;}
+const SgoNode* Child(const SgoNode*,int) noexcept {return nullptr;}
+int Count(const SgoNode*) noexcept {return -1;}
+bool Float(const SgoNode*,float*) noexcept {return false;}
+bool Int(const SgoNode*,std::int32_t*) noexcept {return false;}
+bool Text(const SgoNode*,wchar_t*,std::size_t) noexcept {return false;}
+int MaterialAnimsLoad(MaterialAnims&,void*,const SgoNode*,const int*,int) noexcept {return 0;}
+int deathPlays=0;
+void MaterialAnimsPlay(MaterialAnims&,int index,int mode) noexcept {if(index==1 && mode==1)++deathPlays;}
+void MaterialAnimsUpdate(MaterialAnims&,void*) noexcept {}
+void MaterialAnimsFree(MaterialAnims&) noexcept {}
 void DeleteObject(void* object) noexcept {++fixture::deleted;fixture::lastDeleted=object;}
 void SetFlag(void*,std::uint32_t,bool) noexcept {}
 bool SetTeam(void*,std::int32_t,bool) noexcept {return false;}
@@ -103,29 +120,34 @@ int main(){
  entry->pickTick=entry->tick;entry->pickMask=0;GunStartHook(gun[0]);Check(starts==2,"exit restores real AI arm selection instead of leaving a global bypass");
  *reinterpret_cast<void**>(gun[0]+kGunOwnerAt)=other;active=true;GunStartHook(gun[0]);
  Check(starts==3,"ordinary non-EDF4.1 gun ownership passes through unchanged");
- // The shield arm (edf41_hector_shield {arms: [1], sgo}): its gun never starts, whoever drives; its shield is made once,
- // kept through a pause and goes with the entry.
+ // The shield arm (edf41_hector_weapons {sgo: [launcher, shield], shield: [1]}): its gun never starts, whoever drives; its
+ // weapon object is made once, kept through a pause and goes with the entry.
  *reinterpret_cast<void**>(gun[0]+kGunOwnerAt)=object;shieldKey=true;
  *reinterpret_cast<std::int32_t*>(bones+kBoneParentAt)=-1;for(int i=0;i<16;i+=5)reinterpret_cast<float*>(bones+kBoneWorldAt)[i]=1;
  reinterpret_cast<float*>(bones+kBoneWorldAt)[12]=31;
  *reinterpret_cast<unsigned char**>(object+kSkeletonAt+0x10)=bones;*reinterpret_cast<std::int64_t*>(object+kSkeletonAt+0x20)=1;
- entry->shieldRead=false;entry->bonesTried=true;entry->arm[1]=0;
+ entry->weaponsRead=false;entry->bonesTried=true;entry->arm[1]=0;
  animState=1;active=false;entry->pickTick=entry->tick;entry->pickMask=hector::kArmLeft|hector::kArmRight;const int fired=starts;
  GunStartHook(gun[1]);animState=2;   // the SGO readers checked once (the fake image has no prints); head / lights stay off below
  Check(entry->shieldMask==2u && starts==fired,"AI-driven: the shield arm's gun never starts, even when the AI's pick includes it");
  active=true;GunStartHook(gun[1]);Check(starts==fired,"player-driven: the shield arm's gun still never starts");
  GunStartHook(gun[0]);Check(starts==fired+1,"player-driven: the other arm still fires");
  BaseUpdateHook(object,nullptr);BaseUpdateHook(object,nullptr);
- Check(created==1 && entry->shield[1].object==shieldObject && entry->shield[0].object==nullptr,"the shield is asked for once, on its arm only, not every frame");
- Check(reinterpret_cast<const float*>(shieldObject+edf41c::kMatrixAt)[12]==31,"the shield follows its arm bone's world matrix");
+ Check(created==1 && entry->weapon[1].object==shieldObject && entry->weapon[0].object==nullptr,"the weapon is asked for once, on its arm only, not every frame");
+ Check(reinterpret_cast<const float*>(shieldObject+edf41c::kMatrixAt)[12]==31,"the weapon object follows its arm bone's world matrix");
+ Check(edf41c::modelMatrices==2 && edf41c::disabled==0 && weapons[shieldObject].layered,"its skeleton is rebuilt from that matrix every frame; a live shield keeps its ragdoll");
+ object[kDestroyedAt]=1;BaseUpdateHook(object,nullptr);BaseUpdateHook(object,nullptr);
+ Check(edf41c::deathPlays==1 && weapons[shieldObject].dead && edf41c::disabled==2 && deleted==0,"the Hector dies: its weapon plays its death block once, its ragdoll leaves the world, the object stays on the corpse");
+ Check(reinterpret_cast<const float*>(shieldObject+edf41c::kMatrixAt)[12]==31 && edf41c::modelMatrices==4,"on the corpse it still follows the arm bone");
+ object[kDestroyedAt]=0;
  fakeClock+=60000;BaseUpdateHook(object,nullptr);   // a pause of a minute: nothing ticked, the wall clock went on
- Check(Find(object)==entry && deleted==0 && created==1 && entry->shield[1].object==shieldObject,"a long pause keeps the entry and its shield (not deleted and made again)");
- table[ghost].seenAt=0;edf41c::WeakSet(table[ghost].shield[0],ghostShield);table[recent].seenAt=0x7000;
+ Check(Find(object)==entry && deleted==0 && created==1 && entry->weapon[1].object==shieldObject,"a long pause keeps the entry and its weapon (not deleted and made again)");
+ table[ghost].seenAt=0;edf41c::WeakSet(table[ghost].weapon[0],ghostShield);table[recent].seenAt=0x7000;
  ticks=0x7FFF;Tick(object);   // the sweep: every kStaleTicks Hector ticks
- Check(table.count(ghost)==0 && deleted==1 && lastDeleted==ghostShield,"an entry not ticked for kStaleTicks Hector ticks is swept with its shield");
- Check(table.count(recent)==1 && Find(object)==entry && entry->shield[1].object==shieldObject,"entries ticked within kStaleTicks stay, the live one's shield too");
+ Check(table.count(ghost)==0 && deleted==1 && lastDeleted==ghostShield,"an entry not ticked for kStaleTicks Hector ticks is swept with its weapons");
+ Check(table.count(recent)==1 && Find(object)==entry && entry->weapon[1].object==shieldObject,"entries ticked within kStaleTicks stay, the live one's weapon too");
  table.erase(recent);marked=false;Tick(object);
- Check(table.count(object)==0 && deleted==2 && lastDeleted==shieldObject,"a Hector that loses its marker drops its entry and deletes its shield");
- shields.clear();
+ Check(table.count(object)==0 && deleted==2 && lastDeleted==shieldObject,"a Hector that loses its marker drops its entry and deletes its weapons");
+ weapons.clear();
  table.clear();VirtualFree(image,0,MEM_RELEASE);image=nullptr;std::printf("PASS %d production Hector control-isolation checks\n",checks);
 }

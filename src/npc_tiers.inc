@@ -381,3 +381,224 @@ inline constexpr TierRow kTierRows[]={
     {14,9,1375,-1,4050,L"MPACK_A_Weapon001"},   // MA9E Slade
     {14,9,1451,1375,4300,L"MPACK_B_Weapon001"},   // MA10E Slade
 };
+// Every Fencer hand weapon (docs/weapons.csv class Fencer, categories 200-205: what the hand slots Slot1L/1R/2L/2R
+// take), {weapon id, WEAPONTABLE name}: what a support Fencer may hold in either hand (npc_tier.h PickHands,
+// support_loadout.h ParseSupportPreset #R:L; docs/feature-npc-weapon-tier.md 2.5).
+inline constexpr HandRow kFencerHands[]={
+    {690,L"hImpactHammer01"},   // Vibro Hammer
+    {691,L"hWeapon001"},   // Vibro Hammer F3
+    {692,L"hWeapon002"},   // Force Blade
+    {693,L"hWeapon003"},   // Vibro Roller
+    {694,L"hWeapon004"},   // Vibro Hammer FA
+    {695,L"hWeapon005"},   // Force Blade D
+    {696,L"hWeapon006"},   // Vibro Haken
+    {697,L"hWeapon007"},   // Vulcan Hammer
+    {698,L"hWeapon008"},   // Dynamo Blade
+    {699,L"hWeapon009"},   // Vibro Hammer FE
+    {700,L"hWeapon010"},   // Vibro Roller D2
+    {701,L"hWeapon011"},   // Vibro Hammer FV
+    {702,L"hWeapon012"},   // Force Ax
+    {703,L"hWeapon013"},   // Quake Haken
+    {704,L"hWeapon014"},   // Vulcan Hammer D
+    {705,L"hWeapon015"},   // Vibro Roller D3
+    {706,L"hWeapon016"},   // Dynamo Blade M2
+    {707,L"hWeapon017"},   // Quake Haken ZD
+    {708,L"hWeapon018"},   // Vulcan Hammer ZD
+    {709,L"hWeapon019"},   // Force Blade MA
+    {710,L"hWeapon020"},   // Force Ax G2
+    {711,L"hWeapon021"},   // Finest Hammer
+    {712,L"hWeapon022"},   // Force Ax G3
+    {713,L"hWeapon023"},   // Vibro Roller D9
+    {714,L"hWeapon024"},   // Dyna Force Blade
+    {715,L"hPileBanker01"},   // Blasthole Spear
+    {716,L"hWeapon025"},   // Flashing Spear
+    {717,L"hWeapon026"},   // Jackhammer
+    {718,L"hWeapon027"},   // Power Blade 1
+    {719,L"hWeapon028"},   // Spine Driver
+    {720,L"hWeapon029"},   // Blasthole Spear M2
+    {721,L"hWeapon030"},   // Power Blade 2
+    {722,L"hWeapon031"},   // Blast Twin Spears
+    {723,L"hWeapon032"},   // Flashing Spear M2
+    {724,L"hWeapon033"},   // Jackhammer M2
+    {725,L"hWeapon034"},   // Power Blade 3
+    {726,L"hWeapon035"},   // Spine Driver M2
+    {727,L"hWeapon036"},   // Flashing Spear M3
+    {728,L"hWeapon037"},   // Blasthole Spear M3
+    {729,L"hWeapon038"},   // Blast Twin Spears M2
+    {730,L"hWeapon039"},   // Power Blade 4
+    {731,L"hWeapon040"},   // Blasthole Spear M4
+    {732,L"hWeapon041"},   // Jackhammer M3
+    {733,L"hWeapon042"},   // Spine Driver M3
+    {734,L"hWeapon043"},   // Flashing Spear M4
+    {735,L"hWeapon044"},   // Blasthole Spear M5
+    {736,L"hWeapon045"},   // Jackhammer M4
+    {737,L"hWeapon046"},   // Power Blade 5
+    {738,L"hWeapon047"},   // Blast Twin Spears M3
+    {739,L"hWeapon048"},   // Blasthole Spear M6
+    {740,L"hWeapon049"},   // Spine Driver M4
+    {741,L"hWeapon050"},   // Jackhammer MA
+    {742,L"hWeapon051"},   // Blasthole Spear MS
+    {743,L"hWeapon052"},   // Blast Twin Spears M4
+    {744,L"hWeapon053"},   // Flashing Spear M5
+    {745,L"hWeapon054"},   // Spine Driver MA
+    {746,L"hWeapon055"},   // Power Blade X
+    {747,L"hShield01"},   // Deflection Shield
+    {748,L"hBbuckler01"},   // Ion Mirror Shield
+    {749,L"hTowershield01"},   // Tower Shield
+    {750,L"hWeapon056"},   // Deflection Shield 2
+    {751,L"hWeapon057"},   // Ion Mirror Shield 2E
+    {752,L"hWeapon058"},   // Deflection Shield 3
+    {753,L"hWeapon059"},   // Reflector
+    {754,L"hWeapon060"},   // Tower Shield 2E
+    {755,L"hWeapon061"},   // Deflection Shield 4
+    {756,L"hWeapon062"},   // Ion Mirror Shield 3E
+    {757,L"hWeapon063"},   // Reflector 2
+    {758,L"hWeapon064"},   // Deflection Shield 5
+    {759,L"hWeapon065"},   // Tower Shield 3E
+    {760,L"hWeapon066"},   // Deflection Shield 6
+    {761,L"hWeapon067"},   // Ion Mirror Shield 4E
+    {762,L"hWeapon068"},   // Deflection Shield 7
+    {763,L"hWeapon069"},   // Tower Shield 4E
+    {764,L"hWeapon070"},   // Ion Mirror Shield 5E
+    {765,L"hWeapon071"},   // Deflection Shield MA
+    {766,L"hWeapon072"},   // Powered Reflector
+    {767,L"hWeapon073"},   // Deflection Shield MGX
+    {768,L"hWeapon074"},   // Ion Mirror Shield MG
+    {769,L"hWeapon075"},   // Master Shield
+    {770,L"hWeapon076"},   // Great Shield
+    {771,L"hGatling01"},   // FG7 Hand Gatling
+    {772,L"hWeapon077"},   // Galleon Lightweight Cannon
+    {773,L"hWeapon078"},   // Dexter Automatic Shotgun
+    {774,L"hWeapon079"},   // Flame Revolver
+    {775,L"hWeapon080"},   // FG8 Hand Gatling
+    {776,L"hWeapon081"},   // Galleon Rapid Fire Cannon
+    {777,L"hWeapon082"},   // Dexter Automatic Shotgun D1
+    {778,L"hWeapon083"},   // Flame Revolver D
+    {779,L"hWeapon084"},   // UT1 Hand Gatling
+    {780,L"hWeapon085"},   // Galleon Lightweight Cannon M2
+    {781,L"hWeapon086"},   // Disruptor
+    {782,L"hWeapon087"},   // FG9 Hand Gatling
+    {783,L"hWeapon088"},   // FGS Diffusion Gatling
+    {784,L"hWeapon089"},   // Dexter Automatic Shotgun D2
+    {785,L"hWeapon090"},   // Galleon Triple Burst Cannon
+    {786,L"hWeapon091"},   // Flame Revolver DC1
+    {787,L"hWeapon092"},   // UT2 Hand Gatling
+    {788,L"hWeapon093"},   // Galleon Lightweight Cannon M3
+    {789,L"hWeapon094"},   // Dexter Automatic Shotgun G
+    {790,L"hWeapon095"},   // FG10 Hand Gatling
+    {791,L"hWeapon096"},   // Galleon 3R Burst Cannon
+    {792,L"hWeapon097"},   // Flame Revolver DC2
+    {793,L"hWeapon098"},   // Power Disruptor
+    {794,L"hWeapon099"},   // FG20 Hand Gatling
+    {795,L"hWeapon100"},   // Galleon Rapid Fire Cannon M2
+    {796,L"hWeapon101"},   // Dexter Automatic Shotgun ZA
+    {797,L"hWeapon102"},   // UT3 Hand Gatling
+    {798,L"hWeapon103"},   // Galleon Armor-Piercing Cannon
+    {799,L"hWeapon104"},   // Maximum Disruptor
+    {800,L"hWeapon105"},   // Dexter Automatic Shotgun ZG
+    {801,L"hWeapon106"},   // FGZ Hand Gatling
+    {802,L"hWeapon107"},   // Hell Flame Revolver
+    {803,L"hCannon01"},   // NC101 Hand Cannon
+    {804,L"hWeapon108"},   // 30mm Gallic Heavy Cannon
+    {805,L"hWeapon109"},   // Powerdyne
+    {806,L"hWeapon110"},   // NCS1 Cannon Shot
+    {807,L"hWeapon111"},   // 30mm Gallic Heavy Cannon M2
+    {808,L"hWeapon113"},   // 25mm Light Canister Cannon
+    {809,L"hWeapon114"},   // NC102 Hand Cannon
+    {810,L"hWeapon115"},   // 30mm Gallic Heavy Cannon M3
+    {811,L"hWeapon116"},   // NC103 Hand Cannon
+    {812,L"hWeapon117"},   // 30mm Gallic Heavy Cannon M4
+    {813,L"hWeapon119"},   // NC104 Hand Cannon
+    {814,L"hWeapon120"},   // 32mm Gallic Heavy Cannon
+    {815,L"hWeapon121"},   // NCS2 Cannon Shot
+    {816,L"hWeapon122"},   // NC201 Hand Cannon
+    {817,L"hWeapon124"},   // 30mm Canister Cannon
+    {818,L"hWeapon125"},   // NC202 Hand Cannon
+    {819,L"hWeapon126"},   // 35mm Gallic Heavy Cannon
+    {820,L"hWeapon128"},   // NCSS Cannon Shot
+    {821,L"hWeapon129"},   // NC290 Hand Cannon
+    {822,L"hWeapon130"},   // 35mm Battle Cannon
+    {823,L"hWeapon131"},   // FH10 Light Mortar
+    {824,L"hWeapon132"},   // YH1 Dispersal Mortar
+    {825,L"hWeapon133"},   // FHD1 Heavy Mortar
+    {826,L"hWeapon134"},   // YH2 Dispersal Mortar
+    {827,L"hWeapon135"},   // FH11 Light Mortar
+    {828,L"hWeapon136"},   // FHD2 Heavy Mortar
+    {829,L"hWeapon137"},   // FH12 Light Mortar
+    {830,L"hWeapon138"},   // FHD3 Heavy Mortar
+    {831,L"hWeapon139"},   // FH21 Light Mortar
+    {832,L"hWeapon140"},   // YH3 Dispersal Mortar
+    {833,L"hWeapon141"},   // FH22 Mortar
+    {834,L"hWeapon142"},   // FHER Explosion Mortar
+    {835,L"hWeapon143"},   // FH29 Mortar
+    {836,L"hWeapon144"},   // YH7 Dispersal Mortar
+    {837,L"hWeapon145"},   // FHEZ Super-Heavy Mortar
+    {838,L"hWeapon147"},   // Arm Hound
+    {839,L"hClusterMissile01"},   // Blood Storm
+    {840,L"hWeapon148"},   // Leviathan
+    {841,L"hWeapon149"},   // Haytal Multi-Missile Launcher
+    {842,L"hWeapon150"},   // Arcane 6-Barrel Launcher
+    {843,L"hWeapon151"},   // G2 Arm Hound
+    {844,L"hWeapon152"},   // FG01 High Altitude Impact Launcher
+    {845,L"hWeapon153"},   // Phoenix
+    {846,L"hWeapon154"},   // Arcane 6-Barrel Launcher G2
+    {847,L"hWeapon155"},   // G3 Arm Hound
+    {848,L"hWeapon156"},   // Haytal Multi-Missile Launcher M2
+    {849,L"hWeapon157"},   // M2 Blood Storm
+    {850,L"hWeapon158"},   // Leviathan MA
+    {851,L"hWeapon159"},   // FG02 High Altitude Impact Launcher
+    {852,L"hWeapon160"},   // Phoenix 2
+    {853,L"hWeapon161"},   // Arcane 6-Barrel Launcher G3
+    {854,L"hWeapon162"},   // Haytal Multi-Missile Launcher MA
+    {855,L"hWeapon163"},   // M3 Blood Storm
+    {856,L"hWeapon164"},   // G4 Arm Hound
+    {857,L"hWeapon165"},   // Wild Leviathan
+    {858,L"hWeapon166"},   // Phoenix X
+    {859,L"hWeapon167"},   // Arcane 6-Barrel Launcher GA
+    {860,L"hWeapon168"},   // FGX High Altitude Impact Launcher
+    {861,L"hWeapon169"},   // GX Arm Hound
+    {862,L"hWeapon170"},   // Haytal Multi-Missile Launcher WX
+    {863,L"hWeapon171"},   // Arcane 6-Barrel Launcher GX
+    {864,L"hWeapon172"},   // Phoenix WX
+    {865,L"hWeapon173"},   // MV Blood Storm
+    {1359,L"DLC_h_impact_dakimakura_onee01"},   // Disguised Body Pillow
+    {1360,L"DLC_h_Katana01"},   // Power Blade Zero
+    {1361,L"DLC_h_ProtoReflector"},   // Proto Reflector
+    {1368,L"add006"},   // Cosmic Hammer
+    {1369,L"add007"},   // Blasthole Spear MSXE
+    {1373,L"dayone003"},   // EXA Force Blade
+    {1374,L"dayone004"},   // EXA Vulcan Hammer
+    {1413,L"MPACK_A_Weapon039"},   // Force Blade MAXE
+    {1414,L"MPACK_A_Weapon040"},   // Jackhammer MBF
+    {1415,L"MPACK_A_Weapon041"},   // Blast Twin Spears M5
+    {1416,L"MPACK_A_Weapon042"},   // Power Blade Omega
+    {1417,L"MPACK_A_Weapon043"},   // Flashing Spear MW6
+    {1418,L"MPACK_A_Weapon044"},   // Dexter Automatic Shotgun ZGXE
+    {1419,L"MPACK_A_Weapon045"},   // Red Blast Gatling
+    {1420,L"MPACK_A_Weapon046"},   // Galleon No-Recoil Machine Gun
+    {1421,L"MPACK_A_Weapon047"},   // 38mm Rage Cannon
+    {1422,L"MPACK_A_Weapon048"},   // NC300 Hand Cannon
+    {1423,L"MPACK_A_Weapon049"},   // Planet Cannon
+    {1424,L"MPACK_A_Weapon050"},   // FH29RE Mortar
+    {1425,L"MPACK_A_Weapon051"},   // M4 Blood Storm
+    {1426,L"MPACK_A_Weapon052"},   // Perfect Reflector
+    {1427,L"MPACK_A_Weapon053"},   // Perfect Shield
+    {1508,L"MPACK_B_Weapon058"},   // Quake Haken ZDXE
+    {1509,L"MPACK_B_Weapon059"},   // Finest Hammer XE
+    {1510,L"MPACK_B_Weapon060"},   // Blasthole Spear MSXX
+    {1511,L"MPACK_B_Weapon061"},   // Flashing Spear M7L
+    {1512,L"MPACK_B_Weapon062"},   // Spine Driver 3-Attack
+    {1513,L"MPACK_B_Weapon063"},   // Power Blade 8
+    {1514,L"MPACK_B_Weapon064"},   // FGZF Hand Gatling
+    {1515,L"MPACK_B_Weapon065"},   // Dexter Automatic Shotgun ZGXX
+    {1516,L"MPACK_B_Weapon066"},   // Fire Blast Gatling
+    {1517,L"MPACK_B_Weapon067"},   // NCXE Cannon Shot
+    {1518,L"MPACK_B_Weapon068"},   // FHEZZZ Super-Heavy Mortar
+    {1519,L"MPACK_B_Weapon069"},   // Planet Buster Cannon
+    {1520,L"MPACK_B_Weapon070"},   // High-Cycle Hound
+    {1521,L"MPACK_B_Weapon071"},   // Lonely Phoenix
+    {1522,L"MPACK_B_Weapon072"},   // FGXR High Altitude Impact Launcher
+    {1523,L"MPACK_B_Weapon073"},   // Lone Leviathan
+    {1524,L"MPACK_B_Weapon074"},   // Ion Mirror Shield WE
+    {1525,L"MPACK_B_Weapon075"},   // Nu Tower Shield
+};

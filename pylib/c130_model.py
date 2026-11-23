@@ -136,7 +136,7 @@ def _textures(folder: str, model: str, material: str, made: bool = True) -> tupl
     px = bytearray(rml.rgba)
     px[2::4] = b'\xff' * (len(px) // 4)
     rml = texfile.Image(rml.width, rml.height, px)
-    files = {f'{stem}_df.dds': texfile_accel.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
+    files = {f'{stem}_df.dds': texfile_accel.bc7_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
              f'{stem}_nm.dds': texfile_accel.bc5_normal_file(os.path.join(folder, f'{material}_nm.png')),
              f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
     return files, dict(zip(BODY_SLOTS, files))

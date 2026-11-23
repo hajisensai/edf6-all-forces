@@ -17,11 +17,22 @@ using namespace hostcfg;
 std::atomic<int> hostRecruit{-1},hostCover{-1};   // the host's values as a guest; -1: this machine's ini
 std::atomic<bool> hostSilent{false};              // a guest whose host published no word (an older All Forces)
 std::atomic<bool> bikeGunner{true};               // this mission's 408 gunner seat (Edf41BikeGunnerAllowed)
+std::atomic<bool> commander{false};               // this mission's commander mode (CommanderModeInEffect)
+// The host's ScopeSpread values as a guest (hostScopeSet), under scopeLock: read by every player round (scope_spread.cpp).
+bool hostScopeSet=false;
+scopespread::Params hostScope{};
+SRWLOCK scopeLock=SRWLOCK_INIT;
 // The builds (the menu's lines; the UI thread's).
 Builds builds{};
 SRWLOCK lock=SRWLOCK_INIT;   // the tick (UI thread) and the mission sync (the script's thread) both read
 
 coopattr::Publisher publisher{kKey};
+
+// This machine's ScopeSpread values (EDF6VehicleCrew.ini; plugin.cpp clamps them to scope_spread_logic.h's ranges).
+scopespread::Params LocalScope() noexcept {
+    const Config& c=Cfg();
+    return scopespread::Params{c.scopeSpread,c.scopeSniperHipSpread,c.scopeSniperHipMinSpread,c.scopeHipSpread,c.scopeAimSpread};
+}
 coopattr::Beat beat;
 
 Word Mine() noexcept {
@@ -30,6 +41,8 @@ Word Mine() noexcept {
     w.features=kFeatures;
     w.vanillaRecruit=Cfg().vanillaRecruit;
     w.npcFreeSquadCover=Cfg().npcFreeSquadCover;
+    w.commander=Cfg().commanderMode;
+    w.scope=LocalScope();
     return w;
 }
 
@@ -59,7 +72,19 @@ void Read(bool mission) noexcept {
             surveyed=t->snapshot(kKey,&CountMember,&survey,nullptr)!=0;
         } __except(EXCEPTION_EXECUTE_HANDLER){hostWord=false;surveyed=false;}
     }
-    const Effective e=Decide(room.inRoom!=0,room.isHost!=0,hostWord,host,Cfg().vanillaRecruit,Cfg().npcFreeSquadCover);
+    const scopespread::Params mine=LocalScope();
+    const Effective e=Decide(room.inRoom!=0,room.isHost!=0,hostWord,host,Cfg().vanillaRecruit,Cfg().npcFreeSquadCover,mine);
+    {
+        const bool set=e.source==Source::host;
+        AcquireSRWLockExclusive(&scopeLock);
+        const bool changed=set!=hostScopeSet || (set && !SameScope(hostScope,e.scope));
+        hostScopeSet=set;hostScope=e.scope;
+        ReleaseSRWLockExclusive(&scopeLock);
+        if(changed && set)
+            Log("HOSTCFG playing by the host's ScopeSpread=%d sniper unzoomed x%.2f min %.4f rad, others unzoomed x%.2f zoomed x%.2f (this machine's ini: %d x%.2f %.4f x%.2f x%.2f)",
+                e.scope.on,e.scope.sniperHip,e.scope.sniperHipMin,e.scope.hip,e.scope.aim,mine.on,mine.sniperHip,mine.sniperHipMin,mine.hip,mine.aim);
+        else if(changed)Log("HOSTCFG ScopeSpread from this machine's ini");
+    }
     const int r=e.source==Source::host ? (e.vanillaRecruit ? 1 : 0) : -1,c=e.source==Source::host ? (e.npcFreeSquadCover ? 1 : 0) : -1;
     const bool silent=e.source==Source::localHostSilent;
     const int wasR=hostRecruit.exchange(r),wasC=hostCover.exchange(c);
@@ -85,6 +110,14 @@ void Read(bool mission) noexcept {
         if(bikeGunner.exchange(allowed)!=allowed || !allowed)
             Log("HOSTCFG this mission's 408 sidecar gunner seat: %s",allowed ? "open" :
                 "closed (a member's All Forces does not have it: the 408 drives as a stock Car for everyone)");
+        // The commander mode: the host's word (the host: its ini), every member's build having it; kept for the mission.
+        const bool command=CommanderAtSync(room.inRoom!=0,room.isHost!=0,Cfg().commanderMode,hostWord,host.commander,surveyed,
+                                           survey.builds.silent,survey.common);
+        commander.store(command);
+        const bool wanted=room.isHost ? Cfg().commanderMode : hostWord && host.commander;
+        if(command || wanted || Cfg().commanderMode)
+            Log("HOSTCFG this mission's commander mode: %s",command ? "on" : wanted ?
+                "off (a member's All Forces does not have it, or the room was not read)" : "off (the host's setting)");
     } else {
         // The room / HQ frame (no mission decided here): out of a room the seat is this machine's again, so the last
         // online mission's closed seat does not follow into an offline one.
@@ -112,6 +145,8 @@ void HostSettingsRoomTick() noexcept {
 void HostSettingsMissionSync() noexcept { Read(true); }
 
 void HostSettingsOfflineMission() noexcept {
+    const bool command=CommanderAtSync(false,false,Cfg().commanderMode,false,false,false,0,0);
+    if(commander.exchange(command)!=command || command)Log("HOSTCFG an offline mission: commander mode %s (this machine's ini)",command ? "on" : "off");
     const bool open=BikeGunnerOffline();
     if(bikeGunner.exchange(open)!=open)Log("HOSTCFG an offline mission: the 408 sidecar gunner seat is this machine's (open)");
 }
@@ -125,6 +160,14 @@ bool NpcFreeSquadCoverInEffect() noexcept {
     return h>=0 ? h!=0 : Cfg().npcFreeSquadCover;
 }
 bool Edf41BikeGunnerAllowed() noexcept { return bikeGunner.load(std::memory_order_relaxed); }
+bool CommanderModeInEffect() noexcept { return commander.load(std::memory_order_relaxed); }
+scopespread::Params ScopeSpreadInEffect() noexcept {
+    AcquireSRWLockShared(&scopeLock);
+    const bool set=hostScopeSet;
+    const scopespread::Params host=hostScope;
+    ReleaseSRWLockShared(&scopeLock);
+    return set ? host : LocalScope();
+}
 
 int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
     using hudtext::Tr;using hudtext::Tx;
@@ -138,6 +181,15 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         _snwprintf_s(out[n].text,_TRUNCATE,L"%ls",Tr(Tx::hostSettingsSilent));
         out[n++].warn=true;
     }
+    AcquireSRWLockShared(&scopeLock);
+    const bool scopeSet=hostScopeSet;
+    const scopespread::Params scope=hostScope;
+    ReleaseSRWLockShared(&scopeLock);
+    if(n<capacity && scopeSet && !SameScope(scope,LocalScope())) {
+        if(scope.on)_snwprintf_s(out[n].text,_TRUNCATE,Tr(Tx::hostScopeSpread),scope.sniperHip,scope.sniperHipMin,scope.hip,scope.aim);
+        else _snwprintf_s(out[n].text,_TRUNCATE,L"%ls",Tr(Tx::hostScopeSpreadOff));
+        out[n++].warn=false;
+    }
     AcquireSRWLockShared(&lock);
     const Builds b=builds;
     ReleaseSRWLockShared(&lock);
@@ -145,7 +197,8 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         wchar_t names[96]{};
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
             {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},{kFeatBikeGunMount,Tx::featBikeGunMount},
-            {kFeatBikeRide,Tx::featBikeRide},
+            {kFeatBikeRide,Tx::featBikeRide},{kFeatCommander,Tx::featCommander},
+            {kFeatScopeSpread,Tx::featScopeSpread},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

@@ -225,13 +225,235 @@ class TextureSideTests(unittest.TestCase):
             Image.new('RGBA', (64, 64), (90, 100, 110, 255)).save(os.path.join(d, 'col.png'))
             Image.new('RGBA', (64, 64), (128, 128, 255, 255)).save(os.path.join(d, 'nor.png'))
             material = {'name': 'hull', 'albedo': 'col.png', 'normal': 'nor.png'}
-            files, _slots = xm_air_model._textures(d, 'xm_test', material)
-            self.assertEqual(self._side(files['edf6vc_xm_test_hull_df.dds']), (side, side))
-            self.assertEqual(self._side(files['edf6vc_xm_test_hull_nm.dds']), (side, side))
+            files = xm_air_model._textures(d, 'xm_test', material)
+            self.assertEqual(files['albedo'][0], 'edf6vc_xm_test_hull_col.dds')
+            for slot in ('albedo', 'normal'):
+                self.assertEqual(self._side(files[slot][1]), (side, side))
             spec = xm_rig.Spec(d, {}, {})
             out = xm_rig._material_textures(spec, material)
             self.assertEqual(self._side(out['albedo'][1]), (side, side))
             self.assertEqual(self._side(out['normal'][1]), (side, side))
+
+
+class SurfaceMapTests(unittest.TestCase):
+    """Every family's materials read the X-Morph specular map as per-texel roughness / metalness (wt_tracked.SPECULAR_RM)
+    and a lit emissive map as the light material's mask (docs/xmorph-redo-1121.md): the aircraft's (xm_air_model), the
+    walkers' (xm_rig) and the car's (car_model, wt_tracked.material_textures) as the tracked ones'."""
+
+    @staticmethod
+    def _decoded(dds: bytes) -> np.ndarray:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(dds)) as im:     # the top level of the DXT1 chain
+            return np.asarray(im.convert('RGBA'))
+
+    def _folder(self, d: str) -> dict:
+        from PIL import Image
+        Image.new('RGB', (64, 64), (90, 100, 110)).save(os.path.join(d, 'col.png'))
+        spec = np.zeros((64, 64), np.uint8)
+        spec[:, 32:] = 255                         # left half matte paint, right half bare metal
+        Image.fromarray(spec, 'L').save(os.path.join(d, 'spec.png'))
+        glow = np.zeros((64, 64), np.uint8)
+        glow[:16] = 255                            # the top quarter a light strip
+        Image.fromarray(glow, 'L').save(os.path.join(d, 'glow.png'))
+        return {'name': 'hull', 'albedo': 'col.png', 'specular': 'spec.png'}
+
+    def _check_rm(self, rgba: np.ndarray, blue_lit: bool) -> None:
+        import wt_tracked as wt
+        (r0, r1), (m0, m1) = wt.SPECULAR_RM
+        h, w = rgba.shape[:2]
+        left, right = rgba[h // 2 + 8, w // 8], rgba[h // 2 + 8, w - w // 8]
+        for got, want in ((left[:2], (r0, m0)), (right[:2], (r1, m1))):
+            self.assertLessEqual(max(abs(int(a) - b) for a, b in zip(got, want)), 6, (got, want))
+        if blue_lit:
+            self.assertGreater(int(rgba[2, w // 2, 2]), 240)        # in the strip: the light mask
+            self.assertLess(int(rgba[h - 3, w // 2, 2]), 10)        # outside it: unlit
+        else:
+            import wt_tracked as wt
+            self.assertLessEqual(abs(int(rgba[h // 2, w // 2, 2]) - wt.NO_OCCLUSION), 6)
+
+    def test_families_take_the_specular_map(self) -> None:
+        import xm_air_model
+        import xm_rig
+        with tempfile.TemporaryDirectory() as d:
+            m = self._folder(d)
+            for out in (xm_air_model._textures(d, 'xm_test', m), xm_rig._material_textures(xm_rig.Spec(d, {}, {}), m)):
+                self.assertEqual(set(out), {'albedo', 'normal', 'param_r_m_occ_hr'})
+                self._check_rm(self._decoded(out['param_r_m_occ_hr'][1]), False)
+
+    def test_lit_material_takes_the_light_mask(self) -> None:
+        import wt_tracked as wt
+        import xm_air_model
+        import xm_rig
+        with tempfile.TemporaryDirectory() as d:
+            m = {**self._folder(d), 'emissive': 'glow.png', 'template': wt.LIGHT}
+            for out in (xm_air_model._textures(d, 'xm_test', m), xm_rig._material_textures(xm_rig.Spec(d, {}, {}), m)):
+                self.assertEqual(set(out), {'albedo', 'normal', 'param_r_m_light_hr'})
+                self._check_rm(self._decoded(out['param_r_m_light_hr'][1]), True)
+
+    def test_material_maps_lights_only_a_lit_map(self) -> None:
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'textures'))
+            dark = Image.new('L', (8, 8), px.LIT)            # nothing over LIT: no light material
+            spec = Image.new('L', (8, 8), 100)
+            m = {'name': 'a'}
+            px.material_maps(m, 'a', d, {'specular': spec, 'emissive': dark})
+            self.assertEqual((m.get('template'), 'emissive' in m, m['specular'], m['min_side']),
+                             (None, False, 'textures/a_specular.png', px.MIN_SIDE))
+            m = {'name': 'b'}
+            px.material_maps(m, 'b', d, {'specular': spec, 'emissive': Image.new('L', (8, 8), px.LIT + 1)})
+            self.assertEqual((m['template'], m['emissive']), ('light', 'textures/b_emissive.png'))
+
+    def test_light_per_unit_albedo(self) -> None:
+        import wt_tracked as wt
+        self.assertEqual(wt.light_rgb(None), (wt.LIGHT_STRENGTH,) * 3)
+        self.assertEqual(wt.light_rgb([10, 0, 0]), (10.0, 0.0, 0.0))
+        for bad in ([0, 0, 0], [-1, 1, 1], [1, 1]):
+            with self.assertRaises(wt.WtModelError):
+                wt.light_rgb(bad)
+
+
+class RotorBlurTests(unittest.TestCase):
+    """A heli rotor's see-through blur (docs/xmorph-redo-1121.md 「旋翼盘」): its animated texture's frames
+    (xm_model.anim_frames) averaged into one RGBA albedo (prep_xmorph.blur_average) with a blend 'alpha', its mesh seen
+    from both sides (two_sided), drawn by xm_air_model on the stock Alpha host (wt_tracked.add_surface_material)."""
+
+    def test_txpk_frames(self) -> None:
+        f = b'DDS ' + bytes(range(200))     # the frames are cut, not decoded, here
+        data = b'TxPk' + struct.pack('<HI', 3, len(f)) + f * 3
+        self.assertEqual(xm.txpk_frames(data), [f, f, f])
+        for bad in (data[:-1], b'TxPq' + data[4:], b'TxPk' + struct.pack('<HI', 3, len(f)) + b'XDS ' + f[4:] + f * 2):
+            with self.assertRaises(xm.XmModelError):
+                xm.txpk_frames(bad)
+
+    def test_anim_texture_line_is_found(self) -> None:
+        node = xp.parse('material units_air/x_rotor : base/unlit_transparent_skinned\n{\n technique base\n {\n'
+                        '  pass 0\n  {\n   texture_unit diffuse\n   {\n'
+                        '    anim_texture materials/textures/units_air/x_rotor.dds 5 0.2\n   }\n  }\n }\n}\n')
+        self.assertEqual(xm._values(node, 'anim_texture'), ['materials/textures/units_air/x_rotor.dds 5 0.2'])
+
+    def test_blur_average_is_what_the_loop_blends(self) -> None:
+        from PIL import Image
+        rng = np.random.default_rng(7)
+        frames = [rng.integers(0, 256, (4, 4, 4), dtype=np.uint8) for _ in range(5)]
+        frames[0][0, 0, 3] = frames[1][0, 0, 3] = frames[2][0, 0, 3] = frames[3][0, 0, 3] = frames[4][0, 0, 3] = 0
+        avg = px.blur_average([Image.fromarray(f, 'RGBA') for f in frames]).astype(np.float64)
+        dst = np.array([30.0, 200.0, 90.0])
+        f = np.stack(frames).astype(np.float64)
+        a = f[..., 3:] / 255.0
+        loop = (a * f[..., :3] + (1 - a) * dst).mean(0)             # the five frames blended, averaged
+        once = avg[..., 3:] / 255.0 * avg[..., :3] + (1 - avg[..., 3:] / 255.0) * dst
+        self.assertLess(float(np.abs(loop - once).max()), 1.0)      # within the 8-bit rounding
+        self.assertTrue(np.array_equal(avg[0, 0, :3], np.rint(f[:, 0, 0, :3].mean(0))))   # no frame covers it
+
+    def test_one_sided_blur_gets_its_back(self) -> None:
+        P = np.array([[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]], float)    # one quad facing up (+y)
+        N = np.tile([0.0, 1.0, 0.0], (4, 1))
+        UV = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], float)
+        T = np.array([[0, 1, 2], [2, 3, 0]])
+        pos, nrm, uv, tri = px.two_sided(P, N, UV, T)
+        self.assertEqual((len(pos), len(tri)), (8, 4))
+        f = np.cross(pos[tri[:, 1]] - pos[tri[:, 0]], pos[tri[:, 2]] - pos[tri[:, 0]])
+        self.assertEqual(np.sign(f[:, 1]).tolist(), [1, 1, -1, -1])
+        self.assertTrue(np.array_equal(nrm[4:], -N) and np.array_equal(uv[4:], UV))
+        # already back to back (the small heli's two quads): as it is
+        again = px.two_sided(pos, nrm, uv, tri)
+        self.assertTrue(all(np.array_equal(x, y) for x, y in zip(again, (pos, nrm, uv, tri))))
+
+    def test_air_model_draws_the_blur(self) -> None:
+        import xm_air_model
+        with tempfile.TemporaryDirectory() as d:
+            P = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], np.float32)
+            arrays = {}
+            for k in range(2):
+                arrays.update({f'p{k}_pos': P, f'p{k}_nrm': np.tile([0, 0, 1.0], (3, 1)).astype(np.float32),
+                               f'p{k}_uv': np.zeros((3, 2), np.float32), f'p{k}_tri': np.array([[0, 1, 2]], np.uint32)})
+            np.savez(os.path.join(d, 'model.npz'), **arrays)
+            info = {'materials': [{'name': 'xm_0', 'albedo': 'a.png', 'specular': 's.png'},
+                                  {'name': 'xm_1', 'albedo': 'b.png', 'alpha': {'mode': 'blend', 'factor': 1.0},
+                                   'transparent': {'blend': 'alpha', 'frames': ['f0.png'], 'frame_time': 0.2}}],
+                    'parts': [{'bone': 'xm_hull', 'material': 0}, {'bone': 'rotor', 'material': 1}]}
+            parts = xm_air_model._parts(d, info)
+            self.assertEqual([(p.material, b) for p, b in parts], [('xm_0', 'xm_hull'), ('xm_1', 'rotor')])
+            with open(os.path.join(d, 'model.json'), 'w', encoding='utf-8') as h:
+                import json
+                json.dump({'format': 1, 'family': 'heli', **info}, h)
+            self.assertIn(os.path.join(d, 'b.png'), xm_air_model.model_files(d))   # the installer's cache hashes it
+
+    def test_see_through_body_on_any_common_basic_host(self) -> None:
+        # the V505 hull (xm_air_model's body) takes a see-through material as v603_body does; a track cannot blend
+        import wt_tracked as wt
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank', 'alpha': {'mode': 'blend'}}), wt.ALPHA)
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank', 'alpha': {'mode': 'mask'}}), wt.CLIP)
+        self.assertEqual(wt.template({'name': 'b', 'template': 'v505_tank'}), 'v505_tank')
+        for bad in ({'template': wt.LIGHT, 'alpha': {'mode': 'blend'}},
+                    {'template': 'v603_kyata_L', 'alpha': {'mode': 'blend'}}):
+            with self.assertRaises(wt.WtModelError):
+                wt.template({'name': 'b', **bad})
+
+    def test_heli_blurs_build_on_the_alpha_host(self) -> None:
+        """The model pack's helis with a blur: its material on snd_BRDF_Common_Alpha (b3 2: the translucent list),
+        diffuse.w 1 and the view fall-off held at 1, the V505 body's other colour parameters; its albedo DXT5."""
+        import alpha_maps
+        import obj_model
+        import rootcpk
+        import texfile
+        import wt_tracked as wt
+        import xm_air_model as xa
+        import xm_heli
+        import xm_units
+        from dreadnought_model import BODY_HOST, _host
+        if not (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file():
+            self.skipTest('EDF6 is not installed')
+        game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+        body_md, _m = _host(game, BODY_HOST)
+        body = next(x for x in body_md.materials if body_md.name_of(x.name) == BODY_HOST[2])
+        self.assertEqual(body.shader, wt.BASIC_SHADER)
+        own = {p.name: list(p.value) for p in body.params}
+        seen = 0
+        for key in ('xm_small_helicopter_core', 'xm_medium_helicopter_core'):
+            folder = obj_model.model_dir(xm_units.folder(key))
+            if folder is None:
+                continue
+            info = xa.read_info(folder)
+            md, tex, _anim, _out = xa.build_model(game, folder, key, xm_heli.holders(xm_units.UNITS[key], info))
+            for m in info['materials']:
+                if not m.get('transparent'):
+                    continue
+                with self.subTest(key=key, material=m['name']):
+                    seen += 1
+                    self.assertEqual(alpha_maps.entry(m['alpha'])['mode'], alpha_maps.BLEND)
+                    mat = next(x for x in md.materials if md.name_of(x.name) == f'{key}_{m["name"]}')
+                    self.assertEqual((mat.shader, mat.b3), (wt.ALPHA_SHADER, 2))
+                    params = {p.name: list(p.value) for p in mat.params}
+                    self.assertEqual(params['diffuse'][:3], own['diffuse'][:3])
+                    self.assertAlmostEqual(params['diffuse'][3], 1.0, places=6)
+                    self.assertEqual([params[k][0] for k in wt.FALL_OFF], list(wt.FALL_OFF.values()))
+                    albedo = md.textures[next(x.texture for x in mat.textures if x.kind == 'albedo')].filename
+                    self.assertEqual(texfile.dds_info(tex[albedo]).fourcc, b'DXT5')
+                    drawn = [me for me in md.objects[0].meshes if me.material == md.materials.index(mat)]
+                    self.assertTrue(drawn)
+        if not seen:
+            self.skipTest('the model pack\'s heli folders are not here')
+
+
+class PrepSelectTests(unittest.TestCase):
+    def test_every_ported_family_is_selected(self) -> None:
+        # the aircraft and walkers name no `like` (only the V603 families need one): their ported rows are prepared
+        import xm_units
+        for family in ('heli', 'jet', 'mech', 'infantry', 'car', 'tracked', 'wheeled', 'emplacement'):
+            with self.subTest(family=family):
+                self.assertEqual({u.key for u in px.select(family, [])},
+                                 {u.key for u in xm_units.ported(family)})
+
+    def test_parts_keep_the_mesh_normals(self) -> None:
+        um = synthetic_unit()
+        um.normals = np.tile([0.0, 0.0, 1.0], (len(um.positions), 1))     # not the faces': the mesh's own
+        sel = np.flatnonzero(um.tri_bone == 'turret_1')
+        pos, nrm, uv, tri = px.part_arrays(um, um.positions * 0.5, sel)
+        self.assertTrue(np.array_equal(nrm, np.tile([0.0, 0.0, 1.0], (len(pos), 1))))
+        self.assertTrue(np.allclose(pos[tri].reshape(-1, 3), um.positions[um.triangles[sel]].reshape(-1, 3) * 0.5))
 
 
 def _box(c, h) -> tuple[np.ndarray, np.ndarray]:  # noqa: ANN001

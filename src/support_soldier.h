@@ -43,13 +43,17 @@ bool ApplySupportSoldierSpawn(const float* worldMatrix,bool leader,const unsigne
 // `look`: a coloured copy of its template (support_loadout.h SupportLookFile, app:/object/ path) preloaded this mission
 // (support_variants.h); nullptr: the stock template. `weapon`: the player weapon it carries (npctier::PackArms of its
 // kind, support_net.h Unit::arms; docs/feature-npc-weapon-tier.md) in place of the template's main one, with a player's
-// attack coefficient; 0: the template's weapon under the difficulty's. A weapon that cannot be given: not spawned.
+// attack coefficient; 0: the template's weapon under the difficulty's. `offhand`: a Fencer kind's second hand
+// (Unit::offhand, only with `weapon`) in place of the template's AI shield; 0: the shield. A weapon that cannot be
+// given: not spawned.
 bool ApplySupportSoldierResource(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                 bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept;
+                                 bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0,
+                                 std::uint64_t offhand=0) noexcept;
 // The same, but an ID-bearing soldier is not registered yet: the caller seats it first (a crew made aboard an aircraft
 // in the air) and then registers it with RegisterSupportObject(soldier, id); on failure it deletes it.
 bool CreateSupportSoldierUnregistered(const float* worldMatrix,std::uint32_t resource,const unsigned char* nativeNetId32,
-                                      bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept;
+                                      bool local,ObjRef* out,const wchar_t* look=nullptr,std::uint64_t weapon=0,
+                                      std::uint64_t offhand=0) noexcept;
 bool DeriveSupportSoldierNetId(const void* registeredAnchor,unsigned ordinal,unsigned char* out32) noexcept;
 // Register a freshly created canonical support object (soldier/aircraft/ground vehicle) on this peer.
 // Never call twice; the reliable spawn transaction owns validation and rollback on failure.

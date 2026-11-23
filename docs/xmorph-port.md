@@ -186,12 +186,17 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
   `make_tracked_combat.STATIC_TRACKS` 对所有 `hulls()` 把滚动速率置 0。
 - 导弹车的发射架是一根骨骼同时做 yaw 和 pitch（`barrel_1`，枢轴在架尾 z −5.19）：`rig()` 把整个发射架当炮（`cannon_l`，绕枢轴俯仰），
   在枢轴下合成一个藏在架子里的转台（`TURNTABLE`）当 `cannon_main`；四个发射管取上面一对为原生左右挂点（`MOUTHS`）。架子绕尾部转，
-  转太多会扫到驾驶室，`Unit.traverse = 30`（`TURRET_LIMITS` 左右各 30°）。
+  转太多会扫到驾驶室，`Unit.traverse = 30`（`TURRET_LIMITS` 左右各 30°）。发射架仰角止动 80°（`Unit.elevation = 80` →
+  `make_tracked_combat.PITCH_LIMITS`：V603 俯仰铰链 `cannon_r`/`cannon_main` 由原生 `[1, -60, 5]` 改为 `[1, -80, 5]`），供重型导弹高抛
+  （2026-11-21 用户：「重型导弹这种开启俯瞰视角应该高抛弹道」）。原来照搬 TOS-1 的弹道（6 m/帧、重力 0.6、寿命 600 帧）仰角过约 7° 就在空中
+  到寿命消失（不爆炸），60° 止动下高弧要 12.7 km 外才有，等于不能高抛；现在 6 m/帧、重力 2.94、寿命 1500 帧：最远约 2995 m（插件瞄准取地面点的
+  上限 3 km），高弧覆盖约 1025 m 到最远，平地飞行 11.8–16.4 s，整个高弧包络都在寿命内（`tools/selftest.py lofted_envelope_within_life`）。
+  高弧最近射程以内退到低弧。眼点挂在发射架上（`cannon_l`），抬到 80° 视线不被挡（`tests/gun_camera_sweep_guard.py` 按止动扫到 80°）。
 - 装甲车的骨架以车门为根（`be_door_*`）：车体骨骼取 `body`（`hull_bone()`）。
 
 | 单位 | 三角形 | 轮（每侧） | 轮半径 | 主武器（原生一对） | 副武器（`Arm`） | 耐久 |
 |---|---|---|---|---|---|---|
-| xm_medium_missile_launcher | 8,684 | 5 | 0.60 | 重型导弹：每 5 s 一枚、曲射（TOS-1 的落点标记），15000 / 爆炸 18 m，两管轮流 | — | 800 |
+| xm_medium_missile_launcher | 8,684 | 5 | 0.60 | 重型导弹：每 5 s 一枚、高抛（TOS-1 的落点标记；最远约 3 km，高弧约 1–3 km，寿命覆盖全部高弧），15000 / 爆炸 18 m，两管轮流 | — | 800 |
 | xm_medium_apc | 4,753 | 4 | 0.84 | 双联重机枪对空弹：每 1.3 s 三发、两管齐射，300 | 对地弹（同一对枪管轮流，600） | 3700 |
 | xm_small_humvee | 1,857 | 2 | 0.52 | 机枪对空弹：每 1.5 s 三发，150 | 对地弹（240，每 2 s 三发） | 800 |
 | xm_small_buggy | 3,048 | 2 | 0.49 / 0.77 | 防空导弹：每 3 s 五发、追踪（泰坦侧导弹的外观与锁定，`Unit.homing`），240 | 车头机枪（每 1.5 s 六发，240） | 800 |
@@ -285,6 +290,8 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 
 ## 未做 / 风险
 
+- 2026-11-21：飞机、步行机甲、步兵、货车、炮台也改成逐像素粗糙度 / 金属度、发光图进 light 材质、网格自带法线，旋翼盘网格与帧保留待透明材质；
+  light 材质与 X-Morph 发光的逆向、`light` 语义（每单位 albedo 的发光）见 [xmorph-redo-1121.md](xmorph-redo-1121.md)。
 - **全部未进游戏看**：灯带的亮度（`light_color` 2.0，按无畏舰的 4 减半估的）、高光图到粗糙度 / 金属度的映射（`SPECULAR_RM`，按观感估的）
   都可能要按实机调；轮子随车速转的观感、填充轮是否真的看不见、负重轮比地面高出的履带厚度（车会下沉 2–6 cm）都要实机看。
 - 履带贴图滚动：已由 `make_tracked_combat.STATIC_TRACKS` 把 `tank_caterpillar_animation_info[0]` 置 0（`docs/model-lod.md` §3），贴图不动；
@@ -340,7 +347,8 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 - **模型**（`prep_xmorph.prepare_air` → `pylib/xm_air_model.py`）：MDB 保留 V506 的全部骨骼（mdl、globalSRT、body、rearWheelSus、
   rotor、bend_roterA–D、tailRotor：原版的音效 / 布娃娃 / 残骸效果引用它们），CAS 用 V506 的，`default` 片段经
   `cas_pose.retarget` 平移到我们的枢轴。整机往上抬到最低点 y = 0。贴图挂在 V505_TANK 的 `v505_tank` 宿主材质上；没有法线图的给平法线，
-  粗糙度用常量金属值。透明的旋翼模糊材质（`unlit_transparent`）丢弃。
+  粗糙度用常量金属值。透明的旋翼模糊材质（`unlit_transparent`）：帧图时间平均成一张 RGBA albedo，挂原版 Alpha 宿主半透明绘制
+  （2026-11-21，[xmorph-redo-1121.md](xmorph-redo-1121.md) 第 7 节）。
 - **旋翼**：骨骼名含 `rotor` 的子树各成一组（共轴的合并），主旋翼 = 半径最大的一组，映射到 V506 的 `rotor`（绕本地 y 转）；尾旋翼 =
   主旋翼的左右镜像伙伴（炮艇的成对旋翼：两侧都转），没有则取没有伙伴的最大一组（重型的尾桨、运输的后旋翼），映射到 `tailRotor`
   （绕本地 x 转）。每个旋翼挂在转过轴向的安装骨骼上（`xm_rotor_mount` / `xm_tail_mount`）。**其余旋翼静止**（炮艇前一对、重型两侧）：

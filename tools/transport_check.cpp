@@ -162,10 +162,90 @@ void Paradrop() {
     Check(Landed(true,50.0f,1.5f) && Landed(false,1.0f,1.5f) && !Landed(false,10.0f,1.5f) && !Landed(false,-1.0f,1.5f),
           "down: standing, or within 1.5 m of the ground (no ground seen: not down)");
 }
+
+// 2026-11-21 「直升机/固定翼 飞翼喷射一下落，剑兵硬着陆，突击索降，空袭降落伞」: how each class comes down, and a helicopter's
+// delivery by hovering over the point (no landing).
+void Descents() {
+    Check(DescentOf(kWingDiver,false)==Descent::jets && DescentOf(kWingDiver,true)==Descent::jets,"a Wing Diver on her jets from either");
+    Check(DescentOf(kFencer,false)==Descent::hardLanding && DescentOf(kFencer,true)==Descent::hardLanding,"a Fencer: a hard landing from either");
+    Check(DescentOf(kRanger,false)==Descent::canopy && DescentOf(kAirRaider,false)==Descent::canopy,"Ranger / Air Raider: a canopy from a plane");
+    Check(DescentOf(kRanger,true)==Descent::rope && DescentOf(kAirRaider,true)==Descent::rope,"...a rope from a helicopter");
+    Check(DescentOf(-1,false)==Descent::canopy && DescentOf(-1,true)==Descent::rope,"a class not known: as a Ranger");
+    // The jets: a burst out of the door, free fall high up, bursts near the ground with hysteresis.
+    Check(JetBurn(false,-50.0f,140.0f,0) && JetBurn(false,0.0f,140.0f,kJetKickMs-1),"the burst out of the door");
+    Check(!JetBurn(false,-20.0f,140.0f,kJetKickMs),"then falling free high up");
+    Check(JetBurn(false,-45.0f,100.0f,5000) && !JetBurn(false,-45.0f,140.0f,5000),"she burns once the ground is within her stopping distance");
+    Check(JetBurn(false,-kJetSinkMost-1.0f,kJetMargin-1.0f,5000) && !JetBurn(false,-kJetSinkMost+1.0f,kJetMargin-1.0f,5000),
+          "low down: she burns once falling past the most");
+    Check(JetBurn(true,-kJetSinkEase-1.0f,20.0f,5000) && !JetBurn(true,-kJetSinkEase+1.0f,20.0f,5000),"...and lets go once slower than the ease");
+    Check(JetBurn(false,-20.0f,-1.0f,5000),"the ground not known: by her fall alone");
+    // A simulated fall from 150 m at 9.8 m/s2 with her jets thrusting 20 m/s2 up while on: down at a walking pace.
+    {
+        float y=150.0f,vy=0.0f;bool burn=false;float most=0.0f;int bursts=0;
+        for(int f=0;f<6000 && y>0.0f;++f) {
+            const bool b=JetBurn(burn,vy,y,static_cast<std::uint64_t>(f)*16u);
+            bursts+=b && !burn;burn=b;
+            vy+=(-9.8f+(burn ? 20.0f : 0.0f))*0.016f;y+=vy*0.016f;
+            if(y<5.0f && -vy>most)most=-vy;
+        }
+        Check(y<=0.0f && most<kJetSinkMost+3.0f,"braked: she lands no faster than about the most",most);
+        Check(bursts>=3,"in bursts, not one long burn",bursts);
+    }
+    // The Fencer: no canopy, the fall held at kHardFallMost, the plane's way bled to the floor.
+    float vel[3]={98.0f,-50.0f,0.0f};
+    for(int i=0;i<600;++i)FreeFallStep(vel,0.6f);
+    Check(vel[1]==-kHardFallMost,"a Fencer falls at up to the hard-fall most",vel[1]);
+    Check(std::fabs(vel[0]-kDriftFloor)<0.01f,"its way bled down to the floor, not past it",vel[0]);
+    float slow[3]={3.0f,-5.0f,0.0f};FreeFallStep(slow,0.6f);
+    Check(slow[0]==3.0f && slow[1]==-5.0f,"slow already: untouched");
+    // The rope: down at the sink, drawn onto it, no faster than the pull.
+    const float pos[3]={2.0f,10.0f,0.0f},anchor[3]={0.0f,18.0f,0.0f},on[3]={0.0f,10.0f,0.0f};
+    float rv[3]={40.0f,-20.0f,7.0f};RopeStep(rv,pos,anchor);
+    Check(rv[1]==-kRopeSink && rv[0]<0.0f && std::fabs(std::hypot(rv[0],rv[2])-kRopePull)<0.01f && rv[2]==0.0f,
+          "down the rope at the sink, drawn onto it at most the pull",rv[0],rv[1]);
+    RopeStep(rv,on,anchor);
+    Check(rv[0]==0.0f && rv[2]==0.0f && rv[1]==-kRopeSink,"on it: straight down");
+    Check(kRopeLength>=kRopeHeight+kHoverBand,"the rope reaches the ground from the highest hover allowed",kRopeLength,kRopeHeight+kHoverBand);
+    // The hover: over the point, still, at about the rope height (never all but on the ground).
+    Check(Hovering(3.0f,1.0f,kRopeHeight) && !Hovering(kHoverNear+1.0f,1.0f,kRopeHeight) && !Hovering(3.0f,kHoverStill+1.0f,kRopeHeight),
+          "held over the point, still");
+    Check(!Hovering(3.0f,1.0f,kHoverLow-1.0f) && !Hovering(3.0f,1.0f,kRopeHeight+kHoverBand+1.0f) && !Hovering(3.0f,1.0f,-1.0f),
+          "...at the rope height (too low, too high or the ground not known: no)");
+}
+
+void HoverTrip() {
+    const Tuning t{};
+    Trip trip;trip.carrier=Carrier::heli;trip.hover=true;trip.phase=Phase::moving;trip.since=0;
+    World w;w.aboard=4;w.vehicleToDrop=20.0f;w.speed=10.0f;
+    View v=ViewOf(w,1000);
+    Step st=Advance(trip,v,t);
+    Check(st.next==Phase::landing && st.act==Act::hover,"near the drop: it hovers (no landing)");
+    trip.phase=Phase::landing;trip.since=1000;
+    st=Advance(trip,ViewOf(w,2000),t);
+    Check(st.next==Phase::landing && st.act==Act::hover,"not held yet: still coming into the hover");
+    v=ViewOf(w,3000);v.hovering=true;
+    st=Advance(trip,v,t);
+    Check(st.next==Phase::unloading && st.act==Act::rope,"held: down the ropes");
+    trip.phase=Phase::unloading;trip.since=3000;
+    v.ms=4000;st=Advance(trip,v,t);
+    Check(st.next==Phase::unloading && st.act==Act::rope,"one after another while any are aboard");
+    w.aboard=0;v=ViewOf(w,5000);
+    st=Advance(trip,v,t);
+    Check(st.next==Phase::none && st.act==Act::release,"all down: over (it never touched the ground)");
+    w.aboard=2;v=ViewOf(w,3000+t.ropeMs+1);
+    st=Advance(trip,v,t);
+    Check(st.next==Phase::landing && st.act==Act::settle,"not down in time: it lands the rest");
+    trip.phase=Phase::landing;trip.since=1000;
+    st=Advance(trip,ViewOf(w,1000+t.landMs+1),t);
+    Check(st.next==Phase::landing && st.act==Act::settle,"no hover held in time: it lands them");
+    trip.hover=false;
+    w.grounded=true;st=Advance(trip,ViewOf(w,1000),t);
+    Check(st.next==Phase::unloading && st.act==Act::unload,"settled: an ordinary landing's unload");
+}
 }  // namespace
 
 int main() {
-    Decisions();GroundTrip();HeliTrip();Aborts();Paradrop();
+    Decisions();GroundTrip();HeliTrip();Aborts();Paradrop();Descents();HoverTrip();
     std::printf("transport_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

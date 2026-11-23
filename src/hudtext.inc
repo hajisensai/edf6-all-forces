@@ -648,6 +648,8 @@ HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cove
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
 HUDTEXT(hostSettingsOn,L"on",L"开",L"開",L"オン")
 HUDTEXT(hostSettingsOff,L"off",L"关",L"關",L"オフ")
+HUDTEXT(hostScopeSpread,L"Host's scope spread: sniper unzoomed x%.2f (at least %.3f rad), others unzoomed x%.2f, zoomed x%.2f",L"按房主设置：狙击枪不开镜散布 ×%.2f（至少 %.3f 弧度），其他有镜武器不开镜 ×%.2f、开镜 ×%.2f",L"按房主設定：狙擊槍不開鏡散布 ×%.2f（至少 %.3f 弧度），其他有鏡武器不開鏡 ×%.2f、開鏡 ×%.2f",L"ホストの設定：狙撃銃スコープなし拡散 ×%.2f（最小 %.3f rad）、他のスコープ武器 なし ×%.2f・あり ×%.2f")
+HUDTEXT(hostScopeSpreadOff,L"Host's settings: scoped weapons spread as stock",L"按房主设置：开镜 / 不开镜精度差分关闭（原版散布）",L"按房主設定：開鏡 / 不開鏡精度差分關閉（原版散布）",L"ホストの設定：スコープ有無の精度差なし（原版の拡散）")
 HUDTEXT(buildsDiffer,L"%u member(s) run another All Forces build; may differ: %ls",L"%u 名成员的全军出击版本与本机不同，可能不一致：%ls",L"%u 名成員的全軍出擊版本與本機不同，可能不一致：%ls",L"%u 人の全軍出撃が別の版：食い違う恐れ：%ls")
 HUDTEXT(featHostSettings,L"recruit / cover",L"招募 / 掩护",L"招募 / 掩護",L"合流 / 援護")
 HUDTEXT(featCreditReload41,L"4.1 calls' score reload",L"4.1 呼叫积分装填",L"4.1 呼叫積分裝填",L"4.1 要請のポイント補充")
@@ -658,6 +660,8 @@ HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍�
 HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（已关闭）",L"408 砲手機槍（已關閉）",L"408 の銃手機銃（閉鎖）")
 HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
 HUDTEXT(featBikeRide,L"the 408's drive, SDL1 models and riding pose",L"408 驱动、SDL1 各型号性能与骑姿",L"408 驅動、SDL1 各型號性能與騎姿",L"408 の駆動・SDL1 各型の性能・乗車姿勢")
+HUDTEXT(featCommander,L"the commander mode",L"指挥官模式",L"指揮官模式",L"指揮官モード")
+HUDTEXT(featScopeSpread,L"scoped weapons' spread",L"开镜 / 不开镜精度差分",L"開鏡 / 不開鏡精度差分",L"スコープ有無の精度差")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.
@@ -869,10 +873,10 @@ HUDTEXT(statsUnknownEnemy,L"Unknown enemy",L"未知敌人",L"未知敵人",L"不
 // --- The room loadout menu's pre-sync line (src/room_sync_logic.h SelectLines; a member is its room ordinal + 1) ---
 HUDTEXT(roomSyncCoopOld,L"EDF6Coop too old (no member attributes): room pre-sync off, missing files go on the pending list",L"EDF6Coop 版本过旧（没有成员属性接口）：房间预同步关闭，缺的文件照旧记入待生成清单",L"EDF6Coop 版本過舊（沒有成員屬性介面）：房間預同步關閉，缺的檔案照舊記入待生成清單",L"EDF6Coop が古い（メンバー属性 API なし）：ルーム事前同期はオフ、不足ファイルは従来どおり生成待ちリストへ")
 HUDTEXT(roomSyncPublishRefused,L"EDF6Coop refused this PC's pre-sync value (error %d; 5 = its 4096-byte budget is full): the others do not see it",L"EDF6Coop 拒绝发布本机的预同步数据（错误 %d；5 = 4096 字节总额已满）：其他成员看不到",L"EDF6Coop 拒絕發布本機的預同步資料（錯誤 %d；5 = 4096 位元組總額已滿）：其他成員看不到",L"EDF6Coop がこのPCの事前同期データを拒否（エラー %d；5 = 4096 バイトの総量超過）：他のメンバーには見えません")
-HUDTEXT(roomSyncHostOld,L"The host has no pre-sync (older All Forces): missing files go on the pending list",L"房主没有预同步（旧版全军出击）：缺的文件照旧记入待生成清单",L"房主沒有預同步（舊版全軍出擊）：缺的檔案照舊記入待生成清單",L"ホストに事前同期なし（旧版 All Forces）：不足ファイルは従来どおり生成待ちリストへ")
-HUDTEXT(roomSyncHostBad,L"The host's file list is malformed: ignored",L"房主公布的文件清单格式不对：已忽略",L"房主公布的檔案清單格式不對：已忽略",L"ホストのファイルリストが不正：無視しました")
-HUDTEXT(roomSyncHostWaiting,L"Waiting for the host's file list",L"等待房主的文件清单",L"等待房主的檔案清單",L"ホストのファイルリスト待ち")
-HUDTEXT(roomSyncLeftOut,L"%d files not announced (list too long): pending list as before",L"%d 个文件没能公布（清单太长）：照旧走待生成清单",L"%d 個檔案沒能公布（清單太長）：照舊走待生成清單",L"%d 個のファイルは未通知（リストが長すぎる）：従来どおり生成待ちリストへ")
+HUDTEXT(roomSyncConfigWaiting,L"Waiting for the members' loadouts",L"等待成员的支援配置",L"等待成員的支援配置",L"メンバーの支援設定待ち")
+HUDTEXT(roomSyncMemberConfigBad,L"Member %d's loadout does not read: their calls use the defaults",L"成员 %d 公布的支援配置无法读取：他呼叫的支援按默认配置",L"成員 %d 公布的支援配置無法讀取：他呼叫的支援按預設配置",L"メンバー %d の支援設定が読めません：その呼び出しは既定の構成")
+HUDTEXT(roomSyncConfigLeftOut,L"%d of this PC's loadout entries did not fit (too long): those calls use the defaults",L"本机有 %d 项支援配置没能公布（太长）：这些支援按默认配置",L"本機有 %d 項支援配置沒能公布（太長）：這些支援按預設配置",L"このPCの支援設定 %d 項目を公開できません（長すぎ）：それらは既定の構成")
+HUDTEXT(roomSyncLeftOut,L"%d files over the room's list limit: pending list as before",L"%d 个文件超出房间清单上限：照旧走待生成清单",L"%d 個檔案超出房間清單上限：照舊走待生成清單",L"%d 個のファイルがルームのリスト上限超過：従来どおり生成待ちリストへ")
 HUDTEXT(roomSyncSelfGenerating,L"This PC: %d files missing, generating",L"本机缺 %d 个文件，生成中",L"本機缺 %d 個檔案，生成中",L"このPC：%d 個のファイルが不足、生成中")
 HUDTEXT(roomSyncSelfFailed,L"This PC: %d files missing, generation failed: %ls",L"本机缺 %d 个文件，生成失败：%ls",L"本機缺 %d 個檔案，生成失敗：%ls",L"このPC：%d 個のファイルが不足、生成失敗：%ls")
 HUDTEXT(roomSyncSelfCapped,L"This PC: %d files over this room's limit of %d: they come stock",L"本机还缺 %d 个文件，超过每个房间最多生成 %d 个的上限：这些按原版出动",L"本機還缺 %d 個檔案，超過每個房間最多產生 %d 個的上限：這些按原版出動",L"このPC：%d 個のファイルがルームの上限 %d 個を超過：これらは原版のまま")
@@ -908,6 +912,21 @@ HUDTEXT(roomUnitOwnPStrike,L"My summon: player strike jet",L"我召唤的·玩�
 HUDTEXT(roomUnitOwnFighter,L"My summon: fighter",L"我召唤的·制空战斗机",L"我召喚的·制空戰鬥機",L"自分の要請・制空戦闘機")
 HUDTEXT(roomUnitOwnInterceptor,L"My summon: interceptor",L"我召唤的·截击机",L"我召喚的·截擊機",L"自分の要請・迎撃機")
 HUDTEXT(roomUnitOwnMultirole,L"My summon: multirole jet",L"我召唤的·多用途机",L"我召喚的·多用途機",L"自分の要請・マルチロール機")
+HUDTEXT(roomUnitOwnMech,L"My summon: mech",L"我召唤的·机甲",L"我召喚的·機甲",L"自分の要請・コンバットフレーム")
+// The mech's seven rows (room_menu.h kMechRow*; room_ui_logic.h RowLine, room_dialog_logic.h Page::mech)
+HUDTEXT(roomMechRequest,L"Base request",L"底座请求",L"底座請求",L"ベースの要請")
+HUDTEXT(roomMechFrame,L"Frame",L"机体",L"機體",L"機体")
+HUDTEXT(roomMechRightArm,L"Right arm",L"右臂",L"右臂",L"右腕")
+HUDTEXT(roomMechLeftArm,L"Left arm",L"左臂",L"左臂",L"左腕")
+HUDTEXT(roomMechRightShoulder,L"Right shoulder",L"右肩",L"右肩",L"右肩")
+HUDTEXT(roomMechLeftShoulder,L"Left shoulder",L"左肩",L"左肩",L"左肩")
+HUDTEXT(roomMechCore,L"Core",L"核心",L"核心",L"コア")
+HUDTEXT(roomMechOwn,L"(the request's own)",L"（请求自己的）",L"（請求自己的）",L"（要請のもの）")
+HUDTEXT(roomMechEmpty,L"(empty)",L"（空）",L"（空）",L"（なし）")
+HUDTEXT(roomMechPart,L"%ls: %ls",L"%ls：%ls",L"%ls：%ls",L"%ls：%ls")
+HUDTEXT(roomStockMech,L"Stock mech (confirm: customise)",L"原版机甲（确认 = 自定义）",L"原版機甲（確認 = 自訂）",L"標準の機体（決定でカスタム）")
+HUDTEXT(roomDlgPickMech,L"Choose the part",L"选择部件",L"選擇部件",L"パーツを選択")
+HUDTEXT(roomDescMechRule,L"A weapon or core above the base request's level is not offered; at least one weapon.",L"高于底座请求等级的武器 / 核心不列出；至少装一件武器。",L"高於底座請求等級的武器 / 核心不列出；至少裝一件武器。",L"ベースの要請のレベルを超える武器 / コアは選べません。武器は最低1つ。")
 // The soldier kinds (support_loadout.h kSupportKindNames order)
 HUDTEXT(roomKindRifle,L"Ranger, rifle",L"游骑兵·步枪",L"遊騎兵·步槍",L"レンジャー・ライフル")
 HUDTEXT(roomKindFlame,L"Ranger, flamethrower",L"游骑兵·火焰",L"遊騎兵·火焰",L"レンジャー・火炎放射器")
@@ -968,7 +987,7 @@ HUDTEXT(roomGenStartFailed,L"The file generator did not start: %ls",L"生成器�
 HUDTEXT(roomSaved,L"Saved %d unit(s)",L"已保存 %d 个单位",L"已儲存 %d 個單位",L"%d 部隊を保存しました")
 HUDTEXT(roomSaveFailed,L"Not saved: %ls",L"保存失败：%ls",L"儲存失敗：%ls",L"保存失敗：%ls")
 HUDTEXT(roomSaveRefused,L"Not saved: a value would not read back as edited",L"未保存：有配置无法按原样读回",L"未儲存：有配置無法照原樣讀回",L"未保存：編集どおりに読み戻せない値があります")
-HUDTEXT(roomClientNote,L"In this room the host's loadouts are used",L"本局以房主配置为准",L"本局以房主配置為準",L"このルームではホストの設定が使われます")
+HUDTEXT(roomClientNote,L"Online: each member's loadout here applies to the supports they call, shared with the room",L"联机：每个成员在这里的配置用于他自己呼叫的支援，并同步给全员",L"連線：每個成員在這裡的配置用於他自己呼叫的支援，並同步給全員",L"オンライン：各メンバーのここでの設定は本人が呼ぶ支援に使われ、全員に同期されます")
 HUDTEXT(roomHint,L"Arrows/D-pad: select, change   Enter/A: open   Esc/B: back   Ins/X: add   Del/Y: remove   Home/Back: stock   %ls: close",
         L"方向键/十字键 选择、修改   Enter/A 确认   Esc/B 返回   Ins/X 添加   Del/Y 删除   Home/Back 恢复原版   %ls 关闭",
         L"方向鍵/十字鍵 選擇、修改   Enter/A 確認   Esc/B 返回   Ins/X 新增   Del/Y 刪除   Home/Back 恢復原版   %ls 關閉",

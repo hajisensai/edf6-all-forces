@@ -184,6 +184,15 @@ inline Plan PlanFrame(bool hasInput,bool open) noexcept {
     return Plan{hasInput,hasInput && open};
 }
 
+// --- The HQ opens its own mission select by itself (docs/worldmap-hq-open-re.md §5.1) ---
+// Once per HQ screen object (`tried`: this object was tried already, opened or not; a new object, even at a dead one's
+// address, is untried): Enabled && HqAutoMissionSelect (`on`), only while the HQ itself would read input (`hasInput`:
+// 0x8DAD00 with the real ctx, nothing of the game's over it: the opening, a notice, a sub-screen, a transition) and never
+// while the support loadout menu (F2) is up or its closing key still held (`menuBusy`): that frame is simply waited out.
+inline bool AutoOpenDue(bool on,bool tried,bool hasInput,bool menuBusy) noexcept {
+    return on && !tried && hasInput && !menuBusy;
+}
+
 // --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---
 // Off: the screen's own update is chained with its own ctx and nothing else runs (no key read, no input taken, no
 // pre-sync, no preview; only what the plugin drew on this screen earlier is taken back). The room pre-sync runs only on
@@ -267,7 +276,7 @@ inline constexpr UnitText kUnitTexts[]={
     {L"INTERCEPTOR",Tx::roomUnitInterceptor},{L"INTERCEPTOR_F",Tx::roomUnitInterceptorFollow},
     {L"MULTIROLE",Tx::roomUnitMultirole},{L"MULTIROLE_F",Tx::roomUnitMultiroleFollow},
     {L"OWN_PFIGHTER",Tx::roomUnitOwnPFighter},{L"OWN_PSTRIKE",Tx::roomUnitOwnPStrike},{L"OWN_FIGHTER",Tx::roomUnitOwnFighter},
-    {L"OWN_INTERCEPTOR",Tx::roomUnitOwnInterceptor},{L"OWN_MULTIROLE",Tx::roomUnitOwnMultirole}};
+    {L"OWN_INTERCEPTOR",Tx::roomUnitOwnInterceptor},{L"OWN_MULTIROLE",Tx::roomUnitOwnMultirole},{L"OWN_MECH",Tx::roomUnitOwnMech}};
 // The unit's label: the table's in the HUD's language, else `fallback` (the catalog's own name).
 inline const wchar_t* UnitLabel(const wchar_t* key,const wchar_t* fallback) noexcept {
     if(key && !*key)return hudtext::Tr(Tx::roomUnitCrewDefault);     // SupportCrewColour
@@ -295,6 +304,7 @@ inline constexpr const wchar_t* kRounds=L"x%d";
 inline constexpr const wchar_t* kFieldRounds=L"< x%d >";
 inline constexpr const wchar_t* kFieldGun=L"< HE / AP >";
 inline constexpr const wchar_t* kPackSuffix=L" + %ls";
+inline constexpr const wchar_t* kFieldChoice=L"< %d / %d >";   // a mech row being changed: its value's place, how many
 namespace detail {
 template<class... A> void Put(wchar_t* out,std::size_t n,const wchar_t* format,A... args) noexcept {
     if(!out || !n)return;
@@ -335,6 +345,10 @@ inline void RowLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
     case RowText::guns: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomGuns)); break;
     case RowText::ownLoad: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomOwnLoad)); break;
     case RowText::stockVehicle: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomStockVehicle)); break;
+    case RowText::stockMech: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomStockMech)); break;
+    case RowText::mechPart:   // "Right arm: Machine Gun", the parts' own label in the HUD's language
+        detail::Put(body,kLineMost,hudtext::Tr(Tx::roomMechPart),roomdialog::MechRowName(r.index),roomdialog::MechValueName(r.index,r.part));
+        break;
     case RowText::crew: detail::Put(body,kLineMost,hudtext::Tr(Tx::roomCrewRow),KindLabel(r.kind)); break;
     default: body[0]=0; break;
     }
@@ -359,6 +373,7 @@ inline void NoteLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
         if(r.field==1)detail::Put(out,n,kFieldRounds,r.rounds);
         else detail::Put(out,n,L"%ls",hudtext::Tr(Tx::roomFieldStore));
     } else if(r.editing && (r.text==RowText::gunHE || r.text==RowText::gunAP))detail::Put(out,n,L"%ls",kFieldGun);
+    else if(r.editing && r.text==RowText::mechPart)detail::Put(out,n,kFieldChoice,r.choice,r.choices);
     else if(r.text==RowText::pylon)detail::Put(out,n,kRounds,r.rounds);
     else if(r.text==RowText::soldier && !r.primary && !r.secondary)detail::Put(out,n,L"%ls",hudtext::Tr(Tx::roomStockColour));
 }
@@ -515,7 +530,8 @@ inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,room
     const roommenu::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
     // A vehicle's own pages (its rows, a pylon, the gun, a store, the rounds): the vehicle, whatever has the focus.
     if(m.open && u && u->kind==roommenu::UnitKind::vehicle && u->body!=VehicleBody::none &&
-       (nav.page==Page::unit || nav.page==Page::pylon || nav.page==Page::gun || nav.page==Page::store || nav.page==Page::rounds)) {
+       (nav.page==Page::unit || nav.page==Page::pylon || nav.page==Page::gun || nav.page==Page::store || nav.page==Page::rounds ||
+        nav.page==Page::mech)) {
         const bool crewButton=nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg==roommenu::CrewRow(*u);
         if(out)*out=crewButton ? CrewPreview(m,*u,kinds) : VehiclePreview(*u);
         return true;

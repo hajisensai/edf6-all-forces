@@ -43,7 +43,7 @@ bool SupportSoldierArmsReady() noexcept {return armsReady;}
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=localArms;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {++armsAsked;return armsLoad;}
 bool ApplySupportSoldierResource(const float*,std::uint32_t resource,const unsigned char*,bool local,ObjRef* out,const wchar_t* look,
-                                 std::uint64_t weapon) noexcept {
+                                 std::uint64_t weapon,std::uint64_t) noexcept {
     if(failAt && spawned+1==failAt)return false;
     if(local)return false;   // the mission crew is never a local-only soldier (as ApplySupportSoldierSpawn was)
     looks[spawned]=look;resources[spawned]=resource;weapons[spawned]=weapon;

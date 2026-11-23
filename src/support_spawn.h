@@ -37,13 +37,30 @@ constexpr const SupportVehicleSpec* SupportVehicleInfo(SupportVehicleKind kind) 
 constexpr bool SupportVehicleModeAvailable(SupportCrewMode mode) noexcept {
     return mode==SupportCrewMode::soldiers || mode==SupportCrewMode::unmanned;
 }
-// Underground none of these hulls (support_policy.h Allowed: only soldiers walk in there; the drill tank is a request).
+// Underground none of these hulls (support_policy.h Allowed: only soldiers come in there, by the drill transport below).
 constexpr bool SupportVehicleEnvironmentAllowed(SupportVehicleKind kind,SupportEnvironment env) noexcept {
     const auto row=SupportVehicleInfo(kind);
     return row && (env==SupportEnvironment::surface || (env==SupportEnvironment::wasteland && row->wasteland));
 }
+// The drill transport (docs/insertion-re.md §5; the user: 「地底可以用钻地坦克」): underground the infantry calls come in a
+// drill tank (support_dispatch.cpp), the Air Raider's drill tank with passenger seats (tools/make_drill.py
+// TRANSPORT_SGO_FILE: Vehicle505_Tank, the driver's seat and TRANSPORT_PASSENGERS more on its locators). Not a
+// SupportVehicleKind: a kind more would add two ground calls and an airdrop to the bar and move every later entry (the
+// transports, the airdrops, the strikes, the rescue). Its own plan resource (a hull of the ground range, past the kinds').
+// Unarmed for the support's firepower: its one weapon is the drill's bit (fires nothing; drill.cpp works the drill).
+// Bounds from pylib/drill_model.py, rounded out: the hull 4.8 m wide, 5.74 m tall, its back 3.6 m behind the origin, the
+// drill's tip 9.9 m ahead (DRILL_BASE z 3.35 + DRILL_LENGTH 6.55).
+inline constexpr SupportVehicleSpec kSupportDrillTransport=
+    {L"钻地运兵车",L"app:/Object/EDF6VC_DRILL_TRANSPORT.SGO",13,2.4f,9.9f,5.8f,0x17DADB0,false,false,supportlevel::Curve::blacker};
+inline constexpr const wchar_t kSupportDrillTransportFile[]=L"EDF6VC_DRILL_TRANSPORT.SGO";
+inline constexpr std::uint32_t kSupportDrillTransportResource=0x20100u;   // kSupportVehicleResource + 0x100
 // Called on the mission's preload thread; clears last mission's readiness before native preloads.
 void PreloadSupportVehicles() noexcept;
+// The drill transport preloaded this mission (its SGO the installer's: Mods/OBJECT) and not broken.
+bool SupportDrillTransportReady() noexcept;
+// An empty drill transport at the verified entry, as SpawnSupportVehicle makes a stock hull (the same class and seats
+// required of what the game made); rolled back by DeleteSupportVehicle.
+unsigned char* SpawnSupportDrillTransport(const float* entry,const float* heading,const void* owner) noexcept;
 bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept;
 // Creates and initializes an EMPTY hull at the already verified entry, sets friend team and records
 // its copy owner (owner is the parent; otherwise inherits SetSpawnOwner, as jet::Launch). Caller then

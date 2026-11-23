@@ -75,6 +75,11 @@ SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人
 # tank 12.5 m, the Apocalypse's class. Every model folder is made at this size (tools/prep_xmorph.py); the rows' `eye`
 # and `camera` stay in the game's metres, read through eye() / camera().
 SCALE = 0.7
+# The aircraft (families heli and jet: tools/prep_xmorph.py prepare_air) at the game's own size: their branch's choice
+# (docs/xmorph-port.md 「直升机」「固定翼」: 比例 1.0 照原作, the fighter already a third of an EDF one), the folders the
+# model pack ships and the rows' heli eyes and sizes were measured on. Unifying them with SCALE is the maintainer's call
+# (docs/xmorph-redo-1121.md).
+AIR_SCALE = 1.0
 # Every X-Morph map is resampled (Lanczos, a whole factor) to this on its shorter side before block compression, every
 # family alike (wt_tracked min_side: the ground units' folders say so in model.json; pylib/xm_air_model.py and
 # pylib/xm_rig.py, the aircraft's and the walkers', read it here). The packs hold the units' maps at 256..512 (the
@@ -107,7 +112,8 @@ class Arm:
     numbers: dict = field(default_factory=dict)   # a gun's SGO numbers over the template's (Shell.extra)
     fire: int = 2            # its fire key (vcobjects Store.key: 2 the second trigger, 3..6 VehicleFire<n>Key), one a unit;
                              # 0 with a `seat` (that seat's trigger fires it)
-    auto: bool = False       # an auto turret (vcobjects Store.auto): it fires itself with the auto turrets on
+    auto: bool = False       # an auto turret (vcobjects Store.auto): its own `seat` and `turret`, laying and firing itself
+                             # with nobody in the seat and the auto turrets on; never an arm on a fire key
     # Its own gunner seat (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): 0 none (on the driver's key); n
     # the vehicle's seat n, one arm a seat, numbered from 1 in arms order. Needs `turret`.
     seat: int = 0
@@ -162,6 +168,9 @@ class Unit:
     # and lock-on, as the Patriot's) where its `like`'s is a gun's
     homing: bool = False
     traverse: float = 0.0    # its turret's stops, deg either side (make_tracked_combat TURRET_LIMITS); 0: free
+    # its gun's elevation stop, deg up (make_tracked_combat PITCH_LIMITS: the V603's pitch hinge [1, -elevation, 5]);
+    # 0: the V603's own 60
+    elevation: float = 0.0
     cab: str = ''            # a car's driver's cockpit kit (pylib/cockpit_kits_ground.py KITS; cockpit_fits_plugin)
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
     # (camera, eye: measured on the model at the game's size, metres; read through camera() / eye(), at SCALE)
@@ -169,7 +178,8 @@ class Unit:
     # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m; a car's: its driver's eye
     eye: tuple[float, ...] = ()
     # The bone the eye rides: the turret (cannon_main), or the gun's pitch hinge (cannon_l) where the raised gun or its
-    # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5..60 deg).
+    # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5 deg up to
+    # its elevation stop).
     eye_bone: str = 'cannon_main'
     durability: float = 0.0  # vcobjects GroundVehicle.durability
     reload: int = 0          # its request (tools/calls.py Call): ReloadTime base
@@ -301,7 +311,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 5.0, 'burst_gap': 18.0,
-                          'interval': 240.0}, fire=3, auto=True),
+                          'interval': 240.0}, fire=3),
              Arm('rockets', ('front_missile_1', 'front_missile_2'), 'air', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 40,
                  # front_missile_1 / _2: fire_rate 2, two 0.4 s apart each (enemy_rocket_small: speed 60, accel 50,
                  # turning 15 deg/s: barely guided; 10 anti_player): both pods, four every 2 s
@@ -354,7 +364,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 20.0, 'burst_gap': 6.0,
-                          'interval': 300.0}, fire=3, auto=True)),
+                          'interval': 300.0}, fire=3)),
        # xm_large_tank_emp at the game's size: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
        # y 6.5, their muzzles z 9.3
        camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,
@@ -425,14 +435,22 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        gun=('Heavy Missiles', '重型导弹', '重ミサイル', '重型飛彈'),
        # main_weapon: MissileWeaponDef, fire_rate 5, muzzles_per_fire 1 (enemy_missile_anti_core_launchers: 125, Area
        # 12): one missile every 5 s, the two holders in turn
+       # Its flight (the user, 2026-11-21: 「重型导弹这种开启俯瞰视角应该高抛弹道」): the TOS-1's 6 m a frame, 0.6 g and 600
+       # frames could not loft at all (above ~7 deg the missile's life ran out in the air, where it vanishes unburst; the
+       # V603's 60 deg stop only reached a high arc 12.7 km out). Derived as tools/make_katyusha.py derives the
+       # Katyusha's (pylib/ballistics.py envelope, the game's 14.7 m/s^2): the most range the plugins' sight reaches
+       # (kSightFar, 3 km: ~2995 m at 45 deg at 6 m a frame under 2.94 g), the rack raised to 80 deg (`elevation`)
+       # for a high arc from ~1025 m out to it, 11.8..16.4 s in the air on flat ground; it lives 25 s, so a lofted
+       # missile never expires in the air, even onto a target well below (tools/selftest.py lofted_envelope_within_life).
        guns={'AmmoCount': 16.0, 'AmmoDamage': 15000.0, 'AmmoExplosion': 18.0, 'FireInterval': 600.0,
-             'FireBurstCount': 1.0, 'FireBurstInterval': 0.0, 'FireAccuracy': 0.01},
+             'FireBurstCount': 1.0, 'FireBurstInterval': 0.0, 'FireAccuracy': 0.01,
+             'AmmoSpeed': 6.0, 'AmmoGravityFactor': 2.94, 'AmmoAlive': 1500.0},
        # models/xm_medium_missile_launcher: 12.3 m long (z -7.0..5.3); the cab in front (roof ~3.4), the rack on the
        # bed y 1.5..3.7, z -7.0..0.7, its pivot y 2.37, z -5.2; the upper tubes' mouths y 3.1, z 0.8
        camera={'model_eye': (0., 4.2, -3.0), 'model_look_at': (0., 3.0, 10.), 'third_person_distance': 13.,
                'third_person_height': 5.4},
        # the eye rides the rack (cannon_l): on the turret the raised rack swung through its view from 32 deg up
-       eye=(0.0, 4.1, -4.6), eye_bone='cannon_l', durability=800.0, reload=16000, level=2.5, traverse=30.0,
+       eye=(0.0, 4.1, -4.6), eye_bone='cannon_l', durability=800.0, reload=16000, level=2.5, traverse=30.0, elevation=80.0,
        after='EDF6VC_CALL_XM_LARGE_BOMBER_CORE'),
     # The APC: eight wheels, a turret with twin heavy machine guns (bursts of three, every 1.3 s) and a radar; two
     # weapons on the same guns: anti-air rounds (main_weapon, both barrels) and ground rounds (core_weapon, the
@@ -856,19 +874,19 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     _u('bosses/highway_tank', 'tracked', 'apocalypse', 'ported', 'JAGUAR Type S',
        texts={'SC': ('X-Morph 美洲虎 S 型坦克', '请求人类军队的原型超重型坦克「美洲虎 S 型」（原作首领）：全长约 32 米。主炮塔的巨炮为主攻击，'
                                        '约每十秒一发、命中处大范围冲击波；车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
-                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射，防空导弹和高射炮可当自动炮塔；装甲极厚。'),
+                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射；装甲极厚。'),
               'CN': ('X-Morph JAGUAR S 型戰車', '請求人類軍隊的原型超重型戰車「JAGUAR S 型」（原作首領）：全長約 32 公尺。主砲塔的巨砲為主攻擊，'
                                        '約每十秒一發、命中處大範圍衝擊波；車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
-                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射，防空飛彈和高射砲可當自動砲塔；裝甲極厚。'),
+                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射；裝甲極厚。'),
               'JA': ('X-Morph ジャガータイプS', '人類軍の試作超重戦車「ジャガータイプS」（原作のボス）を要請する。全長約 32 m。主砲塔の巨砲'
                                         '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。車体前部の巡航ロケット 2 基（各 6 連射）、'
-                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空ミサイルと高射砲は自動砲塔にもなる。装甲は極めて厚い。'),
+                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。装甲は極めて厚い。'),
               'EN': ('X-Morph JAGUAR Type S', "Requests the human army's prototype super-heavy tank JAGUAR Type S (a boss in "
                                               "the game): about 32 m long. Its main turret's great gun on the primary attack, a "
                                               'round about every 10 s with a wide shock wave where it hits; each on its own '
                                               'fire key with the gun: the two front cruise rocket pods (six each), the AA missiles on '
                                               "the main turret (twelve), the four side turrets' flak, the front mortar and "
-                                              "the front turret's laser (a 3 s beam); the AA missiles and the flak can be auto turrets; extremely heavy armour.")},
+                                              "the front turret's laser (a 3 s beam); extremely heavy armour.")},
        gun=('Great Gun', '巨炮', '巨砲', '巨砲'),
        # main_turret_projectile: fire_rate 10, 500 (anti_core: DAMAGE) and a ShockWave radius 16 (x BLAST)
        guns={'AmmoCount': 20.0, 'AmmoDamage': 60000.0, 'AmmoExplosion': 24.0, 'FireInterval': 1200.0},
@@ -887,7 +905,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 450.0, 'blast': 4.5,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 12.0, 'burst_gap': 30.0,
-                          'interval': 1680.0}, fire=3, auto=True),
+                          'interval': 1680.0}, fire=3),
              Arm('flak', ('side_left_front_turret', 'side_right_front_turret', 'side_left_back_turret',
                           'side_right_back_turret'), 'gun',
                  ('Flak', '高射砲', '高射砲', '高射炮', '고사포'), 120, 'cannon_l',
@@ -895,7 +913,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  # 20 anti_player, Area 12): the four together a shell every 2.25 s
                  shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                  numbers={'AmmoDamage': 600.0, 'AmmoExplosion': 18.0, 'AmmoSpeed': 30.0, 'FireInterval': 135.0,
-                          'FireBurstCount': 1.0}, fire=4, auto=True),
+                          'FireBurstCount': 1.0}, fire=4),
              Arm('mortar', ('front_mortar',), 'gun', ('Mortar', '迫撃砲', '迫擊砲', '迫击炮', '박격포'), 10, 'cannon_l',
                  # front_mortar: ArtilleryWeaponDef, fire_rate 18 (enemy_artillery_boss_tank: 333 artillery, Area 10):
                  # the grenade launcher's lobbed round

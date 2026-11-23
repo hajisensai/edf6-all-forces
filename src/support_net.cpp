@@ -20,6 +20,7 @@
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "npc_arms.h"
+#include "commander_logic.h"
 #include "command_identity.h"
 #include "net_object_ref.h"
 #include "version_notice.h"
@@ -270,8 +271,8 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
     if(note && size)swprintf_s(note,size,L"%ls",text);
 }
-// A header of another build: the map command protocol's magic with another version (support's own wire is v2 in every
-// build that has the extension). Only read: the message is still dropped as before.
+// A header of another build: the map command protocol's magic with another version (support's own wire: v3 since
+// 2026-11-21, older builds kept out of the room by mod_room.h). Only read: the message is still dropped as before.
 void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
     if(!peer || peer>support_net::kMaxPeers || count<8)return;
     std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);
@@ -411,6 +412,7 @@ bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     return std::memcmp(local,plan.requester,sizeof(local))==0;
 }
+const char* SupportPeerPuid(std::uint32_t peer) noexcept { return running ? PeerPuid(peer) : nullptr; }
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept {
     if(!out)return false;
     *out={};unsigned char identity[32]{};
@@ -556,7 +558,9 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     // rescue's crew too (2026-11-10, offline as online: support_dispatch.cpp RescueHere); none for the test range's rows.
     support_net::RequesterArms arms{};
     const auto catalog=static_cast<std::uint32_t>(catalogId);
-    if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
+    // A commander's NPC (commander.cpp): the kind in `loadout` carries the player's own weapon, not one below it.
+    if(catalog==commander::kCatalog)CommanderRequesterArms(static_cast<int>(loadout),&arms);
+    else if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
     if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms)) {
         Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;

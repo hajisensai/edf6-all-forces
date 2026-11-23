@@ -913,7 +913,8 @@ def texture_problems(rab: Rab, md: Mdb, model_member: str) -> list[str]:
 
 
 def texture_dds(path: str) -> bytes:
-    """A texture file as a DDS the game reads: a .dds as it is (validated), a PNG / JPEG converted to DXT1."""
+    """A colour map file as a DDS the game reads: a .dds as it is (validated), a PNG / JPEG converted to BC7_UNORM
+    (docs/model-quality-1121-bc7.md)."""
     with open(path, 'rb') as h:
         head = h.read(4)
     if head == texfile.DDS_MAGIC:
@@ -922,4 +923,4 @@ def texture_dds(path: str) -> bytes:
         texfile.texture_pair(data)
         return data
     import texfile_accel
-    return texfile_accel.dxt1_dds(texfile.load_image(path))     # texfile.dxt1_dds's bytes, in numpy
+    return texfile_accel.bc7_dds(texfile.load_image(path))      # texfile.bc7_dds's bytes, native

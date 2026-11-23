@@ -10,6 +10,9 @@
                                         plugin takes the player's trigger for the drill; an NPC driver's AI may still pull
                                         it): no damage, no blast, a round that lives one frame, silent
   Mods/OBJECT/EDF6VC_DRILL_CHARGE.SGO   the drill's bite (vcobjects DRILL_CHARGE_*: src/jet_bay.cpp DrillCharge)
+  Mods/OBJECT/EDF6VC_DRILL_TRANSPORT.SGO  the support's drill transport (TRANSPORT_SGO_FILE): EDF6VC_DRILL.SGO as written,
+                                        its driver's seat and TRANSPORT_PASSENGERS passenger seats more (underground
+                                        the infantry calls come in it: src/support_dispatch.cpp DrillPlan)
 
 Without the OBJ (pylib/drill_model.py model_dir: $EDF6VC_MODELS, `models` next to the installer, or the developer's
 folder) the drill tank cannot be built: its SGO then names the stock Blacker model and the stock Blacker cannon, so
@@ -74,6 +77,14 @@ BIT = {'AmmoCount': 1.0, 'AmmoDamage': 0.0, 'AmmoExplosion': 0.0, 'AmmoAlive': 1
        'AmmoHitImpulseAdjust': 0.0, 'FireRecoil': 0.0, 'AmmoColor': [0.0, 0.0, 0.0, 0.0]}
 SILENT = ('FireSe', 'AmmoHitSe')            # their volume (entry 2) 0
 NAMES = {'ja': 'ドリル', 'en': 'Drill', 'cn': '鑽頭', 'kr': 'Drill', 'sc': '钻头'}
+# The support's drill transport (docs/insertion-re.md §5, the user: 「地底可以用钻地坦克」): underground the map's infantry
+# calls (a squad of 4, a platoon of 12, or a composed load of up to 12) drive in aboard it, get off at the point and it
+# drives back (src/support_dispatch.cpp DrillPlan, src/support_spawn.h kSupportDrillTransport: 13 seats, its file name).
+# Its own file: the Air Raider's request keeps its one seat (no squad climbs into the player's drill tank). As the
+# transport helicopter's (tools/make_jets.py with_passenger_seats): each passenger seat on the driver's locators (the model
+# has no other), the 410 door gunner's pose and key row, every class, no weapon on it.
+TRANSPORT_SGO_FILE = 'EDF6VC_DRILL_TRANSPORT.SGO'
+TRANSPORT_PASSENGERS = 12
 
 
 def _node(v: object) -> object:
@@ -187,6 +198,27 @@ def camera_check(camera: tuple[list[float], list[float]] = CAMERA) -> dict[str, 
     return out
 
 
+def transport_sgo(game: vc.Game, drill: bytes) -> bytes:
+    """TRANSPORT_SGO_FILE: the drill tank's SGO `drill` (as written: its model, LOD table, camera, weapon) with
+    TRANSPORT_PASSENGERS passenger seats after the driver's."""
+    import make_jets
+    return make_jets.with_passenger_seats(drill, 0, TRANSPORT_PASSENGERS, game.read('OBJECT', make_jets.GUNNER_STOCK))
+
+
+def check_transport(files: dict[str, bytes]) -> None:
+    """The drill transport is the drill tank with passenger seats and nothing else changed: 1 + TRANSPORT_PASSENGERS seats
+    (make_jets.check_passenger_seats: each passenger seat on the driver's locators, every class, the door gunner's pose and
+    key row, no weapon on it), the driver's seat as the drill tank's, every other key the same."""
+    import make_jets
+    drill = sgo.read(files[f'OBJECT/{SGO_FILE}'])[1]
+    transport = sgo.read(files[f'OBJECT/{TRANSPORT_SGO_FILE}'])[1]
+    make_jets.check_passenger_seats(files[f'OBJECT/{TRANSPORT_SGO_FILE}'], 1 + TRANSPORT_PASSENGERS, TRANSPORT_SGO_FILE, 1)
+    seats = transport['vehicle_riding_position']
+    assert seats[0] == drill['vehicle_riding_position'][0] and len(drill['vehicle_riding_position']) == 1, seats[0]
+    assert set(transport) == set(drill), set(transport) ^ set(drill)
+    assert all(transport[k] == drill[k] for k in drill if k != 'vehicle_riding_position'),         [k for k in drill if k != 'vehicle_riding_position' and transport[k] != drill[k]]
+
+
 def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     """The SGO names this tool's model (or, without one, the stock Blacker's) and weapon; with the model, its weapon
     bone is there and the model passes drill_model.check; the bit fires nothing; the charge's blast breaks buildings."""
@@ -249,6 +281,9 @@ def build(root: str, models: str | None = None) -> dict[str, bytes]:
     files = model_lod.finish(cockpits.graft_files(game, files))
     # what is written is held to the same contract as what was authored
     check(files, game)
+    # the support's drill transport: the finished SGO (its model's LOD table included) with its passenger seats
+    files[f'OBJECT/{TRANSPORT_SGO_FILE}'] = transport_sgo(game, files[f'OBJECT/{SGO_FILE}'])
+    check_transport(files)
     return files
 
 

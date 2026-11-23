@@ -14,12 +14,39 @@ bool Point(const float* p) noexcept {
     return true;
 }
 static_assert(kArmsKinds==static_cast<std::uint32_t>(kSupportWeaponCount),"a requester's arms: one word a soldier kind");
-// A unit's weapon: none, or one its soldier kind carries (npc_tier.h UnpackArms; never on a vehicle).
+// A unit's weapons: none, or what its soldier kind carries (npc_tier.h UnpackArms; never on a vehicle); a second hand
+// only a Fencer kind's (UnpackHand) and only with a main one.
 bool UnitArms(const Unit& u) noexcept {
-    return !u.arms || (IsSupportSoldierResource(u.resourceId) && npctier::UnpackArms(u.arms,SupportSoldierWeapon(u.resourceId),nullptr));
+    if(!u.arms)return !u.offhand;
+    if(!IsSupportSoldierResource(u.resourceId))return false;
+    const SupportWeapon kind=SupportSoldierWeapon(u.resourceId);
+    return npctier::UnpackArms(u.arms,kind,nullptr) && npctier::UnpackHand(u.offhand,kind,nullptr);
 }
 bool ValidArms(const RequesterArms& a) noexcept {
-    for(std::uint32_t k=0;k<kArmsKinds;++k)if(!npctier::UnpackArms(a.kind[k],static_cast<SupportWeapon>(k),nullptr))return false;
+    for(std::uint32_t k=0;k<kArmsKinds;++k) {
+        const auto kind=static_cast<SupportWeapon>(k);
+        if(!npctier::UnpackArms(a.kind[k],kind,nullptr) || !npctier::UnpackHand(a.offhand[k],kind,nullptr) ||
+           (a.offhand[k] && !a.kind[k]))return false;
+    }
+    return true;
+}
+// The kinds whose second hand a request carries (the Fencer kinds, SupportWeapon order) and the v3 tail.
+constexpr SupportWeapon kOffhandKinds[]={SupportWeapon::fencerCannon,SupportWeapon::fencerMiddleCannon,
+                                         SupportWeapon::fencerPileBanker,SupportWeapon::fencerShotgun};
+constexpr std::size_t kTailBytes=24;
+static_assert(6*std::size(kOffhandKinds)==kTailBytes && kWireSize==176+kTailBytes,"the v3 tail: four second hands");
+// A weapon word as 6 bytes (u16 id, 0xFFFF none; u32 stars, a nibble each) and back.
+void PutWord(unsigned char* p,std::uint64_t v) noexcept {
+    const std::uint16_t id=v ? static_cast<std::uint16_t>(v&0xFFFFu) : static_cast<std::uint16_t>(0xFFFFu);
+    const auto stars=static_cast<std::uint32_t>(v>>16);
+    p[0]=static_cast<unsigned char>(id);p[1]=static_cast<unsigned char>(id>>8);
+    for(unsigned i=0;i<4;++i)p[2+i]=static_cast<unsigned char>(stars>>(i*8));
+}
+bool GetWord(const unsigned char* p,std::uint64_t* v) noexcept {
+    const auto id=static_cast<std::uint16_t>(p[0]|(p[1]<<8));
+    std::uint32_t stars=0;for(unsigned i=0;i<4;++i)stars|=static_cast<std::uint32_t>(p[2+i])<<(i*8);
+    if(id==0xFFFFu){*v=0;return !stars;}
+    *v=npctier::kArmsOn|id|(static_cast<std::uint64_t>(stars)<<16);
     return true;
 }
 // A request's arms in its unit fields (resourceId, role, matrix, netId: 104 bytes, all zero in a request before): per
@@ -28,22 +55,28 @@ constexpr std::size_t kArmsBytes=6*kArmsKinds,kUnitBytes=8+64+32;
 static_assert(kArmsBytes<=kUnitBytes,"the arms fit the request's unit fields");
 void PutArms(unsigned char* p,const RequesterArms& a) noexcept {
     std::memset(p,0,kUnitBytes);
-    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6) {
-        const std::uint64_t v=a.kind[k];
-        const std::uint16_t id=v ? static_cast<std::uint16_t>(v&0xFFFFu) : static_cast<std::uint16_t>(0xFFFFu);
-        const auto stars=static_cast<std::uint32_t>(v>>16);
-        p[0]=static_cast<unsigned char>(id);p[1]=static_cast<unsigned char>(id>>8);
-        for(unsigned i=0;i<4;++i)p[2+i]=static_cast<unsigned char>(stars>>(i*8));
-    }
+    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6)PutWord(p,a.kind[k]);
 }
 bool GetArms(const unsigned char* p,RequesterArms& a) noexcept {
     for(std::size_t i=kArmsBytes;i<kUnitBytes;++i)if(p[i])return false;
-    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6) {
-        const auto id=static_cast<std::uint16_t>(p[0]|(p[1]<<8));
-        std::uint32_t stars=0;for(unsigned i=0;i<4;++i)stars|=static_cast<std::uint32_t>(p[2+i])<<(i*8);
-        if(id==0xFFFFu){if(stars)return false;a.kind[k]=0;continue;}
-        a.kind[k]=npctier::kArmsOn|id|(static_cast<std::uint64_t>(stars)<<16);
+    for(std::uint32_t k=0;k<kArmsKinds;++k,p+=6)if(!GetWord(p,&a.kind[k]))return false;
+    return true;
+}
+// The v3 tail: a request's Fencer second hands; a unit message's offhand (u64) then zero; zero otherwise.
+void PutTail(unsigned char* p,const Message& m) noexcept {
+    std::memset(p,0,kTailBytes);
+    if(m.kind==Kind::request)for(SupportWeapon f:kOffhandKinds){PutWord(p,m.arms.offhand[static_cast<std::uint32_t>(f)]);p+=6;}
+    else if(m.kind==Kind::unit)for(unsigned i=0;i<8;++i)p[i]=static_cast<unsigned char>(m.unit.offhand>>(i*8));
+}
+bool GetTail(const unsigned char* p,Message& m) noexcept {
+    if(m.kind==Kind::request) {
+        for(std::uint32_t k=0;k<kArmsKinds;++k)m.arms.offhand[k]=0;
+        for(SupportWeapon f:kOffhandKinds){if(!GetWord(p,&m.arms.offhand[static_cast<std::uint32_t>(f)]))return false;p+=6;}
+        return true;
     }
+    std::size_t from=0;
+    if(m.kind==Kind::unit){m.unit.offhand=0;for(unsigned i=0;i<8;++i)m.unit.offhand|=static_cast<std::uint64_t>(p[i])<<(i*8);from=8;}
+    for(std::size_t i=from;i<kTailBytes;++i)if(p[i])return false;
     return true;
 }
 bool ZeroId(const unsigned char* id) noexcept {
@@ -58,7 +91,7 @@ bool RequesterMetadata(const unsigned char* id,std::uint32_t team) noexcept {
 bool BeginUnit(const Unit& unit) noexcept {
     // BEGIN has no unit transform/variant. Require byte-zero floats, including rejecting negative zero.
     const float zero[16]{};
-    if(unit.variant || unit.arms || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
+    if(unit.variant || unit.arms || unit.offhand || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
     if(!unit.resourceId)return !unit.role && ZeroId(unit.netId);
     return unit.resourceId==kBeginRequesterMetadata && (unit.role==0 || crew::pvp_match::PvpTeam(static_cast<int>(unit.role))) &&
         CanonicalRequester(unit.netId);
@@ -142,10 +175,11 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     Store32(p,static_cast<std::uint32_t>(m.challenge));Store32(p,static_cast<std::uint32_t>(m.challenge>>32));
     Store32(p,m.transaction);Store32(p,m.kind==Kind::unit ? static_cast<std::uint32_t>(m.unit.arms) : m.request);Store32(p,m.catalog);Store32(p,m.count);Store32(p,m.index);Store32(p,m.ok);
     for(float f:m.target)Float(p,f);
-    if(m.kind==Kind::request){PutArms(p,m.arms);p+=kUnitBytes;Store32(p,0);return true;}
+    if(m.kind==Kind::request){PutArms(p,m.arms);p+=kUnitBytes;Store32(p,0);PutTail(p,m);return true;}
     Store32(p,m.unit.resourceId);Store32(p,m.unit.role);
     for(float f:m.unit.matrix)Float(p,f);
     std::memcpy(p,m.unit.netId,32);p+=32;Store32(p,m.kind==Kind::unit ? static_cast<std::uint32_t>(m.unit.arms>>32) : 0u);
+    PutTail(p,m);
     return true;
 }
 bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
@@ -160,7 +194,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     if(m.kind==Kind::request) {
         if(!GetArms(p,m.arms))return false;
         p+=kUnitBytes;if(Read32(p))return false;
-        if(!ValidMessage(m))return false;
+        if(!GetTail(p,m) || !ValidMessage(m))return false;
         out=m;return true;
     }
     m.unit.resourceId=Read32(p);m.unit.role=Read32(p);
@@ -170,7 +204,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     // A unit message's weapon (Unit::arms): its low word where a request's id goes, its high word last.
     if(m.kind==Kind::unit){m.unit.arms=m.request|(static_cast<std::uint64_t>(high)<<32);m.request=0;}
     else if(high)return false;
-    if(!ValidMessage(m))return false;
+    if(!GetTail(p,m) || !ValidMessage(m))return false;
     out=m;return true;
 }
 void Session::ClearTransactions() noexcept {
@@ -492,11 +526,15 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
             // Its soldiers carry the requester's weapons (docs/feature-npc-weapon-tier.md), decided by the requester and
             // given here, never by a planner: every soldier of a kind the request names one for. A prepared plan (the
             // mission crews', a carrier's drone) has no request: its units keep the arms its builder gave them (a mission
-            // crew's: the host's player's, mission_crew_support.cpp Build; a drone: none).
+            // crew's: the host's player's, mission_crew_support.cpp Build; a drone: none). A Fencer whose preset names both
+            // hands (support_loadout.h kind#R:L) the planner gave them, its second hand set: kept as planned.
             for(std::uint32_t i=0;!t.external && i<t.plan.count && i<kMaxUnits;++i) {
                 auto& unit=t.plan.units[i];
-                unit.arms=IsSupportSoldierResource(unit.resourceId) ?
-                    t.arms.kind[static_cast<std::uint32_t>(SupportSoldierWeapon(unit.resourceId))] : 0;
+                const bool soldier=IsSupportSoldierResource(unit.resourceId);
+                if(soldier && unit.arms && unit.offhand)continue;
+                const auto k=static_cast<std::uint32_t>(SupportSoldierWeapon(unit.resourceId));
+                unit.arms=soldier ? t.arms.kind[k] : 0;
+                unit.offhand=soldier ? t.arms.offhand[k] : 0;
             }
             t.planned=true;
         }

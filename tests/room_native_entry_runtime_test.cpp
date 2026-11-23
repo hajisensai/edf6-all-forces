@@ -64,7 +64,7 @@ namespace roomsync {
 void TickRoomSync() noexcept {UnexpectedRoomDependency();}
 void LeaveRoomSync() noexcept {++nativeSyncLeaves;}
 int RoomSyncLines(SyncLine*,int) noexcept {UnexpectedRoomDependency();return 0;}
-void ForgetRoomHostList() noexcept {UnexpectedRoomDependency();}
+void ForgetRoomList() noexcept {UnexpectedRoomDependency();}
 }
 }
 

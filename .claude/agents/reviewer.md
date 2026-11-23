@@ -2,6 +2,7 @@
 name: reviewer
 description: 根因与审查（Opus，由 tools/claude_hooks/subagent_model_router.py 钉死）。用于根因定位、代码/PR 审查、反驳式核验、测试红了之后的伪红 / 真红分型与根因，以及涉及 DB schema / 同步 / 生命周期 / 并发 / 平台或 native 边界 / 跨 3 个以上模块的判断与设计。
 model: opus
+autoCompactWindow: 200000
 tools: Bash, PowerShell, Read, Edit, Write, Grep, Glob, Agent, SendMessage, Monitor, TaskStop, EnterWorktree, ExitWorktree, WebFetch, WebSearch, mcp__context7__resolve-library-id, mcp__context7__query-docs
 ---
 

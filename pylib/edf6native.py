@@ -1,13 +1,15 @@
 """The installer's native helpers (native/*.cpp, one DLL: edf6cmpl.dll), loaded with ctypes. Every function there is a
-port of a pure Python reference that stays the fallback (a dev checkout without build.cmd) and the definition of the
-bytes: the native one gives the same bytes on every input it accepts, and hands back what it does not (tests/
-test_native_*.py compare the two).
+port of a pure Python reference, the definition of the bytes: the native one gives the same bytes on every input it
+accepts, and hands back what it does not (tests/test_native_*.py compare the two). The reference stays the fallback
+(a dev checkout without build.cmd), all but BC7's, which is too slow to install with.
 
   cmpl.cpp         mdb.cmpl_compress / cmpl_decompress        (models, map parts)
   crilayla.cpp     crilayla.decompress                        (every compressed file read from a game's CPK)
   lzss_greedy.cpp  fmb_build.cmpl_fast                        (the SK maps' terrain leaves)
   aabb_tree.cpp    hkcms_build._section_tree, simd_tree       (the SK maps' collision meshes)
   dxt1.cpp         texfile._dxt1_level (texfile_accel)         (every DXT1 texture the installer encodes)
+  bc7.cpp          bc7.encode_level (texfile_accel.bc7_dds)    (the external models' colour maps; no Python fallback:
+                                                               bc7.py is the definition, far too slow to install with)
 
 lib() -> the CDLL, or None. Found beside the frozen installer's modules (build_release bundles it) or in a dev
 checkout's build/pylib. A DLL there that does not load raises, every time: never half native, half Python.
@@ -33,6 +35,7 @@ _PROTOTYPES = {
     'edf6_simd_tree_nodes': (ctypes.c_size_t, (ctypes.c_size_t,)),
     'edf6_simd_tree': (ctypes.c_int, (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)),
     'edf6_dxt1_level': (ctypes.c_size_t, (ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)),
+    'edf6_bc7_level': (ctypes.c_size_t, (ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int)),
 }
 
 

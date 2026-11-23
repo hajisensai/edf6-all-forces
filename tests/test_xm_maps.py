@@ -278,7 +278,7 @@ class AlphaModes(unittest.TestCase):
         self.assertEqual(self.mode('t/road'), 'clip')           # alpha blend on a map surface: alpha-tested
         self.assertEqual(self.mode('t/crack'), 'clip')
         self.assertEqual(self.mode('t/glow'), 'opaque')
-        self.assertEqual(self.mode('t/leaf_solid'), 'opaque')   # a test that rejects nothing: stored as DXT1
+        self.assertEqual(self.mode('t/leaf_solid'), 'opaque')   # a test that rejects nothing: stored as BC7
 
     def test_one_image_two_modes(self) -> None:
         box, leaf = self.r.material_tex('t/box'), self.r.material_tex('t/leaf')

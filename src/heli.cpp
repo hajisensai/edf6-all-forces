@@ -58,6 +58,7 @@
 #include "log_once.h"
 #include "profile_sigs.h"
 #include "firstperson.h"
+#include "scope_spread.h"
 #include "enemy_points.h"
 #include "npc_logic.h"
 #include "fp_view.h"
@@ -805,7 +806,12 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     // only; its shot rows put back after the stock shot read them).
     FpShotAim aim{};
     FirstPersonAimShot(weapon,muzzle,replay,&aim);
+    // A local player's round of a scoped weapon: its cone by the scope (scope_spread.h; +0xE14 / +0x378 for this round
+    // only, put back after the stock shot read them).
+    ScopeShot scope{};
+    ScopeSpreadShot(weapon,replay,&scope);
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    ScopeSpreadRestore(scope);
     FirstPersonAimRestore(aim);
     // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle
     // flash it used to wait for is missing on many weapons). It reads only this machine's first-person state.
@@ -3387,7 +3393,7 @@ SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept 
     } __except(EXCEPTION_EXECUTE_HANDLER){return SupportEntry::gone;}
 }
 
-bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
+bool HeliFerry(const void* vehicle,const float* at,bool land,float hover) noexcept {
     __try {
         Heli* const h=Find(vehicle);
         if(!h || h->leaving || h->reap)return false;
@@ -3396,11 +3402,12 @@ bool HeliFerry(const void* vehicle,const float* at,bool land) noexcept {
             h->ferry=h->ferryLand=false;return true;
         }
         if(!std::isfinite(at[0]+at[1]+at[2]))return false;
-        const bool same=h->ferry && h->ferryLand==land && Dist2(h->ferryAt,at)<1.0f;
+        const float over=hover>0.0f ? hover : Cfg().heliHeight;
+        const bool same=h->ferry && h->ferryLand==land && Dist2(h->ferryAt,at)<1.0f && std::fabs(h->hold[1]-at[1]-over)<0.5f;
         h->ferry=true;h->ferryLand=land;std::memcpy(h->ferryAt,at,12);
-        h->hold[0]=at[0];h->hold[1]=at[1]+Cfg().heliHeight;h->hold[2]=at[2];
+        h->hold[0]=at[0];h->hold[1]=at[1]+over;h->hold[2]=at[2];
         h->target=ObjRef{};h->tracked=ObjRef{};h->focus={};h->extend=false;h->circleUntil=0;
-        if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s",vehicle,at[0],at[1],at[2],land ? ", landing there" : "");
+        if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s, %.0f m over it",vehicle,at[0],at[1],at[2],land ? ", landing there" : "",over);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

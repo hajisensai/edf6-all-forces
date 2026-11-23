@@ -279,6 +279,7 @@ struct Config {
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
+    bool chaseCam=true;             // the vehicle cameras' chase follower: inertia, a jet's / heli's partial roll (turretcam.cpp, chase_cam.h)
     int freeLookKey=0x43;           // ...free look while held: the camera turns, the turret holds ('C'; 0 none). Not the
                                     // middle button: on the drive page that is the Grape's horn (docs/keyconfig-re.md §8)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
@@ -291,6 +292,11 @@ struct Config {
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     int infantryScope=2;            // a soldier's scoped weapon zoomed (infantryscope.cpp, scope_pip.h Mode): 0 stock, 1 the whole
                                     // screen under a real optic's eyepiece and reticle, 2 the picture in the picture (the lens only)
+    bool scopeSpread=true;          // a player's scoped weapon spreads by the scope (scope_spread.cpp; online the host's: host_settings.h)
+    float scopeSniperHipSpread=4.0f;      // ...a sniper rifle (category 2 / 104) unzoomed: the stock cone x this (zoomed: the stock)
+    float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
+    float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
+    float scopeAimSpread=0.8f;            // ...and zoomed: x this
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
@@ -362,6 +368,8 @@ struct Config {
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
     int roomLoadoutKey=0x71;        // ...its key (F2; a Windows virtual-key code, 0: none)
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
+    bool hqAutoMissionSelect=true;  // the offline HQ opens its own mission select once per HQ screen (room_ui.cpp AutoOpenMission,
+                                    // docs/worldmap-hq-open-re.md; also with RoomLoadout=0; 0: the HQ as stock)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
@@ -479,6 +487,15 @@ struct Config {
     float npcGrabRange=4.0f;        // ...m: one this near makes them roll (or back off)
     float npcCrowd=1.5f;            // ...the pressure (enemies near, nearer weigh more) they back off from
     float npcRollSec=2.5f;          // ...s between two rolls
+    // Their own dashes (npcai.cpp Mobility, docs/npc-mobility-re.md):
+    bool npcWingDash=true;          // ...a Wing Diver dashes (the stock dash): out of a crowd, to a far goal, to keep up
+    float npcWingDashFar=25.0f;     // ...m: a fight's / order's walk with more than this left is dashed (keeping up: twice)
+    float npcWingDashSec=1.5f;      // ...s between two of her dashes
+    float npcWingDashReserve=0.5f;  // ...share of her energy kept after a dash (in the air at least 0.6), and one more dash
+    bool npcFencerMobility=true;    // ...a Fencer whose weapons dash / boost uses them: dash-jump, dash only or boost only
+    float npcFencerDashJumpRange=45.0f;   // ...m: a goal this far, the way clear and both hands able: the dash-jump
+    float npcFencerDashRange=15.0f; // ...m: a goal this far: a dash
+    int npcFencerDashReserve=1;     // ...dashes kept for dodging while an enemy is near
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
            // ...m from their anchor (the player they follow, their leader, their post) they go to fight
@@ -513,6 +530,10 @@ struct Config {
     bool npcFreeSquadCover=false;   // the stock's cover of a squad with +0x540 (seen at 1/3 the range; for a while damage
                                     // taken x0.01, dealt x0.1; npcai.cpp CoverRoot): false = no squad has it (the user
                                     // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
+    bool commanderMode=false;       // the commander mode (commander.cpp, docs/feature-2026-11-21-commander-mode.md): no
+                                    // player soldier to play, an NPC of the player's class and weapon at its start, the M
+                                    // map the only view; every friendly NPC soldier dead = the mission lost. Online the
+                                    // host's (host_settings.h CommanderModeInEffect)
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, two keys of their own shift War Thunder's cruise gears; W / S override them
@@ -961,7 +982,10 @@ bool IsDreadnought(const void* vehicle) noexcept;
 // `human` at a Dreadnought's bridge on the keyboard, and `vk` one of its strafe keys (dreadnought.cpp): the bridge holds the
 // key, the Q mark yields to it (npcai.cpp; plan-2026-10-25-keybinds.md §3.3 B).
 bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept;
-void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+// boarding.cpp: the player into it (the boarding gun's path). False, logged: not taken on (the boarding hook not in, no
+// player, or refused: not a board-able friend, the player in a vehicle, no seats); nothing will press for it.
+bool BoardingRequest(unsigned char* vehicle) noexcept;
+bool BoardingReady() noexcept;                           // boarding.cpp: its hook is in (BoardingRequest can take one on)
 bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
 // fresh for kSazabiCueMs). False with none (not riding one).
@@ -1208,6 +1232,11 @@ bool TurretCamSteers(const void* vehicle) noexcept;
 // (the user, 2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了").
 bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept;
 void ResetTurretCam() noexcept;
+// The chase follower's roll (turretcam.cpp, chase_cam.h; README 载具镜头跟随): from the camera step after the native one
+// (firstperson.cpp CameraAfterNative), with the camera's rows (+0x220) in third person to turn them about their forward
+// row onto this step's followed up (a jet's or a heli's partial bank), null where another view owns them (first person,
+// a controlled enemy): either way this step's roll is used up.
+void ChaseCamUp(const unsigned char* cam,float* rows) noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
 // in free look), `gun` where the gun's round would be at that point's range as it points now (on its arc), the muzzle
@@ -1513,6 +1542,12 @@ void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and p
 ObjRef ChuteCanopyMake(const float* feet,const float* drift) noexcept;
 bool ChuteCanopyMove(const ObjRef& canopy,const float* feet,const float* drift) noexcept;
 void ChuteCanopyFree(const ObjRef& canopy) noexcept;
+// playerjet.cpp: a helicopter's rope (transport.cpp's rope descent; transport_logic.h kRopeLength long), hanging straight
+// down from `top`, moved there each frame, deleted. EDF6VC_ROPE.SGO (tools/make_chute.py), a FarEventObject as the
+// canopy is; an empty ref: not made (not installed, not preloaded, or the game made nothing).
+ObjRef RopeMake(const float* top) noexcept;
+bool RopeMove(const ObjRef& rope,const float* top) noexcept;
+void RopeFree(const ObjRef& rope) noexcept;
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool PassThrough() noexcept;   // jet_hooks.cpp: the addBody hook is in
  bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;

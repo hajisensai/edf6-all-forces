@@ -29,10 +29,8 @@ from dataclasses import replace
 import numpy as np
 
 import obj_model as om
-import texfile
-import texfile_accel
 import xm_units
-from dreadnought_model import BODY_AT, BODY_HOST, BODY_SLOTS, _host, _member, _with_frames
+from dreadnought_model import BODY_AT, BODY_HOST, _host, _member, _with_frames
 from mdb import Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, mmul, rab_read, \
     rab_write
 
@@ -42,9 +40,8 @@ BENDS = ('bend_roterA', 'bend_roterB', 'bend_roterC', 'bend_roterD')
 STOCK = ('V506_HELI.MRAB', 'v506_heli.mdb', 'V506_HELI.CAS')
 # The V506's bones its SGO names (MAB locators' parents, ragdoll, dead effect, bone mapping): all kept, by name.
 V506_BONES = ('mdl', 'globalSRT', 'body', 'rearWheelSus', 'rotor', *BENDS, 'tailRotor')
-# The textures' third map (v505_tank's param_r_m_occ_hr: R roughness, G metal, B occlusion, 255 none): X-Morph's
-# materials have a specular map, not these; a painted metal's.
-ROUGH_METAL = (150, 70, 255)
+# A material's maps (tools/prep_xmorph.py material_maps): wt_tracked.material_textures makes the archive's textures of them
+TEXTURE_KEYS = ('albedo', 'normal', 'specular', 'emissive')
 MIN_TRIANGLES = 800
 
 
@@ -79,7 +76,7 @@ def read_info(folder: str) -> dict:
 def model_files(folder: str) -> list[str]:
     """Every file of the folder the archive is made from (the installer's cache hashes them)."""
     info = read_info(folder)
-    names = ['model.json', 'model.npz'] + [m[k] for m in info['materials'] for k in ('albedo', 'normal') if k in m]
+    names = ['model.json', 'model.npz'] + [m[k] for m in info['materials'] for k in TEXTURE_KEYS if k in m]
     return [os.path.join(folder, n) for n in names]
 
 
@@ -126,24 +123,21 @@ def skeleton(info: dict, stock: Mdb, holders: dict[str, tuple[float, float, floa
     return out, frames
 
 
-def _textures(folder: str, key: str, material: dict) -> tuple[dict[str, bytes], dict[str, str]]:
-    """({archive file: DDS}, {slot: file}) of one material: its colour, its normal map (flat where it has none) and the
-    painted metal's roughness map (ROUGH_METAL). The colour and normal maps are resampled to xm_units.TEXTURE_MIN_SIDE
-    before block compression, as the ground units' (wt_tracked min_side)."""
+def _textures(folder: str, key: str, material: dict) -> dict[str, tuple[str, bytes]]:
+    """slot kind -> (archive file, DDS) of one material, as every X-Morph unit's (wt_tracked.material_textures): its
+    colour, its normal map (flat where it has none), its specular map as per-texel roughness / metalness
+    (wt_tracked.SPECULAR_RM) and, on a light material (template LIGHT), its emissive map as the light mask; resampled
+    to xm_units.TEXTURE_MIN_SIDE before block compression. The archive names carry the unit's key (its materials are
+    xm_<k>)."""
     import wt_tracked as wt
-    stem = f'edf6vc_{key}_{material["name"]}'
-    side = xm_units.TEXTURE_MIN_SIDE
-    flat = texfile.Image(4, 4, bytearray(bytes((128, 128, 255, 255)) * 16))
-    rml = texfile.Image(4, 4, bytearray(bytes((*ROUGH_METAL, 255)) * 16))
-    nm = (wt._normal_dds(os.path.join(folder, material['normal']), side) if 'normal' in material
-          else texfile_accel.bc5_normal_dds(flat))
-    files = {f'{stem}_df.dds': wt._dds_of(os.path.join(folder, material['albedo']), side),
-             f'{stem}_nm.dds': nm, f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
-    return files, dict(zip(BODY_SLOTS, files))
+    m = {**material, 'name': f'edf6vc_{key}_{material["name"]}', 'template': material.get('template', BODY_HOST[2]),
+         'min_side': xm_units.TEXTURE_MIN_SIDE}
+    return wt.material_textures(wt.Spec(folder, {}, {}), m)
 
 
 def _parts(folder: str, info: dict) -> list[tuple[om.Part, str]]:
-    """(part, its bone) of every part the folder has, in model space as prepared."""
+    """(part, its bone) of every part the folder has (a rotor's blur too: a translucent material), in model space as
+    prepared."""
     arr = np.load(os.path.join(folder, 'model.npz'))
     out = []
     for k, p in enumerate(info['parts']):
@@ -167,19 +161,24 @@ def build_model(game, folder: str, key: str,  # noqa: ANN001 - rootcpk.Game
     names = [n for n, _p, _a in bones]
     pieces = [(p, names.index(b)) for p, b in _parts(folder, info)]
     joints = [(n, names.index(p) if p else -1, a) for n, p, a in bones]
-    body_md, body_mesh = _host(game, BODY_HOST)
+    import wt_tracked as wt
+    body_md, _body_mesh = _host(game, BODY_HOST)
     md = Mdb(body_md.version, names, [], [], [], [])
     tex: dict[str, bytes] = {}
     meshes = []
     extent = om.reach(p for p, _b in pieces)     # the whole model's: its materials store positions alike
     for m in info['materials']:
-        if m.get('dropped'):
-            continue
-        files, slots = _textures(folder, key, m)
-        tex.update(files)
-        md, mi = om.add_material(md, body_md, BODY_HOST[2], f'{key}_{m["name"]}', slots)
+        # a rotor's blur (tools/prep_xmorph.py rotor_blur): a translucent body material (its 'alpha', ALPHA_HOST)
+        _req(not m.get('transparent') or m.get('alpha', {}).get('mode') == 'blend',
+             f'{folder}: material {m["name"]} is a rotor blur with no blend alpha: not the current prep_xmorph folder')
+        files = _textures(folder, key, m)
+        tex.update(files.values())
+        # the body template (V505's); lit, Retro-Balam's light material with the V505's colour parameters; see-through,
+        # the stock Alpha host with the V505's (wt_tracked.add_surface_material)
+        md, mi, tmpl = wt.add_surface_material(game, md, body_md, BODY_HOST[2], {**m, 'name': f'{key}_{m["name"]}'},
+                                               {k: fn for k, (fn, _d) in files.items()})
         group = [(p, b) for p, b in pieces if p.material == m['name']]
-        meshes += om.build_meshes(body_mesh, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
+        meshes += om.build_meshes(tmpl, [(p, om.rigid(p, b)) for p, b in group], mi, extent=extent)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     posed = [(np.array(p.positions()), [list(s) for s in om.rigid(p, b)]) for p, b in pieces]
     skel = procmesh.bones(joints, key, posed, 1.0)

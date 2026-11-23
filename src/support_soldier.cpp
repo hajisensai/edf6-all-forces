@@ -35,13 +35,19 @@ using CoefFn=float(__fastcall*)(void*,float);
 LoadWeaponFn loadWeaponNext=nullptr;CoefFn coefNext=nullptr;
 bool arms=false;   // both hooks in (InstallSupportSoldiers)
 // The soldier Spawn is creating with a player weapon: its path and stars, given to the first weapon load (index 0) of
-// the first human whose constructor loads one while it is set, which Spawn then checks is the soldier it got.
-struct Arming {
-    bool on=false,applied=false;
-    void* human=nullptr;
+// the first human whose constructor loads one while it is set, which Spawn then checks is the soldier it got. A Fencer
+// given a second hand (support_net.h Unit::offhand): that one to the same human's second load (index 1, the template's
+// AI shield; WeaponSet 1), checked the same way.
+struct ArmingLoad {
     wchar_t path[96]{};
     std::size_t length=0;
     alignas(8) std::uint8_t stars[npctier::kStarCount]{};
+};
+struct Arming {
+    bool on=false,second=false;   // `second`: a second hand is given too
+    int applied=0;                // the loads of `human` replaced so far (0, 1, 2)
+    void* human=nullptr;
+    ArmingLoad load[2]{};
 };
 Arming arming;
 constexpr std::size_t kNetworkManager=0x20B2AC8;
@@ -135,10 +141,12 @@ Owned* FreeEntry() noexcept {
     return nullptr;
 }
 void* __fastcall LoadWeaponHook(void* human,const MsvcWide* path,const void* stars) noexcept {
-    if(!arming.on || arming.applied)return loadWeaponNext(human,path,stars);
-    arming.applied=true;arming.human=human;
-    const MsvcWide mine{arming.path,0,arming.length,arming.length};
-    return loadWeaponNext(human,&mine,arming.stars);
+    if(!arming.on || (arming.applied && human!=arming.human) || arming.applied>=(arming.second ? 2 : 1))
+        return loadWeaponNext(human,path,stars);
+    const ArmingLoad& l=arming.load[arming.applied];
+    arming.human=human;++arming.applied;
+    const MsvcWide mine{l.path,0,l.length,l.length};
+    return loadWeaponNext(human,&mine,l.stars);
 }
 // A soldier this module made with a player weapon: the attack coefficient a player has (1, the weapon's own damage, as
 // the requester's), not the difficulty's (docs/feature-npc-weapon-tier.md). Every other soldier: the stock one.
@@ -192,21 +200,30 @@ int SpawnFault(const char* stage,const EXCEPTION_POINTERS* error,const float* re
 // `look`: a coloured copy of the resource's template (support_loadout.h SupportLookFile, app:/object/ spelling) the caller
 // found preloaded (support_variants.h); nullptr: the stock template. Same class, AI weapon and setup either way.
 // `weapon`: a player weapon it carries (npctier::PackArms, its kind's; support_net.h Unit::arms), 0: the template's.
+// `offhand`: a Fencer's second hand (Unit::offhand, npctier::UnpackHand) in place of its AI shield, 0: the shield.
 bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned char* netId=nullptr,bool local=false,
-           bool registerNow=true,const wchar_t* look=nullptr,std::uint64_t weapon=0) noexcept {
+           bool registerNow=true,const wchar_t* look=nullptr,std::uint64_t weapon=0,std::uint64_t offhand=0) noexcept {
     *out=ObjRef{};
     if(!Gate(netId!=nullptr,local))return false;
     const wchar_t* const body=Body(resource) && look ? look : Body(resource);
     if(!body){failure=SupportSpawnFailure::transform;return false;}
-    npctier::Arms carried;
-    if(weapon) {
+    npctier::Arms carried,second;
+    ArmingLoad loads[2]{};
+    if(weapon || offhand) {
         // The weapon hooks not in, or arms not its kind's: never the template instead (it would not be the soldier every
         // machine builds). Validate refuses such a plan first; this is the last word.
-        if(!arms || !npctier::UnpackArms(weapon,SupportSoldierWeapon(resource),&carried) ||
-           !npctier::ArmsPath(SupportSoldierWeapon(resource),carried,arming.path,std::size(arming.path))) {
-            Log("SUPPORT soldier weapon %016llX not buildable here (hooks %d): not spawned",static_cast<unsigned long long>(weapon),arms ? 1 : 0);
+        const SupportWeapon kind=SupportSoldierWeapon(resource);
+        if(!arms || !weapon || !npctier::UnpackArms(weapon,kind,&carried) ||
+           !npctier::ArmsPath(kind,carried,loads[0].path,std::size(loads[0].path)) ||
+           !npctier::UnpackHand(offhand,kind,&second) ||
+           (second.on && !npctier::HandPath(second,loads[1].path,std::size(loads[1].path)))) {
+            Log("SUPPORT soldier weapon %016llX / %016llX not buildable here (hooks %d): not spawned",static_cast<unsigned long long>(weapon),
+                static_cast<unsigned long long>(offhand),arms ? 1 : 0);
             failure=SupportSpawnFailure::setup;return false;
         }
+        std::memcpy(loads[0].stars,carried.stars,sizeof(loads[0].stars));
+        std::memcpy(loads[1].stars,second.stars,sizeof(loads[1].stars));
+        for(auto& l:loads)l.length=wcslen(l.path);
     }
     // Its kind is offered, parsed and planned only when installed (support_call.h SupportKindInstalled): a plan of another
     // machine with it reaches here only past this machine's Validate, which refuses it first.
@@ -232,19 +249,21 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
         nativeInput=nativeMatrix;
         InitParam init{image+kInitVtable,{}};
         if(carried.on) {
-            arming.on=true;arming.applied=false;arming.human=nullptr;
-            arming.length=wcslen(arming.path);
-            std::memcpy(arming.stars,carried.stars,sizeof(arming.stars));
+            arming=Arming{};arming.on=true;arming.second=second.on;
+            arming.load[0]=loads[0];arming.load[1]=loads[1];
         }
         soldier=create(missionManager,nativeMatrix,body,&init);
-        const bool given=arming.on && arming.applied && soldier && arming.human==soldier;
+        const bool given=arming.on && arming.applied==(arming.second ? 2 : 1) && soldier && arming.human==soldier;
         const bool wanted=arming.on;
         arming=Arming{};
         if(!soldier){failure=SupportSpawnFailure::create;return false;}
         if(wanted && !given) {
-            Log("SUPPORT soldier %ls: its weapon load did not take %016llX: deleted",body,static_cast<unsigned long long>(weapon));
+            Log("SUPPORT soldier %ls: its weapon loads did not take %016llX / %016llX: deleted",body,static_cast<unsigned long long>(weapon),
+                static_cast<unsigned long long>(offhand));
             failure=SupportSpawnFailure::setup;destroy(soldier);return false;
         }
+        if(second.on)Log("SUPPORT soldier %ls: hands %u (set 0) / %u (set 1)",body,static_cast<unsigned>(carried.id),
+                         static_cast<unsigned>(second.id));
         stage="identity";
         const auto ctrl=At<unsigned char*>(soldier,kSelfCtrl);
         if(!IsSoldierClass(soldier) || IsAnyPlayer(soldier) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0) {
@@ -429,14 +448,14 @@ bool ApplySupportSoldierSpawn(const float* matrix,bool leader,const unsigned cha
     return support_native::Spawn(matrix,leader ? kSupportLeaderResource : kSupportRangerResource,out,id);
 }
 bool ApplySupportSoldierResource(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                 const wchar_t* look,std::uint64_t weapon) noexcept {
+                                 const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id,true,look,weapon);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,true,look,weapon,offhand);
 }
 bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource,const unsigned char* id,bool local,ObjRef* out,
-                                      const wchar_t* look,std::uint64_t weapon) noexcept {
+                                      const wchar_t* look,std::uint64_t weapon,std::uint64_t offhand) noexcept {
     if(!out)return false;
-    return support_native::Spawn(matrix,resource,out,id,local && !id,false,look,weapon);
+    return support_native::Spawn(matrix,resource,out,id,local && !id,false,look,weapon,offhand);
 }
 bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept {
     using namespace support_native;

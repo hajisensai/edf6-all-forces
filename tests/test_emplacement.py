@@ -150,7 +150,9 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(vc.store_of(vehicle.weapons[2]), ('PATRIOT_SAM', 8))
         tubes = em.spec('patriot').info['muzzles']['missiles']
         self.assertEqual(len(tubes), 4)
-        self.assertEqual({t['bone'] for t in tubes}, {'cannon_main'})
+        # On the pack's elevation hinge: the missile leaves along the raised pack, not level (2026-11-21:
+        # 「类似通古斯卡的导弹没有跟随发射架方向射出去」).
+        self.assertEqual({t['bone'] for t in tubes}, {'cannon_l'})
 
 
 if __name__ == '__main__':

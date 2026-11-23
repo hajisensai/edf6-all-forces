@@ -6,8 +6,8 @@
 //  - InfantryScopeNow's lens flag (the HUD frames the lens only while it draws) and its FOV (the reticle's angles);
 //  - the camera step asks scope_lens.cpp for the lens view at the stock zoom's FOV; a refused lens view zooms again;
 //  - the world's ends (InfantryScopeWorldEnd) and the lens command (InfantryScopeLensCommand) on a real D3D11 WARP
-//    device, in the frame's order (docs/scope-pip-re.md §5.3): the main view's world colour held, the lens view's
-//    (viewport 3, S x S) held, the command draws the lens view's picture into the lens's disc (scope_pip.h LensSample),
+//    device, in the frame's order (docs/scope-pip-re.md §5.3): the lens view's world colour held (viewport 3, S x S, the last
+//    recording's), the main view's held, the command draws the lens view's picture into the lens's disc (scope_pip.h LensSample),
 //    nothing outside it; the reticle's FOV from the lens view's projection; another player's view, a stock-zoomed frame,
 //    a mis-sized lens view, a lens view with no main view before it: nothing; a partial viewport refuses until the
 //    mission's reset.
@@ -226,10 +226,11 @@ int WorldEndChecks() {
     config.enabled=true;config.infantryScope=2;lensHooked.store(true);
     Open(GetTickCount64());
     Check(Step(camera)==scopepip::kBaseFov,"the camera left the frame unmagnified");
-    // One frame in the recording's order: the main view's world end, the lens view's, the lens command.
+    // One frame in the render thread's order: the lens view's world end (the last recording's, after its main view's
+    // post stage), this recording's main view's world end, the lens command right after it (before its post stage).
     const auto frame=[&](unsigned char* view,const Target& lensTarget) {
-        g.Bind(g.main);End(g.context.Get(),view);
         g.Bind(lensTarget);End(g.context.Get(),lensView);
+        g.Bind(g.main);End(g.context.Get(),view);
         Refresh();InfantryScopeLensCommand(g.context.Get());Refresh();
     };
 
@@ -240,8 +241,8 @@ int WorldEndChecks() {
 
     // A shadow cascade's world end (query 2) holds nothing.
     viewOwner=soldier;
-    g.Bind(g.main);End(g.context.Get(),shadowView);
     g.Bind(g.lens);End(g.context.Get(),lensView);
+    g.Bind(g.main);End(g.context.Get(),shadowView);
     InfantryScopeLensCommand(g.context.Get());
     Check(g.Read(g.main)==g.main.start && lensAt.load()==0,"a shadow cascade's world end: nothing held, nothing drawn");
 
@@ -273,10 +274,10 @@ int WorldEndChecks() {
     g.Restore(g.main);
     InfantryScopeLensCommand(g.context.Get());
     Check(g.Read(g.main)==g.main.start && !lensShown.load(),"no views held: the command draws nothing");
-    // The lens view's world end with no main view held before it: nothing.
+    // The lens view's world end with no main view's after it: nothing.
     g.Bind(g.lens);End(g.context.Get(),lensView);
     InfantryScopeLensCommand(g.context.Get());
-    Check(g.Read(g.main)==g.main.start,"a lens view with no main view before it: nothing");
+    Check(g.Read(g.main)==g.main.start,"a lens view with no main view after it: nothing");
 
     // A frame the stock zoom rendered (in flight from before the camera unzoomed): no lens, not refused.
     project(mainView,kStockFov);

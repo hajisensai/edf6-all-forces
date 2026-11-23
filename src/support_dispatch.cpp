@@ -27,10 +27,13 @@
 #include "hudtext.h"
 #include "transport.h"
 #include "support_variants.h"
+#include "room_sync.h"
 #include "airdrop.h"
 #include "helipad.h"
 #include "support_points.h"
 #include "support_warning.h"
+#include "commander.h"
+#include "commander_logic.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -67,6 +70,9 @@ struct Planning {
     std::uint64_t loadout=0;bool loadKnown=false,composed=false;SupportLoadout load{};
     int edge=0;npc::navigation::RouteState navigation{};
     bool entriesMade=false;support::GroundEntries entries{};   // fixed at the request: the caller moves on meanwhile
+    // Underground an infantry call is planned as a drill transport (DrillPlan) first; no entry connected to the point by a
+    // route that hull can drive (the caves narrower than it), its soldiers walk in from the entries instead.
+    bool onFoot=false;
 };
 Planning planning{};
 // The planning and deployment rows hold route states (ground_navigation.h RouteState, ~150 KB each): `row={}` would
@@ -141,6 +147,8 @@ void Refuse(std::uint32_t catalog,const char* cause,const wchar_t* text) noexcep
 bool LocalAuthority() noexcept {return !InSession();}
 void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexcept {
     using support_net::RequestStatus;
+    // A commander's NPC request (commander.cpp): its own, never the map's line nor a paid call's.
+    if(CommanderRequestNotice(request,state))return;
     // The rescue's own request: told to the rescue only (its id taken from the accepted notice of its submission).
     if(rescueSubmitting && state==RequestStatus::accepted && request){rescueRequest=request;rescueEnded=false;return;}
     if(request && request==rescueRequest) {
@@ -177,6 +185,14 @@ int AirCount() noexcept {return SupportAirCallCount();}
 int GroundStart() noexcept {return AirCount()+2;}
 bool InfantryCatalog(std::uint32_t catalog) noexcept {
     return catalog==static_cast<unsigned>(AirCount()) || catalog==static_cast<unsigned>(AirCount()+1);
+}
+// Underground the infantry calls come in a drill transport (support_spawn.h kSupportDrillTransport; the user: 「地底可以用
+// 钻地坦克」, docs/insertion-re.md §5): it drives in from a ground entry with the soldiers aboard, they get off at the point
+// as a crewed APC's passengers do (TransportDeliver) and it drives back to its entry (WithdrawGround). The same two
+// entries, no entry of its own: a SupportVehicleKind or a catalog entry more would move every later index (the
+// transports, the airdrops, the strikes, the rescue) and add an airdrop. Its plan: the hull, its driver, the riders.
+bool DrillPlan(const SupportPlan& plan) noexcept {
+    return plan.count && plan.units[0].resourceId==kSupportDrillTransportResource && InfantryCatalog(plan.catalogId);
 }
 npc::navigation::Profile InfantryRouteProfile() noexcept {
     npc::navigation::Profile profile;profile.cell=4;profile.waypointRadius=kInfantryWaypointRadius;profile.greed=npc::navigation::kRouteGreed;return profile;
@@ -321,10 +337,12 @@ bool AddUnit(SupportPlan& plan,std::uint32_t resource,std::uint32_t parent,const
 }
 // The real crew gather beside their ground vehicle, on its own level (`rise`).
 // `resources`: each one's (count of them).
+// `bothSides`: in two files, one each side of it (the drill transport's thirteen: a file of them would reach 27 m back).
 bool AddCrew(SupportPlan& plan,unsigned parent,const float* entry,const float* heading,unsigned count,float width,
-             const std::uint32_t* resources,float rise) noexcept {
+             const std::uint32_t* resources,float rise,bool bothSides=false) noexcept {
     for(unsigned i=0;i<count;++i) {
-        const float side=width+2.0f,back=-3.0f-static_cast<float>(i)*2.0f;
+        const unsigned row=bothSides ? i/2 : i;
+        const float side=(bothSides && (i&1) ? -1.0f : 1.0f)*(width+2.0f),back=-3.0f-static_cast<float>(row)*2.0f;
         float at[3]={entry[0]+heading[2]*side+heading[0]*back,entry[1],entry[2]-heading[0]*side+heading[2]*back};
         if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>rise)return false;
         if(!AddUnit(plan,resources[i],parent,at,heading))return false;
@@ -345,6 +363,15 @@ unsigned AirCrew(std::uint32_t catalog,const SupportAircraft& spec) noexcept {
 // (support_net.h SupportPeersAcceptVariants). Otherwise an older peer's Validate refuses the plan mid-transaction
 // with no reason anyone sees, so the host plans its protocol v2 plan and says why (once a request, logged).
 bool legacyNoticed=false;
+// The loadout a plan is made with (2026-11-21, the player: 「要能在房间里面用界面调npc、挂载等」): the requester's own. Offline
+// and for this machine's own requests that is this machine's configuration; the host planning another room member's
+// request plans it with the loadout that member published in the room (room_sync.h RoomMemberConfig, member_config.h),
+// or the defaults when it published none that reads (never the host's own: the call is the member's). Whether a support
+// may be called at all (SupportDisabled) stays the host's rule. Set by PlanForRequester around Plan; the mission
+// vehicles' crews (kMissionCrewCatalog) are nobody's request and keep this machine's.
+// SoldierVariant and PresetHands share this configuration. Weapon stars still come from the planner's records.
+const SupportConfig* planConfig=nullptr;
+const SupportConfig& PlanCfg() noexcept { return planConfig ? *planConfig : SupportCfg(); }
 bool UseConfiguredLoadout() noexcept {
     if(SupportPeersAcceptVariants())return true;
     if(!legacyNoticed) {
@@ -387,7 +414,7 @@ std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint6
 // bits: the soldier then comes with its colours alone, said once a request.
 std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    auto look=PresetLookFor(PlanCfg().preset[catalog],load,i);
     if(look.pack && !SupportPeersApplyBackpacks()) {
         Log("SUPPORT plan catalog=%u: soldier %d without its backpack weapon: a peer runs an older All Forces (no backpacks)",catalog,i);
         NoteVariant(L"房间里有旧版全军出击：支援士兵本次不带背包武器（全员更新后生效）%ls",L"");
@@ -398,10 +425,22 @@ std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,in
     if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
     return DecideVariant(catalog,file,LookVariant(look));
 }
+// Soldier `i` of a composed load, a Fencer whose preset names both hands (support_loadout.h #R:L, PresetHandsFor): those
+// as its weapon words (npc_arms.h PresetHandArms: this machine's player's stars, each one less), kept by GiveLocalArms
+// and the host's Session (docs/feature-npc-weapon-tier.md 2.5). Without them (none named, or no weapon can be given
+// here: logged) the requester's own pick fills it later.
+void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_net::Unit& unit) noexcept {
+    if(catalog>=static_cast<unsigned>(kSupportConfigUnits) || !IsSupportSoldierResource(unit.resourceId))return;
+    const FencerHands h=PresetHandsFor(PlanCfg().preset[catalog],load,i);
+    if(!h.On() || !HandsFit(h,SupportSoldierWeapon(unit.resourceId)))return;
+    if(!PresetHandArms(h.right,h.left,&unit.arms,&unit.offhand))
+        Log("SUPPORT plan catalog=%u: soldier %d's preset hands %d:%d not given (the weapon hooks / preload are not in): the requester's pick",
+            catalog,i,h.right,h.left);
+}
 // The entry's tank / jets: its SupportVehicle_<key> pylons as a variant of the hull.
 std::uint64_t HullVariant(std::uint32_t catalog) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    const auto& l=SupportCfg().vehicle[catalog];
+    const auto& l=PlanCfg().vehicle[catalog];
     if(!l.On() || l.body!=VehicleBodyOfKey(SupportCallKey(static_cast<int>(catalog))))return 0;
     wchar_t file[96];
     if(!VehicleVariantFile(l,file,_countof(file)))return 0;
@@ -421,14 +460,14 @@ bool VariantFile(const SupportPlan& plan,const support_net::Unit& unit,wchar_t* 
 }
 int AircraftCount(std::uint32_t catalog,const SupportAircraft& spec,unsigned group) noexcept {
     if(IsRescue(catalog))return 1;   // one heli for one swimmer, never configured
-    const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) && UseConfiguredLoadout() ? SupportCfg().aircraft[catalog] : 0;
+    const int chosen=catalog<static_cast<unsigned>(kSupportConfigUnits) && UseConfiguredLoadout() ? PlanCfg().aircraft[catalog] : 0;
     const int most=static_cast<int>(support_net::kMaxUnits/group);
     const int wanted=chosen>0 ? chosen : spec.count;
     return wanted<1 ? 1 : wanted>most ? most : wanted;
 }
 // The infantry's resources (configured weapons, support_config.h): member i of a 4 / 12-person request.
 std::uint32_t InfantryResource(bool platoon,unsigned i) noexcept {
-    const auto& c=SupportCfg();
+    const auto& c=PlanCfg();
     if(!UseConfiguredLoadout())return i%4==0 ? kSupportLeaderResource : kSupportRangerResource;
     if(i%4==0)return SupportSoldierResource(c.leader,true);
     return SupportSoldierResource(platoon ? c.platoon[(i/4)%3] : c.squad,false);
@@ -574,7 +613,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         }
         // Created in the air at the edge, in formation, flying in (support_entry.h AirFormationSlot); the real crew are
         // made inside their aircraft (the same matrix) and seated at once at spawn.
-        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().aircraftCrew,false) : kSupportRangerResource;
         const float spacing=spec.heli>=0 ? 0.6f : 1.0f;
         for(int i=0;i<spec.count;++i) {
             float at[3];support::AirFormationSlot(route,i,spacing,at);
@@ -616,7 +655,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             return PlanResult::refused;
         }
         // The hull in the air at the edge, its pilot and the soldiers made inside it and seated at once (BoardAirborne).
-        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().aircraftCrew,false) : kSupportRangerResource;
         if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
            !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
         plan.units[1].variant=SupportCrewVariant(catalog,crew);   // its pilot's colours (the riders' are the preset's)
@@ -626,7 +665,10 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             if(!AddUnit(plan,resource,1,route.from,route.heading)) {
                 Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;
             }
-            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+            if(composed) {
+                plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+                PresetHands(catalog,load,static_cast<int>(i),plan.units[plan.count-1]);
+            }
         }
         Log("SUPPORT plan catalog=%u ready: a transport %s in the air at (%.0f,%.0f,%.0f) heading (%.2f,%.2f), %u soldiers aboard",catalog,
             plane ? "plane (paratroop drop)" : "helicopter (air assault)",route.from[0],route.from[1],route.from[2],route.heading[0],
@@ -663,7 +705,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             else Refuse(catalog,"no clear air corridor from any map edge",L"从地图边缘到目标没有净空的空中航线");
             return PlanResult::refused;
         }
-        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().aircraftCrew,false) : kSupportRangerResource;
+        const auto crew=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().aircraftCrew,false) : kSupportRangerResource;
         if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,route.from,route.heading) ||
            !AddUnit(plan,crew,1,route.from,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
         plan.units[1].variant=SupportCrewVariant(catalog,crew);   // its pilot's colours
@@ -676,7 +718,17 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     // a map with no ground found round its centre still takes an air call, as before the transports).
     if(!area.ground){Refuse(catalog,"no ground found round the map's centre",L"无法测定本图的地面范围，无法规划支援入口");return PlanResult::refused;}
     SupportVehicleKind kind{};SupportCrewMode mode{};const bool vehicle=GroundCatalog(catalog,kind,mode);
-    const auto* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
+    const SupportVehicleSpec* spec=vehicle ? SupportVehicleInfo(kind) : nullptr;
+    // Underground an infantry call comes in the drill transport (DrillPlan), unless NpcBoarding is off (no NPC boards
+    // anything) or no entry had a route it can drive (planning.onFoot). Its SGO is the installer's: not preloaded, the
+    // install is broken and the call is refused (nothing stands in for it).
+    const bool drill=!vehicle && InfantryCatalog(catalog) && SupportMissionPolicy().underground && Cfg().npcBoarding && !planning.onFoot;
+    if(drill && !SupportDrillTransportReady()) {
+        Refuse(catalog,"EDF6VC_DRILL_TRANSPORT.SGO not installed / preloaded (underground the infantry comes by drill tank)",
+               L"钻地运兵车资源未安装：地下的步兵支援由钻地坦克运送，请用安装器重新安装");
+        return PlanResult::refused;
+    }
+    if(drill)spec=&kSupportDrillTransport;
     if(vehicle && !support::Allowed(SupportMissionPolicy(),CapabilityOf(catalog))) {
         Refuse(catalog,"mission forbids this vehicle (external military support, or underground)",SupportCallForbidden(static_cast<int>(catalog)));
         return PlanResult::refused;
@@ -690,6 +742,10 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         planning.entriesMade=true;
         Log("SUPPORT plan catalog=%u: %d physical ground entry candidates round (%.0f,%.0f,%.0f), visibility unrestricted",catalog,
             planning.entries.count,target[0],target[1],target[2]);
+    }
+    if(planning.edge>=planning.entries.count && drill) {
+        Log("SUPPORT plan catalog=%u: no entry with a route the drill transport can drive: the soldiers walk in",catalog);
+        planning.onFoot=true;planning.edge=0;Renew(planning.navigation);return PlanResult::pending;
     }
     if(planning.edge>=planning.entries.count) {
         Refuse(catalog,"no entry candidate connected to the target by a verified route",L"找不到与目的地连通的支援入口（周围 100-500 米及场地边缘无安全入场通道）");
@@ -716,10 +772,25 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     if(path==npc::navigation::Result::blocked)return nextEdge("no route to the target");
     const float distance=support::FlatDistance(entry,target);
     const float heading[3]={(target[0]-entry[0])/distance,0,(target[2]-entry[2])/distance};
-    if(vehicle) {
+    if(drill) {
+        entry[1]+=0.1f;
+        // Its driver (the vehicles' crew weapon), then the call's soldiers aboard (its own 4 / 12, or the composed load: a
+        // leader every four), each with what the walking call gives it (a composed load's preset colours).
+        const bool platoon=catalog!=static_cast<unsigned>(AirCount());
+        const unsigned riders=composed ? static_cast<unsigned>(load.count) : platoon ? 12u : 4u;
+        std::uint32_t crew[support_net::kMaxUnits];
+        crew[0]=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().vehicleCrew,false) : kSupportRangerResource;
+        for(unsigned i=0;i<riders;++i)crew[1+i]=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
+        if(!AddUnit(plan,kSupportDrillTransportResource,0,entry,heading) ||
+           !AddCrew(plan,1,entry,heading,1+riders,spec->halfWidth,crew,0.55f,true))
+            return nextEdge("no level ground for the drill transport's crew");
+        plan.units[1].variant=SupportCrewVariant(catalog,crew[0]);
+        if(composed)for(unsigned i=0;i<riders;++i)plan.units[2+i].variant=SoldierVariant(catalog,load,static_cast<int>(i),crew[1+i]);
+        Log("SUPPORT plan catalog=%u: underground: a drill transport, its driver and %u soldiers aboard",catalog,riders);
+    } else if(vehicle) {
         entry[1]+=0.1f;
         // Its driver (the configured crew weapon), then its passengers: the composed load, or as many more crew.
-        const auto driver=UseConfiguredLoadout() ? SupportSoldierResource(SupportCfg().vehicleCrew,false) : kSupportRangerResource;
+        const auto driver=UseConfiguredLoadout() ? SupportSoldierResource(PlanCfg().vehicleCrew,false) : kSupportRangerResource;
         std::uint32_t crew[support_net::kMaxUnits];unsigned count=mode==SupportCrewMode::unmanned ? 1u : spec->seats;
         if(mode==SupportCrewMode::soldiers && composed)count=1+static_cast<unsigned>(load.count);
         if(count>support_net::kMaxUnits-1)count=support_net::kMaxUnits-1;
@@ -730,9 +801,11 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         // The hull's pylons (SupportVehicle_<key>); its crew's colours (SupportCrewColour: the driver, and every seat when
         // the call brings its own crew), a composed load's passengers' the preset's (unit 1 is the driver, 2.. the load).
         plan.units[plan.count-count-1].variant=HullVariant(catalog);
-        for(unsigned i=0;i<count;++i)
+        for(unsigned i=0;i<count;++i) {
             plan.units[plan.count-count+i].variant=i>0 && composed ? SoldierVariant(catalog,load,static_cast<int>(i-1),crew[i]) :
                                                                        SupportCrewVariant(catalog,crew[i]);
+            if(i>0 && composed)PresetHands(catalog,load,static_cast<int>(i-1),plan.units[plan.count-count+i]);
+        }
     } else {
         const bool platoon=catalog!=static_cast<unsigned>(AirCount());
         const unsigned count=composed ? static_cast<unsigned>(load.count) : platoon ? 12u : 4u;
@@ -741,7 +814,10 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             if(!Foot(at[0],at[2],entry[1],at[1]) || std::fabs(at[1]-entry[1])>0.55f)return nextEdge("no level ground for the squad");
             const auto resource=composed ? SupportLoadoutResource(load,static_cast<int>(i)) : InfantryResource(platoon,i);
             if(!AddUnit(plan,resource,0,at,heading))return nextEdge("plan full");
-            if(composed)plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+            if(composed) {
+                plan.units[plan.count-1].variant=SoldierVariant(catalog,load,static_cast<int>(i),resource);
+                PresetHands(catalog,load,static_cast<int>(i),plan.units[plan.count-1]);
+            }
         }
     }
     Log("SUPPORT plan catalog=%u ready: entry (%.0f,%.0f,%.0f), %.0f m to the target, %u units",catalog,entry[0],entry[1],entry[2],
@@ -749,18 +825,47 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     *out=plan;planning.active=false;return PlanResult::ready;
 }
 
+// The loadout of room member `peer`'s requests (planConfig): looked up again for each request (the member may have saved
+// a new one in the room), kept while that request plans across frames.
+struct RequesterLoadout {
+    std::uint32_t peer=~0u,catalog=~0u;float target[3]{};std::uint64_t loadout=0;
+    bool known=false;
+    SupportConfig config;
+} requesterLoadout;
+const SupportConfig* LoadoutOfPeer(std::uint32_t peer,std::uint32_t catalog,const float* target,std::uint64_t loadout) noexcept {
+    const char* puid=peer ? SupportPeerPuid(peer) : nullptr;
+    if(!peer || !puid || !*puid)return nullptr;   // this machine's own request: its own configuration
+    auto& r=requesterLoadout;
+    if(r.peer==peer && r.catalog==catalog && r.loadout==loadout && target && !std::memcmp(r.target,target,sizeof(r.target)))
+        return &r.config;
+    r.peer=peer;r.catalog=catalog;r.loadout=loadout;
+    if(target)std::memcpy(r.target,target,sizeof(r.target));
+    r.known=roomsync::RoomMemberConfig(puid,&r.config);
+    if(!r.known)r.config=SupportConfig{};
+    Log("SUPPORT plan catalog=%u for peer %u (%.12s): %s",catalog,peer,puid,
+        r.known ? "that member's own loadout from the room" : "that member published no loadout that reads: the defaults");
+    return &r.config;
+}
 support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
                                          std::uint64_t loadout,SupportPlan* out) noexcept {
+    if(catalog==commander::kCatalog)return PlanCommander(peer,target,loadout,out);   // a commander's NPC (commander.cpp)
+    struct Scope {
+        explicit Scope(const SupportConfig* c) noexcept { planConfig=c; }
+        ~Scope() { planConfig=nullptr; }
+    } scope(LoadoutOfPeer(peer,catalog,target,loadout));
     if(SupportSubCatalog(static_cast<int>(catalog))) {
         ObjRef requester{};
         if(!SupportAuthenticatedRequester(peer,&requester) || !Live(requester))return support_net::PlanResult::refused;
         return PlanSubmarine(catalog,target,static_cast<const float*>(static_cast<const void*>(
             static_cast<const unsigned char*>(requester.obj)+kPosition)),loadout,out);
     }
-    return Plan(catalog,target,loadout,out);
+    const auto result=Plan(catalog,target,loadout,out);
+    if(result!=support_net::PlanResult::pending)requesterLoadout.peer=~0u;   // the next request looks it up again
+    return result;
 }
 bool Validate(const SupportPlan& plan) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
+    if(plan.catalogId==commander::kCatalog)return ValidateCommanderPlan(plan);
     const bool dynamicDrone=plan.count==1 &&
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
     if(int strike=0;!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
@@ -827,6 +932,20 @@ bool Validate(const SupportPlan& plan) noexcept {
         if(!support::Allowed(SupportMissionPolicy(),support::Capability::air))return false;
         // Its riders: the call's own (4 / 12) or a composed load, one to the hull's seats.
         if(plan.count<3 || plan.count>2+kTransportSeats || plan.units[0].role || plan.units[0].resourceId!=kAircraft+kSupportAirborneOffset+plan.catalogId)return false;
+        if(!member(plan.units[1].resourceId) || plan.units[1].role!=1)return false;
+        for(unsigned i=2;i<plan.count;++i)
+            if(plan.units[i].role!=1 || !IsSupportSoldierResource(plan.units[i].resourceId) ||
+               IsSupportLeaderResource(plan.units[i].resourceId)!=((i-2)%4==0))return false;
+        return true;
+    }
+    if(DrillPlan(plan)) {
+        // Underground only: the drill transport (preloaded here too), its driver, the soldiers aboard (a leader every
+        // four), all made beside it and boarded (role 1).
+        if(!SupportMissionPolicy().underground || !SupportDrillTransportReady()) {
+            Log("SUPPORT validate catalog=%u: a drill transport plan, not underground here or its SGO not preloaded",plan.catalogId);
+            return false;
+        }
+        if(plan.count<3 || plan.count>2u+static_cast<unsigned>(kSupportLoadoutMost) || plan.units[0].role)return false;
         if(!member(plan.units[1].resourceId) || plan.units[1].role!=1)return false;
         for(unsigned i=2;i<plan.count;++i)
             if(plan.units[i].role!=1 || !IsSupportSoldierResource(plan.units[i].resourceId) ||
@@ -1062,13 +1181,15 @@ void WithdrawGround(Deployment& deployed) noexcept {
         return;
     }
     SupportVehicleKind kind{};SupportCrewMode mode{};
-    if(!GroundCatalog(deployed.plan.catalogId,kind,mode)){deployed.withdrawing=false;return;}
+    const SupportVehicleSpec* spec=DrillPlan(deployed.plan) ? &kSupportDrillTransport :
+                                   GroundCatalog(deployed.plan.catalogId,kind,mode) ? SupportVehicleInfo(kind) : nullptr;
+    if(!spec){deployed.withdrawing=false;return;}
     const float* position=reinterpret_cast<const float*>(hull+kPosition);
     const float* exit=deployed.plan.units[0].matrix+12;
     bool there=!NpcDriver(hull);
     if(!there) {
         float waypoint[3];
-        const auto path=GroundNavigate(deployed.navigation,position,exit,kVehicleArrival,GameMs(),waypoint,VehicleRouteProfile(*SupportVehicleInfo(kind)));
+        const auto path=GroundNavigate(deployed.navigation,position,exit,kVehicleArrival,GameMs(),waypoint,VehicleRouteProfile(*spec));
         if(path==npc::navigation::Result::moving)NpcPrepareVehicleRoutePost(hull,waypoint,kVehicleDriverHold);
         else if(path==npc::navigation::Result::arrived)there=true;
         else if(path==npc::navigation::Result::blocked)there=support::FlatDistance(position,player.pos)>300.0f;   // out of the way
@@ -1128,6 +1249,7 @@ void Destroy(std::uint64_t id) noexcept {
         return;
     }
     DestroyMissionCrewPlan(id);
+    DestroyCommanderPlan(id);
 }
 // `networked`: a committed support_net transaction (registered IDs on every peer); else this machine's own
 // deployment (LocalAuthority): unregistered objects only it simulates.
@@ -1183,7 +1305,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         const wchar_t* const made=here && (unit.variant&kVariantApplied) ? path : nullptr;
         if(unit.resourceId<kAircraft) {
             if(!(aboard ? CreateSupportSoldierUnregistered : ApplySupportSoldierResource)(unit.matrix,unit.resourceId,
-                    networked ? unit.netId : nullptr,!networked,&object,made,unit.arms)) {
+                    networked ? unit.netId : nullptr,!networked,&object,made,unit.arms,unit.offhand)) {
                 Log("SUPPORT spawn %llu: soldier %u (resource %X) not created",static_cast<unsigned long long>(id),i,unit.resourceId);
                 Destroy(id);return false;
             }
@@ -1203,6 +1325,8 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             } else if(unit.resourceId<kVehicle) {
                 SupportAircraft spec;
                 if(AircraftSpecOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix,made);
+            } else if(unit.resourceId==kSupportDrillTransportResource) {
+                if(DrillPlan(plan))vehicle=SpawnSupportDrillTransport(unit.matrix+12,unit.matrix+8,nullptr);
             } else {
                 SupportVehicleKind kind{};SupportCrewMode mode{};
                 if(GroundCatalog(plan.catalogId,kind,mode))vehicle=SpawnSupportVehicle(kind,mode,unit.matrix+12,unit.matrix+8,nullptr,made);
@@ -1257,6 +1381,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
 }
 bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
+    if(plan.catalogId==commander::kCatalog)return ApplyCommanderPlan(id,plan,remote);
     return SpawnDeployment(id,plan,remote,InSession());
 }
 bool Assign(Deployment& deployed) noexcept {
@@ -1379,7 +1504,7 @@ const wchar_t* SupportCallForbidden(int index) noexcept {
     // Submarine plans surface from verified water, so only underground policy excludes this entry.
     const bool allowed=SupportSubCatalog(index) ? !policy.underground : support::Allowed(policy,CapabilityOf(static_cast<std::uint32_t>(index)));
     if(allowed)return nullptr;
-    if(policy.underground)return L"地下只能呼叫步兵支援；钻地战车请用空袭兵的载具请求呼叫";
+    if(policy.underground)return L"地下只能呼叫步兵支援（由钻地坦克运送）；钻地战车请用空袭兵的载具请求呼叫";
     if(policy.environment==support::Environment::unknown)return L"无法读取本关的支援限制：只能呼叫步兵或民用轻卡";
     return L"本关限制外部支援：只能呼叫步兵或民用轻卡";
 }
@@ -1910,8 +2035,19 @@ void SupportDispatchTick() noexcept {
             boarded=boarded && seated;
         }
         SupportVehicleKind kind{};SupportCrewMode mode{};
-        const bool ground=GroundCatalog(deployed.plan.catalogId,kind,mode),infantry=InfantryCatalog(deployed.plan.catalogId);
-        if(!alive && deployed.started) {
+        const bool drill=DrillPlan(deployed.plan);
+        const bool ground=GroundCatalog(deployed.plan.catalogId,kind,mode) || drill,
+                   infantry=InfantryCatalog(deployed.plan.catalogId) && !drill;
+        // A vehicle that carries soldiers to the point (a crewed APC / truck, the drill transport): a passenger lost on the
+        // way does not end the delivery while its hull and driver live (the survivors still get off at the point; before,
+        // they rode on in it for the rest of the mission, and it never went back).
+        const bool carrier=drill || (ground && mode==SupportCrewMode::soldiers && kind!=SupportVehicleKind::tank);
+        if(!alive && deployed.started && carrier && Live(deployed.objects[0]) && deployed.plan.count>1 && Live(deployed.objects[1])) {
+            if(!deployed.lost) {
+                Log("SUPPORT deployment %llu: a passenger lost on the way: the vehicle carries the rest on",static_cast<unsigned long long>(deployed.id));
+                deployed.lost=true;Status(L"支援途中遭受损失，存活单位继续执行任务");
+            }
+        } else if(!alive && deployed.started) {
             // Once in the field, losses are gameplay. Never despawn the surviving deployed units.
             if(ground || infantry) {
                 Log("SUPPORT deployment %llu: a unit lost on the way: the survivors carry on (delivered)",static_cast<unsigned long long>(deployed.id));
@@ -1938,7 +2074,9 @@ void SupportDispatchTick() noexcept {
                     started=AircraftSpecOf(deployed.plan.catalogId,&spec) && ActivateSupportAircraft(object,spec,deployed.plan.target,false) && started;
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
-                else if(IsSupportLeaderResource(resource))started=NpcPrepareSquadRoute(object,
+                // A walking squad's leader its quiet route from where it stands; one aboard a hull (role 1: a crewed APC's
+                // composed load, the drill transport's) rides: a route held at the entry would pull its squad back there.
+                else if(IsSupportLeaderResource(resource) && !deployed.plan.units[i].role)started=NpcPrepareSquadRoute(object,
                     reinterpret_cast<const float*>(object+kPosition),kInfantryRouteStop) && started;
             }
             if(started){deployed.started=true;Status(L"支援已出发，正在沿路线入场");}
@@ -1949,7 +2087,7 @@ void SupportDispatchTick() noexcept {
         if(ground) {
             auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
             const float* position=reinterpret_cast<const float*>(vehicle+kPosition);float waypoint[3];
-            const auto profile=VehicleRouteProfile(*SupportVehicleInfo(kind));
+            const auto profile=VehicleRouteProfile(drill ? kSupportDrillTransport : *SupportVehicleInfo(kind));
             const ULONGLONG now=GameMs();
             float speed=1e9f;
             if(deployed.vehicleSampleAt && now>=deployed.vehicleSampleAt) {
@@ -1977,36 +2115,47 @@ void SupportDispatchTick() noexcept {
                     const auto playerRef=ObjRef::Of(PlayerHuman());
                     for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].role==1)
                         FollowSupportSoldier(deployed.objects[i],playerRef);
-                } else if(kind!=SupportVehicleKind::tank) {
-                    // A crewed APC / truck: the soldiers in its passenger seats are a squad; they get off here (stuck:
-                    // where it stands, then walk on) and guard the point, and it goes back with its driver (the user,
-                    // 2026-10-10: "载具送过来以后就会直接回去"; transport.cpp TransportDeliver -> SupportWithdrawVehicle).
-                    // Its leader the passenger made as one (IsSupportLeaderResource), else the first: the seats need not
-                    // be in the plan's order, and a leader following one of its own members inverts the squad.
+                } else if(carrier) {
+                    // A crewed APC / truck, the drill transport: the soldiers in its passenger seats are squads; they get
+                    // off here (stuck: where it stands, then walk on) and guard the point, and it goes back with its driver
+                    // (the user, 2026-10-10: "载具送过来以后就会直接回去"; transport.cpp TransportDeliver ->
+                    // SupportWithdrawVehicle). An APC's four are one squad: its leader the passenger made as one
+                    // (IsSupportLeaderResource), else the first (the seats need not be in the plan's order, and a leader
+                    // following one of its own members inverts the squad). The drill transport's twelve are up to three:
+                    // in the plan's order a leader every four (as planned), each member following the leader before it
+                    // (that leader lost: the first of the rest leads).
                     const auto passenger=[&](unsigned i) noexcept {
                         return deployed.plan.units[i].role==1 && Live(deployed.objects[i]) && SeatCount(vehicle)>0 &&
                                At<const void*>(SeatAt(vehicle,0),kSeatRider)!=deployed.objects[i].obj && Seated(vehicle,deployed.objects[i]);
                     };
-                    ObjRef top;
-                    for(unsigned i=0;i<deployed.plan.count && !top;++i)
-                        if(passenger(i) && IsSupportLeaderResource(deployed.plan.units[i].resourceId))top=deployed.objects[i];
-                    for(unsigned i=0;i<deployed.plan.count && !top;++i)if(passenger(i))top=deployed.objects[i];
+                    const void* tops[3]{};int squadCount=0;ObjRef top;
+                    if(!drill) {
+                        for(unsigned i=0;i<deployed.plan.count && !top;++i)
+                            if(passenger(i) && IsSupportLeaderResource(deployed.plan.units[i].resourceId))top=deployed.objects[i];
+                        for(unsigned i=0;i<deployed.plan.count && !top;++i)if(passenger(i))top=deployed.objects[i];
+                        if(top)tops[squadCount++]=top.obj;
+                    }
+                    unsigned squadOf=~0u;   // the drill transport: the planned squad (of four) `top` leads
                     for(unsigned i=0;i<deployed.plan.count;++i)if(passenger(i)) {
                         deployed.carried[i]=true;   // the player's now: never deleted with the vehicle (ClearSeated)
+                        if(drill && i>=2 && (i-2)/4!=squadOf && squadCount<3) {
+                            squadOf=(i-2)/4;top=deployed.objects[i];tops[squadCount++]=top.obj;continue;
+                        }
                         if(deployed.objects[i].obj!=top.obj)FollowSupportSoldier(deployed.objects[i],top);
                     }
-                    const void* tops[1]={top.obj};
-                    if(top && !TransportDeliver(vehicle,tops,1,deployed.plan.target,stuck)) {
+                    if(squadCount && !TransportDeliver(vehicle,tops,squadCount,deployed.plan.target,stuck)) {
                         // No trip: put them off here anyway (they walk to the point) and send it back.
                         Log("SUPPORT deployment %llu: its passengers not handed to their transport: off here",static_cast<unsigned long long>(deployed.id));
                         for(unsigned i=0;i<deployed.plan.count;++i)if(passenger(i))Unseat(deployed.objects[i]);
-                        if(top)NpcSquadSetOrder(top.obj,mapcmd::Command{mapcmd::Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}},false);
+                        for(int k=0;k<squadCount;++k)
+                            NpcSquadSetOrder(tops[k],mapcmd::Command{mapcmd::Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}},false);
                         SupportWithdrawVehicle(vehicle);
                     }
                 }
                 deployed.delivered=true;
                 Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" :
-                       stuck ? L"支援车辆无法继续前进：乘员就地下车步行前往" : L"支援车辆已抵达目的地");
+                       stuck ? L"支援车辆无法继续前进：乘员就地下车步行前往" :
+                       drill ? L"钻地运兵车已抵达：步兵下车守点，钻地坦克返回入口" : L"支援车辆已抵达目的地");
             } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
         } else if(infantry) {
             int leader=0;bool complete=true,released=false;
@@ -2074,7 +2223,7 @@ std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) n
     const bool mission=catalog==support_net::kMissionCrewCatalog;
     if(!IsSupportSoldierResource(resource) || (!mission && !HasCrew(SupportCallKey(static_cast<int>(catalog)))))return 0;
     const SupportLook look=mission ? SupportCfg().MissionCrewLook() :
-                           catalog<static_cast<unsigned>(kSupportConfigUnits) ? SupportCfg().CrewLook(static_cast<int>(catalog)) :
+                           catalog<static_cast<unsigned>(kSupportConfigUnits) ? PlanCfg().CrewLook(static_cast<int>(catalog)) :
                            SupportLook{};
     if(!look.On())return 0;
     wchar_t file[96];

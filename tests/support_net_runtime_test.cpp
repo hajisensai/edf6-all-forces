@@ -30,7 +30,7 @@ unsigned lastSupportTeam=0,lastSupportOwner=0;
 unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
-struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
+struct Packet { EDF6CoopPeer sender;unsigned char bytes[200]; };   // support_protocol.h kWireSize (asserted below)
 std::deque<Packet> incoming;
 HMODULE WINAPI Module(LPCWSTR name) {
     if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);
@@ -173,6 +173,7 @@ support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* at,std
 }
 // npc_arms.h: this player's soldier weapons (none here) and their loads (all here).
 void LocalRequesterArms(support_net::RequesterArms* out) noexcept {*out=support_net::RequesterArms{};}
+void CommanderRequesterArms(int,support_net::RequesterArms* out) noexcept {*out=support_net::RequesterArms{};}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept {return support_net::PlanResult::ready;}
 support_net::PlanResult PrepareRangeEnemy(const support_net::Plan& plan) noexcept {
     return debugspawn::NetworkPlanRow(plan)>=0 ? support_net::PlanResult::ready : support_net::PlanResult::refused;
@@ -196,6 +197,7 @@ support_net::PlanResult PlanPvpUnit(const char*,const float*,std::uint64_t,suppo
 }
 namespace fixture {
 using namespace crew::support_net;
+static_assert(sizeof(Packet::bytes)==kWireSize,"a test packet holds one support message");
 int checks=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);} }
 std::uint32_t EDF6COOP_CALL Snapshot(EDF6CoopSnapshot* out) {

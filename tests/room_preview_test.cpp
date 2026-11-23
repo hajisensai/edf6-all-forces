@@ -118,7 +118,8 @@ void Camera() {
     s.Apply(x,-0.5f,3.f);s.Restore(x);
     Expect(pt[0][0]==1.f && pt[0][1]==2.f && pt[0][2]==3.f && pt[1][0]==10.f,"restored from the scaled placement exactly");
     Expect(VehicleScale(VehicleBody::tank)==kTankScale && VehicleScale(VehicleBody::strike)==kJetScale &&
-           VehicleScale(VehicleBody::rmultirole)==kJetScale && VehicleScale(VehicleBody::none)==1.f,"scale by body");
+           VehicleScale(VehicleBody::rmultirole)==kJetScale && VehicleScale(VehicleBody::mech)==kTankScale &&
+           VehicleScale(VehicleBody::none)==1.f,"scale by body (the mech framed as the tank)");
     Expect(Turned(1.f,0.5f)==1.5f && Turned(6.28f,0.01f)<0.01f && Turned(0.f,-0.01f)>6.f,"the turntable wraps");
     // The turntable: the stand's yaw saved when a vehicle first turns, put back once none does (soldier / closed).
     Turntable t;
