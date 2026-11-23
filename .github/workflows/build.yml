@@ -101,6 +101,8 @@ jobs:
           # src/mech_parts.inc: from pylib/mech_parts.py (no game needed).
           python tools/gen_mech_parts.py --check
           if ($LASTEXITCODE) { Write-Error 'src/mech_parts.inc is stale: run python tools/gen_mech_parts.py and commit it'; exit 1 }
+          python tools/gen_weapon_series.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/weapon_series.inc is stale: run python tools/gen_weapon_series.py and commit it'; exit 1 }
           # common/edf/katyusha_cab_gen.h is measured on the Katyusha's model (no Root.cpk here): checked against its own
           # record of what it was made from (tools/gen_katyusha_cab.py --check).
           python tools/gen_katyusha_cab.py --check

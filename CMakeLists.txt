@@ -142,6 +142,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+# 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
+target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
@@ -883,6 +885,10 @@ add_test(NAME player_slots COMMAND player_slots_test)
 add_executable(armory_logic_test tests/armory_logic_test.cpp)
 target_compile_options(armory_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME armory_logic COMMAND armory_logic_test)
+# 整备界面武器页的纯逻辑（src/weapon_list_logic.h）与生成的系列数据（src/weapon_series.inc，tools/gen_weapon_series.py）。
+add_executable(weapon_list_logic_test tests/weapon_list_logic_test.cpp)
+target_compile_options(weapon_list_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME weapon_list_logic COMMAND weapon_list_logic_test)
 # It waits for its stand-in children however long a busy machine takes (they run at normal priority; only the
 # plugin's own generator is below normal, VariantGenerator): the hang guard is here.
 set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
@@ -1098,6 +1104,9 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The native dialogs' code checks (src/room_dialog.cpp, tools/room_dialog_sigs.py) against EDF.dll (skipped without the game).
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
+add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py")
+set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
 set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1297,7 +1306,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test weapon_list_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
