@@ -11,6 +11,7 @@
 #include "room_preview_logic.h"
 #include "code_signatures.h"
 #include "crew.h"
+#include "edf/memory.h"
 #include "edf/patch.h"
 #include <cwchar>
 #include <iterator>
@@ -33,6 +34,9 @@ constexpr std::size_t kViewAsync=0xD0,kViewPlayer=0x2AC,kViewShownColour=0x158,k
     kViewYaw=0x2A4,kViewZoom=0x308,kViewHidden=0x3EC;
 constexpr std::size_t kViewCamera[4]={0x2C0,0x2D0,0x2E0,0x2F0};
 constexpr unsigned kMsgBuild=3,kMsgColour=5,kMsgLock=8,kMsgUnlock=9;
+// The unified model file (docs/unified-model-re.md): the model slot load 0x93AA00 asks 0x6BF380 for "animation_model" at
+// this call; the hook asks for kMenuModelKey instead when the document has it.
+constexpr std::size_t kMenuModelCall=0x93AD30,kModelLoad=0x6BF380,kFindMember=0x179EBA8,kDocTag=0x10;
 
 using UpdateFn=std::uintptr_t(__fastcall*)(unsigned char*,void*);
 using DeleteFn=void*(__fastcall*)(unsigned char*,unsigned);
@@ -82,6 +86,20 @@ bool Send(unsigned char* view,unsigned id,void* payload) noexcept {
     return reinterpret_cast<MessageFn>(vt[kSlotMessage])(view,id,payload);
 }
 
+// --- The unified model file: the menu reads menu_animation_model (worker thread; reads the document only) ---
+struct FindQuery { const wchar_t* key; std::int32_t index; };
+using FindFn=void(__fastcall*)(const unsigned char*,FindQuery*);
+using ModelLoadFn=bool(__fastcall*)(void*,void*,unsigned char*,const wchar_t*,int);
+bool __fastcall MenuModelLoad(void* model,void* arg,unsigned char* doc,const wchar_t* key,int flag) {
+    const std::uint16_t tag=doc ? *reinterpret_cast<const std::uint16_t*>(doc+kDocTag) : 0xFFFF;
+    if(tag==kDocClassic || tag==kDocDsgo) {
+        FindQuery q{kMenuModelKey,-1};
+        reinterpret_cast<FindFn const*>(image+kFindMember)[tag](doc,&q);
+        if(q.index!=-1)key=kMenuModelKey;
+    }
+    return reinterpret_cast<ModelLoadFn>(image+kModelLoad)(model,arg,doc,key,flag);
+}
+
 // --- What the menu asks for ---
 bool Generated(const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
@@ -99,25 +117,28 @@ int WeaponRow(const wchar_t* name) noexcept {
         return gs ? reinterpret_cast<RowFn>(image+kWeaponRow)(gs+kGsTables,name) : -1;
     } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
 }
-// False: a vehicle whose menu SGO is not in Mods (its body not installed: nothing to show).
+// Logs once per unit that its unified file (or the jets' menu CAS) is not in Mods: the install is broken, that unit is
+// not previewed (no stock stand-in: docs/unified-model-re.md).
+bool Present(const wchar_t* file,bool& said) noexcept {
+    if(Generated(file))return true;
+    if(!said){said=true;Log("ROOM preview: Mods\\%ls missing (install the plugin again): not previewed",file);}
+    return false;
+}
+// False: nothing to show (a tank / mech base, which is no unified file; or a unified file not in Mods).
 bool SetOverride(const PreviewSpec& spec) noexcept {
     DescOverride ov;
-    wchar_t vehicle[96];
-    const wchar_t* path=nullptr;
+    wchar_t file[96],path[96];
     if(spec.body!=VehicleBody::none) {
-        wchar_t file[96];
-        if(!VehicleMenuOf(spec.body,false,file,std::size(file)) || !VehicleMenuOf(spec.body,true,vehicle,std::size(vehicle)))return false;
-        if(!Generated(file)) {
-            static bool said[kVehicleBodyLast+1]{};
-            bool& s=said[static_cast<int>(spec.body)];
-            if(!s){s=true;Log("ROOM preview: Mods\\%ls missing (install the plugin again): that vehicle not previewed",file);}
-            return false;
-        }
-        ov=VehicleOverride();path=vehicle;
+        if(!VehicleFileOf(spec.body,false,file,std::size(file)) || !VehicleFileOf(spec.body,true,path,std::size(path)))return false;
+        static bool said[kVehicleBodyLast+1]{},saidCas=false;
+        if(!Present(file,said[static_cast<int>(spec.body)]) || !Present(kJetMenuCas,saidCas))return false;
+        ov=VehicleOverride();
     } else {
+        if(!SoldierFileOf(spec.kind,spec.leader,false,file,std::size(file)) || !SoldierFileOf(spec.kind,spec.leader,true,path,std::size(path)))
+            return false;
+        static bool said[kSupportWeaponCount][2]{};
+        if(!Present(file,said[static_cast<int>(spec.kind)][spec.leader ? 1 : 0]))return false;
         ov=OverrideOf(spec.kind,spec.leader,spec.look,[](const wchar_t* n) noexcept {return WeaponRow(n);});
-        const wchar_t* file=MenuFileOf(spec.kind,spec.leader);
-        path=MenuPathOf(spec.kind,spec.leader,file && Generated(file));
     }
     AcquireSRWLockExclusive(&shared.lock);
     shared.on=true;shared.ov=ov;
@@ -247,6 +268,8 @@ bool Chain(std::size_t vtable,std::size_t slot,void* hook,void** next) noexcept 
     return edf::ChainVtableSlot(reinterpret_cast<void**>(image+vtable)+slot,hook,next);
 }
 bool Hook() noexcept {
+    bool changed=false;
+    if(!edf::RedirectCall(image+kMenuModelCall,image+kModelLoad,reinterpret_cast<void*>(&MenuModelLoad),changed))return false;
     // The build hooks first: armed stays null (no rewrite) until the view's update adopts a view.
     if(!Chain(kBuildVtable1,kSlotDoCall,reinterpret_cast<void*>(&Build1),reinterpret_cast<void**>(&nextBuild1)))return false;
     if(!Chain(kBuildVtable3,kSlotDoCall,reinterpret_cast<void*>(&Build3),reinterpret_cast<void**>(&nextBuild3)))return false;

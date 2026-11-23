@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 
 namespace crew::roompreview {
 
@@ -20,54 +21,64 @@ constexpr int MenuClassOf(SupportWeapon k) noexcept {
     const int c=SupportSoldierClass(k);
     return c==0 ? kRangerClass : c==1 ? kWingDiverClass : kFencerClass;
 }
-// The generated menu SGOs (tools/menu_preview.py, Mods/MENUOBJECT): the Ranger NPC body n601_common_ranger in the stock
-// P505 menu SGO; _L colours the head only (the Flame / Rocket / Shotgun / Sniper leaders; the Rifle leader colours head
-// and body, which is every colourable material, so it is the plain one). The Wing Diver / Fencer NPCs wear the player
-// bodies p606 / p607: their stock menu SGOs (CONFIG.SGO SoldierInit outfit 3, spelled as there: one FNV cache entry).
-inline constexpr const wchar_t* kMenuRanger=L"app:/MENUOBJECT/EDF6VC_MENU_RANGER.SGO";
-inline constexpr const wchar_t* kMenuRangerLeader=L"app:/MENUOBJECT/EDF6VC_MENU_RANGER_L.SGO";
-inline constexpr const wchar_t* kMenuRangerFile=L"MENUOBJECT\\EDF6VC_MENU_RANGER.SGO";      // under Mods
-inline constexpr const wchar_t* kMenuRangerLeaderFile=L"MENUOBJECT\\EDF6VC_MENU_RANGER_L.SGO";
-inline constexpr const wchar_t* kMenuRangerStock=L"APP:/MENUOBJECT/p505_ranger.SGO";        // no generated file
-inline constexpr const wchar_t* kMenuWingDiver=L"APP:/MENUOBJECT/p606_WingDiver.SGO";
-inline constexpr const wchar_t* kMenuFencer=L"APP:/MENUOBJECT/p607_fencer.SGO";
-constexpr bool HeadOnlyLeader(SupportWeapon k,bool leader) noexcept {
-    return leader && SupportSoldierClass(k)==0 && k!=SupportWeapon::rifle && k!=SupportWeapon::xmInfantry;
-}
-// The generated file the kind needs (Mods-relative), or nullptr (a stock menu SGO).
-constexpr const wchar_t* MenuFileOf(SupportWeapon k,bool leader) noexcept {
-    return SupportSoldierClass(k)!=0 ? nullptr : HeadOnlyLeader(k,leader) ? kMenuRangerLeaderFile : kMenuRangerFile;
-}
-// The path the Desc gets. `generated`: MenuFileOf's file is in Mods (a Ranger without it: the stock player Ranger).
-constexpr const wchar_t* MenuPathOf(SupportWeapon k,bool leader,bool generated) noexcept {
-    const int c=SupportSoldierClass(k);
-    if(c==1)return kMenuWingDiver;
-    if(c==2)return kMenuFencer;
-    if(!generated)return kMenuRangerStock;
-    return HeadOnlyLeader(k,leader) ? kMenuRangerLeader : kMenuRanger;
-}
-
-// A vehicle's menu SGO (tools/menu_preview.py vehicle_file): the stock P505 menu SGO with animation_model = the vehicle
-// body's own (support_loadout.h kVehicleBodies base: its model, CAS and MAB), no weapons. EDF6VC_MENU_V_<NAME>.SGO.
-inline constexpr const wchar_t* kMenuVehiclePrefix=L"EDF6VC_MENU_V_";
-// `body`'s generated file under Mods (`path` false: MENUOBJECT\<file>) or the path the Desc gets (app:/MENUOBJECT/<file>);
-// the length, 0 when `body` is no vehicle body or it does not fit.
-inline std::size_t VehicleMenuOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
-    const VehicleBodyRow* row=VehicleBodyOf(body);
+// --- The unified model file (docs/unified-model-re.md; pylib/menu_model.py) ---
+// The preview shows a unit from the very file the battle loads: each carries the keys only the menu reads, and the
+// hook on the menu's model load (room_preview.cpp MenuModelLoad) makes the menu read kMenuModelKey where the battle
+// reads animation_model (the one key both read with different values). No menu-only model file exists.
+inline constexpr const wchar_t* kMenuModelKey=L"menu_animation_model";
+inline constexpr std::uint16_t kDocClassic=0,kDocDsgo=2;   // doc variant tags (+0x10) whose member lookup the hook asks
+// The support soldiers' AI templates (tools/support_loadout.py KINDS; src/support_soldier.cpp kBodies), SupportWeapon
+// order; tools/menu_preview.py writes each and its _LEADER into Mods/OBJECT as a unified file. The X-Morph infantry
+// (its body the installer's own, no menu keys) previews as the rifle Ranger.
+inline constexpr const wchar_t* kSoldierTemplates[kSupportWeaponCount]={
+    L"N601_COMMON_RANGER_AF",L"N601_COMMON_RANGER_FL",L"N601_COMMON_RANGER_RL",L"N601_COMMON_RANGER_SG",
+    L"N601_COMMON_RANGER_SN",L"N606_AIPALEWING_LANCE",L"N606_AIPALEWING_LR",L"N606_AIPALEWING_MS",L"N606_AIPALEWING_IZN",
+    L"N606_AIPALEWING_TB",L"N607_AIHEAVYARMOR_SC",L"N607_AIHEAVYARMOR_SMC",L"N607_AIHEAVYARMOR_SP",L"N607_AIHEAVYARMOR_SSG",
+    L"N601_COMMON_RANGER_AF",
+};
+namespace detail {
+inline std::size_t Join(wchar_t* out,std::size_t capacity,std::initializer_list<const wchar_t*> parts,bool lower) noexcept {
     if(!out || !capacity)return 0;
     out[0]=0;
-    if(!row)return 0;
-    const wchar_t* parts[4]={path ? L"app:/MENUOBJECT/" : L"MENUOBJECT\\",kMenuVehiclePrefix,row->name,L".SGO"};
     std::size_t n=0;
     for(const wchar_t* part:parts)
-        for(const wchar_t* c=part;*c;++c){if(n+1>=capacity){out[0]=0;return 0;}out[n++]=*c;}
+        for(const wchar_t* c=part;*c;++c) {
+            if(n+1>=capacity){out[0]=0;return 0;}
+            const wchar_t w=*c;
+            out[n++]=lower && w>=L'A' && w<=L'Z' ? static_cast<wchar_t>(w-L'A'+L'a') : w;
+        }
     out[n]=0;
     return n;
 }
+}  // namespace detail
+// A soldier kind's unified file: `path` false its Mods-relative file (OBJECT\N601_COMMON_RANGER_AF_LEADER.SGO), true
+// the path the Desc gets (app:/object/n601_common_ranger_af_leader.sgo). The length, 0 when it does not fit / no kind.
+inline std::size_t SoldierFileOf(SupportWeapon k,bool leader,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const int i=static_cast<int>(k);
+    if(i<0 || i>=kSupportWeaponCount){if(out && capacity)out[0]=0;return 0;}
+    return path ? detail::Join(out,capacity,{L"app:/object/",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},true)
+                : detail::Join(out,capacity,{L"OBJECT\\",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},false);
+}
+// The vehicle bodies whose battle file is a unified one: the jets (pylib/vcobjects.py jet_sgo). The tank's and the
+// mech's base files are stock SGOs other writers layer (AutoTurret, the optics redirect): not unified, not previewed.
+constexpr bool VehicleUnified(VehicleBody body) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    return row && !row->tank && body!=VehicleBody::mech;
+}
+// The jets' menu CAS (tools/menu_preview.py jet_cas_rel; pylib/menu_model.py menu_cas_name) under Mods: a jet's unified
+// file names it, so a jet is previewed only when it is there (a CAS without `main` crashes the renderer).
+inline constexpr const wchar_t* kJetMenuCas=L"MENUOBJECT\\EDF6VC_MENU_V506_HELI.CAS";
+// A body's unified file, as SoldierFileOf (OBJECT\EDF6VC_DN_SUPPORT_STRIKE.SGO / app:/object/edf6vc_dn_support_strike.sgo);
+// 0 for a body VehicleUnified refuses.
+inline std::size_t VehicleFileOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const VehicleBodyRow* row=VehicleUnified(body) ? VehicleBodyOf(body) : nullptr;
+    if(!row){if(out && capacity)out[0]=0;return 0;}
+    return path ? detail::Join(out,capacity,{L"app:/object/",row->base},true) : detail::Join(out,capacity,{L"OBJECT\\",row->base},false);
+}
 
 // The WeaponTable rows (WEAPON/WEAPONTABLE.SGO names, looked up at run time by 0xE1BA0) the menu hangs on the model in
-// place of the AI weapons (docs/room-3d-preview-re.md §5; the leaders' LAZR02 / IZNR02 / TB02 look as the 01s). A
-// Fencer's list is CONFIG's order, [0] left (the shield), [1] right; the menu shows the selected pair (Desc +0x50 = 0).
+// place of the AI weapons (docs/room-3d-preview-re.md §5; the leaders' LAZR02 / IZNR02 / TB02 look as the 01s). The
+// menu shows the selected pair (Desc +0x50 = 0).
 inline constexpr int kDescWeaponsMost=6;
 struct MenuWeapons { int count; const wchar_t* name[2]; };
 constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
@@ -83,10 +94,12 @@ constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
         case SupportWeapon::wingMonster: return {1,{L"pWeapon131",nullptr}};
         case SupportWeapon::wingIzuna: return {1,{L"pWeapon100",nullptr}};
         case SupportWeapon::wingThunderBow: return {1,{L"pWeapon102",nullptr}};
-        case SupportWeapon::fencerCannon: return {2,{L"hShield01",L"hCannon01"}};
-        case SupportWeapon::fencerMiddleCannon: return {2,{L"hShield01",L"hWeapon077"}};
-        case SupportWeapon::fencerPileBanker: return {2,{L"hShield01",L"hPileBanker01"}};
-        case SupportWeapon::fencerShotgun: return {2,{L"hShield01",L"hWeapon077"}};
+        // A Fencer's in its unified file's order (the template's soldier_weapon_slot: [0] weapon_r, [1] weapon_l):
+        // the right-hand weapon, then the shield.
+        case SupportWeapon::fencerCannon: return {2,{L"hCannon01",L"hShield01"}};
+        case SupportWeapon::fencerMiddleCannon: return {2,{L"hWeapon077",L"hShield01"}};
+        case SupportWeapon::fencerPileBanker: return {2,{L"hPileBanker01",L"hShield01"}};
+        case SupportWeapon::fencerShotgun: return {2,{L"hWeapon077",L"hShield01"}};
         default: return {0,{nullptr,nullptr}};
     }
 }

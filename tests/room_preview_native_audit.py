@@ -1,7 +1,8 @@
 """The room / HQ 3D preview against the game's own files (read only): src/room_preview_signatures.inc is EDF.dll's code,
 the vtable slots the hooks chain hold the functions the docs name, the OnMessage jump table sends 3 / 5 / 8 / 9 where
 room_preview.cpp expects, and src/room_preview_logic.h's tables are the game data's (the AI templates' soldier_color,
-the WeaponTable names, CONFIG.SGO's menu paths, tools/menu_preview.py's generated names). Without the game: skipped."""
+the WeaponTable names, CONFIG.SGO's stock menu SGOs, tools/menu_preview.py's names), and the
+unified model file's hook site (the call, its key, the member-lookup table). Without the game: skipped."""
 from __future__ import annotations
 
 import os
@@ -48,10 +49,30 @@ def audit_code(img: bytes, base: int) -> None:
         disp = struct.unpack_from('<i', img, site + 3)[0]
         check(site + 7 + disp == vt, f'the job at {site:#x} is the std::function {vt:#x}')
     check(struct.unpack_from('<i', img, 0x938A77 + 3)[0] + 0x938A77 + 7 == 0x20B2890, 'GameStatus global')
+    # The unified model file's hook (docs/unified-model-re.md §2): the menu's one model-load call, the key it passes, and
+    # the member-lookup table MenuModelLoad asks whether a document has menu_animation_model.
+    site, target = sigs.MENU_MODEL_CALL
+    check(img[site] == 0xE8 and site + 5 + struct.unpack_from('<i', img, site + 1)[0] == target,
+          f'{site:#x} is call {target:#x} (the hook redirects it)')
+    lea = 0x93AD1E
+    check(img[lea:lea + 3] == b'\x4c\x8d\x0d', f'{lea:#x} is lea r9, [rip+x] (the key argument)')
+    at = lea + 7 + struct.unpack_from('<i', img, lea + 3)[0]
+    key = 'animation_model\0'.encode('utf-16le')
+    check(img[at:at + len(key)] == key, f'the key at {at:#x} is L"animation_model"')
+    for tag, fn in sigs.FIND_MEMBER_ENTRIES.items():
+        held = struct.unpack_from('<Q', img, sigs.FIND_MEMBER + 8 * tag)[0] - base
+        check(held == fn, f'member lookup table [{tag}] is {fn:#x} (holds {held:#x})')
+    cpp = open(os.path.join(ROOT, 'src', 'room_preview.cpp'), encoding='utf-8').read()
+    for const, value in (('kMenuModelCall', site), ('kModelLoad', target), ('kFindMember', sigs.FIND_MEMBER)):
+        check(re.search(const + r'=0x([0-9A-Fa-f]+)', cpp) is not None and
+              int(re.search(const + r'=0x([0-9A-Fa-f]+)', cpp).group(1), 16) == value, f'room_preview.cpp {const} = {value:#x}')
+    text = logic_text()
+    check('kDocClassic=0,kDocDsgo=2' in text and set(sigs.FIND_MEMBER_ENTRIES) >= {0, 2}, 'the tags the hook asks')
 
 
 def audit_tables(game) -> None:
     import dsgo
+    import menu_model
     import menu_preview
     import sgo
     import support_loadout
@@ -61,12 +82,13 @@ def audit_tables(game) -> None:
         check(name in rows, f'WeaponTable has {name}')
     _, config = sgo.read(game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
     menus = [p for row in sgo.plain(config['SoldierInit']) for p in row[5][1]]
-    for const in ('kMenuRangerStock', 'kMenuWingDiver', 'kMenuFencer'):
-        m = re.search(const + r'=L"([^"]+)"', text)
-        check(bool(m) and m.group(1) in menus, f'{const} is spelled as CONFIG.SGO')
-    for const, rel in (('kMenuRanger', 'MENUOBJECT/EDF6VC_MENU_RANGER.SGO'), ('kMenuRangerLeader', 'MENUOBJECT/EDF6VC_MENU_RANGER_L.SGO')):
-        m = re.search(const + r'=L"app:/([^"]+)"', text)
-        check(bool(m) and m.group(1) == rel and rel in menu_preview.rels(), f'{const} is tools/menu_preview.py\'s {rel}')
+    stock = {p.rsplit('/', 1)[-1].upper() for p in menus}
+    for prefix, name in menu_model.STOCK_MENU.items():
+        check(name in stock, f"{prefix}: the stock menu SGO {name} is a class's in CONFIG.SGO")
+        check(name.upper() in {n.upper() for n in game.names(menu_model.MENU_FOLDER)}, f'{name} in Root.cpk MENUOBJECT')
+    check(f'kMenuModelKey=L"{menu_model.MENU_MODEL}"' in text, "kMenuModelKey is pylib/menu_model.py's key")
+    check('kJetMenuCas=L"' + menu_preview.jet_cas_rel().replace('/', '\\\\') + '"' in text,
+          "kJetMenuCas is tools/menu_preview.py's jet menu CAS")
     audit_colours(game, text, support_loadout, dsgo)
 
 

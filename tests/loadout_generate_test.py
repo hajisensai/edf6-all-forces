@@ -67,7 +67,7 @@ def make_game(root: str) -> str:
         f.write(INI.encode('utf-8'))
     with open(os.path.join(plugins, sl.PENDING), 'wb') as f:
         f.write((PENDING_NAME + '\r\n').encode())
-    for rel in menu_preview.rels():   # the preview's menu SGOs already there (tests/menu_preview_test.py makes them)
+    for rel in menu_preview.rels():   # the unified model files already there (tests/menu_preview_test.py makes them)
         os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
         with open(os.path.join(root, 'Mods', rel), 'wb') as f:
             f.write(b'menu')
@@ -108,7 +108,7 @@ try:
     with tempfile.TemporaryDirectory(prefix='edf6vc-generate-') as root:
         game = make_game(root)
         obj = os.path.join(game, 'Mods', 'OBJECT')
-        os.makedirs(obj)
+        os.makedirs(obj, exist_ok=True)   # the unified soldier files live there too
         kept = os.path.join(obj, 'EDF6VC_NPC_LANCE_1E3A8A_X.SGO')   # the non-leader: already there, someone's bytes
         with open(kept, 'wb') as f:
             f.write(b'already here')

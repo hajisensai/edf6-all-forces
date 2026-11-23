@@ -7,6 +7,7 @@
 #include "../src/room_preview_logic.h"
 #include <cstdio>
 #include <cwchar>
+#include <cwctype>
 
 namespace {
 using namespace crew;
@@ -21,34 +22,43 @@ std::int32_t Int(const unsigned char* b,std::size_t off) { std::int32_t v;std::m
 float Float(const unsigned char* b,std::size_t off) { float v;std::memcpy(&v,b+off,4);return v; }
 
 void Models() {
+    wchar_t f[96],q[96];
     for(int i=0;i<kSupportWeaponCount;++i) {
         const int c=SupportSoldierClass(Kind(i));
         Expect(MenuClassOf(Kind(i))==(c==0 ? 0 : c==1 ? 1 : 3),"class: Ranger 0, Wing Diver 1, Fencer 3");
+        const wchar_t* t=kSoldierTemplates[i];
+        Expect(!std::wcsncmp(t,c==0 ? L"N601_" : c==1 ? L"N606_" : L"N607_",5),"the template is the class's (N601 / N606 / N607)");
         for(int l=0;l<2;++l) {
             const bool leader=l==1;
-            const wchar_t* file=MenuFileOf(Kind(i),leader);
-            Expect((file!=nullptr)==(c==0),"only Rangers need a generated file");
-            Expect(!std::wcscmp(MenuPathOf(Kind(i),leader,false),c==0 ? kMenuRangerStock : c==1 ? kMenuWingDiver : kMenuFencer),
-                   "without the file: stock menu SGOs");
-            if(c==0)Expect(!std::wcscmp(MenuPathOf(Kind(i),leader,true),
-                                         leader && Kind(i)!=SupportWeapon::rifle && Kind(i)!=SupportWeapon::xmInfantry ?
-                                             kMenuRangerLeader : kMenuRanger),"Rangers: the head-only leader file (not the rifle's, not the X-Morph infantry's)");
+            const std::size_t nf=SoldierFileOf(Kind(i),leader,false,f,96),nq=SoldierFileOf(Kind(i),leader,true,q,96);
+            Expect(nf>0 && nq>0,"every kind has its unified file");
+            Expect(!std::wcsncmp(f,L"OBJECT\\",7) && !std::wcsncmp(q,L"app:/object/",12),"under Mods/OBJECT; an app:/object path");
+            Expect(nf-7==nq-12,"the file and the path the same name");
+            bool same=true;
+            for(std::size_t k=0;k<nf-7;++k)same=same && std::towlower(f[7+k])==q[12+k];
+            Expect(same,"the path is the file lower-cased");
+            Expect(!std::wcsncmp(f+7,t,std::wcslen(t)),"named by the template");
+            Expect(!std::wcscmp(f+nf-(leader ? 11 : 4),leader ? L"_LEADER.SGO" : L".SGO"),"the leader's _LEADER file");
         }
         const MenuWeapons w=MenuWeaponsOf(Kind(i));
         Expect(w.count==(c==2 ? 2 : 1),"weapons: one, a Fencer's shield and weapon");
-        if(c==2)Expect(!std::wcscmp(w.name[0],L"hShield01"),"Fencer: the shield is weapons[0] (left)");
+        if(c==2)Expect(!std::wcscmp(w.name[1],L"hShield01") && std::wcscmp(w.name[0],L"hShield01"),
+                       "Fencer: weapons[0] the right-hand weapon, [1] the shield (the battle soldier_weapon_slot)");
     }
+    Expect(SoldierFileOf(SupportWeapon::count,false,false,f,96)==0 && f[0]==0,"no kind: none");
+    Expect(SoldierFileOf(SupportWeapon::rifle,true,true,f,10)==0 && f[0]==0,"too small: none");
+    Expect(SoldierFileOf(SupportWeapon::rifle,false,false,f,96)>0 && !std::wcscmp(f,L"OBJECT\\N601_COMMON_RANGER_AF.SGO"),"rifle file");
+    Expect(SoldierFileOf(SupportWeapon::wingLance,true,true,f,96)>0 && !std::wcscmp(f,L"app:/object/n606_aipalewing_lance_leader.sgo"),
+           "Wing Diver leader path");
     Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::rifle).name[0],L"aWeapon003"),"rifle row name");
-    Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::fencerPileBanker).name[1],L"hPileBanker01"),"pile banker row name");
+    Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::fencerPileBanker).name[0],L"hPileBanker01"),"pile banker row name");
     Expect(MenuWeaponsOf(SupportWeapon::count).count==0,"no weapons for an invalid kind");
     // The X-Morph infantry previews as the stock rifle Ranger (both bodies: member and leader).
     for(int l=0;l<2;++l) {
         const bool leader=l==1;
         Expect(MenuClassOf(SupportWeapon::xmInfantry)==kRangerClass,"X-Morph infantry: a Ranger's class");
-        Expect(!HeadOnlyLeader(SupportWeapon::xmInfantry,leader),"X-Morph infantry: no head-only leader");
-        Expect(MenuFileOf(SupportWeapon::xmInfantry,leader)==MenuFileOf(SupportWeapon::rifle,leader) &&
-               !std::wcscmp(MenuPathOf(SupportWeapon::xmInfantry,leader,true),MenuPathOf(SupportWeapon::rifle,leader,true)),
-               "X-Morph infantry: the rifle Ranger's menu file and path");
+        SoldierFileOf(SupportWeapon::xmInfantry,leader,true,f,96);SoldierFileOf(SupportWeapon::rifle,leader,true,q,96);
+        Expect(!std::wcscmp(f,q),"X-Morph infantry: the rifle Ranger's unified file");
     }
     Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::xmInfantry).name[0],MenuWeaponsOf(SupportWeapon::rifle).name[0]),
            "X-Morph infantry: the rifle's weapon");
@@ -77,7 +87,7 @@ void Desc() {
     DescOverride o=OverrideOf(SupportWeapon::fencerCannon,false,SupportLook{0x102030,kStockColour},row);
     Expect(o.weaponCount==1 && o.weapon[0]==747,"a row not in the table is left out");
     o=OverrideOf(SupportWeapon::fencerMiddleCannon,false,SupportLook{0x102030,kStockColour},row);
-    Expect(o.weaponCount==2 && o.weapon[0]==747 && o.weapon[1]==803,"both rows, shield first");
+    Expect(o.weaponCount==2 && o.weapon[0]==803 && o.weapon[1]==747,"both rows, the shield second");
     RewriteDesc(d,o);
     Expect(d[kDescPath]==0xCD && d[0x1F]==0xCD,"the path (wstring) untouched");
     Expect(Int(d,kDescModelType)==3 && Int(d,kDescClass)==3,"Fencer: model type and class 3 (dual)");
@@ -85,7 +95,7 @@ void Desc() {
     Expect(Float(d,kDescColour1)==StockOf(SupportWeapon::fencerMiddleCannon,false).c[1].v[0],"colour 1 stock");
     Expect(Int(d,kDescOutfit)==kSentinelOutfit,"the sentinel outfit");
     Expect(Int(d,kDescWeaponCount)==2 && Int(d,kDescSelected)==0,"count and selected slot");
-    Expect(Int(d,kDescWeapons)==747 && Int(d,kDescWeapons+4)==803,"weapons");
+    Expect(Int(d,kDescWeapons)==803 && Int(d,kDescWeapons+4)==747,"weapons");
     Expect(d[kDescWeapons+8]==0xCD && d[kDescSize-1]==0xCD,"nothing past the count");
     o.weaponCount=99;RewriteDesc(d,o);
     Expect(Int(d,kDescWeaponCount)==kDescWeaponsMost,"count capped at six");
@@ -136,14 +146,21 @@ void Camera() {
 
 void Vehicles() {
     wchar_t b[96];
-    Expect(VehicleMenuOf(VehicleBody::tank,false,b,96)>0 && !std::wcscmp(b,L"MENUOBJECT\\EDF6VC_MENU_V_TANK.SGO"),"tank file under Mods");
-    Expect(VehicleMenuOf(VehicleBody::rmultirole,true,b,96)>0 && !std::wcscmp(b,L"app:/MENUOBJECT/EDF6VC_MENU_V_RMULTIROLE.SGO"),"path");
-    Expect(VehicleMenuOf(VehicleBody::none,true,b,96)==0 && b[0]==0,"no body: none");
-    Expect(VehicleMenuOf(VehicleBody::strike,true,b,10)==0 && b[0]==0,"too small: none");
+    Expect(!VehicleUnified(VehicleBody::tank) && VehicleFileOf(VehicleBody::tank,false,b,96)==0 && b[0]==0,
+           "the tank's base: no unified file, not previewed");
+    Expect(!VehicleUnified(VehicleBody::mech) && VehicleFileOf(VehicleBody::mech,true,b,96)==0,"the mech's base: neither");
+    Expect(VehicleFileOf(VehicleBody::rmultirole,false,b,96)>0 && !std::wcscmp(b,L"OBJECT\\EDF6VC_FLY_MULTIROLE.SGO"),"jet file under Mods");
+    Expect(VehicleFileOf(VehicleBody::strike,true,b,96)>0 && !std::wcscmp(b,L"app:/object/edf6vc_dn_support_strike.sgo"),"path");
+    Expect(VehicleFileOf(VehicleBody::none,true,b,96)==0 && b[0]==0,"no body: none");
+    Expect(VehicleFileOf(VehicleBody::strike,true,b,10)==0 && b[0]==0,"too small: none");
+    Expect(!std::wcscmp(kJetMenuCas,L"MENUOBJECT\\EDF6VC_MENU_V506_HELI.CAS"),"the jets' menu CAS");
     for(const auto& row:kVehicleBodies) {
         wchar_t f[96],q[96];
-        Expect(VehicleMenuOf(row.body,false,f,96)>0 && VehicleMenuOf(row.body,true,q,96)>0,"every body has a file");
-        Expect(!std::wcscmp(f+11,q+16),"the file and the path name the same file");
+        const bool unified=!row.tank && row.body!=VehicleBody::mech;
+        Expect(VehicleUnified(row.body)==unified,"every jet unified, tanks / mech not");
+        if(!unified)continue;
+        Expect(VehicleFileOf(row.body,false,f,96)>0 && VehicleFileOf(row.body,true,q,96)>0,"every jet has a file");
+        Expect(!std::wcscmp(f+7,row.base) && std::wcslen(q+12)==std::wcslen(row.base),"the file and the path name its base");
     }
     const DescOverride o=VehicleOverride();
     Expect(o.cls==kRangerClass && o.weaponCount==0,"a vehicle: Ranger class, no weapons");

@@ -106,8 +106,8 @@ def generate_variants(game: str) -> tuple[list[str], dict[str, str]]:
 
 
 def generate_menu_preview(game: str, errors: dict[str, str]) -> list[str]:
-    """The preview's menu SGOs (tools/menu_preview.py) when one is missing, as new names only (install_new: the game may
-    be running). A failure goes into `errors` under the file's name. The paths written."""
+    """The soldiers' unified model files and the jets' menu CAS (tools/menu_preview.py) when one is missing, as new names
+    only (install_new: the game may be running). A failure goes into `errors` under the tool's name. The paths written."""
     import menu_preview
     import rootcpk
     if not menu_preview.missing(game):
@@ -115,7 +115,7 @@ def generate_menu_preview(game: str, errors: dict[str, str]) -> list[str]:
     try:
         files = menu_preview.build(rootcpk.Game(game))
     except Exception as e:   # reported in the status file like a variant that could not be made
-        errors[menu_preview.RANGER] = f'{type(e).__name__}: {e}'
+        errors[menu_preview.OWNER] = f'{type(e).__name__}: {e}'
         return []
     return menu_preview.install_new(game, files)
 

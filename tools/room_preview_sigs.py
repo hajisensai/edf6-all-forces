@@ -47,7 +47,17 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x03D450, 24, 'std::wstring::assign(ptr, len)'),
     (0x0E1BA0, 20, 'WeaponTable row by name'),
     (0x0D8700, 0x28, 'the player outfit (GS, player)'),
+    (0x93AD16, 0x1F, 'model slot load: 0x6BF380(model, ?, doc, L"animation_model", 0) (the unified file hook redirects the call)'),
+    (0x6BF3AB, 0x2E, '0x6BF380: the member lookup through table 0x179EBA8[doc tag] (index at query +8, -1 none)'),
+    (0x238F90, 0x25, 'member lookup, classic SGO (tag 0)'),
+    (0x239060, 0x22, 'member lookup, DSGO (tag 2)'),
 )
+
+# The model-slot load call the unified file hook redirects (docs/unified-model-re.md section 2): call site, target.
+MENU_MODEL_CALL = (0x93AD30, 0x6BF380)
+# The member lookup table (image VAs at the default base 0x180000000): tag -> function. Tags 0 and 2 are the hook's.
+FIND_MEMBER = 0x179EBA8
+FIND_MEMBER_ENTRIES = {0: 0x238F90, 1: 0x238DF0, 2: 0x239060}
 
 # vtable slots the hooks chain: (vtable rva, slot, the function the slot holds)
 SLOTS: tuple[tuple[int, int, int], ...] = (
