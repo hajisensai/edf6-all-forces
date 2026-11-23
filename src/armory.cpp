@@ -707,8 +707,9 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
 }
 
 bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,roompreview::ViewCamera* camera,
-                   bool* own) noexcept {
+                   bool* own,roompreview::SquadSpec* squad) noexcept {
     if(own)*own=false;
+    if(squad)squad->count=0;
     if(!state.open || !support.env.previewOn)return false;   // as the page's Hole: the popups are drawn over the model
     if(state.tab==kWeaponsTab) {
         // the player's own model holding the weapon under the cursor, in the details column's hole (front camera)
@@ -722,6 +723,11 @@ bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,ro
     const sp::UnitsPage* page=state.tab==kSquadTab ? static_cast<const sp::UnitsPage*>(&squadPage) :
                               state.tab==kVehicleTab ? static_cast<const sp::UnitsPage*>(&vehiclePage) : nullptr;
     if(!page || !page->PreviewOf(state.pos,spec))return false;
+    if(squad) {
+        squad->count=page->SquadOf(state.pos,squad->soldier);
+        if(squad->count<2)squad->count=0;
+        else if(spec)*spec=squad->soldier[0];
+    }
     if(rect)*rect=sp::ViewRectOf();
     if(camera)*camera=page->Camera();
     return true;

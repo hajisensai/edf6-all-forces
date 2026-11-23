@@ -77,6 +77,20 @@ def audit_code(img: bytes, base: int) -> None:
         found = re.search(const + r'=0x([0-9A-Fa-f]+)', cpp)
         check(found is not None and int(found.group(1), 16) == value, f'room_preview.cpp {const} = {value:#x}')
     check(f'kMsgWeapon={sigs.MSG_WEAPON[0]};' in cpp, 'room_preview.cpp kMsgWeapon is msg 4')
+    # The squad's views (docs/room-3d-preview-re.md section 6.3): HUiHQ3DModel's own view creation, the cpp's copy of it.
+    isite, info = sigs.VIEW_CREATE_INFO
+    check(img[isite + 1] == 0x8D and img[isite] in (0x48, 0x4C) and
+          isite + 7 + struct.unpack_from('<i', img, isite + 3)[0] == info, f'{isite:#x} is lea r, [rip+{info:#x}] (the createInfo type)')
+    for csite, ctarget in (sigs.VIEW_NEW, sigs.VIEW_CONSTRUCT):
+        check(img[csite] == 0xE8 and csite + 5 + struct.unpack_from('<i', img, csite + 1)[0] == ctarget,
+              f'{csite:#x} is call {ctarget:#x}')
+    size = 0x8783E5
+    check(img[size] == 0xB9 and struct.unpack_from('<I', img, size + 1)[0] == 0x450,
+          f'{size:#x} is mov ecx, 0x450 (the view size)')
+    for const, value in (('kOperatorNew', sigs.VIEW_NEW[1]), ('kViewConstruct', sigs.VIEW_CONSTRUCT[1]),
+                         ('kViewCreateInfo', info), ('kKill', 0x11A4450), ('kViewSize', 0x450)):
+        found = re.search(const + r'=0x([0-9A-Fa-f]+)', cpp)
+        check(found is not None and int(found.group(1), 16) == value, f'room_preview.cpp {const} = {value:#x}')
     text = logic_text()
     check('kDocClassic=0,kDocDsgo=2' in text and set(sigs.FIND_MEMBER_ENTRIES) >= {0, 2}, 'the tags the hook asks')
 

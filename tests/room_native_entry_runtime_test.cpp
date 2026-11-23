@@ -44,6 +44,8 @@ namespace roompreview {
 bool InstallPreviewHooks() noexcept {UnexpectedRoomDependency();return false;}
 void ShowPreview(const PreviewSpec&) noexcept {UnexpectedRoomDependency();}
 void HidePreview() noexcept {++nativePreviewHides;}
+void ShowSquad(const SquadSpec&) noexcept {UnexpectedRoomDependency();}
+void HideSquad() noexcept {UnexpectedRoomDependency();}
 void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
 void SetViewPlacement(const ViewRect&,const ViewCamera&) noexcept {UnexpectedRoomDependency();}
 void ClearViewPlacement() noexcept {}
@@ -54,7 +56,7 @@ bool Install() noexcept {UnexpectedRoomDependency();return false;}
 void Open(unsigned char*,bool,const roommenu::Menu*,roommenu::IniRead,void*,bool,int) noexcept {UnexpectedRoomDependency();}
 bool IsOpen() noexcept {return false;}
 bool Frame(unsigned char*,bool,bool) noexcept {UnexpectedRoomDependency();return false;}
-bool PreviewWanted(roompreview::PreviewSpec*,roompreview::ViewRect*,roompreview::ViewCamera*,bool*) noexcept {UnexpectedRoomDependency();return false;}
+bool PreviewWanted(roompreview::PreviewSpec*,roompreview::ViewRect*,roompreview::ViewCamera*,bool*,roompreview::SquadSpec*) noexcept {UnexpectedRoomDependency();return false;}
 bool TakePvpRequest() noexcept {UnexpectedRoomDependency();return false;}
 bool TakeMapRequest() noexcept {UnexpectedRoomDependency();return false;}
 int TakeOpenAsk() noexcept {UnexpectedRoomDependency();return -1;}

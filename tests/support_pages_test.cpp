@@ -517,6 +517,69 @@ void RandomWalk() {
     Expect(squads.Commit(nullptr,0) && vehicles.Commit(nullptr,0) && !squads.Dirty() && !vehicles.Dirty(),"and save");
 }
 
+// The squad side by side (room_preview.h ShowSquad): the cursor's squad tab, a ring under each, a click picks one.
+void SquadSideBySide() {
+    namespace rp=crew::roompreview;
+    Fresh(true);
+    sp::SquadPage squads;sp::VehiclePage vehicles;
+    squads.Bind(&model);vehicles.Bind(&model);
+    const int s=RowOf(squads,L"SQUAD");
+    rp::PreviewSpec out[rp::kSquadMost]{};
+    Expect(squads.SquadOf(ar::Pos{0,s,0,0},out)==0,"the own load: no squad");
+    squads.Activate(ar::Pos{0,s,0,0});
+    Expect(squads.SquadOf(ar::Pos{0,s,0,0},out)==1 && squads.SquadSlot(ar::Pos{0,s,0,0})==0,"one soldier: one model");
+    for(int i=0;i<5;++i)squads.Activate(ar::Pos{0,s,squads.Items(ar::Pos{0,s,0,0})-2,0});
+    const rm::Unit& u=UnitOf(squads,s);
+    Expect(u.squad.count==6,"six soldiers");
+    Expect(squads.SquadOf(ar::Pos{0,s,2,0},out)==4 && squads.SquadSlot(ar::Pos{0,s,2,0})==2,"the first tab: four, the third in column 3");
+    Expect(out[0].leader && !out[1].leader && !out[3].leader,"its first a leader");
+    bool same=true;
+    for(int k=0;k<4;++k)same=same && out[k].kind==u.squad.kind[k] && out[k].look.primary==u.squad.look[k].primary;
+    Expect(same,"each soldier's kind and colours, left to right");
+    Expect(squads.SquadOf(ar::Pos{0,s,5,0},out)==2 && out[0].leader && out[1].kind==u.squad.kind[5],
+           "the second tab: the two there are, its first a leader");
+    Expect(squads.SquadOf(ar::Pos{0,s,6,0},out)==0,"the add line: no squad");
+    Expect(vehicles.SquadOf(ar::Pos{0,0,0,0},out)==0,"the vehicle page: never a squad");
+    // a click on a soldier's column picks him (in the tab shown); the tabs and view buttons keep theirs
+    const rp::ViewRect view=sp::ViewRectOf();
+    const float midY=view.y+view.h*0.5f;
+    for(int k=0;k<4;++k){
+        const rp::ViewRect col=rp::SquadRectOf(view,4,k);
+        ar::Pos c{0,s,1,3};
+        Expect(squads.Click(c,col.x+col.w*0.5f,midY) && c.item==k && c.field==0,"a column picks its soldier");
+    }
+    ar::Pos second{0,s,5,0};
+    const rp::ViewRect left=rp::SquadRectOf(view,2,0);
+    Expect(squads.Click(second,left.x+left.w*0.5f,midY) && second.item==4,"in the second tab: soldier 5");
+    const skin::Rect t=sp::SquadTab(1);
+    ar::Pos tab{0,s,2,0};
+    Expect(squads.Click(tab,(t.x0+t.x1)/2,(t.y0+t.y1)/2) && tab.item==4,"a squad tab still picks its squad");
+    model.env.previewOn=false;
+    ar::Pos off{0,s,1,0};
+    Expect(!squads.Click(off,view.x+view.w*0.1f,midY) && off.item==1,"preview off: no columns to click");
+    model.env.previewOn=true;
+    // the rings: one orange under the selected soldier, dim under the other three, each in its column
+    ar::Page* pages[]={&squads,&vehicles};
+    ar::State st;ar::Presets ps;ar::Words w;
+    ar::Open(st,ar::Input{},0);
+    st.pos=ar::Pos{0,s,2,0};st.column=1;
+    ar::Build(st,pages,2,ps,w,&built);
+    const ar::Layer& base=built.layer[0];
+    int orange=0,dim=0;
+    float orangeX0=1e9f,orangeX1=-1e9f;
+    for(int i=base.holeQuads;i<base.quads.n;++i){
+        const auto& q=base.quads.q[i];
+        if(q.argb[0]==sp::kRingOther)++dim;
+        if(q.argb[0]==sp::kRing && sp::kView.Contains(q.xy[0][0],q.xy[0][1]) && q.xy[0][1]>midY){
+            ++orange;orangeX0=q.xy[0][0]<orangeX0 ? q.xy[0][0] : orangeX0;orangeX1=q.xy[0][0]>orangeX1 ? q.xy[0][0] : orangeX1;
+        }
+    }
+    const rp::ViewRect third=rp::SquadRectOf(view,4,2);
+    Expect(dim==3*24,"three dim rings");
+    Expect(orange==24 && orangeX0>=third.x && orangeX1<=third.x+third.w,"the orange ring under the third soldier's column");
+    Expect(!HasText(base,hudtext::Tr(Tx::spOnlySelected)),"the squad shown: no 'only the selected one' note");
+    Expect(base.quads.dropped==0 && base.droppedTexts==0,"nothing dropped");
+}
 }  // namespace
 
 int main() {
@@ -527,6 +590,7 @@ int main() {
     Viewport();
     InBuild();
     Callouts();
+    SquadSideBySide();
     RandomWalk();
     if(failures){std::printf("%d failure(s)\n",failures);return 1;}
     std::printf("support_pages: all passed\n");

@@ -6,6 +6,7 @@
 //   - the camera's x shift while the menu is open;
 //   - the planner: what to send the view this frame, from what is wanted and what it shows.
 #pragma once
+#include "preview_camera.h"
 #include "support_loadout.h"
 #include <cstddef>
 #include <cstdint>
@@ -312,5 +313,41 @@ inline Actions Step(Plan& p,const Want& w,const Shown& s) noexcept {
 }
 // TickPreview stopped (the room / HQ screen went without closing the menu): the view puts the player back by itself.
 inline constexpr unsigned kOrphanFrames=30;
+
+// --- The squad's other soldiers (docs/room-3d-preview-re.md section 6.3): views the preview makes, one soldier each ---
+// Such a view shows only ever its soldier (never the player): no msg 8 lock, no player rebuild. It stays hidden
+// (+0x3EC 1) until its model is the soldier asked for: its constructor posts a build of player 0 before the preview can
+// arm the override (the Async is made at the constructor's end, right before that msg 3), and the job queue's order
+// against the preview's own build is not proven (two workers could finish them in either order), so a shown model
+// that is not the soldier, with no build of ours still to run, is built again after kSquadRebuildFrames (not every
+// frame: the finished build is taken by the view's update a frame or more after the worker took the override).
+inline constexpr unsigned kSquadRebuildFrames=30;
+struct SquadPlan {
+    int posted=kNone;    // the soldier last asked for (ModelKey)
+    unsigned waited=0;   // frames the shown model has not been it
+};
+struct SquadActions {
+    bool build=false,reveal=false;
+    bool recolour[2]{};
+};
+inline SquadActions SquadStep(SquadPlan& p,const Want& w,const Shown& s) noexcept {
+    SquadActions a;
+    const int key=ModelKey(w);
+    if(p.posted!=key){a.build=true;p.posted=key;p.waited=0;return a;}
+    const bool soldierShown=!s.pending && s.cls==MenuClassOf(w.kind) && s.outfit==kSentinelOutfit;
+    if(!soldierShown) {
+        if(!s.pending && ++p.waited>=kSquadRebuildFrames){a.build=true;p.waited=0;}
+        return a;
+    }
+    p.waited=0;
+    a.reveal=true;
+    for(int ch=0;ch<2;++ch)a.recolour[ch]=s.colour[ch] && !SameRgba(w.colour[ch],s.colour[ch]);
+    return a;
+}
+// How many views the preview keeps beside the game's own: the squad's soldiers past the first, while the menu shows a
+// squad in a placed viewport (unplaced, every view would stand at MENUMODELSETTING's one camera_pos, on each other).
+constexpr int ExtraViewsWanted(bool squadOn,int count,bool placed,bool mainShowsSoldier) noexcept {
+    return !squadOn || !placed || !mainShowsSoldier || count<2 ? 0 : (count>kSquadMost ? kSquadMost : count)-1;
+}
 
 }  // namespace crew::roompreview

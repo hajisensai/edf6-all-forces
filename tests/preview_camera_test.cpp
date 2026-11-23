@@ -81,11 +81,35 @@ static void Presets() {
     Check(t.m[1][2]>0,"pitch > 0 tilts the top toward the camera");
 }
 
+// The squad in a row: four equal columns, each soldier's feet under its column's centre and in the viewport's lower half,
+// left to right; a click finds its column.
+static void Squad() {
+    const ViewRect r{638,130,634,340};
+    float prev=-1;
+    for(int i=0;i<kSquadMost;++i){
+        const ViewRect c=SquadRectOf(r,kSquadMost,i);
+        Check(Near(c.w,r.w/4) && Near(c.x,r.x+c.w*static_cast<float>(i)) && c.h==r.h,"a quarter of the width each");
+        for(int k=0;k<kCameraPresetCount;++k){
+            float feet[2];
+            FeetOf(c,kCameraPresets[k],16.f/9.f,feet);
+            Check(feet[0]>=c.x && feet[0]<c.x+c.w,"the feet in the column");
+            if(k==static_cast<int>(CameraPreset::closeUp))Check(feet[1]>r.y+r.h,"特写: the feet below the viewport (no ring)");
+            else Check(feet[1]>r.y+r.h*0.5f && feet[1]<=r.y+r.h,"the feet in the viewport's lower half");
+            if(k==1){Check(Near(feet[0],c.x+c.w*0.5f,4.f),"front view: the feet under the column's centre (perspective: a few px)");Check(feet[0]>prev,"left to right");prev=feet[0];}
+        }
+        Check(SquadSlotAt(r,kSquadMost,c.x+c.w*0.5f,r.y+10)==i,"a click in the column picks its soldier");
+    }
+    Check(SquadSlotAt(r,4,r.x-1,r.y+10)==-1 && SquadSlotAt(r,4,r.x+5,r.y+r.h+1)==-1,"outside the viewport: none");
+    Check(SquadSlotAt(r,2,r.x+r.w*0.75f,r.y+1)==1 && SquadRectOf(r,2,2).w==0,"two soldiers: halves; past the count empty");
+    Check(Near(SquadRectOf(r,9,3).w,r.w/4),"more than four: four columns");
+}
+
 int main() {
     Ndcs();
     StockProjection();
     Placement();
     Presets();
+    Squad();
     std::printf("preview_camera_test: %d/%d checks passed\n",checks-failed,checks);
     return failed ? 1 : 0;
 }

@@ -46,6 +46,7 @@ inline constexpr float kPanelTop=232;                          // ColumnTop(2): 
 inline constexpr float kCamW=86,kCamH=34;                      // the view buttons, bottom right inside the viewport
 inline constexpr int kSquadTabs=3;                             // 12 seats at most: 第1/2/3小队
 inline constexpr std::uint32_t kRing=skin::kCursor;            // the selected soldier's floor ring (orange)
+inline constexpr std::uint32_t kRingOther=0x80C8C8C8u;         // the squad's other soldiers' rings (dim)
 inline constexpr std::uint32_t kNoteColour=0xFFF0B060u;
 
 inline rp::ViewRect ViewRectOf() noexcept { return rp::ViewRect{kView.x0,kView.y0,kView.W(),kView.H()}; }
@@ -232,6 +233,9 @@ public:
     }
     // What the 3D view shows at `p` (false: nothing: the viewport is an opaque box).
     virtual bool PreviewOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept=0;
+    // The soldiers shown side by side at `p` (room_preview.h ShowSquad), `out` (null: only counted) the first
+    // rp::kSquadMost; soldier 0 is PreviewOf's of the first of them. Below 2: one model (PreviewOf's).
+    virtual int SquadOf(const ar::Pos&,rp::PreviewSpec* /*out*/) const noexcept { return 0; }
     rp::ViewCamera Camera() const noexcept { return rp::kCameraPresets[camera]; }
     int CameraIndex() const noexcept { return camera; }
     // The menu unit index of row `row` (-1 none).
@@ -387,6 +391,18 @@ public:
         if(out)*out=rp::PreviewSpec{u->squad.kind[p.item],p.item%4==0,u->squad.look[p.item]};
         return true;
     }
+    // The cursor's squad tab (four soldiers, or the soldiers there are), left to right; its first a leader.
+    int SquadOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept override {
+        const rm::Unit* u=UnitAt(p.row);
+        if(!u || p.item<0 || p.item>=u->squad.count)return 0;
+        const int first=p.item/rp::kSquadMost*rp::kSquadMost;
+        const int left=u->squad.count-first,soldiers=left<rp::kSquadMost ? left : rp::kSquadMost;
+        for(int k=0;out && k<soldiers;++k)
+            out[k]=rp::PreviewSpec{u->squad.kind[first+k],(first+k)%4==0,u->squad.look[first+k]};
+        return soldiers;
+    }
+    // The column the soldier at `p` stands in (0 alone).
+    int SquadSlot(const ar::Pos& p) const noexcept { return SquadOf(p,nullptr)>=2 ? p.item%rp::kSquadMost : 0; }
     // The squad tabs (第1/2/3小队, four soldiers each, shown when there are more than four).
     int SquadTabs(const ar::Pos& p) const noexcept {
         const rm::Unit* u=UnitAt(p.row);
@@ -414,7 +430,12 @@ protected:
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {
         for(int k=0;k<SquadTabs(p);++k)
             if(SquadTab(k).Contains(x,y)){p.item=4*k;p.field=0;return true;}
-        return false;
+        // a soldier of the squad side by side: his column picks him
+        const int soldiers=model && model->env.previewOn ? SquadOf(p,nullptr) : 0;
+        const int k=soldiers>=2 ? rp::SquadSlotAt(ViewRectOf(),soldiers,x,y) : -1;
+        if(k<0)return false;
+        p.item=p.item/rp::kSquadMost*rp::kSquadMost+k;p.field=0;
+        return true;
     }
     void DrawInView(const ar::Pos& p,bool shown,ar::Layer* out) const noexcept override {
         const int tabs=SquadTabs(p);
@@ -427,13 +448,23 @@ protected:
             out->Say(s,(r.x0+r.x1)/2,r.y0+10,22,skin::TextOn(at),ar::Align::centre,false,r.W()-8);
         }
         if(!shown)return;
-        const rm::Unit* u=UnitAt(p.row);
-        // one model: the selected soldier, said so
-        if(u && u->squad.count>1)
-            out->Say(hudtext::Tr(Tx::spOnlySelected),kView.x0+14,kView.y0+10,20,kNoteColour,ar::Align::left,false,kView.W()-28);
-        float feet[2];
-        FeetOnScreen(Camera(),aspect,feet);
-        detail::Ring(&out->quads,feet[0],feet[1],48,13,5,kRing);
+        const int soldiers=SquadOf(p,nullptr);
+        if(soldiers<2) {
+            float feet[2];
+            FeetOnScreen(Camera(),aspect,feet);
+            detail::Ring(&out->quads,feet[0],feet[1],48,13,5,kRing);
+            return;
+        }
+        // the squad side by side (room_preview.h ShowSquad): a ring under each, the selected one's orange; each where
+        // room_preview places that soldier's model (its column of the viewport, the same camera)
+        const int at=SquadSlot(p);
+        for(int k=0;k<soldiers;++k){
+            float feet[2];
+            rp::FeetOf(rp::SquadRectOf(ViewRectOf(),soldiers,k),Camera(),aspect,feet);
+            if(!kView.Contains(feet[0],feet[1]))continue;   // 特写: the feet under the viewport
+            const float rx=soldiers>2 ? 34.f : 44.f;   // narrower columns, smaller rings
+            detail::Ring(&out->quads,feet[0],feet[1],rx,13,5,k==at ? kRing : kRingOther);
+        }
     }
 public:
     float aspect=16.f/9.f;   // the screen's (room_preview.cpp reads the window's; the runtime sets it)

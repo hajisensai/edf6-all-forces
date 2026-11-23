@@ -37,8 +37,22 @@ bool PreviewCallouts(const wchar_t* modsFile,menucallouts::Callouts* out) noexce
 bool InstallPreviewHooks() noexcept;
 // Shows `spec` in place of the player's soldier (again with a new spec: rebuilt or recoloured as needed).
 void ShowPreview(const PreviewSpec& spec) noexcept;
-// Puts the player's own soldier back. Idempotent.
+// Puts the player's own soldier back (and ends a squad: HideSquad). Idempotent.
 void HidePreview() noexcept;
+
+// The squad side by side (docs/room-3d-preview-re.md section 6.3): soldier 0 in the game's own view (the caller shows
+// it with ShowPreview), soldiers 1..count-1 each in a UiHQ_3DModelView the preview makes beside it (index 0, player
+// count 1, the override armed on its own Async) and kills when the squad is no longer asked for, the placement ends,
+// TickPreview stops, or the game's view goes. Only while placed (SetViewPlacement): soldier i stands in
+// SquadRectOf(rect, count, i) (preview_camera.h), its floor ring at FeetOf of that rect. Soldiers only (no vehicles).
+struct SquadSpec {
+    int count=0;                      // < 2: no squad (the made views killed)
+    PreviewSpec soldier[kSquadMost];  // body none
+};
+// Again with a new squad: each changed soldier rebuilt / recoloured in its own view. Call it after ShowPreview.
+void ShowSquad(const SquadSpec& squad) noexcept;
+// The made views killed (the game's own view stays as ShowPreview / HidePreview leave it). Idempotent.
+void HideSquad() noexcept;
 // Once per UI frame while the room / HQ screen lives (camera offset, pending rebuilds, safe teardown).
 void TickPreview(bool menuOpen) noexcept;
 

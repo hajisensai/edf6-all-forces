@@ -248,6 +248,40 @@ void Planner() {
     a=Step(p,w,s);
     Expect(!a.Any(),"reopened the same soldier while waiting: no rebuild");
 }
+// The squad's other views (section 6.3): build on the first frame, hidden until the soldier is shown, the constructor's
+// player build (or a late one) answered by one rebuild after kSquadRebuildFrames, recolour only what differs, a new
+// soldier rebuilt at once; and how many views the preview keeps.
+void Squad() {
+    SquadPlan p;Want w;Shown s;
+    float c0[4]={},c1[4]={};
+    s.colour[0]=c0;s.colour[1]=c1;s.cls=0;s.outfit=2;   // what the constructor's own build shows: player 0's Ranger
+    w.on=true;w.kind=SupportWeapon::fencerCannon;w.colour[0]=Rgba{{1,0,0,1}};w.colour[1]=Rgba{{0,1,0,1}};
+    SquadActions a=SquadStep(p,w,s);
+    Expect(a.build && !a.reveal,"first frame: build, still hidden");
+    s.pending=true;
+    for(unsigned i=0;i<kSquadRebuildFrames*2;++i)a=SquadStep(p,w,s);
+    Expect(!a.build && !a.reveal,"our build not taken yet: wait, hidden, never rebuilt");
+    s.pending=false;
+    for(unsigned i=1;i<kSquadRebuildFrames;++i){a=SquadStep(p,w,s);Expect(!a.build && !a.reveal,"the player's model shown: hidden, waiting");}
+    a=SquadStep(p,w,s);
+    Expect(a.build && !a.reveal,"still the player's model after kSquadRebuildFrames: built again (a late constructor build)");
+    s.cls=3;s.outfit=kSentinelOutfit;std::memcpy(c0,w.colour[0].v,16);
+    a=SquadStep(p,w,s);
+    Expect(a.reveal && !a.build && !a.recolour[0] && a.recolour[1],"the soldier shown: revealed, the differing channel sent");
+    std::memcpy(c1,w.colour[1].v,16);
+    a=SquadStep(p,w,s);
+    Expect(a.reveal && !a.build && !a.recolour[0] && !a.recolour[1],"as wanted: shown, nothing sent");
+    w.kind=SupportWeapon::rifle;
+    a=SquadStep(p,w,s);
+    Expect(a.build && !a.reveal,"another soldier: rebuilt at once, hidden");
+    s.cls=0;s.outfit=kSentinelOutfit;
+    a=SquadStep(p,w,s);
+    Expect(a.reveal,"the Ranger shown: revealed");
+    Expect(ExtraViewsWanted(true,4,true,true)==3 && ExtraViewsWanted(true,9,true,true)==3 && ExtraViewsWanted(true,2,true,true)==1,
+           "three views at most beside the game's own");
+    Expect(!ExtraViewsWanted(true,1,true,true) && !ExtraViewsWanted(false,4,true,true) && !ExtraViewsWanted(true,4,false,true) &&
+           !ExtraViewsWanted(true,4,true,false),"none: one soldier, no squad, not placed, or the game's view not on a soldier");
+}
 }  // namespace
 
 int main() {
@@ -257,6 +291,7 @@ int main() {
     Camera();
     Vehicles();
     Planner();
+    Squad();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }
