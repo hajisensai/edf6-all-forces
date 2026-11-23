@@ -1,5 +1,5 @@
 // The player's weapon slots a preset switches (src/player_slots.h), offline: slot counts and categories per class as
-// docs/loadout-re.md §1.2 lists them, and a switch's plan writing only owned rows of the right category.
+// docs/loadout-re.md §1.2 lists them (read from wlist::kWeaponSlotRules), and a switch's plan writing only owned rows of the right category.
 #include "../src/player_slots.h"
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +36,15 @@ int main() {
     Check(SlotAccepts(3,0,200) && SlotAccepts(3,3,205) && !SlotAccepts(3,3,206),"fencer weapons");
     Check(SlotAccepts(3,4,206) && SlotAccepts(3,5,209) && !SlotAccepts(3,5,210) && !SlotAccepts(3,6,206),"fencer support");
     Check(!SlotAccepts(-1,0,0) && !SlotAccepts(4,0,0),"no other class");
+    // one table: every category of every wlist::kWeaponSlotRules slot accepted, nothing else in that class
+    for(const crew::wlist::WeaponSlotRule& r:crew::wlist::kWeaponSlotRules) {
+        Check(r.slot<SlotsOf(r.cls),"each rule's slot counted");
+        for(int c=-1;c<400;++c) {
+            bool listed=false;
+            for(int k=0;k<crew::wlist::kSlotCategoriesMost && r.categories[k]>=0;++k)listed=listed || r.categories[k]==c;
+            Check(SlotAccepts(r.cls,r.slot,c)==listed,"SlotAccepts is kWeaponSlotRules");
+        }
+    }
 
     // the plan
     const std::map<std::string,RowInfo> table{{"AssultRifle01",{5,0,true}},{"aHandGrenade01",{40,20,true}},

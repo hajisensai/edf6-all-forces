@@ -43,8 +43,9 @@ struct EquipResult {
     wlist::Verdict verdict=wlist::Verdict::absent;   // ok 才写；same 不写也算成功
     bool written=false;            // GS+0x6E98 那一格已写成 row
 };
-// 写一个槽：先按表里读到的类别 / 等级、持有位、上限、本兵种其它槽，用 wlist::CheckEquipRow 判定（规则同原版
-// HUiHQWeaponSelect），ok 才写 GS+0x6E98+player*0x3E60+cls*0x18+slot*4。3D 预览由调用方经 ShowPlayerWeapon 通知。
+// 写一个槽：就是只要这一槽的 SetClassSlots（GS+0x6E98 只有一条写路径）。按表里读到的类别 / 等级、持有位、上限、
+// 本兵种其它槽，用 wlist::CheckEquipRow 判定（规则同原版 HUiHQWeaponSelect），ok 才写
+// GS+0x6E98+player*0x3E60+cls*0x18+slot*4。3D 预览由调用方经 ShowPlayerWeapon 通知。
 // 不存档：原版确认路径上也没有存档 / 脏标记（docs/weapon-select-re.md §4），装备随游戏自己的下一次存档写盘。
 EquipResult Equip(int player,int cls,int slot,int row) noexcept;
 

@@ -1,12 +1,10 @@
 // 整备方案 at run time: armory_presets.h. EDF.dll 0x678CCB46 RVAs (docs/loadout-re.md §1, §8; docs/armory-re.md §4).
 #include "armory_presets.h"
 #include "crew.h"
-#include "memory.h"
 #include "loadout_store.h"
 #include "player_slots.h"
 #include "room_preview.h"
 #include "weapon_equip.h"
-#include "weapon_records.h"
 #include <Windows.h>
 #include <cstdint>
 #include <array>
@@ -17,16 +15,6 @@
 
 namespace crew::armorypresets {
 namespace {
-
-constexpr std::size_t kGameStatus=0x20B2890;            // GS*
-constexpr unsigned kFindRow=0xE1BA0;                    // (GS+0x130, const wchar_t* name) -> row, -1
-constexpr unsigned kGetRow=0xE1CF0,kRowCount=0xE23F0;   // (cfg, Row* out, id) -> out, no bound check; (cfg) -> rows
-constexpr std::size_t kCfg=0x130,kTableRef=0x188;       // the weapon table, loaded once cfg+0x188 is set
-constexpr std::size_t kRowName=0,kRowCategory=0x10;     // in a Row (scope_spread.cpp, airstrike.cpp)
-constexpr std::size_t kClass=0x6E90,kWeapons=0x6E98,kClassStride=0x18;
-using FindRowFn=int(__fastcall*)(void*,const wchar_t*);
-using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
-using RowCountFn=std::uint32_t(__fastcall*)(void*);
 
 preset::Book book;
 bool readable=false;   // the last Load succeeded: the book may be written
@@ -81,42 +69,17 @@ bool ReadSupport(std::vector<preset::Entry>* out,wchar_t* why,std::size_t cap) {
     return true;
 }
 
-unsigned char* GameStatus() noexcept {
-    __try { return At<unsigned char*>(image,kGameStatus); } __except(EXCEPTION_EXECUTE_HANDLER){ return nullptr; }
-}
-// The weapon table, nullptr before it is loaded.
-void* Table(unsigned char* gs) noexcept {
-    if(!gs || !Readable(gs+kCfg+kTableRef,8) || !At<void*>(gs+kCfg,kTableRef))return nullptr;
-    return gs+kCfg;
-}
-struct RowRead { const wchar_t* name=nullptr; int category=-1; };
-RowRead ReadRow(void* table,std::uint32_t id) noexcept {
-    RowRead r;
-    __try {
-        if(id>=reinterpret_cast<RowCountFn>(image+kRowCount)(table))return r;
-        alignas(8) unsigned char row[0x100]{};
-        reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
-        r.name=At<const wchar_t*>(row,kRowName);
-        r.category=At<std::int32_t>(row,kRowCategory);
-    } __except(EXCEPTION_EXECUTE_HANDLER){ r=RowRead{}; }
-    return r;
-}
-int FindRow(void* table,const wchar_t* name) noexcept {
-    __try { return reinterpret_cast<FindRowFn>(image+kFindRow)(table,name); } __except(EXCEPTION_EXECUTE_HANDLER){ return -1; }
-}
-
-playerslots::RowInfo Lookup(unsigned char* gs,void* table,const std::string& name) {
+// A weapon name's row as weapon_equip reads it (the one reader of the runtime weapon table).
+playerslots::RowInfo Lookup(const std::string& name) {
     playerslots::RowInfo info;
     const std::wstring w=Wide(name);
     if(w.empty())return info;
-    const int row=FindRow(table,w.c_str());
-    if(row<0 || static_cast<std::uint32_t>(row)>=WeaponRecordCapacity())return info;
-    const RowRead r=ReadRow(table,static_cast<std::uint32_t>(row));
-    if(!r.name)return info;
-    const unsigned char* record=WeaponRecord(gs,static_cast<std::uint32_t>(row));
+    const int row=wequip::FindRow(w.c_str());
+    wequip::RowFacts f;
+    if(row<0 || !wequip::ReadRow(row,&f))return info;
     info.row=row;
-    info.category=r.category;
-    info.owned=record && Readable(record,4) && (At<std::uint32_t>(record,0)&1u)!=0;
+    info.category=f.category;
+    info.owned=wequip::Owned(row);
     return info;
 }
 
@@ -124,10 +87,8 @@ playerslots::RowInfo Lookup(unsigned char* gs,void* table,const std::string& nam
 // view told of the class's slots 0..3 (room_preview, the one msg 4 sender); false when there is nothing to write into.
 bool WritePlayer(const preset::Player& p) {
     if(p.cls<0)return true;   // the preset does not hold the player's loadout
-    unsigned char* const gs=GameStatus();
-    void* const table=Table(gs);
-    if(!table || !wequip::Ready())return false;
-    const playerslots::Plan plan=playerslots::PlanWrites(p,[&](const std::string& n){ return Lookup(gs,table,n); });
+    if(wequip::RowCount()<0)return false;   // not ready or no weapon table yet
+    const playerslots::Plan plan=playerslots::PlanWrites(p,[](const std::string& n){ return Lookup(n); });
     std::array<std::array<int,wlist::kSlotsMost>,playerslots::kClasses> want{};
     for(auto& c:want)c.fill(-1);
     for(int i=0;i<plan.n;++i)want[static_cast<std::size_t>(plan.write[i].cls)][static_cast<std::size_t>(plan.write[i].slot)]=
@@ -152,38 +113,76 @@ bool WritePlayer(const preset::Player& p) {
     return true;
 }
 
+// The support key edits (SwitchEdits) written through SaveSupportLoadouts: all or none.
+bool WriteSupport(const std::vector<preset::Entry>& edits,int index,wchar_t* why,std::size_t cap) {
+    if(edits.empty())return true;
+    if(static_cast<int>(edits.size())>kLoadoutSaveMost){Say(why,cap,L"too many support keys in one switch");return false;}
+    std::vector<std::wstring> units(edits.size()),values(edits.size());
+    std::vector<LoadoutSave> lines(edits.size());
+    for(std::size_t i=0;i<edits.size();++i) {
+        preset::SupportKey key;
+        if(!preset::ParseSupportKey(edits[i].key,&key)){Say(why,cap,L"a support key the preset holds is malformed");return false;}
+        units[i]=Wide(key.unit);
+        values[i]=Wide(edits[i].value);
+        const LoadoutField field=key.family==preset::Family::preset ? LoadoutField::preset :
+                                 key.family==preset::Family::vehicle ? LoadoutField::vehicle : LoadoutField::crew;
+        lines[i]=LoadoutSave{field,units[i].c_str(),values[i].c_str()};
+    }
+    int failed=-1;
+    if(SaveSupportLoadouts(lines.data(),static_cast<int>(lines.size()),&failed,why,cap))return true;
+    Log("ARMORY switch to preset %d refused at %d (%s): %ls (no support key written)",index+1,failed,
+        failed>=0 ? edits[static_cast<std::size_t>(failed)].key.c_str() : "-",why ? why : L"");
+    return false;
+}
+
+// A switch is all or nothing across its three stores: the book (Current=), EDF6VehicleCrew.ini's support keys and the
+// player's weapons in GameStatus. Everything that can refuse is checked first (the ini readable, the edits well formed,
+// the weapon table there when the preset holds the player); then the book is written first (the one write most likely
+// to fail: a locked file), then the ini (all or none), then the player. A later step failing undoes the earlier ones:
+// the ini written back to what it was, the book back to its old Current=. The variant generator starts only once all
+// three hold the new preset.
 bool SwitchTo(int index,wchar_t* why,std::size_t cap) {
     if(index<0 || index>=static_cast<int>(book.presets.size())){Say(why,cap,L"no such preset");return false;}
     const preset::Preset& to=book.presets[static_cast<std::size_t>(index)];
     std::vector<preset::Entry> now;
     if(!ReadSupport(&now,why,cap))return false;
     const std::vector<preset::Entry> edits=preset::SwitchEdits(now,to.support);
+    for(const preset::Entry& e:edits) {
+        preset::SupportKey key;
+        if(!preset::ParseSupportKey(e.key,&key)){Say(why,cap,L"a support key the preset holds is malformed");return false;}
+    }
     if(static_cast<int>(edits.size())>kLoadoutSaveMost){Say(why,cap,L"too many support keys in one switch");return false;}
+    preset::Player was;
+    if(to.player.cls>=0 && !ReadPlayer(&was)) {
+        Say(why,cap,L"the player's loadout cannot be read or written yet (no weapon table): nothing switched");
+        return false;
+    }
+    const int wasCurrent=book.current;
+    book.current=index;
+    if(!Save(why,cap)){book.current=wasCurrent;return false;}
+    const auto undoBook=[&]() {
+        book.current=wasCurrent;
+        wchar_t again[160]{};
+        if(!Save(again,std::size(again)))
+            Log("ARMORY the book could not be put back to preset %d either: %ls (it names preset %d)",wasCurrent+1,again,index+1);
+    };
+    if(!WriteSupport(edits,index,why,cap)){undoBook();return false;}
+    if(!WritePlayer(to.player)) {
+        Say(why,cap,L"the player's loadout could not be written: the switch was undone");
+        std::vector<preset::Entry> after;
+        wchar_t back[160]{};
+        if(!ReadSupport(&after,back,std::size(back)) || !WriteSupport(preset::SwitchEdits(after,now),index,back,std::size(back)))
+            Log("ARMORY preset %d: the support keys could not be put back: %ls",index+1,back);
+        if(to.player.cls>=0 && !WritePlayer(was))Log("ARMORY preset %d: the player's old loadout could not be put back",index+1);
+        undoBook();
+        return false;
+    }
     if(!edits.empty()) {
-        std::vector<std::wstring> units(edits.size()),values(edits.size());
-        std::vector<LoadoutSave> lines(edits.size());
-        for(std::size_t i=0;i<edits.size();++i) {
-            preset::SupportKey key;
-            if(!preset::ParseSupportKey(edits[i].key,&key)){Say(why,cap,L"a support key the preset holds is malformed");return false;}
-            units[i]=Wide(key.unit);
-            values[i]=Wide(edits[i].value);
-            const LoadoutField field=key.family==preset::Family::preset ? LoadoutField::preset :
-                                     key.family==preset::Family::vehicle ? LoadoutField::vehicle : LoadoutField::crew;
-            lines[i]=LoadoutSave{field,units[i].c_str(),values[i].c_str()};
-        }
-        int failed=-1;
-        if(!SaveSupportLoadouts(lines.data(),static_cast<int>(lines.size()),&failed,why,cap)) {
-            Log("ARMORY switch to preset %d refused at %d (%s): %ls (nothing written)",index+1,failed,
-                failed>=0 ? edits[static_cast<std::size_t>(failed)].key.c_str() : "-",why ? why : L"");
-            return false;
-        }
         wchar_t gen[160]{};
         if(!StartVariantGeneration(gen,std::size(gen)))Log("ARMORY the variant generator not started: %ls",gen);
     }
-    if(!WritePlayer(to.player))Log("ARMORY preset %d: the player's loadout not switched (no weapon table yet)",index+1);
-    book.current=index;
     Log("ARMORY switched to preset %d (%zu support keys changed)",index+1,edits.size());
-    return Save(why,cap);
+    return true;
 }
 
 }  // namespace
@@ -191,21 +190,22 @@ bool SwitchTo(int index,wchar_t* why,std::size_t cap) {
 bool ReadPlayer(preset::Player* out) noexcept {
     try {
         *out=preset::Player{};
-        // RowCount / GetRow are called below: only once weapon_equip_signatures.inc checked them (the same RVAs)
-        if(!wequip::Ready())return false;
-        unsigned char* const gs=GameStatus();
-        void* const table=Table(gs);
-        if(!table || !Readable(gs+kClass,4) || !Readable(gs+kWeapons,playerslots::kClasses*kClassStride))return false;
-        const int cls=At<std::int32_t>(gs,kClass);
-        if(cls<0 || cls>=playerslots::kClasses)return false;
+        if(wequip::RowCount()<0)return false;   // weapon_equip refused or no weapon table yet
+        const int cls=wequip::CurrentClass(0);
+        if(cls<0)return false;
         out->cls=cls;
-        for(int c=0;c<playerslots::kClasses;++c)
+        for(int c=0;c<playerslots::kClasses;++c) {
+            std::array<int,wlist::kSlotsMost> rows{};
+            if(!wequip::ReadEquipped(0,c,&rows))return false;
             for(int s=0;s<playerslots::SlotsOf(c);++s) {
-                const std::int32_t id=At<std::int32_t>(gs,kWeapons+static_cast<std::size_t>(c)*kClassStride+static_cast<std::size_t>(s)*4);
-                if(id<0)continue;
-                const RowRead r=ReadRow(table,static_cast<std::uint32_t>(id));
-                if(r.name && Readable(r.name,2))out->weapon[c][s]=Utf8(r.name);
+                const int id=rows[static_cast<std::size_t>(s)];
+                wequip::RowFacts f;
+                if(id<0 || !wequip::ReadRow(id,&f) || !f.id[0])continue;
+                // a name that filled RowFacts::id may be cut short: stored, it would never be found again
+                if(wcslen(f.id)+1>=std::size(f.id)){Log("ARMORY row %d's name is too long to store: slot left empty",id);continue;}
+                out->weapon[c][s]=Utf8(f.id);
             }
+        }
         return true;
     } catch(...) { return false; }
 }

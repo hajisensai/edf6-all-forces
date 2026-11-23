@@ -24,6 +24,8 @@
 #include "armory_presets.h"
 #include "worldmap_tiles.h"
 #include "crew.h"
+#include "loadout_store.h"
+#include "room_sync.h"
 #include "memory.h"
 #include "map.h"
 
@@ -543,6 +545,9 @@ struct Shot {
     int launch=-1;            // the preset the chosen mission starts with (-1: as equipped, no presets)
     bool remembered=false;    // ...remembered for it (else the one in force)
     wchar_t launchLabel[24]{},launchName[64]{},launchKeys[48]{};
+    // A start held for the generator (Launch): what 本关出动's row says instead of the preset; failed: an error.
+    wchar_t launchNote[160]{};
+    bool launchFailed=false;
     Progress progress;
     wchar_t progressText[64]{};
 };
@@ -650,6 +655,12 @@ struct Ui {
     bool rbWas=false,digitWas[8]{};
     int backTab=-1;           // a 整备 tab clicked: the stock 返回 given to this frame's stock OnUpdate, 整备 opened there
     crew::armory::Presets ps; // the preset book's chips (armory_presets.h), read when the select opened
+    // A start held for the generator (Launch): the entry confirmed, the last poll; the entry whose start was refused
+    // for a failed generation (confirmed again: started with the files as they are); the line 本关出动 shows.
+    int pending=-1,failedEntry=-1;
+    ULONGLONG polled=0;
+    wchar_t note[160]{};
+    bool noteFailed=false;
 };
 Ui ui;
 bool backOk=false,launchOk=false;   // kBackSig / the confirm callback's slot checked at load
@@ -799,8 +810,76 @@ void StartWithPreset(unsigned char* self,const char* how) noexcept {
     wchar_t why[160]{};
     const bool ok=armorypresets::Apply(fx,why,std::size(why));
     armorypresets::Fill(&ui.ps);
+    if(ok)roomsync::RoomSyncNudge();   // in a room the start gate reads the switched-in set's files at once
     if(ok)Log("WORLDMAP %s: row %d starts with preset %d (switched in)",how,rows.row[cursor],want+1);
     else Log("WORLDMAP %s: row %d: preset %d not switched in: %ls",how,rows.row[cursor],want+1,why);
+}
+// The cursor's mission confirmed (the stock confirm callback, our click's confirm): its preset switched in, then the
+// generator asked: true when the start goes on now. While it runs the start is held (ui.pending: AfterStock starts it
+// when the generator is done; the cursor moved, it is dropped); failed / no generator: not started, the error on
+// 本关出动's row, and the same mission confirmed again starts with the files as they are (the player's choice, logged).
+constexpr ULONGLONG kGenPollMs=500;
+bool Launch(unsigned char* self,const char* how) noexcept {
+    StartWithPreset(self,how);
+    const int cursor=CursorIndex(self);
+    if(cursor<0 || cursor>=rows.n || !Enterable(rows.state[cursor]) || !Confirmable(self))return true;   // the stock's own
+    const GenerateStatus g=VariantGenerationStatus();
+    ui.pending=-1;
+    if(g.state==GenerateState::running) {
+        ui.pending=cursor;ui.polled=GetTickCount64();
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchWaiting),g.message);
+        ui.noteFailed=false;
+        Log("WORLDMAP %s: row %d held: the generator is running (%ls)",how,rows.row[cursor],g.message);
+        return false;
+    }
+    if(g.state==GenerateState::failed || g.state==GenerateState::missing) {
+        if(ui.failedEntry==cursor) {
+            Log("WORLDMAP %s: row %d confirmed again after a failed generation (%ls): started with the files as they are",
+                how,rows.row[cursor],g.message);
+            ui.failedEntry=-1;ui.note[0]=0;
+            return true;
+        }
+        ui.failedEntry=cursor;
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchFailed),g.message);
+        ui.noteFailed=true;
+        Log("WORLDMAP %s: row %d not started: the generation %s (%ls)",how,rows.row[cursor],
+            g.state==GenerateState::failed ? "failed" : "has no generator",g.message);
+        return false;
+    }
+    ui.failedEntry=-1;ui.note[0]=0;
+    return true;
+}
+// A held start (Launch) each frame after the stock OnUpdate: dropped when the cursor left it or the select cannot
+// confirm; the generator polled; done, the start made (the direct confirm, as a click's).
+void FollowPending(unsigned char* self) noexcept {
+    if(ui.pending<0)return;
+    const int cursor=CursorIndex(self);
+    if(cursor!=ui.pending || !Confirmable(self)) {
+        Log("WORLDMAP select %p: the held start of entry %d dropped (the cursor on %d)",static_cast<void*>(self),ui.pending,cursor);
+        ui.pending=-1;ui.note[0]=0;
+        return;
+    }
+    const ULONGLONG now=GetTickCount64();
+    if(now-ui.polled<kGenPollMs)return;
+    ui.polled=now;
+    const GenerateStatus g=VariantGenerationStatus();
+    if(g.state==GenerateState::running) {
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchWaiting),g.message);
+        return;
+    }
+    ui.pending=-1;
+    if(g.state==GenerateState::failed || g.state==GenerateState::missing) {
+        ui.failedEntry=cursor;
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchFailed),g.message);
+        ui.noteFailed=true;
+        Log("WORLDMAP select %p: entry %d not started: the generation %s (%ls)",static_cast<void*>(self),cursor,
+            g.state==GenerateState::failed ? "failed" : "has no generator",g.message);
+        return;
+    }
+    ui.note[0]=0;
+    Log("WORLDMAP select %p: the generator is done (%ls): entry %d started",static_cast<void*>(self),g.message,cursor);
+    if(launchOk)roomsync::RoomSyncNudge();
+    Confirm(self);
 }
 // The title bar clicked: a 整备 tab (the select closed the stock way, 整备 opened at it), a chip (that preset in force).
 void TitleClick(unsigned char* self) noexcept {
@@ -973,6 +1052,8 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     if(out.launch>=0)_snwprintf_s(out.launchName,_TRUNCATE,L"%d  %ls",out.launch+1,ui.ps.names[out.launch]);
     else wcsncpy_s(out.launchName,hudtext::Tr(hudtext::Tx::mapLaunchNone),_TRUNCATE);
     wcsncpy_s(out.launchKeys,hudtext::Tr(hudtext::Tx::mapLaunchKeys),_TRUNCATE);
+    wcsncpy_s(out.launchNote,ui.note,_TRUNCATE);
+    out.launchFailed=ui.noteFailed;
     out.progress=CountProgress(rows.state,rows.n);
     _snwprintf_s(out.progressText,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapProgress),out.progress.cleared,out.progress.shown);
     ui.panelLines=0;
@@ -1067,10 +1148,11 @@ void AfterStock(unsigned char* self) noexcept {
         } else {
             Log("WORLDMAP select %p: confirm entry %d (row %d) by a click",static_cast<void*>(self),cursor,
                 cursor>=0 && cursor<rows.n ? rows.row[cursor] : -1);
-            if(launchOk)StartWithPreset(self,"a click's confirm");   // (the direct call skips the callback's hook)
-            Confirm(self);
+            // (the direct call skips the callback's hook)
+            if(!launchOk || Launch(self,"a click's confirm"))Confirm(self);
         }
     }
+    FollowPending(self);
 }
 
 std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
@@ -1328,9 +1410,13 @@ void DrawPanel() noexcept {
     // 本关出动: the preset the chosen mission starts with (lit when remembered for it), its keys at the right.
     {
         const float y=kLaunchRow.y0;
-        renderer->Rect(kLaunchRow.x0+4.f,y,kLaunchRow.x1-4.f,y+kPanelRow-4.f,d.remembered ? 0x90F07A10u : 0x60302A1Eu);
-        const float label=Text(d.launchLabel,x,y+7.f,22.f,true,0xFFEDE6D2u,140.f);
-        Text(d.launchName,x+label+14.f,y+7.f,22.f,false,0xFFFFFFFFu,w-label-14.f);
+        // A held start (Launch): its line instead of the preset, amber while the generator runs, red when it failed.
+        const bool noted=d.launchNote[0]!=0;
+        const std::uint32_t back=noted ? (d.launchFailed ? 0xC0A02020u : 0xA0806010u) : d.remembered ? 0x90F07A10u : 0x60302A1Eu;
+        renderer->Rect(kLaunchRow.x0+4.f,y,kLaunchRow.x1-4.f,y+kPanelRow-4.f,back);
+        const float label=noted ? 0.f : Text(d.launchLabel,x,y+7.f,22.f,true,0xFFEDE6D2u,140.f);
+        Text(noted ? d.launchNote : d.launchName,x+(noted ? 0.f : label+14.f),y+(noted ? 9.f : 7.f),noted ? 18.f : 22.f,false,
+             0xFFFFFFFFu,noted ? w : w-label-14.f);
     }
     ID3D11ShaderResourceView* const disc=labels->Disc(*renderer);
     for(int i=0;i<d.lines;++i) {
@@ -1586,8 +1672,10 @@ std::uint64_t __fastcall InvokeHook(unsigned char* functor,void* result) {
         screen=*reinterpret_cast<unsigned char* const*>(functor+kFunctorScreen);
         pmf=*reinterpret_cast<const std::uintptr_t*>(functor+kFunctorPmf);
     } __except(EXCEPTION_EXECUTE_HANDLER){ screen=nullptr; }
-    if(screen && screen==ui.self && pmf==reinterpret_cast<std::uintptr_t>(image+kConfirm) && gone.load()!=screen)
-        StartWithPreset(screen,"the stock confirm");
+    // Held (Launch false): the stock confirm not called, as Invoke itself skips it when the screen is gone (0x8A40E4:
+    // its return value is cbRequestMission's void, nobody reads it); AfterStock starts it when the generator is done.
+    if(screen && screen==ui.self && pmf==reinterpret_cast<std::uintptr_t>(image+kConfirm) && gone.load()!=screen &&
+       !Launch(screen,"the stock confirm"))return 0;
     return nextInvoke(functor,result);
 }
 

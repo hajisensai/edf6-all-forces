@@ -148,19 +148,16 @@ bool ReadLoadout(int who,int cls,wlist::Loadout* out) {
     return true;
 }
 
+// 一个槽也走 SetClassSlots：GS+0x6E98 只有这一条写路径（判定 wlist::PlanClassSlots → CheckEquipRow）。
 EquipResult Equip(int who,int cls,int slot,int row) noexcept {
     EquipResult r;
-    std::array<int,wlist::kSlotsMost> equipped{};
-    RowFacts f;
-    if(!ready || !ReadRow(row,&f) || !ReadEquipped(who,cls,&equipped))return r;
-    r.verdict=wlist::CheckEquipRow(wlist::kWeaponSlotRules,std::size(wlist::kWeaponSlotRules),cls,slot,row,f.category,f.level,
-                                   Owned(row),LevelCap(),equipped);
-    if(r.verdict!=wlist::Verdict::ok)return r;
-    int* cell=EquippedCell(who,cls,slot);
-    if(!cell || !Readable(cell,sizeof(int),true))return r;
-    *cell=row;
-    r.written=true;
-    Log("WEQUIP player %d class %d slot %d = row %d (%ls)",who,cls,slot,row,f.id);
+    if(slot<0 || slot>=wlist::kSlotsMost || row<0)return r;
+    std::array<int,wlist::kSlotsMost> want;
+    want.fill(-1);
+    want[static_cast<std::size_t>(slot)]=row;
+    const wlist::ClassPlan p=SetClassSlots(who,cls,want);
+    r.verdict=p.verdict[static_cast<std::size_t>(slot)];
+    r.written=r.verdict==wlist::Verdict::ok && p.slots[static_cast<std::size_t>(slot)]==row;
     return r;
 }
 
@@ -179,8 +176,11 @@ wlist::ClassPlan SetClassSlots(int who,int cls,const std::array<int,wlist::kSlot
                                 return true;
                             });
     for(std::size_t s=0;s<current.size();++s)
-        if(p.slots[s]!=current[s])cells[s]=p.slots[s];
-    Log("WEQUIP player %d class %d: %d slots written",who,cls,p.changed);
+        if(p.slots[s]!=current[s]){
+            cells[s]=p.slots[s];
+            RowFacts f;
+            Log("WEQUIP player %d class %d slot %zu = row %d (%ls)",who,cls,s,p.slots[s],ReadRow(p.slots[s],&f) ? f.id : L"?");
+        }
     return p;
 }
 
