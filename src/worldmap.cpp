@@ -140,6 +140,13 @@ const Sig kSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{kDraw,kDrawSig,sizeo
     {kNumber,kNumberSig,sizeof(kNumberSig)},{0x9591AF,kNotOpenSig,sizeof(kNotOpenSig)},{0x958A66,kTitleSig,sizeof(kTitleSig)},
     {0x8A26AA,kModeSig,sizeof(kModeSig)},{0x8A5371,kRepeatSig,sizeof(kRepeatSig)},{0xDC0B0,kCurrentSig,sizeof(kCurrentSig)},
     {kTransform,kTransformSig,sizeof(kTransformSig)}};
+// Stage 6's, each part checked on its own (a mismatch leaves that part out, not the map).
+const Sig kBackSigs[]={{0x84B544,kBackSig,sizeof(kBackSig)}};
+const Sig kLaunchSigs[]={{kInvoke,kInvokeSig,sizeof(kInvokeSig)},{0x8A40E9,kInvokeCallSig,sizeof(kInvokeCallSig)}};
+template<std::size_t N> bool AllMatch(const Sig (&sigs)[N]) noexcept {
+    for(const Sig& s:sigs)if(!Matches(s.rva,s.bytes,s.size))return false;
+    return true;
+}
 
 using UpdateFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
 using DrawFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
@@ -1615,10 +1622,9 @@ bool InstallWorldMap() noexcept {
        !Chain(kUpdateSlot,kUpdate,reinterpret_cast<void*>(&UpdateHook),nextUpdate,"OnUpdate"))return false;
     Log("HOOK worldmap select chained (vtable 0x18052E8 slots 1, 2, 5): the list becomes the world map once a select opens");
     // Stage 6, each on its own (a mismatch leaves that part out, not the map): the 返回 a 整备 tab gives, 本关出动.
-    backOk=Matches(0x84B544,kBackSig,sizeof(kBackSig));
+    backOk=AllMatch(kBackSigs);
     if(!backOk)Log("HOOK worldmap: the 返回 key's code at EDF+0x84B544 is not as expected: the map's 整备 tabs do nothing");
-    launchOk=Matches(kInvoke,kInvokeSig,sizeof(kInvokeSig)) && Matches(0x8A40E9,kInvokeCallSig,sizeof(kInvokeCallSig)) &&
-             Chain(kInvokeSlot,kInvoke,reinterpret_cast<void*>(&InvokeHook),nextInvoke,"confirm callback");
+    launchOk=AllMatch(kLaunchSigs) && Chain(kInvokeSlot,kInvoke,reinterpret_cast<void*>(&InvokeHook),nextInvoke,"confirm callback");
     if(!launchOk)Log("HOOK worldmap: the select's confirm callback is not as expected: 本关出动 is shown, not switched in");
     return true;
 }
