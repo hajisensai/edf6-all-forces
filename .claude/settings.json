@@ -24,6 +24,11 @@
     ]
   },
   "autoCompactWindow": 300000,
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "autoCompactWindow": 300000
+    }
+  },
   "permissions": {
     "deny": [
       "SuggestPluginInstall",
