@@ -1,5 +1,7 @@
 // 整备界面武器页的游戏侧：读武器表 / 持有位 / 等级上限 / 当前装备，写一个槽（docs/weapon-select-re.md）。
-// 列表与判定的纯逻辑在 weapon_list_logic.h；这里只取运行时事实、按同一判定写 GS，再像原版一样给 3D 预览发消息 4。
+// 列表与判定的纯逻辑在 weapon_list_logic.h；这里只取运行时事实、按同一判定写 GS。
+// 玩家装备（GS+0x6E98）与兵种（GS+0x6E90）只经这里写（整备武器页、整备方案切换）；3D 预览的消息 4 只经
+// roompreview::ShowPlayerWeapon 发（调用方写成功后自己叫它），这里不发。
 //
 // 线程：除 InstallWeaponEquip 外都只在游戏的 UI 更新里调（菜单 OnUpdate 链，即原版选择界面运行的那个线程）。
 // 不打补丁、不挂钩：只调用签名核过的原生函数（weapon_equip_signatures.inc，tools/weapon_equip_sigs.py）。
@@ -40,11 +42,16 @@ bool ReadLoadout(int player,int cls,wlist::Loadout* out);
 struct EquipResult {
     wlist::Verdict verdict=wlist::Verdict::absent;   // ok 才写；same 不写也算成功
     bool written=false;            // GS+0x6E98 那一格已写成 row
-    bool previewNotified=false;    // cls 是该玩家当前兵种：已广播消息 4 {player, slot, row, cls}
 };
 // 写一个槽：先按表里读到的类别 / 等级、持有位、上限、本兵种其它槽，用 wlist::CheckEquipRow 判定（规则同原版
-// HUiHQWeaponSelect），ok 才写 GS+0x6E98+player*0x3E60+cls*0x18+slot*4，然后像原版确认键一样经 UI 系统广播消息 4。
+// HUiHQWeaponSelect），ok 才写 GS+0x6E98+player*0x3E60+cls*0x18+slot*4。3D 预览由调用方经 ShowPlayerWeapon 通知。
 // 不存档：原版确认路径上也没有存档 / 脏标记（docs/weapon-select-re.md §4），装备随游戏自己的下一次存档写盘。
 EquipResult Equip(int player,int cls,int slot,int row) noexcept;
+
+// 一次写一个兵种的几个槽（整备方案切换）：want[s] -1 不动；判定见 wlist::PlanClassSlots（同 Equip 的规则，重复按写完
+// 以后判，两槽互换也能写；被拒的槽留原值）。未就绪 / 读不到：返回的 changed 为 0、verdict 全为 absent。
+wlist::ClassPlan SetClassSlots(int player,int cls,const std::array<int,wlist::kSlotsMost>& want) noexcept;
+// 选兵种：写 GS+0x6E90+player*0x3E60（0..3）。
+bool SetClass(int player,int cls) noexcept;
 
 }  // namespace crew::wequip

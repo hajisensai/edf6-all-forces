@@ -51,6 +51,37 @@ public:
         ++commits; dirty=false; return true;
     }
     bool Dirty() const noexcept override { return dirty; }
+    // the page hooks (off unless a test turns them on)
+    int header[3]{};
+    bool holed=false, typing=false;
+    int alts=0, relocateItem=-1;
+    wchar_t typed[kTextMost]{};
+    const wchar_t* note=nullptr;
+    int Header(int c) const noexcept override { return header[c]; }
+    bool Hole(const Pos&,skin::Rect* out) const noexcept override {
+        if(holed)*out=skin::Rect{1328,130,1792,530};
+        return holed;
+    }
+    bool Key(Pos&,int,int k,const Input& in) noexcept override {
+        if(typing){
+            if(k==kConfirm || k==kCancel){typing=false;return true;}
+            if(k==kBackspace){detail::PopChar(typed);return true;}
+            return false;
+        }
+        if(k==kSearch){typing=true;return true;}
+        if(k==kAltNext){++alts;return true;}
+        if(k==kMouseLeft && header[1]>0 && in.pointer && skin::layout::Row(1,0).Contains(in.x,in.y)){++alts;return true;}
+        return false;
+    }
+    bool Typing() const noexcept override { return typing; }
+    void Type(const wchar_t* c,int n) noexcept override { for(int i=0;i<n;++i)detail::AppendChar(typed,c[i]); }
+    void Relocate(Pos* p,int) noexcept override { if(relocateItem>=0){p->item=relocateItem;relocateItem=-1;} }
+    bool TakeNote(wchar_t* out,std::size_t cap) noexcept override {
+        if(!note)return false;
+        CopyText(out,cap,note);
+        note=nullptr;
+        return true;
+    }
 };
 
 Words MakeWords() {
@@ -270,6 +301,64 @@ void Scripted() {
     }
 }
 
+// The page hooks: header lines, the hole, keys a page takes, typing, relocation, notes.
+void Hooks() {
+    Rig r;
+    r.a.header[1]=2;r.a.header[2]=7;r.a.holed=true;r.a.rows=6;
+    r.Tap(kConfirm);
+    Check(r.s.column==1,"into the centre");
+    Check(detail::Visible(r.a,1)==skin::layout::RowsIn(1)-2,"header lines leave fewer visible");
+    // a click on the first item line (below the header) focuses it; a click on the header goes to the page
+    const skin::Rect item1=skin::layout::Row(1,2+1);
+    r.Click((item1.x0+item1.x1)/2,(item1.y0+item1.y1)/2);
+    Check(r.s.pos.item==1 && r.s.column==1,"items start below the header");
+    const skin::Rect head=skin::layout::Row(1,0);
+    r.Click((head.x0+head.x1)/2,(head.y0+head.y1)/2);
+    Check(r.a.alts==1 && r.s.pos.item==1,"the page takes a click on its header");
+    r.Tap(kAltNext);
+    Check(r.a.alts==2,"the page takes its own key");
+    // typing: characters to the page, the state's keys (tab, preset, list) do nothing
+    r.Tap(kSearch);
+    Check(r.a.typing,"search starts typing");
+    r.Type(L"qe1");
+    r.Tap(kTabNext);r.Tap(kDigit1+1);r.Tap(kDown);
+    Check(std::wcscmp(r.a.typed,L"qe1")==0,"typed characters reach the page");
+    Check(r.s.tab==0 && r.s.pos.item==1,"while typing the state's keys do nothing");
+    r.Tap(kBackspace);
+    Check(std::wcscmp(r.a.typed,L"qe")==0,"backspace to the page");
+    r.Tap(kConfirm);
+    Check(!r.a.typing && r.s.column==1,"confirm ends typing without moving a column");
+    r.Type(L"x");
+    Check(std::wcscmp(r.a.typed,L"qe")==0,"not typing: characters ignored");
+    // relocation and the note
+    r.a.relocateItem=2;
+    r.Tap(kUp);
+    Check(r.s.pos.item==2,"the page relocates the cursor last");
+    r.a.note=L"why";
+    r.Tap(kUp);
+    Check(std::wcscmp(r.s.note,L"why")==0,"the page's note shown");
+    // the toggle still closes while typing
+    r.Tap(kSearch);
+    Effects fx=r.Tap(kToggle);
+    Check(fx.close && !r.s.open,"toggle closes while typing");
+    // the view: nothing drawn over the hole
+    Open(r.s,r.in);
+    static View v;
+    Build(r.s,r.pages,3,r.ps,r.w,&v);
+    const skin::Rect hole{1328,130,1792,530};
+    for(int i=0;i<v.layer[0].quads.n;++i){
+        const skin::Quad& q=v.layer[0].quads.q[i];
+        float x0=q.xy[0][0],x1=x0,y0=q.xy[0][1],y1=y0;
+        for(const auto& c:q.xy){x0=c[0]<x0?c[0]:x0;x1=c[0]>x1?c[0]:x1;y0=c[1]<y0?c[1]:y0;y1=c[1]>y1?c[1]:y1;}
+        Check(!(x0<hole.x1-0.01f && hole.x0+0.01f<x1 && y0<hole.y1-0.01f && hole.y0+0.01f<y1),"nothing over the hole");
+    }
+    for(int i=0;i<v.layer[0].nt;++i){
+        const Text& t=v.layer[0].texts[i];
+        Check(!hole.Contains(t.x,t.y),"no text in the hole");
+    }
+    Check(v.layer[0].quads.dropped==0,"holed view within capacity");
+}
+
 void RandomWalk() {
     std::mt19937 rng(20261124u);
     static View v;
@@ -277,6 +366,8 @@ void RandomWalk() {
         Rig r;
         r.a.rows=static_cast<int>(rng()%30);
         r.c.rows=1+static_cast<int>(rng()%3);
+        r.c.header[0]=static_cast<int>(rng()%3);r.c.header[1]=static_cast<int>(rng()%3);r.c.header[2]=7;
+        r.c.holed=rng()%2!=0;
         int closes=0;
         for(int f=0;f<4000;++f){
             if(!r.s.open){Open(r.s,r.in,static_cast<int>(rng()%3));}
@@ -324,6 +415,7 @@ void RandomWalk() {
 
 int main() {
     Scripted();
+    Hooks();
     RandomWalk();
     std::printf("armory_logic: %d checks passed\n",checks);
     return 0;

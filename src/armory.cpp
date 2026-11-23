@@ -9,8 +9,13 @@
 #include "armory_draw.h"
 #include "armory_logic.h"
 #include "armory_presets.h"
-#include "player_slots.h"
+#include "ini_text.h"
+#include "loadout_file.h"
+#include "loadout_store.h"
 #include "room_dialog_logic.h"
+#include "room_preview.h"
+#include "weapon_equip.h"
+#include "weapon_page_logic.h"
 #include "worldmap_logic.h"
 #include "crew.h"
 #include "hudtext.h"
@@ -26,6 +31,7 @@
 #include <iterator>
 #include <mutex>
 #include <new>
+#include <set>
 #include <string>
 
 namespace crew::armoryui {
@@ -163,6 +169,8 @@ ar::Input ReadInput(bool toggleDown) noexcept {
     h[ar::kConfirm]=Down(VK_RETURN);h[ar::kCancel]=Down(VK_ESCAPE);h[ar::kBackspace]=Down(VK_BACK);
     h[ar::kTabPrev]=Down('Q');h[ar::kTabNext]=Down('E');h[ar::kSubPrev]=Down('Z');h[ar::kSubNext]=Down('C');
     h[ar::kStore]=Down('R');h[ar::kPresetMenu]=Down('F');
+    h[ar::kAltPrev]=Down('A');h[ar::kAltNext]=Down('D');h[ar::kJumpPrev]=Down(VK_PRIOR);h[ar::kJumpNext]=Down(VK_NEXT);
+    h[ar::kSearch]=Down(VK_TAB);
     for(int d=0;d<8;++d)h[ar::kDigit1+d]=Down('1'+d);
     h[ar::kMouseLeft]=Down(VK_LBUTTON);h[ar::kMouseRight]=Down(VK_RBUTTON);
     XINPUT_STATE pad{};
@@ -175,6 +183,10 @@ ar::Input ReadInput(bool toggleDown) noexcept {
         h[ar::kTabPrev]|=(b&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0;h[ar::kTabNext]|=(b&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
         h[ar::kSubPrev]|=pad.Gamepad.bLeftTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         h[ar::kSubNext]|=pad.Gamepad.bRightTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+        // the right stick: left / right a page's alternate (the weapons page's category), up / down its jump
+        constexpr int kStick=16000;
+        h[ar::kAltPrev]|=pad.Gamepad.sThumbRX<-kStick;h[ar::kAltNext]|=pad.Gamepad.sThumbRX>kStick;
+        h[ar::kJumpPrev]|=pad.Gamepad.sThumbRY>kStick;h[ar::kJumpNext]|=pad.Gamepad.sThumbRY<-kStick;
     }
     ReadPointer(in);
     return in;
@@ -236,30 +248,27 @@ private:
     int n=0;
 };
 
-// The player's class and weapons now (GameStatus), one row per class.
-class PlayerPage final : public ar::Page {
+// The weapons page (weapon_page_logic.h) on the game: weapon_equip writes, room_preview shows (player 1).
+class WeaponsGame final : public ar::wpage::Game {
 public:
-    void Refresh() noexcept { have=armorypresets::ReadPlayer(&player); }
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabPlayer); }
-    int Rows(int) const noexcept override { return have ? playerslots::kClasses : 1; }
-    void RowLine(int,int row,ar::Line* out) const noexcept override {
-        if(!have){ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryNoPlayer));out->dim=true;return;}
-        static constexpr Tx kNames[]={Tx::classRanger,Tx::classWingDiver,Tx::armoryClassAirRaider,Tx::classFencer};
-        ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(kNames[row]));
-        if(row==player.cls)ar::CopyText(out->value,ar::kTextMost,L"◆");
+    bool built=false;   // the catalog built from the table loaded now (Open)
+    bool Ready() const noexcept override { return built && wequip::Ready() && wequip::RowCount()>=0; }
+    int CurrentClass() const noexcept override { return wequip::CurrentClass(0); }
+    bool Read(int cls,wlist::Loadout* out) noexcept override {
+        try { return wequip::ReadLoadout(0,cls,out); } catch(...) { return false; }
     }
-    int Items(const ar::Pos& p) const noexcept override { return have ? playerslots::SlotsOf(p.row) : 0; }
-    void ItemLine(const ar::Pos& p,ar::Line* out) const noexcept override {
-        _snwprintf_s(out->label,ar::kTextMost,_TRUNCATE,hudtext::Tr(Tx::armorySlot),p.item+1);
-        const std::string& w=player.weapon[p.row][p.item];
-        if(w.empty())ar::CopyText(out->value,ar::kTextMost,hudtext::Tr(Tx::armoryEmpty));
-        else Utf16(w,out->value,ar::kTextMost);
+    wlist::Verdict Equip(int cls,int slot,int row) noexcept override {
+        const wequip::EquipResult r=wequip::Equip(0,cls,slot,row);
+        if(r.written && wequip::CurrentClass(0)==cls)roompreview::ShowPlayerWeapon(cls,slot,row);
+        return r.verdict;
     }
-    int Fields(const ar::Pos& p) const noexcept override { return have && p.item>=0 ? 1 : 0; }
-    void FieldLine(const ar::Pos&,ar::Line* out) const noexcept override { ReadOnly(out); }
-private:
-    crew::preset::Player player;
-    bool have=false;
+    void Preview(int cls,int slot,int row) noexcept override { roompreview::ShowPlayerWeapon(cls,slot,row); }
+    void SaveFavourites(const std::set<std::wstring>& ids) noexcept override {
+        try {
+            if(!SaveIniFlag("WeaponFavourites",wlist::SerializeFavourites(ids).c_str()))
+                Log("ARMORY the weapon favourites could not be written to the ini");
+        } catch(...) {}
+    }
 };
 
 // The mission: where missions are picked, and in the room the 对战 pages.
@@ -293,9 +302,13 @@ private:
 
 // --- The UI thread's state ---
 UnitsPage squadPage(Tx::armoryTabSquad,true),vehiclePage(Tx::armoryTabVehicle,false);
-PlayerPage playerPage;
+WeaponsGame weaponsGame;
+wlist::Catalog weaponCatalog;
+ar::wpage::Texts weaponTexts;
+ar::wpage::WeaponsPage weaponsPage;
 MissionPage missionPage;
-ar::Page* const kPages[]={&squadPage,&vehiclePage,&playerPage,&missionPage};
+ar::Page* const kPages[]={&weaponsPage,&squadPage,&vehiclePage,&missionPage};
+constexpr int kWeaponsTab=0;
 constexpr int kPageCount=static_cast<int>(std::size(kPages));
 
 ar::State state;
@@ -305,6 +318,65 @@ ar::View building;            // big: not on the stack
 unsigned char* openOn=nullptr;
 bool latched=false;           // closed with one of its keys still held: the screen's input stays taken until they are up
 bool pvpAsked=false;
+
+void FillWeaponTexts() noexcept {
+    ar::wpage::Texts& t=weaponTexts;
+    t.name=hudtext::Tr(Tx::armoryTabPlayer);
+    static constexpr Tx kClassNames[]={Tx::classRanger,Tx::classWingDiver,Tx::armoryClassAirRaider,Tx::classFencer};
+    for(int c=0;c<ar::wpage::kClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
+    t.slotFormat=hudtext::Tr(Tx::armorySlot);
+    t.empty=hudtext::Tr(Tx::armoryEmpty);
+    t.notReady=hudtext::Tr(Tx::armoryNoPlayer);
+    t.noWeapons=hudtext::Tr(Tx::armoryWpNone);
+    t.all=hudtext::Tr(Tx::armoryWpAll);
+    t.search=hudtext::Tr(Tx::armoryWpSearch);
+    t.owned=hudtext::Tr(Tx::armoryWpOwned);
+    t.equip=hudtext::Tr(Tx::armoryWpEquip);
+    t.expand=hudtext::Tr(Tx::armoryWpExpand);
+    t.collapse=hudtext::Tr(Tx::armoryWpCollapse);
+    t.favourite=hudtext::Tr(Tx::armoryWpFavourite);
+    t.source=hudtext::Tr(Tx::armoryWpSource);
+    t.showUnowned=hudtext::Tr(Tx::armoryWpShowUnowned);
+    t.favouritesOnly=hudtext::Tr(Tx::armoryWpFavOnly);
+    t.on=hudtext::Tr(Tx::armoryWpOn);
+    t.off=hudtext::Tr(Tx::armoryWpOff);
+    t.level=hudtext::Tr(Tx::armoryWpLevel);
+    t.previewOther=hudtext::Tr(Tx::armoryWpPreviewOther);
+    t.verdict[static_cast<int>(wlist::Verdict::notOwned)]=hudtext::Tr(Tx::armoryWpNotOwned);
+    t.verdict[static_cast<int>(wlist::Verdict::capped)]=hudtext::Tr(Tx::armoryWpCapped);
+    t.verdict[static_cast<int>(wlist::Verdict::wrongSlot)]=hudtext::Tr(Tx::armoryWpWrongSlot);
+    t.verdict[static_cast<int>(wlist::Verdict::duplicate)]=hudtext::Tr(Tx::armoryWpDuplicate);
+    t.verdict[static_cast<int>(wlist::Verdict::absent)]=hudtext::Tr(Tx::armoryWpAbsent);
+    t.hints[0]=hudtext::Tr(Tx::armoryWpHintList);
+    t.hints[1]=hudtext::Tr(Tx::armoryWpHintCentre);
+    t.hints[2]=hudtext::Tr(Tx::armoryWpHintDetails);
+    t.typingHint=hudtext::Tr(Tx::armoryWpHintTyping);
+    t.lang=static_cast<int>(hudtext::InUse());
+}
+
+// The favourites ([VehicleCrew] WeaponFavourites, ids comma-separated) as the ini has them now.
+std::set<std::wstring> ReadWeaponFavourites() noexcept {
+    std::set<std::wstring> ids;
+    try {
+        std::string ini,value;
+        const wchar_t* path=ConfigPath();
+        if(path && ReadFileBytes(path,&ini) && initext::Get(ini,"VehicleCrew","WeaponFavourites",&value) &&
+           !wlist::ParseFavourites(value,&ids))
+            Log("ARMORY WeaponFavourites in the ini is malformed: ignored");
+    } catch(...) {}
+    return ids;
+}
+
+// The weapons page's 3D view each frame: the weapon under the cursor in the player's hands, the view in the page's hole
+// (room_preview SetViewPlacement) while it has one; the game's own placement back otherwise.
+void WeaponsView(bool active) noexcept {
+    weaponsPage.Tick(state.pos,state.column,active);
+    ar::skin::Rect hole{};
+    if(active && weaponsPage.Hole(state.pos,&hole)) {
+        roompreview::SetViewPlacement(roompreview::ViewRect{hole.x0,hole.y0,hole.x1-hole.x0,hole.y1-hole.y0},
+                                      roompreview::PresetOf(roompreview::CameraPreset::front));
+    } else roompreview::ClearViewPlacement();
+}
 
 void FillWords() noexcept {
     words.title=hudtext::Tr(Tx::armoryTitle);
@@ -324,6 +396,7 @@ void FillWords() noexcept {
     static constexpr Tx kSuggest[]={Tx::armorySuggest1,Tx::armorySuggest2,Tx::armorySuggest3,Tx::armorySuggest4};
     words.nsuggest=static_cast<int>(std::size(kSuggest));
     for(int i=0;i<words.nsuggest;++i)words.suggest[i]=hudtext::Tr(kSuggest[i]);
+    FillWeaponTexts();
 }
 
 void Publish(bool open) noexcept {
@@ -340,6 +413,7 @@ void Publish(bool open) noexcept {
 void CloseNow(const char* why) noexcept {
     if(!state.open && !openOn)return;
     ar::Close(state);
+    WeaponsView(false);
     wantText.store(false);
     Publish(false);
     Log("ARMORY closed (%s)",why);
@@ -428,7 +502,12 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept {
     FillWords();
     squadPage.Bind(units);
     vehiclePage.Bind(units);
-    playerPage.Refresh();
+    try {
+        weaponsGame.built=wequip::BuildCatalog(&weaponCatalog);
+    } catch(...) { weaponsGame.built=false; }
+    if(!weaponsGame.built)Log("ARMORY the weapons page: the weapon table is not loaded (or weapon_equip is off)");
+    weaponsPage.Attach(&weaponsGame,&weaponCatalog,&weaponTexts);
+    weaponsPage.SetFavourites(ReadWeaponFavourites());
     missionPage.Bind(room);
     missionPage.asked=false;
     pvpAsked=false;
@@ -470,10 +549,11 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         if(!armorypresets::Apply(fx,why,std::size(why))) {
             Log("ARMORY preset op %d refused: %ls",static_cast<int>(fx.op),why);
             ar::Note(state,why);
-        } else if(fx.op==ar::Op::switchTo)playerPage.Refresh();
+        } else if(fx.op==ar::Op::switchTo)weaponsPage.Refresh();
         armorypresets::Fill(&presets);
     }
     if(missionPage.asked){missionPage.asked=false;pvpAsked=true;ar::Close(state);}
+    WeaponsView(state.open && state.tab==kWeaponsTab && state.popup==ar::Popup::none);
     if(!state.open) {
         CloseNow(pvpAsked ? "the 对战 pages asked" : "its own keys");
         latched=AnyHeld(in);

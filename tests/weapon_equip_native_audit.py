@@ -34,11 +34,11 @@ def audit_source() -> None:
     with open(os.path.join(ROOT, 'src', 'weapon_equip.cpp'), encoding='utf-8') as f:
         text = f.read()
     rvas = {rva for rva, _, _ in sigs.SIGNATURES}
-    for name in ('kRowCount', 'kGetRow', 'kFindRow', 'kLevelCap', 'kBroadcast'):
+    for name in ('kRowCount', 'kGetRow', 'kFindRow', 'kLevelCap'):
         m = re.search(rf'{name}=0x([0-9A-F]+)', text)
         check(bool(m) and int(m.group(1), 16) in rvas, f'weapon_equip.cpp {name} is a signed function')
     for const in ('kGsCapOn=0x14FC8', 'kGsEquipped=0x6E98', 'kGsPlayerStride=0x3E60', 'kGsClassStride=0x18',
-                  'kUiSystem=0x20B2960', 'kUiSystemAdjust=0x88', 'kMsgSwapWeapon=4', 'kRowLevel=0x20'):
+                  'kGsClass=0x6E90', 'kRowLevel=0x20'):
         check(const in text, f'weapon_equip.cpp {const}')
 
 

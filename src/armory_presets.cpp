@@ -4,9 +4,12 @@
 #include "memory.h"
 #include "loadout_store.h"
 #include "player_slots.h"
+#include "room_preview.h"
+#include "weapon_equip.h"
 #include "weapon_records.h"
 #include <Windows.h>
 #include <cstdint>
+#include <array>
 #include <cwchar>
 #include <iterator>
 #include <string>
@@ -117,20 +120,35 @@ playerslots::RowInfo Lookup(unsigned char* gs,void* table,const std::string& nam
     return info;
 }
 
-// The preset's player written into GameStatus; false when there is nothing to write into (no table yet).
+// The preset's player written into GameStatus through weapon_equip (the one writer of GS+0x6E98 / +0x6E90), then the 3D
+// view told of the class's slots 0..3 (room_preview, the one msg 4 sender); false when there is nothing to write into.
 bool WritePlayer(const preset::Player& p) {
     if(p.cls<0)return true;   // the preset does not hold the player's loadout
     unsigned char* const gs=GameStatus();
     void* const table=Table(gs);
-    if(!table || !Readable(gs+kClass,4,true) || !Readable(gs+kWeapons,playerslots::kClasses*kClassStride,true))return false;
+    if(!table || !wequip::Ready())return false;
     const playerslots::Plan plan=playerslots::PlanWrites(p,[&](const std::string& n){ return Lookup(gs,table,n); });
-    for(int i=0;i<plan.n;++i) {
-        const playerslots::Write& w=plan.write[i];
-        Put<std::int32_t>(gs,kWeapons+static_cast<std::size_t>(w.cls)*kClassStride+static_cast<std::size_t>(w.slot)*4,w.row);
+    std::array<std::array<int,wlist::kSlotsMost>,playerslots::kClasses> want{};
+    for(auto& c:want)c.fill(-1);
+    for(int i=0;i<plan.n;++i)want[static_cast<std::size_t>(plan.write[i].cls)][static_cast<std::size_t>(plan.write[i].slot)]=
+        plan.write[i].row;
+    int written=0,refused=0;
+    std::array<int,wlist::kSlotsMost> shown{};
+    shown.fill(-1);
+    for(int c=0;c<playerslots::kClasses;++c){
+        const wlist::ClassPlan r=wequip::SetClassSlots(0,c,want[static_cast<std::size_t>(c)]);
+        written+=r.changed;
+        for(std::size_t s=0;s<r.verdict.size();++s)
+            if(want[static_cast<std::size_t>(c)][s]>=0 && r.verdict[s]!=wlist::Verdict::ok && r.verdict[s]!=wlist::Verdict::same)
+                ++refused;
+        if(c==plan.cls)shown=r.slots;
     }
-    if(plan.cls>=0)Put<std::int32_t>(gs,kClass,plan.cls);
+    if(plan.cls>=0 && !wequip::SetClass(0,plan.cls))return false;
+    for(int s=0;s<4;++s)
+        if(shown[static_cast<std::size_t>(s)]>=0)roompreview::ShowPlayerWeapon(plan.cls,s,shown[static_cast<std::size_t>(s)]);
     Log("ARMORY the player's loadout switched: class %d, %d slots written (%d not in the weapon table, %d not owned, "
-        "%d of a category the slot does not take: left as they were)",plan.cls,plan.n,plan.unknown,plan.notOwned,plan.wrongSlot);
+        "%d of a category the slot does not take, %d refused by the select rules (level cap / duplicate): left as they were)",
+        plan.cls,written,plan.unknown,plan.notOwned,plan.wrongSlot,refused);
     return true;
 }
 

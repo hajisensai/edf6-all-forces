@@ -78,6 +78,22 @@ struct View {
     void Clear() noexcept { for(Layer& l:layer){l.quads.n=0;l.quads.dropped=0;l.nt=0;l.droppedTexts=0;} open=false; }
 };
 
+// ---- input ------------------------------------------------------------------------------------------------------------
+// kAltPrev / kAltNext, kJumpPrev / kJumpNext, kSearch mean nothing to the state itself: a page takes them (Page::Key),
+// e.g. the weapons page's category, letter jump and search box.
+enum Key : int {
+    kUp,kDown,kLeft,kRight,kConfirm,kCancel,kTabPrev,kTabNext,kSubPrev,kSubNext,kStore,kPresetMenu,kBackspace,
+    kToggle,kAltPrev,kAltNext,kJumpPrev,kJumpNext,kSearch,kMouseLeft,kMouseRight,kDigit1,kDigit8=kDigit1+7,kKeyCount
+};
+struct Input {
+    bool held[kKeyCount]{};
+    bool pointer=false;   // x / y valid (the cursor over the window, design units)
+    float x=0,y=0;
+    int wheel=0;          // notches since the last frame, + away from the user (up)
+    wchar_t typed[8]{};   // characters typed since the last frame (WM_CHAR), for a rename / a page's search
+    int ntyped=0;
+};
+
 // ---- a page ----------------------------------------------------------------------------------------------------------
 // One tab of the screen. Called on the UI thread only (Step / Build). Counts may change between frames (the state
 // clamps its cursor every frame).
@@ -104,24 +120,29 @@ public:
     virtual bool Dirty() const noexcept { return false; }
     // Extra marks over the columns (a picture, a summary), after the state's own: column 0..2.
     virtual void Draw(const Pos&,int /*column*/,Layer*) const noexcept {}
+    // Lines at the top of a column the page draws itself (Draw; layout::Row(column, first..) below the sub tabs of the
+    // list): the state's lines start after them. Constant for a page.
+    virtual int Header(int /*column*/) const noexcept { return 0; }
+    // A rect of the screen nothing may cover (the 3D view: room_preview.h SetViewPlacement): the background and the
+    // panels are drawn round it. Inside the details column, above its lines (Header(2) keeps them clear of it).
+    virtual bool Hole(const Pos&,skin::Rect* /*out*/) const noexcept { return false; }
+    // A key that went down this frame (kToggle excepted), before the state uses it: true takes it (the state does
+    // nothing with it this frame). The pointer is in `in` (a click on a header line). The page may move the cursor.
+    virtual bool Key(Pos&,int /*column*/,int /*key*/,const Input&) noexcept { return false; }
+    // The page is taking typed text (its search box): only Type and Key run, the state's keys do nothing.
+    virtual bool Typing() const noexcept { return false; }
+    virtual void Type(const wchar_t* /*chars*/,int /*n*/) noexcept {}
+    // Last in a frame, before the cursor is clamped: the page may put the cursor somewhere else (its lines rebuilt).
+    virtual void Relocate(Pos*,int /*column*/) noexcept {}
+    // Something to show in the note slot (why an equip was refused): copy it and say true, once.
+    virtual bool TakeNote(wchar_t* /*out*/,std::size_t /*cap*/) noexcept { return false; }
+    // The hint bar text instead of Words::hints[column]; nullptr keeps that.
+    virtual const wchar_t* Hint(const Pos&,int /*column*/) const noexcept { return nullptr; }
 protected:
     ~Page()=default;
 };
 
-// ---- input / effects -------------------------------------------------------------------------------------------------
-enum Key : int {
-    kUp,kDown,kLeft,kRight,kConfirm,kCancel,kTabPrev,kTabNext,kSubPrev,kSubNext,kStore,kPresetMenu,kBackspace,
-    kToggle,kMouseLeft,kMouseRight,kDigit1,kDigit8=kDigit1+7,kKeyCount
-};
-struct Input {
-    bool held[kKeyCount]{};
-    bool pointer=false;   // x / y valid (the cursor over the window, design units)
-    float x=0,y=0;
-    int wheel=0;          // notches since the last frame, + away from the user (up)
-    wchar_t typed[8]{};   // characters typed since the last frame (WM_CHAR), for a rename
-    int ntyped=0;
-};
-
+// ---- effects -------------------------------------------------------------------------------------------------------
 // The preset chips as the runtime knows them this frame.
 struct Presets {
     int count=0;                              // 0..kPresetMost
@@ -194,8 +215,14 @@ namespace detail {
 inline int Clamp(int v,int lo,int hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
 inline int Wrap(int v,int n) noexcept { return n<=0 ? 0 : ((v%n)+n)%n; }
 inline int FirstListRow(const Page& p) noexcept { return p.Subs()>0 ? 1 : 0; }
+// The first layout row of a column the state's lines use (sub tabs, then the page's header).
+inline int FirstRow(const Page& p,int column) noexcept {
+    const int h=p.Header(column);
+    return (column==0 ? FirstListRow(p) : 0)+(h>0 ? h : 0);
+}
 inline int Visible(const Page& p,int column) noexcept {
-    return skin::layout::RowsIn(column)-(column==0 ? FirstListRow(p) : 0);
+    const int v=skin::layout::RowsIn(column)-FirstRow(p,column);
+    return v>1 ? v : 1;
 }
 inline int Count(const Page& p,const Pos& pos,int column) noexcept {
     return column==0 ? p.Rows(pos.sub) : column==1 ? p.Items(pos) : p.Fields(pos);
@@ -361,8 +388,7 @@ inline void PopupStep(State& s,const Input& in,const Presets& ps,const Words& w,
 
 // Mouse in the columns: focus what was clicked; a second click on the focused field activates it.
 inline void ClickColumns(State& s,Page& p,const Input& in) noexcept {
-    const int first=FirstListRow(p);
-    if(first>0)
+    if(FirstListRow(p)>0)
         for(int i=0;i<p.Subs();++i)
             if(SubTab(p,i).Contains(in.x,in.y)){
                 if(s.pos.sub!=i){s.pos=Pos{i,0,0,0};s.top[0]=s.top[1]=s.top[2]=0;}
@@ -372,7 +398,7 @@ inline void ClickColumns(State& s,Page& p,const Input& in) noexcept {
     for(int c=0;c<3;++c){
         const int n=Count(p,s.pos,c), vis=Visible(p,c);
         for(int v=0;v<vis && s.top[c]+v<n;++v){
-            if(!skin::layout::Row(c,v+(c==0 ? first : 0)).Contains(in.x,in.y))continue;
+            if(!skin::layout::Row(c,v+FirstRow(p,c)).Contains(in.x,in.y))continue;
             const int i=s.top[c]+v;
             int& at=Index(s.pos,c);
             if(c==2 && s.column==2 && at==i){p.Activate(s.pos);return;}
@@ -402,19 +428,29 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
         if(CommitPage(s,page)){fx.close=true;Close(s);}
     }else if(s.popup!=Popup::none){
         PopupStep(s,in,ps,w,&fx);
+    }else if(page.Typing()){
+        // the page's text box: typed characters and the page's own keys, nothing of the state's
+        if(in.ntyped>0)page.Type(in.typed,in.ntyped<8 ? in.ntyped : 8);
+        for(int k=0;k<kKeyCount;++k)
+            if(k!=kToggle && Pressed(s,in,k))page.Key(s.pos,s.column,k,in);
     }else{
+        // the page first: a key it takes is not down for the state this frame (prev still follows `in`)
+        Input use=in;
+        for(int k=0;k<kKeyCount;++k)
+            if(k!=kToggle && Pressed(s,in,k) && page.Key(s.pos,s.column,k,in))use.held[k]=false;
+        Clamp(s,page);
         // preset chips: keys and mouse
         for(int d=0;d<kPresetMost;++d)
-            if(Pressed(s,in,kDigit1+d) && d<ps.count && CommitPage(s,page)){fx.op=Op::switchTo;fx.index=d;}
-        if(Pressed(s,in,kStore) && ps.current>=0 && CommitPage(s,page)){fx.op=Op::store;fx.index=ps.current;}
-        if(Pressed(s,in,kPresetMenu) && CommitPage(s,page)){
+            if(Pressed(s,use,kDigit1+d) && d<ps.count && CommitPage(s,page)){fx.op=Op::switchTo;fx.index=d;}
+        if(Pressed(s,use,kStore) && ps.current>=0 && CommitPage(s,page)){fx.op=Op::store;fx.index=ps.current;}
+        if(Pressed(s,use,kPresetMenu) && CommitPage(s,page)){
             s.popup=Popup::actions;
             s.popupCursor=ps.count>0 ? kActStore : kActNew;
             s.popupTarget=ps.current;
         }
-        if(in.pointer && (Pressed(s,in,kMouseLeft) || Pressed(s,in,kMouseRight))){
-            const bool left=Pressed(s,in,kMouseLeft);
-            const int chip=ChipAt(ps,in.x,in.y), tab=TabAt(npages,in.x,in.y);
+        if(use.pointer && (Pressed(s,use,kMouseLeft) || Pressed(s,use,kMouseRight))){
+            const bool left=Pressed(s,use,kMouseLeft);
+            const int chip=ChipAt(ps,use.x,use.y), tab=TabAt(npages,use.x,use.y);
             if(chip>=0){
                 if(CommitPage(s,page)){
                     if(chip>=ps.count){if(left)StartRename(s,ps,kActNew,-1);}
@@ -424,38 +460,38 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
             }else if(tab>=0 && left){
                 if(tab!=s.tab && CommitPage(s,page)){s.tab=tab;s.column=0;s.pos=Pos{};s.top[0]=s.top[1]=s.top[2]=0;}
             }else if(left){
-                ClickColumns(s,page,in);
+                ClickColumns(s,page,use);
             }
         }
         // page tabs, sub tabs
-        const int dt=(Pressed(s,in,kTabNext) ? 1 : 0)-(Pressed(s,in,kTabPrev) ? 1 : 0);
+        const int dt=(Pressed(s,use,kTabNext) ? 1 : 0)-(Pressed(s,use,kTabPrev) ? 1 : 0);
         if(dt && npages>1 && fx.op==Op::none && s.popup==Popup::none && CommitPage(s,page)){
             s.tab=Wrap(s.tab+dt,npages);
             s.column=0;s.pos=Pos{};s.top[0]=s.top[1]=s.top[2]=0;
         }
         Page& now=*pages[s.tab];
-        const int ds=(Pressed(s,in,kSubNext) ? 1 : 0)-(Pressed(s,in,kSubPrev) ? 1 : 0);
+        const int ds=(Pressed(s,use,kSubNext) ? 1 : 0)-(Pressed(s,use,kSubPrev) ? 1 : 0);
         if(ds && now.Subs()>1 && s.popup==Popup::none){
             s.pos=Pos{Wrap(s.pos.sub+ds,now.Subs()),0,0,0};
             s.column=0;s.top[0]=s.top[1]=s.top[2]=0;
         }
         // columns
         if(s.popup==Popup::none && fx.op==Op::none){
-            const int dy=(Pressed(s,in,kDown) ? 1 : 0)-(Pressed(s,in,kUp) ? 1 : 0);
+            const int dy=(Pressed(s,use,kDown) ? 1 : 0)-(Pressed(s,use,kUp) ? 1 : 0);
             if(dy)MoveIn(s,now,dy);
-            if(in.wheel){
-                if(s.column==2)now.Step(s.pos,in.wheel>0 ? 1 : -1);
-                else MoveIn(s,now,-in.wheel);
+            if(use.wheel){
+                if(s.column==2)now.Step(s.pos,use.wheel>0 ? 1 : -1);
+                else MoveIn(s,now,-use.wheel);
             }
             if(s.column==2){
-                if(Pressed(s,in,kLeft))now.Step(s.pos,-1);
-                if(Pressed(s,in,kRight))now.Step(s.pos,1);
-                if(Pressed(s,in,kConfirm))now.Activate(s.pos);
-                if(Pressed(s,in,kCancel))s.column=1;
+                if(Pressed(s,use,kLeft))now.Step(s.pos,-1);
+                if(Pressed(s,use,kRight))now.Step(s.pos,1);
+                if(Pressed(s,use,kConfirm))now.Activate(s.pos);
+                if(Pressed(s,use,kCancel))s.column=1;
             }else{
-                if((Pressed(s,in,kRight) || Pressed(s,in,kConfirm)) && Count(now,s.pos,s.column+1)>0)++s.column;
-                if(Pressed(s,in,kLeft) && s.column>0)--s.column;
-                if(Pressed(s,in,kCancel)){
+                if((Pressed(s,use,kRight) || Pressed(s,use,kConfirm)) && Count(now,s.pos,s.column+1)>0)++s.column;
+                if(Pressed(s,use,kLeft) && s.column>0)--s.column;
+                if(Pressed(s,use,kCancel)){
                     if(s.column>0)--s.column;
                     else if(CommitPage(s,now)){fx.close=true;Close(s);}
                 }
@@ -463,7 +499,13 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
         }
     }
     for(int k=0;k<kKeyCount;++k)s.prev[k]=in.held[k];
-    if(s.open)Clamp(s,*pages[s.tab]);
+    if(s.open){
+        Page& now=*pages[s.tab];
+        now.Relocate(&s.pos,s.column);
+        wchar_t note[kTextMost]{};
+        if(now.TakeNote(note,kTextMost) && note[0])Note(s,note);
+        Clamp(s,now);
+    }
     return fx;
 }
 
@@ -476,7 +518,10 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     out->open=true;
     Layer& base=out->layer[0];
     const Page& page=*pages[Clamp(s.tab,0,npages-1)];
-    skin::Diamonds(&base.quads,skin::Rect{0,0,skin::kWidth,skin::kHeight});
+    skin::Rect hole{};
+    const bool holed=page.Hole(s.pos,&hole);
+    if(holed)skin::DiamondsAround(&base.quads,skin::Rect{0,0,skin::kWidth,skin::kHeight},hole);
+    else skin::Diamonds(&base.quads,skin::Rect{0,0,skin::kWidth,skin::kHeight});
     skin::Bar(&base.quads,L::kTitle);
     skin::Bar(&base.quads,L::kHint);
     base.Say(w.title,L::kTitle.x0+60,L::kTitle.y0+14,36,skin::kTextDark,Align::left,true,L::kTabX-L::kTitle.x0-70);
@@ -500,9 +545,11 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
                  first.x0-L::Tab(npages<L::kTabMost ? npages : L::kTabMost).x0-24);
     }
     // columns
-    for(int c=0;c<3;++c)skin::Panel(&base.quads,L::Column(c));
-    const int first=FirstListRow(page);
-    if(first>0)
+    for(int c=0;c<3;++c){
+        if(holed)skin::PanelAround(&base.quads,L::Column(c),hole);
+        else skin::Panel(&base.quads,L::Column(c));
+    }
+    if(FirstListRow(page)>0)
         for(int i=0;i<page.Subs();++i){
             const skin::Rect r=SubTab(page,i);
             skin::Tab(&base.quads,r,i==s.pos.sub);
@@ -519,7 +566,7 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
             if(c==0)page.RowLine(p.sub,i,&line);
             else if(c==1)page.ItemLine(p,&line);
             else page.FieldLine(p,&line);
-            const skin::Rect r=L::Row(c,v+(c==0 ? first : 0));
+            const skin::Rect r=L::Row(c,v+FirstRow(page,c));
             const bool at=IndexOf(s.pos,c)==i;
             const bool beige=c==0 && at;
             if(c==0)skin::Button(&base.quads,r,beige);
@@ -545,7 +592,8 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     }
     // hint bar, note
     const int hint=s.popup==Popup::rename ? 4 : s.popup!=Popup::none ? 3 : s.column;
-    base.Say(w.hints[hint],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
+    const wchar_t* own=s.popup==Popup::none ? page.Hint(s.pos,s.column) : nullptr;
+    base.Say(own ? own : w.hints[hint],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
     if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
     // popup
     if(s.popup==Popup::none)return;

@@ -62,11 +62,25 @@ SoldierInit（CONFIG.SGO，`[槽名, 默认, [类别], 可重复, 支援槽]`，
 1. 表就绪、行 < RowCount；GetRow 读该行类别与显示等级；读持有位、上限（`GS+0x14FC8` 为 0 视为 -1）与本兵种 6 槽。
 2. `wlist::CheckEquipRow`：槽存在 → 类别在该槽表里 → 本槽已是它（same，不写）→ 持有 → 未超上限（无符号比较）→ 不可重复的槽不与本兵种其它槽重复。与 §2 的原版规则一一对应；离线测试 `weapon_list_logic_test`。
 3. ok 才写 `GS+0x6E98+...`（只写这一格，不像原版整块拷回——原版的整块来自同一 GS 块的快照，其余字段不变，效果相同）。
-4. 写的兵种是该玩家当前兵种时，照 §4 广播消息 4；UI System 指针为空时不新建（原版会新建；插件不替游戏造 UI 系统），记一行日志。
+4. `wequip::Equip` 自己**不发**消息 4。插件里消息 4 只有一个发送者 `roompreview::ShowPlayerWeapon`（`src/room_preview.cpp`
+   `SendWeapon`）：不经 UI System 广播，直接发给已认领的 `UiHQ_3DModelView`（载荷 `{player, slot, row, 0}`，在视图自己的
+   Update 里发；视图正显示别的兵种 / 支援士兵预览时丢弃），每槽一个待发值（同帧多槽，后写的覆盖）。写成功、且写的是该玩家
+   当前兵种时由调用方（整备武器页 `WeaponsGame::Equip`、整备方案 `WritePlayer`）调它。H（代码）；视图收到后模型是否立即
+   换枪：**M**（§4 接收侧细节 M，未实机）
 5. 不存档（§3.6）。
+6. 玩家装备 `GS+0x6E98` 与兵种 `GS+0x6E90` 插件里只经 `weapon_equip.cpp` 写：一格用 `Equip`，整备方案切换用
+   `SetClassSlots`（一次一个兵种的几槽，规则同上，重复按「写完以后」判，两槽互换也能写；判定是纯逻辑
+   `wlist::PlanClassSlots`，离线测试 `weapon_list_logic_test` ClassSlots）与 `SetClass`。**例外**：`src/loadout.cpp`
+   （支援士兵借玩家槽生成、任务后还原的临时换装）仍直接读写这两处，不属于整备界面，未并入。H（代码）
+7. 签名：原先核对的 UI System 广播 `0x119D1B0` 已不调用，从 `weapon_equip_signatures.inc` 去掉；原版消息 4 发送者
+   `0x8BB939` 仍核对（ShowPlayerWeapon 载荷格式的依据），`weapon_equip_native_audit.py` 照旧核对原版确认路径调它。
 
 ## 6. 未知 / 未做
 
 - 武器属性（伤害、弹数、换弹、射程、射速）：原版说明栏由 `0xD8A90` 按星级算，未逆向，`wlist::CompareStats` 目前只有等级一项有数据。**L**
 - `this+0x7F0` 目标的确切来源（§3.3）；插件始终写 GS，联机房间里成员装备由 `MissionSync`（`0x78E9A0`）从 GS 打包（`docs/loadout-re.md` §6），所以 GS 是联机下也会被同步的那一份。**M**
 - 原版在列表里对 NEW / UP 的处理（`0x8B51A0`）与清 NEW 位：插件页面暂不清 NEW。**M**
+- 整备方案切换现在也按原版规则判等级上限与重复（以前只判找得到 / 持有 / 类别）：超上限或会重复的槽留原值，日志
+  `ARMORY the player's loadout switched ... refused by the select rules`。H（代码）
+- 3D 预览只能显示玩家**当前兵种**（视图只有一个模型，`kViewShownClass` 不等于要显示的兵种时消息 4 被丢弃）：看别的兵种的槽时
+  详情列不留洞、显示文字提示。方案切换改了兵种时，视图是否随 `GS+0x6E90` 重建成新兵种，未知。**L**

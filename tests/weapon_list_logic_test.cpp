@@ -220,6 +220,67 @@ void RawRows() {
     Check(CheckEquipRow(r,n,0,0,-1,0,0,true,-1,eq)==Verdict::absent,"no row");
 }
 
+// 整备方案一次写一个兵种（PlanClassSlots）：互换、被拒留原值后的连锁重复、随机下的不变式。
+void ClassSlots() {
+    const WeaponSlotRule* r=kWeaponSlotRules;
+    const std::size_t n=std::size(kWeaponSlotRules);
+    // 行 100..199：类别 = 行 % 7（Ranger 主武器类别 0..6），等级 = 行 - 100，190 起没持有
+    auto facts=[](int row,int* category,int* level,bool* owned){
+        if(row<100 || row>=200)return false;
+        *category=row%7;*level=row-100;*owned=row<190;
+        return true;
+    };
+    const std::array<int,kSlotsMost> cur{100,101,-1,-1,-1,-1};
+    ClassPlan p=PlanClassSlots(r,n,0,cur,{101,100,-1,-1,-1,-1},-1,facts);
+    Check(p.slots[0]==101 && p.slots[1]==100 && p.changed==2,"two main slots swapped");
+    Check(p.verdict[0]==Verdict::ok && p.verdict[1]==Verdict::ok && p.verdict[2]==Verdict::same,"swap verdicts");
+    // 槽 1 要写没持有的 190 被拒、留 101；槽 0 要写 101 于是与它重复，也留原值
+    p=PlanClassSlots(r,n,0,cur,{101,190,-1,-1,-1,-1},-1,facts);
+    Check(p.slots==cur && p.changed==0,"a refusal leaves a duplicate: nothing written");
+    Check(p.verdict[1]==Verdict::notOwned && p.verdict[0]==Verdict::duplicate,"chained refusal verdicts");
+    p=PlanClassSlots(r,n,0,cur,{150,-1,-1,-1,-1,-1},40,facts);
+    Check(p.slots==cur && p.verdict[0]==Verdict::capped,"over the cap left");
+    p=PlanClassSlots(r,n,0,cur,{300,-1,-1,-1,-1,-1},-1,facts);
+    Check(p.verdict[0]==Verdict::absent && p.slots==cur,"not in the table");
+    p=PlanClassSlots(r,n,0,cur,{100,-1,-1,-1,-1,-1},-1,facts);
+    Check(p.verdict[0]==Verdict::same && p.changed==0,"already there");
+    // 随机：写完以后每个改了的槽都通过原版判定（以写完的样子），没改的要么 want -1 / 原值，要么有拒绝原因
+    std::mt19937 rng(7);
+    for(int run=0;run<20000;++run){
+        const int cls=static_cast<int>(rng()%4);
+        std::array<int,kSlotsMost> now{},want{};
+        for(std::size_t s=0;s<now.size();++s){
+            now[s]=rng()%3==0 ? -1 : 100+static_cast<int>(rng()%100);
+            want[s]=rng()%3==0 ? -1 : 95+static_cast<int>(rng()%110);
+        }
+        auto anyFacts=[cls](int row,int* category,int* level,bool* owned){
+            if(row<100 || row>=200)return false;
+            const int base=cls==0 ? 0 : cls==1 ? 100 : cls==2 ? 310 : 200;
+            *category=base+row%5;*level=row-100;*owned=row<190;
+            return true;
+        };
+        const int cap=rng()%2 ? -1 : static_cast<int>(rng()%100);
+        const ClassPlan q=PlanClassSlots(r,n,cls,now,want,cap,anyFacts);
+        int changed=0;
+        for(std::size_t s=0;s<now.size();++s){
+            if(q.slots[s]==now[s]){
+                Check(want[s]<0 || want[s]==now[s] ? q.verdict[s]==Verdict::same :
+                      q.verdict[s]!=Verdict::ok && q.verdict[s]!=Verdict::same,"kept slots: same or a reason");
+                continue;
+            }
+            ++changed;
+            Check(q.slots[s]==want[s] && q.verdict[s]==Verdict::ok,"a changed slot is the wanted row");
+            std::array<int,kSlotsMost> probe=q.slots;
+            probe[s]=now[s];
+            int c=0,l=0;bool o=false;
+            Check(anyFacts(want[s],&c,&l,&o) &&
+                  CheckEquipRow(r,n,cls,static_cast<int>(s),want[s],c,l,o,cap,probe)==Verdict::ok,
+                  "a changed slot passes the rules against the result");
+        }
+        Check(changed==q.changed,"changed counted");
+    }
+}
+
 void Stats() {
     WeaponStats a,b;
     a[Stat::level]=10;b[Stat::level]=20;
@@ -288,6 +349,7 @@ int main() {
     Generated();
     Lists();
     RawRows();
+    ClassSlots();
     Stats();
     Fuzz();
     std::printf("weapon_list_logic: %d checks passed\n",checks);

@@ -3,6 +3,7 @@
 // pure (no D3D) so the offline test (tests/armory_skin_test.cpp) checks shapes, colours and the layout, and
 // src/armory_draw.cpp only hands the quads to uigpu::Painter::QuadColours. Design space 1920 x 1080 (the stock UI's).
 // Corner order is the Painter's: top-left, top-right, bottom-left, bottom-right (a triangle strip: TL TR BL / TR BL BR).
+#include <cmath>
 #include <cstdint>
 
 namespace crew::armory::skin {
@@ -123,7 +124,94 @@ inline void Diamonds(Quads* out,const Rect& r) {
         }
 }
 
-// Which colour the diamond background has at (x, y) (the test's model of Diamonds).
+// ---- a hole for the 3D view (room_preview.h SetViewPlacement): the model is drawn before every UI layer, so nothing of
+// the screen may cover its rect. Shapes are cut to the area round the hole, not drawn over it.
+
+// Rect `a` and `b` share some area.
+constexpr bool Overlap(const Rect& a,const Rect& b) noexcept { return a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1; }
+
+// The convex polygon `in` (n corners in order round it, n <= 8) cut to `r` (Sutherland-Hodgman); its corners into `out`
+// (room for n + 4), how many (0: nothing of it in `r`).
+inline int ClipToRect(const float (*in)[2],int n,const Rect& r,float (*out)[2]) noexcept {
+    float a[12][2], b[12][2];
+    int m=n<8 ? n : 8;
+    for(int i=0;i<m;++i){a[i][0]=in[i][0];a[i][1]=in[i][1];}
+    for(int edge=0;edge<4 && m>0;++edge){
+        // keep: x >= x0, x <= x1, y >= y0, y <= y1
+        const int axis=edge/2;
+        const bool low=edge%2==0;
+        const float lim=axis==0 ? (low ? r.x0 : r.x1) : (low ? r.y0 : r.y1);
+        auto in_=[&](const float* p){ return low ? p[axis]>=lim : p[axis]<=lim; };
+        int k=0;
+        for(int i=0;i<m;++i){
+            const float* p=a[i];
+            const float* q=a[(i+1)%m];
+            const bool pin=in_(p), qin=in_(q);
+            if(pin){b[k][0]=p[0];b[k][1]=p[1];++k;}
+            if(pin!=qin){
+                const float t=(lim-p[axis])/(q[axis]-p[axis]);
+                b[k][0]=p[0]+(q[0]-p[0])*t;b[k][1]=p[1]+(q[1]-p[1])*t;
+                b[k][axis]=lim;
+                ++k;
+            }
+        }
+        m=k;
+        for(int i=0;i<m;++i){a[i][0]=b[i][0];a[i][1]=b[i][1];}
+    }
+    // a corner on the cut line comes out twice: keep it once
+    int k=0;
+    for(int i=0;i<m;++i){
+        const float* p=a[i];
+        const float* last=k>0 ? out[k-1] : a[m-1];
+        if(std::fabs(p[0]-last[0])<1e-3f && std::fabs(p[1]-last[1])<1e-3f)continue;
+        out[k][0]=p[0];out[k][1]=p[1];++k;
+    }
+    return k<3 ? 0 : k;
+}
+
+// A convex polygon (corners in order round it) in one colour: 4 corners one quad, more a fan of triangles (each a quad
+// with its last corner repeated).
+inline void Polygon(Quads* out,const float (*p)[2],int n,std::uint32_t c) {
+    if(n==4){
+        out->Add(p[0][0],p[0][1],p[1][0],p[1][1],p[3][0],p[3][1],p[2][0],p[2][1],c,c,c,c);
+        return;
+    }
+    for(int i=1;i+1<n;++i)
+        out->Add(p[0][0],p[0][1],p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+1][0],p[i+1][1],c,c,c,c);
+}
+
+// The diamond background inside `r` only (each diamond cut to it).
+inline void DiamondsIn(Quads* out,const Rect& r) {
+    if(r.x1<=r.x0 || r.y1<=r.y0)return;
+    out->Box(r,kDiamondDark);
+    const float h=kDiamondPeriod/2;
+    const int i0=static_cast<int>(r.x0/kDiamondPeriod), i1=static_cast<int>(r.x1/kDiamondPeriod)+1;
+    const int j0=static_cast<int>(r.y0/kDiamondPeriod), j1=static_cast<int>(r.y1/kDiamondPeriod)+1;
+    for(int j=j0;j<=j1;++j)
+        for(int i=i0;i<=i1;++i){
+            const float cx=static_cast<float>(i)*kDiamondPeriod, cy=static_cast<float>(j)*kDiamondPeriod;
+            const float d[4][2]={{cx,cy-h},{cx+h,cy},{cx,cy+h},{cx-h,cy}};   // round it: top, right, bottom, left
+            float cut[12][2];
+            const int n=ClipToRect(d,4,r,cut);
+            if(n)Polygon(out,cut,n,kDiamondLight);
+        }
+}
+// The four bands of `outer` round `hole` (top, bottom, left, right; empty ones are empty rects).
+inline void Around(const Rect& outer,const Rect& hole,Rect band[4]) noexcept {
+    const float hx0=hole.x0>outer.x0 ? hole.x0 : outer.x0, hx1=hole.x1<outer.x1 ? hole.x1 : outer.x1;
+    const float hy0=hole.y0>outer.y0 ? hole.y0 : outer.y0, hy1=hole.y1<outer.y1 ? hole.y1 : outer.y1;
+    band[0]=Rect{outer.x0,outer.y0,outer.x1,hy0};
+    band[1]=Rect{outer.x0,hy1,outer.x1,outer.y1};
+    band[2]=Rect{outer.x0,hy0,hx0,hy1};
+    band[3]=Rect{hx1,hy0,outer.x1,hy1};
+}
+// The diamond background over `screen` but `hole`.
+inline void DiamondsAround(Quads* out,const Rect& screen,const Rect& hole) {
+    if(!Overlap(screen,hole)){DiamondsIn(out,screen);return;}
+    Rect band[4];
+    Around(screen,hole,band);
+    for(const Rect& b:band)DiamondsIn(out,b);
+}
 inline std::uint32_t DiamondAt(float x,float y) noexcept {
     const float h=kDiamondPeriod/2;
     float fx=x-static_cast<float>(static_cast<int>(x/kDiamondPeriod+0.5f))*kDiamondPeriod;
@@ -145,6 +233,29 @@ inline void Panel(Quads* out,const Rect& r) {
     out->Box(Rect{r.x0,r.y1-l,r.x0+w,r.y1},kBracket);
     out->Box(Rect{r.x1-l,r.y1-w,r.x1,r.y1},kBracket);
     out->Box(Rect{r.x1-w,r.y1-l,r.x1,r.y1},kBracket);
+}
+
+// A panel with the 3D view's hole in it: the panel round the hole, its corner brackets, and silver brackets at the
+// hole's corners (the view framed like a panel of its own).
+inline void PanelAround(Quads* out,const Rect& r,const Rect& hole) {
+    if(!Overlap(r,hole)){Panel(out,r);return;}
+    Rect band[4];
+    Around(r,hole,band);
+    for(const Rect& b:band)
+        if(b.x1>b.x0 && b.y1>b.y0)out->Box(b,kPanel);
+    const float l=kBracketLength, w=kBracketWidth;
+    // the hole's brackets sit just outside it (grown by the bracket width), never on the view
+    const Rect corners[2]={r,Rect{hole.x0-w,hole.y0-w,hole.x1+w,hole.y1+w}};
+    for(const Rect& c:corners){
+        out->Box(Rect{c.x0,c.y0,c.x0+l,c.y0+w},kBracket);
+        out->Box(Rect{c.x0,c.y0,c.x0+w,c.y0+l},kBracket);
+        out->Box(Rect{c.x1-l,c.y0,c.x1,c.y0+w},kBracket);
+        out->Box(Rect{c.x1-w,c.y0,c.x1,c.y0+l},kBracket);
+        out->Box(Rect{c.x0,c.y1-w,c.x0+l,c.y1},kBracket);
+        out->Box(Rect{c.x0,c.y1-l,c.x0+w,c.y1},kBracket);
+        out->Box(Rect{c.x1-l,c.y1-w,c.x1,c.y1},kBracket);
+        out->Box(Rect{c.x1-w,c.y1-l,c.x1,c.y1},kBracket);
+    }
 }
 
 // Slanted metal button: a parallelogram, top edge kButtonSlant right of the bottom, within `r`. Selected: beige.

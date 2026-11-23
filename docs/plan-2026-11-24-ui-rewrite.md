@@ -80,6 +80,12 @@
 - 数据：武器表（WeaponTable，含移植行）+ 拥有位（`GS+0xEB50` / 重定位后的记录，`weapon_records.h`）+ 等级上限谓词（`weapon-level-cap-re.md`）。
   系列 = 名字去掉末尾编号 / 型号后缀的规则，由生成器从武器表算好（`tools/gen_weapon_series.py` → `src/weapon_series.inc`），不在运行时猜。
 - 写装备：`GS+0x6E98`（与原版 UI `0x7DD8AB` 写同一处，H）。需逆向原版换装后通知 3D 预览 / 存档脏标记的调用（msg 4 已知，H；脏标记 M）。
+- 进度（2026-11-24，分支 `feat/ui-weaponpage`）：框架加了页面头部行 / 3D 预览留洞 / 页面自取按键与输入框 / 光标重定位
+  （`armory_logic.h`，`armory_skin.h` 的 ClipToRect / DiamondsAround / PanelAround）；武器页纯逻辑 `weapon_page_logic.h`
+  （兵种分页、槽、类别、来源、搜索、系列折叠、持有数、Lv 范围、超上限灰显、▲▼ 对比、收藏、试拿）与离线测试；
+  运行时接入 `armory.cpp`（替换只读玩家页）。统一写入：GS+0x6E98 / +0x6E90 只经 `weapon_equip.cpp` 写（方案切换改走
+  `SetClassSlots` / `SetClass`），消息 4 只经 `roompreview::ShowPlayerWeapon` 发。脏标记：原版确认路径上没有（M），不做。
+  未做 / 未验证：全部未实机；属性对比只有等级；只能预览当前兵种；洞可能被 HQ 的顶栏 / 底栏盖住；不清 NEW 位。
 
 ### 阶段 6　选择任务页
 

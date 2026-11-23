@@ -3,7 +3,8 @@ read from EDF.dll (TimeDateStamp 0x678CCB46): writes src/weapon_equip_signatures
 checks the .inc against the game's EDF.dll and the generated weapon data against the game's tables.
 
 The functions weapon_equip.cpp calls, and the stock weapon select screen's code whose rules it repeats (a change there
-means the rules may have changed: the module stays off).
+means the rules may have changed: the module stays off). The stock msg 4 sender stays listed as the reference of the
+payload roompreview::ShowPlayerWeapon sends (weapon_equip.cpp itself sends no message).
 
     python tools/weapon_equip_sigs.py [EDF.dll]
 """
@@ -26,7 +27,6 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x0E1BA0, 0x14, 'WeaponTable FindRow(cfg, const wchar_t*): -1 when not there'),
     (0x0E20B9, 0x28, 'GetRow: +0x20 = max(0, (int)(col4 * 0.25f * 100.0f)), the level shown and capped'),
     (0x0D8850, 0x30, 'the weapon level cap (GS): difficulty GS+0x4C, progress 0xD7B60, jmp 0xE2710'),
-    (0x119D1B0, 0x1C, 'the UI system broadcast (system, message id, payload*)'),
     # The stock screen (HUiHQWeaponSelect) whose rules the write repeats.
     (0x8BC850, 0x29, 'the cap predicate: byte GS+0x14FC8 && (unsigned)level > 0xD8850(GS)'),
     (0x8B5145, 0x3C, 'list build: +0xE528 (the slot may repeat) 0: an item in the class\'s other slots (and not this '
