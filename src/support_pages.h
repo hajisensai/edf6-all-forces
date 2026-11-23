@@ -5,8 +5,9 @@
 //    the plugin's parser takes back), on a copy of the menu both pages share; each page saves its own units through
 //    room_ui_logic.h SaveItems (the same lines the old menu wrote) and the saver (loadout_store.h SaveSupportLoadouts).
 //  - The centre column's top is the 3D viewport (preview_camera.h rect, SetViewPlacement): uncovered (Page::Hole) only
-//    when the selection has a model the menu renderer can show (a soldier, a crew soldier, a jet's unified file:
-//    room_preview_logic.h VehicleUnified); otherwise an opaque box that says why. The view shows ONE model
+//    when the selection has a model the menu renderer can show (a soldier, a crew soldier, a vehicle's unified file:
+//    room_preview_logic.h VehicleFileOf, its loadout's variant when it has one); otherwise (a loadout not generated
+//    yet, the preview off) an opaque box that says why. The view shows ONE model
 //    (docs/plan-2026-11-24-ui-rewrite.md stage 4b): the squad's selected soldier, marked so on screen.
 //  - Online (the room screen) the details column's top is the "我的呼叫 / 房主规则" panel: the host's SupportDisabled
 //    and the call's pt / price, read-only (a guest: the host's apply).
@@ -73,6 +74,9 @@ struct Env {
     bool online=false;     // the room screen (online): the rules panel shows
     bool host=true;        // this machine hosts the room (online_authority.h OnlineHostOnly)
     bool previewOn=false;  // the 3D preview's hooks are in (room_preview.h InstallPreviewHooks)
+    // Whether Mods\<file> is there (room_preview.h PreviewFileThere): a vehicle's loadout just edited has no file until
+    // it is saved and the generator made it. Null: every file is.
+    bool (*fileThere)(const wchar_t* modsFile) noexcept=nullptr;
     roomui::CrewKinds kinds{};
     HostRule rule[rm::kMostUnits]{};   // by the menu's unit index
 };
@@ -540,19 +544,27 @@ public:
         default:return false;
         }
     }
-    // A jet (its unified file carries the menu's keys) or a crew's soldier; a tank / the mech have no menu model.
+    // A crew's soldier, or the vehicle as its loadout makes it: the unified file the battle spawns (its loaded variant
+    // EDF6VC_LO_*, else its base; every one carries the menu's keys, room_preview_logic.h VehicleUnified). A loadout
+    // edited and not yet generated has no file: nothing shown, the box says so (NoModelWhy).
     bool PreviewOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept override {
         const rm::Unit* u=UnitAt(p.row);
         if(!u)return false;
         const ItemRef it=ItemOf(*u,p.item);
         if(it.kind==It::crew){if(out)*out=roomui::CrewPreview(model->menu,*u,model->env.kinds);return true;}
-        if(rm::IsCrewUnit(*u) || !roompreview::VehicleUnified(u->body))return false;
+        if(rm::IsCrewUnit(*u) || !roompreview::VehicleUnified(u->body) || !FileThere(*u))return false;
         if(out)*out=roomui::VehiclePreview(*u);
         return true;
     }
 protected:
     bool Mine(const rm::Unit& u) const noexcept override { return !rm::IsSquad(u); }
-    Tx NoModelWhy(const ar::Pos&) const noexcept override { return Tx::spNoModel; }
+    Tx NoModelWhy(const ar::Pos&) const noexcept override { return Tx::spNotGenerated; }
+    bool FileThere(const rm::Unit& u) const noexcept {
+        const rp::PreviewSpec spec=roomui::VehiclePreview(u);
+        wchar_t file[96];
+        if(!roompreview::VehicleFileOf(spec.body,spec.load,false,file,sizeof(file)/sizeof(file[0])))return false;
+        return !model->env.fileThere || model->env.fileThere(file);
+    }
     // A mech's slot callout picks its row.
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {
         const rm::Unit* u=UnitAt(p.row);

@@ -488,6 +488,7 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
              'their weapon text rows; recorded in Mods/.edf6at_data.json)...'))
     import make_optics
     import ledger
+    import menu_preview
     import rootcpk
     led, source = ledger.Ledger(game), None
     final = {}
@@ -498,6 +499,12 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
                 if source is None:
                     source = rootcpk.Game(game)
                 data, _ = make_optics.range_vehicle(led, source, data, make_optics.OWNER)
+            if rel.upper() == menu_preview.TANK_BASE:
+                # The support tank's base is a unified model file (docs/unified-model-re.md) made by its writer, so
+                # AutoTurret's manifest records the bytes on disk (no other hash is ever layered over its SGOs).
+                if source is None:
+                    source = rootcpk.Game(game)
+                data = menu_preview.unify_vehicle(source, rel, data, game)
         final[rel] = data
     at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=final, proteus=True)
 
@@ -1373,6 +1380,12 @@ def write_menu_preview(game: str) -> bool:
         return False
     for written in menu_preview.install(game, files):
         print(tr('写入', 'Writing'), written)
+    not_unified = menu_preview.base_problems(rootcpk.Game(game), game)
+    if not_unified:   # a writer above did not unify its base: that vehicle's preview would show nothing
+        print(tr('！ 支援载具的基础文件不是统一模型文件（预览不显示该载具）：',
+                 "! A support vehicle's base file is no unified model file (its preview shows nothing): ")
+              + '; '.join(not_unified))
+        return False
     return True
 
 

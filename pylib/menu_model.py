@@ -26,6 +26,7 @@ MENU_MODEL = 'menu_animation_model'   # src/room_preview_logic.h kMenuModelKey
 BATTLE_MODEL = 'animation_model'
 SOLDIER_KEYS = ('soldier_weapon_slot', 'soldier_weapon_grab_adjust')
 ADDED = (MENU_MODEL, 'change_color', 'random_animation')   # what a soldier's battle file gains
+VEHICLE_ADDED = (*ADDED, *SOLDIER_KEYS)   # what a vehicle's battle file gains (vehicle_menu_keys)
 MENU_NEEDS = (MENU_MODEL, 'change_color', 'random_animation', 'soldier_weapon_slot')
 MENU_ANMGROUP = 'main'   # the anmgroup the menu plays, looked up case-sensitively (EDF.dll 0x93FB85; -1 crashes it)
 CHANNELS = ('change_color0', 'change_color1')
@@ -152,10 +153,11 @@ def cas_groups(cas: bytes) -> list[str]:
     return [cas_legacy._text(cas, at + cas_legacy._u(cas, '<i', at)[0]) for at, _ in lay.tree.anmgroups]
 
 
-def menu_problems(data: bytes, read_cas: Callable[[str], bytes | None] | None = None) -> list[str]:
+def menu_problems(data: bytes, read_cas: Callable[[str], bytes | None]) -> list[str]:
     """What keeps `data` from being a unified file ([] none): the battle model, every key the menu needs, the menu
-    model's shape, a soldier's weapon slot, and (with `read_cas`: a CAS path -> its bytes, None when nowhere) the menu
-    CAS having an anmgroup named exactly MENU_ANMGROUP."""
+    model's shape, and the menu CAS (`read_cas`: a CAS path -> its bytes, None when nowhere) having an anmgroup named
+    exactly MENU_ANMGROUP. Always checked: the renderer indexes that group's number without a check (EDF.dll 0x93EBAC;
+    -1 crashed test site #50), so no file without it may be written."""
     m = members_of(data)
     out = [f'缺 {k}' for k in (BATTLE_MODEL, *MENU_NEEDS) if k not in m]
     model = m.get(MENU_MODEL)
@@ -163,7 +165,7 @@ def menu_problems(data: bytes, read_cas: Callable[[str], bytes | None] | None = 
         if not (isinstance(model, list) and len(model) == 3 and isinstance(model[0], list) and len(model[0]) == 2
                 and all(isinstance(s, str) for s in model[0]) and isinstance(model[1], str)):
             out.append(f'{MENU_MODEL} 不是 [[archive, model], CAS, MAB]')
-        elif read_cas is not None:
+        else:
             cas = read_cas(model[1])
             if cas is None:
                 out.append(f'菜单 CAS {model[1]} 不存在')

@@ -113,7 +113,7 @@ def generate_menu_preview(game: str, errors: dict[str, str]) -> list[str]:
     if not menu_preview.missing(game):
         return []
     try:
-        files = menu_preview.build(rootcpk.Game(game))
+        files = menu_preview.build(rootcpk.Game(game), game)
     except Exception as e:   # reported in the status file like a variant that could not be made
         errors[menu_preview.OWNER] = f'{type(e).__name__}: {e}'
         return []

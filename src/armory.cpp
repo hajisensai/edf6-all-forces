@@ -318,6 +318,7 @@ void FillEnv(bool room,bool previewOn) noexcept {
     e.online=room;
     e.host=OnlineHostOnly();
     e.previewOn=previewOn;
+    e.fileThere=roompreview::PreviewFileThere;
     e.kinds=crew::roomui::CrewKinds{SupportCfg().vehicleCrew,SupportCfg().aircraftCrew};
     for(int i=0;i<support.menu.unitCount && i<rm::kMostUnits;++i) {
         const wchar_t* key=support.menu.unit[i].key;

@@ -500,6 +500,7 @@ inline void DressCrewRows(roommenu::View& v,const roommenu::Menu& m,const CrewKi
 inline roompreview::PreviewSpec VehiclePreview(const roommenu::Unit& u) noexcept {
     roompreview::PreviewSpec p{};
     p.body=u.body;
+    if(u.vehicle.On() && u.vehicle.body==u.body)p.load=u.vehicle;
     return p;
 }
 inline roompreview::PreviewSpec CrewPreview(const roommenu::Menu& m,const roommenu::Unit& u,const CrewKinds& kinds) noexcept {
@@ -521,7 +522,9 @@ inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out,con
     return true;
 }
 inline bool SamePreview(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
-    return a.body==b.body && (a.body!=VehicleBody::none || (a.kind==b.kind && a.leader==b.leader && a.look==b.look));
+    if(a.body!=b.body)return false;
+    if(a.body==VehicleBody::none)return a.kind==b.kind && a.leader==b.leader && a.look==b.look;
+    return a.load.On()==b.load.On() && (!a.load.On() || LoadoutVariant(a.load)==LoadoutVariant(b.load));
 }
 
 // --- Saving: what loadout_store.h SaveSupportLoadout is called with, one per line of room_menu.h CollectSave ---

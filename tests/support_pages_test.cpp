@@ -225,8 +225,16 @@ void Viewport() {
     Expect(squads.PreviewOf(ar::Pos{0,s,0,0},&spec) && spec.leader && spec.body==VehicleBody::none,"the soldier, a leader");
     const int jet=RowOf(vehicles,L"FIGHTER"),tank=RowOf(vehicles,L"TANK_CREWED"),mech=RowOf(vehicles,L"OWN_MECH");
     Expect(vehicles.PreviewOf(ar::Pos{0,jet,0,0},&spec) && spec.body!=VehicleBody::none,"a jet: its unified model");
-    Expect(!vehicles.Hole(ar::Pos{0,tank,0,0},&hole),"a tank has no menu model");
-    Expect(!vehicles.Hole(ar::Pos{0,mech,0,0},&hole),"the mech has no menu model");
+    Expect(vehicles.Hole(ar::Pos{0,tank,0,0},&hole) && vehicles.PreviewOf(ar::Pos{0,tank,0,0},&spec) &&
+           spec.body==VehicleBody::tank && !spec.load.On(),"a stock tank: its unified base");
+    Expect(vehicles.Hole(ar::Pos{0,mech,0,0},&hole) && vehicles.PreviewOf(ar::Pos{0,mech,0,0},&spec) &&
+           spec.body==VehicleBody::mech,"the mech: its unified base");
+    // A file not there (a loadout edited, not generated yet): no model, the box says why.
+    static const wchar_t* asked=nullptr;
+    model.env.fileThere=[](const wchar_t* f) noexcept {asked=f;return false;};
+    Expect(!vehicles.Hole(ar::Pos{0,tank,0,0},&hole) && asked && !std::wcscmp(asked,L"OBJECT\\V505_TANK_MISSION.SGO"),
+           "a file not in Mods: no hole");
+    model.env.fileThere=nullptr;
     const int crewAt=vehicles.Items(ar::Pos{0,tank,0,0})-3;   // stock line, crew, add, reset
     Expect(sp::VehiclePage::ItemOf(UnitOf(vehicles,tank),crewAt).kind==sp::It::crew,"the tank's crew row");
     Expect(vehicles.Hole(ar::Pos{0,tank,crewAt,0},&hole),"its crew is a soldier: shown");
@@ -304,7 +312,11 @@ void InBuild() {
     vehicles.Activate(ar::Pos{0,mech,0,0});
     st.pos=ar::Pos{0,mech,2,0};
     ar::Build(st,pages,2,ps,w,&built);
-    Expect(base.holeQuads==0 && HasText(base,hudtext::Tr(Tx::spNoModel)),"the mech: no model, said so");
+    Expect(base.holeQuads>0,"the mech: its model, the hole");
+    model.env.fileThere=[](const wchar_t*) noexcept {return false;};
+    ar::Build(st,pages,2,ps,w,&built);
+    Expect(base.holeQuads==0 && HasText(base,hudtext::Tr(Tx::spNotGenerated)),"its file not made yet: no hole, said so");
+    model.env.fileThere=nullptr;
 }
 
 // Random edits on both pages: every state one the parsers take back, the cursor maps never out of range.

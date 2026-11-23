@@ -11,11 +11,14 @@ the battle reads animation_model. No menu-only model file exists.
   random_animation       the class's stock menu idle poses
   soldier_weapon_slot / soldier_weapon_grab_adjust   the template's own (the menu reads the same shape)
 
-And the menu CAS of the support jets: their CAS v506_heli.cas has `Roter` / `Main` but no `main`, the anmgroup the menu
-renderer looks up case-sensitively (EDF.dll 0x93FB85) and indexes without a check (0x93EBAC: -1 crashed test site #50),
-so MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS is that CAS with the one anmgroup's name lower-cased in place (same length), the
-animation resource the jets' menu_animation_model names (pylib/vcobjects.py jet_sgo); the jets' own CAS is untouched.
-build() refuses (ValueError) any file menu_model.menu_problems finds lacking or whose battle keys moved.
+And the menu CAS of the jets: their CAS (v506_heli.cas, or a jet's own retarget of it: pylib/jet_models.py animation,
+pylib/xm_air_model.py) has `Roter` / `Main` but no `main`, the anmgroup the menu renderer looks up case-sensitively
+(EDF.dll 0x93FB85) and indexes without a check (0x93EBAC: -1 crashed test site #50), so MENUOBJECT/EDF6VC_MENU_<CAS>.CAS
+is that CAS with the one anmgroup's name lower-cased in place (same length), the animation resource the jets'
+menu_animation_model names (pylib/vcobjects.py jet_sgo); the jets' own CAS are untouched. A jet's own CAS is read from
+Mods (the tool that flies the jet wrote it before); one not there is a jet not installed: no copy, nothing previews it.
+build() refuses (ValueError) any file menu_model.menu_problems finds lacking (the menu CAS's `main` always read and
+checked) or whose battle keys moved.
 
 Written into <game>/Mods as this tool's in the ledger (pylib/ledger.py, owner OWNER); Root.cpk only read.
 
@@ -41,6 +44,11 @@ CHANNELS = menu_model.CHANNELS
 EVERY = menu_model.EVERY
 MENU_ANMGROUP = menu_model.MENU_ANMGROUP
 JET_CAS = menu_model.JET_CAS
+# The support vehicles' bases that are stock SGOs (support_loadout.BODIES; the jets' are pylib/vcobjects.py's, unified
+# as made). Each is made a unified model file by the tool that writes it: the tank's by AutoTurret's install
+# (tools/installer.py install_autoturret: its manifest records those bytes), the mech's (no other writer) here.
+TANK_BASE = 'OBJECT/V505_TANK_MISSION.SGO'
+MECH_BASE = 'OBJECT/V504_BEGARUTA.SGO'
 
 Selector = int | str
 Templates = dict[str, dsgo.Node]
@@ -52,13 +60,37 @@ def template_names() -> list[str]:
     return [t + suffix for n, _, t in support_loadout.KINDS if support_loadout.has_looks(n) for suffix in ('', '_LEADER')]
 
 
-def jet_cas_rel() -> str:
-    return f'{menu_model.MENU_FOLDER}/{menu_model.menu_cas_name(JET_CAS)}'
+def jet_cas_rel(cas: str = JET_CAS) -> str:
+    """The Mods path of `cas`'s menu copy (MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS for the 506's)."""
+    return f'{menu_model.MENU_FOLDER}/{menu_model.menu_cas_name(cas)}'
+
+
+def jet_cas_sources() -> list[str]:
+    """Every CAS a jet flies on (lower case app:/ paths): the 506's, then each jet's own retarget (vcobjects.JETS)."""
+    import vcobjects
+    own = sorted({c.lower() for c in map(vcobjects.jet_own_cas, vcobjects.JETS.values()) if c})
+    return [JET_CAS] + [c for c in own if c != JET_CAS]
 
 
 def rels() -> list[str]:
     """Every file this tool writes (always made; loadout-generate remakes them when missing)."""
-    return [f'OBJECT/{n}.SGO' for n in template_names()] + [jet_cas_rel()]
+    return [f'OBJECT/{n}.SGO' for n in template_names()] + [MECH_BASE, jet_cas_rel()]
+
+
+def base_problems(game: rootcpk.Game, root: str) -> list[str]:
+    """Why a support vehicle's base as the game loads it under `root` (Mods, else Root.cpk) is no unified model file
+    ([] every one is): the preview shows that body only from such a file."""
+    import support_loadout
+    out = []
+    for name, _, _ in support_loadout.BODIES.values():
+        data = support_loadout._source(root, game, 'OBJECT', name)
+        if data is None:
+            out.append(f'{name}: 不存在')
+            continue
+        problems = menu_model.menu_problems(data, read_cas_for(game, root))
+        if problems:
+            out.append(f'{name}: {problems}')
+    return out
 
 
 def cas_ref(path: str) -> tuple[str, str]:
@@ -170,52 +202,80 @@ def unify_soldier(game: rootcpk.Game, name: str, data: bytes,
 
 def check(game: rootcpk.Game, name: str, battle: bytes, unified: bytes, root: str | None = None) -> None:
     """ValueError when `unified` lacks what either loader needs or a battle key differs from `battle`."""
-    def read_cas(path: str) -> bytes | None:
-        import support_loadout
-        if path.lower() == menu_model.menu_cas_path(JET_CAS):
-            return jet_menu_cas(game)   # this tool's own file: made here, whether or not it is on disk yet
-        try:
-            return support_loadout._source(root, game, *cas_ref(path))
-        except ValueError:
-            return None
-    problems = menu_model.menu_problems(unified, read_cas)
+    problems = menu_model.menu_problems(unified, read_cas_for(game, root))
     moved = menu_model.battle_equal(battle, unified)
     if problems or moved:
         raise ValueError(f'{name} 不是统一模型文件：{problems + [f"战斗键 {k} 变了" for k in moved]}')
 
 
 def unify_vehicle(game: rootcpk.Game, name: str, data: bytes, root: str | None = None) -> bytes:
-    """A vehicle's battle file `data` (a classic SGO: a support_loadout loaded tank / mech) with the vehicle menu keys
-    (menu_model.vehicle_menu_keys: its own model, MAB and CAS; the jets' CAS the renamed menu CAS) added; a file that
-    has them (a jet from pylib/vcobjects.py jet_sgo) comes back as it is. ValueError as unify_soldier."""
+    """A vehicle's battle file `data` (a classic SGO: a tank / mech base or a support_loadout loaded variant, a jet from
+    pylib/vcobjects.py jet_sgo) with the vehicle menu keys (menu_model.vehicle_menu_keys: its own model and MAB; its
+    CAS, or for a jet CAS the renamed menu copy) derived from its battle keys. Keys a file already has from its source
+    (a loaded tank built on the unified base) are derived again, so a variant whose model differs never keeps the
+    base's; the same keys come back as the same bytes. ValueError as unify_soldier."""
     version, members = sgo.read(data)
-    if menu_model.MENU_MODEL in members:
-        check(game, name, data, data, root)
-        return data
-    cas = members[menu_model.BATTLE_MODEL][1]
-    menu = menu_model.menu_cas_path(cas) if cas.lower() == JET_CAS else cas
+    battle = {k: v for k, v in members.items() if k not in menu_model.VEHICLE_ADDED}
+    cas = battle[menu_model.BATTLE_MODEL][1]
+    jets = {c.lower() for c in jet_cas_sources()}
+    menu = menu_model.menu_cas_path(cas) if cas.lower() in jets else cas
     _, stock = sgo.read(game.read(menu_model.MENU_FOLDER, menu_model.VEHICLE_STOCK))
-    out = sgo.write_depth_first(version, menu_model.add_sgo(
-        members, menu_model.vehicle_menu_keys(stock, members[menu_model.BATTLE_MODEL], menu)))
-    check(game, name, data, out, root)
+    keys = menu_model.vehicle_menu_keys(stock, battle[menu_model.BATTLE_MODEL], menu)
+    if all(k in members and menu_model.plain(members[k]) == menu_model.plain(v) for k, v in keys.items()):
+        out = data
+    else:
+        out = sgo.write_depth_first(version, menu_model.add_sgo(battle, keys))
+    check(game, name, sgo.write_depth_first(version, battle), out, root)   # its menu keys (any) derived again
     return out
 
 
-def jet_menu_cas(game: rootcpk.Game) -> bytes:
-    """MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS: the jets' CAS with `Main` named `main`."""
-    renamed = menu_cas(game.read(*cas_ref(JET_CAS)))
+def jet_menu_cas(game: rootcpk.Game, cas: str = JET_CAS, root: str | None = None) -> bytes | None:
+    """The menu copy of jet CAS `cas` (MENUOBJECT/EDF6VC_MENU_<name>.CAS): it with `Main` named `main`. The 506's is
+    read from Root.cpk; a jet's own from Mods under `root` (None: not there, that jet is not installed)."""
+    if cas.lower() == JET_CAS:
+        source = game.read(*cas_ref(JET_CAS))
+    else:
+        path = os.path.join(root, 'Mods', *cas_ref(cas)) if root else ''
+        if not path or not os.path.isfile(path):
+            return None
+        with open(path, 'rb') as f:
+            source = f.read()
+    renamed = menu_cas(source)
     if renamed is None:
-        raise ValueError(f'{JET_CAS} 已有 {MENU_ANMGROUP!r}：菜单 CAS 不再需要，改 pylib/vcobjects.py jet_sgo')
+        raise ValueError(f'{cas} 已有 {MENU_ANMGROUP!r}：菜单 CAS 不再需要，改 pylib/vcobjects.py jet_sgo')
     return renamed
 
 
+def read_cas_for(game: rootcpk.Game, root: str | None):
+    """menu_model.menu_problems' `read_cas`: a jet menu copy made as build makes it (whether or not it is on disk
+    yet), any other CAS as the game loads it (Mods, else Root.cpk); None when nowhere."""
+    copies = {menu_model.menu_cas_path(c): c for c in jet_cas_sources()}
+
+    def read_cas(path: str) -> bytes | None:
+        import support_loadout
+        if path.lower() in copies:
+            return jet_menu_cas(game, copies[path.lower()], root)
+        try:
+            return support_loadout._source(root, game, *cas_ref(path))
+        except ValueError:
+            return None
+    return read_cas
+
+
 def build(game: rootcpk.Game, root: str | None = None) -> dict[str, bytes]:
-    """{Mods path: bytes}: every template's unified file and the jets' menu CAS, from Root.cpk (read only). `root` is
-    unused (the files depend on Root.cpk alone)."""
-    del root
+    """{Mods path: bytes}: every template's unified file (Root.cpk, read only) and the jets' menu CAS (the 506's always;
+    a jet's own retarget when its tool wrote it under `root`'s Mods)."""
     every: dict[tuple[str, str], set[str]] = {}
     files = {f'OBJECT/{n}.SGO': unify_soldier(game, n, game.read('OBJECT', n + '.SGO'), every) for n in template_names()}
-    files[jet_cas_rel()] = jet_menu_cas(game)
+    import support_loadout   # the Mods copy when there (ours from the last install: its keys derived again)
+    mech = support_loadout._source(root, game, *MECH_BASE.split('/'))
+    if mech is None:
+        raise ValueError(f'{MECH_BASE} 不在 Root.cpk')
+    files[MECH_BASE] = unify_vehicle(game, MECH_BASE, mech, root)
+    for cas in jet_cas_sources():
+        made = jet_menu_cas(game, cas, root)
+        if made is not None:
+            files[jet_cas_rel(cas)] = made
     return files
 
 

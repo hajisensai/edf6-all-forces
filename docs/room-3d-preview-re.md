@@ -86,6 +86,8 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 ## 6.1 载具预览（2026-11-10，测试站 #46，只做了离线验证）
 
 > 2026-11-24：本节的「单独菜单 SGO `EDF6VC_MENU_V_<BODY>.SGO`」已换成统一文件 `OBJECT/EDF6VC_FLY_*.SGO`（战斗键 + 菜单键），战机 CAS 的小写 `main` 副本改名为 `MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS`；坦克 / 机甲基础文件有别的工具分层写入，暂不统一、不预览。见 `docs/unified-model-re.md`。
+>
+> 2026-11-24 晚：坦克基础由 AutoTurret 安装时写入统一版、机甲基础由 `tools/menu_preview.py` 写入统一版，带配置的载具预览自己的 `EDF6VC_LO_*` 变体（`docs/unified-model-re.md` §3.1）；每个机体都预览。
 
 - 同一条路（方案 A）：Desc 路径换成安装器生成的 `app:/MENUOBJECT/EDF6VC_MENU_V_<BODY>.SGO`（`tools/menu_preview.py build_vehicles`）：原版 `P505_RANGER.SGO` 其余键不动，`animation_model` 整个换成该机体基础 SGO（`support_loadout.BODIES`，Mods 里别的工具写的那份优先，否则 Root.cpk）的 `[模型, CAS, MAB]`。兵种号写游骑兵（只决定武器握持，载具没有武器），武器数 0。机体没装（基础 SGO 不在）就不生成，也不预览（日志一行）。
 - 挂载不上模型：游戏里战机的挂载武器本来就没有挂架模型（`docs/stores-re.md` §1、§10：挂点上的武器是独立场景对象，只有发射出去的弹体有模型），菜单渲染器也只按 WeaponTable 行号挂玩家武器（§5）。所以挂载改动由菜单的行（挂点、重量、弹数）实时显示，模型不变。H（静态）。
@@ -104,6 +106,22 @@ Fencer 挂点 `[[1,3]→weapon_r]`、`[[0,2]→weapon_l]`，推测 weapons[0] �
 - **绘制顺序**（M）：模型在 3D 场景里画，UI 总在本帧 3D 之后（`docs/worldmap-select-re.md`，H）。整备界面盖在 HQ 上时，皮肤要给矩形**留洞**；视图要继续画，需 `+0x304 ≠ 2` 且 `+0x3EC ≠ 1`：摆放期间每帧把 2 改 0、1 改 0，清除摆放时还原进入时的值（锁住期间 `+0x3EC` 由 msg 8/9 那套负责）。
 - **正面朝向**（L）：yaw 0 时模型朝 +Z（朝相机）是按原版默认画面推的，未实机核对；不对就改 `kCameraPresets` 的 yaw。
 - **msg 4**（`0x93B895`，H）：`{player, slot, row, 0}`，player 须等于 `+0x2AC`；`+0x368 = slot`、`+0x36C + slot*4 = row`，再按 `+0x318` 的 Desc 重建。`ShowPlayerWeapon(cls, slot, row)` 只在视图显示的是玩家自己的模型、且显示兵种（`+0x180`）等于 `cls` 时，于下一次视图更新里发送；slot 限 0..3（M：数组到 `+0x3EC` 前最多 32 项，实际槽数未逐兵种核对）。
+
+## 6.3 四人小队同屏（2026-11-24，静态逆向，未实现）
+
+视图构造 `0x938760`（vanilla-code 伪代码，H）：
+
+- `view+0x2A8 = param_2+0x28`（玩家数），`view+0x2AC = param_2+0x2C`（下标）。按 `GameStatus + 下标*0x3E60 + 0x6E90` 读该玩家的兵种 / 外观。
+- `camera_pos` 取法：玩家数 < 2 → `[0]`；否则下标 0 → `[1]`，其他 → `[2]`。`FUN_1811a43f0(view, 1, 下标, 2)` 把 `view+0x34` 设成下标，并按下标选 `+0x1C` 子对象的玩家视口。
+- 构造末尾 `FUN_18093b320(view, 3, {下标, 兵种, 外观})` 直接发一次 msg 3 构建。
+- GameStatus 里每玩家块最多约 3 个（`0x6E90 + n*0x3E60` 在 n = 3 时与 `0x14FF4` 的玩家数重叠），下标 3 读到的是别的字段。
+- `HUiHQ3DModel` 构造 `0x8782C0` 用 `FUN_18119c600` 注册每个视图（会加载布局资源）。
+
+结论：
+
+- **方案 (a) 生成「四人一体」文件不可行**（H）：四人各自兵种不同、每人主 / 副色共 8 个颜色通道，菜单只有 `change_color0/1` 两个；小队组成是运行时的，CAS 轨道按骨骼名驱动，四个同名骨架无法在一个模型里各播各的。
+- **方案 (b) 用下标 2 / 3 再建视图不安全**（H）：下标 3 越界读 GameStatus，下标 ≥ 1 还会换成分屏视口与 `camera_pos[1/2]`。
+- 可行的 (b) 变体（M，未实现）：多建 3 个视图，**全部用下标 0、玩家数 1**（`camera_pos[0]`、GameStatus 槽 0 有效、视口与单视图相同），每个视图的异步构建（`view+0xD0`）各自挂上 Desc override（现在的 override 是全局一份，要改成按视图），摆放钩子按视图给各自的矩阵，屏幕位置由 `preview_camera.h` 算出供地面圈使用。风险：视图由插件创建就要由插件析构（生命周期），构造末尾那次 msg 3 构建会先按玩家自己的外观建一次再被 override 竞争。没有游戏不能验证这两点，所以本轮没有实现，小队页仍只显示所选士兵（`Tx::spOnlySelected`）。
 
 ## 7. 需实机验证
 
