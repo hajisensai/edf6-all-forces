@@ -12,6 +12,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "mod_room.h"
+#include "room_sync.h"
 #include <cstring>
 
 namespace crew {
@@ -164,7 +165,9 @@ bool StartAllowed() noexcept {
 bool __fastcall StartGate(void* lobby) noexcept {
     bool host=false;
     __try { host=reinterpret_cast<IsLocalHostFn>(image+kIsLocalHost)(lobby); } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
-    return host && StartAllowed();
+    // The room's files first (room_sync.h RoomSyncAllowsStart: every member's generated, or the lines say why not),
+    // then PvP's lock: a lock is published only once the files are there.
+    return host && roomsync::RoomSyncAllowsStart() && StartAllowed();
 }
 }  // namespace
 

@@ -67,4 +67,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
   - 挂载**不画在模型上**（菜单渲染器只挂 WeaponTable 行），视口里用文字列出挂载。
   - 地面橙环与机甲 6 个槽位标注是 2D 叠加，位置由 `rp::Place` 投影原点算出：与模型是否对齐 **L**（未实机）。
 - 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自本机** `SupportCfg()` 与呼叫目录（`SupportCallKey` 按单位键匹配 → `Enabled` / `SupportCallPt` / `SupportCallPrice`）。H（代码）。房主的 `SupportDisabled` **没有同步给客人**（`host_settings.h` / `room_sync.h` 里没有这一项，2026-11-24 查），所以客人看到的是自己 ini 的规则，不一定是房主的。面板只读，不提供 `SupportDisabled` 编辑。H（代码检索）
-- 小队页签（第 1/2/3 小队）只响应鼠标点击；Z / C 在单列页面上切换视角预设。H（代码）
+- 小队页签（第 1/2/3 小队）：鼠标点击，或在士兵列表 / 士兵字段里按 A/D、右摇杆左右（`kAltPrev/kAltNext`，`SquadPage::Key`）切到上 / 下一小队的第一名士兵（循环）；单位列表里不响应。提示栏写明（`spSquadHintCentre/Details`）。Z / C 在单列页面上切换视角预设。H（代码）
+- 载具页「开火键」列（`sp::PylonFireKey`）：挂载码 1..10 对应的武器文件 `EDF6VC_<NAME>_<发数>.SGO` 按 `StoreSpecOfPrefix` 取 `StoreSpec::fireKey`；支援坦克上 3..6 显示「开火键 n：键盘键 / 手柄键」（本机 `VehicleFire<n>Key/Button`），其余显示「随主炮（切换键 切换弹种）」；战机（`jet_combat.cpp` 不看 fireKey）总是「随主武器（切换键）」，切换键 = `PlayerJetSwitchKey` / LB。目前 stores.inc 里挂载用的文件 fireKey 全是 0，所以实际都显示切换键。H（代码）
+- 游戏强制收走整备画面（失去输入 / 换画面 / 选关对象析构）时**放弃**未保存的修改（`DropEdits`：各页 `Discard`，记日志），下次打开在提示栏说明丢了几页（`armoryEditsDropped`）；不再静默保存。H（代码）
+- 状态条（`ar::StatusLines`，提示栏下最多 4 行，警告为红）：房间开始被挂起（`RoomSyncStartHeldLine`）、PvP 等待、上次保存结果、生成器状态（500 ms 读一次状态文件）、房间同步行、房主设置行。H（代码）
+- 房间里开始任务的闸门（`room_pvp.cpp StartGate`）：先 `RoomSyncAllowsStart`（`room_sync_logic.h HoldOf`：成员配置在路上 / 本机或成员生成中 / 成员核对清单 → 等待；本机或成员生成失败 / 无生成器 / 成员无预同步 / 房间清单读不出 → 失败，同样挂起，由同步行说明原因；仅超出房间上限的文件「按原版出动」与成员配置读不出「按默认」不挂起），再 PvP 锁。整备或地图切方案后 `RoomSyncNudge` 让下一次 Tick 立即重算。M（未实机：StartGate 与 room_ui 的 TickRoomSync 被假定在同一线程）

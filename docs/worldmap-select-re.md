@@ -268,6 +268,8 @@ const wchar_t* title = (const wchar_t*)(a + *(const i32*)(a + 8));   // 第 0 �
 - 插件自己的鼠标确认直调 `0x8A85C0`（§3.3），不经 Invoke，所以在直调前单独切方案（`AfterStock`）。
 - 只在行可进（`Enterable`）且 `+0x7B4 & 1`（可确认）时切；`entry+8 > 2`（未开放对话框）不切。确认后再弹的难度 / 下载对话框若被取消，方案**已经切了**（M：未做回滚，按「切方案 = 玩家已选的出动方案」处理）。
 
+- 出击等生成器（2026-11-24）：`Launch` 在切方案后读 `VariantGenerationStatus`：`running` 时**不调原版确认**——`InvokeHook` 直接返回 0（`0x8A4060` 在界面已析构时同样跳过 `call [rbp+18h]`，`0x8A40E4 test rsi,rsi; je 0x8A40F6`，返回值即 `cbRequestMission` 的 void，没人读，H），记下待出击的行；`AfterStock` 之后每 500 ms 查一次，生成结束直调 `0x8A85C0` 出击，光标离开该行或不可确认则取消；`failed` / `missing` 不出击，「本关出动」行显示红色错误，同一行再次确认则按现有文件出击（玩家明确选择，记日志）。等待 / 错误文本在「本关出动」行（琥珀 / 红底）。M（未实机）
+
 ### 10.2 合成返回键（M，未实机）
 
 - HUiLayout 更新 `0x84B490` 在 `0x84B544` 判返回：`[rbx+34h] == -1` 读合并的按下掩码 `Input+0x4524`，否则读该界面手柄的记录 `pad = [Input+0x4518+slot*4]`、掩码在 `pad*0xDD0+0xDBC`；`test byte [rax],80h`。签名（44 字节）`8B 43 34 83 F8 FF 75 09 48 8D 87 24 45 00 00 EB 18 48 63 8C 87 18 45 00 00 48 69 C1 D0 0D 00 00 48 05 BC 0D 00 00 48 03 C7 F6 00 80`。命中后放取消音 `0x84B950`，调取消回调 `[self+0x5F8]->vt[1](cb, &Result{vtable 0x17FE090, self+0x608})`，`+0x6B0` 临时追加 `"/CANCEL"`。

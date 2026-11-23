@@ -475,6 +475,7 @@ void FillWords() noexcept {
 void FillStatus(ar::StatusLines* out) noexcept {
     *out=ar::StatusLines{};
     wchar_t line[ar::kTextMost];
+    if(openRoomNow && roomsync::RoomSyncStartHeldLine(line,std::size(line)))out->Add(line,true);
     if(openRoomNow && RoomPvpWaitingLine(line,std::size(line)))out->Add(line,true);
     out->Add(saveNote,saveWarn);
     const ULONGLONG now=GetTickCount64();
@@ -678,6 +679,7 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
             Log("ARMORY preset op %d refused: %ls",static_cast<int>(fx.op),why);
             ar::Note(state,why);
         } else if(fx.op==ar::Op::switchTo) {
+            roomsync::RoomSyncNudge();   // the room's start gate reads the switched-in set's files at once
             weaponsPage.Refresh();
             if(iniRead)sp::Reload(support,iniRead,iniContext);   // the preset rewrote the support keys: shown as written
             BindSupport();
