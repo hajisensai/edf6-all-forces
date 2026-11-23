@@ -889,6 +889,11 @@ add_test(NAME armory_logic COMMAND armory_logic_test)
 add_executable(weapon_list_logic_test tests/weapon_list_logic_test.cpp)
 target_compile_options(weapon_list_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME weapon_list_logic COMMAND weapon_list_logic_test)
+# 整备界面的武器页（src/weapon_page_logic.h）：框架里用键鼠驱动、假游戏侧接小表（类别 / 来源 / 搜索 / 首字跳转 /
+# 装备与拒绝原因 / 收藏 / 3D 预览试拿与换回）。
+add_executable(weapon_page_logic_test tests/weapon_page_logic_test.cpp)
+target_compile_options(weapon_page_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME weapon_page_logic COMMAND weapon_page_logic_test)
 # It waits for its stand-in children however long a busy machine takes (they run at normal priority; only the
 # plugin's own generator is below normal, VariantGenerator): the hang guard is here.
 set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
@@ -1306,7 +1311,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test weapon_list_logic_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test weapon_list_logic_test weapon_page_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
