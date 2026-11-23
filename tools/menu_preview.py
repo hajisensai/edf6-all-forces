@@ -208,24 +208,40 @@ def check(game: rootcpk.Game, name: str, battle: bytes, unified: bytes, root: st
         raise ValueError(f'{name} 不是统一模型文件：{problems + [f"战斗键 {k} 变了" for k in moved]}')
 
 
-def unify_vehicle(game: rootcpk.Game, name: str, data: bytes, root: str | None = None) -> bytes:
-    """A vehicle's battle file `data` (a classic SGO: a tank / mech base or a support_loadout loaded variant, a jet from
-    pylib/vcobjects.py jet_sgo) with the vehicle menu keys (menu_model.vehicle_menu_keys: its own model and MAB; its
-    CAS, or for a jet CAS the renamed menu copy) derived from its battle keys. Keys a file already has from its source
-    (a loaded tank built on the unified base) are derived again, so a variant whose model differs never keeps the
-    base's; the same keys come back as the same bytes. ValueError as unify_soldier."""
-    version, members = sgo.read(data)
-    battle = {k: v for k, v in members.items() if k not in menu_model.VEHICLE_ADDED}
-    cas = battle[menu_model.BATTLE_MODEL][1]
+def unify_vehicle(game: rootcpk.Game, name: str, data: bytes, root: str | None = None,
+                  menu: list[str] | None = None) -> bytes:
+    """A vehicle's battle file `data` (a tank / mech base or a support_loadout loaded variant, a jet from
+    pylib/vcobjects.py jet_sgo; a classic SGO, or a DSGO for the mech frames written in one: V608_OLDROBOT) with the
+    vehicle menu keys (menu_model.vehicle_menu_keys: its own model and MAB; its CAS, or for a jet CAS the renamed menu
+    copy) derived from its battle keys. `menu`: the menu model's [archive, model] instead of the battle model's (a
+    loaded variant's merged model, pylib/menu_graft.py); the battle keys stay as they are either way. Keys a file
+    already has from its source (a loaded tank built on the unified base) are derived again, so a variant whose model
+    differs never keeps the base's; the same keys come back as the same bytes. ValueError as unify_soldier."""
+    if data[:4] == b'DSGO':
+        doc = dsgo.parse(data)
+        kept = [(i, n) for i, n in sorted(doc.root.names.items()) if n not in menu_model.VEHICLE_ADDED]
+        doc.root = dsgo.Node([doc.root.items[i] for i, _ in kept], {k: n for k, (_, n) in enumerate(kept)})
+        battle = {n: menu_model.plain(doc.root.items[k]) for k, n in doc.root.names.items()}
+        battle_bytes = dsgo.write(doc)
+    else:
+        version, members = sgo.read(data)
+        battle = {k: v for k, v in members.items() if k not in menu_model.VEHICLE_ADDED}
+        battle_bytes = sgo.write_depth_first(version, battle)
+    model = battle[menu_model.BATTLE_MODEL]
+    cas = model[1]
     jets = {c.lower() for c in jet_cas_sources()}
-    menu = menu_model.menu_cas_path(cas) if cas.lower() in jets else cas
+    menu_cas_ = menu_model.menu_cas_path(cas) if cas.lower() in jets else cas
     _, stock = sgo.read(game.read(menu_model.MENU_FOLDER, menu_model.VEHICLE_STOCK))
-    keys = menu_model.vehicle_menu_keys(stock, battle[menu_model.BATTLE_MODEL], menu)
-    if all(k in members and menu_model.plain(members[k]) == menu_model.plain(v) for k, v in keys.items()):
+    keys = menu_model.vehicle_menu_keys(stock, [list(menu) if menu else model[0], cas, model[2]], menu_cas_)
+    have = menu_model.members_of(data)
+    if all(k in have and have[k] == menu_model.plain(v) for k, v in keys.items()):
         out = data
+    elif data[:4] == b'DSGO':
+        menu_model.add_dsgo(doc.root, keys)
+        out = dsgo.write(doc)
     else:
         out = sgo.write_depth_first(version, menu_model.add_sgo(battle, keys))
-    check(game, name, sgo.write_depth_first(version, battle), out, root)   # its menu keys (any) derived again
+    check(game, name, battle_bytes, out, root)   # its menu keys (any) derived again
     return out
 
 
