@@ -269,24 +269,26 @@ public:
     const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabMission); }
     int Rows(int) const noexcept override { return room ? 2 : 1; }
     void RowLine(int,int row,ar::Line* out) const noexcept override {
-        if(row==0){ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryWorldMap));out->dim=true;return;}
+        if(row==0){ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryWorldMap));return;}
         ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryPvp));
     }
-    int Items(const ar::Pos& p) const noexcept override { return p.row==1 ? 1 : 0; }
-    void ItemLine(const ar::Pos&,ar::Line* out) const noexcept override {
-        ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryPvp));
+    int Items(const ar::Pos& p) const noexcept override { return p.row==0 || p.row==1 ? 1 : 0; }
+    void ItemLine(const ar::Pos& p,ar::Line* out) const noexcept override {
+        ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(p.row==0 ? Tx::armoryWorldMap : Tx::armoryPvp));
     }
-    int Fields(const ar::Pos& p) const noexcept override { return p.row==1 ? 1 : 0; }
+    int Fields(const ar::Pos& p) const noexcept override { return p.row==0 || p.row==1 ? 1 : 0; }
     void FieldLine(const ar::Pos&,ar::Line* out) const noexcept override {
         ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryPvpOpen));
         out->acts=true;
     }
+    // Row 0: the world map (the screen's own mission select: room_ui.cpp presses its button); row 1: the 对战 pages.
     bool Activate(const ar::Pos& p) noexcept override {
+        if(p.row==0){mapAsked=true;return true;}
         if(p.row!=1)return false;
         asked=true;
         return true;
     }
-    bool asked=false;
+    bool asked=false,mapAsked=false;
 private:
     bool room=false;
 };
@@ -305,6 +307,9 @@ ar::View building;            // big: not on the stack
 unsigned char* openOn=nullptr;
 bool latched=false;           // closed with one of its keys still held: the screen's input stays taken until they are up
 bool pvpAsked=false;
+bool openRoom=false;   // opened over the room (else the HQ)
+bool mapAsked=false;   // the world map asked (the 任务 tab chosen on the HQ, or its row activated): room_ui opens it
+int openTab=-1;        // the world map's title bar asked 整备 open at this tab (the next frame the screen has its input)
 
 void FillWords() noexcept {
     words.title=hudtext::Tr(Tx::armoryTitle);
@@ -422,7 +427,7 @@ bool Install() noexcept {
 }
 bool Installed() noexcept { return installed; }
 
-void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept {
+void Open(unsigned char* self,bool room,const roommenu::Menu* units,int tab) noexcept {
     if(!installed || !self)return;
     Subclass();
     FillWords();
@@ -431,7 +436,11 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept {
     playerPage.Refresh();
     missionPage.Bind(room);
     missionPage.asked=false;
+    missionPage.mapAsked=false;
     pvpAsked=false;
+    mapAsked=false;
+    openRoom=room;
+    if(tab>=0 && tab<kPageCount)state.tab=tab;
     wchar_t why[160]{};
     if(!armorypresets::Load(why,std::size(why))) {
         wchar_t note[ar::kTextMost];
@@ -464,7 +473,11 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     }
     FillWords();
     const ar::Input in=ReadInput(toggleDown);
+    const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);
+    // The HQ's 任务 tab is the world map itself (its page has nothing else there): chosen, the map opens. In the room the
+    // page keeps its 对战 row; its world map row opens the map.
+    if(state.open && !openRoom && tabWas!=state.tab && kPages[state.tab]==&missionPage)missionPage.mapAsked=true;
     if(fx.op!=ar::Op::none) {
         wchar_t why[160]{};
         if(!armorypresets::Apply(fx,why,std::size(why))) {
@@ -474,8 +487,9 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         armorypresets::Fill(&presets);
     }
     if(missionPage.asked){missionPage.asked=false;pvpAsked=true;ar::Close(state);}
+    if(missionPage.mapAsked){missionPage.mapAsked=false;mapAsked=true;ar::Close(state);}
     if(!state.open) {
-        CloseNow(pvpAsked ? "the 对战 pages asked" : "its own keys");
+        CloseNow(pvpAsked ? "the 对战 pages asked" : mapAsked ? "the world map asked" : "its own keys");
         latched=AnyHeld(in);
         return true;   // this frame's keys were ours
     }
@@ -488,11 +502,23 @@ bool TakePvpRequest() noexcept {
     pvpAsked=false;
     return asked;
 }
+bool TakeMapRequest() noexcept {
+    const bool asked=mapAsked;
+    mapAsked=false;
+    return asked;
+}
+void AskOpen(int tab) noexcept { openTab=tab>=0 && tab<kPageCount ? tab : -1; }
+int TakeOpenAsk() noexcept {
+    const int tab=openTab;
+    openTab=-1;
+    return tab;
+}
 
 void Forget() noexcept {
     CloseNow("forgotten: a mission starting, the screen left or the plugin off");
     latched=false;
     pvpAsked=false;
+    mapAsked=false;
 }
 
 void ScreenGone(unsigned char* self) noexcept {

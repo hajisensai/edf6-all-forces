@@ -1231,3 +1231,7 @@ HUDTEXT(armoryPvp,L"Versus settings",L"对战设置",L"對戰設定",L"対戦設
 HUDTEXT(armoryPvpOpen,L"Open",L"打开",L"開啟",L"開く")
 HUDTEXT(armoryWorldMap,L"Missions: pick on the world map (mission select)",L"任务：在世界地图（任务选择）里挑选",L"任務：在世界地圖（任務選擇）裡挑選",L"ミッション：世界地図（ミッション選択）で選ぶ")
 HUDTEXT(armoryPresetsOff,L"Presets unavailable: %ls",L"方案不可用：%ls",L"方案不可用：%ls",L"プリセット使用不可：%ls")
+HUDTEXT(mapLaunch,L"Deploy with",L"本关出动",L"本關出動",L"出撃プリセット")
+HUDTEXT(mapLaunchKeys,L"1-8 / click: preset",L"1-8 / 点击：选方案",L"1-8 / 點擊：選方案",L"1-8 / クリック：プリセット")
+HUDTEXT(mapLaunchNone,L"As equipped (no presets: make them in the armory)",L"当前装备（还没有方案：在整备里新建）",L"目前裝備（還沒有方案：在整備裡新建）",L"現在の装備（プリセットなし：整備で作成）")
+HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")

@@ -20,7 +20,8 @@ bool Installed() noexcept;
 // --- The UI thread (room_ui.cpp Frame) ---
 // Opened on screen object `self` over `units` (room_ui's menu, loaded from the ini just now; it must stay alive and
 // unchanged while open). The keys held now count as already down (the key that opened it does nothing inside).
-void Open(unsigned char* self,bool room,const roommenu::Menu* units) noexcept;
+// `tab` >= 0: opened at that page (armory.cpp kPages: 0 小队, 1 载具, 2 武器, 3 任务), else at the last one.
+void Open(unsigned char* self,bool room,const roommenu::Menu* units,int tab=-1) noexcept;
 bool IsOpen() noexcept;
 // One frame. `hasInput`: the screen would read input this frame (nothing of the game's over it); `toggleDown`: the
 // open / close key or pad combination is held (room_ui's KeysDown). Closed when the screen lost its input (a game
@@ -29,6 +30,13 @@ bool IsOpen() noexcept;
 bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept;
 // The 对战设置 row picked (the room's PvP pages, room_ui.cpp's native dialogs): true once per request.
 bool TakePvpRequest() noexcept;
+// The world map asked (the HQ's 任务 tab chosen, or the 任务 page's world map row): true once per request; room_ui
+// presses the screen's own mission select button (closed already).
+bool TakeMapRequest() noexcept;
+// The world map's title bar (worldmap.cpp): a tab other than the map's clicked; the select is closed the stock way and
+// the next frame its screen (the HQ / the room) has its input, room_ui opens 整备 at `tab` (TakeOpenAsk: once, -1 none).
+void AskOpen(int tab) noexcept;
+int TakeOpenAsk() noexcept;
 // Closed at once, nothing committed (a mission starting, the screen forgotten, the plugin turned off).
 void Forget() noexcept;
 

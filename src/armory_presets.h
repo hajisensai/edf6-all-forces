@@ -25,6 +25,12 @@ void Fill(armory::Presets* out) noexcept;
 // One preset operation the screen asked for (armory::Effects op / index / name). False, *why set, when refused or when
 // it failed; what was not done is left as it was (a failed switch writes neither the ini nor the book).
 bool Apply(const armory::Effects& fx,wchar_t* why,std::size_t cap) noexcept;
+// Stage 6, the world map's 本关出动 (worldmap.cpp, the UI thread): the preset mission `key` (the list's field 2, e.g.
+// L"EDF6/M000B") is remembered to start with, -1 none (or the book unread).
+int MissionPreset(const wchar_t* key) noexcept;
+// Mission `key` remembered to start with preset `index`, the book written; false, *why set, when refused (the book
+// unread, no such preset, a key the book does not take, the book full) or not written (the book as it was).
+bool RememberMission(const wchar_t* key,int index,wchar_t* why,std::size_t cap) noexcept;
 // The player's class and every slot's weapon now, by row name. False: no game status or weapon table yet.
 bool ReadPlayer(preset::Player* out) noexcept;
 
