@@ -89,4 +89,30 @@ inline void ScreenOf(const Matrix4& m,const float p[3],float aspect,float out[2]
     out[1]=(1.f-n.y)*0.5f*kDesignH;
 }
 
+// --- The squad side by side (docs/room-3d-preview-re.md section 6.3): soldier i of n stands in the i-th of n equal
+// columns of the viewport, each placed by Place as one soldier in its own rect (the same camera, the same size: a
+// soldier fills its column's height). The page draws each one's floor ring at FeetOf of the same rect, so the ring and
+// the model meet by construction (the feet do not move with the yaw: Place's row 1 has no yaw in it).
+inline constexpr int kSquadMost=4;   // the views at once: the game's own index-0 view and three the preview makes
+inline ViewRect SquadRectOf(const ViewRect& r,int n,int i) noexcept {
+    if(n<1)n=1;
+    if(n>kSquadMost)n=kSquadMost;
+    if(i<0 || i>=n)return ViewRect{};
+    const float w=r.w/static_cast<float>(n);
+    return ViewRect{r.x+w*static_cast<float>(i),r.y,w,r.h};
+}
+// Where a soldier placed in `r` has its feet on screen (design units).
+inline void FeetOf(const ViewRect& r,const ViewCamera& c,float aspect,float out[2]) noexcept {
+    const Matrix4 m=Place(r,c,ModelFrame{},0.f,aspect);
+    const float origin[3]={0,0,0};
+    ScreenOf(m,origin,aspect,out);
+}
+// The soldier column under (x, y) (-1: outside the viewport).
+inline int SquadSlotAt(const ViewRect& r,int n,float x,float y) noexcept {
+    if(n<1 || r.w<=0 || x<r.x || x>=r.x+r.w || y<r.y || y>=r.y+r.h)return -1;
+    if(n>kSquadMost)n=kSquadMost;
+    const int i=static_cast<int>((x-r.x)/(r.w/static_cast<float>(n)));
+    return i<n ? i : n-1;
+}
+
 }  // namespace crew::roompreview

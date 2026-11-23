@@ -56,7 +56,26 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x93B895, 0x3B, 'msg 4: {player, slot, row}: +0x368 = slot, +0x36C[slot] = row, then the Desc rebuilt'),
     (0x93C1C7, 0x35, 'msg 7: {0} / {1, player}: +0x304 = 0 / 1 (this player) / 2 (another: hidden)'),
     (0x93CF1F, 0x22, 'update: +0x30C = 1, 0 when +0x304 is 2 (Draw skips it)'),
+    # The squad's views the preview makes (docs/room-3d-preview-re.md section 6.3): made as HUiHQ3DModel makes its own,
+    # killed as the UI system kills any object.
+    (0x8783B1, 0x53, 'HUiHQ3DModel 0x8782C0: a view made: createInfo {0x1800508, HQ+0x48 (the UI system), 0, 0, &out, count, index, 1}, new 0x450, 0x938760'),
+    (0x87841B, 0x53, 'HUiHQ3DModel: its strong ref of the new view released (uses +8, _Destroy, weaks +0xC)'),
+    (0x938760, 20, 'UiHQ_3DModelView constructor (view, createInfo)'),
+    (0x9392D6, 7, 'constructor: +0x3EC = 0 (shown)'),
+    (0x9393B0, 0x28, 'constructor end: msg 3 {index, class, outfit} to itself (the build posted before the override can arm)'),
+    (0x11A3F04, 0x22, 'UI node base constructor 0x11A3EA0: node +0x48 = createInfo +8 (the UI system)'),
+    (0x119CDA0, 0x4A, 'UI system: an object registered: under the lock +0x60 into the pending list +0x18, flags |= 0x20'),
+    (0x119D2A4, 0x0D, 'UI system frame 0x119D270: the lock +0x60 taken (the pending list moved into the main list)'),
+    (0x119D308, 5, 'UI system frame: the lock released before the updates (an object made in an update waits a frame)'),
+    (0x11A4450, 0x15, 'Kill: flags |= 1, then slot 4; the system releases its ref the next frame'),
+    (0x12D85B0, 9, 'operator new (the deleting destructor frees with the sized delete 0x12D85EC)'),
+    (0x11A45F0, 0x15, 'the shared_ptr control block of the view _Destroy: object slot 5 (the deleting destructor), 1'),
 )
+
+# A view made as HUiHQ3DModel makes one: the lea of createInfo +0 (its type pointer), the call of the constructor.
+VIEW_CREATE_INFO = (0x8783B1, 0x1800508)
+VIEW_CONSTRUCT = (0x8783FF, 0x938760)
+VIEW_NEW = (0x8783EA, 0x12D85B0)
 
 # The model matrix call the placement hook redirects (docs/room-3d-preview-re.md section 6.2): call site, target.
 WORLD_MATRIX_CALL = (0x93D1A1, 0x1100B90)
@@ -74,6 +93,8 @@ FIND_MEMBER_ENTRIES = {0: 0x238F90, 1: 0x238DF0, 2: 0x239060}
 SLOTS: tuple[tuple[int, int, int], ...] = (
     (0x180FA60, 1, 0x93CE30), (0x180FA60, 3, 0x93B320), (0x180FA60, 5, 0x93A2C0),
     (0x180FDB0, 2, 0x9424A0), (0x180FE20, 2, 0x942590),
+    # not chained, relied on: Kill's slot 4 (a ret) and the view's control block _Destroy
+    (0x180FA60, 4, 0x7CAF80), (0x1AE29F8, 0, 0x11A45F0),
 )
 
 
