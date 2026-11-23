@@ -11,11 +11,14 @@ the battle reads animation_model. No menu-only model file exists.
   random_animation       the class's stock menu idle poses
   soldier_weapon_slot / soldier_weapon_grab_adjust   the template's own (the menu reads the same shape)
 
-And the menu CAS of the support jets: their CAS v506_heli.cas has `Roter` / `Main` but no `main`, the anmgroup the menu
-renderer looks up case-sensitively (EDF.dll 0x93FB85) and indexes without a check (0x93EBAC: -1 crashed test site #50),
-so MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS is that CAS with the one anmgroup's name lower-cased in place (same length), the
-animation resource the jets' menu_animation_model names (pylib/vcobjects.py jet_sgo); the jets' own CAS is untouched.
-build() refuses (ValueError) any file menu_model.menu_problems finds lacking or whose battle keys moved.
+And the menu CAS of the jets: their CAS (v506_heli.cas, or a jet's own retarget of it: pylib/jet_models.py animation,
+pylib/xm_air_model.py) has `Roter` / `Main` but no `main`, the anmgroup the menu renderer looks up case-sensitively
+(EDF.dll 0x93FB85) and indexes without a check (0x93EBAC: -1 crashed test site #50), so MENUOBJECT/EDF6VC_MENU_<CAS>.CAS
+is that CAS with the one anmgroup's name lower-cased in place (same length), the animation resource the jets'
+menu_animation_model names (pylib/vcobjects.py jet_sgo); the jets' own CAS are untouched. A jet's own CAS is read from
+Mods (the tool that flies the jet wrote it before); one not there is a jet not installed: no copy, nothing previews it.
+build() refuses (ValueError) any file menu_model.menu_problems finds lacking (the menu CAS's `main` always read and
+checked) or whose battle keys moved.
 
 Written into <game>/Mods as this tool's in the ledger (pylib/ledger.py, owner OWNER); Root.cpk only read.
 
@@ -52,8 +55,16 @@ def template_names() -> list[str]:
     return [t + suffix for n, _, t in support_loadout.KINDS if support_loadout.has_looks(n) for suffix in ('', '_LEADER')]
 
 
-def jet_cas_rel() -> str:
-    return f'{menu_model.MENU_FOLDER}/{menu_model.menu_cas_name(JET_CAS)}'
+def jet_cas_rel(cas: str = JET_CAS) -> str:
+    """The Mods path of `cas`'s menu copy (MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS for the 506's)."""
+    return f'{menu_model.MENU_FOLDER}/{menu_model.menu_cas_name(cas)}'
+
+
+def jet_cas_sources() -> list[str]:
+    """Every CAS a jet flies on (lower case app:/ paths): the 506's, then each jet's own retarget (vcobjects.JETS)."""
+    import vcobjects
+    own = sorted({c.lower() for c in map(vcobjects.jet_own_cas, vcobjects.JETS.values()) if c})
+    return [JET_CAS] + [c for c in own if c != JET_CAS]
 
 
 def rels() -> list[str]:
@@ -170,15 +181,7 @@ def unify_soldier(game: rootcpk.Game, name: str, data: bytes,
 
 def check(game: rootcpk.Game, name: str, battle: bytes, unified: bytes, root: str | None = None) -> None:
     """ValueError when `unified` lacks what either loader needs or a battle key differs from `battle`."""
-    def read_cas(path: str) -> bytes | None:
-        import support_loadout
-        if path.lower() == menu_model.menu_cas_path(JET_CAS):
-            return jet_menu_cas(game)   # this tool's own file: made here, whether or not it is on disk yet
-        try:
-            return support_loadout._source(root, game, *cas_ref(path))
-        except ValueError:
-            return None
-    problems = menu_model.menu_problems(unified, read_cas)
+    problems = menu_model.menu_problems(unified, read_cas_for(game, root))
     moved = menu_model.battle_equal(battle, unified)
     if problems or moved:
         raise ValueError(f'{name} 不是统一模型文件：{problems + [f"战斗键 {k} 变了" for k in moved]}')
@@ -201,21 +204,48 @@ def unify_vehicle(game: rootcpk.Game, name: str, data: bytes, root: str | None =
     return out
 
 
-def jet_menu_cas(game: rootcpk.Game) -> bytes:
-    """MENUOBJECT/EDF6VC_MENU_V506_HELI.CAS: the jets' CAS with `Main` named `main`."""
-    renamed = menu_cas(game.read(*cas_ref(JET_CAS)))
+def jet_menu_cas(game: rootcpk.Game, cas: str = JET_CAS, root: str | None = None) -> bytes | None:
+    """The menu copy of jet CAS `cas` (MENUOBJECT/EDF6VC_MENU_<name>.CAS): it with `Main` named `main`. The 506's is
+    read from Root.cpk; a jet's own from Mods under `root` (None: not there, that jet is not installed)."""
+    if cas.lower() == JET_CAS:
+        source = game.read(*cas_ref(JET_CAS))
+    else:
+        path = os.path.join(root, 'Mods', *cas_ref(cas)) if root else ''
+        if not path or not os.path.isfile(path):
+            return None
+        with open(path, 'rb') as f:
+            source = f.read()
+    renamed = menu_cas(source)
     if renamed is None:
-        raise ValueError(f'{JET_CAS} 已有 {MENU_ANMGROUP!r}：菜单 CAS 不再需要，改 pylib/vcobjects.py jet_sgo')
+        raise ValueError(f'{cas} 已有 {MENU_ANMGROUP!r}：菜单 CAS 不再需要，改 pylib/vcobjects.py jet_sgo')
     return renamed
 
 
+def read_cas_for(game: rootcpk.Game, root: str | None):
+    """menu_model.menu_problems' `read_cas`: a jet menu copy made as build makes it (whether or not it is on disk
+    yet), any other CAS as the game loads it (Mods, else Root.cpk); None when nowhere."""
+    copies = {menu_model.menu_cas_path(c): c for c in jet_cas_sources()}
+
+    def read_cas(path: str) -> bytes | None:
+        import support_loadout
+        if path.lower() in copies:
+            return jet_menu_cas(game, copies[path.lower()], root)
+        try:
+            return support_loadout._source(root, game, *cas_ref(path))
+        except ValueError:
+            return None
+    return read_cas
+
+
 def build(game: rootcpk.Game, root: str | None = None) -> dict[str, bytes]:
-    """{Mods path: bytes}: every template's unified file and the jets' menu CAS, from Root.cpk (read only). `root` is
-    unused (the files depend on Root.cpk alone)."""
-    del root
+    """{Mods path: bytes}: every template's unified file (Root.cpk, read only) and the jets' menu CAS (the 506's always;
+    a jet's own retarget when its tool wrote it under `root`'s Mods)."""
     every: dict[tuple[str, str], set[str]] = {}
     files = {f'OBJECT/{n}.SGO': unify_soldier(game, n, game.read('OBJECT', n + '.SGO'), every) for n in template_names()}
-    files[jet_cas_rel()] = jet_menu_cas(game)
+    for cas in jet_cas_sources():
+        made = jet_menu_cas(game, cas, root)
+        if made is not None:
+            files[jet_cas_rel(cas)] = made
     return files
 
 

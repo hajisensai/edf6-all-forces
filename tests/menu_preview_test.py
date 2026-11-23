@@ -155,8 +155,15 @@ def check_model_offline() -> None:
     check(keys['change_color'] == [[0, 'change_color0'], ['head', 'change_color1']], 'selectors one a channel')
     after = sgo.write_depth_first(version, mm.add_sgo(battle, keys))
     check(mm.battle_equal(before, after) == [], 'only menu keys added: every battle key equal')
-    check(mm.menu_problems(after) == [], 'a unified file')
-    missing = mm.menu_problems(before)
+    # Offline the CAS bytes are stand-ins: b'CAS' has the menu's `main`, b'HELI' only the 506's `Main` (#50).
+    groups = mm.cas_groups
+    mm.cas_groups = lambda cas: {b'CAS': ['weapon', 'main'], b'HELI': ['Roter', 'Main']}[cas]
+    has_main = lambda _p: b'CAS'  # noqa: E731
+    check(mm.menu_problems(after, has_main) == [], 'a unified file')
+    heli = mm.menu_problems(after, lambda _p: b'HELI')
+    check(heli == [f"菜单 CAS {stock['animation_model'][1]} 没有名为 'main' 的动画组（['Roter', 'Main']）：渲染器会拿 -1 当下标"],
+          f'a menu CAS without `main`: refused (the -1 index) {heli}')
+    missing = mm.menu_problems(before, has_main)
     check(missing == [f'缺 {k}' for k in (mm.MENU_MODEL, 'change_color', 'random_animation')], f'battle-only: {missing}')
     moved = dict(mm.add_sgo(battle, keys))
     moved['durability'] = mm._f(1.0)
@@ -168,8 +175,9 @@ def check_model_offline() -> None:
     check(no_main == [f'菜单 CAS {stock["animation_model"][1]} 不存在'], f'the menu CAS nowhere: refused {no_main}')
     bad = dict(mm.add_sgo(battle, keys))
     bad[mm.MENU_MODEL] = ['x.cas']
-    check(mm.menu_problems(sgo.write_depth_first(version, bad)) == [f'{mm.MENU_MODEL} 不是 [[archive, model], CAS, MAB]'],
+    check(mm.menu_problems(sgo.write_depth_first(version, bad), has_main) == [f'{mm.MENU_MODEL} 不是 [[archive, model], CAS, MAB]'],
           'a malformed menu model refused')
+    mm.cas_groups = groups
 
 
 def check_real(game: object, game_dir: str) -> None:
@@ -185,9 +193,29 @@ def check_real(game: object, game_dir: str) -> None:
           sum(a != b for a, b in zip(jet_cas, heli)) == 1, 'the jet menu CAS: only that name lower-cased, in place')
     check(mp.menu_cas(game.read('OBJECT', 'V505_TANK.CAS')) is None, "the tank's CAS has `main`: used as it is")
 
+    import jet_models
+    built = {f'app:/object/{c.lower()}': m for m, c in jet_models.ANIMATIONS.items()}
+
+    def own_cas(cas: str) -> bytes | None:
+        """A jet CAS as its tool makes it: the 506's from Root.cpk, the carrier's / drone's built here, an X-Morph
+        jet's from the game's Mods (built from the model pack at install; None: that jet is not installed)."""
+        if cas == mm.JET_CAS:
+            return game.read(*mp.cas_ref(cas))
+        if cas in built:
+            return jet_models.animation(game, built[cas])
+        path = os.path.join(game_dir, 'Mods', *mp.cas_ref(cas))
+        return read(path) if os.path.isfile(path) else None
+    sources = {c: own_cas(c) for c in mp.jet_cas_sources()}
+    for cas, source in sources.items():
+        if source is not None:
+            made = mp.menu_cas(source)
+            check(made is not None and [n for _, n in mp.anmgroups(made)] == ['Roter', 'main'],
+                  f'{cas}: a heli retarget (`Main`), its menu copy has `main`')
+
     def read_cas(path: str) -> bytes | None:
-        if path.lower() == mm.menu_cas_path(mm.JET_CAS):
-            return jet_cas
+        for cas, source in sources.items():
+            if path.lower() == mm.menu_cas_path(cas):
+                return None if source is None else mp.menu_cas(source)
         try:
             return game.read(*mp.cas_ref(path))
         except KeyError:
@@ -224,17 +252,22 @@ def check_real(game: object, game_dir: str) -> None:
         made = support_loadout.soldier_file(game, kind, leader, look, support_loadout.PACKS[0][1])
         check(mm.menu_problems(made, read_cas) == [] and mm.battle_equal(battle, made) == [],
               f'{kind} variant: unified, its battle keys the variant\'s')
-    # Every plugin jet (pylib/vcobjects.py jet_sgo): unified at the source, its menu CAS the renamed one.
+    # Every plugin jet (pylib/vcobjects.py jet_sgo): unified at the source, its menu CAS always the renamed copy of its
+    # own (the carrier's, the drone's and the X-Morph jets' retargets too: `Main` only, the -1 index of #50).
+    unchecked = []
     for name in vcobjects.JETS:
         made = vcobjects.jet_sgo(game, name)
         m = mm.members_of(made)
-        own = [] if read_cas(m[mm.MENU_MODEL][1]) is not None else ['custom CAS']   # a jet on a CAS made elsewhere
-        problems = mm.menu_problems(made, read_cas if not own else None)
+        check(m[mm.MENU_MODEL][1] == mm.menu_cas_path(m['animation_model'][1]), f'jet {name}: the renamed menu CAS')
+        if sources.get(m['animation_model'][1].lower(), b'') is None:   # an X-Morph jet not installed on this machine
+            unchecked.append(name)
+            continue
+        problems = mm.menu_problems(made, read_cas)
         check(problems == [], f'jet {name}: {problems}')
         check(m[mm.MENU_MODEL][0] == m['animation_model'][0][:2] and m[mm.MENU_MODEL][2] == m['animation_model'][2],
               f'jet {name}: its own model and MAB')
-        if m['animation_model'][1].lower() == mm.JET_CAS:
-            check(m[mm.MENU_MODEL][1] == mm.menu_cas_path(mm.JET_CAS), f'jet {name}: the renamed menu CAS')
+    if unchecked:
+        print(f'menu_preview_test: {len(unchecked)} X-Morph jets not installed here, their menu CAS not read: {unchecked[:4]}')
     # A loaded tank (support_loadout's EDF6VC_LO_*): its unified file over the loaded battle file.
     errors: dict[str, str] = {}
     with contextlib.redirect_stdout(io.StringIO()):
