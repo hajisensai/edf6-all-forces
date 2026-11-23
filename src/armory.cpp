@@ -24,6 +24,7 @@
 #include "support_call.h"
 #include "support_config.h"
 #include "support_pages.h"
+#include "support_points_logic.h"
 #include "weapon_equip.h"
 #include "weapon_page_logic.h"
 #include "worldmap_logic.h"
@@ -365,24 +366,39 @@ void FillFireKeys(sp::Env& e) noexcept {
     }
 }
 
-// The pages' environment: online or not, who hosts, the crew kinds and each unit's call rule. The rules are this
-// machine's (SupportCfg / the catalog): the host's SupportDisabled is not synced to guests (docs/armory-re.md).
+// Each menu unit's catalog entry (SupportCallKey matched by its key; -1: not in the catalog), found at Open.
+int unitCatalog[rm::kMostUnits]{};
+// Each unit's call rule (sp::Env::rule) as the room plays by it (host_settings.h SupportRulesInEffect): offline and as
+// the host this machine's SupportDisabled / SupportPtScale, as a guest the host's (its room word v4; until it arrived the
+// panel says it waits). Every frame: the host's word may arrive or change while the page is open.
+void FillRules() noexcept {
+    sp::Env& e=support.env;
+    const hostcfg::SupportRules r=SupportRulesInEffect();
+    e.host=OnlineHostOnly();
+    e.rulesKnown=r.known;
+    for(int i=0;i<support.menu.unitCount && i<rm::kMostUnits;++i) {
+        const int c=unitCatalog[i];
+        if(c<0){e.rule[i]=sp::HostRule{};continue;}
+        const std::uint32_t pt=SupportCallPt(c);
+        e.rule[i]=sp::HostRule{true,hostcfg::SupportCallable(r,c),pt,support_points::Price(pt,r.ptScale)};
+    }
+}
+// The pages' environment: online or not, who hosts, the crew kinds and each unit's call rule (FillRules).
 void FillEnv(bool room,bool previewOn) noexcept {
     sp::Env& e=support.env;
     e=sp::Env{};
     e.online=room;
-    e.host=OnlineHostOnly();
     e.previewOn=previewOn;
     e.fileThere=roompreview::PreviewFileThere;
     e.kinds=crew::roomui::CrewKinds{SupportCfg().vehicleCrew,SupportCfg().aircraftCrew};
-    for(int i=0;i<support.menu.unitCount && i<rm::kMostUnits;++i) {
-        const wchar_t* key=support.menu.unit[i].key;
+    for(int i=0;i<rm::kMostUnits;++i) {
+        unitCatalog[i]=-1;
+        const wchar_t* key=i<support.menu.unitCount ? support.menu.unit[i].key : nullptr;
         if(!key || !*key)continue;
-        for(int c=0;c<SupportCallCount();++c) {
-            const wchar_t* k=SupportCallKey(c);
-            if(k && _wcsicmp(k,key)==0){e.rule[i]=sp::HostRule{true,SupportCfg().Enabled(c),SupportCallPt(c),SupportCallPrice(c)};break;}
-        }
+        for(int c=0;c<SupportCallCount();++c)
+            if(const wchar_t* k=SupportCallKey(c);k && _wcsicmp(k,key)==0){unitCatalog[i]=c;break;}
     }
+    FillRules();
     FillFireKeys(e);
 }
 void BindSupport() noexcept {
@@ -673,6 +689,7 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         return false;
     }
     FillWords();
+    FillRules();
     const ar::Input in=ReadInput(toggleDown);
     const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);

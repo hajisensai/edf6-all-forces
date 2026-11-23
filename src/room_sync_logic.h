@@ -39,6 +39,7 @@
 // <state>: r ready, g generating (or about to), f the generator failed, n no generator installed, w no set to check yet.
 #pragma once
 #include "coop_member_attribute_api.h"
+#include "host_settings_logic.h"
 #include "hudtext.h"
 #include "player_vehicle_logic.h"
 #include "room_sync.h"
@@ -71,8 +72,10 @@ inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
 inline constexpr std::size_t kConfigBudget=3800;      // all configuration values together (header bytes included)
-static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
-              "the configuration, readiness and own player loadouts fit Coop's budget");
+// Beside them every member publishes its room word (host_settings_logic.h EDF6X_AF_ROOM, kWordMost: since word v4 it
+// carries the host's SupportDisabled / SupportPtScale too, 2026-11-24).
+static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost+hostcfg::kWordMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
+              "the configuration, readiness, own player loadouts and the room word fit Coop's budget");
 // "1;" + 16 + ";" + 1 digit + ";": 21 bytes; a further part's "<16 hex>;": 17.
 inline constexpr std::size_t kConfigHeader=21,kPartHeader=17;
 // The longest line: the budget less every header.

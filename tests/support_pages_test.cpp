@@ -312,6 +312,25 @@ void InBuild() {
     Expect(base.holeQuads==0,"the own-load line: no model, no hole");
     Expect(HasText(base,hudtext::Tr(Tx::spPanelTitle)),"the rules panel");
     Expect(HasText(base,hudtext::Tr(Tx::spGuestRules)),"a guest reads the host's rules");
+    {
+        // The host's price line (its SupportPtScale already applied by armory.cpp FillRules) and its refusal shown.
+        wchar_t pt[ar::kTextMost],line[ar::kTextMost];
+        _snwprintf_s(pt,_TRUNCATE,hudtext::Tr(Tx::spRulePt),120u,3000);
+        _snwprintf_s(line,_TRUNCATE,L"%ls  %ls",hudtext::Tr(Tx::spRuleOff),pt);
+        Expect(HasText(base,line),"the host's rule: disabled, its pt and price");
+        // Before the host's word arrived: the panel waits, nothing greyed by a rule not known.
+        model.env.rulesKnown=false;
+        ar::Build(st,pages,2,ps,w,&built);
+        ar::Line waiting;squads.RowLine(0,s,&waiting);
+        Expect(HasText(built.layer[0],hudtext::Tr(Tx::spRuleWaiting)) && !HasText(built.layer[0],line) && !waiting.dim,
+               "a guest without the host's rules yet: waiting, not this machine's");
+        model.env.rulesKnown=true;
+        model.env.host=true;
+        ar::Build(st,pages,2,ps,w,&built);
+        Expect(HasText(built.layer[0],hudtext::Tr(Tx::spHostRules)) && HasText(built.layer[0],line),"the host: its own rules, said so");
+        model.env.host=false;
+        ar::Build(st,pages,2,ps,w,&built);
+    }
     Expect(HasText(base,hudtext::Tr(Tx::spOnlySelected)),"the box says the view shows the selected soldier");
     squads.Activate(ar::Pos{0,s,0,0});
     squads.Activate(ar::Pos{0,s,1,0});
