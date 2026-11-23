@@ -117,6 +117,15 @@ void SquadEdits() {
     ar::Pos click{0,row,0,0};
     const skin::Rect t=sp::SquadTab(2);
     Expect(page.Click(click,(t.x0+t.x1)/2,(t.y0+t.y1)/2) && click.item==8,"the third squad tab selects soldier 9");
+    // the same tabs from the keyboard / pad (A/D, right stick): next / previous squad, wrapping; not in the unit list
+    const ar::Input none{};
+    ar::Pos key{0,row,5,2};
+    Expect(page.Key(key,1,ar::kAltNext,none) && key.item==8 && key.field==0,"A/D: soldier 6 -> squad 3's first");
+    Expect(page.Key(key,2,ar::kAltNext,none) && key.item==0,"past the last squad: back to the first");
+    Expect(page.Key(key,1,ar::kAltPrev,none) && key.item==8,"before the first: the last");
+    Expect(!page.Key(key,0,ar::kAltNext,none) && key.item==8,"the unit list: not a squad key");
+    Expect(!page.Key(key,1,ar::kJumpNext,none),"other keys are the state's");
+    Expect(page.Hint(key,1)!=nullptr && page.Hint(key,0)==nullptr,"the hint says the squad keys where they work");
     Expect(rm::CollectSave(model.menu,&model.set),"every squad edit reads back");
 }
 

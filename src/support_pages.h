@@ -361,6 +361,21 @@ public:
         const int t=(u->squad.count+3)/4;
         return t<kSquadTabs ? t : kSquadTabs;
     }
+    // The squad tabs from the keyboard / pad (A/D, the right stick left / right: kAltPrev / kAltNext), in the soldier
+    // list and the soldier's fields: the first soldier of the next / previous squad, wrapping, as a tab click.
+    bool Key(ar::Pos& p,int column,int key,const ar::Input&) noexcept override {
+        if(key!=ar::kAltPrev && key!=ar::kAltNext)return false;
+        const int tabs=SquadTabs(p);
+        if(column<1 || tabs<2)return false;
+        const int at=p.item>=0 && p.item/4<tabs ? p.item/4 : 0;
+        p.item=4*ar::detail::Wrap(at+(key==ar::kAltNext ? 1 : -1),tabs);
+        p.field=0;
+        return true;
+    }
+    const wchar_t* Hint(const ar::Pos& p,int column) const noexcept override {
+        if(column<1 || SquadTabs(p)<2)return nullptr;
+        return hudtext::Tr(column==1 ? Tx::spSquadHintCentre : Tx::spSquadHintDetails);
+    }
 protected:
     bool Mine(const rm::Unit& u) const noexcept override { return rm::IsSquad(u); }
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {

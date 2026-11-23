@@ -1270,6 +1270,8 @@ HUDTEXT(spFireWithGun,L"with the main gun",L"随主炮",L"隨主砲",L"主砲と
 HUDTEXT(spMainGun,L"Main gun",L"主炮",L"主砲",L"主砲")
 HUDTEXT(spGuns,L"Guns",L"机炮",L"機砲",L"機関砲")
 HUDTEXT(spSquadTab,L"Squad %d",L"第%d小队",L"第%d小隊",L"第%d分隊")
+HUDTEXT(spSquadHintCentre,L"Up/Down: select   A/D, right stick: squad   Enter/A: details   Esc/B: back",L"↑↓：选择   A/D、右摇杆左右：切换小队   Enter/A：详情   Esc/B：返回",L"↑↓：選擇   A/D、右搖桿左右：切換小隊   Enter/A：詳情   Esc/B：返回",L"上下：選択   A/D・右スティック左右：分隊切替   Enter/A：詳細   Esc/B：戻る")
+HUDTEXT(spSquadHintDetails,L"Left/Right, wheel: change   A/D, right stick: squad   Enter/A: do   Esc/B: back",L"←→、滚轮：修改   A/D、右摇杆左右：切换小队   Enter/A：执行   Esc/B：返回",L"←→、滾輪：修改   A/D、右搖桿左右：切換小隊   Enter/A：執行   Esc/B：返回",L"左右・ホイール：変更   A/D・右スティック左右：分隊切替   Enter/A：実行   Esc/B：戻る")
 HUDTEXT(spOnlySelected,L"3D: the selected soldier only",L"3D 仅显示所选士兵",L"3D 僅顯示所選士兵",L"3D は選択中の隊員のみ")
 HUDTEXT(spNoModel,L"This body has no menu model: no 3D",L"此机体没有菜单模型：不显示 3D",L"此機體沒有選單模型：不顯示 3D",L"この機体はメニュー用モデルなし：3D 非表示")
 HUDTEXT(spPreviewOff,L"3D preview unavailable",L"3D 预览不可用",L"3D 預覽不可用",L"3D プレビュー使用不可")
