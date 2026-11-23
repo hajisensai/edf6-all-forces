@@ -4,6 +4,7 @@
 #include "coop_attr.h"
 #include "crew.h"
 #include "hudtext.h"
+#include "support_config.h"
 #include "version.h"
 #include <Windows.h>
 #include <atomic>
@@ -22,6 +23,9 @@ std::atomic<bool> commander{false};               // this mission's commander mo
 bool hostScopeSet=false;
 scopespread::Params hostScope{};
 SRWLOCK scopeLock=SRWLOCK_INIT;
+// The support rules in effect (SupportRulesInEffect), under scopeLock too; offline / no read yet: this machine's (filled
+// at each read).
+SupportRules supportRules{};
 // The builds (the menu's lines; the UI thread's).
 Builds builds{};
 SRWLOCK lock=SRWLOCK_INIT;   // the tick (UI thread) and the mission sync (the script's thread) both read
@@ -43,6 +47,8 @@ Word Mine() noexcept {
     w.npcFreeSquadCover=Cfg().npcFreeSquadCover;
     w.commander=Cfg().commanderMode;
     w.scope=LocalScope();
+    w.supportDisabled=SupportCfg().disabled;
+    w.ptScale=Cfg().supportPtScale;
     return w;
 }
 
@@ -84,6 +90,20 @@ void Read(bool mission) noexcept {
             Log("HOSTCFG playing by the host's ScopeSpread=%d sniper unzoomed x%.2f min %.4f rad, others unzoomed x%.2f zoomed x%.2f (this machine's ini: %d x%.2f %.4f x%.2f x%.2f)",
                 e.scope.on,e.scope.sniperHip,e.scope.sniperHipMin,e.scope.hip,e.scope.aim,mine.on,mine.sniperHip,mine.sniperHipMin,mine.hip,mine.aim);
         else if(changed)Log("HOSTCFG ScopeSpread from this machine's ini");
+    }
+    {
+        const SupportRules rules=DecideSupportRules(room.inRoom!=0,room.isHost!=0,hostWord,host,SupportCfg().disabled,
+                                                    Cfg().supportPtScale);
+        AcquireSRWLockExclusive(&scopeLock);
+        const bool changed=!SameSupportRules(rules,supportRules);
+        supportRules=rules;
+        ReleaseSRWLockExclusive(&scopeLock);
+        if(changed && rules.source==Source::host)
+            Log("HOSTCFG the host's support rules: SupportDisabled mask 0x%llX, SupportPtScale %.3f (this machine's ini: 0x%llX %.3f)",
+                static_cast<unsigned long long>(rules.disabled),rules.ptScale,static_cast<unsigned long long>(SupportCfg().disabled),
+                Cfg().supportPtScale);
+        else if(changed && !rules.known)Log("HOSTCFG the host's support rules not read yet (no %s from the host): the 整备 panel waits for them",kKey);
+        else if(changed)Log("HOSTCFG support rules from this machine's ini");
     }
     const int r=e.source==Source::host ? (e.vanillaRecruit ? 1 : 0) : -1,c=e.source==Source::host ? (e.npcFreeSquadCover ? 1 : 0) : -1;
     const bool silent=e.source==Source::localHostSilent;
@@ -161,6 +181,13 @@ bool NpcFreeSquadCoverInEffect() noexcept {
 }
 bool Edf41BikeGunnerAllowed() noexcept { return bikeGunner.load(std::memory_order_relaxed); }
 bool CommanderModeInEffect() noexcept { return commander.load(std::memory_order_relaxed); }
+SupportRules SupportRulesInEffect() noexcept {
+    AcquireSRWLockShared(&scopeLock);
+    const SupportRules r=supportRules;
+    ReleaseSRWLockShared(&scopeLock);
+    // Before the first read (and out of a room the read decides the same): this machine's current ini.
+    return r.source==Source::local ? SupportRules{true,Source::local,SupportCfg().disabled,Cfg().supportPtScale} : r;
+}
 scopespread::Params ScopeSpreadInEffect() noexcept {
     AcquireSRWLockShared(&scopeLock);
     const bool set=hostScopeSet;
@@ -198,7 +225,7 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
             {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},{kFeatBikeGunMount,Tx::featBikeGunMount},
             {kFeatBikeRide,Tx::featBikeRide},{kFeatCommander,Tx::featCommander},
-            {kFeatScopeSpread,Tx::featScopeSpread},
+            {kFeatScopeSpread,Tx::featScopeSpread},{kFeatHostRules,Tx::featHostRules},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

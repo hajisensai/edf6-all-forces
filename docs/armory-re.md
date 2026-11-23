@@ -67,7 +67,14 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。证据等级：**H** = �
   - 每个支援载具机体都有统一模型文件（`docs/unified-model-re.md` §3.1）：预览战斗会刷出的那个文件（有配置用 `EDF6VC_LO_*` 变体，否则基础文件）。配置刚改、还没生成文件时视口显示「这套配置的模型还没生成」。乘员行显示乘员士兵。
   - 挂载**不画在模型上**（菜单渲染器只挂 WeaponTable 行），视口里用文字列出挂载。
   - 地面橙环与机甲 6 个槽位标注是 2D 叠加，位置由 `rp::Place` 投影原点算出：与模型是否对齐 **L**（未实机）。
-- 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自本机** `SupportCfg()` 与呼叫目录（`SupportCallKey` 按单位键匹配 → `Enabled` / `SupportCallPt` / `SupportCallPrice`）。H（代码）。房主的 `SupportDisabled` **没有同步给客人**（`host_settings.h` / `room_sync.h` 里没有这一项，2026-11-24 查），所以客人看到的是自己 ini 的规则，不一定是房主的。面板只读，不提供 `SupportDisabled` 编辑。H（代码检索）
+- 联机规则面板（右上「我的呼叫 / 房主规则」）：**规则取自房主**（2026-11-24 起，`feat/ui3-hostrules`）。H（代码）
+  - 为什么是房主的：能不能叫由房主裁决（`support_dispatch.cpp` `Plan` 用房主自己的 `SupportCfg().Enabled` 拒绝，客人的请求都经房主规划）；价格是 pt × 房主的 `SupportPtScale`（`support_points.cpp`：pt 池由房主保管，客人的 `SupportPointsPrice` 用房主经 SPTS 发来的 scale，但那是任务内的通道，房间画面里没有）。
+  - 怎么传：房间字 `EDF6X_AF_ROOM`（`host_settings_logic.h`）升到 **v4**，在 v3 后追加 `d=<SupportConfig::disabled 的 64 位掩码，1..16 位大写 hex>` 与 `p=<SupportPtScale 的 float 位模式，8 位大写 hex>`（按位传，客人算出的价格与房主扣的完全一致）。新特性位 `kFeatHostRules=0x800`。解析严格：v3 字、缺字段、scale 不在 0..100 / NaN 一律整字作废。
+  - 预算：最长字 `kWordLongest`=113 字节（含 NUL）≤ `kWordMost`=128；`room_sync_logic.h` 的 `static_assert` 把它和 `kConfigBudget`(3800)+`kHaveMost`(40)+`playerveh::kValueMost`(128) 一起算进 Coop 的 4096 字节总预算（正好 4096）。`room_sync_test` Budget 用最长配置行 + 最长房间字实测不被拒。
+  - 取值（`DecideSupportRules`）：离线 / 房主 → 本机 ini；客人且已收到房主的字 → 房主的；客人未收到 → `known=false`，面板显示「正在等待房主的规则」、不灰掉任何单位，**不拿本机 ini 顶替**。`armory.cpp` `FillRules` 每帧从 `SupportRulesInEffect()` 刷新（房间帧先跑 `HostSettingsRoomTick`），价格用 `support_points::Price(pt, scale)`。
+  - 房间协议 15 → **16**（`mod_room.h`）：v3 读者会整字拒收 v4，旧版客人的招募 / 掩护 / 开镜散布会退回本机 ini，所以旧版不能进房（全员同版本，AF_PROFILE 公告所需协议）。
+  - 仍只是**显示**：客人本机的提前拒绝（`support_dispatch.cpp` `Request` 里 `SupportCfg().Enabled(index)`）和打击（strike）的停用检查仍读本机 ini；真正的裁决在房主。要把客人本机的提前拒绝也改成房主规则，需另改 `support_dispatch.cpp` 并补 `support_dispatch_test`。
+  - 需实机确认：客人进房后 1–2 秒内面板从「等待」变为房主规则；房主改 ini 保存后客人面板跟着变；房主 `SupportPtScale=0` 时客人显示价格 0。
 - 小队页签（第 1/2/3 小队）：鼠标点击，或在士兵列表 / 士兵字段里按 A/D、右摇杆左右（`kAltPrev/kAltNext`，`SquadPage::Key`）切到上 / 下一小队的第一名士兵（循环）；单位列表里不响应。提示栏写明（`spSquadHintCentre/Details`）。Z / C 在单列页面上切换视角预设。H（代码）
 - 载具页「开火键」列（`sp::PylonFireKey`）：挂载码 1..10 对应的武器文件 `EDF6VC_<NAME>_<发数>.SGO` 按 `StoreSpecOfPrefix` 取 `StoreSpec::fireKey`；支援坦克上 3..6 显示「开火键 n：键盘键 / 手柄键」（本机 `VehicleFire<n>Key/Button`），其余显示「随主炮（切换键 切换弹种）」；战机（`jet_combat.cpp` 不看 fireKey）总是「随主武器（切换键）」，切换键 = `PlayerJetSwitchKey` / LB。目前 stores.inc 里挂载用的文件 fireKey 全是 0，所以实际都显示切换键。H（代码）
 - 游戏强制收走整备画面（失去输入 / 换画面 / 选关对象析构）时**放弃**未保存的修改（`DropEdits`：各页 `Discard`，记日志），下次打开在提示栏说明丢了几页（`armoryEditsDropped`）；不再静默保存。H（代码）

@@ -1,6 +1,7 @@
 // The host's settings and the room's builds online (host_settings_logic.h: why, and the word every member publishes;
 // coop_attr.h: EDF6Coop's member attributes). Offline, or as the host, every value is this machine's ini.
 #pragma once
+#include "host_settings_logic.h"
 #include "room_sync.h"
 #include "scope_spread_logic.h"
 
@@ -20,6 +21,10 @@ bool NpcFreeSquadCoverInEffect() noexcept;
 // The scoped weapons' spread (scope_spread.cpp, every player round): the host's ScopeSpread* as a guest whose host
 // published them, else this machine's ini.
 scopespread::Params ScopeSpreadInEffect() noexcept;
+// The support rules this machine's 整备 support page shows (armory.cpp FillRules, UI thread; any thread): offline and as
+// the host this machine's SupportDisabled / SupportPtScale; as a guest the host's from its word (known false until it
+// arrived). host_settings_logic.h DecideSupportRules.
+hostcfg::SupportRules SupportRulesInEffect() noexcept;
 // The 408's sidecar gunner seat (edf41bike.cpp) this mission: offline always; online only when every member of the room
 // said its build has it (host_settings_logic.h kFeatBikeGunner), as edf5online_room.h does for the player count.
 bool Edf41BikeGunnerAllowed() noexcept;

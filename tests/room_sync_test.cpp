@@ -678,11 +678,15 @@ void Budget() {
     static Machine host;host=Machine{};
     host.line=std::string(kConfigLineMost,'P');
     host.ownPlayer="1;"+std::string(playerveh::kValueMost-2,'6');
+    // and this member's longest room word (host_settings_logic.h v4: the host's SupportDisabled / SupportPtScale in it).
+    lobby.current=0;
+    Expect(Publish(crew::hostcfg::kKey,std::string(crew::hostcfg::kWordLongest-1,'w').c_str())!=0,"the longest room word published");
     Tick(host,0,1000);
     std::size_t published=0;
     for(const auto& kv:lobby.member[0].values)published+=kv.second.size();
-    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave) && ValueOf(0,"EDF6X_VCCFG3"),
-           "the longest line in every part, its readiness and the player loadouts within Coop's budget");
+    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave) && ValueOf(0,"EDF6X_VCCFG3") &&
+           ValueOf(0,crew::hostcfg::kKey),
+           "the longest line in every part, its readiness, the player loadouts and the room word within Coop's budget");
     // Fewer: the parts no longer needed are withdrawn.
     host.line="short";
     Tick(host,0,3000);

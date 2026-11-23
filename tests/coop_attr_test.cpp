@@ -130,7 +130,7 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"3;v=0.8.0;f=7FF;r=1;c=0;m=0;s=1,40000,150,12500,8000"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"4;v=0.8.0;f=FFF;r=1;c=0;m=0;s=1,40000,150,12500,8000;d=0;p=3F800000"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
            !back.npcFreeSquadCover && !back.commander,"parsed back");
@@ -146,9 +146,33 @@ void WordAndRoom() {
                          "3;v=1;f=1;r=0;c=0;m=0;s=1,1,1.5,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1234567,1,1"})
         Expect(!ParseWord(bad,back),"another version's word is no word");
     // A host's value outside the ranges is played at the range's end, as this machine's ini would be.
-    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=1,999999,0,0,999999",back) && back.scope.sniperHip==20.0f && back.scope.sniperHipMin==0.0f &&
+    // v4 (2026-11-24): the host's SupportDisabled mask and SupportPtScale round trip exactly.
+    w.supportDisabled=0x8000000000000005ull;w.ptScale=0.37f;
+    Expect(FormatWord(w,text,sizeof(text)) && std::strstr(text,";d=8000000000000005;p=3EBD70A4") && ParseWord(text,back) &&
+           back.supportDisabled==0x8000000000000005ull && back.ptScale==0.37f,"the support rules round trip");
+    w.supportDisabled=~0ull;w.ptScale=100.0f;strcpy_s(w.version,"12345678901234567890123");w.features=0xFFFFFFFFu;
+    w.vanillaRecruit=w.npcFreeSquadCover=w.commander=true;w.scope.sniperHip=w.scope.sniperHipMin=w.scope.hip=w.scope.aim=200.0f;
+    Expect(FormatWord(w,text,sizeof(text)) && std::strlen(text)+1==kWordLongest && ParseWord(text,back) && back.ptScale==100.0f,
+           "the longest word: exactly kWordLongest, within kWordMost");
+    for(const float bad:{-1.0f,100.5f,std::nanf("")}){w.ptScale=bad;Expect(!FormatWord(w,text,sizeof(text)),"a scale out of 0..100 is not sent");}
+    for(const char* bad:{"3;v=0.8.0;f=7FF;r=1;c=0;m=0;s=1,40000,150,12500,8000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=;p=3F800000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=1a;p=3F800000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=10000000000000000;p=3F800000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0;p=3F80000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0;p=BF800000",    // -1
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0;p=42C90000",    // 100.5
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0;p=7FC00000",    // NaN
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;p=3F800000;d=0",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=0;p=3F800000;x=1"})
+        Expect(!ParseWord(bad,back),"a v3 word or a broken support rules field is no word");
+    Expect(ParseWord("4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;d=4;p=00000000",back) && back.supportDisabled==4 && back.ptScale==0.0f,
+           "everything free (scale 0) and one call disabled");
+    Expect(ParseWord("4;v=1;f=1;r=0;c=0;m=0;s=1,999999,0,0,999999;d=0;p=3F800000",back) && back.scope.sniperHip==20.0f && back.scope.sniperHipMin==0.0f &&
            back.scope.hip==1.0f && back.scope.aim==1.0f,"the host's scope spread clamped");
-    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=0,40000,150,12500,8000",back) && !back.scope.on,"the host's scope spread off");
+    Expect(ParseWord("4;v=1;f=1;r=0;c=0;m=0;s=0,40000,150,12500,8000;d=0;p=3F800000",back) && !back.scope.on,"the host's scope spread off");
     strcpy_s(w.version,"a;b");
     Expect(!FormatWord(w,text,sizeof(text)),"a version that would break the word is not sent");
 
@@ -174,6 +198,23 @@ void WordAndRoom() {
            "the same scope spread told apart from another");
     crew::scopespread::Params offA,offB;offA.on=offB.on=false;offB.hip=3.0f;
     Expect(SameScope(offA,offB),"two off settings play the same");
+
+    // The support rules the 整备 page shows: the host's for a guest, its own ini for the host / offline, none yet: waiting.
+    host.supportDisabled=0x6;host.ptScale=2.5f;
+    SupportRules sr=DecideSupportRules(true,false,true,host,0x1,1.0f);
+    Expect(sr.known && sr.source==Source::host && sr.disabled==0x6 && sr.ptScale==2.5f,"a guest: the host's SupportDisabled and scale");
+    Expect(!SupportCallable(sr,1) && !SupportCallable(sr,2) && SupportCallable(sr,0) && SupportCallable(sr,64) && SupportCallable(sr,-1),
+           "callable by the host's mask");
+    sr=DecideSupportRules(true,true,true,host,0x1,1.0f);
+    Expect(sr.known && sr.source==Source::local && sr.disabled==0x1 && sr.ptScale==1.0f,"the host: its own ini");
+    sr=DecideSupportRules(false,false,true,host,0x1,0.5f);
+    Expect(sr.known && sr.source==Source::local && sr.disabled==0x1 && sr.ptScale==0.5f,"offline: this machine's ini");
+    sr=DecideSupportRules(true,false,false,host,0x1,1.0f);
+    Expect(!sr.known && sr.source==Source::localHostSilent && !sr.disabled,"a guest before the host's word: waiting, never its own ini");
+    Expect(SameSupportRules(sr,DecideSupportRules(true,false,false,host,0x3,2.0f)) &&
+           !SameSupportRules(DecideSupportRules(true,false,true,host,0,1),DecideSupportRules(true,true,true,host,0,1)),
+           "rules told apart for the log");
+    Expect((kFeatures&kFeatHostRules)!=0,"this build carries the host's rules");
 
     Builds b;
     hostcfg::Word older;strcpy_s(older.version,"0.8.0");older.features=kFeatures&~kFeatBikeGunner;

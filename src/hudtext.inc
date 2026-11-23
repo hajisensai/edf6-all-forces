@@ -662,6 +662,7 @@ HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬
 HUDTEXT(featBikeRide,L"the 408's drive, SDL1 models and riding pose",L"408 驱动、SDL1 各型号性能与骑姿",L"408 驅動、SDL1 各型號性能與騎姿",L"408 の駆動・SDL1 各型の性能・乗車姿勢")
 HUDTEXT(featCommander,L"the commander mode",L"指挥官模式",L"指揮官模式",L"指揮官モード")
 HUDTEXT(featScopeSpread,L"scoped weapons' spread",L"开镜 / 不开镜精度差分",L"開鏡 / 不開鏡精度差分",L"スコープ有無の精度差")
+HUDTEXT(featHostRules,L"the host's support rules in the armory",L"整备页显示房主的支援规则",L"整備頁顯示房主的支援規則",L"整備画面にホストの支援ルール")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.
@@ -1224,8 +1225,9 @@ HUDTEXT(spRuleOn,L"Host: callable",L"房主：可呼叫",L"房主：可呼叫",L
 HUDTEXT(spRuleOff,L"Host: disabled (SupportDisabled)",L"房主：已禁用（SupportDisabled）",L"房主：已停用（SupportDisabled）",L"ホスト：無効（SupportDisabled）")
 HUDTEXT(spRulePt,L"%u pt, price %d",L"%u pt，价格 %d",L"%u pt，價格 %d",L"%u pt、価格 %d")
 HUDTEXT(spRuleUnlisted,L"Not in the call catalog",L"不在呼叫目录中",L"不在呼叫目錄中",L"要請カタログ外")
-HUDTEXT(spGuestRules,L"Read-only: the host's rules apply",L"只读：以房主设置为准",L"唯讀：以房主設定為準",L"読み取り専用：ホスト設定に従う")
-HUDTEXT(spHostRules,L"Set in the ini (SupportDisabled)",L"在 ini 的 SupportDisabled 中设置",L"在 ini 的 SupportDisabled 中設定",L"ini の SupportDisabled で設定")
+HUDTEXT(spGuestRules,L"Read-only: the host's SupportDisabled / SupportPtScale",L"只读：房主的 SupportDisabled / SupportPtScale",L"唯讀：房主的 SupportDisabled / SupportPtScale",L"読み取り専用：ホストの SupportDisabled / SupportPtScale")
+HUDTEXT(spRuleWaiting,L"Waiting for the host's rules",L"正在等待房主的规则",L"正在等待房主的規則",L"ホストのルールを待っています")
+HUDTEXT(spHostRules,L"Yours for the room: ini SupportDisabled / SupportPtScale",L"全房间按你的 ini：SupportDisabled / SupportPtScale",L"全房間按你的 ini：SupportDisabled / SupportPtScale",L"部屋全体にあなたの ini：SupportDisabled / SupportPtScale")
 HUDTEXT(spMineEdited,L"My call: edited, not saved",L"我的呼叫：已修改，未保存",L"我的呼叫：已修改，未儲存",L"自分の要請：変更あり・未保存")
 HUDTEXT(spMineSaved,L"My call: as saved",L"我的呼叫：与已保存一致",L"我的呼叫：與已儲存一致",L"自分の要請：保存済み")
 HUDTEXT(spUnsaved,L"* Unsaved changes",L"＊ 有未保存的修改",L"＊ 有未儲存的修改",L"＊ 未保存の変更あり")

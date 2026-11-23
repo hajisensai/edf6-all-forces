@@ -10,7 +10,9 @@
 //    yet, the preview off) an opaque box that says why. The view shows ONE model
 //    (docs/plan-2026-11-24-ui-rewrite.md stage 4b): the squad's selected soldier, marked so on screen.
 //  - Online (the room screen) the details column's top is the "我的呼叫 / 房主规则" panel: the host's SupportDisabled
-//    and the call's pt / price, read-only (a guest: the host's apply).
+//    and the call's pt / price at the host's SupportPtScale, read-only. The host sees its own ini's; a guest the host's,
+//    sent in the host's room word (host_settings_logic.h word v4, armory.cpp FillRules each frame), and until that word
+//    arrived (Env::rulesKnown false) that it waits for them, never its own ini's in their place.
 #pragma once
 #include "armory_logic.h"
 #include "armory_skin.h"
@@ -94,6 +96,7 @@ struct Env {
     bool (*callouts)(const wchar_t* modsFile,crew::menucallouts::Callouts* out) noexcept=nullptr;
     roomui::CrewKinds kinds{};
     HostRule rule[rm::kMostUnits]{};   // by the menu's unit index
+    bool rulesKnown=true;              // a guest: the host's rules have arrived (host_settings.h SupportRulesInEffect)
     // The fire keys a pylon's store is on (docs/multi-weapon-keys.md): the runtime fills them from the stores' own
     // StoreSpec::fireKey (stores.inc) and this machine's bindings. On the support tank (payload.cpp ControlOfSpec, a
     // tank class): 3..kOwnKeysLast its own VehicleFire<n>Key, anything else (0; the second trigger, read on the V603
@@ -181,7 +184,7 @@ public:
         if(!u)return;
         roomdialog::UnitLine(*u,out->label,ar::kTextMost);
         const HostRule& r=Rule(row);
-        if(model->env.online && r.listed && !r.enabled)out->dim=true;   // the host refuses this call
+        if(model->env.online && model->env.rulesKnown && r.listed && !r.enabled)out->dim=true;   // the host refuses this call
     }
     bool Dirty() const noexcept override {
         for(int i=0;i<n;++i)if(rm::UnitChanged(model->menu.unit[index[i]]))return true;
@@ -302,13 +305,14 @@ protected:
         y+=40;
         const HostRule& r=Rule(p.row);
         wchar_t line[ar::kTextMost];
-        if(!r.listed)ar::CopyText(line,ar::kTextMost,hudtext::Tr(Tx::spRuleUnlisted));
+        if(!model->env.rulesKnown)ar::CopyText(line,ar::kTextMost,hudtext::Tr(Tx::spRuleWaiting));
+        else if(!r.listed)ar::CopyText(line,ar::kTextMost,hudtext::Tr(Tx::spRuleUnlisted));
         else {
             wchar_t pt[ar::kTextMost];
             detail::Put(pt,hudtext::Tr(Tx::spRulePt),r.pt,r.price);
             detail::Put(line,L"%ls  %ls",hudtext::Tr(r.enabled ? Tx::spRuleOn : Tx::spRuleOff),pt);
         }
-        out->Say(line,x,y,22,r.listed && !r.enabled ? 0xFFE05A3Cu : skin::kText,ar::Align::left,false,w);
+        out->Say(line,x,y,22,model->env.rulesKnown && r.listed && !r.enabled ? 0xFFE05A3Cu : skin::kText,ar::Align::left,false,w);
         y+=40;
         out->Say(hudtext::Tr(model->env.host ? Tx::spHostRules : Tx::spGuestRules),x,y,22,skin::kTextDim,ar::Align::left,false,w);
     }
