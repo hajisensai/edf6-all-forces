@@ -44,6 +44,7 @@
 #include "hector_probe.h"
 #include "players_probe.h"
 #include "umbra_probe.h"
+#include "heap_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -745,7 +746,7 @@ const std::wstring* CycleRoutine(const std::wstring& decl) noexcept {
         const LONG left=InterlockedIncrement(&cycleLeft);
         Log("CYCLE %ld/%ld left%s: Result_Offline skipped (no result screen, nothing saved) -> %s",left,cycleTotal,
             phase==kCycleStaying ? " (the mission ended on its own)" : "",cycleReboot ? "ReBoot" : "PlayMission_Offline");
-        LogMemory("cycle left");LogMemoryMap("cycle left");
+        LogMemory("cycle left");LogMemoryMap("cycle left");autopilot::HeapProbeMark("cycle left");
         InterlockedExchange(&cyclePhase,kCycleEntering);
         if(!cycleReboot)return &play;
         auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
@@ -913,6 +914,11 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else if(named && !std::strcmp(what,"umbra"))
             Log("PROBE umbra installed=%d",autopilot::InstallUmbraProbe(image,&Log));
+        else if(named && !std::strcmp(what,"heap")) {   // "probe heap [N]": counting from the Nth cycle left (default 2)
+            int from=2;
+            sscanf_s(text,"%*s %*s %d",&from);
+            Log("PROBE heap installed=%d",autopilot::InstallHeapProbe(&Log,from));
+        }
         else Log("CMD probe: unknown probe %s",what);
     }
     else if(!std::strcmp(word,"crash"))Crash(text);

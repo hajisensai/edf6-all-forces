@@ -1610,7 +1610,7 @@ target_compile_options(rip_sampler PRIVATE /W4 /WX /utf-8 /permissive-)
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
             tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp
-            tests/autopilot/umbra_probe.cpp)
+            tests/autopilot/umbra_probe.cpp tests/autopilot/heap_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
