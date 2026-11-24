@@ -85,6 +85,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
 import gamelease  # noqa: E402
+import modfiles  # noqa: E402
 TOOLS = os.path.join(ROOT, 'tools')   # tools/support_config.py (the ini's own editor)
 
 NAME = 'EDF6Autopilot'
@@ -589,6 +590,11 @@ class SteamLaunchWindowMover:
 
 
 def launch() -> None:
+    require_closed()
+    # A run right after another (or after the user quit) would otherwise land in the seconds Steam still counts the
+    # game as running and only get its 「游戏已在运行」 dialog (pylib/modfiles.py steam_running_app).
+    if not modfiles.wait_steam_released():
+        raise RuntimeError('Steam still counts EDF6 as running 60 s after EDF6.exe is gone: not launching')
     require_closed()
     before = user32.GetForegroundWindow()
     # The game only runs launched by Steam (started directly, even with Steam's environment, it stops at a white
