@@ -82,6 +82,20 @@ def find() -> str | None:
     return None
 
 
+EDF_STAMP = 0x678CCB46   # the only EDF.dll the plugins run on (src/plugin.cpp IdentifyImage: any other is REFUSED)
+
+
+def edf_stamp(game_root: str) -> int | None:
+    """EDF.dll's PE TimeDateStamp, None when it is not there or not a PE."""
+    try:
+        with open(os.path.join(game_root, 'EDF.dll'), 'rb') as f:
+            head = f.read(0x1000)
+        pe = int.from_bytes(head[0x3C:0x40], 'little')
+        return int.from_bytes(head[pe + 8:pe + 12], 'little') if head[pe:pe + 4] == b'PE\0\0' else None
+    except (OSError, ValueError):
+        return None
+
+
 def find_or_dev() -> str:
     """The game dir, or the developer's path when none is found (the tools' old default)."""
     return find() or DEV_DIR
