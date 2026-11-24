@@ -16,14 +16,12 @@ struct CommandNetworkResult {
 };
 // Nonzero means queued, never that the native order executed. Read the correlated
 // result below. More than 16 units is rejected, never silently truncated.
-// `queued` (Shift): after the points each unit is on its way to, kept by its authority (command protocol v7). A host of
-// an older version is refused it here, with the reason in `note` (no immediate order sent in its place).
+// `queued` (Shift): after the points each unit is on its way to, kept by its authority (command protocol v7).
 std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsigned count,
     const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize,
     const std::uint32_t* formationSlots=nullptr,std::uint32_t formationTotal=0,bool queued=false) noexcept;
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept;
 bool MapCommandNetworkReady() noexcept;
-std::uint32_t MapCommandNetworkVersion() noexcept;   // the version agreed with the host (command_protocol.h), 0 none yet
 // The Shift queues for the clients' maps (command protocol v7 Kind::ways). Host: the queues of this machine's units now
 // (mapcmd.cpp MapCommandQueueTick, once a frame); each one changed is sent, one gone is cleared, a member saying hello
 // is sent them all. Client / offline: nothing. Game thread.
@@ -46,6 +44,9 @@ struct CommandNetworkContext {
     // The transport alone is up (the support handshake may still be pending): what the Q marks need, peer to peer
     // with no host step (qmark.cpp). `ready` implies it.
     bool linked=false;
+    // EDF6Coop sendState (coop_extension_api.h: unreliable, the latest per (sender, key)); key from plugin_net_logic.h
+    // StateKey. True: taken by the transport (which may still drop it).
+    bool (*sendState)(std::uint32_t peer,std::uint32_t key,const void*,std::size_t) noexcept=nullptr;
 };
 void UpdateCommandNetwork(const CommandNetworkContext&,std::uint64_t now) noexcept;
 bool ReceiveCommandNetwork(std::uint32_t senderPeer,const char* authenticatedPuid,

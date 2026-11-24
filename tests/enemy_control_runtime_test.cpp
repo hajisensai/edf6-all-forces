@@ -127,8 +127,8 @@ bool UpdateDeiroiAim(const NativeLease&,float,float) noexcept {return true;}
 bool RestoreDeiroiControl(const NativeLease&) noexcept {return true;}
 bool PoseRequired(const NativeLease&) noexcept {return false;}
 bool PoseReady(const NativeLease&) noexcept {return false;}
-bool CapturePose(const NativeLease&,void*,std::size_t,std::size_t*) noexcept {return false;}
-bool ApplyPose(NativeLease&,const void*,std::size_t) noexcept {return false;}
+bool CapturePose(const NativeLease&,pose::State*) noexcept {return false;}
+bool ApplyPose(NativeLease&,const pose::State&) noexcept {return false;}
 bool RestorePose(NativeLease&) noexcept {return true;}
 bool WorldMoveToPad(const NativeLease&,const float*,float,Input*) noexcept {return true;}
 bool AimToPad(const NativeLease&,float,float,Input*) noexcept {return true;}

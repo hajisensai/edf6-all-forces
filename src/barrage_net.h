@@ -1,5 +1,5 @@
-// The long-range barrages' plugin_net.h channel (barrage.cpp; the wire barrage_net_protocol.h): BRGS, sent only to the
-// peers that announced support_protocol.h kExtBarrage. support_net.cpp registers it.
+// The long-range barrages' plugin_net.h channel (barrage.cpp; the wire barrage_net_protocol.h): BRGS, sent to every peer
+// (the room protocol keeps other builds out). support_net.cpp registers it.
 #pragma once
 #include "plugin_net_logic.h"
 

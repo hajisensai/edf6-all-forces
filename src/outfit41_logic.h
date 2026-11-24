@@ -257,7 +257,7 @@ constexpr bool Pack41(int content,int edf41) noexcept { return ported::Edf41Pack
 // with this feature publishes it, whatever it wears: "1;" then its chosen flag and its MissionDefault flag, '0' or '1'.
 // The pack is the room's (every member plays the same mission), so a reader decides with its own Pack41. A member with no
 // value (an older All Forces, Coop without the member attributes) or another version's value wears the stock outfit on
-// this machine; the room's version notice names the feature (support_protocol.h kExtOutfit41).
+// this machine.
 inline constexpr char kAttrKey[]="EDF6X_OUTFIT41";
 struct Wire { bool chosen=false,missionDefault=false; };
 inline constexpr std::size_t kWireSize=5;   // "1;cd" and the NUL

@@ -19,8 +19,8 @@
 // mission's (-1) or the outfit change is not unlocked yet (GS +0x300).
 // Online: this machine's member tells the room its two flags (EDF6Coop member attribute EDF6X_OUTFIT41, published from
 // the room's frame when they change); a remote member is resolved from its mission index to its EOS id
-// (EDF6Coop_ResolveMissionPlayerPuid) and its value read. No value (an older All Forces): the stock outfit, logged; the
-// room's version notice names the feature (support_protocol.h kExtOutfit41).
+// (EDF6Coop_ResolveMissionPlayerPuid) and its value read. No value (an older All Forces): the stock outfit, logged (an
+// older All Forces is kept out of the room by the room protocol, mod_room.h).
 // The EDF4.1 outfit's own colours (outfit41_logic.h Reconcile) reach the others in this machine's member record: the
 // swap is made right before MissionSync_Begin packs it (Outfit41MissionSync, from mission.cpp). The save never holds
 // them: the save job's copy of MAIN.GST gets the stock colours back (SaveJobHook; docs/edf41-outfits.md §1.3).

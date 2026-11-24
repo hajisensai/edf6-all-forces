@@ -12,9 +12,14 @@ namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept 
 namespace {
 using crew::At;using crew::Put;
 using crew::enemy_native::NativeLease;using crew::enemy_native::NativeProfile;
-using crew::enemy_native::PoseReady;using crew::enemy_native::CapturePose;using crew::enemy_native::ApplyPose;
+using crew::enemy_native::PoseReady;using crew::enemy_native::CapturePose;
 using crew::enemy_native::RestorePose;using crew::enemy_native::pose::Kind;using crew::enemy_native::pose::State;
 using Wire=std::array<unsigned char,crew::enemy_native::pose::kWireBytes>;
+// The guest's path: a received wire sample decodes into the state the per-frame write receives.
+bool ApplyWire(NativeLease& lease,const Wire& wire) {
+    crew::enemy_native::pose::Packet packet{};
+    return crew::enemy_native::pose::Decode(wire.data(),wire.size(),&packet) && crew::enemy_native::ApplyPose(lease,packet.state);
+}
 int currentKind=0,checks=0,failures=0,mutations=0,modelBuilds=0,ragReads=0,ragWrites=0,managerFlushes=0;
 void Check(bool good,const char* expression,int line) {
     ++checks;if(!good){++failures;std::fprintf(stderr,"kind %d line %d: %s\n",currentKind,line,expression);}
@@ -263,8 +268,7 @@ struct Fixture {
         return true;
     }
     State Captured() const {
-        Wire wire{};std::size_t used=0;CHECK(CapturePose(lease,wire.data(),wire.size(),&used));CHECK(used==wire.size());
-        State state;CHECK(crew::enemy_native::pose::Decode(wire.data(),used,&state));return state;
+        State state;CHECK(CapturePose(lease,&state));CHECK(crew::enemy_native::pose::Valid(state));return state;
     }
     State Incoming() const {
         State state=Captured();state.position[0]=100;state.position[1]=200;state.position[2]=300;
@@ -282,7 +286,10 @@ struct Fixture {
         }
         return state;
     }
-    Wire WireFor(const State& state) const {Wire wire{};CHECK(crew::enemy_native::pose::Encode(state,wire.data(),wire.size()));return wire;}
+    Wire WireFor(const State& state) const {
+        crew::enemy_native::pose::Packet packet{};packet.state=state;
+        Wire wire{};CHECK(crew::enemy_native::pose::Encode(packet,wire.data(),wire.size()));return wire;
+    }
     void* WritableLeaf() const {
         if(kind==Kind::large || kind==Kind::squid)return character;
         if(kind==Kind::ufo515)return At<void*>(object,0xEA0);
@@ -322,7 +329,7 @@ void DrainCheck() {for(const auto& transaction:crew::enemy_native::transactions)
 void Success(Kind kind) {
     Fixture fixture(kind);CHECK(PoseReady(fixture.lease));const State incoming=fixture.Incoming();const Wire wire=fixture.WireFor(incoming);
     const int builds=modelBuilds,reads=ragReads,writes=ragWrites,flushes=managerFlushes;
-    CHECK(ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(fixture.lease.restoreGate==nullptr);CHECK(crew::enemy_native::Existing(fixture.lease)==nullptr);
+    CHECK(ApplyWire(fixture.lease,wire));CHECK(fixture.lease.restoreGate==nullptr);CHECK(crew::enemy_native::Existing(fixture.lease)==nullptr);
     const State captured=fixture.Captured();CHECK(Close3(captured.position,incoming.position));CHECK(Close3(captured.linearVelocity,incoming.linearVelocity));
     CHECK(Close(captured.rotation[1],incoming.rotation[1]) && Close(captured.rotation[3],incoming.rotation[3]));
     if(kind==Kind::deiroi) {
@@ -337,42 +344,42 @@ void Success(Kind kind) {
 void PreflightCases(Kind kind) {
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());fixture.BreakDeepReference();const Snapshot before=fixture.Before();const int was=mutations;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);DrainCheck();
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);DrainCheck();
     }
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot before=fixture.Before();const int was=mutations;DWORD previous=0;
         void* const leaf=fixture.WritableLeaf();CHECK(VirtualProtect(leaf,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);
         DWORD discarded=0;CHECK(VirtualProtect(leaf,0x1000,previous,&discarded)!=0);Sleep(20);DrainCheck();
     }
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());fixture.BreakReference();const Snapshot before=fixture.Before();const int was=mutations;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was);CHECK(fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);DrainCheck();
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was);CHECK(fixture.Unchanged(before));CHECK(!fixture.lease.restoreGate);DrainCheck();
     }
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot before=fixture.Before();const int was=mutations;DWORD previous=0;
         CHECK(VirtualProtect(fixture.object,0x4000,PAGE_READONLY,&previous)!=0);Sleep(20);
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was);CHECK(fixture.Unchanged(before));
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was);CHECK(fixture.Unchanged(before));
         DWORD discarded=0;CHECK(VirtualProtect(fixture.object,0x4000,previous,&discarded)!=0);Sleep(20);DrainCheck();
     }
     {
         Fixture fixture(kind);State incoming=fixture.Incoming();incoming.profile^=1u;const Wire wire=fixture.WireFor(incoming);const Snapshot before=fixture.Before();const int was=mutations;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(before));DrainCheck();
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(before));DrainCheck();
     }
 }
 void RollbackCases(Kind kind) {
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot before=fixture.Before();fault=Fault::onceTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));fault=Fault::none;
+        CHECK(!ApplyWire(fixture.lease,wire));fault=Fault::none;
         CHECK(fixture.Unchanged(before));CHECK(fixture.lease.restoreGate==nullptr);DrainCheck();
     }
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot before=fixture.Before();fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));
+        CHECK(!ApplyWire(fixture.lease,wire));
         auto* journal=crew::enemy_native::Existing(fixture.lease);CHECK(journal && journal->used && journal->pending && journal->writes && journal->bodies);
         CHECK(fixture.lease.restoreGate==&RestorePose);CHECK(!RestorePose(fixture.lease));CHECK(fixture.lease.restoreGate==&RestorePose);
         const unsigned entries=journal ? journal->writes : 0;const int was=mutations;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was);
         CHECK(journal && journal->writes==entries && fixture.lease.object==fixture.object && fixture.lease.control==fixture.control && fixture.lease.profile==&fixture.profile);
         CHECK(fixture.lease.savedPlayer==7 && fixture.lease.previousHeld==0x55 && fixture.lease.savedPad==fixture.object+0x300);
         fault=Fault::none;CHECK(RestorePose(fixture.lease));CHECK(fixture.lease.restoreGate==nullptr);CHECK(fixture.Unchanged(before));DrainCheck();
@@ -381,7 +388,7 @@ void RollbackCases(Kind kind) {
 void ReplacementLifecycles() {
     {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));auto* journal=crew::enemy_native::Existing(fixture.lease);
+        CHECK(!ApplyWire(fixture.lease,wire));auto* journal=crew::enemy_native::Existing(fixture.lease);
         CHECK(journal && journal->pending);auto* oldControl=At<unsigned char*>(fixture.child,0x30);
         const LONG held=At<LONG>(oldControl,12);CHECK(held==2);
         std::vector<std::pair<void*,Physical>> oldBodies;
@@ -397,7 +404,7 @@ void ReplacementLifecycles() {
     }
     for(unsigned replacement=0;replacement<2;++replacement) {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));auto* journal=crew::enemy_native::Existing(fixture.lease);
+        CHECK(!ApplyWire(fixture.lease,wire));auto* journal=crew::enemy_native::Existing(fixture.lease);
         CHECK(journal && journal->pending && journal->bodies>=2);if(!journal){fault=Fault::none;continue;}
         auto& victim=journal->body[0];CHECK(victim.owner!=0 && !victim.character);
         auto* body=static_cast<unsigned char*>(victim.object);auto* rag=At<unsigned char*>(fixture.child,0x790);
@@ -421,7 +428,7 @@ void ReplacementLifecycles() {
     }
     {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));auto* childControl=At<unsigned char*>(fixture.child,0x30);CHECK(At<LONG>(childControl,12)==2);
+        CHECK(!ApplyWire(fixture.lease,wire));auto* childControl=At<unsigned char*>(fixture.child,0x30);CHECK(At<LONG>(childControl,12)==2);
         DWORD previous=0;CHECK(VirtualProtect(childControl,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);fault=Fault::none;
         CHECK(!RestorePose(fixture.lease));CHECK(fixture.lease.restoreGate==&RestorePose);CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
         CHECK(At<LONG>(childControl,12)==2);
@@ -431,7 +438,7 @@ void ReplacementLifecycles() {
 }
 void PendingUnreadableRoot(Kind kind) {
     Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();fault=Fault::persistentTransform;
-    CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
+    CHECK(!ApplyWire(fixture.lease,wire));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
     DWORD previous=0;CHECK(VirtualProtect(fixture.object,0x4000,PAGE_NOACCESS,&previous)!=0);Sleep(20);fault=Fault::none;
     const int was=mutations;CHECK(!RestorePose(fixture.lease));CHECK(mutations==was);
     CHECK(fixture.lease.restoreGate==&RestorePose && crew::enemy_native::Existing(fixture.lease)!=nullptr);
@@ -443,7 +450,7 @@ void PreflightUnreadablePart() {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();
         auto* childControl=At<unsigned char*>(fixture.child,0x30);void* inaccessible=which ? static_cast<void*>(childControl) : fixture.child;
         const int was=mutations;DWORD previous=0;CHECK(VirtualProtect(inaccessible,0x1000,PAGE_NOACCESS,&previous)!=0);Sleep(20);
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was);CHECK(!fixture.lease.restoreGate);DrainCheck();
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was);CHECK(!fixture.lease.restoreGate);DrainCheck();
         DWORD discarded=0;CHECK(VirtualProtect(inaccessible,0x1000,previous,&discarded)!=0);Sleep(20);
         CHECK(fixture.Unchanged(baseline));CHECK(At<LONG>(childControl,12)==1);
     }
@@ -451,7 +458,7 @@ void PreflightUnreadablePart() {
 void RetiredPoseStorage() {
     {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
         auto* oldPoints=At<unsigned char*>(fixture.object,0xB08);auto* oldHistory=At<unsigned char*>(fixture.object,0xB28);
         auto* newPoints=fixture.Allocate();auto* newHistory=fixture.Allocate();Put<void*>(fixture.object,0xB08,newPoints);Put<void*>(fixture.object,0xB28,newHistory);
         std::memset(oldPoints,0x71,0x60);std::memset(oldHistory,0x72,0x60);std::memset(newPoints,0x73,0x60);std::memset(newHistory,0x74,0x60);
@@ -461,7 +468,7 @@ void RetiredPoseStorage() {
     }
     for(unsigned retirement=0;retirement<2;++retirement) {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));auto* journal=crew::enemy_native::Existing(fixture.lease);CHECK(journal!=nullptr);
+        CHECK(!ApplyWire(fixture.lease,wire));auto* journal=crew::enemy_native::Existing(fixture.lease);CHECK(journal!=nullptr);
         if(!journal){fault=Fault::none;continue;}
         if(retirement==0)Put<void*>(fixture.child,0x5C0,fixture.Allocate());else Put<std::uint64_t>(fixture.object,0xF70,0);
         std::vector<std::pair<unsigned char*,std::vector<unsigned char>>> retained;
@@ -477,7 +484,7 @@ void RetiredPoseStorage() {
     }
     {
         Fixture fixture(Kind::timeShip);const Wire wire=fixture.WireFor(fixture.Incoming());fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
         Put<std::uint64_t>(fixture.object+0x940,0x20,1);std::memset(fixture.rootNodes+0x110+0xB0,0x69,64);
         const std::vector<unsigned char> retired(fixture.rootNodes+0x110+0xB0,fixture.rootNodes+0x110+0xF0);
         fault=Fault::none;CHECK(RestorePose(fixture.lease));CHECK(!std::memcmp(fixture.rootNodes+0x110+0xB0,retired.data(),retired.size()));
@@ -489,12 +496,12 @@ void ReadonlyRigidTransformBacking(Kind kind) {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();
         void* body=kind==Kind::ufo515 ? At<void*>(fixture.object,0xEA0) : fixture.bodies.front();
         auto* descriptor=descriptors.at(At<std::uint32_t>(body,0xF0));
-        if(pending){fault=Fault::persistentTransform;CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));fault=Fault::none;}
+        if(pending){fault=Fault::persistentTransform;CHECK(!ApplyWire(fixture.lease,wire));fault=Fault::none;}
         DWORD previous=0;CHECK(VirtualProtect(descriptor,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);const int was=mutations;
         if(pending) {
             Put<float>(fixture.object,0x90,999);CHECK(!RestorePose(fixture.lease));CHECK(mutations==was && At<float>(fixture.object,0x90)==999);
             CHECK(fixture.lease.restoreGate==&RestorePose && crew::enemy_native::Existing(fixture.lease)!=nullptr);
-        } else {CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);}
+        } else {CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);}
         DWORD discarded=0;CHECK(VirtualProtect(descriptor,0x1000,previous,&discarded)!=0);Sleep(20);
         CHECK(RestorePose(fixture.lease));CHECK(!fixture.lease.restoreGate && fixture.Unchanged(baseline));DrainCheck();
     }
@@ -504,12 +511,12 @@ void ReadonlyPhysicalBacking(Kind kind) {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();const int was=mutations;
         void* body=kind==Kind::large || kind==Kind::squid ? fixture.character : kind==Kind::ufo515 ? At<void*>(fixture.object,0xEA0) : fixture.bodies.front();
         auto* backing=&physical.at(body);DWORD previous=0;CHECK(VirtualProtect(backing,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);
         DWORD discarded=0;CHECK(VirtualProtect(backing,0x1000,previous,&discarded)!=0);Sleep(20);DrainCheck();
     }
     {
         Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();fault=Fault::persistentTransform;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(crew::enemy_native::Existing(fixture.lease)!=nullptr);
         void* body=kind==Kind::large || kind==Kind::squid ? fixture.character : kind==Kind::ufo515 ? At<void*>(fixture.object,0xEA0) : fixture.bodies.front();
         auto* backing=&physical.at(body);DWORD previous=0;CHECK(VirtualProtect(backing,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);fault=Fault::none;
         Put<float>(fixture.object,0x90,888);const int was=mutations;CHECK(!RestorePose(fixture.lease));CHECK(mutations==was && At<float>(fixture.object,0x90)==888);
@@ -525,7 +532,7 @@ void ReadonlyPositionResidual(Kind kind) {
     DWORD previous=0;CHECK(VirtualProtect(storage+0x1000,0x1000,PAGE_READONLY,&previous)!=0);Sleep(20);const int was=mutations;
     // The first 64B transform is writable; precision residual at +40 is in the next, read-only page.
     CHECK(crew::Readable(raw,64,true) && !crew::Readable(raw,0xB0,true));
-    CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);
+    CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(baseline));CHECK(!fixture.lease.restoreGate);
     DWORD discarded=0;CHECK(VirtualProtect(storage+0x1000,0x1000,previous,&discarded)!=0);Sleep(20);DrainCheck();
 }
 void PrecisionRollback(Kind kind) {
@@ -535,23 +542,23 @@ void PrecisionRollback(Kind kind) {
         Put<float>(raw,0x40,1.0e-7f);Put<float>(raw,0x44,-1.0e-7f);Put<float>(raw,0x48,3.0e-7f);
     }
     const Snapshot baseline=fixture.Before();fault=Fault::onceTransform;
-    CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));fault=Fault::none;
+    CHECK(!ApplyWire(fixture.lease,wire));fault=Fault::none;
     CHECK(fixture.lease.restoreGate==nullptr && fixture.Unchanged(baseline));DrainCheck();
 }
 void ReusedFailedRagTransaction() {
     {
         Fixture fixture(Kind::deiroi);const Wire wire=fixture.WireFor(fixture.Incoming());fixture.BreakDeepReference();const Snapshot before=fixture.Before();const int was=mutations;
-        CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));CHECK(mutations==was && fixture.Unchanged(before));DrainCheck();
+        CHECK(!ApplyWire(fixture.lease,wire));CHECK(mutations==was && fixture.Unchanged(before));DrainCheck();
     }
     Fixture fixture(Kind::ufo515);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot baseline=fixture.Before();fault=Fault::persistentTransform;
-    CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));auto* journal=crew::enemy_native::Existing(fixture.lease);
+    CHECK(!ApplyWire(fixture.lease,wire));auto* journal=crew::enemy_native::Existing(fixture.lease);
     CHECK(journal && journal->pending && journal->bodies==1 && journal->body[0].rag==nullptr);
     CHECK(fixture.lease.restoreGate==&RestorePose);fault=Fault::none;
     CHECK(RestorePose(fixture.lease));CHECK(fixture.lease.restoreGate==nullptr && fixture.Unchanged(baseline));DrainCheck();
 }
 void VelocityFailures(Kind kind) {
     Fixture fixture(kind);const Wire wire=fixture.WireFor(fixture.Incoming());const Snapshot before=fixture.Before();fault=Fault::onceLinear;
-    CHECK(!ApplyPose(fixture.lease,wire.data(),wire.size()));fault=Fault::none;
+    CHECK(!ApplyWire(fixture.lease,wire));fault=Fault::none;
     CHECK(fixture.Unchanged(before));CHECK(fixture.lease.restoreGate==nullptr);DrainCheck();
 }
 } // namespace

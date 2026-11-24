@@ -9,8 +9,8 @@
 // or lost the start, picks the show up from it; a newly joined peer is sent one at once) and `end` when it is over or
 // stopped. Each carries the frame the caller has played, so a receiver starts (or catches up) where the caller is,
 // through ultimate_show.h Seek, never replaying the frames it missed.
-// Wire: fixed size, little-endian (wire.h), plugin_net.h channel ULTS, support_protocol.h kExtUltimate: sent only to a
-// peer that announced the bit, another version dropped by the registry.
+// Wire: fixed size, little-endian (wire.h), plugin_net.h channel ULTS: sent to every peer, another
+// version dropped by the registry.
 //   magic, version, kind (byte 8), origin @12, serial @16, frame @20, seed @24 (two words, low first), damage @32,
 //   at[3] @36, plane[3] @48, caller[32] @60; zero to kWire.
 // Version 2 (2026-10-31): the caller is its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
@@ -60,6 +60,13 @@ inline bool Valid(const Msg& m) noexcept {
 }  // namespace detail
 
 inline bool Owned(const void* bytes,std::size_t size) noexcept { return wire::HeadWord(bytes,size,0)==kMagic; }
+// A keep goes as an EDF6Coop state message (plugin_net.h SendState: unreliable, the newest of the show's slot kept; the next
+// keep replaces a lost one); a start and an end reliable. So a keep may overtake its show's start (it begins the show:
+// ultimate_show.h Table) or come after its end (ended: nothing), and an end of a show not played here is kept as ended, or
+// a keep sent before it and arriving after would begin it.
+inline bool KeepState(const void* bytes,std::size_t size) noexcept {
+    return Owned(bytes,size) && size==kWire && static_cast<const unsigned char*>(bytes)[8]==static_cast<unsigned char>(Kind::keep);
+}
 
 // False: a message that would not decode (see Decode), or no room.
 inline bool Encode(const Msg& m,void* bytes,std::size_t size) noexcept {

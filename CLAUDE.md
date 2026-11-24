@@ -65,5 +65,5 @@
 ## 版本与相关仓库
 
 - 版本号只在 `CMakeLists.txt` 的 `project(EDF6VehicleCrew VERSION x.y.z)`；发版就是推 `vX.Y.Z` 标签。
-- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`）。建房 / 进房要求全员装 EDF6Coop 2.7.0+（协议细节见细则）。
+- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`）。建房 / 进房要求全员装 EDF6Coop 2.9.0+（协议细节见细则）。
 - 分享组合包：`D:\APP\edf6-share`。

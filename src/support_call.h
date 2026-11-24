@@ -167,8 +167,7 @@ const wchar_t* SupportCallForbidden(int index) noexcept;
 // The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
 // after the airdrops, so every older index keeps its meaning on the wire. heli.cpp's trigger (a local player on foot in
 // the sea, a submarine carrier out) asks for it at the swimmer through the same request path as a map call: offline /
-// a one-player world's host plans it here, any other online machine through the host (support_net, kExtSeaRescue on
-// every peer). One 410 made on the carrier's deck or in the air at the edge, its real pilot and a door gunner made
+// a one-player world's host plans it here, any other online machine through the host (support_net). One 410 made on the carrier's deck or in the air at the edge, its real pilot and a door gunner made
 // inside it and seated at once; its other door seat is left for the swimmer. Same return and note as SupportCallAt.
 int SupportRescueCatalog() noexcept;
 bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noexcept;
