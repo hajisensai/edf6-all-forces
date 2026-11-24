@@ -236,7 +236,7 @@ namespace {
 // Render thread only: the lens's compositor (scope_pip_gpu.h), the world views since the lens last wanted it. Any
 // thread: whether this mission's first drawn lens / a lens view that could not be held was logged.
 scopepip::LensCompositor compositor;
-unsigned idleViews=0;
+ULONGLONG idleSince=0;   // render thread: when the lens pass went idle (GetTickCount64), 0 while in use
 std::atomic<bool> drawnLogged{false},lensSizeLogged{false};
 // The world view's viewport (view+0) and query (view+4: 0 the main view, 1 the distant view, 2 a shadow cascade).
 bool ViewIndex(const void* view,unsigned* index,unsigned* type) noexcept {
@@ -246,9 +246,9 @@ bool ViewIndex(const void* view,unsigned* index,unsigned* type) noexcept {
 }  // namespace
 
 void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
-    // Render thread only. The pass's device resources go after a while of no lens (kIdleViews world views: a few
-    // seconds), not on every other view (split screen: the other player's view has none).
-    constexpr unsigned kIdleViews=240;
+    // Render thread only. The pass's device resources go after kIdleMs of no lens (by time: the world views a second
+    // follow the frame rate), not on every other view (split screen: the other player's view has none).
+    constexpr ULONGLONG kIdleMs=4000;
     unsigned index=0,type=0;
     if(!context || !view || !ViewIndex(view,&index,&type) || type!=0)return;
     if(index==scopepip::kLensViewport) {
@@ -269,10 +269,11 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
     if(!want) {
         if(index==0)compositor.Release();
         if(mine)lensShown.store(false,std::memory_order_release);
-        if(++idleViews>=kIdleViews){compositor.Reset();idleViews=0;}
+        if(!idleSince)idleSince=now;
+        else if(now-idleSince>=kIdleMs){compositor.Reset();idleSince=now;}
         return;
     }
-    idleViews=0;
+    idleSince=0;
     // The main view's world colour, held for the lens command (recorded right after it, before this view's post stage;
     // the lens view it draws was rendered after the last recording's main view).
     if(compositor.CaptureMain(context,ViewYScale(view)))return;

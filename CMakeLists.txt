@@ -1124,6 +1124,8 @@ add_test(NAME frame_rate_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # Each of the two waits installed on its own checks only (tests/frame_pacing_install_guard.py).
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
+# Everything above 59.94 Hz is behind ini FrameRateDev, off and not in the shipped ini (tests/frame_rate_dev_guard.py).
+add_test(NAME frame_rate_dev_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_dev_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
