@@ -41,6 +41,7 @@
 // stock camera). The AddSe aim step's hook is also the gun stabilizer's way in (stab.cpp StabStep runs the stock step and
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "seat_switch_logic.h"
 #include "vehicle_look.h"
@@ -900,7 +901,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool aimed=live && now-s.aimMs<=kAimFreshMs && s.view;
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
-    if(!live){camSide=CamSide{};PublishObservation(seat,false);return;}
+    if(!live){if(camSide.owned)FrameRateCameraCut(cam);camSide=CamSide{};PublishObservation(seat,false);return;}
     // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
     // served, so it never saw them go): its camera starts from the stock one again, easing in.
     if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
@@ -915,11 +916,12 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool b=AuthoredRig(s.v,&rigB,&baseB);
     if(b && (!a || rigB.radius>=rigA.radius)){normal=rigB;base=baseB;}
     else if(a){normal=rigA;base=baseA;}
-    else{camSide=CamSide{};PublishObservation(seat,false);return;}
+    else{if(camSide.owned)FrameRateCameraCut(cam);camSide=CamSide{};PublishObservation(seat,false);return;}
     rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,normal,s.v};
     if(ExternalView(s.v,s.high)) {
         // Keep the measured rig/classification (the high view still needs it), but no hidden third-person
         // placement or return blend may survive under an external camera owner.
+        if(camSide.owned)FrameRateCameraCut(cam);
         camSide=CamSide{};
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat){shared.normalRay=false;shared.resume=true;shared.observing=false;}

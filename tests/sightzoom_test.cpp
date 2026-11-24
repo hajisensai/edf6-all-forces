@@ -7,6 +7,7 @@ namespace crew {
 bool observing=false;
 bool VehicleLookActive(const void*) noexcept { return observing; }
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 namespace {
 Config config{};
 unsigned char vehicle[0x1200]{},otherVehicle[0x1200]{},seats[2*kSeatStride]{},human[0x1600]{},otherHuman[0x1600]{};

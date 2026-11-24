@@ -32,6 +32,10 @@ namespace scopelens {
 // At load: every site and callee checked, the recording's calls redirected. False (logged): no lens view.
 bool Install() noexcept;
 bool Installed() noexcept;
+// Game thread, the render recording: `fn` runs at each viewport's projection (0x1197B50), before the lens view's work and
+// the native projection (the camera's interpolation, frame_rate_view.cpp). Redirects the call if the lens view has not.
+using BeforeProjectFn=void(*)(void* camera,const int* rect);
+bool SetBeforeProject(BeforeProjectFn fn) noexcept;
 // Game thread (the camera step): `camera` (a CharacterGhostCamera) is the scoped soldier's, its step left the frame
 // unmagnified, the scope's vertical FOV `scopeFov`. nullptr: no lens wanted. Stale after kFreshMs.
 void Want(const void* camera,float scopeFov) noexcept;
