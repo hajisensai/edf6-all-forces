@@ -6,7 +6,7 @@
 // once the chain reaches it, and ucrtbase's abort is told not to fast-fail, so no case goes on to Windows' error
 // reporting. __fastfail is not a case: nothing in the process runs for it (crash_dump.h).
 #include "../src/crash_dump.cpp"
-#include "../src/log_buffer.h"
+#include "../common/log.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -19,7 +19,7 @@ namespace {
 wchar_t logPath[MAX_PATH]{};
 bool endWhenWritten=false;   // the invalid parameter case: its handler fast-fails after the dump, so the test ends here
 bool failCrashLog=false;
-crew::logging::Buffer<4096> logBuffer;
+edf::logfile::Buffer<4096> logBuffer;
 constexpr UINT kChained=0xC0DE0001;    // the child's own filter, behind the plugin's, ended the process
 constexpr UINT kLate=0xC0DE0002;       // a filter set after the plugin's (through the redirect) ended it
 constexpr UINT kWritten=0xC0DE0003;    // the invalid parameter case ended after its dump
@@ -40,16 +40,16 @@ void Log(const char* format,...) noexcept {
     char text[1000];va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
     logBuffer.Append(text,std::strlen(text));
     logBuffer.Append("\n",1);
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); });
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); });
 }
 void FlushLog() noexcept {
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); },true);
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); },true);
 }
 void CrashLog(const char* text,std::size_t size) noexcept {
     WIN32_FILE_ATTRIBUTE_DATA dump{};
     if(GetFileAttributesExW(dumpPath,GetFileExInfoStandard,&dump) && (dump.nFileSizeHigh || dump.nFileSizeLow))Append("DUMP_READY");
     // The same raw append used by plugin.cpp, without the logger's buffer/file locks or printf formatting.
-    logging::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
+    edf::logfile::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
     if(endWhenWritten)TerminateProcess(GetCurrentProcess(),kWritten);
 }
 }  // namespace crew
@@ -384,7 +384,7 @@ int main(int argc,char** argv) {
         Check(ReadDump(work).found,"failed crash log: the primary dump is still written");
     }
     {
-        crew::logging::Buffer<16> buffer;
+        edf::logfile::Buffer<16> buffer;
         std::string written;
         unsigned dropped=0;
         auto write=[&](const char* bytes,std::size_t size,unsigned lost) noexcept { written.append(bytes,size);dropped+=lost; };
