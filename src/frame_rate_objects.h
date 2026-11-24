@@ -1,7 +1,7 @@
 // Frames above the game's 59.94 Hz, stage 4 (PR-e): every other object's root between two ticks
 // (frame_rate_objects.cpp, docs/unlimited-fps-re.md §4.3.3). Driven by frame_rate_view.cpp only: installed with it
-// (the frame gate on), sampled and posed at its render recording hook (the sample before its player root, the poses
-// after), put back with its poses; and forgotten when the mission's scene is released (mission.cpp).
+// (the frame gate on), sampled and posed at the render recording's first projection (the sample before its player root,
+// the poses after), put back with its poses; and forgotten when the mission's scene is released (mission.cpp).
 #pragma once
 #include "frame_rate_logic.h"
 #include <cstdint>
@@ -11,8 +11,8 @@ namespace frameobjects {
 // framerateview::Install, once it is in: the tables' first sizes (no memory: nothing here turns on). Everything below is
 // free before it.
 void Install() noexcept;
-// Game thread, every frame at the render recording call 0x1198FA4 (before the frame's tick loop), before fps-7 writes
-// the player's root; `unticked`: this frame runs no tick (Pose follows). The first call after a tick (System's tick
+// Game thread, every frame at the render recording's first projection (0x1198FA4 -> 0x11978D0 -> 0x1197B50: after the
+// recording copied the skeletons' poses, before the frame's tick loop), before fps-7 writes the player's root; `unticked`: this frame runs no tick (Pose follows). The first call after a tick (System's tick
 // count changed, however many calls a tick) samples the root of every object of System's update list that has a model,
 // as the tick's every job left it. Only while frames without ticks come: from kIdleTicks ticks after the last one (or
 // before the first, or with the frame gate not in: no frame says unticked) the sample is skipped (stress:30, ticks every
@@ -20,7 +20,7 @@ void Install() noexcept;
 // (its Pose then counts what lacks the tick before as Left::kSamples: two ticks to blend again).
 constexpr unsigned kIdleTicks=60;   // 1 s of ticks without a frame without ticks
 void Sample(bool unticked) noexcept;
-// Game thread, a frame without ticks, at the render recording right after Sample and the player's root (fps-7):
+// Game thread, a frame without ticks, at the recording's first projection right after Sample and the player's root (fps-7):
 // every sampled object's draw poses times its D = cur^-1 * blend(prev, cur, alpha); riders of a vehicle (other crew, the
 // auto turret's gunners: anyone in its seats) with the vehicle's D. `rootHuman` / `rootVehicle`: fps-7's (left to it);
 // `rootD`: its D (16 floats) when it posed them, else null (their riders are left as stepped).

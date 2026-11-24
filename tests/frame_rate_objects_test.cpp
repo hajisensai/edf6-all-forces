@@ -432,14 +432,14 @@ void Idle() {
     for(unsigned i=0;i<frameobjects::kIdleTicks;++i){both(2.0f+static_cast<float>(i));Tick();}
     c=Take();
     Check(!c.idleTicks && bodies.size()==2 && bodies[0].samples==2,"idle: the window's ticks sampled");
-    both(100);Tick();
+    for(unsigned i=0;i<=kMostGap;++i){both(100.0f+static_cast<float>(i));Tick();}
     c=Take();
-    Check(c.idleTicks==1 && bodies.size()==2,"idle: the tick after the window skipped, the objects known kept");
-    both(101);TickOnly();
+    Check(c.idleTicks==kMostGap+1 && bodies.size()==2,"idle: the ticks after the window skipped, the objects known kept");
+    both(110);TickOnly();
     Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
     Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2 && c.AsStepped()==2,
-          "idle: the frame without ticks that resumes samples, the tick before it was not: every object under samples");
+          "idle: the frame without ticks that resumes samples past kMostGap skipped ticks: every object under samples");
     both(102);Tick();
     Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
@@ -464,6 +464,39 @@ void Idle() {
     TickOnly();TickOnly();frameobjects::Sample(false);
     c=Take();
     Check(c.idleTicks==2,"a recording after two ticks: both counted");
+    frameobjects::SceneOver();Take();
+}
+
+// A frame catching up (two ticks before one recording): the second tick sampled only, the pair goes on across the gap,
+// drawn from the tick before cur on the prev-cur line; past kMostGap the samples start again.
+void CatchUp() {
+    NewScene();
+    const Obj a=MakeObj(thermal::Family::kOther);
+    List({&a});
+    Steps({&a},0,1);
+    Root(a,3);TickOnly();TickOnly();frameobjects::Sample(false);   // ticks at x 2 and 3, the recording after both
+    Check(bodies.size()==1 && bodies[0].samples==2 && bodies[0].gap==2,"catch-up: two ticks apart, still a pair");
+    Frame(0.5f,nullptr,nullptr,nullptr);
+    auto c=Take();
+    Check(c.posed==1 && NearX(a.model.pose,2.5f),
+          "catch-up: drawn half a tick on from the tick before cur (x 2.5, not 2 from a blend over the pair)");
+    frameobjects::Restore();
+    // A pair two ticks apart moves up to twice the cut.
+    Root(a,3.0f+15.0f);TickOnly();TickOnly();frameobjects::Sample(false);
+    Frame(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==1 && NearX(a.model.pose,3.0f+15.0f*0.75f),"catch-up: a move over the gap is cut at gap times kCutMove");
+    frameobjects::Restore();
+    Root(a,19);Tick();
+    Frame(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==1 && bodies[0].gap==1 && NearX(a.model.pose,18.5f),"catch-up: the next tick, a one-tick pair again");
+    frameobjects::Restore();
+    for(std::uint32_t i=0;i<=kMostGap;++i)TickOnly();
+    Root(a,30);frameobjects::Sample(false);
+    Frame(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==1,"catch-up: past kMostGap ticks the samples start again");
     frameobjects::SceneOver();Take();
 }
 
@@ -497,6 +530,7 @@ int main() {
     PlayerWeapons();
     Costs();
     Idle();
+    CatchUp();
     std::printf("frame_rate_objects: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

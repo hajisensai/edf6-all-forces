@@ -5,7 +5,7 @@
 // Which objects. System ([image+0x20B2958], scene::ObjectManager) keeps the objects its tick updates in a list (+0x448
 // pointers, +0x458 count): 0x1198DA0's object phase walks it each tick (0x11993D6 cleans it right before, 0x1195F20).
 // Once a tick (System +0xCE0, the tick count 0x1198FD0 adds one to: the first render recording that sees it changed,
-// see below), the sample takes every listed object whose family thermal_models.cpp knows (soldiers
+// at its first projection, see below), the sample takes every listed object whose family thermal_models.cpp knows (soldiers
 // and NPCs of any machine, vehicles empty or not, insects, humanoids, monsters, UFOs and the other families there):
 // pose[0] of its main model's skeleton instance (model+0xA0, the world root). A listed pointer can outlive its object
 // until the next clean (0x1195F20 drops expired entries only then), so each sampled object is held by a weak count on its
@@ -14,21 +14,28 @@
 // object is not listed, and all of them when the mission's scene is released (SceneOver). Identity: the control block,
 // the vtable, the instance; any change starts its samples again.
 //
-// Where: at the render recording (render_record.cpp, 0x1198FA4), before fps-7 writes the player's root, the first
-// recording whose tick count is not the last sample's. The recording runs once a frame before the frame's tick loop, so
-// the first one after a tick sees the roots as that tick left them and as they are drawn: after the tick's every job.
+// Where: inside the render recording (0x1198FA4 -> 0x11978D0), at its first projection (frame_rate_view.cpp
+// ProjectStart, viewport 0's 0x1197B50), before fps-7 writes the player's root, the first recording whose tick count is
+// not the last sample's. The recording runs once a frame before the frame's tick loop, so the first one after a tick
+// sees the roots as that tick left them. Before it projects, the recording makes the skeletons' pose arrays again: its
+// loop at 0x1197950 calls vtable slot 3 of every object in System's +0x428 list (M001: 70, among them every soldier), a
+// soldier's going 0x59A780 -> 0x5750D0 -> 0x6C06A0(h+0x860) -> 0x1100F10(h+0x900), which copies every bone record's
+// world (rec+0xB0, the tick's last word on the bones) over the pose array (inst+0x30) when [model+0x31C] & 1; then the
+// +0x358 jobs (0x1197A0B). So the sample and the poses come after both, at the first projection, before the first draw:
+// at the recording's start (#404) the sample read the copy the last recording made, before the tick, and every pose
+// written there was copied over before it was drawn (M001 at FrameRateCap=1: 12 a frame, all soldiers, the player's too;
+// counted blended, drawn as stepped; then 5400-6300 every 5 s left for `pose`). At the projection: none left for `pose`,
+// every pose written still there at the end fence, 8300-9200 blended every 5 s.
 // It was the camera step (0x11995A6, once a viewport a tick) before: after it the tick still runs 0x11BEBE0 (Havok
 // queries' callbacks), the +0x358 job table (each element's vtbl[1] through 0x118FC00), 0x1193D50 when not paused
 // (every [sys+0xCC0] entry's slot 0x28, the +0x370 jobs) and +0x358 again, vtable calls chosen at run time; in M001 at
 // FrameRateCap=1 every object drawn as stepped was one of those writes (Left::kPose, 4500-5700 every 5 s against 1800
-// blended, #395). A frame with two ticks samples the second only (the pair is then not consecutive: samples start
-// again). A root written between the sample and the drawing makes the drawn root differ from cur: that object is drawn
-// as stepped (counted, Left::kPose), never blended from a stale pair. After the move, M001 at FrameRateCap=1 still draws
-// about 1000-1300 a second as stepped for `pose`: every one a Ranger (vtable EDF+0x17CDF28, AssultSoldier), the player
-// and allies, on a frame without ticks after the one that sampled (never in the sampling record call). Their root is
-// written again between frames without a tick: not found yet (docs/unlimited-fps-re.md 4.3.3).
+// blended, #395). A frame with two ticks (catching up) samples the second only: the pair then spans kMostGap ticks at
+// most and goes on (Body::gap: drawn from the tick before cur on that line, the cuts times the gap); a longer gap (the
+// sample idle, a stall) starts the samples again. A root written between the sample and the drawing makes the drawn
+// root differ from cur: that object is drawn as stepped (counted, Left::kPose), never blended from a stale pair.
 //
-// What a frame without ticks draws (at the render recording, frame_rate_view.cpp RecordStart). Each object whose drawn
+// What a frame without ticks draws (at the recording's first projection, frame_rate_view.cpp ProjectStart). Each object whose drawn
 // root is still the last tick's (nothing wrote it since) moves to D = cur^-1 * InterpolateScaled(prev, cur, alpha) (a
 // uniform scale is blended, a squash, a mirror, a teleport over kCutMove metres or a turn over kCutTurn radians in one
 // tick are drawn as they are): D times every bone of every instance of every model the object draws with (bone poses
@@ -87,18 +94,22 @@ constexpr std::uint64_t kMostBones=256;
 // the player's root agree. A real move past them is drawn as stepped and counted (refused, move / turn): the FRAMERATE
 // line says whether they cut real motion (docs/unlimited-fps-re.md §4.3.3).
 constexpr float kCutMove=10.0f,kCutTurn=1.0f;
+// The most ticks between two samples still taken as a pair (a frame catching up runs 2, rarely 3): kCutTurn times it
+// stays under half a turn.
+constexpr std::uint32_t kMostGap=3;
 // The tables' first sizes (they grow on frames with ticks): poses written a frame, their floats (4 MB each copy), objects.
 constexpr std::size_t kFirstPoses=4096,kFirstPoseFloats=1u<<20,kFirstBodies=1024;
 constexpr int kRefusals=static_cast<int>(Refusal::kCount);
 
-// An object's root as the last two ticks left it (see the top). tick: the last sample's; samples: 2 when prev is the
-// tick before. This frame (without ticks): fresh (still there, the same, its drawn root what the tick left), moving
+// An object's root as its last two samples left it (see the top). tick: the last sample's; samples: 2 when prev is a
+// sample gap (1 to kMostGap) ticks before. This frame (without ticks): fresh (still there, the same, its drawn root what the tick left), moving
 // with d, still (nothing moved); why: what left it as stepped.
 struct Body {
     const unsigned char* object=nullptr;unsigned char* ctrl=nullptr;const void* vtable=nullptr;
     const unsigned char* inst=nullptr;
     thermal::Family family=thermal::Family::kNone;
     std::uint32_t tick=0;
+    std::uint32_t gap=1;   // ticks from prev to cur (1 to kMostGap)
     int samples=0;
     bool fresh=false,moving=false,still=false;
     Left why=Left::kSamples;
@@ -373,7 +384,7 @@ void Forget(std::size_t i) noexcept {
 
 // One listed object's sample (the game holds it live: no Readable). kSkip: nothing of it this tick; kFull: no room.
 enum class Sampled { kYes,kSkip,kFull };
-Sampled SampleOne(const unsigned char* obj,std::uint32_t tick,bool next) noexcept {
+Sampled SampleOne(const unsigned char* obj,std::uint32_t tick,std::uint32_t gap) noexcept {
     if(!obj || (At<unsigned char>(obj,kObjFlags)&kObjDeleted))return Sampled::kSkip;
     const auto model=static_cast<const unsigned char*>(thermal::EnemyModelLive(obj));
     if(!model)return Sampled::kSkip;
@@ -403,7 +414,8 @@ Sampled SampleOne(const unsigned char* obj,std::uint32_t tick,bool next) noexcep
         bodyIndex.Set(obj,at);
     }
     Body& b=bodies[static_cast<std::size_t>(at)];
-    if(!next || b.tick!=sampledTick || b.vtable!=vt || b.inst!=inst)b.samples=0;
+    if(gap<1 || gap>kMostGap || b.tick!=sampledTick || b.vtable!=vt || b.inst!=inst)b.samples=0;
+    b.gap=b.samples ? gap : 1u;
     if(!b.samples)b.family=thermal::EnemyFamilyLive(obj);
     b.vtable=vt;b.inst=inst;b.tick=tick;
     std::memcpy(b.prev,b.cur,sizeof(b.prev));
@@ -434,12 +446,12 @@ void SampleAll() noexcept {
     if(!UpdateList(sys,list,count))return;
     const auto tick=At<std::uint32_t>(sys,kTickCount);
     if(sampledAny && tick==sampledTick)return;
-    const bool next=sampledAny && tick==sampledTick+1;
+    const std::uint32_t gap=sampledAny ? tick-sampledTick : 0u;   // ticks since the last sample (0: none, a new pair)
     if(!Grow(static_cast<std::size_t>(count)))return;
     unsigned full=0;
     for(std::uint64_t i=0;i<count;++i) {
         __try {
-            if(SampleOne(list[i],tick,next)==Sampled::kFull)++full;
+            if(SampleOne(list[i],tick,gap)==Sampled::kFull)++full;
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     // Objects not sampled this tick (gone from the list, deleted, no model) are forgotten.
@@ -483,8 +495,12 @@ void OwnState(Body& b,float alpha) noexcept {
     float shown[16];
     fpview::M4 cur,inverse,to;
     std::memcpy(cur.m,b.cur,64);
-    if(!framerate::InterpolateScaled(b.prev,b.cur,alpha,shown,kCutMove,kCutTurn)) {
-        ++counts.refused[static_cast<int>(framerate::ScaledRefusal(b.prev,b.cur,alpha,kCutMove,kCutTurn))];
+    // A pair `gap` ticks apart: the frame is alpha into the tick after the one before cur, (gap - 1 + alpha) / gap of the
+    // way from prev; one tick moves gap times less than the pair.
+    const float gap=static_cast<float>(b.gap);
+    const float along=(gap-1.0f+alpha)/gap;
+    if(!framerate::InterpolateScaled(b.prev,b.cur,along,shown,kCutMove*gap,kCutTurn*gap)) {
+        ++counts.refused[static_cast<int>(framerate::ScaledRefusal(b.prev,b.cur,along,kCutMove*gap,kCutTurn*gap))];
         return;
     }
     if(!fpview::InverseAffine(cur,&inverse)) {
