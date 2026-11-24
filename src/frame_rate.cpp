@@ -31,6 +31,7 @@
 // cap is above the display's refresh rate or there is none, else 1 but for 8 ticks after a catch-up.
 #include "frame_rate.h"
 #include "frame_rate_view.h"
+#include "swap_flip.h"
 #include "frame_pacing_logic.h"
 #include "frame_rate_logic.h"
 #include "frame_pacing.h"
@@ -338,7 +339,8 @@ void InstallFrameRate() noexcept {
     }
     // The input move first: it is all FrameRateDev does at FrameRateCap=0 (latency-3), and the gate needs it.
     const bool input=InstallInputMove();
-    Log("FRAMERATE FrameRateDev=1: input wrappers updated before the step=%d",input);
+    const bool flip=InstallSwapFlip();
+    Log("FRAMERATE FrameRateDev=1: input wrappers updated before the step=%d, flip swap chain=%d",input,flip);
     if(c.frameRateCap==framerate::kOff || !input)return;
     cap=c.frameRateCap;
     LARGE_INTEGER freq;

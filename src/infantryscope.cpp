@@ -1,4 +1,5 @@
 // A soldier's scoped weapon looked through (src/infantryscope.h).
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "enemy_control.h"
 #include "infantryscope.h"
@@ -58,6 +59,7 @@ std::atomic<float> lensShownFov{0.0f};
 // Game thread only: the camera's FOV this hook wrote, to retract before the next step (sightzoom.cpp's way).
 struct Unzoom { void* camera=nullptr; float before=0.0f,written=0.0f; };
 Unzoom unzoom{};
+bool unzoomLast=false;   // the last step's camera was widened (its on and off are cuts, frame_rate_view.h)
 
 // openedAt: when this soldier's scope was first seen open (the lens's probation, scope_pip.h KeepUnzoomed). frameFov /
 // scopeFov: the camera step's last unmagnified frame for this soldier and the stock zoom's FOV it replaced (0: the
@@ -118,6 +120,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
         const float wide=scopepip::KeepUnzoomed(true,lensHooked.load(std::memory_order_acquire),LensRefused(),now,p.openedAt,
                                                 lensAt.load(std::memory_order_acquire)) ?
                          scopepip::Unzoomed(before,At<float>(c,kCamZoom)) : 0.0f;
+        if((wide>0.0f)!=unzoomLast){unzoomLast=wide>0.0f;FrameRateCameraCut(cam);}   // the field jumps
         if(!(wide>0.0f)){PublishFov(p.cue.human,0.0f,0.0f);return;}
         unzoom=Unzoom{cam,before,wide};
         *reinterpret_cast<float*>(c+kCamFov)=wide;
