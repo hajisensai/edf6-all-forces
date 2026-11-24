@@ -148,9 +148,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/frame_rate_objects.cpp src/render_record.cpp src/swap_flip.cpp)
 # The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/swap_flip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp src/preload_set.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
@@ -1150,6 +1150,8 @@ set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
 # FrameRateCap=0 installs nothing above 59.94 Hz; the developer switch FrameRateDev is gone (tests/frame_rate_off_guard.py).
 add_test(NAME frame_rate_off_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_off_guard.py")
+# Every game call site redirected from one file (0x1198FA4: src/render_record.cpp, the others chained in its turns).
+add_test(NAME redirect_owner_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/redirect_owner_guard.py")
 # 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
 # tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
 add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
@@ -2172,6 +2174,19 @@ target_link_libraries(frame_rate_view_test PRIVATE edf6common)
 target_compile_options(frame_rate_view_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks frame_rate_view_test)
 add_test(NAME frame_rate_view COMMAND frame_rate_view_test)
+# The render recording's single owner (src/render_record.cpp): 0x1198FA4 redirected once, the frame rate's and the first
+# person's turns in order, each alone.
+add_executable(render_record_test EXCLUDE_FROM_ALL tests/render_record_test.cpp)
+target_include_directories(render_record_test PRIVATE src common)
+target_compile_options(render_record_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks render_record_test)
+add_test(NAME render_record COMMAND render_record_test)
+add_executable(frame_rate_objects_test EXCLUDE_FROM_ALL tests/frame_rate_objects_test.cpp)
+target_include_directories(frame_rate_objects_test PRIVATE src common)
+target_link_libraries(frame_rate_objects_test PRIVATE edf6common)
+target_compile_options(frame_rate_objects_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks frame_rate_objects_test)
+add_test(NAME frame_rate_objects COMMAND frame_rate_objects_test)
 add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
 target_include_directories(fp_skin_test PRIVATE src common)
 target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)

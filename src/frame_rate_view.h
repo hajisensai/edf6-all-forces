@@ -11,7 +11,8 @@ bool Install() noexcept;
 // Game thread, each frame right before System::Update (frame_rate.cpp SystemUpdateHook): anything the last frame's end
 // fence did not put back is (the blends are undone at the frame end's fence 0x11A305A, once the render thread has drawn
 // the frame, so the next frame's Application::Update and step read the simulation), and this frame's phase is set: `alpha` 1 on a frame that steps (its render comes before its steps), else the part of a
-// tick since the last boundary.
+// tick since the last boundary. Nothing is posed here: a frame without ticks poses at System::Update's render recording
+// (its call 0x1198FA4, after the frame's object deletion 0x1195F20), and only there.
 void BeginFrame(std::uint32_t ticks,float alpha) noexcept;
 // Game thread, the FRAMERATE statistics since the last call: viewport projections on frames without ticks drawn blended
 // / left as stepped, and frames without ticks whose player root (fps-7) was moved to the blend / left as stepped because
@@ -24,4 +25,9 @@ void TakeCounts(unsigned& blended,unsigned& unblended,unsigned& roots,unsigned& 
 // until the next step draw this step as it is instead of a blend across the jump. nullptr: every camera. Free when the
 // interpolation is off.
 void FrameRateCameraCut(const void* camera) noexcept;
+// Game thread, at the render recording (render_record.h, before 0x11978D0 projects): the eye (the camera's world
+// matrix's position row) `camera` is drawn from this frame, the blend BeforeProject will write on a frame without ticks
+// (same checks, nothing written). False: drawn as it is (interpolation off, a frame with ticks, a cut, a camera not
+// blended); the caller reads the camera itself.
+bool FrameRateDrawnEye(const void* camera,float eye[3]) noexcept;
 }  // namespace crew

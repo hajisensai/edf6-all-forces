@@ -1,10 +1,11 @@
 // The frame rate view's state machine (src/frame_rate_view.cpp, docs/unlimited-fps-re.md §4.3) run on heap fixtures laid
 // out as the file reads them: the camera (+0x220 world, +0x24 field, +0x360 soldier), the soldier, the vehicle, their
 // models, skeleton instances and pose arrays. The camera step's and the frame end fence's game calls (image+kCameraStep,
-// image+kFence) land on local stand-ins: `image` is set so that image+rva is the stand-in for the call being made.
-// Each frame runs as the game does: BeginFrame, the projection (BeforeProject), the steps (CameraStepHook), the fence
-// (FrameEndHook).
+// image+kFence, image+kRecordDraw) land on local stand-ins: `image` is set so that image+rva is the stand-in for the call
+// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's hook, RecordStart: a frame without ticks
+// poses there), the projection (BeforeProject), the steps (CameraStepHook), the fence (FrameEndHook).
 #include "../src/frame_rate_view.cpp"
+#include "../src/render_record.cpp"
 #include <cmath>
 #include <cstdio>
 
@@ -14,6 +15,16 @@ void Log(const char*,...) noexcept {}
 const unsigned char* riddenHuman=nullptr;   // the soldier HumanOnFoot says is riding
 bool HumanOnFoot(const unsigned char* human) noexcept { return human!=riddenHuman; }
 namespace scopelens { bool SetBeforeProject(BeforeProjectFn) noexcept { return false; } }
+// The other objects' layer (frame_rate_objects.cpp, PR-e) reads the game's object tables: not exercised here, only
+// counted, so its calls ride the same frames as the player's root.
+namespace frameobjects {
+int installs=0,samples=0,poses=0,restores=0,refusals=0;
+void Install() noexcept { ++installs; }
+void Sample() noexcept { ++samples; }
+void Pose(float,const void*,const void*,const float*) noexcept { ++poses; }
+void Restore() noexcept { ++restores; }
+void NoteRootRefusal(framerate::Refusal) noexcept { ++refusals; }
+}  // namespace frameobjects
 
 namespace {
 int checks=0,failures=0;
@@ -48,6 +59,9 @@ void StandInStep(void* camera,void*) {
         }
 }
 void* StandInFence(void*,void*,void*,void*) { ++fenceCalls;return nullptr; }
+int recordCalls=0;
+std::uint64_t recordArgs[2]{};
+void* StandInRecord(void*,std::uint64_t a,std::uint64_t b) { ++recordCalls;recordArgs[0]=a;recordArgs[1]=b;return nullptr; }
 unsigned char* ImageFor(std::uintptr_t function,unsigned rva) noexcept {
     return reinterpret_cast<unsigned char*>(function-rva);
 }
@@ -73,6 +87,20 @@ void Step(void* camera) {
     CameraStepHook(camera,nullptr);
 }
 void Project(void* camera) { BeforeProject(camera,nullptr); }
+// System::Update's render recording call (0x1198FA4), through render_record.cpp's hook with the frame rate's turn
+// registered as Install registers it (the call site's patch itself is render_record_test's).
+void Record() {
+    recordState=1;
+    renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
+    image=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInRecord),kRecordDraw);
+    RecordHook(nullptr,0x1234,1);
+    image=stepImage;
+}
+// A frame without ticks up to its render recording: BeginFrame, then the record call (which poses).
+void Frame0(float alpha) {
+    framerateview::BeginFrame(0,alpha);
+    Record();
+}
 void Fence() {
     image=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInFence),kFence);
     FrameEndHook(nullptr,nullptr,nullptr,nullptr);
@@ -190,7 +218,7 @@ void CameraBlend() {
     Check(Counted().blended==0,"camera: a frame with ticks counts no blend");
 
     for(float alpha:{0.25f,0.5f}) {
-        framerateview::BeginFrame(0,alpha);
+        Frame0(alpha);
         Project(cam);
         const M4 want=Pose(0.4f*alpha,4*alpha,0,2*alpha);
         Check(Near(World(cam),want.m),"camera: a 0-tick frame draws prev->cur at alpha (position linear, yaw slerped)");
@@ -208,7 +236,7 @@ void CameraBlend() {
     // Someone else wrote the camera after its step: left alone.
     const M4 other=Pose(1.0f,9,9,9);
     std::memcpy(cam+kWorld,other.m,64);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Same(World(cam),other.m,64),"camera: a matrix written after the step is not blended over");
     Fence();
@@ -217,7 +245,7 @@ void CameraBlend() {
     Check(c.unblended==1 && c.blended==0,"camera: written after the step counts unblended");
     std::memcpy(cam+kWorld,b.m,64);
     Put<float>(cam,kFov,2.0f);   // the field alone written after the step
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Same(World(cam),b.m,64) && Fov(cam)==2.0f,"camera: a field written after the step is not blended over");
     Fence();
@@ -225,7 +253,7 @@ void CameraBlend() {
     Put<float>(cam,kFov,1.4f);
 
     // Review 4: the blend overwritten after the projection. Matrix overwritten: neither matrix nor field goes back.
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     const float shownFov=Fov(cam);
     std::memcpy(cam+kWorld,other.m,64);
@@ -234,12 +262,41 @@ void CameraBlend() {
     Check(Fov(cam)==shownFov,"camera: the field is not put back without its matrix (review 4)");
     // Field overwritten, matrix still the blend: the matrix goes back, the field stays theirs.
     std::memcpy(cam+kWorld,b.m,64);Put<float>(cam,kFov,1.4f);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Put<float>(cam,kFov,3.0f);
     Fence();
     Check(Same(World(cam),b.m,64) && Fov(cam)==3.0f,"camera: matrix restored, someone's field kept");
     Put<float>(cam,kFov,1.4f);
+    Counted();
+}
+
+// 1b. The eye the first person places its Umbra boxes around (FrameRateDrawnEye, at the render recording, before the
+// projection): the blend the projection then draws on a frame without ticks; false (the camera's own) otherwise.
+void DrawnEye() {
+    Reset();
+    const M4 a=Pose(0.0f,0,0,0),b=Pose(0.4f,4,0,2);
+    TickTo(cam,a,1.0f);
+    float eye[3]{};
+    BeginTick(1);
+    Check(!FrameRateDrawnEye(cam,eye),"drawn eye: a frame with ticks draws the camera as it is");
+    Queue(cam,b,1.0f);
+    Step(cam);
+    Fence();
+    Frame0(0.25f);
+    const bool before=FrameRateDrawnEye(cam,eye);
+    const float early[3]={eye[0],eye[1],eye[2]};
+    Check(Same(World(cam),b.m,64),"drawn eye: asking writes nothing");
+    Project(cam);
+    const float* const w=reinterpret_cast<const float*>(cam+kWorld);
+    Check(before && Same(early,w+12,12) && std::fabs(early[0]-1.0f)<1e-4f,"drawn eye: before the projection, the eye it then draws");
+    Check(FrameRateDrawnEye(cam,eye) && Same(eye,w+12,12),"drawn eye: after it, the eye written");
+    Check(!FrameRateDrawnEye(cam2,eye),"drawn eye: a camera not sampled");
+    Fence();
+    FrameRateCameraCut(cam);
+    Frame0(0.5f);
+    Check(FrameRateDrawnEye(cam,eye) && Same(eye,b.m+12,12),"drawn eye: a cut camera, the step's eye (what it is drawn at)");
+    Fence();
     Counted();
 }
 
@@ -251,19 +308,19 @@ void CameraCuts() {
     TickTo(cam,b);
     FrameRateCameraCut(cam);
     for(int frame=0;frame<2;++frame) {
-        framerateview::BeginFrame(0,frame ? 0.75f : 0.25f);
+        Frame0(frame ? 0.75f : 0.25f);
         Project(cam);
         Check(Near(World(cam),b.m),"cut: every frame until the next step draws cur");
         Fence();
         Check(Same(World(cam),b.m,64),"cut: cur stands after the fence");
     }
     TickTo(cam,c2);   // the step after the cut: prev is this step's own bytes
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Near(World(cam),c2.m),"cut: the next step takes prev from the camera's bytes (no blend across the jump)");
     Fence();
     TickTo(cam,d);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     const M4 mid=Pose(0,5,0,0);
     Check(Near(World(cam),mid.m),"cut: the step after that blends again");
@@ -275,7 +332,7 @@ void CameraCuts() {
     TickTo(cam2,a);
     BeginTick(1);Queue(cam,b);Queue(cam2,c2);Step(cam);Step(cam2);Fence();
     FrameRateCameraCut(nullptr);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);Project(cam2);
     Check(Near(World(cam),b.m) && Near(World(cam2),c2.m),"cut: nullptr cuts every camera");
     Fence();
@@ -283,7 +340,7 @@ void CameraCuts() {
     BeginTick(1);Queue(cam,c2);Queue(cam2,c2);Step(cam);Step(cam2);Fence();
     BeginTick(1);Queue(cam,d);Queue(cam2,d);Step(cam);Step(cam2);Fence();
     FrameRateCameraCut(cam2);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);Project(cam2);
     Check(Near(World(cam),Pose(0,5,0,0).m) && Near(World(cam2),d.m),"cut: a named camera cuts that camera only");
     Fence();
@@ -295,7 +352,7 @@ void CameraCuts() {
     BeginTick(1);Fence();   // a tick that does not step it (age 1)
     BeginTick(1);           // and another (age 2)
     Queue(cam,c2);Step(cam);Fence();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Near(World(cam),c2.m),"cut: a camera idle for more than one tick does not blend from its old step");
     Fence();
@@ -304,7 +361,7 @@ void CameraCuts() {
     TickTo(cam,a);
     TickTo(cam,b);
     TickTo(cam,c2);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Near(World(cam),Pose(0,3,0,0).m),"cut: a camera stepped every tick blends prev->cur");
     Fence();
@@ -319,7 +376,7 @@ void PrevCur() {
     Project(cam);
     for(float x:{1.0f,2.0f,4.0f}){Queue(cam,Pose(0,x,0,0));Step(cam);}
     Fence();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Near(World(cam),Pose(0,3,0,0).m),"prev/cur: prev is the catch-up frame's second-to-last step");
     Fence();
@@ -336,7 +393,7 @@ void PrevCur() {
         Reset();
         TickTo(cam,Pose(0,0,0,0));
         TickTo(cam,j.to);
-        framerateview::BeginFrame(0,0.5f);
+        Frame0(0.5f);
         Project(cam);
         const bool asStepped=Same(World(cam),j.to.m,64);
         Fence();
@@ -359,7 +416,7 @@ void Roots() {
     const M4 r0=Pose(0.0f,10,0,10),r1=Pose(0.2f,10.4f,0,10.2f);
     OnFoot(r0);
     MoveSoldier(r0);TickTo(cam,Pose(0,0,0,0));
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(Counted().roots==0,"root: one sample poses nothing");
     Fence();
     const Snapshot atR0=Snap();
@@ -369,7 +426,7 @@ void Roots() {
     MoveSoldier(r1);Queue(cam,Pose(0,1,0,0));Step(cam);
     Fence();
     const Snapshot stepped=Snap();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     const M4 half=Pose(0.1f,10.2f,0,10.1f);
     Check(PosedAt(bodyPose,half),"root: every body bone moves to local · blend(prev, cur, alpha)");
     Check(PosedAt(lodPose,half,0.5f) && PosedAt(lod2Pose,half,0.25f),"root: the base LOD and the LOD table's instances too");
@@ -380,11 +437,11 @@ void Roots() {
     Counts c=Counted();
     Check(c.roots==1 && c.rootsLeft==0 && c.rootsRefused==0,"root: one posed root counted");
     // The base LOD listed twice (base and table) is posed once: D applied once.
-    framerateview::BeginFrame(0,0.25f);
+    Frame0(0.25f);
     Check(PosedAt(lodPose,Pose(0.05f,10.1f,0,10.05f),0.5f),"root: an instance listed twice is posed once");
     // BeginFrame's fallback: no fence, the next frame's start puts the poses and the camera back.
     Project(cam);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(PosedAt(bodyPose,half),"root: a frame after an unfenced one poses from the step, not from the last blend");
     BeginTick(1);
     Check(Unchanged(stepped),"root: BeginFrame without a fence still restores the poses");
@@ -392,17 +449,19 @@ void Roots() {
     Fence();
     Counted();
 
-    // Someone rewrote one instance after the write: that instance is left, the others go back.
-    framerateview::BeginFrame(0,0.5f);
+    // Someone rewrote one bone after the write: that bone is left, the instance's other bones and the others go back.
+    Frame0(0.5f);
     weaponPose[17]+=1.0f;
-    float weaponTheirs[kBones*16];std::memcpy(weaponTheirs,weaponPose,sizeof(weaponTheirs));
+    float weaponTheirs[16];std::memcpy(weaponTheirs,weaponPose+16,sizeof(weaponTheirs));
     Fence();
-    Check(Same(weaponPose,weaponTheirs,sizeof(weaponTheirs)),"root: a pose rewritten after the write is not put back");
+    Check(Same(weaponPose+16,weaponTheirs,sizeof(weaponTheirs)),"root: a bone rewritten after the write is not put back");
+    Check(Same(weaponPose,stepped.weapon,64) && Same(weaponPose+32,stepped.weapon+32,64),
+          "root: the same instance's untouched bones go back");
     Check(Same(bodyPose,stepped.body,sizeof(stepped.body)) && Same(lodPose,stepped.lod,sizeof(stepped.lod)),
           "root: the untouched poses go back");
     std::memcpy(weaponPose,stepped.weapon,sizeof(stepped.weapon));
     // The pose pointer or the bone count changed: not put back.
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     float lodWritten[kBones*16];std::memcpy(lodWritten,lodPose,sizeof(lodWritten));
     Put<float*>(lodInst,kInstPose,sparePose);
     float lod2Written[kBones*16];std::memcpy(lod2Written,lod2Pose,sizeof(lod2Written));
@@ -417,13 +476,13 @@ void Roots() {
 
     // rootsLeft: the live root differs from the sample (moved after the step), or the control block changed.
     bodyPose[12]+=0.5f;
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(bodyPose[12]==stepped.body[12]+0.5f && Same(lodPose,stepped.lod,sizeof(stepped.lod)),
           "root: a root moved after its step is not posed");
     Fence();
     bodyPose[12]=stepped.body[12];
     Put<const void*>(human,kSelfCtrl,ctrlB);
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(Unchanged(stepped),"root: a soldier whose control block changed since the step is not posed");
     Fence();
     c=Counted();
@@ -436,7 +495,7 @@ void Roots() {
     Instance(weapon+kWeaponModel+kModelInst,bodyPose,kBones);
     TwoSamples(r0,r1);
     const Snapshot shared=Snap();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(PosedAt(bodyPose,half),"root: a pose array two instances share is posed once");
     Fence();
     Check(Unchanged(shared),"root: and put back once");
@@ -447,7 +506,7 @@ void Roots() {
     OnFoot(r0);
     TwoSamples(r0,Pose(0,25,0,10));
     const Snapshot jumped=Snap();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(Unchanged(jumped),"root: a jump is not posed");
     Fence();
     c=Counted();
@@ -467,7 +526,7 @@ void Riding() {
     WritePose(vehiclePose,v1);
     TickTo(cam,Pose(0,1,0,0));
     const Snapshot stepped=Snap();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     const M4 half=Pose(0.15f,51,0,50);
     Check(PosedAt(vehiclePose,half),"ride: the vehicle's bones move to the blend of its root");
     M4 cur;std::memcpy(cur.m,v1.m,64);
@@ -513,7 +572,7 @@ void RootIdentity() {
         const Snapshot before=Snap();
         float before2[kBones*16];std::memcpy(before2,body2Pose,sizeof(before2));
         TickTo(cam,Pose(0,4,0,0));
-        framerateview::BeginFrame(0,0.5f);
+        Frame0(0.5f);
         Project(cam);
         char what[160];
         std::snprintf(what,sizeof(what),"%s: its camera is cut (draws the step, not a blend)",names[change]);
@@ -526,7 +585,7 @@ void RootIdentity() {
         Check(c.roots==0,what);
         // The next tick samples again: posing resumes.
         TickTo(cam,Pose(0,5,0,0));
-        framerateview::BeginFrame(0,0.5f);
+        Frame0(0.5f);
         std::snprintf(what,sizeof(what),"%s: the second sample of the new root poses again",names[change]);
         Check(Counted().roots==1,what);
         Fence();
@@ -539,7 +598,7 @@ void RootIdentity() {
     BeginTick(1);Queue(cam,Pose(0,0,0,0));Queue(cam2,Pose(0,0,0,0));Step(cam);Step(cam2);Fence();
     MoveSoldier(Pose(0,1,0,0));
     BeginTick(1);Queue(cam,Pose(0,1,0,0));Queue(cam2,Pose(0,1,0,0));Step(cam);Step(cam2);Fence();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(Counted().roots==1,"root: the first camera's samples are kept with a second camera on the soldier");
     Fence();
     // The root's camera stops stepping: the root goes, and the other camera samples.
@@ -549,9 +608,54 @@ void RootIdentity() {
     Check(root.camera==nullptr || root.camera==cam2,"root: a camera that stopped stepping gives the root up");
     MoveSoldier(Pose(0,3,0,0));
     BeginTick(1);Queue(cam2,Pose(0,3,0,0));Step(cam2);Fence();
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Check(Counted().roots==1 && PosedAt(bodyPose,Pose(0,2.5f,0,0)),"root: the other camera samples it");
     Fence();
+}
+
+// 4b. Where the poses are written: not at BeginFrame (System::Update deletes objects after it), at the render recording
+// call (0x1198FA4), once; the end fence puts them back.
+void RecordPoint() {
+    Reset();
+    stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
+    const M4 r0=Pose(0.0f,10,0,10),r1=Pose(0.2f,10.4f,0,10.2f);
+    OnFoot(r0);
+    TwoSamples(r0,r1);
+    const Snapshot stepped=Snap();
+    const int objectPoses=frameobjects::poses;
+    framerateview::BeginFrame(0,0.5f);
+    Check(Unchanged(stepped) && frameobjects::poses==objectPoses,"record: BeginFrame of a frame without ticks writes nothing");
+    const int records=recordCalls;
+    Record();
+    Check(recordCalls==records+1 && recordArgs[0]==0x1234 && recordArgs[1]==1,
+          "record: the hook calls the game's recording with its arguments");
+    Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,
+          "record: the hook poses the root and the other objects");
+    Record();   // a second record call in the same frame: posed once
+    Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,"record: posed once a frame");
+    Fence();
+    Check(Unchanged(stepped),"record: the end fence puts the poses back");
+    // A frame with ticks: the record call poses nothing.
+    BeginTick(1);
+    Record();
+    Check(Unchanged(stepped) && frameobjects::poses==objectPoses+1,"record: a frame with ticks poses nothing");
+    Fence();
+    // A frame without ticks whose record call never came: the next frame's fence and record pose nothing stale.
+    framerateview::BeginFrame(0,0.5f);
+    Fence();
+    BeginTick(1);
+    Record();
+    Check(Unchanged(stepped) && frameobjects::poses==objectPoses+1,"record: a pose due is dropped at the fence");
+    Fence();
+    // Off: the hook only calls through.
+    on=false;
+    framerateview::BeginFrame(0,0.5f);
+    on=false;
+    Record();
+    Check(Unchanged(stepped) && recordCalls>records+3,"record: off, it only calls the game's recording");
+    on=true;
+    Fence();
+    Counted();
 }
 
 // 5. Off: nothing at all.
@@ -560,7 +664,7 @@ void Off() {
     TickTo(cam,Pose(0,0,0,0));
     TickTo(cam,Pose(0,1,0,0));
     on=false;
-    framerateview::BeginFrame(0,0.5f);
+    Frame0(0.5f);
     Project(cam);
     Check(Same(World(cam),Pose(0,1,0,0).m,64),"off: no blend");
     Fence();
@@ -574,9 +678,11 @@ int main() {
     stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
     image=stepImage;
     CameraBlend();
+    DrawnEye();
     CameraCuts();
     PrevCur();
     Roots();
+    RecordPoint();
     Riding();
     RootIdentity();
     Off();

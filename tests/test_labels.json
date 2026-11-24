@@ -2488,6 +2488,12 @@
     "tests/frame_rate_net_guard.py"
    ]
   },
+  "frame_rate_objects": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "frame_rate_off_guard": {
    "labels": [
     "autoturret-tools",
@@ -4617,6 +4623,22 @@
    "scripts": []
   },
   "real_turret_crew": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "redirect_owner_guard": {
+   "labels": [
+    "autoturret-tools",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/redirect_owner_guard.py"
+   ]
+  },
+  "render_record": {
    "labels": [
     "plugin-native"
    ],

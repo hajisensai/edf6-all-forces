@@ -1,11 +1,24 @@
 // The tables' key index (common/edf/hash_index.h) offline, against std::unordered_map as the reference: random inserts,
-// overwrites and erases (backward shift), growth past many doublings, Clear keeping the cells.
+// overwrites and erases (backward shift), growth past many doublings, Clear keeping the cells, a growth whose allocation
+// fails leaving the index as it was.
 //   cmake --build build --target hash_index_check && build\hash_index_check.exe      (exit code 1 on a failure)
 #include "edf/hash_index.h"
 #include <cstdio>
+#include <cstdlib>
+#include <new>
 #include <random>
 #include <unordered_map>
 #include <vector>
+
+// Allocations failed on demand (the growth's std::bad_alloc).
+static bool failAllocations=false;
+void* operator new(std::size_t n) {
+    if(failAllocations)throw std::bad_alloc();
+    if(void* p=std::malloc(n ? n : 1))return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p,std::size_t) noexcept { std::free(p); }
 
 namespace {
 int failures=0,cases=0;
@@ -58,6 +71,33 @@ int main() {
     for(int s=0;s<200;++s)for(int t=0;t<50;++t)pairOk=pairOk && pairs.Find(edf::PtrPair{key(s),key(1000+t)})==n++;
     pairOk=pairOk && pairs.Find(edf::PtrPair{key(1000),key(0)})==-1;   // the pair the other way round is another
     Check(pairOk,"10000 shooter-target pairs, each found as itself");
+
+    // A growth whose allocation fails (Set at the half-full mark, Reserve): std::bad_alloc out, the index as it was.
+    {
+        edf::PtrIndex grown;
+        for(int i=0;i<32;++i)grown.Set(key(i),i);   // 64 cells half full: the 33rd key grows them
+        const std::size_t grownCap=grown.Capacity();
+        bool threw=false;
+        failAllocations=true;
+        try { grown.Set(key(32),32); } catch(const std::bad_alloc&) { threw=true; }
+        failAllocations=false;
+        bool kept=threw && grown.Size()==32 && grown.Capacity()==grownCap && grown.Find(key(32))==-1;
+        for(int i=0;i<32;++i)kept=kept && grown.Find(key(i))==i;
+        Check(kept,"Set: a failed growth throws and leaves every key found",static_cast<long long>(grown.Size()),
+              static_cast<long long>(grown.Capacity()));
+        threw=false;
+        failAllocations=true;
+        try { grown.Reserve(1000); } catch(const std::bad_alloc&) { threw=true; }
+        failAllocations=false;
+        kept=threw && grown.Size()==32 && grown.Capacity()==grownCap;
+        for(int i=0;i<32;++i)kept=kept && grown.Find(key(i))==i;
+        Check(kept,"Reserve: a failed growth throws and leaves every key found");
+        grown.Set(key(32),32);
+        grown.Erase(key(3));
+        kept=grown.Size()==32 && grown.Capacity()==grownCap*2 && grown.Find(key(32))==32 && grown.Find(key(3))==-1;
+        for(int i=0;i<32;++i)kept=kept && (i==3 || grown.Find(key(i))==i);
+        Check(kept,"after the failed growths the next one grows and the index keeps working");
+    }
 
     std::printf("hash_index_check: %d/%d passed\n",cases-failures,cases);
     return failures ? 1 : 0;

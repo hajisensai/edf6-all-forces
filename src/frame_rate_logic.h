@@ -171,4 +171,74 @@ inline bool InterpolateRigid(const float previous[16],const float current[16],fl
     return true;
 }
 
+// Stage 4 (docs/unlimited-fps-re.md §4.3.3): a model's root bone is a world matrix whose three rows may share one length
+// (a giant insect or a big mech is its kind's model drawn at a scale). Each row divided by the first row's length makes a
+// rigid matrix, InterpolateRigid blends that, and the rows get the blend of the two lengths back. False as there, and
+// when the rows' lengths differ (a squash, not one scale: RigidSign refuses it after the division) or one is 0.
+inline bool UnitRows(const float m[16],float out[16],double& scale) noexcept {
+    const double s=std::sqrt(static_cast<double>(m[0])*m[0]+static_cast<double>(m[1])*m[1]+static_cast<double>(m[2])*m[2]);
+    if(!(s>1e-6) || !std::isfinite(s))return false;
+    for(int i=0;i<16;++i)out[i]=m[i];
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(m[i*4+j]/s);
+    scale=s;
+    return true;
+}
+inline bool InterpolateScaled(const float previous[16],const float current[16],float alpha,float out[16],
+                              float maxMove,float maxTurn) noexcept {
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return false;
+    if(!InterpolateRigid(p,c,alpha,out,maxMove,maxTurn))return false;
+    const double s=sp+(sc-sp)*static_cast<double>(alpha);
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(out[i*4+j]*s);
+    return true;
+}
+
+// Why InterpolateRigid / InterpolateScaled refused a pair (the FRAMERATE log's summary): alpha out of [0, 1], not a
+// rotation (a squash, a shear, NaN, beyond RigidSign's 1e-3), mirrored one way and not the other, a move or a turn over
+// the cut; kNone when they take it.
+enum class Refusal : int { kNone,kAlpha,kNotRigid,kMirrored,kMove,kTurn,kCount };
+inline Refusal RigidRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
+                            float maxTurn) noexcept {
+    if(!(alpha>=0.0f && alpha<=1.0f))return Refusal::kAlpha;
+    const double sp=RigidSign(previous),sc=RigidSign(current);
+    if(sp==0.0 || sc==0.0)return Refusal::kNotRigid;
+    if(sp!=sc)return Refusal::kMirrored;
+    Quat a{},b{};
+    if(!RotationOf(previous,sp,a) || !RotationOf(current,sc,b))return Refusal::kNotRigid;
+    double dot=std::fabs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);
+    if(dot>1.0)dot=1.0;
+    double move2=0.0;
+    for(int k=0;k<3;++k){const double d=static_cast<double>(current[12+k])-previous[12+k];move2+=d*d;}
+    if(move2>static_cast<double>(maxMove)*maxMove)return Refusal::kMove;
+    if(2.0*std::acos(dot)>maxTurn)return Refusal::kTurn;
+    return Refusal::kNone;
+}
+inline Refusal ScaledRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
+                             float maxTurn) noexcept {
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return Refusal::kNotRigid;
+    return RigidRefusal(p,c,alpha,maxMove,maxTurn);
+}
+
+// A pose's bones (`count` world matrices of 16 floats, row vectors) each times `d` on the right: bone * d.
+inline void MulBones(float* bones,std::uint64_t count,const float d[16]) noexcept {
+    for(std::uint64_t b=0;b<count;++b) {
+        float* const m=bones+b*16;
+        float r[16];
+        for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+            r[i*4+j]=m[i*4]*d[j]+m[i*4+1]*d[4+j]+m[i*4+2]*d[8+j]+m[i*4+3]*d[12+j];
+        for(int k=0;k<16;++k)m[k]=r[k];
+    }
+}
+// A pose's contents in 64 bits (Fletcher over the 32-bit words: position matters, any rewrite of a bone changes it),
+// what a frame wrote kept so the next one puts back only a pose nothing has written since.
+inline std::uint64_t PoseSum(const float* bones,std::uint64_t count) noexcept {
+    std::uint64_t a=1,b=0;
+    const auto* const w=reinterpret_cast<const std::uint32_t*>(bones);
+    for(std::uint64_t i=0;i<count*16;++i){a+=w[i];b+=a;}
+    return (b<<32)^a^(b>>32);
+}
+
 }  // namespace crew::framerate

@@ -69,6 +69,19 @@ check(re.search(r'InstallSwapFlip\(c\.frameRateFlip\)', body), 'InstallFrameRate
 sf = code(read('src', 'swap_flip.cpp'))
 check(re.search(r'if\(!flipModel\)return true;\s*return callTo\(kCreateCall', sf), 'the creation hook only with flipModel, after the Present')
 check(callers['framerateview::Install()'] == ['frame_rate.cpp'], f"framerateview::Install only from frame_rate.cpp: {callers['framerateview::Install()']}")
+# Stage 4 (frame_rate_objects.cpp): installed from framerateview::Install only (after its hooks are in, so with the
+# frame gate), and every entry point does nothing before it.
+objs_install = [n for n in names if re.search(r'frameobjects::Install\(\);', code(read('src', n)))]
+check(objs_install == ['frame_rate_view.cpp'], f'frameobjects::Install only from frame_rate_view.cpp: {objs_install}')
+view_install = re.search(r'bool Install\(\) noexcept \{\n(.*?)\n\}\n', code(read('src', 'frame_rate_view.cpp')), re.S)
+check(view_install and view_install.group(1).find('frameobjects::Install();') > view_install.group(1).rfind('return false;'),
+      'frameobjects::Install after every failing return of framerateview::Install')
+objs = code(read('src', 'frame_rate_objects.cpp'))
+for entry, guard in (('void Sample() noexcept {', 'if(!on)return;'), ('void Pose(float alpha,', 'if(!on || '),
+                     ('void Restore() noexcept {', 'if(on '), ('void SceneOver() noexcept {', 'if(!on)'),
+                     ('void NoteRootRefusal(', 'if(on ')):
+    at = objs.find(entry)
+    check(at >= 0 and guard in objs[at:objs.find('\n}', at)], f'frameobjects {entry.split("(")[0].split()[-1]} does nothing before Install')
 check(callers['InstallGate()'] == ['frame_rate.cpp'], f"InstallGate only in frame_rate.cpp: {callers['InstallGate()']}")
 check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove only in frame_rate.cpp: {callers['InstallInputMove()']}")
 check(set(callers['SwapFlipUseWaitable(']) <= {'frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'}, 'the waitable object only with the frame gate')
