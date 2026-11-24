@@ -46,7 +46,7 @@ void PoseAtomic() {
     for(unsigned n=1;n<3;++n)Check(poses[&*r.nodes[n]].calls==1 && poses[&*r.nodes[n]].bytes==bytes,"only complete authenticated state commits all physical caches");
 }
 void PoseAuthAndBinding() {
-    for(unsigned fault=0;fault<8;++fault) {
+    for(unsigned fault=0;fault<7;++fault) {
         Room r;EnablePose(r);Check(r.Request(),"bound pose request queued");r.Settle();const auto id=r.Active();auto bytes=Payload(64);
         Check(r.nodes[0]->protocol.SubmitPose(id,bytes.data(),bytes.size(),r.now),"auth fixture physical correction queued");
         auto packet=r.Find(Kind::Pose,0,1);r.queue.clear();auto m=Unpack(packet);
@@ -59,12 +59,20 @@ void PoseAuthAndBinding() {
         case 4:m.spec.requesterPlayer=r.nodes[2]->player;break;
         case 5:++m.spec.profileHash;break;
         case 6:++m.request;break;
-        case 7:++m.sequence;break;
         }
         if(fault)packet=r.PacketOf(0,1,m);r.Deliver(packet);r.Pump();
         Check(!poses[&*r.nodes[1]].calls,"sender, epoch, exact target/source/profile/nonce and pose sequence bind every state");
         if(ignored)Check(r.nodes[0]->protocol.ActiveCount()==1,"foreign or retired corrections cannot revoke the current body");
         else r.Closed(id,Result::InvalidInput);
+    }
+    {   // poses travel as unreliable Coop state messages: a lost one leaves a gap, the next newer pose still applies, an older one is dropped
+        Room r;EnablePose(r);Check(r.Request(),"pose gap request queued");r.Settle();const auto id=r.Active();auto bytes=Payload(64);
+        Check(r.nodes[0]->protocol.SubmitPose(id,bytes.data(),bytes.size(),r.now),"pose gap correction queued");
+        auto packet=r.Find(Kind::Pose,0,1);r.queue.clear();const auto first=packet;auto m=Unpack(packet);++m.sequence;packet=r.PacketOf(0,1,m);r.Deliver(packet);r.Pump();
+        Check(poses[&*r.nodes[1]].calls==1 && poses[&*r.nodes[1]].sequence==2,"a newer pose after a lost one applies once");
+        Check(r.nodes[0]->protocol.ActiveCount()==1,"a lost pose never ends the lease");
+        r.Deliver(first);r.Pump();
+        Check(poses[&*r.nodes[1]].calls==1 && poses[&*r.nodes[1]].sequence==2 && r.nodes[0]->protocol.ActiveCount()==1,"a pose older than the applied one is dropped and the lease lives on");
     }
     Room r;EnablePose(r);Check(r.Request(),"owner PUID pose fixture request queued");r.Settle();auto bytes=Payload(20);
     Check(r.nodes[0]->protocol.SubmitPose(r.Active(),bytes.data(),bytes.size(),r.now),"owner PUID pose queued");auto p=r.Find(Kind::Pose,0,1);auto m=Unpack(p);r.queue.clear();
