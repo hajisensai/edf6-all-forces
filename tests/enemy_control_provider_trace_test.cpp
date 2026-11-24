@@ -288,11 +288,12 @@ bool AggregateSend(void* user,std::uint32_t peer,const void* bytes,std::size_t s
 }
 std::array<unsigned char,crew::enemy_native::pose::kWireBytes> AggregatePoseBytes(unsigned body,std::uint64_t sequence){
     crew::enemy_native::pose::State state{};state.kind=crew::enemy_native::pose::Kind::deiroi;state.profile=static_cast<std::uint32_t>(kProfile);state.position[0]=static_cast<float>(body);state.position[1]=static_cast<float>(sequence);state.rotation[3]=1;
-    std::array<unsigned char,crew::enemy_native::pose::kWireBytes> bytes{};Check(crew::enemy_native::pose::Encode(state,bytes.data(),bytes.size()),"mixed pressure uses the real production pose codec and a canonical legal state");return bytes;
+    crew::enemy_native::pose::Packet packet{};packet.state=state;packet.senderFrame=static_cast<std::uint32_t>(sequence*2);
+    std::array<unsigned char,crew::enemy_native::pose::kWireBytes> bytes{};Check(crew::enemy_native::pose::Encode(packet,bytes.data(),bytes.size()),"mixed pressure uses the real production pose codec and a canonical legal state");return bytes;
 }
 bool AggregatePoseApply(void* user,std::uint64_t lease,const LeaseSpec& spec,std::uint64_t sequence,const void* bytes,std::size_t size){
     auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto body=bus.Body(lease);Check(bus.mixedPose && node->id!=0,"only mixed protocol-pressure guests apply synthetic legal pose traffic");const auto* current=bus.room.Lease(node->id,lease);Check(current && SameSpec(spec,current->spec),"mixed pose retains the exact body lease and source identity");
-    crew::enemy_native::pose::State decoded{};Check(crew::enemy_native::pose::Decode(bytes,size,&decoded),"each mixed pressure pose decodes with the production semantic validator");const auto expected=AggregatePoseBytes(body,sequence);Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"mixed pose payload remains byte-identical across the reliable production wire");Check(sequence==bus.posesApplied[node->id][body]+1,"each guest applies every mixed pressure pose once in order");++bus.posesApplied[node->id][body];return true;
+    crew::enemy_native::pose::Packet decoded{};Check(crew::enemy_native::pose::Decode(bytes,size,&decoded),"each mixed pressure pose decodes with the production semantic validator");const auto expected=AggregatePoseBytes(body,sequence);Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"mixed pose payload remains byte-identical across the reliable production wire");Check(sequence==bus.posesApplied[node->id][body]+1,"each guest applies every mixed pressure pose once in order");++bus.posesApplied[node->id][body];return true;
 }
 SendResult AggregateTrySendAction(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
     auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto to=bus.room.Global(node->id,peer);

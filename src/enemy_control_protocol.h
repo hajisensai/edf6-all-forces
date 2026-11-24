@@ -26,7 +26,9 @@ constexpr std::uint32_t kMagic=0x4c544345u,kCapability=5;
 // enemy player in PvP) goes by its reference; a version-5 peer is left out the same way.
 // Version 7 (2026-10-31): the controller's manual focus (Input focusRef, input version 4) and the Deiroi entity shot's
 // lock target are references too, and a player target not here is an empty actor, not a pending one.
-constexpr std::uint8_t kVersion=7;
+// Version 8 (2026-11-24, net-9): the pose payload is pose wire version 2 (enemy_control_pose_codec.h: the host's frame and
+// measured motion per sample); the guest interpolates it per logic frame instead of writing each sample on arrival.
+constexpr std::uint8_t kVersion=8;
 constexpr std::size_t kMaxPeers=32,kMaxLeases=16,kMaxInputBytes=512,kChunkBytes=512,kWirePrefixBytes=192,kWireBytes=kWirePrefixBytes+kMaxInputBytes,kMaxPoseBytes=512,kMaxActions=1024,kActionWindow=128;
 using ActionIndex=std::uint16_t;
 static_assert(kMaxActions<=static_cast<std::size_t>((std::numeric_limits<ActionIndex>::max)())+1,"all shared action pool indices must fit without truncation");

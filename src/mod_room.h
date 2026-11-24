@@ -61,6 +61,8 @@ namespace crew {
 //  17 (2026-11-24): net-6, the per-feature compatibility layer removed: no extension bits in the support handshake
 //      (kExtVariants alone, runtime state), no plugin_net roster / PeerHas, no command protocol negotiation (v10 only),
 //      no "older build" notices. Every channel sends to every peer: a 16 would be sent what it cannot read.
+//      Same number, net-9: enemy-control protocol 8 / pose wire 2 (each pose sample carries the host's frame and
+//      measured motion; the guest interpolates it per logic frame).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=17;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

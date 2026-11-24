@@ -1077,16 +1077,13 @@ bool EnemyControlNeedsNetworkPose(std::uint64_t lease) noexcept {
     return s && s->networked && !s->catalogue.adapter && s->snapshot.phase==Phase::active &&
         Live(s->owner) && Live(s->target) && enemy_native::PoseRequired(s->native);
 }
-bool EnemyControlCaptureNetworkPose(std::uint64_t lease,void* bytes,std::size_t capacity,std::size_t* used) noexcept {
-    if(used)*used=0;
+bool EnemyControlCaptureNetworkPose(std::uint64_t lease,enemy_native::pose::State* out) noexcept {
     const auto* s=ByLease(lease);
-    return EnemyControlNeedsNetworkPose(lease) && bytes && used &&
-        enemy_native::CapturePose(s->native,bytes,capacity,used);
+    return EnemyControlNeedsNetworkPose(lease) && out && enemy_native::CapturePose(s->native,out);
 }
-bool EnemyControlApplyNetworkPose(std::uint64_t lease,const void* bytes,std::size_t size) noexcept {
+bool EnemyControlApplyNetworkPose(std::uint64_t lease,const enemy_native::pose::State& state) noexcept {
     auto* s=ByLease(lease);
-    return EnemyControlNeedsNetworkPose(lease) && bytes && size &&
-        enemy_native::ApplyPose(s->native,bytes,size);
+    return EnemyControlNeedsNetworkPose(lease) && enemy_native::ApplyPose(s->native,state);
 }
 bool EnemyControlSuppressHuman(const unsigned char* human) noexcept {
     if(!human)return false;
