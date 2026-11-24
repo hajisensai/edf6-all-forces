@@ -1175,6 +1175,9 @@ set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The plugin's writable data section stays small: big per-session tables are crew::LazyRows (mem-4,
+# tests/plugin_image_size_guard.py reads the built DLL's PE header).
+add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py" "$<TARGET_FILE:EDF6VehicleCrew>")
 # An empty vehicle it makes is CreateVehicle2's (0x633280), never SetLevel's: off the native AI list, so the player in
 # it drives and fires; with EDF6_NATIVE_DLL its signatures are compared with the DLL.
 add_test(NAME debug_spawn_vehicle_level_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_vehicle_level_guard.py")
