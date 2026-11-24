@@ -1,20 +1,27 @@
-"""Every code write goes through the code owner registry (common/code_owner.cpp, edf/code_owner.h).
+"""Every code write goes through the code owner registry, and the call sites named by constant keep one owner.
 
-Two modules patching one site is found at run time, not here: each patch primitive (edf::RedirectCall, PatchCode,
+Two ways, side by side. The static scan (owners() below, kept from before the registry) reads the k* constants in the
+first argument of RedirectCall / PatchCall / RedirectImportCall across both plugins and common/ and fails when one RVA
+is redirected from two files: it sees across the two DLLs (each has its own registry) and fails CI, where the registry
+only logs. It also keeps 0x1198FA4 (the render recording) with src/render_record.cpp alone, frame_rate_view.cpp and
+firstperson.cpp registering their turns there. It misses literal addresses (image+0x...), loops over tables, PatchCode
+writing an E8 and hand-written writes; the registry (common/code_owner.cpp, edf/code_owner.h) covers those at run
+time: each patch primitive (edf::RedirectCall, PatchCode,
 RedirectImportCall, PatchVtableSlot, ChainVtableSlot) claims its bytes for the calling file (__builtin_FILE() as a
 default argument) before it looks at them, and a second file's claim is logged ("PATCH conflict: ..."; the first
-person's culling was left out silently when the frame rate redirected 0x1198FA4 first, #395). The static scan this
-replaced read the k* constants in the primitives' first argument and missed literal addresses (image+0x...), loops over
-tables, PatchCode writing an E8, and hand-written VirtualProtect writes; tests/code_owner_test.cpp covers the registry.
+person's culling was left out silently when the frame rate redirected 0x1198FA4 first, #395).
+tests/code_owner_test.cpp covers the registry.
 
 This guard keeps the registry seeing every write:
   - the primitives claim before they read or write, the import call and the vtable chain passing the caller on;
-  - every hand-written code write in the plugins (VirtualProtect to PAGE_EXECUTE_READWRITE in src/, autoturret/)
-    claims its bytes with edf::ClaimCode right before;
+  - every hand-written write in the plugins (src/, autoturret/: a VirtualProtect making memory writable, PAGE_READWRITE
+    or PAGE_EXECUTE_READWRITE, and a pointer swap, InterlockedCompareExchangePointer / InterlockedExchangePointer)
+    claims its bytes with edf::ClaimCode within the few lines before;
   - no plugin file names an owner itself (__builtin_FILE / a file name passed), and only the files listed here chain
     (Claim::kLayered) over another's patch;
   - both plugins send conflicts to their log before the first patch and log the totals once loaded.
 """
+import collections
 import os
 import re
 import sys
@@ -77,6 +84,8 @@ for header, names in (("common/edf/memory.h", ("RedirectCall",)),
         check(bool(decl) and "const char* owner=__builtin_FILE()" in decl.group(1),
               f"{name}'s owner defaults to the calling file")
 
+WRITABLE = re.compile(r"VirtualProtect\([^;]*PAGE_(EXECUTE_)?READWRITE")
+SWAP = re.compile(r"Interlocked(CompareExchange|Exchange)Pointer\(")
 writes = owners = layered = 0
 for top in ("src", "autoturret"):
     for dirpath, _, files in os.walk(os.path.join(ROOT, top)):
@@ -87,9 +96,9 @@ for top in ("src", "autoturret"):
             lines = read(rel).splitlines()
             text = "\n".join(lines)
             for i, line in enumerate(lines):
-                if re.search(r"VirtualProtect\([^;]*PAGE_EXECUTE_READWRITE", line) and rel not in UNREGISTERED_OK:
+                if (WRITABLE.search(line) or SWAP.search(line)) and rel not in UNREGISTERED_OK:
                     writes += 1
-                    before = "\n".join(lines[max(0, i - 3):i + 1])
+                    before = "\n".join(lines[max(0, i - 4):i + 1])
                     check("edf::ClaimCode(" in before, f"{rel}:{i + 1}: a code write of its own claims its bytes first")
             if "__builtin_FILE" in text or re.search(r"(RedirectCall|PatchCode|RedirectImportCall|PatchVtableSlot|"
                                                      r"ChainVtableSlot)\([^;]*\"[^\"]*\.(cpp|h)\"", text):
@@ -98,7 +107,7 @@ for top in ("src", "autoturret"):
             if "Claim::kLayered" in text:
                 layered += 1
                 check(rel in LAYERED_OK, f"{rel}: chains over another's patch (Claim::kLayered) only where listed")
-check(writes >= 6, f"the hand-written code writes found ({writes})")
+check(writes >= 8, f"the hand-written code writes found ({writes})")
 check(layered == len(LAYERED_OK), "perf_probe.cpp's Chain is layered")
 
 for rel in ("src/plugin.cpp", "autoturret/src/plugin.cpp"):
@@ -107,6 +116,68 @@ for rel in ("src/plugin.cpp", "autoturret/src/plugin.cpp"):
     first = min(i for i in (text.find("InstallCrashDump();", sink), text.find("HookFlak();", sink)) if i > 0)
     check(0 < sink < first, f"{rel}: conflicts go to the log from before the first patch")
     check("edf::GetClaimStats()" in text and "PATCH owners:" in text, f"{rel}: the totals logged once loaded")
+
+CALLS = ("RedirectCall(", "PatchCall(", "RedirectImportCall(")
+
+
+def strip(text):
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+
+
+def first_arg(text, start):
+    depth, i = 0, start
+    while i < len(text):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            if depth == 0:
+                return text[start:i]
+            depth -= 1
+        elif c == "," and depth == 0:
+            return text[start:i]
+        i += 1
+    return text[start:]
+
+
+def call_owners():
+    """RVA -> the files redirecting it, from the k* constants in the calls' first argument (scalars or arrays)."""
+    sites = collections.defaultdict(set)
+    for top in ("src", "autoturret", "common"):
+        for dirpath, _, files in os.walk(os.path.join(ROOT, top)):
+            for name in files:
+                if not name.endswith((".cpp", ".h", ".inc")):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, name), ROOT).replace("\\", "/")
+                text = strip(read(rel))
+                if not any(c in text for c in CALLS):
+                    continue
+                values = collections.defaultdict(list)
+                for n, v in re.findall(r"\b(k\w+)\s*=\s*(0x[0-9A-Fa-f]+)\b", text):
+                    values[n].append(int(v, 16))
+                for n, table in re.findall(r"\b(k\w+)\s*\[\s*\w*\s*\]\s*=\s*\{([^}]*)\}", text):
+                    values[n].extend(int(v, 16) for v in re.findall(r"0x[0-9A-Fa-f]+", table))
+                for call in CALLS:
+                    for m in re.finditer(r"(?<![\w:])(?:edf::)?" + re.escape(call), text):
+                        for ident in re.findall(r"\bk\w+", first_arg(text, m.end())):
+                            for v in values.get(ident, ()):
+                                sites[v].add(rel)
+    return sites
+
+
+sites = call_owners()
+shared = {rva: files for rva, files in sites.items() if len(files) > 1}
+for rva, files in sorted(shared.items()):
+    check(False, f"0x{rva:X} is redirected from {len(files)} files: {', '.join(sorted(files))}")
+check(not shared, f"each of the {len(sites)} call sites named by constant is redirected from one file")
+check(sites.get(0x1198FA4) == {"src/render_record.cpp"},
+      f"0x1198FA4 (the render recording) is redirected by src/render_record.cpp alone ({sorted(sites.get(0x1198FA4, ()))})")
+for rel, slot in (("src/frame_rate_view.cpp", "kFrameRate"), ("src/firstperson.cpp", "kFirstPerson")):
+    text = strip(read(rel))
+    check("renderrecord::Install()" in text and f"renderrecord::Set(renderrecord::Slot::{slot}," in text,
+          f"{rel} installs render_record and registers its {slot} turn")
+    check(not re.search(r"0x1198FA4|0x11978D0", text, re.I),
+          f"{rel} does not name the render recording's call itself (render_record.cpp owns it)")
 
 print(f"redirect_owner_guard: {len(failures)} failed")
 sys.exit(1 if failures else 0)

@@ -84,12 +84,8 @@ bool __fastcall HeavyFire(void* self) { return Dispatch(self,1); }
 bool __fastcall MartianFire(void* self) { return Dispatch(self,2); }
 bool __fastcall BarrageFire(void* self) { return Dispatch(self,3); }
 bool Replace(WeaponHook& hook,const void* expected,const void* desired) noexcept {
-    auto* cell=reinterpret_cast<void* volatile*>(image+hook.vtable+kWeaponSlot*8);
-    DWORD old=0;
-    if(!VirtualProtect(const_cast<void**>(cell),sizeof(void*),PAGE_READWRITE,&old))return false;
-    const void* was=InterlockedCompareExchangePointer(cell,const_cast<void*>(desired),const_cast<void*>(expected));
-    DWORD ignored=0;const bool protectedAgain=VirtualProtect(const_cast<void**>(cell),sizeof(void*),old,&ignored)!=0;
-    return was==expected && protectedAgain;
+    auto** const cell=reinterpret_cast<void**>(image+hook.vtable+kWeaponSlot*8);
+    return edf::PatchVtableSlot(cell,const_cast<void*>(expected),const_cast<void*>(desired));
 }
 }
 bool InstallHumanoidControl() noexcept {
