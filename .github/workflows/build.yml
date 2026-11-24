@@ -108,6 +108,10 @@ jobs:
           # docs/*.md named in the sources, and the repository paths the docs name, exist (tools/doc_links_check.py).
           python tools/doc_links_check.py
           if ($LASTEXITCODE) { Write-Error 'dead doc/code links: fix the paths tools/doc_links_check.py lists'; exit 1 }
+          # Every ctest and selftest test is in a domain and the labels are current (tools/check.py runs only the tests
+          # a change selects by them; CI still runs every test).
+          python tools/test_domains.py --check
+          if ($LASTEXITCODE) { Write-Error 'tests/test_labels.json is stale: run python tools/test_domains.py --write, reconfigure (build.cmd) and commit it'; exit 1 }
 
       - name: Self-test of the install chain
         shell: pwsh
