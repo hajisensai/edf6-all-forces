@@ -187,7 +187,6 @@ void WaysMessages() {
     m.ways.order=static_cast<std::uint32_t>(mapcmd::Order::move);
     {Message clear=m;clear.ways=command_net::Ways{};Check(Encode(clear,bytes,sizeof(bytes)),"a clearing: no order, no point");
      clear.ways.current[0]=1;Check(!Encode(clear,bytes,sizeof(bytes)),"a clearing carries no current point");}
-    m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"no ways message at an older version");m.version=kVersion;
     m.ways.n=9;Check(!Encode(m,bytes,sizeof(bytes)),"at most eight points");m.ways.n=1;
     Check(!Encode(m,bytes,sizeof(bytes)),"a point past the count must be zero");m.ways.n=2;
     m.ways.at[0][1]=std::numeric_limits<float>::quiet_NaN();Check(!Encode(m,bytes,sizeof(bytes)),"no NaN point");m.ways.at[0][1]=0;

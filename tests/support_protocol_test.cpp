@@ -550,7 +550,9 @@ void RoomBuilds() {
      unsigned char bytes[kWireSize];Message out;
      Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.ok==1,"the welcome's `ok` round-trips");}
     {Room r(3);r.muteNode=2;
+     // A mission's reset (Stop on every machine), the muted guest's new hellos lost.
      r.With(0);r.nodes[0]->session->Stop();r.nodes[0]->session->Start(true,2,0,r.now);
+     r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,r.Peer(2,0),r.now);
      for(int i=0;i<3;++i){r.Step(1100);r.Settle();}
      Check(r.nodes[1]->session->Ready() && !r.nodes[1]->session->RoomReady(),
            "a guest welcomed while another guest's hello is unheard: ready, not room ready");
