@@ -54,9 +54,9 @@ TurretCamReadout sceneMouseIntent{};bool hasMouseIntent=false,hasMountedOptic=fa
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false,
      hasSazabi=false;
 bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
-// When the scene's readouts were taken (the game thread's tick): before HudDraw takes its own `now`. The gear's read the
-// tick in the middle of the draw, a 16 ms tick later at times: `now - tick` wrapped and the gear panel was not drawn.
-ULONGLONG sceneTick=0;
+// The scene step (step_fresh.h): the HUD takes a readout stamped within kEveryStep steps; each frame drawn is a step.
+const bool sceneStepStarted=(stepfresh::See(1),true);
+void NextStep() noexcept { stepfresh::See(stepfresh::Now()+1); }
 bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
 bool hasMapPayload=false;PayloadReadout sceneMapPayload{};
@@ -168,7 +168,7 @@ ULONGLONG GameMs() noexcept { return GetTickCount64(); }
 bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
-bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; }
+bool WarnLatest(Warnings* o) noexcept { if(hasWarn){*o=sceneWarn;o->step=stepfresh::Now();}return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
@@ -388,7 +388,7 @@ void MapCommandPlaceButtons(const float* r,const int* codes,int n,int window) no
 }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
-    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
+    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->step=stepfresh::Now();
     return true;
 }
 bool IsSub(const void*) noexcept { return false; }
@@ -464,7 +464,7 @@ std::string Narrow(const std::wstring& w) {
 }
 // `draw` recorded as scene `name` on a screen `width` x `height`: its text on the screen, its overlaps none English lacks.
 template<class F> void Record(const wchar_t* name,F draw,int width,int height=1080) {
-    drew.clear();glyphs.clear();panels.clear();recording=true;sceneTick=GetTickCount64();
+    drew.clear();glyphs.clear();panels.clear();recording=true;NextStep();
     draw();
     recording=false;
     SceneText t;
@@ -1015,7 +1015,7 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
 
 // A frame drawn and not recorded: what the HUD sees before a scene (a switch's banner needs the value before it).
 void Prime(const float* pos,int width=1920) {
-    sceneTick=GetTickCount64();
+    NextStep();
     float vp[16];
     const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
@@ -2266,7 +2266,7 @@ int Scenes(const std::wstring& dir) {
     sceneWarn=Warnings{};
     sceneWarn.on=1u<<kWarnPullUp|1u<<kWarnMissile|1u<<kWarnStall|1u<<kWarnGear|1u<<kWarnLock;
     for(auto& t:sceneWarn.litAt)t=now-5000;
-    sceneWarn.launchAt=now-200;sceneWarn.tick=now;
+    sceneWarn.launchAt=now-200;
     Scene(dir,L"jet_pullup",pos);
 
     // The same jet a moment earlier: TERRAIN 5 s out, a lift share near the stall, a lock only.

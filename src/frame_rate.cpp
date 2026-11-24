@@ -101,6 +101,13 @@ volatile std::uint32_t finalTicks=1;
 // The phase this frame draws at (frame_rate_logic.h RenderAlpha), set by the gate.
 float frameAlpha=1.0f;
 bool viewOn=false;
+// The shared random seed (0x1F54128) across a 0-tick frame (#394 review e): its own step (InstallRandomStep) runs only
+// on frames with ticks, so a seed moved from one frame's start to the next over a 0-tick frame is something else drawing
+// from it on that frame (the draw, an effect): the sequence would then drift from 60 fps's, online too.
+std::uint64_t seedAtFrame=0;
+bool lastFrameZero=false;
+unsigned seedMoved=0,seedFrames=0;
+
 std::uint64_t tickPeriod=0;
 constexpr unsigned kTickBase=0x2139D10,kTickLast=0x2139D18;
 // The input move: whether this frame's wrapper update already ran before System::Update.
@@ -154,11 +161,12 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     }
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
         "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u (changed since its tick), "
-        "refused %u (a jump or not rigid)",s,
+        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
         1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft,
-        rootsRefused);
+        rootsRefused,seedMoved,seedFrames);
+    seedMoved=seedFrames=0;
     if(viewOn) {
         // Stage 4 (frame_rate_objects.cpp): the other objects, and why roots were refused (alpha, not rigid, mirrored,
         // a move or a turn over the cut), the player's and the objects'.
@@ -229,6 +237,10 @@ void ClearForUi(unsigned char* table) noexcept {
 void SystemUpdateHook(void* system,float dt,int n) {
     void* const input=*reinterpret_cast<void**>(image+kInputManager);
     if(gateOn) {
+        const std::uint64_t seed=*reinterpret_cast<const volatile std::uint64_t*>(image+kRandomSeed);
+        if(lastFrameZero){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
+        seedAtFrame=seed;
+        lastFrameZero=n<=0;
         // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
         if(n>1)catchUp=kCatchUpTicks;
         else catchUp=catchUp>n ? catchUp-n : 0;
@@ -298,20 +310,27 @@ bool PatchCall(unsigned rva,const void* to) noexcept {
     return edf::PatchCode(site,expected,call,5);
 }
 
-bool InstallGate() noexcept {
-    if(!edf::Matches(image,kCountFirst,kCountFirstSig,sizeof(kCountFirstSig)) ||
-       !edf::Matches(image,kCountAgain,kCountAgainSig,sizeof(kCountAgainSig))) {
-        Log("FRAMERATE the main loop's tick counts are not as read (another MOD?): no frame gate");
+// The gate's sites as read and the frame step's wait ours (not EDF6VR's or an FPS unlimiter's: frame_pacing.cpp,
+// frame_pacing_logic.h ForeignTickWait). Asked before anything is installed: all or nothing.
+bool GateSitesAsRead() noexcept {
+    if(!FramePacingTickWaitInstalled()) {
+        Log("FRAMERATE the frame step's wait is not ours (the PACING line says whose): nothing installed, the game keeps its rate");
         return false;
     }
-    if(!FramePacingTickWaitInstalled()) {
-        Log("FRAMERATE the frame step's wait is not ours (frame_pacing.cpp): no frame gate");
+    if(!edf::Matches(image,kCountFirst,kCountFirstSig,sizeof(kCountFirstSig)) ||
+       !edf::Matches(image,kCountAgain,kCountAgainSig,sizeof(kCountAgainSig))) {
+        Log("FRAMERATE the main loop's tick counts are not as read (another MOD?): nothing installed, the game keeps its rate");
         return false;
     }
     if(!edf::Matches(image,kFinalStore,kFinalStoreSig,sizeof(kFinalStoreSig))) {
-        Log("FRAMERATE the main loop's store of n (0x%X) is not as read: no frame gate",kFinalStore);
+        Log("FRAMERATE the main loop's store of n (0x%X) is not as read: nothing installed, the game keeps its rate",kFinalStore);
         return false;
     }
+    return true;
+}
+
+bool InstallGate() noexcept {
+    if(!GateSitesAsRead())return false;
     void* const stub=MakeGateStub();
     // `mov [rsp+0C4h],ebx` (the caller's rsp+0xBC); `mov r11,&finalTicks; mov [r11],ebx; ret` (r11 is dead: a call follows).
     unsigned char leaf[]={0x89,0x9C,0x24,0xC4,0x00,0x00,0x00,0x49,0xBB,0,0,0,0,0,0,0,0,0x41,0x89,0x1B,0xC3};
@@ -441,6 +460,7 @@ void InstallFrameRate() noexcept {
     const Config& c=Cfg();
     if(!image)return;
     if(c.frameRateCap==framerate::kOff)return;   // the game's own rate: nothing installed
+    if(!GateSitesAsRead())return;                // another frame limiter (EDF6VR) or another MOD: nothing installed
     // The input move first: the gate needs it.
     const bool input=InstallInputMove();
     const bool present=InstallSwapFlip(c.frameRateFlip);
@@ -463,9 +483,10 @@ void InstallFrameRate() noexcept {
         Log("FRAMERATE guards %d/%d, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,kGuards,takes,sync);
         return;
     }
-    gateOn=InstallGate();
+    // The interpolation before the gate: without it the frames between the ticks would only draw the same scene again.
+    viewOn=framerateview::Install();
+    gateOn=viewOn && InstallGate();
     if(gateOn && flip && c.maxFrameLatency>0)SwapFlipUseWaitable(static_cast<unsigned>(c.maxFrameLatency));
-    viewOn=gateOn && framerateview::Install();
     Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/%d, input takes %d/2, sync=%d, camera interpolation=%d",
         cap,gateOn,guards,kGuards,takes,sync,viewOn);
 }

@@ -29,13 +29,32 @@ public:
     bool Allocated() const noexcept {return rows.load(std::memory_order_acquire)!=nullptr;}
     static constexpr std::size_t size() noexcept {return N;}
 
-    T* begin() noexcept {return rows.load(std::memory_order_acquire);}
-    T* end() noexcept {T* r=begin();return r ? r+N : nullptr;}
-    const T* begin() const noexcept {return rows.load(std::memory_order_acquire);}
-    const T* end() const noexcept {const T* r=begin();return r ? r+N : nullptr;}
+    // A loop reads the rows pointer once. begin() loads it and carries the end of that same load; end() is only the
+    // marker the loop compares with. Loading it again in end() could straddle another thread's first Allocate() and
+    // give begin = nullptr, end = rows + N: a loop from null through N rows. A cursor converts to the row pointer
+    // (`stream - streams.begin()`, a null check); Last() is its end, null whenever the cursor is.
+    struct End {};
+    template<class P>
+    class Cursor {
+    public:
+        constexpr Cursor(P at,P last) noexcept:at_(at),last_(last) {}
+        operator P() const noexcept {return at_;}
+        P Last() const noexcept {return last_;}
+        decltype(auto) operator*() const noexcept {return *at_;}
+        P operator->() const noexcept {return at_;}
+        Cursor& operator++() noexcept {++at_;return *this;}
+        bool operator!=(End) const noexcept {return at_!=last_;}
+        bool operator==(End) const noexcept {return at_==last_;}
+    private:
+        P at_;
+        P last_;
+    };
+    Cursor<T*> begin() noexcept {T* r=rows.load(std::memory_order_acquire);return {r,r ? r+N : nullptr};}
+    Cursor<const T*> begin() const noexcept {const T* r=rows.load(std::memory_order_acquire);return {r,r ? r+N : nullptr};}
+    End end() const noexcept {return {};}
     // Only valid once Allocate() has succeeded.
-    T& operator[](std::size_t i) noexcept {return begin()[i];}
-    const T& operator[](std::size_t i) const noexcept {return begin()[i];}
+    T& operator[](std::size_t i) noexcept {return rows.load(std::memory_order_acquire)[i];}
+    const T& operator[](std::size_t i) const noexcept {return rows.load(std::memory_order_acquire)[i];}
 
 private:
     __declspec(noinline) bool Make(const char* lazyFeature) noexcept {

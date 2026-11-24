@@ -515,7 +515,7 @@ bool GunnerSeat(const unsigned char* seat) noexcept {
 }
 
 void Gunners(unsigned char* vehicle) noexcept {
-    SeeVehicle(vehicle);
+    SeeFrame();
     const unsigned count=edf::SeatCount(vehicle);
     if(vehicle[kDead] || !Readable(vehicle,kTurn+count*kTurnStride,true))return;
     if(count<2){LogSkip(vehicle,"no gunner seats");return;}

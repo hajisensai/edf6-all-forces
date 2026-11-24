@@ -35,16 +35,25 @@
 
 ## 探测（`src/sync_load_probe.cpp`）
 
-- Debug=1 且 `SyncLoadProbe=1`（默认 1，改后要重启游戏）时，在 perf_probe 之后安装。先逐字节核对 13 段签名（序言、key 来源、
-  命中判断、两条 jmp、工厂 / Open / Wait、读失败、出口），任何一段不符就写一行 `HOOK sync load probe NOT installed` 并不装。
-- 四个调用点链式接入（`perfprobe::ChainCall`：只接受原函数或别的钩子的 near thunk）：`0x84ECF`（查找，计时等待）、
-  `0x84FDA`（标记未命中）、`0x850CD`（标记文件不存在）、`0x8515D`（出口：解锁之后结算）。
+- Debug=1 且 `SyncLoadProbe=1`（默认 1，改后要重启游戏）时，在 perf_probe 之后安装。
+  - 帧锚点没装上（`HOOK perf frame=0`）就没有游戏线程可认，直接写一行
+    `HOOK sync load probe NOT installed: no frame anchor` 并不装。
+  - 先逐字节核对 14 段签名（序言、缓存锁、key 来源、命中判断、两条 jmp、工厂 / Open / Wait、读失败、出口），任何一段不符就写
+    一行 `HOOK sync load probe NOT installed: the bytes at 0x...` 并不装。
+- 五个调用点链式接入（`perfprobe::ChainCall`：只接受原函数或别的钩子的 near thunk）：`0x84EBF`（缓存锁 `0x50BC0`，
+  `cache+0x50`：计时起点，锁等待也算进 SYNC WAIT）、`0x84ECF`（查找，记 key 与等待）、`0x84FDA`（标记未命中）、
+  `0x850CD`（标记文件不存在）、`0x8515D`（出口：解锁之后结算）。中途某处接不上时写
+  `HOOK sync load probe NOT active: the call at 0x...`（带调用点 RVA 和已接数），已接的只透传。
 - 只在游戏线程（perf_probe 帧锚点 `0x11A2FF3` 每帧记下的线程）上记账；别的线程（加载线程的预载、菜单的模型作业线程）直接透传。
+- 配对（`src/sync_load_logic.h`，单测 `sync_load_logic`）：按返回地址槽的地址（同一次调用各调用点相同，栈向下长）。
+  新调用开始时先弹掉帧地址 ≤ 它的条目：那些是异常展开掉、出口没跑的调用，不弹的话同一栈深度再进来会叠在残条目上，
+  深度回不到 0，日志就停了。出口时弹掉帧地址 < 它的条目（展开掉的内层）。
 - 最外层 `0x84E80` 返回后（此时不持有缓存锁）才写日志：
-  - `SYNC LOAD <路径> <ms> ms`：游戏线程上的一次未命中（整次 `0x84E80` 调用的时间）；文件不存在时末尾加 `not found`。
-  - `SYNC WAIT <路径> <ms> ms`：查找等了 ≥ 0.5 ms（别的线程正在读它，或缓存锁被占）。
-  - `SYNC LOAD STATS since load, game thread: ...`：累计调用数、读次数与总毫秒、等待次数、钩子自身每次调用的耗时（含它自己的
-    QPC 读数），最多每 10 s 一行。
+  - `SYNC LOAD <路径> <ms> ms`：游戏线程上的一次未命中（从拿缓存锁 0x84EBF 到最后一次解锁 0x8515D，不含 0x84E80 的序言和尾声）；文件不存在时末尾加 `not found`。
+  - `SYNC WAIT <路径> <ms> ms`：拿缓存锁加第一次查找共 ≥ 0.5 ms（锁被别的线程占着，或别的线程正在读这个条目）。
+  - `SYNC LOAD STATS since load, game thread: ...`：累计调用数、读次数与总毫秒、等待次数，上一行以来（约 10 s）的增量
+    `the last N s: +calls, +loads (ms), +waits (ms)`（第一行没有上一行，这段写作 `since load: ...`），钩子自身每次调用的耗时
+    （含它自己的 QPC 读数），最多每 10 s 一行。
 
 ## 实测
 

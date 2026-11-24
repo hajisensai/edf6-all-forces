@@ -101,6 +101,7 @@ ULONGLONG GameMs() noexcept {return submarine_fixture::milliseconds;}
 ULONGLONG GameFrame() noexcept {return submarine_fixture::frame;}
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept {return submarine_fixture::session;}
+bool GamePaused() noexcept {return false;}
 bool OnlineHostOnly() noexcept {return submarine_fixture::host;}
 bool OnlineRunsHere(const void*) noexcept {return submarine_fixture::runsHere;}
 bool IsOnlineAuthority(const void*) noexcept {return submarine_fixture::authority;}

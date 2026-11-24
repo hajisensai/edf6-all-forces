@@ -66,6 +66,7 @@ PassFn nextPalette=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
 std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
+bool anchored=false;                // the frame anchor chained
 
 double tickMs=0.0;   // ms a QPC tick
 LONGLONG Qpc() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
@@ -315,6 +316,7 @@ void Install() noexcept {
     if(!Cfg().debug)return;
     // each hook's next is the global it calls through, written by Chain before the site is
     const bool anchor=Chain(kInputCall,kInput,reinterpret_cast<void*>(&InputHook),reinterpret_cast<void**>(&nextInput));
+    anchored=anchor;
     Log("PERF QPC %lld Hz; HOOK perf frame=%d (the main loop's input sample: frame times, steps a frame, SLOW FRAME)",
         hz.QuadPart,anchor);
     if(!anchor || !Cfg().perfProbe)return;
@@ -348,6 +350,7 @@ void Install() noexcept {
 
 bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
 DWORD GameThread() noexcept { return gameThread.load(std::memory_order_relaxed); }
+bool FrameAnchored() noexcept { return anchored; }
 
 Frames TakeFrames() noexcept {
     const Frames f{base.frames,base.steps,base.over20,base.over33,base.sum,base.worst};

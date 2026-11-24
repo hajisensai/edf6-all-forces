@@ -34,6 +34,7 @@
 #include "memory.h"
 #include "edf/patch.h"
 #include <dxgi.h>
+#include <cwchar>
 
 namespace crew {
 namespace {
@@ -44,6 +45,9 @@ constexpr unsigned kTickCount=0x11DAE60,kTickBase=0x2139D10,kTickLast=0x2139D18;
 const unsigned char kPumpArg[]={0x33,0xC9},kTickArg[]={0xB9,0x01,0x00,0x00,0x00};
 const unsigned char kPumpSig[]={0xFF,0x15,0x38,0x12,0x5D,0x00};   // call [Sleep]
 const unsigned char kTickSig[]={0xFF,0x15,0xBD,0x27,0x5B,0x00};   // call [Sleep]
+// The frame step's loop back to the tick count after the wait: `je 0x11A2F60` (frame_pacing_logic.h ForeignTickWait).
+constexpr unsigned kTickBranch=0x11A2F74;
+const unsigned char kTickBranchSig[]={0x74,0xEA};
 // 0x11DAE60 whole (docs/frame-pacing-re.md): the arithmetic frame_pacing_logic.h repeats, over kTickBase / kTickLast.
 const unsigned char kTickCountSig[]={
     0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8D,0x0D,0xA3,0xEE,0xF5,0x00,0xE8,0x5E,0xBE,0xE8,0xFE,0x48,0x8B,0xD8,0xE8,
@@ -66,6 +70,20 @@ constexpr LONGLONG kWait=-10000;   // 1 ms, relative, in 100 ns: the window thre
 using SleepFn=void(WINAPI*)(DWORD);
 void* gameSleep=nullptr;
 bool tickWaitInstalled=false;
+
+// EDF6VR loaded already, or beside this plugin to be loaded after it (frame_pacing_logic.h ForeignTickWait).
+bool EdfVrInstalled() noexcept {
+    if(GetModuleHandleW(L"EDF6VR.dll"))return true;
+    HMODULE self=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&EdfVrInstalled),&self))return false;
+    wchar_t path[MAX_PATH]{};
+    const DWORD n=GetModuleFileNameW(self,path,MAX_PATH);
+    if(!n || n>=MAX_PATH)return false;
+    wchar_t* const slash=wcsrchr(path,L'\\');
+    if(!slash || wcscpy_s(slash+1,static_cast<std::size_t>(path+MAX_PATH-(slash+1)),L"EDF6VR.dll"))return false;
+    return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES;
+}
 GateWaitFn gateWait=nullptr;   // set once at load, before the main loop runs
 std::uint64_t qpcFreq=0,tickPeriod=0;
 
@@ -176,7 +194,13 @@ bool InstallFramePacing() noexcept {
     if(edf::Matches(image,kPumpSleep-sizeof(kPumpArg),kPumpArg,sizeof(kPumpArg)))
         pump=edf::RedirectImportCall(image+kPumpSleep,kPumpSig,reinterpret_cast<void*>(&PumpWait),&gameSleep);
     else Log("PACING the window thread's wait is not as read (another hook?): left as it is");
-    if(!edf::Matches(image,kTickSleep-sizeof(kTickArg),kTickArg,sizeof(kTickArg)))
+    const pacing::Foreign foreign=pacing::ForeignTickWait(image+kTickSleep,kTickSig,image+kTickBranch,kTickBranchSig,EdfVrInstalled());
+    if(foreign==pacing::Foreign::kVr)
+        Log("PACING EDF6VR is installed (it removes the frame step's wait itself in a mission): the wait left to it, no frame gate");
+    else if(foreign!=pacing::Foreign::kNone)
+        Log("PACING the frame step's %s (0x%X) is not the game's (an FPS unlimiter patch?): the wait left to it, no frame gate",
+            foreign==pacing::Foreign::kWait ? "wait" : "loop branch",foreign==pacing::Foreign::kWait ? kTickSleep : kTickBranch);
+    else if(!edf::Matches(image,kTickSleep-sizeof(kTickArg),kTickArg,sizeof(kTickArg)))
         Log("PACING the frame step's wait is not as read (another hook?): left as it is");
     else if(!edf::Matches(image,kTickCount,kTickCountSig,sizeof(kTickCountSig)))
         Log("PACING the tick clock 0x11DAE60 is not as read (another MOD or hook?): the frame step's wait left as it is");

@@ -189,13 +189,14 @@ void CameraBlend() {
     Reset();
     const M4 a=Pose(0.0f,0,0,0),b=Pose(0.4f,4,0,2);
     TickTo(cam,a,1.0f);
-    TickTo(cam,b,1.4f);
-    Check(Near(World(cam),b.m,0) && Fov(cam)==1.4f,"camera: the step's bytes stand after the tick frame");
     // A frame with ticks: the projection comes before the steps and draws the camera as the last step left it.
     BeginTick(2);
     Project(cam);
-    Check(Same(World(cam),b.m,64) && Fov(cam)==1.4f,"camera: a frame with ticks does not write");
+    Check(Same(World(cam),a.m,64) && Fov(cam)==1.0f,"camera: a frame with ticks does not write");
+    Queue(cam,b,1.4f);
+    Step(cam);
     Fence();
+    Check(Near(World(cam),b.m,0) && Fov(cam)==1.4f,"camera: the step's bytes stand after the tick frame");
     Check(Counted().blended==0,"camera: a frame with ticks counts no blend");
 
     for(float alpha:{0.25f,0.5f}) {

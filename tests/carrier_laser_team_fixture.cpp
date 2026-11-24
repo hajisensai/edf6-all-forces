@@ -56,8 +56,8 @@ void Reset() {
     authority=true;player=nullptr;milliseconds=100000;++frame;
     patchAllowed=false;registrationAllowed=true;registrations=nativeAiCalls=seenFrames=0;registeredOwns=nullptr;registeredControlled=nullptr;
     std::memset(relations,0,sizeof(relations));std::memset(rows,0,sizeof(rows));
-    for(unsigned i=0;i<64;++i)edf::Put<void*>(rows,i*crew::kTeamStride+crew::kTeamRelation,relations[i]);
-    edf::Put<void*>(manager,crew::kTeamRows,rows);edf::Put<void*>(crew::image,crew::kTeams,manager);
+    for(unsigned i=0;i<64;++i)edf::Put<void*>(rows,i*edf::kTeamStride+edf::kTeamRelation,relations[i]);
+    edf::Put<void*>(manager,edf::kTeamRows,rows);edf::Put<void*>(crew::image,edf::kTeamManager,manager);
     edf::Put<void*>(crew::image,crew::kObjectMgr,manager);
     crew::sigOk=crew::preloaded=crew::flyOk=true;crew::broken=crew::aiDead=false;
 }
@@ -168,7 +168,7 @@ void TestDirectedRelation() {
     edf::Put<int>(ship.bytes,edf::kTeam,-1);CHECK(!crew::ShipEnemy(ship.bytes,2));
     edf::Put<int>(ship.bytes,edf::kTeam,64);CHECK(!crew::ShipEnemy(ship.bytes,2));
     edf::Put<int>(ship.bytes,edf::kTeam,7);Hostile(7,2);
-    edf::Put<void*>(crew::image,crew::kTeams,nullptr);CHECK(!crew::ShipEnemy(ship.bytes,2));
+    edf::Put<void*>(crew::image,edf::kTeamManager,nullptr);CHECK(!crew::ShipEnemy(ship.bytes,2));
 }
 void TestMixedTeamDiscovery() {
     Reset();Carrier(1,0);Carrier(1,200);Carrier(2,400);

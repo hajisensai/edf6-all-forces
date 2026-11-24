@@ -94,11 +94,11 @@ check(re.search(r'bool Steps\(\) noexcept \{ return !gateOn \|\| finalTicks; \}'
 install = body(fr, r'void InstallFrameRate\(\) noexcept \{')
 check(install, 'InstallFrameRate found')
 miss = install.find('if(guards!=kGuards || takes!=2 || !sync)')
-gate = install.find('gateOn=InstallGate();')
+gate = install.find('gateOn=viewOn && InstallGate();')
 check(miss >= 0 and gate > miss, 'the gate is tried only after every guard went in')
 check(re.search(r'if\(guards!=kGuards \|\| takes!=2 \|\| !sync\) \{[^}]*return;\s*\}', install, re.S),
       'a missing guard returns before the gate')
-check(re.findall(r'\bgateOn=(?!false;)[^;]*;', fr) == ['gateOn=InstallGate();'], 'gateOn is set in one place (from InstallGate)')
+check(re.findall(r'\bgateOn=(?!false;)[^;]*;', fr) == ['gateOn=viewOn && InstallGate();'], 'gateOn is set in one place (from InstallGate, with the view on)')
 ig = body(fr, r'bool InstallGate\(\) noexcept \{')
 check(re.search(r'while\(written<3 && edf::PatchCode\(', ig) and re.search(r'if\(written<3\) \{', ig),
       'the gate\'s 3 writes are all or none')
@@ -134,8 +134,11 @@ crew = src['crew.cpp']
 check(re.search(r'ULONGLONG GameFrame\(\) noexcept \{ return frameClock\.logical; \}', crew),
       'GameFrame() only reads the clock (it observes nothing itself)')
 seen = body(crew, r'void SeeFrame\(const void\*\) noexcept \{')
-check(re.search(r'frameClock\.Observe\(system,At<const void\*>\(system,0x68\),At<std::uint32_t>\(system,0xCE0\)\)', seen),
-      'SeeFrame steps the clock by System+0xCE0 (written in the tick loops only)')
+frame_h = open(os.path.join(ROOT, 'common', 'edf', 'game_frame.h'), encoding='utf-8').read()
+check(re.search(r'gameframe::ReadStep\(image,s\)', seen) and re.search(r'frameClock\.Observe\(s\.system,s\.scene,s\.count\)', seen)
+      and re.search(r'kSystemScene=0x68,kSystemStep=0xCE0;', frame_h)
+      and re.search(r'edf::At<std::uint32_t>\(system,kSystemStep\)', frame_h),
+      'SeeFrame steps the clock by System+0xCE0 (written in the tick loops only), read by gameframe::ReadStep')
 observers = [n for n, t in src.items() if 'frameClock.Observe(' in t]
 check(observers == ['crew.cpp'] and crew.count('frameClock.Observe(') == 1, f'the frame clock is observed by SeeFrame only: {observers}')
 SEE_FRAME = {'carrierlaser.cpp', 'crew.cpp', 'npcai.cpp', 'pvp.cpp', 'support_dispatch.cpp'}   # ship AI, vehicle input, Think, PvpFrame, SupportActorFrame

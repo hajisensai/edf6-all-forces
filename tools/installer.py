@@ -134,13 +134,6 @@ NEW_DEFAULTS_1124: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1124 = ('; edf6vc-defaults-2026-11-24：安装器已把仍是旧出厂值 1 的 MaxFrameLatency 改成 0（不设显卡排队帧数，'
                       '保持系统默认；重场景实测设 1 时有降速）（想改就改，之后安装不会再改）')
-# The frame rate (docs/unlimited-fps-re.md §5): FrameRateCap shipped 0 (read only) and became 1, the display's refresh
-# rate with the camera and the player interpolated; merge_ini keeps an old ini's 0.
-NEW_DEFAULTS_1124B: dict[str, dict[str, tuple[str, str]]] = {
-    SECTION: {'FrameRateCap': ('0', '1')},
-}
-DEFAULTS_MARK_1124B = ('; edf6vc-defaults-2026-11-24b：安装器已把仍是旧出厂值 0 的 FrameRateCap 改成 1（画面帧率跟显示器刷新率，'
-                       '游戏逻辑仍是 59.94；想要原版 60 帧就改回 0）（想改就改，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
@@ -149,7 +142,6 @@ DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = 
     (DEFAULTS_MARK_1108, NEW_DEFAULTS_1108),
     (DEFAULTS_MARK_1110, NEW_DEFAULTS_1110),
     (DEFAULTS_MARK_1124, NEW_DEFAULTS_1124),
-    (DEFAULTS_MARK_1124B, NEW_DEFAULTS_1124B),
 )
 
 

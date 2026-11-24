@@ -151,4 +151,31 @@ assert rip(0x1198894, 7) == value('kCommands')                                 #
 assert binary[0x111B8FE:0x111B905] == bytes.fromhex('488db340010000')          # rsi = context+0x140
 assert binary[0x1118AC0:0x1118AC4] == bytes.fromhex('488b4908')                # a command's D3D context: +8
 
-print('scope lens native anchors passed:', len(guards), 'guards, 7 redirected calls, slots, camera, ring')
+# 7. The viewport's colour targets are samplable (scope_pip_gpu.cpp samples the lens view's own texture, no copy):
+# 0x11997A0 fills one D3D11_TEXTURE2D_DESC at rbp+7 (Width +0, Height +4, MipLevels +8, ArraySize +0xC, Format +0x10,
+# SampleDesc +0x14, Usage +0x1C, BindFlags +0x20, CPUAccessFlags +0x24, MiscFlags +0x28) and hands it to 0x1121F70 for
+# the three G-buffers and the colour targets +0xD0 / +0xF0, BindFlags 0xA8 = SHADER_RESOURCE | RENDER_TARGET |
+# UNORDERED_ACCESS, format 0xA = R16G16B16A16_FLOAT; the depth (after +0xF0) rewrites the flags to 0x48.
+assert binary[0x1199858:0x119985F] == bytes.fromhex('c745170a000000')          # Format = 0xA
+assert binary[0x1199836:0x119983E] == bytes.fromhex('48c7451b01000000')        # SampleDesc {1, 0}
+assert binary[0x119985F:0x1199862] == bytes.fromhex('895d23')                  # Usage = DEFAULT (ebx 0)
+assert binary[0x1199862:0x119986A] == bytes.fromhex('48c74527a8000000')        # BindFlags 0xA8, CPUAccessFlags 0
+assert binary[0x119986A:0x119986D] == bytes.fromhex('895d2f')                  # MiscFlags 0
+assert binary[0x11998D6:0x11998DD] == bytes.fromhex('c745170a000000')          # Format again before +0xD0 / +0xF0
+for site, slot in ((0x1199889, 0x68), (0x11998AD, 0x88), (0x11998D1, 0xA8), (0x119990B, 0xD0), (0x119992F, 0xF0)):
+    call(site, 0x1121F70)
+    assert binary[site - 0xB:site - 0x7] == bytes.fromhex("4c8d4507"), hex(site)   # r8 = the description
+# The desc's BindFlags are not written between 0x1199862 and the last colour target (only the format at 0x11998D6).
+for at in range(0x119986A, 0x1199934):
+    assert binary[at:at + 3] not in (bytes.fromhex('c74527'), bytes.fromhex('894527'), bytes.fromhex('895d27')), hex(at)
+assert binary[0x1199934:0x119993B] == bytes.fromhex('c74527' + '48000000')     # the depth after: 0x48
+# 0x1121F70 passes the description unchanged to ID3D11Device::CreateTexture2D (vtable +0x28) and, for bit 8, makes the
+# engine's own shader resource view (CreateShaderResourceView +0x38): the engine samples these targets itself.
+assert binary[0x1121F87:0x1121F8A] == bytes.fromhex('498be8')                  # rbp = r8 (the description)
+assert binary[0x1121FBE:0x1121FC7] == bytes.fromhex('488bd5' + '488bcf' + 'ff5028')  # CreateTexture2D(device, desc, ...)
+assert binary[0x1121FDC:0x1121FE1] == bytes.fromhex('8b4520' + 'a808')          # BindFlags & SHADER_RESOURCE
+assert binary[0x1121FFF:0x1122002] == bytes.fromhex('ff5038')                  # CreateShaderResourceView
+src_gpu = (Path(__file__).resolve().parents[1] / 'src/scope_pip_gpu.cpp').read_text(encoding='utf-8')
+assert 'CopyResource' not in src_gpu and 'D3D11_BIND_SHADER_RESOURCE' in src_gpu
+
+print('scope lens native anchors passed:', len(guards), 'guards, 7 redirected calls, slots, camera, ring, colour targets')

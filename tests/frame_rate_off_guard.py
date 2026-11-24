@@ -41,7 +41,8 @@ src_dir = os.path.join(ROOT, 'src')
 names = sorted(n for n in os.listdir(src_dir) if n.endswith(('.cpp', '.h')))
 for name in names:
     check(not re.search(r'frameRateDev|FrameRateDev', code(read('src', name))), f'src/{name} reads no FrameRateDev')
-check(re.search(r'\bint frameRateCap=1;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 1 (the display\'s refresh rate, as the shipped ini)')
+check(re.search(r'\bint frameRateCap=0;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate, as the shipped ini)')
+check(re.search(r'(?m)^FrameRateCap=0$', ini), 'the shipped ini has FrameRateCap=0 (1 waits for the maintainer\'s checklist)')
 
 fr = code(read('src', 'frame_rate.cpp'))
 m = re.search(r'void InstallFrameRate\(\) noexcept \{\n(.*?)\n\}\n', fr, re.S)
@@ -84,6 +85,7 @@ check(callers['InstallGate()'] == ['frame_rate.cpp'], f"InstallGate only in fram
 check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove only in frame_rate.cpp: {callers['InstallInputMove()']}")
 check(set(callers['SwapFlipUseWaitable(']) <= {'frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'}, 'the waitable object only with the frame gate')
 check(re.search(r'if\(gateOn && flip && c\.maxFrameLatency>0\)SwapFlipUseWaitable\(', body), 'the waitable object only with the gate on')
+check(re.search(r'viewOn=framerateview::Install\(\);\s*gateOn=viewOn && InstallGate\(\);', body), 'no interpolation, no gate (#394 review b)')
 plugin = code(read('src', 'plugin.cpp'))
 check(plugin.count('InstallFrameRate();') == 1, 'plugin.cpp installs the frame rate once')
 print(f'frame rate off switch: {checks} checks ok')

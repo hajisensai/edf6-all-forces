@@ -21,7 +21,8 @@ namespace crew {
 namespace {
 using qmark_net::kMaxPeers;
 constexpr ULONGLONG kResolveMs=500;     // a teammate's mark whose enemy is not found here: looked for again after this
-constexpr ULONGLONG kPublishFreshMs=500;
+// The views are the HUD's while published within stepfresh::kEveryStep steps (QMarkFrame runs once a step from the
+// player's frame, step_fresh.h); a player frame no longer run (out of the mission) leaves them stale.
 
 // This machine's point mark (wall clock: shown as long while the game is paused, as the old ring was).
 struct OwnPoint { bool on; float at[3]; ULONGLONG until; };
@@ -48,7 +49,7 @@ bool netReady=false;
 SRWLOCK viewLock=SRWLOCK_INIT;
 QMarkView views[kQMarkViews]{};
 int viewCount=0;
-ULONGLONG viewWall=0;
+stepfresh::Step viewStep=0;
 
 // The cues asked for since the last frame (bit per QMarkCue); this run's let-goes (the teammates' off cue).
 unsigned cues=0;
@@ -127,7 +128,7 @@ void Publish(ULONGLONG now) noexcept {
         }
     }
     AcquireSRWLockExclusive(&viewLock);
-    std::memcpy(views,v,sizeof(views));viewCount=n;viewWall=now;
+    std::memcpy(views,v,sizeof(views));viewCount=n;viewStep=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -234,7 +235,7 @@ void QMarkFrame() noexcept {
 void ResetQMarks() noexcept {
     ownPoint=OwnPoint{};cues=0;letGoes=0;
     ResetQMarkNetwork();
-    AcquireSRWLockExclusive(&viewLock);viewCount=0;viewWall=0;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);viewCount=0;viewStep=0;ReleaseSRWLockExclusive(&viewLock);
 }
 
 void UpdateQMarkNetwork(bool ready,std::uint32_t peers,bool (*send)(std::uint32_t,const void*,std::size_t) noexcept,
@@ -288,7 +289,7 @@ void ResetQMarkNetwork() noexcept {
 int QMarkViews(QMarkView* out,int max) noexcept {
     AcquireSRWLockShared(&viewLock);
     int n=0;
-    if(viewWall && GetTickCount64()-viewWall<=kPublishFreshMs)for(;n<viewCount && n<max;++n)out[n]=views[n];
+    if(stepfresh::Fresh(viewStep))for(;n<viewCount && n<max;++n)out[n]=views[n];
     ReleaseSRWLockShared(&viewLock);
     return n;
 }

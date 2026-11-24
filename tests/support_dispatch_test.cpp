@@ -547,7 +547,7 @@ int main() {
     check(At<float>(objects[0],kPosition)==-1400 && At<float>(objects[0],kPosition+4)==150,"hull starts in the air at the planned edge");
     check(At<float>(objects[1],kPosition+4)==150 && At<const void*>(seats[0],kSeatRider)==objects[1],
           "the real soldier is made inside its aircraft and sits in the driver's seat at spawn");
-    auto* const deploymentRows=deployments.begin();
+    const Deployment* const deploymentRows=deployments.begin();   // the cursor converts to the row pointer
     check(deploymentRows && deployments.Allocated(),"the first spawn allocates the deployment rows");
     check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
     fixtureMs+=100;SupportDispatchTick();

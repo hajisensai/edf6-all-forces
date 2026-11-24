@@ -10,7 +10,7 @@ set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only gene
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
@@ -451,13 +451,14 @@ add_executable(body_mark_check EXCLUDE_FROM_ALL tools/body_mark_check.cpp)
 target_link_libraries(body_mark_check PRIVATE edf6common_dyn)
 target_compile_options(body_mark_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(body_mark_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# The gunner seats' shared enemy points (tools/enemy_points_check.cpp, src/enemy_points.h).
+# The gunner seats' shared enemy points (tools/enemy_points_check.cpp, common/edf/enemy_points.h).
 add_executable(enemy_points_check EXCLUDE_FROM_ALL tools/enemy_points_check.cpp)
 target_include_directories(enemy_points_check PRIVATE common)
 target_compile_options(enemy_points_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(enemy_points_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# The soldiers' frame grid (tools/npc_grid_check.cpp, src/npc_grid.h): its answers are the brute-force scans'.
+# The soldiers' frame grid (tools/npc_grid_check.cpp, common/edf/npc_grid.h + src/npc_grid.h): its answers are the brute-force scans'.
 add_executable(npc_grid_check EXCLUDE_FROM_ALL tools/npc_grid_check.cpp)
+target_include_directories(npc_grid_check PRIVATE common)
 target_compile_options(npc_grid_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(npc_grid_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The battle-size tables' key index (tools/hash_index_check.cpp, common/edf/hash_index.h).
@@ -1178,6 +1179,9 @@ set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODIN
 add_executable(rescue_logic_test tests/rescue_logic_test.cpp)
 target_compile_options(rescue_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME rescue_logic COMMAND rescue_logic_test)
+add_executable(sync_load_logic_test tests/sync_load_logic_test.cpp)
+target_compile_options(sync_load_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME sync_load_logic COMMAND sync_load_logic_test)
 # The debug spawn tool ships off and an upgraded ini keeps it off; its natives and stock SGOs against the installed game
 # (skip 77 without it).
 add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_ini_test.py")
@@ -1298,7 +1302,14 @@ target_include_directories(hail_glide_check PRIVATE src common third_party/EDFMo
 target_compile_options(hail_glide_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hail_glide_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_dependencies(offline_checks hail_glide_check)
-add_test(NAME hail_glide COMMAND hail_glide_check)
+# In HAIL_GLIDE_SHARDS parts run side by side, packed by their measured seconds (tests/hail_glide_shard.py,
+# tests/hail_glide_seconds.json): whole it took 141 s, the longest test a src/-only change runs.
+set(HAIL_GLIDE_SHARDS 4)
+math(EXPR _hail_last "${HAIL_GLIDE_SHARDS} - 1")
+foreach(_shard RANGE ${_hail_last})
+  add_test(NAME hail_glide_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard.py"
+           "$<TARGET_FILE:hail_glide_check>" --shard ${_shard}/${HAIL_GLIDE_SHARDS})
+endforeach()
 
 add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
@@ -1379,6 +1390,7 @@ add_test(NAME proteus_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_range_test.py")
 add_test(NAME range_tracked_reuse COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/range_tracked_reuse_test.py")
 add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
+add_test(NAME test_domains COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_domains_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
@@ -1612,7 +1624,14 @@ target_compile_options(mission_pack_save_native_test PRIVATE /W4 /WX /utf-8 /per
 add_dependencies(offline_checks mission_pack_save_native_test)
 add_test(NAME mission_pack_save_native COMMAND mission_pack_save_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_pack_save_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
+# In EDF5_LIFECYCLE_SHARDS parts run side by side, packed by their measured seconds
+# (tests/edf5_campaign_lifecycle_seconds.json): whole it took 151 s.
+set(EDF5_LIFECYCLE_SHARDS 4)
+math(EXPR _edf5_lifecycle_last "${EDF5_LIFECYCLE_SHARDS} - 1")
+foreach(_shard RANGE ${_edf5_lifecycle_last})
+  add_test(NAME edf5_campaign_lifecycle_${_shard} COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py" --shard ${_shard}/${EDF5_LIFECYCLE_SHARDS})
+endforeach()
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)
@@ -2080,6 +2099,18 @@ add_test(NAME crash_dump COMMAND crash_dump_test)
 # It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
 set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
 add_dependencies(offline_checks crash_dump_test)
+# The crash's log flush (common/log.h CrashFlush): only the open handle and preformatted bytes, with CreateFileW,
+# MoveFileExW and _snprintf_s counted (log.cpp compiled into the test, no edf6common).
+add_executable(log_crash_test tests/log_crash_test.cpp)
+target_include_directories(log_crash_test PRIVATE common)
+target_compile_options(log_crash_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME log_crash COMMAND log_crash_test)
+add_dependencies(offline_checks log_crash_test)
+# The Mods listing ModFileIn answers from (src/mod_file.h), on a made-up game directory under %TEMP%.
+add_executable(mod_file_test tests/mod_file_test.cpp)
+target_compile_options(mod_file_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME mod_file COMMAND mod_file_test)
+add_dependencies(offline_checks mod_file_test)
 # More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
 # spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
 add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)
@@ -2394,6 +2425,15 @@ target_compile_options(autoturret_payload_aim_test PRIVATE /W4 /WX /utf-8 /permi
 target_link_options(autoturret_payload_aim_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks autoturret_payload_aim_test)
 add_test(NAME autoturret_payload_aim COMMAND autoturret_payload_aim_test)
+# EDF6AutoTurret's frame is the scene step that ran (one frame however often a vehicle's input runs in it, none while paused; a gun's stamp holds through
+# the next step only), and its scan through the world's grid is the linear scan's own list (tests/autoturret_clock_grid_test.cpp).
+add_executable(autoturret_clock_grid_test EXCLUDE_FROM_ALL tests/autoturret_clock_grid_test.cpp)
+target_include_directories(autoturret_clock_grid_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(autoturret_clock_grid_test PRIVATE edf6common user32)
+target_compile_options(autoturret_clock_grid_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(autoturret_clock_grid_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks autoturret_clock_grid_test)
+add_test(NAME autoturret_clock_grid COMMAND autoturret_clock_grid_test)
 add_test(NAME edf41_caption_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_caption_contract_test.py")
 
 add_executable(enemy_ui_logic_test EXCLUDE_FROM_ALL tests/enemy_ui_logic_test.cpp)
@@ -2796,6 +2836,13 @@ target_include_directories(twin_cadence_test PRIVATE src)
 target_compile_options(twin_cadence_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks twin_cadence_test)
 add_test(NAME twin_cadence COMMAND twin_cadence_test)
+
+# Handoff freshness by the scene step, not the wall clock (src/step_fresh.h; docs/step-freshness.md).
+add_executable(step_fresh_test EXCLUDE_FROM_ALL tests/step_fresh_test.cpp)
+target_include_directories(step_fresh_test PRIVATE src)
+target_compile_options(step_fresh_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks step_fresh_test)
+add_test(NAME step_fresh COMMAND step_fresh_test)
 add_test(NAME twin_cadence_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/twin_cadence_native.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(twin_cadence_native PROPERTIES SKIP_RETURN_CODE 77)
 # Each BMPT barrel's own recoil on its own shot (src/barrel_recoil.h), the production source with the game's readers replaced.
@@ -2819,3 +2866,7 @@ foreach(_test IN LISTS _all_tests)
   list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
 endforeach()
+
+# Every test's domains as its LABELS (ctest -L <domain>; tools/check.py runs only the ones a change selects):
+# generated by tools/test_domains.py --write, checked by its --check in CI and in check.py.
+include("${CMAKE_SOURCE_DIR}/cmake/test_labels.cmake")

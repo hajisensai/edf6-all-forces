@@ -1182,8 +1182,11 @@ void Log(const char* format,...) noexcept {
     va_list args;va_start(args,format);edf::logfile::Line(format,args);va_end(args);
 }
 
-// A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
-// below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
+// What is buffered written now, best-effort: both locks once without waiting (edf::logfile::Flush(true)); it may open
+// the log or rotate it as the writer would, so it is not the crash path. A crash goes through CrashLog below:
+// edf::logfile::Crash, after the dump is written, writes the older lines and then the crash line through the log's one
+// handle (opened then if it was not yet; no rotation, no CRT formatting), or with a log lock held the crash line alone
+// by its own raw append.
 void FlushLog() noexcept {
     edf::logfile::Flush();
 }
@@ -1310,7 +1313,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRenderFence();      // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
     InstallFrameLatency();     // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
     // ini FrameRateCap (docs/unlimited-fps-re.md): 0 the game's 59.94 Hz, nothing installed; otherwise frames between the
-    // ticks, drawn with the camera and the player's root interpolated, on a flip swap chain.
+    // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
+    // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
