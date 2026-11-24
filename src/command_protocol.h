@@ -14,13 +14,13 @@ namespace crew::command_net {
 // the one after the point): the layout and the size are 6's.
 // Version 8 (2026-10-31): the requester is the player's requester ID (net_object_ref.h: its mission slot, the same on
 // every machine; a stock mission numbers the players' NetIds per machine), no longer its NetId. A build before it is not
-// spoken to at all (kMinVersion 8: its messages do not decode, ours do not there; no compatibility with older builds).
+// spoken to at all (its messages do not decode, ours do not there; no compatibility with older builds).
 // Version 9 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23) and
 // the focus any object's reference (a player's by its slot: an enemy player in PvP, which a NetId named on no other
-// machine); an older build is not spoken to (kMinVersion 9).
+// machine); an older build is not spoken to.
 // Version 10 (2026-11-10, test site #45): DISMOUNT ALL's choice in Command::param (mapcmd_logic.h DismountParamValid:
 // every rider but the driver, or only some classes' riders); an older build would refuse the order's parameter, so it
-// is not spoken to (kMinVersion 10; the room protocol went to 9 with it: an older build is not let into the room).
+// is not spoken to (the room protocol went to 9 with it: an older build is not let into the room).
 // One version, not negotiated (net-6, 2026-11-24: the v6 / v7 negotiation removed): every machine of the room runs
 // this build (mod_room.h kAllForcesRoomProtocol), every message goes out at kVersion and one of another does not decode.
 constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=10,kMaxPeers=1024;

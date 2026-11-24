@@ -382,9 +382,13 @@ int main(int argc,char** argv){
                 Check(!(wire>=static_cast<std::uint32_t>(range) && wire<=static_cast<std::uint32_t>(range>>32)),"real vanilla search range excludes All Forces");}
         }
     }
-    value.value=kAllForcesRoomPrefix-0x100+0x93;const auto beforeOlder=joins;
+    value.value=kAllForcesRoomPrefix-0x100+0x93;const auto beforeOlder=joins;const int noticesBeforeOlder=packNotices;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==beforeOlder,"an older room protocol's room refused (no compatibility with older builds)");
+    Check(packNotices==noticesBeforeOlder+1 && packNotice.find(L"房间协议 "+std::to_wstring(kAllForcesRoomProtocol-1))!=std::wstring::npos &&
+          packNotice.find(L"本机是房间协议 "+std::to_wstring(kAllForcesRoomProtocol))!=std::wstring::npos &&
+          lastLog.find("room_protocol="+std::to_string(kAllForcesRoomProtocol-1))!=std::string::npos,
+          "the older room's refusal names both room protocols");
     value.value=kAllForcesRoomPrefix+0x100+0x93;const auto before=joins;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==before,"unknown future profile refused");

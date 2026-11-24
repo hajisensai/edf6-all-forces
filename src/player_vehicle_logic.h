@@ -104,7 +104,7 @@ inline bool ParseValue(const char* value,Variant* out,int* count) noexcept {
     return true;
 }
 
-// --- The mission's messages (plugin_net.h channel PVEH, support_protocol.h kExtPlayerVehicle) ---
+// --- The mission's messages (plugin_net.h channel PVEH) ---
 // The requester is the player's requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 // Version 2 (2026-10-31): that ID; version 1 sent the NetId, which a guest did not find for the host's player.
 // Version 3 (2026-10-31): the requester is its object reference (net_object_ref.h: its slot, the tag at bytes 20..23).

@@ -11,8 +11,8 @@
 // player walks up to one asks for it (`pick`), the host gives it to the first who asked (`owner`) and ends it (`gone`);
 // every machine draws and fires each gun round its owner, and only the owner's machine's rounds deal damage (the game's
 // own rule: a round whose attacker is another machine's hurts nothing here; EDF6Coop docs/net-re/damage.md).
-// Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
-// to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
+// Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT and FGUN: sent to every
+// peer, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
 // and radial kinds, the float guns taken from the game's own drop. Version 3 (2026-10-31): a player (a grab's grabber, a
 // gun's asker and owner) goes by its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 // Version 4 (2026-10-31): every object is its reference (net_object_ref.h): a player by its slot with the tag at bytes

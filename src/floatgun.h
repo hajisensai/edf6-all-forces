@@ -21,6 +21,6 @@ void UpdateFloatGunNetwork(const CommandNetworkContext& context,std::uint64_t no
 bool ReceiveFloatGunNetwork(std::uint32_t peer,const char* authenticatedPuid,const void* bytes,std::size_t size,
                             std::uint64_t now) noexcept;
 void ResetFloatGunNetwork() noexcept;
-// Its plugin_net.h channel (support_net.cpp registers it): FGUN, support_protocol.h kExtFloatGun.
+// Its plugin_net.h channel (support_net.cpp registers it): FGUN.
 plugin_net::Channel FloatGunNetChannel() noexcept;
 }  // namespace crew

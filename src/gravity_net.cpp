@@ -1,5 +1,5 @@
-// The gravity operations online (gravity_net.h; the wire gravity_net_protocol.h; the channel plugin_net.h GRVT, sent only to
-// the peers that announced support_protocol.h kExtGravity). Game thread only.
+// The gravity operations online (gravity_net.h; the wire gravity_net_protocol.h; the channel plugin_net.h GRVT, sent to every
+// peer). Game thread only.
 #include "gravity_net.h"
 #include "command_identity.h"
 #include "gravity_net_protocol.h"

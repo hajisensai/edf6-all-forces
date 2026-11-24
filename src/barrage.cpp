@@ -27,7 +27,6 @@
 #include "heli.h"           // MapRay, VisitEnemiesOf
 #include "memory.h"
 #include "plugin_net.h"
-#include "support_protocol.h"   // kExtBarrage
 #include "support_soldier.h"    // ReadNativeObjectId
 #include "support_warning.h"    // WarnBarrage
 #include <cmath>
@@ -322,7 +321,7 @@ void ResetBarrages() noexcept {
     origin=plugin_net::NewOrigin();serial=0;heard.Clear();
 }
 
-// ---- the channel (plugin_net.h: BRGS, support_protocol.h kExtBarrage) ----
+// ---- the channel (plugin_net.h: BRGS) ----
 namespace {
 int netLogs=0;
 bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t) noexcept {

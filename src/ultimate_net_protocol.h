@@ -9,8 +9,8 @@
 // or lost the start, picks the show up from it; a newly joined peer is sent one at once) and `end` when it is over or
 // stopped. Each carries the frame the caller has played, so a receiver starts (or catches up) where the caller is,
 // through ultimate_show.h Seek, never replaying the frames it missed.
-// Wire: fixed size, little-endian (wire.h), plugin_net.h channel ULTS, support_protocol.h kExtUltimate: sent only to a
-// peer that announced the bit, another version dropped by the registry.
+// Wire: fixed size, little-endian (wire.h), plugin_net.h channel ULTS: sent to every peer, another
+// version dropped by the registry.
 //   magic, version, kind (byte 8), origin @12, serial @16, frame @20, seed @24 (two words, low first), damage @32,
 //   at[3] @36, plane[3] @48, caller[32] @60; zero to kWire.
 // Version 2 (2026-10-31): the caller is its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).

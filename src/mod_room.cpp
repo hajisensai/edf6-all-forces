@@ -270,11 +270,22 @@ void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     }
     const char* reason=!o ? "missing-options" : virtualRoom==0 ? "coop-virtual-profile-rejected" :
         copied!=0 ? "search-type-read-failed" : !typed ? "search-type-invalid" : "incompatible-search-type";
-    Log("ROOM join refused: reason=%s virtual=%d attribute_result=%d numeric=%d SEARCH_TYPE=%#llx",
-        reason,virtualRoom,copied,typed,static_cast<unsigned long long>(wireType));
+    const std::int64_t other=typed ? OtherAllForcesProtocol(wireType) : 0;
+    Log("ROOM join refused: reason=%s virtual=%d attribute_result=%d numeric=%d SEARCH_TYPE=%#llx room_protocol=%lld local=%lld",
+        reason,virtualRoom,copied,typed,static_cast<unsigned long long>(wireType),static_cast<long long>(other),
+        static_cast<long long>(kAllForcesRoomProtocol));
     // EOS_InvalidParameters. No original JoinLobby call and therefore no
     // game session/resource loading, including direct invitations to vanilla.
     Refuse(client,cb);
+    // Another build's All Forces room (an invitation, a remembered room): no compatibility (CLAUDE.md), the player told
+    // which protocol each side runs and that the whole room must run the same build.
+    if(other) {
+        wchar_t text[512]{};
+        swprintf_s(text,L"这个房间是%ls版本的全军出击（房间协议 %lld），本机是房间协议 %lld。\n\n联机要求房间内所有人使用同一版本的全军出击，"
+                   L"旧版本不能进房。请%ls后再加入。",other<kAllForcesRoomProtocol ? L"旧" : L"新",static_cast<long long>(other),
+                   static_cast<long long>(kAllForcesRoomProtocol),other<kAllForcesRoomProtocol ? L"让房主更新到与本机相同的版本" : L"把本机全军出击更新到房主的版本");
+        notice::Post("room-protocol",L"全军出击：无法加入联机房间",text,0);
+    }
 }
 void** Slot(const char* name) noexcept {
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
