@@ -29,7 +29,7 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
 
 - host-settings 词 v3 → v4（加 `n=` / `p=`，各 32 位大写十六进制，高字在前），`kWordMost` 128 → 200；
   新能力位 `kFeatPreloadSet=2048`（房间公告里的名字 `featPreloadSet`）。
-- 房间协议 `kAllForcesRoomProtocol` 15 → 16：旧版本不公布需求却会照旧全量预载，房主的集合就漏掉它的呼叫，所以旧版不能进房
+- 房间协议 `kAllForcesRoomProtocol` 取合并时 main 的值 + 1（写这份文档时 main 是 16，本分支为 17；与 net-6 谁先合谁用下一个号，后合的再 +1）：旧版本不公布需求却会照旧全量预载，房主的集合就漏掉它的呼叫，所以旧版不能进房
   （房主侧按协议拒绝，房间公告所需版本，沿用现有机制）。不写兼容分支。
 - 为什么不用 `plugin_net.h` 通道：预载在 MissionSync 之后、任务对象建立之前，此时 plugin_net 还没起来；成员属性（coop_attr）
   在房间阶段就可读，正好是 host-settings 词已有的传输。
@@ -43,7 +43,7 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
 ## 验证
 
 - 离线：`preload_set`（呼叫行表、Always ⊂ All、ByMode、RoomSet、AtSync、文本格式往返与坏输入）、`coop_attr`（v4 词往返、
-  v3 词与残缺 v4 词一律拒收）、`player_identity_guard`（协议 16）、`command_identity` / `command_native_dispatch` /
+  v3 词与残缺 v4 词一律拒收）、`player_identity_guard`（协议号）、`command_identity` / `command_native_dispatch` /
   `support_soldier` / `support_spawn` 等原有夹具；`python tools/check.py` 全绿。
 - 实机（未做，交协调者统一采）：同一任务 `PreloadMode=1` 对 `PreloadMode=0` 各 1–2 次，对比进图时长、MISSION 阶段 ms、
   MEMORY 行；配合 hitch2 的 `SyncLoadProbe=1` 看叫出各类呼叫时有没有 `SYNC LOAD ...EDF6VC_...` 漏项。

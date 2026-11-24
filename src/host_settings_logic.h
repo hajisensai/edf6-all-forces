@@ -21,7 +21,7 @@
 // reading its own ini would let one member play the stock spread while the others are penalised unzoomed.
 //
 // Word v3 carries both the commander flag and the scope settings. Scope values are integers in units of 1/10000.
-// Word v4 (2026-11-24, room protocol 16) adds the plugin content preload's sets (preload_set_logic.h): n= what this
+// Word v4 (2026-11-24, with its room protocol bump: mod_room.h) adds the plugin content preload's sets (preload_set_logic.h): n= what this
 // member's play reaches (its catalog, its equipped call weapons, PreloadMode applied), p= the room's set as this member
 // last saw it (its n= and every other member's). The host's p= is what every member preloads at the mission's sync
 // (preload::AtSync): the set must be the same on every machine, a body one machine lacks is an object it cannot make.

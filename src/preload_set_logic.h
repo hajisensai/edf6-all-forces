@@ -140,7 +140,7 @@ constexpr Mode ModeOf(int ini) noexcept { return ini==1 ? Mode::all : ini==2 ? M
 // What a machine says it needs (its word's n=, mode applied): PreloadMode=1 everything, 2 nothing, else `needed`.
 constexpr Set ByMode(Mode m,const Set& needed) noexcept { return m==Mode::all ? All() : m==Mode::none ? Set{} : needed; }
 // The host's set for the room (its word's p=): its own needs and every member's said needs. A member that said none
-// (its word not out yet) adds nothing: the protocol keeps older builds out (mod_room.h 16), so a member without a
+// (its word not out yet) adds nothing: the protocol keeps older builds out (mod_room.h, word v4's bump), so a member without a
 // word is one whose word comes within a beat.
 constexpr Set RoomSet(const Set& hostSet,const Set* members,int count) noexcept {
     Set s=hostSet;
@@ -172,7 +172,7 @@ inline bool Parse(std::string_view text,Set& out) noexcept {
 
 // Online, at the mission's sync: what this machine preloads. The host's set when the host said one (every member then
 // preloads the same); offline / as the host, this machine's own decision. A guest whose host said none is no room this
-// build plays in (the room's protocol keeps older builds out, mod_room.h 16): it preloads nothing of the plugin's, and
+// build plays in (the room's protocol keeps older builds out, mod_room.h): it preloads nothing of the plugin's, and
 // its calls do not come, rather than objects one machine has and another lacks.
 enum class Source : std::uint8_t { local, host, hostSilent };
 struct Decision { Set set; Source source=Source::local; };
