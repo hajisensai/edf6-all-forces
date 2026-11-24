@@ -178,7 +178,7 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     }
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
         "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u (changed since its tick), "
-        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames; "
+        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames after a 0-tick frame; "
         "%.1f%% of the frames loading (no 0-tick frames)",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
@@ -280,7 +280,11 @@ void SystemUpdateHook(void* system,float dt,int n) {
     void* const input=*reinterpret_cast<void**>(image+kInputManager);
     if(gateOn) {
         const std::uint64_t seed=*reinterpret_cast<const volatile std::uint64_t*>(image+kRandomSeed);
-        if(lastFrameZero){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
+        // Two 0-tick frames in a row only: a frame with ticks runs the game's own step (0x705570, n > 0) in
+        // Application::Update before this read, so a 0-tick frame followed by one with ticks always reads moved
+        // (M001 2026-11-24: 300 of ~1500 every 5 s, the ticks' count exactly). Between two 0-tick reads nothing of the
+        // game's steps it.
+        if(lastFrameZero && n<=0){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
         seedAtFrame=seed;
         lastFrameZero=n<=0;
         // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
