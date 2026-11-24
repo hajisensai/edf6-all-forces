@@ -174,6 +174,10 @@ stress:100 插件栈里排前面的还有 ShotOk / ShotClearOf / Grid::Capsule�
 - 第二批开头（会碰几乎所有文件，等第一批合完、其它线暂停时一次做）：eng-3 拆 `crew.h` / Config；eng-4 + mod-2 配置单一事实源
   （一张表生成字段 / 读取 / 校验，热重载移出游戏线程、只解析一次）；eng-7 + mod-5 裸 RVA 集中登记到 `src/edf_rva.h` 加棘轮；
   eng-5 CMake 收拢；eng-6 测试不再 include 生产 .cpp；eng-8 补丁所有权与重叠检测；eng-9 拆 selftest.py。
+  eng-13 拆模型注册表（`pylib/vcobjects.py`、`tools/call_weapons.py` 这类 import 或点名全部生成器 / 模型模块的表），
+  让改一个模型文件只选中真正依赖它的用例。实测：按改动选测试（`tools/test_domains.py`，PR #391）下只改
+  `pylib/drill_model.py`（经 make_drill ← vcobjects ← call_weapons 被选中）仍选中 ctest 171/656、selftest 310/346，
+  测试 CPU 时间只少约 7%，原因是约 340 个用例经这些注册表依赖几乎全部 pylib 模型模块。这一轮不做。
 
 ### E. 插件每帧开销（第二批，按 A 的数据排序）
 
