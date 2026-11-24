@@ -2034,7 +2034,16 @@ add_test(NAME mission_watch COMMAND mission_watch_test)
 # The plugin's crash dump (src/crash_dump.cpp): a child process per crash kind (access violation, C++ throw, stack
 # overflow, abort / terminate in ucrtbase and in the static CRT, an invalid CRT parameter, a filter set later, two
 # threads at once), each dump's exception stream checked; handled exceptions write none.
+# The peer cases: a stand-in EDF6AutoTurret.dll whose buffered lines the crash path must flush (common/log.h).
+add_library(crash_flush_peer SHARED tests/crash_flush_peer.cpp)
+target_compile_options(crash_flush_peer PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(crash_flush_peer PROPERTIES OUTPUT_NAME EDF6AutoTurret
+                      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/crash_flush_peer"
+                      ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/crash_flush_peer")
 add_executable(crash_dump_test tests/crash_dump_test.cpp)
+target_include_directories(crash_dump_test PRIVATE common)
+target_compile_definitions(crash_dump_test PRIVATE "CRASH_PEER_DLL=L\"$<TARGET_FILE:crash_flush_peer>\"")
+add_dependencies(crash_dump_test crash_flush_peer)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_libraries(crash_dump_test PRIVATE dbghelp)
 add_test(NAME crash_dump COMMAND crash_dump_test)

@@ -10,6 +10,8 @@ namespace crew {
 // once at load (LoadModFiles, EML6_Load) instead of a GetModuleFileNameW and a GetFileAttributesW per question: the
 // Preload* checks ask about hundreds of files on the game thread as a mission starts. The install is complete and
 // does not change while the game runs. Names compare as the file system does (ordinal, case-insensitive).
+// Only the installer's files: a variant the plugin writes into Mods while the game runs (a derived SGO or weapon file
+// generated at run time) is not in the list and must not be asked about here; check that file on disk where it is made.
 namespace mod_file {
 struct Dir { const wchar_t* name; std::vector<std::wstring> files; };
 inline Dir dirs[]={{L"OBJECT",{}},{L"WEAPON",{}}};

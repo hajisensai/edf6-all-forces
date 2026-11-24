@@ -5,8 +5,8 @@
 // one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every kFlushMs.
 // A WriteFile per line on the game thread was the hitch under a burst of lines (an air strike's jets, each logging
 // what it saw: 15000 lines a second, 2026-10-04); opening and closing the file per line before that, with the virus
-// scanner looking at each close, was the hitch when a mission started. A crash takes at most the last kFlushMs of
-// lines. Two buffers of kBuffer: the writer takes the full one and the lines go on into the other; a line that does
+// scanner looking at each close, was the hitch when a mission started. A crash writes what is buffered without waiting
+// for a lock (Flush(true)): its own log in Crash, EDF6AutoTurret's through kCrashFlush below. Two buffers of kBuffer: the writer takes the full one and the lines go on into the other; a line that does
 // not fit is dropped and counted (said with the next write), never waited for. Past kLogMax the file is renamed to
 // .log.1 (the one before replaced) and a new one begun, by the writer. No FILE_SHARE_DELETE: a log deleted while the
 // game runs would take the rest unseen. Process exit (DllMain's DLL_PROCESS_DETACH) writes what is left, best-effort.
@@ -83,7 +83,15 @@ void Line(const char* format,va_list args) noexcept;
 // What is buffered written now. Best-effort (tryOnly): both locks once, without waiting (a crash, process exit, a
 // refused load ending the game); otherwise waiting for the writer (tests).
 void Flush(bool tryOnly=true) noexcept;
-// Preformatted crash diagnostics appended directly (AppendCrashLine on the log's path).
+// A crash: what is buffered (Flush(true)), then the preformatted crash diagnostics appended directly (AppendCrashLine
+// on the log's path).
 void Crash(const char* text,std::size_t size) noexcept;
+
+// The one crash handler of the process is EDF6VehicleCrew's (src/crash_dump.cpp), and EDF6AutoTurret's buffer is its
+// own copy of this file's: after the dump the handler calls this export of EDF6AutoTurret's once, which is Flush(true)
+// (the crashed thread may own either lock: no wait). Without it a crash lost that log's last kFlushMs (#372's review).
+using CrashFlushFn=void(__cdecl*)();
+constexpr wchar_t kCrashFlushDll[]=L"EDF6AutoTurret.dll";
+constexpr char kCrashFlush[]="EDF6AutoTurret_CrashFlushLogV1";
 
 }  // namespace edf::logfile

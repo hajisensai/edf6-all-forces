@@ -63,11 +63,14 @@ int main() {
         Check(stamped,"millisecond timestamps");
     }
 
+    Say("just before the crash");   // still buffered: the crash writes it first (log.h Crash)
     const char crash[]="CRASH test line\r\n";
     edf::logfile::Crash(crash,sizeof(crash)-1);
     {
         const auto lines=Lines(path);
         Check(!lines.empty() && lines.back()=="CRASH test line\r","crash line appended beside the writer's handle");
+        Check(lines.size()>=2 && lines[lines.size()-2].find("] just before the crash\r")!=std::string::npos,
+              "the buffered lines before the crash line");
     }
 
     // Past kMax: the log renamed to .log.1 and a new one begun.

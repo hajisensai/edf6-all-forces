@@ -99,6 +99,7 @@ void Flush(bool tryOnly) noexcept {
 }
 
 void Crash(const char* text,std::size_t size) noexcept {
+    Flush(true);   // the lines before the crash first, in order
     AppendCrashLine(logPath,text,size);
 }
 
