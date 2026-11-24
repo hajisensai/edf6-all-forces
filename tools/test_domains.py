@@ -141,13 +141,13 @@ def owner(path: str) -> str:
     return 'misc'
 
 
-def tracked() -> list[str]:
-    """The repository's files: the ones git tracks, on disk. Not the untracked ones: a scratch file in a folder a test
+def tracked(root: str = ROOT) -> list[str]:
+    """The repository's (`root`'s) files: the ones git tracks, on disk. Not the untracked ones: a scratch file in a folder a test
     lists would widen (or a stray module named like a real one would bend) the labels of whoever ran --write, and the
     labels would differ between checkouts; a new test is git added before --write."""
     out = subprocess.run(['git', '-c', 'core.quotepath=off', 'ls-files', '--cached'],
-                         cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True).stdout
-    return sorted({p for p in out.splitlines() if p and os.path.isfile(os.path.join(ROOT, p))})
+                         cwd=root, capture_output=True, text=True, encoding='utf-8', check=True).stdout
+    return sorted({p for p in out.splitlines() if p and os.path.isfile(os.path.join(root, p))})
 
 
 class Repo:

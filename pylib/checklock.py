@@ -180,8 +180,8 @@ def worktree_lock(root: str) -> str:
 
 def worktree_holder(path: str) -> dict:
     """Who holds the lock at `path` (worktree_lock), as its holder wrote it down; {'starting': True} when no live
-    process is written down: the holder has the lock and not written itself yet (the record is written after the lock
-    is taken, and removed before it is let go), or a holder that was killed left its record."""
+    process is written down: the holder has the lock and has not written itself yet, or has emptied its record and
+    is letting go (half a record does not parse: the same), or a holder that was killed left its record."""
     try:
         with open(path + '.json', encoding='utf-8') as h:
             who = json.load(h)
@@ -200,16 +200,19 @@ def worktree_once(root: str) -> Iterator[None]:
     try:
         if not _try_lock(fd):
             raise Busy(worktree_holder(path))
-        # the record whole or not at all (a reader never sees half of it), and only while the lock is held: a reader
-        # that finds none, or a dead process in it, knows the holder has not written itself down yet
-        tmp = f'{path}.{os.getpid()}.tmp'
-        with open(tmp, 'w', encoding='utf-8') as h:
+        # The record is rewritten in place, never renamed over or deleted: on Windows a rename onto, or a delete of,
+        # a file another process has open (a second check.py reading who has the lock) fails with PermissionError,
+        # which killed the holder at its start or replaced its exit code at its end. Rewriting needs only the write
+        # sharing every reader gives (Python's open shares read and write). A reader that finds it empty, half
+        # written, or naming a dead process knows the holder has not written itself down yet or is letting go.
+        with open(path + '.json', 'w', encoding='utf-8') as h:
             json.dump({'root': os.path.abspath(root), 'pid': os.getpid(), 'since': time.time()}, h)
-        os.replace(tmp, path + '.json')
         try:
             yield
         finally:
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(path + '.json')
+            try:
+                open(path + '.json', 'w').close()   # emptied while the lock is still held: "letting go"
+            except OSError:
+                pass   # not emptied: it names this process, which is about to end; read as "letting go" then too
     finally:
         os.close(fd)
