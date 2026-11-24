@@ -117,9 +117,11 @@ struct PureNode {
     std::map<std::uint64_t,Baseline> baselines;
     std::map<std::uint64_t,std::vector<ec::Input>> inputs;
 };
-struct Packet {unsigned from=0,to=0;std::uint64_t sentAt=0;std::vector<unsigned char> bytes;};
+// state: sent as an EDF6Coop state message (key: plugin_net StateKey); unreliable, so a test may drop or reorder it.
+struct Packet {unsigned from=0,to=0;std::uint64_t sentAt=0;std::vector<unsigned char> bytes;bool state=false;std::uint32_t key=0;};
 Room* room=nullptr;
 bool PureSend(void*,std::uint32_t,const void*,std::size_t);
+bool PureSendState(void*,std::uint32_t,std::uint32_t,const void*,std::size_t);
 bool PureAuthenticate(void*,const char*,const ep::NativeId&);
 bool PureResolve(void*,ep::LeaseSpec*);
 bool PurePrepare(void*,std::uint64_t,const ep::LeaseSpec&);
@@ -132,6 +134,12 @@ bool PurePose(void*,std::uint64_t,const ep::LeaseSpec&,std::uint64_t,const void*
 ep::ActionResult PureAction(void*,std::uint64_t,const ep::LeaseSpec&,std::uint64_t,const void*,std::size_t);
 bool BridgeSend(std::uint32_t,const void*,std::size_t) noexcept;
 std::uint32_t BridgeTrySend(std::uint32_t,const void*,std::size_t,std::uint32_t,std::uint32_t) noexcept;
+bool BridgeSendState(std::uint32_t,std::uint32_t,const void*,std::size_t) noexcept;
+// A pure peer's hooks; its poses go as state messages like the production bridge's.
+ep::Hooks PureHooks(void* node) {
+    ep::Hooks hooks{node,&PureSend,&PureAuthenticate,&PureResolve,&PurePrepare,&PureBegin,&PureValidate,&PureApply,&PureRestore,&PureActivate,&PurePose,&PureAction};
+    hooks.SendState=&PureSendState;return hooks;
+}
 struct Room {
     unsigned bridge=0;
     std::uint64_t epoch=0;
@@ -145,8 +153,7 @@ struct Room {
         for(unsigned i=0;i<3;++i) {
             auto& node=nodes[i];node.room=this;node.global=i;
             node.context={true,i==0,epoch,i ? Peer(i,0) : 0,2,kPuid[i]};
-            CHECK(node.protocol.Configure({&node,&PureSend,&PureAuthenticate,&PureResolve,&PurePrepare,&PureBegin,
-                &PureValidate,&PureApply,&PureRestore,&PureActivate,&PurePose,&PureAction}));
+            CHECK(node.protocol.Configure(PureHooks(&node)));
         }
         TickAll();Pump();now+=1001;TickAll();Pump();
         for(unsigned i=0;i<3;++i)CHECK(Protocol(i).Ready()==capacityReady);
@@ -159,13 +166,18 @@ struct Room {
     ep::Protocol& Protocol(unsigned node) noexcept {return node==bridge ? crew::protocol : nodes[node].protocol;}
     void TickAll() {
         for(unsigned i=0;i<3;++i)if(i==bridge)
-            crew::UpdateEnemyControlNetwork({true,bridge==0,epoch,bridge ? Peer(bridge,0) : 0,2,kPuid[bridge],&BridgeSend,&BridgeTrySend},now);
+            crew::UpdateEnemyControlNetwork({true,bridge==0,epoch,bridge ? Peer(bridge,0) : 0,2,kPuid[bridge],&BridgeSend,&BridgeTrySend,false,&BridgeSendState},now);
         else nodes[i].protocol.Tick(nodes[i].context,now);
     }
-    bool Queue(unsigned from,std::uint32_t peer,const void* bytes,std::size_t size) {
+    bool Queue(unsigned from,std::uint32_t peer,const void* bytes,std::size_t size,std::uint32_t key=0) {
         if(!peer || peer>2 || !bytes || size<ep::kWirePrefixBytes || size>ep::kWireBytes)return false;
         Packet packet;packet.from=from;packet.to=Global(from,peer);packet.sentAt=now;packet.bytes.resize(size);std::memcpy(packet.bytes.data(),bytes,size);
+        packet.state=key!=0;packet.key=key;
         ep::Message decoded;CHECK(ep::Decode(packet.bytes.data(),packet.bytes.size(),decoded));
+        // Only poses go as states (the channel's takesState), each of the host's lease slots its own key.
+        CHECK(packet.state==(decoded.kind==ep::Kind::Pose) && ep::PoseState(bytes,size)==(decoded.kind==ep::Kind::Pose));
+        CHECK(!packet.state || (key>=crew::plugin_net::StateKey(crew::plugin_net::StateStream::enemyPose,0) &&
+            key<crew::plugin_net::StateKey(crew::plugin_net::StateStream::enemyPose,ep::kMaxLeases)));
         history.push_back(packet);queue.push_back(packet);return true;
     }
     void Deliver(const Packet& packet,const char* authenticated=nullptr) {
@@ -245,6 +257,11 @@ struct Room {
     }
 };
 bool BridgeSend(std::uint32_t peer,const void* bytes,std::size_t size) noexcept {return room && room->Queue(room->bridge,peer,bytes,size);}
+bool BridgeSendState(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t size) noexcept {return room && key && room->Queue(room->bridge,peer,bytes,size,key);}
+bool PureSendState(void* user,std::uint32_t peer,std::uint32_t object,const void* bytes,std::size_t size) {
+    const auto& node=*static_cast<PureNode*>(user);const auto key=crew::plugin_net::StateKey(crew::plugin_net::StateStream::enemyPose,object);
+    return key && node.room->Queue(node.global,peer,bytes,size,key);
+}
 bool PureSend(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
     const auto& node=*static_cast<PureNode*>(user);return node.room->Queue(node.global,peer,bytes,size);
 }
@@ -587,9 +604,9 @@ void AuthenticationAndPreparation() {
         CHECK(status.online && !status.ready);CHECK(!current.Request(0,5));CHECK(native.beginCalls==0 && native.prepareCalls==0);}
 }
 void LocalCapacityProofGatesEnemyControl() {
-    // An API-v1 support endpoint can remain online while the separate capacity
+    // A support endpoint (extension ABI 2) can remain online while the separate capacity
     // query is missing or proves the older, smaller reliable inbox/backlog.
-    static_assert(EDF6COOP_EXTENSION_VERSION==1,"ordinary support ABI remains API v1");
+    static_assert(EDF6COOP_EXTENSION_VERSION==2,"the support ABI is extension ABI 2 (state messages)");
     EDF6CoopExtensionCapacity proof{sizeof(EDF6CoopExtensionCapacity),EDF6COOP_EXTENSION_CAPACITY_VERSION,
         EDF6COOP_EXTENSION_MAX_PAYLOAD,32,crew::kEnemyControlInboxMessages,crew::kEnemyControlPendingBytes,
         crew::kEnemyControlPendingBytes,EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED|EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND};
@@ -740,7 +757,7 @@ void ReadyContextCannotSkipRestore(unsigned production,unsigned serial) {
     native.restoreFailures=100;crew::ResetEnemyControlNetwork();current.Pump();
     const unsigned begins=native.beginCalls;
     ++now;const auto nextEpoch=current.epoch+1000;
-    crew::UpdateEnemyControlNetwork({true,production==0,nextEpoch,production ? Room::Peer(production,0) : 0,2,kPuid[production],&BridgeSend},now);
+    crew::UpdateEnemyControlNetwork({true,production==0,nextEpoch,production ? Room::Peer(production,0) : 0,2,kPuid[production],&BridgeSend,&BridgeTrySend,false,&BridgeSendState},now);
     const auto* old=current.Lease(production,snapshot.lease);
     CHECK(old && old->phase==ep::Phase::restoring && !old->localRestored && old->spec.requesterPlayer==actors[source].id && old->spec.target==actors[5].id && old->spec.profileHash==snapshot.profileHash);
     CHECK(native.leases[snapshot.lease].captured && !current.Protocol(production).Ready());
@@ -789,7 +806,7 @@ void EpochPendingSampleDoesNotCrossWorld() {
     // sample identity, rather than relying on a different actor to reject it.
     for(unsigned i=0;i<3;++i)if(i!=current.bridge) {
         auto& node=current.nodes[i];node.protocol.Reset(now);
-        auto fresh=std::make_unique<ep::Protocol>(ep::Hooks{&node,&PureSend,&PureAuthenticate,&PureResolve,&PurePrepare,&PureBegin,&PureValidate,&PureApply,&PureRestore,&PureActivate,&PurePose,&PureAction});
+        auto fresh=std::make_unique<ep::Protocol>(PureHooks(&node));
         node.protocol=std::move(*fresh);
         node.baselines.clear();node.inputs.clear();node.context.epoch=current.epoch+1;
     }
@@ -854,7 +871,7 @@ void HostPoseSamplingAndAtomicDelivery() {
     const auto firstFrame=crew::GameFrame();
     crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1);
     CHECK(Same(native.capturedPose,PoseState(1)) && PosePacketCount(current)==2);
-    const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
+    const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1 && envelopes[0].state);
     ep::Message message;CHECK(ep::Decode(envelopes[0].bytes.data(),envelopes[0].bytes.size(),message));
     CHECK(message.sequence==1 && message.epoch==current.epoch && message.lease==snapshot.lease && message.request);
     CHECK(message.capability==(1u<<16) && message.inputSize==npose::kWireBytes && envelopes[0].bytes.size()==ep::kWirePrefixBytes+npose::kWireBytes);
@@ -1185,6 +1202,33 @@ void RetiredPoseSlotsDoNotRevokeNewBody() {
         CHECK(!native.restoreCalls);CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(snapshot.lease);
     }
 }
+// Poses are state messages (EDF6Coop extension ABI 2): never retransmitted, the transport keeps only the newest of a key.
+// A guest takes the newest it has seen, skips the ones lost between, drops older ones arriving late: none faults the lease.
+void PoseStateStreamToleratesLossAndReorder() {
+    Room current(1,171);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
+    crew::EnemyControlNetworkFrame();
+    std::vector<Packet> toPure,toBridge;
+    for(unsigned i=0;i<4;++i) {
+        const auto bytes=PoseWire(20u+i,crew::GameFrame());
+        CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));
+        auto pure=TakePosePackets(current,2),bridged=TakePosePackets(current,1);CHECK(pure.size()==1 && bridged.size()==1);
+        CHECK(pure[0].state && bridged[0].state && pure[0].key==bridged[0].key && (toPure.empty() || toPure[0].key==pure[0].key));
+        toPure.push_back(pure[0]);toBridge.push_back(bridged[0]);
+    }
+    current.Pump();
+    // The third overtakes the first two, which then come late; the fourth after them.
+    current.Deliver(toPure[2]);CHECK(current.nodes[2].poseApplies==1 && current.nodes[2].poseSequences[snapshot.lease]==3);
+    current.Deliver(toPure[0]);current.Deliver(toPure[1]);CHECK(current.nodes[2].poseApplies==1);
+    current.Deliver(toPure[3]);CHECK(current.nodes[2].poseApplies==2 && current.nodes[2].poseSequences[snapshot.lease]==4);
+    CHECK(current.nodes[2].poses[snapshot.lease]==PoseWire(23,crew::GameFrame()));
+    CHECK(current.Lease(2,snapshot.lease)->phase==ep::Phase::active);
+    // The production guest: the first and third lost, the second late after the fourth.
+    current.Deliver(toBridge[3]);current.Deliver(toBridge[1]);current.Pump();
+    CHECK(current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
+    crew::EnemyControlNetworkFrame();now+=34;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls>=1 && Same(native.appliedPose,PoseState(23)));
+    CHECK(current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
+    CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(snapshot.lease);
+}
 void EpochRejectsOldPoseEnvelope() {
     Room current(1,140);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto previous=current.ActiveSnapshot(2);
     crew::EnemyControlNetworkFrame();const auto bytes=PoseWire(10,crew::GameFrame());
@@ -1192,7 +1236,7 @@ void EpochRejectsOldPoseEnvelope() {
     RejectNonCanonicalSizes(current,old[0]);current.Pump();CHECK(native.poseApplyCalls==0);
     for(unsigned i=0;i<3;++i)if(i!=current.bridge) {
         auto& node=current.nodes[i];node.protocol.Reset(now);
-        auto fresh=std::make_unique<ep::Protocol>(ep::Hooks{&node,&PureSend,&PureAuthenticate,&PureResolve,&PurePrepare,&PureBegin,&PureValidate,&PureApply,&PureRestore,&PureActivate,&PurePose,&PureAction});
+        auto fresh=std::make_unique<ep::Protocol>(PureHooks(&node));
         node.protocol=std::move(*fresh);
         node.baselines.clear();node.inputs.clear();node.poses.clear();node.poseSequences.clear();node.context.epoch=current.epoch+1;
     }
@@ -1226,7 +1270,7 @@ int main() {
     ReadyContextCannotSkipRestore(0,80);ReadyContextCannotSkipRestore(1,81);
     PendingCancellationUsesCurrentUiBinding();EpochPendingSampleDoesNotCrossWorld();
     HostPoseSamplingAndAtomicDelivery();GuestPoseAuthenticationAndAtomicDelivery();PoseFailureAndLoss();
-    NonFallbackDoesNotProducePose();EpochRejectsOldPoseEnvelope();PoseRevalidatesNativeActorBinding();RetiredPoseSlotsDoNotRevokeNewBody();
+    NonFallbackDoesNotProducePose();EpochRejectsOldPoseEnvelope();PoseStateStreamToleratesLossAndReorder();PoseRevalidatesNativeActorBinding();RetiredPoseSlotsDoNotRevokeNewBody();
     ProductionSignalBatchesRespectNativeBarriers();HostNormalizesStaleFocusWithoutRevokingControl();HostExitDrainsNativeAndWireOutboxes();HostAcceptedBatchesUseBackpressure();ProductionSdkBackpressureRetainsAcceptedResults();GuestAcceptedActionsRequireActualNativeApplication();ActionsRevalidateNativeIdentityAndFailures();
     std::printf("enemy_control_net_fixture: %u checks passed (production host/guest + real three-peer codec bus)\n",checks);return 0;
 }

@@ -198,6 +198,7 @@ void RegisterPluginChannels() noexcept {
     c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
+    c.takesState=&enemy_control_protocol::PoseState;
     c.update=&UpdateEnemyControlNetwork;c.reset=&ResetEnemyControlNetwork;plugin_net::RegisterChannel(c);
     c=Channel{};c.name="submarine drones";c.magic=sub_support::kMagic;c.receive=&ReceiveSubSupportNetwork;
     c.update=&UpdateSubSupportNetwork;c.reset=&ResetSubSupportNetwork;plugin_net::RegisterChannel(c);

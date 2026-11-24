@@ -9,6 +9,7 @@
 #include "command_identity.h"
 #include "coop_extension_api.h"
 #include "support_net.h"
+#include "plugin_net_logic.h"
 #include "support_soldier.h"
 #include "online_authority.h"
 #include "memory.h"
@@ -84,6 +85,11 @@ const ep::LeaseView* Lease(std::uint64_t id) noexcept;
 void Publish() noexcept;
 bool Send(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     return transport.ready && transport.send && peer && peer<=transport.peerCount && transport.send(peer,bytes,size);
+}
+// A pose: the newest of its lease slot, unreliable (plugin_net.h StateKey; EDF6Coop 2.9.0 always has sendState).
+bool SendState(void*,std::uint32_t peer,std::uint32_t object,const void* bytes,std::size_t size) noexcept {
+    const auto key=plugin_net::StateKey(plugin_net::StateStream::enemyPose,object);
+    return transport.ready && transport.sendState && key && peer && peer<=transport.peerCount && transport.sendState(peer,key,bytes,size);
 }
 ep::SendResult TrySendAction(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     if(!transport.ready || !transport.trySend || !peer || peer>transport.peerCount)return ep::SendResult::unavailable;
@@ -221,7 +227,7 @@ bool ActionsEmpty(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
 bool AbortActions(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
     __try{return EnemyControlAbortNetworkActions(token);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput,&TrySendAction});
+ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput,&TrySendAction,&SendState});
 const ep::LeaseView* Lease(std::uint64_t id) noexcept {
     if(!id)return nullptr;
     for(std::size_t i=0;i<ep::kMaxLeases;++i)if(const auto* lease=protocol.LeaseAt(i);lease && lease->id==id)return lease;
