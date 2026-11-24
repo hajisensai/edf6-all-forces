@@ -3,7 +3,7 @@
 // Copies in a scratch directory of the test's own are loaded (EML6_Load writes its .log beside the DLL). Checked:
 //  - each DLL exports exactly its list below (every extern "C" __declspec(dllexport) of src/ and autoturret/src/), each
 //    one found by GetProcAddress and lying in that DLL (an export forwarded or resolved into the other is wrong);
-//  - every aimlink.h name its owner exports, and aimlink::Resolve finds the peer's names in both orders: nothing while
+//  - every aimlink.h name (and common/log.h kCrashFlush, which crash_dump.cpp looks up in kCrashFlushDll) its owner exports, and aimlink::Resolve finds the peer's names in both orders: nothing while
 //    the peer is not loaded, nothing again within the second (its throttle), the export once the peer is there;
 //  - with no EDF.dll in the process both EML6_Load return false, before touching any game memory, and each log says
 //    "<plugin> <version> loading (build <id>, <bytes> bytes, written ...)" for the very copy loaded, then "REFUSED".
@@ -16,6 +16,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "edf/aimlink.h"
+#include "log.h"
 #include "plugin_load_util.h"
 #include <cstring>
 #include <iterator>
@@ -44,6 +45,7 @@ const char* const kCrewExports[]={
 };
 const char* const kTurretExports[]={
     "EML6_Load","EDF6AutoTurret_SetInputSourceV1","EDF6AutoTurret_SteersV2","EDF6AutoTurret_StabilizerAwareV3",   // plugin.cpp
+    "EDF6AutoTurret_CrashFlushLogV1",                                           // plugin.cpp: common/log.h kCrashFlush
     "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4","EDF6AutoTurret_TurretLockV1","EDF6AutoTurret_MissionResetV1",   // designate.cpp
 };
 
@@ -55,6 +57,7 @@ const Link kLinks[]={
     {aimlink::kAimsTurret,true},{aimlink::kPayloadAim,true},
     {aimlink::kTurretReadout,false},{aimlink::kSteers,false},{aimlink::kStabilizerAware,false},
     {aimlink::kPlayerAim,false},
+    {edf::logfile::kCrashFlush,false},   // EDF6VehicleCrew's crash dump flushes EDF6AutoTurret's log through it (crash_dump.cpp)
 };
 using AnyFn=void(__cdecl*)();
 struct Resolver { AnyFn cache=nullptr; ULONGLONG triedAt=0; };
@@ -141,6 +144,7 @@ int main(int argc,char** argv) {
     turret.copy=plugintest::CopyInto(std::filesystem::u8path(argv[2]),dir);
     Check(crew.copy.filename()==aimlink::kCrewDll && turret.copy.filename()==aimlink::kTurretDll,
           "the built files carry the names aimlink.h looks them up by");
+    Check(turret.copy.filename()==edf::logfile::kCrashFlushDll,"the crash dump looks EDF6AutoTurret's log flush up by its file name");
     Plugin& first=order=="crew-first" ? crew : turret;
     Plugin& second=order=="crew-first" ? turret : crew;
     const bool firstIsCrew=&first==&crew;

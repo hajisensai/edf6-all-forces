@@ -68,6 +68,7 @@ bool BoneMatrix(void*,int,float*) noexcept{fixture::Check(false,"no sound point 
 bool PlaySe(const void*,const wchar_t*,const float*,SoundHandle*) noexcept{fixture::Check(false,"no sound without a table");return false;}
 void MoveSound(SoundHandle&,const float*) noexcept{fixture::Check(false,"no sound to move");}
 void StopSound(SoundHandle& handle,int) noexcept{if(handle.instance)++fixture::soundStops;handle=SoundHandle{};}
+const SgoNode* Persist(const SgoNode*) noexcept{fixture::Check(false,"no flame parameter to persist without the 4.1 keys");return nullptr;}
 void AtGameShutdown(void(*fn)() noexcept) noexcept{fixture::shutdownFn=fn;}
 bool FillSePreset(unsigned char*,const void*,const wchar_t*) noexcept{fixture::Check(false,"no preset without a table");return false;}
 }
