@@ -5591,6 +5591,24 @@
     "tests/testhub_dump_source_test.py"
    ]
   },
+  "texshare": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/texshare_test.py"
+   ]
+  },
   "texture_acceleration": {
    "labels": [
     "cockpit",
