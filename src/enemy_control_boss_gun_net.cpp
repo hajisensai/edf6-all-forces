@@ -9,6 +9,7 @@
 #include "enemy_control_projectile_native.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cstring>
 #include <limits>
 #include <new>
@@ -43,7 +44,7 @@ void ResetStream(Stream& s) noexcept {
     static_assert(std::is_trivially_destructible_v<Stream>);::new(static_cast<void*>(&s)) Stream{};
 }
 thread_local Scope* activeScope=nullptr;
-Stream streams[kRoots]{};unsigned char* admittedImage=nullptr;bool installed=false;
+LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 struct Sig {unsigned rva;unsigned char bytes[16];};
 constexpr Sig kSigs[]={
     {0x6D05C0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x55,0x57,0x41,0x54,0x41}},
@@ -165,6 +166,7 @@ Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || !Ready() || !Family(l) || !Current(RootRef(l)))return nullptr;
     for(auto& old:streams)if(old.held && old.retired) {bool role=false;if(!NativeActionRole(old.root.object,&role) || (old.root.object==l.object && !NativeActionQuiescing(l.object)))ResetStream(old);}
     if(auto* s=Find(l))return s->authority==authority ? s : nullptr;
+    if(!streams.Allocate("boss gun net streams"))return nullptr;
     for(auto& s:streams)if(!s.held) {if(!Pin(RootRef(l)))return nullptr;s.root=RootRef(l);s.profile=l.profile;s.held=s.rootHeld=true;s.authority=authority;return &s;}
     return nullptr;
 }

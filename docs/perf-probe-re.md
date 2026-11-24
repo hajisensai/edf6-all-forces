@@ -41,6 +41,36 @@ System::update 在 `0x1198FA4` 先调一次绘制录制 `0x11978D0`，然后跑 
 - 渲染线程的 Present 命令 `0x1118AF0`，在 `0x1118B45` 执行 `call [rax+0x40]`：rax 是 `[[0x2136FF0+0x90]]`，也就是
   IDXGISwapChain 的 vtable，+0x40 是槽 8 Present。所以渲染器 +0x90 存的是 swap chain。实机上对它做 QI 能拿到
   IDXGISwapChain，desc 为 3840x2160、1 个 buffer、DISCARD。
+- 遮挡查询读取 `0x1631790`（gpu-5，PERF GPU 的 `occlusion query reads`）：
+  - 唯一调用点 `0x11E4244`，在 Umbra Commander 的结果循环里。
+  - 参数：rcx 渲染器，rdx 查询，r9 指向结果，第 5 个参数（栈上的字节）是「等待」。等待字节在 `0x11E4230` 由
+    `mov [rsp+0x20],al` 写入。
+  - 函数先取自旋锁 cmdctx+0x29F0，再在 `0x1631860` 经 vt+0xE8 调 GetData。flags 在 `0x163184C` 固定写 0。
+  - 返回 al = 结果已就绪。
+  - 探针按调用计次数：未就绪（返回 0）、等待字节为 1，以及这两类各自的耗时。
+- 蒙皮调色板 `0x11009A0`（gpu-6，PERF GPU 的 `skin palettes`）：
+  - 计数挂在 LOD 绘制 `0x1104100` 里的调用点 `0x1104131`，每个 pass 一次。
+  - 另有两个调用点 `0x6C2C8A`、`0x1102F2E` 不计入。
+- 实测（Debug=1 + PerfProbe=1，60 fps）：
+  - M001 每帧读约 10.6–13 次遮挡查询，几乎都带等待，但**从没遇到未就绪**；全部读取合计 0.05–0.07 ms/帧，单次最差约 1.6 ms。
+  - M001 每帧约 92 次蒙皮调色板，0.08 ms/帧。
+
+## 2.1 设备与适配器（gpu-4）
+
+- `0x111B420..0x111B6BD` 建设备：
+  - `0x111B595` 调 D3D11CreateDevice，适配器参数为 NULL（默认适配器）。驱动类型依次试 HARDWARE / WARP / REFERENCE。
+  - 设备存在 cmdctx+0x80，立即上下文存在 +0x88。
+- 设备建好后：
+  - `0x111B65E` 先 QI 出 IDXGIDevice，再 GetAdapter，结果存进 cmdctx+0xF0。
+  - 再用 GetParent 取工厂，存进 cmdctx+0xF8。
+- cmdctx+0xF0 的使用点：
+  - `0x111A64F` 调 EnumOutputs 建显示模式列表。失败时跳到 `0x111A98D`：走 1280x720 默认值，模式列表为空。
+  - 另有 `0x111AE8A`、`0x111C2ED`、`0x111C493`、`0x111C6C6`、`0x111C7BC`。
+  - 所以「设备所在的适配器」也被当作「输出所在的适配器」。
+- 推论（未在混合显卡机器上验证）：
+  - 把设备强制建在独显上时，muxless Optimus 笔记本的独显通常没有输出，EnumOutputs 会失败。
+  - 游戏会退到空模式列表，全屏和分辨率选择会出问题。
+  - 所以不能只改 `0x111B595` 的适配器参数。
 
 ## 3. 线程
 
