@@ -7301,11 +7301,14 @@ def npc_ai_asks_less() -> None:
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
     assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
     assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
-    arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
+    # cpu-2: the asks moved to AskArms (once a soldier, again when SameArms sees its arms changed)
+    arms = body(code, 'bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,\n             std::uint64_t setCount) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
     second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
-    assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
+    assert first < arms.index('if(!Readable(list,count*8))return false;') < second < arms.index('seen.entry[k]=entry;'),         'AskArms: list and sets in one call, then weapons and entries in one, before they are asked'
     assert 'edf::PrefetchReadable(' not in arms
+    of = body(code, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {')
+    assert of.index('SameArms(') < of.index('AskArms('), 'ArmsOf: asks only when the fingerprint changed'
     move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {')
     assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
     navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
