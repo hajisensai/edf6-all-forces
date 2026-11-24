@@ -508,10 +508,24 @@ class DriverTest(unittest.TestCase):
         u = Mock()
         with patch.object(drive, 'user32', u), patch.object(drive.os, 'startfile') as start, \
              patch.object(drive, 'steam_launching_title', return_value=None), \
-             patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
+             patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'),              patch.object(drive.modfiles, 'steam_running_app', return_value=0):
             drive.launch()
         start.assert_called_once_with('steam://rungameid/2291060')
         u.PostMessageW.assert_not_called()
+
+    def test_launch_waits_until_steam_releases_the_game(self):
+        # EDF6.exe gone but Steam still counting it running (its RunningAppID lags the exit): no steam:// until clear.
+        states = iter([drive.APP_ID, drive.APP_ID, 0])
+        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'steam_running_app', side_effect=lambda: next(states)),              patch.object(drive.modfiles.time, 'sleep') as nap,              patch.object(drive, 'steam_launching_title', return_value=None),              patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
+            drive.launch()
+        self.assertEqual(nap.call_count, 2)
+        start.assert_called_once_with('steam://rungameid/2291060')
+
+    def test_launch_refuses_while_steam_keeps_the_game(self):
+        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'wait_steam_released', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'Steam still counts'):
+                drive.launch()
+        start.assert_not_called()
 
     def test_steam_launching_title_from_the_clients_localization(self):
         with tempfile.TemporaryDirectory() as steam:

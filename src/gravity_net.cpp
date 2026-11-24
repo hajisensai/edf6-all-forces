@@ -40,12 +40,12 @@ struct Out {
     gravity::Target t;
     gravity_net::Grab hold{};       // its state as it goes out (origin, grab, IDs, ray, goal)
     ObjRef by{};                    // its grabber (this machine's player): fallen mid-grab, the grab is let go (Frame)
-    ULONGLONG calledAt=0,sentAt=0;
+    ULONGLONG calledAt=0,sentFrame=0,sentMs=0;   // sentFrame/sentMs: GameFrame and ms of the hold's last state out (0: send now)
     gravity_net::Grab queue[kMostQueued]{};   // throws, let-goes, radials not sent yet
     int queued=0;
     std::uint32_t origin=1,serial=0;
     // A thrown thing with no ID (found by the ray on the peers): its flight's states follow its throw.
-    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentAt=0,slowSince=0; } flight;
+    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentFrame=0,sentMs=0,slowSince=0; } flight;
 };
 Out out;
 bool netReady=false,netHost=false;
@@ -156,8 +156,9 @@ void FlightTick(ULONGLONG now) noexcept {
     if(Len(vel)<kRestSpeed){if(!f.slowSince)f.slowSince=now;}
     else f.slowSince=0;
     const bool rest=f.slowSince && now-f.slowSince>=kFlightRestMs;
-    if(!rest && f.sentAt && now-f.sentAt<gravity_net::kFlightGapMs)return;
-    f.sentAt=now;
+    const ULONGLONG frame=GameFrame();
+    if(!rest && !gravity_net::Due(frame,f.sentFrame,gravity_net::kFlightGapFrames,now,f.sentMs,gravity_net::kFlightGapMs))return;
+    f.sentFrame=frame;f.sentMs=now;
     gravity_net::Grab g=f.g;
     g.kind=gravity_net::GrabKind::flight;
     std::memcpy(g.at,at,12);std::memcpy(g.vel,vel,12);
@@ -211,7 +212,7 @@ bool Hold(const Target& t,const unsigned char* by,const float* hit,const float* 
         if(a)std::memcpy(g.rayA,a,12);
         if(b)std::memcpy(g.rayB,b,12);
         g.origin=out.origin;g.grab=++out.serial;
-        out.hold=g;out.t=t;out.holding=true;out.sentAt=0;
+        out.hold=g;out.t=t;out.holding=true;out.sentFrame=0;
         if(out.flight.on && Same(out.flight.t,t))out.flight=Out::Flight{};   // caught again: its flight is a hold now
     }
     std::memcpy(out.hold.goal,goal,12);
@@ -283,15 +284,14 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
     for(int i=0;i<out.queued;++i)
         if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
     out.queued=0;
-    const ULONGLONG ms=GameMs();
-    if(!out.holding || (out.sentAt && ms-out.sentAt<gravity_net::kHoldGapMs))return;
-    out.sentAt=ms;
+    const ULONGLONG frame=GameFrame();
+    if(!out.holding || !gravity_net::Due(frame,out.sentFrame,gravity_net::kHoldGapFrames,now,out.sentMs,gravity_net::kHoldGapMs))return;
+    out.sentFrame=frame;out.sentMs=now;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
     plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
-    (void)now;
 }
 // A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
-void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentAt=0; }
+void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentFrame=0; }
 
 plugin_net::Channel GravityNetChannel() noexcept {
     plugin_net::Channel c;
@@ -355,7 +355,7 @@ void ResetGravityNetwork() noexcept {
     inbox.Reset();
     out.queued=0;out.flight=Out::Flight{};
     out.origin=plugin_net::NewOrigin();out.serial=0;
-    if(out.holding)out.sentAt=0;   // the hold goes out again in full to the new roster
+    if(out.holding)out.sentFrame=0;   // the hold goes out again in full to the new roster
     netReady=false;netHost=false;peerCount=0;hostPeer=0;
 }
 }  // namespace crew

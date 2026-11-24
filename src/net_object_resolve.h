@@ -32,9 +32,10 @@ bool EncodeNetRef(const void* object,unsigned char out[32]) noexcept;   // the o
 // `n` references (each null or all zero: none, never found) in one walk, each to `lives[i]`. A player's: its one live
 // player of that slot; with none live and NetLife::present, its one present player (dead=true); two live of one slot, or
 // two present and none live, are none (`ambiguous`). A NetId's: the one object of it live (or present), never a player
-// soldier (a player only by its slot). Not found leaves `out[i].found` false (a player's slot still told). Player references
-// alone reuse the frame's (GameFrame) table of the mission's players, each entry rechecked, so a per-frame lookup costs no
-// walk. False only when the walk could not run (no world, an invalid reference, n too many):
+// soldier (a player only by its slot). Not found leaves `out[i].found` false (a player's slot still told). Each walk keeps
+// the frame's (GameFrame) table of the mission's players and of every NetId it met; a reference asked again in that frame is
+// answered from them, each entry rechecked, so a per-frame lookup costs at most one walk a frame (a NetId the walk did not
+// meet, or an entry no longer itself, walks again). False only when the walk could not run (no world, an invalid reference, n too many):
 // every `out` cleared.
 bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsigned n,NetResolved* out) noexcept;
 bool ResolveNetRef(const unsigned char* ref,NetLife life,NetResolved* out) noexcept;
