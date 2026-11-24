@@ -1617,6 +1617,13 @@ target_include_directories(EDF6Autopilot PRIVATE common)
 target_compile_options(EDF6Autopilot PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(EDF6Autopilot PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
 
+# The autopilot's heap probe (mem-3) offline: live allocations by call path, freed / reallocated ones not counted.
+add_executable(heap_probe_test tests/heap_probe_test.cpp tests/autopilot/heap_probe.cpp)
+target_include_directories(heap_probe_test PRIVATE tests/autopilot)
+target_link_libraries(heap_probe_test PRIVATE psapi)
+target_compile_options(heap_probe_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME heap_probe COMMAND heap_probe_test)
+
 add_executable(fieldshare_test tests/fieldshare_test.cpp)
 target_include_directories(fieldshare_test PRIVATE src common)
 target_link_libraries(fieldshare_test PRIVATE edf6common)

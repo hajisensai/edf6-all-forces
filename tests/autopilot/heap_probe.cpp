@@ -22,6 +22,7 @@ HeapFreeFn realHeapFree=nullptr;
 VirtualAllocFn realVirtualAlloc=nullptr;
 VirtualFreeFn realVirtualFree=nullptr;
 
+bool countOwn=false;
 volatile LONG armed=0,tracking=0,marks=0,startAt=2;
 volatile LONG64 dropped=0;
 
@@ -94,7 +95,8 @@ void Account(std::uint32_t site,std::uint32_t kind,std::int64_t bytes,std::int64
     InterlockedAdd64(&sites[site].count[kind],count);
 }
 
-void Track(void* p,SIZE_T size,std::uint32_t kind) noexcept {
+// Not inlined: the captured stack skips exactly this frame and the hook's.
+__declspec(noinline) void Track(void* p,SIZE_T size,std::uint32_t kind) noexcept {
     std::uintptr_t frames[24]{},path[kDepth]{};
     const USHORT got=RtlCaptureStackBackTrace(2,24,reinterpret_cast<PVOID*>(frames),nullptr);
     int n=0;
@@ -294,7 +296,7 @@ bool Patch() noexcept {
                        reinterpret_cast<LPCWSTR>(&InstallHeapProbe),&self);
     HMODULE modules[512]{};DWORD bytes=0;
     if(!EnumProcessModules(GetCurrentProcess(),modules,sizeof(modules),&bytes))return false;
-    const HMODULE own[]={GetModuleHandleW(L"ntdll.dll"),k32,GetModuleHandleW(L"KernelBase.dll"),self};
+    const HMODULE own[]={GetModuleHandleW(L"ntdll.dll"),k32,GetModuleHandleW(L"KernelBase.dll"),countOwn ? nullptr : self};
     int patched=0,touched=0;
     for(DWORD i=0;i<bytes/sizeof(HMODULE) && i<512;++i) {
         if(std::find(std::begin(own),std::end(own),modules[i])!=std::end(own))continue;
@@ -307,8 +309,9 @@ bool Patch() noexcept {
 }
 }  // namespace
 
-bool InstallHeapProbe(LogFn log,int startMark) noexcept {
+bool InstallHeapProbe(LogFn log,int startMark,bool countOwnModule) noexcept {
     logFn=log;
+    countOwn=countOwnModule;
     startAt=startMark<1 ? 1 : startMark;
     InterlockedExchange(&armed,1);
     log("HEAPPROBE armed: counting from cycle mark %ld",startAt);
