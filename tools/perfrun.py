@@ -48,8 +48,11 @@ LEGS (more than one positional argument): one launch, the scenarios one after th
   the next leg: the range mission's files rewritten for it when it is a range scenario (gen.rewrite_scenario: the
   originals kept by the first write stay the ones put back), and the autopilot's `next` command (the mission left
   through the pause menu's withdraw, the result screen skipped, back in through HQMain as at the launch: no memory
-  written to skip the game's own way; docs/mission-cycle-re.md). A leg is entered when the autopilot logs
-  "NEXT k entered"; one not in its mission --leg-timeout seconds after its `next` (default 900) ends the run there.
+  written to skip the game's own way; docs/mission-cycle-re.md). A leg is entered when the autopilot logs that its
+  mission runs (the loading over: "RUNNING" for the first, "NEXT k entered" for the later ones), its warm-up counted
+  from there, and only when the row, the difficulty and the mode's content id it logs are the leg's (a failure
+  otherwise); a way in that fails (refused, the pack's mode not entered) ends the run at once, and one not in its
+  mission --leg-timeout seconds after it was asked (default 900) ends it there.
   LEG is SCENARIO[,key=SPEC@S[:MS]]...[,warm=S][,diff=N]: keys held S seconds after the leg entered its mission (as
   --key), its own warm-up and difficulty. --key, --ab and --cycle are refused with legs (key= on the leg instead).
   Out: <out>/<leg>/ each (run.json with the leg's windows, cpu.txt, stacks.txt, gpu.csv, its part of the plugin log,
@@ -69,6 +72,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -407,6 +411,15 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     return rc
 
 
+def seconds(text: str, positive: bool = False) -> float:
+    """A number of seconds from the command line: finite, not negative (above 0 with `positive`); ValueError
+    otherwise (float() takes nan, inf and -5 as well)."""
+    v = float(text)
+    if not math.isfinite(v) or v < 0 or (positive and v == 0):
+        raise ValueError(text)
+    return v
+
+
 def leg_option(text: str) -> dict:
     """One positional argument: SCENARIO[,key=SPEC@S[:MS]]...[,warm=S][,diff=N] (MS default 300, as --key's)."""
     scenario, *parts = text.split(',')
@@ -422,7 +435,7 @@ def leg_option(text: str) -> dict:
                 import drive
                 leg['keys'].append(drive.key_option(value if ':' in value else value + ':300'))
             elif name == 'warm':
-                leg['warm'] = float(value)
+                leg['warm'] = seconds(value)
             elif name == 'diff':
                 leg['difficulty'] = int(value)
                 if not 0 <= leg['difficulty'] <= 4:
@@ -453,9 +466,10 @@ def leg_mission(scenario: str) -> str:
 
 
 def legs_longest(warms: list[float], cpu_s: int, stacks_s: int, leg_timeout: float) -> int:
-    """drive.run's SECONDS for a launch of legs: every leg's sampling, every later leg's way in at its longest, and
-    90 s (as one_run's): only the deadline, the run quits as soon as the last leg is sampled."""
-    return int(sum(w + cpu_s + stacks_s for w in warms) + (len(warms) - 1) * leg_timeout + 90)
+    """drive.run's SECONDS for a launch of legs (counted from the first mission's PlayMission_Offline, its loading
+    still ahead): every leg's sampling, every leg's way in (the first one's loading too) at its longest, and 90 s (as
+    one_run's): only the deadline, the run quits as soon as the last leg is sampled."""
+    return int(sum(w + cpu_s + stacks_s for w in warms) + len(warms) * leg_timeout + 90)
 
 
 TIME = re.compile(rb'^\[(?:\d{4}-\d\d-\d\d )?(\d+):(\d+):(\d+(?:\.\d+)?)\]')
@@ -486,34 +500,44 @@ def split_log(data: bytes, start: float, bounds: list[float]) -> list[bytes]:
     return [b''.join(p) for p in pieces]
 
 
-def hold_leg_keys(game: str, keys: list[tuple[str, float, int]], entered: float, marks: dict) -> None:
-    """A leg's key= holds, each S seconds after the leg entered its mission (drive.key: the autopilot's keys file)."""
+def hold_leg_keys(game: str, keys: list[tuple[str, float, int]], entered: float, marks: dict, gate) -> None:
+    """A leg's key= holds, each S seconds after the leg entered its mission (drive.key: the autopilot's keys file,
+    through the run's gate: none once its end began)."""
     import drive
     for spec, at, ms in sorted(keys, key=lambda k: k[1]):
         time.sleep(max(0.0, entered + at - time.time()))
         try:
-            drive.key(game, spec, ms)
+            drive.key(game, spec, ms, gate)
         except Exception as e:   # noqa: BLE001 - kept for the leg's run.json; the leg's sampling goes on
             marks['key_error'] = f'{spec}@{at:g}: {type(e).__name__}: {e}'
             return
         marks.setdefault('keys_held', []).append([spec, at, ms, round(time.time() - entered - ms / 1000, 1)])
 
 
-def wait_next(game: str, k: int, seen: int, timeout: float) -> str | None:
-    """Until the k-th `next` of the launch is in its mission (None) or why not: refused or failed (the autopilot log
-    rows after the first `seen`, those before the command), the game gone, or `timeout` seconds passed."""
+def wait_next(game: str, k: int, seen: int, timeout: float, mission: str, difficulty: int,
+              gate=None) -> str | None:
+    """Until the launch's k-th mission entry (k 0: the first, its RUNNING row; k 1...: the k-th `next`) runs the
+    mission asked (None) or why not: the way in failed (refused, the pack's mode not entered, the script back at the
+    title: at once, not after `timeout`), the mission running is another one (its row, difficulty or mode's content id
+    not `mission`'s / `difficulty`), the game gone, the run's end begun, or `timeout` seconds passed. The autopilot log
+    rows after the first `seen` (those before the ask) are read."""
     import drive
+    what = f'next {k}' if k else 'the first mission'
     end = time.time() + timeout
     while time.time() < end:
-        how = drive.next_outcome(drive.rows(game)[seen:], k)
-        if how == 'entered':
-            return None
+        how = drive.entry_outcome(drive.rows(game)[seen:], k)
+        if how and how[0] == 'failed':
+            return f'{what} failed: {how[1]}'
         if how:
-            return f'next {k} failed (the autopilot log\'s NEXT / CYCLE rows)'
+            row, content = drive.mission_target(game, mission)
+            bad = drive.entry_mismatch(how[1], row, difficulty, content)
+            return f'{what} entered another mission than {mission} (difficulty {difficulty}): {bad}' if bad else None
         if not drive.game_pids():
-            return f'the game exited before next {k} was in its mission'
+            return f'the game exited before {what} was in its mission'
+        if gate is not None and gate.state != drive.Gate.OPEN:
+            return f'the run ended before {what} was in its mission'
         time.sleep(0.5)
-    return f'next {k} not in its mission {timeout:.0f} s after it was handed (--leg-timeout)'
+    return f'{what} not in its mission {timeout:.0f} s after it was asked (--leg-timeout)'
 
 
 def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], difficulties: list[int], dirs: list[str],
@@ -523,28 +547,30 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
     the run (kept in its leg's marks['error']; returning ends drive.run's stay)."""
     import drive
     import gen
+    gate = state['gate']
     i = 0
     try:
         for i, leg in enumerate(legs):
             marks = legmarks[i]
+            mission = leg_mission(leg['scenario'])
+            seen = 0   # the first: every row of the launch (its `running` went with the mission)
             if i:
                 seen = len(drive.rows(game))
-                with state['lock']:   # never a write after the run's end began putting the range back
-                    if state['stop']:
-                        marks['error'] = 'the run ended first'
-                        return
-                    if plans[i]:
+                # the range's files and the `next`, each checked and written under the run's gate: nothing after the
+                # run's quit (it would overwrite it) or once it puts things back (left behind) -- drive.Gate
+                if plans[i]:
+                    with gate.writing():
                         skipped[i] = (gen.rewrite_scenario if state['written'] else gen.write_scenario)(game, plans[i])
                         state['written'] = True
                 marks['asked'] = time.time()
-                drive.command(game, drive.next_command(leg_mission(leg['scenario']), difficulties[i],
-                                                       opts['next_reboot']))
-                why = wait_next(game, i, seen, opts['leg_timeout'])
-                if why:
-                    marks['error'] = why
-                    return
+                drive.command(game, drive.next_command(mission, difficulties[i], opts['next_reboot']), gate)
+            # in its mission once the mission runs (the loading over), every leg the same way: its warm-up from there
+            why = wait_next(game, i, seen, opts['leg_timeout'], mission, difficulties[i], gate)
+            if why:
+                marks['error'] = why
+                return
             marks['entered'] = time.time()
-            keys = threading.Thread(target=hold_leg_keys, args=(game, leg['keys'], marks['entered'], marks),
+            keys = threading.Thread(target=hold_leg_keys, args=(game, leg['keys'], marks['entered'], marks, gate),
                                     daemon=True)
             keys.start()
             _sample(dirs[i], warms[i], opts['cpu'], opts['stacks'], opts['interval'], marks, opts.get('presentmon'))
@@ -580,7 +606,7 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
     difficulties = [leg['difficulty'] if leg['difficulty'] is not None else opts['difficulty'] for leg in legs]
     legmarks: list[dict] = [{} for _ in legs]
     skipped: list = [[] for _ in legs]
-    state = {'lock': threading.Lock(), 'stop': False, 'written': False}
+    state = {'gate': drive.Gate(), 'written': False}
     log = plugin_log(game)
     log_at = log_mark(log)
     clog = coop_log(game)
@@ -600,10 +626,9 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
                        during=lambda: run_legs(game, legs, plans, warms, difficulties, dirs, legmarks, skipped, state,
                                                opts),
-                       quit_wait=600)
+                       quit_wait=600, extra=('running',), gate=state['gate'])
     finally:
-        with state['lock']:
-            state['stop'] = True
+        state['gate'].end(drive.Gate.CLOSED)   # drive.run did already, unless it never got that far
         if drive.game_pids():
             if state['written'] or drive.anything_left(game):
                 print('!!! the game is still running: NOT put back: the placed plugins, the ini, the autopilot' +
@@ -646,10 +671,12 @@ PLUGIN_OWN = re.compile(r"the plugin's own work \(not the game's own under a hoo
 
 def legs_table(dirs: list[str]) -> str:
     """summary.md: a row a leg, in order: its frames (mean, a second, over 20 ms, steps a frame), the plugin's own work
-    on the game thread (the leg's report.md), the living objects, the process CPU; why a leg has no numbers."""
+    on the game thread (the leg's report.md), the living objects, the process CPU; why a leg has no numbers. A leg's
+    error (its run.json's error / key_error: a stack window that failed after the clean one, a key not held) is in its
+    own last column, **ERROR** first, its numbers kept but not to be taken as a clean leg's."""
     import perf_report
     out = ['| leg | scenario | warm s | mean ms | fps | over 20 ms | steps a frame | plugin own work | living objects | '
-           'process CPU (% of a core) |', '|---|---|---|---|---|---|---|---|---|---|']
+           'process CPU (% of a core) | error |', '|---|---|---|---|---|---|---|---|---|---|---|']
     for d in dirs:
         name = os.path.basename(d)
         try:
@@ -659,9 +686,12 @@ def legs_table(dirs: list[str]) -> str:
             run = {}
         scenario = run.get('scenario', '?')
         warm = f'{run["warm"]:.0f}' if 'warm' in run else ''
+        errors = [run[k] for k in ('error', 'key_error') if run.get(k)]
+        err = ('**ERROR** ' + '; '.join(errors).replace('|', '/')) if errors else ''
         if 'cpu' not in run.get('windows', {}):
             why = (run.get('error') or 'not reached').replace('|', '/')
-            out.append(f'| {name} | {scenario} | {warm} | not sampled: {why} | | | | | | |')
+            err = err or '**ERROR** not sampled'
+            out.append(f'| {name} | {scenario} | {warm} | not sampled: {why} | | | | | | | {err} |')
             continue
         cw = tuple(run['windows']['cpu'])
         log = os.path.join(d, 'vehiclecrew.log')
@@ -679,12 +709,12 @@ def legs_table(dirs: list[str]) -> str:
         c = f'{cpu.get("total", sum(cpu.values())) / 10 / secs:.0f}' if cpu else ''
         if not fs:
             out.append(f'| {name} | {scenario} | {warm} | no PERF rows | | | | {own} | '
-                       f'{perf_report.objects_text(objs)} | {c} |')
+                       f'{perf_report.objects_text(objs)} | {c} | {err} |')
             continue
         o20 = f'{fs["over20_pct"]:.2f}%' if fs['over20_pct'] is not None else 'n/a'
         spf = f'{fs["steps_per_frame"]:.2f}' if fs['steps_per_frame'] is not None else 'n/a'
         out.append(f'| {name} | {scenario} | {warm} | {fs["mean_ms"]:.2f} | {fs["fps"]:.1f} | {o20} | {spf} | {own} | '
-                   f'{perf_report.objects_text(objs)} | {c} |')
+                   f'{perf_report.objects_text(objs)} | {c} | {err} |')
     return '\n'.join(out) + '\n'
 
 
@@ -716,10 +746,19 @@ def options(argv: list[str]) -> tuple[str, dict]:
             opts['keys'].append((spec, at, ms))
             i += 2
         elif a in ('--warm', '--cycle-stay', '--leg-timeout'):
-            opts[a[2:].replace('-', '_')] = float(argv[i + 1])
+            try:
+                opts[a[2:].replace('-', '_')] = seconds(argv[i + 1], positive=a != '--warm')
+            except ValueError:
+                raise SystemExit(f'{a} {argv[i + 1]}: a finite number of seconds, not negative') from None
             i += 2
         elif a in ('--rounds', '--cycle', '--cpu', '--stacks', '--interval', '--difficulty'):
-            opts[a[2:]] = int(argv[i + 1])
+            try:
+                opts[a[2:]] = int(argv[i + 1])
+            except ValueError:
+                raise SystemExit(f'{a} {argv[i + 1]}: a whole number') from None
+            if opts[a[2:]] < 0 or (a in ('--rounds', '--cpu', '--interval') and opts[a[2:]] == 0) or \
+                    (a == '--difficulty' and opts[a[2:]] > 4):
+                raise SystemExit(f'{a} {argv[i + 1]}: out of range')
             i += 2
         elif a.startswith('--'):
             raise SystemExit(f'unknown option {a}')

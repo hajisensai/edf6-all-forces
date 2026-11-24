@@ -751,6 +751,14 @@ def legs_options() -> None:
                 ['M001,foo=1', '--dll', 'installed'], ['M001,warm=x', '--dll', 'installed'],
                 ['M001,diff=7', '--dll', 'installed'], [',key=4d@1', '--dll', 'installed'],
                 ['M001,key', '--dll', 'installed'], ['M001,key=4d', '--dll', 'installed'],
+                ['M001,warm=-1', '--dll', 'installed'], ['M001,warm=nan', '--dll', 'installed'],
+                ['M001,warm=inf', '--dll', 'installed'], ['M001,key=4d@nan', '--dll', 'installed'],
+                ['M001,key=4d@-2', '--dll', 'installed'], ['M001,key=4d@1:0', '--dll', 'installed'],
+                ['M001', '--warm', 'nan', '--dll', 'installed'], ['M001', '--warm', '-5', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', '0', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', 'inf', '--dll', 'installed'],
+                ['M001', '--cpu', '0', '--dll', 'installed'], ['M001', '--difficulty', '9', '--dll', 'installed'],
+                ['M001', '--stacks', '-1', '--dll', 'installed'],
                 ['M001', '--restore'], ['--dll', 'installed']):
         try:
             perfrun.options(bad)
@@ -767,8 +775,9 @@ def legs_options() -> None:
           == ['range'] * 4 + ['M001', 'RM015', '42'], "a leg's mission: range for a range scenario")
     check(drive.next_command('range', 1) == 'next range 1' and drive.next_command('M001', 2, True)
           == 'next M001 2 reboot', "a leg's `next` command")
-    check(perfrun.legs_longest([40.0, 25.0], 20, 20, 900) == int(40 + 40 + 25 + 40 + 900 + 90),
-          "the launch's deadline: every leg's sampling and every later leg's way in")
+    check(perfrun.legs_longest([40.0, 25.0], 20, 20, 900) == int(40 + 40 + 25 + 40 + 2 * 900 + 90),
+          "the launch's deadline: every leg's sampling and every leg's way in (the first one's loading too)")
+    check(perfrun.options(['M001,warm=0', '--dll', 'installed'])[1]['warm'] == 0.0, 'warm=0: sampled at once')
 
 
 def legs_logs() -> None:
@@ -795,6 +804,25 @@ def legs_logs() -> None:
     check(b'1600' in b and b'date first' in b and b'160,' not in b, 'the second leg: past midnight, the date-first rows')
     check(c == b'[00:01:00.000] at the second bound\r\n', 'a row at a bound goes to the leg after it')
     check(perfrun.split_log(data, start, []) == [data], 'one leg: the whole log')
+    # perf_report's windows over midnight: 23:59:00 + 60 s; rows before, inside (both sides of 00:00) and after
+    d = tempfile.mkdtemp()
+    try:
+        log = os.path.join(d, 'vehiclecrew.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write('[23:58:30.000] PERF OBJECTS enemies 1, player team 4, friends 9\n'
+                    '[23:59:30.000] PERF OBJECTS enemies 10, player team 4, friends 9\n'
+                    '[00:00:00.000] PERF OBJECTS enemies 20, player team 4, friends 9\n'
+                    '[00:00:30.000] PERF OBJECTS enemies 1000, player team 4, friends 9\n'
+                    '[00:00:00.400] PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, '
+                    '0 over 33 ms\n')
+        objs = perf_report.read_objects(log, (start, start + 60))
+        check(objs.get('enemies') == (15.0, 20), f'PERF OBJECTS over midnight: the window\'s rows only ({objs})')
+        check(len(perf_report.read_perf(log, (start, start + 60))) == 1, 'PERF rows over midnight kept')
+        check(perf_report.in_window(perfrun.tod(start) - 60, (start, start + 60)) is False,
+              'a row a minute before the window is before it, not a day later')
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def legs_run() -> None:
@@ -817,11 +845,15 @@ def legs_run() -> None:
         log = perfrun.plugin_log(game)
         with open(log, 'wb') as f:
             f.write(b'[00:00:00.000] an earlier launch\r\n')
+        with open(os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini'), 'w', encoding='utf-8') as f:
+            f.write('[VehicleCrew]\nTestRangeContent=4242\n')
         calls: list = []
         auto: list[str] = []
         running: list[int] = []
         enemies = {'range': 0}
-        enter = [True]
+        enter = ['ok']   # how a `next` goes: ok, never (no row), mode (the pack's mode not entered), wrong (difficulty)
+        running_at = [0.0]   # when the first mission runs (its RUNNING row), its loading before
+        targets = {'M001': (1, 0, 0), 'range': (0, 4242, 7)}   # row, content id, mode
 
         def stamp(text: str) -> None:
             t = int(perfrun.tod(time.time()) * 1000)   # once, truncated as the plugin's stamp: never past now
@@ -830,19 +862,36 @@ def legs_run() -> None:
                         .encode())
 
         def fake_run(game_, mission, difficulty, seconds, keep, **k):
-            calls.append(('run', mission, difficulty))
+            calls.append(('run', mission, difficulty, k.get('extra'), isinstance(k.get('gate'), drive.Gate)))
             running.append(1)
             stamp(f'the launch: {mission}')
+            row, content, mode = targets[mission]
+            running_at[0] = time.time() + 0.3
+            first = [f'[ 0.5 s] RANGE mode {mode} (content id {content}) made current'] if content else []
+            auto[:] = first
+            runs = (f'[ 9.0 s] RUNNING: the mission runs (row {row}, difficulty {difficulty}, mode {mode}, '
+                    f'content id {content})')
+            rows_now[0] = lambda: (auto[:len(first)] + [runs] + auto[len(first):] if time.time() >= running_at[0]
+                                   else list(auto))
             k['during']()
             running.clear()
             return 0
 
-        def fake_command(game_, text):
+        def fake_command(game_, text, gate=None):
             calls.append(('command', text))
             time.sleep(0.01)
             stamp(f'left for {text}')
-            if enter[0]:
-                auto.append(f'[ 1.0 s] NEXT {sum(1 for c in calls if c[0] == "command")} entered: the mission runs')
+            _, mission, diff = text.split()[:3]
+            row, content, mode = targets[mission]
+            n = sum(1 for c in calls if c[0] == 'command')
+            if enter[0] == 'mode':
+                auto.append('[ 1.0 s] RANGE no offline mode with content id 4242')
+                auto.append("[ 1.0 s] SCRIPT HQMain: the pack's mode not entered, the menu as is")
+            elif enter[0] in ('ok', 'wrong'):
+                auto.append(f'[ 1.0 s] RANGE mode {mode} (content id {content}) made current')
+                d = int(diff) + (1 if enter[0] == 'wrong' else 0)
+                auto.append(f'[ 1.0 s] NEXT {n} entered: the mission runs (row {row}, difficulty {d}, mode {mode}, '
+                            f'content id {content})')
 
         def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
             calls.append(('sample', os.path.basename(out), warm))
@@ -866,9 +915,10 @@ def legs_run() -> None:
             return ['left out']
         drive.game_pids = lambda: list(running)
         drive.run = fake_run
-        drive.rows = lambda game_: list(auto)
+        rows_now = [lambda: list(auto)]
+        drive.rows = lambda game_: rows_now[0]()
         drive.command = fake_command
-        drive.key = lambda game_, spec, ms: calls.append(('key', spec, ms))
+        drive.key = lambda game_, spec, ms, gate=None: calls.append(('key', spec, ms))
         drive.restore_placed = lambda game_: calls.append(('placed',)) or True
         drive.anything_left = lambda game_: False
         gen.installed = lambda game_: True
@@ -884,7 +934,7 @@ def legs_run() -> None:
             rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
         check(rc == 0, 'three legs: the run passes')
         order = [c for c in calls if c[0] != 'key']
-        check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1),
+        check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1, ('running',), True),
                         ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
                         ('rewrite', 1600), ('command', 'next range 1'), ('sample', 'stress_10', 7.0),
                         ('restore',), ('placed',)],
@@ -901,6 +951,17 @@ def legs_run() -> None:
               and all('cpu' in r['windows'] for r in runs) and 'asked' in runs[1] and 'asked' not in runs[0],
               "each leg's run.json: its scenario, difficulty, windows, when its `next` was handed")
         check(runs[1]['keys_held'][0][:3] == ['4d', 0.1, 300], "the leg's key held, timed from its entry")
+        check(runs[0]['entered'] >= running_at[0],
+              "the first leg's warm-up from its RUNNING row (the mission runs), not from before its loading")
+        with open(os.path.join(dirs[0], 'run.json'), encoding='utf-8') as f:
+            first = json.load(f)
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(dict(first, error='rip_sampler (stacks) exit 5: denied'), f)
+        row0 = perfrun.legs_table(dirs).splitlines()[2]
+        check(row0.endswith('| **ERROR** rip_sampler (stacks) exit 5: denied |') and '| 20.00 |' in row0,
+              "summary.md: a sampled leg with an error says so in its row")
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(first, f)
         slices = []
         for x in dirs:
             with open(os.path.join(x, 'vehiclecrew.log'), 'rb') as f:
@@ -922,8 +983,8 @@ def legs_run() -> None:
         # a leg that never comes in: the run ends there, failed, everything still put back
         calls.clear()
         auto.clear()
-        enter[0] = False
-        opts['leg_timeout'] = 0.3
+        enter[0] = 'never'
+        opts['leg_timeout'] = 2.0   # the first leg's RUNNING comes 0.3 s in: in time; the second leg's never
         out = os.path.join(d, 'out2')
         with contextlib.redirect_stdout(io.StringIO()) as said:
             rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
@@ -932,8 +993,23 @@ def legs_run() -> None:
         with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
             check('--leg-timeout' in json.load(f)['error'], "the leg's run.json says why")
         table = perfrun.legs_table([os.path.join(out, n) for n in ('stress_1', 'M001', 'stress_10')]).splitlines()
-        check('not sampled: next 1 not in its mission' in table[3] and 'not sampled: not reached' in table[4],
-              'summary.md: why a leg has no numbers')
+        check('not sampled: next 1 not in its mission' in table[3] and 'not sampled: not reached' in table[4]
+              and table[3].endswith('| **ERROR** next 1 not in its mission 2 s after it was asked (--leg-timeout) |')
+              and table[4].endswith('| **ERROR** not sampled |'), 'summary.md: why a leg has no numbers, marked')
+        # the pack's mode not entered: the leg failed at once, not after --leg-timeout
+        for how, want in (('mode', "failed: [ 1.0 s] SCRIPT HQMain: the pack's mode not entered"),
+                          ('wrong', 'next 1 entered another mission than M001 (difficulty 3): difficulty 4, not 3')):
+            calls.clear()
+            enter[0] = how
+            opts['leg_timeout'] = 900.0
+            out = os.path.join(d, 'out-' + how)
+            t0 = time.time()
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+            with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
+                why = json.load(f).get('error', '')
+            check(rc == 1 and time.time() - t0 < 30 and want in why and ('placed',) in calls,
+                  f'a `next` that {how}: the leg failed at once ({why!r}), the run ended and put back')
     finally:
         for k, v in saved.items():
             setattr(drive, k, v)

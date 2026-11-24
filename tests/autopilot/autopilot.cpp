@@ -28,6 +28,8 @@
 //    enter the mission named instead (tools/perfrun.py's legs: several scenarios in one launch). Back in through
 //    HQMain the "mission" way (or ReBoot with "reboot"): the pack's mode switched when it is another one (SetMode), the
 //    row and difficulty set; then "NEXT k entered".
+//  - "running" (with the mission): one "RUNNING: the mission runs (row, difficulty, mode, content id)" row once the
+//    first mission runs (its loading over), as "NEXT k entered" for the later ones.
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
@@ -737,8 +739,24 @@ void CycleStep() noexcept {
     reinterpret_cast<MissionEndFn>(image+kMissionEnd)(mgr,kMissionAbort);
 }
 
+// "running": once, when MissionMgr first says a mission runs (the loading over), one RUNNING row with what the game
+// state holds then, as "NEXT k entered" has it (tools/perfrun.py times a launch's first leg from it, as the later
+// legs from theirs).
+volatile LONG watchRunning=0;
+void RunningStep() noexcept {
+    if(!watchRunning)return;
+    void* const mgr=MissionMgr();
+    if(!mgr || !reinterpret_cast<MissionRunningFn>(image+kMissionRunning)(mgr))return;
+    if(!InterlockedExchange(&watchRunning,0))return;
+    unsigned char* const gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
+    const int mode=*reinterpret_cast<const int*>(gs+kCurrentMode);
+    Log("RUNNING: the mission runs (row %d, difficulty %d, mode %d, content id %ld)",
+        *reinterpret_cast<int*>(gs+kMissionRow),*reinterpret_cast<int*>(gs+kDifficulty),mode,ModeContent(gs,mode));
+}
+
 void __fastcall WorldStep(void* app) {
     realWorldStep(app);
+    RunningStep();
     CycleStep();
 }
 
@@ -761,6 +779,13 @@ bool HookWorldStep(const char* who) noexcept {
         realWorldStep=reinterpret_cast<WorldStepFn>(next);
     }
     return true;
+}
+
+// "running" (with the mission, before the launch): RunningStep's one RUNNING row.
+void AskRunning() noexcept {
+    if(!HookWorldStep("RUNNING"))return;
+    InterlockedExchange(&watchRunning,1);
+    Log("RUNNING armed: a row once the mission runs");
 }
 
 // "cycle N [STAY seconds, default 20] [reboot]".
@@ -983,6 +1008,7 @@ void RunCommand(const char* text) noexcept {
     else if(!std::strcmp(word,"mission"))AskMission(text);
     else if(!std::strcmp(word,"cycle"))AskCycle(text);
     else if(!std::strcmp(word,"next"))AskNext(text);
+    else if(!std::strcmp(word,"running"))AskRunning();
     else if(!std::strcmp(word,"probe")) {
         char what[32]{};
         const bool named=sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1;
