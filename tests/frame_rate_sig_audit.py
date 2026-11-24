@@ -77,8 +77,8 @@ for name in ('kCountFirst', 'kCountAgain'):
     sig = arrays[name + 'Sig']
     check(img[at:at + len(sig)] == sig, f'{name} {at:#x}: {img[at:at + len(sig)].hex(" ")} != {sig.hex(" ")}')
     check(rel_target(at, 5) == consts['kTickCount'], f'{name} calls kTickCount')
-    check(img[at + 5:at + 7] == arrays['kMovEbxEax'], f'{name}: mov ebx,eax after the call')
-check(arrays['kMovEbxEdx'] == b'\x8b\xda', 'kMovEbxEdx is mov ebx,edx')
+    check(img[at + 5:at + 7] == bytes.fromhex('8bd8'), f'{name}: mov ebx,eax after the call')
+check(arrays['kMovEbxEdx'] == bytes.fromhex('8bda'), 'kMovEbxEdx is mov ebx,edx')
 check(consts['kTickCount'] == pconsts['kTickCount'], 'the gate counts with the clock frame_pacing.cpp checks byte for byte')
 first, again = consts['kCountFirst'], consts['kCountAgain']
 check(first + 9 + 2 + img[first + 10] == 0x11A2F76, 'the first count goes on to the frame when it is not 0')
@@ -87,6 +87,15 @@ check(again + 9 + 2 + struct.unpack_from('<b', img, again + 10)[0] == pconsts['k
 check(img[0x11A2F76:0x11A2F78] == b'\x3b\xdd' and img[0x11A2F80:0x11A2F83] == b'\x0f\x47\xdd' and
       img[0x11A2EDA:0x11A2EDD] == b'\x8d\x6e\x03', 'n = min(n, 3) after the counts (ebp = rsi + 3)')
 check(direct_callers(consts['kTickCount']) == [first, again], 'kTickCount is called only by the two counts')
+# The final n: after the clamp, zeroed with dt when [rdi+9] (mov ebx,esi), then stored for Application::Update. The
+# guards read the copy the store's stub keeps, so they see the n the step runs with.
+fin = consts['kFinalStore']
+check(img[fin:fin + 7] == arrays['kFinalStoreSig'], 'kFinalStore: mov [rsp+0BCh],ebx')
+check(img[0x11A2FAC:0x11A2FB0] == bytes.fromhex('40387709') and img[0x11A2FB6:0x11A2FBB] == bytes.fromhex('0f57f68bde'),
+      'the reset between the counts and kFinalStore: [rdi+9] zeroes dt and n')
+check(re.search(r'Site sites\[\]=\{\{kCountFirst,.*\{kCountAgain,.*\{kFinalStore,', src), 'the gate writes its three sites together')
+check(src.index('SetFramePacingGate(&GateWaitCounts)') > src.index('int written=0'), 'the wait goes to the gate only after the writes')
+check('frameTicks' not in src and 'bool Steps() noexcept { return !gateOn || finalTicks; }' in src, 'the guards read the final n')
 check(re.search(r'RtlAddFunctionTable', src) and re.search(r'0x01,0x04,0x01,0x00,0x04,0x42', src),
       'the gate stub registers its unwind (UWOP_ALLOC_SMALL 0x28 at offset 4)')
 check(re.search(r'if\(gateWait\)', pacing) and re.search(r'tickWaitInstalled=tick;', pacing),

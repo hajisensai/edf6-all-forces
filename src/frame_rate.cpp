@@ -47,7 +47,12 @@ namespace {
 constexpr unsigned kCountFirst=0x11A2F4F,kCountAgain=0x11A2F6B,kTickCount=0x11DAE60;
 const unsigned char kCountFirstSig[]={0xE8,0x0C,0x7F,0x03,0x00,0x8B,0xD8,0x85,0xC0,0x75,0x1C};
 const unsigned char kCountAgainSig[]={0xE8,0xF0,0x7E,0x03,0x00,0x8B,0xD8,0x85,0xC0,0x74,0xEA};
-const unsigned char kMovEbxEax[]={0x8B,0xD8},kMovEbxEdx[]={0x8B,0xDA};
+const unsigned char kMovEbxEdx[]={0x8B,0xDA};
+// The frame's final tick count: after the counts the loop clamps n to 3 (0x11A2F80) and, when [rdi+9] is set (0x11A2FAC),
+// zeroes it and dt; then it stores n for Application::Update ([rsp+0xBC], there [r14+4]). That store (7 bytes) becomes a
+// call to a leaf stub that stores it and keeps a copy: every guard below reads the n the step really runs with.
+constexpr unsigned kFinalStore=0x11A2FD8;
+const unsigned char kFinalStoreSig[]={0x89,0x9C,0x24,0xBC,0x00,0x00,0x00};   // mov [rsp+0BCh],ebx
 // Application::Update's per-call work.
 constexpr unsigned kSteamCall=0x705633,kNetCall=0x705693,kNet=0x788460,kEosCall=0x7056AE,kEos=0x12ADB30;
 constexpr unsigned kWindCall=0x7056BA,kWind=0x1230A0,kHoldOff=0x70595C;
@@ -78,8 +83,8 @@ int cap=framerate::kOff;
 std::uint64_t qpcFreq=0,slotPeriod=0;
 framerate::Gate gate;
 bool gateOn=false;
-// The ticks the frame being run steps (the gate's count; the game thread only).
-std::uint32_t frameTicks=1;
+// The ticks the frame being run steps, as Application::Update gets them (the leaf stub at kFinalStore; game thread).
+volatile std::uint32_t finalTicks=1;
 // The phase this frame draws at (frame_rate_logic.h RenderAlpha), set by the gate.
 float frameAlpha=1.0f;
 bool viewOn=false;
@@ -135,13 +140,8 @@ std::uint64_t GateCount() noexcept {
     SwapFlipWait();   // latency-5: the frame starts when the GPU can take it; its ticks and alpha are counted after
     const std::uint64_t now=Now();
     const std::uint32_t n=reinterpret_cast<CountFn>(image+kTickCount)();
-    frameTicks=n;
     frameAlpha=framerate::RenderAlpha(n,now,*reinterpret_cast<const std::uint64_t*>(image+kTickBase),
                                       *reinterpret_cast<const std::uint64_t*>(image+kTickLast),tickPeriod);
-    // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
-    if(n>1)catchUp=kCatchUpTicks;
-    else catchUp=catchUp>static_cast<int>(n) ? catchUp-static_cast<int>(n) : 0;
-    CountStats(now,n);
     return 1u|static_cast<std::uint64_t>(n)<<32;
 }
 
@@ -150,7 +150,7 @@ std::uint64_t GateWaitCounts(std::uint64_t now) noexcept {
     return framerate::WaitCounts(gate,now,cap);
 }
 
-bool Steps() noexcept { return !gateOn || frameTicks; }
+bool Steps() noexcept { return !gateOn || finalTicks; }
 
 void SteamGuard() noexcept { if(Steps())reinterpret_cast<SteamFn>(steamRun)(); }
 void NetGuard(void* self) { if(Steps())reinterpret_cast<VoidFn>(image+kNet)(self); }
@@ -173,12 +173,19 @@ void ClearForUi(unsigned char* table) noexcept {
 
 void SystemUpdateHook(void* system,float dt,int n) {
     void* const input=*reinterpret_cast<void**>(image+kInputManager);
+    if(gateOn) {
+        // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
+        if(n>1)catchUp=kCatchUpTicks;
+        else catchUp=catchUp>n ? catchUp-n : 0;
+        CountStats(Now(),n>0 ? static_cast<std::uint32_t>(n) : 0u);
+    }
     if(input) {
-        if(n>0)reinterpret_cast<WrapUpdateFn>(image+kWrapUpdate)(input,n);
+        // Without the gate a frame with n = 0 (the loop's reset, [rdi+9]) updates the wrappers as the game does.
+        if(n>0 || !gateOn)reinterpret_cast<WrapUpdateFn>(image+kWrapUpdate)(input,n);
         else ClearForUi(static_cast<unsigned char*>(input)+kWrapTable);
         wrapped=true;
     }
-    framerateview::BeginFrame(n>0 ? static_cast<std::uint32_t>(n) : 0u,gateOn ? frameAlpha : 1.0f);
+    framerateview::BeginFrame(n>0 ? static_cast<std::uint32_t>(n) : 0u,gateOn && n==0 ? frameAlpha : 1.0f);
     reinterpret_cast<SystemUpdateFn>(image+kSystemUpdate)(system,dt,n);
 }
 
@@ -246,15 +253,42 @@ bool InstallGate() noexcept {
         Log("FRAMERATE the frame step's wait is not ours (frame_pacing.cpp): no frame gate");
         return false;
     }
+    if(!edf::Matches(image,kFinalStore,kFinalStoreSig,sizeof(kFinalStoreSig))) {
+        Log("FRAMERATE the main loop's store of n (0x%X) is not as read: no frame gate",kFinalStore);
+        return false;
+    }
     void* const stub=MakeGateStub();
-    if(!stub){Log("FRAMERATE no page near the main loop for the gate stub");return false;}
+    // `mov [rsp+0C4h],ebx` (the caller's rsp+0xBC); `mov r11,&finalTicks; mov [r11],ebx; ret` (r11 is dead: a call follows).
+    unsigned char leaf[]={0x89,0x9C,0x24,0xC4,0x00,0x00,0x00,0x49,0xBB,0,0,0,0,0,0,0,0,0x41,0x89,0x1B,0xC3};
+    const auto copy=reinterpret_cast<std::uintptr_t>(&finalTicks);
+    std::memcpy(leaf+9,&copy,sizeof(copy));
+    void* const final=edf::AllocateNearCode(image+kFinalStore,leaf,sizeof(leaf));
+    if(!stub || !final){Log("FRAMERATE no page near the main loop for the gate stubs");return false;}
+    // Three sites, each one write (a count's call with its `mov ebx,edx`, the store's call), all or none: a count
+    // without its mov would step one tick a frame (the game sped up), a mov without its call steps garbage. Written at
+    // load, before the main loop runs; a write that fails puts back the ones before it.
+    struct Site { unsigned rva; const unsigned char* sig; std::size_t size; const void* to; unsigned char code[7]; };
+    Site sites[]={{kCountFirst,kCountFirstSig,7,stub,{}},{kCountAgain,kCountAgainSig,7,stub,{}},{kFinalStore,kFinalStoreSig,7,final,{}}};
+    for(Site& t:sites) {
+        const auto delta=static_cast<const unsigned char*>(t.to)-(image+t.rva+5);
+        if(delta>0x7FFFFFF0 || delta<-0x7FFFFFF0){Log("FRAMERATE a gate stub is out of call range: no frame gate");return false;}
+        const auto rel=static_cast<std::int32_t>(delta);
+        t.code[0]=0xE8;
+        std::memcpy(t.code+1,&rel,4);
+        if(t.rva==kFinalStore)t.code[5]=t.code[6]=0x90;
+        else std::memcpy(t.code+5,kMovEbxEdx,2);
+    }
+    int written=0;
+    while(written<3 && edf::PatchCode(image+sites[written].rva,sites[written].sig,sites[written].code,sites[written].size))++written;
+    if(written<3) {
+        bool back=true;
+        for(int i=written-1;i>=0;--i)back=edf::PatchCode(image+sites[i].rva,sites[i].code,sites[i].sig,sites[i].size) && back;
+        Log("FRAMERATE the frame gate's write %d of 3 failed: %s",written+1,back ? "the ones before it put back, no frame gate"
+                                                                                 : "and putting back failed: the main loop is in an unknown state");
+        return false;
+    }
     SetFramePacingGate(&GateWaitCounts);
-    // At load, before the application's init: the main loop has not run yet, so the four writes need no order.
-    const bool ok=edf::PatchCode(image+kCountFirst+5,kMovEbxEax,kMovEbxEdx,2) &&
-                  edf::PatchCode(image+kCountAgain+5,kMovEbxEax,kMovEbxEdx,2) &&
-                  PatchCall(kCountFirst,stub) && PatchCall(kCountAgain,stub);
-    if(!ok)Log("FRAMERATE the frame gate was not written whole: the main loop is in an unknown state");
-    return ok;
+    return true;
 }
 
 // The random step (34 bytes, rax and rcx dead after it) becomes a call to a leaf stub and NOPs; the stub steps the
