@@ -51,6 +51,7 @@ Config config;
 const Config& Cfg() noexcept { config.enabled=true;return config; }
 bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
+ULONGLONG GameFrame() noexcept { return fixture::tick; }   // a frame per fixture tick: the support tick runs once each
 unsigned char* PlayerHuman() noexcept { return nullptr; }   // the rescue requester lookup (no player in this fixture)
 void Log(const char*,...) noexcept {}
 bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
@@ -216,10 +217,25 @@ std::uint32_t EDF6COOP_CALL TrySend(std::uint64_t expected,const EDF6CoopPeer* t
     Check(bytes && size==4 && byteLimit==768*1024 && packetLimit==768,"bounded send forwards the caller's real SDK ceilings exactly");
     ++boundedSendCalls;return boundedSendResult;
 }
+unsigned singlePolls=0;
 std::uint32_t EDF6COOP_CALL Poll(std::uint64_t expected,EDF6CoopPeer* sender,void* bytes,std::uint32_t cap,std::uint32_t* out) {
     Check(expected==generation,"poll bound to observed transport generation");
-    *out=0;if(incoming.empty() || cap<kWireSize)return 0;
+    ++singlePolls;*out=0;if(incoming.empty() || cap<kWireSize)return 0;
     *sender=incoming.front().sender;std::memcpy(bytes,incoming.front().bytes,kWireSize);*out=kWireSize;incoming.pop_front();return 1;
+}
+unsigned batchPolls=0;
+std::uint32_t EDF6COOP_CALL Batch(std::uint64_t expected,EDF6CoopExtensionMessage* items,std::uint32_t most,void* buffer,
+                                  std::uint32_t bytes,std::uint32_t* out) {
+    Check(expected==generation,"batch poll bound to observed transport generation");
+    ++batchPolls;*out=0;
+    while(*out<most && !incoming.empty() && (*out+1)*kWireSize<=bytes) {
+        // Coop names a sender only by its roster index: one outside the roster never reaches the plugin.
+        if(std::strcmp(incoming.front().sender.id,"client") || peerCount!=1){incoming.pop_front();continue;}
+        items[*out]={0,*out*kWireSize,kWireSize,0};
+        std::memcpy(static_cast<unsigned char*>(buffer)+*out*kWireSize,incoming.front().bytes,kWireSize);
+        incoming.pop_front();++*out;
+    }
+    return 1;
 }
 std::uint32_t EDF6COOP_CALL Api(std::uint32_t version,std::uint32_t size,EDF6CoopExtensionApi* out) {
     if(version!=1 || size!=sizeof(*out))return 0;
@@ -236,6 +252,7 @@ std::uint32_t __cdecl TransportGateReady() { return 1; }
 FARPROC WINAPI Proc(HMODULE,LPCSTR name) {
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&Api);
     if(!std::strcmp(name,"EDF6CoopTrySendExtension"))return reinterpret_cast<FARPROC>(&TrySend);
+    if(!std::strcmp(name,"EDF6CoopPollExtensionBatch"))return reinterpret_cast<FARPROC>(&Batch);
     if(!std::strcmp(name,"EOS_ProductUserId_ToString"))return reinterpret_cast<FARPROC>(&PuidToString);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return reinterpret_cast<FARPROC>(&ResolvePlayer);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&TransportGateReady);
@@ -381,7 +398,7 @@ int main() {
     auto carrierPacket=packet;std::memcpy(carrierPacket.bytes,"AFDQ",4);incoming.push_back(carrierPacket);
     reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
     Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
-    Check(carrierContexts-carrierContextsBefore==2,"nested prepared-plan enqueue cannot recursively poll/advance native support");
+    Check(carrierContexts-carrierContextsBefore==1,"nested prepared-plan enqueue cannot recursively poll/advance native support (unmoved room: only the closing update)");
     // The newer channels (plugin_net.h): a peer that did not announce kExtGravity (this fixture's hellos carry no extension
     // word) is never heard on it; a channel this build does not have is dropped, never fed to the support parser.
     auto gravityPacket=packet;std::memset(gravityPacket.bytes,0,sizeof(gravityPacket.bytes));std::memcpy(gravityPacket.bytes,"GRVT",5);
@@ -391,10 +408,16 @@ int main() {
     Check(sendCount==sendsBefore && commandPackets==1 && qmarkPackets==1 && crew::running,"a channel this build does not have: dropped quietly");
     // 2026-10-30 (the user: 「联机时候巨卡无比」): the channels' frame ran once a received message (2 + n a tick); it runs
     // before and after the poll only (and when the session's readiness or epoch changes), however many came in.
-    {const auto framesBefore=carrierContexts,qmarksBefore=qmarkPackets;
+    // 2026-11-24 (net-7/net-8): the frames come in 64 at a time under one EDF6Coop lock, and the update before the poll
+    // runs only when the room moved since the last one (the closing update already told the channels this room).
+    {const auto framesBefore=carrierContexts,qmarksBefore=qmarkPackets;const auto batchesBefore=batchPolls;
      for(int i=0;i<64;++i)incoming.push_back(markPacket);
      Step();
-     Check(qmarkPackets-qmarksBefore==64 && carrierContexts-framesBefore==2,"64 messages in one tick: every one routed, the channels' frame twice");}
+     Check(singlePolls==0,"the receive loop never takes the one-message poll");
+     Check(qmarkPackets-qmarksBefore==64 && carrierContexts-framesBefore==1 && batchPolls-batchesBefore==2,
+         "64 messages in one tick: every one routed by one full batch (an empty one ends the loop), the channels' frame once");
+     const auto batchesNow=batchPolls;for(int i=0;i<5;++i)incoming.push_back(markPacket);Step();
+     Check(qmarkPackets-qmarksBefore==69 && batchPolls-batchesNow==1,"a short batch is the whole queue: one EDF6Coop lock a frame");}
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
