@@ -151,7 +151,9 @@ def main(argv: list[str]) -> int:
     with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
-        print(f'check.py: {ROOT}, {jobs} processes, below-normal priority; logs build/check-*.log', flush=True)
+        waited, started = time.perf_counter() - started, time.perf_counter()   # the queue is not the check's time
+        print(f'check.py: {ROOT}, {jobs} processes, below-normal priority (waited {waited:.0f} s for the single '
+              f'check slot); logs build/check-*.log', flush=True)
         defines, game = game_defines()
         print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
         if '--no-build' not in argv:
