@@ -863,6 +863,12 @@ add_executable(preload_set_test tests/preload_set_test.cpp)
 target_include_directories(preload_set_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(preload_set_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME preload_set COMMAND preload_set_test)
+# The vehicles' weapon SGOs queued with them (src/vehicle_weapons_logic.h): the scan, the stock rows of the hitch2 SYNC
+# LOAD list; the stock table covers every stock vehicle the plugin preloads; against the game's SGOs (skip 77 without it).
+add_executable(vehicle_weapons_test tests/vehicle_weapons_test.cpp)
+target_include_directories(vehicle_weapons_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicle_weapons_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicle_weapons COMMAND vehicle_weapons_test)
 # The scoped weapons' spread rule (src/scope_spread_logic.h); its guard and native audit are with the Python tests below.
 add_executable(scope_spread_test tests/scope_spread_test.cpp)
 target_include_directories(scope_spread_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -1175,6 +1181,14 @@ add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
 set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The vehicles' weapon SGOs (tests/vehicle_weapons_test.cpp): the stock table covers every stock vehicle the plugin
+# preloads; it is Root.cpk's; the plugin's scan of every vehicle row's real SGO queues the hitch2 SYNC LOAD list (77: no game).
+add_test(NAME vehicle_weapons_covers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_vehicle_weapons.py" --covers)
+add_test(NAME vehicle_weapons_stock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_vehicle_weapons.py" --check)
+set_tests_properties(vehicle_weapons_stock PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME vehicle_weapons_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicle_weapons_native_audit.py"
+         "$<TARGET_FILE:vehicle_weapons_test>")
+set_tests_properties(vehicle_weapons_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The recorded sound pack (tools/sound_pack.py) on a stand-in archive: every clip it names is one the plugin reads, as
 # the plugin reads it (ReadWav), the loops seamless, the recordings' DC out, never louder than the plugin's own clip.
 add_test(NAME sound_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sound_pack_test.py")
@@ -1241,6 +1255,7 @@ set(EDF6_OFFLINE_CHECKS append_log_test common_host_check save_mode_check pjet_k
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
+add_dependencies(offline_checks vehicle_weapons_test)
 add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
 add_dependencies(offline_checks stab_native_readback_test)

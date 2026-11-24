@@ -7,6 +7,7 @@
 // before reading a key, DebugSpawnReadout has nothing to show. It patches nothing at all, on or off.
 #include "crew.h"
 #include "debug_spawn.h"
+#include "vehicle_weapons.h"
 #include "debug_spawn_net.h"
 #include "support_net.h"
 #include "memory.h"
@@ -419,6 +420,7 @@ bool RequestLoad(int row,const float* at,const float* heading,const float* look)
         if(!mgr || !objects || objects!=missionMgr)return false;
         if(!loading[row]) {
             reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[row].sgo,2,-1);
+            if(kEntries[row].how==How::vehicle)QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kEntries[row].sgo);   // LoadTick waits for them too
             loading[row]=true;loadAskedAt=GetTickCount64();
             Log("DEBUGSPAWN %s: not loaded this mission: its load queued (%ls)",kEntries[row].id,kEntries[row].sgo);
         }
@@ -864,6 +866,7 @@ void PreloadDebugSpawn() noexcept {
             if((!PreloadsRow(kEntries[i],range) && !pvpRows[i]) || broken[i])continue;
             if(missing[i]){++absent;continue;}   // not installed: a missing SGO is never handed to the preload
             reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[i].sgo,2,-1);
+            if(kEntries[i].how==How::vehicle)QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kEntries[i].sgo);   // its weapons with it (vehicle_weapons.h)
             preloaded[i]=true;
             ++(kEntries[i].how==How::enemy ? enemies : vehicles);
         }

@@ -21,13 +21,15 @@ bool signatures=true,failSetup=false,badClass=false,occupied=false,variantBadCla
 int marks=0,firepowers=0,markedAt=-1;crew::supportlevel::Curve lastCurve=crew::supportlevel::Curve::eros;
 const wchar_t* lastPath=nullptr;
 const wchar_t* const kLoaded=L"app:/object/edf6vc_lo_tank_4000000000000c81.sgo";
-int checks=0,preloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
+int checks=0,preloads=0,weaponPreloads=0,makes=0,applies=0,disposals=0,deletes=0,teams=0,levels=0,owners=0;
 alignas(16) unsigned char object[0x2000]{},seats[13*edf::kSeatStride]{};
 const void* expectedOwner=nullptr;
 float lastPosition[3]{};
 void Check(bool ok,const char* what) { ++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);} }
 void Preload(void*,const wchar_t* path,std::int32_t type,std::int32_t slot) {
-    Check(path && type==2 && slot==-1,"native vehicle preload arguments");++preloads;
+    Check(path && type==2 && slot==-1,"native vehicle preload arguments");
+    // A hull's weapons are queued with it (vehicle_weapons.h): counted apart from the hulls.
+    if(!_wcsnicmp(path,L"app:/weapon/",12))++weaponPreloads;else ++preloads;
 }
 void ReadSetup(void*,void* setup) { edf::Put<std::uint16_t>(setup,0x10,0); }
 void Apply(void*,void*) {
@@ -107,6 +109,7 @@ int main() {
     Check(!SpawnSupportVehicle(tank,manned,at,forward,nullptr),"no spawn before mission preload");
     Check(!SupportDrillTransportReady() && !SpawnSupportDrillTransport(at,forward,nullptr),"no drill transport before mission preload");
     PreloadSupportVehicles();Check(fixture::preloads==4,"all audited resources preloaded, and the installer's drill transport");
+    Check(fixture::weaponPreloads==3,"the hulls' weapons queued with them: the Blacker's two, the rescue carrier's one");
     Check(SupportDrillTransportReady(),"the drill transport preloaded");
     Check(!SpawnSupportVehicle(static_cast<SupportVehicleKind>(255),manned,at,forward,nullptr),"reject invalid resource");
     Check(!SpawnSupportVehicle(tank,static_cast<SupportCrewMode>(255),at,forward,nullptr),"reject invalid mode");

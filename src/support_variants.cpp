@@ -2,6 +2,7 @@
 // support_soldier.cpp and support_spawn.cpp call for the stock templates and hulls, checked by the same bytes.
 #include "support_variants.h"
 #include "support_variants_logic.h"
+#include "vehicle_weapons.h"
 #include "room_sync.h"
 #include "support_config.h"
 #include "support_loadout.h"
@@ -48,6 +49,8 @@ bool PreloadOne(const wchar_t* file,void* mgr) noexcept {
     for(wchar_t* c=app;*c;++c)*c=static_cast<wchar_t>(std::towlower(*c));
     __try {
         reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,app,2,-1);
+        // A loaded vehicle's weapons with it (vehicle_weapons.h); a coloured soldier's are its kind's, loaded as the stock one's.
+        if(!_wcsnicmp(file,L"EDF6VC_LO_",10))QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),app);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         Log("SUPPORT variant %ls: preload fault, left unloaded",file);

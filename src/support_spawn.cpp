@@ -1,6 +1,7 @@
 // Native ground support creation, EDF.dll TimeDateStamp 0x678CCB46. The independent setup path is
 // the first half of RideAi(true), already used by playerjet.cpp for an empty catch aircraft.
 #include "support_spawn.h"
+#include "vehicle_weapons.h"
 #include "preload_set.h"
 #include "crew.h"
 #include "memory.h"
@@ -94,6 +95,7 @@ void PreloadSupportVehicles() noexcept {
             // Stock Root.cpk resources, not optional mod files. Preload traverses their models,
             // ragdolls and weapon resources just as a script's PreloadVehicleResource does.
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kSupportVehicles[i].sgo,2,-1);
+            QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSupportVehicles[i].sgo);
             preloaded[i]=true;
         }
         // The drill transport is the installer's file (tools/make_drill.py), not Root.cpk's: not there, a broken install
@@ -101,6 +103,7 @@ void PreloadSupportVehicles() noexcept {
         if(!preload::Want(preload::Item::drillTransport)){}
         else if(!drillBroken && EDF6_SUPPORT_SPAWN_MOD_FILE(L"OBJECT",kSupportDrillTransportFile)) {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kSupportDrillTransport.sgo,2,-1);
+            QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSupportDrillTransport.sgo);
             drillPreloaded=true;
         } else if(!drillBroken)Log("SUPPORT ground: Mods/OBJECT/%ls not installed: no drill transport underground (reinstall)",kSupportDrillTransportFile);
     } __except(EXCEPTION_EXECUTE_HANDLER) {

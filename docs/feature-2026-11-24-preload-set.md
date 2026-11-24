@@ -25,6 +25,23 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
 - `PreloadMode`（ini，开发者 A/B 开关）：0 按需（默认）、1 全部（旧做法）、2 插件内容一概不预载。联机时以房主的集合为准。
 - 每个任务开始写一行 `PRELOAD this mission's set <32 hex> (<n> items, <来源>; this machine's PreloadMode ...)`。
 
+## 载具武器 SGO
+
+- 游戏的资源预载（`0x7A3780`）预载载具 SGO 时**不会**带上它 `vehicle_setup` / `mission_setup` 里写的 `app:/weapon/*.sgo`：
+  hitch2 的 SYNC LOAD 探针在一次测试场里看到这些武器在造车时于游戏线程同步读了 41 次、共 4.1 s（原版 V_* 27 次 3.0 s，
+  插件 EDF6VC_* 14 次 1.1 s），是进关同步读里最大的一块（总共 7.1 s）。
+- 现在每个预载载具 SGO 的地方（`support_spawn.cpp` 支援车体与钻地运输、`support_variants.cpp` 的 `EDF6VC_LO_` 载具、
+  `debug_spawn.cpp` 任务预载与按需加载、`player_vehicle.cpp`、`subcarrier.cpp`）紧接着调 `QueueVehicleWeapons`
+  （`src/vehicle_weapons.h`），把这辆车的武器 SGO 以同样的参数排进同一预载组，同一任务内每个文件只排一次。
+  武器跟着载具走：载具在可达集合里，它的武器就在；集合的位不变，联机房主下发与离线走同一算法，协议号不因此再变。
+- 武器从哪来：
+  - Mods 里的载具（插件的 EDF6VC_*、测试场派生的 EDF6TR_*、EDF4.1、`EDF6VC_LO_` 变体，以及 Mods 里的原版覆盖）：
+    预载时读 `<游戏目录>\Mods\OBJECT\NAME.SGO`，扫其中的 UTF-16LE `app:/weapon/....sgo` 字符串（`ScanSgo`）；
+  - 原版载具（在 Root.cpk 里，插件不读）：查生成表 `src/vehicle_weapons.inc`（`tools/gen_vehicle_weapons.py` 从 Root.cpk
+    生成；收录插件会预载的全部原版载具：spawn_catalog 的原版载具行 + `kSupportVehicles`）；
+  - 两者都不是：记一行日志，不回退。
+- 每个任务在预载后写一行 `PRELOAD vehicle weapons: <n> weapon files queued with <m> vehicles`。
+
 ## 联机协议
 
 - host-settings 词 v3 → v4（加 `n=` / `p=`，各 32 位大写十六进制，高字在前），`kWordMost` 128 → 200；
@@ -45,5 +62,11 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
 - 离线：`preload_set`（呼叫行表、Always ⊂ All、ByMode、RoomSet、AtSync、文本格式往返与坏输入）、`coop_attr`（v4 词往返、
   v3 词与残缺 v4 词一律拒收）、`player_identity_guard`（协议号）、`command_identity` / `command_native_dispatch` /
   `support_soldier` / `support_spawn` 等原有夹具；`python tools/check.py` 全绿。
+- 载具武器：`vehicle_weapons`（扫描：奇偶偏移、大小写、诱饵；hitch2 清单里的原版载具 VEHICLE404 / 403 / 407、V510、V505、V503
+  的武器都在其行里；Mods 优先于原版行；同一任务去重）、`vehicle_weapons_covers`（无游戏：插件会预载的原版载具都有行）、
+  `vehicle_weapons_stock`（生成表与 Root.cpk 一致，无游戏 77 跳过）、`vehicle_weapons_native`（用插件自己的扫描扫 spawn_catalog
+  全部 113 个载具行的真实 SGO：原版行与生成表一致，hitch2 清单的 39 个武器文件全部被某辆可预载载具带上；无游戏 77 跳过）；
+  `support_spawn` 断言三个支援车体的 3 个武器随车体排队。
 - 实机（未做，交协调者统一采）：同一任务 `PreloadMode=1` 对 `PreloadMode=0` 各 1–2 次，对比进图时长、MISSION 阶段 ms、
-  MEMORY 行；配合 hitch2 的 `SyncLoadProbe=1` 看叫出各类呼叫时有没有 `SYNC LOAD ...EDF6VC_...` 漏项。
+  MEMORY 行；配合 hitch2 的 `SyncLoadProbe=1` 看叫出各类呼叫时有没有 `SYNC LOAD ...EDF6VC_...` 漏项；
+  同时看进关的 `SYNC LOAD` 里 V_* / EDF6VC_* 武器行是否消失，以及 `PRELOAD vehicle weapons` 行。
