@@ -5,14 +5,18 @@
 //
 // What it catches, from any thread of the game:
 //  - an exception nobody handles (the top-level filter): an access violation, a C++ exception no catch took, a stack
-//    overflow (written by a thread of its own, which then also calls the filter behind ours: the overflowed thread has
-//    only the little stack Windows leaves it, and only waits). One-chance exceptions a
+//    overflow (written by a thread of its own, which then also calls the filter behind ours: the overflowed thread
+//    only waits, on the 32 KB a stack overflow guarantee keeps for it; the installing thread and every thread started
+//    after the install get one, crash_dump.cpp kOverflowStack). One-chance exceptions a
 //    __try / catch handles never reach it, so the game's and the CRT's handled ones (_com_error, ...) write nothing;
 //  - abort() and std::terminate() of the game's CRT (ucrtbase.dll: its SIGABRT handler) and of this plugin's own
 //    static CRT;
 //  - an invalid CRT parameter (ucrtbase's and ours), which would fast-fail right after.
 // What it cannot: __fastfail (the kernel ends the process without running any code in it: /GS failures, CFG,
 // heap corruption the heap detects), a process killed from outside, a hang. Those are left to Windows' LocalDumps.
+// Nor, for sure, a stack overflow on a thread already running at the install (other than the installing one) or with
+// a stack under 1 MB: Windows' default leaves those 12-16 KB, which the exception frame, the dispatch and other modules'
+// vectored handlers can use up; the process then ends with 0xC0000005 and no dump.
 //
 // The filter stays first: kernelbase!SetUnhandledExceptionFilter is redirected so a filter set later (the Steam
 // client's, an overlay's) goes behind ours and is called after the dump; where that redirect cannot go in, the mission
