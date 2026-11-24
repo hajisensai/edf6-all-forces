@@ -31,7 +31,7 @@
 ## 逆向
 
 - 静态逆向先查原版代码索引 `D:\APP\edf6-all-forces\vanilla-code`（入口 [README.md](../vanilla-code/README.md)；不在本仓库，本机独有）：`EDF.dll` / `EDF6.exe` 完整汇编、Ghidra 伪代码、`vanilla.sqlite`。在该目录运行 `python -B vanilla.py show|c|refs|notes|find|vtable <hex rva>`，再按需用 `tools/edfre.py` 手工反汇编。伪代码的类型和变量名是 Ghidra 猜的，结论以汇编为准。派做逆向的子代理时把这个索引告诉它。
-- 有新发现就写回 vanilla-code，不只留在本仓库笔记里：函数名 → `function-labels.tsv`（填 evidence 与 source）；调用流程 → `代码流程.md`；手工重建的函数 → `pseudocode-manual/EDF.dll/`。本仓库的 `docs/*-re.md` 照常写，重建数据库时 `vanilla.py build` 会把其中的地址收进 `notes`。
+- 有新发现就向公开仓库 [hajisensai/edf6-vanilla-re](https://github.com/hajisensai/edf6-vanilla-re)（本机克隆 `D:\APP\edf6-vanilla-re`，主克隆留在 `main`，改动开分支或 worktree）提 PR，不只留在本仓库笔记里：函数名 → `shared/functions/<模块>.tsv`，全局变量 / vtable → `shared/data/`，结构体字段 → `shared/types/<类型>.tsv`，子系统笔记 → `shared/notes/*.md`。格式、命名、置信度、evidence 按它的 `CONTRIBUTING.zh-CN.md`，提交前跑 `python tools/lint_shared.py`。**禁止提交**汇编、伪代码、P-code、`.sqlite`、任务脚本正文和任何游戏文件内容，只写自己的结论；被 lint 拦下就改写，不绕过。本仓库的 `docs/*-re.md` 照常写。
 
 ## 构建
 
