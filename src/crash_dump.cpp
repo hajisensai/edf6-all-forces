@@ -84,10 +84,10 @@ bool redirected=false;
 // last pages below the faulting frame: 12-16 KB, 8.7-10.5 KB of it still free at our wait on Windows 11 26200, the
 // amount moving from run to run with where the overflow lands in the last frame (the stack's start is randomized).
 // When it runs out, the fault there cannot be delivered and Windows ends the process with 0xC0000005 before a dump
-// (the signature of crash_dump's occasional CI failure). SetThreadStackGuarantee makes it kOverflowStack: for the installing thread and each
-// thread started after the install (OnThreadStart, a TLS callback, so a thread of the exe or of this DLL alike), only
-// on 1 MB stacks or more (every CreateThread without STACK_SIZE_PARAM_IS_A_RESERVATION: EDF.dll's threads), where
-// it costs 3% of the stack; a smaller stack someone reserved on purpose keeps Windows' default.
+// (the signature of crash_dump's occasional CI failure). SetThreadStackGuarantee makes it kOverflowStack: for the
+// installing thread and each thread started after the install (OnThreadStart, a TLS callback, so a thread of the exe
+// or of this DLL alike), only on 1 MB stacks or more (every CreateThread without STACK_SIZE_PARAM_IS_A_RESERVATION:
+// EDF.dll's threads), where it costs 3% of the stack; a smaller stack someone reserved on purpose keeps Windows' default.
 constexpr ULONG kOverflowStack=32*1024;
 constexpr ULONG_PTR kGuaranteedReserve=1024*1024;
 bool GuaranteeStack() noexcept {
@@ -486,8 +486,24 @@ bool InstallCrashDump(const wchar_t* folder) noexcept {
 }
 
 // Each thread started after the install: its stack overflow guarantee (GuaranteeStack), set on the thread itself.
+// The first one set is logged, once a process, with where the thread starts: the TLS callback running in the game
+// (EDF6VehicleCrew.dll loaded by EDFModLoader, DisableThreadLibraryCalls) is seen in a tester's log. Not a
+// "CRASHDUMP installed" line (tools/testhub.py _INSTALLED). The loader lock is held here: Where and Log take only
+// their own locks and the loader's (held already); the log writer thread never waits on the loader.
+std::atomic<bool> threadGuaranteeLogged{false};
 void NTAPI OnThreadStart(void*,DWORD reason,void*) noexcept {
-    if(reason==DLL_THREAD_ATTACH && installed.load())GuaranteeStack();
+    if(reason!=DLL_THREAD_ATTACH || !installed.load() || !GuaranteeStack())return;
+    if(threadGuaranteeLogged.exchange(true))return;
+    using QueryThreadFn=LONG(NTAPI*)(HANDLE,ULONG,void*,ULONG,ULONG*);
+    void* start=nullptr;
+    const auto query=reinterpret_cast<QueryThreadFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtQueryInformationThread"));
+    if(query)query(GetCurrentThread(),9,&start,sizeof(start),nullptr);   // 9: ThreadQuerySetWin32StartAddress
+    wchar_t module[MAX_PATH];
+    unsigned long long offset=0;
+    Where(start,module,std::size(module),offset);
+    Log("CRASHDUMP stack overflow guarantee %lu KB set by the TLS callback on a thread started after the install "
+        "(thread %lu, start %ls+%#llx); logged for the first such thread only",
+        kOverflowStack>>10,GetCurrentThreadId(),module,offset);
 }
 
 void CheckCrashFilter() noexcept {
