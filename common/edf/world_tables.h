@@ -19,7 +19,7 @@ constexpr std::size_t kLockRegistry=0x20B2AB0,kRegList=0x8,kRegSize=0x10;
 
 // The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null.
 inline const std::int32_t* Relations(const unsigned char* image,std::int32_t team) noexcept {
-    if(team<0 || team>=enemypoints::kMaxTeam)return nullptr;
+    if(!image || team<0 || team>=enemypoints::kMaxTeam)return nullptr;   // no image: the plugin refused the load
     const auto manager=At<const unsigned char*>(image,kTeamManager);
     if(!Readable(manager,kTeamRows+8))return nullptr;
     const auto rows=At<const unsigned char*>(manager,kTeamRows);
@@ -30,6 +30,7 @@ inline const std::int32_t* Relations(const unsigned char* image,std::int32_t tea
 
 // The registry's list head and node count, or false while it cannot be read.
 inline bool LockList(const unsigned char* image,const unsigned char*& head,std::uint64_t& nodes) noexcept {
+    if(!image)return false;
     const auto registry=At<const unsigned char*>(image,kLockRegistry);
     if(!Readable(registry,kRegList+0x10))return false;
     head=At<const unsigned char*>(registry,kRegList);

@@ -75,7 +75,13 @@ int main() {
     Put<void*>(image,gameframe::kSystem,gravityWorld);Put<void*>(gravityWorld,0,image+gameframe::kSystemVtable);
     Put<void*>(gravityWorld,gameframe::kSystemScene,physics);Put<void*>(physics,0x20,gravityVtable);
     std::uint32_t step=100;
-    const auto nextStep=[&]{Put<std::uint32_t>(gravityWorld,gameframe::kSystemStep,++step);SeeFrame();};
+    Put<float>(image,gameframe::kStepSeconds,1.0f/60.0f);
+    // A running step: the count and the scene time move together (a paused one would move only the count).
+    const auto nextStep=[&]{
+        Put<std::uint32_t>(gravityWorld,gameframe::kSystemStep,++step);
+        Put<float>(gravityWorld,gameframe::kSystemRunTime,At<float>(gravityWorld,gameframe::kSystemRunTime)+1.0f/60.0f);
+        SeeFrame();
+    };
     unsigned char vehicle[0x3000]{},seat[edf::kSeatStride]{},vehicleCtrl[16]{},rider[0x400]{},riderCtrl[16]{};
     unsigned char holder[0x20]{},enemy[0x400]{},enemyCtrl[16]{};
     unsigned char* holders[]={holder};

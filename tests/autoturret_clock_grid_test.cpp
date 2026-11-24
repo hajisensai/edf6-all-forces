@@ -3,7 +3,9 @@
 // table (common/edf/world_tables.h).
 //  (b) The frame is the scene step: inputs run twice for one vehicle in a step (A, B, A; the exports asking in between)
 //      stay one frame and take the world snapshot once; the next step is the next frame; a flak gun's stamp holds through
-//      the step after it and no later (GunFuse: "this frame or the last").
+//      the step after it and no later (GunFuse: "this frame or the last"). Paused steps (the step count goes on, the scene
+//      time +0xCE4 does not) are no frames: the player's lock and a stamp outlast the pause menu; a call running two
+//      sub-steps (the time added once, for both) is two frames.
 //  (a) ScanEnemies through the snapshot's grid gives the linear scan's own list (the same rows, in the same order) and so
 //      the same pick, over random worlds (clusters, strays far off, dead and non-finite points), random vehicle matrices
 //      (turned, scaled, sheared, singular), teams, pivot heights and ranges (0, boundary, huge, infinite, NaN).
@@ -96,9 +98,19 @@ int main() {
     static unsigned char sceneA[0x40]{},sceneB[0x40]{};
     Put<void*>(image,gameframe::kSystem,system);Put<void*>(system,0,image+gameframe::kSystemVtable);
     Put<void*>(system,gameframe::kSystemScene,sceneA);
+    constexpr float kDt=1.0f/60.0f;
+    Put<float>(image,gameframe::kStepSeconds,kDt);
     std::uint32_t step=500;
-    const auto setStep=[&](std::uint32_t s){step=s;Put<std::uint32_t>(system,gameframe::kSystemStep,s);};
-    setStep(step);
+    float run=0.0f;
+    // As the game: a running step adds its time (once per call, before the sub-steps), a scene start zeroes both.
+    const auto setRun=[&](float r){run=r;Put<float>(system,gameframe::kSystemRunTime,r);};
+    const auto setCount=[&](std::uint32_t s){step=s;Put<std::uint32_t>(system,gameframe::kSystemStep,s);};
+    const auto setStep=[&](std::uint32_t s) {
+        if(s>step)setRun(run+static_cast<float>(s-step)*kDt);
+        else if(s<step)setRun(0.0f);
+        setCount(s);
+    };
+    setRun(static_cast<float>(step)*kDt);setCount(step);
 
     // The team table: 8 teams, a random relation row each (team 0 and 1 always enemies of each other).
     constexpr int kTeamsUsed=8;
@@ -158,6 +170,52 @@ int main() {
         check(GunStamp(gun).fuse==9,"a fresh stamp replaces it");
         check(GunStamp(other).fuse==kNoFuse,"a gun never stamped has none");
 
+        // Paused: the step count goes on (0x1198FD0 before the pause test 0x11990C7), the scene time does not.
+        {
+            setStep(step+1);SeeFrame();
+            const ULONGLONG fp=Frame();
+            pilot=Pilot{};pilot.vehicle=a;pilot.seenFrame=fp;
+            StampGun(gun,5,1);
+            for(int i=0;i<300;++i) {   // the pause menu, five seconds; an export asks now and then
+                setCount(step+1);
+                if(i%7==0){SeeFrame();EDF6AutoTurret_SteersV2(a,0);}
+            }
+            check(Frame()==fp,"paused steps are no frames");
+            check(Fresh(),"the player's lock outlasts the pause menu");
+            check(GunStamp(gun).fuse==5,"a stamp outlasts the pause menu");
+            setStep(step+1);SeeFrame();
+            check(Frame()==fp+1 && Fresh(),"back from the pause: one frame on, the lock still the player's");
+            check(GunStamp(gun).fuse==5,"the stamp holds in the step after it, the pause between not counted");
+            setStep(step+1);SeeFrame();
+            check(GunStamp(gun).fuse==kNoFuse,"two run steps on, the stamp is stale");
+            // Paused with no hook or export of ours seeing it: the count jumps, the time only by the steps that ran.
+            const ULONGLONG fq=Frame();
+            setRun(run+5.0f*kDt);setCount(step+5);   // five steps run
+            setCount(step+200);                     // then paused
+            setStep(step+1);SeeFrame();             // and back
+            check(Frame()==fq+6,"unseen: the steps that ran count, the paused ones do not");
+            // One call running two sub-steps: the time of both is added before the first.
+            const ULONGLONG fr=Frame();
+            setRun(run+2.0f*kDt);
+            setCount(step+1);SeeFrame();SeeFrame();
+            check(Frame()==fr+1,"the first of two sub-steps: one frame on");
+            setCount(step+1);SeeFrame();
+            check(Frame()==fr+2,"the second sub-step of the call: one more");
+            StampGun(gun,6,1);
+            setStep(step+1);SeeFrame();
+            check(Frame()==fr+3 && GunStamp(gun).fuse==6,"the next call's step: a stamp of the second sub-step still holds");
+            // A long mission: the float time's steps still come out one by one.
+            setRun(36000.0f);setCount(step+1);SeeFrame();
+            const ULONGLONG fs=Frame();
+            for(int i=0;i<600;++i){setStep(step+1);SeeFrame();}
+            check(Frame()==fs+600,"ten hours in: 600 steps are 600 frames");
+            const float good=run;
+            setRun(std::numeric_limits<float>::quiet_NaN());setCount(step+1);SeeFrame();
+            check(Frame()==fs+600,"a scene time that is no number: the frame stays");
+            setRun(good);
+            pilot=Pilot{};
+        }
+
         // A new scene (and its step back at 0): a frame on, never backwards; no System: the frame stays.
         const ULONGLONG f1=Frame();
         Put<void*>(system,gameframe::kSystemScene,sceneB);setStep(0);SeeFrame();
@@ -175,7 +233,7 @@ int main() {
     // ---- (a) the grid's scan is the linear scan ----
     std::uniform_real_distribution<float> unit(0.0f,1.0f);
     const auto uni=[&](float lo,float hi){return lo+(hi-lo)*unit(rng);};
-    int worlds=0,queries=0,gridQueries=0,nonEmpty=0;
+    int worlds=0,queries=0,gridQueries=0,coverQueries=0,nonEmpty=0;
     long long listed=0;
     for(int round=0;round<12;++round) {
         const int n=round==0 ? 0 : round==1 ? 1 : 200+static_cast<int>(rng()%3000);
@@ -202,6 +260,7 @@ int main() {
         }
         setStep(step+1);SeeFrame();
         int count=0;World(&count);
+        check(!worldGridBuilt,"the snapshot alone builds no grid (the first scan that needs it does)");
         ++worlds;
         for(int q=0;q<400 && n>0;++q) {
             // The scanning vehicle: one of the registry's objects (the scan leaves itself out), its matrix random.
@@ -248,13 +307,16 @@ int main() {
             check(same,"the grid's scan lists the linear scan's rows, in its order");
             check(Nearest(v,got.e.data(),got.count)==Nearest(v,want.data(),static_cast<int>(want.size())),"the grid's scan picks the linear scan's target");
             ++queries;listed+=got.count;nonEmpty+=got.count>0;
-            gridQueries+=std::isfinite(ScanRadius(m,range));
+            const float rr=ScanRadius(m,range);
+            const bool covers=!(m[12]-rr>worldLo[0] || m[12]+rr<worldHi[0] || m[14]-rr>worldLo[1] || m[14]+rr<worldHi[1]);
+            gridQueries+=std::isfinite(rr) && !covers;coverQueries+=std::isfinite(rr) && covers;
         }
     }
     check(gridQueries>queries/2,"most queries went through the grid (not the every-row fallback)");
+    check(coverQueries>0,"some bounded queries held every point and went linear (and still matched)");
     check(nonEmpty>queries/3,"most queries found enemies (the comparison is not of empty lists)");
-    std::printf("%d checks, %d failed; %d worlds, %d scans (%d through the grid, %d found any, %lld listed)\n",checks,failed,worlds,
-                queries,gridQueries,nonEmpty,listed);
+    std::printf("%d checks, %d failed; %d worlds, %d scans (%d through the grid, %d bounded but holding all, %d found any, %lld listed)\n",checks,failed,worlds,
+                queries,gridQueries,coverQueries,nonEmpty,listed);
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     return failed ? 1 : 0;
 }

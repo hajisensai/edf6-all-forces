@@ -105,15 +105,19 @@ GunFuse gunFuses[kMaxGunFuses]{};
 SRWLOCK gunLock=SRWLOCK_INIT;
 bool gunsFullLogged=false;
 
-// The frame counter (SeeFrame): the native scene step as gameframe::Clock extends it (game thread), and its value as
-// last seen there, for Frame() on any thread.
-gameframe::Clock frameClock;
+// The frame counter (SeeFrame): the scene steps that really ran, as gameframe::RunClock counts them (game thread; a
+// paused step is no frame, so a lock and a stamp outlast the pause menu), and its value as last seen there, for Frame()
+// on any thread.
+gameframe::RunClock frameClock;
 std::atomic<ULONGLONG> frameNow{1};
 
-// The world's lock points this frame (RefreshWorld; turret.h kFirstWorld): rows 0..worldCount-1, and their grid.
+// The world's lock points this frame (RefreshWorld; turret.h kFirstWorld): rows 0..worldCount-1, their horizontal
+// extent, and their grid (built by the first scan of the frame that a smaller box helps: WorldGrid).
 std::vector<Enemy> worldEnemies(kFirstWorld);
 std::vector<enemypoints::Point> worldPoints;
 npc::grid::Grid worldGrid;
+bool worldGridBuilt=false;
+float worldLo[2]{},worldHi[2]{};
 constexpr float kWorldCell=64.0f;   // m: the grid's cell side (a gun's range covers a few)
 int worldCount=0;
 ULONGLONG worldFrame=0,worldAt=0;
@@ -209,7 +213,7 @@ void RefreshWorld() noexcept {
     const ULONGLONG now=Frame();
     if(worldFrame==now)return;
     worldFrame=now;worldAt=GetTickCount64();worldCount=0;
-    worldGrid.Clear();
+    worldGrid.Clear();worldGridBuilt=false;
     const unsigned char* head=nullptr;
     std::uint64_t nodes=0;
     if(!edf::LockList(image,head,nodes))return;
@@ -218,9 +222,24 @@ void RefreshWorld() noexcept {
     for(const enemypoints::Point& p:worldPoints) {
         Enemy& e=worldEnemies[static_cast<std::size_t>(worldCount)];
         if(!Finite(static_cast<const unsigned char*>(p.object),kPosition,e.origin))continue;
-        std::memcpy(e.pos,p.aim,12);e.object=p.object;e.team=p.team;++worldCount;
+        std::memcpy(e.pos,p.aim,12);e.object=p.object;e.team=p.team;
+        // The extent of every point (a non-finite one makes it infinite: no box covers it, the grid keeps it apart).
+        if(!worldCount){worldLo[0]=worldHi[0]=e.pos[0];worldLo[1]=worldHi[1]=e.pos[2];}
+        for(int k=0;k<2;++k) {
+            const float v=e.pos[k*2];
+            if(!(v>=worldLo[k]))worldLo[k]=std::isnan(v) ? -std::numeric_limits<float>::infinity() : v;
+            if(!(v<=worldHi[k]))worldHi[k]=std::isnan(v) ? std::numeric_limits<float>::infinity() : v;
+        }
+        ++worldCount;
     }
-    worldGrid.Build(worldCount,[](int i){ return static_cast<const float*>(worldEnemies[static_cast<std::size_t>(i)].pos); },kWorldCell);
+}
+// The frame's grid, built once on first use.
+const npc::grid::Grid& WorldGrid() noexcept {
+    if(!worldGridBuilt) {
+        worldGrid.Build(worldCount,[](int i){ return static_cast<const float*>(worldEnemies[static_cast<std::size_t>(i)].pos); },kWorldCell);
+        worldGridBuilt=true;
+    }
+    return worldGrid;
 }
 
 const Enemy* World(int* count) noexcept {
@@ -259,9 +278,11 @@ void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept 
     };
     const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
     const float r=ScanRadius(m,range);
-    if(std::isfinite(r)) {
+    // A box round the pivot that holds every point already: the grid would visit them all (in the same order).
+    const bool covers=!(m[12]-r>worldLo[0] || m[12]+r<worldHi[0] || m[14]-r>worldLo[1] || m[14]+r<worldHi[1]);
+    if(std::isfinite(r) && !covers) {
         static std::vector<int> rows;   // kept: its room grows to the battle once
-        npc::grid::FirstAround(worldGrid,m+12,r,INT_MAX,keep,rows);
+        npc::grid::FirstAround(WorldGrid(),m+12,r,INT_MAX,keep,rows);
         for(int i:rows)out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];
     } else {
         for(int i=0;i<worldCount;++i)if(keep(i))out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];
@@ -1027,9 +1048,14 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("EDF6AutoTurret %s loading (build %s, %s)",EDF6AT_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
-    image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
-    if(!image){Log("REFUSED: unsupported EDF.dll (the weapon data still works stock: the guns fire unaimed, unfused)");return false;}
-    if(!gameframe::CounterAsExpected(image)){Log("REFUSED: the scene step counter's code (0x1198FD0 / 0x1193551) is not the stock one: no game frame to count by");return false;}
+    unsigned char* const edfImage=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
+    if(!edfImage){Log("REFUSED: unsupported EDF.dll (the weapon data still works stock: the guns fire unaimed, unfused)");return false;}
+    if(!gameframe::CounterAsExpected(edfImage) || !gameframe::RunTimeAsExpected(edfImage)) {
+        Log("REFUSED: the scene step / scene time code (0x1198FD0 / 0x1193551 / 0x1198E07) is not the stock one: no game frame to count by");
+        return false;
+    }
+    // Only now: every export answers false (does nothing) while image is null, a refused load included.
+    image=edfImage;
     // The flak and the tank gunners stand alone: either one's code being patched by someone else
     // leaves only that one stock. The DLL stays loaded while any slot points into it.
     const int flak=HookFlak();
@@ -1055,7 +1081,7 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void
 
 // EDF6VehicleCrew's gun stabilizer asks whether this plugin steers its guns from the held axes (aimlink.h V3): an older
 // one would count the hull's turn twice, and gets no stabilizer on the seats it steers.
-extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return true; }
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return autoturret::image!=nullptr; }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){autoturret::module=instance;DisableThreadLibraryCalls(instance);}
