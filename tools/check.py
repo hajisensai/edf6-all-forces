@@ -1,6 +1,6 @@
 """The offline checks CI runs (.github/workflows/build.yml), in one command, gentle on the machine it runs on.
 
-  python tools/check.py [--full | --dry-run] [-j N] [--no-build] [--no-ctest] [--no-selftest] [--no-gen]
+  python tools/check.py [--full | --dry-run] [--base REV] [-j N] [--no-build] [--no-ctest] [--no-selftest] [--no-gen]
                         [--normal-priority]
 
   build.cmd + offline_checks, then side by side: ctest, tools/selftest.py, py_compile and the generated files' checks.
@@ -9,6 +9,7 @@
   the merge-base with origin/main, uncommitted and untracked ones included. A change to the build, common/, pylib's
   shared base, CI, check.py or the domain table, or no merge-base, runs every test. The build and the gen stage
   always run whole. --full: every test (CI always runs every test). --dry-run: say what would run, run nothing.
+  --base REV: compare with REV instead of the merge-base (--base HEAD: only the uncommitted changes).
   One check per worktree: a second one while the first is queued or running exits 3 at once.
 
 Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡」):
@@ -116,9 +117,12 @@ def _git(*args: str) -> tuple[int, str]:
     return r.returncode, r.stdout
 
 
+BASE: str | None = None   # --base REV
+
+
 def base_of() -> str:
-    """The merge-base of HEAD and origin/main ('' without one)."""
-    code, base = _git('merge-base', 'HEAD', 'origin/main')
+    """The commit the changes are counted from: --base REV, else the merge-base of HEAD and origin/main ('' without)."""
+    code, base = _git('rev-parse', '--verify', BASE + '^{commit}') if BASE else _git('merge-base', 'HEAD', 'origin/main')
     return '' if code else base.strip()
 
 
@@ -127,7 +131,7 @@ def changed_files() -> tuple[list[str], str | None]:
     of a rename) and the untracked ones; (files, None), or ([], why) when there is no base to compare with."""
     base = base_of()
     if not base:
-        return [], 'no merge-base with origin/main (git fetch origin?)'
+        return [], f'no commit {BASE}' if BASE else 'no merge-base with origin/main (git fetch origin?)'
     code, diff = _git('diff', '--name-only', '--no-renames', base)
     code2, new = _git('ls-files', '--others', '--exclude-standard')
     if code or code2:
@@ -228,13 +232,16 @@ def gen_checks(log: str) -> tuple[int, float]:
 
 
 def main(argv: list[str]) -> int:
-    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run'}
+    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
     if any(a.startswith('-') and a not in known for a in argv):
         print(__doc__)
         return 0 if {'-h', '--help'} & set(argv) else 2
     jobs = os.cpu_count() or 8
     if '-j' in argv:
         jobs = max(2, int(argv[argv.index('-j') + 1]))
+    if '--base' in argv:
+        global BASE
+        BASE = argv[argv.index('--base') + 1]
     sel = plan(argv)
     if '--dry-run' in argv:
         say_plan(sel)
