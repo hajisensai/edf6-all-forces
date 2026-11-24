@@ -415,6 +415,10 @@ def probe_parsing() -> None:
 def perfrun_probe_options() -> None:
     _, o = perfrun.options(['M001', '--dll', 'installed', '--cycle', '3', '--cycle-stay', '10'])
     check(o['cycle'] == 3 and o['cycle_stay'] == 10.0, '--cycle N and --cycle-stay S')
+    _, o = perfrun.options(['M001', '--dll', 'installed', '--key', 'pad:LT@15:1000', '--key', '57@20'])
+    check(o['keys'] == [('pad:LT', 15.0, 1000), ('57', 20.0, 1000)], '--key SPEC@S[:MS], repeatable, as drive.py takes it')
+    _, o = perfrun.options(['M001', '--dll', 'installed'])
+    check(o['keys'] == [], 'no --key: no keys held')
     for bad in (['M001', '--dll', 'installed', '--presentmon', os.path.join(ROOT, 'no-such-presentmon.exe')],
                 ['M001', '--dll', 'installed', '--cycle', '2', '--ab', __file__, __file__]):
         try:
@@ -563,7 +567,7 @@ def outlived_runs() -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out'), None,
-                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False, keys=[]))
         check(rc != 0 and 'perfrun.py --restore' in out.getvalue() and 'placed plugins' in out.getvalue(),
               'a stock mission the game outlived: not put back, said so, with the one command that does')
         with open(os.path.join(d, 'out', 'run.json'), encoding='utf-8') as f:
@@ -592,7 +596,7 @@ def outlived_runs() -> None:
         drive.run = late_exit
         with contextlib.redirect_stdout(io.StringIO()):
             rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out2'), None,
-                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False, keys=[]))
         check(rc == 1 and calls == [('placed', game)], 'the game gone after drive.run: one_run puts back what is left')
         calls.clear()
         drive.restore_placed = lambda g: calls.append(('placed', g)) and False
@@ -600,7 +604,7 @@ def outlived_runs() -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = perfrun.one_run(game, 'M001', os.path.join(d, 'out3'), None,
-                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False))
+                                 dict(warm=1.0, cpu=1, stacks=0, interval=2, difficulty=1, ini=[], shots=False, keys=[]))
         check(rc == 1 and calls == [('placed', game)] and 'perfrun.py --restore' in out.getvalue(),
               'a placed file left over: the run fails, with the command that puts it back')
     finally:
