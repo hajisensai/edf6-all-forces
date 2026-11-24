@@ -733,12 +733,15 @@ def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms:
             incl[k] += 1
     if not incl:
         return ['no plugin frames']
+    anyp = sum(1 for st in stacks if any(is_plugin(f) and 'perfprobe' not in plug.func(f, j == 0)[1]
+                                         for j, f in enumerate(st)))
 
     def row(k: str, c: int) -> str:
         ms = f' {c / n * frame_ms:6.2f} ms/frame' if frame_ms else ''
         label = names[k] if names[k] == k else f'{names[k]} ({k})'
         return f'- {c / n * 100:5.1f}%{ms} {label}'
-    out = ['inclusive:', '']
+    ms = f', {anyp / n * frame_ms:.2f} ms/frame' if frame_ms else ''
+    out = [f'the plugin on the stack (the measurement probes not counted): {anyp / n * 100:.1f}%{ms}', '', 'inclusive:', '']
     out += [row(k, c) + f' (self {selfc[k] / n * 100:.1f}%)' for k, c in incl.most_common(top)]
     out += ['', 'self (system calls below included):', '']
     out += [row(k, c) for k, c in selfc.most_common(top)]
@@ -763,7 +766,7 @@ def thread_detail(img: Image, stacks: list[list[str]], top: int) -> list[str]:
         if frame_rva(st[0]) is None:
             leaf_via[module(st[0])][' < '.join(img.name(s) for s in edf[:2]) or '(no EDF frame)'] += 1
         plugin += any(is_plugin(f) for f in st)
-    out = [f'plugin frames on the stack: {plugin / n * 100:.1f}%', '', 'self (deepest EDF.dll function, system calls '
+    out = [f'plugin frames on the stack (the measurement probes included): {plugin / n * 100:.1f}%', '', 'self (deepest EDF.dll function, system calls '
            'below it included):', '']
     out += [f'- {c / n * 100:5.1f}% {img.name(f)} <- ' + ', '.join(f'{k} {v}' for k, v in callers[f].most_common(3))
             for f, c in selfc.most_common(top)]
