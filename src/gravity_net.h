@@ -1,11 +1,11 @@
 // The gravity operations online (gravity_net.cpp; the wire and why in gravity_net_protocol.h): what this machine's player
 // holds and throws, every other machine's copy of it held and thrown the same way.
 // A carrier (the gravity gun) does its own moves through gravity.h as offline and tells this layer each frame:
-//  - Hold every frame it carries `t` to `goal` (moving at `goalVel`): the grab's state goes to every peer (kHoldGapMs).
+//  - Hold every frame it carries `t` to `goal` (moving at `goalVel`): the grab's state goes to every peer (kHoldGapFrames).
 //    False: not this machine's to hold (a peer holds it already, or both grabbed it at once and the peer outranks this
 //    one: the host's grab over a guest's, else the lower PUID's): the carrier lets go;
 //  - Thrown with the velocity Throw gave it, or LetGo: once, the grab ended. A thrown thing with no ID (debris, a
-//    container) has its flight's states sent after it (kFlightGapMs, up to kFlightMostMs or its rest) and every copy is
+//    container) has its flight's states sent after it (kFlightGapFrames, up to kFlightMostMs or its rest) and every copy is
 //    steered onto them;
 //  - Radial instead of gravity::Radial: every machine moves its copies the same way.
 // A carrier that stops calling Hold without either (put away, the mission over) lets go here after a few frames.
