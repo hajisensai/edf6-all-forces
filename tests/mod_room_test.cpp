@@ -68,10 +68,19 @@ const EDF6CoopMemberAttributeApi* EDF6COOP_MA_CALL AttributeTable(uint32_t versi
     return &attributeTable;
 }
 uint32_t Identity(int32_t,EDF6CoopPeer*){++worldQueries;return 0;}
+// 10: an EDF6Coop whose overflow still latches the room (no capacity bit 2), 11: one without the batch poll export.
+uint32_t Capacity(uint32_t version,uint32_t size,EDF6CoopExtensionCapacity* out){
+    if(version!=EDF6COOP_EXTENSION_CAPACITY_VERSION || size!=sizeof(*out))return 0;
+    *out=EDF6CoopExtensionCapacity{};out->size=sizeof(*out);out->version=EDF6COOP_EXTENSION_CAPACITY_VERSION;
+    out->flags=dependencyMode==10 ? 11u : 15u;return 1;
+}
+uint32_t Batch(uint64_t,EDF6CoopExtensionMessage*,uint32_t,void*,uint32_t,uint32_t* count){*count=0;return 0;}
 FARPROC ResolveDependency(const char* name) noexcept {
     if(dependencyMode==0)return nullptr;
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&BridgeApi);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&Admission);
+    if(!std::strcmp(name,"EDF6CoopGetExtensionCapacity"))return reinterpret_cast<FARPROC>(&Capacity);
+    if(!std::strcmp(name,"EDF6CoopPollExtensionBatch"))return dependencyMode==11 ? nullptr : reinterpret_cast<FARPROC>(&Batch);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
     // The room check asks for the v1 table and refuses one it cannot use (coop_attr.h Usable): 6 none, 7 another version.
     if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&AttributeTable);
@@ -393,7 +402,7 @@ int main(int argc,char** argv){
     // Both native entry points must reject missing/old/incomplete/uninitialized
     // Coop while a matching bridge is usable in the menu (world still absent).
     const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
-    for(int mode:{0,1,2,3,4,6,7,8,9}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version; 8, 9: older than 2.7.0
+    for(int mode:{0,1,2,3,4,6,7,8,9,10,11}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version; 8, 9: older than 2.7.0; 10, 11: overflow not recovered / no batch poll
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);

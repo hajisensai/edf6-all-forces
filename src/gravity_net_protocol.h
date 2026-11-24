@@ -32,10 +32,11 @@ constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
 constexpr std::uint32_t kVersion=4;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
-constexpr std::uint64_t kHoldGapMs=50;     // a hold's state goes out this often while it lasts
+// Senders' pacing in logic frames (GameFrame, 60 Hz), not ms of a clock with 15.6 ms steps (which stretched 50 ms to ~63).
+constexpr std::uint64_t kHoldGapFrames=3;  // a hold's state goes out this often while it lasts (20 Hz)
 constexpr std::uint64_t kHoldSilentMs=600; // a hold not heard of this long is let go (its grabber left, its plugin stopped)
 constexpr std::uint32_t kMostLeftMs=3600000;
-constexpr std::uint64_t kFlightGapMs=100;    // a thrown thing with no ID: its state goes out this often while it flies...
+constexpr std::uint64_t kFlightGapFrames=6;  // a thrown thing with no ID: its state goes out this often while it flies (10 Hz)...
 constexpr std::uint64_t kFlightMostMs=4000;  // ...for at most this long (or until it rests)
 constexpr std::uint64_t kFlightSilentMs=600; // a flight not heard of this long is left to this machine's physics
 constexpr float kMostRadial=200.0f;          // m: a radial's reach at most (gravity::Radial)

@@ -92,6 +92,14 @@ const wchar_t* CoopDependencyProblem() noexcept {
     const auto attributes=reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(resolveCoop("EDF6CoopGetMemberAttributeApi"));
     if(!attributes || !coopattr::Usable(attributes(EDF6COOP_MEMBER_ATTRIBUTE_VERSION)))   // coop_attr.h: what every reader needs
         return L"EDF6Coop 缺少成员属性接口（各玩家的 4.1 外观等联机同步需要），版本过旧。";
+    // 2026-11-24 (net-2, net-7): support_net.cpp takes a frame's messages with one batch poll, and counts on an overflow
+    // being recovered (a new generation once the links drain) rather than ending the plugins' networking for the mission.
+    const auto capacity=reinterpret_cast<EDF6CoopGetExtensionCapacityFn>(resolveCoop("EDF6CoopGetExtensionCapacity"));
+    EDF6CoopExtensionCapacity limits{};limits.size=sizeof(limits);
+    constexpr std::uint32_t kNeeded=EDF6COOP_EXTENSION_CAPACITY_RECOVERABLE_FAULT|EDF6COOP_EXTENSION_CAPACITY_POLL_BATCH;
+    if(!capacity || capacity(EDF6COOP_EXTENSION_CAPACITY_VERSION,sizeof(limits),&limits)!=1 || limits.size!=sizeof(limits) ||
+       (limits.flags&kNeeded)!=kNeeded || !resolveCoop("EDF6CoopPollExtensionBatch"))
+        return L"EDF6Coop 缺少批量收包与拥塞后自动恢复的联机扩展接口，版本过旧。";
     if(admission()!=1)return L"EDF6Coop 的任务准入保护尚未就绪，已阻止进入联机。";
     return nullptr;
 }
