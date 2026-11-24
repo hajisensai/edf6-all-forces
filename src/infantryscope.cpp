@@ -237,7 +237,22 @@ namespace {
 // thread: whether this mission's first drawn lens / a lens view that could not be held was logged.
 scopepip::LensCompositor compositor;
 ULONGLONG idleSince=0;   // render thread: when the lens pass went idle (GetTickCount64), 0 while in use
-std::atomic<bool> drawnLogged{false},lensSizeLogged{false};
+// A new mission (ResetInfantryScope, game thread) bumps it; the render thread drops every device resource of the last
+// one (the cached view holds the lens view's texture, which the engine's mission end destroyed) at its next call.
+std::atomic<unsigned> missionEpoch{0};
+unsigned seenEpoch=0,loggedViews=0;
+void NewMission() noexcept {
+    const unsigned epoch=missionEpoch.load(std::memory_order_acquire);
+    if(epoch==seenEpoch)return;
+    seenEpoch=epoch;
+    compositor.Reset();
+    idleSince=0;loggedViews=0;
+}
+// Once a mission each, one flag per reason (a shared one let the first reason hide the others): the lens view's target
+// not samplable, the lens command without both colours held, the lens texture bound natively as a render target, the
+// device refusing the lens texture's shader resource view.
+std::atomic<bool> drawnLogged{false},lensSizeLogged{false},lensMissingLogged{false},lensBoundLogged{false},
+    lensViewLogged{false};
 // The world view's viewport (view+0) and query (view+4: 0 the main view, 1 the distant view, 2 a shadow cascade).
 bool ViewIndex(const void* view,unsigned* index,unsigned* type) noexcept {
     __try { *index=At<unsigned>(view,0);*type=At<unsigned>(view,4);return true; }
@@ -251,6 +266,7 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
     constexpr ULONGLONG kIdleMs=4000;
     unsigned index=0,type=0;
     if(!context || !view || !ViewIndex(view,&index,&type) || type!=0)return;
+    NewMission();
     if(index==scopepip::kLensViewport) {
         // The lens view's world (scope_lens.cpp): held for the next recording's lens command (right after that
         // recording's main view's world, before its post stage).
@@ -289,12 +305,20 @@ void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept {
     // Render thread, after the main view's world: the lens view the last recording rendered drawn into the main view's
     // world colour (both released).
     float h=0.0f,r=0.0f,lensYScale=0.0f;
+    NewMission();
     const bool heldMain=compositor.HoldsMain(),heldLens=compositor.HoldsLens();
     if(!context || !compositor.Composite(context,&h,&r,&lensYScale)) {
         lensShown.store(false,std::memory_order_release);
         // docs/scope-pip-re.md §4.5 (M): the lens view's world end is the one with view+0 == 3. Not seen: say so once.
-        if((!heldMain || !heldLens) && !lensSizeLogged.exchange(true,std::memory_order_acq_rel))
+        if((!heldMain || !heldLens) && !lensMissingLogged.exchange(true,std::memory_order_acq_rel))
             Log("INFANTRYSCOPE the lens command found no %s world colour held: no lens this frame",heldMain ? "lens view's" : "main view's");
+        const scopepip::LensSource failed=compositor.Source();
+        if(heldMain && heldLens && failed.lensBoundAsTarget && !lensBoundLogged.exchange(true,std::memory_order_acq_rel))
+            Log("INFANTRYSCOPE the lens view's texture is bound as a render target at the lens command: no lens this frame");
+        if(heldMain && heldLens && failed.viewError && !lensViewLogged.exchange(true,std::memory_order_acq_rel))
+            Log("INFANTRYSCOPE the lens view's texture %p (%ux%u format %u bind 0x%X) got no shader resource view as format %u "
+                "(hr 0x%08lX): no lens",failed.texture,failed.width,failed.height,failed.format,failed.bindFlags,
+                failed.viewFormat,static_cast<unsigned long>(failed.viewError));
         return;
     }
     // The reticle's FOV: the lens view's own projection as rendered (it may be a step behind the camera).
@@ -302,6 +326,16 @@ void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept {
     lensShownFov.store(fov,std::memory_order_release);
     lensShown.store(fov>0.0f,std::memory_order_release);
     lensAt.store(GetTickCount64(),std::memory_order_release);
+    // One line per new view of a lens view's texture: its bind flags (sampled directly, no copy) and the native targets
+    // at the command (the main view's world colour, not the lens view's texture).
+    const scopepip::LensSource src=compositor.Source();
+    if(src.views!=loggedViews) {
+        loggedViews=src.views;
+        Log("INFANTRYSCOPE lens view sampled directly: texture %p %ux%u format %u view %u bind 0x%X; main colour %p %ux%u; "
+            "native targets %u, lens bound as one: %s; views %u",src.texture,src.width,src.height,src.format,src.viewFormat,
+            src.bindFlags,src.mainTexture,src.mainWidth,src.mainHeight,src.nativeTargets,src.lensBoundAsTarget ? "yes" : "no",
+            src.views);
+    }
     if(!drawnLogged.exchange(true,std::memory_order_acq_rel))
         Log("INFANTRYSCOPE lens drawn: main height %.0f, lens radius %.0f, lens view %dx%d, scope fov %.4f",h,r,
             scopelens::Side(),scopelens::Side(),fov);
@@ -336,9 +370,13 @@ bool InstallInfantryScope() noexcept {
 
 void ResetInfantryScope() noexcept {
     Publish(Published{});
+    missionEpoch.fetch_add(1,std::memory_order_acq_rel);
     scopelens::Reset();
     drawnLogged.store(false,std::memory_order_release);
     lensSizeLogged.store(false,std::memory_order_release);
+    lensMissingLogged.store(false,std::memory_order_release);
+    lensBoundLogged.store(false,std::memory_order_release);
+    lensViewLogged.store(false,std::memory_order_release);
     lensRefused.store(false,std::memory_order_release);
     lensAt.store(0,std::memory_order_release);
     lensShown.store(false,std::memory_order_release);
