@@ -41,8 +41,8 @@ void Update(const Room& next,std::uint64_t now) noexcept {
     if(ready && room.peersReady)peers.Joins(registry,c.peerCount,[](std::size_t i,std::uint32_t p) noexcept {registry.At(i).joined(p);});
 }
 
-bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept {
-    return registry.Dispatch(peer,puid,bytes,size,now)!=Route::none;
+bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,bool state) noexcept {
+    return registry.Dispatch(peer,puid,bytes,size,now,state)!=Route::none;
 }
 
 void Reset() noexcept {
@@ -69,6 +69,15 @@ std::uint32_t Broadcast(const void* bytes,std::size_t size) noexcept {
 bool SendHost(const void* bytes,std::size_t size) noexcept {
     const std::uint32_t host=HostPeer();
     return host && Send(host,bytes,size);
+}
+bool SendState(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t size) noexcept {
+    return ready && key && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.sendState &&
+        room.context.sendState(peer,key,bytes,size);
+}
+std::uint32_t BroadcastState(std::uint32_t key,const void* bytes,std::size_t size) noexcept {
+    std::uint32_t sent=0;
+    for(std::uint32_t p=1;ready && p<=room.context.peerCount;++p)if(SendState(p,key,bytes,size))++sent;
+    return sent;
 }
 std::uint32_t NewOrigin() noexcept {
     unsigned r=0;

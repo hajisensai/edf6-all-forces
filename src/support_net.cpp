@@ -133,6 +133,11 @@ bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcep
         count<=EDF6COOP_EXTENSION_MAX_PAYLOAD && api.send &&
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
 }
+// A plugin channel's state message (plugin_net.h SendState): EDF6Coop sendState, never the support protocol's own.
+bool SendStateCommand(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t count) noexcept {
+    return running && key && peer && peer<=snapshot.peerCount && bytes && count && count<=EDF6COOP_EXTENSION_MAX_PAYLOAD &&
+        api.sendState && api.sendState(snapshot.generation,&peers[peer],key,bytes,static_cast<std::uint32_t>(count))!=0;
+}
 std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t count,std::uint32_t byteLimit,std::uint32_t packetLimit) noexcept {
     if(!running || !peer || peer>snapshot.peerCount || !bytes || !count ||
        count>EDF6COOP_EXTENSION_MAX_PAYLOAD || !trySendExtension)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
@@ -168,7 +173,7 @@ void CommandContext(ULONGLONG now) noexcept {
     toldContext=CurrentContext();contextTold=true;
     plugin_net::Room room;
     room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
+        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running,&SendStateCommand};
     room.peersReady=running && session.RoomReady();   // every hello heard: the channels' joins (plugin_net.h)
     plugin_net::Update(room,now);
 }
@@ -232,7 +237,7 @@ bool Resolve(ULONGLONG now) noexcept {
     transportAdmissionReady=reinterpret_cast<AdmissionReadyFn>(GetProcAddress(current,"EDF6Coop_MissionAdmissionReady"));
     pollBatch=reinterpret_cast<EDF6CoopPollExtensionBatchFn>(GetProcAddress(current,"EDF6CoopPollExtensionBatch"));
     if(!get || !pollBatch || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
-       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll ||
+       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll || !api.sendState ||
        !transportAdmissionReady || !transportAdmissionReady() || !GetProcAddress(current,"EDF6Coop_ResolveMissionPlayerPuid")) {
         NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
         api={};pollBatch=nullptr;return false;
@@ -430,11 +435,16 @@ void RunSupportNetTick() noexcept {
             const EDF6CoopExtensionMessage& item=batch[k];
             ++netPerf.messages;
             // The sender is EDF6Coop's index of its authenticated peer (the order Start enumerated them in): peers[index+1].
+            // A state message (ABI 2 flags bit 0) has its key, a reliable one none; any other flag is not this ABI's.
+            const bool state=(item.flags&EDF6COOP_EXTENSION_MESSAGE_STATE)!=0;
             if(item.peer>=snapshot.peerCount || !item.bytes || item.bytes>EDF6COOP_EXTENSION_MAX_PAYLOAD ||
-               item.offset>sizeof(batchBytes)-item.bytes)continue;
+               item.offset>sizeof(batchBytes)-item.bytes || (item.flags&~EDF6COOP_EXTENSION_MESSAGE_STATE) ||
+               state!=(item.key!=0))continue;
             const std::uint32_t peer=item.peer+1,count=item.bytes;
             const unsigned char* bytes=batchBytes+item.offset;
-            if(plugin_net::Receive(peer,peers[peer].id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
+            // A channel's (plugin_net.h), before the support parser. A state message is a channel's or nothing: the support
+            // protocol sends none (plugin_net::Receive drops one no channel takes).
+            if(plugin_net::Receive(peer,peers[peer].id,bytes,count,now,state) || state)continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();

@@ -44,6 +44,9 @@ struct CommandNetworkContext {
     // The transport alone is up (the support handshake may still be pending): what the Q marks need, peer to peer
     // with no host step (qmark.cpp). `ready` implies it.
     bool linked=false;
+    // EDF6Coop sendState (coop_extension_api.h: unreliable, the latest per (sender, key)); key from plugin_net_logic.h
+    // StateKey. True: taken by the transport (which may still drop it).
+    bool (*sendState)(std::uint32_t peer,std::uint32_t key,const void*,std::size_t) noexcept=nullptr;
 };
 void UpdateCommandNetwork(const CommandNetworkContext&,std::uint64_t now) noexcept;
 bool ReceiveCommandNetwork(std::uint32_t senderPeer,const char* authenticatedPuid,

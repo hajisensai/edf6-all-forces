@@ -69,6 +69,26 @@ void RegistryChecks() {
     Check(reg.Dispatch(1,"p1",ma.data(),3,0)==Route::none,"too short to have a magic: none");
     Check(reg.Dispatch(0,"",nullptr,0,0)==Route::none,"no bytes: none");
 
+    // State messages (EDF6Coop extension ABI 2): only a channel's kinds it takes as state; never left to the support parser.
+    Check(reg.Dispatch(1,"p1",mb.data(),mb.size(),0,true)==Route::dropped && gotB==2,"a state to a channel taking none: dropped");
+    Check(reg.Dispatch(1,"p1",unknown.data(),unknown.size(),0,true)==Route::dropped,"a state of no channel: dropped, not none");
+    Check(reg.Dispatch(1,"p1",ma.data(),3,0,true)==Route::dropped,"a state too short for a magic: dropped");
+    Registry st;
+    Channel s;s.name="s";s.magic=kC;s.version=1;s.minSize=s.maxSize=16;s.receive=&ReceiveC;
+    s.takesState=[](const void* p,std::size_t n) noexcept { return n>8 && static_cast<const unsigned char*>(p)[8]==1; };
+    Check(st.Register(s),"a channel taking states");
+    auto s1=Message(kC,1,16);s1[8]=1;
+    auto s2=Message(kC,1,16);s2[8]=2;
+    Check(st.Dispatch(1,"p1",s1.data(),s1.size(),0,true)==Route::delivered && gotC==1,"its state kind: delivered");
+    Check(st.Dispatch(1,"p1",s2.data(),s2.size(),0,true)==Route::dropped && gotC==1,"another kind as a state: dropped");
+    Check(st.Dispatch(1,"p1",s2.data(),s2.size(),0)==Route::delivered && gotC==2,"the same kind reliable: delivered");
+    auto s3=Message(kC,1,15);s3[8]=1;
+    Check(st.Dispatch(1,"p1",s3.data(),s3.size(),0,true)==Route::dropped && gotC==2,"a state out of bounds: dropped");
+    Check(StateKey(StateStream::enemyPose,0)==1024u && StateKey(StateStream::ultimateKeep,5)==4u*1024u+5u,"the key rule");
+    Check(StateKey(StateStream::enemyPose,kStateObjects)==0u && StateKey(static_cast<StateStream>(0),1)==0u &&
+          StateKey(static_cast<StateStream>(kStateStreams),0)==0u,"an object or stream out of range: no key");
+    Check(StateKey(static_cast<StateStream>(kStateStreams-1),kStateObjects-1)<65536u,"the largest key under 65536");
+
     // Joins: each channel with a joined callback, once per peer of the room, again after Reset.
     Peers peers;peers.Reset();
     joins.clear();

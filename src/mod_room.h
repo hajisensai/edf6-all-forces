@@ -63,6 +63,8 @@ namespace crew {
 //      no "older build" notices. Every channel sends to every peer: a 16 would be sent what it cannot read.
 //      Same number, net-9: enemy-control protocol 8 / pose wire 2 (each pose sample carries the host's frame and
 //      measured motion; the guest interpolates it per logic frame).
+//      Same number, net-5: every member needs EDF6Coop 2.9.0 (extension ABI 2, coop_attr.h kRoomCoop*); the per-frame
+//      states (enemy-control pose, gravity hold / flight, ultimate keep) go as state messages (plugin_net.h SendState).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
 constexpr std::int64_t kAllForcesRoomProtocol=17;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);

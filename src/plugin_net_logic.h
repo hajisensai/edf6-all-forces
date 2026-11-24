@@ -35,7 +35,35 @@ struct Channel {
     void (*update)(const CommandNetworkContext& context,std::uint64_t now) noexcept=nullptr;
     void (*reset)() noexcept=nullptr;
     void (*joined)(std::uint32_t peer) noexcept=nullptr;
+    // A state message (EDF6Coop sendState; plugin_net.h SendState) of this channel's that it takes: true for the kinds it
+    // sends as state. nullptr: the channel sends none, and every state message of its magic is dropped.
+    bool (*takesState)(const void* bytes,std::size_t size) noexcept=nullptr;
 };
+
+// State messages (EDF6Coop ABI 2 sendState, net-5 2026-11-24): "the latest replaces the previous" under a key the sender
+// picks; never retransmitted, a receiver drops one not newer than the last it took of (sender, key). Their payload is the
+// channel's own message, the same bytes a reliable one would carry (EDF6Coop's [key][sequence] header is its own and
+// stripped before delivery), routed by its magic like any other; the channel's takesState says which kinds may come so.
+// The key: one stream of one sender, StateKey(stream, object):
+//  - stream: a kind of state of one channel (StateStream below; a fixed number, never a registry index, so a key does not
+//    move when a channel is added);
+//  - object: which one of them on the sending machine, a slot it keeps for the object's life (an enemy-control lease's
+//    slot, a show's slot; 0 for a machine's one hold). A slot used again for the next object is the same stream: its
+//    sequence goes on, and the receiver tells the objects apart by the payload (a lease, a grab serial, a show key).
+// stream*kStateObjects+object < 64*1024 = EDF6COOP_EXTENSION_MAX_STATE_KEYS; key 0 is no key.
+enum class StateStream : std::uint32_t {
+    enemyPose=1,       // enemy control: the host's pose of a lease (object: its lease slot, < enemy_control_protocol::kMaxLeases)
+    gravityHold=2,     // gravity: this machine's hold (object 0)
+    gravityFlight=3,   // gravity: this machine's thrown thing's flight (object 0)
+    ultimateKeep=4,    // ultimate strike: a playing show's keep (object: its show slot, < ultimate::kMaxShows)
+};
+constexpr std::uint32_t kStateObjects=1024,kStateStreams=64;
+// 0: no key (an object out of range, a stream not one).
+constexpr std::uint32_t StateKey(StateStream stream,std::uint32_t object) noexcept {
+    const auto s=static_cast<std::uint32_t>(stream);
+    return s && s<kStateStreams && object<kStateObjects ? s*kStateObjects+object : 0u;
+}
+static_assert(kStateStreams*kStateObjects<=65536u,"every key under EDF6COOP_EXTENSION_MAX_STATE_KEYS");
 
 enum class Route : std::uint8_t {
     none,        // no channel's: the caller tries its own parser (support_net's v2 messages)
@@ -65,10 +93,13 @@ public:
     }
     // Every channel's reset (the room changed: RoomWatch; or the transport reset whole).
     void ResetAll() const noexcept { for(std::size_t i=0;i<count_;++i)if(rows_[i].reset)rows_[i].reset(); }
-    Route Dispatch(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) const noexcept {
+    // state: a state message (EDF6Coop sendState); none of a channel's: dropped, never the support parser's.
+    Route Dispatch(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,
+                   bool state=false) const noexcept {
         const Channel* c=Find(bytes,size);
-        if(!c)return Route::none;
+        if(!c)return state ? Route::dropped : Route::none;
         if(size<c->minSize || size>c->maxSize)return Route::dropped;
+        if(state && (!c->takesState || !c->takesState(bytes,size)))return Route::dropped;
         if(c->version && wire::HeadWord(bytes,size,1)!=c->version)return Route::dropped;
         // A channel's receive returning false would hand its bytes to another parser: it never may (they are its).
         c->receive(peer,puid,bytes,size,now);

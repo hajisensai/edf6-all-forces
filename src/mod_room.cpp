@@ -78,11 +78,13 @@ const wchar_t* CoopVersionProblem() noexcept {
 const wchar_t* CoopDependencyProblem() noexcept {
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(resolveCoop("EDF6CoopGetExtensionApi"));
     if(!get)return L"未安装匹配版本的 EDF6Coop，或当前版本过旧。";
+    // Its version first: an EDF6Coop older than kRoomCoop* does not serve this build's extension ABI either (2.9.0's
+    // version 2, net-5), and the player is told which version to upgrade to rather than "incompatible".
+    if(const wchar_t* old=CoopVersionProblem())return old;
     EDF6CoopExtensionApi api{};
     if(get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api)!=1 || api.size!=sizeof(api) ||
-       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll)
+       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll || !api.sendState)
         return L"EDF6Coop 联机扩展接口不兼容或不完整。";
-    if(const wchar_t* old=CoopVersionProblem())return old;
     using AdmissionReady=std::uint32_t(*)();
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
