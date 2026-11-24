@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <random>
 
 namespace {
@@ -266,6 +267,76 @@ void Rigid() {
     Expect(InterpolateRigid(a,b,0.5f,o,10,1) && o[15]==1.0f && o[3]==0.0f,"fourth column from the current");
 }
 
+// Stage 4: a scaled root (one length for the three rows), the bones times D, the pose's sum.
+void Scaled() {
+    float a[16],b[16],o[16],e[16];
+    auto scale=[](float* m,float s){for(int i=0;i<3;++i)for(int j=0;j<3;++j)m[i*4+j]*=s;};
+    Make(a,0.0,0.0,0,0,0);Make(b,0.4,0.0,1,0,0);Make(e,0.1,0.0,0.25f,0,0);
+    scale(a,3.0f);scale(b,3.0f);scale(e,3.0f);
+    Expect(InterpolateScaled(a,b,0.25f,o,10,1) && MaxDiff(o,e)<1e-5,"a scaled quarter yaw and move",MaxDiff(o,e));
+    Expect(!InterpolateRigid(a,b,0.25f,o,10,1),"which the rigid blend refuses");
+    Make(a,0.2,0.1,0,0,0);Make(b,0.2,0.1,0,0,0);Make(e,0.2,0.1,0,0,0);
+    scale(a,2.0f);scale(b,4.0f);scale(e,2.5f);
+    Expect(InterpolateScaled(a,b,0.25f,o,10,1) && MaxDiff(o,e)<1e-5,"the scale blended too",MaxDiff(o,e));
+    Make(a,0.0,0.0,0,0,0);Make(b,0.1,0.0,0,0,0);
+    Expect(InterpolateScaled(a,b,0.5f,o,10,1) && RigidSign(o)==1.0,"unscaled stays rigid");
+    // The refusal's reason, for the log; kNone exactly when the blend takes the pair.
+    Expect(ScaledRefusal(a,b,0.5f,10,1)==Refusal::kNone && RigidRefusal(a,b,0.5f,10,1)==Refusal::kNone,"taken: no reason");
+    Expect(RigidRefusal(a,b,1.5f,10,1)==Refusal::kAlpha,"reason: alpha");
+    {
+        float t[16];std::memcpy(t,b,64);t[12]=50.0f;
+        Expect(RigidRefusal(a,t,0.5f,10,1)==Refusal::kMove && !InterpolateRigid(a,t,0.5f,o,10,1),"reason: move");
+        Make(t,2.0,0,0,0,0);
+        Expect(RigidRefusal(a,t,0.5f,10,1)==Refusal::kTurn && !InterpolateRigid(a,t,0.5f,o,10,1),"reason: turn");
+        Make(t,0.1,0,0,0,0,true);
+        Expect(RigidRefusal(a,t,0.5f,10,1)==Refusal::kMirrored,"reason: mirrored");
+        Make(t,0.1,0,0,0,0);t[0]*=2.0f;
+        Expect(RigidRefusal(a,t,0.5f,10,1)==Refusal::kNotRigid && ScaledRefusal(a,t,0.5f,10,1)==Refusal::kNotRigid,
+               "reason: not rigid (a squash)");
+        Make(t,0.1,0,0,0,0);scale(t,3.0f);
+        Expect(RigidRefusal(a,t,0.5f,10,1)==Refusal::kNotRigid && ScaledRefusal(a,t,0.5f,10,1)==Refusal::kNone,
+               "a uniform scale: rigid refuses, scaled takes");
+    }
+    b[0]*=2.0f;b[1]*=2.0f;b[2]*=2.0f;
+    Expect(!InterpolateScaled(a,b,0.5f,o,10,1),"a squash (rows of two lengths) refused");
+    Make(b,0.1,0.0,0,0,0);scale(b,0.0f);
+    Expect(!InterpolateScaled(a,b,0.5f,o,10,1),"a zero scale refused");
+    Make(b,0.1,0.0,50,0,0);scale(b,2.0f);scale(a,2.0f);
+    Expect(!InterpolateScaled(a,b,0.5f,o,10,1),"a scaled teleport is a cut");
+    // D = cur^-1 * shown: the root bone times D is the shown root, a second bone keeps its place relative to the root.
+    Make(a,0.0,0.0,0,0,0);Make(b,0.4,0.2,1,2,3);scale(a,1.5f);scale(b,1.5f);
+    Expect(InterpolateScaled(a,b,0.5f,e,10,1),"blend for D");
+    // The inverse of b (uniform scale s, rotation R, translation t): R^T/s, -t R^T/s.
+    float inv[16]={},d[16]={};
+    const float s2=1.5f*1.5f;
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)inv[i*4+j]=b[j*4+i]/s2;
+    for(int j=0;j<3;++j)inv[12+j]=-(b[12]*inv[j]+b[13]*inv[4+j]+b[14]*inv[8+j]);
+    inv[15]=1.0f;
+    for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+        d[i*4+j]=inv[i*4]*e[j]+inv[i*4+1]*e[4+j]+inv[i*4+2]*e[8+j]+inv[i*4+3]*e[12+j];
+    float bones[32];
+    std::memcpy(bones,b,64);
+    Make(o,0.9,-0.3,4,5,6);
+    std::memcpy(bones+16,o,64);
+    float rel[16];   // bone 1 in the root's frame before
+    for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+        rel[i*4+j]=o[i*4]*inv[j]+o[i*4+1]*inv[4+j]+o[i*4+2]*inv[8+j]+o[i*4+3]*inv[12+j];
+    const std::uint64_t before=PoseSum(bones,2);
+    MulBones(bones,2,d);
+    Expect(MaxDiff(bones,e)<1e-4,"the root times D is the shown root",MaxDiff(bones,e));
+    float back[16];
+    for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+        back[i*4+j]=rel[i*4]*e[j]+rel[i*4+1]*e[4+j]+rel[i*4+2]*e[8+j]+rel[i*4+3]*e[12+j];
+    Expect(MaxDiff(bones+16,back)<1e-4,"another bone moves with the root",MaxDiff(bones+16,back));
+    const std::uint64_t after=PoseSum(bones,2);
+    Expect(after!=before,"the sum sees the write");
+    bones[17]+=1e-6f;
+    Expect(PoseSum(bones,2)!=after,"and a one-ulp rewrite of one bone");
+    float swapped[32];
+    std::memcpy(swapped,bones+16,64);std::memcpy(swapped+16,bones,64);
+    Expect(PoseSum(swapped,2)!=PoseSum(bones,2),"and bones swapped in place");
+}
+
 // The input across presentation frames (docs/unlimited-fps-re.md §2.4), the order frame_rate.cpp gives it. The game's
 // wrapper update (0x1182BC0, one action here) clears the edges and sets them on a change since the last update; the
 // game runs it after System::Update, so the step reads the last frame's. With the frame gate the plugin runs it before
@@ -326,6 +397,7 @@ int main() {
     LoopCountFirst();
     Alpha();
     Rigid();
+    Scaled();
     InputEdges();
     std::printf("frame_rate_check: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
