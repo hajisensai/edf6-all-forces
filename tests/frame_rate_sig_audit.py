@@ -5,7 +5,8 @@ wind time, the hold-off count Application+0x6C) and what it is given ({dt, n} in
 call and the wrapper update's call with their arguments; the wrapper table 0x7CDC0 walks (4 players of 0xDD0, 146
 wrappers of 0x18 from +8, the menu-key masks after them) and the wrapper update 0x1182BC0's field layout ClearForUi
 relies on; the mouse's and the wheel's takes in the input callback and the accumulator's cleared value; the sync interval
-`sete dl` passed to 0x111D890, its only call. An EDF.dll path as the argument, else the game gamedir finds; exit 77
+`sete dl` passed to 0x111D890, its only call; the load count 0x2139AB0+0x34 (its add, its callers, its set-to-0s, the job
+thread's read). An EDF.dll path as the argument, else the game gamedir finds; exit 77
 (skipped) without one."""
 from __future__ import annotations
 
@@ -220,5 +221,26 @@ check(direct_callers(consts['kVolume']) == [vol], 'the volume smoothing is calle
 ls = consts['kLoadStore']
 check(img[ls:ls + 8] == arrays['kLoadStoreSig'] and rip(ls, 8) == consts['kLoadMeter'], 'kLoadStore stores to kLoadMeter')
 check(img[ls + 8] == 0xE8, 'a call follows the load store (r11 and the flags are dead in the stub)')
+# The load count (docs/unlimited-fps-re.md §4.1.1): 0x1133FC0 adds dl*2-1 to rcx+0x34; every caller passes the global
+# kLoad (but the two of 0x110B4xx, another object's); the mission scripts' BeginLoading sets it to 0 (0x1133400) and then
+# adds 1, EndLoading takes 1; the job thread holds its queue while it is above 0.
+la, lo = consts['kLoadAdd'], consts['kLoad']
+check(img[la:la + 16] == arrays['kLoadAddSig'] and img[la + 14] == consts['kLoadCount'], 'kLoadAdd: lock xadd [rcx+34h],dl*2-1')
+adds = {c: (rip(c - 7, 7), img[c - 9:c - 7]) for c in direct_callers(la) if img[c - 7:c - 4] in (bytes.fromhex('488d0d'), bytes.fromhex('488b0d'))}
+check(len(adds) == len(direct_callers(la)) == 15, f'kLoadAdd has the 15 callers read: {len(direct_callers(la))}')
+check(sorted(c for c, (t, _) in adds.items() if t != lo) == [0x110B527, 0x110B644], 'all but 0x110B4xx pass kLoad')
+up = sorted(c for c, (t, d) in adds.items() if t == lo and d == bytes.fromhex('b201'))
+down = sorted(c for c, (t, d) in adds.items() if t == lo and d == bytes.fromhex('33d2'))
+check(up == [0x9E014, 0x1ACC03, 0x20FC24, 0x21070F, 0x9424C4, 0x942542, 0x9425B4], f'the +1 callers: {[hex(c) for c in up]}')
+check(down == [0x1B4A69, 0x210889, 0x21FBD6, 0x9424DF, 0x94255B, 0x9425CF], f'the -1 callers: {[hex(c) for c in down]}')
+check(img[0x1133400:0x1133408] == bytes.fromhex('c7413400000000c3'), '0x1133400: mov dword [rcx+34h],0')
+check(img[0x1ACBEE:0x1ACBF5] == bytes.fromhex('488d0dbbcef801') and rip(0x1ACBEE, 7) == lo and rel_target(0x1ACBF5, 5) == 0x1133400,
+      'BeginLoading sets kLoad to 0 before its +1 (0x1ACBF5)')
+check(all(rip(c - 7, 7) == lo for c in direct_callers(0x1133400)), 'every set-to-0 is of kLoad')
+jr = consts['kLoadJobRead']
+check(img[jr:jr + 5] == arrays['kLoadJobReadSig'] and img[jr - 3:jr] == bytes.fromhex('418bc7') and img[jr + 5:jr + 9] == bytes.fromhex('85c00f8f'),
+      'the job thread reads the count (lock xadd [rbp+34h],r15d) and skips its queue above 0')
+check('if(LoadingNow())return pacing::CountsToBoundary(' in src and 'if(!framerate::LoadingRuns(gate,n))return 0;' in src,
+      'while loading the gate counts first and waits to tick boundaries')
 check(re.search(r'constexpr int kGuards=8;', src) and 'guards!=kGuards' in src, 'the gate needs all 8 guards')
 print(f'frame rate signatures: {checks} checks ok')
