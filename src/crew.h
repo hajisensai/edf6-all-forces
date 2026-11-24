@@ -22,6 +22,7 @@ struct Config {
     bool enabled=true;
     bool debug=true;
     bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
+    int preloadMode=0;         // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
     float crewRange=600.0f;    // metres from the player; 0 = any distance

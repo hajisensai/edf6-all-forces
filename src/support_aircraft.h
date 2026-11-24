@@ -11,6 +11,8 @@ struct SupportAircraft {
     int sortie=0;              // a sortie call's pass (crew.h SortiePass; 0 none): one pass at the target, then away
 };
 int SupportAirCallCount() noexcept;
+// A sortie's second wave's catalog entry (tools/calls.py `then`), -1 none.
+int SupportAirCallThen(int index) noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
 std::uint32_t SupportAirCallPt(int index) noexcept;   // its pt on the map's bar (tools/calls.py Call.pt)

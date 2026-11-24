@@ -661,6 +661,7 @@ HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（�
 HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
 HUDTEXT(featBikeRide,L"the 408's drive, SDL1 models and riding pose",L"408 驱动、SDL1 各型号性能与骑姿",L"408 驅動、SDL1 各型號性能與騎姿",L"408 の駆動・SDL1 各型の性能・乗車姿勢")
 HUDTEXT(featCommander,L"the commander mode",L"指挥官模式",L"指揮官模式",L"指揮官モード")
+HUDTEXT(featPreloadSet,L"the room's preload set",L"房间统一预载集合",L"房間統一預載集合",L"ルーム共通のプリロード")
 HUDTEXT(featScopeSpread,L"scoped weapons' spread",L"开镜 / 不开镜精度差分",L"開鏡 / 不開鏡精度差分",L"スコープ有無の精度差")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it

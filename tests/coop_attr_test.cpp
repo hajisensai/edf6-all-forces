@@ -130,7 +130,7 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"3;v=0.8.0;f=7FF;r=1;c=0;m=0;s=1,40000,150,12500,8000"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"4;v=0.8.0;f=FFF;r=1;c=0;m=0;s=1,40000,150,12500,8000;n=00000000000000000000000000000000;p=00000000000000000000000000000000"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
            !back.npcFreeSquadCover && !back.commander,"parsed back");
@@ -139,16 +139,24 @@ void WordAndRoom() {
     w.commander=true;
     Expect(FormatWord(w,text,sizeof(text)) && ParseWord(text,back) && back.commander && back.scope.on,
            "commander and scope settings round trip together");
-    for(const char* bad:{"","2;v=1;f=1;r=0;c=0;m=0","3;v=1;f=1;r=0;c=0;m=2;s=1,1,1,1,1","1;v=1;f=1;r=0;c=0","3;v=1;f=1;r=0;c=0","3;v=;f=1;r=0;c=0;m=0;s=1,1,1,1,1","3;v=1;f=G;r=0;c=0;m=0;s=1,1,1,1,1",
+    w.needs.Add(crew::preload::Item::sub);w.needs.Add(crew::preload::Soldier(14));
+    w.room=w.needs;w.room.Add(crew::preload::Body(crew::preload::body::xmBomber));
+    Expect(FormatWord(w,text,sizeof(text)) && ParseWord(text,back) && back.needs==w.needs && back.room==w.room && back.commander,
+           "the preload sets round trip (word v4 n= / p=)");
+    Expect(std::strlen(text)<kWordMost && std::strstr(text,";n=") && std::strstr(text,";p="),"the v4 word fits");
+    for(const char* bad:{"","2;v=1;f=1;r=0;c=0;m=0","3;v=1;f=1;r=0;c=0;m=2;s=1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;n=00000000000000000000000000000000;p=00000000000000000000000000000000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1","4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;n=00000000000000000000000000000000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;p=00000000000000000000000000000000;n=00000000000000000000000000000000","4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;n=0000000000000000000000000000000;p=00000000000000000000000000000000",
+                         "4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;n=a0000000000000000000000000000000;p=00000000000000000000000000000000","4;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;n=00000000000000000000000000000000;p=00000000000000000000000000000000;x=1","1;v=1;f=1;r=0;c=0","3;v=1;f=1;r=0;c=0","3;v=;f=1;r=0;c=0;m=0;s=1,1,1,1,1","3;v=1;f=G;r=0;c=0;m=0;s=1,1,1,1,1",
                          "3;v=1;f=1;r=2;c=0;m=0;s=1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1;x=1","3;v=1;f=123456789;r=0;c=0;m=0;s=1,1,1,1,1",
                          "3;v=1;r=0;f=1;c=0;m=0;s=1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=2,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1",
                          "3;v=1;f=1;r=0;c=0;m=0;s=1,1,1,1,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,-1,1,1",
                          "3;v=1;f=1;r=0;c=0;m=0;s=1,1,1.5,1,1","3;v=1;f=1;r=0;c=0;m=0;s=1,1,1234567,1,1"})
         Expect(!ParseWord(bad,back),"another version's word is no word");
     // A host's value outside the ranges is played at the range's end, as this machine's ini would be.
-    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=1,999999,0,0,999999",back) && back.scope.sniperHip==20.0f && back.scope.sniperHipMin==0.0f &&
+    Expect(ParseWord("4;v=1;f=1;r=0;c=0;m=0;s=1,999999,0,0,999999;n=00000000000000000000000000000000;p=00000000000000000000000000000000",back) && back.scope.sniperHip==20.0f && back.scope.sniperHipMin==0.0f &&
            back.scope.hip==1.0f && back.scope.aim==1.0f,"the host's scope spread clamped");
-    Expect(ParseWord("3;v=1;f=1;r=0;c=0;m=0;s=0,40000,150,12500,8000",back) && !back.scope.on,"the host's scope spread off");
+    Expect(ParseWord("4;v=1;f=1;r=0;c=0;m=0;s=0,40000,150,12500,8000;n=00000000000000000000000000000000;p=00000000000000000000000000000000",back) && !back.scope.on,"the host's scope spread off");
     strcpy_s(w.version,"a;b");
     Expect(!FormatWord(w,text,sizeof(text)),"a version that would break the word is not sent");
 

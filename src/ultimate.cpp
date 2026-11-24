@@ -20,6 +20,7 @@
 // (jet_bay.cpp ShellMake: OnlineShotCounts). A show whose caller is gone (left the room, deleted) fires no more rounds and
 // plays its effects out.
 #include "command_identity.h"
+#include "preload_set.h"
 #include "crew.h"
 #include "edf41classes.h"
 #include "far_object.h"
@@ -756,7 +757,7 @@ void UltimateTick() noexcept {
 void PreloadUltimate(void* mgr) noexcept {
     int ready=0;
     for(int i=0;i<kModelCount;++i) {
-        circleReady[i]=mgr && jet::ModFileThere(kCircleFiles[i].file);
+        circleReady[i]=mgr && preload::Want(preload::Item::ultimate) && jet::ModFileThere(kCircleFiles[i].file);
         if(circleReady[i]){reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kCircleFiles[i].sgo,2,-1);++ready;}
     }
     Log("ULTIMATE preload: %d of %d magic circle models",ready,kModelCount);

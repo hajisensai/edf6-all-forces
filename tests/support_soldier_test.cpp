@@ -79,7 +79,7 @@ void Setup() {
     using namespace support_native;
     ResetSupportSoldiers();made=deleted=preloads=0;failAt=-1;wrong=false;session=false;host=true;
     profile=true;faulted=false;firstFault=SupportSpawnFailure::none;failure=SupportSpawnFailure::none;
-    create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;installed=&FakeInstalled;
+    create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preloadFile=&Preload;registerObject=&Register;installed=&FakeInstalled;
     Put<void*>(image,kObjectManager,objects);Put<void*>(image,kPreloadManager,controls);Put<void*>(image,kNetworkManager,registeredId);
     NoteSupportKindsInstalled();   // the plugin's load: what Mods/OBJECT holds (the test's ourFilesThere)
     PreloadSupportSoldiers();
@@ -217,7 +217,7 @@ int main() {
     Check(!SupportSoldiersReady() && SupportSoldierLastFailure()==SupportSpawnFailure::setup &&
           wcsstr(SupportSoldierFailureText(),L"配置异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
           "readiness preserves setup cause and restart diagnosis");
-    Setup();support_native::preload=&FaultPreload;PreloadSupportSoldiers();
+    Setup();support_native::preloadFile=&FaultPreload;PreloadSupportSoldiers();
     Check(!SupportSoldiersReady() && SupportSoldierLastFailure()==SupportSpawnFailure::mission &&
           wcsstr(SupportSoldierFailureText(),L"预载异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
           "preload SEH is a persistent mission-resource fault, not unsupported native profile");

@@ -14,6 +14,7 @@
 //    is the ground support's own step), before the container sets its team (5) and deletes itself.
 // Game thread only: AirdropTick from map.cpp's frame, the watched call from the container's own update.
 #include "airdrop.h"
+#include "preload_set.h"
 #include "airdrop_logic.h"
 #include "crew.h"
 #include "heli.h"
@@ -148,7 +149,7 @@ unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* par
 
 void PreloadAirdrop() noexcept {
     boxPreloaded=false;
-    if(!profile)return;
+    if(!profile || !preload::Want(preload::Item::airdrop))return;
     __try {
         const auto mgr=At<void*>(image,kPreloadMgr);
         if(!mgr)return;

@@ -537,6 +537,7 @@ void LoadConfig() noexcept {
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
+    n.preloadMode=static_cast<int>(FixInt("PreloadMode",ReadInt(L"PreloadMode",n.preloadMode),0,2));
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
     n.crewDelayMs=FixInt("CrewDelayMs",ReadInt(L"CrewDelayMs",n.crewDelayMs),0,600000);
     n.crewRange=ReadFloat(L"CrewRange",n.crewRange);

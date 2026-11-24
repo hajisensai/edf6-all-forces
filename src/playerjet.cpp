@@ -34,6 +34,7 @@
 // boarded and flown through this same record and these steps; what is theirs alone is in playerjet_board.inc.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "pad_hold.h"
+#include "preload_set.h"
 #include "body506.h"
 #include "lockon.h"
 #include "edf/weapon.h"
@@ -1888,7 +1889,7 @@ void PreloadPlayerJets() noexcept {
         const pjet::CatchFile& f=pjet::kCatchFiles[i];
         playerJetPreloaded[i]=false;
         const auto mgr=At<void*>(image,kPreloadMgrAt);
-        if((f.player || twins) && mgr && jet::SpawnReady() && jet::ModFileThere(f.file)) {
+        if((f.player || twins) && preload::Want(preload::Catch(i)) && mgr && jet::SpawnReady() && jet::ModFileThere(f.file)) {
             __try {
                 reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,f.sgo,2,-1);
                 playerJetPreloaded[i]=true;
@@ -1898,14 +1899,14 @@ void PreloadPlayerJets() noexcept {
         if(n>0)at+=n;
     }
     chutePreloaded=false;   // the parachute's canopy (ChuteMake), when installed
-    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && preload::Want(preload::Item::chute) && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kChuteSgo,2,-1);
             chutePreloaded=true;
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     ropePreloaded=false;   // a helicopter's rope (RopeMake: transport.cpp's rope descent), when installed
-    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && preload::Want(preload::Item::rope) && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kRopeSgo,2,-1);
             ropePreloaded=true;

@@ -20,6 +20,7 @@
 #include "playarea.h"
 #include "outfit41.h"
 #include "host_settings.h"
+#include "preload_set.h"
 #include "room_ui.h"
 #include "sazabi_sound.h"
 #include "support_spawn.h"
@@ -179,6 +180,7 @@ void MissionStart() noexcept {
     ResetTerrainShare();
     ResetPlayArea();
     ResetEdf5Online();   // the EDF5 creation loop's online arguments (edf5online.cpp)
+    preload::BeginMission();   // this mission's set of the plugin's content (preload_set.h), decided before this
     WatchMissionPhase("jets");
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     WatchMissionPhase("player jets");

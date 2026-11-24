@@ -2,6 +2,7 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "preload_set.h"
 #include "online_authority.h"
 #include "vehicleram.h"
 #include "gunmuzzle.h"
@@ -676,6 +677,8 @@ bool InstallBay(bool spawnOk) noexcept {
 
 void PreloadShells(void* mgr,bool gunship) noexcept {
     gunshipReady=shellsOk && gunship;
+    // This mission's set (preload_set.h): the vehicles' rounds (every mission but PreloadMode=2), the Dreadnought's.
+    const bool rounds=preload::Want(preload::Item::vehicleRounds),dn=preload::Want(preload::Item::dnRounds);
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
     for(auto& gun:kSideGuns) {   // each side gun whose round is installed; one from before the gun: the guns it had
         gun.ready=gunshipReady && ModFileThere(gun.file);
@@ -683,17 +686,17 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         else if(gunshipReady)Log("JET the gunship has no %s this mission: no %ls (python tools/make_jets.py, or the installer)",gun.name,gun.file);
     }
     for(int i=0;i<kChargeCount;++i) {
-        chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
+        chargeReady[i]=shellsOk && rounds && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
     }
-    drillReady=shellsOk && ModFileThere(kDrillChargeFile);
+    drillReady=shellsOk && rounds && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
     for(int i=0;i<kEmcCount;++i) {
-        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
+        emcReady[i]=shellsOk && rounds && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
         if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
     }
     for(int i=0;i<kDnRoundCount;++i) {   // with the Dreadnought (gunship: jet_spawn.cpp asks for its cannon with it)
-        dnRoundReady[i]=gunshipReady && ModFileThere(kDnRounds[i].file);
+        dnRoundReady[i]=gunshipReady && dn && ModFileThere(kDnRounds[i].file);
         if(dnRoundReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDnRounds[i].sgo,2,-1);
     }
     char charges[64];
