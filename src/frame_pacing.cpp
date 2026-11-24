@@ -25,7 +25,7 @@
 //
 // The DXGI queue: EDF.dll never calls IDXGIDevice1::SetMaximumFrameLatency (its only use of that interface is
 // GetAdapter at 0x111B65E), so the CPU may run up to DXGI's default 3 frames ahead of the display. After the game's
-// device init 0x111B420 (its only caller 0x11A33DF) the plugin sets ini MaxFrameLatency (default 1) on the device
+// device init 0x111B420 (its only caller 0x11A33DF) the plugin sets ini MaxFrameLatency (default 0: not set) on the device
 // (renderer 0x2136FF0 +0x80, the ID3D11Device the init QIs at 0x111B63C). The device is made once; the swap chain it
 // rebuilds (0x111B220) keeps the device's setting.
 #include "frame_pacing.h"
