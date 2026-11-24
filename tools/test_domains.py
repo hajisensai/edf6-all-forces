@@ -97,8 +97,22 @@ EXTRA = {
 # The tests that read the whole repository (git ls-files, every source of every folder) without naming what they read:
 # every domain. tools/test_domains.py cannot see such a scan; a scan of a module folder it does see (SCANS).
 EVERYTHING = {
-    'ctest': {'gamedir_literal_guard'},          # git ls-files: every .py / .cmd / CMakeLists.txt
+    'ctest': {'gamedir_literal_guard',           # git ls-files: every .py / .cmd / CMakeLists.txt
+              'test_domains'},                   # every test's script and tools/selftest.py (blind_scans), git ls-files
     'selftest': {'cab_floor_katyusha_only'},     # os.listdir of tools/, pylib/, autoturret/tools/: every .py
+}
+# A listing of a folder built at run time from the repository (ROOT, __file__, a module's constant) with no folder name
+# written along the way (os.walk(ROOT), os.walk(eo.FILES)): what it reads, declared, as 'file::top-level function' (or
+# '::<module>') -> the files it reads (fnmatch, '*' crosses folders; () = none in the repository: a temporary or the
+# game's folder). tools/test_domains.py --check finds every such listing in the tests' scripts and tools/selftest.py
+# (blind_scans): one neither declared here nor run only by EVERYTHING's tests fails it.
+SCANNED: dict[str, tuple[str, ...]] = {
+    'tests/perfrun_test.py::scenario_files': (),                # a temporary game folder's mission
+    'tests/save_backup_test.py::<module>': (),                  # a temporary save folder
+    'tests/test_worldmap_pack.py::DeveloperFolder': (),         # the developer's model folder (not tracked)
+    'tools/selftest.py::_cmake_plugins': ('CMakeLists.txt', '*/CMakeLists.txt'),
+    'tools/selftest.py::edf41_outfits_shipped': ('edf41port/outfits/*',),   # edf41_outfits.FILES
+    'tools/selftest.py::edf5_dlc_shipped': ('edf5port/dlc/*',),             # edf5_dlc.DLC
 }
 # The calls that list a folder: a file (or a selftest function) that makes one reads the module folders it names whole,
 # the Python files directly in them too ('pylib/*'), not only their data files.
@@ -128,8 +142,10 @@ def owner(path: str) -> str:
 
 
 def tracked() -> list[str]:
-    """The repository's files: tracked, and new ones not ignored yet (a test added before its git add), on disk."""
-    out = subprocess.run(['git', '-c', 'core.quotepath=off', 'ls-files', '--cached', '--others', '--exclude-standard'],
+    """The repository's files: the ones git tracks, on disk. Not the untracked ones: a scratch file in a folder a test
+    lists would widen (or a stray module named like a real one would bend) the labels of whoever ran --write, and the
+    labels would differ between checkouts; a new test is git added before --write."""
+    out = subprocess.run(['git', '-c', 'core.quotepath=off', 'ls-files', '--cached'],
                          cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True).stdout
     return sorted({p for p in out.splitlines() if p and os.path.isfile(os.path.join(ROOT, p))})
 
@@ -294,6 +310,8 @@ class Repo:
                             out.update(files)
         for pattern in EXTRA.get(path, ()):
             out.update(f for f in self.files if fnmatch.fnmatchcase(f, pattern))
+        if path != 'tools/selftest.py':   # its listings apply to the selftest tests that reach them (selftest_deps)
+            out |= self.declared(path)
         for s in self._strings(tree):
             out |= self.string_deps(s, base)
         if any(isinstance(n, ast.Attribute) and n.attr in SCANS or isinstance(n, ast.Name) and n.id in SCANS
@@ -393,6 +411,16 @@ class Repo:
             elif not is_full(d):
                 out.add(owner(d))
         out.discard(SCRIPTS)
+        return out
+
+    def declared(self, path: str, functions: set[str] | None = None) -> set[str]:
+        """The files SCANNED says `path`'s listings read (only those in `functions`, when given)."""
+        out: set[str] = set()
+        for key, patterns in SCANNED.items():
+            f, fn = key.split('::', 1)
+            if f == path and (functions is None or fn in functions):
+                for pattern in patterns:
+                    out.update(x for x in self.files if fnmatch.fnmatchcase(x, pattern))
         return out
 
     def scripts_of(self, deps: set[str]) -> list[str]:
@@ -608,8 +636,173 @@ def selftest_deps(repo: Repo) -> dict[str, tuple[set[str], set[str]]]:
         uses = {fn.__name__, fn.__code__.co_name}
         value_deps(fn, fn.__globals__, set(), deps, 0)
         deps.discard('tools/selftest.py')   # its own module: what this test reaches of it is followed above
-        out[fn.__name__] = (repo.closure(deps) | {'tools/selftest.py'}, {u for u in uses if u in vars(selftest)})
+        mine = {u for u in uses if u in vars(selftest)}
+        deps |= repo.declared('tools/selftest.py', mine)
+        out[fn.__name__] = (repo.closure(deps) | {'tools/selftest.py'}, mine)
     return out
+
+
+# --- folder listings the analysis cannot see
+_LISTERS = {('os', 'listdir'), ('os', 'walk'), ('os', 'scandir'), ('glob', 'glob'), ('glob', 'iglob')}
+
+
+def _listed(call: ast.Call) -> ast.AST | None:
+    """The folder a call lists, if it lists one: os.listdir / walk / scandir, glob.glob / iglob (their argument),
+    p.iterdir() / p.rglob() / p.glob() (the path p)."""
+    f = call.func
+    if not isinstance(f, ast.Attribute):
+        return None
+    if isinstance(f.value, ast.Name) and (f.value.id, f.attr) in _LISTERS:
+        if call.args:
+            return call.args[0]
+        for k in call.keywords:
+            if k.arg in ('path', 'top', 'pathname'):
+                return k.value
+        return ast.Constant('.')
+    if f.attr in ('iterdir', 'rglob') or f.attr == 'glob' and not (isinstance(f.value, ast.Name) and f.value.id == 'glob'):
+        return f.value
+    return None
+
+
+def _bound(target: ast.AST) -> list[str]:
+    """The names an assignment binds; not a name inside a subscript or an attribute (os.environ['X'] = ...)."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [n for e in target.elts for n in _bound(e)]
+    if isinstance(target, ast.Starred):
+        return _bound(target.value)
+    return []
+
+
+def _binds(scope: ast.AST) -> dict[str, list[ast.AST]]:
+    """Every name bound in `scope` -> the expressions bound to it (assignments, loop targets, parameter defaults); not
+    the names of a function or class inside it (their own scope), only its parameters' defaults."""
+    out: dict[str, list[ast.AST]] = {}
+
+    def own(node: ast.AST):
+        yield node
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                if not isinstance(c, ast.ClassDef):
+                    yield c.args
+            else:
+                yield from own(c)
+    for n in own(scope):
+        if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                for x in _bound(t):
+                    out.setdefault(x, []).append(n.value)
+        elif isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
+            for x in _bound(n.target):
+                out.setdefault(x, []).append(n.iter)
+        elif isinstance(n, ast.NamedExpr):
+            out.setdefault(n.target.id, []).append(n.value)
+        elif isinstance(n, ast.arguments):
+            pos = n.posonlyargs + n.args
+            for a, d in zip(pos[len(pos) - len(n.defaults):], n.defaults):
+                out.setdefault(a.arg, []).append(d)
+            for a, d in zip(n.kwonlyargs, n.kw_defaults):
+                if d is not None:
+                    out.setdefault(a.arg, []).append(d)
+    return out
+
+
+def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]]:
+    """The folder listings in a Python file whose folder names no folder: (its top-level function or class,
+    '<module>' outside one; the line; the call). A listing of a folder built from the repository (ROOT, __file__, a
+    local module's constant) with no folder name written anywhere along the way (os.walk(ROOT), os.walk(eo.FILES))
+    reads files this analysis cannot see; so does a 'git ls-files'. Names are followed through the assignments, loop
+    targets and parameter defaults of their function and of the module (any of them, not the one that runs)."""
+    with open(path, 'rb') as f:
+        tree = ast.parse(f.read())
+    imported: set[str] = set()   # the names bound to the repository's own modules
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            imported.update(a.asname or a.name.split('.')[0] for a in n.names if a.name.split('.')[0] in local_modules)
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            imported.update(a.asname or a.name for a in n.names if a.name in local_modules)
+    module = _binds(tree)
+
+    def judge(expr: ast.AST, env: dict, memo: dict) -> tuple[bool, bool]:
+        """(a folder name is written in it, it is built from the repository)"""
+        named = anchored = False
+        called = {id(c.func) for c in ast.walk(expr) if isinstance(c, ast.Call)}
+        for x in ast.walk(expr):
+            if isinstance(x, ast.Constant) and isinstance(x.value, str) and x.value.strip('./\\'):   # not '..'
+                named = True
+            elif isinstance(x, ast.Name):
+                if x.id == '__file__':
+                    anchored = True
+                    continue
+                if x.id not in memo:
+                    memo[x.id] = (False, False)   # bound through itself: nothing more
+                    n2 = a2 = False
+                    for v in env.get(x.id, []) + ([] if env is module else module.get(x.id, [])):
+                        n3, a3 = judge(v, env, memo)
+                        n2, a2 = n2 or n3, a2 or a3
+                    memo[x.id] = (n2, a2)
+                named = named or memo[x.id][0]
+                anchored = anchored or memo[x.id][1]
+            elif isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in imported \
+                    and id(x) not in called:   # a module's constant (eo.FILES); its function builds from its arguments
+                anchored = True
+        return named, anchored
+
+    out: list[tuple[str, int, str]] = []
+    scopes = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+    def visit(node: ast.AST, name: str, env: dict, memo: dict) -> None:
+        if isinstance(node, ast.Constant) and node.value == 'ls-files':
+            out.append((name, node.lineno, 'git ls-files'))
+        elif isinstance(node, ast.Call) and (target := _listed(node)) is not None:
+            named, anchored = judge(target, env, memo)
+            if anchored and not named:
+                out.append((name, node.lineno, ast.unparse(node)[:100]))
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, scopes):   # its own names, then the ones of the scopes around it
+                inner = {k: v + env.get(k, []) for k, v in _binds(c).items()}
+                visit(c, name, {**env, **inner}, {})
+            else:
+                visit(c, name, env, memo)
+
+    for top in tree.body:
+        name = top.name if isinstance(top, scopes) else '<module>'
+        if isinstance(top, scopes):
+            visit(top, name, {k: v[:] for k, v in _binds(top).items()}, {})
+        else:
+            visit(top, name, module, {})
+    return out
+
+
+def blind_scan_problems(repo: Repo, labels: dict) -> list[str]:
+    """Each listing blind_scans finds in a test's script or in tools/selftest.py that neither SCANNED declares nor
+    only EVERYTHING's tests run; and each SCANNED entry no listing needs any more."""
+    runs: dict[str, set[str]] = {}   # a ctest script -> the ctest tests that run or import it
+    for name, e in labels['ctest'].items():
+        for f in e['scripts']:
+            runs.setdefault(f, set()).add(name)
+    reach: dict[str, set[str]] = {}  # a tools/selftest.py global -> the selftest tests that reach it
+    for name, e in labels['selftest'].items():
+        for u in e.get('uses', ()):
+            reach.setdefault(u, set()).add(name)
+    files = sorted({f for f in runs if f.endswith('.py') and f != 'tools/selftest.py'} | {'tools/selftest.py'})
+    problems, seen = [], set()
+    for f in files:
+        for fn, line, text in blind_scans(os.path.join(ROOT, f), set(repo.modules)):
+            key = f'{f}::{fn}'
+            seen.add(key)
+            if key in SCANNED:
+                continue
+            tests, every = (reach.get(fn, set()), EVERYTHING['selftest']) if f == 'tools/selftest.py' else \
+                (runs.get(f, set()), EVERYTHING['ctest'])
+            if tests and tests <= every:
+                continue
+            problems.append(f'{f}:{line} {text}: lists a folder this analysis cannot see; put the tests running it '
+                            f'({", ".join(sorted(tests)[:4]) or "none"}) in EVERYTHING, or declare what it reads: '
+                            f'SCANNED[{key!r}]')
+    problems += [f'SCANNED[{k!r}]: no such listing any more' for k in sorted(SCANNED.keys() - seen)]
+    return problems
 
 
 # --- the labels
@@ -770,6 +963,7 @@ def _check(build: str) -> int:
             problems.append(f'ctest test {t["name"]} has no LABELS (reconfigure after --write: build.cmd)')
         elif labs != (want['ctest'].get(t['name'], {}).get('labels') or ['none']):
             problems.append(f'ctest test {t["name"]} LABELS {labs} != {want["ctest"][t["name"]]["labels"]} (reconfigure)')
+    problems += blind_scan_problems(Repo(), want)
     for n, e in {**want['ctest'], **want['selftest']}.items():
         if not e['labels'] and not e['scripts']:
             problems.append(f'test {n} depends on nothing this table knows: no change but a full run would select it')

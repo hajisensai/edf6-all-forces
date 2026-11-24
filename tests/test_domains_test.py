@@ -2,7 +2,10 @@
 names a change to tools/selftest.py falls in, and one check per worktree (pylib/checklock.py worktree_once)."""
 from __future__ import annotations
 
+import contextlib
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -143,6 +146,166 @@ class WorktreeOnce(unittest.TestCase):
                     pass
             with checklock.worktree_once(root):   # released
                 pass
+
+
+class Tracked(unittest.TestCase):
+    def test_untracked_files_are_not_the_repositorys(self) -> None:
+        probe = os.path.join(ROOT, 'tests', f'_untracked_probe_{os.getpid()}.py')
+        rel = os.path.relpath(probe, ROOT).replace(os.sep, '/')
+        with open(probe, 'w', encoding='utf-8') as f:
+            f.write('import os\n')
+        try:
+            ignored = subprocess.run(['git', 'check-ignore', '-q', rel], cwd=ROOT).returncode == 0
+            self.assertFalse(ignored, f'{rel} is ignored: the probe proves nothing')
+            files = td.tracked()
+            self.assertIn('tests/test_domains_test.py', files)
+            self.assertNotIn(rel, files)
+        finally:
+            os.remove(probe)
+
+
+class Busy(unittest.TestCase):
+    def test_a_lock_held_with_no_live_record_reads_as_starting(self) -> None:
+        import check
+        dead = subprocess.Popen([sys.executable, '-c', 'pass'])
+        dead.wait()
+        with tempfile.TemporaryDirectory() as root:
+            path = checklock.worktree_lock(root)
+            os.makedirs(checklock.LOCK_DIR, exist_ok=True)
+            fd = os.open(path, os.O_RDWR | os.O_CREAT)
+            try:
+                self.assertTrue(checklock._try_lock(fd))   # taken; its holder has not written itself down yet
+                for record in (None, {'root': root, 'pid': dead.pid, 'since': 0}):   # none, or a dead one's
+                    if record is not None:
+                        with open(path + '.json', 'w', encoding='utf-8') as h:
+                            json.dump(record, h)
+                    with self.assertRaises(checklock.Busy) as e:
+                        with checklock.worktree_once(root):
+                            pass
+                    self.assertEqual(e.exception.args[0], {'starting': True}, record)
+                    text = check.busy_text(e.exception.args[0])
+                    self.assertIn('还没写下 pid', text)
+                    self.assertNotIn('pid ?', text)
+            finally:
+                os.close(fd)
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(path + '.json')
+
+    def test_the_record_lives_exactly_while_the_lock_is_held(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            lock = checklock.worktree_lock(root)
+            with checklock.worktree_once(root):
+                with open(lock + '.json', encoding='utf-8') as h:
+                    self.assertEqual(json.load(h)['pid'], os.getpid())
+                self.assertEqual(checklock.worktree_holder(lock)['pid'], os.getpid())
+            self.assertFalse(os.path.exists(lock + '.json'))
+            name = os.path.basename(lock)
+            self.assertEqual([f for f in os.listdir(checklock.LOCK_DIR) if f.startswith(name) and f.endswith('.tmp')], [])
+
+
+@unittest.skipUnless(os.name == 'nt', 'a job object is Windows')
+class ChildrenDieWithMe(unittest.TestCase):
+    def test_a_killed_parent_takes_its_children(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL('kernel32', use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        code = ('import subprocess, sys, time\n'
+                f'sys.path.insert(0, {os.path.join(ROOT, "pylib")!r})\n'
+                'import checklock\n'
+                'checklock.children_die_with_me()\n'
+                "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+                'print(c.pid, flush=True)\n'
+                'time.sleep(120)\n')
+        parent = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True)
+        child = None
+        try:
+            pid = int(parent.stdout.readline())
+            child = k.OpenProcess(0x00100001, False, pid)   # SYNCHRONIZE | PROCESS_TERMINATE
+            self.assertTrue(child, ctypes.get_last_error())
+            self.assertEqual(k.WaitForSingleObject(child, 0), 0x102, 'the child ended on its own')   # WAIT_TIMEOUT
+            parent.kill()   # TerminateProcess: none of the parent's finally / atexit runs
+            parent.wait()
+            self.assertEqual(k.WaitForSingleObject(child, 20000), 0, 'the child outlived its killed parent')
+        finally:
+            if child:
+                k.TerminateProcess(child, 1)
+                k.CloseHandle(child)
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait()
+            parent.stdout.close()
+
+
+class BlindScans(unittest.TestCase):
+    SOURCE = '''import os
+import eo
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FILES = os.path.join(ROOT, 'edf41port')
+def whole_root():
+    return os.walk(ROOT)
+def a_module_constant():
+    return list(eo.FILES.iterdir())
+def through_a_name():
+    top = ROOT
+    for d, _, _ in os.walk(top):
+        pass
+def git_files():
+    return ['git', 'ls-files']
+def named_folder():
+    return os.listdir(os.path.join(ROOT, 'pylib')), os.listdir(FILES)
+def a_temporary():
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        return os.listdir(t)
+def a_parameter(d):
+    return os.listdir(d)
+def a_module_function(root):
+    return os.listdir(eo.mission_dir(root))
+def a_nested_scope():
+    def inner():
+        here = ROOT
+        return os.listdir(here)
+    return inner
+'''
+
+    def test_listings_naming_no_folder_are_found(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            scan = os.path.join(d, 'scan.py')
+            with open(scan, 'w', encoding='utf-8') as f:
+                f.write(self.SOURCE)
+            found = {fn for fn, _line, _text in td.blind_scans(scan, {'eo'})}
+        self.assertEqual(found, {'whole_root', 'a_module_constant', 'through_a_name', 'git_files', 'a_nested_scope'})
+
+    def test_every_blind_listing_is_declared_or_runs_everything(self) -> None:
+        repo, labels = td.Repo(), td.load()
+        self.assertEqual(td.blind_scan_problems(repo, labels), [])
+        for key in list(td.SCANNED):   # each declaration is needed: without it the guard fails
+            saved = td.SCANNED.pop(key)
+            try:
+                problems = td.blind_scan_problems(repo, labels)
+            finally:
+                td.SCANNED[key] = saved
+            self.assertTrue(any(repr(key) in p for p in problems), key)
+        td.SCANNED['tests/nothing.py::gone'] = ()
+        try:
+            self.assertIn("SCANNED['tests/nothing.py::gone']: no such listing any more",
+                          td.blind_scan_problems(repo, labels))
+        finally:
+            del td.SCANNED['tests/nothing.py::gone']
+
+    def test_a_declared_listing_is_a_dependency(self) -> None:
+        repo = td.Repo()
+        self.assertIn('edf41port/outfits/MENUOBJECT/EDF41_P_RANGER.SGO',
+                      repo.declared('tools/selftest.py', {'edf41_outfits_shipped'}))
+        self.assertIn('CMakeLists.txt', repo.declared('tools/selftest.py', {'_cmake_plugins'}))
+        self.assertEqual(repo.declared('tools/selftest.py', {'something_else'}), set())
+        deps, _uses = td.selftest_deps(repo)['edf41_outfits_shipped']
+        self.assertIn('edf41port/outfits/MENUOBJECT/EDF41_P_RANGER.SGO', deps)
+
 
 
 if __name__ == '__main__':

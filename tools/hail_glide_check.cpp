@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 namespace {
 using namespace crew;
@@ -318,14 +320,13 @@ int main(int argc,char** argv){
         }
         return 0;
     }
-    // Every unit, in the order the check printed them before it was split.
-    static char names[256][48];
-    int count=0;
-    std::snprintf(names[count++],sizeof(names[0]),"logged");
+    // Every unit, in the order the check printed them before it was split: as many as there are wings (no table to
+    // outgrow and cut short).
+    std::vector<std::string> names{"logged"};
     for(const char* part:{"sweep","walls","map1600","map4000"}) {
-        if(std::strcmp(part,"walls")==0){std::snprintf(names[count++],sizeof(names[0]),"walls");continue;}
+        if(std::strcmp(part,"walls")==0){names.emplace_back("walls");continue;}
         for(const auto& b:pjet::kBoardable)
-            if(b.frame==pjet::Airframe::wing && count<256)std::snprintf(names[count++],sizeof(names[0]),"%s:%s",part,b.perf.name);
+            if(b.frame==pjet::Airframe::wing)names.push_back(std::string(part)+":"+b.perf.name);
     }
     bool list=false;int asked=0;
     for(int i=1;i<argc;++i) {
@@ -333,7 +334,7 @@ int main(int argc,char** argv){
         else if(std::strcmp(argv[i],"--trace")==0)trace=true;
         else ++asked;
     }
-    if(list){for(int i=0;i<count;++i)std::printf("%s\n",names[i]);return 0;}
+    if(list){for(const auto& n:names)std::printf("%s\n",n.c_str());return 0;}
     int fails=0;
     if(asked) {
         for(int i=1;i<argc;++i) {
@@ -343,7 +344,7 @@ int main(int argc,char** argv){
             else fails+=f;
         }
     } else {
-        for(int i=0;i<count;++i)fails+=Run(names[i]);
+        for(const auto& n:names)fails+=Run(n.c_str());
     }
     std::printf(fails ? "hail_glide_check: %d FAILED\n" : "hail_glide_check: all passed\n",fails);
     return fails ? 1 : 0;
