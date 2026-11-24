@@ -38,6 +38,8 @@ constexpr Rule kRules[]={
     {".?AVTransporter_Container@@",0x5C0,false},
     {".?AVGeneratorPoll@@",0x7C0,false}
 };
+constexpr std::size_t kHumanRule=2,kVehicleRule=3;   // kRules' HumanBase, VehicleBase
+static_assert(kRules[kHumanRule].model==0x860 && kRules[kVehicleRule].model==0xE40,"HumanBase, VehicleBase");
 constexpr std::size_t kHumanoidStride=0x710,kModelBytes=0x4E0,kMostModels=128;
 constexpr unsigned kAnimationVtable=0x17C4030;
 struct Col { std::uint32_t signature,offset,ctorOffset,type,hierarchy,self; };
@@ -141,20 +143,23 @@ bool IsModel(const void* model) noexcept {
     }
     return false;
 }
+// The object's binding (resolved once per vtable, up to the cache's size; past it into `uncached`), null when its vtable
+// cannot be read.
+const Binding* BindingOf(const void* object,Binding& uncached) noexcept {
+    const void* vt=nullptr;
+    if(!Read(object,&vt))return nullptr;
+    for(std::size_t i=0;i<cache.count;++i)if(cache.bindings[i].vtable==vt)return &cache.bindings[i];
+    uncached=Resolve(object,vt);
+    if(cache.count<cache.bindings.size()){cache.bindings[cache.count]=uncached;return &cache.bindings[cache.count++];}
+    return &uncached;
+}
 }  // namespace
 
 std::size_t EnemyModels(const void* object,const void** out,std::size_t capacity) noexcept {
     if(!object || !out || !capacity || !Profile())return 0;
-    const void* vt=nullptr;
-    if(!Read(object,&vt))return 0;
-    const Binding* binding=nullptr;Binding uncached{};
-    for(std::size_t i=0;i<cache.count;++i)if(cache.bindings[i].vtable==vt){binding=&cache.bindings[i];break;}
-    if(!binding) {
-        uncached=Resolve(object,vt);
-        if(cache.count<cache.bindings.size()){cache.bindings[cache.count]=uncached;binding=&cache.bindings[cache.count++];}
-        else binding=&uncached;
-    }
-    if(binding->rule<0)return 0;
+    Binding uncached{};
+    const Binding* const binding=BindingOf(object,uncached);
+    if(!binding || binding->rule<0)return 0;
     const auto raw=reinterpret_cast<std::uintptr_t>(object);
     if(raw<binding->complete || binding->member>(std::numeric_limits<std::uintptr_t>::max)()-(raw-binding->complete))return 0;
     const auto owner=reinterpret_cast<const unsigned char*>(raw-binding->complete+binding->member);
@@ -176,5 +181,15 @@ std::size_t EnemyModels(const void* object,const void** out,std::size_t capacity
 }
 const void* EnemyModel(const void* object) noexcept {
     const void* model=nullptr;EnemyModels(object,&model,1);return model;
+}
+Family EnemyFamily(const void* object) noexcept {
+    if(!object)return Family::kNone;
+    Binding uncached{};
+    const Binding* const binding=BindingOf(object,uncached);
+    if(!binding || binding->rule<0)return Family::kNone;
+    const auto rule=static_cast<std::size_t>(binding->rule);
+    if(rule==kHumanRule)return Family::kHuman;
+    if(rule==kVehicleRule)return Family::kVehicle;
+    return Family::kOther;
 }
 }  // namespace crew::thermal

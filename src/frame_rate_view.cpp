@@ -38,6 +38,7 @@
 // Not covered: other soldiers in the same vehicle, and frames with ticks (the render thread can read a pose the step
 // is writing, the stock race the 60 Hz frame hides; R1 in the plan).
 #include "frame_rate_view.h"
+#include "frame_rate_objects.h"
 #include "frame_rate_logic.h"
 #include "fp_view.h"
 #include "heli.h"
@@ -196,8 +197,9 @@ void PoseModel(const unsigned char* model,const fpview::M4& d) {
 }
 
 // A frame without ticks: the root at alpha between the last two ticks, with everything it carries.
-void PoseRoot(float alpha) {
-    if(root.samples<2)return;
+// True when it posed them, with their D in `d` (stage 4's riders of the player's vehicle take it).
+bool PoseRoot(float alpha,fpview::M4& d) {
+    if(root.samples<2)return false;
     const unsigned char* const h=root.human;
     const unsigned char* const v=root.vehicle;
     std::uint64_t n=0;
@@ -206,20 +208,22 @@ void PoseRoot(float alpha) {
     if(!live || At<const void*>(h,kSelfCtrl)!=root.humanCtrl || RiddenBy(h)!=v ||
        (v && At<const void*>(v,kSelfCtrl)!=root.vehicleCtrl) || std::memcmp(live,root.cur,sizeof(root.cur))) {
         ++rootsLeft;
-        return;
+        return false;
     }
     if(!framerate::InterpolateRigid(root.prev,root.cur,alpha,shown,kCutMove,kCutTurn)) {
         ++rootsRefused;
-        return;
+        frameobjects::NoteRootRefusal(framerate::RigidRefusal(root.prev,root.cur,alpha,kCutMove,kCutTurn));
+        return false;
     }
     fpview::M4 cur,inverse,to;
     std::memcpy(cur.m,root.cur,64);
     std::memcpy(to.m,shown,64);
     if(!fpview::InverseAffine(cur,&inverse)) {
         ++rootsRefused;
-        return;
+        frameobjects::NoteRootRefusal(framerate::Refusal::kNotRigid);
+        return false;
     }
-    const fpview::M4 d=fpview::Mul(inverse,to);
+    d=fpview::Mul(inverse,to);
     ++rootsPosed;
     if(v)PoseModel(v+kVehicleModel,d);
     PoseModel(h+kBodyModel,d);
@@ -227,6 +231,7 @@ void PoseRoot(float alpha) {
     const auto weapons=At<std::int32_t>(h,kWeaponCount);
     if(list && weapons>0 && weapons<=kMostWeapons && Readable(list,static_cast<std::size_t>(weapons)*8))
         for(int i=0;i<weapons;++i)if(list[i])PoseModel(list[i]+kWeaponModel,d);
+    return true;
 }
 
 // The cameras this frame drew blended get their step's state back: the matrix where it still holds the blend, the field
@@ -248,6 +253,7 @@ void RestoreCameras() noexcept {
 }
 void RestoreFrame() noexcept {
     RestoreCameras();
+    frameobjects::Restore();   // stage 4: written after fps-7's, back before it
     RestorePoses();
 }
 
@@ -299,6 +305,7 @@ void CameraStepHook(void* camera,void* arg) {
         c->age=0;
         SampleRoot(camera);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    frameobjects::Sample();   // stage 4: every other object's root, once a tick
 }
 
 void BeforeProject(void* camera,const int*) {
@@ -334,11 +341,14 @@ void BeginFrame(std::uint32_t ticks,float alpha) noexcept {
     }
     alphaNow=alpha;
     if(ticks || alpha>=1.0f)return;
+    fpview::M4 d;
+    bool posedRoot=false;
     __try {
-        PoseRoot(alpha);
+        posedRoot=PoseRoot(alpha,d);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         ++rootsLeft;
     }
+    frameobjects::Pose(alpha,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
 }
 
 void TakeCounts(unsigned& blendedOut,unsigned& unblendedOut,unsigned& rootsOut,unsigned& rootsLeftOut,
@@ -370,6 +380,7 @@ bool Install() noexcept {
     posed.reserve(kMostInsts*(kMostWeapons+2));
     posedBefore.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
     posedAfter.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
+    frameobjects::Install();
     on=true;
     return true;
 }
