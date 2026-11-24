@@ -2082,6 +2082,13 @@ target_compile_options(fp_ride_lifecycle_test PRIVATE /W4 /WX /utf-8 /permissive
 target_link_options(fp_ride_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks fp_ride_lifecycle_test)
 add_test(NAME fp_ride_lifecycle COMMAND fp_ride_lifecycle_test)
+# The frame rate view's camera / root interpolation state machine (src/frame_rate_view.cpp) on heap fixtures.
+add_executable(frame_rate_view_test EXCLUDE_FROM_ALL tests/frame_rate_view_test.cpp)
+target_include_directories(frame_rate_view_test PRIVATE src common)
+target_link_libraries(frame_rate_view_test PRIVATE edf6common)
+target_compile_options(frame_rate_view_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks frame_rate_view_test)
+add_test(NAME frame_rate_view COMMAND frame_rate_view_test)
 add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
 target_include_directories(fp_skin_test PRIVATE src common)
 target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)
