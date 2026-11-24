@@ -2071,6 +2071,13 @@ add_test(NAME crash_dump COMMAND crash_dump_test)
 # It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
 set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
 add_dependencies(offline_checks crash_dump_test)
+# The crash's log flush (common/log.h CrashFlush): only the open handle and preformatted bytes, with CreateFileW,
+# MoveFileExW and _snprintf_s counted (log.cpp compiled into the test, no edf6common).
+add_executable(log_crash_test tests/log_crash_test.cpp)
+target_include_directories(log_crash_test PRIVATE common)
+target_compile_options(log_crash_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME log_crash COMMAND log_crash_test)
+add_dependencies(offline_checks log_crash_test)
 # More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
 # spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
 add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)
