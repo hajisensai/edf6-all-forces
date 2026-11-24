@@ -26,8 +26,8 @@ int main() {
     Leave(c,0);Tick(c);
     Check(!PlayerSelectablePayload(&copied),"game-thread departure clears complete snapshot under the same lock");
     SetUp();Tick(c);
-    AcquireSRWLockExclusive(&choiceLock);selectableAt=GetTickCount64()-kFreshMs-1;ReleaseSRWLockExclusive(&choiceLock);
-    Check(!PlayerSelectablePayload(&copied),"draw snapshot expires by wall time without querying the game clock");
+    Skip(stepfresh::kEveryStep+1);   // the game thread stepped on without publishing (the player's frame gone)
+    Check(!PlayerSelectablePayload(&copied),"draw snapshot expires by the step count without querying the game clock");
     Check(!PlayerSelectablePayload(nullptr),"null output is rejected without touching state");
 
     SetUp();

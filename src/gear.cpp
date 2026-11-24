@@ -164,7 +164,7 @@ GearState PlayerGear(unsigned char* v,bool held,bool keys,bool air,float speed,f
     h.shown=true;std::memcpy(h.at,s.at,sizeof(h.at));h.wantUp=s.wantUp;
     h.overspeed=!s.up && speed>kGearLimit;
     h.warn=air && !s.down && clear!=kNoGround && clear<kWarnHeight && speed<kWarnSpeed && climb<0.0f;
-    h.blocked=g->blockedAt && now-g->blockedAt<kGearBlockedMs;h.keys=keys;h.tick=now;
+    h.blocked=g->blockedAt && now-g->blockedAt<kGearBlockedMs;h.keys=keys;h.step=stepfresh::Now();
     Publish(h);
     return s;
 }

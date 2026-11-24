@@ -350,22 +350,30 @@ def _tod(t: float) -> float:
     return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
 
 
+def in_window(t: float, window: tuple[float, float]) -> bool:
+    """Whether a row stamped `t` (a time of day, seconds) is inside `window` (wall-clock seconds; a row covers the 5 s
+    before it, so one must end 5 s in). The stamp is placed on the wall clock from the window's start, as
+    tools/perfrun.py split_log does: a window over midnight (23:59:50 to 00:00:30) keeps its rows past midnight, and a
+    stamp up to an hour before the start is before it (not a day later)."""
+    d = (t - _tod(window[0])) % 86400
+    at = window[0] + (d - 86400 if d > 86400 - 3600 else d)
+    return window[0] + 5 <= at <= window[1] + 0.5
+
+
 def _rows(log: str, pattern: re.Pattern, window: tuple[float, float] | None) -> list[re.Match]:
-    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (wall-clock seconds;
-    a row covers the 5 s before it, so one must end 5 s in), all of them without one."""
+    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (in_window), all of
+    them without one."""
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
     except OSError:
         return []
-    a, b = (_tod(window[0]), _tod(window[1])) if window else (None, None)
     out = []
     for line in lines:
         m = pattern.search(line)
         if not m:
             continue
-        t = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
-        if a is None or a + 5 <= t <= b + 0.5:
+        if window is None or in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
             out.append(m)
     return out
 
@@ -589,16 +597,12 @@ OBJECTS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF OBJECTS enemies (-?\
 def read_objects(log: str, window: tuple[float, float]) -> dict:
     """The plugin's PERF OBJECTS rows (what the game held: its own team counts, the living only) in `window`: each
     team's mean and max, {} on a build without them."""
-    def tod(t: float) -> float:
-        lt = time.localtime(t)
-        return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
-    a, b = tod(window[0]), tod(window[1])
     rows = []
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             for line in f:
                 m = OBJECTS.search(line)
-                if m and a + 5 <= int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) <= b + 0.5:
+                if m and in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
                     rows.append((int(m[4]), int(m[5]), int(m[6])))
     except OSError:
         return {}

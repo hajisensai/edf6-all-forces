@@ -27,9 +27,10 @@ using StageFn=void(__fastcall*)(void*,void*,const void*);
 using SubmitFn=void(__fastcall*)(void*,void*,int);
 using DrawFn=void(__fastcall*)(void*,void*,int,void*);
 constexpr int kModels=2048;
-constexpr ULONGLONG kFreshMs=1000;
+// The view stage takes a snapshot published within stepfresh::kEveryStep steps (TickPlayer runs once a step;
+// step_fresh.h). The pause menu keeps the last view (no step runs); a new mission: NewMission.
 struct Snapshot {
-    ULONGLONG at=0;
+    stepfresh::Step at=0;
     bool enabled=false,eligible=false,inSight=false;
     unsigned count=0;
     const void* model[kModels]{};
@@ -144,7 +145,7 @@ void __fastcall BeginHook(void* manager,void* native,const void* view) {
     frame.seen|=bit;
     frame.shot=ReadSnapshot(*p);frame.mode=p->requested.load(std::memory_order_acquire);
     if(frame.mode==Mode::optical || !frame.shot.enabled || !frame.shot.eligible || !frame.shot.inSight ||
-       GetTickCount64()-frame.shot.at>kFreshMs) {frame.gpu.Invalidate();return;}
+       !stepfresh::Fresh(frame.shot.at)) {frame.gpu.Invalidate();return;}
     frame.active=frame.gpu.BeginView(Context(native),++frame.serial);
     if(frame.active)frame.used=true;
     else Failed();
@@ -237,7 +238,7 @@ Mode CycleModeOf(Player& p) noexcept {
     return SetModeOf(p,next) ? next : was;
 }
 void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) noexcept {
-    Snapshot shot{};shot.at=GetTickCount64();shot.enabled=enabled;
+    Snapshot shot{};shot.at=stepfresh::Now();shot.enabled=enabled;
     unsigned char* vehicle=nullptr;unsigned seat=0;
     const bool seated=enabled && Seat(human,&vehicle,&seat);
     p.pad.store(seated && At<unsigned char>(SeatAt(vehicle,seat),edf::kSeatPad)!=0,std::memory_order_release);

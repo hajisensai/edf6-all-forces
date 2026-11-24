@@ -16,7 +16,7 @@ struct Warnings {
     unsigned on;                  // 1 << Warn for each lit
     ULONGLONG litAt[kWarnCount];  // GetTickCount64 each last came on (the annunciator flashes a new one)
     ULONGLONG launchAt;           // ...a missile not coming for it a moment before began to (0: none yet): a launch
-    ULONGLONG tick;               // published
+    stepfresh::Step step;         // the step it was published in (step_fresh.h)
 };
 constexpr ULONGLONG kLaunchMs=2500;   // a launch's flash and warble
 // The ground-proximity windows (a real GPWS's look-ahead): caution within kTerrainSeconds, PULL UP within kPullUpSeconds.

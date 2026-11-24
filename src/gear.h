@@ -31,7 +31,7 @@ struct GearHud {
     bool warn;               // up (or not down) low and slow: the gear warning
     bool blocked;            // an up command refused (weight on the wheels) within kGearBlockedMs
     bool keys;               // flown on the keyboard and mouse (the hint names the key, else the pad button)
-    ULONGLONG tick;          // GetTickCount64 when published
+    stepfresh::Step step;    // the step it was published in (step_fresh.h; GearHudClear clears it when no gear jet is flown)
 };
 GearState PlayerGear(unsigned char* v,bool held,bool keys,bool air,float speed,float clear,float climb,float dt) noexcept;
 float GearDragShare(const void* v) noexcept;   // parasitic drag added, a share of the clean jet's (0 up)

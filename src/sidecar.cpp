@@ -142,7 +142,8 @@ using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 using PositionFn=float*(__fastcall*)(void*,float*);
 
 // Published on the game thread; bullet batches may run elsewhere. Never read sidecars from a bullet hook.
-struct PassengerPair { ObjRef vehicle,gunner,driver; ULONGLONG at; };
+// at: the step the bike's input published the pair (step_fresh.h); a bullet pass takes it within stepfresh::kEveryStep.
+struct PassengerPair { ObjRef vehicle,gunner,driver; stepfresh::Step at; };
 PassengerPair passengers[kMaxSidecars]{};
 SRWLOCK passengerLock=SRWLOCK_INIT;
 // How many of `passengers` hold a gunner, kept with them under the lock: the bullets' hook (jet_hooks.cpp) looks up
@@ -195,7 +196,7 @@ bool Holdable(const unsigned char* h) noexcept {
 void PublishPassenger(const Sidecar& s) noexcept {
     PassengerPair pair{};
     if(s.gunner) {
-        pair.vehicle=s.ref;pair.gunner=s.gunner;pair.at=GetTickCount64();
+        pair.vehicle=s.ref;pair.gunner=s.gunner;pair.at=stepfresh::Now();
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.obj));
         if(SeatCount(v) && SeatRider(SeatAt(v,0))!=Rider::none)
             pair.driver=ObjRef::Of(At<const void*>(SeatAt(v,0),kSeatRider));
@@ -450,7 +451,7 @@ bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtr
     for(const auto& p:passengers)if(p.gunner.obj==owner && p.gunner.ctrl==ownerCtrl &&
         (p.vehicle.obj==target || p.driver.obj==target)) {match=p;break;}
     ReleaseSRWLockShared(&passengerLock);
-    if(!match.gunner || GetTickCount64()-match.at>kGoneMs)return false;
+    if(!match.gunner || !stepfresh::Fresh(match.at))return false;
     __try {
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(match.vehicle.obj));
         const auto h=static_cast<const unsigned char*>(owner);

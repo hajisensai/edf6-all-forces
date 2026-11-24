@@ -22,7 +22,6 @@ namespace crew {
 namespace {
 constexpr float kRise=5.0f;                  // m: met this much higher than the ground under it, it is TERRAIN
 constexpr ULONGLONG kMissileMemoryMs=1500;   // a missile coming that was not counted this long before: a launch
-constexpr ULONGLONG kGearFreshMs=500;        // the gear's readout older than this: no jet with gear flown
 SRWLOCK publishLock=SRWLOCK_INIT;
 Warnings published{};
 bool flown=false;
@@ -94,7 +93,7 @@ void WarnTick() noexcept {
         missilesSeen=missiles;missilesSeenAt=now;
     }
     GearHud gear{};
-    if(GearHudLatest(&gear) && now-gear.tick<=kGearFreshMs) {
+    if(GearHudLatest(&gear) && stepfresh::Fresh(gear.step)) {   // a gear jet flown this step (else cleared or stopped)
         if(gear.warn)on|=1u<<kWarnGear;
         if(gear.overspeed)on|=1u<<kWarnGearSpeed;
         if(gear.blocked)on|=1u<<kWarnWow;
@@ -102,7 +101,7 @@ void WarnTick() noexcept {
     if(fuel && FuelLow(*fuel))on|=1u<<kWarnFuel;
     if(y==&j.sym && j.area)on|=1u<<kWarnArea;
     for(int k=0;k<kWarnCount;++k)if((on>>k&1u) && !(state.on>>k&1u))state.litAt[k]=now;
-    state.on=on;state.tick=now;
+    state.on=on;state.step=stepfresh::Now();
     Publish(true);
     const bool launch=missiles>0 && state.launchAt && now-state.launchAt<kLaunchMs;
     audio::Cockpit c{missiles ? 2 : locked ? 1 : 0,false,false,0u};
@@ -118,7 +117,7 @@ void WarnTick() noexcept {
 
 bool WarnLatest(Warnings* out) noexcept {
     AcquireSRWLockShared(&publishLock);
-    const bool fresh=flown && GetTickCount64()-published.tick<=kGearFreshMs;
+    const bool fresh=flown && stepfresh::Fresh(published.step);   // WarnTick ran in the last steps
     if(fresh)*out=published;
     ReleaseSRWLockShared(&publishLock);
     return fresh;

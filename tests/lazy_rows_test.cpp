@@ -6,7 +6,8 @@
 //   again nor move the rows, and the rows are never freed, so pointers into them never dangle;
 // - a failed allocation logs exactly one MEMORY line, keeps the table empty, and never retries
 //   (the feature stays off; no half-made table);
-// - threads racing the first Allocate() all see the same rows and the losers' blocks are freed.
+// - threads racing the first Allocate() all see the same rows and the losers' blocks are freed;
+// - a loop's begin() and end() use one read of the rows pointer: a null begin has a null end.
 #include "../src/lazy_rows.h"
 
 #include <cstdio>
@@ -54,11 +55,11 @@ std::size_t Count(crew::LazyRows<Row,16>& rows) {std::size_t n=0;for(auto& row:r
 
 void FirstUseAndReuse() {
     Check(!kConstantInit.Allocated() && kConstantInit.begin()==nullptr,"a constant-initialised table holds no rows");
-    Check(!table.Allocated() && table.begin()==nullptr && table.end()==nullptr && Count(table)==0,
+    Check(!table.Allocated() && table.begin()==nullptr && table.begin().Last()==nullptr && Count(table)==0,
           "before first use: no rows, iteration is empty");
     Check(Row::made==0,"before first use: nothing allocated");
     Check(table.Allocate("test rows") && table.Allocated(),"first use allocates");
-    Check(Row::made==1 && Count(table)==16 && table.end()-table.begin()==16,"all N rows at once, in one block");
+    Check(Row::made==1 && Count(table)==16 && table.begin().Last()-table.begin()==16,"all N rows at once, in one block");
     bool valueInit=true;
     for(const auto& row:table) {
         if(row.held!=0 || row.next!=1)valueInit=false;
@@ -83,12 +84,30 @@ void FailureTurnsTheFeatureOff() {
     const int madeBefore=Row::made;
     Row::refuse=true;
     Check(!refused.Allocate("refused rows"),"the heap refuses: Allocate fails");
-    Check(!refused.Allocated() && refused.begin()==nullptr && refused.end()==nullptr,"after a failure the table stays empty");
+    Check(!refused.Allocated() && refused.begin()==nullptr && refused.begin().Last()==nullptr,"after a failure the table stays empty");
     Check(crew::memoryLines==1,"the failure logs one MEMORY line");
     Row::refuse=false;
     for(int i=0;i<100;++i)Check(!refused.Allocate("refused rows"),"after a failure the feature stays off");
     Check(crew::memoryLines==1 && crew::logLines==1,"no second log line");
     Check(Row::made==madeBefore,"no retry, no half-made table");
+}
+
+// A loop whose begin() ran before another thread's first Allocate() and whose end() after it: begin is null, so its
+// end must be too (the loop runs no rows), not rows + N (a loop from null through N rows). Deterministic: the
+// "other thread" allocates between the two calls.
+void LoopStraddlingFirstAllocate() {
+    crew::LazyRows<Row,16> fresh;
+    auto first=fresh.begin();
+    Check(fresh.Allocate("straddled rows"),"the other thread's first use allocates");
+    const auto last=fresh.end();
+    Check(first==nullptr && first.Last()==nullptr,"begin is null, so its end is null");
+    std::size_t n=0;
+    for(;first!=last && n<=fresh.size();++first)++n;
+    Check(n==0,"a loop begun before the first Allocate() runs no rows");
+    std::size_t after=0;
+    for(auto& row:fresh){(void)row;++after;}
+    Check(after==16,"the next loop sees all N rows");
+    delete[] static_cast<Row*>(fresh.begin());   // test only
 }
 
 void RacingFirstUse() {
@@ -114,6 +133,7 @@ int main() {
     std::setvbuf(stdout,nullptr,_IONBF,0);
     FirstUseAndReuse();
     FailureTurnsTheFeatureOff();
+    LoopStraddlingFirstAllocate();
     RacingFirstUse();
     std::printf("lazy_rows_test: %d checks passed\n",checks);
     return 0;

@@ -1182,8 +1182,11 @@ void Log(const char* format,...) noexcept {
     va_list args;va_start(args,format);edf::logfile::Line(format,args);va_end(args);
 }
 
-// A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
-// below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
+// What is buffered written now, best-effort: both locks once without waiting (edf::logfile::Flush(true)); it may open
+// the log or rotate it as the writer would, so it is not the crash path. A crash goes through CrashLog below:
+// edf::logfile::Crash, after the dump is written, writes the older lines and then the crash line through the log's one
+// handle (opened then if it was not yet; no rotation, no CRT formatting), or with a log lock held the crash line alone
+// by its own raw append.
 void FlushLog() noexcept {
     edf::logfile::Flush();
 }

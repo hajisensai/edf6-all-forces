@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -772,5 +773,55 @@ class PacksFileTests(unittest.TestCase):
                 self.assertEqual(campaign.legacy_layouts(root, {}, (campaign.PACK41,), by_pack), legacy)
 
 
+SECONDS = ROOT / 'tests' / 'edf5_campaign_lifecycle_seconds.json'
+
+
+class _Timed(unittest.TextTestResult):
+    """Each test's seconds, for SECONDS."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.took: dict[str, float] = {}
+
+    def startTest(self, test: unittest.TestCase) -> None:
+        self._started = time.perf_counter()
+        super().startTest(test)
+
+    def stopTest(self, test: unittest.TestCase) -> None:
+        super().stopTest(test)
+        self.took[unit_name(test)] = time.perf_counter() - self._started
+
+
+def unit_name(test: unittest.TestCase) -> str:
+    return test.id().split('.', 1)[1]   # Class.test_name, without the module ('__main__' run as a script)
+
+
+def main(argv: list[str]) -> int:
+    """`--shard I/N` (ctest's edf5_campaign_lifecycle_<I>): the I-th of N parts of about equal measured time
+    (pylib/testshard.py, SECONDS); `--seconds`: run every test one after another and write their seconds to SECONDS.
+    Anything else: unittest.main's command line."""
+    if '--shard' not in argv and '--seconds' not in argv:
+        unittest.main(argv=[sys.argv[0], *argv])
+        return 0
+    import testshard
+    shard, count = 0, 1
+    if '--shard' in argv:
+        shard, count = (int(x) for x in argv[argv.index('--shard') + 1].split('/'))
+        if not 0 <= shard < count:
+            raise SystemExit(f'--shard {shard}/{count}: I must be 0..N-1')
+    every: list[unittest.TestCase] = []
+    pending = [unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])]
+    while pending:
+        for t in pending.pop(0):
+            (pending.append if isinstance(t, unittest.TestSuite) else every.append)(t)
+    mine = testshard.pack(every, count, testshard.load(str(SECONDS)), unit_name)[shard]
+    result = unittest.TextTestRunner(resultclass=_Timed, verbosity=2).run(unittest.TestSuite(mine))
+    if '--seconds' in argv and count == 1:
+        testshard.save(str(SECONDS), "Each tests/test_edf5_campaign_lifecycle.py test's seconds (--seconds, one after "
+                       "another): ctest's edf5_campaign_lifecycle_<I> balance their shards by them.", result.took)
+    print(f'shard {shard}/{count}: {len(mine)} of {len(every)} tests')
+    return 0 if result.wasSuccessful() else 1
+
+
 if __name__ == '__main__':
-    unittest.main()
+    sys.exit(main(sys.argv[1:]))
