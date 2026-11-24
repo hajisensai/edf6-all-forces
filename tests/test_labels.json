@@ -2473,7 +2473,16 @@
    ],
    "scripts": []
   },
-  "frame_rate_dev_guard": {
+  "frame_rate_net_guard": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/frame_rate_net_guard.py"
+   ]
+  },
+  "frame_rate_off_guard": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -2490,7 +2499,7 @@
     "worldmap"
    ],
    "scripts": [
-    "tests/frame_rate_dev_guard.py"
+    "tests/frame_rate_off_guard.py"
    ]
   },
   "frame_rate_sigs": {
@@ -2502,6 +2511,12 @@
    "scripts": [
     "tests/frame_rate_sig_audit.py"
    ]
+  },
+  "frame_rate_view": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "frozen_cockpit_package": {
    "labels": [
@@ -10379,6 +10394,32 @@
     "footprint_covers_the_stock_models",
     "os",
     "sys"
+   ]
+  },
+  "frame_rate_cap_default_off": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "frame_rate_cap_default_off",
+    "os",
+    "re",
+    "src"
    ]
   },
   "free_look_key_default_migrates": {
