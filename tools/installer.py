@@ -127,6 +127,20 @@ NEW_DEFAULTS_1110: dict[str, dict[str, tuple[str, str]]] = {
 DEFAULTS_MARK_1110 = ('; edf6vc-defaults-2026-11-10：安装器已把仍是旧出厂值的观察键 FreeLookKey 0x04（鼠标中键，在格雷普上就是喇叭）'
                       '改成 0x43（C），高视角 HighCamKey 0x43（C）改成 0x4C（L），InfantryScope 1 改成 2（步兵开镜画中画：'
                       '镜外不放大、只放大镜片里；想要整屏放大就改回 1）（想改就改，之后安装不会再改）')
+# The DXGI queue (docs/plan-2026-11-24-optimization.md, B line): MaxFrameLatency shipped 1 (PR #369) and went back to 0
+# (not set: the game's 3) after a heavy-scene A/B where 2 of 3 launches at 1 ran slow; merge_ini keeps an old ini's 1.
+NEW_DEFAULTS_1124: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'MaxFrameLatency': ('1', '0')},
+}
+DEFAULTS_MARK_1124 = ('; edf6vc-defaults-2026-11-24：安装器已把仍是旧出厂值 1 的 MaxFrameLatency 改成 0（不设显卡排队帧数，'
+                      '保持系统默认；重场景实测设 1 时有降速）（想改就改，之后安装不会再改）')
+# The frame rate (docs/unlimited-fps-re.md §5): FrameRateCap shipped 0 (read only) and became 1, the display's refresh
+# rate with the camera and the player interpolated; merge_ini keeps an old ini's 0.
+NEW_DEFAULTS_1124B: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'FrameRateCap': ('0', '1')},
+}
+DEFAULTS_MARK_1124B = ('; edf6vc-defaults-2026-11-24b：安装器已把仍是旧出厂值 0 的 FrameRateCap 改成 1（画面帧率跟显示器刷新率，'
+                       '游戏逻辑仍是 59.94；想要原版 60 帧就改回 0）（想改就改，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
@@ -134,6 +148,8 @@ DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = 
     (DEFAULTS_MARK_1024, NEW_DEFAULTS_1024),
     (DEFAULTS_MARK_1108, NEW_DEFAULTS_1108),
     (DEFAULTS_MARK_1110, NEW_DEFAULTS_1110),
+    (DEFAULTS_MARK_1124, NEW_DEFAULTS_1124),
+    (DEFAULTS_MARK_1124B, NEW_DEFAULTS_1124B),
 )
 
 

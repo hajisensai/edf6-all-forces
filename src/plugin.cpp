@@ -598,7 +598,7 @@ void LoadConfig() noexcept {
     {
         const int raw=ReadInt(L"FrameRateCap",static_cast<DWORD>(n.frameRateCap));
         n.frameRateCap=framerate::FixCap(raw);
-        if(n.frameRateCap!=raw)Log("CONFIG FrameRateCap=%d: %d used (0 the game's own 59.94, -1 no cap, 61..1000)",raw,n.frameRateCap);
+        if(n.frameRateCap!=raw)Log("CONFIG FrameRateCap=%d: %d used (1 the display's refresh rate, 0 the game's own 59.94, -1 no cap, 61..1000)",raw,n.frameRateCap);
     }
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);

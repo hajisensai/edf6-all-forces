@@ -41,7 +41,7 @@ src_dir = os.path.join(ROOT, 'src')
 names = sorted(n for n in os.listdir(src_dir) if n.endswith(('.cpp', '.h')))
 for name in names:
     check(not re.search(r'frameRateDev|FrameRateDev', code(read('src', name))), f'src/{name} reads no FrameRateDev')
-check(re.search(r'\bint frameRateCap=0;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate)')
+check(re.search(r'\bint frameRateCap=1;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 1 (the display\'s refresh rate, as the shipped ini)')
 
 fr = code(read('src', 'frame_rate.cpp'))
 m = re.search(r'void InstallFrameRate\(\) noexcept \{\n(.*?)\n\}\n', fr, re.S)

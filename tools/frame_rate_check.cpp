@@ -35,7 +35,8 @@ void CapSettings() {
     Expect(FixCap(0)==kOff,"0 is off");
     Expect(FixCap(-1)==kUnlimited,"-1 is no cap");
     Expect(FixCap(-2)==kOff && FixCap(-1000)==kOff,"under -1 is off");
-    Expect(FixCap(1)==kOff && FixCap(30)==kOff && FixCap(60)==kOff,"1..60 is off (the game gives 59.94 already)");
+    Expect(FixCap(1)==kRefresh,"1 is the display's refresh rate");
+    Expect(FixCap(2)==kOff && FixCap(30)==kOff && FixCap(60)==kOff,"2..60 is off (the game gives 59.94 already)");
     Expect(FixCap(61)==61 && FixCap(120)==120 && FixCap(1000)==1000,"61..1000 as given");
     Expect(FixCap(1001)==1000 && FixCap(100000)==1000,"over 1000 is 1000");
     Expect(PresentPeriod(10'000'000,0)==0 && PresentPeriod(10'000'000,kUnlimited)==0 && PresentPeriod(0,120)==0,"no period off");

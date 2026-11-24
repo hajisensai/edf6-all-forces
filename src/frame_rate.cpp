@@ -1,5 +1,6 @@
 // Frames above the game's 59.94 Hz, stage 2 (docs/unlimited-fps-re.md §4): the frame gate, the pacing guards, the input
-// on tick frames and the swap chain's sync interval. ini FrameRateCap: 0 (the game's 59.94 Hz) installs nothing; a cap
+// on tick frames and the swap chain's sync interval. ini FrameRateCap: 0 (the game's 59.94 Hz) installs nothing; 1 (the
+// display's refresh rate, shipped) or a cap
 // installs everything below, the camera and the player's root interpolation (frame_rate_view.cpp) and the flip swap
 // chain (swap_flip.cpp). Other objects still move at the tick rate (docs/unlimited-fps-re.md §4.3, stage 4).
 //
@@ -89,7 +90,8 @@ const unsigned char kSyncSig[]={0x8B,0xD6,0x48,0x8D,0x0D,0x5B,0x3F,0xF9,0x00,0x3
 constexpr int kCatchUpTicks=8;
 constexpr std::uint64_t kStatsSeconds=5;
 
-int cap=framerate::kOff;
+int cap=framerate::kOff;       // FixCap's
+int gateCap=framerate::kOff;   // the slots': kRefresh has none (kUnlimited), the sync interval holds it to the refresh
 std::uint64_t qpcFreq=0,slotPeriod=0;
 framerate::Gate gate;
 bool gateOn=false;
@@ -165,7 +167,7 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
 
 // Low 32 bits: whether the frame runs; high: its ticks. Called by the near stub in place of 0x11DAE60.
 std::uint64_t GateCount() noexcept {
-    if(!framerate::Ready(gate,Now(),cap,slotPeriod))return 0;
+    if(!framerate::Ready(gate,Now(),gateCap,slotPeriod))return 0;
     SwapFlipWait();   // latency-5: the frame starts when the GPU can take it; its ticks and alpha are counted after
     const std::uint64_t now=Now();
     const std::uint32_t n=reinterpret_cast<CountFn>(image+kTickCount)();
@@ -176,7 +178,7 @@ std::uint64_t GateCount() noexcept {
 
 // TickWait (frame_pacing.cpp) asks this while the gate is on: QPC counts to the next slot.
 std::uint64_t GateWaitCounts(std::uint64_t now) noexcept {
-    return framerate::WaitCounts(gate,now,cap);
+    return framerate::WaitCounts(gate,now,gateCap);
 }
 
 bool Steps() noexcept { return !gateOn || finalTicks; }
@@ -411,7 +413,7 @@ bool InstallSync() noexcept {
     DEVMODEW mode{};
     mode.dmSize=sizeof(mode);
     const int refresh=EnumDisplaySettingsW(nullptr,ENUM_CURRENT_SETTINGS,&mode) ? static_cast<int>(mode.dmDisplayFrequency) : 0;
-    vsyncWanted=cap!=framerate::kUnlimited && refresh>1 && cap<=refresh;
+    vsyncWanted=cap==framerate::kRefresh || (cap!=framerate::kUnlimited && refresh>1 && cap<=refresh);
     Log("FRAMERATE display %d Hz, cap %d: sync interval %d (0 for %d ticks after a catch-up)",refresh,cap,vsyncWanted ? 1 : 0,kCatchUpTicks);
     bool changed=false;
     return edf::RedirectCall(image+kSyncCall,image+kSyncSubmit,reinterpret_cast<void*>(&SyncHook),changed);
@@ -431,7 +433,8 @@ void InstallFrameRate() noexcept {
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);
     qpcFreq=static_cast<std::uint64_t>(freq.QuadPart);
-    slotPeriod=framerate::PresentPeriod(qpcFreq,cap);
+    gateCap=cap==framerate::kRefresh ? framerate::kUnlimited : cap;
+    slotPeriod=framerate::PresentPeriod(qpcFreq,gateCap);
     tickPeriod=pacing::TickPeriod(qpcFreq);
     // Everything a 0-tick frame would do wrong goes in before the gate that makes them: the guards, the takes, the sync.
     const int guards=InstallGuards();
