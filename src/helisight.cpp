@@ -49,15 +49,17 @@ namespace crew {
 namespace {
 constexpr int kMostGuns=2;
 constexpr std::uint64_t kMostMuzzles=64;
-constexpr ULONGLONG kFreshMs=200;       // a readout not refreshed this long (game ms) is gone: the player got out
 constexpr std::size_t kWeaponLockRange=0x6D0;   // LockonRange (autoturret/docs/re-notes.md "Weapon")
 // A round slower than this (m/frame: 120 m/s, heli.cpp Arms) with no lock is a rocket; a round that reaches less than
 // kNoReach m in its life is no weapon to aim (the 506's fuel tank v_fuel01: 1 m/frame for 1 frame).
 constexpr float kRocketBelow=2.0f,kNoReach=10.0f;
 constexpr float kRocketSight=3000.0f;   // m: the farthest the rockets' point is looked for (the near camera's far clip)
 
+// The player's seat's readout, the step it was published in (step_fresh.h: a vehicle input runs every step; one that
+// stopped publishing is gone) and its vehicle (the player getting out clears it there).
 HeliSightReadout latest{};
-ULONGLONG latestMs=0;
+stepfresh::Step latestStep=0;
+const void* latestVehicle=nullptr;
 
 // A gun's round: AmmoSpeed (m/frame), AmmoGravityFactor, AmmoAlive (frames); false when unreadable or none.
 struct Round { float speed,factor; std::int32_t alive; };
@@ -188,9 +190,11 @@ bool PlayerHeliOwnSight(const void* vehicle) noexcept {
 }
 
 void HeliSightFrame(unsigned char* v) noexcept {
-    if(v[kDead] || !PlayerHeliOwnSight(v))return;
+    // The player left this vehicle (out, dead, another seat's sight): its readout goes now, not when it ages.
+    const auto clear=[&]{ if(latestVehicle==v){latest=HeliSightReadout{};latestStep=0;latestVehicle=nullptr;} };
+    if(v[kDead] || !PlayerHeliOwnSight(v)){clear();return;}
     const unsigned char* const seat=PlayerSeat(v);
-    if(!seat)return;
+    if(!seat){clear();return;}
     const unsigned char* guns[kMostGuns]{};
     int n=HiddenAimGuns(seat,guns,kMostGuns);
     unsigned char *gun=nullptr,*arm=nullptr;
@@ -206,18 +210,18 @@ void HeliSightFrame(unsigned char* v) noexcept {
         r.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
     }
     const bool armOk=arm && SolveArm(arm,homing,r);
-    if(!gunOk && !armOk)return;
-    latest=r;latestMs=GameMs();
+    if(!gunOk && !armOk){clear();return;}
+    latest=r;latestStep=stepfresh::Now();latestVehicle=v;
     DebugLog(v,gunOk ? guns[0] : nullptr,n,r);
 }
 
 bool PlayerHeliSight(HeliSightReadout* out) noexcept {
-    if(!latestMs || GameMs()-latestMs>kFreshMs)return false;
+    if(!stepfresh::Fresh(latestStep))return false;
     *out=latest;
     return true;
 }
 
 void ResetHeliSight() noexcept {
-    latest=HeliSightReadout{};latestMs=0;
+    latest=HeliSightReadout{};latestStep=0;latestVehicle=nullptr;
 }
 }  // namespace crew

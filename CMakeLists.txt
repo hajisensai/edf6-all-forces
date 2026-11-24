@@ -2811,6 +2811,13 @@ target_include_directories(twin_cadence_test PRIVATE src)
 target_compile_options(twin_cadence_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks twin_cadence_test)
 add_test(NAME twin_cadence COMMAND twin_cadence_test)
+
+# Handoff freshness by the scene step, not the wall clock (src/step_fresh.h; docs/step-freshness.md).
+add_executable(step_fresh_test EXCLUDE_FROM_ALL tests/step_fresh_test.cpp)
+target_include_directories(step_fresh_test PRIVATE src)
+target_compile_options(step_fresh_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks step_fresh_test)
+add_test(NAME step_fresh COMMAND step_fresh_test)
 add_test(NAME twin_cadence_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/twin_cadence_native.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(twin_cadence_native PROPERTIES SKIP_RETURN_CODE 77)
 # Each BMPT barrel's own recoil on its own shot (src/barrel_recoil.h), the production source with the game's readers replaced.

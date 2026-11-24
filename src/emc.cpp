@@ -101,8 +101,8 @@ bool triggerOk=false,weaponOk=false,seOk=false;
 // The local player's EMC now (game thread writes, the HUD's draw thread reads).
 SRWLOCK cueLock=SRWLOCK_INIT;
 EmcCue cue{};
-ULONGLONG cueAt=0;
-constexpr ULONGLONG kCueFreshMs=300;
+// the step it was published in (step_fresh.h): the player's vehicle's step publishes it every step
+stepfresh::Step cueStep=0;
 
 bool Is510(const void* v) noexcept { return At<const unsigned char*>(v,0)==image+kVt510; }
 
@@ -267,7 +267,7 @@ void Publish(const Emc& e,const unsigned char* v,const unsigned char* weapon) no
     c.charging=e.st.phase==emc::Phase::charging;c.firing=e.st.phase==emc::Phase::firing;c.empty=ammo<=0;
     std::memcpy(c.pos,v+kPosition,12);
     AcquireSRWLockExclusive(&cueLock);
-    cue=c;cueAt=GetTickCount64();
+    cue=c;cueStep=stepfresh::Now();
     ReleaseSRWLockExclusive(&cueLock);
 }
 
@@ -392,7 +392,7 @@ void EmcTick() noexcept {
 
 bool PlayerEmcCue(EmcCue* out) noexcept {
     AcquireSRWLockShared(&cueLock);
-    const bool fresh=cueAt && GetTickCount64()-cueAt<=kCueFreshMs;
+    const bool fresh=stepfresh::Fresh(cueStep);
     if(fresh)*out=cue;
     ReleaseSRWLockShared(&cueLock);
     return fresh;

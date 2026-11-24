@@ -6079,7 +6079,9 @@ def stock_payload_and_seats_wired() -> None:
     assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
     frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
     assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
-    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    # The list's line stays up the whole ride: shown while its step stamp is fresh (step_fresh.h), not cut at the prompt's
+    # time (latestListed lifts shownUntil as its limit).
+    assert 'latestListed=Cfg().seatList;' in seat and '(!latestListed && ms>=shownUntil)' in seat,         'Publish: SeatList keeps the line up the whole ride'
     assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
     # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
     # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
@@ -6710,6 +6712,14 @@ def map_wired() -> None:
     are wired."""
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
     code, cmake, mission, hud = src('src/map.cpp'), src('CMakeLists.txt'), src('src/mission.cpp'), src('src/hud.cpp')
+    # The pause menu over the open map (map_camera_state.h PauseClose, tools/map_cam_check.cpp): the camera step reports
+    # it, Frame closes the map on the first step after it, a new mission drops it. All three wired.
+    assert 'const bool mapOpen=pauseClose.CameraShows(fresh,fresh && GamePaused());' in code, \
+        'the camera step must report the pause menu over the open map'
+    assert 'if(pauseClose.CloseNow(game.open))Close("the game was paused");' in code, 'Frame must close the map after a pause'
+    assert 'pauseClose.Reset();' in code, 'ResetMap must drop a pause seen in the last mission'
+    # The scene's end (mission.cpp ReleaseGroupHook, FreeResourceGroup(2)): every step stamp stale, the scope wheel let go.
+    assert 'if(static_cast<std::uint32_t>(group)==kSceneGroup)SceneOver();' in mission, 'the scene end must reach SceneOver'
     for key in ('Map', 'MapKey', 'MapButton', 'MapViewDistance'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('MapKey', 'MapButton', 'MapViewDistance'):

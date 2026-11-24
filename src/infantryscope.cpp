@@ -25,7 +25,6 @@ constexpr std::size_t kHumanZoom=0x1D0,kHumanSpecialView=0x224;
 // The weapon: +0x690 SecondaryFire_Type (1 a scope), +0x780 the scope open, +0x784 its power, +0x36C FireInterval,
 // +0x8B0 AmmoExplosion.
 constexpr std::size_t kScopeType=0x690,kScopeOpen=0x780,kScopePower=0x784,kFireInterval=0x36C,kBlast=0x8B0;
-constexpr ULONGLONG kFreshMs=200;   // wall: a cue older than this is gone (the frame stopped publishing)
 constexpr int kMostSets=8;
 
 // The stock crosshair (HudPlayer_CrossHair): its draw, slot 3 of its vtable; +0x580 the soldier it is for.
@@ -61,10 +60,11 @@ struct Unzoom { void* camera=nullptr; float before=0.0f,written=0.0f; };
 Unzoom unzoom{};
 bool unzoomLast=false;   // the last step's camera was widened (its on and off are cuts, frame_rate_view.h)
 
-// openedAt: when this soldier's scope was first seen open (the lens's probation, scope_pip.h KeepUnzoomed). frameFov /
+// at: the step the soldier's frame published the cue in (step_fresh.h; it publishes every step and clears the cue when the
+// scope closes, so an old stamp is a frame that stopped running). openedAt: when this soldier's scope was first seen open (the lens's probation, scope_pip.h KeepUnzoomed). frameFov /
 // scopeFov: the camera step's last unmagnified frame for this soldier and the stock zoom's FOV it replaced (0: the
 // frame is the stock zoom's), at fovAt.
-struct Published { ObjRef human; InfantryScopeCue cue; ULONGLONG at; ULONGLONG openedAt; float frameFov,scopeFov; ULONGLONG fovAt; };
+struct Published { ObjRef human; InfantryScopeCue cue; stepfresh::Step at; ULONGLONG openedAt; float frameFov,scopeFov; ULONGLONG fovAt; };
 Published published{};
 SRWLOCK lock=SRWLOCK_INIT;
 
@@ -77,6 +77,10 @@ bool PictureInPicture() noexcept {
 bool LensRefused() noexcept {
     return lensRefused.load(std::memory_order_acquire) || scopelens::Refused();
 }
+// The cue holds while the soldier's frame published it in the last steps and the game is not paused: the pause menu stops
+// the soldier's frame but not the camera step, the draw or the render thread, and its frames are the stock zoom's
+// (scope_pip.h KeepUnzoomed), the HUD's mask gone with the rest of the HUD (hud.cpp HudDraw). Any thread.
+bool Live(const Published& p) noexcept { return p.cue.human && stepfresh::Fresh(p.at) && !GamePaused(); }
 Published Read() noexcept {
     AcquireSRWLockShared(&lock);
     const Published p=published;
@@ -113,7 +117,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     __try {
         const Published p=Read();
         const ULONGLONG now=GetTickCount64();
-        if(!p.cue.human || now-p.at>kFreshMs || !PictureInPicture())return;
+        if(!Live(p) || !PictureInPicture())return;
         auto c=static_cast<unsigned char*>(cam);
         if(At<const void*>(c,kCamTargetRef)!=p.cue.human && At<const void*>(c,kCamTarget)!=p.cue.human)return;
         const float before=At<float>(c,kCamFov);
@@ -188,7 +192,7 @@ void InfantryScopeFrame(unsigned char* human) noexcept {
         }
         p.cue=InfantryScopeCue{human,std::isfinite(power) ? power : 1.0f,
                                infantryscope::LookFor(At<std::int32_t>(w,kFireInterval),std::isfinite(blast) ? blast : 0.0f,rocket)};
-        p.at=GetTickCount64();
+        p.at=stepfresh::Now();
         if(!published.human.Is(human) || published.cue.look!=p.cue.look)
             Log("INFANTRYSCOPE %.1fx, %s",p.cue.zoom,p.cue.look==scope::Look::launcher ? "launcher" : p.cue.look==scope::Look::combat ? "combat optic" : "marksman");
         Publish(p);
@@ -198,7 +202,7 @@ void InfantryScopeFrame(unsigned char* human) noexcept {
 bool InfantryScopeNow(InfantryScopeCue* out) noexcept {
     const Published p=Read();
     const ULONGLONG now=GetTickCount64();
-    if(!p.human || !Cfg().enabled || !Cfg().infantryScope || now-p.at>kFreshMs || !(p.cue.zoom>1.01f))return false;
+    if(!p.human || !Cfg().enabled || !Cfg().infantryScope || !Live(p) || !(p.cue.zoom>1.01f))return false;
     if(out) {
         *out=p.cue;
         // The lens is what the HUD frames only while it draws: in the soldier's last world view, lately.
@@ -279,9 +283,9 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
         return;
     }
     const Published p=Read();
-    const ULONGLONG now=GetTickCount64();
+    const ULONGLONG now=GetTickCount64();   // the idle timer's clock only (freshness is the step count's: Live)
     const bool mine=ViewOf(view,p.cue.human);
-    const bool want=mine && now-p.at<=kFreshMs && PictureInPicture() && !LensRefused() && scopelens::Installed();
+    const bool want=mine && Live(p) && PictureInPicture() && !LensRefused() && scopelens::Installed();
     if(!want) {
         if(index==0)compositor.Release();
         if(mine)lensShown.store(false,std::memory_order_release);

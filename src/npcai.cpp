@@ -344,7 +344,10 @@ const void* followedLock=nullptr;   // the turret lock the mark last followed (F
 // A mark key press at an aircraft's stick waiting for its lock (JetMarkFrame).
 struct JetMark { bool pending; const void* from; ULONGLONG until; };
 JetMark jetMark{};
-struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
+// step: the scene step KeepMark published it in (step_fresh.h; every step, and it clears `on` itself when the mark goes):
+// the count only covers a frame that stopped running KeepMark while the scene runs (no player); at the scene's end the
+// count stands still and crew::SceneOver makes the stamp stale (step_fresh.h).
+struct MarkPub { bool on; float at[3]; stepfresh::Step step; NpcPing ping; };
 MarkPub markPub{};
 NpcPing ping{};
 SRWLOCK markLock=SRWLOCK_INIT;
@@ -440,7 +443,7 @@ void KeepMark() noexcept {
     if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
     else if(mark.obj){npcmark::Assign(mark.obj,{});Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
-    markPub.on=npcmark::MarkOn() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.on=npcmark::MarkOn() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.step=stepfresh::Now();
     markPub.ping=ping;
     if(!npcmark::MarkOn())markPub.ping.on=false;
     ReleaseSRWLockExclusive(&markLock);
@@ -4651,7 +4654,7 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
 
 bool NpcMarkReadout(float* at) noexcept {
     AcquireSRWLockShared(&markLock);
-    const bool on=markPub.on && GetTickCount64()-markPub.wall<=500;
+    const bool on=markPub.on && stepfresh::Fresh(markPub.step);
     if(on)std::memcpy(at,markPub.at,12);
     ReleaseSRWLockShared(&markLock);
     return on;
@@ -4660,7 +4663,9 @@ bool NpcMarkReadout(float* at) noexcept {
 bool NpcPingReadout(NpcPing* out) noexcept {
     AcquireSRWLockShared(&markLock);
     *out=markPub.ping;
+    const bool fresh=stepfresh::Fresh(markPub.step);
     ReleaseSRWLockShared(&markLock);
-    return out->on && GetTickCount64()-out->wall<=kPingMs;
+    // The handoff is the step's; how long a given point shows (kPingMs since it was given) stays the notice's own time.
+    return fresh && out->on && GetTickCount64()-out->wall<=kPingMs;
 }
 }  // namespace crew
