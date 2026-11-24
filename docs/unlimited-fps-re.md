@@ -247,23 +247,33 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 只改呈现，模拟与网络节奏不变（§4.2 让网络块保持原节奏），所以**不需要升房间协议**：同一房间里有人开、有人不开，模拟结果一样。
 阶段 2 实机要验证这一点（EDF6Coop 自己的每帧钩子在不在 n = 0 帧多跑，见 Coop 仓库）。
 
+插件自己的联机通道（2026-11-24 审查，`tests/frame_rate_net_guard.py`）：n = 0 帧不跑泵、不发包。泵 `RunSupportNetTick`
+（`support_net.cpp`）按 `GameFrame()` 去重，`GameFrame()` 只在 `SeeFrame` 读到 System+0xCE0 变了才推进；+0xCE0 只在
+`0x1198EEA` / `0x1198FDA` 写，后者在 tick 循环里，n = 0 时 `0x1198FB3` 跳过整个循环。`SeeFrame` 只在 tick 内调用（载具输入、
+NPC Think、空母激光、支援分派、PvP）。直接发包的点都在 tick 路径上或是一次性事件，周期重发按时间或逻辑帧限频。每个渲染帧都跑的
+文件（HUD、Present、UI、窗口消息、fps-9 的几处、`map.cpp` 每帧钩子）不发包。低风险：`room_ui.cpp` 每帧调 `RoomPvpTick` 写
+EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（高帧率下重试更频，不分歧）。EDF6Coop 自己的每帧工作挂在
+`0x7056AE`，由守卫限在 tick 帧；双机实测留给维护者（§7-5）。
+
 ## 5. 阶段与现状
 
 | 阶段 | 内容 | 现状 |
 |---|---|---|
 | 1 | 呈现槽、tick 只在出帧时数、渲染相位、刚体插值的纯逻辑；离线检查 `tools/frame_rate_check.cpp`；ini `FrameRateCap` 读取与日志 | 完成（只离线） |
-| 2 | 帧门小桩 + 两处 `mov ebx,edx`、等待到槽、6 个节奏守卫（Steam / 网络 / EOS / MapMgr / `+0x6C` / 随机数）、封装更新挪到步进前 + 鼠标滚轮只在 tick 帧取、插件接管 SyncInterval；签名审计 `tests/frame_rate_sig_audit.py` | **代码完成，只在开发开关 `FrameRateDev=1` 下生效**（ini 里不写，默认关）；实机结果见 PR |
-| 3 | 玩家镜头 + 玩家 / 载具根变换插值（§4.3.1–4.3.2）；插件镜头功能的断点 API；交换链翻转模型 + 撕裂 + 可等待对象（`docs/frame-pacing-re.md`） | **代码完成，只在 `FrameRateDev=1` 且有上限时生效**；实机结果见 PR |
+| 2 | 帧门小桩 + 两处 `mov ebx,edx`、等待到槽、6 个节奏守卫（Steam / 网络 / EOS / MapMgr / `+0x6C` / 随机数）、封装更新挪到步进前 + 鼠标滚轮只在 tick 帧取、插件接管 SyncInterval；签名审计 `tests/frame_rate_sig_audit.py` | 完成：`FrameRateCap≠0` 时生效 |
+| 3 | 玩家镜头 + 玩家 / 载具根变换插值（§4.3.1–4.3.2）；插件镜头功能的断点 API；交换链翻转模型 + 撕裂 + 可等待对象（`docs/frame-pacing-re.md`） | 完成：`FrameRateCap≠0` 时生效；MSAA 开着时交换链保留 blt |
 | 4 | 全部骨骼插值 | 未做 |
 | 5 | 植被风、着色器时间、特效 | 未做 |
 | 6 | 联机实测、性能（n = 0 帧的 Umbra / 栅栏成本） | 未做 |
 
-开关：`FrameRateDev=0`（默认）时 `FrameRateCap` 只被读取并记一行 `FRAMERATE`，游戏照原版运行。`FrameRateDev=1` 时：
-- `FrameRateCap=0`：只装输入挪位（latency-3），帧率仍 59.94。
-- `FrameRateCap≠0`：再装 8 个守卫、鼠标 / 滚轮取、SyncInterval 钩子，全部装上才装帧门；日志每 5 s 一行 `FRAMERATE ticks/s frames/s`。
+开关只有 ini `FrameRateCap`（2026-11-24 起面向玩家；原先的开发开关 `FrameRateDev` 已删，守卫 `tests/frame_rate_off_guard.py`）：
+- `FrameRateCap=0`（发布默认）：什么都不装，游戏照原版运行。`1`（跟刷新率）改成默认要等 §7 清单做完、其他物体插值（PR-e）合入后单独开 PR。
+- `FrameRateCap≠0`：先核对所有改写点（tick 计数两处、n 的存储、tick 等待是本插件的 TickWait、没有 EDF6VR），有一处不符就整个不装；
+  都符合时装输入挪位（latency-3）、8 个守卫、鼠标 / 滚轮取、SyncInterval 钩子、Present 统计（翻转模型只在开发开关 `FrameRateFlip` 后），全部装上才装帧门；
+  日志每 5 s 一行 `FRAMERATE`（ticks/s、frames/s、1% low）与一行 `PRESENT`（Present 调用数、`GetFrameStatistics` 的实际上屏帧数与刷新数）。
 
-不对玩家默认开的理由：阶段 3 只插值玩家镜头和玩家自己（及所乘载具）；其他角色、敌人、特效、植被仍按 tick 走（阶段 4、5），
-高帧率下它们相对镜头是 60 Hz 的阶梯运动；§7 的人工项也还没测。
+已知限制：只插值玩家镜头和玩家自己（及所乘载具）；其他角色、敌人、特效、植被仍按 tick 走（阶段 4、5），
+高帧率下它们相对镜头是 60 Hz 的阶梯运动；§7 的人工项还没测。
 
 ## 6. 离线检查（阶段 1）
 

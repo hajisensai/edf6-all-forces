@@ -17,13 +17,14 @@
 #include <cstdint>
 
 namespace crew::framerate {
-// ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), -1 no cap (the GPU and the swap chain's sync
-// interval are the limit: the game has no vsync setting, 0x11A3098's `sete dl` passes 1 except for the 8 frames after
-// a catch-up, docs/unlimited-fps-re.md §1), 61..1000 at most that many frames a second. 1..60 is no more than the game already gives
+// ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), 1 the display's refresh rate (the shipped default:
+// no slots, the swap chain's sync interval 1 holds the frames to the refresh), -1 no cap (the GPU and the sync interval
+// are the limit: the game has no vsync setting, 0x11A3098's `sete dl` passes 1 except for the 8 frames after a catch-up,
+// docs/unlimited-fps-re.md §1), 61..1000 at most that many frames a second. 2..60 is no more than the game already gives
 // and is taken as 0; anything under -1 as 0; over 1000 as 1000.
-constexpr int kOff=0,kUnlimited=-1,kMinCap=61,kMaxCap=1000;
+constexpr int kOff=0,kRefresh=1,kUnlimited=-1,kMinCap=61,kMaxCap=1000;
 constexpr int FixCap(int raw) noexcept {
-    if(raw==kUnlimited)return kUnlimited;
+    if(raw==kUnlimited || raw==kRefresh)return raw;
     if(raw<kMinCap)return kOff;
     return raw>kMaxCap ? kMaxCap : raw;
 }
@@ -45,7 +46,8 @@ struct Gate {
     std::uint64_t next=0;   // QPC of the next slot
     bool armed=false;
 };
-// `cap` as FixCap gives it (not kOff: then the game's own loop runs), `period` PresentPeriod(freq, cap).
+// `cap` as FixCap gives it (not kOff: then the game's own loop runs; kRefresh is passed as kUnlimited, the sync interval
+// paces it), `period` PresentPeriod(freq, cap).
 constexpr bool Ready(Gate& g,std::uint64_t now,int cap,std::uint64_t period) noexcept {
     if(cap==kUnlimited)return true;
     const auto late=static_cast<std::int64_t>(now-g.next);

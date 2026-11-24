@@ -6330,7 +6330,7 @@ def max_frame_latency_default_back_to_0() -> None:
     ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
     assert re.search(r'^MaxFrameLatency=0$', ini, re.M) and 'int maxFrameLatency=0;' in crew
     assert installer.NEW_DEFAULTS_1124[installer.SECTION] == {'MaxFrameLatency': ('1', '0')}
-    marks = '\n'.join(m for m, _ in installer.DEFAULTS_STEPS[:-1])
+    marks = '\n'.join(m for m, _ in installer.DEFAULTS_STEPS if m != installer.DEFAULTS_MARK_1124)
     old = f'[VehicleCrew]\n{marks}\nEnabled=1\nMaxFrameLatency=1\n'
     text, flipped = installer.apply_new_defaults(old)
     assert flipped == ['MaxFrameLatency'] and 'MaxFrameLatency=0' in text and text.count(installer.DEFAULTS_MARK_1124) == 1, flipped
@@ -6341,6 +6341,17 @@ def max_frame_latency_default_back_to_0() -> None:
     assert flipped == [] and 'MaxFrameLatency=2 ; mine' in text
     assert re.search(r'^MaxFrameLatency=0$', installer.planned_ini(old, ini)[0], re.M)
 
+
+
+@test
+def frame_rate_cap_default_off() -> None:
+    """FrameRateCap ships 0, the game's own 59.94 Hz (docs/unlimited-fps-re.md §5): the shipped ini and the plugin's
+    default agree, and no defaults step moves it (1, the display's refresh rate, waits for the maintainer's checklist
+    and the other objects' interpolation; a later PR changes the default)."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^FrameRateCap=0$', ini, re.M) and 'int frameRateCap=0;' in crew
+    assert all('FrameRateCap' not in flips.get(installer.SECTION, {}) for _, flips in installer.DEFAULTS_STEPS)
 
 @test
 def high_cam_default_migrates() -> None:

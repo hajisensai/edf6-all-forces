@@ -1,5 +1,5 @@
 // Frames above the game's 59.94 Hz, stage 3: the camera between two steps (docs/unlimited-fps-re.md §4.3; the review's
-// fps-5, fps-6, fps-8). Developer only: installed with the frame gate (frame_rate.cpp, ini FrameRateDev=1 and a cap).
+// fps-5, fps-6, fps-8). Installed with the frame gate (frame_rate.cpp, ini FrameRateCap other than 0).
 //
 // The snapshot (fps-5). In the step loop of System::Update, each viewport's camera steps through 0x118DF40 (called at
 // 0x11995A6 only, rcx the camera): its vtable slot 4 (+0x20) writes the camera's world matrix cam+0x220 (rows right, up,
@@ -13,9 +13,11 @@
 // On a frame with ticks the phase is 1 and the camera is drawn as the last step left it, as the game does. On a frame
 // without, the camera is drawn at InterpolateRigid(prev, cur, alpha) and the field at the same blend: the picture is one
 // tick behind the simulation, never ahead of it. The HUD after System::Update (0x7058B7) sees the same camera as the
-// picture. Right before the next System::Update the step's own state goes back (BeginFrame), so the step, the plugin's
-// logic in it and the camera's own next step read the simulation's camera, never a blend. A camera something else wrote
-// after its step (the bytes differ from cur) is left alone; a blend something else overwrote is not put back.
+// picture. The step's own state goes back right after the same frame's end fence (0x11A305A -> 0x111CC20: the render
+// thread has drawn the frame), before the next frame's Application::Update (the network, EOS / EDF6Coop's room, the
+// wind) and its step: the blend lives only while the frame is drawn (the review of #386, 3). A camera something else
+// wrote after its step (the bytes differ from cur) is left alone; a blend something else overwrote is not put back (the
+// field only with its matrix).
 //
 // The cuts (fps-8). InterpolateRigid already draws the step as it is across a teleport (kCutMove metres or kCutTurn
 // radians in one tick). A plugin camera switch is a smaller jump (first person to over the shoulder is a metre or two;
@@ -29,8 +31,9 @@
 // render thread is idle: the frame end's fence 0x11A305A waited for it), D = cur^-1 * InterpolateRigid(prev, cur,
 // alpha) is multiplied onto every bone of the draw pose ([inst+0x30], world matrices) of every instance of the body,
 // every weapon of [h+0x1950] (+0xF30) and, riding, the vehicle (the rider and their weapons with the vehicle's D: rigid
-// passengers). A skin is drawn from each bone's own matrix, so all bones move, not the root only. The next frame puts
-// the poses back where they still hold what was written. The first person's view model (firstperson.cpp DrawTransforms)
+// passengers). A skin is drawn from each bone's own matrix, so all bones move, not the root only. The same frame's end
+// fence puts the poses back where they still hold what was written. A new root (the soldier, the vehicle, their
+// control blocks or the instance changed: boarding, a seat, down / revived, a cutscene) cuts its camera too. The first person's view model (firstperson.cpp DrawTransforms)
 // takes its anchor from the drawn pose, so D cancels there; its riding path (stepT) does not and is a known gap.
 // Not covered: other soldiers in the same vehicle, and frames with ticks (the render thread can read a pose the step
 // is writing, the stock race the 60 Hz frame hides; R1 in the plan).
@@ -47,6 +50,8 @@
 namespace crew {
 namespace {
 constexpr unsigned kCameraStepCall=0x11995A6,kCameraStep=0x118DF40;
+// The main loop's frame end: the game thread waits for the render thread (frame_pacing.cpp has its loop).
+constexpr unsigned kFenceCall=0x11A305A,kFence=0x111CC20;
 // lea rdx,[rsp+38h]; call 0x118DF40
 const unsigned char kCameraStepSig[]={0x48,0x8D,0x54,0x24,0x38,0xE8,0x95,0x49,0xFF,0xFF};
 constexpr unsigned kWorld=0x220,kFov=0x24;
@@ -88,7 +93,7 @@ Root root;
 struct Posed { const unsigned char* inst; float* pose; std::uint64_t count; std::size_t at; };
 std::vector<Posed> posed;
 std::vector<float> posedBefore,posedAfter;
-unsigned rootsPosed=0,rootsLeft=0;
+unsigned rootsPosed=0,rootsLeft=0,rootsRefused=0;   // left: the root changed since its tick; refused: a jump or no rigid
 
 bool IsSoldier(const unsigned char* h) noexcept {
     if(!h || !Readable(h,kWeaponCount+8))return false;
@@ -143,6 +148,8 @@ void SampleRoot(const void* camera) noexcept {
     const void* const hc=At<const void*>(h,kSelfCtrl);
     const void* const vc=v ? At<const void*>(v,kSelfCtrl) : nullptr;
     if(!pose || root.human!=h || root.humanCtrl!=hc || root.vehicle!=v || root.vehicleCtrl!=vc || root.inst!=inst) {
+        // Boarding, a seat, down / revived, a cutscene: the game's own camera switch is a jump a blend would smear over.
+        if(root.samples)FrameRateCameraCut(camera);
         root=Root{};
         if(!pose)return;
         root.camera=camera;root.human=h;root.humanCtrl=hc;root.vehicle=v;root.vehicleCtrl=vc;root.inst=inst;
@@ -197,16 +204,19 @@ void PoseRoot(float alpha) {
     const float* const live=PoseOf(root.inst,&n);
     float shown[16];
     if(!live || At<const void*>(h,kSelfCtrl)!=root.humanCtrl || RiddenBy(h)!=v ||
-       (v && At<const void*>(v,kSelfCtrl)!=root.vehicleCtrl) || std::memcmp(live,root.cur,sizeof(root.cur)) ||
-       !framerate::InterpolateRigid(root.prev,root.cur,alpha,shown,kCutMove,kCutTurn)) {
+       (v && At<const void*>(v,kSelfCtrl)!=root.vehicleCtrl) || std::memcmp(live,root.cur,sizeof(root.cur))) {
         ++rootsLeft;
+        return;
+    }
+    if(!framerate::InterpolateRigid(root.prev,root.cur,alpha,shown,kCutMove,kCutTurn)) {
+        ++rootsRefused;
         return;
     }
     fpview::M4 cur,inverse,to;
     std::memcpy(cur.m,root.cur,64);
     std::memcpy(to.m,shown,64);
     if(!fpview::InverseAffine(cur,&inverse)) {
-        ++rootsLeft;
+        ++rootsRefused;
         return;
     }
     const fpview::M4 d=fpview::Mul(inverse,to);
@@ -217,6 +227,36 @@ void PoseRoot(float alpha) {
     const auto weapons=At<std::int32_t>(h,kWeaponCount);
     if(list && weapons>0 && weapons<=kMostWeapons && Readable(list,static_cast<std::size_t>(weapons)*8))
         for(int i=0;i<weapons;++i)if(list[i])PoseModel(list[i]+kWeaponModel,d);
+}
+
+// The cameras this frame drew blended get their step's state back: the matrix where it still holds the blend, the field
+// only with it (a field equal by chance under someone else's matrix is theirs).
+void RestoreCameras() noexcept {
+    for(Camera& c:cameras) {
+        if(!c.camera || !c.written)continue;
+        auto* const bytes=static_cast<unsigned char*>(const_cast<void*>(c.camera));
+        __try {
+            float fov=0.0f;
+            std::memcpy(&fov,bytes+kFov,4);
+            if(!std::memcmp(bytes+kWorld,c.shown,sizeof(c.shown))) {
+                std::memcpy(bytes+kWorld,c.cur,sizeof(c.cur));
+                if(fov==c.shownFov)std::memcpy(bytes+kFov,&c.curFov,4);
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        c.written=false;
+    }
+}
+void RestoreFrame() noexcept {
+    RestoreCameras();
+    RestorePoses();
+}
+
+using FenceFn=void*(*)(void*,void*,void*,void*);
+// The frame end's fence: once the render thread has drawn the frame, the blends go (the review of #386, 3).
+void* FrameEndHook(void* a,void* b,void* c,void* d) {
+    void* const r=reinterpret_cast<FenceFn>(image+kFence)(a,b,c,d);
+    if(on)RestoreFrame();
+    return r;
 }
 
 using CameraStepFn=void(*)(void*,void*);
@@ -265,6 +305,12 @@ void BeforeProject(void* camera,const int*) {
     if(!on || alphaNow>=1.0f || !camera)return;
     Camera* const c=Find(camera);
     if(!c || !c->havePrev || c->written)return;
+    // A camera that did not step on the last frame with ticks (age 1 or more) holds the tick before's pair: blending it
+    // would draw it going back. Left as it is (counted unblended).
+    if(c->age) {
+        ++unblended;
+        return;
+    }
     auto* const bytes=static_cast<unsigned char*>(camera);
     __try {
         float fov=0.0f;
@@ -286,22 +332,12 @@ void BeforeProject(void* camera,const int*) {
 namespace framerateview {
 void BeginFrame(std::uint32_t ticks,float alpha) noexcept {
     if(!on)return;
+    RestoreFrame();   // normally done at the last frame's end fence already: nothing left
     for(Camera& c:cameras) {
         if(!c.camera)continue;
-        if(c.written) {
-            auto* const bytes=static_cast<unsigned char*>(const_cast<void*>(c.camera));
-            __try {
-                float fov=0.0f;
-                std::memcpy(&fov,bytes+kFov,4);
-                if(!std::memcmp(bytes+kWorld,c.shown,sizeof(c.shown)))std::memcpy(bytes+kWorld,c.cur,sizeof(c.cur));
-                if(fov==c.shownFov)std::memcpy(bytes+kFov,&c.curFov,4);
-            } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            c.written=false;
-        }
         if(ticks && c.age<1000)++c.age;
         if(c.camera==root.camera && c.age>1)root=Root{};   // its camera stopped stepping: the next one samples
     }
-    RestorePoses();
     alphaNow=alpha;
     if(ticks || alpha>=1.0f)return;
     __try {
@@ -311,9 +347,10 @@ void BeginFrame(std::uint32_t ticks,float alpha) noexcept {
     }
 }
 
-void TakeCounts(unsigned& blendedOut,unsigned& unblendedOut,unsigned& rootsOut,unsigned& rootsLeftOut) noexcept {
-    blendedOut=blended;unblendedOut=unblended;rootsOut=rootsPosed;rootsLeftOut=rootsLeft;
-    blended=unblended=rootsPosed=rootsLeft=0;
+void TakeCounts(unsigned& blendedOut,unsigned& unblendedOut,unsigned& rootsOut,unsigned& rootsLeftOut,
+                unsigned& rootsRefusedOut) noexcept {
+    blendedOut=blended;unblendedOut=unblended;rootsOut=rootsPosed;rootsLeftOut=rootsLeft;rootsRefusedOut=rootsRefused;
+    blended=unblended=rootsPosed=rootsLeft=rootsRefused=0;
 }
 
 bool Install() noexcept {
@@ -327,6 +364,11 @@ bool Install() noexcept {
         return false;
     }
     bool changed=false;
+    // The restore first: nothing is blended until the camera step's hook samples.
+    if(!edf::RedirectCall(image+kFenceCall,image+kFence,reinterpret_cast<void*>(&FrameEndHook),changed)) {
+        Log("FRAMERATE the frame end's fence call (0x%X) could not be redirected: no interpolation",kFenceCall);
+        return false;
+    }
     if(!edf::RedirectCall(image+kCameraStepCall,image+kCameraStep,reinterpret_cast<void*>(&CameraStepHook),changed)) {
         Log("FRAMERATE the camera step's call could not be redirected: no interpolation");
         return false;

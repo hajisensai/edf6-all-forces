@@ -1,4 +1,4 @@
-// Frames above the game's 59.94 Hz, stage 2 (frame_rate.cpp, docs/unlimited-fps-re.md): developer only (ini FrameRateDev).
+// Frames above the game's 59.94 Hz (frame_rate.cpp, docs/unlimited-fps-re.md): ini FrameRateCap, 0 = the game's rate.
 #pragma once
 
 namespace crew {

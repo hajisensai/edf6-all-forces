@@ -1136,6 +1136,16 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!realKeyState)realKeyState=&GetKeyState;
     Log("BACKGROUND window kept inactive and off screen: %d of 6 import slots",KeepWindowInactive(edf));
     Log("BACKGROUND user32 diverted in the whole process: %d entries (aliases once)",KeepDesktop());
+    // Windows 11 throttles a process whose window is off screen / occluded: its timer resolution request is ignored
+    // (Sleep back to 15.6 ms) and EcoQoS may slow its threads. A player's game is in front and never sees this; the
+    // background runs must not, or their frame rates measure the throttling (test plugin only, never the shipped ones).
+    PROCESS_POWER_THROTTLING_STATE throttle{};
+    throttle.Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    throttle.ControlMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED|PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    throttle.StateMask=0;
+    const BOOL unthrottled=SetProcessInformation(GetCurrentProcess(),ProcessPowerThrottling,&throttle,sizeof(throttle));
+    Log("BACKGROUND power throttling off (timer resolution kept, no EcoQoS)=%d (error %lu)",unthrottled ? 1 : 0,
+        unthrottled ? 0ul : GetLastError());
     Log("HOOK createCoRoutine=%d",HookCoRoutine());
     LogMemory("load");
     PollCommand();   // a mission asked before the launch, before the script's main loop runs
