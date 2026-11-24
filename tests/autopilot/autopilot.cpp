@@ -22,6 +22,8 @@
 //  - "cycle N [STAY] [reboot]" (with the mission, or once in it): withdraw from the mission STAY seconds (default 20)
 //    after it runs, the pause menu's way, and enter the same mission again, N times in one launch (CYCLE rows; for
 //    the Havok worker reset on the way out: docs/mission-cycle-re.md).
+//    Each entry and way out also logs MEMMAP / HEAPS (where the commit sits); "probe heap N" adds the live allocations
+//    born since the Nth way out, by call path (heap_probe.cpp; mem-3, docs/memloop-re.md).
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>

@@ -22,7 +22,7 @@ HeapFreeFn realHeapFree=nullptr;
 VirtualAllocFn realVirtualAlloc=nullptr;
 VirtualFreeFn realVirtualFree=nullptr;
 
-volatile LONG tracking=0,marks=0,startAt=2;
+volatile LONG armed=0,tracking=0,marks=0,startAt=2;
 volatile LONG64 dropped=0;
 
 // The call path: the first frames outside the allocators' own modules (system DLLs, the shared CRT), so a site is
@@ -266,11 +266,9 @@ void Dump(const char* why) noexcept {
               s.count[0],s.count[1],path);
     }
 }
-}  // namespace
-
-bool InstallHeapProbe(LogFn log,int startMark) noexcept {
-    logFn=log;
-    if(shards)return true;
+// The import tables are swapped at the starting mark, not at the command: the command comes with the launch, before
+// EDFModLoader has loaded the plugins after this one (and before the game's own late DLLs).
+bool Patch() noexcept {
     const HMODULE k32=GetModuleHandleW(L"kernel32.dll");
     realHeapAlloc=reinterpret_cast<HeapAllocFn>(GetProcAddress(k32,"HeapAlloc"));
     realHeapReAlloc=reinterpret_cast<HeapReAllocFn>(GetProcAddress(k32,"HeapReAlloc"));
@@ -303,16 +301,29 @@ bool InstallHeapProbe(LogFn log,int startMark) noexcept {
         const int n=PatchModule(modules[i]);
         patched+=n;touched+=n ? 1 : 0;
     }
-    startAt=startMark<1 ? 1 : startMark;
-    log("HEAPPROBE installed: %d import entries in %d modules, counting from cycle mark %ld (%zu MB of tables)",patched,
-        touched,startAt,(sizeof(Shard)*kShards+sizeof(Site)*kSites)>>20);
+    logFn("HEAPPROBE import entries swapped: %d in %d of %lu modules (%zu MB of tables)",patched,touched,
+          bytes/static_cast<DWORD>(sizeof(HMODULE)),(sizeof(Shard)*kShards+sizeof(Site)*kSites)>>20);
     return patched>0;
+}
+}  // namespace
+
+bool InstallHeapProbe(LogFn log,int startMark) noexcept {
+    logFn=log;
+    startAt=startMark<1 ? 1 : startMark;
+    InterlockedExchange(&armed,1);
+    log("HEAPPROBE armed: counting from cycle mark %ld",startAt);
+    return true;
 }
 
 void HeapProbeMark(const char* why) noexcept {
-    if(!shards)return;
+    if(!armed)return;
     const LONG n=InterlockedIncrement(&marks);
-    if(n==startAt){InterlockedExchange(&tracking,1);logFn("HEAPLIVE %s (mark %ld): counting starts",why,n);return;}
+    if(n==startAt) {
+        if(!Patch()){logFn("HEAPPROBE failed: nothing counted");InterlockedExchange(&armed,0);return;}
+        InterlockedExchange(&tracking,1);
+        logFn("HEAPLIVE %s (mark %ld): counting starts",why,n);
+        return;
+    }
     if(n>startAt)Dump(why);
 }
 }  // namespace autopilot
