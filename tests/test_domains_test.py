@@ -315,6 +315,11 @@ class ChildrenDieWithMe(unittest.TestCase):
 class BlindScans(unittest.TestCase):
     SOURCE = '''import os
 import eo
+import glob
+import re
+import subprocess
+from os import walk
+from glob import glob as g
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = os.path.join(ROOT, 'edf41port')
 def whole_root():
@@ -342,6 +347,22 @@ def a_nested_scope():
         here = ROOT
         return os.listdir(here)
     return inner
+def only_patterns():
+    return glob.glob(os.path.join(ROOT, '**', '*.cpp'), recursive=True), g(ROOT + '/**/*.cpp')
+def imported_walk():
+    return walk(ROOT)
+def imported_glob():
+    return g(os.path.join(os.path.dirname(__file__), '*'))
+def shell_listing():
+    return os.popen('dir /s /b ' + ROOT).read()
+def git_in_one_string():
+    return os.popen('git -c core.quotepath=off ls-files').read()
+def git_grep_list():
+    return subprocess.run(['git', 'grep', '-l', 'ROOT'], capture_output=True)
+def a_pattern_mentioning_git(text):
+    return re.search(r'foreach .* in git [^)]*ls-files', text), os.popen('echo ' + ROOT)
+def imported_glob_naming_a_folder():
+    return g(os.path.join(ROOT, 'pylib', '*.py')), walk(os.path.join(ROOT, 'tests'))
 '''
 
     def test_listings_naming_no_folder_are_found(self) -> None:
@@ -350,7 +371,9 @@ def a_nested_scope():
             with open(scan, 'w', encoding='utf-8') as f:
                 f.write(self.SOURCE)
             found = {fn for fn, _line, _text in td.blind_scans(scan, {'eo'})}
-        self.assertEqual(found, {'whole_root', 'a_module_constant', 'through_a_name', 'git_files', 'a_nested_scope'})
+        self.assertEqual(found, {'whole_root', 'a_module_constant', 'through_a_name', 'git_files', 'a_nested_scope',
+                                'only_patterns', 'imported_walk', 'imported_glob', 'shell_listing',
+                                'git_in_one_string', 'git_grep_list'})
 
     def test_every_blind_listing_is_declared_or_runs_everything(self) -> None:
         repo, labels = td.Repo(), td.load()
