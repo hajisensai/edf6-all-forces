@@ -263,8 +263,8 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 - 采样：在镜头步进钩子里（tick 结果已定），`h = [cam+0x360]`（vtable 是四个兵种之一才算），徒步取身体实例 `[h+0x900]` 的 pose[0]，
   骑乘（`HumanOnFoot` 为假）取载具实例 `v+0xEE0`（`v = [h+0x1548]`）的 pose[0]。每 tick 一次，只由第一台跟着这个兵的镜头采样。
   身份（h、v 及其控制块 `+kSelfCtrl`、实例指针）变了就清零重来。
-- 写点：n = 0 帧在 `System::Update` 里的渲染录制调用 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）之前，由 `RecordDrawHook`
-  写；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
+- 写点：n = 0 帧在 `System::Update` 里的渲染录制调用 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）之前，由帧率在
+  `render_record.cpp` 里的回合（`frame_rate_view.cpp` `RecordStart`）写；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
   - `System::Update` `0x1198DA0` 进录制前依次调 `0x1195A80`、`0x1195F20`（整理对象表，会删对象、摘掉更新表里的裸指针）、
     `0x1197680`，再过 `0x1198F84 / 0x1198F8D` 两道门才到 `0x1198FA4`。在 `BeginFrame` 写，`0x1195F20` 删掉的对象就带着写过的
     pose 进了还原表；在录制调用处写，对象表已是本帧最终状态。
@@ -276,6 +276,26 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
     `0x1199764 → 0x118EFD0`（Havok 内存）不读绘制 pose。渲染线程在执行绘制命令时（`0x11009CB`）才读 `[inst+0x30]`，
     所以还原仍要放在帧末栅栏之后，不能放在录制返回后。
   - 一帧只写一次（`poseDue` 在写后清零，栅栏也清零：录制没来的帧不会拖到下一帧写）。
+  - **调用点只有一个所有者**（`src/render_record.cpp`）。`edf::RedirectCall` 只接管仍指向原版函数的调用点，所以两个模块各自
+    重定向同一点时，后装的那个会被拒、功能静默缺失。#395 复审发现过：帧率（`FrameRateCap≠0`）先装，第一人称的 Umbra 放置
+    （`firstperson.cpp`，原来也挂 `0x1198FA4`）就装不上，日志 `FP installed: ... culling=0 pass=0`。现在由 `render_record.cpp`
+    独占这个调用点（核对 `kRecordSig` 后只重定向一次，`Install` 幂等），各功能用 `renderrecord::Set` 登记回合。钩子按槽位
+    固定顺序调用各回合，再原样调用 `0x11978D0`：
+    1. **帧率**（`Slot::kFrameRate`）：n = 0 帧写玩家根与其余对象的插值 pose（§4.3.3）。
+    2. **第一人称**（`Slot::kFirstPerson`）：把视图模型交给 Umbra 的包围盒放到眼睛处（`PlaceAll`）。
+    顺序理由：
+    - 两边的输入互不相干。插值只改骨骼 pose（`[inst+0x30]`），不碰镜头，也不碰模型 `+0x110` 的包围盒；`PlaceAll` 读的是
+      镜头和 `+0x110`。所以先后都不改变对方读到的数据。
+    - 第一人称放在最后，看到的是本帧最终要画的状态。它用的眼位是本帧**实际绘制**的眼位：n = 0 帧取帧率插值后的镜头
+      （`FrameRateDrawnEye`，与 `BeforeProject` 同样的判定，只算不写），否则取镜头本身。原因是 Umbra 按 `0x11978D0` 内
+      `0x1197B50` 投影时交上去的镜头做剔除，而录制调用时 `cam+0x220` 还是步进值；盒子若放在步进眼位，镜头在一个 tick 里移动的
+      距离可能让盒子偏离镜头、被剔掉。
+    - 两边各自 `renderrecord::Install()`，谁先装都一样。`FrameRateCap=0` 时只有第一人称的回合；第一人称关时只有帧率的回合；
+      各自独立工作。离线 `render_record_test` 覆盖只重定向一次、按槽位排序、各自单独、签名或重定向失败不重试。
+      `redirect_owner_guard.py` 扫两个插件全部 `RedirectCall` / `PatchCall` / `RedirectImportCall` 的调用点：同一 RVA 不得出现在
+      两个文件里，`0x1198FA4` 只能由 `render_record.cpp` 重定向。扫描时除此之外没有别的重复重定向。`perf_probe.cpp` 的 `Chain`
+      按设计叠在别人的 thunk 上（`0x705715`、`0x1103FD1`、`0x1198FA4`、`0x11A305A`、`0x11A309B`、`0x11E255C`），最后安装，
+      不算所有者。
   `D = cur⁻¹ · InterpolateRigid(prev, cur, alpha)`，
   右乘到下列模型**每个实例**（`model+0xA0`、基础 LOD `[model+0x1B8]`、LOD 表 `[model+0x250]` 各项 `+0x58`）**每根骨**的 pose
   （`[inst+0x30]`，个数 `[inst+0x20]`，每骨 0x40 字节世界矩阵）：身体 `h+0x860`、`[h+0x1950]` 全部武器的 `+0xF30`、骑乘时的载具
@@ -332,7 +352,13 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   判定也按 vtable 缓存。`Readable` 只问 System 和它的更新表：离线测试 `frame_rate_objects_test` 中 20 个和 2000 个对象的采样都只问
   2 次、一帧写入也只问 2 次（审查时 stress:30 采样每步 4.74 ms 全在 `Readable`）。例外：载具扳机武器的登记检查
   `IsAnimationModel` 走带检查的读法，每把武器每帧问一次（只有载具才有，数量少）。
-- **写**：n = 0 帧，在 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里（见 §4.3.2 写点）。
+- **只在有 0-tick 帧时采样**：最近一次 n = 0 帧之后的 `kIdleTicks` = 60 个 tick（60 Hz 下 1 s）内照常每 tick 采样。超过这个窗口、
+  从没出现过 n = 0 帧、或帧门没装上（`frame_rate.cpp` 视图装上但 `InstallGate` 失败，alpha 恒为 1，`Pose` 从不调用），就跳过采样，
+  计入日志 `ticks not sampled (idle)`。stress:30 每帧都有 tick 时，这一步每步省 0.6–1.3 ms。窗口外第一个 n = 0 帧不写任何对象：
+  已知对象全部计入 `samples`，从下一个 tick 起恢复采样，连续两次采样后（两个 tick）恢复插值。空闲期间保留已知对象及其 weak
+  计数（上限是最后一次采样的对象数），恢复采样时不在表里的再归还；场景释放后重新从空闲开始。离线用例：
+  `frame_rate_objects_test` 的 `Idle`。
+- **写**：n = 0 帧，在 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里帧率的回合（见 §4.3.2 写点与调用点所有者）。
   - 对象必须还在、vtable 不变、当前绘制的 pose[0] 仍等于 cur（tick 后没人改过）。
   - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 `kCutMove` 10 m 或
     `kCutTurn` 1 rad（57°）的不插值。这两个阈值不是游戏里读出来的：是 fps-8 给玩家根定的「瞬移 / 复活 / 镜头切换」判据
@@ -348,7 +374,9 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
     照 tick 画，原因随车。
   - **子对象**（`[obj+0x38]` 有父对象）：在更新表里的，和其它对象一样用**自己的** D，不跟父对象的 D；不在表里的照 tick 画。
     刚性连着的父子各自插值，结果近似一致，但不保证严格贴合。
-  - 玩家本人和玩家载具留给 fps-7，不重复乘。
+  - 玩家本人和玩家载具留给 fps-7，不重复乘。fps-7 只乘载具自己的模型 `v+0xE40`，所以玩家载具的扳机武器（`+0x638`）在这里乘
+    fps-7 的 D，与车身同步；fps-7 没写车身（被拒或照 tick 画）时，这些武器也照 tick 画。离线用例：`frame_rate_objects_test`
+    的 `RidersAndWeapons`。
   - 每个 pose 一帧只写一次（按 pose 指针去重）。先把记录、写前副本和写后副本存好，再写 pose：中途出错也能还原。0-tick 帧不分配；
     表不够时其余对象照 tick 画（`full`），下个 tick 扩容。
 - **还原**：与 fps-7 一起放在 `RestoreFrame`（本帧帧末栅栏后），先还原本模块，再还原 fps-7。前提全部满足才还原：
@@ -358,6 +386,10 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   - 实例仍是这个模型的，pose 指针和骨数不变。
   - 然后**逐根骨**比较：仍等于写入值的骨还原，写入后被别人改过的骨保留别人的。
 - **联机**：只改画面上的 pose，n ≥ 1 帧不碰，不发包（`frame_rate_net_guard.py` 把本文件列入每帧文件）。
+- **谁会看到插值后的 pose**（#395 复审核对，H）：从 `0x70571A`（`System::Update` 返回）到帧末栅栏 `0x11A305A` 之间，HUD
+  `0x11977F0`、声音 `0x7B3010` / `0x7AF3E0`，以及 `0x1630BA0` / `0x1134A10`，都可能读到写入的插值 pose。这些路径里没找到回写
+  逻辑状态的代码：联机同步 `0x788460` 在 `System::Update` 之前，而且只在 n ≥ 1 帧跑。所以插值只影响这一帧的画面和这些读者
+  （例如声音位置偏到 tick 之间），不进入模拟。
 - **日志**：每 5 s 在 `FRAMERATE` 行后另起一行，有数才打：
   - `objects N: blended / (riders) / still / as stepped (gone/vtable/pose/samples/unsampled/refused/full/fault) / most poses a frame`。
     原因：`gone` 对象已释放或待删；`vtable` 地址上换了类；`pose` 采样后根被别处写过；`samples` 只见过一个 tick；`unsampled` 有
@@ -368,6 +400,7 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 
 - 挂在载具 / 角色上的特效、粒子、拖尾、光源、弹（不是带骨骼模型的对象，阶段 5）。
 - `+0xF30` 不是已登记 AnimationModel 的载具扳机武器。
+- 采样空闲（最近 60 个 tick 没有 n = 0 帧）之后的头两个 tick，计入 `samples`。
 - `thermal_models.cpp` 规则外的对象类；不在 `+0x448` 更新表里的对象（含不在表里的子对象）。
 - 一 tick 内被镜头步进之后的作业改过根的对象（见上「为什么采样留在镜头步进」），计入 `pose`。
 - 根有非均匀缩放的。
@@ -441,6 +474,10 @@ EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（�
 6. 镜头插值（阶段 3）：快速转视角、奔跑、载具高速、地图开关、第一人称开关、敌控 / 炮塔镜头切换时无跳变、无黑闪；
    第三人称玩家角色（含手上和背上的武器）相对画面不抖；骑乘载具时载具、驾驶员、武器一起平滑；瞄具缩放进出无拖影；
    日志 `player root blended` 远多于 `as stepped`。
+   - 驾驶有扳机武器模型的载具（`+0x638`，炮塔 / 机枪是独立模型的）高速移动时，武器与车身一起平滑，不落后一个 tick
+     （§4.3.3 玩家载具）。
+   - `FrameRateCap≠0` 时第一人称：日志 `FP installed: ... culling=1 pass=1` 与 `FRAMERATE ... camera interpolation=1` 同时出现；
+     快速转身、平移时手臂和武器不被剔除闪掉（§4.3.2 调用点所有者）。
 6a. 上屏（阶段 3）：日志 `FLIP swap chain ... flip discard, 2 buffers ... tearing 1, waitable 1`；窗口 / 无边框下上限高于刷新率时
    出帧率能超过刷新率（撕裂），上限不高于刷新率时无撕裂；全屏切换、改分辨率（重建交换链）后仍正常；开 MSAA 时日志说明保留
    blt 模型。
