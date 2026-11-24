@@ -48,4 +48,26 @@
 
 ## 实测
 
-见 PR 与 `docs/plan-2026-11-24-optimization.md`（hitch-2 一节）。
+2026-11-24 测试场一次（`drive.py run range`，`DebugSpawn=1`，build `8f5f855f`，DLL sha256 `43d889f6…`，日志 loading 14:04:59
+与本次启动吻合）。离线部分（安装、13 段签名、4 处链式接入）由 ctest `sync_load_probe_native` 证明，实机只用来收清单。
+
+- 安装：`HOOK sync load probe=1`。钩子自身开销（`SYNC LOAD STATS`，QPC 计在钩子代码内、只算游戏线程）：**0.22–0.25 µs 一次**，
+  从启动到进关共 605 次缓存调用 ≈ 0.15 ms，相对进关 7.1 s 的同步读可以忽略，所以不再做装 / 不装的实机 A/B。
+  非游戏线程的透传只多一次原子读和 `GetCurrentThreadId`，没单独测。
+- 游戏线程上 72 次未命中、共 7101 ms（最长 510 ms），0 次 SYNC WAIT、0 次文件不存在：
+
+  | 功能 | 次数 | 合计 ms | 最长 ms | 时机 |
+  |---|---|---|---|---|
+  | 任务列表 `MISSIONLIST*.SGO`（原版 3 次重读 + 测试场包 2） | 5 | 1236 | 475 | 主菜单 / 选关 |
+  | 菜单 UI（鼠标指针、小 loading） | 7 | 379 | 141 | 主菜单 |
+  | 读取画面 UI + `MISSION.RMPA` | 14 | 706 | 164 | 进关读取画面 |
+  | 地图 `.MAE` / `ADDITIONAL_MAP_PARAM.DSGO` | 2 | 262 | 158 | 任务第一帧 |
+  | HUD（副武器槽、受伤显示） | 3 | 396 | 216 | 任务第一帧 |
+  | 原版载具武器 `WEAPON\V_*.SGO` | 27 | 3020 | 510 | 任务第一帧（测试场摆放的载具） |
+  | 插件载具武器 `WEAPON\EDF6VC_*.SGO` | 14 | 1102 | 272 | 任务第一帧（同上） |
+
+- 后 4 组都落在插件预载阶段（`MISSION phases done` 14:05:50）之后那个 6.5 s 的帧里（`SLOW FRAME ... 6519.9 ms`，
+  14:06:08.9–14:06:15.3）：载具对象创建时现场读它的武器 SGO。插件的 `player vehicles` / `support vehicles` 阶段都是 0 ms、
+  `DEBUGSPAWN ... 0 vehicles preloaded`，即载具本体之外的武器 SGO 没有预载。这一帧是否在淡入之前（玩家是否看得到）没确认。
+- 没测到的：M001 / RM015 两次都是 Steam 150 s 内没起游戏（没有 EDF6.exe，文件已逐字节还原）；测试场里的空中支援呼叫
+  按键落在上面那段读取里，菜单没打开（无 `DEBUGSPAWN menu open`），所以「任务中途呼叫」的同步读没有数据。
