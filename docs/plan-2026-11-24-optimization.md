@@ -111,7 +111,7 @@ stress:100 插件栈里排前面的还有 ShotOk / ShotClearOf / Grid::Capsule�
 
 **B 线进展（2026-11-24）与下一步**
 
-- 第 1 步：PR1（分支 `claude/opt-present-fps-032dd4`）——gpu-1、latency-1（ini `MaxFrameLatency`，默认 1）、文档更正、签名审计。
+- 第 1 步：PR1（分支 `claude/opt-present-fps-032dd4`）——gpu-1、latency-1（ini `MaxFrameLatency`，默认 1；2026-11-24 重场景 A/B 后改回默认 0，安装器把仍是 1 的旧 ini 改成 0）、文档更正、签名审计。
 - 第 2 步：PR2（分支 `claude/fps-stage2-dev`，基于 PR1）——只在 `FrameRateDev=1` 下生效。比计划多做的：
   - 共享随机数 `0x705570` 每帧推进一次，是第 6 个守卫。
   - fps-3 不用 `Shadow` OR 回，而是把封装更新挪到步进之前、只在 tick 帧跑，和 latency-3 是同一个改动。
