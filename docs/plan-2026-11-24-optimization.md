@@ -105,6 +105,7 @@ cpu-11（n = 0 帧成本）。然后在当前 main 上重测 stress:1/10/30/100 
   - net-11：依赖 net-5 和 Coop W1 多路径。状态类走客人直连网状路径，事务类留房主中转；中转的状态类套用 relayBytesPerSecond
     预算和兴趣过滤，超预算丢旧的而不是 fail-closed（不再触发 net-2 的恢复）。只在大房间有收益，排在最后。
 - net-10：Havok 多线程下的联机分歧对比（与 B 的 fps-10 同一次实机做）。
+  - 阶段 A（单机，2026-11-24）已做：测试插件物理探针 `probe physics` + `tools/physics_probe_compare.py`，RM015 每个开关值一次启动 × 3 段 × 6000 tick；133/137 个 body 在 ST/MT 间逐位相同，差只来自 4 个 AI 士兵且 ST-ST 同样有，均值比 0.898，多线程不放大分歧（docs/havok-mt-re.md §13「第 5 项阶段 A」）。缺：碰撞密集场景（M001 用 drive.py 起不来，待查），阶段 B 两台机器联机。
 
 ### D. 工程（第一批做不碰全局结构的；结构性重构放第二批开头一次做完）
 
