@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'pylib'), str(ROOT / 'tools')]
 import dsgo
+import gamedir
 import edf41_objects
 import edf41calls
 import edf41mech
@@ -97,8 +98,11 @@ class Bundled406(unittest.TestCase):
 class Native406(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        edf41 = Path(os.environ.get('EDF41_GAME_DIR', r'D:\Steam\steamapps\common\Earth Defense Force 4.1'))
-        edf6 = Path(os.environ.get('EDF6_GAME_DIR', r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 6'))
+        found6 = gamedir.find()
+        found41 = gamedir.find_other(gamedir.EDF41, near=found6)
+        if not found6 or not found41:
+            raise unittest.SkipTest('source Steam games are not installed')
+        edf41, edf6 = Path(found41), Path(found6)
         if not (edf41 / 'Root.cpk').is_file() or not (edf6 / 'Root.cpk').is_file():
             raise unittest.SkipTest('source Steam games are not installed')
         import make_edf41_objects

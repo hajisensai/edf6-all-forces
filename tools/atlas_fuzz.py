@@ -17,7 +17,10 @@ from pathlib import Path
 
 import pefile
 
-SRC = Path(os.environ.get('EDF6_DIR', r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6')) / 'EDF.dll'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
+import gamedir  # noqa: E402
+
+SRC = Path(gamedir.find_or_dev()) / 'EDF.dll'
 DLL = Path(tempfile.gettempdir()) / 'edf6vc_atlas_fuzz_EDF.dll'   # a copy: the game's own file stays untouched
 if not DLL.exists():
     shutil.copyfile(SRC, DLL)

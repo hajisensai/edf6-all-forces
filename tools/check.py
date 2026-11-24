@@ -16,7 +16,9 @@ Each part's output goes to build/check-<part>.log; the failures' tails are print
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,6 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, 'build')
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import checklock  # noqa: E402
+import gamedir  # noqa: E402
 
 # (a generator's command line, the files it rewrites that must then be unchanged in git; None: it checks itself)
 GENERATED = [
@@ -38,7 +41,59 @@ GENERATED = [
     (['tools/gen_nozzles.py', '--check'], None),
     (['tools/gen_katyusha_cab.py', '--check'], None),
     (['tools/gen_mech_parts.py', '--check'], None),
+    (['tools/gen_worldmap.py', '--check'], None),
+    (['tools/doc_links_check.py'], None),   # docs <-> code paths (eng-12)
 ]
+
+
+def game_defines() -> tuple[list[str], str | None]:
+    """The -D the build configures with: the game pylib/gamedir finds, so the native audits (ctest's tests given
+    ${EDF6_NATIVE_DLL} / ${EDF6_GAME_DIR}) read its EDF.dll and data instead of skipping. They only read the files,
+    the game may be running. No game (CI): both empty, those tests skip. Raises on an EDF.dll that is not the one
+    the plugins support: the audits would compare the sources with the wrong bytes."""
+    game = gamedir.find()
+    if not game:
+        return ['-DEDF6_GAME_DIR=', '-DEDF6_NATIVE_DLL='], None
+    stamp = gamedir.edf_stamp(game)
+    if stamp != gamedir.EDF_STAMP:
+        raise SystemExit(f'check.py: {os.path.join(game, "EDF.dll")} TimeDateStamp {stamp and hex(stamp)} is not the supported '
+                         f'{gamedir.EDF_STAMP:#x}: update the game or point EDF6_DIR at a supported install')
+    game = game.replace(os.sep, '/')
+    return [f'"-DEDF6_GAME_DIR={game}"', f'"-DEDF6_NATIVE_DLL={game}/EDF.dll"'], game
+
+
+def native_tests() -> set[str]:
+    """ctest's tests that read the game: any argument or environment naming the configured EDF.dll / game dir."""
+    out = subprocess.run(['ctest', '--test-dir', BUILD, '--show-only=json-v1'], cwd=ROOT, capture_output=True,
+                         text=True, encoding='utf-8', errors='replace').stdout
+    try:
+        tests = json.loads(out).get('tests', [])
+    except ValueError:
+        return set()
+    cache = {}
+    with open(os.path.join(BUILD, 'CMakeCache.txt'), encoding='utf-8', errors='replace') as f:
+        for line in f:
+            m = re.match(r'(EDF6_GAME_DIR|EDF6_NATIVE_DLL):\w+=(.*)', line.strip())
+            if m and m.group(2):
+                cache[m.group(1)] = m.group(2)
+    if not cache:
+        return set()
+    names = set()
+    for t in tests:
+        props = ' '.join(str(p.get('value')) for p in t.get('properties', []))
+        if any(v in ' '.join(t.get('command') or []) + props for v in cache.values()):
+            names.add(t['name'])
+    return names
+
+
+def ctest_outcomes(log: str) -> dict[str, str]:
+    out = {}
+    with open(log, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            m = re.search(r'Test\s+#\d+: (\S+) \.*\s*(\*\*\*\w+|Passed)', line)
+            if m:
+                out[m.group(1)] = m.group(2).lstrip('*')
+    return out
 
 
 def run(cmd: list[str] | str, log: str, env: dict | None = None, shell: bool = False) -> tuple[int, float]:
@@ -97,8 +152,10 @@ def main(argv: list[str]) -> int:
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
         print(f'check.py: {ROOT}, {jobs} processes, below-normal priority; logs build/check-*.log', flush=True)
+        defines, game = game_defines()
+        print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
         if '--no-build' not in argv:
-            cmd = f'call "{os.path.join(ROOT, "build.cmd")}" && call "{os.path.join(ROOT, "tools", "msvc-x64-env.cmd")}" ' \
+            cmd = f'call "{os.path.join(ROOT, "build.cmd")}" {" ".join(defines)} && call "{os.path.join(ROOT, "tools", "msvc-x64-env.cmd")}" ' \
                   f'&& cmake --build "{BUILD}" --target offline_checks'
             results['build'] = run(cmd, logs['build'], env, shell=True)
             print(f"build: {'ok' if not results['build'][0] else 'FAIL'} ({results['build'][1]:.0f} s)", flush=True)
@@ -127,7 +184,19 @@ def main(argv: list[str]) -> int:
         for t in threads:
             t.join()
     failed = [k for k, (code, _) in results.items() if code]
+    if 'ctest' in results:
+        native = native_tests()
+        outcome = ctest_outcomes(logs['ctest'])
+        ran = sorted(n for n in native if outcome.get(n) not in (None, 'Skipped'))
+        skipped = sorted(n for n in native if outcome.get(n) == 'Skipped')
+        print(f'check.py: native audits run {len(ran)}, skipped {len(skipped)}'
+              f'{"" if game else " (no game: every native audit skips)"}')
+        if game and skipped:   # the game is here: a skip is an audit that lost its input, not a pass
+            print('  skipped with the game present: ' + ', '.join(skipped))
+            failed.append('native-skips')
     for k in failed:
+        if k not in logs:
+            continue
         print(f'\n===== {k} failed: the end of build/check-{k}.log =====')
         print(tail(logs[k]))
     print(f"check.py: {'FAIL ' + ', '.join(failed) if failed else 'all passed'} in {time.perf_counter() - started:.0f} s")

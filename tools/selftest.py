@@ -12621,8 +12621,10 @@ def edf41_friend_grip_matches_weapons() -> None:
     import mab_legacy
     import make_edf41_objects as m
     import sgo
-    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
-    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+    import gamedir
+    edf6 = gamedir.find()
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not (edf41 and edf6):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)
