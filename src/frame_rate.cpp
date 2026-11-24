@@ -119,13 +119,13 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     const std::uint64_t span=now-stats.since;
     if(span<kStatsSeconds*qpcFreq)return;
     const double s=static_cast<double>(span)/static_cast<double>(qpcFreq);
-    unsigned blended=0,unblended=0;
-    if(viewOn)framerateview::TakeCounts(blended,unblended);
+    unsigned blended=0,unblended=0,roots=0,rootsLeft=0;
+    if(viewOn)framerateview::TakeCounts(blended,unblended,roots,rootsLeft);
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s, 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
-        "0-tick projections blended %u, as stepped %u",s,
+        "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
-        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended);
+        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft);
     stats.since=now;stats.frames=stats.ticks=stats.zero=stats.longestZero=0;
 }
 

@@ -173,4 +173,30 @@ for site, target, hook in (('kNetCall', 'kNet', 'NetGuard'), ('kEosCall', 'kEos'
                            ('kSyncCall', 'kSyncSubmit', 'SyncHook')):
     check(re.search(rf'RedirectCall\(image\+{site},image\+{target},reinterpret_cast<void\*>\(&{hook}\)', src), f'{hook} at {site}')
 check(re.search(r'RedirectImportCall\(image\+kSteamCall,kSteamSig,reinterpret_cast<void\*>\(&SteamGuard\)', src), 'SteamGuard at kSteamCall')
+
+# Stage 3 (frame_rate_view.cpp): the camera step is called once, at kCameraStepCall, the last call of the tick loop (after
+# every object phase, so its hook samples the tick's result); the projection 0x1197B50 -> 0x118DFF0 is shared with scope_lens.
+view = open(os.path.join(ROOT, 'src', 'frame_rate_view.cpp'), encoding='utf-8').read()
+vconsts = {m[0]: int(m[1], 0) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+|\d+)\b', view)}
+varrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+           for name, body in re.findall(r'\b(k\w+)\[\]=\{([^}]*)\}', view)}
+step_call, step = vconsts['kCameraStepCall'], vconsts['kCameraStep']
+check(img[step_call - 5:step_call + 5] == varrays['kCameraStepSig'] and rel_target(step_call, 5) == step, 'kCameraStepCall')
+check(direct_callers(step) == [step_call], 'the camera step is called only at kCameraStepCall')
+check(img[step_call + 0xE0] == 0xE9 and rel_target(step_call + 0xE0, 5) == 0x119959C, 'the camera step is in the per-viewport loop')
+check(re.search(r'RedirectCall\(image\+kCameraStepCall,image\+kCameraStep,reinterpret_cast<void\*>\(&CameraStepHook\)', view), 'CameraStepHook')
+for vt in (0x17CDF28, 0x17D0FF8, 0x17CF5B8, 0x17CF100):
+    check(f'{vt:#X}'.replace('0X', '0x') in view, f'soldier vtable {vt:#x} in frame_rate_view.cpp')
+
+# The swap chain (swap_flip.cpp): CreateSwapChain's call in 0x111B220 and the Present's flags.
+flip = open(os.path.join(ROOT, 'src', 'swap_flip.cpp'), encoding='utf-8').read()
+fconsts = {m[0]: int(m[1], 0) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+|\d+)\b', flip)}
+farrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+           for name, body in re.findall(r'\b(k\w+)\[\]=\{([^}]*)\}', flip)}
+create, present = fconsts['kCreateCall'], fconsts['kPresentFlags']
+check(img[create:create + 6] == farrays['kCreateSig'], 'kCreateCall: mov rax,[rcx]; call [rax+50h] (IDXGIFactory::CreateSwapChain)')
+check(img[create - 14:create - 9] == b'\x4c\x8d\x44\x24\x30', 'kCreateCall: r8 = the description on the stack')
+check(sorted(direct_callers(0x111B220)) == [0x111B77B, 0x111C8EC], 'the swap chain is built only by its two callers')
+check(img[present:present + 6] == farrays['kPresentSig'], 'kPresentFlags: mov rax,[rcx]; xor r8d,r8d')
+check(img[present + 0xF:present + 0x12] == b'\xff\x50\x40', 'kPresentFlags: IDXGISwapChain::Present follows')
 print(f'frame rate signatures: {checks} checks ok')

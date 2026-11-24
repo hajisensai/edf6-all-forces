@@ -13,9 +13,9 @@ bool Install() noexcept;
 // this frame's phase is set: `alpha` 1 on a frame that steps (its render comes before its steps), else the part of a
 // tick since the last boundary.
 void BeginFrame(std::uint32_t ticks,float alpha) noexcept;
-// Game thread, the FRAMERATE statistics: viewport projections on frames without ticks drawn blended / left as stepped
-// since the last call.
-void TakeCounts(unsigned& blended,unsigned& unblended) noexcept;
+// Game thread, the FRAMERATE statistics since the last call: viewport projections on frames without ticks drawn blended
+// / left as stepped, and frames without ticks whose player root (fps-7) was moved to the blend / left as stepped.
+void TakeCounts(unsigned& blended,unsigned& unblended,unsigned& roots,unsigned& rootsLeft) noexcept;
 }  // namespace framerateview
 
 // fps-8, game thread (the camera step, a plugin camera feature switching): `camera`'s view jumps at this step (first
