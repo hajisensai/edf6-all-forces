@@ -7,7 +7,7 @@
 // changes on room/roster/host/link changes, and must never be sent as a shared epoch.
 // Version 2 (EDF6Coop 2.9.0, direct-link protocol 8) replaced version 1, which is no longer served:
 // it adds sendState and reports every delivered message with EDF6CoopExtensionMessage.
-// (Copied from edf-coop-stable src/extension_api.h, 2.9.0; docs/extension-transport.md there.)
+// (Copied from edf-coop-stable src/extension_api.h, 2.9.0; see edf-coop-stable:docs/extension-transport.md.)
 #define EDF6COOP_EXTENSION_VERSION 2u
 #define EDF6COOP_EXTENSION_MAX_PAYLOAD 1024u
 #define EDF6COOP_EXTENSION_MAX_PEERS 1024u
