@@ -286,8 +286,15 @@ def merged_size(archives: dict[str, bytes]) -> tuple[int, int]:
 
 
 def main(argv: list[str]) -> int:
-    folder = argv[0] if argv else os.path.join(os.environ.get('EDF6_GAME', r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'),
-                                               'Mods', 'OBJECT')
+    if argv:
+        folder = argv[0]
+    else:
+        import gamedir
+        game = gamedir.find()
+        if game is None:
+            print('no game found: python pylib/texshare.py <Mods/OBJECT folder>')
+            return 2
+        folder = os.path.join(game, 'Mods', 'OBJECT')
     sets = [s.split(',') for s in argv[1:]] or [[s for s in SHARED_IN]] + [list(s) for s in SHARED.values()]
 
     def read(name: str) -> bytes | None:
