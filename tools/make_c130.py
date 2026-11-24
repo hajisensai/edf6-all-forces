@@ -14,6 +14,9 @@ Root.cpk (only read):
                                                   mark, arms and durability, its twelve passengers behind the pilot
                                                   (make_jets.TRANSPORT_PLANE_PASSENGERS)
 
+Both models' archives are built apart and checked, then written as one, Mods/OBJECT/EDF6VC_C130.MRAB (SHARED_FILE), with one
+copy of the airframe's textures, both SGOs drawing from it (pylib/texshare.py).
+
 Without the model folder none of it is written (the installer says so once): the gunship support and calls and the
 paratroop plane are then not deployed (src/support_dispatch.cpp refuses them at planning; the model pack is part of
 the install, CLAUDE.md). Built in memory first, written atomically and recorded in the ledger as this tool's; --remove
@@ -38,6 +41,7 @@ import ledger  # noqa: E402
 import make_jets  # noqa: E402
 import model_lod  # noqa: E402
 import sgo  # noqa: E402
+import texshare  # noqa: E402
 import vcobjects as vc  # noqa: E402
 from mdb import mdb_read, rab_read  # noqa: E402
 
@@ -51,6 +55,7 @@ SGOS = {GUNSHIP_SGO: (vc.C130_GUNSHIP_JET, 'gunship'), TRANSPORT_SGO: (vc.C130_T
 # make_jets.GUNSHIP_AIRFRAME the bomber401's); check_muzzle holds the model to it, tools/selftest.py support_c130_models
 # the header.
 C130_AIRFRAME = ((0.0, 5.812, 0.0), (20.141, 5.812, 14.82))
+SHARED_FILE = 'EDF6VC_C130.MRAB'   # what build writes for both models' archives (c130_model.archive_name)
 AIRFRAME_FIT = make_jets.AIRFRAME_FIT
 
 
@@ -84,7 +89,9 @@ def build(root: str) -> dict[str, bytes]:
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     files = model_lod.finish(cockpits.graft_files(game, files))
     check(files, game)   # what is written is held to the same contract
-    return files
+    # both models in one archive, one copy of the airframe's textures (pylib/texshare.py): last, so check measured each
+    # model in the archive it was built in
+    return texshare.apply(files, SHARED_FILE)
 
 
 def check_muzzle(game: vc.Game) -> None:
@@ -99,7 +106,7 @@ def check(files: dict[str, bytes], game: vc.Game) -> None:
     """Every SGO names its model (and the V506's CAS) and its airframe, carries its mark, durability and arms, every
     weapon on a bone its model has; the gunship's gunner seat and the plane's passenger seats; every archive passes
     c130_model.check_archive; nothing else is written."""
-    want = set(names())
+    want = set(built_names())
     assert set(files) == want, sorted(set(files) ^ want)
     assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD tables model_lod.finish adds
     for file, (name, model) in SGOS.items():
@@ -129,6 +136,11 @@ def check(files: dict[str, bytes], game: vc.Game) -> None:
 
 def names() -> list[str]:
     """Every path under Mods this tool writes (with the model folder)."""
+    return texshare.names(built_names())
+
+
+def built_names() -> list[str]:
+    """Every path build makes before the models' archives are merged into SHARED_FILE."""
     out = []
     for model in c130_model.MODELS:
         name = c130_model.archive_name(model)

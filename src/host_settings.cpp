@@ -4,6 +4,7 @@
 #include "coop_attr.h"
 #include "crew.h"
 #include "hudtext.h"
+#include "preload_set.h"
 #include "version.h"
 #include <Windows.h>
 #include <atomic>
@@ -34,6 +35,8 @@ scopespread::Params LocalScope() noexcept {
     return scopespread::Params{c.scopeSpread,c.scopeSniperHipSpread,c.scopeSniperHipMinSpread,c.scopeHipSpread,c.scopeAimSpread};
 }
 coopattr::Beat beat;
+// The other members' said needs as the last read joined them (the room tick's; the next word's p= adds this machine's).
+preload::Set othersNeeds{};
 
 Word Mine() noexcept {
     Word w;
@@ -43,10 +46,15 @@ Word Mine() noexcept {
     w.npcFreeSquadCover=Cfg().npcFreeSquadCover;
     w.commander=Cfg().commanderMode;
     w.scope=LocalScope();
+    w.needs=preload::LocalNeeds();
+    AcquireSRWLockShared(&lock);
+    const preload::Set others=othersNeeds;
+    ReleaseSRWLockShared(&lock);
+    w.room=preload::RoomSet(w.needs,&others,1);
     return w;
 }
 
-struct Survey { const char* mine; Builds builds; std::uint32_t common=~0u; };
+struct Survey { const char* mine; Builds builds; std::uint32_t common=~0u; preload::Set needs{}; };
 void EDF6COOP_MA_CALL CountMember(void* context,const EDF6CoopMemberValue* m) {
     auto* s=static_cast<Survey*>(context);
     if(!m || !m->memberId)return;
@@ -54,6 +62,7 @@ void EDF6COOP_MA_CALL CountMember(void* context,const EDF6CoopMemberValue* m) {
     const bool has=m->hasValue && m->value && ParseWord(m->value,w);
     Count(s->builds,m->isSelf!=0,has,has ? &w : nullptr,s->mine);
     if(!m->isSelf)s->common&=has ? w.features : 0u;   // this machine has its own build's (its word may not be out yet)
+    if(!m->isSelf && has)s->needs.Join(w.needs);
 }
 
 // One read of the room: the host's values and every member's build. `mission`: also decide this mission's
@@ -98,12 +107,18 @@ void Read(bool mission) noexcept {
     AcquireSRWLockExclusive(&lock);
     const Builds was=builds;
     builds=surveyed ? survey.builds : Builds{};
+    othersNeeds=surveyed ? survey.needs : preload::Set{};
     const Builds now=builds;
     ReleaseSRWLockExclusive(&lock);
     if(now.silent!=was.silent || now.differing!=was.differing || now.missing!=was.missing)
         Log("HOSTCFG the room's builds: %u members, %u without %s (an older All Forces), %u with other features, missing 0x%X",
             now.members,now.silent,kKey,now.differing,now.missing);
     if(mission) {
+        // The preload set (preload_set_logic.h AtSync): the host's p= for every member. The host plays by its own word as
+        // the room has it (what the guests read); before its first word is out, the room as it reads it now.
+        const preload::Set fresh=preload::RoomSet(preload::LocalNeeds(),&survey.needs,1);
+        preload::DecideOnline(preload::AtSync(room.inRoom!=0,room.isHost!=0,hostWord,host.room,
+                                              room.isHost && hostWord ? host.room : fresh));
         // Offline: the gunner seat as built. Online: only with every member's word saying it has it (every machine then
         // decides the same; one older member and the 408 is a stock Car for everyone).
         const bool allowed=BikeGunnerAtSync(room.inRoom!=0,surveyed,survey.builds.silent,survey.common);
@@ -145,6 +160,7 @@ void HostSettingsRoomTick() noexcept {
 void HostSettingsMissionSync() noexcept { Read(true); }
 
 void HostSettingsOfflineMission() noexcept {
+    preload::DecideOffline();
     const bool command=CommanderAtSync(false,false,Cfg().commanderMode,false,false,false,0,0);
     if(commander.exchange(command)!=command || command)Log("HOSTCFG an offline mission: commander mode %s (this machine's ini)",command ? "on" : "off");
     const bool open=BikeGunnerOffline();
@@ -194,11 +210,11 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
     const Builds b=builds;
     ReleaseSRWLockShared(&lock);
     if(n<capacity && (b.silent || b.differing)) {
-        wchar_t names[96]{};
+        wchar_t names[160]{};
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
             {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},{kFeatBikeGunMount,Tx::featBikeGunMount},
             {kFeatBikeRide,Tx::featBikeRide},{kFeatCommander,Tx::featCommander},
-            {kFeatScopeSpread,Tx::featScopeSpread},
+            {kFeatScopeSpread,Tx::featScopeSpread},{kFeatPreloadSet,Tx::featPreloadSet},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

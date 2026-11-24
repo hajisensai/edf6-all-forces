@@ -30,6 +30,8 @@
 // launches jet.cpp's gun drones (JetLaunchDrone) while it has a target.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "subcarrier.h"
+#include "vehicle_weapons.h"
+#include "preload_set.h"
 #include "body506.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -1212,8 +1214,8 @@ void PreloadSub() noexcept {
         preloaded=false;
         if(!spawnOk || broken)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
-        preloaded=mgr && FilesThere();
-        if(preloaded)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kSubSgo,2,-1);
+        preloaded=mgr && preload::Want(preload::Item::sub) && FilesThere();
+        if(preloaded){reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kSubSgo,2,-1);QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSubSgo);}
         Log("SUB preload carrier=%d",preloaded);
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;}
 }

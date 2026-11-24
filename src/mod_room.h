@@ -65,8 +65,11 @@ namespace crew {
 //      measured motion; the guest interpolates it per logic frame).
 //      Same number, net-5: every member needs EDF6Coop 2.9.0 (extension ABI 2, coop_attr.h kRoomCoop*); the per-frame
 //      states (enemy-control pose, gravity hold / flight, ultimate keep) go as state messages (plugin_net.h SendState).
+//  18 (2026-11-24): host settings v4 carries the preload set (host_settings_logic.h n= / p=): every member preloads the
+//      host's room set of the plugin's content instead of all of it, so an older build (which preloads everything but
+//      never says what it needs) would leave the host's set without its calls' bodies on the other machines.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=17;
+constexpr std::int64_t kAllForcesRoomProtocol=18;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

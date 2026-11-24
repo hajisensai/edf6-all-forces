@@ -285,6 +285,11 @@ def bounded_dump_metadata(root: str, exe: str, crew: str, run: int) -> None:
     expect(sum(reads) < (1 << 20), 'only dump metadata is read, independent of the full memory payload')
 
 
+# src/crash_dump.cpp OnThreadStart's line, as the plugin writes it.
+TLS_LINE = ('CRASHDUMP stack overflow guarantee 32 KB set by the TLS callback on a thread started after the install '
+            '(thread 7404, start EDF.dll+0x3e5f9); logged for the first such thread only')
+
+
 def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run: int) -> None:
     """2026-10-18: the plugin's own dump, crash/dumps.txt always, why no dump, Windows' Report.wer."""
     for name in os.listdir(dumps):
@@ -304,6 +309,9 @@ def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run:
     # The plugin's dump installed but nothing reached it (a fast fail): said.
     write_log(game, [loading, installed], now - 5)
     expect('已装好' in collected(game)[1], 'an installed crash dump that saw no crash: said')
+    # The TLS callback's once-a-process line (src/crash_dump.cpp OnThreadStart) is neither a crash line nor an install.
+    write_log(game, [loading, installed, f'{tod(run + 1)} {TLS_LINE}'], now - 5)
+    expect('已装好' in collected(game)[1], "the TLS callback's stack guarantee line is not taken for a crash")
     # It saw the crash but the dump failed: the crash line is quoted.
     write_log(game, [loading, installed, f'{tod(run + 60)} CRASH unhandled exception: exception C0000005 at EDF.dll+0x4c3a30',
                      f'{tod(run + 60)} CRASH dump not written: x (error 5)'], now - 5)
@@ -428,6 +436,7 @@ def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run:
     folder = 'C:\\Users\\t\\AppData\\Local\\CrashDumps'
     write_log(game, [f'{tod(before)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
                      f'{tod(before)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(before + 1)} {TLS_LINE}',
                      f'{tod(before + 60)} MISSION start: per-object state dropped, resources preloaded',
                      f'{tod(run)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
                      f'{tod(run)} CRASHDUMP installed: {folder}\\EDF6.exe.7500.plugin.dmp (dbghelp 1, ...)'],

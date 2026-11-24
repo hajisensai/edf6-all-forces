@@ -60,11 +60,14 @@ namespace {
 // ---- the child ----
 // The exe's own filter needs a real stack, as the game's filters behind the plugin's do (TerminateProcess alone first
 // runs RtlReportSilentProcessExit, 2.7 KB): 64 KB here, more than a stack overflow ever leaves its thread. It notes
-// the thread that called it: the crashed one, but the dumping thread after a stack overflow.
+// the thread that called it: the crashed one, but the dumping thread after a stack overflow. HungryHandler's measure
+// is written here too: the overflowed thread has no stack for it (the dumping thread runs after it is set).
+std::size_t handlerFree=0,handlerAte=0;
 __declspec(noinline) void Chained() noexcept {
     volatile char frame[64*1024];
     frame[0]=1;frame[sizeof(frame)-1]=frame[0];
     char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST chained on thread %lu",GetCurrentThreadId());Append(t);
+    if(handlerFree){_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST handler free %zu ate %zu",handlerFree,handlerAte);Append(t);}
 }
 LONG WINAPI Last(EXCEPTION_POINTERS*) { Chained(); TerminateProcess(GetCurrentProcess(),kChained); return EXCEPTION_CONTINUE_SEARCH; }
 LONG WINAPI Late(EXCEPTION_POINTERS*) { TerminateProcess(GetCurrentProcess(),kLate); return EXCEPTION_CONTINUE_SEARCH; }
@@ -105,16 +108,27 @@ DWORD WINAPI Overflow(void*) {
     return static_cast<DWORD>(Deep(1));
 }
 // What else runs on an overflowed thread before the plugin's filter: other modules' first-chance vectored handlers
-// (overlays and the like register them) and an exception frame whose size is the CPU's XSAVE state. 16 KB of them is
-// more than Windows' default leaves after an overflow (12-16 KB below the faulting frame, the dispatch and our wait
-// included). Without the guarantee this case always ends with 0xC0000005, the signature of the CI's occasional "stack"
-// failure (no dump at all), where that default ran out with no handler of this kind.
+// (overlays and the like register them) and an exception frame whose size is the CPU's XSAVE state. HungryHandler
+// stands for them: it takes kHungry, but always leaves kHandlerKeep below it for the dispatch, our filter and its
+// wait (they fail with 4 KB left, the reserve's last page counted, and go through with 5 KB: Windows 11 26200). Its
+// free stack (from the reserve's bottom) measured on Windows 11 26200 with AVX-512: 36.8-40.9 KB with the guarantee,
+// 12.2-16.3 KB with Windows' default, so 16 KB is taken there, 8.3 KB at most without it. A CPU with a larger
+// exception frame (more XSAVE state) leaves less at the handler: it then takes less rather than ending the process,
+// and the parent's check (at least kHungryLeast taken, more than the default could ever give) says so with the numbers.
+// Without the guarantee, the default leaves no room for 12 KB: the CI's occasional "stack" failure (0xC0000005, no
+// dump at all) was that default running out with no handler of this kind.
+constexpr std::size_t kHungry=16*1024,kHandlerKeep=8*1024,kHungryLeast=12*1024;
 __declspec(noinline) void UseStack(std::size_t n) noexcept {
     volatile char* bytes=static_cast<volatile char*>(_alloca(n));
     bytes[0]=1;bytes[n-1]=bytes[0];
 }
 LONG WINAPI HungryHandler(EXCEPTION_POINTERS* ep) noexcept {
-    if(ep->ExceptionRecord->ExceptionCode==EXCEPTION_STACK_OVERFLOW)UseStack(16*1024);
+    if(ep->ExceptionRecord->ExceptionCode!=EXCEPTION_STACK_OVERFLOW)return EXCEPTION_CONTINUE_SEARCH;
+    ULONG_PTR low=0,high=0;
+    GetCurrentThreadStackLimits(&low,&high);
+    handlerFree=reinterpret_cast<ULONG_PTR>(_AddressOfReturnAddress())-low;
+    handlerAte=handlerFree>kHandlerKeep ? (std::min)(kHungry,handlerFree-kHandlerKeep) : 0;
+    if(handlerAte)UseStack(handlerAte);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 DWORD WINAPI Handled(void*) {
@@ -417,7 +431,7 @@ int main(int argc,char** argv) {
     Crash(self,work,"av",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"cpp",kChained,0xE06D7363,"unhandled exception");
     // A thread started after the install has the plugin's stack overflow guarantee (crash_dump.cpp kOverflowStack),
-    // and with it the dump and the chain go through even with 16 KB of other handlers ahead of ours.
+    // and with it the dump and the chain go through even with 12-16 KB of other handlers ahead of ours (HungryHandler).
     for(const char* mode:{"stack","stackhandler"}) {
         Crash(self,work,mode,kChained,EXCEPTION_STACK_OVERFLOW,"unhandled exception");
         wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\log.txt",work);
@@ -425,8 +439,16 @@ int main(int argc,char** argv) {
         const auto at=text.find("TEST stack guarantee ");
         const unsigned long guarantee=at==std::string::npos ? 0 : std::strtoul(text.c_str()+at+21,nullptr,10);
         char what[200];
-        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the overflowed thread's stack guarantee %lu (want %lu)",mode,guarantee,crew::kOverflowStack);
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the overflowed thread's stack guarantee %lu (want %lu)",
+                    mode,guarantee,crew::kOverflowStack);
         Check(guarantee>=crew::kOverflowStack,what);
+        if(std::strcmp(mode,"stackhandler"))continue;
+        const auto hungry=text.find("TEST handler free ");
+        std::size_t free=0,ate=0;
+        if(hungry!=std::string::npos)sscanf_s(text.c_str()+hungry,"TEST handler free %zu ate %zu",&free,&ate);
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"stackhandler: the handler took %zu of the %zu bytes free (want %zu at least)",
+                    ate,free,kHungryLeast);
+        Check(ate>=kHungryLeast,what);
     }
     Crash(self,work,"abort",kAbortExit,0x40000015,"abort() in the game's CRT");
     Crash(self,work,"terminate",kAbortExit,0x40000015,"abort() in the game's CRT");
@@ -441,6 +463,15 @@ int main(int argc,char** argv) {
         Check(text.find("filter kept first by redirect")!=std::string::npos,"the redirect went in");
     }
     Crash(self,work,"race",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+    {   // Five threads started after the install (four racers, the dumping thread): the TLS callback's line once.
+        wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\log.txt",work);
+        const std::string text=Read(log);
+        const char line[]="CRASHDUMP stack overflow guarantee 32 KB set by the TLS callback on a thread started after "
+                          "the install (thread ";
+        std::size_t count=0;
+        for(auto at=text.find(line);at!=std::string::npos;at=text.find(line,at+1))++count;
+        Check(count==1,"race: the first thread given the stack overflow guarantee by the TLS callback is logged, once");
+    }
     Crash(self,work,"bufferlock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"filelock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     // EDF6AutoTurret's buffered lines reach its log on a crash (#372's review: its async log lost the last 50 ms).

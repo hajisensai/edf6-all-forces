@@ -1,4 +1,5 @@
 #include "support_soldier.h"
+#include "preload_set.h"
 #include "support_call.h"
 #include "memory.h"
 #include "mod_file.h"
@@ -102,7 +103,7 @@ using FollowFn=void(__fastcall*)(void*,void*,bool);
 using PreloadFn=void(__fastcall*)(void*,const wchar_t*,int,int);
 using RegisterFn=const unsigned char*(__fastcall*)(void*,ObjRef*,const unsigned char*);
 CreateFn create=nullptr;DeleteFn destroy=nullptr;TeamFn team=nullptr;LevelFn level=nullptr;
-FollowFn follow=nullptr;PreloadFn preload=nullptr;
+FollowFn follow=nullptr;PreloadFn preloadFile=nullptr;
 RegisterFn registerObject=nullptr;
 using DeriveFn=void*(__fastcall*)(void*,const void*,unsigned);
 DeriveFn deriveId=nullptr;
@@ -358,7 +359,7 @@ bool InstallSupportSoldiers() noexcept {
     __try {
         for(const auto& s:signatures)if(!Matches(s.rva,s.bytes,sizeof(s.bytes)))return false;
         create=reinterpret_cast<CreateFn>(image+kCreate);destroy=reinterpret_cast<DeleteFn>(image+kDelete);
-        preload=reinterpret_cast<PreloadFn>(image+kPreload);team=reinterpret_cast<TeamFn>(image+kTeamCall);
+        preloadFile=reinterpret_cast<PreloadFn>(image+kPreload);team=reinterpret_cast<TeamFn>(image+kTeamCall);
         level=reinterpret_cast<LevelFn>(image+kLevel);follow=reinterpret_cast<FollowFn>(image+kFollow);
         const unsigned char registerSig[]={0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24};
         if(!Matches(kRegister,registerSig,sizeof(registerSig)))return false;
@@ -386,9 +387,13 @@ void PreloadSupportSoldiers() noexcept {
         void* mgr=At<void*>(image,kPreloadManager);
         missionManager=At<void*>(image,kObjectManager);
         if(!mgr || !missionManager)return;
+        bool any=false;
         for(int k=0;k<kSupportWeaponCount;++k)
-            if(SupportKindInstalled(static_cast<SupportWeapon>(k)))for(const wchar_t* path:kBodies[k])preload(mgr,path,2,-1);
-        preloaded=true;
+            if(preload::Want(preload::Soldier(k)) && SupportKindInstalled(static_cast<SupportWeapon>(k))) {
+                for(const wchar_t* path:kBodies[k])preloadFile(mgr,path,2,-1);
+                any=true;
+            }
+        preloaded=any;   // none in this mission's set (PreloadMode=2): no soldier is made
     } __except(SpawnFault("preload",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
         preloaded=false;RecordFault(SupportSpawnFailure::mission);
     }

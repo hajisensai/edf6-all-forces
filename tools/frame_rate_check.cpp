@@ -193,6 +193,56 @@ void LoopCountFirst() {
            static_cast<double>(stepped),static_cast<double>(clock.last/tick));
 }
 
+// Loads (frame_rate_logic.h LoadingRuns): the gate as GateCount / GateWaitCounts wire it, with a load from 5 s to 15 s.
+// While loading no frame runs without ticks and the loop waits to tick boundaries (the game's own cadence); every tick
+// is still stepped once; after the load the slots start over from now (no burst for the load's time) and the 0-tick
+// frames come back.
+void LoadingLoop() {
+    Expect(!Loading(0) && !Loading(-1) && !Loading(INT32_MIN),"a count of 0 or under is not a load");
+    Expect(Loading(1) && Loading(3),"a count above 0 is a load");
+    const u64 freq=10'000'000,tick=crew::pacing::TickPeriod(freq);
+    for(int cap:{61,144,1000,kUnlimited}) {
+        const u64 period=PresentPeriod(freq,cap);
+        GameClock clock{987654321,0,tick};
+        Gate g{};
+        u64 now=clock.base+11,stepped=0,loadFrames=0,loadZero=0,loadTicks=0,afterFrames=0,afterZero=0,burst=0,waits=0;
+        std::mt19937_64 rng(static_cast<u64>(cap+11));
+        std::uniform_int_distribution<u64> cost(freq/2000,freq/400);
+        const u64 loadFrom=freq*5,loadTo=freq*15,end=freq*25;
+        while(now-clock.base<end) {
+            const u64 t=now-clock.base;
+            const bool loading=Loading(t>=loadFrom && t<loadTo ? 1 : 0);
+            u64 n=0;
+            if(loading) {
+                n=clock.Count(now);
+                if(!LoadingRuns(g,n)) {
+                    const u64 w=crew::pacing::CountsToBoundary(now,clock.base,clock.last,tick);
+                    Expect(w>0 && w<=tick,"loading: a frame without ticks waits to the boundary",static_cast<double>(w));
+                    now+=w;++waits;continue;
+                }
+            } else {
+                if(!Ready(g,now,cap,period)){now+=WaitCounts(g,now,cap);continue;}
+                n=clock.Count(now);
+            }
+            const u64 capped=n<3 ? n : 3;
+            stepped+=capped;
+            if(loading){++loadFrames;loadTicks+=capped;if(!capped)++loadZero;}
+            else if(t>=loadTo){++afterFrames;if(!capped)++afterZero;if(t<loadTo+freq/10)++burst;}
+            now+=cost(rng);
+        }
+        const u64 passed=(now-clock.base)/tick;
+        Expect(loadZero==0,"loading: no 0-tick frames",static_cast<double>(loadZero),cap);
+        Expect(loadFrames>0 && loadFrames<=loadTicks,"loading: every frame steps",static_cast<double>(loadFrames),static_cast<double>(loadTicks));
+        Expect(loadFrames>=595 && loadFrames<=601,"loading: about a frame a tick (10 s at 59.94 Hz)",static_cast<double>(loadFrames),cap);
+        Expect(waits>0,"loading: the loop waits between ticks",static_cast<double>(waits));
+        Expect(stepped+1>=passed && stepped<=passed,"every tick that passed is stepped once over the load",
+               static_cast<double>(stepped),static_cast<double>(passed));
+        Expect(afterZero>0,"after the load the 0-tick frames are back",static_cast<double>(afterZero),cap);
+        if(cap!=kUnlimited)Expect(burst<=static_cast<u64>(cap)/10+2,"after the load no burst: the slots start over",
+                                  static_cast<double>(burst),cap);
+    }
+}
+
 void Alpha() {
     const u64 tick=1000;
     Expect(RenderAlpha(1,500,0,0,tick)==1.0f,"a frame that steps renders the last step");
@@ -324,6 +374,7 @@ int main() {
     Slots();
     Loop();
     LoopCountFirst();
+    LoadingLoop();
     Alpha();
     Rigid();
     InputEdges();

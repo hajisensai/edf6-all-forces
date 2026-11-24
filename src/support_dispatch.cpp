@@ -8,6 +8,7 @@
 #include "support_source.h"
 #include "carrier_drone_net.h"
 #include "pvp_native.h"
+#include "preload_set.h"   // SupportCatalogReach
 #include "command_identity.h"
 #include "support_drone.h"
 #include "subcarrier.h"
@@ -1484,6 +1485,20 @@ bool SupportWithdrawVehicle(const void* vehicle) noexcept {
         }
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool SupportCatalogReachOf(int index,SupportCatalogReach& out) noexcept {
+    out=SupportCatalogReach{};
+    if(index<0 || index>=SupportCallCount())return false;
+    const auto id=static_cast<std::uint32_t>(index);
+    SupportVehicleKind kind{};SupportCrewMode mode{};bool platoon=false,plane=false;int strike=0;
+    out.sub=SupportSubCatalog(index);   // the carrier, its laser (with CarrierLaser) and the gun drones it launches
+    out.aircraft=AircraftSpecOf(id,&out.spec);
+    if(TransportCatalog(id,platoon,plane)){out.chute=plane;out.rope=!plane;}
+    if(AirdropCatalog(id,kind))out.airdrop=out.hulls=true;
+    if(GroundCatalog(id,kind,mode))out.hulls=true;
+    out.drill=InfantryCatalog(id);
+    out.ultimate=StrikeCatalog(id,strike) && SupportStrikeBarrage(strike)<0;
+    return true;
 }
 int SupportCallCount() noexcept {
     return AirCount()+2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries+SupportStrikeCount()+1;
