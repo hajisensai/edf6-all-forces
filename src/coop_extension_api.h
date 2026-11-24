@@ -48,7 +48,7 @@ typedef uint32_t (EDF6COOP_CALL *EDF6CoopGetExtensionApiFn)(
 #define EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED 1u
 #define EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND 2u
 // An overflow (send/relay backlog, inbox) renews the generation and readiness comes back once the links drain, never
-// latched closed for the room (edf-coop-stable docs/extension-transport.md, "Overflow recovery contract").
+// latched closed for the room (edf-coop-stable:docs/extension-transport.md, "Overflow recovery contract").
 #define EDF6COOP_EXTENSION_CAPACITY_RECOVERABLE_FAULT 4u
 #define EDF6COOP_EXTENSION_CAPACITY_POLL_BATCH 8u   // EDF6CoopPollExtensionBatch is exported
 #define EDF6COOP_EXTENSION_SEND_UNAVAILABLE 0u

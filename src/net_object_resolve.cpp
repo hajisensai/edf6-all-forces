@@ -290,7 +290,6 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
         const ULONGLONG frame=GameFrame();
         bool cached=frame && players.valid && players.frame==frame && players.world==world;
         for(unsigned j=0;cached && j<n;++j)if(visitor.q[j].kind==netref::Kind::native)cached=CachedNative(visitor.q[j]);
-        if(!cached)for(unsigned j=0;j<n;++j){visitor.q[j].match=ObjRef{};visitor.q[j].matchTwice=false;}
         for(unsigned j=0;cached && j<n;++j) {
             const Query& q=visitor.q[j];
             if(q.kind!=netref::Kind::player)continue;
@@ -303,6 +302,9 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
             }
             cached=cached && held;
         }
+        // Not served from the tables (a NetId not met, or a player no longer itself): what CachedNative filled in goes, the walk
+        // decides every query afresh (a match left over would read as the walk's second one).
+        if(!cached)for(unsigned j=0;j<n;++j){visitor.q[j].match=ObjRef{};visitor.q[j].matchTwice=false;}
         if(!cached && !WalkWorld(visitor,world,frame))return false;
         for(unsigned i=0;i<n;++i)out[i]=Result(visitor.q[i],world.expected);
         return true;

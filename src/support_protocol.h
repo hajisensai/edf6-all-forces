@@ -31,7 +31,7 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // kExtVariants is the one extension bit: runtime state (the variants hook runs this mission), not a build's. The bits
 // that said which features a build had (the sea rescue and its own channel, the EDF4.1 outfit, players 5+, backpack
 // weapons, the host's roster, the plugin's channels) and the welcome's features word were removed by net-6 (2026-11-24):
-// every machine of a room runs this build (mod_room.h kAllForcesRoomProtocol 16: an older or newer build neither finds
+// every machine of a room runs this build (mod_room.h kAllForcesRoomProtocol 17: an older or newer build neither finds
 // nor joins the room), so nothing is asked of a peer per feature.
 constexpr std::uint32_t kExtVariants=1u;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it

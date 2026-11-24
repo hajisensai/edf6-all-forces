@@ -56,11 +56,13 @@ namespace crew {
 //  13 (2026-11-21): commander mode adds a catalog and host settings field. Older builds cannot negotiate it.
 //  14 (2026-11-21): custom mechs add a vehicle body to PVEH v4. Every member must use the same channel version.
 //  15 (2026-11-21): host settings v3 synchronizes scope spread and support wire v3 carries both Fencer hands.
-//  16 (2026-11-24): net-6, the per-feature compatibility layer removed: no extension bits in the support handshake
+//  16 (2026-11-24): every member needs EDF6Coop 2.8.0 (batch poll, recoverable overflow) and sends enemy-control and
+//      gravity states by logic frame; a 15 build would sit in the room on an EDF6Coop whose overflow ends its networking.
+//  17 (2026-11-24): net-6, the per-feature compatibility layer removed: no extension bits in the support handshake
 //      (kExtVariants alone, runtime state), no plugin_net roster / PeerHas, no command protocol negotiation (v10 only),
-//      no "older build" notices. Every channel sends to every peer: a 15 would be sent what it cannot read.
+//      no "older build" notices. Every channel sends to every peer: a 16 would be sent what it cannot read.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=16;
+constexpr std::int64_t kAllForcesRoomProtocol=17;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

@@ -32,13 +32,21 @@ constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
 constexpr std::uint32_t kVersion=4;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
-// Senders' pacing in logic frames (GameFrame, 60 Hz), not ms of a clock with 15.6 ms steps (which stretched 50 ms to ~63).
-constexpr std::uint64_t kHoldGapFrames=3;  // a hold's state goes out this often while it lasts (20 Hz)
+// Senders' pacing in logic frames (GameFrame, 60 Hz), not ms of a clock with 15.6 ms steps (which stretched 50 ms to ~63),
+// or after the Gap*Ms if that comes first: at a low frame rate the frames alone would stretch a gap toward the receiver's
+// Silent*Ms, which is wall-clock (6 frames at 10 fps are its whole 600 ms).
+constexpr std::uint64_t kHoldGapFrames=3,kHoldGapMs=50;  // a hold's state goes out this often while it lasts (20 Hz)
 constexpr std::uint64_t kHoldSilentMs=600; // a hold not heard of this long is let go (its grabber left, its plugin stopped)
 constexpr std::uint32_t kMostLeftMs=3600000;
-constexpr std::uint64_t kFlightGapFrames=6;  // a thrown thing with no ID: its state goes out this often while it flies (10 Hz)...
+constexpr std::uint64_t kFlightGapFrames=6,kFlightGapMs=100;  // a thrown thing with no ID: its state goes out this often while it flies (10 Hz)...
 constexpr std::uint64_t kFlightMostMs=4000;  // ...for at most this long (or until it rests)
 constexpr std::uint64_t kFlightSilentMs=600; // a flight not heard of this long is left to this machine's physics
+static_assert(kHoldGapMs*4<=kHoldSilentMs && kFlightGapMs*4<=kFlightSilentMs,"a state lost or late thrice is not silence");
+// Due: the next state goes out (never sent, or its frames or its ms are up, whichever first).
+constexpr bool Due(std::uint64_t frame,std::uint64_t sentFrame,std::uint64_t gapFrames,std::uint64_t now,std::uint64_t sentMs,
+                   std::uint64_t gapMs) noexcept {
+    return !sentFrame || frame-sentFrame>=gapFrames || now-sentMs>=gapMs;
+}
 constexpr float kMostRadial=200.0f;          // m: a radial's reach at most (gravity::Radial)
 constexpr float kMostRadialSpeed=200.0f;     // m/s
 
