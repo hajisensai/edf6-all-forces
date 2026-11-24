@@ -42,6 +42,7 @@
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include "online_authority.h"
+#include "preload_set.h"
 #include "unlock_ported.h"
 #include "weapon_records.h"
 #include <cmath>
@@ -558,6 +559,31 @@ bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept {
     return fresh;
 }
 int SupportAirCallCount() noexcept { return kCallCount; }
+int SupportAirCallThen(int index) noexcept { return index>=0 && index<kCallCount ? kCalls[index].then : -1; }
+// Every class's equipped weapons (the game status's slots, npc_arms.cpp ReadInventory's layout): a class switched in the
+// room's last beat before the start still counts. Read on the room's tick and at a mission's start.
+void AddEquippedCallItems(preload::Set& out) noexcept {
+    constexpr unsigned kGameStatus=0x20B2890;
+    constexpr std::size_t kWeapons=0x6E98,kClassStride=0x18;
+    constexpr int kSlots[4]={4,4,5,6};   // Ranger, Wing Diver, Air Raider, Fencer
+    __try {
+        unsigned char* const gs=At<unsigned char*>(image,kGameStatus);
+        if(!gs || !Readable(gs+kWeapons,4*kClassStride) || !Readable(gs+kCfg+kTableRef,8))return;
+        void* const table=gs+kCfg;
+        if(!At<void*>(table,kTableRef))return;
+        const std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
+        alignas(8) unsigned char row[0x100];
+        for(int cls=0;cls<4;++cls)for(int i=0;i<kSlots[cls];++i) {
+            const auto id=At<std::int32_t>(gs,kWeapons+cls*kClassStride+i*4);
+            if(id<0 || static_cast<std::uint32_t>(id)>=n)continue;
+            reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,static_cast<std::uint32_t>(id));
+            const auto name=At<const wchar_t*>(row,0);
+            constexpr std::size_t kLongest=64;
+            if(!name || !Readable(name,sizeof(wchar_t)))continue;
+            preload::AddCallItems(std::wstring_view(name,wcsnlen(name,kLongest)),out);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
 // The call's configuration key: its weapon row id without EDF6VC_CALL_ (INTERCEPTOR, HELI_F, ...).
 const wchar_t* SupportAirCallKey(int index) noexcept {
     constexpr std::size_t prefix=12;   // L"EDF6VC_CALL_"

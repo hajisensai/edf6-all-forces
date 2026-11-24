@@ -21,7 +21,12 @@
 // reading its own ini would let one member play the stock spread while the others are penalised unzoomed.
 //
 // Word v3 carries both the commander flag and the scope settings. Scope values are integers in units of 1/10000.
+// Word v4 (2026-11-24, with its room protocol bump: mod_room.h) adds the plugin content preload's sets (preload_set_logic.h): n= what this
+// member's play reaches (its catalog, its equipped call weapons, PreloadMode applied), p= the room's set as this member
+// last saw it (its n= and every other member's). The host's p= is what every member preloads at the mission's sync
+// (preload::AtSync): the set must be the same on every machine, a body one machine lacks is an object it cannot make.
 #pragma once
+#include "preload_set_logic.h"
 #include "scope_spread_logic.h"
 #include <cstddef>
 #include <cstdint>
@@ -50,10 +55,11 @@ enum : std::uint32_t {
     kFeatCommander=512u,       // the commander mode (commander.cpp): the commander's NPC request (support catalog
                                // kCommanderCatalog), the players' NoTarget / NoHpLoss and the NPC-wipe failure
     kFeatScopeSpread=1024u,
+    kFeatPreloadSet=2048u,     // the room's preload set (word v4 n= / p=): every member preloads the host's p=
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
                                          kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded|kFeatBikeGunMount|
-                                         kFeatBikeRide|kFeatCommander|kFeatScopeSpread;
+                                         kFeatBikeRide|kFeatCommander|kFeatScopeSpread|kFeatPreloadSet;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {
@@ -61,8 +67,9 @@ struct Word {
     std::uint32_t features=0;
     bool vanillaRecruit=false,npcFreeSquadCover=false,commander=false;
     scopespread::Params scope{};
+    preload::Set needs{},room{};
 };
-inline constexpr std::size_t kWordMost=128;
+inline constexpr std::size_t kWordMost=200;
 // A ScopeSpread number in the word: 1/10000 units, rounded (every value is in [0, 20]: scope_spread_logic.h ranges).
 inline constexpr std::int32_t kScopeUnit=10000,kScopeMost=999999;
 constexpr std::int32_t ScopeToWord(float v) noexcept {
@@ -72,10 +79,12 @@ constexpr float ScopeFromWord(std::int32_t v) noexcept { return static_cast<floa
 
 inline bool FormatWord(const Word& w,char* out,std::size_t size) noexcept {
     for(const char* p=w.version;*p;++p)if(*p==';' || *p<0x21 || *p>0x7E)return false;
-    const int n=std::snprintf(out,size,"3;v=%s;f=%X;r=%d;c=%d;m=%d;s=%d,%d,%d,%d,%d",w.version,static_cast<unsigned>(w.features),
+    char needs[preload::kTextSize]{},room[preload::kTextSize]{};
+    if(!preload::Format(w.needs,needs,sizeof(needs)) || !preload::Format(w.room,room,sizeof(room)))return false;
+    const int n=std::snprintf(out,size,"4;v=%s;f=%X;r=%d;c=%d;m=%d;s=%d,%d,%d,%d,%d;n=%s;p=%s",w.version,static_cast<unsigned>(w.features),
                               w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0,w.commander ? 1 : 0,w.scope.on ? 1 : 0,
                               static_cast<int>(ScopeToWord(w.scope.sniperHip)),static_cast<int>(ScopeToWord(w.scope.sniperHipMin)),
-                              static_cast<int>(ScopeToWord(w.scope.hip)),static_cast<int>(ScopeToWord(w.scope.aim)));
+                              static_cast<int>(ScopeToWord(w.scope.hip)),static_cast<int>(ScopeToWord(w.scope.aim)),needs,room);
     return n>0 && static_cast<std::size_t>(n)<size;
 }
 namespace detail {
@@ -121,7 +130,7 @@ inline bool Scope(std::string_view v,scopespread::Params& out) noexcept {
 inline bool ParseWord(std::string_view text,Word& out) noexcept {
     Word w;
     std::string_view rest=text,v;
-    if(rest.substr(0,2)!="3;")return false;
+    if(rest.substr(0,2)!="4;")return false;
     rest.remove_prefix(2);
     if(!detail::Field(rest,"v=",v) || v.empty() || v.size()>=kVersionMost)return false;
     std::memcpy(w.version,v.data(),v.size());
@@ -136,7 +145,9 @@ inline bool ParseWord(std::string_view text,Word& out) noexcept {
     if(!detail::Field(rest,"r=",v) || !detail::Bit(v,w.vanillaRecruit))return false;
     if(!detail::Field(rest,"c=",v) || !detail::Bit(v,w.npcFreeSquadCover))return false;
     if(!detail::Field(rest,"m=",v) || !detail::Bit(v,w.commander))return false;
-    if(!detail::Field(rest,"s=",v) || !detail::Scope(v,w.scope) || !rest.empty())return false;
+    if(!detail::Field(rest,"s=",v) || !detail::Scope(v,w.scope))return false;
+    if(!detail::Field(rest,"n=",v) || !preload::Parse(v,w.needs))return false;
+    if(!detail::Field(rest,"p=",v) || !preload::Parse(v,w.room) || !rest.empty())return false;
     out=w;
     return true;
 }

@@ -4299,6 +4299,12 @@
    ],
    "scripts": []
   },
+  "preload_set": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "primer_ballistics": {
    "labels": [
     "plugin-native"
@@ -5585,6 +5591,24 @@
     "tests/testhub_dump_source_test.py"
    ]
   },
+  "texshare": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/texshare_test.py"
+   ]
+  },
   "texture_acceleration": {
    "labels": [
     "cockpit",
@@ -5940,6 +5964,59 @@
    "scripts": [
     "tools/test_vehicle_model_shapes.py"
    ]
+  },
+  "vehicle_weapons": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "vehicle_weapons_covers": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": []
+  },
+  "vehicle_weapons_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vehicle_weapons_native_audit.py"
+   ]
+  },
+  "vehicle_weapons_stock": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": []
   },
   "view_clip_check": {
    "labels": [

@@ -8,6 +8,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "mod_file.h"
+#include "preload_set.h"
 #include "online_authority.h"
 #include "support_aircraft.h"
 #include "pvp.h"
@@ -524,6 +525,18 @@ SupportEntry JetSupportEntry(const void* vehicle,const float* target) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return SupportEntry::gone;}
 }
 
+void AddSupportAircraftItems(const SupportAircraft& spec,preload::Set& out) noexcept {
+    if(!SupportSpecValid(spec))return;
+    const Body body=SupportBody(spec);
+    out.Add(preload::Body(static_cast<int>(body)));
+    // A carrier's drones (jet_carrier.cpp: its own blast / doll ones when their body is there, else the gun drone).
+    const BodyRow& row=Row(body);
+    if(KindOf(row.role).weapon==Weapon::drones) {
+        out.Add(preload::Body(static_cast<int>(Body::drone)));
+        out.Add(preload::Body(static_cast<int>(KindOf(row.drones).body)));
+    }
+}
+
 bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
     return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
 }
@@ -577,7 +590,8 @@ void PreloadJets() noexcept {
             const Body body=kBodies[k].body;
             const bool missionOnly=body==Body::centipede || body==Body::dragonfly || body==Body::enemyFighter ||
                                    body==Body::primerFighter;
-            preloaded[k]=!broken[k] && !missionOnly && ModFileThere(kBodies[k].file);
+            // Not in this mission's set (preload_set.h: nothing the room can call or launch flies it): not loaded.
+            preloaded[k]=!broken[k] && !missionOnly && preload::Want(preload::Body(k)) && ModFileThere(kBodies[k].file);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kBodies[k].sgo,2,-1);
             const int n=sprintf_s(line+at,sizeof(line)-at,"%s%s=%d",k ? " " : "",kBodies[k].name,preloaded[k]);
             if(n>0)at+=n;
@@ -607,7 +621,8 @@ void PreloadJets() noexcept {
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
         // ...and with the Dreadnought, whose turrets fire their emplacements' rounds (the cannon's on an install from before
         // them: jet_bay.cpp TurretRound)
-        PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
+        PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) ||
+                          (preload::Want(preload::Item::dnRounds) && ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB")));
         PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;

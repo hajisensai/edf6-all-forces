@@ -37,6 +37,7 @@
 // (CarrierLaserFrame); with no carrier left, from a 508's AI (ShipAiHook), so it winds down (Interrupt: the sight
 // deleted) when the last carrier is gone, though nothing of the carriers runs any more.
 #include "crew.h"
+#include "preload_set.h"
 #include "edf/world_tables.h"
 #include "enemy_control_native.h"
 #include "memory.h"
@@ -518,7 +519,7 @@ void Step() noexcept {
 void PreloadLaser() noexcept {
     __try {
         preloaded=false;
-        if(!sigOk || broken || !Cfg().carrierLaser)return;
+        if(!sigOk || broken || !Cfg().carrierLaser || !preload::Want(preload::Item::laser))return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         preloaded=mgr && FilesThere();
         if(preloaded) {

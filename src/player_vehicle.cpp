@@ -17,6 +17,7 @@
 // requester machine's decision (player_vehicle_logic.h Engine). Game thread only (the transporter's init, the container's
 // update, the channel's receive / update).
 #include "player_vehicle.h"
+#include "vehicle_weapons.h"
 #include "player_vehicle_logic.h"
 #include "airdrop.h"
 #include "support_spawn.h"
@@ -236,6 +237,7 @@ void PreloadPlayerVehicles() noexcept {
         if(!playerveh::LoadedPath(v,app,std::size(app)))return;
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,app,2,-1);
+            QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),app);   // its guns, pylons, tank (vehicle_weapons.h)
             preloaded[n++]=v;
         } __except(EXCEPTION_EXECUTE_HANDLER){Log("PLAYERVEH preload fault: %ls",file);}
     };
