@@ -33,6 +33,9 @@ options
   --cycle N         a load run instead (hitch-5): nothing sampled; the mission left and entered again N times in one
                     launch (drive.py --cycle; --cycle-stay S in each, default 20), each entry's phases and memory points
                     from the plugin log, the first one cold (the launch's first), the rest warm: loads.md
+  --key SPEC@S[:MS] hold a key S seconds into the mission for MS (default 300; repeatable; drive.py --key): e.g.
+                    4d@50 (M, a virtual-key code in hex) opens the map inside the stack window, so its slow frames'
+                    stacks are taken (hitch-3 / hitch-6)
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
   --restore         put back what a run could not (the game outlived it): the range mission's files, and every file
                     drive.py placed (the DLLs, the ini) byte for byte with the autopilot removed (drive.py restore)
@@ -222,6 +225,22 @@ def placements(dll: str | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def keep_symbols(dll: str | None, out: str) -> str | None:
+    """A copy of `dll` and its PDB in out/symbols, taken before the launch: perf_report names the plugin's frames from
+    the PDB of the very build that ran (an exact match), and the build folder is rebuilt after the run. The copy's path,
+    None without a dll or a PDB next to it."""
+    if not dll or not os.path.isfile(dll):
+        return None
+    pdb = os.path.splitext(dll)[0] + '.pdb'
+    if not os.path.isfile(pdb):
+        return None
+    keep = os.path.join(out, 'symbols')
+    os.makedirs(keep, exist_ok=True)
+    for f in (dll, pdb):
+        shutil.copy2(f, os.path.join(keep, os.path.basename(f)))
+    return os.path.join(keep, os.path.basename(dll))
+
+
 def loaded_plugins(game: str, dll: str | None) -> dict:
     """What the game loads in a run with `dll`, taken before the launch (as placements places them): each plugin's
     file, where it comes from and its sha256. AutoTurret: the build's own next to `dll` (built-alongside), else the game
@@ -300,6 +319,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     clog_at = log_mark(clog)
     cycle = opts.get('cycle')
     loaded = loaded_plugins(game, dll)   # before the launch: the files the game is about to load
+    kept = keep_symbols(dll, out)
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
@@ -311,7 +331,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         # frame split, the render thread and the channels (src/perf_probe.h)
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
                        os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', 'PerfProbe=1', *opts['ini']),
-                       shots=os.path.join(out, 'shots') if opts['shots'] else None,
+                       shots=os.path.join(out, 'shots') if opts['shots'] else None, keys=tuple(opts.get('keys', ())),
                        during=None if cycle else lambda: sample(out, warm, opts['cpu'], opts['stacks'],
                                                                 opts['interval'], marks, opts.get('presentmon')),
                        quit_wait=600,   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
@@ -341,7 +361,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         with open(os.path.join(out, 'coop.log'), 'wb') as f:
             f.write(data)
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
-    run = dict(scenario=scenario, variant=variant, dll=dll, **loaded,
+    run = dict(scenario=scenario, variant=variant, dll=kept or dll, built=dll, **loaded,
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, cycle=cycle, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
@@ -356,7 +376,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
             'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': [], 'presentmon': None,
-            'cycle': 0, 'cycle_stay': 20.0}
+            'cycle': 0, 'cycle_stay': 20.0, 'keys': []}
     pos = []
     i = 0
     while i < len(argv):
@@ -374,6 +394,11 @@ def options(argv: list[str]) -> tuple[str, dict]:
             if '=' not in argv[i + 1]:
                 raise SystemExit('--ini wants KEY=VALUE')
             opts['ini'].append(argv[i + 1])
+            i += 2
+        elif a == '--key':
+            import drive
+            spec, at, ms = drive.key_option(argv[i + 1] if ':' in argv[i + 1] else argv[i + 1] + ':300')
+            opts['keys'].append((spec, at, ms))
             i += 2
         elif a in ('--warm', '--cycle-stay'):
             opts[a[2:].replace('-', '_')] = float(argv[i + 1])

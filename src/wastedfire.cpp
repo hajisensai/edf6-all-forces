@@ -24,6 +24,7 @@
 #include "hit_predict.h"
 #include "memo_epoch.h"
 #include "memory.h"
+#include "live_set.h"
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
 #include "edf/host.h"
@@ -368,7 +369,7 @@ struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shoo
 const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
     TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
     if(m.target==target && m.frame==frame)return m;
-    m={target,frame,Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    m={target,frame,liveset::Has(target) || Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
     if(!m.readable)return m;
     const auto o=static_cast<const unsigned char*>(target);
     m.kind=AcceptOk() ? KindOf(o) : Kind::none;
@@ -382,7 +383,7 @@ hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float
     if(!shooter || !target)return hitpredict::Verdict::fire;
     const ULONGLONG frame=memoClock.Epoch(GameFrame(),WallMs());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
-        shooterMemo={shooter,frame,Readable(shooter,kPosition+12)};
+        shooterMemo={shooter,frame,liveset::Has(shooter) || Readable(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
     const TargetMemo& t=TargetThisFrame(target,frame);
     if(!t.readable)return hitpredict::Verdict::fire;

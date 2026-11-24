@@ -208,6 +208,7 @@ def report_parsing() -> None:
               'GPU: the busiest engine of a type per sample (as Task Manager), idle types left out')
         # a game thread: System::update on most stacks
         img = perf_report.Image.__new__(perf_report.Image)
+        img.names = {}
         img.pdata = [(0x500000, 0x500100), (perf_report.SYSTEM_UPDATE, perf_report.SYSTEM_UPDATE + 0x1000)]
         img.starts = [b for b, _ in img.pdata]
         img.slot_class = {0x500000: 'GiantAnt#5'}
@@ -250,7 +251,7 @@ def report_parsing() -> None:
               'the DLL is resolved only when it is the file the run placed (sha256)')
         opened = []
         real_image = perf_report.Image
-        perf_report.Image = lambda path, classes=True: opened.append(path) or None
+        perf_report.Image = lambda path, classes=True, names=True: opened.append(path) or None
         try:
             plug = perf_report.Plugins(src)
             plug.func('EDF6VehicleCrew.dll+1000', True)
@@ -393,6 +394,7 @@ def probe_parsing() -> None:
         check(p['presents'] == 3 and p['dropped'] == 1 and abs(p['change_mean'] - 25.0) < 1e-9 and
               p['modes'] == {'Hardware: Independent Flip': 3}, 'PresentMon: display changes, not displayed (latency-2)')
         img = perf_report.Image.__new__(perf_report.Image)
+        img.names = {}
         img.pdata = sorted([(0x111B8E0, 0x111B9E0), (perf_report.APP_FRAME, perf_report.APP_FRAME + 0x400),
                             (perf_report.SYSTEM_UPDATE, perf_report.SYSTEM_UPDATE + 0x1000), (0x118DFF0, 0x118E100),
                             (0x65F10, 0x66000)])
@@ -409,6 +411,20 @@ def probe_parsing() -> None:
         pf = perf_report.plugin_functions(Named(), [['ntdll.dll+1', 'EDF.dll+50e00', 'EDF6VehicleCrew.dll+10',
                                                      'EDF.dll+11a305f']] * 3, 10, 16.7)
         check(pf == ['no plugin frames'], 'the measurement probes are not the plugin\'s cost (they call through)')
+
+        class Hooks:
+            def func(self, f: str, leaf: bool) -> tuple[str, str]:
+                return f, {'EDF6VehicleCrew.dll+20': 'crew::ThinkHook<0>', 'EDF6VehicleCrew.dll+30': 'crew::Think',
+                           'EDF6VehicleCrew.dll+10': 'crew::perfprobe::UpdateHook'}.get(f, 'crew::Other')
+        stock = ['EDF.dll+596b60', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10', 'EDF.dll+1198000']
+        own = ['ntdll.dll+1', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10']
+        called = ['EDF.dll+7000', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF.dll+1198000']
+        check(not perf_report.plugin_owns(Hooks(), stock), "the stock Think under ThinkHook is the game's own work")
+        check(perf_report.plugin_owns(Hooks(), own) and perf_report.plugin_owns(Hooks(), called),
+              "the plugin's code, and the game code it calls, are its own work")
+        pf = perf_report.plugin_functions(Hooks(), [stock, own, called, called], 10, 20.0)
+        check(pf[0].endswith('100.0%, 20.00 ms/frame') and pf[1].endswith('75.0%, 15.00 ms/frame'),
+              'both shares reported: on the stack, and its own work')
         def ph(*frames: str) -> str:
             return perf_report.phase_of(img, list(frames))[0]
         check(ph('EDF.dll+118e000', 'EDF.dll+1198fa0') == 'draw: camera / Umbra 0x118DFF0', 'the draw split by its part')
@@ -419,9 +435,43 @@ def probe_parsing() -> None:
         check(ph('ntdll.dll+1') == 'outside the frame loop', 'nothing of the frame: outside it')
 
 
+def vanilla_names() -> None:
+    """Stack frames named from the vanilla indexes: edf6-vanilla-re's reviewed names over the code index's labels, only
+    for the EDF.dll build they were made from; a source missing (CI) or of another build gives no names, no error."""
+    sha = 'ab' * 32
+    with tempfile.TemporaryDirectory() as d:
+        code, re_ = os.path.join(d, 'code'), os.path.join(d, 're')
+        os.makedirs(os.path.join(code, 'function-index'))
+        os.makedirs(os.path.join(re_, 'shared', 'functions'))
+        with open(os.path.join(code, 'function-index', 'summary.json'), 'w', encoding='utf-8') as f:
+            json.dump({'images_sha256': {'EDF.dll': sha.upper()}}, f)
+        with open(os.path.join(code, 'function-index', 'functions.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write('module\trva\tlabel\tlabel_kind\n'
+                    'EDF.dll\t0x6A8B50\tFUN_1806a8b50_guess\tghidra\n'
+                    'EDF.dll\t0x111B8E0\tTalkScript::Run\tsymbol\n'
+                    'EDF.dll\t0x200000\tLAB_180200000\taddress_label\n'
+                    'EDF6.exe\t0x1000\tWinMain\tsymbol\n')
+        with open(os.path.join(re_, 'shared', 'builds.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write(f'build\tmodule\tsha256\nsteam\tEDF.dll\t{sha}\nother\tEDF.dll\t{"cd" * 32}\n')
+        with open(os.path.join(re_, 'shared', 'functions', 'EDF.dll.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write('build\trva\tname\nsteam\t0x006A8B50\tWeapon_RadioContact::UpdateCall\n'
+                    'other\t0x00300000\tNotThisBuild\n')
+        names = perf_report.vanilla_names(sha, code, re_)
+        check(names == {0x6A8B50: 'Weapon_RadioContact::UpdateCall', 0x111B8E0: 'TalkScript::Run'},
+              f'vanilla names: reviewed over index, this build, no address labels or other modules ({names})')
+        check(perf_report.vanilla_names('ef' * 32, code, re_) == {}, 'vanilla names: another build gives none')
+        check(perf_report.vanilla_names(sha, os.path.join(d, 'none'), os.path.join(d, 'none')) == {},
+              'vanilla names: missing sources give none')
+        img = perf_report.Image.__new__(perf_report.Image)
+        img.pdata, img.starts, img.slot_class, img.names = [(0x6A8B50, 0x6A8C00)], [0x6A8B50], {}, names
+        check(img.name(0x6A8B50) == '0x6a8b50 Weapon_RadioContact::UpdateCall', f'named frame ({img.name(0x6A8B50)})')
+
+
 def perfrun_probe_options() -> None:
     _, o = perfrun.options(['M001', '--dll', 'installed', '--cycle', '3', '--cycle-stay', '10'])
     check(o['cycle'] == 3 and o['cycle_stay'] == 10.0, '--cycle N and --cycle-stay S')
+    _, o = perfrun.options(['M001', '--dll', 'installed', '--key', '4d@50', '--key', 'esc@60:500'])
+    check(o['keys'] == [('4d', 50.0, 300), ('esc', 60.0, 500)], '--key SPEC@S[:MS], 300 ms by default')
     for bad in (['M001', '--dll', 'installed', '--presentmon', os.path.join(ROOT, 'no-such-presentmon.exe')],
                 ['M001', '--dll', 'installed', '--cycle', '2', '--ab', __file__, __file__]):
         try:
@@ -625,6 +675,7 @@ scenarios()
 report_parsing()
 probe_parsing()
 perfrun_probe_options()
+vanilla_names()
 drive_during()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)
