@@ -75,8 +75,10 @@ constexpr std::uint64_t kMostHolders=64;   // seat_net.h's bound on a vehicle's 
 // Their weapons are [h+0x1950]; another human's +0x1950 is not read.
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};
 constexpr std::uint64_t kMostBones=256;
-// In one tick: 600 m/s, 57 degrees (fps-7's: frame_rate_view.cpp). A rifle round is about 10 m a tick, a vehicle at full
-// speed one or two metres, a turn of a quarter circle a tick is a cut, not motion: docs/unlimited-fps-re.md §4.3.
+// In one tick: 10 m (600 m/s), 1 rad (57 degrees). Not a game value: fps-8 chose them for the player's root
+// (frame_rate_view.cpp kCutMove / kCutTurn) as "a teleport, a respawn, a cut", and they are reused here so an object and
+// the player's root agree. A real move past them is drawn as stepped and counted (refused, move / turn): the FRAMERATE
+// line says whether they cut real motion (docs/unlimited-fps-re.md §4.3.3).
 constexpr float kCutMove=10.0f,kCutTurn=1.0f;
 // The tables' first sizes (they grow on frames with ticks): poses written a frame, their floats (4 MB each copy), objects.
 constexpr std::size_t kFirstPoses=4096,kFirstPoseFloats=1u<<20,kFirstBodies=1024;

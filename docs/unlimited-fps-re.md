@@ -279,39 +279,65 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 
 - **采样**：在镜头步进钩子里，每 tick 一次（按 `+0xCE0` 去重，多视口、追帧 n = 2/3 每 tick 各采一次）。
   - 遍历更新表，只取 `thermal_models.cpp` 认得的家族：人形 / 士兵 / NPC / 他机玩家（HumanBase）、载具（含空车，VehicleBase）、
-    虫、巨人、怪兽、UFO 等。
+    虫、巨人、怪兽、UFO 等。`+0x18` 带 4 位（待删）的不采。
   - 采每个对象主模型实例 `model+0xA0` 的 pose[0]。
-  - 新对象在它的控制块上加一个 weak 计数，以后判活只看 use 计数，不读已释放内存。某 tick 不在表里了，就归还 weak 并删记录。
+  - 新对象在它的控制块上加一个 weak 计数，以后判活只看 use 计数，不读已释放内存。某 tick 不在表里了，就归还 weak 并删记录；
+    任务场景释放时（`mission.cpp` 的 `ReleaseGroupHook`，组 2，与 `crew::SceneOver` 同处）`frameobjects::SceneOver`
+    先还原、再归还全部 weak、清空记录。
   - 身份（控制块、vtable、实例）变了，或上一 tick 没采到，就重新计数。
-  - 表只在 tick 帧扩容（初始 1024 对象、4096 个 pose、1M float）。
+  - 表只在 tick 帧扩容（初始 1024 对象、4096 个 pose、1M float），扩容在 `noexcept` 里 `try/catch(std::bad_alloc)`：
+    失败则本 tick 不采样（之后的帧照 tick 画），不抛出。`Install` 的初始预留同样，失败就不启用本层，记一行日志。
+- **为什么采样留在镜头步进，不挪到 tick 末尾**：镜头步进是 tick 里最后一个每 tick 都跑的直接调用。它之后依次是
+  `0x11BEBE0`（Havok 查询回调）、`+0x358` 作业表（各元素 vtbl[1]，经 `0x118FC00`）、不暂停时 `0x1193D50`（`[sys+0xCC0]` 各项
+  slot 0x28，再 `+0x370` 作业）、再一次 `+0x358`。这些都是运行时按 vtable 选的调用，静态无法确定哪个会写模型 pose，也就找不到
+  一个「保证看到所有写入」的更晚的点。代价：之后被写过根的对象在 0-tick 帧发现绘制的 pose[0] ≠ cur，照 tick 画并计入
+  `pose` 原因，不会用过期的一对插值。实机若 `pose` 计数高，再按日志找写入者。
+- **读法（性能）**：采样和写入读的都是游戏此刻持有的活对象（镜头步进时在更新表里的；自己控制块 use 计数 > 0 的；座位 /
+  武器架 weak_ptr 活着的），不再逐个问 `Readable`，整段在 `__try` 里。`thermal_models` 为此加了 `EnemyModelsLive` /
+  `EnemyModelLive` / `EnemyFamilyLive`：同样的 RTTI 规则和缓存，只有第一次见到的 vtable 才经 `Readable` 解析 RTTI，模型 vtable 的
+  判定也按 vtable 缓存。`Readable` 只问 System 和它的更新表：离线测试 `frame_rate_objects_test` 中 20 个和 2000 个对象的采样都只问
+  2 次、一帧写入也只问 2 次（审查时 stress:30 采样每步 4.74 ms 全在 `Readable`）。例外：载具扳机武器的登记检查
+  `IsAnimationModel` 走带检查的读法，每把武器每帧问一次（只有载具才有，数量少）。
 - **写**：n = 0 帧，在 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里（见 §4.3.2 写点）。
   - 对象必须还在、vtable 不变、当前绘制的 pose[0] 仍等于 cur（tick 后没人改过）。
-  - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 10 m 或 57° 的不插值。
+  - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 `kCutMove` 10 m 或
+    `kCutTurn` 1 rad（57°）的不插值。这两个阈值不是游戏里读出来的：是 fps-8 给玩家根定的「瞬移 / 复活 / 镜头切换」判据
+    （`frame_rate_view.cpp`），这里沿用，让对象和玩家根判法一致。真实运动若超过它们，会照 tick 画并计入 refused 的
+    move / turn，实机看这两个计数决定要不要按家族调整。
   - 右乘到对象 `EnemyModels` 给出的每个模型、每个实例、每根骨上。四个兵种类（含 NPC）连带 `[h+0x1950]` 的武器一起乘。
+  - **载具扳机武器**：载具 `+0x638` 武器架（`+0x648` 个数，步长 0x48，`+8` 控制块、`+0x10` 武器），控制块 use > 0 且武器
+    `+0xF30` 是已登记的 AnimationModel（`thermal::IsAnimationModel`：vtable 是 EDF.dll 的或 RTTI 是 AnimationModel，且 `+0x10`
+    Umbra 对象已设）时，乘这辆车的 D；不是的不碰。注意：载具武器 `+0xF30` 是否真的作为独立模型绘制，静态没有确认；
+    登记检查只保证不写非模型内存。
   - **乘员随车**：先走每辆载具（`+0x608` 座位，按座位 weak_ptr 判活）。座位上的人形（同车 NPC、EDF6AutoTurret 副炮射手、
-    他机玩家）及其武器一律乘这辆车的 D，不用自己的。玩家载具的其他乘员乘 fps-7 的 D。车停着，乘员算「静止」；车不插值，乘员也不插值。
+    他机玩家）及其武器一律乘这辆车的 D，不用自己的。玩家载具的其他乘员乘 fps-7 的 D。车停着，乘员算「静止」；车不插值，乘员也
+    照 tick 画，原因随车。
+  - **子对象**（`[obj+0x38]` 有父对象）：在更新表里的，和其它对象一样用**自己的** D，不跟父对象的 D；不在表里的照 tick 画。
+    刚性连着的父子各自插值，结果近似一致，但不保证严格贴合。
   - 玩家本人和玩家载具留给 fps-7，不重复乘。
-  - 每个 pose 一帧只写一次（按 pose 指针去重）。0-tick 帧不分配；表不够时其余对象照 tick 画，下个 tick 扩容。
-- **还原**：与 fps-7 一起放在 `RestoreFrame`（本帧帧末栅栏后），先还原本模块，再还原 fps-7。条件全部满足才还原：
-  - 记录仍是同一个对象且对象还在。
+  - 每个 pose 一帧只写一次（按 pose 指针去重）。先把记录、写前副本和写后副本存好，再写 pose：中途出错也能还原。0-tick 帧不分配；
+    表不够时其余对象照 tick 画（`full`），下个 tick 扩容。
+- **还原**：与 fps-7 一起放在 `RestoreFrame`（本帧帧末栅栏后），先还原本模块，再还原 fps-7。前提全部满足才还原：
+  - 记录仍是同一个对象且对象还在（use 计数、weak-this 控制块不变、未带待删位）。
   - 乘员仍坐在原座位，控制块不变。
-  - 模型仍属于这个对象（重新取 `EnemyModels`，或武器槽仍指向它）。
+  - 模型仍属于这个对象：自己的模型重新取 `EnemyModelsLive`；士兵武器按槽位仍是同一把；载具武器按架位仍是同一把且控制块不变。
   - 实例仍是这个模型的，pose 指针和骨数不变。
-  - 内容校验和仍等于写入值。
+  - 然后**逐根骨**比较：仍等于写入值的骨还原，写入后被别人改过的骨保留别人的。
 - **联机**：只改画面上的 pose，n ≥ 1 帧不碰，不发包（`frame_rate_net_guard.py` 把本文件列入每帧文件）。
 - **日志**：每 5 s 在 `FRAMERATE` 行后另起一行，有数才打：
-  - `objects N: blended / (riders) / still / as stepped / most poses a frame`
+  - `objects N: blended / (riders) / still / as stepped (gone/vtable/pose/samples/unsampled/refused/full/fault) / most poses a frame`。
+    原因：`gone` 对象已释放或待删；`vtable` 地址上换了类；`pose` 采样后根被别处写过；`samples` 只见过一个 tick；`unsampled` 有
+    tick 没经过镜头步进采样；`refused` 插值被拒（下面的拒绝计数分原因）；`full` 表不够；`fault` 读出错。乘员随车计原因。
   - 玩家根和对象的拒绝原因计数，分 alpha / not rigid（含 RigidSign 容差）/ mirrored / move / turn。
 
 仍按 60 Hz 画的：
 
 - 挂在载具 / 角色上的特效、粒子、拖尾、光源、弹（不是带骨骼模型的对象，阶段 5）。
-- 载具扳机武器自己的模型（`+0x638` 各项 `+0x10` 的 `+0xF30`）：不确定是否独立绘制，没乘。
-- `thermal_models.cpp` 规则外的对象类；不在 `+0x448` 更新表里的对象。
-- 一 tick 内被别处改过根的对象：`0x11996B3` 管理器 slot 0x28 在镜头步进之后运行，改了就跳过，计入 as stepped。
+- `+0xF30` 不是已登记 AnimationModel 的载具扳机武器。
+- `thermal_models.cpp` 规则外的对象类；不在 `+0x448` 更新表里的对象（含不在表里的子对象）。
+- 一 tick 内被镜头步进之后的作业改过根的对象（见上「为什么采样留在镜头步进」），计入 `pose`。
 - 根有非均匀缩放的。
 - 超过 256 种 vtable 后，没进缓存的类每次都现查（只影响性能，不影响结果）。
-- 有父对象的子对象用自己的 D（与父对象各插各的，刚性连着的近似一致）。
 - n ≥ 1 帧的原版竞争（同 fps-7）。
 
 - 阶段 4：所有角色 / 载具 / 敌人的骨骼。
