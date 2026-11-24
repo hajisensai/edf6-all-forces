@@ -17,10 +17,11 @@
 //    motion id. hknpMotion +0x60 linear velocity (w: its cap). docs/gravity-re.md §2.0.2 / §2.0.3.
 //  - The owner: BodyToObject (0x108260, the body's property key 0) -> SceneObject*, logged as its vtable's RVA.
 //  - The mission's first tick: the first sample where MissionMgr (*(EDF+0x20B28A8)) answers "running" (0x1F68B0).
-//    Ticks are counted from there, so two runs line up by scene tick, not by wall clock.
+//    The scene tick is 0 there; ticks are counted from the first tick after it with a live non-static body (the
+//    scene loaded), so two runs line up by scene tick, not by wall clock.
 // Rows (appended to the autopilot log by its own thread, one write per loop):
-//   PHYS start tick=T world=... bodies=N            the mission's first tick
-//   PHYS H t=REL n=.. dyn=.. kf=.. act=.. hash=.. game=SECONDS ms=WALL gaps=G   every kHashEvery ticks: an FNV-1a
+//   PHYS start tick=T world=... bodies=N live=L     the first sampled tick (T: its scene tick)
+//   PHYS H t=REL n=.. dyn=.. kf=.. act=.. hash=.. a=TICK game=SECONDS ms=WALL gaps=G   every kHashEvery ticks: an FNV-1a
 //        hash of every live non-static body's index, motion bits, position and velocity bytes (bit for bit)
 //   PHYS B t=REL i=INDEX f=FLAGS o=OWNER_VT p=x,y,z v=x,y,z   every kRowEvery ticks, each live non-static body
 //   PHYS end ...                                     after the last tick, or when the mission stops running
@@ -172,12 +173,18 @@ void Sample() noexcept {
     const bool running=mgr && reinterpret_cast<MissionRunningFn>(image+kMissionRunning)(mgr);
     const std::uint32_t tick=At<std::uint32_t>(system,kTick);
     if(phase==kWaiting) {
+        // The scene tick is 0 at the mission's start, but the world fills only once the mission's scene is loaded
+        // (RM015 in the background: about 900 ticks later, and the loading's pace is the wall clock's). Ticks are
+        // counted from the first one with a live non-static body.
         if(!running)return;
         const unsigned char* const world=World(system);
         if(!world)return;
+        Pass first;
+        Walk(world,false,0,first);
+        if(!first.ok || !first.live)return;
         phase=kSampling;baseTick=tick;lastTick=tick-1;baseMs=GetTickCount64();
-        QueueLine("PHYS start tick=%u world=%p bodies=%u game=%.4f",tick,world,At<std::uint32_t>(world,kBodyCount),
-                  static_cast<double>(At<float>(system,kGameTime)));
+        QueueLine("PHYS start tick=%u world=%p bodies=%u live=%u game=%.4f",tick,world,At<std::uint32_t>(world,kBodyCount),
+                  first.live,static_cast<double>(At<float>(system,kGameTime)));
     }
     if(tick!=lastTick+1)++gaps;
     lastTick=tick;
@@ -194,8 +201,8 @@ void Sample() noexcept {
     if(!pass.ok){QueueLine("PHYS H t=%u unreadable",rel);return;}
     if(rows && pass.bytes)Queue(rowBuf,pass.bytes);
     if(rel%kHashEvery==0)
-        QueueLine("PHYS H t=%u n=%u dyn=%u kf=%u act=%u hash=%016llX game=%.4f ms=%llu gaps=%u",rel,pass.live,pass.dynamic,
-                  pass.keyframed,pass.active,static_cast<unsigned long long>(pass.hash),
+        QueueLine("PHYS H t=%u n=%u dyn=%u kf=%u act=%u hash=%016llX a=%u game=%.4f ms=%llu gaps=%u",rel,pass.live,pass.dynamic,
+                  pass.keyframed,pass.active,static_cast<unsigned long long>(pass.hash),tick,
                   static_cast<double>(At<float>(system,kGameTime)),GetTickCount64()-baseMs,gaps);
 }
 
