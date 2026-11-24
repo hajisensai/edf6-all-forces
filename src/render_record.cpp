@@ -5,9 +5,10 @@
 // Two features act there, and only one module may redirect a call site (edf::RedirectCall refuses a site that no longer
 // calls the stock function: the second module would be left out, as the first person's culling was when the frame rate
 // was on: "FP installed: ... culling=0 pass=0"). They run in this order:
-//  1. The unlimited frame rate (frame_rate_view.cpp): every frame, the other objects' sample once a tick (their roots as
-//     the last tick left them, frame_rate_objects.cpp); on a frame without ticks, the player's root, then every other
-//     object, moved to the blend between the last two ticks. Bone poses only: the cameras and the models' Umbra boxes
+//  1. The unlimited frame rate (frame_rate_view.cpp RecordStart): it only opens the recording. Its first projection
+//     (0x1197B50, after the recording copied the skeletons' poses at 0x1197950) samples the other objects once a tick
+//     (frame_rate_objects.cpp) and, on a frame without ticks, moves the player's root, then every other object, to the
+//     blend between the last two ticks. Bone poses only: the cameras and the models' Umbra boxes
 //     (model+0x110) are not touched, so the order with 2 changes neither's input.
 //  2. The first person (firstperson.cpp RenderStart): the viewmodel's Umbra boxes around the eye. The eye is the one
 //     this frame's projection draws (inside the render recording, 0x1197B50: on a frame without ticks the frame rate's

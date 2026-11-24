@@ -11,8 +11,9 @@ bool Install() noexcept;
 // Game thread, each frame right before System::Update (frame_rate.cpp SystemUpdateHook): anything the last frame's end
 // fence did not put back is (the blends are undone at the frame end's fence 0x11A305A, once the render thread has drawn
 // the frame, so the next frame's Application::Update and step read the simulation), and this frame's phase is set: `alpha` 1 on a frame that steps (its render comes before its steps), else the part of a
-// tick since the last boundary. Nothing is posed here: a frame without ticks poses at System::Update's render recording
-// (its call 0x1198FA4, after the frame's object deletion 0x1195F20), and only there.
+// tick since the last boundary. Nothing is posed here: a frame without ticks poses inside System::Update's render
+// recording (its call 0x1198FA4, after the frame's object deletion 0x1195F20) at its first projection (0x1197B50, after
+// the recording copied the skeletons' poses), and only there.
 void BeginFrame(std::uint32_t ticks,float alpha) noexcept;
 // Game thread, the FRAMERATE statistics since the last call: viewport projections on frames without ticks drawn blended
 // / left as stepped, and frames without ticks whose player root (fps-7) was moved to the blend / left as stepped because

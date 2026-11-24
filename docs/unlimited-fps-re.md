@@ -263,11 +263,19 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 - 采样：在镜头步进钩子里（tick 结果已定），`h = [cam+0x360]`（vtable 是四个兵种之一才算），徒步取身体实例 `[h+0x900]` 的 pose[0]，
   骑乘（`HumanOnFoot` 为假）取载具实例 `v+0xEE0`（`v = [h+0x1548]`）的 pose[0]。每 tick 一次，只由第一台跟着这个兵的镜头采样。
   身份（h、v 及其控制块 `+kSelfCtrl`、实例指针）变了就清零重来。
-- 写点：n = 0 帧在 `System::Update` 里的渲染录制调用 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）之前，由帧率在
-  `render_record.cpp` 里的回合（`frame_rate_view.cpp` `RecordStart`）写；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
+- 写点：n = 0 帧在 `System::Update` 里的渲染录制 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）**里面**、第一次投影
+  `0x1197B50`（0 号视口）时写（`frame_rate_view.cpp` `ProjectStart`，经 `BeforeProject`）。帧率在 `render_record.cpp` 里的回合
+  （`RecordStart`）只记下「录制开始」。原因见下一条；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
   - `System::Update` `0x1198DA0` 进录制前依次调 `0x1195A80`、`0x1195F20`（整理对象表，会删对象、摘掉更新表里的裸指针）、
     `0x1197680`，再过 `0x1198F84 / 0x1198F8D` 两道门才到 `0x1198FA4`。在 `BeginFrame` 写，`0x1195F20` 删掉的对象就带着写过的
     pose 进了还原表；在录制调用处写，对象表已是本帧最终状态。
+  - 录制在投影、绘制之前先重抄骨骼姿态（H，汇编；实机核对）：`0x1197950` 循环对 System `+0x428` 表（指针，`+0x438` 个数；
+    M001 约 70 项，所有士兵都在）每项调 vtable slot 3。士兵的 slot 3 = `0x59A780` → `0x5750D0`（`add rcx,0x860; jmp 0x6C06A0`）
+    → `0x6C06A0(h+0x860)`：`[+0x31C] & 1` 时调 `0x1100F10(h+0x900)`，把每根骨的骨骼记录 world（`rec+0xB0`，`rec = [inst+0x10]`，
+    步长 0x110）整块抄进画面姿态数组 `inst+0x30`。之后是 `+0x358` 作业（`0x1197A0B`），再进视口循环、投影、绘制。
+    所以在录制调用之前写的 pose 会被这次复制盖掉。#404 时实测（M001、FrameRateCap=1，临时诊断）：每帧写的 12 个 pose 全是士兵，
+    帧末还原时 3600 / 3600 都已等于 `rec+0xB0`，不是我们写的值；玩家根（fps-7）也一样。也就是计数算作插值成功，画出来却是 tick 原样。
+    挪到第一次投影之后：帧末 3600 / 3600 仍是我们写的值。
   - 调用点字节（`0x1198F96` 起）：`41 B0 01`（`mov r8b,1`）、`41 0F B6 96 E9 0C 00 00`（`movzx edx,byte [r14+0xCE9]`）、
     `49 8B CE`（`mov rcx,r14`）、`E8 27 E9 FF FF`（`call 0x11978D0`）；安装前整段比对（`kRecordSig`），`0x1198FA9` 不用 `rax`。
     `0x11978D0` 另有 4 个调用点 `0x93C3F / 0x9D8BA / 0x9DE91 / 0xBB48B`（载入 / 菜单画面），不挂。`frame_rate_sig_audit.py`
@@ -334,9 +342,11 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 
 做法：
 
-- **采样**：在渲染录制调用 `0x1198FA4` 的钩子里（帧率的回合开头、fps-7 写玩家根之前），每帧都调；`+0xCE0` 比上次变了才采，
-  所以每 tick 最多一次。录制在本帧 tick 循环之前，tick 之后的第一次录制看到的就是那个 tick 跑完所有作业后的根，也就是要画的根。
-  一帧跑两个 tick（掉帧追帧）时只采到第二个，前后两次采样不相邻，计数重来。
+- **采样**：在渲染录制的第一次投影（`ProjectStart`，fps-7 写玩家根之前），每帧都调；`+0xCE0` 比上次变了才采，
+  所以每 tick 最多一次。录制在本帧 tick 循环之前，tick 之后的第一次录制看到的就是那个 tick 跑完所有作业后的根；投影时
+  录制已经把骨骼记录抄进画面姿态（§4.3.2 写点），所以采到的就是要画的根。
+  一帧跑两个 tick（掉帧追帧）时只采到第二个：两次采样相隔 `gap` 个 tick（1–`kMostGap` = 3）仍算一对，接着插值，
+  画在 prev→cur 连线上「cur 前一个 tick」往后 alpha 处（`(gap − 1 + alpha) / gap`），剪切阈值乘 gap；相隔更多（采样空闲、卡顿）计数重来。
   - 遍历更新表，只取 `thermal_models.cpp` 认得的家族：人形 / 士兵 / NPC / 他机玩家（HumanBase）、载具（含空车，VehicleBase）、
     虫、巨人、怪兽、UFO 等。`+0x18` 带 4 位（待删）的不采。
   - 采每个对象主模型实例 `model+0xA0` 的 pose[0]。
@@ -349,12 +359,11 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 - **为什么不在镜头步进采样**（#395 原做法）：镜头步进之后 tick 里还有 `0x11BEBE0`（Havok 查询回调）、`+0x358` 作业表（各元素
   vtbl[1]，经 `0x118FC00`）、不暂停时 `0x1193D50`（`[sys+0xCC0]` 各项 slot 0x28，再 `+0x370` 作业）、再一次 `+0x358`，都是运行时
   按 vtable 选的调用。实机 M001、FrameRateCap=1 时，每 5 秒照 tick 画的约 4500–5700 个对象全部是 `pose` 原因（采样后根又被
-  改过），比插值成功的约 1800 个还多。挪到下一帧的录制之后，这些写入都在采样之前。之后若仍有 `pose`，就是录制之前、
-  0-tick 帧里有人写根（新对象登记 `0x1195A80`、`0x1197680` 等），照 tick 画、不用过期的一对插值。
-- **挪后实测（未解决）**：M001、FrameRateCap=1 仍每秒约 1000–1300 个 `pose`（插值成功约 350/s）。临时诊断：全部是
-  Ranger（vtable `EDF+0x17CDF28`，`AssultSoldier`，玩家和友军），一帧约 4–5 个；**从不**出现在采样的那次录制，全部在
-  之后的 0-tick 帧；偏差先是只转、后来带位移。即 0-tick 帧之间有人重写兵种根（不是 tick 作业，也不是我们未还原的写入：
-  帧初还原表为空）。写入方未定，候选是兵种每帧的动画 / 姿态更新；查明前它们照 tick 画。
+  改过），比插值成功的约 1800 个还多。挪到下一帧的录制之后，这些写入都在采样之前。
+- **为什么不在录制调用之前采样**（#404 做法）：录制自己先重抄士兵的骨骼姿态（§4.3.2 写点）。在那里采到的是上一次录制抄的、
+  tick 之前的值，写的也被盖掉。实测（M001、FrameRateCap=1）：每 5 秒约 5400–6300 个 `pose`，全是 Ranger（vtable
+  `EDF+0x17CDF28`，`AssultSoldier`），都出现在采样之后的 0-tick 帧。挪到第一次投影后：`pose` 0，每 5 秒插值成功
+  8300–9200 个（之前约 1780），帧末写入全部还在。之后若再有 `pose`，就是投影之前有人写根，照 tick 画、不用过期的一对插值。
 - **读法（性能）**：采样和写入读的都是游戏此刻持有的活对象（采样时在更新表里的；自己控制块 use 计数 > 0 的；座位 /
   武器架 weak_ptr 活着的），不再逐个问 `Readable`，整段在 `__try` 里。`thermal_models` 为此加了 `EnemyModelsLive` /
   `EnemyModelLive` / `EnemyFamilyLive`：同样的 RTTI 规则和缓存，只有第一次见到的 vtable 才经 `Readable` 解析 RTTI，模型 vtable 的
@@ -369,7 +378,7 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   tick 没采到，这一帧已知对象全部计入 `samples`，再过一个 tick 恢复插值。空闲期间保留已知对象及其 weak 计数（上限是最后一次
   采样的对象数），恢复采样时不在表里的再归还；场景释放后重新从空闲开始。离线用例：`frame_rate_objects_test` 的 `Idle`
   （含每 tick 两次调用、一次录制前两个 tick）。
-- **写**：n = 0 帧，在采样和 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里帧率的回合（见 §4.3.2 写点与调用点所有者）。
+- **写**：n = 0 帧，在采样和 fps-7 之后，同在渲染录制的第一次投影（见 §4.3.2 写点与调用点所有者）。
   - 对象必须还在、vtable 不变、当前绘制的 pose[0] 仍等于 cur（tick 后没人改过）。
   - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 `kCutMove` 10 m 或
     `kCutTurn` 1 rad（57°）的不插值。这两个阈值不是游戏里读出来的：是 fps-8 给玩家根定的「瞬移 / 复活 / 镜头切换」判据
