@@ -1,6 +1,7 @@
 // src/mod_file.h offline: the Mods listing (LoadModFilesIn) of a made-up game directory under %TEMP%, and ModFileIn
 // on it. Letter case (files and directory names), the sort agreeing with the search (names whose case-sensitive and
-// case-insensitive orders differ: '_' sits between the upper and the lower letters), a subdirectory's name and the
+// case-insensitive orders differ: '_' sits between the upper and the lower letters, and after all of them once the
+// case-insensitive compare has made both names upper case), a subdirectory's name and the
 // files inside it, the directory itself ("", ".", ".."), and directories that are not listed.
 #include "../src/mod_file.h"
 #include <cstdio>
@@ -29,7 +30,8 @@ int main() {
     const std::wstring mods=game+L"\\Mods",object=mods+L"\\OBJECT",weapon=mods+L"\\Weapon",map=mods+L"\\MAP";
     for(const auto& d:{game,mods,object,weapon,map,object+L"\\Sub"})CreateDirectoryW(d.c_str(),nullptr);
 
-    // Ordinal case-sensitive order: "AB" < "Zeta" < "_x" < "a_b" < "b"; case-insensitive: "_x" < "a_b" < "AB" < "b" < "Zeta".
+    // Ordinal case-sensitive order: "AB" < "Zeta" < "_x" < "a_b" < "b"; case-insensitive (CompareStringOrdinal with
+    // bIgnoreCase, which compares the upper-cased names): "AB" < "a_b" < "b" < "Zeta" < "_x".
     // A sort by one and a search by the other would miss some of them.
     const wchar_t* objectFiles[]={L"a_b.sgo",L"AB.sgo",L"_x.sgo",L"b.sgo",L"Zeta.sgo",L"EDF6VC_Mixed.SGO"};
     for(const wchar_t* f:objectFiles)Touch(object+L"\\"+f);
