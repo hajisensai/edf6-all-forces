@@ -371,6 +371,29 @@ Cost Run(int n) {
     frameobjects::Restore();
     return cost;
 }
+// The player's weapons are fps-7's: it writes their models between the sample and Pose (frame_rate_view.cpp PoseRoot),
+// so a listed weapon is neither written again nor counted (as stepped for `pose`, as it was before: M001).
+void PlayerWeapons() {
+    NewScene();
+    const Obj you=MakeObj(thermal::Family::kHuman,2,image+kSoldierVts[0]);
+    const Obj gun=MakeObj(thermal::Family::kOther),other=MakeObj(thermal::Family::kOther);
+    unsigned char** guns=reinterpret_cast<unsigned char**>(Block(16));
+    guns[0]=gun.mem;
+    Put<unsigned char**>(you.mem,kWeapons,guns);
+    Put<std::int32_t>(you.mem,kWeaponCount,1);
+    List({&you,&gun,&other});
+    Steps({&you,&gun,&other},0,1);
+    frameobjects::Sample(true);
+    SetX(gun.model.pose,0.5f);   // fps-7's write (its D on the player's weapons)
+    frameobjects::Pose(0.5f,you.mem,nullptr,nullptr);
+    const auto c=Take();
+    Check(c.posed==1 && !c.AsStepped() && NearX(gun.model.pose,0.5f) && NearX(other.model.pose,0.5f),
+          "player's weapons: left to fps-7 (not written again, not counted); another object blended");
+    frameobjects::Restore();
+    Put<std::int32_t>(you.mem,kWeaponCount,0);
+    frameobjects::SceneOver();
+    Take();
+}
 void Costs() {
     const Cost few=Run(20),many=Run(2000);
     std::printf("Readable asks: sample %llu (20 objects) / %llu (2000), poses %llu / %llu; sample of 2000 %.3f ms\n",
@@ -471,6 +494,7 @@ int main() {
     Reasons();
     Forgetting();
     RidersAndWeapons();
+    PlayerWeapons();
     Costs();
     Idle();
     std::printf("frame_rate_objects: %d checks, %d failed\n",checks,failures);

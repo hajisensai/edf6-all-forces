@@ -539,6 +539,21 @@ void PoseAll(float alpha,const void* rootHuman,const void* rootVehicle,const flo
             b.why=Left::kFault;
         }
     }
+    // The player's weapons: fps-7 wrote their models (frame_rate_view.cpp PoseRoot, [h+0x1950] +0xF30) before this, so
+    // a listed weapon's root is not cur any more: fps-7's, left to it like the player (not counted). M001 at
+    // FrameRateCap=1: about 4 objects a frame of 10 drawn as stepped for `pose` were these.
+    const unsigned char* rootWeapons[kMostWeapons];
+    int rootWeaponCount=0;
+    __try {
+        const auto* const h=static_cast<const unsigned char*>(rootHuman);
+        if(IsSoldier(h))
+            for(std::uint64_t i=0;i<static_cast<std::uint64_t>(kMostWeapons);++i)
+                if(const unsigned char* const w=SoldierWeapon(h,i))rootWeapons[rootWeaponCount++]=w;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    auto rootWeapon=[&](const unsigned char* obj){
+        for(int k=0;k<rootWeaponCount;++k)if(rootWeapons[k]==obj)return true;
+        return false;
+    };
     // The riders first: every vehicle's seats (the player's with fps-7's D) claim theirs.
     riders.Clear();
     for(std::size_t i=0;i<bodies.size();++i) {
@@ -568,7 +583,8 @@ void PoseAll(float alpha,const void* rootHuman,const void* rootVehicle,const flo
             }
             continue;
         }
-        if(b.object==rootHuman || b.object==rootVehicle || riders.Find(b.object)>=0)continue;   // fps-7's, a rider
+        if(b.object==rootHuman || b.object==rootVehicle || rootWeapon(b.object) || riders.Find(b.object)>=0)
+            continue;   // fps-7's, a rider
         if(!b.fresh || (!b.moving && !b.still)) {
             Leave(b.why);
             continue;
