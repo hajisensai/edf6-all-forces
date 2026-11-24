@@ -38,7 +38,8 @@ def call(at: int, target: int) -> None:
 
 checked = 0
 for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPresentCall', 'kPresentCmd'),
-                     ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve')):
+                     ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
+                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette')):
     call(value(site), value(target))
     checked += 1
 for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh')):
@@ -50,6 +51,11 @@ assert binary[0x11A308E:0x11A3091] == bytes.fromhex('488d0d')
 assert 0x11A3095 + struct.unpack_from('<i', binary, 0x11A3091)[0] == value('kRenderer')
 # The render thread's Present: call qword ptr [rax+0x40] (slot 8) at 0x1118B45, rax the swap chain's vtable.
 assert binary[0x1118B45:0x1118B48] == bytes.fromhex('ff5040')
+# The occlusion query read: its wait flag is the caller's byte at [rsp+0x20] (mov [rsp+0x20], al at 0x11E4230), and it
+# reads the query with GetData (call qword ptr [rax+0xE8]) at 0x1631860, flags 0 (mov dword ptr [rsp+0x20], 0).
+assert binary[0x11E4230:0x11E4234] == bytes.fromhex('88442420')
+assert binary[0x1631860:0x1631866] == bytes.fromhex('ff90e8000000')
+assert binary[0x163184C:0x1631854] == bytes.fromhex('c744242000000000')
 # System::update's steps a frame: the whole ticks due clamped (cmp ebx, ebp; then cmova) right after the tick wait.
 assert binary[0x11A2F76:0x11A2F78] == bytes.fromhex('3bdd')
 print(f'perf probe anchors ok ({checked} call sites)')

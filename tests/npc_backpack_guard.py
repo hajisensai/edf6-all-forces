@@ -135,7 +135,7 @@ def main() -> int:
     checks += 1
     if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')
-    arms = body(npcai, 'Arms ArmsOf(const unsigned char* h) noexcept')
+    arms = body(npcai, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept')
     checks += 1
     if 'NpcPackIndex(h,i)' not in arms:
         fail('ArmsOf: a backpack weapon counted among the arms it picks and fires')

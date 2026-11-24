@@ -213,6 +213,7 @@ int main() {
     config.npcEvade=false;config.npcFireLane=false;config.npcGuardFormation=10;sessionOn=true;host=true;
     Put<float>(weapon,kArmReach,100);Put<float>(weapon,kArmDamage,10);Put<int>(weapon,kWeaponAmmo,100);
     for(unsigned i=0;i<4;++i)Unit(i,-900-static_cast<float>(i));
+    Check(deployments.Allocate("fixture deployments"),"the fixture deployment rows exist (the spawn path allocates them first)");
     auto& d=deployments[0];d.used=true;d.assigned=true;d.networked=true;d.id=7001;d.born=npcFixtureMs;
     d.plan.catalogId=21;d.plan.count=4;
     for(unsigned i=0;i<4;++i){d.objects[i]=ObjRef::Of(units[i]);d.plan.units[i].resourceId=i ? kSoldier : kLeader;
@@ -278,7 +279,8 @@ int main() {
     Tick(true,false);
     Check(soldier->target.obj==other && q->routeActive,"nearby combat retains its target during route updates");
     const auto* battlePos=Pos(units[0]);const float battleEye[3]={battlePos[0],battlePos[1]+kEye,battlePos[2]};
-    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0]),nullptr,battleEye,battlePos,q,npcFixtureMs);
+    ArmsSeen battleArms{};
+    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0],battleArms),nullptr,battleEye,battlePos,q,npcFixtureMs);
     Check(std::strcmp(battle.move,"combat spot")==0,"actual Drive selects combat movement ahead of the support route");
     world.enemies=0;wall=true;
     for(int i=0;i<12;++i)Tick(true,false);

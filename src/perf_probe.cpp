@@ -30,6 +30,12 @@ constexpr unsigned kSubmitCalls[]={0x11E255C,0x11E25F9,0x11E3A3F,0x11E4029,0x11E
 constexpr unsigned kSubmit=0x11E1630;
 constexpr unsigned kMeshCalls[]={0x1103FD1,0x6C30CB};
 constexpr unsigned kMesh=0x10FF4E0;
+// Render thread (G line, gpu-5 / gpu-6). Umbra's occlusion query read 0x1631790 (rcx renderer, rdx query, r9 result,
+// [rsp+0x20] wait byte; GetData(query,&r,8,flags 0) at 0x1631860, al = the result is in), its one caller the
+// Commander's query loop at 0x11E4244. The skin palette 0x11009A0 (inverse bind x pose, then UpdateSubresource of the
+// whole buffer), called from the LOD draw 0x1104100 once a pass at 0x1104131.
+constexpr unsigned kQueryCall=0x11E4244,kQuery=0x1631790;
+constexpr unsigned kPaletteCall=0x1104131,kPalette=0x11009A0;
 // The renderer (lea 0x2136FF0, the Present command's rcx) and its swap chain: the render thread's Present command
 // 0x1118AF0 calls [[renderer+0x90]]+0x40 (IDXGISwapChain::Present, slot 8) at 0x1118B45.
 constexpr std::size_t kRenderer=0x2136FF0,kSwapChain=0x90;
@@ -46,6 +52,7 @@ using PassFn=void*(__fastcall*)(void*,void*,void*,void*);   // all four register
 using SubmitFn=void(__fastcall*)(void*,void*,int);
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
 using PresentFn=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
+using QueryFn=bool(__fastcall*)(void*,void*,void*,void*,std::uint8_t);
 
 InputFn nextInput=nullptr;
 UpdateFn nextUpdate=nullptr;
@@ -54,8 +61,11 @@ PassFn nextResolve=nullptr,nextFence=nullptr,nextPresentCmd=nullptr;
 SubmitFn nextSubmit[std::size(kSubmitCalls)]={};
 MeshFn nextMesh[std::size(kMeshCalls)]={};
 PresentFn nextPresent=nullptr;
+QueryFn nextQuery=nullptr;
+PassFn nextPalette=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
+std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 
 double tickMs=0.0;   // ms a QPC tick
 LONGLONG Qpc() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
@@ -100,6 +110,9 @@ std::atomic<long long> presentTicks{0},presentWorst{0},gapTicks{0},gapWorst{0},o
 std::atomic<unsigned> paired{0};
 LONGLONG lastPresent=0;   // render thread only
 std::atomic<unsigned> submits[kPasses]={},meshes{0};
+// The occlusion query reads (calls, not in yet, the waiting ones and their time) and the skin palettes (calls, time).
+std::atomic<unsigned> queries{0},queriesPending{0},queryWaits{0},palettes{0};
+std::atomic<long long> queryTicks{0},queryWaitTicks{0},queryWorst{0},paletteTicks{0};
 
 void Max(std::atomic<long long>& m,long long v) noexcept {
     long long was=m.load(std::memory_order_relaxed);
@@ -146,6 +159,7 @@ void TryPresentHook() noexcept;
 
 void __fastcall InputHook(void* input) {
     const LONGLONG now=Qpc();
+    gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
     if(cur.open)CloseFrame(now);
     const SceneStep s=SceneStepNow();
     cur=Frame{};cur.begin=now;cur.scene=s.scene;cur.step=s.count;cur.open=true;
@@ -197,6 +211,24 @@ template<unsigned I> void __fastcall SubmitAt(void* system,void* object,int pass
 template<unsigned I> void __fastcall MeshAt(void* mesh,void* ctx,int pass,std::uint8_t flag,void* cache) {
     meshes.fetch_add(1,std::memory_order_relaxed);
     nextMesh[I](mesh,ctx,pass,flag,cache);
+}
+
+bool __fastcall QueryHook(void* renderer,void* query,void* c,void* result,std::uint8_t wait) {
+    const LONGLONG t=Qpc();
+    const bool in=nextQuery(renderer,query,c,result,wait);
+    const LONGLONG d=Qpc()-t;
+    queries.fetch_add(1,std::memory_order_relaxed);
+    if(!in)queriesPending.fetch_add(1,std::memory_order_relaxed);
+    queryTicks.fetch_add(d,std::memory_order_relaxed);Max(queryWorst,d);
+    if(wait){queryWaits.fetch_add(1,std::memory_order_relaxed);queryWaitTicks.fetch_add(d,std::memory_order_relaxed);}
+    return in;
+}
+void* __fastcall PaletteHook(void* a,void* b,void* c,void* d) {
+    const LONGLONG t=Qpc();
+    void* const r=nextPalette(a,b,c,d);
+    paletteTicks.fetch_add(Qpc()-t,std::memory_order_relaxed);
+    palettes.fetch_add(1,std::memory_order_relaxed);
+    return r;
 }
 
 // --- The render thread's Present ---
@@ -309,7 +341,13 @@ void Install() noexcept {
     }
     Log("HOOK perf split=%d submits=%u/%zu meshes=%u/%zu (PerfProbe=1: the frame's parts, the draw counts)",whole,subs,
         std::size(kSubmitCalls),mesh,std::size(kMeshCalls));
+    const bool query=Chain(kQueryCall,kQuery,reinterpret_cast<void*>(&QueryHook),reinterpret_cast<void**>(&nextQuery));
+    const bool palette=Chain(kPaletteCall,kPalette,reinterpret_cast<void*>(&PaletteHook),reinterpret_cast<void**>(&nextPalette));
+    Log("HOOK perf queries=%d palettes=%d (PerfProbe=1: the occlusion query reads, the skin palettes)",query,palette);
 }
+
+bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
+DWORD GameThread() noexcept { return gameThread.load(std::memory_order_relaxed); }
 
 Frames TakeFrames() noexcept {
     const Frames f{base.frames,base.steps,base.over20,base.over33,base.sum,base.worst};
@@ -347,6 +385,17 @@ void Report(unsigned frames) noexcept {
             "unpaired; submits a frame by pass %.0f %.0f %.0f %.0f %.0f, other %.0f; mesh draws a frame %.0f",p,pt/p,pw,
             p>1 ? gt/(p-1) : 0.0,gw,pr ? ot/pr : 0.0,pr ? st/pr : 0.0,sw,u,sub[0]/f,sub[1]/f,sub[2]/f,sub[3]/f,sub[4]/f,
             sub[5]/f,me/f);
+    }
+    const unsigned q=queries.exchange(0,std::memory_order_relaxed),qp=queriesPending.exchange(0,std::memory_order_relaxed);
+    const unsigned qw=queryWaits.exchange(0,std::memory_order_relaxed),pa=palettes.exchange(0,std::memory_order_relaxed);
+    const double qt=static_cast<double>(queryTicks.exchange(0,std::memory_order_relaxed))*tickMs;
+    const double qwt=static_cast<double>(queryWaitTicks.exchange(0,std::memory_order_relaxed))*tickMs;
+    const double qx=static_cast<double>(queryWorst.exchange(0,std::memory_order_relaxed))*tickMs;
+    const double pat=static_cast<double>(paletteTicks.exchange(0,std::memory_order_relaxed))*tickMs;
+    if(Cfg().debug && (q || pa)) {
+        const double f=frames ? frames : 1.0;
+        Log("PERF GPU a frame: occlusion query reads %.1f (%.1f not in yet, %.1f waiting), %.3f ms (waiting %.3f, worst "
+            "call %.2f); skin palettes %.1f, %.3f ms",q/f,qp/f,qw/f,qt/f,qwt/f,qx,pa/f,pat/f);
     }
     char out[700],in[700];
     const int no=NetRows(netcount::out,"head 0x%08X",out,sizeof(out)),ni=NetRows(netcount::in,"head 0x%08X",in,sizeof(in));
