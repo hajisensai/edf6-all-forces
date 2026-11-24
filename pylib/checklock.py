@@ -93,3 +93,31 @@ def status() -> str:
         return f"held by {who.get('label', '?')} in {who.get('cwd', '?')} (pid {who.get('pid', '?')})"
     finally:
         os.close(fd)
+
+
+class Busy(Exception):
+    """This worktree's check is already queued or running: {'pid', 'root', 'since'} of the one that has it."""
+
+
+@contextlib.contextmanager
+def worktree_once(root: str) -> Iterator[None]:
+    """One check.py per worktree (2026-11-24: a session that started a second check of the same tree while the first
+    still waited in the queue doubled the queue): raises Busy at once, without waiting, when another holds it."""
+    import hashlib
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    key = hashlib.sha1(os.path.normcase(os.path.abspath(root)).encode('utf-8')).hexdigest()[:16]
+    path = os.path.join(LOCK_DIR, f'check-{key}.lock')
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    try:
+        if not _try_lock(fd):
+            try:
+                with open(path + '.json', encoding='utf-8') as h:
+                    who = json.load(h)
+            except (OSError, ValueError):
+                who = {}
+            raise Busy(who)
+        with open(path + '.json', 'w', encoding='utf-8') as h:
+            json.dump({'root': os.path.abspath(root), 'pid': os.getpid(), 'since': time.time()}, h)
+        yield
+    finally:
+        os.close(fd)

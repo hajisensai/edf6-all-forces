@@ -1,9 +1,15 @@
 """The offline checks CI runs (.github/workflows/build.yml), in one command, gentle on the machine it runs on.
 
-  python tools/check.py [-j N] [--no-build] [--no-ctest] [--no-selftest] [--no-gen] [--normal-priority]
+  python tools/check.py [--full | --dry-run] [-j N] [--no-build] [--no-ctest] [--no-selftest] [--no-gen]
+                        [--normal-priority]
 
   build.cmd + offline_checks, then side by side: ctest, tools/selftest.py, py_compile and the generated files' checks.
   -j N: the processes the tests take in all (default: one a logical core), shared between ctest and selftest.
+  ctest and selftest run only the tests this branch's changes select (tools/test_domains.py): the files changed since
+  the merge-base with origin/main, uncommitted and untracked ones included. A change to the build, common/, pylib's
+  shared base, CI, check.py or the domain table, or no merge-base, runs every test. The build and the gen stage
+  always run whole. --full: every test (CI always runs every test). --dry-run: say what would run, run nothing.
+  One check per worktree: a second one while the first is queued or running exits 3 at once.
 
 Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡」):
 - Below-normal priority (Windows): this process and everything it starts (the compiler, ctest, every test, selftest's
@@ -12,7 +18,11 @@ Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡
   ctest -j 8 + selftest -j 8 at once, 16 cores asked for 32+ processes and each run took twice as long.
 - ctest and selftest side by side instead of one after the other: selftest's wall time is its longest test, most of
   its workers idle at its end, while ctest still had work queued; together they keep the cores busy till both end.
-Each part's output goes to build/check-<part>.log; the failures' tails are printed at the end. Exit 1 on a failure.
+- Only the tests a change can affect (2026-11-24: 「类似的测试优化都要做。太慢了，性能浪费很严重」): a src/-only branch
+  built every model for 10+ minutes in ctest and selftest. Each test's domains (tests/test_labels.json, its ctest
+  LABELS) come from what its code imports and reads; a changed file selects the tests labelled with its domain.
+Each part's output goes to build/check-<part>.log; the failures' tails are printed at the end. Exit 1 on a failure,
+3 when this worktree's check is already queued or running.
 """
 from __future__ import annotations
 
@@ -29,6 +39,9 @@ BUILD = os.path.join(ROOT, 'build')
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import checklock  # noqa: E402
 import gamedir  # noqa: E402
+import test_domains  # noqa: E402  (tools/, this script's folder)
+
+BUSY = 3   # exit code: this worktree's check is already queued or running
 
 # (a generator's command line, the files it rewrites that must then be unchanged in git; None: it checks itself)
 GENERATED = [
@@ -43,6 +56,7 @@ GENERATED = [
     (['tools/gen_mech_parts.py', '--check'], None),
     (['tools/gen_worldmap.py', '--check'], None),
     (['tools/doc_links_check.py'], None),   # docs <-> code paths (eng-12)
+    (['tools/test_domains.py', '--check'], None),   # every test in a domain, the labels current
 ]
 
 
@@ -96,6 +110,71 @@ def ctest_outcomes(log: str) -> dict[str, str]:
     return out
 
 
+def _git(*args: str) -> tuple[int, str]:
+    r = subprocess.run(['git', '-c', 'core.quotepath=off', *args], cwd=ROOT, capture_output=True, text=True,
+                       encoding='utf-8', errors='replace')
+    return r.returncode, r.stdout
+
+
+def changed_files() -> tuple[list[str], str | None]:
+    """This branch's changes: the files changed since the merge-base with origin/main (committed or not, both sides
+    of a rename) and the untracked ones; (files, None), or ([], why) when there is no base to compare with."""
+    code, base = _git('merge-base', 'HEAD', 'origin/main')
+    if code or not base.strip():
+        return [], 'no merge-base with origin/main (git fetch origin?)'
+    base = base.strip()
+    code, diff = _git('diff', '--name-only', '--no-renames', base)
+    code2, new = _git('ls-files', '--others', '--exclude-standard')
+    if code or code2:
+        return [], f'git diff against the merge-base {base[:10]} failed'
+    return sorted({f for f in (diff + new).splitlines() if f}), None
+
+
+def plan(argv: list[str]) -> dict:
+    """The tests to run: test_domains.select's answer for this branch's changes, and what it rests on."""
+    files, why = changed_files()
+    try:
+        labels = test_domains.load()
+    except (OSError, ValueError) as e:
+        labels, why = {}, why or f'{test_domains.LABELS_JSON} unreadable ({e})'
+    if '--full' in argv:
+        why = '--full'
+    sel = test_domains.select(files, labels) if labels else {'full': None, 'domains': {}, 'scripts': []}
+    sel['full'] = why or sel['full']
+    sel['files'] = files
+    sel['labels'] = labels
+    return sel
+
+
+def say_plan(sel: dict) -> None:
+    labels = sel['labels']
+    if sel['full']:
+        print(f'check.py: every test ({sel["full"]})', flush=True)
+        return
+    n = len(sel['files'])
+    print(f'check.py: the tests {n} changed file{"s" * (n != 1)} select (tools/test_domains.py; --full for all):')
+    for d, files in sorted(sel['domains'].items()):
+        print(f'  run   {d:16} {", ".join(files[:3])}{f" (+{len(files) - 3})" if len(files) > 3 else ""}')
+    if sel['scripts']:
+        print(f'  run   the tests in   {", ".join(sel["scripts"][:4])}{" ..." if len(sel["scripts"]) > 4 else ""}')
+    skipped = [d for d in labels.get('domains', {}) if d not in sel['domains'] and d != test_domains.SCRIPTS]
+    print(f'  skip  {", ".join(skipped)} (no change)')
+    for part in ('ctest', 'selftest'):
+        print(f'  {part}: {len(sel[part])} of {len(labels.get(part, {}))} tests')
+    sys.stdout.flush()
+
+
+def skip_file(sel: dict, part: str) -> str | None:
+    """The file naming the tests of `part` no change selects (a test the labels do not know runs); None: all run."""
+    if sel['full']:
+        return None
+    path = os.path.join(BUILD, f'check-{part}-skip.txt')
+    chosen = set(sel[part])
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(''.join(f'{n}\n' for n in sel['labels'].get(part, {}) if n not in chosen))
+    return path
+
+
 def run(cmd: list[str] | str, log: str, env: dict | None = None, shell: bool = False) -> tuple[int, float]:
     started = time.perf_counter()
     with open(log, 'w', encoding='utf-8', errors='replace') as out:
@@ -135,13 +214,32 @@ def gen_checks(log: str) -> tuple[int, float]:
 
 
 def main(argv: list[str]) -> int:
-    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority'}
+    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run'}
     if any(a.startswith('-') and a not in known for a in argv):
         print(__doc__)
         return 0 if {'-h', '--help'} & set(argv) else 2
     jobs = os.cpu_count() or 8
     if '-j' in argv:
         jobs = max(2, int(argv[argv.index('-j') + 1]))
+    sel = plan(argv)
+    if '--dry-run' in argv:
+        say_plan(sel)
+        for part in ('ctest', 'selftest'):
+            if not sel['full']:
+                print(f'{part}: ' + ' '.join(sel[part]))
+        return 0
+    try:
+        with checklock.worktree_once(ROOT):
+            return _main(argv, jobs, sel)
+    except checklock.Busy as e:
+        who = e.args[0] if e.args else {}
+        since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
+        print(f'check.py: 已在排队/运行（pid {who.get("pid", "?")}，{since} 起）: {ROOT} 的检查只跑一套，等它的结果'
+              f'（exit {BUSY}）', flush=True)
+        return BUSY
+
+
+def _main(argv: list[str], jobs: int, sel: dict) -> int:
     if '--normal-priority' not in argv:
         checklock.below_normal()
     os.makedirs(BUILD, exist_ok=True)
@@ -156,6 +254,7 @@ def main(argv: list[str]) -> int:
               f'check slot); logs build/check-*.log', flush=True)
         defines, game = game_defines()
         print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
+        say_plan(sel)
         if '--no-build' not in argv:
             cmd = f'call "{os.path.join(ROOT, "build.cmd")}" {" ".join(defines)} && call "{os.path.join(ROOT, "tools", "msvc-x64-env.cmd")}" ' \
                   f'&& cmake --build "{BUILD}" --target offline_checks'
@@ -169,11 +268,15 @@ def main(argv: list[str]) -> int:
         st_jobs = max(1, min(8, jobs // 2))
         parts = []
         if '--no-ctest' not in argv:
+            ct_skip = skip_file(sel, 'ctest')
             parts.append(('ctest', lambda: run(['ctest', '--test-dir', BUILD, '--output-on-failure',
-                                                '-j', str(max(1, jobs - st_jobs))], logs['ctest'], env)))
+                                                '-j', str(max(1, jobs - st_jobs)),
+                                                *(['--exclude-from-file', ct_skip] if ct_skip else [])],
+                                               logs['ctest'], env)))
         if '--no-selftest' not in argv:
-            parts.append(('selftest', lambda: run([sys.executable, 'tools/selftest.py', '-j', str(st_jobs)],
-                                                  logs['selftest'], env)))
+            st_skip = skip_file(sel, 'selftest')
+            parts.append(('selftest', lambda: run([sys.executable, 'tools/selftest.py', '-j', str(st_jobs),
+                                                   *(['--skip', st_skip] if st_skip else [])], logs['selftest'], env)))
         if '--no-gen' not in argv:
             parts.append(('gen', lambda: gen_checks(logs['gen'])))
 
@@ -192,8 +295,11 @@ def main(argv: list[str]) -> int:
         ran = sorted(n for n in native if outcome.get(n) not in (None, 'Skipped'))
         skipped = sorted(n for n in native if outcome.get(n) == 'Skipped')
         print(f'check.py: native audits run {len(ran)}, skipped {len(skipped)}'
-              f'{"" if game else " (no game: every native audit skips)"}')
-        if game and skipped:   # the game is here: a skip is an audit that lost its input, not a pass
+              f'{"" if game else " (no game: every native audit skips)"}'
+              f'{"" if sel["full"] else f", not selected {len(native) - len(ran) - len(skipped)}"}')
+        # the game is here: a selected audit that skips lost its input, it did not pass (the ones no change selected
+        # did not run at all)
+        if game and skipped:
             print('  skipped with the game present: ' + ', '.join(skipped))
             failed.append('native-skips')
     for k in failed:

@@ -3329,8 +3329,8 @@ SPAWN_CATALOG_SHARDS = 4
 def spawn_catalog_archives(shard: int) -> None:
     """src/fsbudget.cpp adds one CriFsLoader per model archive the catalog's whole preload can hold open
     (src/spawn_catalog_archives.h, from testrange/catalog_archives.json; docs/cri-fs-loaders-re.md): the header is the
-    record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
-    now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
+    record's count (spawn_catalog_archives_counted), the record has every row and no other, and (with the game) the
+    record is what the rows' SGOs name now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
     one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
     packed by their measured seconds (testrange/catalog_row_seconds.json, pylib/testshard.py: dealt round they
     took 357/348/175/119 s, 2026-11-24), each row in one shard, so no kind is built in two."""
@@ -3338,11 +3338,6 @@ def spawn_catalog_archives(shard: int) -> None:
     import catalog
     import gen_spawn_catalog as g
     rec = g.recorded()
-    if shard == 0:
-        union = g.archive_union(rec)
-        assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
-        assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
-        assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
     import rootcpk
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
@@ -3357,6 +3352,18 @@ def spawn_catalog_archives(shard: int) -> None:
         if now != rec[r.sgo]:
             stale.append(r.sgo)
     assert not stale, f'testrange/catalog_archives.json is stale for {stale[:5]}: python tools/gen_spawn_catalog.py --archives'
+
+
+@test
+def spawn_catalog_archives_counted() -> None:
+    """The plugin's side of spawn_catalog_archives: the header is the record's count and fsbudget.cpp adds that many
+    loaders (a test of its own, so a change to the plugin's C++ does not select the shards' model builds)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen_spawn_catalog as g
+    union = g.archive_union(g.recorded())
+    assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
+    assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
+    assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
 
 
 for _shard in range(SPAWN_CATALOG_SHARDS):
@@ -16017,7 +16024,13 @@ def _main(argv: list[str]) -> int:
     import time
     jobs = _jobs(argv)
     costs = _costs()
-    order = sorted(range(len(TESTS)), key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
+    chosen = range(len(TESTS))
+    if '--skip' in argv:   # tools/check.py: the tests no change selects (tools/test_domains.py), one name a line;
+        # a test the list does not name (a new one) runs
+        with open(argv[argv.index('--skip') + 1], encoding='utf-8') as f:
+            skip = {line.strip() for line in f if line.strip()}
+        chosen = [i for i in range(len(TESTS)) if TESTS[i].__name__ not in skip]
+    order = sorted(chosen, key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
     failed = 0
     took: dict[str, float] = {}
     started = time.perf_counter()
@@ -16030,7 +16043,7 @@ def _main(argv: list[str]) -> int:
         print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
         failed += 0 if ok else 1
     if jobs == 1:
-        for i in range(len(TESTS)):
+        for i in chosen:
             report(*_run_one(i))
     else:
         import multiprocessing
@@ -16044,7 +16057,7 @@ def _main(argv: list[str]) -> int:
         with contextlib.suppress(OSError):
             with open(COST_FILE, 'w', encoding='utf-8') as f:
                 json.dump({**costs, **took}, f, indent=0, sort_keys=True)
-    print(f'{len(TESTS) - failed}/{len(TESTS)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
+    print(f'{len(order) - failed}/{len(order)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
     return 1 if failed else 0
 
 
