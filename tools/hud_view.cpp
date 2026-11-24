@@ -836,13 +836,10 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     }
     if(sceneSquadFoldOn!=(summary && !pad)){++textFailed;std::puts("FAIL map squad summary row clickable");}
     if(online && !pad) {
+        // net-6 (2026-11-24): every peer is of this build (the room protocol), so the squad tools are no longer hidden
+        // online; only the basic boarding command is held here.
         bool board=false;
-        for(int i=0;i<sceneButtons;++i) {
-            board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
-            if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation)) {
-                ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
-            }
-        }
+        for(int i=0;i<sceneButtons;++i)board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
         if(!board){++textFailed;std::puts("FAIL online basic boarding command was hidden");}
     }
     if(vehicleOnly) {
