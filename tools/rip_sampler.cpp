@@ -1,8 +1,10 @@
 // rip_sampler: an out-of-process sampling profiler for the running game (no admin rights, no ETW).
 // Every tick each thread that used CPU since the last tick is suspended, its stack walked (dbghelp
 // StackWalk64 over the target's .pdata), and resumed. Output: one line per sample,
-//   T <tid> <cpu_ms_delta> <module>+<hex offset> <module>+<hex offset> ...
-// plus M lines with the process memory counters every second.
+//   T <tid> <cpu_ms_delta> @<qpc> <module>+<hex offset> <module>+<hex offset> ...
+// (qpc: QueryPerformanceCounter while the thread is held, the machine's one clock: the plugin's SLOW FRAME lines carry
+// the same, so tools/perf_report.py takes the samples inside a slow frame), the counter's frequency once as
+// `Q <hz>`, plus M lines with the process memory counters every second.
 //
 //   rip_sampler.exe <pid> <seconds> <interval_ms> <out.txt>
 // Modules are listed once at the start (attach after the game has loaded them): one loaded later shows as ?+addr.
@@ -75,6 +77,8 @@ int main(int argc, char** argv) {
     if (!SymInitialize(proc, nullptr, TRUE)) { std::fprintf(stderr, "SymInitialize %lu\n", GetLastError()); return 5; }
     std::vector<Mod> mods = Modules(proc);
     for (const Mod& m : mods) std::fprintf(out, "D %s %llx %llx\n", m.name.c_str(), m.base, m.end - m.base);
+    LARGE_INTEGER hz; QueryPerformanceFrequency(&hz);
+    std::fprintf(out, "Q %lld\n", hz.QuadPart);
 
     std::map<DWORD, std::pair<HANDLE, std::uint64_t>> threads;
     timeBeginPeriod(1);
@@ -112,11 +116,12 @@ int main(int argc, char** argv) {
             if (SuspendThread(th.first) == static_cast<DWORD>(-1)) continue;
             CONTEXT ctx{}; ctx.ContextFlags = CONTEXT_FULL;
             if (GetThreadContext(th.first, &ctx)) {
+                LARGE_INTEGER at; QueryPerformanceCounter(&at);
                 STACKFRAME64 f{};
                 f.AddrPC.Offset = ctx.Rip; f.AddrPC.Mode = AddrModeFlat;
                 f.AddrFrame.Offset = ctx.Rbp; f.AddrFrame.Mode = AddrModeFlat;
                 f.AddrStack.Offset = ctx.Rsp; f.AddrStack.Mode = AddrModeFlat;
-                std::fprintf(out, "T %lu %llu", tid, delta / 10000);
+                std::fprintf(out, "T %lu %llu @%lld", tid, delta / 10000, at.QuadPart);
                 for (int depth = 0; depth < 48; ++depth) {
                     if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, proc, th.first, &f, &ctx, nullptr,
                                      SymFunctionTableAccess64, SymGetModuleBase64, nullptr) || !f.AddrPC.Offset) break;
