@@ -278,12 +278,13 @@ void CameraCuts() {
     Project(cam);Project(cam2);
     Check(Near(World(cam),b.m) && Near(World(cam2),c2.m),"cut: nullptr cuts every camera");
     Fence();
-    // Only the named camera.
-    BeginTick(1);Queue(cam,c2);Queue(cam2,d);Step(cam);Step(cam2);Fence();
+    // Only the named camera (one step first: the cut's own next step takes prev from its bytes).
+    BeginTick(1);Queue(cam,c2);Queue(cam2,c2);Step(cam);Step(cam2);Fence();
+    BeginTick(1);Queue(cam,d);Queue(cam2,d);Step(cam);Step(cam2);Fence();
     FrameRateCameraCut(cam2);
     framerateview::BeginFrame(0,0.5f);
     Project(cam);Project(cam2);
-    Check(Near(World(cam),Pose(0,3,0,0).m) && Near(World(cam2),d.m),"cut: a named camera cuts that camera only");
+    Check(Near(World(cam),Pose(0,5,0,0).m) && Near(World(cam2),d.m),"cut: a named camera cuts that camera only");
     Fence();
 
     // age > 1: a camera that stopped stepping takes prev from its bytes at its next step.
@@ -427,6 +428,18 @@ void Roots() {
     c=Counted();
     Check(c.rootsLeft==2 && c.roots==0 && c.rootsRefused==0,"root: both counted as left, not refused");
     Put<const void*>(human,kSelfCtrl,ctrlA);
+
+    // Two instances (the weapon's and the body's) drawing from one pose array: D goes on once.
+    Reset();
+    OnFoot(r0);
+    Instance(weapon+kWeaponModel+kModelInst,bodyPose,kBones);
+    TwoSamples(r0,r1);
+    const Snapshot shared=Snap();
+    framerateview::BeginFrame(0,0.5f);
+    Check(PosedAt(bodyPose,half),"root: a pose array two instances share is posed once");
+    Fence();
+    Check(Unchanged(shared),"root: and put back once");
+    Instance(weapon+kWeaponModel+kModelInst,weaponPose,kBones);
 
     // rootsRefused: a jump past kCutMove between the samples.
     Reset();
