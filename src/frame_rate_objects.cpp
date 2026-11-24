@@ -22,9 +22,11 @@
 // (every [sys+0xCC0] entry's slot 0x28, the +0x370 jobs) and +0x358 again, vtable calls chosen at run time; in M001 at
 // FrameRateCap=1 every object drawn as stepped was one of those writes (Left::kPose, 4500-5700 every 5 s against 1800
 // blended, #395). A frame with two ticks samples the second only (the pair is then not consecutive: samples start
-// again). A root written between the sample and the drawing (a frame without ticks writes no root of the game's own)
-// makes the drawn root differ from cur: that object is drawn as stepped (counted, Left::kPose), never blended from a
-// stale pair.
+// again). A root written between the sample and the drawing makes the drawn root differ from cur: that object is drawn
+// as stepped (counted, Left::kPose), never blended from a stale pair. After the move, M001 at FrameRateCap=1 still draws
+// about 1000-1300 a second as stepped for `pose`: every one a Ranger (vtable EDF+0x17CDF28, AssultSoldier), the player
+// and allies, on a frame without ticks after the one that sampled (never in the sampling record call). Their root is
+// written again between frames without a tick: not found yet (docs/unlimited-fps-re.md 4.3.3).
 //
 // What a frame without ticks draws (at the render recording, frame_rate_view.cpp RecordStart). Each object whose drawn
 // root is still the last tick's (nothing wrote it since) moves to D = cur^-1 * InterpolateScaled(prev, cur, alpha) (a
@@ -540,8 +542,7 @@ void PoseAll(float alpha,const void* rootHuman,const void* rootVehicle,const flo
         }
     }
     // The player's weapons: fps-7 wrote their models (frame_rate_view.cpp PoseRoot, [h+0x1950] +0xF30) before this, so
-    // a listed weapon's root is not cur any more: fps-7's, left to it like the player (not counted). M001 at
-    // FrameRateCap=1: about 4 objects a frame of 10 drawn as stepped for `pose` were these.
+    // a listed weapon's root is not cur any more: fps-7's, left to it like the player (not counted).
     const unsigned char* rootWeapons[kMostWeapons];
     int rootWeaponCount=0;
     __try {

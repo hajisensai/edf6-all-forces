@@ -351,6 +351,10 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   按 vtable 选的调用。实机 M001、FrameRateCap=1 时，每 5 秒照 tick 画的约 4500–5700 个对象全部是 `pose` 原因（采样后根又被
   改过），比插值成功的约 1800 个还多。挪到下一帧的录制之后，这些写入都在采样之前。之后若仍有 `pose`，就是录制之前、
   0-tick 帧里有人写根（新对象登记 `0x1195A80`、`0x1197680` 等），照 tick 画、不用过期的一对插值。
+- **挪后实测（未解决）**：M001、FrameRateCap=1 仍每秒约 1000–1300 个 `pose`（插值成功约 350/s）。临时诊断：全部是
+  Ranger（vtable `EDF+0x17CDF28`，`AssultSoldier`，玩家和友军），一帧约 4–5 个；**从不**出现在采样的那次录制，全部在
+  之后的 0-tick 帧；偏差先是只转、后来带位移。即 0-tick 帧之间有人重写兵种根（不是 tick 作业，也不是我们未还原的写入：
+  帧初还原表为空）。写入方未定，候选是兵种每帧的动画 / 姿态更新；查明前它们照 tick 画。
 - **读法（性能）**：采样和写入读的都是游戏此刻持有的活对象（采样时在更新表里的；自己控制块 use 计数 > 0 的；座位 /
   武器架 weak_ptr 活着的），不再逐个问 `Readable`，整段在 `__try` 里。`thermal_models` 为此加了 `EnemyModelsLive` /
   `EnemyModelLive` / `EnemyFamilyLive`：同样的 RTTI 规则和缓存，只有第一次见到的 vtable 才经 `Readable` 解析 RTTI，模型 vtable 的
