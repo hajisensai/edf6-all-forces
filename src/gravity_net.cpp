@@ -282,13 +282,13 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
     else localPuid[0]=0;
     unsigned char bytes[gravity_net::kGrabWire];
     for(int i=0;i<out.queued;++i)
-        if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
+        if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(bytes,sizeof(bytes));
     out.queued=0;
     const ULONGLONG frame=GameFrame();
     if(!out.holding || (out.sentFrame && frame-out.sentFrame<gravity_net::kHoldGapFrames))return;
     out.sentFrame=frame;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
-    plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
+    plugin_net::Broadcast(bytes,sizeof(bytes));
     (void)now;
 }
 // A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
@@ -296,7 +296,7 @@ void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentFrame
 
 plugin_net::Channel GravityNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="gravity";c.magic=gravity_net::kGrabMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtGravity;
+    c.name="gravity";c.magic=gravity_net::kGrabMagic;c.version=gravity_net::kVersion;
     c.minSize=c.maxSize=gravity_net::kGrabWire;
     c.receive=&ReceiveGravityNetwork;c.update=&UpdateGravityNetwork;c.reset=&ResetGravityNetwork;c.joined=&GravityNetworkJoined;
     return c;

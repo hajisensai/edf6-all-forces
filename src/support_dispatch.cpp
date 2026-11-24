@@ -410,16 +410,10 @@ std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint6
     return wanted|kVariantApplied;
 }
 // Soldier `i` of a composed load: its preset colours and backpack weapon (PresetLookFor) as a variant of `resource`'s
-// template. A peer that does not read backpacks (support_protocol.h kExtBackpack) would refuse the whole plan for its
-// bits: the soldier then comes with its colours alone, said once a request.
+// template (every machine of the room reads backpacks: mod_room.h kAllForcesRoomProtocol).
 std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
     auto look=PresetLookFor(PlanCfg().preset[catalog],load,i);
-    if(look.pack && !SupportPeersApplyBackpacks()) {
-        Log("SUPPORT plan catalog=%u: soldier %d without its backpack weapon: a peer runs an older All Forces (no backpacks)",catalog,i);
-        NoteVariant(L"房间里有旧版全军出击：支援士兵本次不带背包武器（全员更新后生效）%ls",L"");
-        look.pack=0;
-    }
     if(!look.On())return 0;
     wchar_t file[96];
     if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
@@ -565,11 +559,6 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             // No Air Raider's call: it needs the rescue itself, a pilot the plugin flies, and real crews seated.
             if(!Cfg().seaRescue || !Cfg().npcBoarding || !Cfg().heliPilot) {
                 Refuse(catalog,"SeaRescue/NpcBoarding/HeliPilot off",L"海上救援、真实机组登乘或直升机驾驶功能未启用");return PlanResult::refused;
-            }
-            // Every peer must have the rescue entry (support_protocol.h kExtSeaRescue): an older one's catalog ends before it.
-            if(!SupportPeersAcceptRescue()) {
-                Refuse(catalog,"a peer runs an older All Forces without the sea rescue entry",hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate));
-                return PlanResult::refused;
             }
             // Its hull must be preloaded this mission (as the transports' are checked): else nothing would be made.
             if(!SupportAircraftReady(spec)) {

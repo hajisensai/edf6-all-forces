@@ -726,8 +726,8 @@ void UpdateFloatGunNetwork(const CommandNetworkContext& context,std::uint64_t) n
     unsigned char bytes[gravity_net::kGunWire];
     for(int i=0;i<outCount;++i) {
         if(!gravity_net::Encode(outgoing[i].m,bytes,sizeof(bytes)))continue;
-        if(outgoing[i].toHost)plugin_net::SendHost(support_net::kExtFloatGun,bytes,sizeof(bytes));
-        else plugin_net::Broadcast(support_net::kExtFloatGun,bytes,sizeof(bytes));
+        if(outgoing[i].toHost)plugin_net::SendHost(bytes,sizeof(bytes));
+        else plugin_net::Broadcast(bytes,sizeof(bytes));
     }
     outCount=0;
 }
@@ -809,19 +809,19 @@ void FloatGunNetworkJoined(std::uint32_t peer) noexcept {
         gravity_net::Gun m{};
         m.kind=gravity_net::GunKind::drop;m.origin=netOrigin;m.serial=g.serial;m.index=g.fromIndex;
         std::memcpy(m.who,g.fromId,32);std::memcpy(m.at,g.at,12);
-        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,support_net::kExtFloatGun,bytes,sizeof(bytes));
+        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,bytes,sizeof(bytes));
         if(g.state!=State::floating)continue;
         m=gravity_net::Gun{};
         m.kind=gravity_net::GunKind::owner;m.origin=netOrigin;m.serial=g.serial;std::memcpy(m.who,g.ownerId,32);
         const ULONGLONG left=g.until ? (g.until>ms ? g.until-ms : 1) : 0;
         m.leftMs=static_cast<std::uint32_t>(left<gravity_net::kMostLeftMs ? left : gravity_net::kMostLeftMs);
-        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,support_net::kExtFloatGun,bytes,sizeof(bytes));
+        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,bytes,sizeof(bytes));
     }
 }
 
 plugin_net::Channel FloatGunNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="float guns";c.magic=gravity_net::kGunMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtFloatGun;
+    c.name="float guns";c.magic=gravity_net::kGunMagic;c.version=gravity_net::kVersion;
     c.minSize=c.maxSize=gravity_net::kGunWire;
     c.receive=&ReceiveFloatGunNetwork;c.update=&UpdateFloatGunNetwork;c.reset=&ResetFloatGunNetwork;c.joined=&FloatGunNetworkJoined;
     return c;

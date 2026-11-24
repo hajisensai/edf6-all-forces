@@ -1113,8 +1113,6 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
 void UltimateTick() noexcept;
 void ResetUltimate() noexcept;
 void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
-// The caller's HUD line (hud.cpp): a peer in the room without the ultimate's channel does not see the show.
-bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.

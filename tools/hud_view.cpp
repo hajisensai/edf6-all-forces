@@ -284,14 +284,6 @@ bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return
 // The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
 bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
-// The room's builds differ (support_net.cpp SupportVersionCue): on in the version_banner scene, under the rescue's line.
-bool sceneVersionOn=false;wchar_t sceneVersion[200]{};
-bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
-    if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
-    return sceneVersionOn;
-}
-// The ultimate strike's caller line (ultimate.cpp PlayerUltimateCue): not drawn in any scene.
-bool PlayerUltimateCue(wchar_t*,std::size_t) noexcept { return false; }
 // The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
 bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
@@ -567,7 +559,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
     sceneCmd.squadGroups[0]=0x5;sceneCmd.squadGroups[1]=0x100;   // groups 1 and 3, group 9 (the panel's [13], [9])
-    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
@@ -722,7 +714,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         int wanted=0;
         for(int i=0;i<mapbtn::kCount;++i)
             wanted+=mapbtn::Shown(static_cast<mapbtn::Id>(i),sceneCmd.selected>0 ? sceneCmd.allowedOrders : 0u,
-                                   sceneCmd.squadToolsAllowed && sceneCmd.selectedSquads>0);
+                                   sceneCmd.selectedSquads>0);
         if(sceneButtons!=wanted){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,wanted);}
         // The support bar: a row (and its chips) for every kind of support, every entry reachable by a click.
         bool reach[kMapSupports]{};
@@ -2171,7 +2163,7 @@ int FullLoadoutScenes(const std::wstring& dir) {
     const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
     hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
     hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
-    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;sceneVersionOn=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;sceneRescueOn=false;
     for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
         hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
         sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
@@ -2519,7 +2511,7 @@ int Scenes(const std::wstring& dir) {
     // The sea rescue's banner under both (heli.cpp): why no heli came, the longest line it says.
     {
         sceneSweepOn=true;sceneSweep=SweepCue{true,12,7,0x59};sceneRescueOn=true;sceneRescue=RescueCue{};
-        _snwprintf_s(sceneRescue.text,_TRUNCATE,hudtext::Tr(hudtext::Tx::rescueFailed),hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate),10);
+        _snwprintf_s(sceneRescue.text,_TRUNCATE,hudtext::Tr(hudtext::Tx::rescueFailed),hudtext::Tr(hudtext::Tx::rescueAreaPending),10);
         sceneRescue.bad=true;
         Scene(dir,L"rescue_banner",ground);
         bool line=false,apart=true;
@@ -2533,31 +2525,7 @@ int Scenes(const std::wstring& dir) {
         }
         failed+=!(line && apart);
         std::printf("%s  rescue_banner: the rescue line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",line,apart);
-        // The room's builds differ, under it: the longest notice (older guests, every feature named).
-        wchar_t features[160];
-        _snwprintf_s(features,_TRUNCATE,L"%ls%ls%ls%ls%ls%ls%ls",hudtext::Tr(hudtext::Tx::versionFeatRescue),hudtext::Tr(hudtext::Tx::versionListSep),
-                     hudtext::Tr(hudtext::Tx::versionFeatAir),hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatLoadout),
-                     hudtext::Tr(hudtext::Tx::versionListSep),hudtext::Tr(hudtext::Tx::versionFeatCommand));
-        wchar_t who[120],what[160];
-        _snwprintf_s(who,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionPeersOlder),2);
-        _snwprintf_s(what,_TRUNCATE,hudtext::Tr(hudtext::Tx::versionUnavailable),features);
-        _snwprintf_s(sceneVersion,_TRUNCATE,L"%ls\n%ls",who,what);
-        sceneVersionOn=true;
-        Scene(dir,L"version_banner",ground);
-        bool shown=false,clear=true;
-        for(std::size_t i=0;i<drew.size();++i) {
-            const Drew& p=drew[i];
-            const bool mine=p.text==who || p.text==what;
-            if(mine && !(p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f))clear=false;   // every line of it on screen
-            if(p.text==what)shown=true;
-            for(std::size_t k=i+1;k<drew.size();++k) {
-                const Drew& q=drew[k];
-                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)clear=false;
-            }
-        }
-        failed+=!(shown && clear);
-        std::printf("%s  version_banner: the build line on screen %d, no text overlapping %d\n",shown && clear ? "ok  " : "FAIL",shown,clear);
-        sceneVersionOn=false;sceneRescueOn=false;
+        sceneRescueOn=false;
     }
     sceneSweepOn=false;
     // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and

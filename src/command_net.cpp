@@ -84,7 +84,6 @@ bool ReceiveCommandNetwork(std::uint32_t peer,const char* puid,const void* bytes
     return true; // malformed or newer command versions never leak to the support parser
 }
 bool MapCommandNetworkReady() noexcept {SupportNetTick();return commands.Ready();}
-std::uint32_t MapCommandNetworkVersion() noexcept {return commands.HostVersion();}
 void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
     if(!context.ready || !context.host)return;
     unsigned char ids[command_net::Session::kWaysUnits][32]{};unsigned published=0;

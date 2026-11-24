@@ -28,71 +28,15 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // sent in the unit message's `challenge`) and writes the ones it lacks to its pending list. A host plans a variant
 // applied only when every peer announced this and has its file by the filter; otherwise stock, said. The variants hook
 // (support_net.h Hooks::variants) announces it.
-// kExtSeaRescue: its catalog has the sea rescue entry (support_call.h SupportRescueCatalog, the catalog's last) and its
-// Validate accepts that entry's plan (one 410, its pilot only: the door seats are the swimmer's). A host plans a rescue
-// only when every peer has it (PeersHaveExtension); an older peer's catalog ends before that index and would refuse the
-// plan mid-transaction with no reason anyone sees. Every hello of this build announces it (Session::Tick), whatever the
-// hook says: it is the catalog's, not a mission's.
-// kExtRescueChannel (2026-10-10, the user: 「救援应该有单独的cd」): it takes part in a sea rescue transaction while another
-// one (a map call's, another player's rescue) is still being made. The host gives a rescue its own channel only when
-// every peer announced it: one rescue in flight per requester, beside the map's one, never under the map's 2 s rate,
-// each requester's rescues kRescueCooldownMs apart (SetRescueCooldown). Without it a rescue waits its turn as before.
-// Announced as kExtSeaRescue is (the hello's index has no bit left: #100's kCapTransports 4 / kCapLoadout 8).
-// kExtOutfit41 (2026-10-18, the user: the EDF4.1 outfit, 「所有东西联机应该都能正常使用」「不同版本可以直接说版本不同」): it tells
-// the room its EDF4.1 outfit (outfit41.cpp, EDF6Coop member attribute EDF6X_OUTFIT41) and dresses the others by theirs.
-// A member without it sees everyone's stock outfit and is seen in its own: the version notice names the feature. Carried
-// by no message of this protocol: announced so the room's builds compare (version_notice.h).
-// kExtBvmPlayers (2026-10-18, a room of eight on an EDF4.1 pack: players 5.. had no soldier): it creates every player of
-// an EDF5 / EDF4.1 script mission, past the BVM loop's four, when every member does (edf5online_room.h: EDF6Coop member
-// attribute EDF6X_BVMPLAYERS, read before the creation). With a member without it every machine creates four: the
-// version notice names the feature. Carried by no message of this protocol.
-// kExtBackpack (2026-10-18, the user: 「让npc可以使用背包位武器如突击的手雷，飞翼的短剑等」; docs/npc-backpack-re.md): it reads a
-// soldier variant's backpack weapon (support_loadout.h LookVariant bits 50-57) and makes that soldier from its file. An
-// older Validate refuses a variant with those bits (the whole plan, no reason anyone sees), so a host sends them only when
-// every peer announced this (SupportPeersApplyBackpacks); otherwise the soldier carries its colours alone, said. The last
-// bit the welcome's old features word (`catalog`, below 1024) has room for: the bits from here on reach a guest in the
-// welcome's unit.resourceId (the host's whole extension word, below), and an older guest never reads them.
-// The plugin's own channels (plugin_net.h, 2026-10-20, the user: 「所有功能都要支持联机」; a channel sends only to a peer that
-// announced its bit, so an older build in the room is left out, never sent bytes it would log as malformed):
-// kExtPeerRoster: it reads the host's roster (plugin_net_logic.h: each member's extension word by PUID; a guest hears no
-// other guest's hello) and so knows which guests have which channel. Every build with plugin_net.cpp announces it.
-// kExtGravity: it plays the gravity operations' grabs and throws (gravity_net_protocol.h GRVT: the gravity gun online).
-// kExtFloatGun: it takes part in the float guns' drops, picks and owners (gravity_net_protocol.h FGUN).
-// kExtPlayerVehicle (2026-10-25): it takes part in the players' own loaded jets (player_vehicle_logic.h PVEH): its haves
-// and decisions; a requester loads its jet only when every peer announced this and has the file.
-// kExtUltimate (2026-10-20): it plays every machine's player's ultimate strike (天罚, ultimate.cpp; ultimate_net_protocol.h
-// ULTS).
-// kExtBarrage (2026-10-26): it plays every machine's player's long-range barrage (barrage.cpp; barrage_net_protocol.h BRGS:
-// called from the map's bar, no stock radio call carries it any more).
-constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
-    kExtBackpack=32u,kExtPeerRoster=64u,kExtGravity=128u,kExtFloatGun=256u,
-    kExtUltimate=512u,kExtPlayerVehicle=1024u,kExtBarrage=2048u,
-    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|
-        kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
-// What every hello of this build announces (Tick):
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|
-    kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
+// kExtVariants is the one extension bit: runtime state (the variants hook runs this mission), not a build's. The bits
+// that said which features a build had (the sea rescue and its own channel, the EDF4.1 outfit, players 5+, backpack
+// weapons, the host's roster, the plugin's channels) and the welcome's features word were removed by net-6 (2026-11-24):
+// every machine of a room runs this build (mod_room.h kAllForcesRoomProtocol 16: an older or newer build neither finds
+// nor joins the room), so nothing is asked of a peer per feature.
+constexpr std::uint32_t kExtVariants=1u;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
-// What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
-// capability bits low (below kMaxUnits, 4 bits), the extension bits above them.
-constexpr std::uint32_t kExtShift=4;
-static_assert(kMaxUnits==(1u<<kExtShift),"the capability bits fill exactly the low kExtShift bits");
-constexpr std::uint32_t Features(std::uint32_t caps,std::uint32_t ext) noexcept { return (caps&(kMaxUnits-1))|(ext<<kExtShift); }
-constexpr std::uint32_t FeatureExt(std::uint32_t ext) noexcept { return ext<<kExtShift; }
-constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
-// The host's welcome carries its own features too (2026-10-10, the user: 「进入房间发现版本不同步给一下说明吧」), in its
-// `catalog` (unused by a welcome before; ValidMessage bounds it below 1024, room for ten bits), and `ok` = 1 when a peer of
-// the room announced fewer than the host: a guest then knows an older host, a newer one, or an older third player, and
-// says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
-// ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
-// From kExtPeerRoster on the features pass 1024: the welcome's `catalog` carries their low ten bits (all an older guest
-// knows), and its unit.resourceId the host's whole extension word (an older host sends 0 there: its catalog is all of it).
-constexpr std::uint32_t kWelcomeCatalogMask=1023u;
-constexpr std::uint32_t WelcomeFeatures(std::uint32_t catalog,std::uint32_t ext) noexcept {
-    return ext ? Features(catalog&(kMaxUnits-1),ext) : catalog;
-}
-static_assert(WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"a welcome carries the host's features whole");
-static_assert(Features(kCapabilities,kExtensions)<(1u<<31),"the features fit a word");
+// The host's welcome: `ok` = 1 once it heard every peer's hello of this handshake (Session::RoomReady: plugin_net.h's
+// channels tell their peers `joined` only then); `catalog` 0; unit.role its kDetails.
 // Additional capability word in hello/welcome unit.role, outside the full ten-bit features word.
 // A requester-bearing BEGIN uses only the unused unit fields and is sent only to a room where every peer
 // announced kDetailPvpSupport. Older builds ignore BEGIN units, so this all-peer gate is mandatory.
@@ -187,21 +131,9 @@ public:
     // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
     // hello's filter (no peer: true). A client is never asked: true.
     bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
-    // Host: whether every peer announced all of `ext` in its hello's extension word (kExtSeaRescue). A client: true.
-    bool PeersHaveExtension(std::uint32_t ext) const noexcept { return PeersHaveVariant(ext,0); }
-    // Host: the extension word of peer `peer`'s current hello (0: not heard, or not the host). plugin_net.h's roster.
-    std::uint32_t PeerExtension(std::uint32_t peer) const noexcept {
-        return running_ && host_ && peer && peer<=peers_ && challenges_[peer] ? peerExt_[peer] : 0u;
-    }
-    // Host: the heard peers whose features (Features: capabilities and extensions) lack some of this build's kFeatures
-    // (`missing`: what they lack between them, feature bits).
-    std::uint32_t PeersBehind(std::uint32_t* missing) const noexcept;
-    std::uint32_t PeersAhead() const noexcept;   // host: peers that announced features this build does not have
-    // Client: whether the host's welcome came, the features it announced (0: an older host, which announces none),
-    // and whether it said a peer of the room is behind it.
-    bool HostCapsKnown() const noexcept { return hostCapsKnown_; }
-    std::uint32_t HostCaps() const noexcept { return hostCaps_; }
-    bool RoomBehindHost() const noexcept { return hostRoomBehind_; }
+    // The room's handshake done: Ready, and the host heard every peer's hello (a guest: its host's current welcome
+    // said so, support_protocol.h welcome `ok`). plugin_net.h's channels tell their peers `joined` only then.
+    bool RoomReady() const noexcept { return Ready() && (host_ || hostRoomReady_); }
     // Host: the peer whose request made transaction `token` (0: this machine's own). False: no such requested one.
     bool RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept;
     // Host: how long one requester's rescues stand apart (from its last rescue made); the host's setting decides.
@@ -216,7 +148,7 @@ private:
         bool dynamicDrone=false; // independent prepared-child channel; same parent/slot serialized only while pending
         bool cancelConfirmed=false;
         bool spawned=false;
-        bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)
+        bool rescue=false;   // on the rescue channel (Hooks::ownChannel)
         bool readyPending=false;   // a peer: PREPARE heard, its READY waiting on Hooks::prepare (a load going on)
         bool planned=false;        // host: planned, its soldiers armed; its BEGIN waiting on Hooks::prepare here (a load)
         bool identified=false;     // host: its units' NetIds derived (once, before the BEGIN that may wait on a load)
@@ -243,7 +175,7 @@ private:
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
     std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{},peerDetails_{};
     std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
-    std::uint32_t hostCaps_=0,hostDetails_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
+    std::uint32_t hostDetails_=0;bool hostCapsKnown_=false,hostRoomReady_=false;   // client: the host's current welcome
     std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
     std::uint64_t rescueCooldown_=kRescueCooldownMs;
     bool InFlight(const Transaction& t) const noexcept;

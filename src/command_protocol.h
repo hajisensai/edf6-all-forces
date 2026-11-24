@@ -21,18 +21,17 @@ namespace crew::command_net {
 // Version 10 (2026-11-10, test site #45): DISMOUNT ALL's choice in Command::param (mapcmd_logic.h DismountParamValid:
 // every rider but the driver, or only some classes' riders); an older build would refuse the order's parameter, so it
 // is not spoken to (kMinVersion 10; the room protocol went to 9 with it: an older build is not let into the room).
-// Negotiated, not assumed: every hello goes out as version kMinVersion with the sender's highest version in the hello's
-// formationTotal; the host answers each peer at the lower of the two and the client speaks that version from then on.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=10,kMinVersion=10,kMaxPeers=1024;
-constexpr bool Compatible(std::uint32_t version) noexcept { return version>=kMinVersion && version<=kVersion; }
+// One version, not negotiated (net-6, 2026-11-24: the v6 / v7 negotiation removed): every machine of the room runs
+// this build (mod_room.h kAllForcesRoomProtocol), every message goes out at kVersion and one of another does not decode.
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=10,kMaxPeers=1024;
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;
 // ways (version 7): the host's Shift queue of one unit, for a client's map to draw (the queue itself is the host's:
 // mapcmd.cpp MapCommandAuthority). units[0] the unit's native ID, sequence the host's revision (newest wins), the
 // order it is carrying out now and its point (current: a guard / move / attack-move, so the client's line runs from the
 // unit to it and on through the rest with no gap) and the points after it, in Message::ways (written where a result's
-// words are); none: its queue is gone (order and current zero). Sent to every peer at version
-// 7 when it changes, and all of them again to a peer when it says hello (a new member, a reconnect).
+// words are); none: its queue is gone (order and current zero). Sent to every peer when it changes, and all of them
+// again to a peer when it says hello (a new member, a reconnect).
 enum class Kind : std::uint32_t { hello=1,capability,request,result,ways };
 constexpr unsigned kWaysMost=8;   // mapcmd::kWaypointsMost
 static_assert(kWaysMost==static_cast<unsigned>(mapcmd::kWaypointsMost),"a ways message carries a whole queue");
@@ -46,7 +45,6 @@ struct Request {
     std::uint32_t formationTotal=0,formationSlots[kCommandNetUnits]{};
 };
 struct Message {
-    std::uint32_t version=kVersion;   // the wire's (Encode writes it, Decode reads it): one Compatible
     Kind kind=Kind::hello;
     std::uint64_t epoch=0;
     std::uint32_t sequence=0;
@@ -56,8 +54,7 @@ struct Message {
     Ways ways{};   // Kind::ways only (its count in request.formationTotal on the wire)
 };
 bool CanonicalId(const unsigned char* id,bool allowEmpty=false) noexcept;
-// `version`: the one it is to travel at (a Compatible one).
-bool ValidRequest(const Request&,std::uint32_t version=kVersion) noexcept;
+bool ValidRequest(const Request&) noexcept;
 bool Encode(const Message&,void*,std::size_t) noexcept;
 bool Decode(const void*,std::size_t,Message&) noexcept;
 bool Owned(const void*,std::size_t) noexcept;
@@ -74,13 +71,9 @@ public:
     void Receive(std::uint32_t peer,const char* puid,const Message&,std::uint64_t now) noexcept;
     std::uint32_t Submit(const Request&,const char* localPuid,std::uint64_t now) noexcept;
     bool Ready() const noexcept;
-    // The version this machine and its host agreed (the host: its own); 0 before the host answered.
-    std::uint32_t HostVersion() const noexcept { return host_ ? kVersion : hostCapable_ ? hostVersion_ : 0u; }
     const CommandNetworkResult& Result() const noexcept { return result_; }
-    // Offline tests only: this session behaves as a build whose highest version is `version` (an older peer).
-    void LimitVersion(std::uint32_t version) noexcept { if(Compatible(version))maxVersion_=version; }
     // The Shift queues the host publishes for the clients' maps (Kind::ways). Host: `unit`'s points now (n 0: none), sent
-    // to every peer of version 7 when they differ from the last sent; `Published` lists what is out. Client: the
+    // to every peer when they differ from the last sent; `Published` lists what is out. Client: the
     // points its host published for `unit` (false: none). Both forget them with the epoch; a client also at each
     // capability (the host's answer to its hello, which every queue out follows: a reconnect starts from those).
     static constexpr unsigned kWaysUnits=96;
@@ -94,7 +87,6 @@ private:
     WaysEntry* WaysSlot(const unsigned char* unit,bool make) noexcept;
     void SendWays(std::uint32_t peer,const WaysEntry& e) noexcept;
     struct Peer {
-        std::uint32_t version=kMinVersion;   // the host's: what it answers this peer at
         bool capable=false,have=false;
         char puid[65]{};
         std::uint64_t lastAt=0;
@@ -103,7 +95,7 @@ private:
     Backend backend_{};
     bool ready_=false,host_=false,hostCapable_=false;
     std::uint64_t epoch_=0,lastHello_=0,pendingAt_=0,lastSend_=0;
-    std::uint32_t hostPeer_=0,peers_=0,nextSequence_=0,hostVersion_=0,maxVersion_=kVersion;
+    std::uint32_t hostPeer_=0,peers_=0,nextSequence_=0;
     std::array<Peer,kMaxPeers+1> peer_{};
     Message pending_{};
     CommandNetworkResult result_{};

@@ -12,7 +12,7 @@
 //                  generates and, at the mission's start, preloads every member's files it can (room_sync.h);
 //   the mission    every machine tells the room which of those files it preloaded (Msg::have, exact names, no filter);
 //                  the requester's machine alone decides at its own request: the loaded jet only when its own file is
-//                  preloaded and every peer of the room announced the channel and said it has that file too, else the
+//                  preloaded and every peer of the room said it has that file too (Msg::have), else the
 //                  stock twin (Decide); it tells everyone (Msg::decide) for that request, keyed by the requester's
 //                  native ID, the body and the request's number for that body (seq: each machine counts the configures
 //                  of that player's requests of that body in order, the game replicates them in order); a machine whose
@@ -218,12 +218,12 @@ public:
         for(int i=0;i<preloadedCount_;++i)if(Same(preloaded_[i],v))return true;
         return false;
     }
-    // The room: its peers (1..count) and which of them announced the channel. A change of room forgets the haves heard
-    // (the indexes mean other machines now): they come again (every machine re-sends its own when the room changes).
-    void Room(std::uint32_t generation,int count,const bool* hasFeature) noexcept {
+    // The room: its peers (1..count; every one runs this build's channel: mod_room.h kAllForcesRoomProtocol). A change of
+    // room forgets the haves heard (the indexes mean other machines now): they come again (every machine re-sends its own
+    // when the room changes).
+    void Room(std::uint32_t generation,int count) noexcept {
         if(generation!=generation_){generation_=generation;for(auto& p:peer_)p=Peer{};}
         peers_=count<0 ? 0 : count>kPeersMost ? kPeersMost : count;
-        for(int i=0;i<peers_;++i)peer_[i].feature=hasFeature && hasFeature[i];
     }
     void Heard(int peer,const Msg& have) noexcept {
         if(peer<1 || peer>kPeersMost || have.kind!=Kind::have)return;
@@ -232,7 +232,7 @@ public:
         for(int i=0;i<have.count;++i)p.have[i]=have.have[i];
     }
     // This machine's player requested `body`: the decision (bits 0 = the stock twin) and the message telling the room.
-    // `id`: the requester's native ID. Online: the loaded jet only when every peer announced the channel and has it.
+    // `id`: the requester's native ID. Online: the loaded jet only when every peer said it has it.
     // `eligible` false: this request is not the one the loadout is for (a mech's base request: player_vehicle.cpp), the
     // stock one (still numbered, so every machine's count stays in step).
     Msg Decide(const unsigned char* id,VehicleBody body,std::uint32_t origin,bool online,bool eligible=true) noexcept {
@@ -244,7 +244,7 @@ public:
         Variant want=at>=0 ? own_[at] : Variant{};
         if(!eligible || (want.bits && !Preloaded(want)))want.bits=0;
         for(int i=0;online && want.bits && i<peers_;++i)
-            if(!peer_[i].feature || !peer_[i].heard || !PeerHas(peer_[i],want))want.bits=0;
+            if(!peer_[i].heard || !PeerHas(peer_[i],want))want.bits=0;
         m.variant.bits=want.bits;
         Remember(id,body,m.seq,want.bits);
         return m;
@@ -289,12 +289,12 @@ public:
     void Clear() noexcept {
         for(auto& v:own_)v=Variant{};
         preloadedCount_=0;generation_=0;peers_=0;
-        for(auto& p:peer_){p.feature=false;p.heard=false;p.count=0;}
+        for(auto& p:peer_){p.heard=false;p.count=0;}
         for(auto& c:counter_){c.used=false;c.next=0;}
         decisions_=0;next_=0;
     }
 private:
-    struct Peer { bool feature=false,heard=false; int count=0; Variant have[kHaveMost]{}; };
+    struct Peer { bool heard=false; int count=0; Variant have[kHaveMost]{}; };
     struct Counter { unsigned char id[wire::kIdBytes]{}; VehicleBody body=VehicleBody::none; std::uint32_t next=0; bool used=false; };
     struct Decision { unsigned char id[wire::kIdBytes]{}; VehicleBody body=VehicleBody::none; std::uint32_t seq=0; std::uint64_t bits=0; };
     static bool PeerHas(const Peer& p,const Variant& v) noexcept {

@@ -172,7 +172,6 @@ struct MapCommandReadout {
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
-    bool squadToolsAllowed=false; // the formation tools: offline, or a host of command protocol v7 (Order::formation)
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
     bool pointer;              // the mouse pointer shown at (px, py)

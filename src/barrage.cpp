@@ -219,7 +219,7 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
         Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no player of this mission's");
         return;
     }
-    const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));
+    const std::uint32_t sent=plugin_net::Broadcast(bytes,sizeof(bytes));
     Log("BARRAGE NET %s %08X:%u told to %u peer(s)",barrage::kKindNames[kind],m.origin,m.serial,sent);
 }
 }  // namespace
@@ -369,7 +369,7 @@ void ResetBarrageNetwork() noexcept {}
 
 plugin_net::Channel BarrageNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;c.featureBit=support_net::kExtBarrage;
+    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;
     c.minSize=c.maxSize=barrage_net::kWire;
     c.receive=&ReceiveBarrageNetwork;c.reset=&ResetBarrageNetwork;
     return c;

@@ -4470,7 +4470,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
                               Tx::orderDismountAll,Tx::orderHold,Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth};
     const wchar_t* const kKey[n]={L"",L"Z",L"-",L"V",L"X",L"J",L"-",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"H",L"T",L"Y",L"O"};
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
-    const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
+    const bool tools=c.allowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
     int shownIds[n];float w[n];int shown=0;
     const wchar_t* word[n]{};
@@ -5525,24 +5525,6 @@ void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int
     if(!PlayerRescueCue(&c))return;
     Label(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c.bad ? kAmber : kGreen,L"%ls",c.text);
 }
-// The room's builds differ (support_net.cpp, version_notice.h): who is older or newer and what does not work because of
-// it, a while after joining (or after a player joined); under the rescue's banner.
-void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    wchar_t line[200];
-    if(!SupportVersionCue(line,_countof(line)))return;
-    // Who, then (after a '\n') what does not work here.
-    wchar_t* second=std::wcschr(line,L'\n');
-    if(second)*second++=0;
-    Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
-    if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
-}
-// The ultimate strike's caller online (ultimate.cpp): peers without its channel see nothing of it; a moment, under the
-// version banner.
-void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    wchar_t line[160];
-    if(!PlayerUltimateCue(line,_countof(line)))return;
-    Label(text,lines,at,width*0.5f,height*0.5f+342.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
-}
 // The caller's strike calls (airstrike.cpp PlayerStrikeCue): a barrage that could not start, a sortie's second wave not
 // called; a moment, under the ultimate's banner.
 void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -6013,8 +5995,6 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
-        VersionBanner(t,width,height,s,lines,&at);
-        UltimateBanner(t,width,height,s,lines,&at);
         StrikeBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
