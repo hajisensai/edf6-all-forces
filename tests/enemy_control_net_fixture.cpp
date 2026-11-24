@@ -1168,11 +1168,11 @@ void ActionsRevalidateNativeIdentityAndFailures() {
         Room current(1,240+changedWeak);native.hostActions=true;
         // This peer models the real host's native drain contract, so failed
         // application cannot be treated as permission to discard its outbox.
-        CHECK(current.nodes[0].protocol.Configure({&current.nodes[0],&PureSend,&PureAuthenticate,&PureResolve,&PurePrepare,&PureBegin,
-            &PureValidate,&PureApply,&PureRestore,&PureActivate,&PurePose,&PureAction,
-            +[](void*,std::uint64_t,const ep::LeaseSpec&){return true;},
-            +[](void*,std::uint64_t,const ep::LeaseSpec&){return true;},
-            +[](void*,std::uint64_t,const ep::LeaseSpec&){return true;}}));
+        auto drainHooks=PureHooks(&current.nodes[0]);
+        drainHooks.QuiesceActions=+[](void*,std::uint64_t,const ep::LeaseSpec&){return true;};
+        drainHooks.ActionsEmpty=+[](void*,std::uint64_t,const ep::LeaseSpec&){return true;};
+        drainHooks.AbortActions=+[](void*,std::uint64_t,const ep::LeaseSpec&){return true;};
+        CHECK(current.nodes[0].protocol.Configure(drainHooks));
         CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
         const auto bytes=PoseBytes(232,42);CHECK(current.Protocol(0).SubmitAction(snapshot.lease,bytes.data(),bytes.size(),now));
         if(changedWeak)edf::Put<const void*>(actors[5].object,edf::kSelfCtrl,actors[6].control);else native.nativeCoreCanReplay=false;

@@ -92,7 +92,9 @@ bool Restore(void* user,std::uint64_t id,const LeaseSpec&){auto& n=*static_cast<
     const auto it=n.native.find(id);if(it!=n.native.end())it->second.suppressed=false;return true;
 }
 bool Activate(void* user,std::uint64_t,const LeaseSpec&){auto& n=*static_cast<Node*>(user);++n.activates;return !n.failActivate;}
-Hooks Backend(Node* n){return {n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};}
+// The fixture's state-message stub: delivered like any packet (this fixture is reliable and ordered).
+bool SendState(void* user,std::uint32_t peer,std::uint32_t,const void* bytes,std::size_t size){return Send(user,peer,bytes,size);}
+Hooks Backend(Node* n){Hooks h{n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};h.SendState=&SendState;return h;}
 Room::Room(unsigned count,unsigned legacyPeer,unsigned oldPeer):legacy(legacyPeer),oldVersion(oldPeer){
     for(unsigned i=0;i<count;++i){auto n=std::make_unique<Node>();n->id=i;n->room=this;n->puid="player-"+std::to_string(i);n->player=Player(10+i);nodes.push_back(std::move(n));}
     for(auto& n:nodes){n->context={true,n->id==0,777,n->id ? Peer(n->id,0) : 0,count-1,n->puid.c_str()};Check(n->protocol.Configure(Backend(n.get())),"startup backend accepted");}

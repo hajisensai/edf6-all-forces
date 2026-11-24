@@ -89,7 +89,7 @@ struct Hooks {
     // Real SDK backlog, independent of native Applied ACKs. wouldBlock retains the queued action unchanged.
     SendResult (*TrySendAction)(void*,std::uint32_t,const void*,std::size_t)=nullptr;
     // The host's poses as a state stream (EDF6Coop extension ABI 2, plugin_net.h SendState): unreliable, only the newest of
-    // a lease slot kept (object: the lease's slot, < kMaxLeases). Absent: poses go reliable (Send) like the rest.
+    // a lease slot kept (object: the lease's slot, < kMaxLeases). Required: Configure refuses a backend without it.
     bool (*SendState)(void*,std::uint32_t,std::uint32_t,const void*,std::size_t)=nullptr;
 };
 // A pose is one part (one wire message), so a state message is a whole pose and one lost or overtaken is only skipped.
@@ -214,8 +214,6 @@ public:
     // Real extension transport has a bounded inbox. Frame pacing retains native batches in the existing pool;
     // exhausted quota is not a Send failure. The caller advances this once per actual shared game frame.
     bool SetReliableOrderedTransport(bool enabled) noexcept {if(HasCurrent())return false;paced_=enabled;return true;}
-    // Compatibility spelling for the pure fixtures; enabling asserts the same reliable ordered SDK contract.
-    bool SetSendPacing(bool enabled) noexcept {return SetReliableOrderedTransport(enabled);}
     void TransportFrame(std::uint64_t now) noexcept;
     void Tick(const Context&,std::uint64_t now) noexcept;
     // Claim every ECTL packet, even malformed ones, so it cannot be repolled as another protocol.
@@ -345,10 +343,10 @@ inline void Protocol::UpdateRequest(const Lease& l) noexcept {
 }
 inline bool Protocol::HooksReady() const noexcept {
     return context_.localCapability==kCapability && hooks_.Send && hooks_.Authenticate && hooks_.Resolve && hooks_.Prepare && hooks_.Begin &&
-        hooks_.ValidateInput && hooks_.ApplyInput && hooks_.Restore && hooks_.Activate;
+        hooks_.ValidateInput && hooks_.ApplyInput && hooks_.Restore && hooks_.Activate && hooks_.SendState;
 }
 inline bool Protocol::Configure(Hooks hooks) noexcept {
-    if(HasCurrent() || Unrestored())return false;hooks_=hooks;return true;
+    if(HasCurrent() || Unrestored() || !hooks.SendState)return false;hooks_=hooks;return true;
 }
 inline bool Protocol::Ready() const noexcept {
     if(!live_ || blocked_ || !HooksReady())return false;
@@ -617,7 +615,7 @@ inline bool Protocol::SubmitPose(std::uint64_t id,const void* bytes,std::size_t 
         const auto offset=static_cast<std::size_t>(index)*kChunkBytes;
         const auto remaining=size-offset;m.inputSize=static_cast<std::uint16_t>(remaining<kChunkBytes ? remaining : kChunkBytes);
         std::memcpy(m.input.data(),static_cast<const std::uint8_t*>(bytes)+offset,m.inputSize);
-        if(!(hooks_.SendState ? BroadcastState(static_cast<std::uint32_t>(l-leases_.data()),m) : Broadcast(m))) {
+        if(!BroadcastState(static_cast<std::uint32_t>(l-leases_.data()),m)) {
             blocked_=true;End(*l,Result::SendFailed,now);return false;
         }
     }

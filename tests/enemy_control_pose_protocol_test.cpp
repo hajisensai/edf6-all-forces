@@ -95,6 +95,29 @@ void PoseFailure() {
      Check(r.Lease(2,1)->phase==Phase::restoring && !r.Lease(2,1)->localRestored && r.nodes[2]->native[1].suppressed,"physics failure retains native baseline while restoration fails");
      r.nodes[2]->failRestore=false;r.Step();r.Closed(1,Result::RestoreFailed);}
 }
+// A pose state message is unordered against the reliable lease stream: one that reaches a guest before its Activate
+// (or before Active) is dropped without touching native physics or failing the lease, and the next pose applies.
+void PoseBeforeActivate() {
+    Packet early;std::vector<unsigned char> earlyBytes;
+    {Room ref;EnablePose(ref);Check(ref.Request(),"reference pose request queued");ref.Settle();earlyBytes=Payload(96);
+     Check(ref.nodes[0]->protocol.SubmitPose(ref.Active(),earlyBytes.data(),earlyBytes.size(),ref.now),"reference host pose queued");early=ref.Find(Kind::Pose,0,2);}
+    Room r;EnablePose(r);r.dropFrom=0;r.dropTo=2;r.dropKind=Kind::Activate;
+    Check(r.Request(),"pose-before-activate request queued");r.Settle();
+    Check(r.Lease(2,1) && r.Lease(2,1)->phase==Phase::beginning && r.Lease(0,1)->phase==Phase::activating,"guest still waits for its Activate");
+    r.Deliver(early);r.Pump();
+    Check(!poses[&*r.nodes[2]].calls,"a pose before Activate never writes guest native physics");
+    Check(r.Lease(2,1)->phase==Phase::beginning && r.Lease(0,1)->phase==Phase::activating,"a pose before Activate never fails the lease");
+    r.dropKind=Kind::Active;r.Deliver(r.Find(Kind::Activate,0,2));r.Pump();
+    Check(r.Lease(2,1)->phase==Phase::activating && r.Lease(0,1)->phase==Phase::active,"guest activated, its Active still in flight");
+    r.Deliver(early);r.Pump();
+    Check(!poses[&*r.nodes[2]].calls && r.Lease(2,1)->phase==Phase::activating,"a pose before Active is dropped too, lease intact");
+    r.dropFrom=99;r.Deliver(r.Find(Kind::Active,0,2));r.Pump();
+    Check(r.Lease(2,1)->phase==Phase::active,"late Active completes the guest's activation");
+    const auto bytes=Payload(200);
+    Check(r.nodes[0]->protocol.SubmitPose(1,bytes.data(),bytes.size(),r.now),"host pose after activation queued");r.Pump();
+    for(unsigned n=1;n<3;++n)Check(poses[&*r.nodes[n]].calls==1 && poses[&*r.nodes[n]].sequence==1 && poses[&*r.nodes[n]].bytes==bytes,"the dropped early pose consumed no sequence; the next one applies");
+    r.Settle();for(unsigned n=0;n<3;++n)Check(r.Lease(n,1)->phase==Phase::active,"lease stays active on every peer");
+}
 void PoseIndependentRestoration() {
     Room r;EnablePose(r);Check(r.Request(),"first independent physical lease queued");r.Settle();
     Check(r.Request(2,101),"second player's independent physical lease queued");r.Settle();
@@ -117,4 +140,4 @@ void PoseCodec() {
     bad=m;bad.inputSize=0;Check(!Encode(bad,bytes.data(),bytes.size()),"empty physical state rejected");
 }
 }
-int main() {ExistingEnemyControlProtocolTests();PoseCodec();PoseSuccess();PoseAtomic();PoseAuthAndBinding();PoseFailure();PoseIndependentRestoration();std::printf("enemy_control_pose_protocol: %d checks passed\n",checks);return 0;}
+int main() {ExistingEnemyControlProtocolTests();PoseCodec();PoseSuccess();PoseAtomic();PoseAuthAndBinding();PoseFailure();PoseBeforeActivate();PoseIndependentRestoration();std::printf("enemy_control_pose_protocol: %d checks passed\n",checks);return 0;}
