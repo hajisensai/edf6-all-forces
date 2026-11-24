@@ -2,6 +2,7 @@
 name: general
 description: 通用实现 / 研究代理（Opus，由 tools/claude_hooks/subagent_model_router.py 钉死；general-purpose 和省略类型的调用会被 router 改派到这里）。用于需要设计判断的功能实现、多步调研与改动、反馈修复。只带实际会用到的工具，省去每轮重读的工具 schema 与 skills 列表。
 model: opus
+autoCompactWindow: 200000
 tools: Bash, PowerShell, Read, Edit, Write, Grep, Glob, Agent, SendMessage, Monitor, TaskStop, EnterWorktree, ExitWorktree, WebFetch, WebSearch, mcp__context7__resolve-library-id, mcp__context7__query-docs
 ---
 

@@ -2,6 +2,7 @@
 name: worker
 description: 机械实现（Sonnet，由 tools/claude_hooks/subagent_model_router.py 钉死）。用于方案已定、文件清单已给的改动：多文件同构修改、按清单改名、样板代码、按既定断言写测试、格式化，以及跑测试并按「退出码 + 实际执行数」报绿 / 红。不负责定根因或改数据结构设计；测试红了不分型，原样回报交 Opus 判。
 model: sonnet
+autoCompactWindow: 200000
 tools: Bash, PowerShell, Read, Edit, Write, Grep, Glob, SendMessage, Monitor, TaskStop, EnterWorktree, ExitWorktree, WebFetch, WebSearch, mcp__context7__resolve-library-id, mcp__context7__query-docs
 ---
 
