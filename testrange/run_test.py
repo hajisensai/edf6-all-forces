@@ -27,6 +27,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen  # noqa: E402
 import gamelease  # noqa: E402  (pylib, on the path through gen)
+import modfiles  # noqa: E402
 import weapons  # noqa: E402
 
 user32 = ctypes.windll.user32
@@ -321,24 +322,10 @@ def aim_stats(lines: list[str]) -> list[str]:
 # ---------- flow ----------
 STEAM_APP = 2291060
 
-def steam_running_app() -> int:
-    """Steam's own idea of the running game (HKCU RunningAppID); it lags the process exit by a
-    few seconds, and a launch inside that window only gets the 「游戏已在运行」 dialog."""
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as k:
-            return int(winreg.QueryValueEx(k, 'RunningAppID')[0])
-    except OSError:
-        return 0
-
-
 def start_game(timeout: float) -> int:
     if edf_pid():
         raise RuntimeError('EDF6 已经在运行；先关掉它（或加 --attach 接着用这个进程）')
-    end = time.time() + 60
-    while steam_running_app() == STEAM_APP and time.time() < end:
-        time.sleep(1)
-    if steam_running_app() == STEAM_APP:
+    if not modfiles.wait_steam_released(60, STEAM_APP):
         raise RuntimeError('Steam 仍认为 EDF6 在运行（RunningAppID 60 秒没清零）')
     os.startfile(f'steam://rungameid/{STEAM_APP}')
     end = time.time() + timeout

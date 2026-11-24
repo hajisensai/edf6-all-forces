@@ -6,7 +6,7 @@
 
 ## 1. 一帧的结构
 
-主循环函数 `0x11A2E40`，循环体从 `0x11A2E80` 开始，每圈是一帧：
+主循环函数 `0x11A2E90`（`.pdata` 从这里开始，调用者 `0x703417`；它前面的 `0x11A2E40` 是另一个 0x42 字节的 scalar deleting destructor），每帧的循环在它的链接片段 `0x11A2ECA..0x11A3116` 里，每圈是一帧：
 
 | 地址 | 内容 | 证据 |
 |---|---|---|
@@ -76,7 +76,7 @@ System::update 在 `0x1198FA4` 先调一次绘制录制 `0x11978D0`，然后跑 
 
 - `0x3E630` 出现在**所有** xgs 线程的栈上，游戏主线程也有。它是 xgs 线程的入口，不能拿来认 pool worker。
 - 游戏主线程在 60 fps 时的分布：75% 在 tick 等待，24% 在栅栏忙等，只有约 1% 在 System::update。所以按 System::update
-  认主线程会漏，要按主循环 `0x11A2E80..0x11A316E` 来认（`tools/perf_report.py` `thread_role`）。
+  认主线程会漏，要按主循环 `0x11A2E90..0x11A316E` 来认（`tools/perf_report.py` `thread_role`）。
 - 渲染线程的入口是 `0x111B8E0`（docs/frame-pacing-re.md）。
 
 ## 4. 输入到 Present

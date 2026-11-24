@@ -68,15 +68,24 @@ const EDF6CoopMemberAttributeApi* EDF6COOP_MA_CALL AttributeTable(uint32_t versi
     return &attributeTable;
 }
 uint32_t Identity(int32_t,EDF6CoopPeer*){++worldQueries;return 0;}
+// 10: an EDF6Coop whose overflow still latches the room (no capacity bit 2), 11: one without the batch poll export.
+uint32_t Capacity(uint32_t version,uint32_t size,EDF6CoopExtensionCapacity* out){
+    if(version!=EDF6COOP_EXTENSION_CAPACITY_VERSION || size!=sizeof(*out))return 0;
+    *out=EDF6CoopExtensionCapacity{};out->size=sizeof(*out);out->version=EDF6COOP_EXTENSION_CAPACITY_VERSION;
+    out->flags=dependencyMode==10 ? 11u : 15u;return 1;
+}
+uint32_t Batch(uint64_t,EDF6CoopExtensionMessage*,uint32_t,void*,uint32_t,uint32_t* count){*count=0;return 0;}
 FARPROC ResolveDependency(const char* name) noexcept {
     if(dependencyMode==0)return nullptr;
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&BridgeApi);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&Admission);
+    if(!std::strcmp(name,"EDF6CoopGetExtensionCapacity"))return reinterpret_cast<FARPROC>(&Capacity);
+    if(!std::strcmp(name,"EDF6CoopPollExtensionBatch"))return dependencyMode==11 ? nullptr : reinterpret_cast<FARPROC>(&Batch);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
     // The room check asks for the v1 table and refuses one it cannot use (coop_attr.h Usable): 6 none, 7 another version.
     if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&AttributeTable);
-    // The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): 8 the 2.6.1 before it, 9 none that says its version.
-    static const char kOld[]="EDF6COOP_VERSION=2.6.1",kCurrent[]="EDF6COOP_VERSION=2.7.0";
+    // The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): 8 the 2.7.2 before it, 9 none that says its version.
+    static const char kOld[]="EDF6COOP_VERSION=2.7.2",kCurrent[]="EDF6COOP_VERSION=2.8.0";
     if(!std::strcmp(name,"EDF6CoopVersion"))return dependencyMode==9 ? nullptr : reinterpret_cast<FARPROC>(reinterpret_cast<std::uintptr_t>(dependencyMode==8 ? kOld : kCurrent));
     return nullptr;
 }
@@ -393,7 +402,7 @@ int main(int argc,char** argv){
     // Both native entry points must reject missing/old/incomplete/uninitialized
     // Coop while a matching bridge is usable in the menu (world still absent).
     const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
-    for(int mode:{0,1,2,3,4,6,7,8,9}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version; 8, 9: older than 2.7.0
+    for(int mode:{0,1,2,3,4,6,7,8,9,10,11}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version; 8, 9: older than 2.8.0; 10, 11: overflow not recovered / no batch poll
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
@@ -403,15 +412,15 @@ int main(int argc,char** argv){
         Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");
         if(mode==6 || mode==7)Check(depNotice.find(L"成员属性接口")!=std::wstring::npos && depNotice.find(L"版本过旧")!=std::wstring::npos,
                          "an EDF6Coop without member attributes is named to the player as too old, not only in the log");
-        if(mode==8)Check(depNotice.find(L"EDF6Coop 2.6.1 版本过旧")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+        if(mode==8)Check(depNotice.find(L"EDF6Coop 2.7.2 版本过旧")!=std::wstring::npos && depNotice.find(L"升级到 2.8.0")!=std::wstring::npos,
                          "an EDF6Coop older than the room protocol's is named with its version and the one to upgrade to");
         if(mode==8 || mode==9) {   // EDF6Coop's own routes (REJOIN, its virtual rooms) are told too, once a minute
             const int posted=packNotices;fakeNow+=60000;
-            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1 && packNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1 && packNotice.find(L"升级到 2.8.0")!=std::wstring::npos,
                   "EDF6Coop's own route tells the player to upgrade EDF6Coop");
             Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1,"not again within the minute");
         }
-        if(mode==9)Check(depNotice.find(L"读不出版本")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+        if(mode==9)Check(depNotice.find(L"读不出版本")!=std::wstring::npos && depNotice.find(L"升级到 2.8.0")!=std::wstring::npos,
                          "an EDF6Coop that says no version is told to upgrade too");
         Check(crew::lastLog.find("matching EDF6Coop required")!=std::string::npos,"dependency failure logged explicitly");
     }

@@ -15,7 +15,7 @@
 namespace crew::perfprobe {
 namespace {
 // The call sites (E8 rel32) and the stock function each calls (EDF.dll, checked by disassembly 2026-11-24).
-// The main loop 0x11A2E80: tick wait (0x11A2F43..0x11A2F74), the frame's input sample, Application::Update (vtable +8 at
+// The main loop 0x11A2E90 (its frame loop 0x11A2ECA..0x11A3116): tick wait (0x11A2F43..0x11A2F74), the frame's input sample, Application::Update (vtable +8 at
 // 0x11A3006), the render fence wait, the Present command.
 constexpr unsigned kInputCall=0x11A2FF3,kInput=0x1182A10;
 constexpr unsigned kFenceCall=0x11A305A,kFence=0x111CC20;

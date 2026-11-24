@@ -49,8 +49,8 @@ ROLES = ((0x130FE20, 'Havok worker (processTaskQueue)'), (0x111B8E0, 'render thr
 APP_BUCKETS = ((0x705530, 'app: start'), (0x705627, 'app: network / Steam / EOS'), (0x7056B4, 'app: MapMgr 0x1230A0'),
                (0x7056C0, 'app: before System::update'), (0x70571B, 'app: after System::update'),
                (0x7058B0, 'app: HUD 0x11977F0'), (0x7058BD, 'app: input wrapper 0x77320'), (0x7058CD, 'app: rest'))
-MAIN_LOOP = (0x11A2E80, 0x11A316E)   # the frame loop around Application::Update (its vtable +8 at 0x11A3006)
-MAIN_BUCKETS = ((0x11A2E80, 'main loop: top'), (0x11A2F21, 'main loop: tick wait'),
+MAIN_LOOP = (0x11A2E90, 0x11A316E)   # the frame loop around Application::Update (its vtable +8 at 0x11A3006)
+MAIN_BUCKETS = ((0x11A2E90, 'main loop: top'), (0x11A2F21, 'main loop: tick wait'),
                 (0x11A2FF8, 'main loop: input sample 0x1182A10'), (0x11A3009, 'main loop: after the update'),
                 (0x11A305F, 'main loop: render fence wait 0x111CC20'), (0x11A3064, 'main loop: after the fence'),
                 (0x11A30A0, 'main loop: Present command 0x111D890'), (0x11A30A1, 'main loop: tail'))
