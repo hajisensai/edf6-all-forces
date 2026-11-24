@@ -56,6 +56,7 @@ MeshFn nextMesh[std::size(kMeshCalls)]={};
 PresentFn nextPresent=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
+std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 
 double tickMs=0.0;   // ms a QPC tick
 LONGLONG Qpc() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
@@ -146,6 +147,7 @@ void TryPresentHook() noexcept;
 
 void __fastcall InputHook(void* input) {
     const LONGLONG now=Qpc();
+    gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
     if(cur.open)CloseFrame(now);
     const SceneStep s=SceneStepNow();
     cur=Frame{};cur.begin=now;cur.scene=s.scene;cur.step=s.count;cur.open=true;
@@ -310,6 +312,9 @@ void Install() noexcept {
     Log("HOOK perf split=%d submits=%u/%zu meshes=%u/%zu (PerfProbe=1: the frame's parts, the draw counts)",whole,subs,
         std::size(kSubmitCalls),mesh,std::size(kMeshCalls));
 }
+
+bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
+DWORD GameThread() noexcept { return gameThread.load(std::memory_order_relaxed); }
 
 Frames TakeFrames() noexcept {
     const Frames f{base.frames,base.steps,base.over20,base.over33,base.sum,base.worst};
