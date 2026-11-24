@@ -163,7 +163,9 @@ int main(){
  Check(soundStops==2 && dragons.count(object)==0,"destroying the dragon (DeleteObject, despawn) stops its held breath and drops its entry");
  dtor(stranger,0);Check(dtors==2 && soundStops==2,"another object's destruction passes straight to the stock destructor");
  // Configure on a marked object: the flame's custom parameter goes CopyOf -> edf41c::Persist (the real one). Persist's
- // limits replace the old dragon copy's (0..16 children, no strings): arrays up to 256 children, 8 levels below the root.
+ // limits replace the old dragon copy's (0..16 children, no strings): arrays up to 256 children, 8 levels below the root,
+ // strings (an empty one too) copied. That is Persist as it was in edf41classes.cpp, moved, not changed: the real
+ // Readable takes a zero-length range, and a negative length was refused there as well.
  Jump(kStateByName,reinterpret_cast<void*>(&StateByName));
  alignas(16) static unsigned char marked[0x1D40]{};
  const auto configure=[&](auto fill,Dragon& d){
@@ -194,7 +196,7 @@ int main(){
   Check(!configure(chain(9),deep9).first && deep9.custom==nullptr,"9 levels: no copy");
   const auto [okText,srcText]=configure([](crew::Node* at){crew::Node* k=SetArray(at,3);SetText(k,L"flame_custom");SetInt(k+1,5);SetText(k+2,L"");},text);
   Check(okText && text.custom && Same(text.custom,srcText) && !inSgo(reinterpret_cast<const char*>(crew::Child(text.custom,0))+crew::Child(text.custom,0)->value),
-        "strings in the custom parameter (one empty) are copied with their characters, which the old copy refused");
+        "strings in the custom parameter (one empty) are copied with their characters (Persist always copied them; the dragon's old copy refused any)");
  }
  dragons.clear();VirtualFree(image,0,MEM_RELEASE);image=nullptr;
  std::printf("PASS %d actual dragon chain/flame checks\n",checks);

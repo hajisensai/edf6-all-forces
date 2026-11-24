@@ -53,6 +53,7 @@ bool CopyNode(const SgoNode* src,std::vector<char>& out,std::size_t at,std::size
     SgoNode copy=*src;
     if(src->type==3) {
         const std::size_t bytes=static_cast<std::size_t>(src->a)*sizeof(wchar_t);
+        // An empty string skips the check: the real Readable takes zero bytes (as before the move), a test's may not.
         if(bytes && !Readable(reinterpret_cast<const char*>(src)+src->b,bytes))return false;
         if(bytes)std::memcpy(out.data()+end,reinterpret_cast<const char*>(src)+src->b,bytes);
         copy.b=static_cast<std::uint32_t>(end-at);
