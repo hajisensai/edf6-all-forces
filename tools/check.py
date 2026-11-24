@@ -27,6 +27,7 @@ Each part's output goes to build/check-<part>.log; the failures' tails are print
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -242,8 +243,8 @@ def main(argv: list[str]) -> int:
     if '--base' in argv:
         global BASE
         BASE = argv[argv.index('--base') + 1]
-    sel = plan(argv)
     if '--dry-run' in argv:
+        sel = plan(argv)
         say_plan(sel)
         for part in ('ctest', 'selftest'):
             if not sel['full']:
@@ -251,26 +252,36 @@ def main(argv: list[str]) -> int:
         return 0
     try:
         with checklock.worktree_once(ROOT):
-            return _main(argv, jobs, sel)
+            return _main(argv, jobs)
     except checklock.Busy as e:
         who = e.args[0] if e.args else {}
         since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
-        print(f'check.py: 已在排队/运行（pid {who.get("pid", "?")}，{since} 起）: {ROOT} 的检查只跑一套，等它的结果'
-              f'（exit {BUSY}）', flush=True)
+        print(f'check.py: 已在排队/运行（pid {who.get("pid", "?")}，{since} 起）: {ROOT} 的检查只跑一套，等它的结果；'
+              f'前一套只覆盖它开跑时（拿到全机检查槽那一刻）的改动，之后的改动等它结束再跑一次（exit {BUSY}）', flush=True)
         return BUSY
 
 
-def _main(argv: list[str], jobs: int, sel: dict) -> int:
+@contextlib.contextmanager
+def slot(argv: list[str]):
+    """The machine's check slot, then the tests to run: (the plan, the seconds queued). The tests are chosen once the
+    slot is held, from the changes on disk then: the queue can take tens of minutes, and the build that follows builds
+    what is on disk then, so a choice made before it could miss what changed while it waited."""
+    started = time.perf_counter()
+    with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
+        waited = time.perf_counter() - started
+        yield plan(argv), waited
+
+
+def _main(argv: list[str], jobs: int) -> int:
     if '--normal-priority' not in argv:
         checklock.below_normal()
     os.makedirs(BUILD, exist_ok=True)
     results: dict[str, tuple[int, float]] = {}
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
-    started = time.perf_counter()
-    with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
+    with slot(argv) as (sel, waited):
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
-        waited, started = time.perf_counter() - started, time.perf_counter()   # the queue is not the check's time
+        started = time.perf_counter()   # the queue is not the check's time
         print(f'check.py: {ROOT}, {jobs} processes, below-normal priority (waited {waited:.0f} s for the single '
               f'check slot); logs build/check-*.log', flush=True)
         defines, game = game_defines()

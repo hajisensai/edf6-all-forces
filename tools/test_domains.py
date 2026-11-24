@@ -94,6 +94,15 @@ EXTRA = {
     'pylib/buildcache.py': ('tools/make_*.py',),          # generator(group): 'make_' + group, imported by tool()
     'tools/cockpit_preview.py': ('pylib/cockpit*.py',),   # import_module(generator) from its command line
 }
+# The tests that read the whole repository (git ls-files, every source of every folder) without naming what they read:
+# every domain. tools/test_domains.py cannot see such a scan; a scan of a module folder it does see (SCANS).
+EVERYTHING = {
+    'ctest': {'gamedir_literal_guard'},          # git ls-files: every .py / .cmd / CMakeLists.txt
+    'selftest': {'cab_floor_katyusha_only'},     # os.listdir of tools/, pylib/, autoturret/tools/: every .py
+}
+# The calls that list a folder: a file (or a selftest function) that makes one reads the module folders it names whole,
+# the Python files directly in them too ('pylib/*'), not only their data files.
+SCANS = {'listdir', 'walk', 'glob', 'iglob', 'rglob', 'iterdir', 'scandir'}
 # A built artifact a test names -> the domains its sources are in.
 ARTIFACTS = {'edf6cmpl': ('native-codec',)}
 NATIVE = ('plugin-native',)
@@ -287,6 +296,9 @@ class Repo:
             out.update(f for f in self.files if fnmatch.fnmatchcase(f, pattern))
         for s in self._strings(tree):
             out |= self.string_deps(s, base)
+        if any(isinstance(n, ast.Attribute) and n.attr in SCANS or isinstance(n, ast.Name) and n.id in SCANS
+               for n in ast.walk(tree)):
+            out |= whole(out)
         if os.path.basename(path).startswith('gen_'):
             # a generator writes the C++ it names (src/calls.inc) from Python data, it does not read it; check.py's gen
             # stage, which always runs, compares the two
@@ -373,6 +385,9 @@ class Repo:
         for d in deps:
             if d.startswith('@'):
                 out.add(d[1:])
+            elif d.endswith('/*'):   # a module folder listed: its Python files too (its data files: 'dir/')
+                out |= {owner(f) for f in self.files if f.startswith(d[:-1]) and '/' not in f[len(d) - 1:]
+                        and f.endswith('.py') and not is_full(f)}
             elif d.endswith('/'):
                 out |= self.dir_owners(d)
             elif not is_full(d):
@@ -381,7 +396,13 @@ class Repo:
         return out
 
     def scripts_of(self, deps: set[str]) -> list[str]:
-        return sorted(d for d in deps if not d.startswith('@') and not d.endswith('/') and owner(d) == SCRIPTS)
+        return sorted(d for d in deps if not d.startswith('@') and not d.endswith(('/', '/*')) and owner(d) == SCRIPTS)
+
+
+def whole(deps: set[str]) -> set[str]:
+    """The module folders among `deps` as listed whole ('pylib/' -> 'pylib/*'): a file that lists a folder it names
+    may read every Python file in it."""
+    return {d + '*' for d in deps if d.endswith('/') and d.rstrip('/') in MODULE_DIRS}
 
 
 # --- ctest
@@ -507,9 +528,13 @@ def selftest_deps(repo: Repo) -> dict[str, tuple[set[str], set[str]]]:
         if id(code) in seen:
             return
         seen.add(id(code))
+        scans = bool(SCANS & set(code.co_names))
         for c in code.co_consts:
             if isinstance(c, str):
-                out.update(repo.string_deps(c, tools_dir))
+                named = repo.string_deps(c, tools_dir)
+                out.update(named)
+                if scans:
+                    out.update(whole(named))
             elif isinstance(c, types.CodeType):
                 code_deps(c, glb, seen, out)
             elif isinstance(c, (tuple, frozenset)):
@@ -593,7 +618,8 @@ def compute(build: str) -> dict:
     ctest = {}
     for t in ctest_tests(build):
         deps = ctest_deps(repo, t, build)
-        ctest[t['name']] = {'labels': sorted(repo.domains_of(deps)), 'scripts': repo.scripts_of(deps)}
+        every = {'@' + d for d in NAMES if d != SCRIPTS} if t['name'] in EVERYTHING['ctest'] else set()
+        ctest[t['name']] = {'labels': sorted(repo.domains_of(deps | every)), 'scripts': repo.scripts_of(deps)}
     # A test CMake adds only on some machines (the native checks against the game's DLL, configured when it is
     # installed): this build has no command to read, so keep what a build that had it wrote.
     try:
@@ -605,6 +631,8 @@ def compute(build: str) -> dict:
             ctest[name] = old[name]
     selftest = {}
     for name, (deps, uses) in selftest_deps(repo).items():
+        if name in EVERYTHING['selftest']:
+            deps = deps | {'@' + d for d in NAMES if d != SCRIPTS}
         selftest[name] = {'labels': sorted(repo.domains_of(deps)), 'scripts': repo.scripts_of(deps),
                           'uses': sorted(uses)}
     return {

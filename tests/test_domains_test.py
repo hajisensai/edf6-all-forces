@@ -84,6 +84,53 @@ class Select(unittest.TestCase):
         self.assertLessEqual(cond, set(self.labels['ctest']))
 
 
+    def test_tests_reading_the_whole_repo_follow_every_source(self) -> None:
+        # gamedir_literal_guard reads every tracked .py / .cmd (git ls-files); cab_floor_katyusha_only lists tools/,
+        # pylib/ and autoturret/tools/: any of those sources changing must select them
+        for f in ('tools/installer.py', 'testrange/gen.py', 'tools/edfre.py', 'worldmap/missions.json',
+                  'tools/make_edf5_weapons.py'):
+            self.assertIn('gamedir_literal_guard', td.select([f], self.labels)['ctest'], f)
+        for f in ('tools/make_edf5_weapons.py', 'pylib/mdb.py', 'autoturret/tools/build.py'):
+            self.assertIn('cab_floor_katyusha_only', td.select([f], self.labels)['selftest'], f)
+        self.assertEqual(set(self.labels['ctest']['gamedir_literal_guard']['labels']), set(td.NAMES) - {td.SCRIPTS})
+
+    def test_a_listed_module_folder_is_read_whole(self) -> None:
+        repo = td.Repo()
+        with tempfile.TemporaryDirectory() as d:
+            scan = os.path.join(d, 'scan.py')
+            with open(scan, 'w', encoding='utf-8') as f:
+                f.write("import os\nnames = os.listdir(os.path.join(ROOT, 'pylib'))\n")
+            deps = repo.py_direct(scan)
+        self.assertIn('pylib/*', deps)
+        self.assertIn('pylib-model', repo.domains_of({'pylib/*'}))
+
+
+class Slot(unittest.TestCase):
+    def test_tests_are_chosen_after_the_check_slot_is_held(self) -> None:
+        import contextlib
+        import check
+        order: list[str] = []
+
+        @contextlib.contextmanager
+        def held(_who: str):
+            order.append('held')
+            yield
+
+        saved = check.checklock.held, check.plan
+        check.checklock.held = held
+        check.plan = lambda argv: order.append('plan') or {'argv': argv}
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                with checklock.worktree_once(root):   # the worktree's own slot chooses nothing
+                    self.assertEqual(order, [])
+            with check.slot(['--x']) as (sel, waited):
+                self.assertEqual(order, ['held', 'plan'])
+                self.assertEqual(sel, {'argv': ['--x']})
+                self.assertGreaterEqual(waited, 0)
+        finally:
+            check.checklock.held, check.plan = saved
+
+
 class WorktreeOnce(unittest.TestCase):
     def test_second_check_of_a_worktree_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as root:
