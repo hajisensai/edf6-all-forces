@@ -179,6 +179,8 @@
 | patriot | EDF6VC_PATRIOT.MRAB | 11796 | 5665 (48%) @108 m / 3868 (33%) @217 m | 23 → 5 | 5/5 | 1.51 → 1.88 | +1 s |
 | xm_medium_tank_regular | EDF6VC_XM_MEDIUM_TANK_REGULAR.MRAB | 5155 | 3606 (70%) @115 m / 2714 (53%) @230 m | 22 → 3 | 3/3 | 0.60 → 0.85 | +1 s |
 
+2026-11-24 起 jets 的 EDF6VC_JET / _INTERCEPTOR / _MULTIROLE / _HELI_TRANSPORT 与 c130 的两个档案在生成最后一步各合成一个（`EDF6VC_AIRCRAFT.MRAB`、`EDF6VC_C130.MRAB`，`pylib/texshare.py`：贴图按内容去重），上表是合并前各自的量。LOD 不受影响，按（档案，模型）各自生成。
+
 读表：「外壳」= 去掉座舱（`edf6vc_cpit_*`，不进 LOD）后的三角形，LOD 百分比相对外壳。「生成耗时变化」是同一生成器整体 `build()` 的墙钟差
 （4–6 个生成器并行跑、前后不同时段，噪声有几十秒，只作量级参考；单个大模型的 LOD 生成实测：2S6 ~9 s、BMPT ~20 s、沙扎比 ~20 s）。「—」= 没有一级省到 20%，不写 LOD。
 
