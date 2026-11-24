@@ -305,6 +305,12 @@ void BeforeProject(void* camera,const int*) {
     if(!on || alphaNow>=1.0f || !camera)return;
     Camera* const c=Find(camera);
     if(!c || !c->havePrev || c->written)return;
+    // A camera that did not step on the last frame with ticks (age 1 or more) holds the tick before's pair: blending it
+    // would draw it going back. Left as it is (counted unblended).
+    if(c->age) {
+        ++unblended;
+        return;
+    }
     auto* const bytes=static_cast<unsigned char*>(camera);
     __try {
         float fov=0.0f;

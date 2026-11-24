@@ -283,20 +283,27 @@ bool PatchCall(unsigned rva,const void* to) noexcept {
     return edf::PatchCode(site,expected,call,5);
 }
 
-bool InstallGate() noexcept {
-    if(!edf::Matches(image,kCountFirst,kCountFirstSig,sizeof(kCountFirstSig)) ||
-       !edf::Matches(image,kCountAgain,kCountAgainSig,sizeof(kCountAgainSig))) {
-        Log("FRAMERATE the main loop's tick counts are not as read (another MOD?): no frame gate");
+// The gate's sites as read and the frame step's wait ours (not EDF6VR's or an FPS unlimiter's: frame_pacing.cpp,
+// frame_pacing_logic.h ForeignTickWait). Asked before anything is installed: all or nothing.
+bool GateSitesAsRead() noexcept {
+    if(!FramePacingTickWaitInstalled()) {
+        Log("FRAMERATE the frame step's wait is not ours (the PACING line says whose): nothing installed, the game keeps its rate");
         return false;
     }
-    if(!FramePacingTickWaitInstalled()) {
-        Log("FRAMERATE the frame step's wait is not ours (frame_pacing.cpp): no frame gate");
+    if(!edf::Matches(image,kCountFirst,kCountFirstSig,sizeof(kCountFirstSig)) ||
+       !edf::Matches(image,kCountAgain,kCountAgainSig,sizeof(kCountAgainSig))) {
+        Log("FRAMERATE the main loop's tick counts are not as read (another MOD?): nothing installed, the game keeps its rate");
         return false;
     }
     if(!edf::Matches(image,kFinalStore,kFinalStoreSig,sizeof(kFinalStoreSig))) {
-        Log("FRAMERATE the main loop's store of n (0x%X) is not as read: no frame gate",kFinalStore);
+        Log("FRAMERATE the main loop's store of n (0x%X) is not as read: nothing installed, the game keeps its rate",kFinalStore);
         return false;
     }
+    return true;
+}
+
+bool InstallGate() noexcept {
+    if(!GateSitesAsRead())return false;
     void* const stub=MakeGateStub();
     // `mov [rsp+0C4h],ebx` (the caller's rsp+0xBC); `mov r11,&finalTicks; mov [r11],ebx; ret` (r11 is dead: a call follows).
     unsigned char leaf[]={0x89,0x9C,0x24,0xC4,0x00,0x00,0x00,0x49,0xBB,0,0,0,0,0,0,0,0,0x41,0x89,0x1B,0xC3};
@@ -426,6 +433,7 @@ void InstallFrameRate() noexcept {
     const Config& c=Cfg();
     if(!image)return;
     if(c.frameRateCap==framerate::kOff)return;   // the game's own rate: nothing installed
+    if(!GateSitesAsRead())return;                // another frame limiter (EDF6VR) or another MOD: nothing installed
     // The input move first: the gate needs it.
     const bool input=InstallInputMove();
     const bool present=InstallSwapFlip(c.frameRateFlip);
@@ -448,9 +456,10 @@ void InstallFrameRate() noexcept {
         Log("FRAMERATE guards %d/%d, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,kGuards,takes,sync);
         return;
     }
-    gateOn=InstallGate();
+    // The interpolation before the gate: without it the frames between the ticks would only draw the same scene again.
+    viewOn=framerateview::Install();
+    gateOn=viewOn && InstallGate();
     if(gateOn && flip && c.maxFrameLatency>0)SwapFlipUseWaitable(static_cast<unsigned>(c.maxFrameLatency));
-    viewOn=gateOn && framerateview::Install();
     Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/%d, input takes %d/2, sync=%d, camera interpolation=%d",
         cap,gateOn,guards,kGuards,takes,sync,viewOn);
 }

@@ -11,6 +11,7 @@
 #include "../src/frame_pacing_logic.h"
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <random>
 
 namespace {
@@ -150,6 +151,30 @@ void Loop() {
         Expect(ticks==frames,"and steps exactly one tick",static_cast<u64>(ticks),static_cast<u64>(frames));
     }
 }
+// EDF6VR / an FPS unlimiter on the frame step's wait (frame_pacing_logic.h ForeignTickWait): the game's bytes and no
+// EDF6VR are the only "none"; EDF6VR wins over the bytes (it patches later); each byte of either site counts.
+void Foreign() {
+    const unsigned char waitSig[6]={0xFF,0x15,0xBD,0x27,0x5B,0x00},branchSig[2]={0x74,0xEA};
+    const unsigned char nops[6]={0x90,0x90,0x90,0x90,0x90,0x90};
+    unsigned char wait[6],branch[2];
+    std::memcpy(wait,waitSig,6);std::memcpy(branch,branchSig,2);
+    Expect(ForeignTickWait(wait,waitSig,branch,branchSig,false)==Foreign::kNone,"the game's bytes, no EDF6VR: ours");
+    Expect(ForeignTickWait(wait,waitSig,branch,branchSig,true)==Foreign::kVr,"EDF6VR beside us, bytes still the game's: its");
+    Expect(ForeignTickWait(nops,waitSig,nops,branchSig,false)==Foreign::kWait,"the unlimiter's NOPs: not ours");
+    Expect(ForeignTickWait(nops,waitSig,nops,branchSig,true)==Foreign::kVr,"EDF6VR named first");
+    for(int i=0;i<6;++i) {
+        std::memcpy(wait,waitSig,6);wait[i]^=0x01;
+        Expect(ForeignTickWait(wait,waitSig,branch,branchSig,false)==Foreign::kWait,"one wait byte changed",static_cast<u64>(i));
+    }
+    std::memcpy(wait,waitSig,6);
+    for(int i=0;i<2;++i) {
+        std::memcpy(branch,branchSig,2);branch[i]^=0x01;
+        Expect(ForeignTickWait(wait,waitSig,branch,branchSig,false)==Foreign::kBranch,"one branch byte changed",static_cast<u64>(i));
+    }
+    // Our own redirect (call rel32 + nop) at the wait is "not the game's" too: asked once, before TickWait goes in.
+    const unsigned char ours[6]={0xE8,0x10,0x20,0x30,0x40,0x90};
+    Expect(ForeignTickWait(ours,waitSig,branchSig,branchSig,false)==Foreign::kWait,"a redirected wait is not the game's");
+}
 }  // namespace
 
 int main() {
@@ -158,6 +183,7 @@ int main() {
     Wrap();
     DueTime();
     Loop();
+    Foreign();
     if(failures){std::printf("frame pacing: %d of %d checks failed\n",failures,checks);return 1;}
     std::printf("frame pacing: %d checks ok\n",checks);
     return 0;

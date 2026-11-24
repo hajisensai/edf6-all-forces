@@ -1310,7 +1310,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRenderFence();      // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
     InstallFrameLatency();     // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
     // ini FrameRateCap (docs/unlimited-fps-re.md): 0 the game's 59.94 Hz, nothing installed; otherwise frames between the
-    // ticks, drawn with the camera and the player's root interpolated, on a flip swap chain.
+    // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
+    // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows

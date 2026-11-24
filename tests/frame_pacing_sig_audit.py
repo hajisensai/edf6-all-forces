@@ -53,7 +53,7 @@ def check(ok: bool, why: str) -> None:
 consts = {m[0]: int(m[1], 16) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b', src)}
 arrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
           for name, body in re.findall(r'\b(k\w+(?:Sig|Arg))\[\]=\{([^}]*)\}', src)}
-check(set(arrays) == {'kPumpArg', 'kTickArg', 'kPumpSig', 'kTickSig', 'kTickCountSig', 'kFenceLoopSig', 'kFencePollSig'},
+check(set(arrays) == {'kPumpArg', 'kTickArg', 'kPumpSig', 'kTickSig', 'kTickBranchSig', 'kTickCountSig', 'kFenceLoopSig', 'kFencePollSig'},
       f'the signature arrays: {sorted(arrays)}')
 
 
@@ -82,6 +82,9 @@ check(img[after] == 0xE8 and rel_target(after, 5) == 0x11DAE60, 'the frame step 
 je = after + 5 + 4   # mov ebx,eax (2) + test eax,eax (2)
 check(img[je] == 0x74 and je + 2 + struct.unpack_from('<b', img, je + 1)[0] == consts['kTickSleep'] - 5,
       'the frame step waits again while no tick has passed')
+# That `je` is what EDF6VR / an FPS unlimiter blanks with the wait (frame_pacing_logic.h ForeignTickWait).
+check(consts['kTickBranch'] == je and img[je:je + 2] == arrays['kTickBranchSig'],
+      f"kTickBranch {consts['kTickBranch']:#x} is the loop's je {je:#x} ({img[je:je + 2].hex(' ')})")
 # Both calls in the frame step go to the tick clock (0x11A2F4F before the loop, 0x11A2F6B after the wait).
 check(img[0x11A2F4F] == 0xE8 and rel_target(0x11A2F4F, 5) == consts['kTickCount'], 'the frame step counts its ticks first')
 check(rel_target(after, 5) == consts['kTickCount'], 'the call after the wait is kTickCount')

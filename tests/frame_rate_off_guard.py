@@ -73,6 +73,7 @@ check(callers['InstallGate()'] == ['frame_rate.cpp'], f"InstallGate only in fram
 check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove only in frame_rate.cpp: {callers['InstallInputMove()']}")
 check(set(callers['SwapFlipUseWaitable(']) <= {'frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'}, 'the waitable object only with the frame gate')
 check(re.search(r'if\(gateOn && flip && c\.maxFrameLatency>0\)SwapFlipUseWaitable\(', body), 'the waitable object only with the gate on')
+check(re.search(r'viewOn=framerateview::Install\(\);\s*gateOn=viewOn && InstallGate\(\);', body), 'no interpolation, no gate (#394 review b)')
 plugin = code(read('src', 'plugin.cpp'))
 check(plugin.count('InstallFrameRate();') == 1, 'plugin.cpp installs the frame rate once')
 print(f'frame rate off switch: {checks} checks ok')
