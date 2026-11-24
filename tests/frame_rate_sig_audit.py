@@ -202,14 +202,20 @@ check(re.search(r'RedirectCall\(image\+kFenceCall,image\+kFence,reinterpret_cast
 # A frame without ticks poses at System::Update's render recording (kRecordCall -> kRecordDraw), not at BeginFrame: the
 # frame's object deletion 0x1195F20 comes between them. Only the System::Update call is taken; the loading / menu
 # screens' calls stay the game's.
-record_call, record = vconsts['kRecordCall'], vconsts['kRecordDraw']
-check(img[record_call - 14:record_call + 5] == varrays['kRecordSig'] and rel_target(record_call, 5) == record, 'kRecordCall')
+# The call site is render_record.cpp's (its single owner: the frame rate's turn, then the first person's).
+record_src = open(os.path.join(ROOT, 'src', 'render_record.cpp'), encoding='utf-8').read()
+rconsts = {m[0]: int(m[1], 0) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+|\d+)\b', record_src)}
+rarrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+           for name, body in re.findall(r'const unsigned char (k\w+)\[\]=\{(.*?)\};', record_src, re.S)}
+record_call, record = rconsts['kRecordCall'], rconsts['kRecordDraw']
+check(img[record_call - 14:record_call + 5] == rarrays['kRecordSig'] and rel_target(record_call, 5) == record, 'kRecordCall')
 check(sorted(direct_callers(record)) == sorted([0x93C3F, 0x9D8BA, 0x9DE91, 0xBB48B, record_call]),
       'the render recording has exactly the five known callers')
 deletes = [c for c in direct_callers(0x1195F20) if 0x1198DA0 <= c < record_call]
 check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before kRecordCall')
-check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordDrawHook\)', view), 'RecordDrawHook')
-check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', view), 'kRecordSig checked before patching')
+check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
+check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
+check('renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);' in view, 'the frame rate poses in its render_record turn')
 begin = re.search(r'void BeginFrame\([^)]*\) noexcept \{(.*?)\n\}', view, re.S)
 check(begin and 'PoseRoot' not in begin[1] and 'frameobjects::Pose' not in begin[1] and 'PoseFrame' not in begin[1],
       'BeginFrame writes no pose')

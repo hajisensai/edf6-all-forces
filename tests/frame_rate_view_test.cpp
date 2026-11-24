@@ -2,9 +2,10 @@
 // out as the file reads them: the camera (+0x220 world, +0x24 field, +0x360 soldier), the soldier, the vehicle, their
 // models, skeleton instances and pose arrays. The camera step's and the frame end fence's game calls (image+kCameraStep,
 // image+kFence, image+kRecordDraw) land on local stand-ins: `image` is set so that image+rva is the stand-in for the call
-// being made. Each frame runs as the game does: BeginFrame, the render recording (RecordDrawHook: a frame without ticks
+// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's hook, RecordStart: a frame without ticks
 // poses there), the projection (BeforeProject), the steps (CameraStepHook), the fence (FrameEndHook).
 #include "../src/frame_rate_view.cpp"
+#include "../src/render_record.cpp"
 #include <cmath>
 #include <cstdio>
 
@@ -86,10 +87,13 @@ void Step(void* camera) {
     CameraStepHook(camera,nullptr);
 }
 void Project(void* camera) { BeforeProject(camera,nullptr); }
-// System::Update's render recording call (0x1198FA4), through the hook.
+// System::Update's render recording call (0x1198FA4), through render_record.cpp's hook with the frame rate's turn
+// registered as Install registers it (the call site's patch itself is render_record_test's).
 void Record() {
+    recordState=1;
+    renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
     image=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInRecord),kRecordDraw);
-    RecordDrawHook(nullptr,0x1234,1);
+    RecordHook(nullptr,0x1234,1);
     image=stepImage;
 }
 // A frame without ticks up to its render recording: BeginFrame, then the record call (which poses).
@@ -264,6 +268,35 @@ void CameraBlend() {
     Fence();
     Check(Same(World(cam),b.m,64) && Fov(cam)==3.0f,"camera: matrix restored, someone's field kept");
     Put<float>(cam,kFov,1.4f);
+    Counted();
+}
+
+// 1b. The eye the first person places its Umbra boxes around (FrameRateDrawnEye, at the render recording, before the
+// projection): the blend the projection then draws on a frame without ticks; false (the camera's own) otherwise.
+void DrawnEye() {
+    Reset();
+    const M4 a=Pose(0.0f,0,0,0),b=Pose(0.4f,4,0,2);
+    TickTo(cam,a,1.0f);
+    float eye[3]{};
+    BeginTick(1);
+    Check(!FrameRateDrawnEye(cam,eye),"drawn eye: a frame with ticks draws the camera as it is");
+    Queue(cam,b,1.0f);
+    Step(cam);
+    Fence();
+    Frame0(0.25f);
+    const bool before=FrameRateDrawnEye(cam,eye);
+    const float early[3]={eye[0],eye[1],eye[2]};
+    Check(Same(World(cam),b.m,64),"drawn eye: asking writes nothing");
+    Project(cam);
+    const float* const w=reinterpret_cast<const float*>(cam+kWorld);
+    Check(before && Same(early,w+12,12) && std::fabs(early[0]-1.0f)<1e-4f,"drawn eye: before the projection, the eye it then draws");
+    Check(FrameRateDrawnEye(cam,eye) && Same(eye,w+12,12),"drawn eye: after it, the eye written");
+    Check(!FrameRateDrawnEye(cam2,eye),"drawn eye: a camera not sampled");
+    Fence();
+    FrameRateCameraCut(cam);
+    Frame0(0.5f);
+    Check(!FrameRateDrawnEye(cam,eye),"drawn eye: a cut camera is drawn as stepped");
+    Fence();
     Counted();
 }
 
@@ -645,6 +678,7 @@ int main() {
     stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
     image=stepImage;
     CameraBlend();
+    DrawnEye();
     CameraCuts();
     PrevCur();
     Roots();

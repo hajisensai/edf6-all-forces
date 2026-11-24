@@ -40,6 +40,7 @@
 // is writing, the stock race the 60 Hz frame hides; R1 in the plan).
 #include "frame_rate_view.h"
 #include "frame_rate_objects.h"
+#include "render_record.h"
 #include "frame_rate_logic.h"
 #include "fp_view.h"
 #include "heli.h"
@@ -55,13 +56,9 @@ namespace {
 constexpr unsigned kCameraStepCall=0x11995A6,kCameraStep=0x118DF40;
 // The main loop's frame end: the game thread waits for the render thread (frame_pacing.cpp has its loop).
 constexpr unsigned kFenceCall=0x11A305A,kFence=0x111CC20;
-// System::Update's render recording (System_RecordDraw, called at 0x1198FA4 after the object deletion 0x1195F20 and
-// before the tick loop): a frame without ticks poses here (docs/unlimited-fps-re.md §4.3.2). Its other callers (0x93C3F,
-// 0x9D8BA, 0x9DE91, 0xBB48B) are left alone.
-constexpr unsigned kRecordCall=0x1198FA4,kRecordDraw=0x11978D0;
-// mov r8b,1; movzx edx,byte [r14+0CE9h]; mov rcx,r14; call 0x11978D0
-const unsigned char kRecordSig[]={0x41,0xB0,0x01,0x41,0x0F,0xB6,0x96,0xE9,0x0C,0x00,0x00,0x49,0x8B,0xCE,
-                                  0xE8,0x27,0xE9,0xFF,0xFF};
+// System::Update's render recording (System_RecordDraw 0x11978D0, its call 0x1198FA4 after the object deletion
+// 0x1195F20 and before the tick loop): a frame without ticks poses there (docs/unlimited-fps-re.md §4.3.2), in the
+// frame rate's turn of render_record.cpp (the call site's single owner; the first person places its boxes after).
 // lea rdx,[rsp+38h]; call 0x118DF40
 const unsigned char kCameraStepSig[]={0x48,0x8D,0x54,0x24,0x38,0xE8,0x95,0x49,0xFF,0xFF};
 constexpr unsigned kWorld=0x220,kFov=0x24;
@@ -292,14 +289,12 @@ void PoseFrame() noexcept {
     frameobjects::Pose(alphaNow,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
 }
 
-// System_RecordDraw's call in System::Update; rdx / r8 passed through whole (edx: System+0xCE9, r8b: 1).
-using RecordDrawFn=void*(*)(void*,std::uint64_t,std::uint64_t);
-void* RecordDrawHook(void* sys,std::uint64_t a,std::uint64_t b) {
+// Right before the render recording (render_record.cpp: the frame rate's turn, before the first person's).
+void RecordStart() noexcept {
     if(on && poseDue) {
         poseDue=false;
         PoseFrame();
     }
-    return reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
 }
 
 using CameraStepFn=void(*)(void*,void*);
@@ -416,8 +411,8 @@ bool Install() noexcept {
         Log("FRAMERATE the camera step's call (0x%X) is not where docs/unlimited-fps-re.md has it: no interpolation",kCameraStepCall);
         return false;
     }
-    if(!edf::Matches(image,kRecordCall-14,kRecordSig,sizeof(kRecordSig))) {
-        Log("FRAMERATE the render recording's call (0x%X) is not where docs/unlimited-fps-re.md has it: no interpolation",kRecordCall);
+    if(!renderrecord::Install()) {
+        Log("FRAMERATE the render recording is not hooked: no interpolation");
         return false;
     }
     if(!scopelens::SetBeforeProject(&BeforeProject)) {
@@ -430,14 +425,11 @@ bool Install() noexcept {
         Log("FRAMERATE the frame end's fence call (0x%X) could not be redirected: no interpolation",kFenceCall);
         return false;
     }
-    if(!edf::RedirectCall(image+kRecordCall,image+kRecordDraw,reinterpret_cast<void*>(&RecordDrawHook),changed)) {
-        Log("FRAMERATE the render recording's call could not be redirected: no interpolation");
-        return false;
-    }
     if(!edf::RedirectCall(image+kCameraStepCall,image+kCameraStep,reinterpret_cast<void*>(&CameraStepHook),changed)) {
         Log("FRAMERATE the camera step's call could not be redirected: no interpolation");
         return false;
     }
+    renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
     frameobjects::Install();
     on=true;
     return true;
@@ -453,5 +445,22 @@ void FrameRateCameraCut(const void* camera) noexcept {
         c.prevFov=c.curFov;
         c.cut=true;
     }
+}
+
+bool FrameRateDrawnEye(const void* camera,float eye[3]) noexcept {
+    if(!on || alphaNow>=1.0f || !camera || !eye)return false;
+    const Camera* const c=Find(camera);
+    if(!c || !c->havePrev || c->age)return false;
+    if(c->written){std::memcpy(eye,c->shown+12,12);return true;}
+    float shown[16];
+    __try {
+        const auto* const bytes=static_cast<const unsigned char*>(camera);
+        float fov=0.0f;
+        std::memcpy(&fov,bytes+kFov,4);
+        if(std::memcmp(bytes+kWorld,c->cur,sizeof(c->cur)) || fov!=c->curFov ||
+           !framerate::InterpolateRigid(c->prev,c->cur,alphaNow,shown,kCutMove,kCutTurn))return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    std::memcpy(eye,shown+12,12);
+    return true;
 }
 }  // namespace crew

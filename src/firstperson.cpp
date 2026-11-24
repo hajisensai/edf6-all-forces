@@ -63,6 +63,7 @@
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "frame_rate_view.h"
+#include "render_record.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
@@ -151,12 +152,9 @@ constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 constexpr unsigned kUmbraPlace=0x11B30C0;
 constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
 constexpr float kEyeBox=2.0f;
-// The frame's render, its call in System::update (rcx the system, dl, r8b).
-constexpr unsigned kRenderCall=0x1198FA4,kRender=0x11978D0;
 // Native camera update submits its camera-to-world to Umbra before our camera callback returns. Capture that exact
 // frame at the verified main-camera call site, rather than comparing the later, differently timed camera matrix.
 constexpr unsigned kCameraSubmitCall=0x118E10A,kCameraSubmit=0x11D46D0;
-using RenderFn=void(__fastcall*)(void*,std::uint8_t,std::uint8_t);
 // The main view's opaque pass: each object submitted by 0x11E1630(system, object, 1); the pass ended by
 // 0x11E1590(system, 1), called at 0x11E2572.
 constexpr unsigned kSubmit=0x11E1630,kPassEnd=0x11E1590,kPassEndCall=0x11E2572;
@@ -913,9 +911,13 @@ void Place(const void* model,const float* eye) noexcept {
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
 
-// The body and the weapons in hand around the eye, or (`real`) where they are.
+// The body and the weapons in hand around the eye, or (`real`) where they are. The eye is the one this frame is drawn
+// from: on a frame without ticks the unlimited frame rate's blend (FrameRateDrawnEye; Umbra culls from the camera the
+// render recording projects, render_record.cpp), else the camera's own.
 void PlaceAll(bool real) noexcept {
-    const float* eye=real ? nullptr : reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
+    float drawn[3];
+    const float* eye=real ? nullptr :
+        FrameRateDrawnEye(Current().cam,drawn) ? drawn : reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
     if(ModelOwnerIs(Current().body,kBodyModel,Current().bodyCtrl))Place(Current().body,eye);
     for(int i=0;i<Current().inHandCount;++i)
         if(ModelOwnerIs(Current().inHand[i],kWeaponModel,Current().inHandCtrls[i]))Place(Current().inHand[i],eye);
@@ -1759,13 +1761,13 @@ void Camera(unsigned char* cam) noexcept {
     Flashes();
 }
 
-// The render about to start: the viewmodel's models placed around the eye for Umbra (above).
-void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
+// The render about to start: the viewmodel's models placed around the eye for Umbra (above). The first person's turn
+// of render_record.cpp, after the frame rate's poses (it places from the eye drawn this frame).
+void RenderStart() noexcept {
     SyncSession();++renderFrame;
     State* before=selected;
     __try { for(auto& state:states)if(state.on && !state.overridden){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
-    reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
 
 // A model of the viewmodel drawn in the selected view's opaque pass in progress (render thread: counted by that pass's
@@ -2768,7 +2770,8 @@ bool InstallFirstPerson() noexcept {
     const bool shotOk=InstallShotEntry();
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
-    placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
+    placeOk=placeOk && renderrecord::Install();
+    if(placeOk)renderrecord::Set(renderrecord::Slot::kFirstPerson,&RenderStart);
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());

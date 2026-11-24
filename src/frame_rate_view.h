@@ -25,4 +25,9 @@ void TakeCounts(unsigned& blended,unsigned& unblended,unsigned& roots,unsigned& 
 // until the next step draw this step as it is instead of a blend across the jump. nullptr: every camera. Free when the
 // interpolation is off.
 void FrameRateCameraCut(const void* camera) noexcept;
+// Game thread, at the render recording (render_record.h, before 0x11978D0 projects): the eye (the camera's world
+// matrix's position row) `camera` is drawn from this frame, the blend BeforeProject will write on a frame without ticks
+// (same checks, nothing written). False: drawn as it is (interpolation off, a frame with ticks, a cut, a camera not
+// blended); the caller reads the camera itself.
+bool FrameRateDrawnEye(const void* camera,float eye[3]) noexcept;
 }  // namespace crew

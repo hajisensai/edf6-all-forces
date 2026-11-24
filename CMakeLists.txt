@@ -148,7 +148,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/frame_rate_objects.cpp src/swap_flip.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/frame_rate_objects.cpp src/render_record.cpp src/swap_flip.cpp)
 # The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp src/preload_set.cpp)
@@ -2172,6 +2172,13 @@ target_link_libraries(frame_rate_view_test PRIVATE edf6common)
 target_compile_options(frame_rate_view_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks frame_rate_view_test)
 add_test(NAME frame_rate_view COMMAND frame_rate_view_test)
+# The render recording's single owner (src/render_record.cpp): 0x1198FA4 redirected once, the frame rate's and the first
+# person's turns in order, each alone.
+add_executable(render_record_test EXCLUDE_FROM_ALL tests/render_record_test.cpp)
+target_include_directories(render_record_test PRIVATE src common)
+target_compile_options(render_record_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks render_record_test)
+add_test(NAME render_record COMMAND render_record_test)
 add_executable(frame_rate_objects_test EXCLUDE_FROM_ALL tests/frame_rate_objects_test.cpp)
 target_include_directories(frame_rate_objects_test PRIVATE src common)
 target_link_libraries(frame_rate_objects_test PRIVATE edf6common)
