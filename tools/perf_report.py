@@ -67,6 +67,9 @@ RENDER = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF RENDER (\d+) presents
                     r'([\d.]+) ms apart \(worst ([\d.]+)\); input to present ([\d.]+) ms \(the frame\'s own sample\), '
                     r'([\d.]+) ms \(worst ([\d.]+); [^)]*\), (\d+) unpaired; submits a frame by pass ([\d.]+) ([\d.]+) '
                     r'([\d.]+) ([\d.]+) ([\d.]+), other ([\d.]+); mesh draws a frame ([\d.]+)')
+GPUROW = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF GPU a frame: occlusion query reads ([\d.]+) \(([\d.]+) not in '
+                    r'yet, ([\d.]+) waiting\), ([\d.]+) ms \(waiting ([\d.]+), worst call ([\d.]+)\); skin palettes ([\d.]+), '
+                    r'([\d.]+) ms')
 NETCH = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NET CHANNELS out: (.*?); in: (.*?); world walks (\d+) '
                    r'\(([\d.]+) ms, ([\d.]+) a frame\)')
 NETROW = re.compile(r'((?:bit|head) 0x[0-9A-Fa-f]+) (\d+)/(\d+) B')
@@ -77,16 +80,66 @@ COOP = re.compile(r'\[(?:\d{4}-\d\d-\d\d )?(\d+):(\d+):(\d+(?:\.\d+)?)\].*?STATS
                   r'([\d.]+) kbps, to (\d+) players.*?wire up ([\d.]+) kbps down ([\d.]+) kbps')
 
 
-class Image:
-    """EDF.dll's .pdata (function ranges) and its vtables' slots by class (RTTI), for naming stack frames."""
+def vanilla_dirs() -> tuple[str, str]:
+    """The two name sources: this machine's vanilla code index (not in any repository) and the edf6-vanilla-re clone.
+    $EDF6_VANILLA_CODE / $EDF6_VANILLA_RE, else where they sit on this machine: vanilla-code in the folder that holds
+    the main checkout, edf6-vanilla-re next to that folder."""
+    import subprocess
+    code, re_ = os.environ.get('EDF6_VANILLA_CODE', ''), os.environ.get('EDF6_VANILLA_RE', '')
+    if not code or not re_:
+        try:
+            common = subprocess.run(['git', '-C', ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                    capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            common = ''
+        if common:
+            home = os.path.dirname(os.path.dirname(common))   # common is <home>/main/.git
+            code = code or os.path.join(home, 'vanilla-code')
+            re_ = re_ or os.path.join(os.path.dirname(home), 'edf6-vanilla-re')
+    return code, re_
 
-    def __init__(self, dll: str, classes: bool = True) -> None:
+
+def vanilla_names(sha: str, code: str, re_: str) -> dict[int, str]:
+    """EDF.dll's function names by RVA for the build of sha256 `sha`: edf6-vanilla-re's shared/functions (the reviewed
+    names) over the vanilla code index's (its functions.tsv but the bare Ghidra address labels). A source missing (CI
+    has neither), or made from another build, gives none: the frames are then shown by RVA alone."""
+    names: dict[int, str] = {}
+    try:
+        with open(os.path.join(code, 'function-index', 'summary.json'), encoding='utf-8') as f:
+            same = json.load(f).get('images_sha256', {}).get('EDF.dll', '').lower() == sha
+        if same:
+            with open(os.path.join(code, 'function-index', 'functions.tsv'), encoding='utf-8', newline='') as f:
+                for r in csv.DictReader(f, delimiter='\t'):
+                    if r['module'] == 'EDF.dll' and r['label_kind'] != 'address_label':
+                        names[int(r['rva'], 16)] = r['label']
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        with open(os.path.join(re_, 'shared', 'builds.tsv'), encoding='utf-8', newline='') as f:
+            builds = {r['build'] for r in csv.DictReader(f, delimiter='\t')
+                      if r['module'] == 'EDF.dll' and r['sha256'].lower() == sha}
+        if builds:
+            with open(os.path.join(re_, 'shared', 'functions', 'EDF.dll.tsv'), encoding='utf-8', newline='') as f:
+                for r in csv.DictReader(f, delimiter='\t'):
+                    if r['build'] in builds:
+                        names[int(r['rva'], 16)] = r['name']
+    except (OSError, ValueError, KeyError):
+        pass
+    return names
+
+
+class Image:
+    """EDF.dll's .pdata (function ranges), its vtables' slots by class (RTTI) and the functions' names where the vanilla
+    indexes know them (vanilla_names), for naming stack frames."""
+
+    def __init__(self, dll: str, classes: bool = True, names: bool = True) -> None:
         import pefile
         pe = pefile.PE(dll, fast_load=True)
         pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXCEPTION']])
         self.pdata = sorted((e.struct.BeginAddress, e.struct.EndAddress) for e in pe.DIRECTORY_ENTRY_EXCEPTION)
         self.starts = [b for b, _ in self.pdata]
         self.slot_class: dict[int, str] = {}
+        self.names: dict[int, str] = vanilla_names(file_sha256(dll), *vanilla_dirs()) if names else {}
         if classes:
             self._classes(pe)
 
@@ -125,7 +178,8 @@ class Image:
     def name(self, rva: int | None) -> str:
         if rva is None:
             return '?'
-        return f'{rva:#x}' + (f' {self.slot_class[rva]}' if rva in self.slot_class else '')
+        label = self.names.get(rva) or self.slot_class.get(rva)
+        return f'{rva:#x}' + (f' {label}' if label else '')
 
 
 def frame_rva(frame: str) -> int | None:
@@ -240,7 +294,7 @@ class Plugins:
             dll = self.dll if mod.lower() == INSTALLED_DLL.lower() else None
             if dll:
                 try:
-                    img = Image(dll, classes=False)
+                    img = Image(dll, classes=False, names=False)
                 except Exception:   # pefile missing or not a PE: RVAs as they are
                     img = None
                 if os.path.isfile(os.path.splitext(dll)[0] + '.pdb'):
@@ -296,22 +350,30 @@ def _tod(t: float) -> float:
     return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
 
 
+def in_window(t: float, window: tuple[float, float]) -> bool:
+    """Whether a row stamped `t` (a time of day, seconds) is inside `window` (wall-clock seconds; a row covers the 5 s
+    before it, so one must end 5 s in). The stamp is placed on the wall clock from the window's start, as
+    tools/perfrun.py split_log does: a window over midnight (23:59:50 to 00:00:30) keeps its rows past midnight, and a
+    stamp up to an hour before the start is before it (not a day later)."""
+    d = (t - _tod(window[0])) % 86400
+    at = window[0] + (d - 86400 if d > 86400 - 3600 else d)
+    return window[0] + 5 <= at <= window[1] + 0.5
+
+
 def _rows(log: str, pattern: re.Pattern, window: tuple[float, float] | None) -> list[re.Match]:
-    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (wall-clock seconds;
-    a row covers the 5 s before it, so one must end 5 s in), all of them without one."""
+    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (in_window), all of
+    them without one."""
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
     except OSError:
         return []
-    a, b = (_tod(window[0]), _tod(window[1])) if window else (None, None)
     out = []
     for line in lines:
         m = pattern.search(line)
         if not m:
             continue
-        t = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
-        if a is None or a + 5 <= t <= b + 0.5:
+        if window is None or in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
             out.append(m)
     return out
 
@@ -364,6 +426,20 @@ def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
             'apart_worst': max(float(m[8]) for m in rows), 'own_ms': mean(9), 'stepped_ms': mean(10),
             'stepped_worst': max(float(m[11]) for m in rows), 'unpaired': sum(int(m[12]) for m in rows),
             'submits': [mean(i) for i in range(13, 19)], 'meshes': mean(19)}
+
+
+def read_gpu(log: str, window: tuple[float, float]) -> dict[str, float]:
+    """The PERF GPU rows in `window` (render thread, gpu-5 / gpu-6): each a frame, the rows' plain mean (each row is a
+    5 s period); the worst call the max. {} without them."""
+    rows = _rows(log, GPUROW, window)
+    if not rows:
+        return {}
+
+    def mean(i: int) -> float:
+        return sum(float(m[i]) for m in rows) / len(rows)
+    return {'rows': len(rows), 'queries': mean(4), 'pending': mean(5), 'waits': mean(6), 'query_ms': mean(7),
+            'wait_ms': mean(8), 'query_worst': max(float(m[9]) for m in rows), 'palettes': mean(10),
+            'palette_ms': mean(11)}
 
 
 def read_net(log: str, window: tuple[float, float], secs: float) -> dict:
@@ -521,16 +597,12 @@ OBJECTS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF OBJECTS enemies (-?\
 def read_objects(log: str, window: tuple[float, float]) -> dict:
     """The plugin's PERF OBJECTS rows (what the game held: its own team counts, the living only) in `window`: each
     team's mean and max, {} on a build without them."""
-    def tod(t: float) -> float:
-        lt = time.localtime(t)
-        return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
-    a, b = tod(window[0]), tod(window[1])
     rows = []
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             for line in f:
                 m = OBJECTS.search(line)
-                if m and a + 5 <= int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) <= b + 0.5:
+                if m and in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
                     rows.append((int(m[4]), int(m[5]), int(m[6])))
     except OSError:
         return {}
@@ -704,6 +776,21 @@ def phases(img: Image, stacks: list[list[str]], top: int, plug: Plugins | None =
     return out
 
 
+def plugin_owns(plug: 'Plugins', st: list[str]) -> bool:
+    """Whether a sample is the plugin's own work: its deepest plugin frame (the measurement probes not counted) is not a
+    hook that only calls through to the game (a *Hook whose callee, the next frame leafward, is EDF.dll: the stock Think
+    under ThinkHook, the stock render under RenderHook). What the plugin's own code calls in the game counts: the
+    deepest plugin frame is then that code, not the hook."""
+    for j, f in enumerate(st):
+        if not is_plugin(f):
+            continue
+        name = plug.func(f, j == 0)[1]
+        if 'perfprobe' in name:
+            continue
+        return not ('Hook' in name and j > 0 and frame_rva(st[j - 1]) is not None)
+    return False
+
+
 def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms: float | None) -> list[str]:
     """The plugin's functions on a thread: inclusive (on the stack at all) and self (the deepest frame outside the
     system DLLs, so the system calls below it count but EDF.dll work it called does not), as a share of the thread's
@@ -733,12 +820,19 @@ def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms:
             incl[k] += 1
     if not incl:
         return ['no plugin frames']
+    anyp = sum(1 for st in stacks if any(is_plugin(f) and 'perfprobe' not in plug.func(f, j == 0)[1]
+                                         for j, f in enumerate(st)))
+    ownp = sum(1 for st in stacks if plugin_owns(plug, st))
 
     def row(k: str, c: int) -> str:
         ms = f' {c / n * frame_ms:6.2f} ms/frame' if frame_ms else ''
         label = names[k] if names[k] == k else f'{names[k]} ({k})'
         return f'- {c / n * 100:5.1f}%{ms} {label}'
-    out = ['inclusive:', '']
+    ms = f', {anyp / n * frame_ms:.2f} ms/frame' if frame_ms else ''
+    own_ms = f', {ownp / n * frame_ms:.2f} ms/frame' if frame_ms else ''
+    out = [f'the plugin on the stack (the measurement probes not counted): {anyp / n * 100:.1f}%{ms}',
+           f"the plugin's own work (not the game's own under a hook that only calls through): {ownp / n * 100:.1f}%{own_ms}",
+           '', 'inclusive:', '']
     out += [row(k, c) + f' (self {selfc[k] / n * 100:.1f}%)' for k, c in incl.most_common(top)]
     out += ['', 'self (system calls below included):', '']
     out += [row(k, c) for k, c in selfc.most_common(top)]
@@ -763,7 +857,7 @@ def thread_detail(img: Image, stacks: list[list[str]], top: int) -> list[str]:
         if frame_rva(st[0]) is None:
             leaf_via[module(st[0])][' < '.join(img.name(s) for s in edf[:2]) or '(no EDF frame)'] += 1
         plugin += any(is_plugin(f) for f in st)
-    out = [f'plugin frames on the stack: {plugin / n * 100:.1f}%', '', 'self (deepest EDF.dll function, system calls '
+    out = [f'plugin frames on the stack (the measurement probes included): {plugin / n * 100:.1f}%', '', 'self (deepest EDF.dll function, system calls '
            'below it included):', '']
     out += [f'- {c / n * 100:5.1f}% {img.name(f)} <- ' + ', '.join(f'{k} {v}' for k, v in callers[f].most_common(3))
             for f, c in selfc.most_common(top)]
@@ -828,6 +922,12 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'stepped with, two frames back; {render["unpaired"]} presents unpaired',
                 f'- draw submits a frame by pass 0 / 1 / 2 / 3 / 4 / other: {sub}; mesh draws a frame '
                 f'{render["meshes"]:.0f}']
+    gpu = read_gpu(log, cw)
+    if gpu:
+        out += [f'- occlusion query reads a frame {gpu["queries"]:.1f} ({gpu["pending"]:.1f} not in yet, '
+                f'{gpu["waits"]:.1f} waiting), {gpu["query_ms"]:.3f} ms (waiting {gpu["wait_ms"]:.3f}, worst call '
+                f'{gpu["query_worst"]:.2f}); skin palettes a frame {gpu["palettes"]:.1f}, {gpu["palette_ms"]:.3f} ms '
+                f'(gpu-5, gpu-6)']
     pm = presentmon_summary(os.path.join(run_dir, 'presentmon.csv'))
     if pm:
         out += ['', f'## Display (PresentMon, {pm["presents"]} presents)', '',

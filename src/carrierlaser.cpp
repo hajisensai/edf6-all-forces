@@ -38,6 +38,7 @@
 // deleted) when the last carrier is gone, though nothing of the carriers runs any more.
 #include "crew.h"
 #include "preload_set.h"
+#include "edf/world_tables.h"
 #include "enemy_control_native.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -58,8 +59,7 @@ constexpr unsigned kDemoVtable=0x17D4B20,kDemoUpdate=0x5B5C50;
 constexpr std::size_t kDemoUpdateSlot=5,kDemoIfc=0x170;
 constexpr unsigned kPreload=0x7A3780,kCreateObject=scene::kCreateObject,kDelete=0x118A1B0,kInitParamVtable=scene::kInitParamBaseVtable;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
-constexpr std::size_t kTeams=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTeamRelation=0x18;
-constexpr int kMaxTeams=64,kEnemyRelation=2;
+constexpr int kMaxTeams=enemypoints::kMaxTeam,kEnemyRelation=enemypoints::kEnemyRelation;   // edf/world_tables.h
 constexpr unsigned kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,kIfcStepFromPoint=0x2B970D,kIfcStepStart=0x2B9756;
 constexpr std::size_t kIfcAim=0x20,kIfcFromPoint=0x2F9,kIfcStart=0x300;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8,kObjFlags=0x18;
@@ -172,12 +172,8 @@ bool ShipEnemy(const unsigned char* ship,int otherTeam) noexcept {
     if(!Readable(ship,kTeam+4))return false;
     const int own=At<int>(ship,kTeam);
     if(own<0 || own>=kMaxTeams || otherTeam<0 || otherTeam>=kMaxTeams || own==otherTeam)return false;
-    const auto* manager=At<const unsigned char*>(image,kTeams);
-    if(!Readable(manager,kTeamRows+8))return false;
-    const auto* rows=At<const unsigned char*>(manager,kTeamRows);
-    if(!Readable(rows+own*kTeamStride,kTeamStride))return false;
-    const auto* relations=At<const int*>(rows+own*kTeamStride,kTeamRelation);
-    return Readable(relations+otherTeam,sizeof(int)) && relations[otherTeam]==kEnemyRelation;
+    const std::int32_t* relations=edf::Relations(image,own);
+    return relations && relations[otherTeam]==kEnemyRelation;
 }
 bool EnemyCarrier(const unsigned char* ship,const ObjRef& carrier) noexcept {
     SubView list[kMaxCarriers]{};

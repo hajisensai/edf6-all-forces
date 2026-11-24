@@ -28,6 +28,7 @@
 #include "command_net.h"
 #include "layout.h"
 #include "memory.h"
+#include "live_set.h"
 #include "formation.h"
 #include "ground_navigation.h"
 #include "pickup.h"
@@ -139,12 +140,32 @@ constexpr int kMaxArms=16,kMaxRoot=16;
 // enemies; fixed 256 / 1024 / 512 left the rest without the plugin's AI or out of target choice). Their first sizes:
 // the old caps, room enough for a stock mission without growing.
 constexpr int kFirstEnemies=1024,kFirstFriends=512,kFirstNobodys=128;
-// The frame grids' cells (m, npc_grid.h): about a crowd's threat reach (Evade: 2 x NpcDangerRange) and a friend's
-// nearness to a target (kFriendNearTarget) -- a query looks at a few cells.
-constexpr float kEnemyCell=16.0f,kFriendCell=16.0f;
+// The frame grids' cells (m, npc_grid.h). The enemies': about a crowd's threat reach (Evade: 2 x NpcDangerRange), a
+// query looks at a few cells. The friends': near the width of a shot's capsule (ShotClearOf: frRadius + kSpread, 1.4 m
+// to 4.6 m each side). Its main ask is that capsule, once a step for every soldier that fires, over a crowd of them:
+// 16 m cells handed it every friend in a band 32-48 m wide along the shot (stress:100 2026-11-24: ShotOk 13 ms a frame,
+// npc::ShotClear's own tests 9.7 of it); 4 m cells, one about 13 m wide. The grid makes the cells coarser by itself
+// when the friends spread far (at most ~4 cells a friend).
+constexpr float kEnemyCell=16.0f,kFriendCell=4.0f;
 
+// The memory ArmsOf asked Readable of for a soldier, as it stood when the asks were made: its weapon list (address,
+// count, the weapons in it, which of them answered readable) and its WeaponSets (address, count, each hand's entry,
+// null when that entry did not answer). While the live soldier still holds the same list and sets with the same
+// pointers in them, the memory is the same memory: the soldier owns it, and a buffer or weapon freed would be one the
+// game itself goes on reading. So ArmsOf asks again only when one of them changes (a weapon picked up, a new soldier).
+struct ArmsSeen {
+    bool known;
+    const void* list;
+    std::uint64_t count;
+    const unsigned char* sets;
+    std::uint64_t setCount;
+    const unsigned char* weapon[kMaxArms];
+    std::uint32_t readable;   // bit i: weapon[i]
+    const unsigned char* const* entry[kHands];
+};
 struct Soldier {
     ObjRef ref;
+    ArmsSeen arms;           // ArmsOf's asks, kept while its weapons stand as they were
     ULONGLONG seen,loggedAt,rollAt,spotAt,losFrame;
     npc::Control control;
     bool controlSet,homeSet,spotSet,los,noSwitch;
@@ -240,6 +261,7 @@ void SeeEnemy(void* ctx,const void* object,const float* aim) {
     w.enemyIndex.Set(object,w.enemies);
     Enemy& e=w.enemy[w.enemies++];
     e.object=object;std::memcpy(e.aim,at,12);e.points=1;
+    liveset::Add(object);
 }
 
 struct FriendWalk { void** vtable; World* w; };
@@ -262,6 +284,7 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         npc::Friend& fr=w.fr[w.friends];
         fr.pos[0]=p[0];fr.pos[1]=p[1]+(r==kVehicleRadius ? 1.5f : 1.0f);fr.pos[2]=p[2];fr.radius=r;
         w.frObject[w.friends++]=o;
+        liveset::Add(o);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 void __fastcall FriendDtor(void*,unsigned) noexcept {}
@@ -275,6 +298,7 @@ void __fastcall NobodyVisit(void* self,void* object) noexcept {
         if(!o || o[kDead] || !KnownVehicle(o) || !NpcDrivable(o))return;
         Room(w.nobody,w.nobodys);
         w.nobody[w.nobodys++]=o;
+        liveset::Add(o);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 void* kNobodyVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&NobodyVisit)};
@@ -320,7 +344,10 @@ const void* followedLock=nullptr;   // the turret lock the mark last followed (F
 // A mark key press at an aircraft's stick waiting for its lock (JetMarkFrame).
 struct JetMark { bool pending; const void* from; ULONGLONG until; };
 JetMark jetMark{};
-struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
+// step: the scene step KeepMark published it in (step_fresh.h; every step, and it clears `on` itself when the mark goes):
+// the count only covers a frame that stopped running KeepMark while the scene runs (no player); at the scene's end the
+// count stands still and crew::SceneOver makes the stamp stale (step_fresh.h).
+struct MarkPub { bool on; float at[3]; stepfresh::Step step; NpcPing ping; };
 MarkPub markPub{};
 NpcPing ping{};
 SRWLOCK markLock=SRWLOCK_INIT;
@@ -416,7 +443,7 @@ void KeepMark() noexcept {
     if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
     else if(mark.obj){npcmark::Assign(mark.obj,{});Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
-    markPub.on=npcmark::MarkOn() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.on=npcmark::MarkOn() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.step=stepfresh::Now();
     markPub.ping=ping;
     if(!npcmark::MarkOn())markPub.ping.on=false;
     ReleaseSRWLockExclusive(&markLock);
@@ -633,38 +660,74 @@ const unsigned char* SetWeapon(const unsigned char* h,int k) noexcept {
     const auto entry=At<unsigned char* const*>(set,kSetWeapon);
     return Readable(entry,8) ? *entry : nullptr;
 }
-Arms ArmsOf(const unsigned char* h) noexcept {
-    Arms a{};
-    const auto list=At<unsigned char* const*>(h,kWeapons);
-    const auto count=At<std::uint64_t>(h,kWeaponCount);
-    if(!count || count>16)return a;
-    // The pages it asks below, asked of the working set in two calls before (edf::PrefetchReadableSpans: the answers
-    // Readable gives, found in its cache): the list and the WeaponSets (SetWeapon's), then the weapons and the sets'
-    // entries, read through the sets. One call each was 4 a soldier (the list, the batch of weapons, a set, an entry:
-    // stress:100 2026-11-08, ArmsOf's asks 3.7 ms a frame, ~0.23 us of each call its own whatever its pages).
-    edf::ReadSpan spans[16+kHands];
+// Whether `seen` still describes h's weapons: the same list, sets and pointers in them (ArmsSeen). Read straight: each
+// is memory the asks answered for and the live soldier still holds under the same pointer.
+bool SameArms(const ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,
+              std::uint64_t setCount) noexcept {
+    if(!seen.known || list!=seen.list || count!=seen.count || sets!=seen.sets || setCount!=seen.setCount)return false;
+    if(std::memcmp(list,seen.weapon,count*8)!=0)return false;
+    for(int k=0;k<kHands;++k)if(setCount>static_cast<std::uint64_t>(k) && seen.entry[k] &&
+                                At<const unsigned char* const*>(sets+k*kSetStride,kSetWeapon)!=seen.entry[k])return false;
+    return true;
+}
+// The asks (Readable) for h's weapon list, weapons and WeaponSet entries, their answers into `seen`; false when the list
+// itself does not answer.
+// The pages are asked of the working set in two calls (edf::PrefetchReadableSpans: the answers Readable gives, found in
+// its cache): the list and the WeaponSets, then the weapons and the sets' entries, read through the sets. One call each
+// was 4 a soldier (stress:100 2026-11-08, ArmsOf's asks 3.7 ms a step, ~0.23 us of each call its own whatever its pages).
+// Once a soldier, and again when its weapons change (SameArms): asked every step, the page cache's tick (~16 ms) ran
+// out within each long step and every soldier's pages were asked anew (stress:100 2026-11-24: 11.5 ms a frame).
+bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,
+             std::uint64_t setCount) noexcept {
+    seen=ArmsSeen{};
+    edf::ReadSpan spans[kMaxArms+kHands];
     int spanCount=0;
     spans[spanCount++]={list,count*8};
-    for(int k=0;k<kHands;++k)if(At<std::uint64_t>(h,kSetCount)>static_cast<std::uint64_t>(k))
-        spans[spanCount++]={At<const unsigned char*>(h,kSets)+k*kSetStride,kSetWeapon+8};
+    for(int k=0;k<kHands;++k)if(setCount>static_cast<std::uint64_t>(k))spans[spanCount++]={sets+k*kSetStride,kSetWeapon+8};
     edf::PrefetchReadableSpans(spans,spanCount);
-    if(!Readable(list,count*8))return a;
+    if(!Readable(list,count*8))return false;
     spanCount=0;
     for(std::uint64_t i=0;i<count;++i)spans[spanCount++]={list[i],kWeaponAmmo+4};
-    for(int k=0;k<kHands;++k)if(At<std::uint64_t>(h,kSetCount)>static_cast<std::uint64_t>(k)) {
-        const auto set=At<const unsigned char*>(h,kSets)+k*kSetStride;
+    for(int k=0;k<kHands;++k)if(setCount>static_cast<std::uint64_t>(k)) {
+        const auto set=sets+k*kSetStride;
         if(Readable(set,kSetWeapon+8))spans[spanCount++]={At<const void*>(set,kSetWeapon),8};
     }
     edf::PrefetchReadableSpans(spans,spanCount);
+    for(std::uint64_t i=0;i<count;++i) {
+        seen.weapon[i]=list[i];
+        if(Readable(list[i],kWeaponAmmo+4))seen.readable|=1u<<i;
+    }
+    for(int k=0;k<kHands;++k)if(setCount>static_cast<std::uint64_t>(k)) {
+        const auto set=sets+k*kSetStride;
+        if(!Readable(set,kSetWeapon+8))continue;
+        const auto entry=At<const unsigned char* const*>(set,kSetWeapon);
+        if(Readable(entry,8))seen.entry[k]=entry;
+    }
+    seen.list=list;seen.count=count;seen.sets=sets;seen.setCount=setCount;
+    // Kept only when every ask said yes: a weapon or entry that did not answer (one being set up) is asked again.
+    bool all=seen.readable==(1u<<count)-1;   // count <= kMaxArms (16)
+    for(int k=0;k<kHands;++k)all=all && (setCount<=static_cast<std::uint64_t>(k) || seen.entry[k]);
+    seen.known=all;
+    return true;
+}
+// h: Think's own object (live). `seen`: its soldier's (Soldier::arms).
+Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {
+    Arms a{};
+    const auto list=At<unsigned char* const*>(h,kWeapons);
+    const auto count=At<std::uint64_t>(h,kWeaponCount);
+    if(!count || count>kMaxArms)return a;
+    const auto sets=At<const unsigned char*>(h,kSets);
+    const auto setCount=At<std::uint64_t>(h,kSetCount);
+    if(!SameArms(seen,list,count,sets,setCount) && !AskArms(seen,list,count,sets,setCount))return a;
     const unsigned char* held[kHands];
-    for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
-    a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
+    for(int k=0;k<kHands;++k)held[k]=seen.entry[k] ? *seen.entry[k] : nullptr;
+    a.n=static_cast<int>(count);
     for(int i=0;i<a.n;++i) {
         const unsigned char* w=list[i];
         npc::Arm& m=a.arm[i];m=npc::Arm{};
         // A backpack weapon (a sub slot's: npc_backpack.cpp) is in no WeaponSet: never picked through d82+i, fired by the
         // trigger, nor counted in the reach it fights at or the blast its shots are vetoed for (Backpack uses it).
-        if(!Readable(w,kWeaponAmmo+4) || NpcPackIndex(h,i))continue;
+        if(!(seen.readable&(1u<<i)) || NpcPackIndex(h,i))continue;
         const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
         a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
         a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
@@ -1954,7 +2017,8 @@ void Think(unsigned char* h,int cls) noexcept {
         return;
     }
     const ULONGLONG ms=GameMs();
-    SeeFrame(h);
+    SeeFrame(h);   // first: the step's frame moved before h is listed in it (listed under the last step, the next Add drops it)
+    liveset::Add(h);   // the game is calling its Think: WastedFire's asks of it as the shooter (VerdictOf)
     if(world.frame!=GameFrame())Gather(team);   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
     const unsigned char* root=RootLeader(h);
     const npc::Control control=ControlOf(h,root);
@@ -1980,7 +2044,7 @@ void Think(unsigned char* h,int cls) noexcept {
         std::memcpy(s->home,pos,12);s->homeSet=true;s->spotSet=false;
     }
     if(s->boardV && Board(*s,h,pos,ms))return; // boarding does not depend on readable hand weapons
-    const Arms a=ArmsOf(h);
+    const Arms a=ArmsOf(h,s->arms);
     if(a.n==0) {   // its weapons cannot be read: nothing to fight with that the plugin knows of, so all of it stays stock
         if(Cfg().debug && !s->unarmedSaid && ms-s->loggedAt>kLogMs) {
             s->loggedAt=ms;s->unarmedSaid=true;
@@ -1991,7 +2055,7 @@ void Think(unsigned char* h,int cls) noexcept {
     s->unarmedSaid=false;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);   // a script's unit keeps its stock moves
-    if(Cfg().debug && ms-s->loggedAt>kLogMs) {
+    if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
             ControlName(control),pos[0],pos[1],pos[2],a.n,a.held[0],p.arm,p.arm>=0 && p.arm<a.n ? a.arm[p.arm].reach : 0.0f,s->target.obj,
@@ -4590,7 +4654,7 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
 
 bool NpcMarkReadout(float* at) noexcept {
     AcquireSRWLockShared(&markLock);
-    const bool on=markPub.on && GetTickCount64()-markPub.wall<=500;
+    const bool on=markPub.on && stepfresh::Fresh(markPub.step);
     if(on)std::memcpy(at,markPub.at,12);
     ReleaseSRWLockShared(&markLock);
     return on;
@@ -4599,7 +4663,9 @@ bool NpcMarkReadout(float* at) noexcept {
 bool NpcPingReadout(NpcPing* out) noexcept {
     AcquireSRWLockShared(&markLock);
     *out=markPub.ping;
+    const bool fresh=stepfresh::Fresh(markPub.step);
     ReleaseSRWLockShared(&markLock);
-    return out->on && GetTickCount64()-out->wall<=kPingMs;
+    // The handoff is the step's; how long a given point shows (kPingMs since it was given) stays the notice's own time.
+    return fresh && out->on && GetTickCount64()-out->wall<=kPingMs;
 }
 }  // namespace crew

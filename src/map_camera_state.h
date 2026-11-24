@@ -32,4 +32,20 @@ public:
         return owner.load()==frame && generation.load()==frame;
     }
 };
+// The pause menu over the open map (the camera step sees it; the scene's steps, Frame among them, are skipped under it):
+// the stock view goes up under the menu at once, and the map is closed by the first step after the pause, so the menu's
+// Esc is the menu's and the player comes back to the game's own view (step_fresh.h: the pause is an explicit state).
+class PauseClose {
+    std::atomic<bool> seen{false};
+public:
+    // Camera thread: whether the map's view goes up this camera step; `due` the map open, its player's and fresh.
+    bool CameraShows(bool due,bool paused) noexcept {
+        if(due && paused){seen.store(true);return false;}
+        return due;
+    }
+    // Game thread (Frame, each step): true once after a pause the camera saw, while the map is open: close it.
+    bool CloseNow(bool open) noexcept { return seen.exchange(false) && open; }
+    // Game thread (a new mission).
+    void Reset() noexcept { seen.store(false); }
+};
 }  // namespace mapcam

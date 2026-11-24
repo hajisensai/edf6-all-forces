@@ -41,6 +41,7 @@
 // stock camera). The AddSe aim step's hook is also the gun stabilizer's way in (stab.cpp StabStep runs the stock step and
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "seat_switch_logic.h"
 #include "vehicle_look.h"
@@ -99,7 +100,9 @@ constexpr int kBlendFrames=15;                 // frames the view eases in when 
 constexpr float kOnTarget=0.0087f;             // rad (0.5 deg): the turret is on the point
 constexpr float kPivotReach=40.0f;             // m: a turret pivot farther from the muzzle than this is not one (TurretPivot)
 constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a big vehicle (HighCamClass 2)
-constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
+constexpr ULONGLONG kLogMs=1000;
+// The frame's / the aim hook's handoff to the camera step and the other modules: fresh within stepfresh::kEveryStep steps
+// (step_fresh.h; both run once a step). The pause menu: no step runs, the camera step keeps the last view as it did.
 // The chase follower's clock (chase_cam.h): the scene's steps (GameFrame), each 1/60 s of game time (System::Update adds
 // n / 60 to its time for n steps, docs/unlimited-fps-re.md §1), the camera stepped once in each. Not the wall clock: a
 // catch-up frame runs several steps within a millisecond and the clock's 16 / 17 ms reads are off the steps the vehicle
@@ -116,7 +119,7 @@ struct Shared {
     ObjRef ref;
     unsigned char* v;
     unsigned char* seat;
-    ULONGLONG seenMs,aimMs;    // the frame saw the player there / the aim hook stepped that seat's aim
+    stepfresh::Step seenStep,aimStep;   // the frame saw the player there / the aim hook stepped that seat's aim
     bool decoupled,high;       // DecoupledTurretCam / highcam.cpp's toggle, this frame
     bool physicalOnly=true;
     bool free,returning;       // free look held / swinging back
@@ -179,7 +182,7 @@ CamSide camSide{};
 GameSide game{};
 SRWLOCK lock=SRWLOCK_INIT;
 
-struct Out { TurretCamReadout r; ULONGLONG at; };
+struct Out { TurretCamReadout r; stepfresh::Step at; };
 Out out{};
 SRWLOCK outLock=SRWLOCK_INIT;
 
@@ -374,7 +377,7 @@ bool FreeHeld(const void* v,const unsigned char* seat) noexcept {
 
 void Publish(const TurretCamReadout& r) noexcept {
     AcquireSRWLockExclusive(&outLock);
-    out=Out{r,GameMs()};
+    out=Out{r,stepfresh::Now()};
     ReleaseSRWLockExclusive(&outLock);
 }
 
@@ -554,7 +557,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     Shared s=shared;
     ReleaseSRWLockExclusive(&lock);
     if(seat!=s.seat || !s.v)return;
-    s.aimMs=GameMs();
+    s.aimStep=stepfresh::Now();
     const float stockBase=rigInfo.v==s.v ? rigInfo.stockBase : 0.0f;
     if(ExternalView(s.v,s.high)) {
         // Native input (and StabStep after us) keeps its exact ownership. A cockpit/optic is attached to the
@@ -585,7 +588,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         else if(!held)HighLoft(seat,s,in,cmd);
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat) {
-            shared.aimMs=s.aimMs;shared.view=s.view;shared.highView=true;shared.steering=false;
+            shared.aimStep=s.aimStep;shared.view=s.view;shared.highView=true;shared.steering=false;
             shared.free=s.free;shared.returning=false;shared.orbitYaw=s.orbitYaw;shared.orbitPitch=s.orbitPitch;
         }
         ReleaseSRWLockExclusive(&lock);
@@ -606,7 +609,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         cmd[0]=held && !foreign ? 0.0f : in[0];cmd[1]=held && !foreign ? 0.0f : in[1];
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat) {
-            shared.aimMs=s.aimMs;shared.view=true;shared.highView=false;shared.steering=false;
+            shared.aimStep=s.aimStep;shared.view=true;shared.highView=false;shared.steering=false;
             shared.yaw=s.yaw;shared.pitch=s.pitch;shared.free=s.free;shared.returning=false;
         }
         ReleaseSRWLockExclusive(&lock);
@@ -622,7 +625,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
             game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;game.held=held;
             cmd[0]=in[0];cmd[1]=in[1];
             AcquireSRWLockExclusive(&lock);
-            if(shared.seat==seat){shared.aimMs=s.aimMs;shared.view=true;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=false;}
+            if(shared.seat==seat){shared.aimStep=s.aimStep;shared.view=true;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=false;}
             ReleaseSRWLockExclusive(&lock);
             return;
         }
@@ -677,7 +680,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     else if(s.free || s.returning){cmd[0]=0.0f;cmd[1]=0.0f;}   // coupled: the turret stands while the view looks round
     else{cmd[0]=in[0];cmd[1]=in[1];game.steer.hasWant=false;}
     AcquireSRWLockExclusive(&lock);
-    if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;
+    if(shared.seat==seat){shared.aimStep=s.aimStep;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;
                           shared.highView=s.highView;}
     ReleaseSRWLockExclusive(&lock);
     if(foreign!=game.foreign && c.debug)Log("TURRETCAM the aim's input is %s",foreign ? "another hand's (the turret is theirs, the view the rider's)" : "the rider's again");
@@ -895,12 +898,11 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     AcquireSRWLockShared(&lock);
     const Shared s=shared;
     ReleaseSRWLockShared(&lock);
-    const ULONGLONG now=GameMs();
-    const bool live=c.enabled && seat==s.seat && s.v && now-s.seenMs<=kFreshMs && s.ref.Is(s.v);
-    const bool aimed=live && now-s.aimMs<=kAimFreshMs && s.view;
+    const bool live=c.enabled && seat==s.seat && s.v && stepfresh::Fresh(s.seenStep) && s.ref.Is(s.v);
+    const bool aimed=live && stepfresh::Fresh(s.aimStep) && s.view;
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
-    if(!live){camSide=CamSide{};PublishObservation(seat,false);return;}
+    if(!live){if(camSide.owned)FrameRateCameraCut(cam);camSide=CamSide{};PublishObservation(seat,false);return;}
     // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
     // served, so it never saw them go): its camera starts from the stock one again, easing in.
     if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
@@ -915,11 +917,12 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool b=AuthoredRig(s.v,&rigB,&baseB);
     if(b && (!a || rigB.radius>=rigA.radius)){normal=rigB;base=baseB;}
     else if(a){normal=rigA;base=baseA;}
-    else{camSide=CamSide{};PublishObservation(seat,false);return;}
+    else{if(camSide.owned)FrameRateCameraCut(cam);camSide=CamSide{};PublishObservation(seat,false);return;}
     rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,normal,s.v};
     if(ExternalView(s.v,s.high)) {
         // Keep the measured rig/classification (the high view still needs it), but no hidden third-person
         // placement or return blend may survive under an external camera owner.
+        if(camSide.owned)FrameRateCameraCut(cam);
         camSide=CamSide{};
         AcquireSRWLockExclusive(&lock);
         if(shared.seat==seat){shared.normalRay=false;shared.resume=true;shared.observing=false;}
@@ -1138,7 +1141,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     if(PlayerTurretLead(v,0,TurretGun(v,seat),lead) && game.hasAim){std::memcpy(game.aim,lead,12);game.aimHit=true;}
     const auto freedom=weaponmount::OfWeapon(v,seat,TurretGun(shared.v,seat));
     AcquireSRWLockExclusive(&lock);
-    shared.seat=seat;shared.seenMs=GameMs();
+    shared.seat=seat;shared.seenStep=stepfresh::Now();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
     shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly && !external;
     if(high){shared.normalRay=false;shared.resume=true;}
@@ -1147,7 +1150,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     if(!shared.decoupled && !shared.free && !shared.returning)shared.view=false;
     ReleaseSRWLockExclusive(&lock);
     const ULONGLONG now=GetTickCount64();
-    if(c.debug && now-game.logAt>=kLogMs && shared.aimMs) {
+    if(c.debug && now-game.logAt>=kLogMs && shared.aimStep) {
         game.logAt=now;
         TurretCamReadout r{};
         const bool fresh=PlayerTurretCam(&r);
@@ -1170,7 +1173,7 @@ const unsigned char* PlayerTurretGun(const unsigned char* vehicle,const unsigned
 bool TurretCamHighTransition(const void* vehicle) noexcept {
     AcquireSRWLockShared(&lock);
     const bool active=shared.v==vehicle && (shared.highView || shared.observing)
-                      && GameMs()-shared.seenMs<=kFreshMs;
+                      && stepfresh::Fresh(shared.seenStep);
     ReleaseSRWLockShared(&lock);
     return active;
 }
@@ -1182,7 +1185,7 @@ bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept {
     ReleaseSRWLockShared(&lock);
     return Cfg().enabled && s.v==vehicle && s.decoupled && !s.resume && s.normalRay && s.rayTake==s.take &&
         !s.highView && !s.observing && !ExternalView(vehicle,s.high) &&
-        GameMs()-s.seenMs<=kFreshMs && s.ref.Is(vehicle);
+        stepfresh::Fresh(s.seenStep) && s.ref.Is(vehicle);
 }
 
 bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
@@ -1190,7 +1193,7 @@ bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
     AcquireSRWLockShared(&lock);
     const Shared s=shared;
     ReleaseSRWLockShared(&lock);
-    if(s.v!=vehicle || !s.ref.Is(vehicle) || GameMs()-s.seenMs>kFreshMs)return false;
+    if(s.v!=vehicle || !s.ref.Is(vehicle) || !stepfresh::Fresh(s.seenStep))return false;
     // The same owners ExternalView yields to, but the free look itself (vehicle_look.cpp asks this to know whether it
     // is its look at all): the map, first person's cockpit eye, the optic up (magnified, or the gunner sight at 1x).
     if(MapHoldsKeys() || MapOwnsView() || HighCamOn(vehicle) || FirstPersonVehicleView(vehicle,0))return false;
@@ -1200,7 +1203,7 @@ bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
 bool TurretCamSteers(const void* vehicle) noexcept {
     if(!TurretCamTurret(vehicle,0))return false;
     AcquireSRWLockShared(&lock);
-    const bool steering=shared.v==vehicle && shared.steering && GameMs()-shared.aimMs<=kAimFreshMs;
+    const bool steering=shared.v==vehicle && shared.steering && stepfresh::Fresh(shared.aimStep);
     ReleaseSRWLockShared(&lock);
     return steering;
 }
@@ -1209,7 +1212,7 @@ bool PlayerTurretCam(TurretCamReadout* r) noexcept {
     AcquireSRWLockShared(&outLock);
     const Out o=out;
     ReleaseSRWLockShared(&outLock);
-    if(!o.at || GameMs()-o.at>kFreshMs)return false;
+    if(!stepfresh::Fresh(o.at))return false;
     *r=o.r;
     return true;
 }

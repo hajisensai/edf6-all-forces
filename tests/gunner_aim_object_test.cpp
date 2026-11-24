@@ -7,7 +7,7 @@ unsigned char* image=nullptr;Config cfg{};
 namespace {void* called=nullptr;unsigned char weapon[32]{};}
 int logs=0;
 void Log(const char*,...) noexcept{++logs;}
-void SeeVehicle(const void*) noexcept{}
+void SeeFrame() noexcept{}
 ULONGLONG Frame() noexcept{return 1;}
 void ScanEnemies(const unsigned char*,float,Nearby& out) noexcept{out.count=0;}
 Track* TrackFor(const unsigned char*,unsigned,bool) noexcept{return nullptr;}

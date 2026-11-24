@@ -45,6 +45,7 @@ void CaptureIndexed(ID3D11DeviceContext*,unsigned,unsigned,int) noexcept {}
 
 namespace crew {
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 Config config{};
 bool depthPatchReady=true;
 bool ViewDepthReady() noexcept { return depthPatchReady; }

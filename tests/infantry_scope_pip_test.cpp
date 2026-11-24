@@ -21,6 +21,7 @@
 using Microsoft::WRL::ComPtr;
 namespace crew {
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 namespace {
 Config config{};
 int checks=0,failures=0;
@@ -35,6 +36,8 @@ void __fastcall StockStep(void* cam,void*) {
 }
 }
 const Config& Cfg() noexcept{return config;}
+namespace { bool paused=false; }
+bool GamePaused() noexcept{return paused;}
 void Log(const char*,...) noexcept{}
 unsigned char* PlayerHuman() noexcept{return soldier;}
 bool HumanOnFoot(const unsigned char*) noexcept{return true;}
@@ -69,11 +72,11 @@ alignas(16) unsigned char camera[0x500]{},otherCamera[0x500]{};
 
 void Open(ULONGLONG openedAt) {
     Published p{};
-    p.human=ObjRef::Of(soldier);p.cue=InfantryScopeCue{soldier,kZoom,scope::Look::marksman};p.at=GetTickCount64();p.openedAt=openedAt;
+    p.human=ObjRef::Of(soldier);p.cue=InfantryScopeCue{soldier,kZoom,scope::Look::marksman};p.at=stepfresh::Now();p.openedAt=openedAt;
     Publish(p);
 }
 // The cue republished as the soldier's frame does (WARP's first shader compile can outlast its freshness).
-void Refresh() { Published p=Read();p.at=GetTickCount64();Publish(p); }
+void Refresh() { Published p=Read();p.at=stepfresh::Now();Publish(p); }
 void End(ID3D11DeviceContext* context,const void* view) { Refresh();InfantryScopeWorldEnd(context,view);Refresh(); }
 float Step(unsigned char* cam) { CamStepHook(cam,nullptr);return At<float>(cam,kCamFov); }
 bool Lens(float* fov=nullptr) {
@@ -324,7 +327,32 @@ int WorldEndChecks() {
 }
 }  // namespace
 
+// mod-7 (step_fresh.h, docs/step-freshness.md): the cue is the soldier's frame's of the last steps, not of the last 200 ms;
+// the pause menu and a new mission end it as explicit states.
+void StepChecks() {
+    config.enabled=true;config.infantryScope=1;
+    stepfresh::See(100);
+    Open(GetTickCount64());
+    Sleep(260);   // a slow frame (stress: 204 ms a frame): wall time passes, no step does
+    Check(InfantryScopeNow(nullptr),"a step slower than the old 200 ms window: the cue holds");
+    stepfresh::See(100+stepfresh::kEveryStep);
+    Check(InfantryScopeNow(nullptr),"the next steps (their frame not run yet): it holds");
+    stepfresh::See(101+stepfresh::kEveryStep);
+    Check(!InfantryScopeNow(nullptr),"the soldier's frame stopped publishing: gone");
+    stepfresh::See(200);
+    Open(GetTickCount64());
+    paused=true;
+    Check(!InfantryScopeNow(nullptr),"the pause menu (steps stopped, the stamp still current): gone at once");
+    paused=false;
+    Check(InfantryScopeNow(nullptr),"resumed: back");
+    stepfresh::NewMission(201);
+    Check(!InfantryScopeNow(nullptr),"a new mission: the last mission's cue is stale");
+    Publish(Published{});
+}
+
 int wmain() {
+    stepfresh::See(1);   // the first scene step: every cue below is stamped with the step now
+    StepChecks();
     CameraChecks();
     WorldEndChecks();
     std::printf("infantry_scope_pip: %d checks, %d failures\n",checks,failures);

@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 namespace {
 using namespace crew;using namespace crew::enemy_native;using namespace crew::enemy_native::monster_net;
 constexpr NativeProfile profiles[]={

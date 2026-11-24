@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cmath>
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 namespace {
 using namespace crew;using namespace crew::enemy_native;
 namespace mn=crew::enemy_native::merman_net;using Result=crew::enemy_control::ActionResult;

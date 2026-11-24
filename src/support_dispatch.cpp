@@ -1,6 +1,7 @@
 // Support requests select and verify an entry before any object exists. The host sends the resulting
 // matrices to peers. Real soldiers board stationary hulls, then the existing vehicle controllers enter.
 #include "crew.h"
+#include "lazy_rows.h"
 #include "support_call.h"
 #include "support_aircraft.h"
 #include "support_submarine.h"
@@ -114,7 +115,7 @@ struct Deployment {
     ULONGLONG tracedAt=0,deliveredAt=0;
     float traced[support_net::kMaxUnits][3]{};
 };
-Deployment deployments[kDeployments]{};
+LazyRows<Deployment,kDeployments> deployments;
 // No cooldown after a delivery (the user, 2026-10-25: 「支援调度 30 秒的全局冷却 删掉」; a limit will be the calls' pt): a call
 // waits only for the one still being planned.
 bool offlinePending=false;std::uint64_t nextOffline=1;
@@ -1289,6 +1290,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
 }
 bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool networked) noexcept {
     if((InSession() && !networked) || !Validate(plan))return false;
+    if(!deployments.Allocate("support deployments"))return false;
     Deployment* deployed=nullptr;for(auto& row:deployments)if(!row.used){deployed=&row;break;}
     if(!deployed)return false;
     deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=networked;

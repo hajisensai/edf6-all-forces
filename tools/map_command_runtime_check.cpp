@@ -345,7 +345,7 @@ void PointerAndInput() noexcept {
     inputstub::keys['G']=false;
     MapCommandView(vp,3840,2160);MapCommandFrame(in,centre);
     Check(game.pointer.x==1956.0f && game.pointer.y==1080.0f,"viewport resize preserves normalized pointer position");
-    game.frameAt=GetTickCount64()-kFreshMs-1;view.at=0;
+    stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep+1);view.at=0;   // the map shut for a while: its frame stale
     MapCommandFrame(in,centre);
     Check(!game.pointer.placed,"reopened map awaits its new view");
     MapCommandView(vp,800,600);MapCommandFrame(in,centre);
@@ -1395,6 +1395,7 @@ void PacedMarch() {
 }  // namespace
 }  // namespace crew
 int main() {
+    stepfresh::See(1);   // the scene's first step (crew.cpp SeeFrame): 0 is "never published"
     edf::SetInputSource(&inputstub::Down,nullptr);   // the plugin's key source (edf/input_source.h)
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();crew::StatsPage();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();

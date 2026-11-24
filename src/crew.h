@@ -13,6 +13,7 @@
 #include "stores.h"
 #include "edf/seat.h"
 #include "mission_packs.h"
+#include "step_fresh.h"   // handoff freshness by the scene step (GameFrame), any thread
 #include "sound_place.h"
 
 namespace crew {
@@ -21,6 +22,8 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool syncLoadProbe=true;   // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
     bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
     int preloadMode=0;         // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
@@ -576,6 +579,7 @@ ULONGLONG GameMs() noexcept;
 // CheckPauseFlag (at load, patches nothing) found the code different.
 bool CheckPauseFlag() noexcept;
 bool GamePaused() noexcept;
+// Another thread, or data handed between hooks: stepfresh::Now() / Fresh (step_fresh.h), the same count mirrored.
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
@@ -594,6 +598,7 @@ void SeeFrame(const void* vehicle) noexcept;
 // mission is dropped here, before the new mission's objects (which may reuse the old addresses) exist.
 void MissionStart() noexcept;
 void ResetCrew() noexcept;        // crew.cpp
+void SceneOver() noexcept;        // crew.cpp: the scene's end (mission.cpp), every step stamp stale
 void ResetHelis() noexcept;       // heli.cpp (and the player track, the rescue)
 void ResetGround() noexcept;      // ground.cpp
 void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
@@ -991,7 +996,7 @@ bool BoardingRequest(unsigned char* vehicle) noexcept;
 bool BoardingReady() noexcept;                           // boarding.cpp: its hook is in (BoardingRequest can take one on)
 bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
-// fresh for kSazabiCueMs). False with none (not riding one).
+// fresh while published in the last steps, step_fresh.h). False with none (not riding one).
 struct SazabiCue {
     float thruster;          // 0..1 the thrusters' charge
     float rifleReady;        // 0..1 to the beam rifle's next shot (1 ready)
@@ -1022,7 +1027,6 @@ struct SazabiCue {
     float assist[3];         // the aim assist's enemy (its lock point, world): the aim point is it (sazabi_assist.h)
     bool lockOn;             // ...held by the lock-on (its key pressed: the camera follows it)
 };
-constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;
 // The player's Sazabi's riding camera (turretcam.cpp's look-at hook): seat `seat`'s eye and look point, false when the
 // seat is no player's Sazabi's (the stock camera then).

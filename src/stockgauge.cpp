@@ -124,11 +124,11 @@ std::uint64_t armorGeneration=1;
 maphud::Record weaponHolds[16]{};
 
 // What the hidden armor gauge showed (stock_armor_hud.h Readout), for hud.cpp: written by ArmorHook (the gauge's thread)
-// while it holds the HUD's player's gauge hidden, its soldier and the wall time with it.
+// while it holds the HUD's player's gauge hidden, its soldier and the step with it (fresh within stepfresh::kFromDraw:
+// the gauge's update may run once a frame, read by HudPublish in that frame's steps; step_fresh.h).
 constexpr std::size_t kObjectHp=0x2F8,kObjectHpMost=0x2F4;   // a soldier's armor, a vehicle's durability (layout.h kHp)
-constexpr ULONGLONG kArmorFreshMs=250;
 SRWLOCK armorLock=SRWLOCK_INIT;
-struct ArmorShown { const void* soldier; ULONGLONG at; armorhud::Readout r; } armorShown{};
+struct ArmorShown { const void* soldier; stepfresh::Step at; armorhud::Readout r; } armorShown{};
 
 // The vehicle whose weapons our HUD lists (SetStockGaugeCover), by its object and its weak-this control block.
 SRWLOCK coverLock=SRWLOCK_INIT;
@@ -252,7 +252,7 @@ void __fastcall ArmorHook(unsigned char* g,void* context) {
             Readable(r.vehicle,kObjectHp+4) ? At<float>(r.vehicle,kObjectHp) : 0.0f,
             Readable(r.vehicle,kObjectHp+4) ? At<float>(r.vehicle,kObjectHpMost) : 0.0f,&shown);
         AcquireSRWLockExclusive(&armorLock);
-        if(give)armorShown=ArmorShown{r.soldier,GetTickCount64(),shown};
+        if(give)armorShown=ArmorShown{r.soldier,stepfresh::Now(),shown};
         else if(armorShown.soldier==r.soldier || (was && !now))armorShown=ArmorShown{};
         ReleaseSRWLockExclusive(&armorLock);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
@@ -340,7 +340,7 @@ bool PlayerStockArmor(armorhud::Readout* out) noexcept {
     AcquireSRWLockShared(&armorLock);
     const ArmorShown a=armorShown;
     ReleaseSRWLockShared(&armorLock);
-    if(!armorOk || !human || a.soldier!=human || GetTickCount64()-a.at>kArmorFreshMs)return false;
+    if(!armorOk || !human || a.soldier!=human || !stepfresh::Fresh(a.at,stepfresh::kFromDraw))return false;
     *out=a.r;
     return true;
 }

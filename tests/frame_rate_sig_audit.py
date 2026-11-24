@@ -77,8 +77,8 @@ for name in ('kCountFirst', 'kCountAgain'):
     sig = arrays[name + 'Sig']
     check(img[at:at + len(sig)] == sig, f'{name} {at:#x}: {img[at:at + len(sig)].hex(" ")} != {sig.hex(" ")}')
     check(rel_target(at, 5) == consts['kTickCount'], f'{name} calls kTickCount')
-    check(img[at + 5:at + 7] == arrays['kMovEbxEax'], f'{name}: mov ebx,eax after the call')
-check(arrays['kMovEbxEdx'] == b'\x8b\xda', 'kMovEbxEdx is mov ebx,edx')
+    check(img[at + 5:at + 7] == bytes.fromhex('8bd8'), f'{name}: mov ebx,eax after the call')
+check(arrays['kMovEbxEdx'] == bytes.fromhex('8bda'), 'kMovEbxEdx is mov ebx,edx')
 check(consts['kTickCount'] == pconsts['kTickCount'], 'the gate counts with the clock frame_pacing.cpp checks byte for byte')
 first, again = consts['kCountFirst'], consts['kCountAgain']
 check(first + 9 + 2 + img[first + 10] == 0x11A2F76, 'the first count goes on to the frame when it is not 0')
@@ -87,6 +87,15 @@ check(again + 9 + 2 + struct.unpack_from('<b', img, again + 10)[0] == pconsts['k
 check(img[0x11A2F76:0x11A2F78] == b'\x3b\xdd' and img[0x11A2F80:0x11A2F83] == b'\x0f\x47\xdd' and
       img[0x11A2EDA:0x11A2EDD] == b'\x8d\x6e\x03', 'n = min(n, 3) after the counts (ebp = rsi + 3)')
 check(direct_callers(consts['kTickCount']) == [first, again], 'kTickCount is called only by the two counts')
+# The final n: after the clamp, zeroed with dt when [rdi+9] (mov ebx,esi), then stored for Application::Update. The
+# guards read the copy the store's stub keeps, so they see the n the step runs with.
+fin = consts['kFinalStore']
+check(img[fin:fin + 7] == arrays['kFinalStoreSig'], 'kFinalStore: mov [rsp+0BCh],ebx')
+check(img[0x11A2FAC:0x11A2FB0] == bytes.fromhex('40387709') and img[0x11A2FB6:0x11A2FBB] == bytes.fromhex('0f57f68bde'),
+      'the reset between the counts and kFinalStore: [rdi+9] zeroes dt and n')
+check(re.search(r'Site sites\[\]=\{\{kCountFirst,.*\{kCountAgain,.*\{kFinalStore,', src), 'the gate writes its three sites together')
+check(src.index('SetFramePacingGate(&GateWaitCounts)') > src.index('int written=0'), 'the wait goes to the gate only after the writes')
+check('frameTicks' not in src and 'bool Steps() noexcept { return !gateOn || finalTicks; }' in src, 'the guards read the final n')
 check(re.search(r'RtlAddFunctionTable', src) and re.search(r'0x01,0x04,0x01,0x00,0x04,0x42', src),
       'the gate stub registers its unwind (UWOP_ALLOC_SMALL 0x28 at offset 4)')
 check(re.search(r'if\(gateWait\)', pacing) and re.search(r'tickWaitInstalled=tick;', pacing),
@@ -170,7 +179,42 @@ check(direct_callers(consts['kSyncSubmit']) == [sync], 'the sync interval is pas
 for site, target, hook in (('kNetCall', 'kNet', 'NetGuard'), ('kEosCall', 'kEos', 'EosGuard'), ('kWindCall', 'kWind', 'WindGuard'),
                            ('kSystemCall', 'kSystemUpdate', 'SystemUpdateHook'), ('kWrapCall', 'kWrapUpdate', 'WrapUpdateHook'),
                            ('kMouseCall', 'kMouseTake', 'MouseTakeHook'), ('kWheelCall', 'kWheelTake', 'WheelTakeHook'),
-                           ('kSyncCall', 'kSyncSubmit', 'SyncHook')):
+                           ('kSyncCall', 'kSyncSubmit', 'SyncHook'), ('kVolumeCall', 'kVolume', 'VolumeGuard')):
     check(re.search(rf'RedirectCall\(image\+{site},image\+{target},reinterpret_cast<void\*>\(&{hook}\)', src), f'{hook} at {site}')
 check(re.search(r'RedirectImportCall\(image\+kSteamCall,kSteamSig,reinterpret_cast<void\*>\(&SteamGuard\)', src), 'SteamGuard at kSteamCall')
+
+# Stage 3 (frame_rate_view.cpp): the camera step is called once, at kCameraStepCall, the last call of the tick loop (after
+# every object phase, so its hook samples the tick's result); the projection 0x1197B50 -> 0x118DFF0 is shared with scope_lens.
+view = open(os.path.join(ROOT, 'src', 'frame_rate_view.cpp'), encoding='utf-8').read()
+vconsts = {m[0]: int(m[1], 0) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+|\d+)\b', view)}
+varrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+           for name, body in re.findall(r'\b(k\w+)\[\]=\{([^}]*)\}', view)}
+step_call, step = vconsts['kCameraStepCall'], vconsts['kCameraStep']
+check(img[step_call - 5:step_call + 5] == varrays['kCameraStepSig'] and rel_target(step_call, 5) == step, 'kCameraStepCall')
+check(direct_callers(step) == [step_call], 'the camera step is called only at kCameraStepCall')
+check(img[step_call + 0xE0] == 0xE9 and rel_target(step_call + 0xE0, 5) == 0x119959C, 'the camera step is in the per-viewport loop')
+check(re.search(r'RedirectCall\(image\+kCameraStepCall,image\+kCameraStep,reinterpret_cast<void\*>\(&CameraStepHook\)', view), 'CameraStepHook')
+for vt in (0x17CDF28, 0x17D0FF8, 0x17CF5B8, 0x17CF100):
+    check(f'{vt:#X}'.replace('0X', '0x') in view, f'soldier vtable {vt:#x} in frame_rate_view.cpp')
+
+# The swap chain (swap_flip.cpp): CreateSwapChain's call in 0x111B220 and the Present's flags.
+flip = open(os.path.join(ROOT, 'src', 'swap_flip.cpp'), encoding='utf-8').read()
+fconsts = {m[0]: int(m[1], 0) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+|\d+)\b', flip)}
+farrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+           for name, body in re.findall(r'\b(k\w+)\[\]=\{([^}]*)\}', flip)}
+create, present = fconsts['kCreateCall'], fconsts['kPresentFlags']
+check(img[create:create + 6] == farrays['kCreateSig'], 'kCreateCall: mov rax,[rcx]; call [rax+50h] (IDXGIFactory::CreateSwapChain)')
+check(img[create - 14:create - 9] == b'\x4c\x8d\x44\x24\x30', 'kCreateCall: r8 = the description on the stack')
+check(sorted(direct_callers(0x111B220)) == [0x111B77B, 0x111C8EC], 'the swap chain is built only by its two callers')
+check(img[present:present + 6] == farrays['kPresentSig'], 'kPresentFlags: mov rax,[rcx]; xor r8d,r8d')
+check(img[present + 0xF:present + 0x12] == b'\xff\x50\x40', 'kPresentFlags: IDXGISwapChain::Present follows')
+# The volume smoothing (rcx = the sound, xmm1 = dt) and the load meter's store, both guarded to frames with ticks.
+vol = consts['kVolumeCall']
+check(img[vol] == 0xE8 and rel_target(vol, 5) == consts['kVolume'] and img[vol - 12:vol - 7] == bytes.fromhex('f3410f100e'),
+      'kVolumeCall: 0x7B3010 with xmm1 = dt')
+check(direct_callers(consts['kVolume']) == [vol], 'the volume smoothing is called only at kVolumeCall')
+ls = consts['kLoadStore']
+check(img[ls:ls + 8] == arrays['kLoadStoreSig'] and rip(ls, 8) == consts['kLoadMeter'], 'kLoadStore stores to kLoadMeter')
+check(img[ls + 8] == 0xE8, 'a call follows the load store (r11 and the flags are dead in the stub)')
+check(re.search(r'constexpr int kGuards=8;', src) and 'guards!=kGuards' in src, 'the gate needs all 8 guards')
 print(f'frame rate signatures: {checks} checks ok')

@@ -7,7 +7,11 @@
 //    constant buffer) are as they were;
 //  - unsupported surfaces (multisampled, a second RTV, a partial viewport, a lens view not S x S, no lens view held, a
 //    lens no stronger than the frame) change nothing;
-//  - a typeless target with a typed view, a resized lens view, the game's R16G16B16A16_FLOAT and an 8-bit one.
+//  - a typeless target with a typed view, a resized lens view, the game's R16G16B16A16_FLOAT and an 8-bit one;
+//  - the lens view's texture is sampled directly, no copy: one shader resource view per texture (pointer + description +
+//    format), reused while it is the lens view's, replaced for a rebuilt or resized target, dropped by Reset, never
+//    holding a texture after that (reference counts back where they were); this frame's contents are what is drawn;
+//    a lens texture without D3D11_BIND_SHADER_RESOURCE is not held, one bound natively as a render target not drawn.
 #include "scope_pip.h"
 #include "scope_pip_gpu.h"
 #include <d3d11.h>
@@ -65,10 +69,11 @@ struct Target {
     UINT w=0,h=0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
 };
-Target MakeTarget(Fixture& f,UINT w,UINT h,DXGI_FORMAT resourceFormat,DXGI_FORMAT viewFormat,UINT samples=1,float blue=0.25f) {
+Target MakeTarget(Fixture& f,UINT w,UINT h,DXGI_FORMAT resourceFormat,DXGI_FORMAT viewFormat,UINT samples=1,float blue=0.25f,
+                  UINT bindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE) {
     Target t;t.w=w;t.h=h;t.format=viewFormat;
     D3D11_TEXTURE2D_DESC d{};d.Width=w;d.Height=h;d.MipLevels=d.ArraySize=1;d.Format=resourceFormat;d.SampleDesc.Count=samples;
-    d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+    d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=bindFlags;
     std::vector<std::uint16_t> halves;std::vector<std::uint8_t> bytes;
     D3D11_SUBRESOURCE_DATA data{};
     if(samples==1) {
@@ -119,6 +124,17 @@ Pixels Read(Fixture& f,const Target& t) {
     return p;
 }
 bool Same(const Pixels& a,const Pixels& b) { return a.v==b.v; }
+// A COM object's reference count (AddRef's result less the one it added).
+ULONG Refs(IUnknown* o) { o->AddRef();return o->Release(); }
+// Rewrite a half-float target's texels' blue (its gradient kept): a new picture in the same texture.
+void Repaint(Fixture& f,const Target& t,float blue) {
+    std::vector<std::uint16_t> halves(static_cast<std::size_t>(t.w)*t.h*4);
+    for(UINT j=0;j<t.h;++j)for(UINT i=0;i<t.w;++i) {
+        std::uint16_t* p=&halves[(static_cast<std::size_t>(j)*t.w+i)*4];
+        p[0]=FloatToHalf((i+0.5f)/t.w);p[1]=FloatToHalf((j+0.5f)/t.h);p[2]=FloatToHalf(blue);p[3]=FloatToHalf(1.0f);
+    }
+    f.context->UpdateSubresource(t.texture.Get(),0,nullptr,halves.data(),t.w*8,0);
+}
 
 // Bind `t` as the native world pass would leave it: RTV0, a depth view, one full viewport, a PS and a constant buffer.
 struct Native {
@@ -244,7 +260,7 @@ int main() {
         Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr),"a second command with nothing held draws nothing");
         Check(Same(once,Read(f,main)),"...and writes nothing");
     }
-    // A typeless 8-bit pair through typed views, then a resized lens view: the private copy follows.
+    // A typeless 8-bit pair through typed views, then a resized lens view: a view of the new texture.
     {
         const Target main=MakeTarget(f,80,80,DXGI_FORMAT_R8G8B8A8_TYPELESS,DXGI_FORMAT_R8G8B8A8_UNORM);
         const int side=SideFor(80,80);
@@ -256,7 +272,7 @@ int main() {
         const int bigSide=SideFor(160,90);
         const Target bigLens=MakeTarget(f,bigSide,bigSide,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
         const Pixels b2=Read(f,big),l2=Read(f,bigLens);
-        Check(Frame(f,c,big,bigLens,bigSide,LensYFor(160,90)),"a resized lens view gets a new private copy");
+        Check(Frame(f,c,big,bigLens,bigSide,LensYFor(160,90)),"a resized lens view gets a new view");
         LensChecks(b2,Read(f,big),l2,0.004f,"half resized");
     }
     // What is not supported changes nothing and says so.
@@ -303,6 +319,74 @@ int main() {
         const Pixels lensBefore=Read(f,lens);
         Check(Frame(f,c,t,lens,side,LensYFor(64,64)),"after Reset the pass builds itself again");
         LensChecks(before,Read(f,t),lensBefore,0.004f,"after reset");
+    }
+    // The lens view's texture sampled directly: the cached view's life (docs/scope-pip-re.md §5.4).
+    {
+        c.Reset();
+        Check(!c.HoldsLensView(),"Reset: no view cached");
+        const Target main=MakeTarget(f,96,64,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
+        const int side=SideFor(96,64);
+        const float lensY=LensYFor(96,64);
+        const Target lens=MakeTarget(f,side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
+        const ULONG lensRefs=Refs(lens.texture.Get());
+        const Pixels before=Read(f,main);
+        Check(Frame(f,c,main,lens,side,lensY),"drawn from the lens view's own texture");
+        Check(c.HoldsLensView() && c.Source().views==1 && c.Source().viewError==0,"one view of it, cached (no device error)");
+        Check(Refs(lens.texture.Get())==lensRefs+1,"the cached view is the only reference kept (the held texture released)");
+        const pip::LensSource first=c.Source();
+        Check(first.texture==lens.texture.Get() && first.mainTexture==main.texture.Get() && first.texture!=first.mainTexture,
+              "the source names the lens view's texture and the main view's target, two resources");
+        Check((first.bindFlags&D3D11_BIND_SHADER_RESOURCE) && first.width==static_cast<UINT>(side) && first.height==static_cast<UINT>(side) &&
+              first.format==DXGI_FORMAT_R16G16B16A16_FLOAT && first.viewFormat==DXGI_FORMAT_R16G16B16A16_FLOAT &&
+              first.nativeTargets==1 && !first.lensBoundAsTarget,"...with its bind flags, size, formats and the native target");
+        // The next frame renders a new picture into the same texture: the same view, this frame's picture drawn.
+        Repaint(f,lens,0.5f);
+        const Pixels lens2=Read(f,lens);
+        Check(Frame(f,c,main,lens,side,lensY),"the same texture again");
+        Check(c.Source().views==1 && Refs(lens.texture.Get())==lensRefs+1,"...reuses the cached view (no new one, no leak)");
+        LensChecks(before,Read(f,main),lens2,0.004f,"this frame's picture");
+        // The engine rebuilds the target (same size, a new texture): a new view, the old texture let go.
+        {
+            const Target rebuilt=MakeTarget(f,side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.25f);
+            const ULONG rebuiltRefs=Refs(rebuilt.texture.Get());
+            const Pixels rb=Read(f,rebuilt);
+            Check(Frame(f,c,main,rebuilt,side,lensY),"a rebuilt target is drawn");
+            Check(c.Source().views==2 && c.Source().texture==rebuilt.texture.Get(),"...through a new view");
+            Check(Refs(lens.texture.Get())==lensRefs && Refs(rebuilt.texture.Get())==rebuiltRefs+1,
+                  "...and the old texture is no longer referenced");
+            LensChecks(before,Read(f,main),rb,0.004f,"rebuilt");
+            // A resolution change: a new size, a new view.
+            const Target big=MakeTarget(f,160,90,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT);
+            const int bigSide=SideFor(160,90);
+            const Target bigLens=MakeTarget(f,bigSide,bigSide,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f);
+            const ULONG bigRefs=Refs(bigLens.texture.Get());
+            const Pixels b2=Read(f,big),l2=Read(f,bigLens);
+            Check(Frame(f,c,big,bigLens,bigSide,LensYFor(160,90)),"a resized lens view is drawn");
+            Check(c.Source().views==3 && Refs(rebuilt.texture.Get())==rebuiltRefs && Refs(bigLens.texture.Get())==bigRefs+1,
+                  "...through a new view, the old size's texture let go");
+            LensChecks(b2,Read(f,big),l2,0.004f,"resized, direct");
+            // A new mission / the scope idle (Reset): nothing kept.
+            c.Reset();
+            Check(!c.HoldsLensView() && Refs(bigLens.texture.Get())==bigRefs,"Reset lets the last texture go");
+        }
+        // A lens texture the engine did not make samplable is not held (no copy to fall back on).
+        const Target opaque=MakeTarget(f,side,side,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,1,0.75f,
+                                       D3D11_BIND_RENDER_TARGET);
+        Bind(f,opaque);
+        Check(!c.CaptureLens(f.context.Get(),side,lensY) && !c.HoldsLens(),"a lens texture without the shader resource bind is not held");
+        // The lens view's texture bound natively as a render target at the command: refused, nothing written.
+        const Pixels still=Read(f,main);
+        Bind(f,lens);Check(c.CaptureLens(f.context.Get(),side,lensY),"held");
+        Bind(f,main);
+        Check(c.CaptureMain(f.context.Get(),kMainY),"held");
+        ID3D11RenderTargetView* lensTarget=lens.rtv.Get();
+        f.context->OMSetRenderTargets(1,&lensTarget,nullptr);
+        Check(!c.Composite(f.context.Get(),nullptr,nullptr,nullptr) && c.Source().lensBoundAsTarget && c.Source().nativeTargets==1,
+              "the lens texture bound as a render target: not drawn, and said so");
+        Check(!c.HoldsMain() && !c.HoldsLens() && !c.HoldsLensView(),"...both released, no view made");
+        f.context->OMSetRenderTargets(0,nullptr,nullptr);
+        Check(Same(still,Read(f,main)),"...nothing written");
+        Check(Refs(lens.texture.Get())==lensRefs,"...no reference left on the lens texture");
     }
     std::printf("scope_pip_gpu: %d checks passed\n",checks);
     return 0;

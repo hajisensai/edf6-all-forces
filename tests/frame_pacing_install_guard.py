@@ -40,4 +40,29 @@ check(len(re.findall(r'\breturn\b', body[pump:])) == 1 and body.rstrip().endswit
 before_tick = body[:tick]
 for name in ('kTickArg', 'kTickCountSig', 'tickPeriod'):
     check(re.search(rf'\b{name}\b', before_tick[pump:]), f'TickWait is gated by {name}')
+
+# InstallRenderFence: the fence wait redirected only after the loop and its poll match (another hook leaves it).
+m = re.search(r'bool InstallRenderFence\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
+check(m, 'InstallRenderFence found')
+fence = re.sub(r'//[^\n]*', '', m.group(1))
+redirect = fence.find('RedirectCall(image+kFenceCall,image+kFencePoll,reinterpret_cast<void*>(&FenceWait)')
+check(redirect >= 0, 'the fence poll redirected to FenceWait')
+check(re.search(r'if\(!edf::Matches\(image,kFenceLoop,kFenceLoopSig,sizeof\(kFenceLoopSig\)\) \|\|\s*!edf::Matches\(image,kFencePoll,kFencePollSig,sizeof\(kFencePollSig\)\)\)',
+                fence[:redirect]) and re.search(r'else ok=edf::RedirectCall', fence), 'the fence redirect is in the else of both signatures')
+check(fence.startswith('    if(!image)return false;'), 'no image: nothing')
+
+# InstallFrameLatency: MaxFrameLatency=0 installs nothing; the device init call is redirected only there.
+m = re.search(r'bool InstallFrameLatency\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
+check(m, 'InstallFrameLatency found')
+lat = re.sub(r'//[^\n]*', '', m.group(1))
+redirect = lat.find('RedirectCall(image+kDeviceInitCall,image+kDeviceInit,reinterpret_cast<void*>(&DeviceInitHook)')
+check(redirect >= 0, 'the device init redirected to DeviceInitHook')
+check(re.search(r'if\(!Cfg\(\)\.maxFrameLatency\)\{[^}]*return false;\}', lat[:redirect]), 'MaxFrameLatency=0 returns before the redirect')
+check(len(re.findall(r'\bRedirect(?:Import)?Call\(|\bPatchCode\(|\bPatchVtableSlot\(', src)) == 4, 'frame_pacing.cpp patches only its four sites')
+
+# Both are installed at load, before the application's init (the fence loop and the device init run in it).
+plugin = open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8').read()
+check(plugin.count('InstallRenderFence();') == 1 and plugin.count('InstallFrameLatency();') == 1, 'plugin.cpp installs both once')
+check(0 <= plugin.find('InstallFramePacing()') < plugin.find('InstallRenderFence();') < plugin.find('InstallFrameLatency();') < plugin.find('InstallFrameRate()'),
+      'the pacing, the fence, the latency, then the frame rate (whose gate needs TickWait)')
 print(f'frame pacing install gates: {checks} checks ok')

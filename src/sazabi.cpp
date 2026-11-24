@@ -468,7 +468,7 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
 
 // The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
 bool PlayerSazabiCue(SazabiCue* out) noexcept {
-    if(!out || !cueMs || GameMs()-cueMs>kSazabiCueMs)return false;
+    if(!out || !stepfresh::Fresh(cueStep))return false;
     *out=cue;
     return true;
 }
@@ -529,7 +529,7 @@ bool InstallSazabi() noexcept {
 void ResetSazabi() noexcept {
     for(auto& m:mechs){DropLocalAim(m.arms);m=Mech{};}
     DropView();
-    cueMs=0;
+    cueStep=0;
     testBoarded=false;
     firstSeenMs=0;
 }

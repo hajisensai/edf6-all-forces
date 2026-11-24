@@ -10,7 +10,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
   python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW|edf5:ROW [0-4],
-                                                     cycle N [STAY] [reboot]
+                                                     cycle N [STAY] [reboot],
+                                                     next MISSION [0-4] [reboot] (leave the mission now and enter
+                                                     MISSION in the same launch: tools/perfrun.py's legs)
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
@@ -27,6 +29,12 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            every second: tests/autopilot/players_probe.cpp)
                            or --cmd "probe umbra" (every box EDF.dll hands Umbra checked for values out of reach, with
                            its owner, and every Vehicle601_Tank's aim and gun pose: tests/autopilot/umbra_probe.cpp)
+                           or --cmd "probe physics [TICKS]" (every live non-static hknp body's position and
+                           velocity by scene tick from the mission's first, default 6000 ticks; a bit-exact hash every
+                           10 ticks: tests/autopilot/physics_probe.cpp, compared by tools/physics_probe_compare.py)
+                           or --cmd "probe heap N" with --cycle (what was allocated from the Nth cycle's way out on
+                           and is still alive at each later one, by call path: tests/autopilot/heap_probe.cpp; every
+                           cycle also logs MEMMAP / HEAPS, where the commit sits)
           --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
@@ -68,6 +76,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import math
 import ctypes.wintypes as wt
 import os
 import re
@@ -615,7 +624,49 @@ def launch() -> None:
     raise SystemExit('no game window in 150 s')
 
 
-def key(game: str, spec: str, ms: int) -> None:
+class RunEnded(RuntimeError):
+    """A write into the game folder refused: the run's end began (Gate)."""
+
+
+class Gate:
+    """The game folder's writes by run's `during` thread (tools/perfrun.py's legs: the `next` commands, the keys, the
+    range's files) against the run's own end, one lock for both. The run's end goes OPEN -> QUITTING (its `quit`
+    written under the lock: no command, key press or file after it, so nothing overwrites the quit) -> CLOSED (before
+    anything is put back: no write at all, a key's release included, so nothing is left behind once restore_placed /
+    uninstall ran). A writer checks and writes under the lock (writing), so a write is either wholly before the end
+    began or never happens."""
+    OPEN, QUITTING, CLOSED = 0, 1, 2
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.state = Gate.OPEN
+
+    def end(self, state: int, then: Callable[[], None] | None = None) -> None:
+        """At least `state` from now on, and `then` (the quit command) done under the same lock."""
+        with self.lock:
+            self.state = max(self.state, state)
+            if then:
+                then()
+
+    def writing(self, release: bool = False):  # noqa: ANN201 - a context manager holding the lock
+        """The lock held for one write: RunEnded once the end began (a key's release: once CLOSED only)."""
+        gate = self
+
+        class _Held:
+            def __enter__(self) -> None:
+                gate.lock.acquire()
+                if gate.state >= (Gate.CLOSED if release else Gate.QUITTING):
+                    gate.lock.release()
+                    raise RunEnded('the run ended first: nothing written into the game folder')
+
+            def __exit__(self, *exc: object) -> None:
+                gate.lock.release()
+        return _Held()
+
+
+def key(game: str, spec: str, ms: int, gate: Gate | None = None) -> None:
+    """Holds `spec` `ms` ms (the autopilot's keys file). With `gate` (a run's `during`): pressed only before the run's
+    end began, released unless everything is already being put back (then uninstall removes the keys file)."""
     codes = [KEYS[k.lower()] if k.lower() in KEYS else int(k, 16) for k in spec.split('+')]
     if not os.path.isfile(os.path.join(plugins(game), NAME + '.session.json')) or not game_pids():
         # A keys file written with no session would be left behind and block the next install.
@@ -625,11 +676,24 @@ def key(game: str, spec: str, ms: int) -> None:
         with open(path + '.tmp', 'w') as f:
             f.write(text)
         os.replace(path + '.tmp', path)
-    try:
+    def release() -> None:
+        if gate is None:
+            write('')
+            return
+        try:
+            with gate.writing(release=True):
+                write('')
+        except RunEnded:
+            return   # CLOSED: the files are being put back (uninstall removes the keys file); nothing written now
+    if gate is None:
         write(' '.join(f'{c:02x}' for c in codes))
+    else:
+        with gate.writing():
+            write(' '.join(f'{c:02x}' for c in codes))
+    try:
         time.sleep(ms / 1000)
     finally:
-        write('')
+        release()
     time.sleep(0.15)
 
 
@@ -690,8 +754,13 @@ def capture(hwnd: int):  # noqa: ANN201 - PIL.Image
             user32.ReleaseDC(hwnd, hdc)
 
 
-def command(game: str, text: str) -> None:
-    """Hands the plugin one command (<dll>.cmd, cleared by it once run)."""
+def command(game: str, text: str, gate: Gate | None = None) -> None:
+    """Hands the plugin one command (<dll>.cmd, cleared by it once run). With `gate` (a run's `during`): only before
+    the run's end began (RunEnded otherwise), checked and written under its lock."""
+    if gate is not None:
+        with gate.writing():
+            command(game, text)
+        return
     path = os.path.join(plugins(game), NAME + '.cmd')
     with open(path + '.tmp', 'w') as f:
         f.write(text)
@@ -732,23 +801,28 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
         keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
         hq: bool = False, every: float = 15.0, during: Callable[[], None] | None = None,
-        quit_wait: int = 90, cycle: tuple[int, float, bool] | None = None) -> int:
+        quit_wait: int = 90, cycle: tuple[int, float, bool] | None = None, gate: Gate | None = None) -> int:
     """`during`: called on a thread of its own once the mission has started (tools/perfrun.py samples the game there);
-    the run quits as soon as it returns, SECONDS then only the longest stay.
+    the run quits as soon as it returns, SECONDS then only the longest stay. `gate`: what `during` writes into the game
+    folder goes through it (command / key with gate=, the range's files under gate.writing()): the run's `quit` ends it
+    (QUITTING), and before anything is put back it is CLOSED, so `during` (a daemon thread, never joined: it may be
+    waiting on a sampler) cannot overwrite the quit nor leave a file behind after the restore.
     `cycle` (N, STAY, REBOOT): the plugin's `cycle` command handed with the mission; the run quits once it logs
     CYCLE done, and fails when SECONDS pass first or the cycle failed.
     Everything placed is put back at the end (restore_placed); non-zero too when anything is left (the game still
     running, or restore_placed left a file), which placed_dir on disk then records for `drive.py restore`."""
     put_back = [False]
     rc = _session(game, mission, difficulty, seconds, keep, put_back, extra=extra, loadout=loadout, shots=shots,
-                  keys=keys, place=place, ini=ini, hq=hq, every=every, during=during, quit_wait=quit_wait, cycle=cycle)
+                  keys=keys, place=place, ini=ini, hq=hq, every=every, during=during, quit_wait=quit_wait, cycle=cycle,
+                  gate=gate or Gate())
     return rc if put_back[0] else rc or 1
 
 
 def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, put_back: list[bool], *,
              extra: tuple[str, ...], loadout: str | None, shots: str | None, keys: tuple[tuple[str, float, int], ...],
              place: tuple[str, ...], ini: tuple[str, ...], hq: bool, every: float,
-             during: Callable[[], None] | None, quit_wait: int, cycle: tuple[int, float, bool] | None) -> int:
+             during: Callable[[], None] | None, quit_wait: int, cycle: tuple[int, float, bool] | None,
+             gate: Gate) -> int:
     """run's launch and stay; put_back[0] set once everything placed is put back (its finally)."""
     install(game)
     watch = DesktopWatch().start()
@@ -808,7 +882,8 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
             log = rows(game)
             cycled = cycled or cycle_outcome(log)
             print(cycle_report(log, cycle[0], cycled))
-        command(game, 'quit')
+        # under the gate's lock: no `next` / key / range file of `during` after it (nothing overwrites the quit)
+        gate.end(Gate.QUITTING, lambda: command(game, 'quit'))
         for _ in range(quit_wait):   # (a game at a few fps takes minutes to leave a mission)
             if not game_pids():
                 break
@@ -827,6 +902,8 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
             return 1
         return 0 if not cycle or cycled == 'done' else 1
     finally:
+        # before anything is copied or put back: `during` writes nothing more (a write under way finishes first)
+        gate.end(Gate.CLOSED)
         watch.stop()
         print(watch.report())
         try:
@@ -847,6 +924,106 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
 def cycle_command(count: int, stay: float, reboot: bool) -> str:
     """The plugin's `cycle` command (tests/autopilot/autopilot.cpp AskCycle)."""
     return f'cycle {count} {stay:g}' + (' reboot' if reboot else '')
+
+
+def next_command(mission: str, difficulty: int, reboot: bool = False) -> str:
+    """The plugin's `next` command (tests/autopilot/autopilot.cpp AskNext): leave the mission running now and enter
+    MISSION (a `mission` command's name: ROW, RM015, M001, range, ...) in the same launch."""
+    return f'next {mission} {difficulty}' + (' reboot' if reboot else '')
+
+
+def next_outcome(log: list[str], k: int) -> str | None:
+    """How the launch's k-th `next` ended, from the autopilot log rows since it was handed: 'entered' (the plugin's
+    "NEXT k entered" row: the new mission runs), 'failed' (refused, the pack's mode not entered, or the script went
+    back to the title), None while it is on its way."""
+    how = entry_outcome(log, k)
+    return how and how[0]
+
+
+# The plugin's rows once a mission runs (MissionMgr says so): "NEXT k entered" for the k-th `next`, "RUNNING" for the
+# launch's first (the `running` command) -- what the game state holds then.
+ENTERED = re.compile(r' (?:NEXT (\d+) entered|RUNNING): the mission runs '
+                     r'\(row (-?\d+), difficulty (-?\d+), mode (-?\d+), content id (-?\d+)\)')
+# The pack's mode made current (or already) on the way in (autopilot.cpp EnterRangeMode).
+RANGE_MODE = re.compile(r' RANGE mode (-?\d+) \(content id (-?\d+)\) (?:made|already) current')
+# The way in failed: refused, the pack's mode not entered (RANGE ... rows, then this; the menu stays, no mission
+# comes), no game state, the script back at the title.
+ENTRY_FAILED = (' NEXT refused', ' RUNNING refused', ' CYCLE failed', " SCRIPT HQMain: the pack's mode not entered",
+                ' SCRIPT HQMain: no game state')
+
+
+def entry_outcome(log: list[str], k: int) -> tuple[str, dict | str] | None:
+    """How the launch's k-th mission entry went (k 0: the first, its RUNNING row; k 1...: the k-th `next`), from the
+    autopilot log rows since it was asked: ('entered', what the mission runs with: row, difficulty, mode, content and
+    the mode the RANGE row before it made current, None without one), ('failed', the row saying so), None while it is
+    on its way."""
+    mode = None
+    for row in log:
+        m = RANGE_MODE.search(row)
+        if m:
+            mode = int(m[1])
+            continue
+        m = ENTERED.search(row)
+        if m and (m[1] is None if k == 0 else m[1] == str(k)):
+            return 'entered', {'row': int(m[2]), 'difficulty': int(m[3]), 'mode': int(m[4]), 'content': int(m[5]),
+                               'range_mode': mode}
+        if any(f in row for f in ENTRY_FAILED):
+            return 'failed', row.strip()
+    return None
+
+
+def pack_content(game: str, key: str) -> int:
+    """[VehicleCrew] `key` of the EDF6VehicleCrew.ini beside the plugins (the installer's TestRangeContent,
+    EDF41Content, EDF5CampaignContent), as the autopilot reads it (ReadPackContent: GetPrivateProfileInt, 0 when absent
+    or past 65535)."""
+    try:
+        with open(os.path.join(plugins(game), 'EDF6VehicleCrew.ini'), encoding='utf-8-sig', errors='replace') as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return 0
+    section = ''
+    for line in lines:
+        s = line.strip()
+        if s.startswith('[') and s.endswith(']'):
+            section = s[1:-1].strip().lower()
+        elif section == 'vehiclecrew' and '=' in s:
+            name, _, value = s.partition('=')
+            if name.strip().lower() == key.lower():
+                m = re.match(r'\s*(\d+)', value)
+                n = int(m[1]) if m else 0
+                return n if n <= 65535 else 0
+    return 0
+
+
+def mission_target(game: str, mission: str) -> tuple[int, int]:
+    """The row and the mode's content id a `mission` / `next` name enters (autopilot.cpp AskMission / AskNext):
+    range row 0 of TestRangeContent's mode, edf41:ROW / edf41mp01:ROW / edf41mp02:ROW of EDF41Content (+1, +2),
+    edf5:ROW of EDF5CampaignContent, a stock row (RM015 13, M001 1, a number) of the stock list (content id 0)."""
+    low = mission.lower()
+    if low == 'range':
+        return 0, pack_content(game, 'TestRangeContent')
+    for prefix, extra in (('edf41:', 0), ('edf41mp01:', 1), ('edf41mp02:', 2)):
+        if low.startswith(prefix):
+            first = pack_content(game, 'EDF41Content')
+            return int(mission[len(prefix):]), first + extra if first > 0 else first
+    if low.startswith('edf5:'):
+        return int(mission[5:]), pack_content(game, 'EDF5CampaignContent')
+    return (13 if low == 'rm015' else 1 if low == 'm001' else int(mission)), 0
+
+
+def entry_mismatch(got: dict, row: int, difficulty: int, content: int) -> str | None:
+    """Why the mission running is not the one asked (row, difficulty, the mode's content id, the mode the way in made
+    current), None when it is."""
+    bad = []
+    if got['row'] != row:
+        bad.append(f'row {got["row"]}, not {row}')
+    if got['difficulty'] != difficulty:
+        bad.append(f'difficulty {got["difficulty"]}, not {difficulty}')
+    if got['content'] != content:
+        bad.append(f'content id {got["content"]}, not {content}')
+    if got['range_mode'] is not None and got['mode'] != got['range_mode']:
+        bad.append(f'mode {got["mode"]}, not the {got["range_mode"]} made current on the way in')
+    return '; '.join(bad) or None
 
 
 def cycle_outcome(log: list[str]) -> str | None:
@@ -889,7 +1066,11 @@ def key_option(text: str) -> tuple[str, float, int]:
     try:
         spec, when = text.split('@', 1)
         at, _, ms = when.partition(':')
-        return spec, float(at), int(ms) if ms else 1000
+        seconds, hold = float(at), int(ms) if ms else 1000
+        # float() takes nan, inf and -5 too: a hold at no time (or never) is refused, not slept on
+        if not spec or not math.isfinite(seconds) or seconds < 0 or hold <= 0:
+            raise ValueError(text)
+        return spec, seconds, hold
     except ValueError:
         raise SystemExit('--key wants SPEC@SECONDS[:MS], e.g. 57@25:5000') from None
 

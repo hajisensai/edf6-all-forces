@@ -24,6 +24,7 @@ bool TurretTestRound(const unsigned char* weapon,RoundModel* model) noexcept {
     return read;
 }
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 Config config{};
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; }
@@ -288,7 +289,7 @@ void Run() {
     }
     unsigned char* holders[]={primary.holder,picked.holder};
     Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);
-    shared=Shared{};shared.v=vehicle;shared.seat=seat;shared.high=true;shared.decoupled=true;shared.seenMs=GameMs();
+    shared=Shared{};shared.v=vehicle;shared.seat=seat;shared.high=true;shared.decoupled=true;shared.seenStep=stepfresh::Now();
     selectedGun=picked.data;
     Check(Gun(vehicle,seat)==picked.data,"selected payload belongs to the seat");
     selectedGun=elsewhere.data;Check(Gun(vehicle,seat)==nullptr,"invalid fire-control target cannot silently select a different gun");
@@ -756,6 +757,7 @@ void Run() {
 }  // namespace
 }  // namespace crew
 int main() {
+    stepfresh::See(1);   // the scene's first step (crew.cpp SeeFrame): 0 is "never published"
     crew::Run();std::printf("turret_cam_runtime_check: %d checks, %d failed\n",crew::checks,crew::failures);
     return crew::failures ? 1 : 0;
 }
