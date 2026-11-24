@@ -55,6 +55,15 @@ void WritePending(const char* text,std::size_t n,unsigned dropped) noexcept {
     }
 }
 
+// A crash's write (CrashFlush), on the crash dump's thread while the crashed one may own the process heap's or the CRT's
+// lock: the handle already open and the bytes already formatted, nothing else. A log not opened yet stays unopened
+// (no CreateFileW), one past logMax grows on (no MoveFileExW), the dropped count is a fixed line (no _snprintf_s).
+constexpr char kCrashDropped[]="(log lines dropped before the crash)\r\n";
+void WriteCrash(const char* text,std::size_t n,unsigned dropped) noexcept {
+    Put(text,n);
+    if(dropped)Put(kCrashDropped,sizeof(kCrashDropped)-1);
+}
+
 DWORD WINAPI Writer(void*) {
     for(;;) {
         Sleep(kFlushMs);
@@ -98,8 +107,12 @@ void Flush(bool tryOnly) noexcept {
     if(logPath[0])buffer.Drain(&WritePending,tryOnly);
 }
 
+void CrashFlush() noexcept {
+    if(logPath[0])buffer.Drain(&WriteCrash,true);
+}
+
 void Crash(const char* text,std::size_t size) noexcept {
-    Flush(true);   // the lines before the crash first, in order
+    CrashFlush();   // the lines before the crash first, in order
     AppendCrashLine(logPath,text,size);
 }
 

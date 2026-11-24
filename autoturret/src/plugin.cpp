@@ -1080,8 +1080,9 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void
 extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return autoturret::image!=nullptr; }
 
 // A crash anywhere in the game: EDF6VehicleCrew's crash dump calls this after its dump (common/log.h kCrashFlush), so
-// the lines still buffered here reach EDF6AutoTurret.log. Never waits (the crashed thread may own a log lock).
-extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_CrashFlushLogV1() { edf::logfile::Flush(true); }
+// the lines still buffered here reach EDF6AutoTurret.log. Never waits (the crashed thread may own a log lock) and
+// neither opens, rotates nor formats (common/log.h CrashFlush).
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_CrashFlushLogV1() { edf::logfile::CrashFlush(); }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){autoturret::module=instance;DisableThreadLibraryCalls(instance);}

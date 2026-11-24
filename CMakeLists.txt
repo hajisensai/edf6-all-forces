@@ -10,7 +10,7 @@ set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only gene
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
@@ -2078,6 +2078,18 @@ add_test(NAME crash_dump COMMAND crash_dump_test)
 # It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
 set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
 add_dependencies(offline_checks crash_dump_test)
+# The crash's log flush (common/log.h CrashFlush): only the open handle and preformatted bytes, with CreateFileW,
+# MoveFileExW and _snprintf_s counted (log.cpp compiled into the test, no edf6common).
+add_executable(log_crash_test tests/log_crash_test.cpp)
+target_include_directories(log_crash_test PRIVATE common)
+target_compile_options(log_crash_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME log_crash COMMAND log_crash_test)
+add_dependencies(offline_checks log_crash_test)
+# The Mods listing ModFileIn answers from (src/mod_file.h), on a made-up game directory under %TEMP%.
+add_executable(mod_file_test tests/mod_file_test.cpp)
+target_compile_options(mod_file_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME mod_file COMMAND mod_file_test)
+add_dependencies(offline_checks mod_file_test)
 # More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
 # spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
 add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)
