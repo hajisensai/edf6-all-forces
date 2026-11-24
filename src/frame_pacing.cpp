@@ -65,6 +65,8 @@ constexpr LONGLONG kWait=-10000;   // 1 ms, relative, in 100 ns: the window thre
 
 using SleepFn=void(WINAPI*)(DWORD);
 void* gameSleep=nullptr;
+bool tickWaitInstalled=false;
+GateWaitFn gateWait=nullptr;   // set once at load, before the main loop runs
 std::uint64_t qpcFreq=0,tickPeriod=0;
 
 // One timer per thread (set and waited on by its own thread only), closed when the thread ends.
@@ -95,6 +97,14 @@ void WINAPI PumpWait(DWORD ms) noexcept {
 void WINAPI TickWait(DWORD ms) noexcept {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
+    if(gateWait) {   // the frame gate's slot, not the tick (frame_rate.cpp)
+        const std::uint64_t counts=gateWait(static_cast<std::uint64_t>(now.QuadPart));
+        if(!counts)return;
+        const HANDLE timer=Timer();
+        if(!timer || !Arm(timer,-static_cast<LONGLONG>(pacing::CountsTo100ns(counts,qpcFreq)))){reinterpret_cast<SleepFn>(gameSleep)(ms);return;}
+        WaitForSingleObject(timer,INFINITE);
+        return;
+    }
     const std::uint64_t base=*reinterpret_cast<const std::uint64_t*>(image+kTickBase);
     const std::uint64_t last=*reinterpret_cast<const std::uint64_t*>(image+kTickLast);
     const std::uint64_t counts=pacing::CountsToBoundary(static_cast<std::uint64_t>(now.QuadPart),base,last,tickPeriod);
@@ -132,6 +142,9 @@ bool DeviceInitHook(void* renderer,void* params) {
     return made;
 }
 }  // namespace
+
+bool FramePacingTickWaitInstalled() noexcept { return tickWaitInstalled; }
+void SetFramePacingGate(GateWaitFn wait) noexcept { gateWait=wait; }
 
 bool InstallRenderFence() noexcept {
     if(!image)return false;
@@ -175,6 +188,7 @@ bool InstallFramePacing() noexcept {
         if(!tickPeriod)Log("PACING QPC frequency %llu: no tick period, the frame step's wait left as it is",qpcFreq);
         else tick=edf::RedirectImportCall(image+kTickSleep,kTickSig,reinterpret_cast<void*>(&TickWait),&gameSleep);
     }
+    tickWaitInstalled=tick;
     Log("PACING window thread wait=%d, frame step wait=%d",pump,tick);
     return pump && tick;
 }
