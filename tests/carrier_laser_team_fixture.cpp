@@ -102,7 +102,7 @@ void ChangeSide(unsigned change) {
 namespace edf {
 bool Readable(const void* pointer,std::size_t,bool) noexcept {return pointer!=nullptr;}
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept {return true;}
-bool PatchVtableSlot(void** slot,void* expected,void* next) noexcept {
+bool PatchVtableSlot(void** slot,void* expected,void* next,edf::Claim,const char*) noexcept {
     if(!laser_fixture::patchAllowed || !slot || *slot!=expected)return false;
     *slot=next;return true;
 }

@@ -225,7 +225,7 @@ bool Readable(const void* pointer,std::size_t size,bool) noexcept {
     while(at<end){MEMORY_BASIC_INFORMATION m{};if(!VirtualQuery(reinterpret_cast<const void*>(at),&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;const auto next=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;if(next<=at)return false;at=next;}return true;
 }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept {return true;}
-bool RedirectCall(unsigned char* p,void*,void*,bool& changed) noexcept {p[1]^=0x55;changed=true;return true;}
+bool RedirectCall(unsigned char* p,void*,void*,bool& changed,edf::Claim,const char*) noexcept {p[1]^=0x55;changed=true;return true;}
 }
 int main() {
     using namespace boss_core_fixture;Image();CHECK(EnemyControlBossPvpReady());CHECK(EnemyControlBossPvpInstall());

@@ -56,9 +56,9 @@ void Reset(){
 namespace edf {
 bool Readable(const void* at,std::size_t,bool) noexcept{return at!=nullptr;}
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept{return fixture::matches;}
-bool ChainVtableSlot(void** slot,void* hook,void** next) noexcept{++fixture::chainCalls;if(fixture::chainCalls==fixture::failChain)return false;*next=*slot;*slot=hook;return true;}
-bool RedirectCall(unsigned char*,void*,void* replacement,bool& changed) noexcept{fixture::callHook=replacement;changed=true;return true;}
-bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept{
+bool ChainVtableSlot(void** slot,void* hook,void** next,const char*) noexcept{++fixture::chainCalls;if(fixture::chainCalls==fixture::failChain)return false;*next=*slot;*slot=hook;return true;}
+bool RedirectCall(unsigned char*,void*,void* replacement,bool& changed,edf::Claim,const char*) noexcept{fixture::callHook=replacement;changed=true;return true;}
+bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size,edf::Claim,const char*) noexcept{
  const int k=at==crew::image+0x65B14B ? 0 : at==crew::image+0x65B31B ? 1 : -1;
  fixture::Check(k>=0 && size==(k ? 8u : 21u) && expected[0]==(k ? 0x85 : 0x49),"the gun gate patches the two stock tests whole");
  std::memcpy(fixture::patches[k],replacement,size);return !fixture::failGate;}

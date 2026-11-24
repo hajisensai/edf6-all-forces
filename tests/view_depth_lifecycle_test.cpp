@@ -22,7 +22,7 @@ bool Readable(const void* pointer,std::size_t size,bool writable) noexcept {
     }
     return true;
 }
-bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
+bool RedirectCall(unsigned char*,void*,void*,bool&,edf::Claim,const char*) noexcept { return false; }
 }
 namespace crew {
 unsigned char* image=nullptr;

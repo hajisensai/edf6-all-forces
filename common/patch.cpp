@@ -21,7 +21,8 @@ bool Matches(const unsigned char* image,std::size_t rva,const unsigned char* byt
     return image && std::memcmp(image+rva,bytes,size)==0;
 }
 
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept {
+bool PatchVtableSlot(void** slot,void* expected,void* replacement,Claim kind,const char* owner) noexcept {
+    ClaimCode(slot,sizeof(void*),kind,owner);
     DWORD old=0;
     if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))return false;
     const bool ok=InterlockedCompareExchangePointer(slot,replacement,expected)==expected;
@@ -29,17 +30,19 @@ bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept {
     return ok;
 }
 
-bool ChainVtableSlot(void** slot,void* hook,void** next) noexcept {
+bool ChainVtableSlot(void** slot,void* hook,void** next,const char* owner) noexcept {
     *next=nullptr;
     void* const current=*slot;
     if(!current || current==hook)return false;
     *next=current;
-    if(PatchVtableSlot(slot,current,hook))return true;
+    if(PatchVtableSlot(slot,current,hook,Claim::kLayered,owner))return true;
     *next=nullptr;
     return false;
 }
 
-bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept {
+bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size,
+               Claim kind,const char* owner) noexcept {
+    ClaimCode(at,size,kind,owner);
     if(std::memcmp(at,replacement,size)==0)return true;
     if(std::memcmp(at,expected,size)!=0)return false;
     DWORD old=0;
@@ -49,7 +52,8 @@ bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned ch
     FlushInstructionCache(GetCurrentProcess(),at,size);
     return true;
 }
-bool RedirectImportCall(unsigned char* site,const unsigned char* sig,void* hook,void** slotValue) noexcept {
+bool RedirectImportCall(unsigned char* site,const unsigned char* sig,void* hook,void** slotValue,
+                        const char* owner) noexcept {
     if(!Readable(site,6) || std::memcmp(site,sig,6)!=0)return false;
     std::int32_t rel=0;
     std::memcpy(&rel,sig+2,4);
@@ -64,7 +68,7 @@ bool RedirectImportCall(unsigned char* site,const unsigned char* sig,void* hook,
     unsigned char code[6]={0xE8,0,0,0,0,0x90};
     const auto rel32=static_cast<std::int32_t>(delta);
     std::memcpy(code+1,&rel32,4);
-    if(PatchCode(site,sig,code,sizeof(code)))return true;
+    if(PatchCode(site,sig,code,sizeof(code),Claim::kSole,owner))return true;
     VirtualFree(thunk,0,MEM_RELEASE);
     return false;
 }

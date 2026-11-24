@@ -85,7 +85,7 @@ bool Chain(unsigned rva,unsigned stock,void* hook,void** next) noexcept {
         *next=now;
         bool changed=false;
         // a failed write after the site changed keeps *next: the site calls the hook
-        if(RedirectCall(site,now,hook,changed) || changed)return changed;
+        if(RedirectCall(site,now,hook,changed,edf::Claim::kLayered) || changed)return changed;
         *next=nullptr;
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

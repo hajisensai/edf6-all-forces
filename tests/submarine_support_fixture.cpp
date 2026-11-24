@@ -91,7 +91,7 @@ Rider SeatRider(const unsigned char*,const unsigned char*) noexcept {return Ride
 bool AnyPlayerIn(const unsigned char*,const unsigned char*) noexcept {return submarine_fixture::playerAboard;}
 bool LivingSoldierInSeat(const unsigned char*,const unsigned char*) noexcept {return submarine_fixture::driverLiving;}
 bool IsAnyPlayer(const unsigned char*) noexcept {return submarine_fixture::driverPlayer;}
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept {changed=false;return false;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept {changed=false;return false;}
 }
 namespace crew {
 unsigned char* image=nullptr;

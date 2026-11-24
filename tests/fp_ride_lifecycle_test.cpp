@@ -26,7 +26,7 @@ bool Readable(const void* p,std::size_t n,bool) noexcept {
     const auto begin=reinterpret_cast<std::uintptr_t>(p),end=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;
     return begin<=end && n<=end-begin;
 }
-bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
+bool ChainVtableSlot(void**,void*,void**,const char*) noexcept { return false; }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return false; }
 bool IsPlayer(const unsigned char* h) noexcept { return h!=nullptr; }
 unsigned SeatCount(const unsigned char* vehicle) noexcept {
@@ -35,7 +35,7 @@ unsigned SeatCount(const unsigned char* vehicle) noexcept {
     return count>0 && count<=kMaxSeats && Readable(seats,count*kSeatStride,false) ? static_cast<unsigned>(count) : 0;
 }
 
-bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
+bool RedirectCall(unsigned char*,void*,void*,bool&,edf::Claim,const char*) noexcept { return false; }
 }
 namespace crew::thermal {
 bool WantsCapture() noexcept { return false; }

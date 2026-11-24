@@ -178,6 +178,6 @@ bool Readable(const void* p,std::size_t n,bool) noexcept {if(!p)return false;
     if(blockedObject) {const auto x=reinterpret_cast<std::uintptr_t>(p),b=reinterpret_cast<std::uintptr_t>(blockedObject);
         if((x>=b && x-b<0x4000) || (x<b && b-x<n)){++blockedReads;return false;}}
     auto at=reinterpret_cast<std::uintptr_t>(p);if(n>UINTPTR_MAX-at)return false;const auto end=at+n;while(at<end){MEMORY_BASIC_INFORMATION m{};if(!VirtualQuery(reinterpret_cast<const void*>(at),&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;const auto next=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;if(next<=at)return false;at=next;}return true;}
-bool RedirectCall(unsigned char* p,void*,void*,bool& changed) noexcept {p[1]^=0x55;changed=true;return true;}
+bool RedirectCall(unsigned char* p,void*,void*,bool& changed,edf::Claim,const char*) noexcept {p[1]^=0x55;changed=true;return true;}
 }
 int main(){Image();CHECK(EnemyControlBossPvpReady());CHECK(EnemyControlBossPvpInstall());CHECK(EnemyControlBossPvpReady());SelectorClone();CachedBeams();RetainedCachedBeams();RootAndPart();MeteorLifecycle();FailureAndIdentity();FullLedger();image[boss_pvp_detail::kPublishCall+1]^=1;CHECK(!EnemyControlBossPvpReady());image[boss_pvp_detail::kPublishCall+1]^=1;CHECK(EnemyControlBossPvpReady());CHECK(EnemyControlBossPvpReset());VirtualFree(image,0,MEM_RELEASE);std::printf("%d checks, %d failures\n",checks,failures);return failures ? 1 : 0;}

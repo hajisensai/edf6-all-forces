@@ -461,7 +461,7 @@ bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) 
 void* AllocateNearCode(const void*,const unsigned char* bytes,std::size_t size) noexcept {
     auto* memory=VirtualAlloc(nullptr,size,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE);if(memory)std::memcpy(memory,bytes,size);return memory;
 }
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept {++transport_fixture::redirects;changed=true;return transport_fixture::registerCalls;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept {++transport_fixture::redirects;changed=true;return transport_fixture::registerCalls;}
 }
 namespace crew {
 unsigned char* image=nullptr;

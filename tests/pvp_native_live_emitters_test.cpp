@@ -179,7 +179,7 @@ void SetLockPoint(void* point,const float* xyz) noexcept{std::memcpy(static_cast
 }
 namespace edf {
 unsigned SeatCount(const unsigned char*) noexcept{return 0;}
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept{changed=false;return false;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept{changed=false;return false;}
 bool IsAnyPlayer(const unsigned char* p) noexcept{return crew::IsSoldierClass(p);}
 }
 int main() {

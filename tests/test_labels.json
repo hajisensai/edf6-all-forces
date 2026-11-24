@@ -640,6 +640,13 @@
     "tests/cockpit_tub_test.py"
    ]
   },
+  "code_owner": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "command_identity": {
    "labels": [
     "plugin-native"

@@ -1020,6 +1020,15 @@ int HookFlak() noexcept {
     Log("HOOK flak input slot=1");
     return 1+HookGrenade()+HookRocket();
 }
+// Two source files patching one code byte (edf/code_owner.h): the second's patch is refused or undoes the first's.
+void LogClaimConflict(const edf::ClaimConflict& c) noexcept {
+    const auto at=reinterpret_cast<const unsigned char*>(c.at);
+    if(image && at>=image && at<image+0x4000000)
+        Log("PATCH conflict: %s and %s both patch EDF.dll+0x%llX (%zu bytes): only one may own a site",c.first,c.second,
+            static_cast<unsigned long long>(at-image),c.size);
+    else Log("PATCH conflict: %s and %s both patch %p (%zu bytes): only one may own a site",c.first,c.second,
+             static_cast<const void*>(at),c.size);
+}
 }  // namespace autoturret
 
 // A background host's keyboard and foreground window for this plugin (common/edf/input_source.h); null: user32's.
@@ -1052,12 +1061,16 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     }
     // Only now: every export answers false (does nothing) while image is null, a refused load included.
     image=edfImage;
+    edf::SetClaimConflictSink(&LogClaimConflict);   // before the first patch
     // The flak and the tank gunners stand alone: either one's code being patched by someone else
     // leaves only that one stock. The DLL stays loaded while any slot points into it.
     const int flak=HookFlak();
     const int gunners=HookGunners();
     Log("LOADED patches flak=%d gunners=%d",flak,gunners);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
+    const edf::ClaimStats claims=edf::GetClaimStats();
+    Log("PATCH owners: %u claims at load, %u conflicts, %u not registered (no room)",claims.claims,claims.conflicts,
+        claims.dropped);
     return flak+gunners>0;
 }
 
