@@ -267,8 +267,9 @@ EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（�
 | 6 | 联机实测、性能（n = 0 帧的 Umbra / 栅栏成本） | 未做 |
 
 开关只有 ini `FrameRateCap`（2026-11-24 起面向玩家；原先的开发开关 `FrameRateDev` 已删，守卫 `tests/frame_rate_off_guard.py`）：
-- `FrameRateCap=0`（发布默认）：什么都不装，游戏照原版运行。
-- `FrameRateCap≠0`：输入挪位（latency-3）、8 个守卫、鼠标 / 滚轮取、SyncInterval 钩子、Present 统计、翻转模型，全部装上才装帧门；
+- `FrameRateCap=0`（发布默认）：什么都不装，游戏照原版运行。`1`（跟刷新率）改成默认要等 §7 清单做完、其他物体插值（PR-e）合入后单独开 PR。
+- `FrameRateCap≠0`：先核对所有改写点（tick 计数两处、n 的存储、tick 等待是本插件的 TickWait、没有 EDF6VR），有一处不符就整个不装；
+  都符合时装输入挪位（latency-3）、8 个守卫、鼠标 / 滚轮取、SyncInterval 钩子、Present 统计（翻转模型只在开发开关 `FrameRateFlip` 后），全部装上才装帧门；
   日志每 5 s 一行 `FRAMERATE`（ticks/s、frames/s、1% low）与一行 `PRESENT`（Present 调用数、`GetFrameStatistics` 的实际上屏帧数与刷新数）。
 
 已知限制：只插值玩家镜头和玩家自己（及所乘载具）；其他角色、敌人、特效、植被仍按 tick 走（阶段 4、5），
