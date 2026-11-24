@@ -290,8 +290,11 @@ void PoseFrame() noexcept {
 }
 
 // Right before the render recording (render_record.cpp: the frame rate's turn, before the first person's).
+// The sample first (stage 4: every other object's root as the last tick left it, before fps-7 writes the player's).
 void RecordStart() noexcept {
-    if(on && poseDue) {
+    if(!on)return;
+    frameobjects::Sample(poseDue);
+    if(poseDue) {
         poseDue=false;
         PoseFrame();
     }
@@ -337,7 +340,6 @@ void CameraStepHook(void* camera,void* arg) {
         c->age=0;
         SampleRoot(camera);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    frameobjects::Sample();   // stage 4: every other object's root, once a tick
 }
 
 void BeforeProject(void* camera,const int*) {

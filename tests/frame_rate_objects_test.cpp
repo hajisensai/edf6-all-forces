@@ -118,7 +118,14 @@ void List(std::initializer_list<const Obj*> objs) {
     Put<std::uint64_t>(sys,kUpdateCount,list.size());
 }
 std::uint32_t tickNow=0;
-void Tick() { Put<std::uint32_t>(sys,kTickCount,++tickNow);frameobjects::Sample(); }
+// A tick (the roots the test set are what it left), alone (TickOnly), or with the next frame's render recording, a frame
+// with ticks (Tick: its sample). A frame without ticks (Frame): its recording's sample, then its poses.
+void TickOnly() { Put<std::uint32_t>(sys,kTickCount,++tickNow); }
+void Tick() { TickOnly();frameobjects::Sample(false); }
+void Frame(float alpha,const void* rootHuman,const void* rootVehicle,const float* rootD) {
+    frameobjects::Sample(true);
+    frameobjects::Pose(alpha,rootHuman,rootVehicle,rootD);
+}
 
 frameobjects::Counts Take() { frameobjects::Counts c;frameobjects::TakeCounts(c);return c; }
 // A scene whose frames without ticks already come (the sample not idle: Idle() has the window).
@@ -163,7 +170,7 @@ void BlendAndRestore() {
     Steps({&a},0,1);
     // The bones move with the root: bone k at root + k.
     for(std::uint64_t k=1;k<a.model.bones;++k)SetX(a.model.pose+k*16,1.0f+static_cast<float>(k));
-    frameobjects::Pose(0.25f,nullptr,nullptr,nullptr);
+    Frame(0.25f,nullptr,nullptr,nullptr);
     Check(NearX(a.model.pose,0.25f) && NearX(a.model.pose+16,1.25f) && NearX(a.model.pose+32,2.25f),
           "pose: every bone times D (the root blended to alpha 0.25)");
     auto c=Take();
@@ -176,7 +183,7 @@ void BlendAndRestore() {
     // The object freed before the restore: nothing goes back.
     Root(a,2);SetX(a.model.pose+16,3);SetX(a.model.pose+32,4);
     Tick();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     Check(NearX(a.model.pose,1.5f),"pose: the next tick's pair");
     Put<std::int32_t>(a.ctrl,8,0);
     frameobjects::Restore();
@@ -184,7 +191,7 @@ void BlendAndRestore() {
     Put<std::int32_t>(a.ctrl,8,1);
     // Another object at the address (weak-this another block) since the write: not written either.
     Root(a,2);Tick();Root(a,3);Tick();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     unsigned char* other=Ctrl();
     Put<const void*>(a.mem,kSelfCtrl,other);
     frameobjects::Restore();
@@ -209,7 +216,7 @@ void Reasons() {
     SetX(late.model.pose,1.5f);                                      // written after the sample
     Put<const void*>(swapped.mem,0,reinterpret_cast<const void*>(0x2000));   // another class at the address
     Put<std::int32_t>(gone.ctrl,8,0);                                // freed
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     auto c=Take();
     Check(LeftBy(c,Left::kSamples)==1,"left: one tick seen (samples)");
     Check(LeftBy(c,Left::kPose)==1,"left: the root written after the sample (pose)");
@@ -240,7 +247,7 @@ void Forgetting() {
     Tick();
     Check(bodies.size()==2 && Weaks(b.ctrl)==1 && bodies[1].object==d.mem && bodyIndex.Find(d.mem)==1 &&
           bodyIndex.Find(b.mem)<0,"forget: not listed, swap-removed, its weak given back, the index follows");
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     Check(NearX(d.model.pose,1.5f) && NearX(a.model.pose,1.5f),"forget: the moved body keeps its samples");
     frameobjects::Restore();
     // Listed twice in one tick: one body.
@@ -289,7 +296,7 @@ void RidersAndWeapons() {
     List({&vehicle,&rider});
     Root(rider,5);
     Steps({&vehicle},0,1);
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     auto c=Take();
     Check(NearX(vehicle.model.pose,0.5f),"vehicle: blended");
     Check(NearX(rider.model.pose,4.5f) && NearX(gunModel.pose,-0.5f),
@@ -310,7 +317,7 @@ void RidersAndWeapons() {
     Root(rider,5);SetX(gunModel.pose,0);SetX(cannonModel.pose,0);
     Root(vehicle,2);
     Tick();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     Put<unsigned char*>(holders,kHolderCtrl,otherCtrl);
     frameobjects::Restore();
     Check(NearX(rider.model.pose,5.0f) && NearX(gunModel.pose,0.0f),"restore: the seated rider and their weapon back");
@@ -322,14 +329,14 @@ void RidersAndWeapons() {
     Root(vehicle,3);Tick();
     const float* fps7=Translation(-0.25f,0,0);
     Take();
-    frameobjects::Pose(0.75f,nullptr,vehicle.mem,fps7);
+    Frame(0.75f,nullptr,vehicle.mem,fps7);
     c=Take();
     Check(NearX(vehicle.model.pose,3.0f) && NearX(rider.model.pose,4.75f) && c.riders==1,
           "the player's vehicle: left to fps-7, its riders with fps-7's D");
     Check(NearX(cannonModel.pose,-0.25f) && !c.AsStepped(),"the player's vehicle: its trigger weapon with fps-7's D");
     frameobjects::Restore();
     Check(NearX(cannonModel.pose,0.0f),"the player's vehicle: its trigger weapon back after the frame");
-    frameobjects::Pose(0.75f,nullptr,vehicle.mem,nullptr);
+    Frame(0.75f,nullptr,vehicle.mem,nullptr);
     c=Take();
     Check(NearX(rider.model.pose,5.0f) && LeftBy(c,Left::kRefused)==1 && !c.posed,
           "the player's vehicle refused: its rider as stepped (refused)");
@@ -357,7 +364,7 @@ Cost Run(int n) {
     Tick();
     const auto t1=std::chrono::steady_clock::now();
     Cost cost{edf::TakeReadableStats().asks,0,std::chrono::duration<double,std::milli>(t1-t0).count()};
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     cost.poseAsks=edf::TakeReadableStats().asks;
     const auto c=Take();
     Check(c.posed==static_cast<unsigned>(n) && c.objects==static_cast<unsigned>(n),"cost: every object posed");
@@ -381,48 +388,60 @@ void Idle() {
     frameobjects::SceneOver();Take();
     const Obj a=MakeObj(thermal::Family::kOther),b=MakeObj(thermal::Family::kOther);
     List({&a,&b});
-    for(unsigned i=0;i<frameobjects::kIdleTicks+5;++i){Root(a,static_cast<float>(i));Root(b,static_cast<float>(i));Tick();}
+    auto both=[&](float x){Root(a,x);Root(b,x);};
+    for(unsigned i=0;i<frameobjects::kIdleTicks+5;++i){both(static_cast<float>(i));Tick();}
     auto c=Take();
     Check(bodies.empty() && c.idleTicks==frameobjects::kIdleTicks+5 && Weaks(a.ctrl)==1,
           "idle: a scene without a frame without ticks (stress:30, or the gate not in) samples nothing");
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);   // the first frame without ticks
+    // The first frame without ticks: its recording is the first after the last tick, and samples it at once.
+    both(0);TickOnly();
+    Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
-    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==0 && !LeftBy(c,frameobjects::Left::kUnsampled),
-          "idle: the first frame without ticks poses nothing (no object known yet)");
-    Steps({&a,&b},0,1);
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Check(!c.posed && !c.idleTicks && bodies.size()==2 && LeftBy(c,frameobjects::Left::kSamples)==2 &&
+          !LeftBy(c,frameobjects::Left::kUnsampled),
+          "idle: the first frame without ticks samples at once; one tick seen, nothing posed yet");
+    both(1);Tick();
+    Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
-    Check(c.posed==2 && !c.idleTicks,"idle: the sample resumed at the next tick, blended two ticks on");
+    Check(c.posed==2 && !c.idleTicks,"idle: blended from the next tick on");
     frameobjects::Restore();
     // In the window: kIdleTicks ticks sampled after the last frame without ticks, then skipped.
-    for(unsigned i=0;i<frameobjects::kIdleTicks;++i){Root(a,2.0f+static_cast<float>(i));Root(b,2.0f+static_cast<float>(i));Tick();}
+    for(unsigned i=0;i<frameobjects::kIdleTicks;++i){both(2.0f+static_cast<float>(i));Tick();}
     c=Take();
     Check(!c.idleTicks && bodies.size()==2 && bodies[0].samples==2,"idle: the window's ticks sampled");
-    Root(a,100);Root(b,100);
-    Tick();
+    both(100);Tick();
     c=Take();
     Check(c.idleTicks==1 && bodies.size()==2,"idle: the tick after the window skipped, the objects known kept");
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    both(101);TickOnly();
+    Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
-    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2 && !LeftBy(c,frameobjects::Left::kUnsampled) &&
-          c.AsStepped()==2,
-          "idle: the frame without ticks that resumes counts every object known under samples, poses none");
-    Root(a,101);Root(b,101);
-    Tick();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
-    c=Take();
-    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2,"idle: one sample after resuming: still lacking samples");
-    Root(a,102);Root(b,102);
-    Tick();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2 && c.AsStepped()==2,
+          "idle: the frame without ticks that resumes samples, the tick before it was not: every object under samples");
+    both(102);Tick();
+    Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
     Check(c.posed==2,"idle: two consecutive samples: blended again");
     frameobjects::Restore();
     frameobjects::SceneOver();
-    Root(a,0);Root(b,0);
-    Tick();
+    both(0);Tick();
     c=Take();
     Check(c.idleTicks==1 && bodies.empty(),"idle: a new scene starts idle");
+
+    // Several recordings a tick (two viewports, or frames without ticks that do not pose): each tick counts once.
+    frameobjects::SceneOver();Take();
+    Frame(0.5f,nullptr,nullptr,nullptr);   // a frame without ticks: the window opens
+    Take();
+    for(unsigned i=0;i<frameobjects::kIdleTicks;++i){both(static_cast<float>(i));Tick();frameobjects::Sample(false);}
+    c=Take();
+    Check(!c.idleTicks && bodies.size()==2 && bodies[0].samples==2,
+          "two calls a tick: the window is kIdleTicks ticks, not half of it");
+    both(200);Tick();frameobjects::Sample(false);
+    c=Take();
+    Check(c.idleTicks==1,"two calls a tick: a skipped tick counted once");
+    TickOnly();TickOnly();frameobjects::Sample(false);
+    c=Take();
+    Check(c.idleTicks==2,"a recording after two ticks: both counted");
+    frameobjects::SceneOver();Take();
 }
 
 void Off() {
@@ -433,7 +452,7 @@ void Off() {
     Tick();
     Check(bodies.empty() && Weaks(a.ctrl)==1,"off: Sample does nothing");
     frameobjects::SceneOver();
-    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    Frame(0.5f,nullptr,nullptr,nullptr);
     Check(!Take().posed,"off: Pose does nothing");
 }
 }  // namespace

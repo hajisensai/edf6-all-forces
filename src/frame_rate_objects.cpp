@@ -3,9 +3,9 @@
 // than 0); a frame with ticks draws the step as it is and touches nothing here but the sample.
 //
 // Which objects. System ([image+0x20B2958], scene::ObjectManager) keeps the objects its tick updates in a list (+0x448
-// pointers, +0x458 count): 0x1198DA0's object phase walks it each tick (0x11993D6 cleans it right before, 0x1195F20),
-// and the camera step (0x11995A6, frame_rate_view.cpp's hook) comes after that phase. Once a tick (System +0xCE0, the
-// tick count 0x1198FD0 adds one to), the hook samples every listed object whose family thermal_models.cpp knows (soldiers
+// pointers, +0x458 count): 0x1198DA0's object phase walks it each tick (0x11993D6 cleans it right before, 0x1195F20).
+// Once a tick (System +0xCE0, the tick count 0x1198FD0 adds one to: the first render recording that sees it changed,
+// see below), the sample takes every listed object whose family thermal_models.cpp knows (soldiers
 // and NPCs of any machine, vehicles empty or not, insects, humanoids, monsters, UFOs and the other families there):
 // pose[0] of its main model's skeleton instance (model+0xA0, the world root). A listed pointer can outlive its object
 // until the next clean (0x1195F20 drops expired entries only then), so each sampled object is held by a weak count on its
@@ -14,13 +14,17 @@
 // object is not listed, and all of them when the mission's scene is released (SceneOver). Identity: the control block,
 // the vtable, the instance; any change starts its samples again.
 //
-// Why at the camera step and not at the tick's end. The camera step is the last direct call of the tick's object work
-// that runs every tick; after it the tick runs 0x11BEBE0 (Havok queries' callbacks), the +0x358 job table (the scene's
-// update / render sync jobs, each element's vtbl[1] through 0x118FC00), 0x1193D50 when not paused (every [sys+0xCC0]
-// entry's slot 0x28, then the +0x370 jobs) and +0x358 again. Those are vtable calls chosen at run time: which of them
-// write a model's pose cannot be settled statically, so no later point is known to see every write. A root written after
-// the sample makes the drawn root differ from cur: that object is drawn as stepped (counted, Left::kPose), never blended
-// from a stale pair.
+// Where: at the render recording (render_record.cpp, 0x1198FA4), before fps-7 writes the player's root, the first
+// recording whose tick count is not the last sample's. The recording runs once a frame before the frame's tick loop, so
+// the first one after a tick sees the roots as that tick left them and as they are drawn: after the tick's every job.
+// It was the camera step (0x11995A6, once a viewport a tick) before: after it the tick still runs 0x11BEBE0 (Havok
+// queries' callbacks), the +0x358 job table (each element's vtbl[1] through 0x118FC00), 0x1193D50 when not paused
+// (every [sys+0xCC0] entry's slot 0x28, the +0x370 jobs) and +0x358 again, vtable calls chosen at run time; in M001 at
+// FrameRateCap=1 every object drawn as stepped was one of those writes (Left::kPose, 4500-5700 every 5 s against 1800
+// blended, #395). A frame with two ticks samples the second only (the pair is then not consecutive: samples start
+// again). A root written between the sample and the drawing (a frame without ticks writes no root of the game's own)
+// makes the drawn root differ from cur: that object is drawn as stepped (counted, Left::kPose), never blended from a
+// stale pair.
 //
 // What a frame without ticks draws (at the render recording, frame_rate_view.cpp RecordStart). Each object whose drawn
 // root is still the last tick's (nothing wrote it since) moves to D = cur^-1 * InterpolateScaled(prev, cur, alpha) (a
@@ -37,7 +41,7 @@
 // stepped. What was written goes back after the frame's end fence (frame_rate_view.cpp RestoreFrame) where the object is
 // still there, the model and instance are still its, bone by bone where the bone still holds what was written.
 //
-// Reads. The sample and the poses read objects the game holds live (listed at the camera step; a body whose own control
+// Reads. The sample and the poses read objects the game holds live (listed at the sample; a body whose own control
 // block's use count says it is there; a seat's or a holder's weak_ptr alive) without asking Readable, under __try: at
 // stress:30 Readable was all of the sample's 4.74 ms a step. Readable is asked for System and its list only.
 //
@@ -107,8 +111,11 @@ unsigned untracked=0;       // listed objects the last sample had no room for
 bool sampledAny=false,on=false;
 // Ticks since the last frame without ticks (frameobjects::Sample): from kIdleTicks on the sample is skipped. Starts idle
 // (nothing samples before the first frame without ticks). The bodies known stay (their weak counts too, bounded by what
-// the last sample listed) until the sample resumes and forgets those no longer listed, or the scene ends.
+// the last sample listed) until the sample resumes and forgets those no longer listed, or the scene ends. Counted by
+// System's tick count (seenTick: the last Sample's), however often Sample is called a tick.
 unsigned ticksSinceUnticked=frameobjects::kIdleTicks;
+std::uint32_t seenTick=0;
+bool seenAny=false;
 
 // Who a written pose is drawn for, checked again before it goes back: the body (index and object: bodies change at a
 // sample only, never between the write and the restore), a rider of its seat `seat` (the human and their control
@@ -620,24 +627,31 @@ void Install() noexcept {
     on=true;
 }
 
-void Sample() noexcept {
+void Sample(bool unticked) noexcept {
     if(!on)return;
-    if(ticksSinceUnticked>=kIdleTicks) {
-        ++counts.idleTicks;
+    const auto* const sys=static_cast<const unsigned char*>(scene::ObjectManager());
+    if(!sys || !Readable(sys,kTickCount+4))return;
+    const auto tick=At<std::uint32_t>(sys,kTickCount);
+    // The ticks since the last call (System's count: a call a frame, or more, never counts a tick twice).
+    const std::uint32_t ticks=seenAny ? tick-seenTick : 1u;
+    seenTick=tick;
+    seenAny=true;
+    if(unticked) {   // the ticks before a frame without ticks are not counted towards idle: the window opens here
+        ticksSinceUnticked=0;
+        if(ticks)SampleAll();
         return;
     }
-    ++ticksSinceUnticked;
+    if(!ticks)return;   // this tick sampled (or skipped) already
+    if(ticksSinceUnticked>=kIdleTicks) {
+        counts.idleTicks+=ticks;
+        return;
+    }
+    ticksSinceUnticked=ticks>kIdleTicks-ticksSinceUnticked ? kIdleTicks : ticksSinceUnticked+ticks;
     SampleAll();
 }
 
 void Pose(float alpha,const void* rootHuman,const void* rootVehicle,const float* rootD) noexcept {
     if(!on || !(alpha>=0.0f && alpha<1.0f))return;
-    const bool idle=ticksSinceUnticked>=kIdleTicks;
-    ticksSinceUnticked=0;
-    if(idle) {   // the sample skipped (see Sample): resumes at the next tick, every object known lacks its samples
-        counts.left[static_cast<int>(Left::kSamples)]+=static_cast<unsigned>(bodies.size());
-        return;
-    }
     PoseAll(alpha,rootHuman,rootVehicle,rootD);
 }
 
@@ -650,6 +664,7 @@ void SceneOver() noexcept {
     if(!posed.empty())RestoreAll();
     ForgetAll();
     ticksSinceUnticked=kIdleTicks;   // the next scene samples from its first frame without ticks
+    seenAny=false;                   // and counts its ticks from its own System's
 }
 
 void NoteRootRefusal(Refusal why) noexcept {

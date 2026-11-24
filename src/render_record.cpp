@@ -5,12 +5,13 @@
 // Two features act there, and only one module may redirect a call site (edf::RedirectCall refuses a site that no longer
 // calls the stock function: the second module would be left out, as the first person's culling was when the frame rate
 // was on: "FP installed: ... culling=0 pass=0"). They run in this order:
-//  1. The unlimited frame rate (frame_rate_view.cpp, a frame without ticks): the player's root, then every other object
-//     (frame_rate_objects.cpp), moved to the blend between the last two ticks. Bone poses only: the cameras and the
-//     models' Umbra boxes (model+0x110) are not touched, so the order with 2 changes neither's input.
+//  1. The unlimited frame rate (frame_rate_view.cpp): every frame, the other objects' sample once a tick (their roots as
+//     the last tick left them, frame_rate_objects.cpp); on a frame without ticks, the player's root, then every other
+//     object, moved to the blend between the last two ticks. Bone poses only: the cameras and the models' Umbra boxes
+//     (model+0x110) are not touched, so the order with 2 changes neither's input.
 //  2. The first person (firstperson.cpp RenderStart): the viewmodel's Umbra boxes around the eye. The eye is the one
 //     this frame's projection draws (inside the render recording, 0x1197B50: on a frame without ticks the frame rate's
-//     blend, framerateview::DrawnEye), not the step's: Umbra culls from the drawn camera, and a box left at the step's eye
+//     blend, crew::FrameRateDrawnEye), not the step's: Umbra culls from the drawn camera, and a box left at the step's eye
 //     can miss a camera a part of a tick away. Last, so it sees the frame as it will be drawn.
 // Each runs whether the other is installed or not (a feature off leaves its slot empty).
 #include "render_record.h"

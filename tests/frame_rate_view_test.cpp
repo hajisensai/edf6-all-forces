@@ -18,9 +18,15 @@ namespace scopelens { bool SetBeforeProject(BeforeProjectFn) noexcept { return f
 // The other objects' layer (frame_rate_objects.cpp, PR-e) reads the game's object tables: not exercised here, only
 // counted, so its calls ride the same frames as the player's root.
 namespace frameobjects {
-int installs=0,samples=0,poses=0,restores=0,refusals=0;
+int installs=0,samples=0,untickedSamples=0,poses=0,restores=0,refusals=0;
+const float* rootSeen=nullptr;   // the player's root as the last Sample saw it (the test points it at the body's pose)
+float rootAtSample[16]{};
 void Install() noexcept { ++installs; }
-void Sample() noexcept { ++samples; }
+void Sample(bool unticked) noexcept {
+    ++samples;
+    if(unticked)++untickedSamples;
+    if(rootSeen)std::memcpy(rootAtSample,rootSeen,sizeof(rootAtSample));
+}
 void Pose(float,const void*,const void*,const float*) noexcept { ++poses; }
 void Restore() noexcept { ++restores; }
 void NoteRootRefusal(framerate::Refusal) noexcept { ++refusals; }
@@ -623,6 +629,8 @@ void RecordPoint() {
     TwoSamples(r0,r1);
     const Snapshot stepped=Snap();
     const int objectPoses=frameobjects::poses;
+    const int samples=frameobjects::samples,untickedSamples=frameobjects::untickedSamples;
+    frameobjects::rootSeen=bodyPose;
     framerateview::BeginFrame(0,0.5f);
     Check(Unchanged(stepped) && frameobjects::poses==objectPoses,"record: BeginFrame of a frame without ticks writes nothing");
     const int records=recordCalls;
@@ -631,6 +639,9 @@ void RecordPoint() {
           "record: the hook calls the game's recording with its arguments");
     Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,
           "record: the hook poses the root and the other objects");
+    Check(frameobjects::samples==samples+1 && frameobjects::untickedSamples==untickedSamples+1 &&
+          !std::memcmp(frameobjects::rootAtSample,stepped.body,sizeof(frameobjects::rootAtSample)),
+          "record: the other objects' sample first (a frame without ticks), before the player's root is written");
     Record();   // a second record call in the same frame: posed once
     Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,"record: posed once a frame");
     Fence();
@@ -639,6 +650,9 @@ void RecordPoint() {
     BeginTick(1);
     Record();
     Check(Unchanged(stepped) && frameobjects::poses==objectPoses+1,"record: a frame with ticks poses nothing");
+    Check(frameobjects::samples==samples+3 && frameobjects::untickedSamples==untickedSamples+1,
+          "record: every record call samples (Sample counts the ticks), only a frame posing says unticked");
+    frameobjects::rootSeen=nullptr;
     Fence();
     // A frame without ticks whose record call never came: the next frame's fence and record pose nothing stale.
     framerateview::BeginFrame(0,0.5f);
@@ -655,6 +669,10 @@ void RecordPoint() {
     Check(Unchanged(stepped) && recordCalls>records+3,"record: off, it only calls the game's recording");
     on=true;
     Fence();
+    Counted();
+    const int stepSamples=frameobjects::samples;
+    BeginTick(1);Queue(cam,Pose(0,0,0,0));Step(cam);Fence();
+    Check(frameobjects::samples==stepSamples,"record: the camera step does not sample the other objects");
     Counted();
 }
 
