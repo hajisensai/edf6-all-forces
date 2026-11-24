@@ -110,12 +110,29 @@ unsigned seedMoved=0,seedFrames=0;
 
 std::uint64_t tickPeriod=0;
 constexpr unsigned kTickBase=0x2139D10,kTickLast=0x2139D18;
+// The game's load count (docs/unlimited-fps-re.md §4.1.1): 0x1133FC0(obj, dl) adds +1 (dl 1) / -1 (dl 0) to obj+0x34 by
+// `lock xadd`; with obj 0x2139AB0 the mission scripts' BeginLoading / EndLoading (0x1ACC03 / 0x1B4A69) and the script
+// natives 0x0A / 0x0B (0x21070F / 0x210889) call it, and the game's job thread holds its queue while it is above 0
+// (0x1133993: `lock xadd [rbp+34h],0`, then Sleep). Read once a frame by the gate: while loading every frame steps.
+constexpr unsigned kLoadAdd=0x1133FC0,kLoadJobRead=0x1133993,kLoad=0x2139AB0,kLoadCount=0x34;
+const unsigned char kLoadAddSig[]={0x0F,0xB6,0xC2,0x8D,0x04,0x45,0xFF,0xFF,0xFF,0xFF,0xF0,0x0F,0xC1,0x41,0x34,0xC3};
+const unsigned char kLoadJobReadSig[]={0xF0,0x0F,0xC1,0x45,0x34};   // lock xadd [rbp+34h],eax
 // The input move: whether this frame's wrapper update already ran before System::Update.
 bool wrapped=false;
 int catchUp=0;
 bool vsyncWanted=true;
 // FRAMERATE statistics, game thread only.
-struct Stats { std::uint64_t since=0,frames=0,ticks=0,zero=0,lastRun=0,longestZero=0; bool lastZero=false; } stats;
+struct Stats { std::uint64_t since=0,frames=0,ticks=0,zero=0,lastRun=0,longestZero=0,loading=0; bool lastZero=false; } stats;
+// The load the gate last saw (game thread): its start and the frames it ran, for the FRAMERATE lines at its ends.
+bool wasLoading=false;
+std::uint64_t loadSince=0,loadFrames=0;
+// The FRAMERATE loading lines at most once per kLoadLogSeconds (a count raised for a moment off the mission load, by
+// 0x110B460 or the HQ model view's pairs, would otherwise log a line pair each time): the loads not logged are counted
+// and told with the next one logged; a load's end is logged only when its start was.
+constexpr std::uint64_t kLoadLogSeconds=5;
+std::uint64_t loadLoggedAt=0;
+unsigned loadsUnlogged=0;
+bool loadLogged=false;
 
 using CountFn=std::uint32_t(*)();
 using VoidFn=void(*)(void*);
@@ -145,6 +162,7 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     stats.lastRun=now;
     stats.lastZero=!n;
     ++stats.frames;
+    if(wasLoading)++stats.loading;
     stats.ticks+=n;
     if(!n)++stats.zero;
     const std::uint64_t span=now-stats.since;
@@ -161,11 +179,13 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     }
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
         "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u (changed since its tick), "
-        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames",s,
+        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames after a 0-tick frame; "
+        "%.1f%% of the frames loading (no 0-tick frames)",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
         1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft,
-        rootsRefused,seedMoved,seedFrames);
+        rootsRefused,seedMoved,seedFrames,
+        stats.frames ? 100.0*static_cast<double>(stats.loading)/static_cast<double>(stats.frames) : 0.0);
     seedMoved=seedFrames=0;
     if(viewOn) {
         // Stage 4 (frame_rate_objects.cpp): the other objects, and why roots were refused (alpha, not rigid, mirrored,
@@ -190,12 +210,46 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
                    p.calls,p.shown,p.refreshes,p.failed,p.occluded);
     else Log("PRESENT calls %.1f/s; failed %u, occluded %u; no frame statistics (0x%08lX: a windowed blt chain has none)",
              p.calls,p.failed,p.occluded,static_cast<unsigned long>(p.statsHr));
-    stats.since=now;stats.frames=stats.ticks=stats.zero=stats.longestZero=0;
+    stats.since=now;stats.frames=stats.ticks=stats.zero=stats.longestZero=stats.loading=0;
     intervalCount=0;
 }
 
 // Low 32 bits: whether the frame runs; high: its ticks. Called by the near stub in place of 0x11DAE60.
+bool LoadingNow() noexcept {
+    return framerate::Loading(*reinterpret_cast<const volatile std::int32_t*>(image+kLoad+kLoadCount));
+}
+
+// The FRAMERATE lines at a load's ends: how long the gate kept the game's cadence and how many frames it ran.
+void SeeLoad(bool loading,std::uint64_t now) noexcept {
+    if(loading==wasLoading)return;
+    wasLoading=loading;
+    if(loading) {
+        loadSince=now;loadFrames=0;
+        loadLogged=!loadLoggedAt || now-loadLoggedAt>=kLoadLogSeconds*qpcFreq;
+        if(!loadLogged){++loadsUnlogged;return;}
+        loadLoggedAt=now;
+        Log("FRAMERATE loading (count %d): no 0-tick frames until it ends (%u loads since the last line not logged)",
+            *reinterpret_cast<const volatile std::int32_t*>(image+kLoad+kLoadCount),loadsUnlogged);
+        loadsUnlogged=0;
+        return;
+    }
+    if(!loadLogged)return;
+    Log("FRAMERATE loaded after %.2f s, %llu frames: the frame gate is back",
+        static_cast<double>(now-loadSince)/static_cast<double>(qpcFreq),static_cast<unsigned long long>(loadFrames));
+}
+
 std::uint64_t GateCount() noexcept {
+    const bool loading=LoadingNow();
+    SeeLoad(loading,Now());
+    if(loading) {
+        // The game's cadence (frame_rate_logic.h LoadingRuns): the ticks first, a frame only with ticks.
+        const std::uint32_t n=reinterpret_cast<CountFn>(image+kTickCount)();
+        if(!framerate::LoadingRuns(gate,n))return 0;
+        SwapFlipWait();   // once a frame that presents, as below
+        ++loadFrames;
+        frameAlpha=1.0f;
+        return 1u|static_cast<std::uint64_t>(n)<<32;
+    }
     if(!framerate::Ready(gate,Now(),gateCap,slotPeriod))return 0;
     SwapFlipWait();   // latency-5: the frame starts when the GPU can take it; its ticks and alpha are counted after
     const std::uint64_t now=Now();
@@ -206,7 +260,10 @@ std::uint64_t GateCount() noexcept {
 }
 
 // TickWait (frame_pacing.cpp) asks this while the gate is on: QPC counts to the next slot.
+// While loading: to the next tick boundary, as the game's own wait.
 std::uint64_t GateWaitCounts(std::uint64_t now) noexcept {
+    if(LoadingNow())return pacing::CountsToBoundary(now,*reinterpret_cast<const std::uint64_t*>(image+kTickBase),
+                                                    *reinterpret_cast<const std::uint64_t*>(image+kTickLast),tickPeriod);
     return framerate::WaitCounts(gate,now,gateCap);
 }
 
@@ -242,7 +299,11 @@ void SystemUpdateHook(void* system,float dt,int n) {
     void* const input=*reinterpret_cast<void**>(image+kInputManager);
     if(gateOn) {
         const std::uint64_t seed=*reinterpret_cast<const volatile std::uint64_t*>(image+kRandomSeed);
-        if(lastFrameZero){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
+        // Two 0-tick frames in a row only: a frame with ticks runs the game's own step (0x705570, n > 0) in
+        // Application::Update before this read, so a 0-tick frame followed by one with ticks always reads moved
+        // (M001 2026-11-24: 300 of ~1500 every 5 s, the ticks' count exactly). Between two 0-tick reads nothing of the
+        // game's steps it.
+        if(lastFrameZero && n<=0){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
         seedAtFrame=seed;
         lastFrameZero=n<=0;
         // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
@@ -328,6 +389,11 @@ bool GateSitesAsRead() noexcept {
     }
     if(!edf::Matches(image,kFinalStore,kFinalStoreSig,sizeof(kFinalStoreSig))) {
         Log("FRAMERATE the main loop's store of n (0x%X) is not as read: nothing installed, the game keeps its rate",kFinalStore);
+        return false;
+    }
+    if(!edf::Matches(image,kLoadAdd,kLoadAddSig,sizeof(kLoadAddSig)) ||
+       !edf::Matches(image,kLoadJobRead,kLoadJobReadSig,sizeof(kLoadJobReadSig))) {
+        Log("FRAMERATE the load count (0x%X+0x%X) is not as read: nothing installed, the game keeps its rate",kLoad,kLoadCount);
         return false;
     }
     return true;

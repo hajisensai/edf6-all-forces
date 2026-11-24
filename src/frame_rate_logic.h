@@ -64,6 +64,20 @@ constexpr std::uint64_t WaitCounts(const Gate& g,std::uint64_t now,int cap) noex
     return toSlot>0 ? static_cast<std::uint64_t>(toSlot) : 0;
 }
 
+// Loads (docs/unlimited-fps-re.md §4.1.1). The game's load count (0x2139AB0+0x34, `lock xadd` at 0x1133FC0) is above 0
+// from a mission script's BeginLoading to its EndLoading; the game's own job thread (0x1133950) holds its queue while it
+// is. A 0-tick frame then only renders the loading screen again (nothing to interpolate) and takes CPU and GPU from the
+// load, so the gate keeps the game's own cadence: the frame counts its ticks first and runs only when it has some (the
+// loop waits to the next tick boundary in between), every frame that runs steps. The count is not asked before the slot
+// here as Ready has it, so nothing waits for a slot with ticks counted; and the slots are left disarmed, so the first
+// frame after the load starts them over from now (no burst for the load's time).
+constexpr bool Loading(std::int32_t count) noexcept { return count>0; }
+// Whether a frame runs while loading, given the ticks the clock just counted.
+constexpr bool LoadingRuns(Gate& g,std::uint64_t ticks) noexcept {
+    g.armed=false;
+    return ticks!=0;
+}
+
 // The phase a frame renders at, between the step before the last and the last (see the top): 1 on a frame that steps
 // (its render comes before its steps), else the part of a tick since the last boundary, held to [0, 1].
 inline float RenderAlpha(std::uint64_t ticksThisFrame,std::uint64_t now,std::uint64_t base,std::uint64_t last,

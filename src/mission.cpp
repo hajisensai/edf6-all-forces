@@ -21,6 +21,8 @@
 #include "playarea.h"
 #include "outfit41.h"
 #include "host_settings.h"
+#include "preload_set.h"
+#include "vehicle_weapons.h"
 #include "room_ui.h"
 #include "sazabi_sound.h"
 #include "support_spawn.h"
@@ -201,6 +203,8 @@ void MissionStart() noexcept {
     ResetTerrainShare();
     ResetPlayArea();
     ResetEdf5Online();   // the EDF5 creation loop's online arguments (edf5online.cpp)
+    ResetVehicleWeapons();     // nothing of this mission's vehicle weapons queued yet (vehicle_weapons.h)
+    preload::BeginMission();   // this mission's set of the plugin's content (preload_set.h), decided before this
     WatchMissionPhase("jets");
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     WatchMissionPhase("player jets");
@@ -223,6 +227,7 @@ void MissionStart() noexcept {
     PreloadPlayerVehicles();  // ...and the jets this player and the room's members summon, loaded (player_vehicle.h)
     WatchMissionPhase("debug spawn");
     PreloadDebugSpawn();      // the debug spawn tool's stock vehicles and enemies; nothing at all with DebugSpawn=0
+    LogVehicleWeapons();      // the weapons the vehicles above queued with them
     WatchMissionPhase("per-frame inputs");
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");

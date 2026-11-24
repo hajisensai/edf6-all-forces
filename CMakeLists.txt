@@ -151,7 +151,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/frame_rate_objects.cpp src/swap_flip.cpp)
 # The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp src/preload_set.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf5online_room.cpp)
@@ -863,6 +863,17 @@ add_executable(coop_attr_test tests/coop_attr_test.cpp)
 target_include_directories(coop_attr_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(coop_attr_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME coop_attr COMMAND coop_attr_test)
+# The mission preload's set (src/preload_set_logic.h): call rows, the room's set, the sync's decision, the word's text.
+add_executable(preload_set_test tests/preload_set_test.cpp)
+target_include_directories(preload_set_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(preload_set_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME preload_set COMMAND preload_set_test)
+# The vehicles' weapon SGOs queued with them (src/vehicle_weapons_logic.h): the scan, the stock rows of the hitch2 SYNC
+# LOAD list; the stock table covers every stock vehicle the plugin preloads; against the game's SGOs (skip 77 without it).
+add_executable(vehicle_weapons_test tests/vehicle_weapons_test.cpp)
+target_include_directories(vehicle_weapons_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicle_weapons_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicle_weapons COMMAND vehicle_weapons_test)
 # The scoped weapons' spread rule (src/scope_spread_logic.h); its guard and native audit are with the Python tests below.
 add_executable(scope_spread_test tests/scope_spread_test.cpp)
 target_include_directories(scope_spread_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -1015,6 +1026,7 @@ add_test(NAME cockpit_instruments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_retrofit_test.py")
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
 add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_tub_test.py")
+add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
@@ -1187,6 +1199,14 @@ add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(debug_spawn_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_resources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_resource_audit.py")
 set_tests_properties(debug_spawn_resources PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The vehicles' weapon SGOs (tests/vehicle_weapons_test.cpp): the stock table covers every stock vehicle the plugin
+# preloads; it is Root.cpk's; the plugin's scan of every vehicle row's real SGO queues the hitch2 SYNC LOAD list (77: no game).
+add_test(NAME vehicle_weapons_covers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_vehicle_weapons.py" --covers)
+add_test(NAME vehicle_weapons_stock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/gen_vehicle_weapons.py" --check)
+set_tests_properties(vehicle_weapons_stock PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME vehicle_weapons_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicle_weapons_native_audit.py"
+         "$<TARGET_FILE:vehicle_weapons_test>")
+set_tests_properties(vehicle_weapons_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The recorded sound pack (tools/sound_pack.py) on a stand-in archive: every clip it names is one the plugin reads, as
 # the plugin reads it (ReadWav), the loops seamless, the recordings' DC out, never louder than the plugin's own clip.
 add_test(NAME sound_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sound_pack_test.py")
@@ -1256,6 +1276,7 @@ set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds he
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
+add_dependencies(offline_checks vehicle_weapons_test)
 add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
 add_dependencies(offline_checks stab_native_readback_test)
@@ -1319,7 +1340,7 @@ target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
 add_dependencies(offline_checks lazy_rows_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test preload_set_test loadout_writer_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

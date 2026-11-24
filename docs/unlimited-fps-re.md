@@ -182,6 +182,40 @@
   刷新率，SyncInterval = 1 加默认 3 帧的队列会让 Present 一直堵在队列满的状态，延迟多 2–3 个刷新周期，正好抵消高帧率想要的低延迟。
   交换链是旧的 blt 模型（DISCARD、BufferCount = 1，`0x111B4C0..0x111B53A`），真正上屏不卡在刷新率还要翻转模型 + ALLOW_TEARING（latency-5）。
 
+#### 4.1.1 加载期间不开帧门
+
+加载画面上多出的 0-tick 帧只是把加载画面重画一遍，没有可插值的东西，还要占 CPU / GPU，拖慢加载。所以加载期间帧门按原版节奏走：
+先数 tick，有 tick 才出帧，没有就等到下一个 tick 边界（`pacing::CountsToBoundary`，与 `FrameRateCap = 0` 时 `TickWait` 等的一样），
+每个出的帧都步进；槽保持未上膛，加载结束后第一帧从当时重新起槽，不会为加载那段时间补发一串帧（`LoadingRuns`）。
+
+判据：游戏自己的加载计数 `0x2139AB0 + 0x34` 大于 0（H，静态，EDF.dll 0x678CCB46，`frame_rate_sig_audit` 逐条核对）。
+
+- 写：`0x1133FC0(obj, dl)` = `movzx eax,dl; lea eax,[rax*2-1]; lock xadd [rcx+34h],eax; ret`，dl = 1 加 1、dl = 0 减 1。
+  15 个调用点全是这个计数：13 个直接传 `lea rcx,[0x2139AB0]`；另 2 个（`0x110B460` 里成对的 `0x110B527` / `0x110B644`）
+  传 `mov rcx,[0x2135930]`，而 `[0x2135930]` 唯一的写入点 `0x10FFE3C` 写的是参数 2（`0x10FFC7A` `mov rbx,rdx`），唯一调用方
+  `0x700F12` 传 `lea rdx,[0x2139AB0]`——也是 `&0x2139AB0`：
+  - +1：AS `BeginLoading`（`0x1ACB10`）的 `0x1ACC03`、BVM native 0x0A `0x21070F`、`0x20FC24`、启动 `0x9E014`、
+    `UiHQ_3DModelView` 异步回调 `0x9424C4` / `0x942542` / `0x9425B4`；
+  - -1：AS `EndLoading`（`0x1B49D0`）的 `0x1B4A69`、BVM native 0x0B `0x210889`、`0x21FBD6`、上面三个回调里成对的
+    `0x9424DF` / `0x94255B` / `0x9425CF`。
+- 清零：`0x1133400` = `mov dword [rcx+34h],0; ret`，9 个调用点（7 个 `call`、2 个尾跳转 `jmp`）全是 `0x2139AB0`：`BeginLoading` 自己在 +1 之前（`0x1ACBF5`）、
+  场景拆除 `0x70FEBA`、BVM native 8 `0x2105AF`、按名加载脚本 `0xB1A4F`、加载 `MainScript.as` 的 `0xB7C29`、`0xA1AF5`、启动 `0x9DF99`，
+  以及尾跳转 `0x1B997D`（前面 `0x1B9971` `lea rcx,[0x2139AB0]`）、`0x226990`（前面 `0x226949`）。
+  所以任务加载期间计数正好是 1；`EndLoading` 之后回到 0。
+- 游戏自己就把它当「正在加载」：作业线程 `0x1133950` 在 `0x1133993` `lock xadd [rbp+34h],r15d`（读），大于 0 时 `Sleep(16)`
+  （`0x1133C02`），不处理 `+0x90` 的作业队列。要是计数平时不回 0，这条队列就永远不跑，所以菜单和任务中它应为 0。
+- 549 个任务脚本每个都恰好一次 `BeginLoading`、一次 `EndLoading`（M001：`BeginLoading → Preload… → WaitPreload →
+  (Online_WaitStart) → EndLoading`），联机等人进场（`Online_WaitStart`）也算在加载里。
+- 判据用 `> 0`，不用 `!= 0`：`BeginLoading` 在 `0x1ACB4E` 的虚调用返回非 0 时跳过清零和 +1，而 `EndLoading` 无条件 -1，
+  计数可以短暂为 -1；下一次 `BeginLoading` 会清零。这种情况下那次加载帧门照开（与改动前一样）。
+- 没选的：`System+0x68` 场景为空（`0x1198ECA`）的路径根本不渲染，任务加载画面期间场景很可能不为空，盖不住；任务对象
+  `+0x2B8`（`BeginLoading` 写 1、`EndLoading` 写 2）没有现成的全局指针；`sync_load_probe` 只在调试版里装。
+
+未经实机确认（静态推断）：启动那次 +1（`0x9E014`）由之后加载 `MainScript.as` 的清零抵消、菜单里计数为 0；`UiHQ_3DModelView`
+的成对 +1 / -1 会让菜单里看 3D 模型时短暂关掉帧门。日志每次加载开始写 `FRAMERATE loading (count N)`、结束写
+`FRAMERATE loaded after X s, N frames`，每 5 s 的 FRAMERATE 行带 `% of the frames loading`，实机看这几行即可确认。
+签名（`0x1133FC0` 的 16 字节、`0x1133993` 的读）不符时帧门整套不装（与其它点位一样全有或全无）。
+
 ### 4.2 节奏守卫（阶段 2，§2.2 / §2.4）
 
 网络块（逐个调用：`0x705633` / `0x705693` / `0x7056AE` / `0x7056BA`）、`+0x6C` 倒数（叶桩读 `[r14+4]`）、共享随机数 `0x705570`
@@ -389,6 +423,9 @@ EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（�
 - 渲染相位：步进帧为 1、边界上为 0、过了 tick 未数时夹到 1、QPC 回绕。
 - 刚体插值：2000 个随机旋转（含镜像）的四元数往返；端点精确；1/4 处的偏航与位移；镜像保持镜像；跨 ±π 走短弧；瞬移、大转角、
   手性不同、缩放、NaN、相位越界一律拒绝；第 4 列取当前。
+- 加载（§4.1.1，`LoadingLoop`）：61 / 144 / 1000 / 不限下 25 s 假时钟、5–15 s 为加载：加载期间没有 0-tick 帧、每帧都步进、
+  10 s 出 595–601 帧（约一 tick 一帧）、没 tick 时等到边界；整段每个 tick 恰好步进一次；加载后 0-tick 帧恢复，头 100 ms 不超过
+  上限的 1/10 + 2 帧（不补发）；计数 ≤ 0 不算加载。
 - 输入顺序：20 万帧随机按键 / 随机 n：封装更新挪到步进前、只在 tick 帧跑时，步进看到 tick 采样到的每个按下恰好一次、UI 同样多；
   原版顺序在帧率高于 tick 率时步进漏键（对照）。
 
@@ -409,3 +446,6 @@ EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（�
    blt 模型。
 7. 性能：同场景帧时间分布（perfrun），n = 0 帧的成本；出帧率在中端机上实际能到多少。
 8. 退出任务、返回主菜单、重开 20 次无卡死、无闪退。
+9. 加载（§4.1.1）：开任务、联机等人进场时日志有 `FRAMERATE loading (count 1)` 和 `loaded after ...`，两行之间的 FRAMERATE 行
+   0-tick 帧约 0%、`frames/s` 约 60；菜单、任务中 `% of the frames loading` 为 0（菜单里看 3D 模型时可以短暂非 0）；
+   同一任务的加载时间与改动前对照不变长（期望变短）。
