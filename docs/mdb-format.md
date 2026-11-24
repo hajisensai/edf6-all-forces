@@ -47,6 +47,14 @@ EDF.dll 的读取（静态核对）：
 所以 lod 成员必须排在模型前面；排在后面的贴图永远绑不上，模型全黑（双管坦克就是这样：生成的档案只剩模型一个成员时，旧的 `add_texture`
 把贴图都接在了模型后面）。`pylib/mdb.py` 的 `insert_member` 按目录表顺序插入，`obj_model.texture_problems` 在生成时检查。
 
+**贴图不能跨档案共享 [H，静态]**：上面那张资源表是每个档案自己的（分发处取的是本档案 `TEXTURE` 目录的表），模型只在它里面查，
+不查别的档案、也没有全局按名字的贴图缓存，所以档案 B 里的模型绑不上档案 A 的贴图，哪怕 A 已经加载。
+想让几个模型共用一份贴图，只能把它们放进同一个档案：一个档案可以有多个 mdb，各 SGO 的 `animation_model` 写同一个档案路径、
+不同的 mdb 名。原版就有很多这样的档案：e602_berserker、e609_jormungand、e614_grandmother、mob、p505_ranger、giantant、BOMBER501 等。
+档案按路径只加载一次，0x1133C50 每个路径一条记录。`pylib/texshare.py` 就是这样合并的：几个生成档案按内容去重贴图后合进一个
+（`EDF6VC_AIRCRAFT.MRAB`、`EDF6VC_C130.MRAB`），mdb 里的贴图名改成合并后的名字，SGO 改指新档案。
+`python pylib/texshare.py [Mods/OBJECT]` 列出已装档案里的重复贴图。
+
 lod 贴图的布局（2176 对非 DX10 的原版 HD / lod 全部如此）：每边是 HD 的 1/16、但不小于 16 像素；mip 比完整链少一级，止于长边 2 像素
 （128×128：7 级；64×32：6 级），而 HD 一直到 1×1。`texfile.texture_pair` 照此切出 lod（多出的 1×1 级是否有害未在游戏里验证，按原版对齐）。
 

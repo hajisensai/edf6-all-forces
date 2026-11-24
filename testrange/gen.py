@@ -1251,7 +1251,10 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
                 rel = f'{folder}/{name}'
                 led.put(OWNER, rel, data)
                 held.add(ledger.key(rel))
-    elevon = f'OBJECT/{JET_ELEVON_FILE}'
+    import texshare
+    on_disk = lambda f: os.path.isfile(led.disk(f'OBJECT/{f}'))  # noqa: E731 - a file under Mods/OBJECT there
+    # the elevon model is in tools/make_jets.py's merged archive when that is installed (pylib/texshare.py)
+    elevon = f'OBJECT/{texshare.installed(JET_ELEVON_FILE, on_disk)}'
     if any(JETS[n].model is None for n in jets) and not os.path.isfile(led.disk(elevon)):
         # The default bomber's shape is measured on the grounded elevon model.
         # A standalone range installation must generate that same model too.
@@ -1306,7 +1309,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             with open(led.disk(rel), 'rb') as file:
                 data = file.read()
         else:
-            data = vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None)
+            # on the archive each model is in on disk: the merged one when installed (pylib/texshare.py)
+            data = texshare.redirect(vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None), texshare.moved(on_disk))
         if name in PROTEUS_MISSION.values():
             import make_proteus
             held.add(ledger.key(make_proteus.range_shield(led, game, OWNER)))
@@ -1348,9 +1352,11 @@ def _release_derived(led: ledger.Ledger, rels: set[str]) -> tuple[list[str], lis
 
 
 def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
-    """A jet model archive (pylib/jet_models.py): the one tools/make_jets.py or an earlier install wrote, else
-    made now; recorded as the range's either way. Returns its ledger key."""
-    rel = f'OBJECT/{file}'
+    """A jet model archive (pylib/jet_models.py): the one tools/make_jets.py or an earlier install wrote (the merged
+    archive it is in, pylib/texshare.py installed), else made now; recorded as the range's either way. Returns its
+    ledger key."""
+    import texshare
+    rel = f'OBJECT/{texshare.installed(file, lambda f: os.path.isfile(led.disk(f"OBJECT/{f}")))}'
     if os.path.isfile(led.disk(rel)):
         led.need(OWNER, rel)
     elif file == jet_models.SAZABI_FILE:   # the installer's (tools/make_sazabi.py), else made from its model folder
