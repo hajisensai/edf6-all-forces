@@ -179,7 +179,9 @@ check(native <= NATIVE_SENDERS, f'native object senders are the reviewed ones: n
 
 # --- 4. Periodic traffic is paced by time or by logic frames, not by calls ---
 pn = src['plugin_net.cpp']
-check(re.search(r'if\(sum==rosterSum && now-rosterAt<kRosterGapMs\)return;', pn), 'the host\'s roster goes again by time only')
+# No roster any more (net-6, #390): joins are told when the room's peers change (peers.Joins), not every call.
+check('rosterSum' not in pn and 'kRosterGapMs' not in pn, 'plugin_net sends no periodic roster (net-6)')
+check(re.search(r'if\(ready && room\.peersReady\)peers\.Joins\(registry,c\.peerCount,', pn), 'joins are told through peers.Joins')
 check(re.search(r'for\(std::size_t i=0;i<registry\.Count\(\);\+\+i\)if\(registry\.At\(i\)\.update\)registry\.At\(i\)\.update\(c,now\);',
                 pn), 'each channel\'s update runs once a plugin_net::Update')
 ec = src.get('enemy_control_net.cpp', '')
