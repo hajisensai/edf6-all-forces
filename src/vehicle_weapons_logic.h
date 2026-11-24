@@ -3,8 +3,10 @@
 // game's resource preload of the vehicle does not take with it: the plugin queues them with their vehicle
 // (vehicle_weapons.h), so the vehicle is made without reading them on the game thread (docs/feature-2026-11-24-
 // preload-set.md; the SYNC LOAD probe saw 41 of them, 4.1 s, in one test range run). No game state here: the tests'.
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <string_view>
@@ -81,11 +83,46 @@ template<class Put> int ScanSgo(const unsigned char* data,std::size_t size,Put&&
     return n;
 }
 
-// A vehicle NAME's weapons to `put`: from its SGO's bytes when it is a Mods file (`modsSgo`, `size` non-zero: the
-// plugin's, the range's, EDF4.1's, the variants'; a Mods copy of a stock vehicle too, as the game loads that), else from
-// its stock row. Their count; -1: neither (a stock vehicle tools/gen_vehicle_weapons.py does not know).
-template<class Put> int WeaponsOf(std::wstring_view name,const unsigned char* modsSgo,std::size_t size,Put&& put) {
-    if(modsSgo && size)return ScanSgo(modsSgo,size,put);
+// Reading a vehicle's Mods/OBJECT SGO whole. `absent`: no such file (a stock vehicle: its stock row). Any other
+// failure is a broken install, not a stock vehicle: logged as it is, the stock table not consulted (no fallback).
+enum class ModsRead { ok, absent, cannotOpen, cannotSize, tooBig, shortRead };
+constexpr const char* ModsReadText(ModsRead r) noexcept {
+    switch(r) {
+    case ModsRead::ok:return "read";
+    case ModsRead::absent:return "absent";
+    case ModsRead::cannotOpen:return "cannot be opened";
+    case ModsRead::cannotSize:return "its size cannot be read";
+    case ModsRead::tooBig:return "larger than the buffer";
+    case ModsRead::shortRead:return "read short";
+    }
+    return "?";
+}
+// `path`'s bytes into `out` (at most `capacity`), their count to `got`. `read` is std::fread's shape (the tests' short
+// read). The file's size is taken first: one larger than `capacity` is not read at all; fewer bytes than its size: short.
+template<class Read> ModsRead ReadModsFile(const wchar_t* path,unsigned char* out,std::size_t capacity,std::size_t& got,Read&& read) {
+    got=0;
+    FILE* in=nullptr;
+    const errno_t e=_wfopen_s(&in,path,L"rb");
+    if(e || !in)return e==ENOENT ? ModsRead::absent : ModsRead::cannotOpen;
+    ModsRead r=ModsRead::ok;
+    std::int64_t size=-1;
+    if(_fseeki64(in,0,SEEK_END) || (size=_ftelli64(in))<0 || _fseeki64(in,0,SEEK_SET))r=ModsRead::cannotSize;
+    else if(static_cast<std::uint64_t>(size)>capacity)r=ModsRead::tooBig;
+    else {
+        got=read(out,1,static_cast<std::size_t>(size),in);
+        if(got!=static_cast<std::size_t>(size)){r=ModsRead::shortRead;got=0;}
+    }
+    std::fclose(in);
+    return r;
+}
+
+// A vehicle NAME's weapons to `put`, as its Mods/OBJECT SGO read (`read`; `modsSgo` / `size` its bytes when ok: the
+// plugin's, the range's, EDF4.1's, the variants'; a Mods copy of a stock vehicle too, as the game loads that) decides:
+// read: scanned; absent: its stock row. Their count; -1: absent and no stock row (a stock vehicle tools/
+// gen_vehicle_weapons.py does not know); -2: there but not read whole (a broken install: the stock row is not taken).
+template<class Put> int WeaponsOf(std::wstring_view name,ModsRead read,const unsigned char* modsSgo,std::size_t size,Put&& put) {
+    if(read==ModsRead::ok)return modsSgo ? ScanSgo(modsSgo,size,put) : 0;
+    if(read!=ModsRead::absent)return -2;
     const StockRow* row=Stock(name);
     return row ? EachListed(row->weapons,put) : -1;
 }

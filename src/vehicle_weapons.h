@@ -18,21 +18,14 @@ inline SRWLOCK lock=SRWLOCK_INIT;
 inline Queued queued;
 inline int vehicles=0,weapons=0;
 inline unsigned char sgo[2u<<20];   // a vehicle's SGO (its models are in their archives): well under 1 MB
-// <the game's directory>\Mods\OBJECT\NAME.SGO's bytes (the exe's directory: Mods sits beside EDF6.exe) into `out`
-// (at most `capacity`); its size, 0 when there is no such file (a stock vehicle) or it cannot be read whole.
-inline std::size_t ReadModsObject(std::wstring_view name,unsigned char* out,std::size_t capacity) noexcept {
-    wchar_t path[MAX_PATH];
+// <the game's directory>\Mods\OBJECT\NAME.SGO (the exe's directory: Mods sits beside EDF6.exe) into `path`; false when
+// it does not fit.
+inline bool ModsObjectPath(std::wstring_view name,wchar_t (&path)[MAX_PATH]) noexcept {
     const DWORD n=GetModuleFileNameW(nullptr,path,static_cast<DWORD>(std::size(path)));
     wchar_t* slash=n && n<std::size(path) ? wcsrchr(path,L'\\') : nullptr;
-    if(!slash)return 0;
+    if(!slash)return false;
     const std::size_t room=std::size(path)-static_cast<std::size_t>(slash-path);
-    if(swprintf_s(slash,room,L"\\Mods\\OBJECT\\%.*ls.SGO",static_cast<int>(name.size()),name.data())<0)return 0;
-    FILE* in=nullptr;
-    if(_wfopen_s(&in,path,L"rb") || !in)return 0;
-    const std::size_t got=std::fread(out,1,capacity,in);
-    const bool whole=got<capacity && std::feof(in)!=0;
-    std::fclose(in);
-    return whole ? got : 0;
+    return swprintf_s(slash,room,L"\\Mods\\OBJECT\\%.*ls.SGO",static_cast<int>(name.size()),name.data())>=0;
 }
 // One weapon file queued with the game's preload; false when the call faulted.
 inline bool QueueOne(void* mgr,void(*preload)(void*,const wchar_t*,std::int32_t,std::int32_t),const wchar_t* path) noexcept {
@@ -51,8 +44,9 @@ inline void ResetVehicleWeapons() noexcept {
 }
 // The weapons of the vehicle at `objectPath` (app:/object/NAME.sgo), each queued with the game's preload `preload` on
 // `mgr` as the vehicle was (the game's WaitPreload, or the caller's load completion, waits for them too) unless queued
-// already this mission. NAME's SGO in Mods/OBJECT is read; else it is a stock vehicle, src/vehicle_weapons.inc's.
-// Neither: logged (its weapons are then read when it is made). The number newly queued.
+// already this mission. NAME's SGO in Mods/OBJECT is read; no such file: a stock vehicle, src/vehicle_weapons.inc's.
+// A Mods file there but not read whole (too big, short, not openable): logged with its path and why, no stock row.
+// No Mods file and no stock row: logged (its weapons are then read when it is made). The number newly queued.
 inline int QueueVehicleWeapons(void* mgr,VehicleWeaponPreloadFn preload,const wchar_t* objectPath) noexcept {
     using namespace vehicle_weapons;
     using namespace vehicle_weapons::detail;
@@ -60,9 +54,16 @@ inline int QueueVehicleWeapons(void* mgr,VehicleWeaponPreloadFn preload,const wc
     const std::wstring_view name=ObjectName(objectPath);
     if(name.empty())return 0;
     int added=0,faults=0;
+    wchar_t file[MAX_PATH];
+    if(!ModsObjectPath(name,file)) {
+        Log("PRELOAD vehicle weapons: %.*ls's Mods/OBJECT path does not fit: its weapons not queued",
+            static_cast<int>(name.size()),name.data());
+        return 0;
+    }
     AcquireSRWLockExclusive(&lock);
-    const std::size_t size=ReadModsObject(name,sgo,sizeof(sgo));
-    const int listed=WeaponsOf(name,sgo,size,[&](std::wstring_view w) noexcept {
+    std::size_t size=0;
+    const ModsRead read=ReadModsFile(file,sgo,sizeof(sgo),size,std::fread);
+    const int listed=WeaponsOf(name,read,sgo,size,[&](std::wstring_view w) noexcept {
         if(queued.Has(w))return;
         wchar_t path[kPathMost];
         const std::size_t len=w.size()<kPathMost ? w.size() : kPathMost-1;
@@ -73,7 +74,9 @@ inline int QueueVehicleWeapons(void* mgr,VehicleWeaponPreloadFn preload,const wc
     });
     ++vehicles;weapons+=added;
     ReleaseSRWLockExclusive(&lock);
-    if(listed<0)Log("PRELOAD vehicle weapons: %.*ls is neither in Mods/OBJECT nor a stock vehicle of src/vehicle_weapons.inc "
+    if(listed==-2)Log("PRELOAD vehicle weapons: %ls %s: its weapons not queued (a broken install; the stock table not taken)",
+                      file,ModsReadText(read));
+    if(listed==-1)Log("PRELOAD vehicle weapons: %.*ls is neither in Mods/OBJECT nor a stock vehicle of src/vehicle_weapons.inc "
                     "(tools/gen_vehicle_weapons.py): its weapons are read when it is made",static_cast<int>(name.size()),name.data());
     if(faults)Log("PRELOAD vehicle weapons: %d of %.*ls's faulted when queued",faults,static_cast<int>(name.size()),name.data());
     return added;

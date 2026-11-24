@@ -1,9 +1,11 @@
 // The vehicles' weapon SGOs queued with them (src/vehicle_weapons_logic.h): the object path's name, the SGO scan, the
-// stock rows (src/vehicle_weapons.inc) of the hitch2 SYNC LOAD list's stock vehicles, the choice between them, the repeats.
+// stock rows (src/vehicle_weapons.inc) of the hitch2 SYNC LOAD list's stock vehicles, the choice between them, the repeats,
+// reading a Mods SGO whole (absent apart from too big / short / unopenable).
 //   vehicle_weapons_test                the checks
 //   vehicle_weapons_test --scan FILE    each weapon file the scan finds in FILE (an SGO), a line each (UTF-8; the
 //                                       native audit tests/vehicle_weapons_native_audit.py runs it on the real SGOs)
 #include "vehicle_weapons_logic.h"
+#include <windows.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -24,7 +26,7 @@ List Scan(const std::vector<unsigned char>& bytes) {
 }
 List Of(std::wstring_view name) {
     List out;
-    WeaponsOf(name,nullptr,0,[&](std::wstring_view w){out.emplace_back(w);});
+    WeaponsOf(name,ModsRead::absent,nullptr,0,[&](std::wstring_view w){out.emplace_back(w);});
     return out;
 }
 bool Holds(const List& l,std::wstring_view w) {
@@ -96,11 +98,17 @@ void StockRows() {
 
 void Choice() {
     int n=0;
-    Expect(WeaponsOf(L"EDF6TR_NOT_STOCK",nullptr,0,[&](std::wstring_view){++n;})==-1 && !n,"neither Mods nor stock: -1");
+    Expect(WeaponsOf(L"EDF6TR_NOT_STOCK",ModsRead::absent,nullptr,0,[&](std::wstring_view){++n;})==-1 && !n,"neither Mods nor stock: -1");
     std::vector<unsigned char> b;PutText(b,L"app:/weapon/edf6vc_bmpt_atgmf_4.sgo");
     List l;
-    Expect(WeaponsOf(L"VEHICLE404_BIGTANK",b.data(),b.size(),[&](std::wstring_view w){l.emplace_back(w);})==1 &&
+    Expect(WeaponsOf(L"VEHICLE404_BIGTANK",ModsRead::ok,b.data(),b.size(),[&](std::wstring_view w){l.emplace_back(w);})==1 &&
            l.size()==1 && l[0]==L"app:/weapon/edf6vc_bmpt_atgmf_4.sgo","a Mods copy is read, not the stock row");
+    // A Mods file there but not read whole is a broken install: no stock row taken, told apart from an unknown vehicle.
+    for(ModsRead bad:{ModsRead::tooBig,ModsRead::shortRead,ModsRead::cannotOpen,ModsRead::cannotSize}) {
+        n=0;
+        Expect(WeaponsOf(L"VEHICLE404_BIGTANK",bad,nullptr,0,[&](std::wstring_view){++n;})==-2 && !n,
+               "a stock vehicle's Mods file not read whole: -2, its stock row not taken");
+    }
 }
 
 void Repeats() {
@@ -111,6 +119,32 @@ void Repeats() {
     for(const auto& w:Of(L"V503_BIKE"))first+=q.Add(w);
     for(const auto& w:Of(L"V613_BIKE"))second+=q.Add(w);
     Expect(first==2 && second==0,"shared weapons queued once a mission");
+}
+
+// A vehicle's Mods/OBJECT SGO read whole, or why not: absent (a stock vehicle) apart from too big / short / unopenable
+// (a broken install: logged, no stock row).
+void ModsFiles() {
+    wchar_t dir[MAX_PATH],file[MAX_PATH];
+    Expect(GetTempPathW(MAX_PATH,dir) && GetTempFileNameW(dir,L"vw",0,file),"a temporary file");
+    std::vector<unsigned char> b;PutText(b,L"app:/weapon/edf6vc_drill_bit.sgo");
+    {FILE* out=nullptr;Expect(!_wfopen_s(&out,file,L"wb") && out,"written");
+     if(out){std::fwrite(b.data(),1,b.size(),out);std::fclose(out);}}
+    unsigned char buf[256];std::size_t got=99;
+    Expect(ReadModsFile(file,buf,sizeof(buf),got,std::fread)==ModsRead::ok && got==b.size() && !std::memcmp(buf,b.data(),got),"read whole");
+    Expect(ReadModsFile(file,buf,b.size(),got,std::fread)==ModsRead::ok && got==b.size(),"exactly the buffer: read whole");
+    Expect(ReadModsFile(file,buf,b.size()-1,got,std::fread)==ModsRead::tooBig && got==0,"one byte over: too big, nothing taken");
+    const auto shortRead=[](void* to,std::size_t size,std::size_t count,FILE* in){ return std::fread(to,size,count-1,in); };
+    Expect(ReadModsFile(file,buf,sizeof(buf),got,shortRead)==ModsRead::shortRead && got==0,"a short read: short, nothing taken");
+    {   // there but held by another without sharing: not openable
+        const HANDLE held=CreateFileW(file,GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        Expect(held!=INVALID_HANDLE_VALUE && ReadModsFile(file,buf,sizeof(buf),got,std::fread)==ModsRead::cannotOpen && got==0,
+               "there but not openable");
+        if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);
+    }
+    DeleteFileW(file);
+    Expect(ReadModsFile(file,buf,sizeof(buf),got,std::fread)==ModsRead::absent && got==0,"no such file: absent (a stock vehicle)");
+    Expect(!std::strcmp(ModsReadText(ModsRead::tooBig),"larger than the buffer") && !std::strcmp(ModsReadText(ModsRead::shortRead),"read short"),
+           "the log's reasons");
 }
 
 int ScanFile(const char* file) {
@@ -135,6 +169,7 @@ int main(int argc,char** argv) {
     StockRows();
     Choice();
     Repeats();
+    ModsFiles();
     if(failures){std::printf("vehicle_weapons_test: %d failures\n",failures);return 1;}
     std::printf("vehicle_weapons_test: OK (%zu stock vehicles)\n",std::size(kStock));
     return 0;

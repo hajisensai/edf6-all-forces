@@ -92,8 +92,9 @@ void PreloadSupportVehicles() noexcept {
         if(!mgr)return;
         for(int i=0;i<kSupportVehicleCount;++i) {
             if(broken[i] || !preload::Want(preload::Item::groundHulls))continue;
-            // Stock Root.cpk resources, not optional mod files. Preload traverses their models,
-            // ragdolls and weapon resources just as a script's PreloadVehicleResource does.
+            // Stock Root.cpk resources, not optional mod files. The preload takes the hull's own resources, not the
+            // weapon SGOs its vehicle_setup / mission_setup name (the SYNC LOAD probe saw those read on the game thread
+            // when the vehicle was made): QueueVehicleWeapons queues them (vehicle_weapons.h).
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kSupportVehicles[i].sgo,2,-1);
             QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSupportVehicles[i].sgo);
             preloaded[i]=true;

@@ -39,7 +39,9 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
     预载时读 `<游戏目录>\Mods\OBJECT\NAME.SGO`，扫其中的 UTF-16LE `app:/weapon/....sgo` 字符串（`ScanSgo`）；
   - 原版载具（在 Root.cpk 里，插件不读）：查生成表 `src/vehicle_weapons.inc`（`tools/gen_vehicle_weapons.py` 从 Root.cpk
     生成；收录插件会预载的全部原版载具：spawn_catalog 的原版载具行 + `kSupportVehicles`）；
-  - 两者都不是：记一行日志，不回退。
+  - Mods 里有这个文件却没读全（超过 2 MB 缓冲、短读、打不开、取不到大小）：算安装坏了，记一行日志写明路径和原因，
+    **不**再去查原版表（`WeaponsOf` 返回 -2，与「不认识这辆车」的 -1 分开）；
+  - Mods 里没有、原版表里也没有：记一行日志，不回退。
 - 每个任务在预载后写一行 `PRELOAD vehicle weapons: <n> weapon files queued with <m> vehicles`。
 
 ## 联机协议
