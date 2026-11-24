@@ -1184,8 +1184,9 @@ void Log(const char* format,...) noexcept {
 
 // What is buffered written now, best-effort: both locks once without waiting (edf::logfile::Flush(true)); it may open
 // the log or rotate it as the writer would, so it is not the crash path. A crash goes through CrashLog below:
-// edf::logfile::Crash writes the older lines first (CrashFlush: the open handle only, no open, rotation or CRT
-// formatting) and then the crash line by its own raw append, after the dump is written.
+// edf::logfile::Crash, after the dump is written, writes the older lines and then the crash line through the log's one
+// handle (opened then if it was not yet; no rotation, no CRT formatting), or with a log lock held the crash line alone
+// by its own raw append.
 void FlushLog() noexcept {
     edf::logfile::Flush();
 }

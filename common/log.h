@@ -6,7 +6,7 @@
 // A WriteFile per line on the game thread was the hitch under a burst of lines (an air strike's jets, each logging
 // what it saw: 15000 lines a second, 2026-10-04); opening and closing the file per line before that, with the virus
 // scanner looking at each close, was the hitch when a mission started. A crash writes what is buffered without waiting
-// for a lock and without opening, rotating or formatting (CrashFlush): its own log in Crash, EDF6AutoTurret's through
+// for a lock, rotating or formatting, opening the log at most once (CrashFlush): its own log in Crash, EDF6AutoTurret's through
 // kCrashFlush below. Two buffers of kBuffer: the writer takes the full one and the lines go on into the other; a line that does
 // not fit is dropped and counted (said with the next write), never waited for. Past kLogMax the file is renamed to
 // .log.1 (the one before replaced) and a new one begun, by the writer. No FILE_SHARE_DELETE: a log deleted while the
@@ -38,7 +38,8 @@ template<std::size_t Capacity> struct Buffer {
         ReleaseSRWLockExclusive(&bufferLock);
     }
 
-    template<class Write> bool Drain(Write write,bool tryOnly=false) noexcept {
+    // `always`: call `write` (under the file lock) even with nothing buffered, for a crash line after the buffered ones.
+    template<class Write> bool Drain(Write write,bool tryOnly=false,bool always=false) noexcept {
         if(tryOnly) {
             if(!TryAcquireSRWLockExclusive(&fileLock))return false;
             if(!TryAcquireSRWLockExclusive(&bufferLock)) {
@@ -54,7 +55,7 @@ template<std::size_t Capacity> struct Buffer {
         const unsigned lost=dropped;
         active^=1;used=0;dropped=0;
         ReleaseSRWLockExclusive(&bufferLock);
-        if(size || lost)write(bytes[full],size,lost);
+        if(size || lost || always)write(bytes[full],size,lost);
         ReleaseSRWLockExclusive(&fileLock);
         return true;
     }
@@ -84,12 +85,14 @@ void Line(const char* format,va_list args) noexcept;
 // What is buffered written now, opening the log or rotating it as the writer would. Best-effort (tryOnly): both locks
 // once, without waiting (process exit, a refused load ending the game); otherwise waiting for the writer (tests).
 void Flush(bool tryOnly=true) noexcept;
-// A crash's flush: both locks once without waiting, then only what needs neither the heap nor the CRT: the buffered
-// bytes to the handle already open. No open of a log not opened yet, no rotation, a fixed line for dropped lines
-// (tests/log_crash_test.cpp counts CreateFileW / MoveFileExW / _snprintf_s through it: none).
+// A crash's flush: both locks once without waiting, then the buffered bytes to the log's one handle. A log not opened
+// yet is opened then (one CreateFileW: the lines before a crash are the ones worth keeping, and the crash line needs a
+// handle anyway); no rotation past the limit (no MoveFileExW), a fixed line for dropped lines (no _snprintf_s).
+// A lock held (the crashed thread owns it): nothing written, nothing taken.
 void CrashFlush() noexcept;
-// A crash: what is buffered (CrashFlush), then the preformatted crash diagnostics appended directly (AppendCrashLine
-// on the log's path).
+// A crash: under the same locks and the same one handle, what is buffered and then the preformatted crash diagnostics.
+// With a lock held the crash line alone is appended through its own handle (AppendCrashLine). Either way at most one
+// CreateFileW in all (tests/log_crash_test.cpp counts it, AppendCrashLine's included).
 void Crash(const char* text,std::size_t size) noexcept;
 
 // The one crash handler of the process is EDF6VehicleCrew's (src/crash_dump.cpp), and EDF6AutoTurret's buffer is its
