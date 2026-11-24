@@ -15,6 +15,8 @@
 #include "edf/seat.h"
 #include "edf/weapon.h"
 #include "edf/aimlink.h"
+#include "edf/enemy_points.h"
+#include "edf/world_tables.h"
 
 namespace autoturret {
 using edf::At;
@@ -119,14 +121,11 @@ constexpr float kFramesPerSecondSq=3600.0f;
 // Each T is one lock point of an object: +0 kind (0 = enemy kind), +8 the object, +0x10 its aim
 // point (rewritten every frame from the bone matrix by 0x6C7700), +0x29 valid, +0x2A lockable.
 // The lock query (0x696710) walks the same list; it is only touched on the game thread.
-constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=0x10;
-constexpr std::size_t kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTargetLockable=0x2A;
-// Team relations: manager -> array (stride 0x38) per team -> int relation[team]; 2 = enemy.
-constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
-constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
-// The registry is an MSVC std::list (head at +8, its size at +0x10: 0x22E210 bumps it, 0x22E330); a walk goes over
-// that many nodes at most -- the list's own count, not a fixed cap a battle's lock points pass.
-constexpr std::size_t kRegSize=0x10;
+// Its head and count and the team relations (edf::Relations) are common/edf/world_tables.h, the walk edf/enemy_points.h:
+// one copy with EDF6VehicleCrew.
+using enemypoints::kNodeTarget;using enemypoints::kTargetObject;using enemypoints::kTargetAim;
+using enemypoints::kTargetValid;using enemypoints::kTargetLockable;
+using enemypoints::kEnemyRelation;using enemypoints::kMaxTeam;
 constexpr float kPi=3.14159265f;
 
 // The turret axes turn at (input x k) rad per frame; measured from the log at ~1.1 rad/s for a
@@ -135,13 +134,11 @@ constexpr float kPitchMargin=0.03f;   // rad past a pitch stop still counted as 
 constexpr float kTurnPerInput=1.1f/60.0f,kTurnPerInputMin=0.2f/60.0f,kTurnPerInputMax=6.0f/60.0f;
 
 // --- Frames ---
-// The game frame number: it steps when a vehicle's input (slot 55, which every live vehicle gets once a
-// frame) comes round again. Game thread only.
-void SeeVehicle(const void* vehicle) noexcept;
-// The same for the player's vehicle the PlayerAimV4 export is asked about (aimlink.h V4, designate.cpp): a vehicle of a
-// class this plugin hooks is already seen by its own hook this frame (not seen twice: the clock would run double); any
-// other vehicle is seen here, once a frame.
-void SeeVehicleOnce(const void* vehicle) noexcept;
+// The game frame number: the native scene step (common/edf/game_frame.h, the clock EDF6VehicleCrew counts by too).
+// SeeFrame moves it on to the step now; every game-thread entry calls it first (the input hooks, the exports), as often as
+// it likes: a step is one frame however many vehicles, seats or exports come round in it. Frame() may be read on any
+// thread (SpawnHook's GunStamp): the last step a game-thread entry saw.
+void SeeFrame() noexcept;
 ULONGLONG Frame() noexcept;
 
 // --- Enemies ---
@@ -156,10 +153,10 @@ constexpr int kFirstWorld=1024;
 // The enemies of `vehicle`'s side within `range` of its turret pivot: pointers into the world snapshot,
 // valid for the current vehicle's step only (game thread; the snapshot is retaken next frame).
 // Every one in range (a fixed 256 kept the first in walk order, not the best); each caller's Nearby is kept across frames.
+// In the snapshot's order, as a scan of the whole snapshot gives them; found through the snapshot's grid (npc_grid.h), which
+// only narrows which rows are tested (tests/autoturret_clock_grid_test.cpp: the same list as the scan).
 struct Nearby { std::vector<const Enemy*> e; int count=0; };
 void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept;
-// The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null.
-const std::int32_t* Relations(std::int32_t team) noexcept;
 
 // --- Tracks ---
 // What the aim keeps from frame to frame for one gun position: a flak turret (seat 0) or a tank gunner seat.
