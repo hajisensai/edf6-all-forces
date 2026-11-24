@@ -34,7 +34,9 @@ inline const Table* Usable(const Table* t) noexcept {
 // The EDF6Coop this build's rooms need: the room protocol 2 (mod_room.h) is EDF6Coop 2.7.0's (Coop#42). 2.6.x wants
 // AF_PROFILE 1, refuses its own REJOIN and virtual rooms of this protocol and cannot read 0x412602xx lobby states, so a
 // room with it would half work: mod_room.cpp refuses to create or join one and says to upgrade.
-inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=7,kRoomCoopPatch=0;
+// 2.8.0 (Coop#47, 2026-11-24): support_net.cpp polls with EDF6CoopPollExtensionBatch and counts on an extension overflow
+// being recovered; with 2.7.x one congestion ended the plugins' networking for the mission.
+inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=8,kRoomCoopPatch=0;
 enum class CoopVersion : std::uint8_t { ok, old, unreadable };
 // EDF6Coop's exported EDF6CoopVersion marker (nullptr: not exported, older than 2.5.0) against kRoomCoop*; the version
 // read back when there is one.

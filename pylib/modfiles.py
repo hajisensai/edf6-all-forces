@@ -10,14 +10,38 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 
 PROCESS = 'EDF6.exe'
+STEAM_APP = 2291060
 
 
 def game_running(process: str = PROCESS) -> bool:
     r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process}', '/NH'],
                        capture_output=True, text=True, errors='replace')
     return process.lower() in r.stdout.lower()
+
+
+def steam_running_app() -> int:
+    """Steam's own idea of the running game (RunningAppID under HKCU Software/Valve/Steam, 0 when none or no Steam).
+    It lags EDF6.exe's exit by a few seconds (cloud sync and the like): a steam://rungameid inside that window only
+    gets Steam's 「游戏已在运行」 dialog, so every launcher waits for it (wait_steam_released) after the process is gone."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as k:
+            return int(winreg.QueryValueEx(k, 'RunningAppID')[0])
+    except (ImportError, OSError, ValueError):
+        return 0
+
+
+def wait_steam_released(timeout: float = 60.0, app: int = STEAM_APP) -> bool:
+    """Wait until Steam no longer counts APP as running; False when it still does after TIMEOUT seconds."""
+    end = time.monotonic() + timeout
+    while steam_running_app() == app:
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.5)
+    return True
 
 
 def refuse_while_running(process: str = PROCESS) -> None:
