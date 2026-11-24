@@ -46,7 +46,7 @@ support_soldier / airdrop / ultimate）每个任务都把装了的插件内容�
 
 - host-settings 词 v3 → v4（加 `n=` / `p=`，各 32 位大写十六进制，高字在前），`kWordMost` 128 → 200；
   新能力位 `kFeatPreloadSet=2048`（房间公告里的名字 `featPreloadSet`）。
-- 房间协议 `kAllForcesRoomProtocol` 取合并时 main 的值 + 1（写这份文档时 main 是 16，本分支为 17；与 net-6 谁先合谁用下一个号，后合的再 +1）：旧版本不公布需求却会照旧全量预载，房主的集合就漏掉它的呼叫，所以旧版不能进房
+- 房间协议 `kAllForcesRoomProtocol` 取合并时 main 的值 + 1（写这份文档时 main 是 16，17 已由 #390 占用，本分支为 18；谁先合进 main 谁拿下一个号：本 PR 先合则用 17、#390 改用 18）：旧版本不公布需求却会照旧全量预载，房主的集合就漏掉它的呼叫，所以旧版不能进房
   （房主侧按协议拒绝，房间公告所需版本，沿用现有机制）。不写兼容分支。
 - 为什么不用 `plugin_net.h` 通道：预载在 MissionSync 之后、任务对象建立之前，此时 plugin_net 还没起来；成员属性（coop_attr）
   在房间阶段就可读，正好是 host-settings 词已有的传输。
