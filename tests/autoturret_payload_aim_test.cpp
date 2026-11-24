@@ -68,9 +68,14 @@ int main() {
     auto check=[&](bool pass,const char* description){++checks;if(!pass){++failed;std::printf("FAIL %s\n",description);}};
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     if(!image)return 2;
-    unsigned char gravityWorld[0x80]{},physics[0x40]{};
+    // The System (common/edf/game_frame.h): its vtable, its scene (whose physics the gravity is read from) and its step.
+    static unsigned char gravityWorld[gameframe::kSystemStep+0x20]{};
+    unsigned char physics[0x40]{};
     void* gravityVtable[]={reinterpret_cast<void*>(&Gravity)};
-    Put<void*>(image,0x20B2958,gravityWorld);Put<void*>(gravityWorld,0x68,physics);Put<void*>(physics,0x20,gravityVtable);
+    Put<void*>(image,gameframe::kSystem,gravityWorld);Put<void*>(gravityWorld,0,image+gameframe::kSystemVtable);
+    Put<void*>(gravityWorld,gameframe::kSystemScene,physics);Put<void*>(physics,0x20,gravityVtable);
+    std::uint32_t step=100;
+    const auto nextStep=[&]{Put<std::uint32_t>(gravityWorld,gameframe::kSystemStep,++step);SeeFrame();};
     unsigned char vehicle[0x3000]{},seat[edf::kSeatStride]{},vehicleCtrl[16]{},rider[0x400]{},riderCtrl[16]{};
     unsigned char holder[0x20]{},enemy[0x400]{},enemyCtrl[16]{};
     unsigned char* holders[]={holder};
@@ -120,8 +125,8 @@ int main() {
     answer=Answer::unhandled;const Barrel nativeBarrel=SeatBarrel(vehicle,seat);
     check(nativeBarrel.ok && nativeBarrel.weapon==native.bytes.data() && Point(nativeBarrel.pos,1,2,3) && Close(nativeBarrel.life,60),"unhandled barrel query retains the native holder muzzle");
 
-    // The input hook has already seen this vehicle: every V4 request below really is the same frame.
-    frame=100;frameSeenCount=0;exportSeen=nullptr;SeeVehicle(vehicle);
+    // The input hook has already seen this step: every V4 request below really is the same frame.
+    nextStep();
     pilot=Pilot{};pilot.vehicle=vehicle;pilot.ctrl=vehicleCtrl;pilot.seat=0;pilot.seenFrame=Frame();pilot.range=2000;pilot.keys=true;
     pilot.target=enemy;pilot.targetCtrl=enemyCtrl;pilot.lockedAt=GetTickCount64();pilot.lockVel[0]=1;
     worldFrame=Frame();worldCount=1;worldEnemies[0]=Enemy{};worldEnemies[0].object=enemy;
@@ -166,7 +171,7 @@ int main() {
         std::vector<std::array<unsigned char,0x40>> targets(kPoints);
         std::vector<std::array<unsigned char,0x400>> foes(kPoints);
         unsigned char registry[0x20]{},manager[0x40]{};
-        std::vector<unsigned char> rows(kTeamStride*kMaxTeam);
+        std::vector<unsigned char> rows(edf::kTeamStride*kMaxTeam);
         std::int32_t relation[kMaxTeam]{};relation[1]=kEnemyRelation;
         Node* const head=&nodes[kPoints];
         for(int i=0;i<kPoints;++i) {
@@ -178,11 +183,11 @@ int main() {
             Put<std::int32_t>(o,kTeam,1);
         }
         head->next=&nodes[0];
-        Put<void*>(registry,kRegList,head);Put<std::uint64_t>(registry,kRegSize,kPoints);Put<void*>(image,kRegistry,registry);
-        Put<void*>(image,kTeams,manager);Put<void*>(manager,kTeamArray,rows.data());
-        Put<const std::int32_t*>(rows.data(),kTeamRelation,relation);
+        Put<void*>(registry,edf::kRegList,head);Put<std::uint64_t>(registry,edf::kRegSize,kPoints);Put<void*>(image,edf::kLockRegistry,registry);
+        Put<void*>(image,edf::kTeamManager,manager);Put<void*>(manager,edf::kTeamRows,rows.data());
+        Put<const std::int32_t*>(rows.data(),edf::kTeamRelation,relation);
         Put<std::int32_t>(vehicle,kTeam,0);
-        ++frame;int count=0;
+        nextStep();int count=0;
         const Enemy* const all=World(&count);
         bool rowsOk=count==kPoints;
         for(int i=0;rowsOk && i<kPoints;++i)rowsOk=all[i].object==foes[static_cast<std::size_t>(i)].data() && all[i].pos[0]==static_cast<float>(i);
@@ -190,12 +195,12 @@ int main() {
         Nearby wide{};ScanEnemies(vehicle,1.0e6f,wide);
         check(wide.count==kPoints && wide.e[kPoints-1]==&all[kPoints-1],"a vehicle's scan keeps every enemy in range, not the first 256");
         Put<std::int32_t>(foes[7].data(),kTeam,0);
-        Nearby fewer{};++frame;ScanEnemies(vehicle,1.0e6f,fewer);
+        Nearby fewer{};nextStep();ScanEnemies(vehicle,1.0e6f,fewer);
         check(fewer.count==kPoints-1,"a friend among them left out");
         nodes[kPoints-1].next=&nodes[0];   // its last node back to the first, not the head
-        ++frame;World(&count);
+        nextStep();World(&count);
         check(count==kPoints,"a walk ends after the list's own count of nodes");
-        Put<void*>(image,kRegistry,nullptr);Put<void*>(image,kTeams,nullptr);
+        Put<void*>(image,edf::kLockRegistry,nullptr);Put<void*>(image,edf::kTeamManager,nullptr);
     }
     // The cab's floor is the Katyusha's alone (2026-11-09 review): the TOS-1's rockets (tools/make_tracked_combat.py
     // GUNS['tos1']: 6 m/frame, 600 frames, gravity factor 0.6, kMarkLofted) take the low arc of a couple of degrees to a

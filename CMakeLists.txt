@@ -2335,6 +2335,15 @@ target_compile_options(autoturret_payload_aim_test PRIVATE /W4 /WX /utf-8 /permi
 target_link_options(autoturret_payload_aim_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks autoturret_payload_aim_test)
 add_test(NAME autoturret_payload_aim COMMAND autoturret_payload_aim_test)
+# EDF6AutoTurret's frame is the scene step (one frame however often a vehicle's input runs in it; a gun's stamp holds through
+# the next step only), and its scan through the world's grid is the linear scan's own list (tests/autoturret_clock_grid_test.cpp).
+add_executable(autoturret_clock_grid_test EXCLUDE_FROM_ALL tests/autoturret_clock_grid_test.cpp)
+target_include_directories(autoturret_clock_grid_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(autoturret_clock_grid_test PRIVATE edf6common user32)
+target_compile_options(autoturret_clock_grid_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(autoturret_clock_grid_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks autoturret_clock_grid_test)
+add_test(NAME autoturret_clock_grid COMMAND autoturret_clock_grid_test)
 add_test(NAME edf41_caption_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_caption_contract_test.py")
 
 add_executable(enemy_ui_logic_test EXCLUDE_FROM_ALL tests/enemy_ui_logic_test.cpp)
