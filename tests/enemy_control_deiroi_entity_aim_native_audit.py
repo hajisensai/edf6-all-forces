@@ -1,11 +1,13 @@
 """Read-only instruction audit; no DLL execution or game-directory write."""
 from pathlib import Path
-import argparse,struct,re
+import argparse,struct,re,sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'pylib'))
+import gamedir
 p=argparse.ArgumentParser()
 p.add_argument('--dll',default='')
 p.add_argument('--game',default='')
 a=p.parse_args()
-dll=Path(a.dll) if a.dll else Path(a.game)/'EDF.dll' if a.game else Path(r'D:/steam/steamapps/common/EARTH DEFENSE FORCE 6/EDF.dll')
+dll=Path(a.dll) if a.dll else Path(a.game)/'EDF.dll' if a.game else Path(gamedir.find_or_dev())/'EDF.dll'
 if not dll.is_file():print('SKIP: supported EDF.dll absent');raise SystemExit(77)
 import pefile,capstone
 pe=pefile.PE(str(dll),fast_load=True)

@@ -28,9 +28,9 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
 import dsgo  # noqa: E402
+import gamedir  # noqa: E402
 import rootcpk  # noqa: E402
 
-DEFAULT_GAME = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
 OUT = os.path.join(ROOT, 'worldmap', 'missions.json')
 AC_MAP = re.compile(r'\bMap\(\s*"app:/map/([\w.]+?)\.mac"', re.I)
 EDF6_LISTS = (('edf6', ''), ('edf6dlc1', '_DLC1'), ('edf6dlc2', '_DLC2'))
@@ -106,7 +106,7 @@ def write(data: dict, path: str = OUT) -> None:
 
 
 def main(argv: list[str]) -> int:
-    data = build(argv[1] if len(argv) > 1 else DEFAULT_GAME)
+    data = build(argv[1] if len(argv) > 1 else gamedir.find_or_dev())
     write(data)
     print(f'{OUT}: ' + ', '.join(f'{p["pack"]} {len(p["missions"])}' for p in data['packs']))
     return 0

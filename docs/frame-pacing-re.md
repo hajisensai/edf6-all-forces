@@ -1,4 +1,4 @@
-# 游戏本体的两处等待：窗口线程空转与帧步进 Sleep(1)
+# 游戏本体的三处等待（窗口线程空转、帧步进 Sleep(1)、渲染栅栏空转）与 DXGI 排队帧数
 
 2026-11-07。对象是 Steam 版 EDF.dll（`0x678CCB46`），实现在 `src/frame_pacing.cpp`，签名审计在 `tests/frame_pacing_sig_audit.py`。
 
@@ -68,6 +68,43 @@ return n                                        ; eax
 
 离线测试 `tools/frame_pacing_check.cpp`：周期与魔数除法一致；刚过边界、恰在边界、已过一个 / 多个 tick；随机状态下等待结束前一计数游戏数 0、恰好结束时数 1；QPC 回绕前后（base 在 2^64 附近、边界在回绕之后）；100 ns 换算向上取整且最小；在假时钟上跑游戏循环，每帧工作在一个 tick 内时恰好等一次、走一个 tick。
 
+## 游戏线程：等渲染栅栏 `0x111CC20` 空转（2026-11-24 更正）
+
+本文旧版在「没有改的」一节写的「采样里它主要是 `WaitForSingleObject` 真等待，不空转」是错的。2026-11-24 用 `tools/edfre.py`
+只读反汇编核实（字节由 `tests/frame_pacing_sig_audit.py` 审计）：
+
+```
+0x111CC4D: call 0x50D10(&ev, 0, 0)       ; CreateEventW(NULL, 自动复位, 未置位)，事件在 [rsp+80h]，每次调用新建
+0x111CC52..0x111CCB2: 往渲染环 +0x28A8 录一条「置位这个事件」的命令并发布
+0x111CCC4: call 0x50E00(&ev)             ; 先查一次
+0x111CCE0: 秒表 0x66D00 > 1.0 s 时 PeekMessageW / TranslateMessage / DispatchMessageW
+0x111CD39: xor ecx,ecx ; call [Sleep]    ; Sleep(0)
+0x111CD49: call 0x50E00(&ev) ; test al,al ; je 0x111CCE0
+0x50E00:   WaitForSingleObject([rcx], 0) ; sete al
+```
+
+零超时轮询加 `Sleep(0)`：游戏线程等渲染线程的整段时间占满一个核，还和渲染线程、Umbra、Havok 的线程抢核。采样落在
+`WaitForSingleObject` 里，是因为它每圈都进一次内核，不是在睡。主循环每帧在 `0x11A305A` 调它，载入路径还有约 40 处调用。
+
+改法（`src/frame_pacing.cpp` `FenceWait`）：`0x111CD49` 的 `call 0x50E00` 改指向 `FenceWait`，对同一个事件
+`WaitForSingleObject(ev, 10 ms)`，返回值语义与 `0x50E00` 相同（等到 = 1）。渲染线程一置位就醒；超过 1 s 时原版每圈抽一次消息，
+现在每 10 ms 抽一次（等不到的那 10 ms 才回到循环头）。`0x111CCC4` 的第一次查询、`Sleep(0)` 与消息泵不动。只在
+`0x111CD39..0x111CD52` 与 `0x50E00` 整个函数的签名都符合时才改，否则记一行 `PACING the render fence loop ... left as it is`。
+
+## DXGI 最大排队帧数（2026-11-24）
+
+EDF.dll 只在设备初始化 `0x111B420`（唯一调用者 `0x11A33DF`，`rcx` = 渲染器 `0x2136FF0`）的 `0x111B646` 对设备
+（渲染器 `+0x80`）QI 一次 `IDXGIDevice1`（IID 在 `0x1A3B768`），只为调 `GetAdapter`，随即 Release；全 DLL 不调
+`SetMaximumFrameLatency`，所以排队上限是 DXGI 默认的 3 帧。`D3D11CreateDevice` 只经 `0x12DAED0` 在 `0x111B595` 调一次，
+设备只建一次；`0x111B220` 重建的是交换链，设备属性保留。
+
+Present 是游戏线程经 `0x111D890` 录进渲染环的命令，渲染线程在 `0x1118B45` 执行。GPU 跟不上（n ≥ 2，追帧后 8 帧
+SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会填满，输入到画面多 1–2 帧。
+
+改法（`InstallFrameLatency`）：`0x11A33DF` 的调用改指向 `DeviceInitHook`，原函数返回真后对设备调
+`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，默认 1，`0` 不设。游戏代码只改这一处调用，日志一行
+`LATENCY max frame latency 1 (was 3)`。
+
 ## 主循环里按帧而不是按 tick 执行的点
 
 主循环（`0x11A2ECA` 起）每帧：`n = min(0x11DAE60(), 3)`，`dt` = 实际帧间隔（秒表 `0x66D00`），再调 `Application::Update`（`0x705530`，`Application` vtable `0x17E91A8` 槽 1，从 `0x11A3006 call [rax+8]` 进入），参数是 `{dt, n}`（`[r14]` / `[r14+4]`）。原版的等待保证 `n >= 1`，所以「按帧」与「按 tick」只在追帧（`n` 为 2、3）和下面那一种 0 tick 帧上不同；若有 MOD 让游戏在 0 tick 时也出帧（如第三方 120 fps 研究包），下面这些点就会多跑（怎样让多出的帧有意义而不出错，见 `docs/unlimited-fps-re.md`）。2026-11-08 静态核实：
@@ -96,5 +133,4 @@ A 与 B 是同一份源码；A 不调用 `InstallFramePacing`。PERF 来自插�
 
 ## 没有改的
 
-- `0x111CC20`（游戏线程等渲染栅栏时也抽消息、`Sleep(0)`）：采样里它主要是 `WaitForSingleObject` 真等待，不空转。
 - 提交内存约 4 GB，其中常驻 RAM 只有 0.5–0.9 GB，其余是游戏预先提交、没有碰过的堆，只占提交额度、不占内存，不值得动。

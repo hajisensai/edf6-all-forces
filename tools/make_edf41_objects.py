@@ -80,12 +80,12 @@ import edf41bike  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
 import mab_legacy  # noqa: E402
+import gamedir  # noqa: E402
 import rootcpk  # noqa: E402
 import mdb  # noqa: E402
 import rabpool  # noqa: E402
 import sgo  # noqa: E402
 
-STEAM = r'D:\Steam\steamapps\common'
 OUT = os.path.join(HERE, '..', 'edf41port', 'objects.json')
 FILES = os.path.join(HERE, '..', 'edf41port', 'objects')
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'DX11.cpk')
@@ -4251,12 +4251,15 @@ def stock_member_sources(games: Games, rel: str, out: dict[str, bytes]) -> dict[
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
-    ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf41', default=gamedir.find_other(gamedir.EDF41, near=edf6))
+    ap.add_argument('--edf6', default=edf6)
     ap.add_argument('--out', help='write objects/ and objects.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='SGO',
                     help='build only this root (HECTOR301CC.SGO; repeatable)')
     a = ap.parse_args()
+    if not a.edf41:
+        ap.error('EDF4.1 not found: set EDF41_DIR or pass --edf41')
     data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only))
     out_json, out_files = (os.path.join(a.out, 'objects.json'), os.path.join(a.out, 'objects')) if a.out else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
