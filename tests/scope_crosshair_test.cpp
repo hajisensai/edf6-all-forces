@@ -7,6 +7,7 @@
 
 namespace crew {
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 namespace {
 Config config{};
 int checks=0,failures=0,drawn=0;
