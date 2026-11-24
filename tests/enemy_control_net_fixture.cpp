@@ -9,6 +9,7 @@ namespace { ULONGLONG FixtureTickCount64() noexcept; }
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <limits>
 #include <map>
 #include <memory>
 #include <vector>
@@ -91,9 +92,9 @@ struct NativeEnvironment {
     unsigned capacityQueries=0;bool flowBlocked=false,flowUnavailable=false;unsigned flowCalls=0;
     bool corruptNativeId=false,wrongRequesterPuid=false,profileMismatch=false,failBegin=false,failActivate=false,failApply=false;
     bool fallback=false,failPoseCapture=false,failPoseApply=false;
-    std::size_t poseSize=ep::kMaxPoseBytes;unsigned poseGeneration=1;
+    unsigned poseInvalid=0,poseGeneration=1; // poseInvalid: 1 = no profile, 2 = non-finite position
     unsigned poseCaptureCalls=0,poseApplyCalls=0,needsPoseCalls=0;
-    std::size_t poseCapacity=0;std::vector<unsigned char> capturedPose,appliedPose;
+    crew::enemy_native::pose::State capturedPose{},appliedPose{};
     unsigned restoreFailures=0;
     unsigned strictCalls=0,sealCalls=0,idCalls=0,authorityCalls=0,prepareCalls=0,describeCalls=0,beginCalls=0,activateCalls=0,applyCalls=0,restoreCalls=0,validateCalls=0;
     unsigned strictWithTarget=0,strictWithoutTarget=0;
@@ -301,6 +302,23 @@ std::vector<unsigned char> PoseBytes(std::size_t size,unsigned generation) {
     std::vector<unsigned char> bytes(size);for(std::size_t i=0;i<size;++i)bytes[i]=static_cast<unsigned char>((i*17+generation*37)%251);
     return bytes;
 }
+namespace npose=crew::enemy_native::pose;
+// A valid Deiroi body whose X is the generation (1 m per generation), so a host motion and a guest lerp are exact.
+npose::State PoseState(unsigned generation) {
+    npose::State state{};state.kind=npose::Kind::deiroi;state.profile=0x5005;
+    state.position[0]=static_cast<float>(generation);state.position[1]=2;state.position[2]=-3;state.rotation[3]=1;
+    state.targetAngles[0]=0.25f;state.targetAngles[1]=-0.5f;state.linearVelocity[0]=0.5f;CHECK(npose::Valid(state));
+    return state;
+}
+bool Same(const npose::State& a,const npose::State& b) {return !std::memcmp(&a,&b,sizeof(a));}
+// The v2 pose wire as a host would send it: generation's body, stamped with the host frame and measured motion.
+std::vector<unsigned char> PoseWire(unsigned generation,std::uint64_t frame,float motionX=0) {
+    npose::Packet packet{};packet.state=PoseState(generation);packet.senderFrame=static_cast<std::uint32_t>(frame);packet.motion[0]=motionX;
+    std::vector<unsigned char> bytes(npose::kWireBytes);CHECK(npose::Encode(packet,bytes.data(),bytes.size()));return bytes;
+}
+npose::Packet DecodePose(const std::vector<unsigned char>& bytes) {
+    npose::Packet packet{};CHECK(npose::Decode(bytes.data(),bytes.size(),&packet));return packet;
+}
 }
 
 namespace crew {
@@ -420,24 +438,23 @@ bool EnemyControlNeedsNetworkPose(std::uint64_t id) noexcept {
     ++native.needsPoseCalls;const auto found=native.leases.find(id);
     return native.fallback && found!=native.leases.end() && found->second.captured && found->second.active;
 }
-bool EnemyControlCaptureNetworkPose(std::uint64_t id,void* bytes,std::size_t capacity,std::size_t* used) noexcept {
-    ++native.poseCaptureCalls;native.poseCapacity=capacity;const auto found=native.leases.find(id);
+bool EnemyControlCaptureNetworkPose(std::uint64_t id,enemy_native::pose::State* out) noexcept {
+    ++native.poseCaptureCalls;const auto found=native.leases.find(id);
     CHECK(room && room->bridge==0 && native.authority && native.fallback);
     CHECK(found!=native.leases.end() && found->second.captured && found->second.active && found->second.live);
     const auto* target=ActorByRef(found->second.target);CHECK(target && target->alive && target->registered);
-    CHECK(bytes && used && capacity==ep::kMaxPoseBytes);
-    *used=0;if(native.failPoseCapture)return false;
-    native.capturedPose=PoseBytes(native.poseSize,native.poseGeneration);
-    const auto copied=native.poseSize<capacity ? native.poseSize : capacity;
-    if(copied)std::memcpy(bytes,native.capturedPose.data(),copied);*used=native.poseSize;return true;
+    CHECK(out);if(native.failPoseCapture)return false;
+    native.capturedPose=PoseState(native.poseGeneration);
+    if(native.poseInvalid==1)native.capturedPose.profile=0;
+    else if(native.poseInvalid==2)native.capturedPose.position[1]=std::numeric_limits<float>::infinity();
+    *out=native.capturedPose;return true;
 }
-bool EnemyControlApplyNetworkPose(std::uint64_t id,const void* bytes,std::size_t size) noexcept {
+bool EnemyControlApplyNetworkPose(std::uint64_t id,const enemy_native::pose::State& state) noexcept {
     ++native.poseApplyCalls;const auto found=native.leases.find(id);
     CHECK(room && room->bridge!=0 && !native.authority && native.fallback);
     CHECK(found!=native.leases.end() && found->second.captured && found->second.active && found->second.live);
     const auto* target=ActorByRef(found->second.target);CHECK(target && target->alive && target->registered);
-    CHECK(bytes && size && size<=ep::kMaxPoseBytes);
-    native.appliedPose.assign(static_cast<const unsigned char*>(bytes),static_cast<const unsigned char*>(bytes)+size);
+    CHECK(enemy_native::pose::Valid(state));native.appliedPose=state;
     return !native.failPoseApply;
 }
 namespace enemy_control {
@@ -828,27 +845,35 @@ void RejectNonCanonicalSizes(Room& current,const Packet& packet) {
     auto padded=packet.bytes;padded.push_back(0);attempt(padded.data(),padded.size());
 }
 void HostPoseSamplingAndAtomicDelivery() {
-    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==7 && ep::kCapability==5);
+    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==8 && ep::kCapability==5);
     CHECK(current.Request(0,5));current.Until(0,ep::Phase::beginning);
     crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==0 && PosePacketCount(current)==0);
     current.Until(0,ep::Phase::activating);crew::EnemyControlNetworkFrame();
     CHECK(native.poseCaptureCalls==0 && PosePacketCount(current)==0);current.Pump();
     const auto snapshot=current.ActiveSnapshot(0);CHECK(!std::strcmp(native.leases[snapshot.lease].authenticatedPuid,kPuid[0]));
-    crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1 && native.poseCapacity==ep::kMaxPoseBytes);
-    CHECK(native.capturedPose==PoseBytes(ep::kMaxPoseBytes,1) && PosePacketCount(current)==2);
+    const auto firstFrame=crew::GameFrame();
+    crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1);
+    CHECK(Same(native.capturedPose,PoseState(1)) && PosePacketCount(current)==2);
     const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
     ep::Message message;CHECK(ep::Decode(envelopes[0].bytes.data(),envelopes[0].bytes.size(),message));
     CHECK(message.sequence==1 && message.epoch==current.epoch && message.lease==snapshot.lease && message.request);
-    CHECK(message.capability==(1u<<16) && message.inputSize==ep::kMaxPoseBytes && envelopes[0].bytes.size()==ep::kWireBytes);
+    CHECK(message.capability==(1u<<16) && message.inputSize==npose::kWireBytes && envelopes[0].bytes.size()==ep::kWirePrefixBytes+npose::kWireBytes);
     CHECK(message.spec.requesterPlayer==actors[0].id && message.spec.target==actors[5].id && message.spec.profileHash==snapshot.profileHash);
     CHECK(!std::strcmp(message.spec.ownerPuid,kPuid[0]));RejectNonCanonicalSizes(current,envelopes[0]);
     CHECK(current.nodes[1].poseApplies==0);current.Deliver(envelopes[0]);CHECK(current.nodes[1].poseApplies==1);
     current.Pump();CHECK(current.nodes[2].poseApplies==1 && native.poseApplyCalls==0);
-    CHECK(current.nodes[1].poses[snapshot.lease]==native.capturedPose && current.nodes[2].poses[snapshot.lease]==native.capturedPose);
+    CHECK(current.nodes[1].poses[snapshot.lease]==current.nodes[2].poses[snapshot.lease]);
+    {const auto sent=DecodePose(current.nodes[1].poses[snapshot.lease]);
+        // Stamped with the host's logic frame; the first sample has no previous position, so no motion.
+        CHECK(Same(sent.state,native.capturedPose) && sent.senderFrame==static_cast<std::uint32_t>(firstFrame));
+        CHECK(sent.motion[0]==0 && sent.motion[1]==0 && sent.motion[2]==0);}
     now+=17;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1);
     now+=17;++native.poseGeneration;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==2);current.Pump();
-    CHECK(current.nodes[1].poseApplies==2 && current.nodes[2].poseApplies==2);
-    CHECK(current.nodes[1].poseSequences[snapshot.lease]==2 && current.nodes[1].poses[snapshot.lease]==PoseBytes(ep::kMaxPoseBytes,2));
+    CHECK(current.nodes[1].poseApplies==2 && current.nodes[2].poseApplies==2 && current.nodes[1].poseSequences[snapshot.lease]==2);
+    {const auto sent=DecodePose(current.nodes[1].poses[snapshot.lease]);
+        // 1 m in two logic frames: 0.5 m/frame along X.
+        CHECK(Same(sent.state,PoseState(2)) && sent.senderFrame==static_cast<std::uint32_t>(firstFrame+2));
+        CHECK(sent.motion[0]==0.5f && sent.motion[1]==0 && sent.motion[2]==0);}
     CHECK(native.applyCalls==0 && current.ApplyCount(1,snapshot.lease)==0);
     CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(snapshot.lease);
     const auto captureCount=native.poseCaptureCalls;now+=34;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==captureCount);
@@ -856,22 +881,39 @@ void HostPoseSamplingAndAtomicDelivery() {
 void GuestPoseAuthenticationAndAtomicDelivery() {
     Room current(1,101);native.fallback=true;CHECK(current.Request(2,5));current.Until(2,ep::Phase::activating);
     const auto* pending=current.ForSource(1,actors[2].id);CHECK(pending);const auto id=pending->id;
-    const auto first=PoseBytes(ep::kMaxPoseBytes,3);CHECK(!current.Protocol(0).SubmitPose(id,first.data(),first.size(),now));
+    const auto early=PoseWire(3,crew::GameFrame());CHECK(!current.Protocol(0).SubmitPose(id,early.data(),early.size(),now));
     CHECK(native.poseApplyCalls==0);current.Pump();const auto snapshot=current.ActiveSnapshot(2);
     CHECK(!std::strcmp(native.leases[id].authenticatedPuid,kPuid[1]));crew::EnemyControlNetworkFrame();
-    CHECK(native.poseCaptureCalls==0);CHECK(!current.Protocol(1).SubmitPose(id,first.data(),first.size(),now));
+    CHECK(native.poseCaptureCalls==0 && native.poseApplyCalls==0);CHECK(!current.Protocol(1).SubmitPose(id,early.data(),early.size(),now));
+    const auto f0=crew::GameFrame();const auto first=PoseWire(3,f0); // delivered within frame f0: the clock offset is zero
     CHECK(current.Protocol(0).SubmitPose(id,first.data(),first.size(),now));auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
     auto forged=envelopes[0];forged.from=2;current.Deliver(forged,kPuid[0]);current.Deliver(envelopes[0],kPuid[2]);
     CHECK(native.poseApplyCalls==0 && current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
-    RejectNonCanonicalSizes(current,envelopes[0]);CHECK(native.poseApplyCalls==0);current.Deliver(envelopes[0]);CHECK(native.poseApplyCalls==1);
-    current.Pump();CHECK(native.appliedPose==first && current.nodes[2].poses[id]==first && current.nodes[2].poseApplies==1);
-    current.Deliver(envelopes[0]);CHECK(native.poseApplyCalls==1);
-    const auto next=PoseBytes(385,4);now+=33;CHECK(current.Protocol(0).SubmitPose(id,next.data(),next.size(),now));
+    RejectNonCanonicalSizes(current,envelopes[0]);CHECK(native.poseApplyCalls==0);
+    // Receive only buffers the sample: the native body is written by the game-thread frame, never from the receive callback.
+    current.Deliver(envelopes[0]);CHECK(native.poseApplyCalls==0);
+    current.Pump();CHECK(current.nodes[2].poses[id]==first && current.nodes[2].poseApplies==1 && native.poseApplyCalls==0);
+    crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1 && Same(native.appliedPose,PoseState(3)));
+    // Same frame again, then a later frame that still renders the same sample: no second write.
+    crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1);
+    now=(f0+1)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1);
+    current.Deliver(envelopes[0]);crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1);
+    // The next host sample, two frames later and moving 0.5 m/frame.
+    now=(f0+2)*17;const auto next=PoseWire(4,f0+2,0.5f);CHECK(current.Protocol(0).SubmitPose(id,next.data(),next.size(),now));
     envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
     ep::Message last;CHECK(ep::Decode(envelopes[0].bytes.data(),envelopes[0].bytes.size(),last));
-    CHECK(last.inputSize==next.size() && last.sequence==2 && envelopes[0].bytes.size()==ep::kWirePrefixBytes+next.size());
-    RejectNonCanonicalSizes(current,envelopes[0]);CHECK(native.poseApplyCalls==1 && native.appliedPose==first);
-    current.Deliver(envelopes[0]);current.Pump();CHECK(native.poseApplyCalls==2 && native.appliedPose==next);
+    CHECK(last.inputSize==npose::kWireBytes && last.sequence==2 && envelopes[0].bytes.size()==ep::kWirePrefixBytes+npose::kWireBytes);
+    RejectNonCanonicalSizes(current,envelopes[0]);CHECK(native.poseApplyCalls==1);
+    current.Deliver(envelopes[0]);current.Pump();CHECK(native.poseApplyCalls==1);
+    // Rendered two frames behind: frame f0+2 still shows the f0 sample, f0+3 is halfway, f0+4 is the new sample exactly.
+    crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1);
+    now=(f0+3)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==2 && native.appliedPose.position[0]==3.5f);
+    now=(f0+4)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==3 && Same(native.appliedPose,PoseState(4)));
+    // Past the newest sample: extrapolated with its motion for at most six frames, then held (no further writes).
+    now=(f0+5)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==4 && native.appliedPose.position[0]==4.5f);
+    now=(f0+10)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==5 && native.appliedPose.position[0]==7.0f);
+    now=(f0+11)*17;crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==5);
+    CHECK(native.appliedPose.position[1]==2 && native.appliedPose.targetAngles[0]==0.25f && native.appliedPose.rotation[3]==1);
     CHECK(native.poseCaptureCalls==0 && current.ApplyCount(1,id)==0);
     CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(id);
 }
@@ -879,35 +921,46 @@ void PoseFailureAndLoss() {
     unsigned serial=110;
     for(unsigned failure=0;failure<3;++failure) {
         Room current(0,serial++);native.fallback=true;CHECK(current.Request(0,5));current.Pump();const auto snapshot=current.ActiveSnapshot(0);
-        if(failure==0)native.failPoseCapture=true;else native.poseSize=failure==1 ? 0 : ep::kMaxPoseBytes+1;
+        if(failure==0)native.failPoseCapture=true;else native.poseInvalid=failure; // capture failed / out-of-range body
         crew::EnemyControlNetworkFrame();current.Pump();current.Closed(snapshot.lease);
         CHECK(native.poseCaptureCalls==1 && native.poseApplyCalls==0 && native.restoreCalls && PosePacketCount(current)==0);
     }
     {Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
         crew::EnemyControlNetworkFrame();native.failPoseApply=true;native.restoreFailures=100;
-        const auto bytes=PoseBytes(512,6);CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();current.Step();
+        const auto bytes=PoseWire(6,crew::GameFrame());CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();
+        CHECK(native.poseApplyCalls==0);current.Step();current.Step(); // the frame's write fails (draining), then restores
         const auto* lease=current.Lease(1,snapshot.lease);CHECK(lease && lease->phase==ep::Phase::restoring && !lease->localRestored);
         CHECK(native.poseApplyCalls==1 && native.leases[snapshot.lease].captured);
         native.restoreFailures=0;++now;crew::EnemyControlNetworkFrame();current.Pump();for(unsigned i=0;i<2;++i)current.Step(101);current.Closed(snapshot.lease);
         CHECK(!native.leases[snapshot.lease].captured);}
     {Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
-        crew::EnemyControlNetworkFrame();const auto bytes=PoseBytes(512,7);
+        crew::EnemyControlNetworkFrame();const auto bytes=PoseWire(7,crew::GameFrame());
         CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
         RejectNonCanonicalSizes(current,envelopes[0]);current.Pump();CHECK(native.poseApplyCalls==0);
         now+=500;crew::EnemyControlNetworkFrame();current.Pump();CHECK(current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
         ++now;crew::EnemyControlNetworkFrame();current.Pump();current.Closed(snapshot.lease);
         CHECK(native.poseApplyCalls==0 && native.restoreCalls);current.Deliver(envelopes[0]);CHECK(native.poseApplyCalls==0);}
     {Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
-        crew::EnemyControlNetworkFrame();const auto bytes=PoseBytes(512,8);now+=400;
-        CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();CHECK(native.poseApplyCalls==1);
+        crew::EnemyControlNetworkFrame();now+=400;const auto bytes=PoseWire(8,crew::GameFrame());
+        CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();CHECK(native.poseApplyCalls==0);
+        crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1);
         now+=500;crew::EnemyControlNetworkFrame();current.Pump();CHECK(current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
         ++now;crew::EnemyControlNetworkFrame();current.Pump();current.Closed(snapshot.lease);CHECK(native.restoreCalls);}
+    // A pose the guest cannot decode (wrong length, the retired v1 size, motion over the cap) fails the lease; nothing is written.
+    for(unsigned bad=0;bad<3;++bad) {
+        Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
+        crew::EnemyControlNetworkFrame();
+        auto bytes=bad==0 ? PoseBytes(385,9) : bad==1 ? PoseBytes(232,9) : PoseWire(9,crew::GameFrame());
+        if(bad==2){const float over=npose::kMaxMotion*1.5f;std::memcpy(bytes.data()+28,&over,sizeof(over));} // motion[2]
+        CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();current.Closed(snapshot.lease);
+        CHECK(native.poseApplyCalls==0 && native.restoreCalls);
+    }
 }
 void PoseRevalidatesNativeActorBinding() {
     unsigned serial=150;
     for(unsigned invalid=0;invalid<7;++invalid) {
         Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
-        crew::EnemyControlNetworkFrame();const auto bytes=PoseBytes(512,12);
+        crew::EnemyControlNetworkFrame();const auto bytes=PoseWire(12,crew::GameFrame());
         CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));
         const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
         const auto sealCalls=native.sealCalls,strictCalls=native.strictCalls;
@@ -926,7 +979,7 @@ void PoseRevalidatesNativeActorBinding() {
     }
     for(unsigned invalid=0;invalid<5;++invalid) {
         Room current(1,serial++);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto snapshot=current.ActiveSnapshot(2);
-        const auto bytes=PoseBytes(512,13);CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));
+        const auto bytes=PoseWire(13,crew::GameFrame());CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));
         const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);
         ep::Message message;CHECK(ep::Decode(envelopes[0].bytes.data(),envelopes[0].bytes.size(),message));
         switch(invalid) {
@@ -1125,8 +1178,8 @@ void RetiredPoseSlotsDoNotRevokeNewBody() {
             crew::EnemyControlNetworkFrame();current.Pump();
             CHECK(native.poseCaptureCalls==1 && current.nodes[1].poseApplies==1 && current.nodes[2].poseApplies==1);
         } else {
-            const auto bytes=PoseBytes(232,20);CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();
-            CHECK(native.poseApplyCalls==1 && native.appliedPose==bytes);
+            const auto bytes=PoseWire(20,crew::GameFrame());CHECK(current.Protocol(0).SubmitPose(snapshot.lease,bytes.data(),bytes.size(),now));current.Pump();
+            crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1 && Same(native.appliedPose,PoseState(20)));
         }
         CHECK(current.ForSource(production,actors[production ? 2 : 0].id)->phase==ep::Phase::active);
         CHECK(!native.restoreCalls);CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(snapshot.lease);
@@ -1134,7 +1187,7 @@ void RetiredPoseSlotsDoNotRevokeNewBody() {
 }
 void EpochRejectsOldPoseEnvelope() {
     Room current(1,140);native.fallback=true;CHECK(current.Request(2,5));current.Pump();const auto previous=current.ActiveSnapshot(2);
-    crew::EnemyControlNetworkFrame();const auto bytes=PoseBytes(512,10);
+    crew::EnemyControlNetworkFrame();const auto bytes=PoseWire(10,crew::GameFrame());
     CHECK(current.Protocol(0).SubmitPose(previous.lease,bytes.data(),bytes.size(),now));const auto old=TakePosePackets(current,1);CHECK(old.size()==1);
     RejectNonCanonicalSizes(current,old[0]);current.Pump();CHECK(native.poseApplyCalls==0);
     for(unsigned i=0;i<3;++i)if(i!=current.bridge) {
@@ -1147,9 +1200,10 @@ void EpochRejectsOldPoseEnvelope() {
     CHECK(current.Protocol(1).Ready() && !native.leases[previous.lease].captured);CHECK(current.Request(2,5));current.Pump();
     const auto next=current.ActiveSnapshot(2);CHECK(next.lease==previous.lease && next.profileHash==previous.profileHash && next.revision!=previous.revision);
     for(const auto& envelope:old)current.Deliver(envelope);CHECK(native.poseApplyCalls==0 && current.ForSource(1,actors[2].id)->phase==ep::Phase::active);
-    crew::EnemyControlNetworkFrame();const auto fresh=PoseBytes(512,11);CHECK(current.Protocol(0).SubmitPose(next.lease,fresh.data(),fresh.size(),now));
+    crew::EnemyControlNetworkFrame();const auto fresh=PoseWire(11,crew::GameFrame());CHECK(current.Protocol(0).SubmitPose(next.lease,fresh.data(),fresh.size(),now));
     const auto envelopes=TakePosePackets(current,1);CHECK(envelopes.size()==1);RejectNonCanonicalSizes(current,envelopes[0]);CHECK(native.poseApplyCalls==0);
-    current.Deliver(envelopes[0]);current.Pump();CHECK(native.poseApplyCalls==1 && native.appliedPose==fresh);
+    current.Deliver(envelopes[0]);current.Pump();CHECK(native.poseApplyCalls==0);
+    crew::EnemyControlNetworkFrame();CHECK(native.poseApplyCalls==1 && Same(native.appliedPose,PoseState(11)));
     CHECK(callbacks.stop(next));current.Pump();current.Closed(next.lease);
 }
 
