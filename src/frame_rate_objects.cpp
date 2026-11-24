@@ -94,7 +94,7 @@ std::vector<float> posedBefore;
 edf::PtrIndex posedIndex;                     // pose array -> 1 (a pose is written once a frame)
 std::size_t posedWant=0,posedFloatsWant=0;    // what a frame wanted and did not have: grown at the next sample
 
-Counts counts;
+frameobjects::Counts counts;
 
 // System's update list, false when there is none to read.
 bool UpdateList(const unsigned char*& sys,const unsigned char* const*& list,std::uint64_t& count) noexcept {
@@ -137,7 +137,7 @@ int InstancesOf(const unsigned char* model,const unsigned char** out) noexcept {
 unsigned char* TakeWeak(const unsigned char* obj) noexcept {
     if(At<const unsigned char*>(obj,kSelf)!=obj)return nullptr;
     const auto ctrl=At<unsigned char*>(obj,kSelfCtrl);
-    if(!ctrl || !Readable(ctrl,16,true) || At<std::int32_t>(ctrl,kCtrlUses)<=0)return nullptr;
+    if(!ctrl || !Readable(ctrl,16,true) || At<std::int32_t>(ctrl,edf::kCtrlUses)<=0)return nullptr;
     _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+kCtrlWeaks));
     return ctrl;
 }
@@ -150,7 +150,7 @@ void DropWeak(unsigned char* ctrl) noexcept {
 }
 // The body's object still there (its use count; the weak count keeps the block), the same, not being deleted.
 bool Alive(const Body& b) noexcept {
-    return b.ctrl && At<std::int32_t>(b.ctrl,kCtrlUses)>0 && At<const unsigned char*>(b.object,kSelfCtrl)==b.ctrl &&
+    return b.ctrl && At<std::int32_t>(b.ctrl,edf::kCtrlUses)>0 && At<const unsigned char*>(b.object,kSelfCtrl)==b.ctrl &&
            !(At<unsigned char>(b.object,kObjFlags)&kObjDeleted);
 }
 
@@ -160,7 +160,7 @@ const unsigned char* SeatHuman(unsigned char* vehicle,unsigned seat,const unsign
     if(!Readable(s,kSeatRiderCtrl+8))return nullptr;
     const auto rider=At<const unsigned char*>(s,kSeatRider);
     const auto ctrl=At<const unsigned char*>(s,kSeatRiderCtrl);
-    if(!rider || !ctrl || !Readable(ctrl,12) || At<std::int32_t>(ctrl,kCtrlUses)<=0 || !Readable(rider,kWeaponCount+8) ||
+    if(!rider || !ctrl || !Readable(ctrl,12) || At<std::int32_t>(ctrl,edf::kCtrlUses)<=0 || !Readable(rider,kWeaponCount+8) ||
        At<const unsigned char*>(rider,kSelfCtrl)!=ctrl)return nullptr;
     *ctrlOut=ctrl;
     return rider;
@@ -472,7 +472,7 @@ void NoteRootRefusal(Refusal why) noexcept {
 void TakeCounts(Counts& out) noexcept {
     out=counts;
     const unsigned objects=counts.objects;
-    counts=Counts{};
+    counts=frameobjects::Counts{};
     counts.objects=objects;
 }
 }  // namespace frameobjects
