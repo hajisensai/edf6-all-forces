@@ -591,6 +591,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
+    n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency)),0,3));
     {
         const int raw=ReadInt(L"FrameRateCap",static_cast<DWORD>(n.frameRateCap));
         n.frameRateCap=framerate::FixCap(raw);
@@ -1378,6 +1379,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
     InstallWeaponRecords();
     InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
+    InstallRenderFence();      // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
+    InstallFrameLatency();     // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
     // ini FrameRateCap (docs/unlimited-fps-re.md): the presentation frames are not wired into the game in this build (no
     // patch: frames without a step would show the same picture and lose input edges until the interpolation and the
     // input shadow are in). Said once, so a log asked about it shows the setting was read and why the rate is the game's.

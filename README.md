@@ -576,6 +576,12 @@ EDF6AutoTurret 时，键仍按 ini。
 `HAVOKMT world tasks so far: … overlapping, at most N at once`，出现重叠会立刻记一行 `OVERLAPPED`。
 `src/havok_mt.cpp`，逆向与审计见 `docs/havok-mt-re.md`（静态分析、离线检查、unicorn 模拟与实测数据，§13）。
 
+## 帧节奏与显示延迟（默认开启）
+
+插件把游戏本体的三处空转等待换成真等待（窗口线程、帧步进的 `Sleep(1)`、游戏线程等渲染线程的栅栏），帧时间不再被系统时钟取整，
+也不再白占 CPU 核；并在设备建好后把 DXGI 最大排队帧数从默认的 3 设为 ini `MaxFrameLatency`（默认 `1`，`0` = 不设），显卡跟不上
+或显示器刷新率不到 60 时少 1–2 帧输入延迟。逆向与实测见 `docs/frame-pacing-re.md`。
+
 ## 帧率上限（FrameRateCap，开发中，当前版本不生效）
 
 原版的 60 帧锁不是垂直同步，而是主循环按 1/59.94 秒一个 tick 步进，没到下一个 tick 就等；整个游戏逻辑（物理、AI、武器、镜头）
