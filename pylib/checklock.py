@@ -66,6 +66,11 @@ def children_die_with_me() -> None:
     if not k.AssignProcessToJobObject(job, k.GetCurrentProcess()):
         raise ctypes.WinError(ctypes.get_last_error())
     _JOB = job
+    # The compiler's PDB server (mspdbsrv.exe, /Zi /FS) is one per endpoint for the whole machine: the first compile
+    # to need it starts it, and here that compile is in the job, so the server is too and ends with this process,
+    # under every other session's build connected to it (their compiles fail on the PDB). This process's builds get
+    # a server of their own instead, started in the job and ended with it.
+    os.environ['_MSPDBSRV_ENDPOINT_'] = f'edf6-check-{os.getpid()}'
 
 
 def below_normal() -> None:

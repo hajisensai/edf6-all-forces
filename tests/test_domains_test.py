@@ -296,6 +296,21 @@ class ChildrenDieWithMe(unittest.TestCase):
                 parent.wait()
             parent.stdout.close()
 
+    def test_its_builds_have_a_pdb_server_of_their_own(self) -> None:
+        """A compile in the job starts mspdbsrv in the job (tmp probe, 2026-11-24: IsProcessInJob true, ended with its
+        killed parent): it must not be the machine's shared one, other sessions' builds use that."""
+        code = ('import os, subprocess, sys\n'
+                f'sys.path.insert(0, {os.path.join(ROOT, "pylib")!r})\n'
+                'import checklock\n'
+                "os.environ['_MSPDBSRV_ENDPOINT_'] = ''\n"
+                'checklock.children_die_with_me()\n'
+                'print(os.getpid())\n'
+                "sys.stdout.flush()\n"
+                "subprocess.run([sys.executable, '-c', \"import os; print(os.environ['_MSPDBSRV_ENDPOINT_'])\"])\n")
+        r = subprocess.run([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True, check=True)
+        pid, endpoint = r.stdout.split()
+        self.assertEqual(endpoint, f'edf6-check-{pid}')
+
 
 class BlindScans(unittest.TestCase):
     SOURCE = '''import os
