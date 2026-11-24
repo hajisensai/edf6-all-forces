@@ -22,6 +22,10 @@
 //  - "cycle N [STAY] [reboot]" (with the mission, or once in it): withdraw from the mission STAY seconds (default 20)
 //    after it runs, the pause menu's way, and enter the same mission again, N times in one launch (CYCLE rows; for
 //    the Havok worker reset on the way out: docs/mission-cycle-re.md).
+//  - "next <row|RM015|M001|range|...> [difficulty] [reboot]" (once in a mission): leave it at once, the cycle's way, and
+//    enter the mission named instead (tools/perfrun.py's legs: several scenarios in one launch). Back in through
+//    HQMain the "mission" way (or ReBoot with "reboot"): the pack's mode switched when it is another one (SetMode), the
+//    row and difficulty set; then "NEXT k entered".
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
@@ -72,6 +76,7 @@ volatile LONG rangeContent=-1;   // "mission range": the test range's content id
 // (cfg = *(mode+0x10), its values at cfg + *(cfg+8)): +0x68 item 8 the online flag (0x8A2379), +0x74 item 9 the content
 // id, +0x80 item 10 the type (0x8C4CA0 compares both).
 constexpr std::size_t kModeArray=0x20,kModeCount=0x30,kModeCfg=0x10,kItemOnline=0x68,kItemContent=0x74,kItemType=0x80;
+constexpr std::size_t kCurrentMode=0x38;   // GS+0x38: the current mode's index (-1: none), written by SetMode (0xDC4C5)
 // The mode switch (GS, index): what the script's `bool SetMode(int)` (0x70FAB0) calls once modes[index] is not null.
 constexpr std::size_t kSetMode=0xDC460;
 // mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14; sub rsp,20h;
@@ -567,19 +572,39 @@ int FindRangeMode(const unsigned char* gs,int content) noexcept {
     return -1;
 }
 
+// Mode `index`'s content id (-1: none, or unreadable): for the NEXT row, which pack the leg really runs in.
+LONG ModeContent(const unsigned char* gs,int index) noexcept {
+    __try {
+        if(index<0 || static_cast<unsigned>(index)>=*reinterpret_cast<const unsigned*>(gs+kModeCount))return -1;
+        const auto modes=*reinterpret_cast<unsigned char* const* const*>(gs+kModeArray);
+        if(!modes[index])return -1;
+        const auto cfg=*reinterpret_cast<const unsigned char* const*>(modes[index]+kModeCfg);
+        return *reinterpret_cast<const int*>(cfg+*reinterpret_cast<const int*>(cfg+8)+kItemContent);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+
 // "mission range" / "mission edf41:ROW": that pack's offline mode made current, as SetMode(int) does; false leaves the menu as
 // is.
 volatile LONG enteredContent=-1;   // the pack's content id the last HQMain entered (-1: the stock list), for "cycle ... reboot"
+// rangeContent's "the stock offline list" (content id 0, the story's offline mode), asked by "next" for a stock mission:
+// a launch starts in it, but a leg before may have switched to a pack's mode.
+constexpr LONG kStockContent=-2;
 bool EnterRangeMode(unsigned char* gs) noexcept {
     const LONG content=InterlockedExchange(&rangeContent,-1);
     InterlockedExchange(&enteredContent,content);
-    if(content<0)return true;   // no range asked: the row alone
+    if(content==-1)return true;   // no range asked: the row alone
     if(!content){Log("RANGE the pack's content id is 0 in EDF6VehicleCrew.ini (the pack is not installed)");return false;}
-    const int mode=FindRangeMode(gs,content);
-    if(mode<0){Log("RANGE no offline mode with content id %ld",content);return false;}
+    const LONG id=content==kStockContent ? 0 : content;
+    const int mode=FindRangeMode(gs,id);
+    if(mode<0){Log("RANGE no offline mode with content id %ld",id);return false;}
+    // Already current (a leg in the same pack): SetMode not called again (it resets the mode's save block, 0xDB580).
+    if(*reinterpret_cast<const int*>(gs+kCurrentMode)==mode) {
+        Log("RANGE mode %d (content id %ld) already current",mode,id);
+        return true;
+    }
     if(!edf::Matches(image,kSetMode,kSetModeSig,sizeof(kSetModeSig))){Log("RANGE EDF+%#zx does not match",kSetMode);return false;}
     reinterpret_cast<SetModeFn>(image+kSetMode)(gs,static_cast<unsigned>(mode));
-    Log("RANGE mode %d (content id %ld) made current",mode,content);
+    Log("RANGE mode %d (content id %ld) made current",mode,id);
     return true;
 }
 
@@ -611,6 +636,9 @@ using WorldStepFn=void(__fastcall*)(void*);
 WorldStepFn realWorldStep=nullptr;
 enum CyclePhase : LONG { kCycleOff, kCycleEntering, kCycleStaying, kCycleLeaving, kCycleDone };
 volatile LONG cyclePhase=kCycleOff,cycleTotal=0,cycleLeft=0,cycleStayMs=20000,cycleReboot=0,cycleRebooting=0;
+// "next": the cycle is a single leave at once, back into the mission AskMission set (not the one left); nextCount the
+// legs entered so far ("NEXT k entered").
+volatile LONG cycleNext=0,nextCount=0;
 ULONGLONG cycleSince=0;   // the game thread's: when the current mission was first seen running
 
 void* MissionMgr() noexcept {return *reinterpret_cast<void**>(image+kMissionMgr);}
@@ -626,9 +654,15 @@ void CycleStep() noexcept {
         if(!running)return;
         cycleSince=now;
         const LONG left=cycleLeft,total=cycleTotal;
-        Log("CYCLE %ld/%ld entered: the mission runs (row %d)",left,total,
-            *reinterpret_cast<int*>(*reinterpret_cast<unsigned char**>(image+kGlobalState)+kMissionRow));
+        unsigned char* const gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
+        const int row=*reinterpret_cast<int*>(gs+kMissionRow);
+        Log("CYCLE %ld/%ld entered: the mission runs (row %d)",left,total,row);
         LogMemory("cycle entered");
+        if(cycleNext) {
+            const int mode=*reinterpret_cast<const int*>(gs+kCurrentMode);
+            Log("NEXT %ld entered: the mission runs (row %d, difficulty %d, mode %d, content id %ld)",
+                InterlockedIncrement(&nextCount),row,*reinterpret_cast<int*>(gs+kDifficulty),mode,ModeContent(gs,mode));
+        }
         if(left>=total) {
             InterlockedExchange(&cyclePhase,kCycleDone);
             Log("CYCLE done: left and entered again %ld times",total);
@@ -649,6 +683,27 @@ void __fastcall WorldStep(void* app) {
     CycleStep();
 }
 
+// The cycle's hook (Application::OnWorldStepBegin's slot), once; false (and "<who> refused" logged) when EDF.dll's
+// bytes do not match or the slot is not taken.
+bool HookWorldStep(const char* who) noexcept {
+    if(!edf::Matches(image,kMissionEnd,kMissionEndSig,sizeof(kMissionEndSig)) ||
+       !edf::Matches(image,kMissionRunning,kMissionRunningSig,sizeof(kMissionRunningSig)) ||
+       !edf::Matches(image,kWorldStep,kWorldStepSig,sizeof(kWorldStepSig))) {
+        Log("%s refused: EDF+%#zx / %#zx / %#zx do not match",who,kMissionEnd,kMissionRunning,kWorldStep);
+        return false;
+    }
+    if(!realWorldStep) {
+        void** const slot=reinterpret_cast<void**>(image+kWorldStepSlot);
+        void* next=nullptr;
+        if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&WorldStep),&next)) {
+            Log("%s refused: Application::OnWorldStepBegin's slot EDF+%#zx not hooked",who,kWorldStepSlot);
+            return false;
+        }
+        realWorldStep=reinterpret_cast<WorldStepFn>(next);
+    }
+    return true;
+}
+
 // "cycle N [STAY seconds, default 20] [reboot]".
 void AskCycle(const char* text) noexcept {
     int count=0;double stay=20.0;char how[16]{};
@@ -658,21 +713,8 @@ void AskCycle(const char* text) noexcept {
         return;
     }
     if(cyclePhase!=kCycleOff && cyclePhase!=kCycleDone){Log("CYCLE refused: a cycle is already running");return;}
-    if(!edf::Matches(image,kMissionEnd,kMissionEndSig,sizeof(kMissionEndSig)) ||
-       !edf::Matches(image,kMissionRunning,kMissionRunningSig,sizeof(kMissionRunningSig)) ||
-       !edf::Matches(image,kWorldStep,kWorldStepSig,sizeof(kWorldStepSig))) {
-        Log("CYCLE refused: EDF+%#zx / %#zx / %#zx do not match",kMissionEnd,kMissionRunning,kWorldStep);
-        return;
-    }
-    if(!realWorldStep) {
-        void** const slot=reinterpret_cast<void**>(image+kWorldStepSlot);
-        void* next=nullptr;
-        if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&WorldStep),&next)) {
-            Log("CYCLE refused: Application::OnWorldStepBegin's slot EDF+%#zx not hooked",kWorldStepSlot);
-            return;
-        }
-        realWorldStep=reinterpret_cast<WorldStepFn>(next);
-    }
+    if(!HookWorldStep("CYCLE"))return;
+    cycleNext=0;
     cycleTotal=count;cycleLeft=0;cycleStayMs=static_cast<LONG>(stay*1000.0);cycleReboot=got>=3;cycleRebooting=0;
     InterlockedExchange(&cyclePhase,kCycleEntering);
     Log("CYCLE armed: leave and enter again %d times, %.1f s in each mission, back in by %s",count,stay,
@@ -682,15 +724,23 @@ void AskCycle(const char* text) noexcept {
 // The script's next routine while a cycle runs: Result_Offline after a withdraw becomes the same mission again
 // (or ReBoot). Null: the routine as asked.
 const std::wstring* CycleRoutine(const std::wstring& decl) noexcept {
-    static const std::wstring play=L"string PlayMission_Offline()",reboot=L"string ReBoot()";
+    static const std::wstring play=L"string PlayMission_Offline()",reboot=L"string ReBoot()",hq=L"string HQMain()";
     const LONG phase=cyclePhase;
     if(phase!=kCycleStaying && phase!=kCycleLeaving && phase!=kCycleEntering)return nullptr;
     if(decl==L"string Result_Offline()" && phase!=kCycleEntering) {
         const LONG left=InterlockedIncrement(&cycleLeft);
         Log("CYCLE %ld/%ld left%s: Result_Offline skipped (no result screen, nothing saved) -> %s",left,cycleTotal,
-            phase==kCycleStaying ? " (the mission ended on its own)" : "",cycleReboot ? "ReBoot" : "PlayMission_Offline");
+            phase==kCycleStaying ? " (the mission ended on its own)" : "",
+            cycleReboot ? "ReBoot" : cycleNext ? "HQMain (the next mission)" : "PlayMission_Offline");
         LogMemory("cycle left");
         InterlockedExchange(&cyclePhase,kCycleEntering);
+        if(cycleNext) {
+            // The mission "next" asked (AskMission's missionRow / rangeContent / difficulty), not the one left: HQMain
+            // (what Result_Common itself returns once its screen is closed) the "mission" way, or ReBoot's way there.
+            if(!cycleReboot)return &hq;
+            cycleRebooting=1;
+            return &reboot;
+        }
         if(!cycleReboot)return &play;
         auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
         missionDifficulty=*reinterpret_cast<int*>(gs+kDifficulty);
@@ -711,7 +761,10 @@ const std::wstring* CycleRoutine(const std::wstring& decl) noexcept {
 void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
     if(InterlockedIncrement(&dumped)<=60){Log("COROUTINE call");DumpArg("rcx",out);DumpArg("rdx",decl);}
     if(decl)
-        if(const std::wstring* next=CycleRoutine(*decl))return realCoRoutine(out,next);
+        if(const std::wstring* next=CycleRoutine(*decl)) {
+            if(*next!=L"string HQMain()")return realCoRoutine(out,next);
+            decl=next;   // "next": HQMain taken the "mission" way below
+        }
     if(missionRow>=0 && decl) {
         if(*decl==L"string StartToTitle()") {
             static const std::wstring offline=L"string Debug_StartOffline()";
@@ -816,6 +869,32 @@ void AskMission(const char* text) noexcept {
                                   range ? "TestRangeContent" : edf5 ? "EDF5CampaignContent" : "EDF41Content");
 }
 
+// "next <row|RM015|M001|range|edf41:ROW|...> [difficulty] [reboot]" (in a mission): leave it at once (the cycle's
+// MissionMgr::End(ABORT) on the game thread, Result_Offline skipped: nothing saved) and enter the mission named, the way
+// "mission" enters the launch's first: HQMain -> its pack's mode (SetMode only when another one is current; the stock
+// list's for a stock mission) -> PlayMission_Offline with the row and difficulty. "reboot": by ReBoot (SystemReset)
+// first, as "cycle ... reboot". Then "NEXT k entered" (k the legs entered by "next" so far).
+void AskNext(const char* text) noexcept {
+    char name[32]{},how[16]{};int difficulty=1;
+    const int got=sscanf_s(text,"%*s %31s %d %15s",name,static_cast<unsigned>(sizeof(name)),&difficulty,how,
+                           static_cast<unsigned>(sizeof(how)));
+    if(got<1 || (got>=3 && _stricmp(how,"reboot"))) {
+        Log("NEXT refused: \"%s\" (next MISSION [DIFFICULTY 0-4] [reboot])",text);
+        return;
+    }
+    if(cyclePhase!=kCycleOff && cyclePhase!=kCycleDone){Log("NEXT refused: a cycle or a next is already running");return;}
+    if(!HookWorldStep("NEXT"))return;
+    char ask[64]{};
+    sprintf_s(ask,"mission %s %d",name,difficulty);
+    AskMission(ask);
+    if(rangeContent==-1)rangeContent=kStockContent;   // a stock mission: the stock list's mode again
+    cycleNext=1;
+    cycleTotal=1;cycleLeft=0;cycleStayMs=0;cycleReboot=got>=3;cycleRebooting=0;
+    cycleSince=0;
+    InterlockedExchange(&cyclePhase,kCycleStaying);   // the mission running now is left on the next world step
+    Log("NEXT armed: %s, difficulty %d, back in by %s",name,difficulty,cycleReboot ? "ReBoot (SystemReset)" : "HQMain");
+}
+
 // "crash av|abort|terminate [game]": a crash on purpose, for EDF6VehicleCrew's crash dump (src/crash_dump.cpp) in the
 // real game: an access violation, or ucrtbase's abort() / terminate() (the game's CRT). On this thread (the command
 // loop's); "av game": on the game thread, at its next keyboard read (KeyboardState, under EDF.dll's frames).
@@ -844,6 +923,7 @@ void RunCommand(const char* text) noexcept {
     else if(!std::strcmp(word,"quit")){LogMemory("quit");Quit();}
     else if(!std::strcmp(word,"mission"))AskMission(text);
     else if(!std::strcmp(word,"cycle"))AskCycle(text);
+    else if(!std::strcmp(word,"next"))AskNext(text);
     else if(!std::strcmp(word,"probe")) {
         char what[32]{};
         const bool named=sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1;

@@ -1527,27 +1527,10 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
     are still kept (restore_scenario first). The originals go to scenario_backup before anything is written, all of
     them or none (the backup is built aside and renamed into place). Returns what without_missing left out of the
     plan."""
-    if not installed(game_root):
-        raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
     backup = scenario_backup(game_root)
-    if os.path.exists(backup):
+    if installed(game_root) and os.path.exists(backup):
         raise RuntimeError(f'上一次的测试场原件还留在 {backup}：先 python tools/perfrun.py --restore')
-    if plan.waves.enabled and plan.waves.enemy not in {s for s, _, _ in ENEMIES}:
-        raise RuntimeError(f'测试场不认识敌人「{plan.waves.enemy}」（gen.ENEMIES）：脚本创建不存在的 SGO 会让游戏退出')
-    game = Game(game_root)
-    plan, skipped = without_missing(game_root, plan)
-    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
-    if wave and not catalog.available(game_root, wave):
-        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）')
-    missing = sorted(x for x in spawned(plan) & (DERIVED.keys() | JETS.keys())
-                     if not os.path.isfile(os.path.join(game_root, 'Mods', 'OBJECT', x.upper() + '.SGO')))
-    if missing:
-        raise RuntimeError(f'{"、".join(missing)} 不在 Mods/OBJECT（测试场只留当前方案要用的生成载具）：'
-                           '先在测试场启动器里用这个方案装一次')
-    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)}):
-        if not has_mission_setup(game, sgo_name):
-            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
-    text, points_file, _, _ = _range_files(game_root, game, plan)
+    game, plan, skipped, text, points_file = _scenario_files(game_root, plan)
     out = mission_dir(game_root, RANGE_MISSION)
     # The backup is whole or not there: built aside, then renamed into place in one step, so a copy that fails
     # (disk full, a file held) leaves no half backup that refuses every later run and that restore cannot read.
@@ -1573,6 +1556,43 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
         restore_scenario(game_root)
         raise
     return skipped
+
+
+def rewrite_scenario(game_root: str, plan: Plan) -> list[str]:
+    """The range mission's files rewritten for `plan` within one measurement whose first write_scenario kept the
+    originals (tools/perfrun.py's next leg in the same launch): the same checks as write_scenario, the kept originals
+    left as they are (the files found before the run, not the previous leg's), so restore_scenario still puts back
+    what was there before the run. Refuses when nothing is kept (write_scenario first). Returns what without_missing
+    left out of the plan."""
+    if not os.path.isfile(os.path.join(scenario_backup(game_root), 'absent.json')):
+        raise RuntimeError('测试场原件没有备份：同一次测量的第一段先用 write_scenario')
+    game, plan, skipped, text, points_file = _scenario_files(game_root, plan)
+    _write_mission(game_root, game, RANGE_MISSION, plan.site, text, points_file)
+    return skipped
+
+
+def _scenario_files(game_root: str, plan: Plan) -> tuple:
+    """write_scenario's / rewrite_scenario's checks, then what they write: (game, the plan without what is missing,
+    what was left out, the script, the points)."""
+    if not installed(game_root):
+        raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
+    if plan.waves.enabled and plan.waves.enemy not in {s for s, _, _ in ENEMIES}:
+        raise RuntimeError(f'测试场不认识敌人「{plan.waves.enemy}」（gen.ENEMIES）：脚本创建不存在的 SGO 会让游戏退出')
+    game = Game(game_root)
+    plan, skipped = without_missing(game_root, plan)
+    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
+    if wave and not catalog.available(game_root, wave):
+        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）')
+    missing = sorted(x for x in spawned(plan) & (DERIVED.keys() | JETS.keys())
+                     if not os.path.isfile(os.path.join(game_root, 'Mods', 'OBJECT', x.upper() + '.SGO')))
+    if missing:
+        raise RuntimeError(f'{"、".join(missing)} 不在 Mods/OBJECT（测试场只留当前方案要用的生成载具）：'
+                           '先在测试场启动器里用这个方案装一次')
+    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)}):
+        if not has_mission_setup(game, sgo_name):
+            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
+    text, points_file, _, _ = _range_files(game_root, game, plan)
+    return game, plan, skipped, text, points_file
 
 
 def restore_scenario(game_root: str) -> bool:
