@@ -65,6 +65,7 @@ QueryFn nextQuery=nullptr;
 PassFn nextPalette=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
+std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 
 double tickMs=0.0;   // ms a QPC tick
 LONGLONG Qpc() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
@@ -158,6 +159,7 @@ void TryPresentHook() noexcept;
 
 void __fastcall InputHook(void* input) {
     const LONGLONG now=Qpc();
+    gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
     if(cur.open)CloseFrame(now);
     const SceneStep s=SceneStepNow();
     cur=Frame{};cur.begin=now;cur.scene=s.scene;cur.step=s.count;cur.open=true;
@@ -343,6 +345,9 @@ void Install() noexcept {
     const bool palette=Chain(kPaletteCall,kPalette,reinterpret_cast<void*>(&PaletteHook),reinterpret_cast<void**>(&nextPalette));
     Log("HOOK perf queries=%d palettes=%d (PerfProbe=1: the occlusion query reads, the skin palettes)",query,palette);
 }
+
+bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
+DWORD GameThread() noexcept { return gameThread.load(std::memory_order_relaxed); }
 
 Frames TakeFrames() noexcept {
     const Frames f{base.frames,base.steps,base.over20,base.over33,base.sum,base.worst};

@@ -148,6 +148,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
+# The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
@@ -1626,7 +1628,7 @@ target_compile_options(rip_sampler PRIVATE /W4 /WX /utf-8 /permissive-)
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
             tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp
-            tests/autopilot/umbra_probe.cpp tests/autopilot/heap_probe.cpp)
+            tests/autopilot/umbra_probe.cpp tests/autopilot/heap_probe.cpp tests/autopilot/physics_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
@@ -2292,6 +2294,13 @@ add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
 target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks memo_epoch_test)
 add_test(NAME memo_epoch COMMAND memo_epoch_test)
+# liveset (src/live_set.*): cpu-2's set of the objects the game handed over this step, keyed by memoepoch::Clock.
+add_executable(live_set_test EXCLUDE_FROM_ALL tests/live_set_test.cpp src/live_set.cpp)
+target_include_directories(live_set_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(live_set_test PRIVATE edf6common)
+target_compile_options(live_set_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks live_set_test)
+add_test(NAME live_set COMMAND live_set_test)
 # edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
 add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
 target_link_libraries(memory_readable_test PRIVATE edf6common)
@@ -2311,6 +2320,9 @@ set_tests_properties(scope_lens_native PROPERTIES SKIP_RETURN_CODE 77)
 # The measurement probes' call sites and render anchors (src/perf_probe.cpp, docs/plan-2026-11-24-optimization.md 3 A).
 add_test(NAME perf_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perf_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(perf_probe_native PROPERTIES SKIP_RETURN_CODE 77)
+# The sync load probe's call sites and the bytes around them in 0x84E80 (src/sync_load_probe.cpp, docs/sync-load-re.md).
+add_test(NAME sync_load_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sync_load_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(sync_load_probe_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(pvp_hud_layout_test EXCLUDE_FROM_ALL tests/pvp_hud_layout_test.cpp)
 target_include_directories(pvp_hud_layout_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(pvp_hud_layout_test PRIVATE edf6common)

@@ -21,6 +21,12 @@
 namespace crew::perfprobe {
 // At the plugin's load, after every other hook (plugin.cpp, just before LOAD complete).
 void Install() noexcept;
+// Points the E8 call at image+`rva` to `hook` over whatever it calls now: `stock`, or another hook's near thunk that ends
+// in it (common/memory.cpp AllocateNearThunk). `*next` gets that target before the site changes. False: not a call to
+// either (nothing written), or the write failed.
+bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept;
+// The main loop's thread (the Debug=1 frame anchor records it each frame); 0 before the first frame or without the anchor.
+DWORD GameThread() noexcept;
 // The frames since the last take (game thread, from PerfTick every 5 s): count, sum and worst ms, over 20 / 33 ms.
 struct Frames { unsigned frames,steps,over20,over33; double sum,worst; };
 Frames TakeFrames() noexcept;

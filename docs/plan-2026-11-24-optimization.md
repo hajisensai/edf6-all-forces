@@ -166,6 +166,7 @@ stress:100 插件栈里排前面的还有 ShotOk / ShotClearOf / Grid::Capsule�
   - net-11：依赖 net-5 和 Coop W1 多路径。状态类走客人直连网状路径，事务类留房主中转；中转的状态类套用 relayBytesPerSecond
     预算和兴趣过滤，超预算丢旧的而不是 fail-closed（不再触发 net-2 的恢复）。只在大房间有收益，排在最后。
 - net-10：Havok 多线程下的联机分歧对比（与 B 的 fps-10 同一次实机做）。
+  - 阶段 A（单机，2026-11-24）已做：测试插件物理探针 `probe physics` + `tools/physics_probe_compare.py`，RM015 每个开关值一次启动 × 3 段 × 6000 tick；RM015 无接触场景下没看到差异；求解器多线程路径（接触 / 堆叠 / 布娃娃）没覆盖到，房间级是否统一开关还不能下结论。逐位相同的 133/137 个 body 全是 keyframed 或全程静止的，测不出求解是否确定；有差的只是 4 个 AI 士兵，ST-ST 同样有（推测来自 AI 的随机数 / 计时）；每开关只启动一次，3 段不独立；MT 那次没给 `on worker threads` 计数（docs/havok-mt-re.md §13「第 5 项阶段 A」）。M001 补测（只起来 MT 一次）同样只有 AI 驱动的 body 在动、在分歧。缺：有布娃娃 / 碎片 / 载具接触的场景（M001 用 drive.py 6 次起不来 5 次，待查），阶段 B 两台机器联机。
 
 ### D. 工程（第一批做不碰全局结构的；结构性重构放第二批开头一次做完）
 

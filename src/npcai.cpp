@@ -2014,8 +2014,8 @@ void Think(unsigned char* h,int cls) noexcept {
         return;
     }
     const ULONGLONG ms=GameMs();
+    SeeFrame(h);   // first: the step's frame moved before h is listed in it (listed under the last step, the next Add drops it)
     liveset::Add(h);   // the game is calling its Think: WastedFire's asks of it as the shooter (VerdictOf)
-    SeeFrame(h);
     if(world.frame!=GameFrame())Gather(team);   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
     const unsigned char* root=RootLeader(h);
     const npc::Control control=ControlOf(h,root);
