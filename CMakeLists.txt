@@ -148,6 +148,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
+# The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
@@ -2317,6 +2319,9 @@ set_tests_properties(scope_lens_native PROPERTIES SKIP_RETURN_CODE 77)
 # The measurement probes' call sites and render anchors (src/perf_probe.cpp, docs/plan-2026-11-24-optimization.md 3 A).
 add_test(NAME perf_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perf_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(perf_probe_native PROPERTIES SKIP_RETURN_CODE 77)
+# The sync load probe's call sites and the bytes around them in 0x84E80 (src/sync_load_probe.cpp, docs/sync-load-re.md).
+add_test(NAME sync_load_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sync_load_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(sync_load_probe_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(pvp_hud_layout_test EXCLUDE_FROM_ALL tests/pvp_hud_layout_test.cpp)
 target_include_directories(pvp_hud_layout_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(pvp_hud_layout_test PRIVATE edf6common)
