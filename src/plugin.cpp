@@ -535,6 +535,7 @@ void LoadConfig() noexcept {
     Config n{};
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
+    n.verbose=ReadInt(L"Debug",n.debug ? 1 : 0)>=2;
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
     n.crewDelayMs=FixInt("CrewDelayMs",ReadInt(L"CrewDelayMs",n.crewDelayMs),0,600000);
     n.crewRange=ReadFloat(L"CrewRange",n.crewRange);

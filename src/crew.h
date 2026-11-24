@@ -21,6 +21,7 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
     float crewRange=600.0f;    // metres from the player; 0 = any distance
