@@ -261,7 +261,12 @@ struct LensCompositor::Impl final {
         resourceDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         resourceDesc.Texture2D.MipLevels = 1;
         ComPtr<ID3D11ShaderResourceView> next;
-        if (FAILED(device->CreateShaderResourceView(lensTexture.Get(), &resourceDesc, &next))) return false;
+        const HRESULT hr = device->CreateShaderResourceView(lensTexture.Get(), &resourceDesc, &next);
+        if (FAILED(hr)) {
+            source.viewError = hr;   // infantryscope.cpp logs it once a mission
+            return false;
+        }
+        source.viewError = 0;
         lensResource = std::move(next);
         viewTexture = lensTexture;
         viewDesc = lensDesc;
@@ -345,6 +350,9 @@ LensSource LensCompositor::Source() const noexcept { return impl_ ? impl_->sourc
 bool LensCompositor::Composite(ID3D11DeviceContext* context, float* mainHeight, float* radius,
                                float* lensYScale) noexcept {
     if (!impl_) return false;
+    // This call's reasons only (the caller logs them when it returns false).
+    impl_->source.lensBoundAsTarget = false;
+    impl_->source.viewError = 0;
     if (!context || !impl_->mainView || !impl_->lensTexture || !Ready(context) ||
         !impl_->mainView || !impl_->lensTexture) {
         if (impl_) impl_->Release();
@@ -362,7 +370,10 @@ bool LensCompositor::Composite(ID3D11DeviceContext* context, float* mainHeight, 
     Scissor(lens, w, h, &left, &top, &right, &bottom);
     if (right <= left || bottom <= top) return false;
     // The native output merger at the command: the lens view's texture must not be one of its render targets (it is
-    // sampled while the main view's target is written; the engine gives each viewport its own targets, §4.1).
+    // sampled while the main view's target is written). Defensive only: the engine gives each viewport its own targets
+    // (§4.1, tests/scope_lens_native_audit.py §7) and binds the main view's at its lens command; this scan is not what
+    // keeps the two apart, it turns a future engine change into a skipped frame and a log line instead of a read-write
+    // hazard (D3D11 would unbind the view and the lens would sample nothing).
     {
         std::array<ID3D11RenderTargetView*, kTargets> raw{};
         context->OMGetRenderTargets(kTargets, raw.data(), nullptr);

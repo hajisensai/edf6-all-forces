@@ -331,7 +331,7 @@ int main() {
         const ULONG lensRefs=Refs(lens.texture.Get());
         const Pixels before=Read(f,main);
         Check(Frame(f,c,main,lens,side,lensY),"drawn from the lens view's own texture");
-        Check(c.HoldsLensView() && c.Source().views==1,"one view of it, cached");
+        Check(c.HoldsLensView() && c.Source().views==1 && c.Source().viewError==0,"one view of it, cached (no device error)");
         Check(Refs(lens.texture.Get())==lensRefs+1,"the cached view is the only reference kept (the held texture released)");
         const pip::LensSource first=c.Source();
         Check(first.texture==lens.texture.Get() && first.mainTexture==main.texture.Get() && first.texture!=first.mainTexture,

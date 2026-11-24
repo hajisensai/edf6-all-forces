@@ -27,6 +27,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            every second: tests/autopilot/players_probe.cpp)
                            or --cmd "probe umbra" (every box EDF.dll hands Umbra checked for values out of reach, with
                            its owner, and every Vehicle601_Tank's aim and gun pose: tests/autopilot/umbra_probe.cpp)
+                           or --cmd "probe physics [TICKS]" (every live non-static hknp body's position and
+                           velocity by scene tick from the mission's first, default 6000 ticks; a bit-exact hash every
+                           10 ticks: tests/autopilot/physics_probe.cpp, compared by tools/physics_probe_compare.py)
                            or --cmd "probe heap N" with --cycle (what was allocated from the Nth cycle's way out on
                            and is still alive at each later one, by call path: tests/autopilot/heap_probe.cpp; every
                            cycle also logs MEMMAP / HEAPS, where the commit sits)

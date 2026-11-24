@@ -26,6 +26,7 @@ struct LensSource {
     unsigned nativeTargets = 0;         // render targets bound natively at the composite
     bool lensBoundAsTarget = false;     // the lens texture among them (the composite refuses then)
     unsigned views = 0;                 // shader resource views created so far (one per lens texture)
+    long viewError = 0;                 // the device's HRESULT when it refused the last view (0: made or cached)
 };
 
 class LensCompositor final {

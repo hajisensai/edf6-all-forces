@@ -20,26 +20,23 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include <cstdio>
 
 namespace autoturret {
-unsigned char imageBytes[16]{};
-unsigned char* image=imageBytes;
+unsigned char* image=nullptr;   // main: a stand-in EDF.dll image with the team table (edf/world_tables.h)
 Config cfg{};
 ULONGLONG frameNow=1;
-int seenOnce=0;
+int seenFrame=0;
 constexpr int kEnemies=4;
 Enemy enemies[kEnemies]{};
 unsigned char objects[kEnemies][0x400]{},objectCtrl[kEnemies][16]{};
 int enemyCount=0;
 std::int32_t relation[kMaxTeam]{};
 void Log(const char*,...) noexcept {}
-void SeeVehicle(const void*) noexcept {}
-void SeeVehicleOnce(const void*) noexcept { ++seenOnce; }
+void SeeFrame() noexcept { ++seenFrame; }
 ULONGLONG Frame() noexcept { return frameNow; }
 bool Same(const void* obj,const void* ctrl) noexcept {
     for(int i=0;i<enemyCount;++i)if(obj==objects[i] && ctrl==objectCtrl[i])return true;
     return false;
 }
 const Enemy* World(int* count) noexcept { *count=enemyCount;return enemies; }
-const std::int32_t* Relations(std::int32_t team) noexcept { return team==0 ? relation : nullptr; }
 void ReloadConfigIfChanged() noexcept {}
 float Down(const unsigned char*) noexcept { return 9.8f; }
 void ResetGunnerLog() noexcept {}
@@ -102,6 +99,12 @@ void Look(float x,float y,float z) { viewAt[0]=x;viewAt[1]=y;viewAt[2]=z; }
 
 int main() {
     edf::SetInputSource(&aimkeys::Key,&aimkeys::Window);   // the plugin's key source (edf/input_source.h)
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    if(!image)return 2;
+    // The team table: team 0's row (the player's) is `relation`; no other team has one.
+    static unsigned char teamManager[0x40]{},teamRows[edf::kTeamStride*kMaxTeam]{};
+    Put<void*>(image,edf::kTeamManager,teamManager);Put<void*>(teamManager,edf::kTeamRows,teamRows);
+    Put<const std::int32_t*>(teamRows,edf::kTeamRelation,relation);
     relation[1]=kEnemyRelation;
     viewRay=&View;turretObserver=&Observer;
     const ULONGLONG now=GetTickCount64();
@@ -110,7 +113,7 @@ int main() {
     Ride tank;Gun cannon(0);
     // A 505-class tank: its class has no hook of this plugin; the export is its only clock and key reader.
     auto a=Ask(tank,cannon);
-    Check(seenOnce>0,"the export steps the clock for a vehicle no own hook sees");
+    Check(seenFrame>0,"the export reads the scene-step clock before judging freshness");
     Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"no lock: the view steers");
     edf::aimlink::TurretReadoutV1 shown{};
     Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.ownGun && shown.lockKey==0x51 && shown.modeKey==0x4A,"the HUD reads the player's own gun, its toggle (J) and lock keys");
