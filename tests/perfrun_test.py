@@ -429,6 +429,8 @@ def probe_parsing() -> None:
 def perfrun_probe_options() -> None:
     _, o = perfrun.options(['M001', '--dll', 'installed', '--cycle', '3', '--cycle-stay', '10'])
     check(o['cycle'] == 3 and o['cycle_stay'] == 10.0, '--cycle N and --cycle-stay S')
+    _, o = perfrun.options(['M001', '--dll', 'installed', '--key', '4d@50', '--key', 'esc@60:500'])
+    check(o['keys'] == [('4d', 50.0, 300), ('esc', 60.0, 500)], '--key SPEC@S[:MS], 300 ms by default')
     for bad in (['M001', '--dll', 'installed', '--presentmon', os.path.join(ROOT, 'no-such-presentmon.exe')],
                 ['M001', '--dll', 'installed', '--cycle', '2', '--ab', __file__, __file__]):
         try:
