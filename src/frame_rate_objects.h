@@ -12,12 +12,17 @@ namespace frameobjects {
 // free before it.
 void Install() noexcept;
 // Game thread, the camera step's hook (after every object's phase of the tick): once a tick (System's tick count), the
-// root of every object of System's update list that has a model.
+// root of every object of System's update list that has a model. Only while frames without ticks come: kIdleTicks ticks
+// after the last one (or before the first, or with the frame gate not in: no frame without ticks ever calls Pose) the
+// sample is skipped (stress:30, ticks every frame: 0.6-1.3 ms a step for nothing) and counted (Counts::idleTicks).
+constexpr unsigned kIdleTicks=60;   // 1 s of ticks without a frame without ticks
 void Sample() noexcept;
 // Game thread, a frame without ticks, at the render recording call 0x1198FA4 right after the player's root (fps-7):
 // every sampled object's draw poses times its D = cur^-1 * blend(prev, cur, alpha); riders of a vehicle (other crew, the
 // auto turret's gunners: anyone in its seats) with the vehicle's D. `rootHuman` / `rootVehicle`: fps-7's (left to it);
-// `rootD`: its D (16 floats) when it posed them, else null (their riders are left as stepped).
+// `rootD`: its D (16 floats) when it posed them, else null (their riders are left as stepped). After an idle sample
+// (above) this frame poses nothing: every object known is counted left for its samples (Left::kSamples), and the sample
+// resumes at the next tick (two ticks to blend again).
 void Pose(float alpha,const void* rootHuman,const void* rootVehicle,const float* rootD) noexcept;
 // Game thread, with fps-7's poses (framerateview RestoreFrame: after this frame's end fence): what Pose wrote goes back
 // where the object is still there, bone by bone where the bone still holds what was written.
@@ -37,7 +42,7 @@ enum class Left { kGone,kVtable,kPose,kSamples,kUnsampled,kRefused,kFull,kFault,
 constexpr int kLeftReasons=static_cast<int>(Left::kCount);
 
 struct Counts {
-    unsigned posed=0,riders=0,still=0,mostPoses=0,objects=0;
+    unsigned posed=0,riders=0,still=0,mostPoses=0,objects=0,idleTicks=0;
     unsigned left[kLeftReasons]{};
     unsigned rootRefused[static_cast<int>(framerate::Refusal::kCount)]{};
     unsigned refused[static_cast<int>(framerate::Refusal::kCount)]{};
@@ -49,7 +54,7 @@ struct Counts {
 };
 // Game thread, since the last call: objects posed on frames without ticks (riders among them), still (nothing to
 // move), left as stepped by reason; the most poses one frame wrote; the objects sampled at the last tick; refusals by
-// reason.
+// reason; the ticks whose sample was skipped (idle, see Sample).
 void TakeCounts(Counts& out) noexcept;
 }  // namespace frameobjects
 }  // namespace crew

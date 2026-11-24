@@ -22,7 +22,7 @@
 // the sample makes the drawn root differ from cur: that object is drawn as stepped (counted, Left::kPose), never blended
 // from a stale pair.
 //
-// What a frame without ticks draws (at the render recording, frame_rate_view.cpp RecordDrawHook). Each object whose drawn
+// What a frame without ticks draws (at the render recording, frame_rate_view.cpp RecordStart). Each object whose drawn
 // root is still the last tick's (nothing wrote it since) moves to D = cur^-1 * InterpolateScaled(prev, cur, alpha) (a
 // uniform scale is blended, a squash, a mirror, a teleport over kCutMove metres or a turn over kCutTurn radians in one
 // tick are drawn as they are): D times every bone of every instance of every model the object draws with (bone poses
@@ -31,7 +31,8 @@
 // when that is a registered AnimationModel). A vehicle's riders (every seat's, the vehicle +0x608: other NPC crew, the
 // auto turret plugin's gunners, remote players) go with the vehicle's D, never their own: rigid passengers (a fighter
 // moves metres a tick, a rider blended apart from it would drift off the seat). The player's soldier and vehicle are
-// fps-7's and left to it; the other riders of the player's vehicle take fps-7's D. A child object (a parent at +0x38) that
+// fps-7's and left to it; the other riders and the trigger weapons (+0x638) of the player's vehicle take fps-7's D (it
+// poses the vehicle's own model only). A child object (a parent at +0x38) that
 // is listed is blended with its own D like any other object, not its parent's; one that is not listed is drawn as
 // stepped. What was written goes back after the frame's end fence (frame_rate_view.cpp RestoreFrame) where the object is
 // still there, the model and instance are still its, bone by bone where the bone still holds what was written.
@@ -104,6 +105,10 @@ edf::PtrIndex riders;       // this frame: a seated human -> 1 (posed or left wi
 std::uint32_t sampledTick=0;
 unsigned untracked=0;       // listed objects the last sample had no room for
 bool sampledAny=false,on=false;
+// Ticks since the last frame without ticks (frameobjects::Sample): from kIdleTicks on the sample is skipped. Starts idle
+// (nothing samples before the first frame without ticks). The bodies known stay (their weak counts too, bounded by what
+// the last sample listed) until the sample resumes and forgets those no longer listed, or the scene ends.
+unsigned ticksSinceUnticked=frameobjects::kIdleTicks;
 
 // Who a written pose is drawn for, checked again before it goes back: the body (index and object: bodies change at a
 // sample only, never between the write and the restore), a rider of its seat `seat` (the human and their control
@@ -309,8 +314,22 @@ bool PoseModel(const Who& who,const Part& part,const float* d) noexcept {
     }
     return fit;
 }
+// A vehicle's (live) trigger weapons (+0x638) whose +0xF30 is a registered AnimationModel, times d.
+bool PoseVehicleWeapons(const Who& who,const unsigned char* holder,const float* d) noexcept {
+    bool fit=true;
+    const auto count=At<std::uint64_t>(holder,kHolderCount);
+    for(std::uint64_t i=0;i<count && i<kMostHolders;++i) {
+        Part part;
+        part.holder=holder;part.slot=Slot::kVehicleWeapon;part.index=i;
+        part.weapon=HolderWeapon(holder,i,&part.weaponCtrl);
+        if(!part.weapon || !thermal::IsAnimationModel(part.weapon+kWeaponModel))continue;
+        part.model=part.weapon+kWeaponModel;
+        fit=PoseModel(who,part,d) && fit;
+    }
+    return fit;
+}
 // Everything `holder` (live) draws times d: its models; a soldier's weapons ([h+0x1950], models +0xF30); a vehicle's
-// trigger weapons (+0x638) whose +0xF30 is a registered AnimationModel.
+// trigger weapons (PoseVehicleWeapons).
 bool PoseObject(const Who& who,const unsigned char* holder,thermal::Family family,const float* d) noexcept {
     const void* models[kMostModels];
     const std::size_t m=thermal::EnemyModelsLive(holder,models,kMostModels);
@@ -320,17 +339,7 @@ bool PoseObject(const Who& who,const unsigned char* holder,thermal::Family famil
         part.holder=holder;part.model=static_cast<const unsigned char*>(models[k]);
         fit=PoseModel(who,part,d) && fit;
     }
-    if(family==thermal::Family::kVehicle) {
-        const auto count=At<std::uint64_t>(holder,kHolderCount);
-        for(std::uint64_t i=0;i<count && i<kMostHolders;++i) {
-            Part part;
-            part.holder=holder;part.slot=Slot::kVehicleWeapon;part.index=i;
-            part.weapon=HolderWeapon(holder,i,&part.weaponCtrl);
-            if(!part.weapon || !thermal::IsAnimationModel(part.weapon+kWeaponModel))continue;
-            part.model=part.weapon+kWeaponModel;
-            fit=PoseModel(who,part,d) && fit;
-        }
-    }
+    if(family==thermal::Family::kVehicle)fit=PoseVehicleWeapons(who,holder,d) && fit;
     if(family!=thermal::Family::kHuman || !IsSoldier(holder))return fit;
     for(std::uint64_t i=0;i<static_cast<std::uint64_t>(kMostWeapons);++i) {
         Part part;
@@ -540,6 +549,18 @@ void PoseAll(float alpha,const void* rootHuman,const void* rootVehicle,const flo
     }
     for(std::size_t i=0;i<bodies.size();++i) {
         const Body& b=bodies[i];
+        // The player's vehicle: fps-7 posed its model (frame_rate_view.cpp PoseRoot, v+0xE40 only); its trigger weapons
+        // go with fps-7's D here (left as stepped, with the vehicle, when fps-7 did not pose it).
+        if(b.object==rootVehicle && b.family==thermal::Family::kVehicle && rootD && Alive(b)) {
+            __try {
+                Who who;
+                who.body=static_cast<int>(i);who.owner=b.object;
+                if(!PoseVehicleWeapons(who,b.object,rootD))Leave(Left::kFull);
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+                Leave(Left::kFault);
+            }
+            continue;
+        }
         if(b.object==rootHuman || b.object==rootVehicle || riders.Find(b.object)>=0)continue;   // fps-7's, a rider
         if(!b.fresh || (!b.moving && !b.still)) {
             Leave(b.why);
@@ -600,11 +621,24 @@ void Install() noexcept {
 }
 
 void Sample() noexcept {
-    if(on)SampleAll();
+    if(!on)return;
+    if(ticksSinceUnticked>=kIdleTicks) {
+        ++counts.idleTicks;
+        return;
+    }
+    ++ticksSinceUnticked;
+    SampleAll();
 }
 
 void Pose(float alpha,const void* rootHuman,const void* rootVehicle,const float* rootD) noexcept {
-    if(on && alpha>=0.0f && alpha<1.0f)PoseAll(alpha,rootHuman,rootVehicle,rootD);
+    if(!on || !(alpha>=0.0f && alpha<1.0f))return;
+    const bool idle=ticksSinceUnticked>=kIdleTicks;
+    ticksSinceUnticked=0;
+    if(idle) {   // the sample skipped (see Sample): resumes at the next tick, every object known lacks its samples
+        counts.left[static_cast<int>(Left::kSamples)]+=static_cast<unsigned>(bodies.size());
+        return;
+    }
+    PoseAll(alpha,rootHuman,rootVehicle,rootD);
 }
 
 void Restore() noexcept {
@@ -615,6 +649,7 @@ void SceneOver() noexcept {
     if(!on)return;
     if(!posed.empty())RestoreAll();
     ForgetAll();
+    ticksSinceUnticked=kIdleTicks;   // the next scene samples from its first frame without ticks
 }
 
 void NoteRootRefusal(Refusal why) noexcept {

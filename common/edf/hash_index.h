@@ -74,11 +74,19 @@ private:
     struct Cell { K key{}; int value=0; };
     std::vector<Cell> cells;
     std::size_t used=0,mask=0;
+    // The doubled cells built aside and swapped in: a failed allocation (std::bad_alloc out of Set / Reserve) leaves
+    // the index as it was, every key still found (strong guarantee; tools/hash_index_check.cpp fails the allocation).
     void Grow() {
-        std::vector<Cell> old;old.swap(cells);
-        cells.assign(old.empty() ? 64 : old.size()*2,Cell{});
-        mask=cells.size()-1;used=0;
-        for(const Cell& c:old)if(!(c.key==K{}))Set(c.key,c.value);
+        std::vector<Cell> grown(cells.empty() ? 64 : cells.size()*2);
+        const std::size_t grownMask=grown.size()-1;
+        for(const Cell& c:cells) {
+            if(c.key==K{})continue;
+            std::size_t i=HashOf(c.key)&grownMask;
+            while(!(grown[i].key==K{}))i=(i+1)&grownMask;
+            grown[i]=c;
+        }
+        cells.swap(grown);
+        mask=grownMask;
     }
 };
 

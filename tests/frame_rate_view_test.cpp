@@ -295,7 +295,7 @@ void DrawnEye() {
     Fence();
     FrameRateCameraCut(cam);
     Frame0(0.5f);
-    Check(!FrameRateDrawnEye(cam,eye),"drawn eye: a cut camera is drawn as stepped");
+    Check(FrameRateDrawnEye(cam,eye) && Same(eye,b.m+12,12),"drawn eye: a cut camera, the step's eye (what it is drawn at)");
     Fence();
     Counted();
 }

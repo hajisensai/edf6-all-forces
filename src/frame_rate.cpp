@@ -197,12 +197,12 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
         for(int i=1;i<static_cast<int>(framerate::Refusal::kCount);++i)refusedAny+=o.rootRefused[i]+o.refused[i];
         static_assert(frameobjects::kLeftReasons==8,"the eight reasons logged");
         const unsigned stepped=o.AsStepped();
-        if(o.posed || o.still || stepped || refusedAny)
+        if(o.posed || o.still || stepped || refusedAny || o.idleTicks)
             Log("FRAMERATE objects %u: blended %u (riders %u), still %u, as stepped %u (gone/vtable/pose/samples/"
-                "unsampled/refused/full/fault %u/%u/%u/%u/%u/%u/%u/%u), most poses a frame %u; refused "
+                "unsampled/refused/full/fault %u/%u/%u/%u/%u/%u/%u/%u), most poses a frame %u, ticks not sampled (idle) %u; refused "
                 "(alpha/not rigid/mirrored/move/turn) player root %u/%u/%u/%u/%u, objects %u/%u/%u/%u/%u",o.objects,
                 o.posed,o.riders,o.still,stepped,o.left[0],o.left[1],o.left[2],o.left[3],o.left[4],o.left[5],o.left[6],
-                o.left[7],o.mostPoses,o.rootRefused[1],o.rootRefused[2],o.rootRefused[3],
+                o.left[7],o.mostPoses,o.idleTicks,o.rootRefused[1],o.rootRefused[2],o.rootRefused[3],
                 o.rootRefused[4],o.rootRefused[5],o.refused[1],o.refused[2],o.refused[3],o.refused[4],o.refused[5]);
     }
     const PresentStats p=SwapFlipPresentStats();

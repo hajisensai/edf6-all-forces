@@ -121,6 +121,12 @@ std::uint32_t tickNow=0;
 void Tick() { Put<std::uint32_t>(sys,kTickCount,++tickNow);frameobjects::Sample(); }
 
 frameobjects::Counts Take() { frameobjects::Counts c;frameobjects::TakeCounts(c);return c; }
+// A scene whose frames without ticks already come (the sample not idle: Idle() has the window).
+void NewScene() {
+    frameobjects::SceneOver();
+    ticksSinceUnticked=0;
+    Take();
+}
 unsigned LeftBy(const frameobjects::Counts& c,frameobjects::Left why) { return c.left[static_cast<int>(why)]; }
 bool NearX(const float* bone,float x) { return std::fabs(bone[12]-x)<1e-4f; }
 
@@ -151,7 +157,7 @@ void WeakCounts() {
 }
 
 void BlendAndRestore() {
-    frameobjects::SceneOver();Take();
+    NewScene();
     const Obj a=MakeObj(thermal::Family::kOther,3);
     List({&a});
     Steps({&a},0,1);
@@ -190,7 +196,7 @@ void BlendAndRestore() {
 }
 
 void Reasons() {
-    frameobjects::SceneOver();Take();
+    NewScene();
     const Obj one=MakeObj(thermal::Family::kOther),late=MakeObj(thermal::Family::kOther),
               swapped=MakeObj(thermal::Family::kOther),gone=MakeObj(thermal::Family::kOther),
               jump=MakeObj(thermal::Family::kOther),still=MakeObj(thermal::Family::kOther);
@@ -224,7 +230,7 @@ void Reasons() {
 }
 
 void Forgetting() {
-    frameobjects::SceneOver();Take();
+    NewScene();
     const Obj a=MakeObj(thermal::Family::kOther),b=MakeObj(thermal::Family::kOther),d=MakeObj(thermal::Family::kOther);
     List({&a,&b,&d});
     Steps({&a,&b,&d},0,1);
@@ -252,7 +258,7 @@ void Forgetting() {
 }
 
 void RidersAndWeapons() {
-    frameobjects::SceneOver();Take();
+    NewScene();
     const Obj vehicle=MakeObj(thermal::Family::kVehicle);
     const void* soldierVt=image+kSoldierVts[0];
     const Obj rider=MakeObj(thermal::Family::kHuman,2,soldierVt);
@@ -311,7 +317,8 @@ void RidersAndWeapons() {
     Check(NearX(cannonModel.pose,-0.5f),"restore: a holder with another control block is not written");
     Put<unsigned char*>(holders,kHolderCtrl,cannonCtrl);
     SetX(cannonModel.pose,0);
-    // The player's vehicle (fps-7's): its riders take fps-7's D; without it they are left as stepped with it.
+    // The player's vehicle (fps-7's): its riders and its trigger weapons (+0x638) take fps-7's D; without it they are left
+    // as stepped with it.
     Root(vehicle,3);Tick();
     const float* fps7=Translation(-0.25f,0,0);
     Take();
@@ -319,11 +326,14 @@ void RidersAndWeapons() {
     c=Take();
     Check(NearX(vehicle.model.pose,3.0f) && NearX(rider.model.pose,4.75f) && c.riders==1,
           "the player's vehicle: left to fps-7, its riders with fps-7's D");
+    Check(NearX(cannonModel.pose,-0.25f) && !c.AsStepped(),"the player's vehicle: its trigger weapon with fps-7's D");
     frameobjects::Restore();
+    Check(NearX(cannonModel.pose,0.0f),"the player's vehicle: its trigger weapon back after the frame");
     frameobjects::Pose(0.75f,nullptr,vehicle.mem,nullptr);
     c=Take();
     Check(NearX(rider.model.pose,5.0f) && LeftBy(c,Left::kRefused)==1 && !c.posed,
           "the player's vehicle refused: its rider as stepped (refused)");
+    Check(NearX(cannonModel.pose,0.0f),"the player's vehicle refused: its trigger weapon as stepped with it");
     frameobjects::Restore();
     frameobjects::SceneOver();
     Take();
@@ -332,7 +342,7 @@ void RidersAndWeapons() {
 // Readable asks of a sample and a frame's poses: the same for 20 objects and 2000 (System and its list only).
 struct Cost { unsigned long long sampleAsks,poseAsks;double sampleMs; };
 Cost Run(int n) {
-    frameobjects::SceneOver();Take();
+    NewScene();
     static std::vector<Obj> pool;
     while(static_cast<int>(pool.size())<n)pool.push_back(MakeObj(thermal::Family::kOther,8));
     list.clear();
@@ -364,6 +374,57 @@ void Costs() {
     Take();
 }
 
+// The sample only while frames without ticks come (frameobjects::kIdleTicks): none yet, none for the window, the gate not
+// in (Pose never called): skipped and counted; the first frame without ticks after it poses nothing, counts every object
+// known left for its samples, and the sample resumes (two ticks to blend again).
+void Idle() {
+    frameobjects::SceneOver();Take();
+    const Obj a=MakeObj(thermal::Family::kOther),b=MakeObj(thermal::Family::kOther);
+    List({&a,&b});
+    for(unsigned i=0;i<frameobjects::kIdleTicks+5;++i){Root(a,static_cast<float>(i));Root(b,static_cast<float>(i));Tick();}
+    auto c=Take();
+    Check(bodies.empty() && c.idleTicks==frameobjects::kIdleTicks+5 && Weaks(a.ctrl)==1,
+          "idle: a scene without a frame without ticks (stress:30, or the gate not in) samples nothing");
+    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);   // the first frame without ticks
+    c=Take();
+    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==0 && !LeftBy(c,frameobjects::Left::kUnsampled),
+          "idle: the first frame without ticks poses nothing (no object known yet)");
+    Steps({&a,&b},0,1);
+    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==2 && !c.idleTicks,"idle: the sample resumed at the next tick, blended two ticks on");
+    frameobjects::Restore();
+    // In the window: kIdleTicks ticks sampled after the last frame without ticks, then skipped.
+    for(unsigned i=0;i<frameobjects::kIdleTicks;++i){Root(a,2.0f+static_cast<float>(i));Root(b,2.0f+static_cast<float>(i));Tick();}
+    c=Take();
+    Check(!c.idleTicks && bodies.size()==2 && bodies[0].samples==2,"idle: the window's ticks sampled");
+    Root(a,100);Root(b,100);
+    Tick();
+    c=Take();
+    Check(c.idleTicks==1 && bodies.size()==2,"idle: the tick after the window skipped, the objects known kept");
+    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2 && !LeftBy(c,frameobjects::Left::kUnsampled) &&
+          c.AsStepped()==2,
+          "idle: the frame without ticks that resumes counts every object known under samples, poses none");
+    Root(a,101);Root(b,101);
+    Tick();
+    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(!c.posed && LeftBy(c,frameobjects::Left::kSamples)==2,"idle: one sample after resuming: still lacking samples");
+    Root(a,102);Root(b,102);
+    Tick();
+    frameobjects::Pose(0.5f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==2,"idle: two consecutive samples: blended again");
+    frameobjects::Restore();
+    frameobjects::SceneOver();
+    Root(a,0);Root(b,0);
+    Tick();
+    c=Take();
+    Check(c.idleTicks==1 && bodies.empty(),"idle: a new scene starts idle");
+}
+
 void Off() {
     // Before Install nothing runs (a fresh state: `on` false).
     on=false;
@@ -392,6 +453,7 @@ int main() {
     Forgetting();
     RidersAndWeapons();
     Costs();
+    Idle();
     std::printf("frame_rate_objects: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }
