@@ -28,6 +28,9 @@ import vanilla_launch as vl  # noqa: E402
 import loadout_generator as lg  # noqa: E402
 import installer  # noqa: E402
 
+# The real Steam's RunningAppID (this machine may have the game open): never waited on here.
+vl.modfiles.steam_running_app = lambda: 0
+
 checks = 0
 
 

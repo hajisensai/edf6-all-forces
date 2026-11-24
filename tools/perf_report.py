@@ -49,8 +49,8 @@ ROLES = ((0x130FE20, 'Havok worker (processTaskQueue)'), (0x111B8E0, 'render thr
 APP_BUCKETS = ((0x705530, 'app: start'), (0x705627, 'app: network / Steam / EOS'), (0x7056B4, 'app: MapMgr 0x1230A0'),
                (0x7056C0, 'app: before System::update'), (0x70571B, 'app: after System::update'),
                (0x7058B0, 'app: HUD 0x11977F0'), (0x7058BD, 'app: input wrapper 0x77320'), (0x7058CD, 'app: rest'))
-MAIN_LOOP = (0x11A2E80, 0x11A316E)   # the frame loop around Application::Update (its vtable +8 at 0x11A3006)
-MAIN_BUCKETS = ((0x11A2E80, 'main loop: top'), (0x11A2F21, 'main loop: tick wait'),
+MAIN_LOOP = (0x11A2E90, 0x11A316E)   # the frame loop around Application::Update (its vtable +8 at 0x11A3006)
+MAIN_BUCKETS = ((0x11A2E90, 'main loop: top'), (0x11A2F21, 'main loop: tick wait'),
                 (0x11A2FF8, 'main loop: input sample 0x1182A10'), (0x11A3009, 'main loop: after the update'),
                 (0x11A305F, 'main loop: render fence wait 0x111CC20'), (0x11A3064, 'main loop: after the fence'),
                 (0x11A30A0, 'main loop: Present command 0x111D890'), (0x11A30A1, 'main loop: tail'))
@@ -77,16 +77,66 @@ COOP = re.compile(r'\[(?:\d{4}-\d\d-\d\d )?(\d+):(\d+):(\d+(?:\.\d+)?)\].*?STATS
                   r'([\d.]+) kbps, to (\d+) players.*?wire up ([\d.]+) kbps down ([\d.]+) kbps')
 
 
-class Image:
-    """EDF.dll's .pdata (function ranges) and its vtables' slots by class (RTTI), for naming stack frames."""
+def vanilla_dirs() -> tuple[str, str]:
+    """The two name sources: this machine's vanilla code index (not in any repository) and the edf6-vanilla-re clone.
+    $EDF6_VANILLA_CODE / $EDF6_VANILLA_RE, else where they sit on this machine: vanilla-code in the folder that holds
+    the main checkout, edf6-vanilla-re next to that folder."""
+    import subprocess
+    code, re_ = os.environ.get('EDF6_VANILLA_CODE', ''), os.environ.get('EDF6_VANILLA_RE', '')
+    if not code or not re_:
+        try:
+            common = subprocess.run(['git', '-C', ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                    capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            common = ''
+        if common:
+            home = os.path.dirname(os.path.dirname(common))   # common is <home>/main/.git
+            code = code or os.path.join(home, 'vanilla-code')
+            re_ = re_ or os.path.join(os.path.dirname(home), 'edf6-vanilla-re')
+    return code, re_
 
-    def __init__(self, dll: str, classes: bool = True) -> None:
+
+def vanilla_names(sha: str, code: str, re_: str) -> dict[int, str]:
+    """EDF.dll's function names by RVA for the build of sha256 `sha`: edf6-vanilla-re's shared/functions (the reviewed
+    names) over the vanilla code index's (its functions.tsv but the bare Ghidra address labels). A source missing (CI
+    has neither), or made from another build, gives none: the frames are then shown by RVA alone."""
+    names: dict[int, str] = {}
+    try:
+        with open(os.path.join(code, 'function-index', 'summary.json'), encoding='utf-8') as f:
+            same = json.load(f).get('images_sha256', {}).get('EDF.dll', '').lower() == sha
+        if same:
+            with open(os.path.join(code, 'function-index', 'functions.tsv'), encoding='utf-8', newline='') as f:
+                for r in csv.DictReader(f, delimiter='\t'):
+                    if r['module'] == 'EDF.dll' and r['label_kind'] != 'address_label':
+                        names[int(r['rva'], 16)] = r['label']
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        with open(os.path.join(re_, 'shared', 'builds.tsv'), encoding='utf-8', newline='') as f:
+            builds = {r['build'] for r in csv.DictReader(f, delimiter='\t')
+                      if r['module'] == 'EDF.dll' and r['sha256'].lower() == sha}
+        if builds:
+            with open(os.path.join(re_, 'shared', 'functions', 'EDF.dll.tsv'), encoding='utf-8', newline='') as f:
+                for r in csv.DictReader(f, delimiter='\t'):
+                    if r['build'] in builds:
+                        names[int(r['rva'], 16)] = r['name']
+    except (OSError, ValueError, KeyError):
+        pass
+    return names
+
+
+class Image:
+    """EDF.dll's .pdata (function ranges), its vtables' slots by class (RTTI) and the functions' names where the vanilla
+    indexes know them (vanilla_names), for naming stack frames."""
+
+    def __init__(self, dll: str, classes: bool = True, names: bool = True) -> None:
         import pefile
         pe = pefile.PE(dll, fast_load=True)
         pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXCEPTION']])
         self.pdata = sorted((e.struct.BeginAddress, e.struct.EndAddress) for e in pe.DIRECTORY_ENTRY_EXCEPTION)
         self.starts = [b for b, _ in self.pdata]
         self.slot_class: dict[int, str] = {}
+        self.names: dict[int, str] = vanilla_names(file_sha256(dll), *vanilla_dirs()) if names else {}
         if classes:
             self._classes(pe)
 
@@ -125,7 +175,8 @@ class Image:
     def name(self, rva: int | None) -> str:
         if rva is None:
             return '?'
-        return f'{rva:#x}' + (f' {self.slot_class[rva]}' if rva in self.slot_class else '')
+        label = self.names.get(rva) or self.slot_class.get(rva)
+        return f'{rva:#x}' + (f' {label}' if label else '')
 
 
 def frame_rva(frame: str) -> int | None:
@@ -240,7 +291,7 @@ class Plugins:
             dll = self.dll if mod.lower() == INSTALLED_DLL.lower() else None
             if dll:
                 try:
-                    img = Image(dll, classes=False)
+                    img = Image(dll, classes=False, names=False)
                 except Exception:   # pefile missing or not a PE: RVAs as they are
                     img = None
                 if os.path.isfile(os.path.splitext(dll)[0] + '.pdb'):

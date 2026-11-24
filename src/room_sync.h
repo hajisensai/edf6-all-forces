@@ -1,5 +1,5 @@
 // Room-stage pre-sync over EDF6Coop's member attributes (EDF6CoopGetMemberAttributeApi v1, edf-coop-stable
-// docs/member-attribute-api.md): every member announces its own support loadout (member_config.h), which applies to the
+// edf-coop-stable:docs/member-attribute-api.md): every member announces its own support loadout (member_config.h), which applies to the
 // supports that member calls; every member generates the variant files of every member's loadout it lacks before the
 // mission starts, and the host plans a member's request with that member's loadout (RoomMemberConfig).
 // Contract between the menu screen (src/room_ui.cpp, stage 4) and the sync (src/room_sync.cpp, stage 6).

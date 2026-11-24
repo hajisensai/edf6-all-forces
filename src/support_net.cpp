@@ -41,6 +41,7 @@ support_net::Session session;
 support_net::Hooks hooks;
 EDF6CoopExtensionApi api{};
 EDF6CoopTrySendExtensionFn trySendExtension=nullptr;
+EDF6CoopPollExtensionBatchFn pollBatch=nullptr;   // the frame's messages under one transport lock (net-7, 2026-11-24)
 EDF6CoopSnapshot snapshot{};
 EDF6CoopPeer peers[support_net::kMaxPeers+1]{};
 HMODULE module=nullptr;
@@ -48,7 +49,7 @@ using AdmissionReadyFn=std::uint32_t(__cdecl*)();
 AdmissionReadyFn transportAdmissionReady=nullptr;
 bool running=false,blockedUntilMission=false;
 std::uint32_t commandHostPeer=0;
-ULONGLONG nextResolve=0,lastTick=~0ULL;
+ULONGLONG nextResolve=0,lastFrame=~0ULL;   // lastFrame: the GameFrame the tick last ran in
 SRWLOCK worldLock=SRWLOCK_INIT;
 EDF6AFMissionParticipants world{sizeof(EDF6AFMissionParticipants),0,0,0,1,{}};
 bool worldFrozen=false,worldCreationSeen=false;
@@ -160,8 +161,23 @@ std::uint32_t OwnExtension() noexcept {
 // "联机时候巨卡无比"): the support tick's time, the messages taken in, and the channels' frames they cost.
 constexpr ULONGLONG kNetPerfMs=5000;
 struct NetPerf { double sum,worst; unsigned ticks,messages,contexts; ULONGLONG at; } netPerf{};
+// The room as the channels were last told it (CommandContext): the frame's first channel update runs only when it moved
+// since (net-8, 2026-11-24: every frame ran every channel's update twice, before and after the poll).
+struct ContextKey {
+    bool ready=false,host=false,linked=false;std::uint64_t epoch=0;std::uint32_t hostPeer=0,peerCount=0;std::uint64_t generation=0;
+    bool operator==(const ContextKey& o) const noexcept {
+        return ready==o.ready && host==o.host && linked==o.linked && epoch==o.epoch && hostPeer==o.hostPeer &&
+            peerCount==o.peerCount && generation==o.generation;
+    }
+};
+ContextKey toldContext{};bool contextTold=false;
+ContextKey CurrentContext() noexcept {
+    return {running && session.Ready(),snapshot.isHost!=0,running,session.Epoch(),commandHostPeer,snapshot.peerCount,snapshot.generation};
+}
+bool ContextMoved() noexcept { return !contextTold || !(CurrentContext()==toldContext); }
 void CommandContext(ULONGLONG now) noexcept {
     ++netPerf.contexts;
+    toldContext=CurrentContext();contextTold=true;
     plugin_net::Room room;
     room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
@@ -221,16 +237,17 @@ bool Resolve(ULONGLONG now) noexcept {
         if(!gate)NoteTransport("EDF6Coop mission admission gate not ready");
         return gate;
     }
-    api={};module=nullptr;transportAdmissionReady=nullptr;trySendExtension=nullptr;
+    api={};module=nullptr;transportAdmissionReady=nullptr;trySendExtension=nullptr;pollBatch=nullptr;
     if(now<nextResolve)return false;nextResolve=now+1000;
     if(!current){NoteTransport("no EDF6Coop.dll loaded (map support online needs the companion EDF6Coop on every player)");return false;}
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(GetProcAddress(current,"EDF6CoopGetExtensionApi"));
     transportAdmissionReady=reinterpret_cast<AdmissionReadyFn>(GetProcAddress(current,"EDF6Coop_MissionAdmissionReady"));
-    if(!get || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
+    pollBatch=reinterpret_cast<EDF6CoopPollExtensionBatchFn>(GetProcAddress(current,"EDF6CoopPollExtensionBatch"));
+    if(!get || !pollBatch || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
        api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll ||
        !transportAdmissionReady || !transportAdmissionReady() || !GetProcAddress(current,"EDF6Coop_ResolveMissionPlayerPuid")) {
         NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
-        api={};return false;
+        api={};pollBatch=nullptr;return false;
     }
     trySendExtension=reinterpret_cast<EDF6CoopTrySendExtensionFn>(GetProcAddress(current,"EDF6CoopTrySendExtension"));
     module=current;return true;
@@ -455,7 +472,7 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     session.Configure({nullptr,&Send,&Nonce,combined});
 }
 void ResetSupportNet() noexcept {
-    session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
+    session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastFrame=~0ULL;contextTold=false;ResetWorld();
     senderCheckLogs.store(0);
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
@@ -471,9 +488,17 @@ void SuspendSupportNet(bool untilMission) noexcept {
     Log("SUPPORT NET suspended: existing actors retained; %s",untilMission ? "the next mission starts it again" :
         "resumes once the room is ready again");
 }
+// The frame's messages: at most kMostMessages, taken kBatchMessages at a time under one EDF6Coop lock (every one fits: a
+// payload is at most EDF6COOP_EXTENSION_MAX_PAYLOAD). Game thread only.
+constexpr std::uint32_t kMostMessages=512,kBatchMessages=64;
+EDF6CoopExtensionMessage batch[kBatchMessages];
+unsigned char batchBytes[kBatchMessages*EDF6COOP_EXTENSION_MAX_PAYLOAD];
 void RunSupportNetTick() noexcept {
+    // Once a logic frame (GameFrame; net-4, 2026-11-24): GetTickCount64's 15.6 ms steps decided this before, which skips
+    // or repeats frames once the frame rate is not ~60. `now` stays the ms the channels' timeouts are kept in.
+    const ULONGLONG frame=GameFrame();
+    if(lastFrame==frame)return;lastFrame=frame;
     const ULONGLONG now=GetTickCount64();
-    if(lastTick==now)return;lastTick=now;
     if(InSession())WorldTick(now);
     if(blockedUntilMission)return;
     if(!Cfg().enabled || !InSession() || !Resolve(now)) {
@@ -490,19 +515,24 @@ void RunSupportNetTick() noexcept {
     if(running && snapshot.generation!=next.generation){SuspendSupportNet(false);return;}
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
-    CommandContext(now);
+    if(ContextMoved())CommandContext(now);   // the channels see a moved room before its messages; else last frame's stands
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
-    for(unsigned received=0;received<512;++received) {
-        EDF6CoopPeer sender{};unsigned char bytes[EDF6COOP_EXTENSION_MAX_PAYLOAD]{};std::uint32_t count=0;
-        if(!api.poll(snapshot.generation,&sender,bytes,sizeof(bytes),&count))break;
-        ++netPerf.messages;
-        if(!PeerValid(sender))continue;
-        std::uint32_t peer=0;
-        for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
-        if(peer) {
+    for(std::uint32_t received=0;received<kMostMessages;) {
+        std::uint32_t taken=0;
+        const std::uint32_t most=kMostMessages-received<kBatchMessages ? kMostMessages-received : kBatchMessages;
+        if(!pollBatch(snapshot.generation,batch,most,batchBytes,sizeof(batchBytes),&taken) || !taken || taken>most)break;
+        received+=taken;
+        for(std::uint32_t k=0;k<taken;++k) {
+            const EDF6CoopExtensionMessage& item=batch[k];
+            ++netPerf.messages;
+            // The sender is EDF6Coop's index of its authenticated peer (the order Start enumerated them in): peers[index+1].
+            if(item.peer>=snapshot.peerCount || !item.bytes || item.bytes>EDF6COOP_EXTENSION_MAX_PAYLOAD ||
+               item.offset>sizeof(batchBytes)-item.bytes)continue;
+            const std::uint32_t peer=item.peer+1,count=item.bytes;
+            const unsigned char* bytes=batchBytes+item.offset;
             NoteForeignVersion(peer,bytes,count);
-            if(plugin_net::Receive(peer,sender.id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
+            if(plugin_net::Receive(peer,peers[peer].id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
@@ -517,6 +547,7 @@ void RunSupportNetTick() noexcept {
                 Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
             } else NoteUnknown(peer,bytes,count);
         }
+        if(taken<most)break;   // drained: every queued message fits the buffer, so a short batch is the whole queue
     }
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);

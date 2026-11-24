@@ -62,6 +62,7 @@ from functools import lru_cache
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
+import gamedir  # noqa: E402
 import calls  # noqa: E402
 import dsgo  # noqa: E402
 import ported_weapons as pw  # noqa: E402
@@ -299,19 +300,11 @@ def plan_rows(ids: list[str]) -> Plan:
 
 
 NATIVE_WEAPONS = 0x800   # the game's own records (docs/loadout-re.md 8.1), without the plugin's relocation
-EDF_STAMP = 0x678CCB46   # the EDF.dll the relocation is made for (src/plugin.cpp IdentifyImage: any other refuses it)
+EDF_STAMP = gamedir.EDF_STAMP   # the EDF.dll the relocation is made for (src/plugin.cpp IdentifyImage: any other refuses it)
 OTHER_RELOCATION = 'edf6_weaponlimit.dll'   # relocates the same records: the plugin then refuses its own (8.8)
 
 
-def edf_stamp(game_root: str) -> int | None:
-    """EDF.dll's PE TimeDateStamp, None when it is not there or not a PE."""
-    try:
-        with open(os.path.join(game_root, 'EDF.dll'), 'rb') as f:
-            head = f.read(0x1000)
-        pe = int.from_bytes(head[0x3C:0x40], 'little')
-        return int.from_bytes(head[pe + 8:pe + 12], 'little') if head[pe:pe + 4] == b'PE\0\0' else None
-    except (OSError, ValueError):
-        return None
+edf_stamp = gamedir.edf_stamp   # EDF.dll's PE TimeDateStamp, None when it is not there or not a PE
 
 
 def record_room(game_root: str) -> tuple[int, str | None]:

@@ -52,14 +52,13 @@ import mab_legacy  # noqa: E402
 import make_edf5_campaign  # noqa: E402
 import make_edf41_objects as m41  # noqa: E402
 import map_legacy  # noqa: E402
+import gamedir  # noqa: E402
 import mdb  # noqa: E402
 import rmpa_legacy  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 from modfiles import sha256  # noqa: E402
 
-EDF5 = r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 5'
-EDF6 = r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
 OUT = os.path.join(ROOT, 'edf5port', 'dlc')
 EDF5_ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'DX11.cpk')
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')
@@ -427,10 +426,13 @@ def verify(edf5: str, edf6: str) -> int:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--edf5', default=EDF5)
-    ap.add_argument('--edf6', default=EDF6)
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf5', default=gamedir.find_other(gamedir.EDF5, near=edf6))
+    ap.add_argument('--edf6', default=edf6)
     ap.add_argument('--verify', action='store_true', help='check the committed data instead of writing it')
     a = ap.parse_args(argv)
+    if not a.edf5:
+        ap.error('EDF5 not found: set EDF5_DIR or pass --edf5')
     if a.verify:
         return verify(a.edf5, a.edf6)
     generate(a.edf5, a.edf6)
