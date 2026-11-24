@@ -1118,6 +1118,9 @@ set_target_properties(frame_rate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 # The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
 add_test(NAME frame_pacing_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(frame_pacing_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The unlimited frame rate's stage 2 sites (src/frame_rate.cpp, docs/unlimited-fps-re.md): the gate, the guards, the input, the sync interval.
+add_test(NAME frame_rate_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # Each of the two waits installed on its own checks only (tests/frame_pacing_install_guard.py).
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).

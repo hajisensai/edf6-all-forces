@@ -50,6 +50,10 @@ constexpr unsigned kSteamCall=0x705633,kNetCall=0x705693,kNet=0x788460,kEosCall=
 constexpr unsigned kWindCall=0x7056BA,kWind=0x1230A0,kHoldOff=0x70595C;
 const unsigned char kSteamSig[]={0xFF,0x15,0x4F,0x11,0x05,0x01};   // call [SteamAPI_RunCallbacks]
 const unsigned char kHoldOffSig[]={0x8B,0x46,0x6C,0x85,0xC0,0x7E,0x11,0xFF,0xC8,0x89,0x46,0x6C};   // mov eax,[rsi+6Ch]; test; jle; dec; mov
+// The shared random number (1191 readers) Application::Update steps once a call: seed = seed*mult+0x269EC3.
+constexpr unsigned kRandomStep=0x705570,kRandomSeed=0x1F54128;
+const unsigned char kRandomStepSig[]={0x48,0xB9,0x65,0x89,0x07,0x6C,0x65,0x8B,0x58,0x5D,0x48,0x8B,0x05,0xA7,0xEB,0x84,0x01,
+                                      0x48,0x0F,0xAF,0xC1,0x48,0x05,0xC3,0x9E,0x26,0x00,0x48,0x89,0x05,0x96,0xEB,0x84,0x01};
 // The input: System::Update's call, the wrapper update's call, the input manager whose +0x5AE8 is the wrapper table.
 constexpr unsigned kSystemCall=0x705715,kSystemUpdate=0x1198DA0,kWrapCall=0x7058C7,kWrapUpdate=0x77320;
 constexpr unsigned kInputManager=0x20B28A0,kWrapTable=0x5AE8;
@@ -142,14 +146,14 @@ void WindGuard(void* self) { if(Steps())reinterpret_cast<VoidFn>(image+kWind)(se
 // A 0-tick frame's wrappers: the edges the UI saw last frame cleared, the values as the sources hold them now.
 void ClearForUi(unsigned char* table) noexcept {
     for(unsigned p=0;p<kPlayers;++p) {
-        unsigned char* const player=table+p*kPlayerSize;
+        unsigned char* const block=table+p*kPlayerSize;
         for(unsigned at=kWrapFirst;at<kWrapEnd;at+=kWrapSize) {
-            unsigned char* const w=player+at;
+            unsigned char* const w=block+at;
             const unsigned char* const src=*reinterpret_cast<unsigned char* const*>(w);
             if(src && !src[0x4D])std::memcpy(w+0xC,src+0x48,4);
             w[0x11]=w[0x12]=w[0x13]=0;
         }
-        for(unsigned mask:{kMaskPressed,kMaskRepeat,kMaskReleased})std::memset(player+mask,0,4);
+        for(unsigned mask:{kMaskPressed,kMaskRepeat,kMaskReleased})std::memset(block+mask,0,4);
     }
 }
 
@@ -238,6 +242,33 @@ bool InstallGate() noexcept {
     return ok;
 }
 
+// The random step (34 bytes, rax and rcx dead after it) becomes a call to a leaf stub and NOPs; the stub steps the
+// seed only on a frame with ticks, so the sequence follows the ticks as at 60 fps: `cmp dword [r14+4],0; je 1f;
+// mov rcx,mult; mov rax,[seed]; imul rax,rcx; add rax,269EC3h; mov [seed],rax; 1: ret`.
+bool InstallRandomStep() noexcept {
+    if(!edf::Matches(image,kRandomStep,kRandomStepSig,sizeof(kRandomStepSig)))return false;
+    unsigned char leaf[]={0x41,0x83,0x7E,0x04,0x00,0x74,0x28,
+                          0x48,0xB9,0x65,0x89,0x07,0x6C,0x65,0x8B,0x58,0x5D,
+                          0x48,0xA1,0,0,0,0,0,0,0,0,
+                          0x48,0x0F,0xAF,0xC1,0x48,0x05,0xC3,0x9E,0x26,0x00,
+                          0x48,0xA3,0,0,0,0,0,0,0,0,
+                          0xC3};
+    const auto seed=reinterpret_cast<std::uintptr_t>(image+kRandomSeed);
+    std::memcpy(leaf+19,&seed,sizeof(seed));
+    std::memcpy(leaf+39,&seed,sizeof(seed));
+    unsigned char* const at=static_cast<unsigned char*>(edf::AllocateNearCode(image+kRandomStep,leaf,sizeof(leaf)));
+    if(!at)return false;
+    unsigned char* const site=image+kRandomStep;
+    const auto delta=at-(site+5);
+    if(delta>0x7FFFFFF0 || delta<-0x7FFFFFF0)return false;
+    unsigned char call[sizeof(kRandomStepSig)];
+    std::memset(call,0x90,sizeof(call));
+    call[0]=0xE8;
+    const auto rel=static_cast<std::int32_t>(delta);
+    std::memcpy(call+1,&rel,4);
+    return edf::PatchCode(site,kRandomStepSig,call,sizeof(call));
+}
+
 int InstallGuards() noexcept {
     int done=0;
     bool changed=false;
@@ -253,6 +284,7 @@ int InstallGuards() noexcept {
         void* const at=edf::AllocateNearCode(image+kHoldOff,leaf,sizeof(leaf));
         if(at && PatchCall(kHoldOff,at))++done;
     }
+    if(InstallRandomStep())++done;
     return done;
 }
 
@@ -304,11 +336,11 @@ void InstallFrameRate() noexcept {
     const int guards=InstallGuards();
     const int takes=InstallInputTakes();
     const bool sync=InstallSync();
-    if(guards!=5 || takes!=2 || !sync) {
-        Log("FRAMERATE guards %d/5, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,takes,sync);
+    if(guards!=6 || takes!=2 || !sync) {
+        Log("FRAMERATE guards %d/6, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,takes,sync);
         return;
     }
     gateOn=InstallGate();
-    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/5, input takes %d/2, sync=%d",cap,gateOn,guards,takes,sync);
+    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/6, input takes %d/2, sync=%d",cap,gateOn,guards,takes,sync);
 }
 }  // namespace crew
