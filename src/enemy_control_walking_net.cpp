@@ -10,6 +10,7 @@
 #include "enemy_control.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include "command_identity.h"
 #include "support_soldier.h"
 #include <cmath>
@@ -47,7 +48,7 @@ struct Stream {
     float point[3]{};unsigned action=0;std::uint64_t next=1,applied=0;unsigned head=0,count=0;
     Part guns[kGuns]{};Event queue[kQueued]{};Receipt receipts[kQueued]{};Replay replay{};
 };
-Stream streams[kRoots]{};unsigned char* admittedImage=nullptr;bool installed=false;
+LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 using VoidFn=void(__fastcall*)(void*);
 template<class T>T Fn(unsigned rva) noexcept {
 #ifdef ENEMY_CONTROL_WALKING_NET_TEST
@@ -93,6 +94,7 @@ Stream* Find(const NativeLease& l) noexcept {
 Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || image!=admittedImage || !Family(l) || !Current(Reference(l),false))return nullptr;
     if(auto* s=Find(l))return s->authority==authority ? s : nullptr;
+    if(!streams.Allocate("walking net streams"))return nullptr;
     for(auto& s:streams)if(!s.rootHeld) {
         if(!Pin(Reference(l)))return nullptr;s.root=Reference(l);s.rootHeld=true;s.profile=l.profile;s.authority=authority;return &s;
     }

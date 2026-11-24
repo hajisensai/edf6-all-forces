@@ -7,7 +7,7 @@
 #include "../src/enemy_control_walking_parts.h"
 #include "../src/crew.h"
 #include "../src/memory.h"
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 #include "../src/enemy_control_walking_parts.cpp"
 namespace {
 using namespace crew;using namespace crew::enemy_native;using namespace crew::enemy_native::walking_parts;
@@ -36,7 +36,7 @@ void __fastcall Delete(void* object){if(!object)return;auto* p=static_cast<unsig
 Peer* Owner(void* root){for(auto& p:peers)if(root==p.body)return &p;return nullptr;}
 NativeLease LeaseFor(Peer& p,unsigned family=0){NativeLease l{};l.object=p.body;l.control=p.control;l.profile=profiles+family;return l;}
 void Reset(unsigned count=2) {
- std::memset(streams,0,sizeof(streams));for(auto& s:streams)s.next=1;walking_parts::scope=nullptr;
+ for(auto& s:streams){std::memset(&s,0,sizeof(s));s.next=1;}walking_parts::scope=nullptr;
  std::memset(peers,0,sizeof(peers));weakTable[0]=reinterpret_cast<void*>(&Destroy);weakTable[1]=reinterpret_cast<void*>(&Destroy);Identity(identity);
  for(unsigned n=0;n<2;++n){auto& p=peers[n];p.offset=n ? 987.0f : 123.0f;Weak(p.body,p.control);Put<void*>(p.body,0x28,p.body);
   Put<void*>(p.body,0x17F0,p.groups);Put<std::size_t>(p.body,0x17F8,2);Put<std::size_t>(p.body,0x1800,2);

@@ -36,3 +36,25 @@
   - 带 `obj+0x380` 0x8000000 位的对象（唯一写入 `0x6E1162`，推测是生成器 / 传送出来的敌人，M）默认**不登记**（`0x6EEDBD` / `0x6EEDC9`），除非本关脚本调 `SetRagdollManagerAcceptGeneratorObjectMode(true)`（`0x1BAA20`，置 `mgr+0x18` bit0，`0x6EF0D0` 每关清零）。
   - 所以 testrange 用 `CreateEnemyGroup` 的 stress / swarm 是 512、进池；用 `SetEnemyGenerator` 出兵的场景（如 `testrange/sub_vs_mothership.py`）尸体不受这个池约束。「规模变大尸体不会无限堆积」只对已登记的布娃娃成立。来源：QQ 群反馈（及开，2026-11-08）。
 - 音频与渲染不在关键路径上（各自线程，等游戏线程）。
+
+## 插件占游戏线程多少（mod-1，2026-11-24 重量）
+
+按帧口径重新量（测量线 A 之后，PERF 是每帧；旧数是每步）。数据来自 `tmp/perf/base-stress_*` 的 rip_sampler 采样，`perf_report` 的「the plugin on the stack (the measurement probes not counted)」行：游戏线程样本里，栈上有任一插件帧（perfprobe 的转发钩子不算）的比例。
+
+| 场景 | 插件占游戏线程 | 每帧 | 每步（3 步 / 帧，stress:10 约 1.08） |
+|---|---|---|---|
+| `stress:10` | 29.5% | 5.34 ms | 约 4.9 ms |
+| `stress:30` | 33.7% | 25.34 ms | 约 8.4 ms |
+| `stress:100` | 36.4% | 74.39 ms | 约 24.8 ms |
+
+`stress:100` 插件内各项（ms / 帧，含被调用者）：
+
+- `ThinkHook` 53.5：其中 Think 40.6、Drive 23.3。
+- `ShotOk` / `ShotClearOf` 13：其中 `Grid::Capsule` 12.1，`npc::ShotClear` 自身 9.65。
+- `ArmsOf` 11.5：几乎全是 `PrefetchReadableSpans`（11.5）。
+- `Readable` 8.4。
+- `RenderHook` 8.0、`InputHook` 5.2、`PickTarget` 4.8、`WastedFire` 4.4、`Gather` 2.6。
+
+PERF MEM（每步）：`stress:100` 约 79.7k 次 Readable、7070 次工作集查询、4.3–4.7 ms；`stress:30` 34k 次、2250 次、1.27 ms。
+
+E 线先后按这张表排：Readable / 工作集查询（cpu-2）最大，其次是 ShotClear 的胶囊遍历、RenderHook、Drive。
