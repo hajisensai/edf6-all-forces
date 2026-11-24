@@ -280,7 +280,8 @@ int main() {
     Tick(true,false);
     Check(soldier->target.obj==other && q->routeActive,"nearby combat retains its target during route updates");
     const auto* battlePos=Pos(units[0]);const float battleEye[3]={battlePos[0],battlePos[1]+kEye,battlePos[2]};
-    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0]),nullptr,battleEye,battlePos,q,npcFixtureMs);
+    ArmsSeen battleArms{};
+    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0],battleArms),nullptr,battleEye,battlePos,q,npcFixtureMs);
     Check(std::strcmp(battle.move,"combat spot")==0,"actual Drive selects combat movement ahead of the support route");
     world.enemies=0;wall=true;
     for(int i=0;i<12;++i)Tick(true,false);
