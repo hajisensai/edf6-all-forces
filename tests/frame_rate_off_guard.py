@@ -78,7 +78,8 @@ check(view_install and view_install.group(1).find('frameobjects::Install();') > 
       'frameobjects::Install after every failing return of framerateview::Install')
 objs = code(read('src', 'frame_rate_objects.cpp'))
 for entry, guard in (('void Sample() noexcept {', 'if(on)'), ('void Pose(float alpha,', 'if(on '),
-                     ('void Restore() noexcept {', 'if(on '), ('void NoteRootRefusal(', 'if(on ')):
+                     ('void Restore() noexcept {', 'if(on '), ('void SceneOver() noexcept {', 'if(!on)'),
+                     ('void NoteRootRefusal(', 'if(on ')):
     at = objs.find(entry)
     check(at >= 0 and guard in objs[at:objs.find('\n}', at)], f'frameobjects {entry.split("(")[0].split()[-1]} does nothing before Install')
 check(callers['InstallGate()'] == ['frame_rate.cpp'], f"InstallGate only in frame_rate.cpp: {callers['InstallGate()']}")

@@ -46,17 +46,21 @@ struct Col { std::uint32_t signature,offset,ctorOffset,type,hierarchy,self; };
 struct Hierarchy { std::uint32_t signature,attributes,count,bases; };
 struct Base { std::uint32_t type,contained; std::int32_t member,vbase,vdisp; std::uint32_t attributes,hierarchy; };
 struct Binding { const void* vtable=nullptr; std::size_t complete=0,member=0; int rule=-1; std::size_t extra=0; };
+// A model vtable's verdict (IsModel's RTTI walk), once per vtable.
+struct ModelVt { const void* vtable=nullptr; bool model=false; };
 struct Cache {
     const unsigned char* base=nullptr;
-    std::size_t size=0,count=0;
+    std::size_t size=0,count=0,modelCount=0;
     std::array<Binding,256> bindings{};
+    std::array<ModelVt,64> models{};
 };
 // This accessor is explicitly game-thread-only. It never caches a live object/model
 // pointer: an object's array may relocate or its parts may be removed between frames.
 thread_local Cache cache;
 
-template<class T> bool Read(const void* p,T* out) noexcept {
-    if(!Readable(p,sizeof(T)))return false;
+// live: the caller holds the object live and reads under __try (EnemyModelsLive): Readable is not asked.
+template<class T> bool Read(const void* p,T* out,bool live=false) noexcept {
+    if(!live && !Readable(p,sizeof(T)))return false;
     std::memcpy(out,p,sizeof(T));return true;
 }
 bool Profile() noexcept {
@@ -128,37 +132,46 @@ Binding Resolve(const void* object,const void* vt) noexcept {
     }
     return result;
 }
-bool IsModel(const void* model) noexcept {
-    if(!Readable(model,kModelBytes))return false;
-    const void* vt=nullptr;const void* registered=nullptr;
-    if(!Read(model,&vt) || !Read(static_cast<const unsigned char*>(model)+0x10,&registered) || !registered)return false;
-    // FP chains slot 1 in place. RTTI/vtable identity survives that chain.
-    if(vt==image+kAnimationVtable)return true;
+// The RTTI verdict of a model's vtable: an AnimationModel at offset 0. -1: its metadata could not be read (not kept).
+int ModelByRtti(const void* model) noexcept {
     Col col{};Hierarchy h{};
-    if(!Metadata(model,&col,&h) || col.offset)return false;
+    if(!Metadata(model,&col,&h))return -1;
+    if(col.offset)return 0;
     for(std::uint32_t i=0;i<h.count;++i) {
         Base b{};
-        if(!BaseAt(h,i,&b))return false;
+        if(!BaseAt(h,i,&b))return -1;
         if(TypeIs(b.type,".?AVAnimationModel@@"))return b.member==0 && b.vbase==-1;
     }
-    return false;
+    return 0;
+}
+bool IsModel(const void* model,bool live) noexcept {
+    if(!live && !Readable(model,kModelBytes))return false;
+    const void* vt=nullptr;const void* registered=nullptr;
+    if(!Read(model,&vt,live) || !Read(static_cast<const unsigned char*>(model)+0x10,&registered,live) || !registered)
+        return false;
+    // FP chains slot 1 in place. RTTI/vtable identity survives that chain.
+    if(vt==image+kAnimationVtable)return true;
+    // The verdict depends on the vtable only (its [-1] locator and the image's RTTI): walked once per vtable.
+    for(std::size_t i=0;i<cache.modelCount;++i)if(cache.models[i].vtable==vt)return cache.models[i].model;
+    const int verdict=ModelByRtti(model);
+    if(verdict>=0 && cache.modelCount<cache.models.size())cache.models[cache.modelCount++]=ModelVt{vt,verdict==1};
+    return verdict==1;
 }
 // The object's binding (resolved once per vtable, up to the cache's size; past it into `uncached`), null when its vtable
 // cannot be read.
-const Binding* BindingOf(const void* object,Binding& uncached) noexcept {
+const Binding* BindingOf(const void* object,Binding& uncached,bool live) noexcept {
     const void* vt=nullptr;
-    if(!Read(object,&vt))return nullptr;
+    if(!Read(object,&vt,live))return nullptr;
     for(std::size_t i=0;i<cache.count;++i)if(cache.bindings[i].vtable==vt)return &cache.bindings[i];
     uncached=Resolve(object,vt);
     if(cache.count<cache.bindings.size()){cache.bindings[cache.count]=uncached;return &cache.bindings[cache.count++];}
     return &uncached;
 }
-}  // namespace
 
-std::size_t EnemyModels(const void* object,const void** out,std::size_t capacity) noexcept {
+std::size_t Models(const void* object,const void** out,std::size_t capacity,bool live) noexcept {
     if(!object || !out || !capacity || !Profile())return 0;
     Binding uncached{};
-    const Binding* const binding=BindingOf(object,uncached);
+    const Binding* const binding=BindingOf(object,uncached,live);
     if(!binding || binding->rule<0)return 0;
     const auto raw=reinterpret_cast<std::uintptr_t>(object);
     if(raw<binding->complete || binding->member>(std::numeric_limits<std::uintptr_t>::max)()-(raw-binding->complete))return 0;
@@ -166,30 +179,50 @@ std::size_t EnemyModels(const void* object,const void** out,std::size_t capacity
     const Rule& rule=kRules[static_cast<std::size_t>(binding->rule)];
     std::size_t n=0;
     auto add=[&](const void* model) noexcept {
-        if(n==capacity || !IsModel(model))return;
+        if(n==capacity || !IsModel(model,live))return;
         for(std::size_t i=0;i<n;++i)if(out[i]==model)return;
         out[n++]=model;
     };
     if(rule.array) {
         const unsigned char* models=nullptr;std::size_t count=0;
-        if(!Read(owner+rule.model+8,&models) || !Read(owner+rule.model+0x18,&count) ||
-           count>kMostModels || !Readable(models,count*kHumanoidStride))return 0;
+        if(!Read(owner+rule.model+8,&models,live) || !Read(owner+rule.model+0x18,&count,live) ||
+           count>kMostModels || (count && !models) || (!live && !Readable(models,count*kHumanoidStride)))return 0;
         for(std::size_t i=0;i<count && n<capacity;++i)add(models+i*kHumanoidStride);
     } else add(owner+rule.model);
     if(binding->extra)add(owner+binding->extra);
     return n;
 }
-const void* EnemyModel(const void* object) noexcept {
-    const void* model=nullptr;EnemyModels(object,&model,1);return model;
-}
-Family EnemyFamily(const void* object) noexcept {
+Family FamilyOf(const void* object,bool live) noexcept {
     if(!object)return Family::kNone;
     Binding uncached{};
-    const Binding* const binding=BindingOf(object,uncached);
+    const Binding* const binding=BindingOf(object,uncached,live);
     if(!binding || binding->rule<0)return Family::kNone;
     const auto rule=static_cast<std::size_t>(binding->rule);
     if(rule==kHumanRule)return Family::kHuman;
     if(rule==kVehicleRule)return Family::kVehicle;
     return Family::kOther;
+}
+}  // namespace
+
+std::size_t EnemyModels(const void* object,const void** out,std::size_t capacity) noexcept {
+    return Models(object,out,capacity,false);
+}
+const void* EnemyModel(const void* object) noexcept {
+    const void* model=nullptr;EnemyModels(object,&model,1);return model;
+}
+Family EnemyFamily(const void* object) noexcept {
+    return FamilyOf(object,false);
+}
+std::size_t EnemyModelsLive(const void* object,const void** out,std::size_t capacity) noexcept {
+    return Models(object,out,capacity,true);
+}
+const void* EnemyModelLive(const void* object) noexcept {
+    const void* model=nullptr;Models(object,&model,1,true);return model;
+}
+Family EnemyFamilyLive(const void* object) noexcept {
+    return FamilyOf(object,true);
+}
+bool IsAnimationModel(const void* model) noexcept {
+    return model && Profile() && IsModel(model,false);
 }
 }  // namespace crew::thermal

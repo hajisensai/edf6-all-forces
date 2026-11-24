@@ -11,6 +11,7 @@
 #include "gravity_net.h"
 #include "floatgun.h"
 #include "firstperson.h"
+#include "frame_rate_objects.h"
 #include "mission_watch.h"
 #include "transport.h"
 #include "turretaim.h"
@@ -104,7 +105,10 @@ const unsigned char kFreeGroupSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xE
                                      0x00,0x83,0xFF,0x02};   // ... mov rcx,[0x20B29A8]; mov edx,edi; call 0x7A2EE0; cmp edi,2
 using ReleaseGroupFn=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t);
 std::uintptr_t __fastcall ReleaseGroupHook(std::uintptr_t manager,std::uintptr_t group) {
-    if(static_cast<std::uint32_t>(group)==kSceneGroup)SceneOver();
+    if(static_cast<std::uint32_t>(group)==kSceneGroup) {
+        SceneOver();
+        frameobjects::SceneOver();   // the unlimited frame rate's weak counts on the scene's objects (frame_rate_objects.h)
+    }
     return reinterpret_cast<ReleaseGroupFn>(image+kReleaseGroup)(manager,group);
 }
 

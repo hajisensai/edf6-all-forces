@@ -47,6 +47,7 @@
 #include "crew.h"
 #include "memory.h"
 #include <cstring>
+#include <new>
 #include <vector>
 
 namespace crew {
@@ -392,8 +393,25 @@ void TakeCounts(unsigned& blendedOut,unsigned& unblendedOut,unsigned& rootsOut,u
     blended=unblended=rootsPosed=rootsLeft=rootsRefused=0;
 }
 
+// The pose tables' sizes (a frame's most: the player's soldier, vehicle and weapons), before anything is patched; no
+// throw leaves here (Install is noexcept).
+bool ReserveTables() noexcept {
+    try {
+        posed.reserve(kMostInsts*(kMostWeapons+2));
+        posedBefore.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
+        posedAfter.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
+        return true;
+    } catch(const std::bad_alloc&) {
+        return false;
+    }
+}
+
 bool Install() noexcept {
     if(on)return true;
+    if(!ReserveTables()) {
+        Log("FRAMERATE no memory for the pose tables: no interpolation");
+        return false;
+    }
     if(!edf::Matches(image,kCameraStepCall-5,kCameraStepSig,sizeof(kCameraStepSig))) {
         Log("FRAMERATE the camera step's call (0x%X) is not where docs/unlimited-fps-re.md has it: no interpolation",kCameraStepCall);
         return false;
@@ -420,9 +438,6 @@ bool Install() noexcept {
         Log("FRAMERATE the camera step's call could not be redirected: no interpolation");
         return false;
     }
-    posed.reserve(kMostInsts*(kMostWeapons+2));
-    posedBefore.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
-    posedAfter.reserve(kMostInsts*(kMostWeapons+2)*kMostBones*16);
     frameobjects::Install();
     on=true;
     return true;
