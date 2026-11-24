@@ -1,8 +1,8 @@
-// The gunner seats' shared enemy points (src/enemy_points.h) offline: for any vehicle, visiting the side's copy gives
+// The gunner seats' shared enemy points (common/edf/enemy_points.h) offline: for any vehicle, visiting the side's copy gives
 // exactly the visits the live registry walk (heli.cpp ForEachEnemyOf / VisitEnemies) gives it -- the same objects and
 // aim points in the same order, the vehicle itself left out -- also after some of them died since the copy was taken.
 //   cmake --build build --target enemy_points_check && build\enemy_points_check.exe      (exit code 1 on a failure)
-#include "../src/enemy_points.h"
+#include "edf/enemy_points.h"
 #include <cstdio>
 #include <limits>
 #include <memory>

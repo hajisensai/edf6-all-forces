@@ -447,13 +447,14 @@ add_executable(body_mark_check EXCLUDE_FROM_ALL tools/body_mark_check.cpp)
 target_link_libraries(body_mark_check PRIVATE edf6common_dyn)
 target_compile_options(body_mark_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(body_mark_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# The gunner seats' shared enemy points (tools/enemy_points_check.cpp, src/enemy_points.h).
+# The gunner seats' shared enemy points (tools/enemy_points_check.cpp, common/edf/enemy_points.h).
 add_executable(enemy_points_check EXCLUDE_FROM_ALL tools/enemy_points_check.cpp)
 target_include_directories(enemy_points_check PRIVATE common)
 target_compile_options(enemy_points_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(enemy_points_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-# The soldiers' frame grid (tools/npc_grid_check.cpp, src/npc_grid.h): its answers are the brute-force scans'.
+# The soldiers' frame grid (tools/npc_grid_check.cpp, common/edf/npc_grid.h + src/npc_grid.h): its answers are the brute-force scans'.
 add_executable(npc_grid_check EXCLUDE_FROM_ALL tools/npc_grid_check.cpp)
+target_include_directories(npc_grid_check PRIVATE common)
 target_compile_options(npc_grid_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(npc_grid_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The battle-size tables' key index (tools/hash_index_check.cpp, common/edf/hash_index.h).
