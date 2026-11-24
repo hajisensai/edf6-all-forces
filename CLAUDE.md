@@ -28,6 +28,11 @@
 - `docs/`：逆向笔记（`*-re.md`）、`feedback-*`（用户原话）、`plan-*` / `feature-*`、`reviews/`。草稿放 `tmp/`（不入库），写完再挪进 `docs/`。
 - `testhub/`：测试站 https://edf6.fushi.moe（Cloudflare Worker + D1 + R2）。部署一律加 `--config wrangler.toml`；原版任务脚本只放测试站，不进公开仓库。
 
+## 逆向
+
+- 静态逆向先查原版代码索引 `D:\APP\edf6-all-forces\vanilla-code`（入口 [README.md](../vanilla-code/README.md)；不在本仓库，本机独有）：`EDF.dll` / `EDF6.exe` 完整汇编、Ghidra 伪代码、`vanilla.sqlite`。在该目录运行 `python -B vanilla.py show|c|refs|notes|find|vtable <hex rva>`，再按需用 `tools/edfre.py` 手工反汇编。伪代码的类型和变量名是 Ghidra 猜的，结论以汇编为准。派做逆向的子代理时把这个索引告诉它。
+- 有新发现就写回 vanilla-code，不只留在本仓库笔记里：函数名 → `function-labels.tsv`（填 evidence 与 source）；调用流程 → `代码流程.md`；手工重建的函数 → `pseudocode-manual/EDF.dll/`。本仓库的 `docs/*-re.md` 照常写，重建数据库时 `vanilla.py build` 会把其中的地址收进 `notes`。
+
 ## 构建
 
 - `build.cmd`；C++17、`/W4 /WX /utf-8 /permissive-`，**警告即错误**。
