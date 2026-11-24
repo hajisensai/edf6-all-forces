@@ -14,6 +14,16 @@ void Log(const char*,...) noexcept {}
 const unsigned char* riddenHuman=nullptr;   // the soldier HumanOnFoot says is riding
 bool HumanOnFoot(const unsigned char* human) noexcept { return human!=riddenHuman; }
 namespace scopelens { bool SetBeforeProject(BeforeProjectFn) noexcept { return false; } }
+// The other objects' layer (frame_rate_objects.cpp, PR-e) reads the game's object tables: not exercised here, only
+// counted, so its calls ride the same frames as the player's root.
+namespace frameobjects {
+int installs=0,samples=0,poses=0,restores=0,refusals=0;
+void Install() noexcept { ++installs; }
+void Sample() noexcept { ++samples; }
+void Pose(float,const void*,const void*,const float*) noexcept { ++poses; }
+void Restore() noexcept { ++restores; }
+void NoteRootRefusal(framerate::Refusal) noexcept { ++refusals; }
+}  // namespace frameobjects
 
 namespace {
 int checks=0,failures=0;
