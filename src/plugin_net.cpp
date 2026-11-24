@@ -3,6 +3,7 @@
 #define _CRT_RAND_S
 #include <cstdlib>
 #include "plugin_net.h"
+#include "net_counters.h"
 #include "crew.h"
 #include "support_protocol.h"
 #include <cstring>
@@ -105,6 +106,7 @@ void Update(const Room& next,std::uint64_t now) noexcept {
 
 bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept {
     if(!bytes || size<4)return false;
+    netcount::In(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
     if(wire::HeadWord(bytes,size,0)==kRosterMagic) {
         if(ready)ReceiveRoster(peer,bytes,size);
         return true;
@@ -129,7 +131,9 @@ bool PeerHas(std::uint32_t peer,std::uint32_t featureBit) noexcept {
     return ready && peer && peer<=room.context.peerCount && peers.Has(peer,featureBit);
 }
 bool Send(std::uint32_t peer,std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept {
-    return bytes && size && size<=kMaxPayload && PeerHas(peer,featureBit) && room.context.send(peer,bytes,size);
+    if(!(bytes && size && size<=kMaxPayload && PeerHas(peer,featureBit) && room.context.send(peer,bytes,size)))return false;
+    netcount::Out(featureBit,size);   // counted only (PERF NET CHANNELS, net_counters.h)
+    return true;
 }
 std::uint32_t Broadcast(std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept {
     std::uint32_t sent=0;

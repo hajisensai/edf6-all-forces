@@ -21,6 +21,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "keyconfig.h"
 #include "crew.h"
+#include "perf_probe.h"
 #include "pvp.h"
 #include "enemy_control.h"
 #include "enemy_control_net.h"
@@ -850,35 +851,45 @@ int TeamObjects(std::int32_t team) noexcept {
 
 // The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
 // how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
+// This hook runs once a simulation STEP (the player soldier's pre-update, guarded by GameFrame), and a frame steps the
+// scene 0..3 times (System::update 0x1199713 loop, n clamped at 0x11A2F76): the frames themselves are timed on the main
+// loop by perf_probe.cpp. Here: the steps, how far apart (a frame's draw and wait fall between its last step and the
+// next frame's first), and what each step asked of memory.
 constexpr ULONGLONG kPerfMs=5000;
 constexpr double kPerfSlowMs=33.4;
 constexpr double kPerfLateMs=20.0;   // over one 1/60 s tick and its jitter: a frame that took two (frame_pacing.cpp)
-struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow,late; ULONGLONG at; } perf{};
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned steps; ULONGLONG at; } perf{};
 void PerfTick() noexcept {
     LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
     if(perf.last.QuadPart) {
         const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
-        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;perf.late+=ms>kPerfLateMs;if(ms>perf.worst)perf.worst=ms;}
+        if(ms<1000.0){perf.sum+=ms;++perf.steps;if(ms>perf.worst)perf.worst=ms;}
     }
     perf.last=now;
     const ULONGLONG t=GetTickCount64();
     if(t-perf.at<kPerfMs)return;
-    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over %.0f ms",perf.frames,
-        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.late,kPerfLateMs,perf.slow,kPerfSlowMs);
-    // what the frames carried (the stress runs: how many there really were, not how many the mission asked for)
-    if(Cfg().debug && perf.frames)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
+    const perfprobe::Frames fr=perfprobe::TakeFrames();
+    if(Cfg().debug && fr.frames)Log("PERF %u frames, %u steps: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over "
+        "%.0f ms; a step every %.1f ms (%.0f steps/s), worst %.1f ms",fr.frames,fr.steps,fr.sum/fr.frames,1000.0*fr.frames/fr.sum,
+        fr.worst,fr.over20,kPerfLateMs,fr.over33,kPerfSlowMs,perf.steps ? perf.sum/perf.steps : 0.0,
+        perf.sum>0.0 ? 1000.0*perf.steps/perf.sum : 0.0,perf.worst);
+    else if(Cfg().debug && perf.steps)Log("PERF %u steps (no frame hook): a step every %.1f ms (%.0f steps/s), worst %.1f ms",
+        perf.steps,perf.sum/perf.steps,1000.0*perf.steps/perf.sum,perf.worst);
+    // what the steps carried (the stress runs: how many there really were, not how many the mission asked for)
+    if(Cfg().debug && perf.steps)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
         TeamObjects(2));
     // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
     // the system calls left with their time
     const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only
-    if(Cfg().debug && perf.frames) {
-        const double f=static_cast<double>(perf.frames),tick=1000.0/static_cast<double>(hz.QuadPart);
-        Log("PERF MEM a frame: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
+    if(Cfg().debug && perf.steps) {
+        const double f=static_cast<double>(perf.steps),tick=1000.0/static_cast<double>(hz.QuadPart);
+        Log("PERF MEM a step: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
             static_cast<double>(r.asks)/f,static_cast<double>(r.pageHits)/f,static_cast<double>(r.wsCalls)/f,
             static_cast<double>(r.wsPages)/f,static_cast<double>(r.wsTicks)*tick/f,static_cast<double>(r.vqCalls)/f,
             static_cast<double>(r.vqTicks)*tick/f);
     }
-    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=perf.late=0;
+    perfprobe::Report(fr.frames);
+    perf.at=t;perf.worst=perf.sum=0.0;perf.steps=0;
 }
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
