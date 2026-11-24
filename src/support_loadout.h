@@ -541,7 +541,7 @@ inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoad
 // Bit 63: applied (the unit is made from the variant's file; clear: the host only tells what it wanted, the unit is
 // stock, a peer without the file writes it to its pending list). Bit 62: a vehicle loadout (else a soldier look).
 // A look: bit 0 primary set, bit 1 secondary set, bits 2-25 primary, 26-49 secondary, 50-57 the backpack weapon
-// (npc_pack_table.h code; sent only to peers that announced kExtBackpack, support_protocol.h). A loadout: bits 0-2 pylons,
+// (npc_pack_table.h code). A loadout: bits 0-2 pylons,
 // bit 3 the tank's AP gun, bits 4-59 a pylon a byte (store code, then the round code in the high nibble).
 // A mech loadout (body mech): bits 62 and 61, bits 0-37 mech_loadout.h MechVariantBits.
 inline constexpr std::uint64_t kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62,kVariantMech=1ull<<61;

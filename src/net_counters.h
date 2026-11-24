@@ -13,7 +13,7 @@ constexpr unsigned kRows=32;
 inline Row out[kRows],in[kRows];
 inline std::atomic<unsigned> walks{0};
 inline std::atomic<long long> walkTicks{0};
-// One message under `key` (a feature bit sent, a head word received): its row found or taken (open addressing; a key
+// One message under `key` (its channel's head word, sent or received): its row found or taken (open addressing; a key
 // keeps its row, the 33rd distinct key is not counted).
 inline void Count(Row* rows,std::uint32_t key,std::size_t bytes) noexcept {
     const unsigned long long k=static_cast<unsigned long long>(key)+1;
@@ -26,7 +26,7 @@ inline void Count(Row* rows,std::uint32_t key,std::size_t bytes) noexcept {
         return;
     }
 }
-inline void Out(std::uint32_t featureBit,std::size_t bytes) noexcept { Count(out,featureBit,bytes); }
+inline void Out(std::uint32_t head,std::size_t bytes) noexcept { Count(out,head,bytes); }
 inline void In(std::uint32_t head,std::size_t bytes) noexcept { Count(in,head,bytes); }
 // One native world walk of the NetId resolver and its QPC ticks.
 inline void Walk(LONGLONG ticks) noexcept {

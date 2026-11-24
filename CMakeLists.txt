@@ -1174,8 +1174,7 @@ add_test(NAME rescue_support_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 # The installer's logs send only crash dumps this install wrote (tools/testhub.py dump_matches).
 add_test(NAME testhub_dump_source COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/testhub_dump_source_test.py")
 set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
-# The rescue's cancel reasons, its takeoff point, and the room's build notice (pure: src/rescue_logic.h, support_entry.h,
-# version_notice.h).
+# The rescue's cancel reasons and its takeoff point (pure: src/rescue_logic.h, support_entry.h).
 add_executable(rescue_logic_test tests/rescue_logic_test.cpp)
 target_compile_options(rescue_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME rescue_logic COMMAND rescue_logic_test)
@@ -2604,6 +2603,8 @@ set_tests_properties(enemy_control_native_net_audit PROPERTIES SKIP_RETURN_CODE 
 edf6_feedback_fixture(enemy_control_pose_protocol_test enemy_control_pose_protocol tests/enemy_control_pose_protocol_test.cpp)
 
 edf6_feedback_fixture(enemy_control_pose_codec_test enemy_control_pose_codec tests/enemy_control_pose_codec_test.cpp)
+# Guest pose timeline for the fallback classes (net-9): src/enemy_control_pose_interp.h, pure.
+edf6_feedback_fixture(enemy_control_pose_interp_test enemy_control_pose_interp tests/enemy_control_pose_interp_test.cpp)
 
 edf6_feedback_fixture(edf41hector_control_fixture edf41hector_control tests/edf41hector_control_fixture.cpp)
 

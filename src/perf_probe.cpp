@@ -401,7 +401,7 @@ void Report(unsigned frames) noexcept {
             "call %.2f); skin palettes %.1f, %.3f ms",q/f,qp/f,qw/f,qt/f,qwt/f,qx,pa/f,pat/f);
     }
     char out[700],in[700];
-    const int no=NetRows(netcount::out,"bit 0x%X",out,sizeof(out)),ni=NetRows(netcount::in,"head 0x%08X",in,sizeof(in));
+    const int no=NetRows(netcount::out,"head 0x%08X",out,sizeof(out)),ni=NetRows(netcount::in,"head 0x%08X",in,sizeof(in));
     const unsigned w=netcount::walks.exchange(0,std::memory_order_relaxed);
     const double wt=static_cast<double>(netcount::walkTicks.exchange(0,std::memory_order_relaxed))*tickMs;
     if(Cfg().debug && (no || ni || w))

@@ -26,7 +26,9 @@ constexpr std::uint32_t kMagic=0x4c544345u,kCapability=5;
 // enemy player in PvP) goes by its reference; a version-5 peer is left out the same way.
 // Version 7 (2026-10-31): the controller's manual focus (Input focusRef, input version 4) and the Deiroi entity shot's
 // lock target are references too, and a player target not here is an empty actor, not a pending one.
-constexpr std::uint8_t kVersion=7;
+// Version 8 (2026-11-24, net-9): the pose payload is pose wire version 2 (enemy_control_pose_codec.h: the host's frame and
+// measured motion per sample); the guest interpolates it per logic frame instead of writing each sample on arrival.
+constexpr std::uint8_t kVersion=8;
 constexpr std::size_t kMaxPeers=32,kMaxLeases=16,kMaxInputBytes=512,kChunkBytes=512,kWirePrefixBytes=192,kWireBytes=kWirePrefixBytes+kMaxInputBytes,kMaxPoseBytes=512,kMaxActions=1024,kActionWindow=128;
 using ActionIndex=std::uint16_t;
 static_assert(kMaxActions<=static_cast<std::size_t>((std::numeric_limits<ActionIndex>::max)())+1,"all shared action pool indices must fit without truncation");
@@ -86,7 +88,12 @@ struct Hooks {
     bool (*NormalizeInput)(void*,std::uint64_t,const LeaseSpec&,const InputMeta&,void*,std::size_t)=nullptr;
     // Real SDK backlog, independent of native Applied ACKs. wouldBlock retains the queued action unchanged.
     SendResult (*TrySendAction)(void*,std::uint32_t,const void*,std::size_t)=nullptr;
+    // The host's poses as a state stream (EDF6Coop extension ABI 2, plugin_net.h SendState): unreliable, only the newest of
+    // a lease slot kept (object: the lease's slot, < kMaxLeases). Required: Configure refuses a backend without it.
+    bool (*SendState)(void*,std::uint32_t,std::uint32_t,const void*,std::size_t)=nullptr;
 };
+// A pose is one part (one wire message), so a state message is a whole pose and one lost or overtaken is only skipped.
+static_assert(kMaxPoseBytes==kChunkBytes,"a pose fits one part");
 inline bool ValidPuid(const char* value) noexcept {
     if(!value || !value[0])return false;
     for(std::size_t i=0;i<65;++i){const auto b=static_cast<unsigned char>(value[i]);if(!b)return true;if(b<33 || b>126)return false;}
@@ -110,6 +117,10 @@ inline bool SameSpec(const LeaseSpec& a,const LeaseSpec& b) noexcept {
     return a.requesterPlayer==b.requesterPlayer && a.target==b.target && a.profileHash==b.profileHash && !std::strcmp(a.ownerPuid,b.ownerPuid);
 }
 enum class Kind : std::uint8_t { Hello=1,Welcome,Request,Reject,Prepare,Prepared,Begin,Started,Activate,InputRequest,Input,Exit,Fault,End,Restored,Ended,Activated,Active,Cancel,CancelAck,Pose,Action,ActionAck,Drain,DrainAck,Abort,ActionAckBatch };
+// A message this channel takes as a state message: a pose (the kind at byte 5, after the magic and the version).
+inline bool PoseState(const void* bytes,std::size_t size) noexcept {
+    return bytes && size>5 && static_cast<const std::uint8_t*>(bytes)[5]==static_cast<std::uint8_t>(Kind::Pose);
+}
 enum AckSignal : std::uint16_t { ackApplied=1,ackPrepared=2,ackStarted=4,ackActivated=8,ackDrained=16,ackRestored=32,ackFault=64 };
 constexpr std::size_t kAckEntryBytes=48,kAckBatchEntries=(kMaxInputBytes-8)/kAckEntryBytes;
 inline std::uint16_t AckSignalFor(Kind kind) noexcept {
@@ -203,8 +214,6 @@ public:
     // Real extension transport has a bounded inbox. Frame pacing retains native batches in the existing pool;
     // exhausted quota is not a Send failure. The caller advances this once per actual shared game frame.
     bool SetReliableOrderedTransport(bool enabled) noexcept {if(HasCurrent())return false;paced_=enabled;return true;}
-    // Compatibility spelling for the pure fixtures; enabling asserts the same reliable ordered SDK contract.
-    bool SetSendPacing(bool enabled) noexcept {return SetReliableOrderedTransport(enabled);}
     void TransportFrame(std::uint64_t now) noexcept;
     void Tick(const Context&,std::uint64_t now) noexcept;
     // Claim every ECTL packet, even malformed ones, so it cannot be repolled as another protocol.
@@ -283,6 +292,7 @@ private:
     bool HooksReady() const noexcept;
     bool Send(std::uint32_t peer,Message message) noexcept;
     bool Broadcast(Message message) noexcept;
+    bool BroadcastState(std::uint32_t object,Message message) noexcept;
     void Welcome() noexcept;
     Lease* Find(std::uint64_t id) noexcept {for(auto& l:leases_)if(l.view.id==id && l.view.phase!=Phase::empty)return &l;return nullptr;}
     Lease* Slot() noexcept {for(auto& l:leases_)if(!Current(l.view.phase) && l.view.localRestored)return &l;return nullptr;}
@@ -333,10 +343,10 @@ inline void Protocol::UpdateRequest(const Lease& l) noexcept {
 }
 inline bool Protocol::HooksReady() const noexcept {
     return context_.localCapability==kCapability && hooks_.Send && hooks_.Authenticate && hooks_.Resolve && hooks_.Prepare && hooks_.Begin &&
-        hooks_.ValidateInput && hooks_.ApplyInput && hooks_.Restore && hooks_.Activate;
+        hooks_.ValidateInput && hooks_.ApplyInput && hooks_.Restore && hooks_.Activate && hooks_.SendState;
 }
 inline bool Protocol::Configure(Hooks hooks) noexcept {
-    if(HasCurrent() || Unrestored())return false;hooks_=hooks;return true;
+    if(HasCurrent() || Unrestored() || !hooks.SendState)return false;hooks_=hooks;return true;
 }
 inline bool Protocol::Ready() const noexcept {
     if(!live_ || blocked_ || !HooksReady())return false;
@@ -362,6 +372,11 @@ inline bool Protocol::Send(std::uint32_t peer,Message m) noexcept {
 }
 inline bool Protocol::Broadcast(Message m) noexcept {
     bool sent=true;for(std::uint32_t p=1;p<=context_.peerCount;++p)if(!Send(p,m))sent=false;return sent;
+}
+inline bool Protocol::BroadcastState(std::uint32_t object,Message m) noexcept {
+    m.epoch=context_.epoch;std::uint8_t bytes[kWireBytes]{};const auto size=EncodedSize(m);
+    if(!live_ || !hooks_.SendState || !Encode(m,bytes,size))return false;
+    bool sent=true;for(std::uint32_t p=1;p<=context_.peerCount;++p)if(!hooks_.SendState(hooks_.user,p,object,bytes,size))sent=false;return sent;
 }
 inline bool Protocol::Auth(std::uint32_t peer,const char* puid) const noexcept {
     if(!ValidPuid(puid) || !peer || peer>context_.peerCount)return false;
@@ -600,7 +615,9 @@ inline bool Protocol::SubmitPose(std::uint64_t id,const void* bytes,std::size_t 
         const auto offset=static_cast<std::size_t>(index)*kChunkBytes;
         const auto remaining=size-offset;m.inputSize=static_cast<std::uint16_t>(remaining<kChunkBytes ? remaining : kChunkBytes);
         std::memcpy(m.input.data(),static_cast<const std::uint8_t*>(bytes)+offset,m.inputSize);
-        if(!Broadcast(m)){blocked_=true;End(*l,Result::SendFailed,now);return false;}
+        if(!BroadcastState(static_cast<std::uint32_t>(l-leases_.data()),m)) {
+            blocked_=true;End(*l,Result::SendFailed,now);return false;
+        }
     }
     return true;
 }
@@ -993,9 +1010,11 @@ inline bool Protocol::Receive(std::uint32_t peer,const char* authenticatedPuid,c
             TryAction(*l,now);
         }
     } else if(m.kind==Kind::Pose && l->view.phase==Phase::active) {
+        // Not newer: an old one, dropped. Newer by more than one: those between lost or overtaken (a pose may come as a
+        // state message, never retransmitted); each pose is whole (one part), so the newest is taken as it is.
         if(m.sequence<=l->poseSequence)return true;
         const auto parts=m.capability>>16,index=m.capability&0xFFFFu;
-        if(m.sequence!=l->poseSequence+1 || !SameSpec(m.spec,l->view.spec) || m.request!=l->request ||
+        if(!SameSpec(m.spec,l->view.spec) || m.request!=l->request ||
            !hooks_.ApplyPose || !hooks_.Authenticate(hooks_.user,l->view.spec.ownerPuid,l->view.spec.requesterPlayer)) {
             Fault(*l,Result::InvalidInput,now);return true;
         }

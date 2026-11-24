@@ -5,8 +5,6 @@
 #include "plugin_net.h"
 #include "net_counters.h"
 #include "crew.h"
-#include "support_protocol.h"
-#include <cstring>
 
 namespace crew::plugin_net {
 namespace {
@@ -14,65 +12,13 @@ Registry registry;
 Peers peers;
 Room room{};
 bool ready=false;
-// The room the peers' words and the channels' state are of (plugin_net_logic.h RoomWatch): a change (another epoch, host,
-// roster size, this machine) forgets the words and resets every channel.
+// The room the joins and the channels' state are of (plugin_net_logic.h RoomWatch): a change (another epoch, host,
+// roster size, this machine) forgets the joins and resets every channel.
 RoomWatch roomWatch;
 std::uint32_t roomGeneration=0;   // RoomGeneration: each change and each whole reset
-// Host: the roster last sent, and when.
-std::uint64_t rosterSum=0,rosterAt=0;
-constexpr std::uint64_t kRosterGapMs=3000;   // sent again this often (and at once on a change): a guest that missed one
-int rosterLogs=0;
-
-std::uint64_t Sum(const RosterEntry* e,std::size_t n) noexcept {
-    std::uint64_t h=1469598103934665603ull;
-    for(std::size_t i=0;i<n;++i) {
-        for(const char* c=e[i].puid;*c;++c)h=(h^static_cast<unsigned char>(*c))*1099511628211ull;
-        h=(h^e[i].ext)*1099511628211ull;
-    }
-    return h^n;
-}
-
-void SendRoster(std::uint64_t now) noexcept {
-    const std::uint32_t count=room.context.peerCount;
-    static RosterEntry entries[kMaxPeers+1];
-    std::size_t n=0;
-    const char* own=room.context.localPuid;
-    if(ValidPuid(own)){strcpy_s(entries[n].puid,own);entries[n].ext=room.ownExt;++n;}
-    for(std::uint32_t p=1;p<=count && room.puid;++p) {
-        const char* id=room.puid(p);
-        if(!peers.Known(p) || !ValidPuid(id))continue;
-        strcpy_s(entries[n].puid,id);entries[n].ext=peers.Ext(p);++n;
-    }
-    if(!n)return;
-    const std::uint64_t sum=Sum(entries,n);
-    if(sum==rosterSum && now-rosterAt<kRosterGapMs)return;
-    rosterSum=sum;rosterAt=now;
-    unsigned char bytes[kMaxPayload];
-    for(std::size_t first=0;first<n;first+=kRosterPerMessage) {
-        const std::size_t part=n-first<kRosterPerMessage ? n-first : kRosterPerMessage;
-        const std::size_t used=EncodeRoster(entries+first,part,bytes,sizeof(bytes));
-        if(used)Broadcast(support_net::kExtPeerRoster,bytes,used);
-    }
-}
-
-void ReceiveRoster(std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
-    if(room.context.host || peer!=room.context.hostPeer || !room.puid)return;   // the host's word alone
-    RosterEntry entries[kRosterPerMessage];
-    std::size_t n=0;
-    if(!DecodeRoster(bytes,size,entries,&n)) {
-        if(rosterLogs++<4)Log("PLUGIN NET the host's roster could not be read (%zu bytes)",size);
-        return;
-    }
-    for(std::size_t i=0;i<n;++i)for(std::uint32_t p=1;p<=room.context.peerCount;++p) {
-        const char* id=room.puid(p);
-        if(id && !std::strcmp(id,entries[i].puid)){peers.Set(p,entries[i].ext);break;}
-    }
-}
-
 }  // namespace
 
 bool RegisterChannel(const Channel& channel) noexcept {
-    if(channel.magic==kRosterMagic)return false;
     const bool ok=registry.Register(channel);
     if(!ok)Log("PLUGIN NET channel %s not registered (full, or its magic taken)",channel.name ? channel.name : "?");
     return ok;
@@ -83,7 +29,7 @@ void Update(const Room& next,std::uint64_t now) noexcept {
     const CommandNetworkContext& c=room.context;
     const bool up=c.ready && c.send && c.peerCount && c.peerCount<=kMaxPeers;
     const RoomStep step=roomWatch.See(c,up);
-    if(step.forgetPeers){peers.Reset();rosterSum=0;rosterAt=0;}
+    if(step.forgetPeers)peers.Reset();
     if(step.resetChannels) {
         Log("PLUGIN NET the room changed (epoch %llu, %u peers, host peer %u%s): every channel reset",
             static_cast<unsigned long long>(c.epoch),c.peerCount,c.hostPeer,c.host ? ", hosting" : "");
@@ -92,33 +38,21 @@ void Update(const Room& next,std::uint64_t now) noexcept {
         registry.ResetAll();   // before any channel's update of the new room
     }
     ready=up;
-    if(ready && c.host && room.heard) {
-        for(std::uint32_t p=1;p<=c.peerCount;++p) {
-            const std::uint32_t ext=room.heard(p);
-            if(!ext){if(peers.Known(p))peers.Forget(p);continue;}
-            if(!peers.Known(p) || peers.Ext(p)!=ext)peers.Set(p,ext);
-        }
-        SendRoster(now);
-    }
     for(std::size_t i=0;i<registry.Count();++i)if(registry.At(i).update)registry.At(i).update(c,now);
-    if(ready)peers.Joins(registry,c.peerCount,[](std::size_t i,std::uint32_t p) noexcept {registry.At(i).joined(p);});
+    if(ready && room.peersReady)peers.Joins(registry,c.peerCount,[](std::size_t i,std::uint32_t p) noexcept {registry.At(i).joined(p);});
 }
 
-bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept {
+bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,bool state) noexcept {
     if(!bytes || size<4)return false;
     netcount::In(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
-    if(wire::HeadWord(bytes,size,0)==kRosterMagic) {
-        if(ready)ReceiveRoster(peer,bytes,size);
-        return true;
-    }
-    return registry.Dispatch(peer,puid,bytes,size,now,[](std::uint32_t p,std::uint32_t bit) noexcept {return peers.Has(p,bit);})!=Route::none;
+    return registry.Dispatch(peer,puid,bytes,size,now,state)!=Route::none;
 }
 
 void Reset() noexcept {
     ++roomGeneration;
     ready=false;
     registry.ResetAll();
-    peers.Reset();rosterSum=0;rosterAt=0;
+    peers.Reset();
     roomWatch.Reset();
 }
 
@@ -127,22 +61,30 @@ std::uint32_t RoomGeneration() noexcept { return roomGeneration; }
 bool Host() noexcept { return ready && room.context.host; }
 std::uint32_t HostPeer() noexcept { return ready && !room.context.host ? room.context.hostPeer : 0u; }
 std::uint32_t PeerCount() noexcept { return ready ? room.context.peerCount : 0u; }
-bool PeerHas(std::uint32_t peer,std::uint32_t featureBit) noexcept {
-    return ready && peer && peer<=room.context.peerCount && peers.Has(peer,featureBit);
-}
-bool Send(std::uint32_t peer,std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept {
-    if(!(bytes && size && size<=kMaxPayload && PeerHas(peer,featureBit) && room.context.send(peer,bytes,size)))return false;
-    netcount::Out(featureBit,size);   // counted only (PERF NET CHANNELS, net_counters.h)
+bool Send(std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
+    if(!(ready && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.send(peer,bytes,size)))return false;
+    netcount::Out(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
     return true;
 }
-std::uint32_t Broadcast(std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept {
+std::uint32_t Broadcast(const void* bytes,std::size_t size) noexcept {
     std::uint32_t sent=0;
-    for(std::uint32_t p=1;ready && p<=room.context.peerCount;++p)if(Send(p,featureBit,bytes,size))++sent;
+    for(std::uint32_t p=1;ready && p<=room.context.peerCount;++p)if(Send(p,bytes,size))++sent;
     return sent;
 }
-bool SendHost(std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept {
+bool SendHost(const void* bytes,std::size_t size) noexcept {
     const std::uint32_t host=HostPeer();
-    return host && Send(host,featureBit,bytes,size);
+    return host && Send(host,bytes,size);
+}
+bool SendState(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t size) noexcept {
+    if(!(ready && key && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.sendState &&
+         room.context.sendState(peer,key,bytes,size)))return false;
+    netcount::Out(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
+    return true;
+}
+std::uint32_t BroadcastState(std::uint32_t key,const void* bytes,std::size_t size) noexcept {
+    std::uint32_t sent=0;
+    for(std::uint32_t p=1;ready && p<=room.context.peerCount;++p)if(SendState(p,key,bytes,size))++sent;
+    return sent;
 }
 std::uint32_t NewOrigin() noexcept {
     unsigned r=0;
