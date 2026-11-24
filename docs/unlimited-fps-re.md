@@ -247,6 +247,14 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 只改呈现，模拟与网络节奏不变（§4.2 让网络块保持原节奏），所以**不需要升房间协议**：同一房间里有人开、有人不开，模拟结果一样。
 阶段 2 实机要验证这一点（EDF6Coop 自己的每帧钩子在不在 n = 0 帧多跑，见 Coop 仓库）。
 
+插件自己的联机通道（2026-11-24 审查，`tests/frame_rate_net_guard.py`）：n = 0 帧不跑泵、不发包。泵 `RunSupportNetTick`
+（`support_net.cpp`）按 `GameFrame()` 去重，`GameFrame()` 只在 `SeeFrame` 读到 System+0xCE0 变了才推进；+0xCE0 只在
+`0x1198EEA` / `0x1198FDA` 写，后者在 tick 循环里，n = 0 时 `0x1198FB3` 跳过整个循环。`SeeFrame` 只在 tick 内调用（载具输入、
+NPC Think、空母激光、支援分派、PvP）。直接发包的点都在 tick 路径上或是一次性事件，周期重发按时间或逻辑帧限频。每个渲染帧都跑的
+文件（HUD、Present、UI、窗口消息、fps-9 的几处、`map.cpp` 每帧钩子）不发包。低风险：`room_ui.cpp` 每帧调 `RoomPvpTick` 写
+EDF6Coop 大厅属性，值不变就跳过，被拒时按调用次数重试（高帧率下重试更频，不分歧）。EDF6Coop 自己的每帧工作挂在
+`0x7056AE`，由守卫限在 tick 帧；双机实测留给维护者（§7-5）。
+
 ## 5. 阶段与现状
 
 | 阶段 | 内容 | 现状 |

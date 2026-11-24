@@ -1128,6 +1128,9 @@ set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
 # FrameRateCap=0 installs nothing above 59.94 Hz; the developer switch FrameRateDev is gone (tests/frame_rate_off_guard.py).
 add_test(NAME frame_rate_off_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_off_guard.py")
+# 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
+# tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
+add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
