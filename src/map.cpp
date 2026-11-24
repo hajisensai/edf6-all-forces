@@ -110,7 +110,9 @@ const HudSig kHudSigs[]={{kHudShow,kHudShowCode,sizeof(kHudShowCode)},{0x1BA80D,
     {0x80843B,kRescueDraw,sizeof(kRescueDraw)},{0x803AC9,kCrossDraw,sizeof(kCrossDraw)},
     {0x118DF4F,kViewportStep,sizeof(kViewportStep)}};
 
-constexpr ULONGLONG kFreshMs=300;       // a pose / readout older than this (wall) is the map closed (paused, loading)
+// The pose / readout are the map's while stamped within stepfresh::kEveryStep steps (step_fresh.h; Frame publishes every
+// step the owner's soldier runs). The pause menu is an explicit state, not an age: the camera step (which runs under it)
+// drops the map's view and tells Frame, which closes the map on the next step (pauseSeen); a new mission: ResetMap.
 constexpr ULONGLONG kGatherMs=100;      // the marks gathered this often
 constexpr int kEaseIn=24,kEaseOut=15;   // frames the camera eases into the map's view and back out
 constexpr float kEyeClear=40.0f;        // m: the eye kept at least this over the ground under it
@@ -133,15 +135,16 @@ MarkerDtorFn nextMarkerDtor=nullptr;
 MarkerUpdateFn nextMarkerUpdate=nullptr;
 
 // --- What the game thread publishes (under `lock`) ---
-struct Pose { bool open; const void* human; float eye[3],look[3]; ULONGLONG at; };
+struct Pose { bool open; const void* human; float eye[3],look[3]; stepfresh::Step at; };
 Pose pose{};
 MapReadout readout{};
-ULONGLONG readoutAt=0;
+stepfresh::Step readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 ObjRef inputOwner{}; // published identity only, under lock; retained through closing-key drain
 std::atomic<bool> holds{false};
 mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
+std::atomic<bool> pauseSeen{false};   // the camera step saw the pause menu over the open map: Frame closes it
 
 // --- The game thread's own ---
 struct Keys { bool map,esc,centre,padMap,padClose,padCentre,stats; };
@@ -152,7 +155,8 @@ struct Game {
     mapcam::View view;
     Keys was;                   // the toggles as last read (a press is the edge)
     LARGE_INTEGER last;         // the last frame (dt)
-    ULONGLONG frameAt,gatherAt;  // wall ms: the last frame of the owner, the last gather
+    stepfresh::Step frameAt;    // the step of the owner's last frame
+    ULONGLONG gatherAt;         // wall ms: the last gather (kGatherMs cadence)
     int count;
     MapUnit unit[kMapUnits];
     int dots,larges;            // the small enemies' dots, the large enemies' pins (of `count`)
@@ -198,8 +202,9 @@ bool Down(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The magnified vehicle sight's claim on the wheel (sightzoom.cpp: its range setting), and its notches' delta.
 std::atomic<bool> scopeHolds{false};
-std::atomic<ULONGLONG> scopeHeldAt{0};   // wall: a claim not renewed for kScopeHoldMs lapses (the vehicle gone, a pause)
-constexpr ULONGLONG kScopeHoldMs=300;
+// The step of the claim (step_fresh.h): one not renewed for kEveryStep steps lapses (the vehicle gone); under the pause
+// menu (an explicit state) the wheel is the menu's.
+std::atomic<stepfresh::Step> scopeHeldAt{0};
 std::atomic<int> scopeWheel{0};
 LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_MOUSEWHEEL && holds.load(std::memory_order_relaxed)) {
@@ -207,7 +212,7 @@ LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
         return 0;   // the map's: not the game's weapon change
     }
     if(msg==WM_MOUSEWHEEL && scopeHolds.load(std::memory_order_relaxed) &&
-       GetTickCount64()-scopeHeldAt.load(std::memory_order_relaxed)<=kScopeHoldMs) {
+       stepfresh::Fresh(scopeHeldAt.load(std::memory_order_relaxed)) && !GamePaused()) {
         scopeWheel.fetch_add(GET_WHEEL_DELTA_WPARAM(wp),std::memory_order_relaxed);
         return 0;   // the sight's range drum, not the game's
     }
@@ -512,7 +517,7 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     const Config& c=Cfg();
     const unsigned char* body=Body(human);
     AcquireSRWLockExclusive(&lock);
-    pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},GetTickCount64()};
+    pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},stepfresh::Now()};
     MapReadout& r=readout;
     r.ownerHumanKey=reinterpret_cast<std::uintptr_t>(human);
     r.pad=g.pad;r.follow=g.follow;
@@ -653,14 +658,15 @@ bool Frame(unsigned char* human) noexcept {
     const ULONGLONG now=GetTickCount64();
     // One player (a second local player is never held: the map is the first one's while its frames come; the old one
     // is not read, it may be gone).
-    if(game.human.obj && game.human.obj!=human && now-game.frameAt<kFreshMs)return false;
+    if(game.human.obj && game.human.obj!=human && stepfresh::Fresh(game.frameAt))return false;
     if(!game.human.Is(human)){Close("another player");game.human=ObjRef::Of(human);game.was=Keys{true,true,true,true,true,true,true};}
     LARGE_INTEGER t,hz;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&hz);
     float dt=game.last.QuadPart ? static_cast<float>(t.QuadPart-game.last.QuadPart)/static_cast<float>(hz.QuadPart) : 0.0f;
     game.last=t;
     if(!(dt>0.0f) || dt>0.1f)dt=1.0f/60.0f;
-    if(game.open && now-game.frameAt>kFreshMs)Close("the game was paused");   // its Esc read by the pause menu, not here
-    game.frameAt=now;
+    // The pause menu came over the open map (Camera saw it): its Esc read by the pause menu, not here.
+    if(pauseSeen.exchange(false,std::memory_order_relaxed) && game.open)Close("the game was paused");
+    game.frameAt=stepfresh::Now();
     if(!c.enabled || !c.map){Close(c.enabled ? "Map=0" : "plugin off");return false;}
     const bool front=InFront();
     XINPUT_STATE padState{};
@@ -796,7 +802,10 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!cameraSession.Current(generation))return;
     // The camera's target: the soldier it follows (+0x350 its weak reference, +0x360 the SoldierBase cast of it).
     const bool mine=p.human && (At<const void*>(cam,kCamTargetRef)==p.human || At<const void*>(cam,kCamTarget)==p.human);
-    const bool mapOpen=p.open && mine && GetTickCount64()-p.at<=kFreshMs;
+    const bool fresh=p.open && mine && stepfresh::Fresh(p.at);
+    const bool paused=fresh && GamePaused();   // the pause menu: the stock view under it, the map closed on the next step
+    if(paused)pauseSeen.store(true,std::memory_order_relaxed);
+    const bool mapOpen=fresh && !paused;
     // The Tempest's TV (tvguide.cpp) shows through the same hook (one owner of the camera step) when the map does not.
     const void* tvHuman=nullptr;
     float tvEye[3],tvLook[3];
@@ -998,13 +1007,13 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
-    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;
+    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;pauseSeen.store(false,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
 }
 
 bool PlayerMap(MapReadout* out) noexcept {
     AcquireSRWLockShared(&lock);
-    const bool fresh=pose.open && readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=pose.open && stepfresh::Fresh(readoutAt);
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&lock);
     return fresh;
@@ -1029,7 +1038,7 @@ bool MapHidesStockHud(const void* camera) noexcept {
 int TakeScopeWheel(bool hold) noexcept {
     if(hold && !subclassed && InFront())Subclass();   // the window's wheel, first wanted here or by the map
     scopeHolds.store(hold,std::memory_order_relaxed);
-    if(hold)scopeHeldAt.store(GetTickCount64(),std::memory_order_relaxed);
+    if(hold)scopeHeldAt.store(stepfresh::Now(),std::memory_order_relaxed);
     static int rest=0;   // part of a notch left over (a smooth wheel's deltas)
     const int delta=scopeWheel.exchange(0,std::memory_order_relaxed);
     if(!hold){rest=0;return 0;}

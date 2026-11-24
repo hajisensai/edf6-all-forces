@@ -58,7 +58,11 @@ constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x2
                       kWeaponChargeNeed=0x22C,kWeaponReloadLeft=0xE68,kWeaponCharge=0xE7C;
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonLB=0x10,kButtonX=0x04;
-constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
+// Handoff freshness by the scene step (step_fresh.h): the player's readout / the UI snapshot are published every step
+// the player sits in a payload seat (PayloadFrame), so kEveryStep; a pick is refreshed by its seat's controller (the
+// player's PayloadFrame every step, an NPC gunner's native seat-fire / gunner pass at the AI's pace), so it keeps the
+// old 200 ms of a 60-step second, as steps: a slow frame no longer ages a pick its controller set in the last step.
+constexpr stepfresh::Step kPickFreshSteps=12;
 constexpr float kCoaxNpcM=900.0f;                 // an NPC crew's coaxial gun: targets this close (HasShot; a 7.62 mm
                                                   // coax's point-target reach, where its tracer burns out)
 constexpr float kCoaxCone=0.05f;                  // ...within this of its line (rad, ~3 degrees)
@@ -91,7 +95,7 @@ Class ClassOf(const void* v) noexcept {
 // `remote`: another machine's choice for a seat it runs (RemotePick), applied here so this copy's pulls land on it too.
 // `secondary`: the intrinsic weapon the seat's own secondary fires (IndependentSecondary: the BMPT's Ataka or 9M120F),
 // chosen apart from `weapon` (the primary's belt): the two controls fire at once, each its own pick.
-struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; unsigned char* secondary; bool held,ownHeld,listed,npc,nativeControl,remote; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
+struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; unsigned char* secondary; bool held,ownHeld,listed,npc,nativeControl,remote; stepfresh::Step seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
 // Online (seat_net.h Pick): the pick of a seat another machine runs (its player's, or the NPC gunner of the machine that
 // runs it), as its last message said: the weapon by its holder in the vehicle's holder array. And what this machine last
@@ -110,7 +114,7 @@ bool pickNetOk=false;
 struct SightPick { ObjRef vehicle,human; unsigned seat; PayloadFire control=PayloadFire::primary; bool primaryHeld,secondaryHeld; };
 SightPick sightPick{};
 PayloadReadout latest{};
-ULONGLONG latestMs=0;
+stepfresh::Step latestStep=0;
 // The local player's auto turrets switched on (1) / off (0) this mission; -1: as the ini's AutoTurrets says.
 int autoTurretsSet=-1;
 bool autoTurretHeld=false;
@@ -125,10 +129,10 @@ struct ChoiceContext {
 };
 ChoiceContext choiceContext{};
 PayloadReadout selectableLatest{};
-ULONGLONG selectableAt=0; // wall time; protected with the complete readout by choiceLock
+stepfresh::Step selectableAt=0; // the step published; protected with the complete readout by choiceLock
 std::uint64_t nextChoiceToken=0; // never reset across missions: delayed UI clicks cannot alias a new snapshot
-struct ChoiceRequest { std::uint64_t token; int seat,entry; ULONGLONG posted; };
-struct ChoicePublication { std::uint64_t token; int seat,count; bool selectable[kMostPayload]; ULONGLONG at; };
+struct ChoiceRequest { std::uint64_t token; int seat,entry; stepfresh::Step posted; };
+struct ChoicePublication { std::uint64_t token; int seat,count; bool selectable[kMostPayload]; stepfresh::Step at; };
 SRWLOCK choiceLock=SRWLOCK_INIT;
 ChoiceRequest choiceRequest{};
 ChoicePublication choicePublication{};
@@ -169,7 +173,7 @@ void PublishChoices(unsigned char* v,unsigned char* const* ws,PayloadReadout& r,
 // the complete UI readout share one lock/epoch; the draw thread sees no game pointers.
 void PublishSelectableSnapshot(const PayloadReadout& r) noexcept {
     AcquireSRWLockExclusive(&choiceLock);
-    selectableLatest=r;selectableAt=GetTickCount64();
+    selectableLatest=r;selectableAt=stepfresh::Now();
     choicePublication=ChoicePublication{};choicePublication.token=r.selectionToken;choicePublication.seat=r.seat;
     choicePublication.count=r.count;choicePublication.at=selectableAt;
     for(int i=0;i<r.count;++i)choicePublication.selectable[i]=r.entry[i].selectable;
@@ -181,16 +185,16 @@ int ConsumeChoice(const PayloadReadout& r) noexcept {
     const auto request=choiceRequest;choiceRequest=ChoiceRequest{};
     ReleaseSRWLockExclusive(&choiceLock);
     return request.token && request.token==r.selectionToken && request.seat==r.seat && request.entry>=0 && request.entry<r.count &&
-        GetTickCount64()-request.posted<=kFreshMs && r.entry[request.entry].selectable ? request.entry : -1;
+        stepfresh::Fresh(request.posted) && r.entry[request.entry].selectable ? request.entry : -1;
 }
 
-Pick* PickFor(const void* v,unsigned seat,ULONGLONG ms) noexcept {
+Pick* PickFor(const void* v,unsigned seat,stepfresh::Step step) noexcept {
     Pick* slot=nullptr;
     for(auto& p:picks) {
         if(p.ref.Is(v) && p.seat==seat)return &p;
-        if(!slot && (!p.ref || (p.ref.obj==v && !p.ref.Is(v)) || ms-p.seen>kFreshMs*10))slot=&p;
+        if(!slot && (!p.ref || (p.ref.obj==v && !p.ref.Is(v)) || !stepfresh::Fresh(p.seen,step,kPickFreshSteps*10)))slot=&p;
     }
-    if(slot){*slot=Pick{};slot->ref=ObjRef::Of(v);slot->seat=seat;slot->seen=ms;}
+    if(slot){*slot=Pick{};slot->ref=ObjRef::Of(v);slot->seat=seat;slot->seen=step;}
     return slot;
 }
 Pick* FindPick(const void* v) noexcept {
@@ -478,11 +482,11 @@ void __fastcall PullHook(unsigned char* holder) {
     const auto ctrl=At<const unsigned char*>(holder,kHolderCtrl);
     if(!ctrl || At<std::int32_t>(ctrl,8)==0)return;
     unsigned char* w=At<unsigned char*>(holder,kHolderWeapon);
-    const ULONGLONG ms=GameMs();
+    const stepfresh::Step step=stepfresh::Now();
     __try {
     if(Cfg().enabled)for(const auto& p:picks) {
         if(!Cfg().stockStores && !p.nativeControl)continue;
-        if(!p.redirects || ms-p.seen>kFreshMs || !Readable(p.ref.obj,kSelfCtrl+8) || !p.ref.Is(p.ref.obj))continue;
+        if(!p.redirects || !stepfresh::Fresh(p.seen,step,kPickFreshSteps) || !Readable(p.ref.obj,kSelfCtrl+8) || !p.ref.Is(p.ref.obj))continue;
         const auto v=static_cast<unsigned char*>(const_cast<void*>(p.ref.obj));
         if(p.seat>=SeatCount(v) || v[kDead])continue;
         const auto seat=SeatAt(v,p.seat);
@@ -600,9 +604,9 @@ void ApplyRemotePicks(unsigned char* v) noexcept {
         }
         unsigned char* const seat=SeatAt(v,r.seat);
         if(!RemoteSeat(v,seat,r.npc))continue;
-        Pick* const p=PickFor(v,r.seat,ms);
+        Pick* const p=PickFor(v,r.seat,stepfresh::Now());
         if(!p)continue;
-        p->remote=true;p->npc=r.npc;p->seen=ms;p->redirects=0;p->weapon=nullptr;p->secondary=nullptr;p->nativeControl=false;
+        p->remote=true;p->npc=r.npc;p->seen=stepfresh::Now();p->redirects=0;p->weapon=nullptr;p->secondary=nullptr;p->nativeControl=false;
         if(r.holder<0)continue;
         PayloadReadout pr{};unsigned char* ws[kMostPayload]{};
         pr.count=ReadSeat(v,r.seat,ClassOf(v),ws,pr,!r.npc);
@@ -938,11 +942,11 @@ void PayloadFrame(unsigned char* v) noexcept {
     }
     const int seat=PlayerSeatOf(v);
     if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};ClearChoiceContext(v);return;}
-    const ULONGLONG ms=GameMs();
-    Pick* const p=PickFor(v,static_cast<unsigned>(seat),ms);
+    const stepfresh::Step step=stepfresh::Now();
+    Pick* const p=PickFor(v,static_cast<unsigned>(seat),step);
     if(!p)return;
     const bool takeover=p->npc || p->remote;
-    p->seen=ms;p->npc=false;p->remote=false;
+    p->seen=step;p->npc=false;p->remote=false;
     const Class c=ClassOf(v);
     PayloadReadout r{};
     unsigned char* ws[kMostPayload]{};
@@ -998,7 +1002,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     for(unsigned char k=kSecondTriggerKey+1;k<=kFireLastKey;++k)in.keys[k]=PlayerKeyHeld(s,FireKeyVk(k),FireKeyButton(k));
     in.blocked=&FriendInLine;
     FireSeat(v,c,ws,r,in);
-    latest=r;latestMs=ms;PublishSelectableSnapshot(r);
+    latest=r;latestStep=step;PublishSelectableSnapshot(r);
     if(r.choices>=2 || p->weapon)SendPick(v,static_cast<unsigned>(seat),p->weapon,false);   // this seat's pick to its copies
 }
 
@@ -1051,10 +1055,10 @@ unsigned char* NpcPayloadPick(unsigned char* v,unsigned seat,float distance,bool
        BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return nullptr;
     const auto s=SeatAt(v,seat);
     if(!AiGunner(v,s))return nullptr;
-    Pick* const p=PickFor(v,seat,GameMs());
+    Pick* const p=PickFor(v,seat,stepfresh::Now());
     if(!p)return nullptr;
     const auto previous=p->remote ? nullptr : p->weapon;
-    p->seen=GameMs();p->npc=true;p->remote=false;p->nativeControl=NativePayloadControl(v,seat);p->redirects=0;p->weapon=nullptr;p->secondary=nullptr;
+    p->seen=stepfresh::Now();p->npc=true;p->remote=false;p->nativeControl=NativePayloadControl(v,seat);p->redirects=0;p->weapon=nullptr;p->secondary=nullptr;
     if(!std::isfinite(distance) || distance<=0.0f)return nullptr;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};
     r.count=ReadSeat(v,seat,ClassOf(v),ws,r,false);
@@ -1104,7 +1108,7 @@ unsigned char* NpcSecondarySelect(unsigned char* v,unsigned seat,float distance,
        seat>=SeatCount(v) || !AiGunner(v,SeatAt(v,seat)) || !std::isfinite(distance) || distance<=0.0f)return nullptr;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};
     const Class c=ClassOf(v);r.count=ReadSeat(v,seat,c,ws,r,false);
-    Pick* const p=PickFor(v,seat,GameMs());
+    Pick* const p=PickFor(v,seat,stepfresh::Now());
     const unsigned char* const previous=p && p->npc && !p->remote ? p->secondary : nullptr;
     unsigned char* best=nullptr;float score=-1.0f;
     for(int i=0;i<r.count;++i) {
@@ -1114,7 +1118,7 @@ unsigned char* NpcSecondarySelect(unsigned char* v,unsigned seat,float distance,
         if(ws[i]==previous)rank+=0.1f;   // stay on the round already locking
         if(rank>score){best=ws[i];score=rank;}
     }
-    if(p && p->npc && !p->remote){p->seen=GameMs();p->secondary=best;}
+    if(p && p->npc && !p->remote){p->seen=stepfresh::Now();p->secondary=best;}
     return best;
 }
 
@@ -1217,17 +1221,17 @@ void TwinBarrelFrame(unsigned char* v) noexcept {
 }
 
 bool PlayerPayload(PayloadReadout* out) noexcept {
-    if(!latestMs || GameMs()-latestMs>kFreshMs)return false;
+    if(!stepfresh::Fresh(latestStep))return false;
     *out=latest;
     return true;
 }
 
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     if(!token || seat<0 || entry<0 || entry>=kMostPayload)return false;
-    const ULONGLONG now=GetTickCount64();
+    const stepfresh::Step now=stepfresh::Now();
     AcquireSRWLockExclusive(&choiceLock);
     const bool valid=token==choicePublication.token && seat==choicePublication.seat && entry<choicePublication.count &&
-        choicePublication.selectable[entry] && now-choicePublication.at<=kFreshMs;
+        choicePublication.selectable[entry] && stepfresh::Fresh(choicePublication.at,now,stepfresh::kEveryStep);
     if(valid)choiceRequest=ChoiceRequest{token,seat,entry,now};
     ReleaseSRWLockExclusive(&choiceLock);
     return valid;
@@ -1236,7 +1240,7 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
 bool PlayerSelectablePayload(PayloadReadout* out) noexcept {
     if(!out)return false;
     AcquireSRWLockShared(&choiceLock);
-    const bool fresh=selectableAt && GetTickCount64()-selectableAt<=kFreshMs;
+    const bool fresh=stepfresh::Fresh(selectableAt);
     if(fresh)*out=selectableLatest;
     ReleaseSRWLockShared(&choiceLock);
     return fresh;
@@ -1299,11 +1303,11 @@ void PumpPayloadUi(unsigned char* human) noexcept {
 
 unsigned char* PayloadPicked(const void* vehicle) noexcept {
     const Pick* const p=FindPick(vehicle);
-    return p && p->weapon && GameMs()-p->seen<=kFreshMs ? p->weapon : nullptr;
+    return p && p->weapon && stepfresh::Fresh(p->seen,kPickFreshSteps) ? p->weapon : nullptr;
 }
 unsigned char* PayloadOwnSecondaryPicked(const void* vehicle) noexcept {
     const Pick* const p=FindPick(vehicle);
-    return p && p->secondary && GameMs()-p->seen<=kFreshMs ? p->secondary : nullptr;
+    return p && p->secondary && stepfresh::Fresh(p->seen,kPickFreshSteps) ? p->secondary : nullptr;
 }
 
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned index) noexcept {
@@ -1326,7 +1330,7 @@ int SeatFireWeapons(const void* vehicle,unsigned index,bool both,unsigned char**
         const Pick* pick=nullptr;
         // Selection ownership lasts until identity/seat/weapon changes, not until a HUD timer expires.
         // Every returned weapon still comes from the live ReadSeat set below. Fire redirects retain
-        // their separate kFreshMs guard in PullHook; a slow/pause frame never grants a stale shot.
+        // their separate kPickFreshSteps guard in PullHook; a slow/pause frame never grants a stale shot.
         if(current)for(const auto& p:picks)if(!p.npc && !p.remote && p.ref.Is(v) && p.seat==index){pick=&p;break;}
         const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
         const auto usable=[&](int i) -> bool {return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
@@ -1465,7 +1469,7 @@ bool PayloadAimWeapon(const void* vehicle,unsigned index,const void* source,cons
         if(OwnKey(ClassOf(v),ws[from])){*out=Spent(ws[from]) ? nullptr : ws[from];return true;}
         const Pick* picked=nullptr;
         for(const auto& p:picks)if(p.ref.Is(v) && p.seat==index && p.npc==npc && !p.remote){picked=&p;break;}
-        const bool fresh=picked && GameMs()-picked->seen<=kFreshMs && (Cfg().stockStores || picked->nativeControl);
+        const bool fresh=picked && stepfresh::Fresh(picked->seen,kPickFreshSteps) && (Cfg().stockStores || picked->nativeControl);
         bool catalogued=false;
         for(int i=0;i<r.count;++i)catalogued=catalogued || IsStoreWeapon(ws[i]);
         // Only managed payload/native-ammunition controllers opt an unmarked source into the peer's aiming path.
@@ -1491,7 +1495,7 @@ void ResetPayload() noexcept {
     for(auto& r:remotes)r=RemotePick{};
     pickGates.Reset();
     for(auto& x:sentPicks)x=SentPick{};
-    latest=PayloadReadout{};latestMs=0;
+    latest=PayloadReadout{};latestStep=0;
     sightPick=SightPick{};
     autoTurretsSet=-1;autoTurretHeld=false;
 }

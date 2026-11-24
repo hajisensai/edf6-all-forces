@@ -64,7 +64,8 @@
 namespace crew {
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept;
 namespace {
-constexpr ULONGLONG kFreshMs=300;        // a readout older than this (wall) is the map closed
+// Freshness by the scene step (step_fresh.h). The map closed is an explicit state: SuspendMapCommands (map.cpp Close,
+// the pause menu included) zeroes frameAt / readoutAt / view.at; the step count covers a frame no longer called.
 constexpr ULONGLONG kNoteMs=3000;        // the last command's word shown this long
 constexpr float kPointFar=8000.0f;       // m: the map ray under the pointer reaches this far
 constexpr float kPointerGain=1.0f;       // px (at 1080 lines) a mouse unit
@@ -88,7 +89,7 @@ struct Game {
     ObjRef selected[kCmdUnits]; // identity when selected; an address recycled since then is another unit
     mapcmd::UnitRef selRef[kCmdUnits]; // ...and its members' (a squad found again through any of them)
     Keys was;
-    ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
+    stepfresh::Step frameAt;    // the step of the last frame (0 / a gap: the map was closed, no edges the first frame)
     int count;
     Entry list[kCmdUnits];
     mapcmd::PointerPosition pointer; // placed once the first rendered viewport arrives
@@ -165,7 +166,8 @@ std::atomic<bool> pointerCaptured{false};
 // --- The view the HUD last drew the map with (under `viewLock`) ---
 constexpr int kUiItems=16;
 struct View {
-    float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
+    // at: the step the draw saw (stepfresh::kFromDraw)
+    float vp[16],w,h; stepfresh::Step at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
     int squads=0,payloads=0,panels=0,supports=0;
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupportHits]{};
     int supportEntry[kMapSupportHits]{};
@@ -187,7 +189,7 @@ SRWLOCK viewLock=SRWLOCK_INIT;
 // --- Published for the draw (under `lock`) ---
 MapCommandReadout readout{};
 MapEnemyControlReadout enemyReadout{};
-ULONGLONG readoutAt=0;
+stepfresh::Step readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 
 bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
@@ -1394,7 +1396,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.placeTop=g.place.category>=0 && g.place.category<debugspawn::kCategoryCount ? g.place.top[g.place.category] : 0;
     if(g.placeOn)std::memcpy(r.placeState,placeState,sizeof(placeState));
     enemyReadout=g.enemy;
-    readoutAt=GetTickCount64();
+    readoutAt=stepfresh::Now();
     ReleaseSRWLockExclusive(&lock);
 }
 }  // namespace
@@ -1414,10 +1416,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     AcquireSRWLockShared(&viewLock);
     v=view;
     ReleaseSRWLockShared(&viewLock);
-    const bool haveView=v.at && now-v.at<=kFreshMs && v.w>0.0f && v.h>0.0f;
+    const bool haveView=stepfresh::Fresh(v.at,stepfresh::kFromDraw) && v.w>0.0f && v.h>0.0f;
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
-    if(now-g.frameAt>kFreshMs) {
+    if(!stepfresh::Fresh(g.frameAt)) {
         g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};pointerCaptured.store(false);Arm(g,false,Order::none,-1);
         g.pvpPad={};pvpHoldsPad.store(false);pvpPadSelection.store(-1);
         g.enemyMenu={};g.enemyPadFire=false;enemyHoldsPad.store(false);
@@ -1425,7 +1427,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
-    g.frameAt=now;
+    g.frameAt=stepfresh::Now();
     const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) || (k.right && !g.was.right) ||
         (k.tab && !g.was.tab) || (k.hold && !g.was.hold) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
         (k.attackMove && !g.was.attackMove) ||
@@ -1714,7 +1716,7 @@ void ResetMapCommands() noexcept {
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
     if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
-    std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
+    std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -1785,7 +1787,7 @@ int MapPvpPadSelection() noexcept { return pvpPadSelection.load(); }
 bool ReadMapEnemyControl(MapEnemyControlReadout* out) noexcept {
     if(!out)return false;
     AcquireSRWLockShared(&lock);
-    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=stepfresh::Fresh(readoutAt);
     if(fresh)*out=enemyReadout;
     ReleaseSRWLockShared(&lock);return fresh;
 }
@@ -1838,7 +1840,7 @@ void MapCommandUiPanels(const float* rects,int n) noexcept {
 }
 
 void SuspendMapCommands() noexcept {
-    // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
+    // Closing the map ends a hover/press even if reopened at once (frameAt=0: the next frame is a first). Keep the user's selection.
     Game& g=game;
     EnemyControlHoldAbility(g.enemy.snapshot,0);
     npcmark::Assign(g.enemyCandidate,{});g.enemyMenu={};g.enemyPadFire=false;g.enemy={};enemyHoldsPad.store(false);
@@ -1853,7 +1855,7 @@ void SuspendMapCommands() noexcept {
 
 bool MapCommandEats(bool front) noexcept {
     Game& g=game;
-    if(GetTickCount64()-g.frameAt>kFreshMs)npcmark::Assign(g.hover,{});
+    if(!stepfresh::Fresh(g.frameAt))npcmark::Assign(g.hover,{});
     const int vk=Cfg().npcMarkKey;
     const bool down=front && vk>0 && Down(vk);
     if(!down || !npcmark::MarkOn()){g.eat=false;npcmark::Assign(g.eatHover,{});}
@@ -1950,7 +1952,7 @@ void MapCommandQueueTick() noexcept {
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {
     AcquireSRWLockShared(&lock);
-    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=stepfresh::Fresh(readoutAt);
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&lock);
     return fresh;

@@ -2490,8 +2490,6 @@ bool IsHelicopter(const void* vehicle) noexcept { return TypeOf(vehicle)!=nullpt
 // while it took +0x1610 for 70).
 namespace {
 constexpr std::size_t kLiftPerRotor=0x1610,kLiftMass=0x161C;
-constexpr ULONGLONG kCueFreshMs=300;
-
 // ---- A stock helicopter's stores weigh it (test hub #39; store_burden.h, docs/aircraft-re.md §2「挂载重量」) ----
 // Its mass over clean: seat 0's stores (stores.cpp ReadStores: the rounds left and the pylons they were loaded on) over
 // its class's clean mass (HeliType::mass). 1 for a plugin body (jet.cpp and the others weigh their own: BurdenOf), a
@@ -2511,7 +2509,8 @@ burden::HeliFlight FlightNow(const unsigned char* v) noexcept {
 }
 SRWLOCK cueLock=SRWLOCK_INIT;
 HeliCue cue{};
-ULONGLONG cueAt=0;
+// the step it was published in (step_fresh.h): HeliCueStep, every step the player's heli is on the ground
+stepfresh::Step cueStep=0;
 }  // namespace
 
 void HeliCueStep(unsigned char* v) noexcept {
@@ -2521,13 +2520,13 @@ void HeliCueStep(unsigned char* v) noexcept {
     if(!(lift>1e-3f) || !(mass>0.0f) || !std::isfinite(lift+mass))return;
     AcquireSRWLockExclusive(&cueLock);
     cue=HeliCue{At<float>(v,kRotor),aim::HoverRotor(lift,mass)};
-    cueAt=GetTickCount64();
+    cueStep=stepfresh::Now();
     ReleaseSRWLockExclusive(&cueLock);
 }
 
 bool PlayerHeliCue(HeliCue* out) noexcept {
     AcquireSRWLockShared(&cueLock);
-    const bool fresh=cueAt && GetTickCount64()-cueAt<=kCueFreshMs;
+    const bool fresh=stepfresh::Fresh(cueStep);
     if(fresh)*out=cue;
     ReleaseSRWLockShared(&cueLock);
     return fresh;
@@ -2942,7 +2941,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
 // The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
 SRWLOCK heliHudLock=SRWLOCK_INIT;
 PlayerHeliReadout heliHud{};
-ULONGLONG heliHudAt=0;
+// the step it was published in (step_fresh.h): PublishHud, every step the player flies it
+stepfresh::Step heliHudStep=0;
 void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,float clear,bool keys) noexcept {
     PlayerHeliReadout r{};
     HeliFlight& f=r.f;
@@ -2986,7 +2986,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     y.threats=n+locks;
     FuelGauge(v,&r.fuel);   // the tank the stock FUEL gauge showed (stockgauge.cpp): HeliStrip's line, LOW FUEL
     AcquireSRWLockExclusive(&heliHudLock);
-    heliHud=r;heliHudAt=GetTickCount64();
+    heliHud=r;heliHudStep=stepfresh::Now();
     ReleaseSRWLockExclusive(&heliHudLock);
 }
 
@@ -3270,7 +3270,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
 
 bool PlayerHeliHud(PlayerHeliReadout* out) noexcept {
     AcquireSRWLockShared(&heliHudLock);
-    const bool fresh=heliHudAt && GetTickCount64()-heliHudAt<=kCueFreshMs;
+    const bool fresh=stepfresh::Fresh(heliHudStep);
     if(fresh)*out=heliHud;
     ReleaseSRWLockShared(&heliHudLock);
     return fresh;

@@ -28,7 +28,8 @@ constexpr std::size_t kUses=0x8,kWeaks=0xC;
 constexpr std::size_t kCommands=0x2136FF0,kRing=0x28A8;
 // TraceCamera's creation description: its vtable (as stereo_camera 0xACD16 writes it), the followed camera's weak_ptr.
 constexpr std::size_t kDescVtable=0x1762178,kDescFollow=0x80,kDescSize=0xA0;
-constexpr ULONGLONG kFreshMs=200;    // a Want older than this: none (the camera step stopped running)
+// A Want is the recording's while stamped within stepfresh::kEveryStep steps (step_fresh.h; the camera step stopped
+// wanting it). Under the pause menu (explicit: the scope's soldier frame stops, infantryscope.cpp Live) none.
 constexpr ULONGLONG kJoinMs=3000;    // a lens camera not in viewport 3's list this long after its creation: refused
 using scopepip::kLensViewport;
 
@@ -130,7 +131,7 @@ std::atomic<bool> installed{false};
 // Any thread.
 std::atomic<const void*> wantCamera{nullptr};
 std::atomic<float> wantFov{0.0f};
-std::atomic<ULONGLONG> wantAt{0};
+std::atomic<stepfresh::Step> wantAt{0};
 std::atomic<bool> refused{false};
 std::atomic<int> side{0};
 
@@ -237,11 +238,10 @@ bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
 // Viewport 0's projection: whether this recording renders the lens.
 void ArmFor(unsigned char* system,unsigned char* camera) noexcept {
     mainCamera=camera;
-    const ULONGLONG now=GetTickCount64();
     const float scopeFov=wantFov.load(std::memory_order_acquire);
     const bool want=installed.load(std::memory_order_acquire) && !refused.load(std::memory_order_acquire) &&
                     camera && wantCamera.load(std::memory_order_acquire)==camera &&
-                    now-wantAt.load(std::memory_order_acquire)<=kFreshMs && scopeFov>0.0f;
+                    stepfresh::Fresh(wantAt.load(std::memory_order_acquire)) && !GamePaused() && scopeFov>0.0f;
     unsigned char* const main=Slot(system,0);
     const float w=static_cast<float>(At<int>(main,kSlotWidth)),h=static_cast<float>(At<int>(main,kSlotHeight));
     const float r=scopepip::LensRadius(w,h);
@@ -360,7 +360,7 @@ bool Installed() noexcept { return installed.load(std::memory_order_acquire); }
 
 void Want(const void* camera,float scopeFov) noexcept {
     wantFov.store(scopeFov,std::memory_order_release);
-    wantAt.store(GetTickCount64(),std::memory_order_release);
+    wantAt.store(stepfresh::Now(),std::memory_order_release);
     wantCamera.store(camera,std::memory_order_release);
 }
 bool Refused() noexcept { return refused.load(std::memory_order_acquire); }

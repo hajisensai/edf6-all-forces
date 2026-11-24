@@ -48,7 +48,10 @@ using seatsw::kSeatPad;using seatsw::kSeatButtons;
 constexpr std::size_t kSeatLeft=0x2C0,kSeatRight=0x2D0,kSeatTriggers=0x2E0;
 constexpr unsigned kAnnounce=0x5763E0,kSetAction=0x551C30,kRideAction=0x56C9F0,kReserve=0x633FE0,kClear=0x634940;
 constexpr unsigned kBoardTail=0x56D796,kVisitorBlend=0x572734,kClassTest=0x6346FC;
-constexpr ULONGLONG kPromptMs=4000,kRefusedMs=1500,kFreshMs=200;
+constexpr ULONGLONG kPromptMs=4000,kRefusedMs=1500;
+constexpr ULONGLONG kRiderGoneMs=2000;   // game ms: a rider's slot not seen this long is free again
+// The prompt is the HUD's while published within stepfresh::kEveryStep steps (step_fresh.h: the player's seat frame
+// runs once a step); the seat list (SeatList) is shown as long as that, the hints for their own durations.
 constexpr int kKeyRowSpecial=3;   // 0x56D7D8: a seat of this key row sets human +0x3F0
 constexpr int kNoneFree=-2;       // SeatPrompt::refused: the next-seat key found no free seat
 
@@ -91,13 +94,15 @@ struct Rider_ {
 };
 Rider_ riders[2]{};
 SeatPrompt latest{};
-ULONGLONG latestMs=0,shownUntil=0;
+stepfresh::Step latestStep=0;
+bool latestListed=false;   // the seat list on (SeatList): shown while fresh, shownUntil not its limit
+ULONGLONG shownUntil=0;
 
 Rider_* RiderFor(const unsigned char* human,ULONGLONG ms) noexcept {
     Rider_* slot=nullptr;
     for(auto& r:riders) {
         if(r.human.Is(human))return &r;
-        if(!slot && (!r.human || r.human.obj==human || ms-r.seen>kFreshMs*10))slot=&r;
+        if(!slot && (!r.human || r.human.obj==human || ms-r.seen>kRiderGoneMs))slot=&r;
     }
     if(slot){*slot=Rider_{};slot->human=ObjRef::Of(human);slot->refused=-1;}
     return slot;
@@ -238,8 +243,8 @@ void Publish(unsigned char* v,const unsigned char* human,bool keys,bool locked,c
         p.holder[i]=HolderOf(s,human);
         p.gun[i]=HasGun(s) || (i>0 && IsDreadnought(v));   // its turrets' seats: the plugin's guns, no holder of theirs
     }
-    latest=p;latestMs=ms;
-    const ULONGLONG until=Cfg().seatList ? ms+kFreshMs : r.promptUntil>r.refusedUntil ? r.promptUntil : r.refusedUntil;
+    latest=p;latestStep=stepfresh::Now();latestListed=Cfg().seatList;
+    const ULONGLONG until=r.promptUntil>r.refusedUntil ? r.promptUntil : r.refusedUntil;
     if(until>shownUntil)shownUntil=until;
 }
 
@@ -313,7 +318,7 @@ void SeatSwitchFrame(unsigned char* v) noexcept {
 
 bool PlayerSeatPrompt(SeatPrompt* out) noexcept {
     const ULONGLONG ms=GameMs();
-    if(!latestMs || ms-latestMs>kFreshMs || ms>=shownUntil)return false;
+    if(!stepfresh::Fresh(latestStep) || (!latestListed && ms>=shownUntil))return false;
     *out=latest;
     return true;
 }
@@ -330,6 +335,6 @@ bool InstallSeatSwitch() noexcept {
 
 void ResetSeatSwitch() noexcept {
     for(auto& r:riders)r=Rider_{};
-    latest=SeatPrompt{};latestMs=shownUntil=0;
+    latest=SeatPrompt{};latestStep=0;latestListed=false;shownUntil=0;
 }
 }  // namespace crew

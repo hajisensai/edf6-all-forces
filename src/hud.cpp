@@ -17,7 +17,8 @@
 // of it, with the player's position, is published as one snapshot (a triple buffer: the game thread never waits,
 // the draw thread always has a whole frame's copy, never half of one and half of the next). The draw reads only
 // the snapshot: it never touches a vehicle, allocates nothing and asks no VirtualQuery. The draw thread's clock
-// is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
+// is the scene step (step_fresh.h): a snapshot not published in the last steps (the shared frame tick stopped: no player,
+// mission over; a new mission's load makes every one stale) is not drawn; nothing is while the game is paused (GamePaused).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "cockpit_canvas.h"
@@ -126,8 +127,9 @@ const Sig kLangSigs[]={
 bool langOk=false;
 
 // --- What the game thread gathers (HudSee) and publishes (HudPublish) ---
-constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen this long (game ms) is not drawn,
-                                    // nor a snapshot this old (wall ms, the draw thread's clock)
+// A vehicle's readout is listed while HudSee saw it in the last steps (step_fresh.h: its input runs every step; one it
+// skipped is no longer NPC-driven, in range or there), and a snapshot is drawn while HudPublish published it in the last
+// steps: neither is a wall-clock window any more, so a slow frame (stress: 204 ms) never drops them.
 constexpr int kEntries=48,kMaxShown=12;
 struct Data {
     const void* key;              // the vehicle (its trail's key; never read through)
@@ -138,11 +140,11 @@ struct Data {
     char kind[16];
 };
 // Game thread only.
-struct Work { ObjRef ref; ULONGLONG seen; bool logged; Data d; };
+struct Work { ObjRef ref; stepfresh::Step seen; bool logged; Data d; };
 Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
-struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
+struct Snapshot { stepfresh::Step step; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue; bool emc; EmcCue emcCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
@@ -196,13 +198,13 @@ void Kind(Data& d,const char* kind) noexcept { strncpy_s(d.kind,kind,_TRUNCATE);
 
 // The vehicle's entry, a new one in a free slot, the slot of a gone object at the same address or of one not
 // seen for a while; nullptr with every slot a fresh one's (it is not shown).
-Work* WorkFor(const void* v,ULONGLONG ms) noexcept {
+Work* WorkFor(const void* v,stepfresh::Step step) noexcept {
     Work* slot=nullptr;
     for(auto& w:work) {
         if(w.ref.Is(v))return &w;
-        if(!slot && (!w.ref || w.ref.obj==v || ms-w.seen>kFreshMs*4))slot=&w;
+        if(!slot && (!w.ref || w.ref.obj==v || !stepfresh::Fresh(w.seen,step,4*stepfresh::kEveryStep)))slot=&w;
     }
-    if(slot)*slot=Work{ObjRef::Of(v),ms,false,{}};
+    if(slot)*slot=Work{ObjRef::Of(v),step,false,{}};
     return slot;
 }
 
@@ -2171,7 +2173,7 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
 // (amber) an up command refused on the ground; with the annunciator up (`annunciated`) those are its tiles instead.
 void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,bool annunciated,Line* lines,int* at,ULONGLONG now) noexcept {
     GearHud g{};
-    if(!GearHudLatest(&g) || now-g.tick>kFreshMs || *at+2>kMaxLines)return;
+    if(!GearHudLatest(&g) || !stepfresh::Fresh(g.step) || *at+2>kMaxLines)return;
     bool down=true,up=true;
     for(int i=0;i<kGearLegs;++i){down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;}
     // The lines first: the panel is as wide as they need (WEIGHT ON WHEELS, or a language's longer words, ran past it).
@@ -3541,7 +3543,8 @@ void HudSee(unsigned char* v) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dx=pos[0]-player.pos[0],dy=pos[1]-player.pos[1],dz=pos[2]-player.pos[2];
     if(Cfg().vehicleHudRange>0.0f && dx*dx+dy*dy+dz*dz>Cfg().vehicleHudRange*Cfg().vehicleHudRange)return;
-    Work* const w=WorkFor(v,ms);
+    const stepfresh::Step step=stepfresh::Now();
+    Work* const w=WorkFor(v,step);
     if(!w)return;
     Data d{};
     d.key=v;
@@ -3565,7 +3568,7 @@ void HudSee(unsigned char* v) noexcept {
     } else {
         d.top=4.0f;Kind(d,"npc");
     }
-    w->d=d;w->seen=ms;
+    w->d=d;w->seen=step;
     if(Cfg().debug && !w->logged) {
         w->logged=true;
         Log("HUD v=%p %s: hp %.0f/%.0f guns %d missiles %d drones %d fuel %.0fs%s",v,d.kind,d.hp,d.hpMax,d.guns,d.missiles,d.drones,
@@ -3575,9 +3578,8 @@ void HudSee(unsigned char* v) noexcept {
 
 void HudPublish() noexcept {
     if(!quadOk)return;
-    const ULONGLONG ms=GameMs();
     Snapshot& s=snaps[back];
-    s.tick=GetTickCount64();
+    s.step=stepfresh::Now();
     std::memcpy(s.me,player.pos,sizeof(s.me));
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
@@ -3618,7 +3620,7 @@ void HudPublish() noexcept {
     s.screens=FirstPersonScreens(&s.scr,PlayerHuman());    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
     if(s.screens && s.scr.physical)PublishInstruments(s);
     if(Cfg().vehicleHud)
-        for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
+        for(const auto& w:work)if(w.ref && stepfresh::Fresh(w.seen,s.step,stepfresh::kEveryStep))s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
 }
 
@@ -5839,7 +5841,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
     // The pause menu: nothing of the plugin's (docs/hud-re.md §10). The game still draws the scene and this HUD pass every
     // frame, and steps the cameras; the stock HUD slides out (its layouts' transition_slide). The snapshot's own age
-    // (kFreshMs, wall) only caught the pause half a second in, and the carriers' bars and the map's marks not at all.
+    // (once a wall-clock window) only caught the pause half a second in, and the carriers' bars and the map's marks not at all.
     if(GamePaused())return;
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
@@ -5875,7 +5877,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            const bool drawn=scopeOverlay && now-z.tick<=kFreshMs;
+            const bool drawn=scopeOverlay && stepfresh::Fresh(z.step);
             PublishScopeDrawn(drawn ? sight.human : nullptr);   // the stock crosshair gives way to it (scope_hold.h)
             if(drawn) {
                 ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask,lines,&at);
@@ -5893,7 +5895,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
         // aircraft's stores show, so boarding shows none).
         static hudcue::Change storePick{};
-        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
+        // The snapshot is the last steps' (step_fresh.h: the draw sees the step the game thread ran last; the pause menu
+        // returned above).
+        const bool fresh=stepfresh::Fresh(snap.step),storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
         const int picked=SeatArmPick(SeatArmList(snap));
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
@@ -5902,7 +5906,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // (strips, annunciator, blocks, tapes) give way, its aim marks and head-up symbols stay on the view.
         const bool screensOn=fresh && snap.screens,headUp=!screensOn || (!snap.scr.physical && HudGlass(snap.scr));
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
-        if(now-snap.tick<=kFreshMs && snap.cockpit) {
+        if(fresh && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.hasImpact)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(!snap.jet.bomb)LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
@@ -5928,7 +5932,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         // A stock heli: the mouse-aim flight's square whenever the mouse flies it (HeliMouseAim), the helicopter HUD round it
         // with HeliFlightHud (off: the takeoff panel, as before).
-        const bool heliFresh=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
+        const bool heliFresh=fresh && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
         if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
         if(heliHud) {
             if(headUp)HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,launchAt,lines,&at);
@@ -5943,15 +5947,15 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                       storeSwitched,lines,&at,&controls);
             if(snap.warned && !screensOn)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
         }
-        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud && !screensOn)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
+        if(fresh && snap.heli && !snap.cockpit && !heliHud && !screensOn)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         // The stock vehicles' HUD up (StockVehicleHud): it carries the drill's line and the gun's marks, so DrillPanel and
         // TurretMark's square give way to it.
-        const bool stockHud=now-snap.tick<=kFreshMs && snap.stock && !snap.cockpit && !snap.stockHud.heli;
-        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli && !stockHud && !screensOn)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
-        if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
+        const bool stockHud=fresh && snap.stock && !snap.cockpit && !snap.stockHud.heli;
+        if(fresh && snap.drill && !snap.cockpit && !snap.heli && !stockHud && !screensOn)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        if(fresh && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
-        if(now-snap.tick<=kFreshMs && snap.dreadnought && !snap.cockpit && !screensOn)
+        if(fresh && snap.dreadnought && !snap.cockpit && !screensOn)
             DreadnoughtHud(drawer,ctx,t,width,height,s,snap.dnCue,lines,&at);
         const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
         const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
@@ -5963,15 +5967,15 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.lookHint) {
+        if(fresh && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(fresh && snap.lookHint) {
             wchar_t key[32];
             if(snap.lookKeys)KeyName(Cfg().freeLookKey,key,32);else SeatButtonName(Cfg().freeLookButton,key,32);
             Label(t,lines,&at,width*0.5f,height*0.86f,1,kLineScale*0.85f*s,kWhite,Tr(Tx::vehicleLookHold),key);
         }
-        if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.cmdHint)CommandHintMark(drawer,ctx,t,viewProj,width,height,s,snap.commandHint,lines,&at);
+        if(fresh && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
+        if(fresh && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
+        if(fresh && snap.cmdHint)CommandHintMark(drawer,ctx,t,viewProj,width,height,s,snap.commandHint,lines,&at);
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
@@ -6007,7 +6011,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                               storeSwitched,lines,&at);
         }
         // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
-        if(now-snap.tick<=kFreshMs && snap.armor && !stockHud && !screensOn)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
+        if(fresh && snap.armor && !stockHud && !screensOn)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         SupportWarnHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
@@ -6019,7 +6023,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
-            if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
+            if(fresh)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
             for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
         }
