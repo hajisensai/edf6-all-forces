@@ -60,6 +60,13 @@ inline bool Valid(const Msg& m) noexcept {
 }  // namespace detail
 
 inline bool Owned(const void* bytes,std::size_t size) noexcept { return wire::HeadWord(bytes,size,0)==kMagic; }
+// A keep goes as an EDF6Coop state message (plugin_net.h SendState: unreliable, the newest of the show's slot kept; the next
+// keep replaces a lost one); a start and an end reliable. So a keep may overtake its show's start (it begins the show:
+// ultimate_show.h Table) or come after its end (ended: nothing), and an end of a show not played here is kept as ended, or
+// a keep sent before it and arriving after would begin it.
+inline bool KeepState(const void* bytes,std::size_t size) noexcept {
+    return Owned(bytes,size) && size==kWire && static_cast<const unsigned char*>(bytes)[8]==static_cast<unsigned char>(Kind::keep);
+}
 
 // False: a message that would not decode (see Decode), or no room.
 inline bool Encode(const Msg& m,void* bytes,std::size_t size) noexcept {

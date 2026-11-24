@@ -588,7 +588,12 @@ void Send(Show& s,ultimate_net::Kind kind,std::uint32_t peer=0) noexcept {
     ultimate_net::Msg m;
     unsigned char bytes[ultimate_net::kWire];
     if(!Message(s,kind,m) || !ultimate_net::Encode(m,bytes,sizeof(bytes)))return;
-    if(peer)plugin_net::Send(peer,bytes,sizeof(bytes));
+    if(kind==ultimate_net::Kind::keep) {
+        // A state message, one stream per show slot of this machine's (ultimate_net_protocol.h KeepState).
+        const auto key=plugin_net::StateKey(plugin_net::StateStream::ultimateKeep,static_cast<std::uint32_t>(&s-shows));
+        if(peer)plugin_net::SendState(peer,key,bytes,sizeof(bytes));
+        else plugin_net::BroadcastState(key,bytes,sizeof(bytes));
+    } else if(peer)plugin_net::Send(peer,bytes,sizeof(bytes));
     else plugin_net::Broadcast(bytes,sizeof(bytes));
     s.keptAt=GetTickCount64();
 }
@@ -798,7 +803,10 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     // Found: its rounds fired by it (their damage zeroed here: jet_bay.cpp ShellMake); not here: the looks alone.
     const unsigned char* const caller=who.found ? static_cast<const unsigned char*>(who.obj.obj) : nullptr;
     switch(table.Receive(k,m.kind==ultimate_net::Kind::end)) {
-    case Act::none: break;
+    case Act::none:
+        // An end of a show not played here: ended all the same (a keep, a state message, sent before it may come after).
+        if(m.kind==ultimate_net::Kind::end)table.Ended(k);
+        break;
     case Act::begin: {
         if(!ShowRoundsReady()) {
             if(netLogs++<16)Log("ULTIMATE NET peer %u's show %08X:%u: this machine's rounds are not preloaded: not played here",
@@ -844,7 +852,7 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
 plugin_net::Channel UltimateNetChannel() noexcept {
     plugin_net::Channel c;
     c.name="ultimate";c.magic=ultimate_net::kMagic;c.version=ultimate_net::kVersion;
-    c.minSize=c.maxSize=ultimate_net::kWire;
+    c.minSize=c.maxSize=ultimate_net::kWire;c.takesState=&ultimate_net::KeepState;
     c.receive=&ReceiveUltimateNetwork;c.update=&UpdateUltimateNetwork;c.reset=&ResetUltimateNetwork;c.joined=&UltimateNetworkJoined;
     return c;
 }
