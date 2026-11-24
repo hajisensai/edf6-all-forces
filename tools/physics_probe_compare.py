@@ -91,8 +91,10 @@ def compare(a: Run, b: Run) -> dict:
                 final.append(d)
     return {'first_diff': first, 'hash_same': same, 'hash_rows': len(common), 'matched': matched,
             'unmatched': unmatched, 'median': pct(every, 0.5), 'p95': pct(every, 0.95), 'max': max(every, default=math.nan),
+            'mean': statistics.fmean(every) if every else math.nan,
             'final_tick': final_tick, 'final_n': len(final), 'final_median': pct(final, 0.5),
-            'final_p95': pct(final, 0.95), 'final_over_1m': sum(1 for d in final if d > 1.0)}
+            'final_p95': pct(final, 0.95), 'final_over_1m': sum(1 for d in final if d > 1.0),
+            'final_differ': sum(1 for d in final if d > 0.0)}
 
 
 def main(argv: list[str]) -> int:
@@ -108,8 +110,8 @@ def main(argv: list[str]) -> int:
               f'{sum(len(x) for x in r.rows.values())} body rows; {r.end}')
     groups: dict[str, list[dict]] = {}
     print()
-    print('pair                      first-diff  hash-same  matched unmatched   median      p95      max  '
-          'final(t, n, median, p95, >1m)')
+    print('pair                      first-diff  hash-same  matched unmatched   median      p95     mean      max  '
+          'final(t, n, median, p95, >1m, differing)')
     for a, b in itertools.combinations(range(len(runs)), 2):
         ra, rb = runs[a], runs[b]
         c = compare(ra, rb)
@@ -117,19 +119,21 @@ def main(argv: list[str]) -> int:
         groups.setdefault(key, []).append(c)
         print(f'{ra.label}#{a + 1} vs {rb.label}#{b + 1}'.ljust(26) +
               f'{c["first_diff"]!s:>10} {c["hash_same"]:>5}/{c["hash_rows"]:<5} {c["matched"]:>7} {c["unmatched"]:>9} '
-              f'{c["median"]:>8.4f} {c["p95"]:>8.4f} {c["max"]:>8.2f}  '
-              f'({c["final_tick"]}, {c["final_n"]}, {c["final_median"]:.4f}, {c["final_p95"]:.4f}, {c["final_over_1m"]})')
+              f'{c["median"]:>8.4f} {c["p95"]:>8.4f} {c["mean"]:>8.4f} {c["max"]:>8.2f}  '
+              f'({c["final_tick"]}, {c["final_n"]}, {c["final_median"]:.4f}, {c["final_p95"]:.4f}, {c["final_over_1m"]}, '
+              f'{c["final_differ"]})')
     print()
-    print('group     pairs  median(of pair medians)  p95(median)  final median  final p95  final >1m (mean)  '
-          'unmatched (mean)')
+    print('group     pairs  median(of pair medians)  p95(median)  mean(median)  final median  final p95  final >1m (mean)  '
+          'final differing (mean)  unmatched (mean)')
     summary = {}
     for key, cs in sorted(groups.items()):
-        s = {k: statistics.median(c[k] for c in cs) for k in ('median', 'p95', 'final_median', 'final_p95')}
+        s = {k: statistics.median(c[k] for c in cs) for k in ('median', 'p95', 'mean', 'final_median', 'final_p95')}
         s['over'] = statistics.mean(c['final_over_1m'] for c in cs)
+        s['differ'] = statistics.mean(c['final_differ'] for c in cs)
         s['unmatched'] = statistics.mean(c['unmatched'] for c in cs)
         summary[key] = s
-        print(f'{key:<9} {len(cs):>5}  {s["median"]:>23.4f}  {s["p95"]:>11.4f}  {s["final_median"]:>12.4f}  '
-              f'{s["final_p95"]:>9.4f}  {s["over"]:>16.1f}  {s["unmatched"]:>16.1f}')
+        print(f'{key:<9} {len(cs):>5}  {s["median"]:>23.4f}  {s["p95"]:>11.4f}  {s["mean"]:>12.4f}  {s["final_median"]:>12.4f}  '
+              f'{s["final_p95"]:>9.4f}  {s["over"]:>16.1f}  {s["differ"]:>22.1f}  {s["unmatched"]:>16.1f}')
     labels = sorted({r.label for r in runs})
     if len(labels) == 2:
         x, y = labels
@@ -138,10 +142,12 @@ def main(argv: list[str]) -> int:
         if mixed and same:
             base = max(s['median'] for s in same)
             base95 = max(s['p95'] for s in same)
+            base_mean = max(s['mean'] for s in same)
             print()
             print(f'{x}-{y} median / max same-setting median: '
-                  f'{mixed["median"] / base if base else math.inf:.3f}; p95 ratio: '
-                  f'{mixed["p95"] / base95 if base95 else math.inf:.3f}')
+                  f'{mixed["median"] / base if base else math.nan:.3f}; p95 ratio: '
+                  f'{mixed["p95"] / base95 if base95 else math.nan:.3f}; mean ratio: '
+                  f'{mixed["mean"] / base_mean if base_mean else math.nan:.3f}  (nan: the same-setting value is 0)')
     return 0
 
 
