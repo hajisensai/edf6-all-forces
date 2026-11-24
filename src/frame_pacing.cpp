@@ -15,11 +15,25 @@
 // tick clock (frame_pacing_logic.h: its start-up QPC 0x2139D10 and last boundary 0x2139D18) and waits once on a
 // high-resolution timer until the next boundary, without changing the process's timer resolution; the loop's own
 // call to 0x11DAE60 after the wait then finds the tick.
+//
+// The game thread's wait for the render thread (0x111CC20, every frame from 0x11A305A and some 40 load paths): it
+// records a signal command for a fresh auto-reset event, then `while(!0x50E00(&event)){ if(over 1 s) pump; Sleep(0); }`
+// where 0x50E00 is WaitForSingleObject(event, 0) == 0. A zero-timeout poll and Sleep(0): the game thread spins one
+// core the whole time it waits (docs/frame-pacing-re.md). The loop's call to 0x50E00 at 0x111CD49 now waits on the
+// same event for up to kFenceWaitMs: it wakes as soon as the render thread signals, and the loop's own 1 s message
+// pump still runs (every kFenceWaitMs once past the second instead of every spin).
+//
+// The DXGI queue: EDF.dll never calls IDXGIDevice1::SetMaximumFrameLatency (its only use of that interface is
+// GetAdapter at 0x111B65E), so the CPU may run up to DXGI's default 3 frames ahead of the display. After the game's
+// device init 0x111B420 (its only caller 0x11A33DF) the plugin sets ini MaxFrameLatency (default 1) on the device
+// (renderer 0x2136FF0 +0x80, the ID3D11Device the init QIs at 0x111B63C). The device is made once; the swap chain it
+// rebuilds (0x111B220) keeps the device's setting.
 #include "frame_pacing.h"
 #include "frame_pacing_logic.h"
 #include "crew.h"
 #include "memory.h"
 #include "edf/patch.h"
+#include <dxgi.h>
 
 namespace crew {
 namespace {
@@ -37,10 +51,22 @@ const unsigned char kTickCountSig[]={
     0x44,0x60,0xD5,0x06,0xF0,0xAE,0x48,0xF7,0xE1,0x48,0x8B,0xC3,0x4C,0x8B,0xCA,0x33,0xD2,0x49,0xC1,0xE9,0x0C,0x49,
     0xF7,0xF1,0x48,0x83,0xF8,0x01,0x72,0x11,0x48,0x8B,0xC8,0x49,0x0F,0xAF,0xC9,0x4C,0x03,0xC1,0x4C,0x89,0x05,0x5D,
     0xEE,0xF5,0x00,0x48,0x83,0xC4,0x20,0x5B,0xC3};
+// The render fence's loop: `xor ecx,ecx; call [Sleep]; lea rcx,[rsp+80h]; call 0x50E00; test al,al; je loop`, and
+// 0x50E00 whole: `WaitForSingleObject([rcx],0); sete al`.
+constexpr unsigned kFenceCall=0x111CD49,kFencePoll=0x50E00,kFenceLoop=0x111CD39;
+const unsigned char kFenceLoopSig[]={0x33,0xC9,0xFF,0x15,0xE7,0x89,0x63,0x00,0x48,0x8D,0x8C,0x24,0x80,0x00,0x00,0x00,
+    0xE8,0xB2,0x40,0xF3,0xFE,0x84,0xC0,0x74,0x8E};
+const unsigned char kFencePollSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x09,0x33,0xD2,0xFF,0x15,0xE9,0x48,0x70,0x01,0x85,
+    0xC0,0x0F,0x94,0xC0,0x48,0x83,0xC4,0x28,0xC3};
+constexpr DWORD kFenceWaitMs=10;
+// The device init's call and the renderer whose +0x80 holds the device.
+constexpr unsigned kDeviceInitCall=0x11A33DF,kDeviceInit=0x111B420,kRenderer=0x2136FF0,kRendererDevice=0x80;
 constexpr LONGLONG kWait=-10000;   // 1 ms, relative, in 100 ns: the window thread's
 
 using SleepFn=void(WINAPI*)(DWORD);
 void* gameSleep=nullptr;
+bool tickWaitInstalled=false;
+GateWaitFn gateWait=nullptr;   // set once at load, before the main loop runs
 std::uint64_t qpcFreq=0,tickPeriod=0;
 
 // One timer per thread (set and waited on by its own thread only), closed when the thread ends.
@@ -71,6 +97,14 @@ void WINAPI PumpWait(DWORD ms) noexcept {
 void WINAPI TickWait(DWORD ms) noexcept {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
+    if(gateWait) {   // the frame gate's slot, not the tick (frame_rate.cpp)
+        const std::uint64_t counts=gateWait(static_cast<std::uint64_t>(now.QuadPart));
+        if(!counts)return;
+        const HANDLE timer=Timer();
+        if(!timer || !Arm(timer,-static_cast<LONGLONG>(pacing::CountsTo100ns(counts,qpcFreq)))){reinterpret_cast<SleepFn>(gameSleep)(ms);return;}
+        WaitForSingleObject(timer,INFINITE);
+        return;
+    }
     const std::uint64_t base=*reinterpret_cast<const std::uint64_t*>(image+kTickBase);
     const std::uint64_t last=*reinterpret_cast<const std::uint64_t*>(image+kTickLast);
     const std::uint64_t counts=pacing::CountsToBoundary(static_cast<std::uint64_t>(now.QuadPart),base,last,tickPeriod);
@@ -80,7 +114,57 @@ void WINAPI TickWait(DWORD ms) noexcept {
     if(!timer || !Arm(timer,-static_cast<LONGLONG>(due))){reinterpret_cast<SleepFn>(gameSleep)(ms);return;}
     WaitForSingleObject(timer,INFINITE);
 }
+// 0x50E00's place in the fence loop: whether the render thread has signalled, now waiting for it.
+bool FenceWait(const HANDLE* event) noexcept {
+    return WaitForSingleObject(*event,kFenceWaitMs)==WAIT_OBJECT_0;
+}
+
+void SetFrameLatency(void* renderer) noexcept {
+    IUnknown* const device=*reinterpret_cast<IUnknown* const*>(static_cast<unsigned char*>(renderer)+kRendererDevice);
+    if(!device){Log("LATENCY the device init returned no device: the DXGI queue left as it is");return;}
+    IDXGIDevice1* dxgi=nullptr;
+    HRESULT hr=device->QueryInterface(__uuidof(IDXGIDevice1),reinterpret_cast<void**>(&dxgi));
+    if(FAILED(hr) || !dxgi){Log("LATENCY no IDXGIDevice1 (0x%08lX): the DXGI queue left as it is",static_cast<unsigned long>(hr));return;}
+    UINT before=0;
+    if(FAILED(dxgi->GetMaximumFrameLatency(&before)))before=0;
+    const UINT want=static_cast<UINT>(Cfg().maxFrameLatency);
+    hr=dxgi->SetMaximumFrameLatency(want);
+    dxgi->Release();
+    if(FAILED(hr))Log("LATENCY SetMaximumFrameLatency(%u) failed (0x%08lX): %u frames queued at most",want,static_cast<unsigned long>(hr),before);
+    else Log("LATENCY max frame latency %u (was %u)",want,before);
+}
+
+using DeviceInitFn=bool(*)(void*,void*);
+// 0x111B420(renderer, params): makes the device and the swap chain, true when it did.
+bool DeviceInitHook(void* renderer,void* params) {
+    const bool made=reinterpret_cast<DeviceInitFn>(image+kDeviceInit)(renderer,params);
+    if(made)SetFrameLatency(renderer);
+    return made;
+}
 }  // namespace
+
+bool FramePacingTickWaitInstalled() noexcept { return tickWaitInstalled; }
+void SetFramePacingGate(GateWaitFn wait) noexcept { gateWait=wait; }
+
+bool InstallRenderFence() noexcept {
+    if(!image)return false;
+    bool changed=false,ok=false;
+    if(!edf::Matches(image,kFenceLoop,kFenceLoopSig,sizeof(kFenceLoopSig)) ||
+       !edf::Matches(image,kFencePoll,kFencePollSig,sizeof(kFencePollSig)))
+        Log("PACING the render fence loop 0x111CC20 is not as read (another hook?): left as it is");
+    else ok=edf::RedirectCall(image+kFenceCall,image+kFencePoll,reinterpret_cast<void*>(&FenceWait),changed);
+    Log("PACING render fence wait=%d",ok);
+    return ok;
+}
+
+bool InstallFrameLatency() noexcept {
+    if(!image)return false;
+    if(!Cfg().maxFrameLatency){Log("LATENCY MaxFrameLatency=0: the DXGI queue left at the game's (3)");return false;}
+    bool changed=false;
+    const bool ok=edf::RedirectCall(image+kDeviceInitCall,image+kDeviceInit,reinterpret_cast<void*>(&DeviceInitHook),changed);
+    if(!ok)Log("LATENCY the device init call 0x11A33DF is not as read (another hook?): the DXGI queue left as it is");
+    return ok;
+}
 
 bool InstallFramePacing() noexcept {
     if(!image)return false;
@@ -104,6 +188,7 @@ bool InstallFramePacing() noexcept {
         if(!tickPeriod)Log("PACING QPC frequency %llu: no tick period, the frame step's wait left as it is",qpcFreq);
         else tick=edf::RedirectImportCall(image+kTickSleep,kTickSig,reinterpret_cast<void*>(&TickWait),&gameSleep);
     }
+    tickWaitInstalled=tick;
     Log("PACING window thread wait=%d, frame step wait=%d",pump,tick);
     return pump && tick;
 }
