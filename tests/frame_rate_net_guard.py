@@ -134,8 +134,11 @@ crew = src['crew.cpp']
 check(re.search(r'ULONGLONG GameFrame\(\) noexcept \{ return frameClock\.logical; \}', crew),
       'GameFrame() only reads the clock (it observes nothing itself)')
 seen = body(crew, r'void SeeFrame\(const void\*\) noexcept \{')
-check(re.search(r'frameClock\.Observe\(system,At<const void\*>\(system,0x68\),At<std::uint32_t>\(system,0xCE0\)\)', seen),
-      'SeeFrame steps the clock by System+0xCE0 (written in the tick loops only)')
+frame_h = open(os.path.join(ROOT, 'common', 'edf', 'game_frame.h'), encoding='utf-8').read()
+check(re.search(r'gameframe::ReadStep\(image,s\)', seen) and re.search(r'frameClock\.Observe\(s\.system,s\.scene,s\.count\)', seen)
+      and re.search(r'kSystemScene=0x68,kSystemStep=0xCE0;', frame_h)
+      and re.search(r'edf::At<std::uint32_t>\(system,kSystemStep\)', frame_h),
+      'SeeFrame steps the clock by System+0xCE0 (written in the tick loops only), read by gameframe::ReadStep')
 observers = [n for n, t in src.items() if 'frameClock.Observe(' in t]
 check(observers == ['crew.cpp'] and crew.count('frameClock.Observe(') == 1, f'the frame clock is observed by SeeFrame only: {observers}')
 SEE_FRAME = {'carrierlaser.cpp', 'crew.cpp', 'npcai.cpp', 'pvp.cpp', 'support_dispatch.cpp'}   # ship AI, vehicle input, Think, PvpFrame, SupportActorFrame
