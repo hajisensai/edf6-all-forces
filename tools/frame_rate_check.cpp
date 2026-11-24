@@ -265,7 +265,12 @@ void Rigid() {
     Expect(InterpolateRigid(a,b,0.5f,o,10,1) && o[15]==1.0f && o[3]==0.0f,"fourth column from the current");
 }
 
-// The game's wrapper update (0x1182BC0) for one action: clears the edges, sets them on a change.
+// The input across presentation frames (docs/unlimited-fps-re.md §2.4), the order frame_rate.cpp gives it. The game's
+// wrapper update (0x1182BC0, one action here) clears the edges and sets them on a change since the last update; the
+// game runs it after System::Update, so the step reads the last frame's. With the frame gate the plugin runs it before
+// System::Update and only on a frame with ticks; a frame without clears the edges for the UI (ClearForUi). Control: the
+// game's own order at a frame rate above the tick rate, where an edge set on a frame without a step is gone before one.
+struct Edges { int pressed=0,released=0; };
 struct Action {
     bool current=false;
     Edges edges{};
@@ -278,37 +283,37 @@ struct Action {
 
 void InputEdges() {
     std::mt19937_64 rng(7);
-    for(int withShadow=0;withShadow<2;++withShadow) {
-        u64 presses=0,uiSaw=0,stepSaw=0,stepShould=0;
+    for(int moved=0;moved<2;++moved) {
+        u64 uiSaw=0,stepSaw=0,stepShould=0;
         Action act;
-        Shadow sh;
-        bool down=false,pressSinceStep=false;
+        bool down=false,downAtStep=false;
         for(int frame=0;frame<200000;++frame) {
-            // A step one frame in three on average (any number of presentation frames between), presses of 1.. frames.
+            // A step one frame in three on average, presses of 1.. frames.
             const u64 ticks=(rng()%3)==0 ? 1 : 0;
-            // The frame: System::Update (the step reads the edges), then the wrapper update, then the UI.
-            if(ticks) {
-                const Edges e=withShadow ? ForStep(sh,act.edges) : act.edges;
-                stepSaw+=e.pressed;
-                // The step should see a press when any came since the last step (two in one tick are one to a step,
-                // as at the game's own rate a step never sees two either).
-                stepShould+=pressSinceStep ? 1u : 0u;
-                pressSinceStep=false;
+            if(!down && rng()%5==0)down=true;
+            else if(down && rng()%2==0)down=false;
+            if(moved) {
+                if(ticks)act.Update(down);
+                else act.edges={};
             }
-            bool next=down;
-            if(!down && rng()%5==0)next=true;
-            else if(down && rng()%2==0)next=false;
-            if(withShadow)BeforeUpdate(sh,act.edges,ticks);
-            act.Update(next);
-            down=next;
-            if(act.edges.pressed){++presses;pressSinceStep=true;}
-            uiSaw+=act.edges.pressed;
+            if(ticks) {
+                stepSaw+=static_cast<u64>(act.edges.pressed);
+                // A press the step should see: up at the last step, down at this one (the game's own sampling at the
+                // tick rate: a tap between two ticks is no press to it either).
+                stepShould+=(down && !downAtStep) ? 1u : 0u;
+                downAtStep=down;
+            }
+            if(!moved)act.Update(down);
+            uiSaw+=static_cast<u64>(act.edges.pressed);
         }
-        Expect(uiSaw==presses,"the UI sees each press once",static_cast<double>(uiSaw),static_cast<double>(presses));
-        if(withShadow)Expect(stepSaw==stepShould,"with the shadow every tick with a press sees it, once",
-                             static_cast<double>(stepSaw),static_cast<double>(stepShould));
-        else Expect(stepSaw<stepShould*9/10,"without it the step misses presses (the failure the shadow is for)",
-                    static_cast<double>(stepSaw),static_cast<double>(stepShould));
+        if(moved) {
+            Expect(stepSaw==stepShould,"wrappers updated before the step: each press a tick samples is seen once",
+                   static_cast<double>(stepSaw),static_cast<double>(stepShould));
+            Expect(uiSaw==stepSaw,"and the UI sees each of them once",static_cast<double>(uiSaw),static_cast<double>(stepSaw));
+        } else {
+            Expect(stepSaw<stepShould*9/10,"the game's order above the tick rate misses presses (what the move is for)",
+                   static_cast<double>(stepSaw),static_cast<double>(stepShould));
+        }
     }
 }
 }  // namespace
