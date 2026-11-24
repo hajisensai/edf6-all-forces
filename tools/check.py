@@ -116,13 +116,18 @@ def _git(*args: str) -> tuple[int, str]:
     return r.returncode, r.stdout
 
 
+def base_of() -> str:
+    """The merge-base of HEAD and origin/main ('' without one)."""
+    code, base = _git('merge-base', 'HEAD', 'origin/main')
+    return '' if code else base.strip()
+
+
 def changed_files() -> tuple[list[str], str | None]:
     """This branch's changes: the files changed since the merge-base with origin/main (committed or not, both sides
     of a rename) and the untracked ones; (files, None), or ([], why) when there is no base to compare with."""
-    code, base = _git('merge-base', 'HEAD', 'origin/main')
-    if code or not base.strip():
+    base = base_of()
+    if not base:
         return [], 'no merge-base with origin/main (git fetch origin?)'
-    base = base.strip()
     code, diff = _git('diff', '--name-only', '--no-renames', base)
     code2, new = _git('ls-files', '--others', '--exclude-standard')
     if code or code2:
@@ -139,7 +144,12 @@ def plan(argv: list[str]) -> dict:
         labels, why = {}, why or f'{test_domains.LABELS_JSON} unreadable ({e})'
     if '--full' in argv:
         why = '--full'
-    sel = test_domains.select(files, labels) if labels else {'full': None, 'domains': {}, 'scripts': []}
+    names = None
+    if test_domains.SELFTEST in files and not why:   # which of its tests and helpers the change is in
+        code, diff = _git('diff', '-U0', base_of(), '--', test_domains.SELFTEST)
+        with open(os.path.join(ROOT, test_domains.SELFTEST), encoding='utf-8') as f:
+            names = test_domains.changed_names(f.read(), test_domains.diff_lines(diff)) if not code else None
+    sel = test_domains.select(files, labels, names) if labels else {'full': None, 'domains': {}, 'scripts': []}
     sel['full'] = why or sel['full']
     sel['files'] = files
     sel['labels'] = labels
@@ -157,6 +167,10 @@ def say_plan(sel: dict) -> None:
         print(f'  run   {d:16} {", ".join(files[:3])}{f" (+{len(files) - 3})" if len(files) > 3 else ""}')
     if sel['scripts']:
         print(f'  run   the tests in   {", ".join(sel["scripts"][:4])}{" ..." if len(sel["scripts"]) > 4 else ""}')
+    if 'selftest_names' in sel:
+        names = sel['selftest_names']
+        print(f'  run   the selftests using {", ".join(names[:6])}{" ..." if len(names) > 6 else ""} (changed in '
+              f'{test_domains.SELFTEST})')
     skipped = [d for d in labels.get('domains', {}) if d not in sel['domains'] and d != test_domains.SCRIPTS]
     print(f'  skip  {", ".join(skipped)} (no change)')
     for part in ('ctest', 'selftest'):

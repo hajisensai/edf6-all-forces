@@ -5159,6 +5159,39 @@
     "tests/terrain_shader_native_audit.py"
    ]
   },
+  "test_domains": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py",
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_domains_test.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tools/doc_links_check.py",
+    "tools/selftest.py",
+    "tools/test_domains.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
   "testhub_dump_source": {
    "labels": [
     "cockpit",
@@ -5850,6 +5883,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "aim_lines_hide_real_crews",
+    "os",
+    "src"
    ]
   },
   "air_chase_wired": {
@@ -5867,6 +5906,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "air_chase_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "air_support_arrival_is_the_flight_controls": {
@@ -5875,6 +5921,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "air_support_arrival_is_the_flight_controls",
+    "os",
+    "re",
+    "src"
    ]
   },
   "andryusha_fuse_online": {
@@ -5883,6 +5936,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "andryusha_fuse_online",
+    "os",
+    "re",
+    "src"
    ]
   },
   "andryusha_marks_agree": {
@@ -5900,6 +5960,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "andryusha_marks_agree",
+    "make_katyusha",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "arrival_smoke_is_drawn_where_it_is_laid": {
@@ -5908,6 +5977,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "arrival_smoke_is_drawn_where_it_is_laid",
+    "os",
+    "re",
+    "src"
    ]
   },
   "artillery_chassis_is_stock": {
@@ -5924,6 +6000,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "artillery_chassis_is_stock",
+    "patched"
    ]
   },
   "artillery_ragdoll_is_the_models": {
@@ -5943,6 +6023,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "artillery_ragdoll_is_the_models",
+    "dsgo",
+    "make_artillery",
+    "os",
+    "src"
    ]
   },
   "artillery_turret_fixed_guns_mounted": {
@@ -5960,6 +6048,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "artillery_turret_fixed_guns_mounted",
+    "dsgo",
+    "make_artillery",
+    "os",
+    "src",
+    "vc"
    ]
   },
   "autoturret_interrupted_install": {
@@ -5978,6 +6075,19 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "_at_build_files",
+    "_failing_write",
+    "_read",
+    "at_build",
+    "autoturret_interrupted_install",
+    "modfiles",
+    "os",
+    "patched",
+    "shutil",
+    "tempfile"
    ]
   },
   "autoturret_interrupted_text_upgrade": {
@@ -5996,6 +6106,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "_sgo_table",
+    "at_build",
+    "autoturret_interrupted_text_upgrade",
+    "dsgo",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "autoturret_interrupted_upgrade": {
@@ -6014,6 +6135,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "_read",
+    "at_build",
+    "autoturret_interrupted_upgrade",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "autoturret_pending_files_protect_foreign_edits": {
@@ -6032,6 +6163,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "_at_build_files",
+    "_failing_write",
+    "at_build",
+    "autoturret_pending_files_protect_foreign_edits",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "awb_hca_seconds_synthetic": {
@@ -6040,6 +6182,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "awb_hca_seconds_synthetic"
    ]
   },
   "awe_v1_to_v2_synthetic": {
@@ -6048,6 +6193,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_awe1",
+    "awe_v1_to_v2_synthetic"
    ]
   },
   "barrage_copies_agree": {
@@ -6067,6 +6216,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "barrage_copies_agree",
+    "calls",
+    "cw",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "boardable_seats_take_every_class": {
@@ -6084,6 +6243,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "boardable_seats_take_every_class",
+    "make_jets",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "boarding_all_classes_stock_resources": {
@@ -6101,6 +6269,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "boarding_all_classes_stock_resources",
+    "calls",
+    "cw",
+    "dsgo",
+    "os"
    ]
   },
   "boarding_an_empty_aircraft_makes_its_entry": {
@@ -6109,6 +6284,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "boarding_an_empty_aircraft_makes_its_entry",
+    "os",
+    "src"
    ]
   },
   "boarding_debug_gun_parameters_and_text": {
@@ -6126,6 +6307,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "boarding_debug_gun_parameters_and_text",
+    "calls",
+    "cw",
+    "dsgo"
    ]
   },
   "boarding_gun_range_unlimited": {
@@ -6144,6 +6331,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "boarding_gun_range_unlimited",
+    "calls",
+    "cw",
+    "os",
+    "re",
+    "src"
    ]
   },
   "boarding_only_after_collision": {
@@ -6152,6 +6348,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "boarding_only_after_collision",
+    "os",
+    "src"
    ]
   },
   "boarding_tag_in_plugin": {
@@ -6170,6 +6372,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "boarding_tag_in_plugin",
+    "calls",
+    "cw",
+    "os",
+    "re",
+    "src"
    ]
   },
   "cab_floor_katyusha_only": {
@@ -6187,6 +6398,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "cab_floor_katyusha_only",
+    "make_katyusha",
+    "os",
+    "re",
+    "src"
    ]
   },
   "calls_failed_install_records_nothing": {
@@ -6204,6 +6423,27 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "OTHER",
+    "STOCK",
+    "_call_files",
+    "_call_ids",
+    "_failing_write",
+    "_flak_request_template",
+    "_mods",
+    "_read",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "calls_failed_install_records_nothing",
+    "cw",
+    "dsgo",
+    "modfiles",
+    "os",
+    "patched",
+    "shutil",
+    "tempfile"
    ]
   },
   "calls_inc_current": {
@@ -6216,6 +6456,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls_inc_current",
+    "gen_calls",
+    "os",
+    "src"
    ]
   },
   "calls_table_consistent": {
@@ -6234,6 +6481,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "calls_table_consistent",
+    "cw",
+    "os",
+    "re",
+    "src",
+    "vc",
+    "xm_units"
    ]
   },
   "carrier_camera_and_ragdoll_on_its_box_centre": {
@@ -6250,6 +6508,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "carrier_camera_and_ragdoll_on_its_box_centre",
+    "vc"
    ]
   },
   "cas_graft_players": {
@@ -6260,6 +6522,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "cas_graft_players",
+    "os"
    ]
   },
   "cas_graft_variables_and_states_real": {
@@ -6277,6 +6543,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "cas_graft_variables_and_states_real",
+    "os"
    ]
   },
   "cas_hollow_real": {
@@ -6294,6 +6566,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "cas_hollow_real",
+    "os"
    ]
   },
   "chute_builds_without_the_game": {
@@ -6303,6 +6581,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "__name__",
+    "_chute_game",
+    "chute_builds_without_the_game",
+    "dsgo"
    ]
   },
   "chute_canopy_geometry": {
@@ -6312,6 +6596,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "chute_canopy_geometry"
    ]
   },
   "chute_wired_through": {
@@ -6331,6 +6618,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "chute_wired_through",
+    "ledger",
+    "os",
+    "re",
+    "src"
    ]
   },
   "cockpit_fields_current": {
@@ -6348,6 +6643,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "cockpit_fields_current",
+    "os",
+    "src"
    ]
   },
   "cockpit_warnings_wired": {
@@ -6362,6 +6663,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "cockpit_warnings_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "collision_box_codec_holds_its_child": {
@@ -6371,6 +6679,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "collision_box_codec_holds_its_child"
    ]
   },
   "commit_all_or_nothing": {
@@ -6388,6 +6699,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mods",
+    "_read",
+    "commit_all_or_nothing",
+    "cw",
+    "modfiles",
+    "os",
+    "shutil",
+    "tempfile"
    ]
   },
   "cpk_offsets_count_from_the_header_sector": {
@@ -6396,6 +6717,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_utf",
+    "cpk_offsets_count_from_the_header_sector",
+    "os"
    ]
   },
   "cpk_reads_compressed_entries_of_every_installed_archive": {
@@ -6405,6 +6731,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "cpk_reads_compressed_entries_of_every_installed_archive",
+    "os"
    ]
   },
   "damage_numbers_wired": {
@@ -6419,6 +6749,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "damage_numbers_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "damage_stats_wired": {
@@ -6433,6 +6770,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "damage_stats_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "dreadnought_agrees": {
@@ -6450,6 +6794,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "dreadnought_agrees",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "drill_copies_agree": {
@@ -6467,6 +6819,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "drill_copies_agree",
+    "ledger",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "drill_settings_documented": {
@@ -6478,6 +6840,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "drill_settings_documented",
+    "os",
+    "re",
+    "src"
    ]
   },
   "drill_spin_bone_free_of_the_ragdoll": {
@@ -6494,6 +6863,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "drill_spin_bone_free_of_the_ragdoll",
+    "os",
+    "src"
    ]
   },
   "edf41_alias_dsgo_helpers": {
@@ -6511,6 +6886,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mini_mab",
+    "edf41_alias_dsgo_helpers"
    ]
   },
   "edf41_anthill_voxel_body": {
@@ -6528,6 +6907,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_anthill_voxel_body"
    ]
   },
   "edf41_asset_pack": {
@@ -6557,6 +6939,143 @@
     "tools/selftest.py",
     "tools/test_installer_incremental.py",
     "tools/test_installer_recovery.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "BOHR_STOCK_AMMO_ALIVE",
+    "CALL_KINDS",
+    "COST_FILE",
+    "E41_DEVELOPER_COPIES",
+    "E5W_REBALANCED",
+    "EDF41_MISSION_MAPS",
+    "EDF41_SOLDIERS",
+    "EDF6_SLOT_CATEGORIES",
+    "HERE",
+    "HUD_LITERAL_WORDS",
+    "HUD_SPEC",
+    "HUD_TEXT_SOURCES",
+    "INI_MODULES",
+    "LEGACY_CAS_SAME",
+    "LEGACY_MDB_SAME",
+    "OTHER",
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "STOCK",
+    "TESTS",
+    "WD_ENERGY_GATE",
+    "_E5C_OWNED_SITES",
+    "_FakeEdf6",
+    "_GUN_MUZZLES",
+    "_I18N_MODULES",
+    "_SAID",
+    "_SAT_DAMAGE",
+    "_SAT_PT",
+    "_START_GAME",
+    "_STOCK_PT",
+    "_STORE_MUZZLES",
+    "__name__",
+    "_afs2_sizes",
+    "_at_build_files",
+    "_awe1",
+    "_belly_model",
+    "_call_files",
+    "_call_ids",
+    "_check_call_outputs",
+    "_chute_game",
+    "_cjk_outside_tr",
+    "_cmake_plugins",
+    "_costs",
+    "_cpk_file",
+    "_cube_part",
+    "_dnode",
+    "_dsgo_strings",
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "_e5c_refuses",
+    "_e5c_stub",
+    "_e5w_curves",
+    "_e5w_games",
+    "_edf41_friend_spawns",
+    "_edf41_install",
+    "_edf41_object",
+    "_edf41_root",
+    "_edf41_shared_game",
+    "_edf41_shared_left_clean",
+    "_edf41_shared_port_fixture",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "_f32",
+    "_f32_plain",
+    "_failing_write",
+    "_flak_request_template",
+    "_function",
+    "_game_read",
+    "_installs",
+    "_jobs",
+    "_legacy_games",
+    "_main",
+    "_mini_mab",
+    "_mini_mdb",
+    "_mods",
+    "_music_cue_waves",
+    "_nozzle_model",
+    "_pack_bundle",
+    "_placeholder_game_rows",
+    "_range_checked",
+    "_range_grid",
+    "_read",
+    "_recoil_game",
+    "_refuses",
+    "_rmpa_points",
+    "_rows_copy",
+    "_run_one",
+    "_sazabi_request_template",
+    "_sgo_bytes",
+    "_sgo_table",
+    "_sound_games",
+    "_stand_in_fmb",
+    "_stock_only_mods",
+    "_synthetic_call_sgo",
+    "_synthetic_call_text",
+    "_tree",
+    "_utf",
+    "at_build",
+    "ballistics",
+    "calls",
+    "contextlib",
+    "cw",
+    "disabled_return_offset",
+    "dsgo",
+    "e5c",
+    "edf41_asset_pack",
+    "gen_calls",
+    "gen_stores",
+    "hud_literal_words",
+    "hudtext_entries",
+    "in_team_field",
+    "installer",
+    "io",
+    "json",
+    "katyusha_kept_whole_bar_the_prune",
+    "ledger",
+    "lzma",
+    "make_artillery",
+    "make_jets",
+    "make_katyusha",
+    "make_stock_stores_wanted",
+    "modfiles",
+    "os",
+    "patched",
+    "re",
+    "shutil",
+    "spawn_catalog_archives",
+    "src",
+    "sys",
+    "tempfile",
+    "traceback",
+    "vc",
+    "xm_units"
    ]
   },
   "edf41_big_dragon_ragdoll_mass": {
@@ -6574,6 +7093,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_big_dragon_ragdoll_mass",
+    "os"
    ]
   },
   "edf41_big_dragon_sounds": {
@@ -6592,6 +7117,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_edf41_root",
+    "_sound_games",
+    "edf41_big_dragon_sounds",
+    "os"
    ]
   },
   "edf41_calls_convert": {
@@ -6604,6 +7136,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "edf41_calls_convert"
    ]
   },
   "edf41_calls_real": {
@@ -6619,6 +7155,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_dsgo_strings",
+    "dsgo",
+    "edf41_calls_real",
+    "json",
+    "os"
    ]
   },
   "edf41_check_sounds_mab": {
@@ -6636,6 +7180,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_check_sounds_mab",
+    "patched"
    ]
   },
   "edf41_class_keys": {
@@ -6653,6 +7201,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "edf41_class_keys",
+    "os"
    ]
   },
   "edf41_class_names": {
@@ -6671,6 +7224,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_class_names",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_clone_destructor_slot": {
@@ -6681,6 +7243,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_clone_destructor_slot",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_dlc_insects": {
@@ -6699,6 +7268,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_dlc_insects",
+    "os"
    ]
   },
   "edf41_dlc_objects": {
@@ -6716,6 +7290,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_object",
+    "_edf41_root",
+    "edf41_dlc_objects",
+    "os",
+    "re"
    ]
   },
   "edf41_dlc_packs": {
@@ -6735,6 +7317,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "e5c",
+    "edf41_dlc_packs",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_dragon_catalog_names": {
@@ -6753,6 +7343,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_dragon_catalog_names",
+    "os",
+    "sys"
    ]
   },
   "edf41_fortress_object_actions": {
@@ -6771,6 +7367,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_fortress_object_actions",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_friend_climb_shipped": {
@@ -6788,6 +7391,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF41_SOLDIERS",
+    "edf41_friend_climb_shipped"
    ]
   },
   "edf41_friend_grip_matches_weapons": {
@@ -6805,6 +7412,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF41_SOLDIERS",
+    "edf41_friend_grip_matches_weapons"
    ]
   },
   "edf41_friend_grip_shipped": {
@@ -6822,6 +7433,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF41_SOLDIERS",
+    "edf41_friend_grip_shipped"
    ]
   },
   "edf41_friend_looks_shipped": {
@@ -6839,6 +7454,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_friend_looks_shipped"
    ]
   },
   "edf41_friends_load_in_edf6": {
@@ -6857,6 +7475,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_edf41_friend_spawns",
+    "_game_read",
+    "_legacy_games",
+    "edf41_friends_load_in_edf6",
+    "os"
    ]
   },
   "edf41_friends_rewrite": {
@@ -6867,6 +7492,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_friends_rewrite"
    ]
   },
   "edf41_friends_spawn_as_named": {
@@ -6885,6 +7513,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_edf41_friend_spawns",
+    "_rmpa_points",
+    "edf41_friends_spawn_as_named",
+    "json",
+    "os"
    ]
   },
   "edf41_hector_alias": {
@@ -6902,6 +7537,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_hector_alias",
+    "os"
    ]
   },
   "edf41_hector_gait": {
@@ -6920,6 +7561,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_edf41_root",
+    "edf41_hector_gait",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_hector_guns": {
@@ -6937,6 +7586,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_hector_guns",
+    "os"
    ]
   },
   "edf41_hector_weapon_anim": {
@@ -6954,6 +7610,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_hector_weapon_anim",
+    "os"
    ]
   },
   "edf41_hector_weapons": {
@@ -6972,6 +7634,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_hector_weapons",
+    "os",
+    "src"
    ]
   },
   "edf41_kill_counters_plugin_table": {
@@ -6984,6 +7652,13 @@
    "scripts": [
     "tests/killcount_native_audit.py",
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_kill_counters_plugin_table",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_kill_counters_save_slots": {
@@ -7002,6 +7677,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_rows_copy",
+    "e5c",
+    "edf41_kill_counters_save_slots",
+    "os"
    ]
   },
   "edf41_kill_counters_shipped": {
@@ -7019,6 +7701,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_sgo_bytes",
+    "edf41_kill_counters_shipped"
    ]
   },
   "edf41_map_wires_real": {
@@ -7036,6 +7722,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "edf41_map_wires_real",
+    "os"
    ]
   },
   "edf41_maps_cover_the_scripts": {
@@ -7054,6 +7746,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_maps_cover_the_scripts",
+    "os"
    ]
   },
   "edf41_maps_install": {
@@ -7070,6 +7766,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "__name__",
+    "edf41_maps_install",
+    "os",
+    "patched"
    ]
   },
   "edf41_maps_real": {
@@ -7087,6 +7789,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_legacy_games",
+    "edf41_maps_real",
+    "os"
    ]
   },
   "edf41_maps_valley_files_real": {
@@ -7104,6 +7811,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_legacy_games",
+    "edf41_maps_valley_files_real",
+    "os"
    ]
   },
   "edf41_menu_bg_install": {
@@ -7123,6 +7835,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "__name__",
+    "edf41_menu_bg_install",
+    "os",
+    "patched",
+    "src"
    ]
   },
   "edf41_menu_bg_math": {
@@ -7139,6 +7859,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_menu_bg_math"
    ]
   },
   "edf41_menu_bg_real": {
@@ -7156,6 +7879,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_menu_bg_real",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother301_finish_contract": {
@@ -7174,6 +7906,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother301_finish_contract",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother401_data": {
@@ -7191,6 +7930,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_mother401_data"
    ]
   },
   "edf41_mother401_parts_collision_layer": {
@@ -7210,6 +7952,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother401_parts_collision_layer",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother401_parts_take_the_hull_level": {
@@ -7229,6 +7978,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother401_parts_take_the_hull_level",
+    "json",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother401_plugin_contract": {
@@ -7247,6 +8004,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother401_plugin_contract",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother_parts_default_migrates": {
@@ -7266,6 +8030,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother_parts_default_migrates",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother_plugin_contract": {
@@ -7285,6 +8056,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_mother_plugin_contract",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_motherships_not_faked": {
@@ -7303,6 +8081,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_motherships_not_faked",
+    "os"
    ]
   },
   "edf41_net_contract": {
@@ -7311,6 +8094,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_net_contract",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_objects_after_weapons": {
@@ -7330,6 +8120,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_objects_after_weapons",
+    "os",
+    "src"
    ]
   },
   "edf41_objects_install": {
@@ -7347,6 +8143,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "__name__",
+    "edf41_objects_install",
+    "modfiles",
+    "os",
+    "tempfile"
    ]
   },
   "edf41_objects_shipped": {
@@ -7364,6 +8167,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "edf41_objects_shipped",
+    "json",
+    "os"
    ]
   },
   "edf41_outfit_item_label": {
@@ -7383,6 +8193,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_outfit_item_label",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_outfits_install": {
@@ -7402,6 +8219,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_outfits_install",
+    "ledger",
+    "modfiles",
+    "os",
+    "src",
+    "tempfile"
    ]
   },
   "edf41_outfits_pipeline_math": {
@@ -7411,6 +8237,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_outfits_pipeline_math",
+    "re"
    ]
   },
   "edf41_outfits_reproducible": {
@@ -7428,6 +8258,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_outfits_reproducible",
+    "os"
    ]
   },
   "edf41_outfits_shipped": {
@@ -7444,6 +8278,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_outfits_shipped",
+    "json",
+    "os"
    ]
   },
   "edf41_rest_behaviour_real": {
@@ -7454,6 +8293,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_rest_behaviour_real",
+    "os"
    ]
   },
   "edf41_robo_finish": {
@@ -7472,6 +8316,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_robo_finish",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_robo_plugin_contract": {
@@ -7490,6 +8341,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_robo_plugin_contract",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_robo_registered": {
@@ -7508,6 +8366,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_robo_registered",
+    "os"
    ]
   },
   "edf41_shared_asset_backed_up_by_older_install": {
@@ -7525,6 +8388,27 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_edf41_install",
+    "_edf41_shared_game",
+    "_edf41_shared_left_clean",
+    "_edf41_shared_port_fixture",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "edf41_shared_asset_backed_up_by_older_install",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf41_shared_asset_reinstall_after_repair": {
@@ -7542,6 +8426,27 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_edf41_install",
+    "_edf41_shared_game",
+    "_edf41_shared_left_clean",
+    "_edf41_shared_port_fixture",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "edf41_shared_asset_reinstall_after_repair",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf41_shared_weapon_asset_lifecycle": {
@@ -7559,6 +8464,24 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_edf41_shared_port_fixture",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "edf41_shared_weapon_asset_lifecycle",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf41_shipped_textures_load_before_models": {
@@ -7576,6 +8499,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_object",
+    "edf41_shipped_textures_load_before_models",
+    "os"
    ]
   },
   "edf41_sk_grass_real": {
@@ -7593,6 +8522,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "edf41_sk_grass_real",
+    "os"
    ]
   },
   "edf41_sk_maps_real": {
@@ -7610,6 +8545,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "edf41_sk_maps_real",
+    "os"
    ]
   },
   "edf41_sounds_captions_synthetic": {
@@ -7626,6 +8567,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_sounds_captions_synthetic",
+    "os"
    ]
   },
   "edf41_sounds_install": {
@@ -7642,6 +8587,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_sounds_install",
+    "json",
+    "os",
+    "patched"
    ]
   },
   "edf41_stale_stock": {
@@ -7659,6 +8610,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_stale_stock",
+    "os"
    ]
   },
   "edf41_stat_lines": {
@@ -7676,6 +8633,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_stat_lines"
    ]
   },
   "edf41_story_pack_real": {
@@ -7694,6 +8654,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "e5c",
+    "edf41_story_pack_real",
+    "os"
    ]
   },
   "edf41_story_small_dragons": {
@@ -7711,6 +8677,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "_edf41_root",
+    "edf41_story_small_dragons",
+    "os",
+    "re"
    ]
   },
   "edf41_story_small_dragons_upgrade": {
@@ -7728,6 +8702,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_story_small_dragons_upgrade",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf41_trees_real": {
@@ -7745,6 +8727,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "edf41_trees_real",
+    "os"
    ]
   },
   "edf41_ufo301_behaviour": {
@@ -7754,6 +8742,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_ufo301_behaviour",
+    "os"
    ]
   },
   "edf41_ufo401_real": {
@@ -7771,6 +8764,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_ufo401_real",
+    "os"
    ]
   },
   "edf41_ufo401ace_real": {
@@ -7788,6 +8786,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_ufo401ace_real",
+    "os"
    ]
   },
   "edf41_ui_names": {
@@ -7798,6 +8801,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_ui_names",
+    "os"
    ]
   },
   "edf41_voice_real": {
@@ -7814,6 +8822,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_sound_games",
+    "edf41_voice_real",
+    "os"
    ]
   },
   "edf41_weapon_bank_real": {
@@ -7830,6 +8843,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_sound_games",
+    "edf41_weapon_bank_real",
+    "os"
    ]
   },
   "edf41_weapon_conversion": {
@@ -7839,6 +8857,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_f32",
+    "dsgo",
+    "edf41_weapon_conversion"
    ]
   },
   "edf41_weapons_convert_real": {
@@ -7856,6 +8879,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_dsgo_strings",
+    "dsgo",
+    "edf41_weapons_convert_real",
+    "os"
    ]
   },
   "edf41_weapons_match_developers": {
@@ -7866,6 +8895,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "E41_DEVELOPER_COPIES",
+    "dsgo",
+    "edf41_weapons_match_developers",
+    "os"
    ]
   },
   "edf41_wing_diver_energy": {
@@ -7876,6 +8911,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "WD_ENERGY_GATE",
+    "dsgo",
+    "edf41_wing_diver_energy",
+    "json",
+    "os"
    ]
   },
   "edf41_zh_mission_texts": {
@@ -7894,6 +8937,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "e5c",
+    "edf41_zh_mission_texts"
    ]
   },
   "edf41_zh_patch_rows": {
@@ -7903,6 +8950,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf41_zh_patch_rows",
+    "os",
+    "tempfile"
    ]
   },
   "edf41_zh_weapon_names": {
@@ -7914,6 +8966,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "edf41_zh_weapon_names",
+    "json",
+    "os"
    ]
   },
   "edf5_campaign_build": {
@@ -7932,6 +8990,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "dsgo",
+    "e5c",
+    "edf5_campaign_build",
+    "os"
    ]
   },
   "edf5_campaign_install_remove": {
@@ -7950,6 +9015,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "e5c",
+    "edf5_campaign_install_remove",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_campaign_interrupted_reinstall": {
@@ -7968,6 +9044,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "_failing_write",
+    "e5c",
+    "edf5_campaign_interrupted_reinstall",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_campaign_legacy_rows": {
@@ -7986,6 +9074,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "e5c",
+    "edf5_campaign_legacy_rows",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_campaign_pack_music": {
@@ -8004,6 +9102,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "e5c",
+    "edf5_campaign_pack_music"
    ]
   },
   "edf5_campaign_pack_music_real": {
@@ -8022,6 +9124,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_afs2_sizes",
+    "_cpk_file",
+    "_e5c_have_game",
+    "_edf41_root",
+    "_music_cue_waves",
+    "dsgo",
+    "e5c",
+    "edf5_campaign_pack_music_real",
+    "os"
    ]
   },
   "edf5_campaign_plugin_sites": {
@@ -8032,6 +9145,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_E5C_OWNED_SITES",
+    "_e5c_have_game",
+    "edf5_campaign_plugin_sites",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf5_campaign_refusals": {
@@ -8050,6 +9172,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "_e5c_refuses",
+    "e5c",
+    "edf5_campaign_refusals",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_campaign_shipped": {
@@ -8069,6 +9203,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "e5c",
+    "edf5_campaign_shipped",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf5_campaign_thumbnails": {
@@ -8087,6 +9229,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "e5c",
+    "edf5_campaign_thumbnails",
+    "json"
    ]
   },
   "edf5_campaign_two_machines": {
@@ -8105,6 +9252,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "e5c",
+    "edf5_campaign_two_machines",
+    "modfiles",
+    "os",
+    "patched",
+    "re",
+    "tempfile"
    ]
   },
   "edf5_campaign_ui_variants_real": {
@@ -8114,6 +9273,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf5_campaign_ui_variants_real",
+    "os"
    ]
   },
   "edf5_dlc_campaign_offers_the_four": {
@@ -8132,6 +9295,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "e5c",
+    "edf5_dlc_campaign_offers_the_four",
+    "json",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_dlc_edf6_changed": {
@@ -8149,6 +9323,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_FakeEdf6",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "edf5_dlc_edf6_changed",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_dlc_ownership": {
@@ -8166,6 +9350,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_FakeEdf6",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "edf5_dlc_ownership",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_dlc_round_trip": {
@@ -8183,6 +9378,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_FakeEdf6",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "edf5_dlc_round_trip",
+    "lzma",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_dlc_shipped": {
@@ -8200,6 +9406,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf5_dlc_shipped",
+    "os"
    ]
   },
   "edf5_found_by_gamedir": {
@@ -8208,6 +9418,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "edf5_found_by_gamedir",
+    "os",
+    "shutil",
+    "tempfile"
    ]
   },
   "edf5_weapon_conversion": {
@@ -8217,6 +9433,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_f32",
+    "dsgo",
+    "edf5_weapon_conversion"
    ]
   },
   "edf5_weapons_match_developers": {
@@ -8231,6 +9452,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "E5W_REBALANCED",
+    "_e5w_games",
+    "dsgo",
+    "edf5_weapons_match_developers",
+    "os"
    ]
   },
   "edf5_weapons_registry": {
@@ -8250,6 +9478,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF6_SLOT_CATEGORIES",
+    "ROOT",
+    "_e5w_curves",
+    "calls",
+    "cw",
+    "edf5_weapons_registry",
+    "os",
+    "src"
    ]
   },
   "edf5_weapons_retire_and_uninstall": {
@@ -8267,6 +9505,23 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "edf5_weapons_retire_and_uninstall",
+    "json",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf5_weapons_rows": {
@@ -8284,6 +9539,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "OTHER",
+    "STOCK",
+    "calls",
+    "cw",
+    "edf5_weapons_rows"
    ]
   },
   "edf5_weapons_stack_real": {
@@ -8301,6 +9563,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5w_games",
+    "_stock_only_mods",
+    "cw",
+    "dsgo",
+    "edf5_weapons_stack_real",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile"
    ]
   },
   "edf6_awe_lists_round_trip": {
@@ -8310,6 +9583,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_sound_games",
+    "edf6_awe_lists_round_trip",
+    "os"
    ]
   },
   "embedded_seat_aim_wired": {
@@ -8318,6 +9596,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "embedded_seat_aim_wired",
+    "os",
+    "src"
    ]
   },
   "emc_copies_agree": {
@@ -8338,6 +9622,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "disabled_return_offset",
+    "emc_copies_agree",
+    "ledger",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "emplacement_fallback_without_the_dreadnought": {
@@ -8355,6 +9649,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_flak_request_template",
+    "calls",
+    "cw",
+    "dsgo",
+    "emplacement_fallback_without_the_dreadnought",
+    "tempfile",
+    "vc"
    ]
   },
   "every_boardable_aircraft_caught": {
@@ -8372,6 +9675,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "every_boardable_aircraft_caught",
+    "make_jets",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "every_boardable_aircraft_requested": {
@@ -8390,6 +9702,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "cw",
+    "every_boardable_aircraft_requested",
+    "make_jets",
+    "os",
+    "re",
+    "src",
+    "vc",
+    "xm_units"
    ]
   },
   "every_call_kind_builds_real": {
@@ -8407,6 +9731,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_STOCK_PT",
+    "_check_call_outputs",
+    "calls",
+    "cw",
+    "dsgo",
+    "every_call_kind_builds_real",
+    "os"
    ]
   },
   "every_call_kind_builds_synthetic": {
@@ -8424,6 +9757,21 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "CALL_KINDS",
+    "_SAT_DAMAGE",
+    "_SAT_PT",
+    "_check_call_outputs",
+    "_dnode",
+    "_refuses",
+    "_synthetic_call_sgo",
+    "_synthetic_call_text",
+    "calls",
+    "cw",
+    "dsgo",
+    "every_call_kind_builds_synthetic",
+    "vc"
    ]
   },
   "every_npc_aircraft_boardable": {
@@ -8435,6 +9783,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "every_npc_aircraft_boardable",
+    "os",
+    "re",
+    "src"
    ]
   },
   "exhausts_come_from_the_models": {
@@ -8452,6 +9807,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "exhausts_come_from_the_models",
+    "os",
+    "re",
+    "src"
    ]
   },
   "fire4_pad_default_migrates": {
@@ -8471,6 +9833,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "fire4_pad_default_migrates",
+    "os",
+    "re",
+    "src"
    ]
   },
   "fmb_build_real": {
@@ -8488,6 +9857,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "fmb_build_real",
+    "os"
    ]
   },
   "fmb_plants_stock_real": {
@@ -8505,6 +9880,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "fmb_plants_stock_real",
+    "os"
    ]
   },
   "fmex_plants_offline": {
@@ -8513,6 +9894,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_stand_in_fmb",
+    "fmex_plants_offline"
    ]
   },
   "footprint_covers_the_stock_models": {
@@ -8531,6 +9916,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "contextlib",
+    "footprint_covers_the_stock_models",
+    "os",
+    "sys"
    ]
   },
   "free_look_key_default_migrates": {
@@ -8550,6 +9942,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "free_look_key_default_migrates",
+    "os",
+    "re",
+    "src"
    ]
   },
   "frozen_collision_consumer": {
@@ -8566,6 +9965,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "frozen_collision_consumer"
    ]
   },
   "game_clock_and_hud_stop_with_the_pause": {
@@ -8575,6 +9977,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "game_clock_and_hud_stop_with_the_pause",
+    "os",
+    "re",
+    "src"
    ]
   },
   "gear_legs_as_the_models_fold_them": {
@@ -8592,6 +10001,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "gear_legs_as_the_models_fold_them",
+    "os",
+    "re",
+    "src"
    ]
   },
   "gear_mount_reaches_the_skin": {
@@ -8601,6 +10017,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "gear_mount_reaches_the_skin"
    ]
   },
   "grand_battle_fits_the_real_plain": {
@@ -8619,6 +10038,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "grand_battle_fits_the_real_plain",
+    "os",
+    "sys"
    ]
   },
   "gravity_gun_mark_in_plugin": {
@@ -8637,6 +10062,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "cw",
+    "gravity_gun_mark_in_plugin",
+    "os",
+    "re",
+    "src"
    ]
   },
   "ground_mission_builders_take_the_game_alone": {
@@ -8655,6 +10089,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ground_mission_builders_take_the_game_alone",
+    "os",
+    "sys"
    ]
   },
   "gun_stabilizer_wired": {
@@ -8666,6 +10106,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "gun_stabilizer_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "gunship_cannon_round": {
@@ -8685,6 +10132,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "__name__",
+    "gunship_cannon_round",
+    "make_jets",
+    "os",
+    "re",
+    "src"
    ]
   },
   "gunship_gunner_seat": {
@@ -8704,6 +10160,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "gunship_gunner_seat",
+    "make_jets",
+    "os",
+    "re",
+    "src"
    ]
   },
   "gunship_muzzle_wired": {
@@ -8723,6 +10187,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "gunship_muzzle_wired",
+    "make_jets",
+    "os",
+    "re",
+    "src"
    ]
   },
   "hand_copies_agree": {
@@ -8740,6 +10212,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "hand_copies_agree",
+    "make_jets",
+    "os",
+    "re",
+    "src",
+    "vc",
+    "xm_units"
    ]
   },
   "heli_mouse_aim_wired": {
@@ -8751,6 +10234,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "heli_mouse_aim_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "heli_sight_after_aim_lines": {
@@ -8771,6 +10261,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "INI_MODULES",
+    "ROOT",
+    "heli_sight_after_aim_lines",
+    "os",
+    "re",
+    "src",
+    "sys"
    ]
   },
   "heli_store_flies_its_own_arc": {
@@ -8779,6 +10278,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "heli_store_flies_its_own_arc",
+    "os",
+    "re",
+    "src"
    ]
   },
   "high_cam_default_migrates": {
@@ -8798,6 +10304,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "high_cam_default_migrates",
+    "os",
+    "re",
+    "src"
    ]
   },
   "high_cam_wired": {
@@ -8818,6 +10331,19 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "BOHR_STOCK_AMMO_ALIVE",
+    "ROOT",
+    "at_build",
+    "dsgo",
+    "high_cam_wired",
+    "make_artillery",
+    "make_katyusha",
+    "os",
+    "re",
+    "src",
+    "vc"
    ]
   },
   "hkcms_build_real": {
@@ -8835,6 +10361,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "hkcms_build_real",
+    "os"
    ]
   },
   "hud_scale_one_source": {
@@ -8846,6 +10378,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "hud_scale_one_source",
+    "os",
+    "re",
+    "src"
    ]
   },
   "hud_switch_cues_wired": {
@@ -8854,6 +10393,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "hud_switch_cues_wired",
+    "os",
+    "src"
    ]
   },
   "hud_text_localized": {
@@ -8868,6 +10413,19 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "HUD_LITERAL_WORDS",
+    "HUD_SPEC",
+    "HUD_TEXT_SOURCES",
+    "ROOT",
+    "hud_literal_words",
+    "hud_text_localized",
+    "hudtext_entries",
+    "os",
+    "re",
+    "src",
+    "sys"
    ]
   },
   "impact_charges_agree": {
@@ -8887,6 +10445,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "impact_charges_agree",
+    "os",
+    "re",
+    "src"
    ]
   },
   "incremental_install_regressions": {
@@ -8907,6 +10472,9 @@
    "scripts": [
     "tools/selftest.py",
     "tools/test_installer_incremental.py"
+   ],
+   "uses": [
+    "incremental_install_regressions"
    ]
   },
   "ini_merge_adds_room_presync": {
@@ -8926,6 +10494,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ini_merge_adds_room_presync",
+    "installer",
+    "os",
+    "src"
    ]
   },
   "ini_merge_only_adds": {
@@ -8945,6 +10520,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ini_merge_only_adds",
+    "installer",
+    "os",
+    "src"
    ]
   },
   "ini_sections_match_windows": {
@@ -8964,6 +10546,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ini_sections_match_windows",
+    "installer",
+    "modfiles",
+    "os",
+    "tempfile"
    ]
   },
   "install_keeps_rows": {
@@ -8981,6 +10570,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "OTHER",
+    "STOCK",
+    "_installs",
+    "calls",
+    "cw",
+    "install_keeps_rows"
    ]
   },
   "installer_menu_8_opens_the_loadouts": {
@@ -9010,6 +10607,143 @@
     "tools/selftest.py",
     "tools/test_installer_incremental.py",
     "tools/test_installer_recovery.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "BOHR_STOCK_AMMO_ALIVE",
+    "CALL_KINDS",
+    "COST_FILE",
+    "E41_DEVELOPER_COPIES",
+    "E5W_REBALANCED",
+    "EDF41_MISSION_MAPS",
+    "EDF41_SOLDIERS",
+    "EDF6_SLOT_CATEGORIES",
+    "HERE",
+    "HUD_LITERAL_WORDS",
+    "HUD_SPEC",
+    "HUD_TEXT_SOURCES",
+    "INI_MODULES",
+    "LEGACY_CAS_SAME",
+    "LEGACY_MDB_SAME",
+    "OTHER",
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "STOCK",
+    "TESTS",
+    "WD_ENERGY_GATE",
+    "_E5C_OWNED_SITES",
+    "_FakeEdf6",
+    "_GUN_MUZZLES",
+    "_I18N_MODULES",
+    "_SAID",
+    "_SAT_DAMAGE",
+    "_SAT_PT",
+    "_START_GAME",
+    "_STOCK_PT",
+    "_STORE_MUZZLES",
+    "__name__",
+    "_afs2_sizes",
+    "_at_build_files",
+    "_awe1",
+    "_belly_model",
+    "_call_files",
+    "_call_ids",
+    "_check_call_outputs",
+    "_chute_game",
+    "_cjk_outside_tr",
+    "_cmake_plugins",
+    "_costs",
+    "_cpk_file",
+    "_cube_part",
+    "_dnode",
+    "_dsgo_strings",
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "_e5c_refuses",
+    "_e5c_stub",
+    "_e5w_curves",
+    "_e5w_games",
+    "_edf41_friend_spawns",
+    "_edf41_install",
+    "_edf41_object",
+    "_edf41_root",
+    "_edf41_shared_game",
+    "_edf41_shared_left_clean",
+    "_edf41_shared_port_fixture",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "_f32",
+    "_f32_plain",
+    "_failing_write",
+    "_flak_request_template",
+    "_function",
+    "_game_read",
+    "_installs",
+    "_jobs",
+    "_legacy_games",
+    "_main",
+    "_mini_mab",
+    "_mini_mdb",
+    "_mods",
+    "_music_cue_waves",
+    "_nozzle_model",
+    "_pack_bundle",
+    "_placeholder_game_rows",
+    "_range_checked",
+    "_range_grid",
+    "_read",
+    "_recoil_game",
+    "_refuses",
+    "_rmpa_points",
+    "_rows_copy",
+    "_run_one",
+    "_sazabi_request_template",
+    "_sgo_bytes",
+    "_sgo_table",
+    "_sound_games",
+    "_stand_in_fmb",
+    "_stock_only_mods",
+    "_synthetic_call_sgo",
+    "_synthetic_call_text",
+    "_tree",
+    "_utf",
+    "at_build",
+    "ballistics",
+    "calls",
+    "contextlib",
+    "cw",
+    "disabled_return_offset",
+    "dsgo",
+    "e5c",
+    "gen_calls",
+    "gen_stores",
+    "hud_literal_words",
+    "hudtext_entries",
+    "in_team_field",
+    "installer",
+    "installer_menu_8_opens_the_loadouts",
+    "io",
+    "json",
+    "katyusha_kept_whole_bar_the_prune",
+    "ledger",
+    "lzma",
+    "make_artillery",
+    "make_jets",
+    "make_katyusha",
+    "make_stock_stores_wanted",
+    "modfiles",
+    "os",
+    "patched",
+    "re",
+    "shutil",
+    "spawn_catalog_archives",
+    "src",
+    "sys",
+    "tempfile",
+    "traceback",
+    "vc",
+    "xm_units"
    ]
   },
   "installer_range_has_targets_and_no_enemy": {
@@ -9029,6 +10763,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_range_checked",
+    "_range_grid",
+    "installer_range_has_targets_and_no_enemy",
+    "os",
+    "re",
+    "src",
+    "sys"
    ]
   },
   "installer_recovery_regressions": {
@@ -9049,6 +10793,9 @@
    "scripts": [
     "tools/selftest.py",
     "tools/test_installer_recovery.py"
+   ],
+   "uses": [
+    "installer_recovery_regressions"
    ]
   },
   "installer_removes_what_it_writes": {
@@ -9068,6 +10815,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_function",
+    "installer_removes_what_it_writes",
+    "os",
+    "re",
+    "src"
    ]
   },
   "installer_speaks_english": {
@@ -9087,6 +10842,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "HERE",
+    "ROOT",
+    "_I18N_MODULES",
+    "_SAID",
+    "_cjk_outside_tr",
+    "installer_speaks_english",
+    "os",
+    "re",
+    "src",
+    "sys"
    ]
   },
   "jet_door_on_the_ground_beside_its_box": {
@@ -9103,6 +10870,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "jet_door_on_the_ground_beside_its_box",
+    "vc"
    ]
   },
   "jet_hardpoints_keep_the_muzzles_out_of_the_ground": {
@@ -9112,6 +10883,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_GUN_MUZZLES",
+    "_STORE_MUZZLES",
+    "_belly_model",
+    "jet_hardpoints_keep_the_muzzles_out_of_the_ground"
    ]
   },
   "jet_masses_cover_every_jet": {
@@ -9128,6 +10905,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "gen_stores",
+    "jet_masses_cover_every_jet",
+    "make_jets",
+    "vc"
    ]
   },
   "jet_ragdoll_proxies_in_the_v506_rest_pose": {
@@ -9144,6 +10927,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "jet_ragdoll_proxies_in_the_v506_rest_pose",
+    "os",
+    "vc"
    ]
   },
   "jet_weapons_hang_on_their_hardpoints": {
@@ -9160,6 +10948,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_GUN_MUZZLES",
+    "_STORE_MUZZLES",
+    "jet_weapons_hang_on_their_hardpoints",
+    "os",
+    "src",
+    "vc"
    ]
   },
   "katyusha_bm13_launcher": {
@@ -9176,6 +10973,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "katyusha_bm13_launcher",
+    "katyusha_kept_whole_bar_the_prune",
+    "make_katyusha",
+    "os"
    ]
   },
   "katyusha_fires_over_its_cab": {
@@ -9186,6 +10989,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "katyusha_fires_over_its_cab",
+    "os",
+    "src"
    ]
   },
   "katyusha_pose_agrees": {
@@ -9203,6 +11012,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "katyusha_pose_agrees",
+    "make_katyusha",
+    "os",
+    "src"
    ]
   },
   "ledger_committed_writer": {
@@ -9219,6 +11035,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mods",
+    "ledger",
+    "ledger_committed_writer",
+    "modfiles",
+    "os",
+    "tempfile"
    ]
   },
   "ledger_deferred_restore_edges": {
@@ -9235,6 +11059,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mods",
+    "ledger",
+    "ledger_deferred_restore_edges",
+    "modfiles",
+    "os",
+    "tempfile"
    ]
   },
   "ledger_refcounts": {
@@ -9251,6 +11083,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mods",
+    "ledger",
+    "ledger_refcounts",
+    "modfiles",
+    "os",
+    "shutil",
+    "tempfile"
    ]
   },
   "legacy_archive_refusals": {
@@ -9260,6 +11101,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "legacy_archive_refusals"
    ]
   },
   "legacy_assets_match_edf6": {
@@ -9269,6 +11113,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "LEGACY_CAS_SAME",
+    "LEGACY_MDB_SAME",
+    "legacy_assets_match_edf6",
+    "os"
    ]
   },
   "legacy_parsers_refuse_malformed_input": {
@@ -9278,6 +11128,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "legacy_parsers_refuse_malformed_input"
    ]
   },
   "lofted_arc_solver": {
@@ -9296,6 +11149,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ballistics",
+    "lofted_arc_solver",
+    "make_katyusha",
+    "os",
+    "src"
    ]
   },
   "lofted_envelope_within_life": {
@@ -9312,6 +11173,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ballistics",
+    "lofted_envelope_within_life",
+    "make_katyusha"
    ]
   },
   "mab_add_locators_real": {
@@ -9329,6 +11195,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_e5c_have_game",
+    "_edf41_root",
+    "mab_add_locators_real",
+    "os"
    ]
   },
   "mab_add_locators_synthetic": {
@@ -9337,6 +11209,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_f32_plain",
+    "_mini_mab",
+    "mab_add_locators_synthetic"
    ]
   },
   "mab_retarget_synthetic": {
@@ -9345,6 +11222,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mini_mab",
+    "mab_retarget_synthetic"
    ]
   },
   "mab_round_trips": {
@@ -9361,6 +11242,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "contextlib",
+    "dsgo",
+    "mab_round_trips",
+    "make_katyusha",
+    "os",
+    "vc"
    ]
   },
   "mab_strings_relaid_as_the_game": {
@@ -9370,6 +11259,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "mab_strings_relaid_as_the_game",
+    "os"
    ]
   },
   "map_commands_wired": {
@@ -9381,6 +11275,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "map_commands_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "map_hides_stock_hud": {
@@ -9393,6 +11294,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "map_hides_stock_hud",
+    "os",
+    "re",
+    "src"
    ]
   },
   "map_legacy_real": {
@@ -9410,6 +11318,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF41_MISSION_MAPS",
+    "_game_read",
+    "_legacy_games",
+    "map_legacy_real",
+    "os"
    ]
   },
   "map_wired": {
@@ -9424,6 +11339,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "map_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "mdb_graft_rigid": {
@@ -9433,6 +11355,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_mini_mdb",
+    "mdb_graft_rigid"
    ]
   },
   "mdb_insert_bone": {
@@ -9442,6 +11368,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "mdb_insert_bone"
    ]
   },
   "mdb_legacy_half2_widened": {
@@ -9451,6 +11380,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "mdb_legacy_half2_widened"
    ]
   },
   "missiles_leave_along_their_rail": {
@@ -9467,6 +11399,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "missiles_leave_along_their_rail",
+    "os",
+    "vc"
    ]
   },
   "mission_pack_ids_agree": {
@@ -9486,6 +11424,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "e5c",
+    "mission_pack_ids_agree",
+    "os",
+    "src"
    ]
   },
   "new_defaults_on_once": {
@@ -9505,6 +11450,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "make_stock_stores_wanted",
+    "new_defaults_on_once",
+    "os",
+    "re",
+    "src"
    ]
   },
   "nix_torso_wired": {
@@ -9518,6 +11471,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "nix_torso_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "nozzle_bones_in_a_made_model": {
@@ -9534,6 +11494,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_nozzle_model",
+    "nozzle_bones_in_a_made_model"
    ]
   },
   "npc_ai_asks_less": {
@@ -9542,6 +11506,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "npc_ai_asks_less",
+    "os",
+    "src"
    ]
   },
   "npc_ai_wired": {
@@ -9555,6 +11525,13 @@
    "scripts": [
     "tests/npc_mobility_native_audit.py",
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "npc_ai_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "npc_formation_wired": {
@@ -9566,6 +11543,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "npc_formation_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "npc_pickup_wired": {
@@ -9577,6 +11561,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "npc_pickup_wired",
+    "os",
+    "re",
+    "src"
    ]
   },
   "npc_recoil_takes_the_player_call": {
@@ -9595,6 +11586,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "__name__",
+    "_recoil_game",
+    "dsgo",
+    "npc_recoil_takes_the_player_call",
+    "os",
+    "patched",
+    "src",
+    "sys"
    ]
   },
   "npc_vehicle_ai_declarations": {
@@ -9614,6 +11616,12 @@
    "scripts": [
     "tests/test_npc_vehicle_ai_sgo.py",
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "npc_vehicle_ai_declarations",
+    "os",
+    "sys"
    ]
   },
   "obj_holes_found_and_closed": {
@@ -9624,6 +11632,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_cube_part",
+    "obj_holes_found_and_closed"
    ]
   },
   "obj_meshes_skip_what_draws_nothing": {
@@ -9634,6 +11646,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_cube_part",
+    "obj_meshes_skip_what_draws_nothing"
    ]
   },
   "obj_meshes_split_below_65536": {
@@ -9644,6 +11660,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_cube_part",
+    "obj_meshes_split_below_65536"
    ]
   },
   "obj_reader_triangulates_and_converts": {
@@ -9654,6 +11674,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "obj_reader_triangulates_and_converts",
+    "os",
+    "shutil",
+    "tempfile"
    ]
   },
   "order_append_only": {
@@ -9665,6 +11691,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "calls",
+    "order_append_only"
    ]
   },
   "pack_install_upgrade_uninstall": {
@@ -9684,6 +11714,30 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "ROOT",
+    "_at_build_files",
+    "_cmake_plugins",
+    "_e5c_stub",
+    "_pack_bundle",
+    "_read",
+    "_tree",
+    "at_build",
+    "contextlib",
+    "e5c",
+    "installer",
+    "io",
+    "ledger",
+    "modfiles",
+    "os",
+    "pack_install_upgrade_uninstall",
+    "patched",
+    "re",
+    "shutil",
+    "src",
+    "tempfile"
    ]
   },
   "pack_ships_every_plugin": {
@@ -9703,6 +11757,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_cmake_plugins",
+    "installer",
+    "os",
+    "pack_ships_every_plugin",
+    "re",
+    "src"
    ]
   },
   "placeholders_keep_rows": {
@@ -9720,6 +11783,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "OTHER",
+    "STOCK",
+    "calls",
+    "cw",
+    "placeholders_keep_rows"
    ]
   },
   "play_area_wired": {
@@ -9728,6 +11798,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "play_area_wired",
+    "src"
    ]
   },
   "play_edge_margin_is_the_big_maps": {
@@ -9745,6 +11821,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "play_edge_margin_is_the_big_maps",
+    "re",
+    "src"
    ]
   },
   "plugin_crash_dump_is_collected": {
@@ -9756,6 +11839,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "plugin_crash_dump_is_collected",
+    "re",
+    "tempfile"
    ]
   },
   "ported_assets_bundled": {
@@ -9770,6 +11860,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "ported_assets_bundled"
    ]
   },
   "ported_assets_of_another_mod_stay": {
@@ -9787,6 +11882,23 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "ported_assets_of_another_mod_stay",
+    "tempfile"
    ]
   },
   "ported_content_unlock_keys": {
@@ -9806,6 +11918,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_e5c_have_game",
+    "calls",
+    "installer",
+    "os",
+    "ported_content_unlock_keys",
+    "re",
+    "src"
    ]
   },
   "ported_weapon_locators_fit": {
@@ -9823,6 +11945,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "ported_weapon_locators_fit",
+    "vc"
    ]
   },
   "ported_weapon_locators_fit_real": {
@@ -9837,6 +11964,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "os",
+    "ported_weapon_locators_fit_real"
    ]
   },
   "ported_weapons_held_as_edf6": {
@@ -9846,6 +11978,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "ported_weapons_held_as_edf6"
    ]
   },
   "ported_weapons_registry_current": {
@@ -9863,6 +11999,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "dsgo",
+    "json",
+    "os",
+    "ported_weapons_registry_current"
    ]
   },
   "procmesh_poles_leave_no_empty_triangles": {
@@ -9872,6 +12015,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "procmesh_poles_leave_no_empty_triangles"
    ]
   },
   "proteus_wired": {
@@ -9891,6 +12037,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "disabled_return_offset",
+    "os",
+    "proteus_wired",
+    "re",
+    "src"
    ]
   },
   "prune_members_keeps_what_the_model_uses": {
@@ -9900,6 +12054,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "prune_members_keeps_what_the_model_uses"
    ]
   },
   "pvp_presets_agree": {
@@ -9919,6 +12076,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "e5c",
+    "os",
+    "pvp_presets_agree",
+    "src",
+    "sys"
    ]
   },
   "pvp_presets_fit_their_sites": {
@@ -9937,6 +12102,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "pvp_presets_fit_their_sites",
+    "sys"
    ]
   },
   "rabpool_round_trip": {
@@ -9946,6 +12117,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "json",
+    "rabpool_round_trip"
    ]
   },
   "range_leaves_out_what_is_not_installed": {
@@ -9964,6 +12139,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "range_leaves_out_what_is_not_installed",
+    "sys"
    ]
   },
   "range_online_mode_has_no_weapon_level_cap": {
@@ -9982,6 +12163,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "e5c",
+    "range_online_mode_has_no_weapon_level_cap"
    ]
   },
   "range_parks_every_boardable_aircraft_apart": {
@@ -10001,6 +12186,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "range_parks_every_boardable_aircraft_apart",
+    "re",
+    "src",
+    "sys",
+    "vc"
    ]
   },
   "range_weapon_cap_in_pack_definition": {
@@ -10020,6 +12214,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "e5c",
+    "os",
+    "range_weapon_cap_in_pack_definition",
+    "src"
    ]
   },
   "range_writes_every_generated_sgo_its_script_creates": {
@@ -10038,6 +12239,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "range_writes_every_generated_sgo_its_script_creates",
+    "re",
+    "sys"
    ]
   },
   "ranger_hold_rifle_like": {
@@ -10046,6 +12254,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "ranger_hold_rifle_like"
    ]
   },
   "readme_counts": {
@@ -10060,6 +12272,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "os",
+    "readme_counts",
+    "src"
    ]
   },
   "recoil_call_formats_agree": {
@@ -10069,6 +12288,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "__name__",
+    "_recoil_game",
+    "dsgo",
+    "recoil_call_formats_agree"
    ]
   },
   "release_imports": {
@@ -10088,6 +12313,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "release_imports",
+    "src"
    ]
   },
   "release_models_whole_folders": {
@@ -10107,6 +12339,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "release_models_whole_folders"
    ]
   },
   "release_module_identity": {
@@ -10127,6 +12364,12 @@
    "scripts": [
     "tests/test_buildcache_module_identity.py",
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "release_module_identity",
+    "sys"
    ]
   },
   "release_reads_no_sources": {
@@ -10146,6 +12389,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "release_reads_no_sources",
+    "src"
    ]
   },
   "release_third_party_notices": {
@@ -10165,6 +12415,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "release_third_party_notices",
+    "src"
    ]
   },
   "rmpa_legacy_real": {
@@ -10182,6 +12438,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "EDF41_MISSION_MAPS",
+    "_game_read",
+    "_legacy_games",
+    "_rmpa_points",
+    "os",
+    "rmpa_legacy_real"
    ]
   },
   "rmpa_wire_links_offline": {
@@ -10190,6 +12454,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "rmpa_wire_links_offline"
    ]
   },
   "rope_geometry_and_build": {
@@ -10207,6 +12474,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "__name__",
+    "_chute_game",
+    "dsgo",
+    "ledger",
+    "os",
+    "re",
+    "rope_geometry_and_build",
+    "src"
    ]
   },
   "sazabi_bones_agree": {
@@ -10224,6 +12502,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "sazabi_bones_agree",
+    "src",
+    "vc"
    ]
   },
   "sazabi_fallback_install_upgrade": {
@@ -10241,6 +12527,26 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "__name__",
+    "_call_files",
+    "_call_ids",
+    "_flak_request_template",
+    "_mods",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "ledger",
+    "modfiles",
+    "os",
+    "patched",
+    "sazabi_fallback_install_upgrade",
+    "tempfile",
+    "vc"
    ]
   },
   "sazabi_range_shared_assets": {
@@ -10259,6 +12565,18 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_mods",
+    "_read",
+    "ledger",
+    "os",
+    "patched",
+    "sazabi_range_shared_assets",
+    "sys",
+    "tempfile",
+    "vc"
    ]
   },
   "sazabi_rifle_files": {
@@ -10269,6 +12587,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "json",
+    "os",
+    "sazabi_rifle_files",
+    "shutil",
+    "tempfile"
    ]
   },
   "sazabi_sound_wired": {
@@ -10280,6 +12605,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "disabled_return_offset",
+    "os",
+    "re",
+    "sazabi_sound_wired",
+    "src"
    ]
   },
   "seam_field_makes_the_block_periodic": {
@@ -10289,6 +12622,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "seam_field_makes_the_block_periodic"
    ]
   },
   "sent_crash_dump_is_this_runs": {
@@ -10318,6 +12654,143 @@
     "tools/selftest.py",
     "tools/test_installer_incremental.py",
     "tools/test_installer_recovery.py"
+   ],
+   "uses": [
+    "AT_FILES",
+    "BOHR_STOCK_AMMO_ALIVE",
+    "CALL_KINDS",
+    "COST_FILE",
+    "E41_DEVELOPER_COPIES",
+    "E5W_REBALANCED",
+    "EDF41_MISSION_MAPS",
+    "EDF41_SOLDIERS",
+    "EDF6_SLOT_CATEGORIES",
+    "HERE",
+    "HUD_LITERAL_WORDS",
+    "HUD_SPEC",
+    "HUD_TEXT_SOURCES",
+    "INI_MODULES",
+    "LEGACY_CAS_SAME",
+    "LEGACY_MDB_SAME",
+    "OTHER",
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "STOCK",
+    "TESTS",
+    "WD_ENERGY_GATE",
+    "_E5C_OWNED_SITES",
+    "_FakeEdf6",
+    "_GUN_MUZZLES",
+    "_I18N_MODULES",
+    "_SAID",
+    "_SAT_DAMAGE",
+    "_SAT_PT",
+    "_START_GAME",
+    "_STOCK_PT",
+    "_STORE_MUZZLES",
+    "__name__",
+    "_afs2_sizes",
+    "_at_build_files",
+    "_awe1",
+    "_belly_model",
+    "_call_files",
+    "_call_ids",
+    "_check_call_outputs",
+    "_chute_game",
+    "_cjk_outside_tr",
+    "_cmake_plugins",
+    "_costs",
+    "_cpk_file",
+    "_cube_part",
+    "_dnode",
+    "_dsgo_strings",
+    "_e5c_game",
+    "_e5c_have_game",
+    "_e5c_real",
+    "_e5c_refuses",
+    "_e5c_stub",
+    "_e5w_curves",
+    "_e5w_games",
+    "_edf41_friend_spawns",
+    "_edf41_install",
+    "_edf41_object",
+    "_edf41_root",
+    "_edf41_shared_game",
+    "_edf41_shared_left_clean",
+    "_edf41_shared_port_fixture",
+    "_edf5dlc_data",
+    "_edf5dlc_game",
+    "_f32",
+    "_f32_plain",
+    "_failing_write",
+    "_flak_request_template",
+    "_function",
+    "_game_read",
+    "_installs",
+    "_jobs",
+    "_legacy_games",
+    "_main",
+    "_mini_mab",
+    "_mini_mdb",
+    "_mods",
+    "_music_cue_waves",
+    "_nozzle_model",
+    "_pack_bundle",
+    "_placeholder_game_rows",
+    "_range_checked",
+    "_range_grid",
+    "_read",
+    "_recoil_game",
+    "_refuses",
+    "_rmpa_points",
+    "_rows_copy",
+    "_run_one",
+    "_sazabi_request_template",
+    "_sgo_bytes",
+    "_sgo_table",
+    "_sound_games",
+    "_stand_in_fmb",
+    "_stock_only_mods",
+    "_synthetic_call_sgo",
+    "_synthetic_call_text",
+    "_tree",
+    "_utf",
+    "at_build",
+    "ballistics",
+    "calls",
+    "contextlib",
+    "cw",
+    "disabled_return_offset",
+    "dsgo",
+    "e5c",
+    "gen_calls",
+    "gen_stores",
+    "hud_literal_words",
+    "hudtext_entries",
+    "in_team_field",
+    "installer",
+    "io",
+    "json",
+    "katyusha_kept_whole_bar_the_prune",
+    "ledger",
+    "lzma",
+    "make_artillery",
+    "make_jets",
+    "make_katyusha",
+    "make_stock_stores_wanted",
+    "modfiles",
+    "os",
+    "patched",
+    "re",
+    "sent_crash_dump_is_this_runs",
+    "shutil",
+    "spawn_catalog_archives",
+    "src",
+    "sys",
+    "tempfile",
+    "traceback",
+    "vc",
+    "xm_units"
    ]
   },
   "share_publishes_every_file_of_a_version": {
@@ -10330,6 +12803,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "__name__",
+    "contextlib",
+    "io",
+    "os",
+    "share_publishes_every_file_of_a_version",
+    "tempfile"
    ]
   },
   "shkt_check_on_synthetic_data": {
@@ -10348,6 +12829,13 @@
    "scripts": [
     "tests/test_shkt_check.py",
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "io",
+    "os",
+    "shkt_check_on_synthetic_data",
+    "sys"
    ]
   },
   "sidecar_copies_agree": {
@@ -10368,6 +12856,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "cw",
+    "ledger",
+    "os",
+    "re",
+    "sidecar_copies_agree",
+    "src"
    ]
   },
   "sidecar_tub_holds_the_gunner": {
@@ -10384,6 +12882,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "sidecar_tub_holds_the_gunner"
    ]
   },
   "sight_zoom_wired": {
@@ -10395,6 +12896,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "sight_zoom_wired",
+    "src"
    ]
   },
   "sk_terrain_real": {
@@ -10412,6 +12920,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_game_read",
+    "_legacy_games",
+    "os",
+    "sk_terrain_real"
    ]
   },
   "skid_tubes_face_out_and_rails_rest_level": {
@@ -10428,6 +12942,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "skid_tubes_face_out_and_rails_rest_level"
    ]
   },
   "soft_edge_wired": {
@@ -10439,6 +12956,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "soft_edge_wired",
+    "src"
    ]
   },
   "sortie_copies_agree": {
@@ -10456,6 +12980,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "os",
+    "re",
+    "sortie_copies_agree",
+    "src"
    ]
   },
   "sound_at_takes_a_still_sound": {
@@ -10464,6 +12996,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "sound_at_takes_a_still_sound",
+    "src"
    ]
   },
   "spawn_catalog_archives_counted": {
@@ -10483,6 +13022,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "spawn_catalog_archives_counted",
+    "src",
+    "sys"
    ]
   },
   "spawn_catalog_archives_recorded_0": {
@@ -10501,6 +13047,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
    ]
   },
   "spawn_catalog_archives_recorded_1": {
@@ -10519,6 +13073,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
    ]
   },
   "spawn_catalog_archives_recorded_2": {
@@ -10537,6 +13099,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
    ]
   },
   "spawn_catalog_archives_recorded_3": {
@@ -10555,6 +13125,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
    ]
   },
   "spawn_catalog_covers_every_registry": {
@@ -10574,6 +13152,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "spawn_catalog_covers_every_registry",
+    "src",
+    "sys"
    ]
   },
   "spawn_catalog_generated_is_current": {
@@ -10592,6 +13178,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "spawn_catalog_generated_is_current"
    ]
   },
   "spawn_catalog_rows_check_their_files": {
@@ -10611,6 +13200,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "spawn_catalog_rows_check_their_files",
+    "src",
+    "sys"
    ]
   },
   "split_missile_wired": {
@@ -10620,6 +13217,12 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "split_missile_wired",
+    "src"
    ]
   },
   "stock_gauges_wired": {
@@ -10631,6 +13234,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "stock_gauges_wired"
    ]
   },
   "stock_guidance_wired": {
@@ -10642,6 +13252,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "stock_guidance_wired"
    ]
   },
   "stock_gun_sight_ranged": {
@@ -10652,6 +13269,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "dsgo",
+    "os",
+    "re",
+    "src",
+    "stock_gun_sight_ranged"
    ]
   },
   "stock_holds_build": {
@@ -10668,6 +13293,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "os",
+    "stock_holds_build"
    ]
   },
   "stock_holds_wired": {
@@ -10688,6 +13318,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ledger",
+    "os",
+    "src",
+    "stock_holds_wired"
    ]
   },
   "stock_payload_and_seats_wired": {
@@ -10708,6 +13345,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ledger",
+    "os",
+    "re",
+    "src",
+    "stock_payload_and_seats_wired",
+    "vc"
    ]
   },
   "stock_stores_build": {
@@ -10726,6 +13372,11 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "os",
+    "stock_stores_build"
    ]
   },
   "stock_vehicle_hud_wired": {
@@ -10739,6 +13390,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "dsgo",
+    "os",
+    "re",
+    "src",
+    "stock_vehicle_hud_wired"
    ]
   },
   "store_looks": {
@@ -10755,6 +13414,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "dsgo",
+    "make_katyusha",
+    "os",
+    "patched",
+    "store_looks",
+    "vc"
    ]
   },
   "stores_inc_current": {
@@ -10772,6 +13439,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "gen_stores",
+    "os",
+    "src",
+    "stores_inc_current",
+    "vc"
    ]
   },
   "support_arrives_from_off_the_map": {
@@ -10780,6 +13455,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "support_arrives_from_off_the_map"
    ]
   },
   "support_c130_models": {
@@ -10797,6 +13479,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "make_jets",
+    "os",
+    "re",
+    "src",
+    "support_c130_models",
+    "vc"
    ]
   },
   "support_helicarrier_models": {
@@ -10814,6 +13505,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "support_helicarrier_models",
+    "vc"
    ]
   },
   "support_jets_wear_their_models": {
@@ -10831,6 +13530,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "support_jets_wear_their_models",
+    "vc"
    ]
   },
   "support_level_tables_match_the_game": {
@@ -10849,6 +13556,15 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "cw",
+    "dsgo",
+    "os",
+    "re",
+    "support_level_tables_match_the_game",
+    "vc"
    ]
   },
   "supports_on_map_pt": {
@@ -10867,6 +13583,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_STOCK_PT",
+    "_refuses",
+    "calls",
+    "cw",
+    "os",
+    "src",
+    "supports_on_map_pt"
    ]
   },
   "supports_on_map_rows_are_placeholders": {
@@ -10884,6 +13610,22 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "OTHER",
+    "STOCK",
+    "_mods",
+    "_placeholder_game_rows",
+    "_read",
+    "calls",
+    "cw",
+    "dsgo",
+    "json",
+    "modfiles",
+    "os",
+    "patched",
+    "supports_on_map_rows_are_placeholders",
+    "tempfile"
    ]
   },
   "target_range_fits_the_real_plain": {
@@ -10902,6 +13644,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "_range_checked",
+    "os",
+    "sys",
+    "target_range_fits_the_real_plain"
    ]
   },
   "team_changes_go_through_set_team": {
@@ -10911,6 +13660,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "in_team_field",
+    "os",
+    "re",
+    "src",
+    "team_changes_go_through_set_team"
    ]
   },
   "texture_files_decode_and_slice": {
@@ -10919,6 +13676,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "texture_files_decode_and_slice"
    ]
   },
   "textures_go_before_the_model": {
@@ -10929,6 +13689,9 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "textures_go_before_the_model"
    ]
   },
   "thrown_drones_marked_and_wired": {
@@ -10949,6 +13712,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "cw",
+    "dsgo",
+    "os",
+    "re",
+    "src",
+    "thrown_drones_marked_and_wired"
    ]
   },
   "turret_aim_wired": {
@@ -10960,6 +13733,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "turret_aim_wired"
    ]
   },
   "turret_cam_wired": {
@@ -10971,6 +13751,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "turret_cam_wired"
    ]
   },
   "ultimate_copies_agree": {
@@ -10990,6 +13777,17 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "cw",
+    "ledger",
+    "os",
+    "re",
+    "src",
+    "ultimate_copies_agree",
+    "vc"
    ]
   },
   "uninstall_misaligned_skips_table": {
@@ -11009,6 +13807,26 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "STOCK",
+    "_call_files",
+    "_call_ids",
+    "_flak_request_template",
+    "_mods",
+    "_read",
+    "_sazabi_request_template",
+    "_sgo_table",
+    "calls",
+    "cw",
+    "dsgo",
+    "installer",
+    "modfiles",
+    "os",
+    "patched",
+    "shutil",
+    "tempfile",
+    "uninstall_misaligned_skips_table"
    ]
   },
   "utf_table_version_field": {
@@ -11017,6 +13835,10 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "_utf",
+    "utf_table_version_field"
    ]
   },
   "vehicle_gun_calibres_wired": {
@@ -11035,6 +13857,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "dsgo",
+    "make_artillery",
+    "os",
+    "re",
+    "src",
+    "vc",
+    "vehicle_gun_calibres_wired"
    ]
   },
   "vehicle_ram_wired": {
@@ -11046,6 +13878,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "vehicle_ram_wired"
    ]
   },
   "vehicle_sound_wired": {
@@ -11057,6 +13896,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "disabled_return_offset",
+    "os",
+    "re",
+    "src",
+    "vehicle_sound_wired"
    ]
   },
   "view_distance_keeps_far_pass_start": {
@@ -11065,6 +13912,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "os",
+    "re",
+    "src",
+    "view_distance_keeps_far_pass_start"
    ]
   },
   "weapon_marks_agree": {
@@ -11083,6 +13937,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "at_build",
+    "make_artillery",
+    "make_katyusha",
+    "os",
+    "re",
+    "src",
+    "weapon_marks_agree"
    ]
   },
   "weapon_rows_never_past_the_records_the_game_keeps": {
@@ -11100,6 +13964,13 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "calls",
+    "cw",
+    "os",
+    "tempfile",
+    "weapon_rows_never_past_the_records_the_game_keeps"
    ]
   },
   "weapon_table_fits_the_save": {
@@ -11118,6 +13989,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "cw",
+    "os",
+    "patched",
+    "re",
+    "weapon_table_fits_the_save"
    ]
   },
   "worldmap_textures_in_model_pack": {
@@ -11137,6 +14016,14 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "ledger",
+    "os",
+    "src",
+    "tempfile",
+    "worldmap_textures_in_model_pack"
    ]
   },
   "xmorph_undeployed_without_its_folder": {
@@ -11155,6 +14042,16 @@
    ],
    "scripts": [
     "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "calls",
+    "contextlib",
+    "cw",
+    "os",
+    "sys",
+    "tempfile",
+    "xmorph_undeployed_without_its_folder"
    ]
   }
  }
