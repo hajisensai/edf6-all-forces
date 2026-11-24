@@ -2,8 +2,9 @@
 // out as the file reads them: the camera (+0x220 world, +0x24 field, +0x360 soldier), the soldier, the vehicle, their
 // models, skeleton instances and pose arrays. The camera step's and the frame end fence's game calls (image+kCameraStep,
 // image+kFence, image+kRecordDraw) land on local stand-ins: `image` is set so that image+rva is the stand-in for the call
-// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's hook, RecordStart: a frame without ticks
-// poses there), the projection (BeforeProject), the steps (CameraStepHook), the fence (FrameEndHook).
+// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's hook, RecordStart; the
+// stand-in recording projects once, as 0x11978D0 does after copying the poses, and a frame without ticks poses at that
+// first projection), the projection (BeforeProject), the steps (CameraStepHook), the fence (FrameEndHook).
 #include "../src/frame_rate_view.cpp"
 #include "../src/render_record.cpp"
 #include <cmath>
@@ -67,7 +68,15 @@ void StandInStep(void* camera,void*) {
 void* StandInFence(void*,void*,void*,void*) { ++fenceCalls;return nullptr; }
 int recordCalls=0;
 std::uint64_t recordArgs[2]{};
-void* StandInRecord(void*,std::uint64_t a,std::uint64_t b) { ++recordCalls;recordArgs[0]=a;recordArgs[1]=b;return nullptr; }
+int recordProjections=1;   // the projections the stand-in recording makes (viewports; 0: none, as when loading)
+bool sampledInRecord=false;
+void* StandInRecord(void*,std::uint64_t a,std::uint64_t b) {
+    ++recordCalls;recordArgs[0]=a;recordArgs[1]=b;
+    const int before=frameobjects::samples;
+    for(int i=0;i<recordProjections;++i)BeforeProject(nullptr,nullptr);
+    sampledInRecord=frameobjects::samples!=before;
+    return nullptr;
+}
 unsigned char* ImageFor(std::uintptr_t function,unsigned rva) noexcept {
     return reinterpret_cast<unsigned char*>(function-rva);
 }
@@ -619,8 +628,9 @@ void RootIdentity() {
     Fence();
 }
 
-// 4b. Where the poses are written: not at BeginFrame (System::Update deletes objects after it), at the render recording
-// call (0x1198FA4), once; the end fence puts them back.
+// 4b. Where the poses are written: not at BeginFrame (System::Update deletes objects after it), not at the render
+// recording's call (0x1198FA4: the recording copies the poses again before it draws), at its first projection, once; the
+// end fence puts them back.
 void RecordPoint() {
     Reset();
     stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
@@ -642,6 +652,7 @@ void RecordPoint() {
     Check(frameobjects::samples==samples+1 && frameobjects::untickedSamples==untickedSamples+1 &&
           !std::memcmp(frameobjects::rootAtSample,stepped.body,sizeof(frameobjects::rootAtSample)),
           "record: the other objects' sample first (a frame without ticks), before the player's root is written");
+    Check(sampledInRecord,"record: the sample and the poses come at the recording's projection, not before it");
     Record();   // a second record call in the same frame: posed once
     Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,"record: posed once a frame");
     Fence();
@@ -669,6 +680,25 @@ void RecordPoint() {
     Check(Unchanged(stepped) && recordCalls>records+3,"record: off, it only calls the game's recording");
     on=true;
     Fence();
+    // A recording with two projections (two viewports): sampled and posed at the first only. One with none: nothing,
+    // and the projection of a later recording call does not take over a recording that never projected.
+    recordProjections=2;
+    const int twoSamples=frameobjects::samples;
+    framerateview::BeginFrame(0,0.5f);
+    Record();
+    Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2,
+          "record: two projections, sampled and posed once");
+    Fence();
+    Check(Unchanged(stepped),"record: and put back");
+    recordProjections=0;
+    framerateview::BeginFrame(0,0.5f);
+    Record();
+    Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2 && Unchanged(stepped),
+          "record: no projection, nothing sampled or posed");
+    Fence();
+    recordProjections=1;
+    Project(cam);   // a projection outside a recording
+    Check(frameobjects::samples==twoSamples+1,"record: a projection outside the recording samples nothing");
     Counted();
     const int stepSamples=frameobjects::samples;
     BeginTick(1);Queue(cam,Pose(0,0,0,0));Step(cam);Fence();

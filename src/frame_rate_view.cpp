@@ -27,9 +27,10 @@
 // player's soldier, who moves only on ticks, sliding back and forth against the picture: the root goes with the camera.
 // The camera step comes after every object's phase in the tick (0x11995A6 is the last call of the loop), so the camera
 // step's hook samples the root after the tick: the soldier's body skeleton's pose[0] ([h+0x900]; h = [camera+0x360]),
-// or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]). On a frame without ticks, at System::Update's render
+// or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]). On a frame without ticks, inside System::Update's render
 // recording (the call 0x1198FA4 -> 0x11978D0, after the frame's object deletion 0x1195F20; the render thread is idle: the
-// last frame's end fence 0x11A305A waited for it; the tick loop after it is skipped), D = cur^-1 * InterpolateRigid(prev,
+// last frame's end fence 0x11A305A waited for it; the tick loop after it is skipped) at its first projection (0x1197B50,
+// after the recording copied the skeletons' poses again: RecordStart), D = cur^-1 * InterpolateRigid(prev,
 // cur, alpha) is multiplied onto every bone of the draw pose ([inst+0x30], world matrices) of every instance of the body,
 // every weapon of [h+0x1950] (+0xF30) and, riding, the vehicle (the rider and their weapons with the vehicle's D: rigid
 // passengers). A skin is drawn from each bone's own matrix, so all bones move, not the root only. The same frame's end
@@ -57,8 +58,9 @@ constexpr unsigned kCameraStepCall=0x11995A6,kCameraStep=0x118DF40;
 // The main loop's frame end: the game thread waits for the render thread (frame_pacing.cpp has its loop).
 constexpr unsigned kFenceCall=0x11A305A,kFence=0x111CC20;
 // System::Update's render recording (System_RecordDraw 0x11978D0, its call 0x1198FA4 after the object deletion
-// 0x1195F20 and before the tick loop): a frame without ticks poses there (docs/unlimited-fps-re.md §4.3.2), in the
-// frame rate's turn of render_record.cpp (the call site's single owner; the first person places its boxes after).
+// 0x1195F20 and before the tick loop): the frame rate's turn of render_record.cpp (the call site's single owner; the
+// first person places its boxes after) opens the recording; a frame without ticks poses at its first projection
+// (docs/unlimited-fps-re.md §4.3.2).
 // lea rdx,[rsp+38h]; call 0x118DF40
 const unsigned char kCameraStepSig[]={0x48,0x8D,0x54,0x24,0x38,0xE8,0x95,0x49,0xFF,0xFF};
 constexpr unsigned kWorld=0x220,kFov=0x24;
@@ -75,7 +77,8 @@ struct Camera {
 Camera cameras[kCameras];
 float alphaNow=1.0f;
 bool on=false;
-bool poseDue=false;   // set by BeginFrame on a frame without ticks: the record call poses, once
+bool poseDue=false;      // set by BeginFrame on a frame without ticks: the recording's first projection poses, once
+bool recordOpen=false;   // set by the record call's turn: its first projection samples (and poses when due), once
 // Projections on frames without ticks: drawn blended, and left as they were (written after the step, or refused).
 unsigned blended=0,unblended=0;
 
@@ -272,12 +275,12 @@ using FenceFn=void*(*)(void*,void*,void*,void*);
 // The frame end's fence: once the render thread has drawn the frame, the blends go (the review of #386, 3).
 void* FrameEndHook(void* a,void* b,void* c,void* d) {
     void* const r=reinterpret_cast<FenceFn>(image+kFence)(a,b,c,d);
-    poseDue=false;
+    poseDue=recordOpen=false;
     if(on)RestoreFrame();
     return r;
 }
 
-// A frame without ticks: the player's root and every other object, at the render recording.
+// A frame without ticks: the player's root and every other object, at the recording's first projection.
 void PoseFrame() noexcept {
     fpview::M4 d;
     bool posedRoot=false;
@@ -289,10 +292,23 @@ void PoseFrame() noexcept {
     frameobjects::Pose(alphaNow,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
 }
 
-// Right before the render recording (render_record.cpp: the frame rate's turn, before the first person's).
-// The sample first (stage 4: every other object's root as the last tick left it, before fps-7 writes the player's).
+// Right before the render recording (render_record.cpp: the frame rate's turn, before the first person's): nothing is
+// read or written yet. The recording itself, before it projects and draws, makes the skeletons' pose arrays again
+// (0x11978D0's loop at 0x1197950: vtable slot 3 of every object in System's +0x428 list; a soldier's
+// 0x59A780 -> 0x5750D0 -> 0x6C06A0(h+0x860) -> 0x1100F10(h+0x900) copies each bone record's world, rec+0xB0, over
+// inst+0x30), then runs the +0x358 jobs (0x1197A0B). A pose written here was copied over before it was drawn (M001,
+// FrameRateCap=1: every pose the frame wrote, 12 a frame, all soldiers, the player's root too), and a sample here read
+// the copy the last recording made, before the tick. So both wait for the recording's first projection
+// (ProjectStart, from BeforeProject: after the copy and the jobs, before the first draw).
 void RecordStart() noexcept {
-    if(!on)return;
+    if(on)recordOpen=true;
+}
+
+// The recording's first projection (viewport 0's, 0x1197B50): the sample first (stage 4: every other object's root as
+// the last tick left it and the recording copied it, before fps-7 writes the player's), then the poses when due.
+void ProjectStart() noexcept {
+    if(!recordOpen)return;
+    recordOpen=false;
     frameobjects::Sample(poseDue);
     if(poseDue) {
         poseDue=false;
@@ -343,7 +359,9 @@ void CameraStepHook(void* camera,void* arg) {
 }
 
 void BeforeProject(void* camera,const int*) {
-    if(!on || alphaNow>=1.0f || !camera)return;
+    if(!on)return;
+    ProjectStart();
+    if(alphaNow>=1.0f || !camera)return;
     Camera* const c=Find(camera);
     if(!c || !c->havePrev || c->written)return;
     // A camera that did not step on the last frame with ticks (age 1 or more) holds the tick before's pair: blending it
@@ -380,7 +398,8 @@ void BeginFrame(std::uint32_t ticks,float alpha) noexcept {
         if(c.camera==root.camera && c.age>1)root=Root{};   // its camera stopped stepping: the next one samples
     }
     alphaNow=alpha;
-    // Nothing is posed here: System::Update deletes objects (0x1195F20) before its render recording, whose hook poses.
+    // Nothing is posed here: System::Update deletes objects (0x1195F20) before its render recording, whose first
+    // projection poses.
     poseDue=!ticks && alpha<1.0f;
 }
 
