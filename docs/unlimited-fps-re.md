@@ -292,10 +292,13 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
       距离可能让盒子偏离镜头、被剔掉。
     - 两边各自 `renderrecord::Install()`，谁先装都一样。`FrameRateCap=0` 时只有第一人称的回合；第一人称关时只有帧率的回合；
       各自独立工作。离线 `render_record_test` 覆盖只重定向一次、按槽位排序、各自单独、签名或重定向失败不重试。
-      `redirect_owner_guard.py` 扫两个插件全部 `RedirectCall` / `PatchCall` / `RedirectImportCall` 的调用点：同一 RVA 不得出现在
-      两个文件里，`0x1198FA4` 只能由 `render_record.cpp` 重定向。扫描时除此之外没有别的重复重定向。`perf_probe.cpp` 的 `Chain`
-      按设计叠在别人的 thunk 上（`0x705715`、`0x1103FD1`、`0x1198FA4`、`0x11A305A`、`0x11A309B`、`0x11E255C`），最后安装，
-      不算所有者。
+      改写点所有权在运行期登记（`common/code_owner.cpp`）：`RedirectCall` / `PatchCode` / `RedirectImportCall` /
+      `PatchVtableSlot` 在读写字节之前，把这几个字节登记给调用它的源文件（默认参数 `__builtin_FILE()`，在调用处展开）；
+      插件自己 `VirtualProtect` 写代码的地方先调 `edf::ClaimCode`。两个文件登记到同一字节就在日志写
+      `PATCH conflict: A and B both patch EDF.dll+0x…`，不管第二个改写成功还是被拒；装载完写 `PATCH owners: N claims, M conflicts`。
+      `perf_probe.cpp` 的 `Chain` 按设计叠在别人的 thunk 上，登记为 `Claim::kLayered`，不和任何人冲突。离线
+      `code_owner_test` 覆盖冲突、链式、同文件重登、部分重叠、默认所有者；`redirect_owner_guard.py` 只守「所有写入都经过登记」。
+      #395 时的静态扫描只认首参里的 `k*` 常量，漏了字面地址、循环变量、`PatchCode` 写 E8 和手写 `VirtualProtect`。
   `D = cur⁻¹ · InterpolateRigid(prev, cur, alpha)`，
   右乘到下列模型**每个实例**（`model+0xA0`、基础 LOD `[model+0x1B8]`、LOD 表 `[model+0x250]` 各项 `+0x58`）**每根骨**的 pose
   （`[inst+0x30]`，个数 `[inst+0x20]`，每骨 0x40 字节世界矩阵）：身体 `h+0x860`、`[h+0x1950]` 全部武器的 `+0xF30`、骑乘时的载具
@@ -319,7 +322,7 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   1. `0x11993D6` 调 `0x1195F20` 整理对象表。
   2. 对象阶段。
   3. `0x119950B` 调各管理器的 slot 0x48。
-  4. `0x11995A6` 镜头步进（采样点）。
+  4. `0x11995A6` 镜头步进（#395 时的采样点，现已挪走，见下）。
   5. `0x11996B3` 调 `0x1193D50`，即各管理器的 slot 0x28。
 - `0x1195F20` 整理对象表的过程：
   1. 先走 `+0x4A8`，删掉 `+0x18` 带 4 位的对象（`0x118A1B0`）。
@@ -331,7 +334,9 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 
 做法：
 
-- **采样**：在镜头步进钩子里，每 tick 一次（按 `+0xCE0` 去重，多视口、追帧 n = 2/3 每 tick 各采一次）。
+- **采样**：在渲染录制调用 `0x1198FA4` 的钩子里（帧率的回合开头、fps-7 写玩家根之前），每帧都调；`+0xCE0` 比上次变了才采，
+  所以每 tick 最多一次。录制在本帧 tick 循环之前，tick 之后的第一次录制看到的就是那个 tick 跑完所有作业后的根，也就是要画的根。
+  一帧跑两个 tick（掉帧追帧）时只采到第二个，前后两次采样不相邻，计数重来。
   - 遍历更新表，只取 `thermal_models.cpp` 认得的家族：人形 / 士兵 / NPC / 他机玩家（HumanBase）、载具（含空车，VehicleBase）、
     虫、巨人、怪兽、UFO 等。`+0x18` 带 4 位（待删）的不采。
   - 采每个对象主模型实例 `model+0xA0` 的 pose[0]。
@@ -341,24 +346,26 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   - 身份（控制块、vtable、实例）变了，或上一 tick 没采到，就重新计数。
   - 表只在 tick 帧扩容（初始 1024 对象、4096 个 pose、1M float），扩容在 `noexcept` 里 `try/catch(std::bad_alloc)`：
     失败则本 tick 不采样（之后的帧照 tick 画），不抛出。`Install` 的初始预留同样，失败就不启用本层，记一行日志。
-- **为什么采样留在镜头步进，不挪到 tick 末尾**：镜头步进是 tick 里最后一个每 tick 都跑的直接调用。它之后依次是
-  `0x11BEBE0`（Havok 查询回调）、`+0x358` 作业表（各元素 vtbl[1]，经 `0x118FC00`）、不暂停时 `0x1193D50`（`[sys+0xCC0]` 各项
-  slot 0x28，再 `+0x370` 作业）、再一次 `+0x358`。这些都是运行时按 vtable 选的调用，静态无法确定哪个会写模型 pose，也就找不到
-  一个「保证看到所有写入」的更晚的点。代价：之后被写过根的对象在 0-tick 帧发现绘制的 pose[0] ≠ cur，照 tick 画并计入
-  `pose` 原因，不会用过期的一对插值。实机若 `pose` 计数高，再按日志找写入者。
-- **读法（性能）**：采样和写入读的都是游戏此刻持有的活对象（镜头步进时在更新表里的；自己控制块 use 计数 > 0 的；座位 /
+- **为什么不在镜头步进采样**（#395 原做法）：镜头步进之后 tick 里还有 `0x11BEBE0`（Havok 查询回调）、`+0x358` 作业表（各元素
+  vtbl[1]，经 `0x118FC00`）、不暂停时 `0x1193D50`（`[sys+0xCC0]` 各项 slot 0x28，再 `+0x370` 作业）、再一次 `+0x358`，都是运行时
+  按 vtable 选的调用。实机 M001、FrameRateCap=1 时，每 5 秒照 tick 画的约 4500–5700 个对象全部是 `pose` 原因（采样后根又被
+  改过），比插值成功的约 1800 个还多。挪到下一帧的录制之后，这些写入都在采样之前。之后若仍有 `pose`，就是录制之前、
+  0-tick 帧里有人写根（新对象登记 `0x1195A80`、`0x1197680` 等），照 tick 画、不用过期的一对插值。
+- **读法（性能）**：采样和写入读的都是游戏此刻持有的活对象（采样时在更新表里的；自己控制块 use 计数 > 0 的；座位 /
   武器架 weak_ptr 活着的），不再逐个问 `Readable`，整段在 `__try` 里。`thermal_models` 为此加了 `EnemyModelsLive` /
   `EnemyModelLive` / `EnemyFamilyLive`：同样的 RTTI 规则和缓存，只有第一次见到的 vtable 才经 `Readable` 解析 RTTI，模型 vtable 的
   判定也按 vtable 缓存。`Readable` 只问 System 和它的更新表：离线测试 `frame_rate_objects_test` 中 20 个和 2000 个对象的采样都只问
   2 次、一帧写入也只问 2 次（审查时 stress:30 采样每步 4.74 ms 全在 `Readable`）。例外：载具扳机武器的登记检查
   `IsAnimationModel` 走带检查的读法，每把武器每帧问一次（只有载具才有，数量少）。
 - **只在有 0-tick 帧时采样**：最近一次 n = 0 帧之后的 `kIdleTicks` = 60 个 tick（60 Hz 下 1 s）内照常每 tick 采样。超过这个窗口、
-  从没出现过 n = 0 帧、或帧门没装上（`frame_rate.cpp` 视图装上但 `InstallGate` 失败，alpha 恒为 1，`Pose` 从不调用），就跳过采样，
-  计入日志 `ticks not sampled (idle)`。stress:30 每帧都有 tick 时，这一步每步省 0.6–1.3 ms。窗口外第一个 n = 0 帧不写任何对象：
-  已知对象全部计入 `samples`，从下一个 tick 起恢复采样，连续两次采样后（两个 tick）恢复插值。空闲期间保留已知对象及其 weak
-  计数（上限是最后一次采样的对象数），恢复采样时不在表里的再归还；场景释放后重新从空闲开始。离线用例：
-  `frame_rate_objects_test` 的 `Idle`。
-- **写**：n = 0 帧，在 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里帧率的回合（见 §4.3.2 写点与调用点所有者）。
+  从没出现过 n = 0 帧、或帧门没装上（`frame_rate.cpp` 视图装上但 `InstallGate` 失败，alpha 恒为 1，从没有帧说自己是 0-tick），
+  就跳过采样，计入日志 `ticks not sampled (idle)`。stress:30 每帧都有 tick 时，这一步每步省 0.6–1.3 ms。tick 数按 `+0xCE0`
+  的变化计，不按调用次数：一个 tick 调多少次（多视口、一帧多次录制）都只算一个，一次录制前跑了两个 tick 就算两个（#395 时
+  在镜头步进里按调用计数，分屏时窗口只剩一半）。窗口外的第一个 n = 0 帧在自己的录制里立刻采样（窗口从它重新开始），但上一个
+  tick 没采到，这一帧已知对象全部计入 `samples`，再过一个 tick 恢复插值。空闲期间保留已知对象及其 weak 计数（上限是最后一次
+  采样的对象数），恢复采样时不在表里的再归还；场景释放后重新从空闲开始。离线用例：`frame_rate_objects_test` 的 `Idle`
+  （含每 tick 两次调用、一次录制前两个 tick）。
+- **写**：n = 0 帧，在采样和 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里帧率的回合（见 §4.3.2 写点与调用点所有者）。
   - 对象必须还在、vtable 不变、当前绘制的 pose[0] 仍等于 cur（tick 后没人改过）。
   - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 `kCutMove` 10 m 或
     `kCutTurn` 1 rad（57°）的不插值。这两个阈值不是游戏里读出来的：是 fps-8 给玩家根定的「瞬移 / 复活 / 镜头切换」判据

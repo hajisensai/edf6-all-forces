@@ -60,9 +60,9 @@ std::uint64_t __fastcall NativeDtor(void* self,unsigned flags){++dtors;dtorFlags
 ULONGLONG crew::GetTickCount64() noexcept {return fixture::fakeClock;}
 namespace edf {
 void* AllocateNearCode(const void*,const unsigned char*,std::size_t) noexcept{return nullptr;}
-bool PatchCode(unsigned char*,const unsigned char*,const unsigned char*,std::size_t) noexcept{return false;}
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept {if(*slot!=expected)return false;*slot=replacement;return true;}
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept{changed=true;return true;}
+bool PatchCode(unsigned char*,const unsigned char*,const unsigned char*,std::size_t,edf::Claim,const char*) noexcept{return false;}
+bool PatchVtableSlot(void** slot,void* expected,void* replacement,edf::Claim,const char*) noexcept {if(*slot!=expected)return false;*slot=replacement;return true;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept{changed=true;return true;}
 bool Readable(const void* value,std::size_t size,bool write) noexcept {
  if(!value || !size)return false;MEMORY_BASIC_INFORMATION info{};
  if(!VirtualQuery(value,&info,sizeof(info)) || info.State!=MEM_COMMIT || (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)))return false;

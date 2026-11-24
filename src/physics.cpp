@@ -18,6 +18,7 @@ bool PatchCode(std::size_t checkRva,const unsigned char* expect,std::size_t expe
     if(rva<checkRva || rva+size>checkRva+expectSize)return false;
     if(!Matches(checkRva,expect,expectSize))return false;
     unsigned char* at=image+rva;
+    edf::ClaimCode(at,size);   // a code write of its own (edf/code_owner.h)
     DWORD old=0;
     if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
     std::memcpy(at,value,size);

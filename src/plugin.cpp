@@ -1248,6 +1248,15 @@ unsigned char* PlayerHuman() noexcept {
         return playerHuman;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
+// Two source files patching one code byte (edf/code_owner.h): the second's patch is refused or undoes the first's.
+void LogClaimConflict(const edf::ClaimConflict& c) noexcept {
+    const auto at=reinterpret_cast<const unsigned char*>(c.at);
+    if(image && at>=image && at<image+0x4000000)
+        Log("PATCH conflict: %s and %s both patch EDF.dll+0x%llX (%zu bytes): only one may own a site",c.first,c.second,
+            static_cast<unsigned long long>(at-image),c.size);
+    else Log("PATCH conflict: %s and %s both patch %p (%zu bytes): only one may own a site",c.first,c.second,
+             static_cast<const void*>(at),c.size);
+}
 }  // namespace crew
 
 // A background host's keyboard, foreground window and pad for this plugin (common/edf/input_source.h); null: its own.
@@ -1297,6 +1306,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
+    edf::SetClaimConflictSink(&LogClaimConflict);   // before the first patch
     // Checks first, patching nothing: a refusal above, or a module found off here, leaves the game as it was.
     const bool heli=CheckHeliProfile();
     const bool ground=CheckGroundProfile();
@@ -1431,6 +1441,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     syncload::Install();    // after it: the game thread is the frame anchor's (sync_load_probe.h)
     Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
+    const edf::ClaimStats claims=edf::GetClaimStats();
+    Log("PATCH owners: %u claims at load, %u conflicts, %u not registered (no room)",claims.claims,claims.conflicts,
+        claims.dropped);
     return true;
 }
 

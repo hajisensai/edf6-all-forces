@@ -304,7 +304,7 @@ namespace edf {
 bool Readable(const void* ptr,std::size_t n,bool write) noexcept {if(!ptr)return false;auto p=reinterpret_cast<std::uintptr_t>(ptr);if(n>UINTPTR_MAX-p)return false;const auto end=p+n;while(p<end){MEMORY_BASIC_INFORMATION m{};if(!VirtualQuery(reinterpret_cast<const void*>(p),&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;if(write && !(m.Protect&(PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return false;const auto next=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;if(next<=p)return false;p=next;}return true;}
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept {return true;}
 void* AllocateNearCode(const void*,const unsigned char* code,std::size_t size) noexcept {static unsigned index=0;auto* thunk=image+0x190000+index++*0x1000;if(size==24)publicationThunk=thunk;DWORD old=0;if(!VirtualProtect(thunk,0x1000,PAGE_EXECUTE_READWRITE,&old))return nullptr;std::memcpy(thunk,code,size);FlushInstructionCache(GetCurrentProcess(),thunk,size);return thunk;}
-bool RedirectCall(unsigned char* site,void* expected,void* replacement,bool& changed) noexcept {
+bool RedirectCall(unsigned char* site,void* expected,void* replacement,bool& changed,edf::Claim,const char*) noexcept {
  static unsigned used=0;changed=false;
  if(!Readable(site,5) || site[0]!=0xE8 || site+5+At<std::int32_t>(site,1)!=expected || used>=32)return false;
  auto* relay=crew::image+0x180000+used++*32;

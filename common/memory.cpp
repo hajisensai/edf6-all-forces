@@ -254,10 +254,12 @@ void* AllocateNearThunk(const void* anchor,void* target) noexcept {
     return AllocateNearCode(anchor,thunk,sizeof(thunk));
 }
 
-bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement,bool& changed) noexcept {
+bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement,bool& changed,Claim kind,
+                  const char* owner) noexcept {
     changed=false;
     __try {
         if(!callSite || !expectedTarget || !replacement) return false;
+        ClaimCode(callSite,5,kind,owner);   // before the bytes are looked at: a second owner is told even when refused
         // A call (E8) or a tail jump (E9): the same rel32, the hook returns where the target would.
         if(!Readable(callSite,5) || (callSite[0]!=0xE8 && callSite[0]!=0xE9)) return false;
         std::int32_t relative=0;

@@ -246,6 +246,7 @@ bool BvmOnline() noexcept {
 
 bool WriteImage(unsigned rva,const unsigned char* code,std::size_t size) noexcept {
     unsigned char* at=image+rva;
+    edf::ClaimCode(at,size);   // a code write of its own (edf/code_owner.h)
     DWORD old=0;
     if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
     std::memcpy(at,code,size);

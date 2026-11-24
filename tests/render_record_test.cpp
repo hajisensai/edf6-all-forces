@@ -15,7 +15,7 @@ bool Matches(const unsigned char*,std::size_t rva,const unsigned char* bytes,std
     ++matches;
     return sigOk && rva==crew::kRecordCall-14 && size==19 && bytes[size-5]==0xE8;
 }
-bool RedirectCall(unsigned char* site,void* expected,void* replacement,bool& changed) noexcept {
+bool RedirectCall(unsigned char* site,void* expected,void* replacement,bool& changed,edf::Claim,const char*) noexcept {
     ++redirects;
     if(!redirectOk || site!=crew::image+crew::kRecordCall || expected!=crew::image+crew::kRecordDraw)return false;
     redirectedTo=replacement;
