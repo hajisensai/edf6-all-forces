@@ -401,12 +401,12 @@ int main() {
         Put<void*>(human,kSets,sets);Put<std::uint64_t>(human,kSetCount,2);
         Put<void*>(sets,kSetWeapon,slot0);Put<void*>(sets+kSetStride,kSetWeapon,slot1);
         Put<float>(w2,0x894,2.0f);Put<float>(w2,0x8E0,0.5f);
-        const Arms both=ArmsOf(human);
+        ArmsSeen seen{};const Arms both=ArmsOf(human,seen);
         Expect(both.n==3 && both.held[0]==2 && both.held[1]==1,"each WeaponSet's held weapon is found at the native set stride");
         Expect(both.speed[2]==120.0f && std::fabs(both.gravity[2]-7.35f)<0.001f,
                "the held weapon's native speed and gravity are converted to metres and seconds");
         Put<std::uint64_t>(human,kSetCount,1);
-        Expect(ArmsOf(human).held[1]==-1,"a one-handed soldier has no second hand's weapon");
+        seen={};Expect(ArmsOf(human,seen).held[1]==-1,"a one-handed soldier has no second hand's weapon");
     }
     // ArmsOf with its pages asked in two batches (edf::PrefetchReadableSpans) = the ArmsOf before them (one call for
     // the list, one for the weapons' batch, one each for a set and an entry), over lists with unreadable, null and
@@ -488,7 +488,7 @@ int main() {
                     Put<const void*>(sets+k*kSetStride,kSetWeapon,r==7 ? static_cast<const void*>(noAccess) : r==6 ? nullptr : &entries[k]);
                 }
                 packReady=packSlots=rng()%5==0;packSlot.index=static_cast<int>(rng()%4);
-                const Arms got=ArmsOf(human),was=before(human);
+                ArmsSeen fresh{};const Arms got=ArmsOf(human,fresh),was=before(human);
                 ++compared;differ+=!same(got,was);armed+=got.n>0 && got.held[0]>=0;
             }
             packReady=packSlots=false;
@@ -507,7 +507,8 @@ int main() {
                 for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);   // nothing kept from before
                 const ULONGLONG tick=GetTickCount64();
                 edf::TakeReadableStats();
-                const Arms a=ArmsOf(human);
+                ArmsSeen seen{};
+                const Arms a=ArmsOf(human,seen);
                 const edf::ReadableStats st=edf::TakeReadableStats();
                 if(GetTickCount64()!=tick)continue;
                 counted=true;
@@ -517,6 +518,26 @@ int main() {
                 const Arms b=before(human);
                 const edf::ReadableStats again=edf::TakeReadableStats();
                 Expect(same(a,b) && (again.wsCalls==0 || GetTickCount64()!=tick),"the answers kept for the tick serve the old order too");
+                // cpu-2: the same list, sets and entries next time (a live soldier's own): nothing asked again, the same
+                // arms; a hand switched within its list read live; a weapon swapped in the list: asked again
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);   // the page cache can't answer
+                edf::TakeReadableStats();
+                const Arms memo=ArmsOf(human,seen);
+                const edf::ReadableStats st2=edf::TakeReadableStats();
+                Expect(same(a,memo) && st2.wsCalls==0 && st2.asks==0,"ArmsOf asks nothing for a soldier whose arms did not change");
+                entries[1]=weapons[2];
+                for(const ULONGLONG was=GetTickCount64();GetTickCount64()==was;)Sleep(1);
+                edf::TakeReadableStats();
+                const Arms swapped=ArmsOf(human,seen);
+                const edf::ReadableStats st3=edf::TakeReadableStats();
+                Expect(swapped.held[1]==2 && st3.wsCalls==0,"a hand switched to another weapon of its list: the new one, read live, nothing asked");
+                list[0]=weapons[5];
+                edf::TakeReadableStats();
+                const Arms relisted=ArmsOf(human,seen);
+                const edf::ReadableStats st4=edf::TakeReadableStats();
+                Expect(st4.asks>0 && (!seen.known || seen.weapon[0]==weapons[5]) && relisted.n==4,
+                       "a weapon swapped in the list: asked again and fingerprinted anew");
+                entries[1]=weapons[3];list[0]=weapons[0];
             }
             Expect(counted,"a tick long enough to count ArmsOf's calls in");
             VirtualFree(block,0,MEM_RELEASE);
@@ -1218,7 +1239,7 @@ int main() {
         unsigned char* list[2]={rifle,grenade};
         Put<unsigned char**>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,2);
         packReady=true;packSlots=1;packSlot=NpcPackSlot{grenade,PackOf(1),0,1};packUses=packReloads=0;packBusy=false;packCanUse=true;
-        Arms packArms=ArmsOf(human);
+        ArmsSeen packSeen{};Arms packArms=ArmsOf(human,packSeen);
         Expect(packArms.n==2 && packArms.arm[0].ready && !packArms.arm[1].ready && packArms.arm[1].reach==0.0f && LongestReach(packArms)==150.0f &&
                LargestBlast(packArms)==0.0f,"the backpack's grenade is out of the arms it picks, fires and fights at (production ArmsOf)");
         packArms.held[0]=0;
