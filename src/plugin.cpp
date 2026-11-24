@@ -17,8 +17,8 @@
 #pragma warning(pop)
 #include "crash_dump.h"
 #include "frame_pacing.h"
-#include "frame_rate.h"
 #include "perf_probe.h"
+#include "frame_rate.h"
 #include "frame_rate_logic.h"
 #include "log.h"
 #include "mod_file.h"
