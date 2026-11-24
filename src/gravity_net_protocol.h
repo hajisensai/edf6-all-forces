@@ -66,6 +66,10 @@ struct Grab {
     float vel[3]{};                  // hold: how fast that point moves; thrown: the velocity it is thrown at
 };
 bool OwnedGrab(const void* bytes,std::size_t size) noexcept;   // the GRVT magic (any version)
+// The kinds that go as EDF6Coop state messages (plugin_net.h SendState: unreliable, only the newest kept): a hold and a
+// flight, states sent again and again (the next one replaces a lost one). A throw, a let-go, a radial go reliable, in order.
+// So a state may overtake the reliable end of the grab before it (GrabInbox: thrownBehind).
+bool GrabState(const void* bytes,std::size_t size) noexcept;
 bool Encode(const Grab&,void* bytes,std::size_t size) noexcept;
 // False: not GRVT, the wrong size, a newer version, an unknown kind, an ID not canonical, a number not finite.
 bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept;
@@ -98,7 +102,7 @@ inline bool OtherOutranks(bool selfHost,bool otherHost,const char* selfPuid,cons
 }
 
 // The receiver of the grabs: each peer's current one.
-enum class GrabEvent { none, started, held, thrown, letGo, flight, radial };
+enum class GrabEvent { none, started, held, thrown, letGo, flight, radial, thrownBehind };
 struct RemoteGrab {
     bool active=false;
     std::uint64_t heardAt=0;
@@ -109,7 +113,9 @@ public:
     // A peer's message: `started` for a hold of a grab not followed yet (the receiver finds its target), `held` for a later
     // state of the one followed, `thrown` / `letGo` ending it (a throw of a grab never followed is still `thrown`: its target
     // is found then), `flight` for a state of the grab it last threw, `radial` for a radial (the hold untouched), `none`
-    // for one of an ended grab, an older one of the same run, a flight of a grab not thrown.
+    // for one of an ended grab, an older one of the same run, a flight of a grab not thrown. `thrownBehind`: a throw of an
+    // older grab of the same run than the one followed, whose hold (a state message) came first: that older grab's target
+    // is thrown all the same, the one followed untouched (a let-go of it is `none`: the newer grab replaced it).
     GrabEvent Receive(std::uint32_t peer,const Grab& g,std::uint64_t now) noexcept;
     // Whether the peer's grab is still held at `now` (heard within kHoldSilentMs); a silent one is let go here.
     bool Holding(std::uint32_t peer,std::uint64_t now) noexcept;
