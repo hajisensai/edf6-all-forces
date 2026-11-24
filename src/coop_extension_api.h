@@ -47,6 +47,10 @@ typedef uint32_t (EDF6COOP_CALL *EDF6CoopGetExtensionApiFn)(
 #define EDF6COOP_EXTENSION_CAPACITY_VERSION 1u
 #define EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED 1u
 #define EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND 2u
+// An overflow (send/relay backlog, inbox) renews the generation and readiness comes back once the links drain, never
+// latched closed for the room (edf-coop-stable:docs/extension-transport.md, "Overflow recovery contract").
+#define EDF6COOP_EXTENSION_CAPACITY_RECOVERABLE_FAULT 4u
+#define EDF6COOP_EXTENSION_CAPACITY_POLL_BATCH 8u   // EDF6CoopPollExtensionBatch is exported
 #define EDF6COOP_EXTENSION_SEND_UNAVAILABLE 0u
 #define EDF6COOP_EXTENSION_SEND_ACCEPTED 1u
 #define EDF6COOP_EXTENSION_SEND_WOULD_BLOCK 2u
@@ -61,6 +65,14 @@ typedef uint32_t (EDF6COOP_CALL *EDF6CoopGetExtensionCapacityFn)(
 typedef uint32_t (EDF6COOP_CALL *EDF6CoopTrySendExtensionFn)(
     uint64_t expectedGeneration,const EDF6CoopPeer* peer,const void* data,uint32_t bytes,
     uint32_t pendingBytesLimit,uint32_t pendingPacketsLimit);
+
+// Up to maxMessages queued messages under one transport lock: payloads packed into buffer in arrival order, each with its
+// sender as the index api.peer enumerates for that generation and its offset/size. One that does not fit stays queued.
+// 1 with *outCount (possibly 0); 0 when unavailable or the generation is stale.
+typedef struct EDF6CoopExtensionMessage { uint32_t peer,offset,bytes,reserved; } EDF6CoopExtensionMessage;
+typedef uint32_t (EDF6COOP_CALL *EDF6CoopPollExtensionBatchFn)(
+    uint64_t expectedGeneration,EDF6CoopExtensionMessage* messages,uint32_t maxMessages,
+    void* buffer,uint32_t bufferBytes,uint32_t* outCount);
 
 // AF -> Coop, in-process only. The producer snapshots actual current-world player
 // PUIDs atomically. Lobby users alone are not participants. ready is 0 while the

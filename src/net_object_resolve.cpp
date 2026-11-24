@@ -1,4 +1,5 @@
 #include "net_object_resolve.h"
+#include "net_counters.h"
 #include "coop_extension_api.h"
 #include "memory.h"
 #include "team_walk.h"
@@ -98,6 +99,42 @@ bool StillSeen(const Seen& s,unsigned expected) noexcept {
     return Present(object,&now) && Same(now,s.ref) && Player(object,expected,&puid,&slot) && slot==s.slot && puid==s.puid;
 }
 
+// The NetIds the same walk met (every present object that is no player soldier), kept for the same frame and world as
+// `players`: an NPC's reference asked again in that frame (each controlled enemy's lease every frame, each pose message a
+// guest takes) is found without another walk. Borrowed pointers, never pinned: every entry of the asked NetId is checked
+// again (present, its own weak reference, still that NetId) before use, and one that fails sends the lookup back to a walk,
+// as does a NetId the walk did not meet (an object made since). Open addressing, a stamp per slot (no clearing per walk);
+// more objects than kMaxNatives leaves the table unused for the frame (each NetId walks, as before). Game thread only.
+struct NativeSeen { unsigned char id[32];ObjRef ref; };
+constexpr unsigned kNativeSlots=16384,kMaxNatives=kNativeSlots/2;   // at most half full: short probes
+struct Natives {
+    unsigned stamp=0;bool valid=false;unsigned count=0;
+    unsigned stamps[kNativeSlots]{};
+    NativeSeen seen[kNativeSlots];
+};
+Natives natives;
+unsigned NativeSlot(const unsigned char* id) noexcept {
+    std::uint64_t h=1469598103934665603ull;
+    for(unsigned i=0;i<32;++i)h=(h^id[i])*1099511628211ull;
+    return static_cast<unsigned>(h^(h>>32))&(kNativeSlots-1);
+}
+void BeginNatives() noexcept {
+    natives.valid=false;natives.count=0;
+    if(++natives.stamp==0){std::memset(natives.stamps,0,sizeof natives.stamps);natives.stamp=1;}
+}
+void RecordNative(const unsigned char* id,const ObjRef& ref) noexcept {
+    unsigned slot=NativeSlot(id);
+    for(;natives.stamps[slot]==natives.stamp;slot=(slot+1)&(kNativeSlots-1)) {
+        const NativeSeen& s=natives.seen[slot];
+        if(Same(s.ref,ref) && !std::memcmp(s.id,id,32))return;   // the same object met again in another team
+    }
+    if(natives.count==kMaxNatives){natives.count=kMaxNatives+1;return;}   // overflow: the table is not used this frame
+    if(natives.count>kMaxNatives)return;
+    natives.stamps[slot]=natives.stamp;
+    std::memcpy(natives.seen[slot].id,id,32);natives.seen[slot].ref=ref;
+    ++natives.count;
+}
+
 struct Query {
     netref::Kind kind=netref::Kind::none;
     NetLife life=NetLife::live;
@@ -124,9 +161,10 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
             if(Player(object,v->expected,&puid,&slot))Record(*v->table,ref,puid,slot);
             return;
         }
-        if(!v->natives)return;
         unsigned char id[32]{};
         if(!ReadNativeObjectId(object,id))return;
+        RecordNative(id,ref);   // the frame's NetId table, asked or not
+        if(!v->natives)return;
         for(unsigned i=0;i<v->n;++i) {
             Query& q=v->q[i];
             if(q.kind!=netref::Kind::native || std::memcmp(id,q.id,32))continue;
@@ -143,13 +181,35 @@ const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reint
 // run, the world changed under it (a mission's end), or more player soldiers than the table holds.
 bool WalkWorld(Visitor& v,const World& w,ULONGLONG frame) noexcept {
     players.valid=false;players.overflow=false;players.count=0;
+    BeginNatives();
     if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)) || !team_walk::WalkRows(w.mgr))return false;
     v.expected=w.expected;v.table=&players;
     reinterpret_cast<WalkFn>(image+kEnumAllTeams)(w.mgr,&v);
     World after{};
     if(!CurrentWorld(&after) || !(after==w) || players.overflow){players.count=0;return false;}
     players.valid=true;players.frame=frame;players.world=w;
+    natives.valid=natives.count<=kMaxNatives;
     return true;
+}
+// NetId query `q` from the frame's table (the caller checked it is this frame's and world's): true with `q.match` (and
+// `matchTwice`) as the walk would have set them; false when the table cannot answer it (not met, or an entry of it no
+// longer that object or that NetId): the caller walks.
+bool CachedNative(Query& q) noexcept {
+    if(!natives.valid)return false;
+    bool met=false;
+    for(unsigned slot=NativeSlot(q.id);natives.stamps[slot]==natives.stamp;slot=(slot+1)&(kNativeSlots-1)) {
+        const NativeSeen& s=natives.seen[slot];
+        if(std::memcmp(s.id,q.id,32))continue;
+        met=true;
+        const auto object=static_cast<const unsigned char*>(s.ref.obj);
+        ObjRef now{};unsigned char id[32]{};
+        if(!Present(object,&now) || !Same(now,s.ref) || !ReadNativeObjectId(object,id) || std::memcmp(id,q.id,32))return false;
+        if(Alive(q.life,object,&now)) {
+            if(q.match && !Same(q.match,now))q.matchTwice=true;
+            q.match=now;
+        }
+    }
+    return met;
 }
 NetResolved Result(const Query& q,unsigned expected) noexcept {
     NetResolved r{};
@@ -225,10 +285,12 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
         if(!any)return true;   // nothing asked: nothing found, no walk
         World world{};
         if(!CurrentWorld(&world))return false;
-        // Players alone, this frame's table of this world, every one asked about still itself, and each asked slot has one
-        // there to its NetLife (live for live): no walk. A slot with none (gone, or a respawn made since the walk) walks.
+        // This frame's tables of this world, every player asked about still itself, each asked slot has one there to its
+        // NetLife (live for live), and each NetId asked met by the walk and still its objects (CachedNative): no walk. A slot
+        // with none (gone, or a respawn made since the walk), or a NetId not met, walks.
         const ULONGLONG frame=GameFrame();
-        bool cached=!visitor.natives && frame && players.valid && players.frame==frame && players.world==world;
+        bool cached=frame && players.valid && players.frame==frame && players.world==world;
+        for(unsigned j=0;cached && j<n;++j)if(visitor.q[j].kind==netref::Kind::native)cached=CachedNative(visitor.q[j]);
         for(unsigned j=0;cached && j<n;++j) {
             const Query& q=visitor.q[j];
             if(q.kind!=netref::Kind::player)continue;
@@ -241,10 +303,18 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
             }
             cached=cached && held;
         }
-        if(!cached && !WalkWorld(visitor,world,frame))return false;
+        // Not served from the tables (a NetId not met, or a player no longer itself): what CachedNative filled in goes, the walk
+        // decides every query afresh (a match left over would read as the walk's second one).
+        if(!cached) {
+            for(unsigned j=0;j<n;++j){visitor.q[j].match=ObjRef{};visitor.q[j].matchTwice=false;}
+            LARGE_INTEGER a,b;QueryPerformanceCounter(&a);
+            const bool walked=WalkWorld(visitor,world,frame);
+            QueryPerformanceCounter(&b);netcount::Walk(b.QuadPart-a.QuadPart);   // counted only (PERF NET CHANNELS)
+            if(!walked)return false;
+        }
         for(unsigned i=0;i<n;++i)out[i]=Result(visitor.q[i],world.expected);
         return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){for(unsigned i=0;i<n;++i)out[i]=NetResolved{};players.valid=false;return false;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){for(unsigned i=0;i<n;++i)out[i]=NetResolved{};players.valid=false;natives.valid=false;return false;}
 }
 bool ResolveNetRef(const unsigned char* ref,NetLife life,NetResolved* out) noexcept {
     const unsigned char* refs[1]={ref};

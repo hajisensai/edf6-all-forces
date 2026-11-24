@@ -664,8 +664,8 @@ void SplitScreenAndSampling(unsigned production,unsigned serial) {
     now+=1;input.move[0]=0.2f;input.aimYaw=0.4f;input.aimPitch=0.1f;CHECK(callbacks.input(one,input));
     now+=1;input.move[0]=0.3f;input.look[1]=0.4f;input.aimYaw=0.8f;input.aimPitch=-0.3f;CHECK(callbacks.input(one,input));
     CHECK(current.ApplyCount(production,one.lease)==1);
-    now+=30;crew::EnemyControlNetworkFrame();current.Pump();CHECK(current.ApplyCount(production,one.lease)==1);
-    ++now;crew::EnemyControlNetworkFrame();current.Pump();AssertInputEverywhere(current,one.lease,2,2);
+    now+=15;crew::EnemyControlNetworkFrame();current.Pump();CHECK(current.ApplyCount(production,one.lease)==1); // 17 ms: one frame
+    now+=17;crew::EnemyControlNetworkFrame();current.Pump();AssertInputEverywhere(current,one.lease,2,2);
     CHECK(current.LastInput(production,one.lease).move[0]==0.3f && current.LastInput(production,one.lease).look[1]==0.4f);
     for(unsigned i=0;i<3;++i){const auto aim=current.LastInput(i,one.lease);CHECK(aim.absoluteAim && aim.aimYaw==0.8f && aim.aimPitch==-0.3f);}
     ++now;input.move[0]=0.4f;CHECK(callbacks.input(one,input)); // queued look sample
@@ -845,8 +845,8 @@ void HostPoseSamplingAndAtomicDelivery() {
     CHECK(current.nodes[1].poseApplies==0);current.Deliver(envelopes[0]);CHECK(current.nodes[1].poseApplies==1);
     current.Pump();CHECK(current.nodes[2].poseApplies==1 && native.poseApplyCalls==0);
     CHECK(current.nodes[1].poses[snapshot.lease]==native.capturedPose && current.nodes[2].poses[snapshot.lease]==native.capturedPose);
-    now+=32;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1);
-    ++now;++native.poseGeneration;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==2);current.Pump();
+    now+=17;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==1);
+    now+=17;++native.poseGeneration;crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==2);current.Pump();
     CHECK(current.nodes[1].poseApplies==2 && current.nodes[2].poseApplies==2);
     CHECK(current.nodes[1].poseSequences[snapshot.lease]==2 && current.nodes[1].poses[snapshot.lease]==PoseBytes(ep::kMaxPoseBytes,2));
     CHECK(native.applyCalls==0 && current.ApplyCount(1,snapshot.lease)==0);
@@ -1176,3 +1176,5 @@ int main() {
     ProductionSignalBatchesRespectNativeBarriers();HostNormalizesStaleFocusWithoutRevokingControl();HostExitDrainsNativeAndWireOutboxes();HostAcceptedBatchesUseBackpressure();ProductionSdkBackpressureRetainsAcceptedResults();GuestAcceptedActionsRequireActualNativeApplication();ActionsRevalidateNativeIdentityAndFailures();
     std::printf("enemy_control_net_fixture: %u checks passed (production host/guest + real three-peer codec bus)\n",checks);return 0;
 }
+// One fixture frame is 17 ms: 17 ms is always exactly one frame later, 34 ms always two (the send cadence).
+namespace crew { ULONGLONG GameFrame() noexcept { return now/17; } }
