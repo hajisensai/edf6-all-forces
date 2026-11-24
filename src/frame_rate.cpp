@@ -56,6 +56,16 @@ const unsigned char kFinalStoreSig[]={0x89,0x9C,0x24,0xBC,0x00,0x00,0x00};   // 
 // Application::Update's per-call work.
 constexpr unsigned kSteamCall=0x705633,kNetCall=0x705693,kNet=0x788460,kEosCall=0x7056AE,kEos=0x12ADB30;
 constexpr unsigned kWindCall=0x7056BA,kWind=0x1230A0,kHoldOff=0x70595C;
+// The sound's volume smoothing 0x7B3010(sound, dt) (0x705946): its +0x3C eases 0.1 of the way to its target and its
+// +0xD8 grows 0.01 a call (both written to the volumes through 0x7AED10), so more calls than ticks fade faster. Called
+// on frames with ticks only, with the dt of every frame since the last call (its +0x30 / +0x34 count down by dt).
+constexpr unsigned kVolumeCall=0x705946,kVolume=0x7B3010;
+// The load meter: 0x11A3033 stores the frame's Update time in percent of a 60 Hz frame to 0x2139B84, read by the
+// level-of-detail cuts (0x134210, 0x136621: thresholds 200-350 %). A 0-tick frame's light Update would pull it down
+// and keep the cuts from coming; the leaf stub stores it on frames with ticks only.
+constexpr unsigned kLoadStore=0x11A3033,kLoadMeter=0x2139B84;
+const unsigned char kLoadStoreSig[]={0xF3,0x0F,0x11,0x05,0x49,0x6B,0xF9,0x00};   // movss [rip+0F96B49h] (0x2139B84),xmm0
+constexpr int kGuards=8;
 const unsigned char kSteamSig[]={0xFF,0x15,0x4F,0x11,0x05,0x01};   // call [SteamAPI_RunCallbacks]
 const unsigned char kHoldOffSig[]={0x8B,0x46,0x6C,0x85,0xC0,0x7E,0x11,0xFF,0xC8,0x89,0x46,0x6C};   // mov eax,[rsi+6Ch]; test; jle; dec; mov
 // The shared random number (1191 readers) Application::Update steps once a call: seed = seed*mult+0x269EC3.
@@ -156,6 +166,13 @@ void SteamGuard() noexcept { if(Steps())reinterpret_cast<SteamFn>(steamRun)(); }
 void NetGuard(void* self) { if(Steps())reinterpret_cast<VoidFn>(image+kNet)(self); }
 void EosGuard(void* self) { if(Steps())reinterpret_cast<VoidFn>(image+kEos)(self); }
 void WindGuard(void* self) { if(Steps())reinterpret_cast<VoidFn>(image+kWind)(self); }
+float volumeDt=0.0f;   // the dt of the frames since the volume smoothing last ran (game thread)
+void VolumeGuard(void* sound,float dt) {
+    volumeDt+=dt;
+    if(!Steps())return;
+    reinterpret_cast<void(*)(void*,float)>(image+kVolume)(sound,volumeDt);
+    volumeDt=0.0f;
+}
 
 // A 0-tick frame's wrappers: the edges the UI saw last frame cleared, the values as the sources hold them now.
 void ClearForUi(unsigned char* table) noexcept {
@@ -334,6 +351,25 @@ int InstallGuards() noexcept {
         if(at && PatchCall(kHoldOff,at))++done;
     }
     if(InstallRandomStep())++done;
+    done+=edf::RedirectCall(image+kVolumeCall,image+kVolume,reinterpret_cast<void*>(&VolumeGuard),changed) ? 1 : 0;
+    // The load meter: the 8-byte store becomes a call to a meterLeaf stub and 3 NOPs (r11 and the flags are dead: a call
+    // follows): `mov r11,&finalTicks; cmp dword [r11],0; je 1f; mov r11,meter; movss [r11],xmm0; 1: ret`.
+    if(edf::Matches(image,kLoadStore,kLoadStoreSig,sizeof(kLoadStoreSig))) {
+        unsigned char meterLeaf[]={0x49,0xBB,0,0,0,0,0,0,0,0,0x41,0x83,0x3B,0x00,0x74,0x0F,0x49,0xBB,0,0,0,0,0,0,0,0,
+                              0xF3,0x41,0x0F,0x11,0x03,0xC3};
+        const auto ticks=reinterpret_cast<std::uintptr_t>(&finalTicks);
+        const auto meter=reinterpret_cast<std::uintptr_t>(image+kLoadMeter);
+        std::memcpy(meterLeaf+2,&ticks,sizeof(ticks));
+        std::memcpy(meterLeaf+18,&meter,sizeof(meter));
+        unsigned char* const at=static_cast<unsigned char*>(edf::AllocateNearCode(image+kLoadStore,meterLeaf,sizeof(meterLeaf)));
+        const auto delta=at ? at-(image+kLoadStore+5) : 0;
+        if(at && delta<=0x7FFFFFF0 && delta>=-0x7FFFFFF0) {
+            unsigned char call[8]={0xE8,0,0,0,0,0x90,0x90,0x90};
+            const auto rel=static_cast<std::int32_t>(delta);
+            std::memcpy(call+1,&rel,4);
+            if(edf::PatchCode(image+kLoadStore,kLoadStoreSig,call,sizeof(call)))++done;
+        }
+    }
     return done;
 }
 
@@ -387,14 +423,14 @@ void InstallFrameRate() noexcept {
     const int guards=InstallGuards();
     const int takes=InstallInputTakes();
     const bool sync=InstallSync();
-    if(guards!=6 || takes!=2 || !sync) {
-        Log("FRAMERATE guards %d/6, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,takes,sync);
+    if(guards!=kGuards || takes!=2 || !sync) {
+        Log("FRAMERATE guards %d/%d, input takes %d/2, sync=%d: not all in, no frame gate (the game keeps its rate)",guards,kGuards,takes,sync);
         return;
     }
     gateOn=InstallGate();
     if(gateOn && flip && c.maxFrameLatency>0)SwapFlipUseWaitable(static_cast<unsigned>(c.maxFrameLatency));
     viewOn=gateOn && framerateview::Install();
-    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/6, input takes %d/2, sync=%d, camera interpolation=%d",
-        cap,gateOn,guards,takes,sync,viewOn);
+    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/%d, input takes %d/2, sync=%d, camera interpolation=%d",
+        cap,gateOn,guards,kGuards,takes,sync,viewOn);
 }
 }  // namespace crew

@@ -179,7 +179,7 @@ check(direct_callers(consts['kSyncSubmit']) == [sync], 'the sync interval is pas
 for site, target, hook in (('kNetCall', 'kNet', 'NetGuard'), ('kEosCall', 'kEos', 'EosGuard'), ('kWindCall', 'kWind', 'WindGuard'),
                            ('kSystemCall', 'kSystemUpdate', 'SystemUpdateHook'), ('kWrapCall', 'kWrapUpdate', 'WrapUpdateHook'),
                            ('kMouseCall', 'kMouseTake', 'MouseTakeHook'), ('kWheelCall', 'kWheelTake', 'WheelTakeHook'),
-                           ('kSyncCall', 'kSyncSubmit', 'SyncHook')):
+                           ('kSyncCall', 'kSyncSubmit', 'SyncHook'), ('kVolumeCall', 'kVolume', 'VolumeGuard')):
     check(re.search(rf'RedirectCall\(image\+{site},image\+{target},reinterpret_cast<void\*>\(&{hook}\)', src), f'{hook} at {site}')
 check(re.search(r'RedirectImportCall\(image\+kSteamCall,kSteamSig,reinterpret_cast<void\*>\(&SteamGuard\)', src), 'SteamGuard at kSteamCall')
 
@@ -208,4 +208,13 @@ check(img[create - 14:create - 9] == b'\x4c\x8d\x44\x24\x30', 'kCreateCall: r8 =
 check(sorted(direct_callers(0x111B220)) == [0x111B77B, 0x111C8EC], 'the swap chain is built only by its two callers')
 check(img[present:present + 6] == farrays['kPresentSig'], 'kPresentFlags: mov rax,[rcx]; xor r8d,r8d')
 check(img[present + 0xF:present + 0x12] == b'\xff\x50\x40', 'kPresentFlags: IDXGISwapChain::Present follows')
+# The volume smoothing (rcx = the sound, xmm1 = dt) and the load meter's store, both guarded to frames with ticks.
+vol = consts['kVolumeCall']
+check(img[vol] == 0xE8 and rel_target(vol, 5) == consts['kVolume'] and img[vol - 12:vol - 7] == bytes.fromhex('f3410f100e'),
+      'kVolumeCall: 0x7B3010 with xmm1 = dt')
+check(direct_callers(consts['kVolume']) == [vol], 'the volume smoothing is called only at kVolumeCall')
+ls = consts['kLoadStore']
+check(img[ls:ls + 8] == arrays['kLoadStoreSig'] and rip(ls, 8) == consts['kLoadMeter'], 'kLoadStore stores to kLoadMeter')
+check(img[ls + 8] == 0xE8, 'a call follows the load store (r11 and the flags are dead in the stub)')
+check(re.search(r'constexpr int kGuards=8;', src) and 'guards!=kGuards' in src, 'the gate needs all 8 guards')
 print(f'frame rate signatures: {checks} checks ok')
