@@ -109,12 +109,62 @@ stress:100 插件栈里排前面的还有 ShotOk / ShotClearOf / Grid::Capsule�
 4. latency-5 / gpu-3 交换链翻转模型 + ALLOW_TEARING（不限帧率真正上屏的前提），latency-7 tick 相位锁 vblank，latency-8 Raw Input。
 5. 阶段 4 / 5（全部骨骼、植被风、着色器时间、特效）与 fps-10 联机实测。
 
+**B 线进展（2026-11-24）与下一步**
+
+- 第 1 步：PR1（分支 `claude/opt-present-fps-032dd4`）——gpu-1、latency-1（ini `MaxFrameLatency`，默认 1；2026-11-24 重场景 A/B 后改回默认 0，安装器把仍是 1 的旧 ini 改成 0）、文档更正、签名审计。
+- 第 2 步：PR2（分支 `claude/fps-stage2-dev`，基于 PR1）——只在 `FrameRateDev=1` 下生效。比计划多做的：
+  - 共享随机数 `0x705570` 每帧推进一次，是第 6 个守卫。
+  - fps-3 不用 `Shadow` OR 回，而是把封装更新挪到步进之前、只在 tick 帧跑，和 latency-3 是同一个改动。
+- 阶段 3 之前要补的核查（审查代理留下的，见 `unlimited-fps-re.md` §2.2）：
+  1. 每帧对活动相机 vslot_3 的调用，各相机类内部是否按调用次数累加。
+  2. UI 各界面内部是否全按 dt 推进（`0x119D270`）。
+  3. `Application+0x60 = n`（`0x7059CF`）由谁读取。
+  4. SoundController `0x7B3010` 两处按次数的音量平滑：`+0x3C` 每次 0.1，`+0xD8` 每次 0.01。改成按 dt 缩放，或在 n = 0 帧跳过。
+  5. 原版 `[rdi+9]` 那一帧不经过帧门，`Steps()` 沿用帧门上次的 tick 数，可能少取一帧鼠标。要么在帧门里也接管这条路径，要么实机证明它只出现在载入时。
+- 阶段 3 的顺序：
+  1. fps-5：在步进末尾抓镜头的「上一步 / 这一步」。
+  2. fps-6：镜头插值并进 `scope_lens.cpp` 的 `ProjectHook`（`0x1197B50` 已被它占用）。
+  3. fps-7：玩家和所乘载具的根变换。fps-6 与 fps-7 只在 `FrameRateDev` 下同时打开。
+  4. fps-8：插件镜头（地图俯视、第一人称、敌控、遥控武器站、炮塔）在切换的那一步打断点标记。
+  5. 实机验收按 §7-6。阶段 3 验收过后，才考虑让 `FrameRateCap` 脱离开发开关。
+- 第 4 步的前提不变：不改成翻转模型 + ALLOW_TEARING，上屏就被刷新率卡住；60 Hz 显示器上不限帧率只能降低输入延迟，画面不会更顺。
+
 ### C. 联机（第一批起；Coop 仓库部分在 Coop 自己的 worktree）
 
 - 先修：net-2 `extensionFault_` 粘滞（一次积压后本关插件联机全失效，10-30 反馈未修的那条根因）；net-3 NetId 解析每帧缓存；
   net-4 节奏改用 QPC / tick 而非 `GetTickCount64`；net-7 / net-8 收包循环批量加锁、通道更新去重。
+  - 2026-11-24 已做（不升线协议；Coop 分支 `claude/1124-ext-fault-recover`，AF 分支 `claude/opt-net-6447d4`）：
+    - net-2：改前，任一条链路积压超 1 MiB / 8192 包或收件箱超 4096 条就把 `extensionFault_` 置死，本房间余下时间插件联机全断。
+      改后，溢出等同一次就绪闪断：清收件箱、换 generation（AF 照常挂起 → 恢复，房主恢复开新 epoch，各客人通道经 RoomWatch 重置）；
+      积压期间保持未就绪，各参与链路降到 ≤512 KiB / ≤4096 包后自动恢复，不再锁死。能力位 bit 2 声明此契约。
+    - net-7：改前，每帧最多 512 次 `extensionPoll`，每次拿 DirectNet 的 `mu_` 并 refresh 一次；AF 每条清零 1 KB、strcmp 查对端。
+      改后，新可选导出 `EDF6CoopPollExtensionBatch`（能力位 bit 3）：一次加锁取 64 条，发送者直接给 `api.peer` 下标；
+      AF 一帧通常一次加锁（满 64 条才再取）。
+    - net-8：改前，收包前、收包后各跑一遍全部通道 update。改后，收包前那遍只在房间（就绪 / epoch / 名册 / 本机身份）变了时跑，
+      平常每帧一遍。未做：怪物操控每条消息仍 Publish 一次、`EnemyControlNetworkFrame` 与 update 的 Tick 仍各一次（要把夹具里
+      「收包即可读状态」的断言改成按帧读，单独做）。
+    - net-3：改前，每次 NetId 引用解析都完整遍历世界（0x5E0C80）。改后，同一逻辑帧内第一次遍历顺手建 NetId 索引表（开放寻址，
+      带帧戳），之后命中直接用，并按 StillNetRef 同样的条件复核（仍在场、同一对象、NetId 未变、存活条件）；未命中仍遍历，
+      所以本帧新建的对象照样找得到。
+    - net-4：改前，怪物操控姿态 / 输入按 `GetTickCount64` 的 33 ms、重力按 50 / 100 ms 限速；15.6 ms 步长的时钟把两帧读成
+      31 或 32 ms，实际约 20 Hz 且不均匀。改后，按逻辑帧（`GameFrame`，System+0xCE0）：输入 / 姿态每 2 帧（30 Hz），
+      重力持握 3 帧、飞行 6 帧；超时仍按毫秒。
+    - 房间门槛：AF 要求 EDF6Coop 声明能力位 2、3 并导出批量收包，否则拒绝建房 / 进房并提示升级 EDF6Coop。
 - 再做（P，升协议，旧版拒绝进房）：net-5 扩展通道加「状态类」不可靠只留最新 + 独立有序域；net-6 删掉已被房间协议覆盖的兼容层
   （kExt 位、PeerHas、名册广播、命令协议 v6/v7 协商）；net-9 怪物操控远端姿态带时间戳插值；net-11 客人间消息不经房主中转（大房间）。
+  设计要点（2026-11-24 补）：
+  - net-5：Coop 扩展 ABI v2 加 `sendState(generation, peer, key, data)`，按 (发送者, key) 只留最新一份，带每 key 序号，
+    不重传、不计入可靠积压（溢出后的恢复门槛只看事务类）；接收端丢弃比已收序号旧的。事务类改用每个扩展 channel 自己的
+    ReliableReceiver（独立序号空间），不再排在被升级的游戏包后面。AF `plugin_net` 加 SendState / BroadcastState，先迁怪物操控姿态、
+    重力持握 / 飞行、终极打击 keep，逐个通道核对哪些消息可丢；租约、支援、动作批仍走可靠有序。Coop 协议、AF 房间协议各加一。
+  - net-6：先确认 `Joins` 只依赖 hello，再删 kExt 功能位（留运行时会变的 kExtVariants）、PeerHas 门、名册广播与版本 0 /
+    NoteForeignVersion 分支、命令协议 v6/v7 协商；整份 build 只认 `kAllForcesRoomProtocol`（必要时进房附 build 哈希由房主拒绝）。
+    房间协议升到下一号，和 net-5 合成一次升级。
+  - net-9：先逆向 0x77C2C0 的 reader 是直接写还是软拉，再定插值层；姿态包加发送端逻辑帧号和线速度，客机按「最新样本 +
+    一个采样间隔」插值 / 外推，误差按时间常数收敛（照 Coop `multislot/src/netplayer.*` 的数学与测试）。依赖 net-4（已做，
+    发送节奏现在均匀 30 Hz）和 net-5；enemy_control_protocol kVersion 7→8，房间协议加一。
+  - net-11：依赖 net-5 和 Coop W1 多路径。状态类走客人直连网状路径，事务类留房主中转；中转的状态类套用 relayBytesPerSecond
+    预算和兴趣过滤，超预算丢旧的而不是 fail-closed（不再触发 net-2 的恢复）。只在大房间有收益，排在最后。
 - net-10：Havok 多线程下的联机分歧对比（与 B 的 fps-10 同一次实机做）。
 
 ### D. 工程（第一批做不碰全局结构的；结构性重构放第二批开头一次做完）
