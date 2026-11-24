@@ -32,7 +32,7 @@ for name in ('kTickArg', 'kTickCountSig', 'kTickCount', 'tickPeriod', 'TickPerio
     check(not re.search(rf'\b{name}\b', before_pump), f'{name} is read before PumpWait is installed: it gates it')
 check(re.search(r'kPumpArg', before_pump), 'PumpWait is gated by its own argument load kPumpArg')
 # The only early return before PumpWait is the high-resolution timer probe both waits need.
-lines = [ln.strip() for ln in before_pump.splitlines() if re.search(r'return', ln)]
+lines = [ln.strip() for ln in before_pump.splitlines() if re.search(r'\breturn\b', ln)]
 check(all(ln.startswith(('if(!image)', 'if(!probe)')) for ln in lines), f'early returns before PumpWait: {lines}')
 # After PumpWait nothing returns before the end: a failed tick check leaves PumpWait in place and skips TickWait only.
 check(len(re.findall(r'\breturn\b', body[pump:])) == 1 and body.rstrip().endswith('return pump && tick;'),

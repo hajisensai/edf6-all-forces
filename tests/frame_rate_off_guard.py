@@ -77,7 +77,7 @@ view_install = re.search(r'bool Install\(\) noexcept \{\n(.*?)\n\}\n', code(read
 check(view_install and view_install.group(1).find('frameobjects::Install();') > view_install.group(1).rfind('return false;'),
       'frameobjects::Install after every failing return of framerateview::Install')
 objs = code(read('src', 'frame_rate_objects.cpp'))
-for entry, guard in (('void Sample() noexcept {', 'if(on)'), ('void Pose(float alpha,', 'if(on '),
+for entry, guard in (('void Sample() noexcept {', 'if(!on)return;'), ('void Pose(float alpha,', 'if(!on || '),
                      ('void Restore() noexcept {', 'if(on '), ('void SceneOver() noexcept {', 'if(!on)'),
                      ('void NoteRootRefusal(', 'if(on ')):
     at = objs.find(entry)
