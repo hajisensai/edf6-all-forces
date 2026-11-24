@@ -198,6 +198,20 @@ check(re.search(r'RedirectCall\(image\+kCameraStepCall,image\+kCameraStep,reinte
 fence_call, fence = vconsts['kFenceCall'], vconsts['kFence']
 check(img[fence_call] == 0xE8 and rel_target(fence_call, 5) == fence, 'kFenceCall calls the render fence wait')
 check(re.search(r'RedirectCall\(image\+kFenceCall,image\+kFence,reinterpret_cast<void\*>\(&FrameEndHook\)', view), 'FrameEndHook')
+# A frame without ticks poses at System::Update's render recording (kRecordCall -> kRecordDraw), not at BeginFrame: the
+# frame's object deletion 0x1195F20 comes between them. Only the System::Update call is taken; the loading / menu
+# screens' calls stay the game's.
+record_call, record = vconsts['kRecordCall'], vconsts['kRecordDraw']
+check(img[record_call - 14:record_call + 5] == varrays['kRecordSig'] and rel_target(record_call, 5) == record, 'kRecordCall')
+check(sorted(direct_callers(record)) == sorted([0x93C3F, 0x9D8BA, 0x9DE91, 0xBB48B, record_call]),
+      'the render recording has exactly the five known callers')
+deletes = [c for c in direct_callers(0x1195F20) if 0x1198DA0 <= c < record_call]
+check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before kRecordCall')
+check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordDrawHook\)', view), 'RecordDrawHook')
+check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', view), 'kRecordSig checked before patching')
+begin = re.search(r'void BeginFrame\([^)]*\) noexcept \{(.*?)\n\}', view, re.S)
+check(begin and 'PoseRoot' not in begin[1] and 'frameobjects::Pose' not in begin[1] and 'PoseFrame' not in begin[1],
+      'BeginFrame writes no pose')
 for vt in (0x17CDF28, 0x17D0FF8, 0x17CF5B8, 0x17CF100):
     check(f'{vt:#X}'.replace('0X', '0x') in view, f'soldier vtable {vt:#x} in frame_rate_view.cpp')
 

@@ -217,7 +217,8 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   prev 是倒数第二步。
 - 投影（fps-6）：`scope_lens.cpp` 的 `ProjectHook`（`0x1197B50 → 0x118DFF0`）开头调 `SetBeforeProject` 注册的回调。n = 0 帧
   在投影前把 `cam+0x220` 写成 `InterpolateRigid(prev, cur, alpha)`、视野线性插值。字节已不等于 cur（别处在步进后改过）就不动。
-  下一帧 `System::Update` 前（`BeginFrame`）仍等于写入值的还原成 cur，所以步进和插件逻辑读到的永远是模拟值。
+  本帧帧末栅栏 `0x11A305A → 0x111CC20`（渲染线程已画完）后仍等于写入值的还原成 cur（`BeginFrame` 开头再兜底一次），所以下一帧的
+  `Application::Update`、步进和插件逻辑读到的永远是模拟值。
 - 断点（fps-8）：`FrameRateCameraCut(camera)`（`nullptr` = 全部）把这对 prev 设成 cur，下一步不插值。已接入的调用点：地图俯视
   开关失败与异常强退（`map.cpp`）、第一人称开 / 关（`firstperson.cpp`）、敌控镜头接管与交还（`firstperson.cpp` `enemyViewLast`）、
   瞄具缩放按下与复位（`sightzoom.cpp`）、步兵瞄具缩放档变化（`infantryscope.cpp`）、炮塔镜头三处硬复位（`turretcam.cpp`）。
@@ -228,11 +229,25 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 - 采样：在镜头步进钩子里（tick 结果已定），`h = [cam+0x360]`（vtable 是四个兵种之一才算），徒步取身体实例 `[h+0x900]` 的 pose[0]，
   骑乘（`HumanOnFoot` 为假）取载具实例 `v+0xEE0`（`v = [h+0x1548]`）的 pose[0]。每 tick 一次，只由第一台跟着这个兵的镜头采样。
   身份（h、v 及其控制块 `+kSelfCtrl`、实例指针）变了就清零重来。
-- 写：n = 0 帧在 `System::Update` 之前（上一帧末的栅栏 `0x11A305A` 已等渲染线程做完）。`D = cur⁻¹ · InterpolateRigid(prev, cur, alpha)`，
+- 写点：n = 0 帧在 `System::Update` 里的渲染录制调用 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）之前，由 `RecordDrawHook`
+  写；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
+  - `System::Update` `0x1198DA0` 进录制前依次调 `0x1195A80`、`0x1195F20`（整理对象表，会删对象、摘掉更新表里的裸指针）、
+    `0x1197680`，再过 `0x1198F84 / 0x1198F8D` 两道门才到 `0x1198FA4`。在 `BeginFrame` 写，`0x1195F20` 删掉的对象就带着写过的
+    pose 进了还原表；在录制调用处写，对象表已是本帧最终状态。
+  - 调用点字节（`0x1198F96` 起）：`41 B0 01`（`mov r8b,1`）、`41 0F B6 96 E9 0C 00 00`（`movzx edx,byte [r14+0xCE9]`）、
+    `49 8B CE`（`mov rcx,r14`）、`E8 27 E9 FF FF`（`call 0x11978D0`）；安装前整段比对（`kRecordSig`），`0x1198FA9` 不用 `rax`。
+    `0x11978D0` 另有 4 个调用点 `0x93C3F / 0x9D8BA / 0x9DE91 / 0xBB48B`（载入 / 菜单画面），不挂。`frame_rate_sig_audit.py`
+    对真 `EDF.dll` 核对签名、恰好这 5 个直接调用者、`0x1195F20` 在录制之前。
+  - n = 0 时 `0x1198FB3 je 0x1199734` 跳过整个 tick 循环（`0x1198FA9..0x1198FB3` 只存 `[rsp+0x30]`、判 n）；循环后的 `0x1199753 → 0x11BE100`（清队列）、
+    `0x1199764 → 0x118EFD0`（Havok 内存）不读绘制 pose。渲染线程在执行绘制命令时（`0x11009CB`）才读 `[inst+0x30]`，
+    所以还原仍要放在帧末栅栏之后，不能放在录制返回后。
+  - 一帧只写一次（`poseDue` 在写后清零，栅栏也清零：录制没来的帧不会拖到下一帧写）。
+  `D = cur⁻¹ · InterpolateRigid(prev, cur, alpha)`，
   右乘到下列模型**每个实例**（`model+0xA0`、基础 LOD `[model+0x1B8]`、LOD 表 `[model+0x250]` 各项 `+0x58`）**每根骨**的 pose
   （`[inst+0x30]`，个数 `[inst+0x20]`，每骨 0x40 字节世界矩阵）：身体 `h+0x860`、`[h+0x1950]` 全部武器的 `+0xF30`、骑乘时的载具
   `v+0xE40`。骑乘时身体和武器也乘载具的 D（刚性乘客）。蒙皮按每根骨自己的矩阵算，只改根骨会把皮撕开，所以全部骨骼都要乘。
-- 还原：下一帧 `BeginFrame` 开头，实例 / pose 指针 / 个数没变、且内容仍等于写入值的，逐字节还原成写入前。
+- 还原：本帧帧末栅栏后（`BeginFrame` 开头兜底），实例 / pose 指针 / 个数没变的，**逐骨**比对：仍等于写入值的骨还原成写入前，
+  别人写过的骨归别人。记录和前后两份拷贝在第一次写之前就入表，写到一半出异常也能还原。
 - 第一人称视图模型的锚点取自绘制时的 pose，D 在 `anchor⁻¹` 里抵消，徒步不会乘两次。骑乘第一人称走镜头步进时算的 stepT
   （`firstperson.cpp` DrawTransforms 失败分支），不跟插值后的镜头，是已知缺口。
 - 没覆盖：n ≥ 1 帧的原版竞争（渲染线程可能读到本帧步进正在写的 pose，60 帧下每帧都同样
@@ -269,7 +284,7 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   - 新对象在它的控制块上加一个 weak 计数，以后判活只看 use 计数，不读已释放内存。某 tick 不在表里了，就归还 weak 并删记录。
   - 身份（控制块、vtable、实例）变了，或上一 tick 没采到，就重新计数。
   - 表只在 tick 帧扩容（初始 1024 对象、4096 个 pose、1M float）。
-- **写**：n = 0 帧，在 fps-7 之后、`System::Update` 之前。
+- **写**：n = 0 帧，在 fps-7 之后，同在渲染录制调用 `0x1198FA4` 的钩子里（见 §4.3.2 写点）。
   - 对象必须还在、vtable 不变、当前绘制的 pose[0] 仍等于 cur（tick 后没人改过）。
   - `D = cur⁻¹ · InterpolateScaled(prev, cur, alpha)`：均匀缩放按比例插值；挤压 / 镜像 / 一 tick 超过 10 m 或 57° 的不插值。
   - 右乘到对象 `EnemyModels` 给出的每个模型、每个实例、每根骨上。四个兵种类（含 NPC）连带 `[h+0x1950]` 的武器一起乘。

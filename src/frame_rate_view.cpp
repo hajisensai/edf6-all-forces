@@ -27,9 +27,10 @@
 // player's soldier, who moves only on ticks, sliding back and forth against the picture: the root goes with the camera.
 // The camera step comes after every object's phase in the tick (0x11995A6 is the last call of the loop), so the camera
 // step's hook samples the root after the tick: the soldier's body skeleton's pose[0] ([h+0x900]; h = [camera+0x360]),
-// or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]). On a frame without ticks, right before System::Update (the
-// render thread is idle: the frame end's fence 0x11A305A waited for it), D = cur^-1 * InterpolateRigid(prev, cur,
-// alpha) is multiplied onto every bone of the draw pose ([inst+0x30], world matrices) of every instance of the body,
+// or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]). On a frame without ticks, at System::Update's render
+// recording (the call 0x1198FA4 -> 0x11978D0, after the frame's object deletion 0x1195F20; the render thread is idle: the
+// last frame's end fence 0x11A305A waited for it; the tick loop after it is skipped), D = cur^-1 * InterpolateRigid(prev,
+// cur, alpha) is multiplied onto every bone of the draw pose ([inst+0x30], world matrices) of every instance of the body,
 // every weapon of [h+0x1950] (+0xF30) and, riding, the vehicle (the rider and their weapons with the vehicle's D: rigid
 // passengers). A skin is drawn from each bone's own matrix, so all bones move, not the root only. The same frame's end
 // fence puts the poses back where they still hold what was written. A new root (the soldier, the vehicle, their
@@ -53,6 +54,13 @@ namespace {
 constexpr unsigned kCameraStepCall=0x11995A6,kCameraStep=0x118DF40;
 // The main loop's frame end: the game thread waits for the render thread (frame_pacing.cpp has its loop).
 constexpr unsigned kFenceCall=0x11A305A,kFence=0x111CC20;
+// System::Update's render recording (System_RecordDraw, called at 0x1198FA4 after the object deletion 0x1195F20 and
+// before the tick loop): a frame without ticks poses here (docs/unlimited-fps-re.md §4.3.2). Its other callers (0x93C3F,
+// 0x9D8BA, 0x9DE91, 0xBB48B) are left alone.
+constexpr unsigned kRecordCall=0x1198FA4,kRecordDraw=0x11978D0;
+// mov r8b,1; movzx edx,byte [r14+0CE9h]; mov rcx,r14; call 0x11978D0
+const unsigned char kRecordSig[]={0x41,0xB0,0x01,0x41,0x0F,0xB6,0x96,0xE9,0x0C,0x00,0x00,0x49,0x8B,0xCE,
+                                  0xE8,0x27,0xE9,0xFF,0xFF};
 // lea rdx,[rsp+38h]; call 0x118DF40
 const unsigned char kCameraStepSig[]={0x48,0x8D,0x54,0x24,0x38,0xE8,0x95,0x49,0xFF,0xFF};
 constexpr unsigned kWorld=0x220,kFov=0x24;
@@ -69,6 +77,7 @@ struct Camera {
 Camera cameras[kCameras];
 float alphaNow=1.0f;
 bool on=false;
+bool poseDue=false;   // set by BeginFrame on a frame without ticks: the record call poses, once
 // Projections on frames without ticks: drawn blended, and left as they were (written after the step, or refused).
 unsigned blended=0,unblended=0;
 
@@ -166,8 +175,10 @@ void RestorePoses() noexcept {
         __try {
             std::uint64_t n=0;
             if(PoseOf(p.inst,&n)!=p.pose || n!=p.count)continue;
-            if(!std::memcmp(p.pose,&posedAfter[p.at],static_cast<std::size_t>(n)*64))
-                std::memcpy(p.pose,&posedBefore[p.at],static_cast<std::size_t>(n)*64);
+            // Bone by bone: a bone someone else wrote since is theirs.
+            for(std::uint64_t b=0;b<n;++b)
+                if(!std::memcmp(p.pose+b*16,&posedAfter[p.at+b*16],64))
+                    std::memcpy(p.pose+b*16,&posedBefore[p.at+b*16],64);
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     posed.clear();posedBefore.clear();posedAfter.clear();
@@ -183,16 +194,18 @@ void PoseModel(const unsigned char* model,const fpview::M4& d) {
         bool done=false;
         for(const Posed& p:posed)done=done || p.pose==pose;
         if(done)continue;
+        // The record and both copies before the first write: a fault part way leaves nothing it cannot put back.
         const std::size_t at=posedBefore.size();
         posedBefore.insert(posedBefore.end(),pose,pose+n*16);
+        posedAfter.insert(posedAfter.end(),pose,pose+n*16);
         for(std::uint64_t b=0;b<n;++b) {
             fpview::M4 m;
             std::memcpy(m.m,pose+b*16,64);
             const fpview::M4 r=fpview::Mul(m,d);
-            std::memcpy(pose+b*16,r.m,64);
+            std::memcpy(&posedAfter[at+b*16],r.m,64);
         }
-        posedAfter.insert(posedAfter.end(),pose,pose+n*16);
         posed.push_back(Posed{insts[i],pose,n,at});
+        std::memcpy(pose,&posedAfter[at],static_cast<std::size_t>(n)*64);
     }
 }
 
@@ -261,8 +274,31 @@ using FenceFn=void*(*)(void*,void*,void*,void*);
 // The frame end's fence: once the render thread has drawn the frame, the blends go (the review of #386, 3).
 void* FrameEndHook(void* a,void* b,void* c,void* d) {
     void* const r=reinterpret_cast<FenceFn>(image+kFence)(a,b,c,d);
+    poseDue=false;
     if(on)RestoreFrame();
     return r;
+}
+
+// A frame without ticks: the player's root and every other object, at the render recording.
+void PoseFrame() noexcept {
+    fpview::M4 d;
+    bool posedRoot=false;
+    __try {
+        posedRoot=PoseRoot(alphaNow,d);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        ++rootsLeft;
+    }
+    frameobjects::Pose(alphaNow,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
+}
+
+// System_RecordDraw's call in System::Update; rdx / r8 passed through whole (edx: System+0xCE9, r8b: 1).
+using RecordDrawFn=void*(*)(void*,std::uint64_t,std::uint64_t);
+void* RecordDrawHook(void* sys,std::uint64_t a,std::uint64_t b) {
+    if(on && poseDue) {
+        poseDue=false;
+        PoseFrame();
+    }
+    return reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
 }
 
 using CameraStepFn=void(*)(void*,void*);
@@ -346,15 +382,8 @@ void BeginFrame(std::uint32_t ticks,float alpha) noexcept {
         if(c.camera==root.camera && c.age>1)root=Root{};   // its camera stopped stepping: the next one samples
     }
     alphaNow=alpha;
-    if(ticks || alpha>=1.0f)return;
-    fpview::M4 d;
-    bool posedRoot=false;
-    __try {
-        posedRoot=PoseRoot(alpha,d);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        ++rootsLeft;
-    }
-    frameobjects::Pose(alpha,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
+    // Nothing is posed here: System::Update deletes objects (0x1195F20) before its render recording, whose hook poses.
+    poseDue=!ticks && alpha<1.0f;
 }
 
 void TakeCounts(unsigned& blendedOut,unsigned& unblendedOut,unsigned& rootsOut,unsigned& rootsLeftOut,
@@ -369,6 +398,10 @@ bool Install() noexcept {
         Log("FRAMERATE the camera step's call (0x%X) is not where docs/unlimited-fps-re.md has it: no interpolation",kCameraStepCall);
         return false;
     }
+    if(!edf::Matches(image,kRecordCall-14,kRecordSig,sizeof(kRecordSig))) {
+        Log("FRAMERATE the render recording's call (0x%X) is not where docs/unlimited-fps-re.md has it: no interpolation",kRecordCall);
+        return false;
+    }
     if(!scopelens::SetBeforeProject(&BeforeProject)) {
         Log("FRAMERATE the projection call 0x1197B50 could not be shared: no interpolation");
         return false;
@@ -377,6 +410,10 @@ bool Install() noexcept {
     // The restore first: nothing is blended until the camera step's hook samples.
     if(!edf::RedirectCall(image+kFenceCall,image+kFence,reinterpret_cast<void*>(&FrameEndHook),changed)) {
         Log("FRAMERATE the frame end's fence call (0x%X) could not be redirected: no interpolation",kFenceCall);
+        return false;
+    }
+    if(!edf::RedirectCall(image+kRecordCall,image+kRecordDraw,reinterpret_cast<void*>(&RecordDrawHook),changed)) {
+        Log("FRAMERATE the render recording's call could not be redirected: no interpolation");
         return false;
     }
     if(!edf::RedirectCall(image+kCameraStepCall,image+kCameraStep,reinterpret_cast<void*>(&CameraStepHook),changed)) {
