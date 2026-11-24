@@ -56,6 +56,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/dmgnum.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
+# The objects the game handed the plugin this step (src/live_set.h): asked instead of edf::Readable for them.
+target_sources(EDF6VehicleCrew PRIVATE src/live_set.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
@@ -146,6 +148,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
+# The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/swap_flip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
@@ -182,9 +186,9 @@ set_target_properties(edf6cmpl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINA
 # EDF6AutoTurret: the flak / Bohr auto-aim and the tank side guns (autoturret/README.md)
 add_subdirectory(autoturret)
 
-add_executable(append_log_test EXCLUDE_FROM_ALL tools/append_log_test.cpp)
-target_link_libraries(append_log_test PRIVATE edf6common)
-target_compile_options(append_log_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_executable(log_test EXCLUDE_FROM_ALL tools/log_test.cpp)
+target_link_libraries(log_test PRIVATE edf6common)
+target_compile_options(log_test PRIVATE /W4 /WX /utf-8 /permissive-)
 # edf6common's load helpers: the strict ini number, the DLL file line, a patch putting the page protection back.
 # The plugin's check whether 原版启动 left the saves in the vanilla set (src/save_mode.h, tools/vanilla_launch.py _mode).
 add_executable(save_mode_check EXCLUDE_FROM_ALL tools/save_mode_check.cpp)
@@ -898,7 +902,12 @@ add_executable(support_dispatch_test EXCLUDE_FROM_ALL tests/support_dispatch_tes
 target_link_libraries(support_dispatch_test PRIVATE edf6common)
 target_compile_options(support_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_dispatch COMMAND support_dispatch_test)
-add_executable(support_infantry_route_test EXCLUDE_FROM_ALL tests/support_infantry_route_test.cpp src/ground_navigation.cpp)
+# crew::LazyRows lifetime (mem-4): first-use allocation, no realloc / free on re-entry, failure = one log line.
+add_executable(lazy_rows_test EXCLUDE_FROM_ALL tests/lazy_rows_test.cpp)
+target_link_libraries(lazy_rows_test PRIVATE edf6common)
+target_compile_options(lazy_rows_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME lazy_rows COMMAND lazy_rows_test)
+add_executable(support_infantry_route_test EXCLUDE_FROM_ALL tests/support_infantry_route_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_link_libraries(support_infantry_route_test PRIVATE edf6common user32)
 target_compile_options(support_infantry_route_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(support_infantry_route_test PRIVATE /OPT:REF)
@@ -1179,6 +1188,9 @@ set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The plugin's writable data section stays small: big per-session tables are crew::LazyRows (mem-4,
+# tests/plugin_image_size_guard.py reads the built DLL's PE header).
+add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py" "$<TARGET_FILE:EDF6VehicleCrew>")
 # An empty vehicle it makes is CreateVehicle2's (0x633280), never SetLevel's: off the native AI list, so the player in
 # it drives and fires; with EDF6_NATIVE_DLL its signatures are compared with the DLL.
 add_test(NAME debug_spawn_vehicle_level_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_vehicle_level_guard.py")
@@ -1233,7 +1245,7 @@ target_compile_options(fp_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
-set(EDF6_OFFLINE_CHECKS append_log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
+set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
@@ -1290,6 +1302,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
+add_dependencies(offline_checks lazy_rows_test)
 add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
@@ -1379,7 +1392,7 @@ target_sources(jet_command_test PRIVATE src/jet_flight.cpp)
 target_sources(map_command_runtime_check PRIVATE src/command_unit.cpp)
 target_sources(map_command_identity_test PRIVATE src/command_unit.cpp)
 target_sources(npc_post_test PRIVATE src/command_unit.cpp)
-add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp src/ground_navigation.cpp)
+add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_include_directories(npc_core_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(npc_core_check PRIVATE edf6common user32)
 target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -1598,7 +1611,7 @@ add_test(NAME mission_pack_save_native COMMAND mission_pack_save_native_test "${
 set_tests_properties(mission_pack_save_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
 
-add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp)
+add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)
 target_include_directories(npc_gunners_online_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(npc_gunners_online_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -1616,12 +1629,19 @@ target_compile_options(rip_sampler PRIVATE /W4 /WX /utf-8 /permissive-)
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
             tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp
-            tests/autopilot/umbra_probe.cpp)
+            tests/autopilot/umbra_probe.cpp tests/autopilot/heap_probe.cpp tests/autopilot/physics_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
 target_compile_options(EDF6Autopilot PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(EDF6Autopilot PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
+
+# The autopilot's heap probe (mem-3) offline: live allocations by call path, freed / reallocated ones not counted.
+add_executable(heap_probe_test tests/heap_probe_test.cpp tests/autopilot/heap_probe.cpp)
+target_include_directories(heap_probe_test PRIVATE tests/autopilot)
+target_link_libraries(heap_probe_test PRIVATE psapi)
+target_compile_options(heap_probe_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME heap_probe COMMAND heap_probe_test)
 
 add_executable(fieldshare_test tests/fieldshare_test.cpp)
 target_include_directories(fieldshare_test PRIVATE src common)
@@ -1728,7 +1748,7 @@ add_executable(support_net_runtime_test tests/support_net_runtime_test.cpp src/s
 target_include_directories(support_net_runtime_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(support_net_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_net_runtime COMMAND support_net_runtime_test)
-add_executable(real_npc_crew_test EXCLUDE_FROM_ALL tests/real_npc_crew_test.cpp src/ground_navigation.cpp)
+add_executable(real_npc_crew_test EXCLUDE_FROM_ALL tests/real_npc_crew_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_link_libraries(real_npc_crew_test PRIVATE edf6common user32)
 target_include_directories(real_npc_crew_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(real_npc_crew_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -1840,7 +1860,7 @@ endforeach()
 add_test(NAME mission_participants_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/mission_participants_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_participants_native PROPERTIES SKIP_RETURN_CODE 77)
 
-add_executable(npc_driver_payload_test EXCLUDE_FROM_ALL tests/npc_driver_payload_test.cpp src/ground_navigation.cpp)
+add_executable(npc_driver_payload_test EXCLUDE_FROM_ALL tests/npc_driver_payload_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_include_directories(npc_driver_payload_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(npc_driver_payload_test PRIVATE edf6common user32)
 target_compile_options(npc_driver_payload_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -1921,7 +1941,7 @@ target_link_options(payload_snapshot_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks payload_snapshot_test)
 add_test(NAME payload_snapshot COMMAND payload_snapshot_test)
 add_executable(command_native_dispatch_test tests/command_native_dispatch_test.cpp tests/command_native_id_reader.cpp
-    src/command_net.cpp src/command_identity.cpp src/net_object_resolve.cpp src/command_protocol.cpp src/ground_navigation.cpp)
+    src/command_net.cpp src/command_identity.cpp src/net_object_resolve.cpp src/command_protocol.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_link_libraries(command_native_dispatch_test PRIVATE edf6common user32)
 target_include_directories(command_native_dispatch_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(command_native_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -2041,7 +2061,16 @@ add_test(NAME mission_watch COMMAND mission_watch_test)
 # The plugin's crash dump (src/crash_dump.cpp): a child process per crash kind (access violation, C++ throw, stack
 # overflow, abort / terminate in ucrtbase and in the static CRT, an invalid CRT parameter, a filter set later, two
 # threads at once), each dump's exception stream checked; handled exceptions write none.
+# The peer cases: a stand-in EDF6AutoTurret.dll whose buffered lines the crash path must flush (common/log.h).
+add_library(crash_flush_peer MODULE tests/crash_flush_peer.cpp)   # MODULE: SHARED is a shipped plugin (selftest _cmake_plugins)
+target_compile_options(crash_flush_peer PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(crash_flush_peer PROPERTIES OUTPUT_NAME EDF6AutoTurret
+                      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/crash_flush_peer"
+                      ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/crash_flush_peer")
 add_executable(crash_dump_test tests/crash_dump_test.cpp)
+target_include_directories(crash_dump_test PRIVATE common)
+target_compile_definitions(crash_dump_test PRIVATE "CRASH_PEER_DLL=L\"$<TARGET_FILE:crash_flush_peer>\"")
+add_dependencies(crash_dump_test crash_flush_peer)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_libraries(crash_dump_test PRIVATE dbghelp)
 add_test(NAME crash_dump COMMAND crash_dump_test)
@@ -2266,6 +2295,13 @@ add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
 target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks memo_epoch_test)
 add_test(NAME memo_epoch COMMAND memo_epoch_test)
+# liveset (src/live_set.*): cpu-2's set of the objects the game handed over this step, keyed by memoepoch::Clock.
+add_executable(live_set_test EXCLUDE_FROM_ALL tests/live_set_test.cpp src/live_set.cpp)
+target_include_directories(live_set_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(live_set_test PRIVATE edf6common)
+target_compile_options(live_set_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks live_set_test)
+add_test(NAME live_set COMMAND live_set_test)
 # edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
 add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
 target_link_libraries(memory_readable_test PRIVATE edf6common)
@@ -2285,6 +2321,9 @@ set_tests_properties(scope_lens_native PROPERTIES SKIP_RETURN_CODE 77)
 # The measurement probes' call sites and render anchors (src/perf_probe.cpp, docs/plan-2026-11-24-optimization.md 3 A).
 add_test(NAME perf_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perf_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(perf_probe_native PROPERTIES SKIP_RETURN_CODE 77)
+# The sync load probe's call sites and the bytes around them in 0x84E80 (src/sync_load_probe.cpp, docs/sync-load-re.md).
+add_test(NAME sync_load_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sync_load_probe_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(sync_load_probe_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(pvp_hud_layout_test EXCLUDE_FROM_ALL tests/pvp_hud_layout_test.cpp)
 target_include_directories(pvp_hud_layout_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(pvp_hud_layout_test PRIVATE edf6common)
@@ -2405,7 +2444,7 @@ target_link_options(room_native_entry_runtime_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks room_native_entry_runtime_test)
 add_test(NAME room_native_entry_runtime COMMAND room_native_entry_runtime_test)
 
-add_executable(npc_action_look_test EXCLUDE_FROM_ALL tests/npc_action_look_test.cpp src/ground_navigation.cpp)
+add_executable(npc_action_look_test EXCLUDE_FROM_ALL tests/npc_action_look_test.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_include_directories(npc_action_look_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(npc_action_look_test PRIVATE edf6common user32)
 target_compile_options(npc_action_look_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)

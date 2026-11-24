@@ -21,6 +21,8 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool syncLoadProbe=true;   // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
     bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
