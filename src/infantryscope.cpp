@@ -283,6 +283,7 @@ void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexce
         return;
     }
     const Published p=Read();
+    const ULONGLONG now=GetTickCount64();   // the idle timer's clock only (freshness is the step count's: Live)
     const bool mine=ViewOf(view,p.cue.human);
     const bool want=mine && Live(p) && PictureInPicture() && !LensRefused() && scopelens::Installed();
     if(!want) {
