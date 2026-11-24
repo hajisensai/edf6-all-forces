@@ -55,6 +55,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/dmgnum.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
+# The objects the game handed the plugin this step (src/live_set.h): asked instead of edf::Readable for them.
+target_sources(EDF6VehicleCrew PRIVATE src/live_set.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
