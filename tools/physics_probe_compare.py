@@ -4,7 +4,8 @@ does HavokMultithread change what the physics computes (docs/havok-mt-re.md §13
   python tools/physics_probe_compare.py ST=run1.log ST=run2.log MT=run3.log ...
 
 Each LOG is an autopilot log kept by `drive.py run ... LOG`; the label before `=` names its group (e.g. the
-HavokMultithread setting). For every pair of runs:
+HavokMultithread setting). A log holds one run per `PHYS start` (several when the launch went through missions with
+`--cycle`); they are numbered in order. For every pair of runs:
   - hash: the first scene tick whose bit-exact hash (every live non-static body's index, motion bits, position and
     velocity) differs, and how many hash rows agree;
   - rows: for the bodies both runs have at a row tick (same body index and same owner vtable), the position difference:
@@ -31,20 +32,32 @@ class Run:
         self.hashes: dict[int, tuple[int, str]] = {}
         self.rows: dict[int, dict[int, tuple[str, tuple[float, ...], tuple[float, ...]]]] = {}
         self.end = ''
-        with open(path, encoding='utf-8', errors='replace') as f:
-            for line in f:
-                m = H_ROW.search(line)
-                if m:
-                    self.hashes[int(m[1])] = (int(m[2]), m[6])
-                    continue
-                m = B_ROW.search(line)
-                if m:
-                    p = tuple(float(x) for x in m[5].split(','))
-                    v = tuple(float(x) for x in m[6].split(','))
-                    self.rows.setdefault(int(m[1]), {})[int(m[2])] = (m[4], p, v)
-                    continue
-                if 'PHYS end' in line:
-                    self.end = line.strip()
+
+    def add(self, line: str) -> None:
+        m = H_ROW.search(line)
+        if m:
+            self.hashes[int(m[1])] = (int(m[2]), m[6])
+            return
+        m = B_ROW.search(line)
+        if m:
+            p = tuple(float(x) for x in m[5].split(','))
+            v = tuple(float(x) for x in m[6].split(','))
+            self.rows.setdefault(int(m[1]), {})[int(m[2])] = (m[4], p, v)
+            return
+        if 'PHYS end' in line:
+            self.end = line.strip()
+
+
+def read_runs(label: str, path: str) -> list[Run]:
+    """The runs of one log: a new one at each `PHYS start`."""
+    runs: list[Run] = []
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if 'PHYS start' in line:
+                runs.append(Run(label, f'{path}#{len(runs) + 1}'))
+            elif runs:
+                runs[-1].add(line)
+    return runs
 
 
 def pct(values: list[float], q: float) -> float:
@@ -89,7 +102,7 @@ def main(argv: list[str]) -> int:
         if not path:
             print(__doc__)
             return 2
-        runs.append(Run(label, path))
+        runs.extend(read_runs(label, path))
     for r in runs:
         print(f'{r.label} {r.path}: {len(r.hashes)} hash rows, {len(r.rows)} row ticks, '
               f'{sum(len(x) for x in r.rows.values())} body rows; {r.end}')

@@ -18,9 +18,10 @@
 //  - The owner: BodyToObject (0x108260, the body's property key 0) -> SceneObject*, logged as its vtable's RVA.
 //  - The mission's first tick: the first sample where MissionMgr (*(EDF+0x20B28A8)) answers "running" (0x1F68B0).
 //    The scene tick is 0 there; ticks are counted from the first tick after it with a live non-static body (the
-//    scene loaded), so two runs line up by scene tick, not by wall clock.
+//    scene loaded), so two runs line up by scene tick, not by wall clock. Once the mission is left the probe arms
+//    again, so a launch with the autopilot's `cycle` samples every mission it enters (one PHYS start .. end each).
 // Rows (appended to the autopilot log by its own thread, one write per loop):
-//   PHYS start tick=T world=... bodies=N live=L     the first sampled tick (T: its scene tick)
+//   PHYS start pass=K tick=T world=... bodies=N live=L   the first sampled tick of the K-th mission (T: its scene tick)
 //   PHYS H t=REL n=.. dyn=.. kf=.. act=.. hash=.. a=TICK game=SECONDS ms=WALL gaps=G   every kHashEvery ticks: an FNV-1a
 //        hash of every live non-static body's index, motion bits, position and velocity bytes (bit for bit)
 //   PHYS B t=REL i=INDEX f=FLAGS o=OWNER_VT p=x,y,z v=x,y,z   every kRowEvery ticks, each live non-static body
@@ -76,6 +77,7 @@ enum Phase { kWaiting, kSampling, kDone };
 Phase phase=kWaiting;
 std::uint32_t baseTick=0,lastTick=0;
 unsigned gaps=0;
+unsigned passes=0;   // missions sampled so far (several in one launch with the autopilot's `cycle`)
 ULONGLONG baseMs=0;
 char rowBuf[kMostRows*kRowBytes];
 
@@ -166,11 +168,15 @@ const unsigned char* World(const unsigned char* system) noexcept {
 }
 
 void Sample() noexcept {
-    if(phase==kDone)return;
     const unsigned char* const system=At<const unsigned char*>(image,kSystem);
     void* const mgr=At<void*>(image,kMissionMgr);
     if(!system || !edf::Readable(system+kTick,8))return;
     const bool running=mgr && reinterpret_cast<MissionRunningFn>(image+kMissionRunning)(mgr);
+    if(phase==kDone) {
+        // Armed again once the mission is left: the next mission of the same launch is sampled the same way.
+        if(!running){phase=kWaiting;gaps=0;}
+        return;
+    }
     const std::uint32_t tick=At<std::uint32_t>(system,kTick);
     if(phase==kWaiting) {
         // The scene tick is 0 at the mission's start, but the world fills only once the mission's scene is loaded
@@ -183,7 +189,7 @@ void Sample() noexcept {
         Walk(world,false,0,first);
         if(!first.ok || !first.live)return;
         phase=kSampling;baseTick=tick;lastTick=tick-1;baseMs=GetTickCount64();
-        QueueLine("PHYS start tick=%u world=%p bodies=%u live=%u game=%.4f",tick,world,At<std::uint32_t>(world,kBodyCount),
+        QueueLine("PHYS start pass=%u tick=%u world=%p bodies=%u live=%u game=%.4f",++passes,tick,world,At<std::uint32_t>(world,kBodyCount),
                   first.live,static_cast<double>(At<float>(system,kGameTime)));
     }
     if(tick!=lastTick+1)++gaps;
