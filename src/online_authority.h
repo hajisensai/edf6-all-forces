@@ -84,7 +84,7 @@ constexpr bool ShotCounts(const Facts& f,Shooter by) noexcept {
 }
 
 // Whether a round a player of this machine fires from the object names that player as its attacker (its IFC's owner)
-// instead of the object. Online, on a registered vehicle: the room's hit authority (coop W3, docs/net-re/damage.md §9)
+// instead of the object. Online, on a registered vehicle: the room's hit authority (coop W3, edf-coop-stable:docs/net-re/damage.md §9)
 // takes the attacker's machine for the one that judges the hit, and a vehicle's machine (0x630F90; the host for an NPC
 // driver) may be another than the gunner's, where ShotCounts deals the damage: named as the vehicle, the round would be
 // dropped here and dealt as 0 there. The player is this machine's registered object, so both rules pick this machine.

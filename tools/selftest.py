@@ -3332,8 +3332,8 @@ def spawn_catalog_archives(shard: int) -> None:
     record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
     now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
     one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
-    the sorted rows dealt round, so the generated vehicles' rows (edf6tr_<kind>_mission, one a kind, each building its
-    kind) spread evenly and no kind is built in two."""
+    packed by their measured seconds (testrange/catalog_row_seconds.json, pylib/testshard.py: dealt round they
+    took 357/348/175/119 s, 2026-11-24), each row in one shard, so no kind is built in two."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import catalog
     import gen_spawn_catalog as g
@@ -3349,7 +3349,7 @@ def spawn_catalog_archives(shard: int) -> None:
     read = g.game_reader(rootcpk.DEFAULT_GAME)
     stale = []
     rows = sorted(catalog.rows(), key=lambda r: r.sgo)
-    for r in rows[shard::SPAWN_CATALOG_SHARDS]:
+    for r in g.shards(rows, SPAWN_CATALOG_SHARDS)[shard]:
         try:
             now = g.row_archives(r, read)
         except (FileNotFoundError, KeyError):
@@ -6290,7 +6290,7 @@ def edf41_mother_parts_default_migrates() -> None:
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
                                                          installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
-                                                         installer.DEFAULTS_MARK_1110]
+                                                         installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6310,6 +6310,27 @@ def edf41_mother_parts_default_migrates() -> None:
     # the install path goes through it (merge_ini keeps the player's 15, the step moves it)
     planned = installer.planned_ini(old, ini)
     assert re.search(r'^Edf41MotherParts=31$', planned[0], re.M) and 'Edf41MotherParts' in planned[3]
+
+
+@test
+def max_frame_latency_default_back_to_0() -> None:
+    """MaxFrameLatency shipped 1 (PR #369) and went back to 0 (docs/plan-2026-11-24-optimization.md B line: 2 of 3 heavy
+    launches at 1 ran slow): the shipped ini and the plugin's default agree, an old ini still at 1 is moved to 0 once by the
+    11-24 defaults step, a value the player chose is kept, and a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^MaxFrameLatency=0$', ini, re.M) and 'int maxFrameLatency=0;' in crew
+    assert installer.NEW_DEFAULTS_1124[installer.SECTION] == {'MaxFrameLatency': ('1', '0')}
+    marks = '\n'.join(m for m, _ in installer.DEFAULTS_STEPS[:-1])
+    old = f'[VehicleCrew]\n{marks}\nEnabled=1\nMaxFrameLatency=1\n'
+    text, flipped = installer.apply_new_defaults(old)
+    assert flipped == ['MaxFrameLatency'] and 'MaxFrameLatency=0' in text and text.count(installer.DEFAULTS_MARK_1124) == 1, flipped
+    again = text.replace('MaxFrameLatency=0', 'MaxFrameLatency=1')
+    assert installer.apply_new_defaults(again) == (again, []), "a later install undid the player's own 1"
+    mine = f'[VehicleCrew]\n{marks}\nMaxFrameLatency=2 ; mine\n'
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == [] and 'MaxFrameLatency=2 ; mine' in text
+    assert re.search(r'^MaxFrameLatency=0$', installer.planned_ini(old, ini)[0], re.M)
 
 
 @test
@@ -12621,8 +12642,10 @@ def edf41_friend_grip_matches_weapons() -> None:
     import mab_legacy
     import make_edf41_objects as m
     import sgo
-    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
-    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+    import gamedir
+    edf6 = gamedir.find()
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not (edf41 and edf6):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)

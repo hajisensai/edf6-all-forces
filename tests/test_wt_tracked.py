@@ -78,12 +78,15 @@ class PrepRuleTests(unittest.TestCase):
 
 def shard_kinds(kinds) -> list:  # noqa: ANN001
     """The kinds this run builds and checks: every one, or with EDF6_TEST_SHARD=I/N (ctest's wt_tracked_<I>, run side by
-    side) every N-th of them."""
+    side) the I-th of N parts of about equal build time (pylib/testshard.py; a kind's build is its spawn catalog row's
+    measured seconds, testrange/catalog_row_seconds.json: dealt round, one part took 190 s and another 140 s)."""
     shard = os.environ.get('EDF6_TEST_SHARD', '')
     if not shard:
         return list(kinds)
+    import testshard
     i, n = (int(x) for x in shard.split('/'))
-    return list(kinds)[i::n]
+    seconds = testshard.load(str(ROOT / 'testrange' / 'catalog_row_seconds.json'))
+    return testshard.pack(list(kinds), n, seconds, lambda k: f'edf6tr_{k}_mission')[i]
 
 
 def _ready() -> bool:

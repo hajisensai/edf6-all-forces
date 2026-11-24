@@ -28,6 +28,11 @@ options
   --ini KEY=VALUE   KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run (repeatable; drive.py --ini), e.g. an A/B
                     of a switch: HavokMultithread=0 against HavokMultithread=1
   --out DIR         default tmp/perf/<scenario>-<time>
+  --presentmon EXE  PresentMon (not shipped: it needs ETW, run perfrun as an administrator) over the clean window:
+                    presentmon.csv, the display side (latency-2) in the report
+  --cycle N         a load run instead (hitch-5): nothing sampled; the mission left and entered again N times in one
+                    launch (drive.py --cycle; --cycle-stay S in each, default 20), each entry's phases and memory points
+                    from the plugin log, the first one cold (the launch's first), the rest warm: loads.md
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
   --restore         put back what a run could not (the game outlived it): the range mission's files, and every file
                     drive.py placed (the DLLs, the ini) byte for byte with the autopilot removed (drive.py restore)
@@ -128,16 +133,24 @@ def sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict) -> None:
+def sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict,
+           presentmon: str | None = None) -> None:
     """The run's `during`: wait `warm`, then the clean window (rip_sampler interval 0 and typeperf side by side), then
     the stack window. A failure is kept in marks['error'] (and ends the stay, as any return does)."""
     try:
-        _sample(out, warm, cpu_s, stacks_s, interval, marks)
+        _sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon)
     except Exception as e:   # noqa: BLE001 - kept for the run's verdict; the run must still quit and restore
         marks['error'] = f'{type(e).__name__}: {e}'
 
 
-def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict) -> None:
+def presentmon_args(exe: str, pid: int, secs: int, csv: str) -> list[str]:
+    """PresentMon over the clean window: the game's presents only, v1 columns (perf_report.presentmon_summary)."""
+    return [exe, '--process_id', str(pid), '--output_file', csv, '--timed', str(secs), '--terminate_after_timed',
+            '--v1_metrics', '--no_console_stats']
+
+
+def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict,
+            presentmon: str | None = None) -> None:
     import drive
     t0 = time.time()
     pids = drive.game_pids()
@@ -151,6 +164,8 @@ def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, mar
     gpu = subprocess.Popen(['typeperf', rf'\GPU Engine(pid_{pid}_*)\Utilization Percentage', '-si', '1', '-sc',
                             str(cpu_s), '-f', 'CSV', '-o', os.path.join(out, 'gpu.csv'), '-y'],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pm = (subprocess.Popen(presentmon_args(presentmon, pid, cpu_s, os.path.join(out, 'presentmon.csv')),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if presentmon else None)
     r = subprocess.run([SAMPLER, str(pid), str(cpu_s), '0', os.path.join(out, 'cpu.txt')], capture_output=True, text=True)
     end = time.time()
     if r.returncode:
@@ -159,10 +174,15 @@ def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, mar
     # rip_sampler times its own `seconds` after attaching (SymInitialize first) and exits right after: the window is
     # the last cpu_s seconds before it returned, not from its start
     marks['windows'] = {'cpu': [end - cpu_s, end]}
-    try:
-        gpu.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        gpu.kill()
+    for side in (gpu, pm):
+        if side is None:
+            continue
+        try:
+            side.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            side.kill()
+    if pm is not None and pm.returncode:
+        marks['presentmon'] = f'exit {pm.returncode} (an administrator? ETW)'
     if stacks_s > 0:
         r = subprocess.run([SAMPLER, str(pid), str(stacks_s), str(interval), os.path.join(out, 'stacks.txt')],
                            capture_output=True, text=True)
@@ -176,6 +196,11 @@ def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, mar
 
 def plugin_log(game: str) -> str:
     return os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.log')
+
+
+def coop_log(game: str) -> str:
+    """EDF6Coop's log (its STATS rows: what the game sent online), next to the plugin's."""
+    return os.path.join(game, 'Mods', 'Plugins', 'EDF6Coop.log')
 
 
 def turret_alongside(dll: str | None) -> str | None:
@@ -271,18 +296,26 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     log = plugin_log(game)
     # the plugin appends to its log across launches: only what this launch writes is this run's
     log_at = log_mark(log)
+    clog = coop_log(game)
+    clog_at = log_mark(clog)
+    cycle = opts.get('cycle')
     loaded = loaded_plugins(game, dll)   # before the launch: the files the game is about to load
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
         place = placements(dll)
-        longest = int(warm + opts['cpu'] + opts['stacks'] + 90)
-        # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run
+        stay = opts.get('cycle_stay', 20.0)
+        # a load run: each entry its stay and a load (two minutes at most, a big map cold), then CYCLE done
+        longest = int(cycle * (stay + 120) + 60) if cycle else int(warm + opts['cpu'] + opts['stacks'] + 90)
+        # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run; PerfProbe=1 the
+        # frame split, the render thread and the channels (src/perf_probe.h)
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
-                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', *opts['ini']),
+                       os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', 'PerfProbe=1', *opts['ini']),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
-                       during=lambda: sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks),
-                       quit_wait=600)   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
+                       during=None if cycle else lambda: sample(out, warm, opts['cpu'], opts['stacks'],
+                                                                opts['interval'], marks, opts.get('presentmon')),
+                       quit_wait=600,   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
+                       cycle=(cycle, stay, False) if cycle else None)
     finally:
         # What drive.run left is on disk (drive.placed_dir), not in which way its own look at the game went: the game
         # closed by now, it is put back here (restore_placed does nothing when drive.run already did).
@@ -303,11 +336,17 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     if data is not None:
         with open(os.path.join(out, 'vehiclecrew.log'), 'wb') as f:
             f.write(data)
+    data = run_log(clog, clog_at)   # only with EDF6Coop installed
+    if data:
+        with open(os.path.join(out, 'coop.log'), 'wb') as f:
+            f.write(data)
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
     run = dict(scenario=scenario, variant=variant, dll=dll, **loaded,
-               warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, **marks)
+               warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, cycle=cycle, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
+    if cycle:
+        return rc
     if marks.get('error') or 'windows' not in marks:
         print('sampling failed:', marks.get('error') or f'drive.py ended first (rc {rc})')
         return 1
@@ -316,7 +355,8 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
-            'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': []}
+            'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': [], 'presentmon': None,
+            'cycle': 0, 'cycle_stay': 20.0}
     pos = []
     i = 0
     while i < len(argv):
@@ -327,7 +367,7 @@ def options(argv: list[str]) -> tuple[str, dict]:
         elif a == '--ab':
             opts['ab'] = (os.path.abspath(argv[i + 1]), os.path.abspath(argv[i + 2]))
             i += 3
-        elif a in ('--dll', '--out'):
+        elif a in ('--dll', '--out', '--presentmon'):
             opts[a[2:]] = argv[i + 1]
             i += 2
         elif a == '--ini':
@@ -335,10 +375,10 @@ def options(argv: list[str]) -> tuple[str, dict]:
                 raise SystemExit('--ini wants KEY=VALUE')
             opts['ini'].append(argv[i + 1])
             i += 2
-        elif a == '--warm':
-            opts['warm'] = float(argv[i + 1])
+        elif a in ('--warm', '--cycle-stay'):
+            opts[a[2:].replace('-', '_')] = float(argv[i + 1])
             i += 2
-        elif a in ('--rounds', '--cpu', '--stacks', '--interval', '--difficulty'):
+        elif a in ('--rounds', '--cycle', '--cpu', '--stacks', '--interval', '--difficulty'):
             opts[a[2:]] = int(argv[i + 1])
             i += 2
         elif a.startswith('--'):
@@ -354,7 +394,25 @@ def options(argv: list[str]) -> tuple[str, dict]:
         opts['dll'] = os.path.abspath(opts['dll'])
         if not os.path.isfile(opts['dll']):
             raise SystemExit(f'no DLL at {opts["dll"]} (build it, or --dll installed)')
+    if opts['presentmon']:
+        opts['presentmon'] = os.path.abspath(opts['presentmon'])
+        if not os.path.isfile(opts['presentmon']):
+            raise SystemExit(f'no PresentMon at {opts["presentmon"]}')
+    if opts['cycle'] and opts['ab']:
+        raise SystemExit('--cycle is a load run: not with --ab')
     return (pos[0] if pos else ''), opts
+
+
+def loads_report(out: str) -> str:
+    """A load run's loads.md: each entry of the launch (perf_report.read_loads), cold first."""
+    import perf_report
+    with open(os.path.join(out, 'run.json'), encoding='utf-8') as f:
+        run = json.load(f)
+    text = '\n'.join([f'# {run["scenario"]}: left and entered again {run["cycle"]} times', '',
+                      *perf_report.loads_text(perf_report.read_loads(os.path.join(out, 'vehiclecrew.log')))]) + '\n'
+    with open(os.path.join(out, 'loads.md'), 'w', encoding='utf-8') as f:
+        f.write(text)
+    return text
 
 
 def main(argv: list[str]) -> int:
@@ -401,6 +459,10 @@ def main(argv: list[str]) -> int:
             print('saved in', out)
             return rc
         rc = one_run(game, scenario, out, opts['dll'], opts)
+    if opts['cycle']:
+        print(loads_report(out))
+        print('saved in', out)
+        return rc
     with open(os.path.join(out, 'run.json'), encoding='utf-8') as f:
         sampled = 'windows' in json.load(f)
     if sampled:

@@ -22,7 +22,7 @@ MK2 `wake_up[0] / globalSRT` 精确对应。CANM 在文件 `0x1660`，生成通�
 修复将搬移表补齐到 16 字节。每行 48 字节，因此全部行都保持 SIMD 对齐。
 原始动画键数据留在原位，行内相对偏移仍按新地址重新计算；帧数、步长、循环标志、原始轨道均不改动。
 
-`tests/proteus_cas_native_audit.py` 私有映射真实 EDF.dll，不执行 DllMain，直接执行完整
+`0611ece6^:tests/proteus_cas_native_audit.py`（已删除） 私有映射真实 EDF.dll，不执行 DllMain，直接执行完整
 `0x1160500` 原生轨道求值函数及 `0x11602D0` 原生时间采样函数：
 
 - 原版四元数读取成功；实际安装的两种旧 CAS 均复现相同读取 −1 异常。

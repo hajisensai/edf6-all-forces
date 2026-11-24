@@ -15,11 +15,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import gamedir  # noqa: E402
 import mdb  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 
-DEFAULT_EDF5 = r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 5'
 OUT = os.path.join(HERE, '..', 'edf5campaign', 'missions.json')
 THUMBS = os.path.join(HERE, '..', 'edf5campaign', 'thumbnails.rab')
 LANGS = ('CN', 'EN', 'JA', 'KR')
@@ -64,7 +64,9 @@ def thumbnails(edf5_dir: str) -> bytes:
 
 
 def main(argv: list[str]) -> int:
-    edf5 = argv[1] if len(argv) > 1 else DEFAULT_EDF5
+    edf5 = argv[1] if len(argv) > 1 else gamedir.find_other(gamedir.EDF5, near=gamedir.find())
+    if not edf5:
+        raise SystemExit('EDF5 not found: set EDF5_DIR or pass the folder as the argument')
     data = build(edf5)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:

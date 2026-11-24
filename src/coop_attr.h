@@ -1,4 +1,4 @@
-// EDF6Coop's room member attributes (coop_member_attribute_api.h, docs/member-attribute-api.md) as every module of the
+// EDF6Coop's room member attributes (coop_member_attribute_api.h, edf-coop-stable:docs/member-attribute-api.md) as every module of the
 // plugin uses them: the EDF4.1 outfit (outfit41.cpp), the EDF5 / EDF4.1 player count (edf5online_room.cpp), the PvP
 // capability (pvp.cpp), the room pre-sync (room_sync.cpp), the room's own checks (mod_room.cpp) and the host's settings
 // (host_settings.cpp). One copy of:

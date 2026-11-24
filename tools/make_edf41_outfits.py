@@ -19,9 +19,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
+import gamedir  # noqa: E402
 import outfit41  # noqa: E402
 import rabpool  # noqa: E402
-from make_edf41_objects import STEAM, archives  # noqa: E402
+from make_edf41_objects import archives  # noqa: E402
 
 OUT = os.path.join(HERE, '..', 'edf41port', 'outfits.json')
 FILES = os.path.join(HERE, '..', 'edf41port', 'outfits')
@@ -65,11 +66,14 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
-    ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf41', default=gamedir.find_other(gamedir.EDF41, near=edf6))
+    ap.add_argument('--edf6', default=edf6)
     ap.add_argument('--out', help='write outfits/ and outfits.json under this folder instead of edf41port/')
     ap.add_argument('--only', action='append', default=[], metavar='CLASS', help=f'one of {sorted(outfit41.SPECS)}')
     a = ap.parse_args()
+    if not a.edf41:
+        ap.error('EDF4.1 not found: set EDF41_DIR or pass --edf41')
     data, files = build(a.edf41, a.edf6, tuple(a.only))
     out_json, out_files = (os.path.join(a.out, 'outfits.json'), os.path.join(a.out, 'outfits')) if a.out else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)

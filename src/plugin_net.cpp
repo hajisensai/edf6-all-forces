@@ -3,6 +3,7 @@
 #define _CRT_RAND_S
 #include <cstdlib>
 #include "plugin_net.h"
+#include "net_counters.h"
 #include "crew.h"
 
 namespace crew::plugin_net {
@@ -42,6 +43,8 @@ void Update(const Room& next,std::uint64_t now) noexcept {
 }
 
 bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,bool state) noexcept {
+    if(!bytes || size<4)return false;
+    netcount::In(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
     return registry.Dispatch(peer,puid,bytes,size,now,state)!=Route::none;
 }
 
@@ -59,7 +62,9 @@ bool Host() noexcept { return ready && room.context.host; }
 std::uint32_t HostPeer() noexcept { return ready && !room.context.host ? room.context.hostPeer : 0u; }
 std::uint32_t PeerCount() noexcept { return ready ? room.context.peerCount : 0u; }
 bool Send(std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
-    return ready && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.send(peer,bytes,size);
+    if(!(ready && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.send(peer,bytes,size)))return false;
+    netcount::Out(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
+    return true;
 }
 std::uint32_t Broadcast(const void* bytes,std::size_t size) noexcept {
     std::uint32_t sent=0;
@@ -71,8 +76,10 @@ bool SendHost(const void* bytes,std::size_t size) noexcept {
     return host && Send(host,bytes,size);
 }
 bool SendState(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t size) noexcept {
-    return ready && key && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.sendState &&
-        room.context.sendState(peer,key,bytes,size);
+    if(!(ready && key && peer && peer<=room.context.peerCount && bytes && size && size<=kMaxPayload && room.context.sendState &&
+         room.context.sendState(peer,key,bytes,size)))return false;
+    netcount::Out(wire::HeadWord(bytes,size,0),size);   // counted only (PERF NET CHANNELS, net_counters.h)
+    return true;
 }
 std::uint32_t BroadcastState(std::uint32_t key,const void* bytes,std::size_t size) noexcept {
     std::uint32_t sent=0;
