@@ -48,6 +48,26 @@ cpu-11（n = 0 帧成本）。然后在当前 main 上重测 stress:1/10/30/100 
 4. latency-5 / gpu-3 交换链翻转模型 + ALLOW_TEARING（不限帧率真正上屏的前提），latency-7 tick 相位锁 vblank，latency-8 Raw Input。
 5. 阶段 4 / 5（全部骨骼、植被风、着色器时间、特效）与 fps-10 联机实测。
 
+**B 线进展（2026-11-24）与下一步**
+
+- 第 1 步：PR1（分支 `claude/opt-present-fps-032dd4`）——gpu-1、latency-1（ini `MaxFrameLatency`，默认 1）、文档更正、签名审计。
+- 第 2 步：PR2（分支 `claude/fps-stage2-dev`，基于 PR1）——只在 `FrameRateDev=1` 下生效。比计划多做的：
+  - 共享随机数 `0x705570` 每帧推进一次，是第 6 个守卫。
+  - fps-3 不用 `Shadow` OR 回，而是把封装更新挪到步进之前、只在 tick 帧跑，和 latency-3 是同一个改动。
+- 阶段 3 之前要补的核查（审查代理留下的，见 `unlimited-fps-re.md` §2.2）：
+  1. 每帧对活动相机 vslot_3 的调用，各相机类内部是否按调用次数累加。
+  2. UI 各界面内部是否全按 dt 推进（`0x119D270`）。
+  3. `Application+0x60 = n`（`0x7059CF`）由谁读取。
+  4. SoundController `0x7B3010` 两处按次数的音量平滑：`+0x3C` 每次 0.1，`+0xD8` 每次 0.01。改成按 dt 缩放，或在 n = 0 帧跳过。
+  5. 原版 `[rdi+9]` 那一帧不经过帧门，`Steps()` 沿用帧门上次的 tick 数，可能少取一帧鼠标。要么在帧门里也接管这条路径，要么实机证明它只出现在载入时。
+- 阶段 3 的顺序：
+  1. fps-5：在步进末尾抓镜头的「上一步 / 这一步」。
+  2. fps-6：镜头插值并进 `scope_lens.cpp` 的 `ProjectHook`（`0x1197B50` 已被它占用）。
+  3. fps-7：玩家和所乘载具的根变换。fps-6 与 fps-7 只在 `FrameRateDev` 下同时打开。
+  4. fps-8：插件镜头（地图俯视、第一人称、敌控、遥控武器站、炮塔）在切换的那一步打断点标记。
+  5. 实机验收按 §7-6。阶段 3 验收过后，才考虑让 `FrameRateCap` 脱离开发开关。
+- 第 4 步的前提不变：不改成翻转模型 + ALLOW_TEARING，上屏就被刷新率卡住；60 Hz 显示器上不限帧率只能降低输入延迟，画面不会更顺。
+
 ### C. 联机（第一批起；Coop 仓库部分在 Coop 自己的 worktree）
 
 - 先修：net-2 `extensionFault_` 粘滞（一次积压后本关插件联机全失效，10-30 反馈未修的那条根因）；net-3 NetId 解析每帧缓存；
