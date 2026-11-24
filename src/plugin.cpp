@@ -18,6 +18,7 @@
 #include "crash_dump.h"
 #include "frame_pacing.h"
 #include "frame_rate.h"
+#include "perf_probe.h"
 #include "frame_rate_logic.h"
 #include "log.h"
 #include "mod_file.h"
@@ -537,6 +538,7 @@ void LoadConfig() noexcept {
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.verbose=ReadInt(L"Debug",n.debug ? 1 : 0)>=2;
+    n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
     n.crewDelayMs=FixInt("CrewDelayMs",ReadInt(L"CrewDelayMs",n.crewDelayMs),0,600000);
     n.crewRange=ReadFloat(L"CrewRange",n.crewRange);
@@ -1418,6 +1420,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
+    perfprobe::Install();   // last: it chains call sites other hooks redirect at load (perf_probe.h)
     Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;

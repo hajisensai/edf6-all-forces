@@ -14,6 +14,10 @@ bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
+namespace perfprobe {   // the measurement probes (src/perf_probe.cpp): no frame hook here
+Frames TakeFrames() noexcept { return {}; }
+void Report(unsigned) noexcept {}
+}  // namespace perfprobe
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
 int yieldAsks=0;   // PromptHook got past its object gate to the seats (the prompt cases)

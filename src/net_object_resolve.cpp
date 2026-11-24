@@ -1,4 +1,5 @@
 #include "net_object_resolve.h"
+#include "net_counters.h"
 #include "coop_extension_api.h"
 #include "memory.h"
 #include "team_walk.h"
@@ -241,7 +242,12 @@ bool ResolveNetRefs(const unsigned char* const* refs,const NetLife* lives,unsign
             }
             cached=cached && held;
         }
-        if(!cached && !WalkWorld(visitor,world,frame))return false;
+        if(!cached) {
+            LARGE_INTEGER a,b;QueryPerformanceCounter(&a);
+            const bool walked=WalkWorld(visitor,world,frame);
+            QueryPerformanceCounter(&b);netcount::Walk(b.QuadPart-a.QuadPart);   // counted only (PERF NET CHANNELS)
+            if(!walked)return false;
+        }
         for(unsigned i=0;i<n;++i)out[i]=Result(visitor.q[i],world.expected);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){for(unsigned i=0;i<n;++i)out[i]=NetResolved{};players.valid=false;return false;}
