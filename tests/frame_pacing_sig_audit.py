@@ -3,7 +3,9 @@ site is `call [Sleep]` with the argument load the plugin compares before it, bot
 and the loops around them are the ones the comments describe (the window thread's loop back to its pump, the frame
 step's loop back to its tick count 0x11DAE60), and the tick clock TickWait reads to wait for the next boundary
 (0x11DAE60 byte for byte, its base 0x2139D10 set from QPC at start-up, its last boundary 0x2139D18, the period
-freq*100/5994 frame_pacing_logic.h repeats). An EDF.dll path as the argument, else the game gamedir finds; exit 77
+freq*100/5994 frame_pacing_logic.h repeats); the render fence loop 0x111CC20 whose zero-timeout poll FenceWait replaces
+(an auto-reset event of its own, the 1 s message pump, Sleep(0)); and the device init the frame latency is set after
+(its only call, the renderer's device at +0x80 QI'd for IDXGIDevice1, the one D3D11CreateDevice). An EDF.dll path as the argument, else the game gamedir finds; exit 77
 (skipped) without one."""
 from __future__ import annotations
 
@@ -51,7 +53,8 @@ def check(ok: bool, why: str) -> None:
 consts = {m[0]: int(m[1], 16) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b', src)}
 arrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
           for name, body in re.findall(r'\b(k\w+(?:Sig|Arg))\[\]=\{([^}]*)\}', src)}
-check(set(arrays) == {'kPumpArg', 'kTickArg', 'kPumpSig', 'kTickSig', 'kTickCountSig'}, f'the signature arrays: {sorted(arrays)}')
+check(set(arrays) == {'kPumpArg', 'kTickArg', 'kPumpSig', 'kTickSig', 'kTickCountSig', 'kFenceLoopSig', 'kFencePollSig'},
+      f'the signature arrays: {sorted(arrays)}')
 
 
 def rel_target(at: int, length: int) -> int:
@@ -127,4 +130,51 @@ check(re.search(r'image\+kTickBase', src) and re.search(r'image\+kTickLast', src
 for site, sig, hook in (('kPumpSleep', 'kPumpSig', 'PumpWait'), ('kTickSleep', 'kTickSig', 'TickWait')):
     check(re.search(rf'RedirectImportCall\(image\+{site},{sig},reinterpret_cast<void\*>\(&{hook}\)', src) is not None,
           f'{hook} is what {site} is redirected to')
+# The render fence 0x111CC20 (FenceWait): an auto-reset event of its own, a signal command for the render thread, then
+# `while(!0x50E00(&event)){ if(stopwatch > 1 s) pump; Sleep(0); }`.
+fence, poll, loop = consts['kFenceCall'], consts['kFencePoll'], consts['kFenceLoop']
+check(img[loop:loop + len(arrays['kFenceLoopSig'])] == arrays['kFenceLoopSig'], f'kFenceLoop {loop:#x} is kFenceLoopSig')
+check(img[poll:poll + len(arrays['kFencePollSig'])] == arrays['kFencePollSig'], f'kFencePoll {poll:#x} is kFencePollSig')
+check(fence == loop + 16 and img[fence] == 0xE8 and rel_target(fence, 5) == poll, 'kFenceCall is the loop\'s call to kFencePoll')
+check(imports.get(rip(loop + 2, 6)) == ('KERNEL32.DLL', 'Sleep') and img[loop:loop + 2] == b'\x33\xc9', 'the loop sleeps 0 ms')
+check(imports.get(rip(poll + 9, 6)) == ('KERNEL32.DLL', 'WaitForSingleObject') and img[poll + 7:poll + 9] == b'\x33\xd2',
+      'kFencePoll is WaitForSingleObject([rcx], 0)')
+check(img[poll + 15:poll + 20] == b'\x85\xc0\x0f\x94\xc0', 'kFencePoll returns al = (WAIT_OBJECT_0), FenceWait the same')
+je = fence + 7
+check(img[je] == 0x74 and je + 2 + struct.unpack_from('<b', img, je + 1)[0] == 0x111CCE0, 'the loop goes back to its stopwatch')
+check(img[0x111CCE8] == 0xE8 and rel_target(0x111CCE8, 5) == 0x66D00 and img[0x111CCD5:0x111CCD9] == b'\xf3\x0f\x10\x35' and
+      struct.unpack_from('<f', img, rip(0x111CCD5, 8))[0] == 1.0, 'the loop pumps messages past 1 s on its stopwatch')
+check(imports.get(rip(0x111CD19, 6)) == ('USER32.dll'.upper(), 'PeekMessageW'), 'the pump is PeekMessageW')
+check(img[0x111CCC4:0x111CCD1] == b'\x48\x8d\x8c\x24\x80\x00\x00\x00\xe8' + struct.pack('<i', poll - 0x111CCD1),
+      'the first poll before the loop is the same event, left as it is')
+check(img[0x111CC45:0x111CC4D] == b'\x48\x8d\x8c\x24\x80\x00\x00\x00' and img[0x111CC40:0x111CC45] == b'\x45\x33\xc0\x33\xd2' and
+      rel_target(0x111CC4D, 5) == 0x50D10, 'the event at [rsp+80h] is made by 0x50D10(edx=0, r8=0)')
+check(imports.get(rip(0x50D51, 6)) == ('KERNEL32.DLL', 'CreateEventW') and img[0x50D40:0x50D4A] == b'\x83\xfd\x01\x44\x8b\xc6\x40\x0f\x94\xc7',
+      '0x50D10 is CreateEventW(0, manual = (edx == 1), initial = r8): auto-reset, not signalled')
+check(img[0x11A305A] == 0xE8 and rel_target(0x11A305A, 5) == 0x111CC20, 'the main loop waits on the fence every frame')
+check(re.search(r'RedirectCall\(image\+kFenceCall,image\+kFencePoll,reinterpret_cast<void\*>\(&FenceWait\)', src) and
+      re.search(r'Matches\(image,kFenceLoop,kFenceLoopSig', src) and re.search(r'Matches\(image,kFencePoll,kFencePollSig', src),
+      'FenceWait goes in at kFenceCall only after both signatures match')
+check(re.search(r'WaitForSingleObject\(\*event,kFenceWaitMs\)==WAIT_OBJECT_0', src), 'FenceWait keeps kFencePoll\'s result')
+
+# The device init (InstallFrameLatency): 0x111B420 is called once, from 0x11A33DF, with the renderer; it keeps the
+# renderer in rdi and QIs its device [rdi+80h] for IDXGIDevice1 (only for GetAdapter); the only D3D11CreateDevice.
+init, call = consts['kDeviceInit'], consts['kDeviceInitCall']
+check(img[call] == 0xE8 and rel_target(call, 5) == init, 'kDeviceInitCall calls kDeviceInit')
+check(img[call - 0x24:call - 0x1D] == b'\x48\x8d\x0d' + struct.pack('<i', consts['kRenderer'] - (call - 0x1D)),
+      'the device init is given the renderer kRenderer')
+check(img[init + 0x2F:init + 0x32] == b'\x48\x8b\xf9', 'the device init keeps the renderer in rdi')
+check(img[0x111B63C:0x111B643] == b'\x48\x8b\x8f' + struct.pack('<I', consts['kRendererDevice']), 'mov rcx,[rdi+kRendererDevice]')
+iid = rip(0x111B64A, 7)
+check(img[iid:iid + 16] == bytes.fromhex('0f97db777662ba48ba28070143b4392c'), f'{iid:#x} is IID_IDXGIDevice1')
+check(imports.get(rip(0x12DAED0, 6)) == ('D3D11.DLL', 'D3D11CreateDevice') and img[0x111B595] == 0xE8 and
+      rel_target(0x111B595, 5) == 0x12DAED0, 'the device init makes the device with D3D11CreateDevice')
+text = pe.sections[0]
+tb, te = text.VirtualAddress, text.VirtualAddress + text.Misc_VirtualSize
+for target, only in ((init, call), (0x12DAED0, 0x111B595)):
+    hits = [tb + m.start() for m in re.finditer(b'\xe8', img[tb:te])
+            if rel_target(tb + m.start(), 5) == target]
+    check(hits == [only], f'{target:#x} is called only from {only:#x}: {[hex(h) for h in hits]}')
+check(re.search(r'RedirectCall\(image\+kDeviceInitCall,image\+kDeviceInit,reinterpret_cast<void\*>\(&DeviceInitHook\)', src),
+      'DeviceInitHook is what kDeviceInitCall is redirected to')
 print(f'frame pacing signatures: {checks} checks ok')

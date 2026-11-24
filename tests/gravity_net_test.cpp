@@ -135,6 +135,13 @@ int main() {
     Check(OtherOutranks(false,true,"0002b","0002a") && !OtherOutranks(true,false,"0002a","0002b"),"the host's grab wins, from both sides");
     Check(OtherOutranks(false,false,"0002b","0002a") && !OtherOutranks(false,false,"0002a","0002b"),"between guests the lower PUID's, from both sides");
     Check(!OtherOutranks(false,false,"0002a","0002a") && !OtherOutranks(false,false,"","0002a"),"the same PUID or none: neither");
+    // Send pacing: frames or ms, whichever first (gravity_net_protocol.h Due).
+    Check(Due(100,0,kFlightGapFrames,5000,0,kFlightGapMs),"a state never sent goes out at once");
+    Check(!Due(105,100,kFlightGapFrames,5050,4970,kFlightGapMs) && Due(106,100,kFlightGapFrames,5070,4970,kFlightGapMs),
+          "60 fps: the sixth frame, though the coarse ms clock reads under the gap");
+    Check(!Due(101,100,kFlightGapFrames,5099,5000,kFlightGapMs) && Due(101,100,kFlightGapFrames,5100,5000,kFlightGapMs),
+          "10 fps: the gap's ms, one frame later, well inside the receiver's silence");
+    Check(Due(102,100,kHoldGapFrames,5050,5000,kHoldGapMs) && !Due(101,100,kHoldGapFrames,5049,5000,kHoldGapMs),"a hold likewise");
     std::printf("gravity_net: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

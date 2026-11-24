@@ -49,10 +49,10 @@ import edf41_sound_fallbacks  # noqa: E402
 import edf41zh  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
+import gamedir  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 
-STEAM = r'D:\Steam\steamapps\common'
 OUT = os.path.join(HERE, '..', 'edf41port', 'weapons.json')
 # The calls (plan P5) in their own registry: released after edf5port/models.json, so they append after its rows
 # (tools/ported_weapons.py REGISTRIES / RELEASED).
@@ -548,11 +548,16 @@ def write(path: str, data: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
-    ap.add_argument('--edf5', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 5'))
-    ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf41', default=gamedir.find_other(gamedir.EDF41, near=edf6))
+    ap.add_argument('--edf5', default=gamedir.find_other(gamedir.EDF5, near=edf6))
+    ap.add_argument('--edf6', default=edf6)
     ap.add_argument('--zh', help="the Simplified Chinese patch's mods folder (default: <EDF4.1>/mods, a patched 4.1)")
     a = ap.parse_args()
+    if not a.edf41:
+        ap.error('EDF4.1 not found: set EDF41_DIR or pass --edf41')
+    if not a.edf5:
+        ap.error('EDF5 not found: set EDF5_DIR or pass --edf5')
     data = build(a.edf41, a.edf5, a.edf6, a.zh or edf41zh.default_dir(a.edf41))
     calls = m5.keep_order(OUT_CALLS, [w for w in data['weapons'] if is_call(w)])
     data['weapons'] = m5.keep_order(OUT, [w for w in data['weapons'] if not is_call(w)])

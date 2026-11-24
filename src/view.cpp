@@ -18,7 +18,8 @@
 
 // The cameras themselves too (2026-10-05, the user: "a little farther and it is gone", with VIEW logging 1000 -> 3000
 // every mission): the copy from the env into the cameras (0x1230A0, at 0x1232B5) has two callers, a setup (0x9D700)
-// and a virtual (0x705530), not a per-frame step, so an env raised after the mission's load never reached them. The
+// and Application::Update (0x705530, at 0x7056BA, every frame: corrected 2026-11-24, an older note here called it
+// not per-frame; the copy at 0x1232B5 runs only when 0x1232AF finds its source, why it missed is not traced). The
 // plugin raises the four cameras' own fields every frame: camera i = *(mgr+0x4D8+i*0x188) (0x1195BE0, a shared_ptr's
 // object), mgr = *(image+0x20B2958); +0x2C far clip, +0x30 the far pass's start, +0x34 its end (what 0x1230A0 writes).
 namespace crew {

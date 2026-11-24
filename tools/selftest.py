@@ -3332,8 +3332,8 @@ def spawn_catalog_archives(shard: int) -> None:
     record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
     now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
     one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
-    the sorted rows dealt round, so the generated vehicles' rows (edf6tr_<kind>_mission, one a kind, each building its
-    kind) spread evenly and no kind is built in two."""
+    packed by their measured seconds (testrange/catalog_row_seconds.json, pylib/testshard.py: dealt round they
+    took 357/348/175/119 s, 2026-11-24), each row in one shard, so no kind is built in two."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import catalog
     import gen_spawn_catalog as g
@@ -3349,7 +3349,7 @@ def spawn_catalog_archives(shard: int) -> None:
     read = g.game_reader(rootcpk.DEFAULT_GAME)
     stale = []
     rows = sorted(catalog.rows(), key=lambda r: r.sgo)
-    for r in rows[shard::SPAWN_CATALOG_SHARDS]:
+    for r in g.shards(rows, SPAWN_CATALOG_SHARDS)[shard]:
         try:
             now = g.row_archives(r, read)
         except (FileNotFoundError, KeyError):
@@ -7301,11 +7301,14 @@ def npc_ai_asks_less() -> None:
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
     assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
     assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
-    arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
+    # cpu-2: the asks moved to AskArms (once a soldier, again when SameArms sees its arms changed)
+    arms = body(code, 'bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,\n             std::uint64_t setCount) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
     second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
-    assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
+    assert first < arms.index('if(!Readable(list,count*8))return false;') < second < arms.index('seen.entry[k]=entry;'),         'AskArms: list and sets in one call, then weapons and entries in one, before they are asked'
     assert 'edf::PrefetchReadable(' not in arms
+    of = body(code, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {')
+    assert of.index('SameArms(') < of.index('AskArms('), 'ArmsOf: asks only when the fingerprint changed'
     move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {')
     assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
     navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
@@ -12621,8 +12624,10 @@ def edf41_friend_grip_matches_weapons() -> None:
     import mab_legacy
     import make_edf41_objects as m
     import sgo
-    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
-    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+    import gamedir
+    edf6 = gamedir.find()
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not (edf41 and edf6):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)

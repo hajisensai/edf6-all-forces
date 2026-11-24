@@ -6,7 +6,7 @@ legacy family (shader, slots, params, texture members, two coats on one texture,
 left alone), the stock gold weapons' private archives and SGO redirects (new files, the stock path restorable), the
 gold models built without cockpit assets (no eye marker: the seats keep the stock camera, fp_vehicle.cpp), and every
 gold call's vehicle is registered.
-With EDF6 (EDF6_GAME_DIR / the default install; skipped without it): the constants are EDF6's own gold coat
+With EDF6 (the installed game gamedir.find() finds; skipped without it): the constants are EDF6's own gold coat
 (V504_BEGARUTA_GOLD) and paint; discover() over the game (and EDF4.1's ported gold archives, with EDF4.1) finds
 exactly COATS; every coat converts to a gold, detailed, metallic, glossy coat whose archive the game can bind.
 """
@@ -27,14 +27,15 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 
 import numpy as np  # noqa: E402
 
+import gamedir  # noqa: E402
 import goldcoat  # noqa: E402
 import mdb  # noqa: E402
 import texfile  # noqa: E402
 import texfile_accel  # noqa: E402
 from mdb import MatParam, MatTex, Material, Mdb, Rab, RabFile, Texture  # noqa: E402
 
-GAME6 = os.environ.get('EDF6_GAME_DIR') or r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
-GAME41 = os.environ.get('EDF41_DIR') or r'D:\steam\steamapps\common\Earth Defense Force 4.1'
+GAME6 = gamedir.find() or ''
+GAME41 = gamedir.find_other(gamedir.EDF41, near=GAME6) or ''
 SOURCE_GOLD = (68, 46, 0)        # the sources' coat panels (measured: 68,46,0 and 66,48,0)
 LIGHT, MECH, BASIC = (goldcoat.LEGACY[k] for k in ('SND_MECH_LIGHT', 'SND_MECH', 'SND_COMMON_BASIC'))
 
@@ -341,7 +342,6 @@ class Coverage(unittest.TestCase):
 
 
 def game6():
-    import gamedir
     if not gamedir.is_game(GAME6):
         raise unittest.SkipTest('EDF6 not installed')
     import rootcpk
@@ -350,7 +350,7 @@ def game6():
 
 def read41(rel: str) -> bytes:
     import rootcpk
-    if not os.path.isfile(os.path.join(GAME41, 'Root.cpk')):
+    if not GAME41 or not os.path.isfile(os.path.join(GAME41, 'Root.cpk')):
         raise unittest.SkipTest('EDF4.1 not installed')
     folder, name = rel.split('/')
     for archive in ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'Chunk03.cpk'):

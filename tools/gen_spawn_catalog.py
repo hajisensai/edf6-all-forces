@@ -15,6 +15,7 @@ spawn_catalog_archives_recorded_<i> recomputes it where the game is).
   python tools/gen_spawn_catalog.py               write both
   python tools/gen_spawn_catalog.py --check       exit 1 when a committed file is not what this would write (CI)
   python tools/gen_spawn_catalog.py --archives    recompute testrange/catalog_archives.json from the game, then write
+                                                  (and testrange/catalog_row_seconds.json: what each row took)
 """
 from __future__ import annotations
 
@@ -31,6 +32,11 @@ import catalog  # noqa: E402
 OUT = os.path.normpath(os.path.join(HERE, '..', 'src', 'spawn_catalog.inc'))
 OUT_ARCHIVES = os.path.normpath(os.path.join(HERE, '..', 'src', 'spawn_catalog_archives.h'))
 ARCHIVES = os.path.normpath(os.path.join(HERE, '..', 'testrange', 'catalog_archives.json'))
+# Each row's measured seconds (a sequential --archives run on the developer's machine): tools/selftest.py
+# spawn_catalog_archives_recorded_<i> packs the rows into its shards by them (longest first, onto the lightest shard),
+# so the rows that build a generated vehicle do not pile up in one shard. Only the balance depends on it: a stale or
+# missing row costs a little balance, never a check.
+SECONDS = os.path.normpath(os.path.join(HERE, '..', 'testrange', 'catalog_row_seconds.json'))
 HOW = {'vehicle': 'How::vehicle', 'ours': 'How::vehicle', 'enemy': 'How::enemy', 'enemy41': 'How::enemy'}
 # The archives a model keeps open while its HD textures may stream (RandomAccessArchive::Open, docs/cri-fs-loaders-re.md):
 # one CriFsLoader each for as long as the object's resources stay loaded.
@@ -242,9 +248,29 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     return read
 
 
-def measure(root: str) -> dict[str, list[str]]:
+def measure(root: str, seconds: dict[str, float] | None = None) -> dict[str, list[str]]:
+    import time
     read = game_reader(root)
-    return {r.sgo: row_archives(r, read) for r in catalog.rows()}
+    out = {}
+    for r in catalog.rows():
+        started = time.perf_counter()
+        out[r.sgo] = row_archives(r, read)
+        if seconds is not None:
+            seconds[r.sgo] = round(time.perf_counter() - started, 1)
+    return out
+
+
+def shards(rows: list, n: int) -> list[list]:
+    """`rows` in `n` parts of about equal measured time (pylib/testshard.py, SECONDS)."""
+    import testshard
+    return testshard.pack(rows, n, testshard.load(SECONDS), lambda r: r.sgo)
+
+
+def write_seconds(seconds: dict[str, float]) -> None:
+    import testshard
+    testshard.save(SECONDS, 'Each spawn catalog row\'s seconds in a sequential python tools/gen_spawn_catalog.py '
+                   '--archives run: tools/selftest.py balances spawn_catalog_archives_recorded_<i> by them.', seconds)
+
 
 
 def write_archives(rows: dict[str, list[str]]) -> None:
@@ -264,8 +290,10 @@ def _same(path: str, text: str) -> bool:
 def main(argv: list[str]) -> int:
     if '--archives' in argv:
         import rootcpk
-        write_archives(measure(rootcpk.DEFAULT_GAME))
-        print('wrote', ARCHIVES)
+        seconds: dict[str, float] = {}
+        write_archives(measure(rootcpk.DEFAULT_GAME, seconds))
+        write_seconds(seconds)
+        print('wrote', ARCHIVES, SECONDS)
     outputs = ((OUT, render()), (OUT_ARCHIVES, render_archives()))
     if '--check' in argv:
         return 0 if all(_same(path, text) for path, text in outputs) else 1

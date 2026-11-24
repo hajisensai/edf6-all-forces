@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
 import edf41_objects
+import gamedir
 import make_edf41_objects as mo
 import sgo
 
@@ -59,8 +60,11 @@ class PrivateData(unittest.TestCase):
 
 class NativeClosure(unittest.TestCase):
     def test_private_spawn_references_resolve(self):
-        edf41 = Path(mo.STEAM) / 'Earth Defense Force 4.1'
-        edf6 = Path(mo.STEAM) / 'EARTH DEFENSE FORCE 6'
+        found6 = gamedir.find()
+        found41 = gamedir.find_other(gamedir.EDF41, near=found6)
+        if not found6 or not found41:
+            self.skipTest('source games are not installed')
+        edf41, edf6 = Path(found41), Path(found6)
         if not (edf41 / 'Root.cpk').is_file() or not (edf6 / 'Root.cpk').is_file():
             self.skipTest('source games are not installed')
         games = mo.Games(str(edf41), str(edf6))
