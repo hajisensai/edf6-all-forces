@@ -1380,7 +1380,67 @@
    ],
    "scripts": []
   },
-  "edf5_campaign_lifecycle": {
+  "edf5_campaign_lifecycle_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_1": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_2": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_3": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -2549,11 +2609,45 @@
    ],
    "scripts": []
   },
-  "hail_glide": {
+  "hail_glide_0": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "pylib-model",
+    "test-data"
    ],
-   "scripts": []
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_1": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_2": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_3": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
   },
   "hangar_recover": {
    "labels": [

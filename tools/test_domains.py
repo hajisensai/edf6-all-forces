@@ -478,7 +478,10 @@ def ctest_deps(repo: Repo, test: dict, build: str) -> set[str]:
             if r.startswith('@build/'):
                 if r != '@build/' and not r.endswith('/build'):
                     name = os.path.basename(r).lower()
-                    if name.endswith(('.exe', '.dll')) or 'mods' in r.lower():
+                    stem = os.path.splitext(os.path.basename(r))[0]
+                    if name.endswith('.exe') and stem in repo.targets:   # a check a script runs (hail_glide_<I>)
+                        deps |= repo.cpp_deps(stem)
+                    elif name.endswith(('.exe', '.dll')) or 'mods' in r.lower():
                         deps |= {'@' + d for d in ARTIFACTS.get(os.path.splitext(name)[0], NATIVE)}
                 continue
             deps |= repo.string_deps(r, '')

@@ -1281,7 +1281,14 @@ target_include_directories(hail_glide_check PRIVATE src common third_party/EDFMo
 target_compile_options(hail_glide_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hail_glide_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_dependencies(offline_checks hail_glide_check)
-add_test(NAME hail_glide COMMAND hail_glide_check)
+# In HAIL_GLIDE_SHARDS parts run side by side, packed by their measured seconds (tests/hail_glide_shard.py,
+# tests/hail_glide_seconds.json): whole it took 141 s, the longest test a src/-only change runs.
+set(HAIL_GLIDE_SHARDS 4)
+math(EXPR _hail_last "${HAIL_GLIDE_SHARDS} - 1")
+foreach(_shard RANGE ${_hail_last})
+  add_test(NAME hail_glide_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard.py"
+           "$<TARGET_FILE:hail_glide_check>" --shard ${_shard}/${HAIL_GLIDE_SHARDS})
+endforeach()
 
 add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
@@ -1595,7 +1602,14 @@ target_compile_options(mission_pack_save_native_test PRIVATE /W4 /WX /utf-8 /per
 add_dependencies(offline_checks mission_pack_save_native_test)
 add_test(NAME mission_pack_save_native COMMAND mission_pack_save_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_pack_save_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
+# In EDF5_LIFECYCLE_SHARDS parts run side by side, packed by their measured seconds
+# (tests/edf5_campaign_lifecycle_seconds.json): whole it took 151 s.
+set(EDF5_LIFECYCLE_SHARDS 4)
+math(EXPR _edf5_lifecycle_last "${EDF5_LIFECYCLE_SHARDS} - 1")
+foreach(_shard RANGE ${_edf5_lifecycle_last})
+  add_test(NAME edf5_campaign_lifecycle_${_shard} COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py" --shard ${_shard}/${EDF5_LIFECYCLE_SHARDS})
+endforeach()
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)
