@@ -29,6 +29,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            every second: tests/autopilot/players_probe.cpp)
                            or --cmd "probe umbra" (every box EDF.dll hands Umbra checked for values out of reach, with
                            its owner, and every Vehicle601_Tank's aim and gun pose: tests/autopilot/umbra_probe.cpp)
+                           or --cmd "probe heap N" with --cycle (what was allocated from the Nth cycle's way out on
+                           and is still alive at each later one, by call path: tests/autopilot/heap_probe.cpp; every
+                           cycle also logs MEMMAP / HEAPS, where the commit sits)
           --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini

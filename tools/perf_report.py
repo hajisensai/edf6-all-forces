@@ -67,6 +67,9 @@ RENDER = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF RENDER (\d+) presents
                     r'([\d.]+) ms apart \(worst ([\d.]+)\); input to present ([\d.]+) ms \(the frame\'s own sample\), '
                     r'([\d.]+) ms \(worst ([\d.]+); [^)]*\), (\d+) unpaired; submits a frame by pass ([\d.]+) ([\d.]+) '
                     r'([\d.]+) ([\d.]+) ([\d.]+), other ([\d.]+); mesh draws a frame ([\d.]+)')
+GPUROW = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF GPU a frame: occlusion query reads ([\d.]+) \(([\d.]+) not in '
+                    r'yet, ([\d.]+) waiting\), ([\d.]+) ms \(waiting ([\d.]+), worst call ([\d.]+)\); skin palettes ([\d.]+), '
+                    r'([\d.]+) ms')
 NETCH = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NET CHANNELS out: (.*?); in: (.*?); world walks (\d+) '
                    r'\(([\d.]+) ms, ([\d.]+) a frame\)')
 NETROW = re.compile(r'((?:bit|head) 0x[0-9A-Fa-f]+) (\d+)/(\d+) B')
@@ -415,6 +418,20 @@ def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
             'apart_worst': max(float(m[8]) for m in rows), 'own_ms': mean(9), 'stepped_ms': mean(10),
             'stepped_worst': max(float(m[11]) for m in rows), 'unpaired': sum(int(m[12]) for m in rows),
             'submits': [mean(i) for i in range(13, 19)], 'meshes': mean(19)}
+
+
+def read_gpu(log: str, window: tuple[float, float]) -> dict[str, float]:
+    """The PERF GPU rows in `window` (render thread, gpu-5 / gpu-6): each a frame, the rows' plain mean (each row is a
+    5 s period); the worst call the max. {} without them."""
+    rows = _rows(log, GPUROW, window)
+    if not rows:
+        return {}
+
+    def mean(i: int) -> float:
+        return sum(float(m[i]) for m in rows) / len(rows)
+    return {'rows': len(rows), 'queries': mean(4), 'pending': mean(5), 'waits': mean(6), 'query_ms': mean(7),
+            'wait_ms': mean(8), 'query_worst': max(float(m[9]) for m in rows), 'palettes': mean(10),
+            'palette_ms': mean(11)}
 
 
 def read_net(log: str, window: tuple[float, float], secs: float) -> dict:
@@ -901,6 +918,12 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'stepped with, two frames back; {render["unpaired"]} presents unpaired',
                 f'- draw submits a frame by pass 0 / 1 / 2 / 3 / 4 / other: {sub}; mesh draws a frame '
                 f'{render["meshes"]:.0f}']
+    gpu = read_gpu(log, cw)
+    if gpu:
+        out += [f'- occlusion query reads a frame {gpu["queries"]:.1f} ({gpu["pending"]:.1f} not in yet, '
+                f'{gpu["waits"]:.1f} waiting), {gpu["query_ms"]:.3f} ms (waiting {gpu["wait_ms"]:.3f}, worst call '
+                f'{gpu["query_worst"]:.2f}); skin palettes a frame {gpu["palettes"]:.1f}, {gpu["palette_ms"]:.3f} ms '
+                f'(gpu-5, gpu-6)']
     pm = presentmon_summary(os.path.join(run_dir, 'presentmon.csv'))
     if pm:
         out += ['', f'## Display (PresentMon, {pm["presents"]} presents)', '',

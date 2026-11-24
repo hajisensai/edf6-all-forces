@@ -2052,7 +2052,7 @@ void Think(unsigned char* h,int cls) noexcept {
     s->unarmedSaid=false;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);   // a script's unit keeps its stock moves
-    if(Cfg().debug && ms-s->loggedAt>kLogMs) {
+    if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
             ControlName(control),pos[0],pos[1],pos[2],a.n,a.held[0],p.arm,p.arm>=0 && p.arm<a.n ? a.arm[p.arm].reach : 0.0f,s->target.obj,

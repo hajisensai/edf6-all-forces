@@ -5,8 +5,10 @@
 // __try or a catch handles) checks there is none. The child's own filter, set before the plugin's, ends the process
 // once the chain reaches it, and ucrtbase's abort is told not to fast-fail, so no case goes on to Windows' error
 // reporting. __fastfail is not a case: nothing in the process runs for it (crash_dump.h).
+// The peer cases load a stand-in EDF6AutoTurret.dll (tests/crash_flush_peer.cpp, no writer thread of its own) whose
+// buffered lines must reach its log through the crash path (common/log.h kCrashFlush), before or after the install.
 #include "../src/crash_dump.cpp"
-#include "../src/log_buffer.h"
+#include "../common/log.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -19,7 +21,7 @@ namespace {
 wchar_t logPath[MAX_PATH]{};
 bool endWhenWritten=false;   // the invalid parameter case: its handler fast-fails after the dump, so the test ends here
 bool failCrashLog=false;
-crew::logging::Buffer<4096> logBuffer;
+edf::logfile::Buffer<4096> logBuffer;
 constexpr UINT kChained=0xC0DE0001;    // the child's own filter, behind the plugin's, ended the process
 constexpr UINT kLate=0xC0DE0002;       // a filter set after the plugin's (through the redirect) ended it
 constexpr UINT kWritten=0xC0DE0003;    // the invalid parameter case ended after its dump
@@ -40,16 +42,16 @@ void Log(const char* format,...) noexcept {
     char text[1000];va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
     logBuffer.Append(text,std::strlen(text));
     logBuffer.Append("\n",1);
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); });
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); });
 }
 void FlushLog() noexcept {
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); },true);
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); },true);
 }
 void CrashLog(const char* text,std::size_t size) noexcept {
     WIN32_FILE_ATTRIBUTE_DATA dump{};
     if(GetFileAttributesExW(dumpPath,GetFileExInfoStandard,&dump) && (dump.nFileSizeHigh || dump.nFileSizeLow))Append("DUMP_READY");
     // The same raw append used by plugin.cpp, without the logger's buffer/file locks or printf formatting.
-    logging::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
+    edf::logfile::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
     if(endWhenWritten)TerminateProcess(GetCurrentProcess(),kWritten);
 }
 }  // namespace crew
@@ -103,6 +105,33 @@ DWORD WINAPI Handled(void*) {
     __try { *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1; } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return 0;
 }
+// The stand-in EDF6AutoTurret.dll (CRASH_PEER_DLL, CMakeLists.txt): lines buffered there just before the crash.
+using PeerLineFn=void(__cdecl*)(const char*);
+using PeerStartFn=void(__cdecl*)(const wchar_t*);
+using PeerLockFn=void(__cdecl*)();
+PeerLineFn peerLine=nullptr;
+PeerLockFn peerLock=nullptr;
+bool peerLocked=false;
+bool LoadPeer(const wchar_t* dir) noexcept {
+    const HMODULE peer=LoadLibraryW(CRASH_PEER_DLL);
+    if(!peer)return false;
+    peerLine=reinterpret_cast<PeerLineFn>(GetProcAddress(peer,"PeerLine"));
+    peerLock=reinterpret_cast<PeerLockFn>(GetProcAddress(peer,"PeerLock"));
+    const auto start=reinterpret_cast<PeerStartFn>(GetProcAddress(peer,"PeerStart"));
+    if(!peerLine || !peerLock || !start)return false;
+    wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\peer.log",dir);
+    start(log);
+    return true;
+}
+DWORD WINAPI PeerCrash(void*) {
+    Mark();
+    for(int i=1;i<=20;++i){char t[32];_snprintf_s(t,sizeof(t),_TRUNCATE,"PEER line %d",i);peerLine(t);}
+    peerLine("PEER last line before the crash");
+    if(peerLocked)peerLock();
+    *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    return 0;
+}
+
 HANDLE gate=nullptr;
 DWORD WINAPI Racer(void*) {
     WaitForSingleObject(gate,INFINITE);
@@ -121,12 +150,20 @@ int Child(const char* mode,const wchar_t* dir) {
     using AbortBehavior=unsigned(__cdecl*)(unsigned,unsigned);
     if(auto set=reinterpret_cast<AbortBehavior>(GetProcAddress(ucrt,"_set_abort_behavior")))set(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     _set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
+    if((!std::strcmp(mode,"peer") || !std::strcmp(mode,"peerlock")) && !LoadPeer(dir)){Append("TEST no peer");return 2;}
     if(!crew::InstallCrashDump(dir)){Append("TEST install failed");return 2;}
     using VoidFn=void(__cdecl*)();
     if(!std::strcmp(mode,"av"))Join(&AccessViolation);
     else if(!std::strcmp(mode,"bufferlock"))Join(&BufferLockedCrash);
     else if(!std::strcmp(mode,"filelock"))Join(&FileLockedCrash);
     else if(!std::strcmp(mode,"nolog")){failCrashLog=true;Join(&BufferLockedCrash);}
+    else if(!std::strcmp(mode,"peer"))Join(&PeerCrash);
+    else if(!std::strcmp(mode,"peerlock")){peerLocked=true;Join(&PeerCrash);}
+    else if(!std::strcmp(mode,"latepeer")) {   // loaded after the crash dump: found at the mission start
+        if(!LoadPeer(dir)){Append("TEST no peer");return 2;}
+        crew::CheckCrashFilter();
+        Join(&PeerCrash);
+    }
     else if(!std::strcmp(mode,"cpp"))Join(&Throw);
     else if(!std::strcmp(mode,"stack"))Join(&Overflow);
     else if(!std::strcmp(mode,"abort")){Mark();reinterpret_cast<VoidFn>(GetProcAddress(ucrt,"abort"))();}
@@ -378,13 +415,31 @@ int main(int argc,char** argv) {
     Crash(self,work,"race",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"bufferlock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"filelock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+    // EDF6AutoTurret's buffered lines reach its log on a crash (#372's review: its async log lost the last 50 ms).
+    for(const char* mode:{"peer","latepeer","peerlock"}) {
+        Crash(self,work,mode,kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+        wchar_t path[MAX_PATH];
+        swprintf_s(path,L"%ls\\peer.log",work);const std::string peer=Read(path);
+        swprintf_s(path,L"%ls\\log.txt",work);const std::string own=Read(path);
+        char what[200];
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the peer's flush was found",mode);
+        Check(own.find("CRASHDUMP EDF6AutoTurret.dll's buffered log lines are written on a crash too")!=std::string::npos,what);
+        if(!std::strcmp(mode,"peerlock")) {   // its lock owned by the crashed thread: given up, the chain went on (Crash)
+            _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: a locked peer buffer is left, not waited for",mode);
+            Check(peer.empty(),what);
+            continue;
+        }
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the peer's last lines reached its log, in order",mode);
+        const auto first=peer.find("PEER line 1\r\n"),last=peer.find("PEER last line before the crash\r\n");
+        Check(Count(peer,"PEER line ")==20 && first!=std::string::npos && last!=std::string::npos && first<last,what);
+    }
     {
         Clean(work);
         Check(Run(self,"nolog",work)==kChained,"failed crash log: the crash chain still exits promptly");
         Check(ReadDump(work).found,"failed crash log: the primary dump is still written");
     }
     {
-        crew::logging::Buffer<16> buffer;
+        edf::logfile::Buffer<16> buffer;
         std::string written;
         unsigned dropped=0;
         auto write=[&](const char* bytes,std::size_t size,unsigned lost) noexcept { written.append(bytes,size);dropped+=lost; };
