@@ -13,7 +13,9 @@ A kit that promises a closed tub (an aircraft cockpit: Kit.sill) is closed under
 eye further down meets a front face of the kit (cockpits.leaks; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去"),
 in every seat fitted above and, for the kits cut from real models (cockpit_kits_plugin.MODELS: the plugin's jets, whose
 models their generators make), in every room from the least to the most the kit takes.
-Exit 77 (skipped) without Root.cpk or without the cockpits' assets (the model folder's cockpits/)."""
+Exit 77 (skipped) without Root.cpk or without the cockpits' assets (the model folder's cockpits/).
+--shard I/N: the I-th of N parts of about equal measured time (pylib/testshard.py, SECONDS); --seconds: run every unit
+one after another and write SECONDS (on the developer's machine, after units change)."""
 from __future__ import annotations
 
 import os
@@ -36,6 +38,7 @@ import jet_models  # noqa: E402
 import make_jets  # noqa: E402
 import obj_model as om  # noqa: E402
 import rootcpk  # noqa: E402
+import testshard  # noqa: E402
 import vehicle_optics  # noqa: E402
 from mdb import mdb_read, rab_read  # noqa: E402
 
@@ -295,7 +298,7 @@ STOCK_COPY_STEMS = frozenset([f.removesuffix('.MRAB') for f in jet_models.STOCK_
 
 def units(game) -> list:  # noqa: ANN001 - rootcpk.Game
     """Every check as a (name, run) unit standing alone, so `--shard I/N` (ctest's cockpit_build_<I>, run in parallel)
-    takes every N-th of them: a kit in each of its rooms, each fitted model, the Blacker built whole."""
+    takes its part of them (SECONDS): a kit in each of its rooms, each fitted model, the Blacker built whole."""
     built: dict = {}
 
     def copies() -> dict:
@@ -331,6 +334,9 @@ def units(game) -> list:  # noqa: ANN001 - rootcpk.Game
     return out
 
 
+SECONDS = os.path.join(HERE, 'cockpit_build_seconds.json')
+
+
 def shard_of(argv: list[str]) -> tuple[int, int]:
     """`--shard I/N` (0 <= I < N): this run's share of the units; none: all of them."""
     if '--shard' not in argv:
@@ -348,10 +354,16 @@ def main(argv: list[str]) -> int:
         return 77
     shard, count = shard_of(argv)
     todo = units(rootcpk.Game(root))
-    mine = todo[shard::count]
+    mine = testshard.pack(todo, count, testshard.load(SECONDS), lambda u: u[0])[shard]
+    took: dict[str, float] = {}
     for name, run in mine:
         print(f'--- {name}', flush=True)
+        started = time.perf_counter()
         run()
+        took[name] = time.perf_counter() - started
+    if '--seconds' in argv:
+        testshard.save(SECONDS, "Each tests/cockpit_build_test.py unit's seconds (--seconds, one after another): "
+                       "ctest's cockpit_build_<I> balance their shards by them.", took)
     print(f'shard {shard}/{count}: {len(mine)} of {len(todo)} units')
     print(f'{failures} FAILED' if failures else 'all passed')
     return 1 if failures else 0

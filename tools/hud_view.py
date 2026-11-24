@@ -30,7 +30,8 @@ def game_fonts() -> dict[str, bytes]:
     try:
         import cpk
         import crilayla
-        game = Path(os.environ.get('EDF6_DIR', r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'))
+        import gamedir
+        game = Path(gamedir.find_or_dev())
         archive = cpk.Cpk(str(game / 'Root.cpk'))
         out = {}
         for key, name in GAME_FONTS.items():

@@ -34,10 +34,11 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import bvm41  # noqa: E402
 import edf41dlc  # noqa: E402
 import edf41zh  # noqa: E402
+import gamedir  # noqa: E402
 import mdb  # noqa: E402
 import rmpa_legacy  # noqa: E402
 import sgo  # noqa: E402
-from make_edf41_objects import STEAM, archives  # noqa: E402
+from make_edf41_objects import archives  # noqa: E402
 
 OUT = os.path.join(HERE, '..', 'edf41port')
 LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
@@ -185,12 +186,17 @@ def write(out: str, data: dict, files: dict[str, bytes], rab: bytes) -> None:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--edf5', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 5'))
-    ap.add_argument('--edf41', default=os.path.join(STEAM, 'Earth Defense Force 4.1'))
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf5', default=gamedir.find_other(gamedir.EDF5, near=edf6))
+    ap.add_argument('--edf41', default=gamedir.find_other(gamedir.EDF41, near=edf6))
     ap.add_argument('--dlc', action='store_true', help="the 4.1 DLC mission packs (edf41port/mp01, mp02) instead of "
                                                       'the story: needs a 4.1 with its DLC installed, not EDF5')
     ap.add_argument('--zh', help="the Simplified Chinese patch's mods folder (default: <EDF4.1>/mods, a patched 4.1)")
     args = ap.parse_args(argv[1:])
+    if not args.edf41:
+        ap.error('EDF4.1 not found: set EDF41_DIR or pass --edf41')
+    if not args.dlc and not args.edf5:
+        ap.error('EDF5 not found: set EDF5_DIR or pass --edf5')
     zh = args.zh or edf41zh.default_dir(args.edf41)
     if args.dlc:
         packs = edf41dlc.find(args.edf41)
