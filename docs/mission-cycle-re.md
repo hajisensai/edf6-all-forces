@@ -96,6 +96,28 @@ worker 在第一次物理步进时接上，所以带着 worker 走到复位的�
 `drive.py run … --cycle N [--cycle-stay S] [--cycle-reboot]`：把命令和 `mission` 一起交给插件，看到 `CYCLE done` 就
 退出游戏；SECONDS 是整个循环的期限，超时或出现 `CYCLE failed` / `CYCLE refused` 时返回 1。
 
+### 3.1 `next`：同一次启动里换下一个任务（2026-11-24，`tools/perfrun.py` 的多段测量）
+
+`next MISSION [DIFFICULTY] [reboot]`：只能在任务里下发。MISSION 的写法与 `mission` 命令相同（行号、`RM015`、`M001`、
+`range`、`edf41:行号` 等）。
+
+1. 用 `mission` 命令的解析（`AskMission`）设好行号、难度和模式包。原版任务用 content id 0，也就是原版离线列表的模式；
+   前一段可能已经切到了测试场的模式包，所以要显式切回。
+2. 复用 `cycle` 的离开流程，次数 1、停留 0：下一个世界步调 `End(mgr, 2)`，跳过 `Result_Offline`，不出结算画面，不写存档。
+3. 回来时启动的例程是 **`HQMain`**，不是 `PlayMission_Offline`。`HQMain` 正是 `Result_Common` 关掉结算画面后自己返回的
+   例程，之后照 `mission` 命令启动时的路线走：按模式包找模式。模式和当前的一样（GS+0x38）时不再调 `SetMode`，因为
+   `SetMode` 会复位该模式的存档块（`0xDB580`）。再写行号和难度，然后启动 `PlayMission_Offline`。整个过程不写内存来跳过
+   游戏自己的流程。
+4. 带 `reboot` 时改走 `ReBoot`（`SystemReset`），再经 `StartToTitle` → `Debug_StartOffline` → `HQMain` 走同一条路线
+   （U：没有实机跑过）。
+5. 新任务第一次 `IsRunning` 时记 `NEXT k entered: the mission runs (row …, difficulty …, mode …, content id …)`。k 是本次
+   启动里第几次 `next`。被拒绝时记 `NEXT refused`，脚本回到标题时记 `CYCLE failed`。
+
+测试场的四个散文件（`MISSION.AC` 等）由 perfrun 在下发 `next` 之前改写（`gen.rewrite_scenario`），只保留第一次写入时
+备份的原件，结束后逐字节还原。进任务时会不会重新读这些文件：`Mission()` 第一次调用才加载 `mission.bvm`
+（`0x70F0B0` → `0x1F68D0`），离开任务时 `PlayMission_Common` 第 1058 行释放场景资源组，所以每次进任务都应该重新读一遍。
+这一点只是推断（U），首次实机时要核对：每段的 PERF OBJECTS 敌人数应该随 stress:N 的 N 变化。
+
 ## 4. 预期日志（U：待主会话实机）
 
 `EDF6Autopilot.log`：
@@ -109,6 +131,20 @@ CYCLE 1/20 entered: the mission runs (row 0)
 …
 CYCLE 20/20 entered: …
 CYCLE done: left and entered again 20 times
+```
+
+`next`（在测试场下发 `next M001 1`）：
+
+```
+MISSION asked: offline row 1, difficulty 1 (applied when the script starts its title)
+NEXT armed: M001, difficulty 1, back in by HQMain
+CYCLE 1/1 leaving: MissionMgr::End(ABORT), as the pause menu's withdraw, after 0.0 s (game thread …)
+CYCLE 1/1 left: Result_Offline skipped (no result screen, nothing saved) -> HQMain (the next mission)
+RANGE mode … (content id 0) made current
+SCRIPT HQMain -> PlayMission_Offline: row 1, difficulty 1
+CYCLE 1/1 entered: the mission runs (row 1)
+NEXT 1 entered: the mission runs (row 1, difficulty 1, mode …, content id 0)
+CYCLE done: left and entered again 1 times
 ```
 
 EDF6VehicleCrew 日志（`HavokMultithread=1`）：每次 `leaving` 之后出现一条

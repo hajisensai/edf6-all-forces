@@ -24,6 +24,7 @@ bool TurretTestRound(const unsigned char* weapon,RoundModel* model) noexcept {
     return read;
 }
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 Config config{};
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; }

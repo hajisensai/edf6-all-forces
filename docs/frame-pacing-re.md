@@ -102,8 +102,26 @@ Present 是游戏线程经 `0x111D890` 录进渲染环的命令，渲染线程�
 SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会填满，输入到画面多 1–2 帧。
 
 改法（`InstallFrameLatency`）：`0x11A33DF` 的调用改指向 `DeviceInitHook`，原函数返回真后对设备调
-`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，默认 1，`0` 不设。游戏代码只改这一处调用，日志一行
+`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，`0` 不设（默认，2026-11-24 起；blast 重场景 A/B 里设 1 的三局有两局整局降速，见计划 B 线）。游戏代码只改这一处调用，日志一行
 `LATENCY max frame latency 1 (was 3)`。
+
+## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，只在 `FrameRateDev=1`）
+
+交换链在 `0x111B220` 建（调用者 `0x111B77B` 设备初始化、`0x111C8EC` 改模式；改模式是重建，不调 `ResizeBuffers`）。渲染器
+`+0xA8..+0xEF` 的描述拷到栈 `rsp+0x30`，`0x111B33D` `mov rax,[rcx]; call [rax+50h]` 调 `IDXGIFactory::CreateSwapChain`
+（`rcx` 工厂 = 渲染器 `+0xF8`，`rdx` 设备，`r8` 描述，`r9` 输出）。原版描述是 blt 模型：`SwapEffect DISCARD`、1 个缓冲、
+`ALLOW_MODE_SWITCH`。窗口 / 无边框下每帧经 DWM 复制（多一个刷新的延迟），可变刷新率跟不上帧，高于刷新率的帧上不了屏。
+MSAA 在 `0x111B28D` 用 `CheckMultisampleQualityLevels` 选，翻转模型不许多重采样后缓冲。
+
+`src/swap_flip.cpp`：
+- `0x111B33D` 的 6 字节改成 `call` 近处小桩 → 插件的 CreateSwapChain：`FLIP_DISCARD`、2 个缓冲；窗口模式且
+  `IDXGIFactory5::CheckFeatureSupport(PRESENT_ALLOW_TEARING)` 为真时加 `ALLOW_TEARING`；帧门开着且 `MaxFrameLatency > 0` 时加
+  `FRAME_LATENCY_WAITABLE_OBJECT` 并对 `IDXGISwapChain2` 设排队帧数（设备上的设置对这种交换链不再起作用）。
+  采样数 > 1 或系统拒绝时按游戏原描述建，记一行日志。
+- Present（渲染线程，`0x1118B36` `mov rax,[rcx]; xor r8d,r8d`，SyncInterval 在 `xmm0` 第 3 个 dword，随后进 `edx`，`0x1118B45`
+  调 vtbl `+0x40`）：6 字节改成 `call` 叶子小桩，SyncInterval 为 0 的帧 flags 传 `DXGI_PRESENT_ALLOW_TEARING`。
+- 可等待对象：帧门（`frame_rate.cpp GateCount`）决定这一帧要跑之后、数 tick 之前等它（最多 100 ms），这一帧的输入和 tick
+  在 GPU 能接帧时才取。改模式重建交换链会换新对象，旧句柄不关（游戏线程可能正在等它），每次改模式漏一个句柄。
 
 ## 主循环里按帧而不是按 tick 执行的点
 

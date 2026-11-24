@@ -15,7 +15,7 @@
 #include <string>
 #include <algorithm>
 #include <filesystem>
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 namespace {
 using namespace crew;
 using namespace crew::enemy_native;

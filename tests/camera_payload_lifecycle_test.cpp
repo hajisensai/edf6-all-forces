@@ -12,6 +12,7 @@ namespace crew {
 bool VehicleLookActive(const void*) noexcept { return false; }
 bool VehicleLookOffered(const void*,unsigned,bool) noexcept { return true; }
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 Config config{};
 unsigned char* currentHuman=nullptr;
 ULONGLONG clockMs=1000;

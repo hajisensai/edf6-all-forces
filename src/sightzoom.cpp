@@ -15,6 +15,7 @@
 //    line with it); the camera lowers the bore by what the gun carries, so the reticle stays on the target as the
 //    barrel climbs.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "seat_switch_logic.h"
 #include "vehicle_look.h"
@@ -318,6 +319,7 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(down && !toggle.held && (keys || padButton)) {
         const sightzoom::Raise r=sightzoom::Press(toggle.step,toggle.raised,firstPerson);
         toggle.step=r.step;toggle.raised=r.raised;
+        FrameRateCameraCut(nullptr);   // the sight's field and place jump
         Log("SIGHTZOOM v=%p seat %u: %s by the %s",v,seat,
             r.step ? (r.step==1 ? "3x" : "6x") : r.raised || !firstPerson ? "1x" : "the cockpit",keys ? "key" : "pad button");
     }
@@ -463,6 +465,7 @@ void SightLayStep(unsigned char* aim,float before) noexcept {
 }
 
 void ResetSightZoom() noexcept {
+    if(toggle.step)FrameRateCameraCut(nullptr);
     toggle=Toggle{};
     TakeScopeWheel(false);
     AcquireSRWLockExclusive(&cueLock);

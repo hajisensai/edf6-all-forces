@@ -62,6 +62,7 @@
 //  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
@@ -1359,6 +1360,7 @@ void ReturnNear(unsigned char* cam) noexcept {
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
+    if(Current().on)FrameRateCameraCut(Current().cam);   // back to the stock camera: no blend across it
     const bool humanOwned=Current().human && ModelOwnerIs(Current().human+kBodyModel,kBodyModel,Current().bodyCtrl);
     if(Current().on && humanOwned){PlaceAll(true);Rebatch(true);}
     if(Current().cam)ReturnNear(Current().cam);
@@ -1717,6 +1719,7 @@ void Camera(unsigned char* cam) noexcept {
     watched.store(nullptr,std::memory_order_relaxed);
     if(!Current().on || Current().cam!=cam || Current().human!=h || Current().bodyCtrl!=At<const void*>(h,kSelfCtrl)) {
         Leave();
+        FrameRateCameraCut(cam);
         Current().on=true;Current().cam=cam;Current().human=h;Current().fresh=true;Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
         Log("FP view on %p (player %p)",cam,h);
     }
@@ -1836,6 +1839,10 @@ void Publish() noexcept {
     });
 }
 
+// Whether the last camera step drew a controlled enemy's view (its take and its give-back are cuts for the frame rate's
+// interpolation, frame_rate_view.h).
+bool enemyViewLast=false;
+
 void CameraAfterNative(unsigned char* cam) noexcept {
     const M4 native=MatrixAt(cam+kCamMatrix);
     __try {
@@ -1847,9 +1854,12 @@ void CameraAfterNative(unsigned char* cam) noexcept {
             // A controlled enemy owns this source player's view. Retire human viewmodel/near/batches and cancel any
             // interrupted FP-key gesture. The map/TV chain still runs outside this step and has final precedence.
             CancelToggle(human);if(Current().on)Leave();
+            if(!enemyViewLast)FrameRateCameraCut(cam);
+            enemyViewLast=true;
             std::memcpy(cam+kCamMatrix,controlled.m,64);
             ChaseCamUp(cam,nullptr);
         } else {
+            if(enemyViewLast){enemyViewLast=false;FrameRateCameraCut(cam);}
             Camera(cam);
             if(!Current().on || Current().cam!=cam || !Current().riding) {
                 VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix),true);   // third person: round the vehicle

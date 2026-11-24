@@ -22,6 +22,8 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool syncLoadProbe=true;   // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
     bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
@@ -83,7 +85,7 @@ struct Config {
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;  // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
-    int maxFrameLatency=1;     // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
+    int maxFrameLatency=0;     // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
     bool frameRateDev=false;   // ini FrameRateDev (not in the shipped ini): frame_rate.cpp's stage 2 (latency-3 alone at FrameRateCap=0); read at start only
     int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz, -1 no cap, 61..1000; read at start only; not wired into the game yet (docs/unlimited-fps-re.md)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)

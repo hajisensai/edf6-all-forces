@@ -146,7 +146,7 @@ bool Sees(const float* eye,const float* p,float distance) noexcept {
 struct Seen { int candidates,visible,current; const void* object[kMostRays]; float pos[kMostRays][3]; };
 bool InSight(const unsigned char* vehicle,const float* eye,const float* dir,int most,Seen* out) noexcept {
     out->candidates=out->visible=0;out->current=-1;
-    const auto relation=Relations(At<std::int32_t>(vehicle,kTeam));
+    const auto relation=edf::Relations(image,At<std::int32_t>(vehicle,kTeam));
     if(!relation)return false;
     struct Candidate { const void* object; float angle,distance,pos[3]; };
     Candidate c[kMostCandidates];
@@ -401,7 +401,9 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretLockV1(edf::a
     if(!out || out->size!=sizeof(edf::aimlink::TurretLockV1))return false;
     *out=edf::aimlink::TurretLockV1{sizeof(edf::aimlink::TurretLockV1),nullptr,0,false,false,nullptr,{}};
     __try {
-        if(!image || !cfg.enabled || !Fresh())return false;
+        if(!image || !cfg.enabled)return false;
+        SeeFrame();
+        if(!Fresh())return false;
         out->autoAim=AutoAimOn();out->keys=pilot.keys;
         out->lockKey=cfg.lockKey;
         out->target=out->autoAim && pilot.target && Same(pilot.target,pilot.targetCtrl) ? pilot.target : nullptr;
@@ -431,7 +433,7 @@ bool PlayerAim(const unsigned char* v,unsigned s,const unsigned char* gun,edf::a
     if(!image || !cfg.enabled || !v || !Readable(v,edf::kSeatCount+8) || v[kDead] || s>=edf::SeatCount(v))return false;
     const auto seat=edf::SeatAt(const_cast<unsigned char*>(v),s);
     if(edf::SeatRider(image,seat)!=edf::Rider::player)return false;
-    SeeVehicleOnce(v);
+    SeeFrame();
     const unsigned char* actual=nullptr;
     if(ActualWeapon(v,s,gun,&actual))gun=actual;
     Shot shot{};

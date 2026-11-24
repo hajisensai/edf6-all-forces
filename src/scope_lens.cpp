@@ -117,6 +117,9 @@ using ControlFn=void(__fastcall*)(void* control);
 unsigned char* const* systemRef=nullptr;
 void* commands=nullptr;
 ProjectFn project=nullptr;
+// The projection call's other user (frame_rate_view.cpp, the camera's interpolation): called first, on every viewport.
+BeforeProjectFn beforeProject=nullptr;
+bool projectHooked=false;
 enum Tail : unsigned { post,plain,copy,history,modeTail,kTails };
 TailFn tails[kTails]{};
 SubmitFn submit=nullptr;
@@ -284,6 +287,8 @@ void RecordLensCommand() noexcept {
 }
 
 void __fastcall ProjectHook(void* camera,const int* rect) {
+    if(beforeProject)beforeProject(camera,rect);
+    if(!installed.load(std::memory_order_relaxed)){project(camera,rect);return;}
     __try {
         unsigned char* const system=System();
         const int i=SlotOf(system,rect);
@@ -320,6 +325,24 @@ void __fastcall SubmitHook(void* commandContext) {
 }
 }  // namespace
 
+// The projection call 0x1197B50 is redirected once, by whichever of the lens view and the camera's interpolation comes
+// first; the hook passes through to the native projection until the lens view is installed.
+bool HookProject() noexcept {
+    if(projectHooked)return true;
+    if(!Matches(kProjectCall-13,kProjectCode,sizeof(kProjectCode)))return false;
+    systemRef=reinterpret_cast<unsigned char* const*>(image+kSystemRef);
+    project=reinterpret_cast<ProjectFn>(image+kProject);
+    bool changed=false;
+    projectHooked=RedirectCall(image+kProjectCall,image+kProject,reinterpret_cast<void*>(&ProjectHook),changed);
+    return projectHooked;
+}
+
+bool SetBeforeProject(BeforeProjectFn fn) noexcept {
+    if(!HookProject())return false;
+    beforeProject=fn;
+    return true;
+}
+
 bool Install() noexcept {
     if(installed.load(std::memory_order_acquire))return true;
     for(const Guard& g:kGuards) {
@@ -345,7 +368,7 @@ bool Install() noexcept {
     descVtable=image+kDescVtable;
     // Every redirect passes through until `installed`: one that fails leaves the others inert.
     bool changed=false;
-    const bool ok=RedirectCall(image+kProjectCall,image+kProject,reinterpret_cast<void*>(&ProjectHook),changed) &&
+    const bool ok=HookProject() &&
         RedirectCall(image+kPostCall,image+kPost,reinterpret_cast<void*>(&TailHook<post>),changed) &&
         RedirectCall(image+kPlainCall,image+kPlain,reinterpret_cast<void*>(&TailHook<plain>),changed) &&
         RedirectCall(image+kCopyCall,image+kCopy,reinterpret_cast<void*>(&TailHook<copy>),changed) &&

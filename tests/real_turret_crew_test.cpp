@@ -5,7 +5,7 @@ namespace autoturret {
 unsigned char* image=nullptr;Config cfg{};
 int tracked=0,scans=0,userCalls=0;bool clearedBeforeStock=false;
 void Log(const char*,...) noexcept{}
-void SeeVehicle(const void*) noexcept{}
+void SeeFrame() noexcept{}
 ULONGLONG Frame() noexcept{return 1;}
 void ScanEnemies(const unsigned char*,float,Nearby& out) noexcept{++scans;out.count=0;}
 Track* TrackFor(const unsigned char*,unsigned,bool) noexcept{++tracked;return nullptr;}

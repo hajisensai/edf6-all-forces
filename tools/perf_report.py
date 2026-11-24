@@ -67,6 +67,9 @@ RENDER = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF RENDER (\d+) presents
                     r'([\d.]+) ms apart \(worst ([\d.]+)\); input to present ([\d.]+) ms \(the frame\'s own sample\), '
                     r'([\d.]+) ms \(worst ([\d.]+); [^)]*\), (\d+) unpaired; submits a frame by pass ([\d.]+) ([\d.]+) '
                     r'([\d.]+) ([\d.]+) ([\d.]+), other ([\d.]+); mesh draws a frame ([\d.]+)')
+GPUROW = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF GPU a frame: occlusion query reads ([\d.]+) \(([\d.]+) not in '
+                    r'yet, ([\d.]+) waiting\), ([\d.]+) ms \(waiting ([\d.]+), worst call ([\d.]+)\); skin palettes ([\d.]+), '
+                    r'([\d.]+) ms')
 NETCH = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NET CHANNELS out: (.*?); in: (.*?); world walks (\d+) '
                    r'\(([\d.]+) ms, ([\d.]+) a frame\)')
 NETROW = re.compile(r'((?:bit|head) 0x[0-9A-Fa-f]+) (\d+)/(\d+) B')
@@ -347,22 +350,30 @@ def _tod(t: float) -> float:
     return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
 
 
+def in_window(t: float, window: tuple[float, float]) -> bool:
+    """Whether a row stamped `t` (a time of day, seconds) is inside `window` (wall-clock seconds; a row covers the 5 s
+    before it, so one must end 5 s in). The stamp is placed on the wall clock from the window's start, as
+    tools/perfrun.py split_log does: a window over midnight (23:59:50 to 00:00:30) keeps its rows past midnight, and a
+    stamp up to an hour before the start is before it (not a day later)."""
+    d = (t - _tod(window[0])) % 86400
+    at = window[0] + (d - 86400 if d > 86400 - 3600 else d)
+    return window[0] + 5 <= at <= window[1] + 0.5
+
+
 def _rows(log: str, pattern: re.Pattern, window: tuple[float, float] | None) -> list[re.Match]:
-    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (wall-clock seconds;
-    a row covers the 5 s before it, so one must end 5 s in), all of them without one."""
+    """The log's rows matching `pattern` (its first three groups the time of day) inside `window` (in_window), all of
+    them without one."""
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
     except OSError:
         return []
-    a, b = (_tod(window[0]), _tod(window[1])) if window else (None, None)
     out = []
     for line in lines:
         m = pattern.search(line)
         if not m:
             continue
-        t = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
-        if a is None or a + 5 <= t <= b + 0.5:
+        if window is None or in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
             out.append(m)
     return out
 
@@ -415,6 +426,20 @@ def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
             'apart_worst': max(float(m[8]) for m in rows), 'own_ms': mean(9), 'stepped_ms': mean(10),
             'stepped_worst': max(float(m[11]) for m in rows), 'unpaired': sum(int(m[12]) for m in rows),
             'submits': [mean(i) for i in range(13, 19)], 'meshes': mean(19)}
+
+
+def read_gpu(log: str, window: tuple[float, float]) -> dict[str, float]:
+    """The PERF GPU rows in `window` (render thread, gpu-5 / gpu-6): each a frame, the rows' plain mean (each row is a
+    5 s period); the worst call the max. {} without them."""
+    rows = _rows(log, GPUROW, window)
+    if not rows:
+        return {}
+
+    def mean(i: int) -> float:
+        return sum(float(m[i]) for m in rows) / len(rows)
+    return {'rows': len(rows), 'queries': mean(4), 'pending': mean(5), 'waits': mean(6), 'query_ms': mean(7),
+            'wait_ms': mean(8), 'query_worst': max(float(m[9]) for m in rows), 'palettes': mean(10),
+            'palette_ms': mean(11)}
 
 
 def read_net(log: str, window: tuple[float, float], secs: float) -> dict:
@@ -572,16 +597,12 @@ OBJECTS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF OBJECTS enemies (-?\
 def read_objects(log: str, window: tuple[float, float]) -> dict:
     """The plugin's PERF OBJECTS rows (what the game held: its own team counts, the living only) in `window`: each
     team's mean and max, {} on a build without them."""
-    def tod(t: float) -> float:
-        lt = time.localtime(t)
-        return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + (t % 1)
-    a, b = tod(window[0]), tod(window[1])
     rows = []
     try:
         with open(log, encoding='utf-8', errors='replace') as f:
             for line in f:
                 m = OBJECTS.search(line)
-                if m and a + 5 <= int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) <= b + 0.5:
+                if m and in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window):
                     rows.append((int(m[4]), int(m[5]), int(m[6])))
     except OSError:
         return {}
@@ -901,6 +922,12 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'stepped with, two frames back; {render["unpaired"]} presents unpaired',
                 f'- draw submits a frame by pass 0 / 1 / 2 / 3 / 4 / other: {sub}; mesh draws a frame '
                 f'{render["meshes"]:.0f}']
+    gpu = read_gpu(log, cw)
+    if gpu:
+        out += [f'- occlusion query reads a frame {gpu["queries"]:.1f} ({gpu["pending"]:.1f} not in yet, '
+                f'{gpu["waits"]:.1f} waiting), {gpu["query_ms"]:.3f} ms (waiting {gpu["wait_ms"]:.3f}, worst call '
+                f'{gpu["query_worst"]:.2f}); skin palettes a frame {gpu["palettes"]:.1f}, {gpu["palette_ms"]:.3f} ms '
+                f'(gpu-5, gpu-6)']
     pm = presentmon_summary(os.path.join(run_dir, 'presentmon.csv'))
     if pm:
         out += ['', f'## Display (PresentMon, {pm["presents"]} presents)', '',

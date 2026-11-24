@@ -59,7 +59,8 @@
 #include "profile_sigs.h"
 #include "firstperson.h"
 #include "scope_spread.h"
-#include "enemy_points.h"
+#include "edf/enemy_points.h"
+#include "edf/world_tables.h"
 #include "npc_logic.h"
 #include "fp_view.h"
 #include "store_burden.h"
@@ -75,15 +76,11 @@ constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kIn
 constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHeadRight=0x15C0,kHeadForward=0x15E0,kContact=0x1580,kRotor=0x1BF8;
 constexpr unsigned char kContactGround=2;
-// Lock-target registry and team relations (same as EDF6AutoTurret's turret.h)
-constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=enemypoints::kNodeTarget;
+// Lock-target registry and team relations: common/edf/world_tables.h (shared with EDF6AutoTurret).
+constexpr std::size_t kNodeTarget=enemypoints::kNodeTarget;
 constexpr std::size_t kTargetObject=enemypoints::kTargetObject,kTargetAim=enemypoints::kTargetAim;
 constexpr std::size_t kTargetValid=enemypoints::kTargetValid;
-constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
 constexpr std::int32_t kMaxTeam=enemypoints::kMaxTeam;
-// The lock registry is an MSVC std::list (head at +8, its size at +0x10: 0x22E210 bumps it, 0x22E330, against max_size);
-// a walk goes over that many nodes at most -- the list's own count, not a fixed cap a battle's lock points pass.
-constexpr std::size_t kRegSize=0x10;
 constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
@@ -646,16 +643,6 @@ bool Row(const unsigned char* v,std::size_t offset,float* out) noexcept {
     return true;
 }
 
-const std::int32_t* Relations(std::int32_t team) noexcept {
-    if(team<0 || team>=kMaxTeam)return nullptr;
-    const auto manager=At<const unsigned char*>(image,kTeams);
-    if(!Readable(manager,kTeamArray+8))return nullptr;
-    const auto rows=At<const unsigned char*>(manager,kTeamArray);
-    if(!Readable(rows+team*kTeamStride,kTeamStride))return nullptr;
-    const auto relation=At<const std::int32_t*>(rows+team*kTeamStride,kTeamRelation);
-    return Readable(relation,kMaxTeam*4) ? relation : nullptr;
-}
-
 // The horizontal distance below which a target sits too steeply under a heli heliFireHeight above it.
 float MinAimHoriz() noexcept { return Cfg().heliFireHeight/std::tan(kMaxDip); }
 
@@ -666,12 +653,8 @@ float MinAimHoriz() noexcept { return Cfg().heliFireHeight/std::tan(kMaxDip); }
 bool EnemyRegistry(std::int32_t& team,const unsigned char*& head,const std::int32_t*& relation,
                    std::uint64_t& nodes) noexcept {
     if(team==kTeamVehicle)team=player.team;
-    relation=Relations(team);
-    const auto registry=At<const unsigned char*>(image,kRegistry);
-    if(!relation || !Readable(registry,kRegList+0x10))return false;
-    head=At<const unsigned char*>(registry,kRegList);
-    nodes=At<std::uint64_t>(registry,kRegSize);
-    return Readable(head,0x10);
+    relation=edf::Relations(image,team);
+    return relation && edf::LockList(image,head,nodes);
 }
 template<class F> bool ForEachEnemyOf(std::int32_t team,const void* v,F&& f) noexcept {
     const unsigned char* head=nullptr;
@@ -750,7 +733,7 @@ const FriendList* FriendsNow(std::int32_t team) noexcept {
     const ULONGLONG frame=GameFrame();
     if(friendsCache.ok && friendsCache.frame==frame && friendsCache.team==team)return &friendsCache.list;
     friendsCache.ok=false;friendsCache.frame=frame;friendsCache.team=team;friendsCache.list.n=0;
-    const auto teams=At<void*>(image,kTeams);
+    const auto teams=At<void*>(image,edf::kTeamManager);
     if(!teams)return nullptr;
     FriendVisitor visitor{kFriendVisitorVtable,&friendsCache.list};
     reinterpret_cast<VisitFriendsFn>(image+kVisitFriends)(teams,team,&visitor);
@@ -4065,11 +4048,9 @@ bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float r
 }
 
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
-    const auto registry=At<const unsigned char*>(image,kRegistry);
-    if(!Readable(registry,kRegList+0x10))return false;
-    const auto head=At<const unsigned char*>(registry,kRegList);
-    if(!Readable(head,0x10))return false;
-    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
+    const unsigned char* head=nullptr;
+    std::uint64_t nodes=0;
+    if(!edf::LockList(image,head,nodes))return false;
     std::uint64_t n=0;
     for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);

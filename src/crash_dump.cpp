@@ -1,5 +1,6 @@
 // The plugin's own crash dump: src/crash_dump.h says what it catches and what it cannot.
 #include "crash_dump.h"
+#include "log.h"
 #include <Psapi.h>
 #include <atomic>
 #include <csignal>
@@ -58,6 +59,19 @@ BOOL WINAPI SerializedWrite(HANDLE,DWORD,HANDLE,MINIDUMP_TYPE,PMINIDUMP_EXCEPTIO
 constexpr DWORD kDumpWaitMs=60000;
 wchar_t dumpPath[MAX_PATH]{};
 std::atomic<bool> installed{false};
+// EDF6AutoTurret's log flush (common/log.h kCrashFlush), looked up at installation and at each mission start (the
+// plugins load in either order), never while crashing. The module is pinned: the pointer stays good to the end.
+std::atomic<edf::logfile::CrashFlushFn> peerFlush{nullptr};
+
+void FindLogPeer() noexcept {
+    if(peerFlush.load())return;
+    HMODULE peer=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN,edf::logfile::kCrashFlushDll,&peer))return;
+    const auto flush=reinterpret_cast<edf::logfile::CrashFlushFn>(GetProcAddress(peer,edf::logfile::kCrashFlush));
+    if(!flush)return;
+    peerFlush.store(flush);
+    Log("CRASHDUMP %ls's buffered log lines are written on a crash too",edf::logfile::kCrashFlushDll);
+}
 
 // The filter set before ours (the game exe's CRT filter) or after it (through the redirect): called after the dump.
 std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> behind{nullptr};
@@ -173,6 +187,7 @@ void Write() noexcept {
         .Number(static_cast<unsigned long long>(size.QuadPart)>>10).Text(" KB written)");
     line.Text("\r\n");
     CrashLog(line.text,line.size);
+    if(const edf::logfile::CrashFlushFn flush=peerFlush.load())flush();   // EDF6AutoTurret's buffered lines (log.h)
 }
 
 DWORD WINAPI Dumper(void*) noexcept {
@@ -440,6 +455,7 @@ bool InstallCrashDump(const wchar_t* folder) noexcept {
         ucrtWatson=reinterpret_cast<InvalidParameterFn>(GetProcAddress(ucrt,"_invoke_watson"));
     }
     const bool ucrt=ClaimUcrt(true);
+    FindLogPeer();
     ownAbortBefore.store(std::signal(SIGABRT,&OnOwnAbort));
     _set_invalid_parameter_handler(&OnOwnInvalidParameter);
     Log("CRASHDUMP installed: %ls (dbghelp %d, dumping thread %d, filter kept first %s, ucrtbase abort/invalid parameter %d)",
@@ -460,5 +476,6 @@ void CheckCrashFilter() noexcept {
         }
     }
     ClaimUcrt(true);
+    FindLogPeer();
 }
 }  // namespace crew

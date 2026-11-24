@@ -26,6 +26,7 @@
 //    mouse's motion is the game's own per-frame delta (the pad record the rider aim reads, 0x56DCED: pad +0x66C / +0x684
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "enemy_control.h"
 #include "pvp.h"
@@ -833,7 +834,7 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
         const float k=1.0f/static_cast<float>(camSide.blend--);
         Ease(camSide.eye,stockEye,k);Ease(camSide.look,stockLook,k);
     }
-    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);FrameRateCameraCut(cam);}
 }
 
 // The stock HUD held off while the map's view is on this camera (easing in, open, easing back), or while this camera is
@@ -890,7 +891,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     if(camSide.shown && camSide.cam==cam && camSide.haveStock)std::memcpy(static_cast<unsigned char*>(cam)+kCamMatrix,camSide.stock,sizeof(camSide.stock));
     nextCamStep(cam,step);
     __try { Camera(static_cast<unsigned char*>(cam),generation); }
-    __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);FrameRateCameraCut(cam);}
     FirstPersonCameraOverride(cam,camSide.shown && camSide.cam==cam && cameraSession.Current(generation));
     StockHud(static_cast<unsigned char*>(cam),generation);
 }
