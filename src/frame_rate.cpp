@@ -30,6 +30,8 @@
 // that caught up (n > 1). With the gate on that count is in frames, not ticks; the plugin passes its own: 0 when the
 // cap is above the display's refresh rate or there is none, else 1 but for 8 ticks after a catch-up.
 #include "frame_rate.h"
+#include "frame_rate_view.h"
+#include "frame_pacing_logic.h"
 #include "frame_rate_logic.h"
 #include "frame_pacing.h"
 #include "crew.h"
@@ -77,6 +79,11 @@ framerate::Gate gate;
 bool gateOn=false;
 // The ticks the frame being run steps (the gate's count; the game thread only).
 std::uint32_t frameTicks=1;
+// The phase this frame draws at (frame_rate_logic.h RenderAlpha), set by the gate.
+float frameAlpha=1.0f;
+bool viewOn=false;
+std::uint64_t tickPeriod=0;
+constexpr unsigned kTickBase=0x2139D10,kTickLast=0x2139D18;
 // The input move: whether this frame's wrapper update already ran before System::Update.
 bool wrapped=false;
 int catchUp=0;
@@ -111,10 +118,13 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     const std::uint64_t span=now-stats.since;
     if(span<kStatsSeconds*qpcFreq)return;
     const double s=static_cast<double>(span)/static_cast<double>(qpcFreq);
-    Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s, 0-tick frames %.1f%%, longest 0-tick frame %.2f ms",s,
+    unsigned blended=0,unblended=0;
+    if(viewOn)framerateview::TakeCounts(blended,unblended);
+    Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s, 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
+        "0-tick projections blended %u, as stepped %u",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
-        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq));
+        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended);
     stats.since=now;stats.frames=stats.ticks=stats.zero=stats.longestZero=0;
 }
 
@@ -124,6 +134,8 @@ std::uint64_t GateCount() noexcept {
     if(!framerate::Ready(gate,now,cap,slotPeriod))return 0;
     const std::uint32_t n=reinterpret_cast<CountFn>(image+kTickCount)();
     frameTicks=n;
+    frameAlpha=framerate::RenderAlpha(n,now,*reinterpret_cast<const std::uint64_t*>(image+kTickBase),
+                                      *reinterpret_cast<const std::uint64_t*>(image+kTickLast),tickPeriod);
     // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
     if(n>1)catchUp=kCatchUpTicks;
     else catchUp=catchUp>static_cast<int>(n) ? catchUp-static_cast<int>(n) : 0;
@@ -164,6 +176,7 @@ void SystemUpdateHook(void* system,float dt,int n) {
         else ClearForUi(static_cast<unsigned char*>(input)+kWrapTable);
         wrapped=true;
     }
+    framerateview::BeginFrame(n>0 ? static_cast<std::uint32_t>(n) : 0u,gateOn ? frameAlpha : 1.0f);
     reinterpret_cast<SystemUpdateFn>(image+kSystemUpdate)(system,dt,n);
 }
 
@@ -332,6 +345,7 @@ void InstallFrameRate() noexcept {
     QueryPerformanceFrequency(&freq);
     qpcFreq=static_cast<std::uint64_t>(freq.QuadPart);
     slotPeriod=framerate::PresentPeriod(qpcFreq,cap);
+    tickPeriod=pacing::TickPeriod(qpcFreq);
     // Everything a 0-tick frame would do wrong goes in before the gate that makes them: the guards, the takes, the sync.
     const int guards=InstallGuards();
     const int takes=InstallInputTakes();
@@ -341,6 +355,8 @@ void InstallFrameRate() noexcept {
         return;
     }
     gateOn=InstallGate();
-    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/6, input takes %d/2, sync=%d",cap,gateOn,guards,takes,sync);
+    viewOn=gateOn && framerateview::Install();
+    Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/6, input takes %d/2, sync=%d, camera interpolation=%d",
+        cap,gateOn,guards,takes,sync,viewOn);
 }
 }  // namespace crew
