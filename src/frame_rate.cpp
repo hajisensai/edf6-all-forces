@@ -1,8 +1,7 @@
 // Frames above the game's 59.94 Hz, stage 2 (docs/unlimited-fps-re.md §4): the frame gate, the pacing guards, the input
-// on tick frames and the swap chain's sync interval. Developer only: ini FrameRateDev=1 (not in the shipped ini); with
-// FrameRateCap=0 it installs only the input move (latency-3), with a cap everything below. Frames without a step draw
-// the same state as the frame before (no interpolation yet: stage 3), so this stage is for checking on the real game that
-// the simulation, the input and the online play keep the game's rate (§7), not for players.
+// on tick frames and the swap chain's sync interval. ini FrameRateCap: 0 (the game's 59.94 Hz) installs nothing; a cap
+// installs everything below, the camera and the player's root interpolation (frame_rate_view.cpp) and the flip swap
+// chain (swap_flip.cpp). Other objects still move at the tick rate (docs/unlimited-fps-re.md §4.3, stage 4).
 //
 // The gate (fps-1). The main loop counts its ticks at 0x11A2F4F / 0x11A2F6B (`call 0x11DAE60; mov ebx,eax; test eax,eax`)
 // and waits (0x11A2F65, frame_pacing.cpp TickWait) while the count is 0. Both calls go to a near stub that returns
@@ -38,6 +37,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "edf/patch.h"
+#include <algorithm>
 #include <cstring>
 #include <initializer_list>
 
@@ -123,8 +123,14 @@ std::uint64_t Now() noexcept {
     return static_cast<std::uint64_t>(t.QuadPart);
 }
 
+// The frame intervals of the stats window (for its 1 % low): game thread, at most kIntervals kept.
+constexpr std::size_t kIntervals=16384;
+std::uint64_t intervals[kIntervals];
+std::size_t intervalCount=0;
+
 void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     if(!stats.since)stats.since=now;
+    if(stats.lastRun && intervalCount<kIntervals)intervals[intervalCount++]=now-stats.lastRun;
     if(stats.lastRun && stats.lastZero && now-stats.lastRun>stats.longestZero)stats.longestZero=now-stats.lastRun;
     stats.lastRun=now;
     stats.lastZero=!n;
@@ -136,12 +142,25 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     const double s=static_cast<double>(span)/static_cast<double>(qpcFreq);
     unsigned blended=0,unblended=0,roots=0,rootsLeft=0;
     if(viewOn)framerateview::TakeCounts(blended,unblended,roots,rootsLeft);
-    Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s, 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
+    // 1 % low: the frame rate of the 99th percentile interval (the slowest 1 % of the window's frames).
+    double low=0;
+    if(intervalCount) {
+        const std::size_t k=intervalCount-1-intervalCount/100;
+        std::nth_element(intervals,intervals+k,intervals+intervalCount);
+        if(intervals[k])low=static_cast<double>(qpcFreq)/static_cast<double>(intervals[k]);
+    }
+    Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
         "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u",s,
-        static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,
+        static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
         1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft);
+    const PresentStats p=SwapFlipPresentStats();
+    if(p.valid)Log("PRESENT calls %.1f/s, shown %.1f/s, display refreshes %.1f/s; failed %u, occluded %u",
+                   p.calls,p.shown,p.refreshes,p.failed,p.occluded);
+    else Log("PRESENT calls %.1f/s; failed %u, occluded %u; no frame statistics (0x%08lX: a windowed blt chain has none)",
+             p.calls,p.failed,p.occluded,static_cast<unsigned long>(p.statsHr));
     stats.since=now;stats.frames=stats.ticks=stats.zero=stats.longestZero=0;
+    intervalCount=0;
 }
 
 // Low 32 bits: whether the frame runs; high: its ticks. Called by the near stub in place of 0x11DAE60.
@@ -402,17 +421,12 @@ bool InstallSync() noexcept {
 void InstallFrameRate() noexcept {
     const Config& c=Cfg();
     if(!image)return;
-    if(!c.frameRateDev) {
-        if(c.frameRateCap!=framerate::kOff)
-            Log("FRAMERATE FrameRateCap=%d read; rendering above the game's 59.94 Hz is a developer stage (FrameRateDev=1, "
-                "docs/unlimited-fps-re.md): the game runs at its own rate",c.frameRateCap);
-        return;
-    }
-    // The input move first: it is all FrameRateDev does at FrameRateCap=0 (latency-3), and the gate needs it.
+    if(c.frameRateCap==framerate::kOff)return;   // the game's own rate: nothing installed
+    // The input move first: the gate needs it.
     const bool input=InstallInputMove();
     const bool flip=InstallSwapFlip();
-    Log("FRAMERATE FrameRateDev=1: input wrappers updated before the step=%d, flip swap chain=%d",input,flip);
-    if(c.frameRateCap==framerate::kOff || !input)return;
+    Log("FRAMERATE FrameRateCap=%d: input wrappers updated before the step=%d, flip swap chain=%d",c.frameRateCap,input,flip);
+    if(!input)return;
     cap=c.frameRateCap;
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);

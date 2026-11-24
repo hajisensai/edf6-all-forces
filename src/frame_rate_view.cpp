@@ -1,5 +1,5 @@
 // Frames above the game's 59.94 Hz, stage 3: the camera between two steps (docs/unlimited-fps-re.md §4.3; the review's
-// fps-5, fps-6, fps-8). Developer only: installed with the frame gate (frame_rate.cpp, ini FrameRateDev=1 and a cap).
+// fps-5, fps-6, fps-8). Installed with the frame gate (frame_rate.cpp, ini FrameRateCap other than 0).
 //
 // The snapshot (fps-5). In the step loop of System::Update, each viewport's camera steps through 0x118DF40 (called at
 // 0x11995A6 only, rcx the camera): its vtable slot 4 (+0x20) writes the camera's world matrix cam+0x220 (rows right, up,

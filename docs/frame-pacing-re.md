@@ -105,7 +105,7 @@ SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会�
 `IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，默认 1，`0` 不设。游戏代码只改这一处调用，日志一行
 `LATENCY max frame latency 1 (was 3)`。
 
-## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，只在 `FrameRateDev=1`）
+## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，`FrameRateCap≠0` 时）
 
 交换链在 `0x111B220` 建（调用者 `0x111B77B` 设备初始化、`0x111C8EC` 改模式；改模式是重建，不调 `ResizeBuffers`）。渲染器
 `+0xA8..+0xEF` 的描述拷到栈 `rsp+0x30`，`0x111B33D` `mov rax,[rcx]; call [rax+50h]` 调 `IDXGIFactory::CreateSwapChain`
