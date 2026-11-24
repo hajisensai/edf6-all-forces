@@ -642,7 +642,8 @@
   },
   "code_owner": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
