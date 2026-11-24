@@ -19,6 +19,7 @@
 #include "frame_pacing.h"
 #include "frame_rate_logic.h"
 #include "log.h"
+#include "mod_file.h"
 #include "crew.h"
 #include "gravity.h"
 #include "havok_mt.h"
@@ -1261,6 +1262,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     char file[96];
     edf::DescribeModuleFile(module,file,sizeof(file));
     Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
+    Log("MODS %zu files listed in Mods/OBJECT and Mods/WEAPON",LoadModFiles());   // mod_file.h: before anything asks ModFileIn
     ini.Start(iniPath);
     NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
