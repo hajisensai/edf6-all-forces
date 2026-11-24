@@ -100,6 +100,13 @@ volatile std::uint32_t finalTicks=1;
 // The phase this frame draws at (frame_rate_logic.h RenderAlpha), set by the gate.
 float frameAlpha=1.0f;
 bool viewOn=false;
+// The shared random seed (0x1F54128) across a 0-tick frame (#394 review e): its own step (InstallRandomStep) runs only
+// on frames with ticks, so a seed moved from one frame's start to the next over a 0-tick frame is something else drawing
+// from it on that frame (the draw, an effect): the sequence would then drift from 60 fps's, online too.
+std::uint64_t seedAtFrame=0;
+bool lastFrameZero=false;
+unsigned seedMoved=0,seedFrames=0;
+
 std::uint64_t tickPeriod=0;
 constexpr unsigned kTickBase=0x2139D10,kTickLast=0x2139D18;
 // The input move: whether this frame's wrapper update already ran before System::Update.
@@ -153,11 +160,12 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     }
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
         "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u (changed since its tick), "
-        "refused %u (a jump or not rigid)",s,
+        "refused %u (a jump or not rigid); random seed moved over %u of %u 0-tick frames",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
         1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft,
-        rootsRefused);
+        rootsRefused,seedMoved,seedFrames);
+    seedMoved=seedFrames=0;
     const PresentStats p=SwapFlipPresentStats();
     if(p.valid)Log("PRESENT calls %.1f/s, shown %.1f/s, display refreshes %.1f/s; failed %u, occluded %u",
                    p.calls,p.shown,p.refreshes,p.failed,p.occluded);
@@ -214,6 +222,10 @@ void ClearForUi(unsigned char* table) noexcept {
 void SystemUpdateHook(void* system,float dt,int n) {
     void* const input=*reinterpret_cast<void**>(image+kInputManager);
     if(gateOn) {
+        const std::uint64_t seed=*reinterpret_cast<const volatile std::uint64_t*>(image+kRandomSeed);
+        if(lastFrameZero){++seedFrames;if(seed!=seedAtFrame)++seedMoved;}
+        seedAtFrame=seed;
+        lastFrameZero=n<=0;
         // The catch-up window in ticks (the game's own counts frames): 8 ticks after a frame that stepped more than one.
         if(n>1)catchUp=kCatchUpTicks;
         else catchUp=catchUp>n ? catchUp-n : 0;

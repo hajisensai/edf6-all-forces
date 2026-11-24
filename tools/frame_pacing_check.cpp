@@ -153,7 +153,7 @@ void Loop() {
 }
 // EDF6VR / an FPS unlimiter on the frame step's wait (frame_pacing_logic.h ForeignTickWait): the game's bytes and no
 // EDF6VR are the only "none"; EDF6VR wins over the bytes (it patches later); each byte of either site counts.
-void Foreign() {
+void ForeignWaits() {
     const unsigned char waitSig[6]={0xFF,0x15,0xBD,0x27,0x5B,0x00},branchSig[2]={0x74,0xEA};
     const unsigned char nops[6]={0x90,0x90,0x90,0x90,0x90,0x90};
     unsigned char wait[6],branch[2];
@@ -183,7 +183,7 @@ int main() {
     Wrap();
     DueTime();
     Loop();
-    Foreign();
+    ForeignWaits();
     if(failures){std::printf("frame pacing: %d of %d checks failed\n",failures,checks);return 1;}
     std::printf("frame pacing: %d checks ok\n",checks);
     return 0;
