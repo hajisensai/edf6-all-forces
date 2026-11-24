@@ -311,6 +311,7 @@ def probe_parsing() -> None:
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
+        gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
         slow = c_format('src/perf_probe.cpp', 'SLOW FRAME %lld %lld %.1f ms, %u steps: app')
         slow_bare = 'SLOW FRAME %d %d %.1f ms, %d steps'
         with open(log, 'w', encoding='utf-8') as f:
@@ -320,6 +321,8 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + frame % (100, 0, 0.1, 1.0, 6.0, 0.7, 40.0, 13.3, 1.5, 0.01, 1.0, 8.6) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
+            f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
+            f.write('[13:00:20.000] ' + gpu % (60.0, 8.0, 1.0, 0.35, 0.1, 2.5, 500.0, 1.2) + '\n')
             f.write('[13:00:20.000] ' + net % ('bit 0x4 10/500 B, bit 0x10 5/100 B', 'head 0x00000F01 3/90 B',
                                                20, 4.0, 0.2) + '\n')
             f.write('[13:00:16.000] ' + slow % (1000, 2000, 40.0, 3, 1.0, 5.0, 30.0, 2.0, 2.0) + '\n')
@@ -339,6 +342,10 @@ def probe_parsing() -> None:
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')
+        g = perf_report.read_gpu(log, w)
+        check(g['rows'] == 2 and abs(g['queries'] - 50.0) < 1e-9 and abs(g['pending'] - 10.0) < 1e-9
+              and g['query_worst'] == 2.5 and abs(g['palettes'] - 400.0) < 1e-9 and abs(g['palette_ms'] - 1.0) < 1e-9,
+              'PERF GPU: occlusion query reads and skin palettes a frame (gpu-5, gpu-6)')
         n = perf_report.read_net(log, w, 10.0)
         check(n['channels'][('out', 'bit 0x4')] == (1.0, 50.0) and n['channels'][('in', 'head 0x00000F01')] == (0.3, 9.0)
               and n['walks'] == 20, 'PERF NET CHANNELS: messages and bytes a second by channel, world walks (net-1)')
