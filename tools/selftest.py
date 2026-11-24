@@ -3332,8 +3332,8 @@ def spawn_catalog_archives(shard: int) -> None:
     record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
     now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
     one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
-    the sorted rows dealt round, so the generated vehicles' rows (edf6tr_<kind>_mission, one a kind, each building its
-    kind) spread evenly and no kind is built in two."""
+    packed by their measured seconds (testrange/catalog_row_seconds.json, pylib/testshard.py: dealt round they
+    took 357/348/175/119 s, 2026-11-24), each row in one shard, so no kind is built in two."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import catalog
     import gen_spawn_catalog as g
@@ -3349,7 +3349,7 @@ def spawn_catalog_archives(shard: int) -> None:
     read = g.game_reader(rootcpk.DEFAULT_GAME)
     stale = []
     rows = sorted(catalog.rows(), key=lambda r: r.sgo)
-    for r in rows[shard::SPAWN_CATALOG_SHARDS]:
+    for r in g.shards(rows, SPAWN_CATALOG_SHARDS)[shard]:
         try:
             now = g.row_archives(r, read)
         except (FileNotFoundError, KeyError):
