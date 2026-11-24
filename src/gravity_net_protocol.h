@@ -10,7 +10,7 @@
 // The float guns are the host's: it sees a colonist die and says which of its guns lies where (`drop`), a machine whose
 // player walks up to one asks for it (`pick`), the host gives it to the first who asked (`owner`) and ends it (`gone`);
 // every machine draws and fires each gun round its owner, and only the owner's machine's rounds deal damage (the game's
-// own rule: a round whose attacker is another machine's hurts nothing here; EDF6Coop docs/net-re/damage.md).
+// own rule: a round whose attacker is another machine's hurts nothing here; edf-coop-stable:docs/net-re/damage.md).
 // Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
 // to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
 // and radial kinds, the float guns taken from the game's own drop. Version 3 (2026-10-31): a player (a grab's grabber, a
