@@ -27,7 +27,7 @@
 #include "edf/input_source.h"
 #include "edf/katyusha_cab.h"
 #include "edf/keybind.h"
-#include "append_log.h"
+#include "log.h"
 #include "edf/game_frame.h"
 #include "edf/npc_grid.h"
 #include <algorithm>
@@ -39,7 +39,6 @@
 namespace autoturret {
 unsigned char* image=nullptr;
 HMODULE module=nullptr;
-wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
 Config cfg{};
@@ -149,14 +148,9 @@ constexpr unsigned char kFireGateStock[]={0x83,0xF8,0x05,0x74,0x23};
 constexpr unsigned char kFireGateFree[]={0x83,0xF8,0x04,0x73,0x23};
 bool legacySeen=false;
 
+// The log: common/log.h (buffered on the caller's thread, written by its own thread, rotated to .log.1 past 32 MB).
 void Log(const char* format,...) noexcept {
-    if(!logPath[0])return;
-    char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    SYSTEMTIME t{};GetLocalTime(&t);
-    char line[1100];
-    const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u] %s\r\n",t.wHour,t.wMinute,t.wSecond,text);
-    static edf::AppendLog log;
-    if(n>0)log.Write(logPath,line,static_cast<DWORD>(n));
+    va_list args;va_start(args,format);edf::logfile::Line(format,args);va_end(args);
 }
 
 void SeeFrame() noexcept {
@@ -1040,8 +1034,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     GetModuleFileNameW(module,iniPath,MAX_PATH);
     auto dot=wcsrchr(iniPath,L'.');if(!dot)return false;
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
+    wchar_t logPath[MAX_PATH];
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
+    edf::logfile::Start(logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Auto Turret";info->version=PLUG_VER(EDF6AT_VERSION_MAJOR,EDF6AT_VERSION_MINOR,EDF6AT_VERSION_PATCH,0);
     char file[96];
     edf::DescribeModuleFile(module,file,sizeof(file));
@@ -1083,7 +1079,12 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void
 // one would count the hull's turn twice, and gets no stabilizer on the seats it steers.
 extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return autoturret::image!=nullptr; }
 
+// A crash anywhere in the game: EDF6VehicleCrew's crash dump calls this after its dump (common/log.h kCrashFlush), so
+// the lines still buffered here reach EDF6AutoTurret.log. Never waits (the crashed thread may own a log lock).
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_CrashFlushLogV1() { edf::logfile::Flush(true); }
+
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){autoturret::module=instance;DisableThreadLibraryCalls(instance);}
+    else if(reason==DLL_PROCESS_DETACH)edf::logfile::Flush();   // process exit: the last lines still buffered (log.h)
     return TRUE;
 }

@@ -21,6 +21,7 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
     bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long

@@ -44,6 +44,7 @@
 #include "edf41_sound_channels.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -116,6 +117,9 @@ struct Node {
     std::int32_t count;
     std::int32_t value;
 };
+// The same 12-byte SGO node as edf41c::SgoNode {type, a, b} (Persist copies the flame's custom parameter).
+static_assert(sizeof(Node)==sizeof(edf41c::SgoNode) && offsetof(Node,type)==offsetof(edf41c::SgoNode,type)
+              && offsetof(Node,count)==offsetof(edf41c::SgoNode,a) && offsetof(Node,value)==offsetof(edf41c::SgoNode,b));
 struct Handle {
     void* sgo;
 };
@@ -167,7 +171,6 @@ TickFn nextTick=nullptr;
 DtorFn nextDtor=nullptr;
 std::mutex lock;
 std::unordered_map<const void*,Dragon> dragons;
-std::vector<std::vector<Node>> customCopies;   // never freed: a bullet keeps a pointer into one
 
 const Node* Key(void* self,const wchar_t* name) noexcept {
     return reinterpret_cast<KeyNodeFn>(image+kKeyNode)(static_cast<char*>(self)+kSgoAt,name);
@@ -185,25 +188,10 @@ float Number(const Node* n) noexcept {
 }
 bool IsArray(const Node* n,int count) noexcept { return n && n->type==0 && n->count==count; }
 
-// The subtree at `src` (numbers and arrays only) laid out in `out` from `at`, each array's children together after it.
-bool CopyInto(const Node* src,std::vector<Node>& out,std::size_t at) noexcept {
-    out[at]=*src;
-    if(src->type==1 || src->type==2)return true;
-    if(src->type!=0 || src->count<0 || src->count>16)return false;
-    const std::size_t first=out.size();
-    out.resize(first+static_cast<std::size_t>(src->count));
-    out[at].value=static_cast<std::int32_t>((first-at)*sizeof(Node));
-    for(int i=0;i<src->count;++i)
-        if(!CopyInto(Child(src,i),out,first+static_cast<std::size_t>(i)))return false;
-    return true;
-}
-
+// The flame's custom parameter, persisted (edf41c::Persist: lives as long as the process, as a bullet keeps a pointer
+// into it; shared by content, so every dragon of one SGO uses one copy).
 const Node* CopyOf(const Node* src) noexcept {
-    std::vector<Node> copy(1);
-    copy.reserve(64);
-    if(!CopyInto(src,copy,0))return nullptr;
-    customCopies.push_back(std::move(copy));
-    return customCopies.back().data();
+    return reinterpret_cast<const Node*>(edf41c::Persist(reinterpret_cast<const edf41c::SgoNode*>(src)));
 }
 
 // The object's configuration: its windows (CAS states resolved), the flame's numbers. false: not a 4.1 dragon (or a
