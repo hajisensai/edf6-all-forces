@@ -594,6 +594,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
+    n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
     n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency)),0,3));
     {
         const int raw=ReadInt(L"FrameRateCap",static_cast<DWORD>(n.frameRateCap));

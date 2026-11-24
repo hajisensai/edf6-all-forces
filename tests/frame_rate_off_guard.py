@@ -52,14 +52,21 @@ check(off >= 0, 'InstallFrameRate returns at FrameRateCap=0')
 first = min(i for i in (body.find('Install'), body.find('Swap'), body.find('framerateview::')) if i >= 0)
 check(off < first, 'nothing is installed before the FrameRateCap=0 return')
 
-callers: dict[str, list[str]] = {'InstallSwapFlip()': [], 'framerateview::Install()': [], 'InstallGate()': [],
+callers: dict[str, list[str]] = {'InstallSwapFlip(': [], 'framerateview::Install()': [], 'InstallGate()': [],
                                  'InstallInputMove()': [], 'SwapFlipUseWaitable(': []}
 for name in names:
     text = code(read('src', name))
     for call in callers:
         if call in text:
             callers[call].append(name)
-check(callers['InstallSwapFlip()'] == ['frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'], f"InstallSwapFlip only from frame_rate.cpp: {callers['InstallSwapFlip()']}")
+check(callers['InstallSwapFlip('] == ['frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'], f"InstallSwapFlip only from frame_rate.cpp: {callers['InstallSwapFlip(']}")
+# The flip model is a developer switch: the shipped ini has no FrameRateFlip, the Config defaults it off, and the
+# creation's hook goes in only when it is asked for (the review of #386, 1 and 2).
+check(not re.search(r'(?im)^\s*;?\s*FrameRateFlip\s*=', ini), 'the shipped ini has no FrameRateFlip key')
+check(re.search(r'\bbool frameRateFlip=false;', read('src', 'crew.h')), 'Config::frameRateFlip defaults to off')
+check(re.search(r'InstallSwapFlip\(c\.frameRateFlip\)', body), 'InstallFrameRate passes the developer switch to InstallSwapFlip')
+sf = code(read('src', 'swap_flip.cpp'))
+check(re.search(r'if\(!flipModel\)return true;\s*return callTo\(kCreateCall', sf), 'the creation hook only with flipModel, after the Present')
 check(callers['framerateview::Install()'] == ['frame_rate.cpp'], f"framerateview::Install only from frame_rate.cpp: {callers['framerateview::Install()']}")
 check(callers['InstallGate()'] == ['frame_rate.cpp'], f"InstallGate only in frame_rate.cpp: {callers['InstallGate()']}")
 check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove only in frame_rate.cpp: {callers['InstallInputMove()']}")

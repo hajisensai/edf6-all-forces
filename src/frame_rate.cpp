@@ -1,8 +1,8 @@
 // Frames above the game's 59.94 Hz, stage 2 (docs/unlimited-fps-re.md §4): the frame gate, the pacing guards, the input
 // on tick frames and the swap chain's sync interval. ini FrameRateCap: 0 (the game's 59.94 Hz) installs nothing; 1 (the
 // display's refresh rate, shipped) or a cap
-// installs everything below, the camera and the player's root interpolation (frame_rate_view.cpp) and the flip swap
-// chain (swap_flip.cpp). Other objects still move at the tick rate (docs/unlimited-fps-re.md §4.3, stage 4).
+// installs everything below, the camera and the player's root interpolation (frame_rate_view.cpp) and the Present's
+// statistics (swap_flip.cpp; its flip swap chain only under the developer switch FrameRateFlip). Other objects still move at the tick rate (docs/unlimited-fps-re.md §4.3, stage 4).
 //
 // The gate (fps-1). The main loop counts its ticks at 0x11A2F4F / 0x11A2F6B (`call 0x11DAE60; mov ebx,eax; test eax,eax`)
 // and waits (0x11A2F65, frame_pacing.cpp TickWait) while the count is 0. Both calls go to a near stub that returns
@@ -142,8 +142,8 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
     const std::uint64_t span=now-stats.since;
     if(span<kStatsSeconds*qpcFreq)return;
     const double s=static_cast<double>(span)/static_cast<double>(qpcFreq);
-    unsigned blended=0,unblended=0,roots=0,rootsLeft=0;
-    if(viewOn)framerateview::TakeCounts(blended,unblended,roots,rootsLeft);
+    unsigned blended=0,unblended=0,roots=0,rootsLeft=0,rootsRefused=0;
+    if(viewOn)framerateview::TakeCounts(blended,unblended,roots,rootsLeft,rootsRefused);
     // 1 % low: the frame rate of the 99th percentile interval (the slowest 1 % of the window's frames).
     double low=0;
     if(intervalCount) {
@@ -152,10 +152,12 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
         if(intervals[k])low=static_cast<double>(qpcFreq)/static_cast<double>(intervals[k]);
     }
     Log("FRAMERATE %.1f s: ticks %.2f/s, frames %.1f/s (1%% low %.1f), 0-tick frames %.1f%%, longest 0-tick frame %.2f ms; "
-        "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u",s,
+        "0-tick projections blended %u, as stepped %u; player root blended %u, as stepped %u (changed since its tick), "
+        "refused %u (a jump or not rigid)",s,
         static_cast<double>(stats.ticks)/s,static_cast<double>(stats.frames)/s,low,
         stats.frames ? 100.0*static_cast<double>(stats.zero)/static_cast<double>(stats.frames) : 0.0,
-        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft);
+        1000.0*static_cast<double>(stats.longestZero)/static_cast<double>(qpcFreq),blended,unblended,roots,rootsLeft,
+        rootsRefused);
     const PresentStats p=SwapFlipPresentStats();
     if(p.valid)Log("PRESENT calls %.1f/s, shown %.1f/s, display refreshes %.1f/s; failed %u, occluded %u",
                    p.calls,p.shown,p.refreshes,p.failed,p.occluded);
@@ -426,8 +428,10 @@ void InstallFrameRate() noexcept {
     if(c.frameRateCap==framerate::kOff)return;   // the game's own rate: nothing installed
     // The input move first: the gate needs it.
     const bool input=InstallInputMove();
-    const bool flip=InstallSwapFlip();
-    Log("FRAMERATE FrameRateCap=%d: input wrappers updated before the step=%d, flip swap chain=%d",c.frameRateCap,input,flip);
+    const bool present=InstallSwapFlip(c.frameRateFlip);
+    const bool flip=present && c.frameRateFlip;
+    Log("FRAMERATE FrameRateCap=%d: input wrappers updated before the step=%d, Present statistics=%d, flip swap chain=%d "
+        "(developer: FrameRateFlip)",c.frameRateCap,input,present,flip);
     if(!input)return;
     cap=c.frameRateCap;
     LARGE_INTEGER freq;

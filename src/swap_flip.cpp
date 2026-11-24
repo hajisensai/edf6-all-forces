@@ -162,7 +162,7 @@ void SwapFlipWait() noexcept {
     if(object)WaitForSingleObject(object,kWaitMs);
 }
 
-bool InstallSwapFlip() noexcept {
+bool InstallSwapFlip(bool flipModel) noexcept {
     if(!edf::Matches(image,kCreateCall,kCreateSig,sizeof(kCreateSig)) ||
        !edf::Matches(image,kPresentFlags,kPresentSig,sizeof(kPresentSig))) {
         Log("FLIP the swap chain's creation or Present is not where docs/frame-pacing-re.md has them: blt model kept");
@@ -199,7 +199,12 @@ bool InstallSwapFlip() noexcept {
     };
     // The Present first: tearingFlags is 0 until a chain with tearing exists.
     if(!callTo(kPresentFlags,presentStub,kPresentSig))return false;
-    if(!callTo(kCreateCall,createStub,kCreateSig))return false;
-    return true;
+    // The flip model is a developer switch (the review of #386): a windowed chain with tearing that the game turns
+    // exclusive in place (SetFullscreenState at 0x111CAC3 / 0x111BF4D, no rebuild) fails its Present with the tearing
+    // flag; the rebuild 0x111B220 leaves +0x90 null when both creations fail; a minimised window's waitable object never
+    // fires. None of it is tested on the real game: players keep the game's blt chain (sync interval 1 is enough for
+    // the display's refresh rate).
+    if(!flipModel)return true;
+    return callTo(kCreateCall,createStub,kCreateSig);
 }
 }  // namespace crew

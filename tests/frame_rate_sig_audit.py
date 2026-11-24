@@ -194,6 +194,10 @@ check(img[step_call - 5:step_call + 5] == varrays['kCameraStepSig'] and rel_targ
 check(direct_callers(step) == [step_call], 'the camera step is called only at kCameraStepCall')
 check(img[step_call + 0xE0] == 0xE9 and rel_target(step_call + 0xE0, 5) == 0x119959C, 'the camera step is in the per-viewport loop')
 check(re.search(r'RedirectCall\(image\+kCameraStepCall,image\+kCameraStep,reinterpret_cast<void\*>\(&CameraStepHook\)', view), 'CameraStepHook')
+# The blends go at the frame end's fence (the review of #386, 3): the main loop's call of 0x111CC20 after Application::Update.
+fence_call, fence = vconsts['kFenceCall'], vconsts['kFence']
+check(img[fence_call] == 0xE8 and rel_target(fence_call, 5) == fence, 'kFenceCall calls the render fence wait')
+check(re.search(r'RedirectCall\(image\+kFenceCall,image\+kFence,reinterpret_cast<void\*>\(&FrameEndHook\)', view), 'FrameEndHook')
 for vt in (0x17CDF28, 0x17D0FF8, 0x17CF5B8, 0x17CF100):
     check(f'{vt:#X}'.replace('0X', '0x') in view, f'soldier vtable {vt:#x} in frame_rate_view.cpp')
 
