@@ -49,7 +49,7 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 - 表行 9 列：`[id, app:/weapon/<id>.sgo, 分类, 1.0, 等级, 0（掉落获得）, EDF5 的星级上限, 模板的第 7 列, 0（不挂 EDF6 DLC 包）]`。EDF5 第 7 列（0/1/2 = EX 武器包）对应 EDF6 第 8 列，EDF6 用第 3 列 = 3 标记武器包；移植武器一律不挂 EDF6 的包（否则没买 EDF6 DLC 的玩家看不到）。EDF6 第 7 列含义未明（载具全 0、AR 呼叫一半一半），照抄模板（同分类、同类、同弹种优先、等级最近的 EDF6 武器）。
 - 获得方式：和原版武器一样按等级随任务掉落。插件的 `GrantCalls` 只发 `EDF6VC_CALL_*`，不发这些。
 
-## 4. 安装（`tools/edf5_weapons.py` + `tools/call_weapons.py`）
+## 4. 安装（`tools/make_edf5_weapons.py` + `tools/call_weapons.py`）
 
 移植武器是共享武器表里的第二组「本方行」，和载具呼叫同一个事务、同一份清单（`Mods/.edf6vc_calls.json`）：
 

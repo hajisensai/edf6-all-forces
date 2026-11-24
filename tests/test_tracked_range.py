@@ -4,6 +4,7 @@ Lifecycle tests write only temporary Mods trees. Native cases read Root.cpk and
 build in memory; the real game directory is never changed or launched.
 """
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -30,6 +31,17 @@ import sgo
 BUILDERS = {'edf6tr_vulcan_mission': make_vulcan, 'edf6tr_bmpt_mission': make_bmpt}
 
 
+def shard_builders():
+    """The vehicles NativeRangeTests builds: every one, or with EDF6_TEST_SHARD=I/N (ctest's tracked_range_native_<I>,
+    run side by side: both in one run took ~330 s) every N-th by name. Each build is ~2 minutes of the run."""
+    shard = os.environ.get('EDF6_TEST_SHARD', '')
+    names = sorted(BUILDERS)
+    if shard:
+        i, n = (int(x) for x in shard.split('/'))
+        names = names[i::n]
+    return {name: BUILDERS[name] for name in names}
+
+
 def files_for(name):
     """Small opaque builder files: lifecycle checks exercise real ledger writes."""
     vehicle = gen.TRACKED_MISSION[name]
@@ -38,6 +50,12 @@ def files_for(name):
 
 
 class RangeCatalogTests(unittest.TestCase):
+    def test_ctest_names_every_class(self):
+        # CMakeLists.txt runs these classes by name (tracked_range, tracked_range_native_<I>): a new one must be added
+        classes = {n for n, v in globals().items() if isinstance(v, type) and issubclass(v, unittest.TestCase)}
+        self.assertEqual(classes, {'RangeCatalogTests', 'UndeployedXMorphTests', 'RangeLifecycleTests',
+                                   'NativeRangeTests'})
+
     def test_native_call_in_objects_get_private_placeable_mission_twins(self):
         rows = {row.sgo: row for row in catalog.rows()}
         plan = gen.target_range(gen.Plan())
@@ -222,10 +240,11 @@ class NativeRangeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.game = gen.Game(rootcpk.DEFAULT_GAME)
-        cls.files = {name: module.build(cls.game.root) for name, module in BUILDERS.items()}
+        cls.builders = shard_builders()
+        cls.files = {name: module.build(cls.game.root) for name, module in cls.builders.items()}
 
     def test_private_mission_setup_contains_every_native_weapon(self):
-        for name in BUILDERS:
+        for name in self.builders:
             with self.subTest(name=name):
                 data = gen.vehicle_sgo(self.game, name)
                 values = sgo.load(data=data)
@@ -236,7 +255,7 @@ class NativeRangeTests(unittest.TestCase):
                 self.assertEqual(values['xgs_scene_object_class'], 'Vehicle603_Flak')
 
     def test_authored_models_fit_their_placement_footprints(self):
-        for name in BUILDERS:
+        for name in self.builders:
             with self.subTest(name=name):
                 vehicle = gen.TRACKED_MISSION[name]
                 archive = mdb.rab_read(self.files[name][f'OBJECT/{vehicle.sgo}.MRAB'])
@@ -271,7 +290,7 @@ class NativeRangeTests(unittest.TestCase):
         self.assertFalse(plan.air.enabled)
 
     def test_real_standalone_install_builds_private_sgos_and_all_resources(self):
-        wanted = set(BUILDERS)
+        wanted = set(self.builders)
         with tempfile.TemporaryDirectory() as root:
             plan = gen.Plan(vehicles={name: 1 for name in wanted})
             plan.waves.enabled = False
@@ -280,8 +299,8 @@ class NativeRangeTests(unittest.TestCase):
                  patch.object(model_workers, 'group_workers', return_value=1), \
                  patch.object(gen, 'register_pack', return_value=[]), \
                  patch.object(gen, 'placeable_derived', return_value=wanted), \
-                 patch.object(make_vulcan, 'build', return_value=self.files['edf6tr_vulcan_mission']), \
-                 patch.object(make_bmpt, 'build', return_value=self.files['edf6tr_bmpt_mission']):
+                 patch.object(make_vulcan, 'build', return_value=self.files.get('edf6tr_vulcan_mission')), \
+                 patch.object(make_bmpt, 'build', return_value=self.files.get('edf6tr_bmpt_mission')):
                 gen.install(root, plan)
             rows = {row.sgo: row for row in catalog.rows()}
             text = Path(gen.mission_dir(root, gen.RANGE_MISSION), 'MISSION.AC').read_text(encoding='utf-8-sig')

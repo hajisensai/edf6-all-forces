@@ -10,6 +10,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'pylib'), str(ROOT / 'tools')]
 import dsgo
+import gamedir
 import edf41_objects as eo
 import make_edf41_objects as convert
 import selftest
@@ -20,9 +21,8 @@ class NpcVisualContract(unittest.TestCase):
         selftest.edf41_friend_grip_shipped()
 
     def test_actual_source_frames(self):
-        sources = [Path(convert.STEAM) / game / 'Root.cpk' for game in
-                   ('Earth Defense Force 4.1', 'EARTH DEFENSE FORCE 6')]
-        if not all(path.is_file() for path in sources):
+        edf6 = gamedir.find()
+        if not (edf6 and gamedir.find_other(gamedir.EDF41, near=edf6)):
             self.skipTest('actual EDF4.1 source game is unavailable')
         selftest.edf41_friend_grip_matches_weapons()
 

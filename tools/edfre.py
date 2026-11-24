@@ -1,4 +1,5 @@
 """Tiny RE helpers over EDF.dll: string lookup, RIP-relative xrefs, disassembly."""
+import os
 import re
 import struct
 import sys
@@ -7,7 +8,10 @@ import capstone
 import numpy as np
 import pefile
 
-P = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6\EDF.dll'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pylib'))
+import gamedir  # noqa: E402
+
+P = os.path.join(gamedir.find_or_dev(), 'EDF.dll')
 pe = pefile.PE(P, fast_load=True)
 img: bytes = pe.get_memory_mapped_image()
 text = [s for s in pe.sections if s.Name.startswith(b'.text')][0]

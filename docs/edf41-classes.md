@@ -463,7 +463,7 @@ EDF.dll `0x678CCB46`，RVA。H = 指令里直接读到；M = 有代码证据的�
   副本，原机器人的事件经**游戏自己的写流 / 读流**进它的 slot 17），以及 301 / 401 / UfoRobo 各关默认设置下不回归。
 - **没有验证、也无法在这里验证**：两台机器的房间——事件真的经 `0x773DA0` → 网络 → 对方的 slot 17；子对象 ID 在两边一致地绑定；HP 差 / 击毁重放
   对我们的部件生效；客人看到的位姿延迟与修正手感。前两条走的是原版自己用的路（GameObjectBase 的 HP 差就是 slot 16 → slot 17；MovingFortress 的
-  部件就是这样登记的），可信度 M。EDF6Coop 的 `tests/gamenet`（GameNet_*）只替身任务开始同步，没有任务对象、没有事件分发器，跑不到这些类。
+  部件就是这样登记的），可信度 M。EDF6Coop 的 `edf-coop-stable:tests/gamenet`（GameNet_*）只替身任务开始同步，没有任务对象、没有事件分发器，跑不到这些类。
 - 已知会不一致的：子弹散布（各机随机数）；没装 Coop W4 时目标每 60 帧被本机重选（原版敌人也这样）；Coop W3 转发的命中事件不带 GDI 的
   子命中记录（`+0x78/+0x88`），**按刚体判弱点的类在拥有者上会拒收转发来的伤害**——我们的 301 船体 / 401 面板，以及原版 UfoCarrier508、
   MovingFortress 的核心都是这样。**已在 EDF6Coop 那边修（hajisensai/edf-coop-stable#35，分支 `fix/forward-hit-body`，提交 `2d49bbd` 与后续 `f8ed025`，2026-10-17 已合并进 main：`695a24f`；尚未打版本标签）**：
