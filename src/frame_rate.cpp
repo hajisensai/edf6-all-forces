@@ -125,6 +125,13 @@ struct Stats { std::uint64_t since=0,frames=0,ticks=0,zero=0,lastRun=0,longestZe
 // The load the gate last saw (game thread): its start and the frames it ran, for the FRAMERATE lines at its ends.
 bool wasLoading=false;
 std::uint64_t loadSince=0,loadFrames=0;
+// The FRAMERATE loading lines at most once per kLoadLogSeconds (a count raised for a moment off the mission load, by
+// 0x110B460 or the HQ model view's pairs, would otherwise log a line pair each time): the loads not logged are counted
+// and told with the next one logged; a load's end is logged only when its start was.
+constexpr std::uint64_t kLoadLogSeconds=5;
+std::uint64_t loadLoggedAt=0;
+unsigned loadsUnlogged=0;
+bool loadLogged=false;
 
 using CountFn=std::uint32_t(*)();
 using VoidFn=void(*)(void*);
@@ -197,8 +204,17 @@ bool LoadingNow() noexcept {
 void SeeLoad(bool loading,std::uint64_t now) noexcept {
     if(loading==wasLoading)return;
     wasLoading=loading;
-    if(loading){loadSince=now;loadFrames=0;Log("FRAMERATE loading (count %d): no 0-tick frames until it ends",
-                                                 *reinterpret_cast<const volatile std::int32_t*>(image+kLoad+kLoadCount));return;}
+    if(loading) {
+        loadSince=now;loadFrames=0;
+        loadLogged=!loadLoggedAt || now-loadLoggedAt>=kLoadLogSeconds*qpcFreq;
+        if(!loadLogged){++loadsUnlogged;return;}
+        loadLoggedAt=now;
+        Log("FRAMERATE loading (count %d): no 0-tick frames until it ends (%u loads since the last line not logged)",
+            *reinterpret_cast<const volatile std::int32_t*>(image+kLoad+kLoadCount),loadsUnlogged);
+        loadsUnlogged=0;
+        return;
+    }
+    if(!loadLogged)return;
     Log("FRAMERATE loaded after %.2f s, %llu frames: the frame gate is back",
         static_cast<double>(now-loadSince)/static_cast<double>(qpcFreq),static_cast<unsigned long long>(loadFrames));
 }

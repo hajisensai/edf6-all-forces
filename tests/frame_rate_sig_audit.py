@@ -222,13 +222,23 @@ ls = consts['kLoadStore']
 check(img[ls:ls + 8] == arrays['kLoadStoreSig'] and rip(ls, 8) == consts['kLoadMeter'], 'kLoadStore stores to kLoadMeter')
 check(img[ls + 8] == 0xE8, 'a call follows the load store (r11 and the flags are dead in the stub)')
 # The load count (docs/unlimited-fps-re.md §4.1.1): 0x1133FC0 adds dl*2-1 to rcx+0x34; every caller passes the global
-# kLoad (but the two of 0x110B4xx, another object's); the mission scripts' BeginLoading sets it to 0 (0x1133400) and then
+# kLoad (13 by `lea rcx,[kLoad]`, the pair in 0x110B460 by `mov rcx,[0x2135930]`, which holds &kLoad too: its one
+# store 0x10FFE3C writes the second argument, passed only by 0x700F12 as `lea rdx,[kLoad]`); the mission scripts' BeginLoading sets it to 0 (0x1133400) and then
 # adds 1, EndLoading takes 1; the job thread holds its queue while it is above 0.
 la, lo = consts['kLoadAdd'], consts['kLoad']
 check(img[la:la + 16] == arrays['kLoadAddSig'] and img[la + 14] == consts['kLoadCount'], 'kLoadAdd: lock xadd [rcx+34h],dl*2-1')
 adds = {c: (rip(c - 7, 7), img[c - 9:c - 7]) for c in direct_callers(la) if img[c - 7:c - 4] in (bytes.fromhex('488d0d'), bytes.fromhex('488b0d'))}
 check(len(adds) == len(direct_callers(la)) == 15, f'kLoadAdd has the 15 callers read: {len(direct_callers(la))}')
-check(sorted(c for c, (t, _) in adds.items() if t != lo) == [0x110B527, 0x110B644], 'all but 0x110B4xx pass kLoad')
+check(sorted(c for c, (t, _) in adds.items() if t != lo) == [0x110B527, 0x110B644] and
+      all(t == 0x2135930 and img[c - 7:c - 4] == bytes.fromhex('488b0d') for c, (t, _) in adds.items() if t != lo),
+      'all but the 0x110B460 pair pass kLoad directly; the pair loads it from [0x2135930]')
+check(img[0x10FFE3C:0x10FFE3F] == bytes.fromhex('48891d') and rip(0x10FFE3C, 7) == 0x2135930 and
+      img[0x10FFC7A:0x10FFC7D] == bytes.fromhex('488bda'), '[0x2135930] is stored at 0x10FFE3C from rbx = rdx (0x10FFC7A)')
+stores = [a for a in (tb + m.start() for m in re.finditer(re.escape(bytes.fromhex('4889')), img[tb:te])) if img[a + 2] & 0xC7 == 5 and rip(a, 7) == 0x2135930]
+check(stores == [0x10FFE3C], f'0x10FFE3C is the one store to [0x2135930]: {[hex(s) for s in stores]}')
+check(img[0x700F12:0x700F15] == bytes.fromhex('488d15') and rip(0x700F12, 7) == lo, '0x700F12 passes lea rdx,[kLoad]')
+pair = sorted(d for c, (t, d) in adds.items() if t != lo)
+check(pair == sorted([bytes.fromhex('b201'), bytes.fromhex('33d2')]), f'the 0x110B460 pair is one +1 and one -1: {pair}')
 up = sorted(c for c, (t, d) in adds.items() if t == lo and d == bytes.fromhex('b201'))
 down = sorted(c for c, (t, d) in adds.items() if t == lo and d == bytes.fromhex('33d2'))
 check(up == [0x9E014, 0x1ACC03, 0x20FC24, 0x21070F, 0x9424C4, 0x942542, 0x9425B4], f'the +1 callers: {[hex(c) for c in up]}')
@@ -236,7 +246,12 @@ check(down == [0x1B4A69, 0x210889, 0x21FBD6, 0x9424DF, 0x94255B, 0x9425CF], f'th
 check(img[0x1133400:0x1133408] == bytes.fromhex('c7413400000000c3'), '0x1133400: mov dword [rcx+34h],0')
 check(img[0x1ACBEE:0x1ACBF5] == bytes.fromhex('488d0dbbcef801') and rip(0x1ACBEE, 7) == lo and rel_target(0x1ACBF5, 5) == 0x1133400,
       'BeginLoading sets kLoad to 0 before its +1 (0x1ACBF5)')
-check(all(rip(c - 7, 7) == lo for c in direct_callers(0x1133400)), 'every set-to-0 is of kLoad')
+zero_calls = direct_callers(0x1133400)
+zero_jumps = [tb + m.start() for m in re.finditer(re.escape(bytes.fromhex('e9')), img[tb:te]) if rel_target(tb + m.start(), 5) == 0x1133400]
+check(len(zero_calls) == 7 and all(rip(c - 7, 7) == lo for c in zero_calls), f'the 7 calls to 0x1133400 are of kLoad: {[hex(c) for c in zero_calls]}')
+check(zero_jumps == [0x1B997D, 0x226990], f'and 2 tail jumps: {[hex(c) for c in zero_jumps]}')
+check(img[0x1B9971:0x1B9974] == bytes.fromhex('488d0d') and rip(0x1B9971, 7) == lo and
+      img[0x226949:0x22694C] == bytes.fromhex('488d0d') and rip(0x226949, 7) == lo, 'the tail jumps load rcx = kLoad first (0x1B9971, 0x226949)')
 jr = consts['kLoadJobRead']
 check(img[jr:jr + 5] == arrays['kLoadJobReadSig'] and img[jr - 3:jr] == bytes.fromhex('418bc7') and img[jr + 5:jr + 9] == bytes.fromhex('85c00f8f'),
       'the job thread reads the count (lock xadd [rbp+34h],r15d) and skips its queue above 0')

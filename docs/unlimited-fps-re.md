@@ -191,13 +191,16 @@
 判据：游戏自己的加载计数 `0x2139AB0 + 0x34` 大于 0（H，静态，EDF.dll 0x678CCB46，`frame_rate_sig_audit` 逐条核对）。
 
 - 写：`0x1133FC0(obj, dl)` = `movzx eax,dl; lea eax,[rax*2-1]; lock xadd [rcx+34h],eax; ret`，dl = 1 加 1、dl = 0 减 1。
-  15 个调用点里 13 个传 `lea rcx,[0x2139AB0]`（另 2 个 `0x110B527` / `0x110B644` 是 `[0x2135930]` 指向的另一个对象）：
+  15 个调用点全是这个计数：13 个直接传 `lea rcx,[0x2139AB0]`；另 2 个（`0x110B460` 里成对的 `0x110B527` / `0x110B644`）
+  传 `mov rcx,[0x2135930]`，而 `[0x2135930]` 唯一的写入点 `0x10FFE3C` 写的是参数 2（`0x10FFC7A` `mov rbx,rdx`），唯一调用方
+  `0x700F12` 传 `lea rdx,[0x2139AB0]`——也是 `&0x2139AB0`：
   - +1：AS `BeginLoading`（`0x1ACB10`）的 `0x1ACC03`、BVM native 0x0A `0x21070F`、`0x20FC24`、启动 `0x9E014`、
     `UiHQ_3DModelView` 异步回调 `0x9424C4` / `0x942542` / `0x9425B4`；
   - -1：AS `EndLoading`（`0x1B49D0`）的 `0x1B4A69`、BVM native 0x0B `0x210889`、`0x21FBD6`、上面三个回调里成对的
     `0x9424DF` / `0x94255B` / `0x9425CF`。
-- 清零：`0x1133400` = `mov dword [rcx+34h],0; ret`，7 个调用点全是 `0x2139AB0`：`BeginLoading` 自己在 +1 之前（`0x1ACBF5`）、
-  场景拆除 `0x70FEBA`、BVM native 8 `0x2105AF`、按名加载脚本 `0xB1A4F`、加载 `MainScript.as` 的 `0xB7C29`、`0xA1AF5`、启动 `0x9DF99`。
+- 清零：`0x1133400` = `mov dword [rcx+34h],0; ret`，9 个调用点（7 个 `call`、2 个尾跳转 `jmp`）全是 `0x2139AB0`：`BeginLoading` 自己在 +1 之前（`0x1ACBF5`）、
+  场景拆除 `0x70FEBA`、BVM native 8 `0x2105AF`、按名加载脚本 `0xB1A4F`、加载 `MainScript.as` 的 `0xB7C29`、`0xA1AF5`、启动 `0x9DF99`，
+  以及尾跳转 `0x1B997D`（前面 `0x1B9971` `lea rcx,[0x2139AB0]`）、`0x226990`（前面 `0x226949`）。
   所以任务加载期间计数正好是 1；`EndLoading` 之后回到 0。
 - 游戏自己就把它当「正在加载」：作业线程 `0x1133950` 在 `0x1133993` `lock xadd [rbp+34h],r15d`（读），大于 0 时 `Sleep(16)`
   （`0x1133C02`），不处理 `+0x90` 的作业队列。要是计数平时不回 0，这条队列就永远不跑，所以菜单和任务中它应为 0。
