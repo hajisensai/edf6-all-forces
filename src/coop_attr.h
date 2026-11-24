@@ -36,7 +36,10 @@ inline const Table* Usable(const Table* t) noexcept {
 // room with it would half work: mod_room.cpp refuses to create or join one and says to upgrade.
 // 2.8.0 (Coop#47, 2026-11-24): support_net.cpp polls with EDF6CoopPollExtensionBatch and counts on an extension overflow
 // being recovered; with 2.7.x one congestion ended the plugins' networking for the mission.
-inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=8,kRoomCoopPatch=0;
+// 2.9.0 (net-5, 2026-11-24): extension ABI 2 (coop_extension_api.h): the channels' state messages (sendState: an enemy
+// lease's pose, a gravity hold and flight, an ultimate show's keep) and the 20-byte delivered message; 2.8.x serves ABI 1
+// alone, so support_net.cpp would find no extension at all.
+inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=9,kRoomCoopPatch=0;
 enum class CoopVersion : std::uint8_t { ok, old, unreadable };
 // EDF6Coop's exported EDF6CoopVersion marker (nullptr: not exported, older than 2.5.0) against kRoomCoop*; the version
 // read back when there is one.
@@ -63,29 +66,37 @@ struct Beat {
 inline void EDF6COOP_MA_CALL IgnoreMember(void*,const EDF6CoopMemberValue*) {}
 inline bool Watch(const Table* t,const char* key) noexcept { return t && key && t->snapshot(key,&IgnoreMember,nullptr,nullptr)!=0; }
 
-// One key of this machine: published when its value changed (EDF6Coop keeps it for every room after), a refusal's
-// reason told once (the caller logs it: `refused`).
+// One key of this machine: published when its value changed (EDF6Coop keeps it for every room after), a refusal told
+// once per value and reason (the caller logs it: `refused`; the same value refused again for the same reason is
+// `refusedAgain`). retryMs (with nowMs, a millisecond clock) asks EDF6Coop again for a refused value at most that often
+// instead of on every call: a caller called every frame then retries by time, not by the frame rate.
 struct Publisher {
     const char* key=nullptr;
     char published[kValueMost]{};   // the value EDF6Coop last accepted ("" none yet)
+    char refusedValue[kValueMost]{};   // the value it last refused (with refusedWhy ~0u: none)
     std::uint32_t refusedWhy=~0u;
+    std::uint64_t refusedAt=0;
     enum class Result { same, published, refused, refusedAgain };
-    Result Publish(const Table* t,const char* value,std::uint32_t* why=nullptr) noexcept {
+    Result Publish(const Table* t,const char* value,std::uint32_t* why=nullptr,std::uint64_t nowMs=0,std::uint64_t retryMs=0) noexcept {
         if(!t || !t->publish || !key || !value)return Result::refusedAgain;
         if(std::strcmp(value,published)==0)return Result::same;
+        const bool sameRefused=refusedWhy!=~0u && std::strcmp(value,refusedValue)==0;
+        if(retryMs && sameRefused && nowMs-refusedAt<retryMs){if(why)*why=refusedWhy;return Result::refusedAgain;}
         if(t->publish(key,value)) {
             strncpy_s(published,value,_TRUNCATE);
-            refusedWhy=~0u;
+            refusedValue[0]=0;refusedWhy=~0u;
             return Result::published;
         }
         const std::uint32_t w=EDF6COOP_MA_HAS(t,lastError) && t->lastError ? t->lastError() : 0u;
         if(why)*why=w;
-        if(w==refusedWhy)return Result::refusedAgain;
+        refusedAt=nowMs;
+        if(sameRefused && w==refusedWhy)return Result::refusedAgain;
+        strncpy_s(refusedValue,value,_TRUNCATE);
         refusedWhy=w;
         return Result::refused;
     }
-    // Another EDF6Coop (or none): nothing it accepted is known any more.
-    void Forget() noexcept { published[0]=0;refusedWhy=~0u; }
+    // Another EDF6Coop (or none): nothing it accepted or refused is known any more.
+    void Forget() noexcept { published[0]=0;refusedValue[0]=0;refusedWhy=~0u; }
 };
 
 // One member's value of a key.

@@ -35,4 +35,18 @@ inline std::uint64_t CountsTo100ns(std::uint64_t counts,std::uint64_t freq) noex
     const std::uint64_t q=_udiv128(high,low,freq,&rem);
     return q+(rem?1u:0u);
 }
+// Another frame limiter on the frame step's wait. EDF6VR (hajisensai/EARTH-DEFENSE-FORCE-6-VR-MOD, ini [Render]
+// RemoveFpsLimit) blanks the Sleep at 0x11A2F65 (6 bytes) and the loop's `je` at 0x11A2F74 (2 bytes) itself, from the
+// frame loop's thread, during a mission, and only while both still hold the game's bytes: it loads after this plugin
+// (EDFModLoader takes the plugins in name order) and patches later, so it is known by its DLL, not by the bytes. A
+// patch that did the same at start-up (Moist Patches' FPSUnlimiter) is known by the bytes. Either way the wait and the
+// frame gate are left to it: TickWait and the gate both, never one of them.
+enum class Foreign { kNone, kVr, kWait, kBranch };
+inline Foreign ForeignTickWait(const unsigned char* wait,const unsigned char* waitSig,const unsigned char* branch,
+                               const unsigned char* branchSig,bool vr) noexcept {
+    if(vr)return Foreign::kVr;
+    for(int i=0;i<6;++i)if(wait[i]!=waitSig[i])return Foreign::kWait;
+    for(int i=0;i<2;++i)if(branch[i]!=branchSig[i])return Foreign::kBranch;
+    return Foreign::kNone;
+}
 }  // namespace crew::pacing

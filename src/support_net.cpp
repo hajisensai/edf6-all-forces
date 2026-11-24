@@ -23,7 +23,6 @@
 #include "commander_logic.h"
 #include "command_identity.h"
 #include "net_object_ref.h"
-#include "version_notice.h"
 #include "hudtext.h"
 #include "plugin_net.h"
 #include "qmark.h"
@@ -60,13 +59,6 @@ std::uint64_t worldSerial=1;
 std::uint32_t worldPhase=0;
 ObjRef worldCreated[support_net::kMaxPeers]{};
 ULONGLONG nextWorldRead=0;
-// The room's builds (version_notice.h): peers whose map command messages carry another protocol version, and the notice
-// last said (logged and shown once a change).
-std::uint32_t commandVersionOf[support_net::kMaxPeers+1]{};
-versionnote::Notice versionShown{};
-SRWLOCK versionLock=SRWLOCK_INIT;
-wchar_t versionText[200]{};
-ULONGLONG versionAt=0;
 // Why the transport is (not) usable, logged once a change: an online request refused as "not ready" has its cause in
 // the log (the 2026-10-09 report had none).
 const char* transportState="";
@@ -141,6 +133,11 @@ bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcep
         count<=EDF6COOP_EXTENSION_MAX_PAYLOAD && api.send &&
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
 }
+// A plugin channel's state message (plugin_net.h SendState): EDF6Coop sendState, never the support protocol's own.
+bool SendStateCommand(std::uint32_t peer,std::uint32_t key,const void* bytes,std::size_t count) noexcept {
+    return running && key && peer && peer<=snapshot.peerCount && bytes && count && count<=EDF6COOP_EXTENSION_MAX_PAYLOAD &&
+        api.sendState && api.sendState(snapshot.generation,&peers[peer],key,bytes,static_cast<std::uint32_t>(count))!=0;
+}
 std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t count,std::uint32_t byteLimit,std::uint32_t packetLimit) noexcept {
     if(!running || !peer || peer>snapshot.peerCount || !bytes || !count ||
        count>EDF6COOP_EXTENSION_MAX_PAYLOAD || !trySendExtension)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
@@ -149,13 +146,7 @@ std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t co
 const char* PeerPuid(std::uint32_t peer) noexcept {
     return peer<=snapshot.peerCount && peer<=support_net::kMaxPeers ? peers[peer].id : nullptr;
 }
-std::uint32_t HeardExtension(std::uint32_t peer) noexcept { return session.PeerExtension(peer); }
-std::uint32_t OwnExtension() noexcept {
-    std::uint32_t ext=0;unsigned char bloom[32]{};
-    if(hooks.variants)hooks.variants(&ext,bloom);
-    return ext|support_net::kExtBuilt;
-}
-// Every plugin channel's frame (plugin_net.h: the registry, the roster, the joins). The Q marks go peer to peer with no
+// Every plugin channel's frame (plugin_net.h: the registry and the joins). The Q marks go peer to peer with no
 // host step: the context's `linked` (the transport alone) is theirs.
 // What the online frame costs this machine (debug, every kNetPerfMs, beside crew.cpp's PERF; the user, 2026-10-30:
 // "联机时候巨卡无比"): the support tick's time, the messages taken in, and the channels' frames they cost.
@@ -164,15 +155,17 @@ struct NetPerf { double sum,worst; unsigned ticks,messages,contexts; ULONGLONG a
 // The room as the channels were last told it (CommandContext): the frame's first channel update runs only when it moved
 // since (net-8, 2026-11-24: every frame ran every channel's update twice, before and after the poll).
 struct ContextKey {
-    bool ready=false,host=false,linked=false;std::uint64_t epoch=0;std::uint32_t hostPeer=0,peerCount=0;std::uint64_t generation=0;
+    bool ready=false,host=false,linked=false,peersReady=false;std::uint64_t epoch=0;std::uint32_t hostPeer=0,peerCount=0;
+    std::uint64_t generation=0;
     bool operator==(const ContextKey& o) const noexcept {
-        return ready==o.ready && host==o.host && linked==o.linked && epoch==o.epoch && hostPeer==o.hostPeer &&
-            peerCount==o.peerCount && generation==o.generation;
+        return ready==o.ready && host==o.host && linked==o.linked && peersReady==o.peersReady && epoch==o.epoch &&
+            hostPeer==o.hostPeer && peerCount==o.peerCount && generation==o.generation;
     }
 };
 ContextKey toldContext{};bool contextTold=false;
 ContextKey CurrentContext() noexcept {
-    return {running && session.Ready(),snapshot.isHost!=0,running,session.Epoch(),commandHostPeer,snapshot.peerCount,snapshot.generation};
+    return {running && session.Ready(),snapshot.isHost!=0,running,running && session.RoomReady(),session.Epoch(),commandHostPeer,
+        snapshot.peerCount,snapshot.generation};
 }
 bool ContextMoved() noexcept { return !contextTold || !(CurrentContext()==toldContext); }
 void CommandContext(ULONGLONG now) noexcept {
@@ -180,8 +173,8 @@ void CommandContext(ULONGLONG now) noexcept {
     toldContext=CurrentContext();contextTold=true;
     plugin_net::Room room;
     room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
-    room.puid=&PeerPuid;room.heard=&HeardExtension;room.ownExt=OwnExtension();
+        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running,&SendStateCommand};
+    room.peersReady=running && session.RoomReady();   // every hello heard: the channels' joins (plugin_net.h)
     plugin_net::Update(room,now);
 }
 void QMarkUpdate(const CommandNetworkContext& c,std::uint64_t now) noexcept { UpdateQMarkNetwork(c.linked,c.peerCount,c.send,now); }
@@ -190,8 +183,8 @@ bool PvpOwns(const void* bytes,std::size_t size) noexcept {
     return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
 }
 // The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
-// then the gravity operations, the float guns and the ultimate strike). The older ones read their own versions (version 0) and are read by
-// every build that has them (no feature bit); the newer ones are only sent to the peers that announced theirs.
+// then the gravity operations, the float guns and the ultimate strike). Every machine of the room runs this build
+// (mod_room.h kAllForcesRoomProtocol): each channel is sent to and read from every peer.
 void RegisterPluginChannels() noexcept {
     static bool registered=false;
     if(registered)return;
@@ -205,6 +198,7 @@ void RegisterPluginChannels() noexcept {
     c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
+    c.takesState=&enemy_control_protocol::PoseState;
     c.update=&UpdateEnemyControlNetwork;c.reset=&ResetEnemyControlNetwork;plugin_net::RegisterChannel(c);
     c=Channel{};c.name="submarine drones";c.magic=sub_support::kMagic;c.receive=&ReceiveSubSupportNetwork;
     c.update=&UpdateSubSupportNetwork;c.reset=&ResetSubSupportNetwork;plugin_net::RegisterChannel(c);
@@ -244,7 +238,7 @@ bool Resolve(ULONGLONG now) noexcept {
     transportAdmissionReady=reinterpret_cast<AdmissionReadyFn>(GetProcAddress(current,"EDF6Coop_MissionAdmissionReady"));
     pollBatch=reinterpret_cast<EDF6CoopPollExtensionBatchFn>(GetProcAddress(current,"EDF6CoopPollExtensionBatch"));
     if(!get || !pollBatch || !get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api) || api.size!=sizeof(api) ||
-       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll ||
+       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll || !api.sendState ||
        !transportAdmissionReady || !transportAdmissionReady() || !GetProcAddress(current,"EDF6Coop_ResolveMissionPlayerPuid")) {
         NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
         api={};pollBatch=nullptr;return false;
@@ -287,89 +281,6 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
 }
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
     if(note && size)swprintf_s(note,size,L"%ls",text);
-}
-// A header of another build: the map command protocol's magic with another version (support's own wire: v3 since
-// 2026-11-21, older builds kept out of the room by mod_room.h). Only read: the message is still dropped as before.
-void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
-    if(!peer || peer>support_net::kMaxPeers || count<8)return;
-    std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);
-    if(magic!=command_net::kMagic)return;
-    const std::uint32_t seen=command_net::Compatible(version) ? 0u : version;   // v6 and v7 negotiate (command_protocol.h)
-    if(commandVersionOf[peer]!=seen && seen)
-        Log("SUPPORT NET peer %u sends map commands of protocol v%u (this build: v%u): its map orders are not synchronised",peer,version,
-            command_net::kVersion);
-    commandVersionOf[peer]=seen;
-}
-// The features a set of feature bits (support_protocol.h Features: capabilities and extensions) names, in the HUD's language.
-void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noexcept {
-    using hudtext::Tr;using hudtext::Tx;using support_net::FeatureExt;
-    out[0]=0;
-    const struct { std::uint32_t bit; Tx text; } kNames[]={{FeatureExt(support_net::kExtSeaRescue),Tx::versionFeatRescue},
-        {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
-        {FeatureExt(support_net::kExtOutfit41),Tx::versionFeatOutfit41},
-        {FeatureExt(support_net::kExtBvmPlayers),Tx::versionFeatBvmPlayers},
-        {FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack},
-        {FeatureExt(support_net::kExtGravity),Tx::versionFeatGravity},
-        {FeatureExt(support_net::kExtFloatGun),Tx::versionFeatFloatGun},
-        {FeatureExt(support_net::kExtUltimate),Tx::versionFeatUltimate},
-        {FeatureExt(support_net::kExtPlayerVehicle),Tx::versionFeatPlayerVehicle},
-        {FeatureExt(support_net::kExtBarrage),Tx::versionFeatBarrage},
-        {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
-        {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
-        {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
-    // At most kNamed named, then "and more": the line stays within the HUD's one line.
-    constexpr int kNamed=3;
-    int named=0;bool more=false;
-    const auto add=[&](const wchar_t* word) noexcept {
-        if(named>=kNamed){more=true;return;}
-        const std::size_t used=std::wcslen(out);
-        _snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls%ls",used ? Tr(Tx::versionListSep) : L"",word);
-        ++named;
-    };
-    // Without the rescue at all, its channel goes unsaid (the line stays within the HUD's one line).
-    if(caps&FeatureExt(support_net::kExtSeaRescue))caps&=~FeatureExt(support_net::kExtRescueChannel);
-    for(const auto& n:kNames)if(caps&n.bit)add(Tr(n.text));
-    if(command)add(Tr(Tx::versionFeatCommand));
-    if(!out[0])add(Tr(Tx::versionFeatSome));
-    if(more){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,size-used,_TRUNCATE,L"%ls",Tr(Tx::versionListMore));}
-}
-// The room's builds compared (version_notice.h), said once a change: logged, and shown on the HUD a while.
-void VersionTick(bool online) noexcept {
-    versionnote::State s;
-    s.online=online;s.host=snapshot.isHost!=0;s.mine=support_net::kFeatures;
-    s.hostKnown=session.HostCapsKnown();s.hostCaps=session.HostCaps();s.roomBehind=session.RoomBehindHost();
-    // The newest build whose welcome carried nothing: the one before the sea rescue (every capability, the variants).
-    s.silentHost=support_net::Features(support_net::kCapabilities,support_net::kExtVariants);
-    s.peersBehind=session.PeersBehind(&s.peersMissing);s.peersAhead=session.PeersAhead();
-    for(std::uint32_t i=1;online && i<=snapshot.peerCount && i<=support_net::kMaxPeers;++i)if(commandVersionOf[i])++s.commandPeers;
-    const versionnote::Notice n=versionnote::Compare(s);
-    if(n==versionShown)return;
-    versionShown=n;
-    using hudtext::Tr;using hudtext::Tx;
-    // Two lines: who is older or newer, then what does not work in this room because of it.
-    wchar_t text[200]{},features[120]{};
-    Features(n.missing,n.command,features,_countof(features));
-    switch(n.kind) {
-    case versionnote::Kind::none: break;
-    case versionnote::Kind::hostOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionHostOlder));break;
-    case versionnote::Kind::selfOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionSelfOlder));break;
-    case versionnote::Kind::peersOlder: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersOlder),static_cast<int>(n.count));break;
-    case versionnote::Kind::peersNewer: _snwprintf_s(text,_TRUNCATE,Tr(Tx::versionPeersNewer),static_cast<int>(n.count));break;
-    case versionnote::Kind::roomOlder: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionRoomOlder));break;
-    case versionnote::Kind::commandOnly: _snwprintf_s(text,_TRUNCATE,L"%ls",Tr(Tx::versionCommandOnly));break;
-    }
-    if(n.kind!=versionnote::Kind::none && n.kind!=versionnote::Kind::selfOlder && n.kind!=versionnote::Kind::peersNewer) {
-        const std::size_t used=std::wcslen(text);
-        _snwprintf_s(text+used,_countof(text)-used,_TRUNCATE,L"\n");
-        const std::size_t more=std::wcslen(text);
-        _snwprintf_s(text+more,_countof(text)-more,_TRUNCATE,Tr(Tx::versionUnavailable),features);
-    }
-    Log("SUPPORT NET builds: kind=%d host=%d mine=0x%X hostKnown=%d hostCaps=0x%X roomBehind=%d peersBehind=%u missing=0x%X ahead=%u "
-        "commandPeers=%u%s",static_cast<int>(n.kind),s.host,s.mine,s.hostKnown,s.hostCaps,s.roomBehind,s.peersBehind,s.peersMissing,
-        s.peersAhead,s.commandPeers,n.kind==versionnote::Kind::none ? " (the same build everywhere)" : "");
-    AcquireSRWLockExclusive(&versionLock);
-    std::memcpy(versionText,text,sizeof(text));versionAt=n.kind==versionnote::Kind::none ? 0 : GetTickCount64();
-    ReleaseSRWLockExclusive(&versionLock);
 }
 }
 namespace {
@@ -474,8 +385,6 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 void ResetSupportNet() noexcept {
     session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastFrame=~0ULL;contextTold=false;ResetWorld();
     senderCheckLogs.store(0);
-    for(auto& v:commandVersionOf)v=0;
-    versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
     commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
 }
 // The transport lost (its generation changed, or the room not ready a moment: EDF6Coop's room lease is 2 s and a link
@@ -527,22 +436,27 @@ void RunSupportNetTick() noexcept {
             const EDF6CoopExtensionMessage& item=batch[k];
             ++netPerf.messages;
             // The sender is EDF6Coop's index of its authenticated peer (the order Start enumerated them in): peers[index+1].
+            // A state message (ABI 2 flags bit 0) has its key, a reliable one none; any other flag is not this ABI's.
+            const bool state=(item.flags&EDF6COOP_EXTENSION_MESSAGE_STATE)!=0;
             if(item.peer>=snapshot.peerCount || !item.bytes || item.bytes>EDF6COOP_EXTENSION_MAX_PAYLOAD ||
-               item.offset>sizeof(batchBytes)-item.bytes)continue;
+               item.offset>sizeof(batchBytes)-item.bytes || (item.flags&~EDF6COOP_EXTENSION_MESSAGE_STATE) ||
+               state!=(item.key!=0))continue;
             const std::uint32_t peer=item.peer+1,count=item.bytes;
             const unsigned char* bytes=batchBytes+item.offset;
-            NoteForeignVersion(peer,bytes,count);
-            if(plugin_net::Receive(peer,peers[peer].id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
+            // A channel's (plugin_net.h), before the support parser. A state message is a channel's or nothing: the support
+            // protocol sends none (plugin_net::Receive drops one no channel takes).
+            if(plugin_net::Receive(peer,peers[peer].id,bytes,count,now,state) || state)continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
-                const bool wasReady=session.Ready();const auto epoch=session.Epoch();
+                const bool wasReady=session.Ready(),wasRoomReady=session.RoomReady();const auto epoch=session.Epoch();
                 session.Receive(peer,message,now);
                 if(session.PendingHandshakes()!=pending)Log("SUPPORT NET handshake: kind=%u peer=%u pending=%u ready=%d",
                     static_cast<unsigned>(message.kind),peer,session.PendingHandshakes(),session.Ready());
-                // The channels' context changes only with the session's readiness or epoch: told before the next message.
-                // (It ran before every message until 2026-10-30: every channel's whole frame, once a received message.)
-                if(session.Ready()!=wasReady || session.Epoch()!=epoch)CommandContext(now);
+                // The channels' context changes only with the session's readiness (its room's too) or epoch: told before
+                // the next message. (It ran before every message until 2026-10-30: every channel's whole frame, once a
+                // received message.)
+                if(session.Ready()!=wasReady || session.RoomReady()!=wasRoomReady || session.Epoch()!=epoch)CommandContext(now);
             } else if(count>=4 && wire::HeadWord(bytes,count,0)==support_net::kMagic) {
                 Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
             } else NoteUnknown(peer,bytes,count);
@@ -552,7 +466,6 @@ void RunSupportNetTick() noexcept {
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
     RangeEnemyNetworkTick();
-    VersionTick(running);
     CommandContext(now);
     if(session.Suspended())SuspendSupportNet(false);
 }
@@ -615,16 +528,6 @@ bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
     return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
 }
 bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
-bool SupportPeersApplyBackpacks() noexcept { return !running || session.PeersHaveExtension(support_net::kExtBackpack); }
-bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHaveExtension(support_net::kExtSeaRescue); }
-bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
-    constexpr ULONGLONG kShowMs=12000;
-    AcquireSRWLockShared(&versionLock);
-    const bool fresh=versionAt && GetTickCount64()-versionAt<=kShowMs && out && capacity;
-    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",versionText);
-    ReleaseSRWLockShared(&versionLock);
-    return fresh;
-}
 bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept {
     std::uint32_t peer=0;
     if(!out || !session.RequesterOf(token,&peer))return false;

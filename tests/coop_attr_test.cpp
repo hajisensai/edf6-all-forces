@@ -90,10 +90,23 @@ void Publishing() {
     std::uint32_t why=0;
     Expect(p.Publish(&t,"c",&why)==coopattr::Publisher::Result::refused && why==EDF6COOP_MA_VALUE_BUDGET,"a refusal and its reason");
     Expect(p.Publish(&t,"c")==coopattr::Publisher::Result::refusedAgain,"the same refusal: not told again");
+    Expect(p.Publish(&t,"d")==coopattr::Publisher::Result::refused,"another value refused for the same reason: told");
+    Expect(p.Publish(&t,"d")==coopattr::Publisher::Result::refusedAgain,"and only once");
+    // A retry period: the refused value is not asked again before it is over (a caller called every frame).
+    coopattr::Publisher r{"EDF6X_TEST"};
+    const int before=publishes;
+    Expect(r.Publish(&t,"e",&why,1000,1000)==coopattr::Publisher::Result::refused && publishes==before+1,"refused at 1000 ms");
+    why=0;
+    Expect(r.Publish(&t,"e",&why,1500,1000)==coopattr::Publisher::Result::refusedAgain && publishes==before+1 &&
+           why==EDF6COOP_MA_VALUE_BUDGET,"500 ms later: not asked, the reason kept");
+    Expect(r.Publish(&t,"f",&why,1600,1000)==coopattr::Publisher::Result::refused && publishes==before+2,"a new value: asked at once");
+    Expect(r.Publish(&t,"f",&why,2700,1000)==coopattr::Publisher::Result::refusedAgain && publishes==before+3,"the period over: asked again, not told");
     refuse=false;
+    Expect(r.Publish(&t,"f",&why,2800,1000)==coopattr::Publisher::Result::refusedAgain && publishes==before+3,"accepted only once the period is over");
+    Expect(r.Publish(&t,"f",&why,3700,1000)==coopattr::Publisher::Result::published && publishes==before+4,"then published");
     Expect(p.Publish(&t,"c")==coopattr::Publisher::Result::published,"accepted later");
     p.Forget();
-    Expect(p.Publish(&t,"c")==coopattr::Publisher::Result::published && publishes==6,"after Forget (another EDF6Coop): published again");
+    Expect(p.Publish(&t,"c")==coopattr::Publisher::Result::published && publishes==12,"after Forget (another EDF6Coop): published again");
     const auto noError=Table(EDF6COOP_MEMBER_ATTRIBUTE_VERSION,false);
     coopattr::Publisher q{"EDF6X_TEST"};
     refuse=true;why=7;
@@ -242,12 +255,13 @@ void Commander() {
 }
 }  // namespace
 
-// The room protocol's EDF6Coop: 2.8.0 and later (coop_attr.h kRoomCoop*).
+// The room protocol's EDF6Coop: 2.9.0 and later (coop_attr.h kRoomCoop*).
 void RoomVersion() {
     using crew::coopattr::CoopVersion;
     int a=-1,b=-1,c=-1;
-    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.8.0",&a,&b,&c)==CoopVersion::ok && a==2 && b==8 && c==0,"2.8.0 is enough");
-    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.10.0",nullptr,nullptr,nullptr)==CoopVersion::ok,"2.10.0 is later than 2.8.0");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.9.0",&a,&b,&c)==CoopVersion::ok && a==2 && b==9 && c==0,"2.9.0 is enough");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.10.0",nullptr,nullptr,nullptr)==CoopVersion::ok,"2.10.0 is later than 2.9.0");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.8.0",&a,&b,&c)==CoopVersion::old && a==2 && b==8 && c==0,"2.8.0 (extension ABI 1, no state messages) is too old");
     Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.7.2",&a,&b,&c)==CoopVersion::old && a==2 && b==7 && c==2,"2.7.2 (no recoverable overflow) is too old");
     Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=3.0.0",nullptr,nullptr,nullptr)==CoopVersion::ok,"3.0.0 too");
     Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.6.1",&a,&b,&c)==CoopVersion::old && a==2 && b==6 && c==1,"2.6.1 is too old, read back");

@@ -87,8 +87,8 @@ struct Config {
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;  // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
     int maxFrameLatency=0;     // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
-    bool frameRateDev=false;   // ini FrameRateDev (not in the shipped ini): frame_rate.cpp's stage 2 (latency-3 alone at FrameRateCap=0); read at start only
-    int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz, -1 no cap, 61..1000; read at start only; not wired into the game yet (docs/unlimited-fps-re.md)
+    bool frameRateFlip=false;  // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
+    int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz (shipped), 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
     float stockMissileNav=3.0f;// ...its navigation constant (2..6)
     bool playerLockByView=true;
@@ -1121,8 +1121,6 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
 void UltimateTick() noexcept;
 void ResetUltimate() noexcept;
 void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
-// The caller's HUD line (hud.cpp): a peer in the room without the ultimate's channel does not see the show.
-bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.

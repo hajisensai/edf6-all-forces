@@ -38,6 +38,26 @@ check(all(ln.startswith(('if(!image)', 'if(!probe)')) for ln in lines), f'early 
 check(len(re.findall(r'\breturn\b', body[pump:])) == 1 and body.rstrip().endswith('return pump && tick;'),
       'nothing after PumpWait returns early')
 before_tick = body[:tick]
+# Another frame limiter on the frame step's wait (EDF6VR, which patches it later, from its DLL; an FPS unlimiter patch,
+# from the bytes): asked before TickWait, and TickWait only in the branch where there is none.
+foreign = before_tick.find('pacing::ForeignTickWait(image+kTickSleep,kTickSig,image+kTickBranch,kTickBranchSig,EdfVrInstalled())')
+check(foreign >= 0, 'InstallFramePacing asks ForeignTickWait (with EdfVrInstalled) before TickWait')
+check(re.search(r'foreign==pacing::Foreign::kVr\)\s*Log\(', before_tick[foreign:]) and
+      re.search(r'else if\(foreign!=pacing::Foreign::kNone\)\s*Log\(', before_tick[foreign:]),
+      'EDF6VR and a foreign patch each log a line and leave the wait')
+vr = re.search(r'bool EdfVrInstalled\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
+check(vr and 'GetModuleHandleW(L"EDF6VR.dll")' in vr.group(1) and vr.group(1).count('L"EDF6VR.dll"') == 2
+      and 'GetFileAttributesW' in vr.group(1), 'EdfVrInstalled: loaded already, or its DLL beside this one (it loads after)')
+# The frame rate (frame_rate.cpp): with the wait not ours, nothing of it goes in (no input move, guards, sync or Present
+# leaf without the gate): GateSitesAsRead, which asks FramePacingTickWaitInstalled, before the first install.
+rate = open(os.path.join(ROOT, 'src', 'frame_rate.cpp'), encoding='utf-8').read()
+gs = re.search(r'bool GateSitesAsRead\(\) noexcept \{\n(.*?)\n\}\n', rate, re.S)
+check(gs and gs.group(1).find('FramePacingTickWaitInstalled()') >= 0, 'GateSitesAsRead asks whose the wait is')
+fr = re.search(r'void InstallFrameRate\(\) noexcept \{\n(.*?)\n\}\n', rate, re.S)
+check(fr, 'InstallFrameRate found')
+frb = re.sub(r'//[^\n]*', '', fr.group(1))
+first = min(i for i in (frb.find('InstallInputMove()'), frb.find('InstallSwapFlip('), frb.find('InstallGuards()')) if i >= 0)
+check(0 <= frb.find('if(!GateSitesAsRead())return;') < first, 'InstallFrameRate asks GateSitesAsRead before it installs anything')
 for name in ('kTickArg', 'kTickCountSig', 'tickPeriod'):
     check(re.search(rf'\b{name}\b', before_tick[pump:]), f'TickWait is gated by {name}')
 

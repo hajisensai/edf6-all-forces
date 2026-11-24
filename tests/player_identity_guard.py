@@ -103,13 +103,14 @@ PLAYER_NETID = re.compile(r'ReadNativeObjectId\(\s*(PlayerHuman\(\)|me|human|who
                           r'static_cast<const unsigned char\*>\(\s*(requester|actor|owner|ownerPlayer)\.obj\s*\))\s*,')
 VERSIONS = [
     ('src/mod_room.h', r'kAllForcesRoomProtocol=(\d+)', 18),
-    ('src/command_protocol.h', r'kMinVersion=(\d+)', 10),
+    ('src/command_protocol.h', r'kVersion=(\d+)', 10),
     ('src/player_vehicle_logic.h', r'kVersion=(\d+)', 4),
     ('src/barrage_net_protocol.h', r'kVersion=(\d+)', 4),
     ('src/ultimate_net_protocol.h', r'kVersion=(\d+)', 3),
     ('src/qmark_protocol.h', r'kVersion=(\d+)', 3),
     ('src/gravity_net_protocol.h', r'kVersion=(\d+)', 4),
-    ('src/enemy_control_protocol.h', r'kVersion=(\d+)', 7),
+    ('src/enemy_control_protocol.h', r'kVersion=(\d+)', 8),
+    ('src/enemy_control_pose_codec.h', r'kWireVersion=(\d+)u', 2),
     ('src/enemy_control_net_input.h', r'kInputVersion=(\d+)', 4),
     ('src/enemy_control_deiroi_net_codec.h', r'kVersion=(\d+)', 2),
     ('src/enemy_control_monster_net_codec.h', r'kVersion=(\d+)', 2),

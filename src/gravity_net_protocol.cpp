@@ -97,7 +97,13 @@ GrabEvent GrabInbox::Receive(std::uint32_t peer,const Grab& g,std::uint64_t now)
     const bool same=r.active && r.last.origin==g.origin && r.last.grab==g.grab;
     // An ended grab, or an older one of the same run: nothing (the transport is ordered; this guards a replay).
     if(d.any && d.origin==g.origin && static_cast<std::int32_t>(g.grab-d.grab)<=0)return GrabEvent::none;
-    if(!same && r.active && r.last.origin==g.origin && static_cast<std::int32_t>(g.grab-r.last.grab)<0)return GrabEvent::none;
+    if(!same && r.active && r.last.origin==g.origin && static_cast<std::int32_t>(g.grab-r.last.grab)<0) {
+        // The next grab's hold (a state message) overtook this one's reliable end: a hold of it is old, its throw still
+        // happens (on its own target), its let-go is moot. Ended now: a second copy or a late hold of it is nothing.
+        if(g.kind==GrabKind::hold)return GrabEvent::none;
+        d=Done{g.origin,g.grab,true,g.kind==GrabKind::thrown};
+        return g.kind==GrabKind::thrown ? GrabEvent::thrownBehind : GrabEvent::none;
+    }
     if(g.kind==GrabKind::hold) {
         r.active=true;r.heardAt=now;r.last=g;
         return same ? GrabEvent::held : GrabEvent::started;
@@ -106,6 +112,12 @@ GrabEvent GrabInbox::Receive(std::uint32_t peer,const Grab& g,std::uint64_t now)
     d=Done{g.origin,g.grab,true,g.kind==GrabKind::thrown};
     if(g.kind==GrabKind::letGo)return same ? GrabEvent::letGo : GrabEvent::none;
     return GrabEvent::thrown;
+}
+
+bool GrabState(const void* bytes,std::size_t size) noexcept {
+    if(!OwnedGrab(bytes,size) || size!=kGrabWire)return false;
+    const auto kind=static_cast<const unsigned char*>(bytes)[8];   // after the magic and the version
+    return kind==static_cast<unsigned char>(GrabKind::hold) || kind==static_cast<unsigned char>(GrabKind::flight);
 }
 
 bool GrabInbox::Holding(std::uint32_t peer,std::uint64_t now) noexcept {

@@ -229,23 +229,7 @@ void Session::InterruptLocalRequests() noexcept {
 void Session::Stop() noexcept {
     ClearTransactions();nextTransaction_=0;running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
     peerExt_.fill(0);peerDetails_.fill(0);for(auto& b:peerBloom_)b.fill(0);
-    hostCaps_=0;hostDetails_=0;hostCapsKnown_=false;hostRoomBehind_=false;
-}
-std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
-    std::uint32_t behind=0,lack=0;
-    for(std::uint32_t i=1;host_ && i<=peers_;++i) {
-        if(!challenges_[i])continue;   // not heard yet
-        const std::uint32_t gap=kFeatures&~Features(peerCaps_[i],peerExt_[i]);
-        if(gap){++behind;lack|=gap;}
-    }
-    if(missing)*missing=lack;
-    return behind;
-}
-std::uint32_t Session::PeersAhead() const noexcept {
-    std::uint32_t ahead=0;
-    // A newer guest: a capability or an extension bit this build does not know (peerExt_ keeps the hello's whole word).
-    for(std::uint32_t i=1;host_ && i<=peers_;++i)if(challenges_[i] && ((peerCaps_[i]&~kCapabilities) || (peerExt_[i]&~kExtensions)))++ahead;
-    return ahead;
+    hostDetails_=0;hostCapsKnown_=false;hostRoomReady_=false;
 }
 bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcept {
     if(!token || !peer)return false;
@@ -302,7 +286,7 @@ void Session::Start(bool host,std::uint32_t peers,std::uint32_t hostPeer,std::ui
         if(host!=host_ || peers!=peers_ || hostPeer!=hostPeer_)return;
         epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);peerExt_.fill(0);peerDetails_.fill(0);
         for(auto& b:peerBloom_)b.fill(0);
-        hostCaps_=0;hostDetails_=0;hostCapsKnown_=false;hostRoomBehind_=false;
+        hostDetails_=0;hostCapsKnown_=false;hostRoomReady_=false;
     } else {
         Stop();host_=host;peers_=peers;hostPeer_=hostPeer;
     }
@@ -326,10 +310,9 @@ bool Session::Broadcast(Message m) noexcept {
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
     Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
-    // This build's features (support_protocol.h kFeatures): the low ten bits where an older guest reads them, the whole
-    // extension word beside them (WelcomeFeatures).
-    m.catalog=kFeatures&kWelcomeCatalogMask;m.ok=PeersBehind(nullptr) ? 1u : 0u;
-    m.unit.resourceId=kExtensions;
+    // `ok`: every peer's hello of this handshake heard (support_protocol.h; the guest's RoomReady).
+    bool heard=true;for(std::uint32_t i=1;i<=peers_;++i)if(!challenges_[i])heard=false;
+    m.ok=heard ? 1u : 0u;
     m.unit.role=kDetails;
     Send(peer,m);
 }
@@ -449,7 +432,7 @@ Session::Transaction* Session::AllocateTransaction() noexcept {
 }
 // Two channels (2026-10-10): the map's (and the mission crew's), one transaction in flight in the whole room (the
 // planner's state is one), each requester's requests 2 s apart and one of its own at a time, another's queued behind it
-// (2026-10-30, Phase::queued); and, when every peer has kExtRescueChannel, the sea rescue's: one in flight per
+// (2026-10-30, Phase::queued); and the sea rescue's (every machine of the room has it: mod_room.h): one in flight per
 // requester beside anything else, each requester's rescues rescueCooldown_ apart from its last one made. Both draw on
 // the same bounded live slots and native ordinals; a failed one of either rolls back alone (Cancel of its own id).
 // Explicit prepared drone children have their own parent/slot channel and never
@@ -461,10 +444,9 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
         return;
     }
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
-    const bool isRescue=backend_.hooks.ownChannel && backend_.hooks.ownChannel(m.catalog);
-    const bool channel=isRescue && PeersHaveExtension(kExtRescueChannel);
+    const bool channel=backend_.hooks.ownChannel && backend_.hooks.ownChannel(m.catalog);   // a sea rescue
     if(!Ready()) {Refuse(peer,m,"the session is not ready");return;}
-    if(isRescue && rescueAt_[peer] && now-rescueAt_[peer]<rescueCooldown_) {Refuse(peer,m,"its rescue cooldown");return;}
+    if(channel && rescueAt_[peer] && now-rescueAt_[peer]<rescueCooldown_) {Refuse(peer,m,"its rescue cooldown");return;}
     if(!channel) {
         if(lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000) {Refuse(peer,m,"2 s after its previous request");return;}
         lastRequestAt_[peer]=now;
@@ -594,7 +576,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(host_ && m.kind==Kind::hello) {
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
         peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
-        // The whole extension word (PeersAhead reads the bits this build does not know) and the variant files' filter.
+        // The extension word (kExtVariants) and the variant files' filter.
         peerExt_[peer]=m.unit.resourceId;peerDetails_[peer]=m.unit.role;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             // The peer started over (a transport blip it resumed from, 2026-10-30): a new epoch for everyone. Every end
@@ -609,12 +591,20 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
             if(!epoch_){Stop();return;}
             challenges_[peer]=m.challenge;
             for(std::uint32_t i=1;i<=peers_;++i)if(challenges_[i])Welcome(i);
-        } else {challenges_[peer]=m.challenge;Welcome(peer);}
+        } else {
+            // The last hello of this handshake heard: every peer is welcomed again at once, its `ok` saying the room is
+            // ready (a guest's plugin_net channels join then: RoomReady); else only this one.
+            bool before=true;for(std::uint32_t i=1;i<=peers_;++i)if(!challenges_[i])before=false;
+            challenges_[peer]=m.challenge;
+            bool after=true;for(std::uint32_t i=1;i<=peers_;++i)if(!challenges_[i])after=false;
+            if(after && !before)for(std::uint32_t i=1;i<=peers_;++i)Welcome(i);
+            else Welcome(peer);
+        }
         return;
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
-        hostCaps_=WelcomeFeatures(m.catalog,m.unit.resourceId);hostDetails_=m.unit.role;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
+        hostDetails_=m.unit.role;hostRoomReady_=m.ok!=0;hostCapsKnown_=true;   // the room ready: every hello heard
         if(epoch_!=m.epoch){Retain();epoch_=m.epoch;}   // as the host's re-handshake: kept, the ids going on
         seenEpochSerial_=m.request;
         return;
@@ -719,7 +709,6 @@ void Session::Tick(std::uint64_t now) noexcept {
     if(!host_ && now-lastHello_>=1000) {
         Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;
         if(backend_.hooks.variants)backend_.hooks.variants(&m.unit.resourceId,m.unit.netId);
-        m.unit.resourceId|=kExtBuilt;   // the catalog's and the protocol's, announced whatever the variants hook said
         m.unit.role=kDetails;
         Send(hostPeer_,m);lastHello_=now;
     }

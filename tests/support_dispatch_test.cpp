@@ -282,9 +282,8 @@ bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,
     if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
     ++activated;lastAirborne=airborne;return true;
 }
-bool peersAirborne=true,peersRescue=true;
+bool peersAirborne=true;
 bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
-bool SupportPeersAcceptRescue() noexcept {return peersRescue;}
 // heli.cpp's half of the sea rescue: what the dispatcher hands it.
 int rescueDeployed=0,rescueFailed=0;unsigned char* rescueHeli=nullptr;float rescueTarget[3]{};bool rescueFlown=false;
 ObjRef rescueRequester{},hostRequester{};
@@ -396,8 +395,6 @@ void NoteMissingVariant(const wchar_t* file,const char*) noexcept {missingNoted.
 void SupportVariantHello(std::uint32_t* ext,unsigned char*) noexcept {if(ext)*ext=support_net::kExtVariants;}
 bool peersApplyVariants=true,peersHaveFiles=true;
 bool SupportPeersApplyVariants() noexcept {return peersApplyVariants;}
-bool peersApplyBackpacks=true;
-bool SupportPeersApplyBackpacks() noexcept {return peersApplyBackpacks;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept {return peersHaveFiles;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
@@ -1379,30 +1376,6 @@ int main() {
         ResetSupportDispatch();
     }
     {
-        // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
-        // compatible resource still supplies its colours immediately (no pending-list round trip).
-        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_backpack_compat_test");
-        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
-        const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
-        std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
-        variantFiles={L"EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
-                      L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};
-        testOnline=true;peersApplyBackpacks=false;peersApplyVariants=true;peersHaveFiles=true;
-        ResetSupportDispatch();SupportPlan plan{};SupportLook look;
-        const auto load=PackSupportLoadout(PresetLoadout(SupportCfg().preset[21]));
-        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
-              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && !look.pack && look.primary==0x1E3A8A,
-              "older peer: its pack is absent but the colours are applied on the first plan");
-        wchar_t madePath[128];
-        check(SupportSoldierLookPath(plan.units[0].resourceId,plan.units[0].variant,true,madePath,128)==madePath &&
-              !std::wcscmp(madePath,L"app:/object/edf6vc_npc_rifle_l_1e3a8a_x.sgo"),"the downgraded plan uses its colour-only resource");
-        peersApplyBackpacks=true;ResetSupportDispatch();plan={};
-        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
-              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && look.pack==1 && look.primary==0x1E3A8A,
-              "every peer updated: the same preset applies its pack and its colours");
-        testOnline=false;ResetSupportDispatch();
-    }
-    {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
         // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
         // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
@@ -1755,10 +1728,7 @@ int main() {
     config.seaRescue=false;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"海上救援"),"SeaRescue=0: refused, the reason returned");
     config.seaRescue=true;
-    peersRescue=false;
-    check(!SupportRescueAt(sea,note,128) && !made && std::wcscmp(note,hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate))==0,
-          "a peer without the rescue entry: refused before anything exists, and said why");
-    peersRescue=true;planRefusal=support::Refusal::noSky;
+    planRefusal=support::Refusal::noSky;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"开放天空"),"no open sky: refused with its reason");
     planRefusal=support::Refusal::noEntry;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"航线"),"no air corridor: refused with its reason");

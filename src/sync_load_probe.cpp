@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <iterator>
@@ -112,12 +113,14 @@ void Flush() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(debug && now-statsAt>=kStatsEveryMs && totals.calls) {
         const Totals d=totals.Since(logged);
-        const double secs=statsAt ? static_cast<double>(now-statsAt)/1000.0 : 0.0;
+        // The first line's part is everything since load (no line before it to count from), said so, not "the last 0 s".
+        char span[32]="since load";
+        if(statsAt)_snprintf_s(span,sizeof(span),_TRUNCATE,"the last %.0f s",static_cast<double>(now-statsAt)/1000.0);
         statsAt=now;logged=totals;
         Log("SYNC LOAD STATS since load, game thread: %llu cache calls, %llu loads (%.1f ms, worst %.1f, %llu not found), "
-            "%llu waits (%.1f ms), %llu lines dropped; the last %.0f s: +%llu calls, +%llu loads (%.1f ms), +%llu waits "
+            "%llu waits (%.1f ms), %llu lines dropped; %s: +%llu calls, +%llu loads (%.1f ms), +%llu waits "
             "(%.1f ms); the hook's own time %.2f us a call",totals.calls,totals.loads,totals.loadMs,worstMs,totals.missing,
-            totals.waits,totals.waitMs,totals.dropped,secs,d.calls,d.loads,d.loadMs,d.waits,d.waitMs,
+            totals.waits,totals.waitMs,totals.dropped,span,d.calls,d.loads,d.loadMs,d.waits,d.waitMs,
             static_cast<double>(self)*tickMs*1000.0/static_cast<double>(totals.calls));
     }
 }

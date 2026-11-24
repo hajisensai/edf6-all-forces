@@ -55,13 +55,23 @@ void WritePending(const char* text,std::size_t n,unsigned dropped) noexcept {
     }
 }
 
-// A crash's write (CrashFlush), on the crash dump's thread while the crashed one may own the process heap's or the CRT's
-// lock: the handle already open and the bytes already formatted, nothing else. A log not opened yet stays unopened
-// (no CreateFileW), one past logMax grows on (no MoveFileExW), the dropped count is a fixed line (no _snprintf_s).
+// A crash's write (CrashFlush, Crash), on the crash dump's thread while the crashed one may own the process heap's or
+// the CRT's lock: the bytes already formatted, to the log's one handle. A log not opened yet is opened here, once: the
+// crash line needs a handle anyway (AppendCrashLine opened one per crash), and leaving it unopened dropped the lines
+// before the crash for no lock saved. One past logMax grows on (no MoveFileExW), the dropped count is a fixed line
+// (no _snprintf_s). Crash's own line (crashText) goes after the buffered ones under the same file lock.
 constexpr char kCrashDropped[]="(log lines dropped before the crash)\r\n";
+const char* crashText=nullptr;
+std::size_t crashSize=0;
+bool crashHandled=false;   // WriteCrash ran for Crash (both locks taken): the crash line is its
 void WriteCrash(const char* text,std::size_t n,unsigned dropped) noexcept {
+    if(!file)file=Open();
     Put(text,n);
     if(dropped)Put(kCrashDropped,sizeof(kCrashDropped)-1);
+    if(crashText) {
+        Put(crashText,crashSize);   // nothing when the open failed: a second CreateFileW would fail as well
+        crashHandled=true;
+    }
 }
 
 DWORD WINAPI Writer(void*) {
@@ -112,8 +122,11 @@ void CrashFlush() noexcept {
 }
 
 void Crash(const char* text,std::size_t size) noexcept {
-    CrashFlush();   // the lines before the crash first, in order
-    AppendCrashLine(logPath,text,size);
+    if(!logPath[0])return;
+    crashText=text;crashSize=size;crashHandled=false;
+    buffer.Drain(&WriteCrash,true,true);   // the lines before the crash, then the crash line: one handle
+    crashText=nullptr;
+    if(!crashHandled)AppendCrashLine(logPath,text,size);   // a lock held: the crash line by itself, its own handle
 }
 
 }  // namespace edf::logfile

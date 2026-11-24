@@ -194,7 +194,7 @@ void SharedPoolCoversEightNativeControllers() {
 }
 void PacedEightControllersRetainAndRotate() {
     Room r(9);EnableClosing(r);
-    for(auto& node:r.nodes)Check(node->protocol.SetSendPacing(true),"real sender pacing binds before actor acquisition");
+    for(auto& node:r.nodes)Check(node->protocol.SetReliableOrderedTransport(true),"real sender pacing binds before actor acquisition");
     for(unsigned owner=1;owner<=8;++owner){Check(r.Request(owner,99+owner),"paced native body acquired");r.Settle();}
     for(unsigned owner=1;owner<=8;++owner)for(unsigned n=0;n<kActionWindow;++n) {
         auto bytes=ActionBytes(20,owner);bytes[0]=static_cast<unsigned char>(owner);bytes[1]=static_cast<unsigned char>(n);
@@ -222,7 +222,7 @@ void PacedEightControllersRetainAndRotate() {
 }
 void PacedSdkCreditsRetainUnsentBatches() {
     for(std::size_t payloadSize:{20u,37u,93u,512u}) {
-    Room r(9);EnableActions(r);for(auto& node:r.nodes)Check(node->protocol.SetSendPacing(true),"SDK byte pacing binds before native admission");
+    Room r(9);EnableActions(r);for(auto& node:r.nodes)Check(node->protocol.SetReliableOrderedTransport(true),"SDK byte pacing binds before native admission");
     for(unsigned owner=1;owner<=8;++owner){Check(r.Request(owner,99+owner),"credit stress body acquired");r.Settle();}
     const auto bytes=ActionBytes(payloadSize,9);
     for(unsigned owner=1;owner<=8;++owner)for(unsigned n=0;n<kActionWindow;++n)Check(r.nodes[0]->protocol.SubmitAction(owner,bytes.data(),bytes.size(),r.now),"full native batch remains stored before any transport quota");

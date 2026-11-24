@@ -27,7 +27,6 @@
 #include "heli.h"           // MapRay, VisitEnemiesOf
 #include "memory.h"
 #include "plugin_net.h"
-#include "support_protocol.h"   // kExtBarrage
 #include "support_soldier.h"    // ReadNativeObjectId
 #include "support_warning.h"    // WarnBarrage
 #include <cmath>
@@ -219,7 +218,7 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
         Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no player of this mission's");
         return;
     }
-    const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));
+    const std::uint32_t sent=plugin_net::Broadcast(bytes,sizeof(bytes));
     Log("BARRAGE NET %s %08X:%u told to %u peer(s)",barrage::kKindNames[kind],m.origin,m.serial,sent);
 }
 }  // namespace
@@ -322,7 +321,7 @@ void ResetBarrages() noexcept {
     origin=plugin_net::NewOrigin();serial=0;heard.Clear();
 }
 
-// ---- the channel (plugin_net.h: BRGS, support_protocol.h kExtBarrage) ----
+// ---- the channel (plugin_net.h: BRGS) ----
 namespace {
 int netLogs=0;
 bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t) noexcept {
@@ -369,7 +368,7 @@ void ResetBarrageNetwork() noexcept {}
 
 plugin_net::Channel BarrageNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;c.featureBit=support_net::kExtBarrage;
+    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;
     c.minSize=c.maxSize=barrage_net::kWire;
     c.receive=&ReceiveBarrageNetwork;c.reset=&ResetBarrageNetwork;
     return c;

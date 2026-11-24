@@ -1147,8 +1147,11 @@ add_test(NAME frame_rate_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DI
 set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # Each of the two waits installed on its own checks only (tests/frame_pacing_install_guard.py).
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
-# Everything above 59.94 Hz is behind ini FrameRateDev, off and not in the shipped ini (tests/frame_rate_dev_guard.py).
-add_test(NAME frame_rate_dev_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_dev_guard.py")
+# FrameRateCap=0 installs nothing above 59.94 Hz; the developer switch FrameRateDev is gone (tests/frame_rate_off_guard.py).
+add_test(NAME frame_rate_off_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_off_guard.py")
+# 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
+# tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
+add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
@@ -1182,8 +1185,7 @@ add_test(NAME rescue_support_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 # The installer's logs send only crash dumps this install wrote (tools/testhub.py dump_matches).
 add_test(NAME testhub_dump_source COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/testhub_dump_source_test.py")
 set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
-# The rescue's cancel reasons, its takeoff point, and the room's build notice (pure: src/rescue_logic.h, support_entry.h,
-# version_notice.h).
+# The rescue's cancel reasons and its takeoff point (pure: src/rescue_logic.h, support_entry.h).
 add_executable(rescue_logic_test tests/rescue_logic_test.cpp)
 target_compile_options(rescue_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME rescue_logic COMMAND rescue_logic_test)
@@ -2159,6 +2161,13 @@ target_compile_options(fp_ride_lifecycle_test PRIVATE /W4 /WX /utf-8 /permissive
 target_link_options(fp_ride_lifecycle_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks fp_ride_lifecycle_test)
 add_test(NAME fp_ride_lifecycle COMMAND fp_ride_lifecycle_test)
+# The frame rate view's camera / root interpolation state machine (src/frame_rate_view.cpp) on heap fixtures.
+add_executable(frame_rate_view_test EXCLUDE_FROM_ALL tests/frame_rate_view_test.cpp)
+target_include_directories(frame_rate_view_test PRIVATE src common)
+target_link_libraries(frame_rate_view_test PRIVATE edf6common)
+target_compile_options(frame_rate_view_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks frame_rate_view_test)
+add_test(NAME frame_rate_view COMMAND frame_rate_view_test)
 add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
 target_include_directories(fp_skin_test PRIVATE src common)
 target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)
@@ -2611,6 +2620,8 @@ set_tests_properties(enemy_control_native_net_audit PROPERTIES SKIP_RETURN_CODE 
 edf6_feedback_fixture(enemy_control_pose_protocol_test enemy_control_pose_protocol tests/enemy_control_pose_protocol_test.cpp)
 
 edf6_feedback_fixture(enemy_control_pose_codec_test enemy_control_pose_codec tests/enemy_control_pose_codec_test.cpp)
+# Guest pose timeline for the fallback classes (net-9): src/enemy_control_pose_interp.h, pure.
+edf6_feedback_fixture(enemy_control_pose_interp_test enemy_control_pose_interp tests/enemy_control_pose_interp_test.cpp)
 
 edf6_feedback_fixture(edf41hector_control_fixture edf41hector_control tests/edf41hector_control_fixture.cpp)
 

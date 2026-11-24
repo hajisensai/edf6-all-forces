@@ -598,12 +598,12 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
-    n.frameRateDev=ReadBool(L"FrameRateDev",n.frameRateDev);
+    n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
     n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency)),0,3));
     {
         const int raw=ReadInt(L"FrameRateCap",static_cast<DWORD>(n.frameRateCap));
         n.frameRateCap=framerate::FixCap(raw);
-        if(n.frameRateCap!=raw)Log("CONFIG FrameRateCap=%d: %d used (0 the game's own 59.94, -1 no cap, 61..1000)",raw,n.frameRateCap);
+        if(n.frameRateCap!=raw)Log("CONFIG FrameRateCap=%d: %d used (1 the display's refresh rate, 0 the game's own 59.94, -1 no cap, 61..1000)",raw,n.frameRateCap);
     }
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
@@ -1185,8 +1185,9 @@ void Log(const char* format,...) noexcept {
 
 // What is buffered written now, best-effort: both locks once without waiting (edf::logfile::Flush(true)); it may open
 // the log or rotate it as the writer would, so it is not the crash path. A crash goes through CrashLog below:
-// edf::logfile::Crash writes the older lines first (CrashFlush: the open handle only, no open, rotation or CRT
-// formatting) and then the crash line by its own raw append, after the dump is written.
+// edf::logfile::Crash, after the dump is written, writes the older lines and then the crash line through the log's one
+// handle (opened then if it was not yet; no rotation, no CRT formatting), or with a log lock held the crash line alone
+// by its own raw append.
 void FlushLog() noexcept {
     edf::logfile::Flush();
 }
@@ -1312,8 +1313,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
     InstallRenderFence();      // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
     InstallFrameLatency();     // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
-    // ini FrameRateCap (docs/unlimited-fps-re.md): stage 2 only under the developer switch FrameRateDev (frames without a
-    // step show the same picture until the interpolation is in); without it a log line says the setting was read.
+    // ini FrameRateCap (docs/unlimited-fps-re.md): 0 the game's 59.94 Hz, nothing installed; otherwise frames between the
+    // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
+    // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows

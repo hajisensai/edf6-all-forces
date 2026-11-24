@@ -1336,7 +1336,6 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
-    r.squadToolsAllowed=!InSession() || MapCommandNetworkVersion()>=7;   // the formation order online (v7)
     for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
         const auto& entry=g.list[i];
         if(entry.owner==Owner::squad && !entry.u.locked)++r.selectedSquads;

@@ -78,11 +78,13 @@ const wchar_t* CoopVersionProblem() noexcept {
 const wchar_t* CoopDependencyProblem() noexcept {
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(resolveCoop("EDF6CoopGetExtensionApi"));
     if(!get)return L"未安装匹配版本的 EDF6Coop，或当前版本过旧。";
+    // Its version first: an EDF6Coop older than kRoomCoop* does not serve this build's extension ABI either (2.9.0's
+    // version 2, net-5), and the player is told which version to upgrade to rather than "incompatible".
+    if(const wchar_t* old=CoopVersionProblem())return old;
     EDF6CoopExtensionApi api{};
     if(get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api)!=1 || api.size!=sizeof(api) ||
-       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll)
+       api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll || !api.sendState)
         return L"EDF6Coop 联机扩展接口不兼容或不完整。";
-    if(const wchar_t* old=CoopVersionProblem())return old;
     using AdmissionReady=std::uint32_t(*)();
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
@@ -270,11 +272,22 @@ void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     }
     const char* reason=!o ? "missing-options" : virtualRoom==0 ? "coop-virtual-profile-rejected" :
         copied!=0 ? "search-type-read-failed" : !typed ? "search-type-invalid" : "incompatible-search-type";
-    Log("ROOM join refused: reason=%s virtual=%d attribute_result=%d numeric=%d SEARCH_TYPE=%#llx",
-        reason,virtualRoom,copied,typed,static_cast<unsigned long long>(wireType));
+    const std::int64_t other=typed ? OtherAllForcesProtocol(wireType) : 0;
+    Log("ROOM join refused: reason=%s virtual=%d attribute_result=%d numeric=%d SEARCH_TYPE=%#llx room_protocol=%lld local=%lld",
+        reason,virtualRoom,copied,typed,static_cast<unsigned long long>(wireType),static_cast<long long>(other),
+        static_cast<long long>(kAllForcesRoomProtocol));
     // EOS_InvalidParameters. No original JoinLobby call and therefore no
     // game session/resource loading, including direct invitations to vanilla.
     Refuse(client,cb);
+    // Another build's All Forces room (an invitation, a remembered room): no compatibility (CLAUDE.md), the player told
+    // which protocol each side runs and that the whole room must run the same build.
+    if(other) {
+        wchar_t text[512]{};
+        swprintf_s(text,L"这个房间是%ls版本的全军出击（房间协议 %lld），本机是房间协议 %lld。\n\n联机要求房间内所有人使用同一版本的全军出击，"
+                   L"旧版本不能进房。请%ls后再加入。",other<kAllForcesRoomProtocol ? L"旧" : L"新",static_cast<long long>(other),
+                   static_cast<long long>(kAllForcesRoomProtocol),other<kAllForcesRoomProtocol ? L"让房主更新到与本机相同的版本" : L"把本机全军出击更新到房主的版本");
+        notice::Post("room-protocol",L"全军出击：无法加入联机房间",text,0);
+    }
 }
 void** Slot(const char* name) noexcept {
     const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);

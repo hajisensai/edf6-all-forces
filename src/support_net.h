@@ -102,15 +102,8 @@ bool SupportPeersAcceptLoadout() noexcept;
 bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
 // Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
 bool SupportPeersApplyVariants() noexcept;
-// Host: whether every peer reads a soldier's backpack weapon (support_protocol.h kExtBackpack); offline / no peer: true.
-bool SupportPeersApplyBackpacks() noexcept;
 // Host: every participant supports the independent detail bits (support_protocol.h kDetailPvpSupport).
 bool SupportPeersHaveDetails(std::uint32_t details) noexcept;
-// Whether every peer has the sea rescue catalog entry (support_protocol.h kExtSeaRescue); true offline / with no session. Without it the
-// host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
-bool SupportPeersAcceptRescue() noexcept;
-// The room's builds differ (version_notice.h): the HUD's line about it, for a while after it changed (draw thread).
-bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept;
 // Host: the player whose request made committed transaction `token`, by its stable identity (the requester's
 // authenticated PUID resolved to its mission player actor; this machine's player for its own). False when unknown.
 bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
