@@ -33,8 +33,9 @@ options
   --cycle N         a load run instead (hitch-5): nothing sampled; the mission left and entered again N times in one
                     launch (drive.py --cycle; --cycle-stay S in each, default 20), each entry's phases and memory points
                     from the plugin log, the first one cold (the launch's first), the rest warm: loads.md
-  --key SPEC@S[:MS] hold a key S seconds into the mission for MS (default 300; repeatable; drive.py --key), e.g. 4d@50 (M, a virtual-key code in hex)
-                    opens the map inside the stack window, so its slow frames' stacks are taken (hitch-3 / hitch-6)
+  --key SPEC@S[:MS] hold a key S seconds into the mission for MS (default 300; repeatable; drive.py --key): e.g.
+                    4d@50 (M, a virtual-key code in hex) opens the map inside the stack window, so its slow frames'
+                    stacks are taken (hitch-3 / hitch-6)
   --shots           a picture of the game window every 15 s (PrintWindow: it costs frames, keep it off to measure)
   --restore         put back what a run could not (the game outlived it): the range mission's files, and every file
                     drive.py placed (the DLLs, the ini) byte for byte with the autopilot removed (drive.py restore)
