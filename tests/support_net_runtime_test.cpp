@@ -102,33 +102,33 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 // The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
-// Their channels (plugin_net.h) as registered: GRVT for kExtGravity peers, FGUN for kExtFloatGun ones.
+// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to this fixture's 200-byte frames).
 bool ReceiveGravity(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {++fixture::gravityPackets;return true;}
 plugin_net::Channel GravityNetChannel() noexcept {
-    plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=1;c.featureBit=support_net::kExtGravity;
-    c.minSize=c.maxSize=160;c.receive=&ReceiveGravity;return c;
+    plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=0;
+    c.minSize=c.maxSize=200;c.receive=&ReceiveGravity;return c;
 }
 bool ReceiveFloatGun(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel FloatGunNetChannel() noexcept {
-    plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;c.featureBit=support_net::kExtFloatGun;
+    plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;
     c.minSize=c.maxSize=96;c.receive=&ReceiveFloatGun;return c;
 }
-// The players' own loaded jets (player_vehicle.cpp): PVEH for kExtPlayerVehicle peers, not under test here.
+// The players' own loaded jets (player_vehicle.cpp): PVEH, not under test here.
 bool ReceivePlayerVehicle(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel PlayerVehicleNetChannel() noexcept {
-    plugin_net::Channel c;c.name="player vehicles";c.magic=0x48455650u;c.version=1;c.featureBit=support_net::kExtPlayerVehicle;
+    plugin_net::Channel c;c.name="player vehicles";c.magic=0x48455650u;c.version=1;
     c.minSize=16;c.maxSize=920;c.receive=&ReceivePlayerVehicle;return c;
 }
-// The ultimate strike's (ultimate.cpp): ULTS for kExtUltimate peers, not under test here.
+// The ultimate strike's (ultimate.cpp): ULTS, not under test here.
 bool ReceiveUltimate(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel UltimateNetChannel() noexcept {
-    plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;c.featureBit=support_net::kExtUltimate;
+    plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;
     c.minSize=c.maxSize=96;c.receive=&ReceiveUltimate;return c;
 }
-// The barrages' (barrage.cpp): BRGS for kExtBarrage peers, not under test here.
+// The barrages' (barrage.cpp): BRGS, not under test here.
 bool ReceiveBarrage(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel BarrageNetChannel() noexcept {
-    plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;c.featureBit=support_net::kExtBarrage;
+    plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;
     c.minSize=c.maxSize=80;c.receive=&ReceiveBarrage;return c;
 }
 // The support pt's (support_points.cpp): SPTS for every peer, not under test here.
@@ -399,11 +399,11 @@ int main() {
     reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
     Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
     Check(carrierContexts-carrierContextsBefore==1,"nested prepared-plan enqueue cannot recursively poll/advance native support (unmoved room: only the closing update)");
-    // The newer channels (plugin_net.h): a peer that did not announce kExtGravity (this fixture's hellos carry no extension
-    // word) is never heard on it; a channel this build does not have is dropped, never fed to the support parser.
+    // The channels (plugin_net.h): every peer's message is its channel's (net-6: no per-feature bits, the room protocol
+    // keeps other builds out), never fed to the support parser; a channel this build does not have is dropped.
     auto gravityPacket=packet;std::memset(gravityPacket.bytes,0,sizeof(gravityPacket.bytes));std::memcpy(gravityPacket.bytes,"GRVT",5);
     const unsigned sendsBefore=sendCount;incoming.push_back(gravityPacket);Step();
-    Check(gravityPackets==0 && sendCount==sendsBefore && carrierPackets==1,"a gravity message from a peer without the bit: dropped");
+    Check(gravityPackets==1 && sendCount==sendsBefore && carrierPackets==1,"a gravity message: its channel's, from any peer of the room");
     auto unknownPacket=packet;std::memcpy(unknownPacket.bytes,"ZZZZ",4);incoming.push_back(unknownPacket);Step();
     Check(sendCount==sendsBefore && commandPackets==1 && qmarkPackets==1 && crew::running,"a channel this build does not have: dropped quietly");
     // 2026-10-30 (the user: 「联机时候巨卡无比」): the channels' frame ran once a received message (2 + n a tick); it runs

@@ -6,8 +6,8 @@ python tests/rescue_support_guard.py [--root DIR], exit 1 on a failure. What it 
   - the rescue's trigger asks for the support catalog's rescue entry (SupportRescueAt) and its heli is only ever the one
     the support deployment hands over (RescueHeliDeployed), after the deployment seated its real pilot;
   - the rescue entry is the catalog's last (older indices keep their wire meaning), carries its pilot and one door gunner
-    (the other door is the swimmer's), and is planned only when every peer announced it (the hello's extension word,
-    kExtSeaRescue: the capability bits 1|2|4|8 are #100's and full);
+    (the other door is the swimmer's); no per-peer rescue bit (net-6, 2026-11-24: the room protocol keeps older builds
+    out: no kExtSeaRescue / kExtRescueChannel, no SupportPeersAcceptRescue);
   - 2026-10-10: it is held to no mission support rule, never queued behind, cooled down by or written over the map's
     support; it takes off from a carrier's deck before the edge; its heli is the requester's (no nearest-swimmer search).
 Run against the code before this change it fails (StartRescue called HeliLaunch).
@@ -85,8 +85,8 @@ def main() -> int:
         fail('src/support_dispatch.cpp AirCrew: the rescue heli is not its pilot and one door gunner (one door is the swimmer\'s)')
     plan = body(dispatch, 'support_net::PlanResult Plan(')
     checks += 1
-    if not before(plan, 'SupportPeersAcceptRescue()', 'PlanAirSupport('):
-        fail('src/support_dispatch.cpp Plan: the rescue is planned without every peer\'s kExtSeaRescue')
+    if not plan or 'SupportPeersAcceptRescue' in plan or 'PlanAirSupport(' not in plan:
+        fail('src/support_dispatch.cpp Plan: a per-peer rescue gate is back (or the rescue is not planned)')
     checks += 1
     if '!IsRescue(catalog) && !support::Allowed(' not in plan or '!IsRescue(plan.catalogId) && !support::Allowed(' not in body(dispatch, 'bool Validate('):
         fail('src/support_dispatch.cpp Plan / Validate: the rescue is held to the mission\'s support rules')
@@ -102,31 +102,23 @@ def main() -> int:
         fail('src/heli.cpp: the rescue heli looks for the nearest swimmer instead of its requester')
     session = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::HostRequest(')
     checks += 1
-    if 'ownChannel' not in session or 'PeersHaveExtension(kExtRescueChannel)' not in session or 'rescueAt_[peer]' not in session:
-        fail('src/support_protocol.cpp HostRequest: the rescue has no channel or cooldown of its own (or ignores an older peer)')
+    if 'ownChannel' not in session or 'PeersHaveExtension' in session or 'rescueAt_[peer]' not in session:
+        fail('src/support_protocol.cpp HostRequest: the rescue has no channel or cooldown of its own (or a per-peer bit is back)')
     checks += 1
     if 'CooldownLeft(' not in body(heli, 'void StartRescue('):
         fail('src/heli.cpp StartRescue: this player rescue cooldown is not held')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
-    if not re.search(r'kExtensions=[^;]*kExtSeaRescue[^;]*kExtRescueChannel', protocol) or 'kCapSeaRescue' in protocol or \
-            'kCapRescueChannel' in protocol:
-        fail('src/support_protocol.h: the sea rescue is not an extension bit of this build (kExtSeaRescue in kExtensions), '
-             'or a capability bit claims it (the capability bits are #100\'s: kCapTransports 4, kCapLoadout 8)')
+    if any(word in protocol for word in ('kExtSeaRescue', 'kExtRescueChannel', 'kCapSeaRescue', 'kCapRescueChannel', 'kExtBuilt')):
+        fail('src/support_protocol.h: a sea rescue capability / extension bit is back (the room protocol keeps older builds out)')
     hello = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::Tick(')
     checks += 1
-    if not before(hello, 'backend_.hooks.variants(', 'm.unit.resourceId|=kExtBuilt;') or \
-            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel(\|kExtOutfit41)?(\|kExtBvmPlayers)?(\|kExtBackpack)?(\|\s*kExt\w+)*;', protocol):
-        fail('src/support_protocol.cpp Tick: the hello does not announce the rescue\'s bits (kExtBuilt) after the variants '
-             'hook wrote its word')
+    if 'backend_.hooks.variants(' not in hello or 'kExtBuilt' in hello:
+        fail('src/support_protocol.cpp Tick: the hello extension word is not the variants hook word alone')
     net = code_only(read(root, 'src/support_net.cpp'))
     checks += 1
-    if 'PeersHaveExtension(support_net::kExtSeaRescue)' not in body(net, 'bool SupportPeersAcceptRescue('):
-        fail('src/support_net.cpp SupportPeersAcceptRescue: not the peers\' kExtSeaRescue')
-    checks += 1
-    if 'kFeatures' not in body(code_only(read(root, 'src/support_protocol.cpp')), 'std::uint32_t Session::PeersBehind(') or \
-            's.mine=support_net::kFeatures' not in net:
-        fail('the version notice compares capabilities only: an older guest without the rescue extension would look the same')
+    if 'SupportPeersAcceptRescue' in net or 'version_notice' in net:
+        fail('src/support_net.cpp: the rescue peer gate or the version notice is back')
     for message in failures:
         print('FAIL', message)
     print(f'rescue_support_guard: {checks} checks, {len(failures)} failures')

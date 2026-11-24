@@ -1,10 +1,9 @@
 // The plugin's online channels (src/plugin_net_logic.h) and their codec (src/wire.h): no game, no transport.
 //  - registration: no receive, no magic, a magic taken, bounds that make no sense refused; a full registry refuses more;
 //  - routing: by magic, then by a channel's own test; none of theirs left to the support parser (Route::none);
-//  - drops: another version, a size out of bounds, a peer that did not announce the channel's bit (an older build);
-//    a channel without a bit reads every peer's;
-//  - joins: a channel is told once per peer when it newly has its bit, again after Forget / Reset;
-//  - the roster's wire: round trip, a bigger room in parts, refusals;
+//  - drops: another version, a size out of bounds (every peer's messages read: no per-feature bits since net-6);
+//  - joins: a channel with a joined callback is told once per peer, again after Reset;
+//  - PUIDs and origins;
 //  - wire.h: field order, sticky failure, finite floats, canonical IDs;
 //  - the room watch: which changes reset every channel, once.
 #include "../src/plugin_net_logic.h"
@@ -12,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <utility>
 
 using namespace crew::plugin_net;
 namespace {
@@ -19,7 +19,6 @@ int checks=0,failures=0;
 void Check(bool ok,const char* what) { ++checks;if(!ok){++failures;std::printf("FAIL %s\n",what);} }
 
 constexpr std::uint32_t kA=0x41414141u,kB=0x42424242u,kC=0x43434343u;
-constexpr std::uint32_t kBitB=128u;
 int gotA=0,gotB=0,gotC=0,gotOwned=0;
 std::uint32_t lastPeer=0;
 bool ReceiveA(std::uint32_t p,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotA;lastPeer=p;return true; }
@@ -39,7 +38,7 @@ std::vector<unsigned char> Message(std::uint32_t magic,std::uint32_t version,std
 void RegistryChecks() {
     Registry reg;
     Channel a;a.name="a";a.magic=kA;a.receive=&ReceiveA;            // an older channel: its own versions, every peer
-    Channel b;b.name="b";b.magic=kB;b.version=3;b.featureBit=kBitB;b.minSize=b.maxSize=64;b.receive=&ReceiveB;b.joined=&JoinedB;
+    Channel b;b.name="b";b.magic=kB;b.version=3;b.minSize=b.maxSize=64;b.receive=&ReceiveB;b.joined=&JoinedB;
     Channel own;own.name="owned";own.owns=&OwnsXY;own.receive=&ReceiveOwned;
     Check(reg.Register(a) && reg.Register(b) && reg.Register(own),"three channels registered");
     Channel dup=a;dup.receive=&ReceiveC;
@@ -54,42 +53,37 @@ void RegistryChecks() {
     Check(!reg.Register(badSize),"a bound past the payload is refused");
     Check(reg.Count()==3,"only the good ones");
 
-    Peers peers;peers.Reset();
-    auto has=[&](std::uint32_t p,std::uint32_t bit) noexcept {return peers.Has(p,bit);};
     auto ma=Message(kA,99,20);
-    Check(reg.Dispatch(1,"p1",ma.data(),ma.size(),0,has)==Route::delivered && gotA==1,"an older channel takes any version, any peer");
+    Check(reg.Dispatch(1,"p1",ma.data(),ma.size(),0)==Route::delivered && gotA==1,"a channel without a version takes any");
     auto mb=Message(kB,3,64);
-    Check(reg.Dispatch(1,"p1",mb.data(),mb.size(),0,has)==Route::dropped && gotB==0,"a peer that did not announce the bit: dropped");
-    peers.Set(1,kBitB|64u);peers.Set(2,64u);
-    Check(reg.Dispatch(1,"p1",mb.data(),mb.size(),0,has)==Route::delivered && gotB==1 && lastPeer==1,"a peer with the bit: delivered");
-    Check(reg.Dispatch(2,"p2",mb.data(),mb.size(),0,has)==Route::dropped && gotB==1,"a newer peer without this channel's bit: dropped");
+    Check(reg.Dispatch(1,"p1",mb.data(),mb.size(),0)==Route::delivered && gotB==1 && lastPeer==1,"its version: delivered");
+    Check(reg.Dispatch(2,"p2",mb.data(),mb.size(),0)==Route::delivered && gotB==2 && lastPeer==2,"any peer's: delivered");
     auto old=Message(kB,2,64);
-    Check(reg.Dispatch(1,"p1",old.data(),old.size(),0,has)==Route::dropped && gotB==1,"another version: the channel's, dropped");
+    Check(reg.Dispatch(1,"p1",old.data(),old.size(),0)==Route::dropped && gotB==2,"another version: the channel's, dropped");
     auto small=Message(kB,3,63);
-    Check(reg.Dispatch(1,"p1",small.data(),small.size(),0,has)==Route::dropped && gotB==1,"a size out of bounds: dropped");
+    Check(reg.Dispatch(1,"p1",small.data(),small.size(),0)==Route::dropped && gotB==2,"a size out of bounds: dropped");
     auto xy=Message(0x00005958u,0,8);   // "XY"
-    Check(reg.Dispatch(3,"p3",xy.data(),xy.size(),0,has)==Route::delivered && gotOwned==1,"a channel's own test routes it");
+    Check(reg.Dispatch(3,"p3",xy.data(),xy.size(),0)==Route::delivered && gotOwned==1,"a channel's own test routes it");
     auto unknown=Message(0x54525053u,2,176);   // support_net's own (support_protocol.h kMagic): none of the channels'
-    Check(reg.Dispatch(1,"p1",unknown.data(),unknown.size(),0,has)==Route::none,"none of theirs: left to the support parser");
-    Check(reg.Dispatch(1,"p1",ma.data(),3,0,has)==Route::none,"too short to have a magic: none");
-    Check(reg.Dispatch(0,"",nullptr,0,0,has)==Route::none,"no bytes: none");
-    Check(peers.Has(9,0) && !peers.Has(9,kBitB) && !peers.Has(0,0),"bit 0 is every peer of the room; a peer unheard has none");
+    Check(reg.Dispatch(1,"p1",unknown.data(),unknown.size(),0)==Route::none,"none of theirs: left to the support parser");
+    Check(reg.Dispatch(1,"p1",ma.data(),3,0)==Route::none,"too short to have a magic: none");
+    Check(reg.Dispatch(0,"",nullptr,0,0)==Route::none,"no bytes: none");
 
-    // Joins: once per peer that has the bit, again after Forget.
+    // Joins: each channel with a joined callback, once per peer of the room, again after Reset.
+    Peers peers;peers.Reset();
     joins.clear();
     auto record=[&](std::size_t i,std::uint32_t p) noexcept {joins.emplace_back(i,p);};
-    peers.Joins(reg,4,record);
-    Check(joins.size()==1 && joins[0].first==1 && joins[0].second==1,"the channel told of the one peer with its bit");
-    peers.Joins(reg,4,record);
-    Check(joins.size()==1,"told once");
-    peers.Set(3,kBitB);peers.Joins(reg,4,record);
-    Check(joins.size()==2 && joins[1].second==3,"a newly heard peer with the bit: told");
-    peers.Forget(1);peers.Joins(reg,4,record);
-    Check(joins.size()==2 && !peers.Has(1,kBitB),"a forgotten peer has nothing");
-    peers.Set(1,kBitB);peers.Joins(reg,4,record);
-    Check(joins.size()==3 && joins[2].second==1,"heard again: told again");
-    peers.Reset();peers.Set(1,kBitB);peers.Joins(reg,4,record);
-    Check(joins.size()==4,"a new room: told again");
+    peers.Joins(reg,2,record);
+    Check(joins.size()==2 && joins[0]==std::make_pair(std::size_t{1},1u) && joins[1]==std::make_pair(std::size_t{1},2u),
+          "the one channel with joined told of each peer");
+    peers.Joins(reg,2,record);
+    Check(joins.size()==2,"told once");
+    peers.Joins(reg,3,record);
+    Check(joins.size()==3 && joins[2].second==3,"a third peer: told of it alone");
+    peers.Reset();peers.Joins(reg,3,record);
+    Check(joins.size()==6,"a new room: told again");
+    peers.Reset();joins.clear();peers.Joins(reg,kMaxPeers+5,record);
+    Check(joins.size()==kMaxPeers && joins.back().second==kMaxPeers,"never past kMaxPeers");
 
     Registry full;
     bool all=true;
@@ -98,31 +92,10 @@ void RegistryChecks() {
     Check(all && !full.Register(more),"a full registry refuses more");
 }
 
-void RosterChecks() {
-    RosterEntry e[3];
-    strcpy_s(e[0].puid,"0002aaaaaaaaaaaaaaaaaaaaaaaaaaaa");e[0].ext=64|128|256;
-    strcpy_s(e[1].puid,"0002bbbbbbbbbbbbbbbbbbbbbbbbbbbb");e[1].ext=64;
-    strcpy_s(e[2].puid,"0002cccccccccccccccccccccccccccc");e[2].ext=0x3E;
-    unsigned char bytes[kMaxPayload];
-    const std::size_t used=EncodeRoster(e,3,bytes,sizeof(bytes));
-    Check(used==kRosterHead+3*kRosterEntry,"a roster of three encodes");
-    RosterEntry back[kRosterPerMessage];std::size_t n=0;
-    Check(DecodeRoster(bytes,used,back,&n) && n==3 && !std::strcmp(back[1].puid,e[1].puid) && back[0].ext==e[0].ext &&
-          back[2].ext==0x3E,"a roster round trip");
-    Check(!DecodeRoster(bytes,used-1,back,&n),"a roster cut short is refused");
-    unsigned char copy[kMaxPayload];
-    std::memcpy(copy,bytes,used);copy[4]=2;
-    Check(!DecodeRoster(copy,used,back,&n),"a roster of another version is refused");
-    std::memcpy(copy,bytes,used);copy[kRosterHead+4+40]='x';   // past the PUID's end: not zero padding
-    Check(!DecodeRoster(copy,used,back,&n),"a roster whose padding is not zeros is refused");
-    RosterEntry bad=e[0];bad.puid[3]=' ';
-    Check(!EncodeRoster(&bad,1,bytes,sizeof(bytes)),"a PUID with a space is not one");
-    RosterEntry many[kRosterPerMessage+1];
-    for(std::size_t i=0;i<=kRosterPerMessage;++i){std::snprintf(many[i].puid,sizeof(many[i].puid),"peer%zu",i);many[i].ext=64;}
-    Check(!EncodeRoster(many,kRosterPerMessage+1,bytes,sizeof(bytes)),"more than a message holds: refused (sent in parts)");
-    Check(EncodeRoster(many,kRosterPerMessage,bytes,sizeof(bytes))<=kMaxPayload,"a full part fits the payload");
+void PuidChecks() {
     char longPuid[kPuidChars+2];std::memset(longPuid,'a',sizeof(longPuid)-1);longPuid[sizeof(longPuid)-1]=0;
-    Check(!ValidPuid(longPuid) && ValidPuid("a"),"a PUID past 64 characters is not one");
+    Check(!ValidPuid(longPuid) && ValidPuid("a") && !ValidPuid("a b") && !ValidPuid("") && !ValidPuid(nullptr),
+          "a PUID: 1..64 printable characters");
     Check(Origin(0,0)==1u && (Origin(6,0)&1u) && Origin(7,0)==7u,"an origin is never zero");
 }
 
@@ -202,7 +175,7 @@ void RoomChecks() {
 
 int main() {
     RegistryChecks();
-    RosterChecks();
+    PuidChecks();
     WireChecks();
     RoomChecks();
     std::printf("plugin_net: %d checks, %d failures\n",checks,failures);

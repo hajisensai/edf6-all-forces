@@ -31,7 +31,6 @@ bool Send(void* ptr,std::uint32_t peer,const Message& m) noexcept {
     auto& n=*static_cast<Node*>(ptr);auto& r=*n.room;
     unsigned char bytes[kWireSize];Message decoded;
     if(!Encode(m,bytes,sizeof(bytes)) || !Decode(bytes,sizeof(bytes),decoded))return false;
-    if(decoded.version!=m.version)return false;
     Packet p{n.index,r.Global(n.index,peer),decoded};r.queue.push_back(p);r.sent.push_back(p);return true;
 }
 void Execute(void* ptr,const char* sender,const Request& r,Message::Result* out) noexcept {
@@ -86,8 +85,7 @@ void Codec() {
     Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
           mapcmd::kLastOrder==mapcmd::Order::formation,"HOLD is appended (13), the formation order after it (14)");
-    Check(kVersion==10 && kMinVersion==10 && Compatible(10) && !Compatible(9) && !Compatible(8) && !Compatible(11),
-          "the wire is version 10 (DISMOUNT ALL's choice); no older version spoken");
+    Check(kVersion==10,"the wire is version 10 (DISMOUNT ALL's choice), the one spoken (net-6: no negotiation)");
     {   // The requester only a player's reference, a unit only a NetId, the focus either (an enemy player in PvP).
         Request r=Make(2,mapcmd::Order::focus);
         Check(ValidRequest(r),"a focus by its NetId");
@@ -125,7 +123,7 @@ void Version8() {
     Message m;m.kind=Kind::request;m.epoch=7;m.sequence=4;m.request=Make(2,mapcmd::Order::move);m.request.flags=kQueued;
     m.request.formationTotal=2;m.request.formationSlots[0]=0;m.request.formationSlots[1]=1;
     unsigned char bytes[kWireSize];Message copy;
-    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.version==kVersion && copy.request.flags==kQueued,
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && bytes[4]==kVersion && copy.request.flags==kQueued,
           "a queued move round trips");
     {std::uint32_t flags;std::memcpy(&flags,bytes+12,4);Check(flags==kQueued,"the queue's flag is the word after kind");}
     m.request.flags=kQueued|2u;Check(!Encode(m,bytes,sizeof(bytes)),"an unknown flag refused");
@@ -153,13 +151,12 @@ void Version8() {
         unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+4,&old,4);
         Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
     }
-    m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"nothing goes out at an older version");
-    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),9),"a request travels at version 10 alone");
+    Check(Encode(m,bytes,sizeof(bytes)) && bytes[4]==kVersion && !bytes[5] && !bytes[6] && !bytes[7],"everything goes out at version 10");
 }
-// The negotiation: every hello at kMinVersion with the sender's highest in it; an older build is never answered.
+// One version, no negotiation (net-6): a hello carries nothing but its epoch; a message of another version is never read.
 void Negotiation() {
     {   // queued and formation orders reach the executor with their flag and parameter
-        Room r;Check(r.nodes[1]->session->HostVersion()==kVersion,"both sides: version 10");
+        Room r;Check(r.nodes[1]->session->Ready(),"the client heard its host's capability");
         Request q=Make(1,mapcmd::Order::attackMove);q.flags=kQueued;
         Check(r.nodes[1]->session->Submit(q,r.Name(1),r.now)!=0,"a queued attack-move submitted");r.Pump();
         Check(r.nodes[0]->executed==1 && r.nodes[0]->lastFlags==kQueued && r.nodes[0]->lastOrder==mapcmd::Order::attackMove,
@@ -167,18 +164,13 @@ void Negotiation() {
         r.Step();Request f=Make(1,mapcmd::Order::formation);f.command.param=mapcmd::FormationParam(-2,3);
         Check(r.nodes[1]->session->Submit(f,r.Name(1),r.now)!=0,"a formation order submitted");r.Pump();
         Check(r.nodes[0]->executed==2 && r.nodes[0]->lastParam==f.command.param,"the host's executor gets the formation parameter");
-        for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(p.message.version==kMinVersion && p.message.request.formationTotal==kVersion,
-            "a hello goes out at the lowest version, the sender's highest in it");
+        for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(!p.message.request.formationTotal,"a hello carries no version");
     }
-    {   // an older build (version 9 and before: version 9 had no DISMOUNT ALL choice, 8 named its player by a tag at
-        // bytes 0..3): no capability for its hello, its requests not run
-        Room r(2);const auto before=r.sent.size();
-        Message hello;hello.version=9;hello.epoch=r.epoch;hello.request.formationTotal=9;
-        r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
-        Check(r.sent.size()==before,"an older build's hello: not answered");
-        Message forged;forged.version=9;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
-        r.nodes[0]->session->Receive(1,r.Name(1),forged,r.now);r.Pump();
-        Check(r.nodes[0]->executed==0,"an older build's request is not executed");
+    {   // an older build's hello (version 9: the room protocol keeps it out; were it sent, it would not decode)
+        Message hello;hello.kind=Kind::hello;hello.epoch=7;unsigned char bytes[kWireSize];Message copy;
+        Check(Encode(hello,bytes,sizeof(bytes)),"a hello encodes");
+        bytes[4]=9;Check(Owned(bytes,sizeof(bytes)) && !Decode(bytes,sizeof(bytes),copy),"a version 9 hello: consumed, never read");
+        hello.request.formationTotal=10;Check(!Encode(hello,bytes,sizeof(bytes)),"a hello carrying a version (the old negotiation) refused");
     }
 }
 // Kind::ways: the host's Shift queues for the clients' maps -- sent to every capable peer when they change, all of them
@@ -219,7 +211,7 @@ void WaysMessages() {
      Check(r.sent.size()==before,"a queue whose current order is no point order: not published");}
     // A peer saying hello again (a reconnect, a new member) is sent every queue out now.
     const auto before=waysTo(1);
-    Message hello;hello.version=kMinVersion;hello.epoch=r.epoch;hello.request.formationTotal=kVersion;
+    Message hello;hello.epoch=r.epoch;
     r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
     Check(waysTo(1)==before+1,"hello: the queues out sent to it again");
     unsigned char out[4][32];Check(r.nodes[0]->session->PublishedWays(out,4)==1,"the host lists what is out");

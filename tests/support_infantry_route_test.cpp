@@ -105,7 +105,6 @@ bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {
 bool PresetHandArms(int,int,std::uint64_t* a,std::uint64_t* b) noexcept{*a=0;*b=0;return false;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept{return support_net::PlanResult::ready;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
-bool SupportPeersAcceptRescue() noexcept{return true;}
 void RescueHeliDeployed(unsigned char*,const float*,bool,const ObjRef&) noexcept{}
 bool SupportTransactionRequester(std::uint64_t,ObjRef*) noexcept{return false;}
 bool SubDeck(const float*,float*) noexcept{return false;}
@@ -139,7 +138,6 @@ bool SupportVariantReady(const wchar_t*) noexcept{return false;}
 void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
 void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}
 bool SupportPeersApplyVariants() noexcept{return true;}
-bool SupportPeersApplyBackpacks() noexcept{return true;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}

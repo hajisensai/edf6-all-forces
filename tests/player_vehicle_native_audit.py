@@ -65,11 +65,10 @@ def audit_source() -> None:
     update = body(pv, 'void Update(')
     check('landing && origin' in update and 'SendHave()' in update, 'the have goes out only when this machine can swap')
     proto = read('src/support_protocol.h')
-    m = re.search(r'kExtBuilt=([^;]*);', proto)
-    check(m and 'kExtPlayerVehicle' in m.group(1) and 'kExtPlayerVehicle=1024u' in proto, 'the build announces kExtPlayerVehicle')
+    check('kExtPlayerVehicle' not in proto, 'no per-feature bit for the channel (net-6: the room protocol keeps older builds out)')
     logic = read('src/player_vehicle_logic.h')
-    check('if(!peer_[i].feature || !peer_[i].heard || !PeerHas(peer_[i],want))want.bits=0;' in logic,
-          'a requester loads its jet only when every peer announced the channel and has the file')
+    check('if(!peer_[i].heard || !PeerHas(peer_[i],want))want.bits=0;' in logic,
+          'a requester loads its jet only when every peer was heard and has the file')
 
 
 def audit_code(img: bytes) -> None:
