@@ -222,6 +222,22 @@ def placements(dll: str | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def keep_symbols(dll: str | None, out: str) -> str | None:
+    """A copy of `dll` and its PDB in out/symbols, taken before the launch: perf_report names the plugin's frames from
+    the PDB of the very build that ran (an exact match), and the build folder is rebuilt after the run. The copy's path,
+    None without a dll or a PDB next to it."""
+    if not dll or not os.path.isfile(dll):
+        return None
+    pdb = os.path.splitext(dll)[0] + '.pdb'
+    if not os.path.isfile(pdb):
+        return None
+    keep = os.path.join(out, 'symbols')
+    os.makedirs(keep, exist_ok=True)
+    for f in (dll, pdb):
+        shutil.copy2(f, os.path.join(keep, os.path.basename(f)))
+    return os.path.join(keep, os.path.basename(dll))
+
+
 def loaded_plugins(game: str, dll: str | None) -> dict:
     """What the game loads in a run with `dll`, taken before the launch (as placements places them): each plugin's
     file, where it comes from and its sha256. AutoTurret: the build's own next to `dll` (built-alongside), else the game
@@ -300,6 +316,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     clog_at = log_mark(clog)
     cycle = opts.get('cycle')
     loaded = loaded_plugins(game, dll)   # before the launch: the files the game is about to load
+    kept = keep_symbols(dll, out)
     skipped = gen.write_scenario(game, plan) if plan else []
     rc = 1
     try:
@@ -341,7 +358,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         with open(os.path.join(out, 'coop.log'), 'wb') as f:
             f.write(data)
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
-    run = dict(scenario=scenario, variant=variant, dll=dll, **loaded,
+    run = dict(scenario=scenario, variant=variant, dll=kept or dll, built=dll, **loaded,
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, cycle=cycle, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
         json.dump(run, f, indent=1)
