@@ -595,6 +595,7 @@ void SeeFrame(const void* vehicle) noexcept;
 // mission is dropped here, before the new mission's objects (which may reuse the old addresses) exist.
 void MissionStart() noexcept;
 void ResetCrew() noexcept;        // crew.cpp
+void SceneOver() noexcept;        // crew.cpp: the scene's end (mission.cpp), every step stamp stale
 void ResetHelis() noexcept;       // heli.cpp (and the player track, the rescue)
 void ResetGround() noexcept;      // ground.cpp
 void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)

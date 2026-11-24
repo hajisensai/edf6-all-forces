@@ -345,7 +345,8 @@ const void* followedLock=nullptr;   // the turret lock the mark last followed (F
 struct JetMark { bool pending; const void* from; ULONGLONG until; };
 JetMark jetMark{};
 // step: the scene step KeepMark published it in (step_fresh.h; every step, and it clears `on` itself when the mark goes):
-// the count only covers a frame that stopped running KeepMark (no player, mission over).
+// the count only covers a frame that stopped running KeepMark while the scene runs (no player); at the scene's end the
+// count stands still and crew::SceneOver makes the stamp stale (step_fresh.h).
 struct MarkPub { bool on; float at[3]; stepfresh::Step step; NpcPing ping; };
 MarkPub markPub{};
 NpcPing ping{};

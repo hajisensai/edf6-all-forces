@@ -62,6 +62,10 @@ constexpr std::uint16_t kButtonLB=0x10,kButtonX=0x04;
 // the player sits in a payload seat (PayloadFrame), so kEveryStep; a pick is refreshed by its seat's controller (the
 // player's PayloadFrame every step, an NPC gunner's native seat-fire / gunner pass at the AI's pace), so it keeps the
 // old 200 ms of a 60-step second, as steps: a slow frame no longer ages a pick its controller set in the last step.
+// The basis of 12: the old window, 200 ms, at the scene's 60 steps a second (docs/perf-probe-re.md §1). The NPC pass's
+// interval was never measured (no report of a pick lapsing under 200 ms between passes), so at the normal rate the
+// allowance is the same as before and only a slow frame's aging is gone. Not a tuned value: a pass slower than 12 steps
+// would lapse here as it did under 200 ms.
 constexpr stepfresh::Step kPickFreshSteps=12;
 constexpr float kCoaxNpcM=900.0f;                 // an NPC crew's coaxial gun: targets this close (HasShot; a 7.62 mm
                                                   // coax's point-target reach, where its tracer burns out)

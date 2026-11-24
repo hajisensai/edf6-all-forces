@@ -1147,6 +1147,14 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 }
 
 
+// The scene's end (mission.cpp ReleaseGroupHook: the scene's resource group released): no traversal runs from here to the
+// next mission's, so the step count would stand still and keep every last-step stamp fresh in the menus. The scene's
+// handoffs are stale from here on, and the magnified sight lets the window's wheel go (map.cpp WheelProc).
+void SceneOver() noexcept {
+    stepfresh::NewMission(traversals.steps);
+    TakeScopeWheel(false);
+}
+
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
     frameClock.Reset();tickFrame=0;++missionCount;

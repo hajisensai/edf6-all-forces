@@ -11,12 +11,13 @@
   不直接用 `GameFrame()`：System::update 在步进循环开头 0x1198FD0 就给 +0xCE0 自增，暂停判定 0x11990C0 在它之后才跳过场景，
   所以暂停期间原生计数照涨，恢复后第一次遍历会一下跳过整段暂停，暂停前发布的数据全被误判过期。
 - `kEveryStep = 2`：每步发布的数据，读取方在同一步前 / 后读，再多容一步（发布方某一步没轮到）。
-- `kFromDraw = 4`：绘制线程每帧发布一次（HUD pass，在本帧步进之前录制），游戏线程在本帧最多 3 步里读，再多容一帧没绘制。
+- `kFromDraw = 6`（2 帧 × 3 步）：每帧发布一次的数据（HUD pass，在本帧步进之前录制；原版护甲条的更新 `stockgauge.cpp ArmorHook`，它跑在哪个线程静态读不出——虚表槽调用——按最坏的每帧一次算），游戏线程在本帧最多 3 步里读，再多容整整一帧（3 步）没发布。原来的 4 只多容 1 步，不够一帧。
 - **绘制线程看到的是什么**：`Now()` 是游戏线程最后跑过的那一步，即本次录制画面所属的场景；该步或之前 `kEveryStep` 步里盖章的数据就是这个画面的。
   帧调度出现 n = 0 帧（`docs/unlimited-fps-re.md` §4.3）时步进不动，绘制继续显示上一步的数据。
 - 帧再慢（stress:100 时一帧 204 ms，或加载卡顿超过 500 ms），只要发布方在上一步跑过，数据就不会被判为过期。
 - 步进计数判断不了的情况，都改成显式状态：
   - **暂停菜单**：场景不跑，`Now()` 不动（见上），按计数数据在暂停中和恢复后都「新鲜」，直到恢复后再过 lag 步仍没重新发布。暂停时必须隐藏的读取方显式检查 `GamePaused()`（HUD 的 `HudDraw` 原本就查）；需要在暂停时保留画面的读取方（热成像、炮塔相机）正好依赖这一点。
+  - **场景结束**：任务结束（通关、撤退、失败）和回标题时，脚本 `FreeResourceGroup(2)` 释放场景资源组（`0x70E330` 内 `0x70E35E` 调 `0x7A2EE0`，`docs/mission-cycle-re.md` §1.1；RETRY 不释放，直接走预加载 → MissionStart）。`mission.cpp ReleaseGroupHook` 改道这一处调用，组号为 2 时调 `crew::SceneOver`：`NewMission` 让此前的章全部过期，并 `TakeScopeWheel(false)` 放开瞄准镜占用的滚轮。没有它，从任务结束到下一次 MissionStart 之间没有场景遍历、`Now()` 停住，最后一步盖的章在菜单里一直「新鲜」（例：按住瞄准镜滚轮时通关，菜单里的滚轮被 `WheelProc` 吃掉；热成像 BeginHook、infantryscope WorldEnd、scope_lens ArmFor 读到旧快照）。
   - **新任务 / 加载**：`ResetCrew` 调 `stepfresh::NewMission`，把 `Now()` 往后推 `kMissionGap = 2^32` 步，上一任务盖的章全部过期。各模块原有的 `Reset*` 清理不变。
   - **状态转换**（下车、关地图、关瞄准镜）：发布方看到转换时自己清空数据。步进计数只兜底「发布方整个不跑了」的情况（载具没了、士兵帧不再调用）。
 
@@ -46,8 +47,8 @@
 | `npcai.cpp` NpcMarkReadout / NpcPingReadout（markPub.wall） | 步进判断 | `markPub.step`；ping 的 3 s 显示时长 kPingMs 不改 |
 | `payload.cpp` latest（PlayerPayload）、selectableAt（PlayerSelectablePayload，第 1239 行） | 步进判断 | `latestStep` / `selectableAt` 改成步；下车时 `ClearChoiceContext` 显式清空 UI 快照 |
 | `payload.cpp` RequestPayloadSelection / ConsumeChoice（choicePublication.at、request.posted） | 步进判断 | UI 发请求 → 游戏线程消费，`kEveryStep` |
-| `payload.cpp` Pick.seen（PullHook、PayloadPicked、SeatFireWeapons） | 步进判断，lag = `kPickFreshSteps`（12） | NPC 炮手的选择按 AI 节奏刷新，保留旧的 200 ms ≈ 60 步/s 的 12 步；槽复用 120 步 |
-| `payload.cpp` RemotePick.at / SentPick.at（kPickStaleMs） | 不改 | 网络消息间隔，与本机步进无关 |
+| `payload.cpp` Pick.seen（PullHook、PayloadPicked、SeatFireWeapons） | 步进判断，lag = `kPickFreshSteps`（12） | 依据：旧窗口 200 ms × 场景 60 步/s = 12 步。NPC 炮手的选择按原版 AI 节奏刷新，间隔没测过，旧 200 ms 下没出过两次刷新之间过期的报告，所以正常帧率下余量与原来相同，只去掉了慢帧老化；不是调出来的值；槽复用 120 步 |
+| `payload.cpp` RemotePick.at / SentPick.at（kPickStaleMs 2000，`GameMs`） | 不改 | 按 `GameMs`（游戏线程，暂停停走、超过 250 ms 的间隔按 16 ms 计），不是墙钟；判的是网络消息刷新间隔（500 ms 一次），与本机步进无关 |
 | `ultimate.cpp:785` PlayerUltimateCue（kShowMs 8000） | 不改 | 8 s 提示显示时长 |
 | `qmark.cpp` viewWall（kPublishFreshMs 500） | 步进判断 | QMarkFrame 每步发布一次，改用 `viewStep` |
 | `turretcam.cpp` seenMs / aimMs / Out.at（kFreshMs 200、kAimFreshMs 150，GameMs） | 步进判断 | 帧 / 瞄准钩子每步一次；暂停时相机步保留最后的画面（与原来 GameMs 停走一致） |
@@ -76,7 +77,7 @@
 | HUD 全部（hud.cpp Snapshot / gear / warn / cue 类 / qmark / mapcmd view 等） | 不画 | `HudDraw` 原本就在 `GamePaused()` 时返回 |
 | infantryscope `Live()`（相机步、WorldEnd） | 不挂瞄准镜画面 | 显式 `!GamePaused()` |
 | scope_lens `ArmFor`（录制） | 不挂镜头 | 显式 `!GamePaused()` |
-| map Camera | 退回原版视角并设 `pauseSeen`，恢复后第一步 `Frame` 关地图 | 显式 `GamePaused()`；pose 在暂停中保持新鲜，所以一定能看到暂停 |
+| map Camera | 退回原版视角并记下暂停（`map_camera_state.h PauseClose`），恢复后第一步 `Frame` 关地图 | 显式 `GamePaused()`；pose 在暂停中保持新鲜，所以一定能看到暂停 |
 | map scopeHeldAt（WndProc） | 滚轮归暂停菜单 | 显式 `!GamePaused()` |
 | subcarrier GaugeHook（绘制） | 不画 | 显式 `!GamePaused()` |
 | turretcam 相机 | 保留最后画面 | 与原来按 GameMs（暂停停走）一致 |
@@ -85,6 +86,8 @@
 
 ## 测试
 
+- `crew_first_use`（接线）：经 `crew.cpp SeeFrame` 走真实的 +CE0 / 暂停位：暂停位置上时 +CE0 涨 600 → `Now()` 不动，恢复后第一次遍历 +1，暂停前的章仍新鲜；不暂停时 +CE0 一次跳 600 → 只 +1；`SceneOver` 之后最后一步的章过期（`kEveryStep` / `kFromDraw` 都过期）、滚轮放开，之后无遍历也仍过期。变异核对：把 SeeFrame 改回 `See(frameClock.logical)` 时此用例变红。
+- `map_cam_check`（PauseClose）：地图开着时暂停 → 原版视角；恢复后第一步关地图且只关一次；地图已关不再关；新任务清掉。`selftest map_wired` 守住 map.cpp 的三处接线（相机步报告、Frame 关图、ResetMap 清除）和 mission.cpp 场景结束接到 `SceneOver`；变异核对：删掉相机步的暂停报告时 selftest 变红。
 - `step_fresh`：慢帧（相邻两步间隔 600 ms）不判过期；暂停（GameFrame 跳 600）只算一步，暂停前的数据恢复后仍新鲜，暂停中看到的变化不算步，同一遍历多处 SeeFrame 只算一步；`kEveryStep` / `kFromDraw` 边界；n = 0 帧；章比读取方的 Now() 还新；0 表示从未发布；跨线程读；NewMission 之后旧章全部过期。
 - `infantry_scope_pip`：260 ms 墙钟不过期；超过 `kEveryStep` 步过期；暂停时隐藏、恢复后显示；新任务后过期。
 - `scope_lens`：Want 超过 kEveryStep 步没续就不挂镜头；暂停时不挂；250 ms 慢帧仍挂。

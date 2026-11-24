@@ -17,8 +17,9 @@
 // of it, with the player's position, is published as one snapshot (a triple buffer: the game thread never waits,
 // the draw thread always has a whole frame's copy, never half of one and half of the next). The draw reads only
 // the snapshot: it never touches a vehicle, allocates nothing and asks no VirtualQuery. The draw thread's clock
-// is the scene step (step_fresh.h): a snapshot not published in the last steps (the shared frame tick stopped: no player,
-// mission over; a new mission's load makes every one stale) is not drawn; nothing is while the game is paused (GamePaused).
+// is the scene step (step_fresh.h): a snapshot not published in the last steps (the shared frame tick stopped while the
+// scene runs: no player) is not drawn; the scene's end (crew::SceneOver, its resources released) and a new mission's
+// load make every one stale, as the count stands still in the menus; nothing is drawn while the game is paused (GamePaused).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "cockpit_canvas.h"

@@ -40,9 +40,11 @@ int main() {
     See(23);
     Check(Fresh(drawn,kFromDraw),"draw -> game thread: 3 steps on, fresh");
     See(24);
-    Check(Fresh(drawn,kFromDraw),"draw -> game thread: kFromDraw steps on, fresh");
-    See(25);
-    Check(!Fresh(drawn,kFromDraw),"draw -> game thread: a frame not drawn at all and more, stale");
+    Check(Fresh(drawn,kFromDraw),"draw -> game thread: a step into the next frame (its publisher skipped), fresh");
+    See(26);
+    Check(Fresh(drawn,kFromDraw),"draw -> game thread: kFromDraw (2 frames x 3 steps) on, fresh");
+    See(27);
+    Check(!Fresh(drawn,kFromDraw),"draw -> game thread: a whole frame not published and more, stale");
 
     // A frame-pacing n = 0 frame (no step): the draw keeps the last step's data however many frames pass.
     See(30);

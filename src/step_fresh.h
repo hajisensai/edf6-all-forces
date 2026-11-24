@@ -24,8 +24,11 @@
 //  - the pause menu: the scene does not run and the count stands still, so data stays "fresh" by count. A reader that must not show anything under the pause
 //    menu checks crew::GamePaused() (the HUD pass does, hud.cpp HudDraw); one that keeps a camera / lens through the
 //    pause relies on exactly this.
-//  - a new mission / load: NewMission (crew.cpp ResetCrew) moves Now() kMissionGap steps on, so nothing stamped in the
-//    last mission is fresh (every module also clears its own state in its Reset*).
+//  - the scene's end (mission.cpp: FreeResourceGroup(2) releasing the scene's resources, after a clear / withdraw /
+//    failure and back to the title; crew.cpp SceneOver) and a new mission / load (crew.cpp ResetCrew): NewMission moves
+//    Now() kMissionGap steps on, so nothing stamped in the scene before is fresh. Between the two no traversal runs and
+//    the count stands still, so without the first every stamp of the last step would stay fresh in the menus (every
+//    module also clears its own state in its Reset*).
 //  - a state the publisher leaves (the player got out, the map closed, the scope closed): the publisher clears its
 //    data when it sees the transition; the count only covers a publisher that stopped running at all (its vehicle
 //    gone, the soldier's frame no longer called).
@@ -38,9 +41,10 @@ using Step=std::uint64_t;   // 0: never published
 
 // An every-step publisher's data, read by the game thread (before or after it in the same step) or the draw thread.
 constexpr Step kEveryStep=2;
-// Data the draw thread publishes once a frame (the HUD pass, before the frame's steps), read by the game thread in that
-// frame's steps: up to 3 steps a frame (System::update) after the step the draw saw, and one more for a skipped draw.
-constexpr Step kFromDraw=4;
+// Data published once a frame (the HUD pass before the frame's steps; the stock gauge update, whose thread static reading
+// does not settle: once a frame at worst), read by the game thread in the frame's steps: up to 3 steps a frame
+// (System::update) after the step the publisher saw, and a whole frame more (3 steps) for a frame it skipped: 2 x 3.
+constexpr Step kFromDraw=6;
 // Far more steps than a mission has between a reset and its first step: a new mission's Now() is past every stamp of
 // the last one by at least this.
 constexpr Step kMissionGap=Step{1}<<32;
@@ -67,12 +71,12 @@ struct Traversals {
 
 // Any thread: the step now (never 0: a stamp of 0 is "never published").
 inline Step Now() noexcept { return detail::mirror.now.load(std::memory_order_acquire); }
-// Game thread (crew.cpp SeeFrame): the step clock read `logical` (GameFrame).
-inline void See(Step logical) noexcept { detail::mirror.now.store(detail::mirror.base+logical,std::memory_order_release); }
-// Game thread (crew.cpp ResetCrew, a new mission): every stamp so far is stale from here on.
-inline void NewMission(Step logical) noexcept {
+// Game thread (crew.cpp SeeFrame): the traversal count now (Traversals::steps, not GameFrame).
+inline void See(Step traversal) noexcept { detail::mirror.now.store(detail::mirror.base+traversal,std::memory_order_release); }
+// Game thread (crew.cpp SceneOver at the scene's end, ResetCrew at a new mission): every stamp so far is stale from here on.
+inline void NewMission(Step traversal) noexcept {
     detail::mirror.base+=kMissionGap;
-    See(logical);
+    See(traversal);
 }
 
 // `at` (a stamp of Now()) is within `lag` steps of `now`. A stamp ahead of `now` (the reader loaded Now() before the

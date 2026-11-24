@@ -6689,6 +6689,14 @@ def map_wired() -> None:
     are wired."""
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
     code, cmake, mission, hud = src('src/map.cpp'), src('CMakeLists.txt'), src('src/mission.cpp'), src('src/hud.cpp')
+    # The pause menu over the open map (map_camera_state.h PauseClose, tools/map_cam_check.cpp): the camera step reports
+    # it, Frame closes the map on the first step after it, a new mission drops it. All three wired.
+    assert 'const bool mapOpen=pauseClose.CameraShows(fresh,fresh && GamePaused());' in code, \
+        'the camera step must report the pause menu over the open map'
+    assert 'if(pauseClose.CloseNow(game.open))Close("the game was paused");' in code, 'Frame must close the map after a pause'
+    assert 'pauseClose.Reset();' in code, 'ResetMap must drop a pause seen in the last mission'
+    # The scene's end (mission.cpp ReleaseGroupHook, FreeResourceGroup(2)): every step stamp stale, the scope wheel let go.
+    assert 'if(static_cast<std::uint32_t>(group)==kSceneGroup)SceneOver();' in mission, 'the scene end must reach SceneOver'
     for key in ('Map', 'MapKey', 'MapButton', 'MapViewDistance'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('MapKey', 'MapButton', 'MapViewDistance'):
