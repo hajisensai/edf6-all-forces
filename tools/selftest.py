@@ -6079,7 +6079,9 @@ def stock_payload_and_seats_wired() -> None:
     assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
     frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
     assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
-    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    # The list's line stays up the whole ride: shown while its step stamp is fresh (step_fresh.h), not cut at the prompt's
+    # time (latestListed lifts shownUntil as its limit).
+    assert 'latestListed=Cfg().seatList;' in seat and '(!latestListed && ms>=shownUntil)' in seat,         'Publish: SeatList keeps the line up the whole ride'
     assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
     # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
     # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
