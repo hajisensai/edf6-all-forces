@@ -50,6 +50,7 @@ bool FrameRateDrawnEye(const void*,float*) noexcept { return false; }
 namespace renderrecord {   // src/render_record.cpp is not linked here (render_record_test has it)
 bool Install() noexcept { return false; }
 void Set(Slot,Before) noexcept {}
+void SetProject(Slot,Project) noexcept {}
 }
 Config config{};
 bool depthPatchReady=true;

@@ -26,11 +26,12 @@
 // The player's root (fps-7, docs/unlimited-fps-re.md §4.3.2). A camera blended a part of a tick behind would draw the
 // player's soldier, who moves only on ticks, sliding back and forth against the picture: the root goes with the camera.
 // The camera step comes after every object's phase in the tick (0x11995A6 is the last call of the loop), so the camera
-// step's hook samples the root after the tick: the soldier's body skeleton's pose[0] ([h+0x900]; h = [camera+0x360]),
-// or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]). On a frame without ticks, inside System::Update's render
+// step's hook knows the root after the tick and counts its ticks: the soldier's body skeleton ([h+0x900]; h =
+// [camera+0x360]), or, riding, the vehicle's ([v+0xEE0], v = [h+0x1548]); its pose[0] is sampled at the recording's
+// first projection, as the recording drew it (StepRoot / SampleRoot). On a frame without ticks, inside System::Update's render
 // recording (the call 0x1198FA4 -> 0x11978D0, after the frame's object deletion 0x1195F20; the render thread is idle: the
 // last frame's end fence 0x11A305A waited for it; the tick loop after it is skipped) at its first projection (0x1197B50,
-// after the recording copied the skeletons' poses again: RecordStart), D = cur^-1 * InterpolateRigid(prev,
+// after the recording copied the skeletons' poses again: ProjectStart), D = cur^-1 * InterpolateRigid(prev,
 // cur, alpha) is multiplied onto every bone of the draw pose ([inst+0x30], world matrices) of every instance of the body,
 // every weapon of [h+0x1950] (+0xF30) and, riding, the vehicle (the rider and their weapons with the vehicle's D: rigid
 // passengers). A skin is drawn from each bone's own matrix, so all bones move, not the root only. The same frame's end
@@ -45,7 +46,6 @@
 #include "frame_rate_logic.h"
 #include "fp_view.h"
 #include "heli.h"
-#include "scope_lens.h"
 #include "crew.h"
 #include "memory.h"
 #include <cstring>
@@ -78,7 +78,6 @@ Camera cameras[kCameras];
 float alphaNow=1.0f;
 bool on=false;
 bool poseDue=false;      // set by BeginFrame on a frame without ticks: the recording's first projection poses, once
-bool recordOpen=false;   // set by the record call's turn: its first projection samples (and poses when due), once
 // Projections on frames without ticks: drawn blended, and left as they were (written after the step, or refused).
 unsigned blended=0,unblended=0;
 
@@ -89,8 +88,8 @@ constexpr std::size_t kTarget=0x360,kVehicle=0x1548,kWeapons=0x1950,kWeaponCount
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
 constexpr int kMostInsts=4,kMostWeapons=16;
 constexpr std::uint64_t kMostBones=256;
-// The root the camera's steps sample: whose (the soldier and their vehicle with their control blocks, the instance),
-// its pose[0] after the last tick (cur) and after the one before (prev).
+// The player's root: whose (the soldier the camera's steps follow and their vehicle with their control blocks, the
+// instance), its pose[0] as the recording drew it after the last tick sampled (cur) and after the one before (prev).
 struct Root {
     const void* camera=nullptr;
     const unsigned char* human=nullptr;const void* humanCtrl=nullptr;
@@ -98,7 +97,12 @@ struct Root {
     const unsigned char* inst=nullptr;
     float prev[16]{},cur[16]{};
     int samples=0;
+    std::uint32_t pending=0;   // the camera's steps (ticks) since the last sample
+    std::uint32_t gap=1;       // ticks from prev to cur (1 to kMostRootGap)
 };
+// A frame with two or three ticks (catching up) samples its last only: the pair then spans that many ticks and goes on
+// (as frame_rate_objects.cpp's kMostGap); a longer gap starts a new pair.
+constexpr std::uint32_t kMostRootGap=3;
 Root root;
 // The poses a frame without ticks wrote: the instance, its pose array and count, where its copies start.
 struct Posed { const unsigned char* inst; float* pose; std::uint64_t count; std::size_t at; };
@@ -144,8 +148,12 @@ int InstancesOf(const unsigned char* model,const unsigned char** out) noexcept {
     return n;
 }
 
-// The camera step's hook, after the tick: the root of the soldier the camera follows.
-void SampleRoot(const void* camera) noexcept {
+// The camera step's hook, after the tick: whose root the camera follows (a change cuts the camera), one more tick for
+// it. Its pose is not read here: the recording re-makes the pose arrays before it draws (0x1197950's loop, slot 3), and
+// a vehicle's is not the camera step's then (M001-swarm riding a 403 tank, 2026-11-24: the root changed since its tick
+// on 1100 of 1110 frames without ticks a 5 s window; on foot 0). SampleRoot takes it at the recording's first
+// projection, as the other objects are taken (frame_rate_objects.cpp).
+void StepRoot(const void* camera) noexcept {
     if(root.camera && root.camera!=camera)return;   // another camera's steps sample the root
     const auto h=At<const unsigned char*>(camera,kTarget);
     if(!IsSoldier(h)) {
@@ -165,8 +173,21 @@ void SampleRoot(const void* camera) noexcept {
         if(!pose)return;
         root.camera=camera;root.human=h;root.humanCtrl=hc;root.vehicle=v;root.vehicleCtrl=vc;root.inst=inst;
     }
+    if(root.pending<=kMostRootGap)++root.pending;
+}
+
+// The recording's first projection, its ticks stepped since the last: the root's pose[0] as the recording drew it.
+void SampleRoot() noexcept {
+    if(!root.camera || !root.pending)return;
+    const std::uint32_t gap=root.pending;
+    root.pending=0;
+    std::uint64_t n=0;
+    const float* const pose=PoseOf(root.inst,&n);
+    if(!pose || gap>kMostRootGap)root.samples=0;
+    if(!pose)return;
     std::memcpy(root.prev,root.cur,sizeof(root.prev));
     std::memcpy(root.cur,pose,sizeof(root.cur));
+    root.gap=root.samples ? gap : 1u;
     if(root.samples<2)++root.samples;
 }
 
@@ -224,9 +245,12 @@ bool PoseRoot(float alpha,fpview::M4& d) {
         ++rootsLeft;
         return false;
     }
-    if(!framerate::InterpolateRigid(root.prev,root.cur,alpha,shown,kCutMove,kCutTurn)) {
+    // A pair `gap` ticks apart (catching up): alpha into the tick after the one before cur, the cuts times the gap.
+    const float gap=static_cast<float>(root.gap);
+    const float along=(gap-1.0f+alpha)/gap;
+    if(!framerate::InterpolateRigid(root.prev,root.cur,along,shown,kCutMove*gap,kCutTurn*gap)) {
         ++rootsRefused;
-        frameobjects::NoteRootRefusal(framerate::RigidRefusal(root.prev,root.cur,alpha,kCutMove,kCutTurn));
+        frameobjects::NoteRootRefusal(framerate::RigidRefusal(root.prev,root.cur,along,kCutMove*gap,kCutTurn*gap));
         return false;
     }
     fpview::M4 cur,inverse,to;
@@ -275,7 +299,7 @@ using FenceFn=void*(*)(void*,void*,void*,void*);
 // The frame end's fence: once the render thread has drawn the frame, the blends go (the review of #386, 3).
 void* FrameEndHook(void* a,void* b,void* c,void* d) {
     void* const r=reinterpret_cast<FenceFn>(image+kFence)(a,b,c,d);
-    poseDue=recordOpen=false;
+    poseDue=false;
     if(on)RestoreFrame();
     return r;
 }
@@ -292,29 +316,23 @@ void PoseFrame() noexcept {
     frameobjects::Pose(alphaNow,root.human,root.vehicle,posedRoot ? d.m : nullptr);   // stage 4: every other object
 }
 
-// Right before the render recording (render_record.cpp: the frame rate's turn, before the first person's): nothing is
-// read or written yet. The recording itself, before it projects and draws, makes the skeletons' pose arrays again
+// Not before the render recording: the recording itself, before it projects and draws, makes the skeletons' pose arrays again
 // (0x11978D0's loop at 0x1197950: vtable slot 3 of every object in System's +0x428 list; a soldier's
 // 0x59A780 -> 0x5750D0 -> 0x6C06A0(h+0x860) -> 0x1100F10(h+0x900) copies each bone record's world, rec+0xB0, over
 // inst+0x30), then runs the +0x358 jobs (0x1197A0B). A pose written here was copied over before it was drawn (M001,
 // FrameRateCap=1: every pose the frame wrote, 12 a frame, all soldiers, the player's root too), and a sample here read
 // the copy the last recording made, before the tick. So both wait for the recording's first projection
 // (ProjectStart, from BeforeProject: after the copy and the jobs, before the first draw).
-void RecordStart() noexcept {
-    if(on)recordOpen=true;
-}
-// Right after the recording returned (render_record.cpp's after turn): a recording that never projected (loading, no
-// viewport) is closed here, not at the fence, so a projection by another of 0x11978D0's callers before the fence is not
-// taken for this frame's first.
-void RecordEnd() noexcept {
-    recordOpen=false;
-}
-
-// The recording's first projection (viewport 0's, 0x1197B50): the sample first (stage 4: every other object's root as
-// the last tick left it and the recording copied it, before fps-7 writes the player's), then the poses when due.
+//
+// The recording's first projection (render_record.cpp's first, viewport 0's 0x1197B50): the sample first (stage 4:
+// every other object's root as the last tick left it and the recording copied it, before fps-7 writes the player's),
+// then the poses when due.
 void ProjectStart() noexcept {
-    if(!recordOpen)return;
-    recordOpen=false;
+    __try {
+        SampleRoot();
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        root.samples=0;
+    }
     frameobjects::Sample(poseDue);
     if(poseDue) {
         poseDue=false;
@@ -360,13 +378,13 @@ void CameraStepHook(void* camera,void* arg) {
         c->havePrev=true;
         c->cut=false;
         c->age=0;
-        SampleRoot(camera);
+        StepRoot(camera);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-void BeforeProject(void* camera,const int*) {
+void BeforeProject(void* camera,const int*,bool first) noexcept {
     if(!on)return;
-    ProjectStart();
+    if(first)ProjectStart();
     if(alphaNow>=1.0f || !camera)return;
     Camera* const c=Find(camera);
     if(!c || !c->havePrev || c->written)return;
@@ -442,10 +460,6 @@ bool Install() noexcept {
         Log("FRAMERATE the render recording is not hooked: no interpolation");
         return false;
     }
-    if(!scopelens::SetBeforeProject(&BeforeProject)) {
-        Log("FRAMERATE the projection call 0x1197B50 could not be shared: no interpolation");
-        return false;
-    }
     bool changed=false;
     // The restore first: nothing is blended until the camera step's hook samples.
     if(!edf::RedirectCall(image+kFenceCall,image+kFence,reinterpret_cast<void*>(&FrameEndHook),changed)) {
@@ -456,8 +470,7 @@ bool Install() noexcept {
         Log("FRAMERATE the camera step's call could not be redirected: no interpolation");
         return false;
     }
-    renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
-    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&RecordEnd);
+    renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);
     frameobjects::Install();
     on=true;
     return true;
