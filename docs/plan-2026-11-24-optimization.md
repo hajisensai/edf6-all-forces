@@ -152,6 +152,24 @@ stress:100 插件栈里排前面的还有 ShotOk / ShotClearOf / Grid::Capsule�
     - 房间门槛：AF 要求 EDF6Coop 声明能力位 2、3 并导出批量收包，否则拒绝建房 / 进房并提示升级 EDF6Coop。
 - 再做（P，升协议，旧版拒绝进房）：net-5 扩展通道加「状态类」不可靠只留最新 + 独立有序域；net-6 删掉已被房间协议覆盖的兼容层
   （kExt 位、PeerHas、名册广播、命令协议 v6/v7 协商）；net-9 怪物操控远端姿态带时间戳插值；net-11 客人间消息不经房主中转（大房间）。
+  - 2026-11-24 已做（第二批；AF 分支 `claude/1124-net-protocol` = 房间协议 17，Coop 分支 `claude/1124-ext-state-channel` = EDF6Coop 2.9.0）：
+    - net-5：Coop 扩展 ABI 1→2（`sendState`，每 (发送者, key) 只留最新、带序号、不重传；消息 20 字节带 flags/key）、扩展自己的有序域
+      （`Link::xtx/xrx`、`ExtAck`）；直连协议 7→8、网络协议 3→4。AF `plugin_net::SendState / BroadcastState`，key =
+      stream×1024 + 对象（enemyPose 1、gravityHold 2、gravityFlight 3、ultimateKeep 4）。迁成状态消息的：怪物操控姿态、
+      重力持握 / 飞行、终极打击 keep；租约 / Ack、重力 thrown / letGo / radial、终极 start / end、支援、指挥仍走可靠有序。
+      所需 EDF6Coop 2.8.0→2.9.0（`kRoomCoop*`）。
+    - net-6：删 kExt 功能位（留 kExtVariants）、plugin_net 名册广播与 PeerHas、`version_notice.h`、命令协议协商（只认 v10）；
+      就绪只看 hello 握手。房间协议 16→17。
+    - net-9：逆向结论是 34 种可操控怪里只有 5 种回退类（Deiroi、GiantDangoLarge、TimeShip、SquidSmall、UFO515）由插件硬写姿态，
+      其余走原生同步和 0x77C2C0 软拉，所以只给这 5 种做插值。姿态线格式 1→2（加发送端逻辑帧号和每帧位移，232→248 B），
+      enemy_control_protocol 7→8。客机渲染时刻 = 本地帧 − 时钟差 − 2 帧，外推 ≤ 6 帧，残差按 τ = 6 帧收敛，
+      超过 max(8 m, |位移|×15) 直接瞬移；收包回调只解码入时间线，写入在逻辑帧里做、每帧最多一次。
+    - net-11：评估后不做（≤ 4 人房）。会经房主中转的持续流只有客人的重力持握（160 B、20 Hz）：房主多出的上行典型约
+      100 kbit/s、最坏约 450 kbit/s，小于房主自己一个怪物操控租约的量；中转积压要连续卡约 80 s 才到 1 MiB 上限，4 人房实际
+      触发不了；多一跳只多 10–40 ms。原来更大的延迟来源是 net-5 之前的队头阻塞（≥ 150 ms），已由 net-5 解决。直连还要
+      Coop 给扩展接上已有的 mesh 选路和打洞，对称 NAT 下仍回退中转。8 人以上的房间先用 net-1 计数量出中转字节，超过
+      relayBytesPerSecond 的一成再做「客人只发一份、房主扇出」。
+    - net-10：见下方 net-10 条目（PR #380）。
   设计要点（2026-11-24 补）：
   - net-5：Coop 扩展 ABI v2 加 `sendState(generation, peer, key, data)`，按 (发送者, key) 只留最新一份，带每 key 序号，
     不重传、不计入可靠积压（溢出后的恢复门槛只看事务类）；接收端丢弃比已收序号旧的。事务类改用每个扩展 channel 自己的
