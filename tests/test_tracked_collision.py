@@ -47,12 +47,13 @@ class NativeAssetTests(unittest.TestCase):
         cls.wt_enabled=wt_tracked.ENABLED
         wt_tracked.ENABLED=False
         cls.addClassCleanup(setattr,wt_tracked,'ENABLED',cls.wt_enabled)
+        import gamedir
         import rootcpk
         import tracked_combat_model as t
         import vulcan_model
         import bmpt_model
-        path=os.environ.get('EDF6_GAME_DIR',rootcpk.DEFAULT_GAME)
-        if not Path(path,'Root.cpk').is_file():raise unittest.SkipTest('installed EDF6 Root.cpk is unavailable')
+        path=gamedir.find()
+        if not path or not Path(path,'Root.cpk').is_file():raise unittest.SkipTest('installed EDF6 Root.cpk is unavailable')
         cls.game=rootcpk.Game(path)
         cls.assets={}
         for kind,module in (('vulcan',vulcan_model),('bmpt',bmpt_model)):

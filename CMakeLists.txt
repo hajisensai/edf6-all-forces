@@ -6,7 +6,8 @@ edf6_version_info_at_end()
 # The tests and tools link the CRT as a DLL, the plugins keep it static (cmake/toolcrt.cmake: the same false positives).
 include("${CMAKE_SOURCE_DIR}/cmake/toolcrt.cmake")
 edf6_tool_crt_at_end()
-set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
+set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks (tools/check.py sets it from pylib/gamedir)")
+set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
@@ -143,6 +144,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
@@ -1117,6 +1119,9 @@ set_target_properties(frame_rate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 # The game's two waits the frame pacing redirects (src/frame_pacing.cpp, docs/frame-pacing-re.md).
 add_test(NAME frame_pacing_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(frame_pacing_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The unlimited frame rate's stage 2 sites (src/frame_rate.cpp, docs/unlimited-fps-re.md): the gate, the guards, the input, the sync interval.
+add_test(NAME frame_rate_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_sig_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(frame_rate_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # Each of the two waits installed on its own checks only (tests/frame_pacing_install_guard.py).
 add_test(NAME frame_pacing_install_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_pacing_install_guard.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
@@ -1377,7 +1382,6 @@ target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(npc_core_check PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
-set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
 add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_session_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME net_ground_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_ground_probe_audit.py" "${EDF6_NATIVE_DLL}")
@@ -1522,7 +1526,6 @@ target_link_libraries(npc_gunner_aim_test PRIVATE edf6common)
 target_compile_options(npc_gunner_aim_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks npc_gunner_aim_test)
 add_test(NAME npc_gunner_aim COMMAND npc_gunner_aim_test)
-set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native gunner checks")
 add_test(NAME sightzoom_native COMMAND sightzoom_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(sightzoom_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
@@ -2202,7 +2205,14 @@ add_dependencies(offline_checks edf41_sound_bank_test)
 add_test(NAME edf41_sound_bank COMMAND edf41_sound_bank_test)
 add_test(NAME edf41_sound_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_sound_lifecycle_test.py")
 add_test(NAME tracked_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_install.py")
-add_test(NAME tracked_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py")
+# Its lifecycle classes in one test, NativeRangeTests (a ~2 min build a vehicle) one vehicle a shard (EDF6_TEST_SHARD;
+# all in one run took ~330 s).
+add_test(NAME tracked_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py"
+         RangeCatalogTests UndeployedXMorphTests RangeLifecycleTests)
+foreach(_shard RANGE 1)
+  add_test(NAME tracked_range_native_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py" NativeRangeTests)
+  set_tests_properties(tracked_range_native_${_shard} PROPERTIES ENVIRONMENT "EDF6_TEST_SHARD=${_shard}/2")
+endforeach()
 add_executable(thermal_gpu_test EXCLUDE_FROM_ALL tests/thermal_gpu_test.cpp src/thermal_gpu.cpp)
 target_include_directories(thermal_gpu_test PRIVATE src)
 target_link_libraries(thermal_gpu_test PRIVATE d3d11 d3dcompiler)
@@ -2239,6 +2249,7 @@ set_tests_properties(drive_gear_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMEN
 # The scoped weapons' spread: its wiring and the weapon table's sniper categories (offline), and the native sites it stands
 # on (src/scope_spread.cpp, docs/scope-accuracy-re.md: read-only, EDF6_NATIVE_DLL unset skips).
 add_test(NAME scope_spread_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_guard.py")
+add_test(NAME gamedir_literal_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gamedir_literal_guard.py")
 add_test(NAME scope_spread_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scope_spread_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(scope_spread_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The Car's (Grape's) seat inputs and the 505 / 601 / 603's against the keys of the plugin's add-on weapons

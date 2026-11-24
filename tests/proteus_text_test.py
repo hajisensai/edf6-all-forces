@@ -1,6 +1,6 @@
 """Proteus text isolation plus real Root.cpk menu/restore regression.
 
-python tests/proteus_text_test.py --game "D:/steam/steamapps/common/EARTH DEFENSE FORCE 6"
+python tests/proteus_text_test.py --game "<EDF6 folder>"
 Only temporary Mods folders are written; Root.cpk is read-only.
 """
 from __future__ import annotations

@@ -14,6 +14,7 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
 import cas_graft  # noqa: E402
+import gamedir  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41heli as heli  # noqa: E402
@@ -23,11 +24,11 @@ import make_edf41_objects as objects  # noqa: E402
 import mdb  # noqa: E402
 import sgo  # noqa: E402
 
-GAME4 = os.environ.get('EDF41_GAME_DIR', r'D:\Steam\steamapps\common\Earth Defense Force 4.1')
-GAME6 = os.environ.get('EDF6_GAME_DIR', r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 6')
+GAME6 = gamedir.find()
+GAME4 = gamedir.find_other(gamedir.EDF41, near=GAME6)
 
 
-@unittest.skipUnless(all(os.path.isfile(os.path.join(p, 'Root.cpk')) for p in (GAME4, GAME6)),
+@unittest.skipUnless(all(p and os.path.isfile(os.path.join(p, 'Root.cpk')) for p in (GAME4, GAME6)),
                      'requires EDF4.1 and EDF6 native resources')
 class Native(unittest.TestCase):
     @classmethod

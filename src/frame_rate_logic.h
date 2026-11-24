@@ -18,7 +18,8 @@
 
 namespace crew::framerate {
 // ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), -1 no cap (the GPU and the swap chain's sync
-// interval are the limit), 61..1000 at most that many frames a second. 1..60 is no more than the game already gives
+// interval are the limit: the game has no vsync setting, 0x11A3098's `sete dl` passes 1 except for the 8 frames after
+// a catch-up, docs/unlimited-fps-re.md §1), 61..1000 at most that many frames a second. 1..60 is no more than the game already gives
 // and is taken as 0; anything under -1 as 0; over 1000 as 1000.
 constexpr int kOff=0,kUnlimited=-1,kMinCap=61,kMaxCap=1000;
 constexpr int FixCap(int raw) noexcept {
@@ -154,29 +155,4 @@ inline bool InterpolateRigid(const float previous[16],const float current[16],fl
     return true;
 }
 
-// The input's edges across presentation frames (docs/unlimited-fps-re.md §2.4). The game's action wrapper update
-// 0x1182BC0 runs every frame (0x7058C7 -> 0x77320 -> 0x7CDC0, 154 calls): it clears the wrapper's pressed / released /
-// repeat bytes (+0x11 / +0x12 / +0x13) and sets them again only on a change seen this frame. The scene step reads them
-// in the next frame's System::Update, before that frame's wrapper update. With frames that do not step, an edge set by
-// one frame's wrapper update is cleared by the next one before any step saw it. The shadow keeps what a frame without
-// a step is about to clear, and hands it to the next step; the UI (it runs after the wrapper update every frame) still
-// sees each edge once, from the native bytes.
-struct Edges {
-    std::uint8_t pressed=0,released=0,repeat=0;
-    constexpr Edges& operator|=(const Edges& o) noexcept {pressed|=o.pressed;released|=o.released;repeat|=o.repeat;return *this;}
-    constexpr bool Any() const noexcept {return pressed || released || repeat;}
-};
-struct Shadow { Edges held{}; };
-// In the wrapper update, before the native one clears `pending` (what the last update set): kept when no step has
-// read it yet, that is when this frame does not step (its System::Update came and went without a step).
-constexpr void BeforeUpdate(Shadow& s,const Edges& pending,std::uint64_t ticksThisFrame) noexcept {
-    if(!ticksThisFrame)s.held|=pending;
-}
-// On a frame that steps, before System::Update: what the step reads is the native bytes and everything kept.
-constexpr Edges ForStep(Shadow& s,const Edges& native) noexcept {
-    Edges e=native;
-    e|=s.held;
-    s.held={};
-    return e;
-}
 }  // namespace crew::framerate

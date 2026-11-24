@@ -171,7 +171,7 @@ def main() -> int:
         ran = True
     else:
         print('SKIP native 408 audit: EDF.dll not present')
-    old = Path(sys.argv[2]) if len(sys.argv)>2 else Path(r'D:\Steam\steamapps\common\Earth Defense Force 4.1\EDF41.exe')
+    old = Path(sys.argv[2]) if len(sys.argv)>2 else Path(gamedir.find_other(gamedir.EDF41, near=gamedir.find_or_dev()) or '')/'EDF41.exe'
     if old.is_file():
         original(old)
         ran = True
