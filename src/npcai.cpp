@@ -140,9 +140,13 @@ constexpr int kMaxArms=16,kMaxRoot=16;
 // enemies; fixed 256 / 1024 / 512 left the rest without the plugin's AI or out of target choice). Their first sizes:
 // the old caps, room enough for a stock mission without growing.
 constexpr int kFirstEnemies=1024,kFirstFriends=512,kFirstNobodys=128;
-// The frame grids' cells (m, npc_grid.h): about a crowd's threat reach (Evade: 2 x NpcDangerRange) and a friend's
-// nearness to a target (kFriendNearTarget) -- a query looks at a few cells.
-constexpr float kEnemyCell=16.0f,kFriendCell=16.0f;
+// The frame grids' cells (m, npc_grid.h). The enemies': about a crowd's threat reach (Evade: 2 x NpcDangerRange), a
+// query looks at a few cells. The friends': near the width of a shot's capsule (ShotClearOf: frRadius + kSpread, 1.4 m
+// to 4.6 m each side). Its main ask is that capsule, once a step for every soldier that fires, over a crowd of them:
+// 16 m cells handed it every friend in a band 32-48 m wide along the shot (stress:100 2026-11-24: ShotOk 13 ms a frame,
+// npc::ShotClear's own tests 9.7 of it); 4 m cells, one about 13 m wide. The grid makes the cells coarser by itself
+// when the friends spread far (at most ~4 cells a friend).
+constexpr float kEnemyCell=16.0f,kFriendCell=4.0f;
 
 // The memory ArmsOf asked Readable of for a soldier, as it stood when the asks were made: its weapon list (address,
 // count, the weapons in it, which of them answered readable) and its WeaponSets (address, count, each hand's entry,
