@@ -402,6 +402,20 @@ def probe_parsing() -> None:
         pf = perf_report.plugin_functions(Named(), [['ntdll.dll+1', 'EDF.dll+50e00', 'EDF6VehicleCrew.dll+10',
                                                      'EDF.dll+11a305f']] * 3, 10, 16.7)
         check(pf == ['no plugin frames'], 'the measurement probes are not the plugin\'s cost (they call through)')
+
+        class Hooks:
+            def func(self, f: str, leaf: bool) -> tuple[str, str]:
+                return f, {'EDF6VehicleCrew.dll+20': 'crew::ThinkHook<0>', 'EDF6VehicleCrew.dll+30': 'crew::Think',
+                           'EDF6VehicleCrew.dll+10': 'crew::perfprobe::UpdateHook'}.get(f, 'crew::Other')
+        stock = ['EDF.dll+596b60', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10', 'EDF.dll+1198000']
+        own = ['ntdll.dll+1', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10']
+        called = ['EDF.dll+7000', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF.dll+1198000']
+        check(not perf_report.plugin_owns(Hooks(), stock), "the stock Think under ThinkHook is the game's own work")
+        check(perf_report.plugin_owns(Hooks(), own) and perf_report.plugin_owns(Hooks(), called),
+              "the plugin's code, and the game code it calls, are its own work")
+        pf = perf_report.plugin_functions(Hooks(), [stock, own, called, called], 10, 20.0)
+        check(pf[0].endswith('100.0%, 20.00 ms/frame') and pf[1].endswith('75.0%, 15.00 ms/frame'),
+              'both shares reported: on the stack, and its own work')
         def ph(*frames: str) -> str:
             return perf_report.phase_of(img, list(frames))[0]
         check(ph('EDF.dll+118e000', 'EDF.dll+1198fa0') == 'draw: camera / Umbra 0x118DFF0', 'the draw split by its part')

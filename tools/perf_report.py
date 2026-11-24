@@ -704,6 +704,21 @@ def phases(img: Image, stacks: list[list[str]], top: int, plug: Plugins | None =
     return out
 
 
+def plugin_owns(plug: 'Plugins', st: list[str]) -> bool:
+    """Whether a sample is the plugin's own work: its deepest plugin frame (the measurement probes not counted) is not a
+    hook that only calls through to the game (a *Hook whose callee, the next frame leafward, is EDF.dll: the stock Think
+    under ThinkHook, the stock render under RenderHook). What the plugin's own code calls in the game counts: the
+    deepest plugin frame is then that code, not the hook."""
+    for j, f in enumerate(st):
+        if not is_plugin(f):
+            continue
+        name = plug.func(f, j == 0)[1]
+        if 'perfprobe' in name:
+            continue
+        return not ('Hook' in name and j > 0 and frame_rva(st[j - 1]) is not None)
+    return False
+
+
 def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms: float | None) -> list[str]:
     """The plugin's functions on a thread: inclusive (on the stack at all) and self (the deepest frame outside the
     system DLLs, so the system calls below it count but EDF.dll work it called does not), as a share of the thread's
@@ -735,13 +750,17 @@ def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms:
         return ['no plugin frames']
     anyp = sum(1 for st in stacks if any(is_plugin(f) and 'perfprobe' not in plug.func(f, j == 0)[1]
                                          for j, f in enumerate(st)))
+    ownp = sum(1 for st in stacks if plugin_owns(plug, st))
 
     def row(k: str, c: int) -> str:
         ms = f' {c / n * frame_ms:6.2f} ms/frame' if frame_ms else ''
         label = names[k] if names[k] == k else f'{names[k]} ({k})'
         return f'- {c / n * 100:5.1f}%{ms} {label}'
     ms = f', {anyp / n * frame_ms:.2f} ms/frame' if frame_ms else ''
-    out = [f'the plugin on the stack (the measurement probes not counted): {anyp / n * 100:.1f}%{ms}', '', 'inclusive:', '']
+    own_ms = f', {ownp / n * frame_ms:.2f} ms/frame' if frame_ms else ''
+    out = [f'the plugin on the stack (the measurement probes not counted): {anyp / n * 100:.1f}%{ms}',
+           f"the plugin's own work (not the game's own under a hook that only calls through): {ownp / n * 100:.1f}%{own_ms}",
+           '', 'inclusive:', '']
     out += [row(k, c) + f' (self {selfc[k] / n * 100:.1f}%)' for k, c in incl.most_common(top)]
     out += ['', 'self (system calls below included):', '']
     out += [row(k, c) for k, c in selfc.most_common(top)]
