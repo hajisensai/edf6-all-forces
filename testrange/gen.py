@@ -1571,6 +1571,12 @@ def rewrite_scenario(game_root: str, plan: Plan) -> list[str]:
     return skipped
 
 
+def check_scenario(game_root: str, plan: Plan) -> list[str]:
+    """write_scenario's checks alone, nothing written (tools/perfrun.py: every range leg before the launch, so a leg
+    that would be refused is not found out half way through it). Returns what without_missing would leave out."""
+    return _scenario_files(game_root, plan)[2]
+
+
 def _scenario_files(game_root: str, plan: Plan) -> tuple:
     """write_scenario's / rewrite_scenario's checks, then what they write: (game, the plan without what is missing,
     what was left out, the script, the points)."""

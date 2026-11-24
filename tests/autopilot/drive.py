@@ -10,7 +10,9 @@ background"). For measurements, e.g. the big map's memory against the stock test
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
   python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW|edf5:ROW [0-4],
-                                                     cycle N [STAY] [reboot]
+                                                     cycle N [STAY] [reboot],
+                                                     next MISSION [0-4] [reboot] (leave the mission now and enter
+                                                     MISSION in the same launch: tools/perfrun.py's legs)
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
@@ -841,6 +843,24 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
 def cycle_command(count: int, stay: float, reboot: bool) -> str:
     """The plugin's `cycle` command (tests/autopilot/autopilot.cpp AskCycle)."""
     return f'cycle {count} {stay:g}' + (' reboot' if reboot else '')
+
+
+def next_command(mission: str, difficulty: int, reboot: bool = False) -> str:
+    """The plugin's `next` command (tests/autopilot/autopilot.cpp AskNext): leave the mission running now and enter
+    MISSION (a `mission` command's name: ROW, RM015, M001, range, ...) in the same launch."""
+    return f'next {mission} {difficulty}' + (' reboot' if reboot else '')
+
+
+def next_outcome(log: list[str], k: int) -> str | None:
+    """How the launch's k-th `next` ended, from the autopilot log rows since it was handed: 'entered' (the plugin's
+    "NEXT k entered" row: the new mission runs), 'failed' (refused, or the script went back to the title), None while
+    it is on its way."""
+    for row in log:
+        if f' NEXT {k} entered' in row:
+            return 'entered'
+        if ' NEXT refused' in row or ' CYCLE failed' in row:
+            return 'failed'
+    return None
 
 
 def cycle_outcome(log: list[str]) -> str | None:
