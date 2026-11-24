@@ -288,12 +288,7 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
     if(!out.holding || !gravity_net::Due(frame,out.sentFrame,gravity_net::kHoldGapFrames,now,out.sentMs,gravity_net::kHoldGapMs))return;
     out.sentFrame=frame;out.sentMs=now;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
-<<<<<<< HEAD
     plugin_net::Broadcast(bytes,sizeof(bytes));
-    (void)now;
-=======
-    plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
->>>>>>> origin/claude/opt-net-6447d4
 }
 // A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
 void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentFrame=0; }
