@@ -40,12 +40,12 @@ struct Out {
     gravity::Target t;
     gravity_net::Grab hold{};       // its state as it goes out (origin, grab, IDs, ray, goal)
     ObjRef by{};                    // its grabber (this machine's player): fallen mid-grab, the grab is let go (Frame)
-    ULONGLONG calledAt=0,sentFrame=0;   // sentFrame: GameFrame of the hold's last state out (0: send now)
+    ULONGLONG calledAt=0,sentFrame=0,sentMs=0;   // sentFrame/sentMs: GameFrame and ms of the hold's last state out (0: send now)
     gravity_net::Grab queue[kMostQueued]{};   // throws, let-goes, radials not sent yet
     int queued=0;
     std::uint32_t origin=1,serial=0;
     // A thrown thing with no ID (found by the ray on the peers): its flight's states follow its throw.
-    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentFrame=0,slowSince=0; } flight;
+    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentFrame=0,sentMs=0,slowSince=0; } flight;
 };
 Out out;
 bool netReady=false,netHost=false;
@@ -157,8 +157,8 @@ void FlightTick(ULONGLONG now) noexcept {
     else f.slowSince=0;
     const bool rest=f.slowSince && now-f.slowSince>=kFlightRestMs;
     const ULONGLONG frame=GameFrame();
-    if(!rest && f.sentFrame && frame-f.sentFrame<gravity_net::kFlightGapFrames)return;
-    f.sentFrame=frame;
+    if(!rest && !gravity_net::Due(frame,f.sentFrame,gravity_net::kFlightGapFrames,now,f.sentMs,gravity_net::kFlightGapMs))return;
+    f.sentFrame=frame;f.sentMs=now;
     gravity_net::Grab g=f.g;
     g.kind=gravity_net::GrabKind::flight;
     std::memcpy(g.at,at,12);std::memcpy(g.vel,vel,12);
@@ -285,11 +285,10 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
         if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
     out.queued=0;
     const ULONGLONG frame=GameFrame();
-    if(!out.holding || (out.sentFrame && frame-out.sentFrame<gravity_net::kHoldGapFrames))return;
-    out.sentFrame=frame;
+    if(!out.holding || !gravity_net::Due(frame,out.sentFrame,gravity_net::kHoldGapFrames,now,out.sentMs,gravity_net::kHoldGapMs))return;
+    out.sentFrame=frame;out.sentMs=now;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
     plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
-    (void)now;
 }
 // A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
 void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentFrame=0; }
