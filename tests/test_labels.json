@@ -2357,6 +2357,16 @@
    ],
    "scripts": []
   },
+  "frame_rate_sigs": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/frame_rate_sig_audit.py"
+   ]
+  },
   "frozen_cockpit_package": {
    "labels": [
     "autoturret-tools",
@@ -3821,6 +3831,15 @@
     "plugin-native"
    ],
    "scripts": []
+  },
+  "perf_probe_native": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/perf_probe_native_audit.py"
+   ]
   },
   "perfrun": {
    "labels": [
@@ -11343,6 +11362,32 @@
    "uses": [
     "ROOT",
     "map_wired",
+    "os",
+    "re",
+    "src"
+   ]
+  },
+  "max_frame_latency_default_back_to_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "max_frame_latency_default_back_to_0",
     "os",
     "re",
     "src"
