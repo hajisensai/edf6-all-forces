@@ -7,12 +7,16 @@
 // WaitForSingleObject INFINITE, 0x3E690). A hit on a pending entry (another thread loading it) blocks in the lookup on the
 // entry's lock (0x9C9F4) until that load ends.
 //
-// With Debug=1 and SyncLoadProbe=1 the probe chains four call sites inside 0x84E80 (the lookup, the miss, the not-found
-// branch, the exit) and, on the game thread only (perf_probe.h GameThread), logs after the outermost 0x84E80 returns:
+// With Debug=1 and SyncLoadProbe=1 the probe chains five call sites inside 0x84E80 (the cache lock 0x50BC0 at 0x84EBF,
+// the lookup, the miss, the not-found branch, the exit) and, on the game thread only (perf_probe.h GameThread), logs
+// after the outermost 0x84E80 returns:
 //   SYNC LOAD <path> <ms> ms            a miss read on the game thread (the whole 0x84E80 call)
 //   SYNC LOAD <path> <ms> ms not found  the same, the file missing (0x84E80 gives an empty handle)
-//   SYNC WAIT <path> <ms> ms            a lookup that waited >= 0.5 ms (another thread's load of it, or the cache lock)
-//   SYNC LOAD STATS ...                 cumulative counts and the hook's own time a call, at most every 10 s
+//   SYNC WAIT <path> <ms> ms            the cache lock and the lookup took >= 0.5 ms (another thread holding the lock, or
+//                                       loading that entry)
+//   SYNC LOAD STATS ...                 totals since load and the last interval's part, the hook's own time a call, at
+//                                       most every 10 s
+// Not installed (one HOOK line says why) without the frame anchor (no game thread to time) or when a site differs.
 // Other threads (the loader thread's preloads) only pass through.
 #pragma once
 

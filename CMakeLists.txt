@@ -1173,6 +1173,9 @@ set_tests_properties(rescue_support_guard PROPERTIES ENVIRONMENT PYTHONIOENCODIN
 add_executable(rescue_logic_test tests/rescue_logic_test.cpp)
 target_compile_options(rescue_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME rescue_logic COMMAND rescue_logic_test)
+add_executable(sync_load_logic_test tests/sync_load_logic_test.cpp)
+target_compile_options(sync_load_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME sync_load_logic COMMAND sync_load_logic_test)
 # The debug spawn tool ships off and an upgraded ini keeps it off; its natives and stock SGOs against the installed game
 # (skip 77 without it).
 add_test(NAME debug_spawn_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_ini_test.py")

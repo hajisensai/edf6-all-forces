@@ -41,7 +41,8 @@ def jump(at: int) -> int:
 
 
 checked = 0
-for site, target in (('kLookupCall', 'kLookup'), ('kMissCall', 'kMiss'), ('kFailCall', 'kFail'), ('kExitCall', 'kExit')):
+for site, target in (('kLockCall', 'kLock'), ('kLookupCall', 'kLookup'), ('kMissCall', 'kMiss'),
+                     ('kFailCall', 'kFail'), ('kExitCall', 'kExit')):
     call(value(site), value(target))
     checked += 1
 sigs = re.findall(r'\{0x([0-9A-Fa-f]+),"([0-9A-F ]+)"\}', re.search(r'kSigs\[\]=\{(.*?)\n\};', source, re.S).group(1))
