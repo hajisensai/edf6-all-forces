@@ -47,6 +47,7 @@
 #include "players_probe.h"
 #include "umbra_probe.h"
 #include "heap_probe.h"
+#include "physics_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -916,6 +917,12 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else if(named && !std::strcmp(what,"umbra"))
             Log("PROBE umbra installed=%d",autopilot::InstallUmbraProbe(image,&Log));
+        else if(named && !std::strcmp(what,"physics")) {
+            unsigned ticks=0;
+            sscanf_s(text,"%*s %*s %u",&ticks);
+            Log("PROBE physics installed=%d ticks=%u",autopilot::InstallPhysicsProbe(image,&Log,logPath,ticks),
+                ticks ? ticks : 6000u);
+        }
         else if(named && !std::strcmp(what,"heap")) {   // "probe heap [N]": counting from the Nth cycle left (default 2)
             int from=2;
             sscanf_s(text,"%*s %*s %d",&from);
@@ -985,6 +992,7 @@ DWORD WINAPI Loop(void*) {
         autopilot::HectorProbeTick();
         autopilot::UmbraProbeTick();
         autopilot::PlayersProbeTick();
+        autopilot::PhysicsProbeTick();
         Sleep(15);
     }
 }
