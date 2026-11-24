@@ -13,6 +13,11 @@
   - the measurement probes' rows (made from the plugin's own format strings): frames and steps, the frame split and
     its n = 0 floor, the render thread, the channels, SLOW FRAME and the samples inside one by QPC, the mission entries
     cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon.
+  - legs (several scenarios in one launch): the positional arguments with their key= / warm= / diff=, each leg's
+    warm-up, its `next` command, the autopilot's NEXT rows, the launch's logs cut a leg each (past midnight too),
+    gen.rewrite_scenario keeping the first originals, one launch of three legs with drive.run faked (the range written
+    once before the launch, rewritten for the later range leg, put back once; the keys timed from the leg's entry; a
+    leg that never comes in ends the run), and summary.md's row a leg.
 Exit code 1 when one fails.
 """
 from __future__ import annotations
@@ -666,6 +671,355 @@ def outlived_runs() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def rewrite_files() -> None:
+    """gen.rewrite_scenario: refused before a write_scenario kept the originals; then the range's files rewritten with
+    the kept originals left as they were, so restore_scenario puts back what was there before the first write."""
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as queues:
+        os.environ['EDF6_QUEUE_DIR'] = queues
+        out = gen.mission_dir(root, gen.RANGE_MISSION)
+        os.makedirs(out)
+        with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
+            f.write(b'old script')
+        saved = {k: getattr(gen, k) for k in ('installed', 'Game', '_range_files', 'without_missing',
+                                              'has_mission_setup', '_write_mission')}
+        scripts = iter(['first leg', 'second leg', 'third leg'])
+
+        def fake_write(game_root, game, mission, site, text, points):
+            for name, data in (('MISSION.AC', text.encode()), ('MISSION.RMPA', points)):
+                with open(os.path.join(gen.mission_dir(game_root, mission), name), 'wb') as f:
+                    f.write(data)
+        gen.installed = lambda game_root: True
+        gen.Game = lambda game_root: None
+        gen.without_missing = lambda game_root, plan: (plan, ['left out'])
+        gen.has_mission_setup = lambda game, name: True
+        gen._range_files = lambda game_root, game, plan: (next(scripts), b'points', [], False)
+        gen._write_mission = fake_write
+        try:
+            plan = gen.Plan()
+            plan.vehicles = {}
+            plan.waves.enabled = False
+            try:
+                gen.rewrite_scenario(root, plan)
+                check(False, 'rewrite_scenario refused before write_scenario')
+            except RuntimeError:
+                with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                    check(f.read() == b'old script', 'rewrite_scenario refused before write_scenario, nothing written')
+            gen._range_files = lambda game_root, game, plan: (next(scripts), b'points', [], False)
+            scripts = iter(['first leg', 'second leg', 'third leg'])
+            gen.write_scenario(root, plan)
+            check(gen.rewrite_scenario(root, plan) == ['left out'], 'rewrite_scenario returns what was left out')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'second leg', 'rewrite_scenario writes the next leg\'s script')
+            with open(os.path.join(gen.scenario_backup(root), 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'the kept original is still the one from before the first leg')
+            gen.rewrite_scenario(root, plan)
+            check(gen.restore_scenario(root), 'restore after two rewrites')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'restore puts back the script from before the first leg')
+            check(not os.path.exists(os.path.join(out, 'MISSION.RMPA')), 'and removes what was not there before it')
+            gen.installed = lambda game_root: False
+            try:
+                gen.check_scenario(root, plan)
+                check(False, 'check_scenario refuses a range that is not installed')
+            except RuntimeError:
+                check(not os.path.exists(gen.scenario_backup(root)), 'check_scenario refuses, nothing kept')
+        finally:
+            for k, v in saved.items():
+                setattr(gen, k, v)
+
+
+def legs_options() -> None:
+    """The positional arguments as legs: their options, the refusals, the folders, the warm-ups, the commands."""
+    import drive
+    scenario, o = perfrun.options(['stress:1', 'stress:10', 'M001,key=4d@48,key=esc@57:500,warm=30,diff=2', 'RM015',
+                                   '--dll', 'installed'])
+    legs = o['legs']
+    check(scenario == 'stress:1' and [g['scenario'] for g in legs] == ['stress:1', 'stress:10', 'M001', 'RM015'],
+          'several positional arguments: the legs in order')
+    check(legs[2]['keys'] == [('4d', 48.0, 300), ('esc', 57.0, 500)] and legs[2]['warm'] == 30.0
+          and legs[2]['difficulty'] == 2 and legs[0]['keys'] == [] and legs[0]['warm'] is None,
+          "a leg's key= (300 ms by default) / warm= / diff=, the others' none")
+    check(o['keys'] == [] and o['leg_timeout'] == 900.0 and not o['next_reboot'], "legs: the run's own keys untouched")
+    scenario, o = perfrun.options(['M001,key=4d@48,warm=10,diff=3', '--dll', 'installed'])
+    check(scenario == 'M001' and o['keys'] == [('4d', 48.0, 300)] and o['warm'] == 10.0 and o['difficulty'] == 3
+          and len(o['legs']) == 1, 'one scenario with leg options: the single run as before, its options the run\'s')
+    _, o = perfrun.options(['M001', 'RM015', '--dll', 'installed', '--leg-timeout', '300', '--next-reboot'])
+    check(o['leg_timeout'] == 300.0 and o['next_reboot'], '--leg-timeout S, --next-reboot')
+    for bad in (['M001', 'RM015', '--dll', 'installed', '--ab', __file__, __file__],
+                ['M001', 'RM015', '--dll', 'installed', '--cycle', '2'],
+                ['M001', 'RM015', '--dll', 'installed', '--key', '4d@50'],
+                ['M001,foo=1', '--dll', 'installed'], ['M001,warm=x', '--dll', 'installed'],
+                ['M001,diff=7', '--dll', 'installed'], [',key=4d@1', '--dll', 'installed'],
+                ['M001,key', '--dll', 'installed'], ['M001,key=4d', '--dll', 'installed'],
+                ['M001,warm=-1', '--dll', 'installed'], ['M001,warm=nan', '--dll', 'installed'],
+                ['M001,warm=inf', '--dll', 'installed'], ['M001,key=4d@nan', '--dll', 'installed'],
+                ['M001,key=4d@-2', '--dll', 'installed'], ['M001,key=4d@1:0', '--dll', 'installed'],
+                ['M001', '--warm', 'nan', '--dll', 'installed'], ['M001', '--warm', '-5', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', '0', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', 'inf', '--dll', 'installed'],
+                ['M001', '--cpu', '0', '--dll', 'installed'], ['M001', '--difficulty', '9', '--dll', 'installed'],
+                ['M001', '--stacks', '-1', '--dll', 'installed'],
+                ['M001', '--restore'], ['--dll', 'installed']):
+        try:
+            perfrun.options(bad)
+            check(False, f'{bad} refused')
+        except SystemExit:
+            check(True, f'{" ".join(bad)} refused')
+    check(perfrun.leg_names([{'scenario': x} for x in ('stress:1', 'M001', 'stress:1', 'stress:1')])
+          == ['stress_1', 'M001', 'stress_1-2', 'stress_1-3'], "a leg's folder: its scenario, -2 on one run twice")
+    check(perfrun.warm_for('stress:1', None) == perfrun.stress_fields(1)[2] and perfrun.warm_for('stress:100', None)
+          == perfrun.stress_fields(100)[2] == 90.0 and perfrun.warm_for('M001', None) == 25.0
+          and perfrun.warm_for('grand', None) == 45.0 and perfrun.warm_for('stress:100', 12.0) == 12.0,
+          "each leg's warm-up: its scenario's own, or the one given")
+    check([perfrun.leg_mission(x) for x in ('stress:10', 'swarm:giantspider01', 'blast', 'grand', 'M001', 'RM015', '42')]
+          == ['range'] * 4 + ['M001', 'RM015', '42'], "a leg's mission: range for a range scenario")
+    check(drive.next_command('range', 1) == 'next range 1' and drive.next_command('M001', 2, True)
+          == 'next M001 2 reboot', "a leg's `next` command")
+    check(perfrun.legs_longest([40.0, 25.0], 20, 20, 900) == int(40 + 40 + 25 + 40 + 2 * 900 + 90),
+          "the launch's deadline: every leg's sampling and every leg's way in (the first one's loading too)")
+    check(perfrun.options(['M001,warm=0', '--dll', 'installed'])[1]['warm'] == 0.0, 'warm=0: sampled at once')
+
+
+def legs_logs() -> None:
+    """The autopilot's NEXT rows, and the launch's logs cut a leg each by the wall clock (past midnight too)."""
+    import drive
+    rows = ['[ 70.0 s] NEXT armed: M001, difficulty 1, back in by HQMain', '[ 71.0 s] CYCLE 1/1 leaving',
+            '[ 90.0 s] NEXT 1 entered: the mission runs (row 1, difficulty 1, mode 0, content id 0)']
+    check(drive.next_outcome(rows, 1) == 'entered' and drive.next_outcome(rows[:2], 1) is None,
+          'NEXT k entered: the leg is in its mission; not yet before it')
+    check(drive.next_outcome(['[ 90.0 s] NEXT 10 entered: ...'], 1) is None, 'NEXT 10 is not NEXT 1')
+    check(drive.next_outcome(['[ 1.0 s] NEXT refused: a cycle or a next is already running'], 1) == 'failed'
+          and drive.next_outcome(['[ 1.0 s] CYCLE failed: the script went back to the title'], 2) == 'failed',
+          'NEXT refused / CYCLE failed: the leg failed')
+    start = time.mktime((2026, 11, 24, 23, 59, 0, 0, 0, -1))
+    data = (b'[23:58:59.900] stamped a little before the start\r\n'
+            b'[23:59:10.000] PERF OBJECTS enemies 160, player team 4, friends 9\r\n'
+            b'  a dump row without a stamp\r\n'
+            b'[2026-11-25 00:00:40] STATS last 5s: the date first (EDF6Coop)\r\n'
+            b'[00:00:30.000] PERF OBJECTS enemies 1600, player team 4, friends 9\r\n'
+            b'[00:01:00.000] at the second bound\r\n')
+    a, b, c = perfrun.split_log(data, start, [start + 60, start + 120])
+    check(a.count(b'\r\n') == 3 and b'a little before' in a and b'without a stamp' in a and b'160,' in a,
+          'the first leg: its rows, a stamp just before the start and a row without a stamp with it')
+    check(b'1600' in b and b'date first' in b and b'160,' not in b, 'the second leg: past midnight, the date-first rows')
+    check(c == b'[00:01:00.000] at the second bound\r\n', 'a row at a bound goes to the leg after it')
+    check(perfrun.split_log(data, start, []) == [data], 'one leg: the whole log')
+    # perf_report's windows over midnight: 23:59:00 + 60 s; rows before, inside (both sides of 00:00) and after
+    d = tempfile.mkdtemp()
+    try:
+        log = os.path.join(d, 'vehiclecrew.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write('[23:58:30.000] PERF OBJECTS enemies 1, player team 4, friends 9\n'
+                    '[23:59:30.000] PERF OBJECTS enemies 10, player team 4, friends 9\n'
+                    '[00:00:00.000] PERF OBJECTS enemies 20, player team 4, friends 9\n'
+                    '[00:00:30.000] PERF OBJECTS enemies 1000, player team 4, friends 9\n'
+                    '[00:00:00.400] PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, '
+                    '0 over 33 ms\n')
+        objs = perf_report.read_objects(log, (start, start + 60))
+        check(objs.get('enemies') == (15.0, 20), f'PERF OBJECTS over midnight: the window\'s rows only ({objs})')
+        check(len(perf_report.read_perf(log, (start, start + 60))) == 1, 'PERF rows over midnight kept')
+        check(perf_report.in_window(perfrun.tod(start) - 60, (start, start + 60)) is False,
+              'a row a minute before the window is before it, not a day later')
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def legs_run() -> None:
+    """One launch of three legs with drive.run faked: the range written once before the launch and rewritten for the
+    later range leg, the `next` commands, the keys timed from the leg's entry, each leg's slice of the log and its
+    run.json, the range and the placed files put back once; summary.md's row a leg; a leg that never comes in."""
+    import contextlib
+    import io
+    import drive
+    names = ('game_pids', 'run', 'rows', 'command', 'key', 'restore_placed', 'anything_left')
+    saved = {k: getattr(drive, k) for k in names}
+    gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'rewrite_scenario',
+                                           'restore_scenario')}
+    sample_saved = perfrun._sample
+    d = tempfile.mkdtemp()
+    try:
+        game = os.path.join(d, 'game')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        os.environ['EDF6_QUEUE_DIR'] = os.path.join(d, 'queues')
+        log = perfrun.plugin_log(game)
+        with open(log, 'wb') as f:
+            f.write(b'[00:00:00.000] an earlier launch\r\n')
+        with open(os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini'), 'w', encoding='utf-8') as f:
+            f.write('[VehicleCrew]\nTestRangeContent=4242\n')
+        calls: list = []
+        auto: list[str] = []
+        running: list[int] = []
+        enemies = {'range': 0}
+        enter = ['ok']   # how a `next` goes: ok, never (no row), mode (the pack's mode not entered), wrong (difficulty)
+        running_at = [0.0]   # when the first mission runs (its RUNNING row), its loading before
+        targets = {'M001': (1, 0, 0), 'range': (0, 4242, 7)}   # row, content id, mode
+
+        def stamp(text: str) -> None:
+            t = int(perfrun.tod(time.time()) * 1000)   # once, truncated as the plugin's stamp: never past now
+            with open(log, 'ab') as f:
+                f.write(f'[{t // 3600000:02d}:{t // 60000 % 60:02d}:{t // 1000 % 60:02d}.{t % 1000:03d}] {text}\r\n'
+                        .encode())
+
+        def fake_run(game_, mission, difficulty, seconds, keep, **k):
+            calls.append(('run', mission, difficulty, k.get('extra'), isinstance(k.get('gate'), drive.Gate)))
+            running.append(1)
+            stamp(f'the launch: {mission}')
+            row, content, mode = targets[mission]
+            running_at[0] = time.time() + 0.3
+            first = [f'[ 0.5 s] RANGE mode {mode} (content id {content}) made current'] if content else []
+            auto[:] = first
+            runs = (f'[ 9.0 s] RUNNING: the mission runs (row {row}, difficulty {difficulty}, mode {mode}, '
+                    f'content id {content})')
+            rows_now[0] = lambda: (auto[:len(first)] + [runs] + auto[len(first):] if time.time() >= running_at[0]
+                                   else list(auto))
+            k['during']()
+            running.clear()
+            return 0
+
+        def fake_command(game_, text, gate=None):
+            calls.append(('command', text))
+            time.sleep(0.01)
+            stamp(f'left for {text}')
+            _, mission, diff = text.split()[:3]
+            row, content, mode = targets[mission]
+            n = sum(1 for c in calls if c[0] == 'command')
+            if enter[0] == 'mode':
+                auto.append('[ 1.0 s] RANGE no offline mode with content id 4242')
+                auto.append("[ 1.0 s] SCRIPT HQMain: the pack's mode not entered, the menu as is")
+            elif enter[0] in ('ok', 'wrong'):
+                auto.append(f'[ 1.0 s] RANGE mode {mode} (content id {content}) made current')
+                d = int(diff) + (1 if enter[0] == 'wrong' else 0)
+                auto.append(f'[ 1.0 s] NEXT {n} entered: the mission runs (row {row}, difficulty {d}, mode {mode}, '
+                            f'content id {content})')
+
+        def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
+            calls.append(('sample', os.path.basename(out), warm))
+            now = time.time()
+            n = enemies['range']
+            stamp('PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, 0 over 33 ms')
+            stamp(f'PERF OBJECTS enemies {n}, player team 4, friends 9')
+            with open(os.path.join(out, 'cpu.txt'), 'w') as f:
+                f.write('')
+            marks['pid'] = 1
+            marks['windows'] = {'cpu': [now - 30, now + 0.2], 'stacks': [now + 0.2, now + 0.3]}
+
+        def write(game_, plan):
+            calls.append(('write', plan.waves.max_alive))
+            enemies['range'] = plan.waves.max_alive
+            return []
+
+        def rewrite(game_, plan):
+            calls.append(('rewrite', plan.waves.max_alive))
+            enemies['range'] = plan.waves.max_alive
+            return ['left out']
+        drive.game_pids = lambda: list(running)
+        drive.run = fake_run
+        rows_now = [lambda: list(auto)]
+        drive.rows = lambda game_: rows_now[0]()
+        drive.command = fake_command
+        drive.key = lambda game_, spec, ms, gate=None: calls.append(('key', spec, ms))
+        drive.restore_placed = lambda game_: calls.append(('placed',)) or True
+        drive.anything_left = lambda game_: False
+        gen.installed = lambda game_: True
+        gen.check_scenario = lambda game_, plan: calls.append(('check', plan.waves.max_alive)) or []
+        gen.write_scenario = write
+        gen.rewrite_scenario = rewrite
+        gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
+        perfrun._sample = fake_sample
+        _, opts = perfrun.options(['stress:1', 'M001,key=4d@0.1,diff=3', 'stress:10,warm=7', '--dll', 'installed',
+                                   '--warm', '5'])
+        out = os.path.join(d, 'out')
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+        check(rc == 0, 'three legs: the run passes')
+        order = [c for c in calls if c[0] != 'key']
+        check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1, ('running',), True),
+                        ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
+                        ('rewrite', 1600), ('command', 'next range 1'), ('sample', 'stress_10', 7.0),
+                        ('restore',), ('placed',)],
+              'every range leg checked before the launch, written once, rewritten for the later range leg, `next` '
+              'for each later leg, put back once at the end')
+        check(('key', '4d', 300) in calls, "the M001 leg's key held")
+        dirs = [os.path.join(out, n) for n in ('stress_1', 'M001', 'stress_10')]
+        runs = []
+        for x in dirs:
+            with open(os.path.join(x, 'run.json'), encoding='utf-8') as f:
+                runs.append(json.load(f))
+        check([r['scenario'] for r in runs] == ['stress:1', 'M001', 'stress:10'] and [r['leg'] for r in runs]
+              == [1, 2, 3] and runs[1]['difficulty'] == 3 and runs[2]['skipped'] == ['left out']
+              and all('cpu' in r['windows'] for r in runs) and 'asked' in runs[1] and 'asked' not in runs[0],
+              "each leg's run.json: its scenario, difficulty, windows, when its `next` was handed")
+        check(runs[1]['keys_held'][0][:3] == ['4d', 0.1, 300], "the leg's key held, timed from its entry")
+        check(runs[0]['entered'] >= running_at[0],
+              "the first leg's warm-up from its RUNNING row (the mission runs), not from before its loading")
+        with open(os.path.join(dirs[0], 'run.json'), encoding='utf-8') as f:
+            first = json.load(f)
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(dict(first, error='rip_sampler (stacks) exit 5: denied'), f)
+        row0 = perfrun.legs_table(dirs).splitlines()[2]
+        check(row0.endswith('| **ERROR** rip_sampler (stacks) exit 5: denied |') and '| 20.00 |' in row0,
+              "summary.md: a sampled leg with an error says so in its row")
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(first, f)
+        slices = []
+        for x in dirs:
+            with open(os.path.join(x, 'vehiclecrew.log'), 'rb') as f:
+                slices.append(f.read())
+        check(b'the launch' in slices[0] and b'an earlier launch' not in slices[0]
+              and b'left for next M001' in slices[1] and b'left for next range' in slices[2]
+              and b'enemies 1600' in slices[2] and b'enemies 1600' not in slices[0] + slices[1],
+              "each leg's part of this launch's log: its leaving, its loading, its rows")
+        with open(os.path.join(out, 'vehiclecrew.log'), 'rb') as f:
+            check(f.read() == b''.join(slices), "the whole launch's log kept beside the legs'")
+        table = perfrun.legs_table(dirs)
+        lines = table.splitlines()
+        check(len(lines) == 5 and lines[2].startswith('| stress_1 | stress:1 | 5 | 20.00 | 50.0 | 1.00% | 1.00 |')
+              and 'enemies 160 (max 160)' in lines[2] and 'enemies 1600 (max 1600)' in lines[4]
+              and 'enemies 160 ' in lines[3], "summary.md: a row a leg, each leg's frames and objects")
+        with open(os.path.join(dirs[0], 'report.md'), 'w', encoding='utf-8') as f:
+            f.write("the plugin's own work (not the game's own under a hook that only calls through): 4.2%, 0.8 ms/frame\n")
+        check('| 4.2% |' in perfrun.legs_table(dirs).splitlines()[2], "summary.md: the plugin's own work from report.md")
+        # a leg that never comes in: the run ends there, failed, everything still put back
+        calls.clear()
+        auto.clear()
+        enter[0] = 'never'
+        opts['leg_timeout'] = 2.0   # the first leg's RUNNING comes 0.3 s in: in time; the second leg's never
+        out = os.path.join(d, 'out2')
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+        check(rc == 1 and ('restore',) in calls and ('placed',) in calls and not any(c[0] == 'rewrite' for c in calls)
+              and 'not sampled' in said.getvalue(), 'a leg not in its mission in time: failed, the run ends, put back')
+        with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
+            check('--leg-timeout' in json.load(f)['error'], "the leg's run.json says why")
+        table = perfrun.legs_table([os.path.join(out, n) for n in ('stress_1', 'M001', 'stress_10')]).splitlines()
+        check('not sampled: next 1 not in its mission' in table[3] and 'not sampled: not reached' in table[4]
+              and table[3].endswith('| **ERROR** next 1 not in its mission 2 s after it was asked (--leg-timeout) |')
+              and table[4].endswith('| **ERROR** not sampled |'), 'summary.md: why a leg has no numbers, marked')
+        # the pack's mode not entered: the leg failed at once, not after --leg-timeout
+        for how, want in (('mode', "failed: [ 1.0 s] SCRIPT HQMain: the pack's mode not entered"),
+                          ('wrong', 'next 1 entered another mission than M001 (difficulty 3): difficulty 4, not 3')):
+            calls.clear()
+            enter[0] = how
+            opts['leg_timeout'] = 900.0
+            out = os.path.join(d, 'out-' + how)
+            t0 = time.time()
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+            with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
+                why = json.load(f).get('error', '')
+            check(rc == 1 and time.time() - t0 < 30 and want in why and ('placed',) in calls,
+                  f'a `next` that {how}: the leg failed at once ({why!r}), the run ended and put back')
+    finally:
+        for k, v in saved.items():
+            setattr(drive, k, v)
+        for k, v in gsaved.items():
+            setattr(gen, k, v)
+        perfrun._sample = sample_saved
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
 scenario_files()
 log_turnover()
 both_plugins()
@@ -677,5 +1031,9 @@ probe_parsing()
 perfrun_probe_options()
 vanilla_names()
 drive_during()
+rewrite_files()
+legs_options()
+legs_logs()
+legs_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)

@@ -43,6 +43,9 @@ cpu-11（n = 0 帧成本）。然后在当前 main 上重测 stress:1/10/30/100 
 运行条件：
 
 - 命令：`python tools/perfrun.py <场景>`，Debug=1 加 PerfProbe=1；
+  之后重测可以一次启动跑完全部场景（多段 legs，2026-11-24 起）：
+  `python tools/perfrun.py stress:1 stress:10 stress:30 stress:100 M001,key=4d@48,key=4d@53,key=esc@57,key=esc@61 RM015`。
+  每段的结果在 `<out>/<段名>/`（run.json、report.md 与单场景相同），汇总表在 `<out>/summary.md`；用法见 perfrun.py 开头的说明。
 - 窗口：进关预热后取 20 s 干净窗口（只看线程 CPU，不挂起线程），之后 20 s 采栈（间隔 2 ms）；
 - 机器：RTX 5090，3840x2160 窗口化，60 Hz；
 - 原始数据：`tmp/perf/base-*`（不入库）；锚点见 `docs/perf-probe-re.md`。
