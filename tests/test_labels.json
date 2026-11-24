@@ -188,12 +188,6 @@
    ],
    "scripts": []
   },
-  "append_log_test": {
-   "labels": [
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "armor_hud_check": {
    "labels": [
     "plugin-native"
@@ -229,6 +223,12 @@
    ]
   },
   "autoturret_binding": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "autoturret_clock_grid": {
    "labels": [
     "plugin-native"
    ],
@@ -2473,6 +2473,26 @@
    ],
    "scripts": []
   },
+  "frame_rate_dev_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/frame_rate_dev_guard.py"
+   ]
+  },
   "frame_rate_sigs": {
    "labels": [
     "plugin-native",
@@ -2728,6 +2748,17 @@
     "tests/hail_glide_shard.py"
    ]
   },
+  "hail_glide_shard_test": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py",
+    "tests/hail_glide_shard_test.py"
+   ]
+  },
   "hangar_recover": {
    "labels": [
     "plugin-native"
@@ -2796,6 +2827,12 @@
    "scripts": [
     "tests/havok_props_sim.py"
    ]
+  },
+  "heap_probe": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "hector_ai_check": {
    "labels": [
@@ -3178,6 +3215,12 @@
    ],
    "scripts": []
   },
+  "lazy_rows": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "level_list": {
    "labels": [
     "autoturret-tools",
@@ -3196,6 +3239,12 @@
    "scripts": [
     "tests/test_level_list.py"
    ]
+  },
+  "live_set": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "loadout_generate": {
    "labels": [
@@ -3244,7 +3293,19 @@
    ],
    "scripts": []
   },
+  "log_crash": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "log_once": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "log_test": {
    "labels": [
     "plugin-native"
    ],
@@ -3470,6 +3531,12 @@
    ]
   },
   "mission_watch": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mod_file": {
    "labels": [
     "plugin-native"
    ],
@@ -4168,6 +4235,15 @@
    ],
    "scripts": [
     "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "plugin_image_size_guard": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/plugin_image_size_guard.py"
    ]
   },
   "plugin_net": {
@@ -5097,6 +5173,12 @@
    ],
    "scripts": []
   },
+  "step_fresh": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "stock_store_loadouts": {
    "labels": [
     "autoturret-tools",
@@ -5380,6 +5462,21 @@
     "tests/supportunit_allies_native_audit.py"
    ]
   },
+  "sync_load_logic": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sync_load_probe_native": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/sync_load_probe_native_audit.py"
+   ]
+  },
   "team_native": {
    "labels": [
     "plugin-native"
@@ -5424,6 +5521,7 @@
     "edf41",
     "edf5",
     "installer",
+    "misc",
     "native-codec",
     "plugin-native",
     "pylib-model",

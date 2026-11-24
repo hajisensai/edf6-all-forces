@@ -107,10 +107,8 @@ EVERYTHING = {
 # game's folder). tools/test_domains.py --check finds every such listing in the tests' scripts and tools/selftest.py
 # (blind_scans): one neither declared here nor run only by EVERYTHING's tests fails it.
 SCANNED: dict[str, tuple[str, ...]] = {
-    'tests/autopilot/drive.py::place_file': (),                 # the game's Mods folder
-    'tests/autopilot/drive.py::unrecorded_placed': (),          # the game's Mods folder
+    'tests/perfrun_test.py::scenario_files': (),                # a temporary game folder's mission
     'tests/save_backup_test.py::<module>': (),                  # a temporary save folder
-    'tests/test_worldmap_pack.py::Build': (),                   # a temporary release folder
     'tests/test_worldmap_pack.py::DeveloperFolder': (),         # the developer's model folder (not tracked)
     'tools/selftest.py::_cmake_plugins': ('CMakeLists.txt', '*/CMakeLists.txt'),
     'tools/selftest.py::edf41_outfits_shipped': ('edf41port/outfits/*',),   # edf41_outfits.FILES
@@ -678,9 +676,19 @@ def _bound(target: ast.AST) -> list[str]:
 
 
 def _binds(scope: ast.AST) -> dict[str, list[ast.AST]]:
-    """Every name bound in `scope` -> the expressions bound to it (assignments, loop targets, parameter defaults)."""
+    """Every name bound in `scope` -> the expressions bound to it (assignments, loop targets, parameter defaults); not
+    the names of a function or class inside it (their own scope), only its parameters' defaults."""
     out: dict[str, list[ast.AST]] = {}
-    for n in ast.walk(scope):
+
+    def own(node: ast.AST):
+        yield node
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                if not isinstance(c, ast.ClassDef):
+                    yield c.args
+            else:
+                yield from own(c)
+    for n in own(scope):
         if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
             for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
                 for x in _bound(t):
@@ -719,6 +727,7 @@ def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]
     def judge(expr: ast.AST, env: dict, memo: dict) -> tuple[bool, bool]:
         """(a folder name is written in it, it is built from the repository)"""
         named = anchored = False
+        called = {id(c.func) for c in ast.walk(expr) if isinstance(c, ast.Call)}
         for x in ast.walk(expr):
             if isinstance(x, ast.Constant) and isinstance(x.value, str) and x.value.strip('./\\'):   # not '..'
                 named = True
@@ -735,24 +744,34 @@ def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]
                     memo[x.id] = (n2, a2)
                 named = named or memo[x.id][0]
                 anchored = anchored or memo[x.id][1]
-            elif isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in imported:
+            elif isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in imported \
+                    and id(x) not in called:   # a module's constant (eo.FILES); its function builds from its arguments
                 anchored = True
         return named, anchored
 
     out: list[tuple[str, int, str]] = []
+    scopes = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+    def visit(node: ast.AST, name: str, env: dict, memo: dict) -> None:
+        if isinstance(node, ast.Constant) and node.value == 'ls-files':
+            out.append((name, node.lineno, 'git ls-files'))
+        elif isinstance(node, ast.Call) and (target := _listed(node)) is not None:
+            named, anchored = judge(target, env, memo)
+            if anchored and not named:
+                out.append((name, node.lineno, ast.unparse(node)[:100]))
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, scopes):   # its own names, then the ones of the scopes around it
+                inner = {k: v + env.get(k, []) for k, v in _binds(c).items()}
+                visit(c, name, {**env, **inner}, {})
+            else:
+                visit(c, name, env, memo)
+
     for top in tree.body:
-        name = top.name if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else '<module>'
-        env = module if name == '<module>' else _binds(top)
-        memo: dict = {}
-        for n in ast.walk(top):
-            if isinstance(n, ast.Constant) and n.value == 'ls-files':
-                out.append((name, n.lineno, 'git ls-files'))
-            elif isinstance(n, ast.Call):
-                target = _listed(n)
-                if target is not None:
-                    named, anchored = judge(target, env, memo)
-                    if anchored and not named:
-                        out.append((name, n.lineno, ast.unparse(n)[:100]))
+        name = top.name if isinstance(top, scopes) else '<module>'
+        if isinstance(top, scopes):
+            visit(top, name, {k: v[:] for k, v in _binds(top).items()}, {})
+        else:
+            visit(top, name, module, {})
     return out
 
 

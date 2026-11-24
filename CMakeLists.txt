@@ -1307,6 +1307,9 @@ foreach(_shard RANGE ${_hail_last})
   add_test(NAME hail_glide_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard.py"
            "$<TARGET_FILE:hail_glide_check>" --shard ${_shard}/${HAIL_GLIDE_SHARDS})
 endforeach()
+# the shards' runner (a failing unit's stderr shown) and the unit list (every wing's every part, none cut short)
+add_test(NAME hail_glide_shard_test COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard_test.py"
+         "$<TARGET_FILE:hail_glide_check>")
 
 add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
