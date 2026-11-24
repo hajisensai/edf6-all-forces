@@ -40,10 +40,11 @@ STEP_PHASES = ('setup2', 'ai_update', 'pre_update', 'havok_update', 'object_upda
 # The draw recording's parts (cpu-1): the camera's projection and Umbra, the xgs pool's flush, the rest.
 DRAW_PARTS = ((0x118DFF0, 'camera / Umbra 0x118DFF0'), (0x1197090, 'pool flush 0x1197090'))
 POOL_WAIT = 0x65F10   # the xgs pool's join: each phase ends waiting on its workers here (docs/reviews cpu-7)
-# Thread roles by a function on the stack (docs/frame-pacing-re.md, havok-mt-re.md section 12, aiworld-re.md).
-ROLES = ((0x3E630, 'xgs pool worker'), (0x130FE20, 'Havok worker (processTaskQueue)'),
-         (0x111B8E0, 'render thread'), (0x1118AF0, 'render thread'), (0xF3AA0, 'ai::World thread'),
-         (0xF3E60, 'ai::World thread'))
+# Thread roles by a function on the stack (docs/frame-pacing-re.md, havok-mt-re.md section 12, aiworld-re.md), the
+# first that matches. 0x3E630 last: every xgs thread starts there (the game thread too, M001 2026-11-24), so it only
+# says "an xgs thread" when nothing more specific is on the stacks.
+ROLES = ((0x130FE20, 'Havok worker (processTaskQueue)'), (0x111B8E0, 'render thread'), (0x1118AF0, 'render thread'),
+         (0xF3AA0, 'ai::World thread'), (0xF3E60, 'ai::World thread'), (0x3E630, 'xgs thread (pool worker or other)'))
 # Application::Update 0x705530's calls by return address, the lowest of each bucket (docs/unlimited-fps-re.md 2.2).
 APP_BUCKETS = ((0x705530, 'app: start'), (0x705627, 'app: network / Steam / EOS'), (0x7056B4, 'app: MapMgr 0x1230A0'),
                (0x7056C0, 'app: before System::update'), (0x70571B, 'app: after System::update'),
@@ -605,6 +606,11 @@ def thread_role(img: Image, stacks: list[list[str]]) -> str:
         return 'game thread (System::update)'
     if starts[WINDOW_LOOP] > len(stacks) * 0.2:
         return 'window thread'
+    # the main loop (at full speed mostly in its tick wait and the render fence, rarely in System::update); before the
+    # roles: every xgs thread, this one too, starts in 0x3E630
+    loop = sum(1 for st in stacks if any(r is not None and MAIN_LOOP[0] <= r < MAIN_LOOP[1] for r in map(frame_rva, st)))
+    if loop > len(stacks) * 0.2:
+        return 'game thread (main loop)'
     for fn, role in ROLES:
         if starts[fn] > len(stacks) * 0.2:
             return role
@@ -715,6 +721,8 @@ def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms:
                     own = False   # EDF.dll is deepest: the sample is the game's
                 continue
             key, name = plug.func(f, j == 0)
+            if 'perfprobe' in name:
+                continue   # the measurement probes only time and call through: what is below them is not theirs
             names[key] = name
             seen.add(key)
             if own is None:
@@ -792,7 +800,7 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                    + f', over 33 ms {fs["over33"]}, worst of each 5 s: median {fs["worst_median_ms"]:.1f} ms, '
                    f'max {fs["worst_max_ms"]:.1f} ms')
         if fs['steps_per_frame'] is not None:
-            out.append(f'{fs["steps"]} steps: {fs["steps_per_frame"]:.2f} a frame, {fs["steps"] / secs:.1f} a second '
+            out.append(f'{fs["steps"]} steps: {fs["steps_per_frame"]:.2f} a frame, {fs["steps"] / (fs["frames"] * fs["mean_ms"] / 1000):.1f} a second '
                        '(59.94 a second is the game\'s full speed; a frame steps at most 3 times)')
     else:
         out.append('no PERF rows in the window (Debug=1 not on, or the window too short)')

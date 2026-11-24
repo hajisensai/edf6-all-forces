@@ -391,8 +391,17 @@ def probe_parsing() -> None:
                             (0x65F10, 0x66000)])
         img.starts = [b for b, _ in img.pdata]
         img.slot_class = {}
-        check(perf_report.thread_role(img, [['ntdll.dll+1', 'EDF.dll+111b900']] * 5) == 'render thread',
-              'the render thread told by its entry')
+        check(perf_report.thread_role(img, [['ntdll.dll+1', 'EDF.dll+111b900', 'EDF.dll+3e700']] * 5) == 'render thread',
+              'the render thread told by its entry, not by the xgs thread start every xgs thread has')
+        check(perf_report.thread_role(img, [['ntdll.dll+1', 'EDF.dll+11a2eca', 'EDF.dll+3e700']] * 5) ==
+              'game thread (main loop)', 'the game thread at full speed: in the main loop, not System::update')
+
+        class Named:
+            def func(self, f: str, leaf: bool) -> tuple[str, str]:
+                return f, {'EDF6VehicleCrew.dll+10': 'crew::perfprobe::FenceHook'}.get(f, 'crew::Other')
+        pf = perf_report.plugin_functions(Named(), [['ntdll.dll+1', 'EDF.dll+50e00', 'EDF6VehicleCrew.dll+10',
+                                                     'EDF.dll+11a305f']] * 3, 10, 16.7)
+        check(pf == ['no plugin frames'], 'the measurement probes are not the plugin\'s cost (they call through)')
         def ph(*frames: str) -> str:
             return perf_report.phase_of(img, list(frames))[0]
         check(ph('EDF.dll+118e000', 'EDF.dll+1198fa0') == 'draw: camera / Umbra 0x118DFF0', 'the draw split by its part')
