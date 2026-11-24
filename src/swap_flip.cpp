@@ -15,10 +15,18 @@
 // SyncHook: a cap above the refresh rate, no cap, the catch-up), so such frames are not held to the refresh either.
 // The flip model forbids a multisampled back buffer: a description with SampleDesc.Count > 1 (the game's MSAA, 0x111B28D)
 // is created as the game made it and logged. A flip chain the system refuses is created as the game made it and logged.
+//
+// The waitable object (latency-5). With the frame gate on (frame_rate.cpp), the chain is made with
+// FRAME_LATENCY_WAITABLE_OBJECT and its queue set to ini MaxFrameLatency (the device's setting no longer applies to such
+// a chain); the gate waits on the object once it lets a frame run, before it counts the ticks: the frame starts, and
+// samples its input and its ticks, when the GPU can take it, not a queued frame earlier. A chain made again (a mode
+// change) has a new object; the old one's handle is not closed (the game thread may be waiting on it), one handle a
+// mode change.
 #include "swap_flip.h"
 #include "crew.h"
 #include "memory.h"
 #include "edf/patch.h"
+#include <atomic>
 #include <cstring>
 #include <dxgi1_5.h>
 
@@ -31,6 +39,10 @@ constexpr UINT kBuffers=2;
 
 // The Present's flags for a frame with sync interval 0 (read by the leaf stub on the render thread).
 volatile UINT tearingFlags=0;
+// The waitable object's queue (0: none) and the object of the chain made last.
+UINT waitableLatency=0;
+std::atomic<HANDLE> waitable{nullptr};
+constexpr DWORD kWaitMs=100;   // a lost device or a hidden window does not stall the game thread longer
 
 using CreateFn=HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*,IUnknown*,DXGI_SWAP_CHAIN_DESC*,IDXGISwapChain**);
 
@@ -56,18 +68,37 @@ HRESULT CreateSwapChainHook(IDXGIFactory* factory,IUnknown* device,DXGI_SWAP_CHA
     flip.BufferCount=kBuffers;
     const bool tearing=flip.Windowed && TearingSupported(factory);
     if(tearing)flip.Flags|=DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    if(waitableLatency)flip.Flags|=DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    waitable.store(nullptr);
     const HRESULT hr=create(factory,device,&flip,out);
     if(SUCCEEDED(hr)) {
         tearingFlags=tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u;
-        Log("FLIP swap chain %ux%u: flip discard, %u buffers, windowed %d, tearing %d (the game asked: effect %u, %u buffer(s), flags 0x%X)",
-            flip.BufferDesc.Width,flip.BufferDesc.Height,flip.BufferCount,flip.Windowed,tearing,
-            static_cast<unsigned>(desc->SwapEffect),desc->BufferCount,desc->Flags);
+        HANDLE object=nullptr;
+        if(waitableLatency && out && *out) {
+            IDXGISwapChain2* chain2=nullptr;
+            if(SUCCEEDED((*out)->QueryInterface(__uuidof(IDXGISwapChain2),reinterpret_cast<void**>(&chain2))) && chain2) {
+                if(SUCCEEDED(chain2->SetMaximumFrameLatency(waitableLatency)))object=chain2->GetFrameLatencyWaitableObject();
+                chain2->Release();
+            }
+            waitable.store(object);
+        }
+        Log("FLIP swap chain %ux%u: flip discard, %u buffers, windowed %d, tearing %d, waitable %d (queue %u) "
+            "(the game asked: effect %u, %u buffer(s), flags 0x%X)",
+            flip.BufferDesc.Width,flip.BufferDesc.Height,flip.BufferCount,flip.Windowed,tearing,object!=nullptr,
+            waitableLatency,static_cast<unsigned>(desc->SwapEffect),desc->BufferCount,desc->Flags);
         return hr;
     }
     Log("FLIP the flip swap chain was refused (0x%08X): created as the game asks",static_cast<unsigned>(hr));
     return create(factory,device,desc,out);
 }
 }  // namespace
+
+void SwapFlipUseWaitable(unsigned latency) noexcept { waitableLatency=latency; }
+
+void SwapFlipWait() noexcept {
+    const HANDLE object=waitable.load(std::memory_order_relaxed);
+    if(object)WaitForSingleObject(object,kWaitMs);
+}
 
 bool InstallSwapFlip() noexcept {
     if(!edf::Matches(image,kCreateCall,kCreateSig,sizeof(kCreateSig)) ||

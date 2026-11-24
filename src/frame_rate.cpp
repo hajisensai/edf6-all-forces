@@ -131,8 +131,9 @@ void CountStats(std::uint64_t now,std::uint32_t n) noexcept {
 
 // Low 32 bits: whether the frame runs; high: its ticks. Called by the near stub in place of 0x11DAE60.
 std::uint64_t GateCount() noexcept {
+    if(!framerate::Ready(gate,Now(),cap,slotPeriod))return 0;
+    SwapFlipWait();   // latency-5: the frame starts when the GPU can take it; its ticks and alpha are counted after
     const std::uint64_t now=Now();
-    if(!framerate::Ready(gate,now,cap,slotPeriod))return 0;
     const std::uint32_t n=reinterpret_cast<CountFn>(image+kTickCount)();
     frameTicks=n;
     frameAlpha=framerate::RenderAlpha(n,now,*reinterpret_cast<const std::uint64_t*>(image+kTickBase),
@@ -357,6 +358,7 @@ void InstallFrameRate() noexcept {
         return;
     }
     gateOn=InstallGate();
+    if(gateOn && flip && c.maxFrameLatency>0)SwapFlipUseWaitable(static_cast<unsigned>(c.maxFrameLatency));
     viewOn=gateOn && framerateview::Install();
     Log("FRAMERATE FrameRateCap=%d: frame gate=%d, guards %d/6, input takes %d/2, sync=%d, camera interpolation=%d",
         cap,gateOn,guards,takes,sync,viewOn);
