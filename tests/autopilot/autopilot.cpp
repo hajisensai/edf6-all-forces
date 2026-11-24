@@ -22,6 +22,8 @@
 //  - "cycle N [STAY] [reboot]" (with the mission, or once in it): withdraw from the mission STAY seconds (default 20)
 //    after it runs, the pause menu's way, and enter the same mission again, N times in one launch (CYCLE rows; for
 //    the Havok worker reset on the way out: docs/mission-cycle-re.md).
+//    Each entry and way out also logs MEMMAP / HEAPS (where the commit sits); "probe heap N" adds the live allocations
+//    born since the Nth way out, by call path (heap_probe.cpp; mem-3, docs/memloop-re.md).
 //    All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include <Windows.h>
 #include <psapi.h>
@@ -32,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #pragma warning(push)
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
@@ -43,6 +46,7 @@
 #include "hector_probe.h"
 #include "players_probe.h"
 #include "umbra_probe.h"
+#include "heap_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -530,6 +534,61 @@ void LogMemory(const char* why) noexcept {
         m.ullAvailPageFile/kMb,m.ullTotalPageFile/kMb);
 }
 
+// mem-3 (the mission cycle's growth): where the commit sits, at each cycle's entry and exit. MEMMAP: the address space
+// walked (VirtualQuery): committed bytes of private / mapped / image regions, the private ones also split into the
+// process heaps' segments (HeapSummary's committed) and the rest (VirtualAlloc'd directly: the engine's own pools,
+// D3D12 / driver allocations), with the count of private allocations and of those of 1 MB and more. HEAPS: every
+// process heap's committed and allocated bytes, the four biggest by handle. Logged by both runs of a comparison (the
+// stock game and the plugins), so the autopilot carries it and not EDF6VehicleCrew.
+void LogMemoryMap(const char* why) noexcept {
+    constexpr double kMb=1024.0*1024.0;
+    HANDLE heaps[256]{};
+    DWORD count=GetProcessHeaps(256,heaps);
+    if(count>256)count=256;
+    struct Heap { HANDLE h; SIZE_T committed, allocated; };
+    Heap top[4]{};
+    SIZE_T heapCommitted=0,heapAllocated=0;
+    for(DWORD i=0;i<count;++i) {
+        HEAP_SUMMARY s{};s.cb=sizeof(s);
+        if(!HeapSummary(heaps[i],0,&s))continue;
+        heapCommitted+=s.cbCommitted;heapAllocated+=s.cbAllocated;
+        Heap h{heaps[i],s.cbCommitted,s.cbAllocated};
+        for(auto& t:top)if(h.committed>t.committed)std::swap(h,t);
+    }
+    SIZE_T privateBytes=0,mappedBytes=0,imageBytes=0,bigBytes=0;
+    unsigned allocations=0,big=0;
+    const char* at=nullptr;
+    void* lastBase=nullptr;SIZE_T lastBaseBytes=0;
+    MEMORY_BASIC_INFORMATION m{};
+    auto closeAllocation=[&]() noexcept {
+        if(!lastBase)return;
+        ++allocations;
+        if(lastBaseBytes>=1024*1024){++big;bigBytes+=lastBaseBytes;}
+        lastBase=nullptr;lastBaseBytes=0;
+    };
+    while(VirtualQuery(at,&m,sizeof(m))==sizeof(m)) {
+        if(m.State==MEM_COMMIT) {
+            if(m.Type==MEM_PRIVATE) {
+                privateBytes+=m.RegionSize;
+                if(m.AllocationBase!=lastBase){closeAllocation();lastBase=m.AllocationBase;}
+                lastBaseBytes+=m.RegionSize;
+            } else if(m.Type==MEM_MAPPED)mappedBytes+=m.RegionSize;
+            else if(m.Type==MEM_IMAGE)imageBytes+=m.RegionSize;
+        }
+        const char* next=static_cast<const char*>(m.BaseAddress)+m.RegionSize;
+        if(next<=at)break;
+        at=next;
+    }
+    closeAllocation();
+    Log("MEMMAP %s private %.0f MB (heaps %.0f committed / %.0f allocated in %lu heaps, the rest %.0f) in %u allocations "
+        "(%u of 1 MB+: %.0f MB), mapped %.0f MB, image %.0f MB",why,privateBytes/kMb,heapCommitted/kMb,
+        heapAllocated/kMb,count,(privateBytes>heapCommitted ? privateBytes-heapCommitted : 0)/kMb,allocations,big,
+        bigBytes/kMb,mappedBytes/kMb,imageBytes/kMb);
+    Log("HEAPS %s %p %.0f/%.0f, %p %.0f/%.0f, %p %.0f/%.0f, %p %.0f/%.0f MB (committed/allocated)",why,
+        top[0].h,top[0].committed/kMb,top[0].allocated/kMb,top[1].h,top[1].committed/kMb,top[1].allocated/kMb,
+        top[2].h,top[2].committed/kMb,top[2].allocated/kMb,top[3].h,top[3].committed/kMb,top[3].allocated/kMb);
+}
+
 // The script's routines as they start: with a mission asked for, the title becomes Debug_StartOffline and the first HQ
 // menu the mission itself (the declarations are the script's: "string Name()").
 // The first calls' arguments, each read as an MSVC std::wstring (diagnostics while the signature is unconfirmed).
@@ -628,7 +687,7 @@ void CycleStep() noexcept {
         const LONG left=cycleLeft,total=cycleTotal;
         Log("CYCLE %ld/%ld entered: the mission runs (row %d)",left,total,
             *reinterpret_cast<int*>(*reinterpret_cast<unsigned char**>(image+kGlobalState)+kMissionRow));
-        LogMemory("cycle entered");
+        LogMemory("cycle entered");LogMemoryMap("cycle entered");
         if(left>=total) {
             InterlockedExchange(&cyclePhase,kCycleDone);
             Log("CYCLE done: left and entered again %ld times",total);
@@ -689,7 +748,7 @@ const std::wstring* CycleRoutine(const std::wstring& decl) noexcept {
         const LONG left=InterlockedIncrement(&cycleLeft);
         Log("CYCLE %ld/%ld left%s: Result_Offline skipped (no result screen, nothing saved) -> %s",left,cycleTotal,
             phase==kCycleStaying ? " (the mission ended on its own)" : "",cycleReboot ? "ReBoot" : "PlayMission_Offline");
-        LogMemory("cycle left");
+        LogMemory("cycle left");LogMemoryMap("cycle left");autopilot::HeapProbeMark("cycle left");
         InterlockedExchange(&cyclePhase,kCycleEntering);
         if(!cycleReboot)return &play;
         auto gs=*reinterpret_cast<unsigned char**>(image+kGlobalState);
@@ -857,6 +916,11 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else if(named && !std::strcmp(what,"umbra"))
             Log("PROBE umbra installed=%d",autopilot::InstallUmbraProbe(image,&Log));
+        else if(named && !std::strcmp(what,"heap")) {   // "probe heap [N]": counting from the Nth cycle left (default 2)
+            int from=2;
+            sscanf_s(text,"%*s %*s %d",&from);
+            Log("PROBE heap installed=%d",autopilot::InstallHeapProbe(&Log,from));
+        }
         else Log("CMD probe: unknown probe %s",what);
     }
     else if(!std::strcmp(word,"crash"))Crash(text);
