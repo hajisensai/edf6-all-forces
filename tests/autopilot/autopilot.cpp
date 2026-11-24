@@ -43,6 +43,7 @@
 #include "hector_probe.h"
 #include "players_probe.h"
 #include "umbra_probe.h"
+#include "physics_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -857,6 +858,12 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else if(named && !std::strcmp(what,"umbra"))
             Log("PROBE umbra installed=%d",autopilot::InstallUmbraProbe(image,&Log));
+        else if(named && !std::strcmp(what,"physics")) {
+            unsigned ticks=0;
+            sscanf_s(text,"%*s %*s %u",&ticks);
+            Log("PROBE physics installed=%d ticks=%u",autopilot::InstallPhysicsProbe(image,&Log,logPath,ticks),
+                ticks ? ticks : 6000u);
+        }
         else Log("CMD probe: unknown probe %s",what);
     }
     else if(!std::strcmp(word,"crash"))Crash(text);
@@ -921,6 +928,7 @@ DWORD WINAPI Loop(void*) {
         autopilot::HectorProbeTick();
         autopilot::UmbraProbeTick();
         autopilot::PlayersProbeTick();
+        autopilot::PhysicsProbeTick();
         Sleep(15);
     }
 }
