@@ -3,6 +3,7 @@
 #include "enemy_control_pose_codec.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cmath>
 #include <cstring>
 
@@ -42,7 +43,7 @@ struct Transaction {
     bool used=false,changed=false,pending=false;PoseKind kind=PoseKind::deiroi;void* stageRag=nullptr;
     Write write[kMostWrites]{};Body body[kMostBodies]{};Owner retained[kMostParts+1]{};
 };
-Transaction transactions[kTransactions]{};
+LazyRows<Transaction,kTransactions> transactions;
 struct Part {unsigned char* object=nullptr;void* control=nullptr;void* model=nullptr;void* rag=nullptr;void* collision=nullptr;};
 struct DeiroiData {unsigned char* points=nullptr;unsigned char* previous=nullptr;std::size_t count=0,oldCount=0,parts=0;Part part[kMostParts]{};};
 
@@ -83,6 +84,7 @@ Transaction* Existing(const NativeLease& l) noexcept {
     for(auto& t:transactions)if(t.used && t.object==l.object && t.control==l.control)return &t;return nullptr;
 }
 Transaction* Start(const NativeLease& l) noexcept {
+    if(!transactions.Allocate("native pose transactions"))return nullptr;
     for(auto& t:transactions)if(!t.used){t.writes=t.bodies=0;t.owners=1;t.owner=0;t.stageRag=nullptr;t.retained[0]={l.object,l.control,false,true};t.used=true;t.changed=t.pending=false;t.object=l.object;t.control=l.control;return &t;}return nullptr;
 }
 bool Clear(Transaction& t) noexcept {

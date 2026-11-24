@@ -102,7 +102,7 @@ Present 是游戏线程经 `0x111D890` 录进渲染环的命令，渲染线程�
 SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会填满，输入到画面多 1–2 帧。
 
 改法（`InstallFrameLatency`）：`0x11A33DF` 的调用改指向 `DeviceInitHook`，原函数返回真后对设备调
-`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，默认 1，`0` 不设。游戏代码只改这一处调用，日志一行
+`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，`0` 不设（默认，2026-11-24 起；blast 重场景 A/B 里设 1 的三局有两局整局降速，见计划 B 线）。游戏代码只改这一处调用，日志一行
 `LATENCY max frame latency 1 (was 3)`。
 
 ## 主循环里按帧而不是按 tick 执行的点

@@ -17,9 +17,11 @@
 #pragma warning(pop)
 #include "crash_dump.h"
 #include "frame_pacing.h"
+#include "perf_probe.h"
 #include "frame_rate.h"
 #include "frame_rate_logic.h"
-#include "log_buffer.h"
+#include "log.h"
+#include "mod_file.h"
 #include "crew.h"
 #include "gravity.h"
 #include "havok_mt.h"
@@ -87,7 +89,6 @@ void SuppressBump(bool on) noexcept { noBumpDepth+=on ? 1 : -1; }
 bool BumpSuppressed() noexcept { return noBumpDepth>0; }
 namespace {
 HMODULE module=nullptr;
-wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
 edf::IniWatch ini;
 
@@ -536,6 +537,8 @@ void LoadConfig() noexcept {
     Config n{};
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
+    n.verbose=ReadInt(L"Debug",n.debug ? 1 : 0)>=2;
+    n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
     n.crewDelayMs=FixInt("CrewDelayMs",ReadInt(L"CrewDelayMs",n.crewDelayMs),0,600000);
     n.crewRange=ReadFloat(L"CrewRange",n.crewRange);
@@ -1172,100 +1175,19 @@ void RepublishStockKeys() noexcept {
         next.npcMarkKey);
 }
 
-// The log: lines are copied into a memory buffer on the caller's thread (the game thread, the call picker, the draw
-// thread: one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every
-// kFlushMs. A WriteFile per line on the game thread was the hitch under a burst of lines (an air strike's jets,
-// each logging what it saw: 15000 lines a second, 2026-10-04); opening and closing the file per line before that,
-// with the virus scanner looking at each close, was the hitch when a mission started. A crash takes at most the
-// last kFlushMs of lines. Two buffers of kLogBuffer: the writer takes the full one and the lines go on into the
-// other; a line that does not fit is dropped and counted (said with the next write), never waited for. Debug=1
-// writes the flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and
-// a new one begun, by the writer. No FILE_SHARE_DELETE: a log deleted while the game runs would take the rest unseen.
-namespace {
-constexpr LONGLONG kLogMax=32ll<<20;
-constexpr std::size_t kLogBuffer=1u<<20;
-constexpr DWORD kFlushMs=50;
-logging::Buffer<kLogBuffer> logBuffer;
-INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
-HANDLE logFile=nullptr;              // under logBuffer.fileLock
-LONGLONG logSize=0;
-
-HANDLE OpenLog() noexcept {
-    const HANDLE h=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if(h==INVALID_HANDLE_VALUE)return nullptr;
-    LARGE_INTEGER size{};
-    logSize=GetFileSizeEx(h,&size) ? size.QuadPart : 0;
-    return h;
-}
-
-void WriteLog(const char* text,std::size_t n) noexcept {
-    DWORD wrote=0;
-    if(logFile && n && WriteFile(logFile,text,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
-}
-
-// The log renamed to .log.1 and a new one opened. A rename that fails (another program holds .log.1, or the log
-// without sharing delete) is said in the log, which then grows another kLogMax first.
-void RotateLog() noexcept {
-    CloseHandle(logFile);
-    const BOOL moved=MoveFileExW(logPath,logOldPath,MOVEFILE_REPLACE_EXISTING);
-    const DWORD error=moved ? 0 : GetLastError();
-    logFile=OpenLog();
-    if(!logFile)return;
-    char line[160];
-    const int n=moved ? _snprintf_s(line,sizeof(line),_TRUNCATE,"(log continued: the previous %lld MB are in .log.1)\r\n",kLogMax>>20)
-                      : _snprintf_s(line,sizeof(line),_TRUNCATE,"(log rotation failed, error %lu: this file grows on)\r\n",error);
-    if(!moved)logSize=0;   // the next try another kLogMax on, not on every line
-    if(n>0)WriteLog(line,static_cast<std::size_t>(n));
-}
-
-// Called with the file lock and an immutable buffer snapshot, by the writer or an explicit best-effort flush.
-void WritePendingLog(const char* text,std::size_t n,unsigned dropped) noexcept {
-    if(!n && !dropped)return;
-    if(!logFile)logFile=OpenLog();
-    if(!logFile)return;
-    if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
-    WriteLog(text,n);
-    if(dropped) {
-        char line[120];
-        const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
-                                kLogBuffer>>10,kFlushMs);
-        if(k>0)WriteLog(line,static_cast<std::size_t>(k));
-    }
-}
-
-DWORD WINAPI LogWriter(void*) {
-    for(;;) {
-        Sleep(kFlushMs);
-        logBuffer.Drain(&WritePendingLog);
-    }
-}
-
-BOOL CALLBACK StartLogWriter(PINIT_ONCE,void*,void**) {
-    const HANDLE t=CreateThread(nullptr,0,&LogWriter,nullptr,0,nullptr);
-    if(t)CloseHandle(t);
-    return TRUE;
-}
-}  // namespace
-
+// The log: common/log.h (the buffer, its writer thread, the rotation to .log.1, shared with EDF6AutoTurret).
 void Log(const char* format,...) noexcept {
-    if(!logPath[0])return;
-    char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    SYSTEMTIME t{};GetLocalTime(&t);
-    char line[1100];
-    const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
-    if(n<=0)return;
-    InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
-    logBuffer.Append(line,static_cast<std::size_t>(n));
+    va_list args;va_start(args,format);edf::logfile::Line(format,args);va_end(args);
 }
 
 // A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
 // below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
 void FlushLog() noexcept {
-    if(logPath[0])logBuffer.Drain(&WritePendingLog,true);
+    edf::logfile::Flush();
 }
 
 void CrashLog(const char* text,std::size_t size) noexcept {
-    logging::AppendCrashLine(logPath,text,size);
+    edf::logfile::Crash(text,size);
 }
 
 void ReloadConfigIfChanged() noexcept {
@@ -1338,13 +1260,15 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     GetModuleFileNameW(module,iniPath,MAX_PATH);
     auto dot=wcsrchr(iniPath,L'.');if(!dot)return false;
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
+    wchar_t logPath[MAX_PATH];
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
-    swprintf_s(logOldPath,L"%ls.1",logPath);
+    edf::logfile::Start(logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
     char file[96];
     edf::DescribeModuleFile(module,file,sizeof(file));
     Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
+    Log("MODS %zu files listed in Mods/OBJECT and Mods/WEAPON",LoadModFiles());   // mod_file.h: before anything asks ModFileIn
     ini.Start(iniPath);
     NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
@@ -1496,6 +1420,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
+    perfprobe::Install();   // last: it chains call sites other hooks redirect at load (perf_probe.h)
     Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;
@@ -1503,5 +1428,6 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){crew::module=instance;DisableThreadLibraryCalls(instance);}
+    else if(reason==DLL_PROCESS_DETACH)edf::logfile::Flush();   // process exit: the last kFlushMs of lines (log.h)
     return TRUE;
 }

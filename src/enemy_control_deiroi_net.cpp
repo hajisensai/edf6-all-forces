@@ -10,6 +10,7 @@
 #include "enemy_control.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cstring>
 #include <limits>
 
@@ -52,7 +53,7 @@ struct Stream {
     std::uint64_t next=1,applied=0;unsigned head=0,count=0,reserved=0,nativeInFlight=0;
     deiroi_wire::Event queue[kQueued]{};
 };
-Stream streams[kBindings]{};
+LazyRows<Stream,kBindings> streams;
 alignas(16) unsigned char rawDescriptors[kBindings][0x260]{};
 unsigned char* installedImage=nullptr;bool ready=false,redirected[18]{};
 
@@ -154,6 +155,7 @@ Stream* Bind(const NativeLease& lease,bool authority) noexcept {
     Ref ref{lease.object,static_cast<unsigned char*>(const_cast<void*>(lease.control))};
     if(!Current(ref,false))return nullptr;
     if(auto* stream=Find(lease))return stream->authority==authority ? stream : nullptr;
+    if(!streams.Allocate("deiroi net streams"))return nullptr;
     for(auto& stream:streams) {
         if(stream.root.object && !stream.rootStrong && !stream.releaseUncertain && !stream.count &&
            Readable(stream.root.control,16) && At<LONG>(stream.root.control,8)==0) {
@@ -249,7 +251,7 @@ void* InvokeUnit(void* manager,const float* matrix,void* factory,void* descripto
     void* input=descriptor;std::uint32_t prior[6]{};for(unsigned i=0;i<6;++i)prior[i]=At<std::uint32_t>(actual,actualOffsets[i]);
     if(sample->entity) {
         if(!Readable(descriptor,sizeof(rawDescriptors[0]))){Fault(stream);return nullptr;}
-        auto* rawDescriptor=rawDescriptors[stream-streams];std::memcpy(rawDescriptor,descriptor,sizeof(rawDescriptors[0]));input=rawDescriptor;actual=rawDescriptor+0x80;
+        auto* rawDescriptor=rawDescriptors[stream-streams.begin()];std::memcpy(rawDescriptor,descriptor,sizeof(rawDescriptors[0]));input=rawDescriptor;actual=rawDescriptor+0x80;
         TargetPin* target=sample->target;
         if(!sample->expected) {
             int lock=-1;

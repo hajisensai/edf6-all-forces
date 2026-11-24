@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 namespace {
 using crew::At;using crew::Put;
 using crew::enemy_native::NativeLease;using crew::enemy_native::NativeProfile;

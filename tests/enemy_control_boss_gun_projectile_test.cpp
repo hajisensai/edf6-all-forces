@@ -9,7 +9,7 @@
 #define ENEMY_CONTROL_PROJECTILE_NATIVE_TEST
 #include "../src/crew.h"
 #include "../src/memory.h"
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 #include "../src/enemy_control_boss_gun_net.cpp"
 #include "../src/enemy_control_projectile_native.cpp"
 namespace {

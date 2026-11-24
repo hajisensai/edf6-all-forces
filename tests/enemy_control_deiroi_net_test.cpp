@@ -9,7 +9,7 @@
 #include <regex>
 #include <string>
 #include <vector>
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 namespace {
 using namespace crew;using namespace crew::enemy_native;using namespace crew::enemy_native::deiroi_net;
 constexpr NativeProfile profile{"Deiroi",0x17AA648,0x31ED90,0x31E680,1,52,0x30,Kind::deiroi,3,4};
