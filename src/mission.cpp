@@ -90,6 +90,24 @@ std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,s
     return result;
 }
 
+// The scene's end (docs/mission-cycle-re.md §1.1): the script's FreeResourceGroup(int) (0x70E330) releases a resource group
+// through 0x7A2EE0(resource manager, group) at 0x70E35E, unless the thread context's vt+0x1A8 says no. Group 2 is the
+// scene's, released after Mission() returns (clear, withdraw, failure) and by InitializeAll (back to the title); a RETRY
+// keeps it and goes on to the preload (MissionStart). After it no scene traversal runs until the next mission's, so the
+// step count stands still: crew::SceneOver makes every step stamp stale there (step_fresh.h). The call after it,
+// 0x70E38E, is havok_mt's (havok_mt_logic.h); this one is not.
+constexpr unsigned kFreeGroup=0x70E330,kFreeGroupCall=0x70E35E,kReleaseGroup=0x7A2EE0;
+constexpr unsigned kSceneGroup=2;
+const unsigned char kFreeGroupSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x8B,0xFA,0xE8,0x4F,0x6F,0xAD,0x00,
+                                     0x48,0x8B,0xC8,0x48,0x8B,0xD8,0x4C,0x8B,0x00,0x41,0xFF,0x90,0xA8,0x01,0x00,0x00,
+                                     0x85,0xC0,0x75,0x58,0x48,0x8B,0x0D,0x4C,0x46,0x9A,0x01,0x8B,0xD7,0xE8,0x7D,0x4B,0x09,
+                                     0x00,0x83,0xFF,0x02};   // ... mov rcx,[0x20B29A8]; mov edx,edi; call 0x7A2EE0; cmp edi,2
+using ReleaseGroupFn=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t);
+std::uintptr_t __fastcall ReleaseGroupHook(std::uintptr_t manager,std::uintptr_t group) {
+    if(static_cast<std::uint32_t>(group)==kSceneGroup)SceneOver();
+    return reinterpret_cast<ReleaseGroupFn>(image+kReleaseGroup)(manager,group);
+}
+
 int Redirect(const unsigned* sites,std::size_t count,unsigned target,void* hook) noexcept {
     int done=0;
     for(std::size_t i=0;i<count;++i) {
@@ -224,7 +242,13 @@ bool InstallMission() noexcept {
         sync=RedirectCall(image+kSyncCall,image+kSyncRecord,reinterpret_cast<void*>(&MissionSyncHook),changed) ? 1 : 0;
         if(!sync && changed)Log("MISSION MissionSync_Begin call site half patched");
     } else Log("MISSION MissionSync_Begin: profile mismatch (the room's colours / host settings / dialog wait for the preload)");
-    Log("HOOK mission sync=%d",sync);
+    int sceneEnd=0;
+    if(Matches(kFreeGroup,kFreeGroupSig,sizeof(kFreeGroupSig))) {
+        bool changed=false;
+        sceneEnd=RedirectCall(image+kFreeGroupCall,image+kReleaseGroup,reinterpret_cast<void*>(&ReleaseGroupHook),changed) ? 1 : 0;
+        if(!sceneEnd && changed)Log("MISSION FreeResourceGroup call site half patched");
+    } else Log("MISSION FreeResourceGroup: profile mismatch (the scene's end leaves the step stamps fresh until the next mission)");
+    Log("HOOK mission sync=%d scene-end=%d",sync,sceneEnd);
     Log("HOOK mission preload=%d/%zu online=%d/%zu%s",offline,std::size(kPreloadCalls),online,std::size(kSessionCalls),
         offline+online ? "" : " (no mission start: per-object state is kept across missions, nothing is preloaded)");
     return offline+online>0;

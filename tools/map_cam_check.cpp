@@ -197,6 +197,22 @@ int main() {
         Keep(follow,wide);
         Check(Near(follow.focus[0],me[0],0.01f) && Near(follow.focus[2],me[2],0.01f),"following a player off the map: on them",follow.focus[0]);
     }
+    {
+        // The pause menu over the open map (map.cpp Camera / Frame): the camera step runs under the pause, the scene's
+        // steps do not. Pause, then resume: the map is closed by the first step after it, once.
+        mapcam::PauseClose pc;
+        Check(pc.CameraShows(true,false) && !pc.CloseNow(true),"open map, no pause: shown, not closed");
+        Check(!pc.CameraShows(true,true),"the pause menu over the open map: the stock view under it");
+        Check(!pc.CameraShows(true,true),"still paused: still the stock view");
+        Check(pc.CloseNow(true),"pause then resume: the first step closes the map");
+        Check(!pc.CloseNow(true),"...once");
+        Check(!pc.CameraShows(false,true) && !pc.CloseNow(true),"paused with the map shut: nothing to close");
+        Check(!pc.CameraShows(true,true) && !pc.CloseNow(false),"the map shut another way before the step: no second close");
+        Check(!pc.CameraShows(true,true),"paused again");
+        pc.Reset();
+        Check(!pc.CloseNow(true),"a new mission drops a pause seen in the last one");
+        cases+=9;
+    }
     std::printf("%d views checked: %s\n",cases,failures ? "FAILED" : "all ok");
     return failures ? 1 : 0;
 }

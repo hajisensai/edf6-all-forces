@@ -88,6 +88,7 @@ void Native(const Invoke* invoke,Hud& hud,const Actor& source,const Row* expecte
 }
 int main() {
     using namespace crew;using namespace crew::enemy_radar;
+    stepfresh::See(1);   // the first scene step: the rows below are stamped with it
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2100000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));if(!image)return 2;
     for(const auto& p:kPrints)std::memcpy(image+p.at,p.bytes,p.size);
     std::memcpy(image+kCenter,kCenterBytes,sizeof(kCenterBytes));
@@ -110,7 +111,10 @@ int main() {
     Row pitched{};CHECK(Build(vertical,pitched));CHECK(Close(pitched.rotation[1],-1));
     vertical.forward[1]=-1;CHECK(Build(vertical,pitched));CHECK(Close(pitched.rotation[1],1));
     EnemyControlRadarPublish(nullptr,0);Native(invoke,first,source,nullptr);
-    EnemyControlRadarPublish(views,2);published.at=GetTickCount64()-kFreshMs-1;Native(invoke,first,source,nullptr);
+    // mod-7 (step_fresh.h): the rows are the last steps' whatever the wall clock did; a publisher that stopped is gone.
+    EnemyControlRadarPublish(views,2);Sleep(520);stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep);Native(invoke,first,source,rows);
+    stepfresh::See(stepfresh::Now()+1);Native(invoke,first,source,nullptr);
+    EnemyControlRadarPublish(views,2);stepfresh::NewMission(stepfresh::Now());Native(invoke,first,source,nullptr);
     View invalid=views[0];invalid.center[0]=std::numeric_limits<float>::quiet_NaN();EnemyControlRadarPublish(&invalid,1);Native(invoke,first,source,nullptr);
     invalid=views[0];invalid.forward[0]=invalid.forward[1]=invalid.forward[2]=0;CHECK(!Build(invalid,pitched));
     invalid=views[0];invalid.team=crew::team_native::kTeamCapacity;CHECK(!Build(invalid,pitched));

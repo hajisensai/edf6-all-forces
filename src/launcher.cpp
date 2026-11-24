@@ -31,13 +31,14 @@ namespace crew {
 namespace {
 constexpr int kSegment=15;              // frames a map ray covers (0.25 s: the arc's sag over it is ~0.1 m)
 constexpr std::uint64_t kMostMuzzles=64;
-constexpr ULONGLONG kFreshMs=200;       // a readout not refreshed this long (game ms) is gone: the player got out
 constexpr float kPi=3.14159265f;
 constexpr float kSightFar=3000.0f;      // m: the farthest the camera's ground point is looked for (the stock far clip)
 constexpr float kNoReach=1e9f;          // RoundImpact: the round's life alone ends the search
 
+// The player's launcher readout and the step it was published in (step_fresh.h): LauncherFrame clears it when the player
+// leaves the seat; the count covers a vehicle whose input stopped running (gone).
 LauncherReadout latest{};
-ULONGLONG latestMs=0;
+stepfresh::Step latestStep=0;
 const void* latestVehicle=nullptr;
 
 // The seat's lofted launcher (edf::Lofted: kMarkLofted or kMarkKatyusha), or nullptr.
@@ -220,7 +221,7 @@ void LauncherFrame(unsigned char* v) noexcept {
     const auto clear=[&](bool local) {
         if(local || latestVehicle==v) {
             SetLauncherLoft(v,false,0.0f);
-            latest=LauncherReadout{};latestMs=0;latestVehicle=nullptr;
+            latest=LauncherReadout{};latestStep=0;latestVehicle=nullptr;
         }
     };
     if(!Cfg().enabled || v[kDead] || SeatCount(v)==0){clear(false);return;}
@@ -249,17 +250,17 @@ void LauncherFrame(unsigned char* v) noexcept {
     // The Andryusha's fuse switch (andryusha.cpp): its weapon's own copy of the mark is what it writes.
     r.fuse=AndryushaSeat(v,seat,const_cast<unsigned char*>(weapon));
     r.keys=At<unsigned char>(seat,seatsw::kSeatPad)==0;
-    latest=r;latestMs=GameMs();latestVehicle=v;
+    latest=r;latestStep=stepfresh::Now();latestVehicle=v;
     DebugLog(v,weapon,r,aim,want,sight);
 }
 
 bool PlayerLauncher(LauncherReadout* out) noexcept {
-    if(!Cfg().enabled || !latestMs || GameMs()-latestMs>kFreshMs)return false;
+    if(!Cfg().enabled || !stepfresh::Fresh(latestStep))return false;
     *out=latest;
     return true;
 }
 
 void ResetLauncher() noexcept {
-    latest=LauncherReadout{};latestMs=0;latestVehicle=nullptr;
+    latest=LauncherReadout{};latestStep=0;latestVehicle=nullptr;
 }
 }  // namespace crew

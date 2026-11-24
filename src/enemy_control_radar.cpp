@@ -12,7 +12,6 @@
 
 namespace crew {
 namespace enemy_radar {
-constexpr ULONGLONG kFreshMs=500;
 constexpr unsigned kCenter=0x82B7A5;
 constexpr unsigned char kCenterBytes[]={0x0F,0x10,0x86,0x90,0,0,0,0x66,0x0F,0x7F,0x44,0x24,0x50};
 struct Site { unsigned at;unsigned char bytes[6]; };
@@ -37,7 +36,9 @@ constexpr Print kPrints[]={
     {0x82C6A9,{0x41,0x0F,0x5C,0x19},4},
 };
 struct Row { std::uintptr_t object=0,control=0;float center[4]{},rotation[16]{};int team=-1; };
-struct Published { Row rows[enemy_control::kMaxControllers]{};unsigned count=0;ULONGLONG at=0; };
+// step: the scene step enemy_control.cpp published the rows in (step_fresh.h). It publishes every step, an empty set once
+// no local session is active (the control's end is explicit); the count covers a publisher that stopped running.
+struct Published { Row rows[enemy_control::kMaxControllers]{};unsigned count=0;stepfresh::Step step=0; };
 SRWLOCK viewLock=SRWLOCK_INIT;
 Published published{};
 unsigned char* admittedImage=nullptr;
@@ -78,10 +79,9 @@ bool Find(const void* hud,Row& out) noexcept {
     __try {object=At<std::uintptr_t>(hud,0x778);control=At<std::uintptr_t>(hud,0x780);}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     if(!object || !control)return false;
-    const auto now=GetTickCount64();
     bool found=false;
     AcquireSRWLockShared(&viewLock);
-    if(now>=published.at && now-published.at<=kFreshMs)
+    if(stepfresh::Fresh(published.step))
         for(unsigned i=0;i<published.count;++i)if(published.rows[i].object==object && published.rows[i].control==control) {
             out=published.rows[i];found=true;break;
         }
@@ -159,7 +159,7 @@ bool Install(unsigned index) {
 }
 }
 void EnemyControlRadarPublish(const enemy_radar::View* views,unsigned count) noexcept {
-    enemy_radar::Published next{};next.at=GetTickCount64();
+    enemy_radar::Published next{};next.step=stepfresh::Now();
     if(views && count<=enemy_control::kMaxControllers)for(unsigned i=0;i<count;++i) {
         enemy_radar::Row row{};if(!enemy_radar::Build(views[i],row))continue;
         bool duplicate=false;for(unsigned j=0;j<count;++j)if(i!=j && views[j].ownerObject==row.object)duplicate=true;

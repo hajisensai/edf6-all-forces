@@ -169,8 +169,8 @@ bool triggerOk=false;
 // The local player's drill now (game thread writes, the HUD's draw thread reads).
 SRWLOCK cueLock=SRWLOCK_INIT;
 DrillCue cue{};
-ULONGLONG cueAt=0;
-constexpr ULONGLONG kCueFreshMs=300;
+// the step it was published in (step_fresh.h): the player's vehicle's step publishes it every step
+stepfresh::Step cueStep=0;
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Clamp(float x,float lo,float hi) noexcept { return x<lo ? lo : x>hi ? hi : x; }
@@ -721,7 +721,7 @@ void Publish(const Drill& d) noexcept {
     AcquireSRWLockExclusive(&cueLock);
     cue=DrillCue{d.rpm,Cfg().drillMaxRpm,d.heat,GameMs()-d.touchAt<=500,d.overheated,d.flight!=Flight::home,
                  d.flight==Flight::back,d.keys};
-    cueAt=GetTickCount64();
+    cueStep=stepfresh::Now();
     ReleaseSRWLockExclusive(&cueLock);
 }
 
@@ -875,7 +875,7 @@ void DrillNetReceived(unsigned char* v,const drill_net::State& s) noexcept {
 
 bool PlayerDrillCue(DrillCue* out) noexcept {
     AcquireSRWLockShared(&cueLock);
-    const bool fresh=cueAt && GetTickCount64()-cueAt<=kCueFreshMs;
+    const bool fresh=stepfresh::Fresh(cueStep);
     if(fresh)*out=cue;
     ReleaseSRWLockShared(&cueLock);
     return fresh;

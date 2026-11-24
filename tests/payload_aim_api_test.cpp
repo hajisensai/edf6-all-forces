@@ -53,7 +53,7 @@ int main() {
     Check(!Ask(c,c.weapon[0],&handled) && handled,"all linked barrels spent remains an authoritative empty group");
     cfg.stockStores=false;
     Ask(c,c.weapon[0],&handled);Check(!handled,"disabling optional stores releases management to native source firing");
-    cfg.stockStores=true;aimApiNow+=201;
+    cfg.stockStores=true;Skip(kPickFreshSteps+1);   // the selection's publisher stopped past PullHook's bound
     Ask(c,c.weapon[0],&handled);Check(!handled,"expired firing redirect releases management in the same bound as PullHook");
 
     SetUp();Pair(c);Tick(c);sightinput::keys['R']=true;Tick(c);
@@ -74,13 +74,13 @@ int main() {
     // Auto's input can run before this frame's Crew selection. Use a still-live preceding update, not GameFrame equality.
     SetUp();Pair(c);people[0][edf::kHumanPlayer]=0;localHuman=nullptr;aimApiNpc=true;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};r.count=ReadSeat(c.vehicle,0,ClassOf(c.vehicle),ws,r,false);
-    auto* pick=PickFor(c.vehicle,0,aimApiNow);pick->npc=true;pick->weapon=c.weapon[6];pick->seen=aimApiNow;
+    auto* pick=PickFor(c.vehicle,0,stepfresh::Now());pick->npc=true;pick->weapon=c.weapon[6];pick->seen=stepfresh::Now();
     const int sources[]={0,1};RedirectPayload(c.vehicle,0,*pick,ws,r,sources,2,2);
-    aimApiNow+=16;
+    stepfresh::See(stepfresh::Now()+1);   // the next step, before its NPC planning
     Check(Ask(c,c.weapon[0],&handled)==c.weapon[6] && handled,"Auto before this frame's NPC planning uses the valid preceding selection");
     Put<int>(c.weapon[6],kWeaponAmmo,0);
     Check(Ask(c,c.weapon[0])==c.weapon[2],"NPC adapter also resolves the surviving right barrel");
-    pick->weapon=nullptr;pick->redirects=0;pick->seen=aimApiNow;
+    pick->weapon=nullptr;pick->redirects=0;pick->seen=stepfresh::Now();
     Check(!Ask(c,c.weapon[0],&handled) && handled,"fresh NPC target loss cannot resurrect native aiming");
     aimApiNpc=false;Ask(c,c.weapon[0],&handled);Check(!handled,"NPC authority loss does not claim the optional query");
     VirtualFree(image,0,MEM_RELEASE);

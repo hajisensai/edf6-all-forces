@@ -101,6 +101,7 @@ void CallAt(unsigned at,unsigned target) {
 }  // namespace
 int main() {
     using namespace crew;
+    stepfresh::See(1);   // the scene's first step (step_fresh.h: 0 is never published)
     int fail=0,checks=0;
     auto check=[&](bool ok,const char* msg){++checks;if(!ok){++fail;std::printf("FAIL: %s\n",msg);}};
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
@@ -148,8 +149,8 @@ int main() {
     weapons[0][1][kWeaponTrigger]=0;authority=false;PullHook(holders[0][0]);
     check(!weapons[0][1][kWeaponTrigger],"authority loss invalidates redirect before another shot");
     check(!NpcPayloadSelect(vehicles[0],0,400,true),"remote seat cannot select locally");authority=true;
-    NpcPayloadSelect(vehicles[0],0,400,true);now+=201;PullHook(holders[0][0]);
-    check(!weapons[0][1][kWeaponTrigger],"expired selection is not reused");
+    NpcPayloadSelect(vehicles[0],0,400,true);stepfresh::See(stepfresh::Now()+kPickFreshSteps+1);PullHook(holders[0][0]);
+    check(!weapons[0][1][kWeaponTrigger],"expired selection (kPickFreshSteps+1 steps unrefreshed) is not reused");
     // A removed or expired holder must not leave a stale redirect to an old weapon.
     now+=1;NpcPayloadSelect(vehicles[0],0,400,true);
     Put<std::uint64_t>(SeatAt(vehicles[0],0),kSeatWeaponCount,1);PullHook(holders[0][0]);
