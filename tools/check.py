@@ -250,15 +250,24 @@ def main(argv: list[str]) -> int:
             if not sel['full']:
                 print(f'{part}: ' + ' '.join(sel[part]))
         return 0
+    checklock.children_die_with_me()   # killed alone, it would leave ctest / selftest running in the same build folder
     try:
         with checklock.worktree_once(ROOT):
             return _main(argv, jobs)
     except checklock.Busy as e:
-        who = e.args[0] if e.args else {}
-        since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
-        print(f'check.py: 已在排队/运行（pid {who.get("pid", "?")}，{since} 起）: {ROOT} 的检查只跑一套，等它的结果；'
-              f'前一套只覆盖它开跑时（拿到全机检查槽那一刻）的改动，之后的改动等它结束再跑一次（exit {BUSY}）', flush=True)
+        print(busy_text(e.args[0] if e.args else {}), flush=True)
         return BUSY
+
+
+def busy_text(who: dict) -> str:
+    """What a second check of this worktree says (checklock.Busy's record of the first)."""
+    if who.get('pid'):
+        since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
+        first = f'已在排队/运行（pid {who["pid"]}，{since} 起）'
+    else:
+        first = '已在排队/运行（另一个 check.py 刚拿到这个 worktree 的锁，还没写下 pid；或正在退出）'
+    return (f'check.py: {first}: {ROOT} 的检查只跑一套，等它的结果；前一套只覆盖它开跑时（拿到全机检查槽那一刻）的改动，'
+            f'之后的改动等它结束再跑一次（exit {BUSY}）')
 
 
 @contextlib.contextmanager

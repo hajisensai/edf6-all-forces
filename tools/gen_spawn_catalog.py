@@ -175,6 +175,7 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     import edf41_objects
     import gen
     import rootcpk
+    import texshare
     reg = edf41_objects.registry()['files']
     archives = [rootcpk.Game(root)] + [rootcpk.Game(root, a) for a in ('Chunk01.cpk', 'Chunk02.cpk')
                                        if os.path.exists(os.path.join(root, a))]
@@ -235,7 +236,8 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
         if rel in reg:
             return edf41_objects.read(rel)
         if rel in range_rows:
-            return gen.vehicle_sgo(game, range_rows[rel])
+            # on the archives this version installs: the generators' merged ones (pylib/texshare.py)
+            return texshare.redirect(gen.vehicle_sgo(game, range_rows[rel]), texshare.SHARED_IN)
         path = os.path.join(root, 'Mods', *rel.split('/'))
         if os.path.isfile(path):
             with open(path, 'rb') as f:

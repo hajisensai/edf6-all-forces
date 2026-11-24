@@ -388,6 +388,17 @@ class _Sgo:
             out.append((name, float(d) if not hasattr(d, 'value') else float(d.value)))
         return out
 
+    def with_archive(self, path: str) -> bytes:
+        """The SGO with its model drawn from archive `path` (app:/object/x.mrab), the model and any LOD table as they
+        were (pylib/texshare.py: models merged into one archive)."""
+        _req(self.items is not None and len(self.items) >= 2, 'no animation_model[0]')
+        if self.dsgo:
+            self.entry.items[0] = path
+            return dsgo.compact(self.doc)
+        _req(self.writer is not None, 'an SGO neither SGO writer reproduces')
+        self.entry[0] = path
+        return self.writer(self.version, self.members)
+
     def with_table(self, table: list[tuple[str, float]]) -> bytes:
         arc, model = self.model()  # type: ignore[misc]
         if self.dsgo:

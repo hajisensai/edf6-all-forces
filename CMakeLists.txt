@@ -1026,6 +1026,7 @@ add_test(NAME cockpit_instruments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_retrofit_test.py")
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
 add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_tub_test.py")
+add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
@@ -1329,6 +1330,9 @@ foreach(_shard RANGE ${_hail_last})
   add_test(NAME hail_glide_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard.py"
            "$<TARGET_FILE:hail_glide_check>" --shard ${_shard}/${HAIL_GLIDE_SHARDS})
 endforeach()
+# the shards' runner (a failing unit's stderr shown) and the unit list (every wing's every part, none cut short)
+add_test(NAME hail_glide_shard_test COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hail_glide_shard_test.py"
+         "$<TARGET_FILE:hail_glide_check>")
 
 add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
 target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)

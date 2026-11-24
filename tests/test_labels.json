@@ -2769,6 +2769,17 @@
     "tests/hail_glide_shard.py"
    ]
   },
+  "hail_glide_shard_test": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py",
+    "tests/hail_glide_shard_test.py"
+   ]
+  },
   "hangar_recover": {
    "labels": [
     "plugin-native"
@@ -5537,6 +5548,7 @@
     "edf41",
     "edf5",
     "installer",
+    "misc",
     "native-codec",
     "plugin-native",
     "pylib-model",
