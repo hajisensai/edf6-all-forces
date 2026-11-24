@@ -27,6 +27,8 @@ options
   --difficulty N    default 1
   --ini KEY=VALUE   KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run (repeatable; drive.py --ini), e.g. an A/B
                     of a switch: HavokMultithread=0 against HavokMultithread=1
+  --key SPEC@S[:MS] hold SPEC S seconds into the mission for MS ms (drive.py --key; repeatable), e.g. a state to measure
+                    in (the scope opened before the clean window)
   --out DIR         default tmp/perf/<scenario>-<time>
   --presentmon EXE  PresentMon (not shipped: it needs ETW, run perfrun as an administrator) over the clean window:
                     presentmon.csv, the display side (latency-2) in the report
@@ -311,7 +313,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         # frame split, the render thread and the channels (src/perf_probe.h)
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
                        os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', 'PerfProbe=1', *opts['ini']),
-                       shots=os.path.join(out, 'shots') if opts['shots'] else None,
+                       shots=os.path.join(out, 'shots') if opts['shots'] else None, keys=tuple(opts['keys']),
                        during=None if cycle else lambda: sample(out, warm, opts['cpu'], opts['stacks'],
                                                                 opts['interval'], marks, opts.get('presentmon')),
                        quit_wait=600,   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
@@ -356,7 +358,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
             'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': [], 'presentmon': None,
-            'cycle': 0, 'cycle_stay': 20.0}
+            'cycle': 0, 'cycle_stay': 20.0, 'keys': []}
     pos = []
     i = 0
     while i < len(argv):
@@ -369,6 +371,10 @@ def options(argv: list[str]) -> tuple[str, dict]:
             i += 3
         elif a in ('--dll', '--out', '--presentmon'):
             opts[a[2:]] = argv[i + 1]
+            i += 2
+        elif a == '--key':
+            import drive
+            opts['keys'].append(drive.key_option(argv[i + 1]))
             i += 2
         elif a == '--ini':
             if '=' not in argv[i + 1]:

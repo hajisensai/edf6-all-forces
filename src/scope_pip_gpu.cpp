@@ -21,7 +21,7 @@ using Microsoft::WRL::ComPtr;
 constexpr UINT kTargets = D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;
 
 // The lens: scope_pip.h LensSample() on the GPU. A pixel outside the circle is discarded (the scissor keeps the pass to
-// the circle's square); inside, the lens view's copy (its texture spans the lens's diameter) is sampled bilinearly.
+// the circle's square); inside, the lens view's own texture (it spans the lens's diameter) is sampled bilinearly.
 // Alpha comes from the same sample: whatever the native target keeps there stays consistent.
 constexpr char kShaders[] = R"hlsl(
 cbuffer LensBlock : register(b0) {
@@ -157,14 +157,19 @@ struct LensCompositor::Impl final {
     ComPtr<ID3D11BlendState> overwriteBlend;
     ComPtr<ID3D11DepthStencilState> noDepthState;
     ComPtr<ID3D11RasterizerState> scissorRasterizer;
-    // The lens view's private copy (its own size and format: CopyResource needs both), sampled through its RTV's
-    // format (a typeless target's typed view).
-    ComPtr<ID3D11Texture2D> lensCopy;
+    // The view the lens samples: of the lens view's own texture (docs/scope-pip-re.md §5.4: the engine creates its colour
+    // targets with D3D11_BIND_SHADER_RESOURCE), through its RTV's format (a typeless target's typed view). Kept for that
+    // texture: the same pointer, description and format next frame reuse it; another texture (a rebuilt target, a
+    // resolution change) replaces it; Reset drops it. The view holds its texture, so the pointer cannot be reused while
+    // it is cached.
+    ComPtr<ID3D11Texture2D> viewTexture;
     ComPtr<ID3D11ShaderResourceView> lensResource;
-    D3D11_TEXTURE2D_DESC copyDesc{};
-    DXGI_FORMAT copyViewFormat = DXGI_FORMAT_UNKNOWN;
+    D3D11_TEXTURE2D_DESC viewDesc{};
+    DXGI_FORMAT viewFormat = DXGI_FORMAT_UNKNOWN;
+    LensSource source{};
     // This frame's held targets.
     ComPtr<ID3D11RenderTargetView> mainView;
+    ComPtr<ID3D11Resource> mainTexture;
     UINT mainWidth = 0, mainHeight = 0;
     float mainYScale = 0.0f;
     ComPtr<ID3D11Texture2D> lensTexture;
@@ -239,33 +244,42 @@ struct LensCompositor::Impl final {
             SUCCEEDED(device->CreateRasterizerState(&rasterDesc, &scissorRasterizer));
     }
 
-    bool PrepareCopy(const D3D11_TEXTURE2D_DESC& desc, DXGI_FORMAT format) noexcept {
-        if (lensCopy && copyDesc.Width == desc.Width && copyDesc.Height == desc.Height &&
-            copyDesc.Format == desc.Format && copyViewFormat == format) return true;
-        lensCopy.Reset();
-        lensResource.Reset();
-        D3D11_TEXTURE2D_DESC next = desc;
-        next.Usage = D3D11_USAGE_DEFAULT;
-        next.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        next.CPUAccessFlags = 0;
-        next.MiscFlags = 0;
+    static bool SameDesc(const D3D11_TEXTURE2D_DESC& a, const D3D11_TEXTURE2D_DESC& b) noexcept {
+        return a.Width == b.Width && a.Height == b.Height && a.MipLevels == b.MipLevels && a.ArraySize == b.ArraySize &&
+            a.Format == b.Format && a.SampleDesc.Count == b.SampleDesc.Count &&
+            a.SampleDesc.Quality == b.SampleDesc.Quality && a.Usage == b.Usage && a.BindFlags == b.BindFlags &&
+            a.CPUAccessFlags == b.CPUAccessFlags && a.MiscFlags == b.MiscFlags;
+    }
+
+    // The held lens texture's view: the cached one when it is of this very texture, else a new one (the old dropped).
+    bool PrepareView() noexcept {
+        if (lensResource && viewTexture.Get() == lensTexture.Get() && SameDesc(viewDesc, lensDesc) &&
+            viewFormat == lensViewFormat) return true;
+        DropView();
         D3D11_SHADER_RESOURCE_VIEW_DESC resourceDesc{};
-        resourceDesc.Format = format;
+        resourceDesc.Format = lensViewFormat;
         resourceDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         resourceDesc.Texture2D.MipLevels = 1;
-        ComPtr<ID3D11Texture2D> nextCopy;
-        ComPtr<ID3D11ShaderResourceView> nextResource;
-        if (FAILED(device->CreateTexture2D(&next, nullptr, &nextCopy)) ||
-            FAILED(device->CreateShaderResourceView(nextCopy.Get(), &resourceDesc, &nextResource))) return false;
-        lensCopy = std::move(nextCopy);
-        lensResource = std::move(nextResource);
-        copyDesc = desc;
-        copyViewFormat = format;
+        ComPtr<ID3D11ShaderResourceView> next;
+        if (FAILED(device->CreateShaderResourceView(lensTexture.Get(), &resourceDesc, &next))) return false;
+        lensResource = std::move(next);
+        viewTexture = lensTexture;
+        viewDesc = lensDesc;
+        viewFormat = lensViewFormat;
+        ++source.views;
         return true;
+    }
+
+    void DropView() noexcept {
+        lensResource.Reset();
+        viewTexture.Reset();
+        viewDesc = D3D11_TEXTURE2D_DESC{};
+        viewFormat = DXGI_FORMAT_UNKNOWN;
     }
 
     void ReleaseMain() noexcept {
         mainView.Reset();
+        mainTexture.Reset();
         mainWidth = mainHeight = 0;
         mainYScale = 0.0f;
     }
@@ -302,6 +316,7 @@ bool LensCompositor::CaptureMain(ID3D11DeviceContext* context, float yScale) noe
     BoundColor bound;
     if (!Bound(context, &bound)) return false;
     impl_->mainView = std::move(bound.view);
+    impl_->mainTexture = bound.texture;
     impl_->mainWidth = bound.desc.Width;
     impl_->mainHeight = bound.desc.Height;
     impl_->mainYScale = yScale;
@@ -313,7 +328,7 @@ bool LensCompositor::CaptureLens(ID3D11DeviceContext* context, int side, float y
     if (!context || side <= 0 || !UsableScale(yScale) || !Ready(context)) return false;
     BoundColor bound;
     if (!Bound(context, &bound) || bound.desc.Width != static_cast<UINT>(side) ||
-        bound.desc.Height != static_cast<UINT>(side)) return false;
+        bound.desc.Height != static_cast<UINT>(side) || !(bound.desc.BindFlags & D3D11_BIND_SHADER_RESOURCE)) return false;
     impl_->lensTexture = std::move(bound.texture);
     impl_->lensDesc = bound.desc;
     impl_->lensViewFormat = bound.viewFormat;
@@ -324,6 +339,8 @@ bool LensCompositor::CaptureLens(ID3D11DeviceContext* context, int side, float y
 bool LensCompositor::HoldsMain() const noexcept { return impl_ && impl_->mainView; }
 bool LensCompositor::HoldsLens() const noexcept { return impl_ && impl_->lensTexture; }
 void LensCompositor::Release() noexcept { if (impl_) impl_->Release(); }
+bool LensCompositor::HoldsLensView() const noexcept { return impl_ && impl_->lensResource; }
+LensSource LensCompositor::Source() const noexcept { return impl_ ? impl_->source : LensSource{}; }
 
 bool LensCompositor::Composite(ID3D11DeviceContext* context, float* mainHeight, float* radius,
                                float* lensYScale) noexcept {
@@ -343,14 +360,40 @@ bool LensCompositor::Composite(ID3D11DeviceContext* context, float* mainHeight, 
     if (!(LensPower(h, lens.r, state.mainYScale, state.lensYScale) >= kLeast)) return false;
     long left = 0, top = 0, right = 0, bottom = 0;
     Scissor(lens, w, h, &left, &top, &right, &bottom);
-    if (right <= left || bottom <= top || !state.PrepareCopy(state.lensDesc, state.lensViewFormat)) return false;
+    if (right <= left || bottom <= top) return false;
+    // The native output merger at the command: the lens view's texture must not be one of its render targets (it is
+    // sampled while the main view's target is written; the engine gives each viewport its own targets, §4.1).
+    {
+        std::array<ID3D11RenderTargetView*, kTargets> raw{};
+        context->OMGetRenderTargets(kTargets, raw.data(), nullptr);
+        state.source.nativeTargets = 0;
+        state.source.lensBoundAsTarget = false;
+        for (ID3D11RenderTargetView* target : raw) {
+            if (!target) continue;
+            ++state.source.nativeTargets;
+            ComPtr<ID3D11Resource> resource;
+            target->GetResource(&resource);
+            if (resource.Get() == state.lensTexture.Get()) state.source.lensBoundAsTarget = true;
+            target->Release();
+        }
+    }
+    LensSource& source = state.source;
+    source.texture = state.lensTexture.Get();
+    source.width = state.lensDesc.Width;
+    source.height = state.lensDesc.Height;
+    source.format = static_cast<unsigned>(state.lensDesc.Format);
+    source.viewFormat = static_cast<unsigned>(state.lensViewFormat);
+    source.bindFlags = state.lensDesc.BindFlags;
+    source.mainTexture = state.mainTexture.Get();
+    source.mainWidth = state.mainWidth;
+    source.mainHeight = state.mainHeight;
+    if (source.lensBoundAsTarget || state.mainTexture.Get() == state.lensTexture.Get() || !state.PrepareView()) return false;
     const LensBlock block{{lens.cx, lens.cy}, lens.r, 0.0f};
     {
         // Isolate every pipeline binding (shader constants, predication, UAVs, stream output) behind the private
         // state; the native one comes back whole when `restore` goes.
         ScopedContextState restore(state.context1.Get(), state.isolatedState.Get());
         context->ClearState();
-        context->CopyResource(state.lensCopy.Get(), state.lensTexture.Get());
         context->UpdateSubresource(state.lensBlock.Get(), 0, nullptr, &block, 0, 0);
         ID3D11RenderTargetView* target = state.mainView.Get();
         context->OMSetRenderTargets(1, &target, nullptr);
