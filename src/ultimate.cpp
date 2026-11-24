@@ -588,27 +588,16 @@ void Send(Show& s,ultimate_net::Kind kind,std::uint32_t peer=0) noexcept {
     ultimate_net::Msg m;
     unsigned char bytes[ultimate_net::kWire];
     if(!Message(s,kind,m) || !ultimate_net::Encode(m,bytes,sizeof(bytes)))return;
-    if(peer)plugin_net::Send(peer,support_net::kExtUltimate,bytes,sizeof(bytes));
-    else plugin_net::Broadcast(support_net::kExtUltimate,bytes,sizeof(bytes));
+    if(kind==ultimate_net::Kind::keep) {
+        // A state message, one stream per show slot of this machine's (ultimate_net_protocol.h KeepState).
+        const auto key=plugin_net::StateKey(plugin_net::StateStream::ultimateKeep,static_cast<std::uint32_t>(&s-shows));
+        if(peer)plugin_net::SendState(peer,key,bytes,sizeof(bytes));
+        else plugin_net::BroadcastState(key,bytes,sizeof(bytes));
+    } else if(peer)plugin_net::Send(peer,bytes,sizeof(bytes));
+    else plugin_net::Broadcast(bytes,sizeof(bytes));
     s.keptAt=GetTickCount64();
 }
 
-// The caller's HUD line (hud.cpp UltimateBanner, the draw thread): a peer without the channel does not see the show (the
-// room's protocol keeps an older build out: mod_room.h).
-SRWLOCK cueLock=SRWLOCK_INIT;
-wchar_t cueText[160]{};
-ULONGLONG cueAt=0;
-void SayOldPeers() noexcept {
-    const std::uint32_t n=plugin_net::PeerCount();
-    std::uint32_t old=0;
-    for(std::uint32_t p=1;p<=n;++p)if(!plugin_net::PeerHas(p,support_net::kExtUltimate))++old;
-    if(!old)return;
-    Log("ULTIMATE %u of %u peers did not announce the ultimate's channel: they do not see the show",old,n);
-    AcquireSRWLockExclusive(&cueLock);
-    _snwprintf_s(cueText,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::ultimateOldPeers));
-    cueAt=GetTickCount64();
-    ReleaseSRWLockExclusive(&cueLock);
-}
 
 // ---- a show's life ----
 void Clear(Show& s) noexcept {
@@ -741,10 +730,7 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
         "storm %d, cannon %d, after %d frames",k.origin,k.serial,s.at[0],s.at[1],s.at[2],std::hypot(by[0]-s.at[0],by[2]-s.at[2]),
         s.damage,static_cast<unsigned long long>(seed),table.Count(),kChargeEnd,kStormEnd-kChargeEnd,kCannonEnd-kStormEnd,
         kAfterEnd-kCannonEnd);
-    if(plugin_net::Ready()) {
-        Send(s,ultimate_net::Kind::start);
-        SayOldPeers();
-    }
+    if(plugin_net::Ready())Send(s,ultimate_net::Kind::start);
     return true;
 }
 
@@ -779,16 +765,7 @@ void ResetUltimate() noexcept {
     origin=plugin_net::NewOrigin();serial=0;
 }
 
-bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept {
-    constexpr ULONGLONG kShowMs=8000;
-    AcquireSRWLockShared(&cueLock);
-    const bool fresh=cueAt && GetTickCount64()-cueAt<=kShowMs && out && capacity;
-    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",cueText);
-    ReleaseSRWLockShared(&cueLock);
-    return fresh;
-}
-
-// ---- the channel (plugin_net.h: ULTS, support_protocol.h kExtUltimate) ----
+// ---- the channel (plugin_net.h: ULTS) ----
 namespace {
 int netLogs=0;
 void UpdateUltimateNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {
@@ -797,7 +774,7 @@ void UpdateUltimateNetwork(const CommandNetworkContext&,std::uint64_t) noexcept 
     for(Show& s:shows)
         if(s.on && !s.remote && s.done>=0 && now-s.keptAt>=ultimate_net::kKeepMs)Send(s,ultimate_net::Kind::keep);
 }
-// A peer newly has the channel: every show of this machine's that plays, at once (it picks them up where they are).
+// A peer joined (the room's handshake done): every show of this machine's that plays, at once (it picks them up where they are).
 void UltimateNetworkJoined(std::uint32_t peer) noexcept {
     for(Show& s:shows)if(s.on && !s.remote && s.done>=0)Send(s,ultimate_net::Kind::keep,peer);
 }
@@ -826,7 +803,10 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     // Found: its rounds fired by it (their damage zeroed here: jet_bay.cpp ShellMake); not here: the looks alone.
     const unsigned char* const caller=who.found ? static_cast<const unsigned char*>(who.obj.obj) : nullptr;
     switch(table.Receive(k,m.kind==ultimate_net::Kind::end)) {
-    case Act::none: break;
+    case Act::none:
+        // An end of a show not played here: ended all the same (a keep, a state message, sent before it may come after).
+        if(m.kind==ultimate_net::Kind::end)table.Ended(k);
+        break;
     case Act::begin: {
         if(!ShowRoundsReady()) {
             if(netLogs++<16)Log("ULTIMATE NET peer %u's show %08X:%u: this machine's rounds are not preloaded: not played here",
@@ -871,8 +851,8 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
 
 plugin_net::Channel UltimateNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="ultimate";c.magic=ultimate_net::kMagic;c.version=ultimate_net::kVersion;c.featureBit=support_net::kExtUltimate;
-    c.minSize=c.maxSize=ultimate_net::kWire;
+    c.name="ultimate";c.magic=ultimate_net::kMagic;c.version=ultimate_net::kVersion;
+    c.minSize=c.maxSize=ultimate_net::kWire;c.takesState=&ultimate_net::KeepState;
     c.receive=&ReceiveUltimateNetwork;c.update=&UpdateUltimateNetwork;c.reset=&ResetUltimateNetwork;c.joined=&UltimateNetworkJoined;
     return c;
 }

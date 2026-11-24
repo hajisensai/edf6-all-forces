@@ -99,7 +99,23 @@ __declspec(noinline) int Deep(int n) {
 }
 DWORD WINAPI Overflow(void*) {
     Mark();
+    ULONG guarantee=0;   // 0: only reads this thread's guarantee back
+    SetThreadStackGuarantee(&guarantee);
+    char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST stack guarantee %lu",guarantee);Append(t);
     return static_cast<DWORD>(Deep(1));
+}
+// What else runs on an overflowed thread before the plugin's filter: other modules' first-chance vectored handlers
+// (overlays and the like register them) and an exception frame whose size is the CPU's XSAVE state. 16 KB of them is
+// more than Windows' default leaves after an overflow (12-16 KB below the faulting frame, the dispatch and our wait
+// included). Without the guarantee this case always ends with 0xC0000005, the signature of the CI's occasional "stack"
+// failure (no dump at all), where that default ran out with no handler of this kind.
+__declspec(noinline) void UseStack(std::size_t n) noexcept {
+    volatile char* bytes=static_cast<volatile char*>(_alloca(n));
+    bytes[0]=1;bytes[n-1]=bytes[0];
+}
+LONG WINAPI HungryHandler(EXCEPTION_POINTERS* ep) noexcept {
+    if(ep->ExceptionRecord->ExceptionCode==EXCEPTION_STACK_OVERFLOW)UseStack(16*1024);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 DWORD WINAPI Handled(void*) {
     __try { *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1; } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -166,6 +182,7 @@ int Child(const char* mode,const wchar_t* dir) {
     }
     else if(!std::strcmp(mode,"cpp"))Join(&Throw);
     else if(!std::strcmp(mode,"stack"))Join(&Overflow);
+    else if(!std::strcmp(mode,"stackhandler")){AddVectoredExceptionHandler(1,&HungryHandler);Join(&Overflow);}
     else if(!std::strcmp(mode,"abort")){Mark();reinterpret_cast<VoidFn>(GetProcAddress(ucrt,"abort"))();}
     else if(!std::strcmp(mode,"terminate")){Mark();reinterpret_cast<VoidFn>(GetProcAddress(ucrt,"terminate"))();}
     else if(!std::strcmp(mode,"ownabort")){Mark();std::abort();}
@@ -399,7 +416,18 @@ int main(int argc,char** argv) {
 
     Crash(self,work,"av",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"cpp",kChained,0xE06D7363,"unhandled exception");
-    Crash(self,work,"stack",kChained,EXCEPTION_STACK_OVERFLOW,"unhandled exception");
+    // A thread started after the install has the plugin's stack overflow guarantee (crash_dump.cpp kOverflowStack),
+    // and with it the dump and the chain go through even with 16 KB of other handlers ahead of ours.
+    for(const char* mode:{"stack","stackhandler"}) {
+        Crash(self,work,mode,kChained,EXCEPTION_STACK_OVERFLOW,"unhandled exception");
+        wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\log.txt",work);
+        const std::string text=Read(log);
+        const auto at=text.find("TEST stack guarantee ");
+        const unsigned long guarantee=at==std::string::npos ? 0 : std::strtoul(text.c_str()+at+21,nullptr,10);
+        char what[200];
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the overflowed thread's stack guarantee %lu (want %lu)",mode,guarantee,crew::kOverflowStack);
+        Check(guarantee>=crew::kOverflowStack,what);
+    }
     Crash(self,work,"abort",kAbortExit,0x40000015,"abort() in the game's CRT");
     Crash(self,work,"terminate",kAbortExit,0x40000015,"abort() in the game's CRT");
     Crash(self,work,"ownabort",kAbortExit,0x40000015,"abort() in the plugin");

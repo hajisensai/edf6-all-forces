@@ -134,6 +134,8 @@ bool TraceSend(void* user,std::uint32_t peer,const void* bytes,std::size_t size)
     Check(b.ledger.Track(p.from,p.to,size,b.room.now,rawSdkArrival),"every AF control and action fits actual DirectNet pendingBytes admission");
     const auto due=std::max(rawSdkArrival,b.flowDue[p.from][p.to]);b.flowDue[p.from][p.to]=due;b.wire.push({p,due,++b.serial,false});return true;
 }
+// Poses as state messages: this timed bus carries them like any other SDK envelope.
+bool TraceSendState(void* user,std::uint32_t peer,std::uint32_t,const void* bytes,std::size_t size){return TraceSend(user,peer,bytes,size);}
 SendResult TraceTrySendAction(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
     auto& bus=Bus(user);const auto* node=static_cast<Node*>(user);const auto to=bus.room.Global(node->id,peer);
     if(!bus.ledger.CanTrackAction(node->id,to,size,bus.room.now))return SendResult::wouldBlock;
@@ -147,7 +149,7 @@ bool TraceQuiesce(void* user,std::uint64_t,const LeaseSpec&) {auto& b=Bus(user);
 bool TraceEmpty(void* user,std::uint64_t,const LeaseSpec&) {const auto& b=Bus(user);return static_cast<Node*>(user)->id!=0 || (b.producerDone && b.uncaptured.empty());}
 bool TraceAbort(void* user,std::uint64_t,const LeaseSpec&) {auto& b=Bus(user);++b.aborts[static_cast<Node*>(user)->id];return true;}
 void RunTrace(const TraceScenario& trace,unsigned hz,unsigned pollHz) {
-    ++traceScalarRuns;TraceBus b(trace,hz,pollHz);for(const auto& n:b.room.nodes){traceBuses[n.get()]=&b;auto h=Backend(n.get());h.ValidateInput=&TraceValidate;h.Send=&TraceSend;h.TrySendAction=&TraceTrySendAction;h.ApplyAction=&TraceApply;h.QuiesceActions=&TraceQuiesce;h.ActionsEmpty=&TraceEmpty;h.AbortActions=&TraceAbort;Check(n->protocol.Configure(h) && n->protocol.SetSendPacing(true),"install production-paced timed actual-provider backend before acquisition");}
+    ++traceScalarRuns;TraceBus b(trace,hz,pollHz);for(const auto& n:b.room.nodes){traceBuses[n.get()]=&b;auto h=Backend(n.get());h.ValidateInput=&TraceValidate;h.Send=&TraceSend;h.SendState=&TraceSendState;h.TrySendAction=&TraceTrySendAction;h.ApplyAction=&TraceApply;h.QuiesceActions=&TraceQuiesce;h.ActionsEmpty=&TraceEmpty;h.AbortActions=&TraceAbort;Check(n->protocol.Configure(h) && n->protocol.SetReliableOrderedTransport(true),"install production-paced timed actual-provider backend before acquisition");}
     Check(b.room.Request(),"authenticated source requests actual trace control");const auto acquireAt=b.room.now;
     for(std::uint64_t acquireFrame=0;;++acquireFrame){b.room.now=acquireAt+(acquireFrame*1000+pollHz-1)/pollHz;b.Tick(true);bool active=true;for(const auto& n:b.room.nodes)active=active && n->protocol.ActiveCount()==1;if(active)break;Check(b.room.now-acquireAt<5000,"all-peer frame-paced acquisition completes within the protocol deadline");}
     b.lease=b.room.Active();b.startAt=b.room.now;std::size_t nextTick=0;std::uint64_t frame=0;
@@ -288,12 +290,14 @@ bool AggregateSend(void* user,std::uint32_t peer,const void* bytes,std::size_t s
 }
 std::array<unsigned char,crew::enemy_native::pose::kWireBytes> AggregatePoseBytes(unsigned body,std::uint64_t sequence){
     crew::enemy_native::pose::State state{};state.kind=crew::enemy_native::pose::Kind::deiroi;state.profile=static_cast<std::uint32_t>(kProfile);state.position[0]=static_cast<float>(body);state.position[1]=static_cast<float>(sequence);state.rotation[3]=1;
-    std::array<unsigned char,crew::enemy_native::pose::kWireBytes> bytes{};Check(crew::enemy_native::pose::Encode(state,bytes.data(),bytes.size()),"mixed pressure uses the real production pose codec and a canonical legal state");return bytes;
+    crew::enemy_native::pose::Packet packet{};packet.state=state;packet.senderFrame=static_cast<std::uint32_t>(sequence*2);
+    std::array<unsigned char,crew::enemy_native::pose::kWireBytes> bytes{};Check(crew::enemy_native::pose::Encode(packet,bytes.data(),bytes.size()),"mixed pressure uses the real production pose codec and a canonical legal state");return bytes;
 }
 bool AggregatePoseApply(void* user,std::uint64_t lease,const LeaseSpec& spec,std::uint64_t sequence,const void* bytes,std::size_t size){
     auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto body=bus.Body(lease);Check(bus.mixedPose && node->id!=0,"only mixed protocol-pressure guests apply synthetic legal pose traffic");const auto* current=bus.room.Lease(node->id,lease);Check(current && SameSpec(spec,current->spec),"mixed pose retains the exact body lease and source identity");
-    crew::enemy_native::pose::State decoded{};Check(crew::enemy_native::pose::Decode(bytes,size,&decoded),"each mixed pressure pose decodes with the production semantic validator");const auto expected=AggregatePoseBytes(body,sequence);Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"mixed pose payload remains byte-identical across the reliable production wire");Check(sequence==bus.posesApplied[node->id][body]+1,"each guest applies every mixed pressure pose once in order");++bus.posesApplied[node->id][body];return true;
+    crew::enemy_native::pose::Packet decoded{};Check(crew::enemy_native::pose::Decode(bytes,size,&decoded),"each mixed pressure pose decodes with the production semantic validator");const auto expected=AggregatePoseBytes(body,sequence);Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"mixed pose payload remains byte-identical across the reliable production wire");Check(sequence==bus.posesApplied[node->id][body]+1,"each guest applies every mixed pressure pose once in order");++bus.posesApplied[node->id][body];return true;
 }
+bool AggregateSendState(void* user,std::uint32_t peer,std::uint32_t,const void* bytes,std::size_t size){return AggregateSend(user,peer,bytes,size);}
 SendResult AggregateTrySendAction(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
     auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto to=bus.room.Global(node->id,peer);
     if(!bus.ledger.CanTrackAction(node->id,to,size,bus.room.now))return SendResult::wouldBlock;
@@ -308,7 +312,7 @@ bool AggregateEmpty(void* user,std::uint64_t lease,const LeaseSpec&){const auto&
 bool AggregateAbort(void* user,std::uint64_t lease,const LeaseSpec&){auto& bus=AggregateBus(user);++bus.aborts[static_cast<Node*>(user)->id][bus.Body(lease)];return true;}
 void RunAggregateTrace(const TraceScenario& trace,unsigned peerCount,unsigned bodies=8,unsigned nativeHz=144,unsigned pollHz=60,bool mixedPose=false,bool stallReceiver=false,bool faultExit=false){
     ++traceAggregateRuns;AggregateTraceBus bus(trace,peerCount,bodies,nativeHz,pollHz,mixedPose,stallReceiver,faultExit);
-    for(const auto& node:bus.room.nodes){aggregateTraceBuses[node.get()]=&bus;auto hooks=Backend(node.get());hooks.Send=&AggregateSend;hooks.TrySendAction=&AggregateTrySendAction;hooks.Authenticate=&AggregateAuth;hooks.ValidateInput=&TraceValidate;hooks.ApplyPose=&AggregatePoseApply;hooks.ApplyAction=&AggregateApply;hooks.QuiesceActions=&AggregateQuiesce;hooks.ActionsEmpty=&AggregateEmpty;hooks.AbortActions=&AggregateAbort;Check(node->protocol.Configure(hooks),"install independent aggregate timed native backend before acquisition");Check(node->protocol.SetSendPacing(true),"aggregate uses actual frame-scoped global production sender pacing");}
+    for(const auto& node:bus.room.nodes){aggregateTraceBuses[node.get()]=&bus;auto hooks=Backend(node.get());hooks.Send=&AggregateSend;hooks.SendState=&AggregateSendState;hooks.TrySendAction=&AggregateTrySendAction;hooks.Authenticate=&AggregateAuth;hooks.ValidateInput=&TraceValidate;hooks.ApplyPose=&AggregatePoseApply;hooks.ApplyAction=&AggregateApply;hooks.QuiesceActions=&AggregateQuiesce;hooks.ActionsEmpty=&AggregateEmpty;hooks.AbortActions=&AggregateAbort;Check(node->protocol.Configure(hooks),"install independent aggregate timed native backend before acquisition");Check(node->protocol.SetReliableOrderedTransport(true),"aggregate uses actual frame-scoped global production sender pacing");}
     // Admission is intentionally serialized by the production protocol. Acquire
     // each actual body through the full barrier before requesting the next one;
     // the native eight-body burst starts only after all independent leases exist.

@@ -92,7 +92,9 @@ bool Restore(void* user,std::uint64_t id,const LeaseSpec&){auto& n=*static_cast<
     const auto it=n.native.find(id);if(it!=n.native.end())it->second.suppressed=false;return true;
 }
 bool Activate(void* user,std::uint64_t,const LeaseSpec&){auto& n=*static_cast<Node*>(user);++n.activates;return !n.failActivate;}
-Hooks Backend(Node* n){return {n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};}
+// The fixture's state-message stub: delivered like any packet (this fixture is reliable and ordered).
+bool SendState(void* user,std::uint32_t peer,std::uint32_t,const void* bytes,std::size_t size){return Send(user,peer,bytes,size);}
+Hooks Backend(Node* n){Hooks h{n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};h.SendState=&SendState;return h;}
 Room::Room(unsigned count,unsigned legacyPeer,unsigned oldPeer):legacy(legacyPeer),oldVersion(oldPeer){
     for(unsigned i=0;i<count;++i){auto n=std::make_unique<Node>();n->id=i;n->room=this;n->puid="player-"+std::to_string(i);n->player=Player(10+i);nodes.push_back(std::move(n));}
     for(auto& n:nodes){n->context={true,n->id==0,777,n->id ? Peer(n->id,0) : 0,count-1,n->puid.c_str()};Check(n->protocol.Configure(Backend(n.get())),"startup backend accepted");}
@@ -102,7 +104,7 @@ Message Unpack(const Packet& p){Message m;Check(Decode(p.bytes.data(),p.bytes.si
 void Codec(){
     Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Player(10);m.spec.target=Id(100);
     std::vector<std::uint8_t> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"request codec accepts canonical native identities");
-    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==7,"explicit ECTL/version7 byte prefix");
+    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==8,"explicit ECTL/version8 byte prefix");
     Message back;Check(Decode(bytes.data(),bytes.size(),back) && back.spec.target==m.spec.target,"semantic fields roundtrip without native struct layout");
     Room r;
     for(std::size_t n=0;n<bytes.size();++n){Check(!Decode(bytes.data(),n,back),"all truncated datagrams rejected");Check(r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),n,r.now)==(n>=4),"owned malformed/truncated magic is consumed, foreign prefix is not");}
