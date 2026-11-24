@@ -150,18 +150,21 @@ class WorktreeOnce(unittest.TestCase):
 
 class Tracked(unittest.TestCase):
     def test_untracked_files_are_not_the_repositorys(self) -> None:
-        probe = os.path.join(ROOT, 'tests', f'_untracked_probe_{os.getpid()}.py')
-        rel = os.path.relpath(probe, ROOT).replace(os.sep, '/')
-        with open(probe, 'w', encoding='utf-8') as f:
-            f.write('import os\n')
-        try:
-            ignored = subprocess.run(['git', 'check-ignore', '-q', rel], cwd=ROOT).returncode == 0
-            self.assertFalse(ignored, f'{rel} is ignored: the probe proves nothing')
-            files = td.tracked()
-            self.assertIn('tests/test_domains_test.py', files)
-            self.assertNotIn(rel, files)
-        finally:
-            os.remove(probe)
+        with tempfile.TemporaryDirectory() as repo:   # a repository of its own: nothing written into the real one
+            def git(*args: str) -> None:
+                subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args], cwd=repo, check=True,
+                               capture_output=True)
+            git('init', '-q')
+            os.makedirs(os.path.join(repo, 'tests'))
+            for name, text in (('tests/kept.py', 'import os\n'), ('tests/new.py', 'import os\n'),
+                               ('.gitignore', 'ignored.py\n'), ('tests/ignored.py', '')):
+                with open(os.path.join(repo, name), 'w', encoding='utf-8') as f:
+                    f.write(text)
+            git('add', 'tests/kept.py', '.gitignore')
+            git('commit', '-q', '-m', 'kept')
+            self.assertEqual(td.tracked(repo), ['.gitignore', 'tests/kept.py'])   # not new.py: untracked, not ignored
+            git('add', 'tests/new.py')
+            self.assertEqual(td.tracked(repo), ['.gitignore', 'tests/kept.py', 'tests/new.py'])   # added: it is
 
 
 class Busy(unittest.TestCase):
@@ -191,16 +194,70 @@ class Busy(unittest.TestCase):
                 with contextlib.suppress(FileNotFoundError):
                     os.remove(path + '.json')
 
-    def test_the_record_lives_exactly_while_the_lock_is_held(self) -> None:
+    def test_the_record_names_the_holder_only_while_it_holds(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             lock = checklock.worktree_lock(root)
             with checklock.worktree_once(root):
                 with open(lock + '.json', encoding='utf-8') as h:
                     self.assertEqual(json.load(h)['pid'], os.getpid())
                 self.assertEqual(checklock.worktree_holder(lock)['pid'], os.getpid())
-            self.assertFalse(os.path.exists(lock + '.json'))
-            name = os.path.basename(lock)
-            self.assertEqual([f for f in os.listdir(checklock.LOCK_DIR) if f.startswith(name) and f.endswith('.tmp')], [])
+            self.assertEqual(checklock.worktree_holder(lock), {'starting': True})
+            self.assertEqual(self.leftovers(lock), [])
+
+    @staticmethod
+    def leftovers(lock: str) -> list[str]:
+        name = os.path.basename(lock)
+        return [f for f in os.listdir(checklock.LOCK_DIR) if f.startswith(name) and f not in (name, name + '.json')]
+
+    def test_a_reader_holding_the_record_open_breaks_nothing(self) -> None:
+        """A second check.py of the worktree has the record open (reading who holds the lock) just as the holder
+        writes it at its start, and again just as it lets go at its end."""
+        dead = subprocess.Popen([sys.executable, '-c', 'pass'])
+        dead.wait()
+        with tempfile.TemporaryDirectory() as root:
+            lock = checklock.worktree_lock(root)
+            os.makedirs(checklock.LOCK_DIR, exist_ok=True)
+            with open(lock + '.json', 'w', encoding='utf-8') as h:   # a killed holder's record
+                json.dump({'root': root, 'pid': dead.pid, 'since': 0}, h)
+            first = open(lock + '.json', encoding='utf-8')
+            second = None
+            try:
+                with self.assertRaises(SystemExit) as e:
+                    with checklock.worktree_once(root):   # the start: the record written while `first` reads it
+                        self.assertEqual(checklock.worktree_holder(lock)['pid'], os.getpid())
+                        second = open(lock + '.json', encoding='utf-8')
+                        raise SystemExit(5)   # the end, while `second` reads it: the check's own exit code stays
+                self.assertEqual(e.exception.code, 5)
+            finally:
+                first.close()
+                if second:
+                    second.close()
+            self.assertEqual(checklock.worktree_holder(lock), {'starting': True})
+            self.assertEqual(self.leftovers(lock), [])
+
+    def test_readers_running_alongside(self) -> None:
+        """The same, raced: a thread reading the record over and over while a holder comes and goes."""
+        import threading
+        with tempfile.TemporaryDirectory() as root:
+            lock = checklock.worktree_lock(root)
+            stop = threading.Event()
+            seen: list[dict] = []
+
+            def read() -> None:
+                while not stop.is_set():
+                    seen.append(checklock.worktree_holder(lock))
+            reader = threading.Thread(target=read)
+            reader.start()
+            try:
+                for _ in range(200):
+                    with checklock.worktree_once(root):
+                        pass
+            finally:
+                stop.set()
+                reader.join()
+            self.assertTrue(seen)
+            self.assertLessEqual({tuple(sorted(w)) for w in seen}, {('starting',), ('pid', 'root', 'since')})
+            self.assertEqual(self.leftovers(lock), [])
 
 
 @unittest.skipUnless(os.name == 'nt', 'a job object is Windows')
@@ -239,10 +296,30 @@ class ChildrenDieWithMe(unittest.TestCase):
                 parent.wait()
             parent.stdout.close()
 
+    def test_its_builds_have_a_pdb_server_of_their_own(self) -> None:
+        """A compile in the job starts mspdbsrv in the job (tmp probe, 2026-11-24: IsProcessInJob true, ended with its
+        killed parent): it must not be the machine's shared one, other sessions' builds use that."""
+        code = ('import os, subprocess, sys\n'
+                f'sys.path.insert(0, {os.path.join(ROOT, "pylib")!r})\n'
+                'import checklock\n'
+                "os.environ['_MSPDBSRV_ENDPOINT_'] = ''\n"
+                'checklock.children_die_with_me()\n'
+                'print(os.getpid())\n'
+                "sys.stdout.flush()\n"
+                "subprocess.run([sys.executable, '-c', \"import os; print(os.environ['_MSPDBSRV_ENDPOINT_'])\"])\n")
+        r = subprocess.run([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True, check=True)
+        pid, endpoint = r.stdout.split()
+        self.assertEqual(endpoint, f'edf6-check-{pid}')
+
 
 class BlindScans(unittest.TestCase):
     SOURCE = '''import os
 import eo
+import glob
+import re
+import subprocess
+from os import walk
+from glob import glob as g
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = os.path.join(ROOT, 'edf41port')
 def whole_root():
@@ -270,6 +347,22 @@ def a_nested_scope():
         here = ROOT
         return os.listdir(here)
     return inner
+def only_patterns():
+    return glob.glob(os.path.join(ROOT, '**', '*.cpp'), recursive=True), g(ROOT + '/**/*.cpp')
+def imported_walk():
+    return walk(ROOT)
+def imported_glob():
+    return g(os.path.join(os.path.dirname(__file__), '*'))
+def shell_listing():
+    return os.popen('dir /s /b ' + ROOT).read()
+def git_in_one_string():
+    return os.popen('git -c core.quotepath=off ls-files').read()
+def git_grep_list():
+    return subprocess.run(['git', 'grep', '-l', 'ROOT'], capture_output=True)
+def a_pattern_mentioning_git(text):
+    return re.search(r'foreach .* in git [^)]*ls-files', text), os.popen('echo ' + ROOT)
+def imported_glob_naming_a_folder():
+    return g(os.path.join(ROOT, 'pylib', '*.py')), walk(os.path.join(ROOT, 'tests'))
 '''
 
     def test_listings_naming_no_folder_are_found(self) -> None:
@@ -278,7 +371,9 @@ def a_nested_scope():
             with open(scan, 'w', encoding='utf-8') as f:
                 f.write(self.SOURCE)
             found = {fn for fn, _line, _text in td.blind_scans(scan, {'eo'})}
-        self.assertEqual(found, {'whole_root', 'a_module_constant', 'through_a_name', 'git_files', 'a_nested_scope'})
+        self.assertEqual(found, {'whole_root', 'a_module_constant', 'through_a_name', 'git_files', 'a_nested_scope',
+                                'only_patterns', 'imported_walk', 'imported_glob', 'shell_listing',
+                                'git_in_one_string', 'git_grep_list'})
 
     def test_every_blind_listing_is_declared_or_runs_everything(self) -> None:
         repo, labels = td.Repo(), td.load()

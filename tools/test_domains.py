@@ -141,13 +141,13 @@ def owner(path: str) -> str:
     return 'misc'
 
 
-def tracked() -> list[str]:
-    """The repository's files: the ones git tracks, on disk. Not the untracked ones: a scratch file in a folder a test
+def tracked(root: str = ROOT) -> list[str]:
+    """The repository's (`root`'s) files: the ones git tracks, on disk. Not the untracked ones: a scratch file in a folder a test
     lists would widen (or a stray module named like a real one would bend) the labels of whoever ran --write, and the
     labels would differ between checkouts; a new test is git added before --write."""
     out = subprocess.run(['git', '-c', 'core.quotepath=off', 'ls-files', '--cached'],
-                         cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True).stdout
-    return sorted({p for p in out.splitlines() if p and os.path.isfile(os.path.join(ROOT, p))})
+                         cwd=root, capture_output=True, text=True, encoding='utf-8', check=True).stdout
+    return sorted({p for p in out.splitlines() if p and os.path.isfile(os.path.join(root, p))})
 
 
 class Repo:
@@ -644,22 +644,59 @@ def selftest_deps(repo: Repo) -> dict[str, tuple[set[str], set[str]]]:
 
 # --- folder listings the analysis cannot see
 _LISTERS = {('os', 'listdir'), ('os', 'walk'), ('os', 'scandir'), ('glob', 'glob'), ('glob', 'iglob')}
+_SHELLS = {('os', 'popen'), ('os', 'system')}
+# a command that lists files: git's (in one string, or as a list's items) or the shell's
+_GIT_LISTS = re.compile(r'^\s*git(\s+-\S+(\s+[^-\s]\S*)?)*\s+(ls-files|ls-tree|grep)\b')   # git -c k=v ls-files
+_SHELL_LISTS = re.compile(r'^\s*(dir|ls|find|tree|where|findstr)\b', re.IGNORECASE)
 
 
-def _listed(call: ast.Call) -> ast.AST | None:
-    """The folder a call lists, if it lists one: os.listdir / walk / scandir, glob.glob / iglob (their argument),
-    p.iterdir() / p.rglob() / p.glob() (the path p)."""
+def _names_folder(text: str) -> bool:
+    """Whether a string written in a path names a folder or file: a part of it (between slashes) that is not dots and
+    not a pattern ('**', '*.cpp', '?'): those match whatever is there."""
+    return any(part.strip('.') and not any(w in part for w in '*?[') for part in re.split(r'[\\/]', text))
+
+
+def _imported_listers(tree: ast.AST) -> dict[str, tuple[str, str]]:
+    """The names a file binds to os / glob (`import os as o`: 'o' -> ('os', '')) and to their listing and shell
+    functions (`from os import walk`: 'walk' -> ('os', 'walk'))."""
+    out: dict[str, tuple[str, str]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name in ('os', 'glob'):
+                    out[a.asname or a.name] = (a.name, '')
+        elif isinstance(n, ast.ImportFrom) and n.module in ('os', 'glob'):
+            for a in n.names:
+                if (n.module, a.name) in _LISTERS | _SHELLS:
+                    out[a.asname or a.name] = (n.module, a.name)
+    return out
+
+
+def _call_of(call: ast.Call, names: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    """(module, function) of a call to os / glob, by attribute (os.walk, o.walk) or by its imported name (walk)."""
     f = call.func
-    if not isinstance(f, ast.Attribute):
-        return None
-    if isinstance(f.value, ast.Name) and (f.value.id, f.attr) in _LISTERS:
+    if isinstance(f, ast.Name) and names.get(f.id, ('', ''))[1]:
+        return names[f.id]
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and names.get(f.value.id, ('', 'x'))[1] == '':
+        return names[f.value.id][0], f.attr
+    return None
+
+
+def _listed(call: ast.Call, names: dict[str, tuple[str, str]] | None = None) -> ast.AST | None:
+    """The folder a call lists, if it lists one: os.listdir / walk / scandir, glob.glob / iglob (their argument; by
+    any name they are imported as: `names`, _imported_listers), p.iterdir() / p.rglob() / p.glob() (the path p)."""
+    f = call.func
+    if names is None:
+        names = {'os': ('os', ''), 'glob': ('glob', '')}
+    which = _call_of(call, names)
+    if which in _LISTERS:
         if call.args:
             return call.args[0]
         for k in call.keywords:
             if k.arg in ('path', 'top', 'pathname'):
                 return k.value
         return ast.Constant('.')
-    if f.attr in ('iterdir', 'rglob') or f.attr == 'glob' and not (isinstance(f.value, ast.Name) and f.value.id == 'glob'):
+    if isinstance(f, ast.Attribute) and which is None and f.attr in ('iterdir', 'rglob', 'glob'):
         return f.value
     return None
 
@@ -712,7 +749,9 @@ def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]
     """The folder listings in a Python file whose folder names no folder: (its top-level function or class,
     '<module>' outside one; the line; the call). A listing of a folder built from the repository (ROOT, __file__, a
     local module's constant) with no folder name written anywhere along the way (os.walk(ROOT), os.walk(eo.FILES))
-    reads files this analysis cannot see; so does a 'git ls-files'. Names are followed through the assignments, loop
+    reads files this analysis cannot see; so does a git command listing or searching files (git ls-files, ls-tree,
+    grep: in one string or as a list's items) and a shell listing command (os.popen / os.system of dir, ls, find,
+    ...). A pattern ('**', '*.cpp') names no folder. Names are followed through the assignments, loop
     targets and parameter defaults of their function and of the module (any of them, not the one that runs)."""
     with open(path, 'rb') as f:
         tree = ast.parse(f.read())
@@ -723,13 +762,14 @@ def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]
         elif isinstance(n, ast.ImportFrom) and n.module:
             imported.update(a.asname or a.name for a in n.names if a.name in local_modules)
     module = _binds(tree)
+    names = _imported_listers(tree)
 
     def judge(expr: ast.AST, env: dict, memo: dict) -> tuple[bool, bool]:
         """(a folder name is written in it, it is built from the repository)"""
         named = anchored = False
         called = {id(c.func) for c in ast.walk(expr) if isinstance(c, ast.Call)}
         for x in ast.walk(expr):
-            if isinstance(x, ast.Constant) and isinstance(x.value, str) and x.value.strip('./\\'):   # not '..'
+            if isinstance(x, ast.Constant) and isinstance(x.value, str) and _names_folder(x.value):   # not '..', '**'
                 named = True
             elif isinstance(x, ast.Name):
                 if x.id == '__file__':
@@ -753,9 +793,18 @@ def blind_scans(path: str, local_modules: set[str]) -> list[tuple[str, int, str]
     scopes = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
     def visit(node: ast.AST, name: str, env: dict, memo: dict) -> None:
-        if isinstance(node, ast.Constant) and node.value == 'ls-files':
-            out.append((name, node.lineno, 'git ls-files'))
-        elif isinstance(node, ast.Call) and (target := _listed(node)) is not None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and (
+                node.value in ('ls-files', 'ls-tree') or _GIT_LISTS.search(node.value)):
+            out.append((name, node.lineno, f'git: {node.value[:80]}'))
+        elif isinstance(node, (ast.List, ast.Tuple)) and any(
+                isinstance(e, ast.Constant) and e.value == 'git' for e in node.elts) and any(
+                isinstance(e, ast.Constant) and e.value == 'grep' for e in node.elts):
+            out.append((name, node.lineno, ast.unparse(node)[:100]))   # ['git', 'grep', ...]: what it searches
+        elif isinstance(node, ast.Call) and _call_of(node, names) in _SHELLS and node.args and any(
+                isinstance(c, ast.Constant) and isinstance(c.value, str) and _SHELL_LISTS.search(c.value)
+                for c in ast.walk(node.args[0])):
+            out.append((name, node.lineno, ast.unparse(node)[:100]))   # os.popen('dir /s /b ' + ...): a whole tree
+        elif isinstance(node, ast.Call) and (target := _listed(node, names)) is not None:
             named, anchored = judge(target, env, memo)
             if anchored and not named:
                 out.append((name, node.lineno, ast.unparse(node)[:100]))
