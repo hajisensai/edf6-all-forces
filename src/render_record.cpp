@@ -14,7 +14,9 @@
 //     this frame's projection draws (inside the render recording, 0x1197B50: on a frame without ticks the frame rate's
 //     blend, crew::FrameRateDrawnEye), not the step's: Umbra culls from the drawn camera, and a box left at the step's eye
 //     can miss a camera a part of a tick away. Last, so it sees the frame as it will be drawn.
-// Each runs whether the other is installed or not (a feature off leaves its slot empty).
+// Each runs whether the other is installed or not (a feature off leaves its slot empty). After the recording returns,
+// the afters run in the same order: the frame rate closes its recording there (RecordEnd), so a projection outside the
+// recording (EDF.dll's four other callers of 0x11978D0) never stands in for one that did not project.
 #include "render_record.h"
 #include "crew.h"
 #include "edf/memory.h"
@@ -28,6 +30,7 @@ constexpr unsigned kRecordCall=0x1198FA4,kRecordDraw=0x11978D0;
 const unsigned char kRecordSig[]={0x41,0xB0,0x01,0x41,0x0F,0xB6,0x96,0xE9,0x0C,0x00,0x00,0x49,0x8B,0xCE,
                                   0xE8,0x27,0xE9,0xFF,0xFF};
 renderrecord::Before recordBefores[static_cast<int>(renderrecord::Slot::kCount)]{};
+renderrecord::After recordAfters[static_cast<int>(renderrecord::Slot::kCount)]{};
 int recordState=0;   // 0 not tried, 1 in, -1 refused
 
 // System_RecordDraw's call; rdx / r8 passed through whole, its result too.
@@ -35,7 +38,10 @@ using RecordDrawFn=void*(*)(void*,std::uint64_t,std::uint64_t);
 void* RecordHook(void* sys,std::uint64_t a,std::uint64_t b) {
     for(const renderrecord::Before before:recordBefores)
         if(before)before();
-    return reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
+    void* const r=reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
+    for(const renderrecord::After after:recordAfters)
+        if(after)after();
+    return r;
 }
 }  // namespace
 
@@ -60,6 +66,11 @@ bool Install() noexcept {
 void Set(Slot slot,Before before) noexcept {
     const int i=static_cast<int>(slot);
     if(recordState>0 && i>=0 && i<static_cast<int>(Slot::kCount))recordBefores[i]=before;
+}
+
+void SetAfter(Slot slot,After after) noexcept {
+    const int i=static_cast<int>(slot);
+    if(recordState>0 && i>=0 && i<static_cast<int>(Slot::kCount))recordAfters[i]=after;
 }
 }  // namespace renderrecord
 }  // namespace crew

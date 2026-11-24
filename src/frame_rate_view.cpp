@@ -303,6 +303,12 @@ void PoseFrame() noexcept {
 void RecordStart() noexcept {
     if(on)recordOpen=true;
 }
+// Right after the recording returned (render_record.cpp's after turn): a recording that never projected (loading, no
+// viewport) is closed here, not at the fence, so a projection by another of 0x11978D0's callers before the fence is not
+// taken for this frame's first.
+void RecordEnd() noexcept {
+    recordOpen=false;
+}
 
 // The recording's first projection (viewport 0's, 0x1197B50): the sample first (stage 4: every other object's root as
 // the last tick left it and the recording copied it, before fps-7 writes the player's), then the poses when due.
@@ -451,6 +457,7 @@ bool Install() noexcept {
         return false;
     }
     renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
+    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&RecordEnd);
     frameobjects::Install();
     on=true;
     return true;

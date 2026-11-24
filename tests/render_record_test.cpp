@@ -1,6 +1,6 @@
 // The render recording's single owner (src/render_record.cpp): the call 0x1198FA4 checked and redirected once however
 // many features install, the features' turns run in Slot order (the frame rate's poses, then the first person's boxes)
-// before the game's recording with its arguments, and each feature's turn runs without the other registered.
+// before the game's recording with its arguments, the afters once it returned, and each feature's turn runs without the other registered.
 #include "../src/render_record.cpp"
 #include <cstdio>
 
@@ -44,6 +44,7 @@ void* recordSys=nullptr;
 int recordCalls=0;
 void FrameRateTurn() noexcept { if(orderAt<7)order[orderAt++]='R'; }
 void FirstPersonTurn() noexcept { if(orderAt<7)order[orderAt++]='F'; }
+void FrameRateAfter() noexcept { if(orderAt<7)order[orderAt++]='r'; }
 void* StandInRecord(void* sys,std::uint64_t a,std::uint64_t b) {
     if(orderAt<7)order[orderAt++]='G';
     ++recordCalls;recordSys=sys;recordArgs[0]=a;recordArgs[1]=b;
@@ -52,6 +53,7 @@ void* StandInRecord(void* sys,std::uint64_t a,std::uint64_t b) {
 void Reset() {
     recordState=0;
     for(auto& b:recordBefores)b=nullptr;
+    for(auto& a:recordAfters)a=nullptr;
     matches=redirects=0;sigOk=redirectOk=true;redirectedTo=nullptr;
     image=reinterpret_cast<unsigned char*>(reinterpret_cast<std::uintptr_t>(&StandInRecord)-kRecordDraw);
 }
@@ -81,6 +83,13 @@ void Both() {
     renderrecord::Set(renderrecord::Slot::kFrameRate,&FrameRateTurn);
     Frame();
     Check(!std::strcmp(order,"RFG"),"order: by slot whatever installs first");
+    // The frame rate's after turn: once the recording returned.
+    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&FrameRateAfter);
+    Frame();
+    Check(!std::strcmp(order,"RFGr"),"after: the frame rate's after turn once the recording returned");
+    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,nullptr);
+    Frame();
+    Check(!std::strcmp(order,"RFG"),"after: cleared");
 }
 
 // Each alone (the frame rate off, or the first person off).
@@ -108,7 +117,8 @@ void Refused() {
     sigOk=true;
     Check(!renderrecord::Install() && matches==1,"install: refused once, not retried by the next feature");
     renderrecord::Set(renderrecord::Slot::kFrameRate,&FrameRateTurn);
-    Check(!recordBefores[0],"refused: nothing registers");
+    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&FrameRateAfter);
+    Check(!recordBefores[0] && !recordAfters[0],"refused: nothing registers");
     Reset();
     redirectOk=false;
     Check(!renderrecord::Install() && redirects==1,"install: a redirect refused");

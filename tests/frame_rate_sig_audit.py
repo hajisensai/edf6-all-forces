@@ -216,6 +216,9 @@ check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before 
 check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
 check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
 check('renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);' in view, 'the frame rate poses in its render_record turn')
+check('renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&RecordEnd);' in view, 'the frame rate closes its recording when it returns')
+check(re.search(r'void\* const r=reinterpret_cast<RecordDrawFn>\(image\+kRecordDraw\)\(sys,a,b\);\s*for\(const renderrecord::After after:recordAfters\)', record_src),
+      'RecordHook runs the afters once the recording returned')
 begin = re.search(r'void BeginFrame\([^)]*\) noexcept \{(.*?)\n\}', view, re.S)
 check(begin and 'PoseRoot' not in begin[1] and 'frameobjects::Pose' not in begin[1] and 'PoseFrame' not in begin[1],
       'BeginFrame writes no pose')

@@ -107,6 +107,7 @@ void Project(void* camera) { BeforeProject(camera,nullptr); }
 void Record() {
     recordState=1;
     renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
+    renderrecord::SetAfter(renderrecord::Slot::kFrameRate,&RecordEnd);
     image=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInRecord),kRecordDraw);
     RecordHook(nullptr,0x1234,1);
     image=stepImage;
@@ -695,6 +696,9 @@ void RecordPoint() {
     Record();
     Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2 && Unchanged(stepped),
           "record: no projection, nothing sampled or posed");
+    Project(cam);   // another caller's projection before the fence (0x11978D0 has four more)
+    Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2,
+          "record: closed when it returned, a later projection before the fence samples and poses nothing");
     Fence();
     recordProjections=1;
     Project(cam);   // a projection outside a recording

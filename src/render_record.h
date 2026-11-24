@@ -17,5 +17,9 @@ enum class Slot { kFrameRate,kFirstPerson,kCount };
 bool Install() noexcept;
 // `before` runs in `slot`'s turn from now on (nullptr: no longer). Call after Install returned true.
 void Set(Slot slot,Before before) noexcept;
+// Game thread, right after the render recording returned (before the tick loop), in Slot order; same rules as Before.
+using After=void(*)() noexcept;
+// `after` runs in `slot`'s turn once the recording returned (nullptr: no longer). Call after Install returned true.
+void SetAfter(Slot slot,After after) noexcept;
 }  // namespace renderrecord
 }  // namespace crew
