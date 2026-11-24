@@ -58,8 +58,15 @@ namespace crew {
 //  15 (2026-11-21): host settings v3 synchronizes scope spread and support wire v3 carries both Fencer hands.
 //  16 (2026-11-24): every member needs EDF6Coop 2.8.0 (batch poll, recoverable overflow) and sends enemy-control and
 //      gravity states by logic frame; a 15 build would sit in the room on an EDF6Coop whose overflow ends its networking.
+//  17 (2026-11-24): net-6, the per-feature compatibility layer removed: no extension bits in the support handshake
+//      (kExtVariants alone, runtime state), no plugin_net roster / PeerHas, no command protocol negotiation (v10 only),
+//      no "older build" notices. Every channel sends to every peer: a 16 would be sent what it cannot read.
+//      Same number, net-9: enemy-control protocol 8 / pose wire 2 (each pose sample carries the host's frame and
+//      measured motion; the guest interpolates it per logic frame).
+//      Same number, net-5: every member needs EDF6Coop 2.9.0 (extension ABI 2, coop_attr.h kRoomCoop*); the per-frame
+//      states (enemy-control pose, gravity hold / flight, ultimate keep) go as state messages (plugin_net.h SendState).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=16;
+constexpr std::int64_t kAllForcesRoomProtocol=17;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {
@@ -71,6 +78,14 @@ constexpr std::int64_t EncodeAllForcesRoom(std::int64_t value) noexcept {
 constexpr std::int64_t DecodeAllForcesRoom(std::int64_t value) noexcept {
     return AllForcesWireType(value) ? value-kAllForcesRoomPrefix : kAllForcesRoomInvalid;
 }
+// The room protocol of another build's All Forces room (its SEARCH_TYPE 0x4146PP00+kind, PP not this one's): PP, or 0
+// for anything else (a vanilla room, this protocol's own). What the join refusal tells the player (mod_room.cpp).
+constexpr std::int64_t OtherAllForcesProtocol(std::int64_t value) noexcept {
+    const std::int64_t protocol=(value-0x41460000)>>8;
+    return value>=0x41460000 && value<0x41470000 && protocol>0 && protocol!=kAllForcesRoomProtocol ? protocol : 0;
+}
+static_assert(OtherAllForcesProtocol(0x41460000+(15<<8)+0x93)==15 && OtherAllForcesProtocol(kAllForcesRoomPrefix+0x93)==0 &&
+              OtherAllForcesProtocol(0x93)==0,"another protocol's room told apart");
 bool InstallModRoom() noexcept;
 // The mission this machine's room last published (the game's DLC and MISSION_NO attributes, as the host publishes them
 // whenever it picks one): false until it published both. Any thread.

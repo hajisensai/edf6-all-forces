@@ -99,14 +99,14 @@ bool SendState(std::uint32_t peer) noexcept {
         if(netLogs++<16)Log("SUPPORT PT NET the state does not encode (most %d, scale %.2f): not sent to peer %u",m.most,m.scale,peer);
         return false;
     }
-    return plugin_net::Send(peer,0,bytes,sizeof(bytes));
+    return plugin_net::Send(peer,bytes,sizeof(bytes));
 }
 void SendStates() noexcept {
     for(std::uint32_t p=1;p<=plugin_net::PeerCount();++p)SendState(p);
 }
 bool SendChange(const support_points::Msg& m) noexcept {
     unsigned char bytes[support_points::kWire];
-    return support_points::Encode(m,bytes,sizeof(bytes)) && plugin_net::SendHost(0,bytes,sizeof(bytes));
+    return support_points::Encode(m,bytes,sizeof(bytes)) && plugin_net::SendHost(bytes,sizeof(bytes));
 }
 // The team of the player whose machine is `peer`, -1 unknown.
 std::int32_t PeerTeam(std::uint32_t peer) noexcept {

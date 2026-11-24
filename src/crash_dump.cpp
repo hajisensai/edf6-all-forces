@@ -78,10 +78,28 @@ std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> behind{nullptr};
 std::atomic<DWORD> chaining{0};   // the thread calling the filter behind: a filter there that calls ours again ends
 bool redirected=false;
 
-// A stack overflow's filter behind runs on the dumping thread. The overflowed thread has only what is left below the
-// guard region once Windows has pushed the exception frame (its CONTEXT, sized by the CPU's XSAVE area) and run
-// UnhandledExceptionFilter's own prologue: nothing guarantees more than that, and where the overflow lands inside the
-// last frame moves by up to a page from one run to the next (the stack's start is randomized). A filter behind ours
+// The stack an overflowed thread keeps for its exception: the frame Windows pushes (its CONTEXT, sized by the CPU's
+// XSAVE state: 3.4 KB with AVX-512), the dispatch down to UnhandledExceptionFilter and ours (2.4 KB), our wait, and
+// before all of them any other module's first-chance vectored handler. Windows' default is only what is left of the
+// last pages below the faulting frame: 12-16 KB, 8.7-10.5 KB of it still free at our wait on Windows 11 26200, the
+// amount moving from run to run with where the overflow lands in the last frame (the stack's start is randomized).
+// When it runs out, the fault there cannot be delivered and Windows ends the process with 0xC0000005 before a dump
+// (the signature of crash_dump's occasional CI failure). SetThreadStackGuarantee makes it kOverflowStack: for the installing thread and each
+// thread started after the install (OnThreadStart, a TLS callback, so a thread of the exe or of this DLL alike), only
+// on 1 MB stacks or more (every CreateThread without STACK_SIZE_PARAM_IS_A_RESERVATION: EDF.dll's threads), where
+// it costs 3% of the stack; a smaller stack someone reserved on purpose keeps Windows' default.
+constexpr ULONG kOverflowStack=32*1024;
+constexpr ULONG_PTR kGuaranteedReserve=1024*1024;
+bool GuaranteeStack() noexcept {
+    ULONG_PTR low=0,high=0;
+    GetCurrentThreadStackLimits(&low,&high);
+    if(high-low<kGuaranteedReserve)return false;
+    ULONG size=kOverflowStack;
+    return SetThreadStackGuarantee(&size)!=FALSE;
+}
+
+// A stack overflow's filter behind runs on the dumping thread. The overflowed thread has only the guarantee above
+// (and where it has none, what Windows' default leaves), less what ran before our filter. A filter behind ours
 // needs far more than our wait: even TerminateProcess(GetCurrentProcess()) first runs RtlReportSilentProcessExit
 // (2.7 KB of stack on Windows 11 26200), and the game's are the CRT's, Steam's or an overlay's. Running one there was
 // a second, undeliverable access violation: the process ended with 0xC0000005 and no filter behind ran.
@@ -458,9 +476,18 @@ bool InstallCrashDump(const wchar_t* folder) noexcept {
     FindLogPeer();
     ownAbortBefore.store(std::signal(SIGABRT,&OnOwnAbort));
     _set_invalid_parameter_handler(&OnOwnInvalidParameter);
-    Log("CRASHDUMP installed: %ls (dbghelp %d, dumping thread %d, filter kept first %s, ucrtbase abort/invalid parameter %d)",
-        path ? dumpPath : L"(no path)",dbghelp,go!=nullptr,redirected ? "by redirect" : "at each mission start",ucrt);
+    // This thread's; the threads started from now on get theirs in OnThreadStart (installed is already set). Threads
+    // already running keep Windows' default: only a thread itself can set its guarantee.
+    const bool guaranteed=GuaranteeStack();
+    Log("CRASHDUMP installed: %ls (dbghelp %d, dumping thread %d, filter kept first %s, ucrtbase abort/invalid parameter %d, "
+        "stack overflow guarantee %lu KB on this thread %d)",path ? dumpPath : L"(no path)",dbghelp,go!=nullptr,
+        redirected ? "by redirect" : "at each mission start",ucrt,kOverflowStack>>10,guaranteed);
     return path && dbghelp;
+}
+
+// Each thread started after the install: its stack overflow guarantee (GuaranteeStack), set on the thread itself.
+void NTAPI OnThreadStart(void*,DWORD reason,void*) noexcept {
+    if(reason==DLL_THREAD_ATTACH && installed.load())GuaranteeStack();
 }
 
 void CheckCrashFilter() noexcept {
@@ -479,3 +506,10 @@ void CheckCrashFilter() noexcept {
     FindLogPeer();
 }
 }  // namespace crew
+
+// The TLS callback of the module crash_dump.cpp is linked into (EDF6VehicleCrew.dll, or a test's exe): the loader
+// calls it on every thread start, DisableThreadLibraryCalls or not (the module has static TLS).
+#pragma comment(linker,"/INCLUDE:_tls_used")
+#pragma comment(linker,"/INCLUDE:crewCrashStackTls")
+#pragma section(".CRT$XLF",long,read)
+extern "C" __declspec(allocate(".CRT$XLF")) const PIMAGE_TLS_CALLBACK crewCrashStackTls=&crew::OnThreadStart;

@@ -36,7 +36,10 @@ inline const Table* Usable(const Table* t) noexcept {
 // room with it would half work: mod_room.cpp refuses to create or join one and says to upgrade.
 // 2.8.0 (Coop#47, 2026-11-24): support_net.cpp polls with EDF6CoopPollExtensionBatch and counts on an extension overflow
 // being recovered; with 2.7.x one congestion ended the plugins' networking for the mission.
-inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=8,kRoomCoopPatch=0;
+// 2.9.0 (net-5, 2026-11-24): extension ABI 2 (coop_extension_api.h): the channels' state messages (sendState: an enemy
+// lease's pose, a gravity hold and flight, an ultimate show's keep) and the 20-byte delivered message; 2.8.x serves ABI 1
+// alone, so support_net.cpp would find no extension at all.
+inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=9,kRoomCoopPatch=0;
 enum class CoopVersion : std::uint8_t { ok, old, unreadable };
 // EDF6Coop's exported EDF6CoopVersion marker (nullptr: not exported, older than 2.5.0) against kRoomCoop*; the version
 // read back when there is one.

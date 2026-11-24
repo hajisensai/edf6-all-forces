@@ -118,7 +118,6 @@ struct Machine {
     Engine engine;
     unsigned char id[32]{};
     std::uint32_t origin=0;
-    bool feature=true;
     VehicleLoadout own[kPlayerVehicleCount]{};
 };
 struct World {
@@ -127,15 +126,12 @@ struct World {
     std::uint32_t generation=1;
     void Room() {
         for(std::size_t i=0;i<m.size();++i) {
-            bool has[kPeersMost]{};int n=0;
-            for(std::size_t j=0;j<m.size();++j)if(j!=i)has[n++]=m[j]->feature;
-            m[i]->engine.Room(generation,n,has);
+            m[i]->engine.Room(generation,static_cast<int>(m.size())-1);
         }
     }
     // Machine i's peer index of machine j (1..: the others in order).
     static int PeerOf(int i,int j) { return j<i ? j+1 : j; }
     void Send(int from,int to,const Msg& msg) {
-        if(!m[from]->feature || !m[to]->feature)return;   // a channel goes only to a peer that announced it
         unsigned char b[kMostSize];
         const std::size_t n=Encode(msg,b,sizeof(b));
         Check(n>0,"every message the engine makes encodes");
@@ -213,11 +209,6 @@ void Machines() {
     {World w;w.m={NewMachine(1,a),NewMachine(2,{}),NewMachine(3,{})};Begin(w,{false,false,true});
      const Outcome o=Request(w,0,VehicleBody::pfighter,false);
      Check(AllSame(o) && o.bits[0]==0,"one machine lacks the file: the stock twin everywhere");
-     for(auto* x:w.m)delete x;}
-    // An older build (no channel): it makes the stock twin; so does everyone.
-    {World w;w.m={NewMachine(1,a),NewMachine(2,{}),NewMachine(3,{})};w.m[2]->feature=false;Begin(w,{false,false,false});
-     const Outcome o=Request(w,0,VehicleBody::pfighter,false);
-     Check(AllSame(o) && o.bits[0]==0 && !o.found[2],"an older peer: stock everywhere (it never hears, makes the stock twin)");
      for(auto* x:w.m)delete x;}
     // A peer whose have has not arrived yet: stock (never a guess).
     {World w;w.m={NewMachine(1,a),NewMachine(2,{})};
