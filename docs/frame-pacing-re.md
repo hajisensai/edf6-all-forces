@@ -105,9 +105,16 @@ SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会�
 `IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，`0` 不设（默认，2026-11-24 起；blast 重场景 A/B 里设 1 的三局有两局整局降速，见计划 B 线）。游戏代码只改这一处调用，日志一行
 `LATENCY max frame latency 1 (was 3)`。
 
-## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，只在 `FrameRateDev=1`）
+## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，只在开发开关 `FrameRateFlip=1`）
 
-交换链在 `0x111B220` 建（调用者 `0x111B77B` 设备初始化、`0x111C8EC` 改模式；改模式是重建，不调 `ResizeBuffers`）。渲染器
+**玩家默认不启用**（#386 审查）：`FrameRateCap≠0` 时只装 Present 统计（下面的叶子小桩，flags 照原版 0，交换链仍是游戏的 blt；跟刷新率靠 SyncInterval 1）。翻转模型、撕裂、可等待对象整套只在 ini `FrameRateFlip=1`（发布的 ini 里没有）下装，原因：
+- 改模式除了重建，还有**原地切全屏**：`0x111CAC3`（`[rax+0x50]` = `IDXGISwapChain::SetFullscreenState`）与 `0x111BF4D`，不重建链。允许撕裂的窗口链切成独占全屏后，带 `DXGI_PRESENT_ALLOW_TEARING` 的 Present 返回 `DXGI_ERROR_INVALID_CALL`，原版 `0x1118B48` 只处理 `0x887A0005..7`，这一帧被静默丢掉（上限高于刷新率时画面冻结，跟刷新率时每次追帧后丢 8 帧）。要做就得在切全屏后清掉 tearing 标志。
+- `0x111B220` 先 Release 并清零渲染器 `+0x90` 再 CreateSwapChain，中间没有 ClearState / Flush；两次建链都失败时 `+0x90` 为空，Present 小桩 `0x1118B2F` 取空指针会崩。
+- 最小化时可等待对象不触发，帧门每帧等满 100 ms。
+- MSAA（本机 8×）下翻转模型建不出来，保留 blt；MSAA 后缓冲改成解析路径的逆向见共享笔记 `msaa-backbuffer-re.md`（以后做）。
+以上都没有实机测过（关 MSAA、切全屏、改分辨率、最小化），修好并实测后再考虑对玩家开放。
+
+交换链在 `0x111B220` 建（调用者 `0x111B77B` 设备初始化、`0x111C8EC` 切 AA 开关时重建；改分辨率走 `ResizeBuffers` `0x111BE39` / `0x111EF0F`，切全屏走原地 `SetFullscreenState`，见上）。渲染器
 `+0xA8..+0xEF` 的描述拷到栈 `rsp+0x30`，`0x111B33D` `mov rax,[rcx]; call [rax+50h]` 调 `IDXGIFactory::CreateSwapChain`
 （`rcx` 工厂 = 渲染器 `+0xF8`，`rdx` 设备，`r8` 描述，`r9` 输出）。原版描述是 blt 模型：`SwapEffect DISCARD`、1 个缓冲、
 `ALLOW_MODE_SWITCH`。窗口 / 无边框下每帧经 DWM 复制（多一个刷新的延迟），可变刷新率跟不上帧，高于刷新率的帧上不了屏。
