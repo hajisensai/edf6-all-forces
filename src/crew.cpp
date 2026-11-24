@@ -90,6 +90,11 @@ ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),Game
 // System increments +CE0 once before the scene's complete input/update traversal.
 // Reading this on the game thread avoids guessing frame boundaries from vehicle order.
 namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
+// The handoffs' step (step_fresh.h): one per scene traversal the plugin saw run. Not frameClock.logical itself: System::update
+// increments +CE0 at the top of its step loop (0x1198FD0), before the pause test (0x11990C0) skips the scene, so under the
+// pause menu the native count runs on and the first traversal after it sees the whole pause as one jump. Counting the
+// traversals instead keeps the count still across the pause: a readout published just before it is as fresh after it.
+namespace { stepfresh::Traversals traversals; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
 ULONGLONG WallMs() noexcept { return GetTickCount64(); }
 SceneStep SceneStepNow() noexcept {
@@ -103,6 +108,7 @@ void SeeFrame(const void*) noexcept {
     const auto system=At<const unsigned char*>(image,kSystem);
     if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return;
     frameClock.Observe(system,At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0));
+    stepfresh::See(traversals.Observe(frameClock.logical,GamePaused()));   // every thread's step count (step_fresh.h)
 }
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
@@ -1144,6 +1150,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
     frameClock.Reset();tickFrame=0;++missionCount;
+    stepfresh::NewMission(traversals.steps);   // nothing handed over in the last mission is fresh (step_fresh.h)
     ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
