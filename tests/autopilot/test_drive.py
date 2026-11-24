@@ -186,6 +186,23 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(drive.cycle_command(20, 20.0, False), 'cycle 20 20')
         self.assertEqual(drive.cycle_command(2, 45.5, True), 'cycle 2 45.5 reboot')
 
+    def test_next_command_text_and_outcome(self):
+        # tests/autopilot/autopilot.cpp AskNext: next MISSION [DIFFICULTY] [reboot]
+        self.assertEqual(drive.next_command('range', 1), 'next range 1')
+        self.assertEqual(drive.next_command('M001', 3, True), 'next M001 3 reboot')
+        log = ['[  70.0 s] NEXT armed: M001, difficulty 3, back in by HQMain',
+               '[  70.5 s] CYCLE 1/1 leaving: MissionMgr::End(ABORT), as the pause menu\'s withdraw, after 0.0 s',
+               '[  71.0 s] CYCLE 1/1 left: Result_Offline skipped (no result screen, nothing saved) -> HQMain (the next '
+               'mission)']
+        self.assertIsNone(drive.next_outcome(log, 1))
+        entered = log + ['[ 100.0 s] CYCLE 1/1 entered: the mission runs (row 1)',
+                         '[ 100.0 s] NEXT 1 entered: the mission runs (row 1, difficulty 3, mode 0, content id 0)']
+        self.assertEqual(drive.next_outcome(entered, 1), 'entered')
+        self.assertIsNone(drive.next_outcome(entered, 2))   # the launch's second next: not this row
+        self.assertEqual(drive.next_outcome(['[ 1.0 s] NEXT refused: a cycle or a next is already running'], 1), 'failed')
+        self.assertEqual(drive.next_outcome(log + ['[ 80.0 s] CYCLE failed: the script went back to the title'], 1),
+                         'failed')
+
     def test_cycle_outcome_and_report_from_the_plugins_rows(self):
         log = ['[   1.0 s] CYCLE armed: leave and enter again 2 times, 20.0 s in each mission, back in by PlayMission_Offline',
                '[  40.0 s] CYCLE 0/2 entered: the mission runs (row 13)',
