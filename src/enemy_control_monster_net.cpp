@@ -7,6 +7,7 @@
 #include "enemy_control_action_native.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cstring>
 #include <limits>
 
@@ -52,7 +53,7 @@ constexpr Sig kSigs[]={
     {0x26EFC0,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xDA,0xB9,0x60,0x15,0x00,0x00,0xE8,0xDD}},
     {0x244CB0,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x48,0x83,0xEC,0x20,0x0F,0xB7,0x41,0x10}},
 };
-Stream streams[kRoots]{};unsigned char* admittedImage=nullptr;bool installed=false;
+LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 template<class T>T Fn(unsigned rva) noexcept {
 #ifdef ENEMY_CONTROL_MONSTER_NET_TEST
     return reinterpret_cast<T>(MonsterNetTestFunction(rva));
@@ -177,6 +178,7 @@ bool Before(const NativeLease& l,bool authority,Input*) noexcept {
         const unsigned family=Family(l);if(!installed || admittedImage!=image || !family || !Current(Reference(l)))return false;
         bool role=false;if(!NativeActionRole(l.object,&role) || role!=authority)return false;
         if(auto* s=Find(l))return s->authority==authority && s->rootHeld && !s->cleanupEntered && !s->uncertain && (!s->faulted || s->quiescing);
+        if(!streams.Allocate("monster net streams"))return false;
         for(auto& s:streams)if(!s.held) {
             if(!Pin(Reference(l)))return false;s.root=Reference(l);s.profile=l.profile;s.held=true;s.rootHeld=true;s.authority=authority;s.family=static_cast<unsigned char>(family);
             s.factory=At<void*>(l.object,DescriptorOffset(family)-0x10);if(!Factory(l,family,s.factory)){s.faulted=true;return false;}
