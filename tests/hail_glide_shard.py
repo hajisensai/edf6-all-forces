@@ -32,19 +32,23 @@ def main(argv: list[str]) -> int:
         shard, count = (int(x) for x in rest[rest.index('--shard') + 1].split('/'))
         if not 0 <= shard < count:
             raise SystemExit(f'--shard {shard}/{count}: I must be 0..N-1')
-    listed = subprocess.run([exe, '--list'], capture_output=True, text=True, check=True).stdout.split()
-    if not listed:
-        print('FAIL hail_glide_check --list printed no units')
+    r = subprocess.run([exe, '--list'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    listed = r.stdout.split()
+    if r.returncode or not listed:
+        sys.stdout.write(r.stdout)
+        print(f'FAIL hail_glide_check --list: exit {r.returncode}, {len(listed)} units')
         return 1
     mine = testshard.pack(listed, count, testshard.load(SECONDS), lambda u: u)[shard]
     took: dict[str, float] = {}
     failed: list[str] = []
     for unit in mine:
         started = time.perf_counter()
-        r = subprocess.run([exe, unit], capture_output=True, text=True)
+        # its stderr too, in order with its stdout: a unit that dies (an assert, a crash message) says why
+        r = subprocess.run([exe, unit], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         took[unit] = time.perf_counter() - started
         sys.stdout.write(r.stdout.replace('hail_glide_check: all passed\n', ''))
         if r.returncode:
+            print(f'FAIL {unit}: exit {r.returncode}')
             failed.append(unit)
     if '--seconds' in rest and count == 1:
         testshard.save(SECONDS, "Each tools/hail_glide_check.cpp unit's seconds (tests/hail_glide_shard.py --seconds, one "
