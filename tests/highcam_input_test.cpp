@@ -35,7 +35,7 @@ int main() {
     mapHeld=true;Press(0x80);Check(!HighCamOn(vehicle),"map owns R3: no high-view toggle");
     mapHeld=false;Press(0x80);Check(!HighCamOn(vehicle),"held map press is not replayed on close");
     Press(0);Press(0x80);Check(HighCamOn(vehicle),"fresh press after close enables high view");
-    wallclock::now+=250;
+    wallclock::now+=250;stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep+1);   // a slow frame; no cue published since
     Check(HighCamOn(vehicle),"slow input frame must retain latched high mode before next cue refresh");
     bool visible=false,keys=false;Check(!PlayerHighCam(&visible,&keys),"stale HUD cue still expires independently of mode");
     Press(0);Put<void*>(seat,kSeatRider,nullptr);HighCamFrame(vehicle);

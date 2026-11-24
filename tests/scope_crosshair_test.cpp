@@ -26,6 +26,7 @@ bool Draws(const void* who) {
 }
 const Config& Cfg() noexcept{return config;}
 void Log(const char*,...) noexcept{}
+bool GamePaused() noexcept{return false;}
 unsigned char* PlayerHuman() noexcept{return soldier;}
 bool HumanOnFoot(const unsigned char*) noexcept{return true;}
 bool ReadRound(const unsigned char*,RoundModel* r) noexcept{*r=RoundModel{};return false;}
@@ -48,6 +49,7 @@ bool Matches(unsigned,const unsigned char*,std::size_t) noexcept{return false;}
 int wmain() {
     using namespace crew;
     nextCrossDraw=&Original;
+    stepfresh::See(1);   // the first scene step (step_fresh.h): a cue is stamped with it
     Check(Draws(soldier) && Draws(other),"no scope: the crosshair for everyone");
     scopeSoldier=soldier;
     Check(!Draws(soldier),"the vehicle sight's field drawn for this soldier: its crosshair held back");
@@ -62,7 +64,7 @@ int wmain() {
     Check(Draws(soldier),"control ended: the crosshair is back");
     // A soldier's own open scope (InfantryScopeNow) still holds it back, as before.
     config.enabled=true;config.infantryScope=1;
-    Publish(Published{ObjRef::Of(soldier),InfantryScopeCue{soldier,4.0f,scope::Look::marksman},GetTickCount64()});
+    Publish(Published{ObjRef::Of(soldier),InfantryScopeCue{soldier,4.0f,scope::Look::marksman},stepfresh::Now()});
     Check(!Draws(soldier) && Draws(other),"an infantry scope holds back its own soldier's crosshair only");
     Publish(Published{});
     Check(Draws(soldier),"the infantry scope closed: the crosshair is back");

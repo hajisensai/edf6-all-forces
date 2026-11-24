@@ -67,7 +67,7 @@ int main() {
     Check(PayloadPicked(c.vehicle)==c.weapon[6],"invalid request cannot overwrite valid queued choice");
     SetUp();r=Read(c);Queue(r,2);
     // Age only the transport in the fixture: no blocking sleep or alteration of game timing.
-    choiceRequest.posted=GetTickCount64()-kFreshMs-1;Tick(c);
+    choiceRequest.posted=stepfresh::Now()-stepfresh::kEveryStep;Tick(c);   // consumed kEveryStep+1 steps after its post
     Check(PayloadPicked(c.vehicle)==c.weapon[3],"delayed click expires rather than applying long after UI dismissal");
     // A single-control tank can click back to its native primary, unlike Titan's independent primary.
     SetUp();Put<void*>(c.vehicle,0,image+kVt403);c.seatHolders[0][1]=c.holders[6];Put<std::uint64_t>(SeatAt(c.vehicle,0),kSeatWeaponCount,2);

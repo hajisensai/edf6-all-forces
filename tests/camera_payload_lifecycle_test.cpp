@@ -128,7 +128,7 @@ struct VehicleFixture {
     void Board(unsigned s) { auto seat=SeatAt(vehicle,s);Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,humanCtrl); }
     void Leave(unsigned s) { auto seat=SeatAt(vehicle,s);Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,kSeatRiderCtrl,nullptr); }
 };
-void Step(VehicleFixture& v) { ++clockMs;PayloadFrame(v.vehicle);TurretCamFrame(v.vehicle); }
+void Step(VehicleFixture& v) { ++clockMs;stepfresh::See(stepfresh::Now()+1);PayloadFrame(v.vehicle);TurretCamFrame(v.vehicle); }
 void Reset(VehicleFixture& v) { ResetPayload();ResetTurretCam();ResetLauncher();lookOk=true;currentHuman=v.human;highMode=false; }
 bool NativeOnly(VehicleFixture& v,unsigned seat=0) {
     unsigned char* selected[3]{};
