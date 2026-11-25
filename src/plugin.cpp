@@ -357,6 +357,8 @@ void Validate(Config& n) noexcept {
     Fix("VehicleGunVolume",n.vehicleGunVolume,0.0f,4.0f);
     Fix("VehicleMgVolume",n.vehicleMgVolume,0.0f,4.0f);
     Fix("VehicleMissileVolume",n.vehicleMissileVolume,0.0f,4.0f);
+    Fix("ExplosionVolume",n.explosionVolume,0.0f,4.0f);
+    Fix("FlybyVolume",n.flybyVolume,0.0f,4.0f);
     Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
     Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
@@ -760,6 +762,8 @@ void LoadConfig() noexcept {
     n.vehicleGunVolume=ReadFloat(L"VehicleGunVolume",n.vehicleGunVolume);
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
+    n.explosionVolume=ReadFloat(L"ExplosionVolume",n.explosionVolume);
+    n.flybyVolume=ReadFloat(L"FlybyVolume",n.flybyVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
@@ -1076,6 +1080,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
+    Log("CONFIG explosionVolume=%.2f flybyVolume=%.2f",n.explosionVolume,n.flybyVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X gatlingKey=0x%X",n.playerJetAll,n.playerJetHailKey,
         n.gunshipBoardGunner,n.gunshipGunnerKey,n.gunshipGatlingKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
@@ -1402,6 +1407,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
+    InstallBlastSound();    // the rounds' explosions as War Thunder layers them (blastsound.cpp)
     InstallMissiles();
     InstallBarrages();      // the long-range barrages' rounds: RocketBullet01's update (barrage.cpp)
     InstallAndryusha();     // the Andryusha's carriers: GrenadeBullet01's update, chained (andryusha.cpp)

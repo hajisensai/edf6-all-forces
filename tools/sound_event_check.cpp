@@ -3,7 +3,8 @@
 // its bass are heard and the far layers are not; far off the far recording and the ground's bump are, the near ones
 // not; past 500 m 6 dB down a doubling; the whole event quieter the farther; the low layer alone goes to the LFE; every layer names
 // a recording group of the set; the variants never repeat back to back and all come round; the machine guns' tails are
-// the rounds' 6 dB down, the fast guns the MG42's grains.
+// the rounds' 6 dB down, the fast guns the MG42's grains. The explosions: their tiers by blast radius, the near layers
+// near and the far ones far, the rumble alone to the LFE, no Doppler, a bomb carrying farthest; the voice budgets.
 //
 //   cmake --build build --target sound_event_check && build\sound_event_check.exe
 #include "../src/sound_event.h"
@@ -109,6 +110,71 @@ void Machine() {
     Check(n==1 && h[0].clip==crew::wt::k_m2_far,"600 m off: the far grain alone");
 }
 
+void Blasts() {
+    namespace w=crew::wt;
+    Check(BlastTier(0.0f)==Blast::minor && BlastTier(2.9f)==Blast::minor && BlastTier(3.0f)==Blast::shell &&
+              BlastTier(7.9f)==Blast::shell && BlastTier(8.0f)==Blast::art && BlastTier(15.9f)==Blast::art &&
+              BlastTier(16.0f)==Blast::bomb && BlastTier(80.0f)==Blast::bomb && BlastTier(NAN)==Blast::minor,
+          "the tiers by blast radius: under 3 m, 3-8, 8-16, 16 on");
+    const Event* all[]={&kBlastSmall,&kBlastMid,&kBlastBig,&kBlastHeavy};
+    bool clips=true,subs=true,times=true,still=true,far=true;
+    for(const Event* e : all) {
+        clips=clips && e->layers>0 && e->layers<=kMostLayers;
+        int lows=0;
+        for(int i=0;i<e->layers;++i) {
+            const Layer& l=e->layer[i];
+            clips=clips && l.clip>=0 && l.clip<w::kCount && w::kVariants[l.clip]>0;
+            lows+=l.sub;
+            subs=subs && (l.sub==(l.clip==w::k_ex_sub));
+            times=times && l.after>=0.0f && l.after<2.0f;
+        }
+        subs=subs && lows==1;
+        still=still && e->doppler==0.0f;
+        far=far && e->hold==kBlastHold;
+    }
+    Check(clips,"an explosion's every layer names a recording group of the set");
+    Check(subs,"an explosion's rumble alone goes to the LFE, one a tier");
+    Check(times,"an explosion's layers start within 2 s of it (the debris last)");
+    Check(still && far,"an explosion stands still (no Doppler) and its curves run to 5000 m");
+    Heard h[kMostLayers];
+    int n=Hear(kBlastMid,20.0f,h);
+    float most=0.0f;
+    for(int i=0;i<n;++i)most=std::fmax(most,h[i].gain);
+    Check(Has(h,n,w::k_ex_attack) && Has(h,n,w::k_ex_sweet) && Has(h,n,w::k_debris_small) && Has(h,n,w::k_ex_sub) &&
+              !Has(h,n,w::k_ex_attack_far) && most>1.0f && most<4.0f,
+          "20 m from a shell's: the attack, the sweetener, the debris and the rumble, near +9 dB; no far attack");
+    const float nearCut=h[0].cutoff;
+    n=Hear(kBlastMid,600.0f,h);
+    Check(Has(h,n,w::k_ex_attack_far) && Has(h,n,w::k_ex_body) && !Has(h,n,w::k_debris_small) &&
+              GainOf(h,n,w::k_ex_attack_far)>GainOf(h,n,w::k_ex_attack),
+          "600 m off: the far attack over the near one, the body; the debris gone");
+    float farCut=0.0f;
+    for(int i=0;i<n;++i)if(h[i].clip==w::k_ex_attack)farCut=h[i].cutoff;
+    Check(farCut>0.0f && farCut<nearCut,"far off the low-pass is lower");
+    n=Hear(kBlastSmall,500.0f,h);
+    Check(!Has(h,n,w::k_xs_close) && !Has(h,n,w::k_xs_far),"a small one is gone by 400 m (but its rumble)");
+    n=Hear(kBlastBig,30.0f,h);
+    Check(!Has(h,n,w::k_ex_sweet) && Has(h,n,w::k_art_attack),"an artillery shell's sweetener only from 50 m");
+    n=Hear(kBlastBig,300.0f,h);
+    Check(Has(h,n,w::k_ex_sweet) && Has(h,n,w::k_art_attack_far) && Has(h,n,w::k_art_body),"300 m off a shell: the sweetener, the far attack, the body");
+    n=Hear(kBlastHeavy,3000.0f,h);
+    Check(Has(h,n,w::k_bomb_far) && Has(h,n,w::k_ex_sub),"3 km from a bomb: its far body and its rumble");
+    Check(Power(kBlastHeavy,2000.0f)>Power(kBlastMid,2000.0f)*10.0f,"a bomb carries farther than a shell");
+    Check(Near(Power(kBlastHeavy,10000.0f),Power(kBlastHeavy,5000.0f)*0.25f,0.02f) && Hear(kBlastHeavy,1e7f,h)==0,
+          "past 5000 m: 6 dB down a doubling, nothing at 10 000 km");
+    // The budgets.
+    const Budget b{3,0.06f,3.0f};
+    const float none[3]={1e9f,1e9f,1e9f},d0[3]={0.0f,0.0f,0.0f};
+    Check(BudgetSlot(b,100.0f,none,d0,3)==0,"no explosion yet: the first place");
+    const float young[3]={0.01f,1.0f,1e9f},dy[3]={50.0f,60.0f,0.0f};
+    Check(BudgetSlot(b,100.0f,young,dy,3)==-1,"within the cooldown of the last: not heard");
+    const float live[3]={0.5f,1.0f,2.0f},dl[3]={50.0f,300.0f,100.0f};
+    Check(BudgetSlot(b,400.0f,live,dl,3)==-1 && BudgetSlot(b,200.0f,live,dl,3)==1,
+          "the budget full: farther than all of them not heard, nearer takes the farthest's place");
+    const float spent[3]={0.5f,4.0f,2.0f};
+    Check(BudgetSlot(b,400.0f,spent,dl,3)==1,"a spent one's place is free");
+}
+
 void Rotations() {
     Rotation r{};
     bool repeat=false;
@@ -134,6 +200,7 @@ int main() {
     Distances();
     Machine();
     Rotations();
+    Blasts();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }

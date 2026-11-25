@@ -4142,7 +4142,8 @@ def vehicle_sound_wired() -> None:
     # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
     # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
     tick = src('src/jetsound.cpp').split('void JetSoundTick()', 1)[1].split('\n}', 1)[0]
-    assert 'if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();' in tick, 'JetSoundTick: the vehicles need the listener'
+    assert 'Cfg().vehicleSound || Cfg().explosionVolume>0.0f || Cfg().flybyVolume>0.0f' in tick and \
+        'if((jets && started) || (Cfg().enabled && others))Tick();' in tick, 'JetSoundTick: the vehicles and explosions need the listener'
     on = code.split('void VehicleSound(unsigned char* v)', 1)[1].split('\n}', 1)[0]
     assert 'audio::ClipsReady() && SoundListening()' in on, 'VehicleSound: no stock sound held while nothing of ours can sound'
     assert 'src/vehsound.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]

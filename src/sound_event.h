@@ -7,7 +7,8 @@
 // ground/weapon/cannons and mguns, the tracks' volumes, GainEffects and their Distance automation, the multiband EQ's
 // frequencyA over Distance, the MultiSounds' start, the Premaster, the bus chain from the event down to weapon_ai, the
 // spatialiser's sound size, minimum extent and Doppler scale); the ones not in them are marked "ours" here and in the doc.
-// Pure: tools/sound_event_check.cpp checks it offline; vehsound.cpp plays it.
+// The explosions the same way, by blast radius. Pure: tools/sound_event_check.cpp checks it offline; vehsound.cpp
+// and blastsound.cpp play it.
 #include "wt_clips.h"
 #include <cmath>
 #include <cstdint>
@@ -56,25 +57,28 @@ struct Layer {
     float after;    // s after the shot (its MultiSound's start)
     bool sub;       // a low layer: the LFE channel's alone (surround.h)
 };
+// Ours: past kHold m the mix is WT's at kHold, falling as 1 / d (6 dB a doubling, the old reports' falloff), the
+// low-pass still the distance's. WT's events end at their spatialiser's maximum distance, 2000 m, their Far and Premaster
+// down to -80 dB there (a cannon 1 km off is about -68 dB): a War Thunder battlefield's; EDF's fights run to 2500 m
+// (vehmix.h kFarAt), where a gun is still heard.
+// An event whose curves run on that far (the explosions', to 5000 m) holds there instead (its own hold).
+constexpr float kHold=500.0f;
 struct Event {
     int layers;
     Layer layer[kMostLayers];
     float db;       // the event's master, its bus chain down to weapon_ai and kTrimDb
     Curve master;   // the Premaster's distance gain
     float size,least,doppler;   // the spatialiser's sound size (m), minimum extent (0..1 of all around), Doppler scale
+    float hold=kHold;           // m: past it WT's mix there, falling as 1 / d
 };
-// Ours: past kHold m the mix is WT's at kHold, falling as 1 / d (6 dB a doubling, the old reports' falloff), the
-// low-pass still the distance's. WT's events end at their spatialiser's maximum distance, 2000 m, their Far and Premaster
-// down to -80 dB there (a cannon 1 km off is about -68 dB): a War Thunder battlefield's; EDF's fights run to 2500 m
-// (vehmix.h kFarAt), where a gun is still heard.
-constexpr float kHold=500.0f;
 
 // What a layer is heard as at a distance: its gain (linear), its low-pass and how long after the shot it starts (the
 // sound's travel time is the caller's). Those under kQuietDb are left out.
 struct Heard { int clip; float gain,cutoff,after; bool sub; };
 inline int Hear(const Event& e,float distance,Heard* out) noexcept {
     const float d=std::isfinite(distance) && distance>0.0f ? distance : 0.0f;
-    const float mixAt=d>kHold ? kHold : d,spread=d>kHold ? -20.0f*std::log10(d/kHold) : 0.0f;
+    const float hold=e.hold>0.0f ? e.hold : kHold;
+    const float mixAt=d>hold ? hold : d,spread=d>hold ? -20.0f*std::log10(d/hold) : 0.0f;
     int n=0;
     for(int i=0;i<e.layers && i<kMostLayers;++i) {
         const Layer& l=e.layer[i];
@@ -224,4 +228,101 @@ constexpr Mg kMg42{
 // one (the gatlings' buzz): ours, WT has no gatling.
 constexpr float kFastFrames=4.0f;
 inline const Mg& MgFor(float frames) noexcept { return frames>0.0f && frames<kFastFrames ? kMg42 : kM2; }
+
+// --- The explosions (explosion_ground_20_37, explosion_ground, art_explosion_ground, bomb_explosion_ground) -----------
+// A round's explosion by its blast radius (BlastTier): a small one's (under 3 m: the autocannons' and the explosive
+// bullets'), a shell's or a grenade's (3-8 m), an artillery shell's or a big rocket's (8-16 m), a bomb's (16 m on). Each
+// event's layers as WT's: the near crack and attack, the far attack that takes over past 200 m, the body far off, the
+// debris coming down after it, each with its own gain over the distance; the Premaster (Explosions_*_Distance_Gain) to
+// 5000 m; the spatialiser's sound size and minimum extent; no Doppler (it stands still). Bus: explosions (minor / rapid /
+// massive) -12 -4 +4 = -12 dB against the cannons' -18 (with weapon_ai, which kCannonBusDb leaves out): 0 dB here. The
+// EQ over the distance is a low-pass here (WT's multiband EQ: ours, by where its cut falls). Ours: the tail (the open
+// field's echo, tails-NNN) and the rumble to the LFE alone (explosion_rumble; WT sends the whole event there at -12 / -8
+// dB). The level: 0 m from a shell's explosion about +9 dB against a cannon's +1.5 at its muzzle (WT's own levels).
+constexpr float kBlastBusDb=0.0f,kBlastHold=5000.0f;
+constexpr Curve kSmallPremaster{3,{{0.0f,0.0f},{2012.7f,-4.0f},{5000.0f,-80.0f}}};
+constexpr Curve kBlastPremaster{3,{{0.0f,0.0f},{2012.7f,-10.0f},{5000.0f,-80.0f}}};
+constexpr Curve kBombPremaster{3,{{0.0f,0.0f},{2012.7f,0.0f},{5000.0f,-18.0f}}};
+constexpr Curve kSmallEq{3,{{0.0f,22000.0f},{374.0f,9000.0f},{3000.0f,1500.0f}}};
+constexpr Curve kBlastEq{3,{{0.0f,22000.0f},{2000.0f,6500.0f},{5000.0f,1500.0f}}};
+constexpr Curve kBombEq{3,{{0.0f,22000.0f},{2000.0f,8000.0f},{5000.0f,3000.0f}}};
+constexpr Curve kBodyEq{2,{{0.0f,22000.0f},{3000.0f,350.0f}}};
+constexpr Curve kRumble{3,{{0.0f,0.0f},{1000.0f,-12.0f},{5000.0f,-60.0f}}};   // ours
+constexpr Curve kDebris{2,{{0.0f,0.0f},{403.8f,-80.0f}}};
+// explosion_ground_20_37 (master -6): hit_explosion_small_close_rapid +8, 0 m +6 -> 400 m -80; bullethit_far +10, 0 m +4
+// -> 200 m 0 -> 400 m -80. Spatialiser: 10 m, 120 degrees. Ours: the rumble -12.
+constexpr Event kBlastSmall{3,{
+    {k_xs_close,8.0f,{2,{{0.0f,6.0f},{400.0f,-80.0f}}},kSmallEq,0.0f,false},
+    {k_xs_far,10.0f,{3,{{0.0f,4.0f},{200.0f,0.0f},{400.0f,-80.0f}}},kSmallEq,0.0f,false},
+    {k_ex_sub,-12.0f,kRumble,kOpen,0.0f,true},
+}, -6.0f+kBlastBusDb+kTrimDb, kSmallPremaster, 10.0f, 120.0f/360.0f, 0.0f, kBlastHold};
+// explosion_ground (master -6): aa_explosion (the sweetener) +11, 0 m +7 -> 190.7 m +6 -> 1000 m -80; heavy_explosion
+// _attack_3 +11, 0 m +10 -> 2000 m -80, its _far +11, -80 at 0 m -> +6 at 204.8 m -> -80 at 5000 m; expl_body_med -5,
+// -80 at 0 m -> +9.9 at 190.7 m -> -56.7 at 5000 m, its EQ 22 kHz -> 350 Hz at 3000 m; dirt_debris_small +10, 0 m 0 ->
+// 403.8 m -80, from 0.2 s. Spatialiser: 2 m, 60 degrees; at most 4 at once, 60 ms apart. Ours: the tail -12, the rumble -6.
+constexpr Event kBlastMid{7,{
+    {k_ex_sweet,11.0f,{3,{{0.0f,7.0f},{190.7f,6.0f},{1000.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_ex_attack,11.0f,{2,{{0.0f,10.0f},{2000.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_ex_attack_far,11.0f,{3,{{0.0f,-80.0f},{204.8f,6.0f},{5000.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_ex_body,-5.0f,{3,{{0.0f,-80.0f},{190.7f,9.9f},{5000.0f,-56.7f}}},kBodyEq,0.0f,false},
+    {k_debris_small,10.0f,kDebris,kBlastEq,0.2f,false},
+    {k_ex_tail,-12.0f,kOpen,kBlastEq,0.1f,false},
+    {k_ex_sub,-6.0f,kRumble,kOpen,0.0f,true},
+}, -6.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold};
+// art_explosion_ground (master -4): art_attack +12, 0 m +10 -> 1000 m -80, its _far +9.5, -80 at 0 m -> +1.11 at 218.9 m
+// -> -2.32 at 981.6 m -> -4 at 5000 m; art_body +6, -80 at 7.06 m -> +5.22 at 190.7 m -> -80 at 1000 m; aa_explosion
+// +10 between 50 m (-0.2) and 1000 m (-4) only; dirt_debris_med +12, 0 m 0 -> 403.8 m -80, from 1.0 s. Premaster and
+// spatialiser: explosion_ground's. Ours: the tail -8, the rumble -3.
+constexpr Event kBlastBig{7,{
+    {k_art_attack,12.0f,{2,{{0.0f,10.0f},{1000.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_art_attack_far,9.5f,{4,{{0.0f,-80.0f},{218.9f,1.11f},{981.6f,-2.32f},{5000.0f,-4.0f}}},kBlastEq,0.0f,false},
+    {k_art_body,6.0f,{3,{{7.06f,-80.0f},{190.7f,5.22f},{1000.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_ex_sweet,10.0f,{4,{{49.0f,-80.0f},{50.0f,-0.2f},{1000.0f,-4.0f},{1001.0f,-80.0f}}},kBlastEq,0.0f,false},
+    {k_debris_med,12.0f,kDebris,kBlastEq,1.0f,false},
+    {k_ex_tail,-8.0f,kOpen,kBlastEq,0.15f,false},
+    {k_ex_sub,-3.0f,kRumble,kOpen,0.0f,true},
+}, -4.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold};
+// bomb_explosion_ground (its master not in the metadata view: 0, ours): aa_explosion +12, 0 m +10 -> 1000 m -80;
+// slow_attack_big +6, 0 m +6 -> 190.7 m +6 -> 5000 m -80; bomb_body_heavy +6, 0 m -6 -> +6 at 981.6 m -> -5 at 4046.6 m
+// -> -80 at 5000 m, from 0.5 s; bomb_debirs -4, 0 m 0 -> 300 m -59.4, then silent, from 1.4 s. Premaster: 0 to 2012.7
+// m, -18 at 5000 m. Spatialiser: 120 m, 140 degrees; at most 3 at once. Ours: the tail -6, the rumble 0.
+constexpr Event kBlastHeavy{6,{
+    {k_ex_sweet,12.0f,{2,{{0.0f,10.0f},{1000.0f,-80.0f}}},kBombEq,0.0f,false},
+    {k_bomb_body,6.0f,{3,{{0.0f,6.0f},{190.7f,6.0f},{5000.0f,-80.0f}}},kBombEq,0.0f,false},
+    {k_bomb_far,6.0f,{4,{{0.0f,-6.0f},{981.6f,6.0f},{4046.6f,-5.0f},{5000.0f,-80.0f}}},kBombEq,0.5f,false},
+    {k_debris_bomb,-4.0f,{3,{{0.0f,0.0f},{300.0f,-59.4f},{300.1f,-80.0f}}},kBombEq,1.4f,false},
+    {k_ex_tail,-6.0f,kOpen,kBombEq,0.2f,false},
+    {k_ex_sub,0.0f,kRumble,kOpen,0.0f,true},
+}, 0.0f+kBlastBusDb+kTrimDb, kBombPremaster, 120.0f, 140.0f/360.0f, 0.0f, kBlastHold};
+
+// The tiers by blast radius (m) and their voice budgets: at most WT's maxVoices (the small and the big one's ours) started
+// within `life` s (about one's length: ours), none within `cooldown` s of the last (explosion_ground's 60 ms; the others'
+// ours).
+enum class Blast : std::uint8_t { minor, shell, art, bomb };   // kBlastSmall, kBlastMid, kBlastBig, kBlastHeavy
+constexpr int kBlastTiers=4;
+struct Budget { int most; float cooldown,life; };
+constexpr Budget kBlastBudget[kBlastTiers]={{6,0.03f,1.5f},{4,0.06f,3.0f},{4,0.06f,4.0f},{3,0.1f,6.0f}};
+constexpr float kSmallBelow=3.0f,kMidBelow=8.0f,kBigBelow=16.0f;
+inline Blast BlastTier(float radius) noexcept {
+    const float r=std::isfinite(radius) && radius>0.0f ? radius : 0.0f;
+    return r<kSmallBelow ? Blast::minor : r<kMidBelow ? Blast::shell : r<kBigBelow ? Blast::art : Blast::bomb;
+}
+inline const Event& BlastEvent(Blast b) noexcept {
+    return b==Blast::minor ? kBlastSmall : b==Blast::shell ? kBlastMid : b==Blast::art ? kBlastBig : kBlastHeavy;
+}
+// Whether a sound `distance` m off may start against the `n` of its kind started `ages` s ago `dists` m off: fewer than
+// its budget live (younger than its life), or nearer than the farthest of them (whose place it takes: that one's voices
+// play on, it just no longer counts); never within the cooldown of the last. Returns the place to take (n: a new one),
+// -1: not heard.
+inline int BudgetSlot(const Budget& b,float distance,const float* ages,const float* dists,int n) noexcept {
+    int live=0,farthest=-1,spent=-1;
+    for(int i=0;i<n;++i) {
+        if(!(ages[i]<b.life)){if(spent<0)spent=i;continue;}
+        if(ages[i]<b.cooldown)return -1;
+        ++live;
+        if(farthest<0 || dists[i]>dists[farthest])farthest=i;
+    }
+    if(live<b.most)return spent>=0 ? spent : n;
+    return farthest>=0 && distance<dists[farthest] ? farthest : -1;
+}
 }  // namespace crew::wtevent

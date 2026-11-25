@@ -294,9 +294,11 @@ void JetSoundTick() noexcept {
     __try {
         const bool jets=Cfg().enabled && Cfg().jetSound;
         if(!jets)for(auto& s:sounds)if(s.ref)Silence(s);   // switched off
-        // The camera is the ground vehicles' listener too (vehsound.cpp SoundAt): kept while either sounds. The jets need
-        // it from their first jet on (started); the vehicles from the switch alone, a mission with no jet in it too.
-        if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();
+        // The camera is the ground vehicles' and the explosions' listener too (vehsound.cpp, blastsound.cpp SoundAt):
+        // kept while any sounds. The jets need it from their first jet on (started); the others from their switch alone,
+        // a mission with no jet in it too.
+        const bool others=Cfg().vehicleSound || Cfg().explosionVolume>0.0f || Cfg().flybyVolume>0.0f;
+        if((jets && started) || (Cfg().enabled && others))Tick();
         else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
     } __except(Fault(GetExceptionInformation())){Recover();}
 }

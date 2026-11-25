@@ -188,6 +188,7 @@ void MissionStart() noexcept {
     ResetGear();
     ResetJetSound();
     ResetVehicleSound();
+    ResetBlastSound();
     ResetSazabiSound();
     ResetMissiles();
     ResetDrills();
