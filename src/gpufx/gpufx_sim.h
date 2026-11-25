@@ -206,6 +206,17 @@ inline void SortBackToFront(const Instance* in,int n,const float view[16],bool l
     std::stable_sort(order,order+n,[keys](std::uint32_t a,std::uint32_t b){return keys[a]<keys[b];});
 }
 
+// ---- the stock particle card (docs/gpufx-re.md: VS 0x1968790, grid table 0x1AE0BA0) ----
+// The stock VS puts corner k (uv (0,0) (1,0) (0,1) (1,1)) at view-space offset size * (sin, cos)(rot + phi_k) with
+// phi = 0, pi/2, 3pi/2, pi. Ours puts corner c = (-1,1) (1,1) (-1,-1) (1,-1) at size * 0.7071 * c turned anticlockwise
+// by its own rot: the same corners when ours = -stock - pi/4.
+inline float StockRotToOurs(float stockRot) noexcept { return -stockRot-0.78539816f; }
+// The stock atlas grid (tiles a side) by frame count: 1 and 2 one tile, 4 a 2x2, 9 a 3x3, 16 a 4x4; 0 for any other
+// count (the table holds -1 there; no stock emitter has one, and ours refuses it).
+inline int StockGrid(int frames) noexcept {
+    switch(frames){case 1:case 2:return 1;case 4:return 2;case 9:return 3;case 16:return 4;default:return 0;}
+}
+
 // ---- depth ----
 // The view-space z a hardware depth value d came from, for a row-vector projection P (clip = v * P): solved from
 // d = (z*P22+P32)/(z*P23+P33). Works for standard and reversed depth alike (the shader uses the same formula).

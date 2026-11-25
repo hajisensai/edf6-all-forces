@@ -137,7 +137,8 @@ int main() {
     const float soft=centre(px)[0];
     std::printf("soft %.4f of %.4f\n",soft,lit);
     CHECK(soft>0.0f && soft<lit*0.5f);
-    // 4. A stock-texture batch (blend 2, additive): a white 1x1 texture adds colour * alpha, leaves alpha.
+    // 4. A stock-texture batch (blend 2, ONE/ONE): a white 1x1 texture adds texel * colour (alpha not applied to it) and
+    // adds its alpha to the target's.
     {
         D3D11_TEXTURE2D_DESC d{};d.Width=d.Height=1;d.MipLevels=d.ArraySize=1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
         d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -152,9 +153,42 @@ int main() {
         CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,vp,&b,1,&st));
         px=rig.Read();
         std::printf("additive %.3f %.3f %.3f a=%.3f\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3]);
-        CHECK(std::fabs(centre(px)[0]-1.0f)<0.01f && std::fabs(centre(px)[1]-0.5f)<0.01f && std::fabs(centre(px)[3]-0.25f)<1e-3f);
+        CHECK(std::fabs(centre(px)[0]-2.0f)<0.01f && std::fabs(centre(px)[1]-1.0f)<0.01f && std::fabs(centre(px)[3]-0.75f)<1e-3f);
         // The stock corner layout: half width size/sqrt2 = 2.12 m at 10 m -> 0.212 of the half screen = 10 px; 14 px out is clear.
         CHECK(centre(px,8)[0]>0.5f && centre(px,14)[0]==0.0f);
+    }
+    // 6. A stock blend-1 batch from a 2x2 atlas (4 frames): frame 3 is the bottom-right tile, upright at stock rot
+    // -pi/4 (the tile's top-left texel top left on screen), alpha written ONE/ZERO, the stock distance fade applied.
+    {
+        // 4x4 texels: each 2x2 tile one frame; the bottom-right tile's own 2x2: red, green / blue, white (alpha 1).
+        std::uint32_t texels[16];
+        for(auto& tx:texels)tx=0xFF000000u;   // other tiles black
+        texels[2*4+2]=0xFF0000FFu;texels[2*4+3]=0xFF00FF00u;texels[3*4+2]=0xFFFF0000u;texels[3*4+3]=0xFFFFFFFFu;
+        D3D11_TEXTURE2D_DESC d{};d.Width=d.Height=4;d.MipLevels=d.ArraySize=1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
+        d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA init{texels,16,0};
+        ComPtr<ID3D11Texture2D> t;ComPtr<ID3D11ShaderResourceView> v;
+        CHECK(SUCCEEDED(rig.device->CreateTexture2D(&d,&init,&t)) && SUCCEEDED(rig.device->CreateShaderResourceView(t.Get(),nullptr,&v)));
+        Instance c=card;c.color[0]=c.color[1]=c.color[2]=1.0f;c.color[3]=1.0f;c.soft=0.001f;c.frame=3.0f;
+        c.rot=StockRotToOurs(-0.78539816f);
+        Batch b{};b.texture=v.Get();b.kind=Kind::nativeAlpha;b.gridX=b.gridY=2;b.frames=4;b.cornerScale=0.70710678f;b.uInset=0.0005f;
+        b.instances=&c;b.count=1;
+        ViewParams fv=vp;fv.fadeMul=0.05f;fv.fadeAdd=0.0f;   // 10 m: 1 - 0.5 -> alpha 0.5
+        rig.context->ClearRenderTargetView(rig.rtv.Get(),clear);
+        rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,1.0f,0);
+        bindNative();
+        CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,fv,&b,1,&st));
+        px=rig.Read();
+        // Half width 10 px: 5 px up-left of the centre is the tile's top-left quarter (red), 5 px down-right its white.
+        const float* tl=&px[((kSize/2-5)*kSize+kSize/2-5)*4];
+        const float* br=&px[((kSize/2+5)*kSize+kSize/2+5)*4];
+        const float* tr=&px[((kSize/2-5)*kSize+kSize/2+5)*4];
+        std::printf("atlas tl %.3f %.3f %.3f a=%.3f tr %.3f %.3f %.3f br %.3f %.3f %.3f\n",tl[0],tl[1],tl[2],tl[3],tr[0],tr[1],tr[2],br[0],br[1],br[2]);
+        CHECK(tl[0]>0.3f && tl[0]>tl[1]*2.0f && tl[0]>tl[2]*2.0f);
+        CHECK(tr[1]>0.3f && tr[1]>tr[0]*2.0f);
+        CHECK(br[0]>0.3f && br[1]>0.3f && br[2]>0.3f);
+        CHECK(std::fabs(tl[3]-0.5f)<0.01f);   // ONE/ZERO: the card's alpha replaces the target's 0.25
+        CHECK(tl[0]<0.55f);                    // faded to half over black
     }
     // 5. A refusal changes nothing: depth of another size.
     {

@@ -22,9 +22,23 @@ constexpr unsigned kParticleDrawSlot=0x17A8F78,kParticleDraw=0x302420;
 constexpr unsigned char kParticleDrawCode[]={0x48,0x89,0x5C,0x24,0x18,0x57,0x48,0x81,0xEC,0x90,0x00,0x00,0x00,0x48,0x8B,0xFA,
     0x48,0x8B,0xD9,0x41,0x83,0xF8,0x02,0x74,0x0A,0x41,0x83,0xF8,0x05,0x0F,0x85,0x96,0x01,0x00,0x00,0x48,0x83,0xB9,0x00,0x02,
     0x00,0x00,0x00};
-constexpr std::size_t kBlend=0x84,kStretch=0x180,kFrames=0x1D8,kLive=0x200,kSnapshot=0x218,kSnapshotCount=0x228,
-    kTexture=0x230,kTextureB=0x240,kWorld=0x2B0;
-constexpr std::size_t kEntry=0x40;   // a render snapshot entry: pos vec4, rgba, dir, rot +0x30, size +0x34, frame byte +0x38
+// The particle core's fields (ParticleRender embeds its core at +0x70; the 0x3027B0 draw takes a bare core): blend
+// +0x14 (0 opaque, 1 alpha, 2 additive, 3 custom), lit +0x110 (nonzero: the lit PS 0x196BA60, refused), frames +0x168,
+// live +0x190, snapshot +0x1A8 / count +0x1B8, texture holder +0x1C0 (its +0x10, the core's +0x1D0, holds the bound SRV's
+// holder: the SRV at that pointer's +0x10).
+constexpr std::size_t kCoreInRender=0x70;
+constexpr std::size_t kBlend=0x14,kLit=0x110,kFrames=0x168,kLive=0x190,kSnapshot=0x1A8,kSnapshotCount=0x1B8,
+    kTexture=0x1C0,kTextureB=0x1D0,kCoreSize=0x200,kRenderWorld=0x2B0;
+constexpr std::size_t kEntry=0x40;   // a render snapshot entry: pos vec4, rgba, normal, rot +0x30, size +0x34, frame byte +0x38
+// The embedded core's own draw: void Draw(core, nativeCtx, const float world[16]) (MuzzleSmoke01, SmokeCandle, flame,
+// plasma, ClaySplash ...: 21 callers, several tail jumps, each filtering the pass itself). 19-byte prologue, no relative
+// instruction: mov r11,rsp; mov [r11+18],rbx; mov [r11+20],rsi; push rdi; sub rsp,90.
+constexpr unsigned kCoreDraw=0x3027B0;
+constexpr unsigned char kCoreDrawCode[]={0x4C,0x8B,0xDC,0x49,0x89,0x5B,0x18,0x49,0x89,0x73,0x20,0x57,0x48,0x81,0xEC,0x90,0x00,
+    0x00,0x00};
+using CoreDrawFn=void(__fastcall*)(void*,void*,const float*);
+CoreDrawFn coreDrawNext=nullptr;
+
 // The renderer's light block (probe dump): *(EDF+0x20B2958) + 0xB00 .. 0xC40.
 constexpr unsigned kRendererPtr=0x20B2958;
 using DrawFn=void(__fastcall*)(void*,void*,int,const void*);
@@ -77,7 +91,7 @@ ComPtr<ID3D11Texture2D> observedDepth;
 unsigned observedFormat=0;
 std::vector<Instance> renderOwn;
 // The stock cards taken over in this view: their instances and one batch per stock draw (in the stock order).
-struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,start,count; };
+struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,grid,start,count; };
 std::vector<Instance> nativeInstances;
 std::vector<NativeBatch> nativeBatches;
 std::vector<Batch> batches;
@@ -89,6 +103,7 @@ struct Probe {
     ULONGLONG loggedAt=0;
     int nativeLogged=0;
     unsigned nativeCalls=0,nativeReplaced=0,nativeOutside=0,nativeRefused=0,byPass[8]{};
+    unsigned coreCalls=0,coreReplaced=0,refusedLit=0,refusedBlend=0,refusedGrid=0,stateLogged=0;
     double cpuMs=0.0;unsigned cpuSamples=0;
     float jitterMin[2]{1e9f,1e9f},jitterMax[2]{-1e9f,-1e9f};
     bool lightLogged=false;
@@ -135,19 +150,20 @@ void TransformPoint(const float p[3],const float m[16],float out[4]) noexcept {
 
 // SEH-only readers (no C++ objects: __try needs none with destructors in the frame).
 struct NativeView {
-    int blend,stretch,frames;
+    int blend,lit,frames;
     std::uint64_t live,count;
     const unsigned char* snapshot;
     float world[16];
     void* chain[3];
 };
-bool ReadNative(const unsigned char* obj,NativeView& n) noexcept {
+// `core`: a particle core (a ParticleRender's +0x70 or the 0x3027B0 draw's own); `world` its object -> world matrix.
+bool ReadNative(const unsigned char* obj,const float* world,NativeView& n) noexcept {
     __try {
-        if(!Readable(obj,0x2F0))return false;
-        n.blend=At<int>(obj,kBlend);n.stretch=At<unsigned char>(obj,kStretch);n.frames=At<int>(obj,kFrames);
+        if(!Readable(obj,kCoreSize) || !world || !Readable(world,sizeof(n.world)))return false;
+        n.blend=At<int>(obj,kBlend);n.lit=At<unsigned char>(obj,kLit);n.frames=At<int>(obj,kFrames);
         n.live=At<std::uint64_t>(obj,kLive);n.count=At<std::uint64_t>(obj,kSnapshotCount);
         n.snapshot=At<const unsigned char*>(obj,kSnapshot);
-        std::memcpy(n.world,obj+kWorld,sizeof(n.world));
+        std::memcpy(n.world,world,sizeof(n.world));
         n.chain[0]=n.chain[1]=n.chain[2]=nullptr;
         const unsigned char* b=At<const unsigned char*>(obj,kTextureB);
         if(b && Readable(b,0x18))n.chain[0]=At<void*>(b,0x10);
@@ -160,7 +176,9 @@ bool ReadNative(const unsigned char* obj,NativeView& n) noexcept {
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-// The snapshot entries into instances (world matrix applied, the stock corner layout: angle rot + k*pi/2 at `size`).
+// The snapshot entries into instances. The stock VS (0x1968790): the centre is the entry's position times the world
+// matrix times the view, `size` the corner's view-space distance from it (the half diagonal, not scaled by the world
+// matrix); the corners' turn: StockRotToOurs (gpufx_sim.h).
 int CopySnapshot(const NativeView& n,Instance* out,int most) noexcept {
     __try {
         const int count=static_cast<int>(n.count<static_cast<std::uint64_t>(most) ? n.count : static_cast<std::uint64_t>(most));
@@ -172,10 +190,11 @@ int CopySnapshot(const NativeView& n,Instance* out,int most) noexcept {
             Instance& o=out[i];
             o.pos[0]=p[0];o.pos[1]=p[1];o.pos[2]=p[2];
             std::memcpy(o.color,e+0x10,sizeof(o.color));
-            o.rot=At<float>(e,0x30)-0.78539816f;
+            o.rot=StockRotToOurs(At<float>(e,0x30));
             o.size=At<float>(e,0x34);
             o.frame=static_cast<float>(At<unsigned char>(e,0x38));
-            o.soft=0.001f;o.emissive=0.0f;
+            // The stock PS has no soft fade (a hard cut where a card meets the ground): ours fades over half its size.
+            o.soft=std::clamp(o.size*0.5f,0.05f,3.0f);o.emissive=0.0f;
         }
         return count;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
@@ -233,19 +252,63 @@ void* BoundTexture(ID3D11DeviceContext* context) noexcept {
     return srv;
 }
 
-void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* view) {
-    const auto stock=reinterpret_cast<DrawFn>(image+kParticleDraw);
-    if(pass!=2 && pass!=5){stock(obj,native,pass,view);return;}
+// The stock particle VS's distance fade constants (xgl_system, VS b0 bytes 568 / 572: cb0[35].z/.w, 608 bytes): a
+// GPU constant buffer the CPU never sees, so a 16-byte copy of cb0[35] goes into a ring of staging buffers at the first
+// stock particle draw of a world and is read back without waiting a few frames later (WorldEnd). Render thread only.
+struct FadeReader {
+    static constexpr int kRing=3;
+    ComPtr<ID3D11Buffer> ring[kRing];
+    bool pending[kRing]{};
+    int next=0;
+    bool copiedThisWorld=false,known=false;
+    float mul=0.0f,add=0.0f;
+    unsigned bytes=0;
+    void Copy(ID3D11DeviceContext* context) noexcept {
+        if(copiedThisWorld || !context)return;
+        copiedThisWorld=true;
+        ComPtr<ID3D11Buffer> cb;
+        context->VSGetConstantBuffers(0,1,&cb);
+        if(!cb)return;
+        D3D11_BUFFER_DESC d{};cb->GetDesc(&d);bytes=d.ByteWidth;
+        if(d.ByteWidth<576 || pending[next])return;
+        if(!ring[next]) {
+            ComPtr<ID3D11Device> device;context->GetDevice(&device);
+            D3D11_BUFFER_DESC sd{};sd.ByteWidth=16;sd.Usage=D3D11_USAGE_STAGING;sd.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+            if(!device || FAILED(device->CreateBuffer(&sd,nullptr,&ring[next])))return;
+        }
+        const D3D11_BOX box{560,0,0,576,1,1};
+        context->CopySubresourceRegion(ring[next].Get(),0,0,0,0,cb.Get(),0,&box);
+        pending[next]=true;next=(next+1)%kRing;
+    }
+    void Read(ID3D11DeviceContext* context) noexcept {
+        for(int i=0;i<kRing;++i) {
+            if(!pending[i])continue;
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if(context->Map(ring[i].Get(),0,D3D11_MAP_READ,D3D11_MAP_FLAG_DO_NOT_WAIT,&m)!=S_OK)continue;
+            const float* f=static_cast<const float*>(m.pData);
+            if(std::isfinite(f[2]) && std::isfinite(f[3])){mul=f[2];add=f[3];known=true;}
+            context->Unmap(ring[i].Get(),0);
+            pending[i]=false;
+        }
+    }
+    void Reset() noexcept { for(auto& r:ring)r.Reset();for(bool& p:pending)p=false;known=false;mul=add=0.0f; }
+};
+FadeReader fade;
+
+enum class Source { render, core };
+// One stock particle draw: taken over (its snapshot copied into a batch, the stock draw skipped; true) or left to the
+// stock draw (false). Both the ParticleRender slot and the embedded core's own draw come here.
+bool TakeOver(const unsigned char* core,const float* world,void* native,Source source,const void* obj) noexcept {
     const bool wantProbe=optProbe.load(std::memory_order_relaxed);
     const bool wantNative=optNative.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed);
     NativeView n{};
-    const bool read=ReadNative(static_cast<const unsigned char*>(obj),n);
-    ++probe.nativeCalls;++probe.byPass[pass&7];
+    const bool read=ReadNative(core,world,n);
     ID3D11DeviceContext* context=native && Readable(native,0x10) ? At<ID3D11DeviceContext*>(native,8) : nullptr;
-    const bool here=inWorld && view==currentView;
-    // The takeover: our world's view, a plain card emitter (no stretched sparks), blend 1 / 2, its texture's chain known.
+    if(inWorld && context)fade.Copy(context);
+    // The takeover: our world's view, an unlit card emitter, blend 1 / 2, a stock atlas grid, its texture's chain known.
     const int chain=textureChain.load(std::memory_order_relaxed);
-    if(wantNative && read && here && chain && n.stretch==0 && (n.blend==1 || n.blend==2) && n.count>0 && n.frames>0) {
+    const int grid=read ? StockGrid(n.frames) : 0;
+    if(wantNative && read && inWorld && chain && n.live && n.lit==0 && (n.blend==1 || n.blend==2) && n.count>0 && grid) {
         auto* srv=static_cast<ID3D11ShaderResourceView*>(Resolve(n,chain));
         const int room=Renderer::kMaxInstances-kBudget-static_cast<int>(nativeInstances.size());
         if(srv && room>0 && static_cast<int>(nativeBatches.size())<Renderer::kMaxBatches-1) {
@@ -255,37 +318,89 @@ void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* vie
             nativeInstances.resize(start+static_cast<std::size_t>(got));
             if(got>0) {
                 NativeBatch b{};b.texture=srv;b.kind=n.blend==2 ? Kind::nativeAdditive : Kind::nativeAlpha;
-                b.frames=n.frames;b.start=static_cast<int>(start);b.count=got;
+                b.frames=grid*grid;b.grid=grid;b.start=static_cast<int>(start);b.count=got;
                 nativeBatches.push_back(std::move(b));
-                ++probe.nativeReplaced;
-                return;   // the stock draw skipped: ours draws these at this view's world end
+                ++probe.nativeReplaced;if(source==Source::core)++probe.coreReplaced;
+                return true;   // the stock draw skipped: ours draws these at this view's world end
             }
         }
         ++probe.nativeRefused;
+    } else if(wantNative && read && n.live && n.count>0) {
+        if(!inWorld)++probe.nativeOutside;
+        else if(n.lit)++probe.refusedLit;
+        else if(n.blend!=1 && n.blend!=2)++probe.refusedBlend;
+        else if(!grid)++probe.refusedGrid;
     }
-    if(!here)++probe.nativeOutside;
-    stock(obj,native,pass,view);
-    if(!context || !read || n.live==0)return;
-    // The texture chain: which candidate is what the stock draw bound.
+    if(!wantProbe || probe.nativeLogged>=32 || !read || n.live==0)return false;
+    ++probe.nativeLogged;
+    Log("GPUFX native draw %s obj=%p vt=EDF+%llX (world view %p, in world %d) blend=%d lit=%d frames=%d live=%llu snap=%llu "
+        "W.diag=%.3f %.3f %.3f T=%.1f %.1f %.1f cand=%p %p %p",source==Source::core ? "core" : "render",obj,
+        static_cast<unsigned long long>(*static_cast<const unsigned char* const*>(obj)-image),currentView,inWorld,n.blend,n.lit,n.frames,
+        static_cast<unsigned long long>(n.live),static_cast<unsigned long long>(n.count),n.world[0],n.world[5],n.world[10],n.world[12],
+        n.world[13],n.world[14],n.chain[0],n.chain[1],n.chain[2]);
+    if(n.count>0 && n.snapshot && Readable(n.snapshot,kEntry)) {
+        const float* e=reinterpret_cast<const float*>(n.snapshot);
+        Log("GPUFX native   entry0 pos=%.2f %.2f %.2f rgba=%.2f %.2f %.2f %.2f rot=%.2f size=%.3f frame=%u",e[0],e[1],e[2],e[4],e[5],e[6],e[7],
+            e[12],e[13],static_cast<unsigned>(n.snapshot[0x38]));
+    }
+    return false;
+}
+
+// After a stock draw that was not taken over: which texture chain is the SRV it bound, and (probe) its state.
+void AfterStock(const unsigned char* core,const float* world,void* native,bool logState) noexcept {
+    ID3D11DeviceContext* context=native && Readable(native,0x10) ? At<ID3D11DeviceContext*>(native,8) : nullptr;
+    if(!context)return;
+    NativeView n{};
+    if(!ReadNative(core,world,n) || n.live==0)return;
     void* bound=BoundTexture(context);
-    if(bound && !chain) {
+    if(bound && !textureChain.load(std::memory_order_relaxed)) {
         for(int c=1;c<=3;++c) if(Resolve(n,c)==bound){textureChain.store(c,std::memory_order_relaxed);Log("GPUFX native texture chain %d (%s) is the bound SRV",c,
-            c==1 ? "obj+0x240 -> +0x10" : c==2 ? "obj+0x230 -> +0x10 -> +0x10" : "obj+0x230 -> +0x10");break;}
+            c==1 ? "core+0x1D0 -> +0x10" : c==2 ? "core+0x1C0 -> +0x10 -> +0x10" : "core+0x1C0 -> +0x10");break;}
     }
-    if(wantProbe && probe.nativeLogged<24) {
-        ++probe.nativeLogged;
-        Log("GPUFX native draw obj=%p vt=EDF+%llX pass=%d view=%p (world view %p, in world %d) blend=%d stretch=%d frames=%d live=%llu snap=%llu "
-            "W.diag=%.3f %.3f %.3f T=%.1f %.1f %.1f cand=%p %p %p bound=%p",obj,
-            static_cast<unsigned long long>(*static_cast<unsigned char**>(obj)-image),pass,view,currentView,inWorld,n.blend,n.stretch,n.frames,
-            static_cast<unsigned long long>(n.live),static_cast<unsigned long long>(n.count),n.world[0],n.world[5],n.world[10],n.world[12],
-            n.world[13],n.world[14],n.chain[0],n.chain[1],n.chain[2],bound);
-        if(n.count>0 && n.snapshot && Readable(n.snapshot,kEntry)) {
-            const float* e=reinterpret_cast<const float*>(n.snapshot);
-            Log("GPUFX native   entry0 pos=%.1f %.1f %.1f rgba=%.2f %.2f %.2f %.2f rot=%.2f size=%.2f frame=%u",e[0],e[1],e[2],e[4],e[5],e[6],e[7],
-                e[12],e[13],static_cast<unsigned>(n.snapshot[0x38]));
-        }
-        LogBoundState(context);
-    }
+    if(logState)LogBoundState(context);
+}
+
+void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* view) {
+    const auto stock=reinterpret_cast<DrawFn>(image+kParticleDraw);
+    if(pass!=2 && pass!=5){stock(obj,native,pass,view);return;}
+    ++probe.nativeCalls;++probe.byPass[pass&7];
+    const auto* o=static_cast<const unsigned char*>(obj);
+    const unsigned char* core=o+kCoreInRender;
+    const float* world=reinterpret_cast<const float*>(o+kRenderWorld);
+    if(view==currentView && TakeOver(core,world,native,Source::render,obj))return;
+    stock(obj,native,pass,view);
+    const bool logState=optProbe.load(std::memory_order_relaxed) && probe.stateLogged<24;
+    if(logState)++probe.stateLogged;
+    AfterStock(core,world,native,logState);
+}
+
+void __fastcall CoreDrawHook(void* core,void* native,const float* world) {
+    ++probe.coreCalls;
+    const auto* c=static_cast<const unsigned char*>(core);
+    if(TakeOver(c,world,native,Source::core,core))return;
+    coreDrawNext(core,native,world);
+    AfterStock(c,world,native,false);
+}
+
+bool InstallCoreDraw() noexcept {
+    if(coreDrawNext)return true;
+    if(!Matches(kCoreDraw,kCoreDrawCode,sizeof(kCoreDrawCode)))return false;
+    unsigned char trampoline[sizeof(kCoreDrawCode)+14];
+    std::memcpy(trampoline,kCoreDrawCode,sizeof(kCoreDrawCode));
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+sizeof(kCoreDrawCode),jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kCoreDraw+sizeof(kCoreDrawCode));
+    std::memcpy(trampoline+sizeof(kCoreDrawCode)+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kCoreDraw,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[sizeof(kCoreDrawCode)];std::memset(patch,0x90,sizeof(patch));
+    std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&CoreDrawHook);
+    std::memcpy(patch+6,&hook,8);
+    coreDrawNext=reinterpret_cast<CoreDrawFn>(code);
+    if(edf::PatchCode(image+kCoreDraw,kCoreDrawCode,patch,sizeof(patch)))return true;
+    coreDrawNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+    return false;
 }
 
 void PublishOptions() noexcept {
@@ -377,6 +492,20 @@ void TickNative() noexcept {
     ReleaseSRWLockExclusive(&publishLock);
 }
 
+// Our smoke's exposure from the scene: the colour target's median luminance before our draw (Stats::sceneLuma) over
+// what a mid-grey (albedo 0.25) ground would show under the light block's own sun (at 0.6 of full) and ambient. The
+// stock renderer's HDR scale is not ours to know; the ratio says how bright its lit ground came out, smoothed over
+// about a second, clamped to a sane range.
+float exposure=1.0f;
+void Calibrate(const Stats& st,const ViewParams& vp) noexcept {
+    if(!(st.sceneLuma>0.0f))return;
+    auto y=[](const float c[3]){return 0.2126f*c[0]+0.7152f*c[1]+0.0722f*c[2];};
+    const float ref=0.25f*(0.6f*y(vp.sunColor)+y(vp.ambient));
+    if(!(ref>1e-4f))return;
+    const float k=std::clamp(st.sceneLuma/ref,0.35f,2.5f);
+    exposure+=(k-exposure)*0.03f;
+}
+
 void LogLight() noexcept {
     __try {
         const unsigned char* r=At<const unsigned char*>(image,kRendererPtr);
@@ -409,7 +538,8 @@ bool Install() noexcept {
                 ++others;
             }
         }
-        Log("GPUFX installed: stock particle draw slot=%d (%u other references)",ok,others);
+        const bool core=InstallCoreDraw();
+        Log("GPUFX installed: stock particle draw slot=%d (%u other references), core draw EDF+%X=%d",ok,others,kCoreDraw,core);
     } __except(EXCEPTION_EXECUTE_HANDLER) {Log("GPUFX profile fault; stock particles untouched");ok=false;}
     installed.store(true,std::memory_order_release);
     return ok;
@@ -437,7 +567,7 @@ void Reset() noexcept {
 
 void WorldBegin(ID3D11DeviceContext*,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire))return;
-    currentView=view;inWorld=MainView(view);observed=false;observedDepth.Reset();observedFormat=0;
+    currentView=view;inWorld=MainView(view);observed=false;observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
     nativeInstances.clear();nativeBatches.clear();
 }
 
@@ -480,6 +610,9 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         ViewParams vp{};
         ReadMatrices(view,vp);
         ReadLight(vp);
+        fade.Read(context);
+        vp.fadeMul=fade.mul;vp.fadeAdd=fade.add;
+        vp.exposure=exposure;
         batches.clear();
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
@@ -487,14 +620,14 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         }
         for(const auto& nb:nativeBatches) {
             Batch b{};b.texture=nb.texture.Get();b.kind=nb.kind;b.frames=nb.frames;
-            int g=1;while(g*g<nb.frames)++g;
-            b.gridX=g;b.gridY=(nb.frames+g-1)/g;b.cornerScale=0.70710678f;b.sorted=false;
+            b.gridX=b.gridY=nb.grid;b.frames=nb.frames;b.cornerScale=0.70710678f;b.uInset=0.0005f;b.sorted=false;
             b.instances=nativeInstances.data()+nb.start;b.count=nb.count;
             batches.push_back(b);
         }
         Stats st{};
         bool drew=false;
         if(!batches.empty() && depth)drew=renderer.Draw(context,depth.Get(),format,vp,batches.data(),static_cast<int>(batches.size()),&st);
+        if(drew)Calibrate(st,vp);
         nativeInstances.clear();nativeBatches.clear();
         const double ms=NowMs()-t0;
         probe.cpuMs+=ms;++probe.cpuSamples;
@@ -520,9 +653,13 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             if(c4[3]!=0.0f)Log("GPUFX   test air card -> view z=%.2f, pixel %.0f,%.0f (ndc %.3f %.3f %.4f)",v4[2],
                 st.viewport[0]+(c4[0]/c4[3]*0.5f+0.5f)*st.viewport[2],st.viewport[1]+(0.5f-c4[1]/c4[3]*0.5f)*st.viewport[3],c4[0]/c4[3],c4[1]/c4[3],c4[2]/c4[3]);
         }
-        Log("GPUFX   own live=%d/%d dropped=%u; stock draws=%u (pass2 %u, pass5 %u) taken over=%u refused=%u outside the world view=%u chain=%d",
-            static_cast<int>(renderOwn.size()),kBudget,poolDropped.load(std::memory_order_relaxed),probe.nativeCalls,probe.byPass[2],probe.byPass[5],probe.nativeReplaced,
-            probe.nativeRefused,probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
+        Log("GPUFX   own live=%d/%d dropped=%u; stock draws=%u (pass2 %u, pass5 %u) core draws=%u taken over=%u (cores %u) refused=%u "
+            "(lit %u blend %u grid %u) outside the world view=%u chain=%d",
+            static_cast<int>(renderOwn.size()),kBudget,poolDropped.load(std::memory_order_relaxed),probe.nativeCalls,probe.byPass[2],probe.byPass[5],
+            probe.coreCalls,probe.nativeReplaced,probe.coreReplaced,probe.nativeRefused,probe.refusedLit,probe.refusedBlend,probe.refusedGrid,
+            probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
+        Log("GPUFX   scene luma median %.3f max %.3f -> exposure %.3f; stock fade (b0 %u bytes, %s) mul %.6f add %.4f",st.sceneLuma,st.sceneLumaMax,
+            exposure,fade.bytes,fade.known ? "read" : "not yet",fade.mul,fade.add);
         probe.cpuMs=0.0;probe.cpuSamples=0;
         for(int a=0;a<2;++a){probe.jitterMin[a]=1e9f;probe.jitterMax[a]=-1e9f;}
     } catch(...) { nativeInstances.clear();nativeBatches.clear(); }

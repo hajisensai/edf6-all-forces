@@ -8,6 +8,7 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -26,9 +27,10 @@ cbuffer Frame : register(b0) {
     row_major float4x4 View;
     row_major float4x4 Proj;
     float4 SunView;    // xyz: towards the sun, view space
-    float4 SunColor;   // rgb; w: exposure
+    float4 SunColor;   // rgb; w: exposure (the scene's measured light scale)
     float4 Ambient;    // rgb; w: near-camera fade distance
     float4 Screen;     // width, height, 1/width, 1/height
+    float4 Fade;       // the stock particle distance fade: x mul, y add (alpha *= sat(1 - (distance * x + y)))
 };
 cbuffer BatchConstants : register(b1) {
     uint Base;
@@ -37,7 +39,8 @@ cbuffer BatchConstants : register(b1) {
     uint Frames;
     uint Kind;
     float CornerScale;
-    float2 Unused;
+    float UInset;
+    float Unused;
 };
 struct Particle {
     float3 pos;
@@ -59,11 +62,15 @@ struct V {
     float4 uv : TEXCOORD0;
     float3 misc : TEXCOORD1;    // frame blend, distance from the camera plane, soft range
     float3 basis : TEXCOORD2;   // cos and sin of the rotation, emissive
+    float4 vpos : TEXCOORD3;    // the corner's view-space position; w: the centre's distance from the camera
 };
 
+// A tile's uv: row-major from the top left, u trimmed by UInset on both sides (the stock VS's frc(u) + 0.0005).
 float2 FrameUV(uint f, float2 uv) {
-    uint x = f % GridX, y = f / GridX;
-    return (float2(x, y) + uv) / float2(GridX, GridY);
+    float2 cell = float2(f % GridX, f / GridX);
+    float2 lo = cell / float2(GridX, GridY) + float2(UInset, 0.0);
+    float2 hi = (cell + 1.0) / float2(GridX, GridY) - float2(UInset, 0.0);
+    return lerp(lo, hi, uv);
 }
 
 V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
@@ -73,6 +80,7 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     sincos(p.rot, s, co);
     float2 r = float2(c.x * co - c.y * s, c.x * s + c.y * co) * (p.size * CornerScale);
     float4 vp = mul(float4(p.pos, 1.0), View);
+    float centre = length(vp.xyz);
     vp.xy += r;
     V o;
     o.pos = mul(vp, Proj);
@@ -85,6 +93,7 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     o.uv = float4(FrameUV(f0, uv), FrameUV(f1, uv));
     o.misc = float3(fr - (float)f0, abs(vp.z), p.soft);
     o.basis = float3(co, s, p.emissive);
+    o.vpos = float4(vp.xyz, centre);
     return o;
 }
 
@@ -103,20 +112,27 @@ float4 Ps(V i) : SV_Target0 {
     if (Kind == 0u) {
         fade *= saturate((i.misc.y - 0.3) / max(Ambient.w, 0.001));   // ours only: no card cuts the near plane
         float a = t.a * i.color.a * fade;
+        float thick = t.b;
         float2 n2 = t.rg * 2.0 - 1.0;
         float2 nr = float2(n2.x * i.basis.x - n2.y * i.basis.y, n2.x * i.basis.y + n2.y * i.basis.x);
         float3 n = float3(nr, sqrt(saturate(1.0 - dot(nr, nr))));
-        float wrap = saturate((dot(n, SunView.xyz) + 0.5) / 1.5);
-        // Thin edges pass light through (forward scattering): less shadowed where the puff is thin.
-        float3 light = Ambient.rgb + SunColor.rgb * lerp(wrap, 1.0, (1.0 - t.b) * 0.35);
+        float wrap = saturate((dot(n, SunView.xyz) + 0.6) / 1.6);
+        // Absorption: sunlight reaching a texel crosses the puff's own thickness on the side turned away from the sun
+        // (a dark core and underside), the ambient sky less so.
+        float shadow = exp(-thick * (1.0 - wrap) * 2.8);
+        // Edge transmission: thin edges seen towards the sun glow (Henyey-Greenstein forward scattering, g = 0.55).
+        float cosT = dot(normalize(i.vpos.xyz), SunView.xyz);
+        float hg = 0.6975 / pow(max(1.3025 - 1.1 * cosT, 1e-3), 1.5);
+        float trans = hg * (1.0 - thick) * 0.22;
+        float3 light = Ambient.rgb * (1.0 - 0.45 * thick) + SunColor.rgb * (wrap * shadow + trans);
         float3 rgb = i.color.rgb * light * SunColor.w;
         return float4(rgb * a, a * (1.0 - i.basis.z));
     }
-    if (Kind == 1u) {
-        float a = t.a * i.color.a * fade;
-        return float4(t.rgb * i.color.rgb * a, a);
-    }
-    return float4(t.rgb * i.color.rgb * (t.a * i.color.a * fade), 0.0);
+    // The stock forward PS (0x19670A0): rgb = texel * colour (no saturate: HDR), a = sat(texel.a * colour.a) times
+    // sat(the VS's distance fade); ours adds the soft depth fade.
+    float a = saturate(t.a * i.color.a) * saturate(1.0 - (i.vpos.w * Fade.x + Fade.y)) * fade;
+    if (Kind == 1u) return float4(t.rgb * i.color.rgb * a, a);
+    return float4(t.rgb * i.color.rgb * fade, a);
 }
 )hlsl";
 
@@ -136,11 +152,11 @@ bool DepthFormats(DXGI_FORMAT view,DXGI_FORMAT& resource,DXGI_FORMAT& shader) no
 
 struct FrameConstants {
     float view[16],proj[16];
-    float sun[4],sunColor[4],ambient[4],screen[4];
+    float sun[4],sunColor[4],ambient[4],screen[4],fade[4];
 };
 struct BatchConstants {
     std::uint32_t base,gridX,gridY,frames,kind;
-    float cornerScale,unused[2];
+    float cornerScale,uInset,unused;
 };
 static_assert(sizeof(FrameConstants)%16==0 && sizeof(BatchConstants)%16==0,"constant buffer sizes");
 
@@ -166,7 +182,7 @@ struct Renderer::Impl final {
     ComPtr<ID3DDeviceContextState> isolated;
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
-    ComPtr<ID3D11BlendState> blend;
+    ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd;
     ComPtr<ID3D11DepthStencilState> noDepth;
     ComPtr<ID3D11RasterizerState> raster;
     ComPtr<ID3D11SamplerState> sampler;
@@ -185,6 +201,14 @@ struct Renderer::Impl final {
     std::array<Timing,kQueries> timing;
     int timingNext=0;
     float gpuMs=-1.0f;
+    // The scene's luminance: five 16x16 blocks of the colour target copied before our draw into a ring of staging
+    // textures, mapped without waiting a few frames later.
+    static constexpr int kLumaRing=3,kLumaBlock=16,kLumaBlocks=5;
+    struct LumaRead { ComPtr<ID3D11Texture2D> tex; bool pending=false; };
+    std::array<LumaRead,kLumaRing> luma;
+    int lumaNext=0;
+    DXGI_FORMAT lumaFormat=DXGI_FORMAT_UNKNOWN;
+    float sceneLuma=-1.0f,sceneLumaMax=-1.0f;
     std::vector<std::uint32_t> order;
     std::vector<float> keys;
     bool failed=false;
@@ -224,6 +248,12 @@ struct Renderer::Impl final {
         rt.BlendEnable=TRUE;rt.SrcBlend=D3D11_BLEND_ONE;rt.DestBlend=D3D11_BLEND_INV_SRC_ALPHA;rt.BlendOp=D3D11_BLEND_OP_ADD;
         rt.SrcBlendAlpha=D3D11_BLEND_ZERO;rt.DestBlendAlpha=D3D11_BLEND_ONE;rt.BlendOpAlpha=D3D11_BLEND_OP_ADD;
         rt.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_RED|D3D11_COLOR_WRITE_ENABLE_GREEN|D3D11_COLOR_WRITE_ENABLE_BLUE;
+        // The stock blends as their states were met (GPUFX native blend log): 1 = SRC_ALPHA/INV_SRC_ALPHA, alpha ONE/ZERO
+        // (our premultiplied output gives the same colour); 2 = ONE/ONE on colour and alpha. All four channels written.
+        D3D11_BLEND_DESC ba=b;auto& ra=ba.RenderTarget[0];
+        ra.SrcBlendAlpha=D3D11_BLEND_ONE;ra.DestBlendAlpha=D3D11_BLEND_ZERO;ra.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+        D3D11_BLEND_DESC bd=ba;auto& rd=bd.RenderTarget[0];
+        rd.SrcBlend=rd.DestBlend=rd.SrcBlendAlpha=rd.DestBlendAlpha=D3D11_BLEND_ONE;
         D3D11_DEPTH_STENCIL_DESC ds{};ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         ds.DepthFunc=D3D11_COMPARISON_ALWAYS;
         D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.CullMode=D3D11_CULL_NONE;r.DepthClipEnable=TRUE;
@@ -236,7 +266,8 @@ struct Renderer::Impl final {
         D3D11_BUFFER_DESC fb{};fb.ByteWidth=sizeof(FrameConstants);fb.Usage=D3D11_USAGE_DYNAMIC;
         fb.BindFlags=D3D11_BIND_CONSTANT_BUFFER;fb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         D3D11_BUFFER_DESC bb=fb;bb.ByteWidth=sizeof(BatchConstants);
-        if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
+        if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateBlendState(&ba,&blendStockAlpha)) ||
+           FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
            FAILED(device->CreateRasterizerState(&r,&raster)) || FAILED(device->CreateSamplerState(&s,&sampler)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
            FAILED(device->CreateBuffer(&bb,nullptr,&batchCb)))return false;
@@ -280,6 +311,61 @@ struct Renderer::Impl final {
             t.pending=false;
             if(!dj.Disjoint && dj.Frequency && b>=a)gpuMs=static_cast<float>(static_cast<double>(b-a)*1000.0/static_cast<double>(dj.Frequency));
         }
+    }
+
+    static float Half(std::uint16_t h) noexcept {
+        const std::uint32_t sign=(h&0x8000u)<<16,exp=(h>>10)&0x1Fu,man=h&0x3FFu;
+        std::uint32_t bits;
+        if(exp==0)return (sign ? -1.0f : 1.0f)*static_cast<float>(man)*(1.0f/16777216.0f);
+        if(exp==31)bits=sign|0x7F800000u|(man<<13);
+        else bits=sign|((exp+112u)<<23)|(man<<13);
+        float f;std::memcpy(&f,&bits,sizeof(f));return f;
+    }
+    // Reads back finished luminance copies (never waits), then copies this frame's blocks if a ring slot is free.
+    void SampleLuma(ID3D11DeviceContext* ctx,ID3D11Texture2D* color,const D3D11_TEXTURE2D_DESC& cd,const D3D11_VIEWPORT& vp) noexcept {
+        if(cd.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT && cd.Format!=DXGI_FORMAT_R16G16B16A16_TYPELESS)return;
+        if(lumaFormat!=cd.Format){for(auto& l:luma){l.tex.Reset();l.pending=false;}lumaFormat=cd.Format;}
+        for(auto& l:luma) {
+            if(!l.pending)continue;
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if(ctx->Map(l.tex.Get(),0,D3D11_MAP_READ,D3D11_MAP_FLAG_DO_NOT_WAIT,&m)!=S_OK)continue;
+            float block[kLumaBlocks];
+            for(int k=0;k<kLumaBlocks;++k) {
+                double sum=0.0;
+                for(int y=0;y<kLumaBlock;++y) {
+                    const auto* row=reinterpret_cast<const std::uint16_t*>(static_cast<const unsigned char*>(m.pData)+static_cast<std::size_t>(y)*m.RowPitch)+
+                        static_cast<std::size_t>(k)*kLumaBlock*4;
+                    for(int x=0;x<kLumaBlock;++x) {
+                        const float r=Half(row[x*4]),g=Half(row[x*4+1]),b=Half(row[x*4+2]);
+                        const float lum=0.2126f*r+0.7152f*g+0.0722f*b;
+                        sum+=std::isfinite(lum) && lum>0.0f ? lum : 0.0;
+                    }
+                }
+                block[k]=static_cast<float>(sum/(kLumaBlock*kLumaBlock));
+            }
+            ctx->Unmap(l.tex.Get(),0);
+            l.pending=false;
+            std::sort(block,block+kLumaBlocks);
+            sceneLuma=block[kLumaBlocks/2];sceneLumaMax=block[kLumaBlocks-1];
+        }
+        LumaRead& l=luma[static_cast<std::size_t>(lumaNext)];
+        if(l.pending)return;
+        if(!l.tex) {
+            D3D11_TEXTURE2D_DESC d{};d.Width=kLumaBlock*kLumaBlocks;d.Height=kLumaBlock;d.MipLevels=d.ArraySize=1;d.Format=cd.Format;
+            d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_STAGING;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+            if(FAILED(device->CreateTexture2D(&d,nullptr,&l.tex)))return;
+        }
+        // Centre, left, right, above and below the centre of the view's rectangle (sky and ground alike: the median).
+        const float fx[kLumaBlocks]={0.5f,0.25f,0.75f,0.5f,0.5f},fy[kLumaBlocks]={0.5f,0.55f,0.55f,0.3f,0.75f};
+        for(int k=0;k<kLumaBlocks;++k) {
+            const float cx=vp.TopLeftX+vp.Width*fx[k],cy=vp.TopLeftY+vp.Height*fy[k];
+            const UINT x0=static_cast<UINT>((std::max)(0.0f,(std::min)(cx-kLumaBlock*0.5f,static_cast<float>(cd.Width-kLumaBlock))));
+            const UINT y0=static_cast<UINT>((std::max)(0.0f,(std::min)(cy-kLumaBlock*0.5f,static_cast<float>(cd.Height-kLumaBlock))));
+            const D3D11_BOX box{x0,y0,0,x0+kLumaBlock,y0+kLumaBlock,1};
+            ctx->CopySubresourceRegion(l.tex.Get(),0,static_cast<UINT>(k*kLumaBlock),0,0,color,0,&box);
+        }
+        l.pending=true;
+        lumaNext=(lumaNext+1)%kLumaRing;
     }
 
     // The flipbook texture with its mips (the tiles keep 2 px of clear border: mips 0..4 never bleed between frames).
@@ -365,6 +451,8 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     st.viewport[0]=vp.TopLeftX;st.viewport[1]=vp.TopLeftY;st.viewport[2]=vp.Width;st.viewport[3]=vp.Height;
     s.ResolveTiming(context);
     st.gpuMs=s.gpuMs;
+    if(cd.Width>=Impl::kLumaBlock && cd.Height>=Impl::kLumaBlock)s.SampleLuma(context,color.Get(),cd,vp);
+    st.sceneLuma=s.sceneLuma;st.sceneLumaMax=s.sceneLumaMax;
 
     // Upload every batch, each sorted back to front under this view.
     st.lookNegZ=view.proj[11]<0.0f;
@@ -405,6 +493,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     f.sun[0]=vx;f.sun[1]=vy;f.sun[2]=vz;
     std::memcpy(f.sunColor,view.sunColor,12);f.sunColor[3]=view.exposure;
     std::memcpy(f.ambient,view.ambient,12);f.ambient[3]=1.5f;
+    f.fade[0]=view.fadeMul;f.fade[1]=view.fadeAdd;
     f.screen[0]=static_cast<float>(cd.Width);f.screen[1]=static_cast<float>(cd.Height);
     f.screen[2]=1.0f/f.screen[0];f.screen[3]=1.0f/f.screen[1];
     if(FAILED(context->Map(s.frameCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))return refuse("constant map failed");
@@ -450,11 +539,14 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             bc.gridX=static_cast<std::uint32_t>(batch.gridX>0 ? batch.gridX : 1);
             bc.gridY=static_cast<std::uint32_t>(batch.gridY>0 ? batch.gridY : 1);
             bc.frames=static_cast<std::uint32_t>(batch.frames>0 ? batch.frames : 1);
-            bc.kind=static_cast<std::uint32_t>(batch.kind);bc.cornerScale=batch.cornerScale;
+            bc.kind=static_cast<std::uint32_t>(batch.kind);bc.cornerScale=batch.cornerScale;bc.uInset=batch.uInset;
             if(FAILED(context->Map(s.batchCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))continue;
             std::memcpy(map.pData,&bc,sizeof(bc));
             context->Unmap(s.batchCb.Get(),0);
             context->PSSetShaderResources(1,1,&tex);
+            ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha ? s.blendStockAlpha.Get() :
+                batch.kind==Kind::nativeAdditive ? s.blendStockAdd.Get() : s.blend.Get();
+            context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
             context->DrawInstanced(4,static_cast<UINT>(ranges[b].count),0,0);
             st.drawn+=ranges[b].count;++st.batches;
         }

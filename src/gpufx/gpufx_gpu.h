@@ -13,12 +13,14 @@ struct ID3D11Texture2D;
 
 namespace crew::gpufx {
 
-// How a batch's texels and colours become light. All three share one premultiplied blend (ONE, INV_SRC_ALPHA, the
-// target's alpha untouched), so lit smoke and glow sort and draw together.
+// How a batch's texels and colours become light. Ours (smoke) is premultiplied (ONE, INV_SRC_ALPHA, the target's alpha
+// untouched), so lit smoke and glow sort and draw together. The stock kinds keep the stock blend's effect exactly,
+// the target's alpha included (docs/gpufx-re.md, forward PS 0x19670A0): blend 1 SRC_ALPHA/INV_SRC_ALPHA with alpha
+// ONE/ZERO (drawn premultiplied, the same result), blend 2 ONE/ONE on colour and alpha.
 enum class Kind : std::uint32_t {
     smoke=0,          // the procedural flipbook: rg normal, b thickness, a density; lit by sun + ambient
-    nativeAlpha=1,    // a stock ParticleRender texture with blend 1: colour = texel * particle colour, alpha blended
-    nativeAdditive=2  // a stock texture with blend 2 (ONE/ONE): texel * particle colour added
+    nativeAlpha=1,    // a stock texture with blend 1: rgb = texel * particle colour, a = sat(texel.a * colour.a) * fade
+    nativeAdditive=2  // a stock texture with blend 2: the same rgb and a, added
 };
 
 struct Batch {
@@ -28,6 +30,7 @@ struct Batch {
     // Corner distance multiplier: 1 = the quad's half width is the instance size (ours); the stock VS places each
     // corner at `size` from the centre (half width size/sqrt 2): 0.7071.
     float cornerScale=1.0f;
+    float uInset=0.0f;  // the stock atlas trims 0.0005 off each side of a tile's u range (its VS adds it to frc(u))
     bool sorted=true;   // back to front by this view's depth before the upload
     const Instance* instances=nullptr;
     int count=0;
@@ -39,7 +42,9 @@ struct ViewParams {
     float sunWorld[3]{0.35f,0.8f,0.45f};   // towards the sun (normalised by the renderer)
     float sunColor[3]{1.6f,1.5f,1.35f};
     float ambient[3]{0.55f,0.6f,0.7f};
-    float exposure=1.0f;   // multiplies lit smoke (the HDR target's scale; stock smoke is drawn near 2,2,2)
+    float exposure=1.0f;   // multiplies lit smoke: the scene's measured light scale (Stats::sceneLuma, gpufx.cpp)
+    // The stock particle VS's distance fade (xgl_system cb0[35].z/.w): alpha *= sat(1 - (distance * mul + add)).
+    float fadeMul=0.0f,fadeAdd=0.0f;
 };
 
 struct Stats {
@@ -48,6 +53,9 @@ struct Stats {
     float viewport[4]{};   // the bound viewport (x, y, width, height): split screen draws into its own rectangle
     int drawn=0,batches=0;
     float gpuMs=-1.0f;     // the last resolved GPU time of a Draw (timestamp queries, a few frames late; -1: none yet)
+    // The scene's luminance before our draw (the median of five 16x16 blocks of the colour target, read back a few
+    // frames late without a stall; -1: none yet) and the brightest block's.
+    float sceneLuma=-1.0f,sceneLumaMax=-1.0f;
     bool reversed=false,lookNegZ=true;
     const char* refused=nullptr;   // why nothing was drawn (null when drawn)
 };

@@ -175,8 +175,26 @@ static void Determinism() {
     CHECK(n1==n2 && std::memcmp(a,b,sizeof(Instance)*static_cast<std::size_t>(n1))==0);
 }
 
+// The stock card: our corners land where the stock VS puts the same uv, for any turn; the stock grid table.
+static void StockCard() {
+    const float phi[4]={0.0f,1.5707963f,4.712389f,3.1415927f};          // stock corner k: uv (0,0) (1,0) (0,1) (1,1)
+    const float cx[4]={-1.0f,1.0f,-1.0f,1.0f},cy[4]={1.0f,1.0f,-1.0f,-1.0f};   // ours, the same uv order
+    for(float rot=-3.0f;rot<=3.0f;rot+=0.37f) {
+        const float ours=StockRotToOurs(rot),s=std::sin(ours),c=std::cos(ours);
+        for(int k=0;k<4;++k) {
+            const float sx=std::sin(rot+phi[k]),sy=std::cos(rot+phi[k]);
+            const float ox=(cx[k]*c-cy[k]*s)*0.70710678f,oy=(cx[k]*s+cy[k]*c)*0.70710678f;
+            CHECK(Near(sx,ox,1e-4f) && Near(sy,oy,1e-4f));
+        }
+    }
+    // Upright at stock rot -pi/4: uv (0,0) top left.
+    CHECK(Near(StockRotToOurs(-0.78539816f),0.0f));
+    CHECK(StockGrid(1)==1 && StockGrid(2)==1 && StockGrid(4)==2 && StockGrid(9)==3 && StockGrid(16)==4);
+    CHECK(StockGrid(0)==0 && StockGrid(3)==0 && StockGrid(8)==0 && StockGrid(25)==0);
+}
+
 int main() {
-    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();
+    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();
     if(failures){std::printf("gpufx_sim: %d failure(s)\n",failures);return 1;}
     std::printf("gpufx_sim: ok\n");
     return 0;
