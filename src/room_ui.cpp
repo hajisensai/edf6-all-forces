@@ -40,6 +40,7 @@
 #include "support_call.h"
 #include "support_config.h"
 #include <atomic>
+#include <climits>
 #include <cstring>
 #include <cwchar>
 #include <iterator>
@@ -67,7 +68,9 @@ constexpr std::size_t kTextFont=0x228;      // HUiTextField: SetText returns at 
 constexpr std::size_t kFontColour=0x2B0;    // HUiTextField: font colour RGBA float4 (0x8BC68C; drawn by 0x7F890C)
 constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8;
 // The stock HQ appends menu buttons through this exact AddByName path; the new definition is not in layout_tree.
-constexpr unsigned kCreateButton=0x8456D0,kScreenWeak=0x811FC0,kMakeClick=0x8FB930,kAddAction=0x7EAA40,kLockWeak=0x83E4F0,kSetButtonText=0x7F8BB0;
+constexpr unsigned kCreateButton=0x8456D0,kScreenWeak=0x811FC0,kMakeClick=0x8FB930,kAddAction=0x7EAA40,kSetButtonText=0x7F8BB0;
+constexpr unsigned kRoomActionTable=0x180AD10,kHqActionTable=0x1804E88;
+constexpr unsigned kHqActionDestroy=0x89F3F0,kHqActionInvoke=0x89F690;
 constexpr unsigned kEnableComponent=0x7EE280,kHasFocus=0x7EBDB0,kFocusComponent=0x7EB360;
 constexpr std::size_t kComponentEnabled=0x70; // native nav's current state; +71 is the public setter's pending state
 constexpr std::size_t kButtonLabel=0x220;   // HUiButton's native weak_ptr<ui::TextField> (0x83B96A / 0x83B97C)
@@ -94,7 +97,6 @@ const unsigned char kCreateButtonSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,
 const unsigned char kScreenWeakSig[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x4C,0x8B,0x41,0x10,0x48,0x8B};
 const unsigned char kMakeClickSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x48,0x89,0x54,0x24,0x10,0x56};
 const unsigned char kAddActionSig[]={0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05,0x05};
-const unsigned char kLockWeakSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x48};
 const unsigned char kSetButtonTextSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x57,0x41,0x54,0x41,0x56};
 const unsigned char kEnableComponentSig[]={0x88,0x51,0x71,0xC3};
 const unsigned char kHasFocusSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8B,0x89,0x88,0x00,0x00,0x00};
@@ -103,14 +105,18 @@ const unsigned char kFocusEnabledSig[]={0x41,0x80,0x79,0x70,0x00}; // 0x7F02D9: 
 const unsigned char kButtonLabelControlSig[]={0x4C,0x8B,0x81,0x28,0x02,0x00,0x00};
 const unsigned char kButtonLabelObjectSig[]={0x48,0x8B,0xB9,0x20,0x02,0x00,0x00};
 const unsigned char kClickInvokeSig[]={0x48,0x63,0x4D,0x20,0x49,0x8B,0xD6,0x48,0x03,0xCE,0xFF,0x55,0x18};
+const unsigned char kHqActionDestroySig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x8B,0xFA,0x48,0x8B,0x49,0x10};
+const unsigned char kHqActionInvokeSig[]={0x48,0x89,0x6C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x30};
 const Sig kNativeMenuSigs[]={{kCreateButton,kCreateButtonSig,sizeof(kCreateButtonSig)},
     {kScreenWeak,kScreenWeakSig,sizeof(kScreenWeakSig)},{kMakeClick,kMakeClickSig,sizeof(kMakeClickSig)},
-    {kAddAction,kAddActionSig,sizeof(kAddActionSig)},{kLockWeak,kLockWeakSig,sizeof(kLockWeakSig)},
+    {kAddAction,kAddActionSig,sizeof(kAddActionSig)},
     {kSetButtonText,kSetButtonTextSig,sizeof(kSetButtonTextSig)},
     {kEnableComponent,kEnableComponentSig,sizeof(kEnableComponentSig)},{kHasFocus,kHasFocusSig,sizeof(kHasFocusSig)},
     {kFocusComponent,kFocusComponentSig,sizeof(kFocusComponentSig)},{0x7F02D9,kFocusEnabledSig,sizeof(kFocusEnabledSig)},
     {0x83B96A,kButtonLabelControlSig,sizeof(kButtonLabelControlSig)},
-    {0x83B97C,kButtonLabelObjectSig,sizeof(kButtonLabelObjectSig)},{0x8F8AC9,kClickInvokeSig,sizeof(kClickInvokeSig)}};
+    {0x83B97C,kButtonLabelObjectSig,sizeof(kButtonLabelObjectSig)},{0x8F8AC9,kClickInvokeSig,sizeof(kClickInvokeSig)},
+    {0x89F719,kClickInvokeSig,sizeof(kClickInvokeSig)},{kHqActionDestroy,kHqActionDestroySig,sizeof(kHqActionDestroySig)},
+    {kHqActionInvoke,kHqActionInvokeSig,sizeof(kHqActionInvokeSig)}};
 // The screens' own OnUpdates (whatever their slots hold now, these are what the game put there).
 const unsigned char kRoomUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 // push rbx; sub rsp,30h; mov rbx,rcx; call 0x84B490 (HUiLayout's update: focus, cancel, buttons)
@@ -189,6 +195,19 @@ void Release(Shared& p) noexcept {
         if(InterlockedDecrement(&c->weaks)==0)reinterpret_cast<void(__fastcall*)(ControlBlock*)>(c->vtable[1])(c);   // _Delete_this
     }
 }
+Shared LockButtonLabel(const void* button) noexcept {
+    const auto& weak=*reinterpret_cast<const Shared*>(static_cast<const unsigned char*>(button)+kButtonLabel);
+    if(!weak.object || !weak.control)return {};
+    // The button already owns a typed weak_ptr<ui::TextField>. The layout-cast helper rejects this base type.
+    volatile LONG* const uses=&weak.control->uses;
+    LONG count=InterlockedCompareExchange(uses,0,0);
+    while(count>0 && count<LONG_MAX) {
+        const LONG observed=InterlockedCompareExchange(uses,count+1,count);
+        if(observed==count)return weak;
+        count=observed;
+    }
+    return {};
+}
 // std::wstring: at most 7 characters in place, else a pointer (capacity > 7: the callees only read it).
 struct WideString { union { wchar_t text[8]; const wchar_t* ptr; }; std::uint64_t size,capacity; };
 WideString Wide(const wchar_t* s) noexcept {
@@ -213,7 +232,6 @@ struct MemberClick { NativeClickFn call; std::int32_t adjust; std::uint32_t padd
 static_assert(sizeof(MemberClick)==16,"the native callback copies one MSVC member function pointer");
 using MakeClickFn=Shared*(__fastcall*)(Shared*,Shared*,const MemberClick*);
 using AddActionFn=void(__fastcall*)(void*,const wchar_t*,const Shared*);
-using LockWeakFn=Shared*(__fastcall*)(Shared*,const Shared*);
 using SetButtonTextFn=void(__fastcall*)(void*,const wchar_t*,const void*);
 using EnableComponentFn=void(__fastcall*)(void*,bool);
 using HasFocusFn=bool(__fastcall*)(void*);
@@ -247,6 +265,7 @@ struct State {
     rm::Menu menu{};
     rm::Keys held{};
     NativeEntry nativeEntry{};
+    Shared nativeButton{};
     const wchar_t* nativeLabel=nullptr;
     bool nativeFocused=false;
     Gate gate{};
@@ -415,6 +434,7 @@ void ForgetMenu() noexcept {
 }
 void Forget() noexcept {
     ForgetMenu();
+    Release(st.nativeButton);
     st.self=nullptr;st.nativeEntry=NativeEntry{};st.nativeLabel=nullptr;st.nativeFocused=false;
     followed.store(nullptr);
     followedGone.store(false);
@@ -438,6 +458,7 @@ void NoteGone(unsigned char* self) noexcept {
     if(!self || followed.load()!=self)return;
     followedGone.store(true);
     if(GetCurrentThreadId()!=uiThread.load())return;
+    Release(st.nativeButton);
     if(st.dialog.control)Log("ROOMUI screen %p ended with the menu's dialog open: closed with it",self);
     nativedialog::CloseDialog(st.dialog);
     st.hasPick=false;
@@ -490,7 +511,14 @@ bool BindNativeEntryAction(unsigned char* self,void* button,const wchar_t* event
     if(!weak.control)return false;
     const MemberClick member{callback,0,0};
     reinterpret_cast<MakeClickFn>(image+kMakeClick)(&action,&weak,&member); // consumes weak, owns native weak lifetime
-    const bool bound=action.object && action.control;
+    bool bound=action.object && action.control;
+    if(bound && !st.room) {
+        // The native specializations share the weak reference and member pointer layout.
+        // Install the HQ dispatcher on this action before registration so it can weak-lock HUiHQMain.
+        auto& table=*static_cast<const void**>(action.object);
+        bound=table==image+kRoomActionTable;
+        if(bound)table=image+kHqActionTable;
+    }
     if(bound)reinterpret_cast<AddActionFn>(image+kAddAction)(button,event,&action); // copies, does not consume
     Release(action);
     return bound;
@@ -537,30 +565,28 @@ void EnsureNativeEntry(unsigned char* self) noexcept {
     if(st.nativeEntry.ready) {
         BindNativeEntryAction(self,button.object,L"focus",&NativeEntryFocused);
         BindNativeEntryAction(self,button.object,L"kill_focus",&NativeEntryUnfocused);
-    }
-    Release(button);
+        st.nativeButton=button;
+    } else Release(button);
     Log("ROOMUI native %s menu entry=%d (stock Button Click/focus, native weak-screen lifetime)",
         st.room ? "room" : "HQ",st.nativeEntry.ready);
 }
 void NativeEntryDisplay(unsigned char* self,bool shown) noexcept {
     if(!st.nativeEntry.ready)return;
-    Shared button=Find(self,kNativeEntryName);
+    const Shared& button=st.nativeButton;
     if(button.object && button.control) {
         const wchar_t* label=Title(false);
         if(st.nativeLabel!=label) {
-            Shared text{};
-            reinterpret_cast<LockWeakFn>(image+kLockWeak)(&text,
-                reinterpret_cast<const Shared*>(static_cast<unsigned char*>(button.object)+kButtonLabel));
+            Shared text=LockButtonLabel(button.object);
             if(text.object) {
                 // Button owns ui::TextField, not HUiTextField: its native SetText accepts a nullable font override.
                 reinterpret_cast<SetButtonTextFn>(image+kSetButtonText)(text.object,label,nullptr);
+                if(Cfg().debug && !st.nativeLabel)Log("ROOMUI native %s button label initialized",st.room ? "room" : "HQ");
                 st.nativeLabel=label;
             }
             Release(text);
         }
         NativeEntryVisible(self,button.object,shown && st.nativeLabel!=nullptr);
     }
-    Release(button);
 }
 // A TextField's text, font colour and shown flag (the canonical call: index by name, then the TextField at it, 0x886800).
 // No text: the empty text (what SetText gives a null one: 0x86369F), as the layout file has it.
@@ -740,8 +766,9 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         } else Log("ROOMUI the 对战 pages asked but the game's dialog did not check out (room=%d): not opened",st.room);
     }
     const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down)) || st.armoryTake;
-    NativeEntryInput(st.nativeEntry,hasInput && !st.menu.open && !armoryui::IsOpen() && !st.gate.latched && !st.armoryTake && Foreground());
-    NativeEntryDisplay(self,st.nativeEntry.enabled);
+    const bool entryShown=!st.menu.open && !armoryui::IsOpen() && !st.armoryTake;
+    NativeEntryInput(st.nativeEntry,entryShown && hasInput && !st.gate.latched && Foreground());
+    NativeEntryDisplay(self,entryShown);
     std::uint64_t result;
     if(take && ctx) {
         alignas(16) unsigned char copy[kCtxSize];
@@ -859,6 +886,10 @@ bool InstallRoomUi() noexcept {
         return hq;
     }
     nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
+    if(nativeEntryOk) {
+        const auto* const table=reinterpret_cast<const void* const*>(image+kHqActionTable);
+        nativeEntryOk=table[0]==image+kHqActionDestroy && table[1]==image+kHqActionInvoke;
+    }
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     previewOk=roompreview::InstallPreviewHooks();
     Log("HOOK roomui preview=%d (0: 整备's viewport stays an opaque box)",previewOk);

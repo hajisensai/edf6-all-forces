@@ -26,7 +26,7 @@ MissionStart 只要求清理配装事务，不等于房间对象已经析构。`
 
 ## 按钮文字
 
-HUiButton 不继承 HUiTextField，不能直接使用 `0x8859C0` 转型或把它传给 `0x863690`。按钮 `+0x220/+0x228` 是内部 `ui::TextField` 的弱引用，原版 RTTI 与 `0x7E7847` 写入链可证实。`0x83E4F0` 将其锁定为强引用后，调用 `0x7F8BB0(ui::TextField*, text, optionalFontParams)`，第三参空，与原版 `0x7E782B` 相同，沿用原生字体。
+按钮 `+0x220/+0x228` 保存内部 `ui::TextField` 的弱引用，原版 RTTI 与 `0x7E7847` 写入链可证实。`0x83E4F0` 是转成 `HUiLayout` 的专用函数，会拒绝这个文字组件。插件沿用 `0x83B9A3` 的引用计数规则获取强引用，再调用 `0x7F8BB0(ui::TextField*, text, optionalFontParams)`，第三参空，与原版 `0x7E782B` 相同，沿用原生字体。
 
 按钮显示已有本地化标题，focus 时写入配装说明及实际快捷键。原有菜单项的 focus 回调会恢复自身说明；插件不修改原版 HQ 描述列表索引。原始 F2 / L3+R3 继续可用；2026-10-25 起画面上不再另画底部提示文字（它落在 HUiMainFrame 的底栏里，压住 EDF6Coop 的 MSLabel），快捷键只写在这个按钮的原版说明框（MenuDescText）里，见 [feature-2026-10-25-room-menu-review.md](feature-2026-10-25-room-menu-review.md)。
 
