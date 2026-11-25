@@ -3,11 +3,12 @@
 // decides what each jet sounds like from the game, warn.cpp what the cockpit warns of; this file only plays it. Called
 // on the game thread; the watchdog and the Windows voice's rendering are threads of their own.
 #pragma once
+#include <cmath>
 namespace crew::audio {
-// What one jet sounds like this frame: the roar's and the whine's gain in the left and right ear, each one's playback
-// rate (1 = as made: the engine's pitch and the Doppler ratio together) and how far off it is heard (0 near .. 1 far:
-// the air takes its highs).
-struct Mix { float roarL,roarR,whineL,whineR; float roarRatio,whineRatio; float distance; };
+// What one jet sounds like this frame: the roar's and the whine's gain, each one's playback rate (1 = as made: the
+// engine's pitch and the Doppler ratio together), how far off it is heard (0 near .. 1 far: the air takes its highs)
+// and where (surround.h: `side` +1 right, `front` +1 ahead of the camera, `spread` 0 a point .. 1 all around).
+struct Mix { float roar,whine; float roarRatio,whineRatio; float distance; float side,front,spread; };
 // The engine, its mastering voice and the sounds (the file next to the DLL, <dll name>_jet.wav, as the roar when it is
 // there; else both made here). False: no sound (logged once).
 bool Start() noexcept;
@@ -60,9 +61,16 @@ constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kC
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,
                                 kClipSzLand,kClipSzDash,kClipSzShieldBlock};
 constexpr int kSazabiLoopClip[]={kClipSzThrusters,kClipSzSaberHum,kClipSzCharge};
-// How a sound is heard this frame: its gain in each ear (the caller's volume in it), its playback rate (pitch and the
-// Doppler ratio together) and how far off it is (0 near .. 1 far: the air takes its highs).
-struct Heard { float left,right,ratio,distance; };
+// How a sound is heard this frame: its gain (the caller's volume in it), where (surround.h Placing: `side` +1 right,
+// `front` +1 ahead of the camera, `spread` 0 a point .. 1 all around; `sub`: a low layer, the LFE channel's alone), its
+// playback rate (pitch and the Doppler ratio together) and the low-pass it is heard through (Hz: AirCutoff for the
+// air's dulling over a distance).
+struct Heard { float gain,side,front,spread; float ratio,cutoff; bool sub; };
+// The air's dulling `away` (0 near .. 1 at vmix::kFarAt) off: the cutoff falling geometrically from 16 kHz to 1.2 kHz.
+inline float AirCutoff(float away) noexcept {
+    const float d=away<0.0f || !(away==away) ? 0.0f : away>1.0f ? 1.0f : away;
+    return 16000.0f*std::pow(1200.0f/16000.0f,d);
+}
 bool ClipsReady() noexcept;               // Start succeeded and the clips are made (the first call has them made)
 int OpenLoop(int clip) noexcept;          // a looping voice of `clip`, silent until set; -1: none free, or not ready
 void SetLoop(int loop,const Heard& h) noexcept;
@@ -74,6 +82,10 @@ void PlayOnce(int clip,const Heard& h) noexcept;   // a one-shot (dropped with e
 enum UltClip : int { kUltCharge, kUltCircle, kUltThunder, kUltGather, kUltBeam, kUltBlast, kUltShock, kUltClipCount };
 bool UltClipThere(int clip) noexcept;     // ClipsReady and its recording read
 void PlayUlt(int clip,const Heard& h) noexcept;
+// The War Thunder recordings (wt_clips.h): read with the vehicles' clips from <dll name>_wt\<name>_<i>.wav, kept in
+// stereo when they are; a group with a variant missing is not there (logged once) and plays nothing.
+bool WtThere(int clip) noexcept;          // ClipsReady and every variant of it read
+void PlayWt(int clip,int variant,const Heard& h) noexcept;
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume in their Mix, the cockpit's Cfg().warnVolume here).

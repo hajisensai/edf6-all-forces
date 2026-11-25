@@ -1,0 +1,27 @@
+#pragma once
+// The War Thunder recordings the ground vehicles' guns are layered from (docs/feature-wt-sound.md): each a group of
+// variants, installed as Mods/Plugins/<dll name>_wt/<name>_<1..n>.wav (16-bit PCM 48 kHz, mono or stereo), made from
+// GaijinEntertainment/fmod_studio_warthunder_for_modders by tools/wt_sound.py (its table says which file each one is;
+// assets/sound/wt/SOURCE.md lists them). tools/wt_sound.py and tests/wt_sound_test.py read this list: the same names,
+// the same counts. A group with a variant missing is not loaded (logged once): its layer stays silent.
+//
+// X(name, variants)
+#define CREW_WT_CLIPS(X) \
+    X(shot_mid,3) X(shot_big,3) X(shot_heavy,3) X(middle_mid,2) X(middle_big,2) X(bass,2) X(body_big,2) X(metal,2) \
+    X(mech_howitzer,2) X(close_75,3) X(close_122,3) X(close_128,3) X(close_150,3) X(far_75,3) X(far_122,3) X(far_128,3) \
+    X(far_150,3) X(bump_med,3) X(bump_big,3) X(sub,3) X(tail_mid,2) X(tail_big,2) X(tail_heavy,2) \
+    X(m2_close,6) X(m2_far,6) X(m2_last_close,2) X(m2_last_far,2) \
+    X(mg42_close,6) X(mg42_far,6) X(mg42_last_close,2) X(mg42_last_far,2)
+
+namespace crew::wt {
+#define CREW_WT_ENUM(name,n) k_##name,
+enum Clip : int { CREW_WT_CLIPS(CREW_WT_ENUM) kCount };
+#undef CREW_WT_ENUM
+#define CREW_WT_NAME(name,n) L"" #name,
+inline constexpr const wchar_t* kName[kCount]={CREW_WT_CLIPS(CREW_WT_NAME)};
+#undef CREW_WT_NAME
+#define CREW_WT_VARIANTS(name,n) n,
+inline constexpr int kVariants[kCount]={CREW_WT_CLIPS(CREW_WT_VARIANTS)};
+#undef CREW_WT_VARIANTS
+constexpr int kMostVariants=6;
+}  // namespace crew::wt

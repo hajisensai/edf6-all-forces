@@ -205,6 +205,7 @@ constexpr float kTrackHalf=1.8f;   // m: a tank's track from its middle (an E551
 // Gain at `d` m of a sound heard at full within `ref`, falling as (ref / d)^`fall` beyond.
 inline float Falloff(float d,float ref,float fall) noexcept { return d>ref ? std::pow(ref/d,fall) : 1.0f; }
 constexpr float kFarAt=2500.0f;    // m: the air's dulling at its fullest (the jets'): audio::Heard's distance is d / kFarAt
+constexpr float kVehicleSize=8.0f;   // m: a tank's length, how wide its sounds are heard near (surround.h SpreadAt)
 
 // --- The Sazabi (sazabi_sound.cpp; docs/sound-re.md §10) ---
 // Each of its sounds: the ini group it is heard at (its movement the engine's, VehicleEngineVolume; its beams, cannon,
@@ -236,6 +237,7 @@ constexpr SzSound kSzLoop[static_cast<int>(SzLoop::count)]={
     {SzGroup::gun,0.6f,15.0f,1.1f,0.0f},        // cannonCharge
 };
 constexpr float kSzHear=3000.0f;                  // m: no voice farther
+constexpr float kSzSize=20.0f;                    // m: the Sazabi's height, how wide it is heard near (surround.h SpreadAt)
 constexpr float kSzFadeIn=0.06f,kSzFadeOut=0.3f;  // s: a loop's level coming up / going out (0 to 1 and back)
 // A loop at `level` (0..1): its gain (before its share and the distance) and pitch. The thrusters roar louder and
 // higher with the thrust, the charge's whine climbs an octave and more as it fills, the blade hums at its level. 0: silent.

@@ -12,6 +12,7 @@
 #include "sazabi_sound.h"
 #include "crew.h"
 #include "jetaudio.h"
+#include "surround.h"
 #include "vehmix.h"
 #include <cmath>
 #include <cstdint>
@@ -48,7 +49,8 @@ float GainAt(const vmix::SzSound& s,const SoundPlace& p,float extra) noexcept {
     return p.distance<vmix::kSzHear ? GroupVolume(s.group)*s.share*vmix::Falloff(p.distance,s.ref,s.fall)*extra : 0.0f;
 }
 audio::Heard HeardAt(const SoundPlace& p,float gain,float ratio) noexcept {
-    return audio::Heard{gain*p.left,gain*p.right,ratio*p.doppler,p.distance/vmix::kFarAt};
+    return audio::Heard{gain,p.side,p.front,surround::SpreadAt(p.distance,vmix::kSzSize,0.0f),ratio*p.doppler,
+                        audio::AirCutoff(p.distance/vmix::kFarAt),false};
 }
 // 1 +- up to `amount`, a different one each call.
 float Jitter(float amount) noexcept {

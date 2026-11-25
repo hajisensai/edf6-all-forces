@@ -42,6 +42,7 @@
 #include "vehmix.h"
 #include "vsynth.h"
 #include "layout.h"
+#include "surround.h"
 #include "memory.h"
 #include "vecmath.h"
 #include "edf/weapon.h"
@@ -311,7 +312,8 @@ Vehicle* EntryFor(unsigned char* v,ULONGLONG ms,bool make) noexcept {
 // --- Hearing ---
 // `muffle`: more of the air's dulling (a case landing inside the turret).
 audio::Heard HeardAt(const SoundPlace& p,float gain,float ratio,float muffle=0.0f) noexcept {
-    return audio::Heard{gain*p.left,gain*p.right,ratio*p.doppler,vmix::Muffled(p.distance/kFarAt,muffle)};
+    return audio::Heard{gain,p.side,p.front,surround::SpreadAt(p.distance,vmix::kVehicleSize,0.0f),ratio*p.doppler,
+                        audio::AirCutoff(vmix::Muffled(p.distance/kFarAt,muffle)),false};
 }
 void Set(int& loop,int clip,bool want,const audio::Heard& h) noexcept {
     if(!want){CloseLoop(loop);return;}

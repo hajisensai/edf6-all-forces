@@ -27,6 +27,7 @@
 #include "heli.h"          // MapRay
 #include "hudtext.h"
 #include "jetaudio.h"      // the recordings (UltClip)
+#include "surround.h"
 #include "memory.h"
 #include "plugin_net.h"
 #include "support_protocol.h"
@@ -298,8 +299,10 @@ void Sound(Show& s,audio::UltClip c,const float* pos,float pitch=1.0f) noexcept 
         const float d=placed ? p.distance : 0.0f,g=kSfx[c].volume*(d>kSfxNear ? kSfxNear/d : 1.0f);
         audio::Beat(GameEffectVolume());
         s.heard=true;
-        audio::PlayUlt(c,audio::Heard{g*(placed ? p.left : 1.0f),g*(placed ? p.right : 1.0f),pitch*(placed ? p.doppler : 1.0f),
-                                      d/2500.0f<1.0f ? d/2500.0f : 1.0f});
+        // Not placed: ahead, as loud in each front speaker as it was in each ear.
+        audio::PlayUlt(c,audio::Heard{g*(placed ? 1.0f : 1.41421356f),placed ? p.side : 0.0f,placed ? p.front : 1.0f,
+                                      placed ? surround::SpreadAt(d,kSfxNear,0.0f) : 0.0f,pitch*(placed ? p.doppler : 1.0f),
+                                      audio::AirCutoff(d/2500.0f),false});
         return;
     }
     edf41c::SeParams sp{};

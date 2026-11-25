@@ -17,6 +17,8 @@
 #include "jetaudio.h"
 #include "crew.h"
 #include "lock_cue.h"
+#include "surround.h"
+#include "wt_clips.h"
 #include "vsynth.h"
 #include <windows.h>
 #include <xaudio2.h>
@@ -37,11 +39,11 @@ constexpr int kFade=kRate/4;                   // ...their ends cross-faded over
 constexpr float kMaxRatio=4.0f;                // a voice's highest playback rate (pitch and Doppler)
 constexpr int kSlots=40;
 constexpr ULONGLONG kQuietMs=150;              // no beat this long: the game is not running, nor is the sound
-constexpr float kNearCutoff=16000.0f,kFarCutoff=1200.0f;
 
 IXAudio2* engine=nullptr;
 IXAudio2MasteringVoice* master=nullptr;
 UINT32 masterChannels=2;
+surround::Layout layout=surround::LayoutOf(surround::kStereo,2);   // the master's speakers (Start)
 bool tried=false,ok=false,whine=true;
 std::vector<std::int16_t> roarPcm,whinePcm;
 WAVEFORMATEX roarFormat{},whineFormat{};
@@ -150,8 +152,9 @@ std::vector<std::int16_t> SynthWhine() {
     return Loop(std::move(g),0.6f);
 }
 
-// A 16-bit PCM WAV (mono or stereo) as mono samples and their rate; false: none or not that.
-bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
+// A 16-bit PCM WAV (mono or stereo) as mono samples and their rate (`stereo`: a stereo one kept so, interleaved, and
+// its channel count there); false: none or not that.
+bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate,int* stereo=nullptr) {
     const HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE)return false;
     LARGE_INTEGER size{};GetFileSizeEx(f,&size);
@@ -170,6 +173,12 @@ bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
             std::memcpy(&rate,body+4,4);bits=body[14]|(body[15]<<8);
         } else if(!std::memcmp(d.data()+at,"data",4) && format==1 && bits==16 && (channels==1 || channels==2)) {
             const std::size_t frames=len/(2*channels);
+            if(stereo) {
+                *stereo=channels;
+                pcm.resize(frames*channels);
+                std::memcpy(pcm.data(),body,frames*channels*2);
+                return frames>static_cast<std::size_t>(rate/100) && rate>=8000 && rate<=192000;
+            }
             pcm.resize(frames);
             for(std::size_t i=0;i<frames;++i) {
                 std::int16_t a,b;std::memcpy(&a,body+i*2*channels,2);
@@ -183,12 +192,13 @@ bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
     return false;
 }
 
-WAVEFORMATEX Mono16(UINT32 rate) noexcept {
+WAVEFORMATEX Pcm16Format(UINT32 rate,WORD channels) noexcept {
     WAVEFORMATEX f{};
-    f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=1;f.nSamplesPerSec=rate;f.wBitsPerSample=16;f.nBlockAlign=2;
-    f.nAvgBytesPerSec=rate*2;
+    f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=channels;f.nSamplesPerSec=rate;f.wBitsPerSample=16;
+    f.nBlockAlign=static_cast<WORD>(2*channels);f.nAvgBytesPerSec=rate*2*channels;
     return f;
 }
+WAVEFORMATEX Mono16(UINT32 rate) noexcept { return Pcm16Format(rate,1); }
 
 // <dll path without .dll><suffix> into `path` (MAX_PATH); false when it does not fit.
 bool BesideDll(const wchar_t* suffix,wchar_t* path) noexcept {
@@ -224,10 +234,18 @@ IXAudio2SourceVoice* Voice(const WAVEFORMATEX& format,const std::vector<std::int
     return v;
 }
 
+// The cockpit's tones (not heard from anywhere): mono into the front left and right at these gains (a surround layout's
+// first two channels).
 void Pan(IXAudio2SourceVoice* v,float left,float right) noexcept {
-    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};   // mono into the master's channels: front left and right (a surround layout's first two)
+    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};
     m[0]=left;m[1]=masterChannels>1 ? right : 0.5f*(left+right);
     v->SetOutputMatrix(nullptr,1,masterChannels,m);
+}
+// A sound heard from somewhere: a voice of `inputs` channels among the master's speakers (surround.h).
+void Place(IXAudio2SourceVoice* v,int inputs,const surround::Placing& p) noexcept {
+    float m[2*XAUDIO2_MAX_AUDIO_CHANNELS];
+    surround::Matrix(layout,p,inputs,m);
+    v->SetOutputMatrix(nullptr,inputs==2 ? 2 : 1,masterChannels,m);
 }
 
 // The cockpit's own share of the volume (Cfg().warnVolume, the master voice being the game's).
@@ -507,11 +525,13 @@ constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
+ClipPcm wtClips[wt::kCount][wt::kMostVariants]{};   // the same (stereo ones kept so); wtThere: every variant read
+bool wtThere[wt::kCount]{};
 std::atomic<bool> clipsReady{false};
 bool clipsAsked=false;
 struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
 LoopVoice loops[kLoops]{};
-struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; };
+struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; WORD channels; };
 ShotVoice shots[kShots]{};
 UINT32 loopStart=0;                // where the next loop begins to play (spread: two tanks idling are not in phase)
 
@@ -599,9 +619,31 @@ void MakeClipsNow() {
         if(BesideDll(suffix,path) && ReadWav(path,ultClips[c].pcm,rate)){++ult;ultClips[c].format=Mono16(rate);}
         else ultClips[c].pcm.clear();
     }
+    int wtRead=0,wtMissing=0;
+    wchar_t firstMissing[MAX_PATH]{};
+    for(int c=0;c<wt::kCount;++c) {
+        bool all=true;
+        for(int i=0;i<wt::kVariants[c];++i) {
+            wchar_t path[MAX_PATH]{},suffix[96];
+            UINT32 rate=kRate;
+            int channels=1;
+            swprintf_s(suffix,L"_wt\\%ls_%d.wav",wt::kName[c],i+1);
+            ClipPcm& clip=wtClips[c][i];
+            if(BesideDll(suffix,path) && ReadWav(path,clip.pcm,rate,&channels)) {
+                clip.format=Pcm16Format(rate,static_cast<WORD>(channels));
+            } else {
+                clip.pcm.clear();all=false;++wtMissing;
+                if(!firstMissing[0])wcscpy_s(firstMissing,path);
+            }
+        }
+        wtThere[c]=all;
+        if(all)++wtRead;
+    }
+    if(wtMissing)Log("SOUND vehicles: %d War Thunder recording(s) missing (the first %ls): their %d group(s) stay silent, the "
+                     "install is broken",wtMissing,firstMissing,wt::kCount-wtRead);
     clipsReady.store(true,std::memory_order_release);
-    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's; the ultimate's: %d of %d recorded",kClipCount-own,own,
-        ult,kUltClipCount);
+    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's; the ultimate's: %d of %d recorded; War Thunder's: %d "
+        "of %d groups",kClipCount-own,own,ult,kUltClipCount,wtRead,wt::kCount);
 }
 DWORD WINAPI MakeClips(void*) {
     __try { MakeClipsNow(); }
@@ -609,19 +651,25 @@ DWORD WINAPI MakeClips(void*) {
     return 0;
 }
 
-// The filter a sound `distance` (0..1) off is heard through (as Set's).
-XAUDIO2_FILTER_PARAMETERS FarFilter(float distance) noexcept {
-    const float d=distance<0.0f ? 0.0f : distance>1.0f ? 1.0f : distance;
-    const float cutoff=kNearCutoff*std::pow(kFarCutoff/kNearCutoff,d);
-    const float radians=2.0f*std::sin(3.14159265f*cutoff/static_cast<float>(kRate));
+// The low-pass at `cutoff` Hz. The state-variable one (2 sin(pi f / rate), XAudio2CutoffFrequencyToRadians) reaches only
+// rate / 6 (8 kHz: XAUDIO2_MAX_FILTER_FREQUENCY), which dulled every near sound (it was the 16 kHz asked for); above that
+// the one-pole one (1 - (1 - 2 f / rate)^2, XAudio2CutoffFrequencyToOnePoleCoefficient), nearly open by 16 kHz.
+XAUDIO2_FILTER_PARAMETERS CutoffFilter(float cutoff) noexcept {
+    const float rate=static_cast<float>(kRate);
+    const float f=!(cutoff>20.0f) ? 20.0f : cutoff>0.5f*rate ? 0.5f*rate : cutoff;
+    if(f>=rate/6.0f) {
+        const float open=1.0f-2.0f*f/rate;
+        return XAUDIO2_FILTER_PARAMETERS{LowPassOnePoleFilter,1.0f-open*open,1.0f};
+    }
+    const float radians=2.0f*std::sin(3.14159265f*f/rate);
     return XAUDIO2_FILTER_PARAMETERS{LowPassFilter,radians<XAUDIO2_MAX_FILTER_FREQUENCY ? radians : XAUDIO2_MAX_FILTER_FREQUENCY,1.0f};
 }
 float Ratio(float r) noexcept { return !(r>1.0f/kMaxRatio) ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; }
-void Hear(IXAudio2SourceVoice* v,const Heard& h) noexcept {
-    const XAUDIO2_FILTER_PARAMETERS f=FarFilter(h.distance);
+void Hear(IXAudio2SourceVoice* v,int inputs,const Heard& h) noexcept {
+    const XAUDIO2_FILTER_PARAMETERS f=CutoffFilter(h.cutoff);
     v->SetFrequencyRatio(Ratio(h.ratio));
     v->SetFilterParameters(&f);
-    Pan(v,std::isfinite(h.left) ? h.left : 0.0f,std::isfinite(h.right) ? h.right : 0.0f);
+    Place(v,inputs,surround::Placing{h.gain,h.side,h.front,h.spread,h.sub});
     v->SetVolume(1.0f);
 }
 }  // namespace
@@ -639,6 +687,9 @@ bool Start() noexcept {
     }
     XAUDIO2_VOICE_DETAILS details{};master->GetVoiceDetails(&details);
     masterChannels=details.InputChannels>=1 && details.InputChannels<=XAUDIO2_MAX_AUDIO_CHANNELS ? details.InputChannels : 2;
+    DWORD mask=0;
+    if(FAILED(master->GetChannelMask(&mask)))mask=0;
+    layout=surround::LayoutOf(mask,static_cast<int>(masterChannels));
     wchar_t path[MAX_PATH]{};
     UINT32 rate=kRate;
     const bool own=BesideDll(L"_jet.wav",path) && ReadWav(path,roarPcm,rate);
@@ -654,7 +705,8 @@ bool Start() noexcept {
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);
     ok=true;
-    Log("SOUND XAudio2 up: %u output channel(s)",masterChannels);
+    Log("SOUND XAudio2 up: %u output channel(s), mask 0x%lX: %d around the listener, LFE %s",masterChannels,mask,layout.ring,
+        layout.lfe>=0 ? "yes" : "no");
     return true;
 }
 
@@ -675,21 +727,16 @@ int Open() noexcept {
 void Set(int i,const Mix& m) noexcept {
     if(i<0 || i>=kSlots || !slots[i].used)return;
     const Slot& s=slots[i];
-    const float distance=m.distance<0.0f ? 0.0f : m.distance>1.0f ? 1.0f : m.distance;
-    // The cutoff falls geometrically from kNearCutoff to kFarCutoff.
-    const float cutoff=kNearCutoff*std::pow(kFarCutoff/kNearCutoff,distance);
-    // XAudio2's filter frequency: 2 sin(pi f / rate), at most XAUDIO2_MAX_FILTER_FREQUENCY (XAudio2CutoffFrequencyToRadians).
-    const float radians=2.0f*std::sin(3.14159265f*cutoff/static_cast<float>(kRate));
-    XAUDIO2_FILTER_PARAMETERS f{LowPassFilter,radians<XAUDIO2_MAX_FILTER_FREQUENCY ? radians : XAUDIO2_MAX_FILTER_FREQUENCY,1.0f};
+    const XAUDIO2_FILTER_PARAMETERS f=CutoffFilter(AirCutoff(m.distance));
     auto ratio=[](float r) noexcept { return r<1.0f/kMaxRatio ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; };
     s.roar->SetFrequencyRatio(ratio(m.roarRatio));
     s.roar->SetFilterParameters(&f);
-    Pan(s.roar,m.roarL,m.roarR);
+    Place(s.roar,1,surround::Placing{m.roar,m.side,m.front,m.spread,false});
     s.roar->SetVolume(1.0f);
     if(s.whine) {
         s.whine->SetFrequencyRatio(ratio(m.whineRatio));
         s.whine->SetFilterParameters(&f);
-        Pan(s.whine,m.whineL,m.whineR);
+        Place(s.whine,1,surround::Placing{m.whine,m.side,m.front,m.spread,false});
         s.whine->SetVolume(1.0f);
     }
 }
@@ -791,7 +838,7 @@ int OpenLoop(int clip) noexcept {
 
 void SetLoop(int i,const Heard& h) noexcept {
     if(i<0 || i>=kLoops || !loops[i].used)return;
-    Hear(loops[i].v,h);
+    Hear(loops[i].v,1,h);
 }
 
 void CloseLoop(int i) noexcept {
@@ -811,28 +858,34 @@ bool UltClipThere(int clip) noexcept {
 void PlayUlt(int clip,const Heard& h) noexcept {
     if(UltClipThere(clip))PlayPcm(ultClips[clip],h);
 }
+bool WtThere(int clip) noexcept { return clip>=0 && clip<wt::kCount && ClipsReady() && wtThere[clip]; }
+void PlayWt(int clip,int variant,const Heard& h) noexcept {
+    if(WtThere(clip) && variant>=0 && variant<wt::kVariants[clip])PlayPcm(wtClips[clip][variant],h);
+}
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
     const UINT32 rate=c.format.nSamplesPerSec;
-    // An idle voice already at this clip's rate, else any idle one (remade at it); none idle: dropped (a burst past kShots).
+    const WORD channels=c.format.nChannels;
+    // An idle voice already at this clip's rate and channels, else any idle one (remade so); none idle: dropped (a burst
+    // past kShots).
     ShotVoice* pick=nullptr;
+    auto fits=[&](const ShotVoice& s){ return s.v && s.rate==rate && s.channels==channels; };
     for(auto& s:shots) {
         XAUDIO2_VOICE_STATE st{};
         if(s.v)s.v->GetState(&st,XAUDIO2_VOICE_NOSAMPLESPLAYED);
         if(s.v && st.BuffersQueued)continue;
-        const bool fits=s.v && s.rate==rate;
-        if(!pick || (fits && !(pick->v && pick->rate==rate)))pick=&s;
+        if(!pick || (fits(s) && !fits(*pick)))pick=&s;
     }
     if(!pick)return;
-    if(pick->v && pick->rate!=rate){pick->v->DestroyVoice();*pick=ShotVoice{};}
+    if(pick->v && !fits(*pick)){pick->v->DestroyVoice();*pick=ShotVoice{};}
     if(!pick->v) {
         if(FAILED(engine->CreateSourceVoice(&pick->v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio))){*pick=ShotVoice{};return;}
-        pick->rate=rate;
+        pick->rate=rate;pick->channels=channels;
     }
     XAUDIO2_BUFFER b{};
     b.Flags=XAUDIO2_END_OF_STREAM;b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
     pick->v->Stop(0);pick->v->FlushSourceBuffers();
     if(FAILED(pick->v->SubmitSourceBuffer(&b)))return;
-    Hear(pick->v,h);
+    Hear(pick->v,channels,h);
     pick->v->Start(0);
 }
 }  // namespace crew::audio
