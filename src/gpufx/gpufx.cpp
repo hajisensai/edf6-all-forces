@@ -1,8 +1,12 @@
 #include "gpufx.h"
 #include "gpufx_gpu.h"
+#include "gpufx_layers.h"
 #include "gpufx_sim.h"
 #include "../crew.h"
 #include "../memory.h"
+#include "../vhud.h"
+#include "edf/memory.h"
+#include "edf/patch.h"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <algorithm>
@@ -46,7 +50,7 @@ constexpr unsigned kRendererPtr=0x20B2958;
 using DrawFn=void(__fastcall*)(void*,void*,int,const void*);
 
 // ---- game thread ----
-constexpr int kBudget=4096;
+constexpr int kBudget=8192;   // the layers' smoke lives up to 30 s; Renderer::kMaxInstances leaves the rest to the takeover
 // On the heap, made by the first tick: a static Pool<4096> would grow the image's .data past the guard
 // (tests/plugin_image_size_guard).
 std::unique_ptr<Pool<kBudget>> pool;
@@ -63,7 +67,8 @@ std::vector<Instance> staging;
 // The published frame: the game thread swaps a full vector in, the render thread copies it out.
 SRWLOCK publishLock=SRWLOCK_INIT;
 std::vector<Instance> published;
-std::atomic<bool> optEnabled{false},optProbe{false},optTest{false};
+std::atomic<bool> optEnabled{false},optProbe{false},optTest{false},optLayers{false};
+bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
 std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
 std::atomic<bool> anchorReady{false};
 float anchorShared[3]{};   // under publishLock
@@ -521,9 +526,125 @@ bool InstallCoreDraw() noexcept {
 void PublishOptions() noexcept {
     const Config& c=Cfg();
     optEnabled.store(c.enabled && c.gpuFx,std::memory_order_relaxed);
+    optLayers.store(c.enabled && c.gpuFx && c.gpuFxLayers && layersInstalled,std::memory_order_relaxed);
     optNative.store(c.gpuFxNative,std::memory_order_relaxed);
     optProbe.store(c.gpuFxProbe,std::memory_order_relaxed);
     optTest.store(c.gpuFxTest,std::memory_order_relaxed);
+}
+
+// ---- the layered emitters (gpufx_layers.h) ----
+// The events come from the game's own hooks (the shot entry 0x696FD0 through heli.cpp, EffectGenUtil::Explosion
+// 0x2E5ED0 here), queued under eventLock and spawned by TickNative. Both are this machine's: a remote player's round
+// is replayed through 0x696FD0 (replay 1), a remote blast is this machine's own bullet's.
+SRWLOCK eventLock=SRWLOCK_INIT;
+constexpr std::size_t kQueueMost=256;
+ShotEvent shotQueue[kQueueMost];std::size_t shotQueued=0;
+BlastEvent blastQueue[kQueueMost];std::size_t blastQueued=0;
+LayerDescs layerDescs{};
+Rng layerRng{0x5EED7A11u};
+std::atomic<unsigned> layerShots{0},layerBlasts{0},layerParticles{0},layerQueueFull{0};
+// A fast gun (an autocannon with a blast) makes a full shot's layers only every kShotRefire s; between, a thin one.
+constexpr float kShotRefire=0.35f;
+struct RecentShot { const void* weapon=nullptr;ULONGLONG ms=0; };
+RecentShot recentShots[16]{};
+
+// Weapon fields (docs/gpufx-re.md, layers): the owner +0x120, the stock muzzle effect +0x480 (0x697F85 skips a null
+// one), AmmoExplosion +0x8B0, the muzzle list +0x1D0 / count +0x1E0, stride 0xF0, an entry's forward +0x70 and
+// position +0x80.
+constexpr std::size_t kWeaponOwner=0x120,kWeaponMuzzleEffect=0x480,kWeaponBlast=0x8B0,kWeaponMuzzles=0x1D0,
+    kWeaponMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleForward=0x70,kMuzzlePosition=0x80;
+
+// EffectGenUtil::Explosion 0x2E5ED0: its head hook (the 15-byte prologue, no relative instructions) and the two
+// "nothing to spawn" branches made unconditional so its own particles are ours: 0x2E68BC (the three ParticleObjects'
+// loop, to its tail 0x2E6C74) and 0x2E6F75 (the extra particle 0x2DFEF0, to 0x2E70D0). The shake, the decal and the
+// point light stay stock.
+constexpr unsigned kExplosion=0x2E5ED0;
+constexpr unsigned char kExplosionSig[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+constexpr unsigned kExplosionLoop=0x2E68BC,kExplosionExtra=0x2E6F75;
+constexpr unsigned char kLoopJe[]={0x0F,0x84,0xB2,0x03,0x00,0x00},kLoopJmp[]={0xE9,0xB3,0x03,0x00,0x00,0x90};
+constexpr unsigned char kExtraJe[]={0x0F,0x84,0x55,0x01,0x00,0x00},kExtraJmp[]={0xE9,0x56,0x01,0x00,0x00,0x90};
+using ExplosionFn=void(__fastcall*)(void*,const float*,const float*,float,float,const float*,float);
+ExplosionFn explosionNext=nullptr;
+
+void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float size,float shake,const float* color,float light) {
+    if(optLayers.load(std::memory_order_relaxed))__try {
+        if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(size) && size>0.0f) {
+            AcquireSRWLockExclusive(&eventLock);
+            if(blastQueued<kQueueMost) {
+                BlastEvent& e=blastQueue[blastQueued++];
+                std::memcpy(e.pos,pos,sizeof(e.pos));e.size=size;
+            } else layerQueueFull.fetch_add(1,std::memory_order_relaxed);
+            ReleaseSRWLockExclusive(&eventLock);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    explosionNext(egu,pos,dir,size,shake,color,light);
+}
+
+// Once, at Install, with GpuFxLayers on (the stock blast particles off for the session: turning the layers off needs
+// a restart, the ini says so).
+bool InstallLayers() noexcept {
+    if(!Matches(kExplosion,kExplosionSig,sizeof(kExplosionSig)) || !Matches(kExplosionLoop,kLoopJe,sizeof(kLoopJe)) ||
+       !Matches(kExplosionExtra,kExtraJe,sizeof(kExtraJe)))return false;
+    unsigned char trampoline[sizeof(kExplosionSig)+14];
+    std::memcpy(trampoline,kExplosionSig,sizeof(kExplosionSig));
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+sizeof(kExplosionSig),jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kExplosion+sizeof(kExplosionSig));
+    std::memcpy(trampoline+sizeof(kExplosionSig)+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kExplosion,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[sizeof(kExplosionSig)];std::memset(patch,0x90,sizeof(patch));
+    std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&ExplosionHook);
+    std::memcpy(patch+6,&hook,8);
+    explosionNext=reinterpret_cast<ExplosionFn>(code);
+    if(!edf::PatchCode(image+kExplosion,kExplosionSig,patch,sizeof(patch))) {
+        explosionNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+        return false;
+    }
+    const bool loop=edf::PatchCode(image+kExplosionLoop,kLoopJe,kLoopJmp,sizeof(kLoopJe));
+    const bool extra=edf::PatchCode(image+kExplosionExtra,kExtraJe,kExtraJmp,sizeof(kExtraJe));
+    Log("GPUFX layers: Explosion hook EDF+%X, its particles off: loop %d, extra %d",kExplosion,loop,extra);
+    return true;
+}
+
+// The camera's stand-in for the lod (the game thread has no camera): the player.
+bool ListenerPosition(float* out) noexcept {
+    const unsigned char* h=PlayerHuman();
+    if(!h || !Readable(h,edf::kPosition+12))return false;
+    std::memcpy(out,h+edf::kPosition,12);
+    return true;
+}
+
+void SpawnLayers() noexcept {
+    if(!layerDescs.Ready())layerDescs=RegisterLayers(*pool);
+    if(!layerDescs.Ready())return;
+    ShotEvent shots[kQueueMost];BlastEvent blasts[kQueueMost];
+    AcquireSRWLockExclusive(&eventLock);
+    const std::size_t ns=shotQueued,nb=blastQueued;
+    std::memcpy(shots,shotQueue,ns*sizeof(ShotEvent));std::memcpy(blasts,blastQueue,nb*sizeof(BlastEvent));
+    shotQueued=blastQueued=0;
+    ReleaseSRWLockExclusive(&eventLock);
+    if(ns==0 && nb==0)return;
+    float eye[3]{};
+    const bool haveEye=ListenerPosition(eye);
+    auto lodAt=[&](const float* p){
+        float d=0.0f;
+        if(haveEye){const float x=p[0]-eye[0],y=p[1]-eye[1],z=p[2]-eye[2];d=std::sqrt(x*x+y*y+z*z);}
+        return LayerLod(d,pool->Live(),kBudget);
+    };
+    // A barrage (many blasts in one frame): past the first 24, each one thinner, so a frame never spawns more than
+    // about a frame's worth of the budget.
+    unsigned made=0;
+    for(std::size_t i=0;i<nb;++i) {
+        float lod=lodAt(blasts[i].pos);
+        if(i>=24)lod*=0.35f;
+        made+=static_cast<unsigned>(SpawnBlast(*pool,layerDescs,layerRng,blasts[i],lod));
+    }
+    for(std::size_t i=0;i<ns;++i)made+=static_cast<unsigned>(SpawnShot(*pool,layerDescs,layerRng,shots[i],lodAt(shots[i].pos)));
+    layerShots.fetch_add(static_cast<unsigned>(ns),std::memory_order_relaxed);
+    layerBlasts.fetch_add(static_cast<unsigned>(nb),std::memory_order_relaxed);
+    layerParticles.fetch_add(made,std::memory_order_relaxed);
 }
 
 void RegisterDescs() noexcept {
@@ -595,8 +716,10 @@ void TickNative() noexcept {
                 pool->Spawn(deskPuff,at,vel,testRng);
             }
         }
-        pool->SetWind(1.5f,0.0f,0.5f);
     }
+    // A light steady breeze: the stock has no wind field the smoke could follow.
+    pool->SetWind(1.5f,0.0f,0.5f);
+    if(optLayers.load(std::memory_order_relaxed))SpawnLayers();
     if(dt>0.0f)pool->Step(dt);
     if(staging.size()!=static_cast<std::size_t>(kBudget))staging.resize(kBudget);
     const int n=pool->Build(staging.data(),kBudget,kFlipFrames);
@@ -655,6 +778,12 @@ bool Install() noexcept {
         }
         const bool core=InstallCoreDraw();
         Log("GPUFX installed: stock particle draw slot=%d (%u other references), core draw EDF+%X=%d",ok,others,kCoreDraw,core);
+        const Config& c=Cfg();
+        if(c.enabled && c.gpuFx && c.gpuFxLayers) {
+            layersInstalled=InstallLayers();
+            if(!layersInstalled)Log("GPUFX layers: Explosion EDF+%X not as expected; the layered emitters stay off",kExplosion);
+        }
+        PublishOptions();
     } __except(EXCEPTION_EXECUTE_HANDLER) {Log("GPUFX profile fault; stock particles untouched");ok=false;}
     installed.store(true,std::memory_order_release);
     return ok;
@@ -669,7 +798,61 @@ void Tick() noexcept {
     try { TickNative(); } catch(...) {}
 }
 
+bool ExplosionHooked() noexcept { return explosionNext!=nullptr; }
+
+void* ShotBegin(unsigned char* weapon) noexcept {
+    if(!optLayers.load(std::memory_order_relaxed))return nullptr;
+    __try {
+        if(!Readable(weapon,kWeaponBlast+4,true))return nullptr;
+        const float blast=At<float>(weapon,kWeaponBlast);
+        if(!(blast>=kCannonBlast) || !KnownVehicle(At<const void*>(weapon,kWeaponOwner)))return nullptr;
+        void* effect=At<void*>(weapon,kWeaponMuzzleEffect);
+        *reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=nullptr;   // ours draws a vehicle gun's flash and smoke
+        return effect;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+
+void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept {
+    __try {
+        if(muzzleEffect)*reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=muzzleEffect;
+        if(!optLayers.load(std::memory_order_relaxed) || !Readable(weapon,kWeaponBlast+4))return;
+        const float blast=At<float>(weapon,kWeaponBlast);
+        if(!(blast>=kCannonBlast))return;
+        const unsigned char* list=At<const unsigned char*>(weapon,kWeaponMuzzles);
+        const std::uint64_t count=At<std::uint64_t>(weapon,kWeaponMuzzleCount);
+        if(count==0 || count>64 || !Readable(list,count*kMuzzleStride))return;
+        const unsigned char* m=list+(muzzle%count)*kMuzzleStride;
+        ShotEvent e{};
+        std::memcpy(e.pos,m+kMuzzlePosition,sizeof(e.pos));std::memcpy(e.dir,m+kMuzzleForward,sizeof(e.dir));
+        const float len=std::sqrt(e.dir[0]*e.dir[0]+e.dir[1]*e.dir[1]+e.dir[2]*e.dir[2]);
+        if(!(len>1e-3f) || !std::isfinite(e.pos[0]) || !std::isfinite(e.pos[1]) || !std::isfinite(e.pos[2]))return;
+        for(float& v:e.dir)v/=len;
+        const unsigned char* owner=At<const unsigned char*>(weapon,kWeaponOwner);
+        e.vehicle=KnownVehicle(owner);
+        e.ground=Readable(owner,edf::kPosition+12) ? At<float>(owner,edf::kPosition+4) : e.pos[1]-10.0f;
+        e.blast=blast;
+        // A fast gun: the full layers once per kShotRefire, a thin shot (a fifth) between.
+        const ULONGLONG now=GameMs();
+        RecentShot* slot=&recentShots[0];
+        for(auto& r:recentShots) {
+            if(r.weapon==weapon){slot=&r;break;}
+            if(r.ms<slot->ms)slot=&r;
+        }
+        const bool thin=slot->weapon==weapon && now-slot->ms<static_cast<ULONGLONG>(kShotRefire*1000.0f);
+        if(!thin){slot->weapon=weapon;slot->ms=now;}
+        if(thin)e.blast=(std::max)(kCannonBlast,e.blast*0.2f);
+        AcquireSRWLockExclusive(&eventLock);
+        if(shotQueued<kQueueMost)shotQueue[shotQueued++]=e;
+        else layerQueueFull.fetch_add(1,std::memory_order_relaxed);
+        ReleaseSRWLockExclusive(&eventLock);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 void Reset() noexcept {
+    AcquireSRWLockExclusive(&eventLock);
+    shotQueued=blastQueued=0;
+    ReleaseSRWLockExclusive(&eventLock);
+    for(auto& r:recentShots)r=RecentShot{};
     if(pool)pool->Clear();
     poolDropped.store(0,std::memory_order_relaxed);
     anchored=false;spawnDebt=0.0f;lastMs=0;ticked=~ULONGLONG(0);
@@ -780,6 +963,9 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
         Log("GPUFX   lit taken over=%u (set 0xC08 %u); lighting captured in %u views, incomplete %u",probe.litReplaced,probe.litSetB,
             probe.litCaptures,probe.litCaptureFailed);
+        Log("GPUFX   layers %s: shots %u blasts %u -> particles %u, queue full %u",optLayers.load(std::memory_order_relaxed) ? "on" : "off",
+            layerShots.load(std::memory_order_relaxed),layerBlasts.load(std::memory_order_relaxed),
+            layerParticles.load(std::memory_order_relaxed),layerQueueFull.load(std::memory_order_relaxed));
         Log("GPUFX   scene luma median %.3f max %.3f -> exposure %.3f; stock fade (b0 %u bytes, %s) mul %.6f add %.4f",st.sceneLuma,st.sceneLumaMax,
             exposure,fade.bytes,fade.known ? "read" : "not yet",fade.mul,fade.add);
         probe.cpuMs=0.0;probe.cpuSamples=0;

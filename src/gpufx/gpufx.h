@@ -23,6 +23,14 @@ void Tick() noexcept;
 // Mission shutdown (mission.cpp): our particles and the test anchor are dropped.
 void Reset() noexcept;
 
+// Game thread, heli.cpp's hook on the shot entry 0x696FD0 (every round of every weapon class, a remote player's too:
+// replayed through it). ShotBegin before the stock shot: a vehicle gun's stock muzzle effect off for this round (ours
+// draws it), returned; ShotEnd after it: the effect back, the round's layers queued (gpufx_layers.h).
+// Whether Install hooked EffectGenUtil::Explosion 0x2E5ED0 (its prologue is a jump now: edf41classes' fingerprint).
+bool ExplosionHooked() noexcept;
+void* ShotBegin(unsigned char* weapon) noexcept;
+void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept;
+
 // Render thread (thermal.cpp's world begin / end redirect, firstperson.cpp's mesh callback).
 void WorldBegin(ID3D11DeviceContext* context,const void* view) noexcept;
 void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept;

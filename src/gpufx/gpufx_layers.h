@@ -10,7 +10,7 @@
 // The counts scale with the size and with `lod` (the caller's: distance to the camera and the pool's load): a far or
 // crowded blast is fewer, bigger puffs, never a cut. Everything is visual and made on each machine from its own events.
 #pragma once
-#include "gpufx/gpufx_sim.h"
+#include "gpufx_sim.h"
 
 #include <algorithm>
 #include <cmath>

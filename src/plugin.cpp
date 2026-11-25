@@ -869,6 +869,7 @@ void LoadConfig() noexcept {
     n.gpuFxTest=ReadBool(L"GpuFxTest",n.gpuFxTest);
     n.gpuFxNative=static_cast<int>(FixInt("GpuFxNative",ReadInt(L"GpuFxNative",static_cast<DWORD>(n.gpuFxNative)),0,2));
     n.gpuFxProbe=ReadBool(L"GpuFxProbe",n.gpuFxProbe);
+    n.gpuFxLayers=ReadBool(L"GpuFxLayers",n.gpuFxLayers);
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
