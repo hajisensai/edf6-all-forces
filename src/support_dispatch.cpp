@@ -1540,16 +1540,16 @@ const wchar_t* SupportCallName(int index) noexcept {
     if(index==AirCount()+1)return L"步兵大队（12人）";
     // Returned static strings can safely be copied into draw-thread snapshots.
     static const wchar_t* labels[]={L"坦克·有人",L"坦克·空车交付",L"装甲运兵车·有人",L"装甲运兵车·空车交付",L"民用轻卡·有人",L"民用轻卡·空车交付"};
-    if(index==SupportRescueCatalog())return L"海上救援直升机";
+    if(index==SupportRescueCatalog())return L"Brute 410 海上救援型";
     if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportStrikeName(strike);
     const int ground=index-GroundStart();
     if(ground>=0 && ground<6)return labels[ground];
-    static const wchar_t* transports[kTransportEntries]={L"直升机机降·小队（4人）",L"直升机机降·大队（12人）",L"运输机空降·小队（4人）",
-                                                         L"运输机空降·大队（12人）"};
+    static const wchar_t* transports[kTransportEntries]={L"Brute 410 运输型·小队（4人）",L"Brute 410 运输型·大队（12人）",
+                                                         L"C-130 运输机·小队（4人）",L"C-130 运输机·大队（12人）"};
     const int t=index-TransportStart();
     if(t>=0 && t<kTransportEntries)return transports[t];
-    // One row, "直升机投送", its vehicles the chips (map_buttons.h GroupSupport groups by the part before "·").
-    static const wchar_t* airdrops[kAirdropEntries]={L"直升机投送·坦克",L"直升机投送·装甲运兵车",L"直升机投送·民用轻卡"};
+    // Grouped by aircraft name, with a chip for each type of vehicle it carries.
+    static const wchar_t* airdrops[kAirdropEntries]={L"Brute 410 吊运型·坦克",L"Brute 410 吊运型·装甲运兵车",L"Brute 410 吊运型·民用轻卡"};
     const int a=index-AirdropStart();return a>=0 && a<kAirdropEntries ? airdrops[a] : L"支援";
 }
 int SupportCallSeats(int index) noexcept {
@@ -1896,7 +1896,9 @@ SupportIcon SupportCallIcon(int index) noexcept {
 SupportTab SupportCallTab(int index) noexcept {
     if(index>=0 && index<AirCount()) {
         SupportAircraft spec;
-        return SupportAircraftSpec(index,&spec) && spec.sortie ? SupportTab::sortie : SupportTab::air;   // the submarine: air
+        if(SupportAircraftSpec(index,&spec) && spec.sortie && spec.jet!=static_cast<int>(JetRole::salvo))
+            return SupportTab::sortie;
+        return SupportTab::air;
     }
     if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportTab::strike;
     return SupportTab::ground;
