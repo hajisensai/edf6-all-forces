@@ -118,20 +118,25 @@
 - 事件来源（都在本机发生，远端玩家的射击经 `0x692540 → 0x696FD0`（replay=1）也会到）：
   - 开火：`0x696FD0` 的入口钩子（`heli.cpp` 的 `MedicShotHook`）。原调用前 `gpufx::ShotBegin`：载具武器且 AmmoExplosion（`weapon+0x8B0`）≥ 2 m 时，把 `weapon+0x480`（炮口效果，`0x697F85` 为空就跳过）临时置空；原调用后 `gpufx::ShotEnd` 放回，并按枪口条目（`+0x1D0` 数组、`+0x1E0` 个数、步长 0xF0，`+0x70` 前向、`+0x80` 位置）排队一条开火事件。
   - 爆炸：`EffectGenUtil::Explosion 0x2E5ED0` 入口钩子（15 字节序言，与 `0x696FD0` 相同），参数 `(egu, pos[4], dir[4], size, shake, color[4], light)`，size = 半径 / 5。开 `GpuFxLayers` 时把 `0x2E68BC`（`0F 84 B2 03 00 00` → `E9 B3 03 00 00 90`，跳过三个 ParticleObject 的循环）和 `0x2E6F75`（`0F 84 55 01 00 00` → `E9 56 01 00 00 90`，跳过附加粒子 `0x2DFEF0`）改成必跳；震屏、焦痕贴花、点光照旧。`edf41classes.cpp` 的指纹表对已被钩住的 `0x2E5ED0` 放行（`gpufx::ExplosionHooked()`）。
-  - `Explosion_Big 0x2E7A30` 是另一条路径，本段未接。
+  - `Explosion_Big 0x2E7A30`（第 3 段）：同一个头钩（`HeadHook`）入队 `BlastEvent`；开 `GpuFxLayers` 时 NOP 原版烟卡 `0x2E7A81` 与 15 团烟 `0x2E7BD4` 两个 call，震屏、贴花、点光照旧。
 - 分层（单位尺寸 × 事件尺寸）：
   - 开炮（载具、AmmoExplosion ≥ 2）：炮口闪光（加色 0.1 s）、冲击环（沿炮管横截面向外的快速淡烟，< 1 s）、地面扬尘环（炮口离地 < 5 m，3–6 s）、浓烟团（沿炮管推出后膨胀上升随风，8–20 s）。手持发射器只有较小的烟团。同一武器 0.35 s 内的连发只出薄的一份。
   - 着弹：火球（加色）、土柱（上抛后回落）、黑烟柱（10–18 s）、碎片（弹道）、低矮残留烟（15–25 s）；半径 ≥ 12 m（炮击、炸弹）加地面大尘云（20–30 s）。
 - 尺寸：单位尺寸乘 `BlastScale(r)`：半径 ≤ 6 m 线性（下限 1），再往上按 `6·sqrt(r/6)` 增长（24 m → 12），否则大爆炸的尘云能到 60 m 一团，把玩家周围糊成一堵不透明的墙。残留烟与大尘云的 alpha 峰值 0.45 / 0.5。自家烟离相机近于自身尺寸时按 `(距离 − 0.25·尺寸) / (0.75·尺寸)` 淡出，相机钻进烟团时不会满屏糊住。
 - 预算与降级：池 8192 颗（`Renderer::kMaxInstances` 16384 的其余给接管）；满时替换最接近寿命末尾的粒子。LOD：60 m 内满量，越远越少（最低 1/5），池超过 3/4 再减半；数量减少时单颗按 `1/sqrt(lod)` 放大，覆盖面积不变。同一帧超过 24 个爆炸时其余每个降到 0.35。相机位置用玩家位置代替（游戏线程拿不到相机）。
 
-## efs 渲染器（`0x2EDE20`，未接管，方案）
+## efs 渲染器（`0x2EDE20`，第 3 段接管 Texture<quad>，`GpuFxEfs`，默认关）
 
 - `0x2EDE20` 是 `effect::EfsObject` 渲染子对象（vtable `0x17A84E0`，槽 1，构造 `0x2ED6E0`）的 `Draw(sub, ctx, pass, view*)`，是多种 efs RenderInfo 的调度器，不经过 `0x3027B0 / 0x1155810 / 0x1154F70`。
 - 结构：`efsInst+0x40` 链表 → 发射器组（`node[2]+0x70`，快照数组 `+0x28`，每视图 0xA0 字节）→ `efs::Emitter`（vtable `0x19AD1C0`，槽 6 `0x10D4C30` 绘制 → `0x10D5C40`）→ RenderInfo（13 种：Texture、Distortion、Sprite、Life、Model、Locus、Line、ExtLine、LocusLine、LocusExtendLine、EmittingExtendLine、Null）。
-- Sprite 的 end `0x10F2000`：存活索引（`RenderInfo+0xB8` 的 uint 向量）按深度排序后，把 `RenderInfo+0x128` 的实例数组（每条 0xC0 字节）交给 `0x10DA360`，最终 `0x10DD1F0`（`Texture<quad>` flush）`DrawIndexedInstanced`。实例数据走逐帧环形缓冲，没有 CPU 动态 VB。
-- 走 efs 的效果：EfsBullet、EfsExposureBullet、EfsMuzzleFlash、SpiderStringBullet03、MapObject_Efs、HumanoidPartsBreakEffect_Efs、若干怪物部件效果，及脚本 `CreateEfs`。
-- 方案：只接 Sprite / Texture quad，其余 RenderInfo 放行。钩 `0x10F2000`（或 `0x10DA360`），先用探针 dump 0xC0 实例记录确定位置 / 大小 / 颜色 / UV / 旋转偏移，再按视图过滤（`*(efsInst+0x110)+0xC0`）照搬，读出后进 `nativeInstances`；blend 取 `ctx+0x19C / 0x1A0`。shader 按材质变体从缓存取，没有固定地址，光照要另行移植。工作量与第 1、2 段的 ParticleRender 接管相当，本段未做。
+- Sprite 的 end `0x10F2000` → `0x10DA360` → `Texture<quad>::Draw 0x10DD1F0`（只经 vtable `0x1A09DC0` 槽 2，槽地址 `0x1A09DD0`）。走 efs 的效果：EfsBullet、EfsExposureBullet、EfsMuzzleFlash、SpiderStringBullet03、MapObject_Efs、HumanoidPartsBreakEffect_Efs、若干怪物部件效果，及脚本 `CreateEfs`。
+- 接管点：`0x10DD1F0(self, ctx, world float[16] 行向量, desc)` 换 vtable 槽（`PatchVtableSlot`，先核序言与槽内容）。它做一次 `DrawIndexedInstanced(6, count, 0, 0, 0)`，shader 组由 soft / 光照选。
+  - desc：`+0` 材质（`+0x20` 网格，`*(u32*)(网格+0x28)` 索引数，须为 6；`+0x28` fetch 资源）、`+8` billboard 字节、`+0xC` normal_pow、`+0x10` soft（|soft| > 0 走变体 2）、`+0x14` zbias、`+0x18` near、`+0x20` 光照指针、`+0x28` ushort 记录索引（单位 uint4，空 = 顺序）、`+0x38` 记录（0x30：translate、scale、quat）、`+0x40` 个数、`+0x48` composite（0x40：xrot、dist、distR、pad；position；texcoord；color）、`+0x50` 纹理对象（空 = 默认纹理，不接）。
+  - ctx：`+8` D3D 上下文；`+0x84` 混合开关、`+0x88` 六个 D3D11 枚举 {Src, Dst, Op, SrcA, DstA, OpA}，表 `0x10FAEE0`：0 = {5,6,1,2,1,1}（alpha）、1 = {5,2,1,2,1,1}（加）、2 = {5,2,3,2,1,1}（反减）；`+0x19C` 深度写（须 0）、`+0x1A0` 比较（8 ALWAYS / 2 LESS / 4 LESS_EQUAL）。
+  - 原版 VS `0x2130`：角点 `rot2D(xrot)·fetch.xy·position.zw + position.xy`，乘 scale.xy，`q v q*`（未归一），乘 basis（world 行；billboard 时为相机行 `*(0x2139A90+8)+0x10` 乘 world 第 k 行长度），加 world 中心；沿视线推 `nd = max(|v| + zbias, near)`；雾距 `|wc + normalize(wc)·(d − nd)|`，`o2 = (dist·S34.x + S34.y, 1 − (dist·S35.z + S35.w), dist·S34.w + S35.x)`。PS `0x1D0`：`fog = sat(o2.x)^S34.z·S36.w`，`bf = sat(o2.z)^S35.y·S37.w·S37.rgb`，`rgb = lerp(max(bf, tex·col), S36.rgb, fog)`，`a = sat(o2.y)·sat(tex.a·col.a)`。S = 原版 xgl_system（608 字节，VS/PS b0）。
+- 我方（`gpufx_efs.h` + `gpufx_gpu.cpp` 的 `EfsVs/EfsPs`）：一个四边形两个实例（中心 + 两轴、zbias、near、颜色、uv 矩形、深度测试标志），视图 / 投影 / 雾都用原版 xgl_system（第一次原版 efs 绘制时从 VS b0 取，换了计 `system changed`）；材质的四角 fetch 与前 6 个索引在第一次原版绘制后经 staging 读回一次，只收居中矩形、两三角在对角线相接（`EfsStripFetch`）。深度测试对照深度副本，不写深度。纹理链（`T+0x10` / `T+8` / `T+0x10→+0x10`）首次用 PS t0 核实。光照、soft、其他混合 / 深度组合、默认纹理照旧走原版（探针计数 `refused …`）。
+- `GpuFxNative=3` 时与粒子一样左半原版、右半我方。离线：`gpufx_sim` 逐角对照 VS asm 抄写、`gpufx_gpu` WARP 覆盖三种混合、雾、距离透明、辉光地板、深度测试。
+- 未实机核对：原版 sampler 与 cull（我方 linear clamp、不剔除）、xgl_system 跨帧是否不变、efs 绘制是否都落在 WorldBegin/WorldEnd 之间（`outside` 计数）、索引指针为空即顺序的假设、D24 量化下 LESS 的边界。同卡片对照一致前保持默认关。
 
 ## 性能（第 2 段，`perfrun blast`，3840×2160，`GpuFxNative=1`，20 s 干净窗口）
 
@@ -144,6 +149,5 @@
 
 ## 未验证 / 未做
 
-- efs `0x2EDE20`：另一个渲染器，未接管，方案见上。
-- `Explosion_Big 0x2E7A30` 未接分层发射器。
+- efs Texture<quad>：已接管但默认关，待 `GpuFxNative=3 GpuFxEfs=1` 实机同卡片对照；其余 RenderInfo（Distortion、Model、Locus/Line 系）未接。
 - 天罚级压力场景的帧率。
