@@ -76,6 +76,7 @@ struct V {
     float3 basis : TEXCOORD2;   // cos and sin of the rotation, emissive
     float4 vpos : TEXCOORD3;    // the corner's view-space position; w: the centre's distance from the camera
     float3 nrm : TEXCOORD4;     // the lit kinds: the stock VS's world normal
+    float3 vlight : TEXCOORD5;  // the set 0xC08: its light, per vertex like its VS (0x19848A0)
 };
 
 float3 UnpackNormal(uint u) {
@@ -88,40 +89,6 @@ float2 FrameUV(uint f, float2 uv) {
     float2 lo = cell / float2(GridX, GridY) + float2(UInset, 0.0);
     float2 hi = (cell + 1.0) / float2(GridX, GridY) - float2(UInset, 0.0);
     return lerp(lo, hi, uv);
-}
-
-V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
-    Particle p = Particles[Base + iid];
-    float2 c = float2((vid & 1) ? 1.0 : -1.0, (vid & 2) ? -1.0 : 1.0);
-    float s, co;
-    sincos(p.rot, s, co);
-    float2 r = float2(c.x * co - c.y * s, c.x * s + c.y * co) * (p.size * CornerScale);
-    float4 vp = mul(float4(p.pos, 1.0), View);
-    float centre = length(vp.xyz);
-    vp.xy += r;
-    V o;
-    o.pos = mul(vp, Proj);
-    o.color = p.color;
-    float2 uv = c * float2(0.5, -0.5) + 0.5;
-    float last = (float)(max(Frames, 1u) - 1u);
-    float fr = clamp(p.frame, 0.0, last);
-    uint f0 = (uint)fr;
-    uint f1 = min(f0 + 1u, (uint)last);
-    o.uv = float4(FrameUV(f0, uv), FrameUV(f1, uv));
-    o.misc = float3(fr - (float)f0, abs(vp.z), p.soft);
-    o.basis = float3(co, s, p.emissive);
-    o.vpos = float4(vp.xyz, centre);
-    o.nrm = float3(0.0, 1.0, 0.0);
-    if (Kind >= 3u) {
-        // The stock lit VS (0x196F5C0): normalize(normal * w.x + the corner's world direction * w.y + w.z times the
-        // direction from the view-space corner to the camera's world position: the stock mixes the two spaces).
-        float3 n = LitSet == 1u ? UnpackNormal(asuint(p.emissive)) : float3(0.0, 1.0, 0.0);
-        float3 side = float3(dot(r, View._11_12), dot(r, View._21_22), dot(r, View._31_32));
-        float3 cam = float3(Sys[4].w, Sys[5].w, Sys[6].w);
-        float3 sum = n * LitWeights.x + side * LitWeights.y + normalize(cam - vp.xyz) * LitWeights.z;
-        o.nrm = dot(sum, sum) > 1e-12 ? normalize(sum) : float3(0.0, 1.0, 0.0);
-    }
-    return o;
 }
 
 // The stock lit PS's light (0x196BA60): `v` the view-space position, `n` the world normal, `px` the target pixel.
@@ -185,6 +152,49 @@ float3 StockLight(float3 v, float3 n, float2 px) {
     return l + PointLights(v, n, px);
 }
 
+V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
+    Particle p = Particles[Base + iid];
+    float2 c = float2((vid & 1) ? 1.0 : -1.0, (vid & 2) ? -1.0 : 1.0);
+    float s, co;
+    sincos(p.rot, s, co);
+    float2 r = float2(c.x * co - c.y * s, c.x * s + c.y * co) * (p.size * CornerScale);
+    float4 vp = mul(float4(p.pos, 1.0), View);
+    float centre = length(vp.xyz);
+    vp.xy += r;
+    V o;
+    o.pos = mul(vp, Proj);
+    o.color = p.color;
+    float2 uv = c * float2(0.5, -0.5) + 0.5;
+    float last = (float)(max(Frames, 1u) - 1u);
+    float fr = clamp(p.frame, 0.0, last);
+    uint f0 = (uint)fr;
+    uint f1 = min(f0 + 1u, (uint)last);
+    o.uv = float4(FrameUV(f0, uv), FrameUV(f1, uv));
+    o.misc = float3(fr - (float)f0, abs(vp.z), p.soft);
+    o.basis = float3(co, s, p.emissive);
+    o.vpos = float4(vp.xyz, centre);
+    o.nrm = float3(0.0, 1.0, 0.0);
+    o.vlight = 0.0;
+    if (Kind >= 3u) {
+        // The stock lit VS (0x196F5C0): normalize(normal * w.x + the corner's world direction * w.y + w.z times the
+        // direction from the view-space corner to the camera's world position: the stock mixes the two spaces).
+        float3 n = LitSet == 1u ? UnpackNormal(asuint(p.emissive)) : float3(0.0, 1.0, 0.0);
+        float3 side = float3(dot(r, View._11_12), dot(r, View._21_22), dot(r, View._31_32));
+        float3 cam = float3(Sys[4].w, Sys[5].w, Sys[6].w);
+        float3 sum = n * LitWeights.x + side * LitWeights.y + normalize(cam - vp.xyz) * LitWeights.z;
+        o.nrm = dot(sum, sum) > 1e-12 ? normalize(sum) : float3(0.0, 1.0, 0.0);
+        // The set 0xC08 lights in its VS: shadow, lights and clustered point lights at the corner, interpolated
+        // across the card (a per-pixel shadow would cut sharp edges into the card that the stock never shows).
+        if (LitSet == 2u && o.pos.w > 1e-4) {
+            float2 ndc = o.pos.xy / o.pos.w;
+            float2 screen = float2(asuint(Sys[20].x), asuint(Sys[20].y));
+            float2 px = clamp((ndc * float2(0.5, -0.5) + 0.5) * screen, 0.0, screen - 1.0);
+            o.vlight = StockLight(vp.xyz, o.nrm, px);
+        }
+    }
+    return o;
+}
+
 // The distance from the camera plane of the scene at this pixel (SV_Position is in target pixels; the depth copy is the
 // whole target, so a split-screen viewport reads its own rectangle), from the hardware depth under this view's own
 // projection (d = (z*P22 + P32) / (z*P23 + P33) solved for z; standard and reversed depth alike).
@@ -235,7 +245,8 @@ float4 Ps(V i) : SV_Target0 {
     float a = saturate(t.a * i.color.a) * saturate(1.0 - (i.vpos.w * Fade.x + Fade.y)) * fade;
     if (Kind >= 3u) {
         if (LitSet == 2u && t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
-        float3 rgb = t.rgb * i.color.rgb * StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+        float3 light = LitSet == 2u ? i.vlight : StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+        float3 rgb = t.rgb * i.color.rgb * light;
         return Kind == 3u ? float4(rgb * a, a) : float4(rgb * fade, a);
     }
     if (Kind == 1u) return float4(t.rgb * i.color.rgb * a, a);
@@ -647,6 +658,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             context->PSSetConstantBuffers(2,2,lcb);
             ID3D11ShaderResourceView* lsrv[]={L.shadowMap,L.points,L.masks[0],L.masks[1],L.masks[2]};
             context->PSSetShaderResources(3,5,lsrv);
+            context->VSSetShaderResources(3,5,lsrv);   // the set 0xC08 lights per vertex
         }
         for(int b=0;b<count;++b) {
             const Batch& batch=batches[b];
