@@ -28,6 +28,8 @@ void Reset() noexcept;
 // draws it), returned; ShotEnd after it: the effect back, the round's layers queued (gpufx_layers.h).
 // Whether Install hooked EffectGenUtil::Explosion 0x2E5ED0 (its prologue is a jump now: edf41classes' fingerprint).
 bool ExplosionHooked() noexcept;
+// The same for EffectGenUtil::Explosion_Big 0x2E7A30.
+bool ExplosionBigHooked() noexcept;
 void* ShotBegin(unsigned char* weapon) noexcept;
 void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept;
 

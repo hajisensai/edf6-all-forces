@@ -603,11 +603,20 @@ constexpr unsigned char kExplosionSig[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41
 constexpr unsigned kExplosionLoop=0x2E68BC,kExplosionExtra=0x2E6F75;
 constexpr unsigned char kLoopJe[]={0x0F,0x84,0xB2,0x03,0x00,0x00},kLoopJmp[]={0xE9,0xB3,0x03,0x00,0x00,0x90};
 constexpr unsigned char kExtraJe[]={0x0F,0x84,0x55,0x01,0x00,0x00},kExtraJmp[]={0xE9,0x56,0x01,0x00,0x00,0x90};
+// EffectGenUtil::Explosion_Big 0x2E7A30 (egu, pos, dir, size, shake, flag): the same prologue; its particles are two
+// calls, 0x2E7A81 -> 0x2E4D90 (the smoke card) and 0x2E7BD4 -> 0x2E0B70 (Blazing, the 15 puffs' loop), both void, made
+// NOPs. The shake 0x104C00, the decal 0x2E7290 and the light 0x2E50C0 stay stock.
+constexpr unsigned kExplosionBig=0x2E7A30,kBigSmoke=0x2E7A81,kBigPuffs=0x2E7BD4;
+constexpr unsigned char kBigSmokeCall[]={0xE8,0x0A,0xD3,0xFF,0xFF},kBigPuffsCall[]={0xE8,0x97,0x8F,0xFF,0xFF};
+constexpr unsigned char kNop5[]={0x90,0x90,0x90,0x90,0x90};
 using ExplosionFn=void(__fastcall*)(void*,const float*,const float*,float,float,const float*,float);
+using ExplosionBigFn=void(__fastcall*)(void*,const float*,const float*,float,float,unsigned char);
 ExplosionFn explosionNext=nullptr;
+ExplosionBigFn explosionBigNext=nullptr;
 
-void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float size,float shake,const float* color,float light) {
-    if(optLayers.load(std::memory_order_relaxed))__try {
+void QueueBlast(const float* pos,float size) noexcept {
+    if(!optLayers.load(std::memory_order_relaxed))return;
+    __try {
         if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(size) && size>0.0f) {
             AcquireSRWLockExclusive(&eventLock);
             if(blastQueued<kQueueMost) {
@@ -617,34 +626,60 @@ void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float 
             ReleaseSRWLockExclusive(&eventLock);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float size,float shake,const float* color,float light) {
+    QueueBlast(pos,size);
     explosionNext(egu,pos,dir,size,shake,color,light);
 }
 
-// Once, at Install, with GpuFxLayers on (the stock blast particles off for the session: turning the layers off needs
-// a restart, the ini says so).
-bool InstallLayers() noexcept {
-    if(!Matches(kExplosion,kExplosionSig,sizeof(kExplosionSig)) || !Matches(kExplosionLoop,kLoopJe,sizeof(kLoopJe)) ||
-       !Matches(kExplosionExtra,kExtraJe,sizeof(kExtraJe)))return false;
+void __fastcall ExplosionBigHook(void* egu,const float* pos,const float* dir,float size,float shake,unsigned char flag) {
+    QueueBlast(pos,size);
+    explosionBigNext(egu,pos,dir,size,shake,flag);
+}
+
+// A head hook over the 15-byte prologue kExplosionSig (no relative instructions in it): the trampoline runs those bytes
+// and jumps back; nullptr when the bytes differ or the patch fails.
+void* HeadHook(unsigned rva,const void* hook) noexcept {
+    if(!Matches(rva,kExplosionSig,sizeof(kExplosionSig)))return nullptr;
     unsigned char trampoline[sizeof(kExplosionSig)+14];
     std::memcpy(trampoline,kExplosionSig,sizeof(kExplosionSig));
     const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
     std::memcpy(trampoline+sizeof(kExplosionSig),jump,6);
-    const auto back=reinterpret_cast<std::uintptr_t>(image+kExplosion+sizeof(kExplosionSig));
+    const auto back=reinterpret_cast<std::uintptr_t>(image+rva+sizeof(kExplosionSig));
     std::memcpy(trampoline+sizeof(kExplosionSig)+6,&back,8);
-    void* const code=edf::AllocateNearCode(image+kExplosion,trampoline,sizeof(trampoline));
-    if(!code)return false;
+    void* const code=edf::AllocateNearCode(image+rva,trampoline,sizeof(trampoline));
+    if(!code)return nullptr;
     unsigned char patch[sizeof(kExplosionSig)];std::memset(patch,0x90,sizeof(patch));
     std::memcpy(patch,jump,6);
-    const auto hook=reinterpret_cast<std::uintptr_t>(&ExplosionHook);
-    std::memcpy(patch+6,&hook,8);
-    explosionNext=reinterpret_cast<ExplosionFn>(code);
-    if(!edf::PatchCode(image+kExplosion,kExplosionSig,patch,sizeof(patch))) {
-        explosionNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
-        return false;
+    const auto target=reinterpret_cast<std::uintptr_t>(hook);
+    std::memcpy(patch+6,&target,8);
+    if(!edf::PatchCode(image+rva,kExplosionSig,patch,sizeof(patch))) {
+        VirtualFree(code,0,MEM_RELEASE);
+        return nullptr;
     }
+    return code;
+}
+
+// Once, at Install, with GpuFxLayers on (the stock blast particles off for the session: turning the layers off needs
+// a restart, the ini says so). Explosion_Big is optional on top: when its bytes differ it stays stock.
+bool InstallLayers() noexcept {
+    if(!Matches(kExplosionLoop,kLoopJe,sizeof(kLoopJe)) || !Matches(kExplosionExtra,kExtraJe,sizeof(kExtraJe)))return false;
+    void* const code=HeadHook(kExplosion,reinterpret_cast<const void*>(&ExplosionHook));
+    if(!code)return false;
+    explosionNext=reinterpret_cast<ExplosionFn>(code);
     const bool loop=edf::PatchCode(image+kExplosionLoop,kLoopJe,kLoopJmp,sizeof(kLoopJe));
     const bool extra=edf::PatchCode(image+kExplosionExtra,kExtraJe,kExtraJmp,sizeof(kExtraJe));
     Log("GPUFX layers: Explosion hook EDF+%X, its particles off: loop %d, extra %d",kExplosion,loop,extra);
+    if(Matches(kBigSmoke,kBigSmokeCall,sizeof(kBigSmokeCall)) && Matches(kBigPuffs,kBigPuffsCall,sizeof(kBigPuffsCall))) {
+        if(void* const big=HeadHook(kExplosionBig,reinterpret_cast<const void*>(&ExplosionBigHook))) {
+            explosionBigNext=reinterpret_cast<ExplosionBigFn>(big);
+            const bool smoke=edf::PatchCode(image+kBigSmoke,kBigSmokeCall,kNop5,sizeof(kNop5));
+            const bool puffs=edf::PatchCode(image+kBigPuffs,kBigPuffsCall,kNop5,sizeof(kNop5));
+            Log("GPUFX layers: Explosion_Big hook EDF+%X, its particles off: smoke %d, puffs %d",kExplosionBig,smoke,puffs);
+        }
+    }
+    if(!explosionBigNext)Log("GPUFX layers: Explosion_Big EDF+%X not as expected; it stays stock",kExplosionBig);
     return true;
 }
 
@@ -839,6 +874,7 @@ void Tick() noexcept {
 }
 
 bool ExplosionHooked() noexcept { return explosionNext!=nullptr; }
+bool ExplosionBigHooked() noexcept { return explosionBigNext!=nullptr; }
 
 void* ShotBegin(unsigned char* weapon) noexcept {
     if(!optLayers.load(std::memory_order_relaxed))return nullptr;
