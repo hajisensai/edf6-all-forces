@@ -26,9 +26,11 @@
 #pragma warning(push,0)
 #include <sapi.h>
 #pragma warning(pop)
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -529,6 +531,22 @@ ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsR
 ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
 ClipPcm wtClips[wt::kCount][wt::kMostVariants]{};   // the same (stereo ones kept so); wtThere: every variant read
 bool wtThere[wt::kCount]{};
+// The vehicles' clips War Thunder's recordings stand in for (the synthesised ones gone): the turret's and the loader's. A
+// one-shot plays the group's variants in turn, a loop the group's first; each levelled to the clip's kClipPeak (the whole
+// group by one gain: the vehicles' mix is set by those peaks). The player's own <dll>_veh_<name>.wav still first; a group
+// not read (logged once with the rest): the clip silent.
+struct WtStandIn { int clip,group; };
+constexpr WtStandIn kWtFor[]={{kClipTurret,wt::k_turret_loop},{kClipTurretStop,wt::k_turret_stop},
+                              {kClipBreechOpen,wt::k_reload_open},{kClipEject,wt::k_reload_eject},
+                              {kClipLoad,wt::k_reload_insert},{kClipShellRam,wt::k_reload_insert},
+                              {kClipClose,wt::k_reload_close}};
+int WtForClip(int c) noexcept {
+    for(const WtStandIn& s:kWtFor)if(s.clip==c)return s.group;
+    return -1;
+}
+int wtOf[kClipCount]{};        // set by MakeClips (as clips): the group standing in for a one-shot + 1, 0 none
+float wtLevel[kClipCount]{};   // its gain to the clip's peak
+std::atomic<unsigned> wtTurn{0};
 std::atomic<bool> clipsReady{false};
 bool clipsAsked=false;
 struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
@@ -604,13 +622,15 @@ std::vector<float> MadeClip(int c) {
     }
 }
 void MakeClipsNow() {
-    int own=0;
+    int own=0,made=0;
     for(int c=0;c<kClipCount;++c) {
         wchar_t path[MAX_PATH],suffix[64];
         UINT32 rate=kRate;
         swprintf_s(suffix,L"_veh_%ls.wav",kClipName[c]);
+        wtOf[c]=0;
         if(BesideDll(suffix,path) && ReadWav(path,clips[c].pcm,rate)){++own;Log("SOUND vehicles: %ls from %ls",kClipName[c],path);}
-        else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);}
+        else if(WtForClip(c)>=0){rate=kRate;clips[c].pcm.clear();wtOf[c]=WtForClip(c)+1;}   // filled below, once read
+        else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);++made;}
         clips[c].format=Mono16(rate);
     }
     int ult=0;
@@ -641,11 +661,28 @@ void MakeClipsNow() {
         wtThere[c]=all;
         if(all)++wtRead;
     }
+    int stoodIn=0;
+    for(int c=0;c<kClipCount;++c) {
+        const int g=wtOf[c]-1;
+        if(g<0 || !wtThere[g])continue;
+        int most=1;
+        for(int i=0;i<wt::kVariants[g];++i)for(std::int16_t x:wtClips[g][i].pcm)most=(std::max)(most,std::abs(static_cast<int>(x)));
+        wtLevel[c]=kClipPeak[c]*32767.0f/static_cast<float>(most);
+        ++stoodIn;
+        if(!kClipLoops[c])continue;
+        const ClipPcm& from=wtClips[g][0];   // a loop: its own copy at the level (its voice loops one buffer)
+        clips[c].pcm.resize(from.pcm.size());
+        for(std::size_t i=0;i<from.pcm.size();++i)
+            clips[c].pcm[i]=static_cast<std::int16_t>((std::clamp)(std::lround(from.pcm[i]*wtLevel[c]),-32768L,32767L));
+        clips[c].format=from.format;
+        wtOf[c]=0;
+    }
     if(wtMissing)Log("SOUND vehicles: %d War Thunder recording(s) missing (the first %ls): their %d group(s) stay silent, the "
                      "install is broken",wtMissing,firstMissing,wt::kCount-wtRead);
     clipsReady.store(true,std::memory_order_release);
-    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's; the ultimate's: %d of %d recorded; War Thunder's: %d "
-        "of %d groups",kClipCount-own,own,ult,kUltClipCount,wtRead,wt::kCount);
+    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's, %d War Thunder's; the ultimate's: %d of %d recorded; "
+        "War Thunder's: %d of %d groups",made,own,stoodIn,ult,kUltClipCount,
+        wtRead,wt::kCount);
 }
 DWORD WINAPI MakeClips(void*) {
     __try { MakeClipsNow(); }
@@ -829,7 +866,7 @@ bool ClipsReady() noexcept {
 }
 
 int OpenLoop(int clip) noexcept {
-    if(clip<0 || clip>=kClipCount || !kClipLoops[clip] || !ClipsReady())return -1;
+    if(clip<0 || clip>=kClipCount || !kClipLoops[clip] || !ClipsReady() || clips[clip].pcm.empty())return -1;
     for(int i=0;i<kLoops;++i) {
         if(loops[i].used)continue;
         const ClipPcm& c=clips[clip];
@@ -863,6 +900,13 @@ void CloseLoop(int i) noexcept {
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept;
 void PlayOnce(int clip,const Heard& h) noexcept {
     if(clip<0 || clip>=kClipCount || kClipLoops[clip] || !ClipsReady())return;
+    if(const int g=wtOf[clip]-1;g>=0) {
+        if(!wtThere[g])return;
+        Heard at=h;
+        at.gain*=wtLevel[clip];
+        PlayPcm(wtClips[g][wtTurn.fetch_add(1,std::memory_order_relaxed)%static_cast<unsigned>(wt::kVariants[g])],at);
+        return;
+    }
     PlayPcm(clips[clip],h);
 }
 bool UltClipThere(int clip) noexcept {
@@ -876,6 +920,7 @@ void PlayWt(int clip,int variant,const Heard& h) noexcept {
     if(WtThere(clip) && variant>=0 && variant<wt::kVariants[clip])PlayPcm(wtClips[clip][variant],h);
 }
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
+    if(c.pcm.empty())return;   // a clip not read: silent
     const UINT32 rate=c.format.nSamplesPerSec;
     const WORD channels=c.format.nChannels;
     // An idle voice already at this clip's rate and channels, else any idle one (remade so); none idle: dropped (a burst

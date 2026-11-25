@@ -8,14 +8,15 @@ The upstream assets are already vorbis-compressed (ogg renamed to .wav); they ar
 16-bit PCM.
 
 Made by `tools/wt_sound.py` (clip names and variant counts: src/wt_clips.h CREW_WT_CLIPS). Per file: channels kept
-(`art_attack_far`, `bomb_far`, `bypass_big`, `bypass_bullet`, `crack_big`, `crack_bullet`, `crack_mid`, `crack_small`, `ex_attack_far`, `ex_sub`, `sub`, `whiz`, `whiz_big`, `whiz_med`, `whiz_small`, `xs_far`: mixed to mono), resampled to 48000 Hz, 20 Hz high-pass, no
-per-file levelling or normalising, start kept, tail under -60 dBFS cut with a 20 ms fade-out;
+(`art_attack_far`, `bomb_far`, `bypass_big`, `bypass_bullet`, `crack_big`, `crack_bullet`, `crack_mid`, `crack_small`, `ex_attack_far`, `ex_sub`, `reload_close`, `reload_eject`, `reload_insert`, `reload_open`, `sub`, `turret_loop`, `turret_stop`, `whiz`, `whiz_big`, `whiz_med`, `whiz_small`, `xs_far`: mixed to mono), resampled to 48000 Hz, 20 Hz high-pass, no
+per-file levelling or normalising, start kept, tail under -60 dBFS cut with a 20 ms fade-out
+(loops kept whole: `turret_loop`);
 cut to a length (300 ms fade-out): close_150 5.0 s, tail_heavy 7.0 s, crack_big 2.5 s, bypass_big 2.0 s.
 One gain for the whole set: **0.680167** (set peak before gain 1.440824; scaled only when over 0.98).
 
 Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.
 
-Files: 172, total size 62653078 bytes (59.75 MiB).
+Files: 192, total size 68436586 bytes (65.27 MiB).
 
 | file | source (under the project root) | channels | seconds | bytes |
 |---|---|---|---|---|
@@ -191,3 +192,23 @@ Files: 172, total size 62653078 bytes (59.75 MiB).
 | incoming_art_3.wav | explosion/modules/layers_merge/art_shell_incoming-003.wav | 2 | 2.334 | 448092 |
 | incoming_bomb_1.wav | explosion/modules/layers_merge/bombs_incoming-001.wav | 2 | 2.072 | 397784 |
 | incoming_bomb_2.wav | explosion/modules/layers_merge/bombs_incoming-002.wav | 2 | 2.049 | 393420 |
+| turret_loop_1.wav | tanks/effects/turret_move/turret_turn_loop_1.wav | 1 | 27.686 | 2657858 |
+| turret_stop_1.wav | tanks/effects/turret_move/turret_klank_01.wav | 1 | 0.859 | 82466 |
+| turret_stop_2.wav | tanks/effects/turret_move/turret_klank_02.wav | 1 | 0.770 | 73936 |
+| turret_stop_3.wav | tanks/effects/turret_move/turret_klank_03.wav | 1 | 0.979 | 94070 |
+| reload_open_1.wav | tanks/weapon/cannons/cannon_reloading/reloading_open-001.wav | 1 | 1.500 | 144044 |
+| reload_open_2.wav | tanks/weapon/cannons/cannon_reloading/reloading_open-002.wav | 1 | 1.500 | 144044 |
+| reload_open_3.wav | tanks/weapon/cannons/cannon_reloading/reloading_open-003.wav | 1 | 2.000 | 192044 |
+| reload_open_4.wav | tanks/weapon/cannons/cannon_reloading/reloading_open-004.wav | 1 | 1.500 | 144044 |
+| reload_eject_1.wav | tanks/weapon/cannons/cannon_reloading/reloading_eject_shell-001.wav | 1 | 1.630 | 156480 |
+| reload_eject_2.wav | tanks/weapon/cannons/cannon_reloading/reloading_eject_shell-002.wav | 1 | 2.000 | 192044 |
+| reload_eject_3.wav | tanks/weapon/cannons/cannon_reloading/reloading_eject_shell-003.wav | 1 | 2.000 | 192020 |
+| reload_eject_4.wav | tanks/weapon/cannons/cannon_reloading/reloading_eject_shell-004.wav | 1 | 2.000 | 192044 |
+| reload_insert_1.wav | tanks/weapon/cannons/cannon_reloading/reloading_insert_projectile-001.wav | 1 | 2.000 | 192044 |
+| reload_insert_2.wav | tanks/weapon/cannons/cannon_reloading/reloading_insert_projectile-002.wav | 1 | 2.000 | 192044 |
+| reload_insert_3.wav | tanks/weapon/cannons/cannon_reloading/reloading_insert_projectile-003.wav | 1 | 2.000 | 192044 |
+| reload_insert_4.wav | tanks/weapon/cannons/cannon_reloading/reloading_insert_projectile-004.wav | 1 | 1.860 | 178568 |
+| reload_close_1.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-001.wav | 1 | 1.971 | 189230 |
+| reload_close_2.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-002.wav | 1 | 2.000 | 192044 |
+| reload_close_3.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-003.wav | 1 | 2.000 | 192044 |
+| reload_close_4.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-004.wav | 1 | 1.983 | 190396 |

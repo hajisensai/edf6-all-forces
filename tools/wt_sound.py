@@ -43,6 +43,8 @@ EXM = 'explosion/modules/'
 MERGE = EXM + 'layers_merge/'
 DEBRIS = 'tanks/impacts_objects/object_material_debris/'
 PASSBY = 'tanks/effects/projectile_passby/'
+TURRET = 'tanks/effects/turret_move/'
+RELOAD = W + 'cannons/cannon_reloading/'
 
 # (name, directory under the project root, file name with {} for the 1-based number, variants)
 _SPEC = (
@@ -99,12 +101,21 @@ _SPEC = (
     ('whiz_big', PASSBY, 'projectile_big_bypass_whiz-{:03d}', 3),
     ('incoming_art', MERGE, 'art_shell_incoming-{:03d}', 3),
     ('incoming_bomb', MERGE, 'bombs_incoming-{:03d}', 2),
+    # the turret and the loader (jetaudio.cpp kWtFor: the vehicles' kClipTurret .. kClipShellRam): turret_turn_loop,
+    # turret_klank, cannon_reloading
+    ('turret_loop', TURRET, 'turret_turn_loop_{}', 1), ('turret_stop', TURRET, 'turret_klank_{:02d}', 3),
+    ('reload_open', RELOAD, 'reloading_open-{:03d}', 4), ('reload_eject', RELOAD, 'reloading_eject_shell-{:03d}', 4),
+    ('reload_insert', RELOAD, 'reloading_insert_projectile-{:03d}', 4), ('reload_close', RELOAD, 'reloading_close-{:03d}', 4),
 )
 SOURCES = {n: [d + f.format(i) + '.wav' for i in range(1, k + 1)] for n, d, f, k in _SPEC}
 # Mixed down to mono: the low layers (the LFE's alone), the far layers (a point that far off) and the rounds going by (one
-# point placed where the round passes: the recordings' own pans are not where it passes here).
+# point placed where the round passes: the recordings' own pans are not where it passes here), the turret and the loader (one
+# point on the vehicle; the loop's voice is a mono one).
 MONO = {'sub', 'ex_sub', 'xs_far', 'ex_attack_far', 'art_attack_far', 'bomb_far', 'whiz', 'crack_bullet', 'crack_small',
-        'crack_mid', 'crack_big', 'bypass_bullet', 'bypass_big', 'whiz_small', 'whiz_med', 'whiz_big'}
+        'crack_mid', 'crack_big', 'bypass_bullet', 'bypass_big', 'whiz_small', 'whiz_med', 'whiz_big', 'turret_loop',
+        'turret_stop', 'reload_open', 'reload_eject', 'reload_insert', 'reload_close'}
+# Loops: kept whole (no tail cut, no fade: the end runs back into the start).
+LOOPS = {'turret_loop'}
 MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0, 'crack_big': 2.5, 'bypass_big': 2.0}
 
 
@@ -164,9 +175,11 @@ def process(path: str, mono: bool, max_seconds: float):
     return y
 
 
-def finish(y, gain: float):
+def finish(y, gain: float, loop: bool = False):
     import numpy as np
     y = y * gain
+    if loop:
+        return y
     loud = np.nonzero(np.abs(y).max(axis=1) > TAIL_FLOOR)[0]
     end = int(loud[-1]) + 1 if len(loud) else 1
     keep = min(len(y), end + int(TAIL_FADE * RATE))
@@ -195,16 +208,16 @@ def build(src: str, out: str) -> None:
             path = os.path.join(src, *rel.split('/'))
             if not os.path.isfile(path):
                 raise SystemExit(f'missing source: {rel}')
-            done[f'{name}_{i}.wav'] = (rel, process(path, name in MONO, MAX_SECONDS.get(name, 0.0)))
-    peak = max(float(np.abs(y).max()) for _, y in done.values())
+            done[f'{name}_{i}.wav'] = (name, rel, process(path, name in MONO, MAX_SECONDS.get(name, 0.0)))
+    peak = max(float(np.abs(y).max()) for _, _, y in done.values())
     gain = min(1.0, PEAK_LIMIT / peak)
     os.makedirs(out, exist_ok=True)
     for stale in os.listdir(out):
         if stale.endswith('.wav') and stale not in done:
             os.remove(os.path.join(out, stale))
     lines, total = [], 0
-    for fn, (rel, y) in done.items():
-        z = finish(y, gain)
+    for fn, (name, rel, y) in done.items():
+        z = finish(y, gain, name in LOOPS)
         write_wav(os.path.join(out, fn), z)
         size = os.path.getsize(os.path.join(out, fn))
         total += size
@@ -219,7 +232,8 @@ def build(src: str, out: str) -> None:
         '16-bit PCM.\n\n'
         'Made by `tools/wt_sound.py` (clip names and variant counts: src/wt_clips.h CREW_WT_CLIPS). Per file: channels kept\n'
         f'({", ".join(f"`{n}`" for n in sorted(MONO))}: mixed to mono), resampled to {RATE} Hz, 20 Hz high-pass, no\n'
-        f'per-file levelling or normalising, start kept, tail under -60 dBFS cut with a {int(TAIL_FADE * 1000)} ms fade-out;\n'
+        f'per-file levelling or normalising, start kept, tail under -60 dBFS cut with a {int(TAIL_FADE * 1000)} ms fade-out\n'
+        f'(loops kept whole: {", ".join(f"`{n}`" for n in sorted(LOOPS))});\n'
         f'cut to a length (300 ms fade-out): {", ".join(f"{n} {t} s" for n, t in MAX_SECONDS.items())}.\n'
         f'One gain for the whole set: **{gain:.6f}** (set peak before gain {peak:.6f}; scaled only when over {PEAK_LIMIT}).\n\n'
         'Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.\n\n'
