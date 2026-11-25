@@ -2767,8 +2767,8 @@ def turret_aim_wired() -> None:
     lockon = src('src/lockon.cpp')
     score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
     assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w)' in score
-    facts = lockon.split('void FactsOf(', 1)[1].split('\n}\n', 1)[0]
-    assert 'IsStoreWeapon(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
+    facts = lockon.split('const WeaponFacts& FactsOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StoreOf(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
     holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
     assert 'Rider::player' in holds and 'IsPlayer(owner)' in holds and 'SeatHolds(seat,w)' in holds
 

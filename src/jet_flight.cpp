@@ -7,6 +7,7 @@
 #include "jet_pullout.h"
 #include "hover_lift.h"
 #include "nacelle_reach.h"
+#include "support_entry.h"
 #include <cwchar>
 
 namespace crew {
@@ -322,19 +323,30 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
 void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
           float* speed) noexcept {
     const bool bomber=j.bay.bombSpeed>0.0f;
+    const bool sortie=j.sortie.pass!=SortiePass::none;
     float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
-    if(bomber)std::memcpy(away,j.bay.bombDir,12);
+    if(sortie)std::memcpy(away,j.sortie.line.dir,12);
+    else if(bomber)std::memcpy(away,j.bay.bombDir,12);
     if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
     const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
     Level(pos,away,climb<top ? climb : top,want);
     *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
+    if(sortie) {
+        float lo[2],hi[2];support::GroundEdge(MapPlayArea(),lo,hi);
+        // A pass can start off the map. Only the edge it is heading out through ends the flight.
+        const bool crossed=(away[0]>0.0f && pos[0]>=hi[0]) || (away[0]<0.0f && pos[0]<=lo[0]) ||
+                           (away[2]>0.0f && pos[2]>=hi[1]) || (away[2]<0.0f && pos[2]<=lo[1]);
+        if(crossed && !j.reap) {
+            Log("JET v=%p crossed the mission boundary (%.0f,%.0f): deleting",j.Vehicle(),pos[0],pos[2]);
+            j.reap=true;
+        }
+        return;
+    }
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
     const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    const bool salvo=j.sortie.pass==SortiePass::missileRain;
-    const float exitRange=salvo ? std::fmax(kWithdrawFar,NearDrawDistance()) : kWithdrawFar;
-    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || (!salvo && edge));
-    if(gone>exitRange || stalled) {
+    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || edge);
+    if(gone>kWithdrawFar || stalled) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
     }

@@ -981,15 +981,20 @@ int WithdrawSuite() {
         Jet salvo{};
         salvo.mode=Mode::withdraw;salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
         const auto& kind=KindOf(Role::interceptor);
-        const float viewer[3]{},nose[3]={1.0f,0.0f,0.0f};
-        const float inside[3]={1750.0f,300.0f,0.0f},outside[3]={3250.0f,300.0f,0.0f};
+        salvo.sortie.line.dir[0]=1.0f;
+        groundHalf=2100.0f;
+        const float viewer[3]={1950.0f,0.0f,0.0f},nose[3]={1.0f,0.0f,0.0f};
+        const float inbound[3]={-2110.0f,300.0f,0.0f},inside[3]={2090.0f,300.0f,0.0f};
+        const float outside[3]={2110.0f,300.0f,0.0f};
         float want[3]{},speed=0.0f;
-        config.viewDistance=3000.0f;
-        Away(salvo,kind,inside,nose,viewer,true,2000,want,&speed);
-        const bool visible=!salvo.reap;
-        Away(salvo,kind,outside,nose,viewer,true,3000,want,&speed);
-        const bool ok=visible && salvo.reap;
-        std::printf("salvo withdraws past the actual draw distance: %s\n",ok ? "ok" : "FAIL");
+        config.viewDistance=1000.0f;
+        Away(salvo,kind,inbound,nose,viewer,true,2000,want,&speed);
+        const bool onCourse=!salvo.reap && want[0]>0.0f;
+        Away(salvo,kind,inside,nose,viewer,true,90000,want,&speed);
+        const bool stillFlying=!salvo.reap;
+        Away(salvo,kind,outside,nose,viewer,true,91000,want,&speed);
+        const bool ok=onCourse && stillFlying && salvo.reap;
+        std::printf("salvo flies to the outbound mission boundary before reaping: %s\n",ok ? "ok" : "FAIL");
         ++cases;if(!ok)++fails;
         config=Config{};config.debug=true;
     }

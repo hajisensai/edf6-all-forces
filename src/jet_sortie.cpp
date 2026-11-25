@@ -1,7 +1,7 @@
 // The jets' sorties (docs/plan-2026-10-25-strikes.md §1.2; the user's strike list, 2026-10-25: 「打一轮就走」): a sortie
 // call's jets (tools/calls.py `sortie`, its SupportAircraft::sortie: ActivateSupportAircraft, jet_spawn.cpp) come in from
 // off the map through the support deployment as every call's, make one pass of their kind at the mark and withdraw
-// (Withdraw: jet.cpp Away climbs off away from the player, the dispatcher deletes it out of sight with its crew). Their
+// (Away follows the sortie heading to the mission boundary, where the dispatcher deletes it with its crew). Their
 // weapons are their own stores (the native rounds every machine sees), fired through jet_combat.cpp Fire as ever; what a
 // sortie changes is the way in, what is struck and when it is over. Geometry: src/sortie_plan.h.
 //   gunRun       the strike run (Strike: a shallow dive, rockets then guns) once: pulled out of its dive, it withdraws
