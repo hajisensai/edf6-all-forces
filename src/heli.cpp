@@ -2853,6 +2853,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
     if(!p)return nullptr;
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
+    if(Cfg().debug)Log("HELI v=%p player starts in flight mode (manual collective)",v);
     std::memcpy(p->aim,fwd,12);
     const float lift=FlightNow(v).lift,mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed (its stores' weight in it)
     p->hover=aim::HoverRotor(lift,mass);

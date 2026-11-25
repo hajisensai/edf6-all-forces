@@ -439,7 +439,7 @@ inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);
 // Where the map is seen whole: left of the kept windows, under the title bar, over the key guide.
-inline constexpr Area kOpenArea{36.f,140.f,806.f,930.f};
+inline constexpr Area kOpenArea{36.f,196.f,806.f,930.f};
 inline bool In(Area a,Pixel p) noexcept { return p.x>=a.x0 && p.x<a.x1 && p.y>=a.y0 && p.y<a.y1; }
 // The mouse over the panel is the panel's (a line clicked), not the map's.
 inline bool OverPanel(Pixel p) noexcept { return In(kPanel,p); }
@@ -711,17 +711,27 @@ inline bool RouteClear(Pixel a,Pixel b,float radius,float* cut) noexcept {
 // The title bar is the 整备 screen's (armory_skin.h layout: kTitle, Tab(i), Chip(i, count)), the map being its last
 // tab (armory.cpp kPages: 武器, 支援编成, 载具, 任务). The chips are the presets only (no ＋: presets are made in 整备).
 inline constexpr int kTabCount=4,kMapTab=3;
+// Mission select draws its own frame above the map. Fit the shared armory tabs and their hit regions below
+// its native title and between the side decorations.
+inline constexpr crew::armory::skin::Rect kMapTitle{170.f,120.f,1750.f,178.f};
+inline constexpr crew::armory::skin::Rect MapTitleRect(crew::armory::skin::Rect r) noexcept {
+    constexpr auto base=crew::armory::skin::layout::kTitle;
+    const float sx=kMapTitle.W()/base.W(),sy=kMapTitle.H()/base.H();
+    return {kMapTitle.x0+(r.x0-base.x0)*sx,kMapTitle.y0+(r.y0-base.y0)*sy,
+            kMapTitle.x0+(r.x1-base.x0)*sx,kMapTitle.y0+(r.y1-base.y0)*sy};
+}
+inline constexpr auto MapTab(int tab) noexcept { return MapTitleRect(crew::armory::skin::layout::Tab(tab)); }
+inline constexpr auto MapChip(int chip,int count) noexcept { return MapTitleRect(crew::armory::skin::layout::Chip(chip,count)); }
 inline int TitleTabAt(Pixel p) noexcept {
-    for(int i=0;i<kTabCount;++i)if(crew::armory::skin::layout::Tab(i).Contains(p.x,p.y))return i;
+    for(int i=0;i<kTabCount;++i)if(MapTab(i).Contains(p.x,p.y))return i;
     return -1;
 }
 inline int TitleChipAt(int presets,Pixel p) noexcept {
-    for(int i=0;i<presets;++i)if(crew::armory::skin::layout::Chip(i,presets).Contains(p.x,p.y))return i;
+    for(int i=0;i<presets;++i)if(MapChip(i,presets).Contains(p.x,p.y))return i;
     return -1;
 }
 inline bool OverTitle(Pixel p) noexcept {
-    const auto& t=crew::armory::skin::layout::kTitle;
-    return p.x>=t.x0 && p.x<t.x1 && p.y>=t.y0 && p.y<t.y1;
+    return kMapTitle.Contains(p.x,p.y);
 }
 // The preset mission `remembered` (loadout_preset.h MissionPreset, -1 none) starts with, of `count`: the remembered
 // one while the book has it, else the one in force (`current`, -1 none): what 本关出动 shows and what starting it
@@ -748,7 +758,7 @@ inline Progress CountProgress(const int* state,int n) noexcept {
     return p;
 }
 // The progress bar under the title bar, left of the kept windows; the share of it filled.
-inline constexpr Area kProgressBar{60.f,104.f,560.f,124.f};
+inline constexpr Area kProgressBar{170.f,183.f,440.f,193.f};
 inline float ProgressShare(const Progress& p) noexcept {
     return p.shown>0 ? static_cast<float>(p.cleared)/static_cast<float>(p.shown) : 0.f;
 }
