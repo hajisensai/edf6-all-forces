@@ -1,6 +1,7 @@
 // Offline check of the GPU particle effects' pure half (src/gpufx/gpufx_sim.h): curves, the pool's budget and
 // replacement, the step's physics, back-to-front ordering, the depth formulas against standard and reversed
 // projections, and the procedural smoke flipbook (clear tile borders, determinism, time).
+#include "gpufx/gpufx_layers.h"
 #include "gpufx/gpufx_sim.h"
 #include <chrono>
 #include <cstdio>
@@ -193,8 +194,70 @@ static void StockCard() {
     CHECK(StockGrid(0)==0 && StockGrid(3)==0 && StockGrid(8)==0 && StockGrid(25)==0);
 }
 
+// The War Thunder style layers: which events make which layers, the counts' lod, the lifetimes, the budget.
+static void Layers() {
+    static Pool<4096> pool;
+    const LayerDescs l=RegisterLayers(pool);
+    CHECK(l.Ready() && l.flash==0 && l.bigDust==9);
+    Rng rng(11);
+    ShotEvent rifle{{0.0f,1.5f,0.0f},{0.0f,0.0f,1.0f},0.0f,0.0f,false};
+    CHECK(SpawnShot(pool,l,rng,rifle,1.0f)==0 && pool.Live()==0);   // a small arm makes nothing
+    ShotEvent tank{{0.0f,2.5f,0.0f},{0.0f,0.0f,1.0f},10.0f,0.0f,true};
+    const ShotCounts tc=CountShot(tank,1.0f);
+    CHECK(tc.flash==2 && tc.ring==14 && tc.dust==18 && tc.smoke==16);
+    ShotEvent high=tank;high.pos[1]=30.0f;
+    CHECK(CountShot(high,1.0f).dust==0);   // no dust ring off the ground
+    ShotEvent launcher=tank;launcher.vehicle=false;
+    const ShotCounts lc=CountShot(launcher,1.0f);
+    CHECK(lc.flash==0 && lc.ring==0 && lc.dust==0 && lc.smoke==6);
+    const ShotCounts far=CountShot(tank,0.25f);
+    CHECK(far.ring<tc.ring && far.smoke<tc.smoke && far.smoke>=3);
+    CHECK(Near(LodGrow(1.0f),1.0f) && Near(LodGrow(0.25f),2.0f) && Near(LodGrow(0.01f),LodGrow(0.2f)));
+    const int made=SpawnShot(pool,l,rng,tank,1.0f);
+    CHECK(made==tc.flash+tc.ring+tc.dust+tc.smoke && pool.Live()==made);
+    // The flash and the ring are gone within a second; the smoke ball lives 8-20 s.
+    pool.Step(1.0f);
+    CHECK(pool.Live()==tc.dust+tc.smoke);
+    pool.Step(6.5f);
+    CHECK(pool.Live()==tc.smoke);
+    std::vector<Instance> out(4096);
+    int n=pool.Build(out.data(),4096,1);
+    float low=1e9f;
+    for(int i=0;i<n;++i)low=(std::min)(low,out[static_cast<std::size_t>(i)].pos[1]);
+    CHECK(n==tc.smoke && low>2.5f);   // risen
+    pool.Step(12.5f);
+    CHECK(pool.Live()==0);
+    pool.Clear();
+
+    // Blasts: the heavy one adds the wide dust; the lod cuts counts, never to nothing.
+    BlastEvent grenade{{0.0f,0.0f,0.0f},1.0f},shell{{0.0f,0.0f,0.0f},4.0f};
+    const BlastCounts gc=CountBlast(grenade,1.0f),sc=CountBlast(shell,1.0f),sf=CountBlast(shell,0.2f);
+    CHECK(gc.bigDust==0 && sc.bigDust>=3 && sc.black>gc.black);
+    CHECK(sf.black>=2 && sf.black<sc.black && sf.bigDust>=3 && sf.fireball>=1);
+    CHECK(CountBlast(BlastEvent{{0.0f,0.0f,0.0f},0.0f},1.0f).black==0);
+    const int blast=SpawnBlast(pool,l,rng,shell,1.0f);
+    CHECK(blast==sc.fireball+sc.dirt+sc.black+sc.debris+sc.residual+sc.bigDust && pool.Live()==blast);
+    pool.Step(3.0f);   // fireball, dirt, debris gone
+    CHECK(pool.Live()==sc.black+sc.residual+sc.bigDust);
+    n=pool.Build(out.data(),4096,1);
+    float top=-1e9f;
+    for(int i=0;i<n;++i)top=(std::max)(top,out[static_cast<std::size_t>(i)].pos[1]);
+    CHECK(top>10.0f);   // the black column rises
+    pool.Step(16.0f);   // past 19 s: the black column is gone, the dust cloud (20-30 s) is not
+    CHECK(pool.Live()>=sc.bigDust && pool.Live()<=sc.residual+sc.bigDust);
+    pool.Step(12.0f);
+    CHECK(pool.Live()==0);
+    pool.Clear();
+
+    // A heavy barrage stays in the budget: the pool replaces, never grows.
+    for(int i=0;i<400;++i){BlastEvent b{{static_cast<float>(i),0.0f,0.0f},6.0f};SpawnBlast(pool,l,rng,b,LayerLod(80.0f,pool.Live(),4096));}
+    CHECK(pool.Live()<=4096 && pool.Dropped()>0);
+    CHECK(Near(LayerLod(30.0f,0,4096),1.0f) && Near(LayerLod(120.0f,0,4096),0.5f) && Near(LayerLod(1000.0f,0,4096),0.2f));
+    CHECK(Near(LayerLod(30.0f,4000,4096),0.5f));
+}
+
 int main() {
-    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();
+    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();
     if(failures){std::printf("gpufx_sim: %d failure(s)\n",failures);return 1;}
     std::printf("gpufx_sim: ok\n");
     return 0;

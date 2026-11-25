@@ -104,7 +104,7 @@ public:
     void SetWind(float x,float y,float z) noexcept { wind_[0]=x;wind_[1]=y;wind_[2]=z; }
 
     // Returns the slot or -1 (an unknown desc).
-    int Spawn(int desc,const float pos[3],const float vel[3],Rng& rng) noexcept {
+    int Spawn(int desc,const float pos[3],const float vel[3],Rng& rng,float scale=1.0f) noexcept {
         const Desc* d=DescAt(desc);
         if(!d)return -1;
         int slot=-1;
@@ -126,7 +126,7 @@ public:
         Particle& p=p_[slot];
         std::memcpy(p.pos,pos,sizeof(p.pos));std::memcpy(p.vel,vel,sizeof(p.vel));
         p.age=0.0f;p.life=(std::max)(0.05f,rng.Range(d->lifeMin,d->lifeMax));
-        p.size0=rng.Range(d->sizeMin,d->sizeMax);
+        p.size0=rng.Range(d->sizeMin,d->sizeMax)*scale;
         p.rot=rng.Range(0.0f,6.2831853f);
         p.spin=rng.Range(-d->spin,d->spin);
         p.frame0=rng.Range(0.0f,8.0f);   // a frame offset so neighbours do not billow in step
