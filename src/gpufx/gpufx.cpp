@@ -23,11 +23,13 @@ constexpr unsigned char kParticleDrawCode[]={0x48,0x89,0x5C,0x24,0x18,0x57,0x48,
     0x48,0x8B,0xD9,0x41,0x83,0xF8,0x02,0x74,0x0A,0x41,0x83,0xF8,0x05,0x0F,0x85,0x96,0x01,0x00,0x00,0x48,0x83,0xB9,0x00,0x02,
     0x00,0x00,0x00};
 // The particle core's fields (ParticleRender embeds its core at +0x70; the 0x3027B0 draw takes a bare core): blend
-// +0x14 (0 opaque, 1 alpha, 2 additive, 3 custom), lit +0x110 (nonzero: the lit PS 0x196BA60, refused), frames +0x168,
+// +0x14 (0 opaque, 1 alpha, 2 additive, 3 custom), lit +0x110 (nonzero: the lit draw 0x1154F70; its set by the byte
+// +0x120: 0 the effect 0xA40 with VS 0x196F5C0 / PS 0x196BA60, else 0xC08 with VS 0x19848A0 / PS 0x19839A0; the
+// normal's weights +0x114 / +0x118 / +0x11C), frames +0x168,
 // live +0x190, snapshot +0x1A8 / count +0x1B8, texture holder +0x1C0 (its +0x10, the core's +0x1D0, holds the bound SRV's
 // holder: the SRV at that pointer's +0x10).
 constexpr std::size_t kCoreInRender=0x70;
-constexpr std::size_t kBlend=0x14,kLit=0x110,kFrames=0x168,kLive=0x190,kSnapshot=0x1A8,kSnapshotCount=0x1B8,
+constexpr std::size_t kBlend=0x14,kLit=0x110,kLitWeights=0x114,kLitSet=0x120,kFrames=0x168,kLive=0x190,kSnapshot=0x1A8,kSnapshotCount=0x1B8,
     kTexture=0x1C0,kTextureB=0x1D0,kCoreSize=0x200,kRenderWorld=0x2B0;
 constexpr std::size_t kEntry=0x40;   // a render snapshot entry: pos vec4, rgba, normal, rot +0x30, size +0x34, frame byte +0x38
 // The embedded core's own draw: void Draw(core, nativeCtx, const float world[16]) (MuzzleSmoke01, SmokeCandle, flame,
@@ -92,7 +94,7 @@ ComPtr<ID3D11Texture2D> observedDepth;
 unsigned observedFormat=0;
 std::vector<Instance> renderOwn;
 // The stock cards taken over in this view: their instances and one batch per stock draw (in the stock order).
-struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,grid,start,count; };
+struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,grid,start,count,litSet;float litWeights[3]; };
 std::vector<Instance> nativeInstances;
 std::vector<NativeBatch> nativeBatches;
 std::vector<Batch> batches;
@@ -105,6 +107,8 @@ struct Probe {
     int nativeLogged=0;
     unsigned nativeCalls=0,nativeReplaced=0,nativeOutside=0,nativeRefused=0,byPass[8]{};
     unsigned coreCalls=0,coreReplaced=0,refusedLit=0,refusedBlend=0,refusedGrid=0,stateLogged=0;
+    unsigned litReplaced=0,litSetB=0,litCaptures=0,litCaptureFailed=0;
+    bool litLogged=false;
     double cpuMs=0.0;unsigned cpuSamples=0;
     float jitterMin[2]{1e9f,1e9f},jitterMax[2]{-1e9f,-1e9f};
     bool lightLogged=false;
@@ -151,7 +155,8 @@ void TransformPoint(const float p[3],const float m[16],float out[4]) noexcept {
 
 // SEH-only readers (no C++ objects: __try needs none with destructors in the frame).
 struct NativeView {
-    int blend,lit,frames;
+    int blend,lit,litSet,frames;
+    float litWeights[3];
     std::uint64_t live,count;
     const unsigned char* snapshot;
     float world[16];
@@ -162,6 +167,8 @@ bool ReadNative(const unsigned char* obj,const float* world,NativeView& n) noexc
     __try {
         if(!Readable(obj,kCoreSize) || !world || !Readable(world,sizeof(n.world)))return false;
         n.blend=At<int>(obj,kBlend);n.lit=At<unsigned char>(obj,kLit);n.frames=At<int>(obj,kFrames);
+        n.litSet=At<unsigned char>(obj,kLitSet) ? 2 : 1;
+        std::memcpy(n.litWeights,obj+kLitWeights,sizeof(n.litWeights));
         n.live=At<std::uint64_t>(obj,kLive);n.count=At<std::uint64_t>(obj,kSnapshotCount);
         n.snapshot=At<const unsigned char*>(obj,kSnapshot);
         std::memcpy(n.world,world,sizeof(n.world));
@@ -196,6 +203,15 @@ int CopySnapshot(const NativeView& n,Instance* out,int most) noexcept {
             o.frame=static_cast<float>(At<unsigned char>(e,0x38));
             // The stock PS has no soft fade (a hard cut where a card meets the ground): ours fades over half its size.
             o.soft=std::clamp(o.size*0.5f,0.05f,3.0f);o.emissive=0.0f;
+            if(n.lit && n.litSet==1) {
+                // The set 0xA40's normal: the entry's +0x20 through the world matrix's rotation, normalised.
+                const float* sn=reinterpret_cast<const float*>(e+0x20);
+                float w[3];
+                for(int c=0;c<3;++c)w[c]=sn[0]*n.world[c]+sn[1]*n.world[4+c]+sn[2]*n.world[8+c];
+                const float len=std::sqrt(w[0]*w[0]+w[1]*w[1]+w[2]*w[2]);
+                if(len>1e-6f){for(float& v:w)v/=len;}
+                o.emissive=PackNormal(w);
+            }
         }
         return count;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
@@ -296,6 +312,52 @@ struct FadeReader {
 };
 FadeReader fade;
 
+// The stock lighting a lit takeover draws with (Kind::nativeLit*): what the stock lit draw binds, taken after the first
+// stock lit draw of each world view (that one stays stock). The set 0xA40 binds it to its PS (b0 system, b3 shadow,
+// t1 shadow map, t2 point lights, t3..t5 cluster masks), the set 0xC08 to its VS (b0, b3, t0 .. t4). Render thread.
+struct LitCapture {
+    ComPtr<ID3D11Buffer> system,shadow;
+    ComPtr<ID3D11ShaderResourceView> views[5];
+    bool complete=false,tried=false;
+    void Reset() noexcept { system.Reset();shadow.Reset();for(auto& v:views)v.Reset();complete=tried=false; }
+    static bool BufferView(ID3D11ShaderResourceView* v) noexcept {
+        if(!v)return false;
+        D3D11_SHADER_RESOURCE_VIEW_DESC d{};v->GetDesc(&d);
+        return d.ViewDimension==D3D11_SRV_DIMENSION_BUFFER || d.ViewDimension==D3D11_SRV_DIMENSION_BUFFEREX;
+    }
+    static unsigned Bytes(ID3D11Buffer* b) noexcept { if(!b)return 0;D3D11_BUFFER_DESC d{};b->GetDesc(&d);return d.ByteWidth; }
+    void Capture(ID3D11DeviceContext* context,int set) noexcept {
+        tried=true;
+        ID3D11Buffer* cb[4]{};ID3D11ShaderResourceView* srv[6]{};
+        if(set==1){context->PSGetConstantBuffers(0,4,cb);context->PSGetShaderResources(1,5,srv);}
+        else{context->VSGetConstantBuffers(0,4,cb);context->VSGetShaderResources(0,5,srv);}
+        system.Attach(cb[0]);shadow.Attach(cb[3]);
+        if(cb[1])cb[1]->Release();
+        if(cb[2])cb[2]->Release();
+        for(int i=0;i<5;++i)views[i].Attach(srv[i]);
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        if(views[0])views[0]->GetDesc(&sd);
+        complete=Bytes(system.Get())>=608 && Bytes(shadow.Get())>=400 && views[0] && sd.ViewDimension==D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        for(int i=1;i<5;++i)complete=complete && BufferView(views[i].Get());
+        if(complete)++probe.litCaptures;else ++probe.litCaptureFailed;
+        if(!probe.litLogged && optProbe.load(std::memory_order_relaxed)) {
+            probe.litLogged=true;
+            Log("GPUFX lit capture (set %d): system %u bytes, shadow %u bytes, shadow map dim %d, lights %d %d %d %d -> %s",set,
+                Bytes(system.Get()),Bytes(shadow.Get()),views[0] ? static_cast<int>(sd.ViewDimension) : -1,BufferView(views[1].Get()),
+                BufferView(views[2].Get()),BufferView(views[3].Get()),BufferView(views[4].Get()),complete ? "complete" : "INCOMPLETE");
+        }
+        if(!complete){system.Reset();shadow.Reset();for(auto& v:views)v.Reset();}
+    }
+    StockLights Lights() const noexcept {
+        StockLights l{};
+        if(!complete)return l;
+        l.system=system.Get();l.shadow=shadow.Get();l.shadowMap=views[0].Get();l.points=views[1].Get();
+        for(int i=0;i<3;++i)l.masks[i]=views[2+i].Get();
+        return l;
+    }
+};
+LitCapture litCapture;
+
 // GpuFxNative=2, the A/B picture in one frame: of a taken-over draw, the entries right of the screen's centre are ours,
 // the left ones stay in the stock snapshot (moved to its front, its count cut) for the stock draw, then put back.
 float splitView[16]{};
@@ -348,10 +410,11 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
     const bool read=ReadNative(core,world,n);
     ID3D11DeviceContext* context=native && Readable(native,0x10) ? At<ID3D11DeviceContext*>(native,8) : nullptr;
     if(inWorld && context)fade.Copy(context);
-    // The takeover: our world's view, an unlit card emitter, blend 1 / 2, a stock atlas grid, its texture's chain known.
+    // The takeover: our world's view, a card emitter (a lit one once this view's stock lighting is captured), blend
+    // 1 / 2, a stock atlas grid, its texture's chain known.
     const int chain=textureChain.load(std::memory_order_relaxed);
     const int grid=read ? StockGrid(n.frames) : 0;
-    if(wantNative && read && inWorld && chain && n.live && n.lit==0 && (n.blend==1 || n.blend==2) && n.count>0 && grid) {
+    if(wantNative && read && inWorld && chain && n.live && (n.lit==0 || litCapture.complete) && (n.blend==1 || n.blend==2) && n.count>0 && grid) {
         auto* srv=static_cast<ID3D11ShaderResourceView*>(Resolve(n,chain));
         const int room=Renderer::kMaxInstances-kBudget-static_cast<int>(nativeInstances.size());
         if(srv && room>0 && static_cast<int>(nativeBatches.size())<Renderer::kMaxBatches-1) {
@@ -363,10 +426,13 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
             if(got>0 && nativeMode==2)all=Split(core,n,start,got);
             const int kept=static_cast<int>(nativeInstances.size()-start);
             if(kept>0) {
-                NativeBatch b{};b.texture=srv;b.kind=n.blend==2 ? Kind::nativeAdditive : Kind::nativeAlpha;
+                NativeBatch b{};b.texture=srv;
+                b.kind=n.lit ? (n.blend==2 ? Kind::nativeLitAdditive : Kind::nativeLitAlpha) : n.blend==2 ? Kind::nativeAdditive : Kind::nativeAlpha;
                 b.frames=grid*grid;b.grid=grid;b.start=static_cast<int>(start);b.count=kept;
+                b.litSet=n.lit ? n.litSet : 0;std::memcpy(b.litWeights,n.litWeights,sizeof(b.litWeights));
                 nativeBatches.push_back(std::move(b));
                 ++probe.nativeReplaced;if(source==Source::core)++probe.coreReplaced;
+                if(n.lit){++probe.litReplaced;if(n.litSet==2)++probe.litSetB;}
             }
             if(got>0)return nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws what is left)
         }
@@ -398,6 +464,7 @@ void AfterStock(const unsigned char* core,const float* world,void* native,bool l
     if(!context)return;
     NativeView n{};
     if(!ReadNative(core,world,n) || n.live==0)return;
+    if(n.lit && inWorld && !litCapture.tried)litCapture.Capture(context,n.litSet);
     void* bound=BoundTexture(context);
     if(bound && !textureChain.load(std::memory_order_relaxed)) {
         for(int c=1;c<=3;++c) if(Resolve(n,c)==bound){textureChain.store(c,std::memory_order_relaxed);Log("GPUFX native texture chain %d (%s) is the bound SRV",c,
@@ -616,7 +683,9 @@ void Reset() noexcept {
 void WorldBegin(ID3D11DeviceContext*,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire))return;
     currentView=view;inWorld=MainView(view);observed=false;
-    if(inWorld)std::memcpy(splitView,static_cast<const unsigned char*>(view)+0x20,sizeof(splitView));observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
+    if(inWorld)std::memcpy(splitView,static_cast<const unsigned char*>(view)+0x20,sizeof(splitView));
+    observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
+    litCapture.Reset();
     nativeInstances.clear();nativeBatches.clear();
 }
 
@@ -662,6 +731,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         fade.Read(context);
         vp.fadeMul=fade.mul;vp.fadeAdd=fade.add;
         vp.exposure=exposure;
+        vp.lights=litCapture.Lights();
         batches.clear();
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
@@ -671,13 +741,14 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             Batch b{};b.texture=nb.texture.Get();b.kind=nb.kind;b.frames=nb.frames;
             b.gridX=b.gridY=nb.grid;b.frames=nb.frames;b.cornerScale=0.70710678f;b.uInset=0.0005f;b.sorted=false;
             b.instances=nativeInstances.data()+nb.start;b.count=nb.count;
+            b.litSet=nb.litSet;std::memcpy(b.litWeights,nb.litWeights,sizeof(b.litWeights));
             batches.push_back(b);
         }
         Stats st{};
         bool drew=false;
         if(!batches.empty() && depth)drew=renderer.Draw(context,depth.Get(),format,vp,batches.data(),static_cast<int>(batches.size()),&st);
         if(drew)Calibrate(st,vp);
-        nativeInstances.clear();nativeBatches.clear();
+        nativeInstances.clear();nativeBatches.clear();litCapture.Reset();
         const double ms=NowMs()-t0;
         probe.cpuMs+=ms;++probe.cpuSamples;
         for(int a=0;a<2;++a){const float j=vp.proj[8+a];probe.jitterMin[a]=(std::min)(probe.jitterMin[a],j);probe.jitterMax[a]=(std::max)(probe.jitterMax[a],j);}
@@ -707,6 +778,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             static_cast<int>(renderOwn.size()),kBudget,poolDropped.load(std::memory_order_relaxed),probe.nativeCalls,probe.byPass[2],probe.byPass[5],
             probe.coreCalls,probe.nativeReplaced,probe.coreReplaced,probe.nativeRefused,probe.refusedLit,probe.refusedBlend,probe.refusedGrid,
             probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
+        Log("GPUFX   lit taken over=%u (set 0xC08 %u); lighting captured in %u views, incomplete %u",probe.litReplaced,probe.litSetB,
+            probe.litCaptures,probe.litCaptureFailed);
         Log("GPUFX   scene luma median %.3f max %.3f -> exposure %.3f; stock fade (b0 %u bytes, %s) mul %.6f add %.4f",st.sceneLuma,st.sceneLumaMax,
             exposure,fade.bytes,fade.known ? "read" : "not yet",fade.mul,fade.add);
         probe.cpuMs=0.0;probe.cpuSamples=0;

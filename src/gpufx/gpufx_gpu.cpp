@@ -40,8 +40,20 @@ cbuffer BatchConstants : register(b1) {
     uint Kind;
     float CornerScale;
     float UInset;
-    float Unused;
+    uint LitSet;
+    float4 LitWeights;   // xyz: the normal's, the corner direction's and the camera direction's weights
 };
+// The stock lighting (bound only with lit batches): xgl_system (cb0 of the stock particle shaders) and
+// xgl_additional_light_setting (their cb3), the shadow map array and the clustered point lights.
+cbuffer StockSystem : register(b2) { float4 Sys[38]; };
+cbuffer StockShadow : register(b3) { float4 Sh[25]; };
+struct PointLight { float4 posRange; float4 colorFalloff; float4 unused; float4 cone; };   // +56 cone.z, +60 cone.w
+struct ClusterMask { uint w[65]; };
+Texture2DArray<float4> ShadowMap : register(t3);
+StructuredBuffer<PointLight> Points : register(t4);
+StructuredBuffer<ClusterMask> MaskX : register(t5);
+StructuredBuffer<ClusterMask> MaskY : register(t6);
+StructuredBuffer<ClusterMask> MaskZ : register(t7);
 struct Particle {
     float3 pos;
     float size;
@@ -63,7 +75,12 @@ struct V {
     float3 misc : TEXCOORD1;    // frame blend, distance from the camera plane, soft range
     float3 basis : TEXCOORD2;   // cos and sin of the rotation, emissive
     float4 vpos : TEXCOORD3;    // the corner's view-space position; w: the centre's distance from the camera
+    float3 nrm : TEXCOORD4;     // the lit kinds: the stock VS's world normal
 };
+
+float3 UnpackNormal(uint u) {
+    return float3(u & 1023u, (u >> 10) & 1023u, (u >> 20) & 1023u) / 1023.0 * 2.0 - 1.0;
+}
 
 // A tile's uv: row-major from the top left, u trimmed by UInset on both sides (the stock VS's frc(u) + 0.0005).
 float2 FrameUV(uint f, float2 uv) {
@@ -94,7 +111,74 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     o.misc = float3(fr - (float)f0, abs(vp.z), p.soft);
     o.basis = float3(co, s, p.emissive);
     o.vpos = float4(vp.xyz, centre);
+    o.nrm = float3(0.0, 1.0, 0.0);
+    if (Kind >= 3u) {
+        // The stock lit VS (0x196F5C0): normalize(normal * w.x + the corner's world direction * w.y + w.z times the
+        // direction from the view-space corner to the camera's world position: the stock mixes the two spaces).
+        float3 n = LitSet == 1u ? UnpackNormal(asuint(p.emissive)) : float3(0.0, 1.0, 0.0);
+        float3 side = float3(dot(r, View._11_12), dot(r, View._21_22), dot(r, View._31_32));
+        float3 cam = float3(Sys[4].w, Sys[5].w, Sys[6].w);
+        float3 sum = n * LitWeights.x + side * LitWeights.y + normalize(cam - vp.xyz) * LitWeights.z;
+        o.nrm = dot(sum, sum) > 1e-12 ? normalize(sum) : float3(0.0, 1.0, 0.0);
+    }
     return o;
+}
+
+// The stock lit PS's light (0x196BA60): `v` the view-space position, `n` the world normal, `px` the target pixel.
+float ShadowAt(float3 v) {
+    float z = abs(v.z);
+    if (!(Sh[17].x >= z)) return 1.0;
+    uint k = z < Sh[8].x ? 0u : 9u;
+    float slice = z < Sh[8].x ? 0.0 : 1.0;
+    float4 p = float4(v, 1.0);
+    float4 q = float4(dot(p, Sh[k + 0]), dot(p, Sh[k + 1]), 0.0, 1.0);
+    float d = dot(p, Sh[k + 2]);
+    q.z = d + Sh[k + 8].y;
+    float2 s = float2(dot(q, Sh[k + 4]), dot(q, Sh[k + 5]));
+    float ref = dot(q, Sh[k + 6]);
+    float range = dot(float4(q.xy, d - Sh[k + 8].z, 1.0), Sh[k + 6]) - ref;
+    uint w, h, layers;
+    ShadowMap.GetDimensions(w, h, layers);
+    float2 t = (s * float2(0.5, -0.5) + 0.5) * float2(w, h);
+    float2 f = frac(t);
+    int2 i = int2(t);
+    float4 m = float4(ShadowMap.Load(int4(i, slice, 0)).x, ShadowMap.Load(int4(i + int2(1, 0), slice, 0)).x,
+                      ShadowMap.Load(int4(i + int2(0, 1), slice, 0)).x, ShadowMap.Load(int4(i + int2(1, 1), slice, 0)).x);
+    m = saturate((m - ref) / range + 1.0);
+    float2 row = lerp(m.xz, m.yw, f.x);
+    float lit = lerp(row.x, row.y, f.y);
+    float away = saturate((z - Sh[18].x) * Sh[18].y);
+    return lit + away * (1.0 - lit);
+}
+float3 StockLight(float3 v, float3 n, float2 px) {
+    float3 l = ShadowAt(v) * saturate(-dot(n, Sys[21].xyz)) * Sys[22].rgb;
+    l += saturate(-dot(n, Sys[24].xyz)) * Sys[25].rgb;
+    l += saturate(-dot(n, Sys[27].xyz)) * Sys[28].rgb;
+    l += saturate(-dot(n, Sys[30].xyz)) * Sys[31].rgb;
+    l += Sys[33].rgb;
+    float4 v1 = float4(v, 1.0);
+    float3 w = float3(dot(v1, Sys[4]), dot(v1, Sys[5]), dot(v1, Sys[6]));
+    float4 w1 = float4(w, 1.0);
+    float2 screen = float2(asuint(Sys[20].x), asuint(Sys[20].y));
+    uint2 cxy = (uint2)(px / screen * 128.0);
+    uint cz = (uint)(dot(w1, Sh[23]) / dot(w1, Sh[24]) * 128.0);
+    if ((MaskX[cxy.x].w[64] & MaskY[cxy.y].w[64] & MaskZ[cz].w[64]) == 0u) return l;
+    uint words = (asuint(Sh[19].y) + 31u) >> 5;
+    [loop] for (uint k = 0u; k < words; ++k) {
+        uint bits = MaskX[cxy.x].w[k] & MaskY[cxy.y].w[k] & MaskZ[cz].w[k];
+        [loop] while (bits != 0u) {
+            uint b = firstbitlow(bits);
+            bits &= ~(1u << b);
+            PointLight pl = Points[k * 32u + b];
+            float3 d = w - pl.posRange.xyz;
+            float dist = length(d);
+            if (dist < pl.posRange.w) {
+                float t = pl.cone.z - dot(d / dist, n) * (1.0 - pl.cone.z);
+                if (t > 0.0) l += pow(max(1.0 - dist * pl.colorFalloff.w, 0.0), pl.cone.w) * saturate(t) * pl.colorFalloff.rgb;
+            }
+        }
+    }
+    return l;
 }
 
 // The distance from the camera plane of the scene at this pixel (SV_Position is in target pixels; the depth copy is the
@@ -131,6 +215,11 @@ float4 Ps(V i) : SV_Target0 {
     // The stock forward PS (0x19670A0): rgb = texel * colour (no saturate: HDR), a = sat(texel.a * colour.a) times
     // sat(the VS's distance fade); ours adds the soft depth fade.
     float a = saturate(t.a * i.color.a) * saturate(1.0 - (i.vpos.w * Fade.x + Fade.y)) * fade;
+    if (Kind >= 3u) {
+        if (LitSet == 2u && t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
+        float3 rgb = t.rgb * i.color.rgb * StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+        return Kind == 3u ? float4(rgb * a, a) : float4(rgb * fade, a);
+    }
     if (Kind == 1u) return float4(t.rgb * i.color.rgb * a, a);
     return float4(t.rgb * i.color.rgb * fade, a);
 }
@@ -156,7 +245,9 @@ struct FrameConstants {
 };
 struct BatchConstants {
     std::uint32_t base,gridX,gridY,frames,kind;
-    float cornerScale,uInset,unused;
+    float cornerScale,uInset;
+    std::uint32_t litSet;
+    float litWeights[4];
 };
 static_assert(sizeof(FrameConstants)%16==0 && sizeof(BatchConstants)%16==0,"constant buffer sizes");
 
@@ -529,6 +620,16 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->PSSetShaderResources(2,1,&dv);
         ID3D11SamplerState* sm=s.sampler.Get();
         context->PSSetSamplers(0,1,&sm);
+        // The stock lighting, for the lit batches: borrowed buffers and views, bound read-only.
+        const StockLights& L=view.lights;
+        const bool litBound=L.Complete();
+        if(litBound) {
+            ID3D11Buffer* lcb[]={L.system,L.shadow};
+            context->VSSetConstantBuffers(2,2,lcb);
+            context->PSSetConstantBuffers(2,2,lcb);
+            ID3D11ShaderResourceView* lsrv[]={L.shadowMap,L.points,L.masks[0],L.masks[1],L.masks[2]};
+            context->PSSetShaderResources(3,5,lsrv);
+        }
         for(int b=0;b<count;++b) {
             const Batch& batch=batches[b];
             if(ranges[b].count==0)continue;
@@ -540,12 +641,15 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             bc.gridY=static_cast<std::uint32_t>(batch.gridY>0 ? batch.gridY : 1);
             bc.frames=static_cast<std::uint32_t>(batch.frames>0 ? batch.frames : 1);
             bc.kind=static_cast<std::uint32_t>(batch.kind);bc.cornerScale=batch.cornerScale;bc.uInset=batch.uInset;
+            const bool lit=batch.kind==Kind::nativeLitAlpha || batch.kind==Kind::nativeLitAdditive;
+            if(lit && !litBound)continue;
+            bc.litSet=static_cast<std::uint32_t>(batch.litSet);std::memcpy(bc.litWeights,batch.litWeights,sizeof(batch.litWeights));
             if(FAILED(context->Map(s.batchCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))continue;
             std::memcpy(map.pData,&bc,sizeof(bc));
             context->Unmap(s.batchCb.Get(),0);
             context->PSSetShaderResources(1,1,&tex);
-            ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha ? s.blendStockAlpha.Get() :
-                batch.kind==Kind::nativeAdditive ? s.blendStockAdd.Get() : s.blend.Get();
+            ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha || batch.kind==Kind::nativeLitAlpha ? s.blendStockAlpha.Get() :
+                batch.kind==Kind::nativeAdditive || batch.kind==Kind::nativeLitAdditive ? s.blendStockAdd.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
             context->DrawInstanced(4,static_cast<UINT>(ranges[b].count),0,0);
             st.drawn+=ranges[b].count;++st.batches;
