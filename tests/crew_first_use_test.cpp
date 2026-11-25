@@ -135,6 +135,7 @@ void EmcInput(unsigned char *) noexcept{unexpectedHook();return;}
 void EmcFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void EmcTick(void) noexcept{unexpectedHook();return;}
 void SazabiSoundTick(void) noexcept{unexpectedHook();return;}
+void BlastSoundTick(void) noexcept{unexpectedHook();return;}
 void SidecarFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool SidecarBoard(unsigned char *,unsigned char *) noexcept{unexpectedHook();return {};}
 void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
