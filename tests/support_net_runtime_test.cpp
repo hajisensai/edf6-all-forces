@@ -105,13 +105,13 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 // The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
-// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to this fixture's 200-byte frames).
+// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to the fixture's frames).
 bool ReceiveGravity(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {++fixture::gravityPackets;return true;}
 // Its state kinds: byte 8 is 1 (a hold); any other comes reliably only.
 bool GravityTakesState(const void* bytes,std::size_t size) noexcept {return size>8 && static_cast<const unsigned char*>(bytes)[8]==1;}
 plugin_net::Channel GravityNetChannel() noexcept {
     plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=0;
-    c.minSize=c.maxSize=200;c.receive=&ReceiveGravity;c.takesState=&GravityTakesState;return c;
+    c.minSize=c.maxSize=support_net::kWireSize;c.receive=&ReceiveGravity;c.takesState=&GravityTakesState;return c;
 }
 bool ReceiveFloatGun(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel FloatGunNetChannel() noexcept {

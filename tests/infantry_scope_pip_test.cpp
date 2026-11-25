@@ -229,6 +229,7 @@ int WorldEndChecks() {
     config.enabled=true;config.infantryScope=2;lensHooked.store(true);
     Open(GetTickCount64());
     Check(Step(camera)==scopepip::kBaseFov,"the camera left the frame unmagnified");
+    Check(!InfantryScopeNow(nullptr),"the PiP warm-up never draws the full-screen eyepiece");
     Check(InfantryScopeLensOwner(lensView)==soldier,"the magnified view omits its scope owner's body");
     Check(!InfantryScopeLensOwner(mainView) && !InfantryScopeLensOwner(shadowView),"the main and shadow views keep the soldier");
     // One frame in the render thread's order: the lens view's world end (the last recording's, after its main view's
@@ -279,6 +280,7 @@ int WorldEndChecks() {
     g.Restore(g.main);
     InfantryScopeLensCommand(g.context.Get());
     Check(g.Read(g.main)==g.main.start && !lensShown.load(),"no views held: the command draws nothing");
+    Check(!InfantryScopeNow(nullptr),"a missed composite frame cannot flash the full-screen mask");
     // The lens view's world end with no main view's after it: nothing.
     g.Bind(g.lens);End(g.context.Get(),lensView);
     InfantryScopeLensCommand(g.context.Get());

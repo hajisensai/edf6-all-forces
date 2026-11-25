@@ -2899,7 +2899,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal
     // 1. The attitude wanted.
     float pitch=0.0f;
-    aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,fore,&pitch);
+    aim::Want w=aim::Instructor(p.hold,p.aim,fwd,pos,p.vel,vert,side,top,kPlayerClimb,maxTilt,grounded,lifting,clear,fore,&pitch,
+                                p.mode.on);
     if(!grounded && !lifting && !p.mode.on && std::fabs(fore)<0.05f && std::fabs(side)<0.05f) {
         aim::Coast(w.vel,p.vel,dt);
         p.hold.speed=vec::Dot(w.vel,fwd);
@@ -2926,7 +2927,10 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
         const aim::Rotor rotor{FlightNow(v).lift,At<float>(v,kVertDamp),At<float>(v,kRotorIdle),At<float>(v,kRotorUp),
                                At<float>(v,kRotorDown)};
-        Put<float>(v,kInThrottle,aim::CollectiveThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,rotor));
+        const float actual=At<float>(v,kRotor);
+        const float throttle=p.mode.on ? aim::CollectiveThrottle(w.climb,p.vel[1],actual,&p.hover,learn,dt,rotor) :
+                                        aim::ManualCollectiveThrottle(vert,p.hover,actual,rotor);
+        Put<float>(v,kInThrottle,throttle);
     } else if(vert>0.0f)Put<float>(v,kInThrottle,1.0f);
     if(!p.flying)Log("HELI v=%p the mouse-aim flight (instructor): top %.1f m/s, hover rotor %.3f, max tilt %.0f deg",v,top,p.hover,
                      maxTilt*180.0f/kPi);

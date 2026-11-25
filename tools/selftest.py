@@ -1875,7 +1875,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst,\s+andryushaBlast, andryushaFire \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst, barrageMissile,\s+andryushaBlast, andryushaFire \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -2178,7 +2178,7 @@ def andryusha_marks_agree() -> None:
     files = re.findall(r'L"(EDF6VC_ANDRYUSHA_\w+\.SGO)"', bay)
     assert files == list(vc.ANDRYUSHA_BOMBLET_FILES), files
     enum = re.search(r'enum class EmcRound \{(.*?)\};', src('src/crew.h'), re.S).group(1)
-    assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,andryushaBlast,andryushaFire'), enum
+    assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,barrageMissile,andryushaBlast,andryushaFire'), enum
     # The fuse switch writes the weapon's template AmmoHitSizeAdjust: the template's AmmoSpeed / AmmoAlive offsets
     # (common/edf/weapon.h) at the same distance from it as in the IFC's InitParam (docs/carrier-laser-re.md §3).
     weapon = dict(re.findall(r'(kWeaponAmmo\w+)=(0x[0-9A-F]+)', src('common/edf/weapon.h')))
@@ -2766,7 +2766,7 @@ def turret_aim_wired() -> None:
     # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
     lockon = src('src/lockon.cpp')
     score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w,&store,&held);' in score
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w)' in score
     facts = lockon.split('void FactsOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'IsStoreWeapon(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
     holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
@@ -7156,7 +7156,7 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int firstHand=0) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger+k]=0' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
     assert 'k<kHands' in veto and 'a.held[k]' in veto and 'LargestBlast(a)' in veto, \

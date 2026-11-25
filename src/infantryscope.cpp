@@ -58,7 +58,6 @@ std::atomic<float> lensShownFov{0.0f};
 // Game thread only: the camera's FOV this hook wrote, to retract before the next step (sightzoom.cpp's way).
 struct Unzoom { void* camera=nullptr; float before=0.0f,written=0.0f; };
 Unzoom unzoom{};
-bool unzoomLast=false;   // the last step's camera was widened (its on and off are cuts, frame_rate_view.h)
 
 // at: the step the soldier's frame published the cue in (step_fresh.h; it publishes every step and clears the cue when the
 // scope closes, so an old stamp is a frame that stopped running). openedAt: when this soldier's scope was first seen open (the lens's probation, scope_pip.h KeepUnzoomed). frameFov /
@@ -106,6 +105,7 @@ void PublishFov(const void* human,float frameFov,float scopeFov) noexcept {
 // hook's own write is retracted (only while the field still holds it): the stock step's no-target branch does not write
 // the FOV, so a closed scope, a mode change or a death never leaves the camera unmagnified.
 void __fastcall CamStepHook(void* cam,void* step) {
+    const bool wasWide=unzoom.camera==cam;
     __try {
         auto c=static_cast<unsigned char*>(cam);
         if(unzoom.camera==cam) {
@@ -117,14 +117,17 @@ void __fastcall CamStepHook(void* cam,void* step) {
     __try {
         const Published p=Read();
         const ULONGLONG now=GetTickCount64();
-        if(!Live(p) || !PictureInPicture())return;
+        if(!Live(p) || !PictureInPicture()){
+            if(wasWide)FrameRateCameraCut(cam);
+            return;
+        }
         auto c=static_cast<unsigned char*>(cam);
         if(At<const void*>(c,kCamTargetRef)!=p.cue.human && At<const void*>(c,kCamTarget)!=p.cue.human)return;
         const float before=At<float>(c,kCamFov);
         const float wide=scopepip::KeepUnzoomed(true,lensHooked.load(std::memory_order_acquire),LensRefused(),now,p.openedAt,
                                                 lensAt.load(std::memory_order_acquire)) ?
                          scopepip::Unzoomed(before,At<float>(c,kCamZoom)) : 0.0f;
-        if((wide>0.0f)!=unzoomLast){unzoomLast=wide>0.0f;FrameRateCameraCut(cam);}   // the field jumps
+        if((wide>0.0f)!=wasWide)FrameRateCameraCut(cam);
         if(!(wide>0.0f)){PublishFov(p.cue.human,0.0f,0.0f);return;}
         unzoom=Unzoom{cam,before,wide};
         *reinterpret_cast<float*>(c+kCamFov)=wide;
@@ -203,13 +206,18 @@ bool InfantryScopeNow(InfantryScopeCue* out) noexcept {
     const Published p=Read();
     const ULONGLONG now=GetTickCount64();
     if(!p.human || !Cfg().enabled || !Cfg().infantryScope || !Live(p) || !(p.cue.zoom>1.01f))return false;
+    const auto lensDrawnAt=lensAt.load(std::memory_order_acquire);
+    const float fov=lensShownFov.load(std::memory_order_acquire);
+    const bool wanted=PictureInPicture() && lensHooked.load(std::memory_order_acquire) && !LensRefused();
+    const bool lens=wanted && lensShown.load(std::memory_order_acquire) && fov>0.0f &&
+                    lensDrawnAt>=p.openedAt && scopepip::LensDrew(now,lensDrawnAt);
+    // A first or dropped composite frame in PiP cannot use the full-screen eyepiece: that is the single
+    // dark flash on the unmagnified camera. Only the steady native-zoom fallback draws that eyepiece.
+    if(!lens && scopepip::KeepUnzoomed(wanted,true,false,now,p.openedAt,lensDrawnAt))return false;
     if(out) {
         *out=p.cue;
-        // The lens is what the HUD frames only while it draws: in the soldier's last world view, lately.
-        const float fov=lensShownFov.load(std::memory_order_acquire);
-        out->lens=PictureInPicture() && !LensRefused() && lensShown.load(std::memory_order_acquire) && fov>0.0f &&
-                  scopepip::LensDrew(now,lensAt.load(std::memory_order_acquire));
-        out->lensFov=out->lens ? fov : 0.0f;
+        out->lens=lens;
+        out->lensFov=lens ? fov : 0.0f;
     }
     return true;
 }

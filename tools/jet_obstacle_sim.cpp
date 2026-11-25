@@ -977,6 +977,22 @@ int WithdrawSuite() {
     logFile=std::fopen("withdraw_suite.log","w");
     boxes.clear();
     int cases=0,fails=0;
+    {
+        Jet salvo{};
+        salvo.mode=Mode::withdraw;salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
+        const auto& kind=KindOf(Role::interceptor);
+        const float viewer[3]{},nose[3]={1.0f,0.0f,0.0f};
+        const float inside[3]={1750.0f,300.0f,0.0f},outside[3]={3250.0f,300.0f,0.0f};
+        float want[3]{},speed=0.0f;
+        config.viewDistance=3000.0f;
+        Away(salvo,kind,inside,nose,viewer,true,2000,want,&speed);
+        const bool visible=!salvo.reap;
+        Away(salvo,kind,outside,nose,viewer,true,3000,want,&speed);
+        const bool ok=visible && salvo.reap;
+        std::printf("salvo withdraws past the actual draw distance: %s\n",ok ? "ok" : "FAIL");
+        ++cases;if(!ok)++fails;
+        config=Config{};config.debug=true;
+    }
     for(const float ground:{1500.0f,2000.0f,0.0f})
         for(const Role role:{Role::strike,Role::fighter,Role::interceptor,Role::multirole,Role::gunship,Role::carrier})
             for(const float viewerX:{0.0f,500.0f})

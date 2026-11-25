@@ -5347,7 +5347,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     if(m.commander) {
         wchar_t key[32];
         if(!m.pad)KeyName(m.mapKey,key,32);
-        else if(m.mapButton==0x20)wcscpy_s(key,L"Back");   // XInput's default map button
+        else if(m.mapButton==0x20)wcscpy_s(key,Tr(Tx::padBack));   // XInput's default map button
         else std::swprintf(key,32,Tr(Tx::padButton),m.mapButton);
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapCommanderSwitch),key);
     } else if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::mapPadKeys));

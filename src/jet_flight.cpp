@@ -331,7 +331,10 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
     const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    if(gone>kWithdrawFar || (gone>kWithdrawNear && (edge || ms-j.modeAt>kWithdrawStuckMs))) {
+    const bool salvo=j.sortie.pass==SortiePass::missileRain;
+    const float exitRange=salvo ? std::fmax(kWithdrawFar,NearDrawDistance()) : kWithdrawFar;
+    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || (!salvo && edge));
+    if(gone>exitRange || stalled) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
     }

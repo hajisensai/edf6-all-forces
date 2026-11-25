@@ -433,7 +433,7 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
 inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
-inline constexpr Area kMissionList{28.f,196.f,354.f,884.f};
+inline constexpr Area kMissionList{170.f,196.f,472.f,884.f};   // inside the left chrome painted by HUiMainFrame
 inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);

@@ -796,6 +796,7 @@ HUDTEXT(statsScopeMine,L"Mine",L"只看我",L"只看我",L"自分のみ")
 HUDTEXT(statsScopeAll,L"Everyone",L"所有人",L"所有人",L"全員")
 HUDTEXT(statsClose,L"Close",L"关闭",L"關閉",L"閉じる")
 HUDTEXT(statsBack,L"Back",L"返回",L"返回",L"戻る")
+HUDTEXT(padBack,L"Back",L"Back",L"Back",L"Back")
 HUDTEXT(statsSummary,L"Dealt %ls   Kills %u   Taken %ls   Healed %ls   Friendly fire %ls   Mission %ls",
         L"输出 %ls   击杀 %u   承伤 %ls   治疗 %ls   误伤 %ls   本关 %ls",L"輸出 %ls   擊殺 %u   承傷 %ls   治療 %ls   誤傷 %ls   本關 %ls",
         L"与ダメージ %ls   撃破 %u   被ダメージ %ls   回復 %ls   誤射 %ls   経過 %ls")
@@ -1162,7 +1163,7 @@ HUDTEXT(kbHeliHover,L"Helicopter: hover toggle",L"直升机：切换悬停",L"�
 HUDTEXT(heliHoverActive,L"HOVER",L"悬停",L"懸停",L"ホバー")
 HUDTEXT(cmdRunEnd,L"Select the end of the attack run",L"选择扫射结束点",L"選擇掃射結束點",L"掃射の終点を指定")
 HUDTEXT(cmdRunStart,L"%ls: select the start of the attack run",L"%ls：选择扫射起点",L"%ls：選擇掃射起點",L"%ls：掃射の始点を指定")
-HUDTEXT(cmdRunLength,L"Attack run length must be 100–2400 m",L"扫射路线长度须为 100–2400 米",L"掃射路線長度須為 100–2400 公尺",L"掃射経路の長さは 100–2400m")
+HUDTEXT(cmdRunLength,L"Attack run length must be 100-2400 m",L"扫射路线长度须为 100–2400 米",L"掃射路線長度須為 100–2400 公尺",L"掃射経路の長さは 100–2400m")
 HUDTEXT(kbDrillLaunch,L"Drill tank: launch the drill",L"钻头战车：发射钻头",L"鑽頭戰車：發射鑽頭",L"ドリル戦車：ドリル射出")
 HUDTEXT(kbProteusMode,L"Proteus: walk / deploy",L"普罗透斯：行走/架设",L"普羅透斯：行走/架設",L"プロテウス：歩行/展開")
 HUDTEXT(kbProteusShield,L"Proteus: shield",L"普罗透斯：护盾",L"普羅透斯：護盾",L"プロテウス：シールド")

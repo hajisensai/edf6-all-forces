@@ -490,6 +490,19 @@ int main() {
     inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
     inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;
     inputTime+=251;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"stale flight never owns camera");inputTime-=251;
+    {
+        const aim::Rotor rotor{0.56f,0.95f,0.1f,0.05f,0.05f};
+        const float hover=0.42f;
+        Check(std::fabs(aim::ManualCollectiveThrottle(0.0f,hover,hover,rotor)-hover)<1e-5f,
+              "free flight releases to neutral collective");
+        const float drifting[3]={0.0f,8.0f,0.0f};
+        aim::Hold hold{};hold.holding=true;
+        float pitch=0.0f;
+        const float level[3]={0.0f,0.0f,1.0f};
+        const auto free=aim::Instructor(hold,level,level,pos,drifting,0.0f,0.0f,65.0f,8.0f,0.6f,
+                                       false,false,100.0f,0.0f,&pitch,false);
+        Check(!hold.holding && free.climb==0.0f,"releasing the throttle in flight never captures an altitude");
+    }
     CheckDroneFrame();
     VirtualFree(trampoline,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);
     std::printf("heli_player_input: %d production-path checks passed (%d attitude calls)\n",checks,calls);
