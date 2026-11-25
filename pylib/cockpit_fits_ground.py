@@ -85,11 +85,12 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'V607_ROBOTRUCK': (
         Fit(0, 'body', (-0.6, 2.05, 3.0), 'truck_cab'),
     ),
-    # Kepler (603): the gunner in the turret a little left of its middle, between the twin guns' cradles (room 0.32,
+    # Kepler (603, KG6): the gunner in the turret a little left of its middle, between the twin guns' cradles (room 0.32,
     # 0.75, 0.29, 0.49, 1.76, 1.15 after the kit came in off the turret's slopes; further out a cradle is 0.28 m away,
-    # too near for the console).
+    # too near for the console). The turret and the cradles stood round his view: a panoramic pod (2026-11-25,
+    # pylib/cockpit_kits_mech.py pano_gunner), the turret folded in his own view.
     'V603_FLAK': (
-        Fit(0, 'cannon_main', (0.3, 2.2, 0.0), 'tank_gunner'),
+        Fit(0, 'cannon_main', (0.3, 2.2, 0.0), 'pano_gunner'),
     ),
     # Maser (510): the operator in the front of the turret's box left of its axis (room 1.82, 0.44, 1.31, 1.53, 0.75,
     # 6.60: the box is symmetric); higher up, under the emitter's boom, the view looked into the boom and its struts

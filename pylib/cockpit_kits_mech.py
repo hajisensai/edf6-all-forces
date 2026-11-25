@@ -171,17 +171,81 @@ def _at(yaw: float, pitch: float, dist: float) -> Vec3:
     return (dist * math.sin(y) * math.cos(p), dist * math.sin(p), dist * math.cos(y) * math.cos(p))
 
 
+# The panoramic cockpit (docs/feature-panoramic-cockpit.md; the user, 2026-11-25: "巴尔加的第一人称改成全周天驾驶舱，进去以后
+# 有一段动画启动屏幕，然后变成全周天的"). The pod's walls are its screen: in the rider's own view the plugin folds the whole
+# vehicle (its hull no longer stands between the eye and the world: the kit rides cockpits.PANORAMIC, not the vehicle's
+# bone) and keeps the seat and its screens floating; the walls are tiles that, on the vehicle's first start, are dark,
+# then flash and give way to the world step by step outward from ahead (src/cockpit_instruments.h kBootSteps: the
+# steps' times are the plugin's). 'full': every wall; 'half': the walls ahead of the eye (Nix: a half dome, its back
+# wall and the walls behind the eye stay plated); 'closed': the old closed pod.
+BOOT_STEPS = 12            # src/cockpit_instruments.h kBootSteps
+BOOT_TILE = 0.3            # a tile's side at most, metres
+BOOT_JITTER = 3            # a tile's step: its angle from ahead plus up to this many steps, so the light comes in blocks
+BOOT_MATERIALS = {
+    'boot_dark': KitMaterial((16, 20, 24)),
+    'boot_glow': KitMaterial((120, 225, 255), emissive=True),
+}
+PANORAMIC_MODES = ('closed', 'half', 'full')
+
+
+def _angle(c: Vec3) -> float:
+    n = math.sqrt(sum(v * v for v in c)) or 1.0
+    return math.degrees(math.acos(max(-1.0, min(1.0, c[2] / n))))
+
+
+def boot_step(centre: Vec3, least: float, widest: float, salt: int) -> int:
+    """A tile's boot step: its angle from ahead (between `least` and `widest`, the nearest and the widest tile's)
+    spread over the steps, plus a jitter of its own."""
+    base = int((_angle(centre) - least) / max(widest - least, 1e-6) * (BOOT_STEPS - BOOT_JITTER))
+    return min(BOOT_STEPS - 1, base + ((salt * 2654435761) >> 7) % BOOT_JITTER)
+
+
+def _boot_tiles(L: float, R: float, U: float, D: float, A: float, B: float, half: bool) -> list[om.Part]:
+    """The pod's walls as boot tiles (each a dark tile and its glow 4 mm nearer the eye, named boot_<step>_<0|1>);
+    `half`: only the walls ahead of the eye."""
+    back = 0.0 if half else -B
+    # (facing toward the eye, the axis the wall stands on and where, the width axis and range, the height axis and range)
+    faces = [((0.0, 0.0, -1.0), 2, A, 0, (-R, L), 1, (-D, U)),
+             ((-1.0, 0.0, 0.0), 0, L, 2, (back, A), 1, (-D, U)),
+             ((1.0, 0.0, 0.0), 0, -R, 2, (back, A), 1, (-D, U)),
+             ((0.0, -1.0, 0.0), 1, U, 0, (-R, L), 2, (back, A)),
+             ((0.0, 1.0, 0.0), 1, -D, 0, (-R, L), 2, (back, A))]
+    if not half:
+        faces.append(((0.0, 0.0, 1.0), 2, -B, 0, (-R, L), 1, (-D, U)))
+    tiles = []
+    for f, (facing, axis, at, wa, (w0, w1), ha, (h0, h1)) in enumerate(faces):
+        nw, nh = max(1, math.ceil((w1 - w0) / BOOT_TILE)), max(1, math.ceil((h1 - h0) / BOOT_TILE))
+        tw, th = (w1 - w0) / nw, (h1 - h0) / nh
+        up = (0.0, 0.0, 1.0) if axis == 1 else (0.0, 1.0, 0.0)
+        for i in range(nw):
+            for j in range(nh):
+                c = [0.0, 0.0, 0.0]
+                c[axis], c[wa], c[ha] = at, w0 + (i + 0.5) * tw, h0 + (j + 0.5) * th
+                tiles.append((tuple(c), facing, up, tw, th, f * 10007 + i * 101 + j))
+    least, widest = min(_angle(c) for c, *_ in tiles), max(_angle(c) for c, *_ in tiles)
+    parts = []
+    for c, facing, up, tw, th, salt in tiles:
+        step = boot_step(c, least, widest, salt)
+        parts.append(panel(f'boot_{step}_0', 'boot_dark', c, tw, th, facing, up))
+        glow = tuple(c[k] + 0.004 * facing[k] for k in range(3))
+        parts.append(panel(f'boot_{step}_1', 'boot_glow', glow, tw * 0.94, th * 0.94, facing, up))
+    return parts
+
+
 LEAST = {'left': 0.2, 'right': 0.2, 'up': 0.15, 'down': 0.25, 'ahead': 0.35, 'back': 0.15}
 SIDE_SCREEN = (34.0, -19.0)   # degrees left (right for the other) and down of the sight line: the view's lower corners
 
 
-def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str]) -> Kit:
+def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str], mode: str = 'closed') -> Kit:
     """The pod: walls where `want` puts them (pulled in to the room), the visor the whole front less a thin frame (the
     game is played through it: nothing crosses it), the seat with its console and control arms, screens `sides` (left,
-    right) at the view's lower corners and `middle` on the console under the visor."""
+    right) at the view's lower corners and `middle` on the console under the visor. `mode` (PANORAMIC_MODES): a
+    panoramic pod's walls are boot tiles instead (_panoramic)."""
     r = _room(cabin, want, LEAST, kit)
     L, R, U, D, A, B = r['left'], r['right'], r['up'], r['down'], r['ahead'], r['back']
     k = min(1.0, *(r[side] / need for side, need in FULL.items()))    # the seat's and screens' scale
+    if mode != 'closed':
+        return _panoramic(L, R, U, D, A, B, k, middle, sides, mode == 'half')
     parts: list[om.Part] = []
     mid = (L - R) / 2
     # The shell seen from inside, open ahead (the front wall with the visor is that).
@@ -241,12 +305,49 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
     return Kit(_merged(parts), mats, screens=tuple(screens))
 
 
+def _panoramic(L: float, R: float, U: float, D: float, A: float, B: float, k: float, middle: str,
+               sides: tuple[str, str], half: bool) -> Kit:
+    """A panoramic pod (BOOT_STEPS): the seat with its console and control arms, the screens `sides` floating at the
+    view's lower corners and `middle` on the seat's console, the walls boot tiles (`half`: ahead of the eye; behind it
+    the plated walls of the closed pod and its ribs)."""
+    parts: list[om.Part] = _boot_tiles(L, R, U, D, A, B, half)
+    mid = (L - R) / 2
+    if half:
+        parts.append(box('shell', 'mech_plate', (mid, (U - D) / 2, -B / 2), (L + R, U + D, B), inward=True,
+                         tile=0.9, faces='xXyYZ'))
+        z = -B * 0.5
+        parts.append(box(f'rib{z:.2f}', 'metal_dark', (mid, U - 0.02, z), (L + R - 0.02, 0.04, 0.06)))
+        for x, n in ((L - 0.02, 'l'), (-R + 0.02, 'r')):
+            parts.append(box(f'rib{n}{z:.2f}', 'metal_dark', (x, (U - D) / 2, z), (0.04, U + D - 0.02, 0.06)))
+    seat, seat_mats = _seat(SEAT_SCALE * k, (-R + MARGIN, -D + MARGIN, -B + MARGIN), (L - MARGIN, U - MARGIN, A - 0.08))
+    parts += seat
+    screens = []
+    w, h = 0.21 * k, 0.155 * k
+    for kind, sign, wall in ((sides[0], 1.0, L), (sides[1], -1.0, R)):
+        c = _at(sign * SIDE_SCREEN[0], SIDE_SCREEN[1], min(0.62 * k, A - 0.06))
+        if abs(c[0]) + w / 2 / 0.86 > wall - 0.03:   # pulled toward the middle to stay inside the pod
+            c = (sign * (wall - 0.03 - w / 2 / 0.86), c[1], c[2])
+        glass, scr = _screen(kind, c, w, h)
+        parts += [glass] + _bezel(f'bezel_{kind}', c, w, h)
+        screens.append(scr)
+    cw, ch = 0.2 * k, 0.15 * k
+    c = (-0.02 * k, -0.42 * k, 0.58 * k)   # the seat console's centre screen (as the closed pod's)
+    glass, scr = _screen(middle, c, cw, ch)
+    parts += [glass] + _bezel(f'bezel_{middle}', c, cw, ch)
+    screens.append(scr)
+    mats = _materials('mech_plate', 'metal_dark', 'screen')
+    mats.update(CONSOLE_MATERIALS)
+    mats.update(BOOT_MATERIALS)
+    mats.update(seat_mats)
+    return Kit(_merged(parts), mats, screens=tuple(screens), panoramic=True)
+
+
 def _merged(parts: list[om.Part]) -> list[om.Part]:
-    """One part per material (fewer meshes in the model)."""
-    by: dict[str, list[om.Part]] = {}
+    """One part per material (fewer meshes in the model); a boot tile's parts one per step and kind (each its bone)."""
+    by: dict[tuple[str, str], list[om.Part]] = {}
     for p in parts:
-        by.setdefault(p.material, []).append(p)
-    return [merge(ps, f'{m}_all') if len(ps) > 1 else ps[0] for m, ps in by.items()]
+        by.setdefault((p.material, p.name if p.name.startswith('boot_') else ''), []).append(p)
+    return [merge(ps, name or f'{m}_all') if len(ps) > 1 else ps[0] for (m, name), ps in by.items()]
 
 
 # Each mech's pod: the walls (metres from the eye) as far as its torso stays closed round them. A mech's armour is
@@ -254,30 +355,41 @@ def _merged(parts: list[om.Part]) -> list[om.Part]:
 # box round the eye whose every face point is enclosed (measured with cockpits.exposed on a 0.12 m grid of each face,
 # grown 0.05 m a side at a time), a little inside it; the room measured straight out (clearance) is wider.
 PILOT = ('map', ('status', 'weapons'))      # middle under the visor; left and right of it
-PODS: dict[str, tuple[Cabin, tuple[str, tuple[str, str]], str]] = {
+# Every mech pilot's pod is panoramic (the user, 2026-11-25: "也套用到其它机甲", "蜘蛛车也要全周天": the crawler 502;
+# "尼克斯你觉得半周天好的话也可以半周天": Nix's half), and so is pano_gunner, the Kepler's (603, KG6) gunner, whose turret and
+# twin cradles stood round the eye ("某些一直被挡视野的载具也改，比如kg6"): the stock gunner's room, the mech seat.
+PODS: dict[str, tuple[Cabin, tuple[str, tuple[str, str]], str, str]] = {
     'mech_begaruta': ({'left': 0.62, 'right': 0.62, 'up': 0.32, 'down': 0.33, 'ahead': 0.73, 'back': 0.37}, PILOT,
-                      "Begaruta's pilot in its chest (closed box round (0, 7.2, -0.3): 0.65 0.65 0.35 0.35 1.3 0.4)."),
+                      "Begaruta's pilot in its chest (closed box round (0, 7.2, -0.3): 0.65 0.65 0.35 0.35 1.3 0.4).",
+                      'full'),
     'mech_nix': ({'left': 0.85, 'right': 0.85, 'up': 0.42, 'down': 0.37, 'ahead': 0.67, 'back': 0.32}, PILOT,
-                 "Nix's pilot in its chest (closed box round (0, 7.2, -0.3): 0.9 0.9 0.45 0.4 0.7 0.35)."),
+                 "Nix's pilot in its chest (closed box round (0, 7.2, -0.3): 0.9 0.9 0.45 0.4 0.7 0.35): a half dome.",
+                 'half'),
     'mech_oldrobot': ({'left': 0.37, 'right': 0.37, 'up': 0.18, 'down': 0.42, 'ahead': 0.5, 'back': 0.47}, PILOT,
                       "The old robot's (608) pilot in its narrow chest (closed box round (0, 7.2, -0.2): 0.4 0.4 0.2 "
-                      "0.45 0.9 0.5)."),
+                      "0.45 0.9 0.5).", 'full'),
     'mech_groundrobo': ({'left': 0.57, 'right': 0.57, 'up': 0.5, 'down': 0.42, 'ahead': 0.67, 'back': 0.37}, PILOT,
-                        "The crawler's (502) driver in its body (closed box round (0, 2.0, -0.3): 0.6 0.6 0.65 0.45 "
-                        "1.0 0.4)."),
+                        "The crawler's (502, the spider) driver in its body (closed box round (0, 2.0, -0.3): 0.6 0.6 "
+                        "0.65 0.45 1.0 0.4).", 'full'),
     'mech_large': ({'left': 1.0, 'right': 1.0, 'up': 0.62, 'down': 0.92, 'ahead': 0.9, 'back': 0.72}, PILOT,
                    "A big mech's pilot with room to spare: a Proteus's in its head (407: closed box round (0, 13.2, 3.0), "
                    "Mk2: round (0, 12.8, 3.0)), Balam's in the front of its chest (round (0, 43, 5.5)); all at the "
-                   "search's caps 1.05 1.05 0.65 0.95 1.35 0.75 (Mk2's ahead 1.1)."),
+                   "search's caps 1.05 1.05 0.65 0.95 1.35 0.75 (Mk2's ahead 1.1).", 'full'),
+    'pano_gunner': ({'left': 1.0, 'right': 1.0, 'up': 0.62, 'down': 0.92, 'ahead': 0.9, 'back': 0.72}, PILOT,
+                    "A turret gunner's panoramic pod (the Kepler, 603), as large as the turret's room round the eye "
+                    "lets it be.", 'full'),
 }
 
 
-def _kit(name: str, want: Cabin, screens: tuple[str, tuple[str, str]], doc: str) -> cockpits.KitFn:
+def _kit(name: str, want: Cabin, screens: tuple[str, tuple[str, str]], doc: str, mode: str) -> cockpits.KitFn:
+    if mode not in PANORAMIC_MODES:
+        raise ValueError(f'{name}: mode {mode} not one of {PANORAMIC_MODES}')
+
     def kit(cabin: Cabin) -> Kit:
-        return _pod(cabin, name, want, screens[0], screens[1])
+        return _pod(cabin, name, want, screens[0], screens[1], mode)
     kit.__doc__ = doc
     kit.__name__ = name
     return kit
 
 
-KITS = {name: _kit(name, want, screens, doc) for name, (want, screens, doc) in PODS.items()}
+KITS = {name: _kit(name, want, screens, doc, mode) for name, (want, screens, doc, mode) in PODS.items()}

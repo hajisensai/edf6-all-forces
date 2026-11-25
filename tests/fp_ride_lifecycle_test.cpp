@@ -102,6 +102,9 @@ float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool SightZoomMounted(const void*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return onFoot; }
 bool MapHoldsKeys() noexcept { return mapOwnsKeys; }
+bool VehiclePowered(const void*) noexcept { return true; }   // crew.cpp: a ride here never boots
+void PowerVehicle(const void*) noexcept {}
+ULONGLONG GameMs() noexcept { return 1; }
 bool MapHoldsHumanKeys(const unsigned char* human) noexcept { return mapOwnsKeys && (!mapKeyHuman || mapKeyHuman==human); }
 bool haveEye=true;
 unsigned char rideVehicle[0x1200]{};

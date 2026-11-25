@@ -238,6 +238,8 @@ struct DrawSnap {
     int rideSeat;               // riding: the seat, its instruments' readings (FirstPersonInstrumentReadings)
     bool instrumentsReady;
     instruments::Readings instruments;
+    bool panoramic;             // riding a panoramic seat (RideView::panoramic): the vehicle's own bones folded in its draw
+    float boot;                 // ...seconds into its boot (cockpit_instruments.h BootShown; past kBootEnd: no boot)
     M4 probeAnchor[2];bool probeAnchored[2];   // Debug=1: each hand's anchor as the camera step read it
     bool nativeArms;            // a stock action (fp_aim.h NativeArms): the arms as its animation poses them, no IK
 };
@@ -319,6 +321,7 @@ struct State {
     CockpitScreens screens;     // ...and its screens round the eye (VehicleScreens), for the HUD
     instruments::Readings instruments;
     bool instrumentsReady;
+    ULONGLONG bootAt;           // a panoramic seat's boot began (GameMs; 0: this ride does not boot)
     bool gunCamera;             // the seat's view is its gun camera's (Ride: fp_view.h GunCameraFrame), last said in the log
     bool nativeArms;            // every weapon in hand hidden by the third person (an appeal): the arms native (fp_aim.h)
     // The aim (fp_aim.h Converge): on foot this camera step (aimOk) and the view's direction it left (aimCamDir); the
@@ -1666,6 +1669,15 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     Rebatch(true);
     if(!Current().riding || Current().ride.vehicle!=ride.vehicle || Current().ride.seat!=ride.seat) {
         Current().instrumentsReady=false;
+        // A panoramic cockpit boots on the vehicle's first start only: nobody (no NPC, no other machine's player, not
+        // this one before) has been aboard it this mission (crew.cpp VehiclePowered).
+        Current().bootAt=0;
+        if(ride.panoramic && !VehiclePowered(ride.vehicle)) {
+            const ULONGLONG now=GameMs();
+            Current().bootAt=now ? now : 1;
+            Log("FP panoramic cockpit boots: %p seat %d",static_cast<void*>(ride.vehicle),ride.seat);
+        }
+        if(ride.panoramic)PowerVehicle(ride.vehicle);
         Current().have=false;Current().reloadLeft=0;Current().motion=fpmotion::State{};
         for(auto& event:Current().shotEvent)event=State::ShotEvent{};
         ForgetKicks();
@@ -1836,6 +1848,12 @@ void Publish() noexcept {
         d.reloadLeft=c.reloadLeft;
         d.hasCam=c.cam!=nullptr;d.camera=c.builtReady ? c.built : fpview::Identity();
         d.rideSeat=c.ride.seat;d.instrumentsReady=c.instrumentsReady;d.instruments=c.instruments;
+        d.panoramic=c.riding && c.ride.panoramic;
+        d.boot=instruments::kBootEnd+1.0f;
+        if(d.panoramic && c.bootAt) {
+            const ULONGLONG now=GameMs();
+            d.boot=now>c.bootAt ? static_cast<float>(now-c.bootAt)*0.001f : 0.0f;
+        }
         for(int k=0;k<2;++k){d.probeAnchor[k]=c.probeAnchor[k];d.probeAnchored[k]=c.probeAnchored[k];}
         d.nativeArms=c.nativeArms && !c.riding;
     });
@@ -2141,6 +2159,24 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
     if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+        // A panoramic seat: the vehicle's own bones (its hull, its shell regions) folded; the kit rides vc_pan_.
+        if(d.panoramic && (!name || std::wcsncmp(name,L"vc_",3)!=0 || std::wcsncmp(name,L"vc_shell_",9)==0)) {
+            const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
+            const M4 moved=fpview::Collapse(original.m+12);
+            std::memcpy(pose+i*16,moved.m,64);
+            continue;
+        }
+        if(name && std::wcsncmp(name,L"vc_boot_",8)==0) {
+            int seat=-1,step=-1,kind=-1;
+            const bool shown=swscanf_s(name,L"vc_boot_%d_%d_%d",&seat,&step,&kind)==3 && d.panoramic && seat==d.rideSeat &&
+                             instruments::BootShown(d.boot,step,kind);
+            if(!shown) {
+                const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
+                const M4 moved=fpview::Collapse(original.m+12);
+                std::memcpy(pose+i*16,moved.m,64);
+            }
+            continue;
+        }
         if(name && std::wcsncmp(name,L"vc_shell_",9)==0) {
             unsigned mask=0,parent=0;
             if(swscanf_s(name,L"vc_shell_%u_%u",&mask,&parent)==2) {
@@ -2156,7 +2192,8 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p') && fields!=6))continue;
         const instruments::SeatPose how=instruments::SeatPoseOf(seat==d.rideSeat,mode,field,place,fields);
         if(how==instruments::SeatPose::skip)continue;
-        const bool ready=d.instrumentsReady && how==instruments::SeatPose::live;
+        const bool ready=d.instrumentsReady && how==instruments::SeatPose::live &&
+                         (!d.panoramic || instruments::BootScreensOn(d.boot));
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,d.instruments,ready);
         std::memcpy(pose+i*16,moved.m,64);

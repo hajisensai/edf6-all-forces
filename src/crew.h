@@ -1148,6 +1148,11 @@ bool IsSidecar(const void* vehicle) noexcept;
 void SidecarFrame(unsigned char* vehicle) noexcept;
 bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
+// crew.cpp (game thread): the vehicle has been started this mission: someone other than this machine's player (an NPC,
+// another machine's player) has been aboard, or PowerVehicle said this machine's player started it (a panoramic
+// cockpit's boot, cockpit_instruments.h kBootSteps). A vehicle the crew table has no room for reads as never started.
+bool VehiclePowered(const void* vehicle) noexcept;
+void PowerVehicle(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
 // The game's warp of a human's character controller to `pos` (sidecar.cpp, as the ride exit does); false: not known.
