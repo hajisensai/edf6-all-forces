@@ -1,5 +1,5 @@
-"""The War Thunder gun sounds agree everywhere: src/wt_clips.h (CREW_WT_CLIPS) == the source table of tools/wt_sound.py ==
-the files under assets/sound/wt (no more, no fewer), each 16-bit PCM 48 kHz mono / stereo (`sub`: mono), the set within the
+"""The War Thunder gun, explosion and passby sounds agree everywhere: src/wt_clips.h (CREW_WT_CLIPS) == the source table of tools/wt_sound.py ==
+the files under assets/sound/wt (no more, no fewer), each 16-bit PCM 48 kHz mono / stereo (wt_sound.MONO's: mono), the set within the
 size limit, SOURCE.md naming every file. Needs no source recordings. Run: python -I tests/wt_sound_test.py"""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import wt_sound  # noqa: E402
 
 OUT = os.path.join(ROOT, 'assets', 'sound', 'wt')
-LIMIT = 40 * 1024 * 1024
+LIMIT = wt_sound.MAX_MB * 1024 * 1024
 
 
 def main() -> int:
@@ -37,8 +37,8 @@ def main() -> int:
             channels, width, rate, frames = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
         if width != 2 or rate != 48000 or channels not in (1, 2) or frames <= 0:
             errors.append(f'{name}: {width * 8}-bit {rate} Hz {channels} ch {frames} frames')
-        if name.rsplit('_', 1)[0] == 'sub' and channels != 1:
-            errors.append(f'{name}: sub must be mono, has {channels} channels')
+        if name.rsplit('_', 1)[0] in wt_sound.MONO and channels != 1:
+            errors.append(f'{name}: must be mono, has {channels} channels')
     if total > LIMIT:
         errors.append(f'total {total} bytes over {LIMIT}')
     if wt_sound.check(OUT):

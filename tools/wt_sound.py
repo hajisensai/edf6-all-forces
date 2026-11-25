@@ -1,4 +1,4 @@
-"""War Thunder tank / machine-gun gun sounds for the plugin's WT gunfire (src/wt_clips.h CREW_WT_CLIPS), cut from
+"""War Thunder gun, explosion and passby sounds for the plugin's WT sounds (src/wt_clips.h CREW_WT_CLIPS), cut from
 Gaijin's official FMOD project for modders (GaijinEntertainment/fmod_studio_warthunder_for_modders, see COMMIT).
 The processed WAVs and assets/sound/wt/SOURCE.md are committed (the repository owner allowed it); the installer puts them in
 Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav (i from 1), which is where the plugin reads them.
@@ -7,7 +7,7 @@ Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav (i from 1), which is where the pl
   python -I tools/wt_sound.py --check [--out assets/sound/wt]     tables and committed files agree (needs no source)
 
 The source is untrusted downloaded data: run with -I and pass the path as an argument.
-Each file: 16-bit PCM read, channels kept (`sub`: mixed down to mono), resampled to 48 kHz, 20 Hz high-pass. No per-file
+Each file: 16-bit PCM read, channels kept (the MONO set: mixed down to mono), resampled to 48 kHz, 20 Hz high-pass. No per-file
 levelling or normalising (the clips' relative levels are what the FMOD events' dB values assume); when the whole set's
 peak is over 0.98 full scale every file is scaled by the same gain. The start is kept (layers of one event line up by
 their starts); the tail under -60 dBFS is cut, with a 20 ms fade-out; a clip with a maximum length is cut to it with a
@@ -32,30 +32,35 @@ PEAK_LIMIT = 0.98
 TAIL_FLOOR = 10 ** (-60 / 20)
 TAIL_FADE = 0.020
 CUT_FADE = 0.300
-MAX_MB = 40
-BASE = 'tanks/weapon/'
-CLOSE = 'cannons/cannons_close_modules/close_17_12_2021/'
-TAILS = 'cannons/cannon_common_tails/'
-FAR = 'cannons/cannons_far/'
-M2 = 'mg/oneshot/m2/grains/'
-MG = 'mg/oneshot/mg_series/grains/'
+MAX_MB = 80
+W = 'tanks/weapon/'
+CLOSE = W + 'cannons/cannons_close_modules/close_17_12_2021/'
+TAILS = W + 'cannons/cannon_common_tails/'
+FAR = W + 'cannons/cannons_far/'
+M2 = W + 'mg/oneshot/m2/grains/'
+MG = W + 'mg/oneshot/mg_series/grains/'
+EXM = 'explosion/modules/'
+MERGE = EXM + 'layers_merge/'
+DEBRIS = 'tanks/impacts_objects/object_material_debris/'
+PASSBY = 'tanks/effects/projectile_passby/'
 
-# (name, directory under BASE, file name with {} for the 1-based number, variants)
+# (name, directory under the project root, file name with {} for the 1-based number, variants)
 _SPEC = (
+    # the ground guns (sound_event.h kMedium .. kHowitzer, kM2, kMg42)
     ('shot_mid', CLOSE, 'cannon_02_shot-{:03d}', 3), ('shot_big', CLOSE, 'cannon_01_shot-{:03d}', 3),
     ('shot_heavy', CLOSE, 'cannon_07_shot-{:03d}', 3), ('middle_mid', CLOSE, 'cannon_02_middle-{:03d}', 2),
     ('middle_big', CLOSE, 'cannon_01_middle-{:03d}', 2), ('bass', CLOSE, 'cannon_05_bass-{:03d}', 2),
-    ('body_big', 'cannons/cannons_close_modules/', 'body_big_01-{:03d}', 2),
-    ('metal', 'cannons/cannons_close_modules/metal/', 'metal_body_big_02-{:03d}', 2),
-    ('mech_howitzer', 'cannons/', 'howitzer_shot_mech_{:02d}', 2),
-    ('close_75', 'cannons/cannon_75mm_kwk40/', 'cannon_75mm_kwk40_shot_{:02d}', 3),
-    ('close_122', 'cannons/cannon_122mm_d25t/', 'cannon_122mm_d25t_shot_{:02d}', 3),
-    ('close_128', 'cannons/cannon_128mm_pak44/', 'cannon_128mm_pak44_shot_{:02d}', 3),
-    ('close_150', 'cannons/cannon_150mm_sfh_18/', '150mm_sfh_18_close-{:03d}', 3),
-    ('far_75', 'cannons/cannon_75mm_kwk40/', 'cannon_75mm_kwk40_shot_far_{:02d}', 3),
-    ('far_122', 'cannons/cannon_122mm_d25t/', 'cannon_122mm_d25t_shot_far_{:02d}', 3),
-    ('far_128', 'cannons/cannon_128mm_pak44/', 'cannon_128mm_pak44_shot_far_{:02d}', 3),
-    ('far_150', 'cannons/cannon_150mm_sfh_18/', '150mm_sfh_18_dist-{:03d}', 3),
+    ('body_big', W + 'cannons/cannons_close_modules/', 'body_big_01-{:03d}', 2),
+    ('metal', W + 'cannons/cannons_close_modules/metal/', 'metal_body_big_02-{:03d}', 2),
+    ('mech_howitzer', W + 'cannons/', 'howitzer_shot_mech_{:02d}', 2),
+    ('close_75', W + 'cannons/cannon_75mm_kwk40/', 'cannon_75mm_kwk40_shot_{:02d}', 3),
+    ('close_122', W + 'cannons/cannon_122mm_d25t/', 'cannon_122mm_d25t_shot_{:02d}', 3),
+    ('close_128', W + 'cannons/cannon_128mm_pak44/', 'cannon_128mm_pak44_shot_{:02d}', 3),
+    ('close_150', W + 'cannons/cannon_150mm_sfh_18/', '150mm_sfh_18_close-{:03d}', 3),
+    ('far_75', W + 'cannons/cannon_75mm_kwk40/', 'cannon_75mm_kwk40_shot_far_{:02d}', 3),
+    ('far_122', W + 'cannons/cannon_122mm_d25t/', 'cannon_122mm_d25t_shot_far_{:02d}', 3),
+    ('far_128', W + 'cannons/cannon_128mm_pak44/', 'cannon_128mm_pak44_shot_far_{:02d}', 3),
+    ('far_150', W + 'cannons/cannon_150mm_sfh_18/', '150mm_sfh_18_dist-{:03d}', 3),
     ('bump_med', FAR, 'cannon_ground_far_med_add-{:03d}', 3), ('bump_big', FAR, 'cannon_ground_far_big_add-{:03d}', 3),
     ('sub', TAILS, 'cannons_sub-{:03d}', 3),
     ('tail_mid', TAILS, 'cannon_84_94_tail_far_{:02d}', 2), ('tail_big', TAILS, 'cannon_100_122_tail_far_{:02d}', 2),
@@ -64,10 +69,43 @@ _SPEC = (
     ('m2_last_close', M2, 'm2_last_close-{:03d}', 2), ('m2_last_far', M2, 'm2_last_far-{:03d}', 2),
     ('mg42_close', MG, 'mg42_close-{:03d}', 6), ('mg42_far', MG, 'mg42_far-{:03d}', 6),
     ('mg42_last_close', MG, 'mg42_last_close-{:03d}', 2), ('mg42_last_far', MG, 'mg42_last_far-{:03d}', 2),
+    # the explosions (sound_event.h kBlastSmall .. kBlastHeavy): explosion_ground_20_37, explosion_ground,
+    # art_explosion_ground, bomb_explosion_ground; the tails and the rumble are ours
+    ('xs_close', EXM + 'small_hits/', 'hit_explosion_small_close_rapid-{:03d}', 3),
+    ('xs_far', 'explosion/', 'bullethit_far_{}', 3),
+    ('ex_sweet', 'explosive/', 'aa_explosion_{:02d}_s', 3),
+    ('ex_attack', EXM + 'attack/heavy/', 'heavy_explosion_attack_3-{:03d}', 3),
+    ('ex_attack_far', EXM + 'attack/heavy/', 'heavy_explosion_attack_3-{:03d}_far', 3),
+    ('ex_body', MERGE, 'expl_body_med-{:03d}', 3),
+    ('art_attack', MERGE, 'art_attack-{:03d}', 3), ('art_attack_far', MERGE, 'art_attack-{:03d}_far', 3),
+    ('art_body', MERGE, 'art_body-{:03d}', 3),
+    ('bomb_body', EXM + 'art/slow/bombs_add/', 'slow_attack_big-{:03d}', 3),
+    ('bomb_far', MERGE, 'bomb_body_heavy-{:03d}', 3),
+    ('debris_small', DEBRIS, 'dirt_debris_small-{:03d}', 2), ('debris_med', DEBRIS, 'dirt_debris_med-{:03d}', 2),
+    ('debris_bomb', DEBRIS, 'bomb_debirs-{:03d}', 2),
+    ('ex_tail', EXM + 'tails/', 'tails-{:03d}', 3),
+    ('ex_sub', 'tanks/explosions/sub_sweetners/', 'explosion_rumble_{:02d}', 3),
+    # the rounds going by and coming down (sound_event.h kPassBullet .. kIncoming): shell_whiz, bullet_passby,
+    # art_shells_incoming, bombs_incoming
+    ('whiz', 'tanks/impacts/', 'shell_whiz_{:02d}', 3),
+    ('crack_bullet', PASSBY + 'crack/', 'bullet_crack-{:03d}', 4),
+    ('crack_small', PASSBY + 'crack/', 'shell_small_crack-{:03d}', 3),
+    ('crack_mid', PASSBY + 'crack/', 'shell_mid_crack-{:03d}', 3),
+    ('crack_big', PASSBY + 'crack/', 'shell_big_crack-{:03d}', 2),
+    ('bypass_bullet', PASSBY, 'bullet_bypass-{:03d}', 4),
+    ('bypass_big', PASSBY, 'projectile_big_bypass-{:03d}', 2),
+    ('whiz_small', PASSBY, 'projectile_small_bypass_whiz-{:03d}', 3),
+    ('whiz_med', PASSBY, 'projectile_med_bypass_whiz-{:03d}', 3),
+    ('whiz_big', PASSBY, 'projectile_big_bypass_whiz-{:03d}', 3),
+    ('incoming_art', MERGE, 'art_shell_incoming-{:03d}', 3),
+    ('incoming_bomb', MERGE, 'bombs_incoming-{:03d}', 2),
 )
-SOURCES = {n: [BASE + d + f.format(i) + '.wav' for i in range(1, k + 1)] for n, d, f, k in _SPEC}
-MONO = {'sub'}
-MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0}
+SOURCES = {n: [d + f.format(i) + '.wav' for i in range(1, k + 1)] for n, d, f, k in _SPEC}
+# Mixed down to mono: the low layers (the LFE's alone), the far layers (a point that far off) and the rounds going by (one
+# point placed where the round passes: the recordings' own pans are not where it passes here).
+MONO = {'sub', 'ex_sub', 'xs_far', 'ex_attack_far', 'art_attack_far', 'bomb_far', 'whiz', 'crack_bullet', 'crack_small',
+        'crack_mid', 'crack_big', 'bypass_bullet', 'bypass_big', 'whiz_small', 'whiz_med', 'whiz_big'}
+MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0, 'crack_big': 2.5, 'bypass_big': 2.0}
 
 
 def clip_table(path: str = CLIPS_H) -> dict[str, int]:
@@ -172,7 +210,7 @@ def build(src: str, out: str) -> None:
         total += size
         lines.append(f'| {fn} | {rel} | {z.shape[1]} | {len(z) / RATE:.3f} | {size} |')
     head = (
-        '# War Thunder gun sounds (assets/sound/wt)\n\n'
+        '# War Thunder gun, explosion and passby sounds (assets/sound/wt)\n\n'
         f'Source: {UPSTREAM} , commit `{COMMIT}`.\n'
         'The upstream Readme says the project "allows you to create sound modifications" and that using the content means\n'
         'agreeing to the War Thunder contribution agreement (https://live.warthunder.com/contribution_agreement/?lang=en).\n'
@@ -180,9 +218,9 @@ def build(src: str, out: str) -> None:
         'The upstream assets are already vorbis-compressed (ogg renamed to .wav); they are decoded once here and written as\n'
         '16-bit PCM.\n\n'
         'Made by `tools/wt_sound.py` (clip names and variant counts: src/wt_clips.h CREW_WT_CLIPS). Per file: channels kept\n'
-        f'(`sub`: mixed to mono), resampled to {RATE} Hz, 20 Hz high-pass, no per-file levelling or normalising, start kept,\n'
-        f'tail under -60 dBFS cut with a {int(TAIL_FADE * 1000)} ms fade-out; close_150 is cut to 5.0 s and tail_heavy to 7.0 s\n'
-        '(300 ms fade-out).\n'
+        f'({", ".join(f"`{n}`" for n in sorted(MONO))}: mixed to mono), resampled to {RATE} Hz, 20 Hz high-pass, no\n'
+        f'per-file levelling or normalising, start kept, tail under -60 dBFS cut with a {int(TAIL_FADE * 1000)} ms fade-out;\n'
+        f'cut to a length (300 ms fade-out): {", ".join(f"{n} {t} s" for n, t in MAX_SECONDS.items())}.\n'
         f'One gain for the whole set: **{gain:.6f}** (set peak before gain {peak:.6f}; scaled only when over {PEAK_LIMIT}).\n\n'
         'Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.\n\n'
         f'Files: {len(done)}, total size {total} bytes ({total / 1048576:.2f} MiB).\n\n'
