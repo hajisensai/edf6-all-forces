@@ -501,6 +501,14 @@ int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    airSortie=static_cast<int>(SortiePass::gunRun);
+    airJet=static_cast<int>(JetRole::strike);airHeli=-1;
+    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties remain in the sortie tab");
+    airSortie=static_cast<int>(SortiePass::missileRain);
+    airJet=static_cast<int>(JetRole::salvo);
+    check(SupportCallTab(0)==SupportTab::air && SupportCallIcon(0)==SupportIcon::jet,
+          "the Zenith stays an aircraft and is available in the air support tab");
+    airSortie=0;airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);
     {
         // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
         // member's, the defaults for a member who published none that reads (never this machine's).
@@ -1522,7 +1530,7 @@ int main() {
     const int rescue=SupportRescueCatalog();
     check(rescue==38 && SupportCallCount()==39 && SupportMenuCount()==38,
           "the rescue is the catalog's last entry, after the transports, the airdrops and the strikes (never #100's TransportStart 29)");
-    check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"海上救援直升机")==0 &&
+    check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"Brute 410 海上救援型")==0 &&
           SupportCallIcon(rescue)==SupportIcon::heli && SupportCallVariant(rescue)==SupportVariant::none,"its key, name and icon");
     check(std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY")==0 && std::wcscmp(SupportCallKey(21),L"SQUAD")==0 &&
           std::wcscmp(SupportCallKey(29),L"SQUAD_HELI")==0 && std::wcscmp(SupportCallKey(35),L"TRUCK_AIRDROP")==0,
