@@ -150,12 +150,8 @@ float ShadowAt(float3 v) {
     float away = saturate((z - Sh[18].x) * Sh[18].y);
     return lit + away * (1.0 - lit);
 }
-float3 StockLight(float3 v, float3 n, float2 px) {
-    float3 l = ShadowAt(v) * saturate(-dot(n, Sys[21].xyz)) * Sys[22].rgb;
-    l += saturate(-dot(n, Sys[24].xyz)) * Sys[25].rgb;
-    l += saturate(-dot(n, Sys[27].xyz)) * Sys[28].rgb;
-    l += saturate(-dot(n, Sys[30].xyz)) * Sys[31].rgb;
-    l += Sys[33].rgb;
+float3 PointLights(float3 v, float3 n, float2 px) {
+    float3 l = 0.0;
     float4 v1 = float4(v, 1.0);
     float3 w = float3(dot(v1, Sys[4]), dot(v1, Sys[5]), dot(v1, Sys[6]));
     float4 w1 = float4(w, 1.0);
@@ -180,6 +176,14 @@ float3 StockLight(float3 v, float3 n, float2 px) {
     }
     return l;
 }
+float3 StockLight(float3 v, float3 n, float2 px) {
+    float3 l = ShadowAt(v) * saturate(-dot(n, Sys[21].xyz)) * Sys[22].rgb;
+    l += saturate(-dot(n, Sys[24].xyz)) * Sys[25].rgb;
+    l += saturate(-dot(n, Sys[27].xyz)) * Sys[28].rgb;
+    l += saturate(-dot(n, Sys[30].xyz)) * Sys[31].rgb;
+    l += Sys[33].rgb;
+    return l + PointLights(v, n, px);
+}
 
 // The distance from the camera plane of the scene at this pixel (SV_Position is in target pixels; the depth copy is the
 // whole target, so a split-screen viewport reads its own rectangle), from the hardware depth under this view's own
@@ -200,16 +204,30 @@ float4 Ps(V i) : SV_Target0 {
         float2 n2 = t.rg * 2.0 - 1.0;
         float2 nr = float2(n2.x * i.basis.x - n2.y * i.basis.y, n2.x * i.basis.y + n2.y * i.basis.x);
         float3 n = float3(nr, sqrt(saturate(1.0 - dot(nr, nr))));
-        float wrap = saturate((dot(n, SunView.xyz) + 0.6) / 1.6);
+        // The sun: the view's own light block, or (LitSet 1: this view's stock lighting captured) the stock lit
+        // particles' sun, ambient, cascade shadow and point lights, in the scene's own units (no exposure guess).
+        float3 sunTo = SunView.xyz, sunRgb = SunColor.rgb * SunColor.w, amb = Ambient.rgb * SunColor.w, extra = 0.0;
+        float sunShadow = 1.0;
+        if (LitSet == 1u) {
+            // view -> world rotation (Sys[4..6].xyz), the stock light's travel direction Sys[21] back into view space
+            float3x3 vw = float3x3(Sys[4].xyz, Sys[5].xyz, Sys[6].xyz);
+            sunTo = -mul(Sys[21].xyz, vw);
+            sunRgb = Sys[22].rgb;
+            amb = Sys[33].rgb;
+            sunShadow = ShadowAt(i.vpos.xyz);
+            extra = PointLights(i.vpos.xyz, mul(vw, n), i.pos.xy);
+        }
+        float wrap = saturate((dot(n, sunTo) + 0.6) / 1.6);
         // Absorption: sunlight reaching a texel crosses the puff's own thickness on the side turned away from the sun
-        // (a dark core and underside), the ambient sky less so.
-        float shadow = exp(-thick * (1.0 - wrap) * 2.8);
+        // (a dark core and underside: Beer-Lambert over the thickness, the core darker than the rim), the ambient
+        // sky less so (it comes from everywhere: the core sees less of it).
+        float shadow = exp(-thick * (1.0 - wrap) * 3.2) * (1.0 - 0.35 * thick);
         // Edge transmission: thin edges seen towards the sun glow (Henyey-Greenstein forward scattering, g = 0.55).
-        float cosT = dot(normalize(i.vpos.xyz), SunView.xyz);
+        float cosT = dot(normalize(i.vpos.xyz), sunTo);
         float hg = 0.6975 / pow(max(1.3025 - 1.1 * cosT, 1e-3), 1.5);
         float trans = hg * (1.0 - thick) * 0.22;
-        float3 light = Ambient.rgb * (1.0 - 0.45 * thick) + SunColor.rgb * (wrap * shadow + trans);
-        float3 rgb = i.color.rgb * light * SunColor.w;
+        float3 light = amb * (1.0 - 0.55 * thick) + sunRgb * sunShadow * (wrap * shadow + trans) + extra * (1.0 - 0.5 * thick);
+        float3 rgb = i.color.rgb * light;
         return float4(rgb * a, a * (1.0 - i.basis.z));
     }
     // The stock forward PS (0x19670A0): rgb = texel * colour (no saturate: HDR), a = sat(texel.a * colour.a) times
@@ -644,6 +662,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             const bool lit=batch.kind==Kind::nativeLitAlpha || batch.kind==Kind::nativeLitAdditive;
             if(lit && !litBound)continue;
             bc.litSet=static_cast<std::uint32_t>(batch.litSet);std::memcpy(bc.litWeights,batch.litWeights,sizeof(batch.litWeights));
+            if(batch.kind==Kind::smoke)bc.litSet=litBound ? 1u : 0u;   // ours lit by the stock lighting when captured
             if(FAILED(context->Map(s.batchCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))continue;
             std::memcpy(map.pData,&bc,sizeof(bc));
             context->Unmap(s.batchCb.Get(),0);
