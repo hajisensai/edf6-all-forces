@@ -487,7 +487,8 @@ void SupportNetTick() noexcept {
         netPerf.ticks,netPerf.sum,netPerf.worst,netPerf.messages,netPerf.contexts);
     netPerf={};netPerf.at=now;
 }
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout,
+                          const sortie::RunSpec& run) noexcept {
     SupportNetTick();
     if(blockedUntilMission) {
         Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
@@ -505,7 +506,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     // A commander's NPC (commander.cpp): the kind in `loadout` carries the player's own weapon, not one below it.
     if(catalog==commander::kCatalog)CommanderRequesterArms(static_cast<int>(loadout),&arms);
     else if(!debugspawn::NetworkCatalog(catalog))LocalRequesterArms(&arms);
-    if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms)) {
+    if(!session.Submit(catalog,target,GetTickCount64(),loadout,&arms,run)) {
         Log("SUPPORT NET request not admitted: catalog=%d pending=%u",catalogId,session.PendingHandshakes());
         Note(note,size,L"支援请求未受理：已有部署、调用过快或本关支援额度已满");return false;
     }

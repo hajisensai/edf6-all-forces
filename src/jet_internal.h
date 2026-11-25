@@ -100,8 +100,8 @@ enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirol
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
                   heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
                   xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole, c130Gunship, supCarrier,
-                  supBlastCarrier, supDollCarrier };
-constexpr int kBodyCount=38;
+                  supBlastCarrier, supDollCarrier, salvoInterceptor };
+constexpr int kBodyCount=39;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -199,6 +199,8 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      Role::blast,"supBlastCarrier"},
     {Body::supDollCarrier,L"app:/object/edf6vc_helicarrier_doll.sgo",L"EDF6VC_HELICARRIER_DOLL.SGO",7069.0f,Role::carrier,
      Role::doll,"supDollCarrier"},
+    {Body::salvoInterceptor,L"app:/object/edf6vc_jet_salvo_interceptor.sgo",L"EDF6VC_JET_SALVO_INTERCEPTOR.SGO",
+     7070.0f,Role::interceptor,Role::drone,"salvoInterceptor"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -313,14 +315,14 @@ struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
     {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
     {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::supCarrier},{JetRole::blastCarrier,Body::supBlastCarrier},
-    {JetRole::dollCarrier,Body::supDollCarrier},{JetRole::gunship,Body::c130Gunship},
+    {JetRole::dollCarrier,Body::supDollCarrier},{JetRole::gunship,Body::c130Gunship},{JetRole::salvo,Body::salvoInterceptor},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));
 constexpr bool LaunchRowsInOrder() noexcept {
     for(int i=0;i<kLaunchCount;++i)if(static_cast<int>(kLaunchRows[i].as)!=i || Row(kLaunchRows[i].body).mark<=0.0f)return false;
     return true;
 }
-static_assert(kLaunchCount==static_cast<int>(JetRole::gunship)+1,"a launch row per JetRole");
+static_assert(kLaunchCount==static_cast<int>(JetRole::salvo)+1,"a launch row per JetRole");
 static_assert(LaunchRowsInOrder(),"kLaunchRows is indexed by JetRole, each a jet body");
 
 // --- A jet's state ---
@@ -499,6 +501,11 @@ struct Sortie {
     SortiePass pass=SortiePass::none;
     bool done=false;
     sortie::Line line{};
+    float runHalf=0.0f;
+    float shotPoint[3]{};
+    bool strafing=false;
+    const void* bombWeapon=nullptr;
+    int bombAmmo=0;
     ULONGLONG begun=0,phaseAt=0,bombAt=0,missileSeen=0;
     int phase=0,fired=0;
     const void* struck[8]{};
@@ -753,6 +760,7 @@ struct Arms {
     int rocket;              // the rocket store with rounds left (StoreRole::rocket), or -1
 };
 Arms ReadArms(unsigned char* v) noexcept;
+inline float GunReach(const Kind& k,const Arms& a) noexcept { return a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen; }
 // The missile for the target: of the stores of its kind (air-to-air at a flyer, else air-to-ground) with rounds,
 // the one whose lock reaches `dist` with the least to spare (a long-range one far out, a short-range one close in),
 // else the longest. The arms' missile counts become that store's.
@@ -777,7 +785,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
 
 // --- jet_sortie.cpp ---
 // A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line from where it is (`pos`) and the way it flies.
-void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms) noexcept;
+void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
+                 const sortie::RunSpec& run={}) noexcept;
 // Its guidance this frame (Guide, before its kind's): true when it set `want` / `speed` (and the fire gates); false: its
 // kind's own (the gunship's circle) or done.
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,

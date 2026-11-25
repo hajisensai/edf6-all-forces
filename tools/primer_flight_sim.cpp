@@ -58,6 +58,7 @@ float MapRay(const float* a,const float* b,float* hit) noexcept {
     for(int i=0;i<3;++i)hit[i]=a[i]+(b[i]-a[i])*t;
     return t;
 }
+float AircraftObstacleRay(const float*,const float*,const void*,const void*,float*) noexcept { return -1.0f; }
 // What the plugin's other files give the code compiled here, as the simulation needs it: the jets' table and an
 // entry's identity (jet.cpp: the control block's use count, the deleted flag), flights (jet_spawn.cpp: numbers
 // only, no bullets fly here), and nothing for the parts that are not simulated (other bodies' physics and

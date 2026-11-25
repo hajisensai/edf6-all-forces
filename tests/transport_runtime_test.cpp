@@ -83,9 +83,9 @@ int NpcSquadBoardVehicle(const void* top,unsigned char* v) noexcept {
     return q->alive;
 }
 bool dismountStalls=false;   // the squad's get-off not yet done (it is still aboard mid-unload)
-int NpcSquadDismount(const void* top) noexcept {
+int NpcSquadDisembark(const void* top,const unsigned char* vehicle) noexcept {
     SquadModel* q=SquadOf(top);
-    if(!q)return 0;
+    if(!q || (q->in && q->in->m!=vehicle))return 0;
     ++q->dismounts;
     if(dismountStalls)return 0;
     if(q->in){const float* vp=PosOf(*q->in);Place(*q->top,vp[0]+5.0f,vp[1],vp[2]);}
@@ -221,6 +221,16 @@ void Reset() {
     std::memset(truckSeats,0,sizeof(truckSeats));std::memset(heliSeats,0,sizeof(heliSeats));
 }
 bool Done(const void* top) noexcept {for(const auto& t:trips)for(int i=0;i<t.count;++i)if(t.riders[i].top.obj==top)return false;return true;}
+
+void CombatCrewStaysAboard() {
+    Reset();
+    MakeVehicle(truck,truckSeats,2);
+    MakeObj(soldier[0]);
+    Put<std::uint64_t>(SeatAt(truck.m,1),kSeatWeaponCount,1);
+    Check(!TransportPair(soldier[0].m,truck.m),"a driver and gunner do not turn a combat vehicle into a transport");
+    Put<std::uint64_t>(SeatAt(truck.m,1),kSeatWeaponCount,0);
+    Check(TransportPair(soldier[0].m,truck.m),"the same chassis with a passenger seat can transport a squad");
+}
 
 void GroundTrip() {
     Reset();
@@ -557,6 +567,7 @@ void ParadropReusedTop() {
 
 int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    CombatCrewStaysAboard();
     GroundTrip();EmptyTruck();DeliverHere();HeliAssault();HeliHoverNeverHeld();Withdraw();Succession();Paradrop();ReOrder();SuccessionMidTrip();ParadropReusedTop();LeaveMidUnload();
     std::printf("transport_runtime: %d checks, %d failed\n",checks,failed);
     return failed ? 1 : 0;

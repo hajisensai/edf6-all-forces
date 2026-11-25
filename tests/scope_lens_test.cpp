@@ -191,7 +191,8 @@ int wmain() {
     Record();
     const int lensSide=scopepip::LensViewSide(scopepip::LensRadius(1920,1080));
     Check(factories==1 && followed==cam0 && control0.weaks==2,"wanted: one lens camera, following viewport 0's camera");
-    Check(At<int>(SlotAt(3),0x3C)==lensSide && At<int>(SlotAt(3),0x40)==lensSide && At<int>(SlotAt(3),0x34)==0,"viewport 3 set to S x S");
+    Check(At<int>(SlotAt(3),0x3C)==lensSide && At<int>(SlotAt(3),0x40)==lensSide &&
+          At<int>(SlotAt(3),0x34)==1920 && At<int>(SlotAt(3),0x38)==1080,"viewport 3 has an S x S target outside the main screen rectangle");
     Check(Trace()==passThrough && !CurrentOf(SlotAt(3)),"...not armed before it joins: the recording as it was");
     Record();
     Check(factories==1 && Trace()==passThrough,"a camera in the queue is not made twice");

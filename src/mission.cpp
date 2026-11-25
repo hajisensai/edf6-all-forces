@@ -220,7 +220,7 @@ void MissionStart() noexcept {
     WatchMissionPhase("support soldiers");
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
     WatchMissionPhase("support soldier weapons");
-    PreloadNpcArms();         // ...and the player weapons this player's soldiers carry, one tier below its own (npc_arms.h)
+    PreloadNpcArms();         // ...and the default crew rifle; other weapons load when their orders use them (npc_arms.h)
     WatchMissionPhase("support variants");
     PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
     WatchMissionPhase("player vehicles");

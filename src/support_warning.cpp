@@ -36,6 +36,8 @@ int nextSlot=0;
 // The preview's last ask (the outline is made again only when the point or the entry changed).
 int previewCatalog=-1;
 float previewAt[3]{};
+float previewHeading[3]{};
+bool previewRun=false;
 ULONGLONG previewPlannedAt=0;
 
 // What stands at (x, z) near height `y`: the first surface down from kGroundReach over it; `y` when there is none.
@@ -74,6 +76,14 @@ void SetRoute(WarningView& v,const float (*pts)[3],int n) noexcept {
     v.look=Look::route;v.closed=false;v.points=n<kWarnPoints ? n : kWarnPoints;
     for(int i=0;i<v.points;++i)std::memcpy(v.pt[i],pts[i],12);
     std::memcpy(v.label,pts[0],12);
+}
+
+bool SetBarrage(WarningView& v,int kind,const float* target,const float* heading) noexcept {
+    warning::BarrageFootprint footprint;
+    if(!warning::BarrageArea(kind,target,heading,&footprint))return false;
+    if(footprint.rectangular)SetPolygon(v,footprint.corners,4,Look::strike);
+    else SetRing(v,footprint.circle,Look::strike,true);
+    return true;
 }
 
 Kept& Claim() noexcept {
@@ -122,18 +132,16 @@ void Name(Kept& k,const wchar_t* name) noexcept { _snwprintf_s(k.name,_countof(k
 }  // namespace
 
 void WarnBarrage(int kind,const float* target,const float* heading,int endFrame) noexcept {
-    warning::Circle c;
-    if(!target || !heading || !warning::BarrageArea(kind,target,heading,&c))return;
+    if(!target || !heading)return;
     Kept made;
     made.on=true;
-    SetRing(made.view,c,Look::strike,true);
+    if(!SetBarrage(made.view,kind,target,heading))return;
     int strike=-1;
     for(int i=0;i<SupportStrikeCount();++i)if(SupportStrikeBarrage(i)==kind){strike=i;break;}
     Name(made,SupportStrikeName(strike));
     made.until=GameMs()+warning::BarrageMs(endFrame);
     Put(Claim(),made);
-    Log("WARN barrage %d: %.0f m round (%.0f,%.0f,%.0f) for %llu ms",kind,c.radius,c.centre[0],c.centre[1],c.centre[2],
-        warning::BarrageMs(endFrame));
+    Log("WARN barrage %d: %d outline points for %llu ms",kind,made.view.points,warning::BarrageMs(endFrame));
 }
 
 void WarnUltimate(const float* at,unsigned long long ms) noexcept {
@@ -159,7 +167,12 @@ void WarnDeployment(const support_net::Plan& plan) noexcept {
     route.on=true;route.timed=false;
     SupportAircraft spec;
     const bool flown=AirSpec(catalog,&spec);
-    if(flown)ring.on=FlownOutline(spec,from,mark,route,ring);
+    if(flown && plan.run.half>0.0f) {
+        const float dx=plan.run.x*plan.run.half,dz=plan.run.z*plan.run.half;
+        const float pts[3][3]={{from[0],from[1],from[2]},{mark[0]-dx,mark[1],mark[2]-dz},
+                              {mark[0]+dx,mark[1],mark[2]+dz}};
+        SetRoute(route.view,pts,3);
+    } else if(flown)ring.on=FlownOutline(spec,from,mark,route,ring);
     else {
         // A ground support, a transport, an airdrop: where it comes from and where it goes.
         const float pts[2][3]={{from[0],from[1],from[2]},{mark[0],mark[1],mark[2]}};
@@ -174,7 +187,7 @@ void WarnDeployment(const support_net::Plan& plan) noexcept {
     if(ring.on)Put(Claim(),ring);
 }
 
-void WarnPreview(int catalog,const float* target) noexcept {
+void WarnPreview(int catalog,const float* target,const float* strikeHeading,const float* runStart) noexcept {
     if(catalog<0 || !target) {
         AcquireSRWLockExclusive(&lock);preview.on=false;ReleaseSRWLockExclusive(&lock);
         previewCatalog=-1;
@@ -182,7 +195,8 @@ void WarnPreview(int catalog,const float* target) noexcept {
     }
     const ULONGLONG now=GameMs();
     const float dx=target[0]-previewAt[0],dz=target[2]-previewAt[2];
-    const bool moved=catalog!=previewCatalog || dx*dx+dz*dz>25.0f;
+    const bool turned=strikeHeading && strikeHeading[0]*previewHeading[0]+strikeHeading[2]*previewHeading[2]<0.999f;
+    const bool moved=catalog!=previewCatalog || dx*dx+dz*dz>25.0f || turned || (runStart!=nullptr)!=previewRun;
     // Made again at most ten times a second (its outline's rays down to the ground), a flown one's route four (its entry is
     // the support planner's: rays along it).
     const bool throttled=catalog==previewCatalog && now-previewPlannedAt<(SupportCatalogAir(catalog) ? 250u : 100u);
@@ -194,16 +208,25 @@ void WarnPreview(int catalog,const float* target) noexcept {
         return;
     }
     previewCatalog=catalog;std::memcpy(previewAt,target,12);previewPlannedAt=now;
+    previewRun=runStart!=nullptr;
+    if(strikeHeading)std::memcpy(previewHeading,strikeHeading,12);
+    else std::memset(previewHeading,0,sizeof(previewHeading));
     Kept made;
     made.on=true;made.timed=false;made.view.preview=true;
     const int strike=SupportCatalogStrike(catalog);
     if(strike>=0) {
-        warning::Circle c;
-        float heading[3];SupportStrikeHeading(target,heading);
+        float automaticHeading[3];
+        if(!strikeHeading){SupportStrikeHeading(target,automaticHeading);strikeHeading=automaticHeading;}
         const int kind=SupportStrikeBarrage(strike);
-        if(kind>=0){if(!warning::BarrageArea(kind,target,heading,&c))return;}
-        else{std::memcpy(c.centre,target,12);c.radius=warning::UltimateRadius();}
-        SetRing(made.view,c,Look::strike,true);
+        if(kind>=0) {
+            if(!SetBarrage(made.view,kind,target,strikeHeading))return;
+        } else {
+            warning::Circle c;std::memcpy(c.centre,target,12);c.radius=warning::UltimateRadius();
+            SetRing(made.view,c,Look::strike,true);
+        }
+    } else if(runStart) {
+        const float pts[2][3]={{runStart[0],runStart[1]+0.5f,runStart[2]},{target[0],target[1]+0.5f,target[2]}};
+        SetRoute(made.view,pts,2);
     } else {
         SupportAircraft spec;
         float from[3];

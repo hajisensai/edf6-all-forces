@@ -10,8 +10,8 @@ namespace renderrecord {
 // callback keeps its own __try.
 using Before=void(*)() noexcept;
 // The order they run in (see render_record.cpp): the unlimited frame rate's poses first (frame_rate_view.cpp, on frames
-// without ticks), then the first person's Umbra boxes around the eye (firstperson.cpp, the eye this frame draws).
-enum class Slot { kFrameRate,kFirstPerson,kCount };
+// without ticks), then the camera clip planes, then the first person's Umbra boxes around the eye.
+enum class Slot { kFrameRate,kViewDistance,kFirstPerson,kCount };
 // At load, by each feature that registers: the call site checked and redirected once (later calls: whether it is in).
 // False (logged here once): the site is not as read or could not be redirected; nothing registers.
 bool Install() noexcept;

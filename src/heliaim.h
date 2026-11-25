@@ -237,6 +237,24 @@ inline Want Instructor(Hold& h,const float* aim,const float* nose,const float* p
     return w;
 }
 
+struct HoverMode {
+    bool on=false,wasDown=false;
+    bool Step(bool down) noexcept {
+        const bool switched=down && !wasDown;
+        wasDown=down;
+        if(switched)on=!on;
+        return switched;
+    }
+};
+
+// With the cyclic released in flight mode, keep the current horizontal course and bleed its speed gradually.
+// Hover mode leaves the controller's zero velocity setpoint in place.
+inline void Coast(float* want,const float* velocity,float dt) noexcept {
+    const float remaining=1.0f-vec::Clamp(dt/8.0f,0.0f,1.0f);
+    want[0]=velocity[0]*remaining;
+    want[2]=velocity[2]*remaining;
+}
+
 // The coordinated turn's bank in the stock lateral channel (veh+0x1540, whose roll is -maxTilt x it, 0x654E84): the
 // centripetal acceleration `speed` x `turn` (m/s, rad/s toward the heading's row 0) tilted into, as a sidestep the same
 // way tilts it (the channel's own sign carries the handedness).

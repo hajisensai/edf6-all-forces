@@ -75,6 +75,7 @@
 #include "heli.h"
 #include "log_once.h"
 #include "fp_skin_gpu.h"
+#include "infantryscope.h"
 #include "thermal.h"
 #include "enemy_control.h"
 #include "map.h"
@@ -124,7 +125,7 @@ constexpr int kMostWeapons=16;
 // animation runs, 4 = its _finish: 0x693DB5 / 0x693D0E), the reload's frames left +0xE68 (both states run while it is
 // above 0: 0x693BAF; payload.cpp's reload bar reads it too), ReloadTime +0x20C (frames), FireRecoil +0x37C.
 constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264,kActLimit=0x5D0,
-                      kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,
+                      kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,kTrigger=0xD70,
                       kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
                       kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
@@ -813,6 +814,7 @@ void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
     if(n>kMostSets)n=kMostSets;
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
+        if(w && h[kTrigger+k])c.firing=true;
         const std::int32_t shots=w ? At<std::int32_t>(w,kShotCount) : 0,fire=w ? At<std::int32_t>(w,kFireState) : 0;
         if(Current().have && w!=Current().held[k] && Current().held[k])c.switched=true;
         if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c,&reload);
@@ -2337,6 +2339,9 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     fpskin::ModelScope maskScope;
     if(pass==3 || pass==4 || pass>5){NextDraw(model)(model,ctx,pass,view);return;}
+    // The magnified view sees from the shoulder camera when opening the scope from third person.
+    // Omit its owner's body in the lens pass while preserving their main view and shadow.
+    if(const auto* owner=InfantryScopeLensOwner(view); owner && model==owner+kBodyModel)return;
     State* state=ViewState(view);
     if(!state){NextDraw(model)(model,ctx,pass,view);return;}
     StateScope scope(state);

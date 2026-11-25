@@ -69,7 +69,7 @@ namespace crew {
 //      host's room set of the plugin's content instead of all of it, so an older build (which preloads everything but
 //      never says what it needs) would leave the host's set without its calls' bodies on the other machines.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=18;
+constexpr std::int64_t kAllForcesRoomProtocol=19;  // BRGS v5 impact timing and SP v4 attack-run geometry
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

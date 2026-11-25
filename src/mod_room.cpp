@@ -108,7 +108,7 @@ const wchar_t* CoopDependencyProblem() noexcept {
 void ShowCoopDependencyProblem(const wchar_t* problem) noexcept {
     wchar_t text[512]{};
     swprintf_s(text,L"全军出击联机需要匹配版本的 EDF6Coop。\n\n%ls\n\n请同时更新全军出击与 EDF6Coop。单机游戏仍可使用。",problem);
-    MessageBoxW(GetActiveWindow(),text,L"全军出击：无法创建或加入联机房间",MB_OK|MB_ICONWARNING);
+    notice::Post("coop-dependency",L"全军出击：无法创建或加入联机房间",text,0);
 }
 using ShowDependencyProblem=void(*)(const wchar_t*) noexcept;
 ShowDependencyProblem showDependencyProblem=&ShowCoopDependencyProblem;

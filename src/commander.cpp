@@ -35,6 +35,7 @@ struct Deployment {
     std::uint64_t transaction=0;
     ObjRef soldier{};
     unsigned char requester[32]{};
+    ObjRef leader{};
     bool remote=false,own=false,active=false;
 };
 Deployment deployments[kMostDeployments]{};
@@ -203,6 +204,7 @@ void Activate() noexcept {
             MarkIdentities ids{};
             if(ResolveMarkIdentities(d.requester,nullptr,&ids))leader=ids.player;
         }
+        d.leader=leader;
         const bool follows=leader && FollowSupportSoldier(d.soldier,leader);
         Log("COMMANDER %llu active: %s",static_cast<unsigned long long>(d.transaction),
             follows ? "follows its commander's soldier (the map's squad of that player)" :
@@ -245,6 +247,13 @@ void OfflineTick() noexcept {
     if(ValidateCommanderPlan(offlinePlan))Apply(nextOffline++,offlinePlan,false);
 }
 }  // namespace
+
+const unsigned char* CommanderAvatar(const unsigned char* requester) noexcept {
+    if(!requester || !CommanderModeInEffect() || released || lost)return nullptr;
+    for(const auto& d:deployments)if(d.active && d.leader.Is(requester) && Alive(d.soldier))
+        return static_cast<const unsigned char*>(d.soldier.obj);
+    return nullptr;
+}
 
 support_net::PlanResult PlanCommander(std::uint32_t peer,const float* target,std::uint64_t loadout,SupportPlan* out) noexcept {
     using support_net::PlanResult;

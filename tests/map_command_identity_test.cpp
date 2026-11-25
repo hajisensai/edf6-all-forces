@@ -30,10 +30,13 @@ SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0
 std::int32_t SupportCallPrice(int) noexcept { return 1800; }
 std::int32_t SupportPoints() noexcept { return 6000; }
 std::int32_t SupportPointsMost() noexcept { return 30000; }
-void WarnPreview(int,const float*) noexcept {}
+void WarnPreview(int,const float*,const float*,const float*) noexcept {}
+int SupportCatalogStrike(int) noexcept {return -1;}
+bool SupportGroundRun(int) noexcept {return false;}
+int SupportStrikeBarrage(int) noexcept {return -1;}
 SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
-bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity,const float*,const sortie::RunSpec&) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
 }
@@ -135,7 +138,7 @@ int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadT
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
-bool TankCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool TankCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 NpcCommandResult NpcMapCommandForRequester(const ObjRef&,const Command&,const ObjRef&,const ObjRef&) noexcept {return {};}
 bool SquadCommand(const void*,const Command&) noexcept { return false; }
 }

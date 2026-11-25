@@ -808,17 +808,19 @@ def script(plan: Plan, lay: Layout) -> str:
     if w.enabled and target_spots(lay) and targets:
         spots = target_spots(lay)
         per = max(1, int(w.per_wave))
+        limit = min(int(w.max_alive), len(spots) * per)
         pts = ', '.join(_q(p.name) for p in spots)
         lines += [
             '',
-            '\t// Targets, per_wave to a spot within 30 m, until max_alive stand (at most one group a spot;',
-            '\t// every other spot is up in the air).',
+            '\t// Refill free target slots up to per_wave at a time. Every other position is in the air.',
             f'\tarray<string> spots = {{ {pts} }};',
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) + {per} <= {min(int(w.max_alive), len(spots) * per)} ) {{',
-            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {TARGET_SPREAD:.0f}, {_q("app:/object/" + w.enemy + ".sgo")}, {per}, {w.level:.2f}, true);',
+            f'\t\tint slots = {limit} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {TARGET_SPREAD:.0f}, {_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             '\t\t}',
             '\t\tWait(1.0);',
@@ -851,6 +853,7 @@ def script(plan: Plan, lay: Layout) -> str:
     elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        per = max(1, int(w.per_wave))
         lines += [
             '',
             '\t// Enemy waves: once fewer than max_alive enemies live, the next spot gets a new group.',
@@ -858,8 +861,10 @@ def script(plan: Plan, lay: Layout) -> str:
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(w.max_alive)} ) {{',
-            f'\t\t\t{spawn}(spots[next % spots.length()], 20, {_q("app:/object/" + w.enemy + ".sgo")}, {int(w.per_wave)}, {w.level:.2f}, true);',
+            f'\t\tint slots = {int(w.max_alive)} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            f'\t\t\t{spawn}(spots[next % spots.length()], 20, {_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             f'\t\t\tWait({w.interval:.1f});',
             '\t\t}',
@@ -871,6 +876,7 @@ def script(plan: Plan, lay: Layout) -> str:
     if air.enabled and (lay.far_points or lay.enemy_points):
         pts = ', '.join(_q(p.name) for p in (lay.far_points or lay.enemy_points))
         enemy = _q('app:/object/' + AIR_ENEMY + '.sgo')
+        per = max(1, int(air.per_wave))
         lines += [
             '',
             '\t// Enemy jets in waves (AirWaves): once fewer than max_alive enemies are left, per_wave more from the far points.',
@@ -878,8 +884,10 @@ def script(plan: Plan, lay: Layout) -> str:
             '\tuint nextAir = 0;',
             f'\tWait({air.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(air.max_alive)} ) {{',
-            f'\t\t\tfor( int k = 0; k < {max(1, int(air.per_wave))}; k++ ) {{',
+            f'\t\tint slots = {int(air.max_alive)} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            '\t\t\tfor( int k = 0; k < count; k++ ) {',
             f'\t\t\t\tCreateFriend(air[nextAir % air.length()], {enemy}, {plan.vehicle_level:.2f}, false);',
             '\t\t\t\tnextAir++;',
             '\t\t\t}',

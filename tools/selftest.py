@@ -362,7 +362,7 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     import jet_models
     import rootcpk
     assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
-                                  vc.GUNSHIP_MODEL_FILE}, sorted(vc.HARDPOINT_FILES)
+                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}, sorted(vc.HARDPOINT_FILES)
     assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
     seen = 0
     for name, jet in vc.JETS.items():
@@ -394,7 +394,7 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
-              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE}
+              for f in vc.HARDPOINT_FILES if f not in {vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():
@@ -3236,6 +3236,9 @@ def installer_range_has_targets_and_no_enemy() -> None:
     hostile = [(f, a) for f, a in made if f.startswith('CreateEnemy') and gen.TARGET + '.sgo' not in a]
     assert not hostile, hostile
     assert any(f == 'CreateEnemyGroup' for f, _ in made), 'no target in the script'
+    per_wave = plan.waves.per_wave
+    assert f'slots < {per_wave} ? slots : {per_wave}' in text and '.sgo", count,' in text, \
+        'the installer range must refill one free slot'
     assert not re.search(r'internal_CreateThread\("Grand', text) and 'CreateFriendSquad' not in text
     friends = {re.search(r'object/(\w+)\.sgo', a).group(1) for f, a in made if f == 'CreateFriend'}
     assert friends == set(gen.RANGE_FRIENDS), f'NPC-placed {sorted(friends)}'

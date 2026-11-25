@@ -15,9 +15,14 @@ bool CameraRay(float*,float*) noexcept { return false; }
 // Score's per-weapon facts (FactsOf): the frame and the store answer are the test's, the lookups counted.
 ULONGLONG frameNow=1;
 ULONGLONG GameFrame() noexcept { return frameNow; }
-bool storeAnswer=false;
+bool storeAnswer=false,salvoAnswer=false;
 int storeQueries=0;
-bool IsStoreWeapon(const unsigned char*) noexcept { ++storeQueries;return storeAnswer; }
+const StoreSpec* StoreOf(const unsigned char*) noexcept {
+    ++storeQueries;
+    static const StoreSpec generic{L"EDF6VC_AAM_", "AAM", StoreRole::air,0.0f,0.0f};
+    static const StoreSpec salvo{L"EDF6VC_SALVO_", "Salvo", StoreRole::air,0.0f,0.0f};
+    return salvoAnswer ? &salvo : storeAnswer ? &generic : nullptr;
+}
 }
 
 namespace {
@@ -138,6 +143,42 @@ int main() {
         storeAnswer=true;
         Put<const void*>(picker,kWeaponOwner,crewless);   // a vehicle with no seats: still not held
         Check(Score(ref,result,picker,&score) && storeQueries==4,"the weapon changing hands reads afresh");
+    }
+    {
+        alignas(16) static unsigned char launcher[0xD00]{}, head[0x28]{}, entries[4][0x30]{}, nodes[32][0x28]{};
+        static unsigned char enemies[3]{};
+        salvoAnswer=true;
+        repeatOk=true;
+        Put<const void*>(launcher,kLockList,head);
+        Put<const void*>(head,0,head);
+        // Enemy zero has two lock points. They share its allocation.
+        for(int i=0;i<4;++i)Put<const void*>(entries[i],kEntryObject,&enemies[i==3 ? 0 : i]);
+        unsigned perEnemy[3]{};
+        const unsigned char* tail=head;
+        for(int n=0;n<32;++n) {
+            ++frameNow;
+            float best=100.0f;
+            int chosen=-1;
+            for(int i=0;i<4;++i) {
+                alignas(16) unsigned char result[0x40]{};
+                Put<float>(result,0,i==3 ? 0.01f : static_cast<float>(i+1)*0.1f);
+                void* ref[]={entries[i]};
+                float score=0.0f;
+                Check(Score(ref,result,launcher,&score),"salvo entrant scored");
+                if(score<best){best=score;chosen=i;}
+            }
+            const int enemy=chosen==3 ? 0 : chosen;
+            Check(enemy==n%3,"all enemies get a round before any repeat, even with multiple lock points");
+            ++perEnemy[enemy];
+            Put<const void*>(const_cast<unsigned char*>(tail),0,nodes[n]);
+            Put<const void*>(nodes[n],0,head);
+            Put<const void*>(nodes[n],kNodeEntry,entries[chosen]);
+            Put<const void*>(nodes[n],kNodeCtrl,ctrl);
+            Put<std::uint64_t>(launcher,kLockCount,static_cast<unsigned>(n+1));
+            tail=nodes[n];
+        }
+        Check(launcher[kRepeatLock]==1 && perEnemy[0]==11 && perEnemy[1]==11 && perEnemy[2]==10,
+              "the full magazine is balanced 11, 11, 10 across three enemies");
     }
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("lockon: %d production cancellation checks passed\n",checks);

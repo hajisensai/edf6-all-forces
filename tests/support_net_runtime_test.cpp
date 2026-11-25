@@ -3,6 +3,7 @@
 // No game process, game installation, socket, or DLL entry point is used.
 #include "../src/crew.h"
 #include "../src/coop_extension_api.h"
+#include "../src/support_protocol.h"
 #include <deque>
 #include <cstring>
 #include <cstdio>
@@ -32,7 +33,7 @@ unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 // flags/key: as EDF6Coop ABI 2 delivers them (EDF6CoopExtensionMessage: bit 0 a state message, and its key).
-struct Packet { EDF6CoopPeer sender;unsigned char bytes[200];std::uint32_t flags=0,key=0; };   // support_protocol.h kWireSize (asserted below)
+struct Packet { EDF6CoopPeer sender;unsigned char bytes[crew::support_net::kWireSize];std::uint32_t flags=0,key=0; };
 std::deque<Packet> incoming;
 HMODULE WINAPI Module(LPCWSTR name) {
     if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);

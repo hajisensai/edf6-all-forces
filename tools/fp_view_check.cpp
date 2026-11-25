@@ -414,6 +414,18 @@ void Springs() {
     Cue sprint=Quiet();sprint.move=Move::sprint;sprint.speed=0.3f;
     p=Run(s,sprint,60);
     Expect(p.pitch<-0.2f && p.yaw<-0.3f,"a sprint lowers it and turns it in",p.pitch,p.yaw);
+    Cue runFire=sprint;runFire.firing=true;runFire.recoil=1.0f;
+    p=Run(s,runFire,60);
+    Expect(std::fabs(p.yaw)<0.01f && std::fabs(p.roll)<0.01f,"held fire brings the sprint pose back to the ready position",p.yaw,p.roll);
+    for(int i=0;i<60;++i) {
+        runFire.move=i%2 ? Move::none : Move::sprint;
+        runFire.shots=i%6==0 ? 1 : 0;
+        p=Advance(s,runFire);
+        Expect(std::fabs(p.yaw)<0.01f && std::fabs(p.roll)<0.01f,"sprint transitions cannot swing the gun during a burst",p.yaw,p.roll);
+        if(runFire.shots)Expect(p.pitch>0.05f,"shots still produce recoil in the ready pose",p.pitch);
+    }
+    p=Run(s,sprint,60);
+    Expect(p.yaw<-0.3f,"the sprint pose returns after the burst",p.yaw);
     s=State{};
     Cue dash=Quiet();dash.move=Move::dash;dash.speed=0.3f;
     float most=0.0f;

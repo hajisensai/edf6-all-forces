@@ -34,7 +34,8 @@ bool ValidArms(const RequesterArms& a) noexcept {
 constexpr SupportWeapon kOffhandKinds[]={SupportWeapon::fencerCannon,SupportWeapon::fencerMiddleCannon,
                                          SupportWeapon::fencerPileBanker,SupportWeapon::fencerShotgun};
 constexpr std::size_t kTailBytes=24;
-static_assert(6*std::size(kOffhandKinds)==kTailBytes && kWireSize==176+kTailBytes,"the v3 tail: four second hands");
+constexpr std::size_t kRunOffset=176+kTailBytes;
+static_assert(6*std::size(kOffhandKinds)==kTailBytes && kWireSize==kRunOffset+12,"the wire tails: second hands and attack line");
 // A weapon word as 6 bytes (u16 id, 0xFFFF none; u32 stars, a nibble each) and back.
 void PutWord(unsigned char* p,std::uint64_t v) noexcept {
     const std::uint16_t id=v ? static_cast<std::uint16_t>(v&0xFFFFu) : static_cast<std::uint16_t>(0xFFFFu);
@@ -138,7 +139,8 @@ void Float(unsigned char*& p,float f) noexcept { std::uint32_t v;std::memcpy(&v,
 float Float(const unsigned char*& p) noexcept { const auto v=Read32(p);float f;std::memcpy(&f,&v,4);return f; }
 bool ValidMessage(const Message& m) noexcept {
     if(m.kind<Kind::hello || m.kind>Kind::requestStatus || m.catalog>=1024 ||
-       m.count>kMaxUnits || m.index>=kMaxUnits || m.ok>1 || !Point(m.target))return false;
+       m.count>kMaxUnits || m.index>=kMaxUnits || m.ok>1 || !Point(m.target) || !sortie::RunValid(m.run) ||
+       (m.run.half!=0.0f && m.kind!=Kind::request && m.kind!=Kind::begin))return false;
     if(m.kind==Kind::hello)return m.challenge!=0 && m.request!=0;
     if(!m.epoch)return false;
     if(m.kind==Kind::welcome)return m.challenge!=0 && m.request!=0;
@@ -152,7 +154,8 @@ bool ValidMessage(const Message& m) noexcept {
 }
 }
 bool ValidPlan(const Plan& p,bool ids) noexcept {
-    if(!p.count || p.count>kMaxUnits || p.catalogId>=1024 || !Point(p.target) || !RequesterMetadata(p.requester,p.team))return false;
+    if(!p.count || p.count>kMaxUnits || p.catalogId>=1024 || !Point(p.target) || !RequesterMetadata(p.requester,p.team) ||
+       !sortie::RunValid(p.run))return false;
     for(std::uint32_t i=0;i<p.count;++i) {
         if(!ValidUnit(p.units[i],ids) || p.units[i].role>p.count || p.units[i].role==i+1)return false;
         if(p.units[i].resourceId==kExistingVehicle && p.catalogId!=kMissionCrewCatalog)return false;
@@ -170,6 +173,8 @@ bool ValidPreparedDronePlan(const Plan& plan) noexcept {
 bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     if(!bytes || size!=kWireSize || !ValidMessage(m))return false;
     auto p=static_cast<unsigned char*>(bytes);
+    auto run=p+kRunOffset;
+    Float(run,m.run.x);Float(run,m.run.z);Float(run,m.run.half);
     Store32(p,kMagic);Store32(p,kVersion);Store32(p,static_cast<std::uint32_t>(m.kind));Store32(p,0);
     Store32(p,static_cast<std::uint32_t>(m.epoch));Store32(p,static_cast<std::uint32_t>(m.epoch>>32));
     Store32(p,static_cast<std::uint32_t>(m.challenge));Store32(p,static_cast<std::uint32_t>(m.challenge>>32));
@@ -187,6 +192,8 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     auto p=static_cast<const unsigned char*>(bytes);
     if(Read32(p)!=kMagic || Read32(p)!=kVersion)return false;
     Message m;m.kind=static_cast<Kind>(Read32(p));if(Read32(p))return false;
+    auto run=static_cast<const unsigned char*>(bytes)+kRunOffset;
+    m.run={Float(run),Float(run),Float(run)};
     m.epoch=Read32(p);m.epoch|=static_cast<std::uint64_t>(Read32(p))<<32;
     m.challenge=Read32(p);m.challenge|=static_cast<std::uint64_t>(Read32(p))<<32;
     m.transaction=Read32(p);m.request=Read32(p);m.catalog=Read32(p);m.count=Read32(p);m.index=Read32(p);m.ok=Read32(p);
@@ -385,13 +392,14 @@ void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus sta
     reply->dirty=true;ReplyTo(peer);
 }
 bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout,
-                     const RequesterArms* arms) noexcept {
-    if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
+                     const RequesterArms* arms,const sortie::RunSpec& run) noexcept {
+    if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || !sortie::RunValid(run) ||
+       nextRequest_==UINT32_MAX)return false;
     // Every slot holds a request still waiting for its outcome: a new one would push one out unsettled (its outcome
     // never told, its pt never settled). Not taken; nothing is sent.
     if(LocalWaiting()>=kRecentRequests)return false;
     if(arms && !ValidArms(*arms))return false;
-    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;
+    Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;m.run=run;
     if(arms)m.arms=*arms;
     Notice(m.request,RequestStatus::accepted);
     std::memcpy(m.target,target,sizeof(m.target));
@@ -462,7 +470,7 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     auto* allocated=AllocateTransaction();if(!allocated){Refuse(peer,m,"no transaction slot");return;}
     auto& t=*allocated;t.phase=!channel && MapBusy() ? Phase::queued : Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
     t.rescue=channel;
-    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;t.arms=m.arms;
+    t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;t.arms=m.arms;t.plan.run=m.run;
     Publish(peer,m.request,RequestStatus::accepted);
 }
 std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now,PreparedKind kind) noexcept {
@@ -539,6 +547,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         if(!ValidPlan(t.plan) || !backend_.hooks.validate(t.plan)){Cancel(id,true,RequestStatus::refused);return;}
         t.phase=Phase::prepared;t.since=now;t.ready[0]=1;
         Message m;m.kind=Kind::begin;m.transaction=t.id;m.catalog=t.plan.catalogId;m.count=t.plan.count;
+        m.run=t.plan.run;
         std::memcpy(m.target,t.plan.target,sizeof(m.target));
         if(HasRequester(t.plan)) {
             m.unit.resourceId=kBeginRequesterMetadata;m.unit.role=t.plan.team;
@@ -662,6 +671,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         if(nextToken_==UINT64_MAX){Suspend();return;}
         t.token=++nextToken_;
         t.phase=Phase::assembling;t.since=now;t.plan.catalogId=m.catalog;t.plan.count=m.count;
+        t.plan.run=m.run;
         std::memcpy(t.plan.target,m.target,sizeof(m.target));
         if(m.unit.resourceId==kBeginRequesterMetadata) {
             std::memcpy(t.plan.requester,m.unit.netId,sizeof(t.plan.requester));t.plan.team=m.unit.role;

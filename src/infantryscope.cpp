@@ -264,6 +264,16 @@ bool ViewIndex(const void* view,unsigned* index,unsigned* type) noexcept {
 }
 }  // namespace
 
+const unsigned char* InfantryScopeLensOwner(const void* view) noexcept {
+    unsigned index=0,type=0;
+    if(!view || !ViewIndex(view,&index,&type) || index!=scopepip::kLensViewport || type!=0 ||
+       !PictureInPicture() || LensRefused() || scopelens::Side()<=0)return nullptr;
+    const Published p=Read();
+    const auto* human=static_cast<const unsigned char*>(p.human.obj);
+    __try { return human && Live(p) && p.human.Is(human) ? human : nullptr; }
+    __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+
 void InfantryScopeWorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
     // Render thread only. The pass's device resources go after kIdleMs of no lens (by time: the world views a second
     // follow the frame rate), not on every other view (split screen: the other player's view has none).

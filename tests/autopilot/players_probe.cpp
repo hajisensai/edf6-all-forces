@@ -78,9 +78,10 @@ void PlayersProbeTick() noexcept {
         if(!edf::Readable(s,kClassRecord+4)){say("PLAYERS %s %p gone",kClasses[i].name,s);seen[i]=nullptr;continue;}
         __try {
             const auto pad=At<const unsigned char*>(s,kPad);
-            say("PLAYERS %s %p localPad(+0x338) %d classRecord(+0xD40) %d player(+0x354) %d pad %p padPath(+0x2D68) %d",
+            say("PLAYERS %s %p localPad(+0x338) %d classRecord(+0xD40) %d player(+0x354) %d pad %p padPath(+0x2D68) %d position %.2f,%.2f,%.2f",
                 kClasses[i].name,s,At<int>(s,kLocalPad),At<int>(s,kClassRecord),At<unsigned char>(s,kPlayer),pad,
-                pad && edf::Readable(pad,kPadPath+4) ? At<int>(pad,kPadPath) : -99);
+                pad && edf::Readable(pad,kPadPath+4) ? At<int>(pad,kPadPath) : -99,
+                At<float>(s,0x90),At<float>(s,0x94),At<float>(s,0x98));
             void* const net=s+kNet;
             const auto send=(*reinterpret_cast<SendFn* const*>(net))[kNetSlotSend];
             // The record through its control block at +0x130 (uses at +4, the record at +8: 22B058..22B09B).

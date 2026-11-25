@@ -28,7 +28,7 @@ namespace crew::preload {
 
 // One bit per preloadable thing. Bodies are jet_internal.h kBodies' indexes (static_assert in preload_set.cpp).
 enum class Item : std::uint8_t {
-    body0=0,                 // .. body0+37: kBodies[k] (with its weapons, stores.inc kJetWeapons)
+    body0=0,                 // .. body0+38: kBodies[k] (with its weapons, stores.inc kJetWeapons)
     catch0=40,               // .. catch0+6: playerjet_kinds.h kCatchFiles[i] (the catch after an ejection)
     chute=48,                // the parachute's canopy (playerjet.cpp ChuteMake)
     rope=49,                 // a helicopter's rope (transport.cpp's rope descent)
@@ -43,7 +43,7 @@ enum class Item : std::uint8_t {
     soldier0=64,             // .. soldier0+14: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
     end=128,
 };
-inline constexpr int kBodyItems=38,kCatchItems=7,kSoldierItems=15;
+inline constexpr int kBodyItems=39,kCatchItems=7,kSoldierItems=15;
 // jet_internal.h Body's indexes this file names (static_assert against Body in preload_set.cpp).
 namespace body {
 enum : int { strike=0, fighter=1, bomber401=2, bomber501_2=3, interceptor=4, multirole=5, carrier=6, drone=7, blast=8,

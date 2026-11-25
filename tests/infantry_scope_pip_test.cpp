@@ -229,6 +229,8 @@ int WorldEndChecks() {
     config.enabled=true;config.infantryScope=2;lensHooked.store(true);
     Open(GetTickCount64());
     Check(Step(camera)==scopepip::kBaseFov,"the camera left the frame unmagnified");
+    Check(InfantryScopeLensOwner(lensView)==soldier,"the magnified view omits its scope owner's body");
+    Check(!InfantryScopeLensOwner(mainView) && !InfantryScopeLensOwner(shadowView),"the main and shadow views keep the soldier");
     // One frame in the render thread's order: the lens view's world end (the last recording's, after its main view's
     // post stage), this recording's main view's world end, the lens command right after it (before its post stage).
     const auto frame=[&](unsigned char* view,const Target& lensTarget) {

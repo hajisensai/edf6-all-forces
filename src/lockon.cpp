@@ -23,12 +23,15 @@
 #include "stores.h"
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 
 namespace crew {
 namespace {
 constexpr std::size_t kLockList=0xC60,kLockCount=0xC68,kLocking=0xC70,kLockingCtrl=0xC78,kLockProgress=0xC80;
 constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120,kWeaponNode=0x08;
 constexpr std::size_t kLockSoundTimer=0xCB8;
+constexpr std::size_t kRepeatLock=0x78E,kRepeatRule=0x691395;
+const unsigned char kRepeatRuleSig[]={0x44,0x38,0xA7,0x8E,0x07,0x00,0x00,0x0F,0x85,0x00,0x01,0x00,0x00};
 constexpr std::size_t kNodeEntry=0x10,kNodeCtrl=0x18,kEntryPoint=0x10;
 // The entry is the lock-target registry's record (heli.cpp kTargetObject / kTargetAim: object +0x8, aim point +0x10).
 constexpr std::size_t kEntryObject=0x8;
@@ -47,7 +50,7 @@ constexpr int kMostSkips=16,kMostNodes=64;
 using PickFn=std::uint64_t(__fastcall*)(void**,unsigned char*,unsigned char*);
 using EntryFn=void(__fastcall*)(void*);
 PickFn pickNext=nullptr;
-bool clearOk=false,dropOk=false;
+bool clearOk=false,dropOk=false,repeatOk=false;
 // The targets the player cycled away from on one weapon, last in its order until `until`.
 struct Skip { const unsigned char* weapon; const void* entries[kMostSkips]; int count; ULONGLONG until; } skip{};
 
@@ -63,6 +66,35 @@ template<class F> void EachLock(const unsigned char* w,F visit) noexcept {
         visit(node);
         node=At<const unsigned char*>(node,0);
     }
+}
+
+const void* LockEnemy(const unsigned char* entry) noexcept {
+    if(!Readable(entry,kEntryObject+8))return entry;
+    if(const auto enemy=At<const void*>(entry,kEntryObject))return enemy;
+    return entry;
+}
+
+struct SalvoAllocation {
+    struct Enemy { const void* object; unsigned rounds; };
+    Enemy enemies[kMostNodes]{};
+    int count=0;
+
+    unsigned RoundsFor(const void* object) const noexcept {
+        for(int i=0;i<count;++i)if(enemies[i].object==object)return enemies[i].rounds;
+        return 0;
+    }
+};
+
+SalvoAllocation AllocatedLocks(const unsigned char* weapon) noexcept {
+    SalvoAllocation locks;
+    EachLock(weapon,[&](const unsigned char* node) {
+        if(!Live(At<const unsigned char*>(node,kNodeCtrl)))return;
+        const void* const enemy=LockEnemy(At<const unsigned char*>(node,kNodeEntry));
+        if(!enemy)return;
+        for(int i=0;i<locks.count;++i)if(locks.enemies[i].object==enemy){++locks.enemies[i].rounds;return;}
+        locks.enemies[locks.count++]={enemy,1};
+    });
+    return locks;
 }
 
 bool IsSoldier(const unsigned char* o) noexcept {
@@ -110,28 +142,51 @@ float ViewAngle(void** ref) noexcept {
 // owner, the seat's rider). The pick runs Score once a candidate (hundreds in a cone), so they are read once a weapon a
 // frame. Keyed by the weapon's resource node and owner too: another weapon at a freed one's address, or the weapon
 // changing hands, in the same frame reads afresh. The pick runs on the game thread only (the weapon's update).
-struct WeaponFacts { const unsigned char* weapon; const void* node; const void* owner; ULONGLONG frame; bool store,held; };
-WeaponFacts facts{nullptr,nullptr,nullptr,~0ull,false,false};
-void FactsOf(const unsigned char* w,bool* store,bool* held) noexcept {
-    if(!Readable(w,kWeaponOwner+8)){*store=IsStoreWeapon(w);*held=PlayerHolds(w);return;}
+struct WeaponFacts {
+    const unsigned char* weapon;
+    const void* node;
+    const void* owner;
+    ULONGLONG frame;
+    bool store,held,salvo;
+    SalvoAllocation locks;
+};
+WeaponFacts facts{nullptr,nullptr,nullptr,~0ull,false,false,false,{}};
+const WeaponFacts& FactsOf(const unsigned char* w) noexcept {
+    if(!Readable(w,kWeaponOwner+8)) {
+        facts={nullptr,nullptr,nullptr,~0ull,false,false,false,{}};
+        return facts;
+    }
     const ULONGLONG frame=GameFrame();
     const auto node=At<const void*>(w,kWeaponNode),owner=At<const void*>(w,kWeaponOwner);
-    if(facts.weapon!=w || facts.node!=node || facts.owner!=owner || facts.frame!=frame)
-        facts={w,node,owner,frame,IsStoreWeapon(w),PlayerHolds(w)};
-    *store=facts.store;*held=facts.held;
+    if(facts.weapon!=w || facts.node!=node || facts.owner!=owner || facts.frame!=frame) {
+        const auto* const spec=StoreOf(w);
+        const bool salvo=spec && std::wcscmp(spec->prefix,L"EDF6VC_SALVO_")==0;
+        facts={w,node,owner,frame,spec!=nullptr,PlayerHolds(w),salvo,{}};
+        if(salvo) {
+            facts.locks=AllocatedLocks(w);
+            if(repeatOk && Readable(w+kRepeatLock,1,true))
+                Put<unsigned char>(const_cast<unsigned char*>(w),kRepeatLock,1);
+        }
+    }
+    return facts;
 }
 
 // Candidate `ref` of weapon `w` (stock result `result`) scored by the plugin's order; false: the stock order.
 bool Score(void** ref,const unsigned char* result,const unsigned char* w,float* score) noexcept {
-    bool store=false,held=false;
-    FactsOf(w,&store,&held);
-    if(!store && !held)return false;   // the stock order whatever the view (below: no view score, no store score)
-    const bool byView=held && (store ? Cfg().playerJetLockByView : Cfg().playerLockByView);
+    const WeaponFacts& f=FactsOf(w);
+    if(!f.store && !f.held)return false;
+    const bool byView=f.held && (f.store ? Cfg().playerJetLockByView : Cfg().playerLockByView);
     const float view=byView ? ViewAngle(ref) : -1.0f;
     if(view>=0.0f)*score=view*view;
-    else if(store){const float yaw=At<float>(result,0),pitch=At<float>(result,4);*score=yaw*yaw+pitch*pitch;}
+    else if(f.store){const float yaw=At<float>(result,0),pitch=At<float>(result,4);*score=yaw*yaw+pitch*pitch;}
     else return false;
-    const void* const entry=ref ? ref[0] : nullptr;
+    const auto* const entry=ref ? static_cast<const unsigned char*>(ref[0]) : nullptr;
+    if(f.salvo && std::isfinite(*score)) {
+        // All native in-cone candidates receive their first round before a repeat. Group the lock points of one
+        // enemy together, and use the aim only to break ties inside the same round count.
+        *score=static_cast<float>(f.locks.RoundsFor(LockEnemy(entry)))+*score/(1.0f+*score);
+        return true;
+    }
     EachLock(w,[&](const unsigned char* node){if(At<const void*>(node,kNodeEntry)==entry)*score+=kRepeatScore;});
     if(skip.weapon==w && GameMs()<skip.until)
         for(int i=0;i<skip.count;++i)if(skip.entries[i]==entry){*score+=kSkipScore;break;}
@@ -173,6 +228,19 @@ bool HookPick() noexcept {
     return false;
 }
 }  // namespace
+
+void LogSalvoLocks(const unsigned char* weapon) noexcept {
+    const auto locks=AllocatedLocks(weapon);
+    if(!locks.count)return;
+    unsigned total=0,fewest=kMostNodes,most=0;
+    for(int i=0;i<locks.count;++i) {
+        const unsigned rounds=locks.enemies[i].rounds;
+        total+=rounds;
+        if(rounds<fewest)fewest=rounds;
+        if(rounds>most)most=rounds;
+    }
+    Log("JET salvo allocation: %u missiles across %d enemies, %u-%u per enemy",total,locks.count,fewest,most);
+}
 
 bool PlayerHolds(const unsigned char* w) noexcept {
     if(!w || !Readable(w+kWeaponOwner,8))return false;
@@ -256,6 +324,7 @@ bool InstallLockon() noexcept {
         // Partial cancellation is available only with both halves of the stock cancellation path verified.
         dropOk=Matches(kDropLocking,kDropLockingSig,sizeof(kDropLockingSig)) &&
                Matches(kCancelLocking,kCancelLockingSig,sizeof(kCancelLockingSig));
+        repeatOk=Matches(kRepeatRule,kRepeatRuleSig,sizeof(kRepeatRuleSig));
         const bool pickOk=Matches(kPick,kPickSig,sizeof(kPickSig)) && HookPick();
         Log("HOOK lockon pick=%d clearLock=%d dropLocking=%d (the player's weapons lock nearest the view first)",pickOk,
             clearOk,dropOk);

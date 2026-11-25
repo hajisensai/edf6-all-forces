@@ -26,6 +26,7 @@
 #include "map.h"
 
 #include <Xinput.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -56,6 +57,7 @@ constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8,kCtxDt=0x10;   // UpdateContex
 constexpr std::size_t kDrawDevice=0x8,kDrawViewport=0x398;       // xgl::gs::Context: ID3D11DeviceContext*, {x, y, w, h}
 constexpr unsigned kFocus=0x953350;     // (HuiButtonListUtil* select+0x770, int i): the native focus to display entry i
 constexpr unsigned kConfirm=0x8A85C0;   // cbRequestMission(select, const Result*): confirms entry +0x778 (rdx not read)
+constexpr unsigned kVerticalMouseCall=0x83FAE3,kVerticalMouse=0x7F0480;
 constexpr unsigned kTextOf=0x7A3500;    // const wchar_t* (text table, const wchar_t* key)
 constexpr unsigned kNumber=0x52F50;     // double (const Handle*): a number node's value
 constexpr unsigned kNotOpenKey=0x1810C80;   // L"MissionSelect_NotOpenMissionTitle" (the locked row's title, 0x9591B6)
@@ -508,6 +510,8 @@ struct Shot {
     // The panel: the chosen place's missions from `first` (of `total`).
     int lines=0,first=0,total=0;
     PanelLine line[kShownLines]{};
+    int listFirst=0,listLines=0;
+    PanelLine list[kShownLines]{};
     hudtext::Lang lang=hudtext::Lang::en;
 };
 SRWLOCK shotLock=SRWLOCK_INIT;
@@ -553,8 +557,16 @@ struct Ui {
     int confirm=-1;                   // the entry a second click on its line confirms after the stock OnUpdate (-1: none)
     int panelFirst=0,panelLines=0;    // the panel's lines as last published (the mouse's hit test)
     int panelEntry[kShownLines]{};
+    int listFirst=0,listLines=0;
 };
 Ui ui;
+thread_local bool mapUpdatingStock=false;
+using ListMouseFn=bool(__fastcall*)(void*);
+
+// Behavior_Vertical tries the mouse first, then uses the navigation repeat mask when it returns false.
+bool __fastcall VerticalListMouse(void* list) noexcept {
+    return !mapUpdatingStock && reinterpret_cast<ListMouseFn>(image+kVerticalMouse)(list);
+}
 std::atomic<unsigned> selectGeneration{0};   // bumped by each select's destructor (GoneHook)
 std::atomic<unsigned char*> gone{nullptr};   // the select whose destructor ran (set there, taken by the next frame)
 constexpr float kOpeningSeconds=1.0f,kFollowSeconds=0.5f;
@@ -653,7 +665,7 @@ int EntryOfPin(int k) noexcept {
 }
 // Group k of layout l chosen: one place, its entry; several, the map opens it up (SplitView) and the cursor goes to
 // the first of its places in list order that has a mission to enter (else its first place's first entry).
-void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const char* why) noexcept {
+void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const char* why,bool expand=true) noexcept {
     MapPoint members[kPlaceCount];
     int n=0,best=-1,bestEntry=-1;
     for(int i=0;i<rows.pinCount;++i) {
@@ -664,7 +676,7 @@ void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const
         if(best<0 && bestEntry<0)best=i;
     }
     if(n==0)return;
-    if(n>1) {
+    if(n>1 && expand) {
         MoveTo(SplitView(ui.moving ? ui.to : ui.view,members,n,s),kFollowSeconds);
         Log("WORLDMAP select %p: %s: a group of %d places opened",static_cast<void*>(self),why,n);
     }
@@ -674,10 +686,12 @@ void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const
 // This frame's map input; true when the stock OnUpdate must not get it (a click, a drag, the wheel, a stick, a zoom).
 bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,float dt,bool input) noexcept {
     const bool front=InFront() && !MapHoldsKeys();   // (the mission's map view is never open over the select; the census)
+    const Pixel previous=ui.pointer;
     ReadPointer(s);
-    const bool overMap=ui.pointerShown && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
+    const bool overList=ui.pointerShown && In(kMissionList,ui.pointer);
+    const bool overMap=ui.pointerShown && !overList && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
     const bool overPanel=ui.pointerShown && OverPanel(ui.pointer);
-    wheelToMapUntil.store(input && front && overMap ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
+    wheelToMapUntil.store(input && front && (overMap || overList) ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
     const int notches=wheel.exchange(0);
     XINPUT_STATE pad{};
     const bool havePad=(front || edf::PadSource()) && PadState(&pad);
@@ -691,24 +705,35 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     }
     bool used=false;
     const int cursor=CursorIndex(self);
+    const bool mapClick=lb && !ui.lbWas && overMap;
+    const bool moved=ui.pointer.x!=previous.x || ui.pointer.y!=previous.y;
+    bool overPin=false;
+    if(overMap && (mapClick || (!lb && moved))) {
+        Layout l;
+        LayOut(ui.view,s,l);
+        Pixel at[kPlaceCount];
+        for(int k=0;k<l.count;++k)at[k]=l.groups[k].at;
+        const int pin=Pick(at,l.count,ui.pointer,kPinRadius);
+        overPin=pin>=0;
+        if(overPin && (mapClick || GroupOfPlace(l,EntryPlace(cursor))!=pin)) {
+            ChooseGroup(self,l,pin,s,mapClick ? "a pin clicked" : "the pointer entered a pin",mapClick);
+            used=true;
+        }
+    }
     // A click: a panel line (the cursor's line again: confirm), a pin (its place chosen), else the map dragged.
     if(lb && !ui.lbWas) {
-        if(overPanel) {
-            const int line=PanelLineAt(ui.pointer,ui.panelLines);
+        if(overPanel || overList) {
+            Pixel relative=ui.pointer;
+            if(overList)relative.x+=kPanel.x0-kMissionList.x0;
+            const int line=PanelLineAt(relative,overList ? ui.listLines : ui.panelLines);
             if(line>=0) {
-                const int entry=ui.panelEntry[line];
+                const int entry=overList ? ui.listFirst+line : ui.panelEntry[line];
                 if(entry==cursor)ui.confirm=Confirmable(self) ? entry : -1;
                 else Choose(self,entry,"a panel line clicked");
             }
             used=true;
         } else if(overMap) {
-            Layout l;
-            LayOut(ui.view,s,l);
-            Pixel at[kPlaceCount];
-            for(int k=0;k<l.count;++k)at[k]=l.groups[k].at;
-            const int k=Pick(at,l.count,ui.pointer,kPinRadius+9.f);
-            if(k>=0)ChooseGroup(self,l,k,s,"a pin clicked");
-            else{ui.dragging=true;ui.dragAt=ui.pointer;}
+            if(!overPin){ui.dragging=true;ui.dragAt=ui.pointer;}
             used=true;
         }
     } else if(lb && ui.dragging) {
@@ -718,6 +743,11 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     if(!lb)ui.dragging=false;
     ui.lbWas=lb;
     if(notches && overMap){ZoomAt(ui.view,s,ui.pointer,WheelZoom(notches));used=true;}
+    if(notches && overList && rows.n>0) {
+        const int entry=std::clamp(cursor-notches,0,rows.n-1);
+        if(entry!=cursor)Choose(self,entry,"mission list scrolled");
+        used=true;
+    }
     // Left / right (the stock select reads neither: its list is vertical): the nearest place that way with a mission
     // that may be chosen. The stock OnUpdate still gets the input (up / down / confirm in the same frame are its).
     const unsigned repeat=RepeatMask(ctx);
@@ -773,7 +803,19 @@ void FollowCursor(unsigned char* self,const Screen& s) noexcept {
     if(!In(kOpenArea,ToScreen(end,s,p)))MoveTo(CentreOn(end,p,s),kFollowSeconds);
 }
 
-// The shot's pins and panel from the rows and the cursor.
+void DescribeLine(PanelLine& l,int entry,int cursor,int titleCount) noexcept {
+    MissionNumber(rows.row[entry],rows.field5[entry],l.num,std::size(l.num));
+    if(rows.state[entry]==3)wcsncpy_s(l.title,rows.notOpen,_TRUNCATE);
+    else if(rows.row[entry]<titleCount)Title(rows.row[entry],l.title,std::size(l.title));
+    else l.title[0]=0;
+    wchar_t* w=l.title;
+    for(const wchar_t* c=l.title;*c;++c)if(*c!=static_cast<wchar_t>(0x2020))*w++=*c;
+    *w=0;
+    l.state=rows.state[entry];
+    l.cursor=entry==cursor;
+}
+
+// The shot's pins and both lists from the rows and the cursor.
 void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.pinCount=rows.pinCount;
     for(int i=0;i<rows.pinCount;++i)out.pins[i]=rows.pins[i];
@@ -788,6 +830,12 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.targetCount=rows.targetCount;
     for(int i=0;i<rows.targetCount;++i){out.targets[i]=rows.targets[i];out.targetState[i]=rows.targetState[i];}
     out.lang=hudtext::InUse();
+    const int total=RowCount();
+    out.listFirst=ScrollFirst(rows.n,cursor,kShownLines);
+    for(int entry=out.listFirst;entry<rows.n && out.listLines<kShownLines;++entry)
+        DescribeLine(out.list[out.listLines++],entry,cursor,total);
+    ui.listFirst=out.listFirst;
+    ui.listLines=out.listLines;
     ui.panelLines=0;
     if(out.chosen<0)return;
     int at[kMaxEntries];
@@ -795,21 +843,11 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     int line=-1;
     for(int i=0;i<count;++i)if(at[i]==cursor)line=i;
     const int first=ScrollFirst(count,line,kShownLines);
-    const int total=RowCount();
     out.first=first;out.total=count;
     for(int i=first;i<count && out.lines<kShownLines;++i) {
         const int e=at[i];
         PanelLine& l=out.line[out.lines];
-        MissionNumber(rows.row[e],rows.field5[e],l.num,std::size(l.num));
-        if(rows.state[e]==3)wcsncpy_s(l.title,rows.notOpen,_TRUNCATE);
-        else if(rows.row[e]<total)Title(rows.row[e],l.title,std::size(l.title));
-        else l.title[0]=0;
-        // The list's titles pad some names with daggers (U+2020) the stock button text does not show: left out.
-        wchar_t* w=l.title;
-        for(const wchar_t* c=l.title;*c;++c)if(*c!=static_cast<wchar_t>(0x2020))*w++=*c;
-        *w=0;
-        l.state=rows.state[e];
-        l.cursor=e==cursor;
+        DescribeLine(l,e,cursor,total);
         ui.panelEntry[out.lines]=e;
         ++out.lines;
     }
@@ -908,6 +946,8 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     if(ui.started)Describe(on,self,s);
     Publish(on);
     std::uint64_t result;
+    const bool wasUpdatingStock=mapUpdatingStock;
+    mapUpdatingStock=true;
     if(used) {
         // The stock OnUpdate as when it does not own the input (§5.2): no scroll, no button; its cursor refresh runs.
         alignas(8) unsigned char copy[kCtxSize];
@@ -917,6 +957,7 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     } else {
         result=nextUpdate(self,ctx);
     }
+    mapUpdatingStock=wasUpdatingStock;
     if(ui.started)AfterStock(self);
     return result;
 }
@@ -1131,6 +1172,25 @@ void DrawPanel() noexcept {
     Text(KeysLine(d.lang,1),x,kPanel.y1-34.f,20.f,false,0xFFD0D8E0u,300.f);
 }
 
+void DrawMissionList() noexcept {
+    const Shot& d=drawn;
+    const int lang=static_cast<int>(d.lang);
+    constexpr const wchar_t* titles[]={L"Missions",L"所有关卡",L"所有關卡",L"任務一覧"};
+    const float x=kMissionList.x0+12.f,y=kMissionList.y0;
+    const float w=kMissionList.x1-x-10.f;
+    const float bottom=y+kPanelHeading+kPanelRow*static_cast<float>(d.listLines);
+    renderer->Rect(kMissionList.x0,y,kMissionList.x1,bottom,0x700A1420u);
+    Text(titles[lang>=0 && lang<4 ? lang : 0],x,y+12.f,26.f,true,0xFFFFFFFFu,w);
+    for(int i=0;i<d.listLines;++i) {
+        const PanelLine& l=d.list[i];
+        const float rowY=y+kPanelHeading+kPanelRow*static_cast<float>(i);
+        if(l.cursor)renderer->Rect(kMissionList.x0,rowY,kMissionList.x1,rowY+kPanelRow-2.f,0x70FFD23Cu);
+        const std::uint32_t colour=l.state==3 ? 0xFFC0C0C0u : 0xFFFFFFFFu;
+        Text(l.num,x,rowY+6.f,22.f,true,colour,62.f);
+        Text(l.title,x+68.f,rowY+6.f,22.f,true,colour,w-68.f);
+    }
+}
+
 // Where the select's window skins draw their large empty frame (Window02_SoldierSel1 / 2's .B / .c meshes reach x
 // 1920, y 113..956; docs/worldmap-select-re.md §8.1): the map drawn again over it after the stock draw. The kept windows
 // (x 842..1382, y 223..851 with their borders) are left alone; the frame's left bar shows above and below them.
@@ -1232,6 +1292,7 @@ void DrawOver(unsigned char* ctx) noexcept {
     }
     renderer->Unclip();
     DrawPanel();
+    if(drawn.listLines>0)DrawMissionList();
     // The pointer: a small cross (the select draws no cursor of its own over the map).
     if(drawn.pointerShown) {
         const float x=drawn.pointer.x,y=drawn.pointer.y;
@@ -1330,6 +1391,9 @@ bool InstallWorldMap() noexcept {
             Log("HOOK worldmap REFUSED: the code at EDF+0x%X is not as expected: the mission select stays stock (the list)",s.rva);
             return false;
         }
+    bool mouseChanged=false;
+    if(!edf::RedirectCall(image+kVerticalMouseCall,image+kVerticalMouse,reinterpret_cast<void*>(&VerticalListMouse),mouseChanged))
+        return false;
     // The destructor first (a new select at a dead one's address must not inherit its state), then the draw, then the
     // update (which hides the list): a later slot that fails leaves the earlier ones inert.
     if(!Chain(kGoneSlot,kGone,reinterpret_cast<void*>(&GoneHook),nextGone,"destructor") ||

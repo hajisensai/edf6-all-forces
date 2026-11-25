@@ -73,7 +73,7 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
         j.yaw=std::atan2(m[8],m[10]);
         const bool down=clear!=kNoGround && clear<kTouch && Len(j.measured)<kBoardSpeed;
         j.phase=down ? Phase::parked : Phase::air;
-        j.throttle=0.0f;j.hover=aim::Hold{};
+        j.throttle=0.0f;j.hover=aim::Hold{};j.hoverMode={};
         if(e){std::memcpy(e->m.vel,j.measured,12);std::memset(e->m.acc,0,12);}
     }
     Log("PJET v=%p one of ours boarded: %s (%s), its NPC pilot out",v,j.kind->name,j.board->frame==pjet::Airframe::rotor ? "rotor" : "wing");
@@ -357,6 +357,7 @@ void HoverAim(PJet& j,unsigned char* v,const Stick& s,const float* pos,float nos
     KeepAimOnScreen(j,v,level,was);
     const bool grounded=clear!=kNoGround && clear<kTouch;
     const aim::Keys keys{s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f,s.lx,s.ascend-(down ? 1.0f : 0.0f)};
+    if(j.hoverMode.on && keys.fore==0.0f)j.hover.speed=0.0f;
     // Its own velocity (Hover's), not the measured one: touching the ground the solver's push out is in that, and the
     // height the hold took on letting go (h.y = y + vy kHoldLead) rose with every bounce: the carrier let down on the
     // ground was thrown back up to a height it then held (the user, 2026-10-09: 「我都撞地上了，还会把空母往天上弹」).
@@ -374,16 +375,34 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     const float nose=std::atan2(m[8],m[10]);
     const bool down=s.keys ? s.boost<0.0f : (At<std::uint16_t>(SeatAt(v,0),kSeatButtons)&kButtonL3)!=0;
     float want[3]={0.0f,0.0f,0.0f},vz=0.0f;
+    std::uint16_t pad=0;
+    const int hoverButton=Cfg().heliHoverButton;
+    const bool toggle=KeyDown(Cfg().heliHoverKey) ||
+        (hoverButton>0 && !MapHoldsKeys() && MapPadState(&pad,nullptr,nullptr) && (pad&hoverButton)==hoverButton);
+    if(j.hoverMode.Step(toggle)) {
+        j.hover=aim::Hold{};
+        Log("PJET v=%p player switched to %s",v,j.hoverMode.on ? "hover" : "flight");
+    }
     const bool aimFlight=s.keys && Cfg().heliMouseAim;
     if(aimFlight)HoverAim(j,v,s,pos,nose,clear,down,dt,want,&vz);
     else {
         const float rate=Clamp(k.roll,kHoverYawMin,kHoverYawMax);
         j.yaw-=s.keys ? s.aimX*kAimPerUnit*Cfg().playerJetMouseSpeed : s.yaw*rate*dt;
-        j.hover=aim::Hold{};j.hasAim=false;
+        j.hasAim=false;
     }
     j.hoverTop=k.cruise;
     j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
-    if(!aimFlight)HoverStick(j,k,s,down,want,&vz);
+    if(!aimFlight) {
+        HoverStick(j,k,s,down,want,&vz);
+        const bool grounded=clear!=kNoGround && clear<kTouch;
+        if(j.hoverMode.on) {
+            vz=aim::Collective(j.hover,pos,e->m.vel,s.ascend-(down ? 1.0f : 0.0f),HoverClimb(k),grounded,
+                               clear==kNoGround ? -1.0f : clear);
+        } else {
+            j.hover=aim::Hold{};
+            if(!grounded && std::fabs(s.ly)<0.05f && std::fabs(s.lx)<0.05f)aim::Coast(want,e->m.vel,dt);
+        }
+    }
     j.area=WallTurnVelocity(pos,want);   // the walls where the map's ground ends (playarea.h), as a wing's
     const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
     const float asked=Len(want);

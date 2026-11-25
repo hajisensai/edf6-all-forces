@@ -113,6 +113,9 @@ void Shapes() {
     for(int i=1;i<n;++i)if(r[i].launch+r[i].flight!=r[0].launch+r[0].flight)one=false;
     bool spread=n>1 && r[0].launch!=r[n-1].launch;
     Check(one && spread,"MRSI: launched apart, every shell lands in the same frame");
+    Check(r[0].launch+r[0].flight<=8*kFps,"MRSI: simultaneous impact within eight seconds");
+    Check(Flat(r[0].to,r[1].to)>25.0f && Flat(r[0].to,r[n-1].to)>70.0f,
+          "MRSI: shells hit across the footprint");
 
     n=PlanOf(Kind::creeping,At(0,0,3),r);
     bool walks=n==kCreepLines*kCreepPer;

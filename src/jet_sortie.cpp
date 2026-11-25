@@ -10,8 +10,7 @@
 //   carpet       level kCarpetAlt over the mark along its line, its bombs let go to land within kCarpetHalf of it either
 //                side, a gap apart over the run (SortieFire); a formation abreast lays parallel bands
 //   popUp        in low (kPopAlt) at the mark, two bombs onto it, then a steep climb away
-//   missileRain  from high (kRainAlt) and far, diving at the mark: its long-range missiles (air-to-air stores, fired at the
-//                ground: SortieStoreFlyer) at the enemies round it, one a gap, each at another; at kRainTo it withdraws
+//   missileRain  approaches the mark at kRainAlt and releases its magazine after every missile has a native lock.
 //   gunshipLap   the gunship's own circle round the mark and its shells, one lap counted (sortie::Lap), then away
 // Every pass that finds nothing to strike gives up after kSearchMs, or once past the mark on its line.
 #include "jet_internal.h"
@@ -54,11 +53,14 @@ const char* const kPassNames[]={"none","gun run","missile pass","carpet","hit an
                                 "heli strafe","heli hunter","heli circle"};
 }  // namespace
 
-void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms) noexcept {
+void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
+                 const sortie::RunSpec& run) noexcept {
     Sortie& s=j.sortie;
     s=Sortie{};
     s.pass=pass;s.begun=ms;s.phaseAt=ms;
-    s.line=sortie::LineThrough(mark,pos,heading);
+    const float explicitHeading[3]={run.x,0.0f,run.z};
+    s.line=sortie::LineThrough(mark,pos,run.half>0.0f ? explicitHeading : heading);
+    s.runHalf=run.half;
     s.missileSeen=j.t.missileAt;
     Log("JET v=%p sortie: %s at (%.0f,%.0f,%.0f)",j.Vehicle(),kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2]);
 }
@@ -78,7 +80,9 @@ ULONGLONG SortieLockMs(const Jet& j,ULONGLONG stock) noexcept {
 }
 ULONGLONG SortieMissileGapMs(const Jet& j,ULONGLONG stock) noexcept {
     const SortiePass p=j.sortie.pass;
-    return !j.sortie.done && (p==SortiePass::missilePass || p==SortiePass::missileRain) ? sortie::kMissileGapMs : stock;
+    if(j.sortie.done)return stock;
+    if(p==SortiePass::missileRain)return sortie::kRainBurstMs;
+    return p==SortiePass::missilePass ? sortie::kMissileGapMs : stock;
 }
 
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,
@@ -88,8 +92,40 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
     const float along=sortie::Along(s.line,pos);
     const float mark=s.line.at[1];
     const bool ground=j.t.target && !j.t.flyer;
+    s.strafing=false;
     switch(s.pass) {
     case SortiePass::gunRun:
+        if(s.runHalf>0.0f) {
+            const float attackHeight=mark+160.0f;
+            *speed=kind.attack;
+            Run(j,pos,attackHeight,550.0f,want);
+            const float relative[3]={pos[0]-s.line.at[0],0.0f,pos[2]-s.line.at[2]};
+            const float cross=std::fabs(sortie::Dot2(relative,s.line.side));
+            if(s.phase==0 && along< -s.runHalf && cross<=65.0f && Dot(nose,s.line.dir)>0.7f)s.phase=1;
+            if(s.phase==0 && ms-s.begun<=2*sortie::kSearchMs) {
+                const float staging[3]={s.line.at[0]-s.line.dir[0]*(s.runHalf+650.0f),attackHeight,
+                                        s.line.at[2]-s.line.dir[2]*(s.runHalf+650.0f)};
+                const float onto[3]={staging[0]-pos[0],0.0f,staging[2]-pos[2]};
+                Level(pos,onto,attackHeight,want);
+                return true;
+            }
+            if(along>s.runHalf || ms-s.begun>2*sortie::kSearchMs) {
+                Done(j,"sortie: marked strafe completed",ms);
+                return true;
+            }
+            const float reach=GunReach(kind,arms);
+            if(cross<=65.0f && along>=-s.runHalf-reach*0.6f) {
+                const float point=Clamp(along+reach*0.65f,-s.runHalf,s.runHalf);
+                const float space=point-along;
+                if(space>kind.gunClose) {
+                    for(int i=0;i<3;++i)s.shotPoint[i]=s.line.at[i]+s.line.dir[i]*point;
+                    NoseOn(pos,s.shotPoint,mark+70.0f,want);
+                    s.strafing=true;*gunsOk=true;
+                }
+                *missileOk=j.t.target && arms.missiles>0 && MissileReach(kind,arms)>0.0f;
+            }
+            return true;
+        }
         if(!ground) {
             if(along>sortie::kPassBeyond || ms-s.begun>sortie::kSearchMs)Done(j,"sortie: nothing to strike",ms);
             Run(j,pos,height,600.0f,want);*speed=kind.attack;
@@ -102,13 +138,16 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
     case SortiePass::missilePass: {
         CountMissile(j);
         *speed=kind.attack;
-        if(along>sortie::kPassBeyond || (along<0.0f && ms-s.begun>2*sortie::kSearchMs)) {
+        if((s.fired>0 && arms.missiles<=0) ||
+           along>sortie::kPassBeyond || (along<0.0f && ms-s.begun>2*sortie::kSearchMs)) {
             Done(j,s.fired ? "sortie: its pass made" : "sortie: nothing to strike",ms);
             Run(j,pos,mark+sortie::kMissilePassAlt,600.0f,want);
             return true;
         }
         const float toward=ground ? sortie::Along(s.line,j.t.aim)-along : 0.0f;
-        if(ground && s.fired<sortie::kPassMissiles && toward>200.0f && arms.missiles>0) {
+        const float to[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
+        *gunsOk=j.t.target && Dot(to,nose)>0.0f && Len(to)<GunReach(kind,arms);
+        if(ground && toward>200.0f && arms.missiles>0) {
             NoseOn(pos,j.t.aim,mark+120.0f,want);
             *missileOk=MissileReach(kind,arms)>0.0f;
         } else Run(j,pos,mark+sortie::kMissilePassAlt,600.0f,want);
@@ -116,7 +155,8 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
     }
     case SortiePass::carpet:
         *speed=kind.attack;
-        if(along>sortie::kCarpetHalf+sortie::kPassBeyond)Done(j,s.fired ? "sortie: its bombs laid" : "sortie: no bombs to lay",ms);
+        if(along>(s.runHalf>0.0f ? s.runHalf : sortie::kCarpetHalf)+sortie::kPassBeyond ||
+           ms-s.begun>2*sortie::kSearchMs)Done(j,s.fired ? "sortie: its bombs laid" : "sortie: no bombs to lay",ms);
         Run(j,pos,mark+sortie::kCarpetAlt,600.0f,want);
         return true;
     case SortiePass::popUp:
@@ -134,13 +174,14 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
         *speed=kind.attack;
         const float off[3]={pos[0]-s.line.at[0],0.0f,pos[2]-s.line.at[2]};
         const float dist=Len(off);
-        if((dist<sortie::kRainTo && ms-s.begun>5000) || ms-s.begun>2*sortie::kSearchMs || (s.fired>0 && arms.missiles<=0)) {
-            Done(j,s.fired ? "sortie: its missiles away" : "sortie: nothing to strike",ms);
+        if((s.fired>0 && arms.missiles<=0) || (dist<sortie::kRainTo && ms-s.begun>5000) || ms-s.begun>2*sortie::kSearchMs) {
+            Log("JET v=%p missile rain: leaving with %d missiles remaining",j.Vehicle(),arms.missiles);
+            Done(j,arms.missiles<=0 ? "sortie: salvo complete" : "sortie: firing window ended",ms);
             std::memcpy(want,nose,12);
             return true;
         }
-        if(ground && dist<sortie::kRainFrom && arms.missiles>0) {
-            NoseOn(pos,j.t.aim,mark+300.0f,want);
+        if(j.t.target && dist<sortie::kRainFrom && arms.missiles>0) {
+            NoseOn(pos,j.t.aim,mark+110.0f,want);
             *missileOk=MissileReach(kind,arms)>0.0f;
         } else Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
         return true;
@@ -163,23 +204,38 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
 
 void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,ULONGLONG ms) noexcept {
     Sortie& s=j.sortie;
-    if(s.done || (s.pass!=SortiePass::carpet && s.pass!=SortiePass::popUp) || (s.pass==SortiePass::popUp && s.phase!=0))return;
+    const bool carpet=s.pass==SortiePass::carpet || (s.pass==SortiePass::gunRun && s.runHalf>0.0f);
+    if(s.done || (!carpet && s.pass!=SortiePass::popUp) || (s.pass==SortiePass::popUp && s.phase!=0))return;
+    if(s.bombWeapon) {
+        for(int i=0;i<arms.storeCount;++i) {
+            const Store& st=arms.stores[i];
+            if(st.weapon!=s.bombWeapon || st.ammo>=s.bombAmmo)continue;
+            s.fired+=s.bombAmmo-st.ammo;
+            s.bombAt=ms;
+            Log("JET v=%p sortie: %d bombs confirmed released",v,s.fired);
+            break;
+        }
+        s.bombWeapon=nullptr;
+    }
+    if(!carpet && s.fired>=sortie::kPopBombs){s.phase=1;s.phaseAt=ms;return;}
     const float mark=s.line.at[1];
     if(pos[1]-mark<sortie::kPopAlt*0.6f)return;   // its own bombs' blast
     float at[3];sortie::Impact(pos,j.m.vel,mark,kG,at);
-    const bool carpet=s.pass==SortiePass::carpet;
-    if(carpet ? !sortie::InCarpet(s.line,at) : HorizDist(at,s.line.at)>sortie::kPopDrop)return;
+    const float half=s.runHalf>0.0f ? s.runHalf : sortie::kCarpetHalf;
+    if(carpet ? std::fabs(sortie::Along(s.line,at))>half : HorizDist(at,s.line.at)>sortie::kPopDrop)return;
+    if(s.runHalf>0.0f) {
+        const float offset[3]={at[0]-s.line.at[0],0.0f,at[2]-s.line.at[2]};
+        if(std::fabs(sortie::Dot2(offset,s.line.side))>65.0f)return;
+    }
     int bombs=0;
     for(int i=0;i<arms.storeCount;++i)if(arms.stores[i].spec->role==StoreRole::bomb)bombs+=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
-    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel)) : 150;
+    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : 150;
     if(s.fired && ms-s.bombAt<gap)return;
     for(int i=0;i<arms.storeCount;++i) {
         const Store& st=arms.stores[i];
         if(st.spec->role!=StoreRole::bomb || st.ammo<=0)continue;
         TriggerStore(st);
-        s.bombAt=ms;++s.fired;
-        Log("JET v=%p sortie: bomb %d away, %.0f m over the mark, landing %.0f m along",v,s.fired,pos[1]-mark,sortie::Along(s.line,at));
-        if(!carpet && s.fired>=sortie::kPopBombs){s.phase=1;s.phaseAt=ms;}
+        s.bombWeapon=st.weapon;s.bombAmmo=st.ammo;
         return;
     }
     if(!carpet && s.fired){s.phase=1;s.phaseAt=ms;}   // out of bombs before its second

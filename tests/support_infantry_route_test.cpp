@@ -1,5 +1,6 @@
 // Real support dispatcher, NPC Think/Drive/MoveTo, and GroundNavigate. Inert scene/actors and
 // a deterministic movement consumer replace only the game, not the route or NPC movement adapters.
+#include "../src/commander.h"
 #define SUPPORT_INFANTRY_NATIVE_TEST
 #define Plan NpcCombatPlan
 #define now npcFixtureMs
@@ -37,8 +38,9 @@ int SupportStrikeCount() noexcept{return 0;}
 const wchar_t* SupportStrikeKey(int) noexcept{return nullptr;}
 const wchar_t* SupportStrikeName(int) noexcept{return L"strike";}
 std::uint32_t SupportStrikePt(int) noexcept{return 0;}
+bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int) noexcept{return -1;}
-bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t) noexcept{return false;}
+bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t,const float*) noexcept{return false;}
 support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 void WarnDeployment(const support_net::Plan&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
@@ -88,7 +90,7 @@ bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
 support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
@@ -141,7 +143,7 @@ bool SupportPeersApplyVariants() noexcept{return true;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
-bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}
+bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t,const sortie::RunSpec&) noexcept{return false;}
 void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}

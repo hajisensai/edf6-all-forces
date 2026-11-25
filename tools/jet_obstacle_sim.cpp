@@ -61,6 +61,7 @@ std::FILE* logFile=nullptr;
 
 struct Box { float lo[3],hi[3]; };
 std::vector<Box> boxes;
+std::vector<Box> aircraftBoxes;
 
 // Ray a->b against box `b`: the fraction to its entry face, or -1 (missed, or `a` inside it: nothing of it seen).
 float RayBox(const float* a,const float* d,const Box& b) noexcept {
@@ -109,6 +110,17 @@ float MapRay(const float* a,const float* b,float* hit) noexcept {
     for(int i=0;i<3;++i)hit[i]=a[i]+d[i]*best;
     return best*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
 }
+float AircraftObstacleRay(const float* a,const float* b,const void*,const void*,float* hit) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    float best=2.0f;
+    for(const auto& box:aircraftBoxes) {
+        const float t=RayBox(a,d,box);
+        if(t>=0.0f && t<best)best=t;
+    }
+    if(best>1.0f)return -1.0f;
+    for(int i=0;i<3;++i)hit[i]=a[i]+d[i]*best;
+    return best*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
 // Nothing else is in this world: no enemies to visit (Strike gets its target from the harness), nobody in line.
 // The enemies the harness puts in (--selftest's focus cases); none elsewhere.
 struct SimEnemy { const void* object; float aim[3]; };
@@ -118,6 +130,7 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     return !simEnemies.empty();
 }
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
+void LogSalvoLocks(const unsigned char*) noexcept {}
 // The enemies a jet's fire is wasted on (src/wastedfire.cpp WastedFire: the shut teleportation ship), as the harness says.
 const void* simWasted=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==simWasted; }
@@ -389,6 +402,22 @@ int SelfTest(const char* outDir) {
     // entry 2600 m out, a dive's pull-out run out to 4 km.
     config.bigWorld=20000.0f;
     int bad=0,cases=0;
+    {
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        Jet aircraft{};
+        const float here[3]={0.0f,100.0f,0.0f},heading[3]={0.0f,0.0f,1.0f};
+        Place(aircraft,mem.data(),ctrl.data(),Role::strike,here,heading,180.0f,0.0f);
+        aircraftBoxes.push_back({{-90.0f,65.0f,160.0f},{90.0f,160.0f,260.0f}});
+        float want[3]={0.0f,0.0f,1.0f};
+        const auto& kind=KindOf(aircraft);
+        Wing(aircraft,kind,mem.data(),here,100.0f,heading,want,180.0f,kDt,1000);
+        const bool seen=aircraft.m.obstUntil>1000 && aircraft.m.obstTop==160.0f;
+        aircraftBoxes.clear();
+        Wing(aircraft,kind,mem.data(),here,100.0f,heading,want,180.0f,kDt,2000);
+        const bool cleared=aircraft.m.obstUntil==0;
+        std::printf("aircraft hull detected and cleared: %s\n",seen && cleared ? "ok" : "FAIL");
+        if(!seen || !cleared)++bad;
+    }
     float worst=1e9f;
     // Loaded: the strike jet's 6 AGM, 6 Mk 82, 38 rockets and 2 AIM-9X on its 22 t (1.21); the multirole's load on 18 t.
     const struct { Role role; float mass; } loads[]={{Role::strike,1.21f},{Role::strike,1.0f},{Role::multirole,1.18f},

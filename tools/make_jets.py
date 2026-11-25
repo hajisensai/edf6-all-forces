@@ -79,6 +79,7 @@ FILES: dict[str, str] = {
     # kBodies), so a carrier is what its mark says however its entry was made.
     'EDF6VC_JET_BLAST_CARRIER.SGO': 'edf6tr_jet_blast_carrier_mission',
     'EDF6VC_JET_DOLL_CARRIER.SGO': 'edf6tr_jet_doll_carrier_mission',
+    vc.SALVO_OBJECT: vc.SALVO_JET,
     # The jets the player flies (src/playerjet.cpp), which the Air Raider's EDF6VC_CALL_PJET_* weapons bring
     # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
@@ -306,6 +307,8 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{TRANSPORT_HELI_MODEL_FILE}'] = heli_transport_model(game)
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    import salvo_model
+    out[f'OBJECT/{vc.SALVO_MODEL}'] = salvo_model.build(game, out[f'OBJECT/{salvo_model.BASE_ARCHIVE}'])
     for model, name in jet_models.ANIMATIONS.items():
         out[f'OBJECT/{name}'] = jet_models.animation(game, model)
     # (each model's nozzle bones, the flames' and the arrival smoke's, are checked on its exits by jet_models.build / elevon_archive)
@@ -405,7 +408,7 @@ def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, MODEL_FILE, *MODEL_FILES,
-               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE,
+               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE, vc.SALVO_MODEL,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
     return texshare.names([f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)])
 

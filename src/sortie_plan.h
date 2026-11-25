@@ -16,7 +16,6 @@ constexpr float kPi=3.14159265358979f;
 constexpr float kMaxOffset=80.0f;         // m: a formation's aircraft at most this far across their line from the mark
 constexpr float kPassBeyond=900.0f;       // m past the mark along its line a level pass ends (it withdraws)
 constexpr float kMissilePassAlt=320.0f;   // m over the mark: the missile pass
-constexpr int kPassMissiles=4;            // missiles each jet of a missile pass fires at most
 constexpr float kCarpetAlt=260.0f;        // m over the mark: the carpet bombers' level
 constexpr float kCarpetHalf=150.0f;       // m: their bombs land within this of the mark along their line
 constexpr float kPopAlt=110.0f;           // m over the mark: the hit and run's run in
@@ -24,10 +23,26 @@ constexpr float kPopDrop=45.0f;           // m: its bombs go when they would lan
 constexpr int kPopBombs=2;
 constexpr float kPopClimb=1.6f;           // its climb away: up this much for each 1 along
 constexpr unsigned long long kPopClimbMs=4500;
-constexpr float kRainAlt=900.0f;          // m over the mark: the missile rain's dive starts there
-constexpr float kRainFrom=2600.0f,kRainTo=900.0f;   // m from the mark: it fires inside the first, withdraws at the second
+constexpr float kRainAlt=320.0f;
+constexpr float kRainFrom=2600.0f,kRainTo=400.0f;
+constexpr unsigned long long kRainBurstMs=1700;  // the 32 rounds are three simulation frames apart
+constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && locked>=loaded; }
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
+constexpr float kRunMin=100.0f,kRunMax=2400.0f;
+struct RunSpec { float x=0.0f,z=0.0f,half=0.0f; };
+inline bool RunValid(const RunSpec& r) noexcept {
+    if(r.half==0.0f)return r.x==0.0f && r.z==0.0f;
+    return std::isfinite(r.x+r.z+r.half) && std::fabs(r.x*r.x+r.z*r.z-1.0f)<0.001f &&
+           r.half>=kRunMin*0.5f && r.half<=kRunMax*0.5f;
+}
+inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* centre) noexcept {
+    const float x=b[0]-a[0],z=b[2]-a[2],length=std::hypot(x,z);
+    if(!(length>=kRunMin && length<=kRunMax))return false;
+    *out=RunSpec{x/length,z/length,length*0.5f};
+    for(int i=0;i<3;++i)centre[i]=a[i]+(b[i]-a[i])*0.5f;
+    return true;
+}
 // Helicopters
 constexpr float kHeliStrafeAlt=35.0f,kHeliStrafeLead=200.0f,kHeliPassBeyond=450.0f;
 constexpr float kHunterStation=300.0f,kHunterAlt=90.0f,kHunterNear=60.0f;   // m from the mark, over it, how near is there
@@ -80,9 +95,9 @@ inline void Impact(const float* pos,const float* vel,float ground,float g,float*
 // The carpet's window: a bomb landing within kCarpetHalf of the mark along the line.
 inline bool InCarpet(const Line& l,const float* impact) noexcept { return std::fabs(Along(l,impact))<=kCarpetHalf; }
 // The gap between bombs that spreads `bombs` over the carpet at `speed` m/s (ms).
-inline unsigned long long CarpetGapMs(int bombs,float speed) noexcept {
+inline unsigned long long CarpetGapMs(int bombs,float speed,float half=kCarpetHalf) noexcept {
     if(bombs<2 || !(speed>1.0f))return 250;
-    const float s=2.0f*kCarpetHalf/speed/static_cast<float>(bombs-1);
+    const float s=2.0f*half/speed/static_cast<float>(bombs-1);
     return static_cast<unsigned long long>(s*1000.0f);
 }
 
