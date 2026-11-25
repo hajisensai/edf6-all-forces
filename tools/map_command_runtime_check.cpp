@@ -35,12 +35,15 @@ SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0
 std::int32_t SupportCallPrice(int) noexcept { return 1800; }
 std::int32_t SupportPoints() noexcept { return 6000; }
 std::int32_t SupportPointsMost() noexcept { return 30000; }
-void WarnPreview(int,const float*) noexcept {}
+void WarnPreview(int,const float*,const float*,const float*) noexcept {}
+int SupportCatalogStrike(int) noexcept {return -1;}
+bool SupportGroundRun(int) noexcept {return false;}
+int SupportStrikeBarrage(int) noexcept {return -1;}
 SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
 int forbiddenEntry=-1;   // the entry the stub mission forbids (underground: an aircraft), -1 none
 const wchar_t* SupportCallForbidden(int index) noexcept { return index==forbiddenEntry ? L"underground: soldiers only" : nullptr; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
-bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity,const float*,const sortie::RunSpec&) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
 }
@@ -199,7 +202,7 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
     return true;
 }
 const void* tankFocus=nullptr;
-bool TankCommand(const void*,const Command& c,const ObjRef& focus) noexcept {tankFocus=focus.obj;return c.order==Order::focus;}
+bool TankCommand(const void*,const Command& c,const ObjRef& focus,const ObjRef&) noexcept {tankFocus=focus.obj;return c.order==Order::focus;}
 NpcCommandResult NpcMapCommandForRequester(const ObjRef& ref,const Command& c,const ObjRef&,const ObjRef& focus) noexcept {
     const bool accepted=TankCommand(ref.obj,c,focus);
     return {accepted ? NpcCommandReason::none : NpcCommandReason::failed,accepted ? 1u : 0u};
@@ -989,7 +992,7 @@ void RtsClicks() noexcept {
     CommandUnit free{squadObj,"squad",Command{},false,{0,0,0}};free.recruitable=true;g.list[0]=Entry{free,Owner::squad};
     Check(Takes(g.list[0],Order::recruit) && Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove),"a free squad on foot: all of them");
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
-    Check(Takes(g.list[0],Order::move) && !Takes(g.list[0],Order::follow),"a tank takes a move (as its post), not follow");
+    Check(Takes(g.list[0],Order::move) && Takes(g.list[0],Order::follow),"a tank can move its post or follow the requester");
     Check(!Takes(g.list[0],Order::withdraw),"WITHDRAW is a squad's order, not a vehicle's");
     Check(!Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::dismountAll),"a vehicle carrying no squad: no dismount");
     {   // A vehicle carrying a squad that takes orders (List marks it): its DISMOUNT / ALL OUT are that squad's (the crew's squad
@@ -1096,8 +1099,9 @@ void SelectionCapabilityMask() noexcept {
     static Game selection;selection=kNewGame;selection.count=1;selection.list[0]={CommandUnit{squadObj,"tank",{},false,{}},Owner::tank};selection.sel.Add(squadObj);
     const float point[3]{};Publish(selection,true,true,point,true);MapCommandReadout r{};PlayerMapCommands(&r);
     Check(r.allowedOrders==((1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::move))|
-                            (1u<<static_cast<unsigned>(Order::attackMove))|(1u<<static_cast<unsigned>(Order::hold))|1u) && !r.selectedSquads,
-        "tank selection enables only its post's point orders (guard, move, attack-move, hold as its post) and release");
+                            (1u<<static_cast<unsigned>(Order::attackMove))|(1u<<static_cast<unsigned>(Order::hold))|
+                            (1u<<static_cast<unsigned>(Order::follow))|1u) && !r.selectedSquads,
+        "tank selection enables following, point orders and release");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
     // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").

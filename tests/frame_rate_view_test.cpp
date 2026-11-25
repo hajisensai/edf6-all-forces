@@ -2,9 +2,10 @@
 // out as the file reads them: the camera (+0x220 world, +0x24 field, +0x360 soldier), the soldier, the vehicle, their
 // models, skeleton instances and pose arrays. The camera step's and the frame end fence's game calls (image+kCameraStep,
 // image+kFence, image+kRecordDraw) land on local stand-ins: `image` is set so that image+rva is the stand-in for the call
-// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's hook, RecordStart; the
-// stand-in recording projects once, as 0x11978D0 does after copying the poses, and a frame without ticks poses at that
-// first projection), the projection (BeforeProject), the steps (CameraStepHook), the fence (FrameEndHook).
+// being made. Each frame runs as the game does: BeginFrame, the render recording (render_record.cpp's RecordHook; the
+// stand-in recording projects through render_record.cpp's ProjectHook, as 0x11978D0 does after copying the poses, and a
+// frame without ticks poses at that first projection), the projection (BeforeProject's turn), the steps
+// (CameraStepHook), the fence (FrameEndHook).
 #include "../src/frame_rate_view.cpp"
 #include "../src/render_record.cpp"
 #include <cmath>
@@ -73,7 +74,7 @@ bool sampledInRecord=false;
 void* StandInRecord(void*,std::uint64_t a,std::uint64_t b) {
     ++recordCalls;recordArgs[0]=a;recordArgs[1]=b;
     const int before=frameobjects::samples;
-    for(int i=0;i<recordProjections;++i)BeforeProject(nullptr,nullptr);
+    for(int i=0;i<recordProjections;++i)ProjectHook(nullptr,nullptr);
     sampledInRecord=frameobjects::samples!=before;
     return nullptr;
 }
@@ -96,17 +97,19 @@ void Queue(const void* camera,const M4& world,float fov=1.0f) {
     for(Queued& q:queued)if(q.camera==camera || !q.camera){q={camera,world,fov,true};return;}
 }
 // One frame of the game's main loop. `steps`: the cameras stepped (in order) on a frame with ticks.
-void BeginTick(unsigned ticks) { framerateview::BeginFrame(ticks,1.0f); }
+void Record();
+// A frame with ticks up to its steps: BeginFrame, then the render recording (the game records before it steps).
+void BeginTick(unsigned ticks) { framerateview::BeginFrame(ticks,1.0f);Record(); }
 void Step(void* camera) {
     image=stepImage;
     CameraStepHook(camera,nullptr);
 }
-void Project(void* camera) { BeforeProject(camera,nullptr); }
+void Project(void* camera) { ProjectHook(camera,nullptr); }
 // System::Update's render recording call (0x1198FA4), through render_record.cpp's hook with the frame rate's turn
 // registered as Install registers it (the call site's patch itself is render_record_test's).
 void Record() {
     recordState=1;
-    renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);
+    renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);
     image=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInRecord),kRecordDraw);
     RecordHook(nullptr,0x1234,1);
     image=stepImage;
@@ -121,10 +124,12 @@ void Fence() {
     FrameEndHook(nullptr,nullptr,nullptr,nullptr);
     image=stepImage;
 }
-// A tick frame that steps `camera` to `world`.
-void TickTo(void* camera,const M4& world,float fov=1.0f) {
+// A tick frame that steps `camera` to `world`: its recording first (it draws the last tick's scene), then the tick moves
+// the root (`move(*rootM)`, when given), then the camera step.
+void TickTo(void* camera,const M4& world,float fov=1.0f,void (*move)(const M4&)=nullptr,const M4* rootM=nullptr) {
     BeginTick(1);
     Project(camera);
+    if(move && rootM)move(*rootM);
     Queue(camera,world,fov);
     Step(camera);
     Fence();
@@ -420,9 +425,10 @@ void PrevCur() {
 
 // The soldier the camera follows ticks from r0 to r1 (two samples).
 void TwoSamples(const M4& r0,const M4& r1,const M4& c0=Pose(0,0,0,0),const M4& c1=Pose(0,1,0,0)) {
-    MoveSoldier(r0);TickTo(cam,c0);
-    MoveSoldier(r1);TickTo(cam,c1);
+    TickTo(cam,c0,1.0f,&MoveSoldier,&r0);
+    TickTo(cam,c1,1.0f,&MoveSoldier,&r1);
 }
+void MoveVehicle(const M4& rootM) { WritePose(vehiclePose,rootM); }
 
 // 4. The player's root (fps-7).
 void Roots() {
@@ -430,7 +436,7 @@ void Roots() {
     stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
     const M4 r0=Pose(0.0f,10,0,10),r1=Pose(0.2f,10.4f,0,10.2f);
     OnFoot(r0);
-    MoveSoldier(r0);TickTo(cam,Pose(0,0,0,0));
+    TickTo(cam,Pose(0,0,0,0),1.0f,&MoveSoldier,&r0);
     Frame0(0.5f);
     Check(Counted().roots==0,"root: one sample poses nothing");
     Fence();
@@ -536,10 +542,8 @@ void Riding() {
     Vehicle(vehicle,vehiclePose,ctrlC);
     Put<const void*>(human,kVehicle,vehicle);
     riddenHuman=human;
-    WritePose(vehiclePose,v0);
-    TickTo(cam,Pose(0,0,0,0));
-    WritePose(vehiclePose,v1);
-    TickTo(cam,Pose(0,1,0,0));
+    TickTo(cam,Pose(0,0,0,0),1.0f,&MoveVehicle,&v0);
+    TickTo(cam,Pose(0,1,0,0),1.0f,&MoveVehicle,&v1);
     const Snapshot stepped=Snap();
     Frame0(0.5f);
     const M4 half=Pose(0.15f,51,0,50);
@@ -609,20 +613,16 @@ void RootIdentity() {
     Reset();
     OnFoot(Pose(0,0,0,0));
     Put<const void*>(cam2,kTarget,human);
-    MoveSoldier(Pose(0,0,0,0));
-    BeginTick(1);Queue(cam,Pose(0,0,0,0));Queue(cam2,Pose(0,0,0,0));Step(cam);Step(cam2);Fence();
-    MoveSoldier(Pose(0,1,0,0));
-    BeginTick(1);Queue(cam,Pose(0,1,0,0));Queue(cam2,Pose(0,1,0,0));Step(cam);Step(cam2);Fence();
+    BeginTick(1);MoveSoldier(Pose(0,0,0,0));Queue(cam,Pose(0,0,0,0));Queue(cam2,Pose(0,0,0,0));Step(cam);Step(cam2);Fence();
+    BeginTick(1);MoveSoldier(Pose(0,1,0,0));Queue(cam,Pose(0,1,0,0));Queue(cam2,Pose(0,1,0,0));Step(cam);Step(cam2);Fence();
     Frame0(0.5f);
     Check(Counted().roots==1,"root: the first camera's samples are kept with a second camera on the soldier");
     Fence();
     // The root's camera stops stepping: the root goes, and the other camera samples.
-    MoveSoldier(Pose(0,2,0,0));
-    BeginTick(1);Queue(cam2,Pose(0,2,0,0));Step(cam2);Fence();
+    BeginTick(1);MoveSoldier(Pose(0,2,0,0));Queue(cam2,Pose(0,2,0,0));Step(cam2);Fence();
     BeginTick(1);Queue(cam2,Pose(0,2,0,0));Step(cam2);Fence();
     Check(root.camera==nullptr || root.camera==cam2,"root: a camera that stopped stepping gives the root up");
-    MoveSoldier(Pose(0,3,0,0));
-    BeginTick(1);Queue(cam2,Pose(0,3,0,0));Step(cam2);Fence();
+    BeginTick(1);MoveSoldier(Pose(0,3,0,0));Queue(cam2,Pose(0,3,0,0));Step(cam2);Fence();
     Frame0(0.5f);
     Check(Counted().roots==1 && PosedAt(bodyPose,Pose(0,2.5f,0,0)),"root: the other camera samples it");
     Fence();
@@ -657,9 +657,8 @@ void RecordPoint() {
     Check(PosedAt(bodyPose,Pose(0.1f,10.2f,0,10.1f)) && frameobjects::poses==objectPoses+1,"record: posed once a frame");
     Fence();
     Check(Unchanged(stepped),"record: the end fence puts the poses back");
-    // A frame with ticks: the record call poses nothing.
+    // A frame with ticks: the record call (BeginTick's) poses nothing.
     BeginTick(1);
-    Record();
     Check(Unchanged(stepped) && frameobjects::poses==objectPoses+1,"record: a frame with ticks poses nothing");
     Check(frameobjects::samples==samples+3 && frameobjects::untickedSamples==untickedSamples+1,
           "record: every record call samples (Sample counts the ticks), only a frame posing says unticked");
@@ -669,7 +668,6 @@ void RecordPoint() {
     framerateview::BeginFrame(0,0.5f);
     Fence();
     BeginTick(1);
-    Record();
     Check(Unchanged(stepped) && frameobjects::poses==objectPoses+1,"record: a pose due is dropped at the fence");
     Fence();
     // Off: the hook only calls through.
@@ -695,13 +693,17 @@ void RecordPoint() {
     Record();
     Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2 && Unchanged(stepped),
           "record: no projection, nothing sampled or posed");
+    Project(cam);   // another caller's projection before the fence (0x11978D0 has four more)
+    Check(frameobjects::samples==twoSamples+1 && frameobjects::poses==objectPoses+2,
+          "record: closed when it returned, a later projection before the fence samples and poses nothing");
     Fence();
     recordProjections=1;
     Project(cam);   // a projection outside a recording
     Check(frameobjects::samples==twoSamples+1,"record: a projection outside the recording samples nothing");
     Counted();
+    BeginTick(1);
     const int stepSamples=frameobjects::samples;
-    BeginTick(1);Queue(cam,Pose(0,0,0,0));Step(cam);Fence();
+    Queue(cam,Pose(0,0,0,0));Step(cam);Fence();
     Check(frameobjects::samples==stepSamples,"record: the camera step does not sample the other objects");
     Counted();
 }
@@ -718,6 +720,44 @@ void Off() {
     Fence();
     on=true;
 }
+
+// 4c. The root sampled at the recording's first projection, not at the camera step: what the recording drew after the
+// tick (it makes the pose arrays again before it projects; a vehicle's differs from the step's), and a catch-up pair.
+void RootSampling() {
+    Reset();
+    stepImage=ImageFor(reinterpret_cast<std::uintptr_t>(&StandInStep),kCameraStep);
+    const M4 r0=Pose(0,10,0,10),r1=Pose(0,10.4f,0,10),r1drawn=Pose(0,10.6f,0,10),r2=Pose(0,10.8f,0,10);
+    OnFoot(r0);
+    TwoSamples(r0,r1);
+    MoveSoldier(r1drawn);   // the recording's copy after the step, not the step's value
+    Frame0(0.5f);
+    Check(PosedAt(bodyPose,Pose(0,10.3f,0,10)),"root sample: the pose the recording made, at its first projection");
+    Fence();
+    Counts c=Counted();
+    Check(c.roots==1 && c.rootsLeft==0,"root sample: posed, not left as changed since its step");
+    // Catching up: a frame with two ticks (two steps of the root's camera) samples once, the pair two ticks apart.
+    Reset();
+    OnFoot(r0);
+    TickTo(cam,Pose(0,0,0,0),1.0f,&MoveSoldier,&r0);
+    BeginTick(2);
+    MoveSoldier(r1);Queue(cam,Pose(0,1,0,0));Step(cam);
+    MoveSoldier(r2);Queue(cam,Pose(0,2,0,0));Step(cam);
+    Fence();
+    Frame0(0.5f);
+    Check(PosedAt(bodyPose,Pose(0,10.6f,0,10)),"root gap: two ticks apart, drawn alpha into the tick after the one before cur");
+    Fence();
+    c=Counted();
+    Check(c.roots==1 && c.rootsLeft==0 && c.rootsRefused==0,"root gap: one posed root");
+    // More than three ticks between samples: a new pair (nothing posed until the next tick's sample).
+    BeginTick(4);
+    for(int i=0;i<4;++i){Queue(cam,Pose(0,3.0f+static_cast<float>(i),0,0));Step(cam);}
+    Fence();
+    const Snapshot longGap=Snap();
+    Frame0(0.5f);
+    Check(Unchanged(longGap),"root gap: past three ticks the pair starts again, nothing posed");
+    Fence();
+    Check(Counted().roots==0,"root gap: and none counted");
+}
 }  // namespace
 }  // namespace crew
 
@@ -732,6 +772,7 @@ int main() {
     Roots();
     RecordPoint();
     Riding();
+    RootSampling();
     RootIdentity();
     Off();
     std::printf("frame_rate_view: %d checks, %d failed\n",checks,failures);

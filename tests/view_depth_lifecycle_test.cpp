@@ -29,6 +29,10 @@ unsigned char* image=nullptr;
 Config testConfig{};
 const Config& Cfg() noexcept { return testConfig; }
 void Log(const char*,...) noexcept {}
+namespace renderrecord {
+bool Install() noexcept { return true; }
+void Set(Slot,Before) noexcept {}
+}
 }
 
 namespace {
@@ -82,12 +86,14 @@ struct Fixture {
         image=allocation;Reset();
     }
     ~Fixture() {
+        decalDepthPending.store(false,std::memory_order_release);
         decalDepthReady.store(false,std::memory_order_release);ViewMapClip(false,0,0);ViewTick();
         image=nullptr;VirtualFree(allocation,0,MEM_RELEASE);
     }
     Fixture(const Fixture&)=delete;
     Fixture& operator=(const Fixture&)=delete;
     void Reset() {
+        decalDepthPending.store(false,std::memory_order_release);
         decalDepthReady.store(false,std::memory_order_release);ViewMapClip(false,0,0);ViewTick();
         testConfig=Config{};testConfig.viewDistance=-1;testConfig.bigWorld=3000;
         std::memset(env,0,sizeof(env));std::memset(replacementEnv,0,sizeof(replacementEnv));
@@ -125,11 +131,15 @@ struct Fixture {
 void InstalledWithoutCreation(Fixture& fixture) {
     fixture.Reset();
     decalDepthInstalled=true;
+    decalDepthPending.store(true,std::memory_order_release);
     Check(InstallViewDepth() && !ViewDepthReady(),"an installed creation hook is not proof that its shader has been created");
-    ViewTick();fixture.NativeAll("normal view distance cannot write clips before shader creation");
-    ViewMapClip(true,35000,1);ViewTick();
-    fixture.NativeAll("map-open then frame tick cannot change near or far clips before shader creation");
-    ViewMapClip(false,0,0);fixture.NativeAll("closing an unready map leaves every native clip unchanged");
+    ViewBeforeRecord();fixture.All("the normal far clip applies on render frames while no decal manager exists",20000,500,20000);
+    WriteNative(fixture.cameras[0],true,kNative);
+    ViewBeforeRecord();fixture.All("the next recording reapplies the configured far clip over a native update",20000,500,20000);
+    ViewMapClip(true,35000,1);ViewBeforeRecord();
+    fixture.All("the map's near and far overrides wait for the shader to be created",20000,500,20000);
+    Check(!fixture.Create(false),"the private native shader-creation stub fails");
+    ViewBeforeRecord();fixture.NativeAll("failed creation returns all camera fields to their native values");
 }
 void MapOrder(Fixture& fixture,bool normalFirst) {
     fixture.Reset();fixture.Ready();

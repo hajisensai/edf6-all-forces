@@ -237,6 +237,8 @@ void Validate(Config& n) noexcept {
     Fix("HeliSpeed",n.heliSpeed,0.0f,200.0f);
     Fix("HeliAgility",n.heliAgility,0.5f,60.0f);
     Fix("PlayerHeliStopSec",n.playerHeliStopSec,0.0f,10.0f);
+    n.heliHoverKey=static_cast<int>(FixInt("HeliHoverKey",n.heliHoverKey,0,254));
+    n.heliHoverButton=static_cast<int>(FixInt("HeliHoverButton",n.heliHoverButton,0,0xFFFF));
     Fix("HeliYawRate",n.heliYawRate,0.0f,360.0f);
     Fix("HeliGuardRadius",n.heliGuardRadius,0.0f,1000.0f);
     Fix("HeliGuardSpeed",n.heliGuardSpeed,1.0f,100.0f);
@@ -562,6 +564,8 @@ void LoadConfig() noexcept {
     n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
+    n.heliHoverKey=ReadInt(L"HeliHoverKey",static_cast<DWORD>(n.heliHoverKey));
+    n.heliHoverButton=ReadInt(L"HeliHoverButton",static_cast<DWORD>(n.heliHoverButton));
     n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
     n.stockVehicleHud=ReadBool(L"StockVehicleHud",n.stockVehicleHud);
     n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);

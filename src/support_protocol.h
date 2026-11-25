@@ -5,7 +5,7 @@
 namespace crew::support_net {
 // v3 (2026-11-21, docs/feature-npc-weapon-tier.md 2.5): kWireSize 176 -> 200, the tail carrying a Fencer's second hand
 // (support_net.h Unit::offhand, RequesterArms::offhand). Older builds are kept out by the room protocol (mod_room.h 11).
-constexpr std::uint32_t kMagic=0x54525053,kVersion=3;
+constexpr std::uint32_t kMagic=0x54525053,kVersion=4;
 // Capabilities a peer announces in its hello's `index` (wire v2 unchanged: an older peer sends 0 there and an older
 // host ignores the field, ValidMessage bounds it below kMaxUnits). kCapSoldierVariants: its Validate accepts the
 // support_call.h soldier weapon resources ((weapon << 8) | role) and a configured number of aircraft. A host plans
@@ -77,10 +77,11 @@ struct Message {
     // never used (support_protocol.cpp: 6 bytes a kind), the Fencer kinds' second hands in the tail. A unit message
     // carries its own in unit.arms / unit.offhand.
     RequesterArms arms{};
+    sortie::RunSpec run;
 };
 // The v2 fields (176 bytes) and a 24-byte tail: a request's four Fencer second hands (6 bytes each), a unit message's
 // offhand (8 bytes, the rest zero), zero in every other message.
-constexpr std::size_t kWireSize=200;
+constexpr std::size_t kWireSize=212;   // v4 adds the requested / authorized attack line to REQUEST and BEGIN
 bool Encode(const Message&,void* bytes,std::size_t size) noexcept;
 bool Decode(const void* bytes,std::size_t size,Message&) noexcept;
 
@@ -105,7 +106,7 @@ public:
     // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`. `arms`: the
     // requester's soldier weapons (null: none, the stock templates), sent in the request's unit fields.
     bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0,
-                const RequesterArms* arms=nullptr) noexcept;
+                const RequesterArms* arms=nullptr,const sortie::RunSpec& run={}) noexcept;
     // The default preserves existing-vehicle migration. An explicit dynamic
     // intent additionally requires all-peer details and preflight native Validate.
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now,PreparedKind kind=PreparedKind::missionCrew) noexcept;

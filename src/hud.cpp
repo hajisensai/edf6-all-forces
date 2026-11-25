@@ -2143,6 +2143,7 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     Format(info,L"");
     if(f.aiming)Append(info,Tr(f.setSpeed==0.0f ? Tx::speedSetHover : Tx::speedSet),static_cast<int>(std::lround(f.setSpeed*3.6f)));
     if(f.power>=0.0f && !f.landed)Append(info,Tr(Tx::heliPower),info.text[0] ? L"    " : L"",static_cast<int>(std::lround(f.power*100.0f)));
+    if(f.hoverMode)Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",Tr(Tx::heliHoverActive));
     if(f.holding)Append(info,Tr(Tx::altHold),info.text[0] ? L"    " : L"");
     wchar_t tank[32];
     FuelText(tank,_countof(tank),fuel);
@@ -5335,12 +5336,21 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     MapUiBox(drawer,ctx,0,0,width,46.0f*s,lines,*at);
     MapUiBox(drawer,ctx,0,height-46.0f*s,width,height,lines,*at);
     const int bandsFirst=*at;
-    wchar_t h[24],g[24];
-    MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
-    wchar_t follow[32]=L"";
-    if(m.follow)std::swprintf(follow,32,L"   %ls",Tr(Tx::orderFollow));
-    Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,Tr(Tx::mapTitle),h,g,follow);
-    if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::mapPadKeys));
+    if(m.watchCommander)Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,L"%ls",Tr(Tx::mapCommanderView));
+    else {
+        wchar_t h[24],g[24];
+        MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
+        wchar_t follow[32]=L"";
+        if(m.follow)std::swprintf(follow,32,L"   %ls",Tr(Tx::orderFollow));
+        Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,Tr(Tx::mapTitle),h,g,follow);
+    }
+    if(m.commander) {
+        wchar_t key[32];
+        if(!m.pad)KeyName(m.mapKey,key,32);
+        else if(m.mapButton==0x20)wcscpy_s(key,Tr(Tx::padBack));   // XInput's default map button
+        else std::swprintf(key,32,Tr(Tx::padButton),m.mapButton);
+        Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapCommanderSwitch),key);
+    } else if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::mapPadKeys));
     else {
         wchar_t key[32];KeyName(m.mapKey,key,32);
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
@@ -5385,16 +5395,18 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
         return true;
     }
-    MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    if(!m.watchCommander)MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     QMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the Q marks, ours and the teammates', on the map too
     SupportWarnHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the supports' areas and routes, the armed one's preview
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
-    MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
-    MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
-    MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
-    MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    if(!m.watchCommander) {
+        MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
+        MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
+        MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
+        MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    }
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
     if(stats)StatsMapTab(drawer,ctx,text,width,height,s,lines,at);
     else DamageStatsUi(nullptr,nullptr,0,0,0);

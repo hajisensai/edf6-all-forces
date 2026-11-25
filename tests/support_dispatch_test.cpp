@@ -185,9 +185,10 @@ int SupportStrikeCount() noexcept {return 2;}
 const wchar_t* SupportStrikeKey(int k) noexcept {return k>=0 && k<2 ? strikeKeys[k] : nullptr;}
 const wchar_t* SupportStrikeName(int k) noexcept {return k==0 ? L"火箭齐射" : L"天罚";}
 std::uint32_t SupportStrikePt(int k) noexcept {return k==0 ? 2000u : k==1 ? 15000u : 0u;}
+bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int k) noexcept {return k==0 ? 0 : -1;}
 int strikesStarted=0;bool strikeStarts=true;
-bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
     ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
 }
 support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route) noexcept {
@@ -278,7 +279,7 @@ bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne,const sortie::RunSpec&) noexcept {
     if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
     ++activated;lastAirborne=airborne;return true;
 }
@@ -413,7 +414,7 @@ void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
 }
 bool submitReady=true;unsigned noticeRequest=0;
 std::uint64_t lastNetLoadout=0;
-bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
+bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout,const sortie::RunSpec&) noexcept {
     ++netRequests;lastNetLoadout=loadout;
     if(!submitReady){_snwprintf_s(note,size,_TRUNCATE,L"联机扩展尚未就绪");return false;}
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);

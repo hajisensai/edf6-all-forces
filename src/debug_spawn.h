@@ -37,7 +37,7 @@ enum class How : std::uint8_t { vehicle, supportCall, drone, enemy, soldier };
 // The support calls (support_dispatch.cpp SupportCallKey: the map's air support catalog) the crewed aircraft rows ask for.
 // The follow variants (they escort the player) where there is one; the Brute is the guard call (it guards the point).
 inline constexpr const wchar_t* kSupportCalls[]={L"STRIKE_F",L"FIGHTER_F",L"INTERCEPTOR_F",L"MULTIROLE_F",L"CARRIER_F",
-    L"BLAST_CARRIER_F",L"DOLL_CARRIER_F",L"GUNSHIP_F",L"HELI_F",L"HELI",L"MEDIC_HELI_F"};
+    L"BLAST_CARRIER_F",L"DOLL_CARRIER_F",L"GUNSHIP_F",L"HELI_F",L"HELI",L"MEDIC_HELI_F",L"SORTIE_MISSILE_RAIN"};
 constexpr int kSupportCallCount=static_cast<int>(sizeof(kSupportCalls)/sizeof(kSupportCalls[0]));
 struct Entry {
     Category category;
@@ -74,6 +74,7 @@ inline constexpr Entry kEntries[]={
     {Category::aircraft,How::supportCall,"call_heli_f",L"直升机 Eros 506（支援呼叫·跟随）",nullptr,8,0.0f},
     {Category::aircraft,How::supportCall,"call_heli",L"直升机 Brute 410（支援呼叫·守点）",nullptr,9,0.0f},
     {Category::aircraft,How::supportCall,"call_medic_heli_f",L"医疗直升机（支援呼叫）",nullptr,10,0.0f},
+    {Category::aircraft,How::supportCall,"call_salvo_interceptor",L"天顶导弹雨（支援呼叫）",nullptr,11,0.0f},
     {Category::aircraft,How::drone,"jet_drone",L"机炮无人机（无人驾驶）",nullptr,0,60.0f},
     // soldier: SupportWeapon's order (support_call.h): every kind the support soldiers make (support_soldier.cpp: each
     // class's body is preloaded every mission), the Wing Divers and Fencers too (the user, 2026-10-19: 「载具与npc少了」).

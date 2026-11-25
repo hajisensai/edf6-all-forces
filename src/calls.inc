@@ -31,7 +31,7 @@ const Call kCalls[]={
     {7805.0f,Brings::jets,JetRole::multirole,std::nullopt,2,150,false,"missile pass",L"EDF6VC_CALL_SORTIE_MISSILE_PASS",2,-1,0u,4400u},
     {7806.0f,Brings::jets,JetRole::strike,std::nullopt,3,150,false,"carpet bombing",L"EDF6VC_CALL_SORTIE_CARPET",3,-1,0u,5200u},
     {7807.0f,Brings::jets,JetRole::strike,std::nullopt,1,150,false,"hit and run",L"EDF6VC_CALL_SORTIE_POPUP",4,-1,0u,3000u},
-    {7808.0f,Brings::jets,JetRole::interceptor,std::nullopt,1,150,false,"missile rain",L"EDF6VC_CALL_SORTIE_MISSILE_RAIN",5,-1,0u,4800u},
+    {7808.0f,Brings::jets,JetRole::salvo,std::nullopt,1,150,false,"missile rain",L"EDF6VC_CALL_SORTIE_MISSILE_RAIN",5,-1,0u,4800u},
     {7809.0f,Brings::helis,std::nullopt,HeliBody::eros506,2,150,false,"hammer and anvil",L"EDF6VC_CALL_SORTIE_HAMMER",7,27,25000u,6400u},
     {7810.0f,Brings::jets,JetRole::fighter,std::nullopt,4,150,false,"wolf pack",L"EDF6VC_CALL_SORTIE_WOLFPACK",1,-1,0u,4800u},
     {7811.0f,Brings::jets,JetRole::gunship,std::nullopt,1,180,false,"guided strike",L"EDF6VC_CALL_SORTIE_GUIDED",6,24,25000u,7200u},

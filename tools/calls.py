@@ -322,7 +322,7 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SORTIE_POPUP', 7807, 'sortie_popup', False, 1, 1500, 0.8, 'jets', 'hit and run', 150, 'strike',
          sortie='popUp'),
     Call('EDF6VC_CALL_SORTIE_MISSILE_RAIN', 7808, 'sortie_missile_rain', False, 1, 2400, 1.3, 'jets', 'missile rain', 150,
-         'interceptor', sortie='missileRain'),
+         'salvo', sortie='missileRain'),
     Call('EDF6VC_CALL_SORTIE_HAMMER', 7809, 'sortie_hammer', False, 2, 3200, 1.5, 'helis', 'hammer and anvil', 150,
          body='eros506', sortie='heliStrafe', then='EDF6VC_CALL_SORTIE_POPUP', then_after=25),
     Call('EDF6VC_CALL_SORTIE_WOLFPACK', 7810, 'sortie_wolfpack', False, 4, 2400, 1.2, 'jets', 'wolf pack', 150, 'fighter',
@@ -978,15 +978,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Hit and Run', 'Sortie: a strike jet comes in low, drops two bombs on the mark and climbs steeply away.'),
     },
     'sortie_missile_rain': {
-        'SC': ('天顶导弹雨', '出击：一架截击机在远处高空朝标记点俯冲，把远程导弹全部射向附近的敌人，导弹从头顶扎下，打完离场。'
-                        '远程导弹原本是对空武器，能否锁定地面目标未实机确认。'),
-        'CN': ('天頂飛彈雨', '出擊：一架截擊機在遠處高空朝標記點俯衝，把遠程飛彈全部射向附近的敵人，飛彈從頭頂紮下，打完離場。'
-                        '遠程飛彈原本是對空武器，能否鎖定地面目標未實機確認。'),
-        'JA': ('天頂ミサイルレイン', '出撃。迎撃機 1 機が遠方の高空から指示地点へ降下しつつ、長射程ミサイルを近くの敵へ撃ち尽くす。'
-                            'ミサイルは頭上から突っ込む。元は対空兵器のため、地上目標をロックできるかは実機未確認。'),
-        'EN': ('Missile Rain', 'Sortie: an interceptor dives at the mark from high and far away, emptying its long-range '
-                           'missiles at the enemies near it so they come down from overhead, then leaves. Those missiles are '
-                           'air-to-air: whether they lock ground targets is not yet tested in game.'),
+        'SC': ('天顶导弹雨', '齐射截击机锁定标记附近的敌人，从四具发光挂架连续打出 32 枚导弹后脱离。'),
+        'CN': ('天頂飛彈雨', '齊射截擊機鎖定標記附近的敵人，從四具發光掛架連續打出 32 枚飛彈後脫離。'),
+        'JA': ('天頂ミサイルレイン', '斉射迎撃機が指示地点付近の敵をロックし、発光する4基の発射器から32発を斉射して離脱する。'),
+        'EN': ('Missile Rain', 'A salvo interceptor locks an enemy near the mark, fires 32 missiles from four lit pods, then departs.'),
     },
     'sortie_hammer': {
         'SC': ('锤与砧', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架对地攻击机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),
@@ -1061,11 +1056,11 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                'walking 30 m on along your heading every 1.5 s, 8 lines in all. The first lands about 9 s in.'),
     },
     'barrage_mrsi': {
-        'SC': ('同时弹着射击', '远程炮击：6 发炮弹以不同弧线先后发射，在同一瞬间砸到标记点。'),
-        'CN': ('同時彈著射擊', '遠程砲擊：6 發砲彈以不同弧線先後發射，在同一瞬間砸到標記點。'),
-        'JA': ('同時弾着射撃', '長距離砲撃。6 発の砲弾を異なる弾道で順に撃ち、同じ瞬間に指示地点へ着弾させる。'),
-        'EN': ('Time-on-Target Fire', 'Long-range fire: six shells fired one after another on different arcs all land on the '
-                                  'mark in the same instant.'),
+        'SC': ('同时弹着射击', '6 发炮弹在约 8 秒内同时落进标记的矩形区域。转动地图可调整矩形朝向。'),
+        'CN': ('同時彈著射擊', '6 發砲彈在約 8 秒內同時落進標記的矩形區域。轉動地圖可調整矩形方向。'),
+        'JA': ('同時弾着射撃', '約 8 秒以内に 6 発が指定範囲へ同時に着弾する。マップを回転させると範囲の向きが変わる。'),
+        'EN': ('Time-on-Target Fire', 'Six shells strike a rectangular area in the same instant within about 8 s. '
+                                  'Rotate the map to aim the rectangle.'),
     },
     'barrage_heavy': {
         'SC': ('重型臼炮', '远程炮击：一发巨型臼炮弹从约 1.6 公里外高抛砸中标记点，抹平据点。'),
@@ -1082,10 +1077,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                              'its way, pops up short of the mark and dives onto it.'),
     },
     'barrage_ballistic': {
-        'SC': ('弹道导弹', '远程打击：远处一道烟柱冲天，约 20 秒后弹头近乎垂直地高速砸下标记点，爆炸极大。'),
-        'CN': ('彈道飛彈', '遠程打擊：遠處一道煙柱沖天，約 20 秒後彈頭近乎垂直地高速砸下標記點，爆炸極大。'),
-        'JA': ('弾道ミサイル', '長距離攻撃。遠くで煙の柱が空へ昇り、約 20 秒後に弾頭がほぼ真上から高速で指示地点に落ちる。爆発は非常に大きい。'),
-        'EN': ('Ballistic Missile', 'Long-range strike: a column of smoke climbs far away, and some 20 s later the warhead comes '
+        'SC': ('弹道导弹', '远程打击：远处一道烟柱冲天，约 16 秒后弹头近乎垂直地高速砸下标记点，爆炸极大。'),
+        'CN': ('彈道飛彈', '遠程打擊：遠處一道煙柱沖天，約 16 秒後彈頭近乎垂直地高速砸下標記點，爆炸極大。'),
+        'JA': ('弾道ミサイル', '長距離攻撃。遠くで煙の柱が空へ昇り、約 16 秒後に弾頭がほぼ真上から高速で指示地点に落ちる。爆発は非常に大きい。'),
+        'EN': ('Ballistic Missile', 'Long-range strike: a column of smoke climbs far away, and some 16 s later the warhead comes '
                                 'down almost straight onto the mark at great speed. A huge blast.'),
     },
     'ultimate': {

@@ -347,7 +347,7 @@ inline int Victim(const int* level,const unsigned* used,int n,unsigned now,int r
 // --- The opening animation ---
 // Where the map shows what it is about (a place framed, LB / LT's zoom): the middle of its open area, left of the
 // select's kept windows (OverPanels: x from 842).
-inline constexpr Pixel kMapFocus{421.f,540.f};
+inline constexpr Pixel kMapFocus{582.f,540.f};
 // A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), the place at `at`
 // (as far as the clamp lets it: not past a pole), not past MostZoom.
 inline View FramePlace(MapPoint p,const Screen& s,float spanDeg=24.f,Pixel at=kMapFocus) noexcept {
@@ -433,6 +433,7 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
 inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
+inline constexpr Area kMissionList{170.f,196.f,472.f,884.f};   // inside the left chrome painted by HUiMainFrame
 inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);

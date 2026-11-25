@@ -18,7 +18,7 @@ void WarnUltimate(const float* at,unsigned long long ms) noexcept;              
 void WarnDeployment(const support_net::Plan& plan) noexcept;                                  // support_dispatch.cpp, applied
 // The map's preview (mapcmd.cpp, each frame a support is armed and the pointer is on the ground): catalog entry `catalog`
 // at `target`; -1 none. Kept while asked for again within a moment.
-void WarnPreview(int catalog,const float* target) noexcept;
+void WarnPreview(int catalog,const float* target,const float* strikeHeading,const float* runStart=nullptr) noexcept;
 void SupportWarningTick() noexcept;    // once a frame (crew.cpp SharedFrameTick): over ones dropped, time left counted
 void ResetSupportWarnings() noexcept;  // a new mission (mission.cpp)
 

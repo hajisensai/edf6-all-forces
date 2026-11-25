@@ -164,9 +164,9 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
     int reserved=0;for(const auto& slot:cs.transaction)reserved+=slot.pending ? 1 : 0;
     if(i==kCarrierDrones || (!guest && (cs.sorties<=reserved || !SlotFree())))return false;
     cs.launchAt=ms;
-    float heading[3]={c.m.vel[0],0.0f,c.m.vel[2]};
-    if(!Normalize(heading)){heading[0]=nose[0];heading[1]=0.0f;heading[2]=nose[2];}
     const float from[3]={pos[0],pos[1]-kLaunchBelow,pos[2]};
+    float heading[3]={aim[0]-from[0],0.0f,aim[2]-from[2]};
+    if(!Normalize(heading)){heading[0]=nose[0];heading[2]=nose[2];}
     // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else the gun drone.
     const Kind& own=KindOf(cs.drones);
     const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : Body::drone;
@@ -178,8 +178,9 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
         if(!ReserveCarrierSupportDrone(c.ref,static_cast<unsigned>(i),token)){ReportSupportFailure(token);return false;}
         return true; // a slot remains reserved until every peer has prepared and activated the exact body
     }
-    const float least=KindOf(Row(b).role).minSpeed,s=Len(c.m.vel)+20.0f;
-    Jet* d=Launch(b,from,heading,aim,Cfg().jetFuelSec,s>least ? s : least,c.Vehicle());
+    const Kind& child=KindOf(Row(b).role);
+    const float speed=child.flight==FlightModel::rotor ? child.cruise : std::fmax(child.minSpeed,Len(c.m.vel)+20.0f);
+    Jet* d=Launch(b,from,heading,aim,Cfg().jetFuelSec,speed,c.Vehicle());
     if(!d)return false;
     d->drone.mother=c.ref.ctrl;d->drone.carried=true;d->drone.slot=i;
     JoinFlight(*d,c.flight);

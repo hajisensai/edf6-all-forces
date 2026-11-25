@@ -284,6 +284,8 @@ HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack (Shift: queue)   Z attack
         L"%ls   右鍵 移動 / 攻擊（Shift 排隊）   Z 攻擊移動   H 原地堅守   V 跟隨我   X 停止   Ctrl+1-9 編隊",
         L"%ls   右クリック 移動 / 攻撃（Shift で予約）   Z 攻撃移動   H 死守   V 追従   X 停止   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
+HUDTEXT(mapCommanderView,L"COMMANDER VIEW",L"指挥官视角",L"指揮官視角",L"指揮官視点")
+HUDTEXT(mapCommanderSwitch,L"%ls  Switch view",L"%ls 切换视角",L"%ls 切換視角",L"%ls 視点を切り替え")
 HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
         L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
         L"左スティック 移動   右スティック 回転 / 傾き   RT / LT ズーム   A 中央へ   B / マップボタン 閉じる")
@@ -794,6 +796,7 @@ HUDTEXT(statsScopeMine,L"Mine",L"只看我",L"只看我",L"自分のみ")
 HUDTEXT(statsScopeAll,L"Everyone",L"所有人",L"所有人",L"全員")
 HUDTEXT(statsClose,L"Close",L"关闭",L"關閉",L"閉じる")
 HUDTEXT(statsBack,L"Back",L"返回",L"返回",L"戻る")
+HUDTEXT(padBack,L"Back",L"返回键",L"返回鍵",L"Back ボタン")
 HUDTEXT(statsSummary,L"Dealt %ls   Kills %u   Taken %ls   Healed %ls   Friendly fire %ls   Mission %ls",
         L"输出 %ls   击杀 %u   承伤 %ls   治疗 %ls   误伤 %ls   本关 %ls",L"輸出 %ls   擊殺 %u   承傷 %ls   治療 %ls   誤傷 %ls   本關 %ls",
         L"与ダメージ %ls   撃破 %u   被ダメージ %ls   回復 %ls   誤射 %ls   経過 %ls")
@@ -1156,6 +1159,11 @@ HUDTEXT(kbFire6,L"Vehicle: fire key 6",L"载具：开火键 6",L"載具：開火
 HUDTEXT(kbAutoTurret,L"Vehicle: auto turrets on / off",L"载具：自动炮塔开关",L"載具：自動砲塔開關",L"車両：自動砲塔オン/オフ")
 HUDTEXT(kbCruiseUp,L"Vehicle: cruise gear up",L"载具：定速挡位升挡",L"載具：定速檔位升檔",L"車両：クルーズ段 アップ")
 HUDTEXT(kbCruiseDown,L"Vehicle: cruise gear down",L"载具：定速挡位降挡",L"載具：定速檔位降檔",L"車両：クルーズ段 ダウン")
+HUDTEXT(kbHeliHover,L"Helicopter: hover toggle",L"直升机：切换悬停",L"直升機：切換懸停",L"ヘリ：ホバリング切替")
+HUDTEXT(heliHoverActive,L"HOVER",L"悬停",L"懸停",L"ホバー")
+HUDTEXT(cmdRunEnd,L"Select the end of the attack run",L"选择扫射结束点",L"選擇掃射結束點",L"掃射の終点を指定")
+HUDTEXT(cmdRunStart,L"%ls: select the start of the attack run",L"%ls：选择扫射起点",L"%ls：選擇掃射起點",L"%ls：掃射の始点を指定")
+HUDTEXT(cmdRunLength,L"Attack run length must be 100-2400 m",L"扫射路线长度须为 100–2400 米",L"掃射路線長度須為 100–2400 公尺",L"掃射経路の長さは 100–2400m")
 HUDTEXT(kbDrillLaunch,L"Drill tank: launch the drill",L"钻头战车：发射钻头",L"鑽頭戰車：發射鑽頭",L"ドリル戦車：ドリル射出")
 HUDTEXT(kbProteusMode,L"Proteus: walk / deploy",L"普罗透斯：行走/架设",L"普羅透斯：行走/架設",L"プロテウス：歩行/展開")
 HUDTEXT(kbProteusShield,L"Proteus: shield",L"普罗透斯：护盾",L"普羅透斯：護盾",L"プロテウス：シールド")

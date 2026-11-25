@@ -3,6 +3,7 @@ BARRAGE_*) into <game>/Mods/OBJECT:
 
   EDF6VC_BARRAGE_ROUND.SGO   a barrage's round: the missions' indirect fire rocket with no gravity and a long life (the
                              plugin flies it and sets its size, blast and damage)
+  EDF6VC_BARRAGE_MISSILE.SGO  cruise and ballistic missiles, using the N6 AT's native missile projectile class and model
   EDF6VC_BARRAGE_BURST.SGO   a cluster rocket's flash where it splits
 
 Built in memory from the player's own Root.cpk (only read), written atomically and recorded in the ledger as this tool's;

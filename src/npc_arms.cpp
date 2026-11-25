@@ -184,21 +184,18 @@ void PreloadNpcArms() noexcept {
         if(!Profile())Log("SUPPORT arms: the resource preload (EDF+%X / EDF+%X) is not as read: soldiers keep their stock weapons",kPreload,kLoadDone);
         return;
     }
-    support_net::RequesterArms arms;
-    LocalRequesterArms(&arms);
-    int queued=0;
-    for(int k=0;k<kSupportWeaponCount;++k) {
-        const auto kind=static_cast<SupportWeapon>(k);
-        for(int hand=0;hand<2;++hand) {
-            npctier::Arms a;wchar_t path[96];
-            const std::uint64_t word=hand ? arms.offhand[k] : arms.kind[k];
-            if(!word || !(hand ? npctier::UnpackHand(word,kind,&a) : npctier::UnpackArms(word,kind,&a)) ||
-               !(hand ? npctier::HandPath(a,path,std::size(path)) : npctier::ArmsPath(kind,a,path,std::size(path))))continue;
-            if(loaded.Has(path) || !Queue(path))continue;
-            loaded.Add(path);++queued;   // with the mission's preload: done by the game's WaitPreload
-        }
+    // The default crew weapon can be needed as soon as the mission starts. Preparing one of every class and hand
+    // blocks the loading screen even when no support is called. The other loadouts already wait in NpcArmsLoaded.
+    Records records;
+    npctier::Inventory inv;
+    if(!ReadInventory(records,inv,true))return;
+    constexpr auto kind=SupportWeapon::rifle;
+    const auto arms=npctier::PickArms(kind,inv);
+    wchar_t path[96];
+    if(arms.on && npctier::ArmsPath(kind,arms,path,std::size(path)) && Queue(path)) {
+        loaded.Add(path);   // the game's WaitPreload completes this before the mission begins
+        Log("SUPPORT arms: default rifle %ls queued with the mission's preload",path);
     }
-    Log("SUPPORT arms: %d weapons of this player's support soldiers queued with the mission's preload",queued);
 }
 
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan& plan) noexcept {

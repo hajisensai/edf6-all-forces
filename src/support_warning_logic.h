@@ -15,12 +15,14 @@ namespace crew::warning {
 
 constexpr float kPi=3.14159265358979f;
 struct Circle { float centre[3]{}; float radius=0.0f; };
+struct BarrageFootprint {
+    Circle circle;
+    float corners[4][3]{};
+    bool rectangular=false;
+};
 
-// The area a barrage of `kind` at `target` along `heading` reaches: the circle round every round's point (the planned
-// rounds on flat ground at the target's height: barrage_plan.h Plan; the guided rockets with no enemy to aim at spread
-// round the mark as they do then, kGuidedReach) widened by each round's blast. Centred on the middle of their points' box
-// (a creeping barrage walks ahead of the mark). False: no rounds (an unknown kind).
-inline bool BarrageArea(int kind,const float* target,const float* heading,Circle* out) noexcept {
+// Bound the planned impacts and their blast radii. Creeping and simultaneous impact use a box in the call's heading.
+inline bool BarrageArea(int kind,const float* target,const float* heading,BarrageFootprint* out) noexcept {
     if(!out || kind<0 || kind>=barrage::kKinds)return false;
     barrage::Setup s;
     for(int i=0;i<3;++i){s.target[i]=target[i];s.heading[i]=heading[i];}
@@ -30,6 +32,24 @@ inline bool BarrageArea(int kind,const float* target,const float* heading,Circle
     const float y=target[1];
     const int n=barrage::Plan(static_cast<barrage::Kind>(kind),s,[y](float,float,float){return y;},rounds,barrage::kMaxRounds);
     if(n<=0)return false;
+    *out={};
+    if(barrage::HasOrientedFootprint(kind)) {
+        float forward[3];barrage::detail::Flat(heading,forward);
+        const float side[3]={forward[2],0.0f,-forward[0]};
+        const float* const axes[2]={forward,side};
+        float lo[2]{},hi[2]{};
+        for(int i=0;i<n;++i)for(int a=0;a<2;++a) {
+            const float along=(rounds[i].to[0]-target[0])*axes[a][0]+(rounds[i].to[2]-target[2])*axes[a][2];
+            const float bottom=along-rounds[i].blast,top=along+rounds[i].blast;
+            lo[a]=i==0 ? bottom : std::fmin(lo[a],bottom);
+            hi[a]=i==0 ? top : std::fmax(hi[a],top);
+        }
+        const float corners[4][2]={{lo[0],lo[1]},{hi[0],lo[1]},{hi[0],hi[1]},{lo[0],hi[1]}};
+        for(int i=0;i<4;++i)for(int a=0;a<3;++a)
+            out->corners[i][a]=target[a]+forward[a]*corners[i][0]+side[a]*corners[i][1];
+        out->rectangular=true;
+        return true;
+    }
     float lo[2]={rounds[0].to[0],rounds[0].to[2]},hi[2]={lo[0],lo[1]};
     for(int i=1;i<n;++i) {
         lo[0]=std::fmin(lo[0],rounds[i].to[0]);lo[1]=std::fmin(lo[1],rounds[i].to[2]);
@@ -41,7 +61,7 @@ inline bool BarrageArea(int kind,const float* target,const float* heading,Circle
         const float dx=rounds[i].to[0]-c.centre[0],dz=rounds[i].to[2]-c.centre[2];
         c.radius=std::fmax(c.radius,std::sqrt(dx*dx+dz*dz)+rounds[i].blast);
     }
-    *out=c;
+    out->circle=c;
     return true;
 }
 

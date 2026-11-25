@@ -47,8 +47,10 @@
 #include "map_cam.h"
 #include "npc_mark.h"
 #include "support_call.h"
+#include "support_aircraft.h"
 #include "support_points.h"
 #include "support_warning.h"
+#include "barrage_plan.h"
 #include "transport.h"
 #include <Xinput.h>
 #include <algorithm>
@@ -102,6 +104,8 @@ struct Game {
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
     bool armedOrder=false;Order armed=Order::none;
     int armedSupport=-1;
+    bool runStarted=false;
+    float runStart[3]{};
     // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
     int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
@@ -415,7 +419,7 @@ const wchar_t* OrderText(Order o) noexcept {
     }
 }
 // Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only the point orders / follow /
-// release, a tank no follow (it keeps a post); a squad riding a vehicle no recruitment and no point order (its vehicle
+// release, a tank can follow or guard; a squad riding a vehicle has no recruitment and no point order (its vehicle
 // takes those), a squad recruitment is not offered for no RECRUIT (mapcmd::OffersRecruit, npcai.cpp). The card shows
 // no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了"): DISMISS for the player's
 // own squads alone (recruit and dismiss never both), BOARD on foot, DISMOUNT riding.
@@ -436,7 +440,7 @@ bool Takes(const Entry& e,Order o) noexcept {
         return true;
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
-    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PlaceOrder(o);
+    if(e.owner==Owner::tank)return mapcmd::VehicleOrder(o) || o==Order::focus;
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
@@ -554,6 +558,7 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
 }
 // One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
 void Arm(Game& g,bool order,Order o,int support) noexcept {
+    if(order || support!=g.armedSupport)g.runStarted=false;
     g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
     if(order || support>=0){g.formationMenu=false;g.dismountMenu=false;g.place.armed=-1;}   // one thing armed at a time (the 「摆放」 row too)
     // A support with seats opens its composition from the load it brings uncomposed (SupportCallPreset); armed again it
@@ -656,7 +661,11 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         const bool again=g.armedSupport==hit.entry;
         if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
-        if(!again){g.supportPick=hit.entry;Note(g,hudtext::Tr(hudtext::Tx::cmdSupportArmed),SupportCallName(hit.entry));}
+        if(!again) {
+            g.supportPick=hit.entry;
+            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart : hudtext::Tx::cmdSupportArmed),
+                 SupportCallName(hit.entry));
+        }
         return;
     }
     if(hit.kind==Game::UiKind::payload) {
@@ -1571,15 +1580,18 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Shift with a move (the right button) or an attack-move (Z): after the points before it (mapcmd_logic.h Waypoints).
     const bool queue=k.shift;
     // The armed point order's click on the ground: that order there (disarmed).
-    int supportAt=-1;
+    int supportAt=-1,runClick=-1;
     SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
     if(g.armedClick && g.armedOrder) {
         p.move=p.move || g.armed==Order::move;p.attackMove=p.attackMove || g.armed==Order::attackMove;p.guard=p.guard || g.armed==Order::guard;
         Arm(g,false,Order::none,-1);
     } else if(g.armedClick && g.armedSupport>=0) {
-        supportAt=g.armedSupport;
-        if(g.composeEntry==supportAt)load=g.compose;
-        Arm(g,false,Order::none,-1);
+        if(SupportGroundRun(g.armedSupport))runClick=g.armedSupport;
+        else {
+            supportAt=g.armedSupport;
+            if(g.composeEntry==supportAt)load=g.compose;
+            Arm(g,false,Order::none,-1);
+        }
     }
     // The test range's 「摆放」 panel (range_place.h): its keys and pad this frame (its clicks UiClick took), one step; the
     // armed row's click on the map places it there and keeps it armed (one after another).
@@ -1636,18 +1648,53 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         Note(g,L"%ls",hudtext::Tr(g.marchPace ? hudtext::Tx::cmdPaceSlowest : hudtext::Tx::cmdPaceFull));
         Log("MAPCMD the march's pace: %s",g.marchPace ? "the slowest unit's" : "each at full speed");
     }
-    if(supportAt<0 && k.supportCall && !g.was.supportCall) {   // C: the picked call at the pointer (its composition if open)
-        supportAt=g.supportPick;
-        if(g.composeEntry==supportAt)load=g.compose;
+    if(supportAt<0 && runClick<0 && k.supportCall && !g.was.supportCall) {
+        if(SupportGroundRun(g.supportPick)) {
+            if(g.armedSupport!=g.supportPick)Arm(g,false,Order::none,g.supportPick);
+            runClick=g.supportPick;
+        } else {
+            supportAt=g.supportPick;
+            if(g.composeEntry==supportAt)load=g.compose;
+        }
     }
     g.was=rawKeys;
     float point[3]{};
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=Cfg().enabled;
+    sortie::RunSpec run;
+    float runCentre[3]{};
+    if(runClick>=0) {
+        using hudtext::Tx;
+        if(!pointOk)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
+        else if(!g.runStarted) {
+            std::memcpy(g.runStart,point,sizeof(g.runStart));
+            g.runStarted=true;
+            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunEnd));
+        } else if(!sortie::RunFromPoints(g.runStart,point,&run,runCentre)) {
+            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunLength));
+        } else {
+            supportAt=runClick;
+            if(g.composeEntry==supportAt)load=g.compose;
+            Arm(g,false,Order::none,-1);
+        }
+    }
+    // The map's Q/E turn (and the pad's map turn) aims the long axis of the rectangular barrages.
+    float heading[3]={in.look[0]-in.eye[0],0.0f,in.look[2]-in.eye[2]};
+    const float headingLength=std::hypot(heading[0],heading[2]);
+    if(headingLength>1e-4f){heading[0]/=headingLength;heading[2]/=headingLength;}
+    const auto aimedHeading=[&](int catalog)->const float* {
+        const int kind=SupportStrikeBarrage(SupportCatalogStrike(catalog));
+        return headingLength>1e-4f && barrage::HasOrientedFootprint(kind) ? heading : nullptr;
+    };
     // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
-    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point);
+    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,aimedHeading(g.armedSupport),
+                g.runStarted ? g.runStart : nullptr);
     if(supportAt>=0) {
-        if(pointOk){SupportCallComposedAt(supportAt,point,load.count>0 ? &load : nullptr,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
+        if(pointOk) {
+            SupportCallComposedAt(supportAt,run.half>0.0f ? runCentre : point,load.count>0 ? &load : nullptr,
+                                  g.note,_countof(g.note),aimedHeading(supportAt),run);
+            g.noteAt=GetTickCount64();
+        }
         else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
     }
     if(placeAt>=0)Place(g,placeAt,pointOk,point);

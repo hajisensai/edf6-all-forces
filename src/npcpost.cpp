@@ -32,11 +32,14 @@
 #include "memory.h"
 #include "mission_crew.h"
 #include "npc_logic.h"
+#include "ground_navigation.h"
 #include "npc_mark.h"
 #include "ifc_model.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include <memory>
+#include <new>
 
 namespace crew {
 namespace {
@@ -64,8 +67,12 @@ constexpr int kMaxPosts=64;
 
 enum class Family : std::uint8_t { none, carBase, mech, barga };
 // wrote/last: the plugin's last write to the two channels it drives (steer / throttle, the Barga's turn / forward).
-struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; float routeArrival; ObjRef focus{}; };
+struct Post {
+    ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active;
+    Command cmd; bool wrote; float last[2]; float routeArrival; ObjRef focus{},escort{};
+};
 Post posts[kMaxPosts]{};
+std::unique_ptr<npc::navigation::RouteState> paths[kMaxPosts];
 struct PendingPost { ObjRef ref; float at[3]; float routeArrival; };
 PendingPost pendingPosts[kMaxPosts]{};
 ULONGLONG fullLoggedAt=0;
@@ -92,7 +99,7 @@ Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     }
     // After a player or script drove it, even the old spawn goal nearby is no longer its post.
     const bool resumed=slot->ref.Is(v);
-    npcmark::Assign(slot->focus,{});*slot=Post{};
+    npcmark::Assign(slot->focus,{});npcmark::Assign(slot->escort,{});paths[slot-posts].reset();*slot=Post{};
     slot->ref=ObjRef::Of(v);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float* goal=reinterpret_cast<const float*>(v+kStockGoal);   // a CarBase's only
@@ -160,7 +167,7 @@ bool HadRoutePost(const unsigned char* v) noexcept {
 void Relinquish(const unsigned char* v) noexcept {
     for(auto& p:posts)if(p.ref.Is(v)) {
         const ObjRef ref=p.ref;
-        npcmark::Assign(p.focus,{});p=Post{};p.ref=ref; // retain only the identity so a later NPC starts at its new position
+        npcmark::Assign(p.focus,{});npcmark::Assign(p.escort,{});paths[&p-posts].reset();p=Post{};p.ref=ref;
     }
 }
 }  // namespace
@@ -437,6 +444,7 @@ void NpcPostInput(unsigned char* v) noexcept {
     if(!IsOnlineAuthority(v)){p->active=false;p->wrote=false;return;} // clients publish read-only map rows
     for(auto& request:pendingPosts)if(request.ref.Is(v)) {
         std::memcpy(p->at,request.at,12);p->commanded=true;p->routeArrival=request.routeArrival;
+        npcmark::Assign(p->escort,{});paths[p-posts].reset();
         p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
         request=PendingPost{};break;
     }
@@ -461,8 +469,28 @@ void NpcPostInput(unsigned char* v) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     // A navigation waypoint is not an area guard post. The route planner supplies its arrival
     // contract; using the ordinary 6 m guard radius would swallow a 4 m grid edge without driving.
-    const float arrival=p->routeArrival>0 ? p->routeArrival : Cfg().tankPostHold;
-    const npc::Steer s=npc::ReturnToPost(reinterpret_cast<const float*>(v+kPosition),m,m+8,p->at,arrival,
+    float arrival=p->routeArrival>0 ? p->routeArrival : Cfg().tankPostHold;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float* goal=p->at;
+    float waypoint[3];
+    if(auto* path=paths[p-posts].get()) {
+        if(p->escort && !npcmark::Alive(p->escort)) {
+            npcmark::Assign(p->escort,{});
+            std::memcpy(p->at,pos,12);
+            p->cmd=Command{Order::guard,{pos[0],pos[1],pos[2]}};
+        }
+        if(p->escort) {
+            goal=reinterpret_cast<const float*>(static_cast<const unsigned char*>(p->escort.obj)+kPosition);
+            arrival=Cfg().groundFollow;
+        }
+        const auto profile=GroundVehicleProfile();
+        if(GroundNavigate(*path,pos,goal,arrival,ms,waypoint,profile)!=npc::navigation::Result::moving) {
+            p->active=false;TakeBack(v,f,*p);return;
+        }
+        goal=waypoint;
+        arrival=profile.waypointRadius;
+    }
+    const npc::Steer s=npc::ReturnToPost(pos,m,m+8,goal,arrival,
                                          Cfg().tankReverseMax,kBackAngle,f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot);
     if(s.active!=p->active)Log("NPCPOST v=%p %s (%.1f m off its post)",v,s.active ? "driving back" : "back at its post",s.dist);
     p->active=s.active;
@@ -512,6 +540,7 @@ bool NpcPostCommand(const void* v,const float* at) noexcept {
     for(auto& p:posts) {
         if(!p.ref.Is(v) || !Available(p,GameMs()))continue;
         std::memcpy(p.at,at ? at : p.home,12);p.commanded=at!=nullptr;p.routeArrival=0.0f;DropPending(static_cast<const unsigned char*>(v));
+        npcmark::Assign(p.escort,{});paths[&p-posts].reset();
         Log("NPCPOST v=%p post %s (%.0f,%.0f,%.0f) by a command",v,at ? "moved to" : "back on its spawn",p.at[0],p.at[1],p.at[2]);
         return true;
     }
@@ -525,7 +554,7 @@ int TankCommandUnits(CommandUnit* out,int most) noexcept {
     for(const auto& p:posts)
         if(n<most && Available(p,ms) && ReadCommandUnit(p.ref,FamilyOf(static_cast<const unsigned char*>(p.ref.obj))==Family::carBase ?
                                                           "TANK" : "MECH",p.cmd,false,&out[n])) {
-            out[n].status=!IsOnlineAuthority(p.ref.obj) ? "REMOTE" : p.active ? "RETURNING" : "AT POST";++n;
+            out[n].status=!IsOnlineAuthority(p.ref.obj) ? "REMOTE" : p.escort ? "FOLLOW" : p.active ? "RETURNING" : "AT POST";++n;
         }
     return n;
 }
@@ -535,17 +564,27 @@ void SeePostFocus(void* context,const void* object,const float*) noexcept {
     auto& f=*static_cast<FocusCheck*>(context);if(f.ref.Is(object))f.seen=true;
 }
 }
-bool TankCommand(const void* v,const Command& c,const ObjRef& focus) noexcept {
+bool TankCommand(const void* v,const Command& c,const ObjRef& focus,const ObjRef& requester) noexcept {
     if(!IsOnlineAuthority(v))return false;
-    if(c.order!=Order::guard && c.order!=Order::none && c.order!=Order::focus)return false;
+    if(c.order!=Order::guard && c.order!=Order::none && c.order!=Order::focus && c.order!=Order::follow)return false;
+    if(c.order==Order::follow && !npcmark::Alive(requester))return false;
     for(auto& p:posts)if(p.ref.Is(v) && Available(p,GameMs())) {
         if(c.order==Order::focus) {
             FocusCheck checked{focus};
             if(!npcmark::Alive(focus) || !VisitEnemies(static_cast<const unsigned char*>(v),&SeePostFocus,&checked) || !checked.seen)return false;
             npcmark::Assign(p.focus,focus);p.cmd=c;return true;
         }
+        const bool routed=c.order==Order::guard || c.order==Order::follow;
+        std::unique_ptr<npc::navigation::RouteState> path;
+        if(routed) {
+            path.reset(new(std::nothrow) npc::navigation::RouteState{});
+            if(!path)return false;
+        }
+        const auto* here=reinterpret_cast<const float*>(static_cast<const unsigned char*>(v)+kPosition);
+        if(!NpcPostCommand(v,c.order==Order::guard ? c.at : c.order==Order::follow ? here : nullptr))return false;
         npcmark::Assign(p.focus,{});
-        if(!NpcPostCommand(v,c.order==Order::guard ? c.at : nullptr))return false;
+        if(c.order==Order::follow)npcmark::Assign(p.escort,requester);
+        paths[&p-posts]=std::move(path);
         p.cmd=c;return true;
     }
     return false;
@@ -569,7 +608,8 @@ bool PrepareNpcVehicleAi(unsigned char* v) noexcept {
 
 void ResetNpcPosts() noexcept {
     for(auto& p:pendingPosts)p=PendingPost{};
-    for(auto& p:posts){npcmark::Assign(p.focus,{});p=Post{};}
+    for(auto& path:paths)path.reset();
+    for(auto& p:posts){npcmark::Assign(p.focus,{});npcmark::Assign(p.escort,{});p=Post{};}
     fullLoggedAt=0;
 }
 }  // namespace crew

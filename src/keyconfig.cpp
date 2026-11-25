@@ -17,12 +17,14 @@
 #include "keyconfig_menu.h"
 #include "code_signatures.h"
 #include "edf/keybind.h"
+#include "edf/input_source.h"
 #include "edf/patch.h"
 #include "edf/wstr.h"
 #include "game_dialog.h"
 #include "hud.h"
 #include "hudtext.h"
 #include "memory.h"
+#include <Xinput.h>
 #include <atomic>
 #include <cstring>
 #include <iterator>
@@ -35,6 +37,106 @@ namespace kb=edf::keybind;
 using namespace keymenu;
 using Signature=CodeSignature;
 #include "keyconfig_signatures.inc"
+
+// The game routes P1 as keyboard or pad before reading the device channels. In keyboard mode 0x118838A points
+// that slot at XInput index -1. Update the native route before it calculates the index, using the same device source.
+constexpr unsigned kInputFocusCall=0x1188308,kInputFocus=0x1183D60,kPadMode=0x1183D70,kSetPadMode=0x1184610;
+constexpr std::size_t kNativePadState=0x2136510,kPadSwap=0x2136504,kSplitInput=0x2136F70,kLocalPlayers=0x14FF4;
+constexpr std::size_t kKeyboardState=0x21360E0;
+const unsigned char kInputFocusCode[]={0x48,0x8B,0x05,0x89,0x24,0xFB,0x00,0x0F,0xB6,0x40,0x30,0xC3};
+const unsigned char kPadModeCode[]={0x0F,0xB6,0x05,0xA5,0xB0,0xE6,0x00,0xC3};
+const unsigned char kSetPadModeCode[]={0x88,0x0D,0x06,0xA8,0xE6,0x00,0xC6,0x05,0xA2,0x1A,0xFB,0x00,0x01,0xC3};
+const unsigned char kPadRouteCode[]={0xE8,0xF2,0xB9,0xFF,0xFF,0x84,0xC0,0x75,0x0C,0x38,0x1D,0xE8,0xEB,0xFA,0x00,
+                                    0x75,0x04,0x41,0x8D,0x76,0xFF};
+const unsigned char kReadPadCode[]={0xFF,0x15,0x39,0xE1,0xFA,0x00,0x85,0xC0,0x75,0x75};
+const Signature kInputRoutes[]={
+    {kInputFocus,kInputFocusCode,sizeof(kInputFocusCode)},{kPadMode,kPadModeCode,sizeof(kPadModeCode)},
+    {kSetPadMode,kSetPadModeCode,sizeof(kSetPadModeCode)},{0x1188379,kPadRouteCode,sizeof(kPadRouteCode)},
+    {0x11883D1,kReadPadCode,sizeof(kReadPadCode)},
+};
+using FocusFn=bool(__fastcall*)();
+using SetPadModeFn=void(__fastcall*)(bool);
+struct DeviceSample {
+    unsigned char keys[256]{};
+    WORD buttons=0;
+    unsigned axes=0;
+    bool ready=false;
+};
+DeviceSample lastInput{};
+ULONGLONG nextPadProbe=0;
+
+unsigned PadAxes(const XINPUT_GAMEPAD& pad) noexcept {
+    const auto direction=[](SHORT value,SHORT threshold)->unsigned {
+        return value>=threshold ? 1u : value<=-threshold ? 2u : 0u;
+    };
+    return direction(pad.sThumbLX,17000) | (direction(pad.sThumbLY,17000)<<2) |
+           (direction(pad.sThumbRX,19000)<<4) | (direction(pad.sThumbRY,19000)<<6) |
+           (pad.bLeftTrigger>=128 ? 0x100u : 0u) | (pad.bRightTrigger>=128 ? 0x200u : 0u);
+}
+
+bool MixedPlayers() noexcept {
+    const auto* status=At<const unsigned char*>(image,kb::kOptions);
+    return !status || !Readable(status,kLocalPlayers+4) || At<unsigned>(status,kLocalPlayers)>1 ||
+           At<unsigned char>(image,kSplitInput)!=0;
+}
+
+void FollowInputDevice() noexcept {
+    if(!Cfg().enabled || MixedPlayers()){lastInput.ready=false;nextPadProbe=0;return;}
+    const bool wasPad=reinterpret_cast<FocusFn>(image+kPadMode)();
+    DeviceSample input;
+    std::memcpy(input.keys,image+kKeyboardState,sizeof(input.keys));
+    const auto virtualPad=edf::PadSource();
+    const auto poll=virtualPad ? virtualPad : At<edf::PadStateFn>(image,kNativePadState);
+    const ULONGLONG now=GetTickCount64();
+    XINPUT_STATE pad{};
+    // When no controller is connected, probing the empty slot continuously can stall the native input pump.
+    if(poll && (virtualPad || now>=nextPadProbe)) {
+        const DWORD user=At<unsigned>(image,kPadSwap)==1 ? 1u : 0u;
+        const bool connected=poll(user,&pad)==ERROR_SUCCESS;
+        nextPadProbe=connected ? 0 : now+100;
+        if(connected){input.buttons=pad.Gamepad.wButtons;input.axes=PadAxes(pad.Gamepad);}
+    }
+    input.ready=true;
+    if(lastInput.ready) {
+        bool keyboardPressed=false;
+        for(unsigned key=1;key<256;++key)
+            keyboardPressed=keyboardPressed || (input.keys[key]&~lastInput.keys[key]&0x80)!=0;
+        const bool padPressed=(input.buttons&~lastInput.buttons)!=0 || (input.axes&~lastInput.axes)!=0;
+        const bool padMode=NextPadMode(wasPad,keyboardPressed,padPressed);
+        if(padMode!=wasPad) {
+            reinterpret_cast<SetPadModeFn>(image+kSetPadMode)(padMode);
+            Log("INPUT P1 switched to %s",padMode ? "gamepad" : "keyboard and mouse");
+        }
+    }
+    lastInput=input;
+}
+
+bool __fastcall InputFocusHook() noexcept {
+    const bool focused=reinterpret_cast<FocusFn>(image+kInputFocus)();
+    if(!focused){lastInput.ready=false;nextPadProbe=0;return false;}
+    __try { FollowInputDevice(); } __except(EXCEPTION_EXECUTE_HANDLER){lastInput.ready=false;}
+    return true;
+}
+
+bool InstallInputSwitch() noexcept {
+    if(!CheckSignatures(kInputRoutes,"INPUT"))return false;
+    bool changed=false;
+    return edf::RedirectCall(image+kInputFocusCall,image+kInputFocus,reinterpret_cast<void*>(&InputFocusHook),changed) || changed;
+}
+
+// The game's chat word filter. The normal output path at 0x720747 already handles a missing filter.
+// Souzooka's EDFModLoader patch identifies this branch; require the full instruction neighborhood for this build.
+constexpr unsigned kChatFilterGate=0x720582;
+const unsigned char kChatGateContext[]={0x48,0x89,0x4C,0x24,0x60,0x48,0x85,0xC9,0x0F,0x84,0xBF,0x01,0x00,0x00,
+                                       0x48,0x63,0x41,0x04};
+bool InstallUnfilteredChat() noexcept {
+    constexpr unsigned branch=8;
+    const unsigned char uncensored[]={0x90,0xE9};   // NOP/JMP preserves the original rel32 target
+    if(!Matches(kChatFilterGate-branch,kChatGateContext,branch) ||
+       !Matches(kChatFilterGate+2,kChatGateContext+branch+2,sizeof(kChatGateContext)-branch-2))return false;
+    if(Matches(kChatFilterGate,uncensored,sizeof(uncensored)))return true;
+    return edf::PatchCode(image+kChatFilterGate,kChatGateContext+branch,uncensored,sizeof(uncensored));
+}
 
 // The label of each slot, in kSlots' order, and each page's name.
 constexpr hudtext::Tx kSlotText[]={
@@ -51,7 +153,7 @@ constexpr hudtext::Tx kSlotText[]={
     hudtext::Tx::kbSzLock,hudtext::Tx::kbSzDash,hudtext::Tx::kbSzDescend,hudtext::Tx::kbSzFunnel,hudtext::Tx::kbSzCannon,
     hudtext::Tx::kbSzMelee,hudtext::Tx::kbSzGuard,
     hudtext::Tx::kbFire3,hudtext::Tx::kbFire4,hudtext::Tx::kbFire5,hudtext::Tx::kbFire6,hudtext::Tx::kbAutoTurret,
-    hudtext::Tx::kbCruiseUp,hudtext::Tx::kbCruiseDown,
+    hudtext::Tx::kbCruiseUp,hudtext::Tx::kbCruiseDown,hudtext::Tx::kbHeliHover,
 };
 static_assert(sizeof(kSlotText)/sizeof(kSlotText[0])==static_cast<std::size_t>(kb::kSlotCount),"a label for every slot");
 constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx::kbPageVehicle,hudtext::Tx::kbPageAir,
@@ -87,6 +189,7 @@ constexpr KeyField kFields[]={
     {L"VehicleFire5Key",&Config::vehicleFire5Key},{L"VehicleFire6Key",&Config::vehicleFire6Key},
     {L"VehicleAutoTurretKey",&Config::vehicleAutoTurretKey},
     {L"VehicleCruiseUpKey",&Config::vehicleCruiseUpKey},{L"VehicleCruiseDownKey",&Config::vehicleCruiseDownKey},
+    {L"HeliHoverKey",&Config::heliHoverKey},
 };
 constexpr int kFieldCount=static_cast<int>(sizeof(kFields)/sizeof(kFields[0]));
 constexpr bool SameName(const wchar_t* a,const wchar_t* b) noexcept {
@@ -175,7 +278,7 @@ const wchar_t* __fastcall KcLabel(int page,int row,void*) noexcept {
     return s ? hudtext::Tr(kSlotText[kb::IndexOf(s)],Language()) : nullptr;
 }
 // The row's key as the stock rows show theirs: the key name of (the model, the action), through the text table. A code
-// the menu cannot name (outside 0..0x78: never written by the game, the plugin or the seed) is shown unassigned.
+// the keyboard-only plugin cannot consume is shown unassigned, including a controller code from a saved store.
 const wchar_t* __fastcall KcValue(int page,int row,unsigned char* menu) noexcept {
     const kb::Slot* s=kb::SlotAt(page,row);
     if(!s || !menu)return L"";
@@ -183,10 +286,11 @@ const wchar_t* __fastcall KcValue(int page,int row,unsigned char* menu) noexcept
         void* table=At<void*>(image,kTextTable);
         unsigned char* store=KeyStore();
         if(!table || !store)return L"";
-        const int who=At<std::int32_t>(menu,kMenuPlayer);
-        const std::int32_t code=who>=0 && who<kb::kPlayers ? kb::Read(store,who,s->action) : kb::kNoAssign;
-        const wchar_t* key=kb::ValidCode(code) ? reinterpret_cast<KeyNameFn>(image+kKeyName)(menu+kMenuModel,s->action)
-                                               : At<const wchar_t*>(image,kNameTable);
+        auto* const model=menu+kMenuModel;
+        const int who=At<std::int32_t>(model,4),set=At<std::int32_t>(model,0x14);
+        const auto code=who>=0 && who<kb::kPlayers && set>=0 && set<kb::kSets ? *kb::SlotPtr(store,who,set,s->action) : kb::kNoAssign;
+        const wchar_t* key=KeyboardDisplayCode(code)!=kb::kNoAssign ? reinterpret_cast<KeyNameFn>(image+kKeyName)(model,s->action)
+                                                                   : At<const wchar_t*>(image,kNameTable);
         const wchar_t* text=key ? reinterpret_cast<TextLookupFn>(image+kTextLookup)(table,key) : nullptr;
         return text ? text : L"";
     } __except(EXCEPTION_EXECUTE_HANDLER){return L"";}
@@ -317,6 +421,8 @@ void KeyConfigTick() noexcept {
 
 bool InstallKeyConfig() noexcept {
     if(installed.load())return true;
+    Log("INPUT native keyboard/gamepad switching=%d",InstallInputSwitch());
+    if(Cfg().enabled)Log("CHAT local word filter bypass=%d",InstallUnfilteredChat());
     if(!CheckCode())return false;
     // Everything built first; nothing is patched unless all of it was.
     unsigned char table[kRows*kRowBytes];

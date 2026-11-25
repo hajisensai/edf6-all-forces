@@ -25,7 +25,7 @@
 
 namespace crew::barrage_net {
 constexpr std::uint32_t kMagic=0x53475242u;   // "BRGS"
-constexpr std::uint32_t kVersion=4;
+constexpr std::uint32_t kVersion=5;  // the two peers replay the same revised barrage plan
 constexpr std::size_t kWire=96;
 constexpr float kMostDamage=1.0e9f;
 

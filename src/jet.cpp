@@ -213,10 +213,7 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
     bool faced=false;
     if(j.mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
     else if(kind.weapon==Weapon::charge) {
-        // At its target; going back, at its carrier's dock; else, its carrier given no order, under the carrier
-        // itself; sent somewhere (the player's order, CarrierState::order) or thrown (no carrier), kThrownHover over
-        // its anchor, waiting there. The anchor is on the ground in both, and twice kDockBelow under it, as before,
-        // was under the ground (the drone sank into it, held by HoldOffGround's floor).
+        // At its target, at the carrier's dock when recalled, or hovering above the assigned area while waiting.
         // At a flyer it climbs as fast as it flies: at half that (12.5 m/s, a doll drone) the flyers it chased kept above
         // it, climbing with it to the game's ceiling, and it never reached them (2026-10-10 log: y 483 -> 985 m in 46 s,
         // 28-110 m under its target; the user: the drones and their carrier are to attack the flyers).
@@ -232,7 +229,6 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
             const float under=GroundClearance(goal);
             if(under!=kNoGround && kind.doll && under<kDollRide)goal[1]+=kDollRide-under;
         }
-        else if(mp && !mother->carrier.ordered){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
         else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
     } else {
         // The carrier: about its station (CarrierGoal), kMinAlt*2 over the ground there at least.
@@ -647,16 +643,15 @@ void JetFrame(unsigned char* v) noexcept {
         j->loadPrefer=LoadoutPrefer(kind.prefer,left>0 ? air : 0,left>0 ? ground : 0);j->loadSet=true;
     }
     const bool follow=player.at && ms-player.at<10000;
-    // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
+    // A drone works round its launch assignment, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
     Jet* const mother=MotherOf(*j);
     if(j->escort && follow && !gunner)std::memcpy(j->anchor,player.pos,12);   // the player aboard: player.pos is its own
     // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
     const bool ordered=mother && mother->carrier.ordered;
-    const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order :
-                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) :
+    const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order : mother ? j->anchor :
                         CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor);
-    const float* viewer=follow ? player.pos : anchor;
+    const float* viewer=follow ? player.pos : mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : anchor;
     // Worked round from inside its soft edge (airbound.h): a strike point, a guard post or a commanded point out past it
     // is taken in by its patrol circle, so the circle and the fight round it stay in.
     float anchorIn[3];
@@ -669,9 +664,17 @@ void JetFrame(unsigned char* v) noexcept {
 
     // The target and its motion.
     const float targetRange=ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind);
-    const bool moving=!j->focus && MapCommandMoving(*j,pos,anchor,targetRange);   // a focus order: at it first
+    float runAnchor[3]{};
+    const float* targetAnchor=anchor;
+    if(j->sortie.runHalf>0.0f) {
+        const auto& line=j->sortie.line;
+        const float along=Clamp(sortie::Along(line,pos),-j->sortie.runHalf,j->sortie.runHalf);
+        for(int i=0;i<3;++i)runAnchor[i]=line.at[i]+line.dir[i]*along;
+        targetAnchor=runAnchor;
+    }
+    const bool moving=j->sortie.pass==SortiePass::none && !j->focus && MapCommandMoving(*j,pos,anchor,targetRange);
     if(!moving && !j->ferry && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)
-        PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
+        PickTarget(*j,v,pos,targetAnchor,targetRange,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,SortieStoreFlyer(*j,j->t.flyer),Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
@@ -700,7 +703,7 @@ void JetFrame(unsigned char* v) noexcept {
     j->m.ready=true;
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
-    else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
+    else Arm(*j,kind,v,pos,nose,j->sortie.strafing ? j->sortie.shotPoint : lead,gunsOk,missileOk,arms,ms);
     if(!gunner && j->mode!=Mode::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000) {

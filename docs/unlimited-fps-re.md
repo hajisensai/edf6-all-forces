@@ -249,7 +249,8 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   最后一个调用，排在各对象阶段（vtable `+0x38/+0x30/+0x20/+0x40/+0x28/+0x48`）之后。H。插件的镜头功能都挂在镜头 vtable 槽 4 上，
   步进返回时都已写完。钩子按镜头记 `prev / cur`（`cam+0x220` 64 字节世界矩阵 + `cam+0x24` 视野），最多 8 台；追帧（n = 2、3）时
   prev 是倒数第二步。
-- 投影（fps-6）：`scope_lens.cpp` 的 `ProjectHook`（`0x1197B50 → 0x118DFF0`）开头调 `SetBeforeProject` 注册的回调。n = 0 帧
+- 投影（fps-6）：`scope_lens.cpp` 的 `ProjectHook`（`0x1197B50 → 0x118DFF0`）开头调 `SetBeforeProject` 注册的回调（唯一注册者是
+  `render_record.cpp`，它再按槽位调各功能的投影回合，帧率的是 `BeforeProject`）。n = 0 帧
   在投影前把 `cam+0x220` 写成 `InterpolateRigid(prev, cur, alpha)`、视野线性插值。字节已不等于 cur（别处在步进后改过）就不动。
   本帧帧末栅栏 `0x11A305A → 0x111CC20`（渲染线程已画完）后仍等于写入值的还原成 cur（`BeginFrame` 开头再兜底一次），所以下一帧的
   `Application::Update`、步进和插件逻辑读到的永远是模拟值。
@@ -260,12 +261,17 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
 
 #### 4.3.2 玩家根变换（fps-7）
 
-- 采样：在镜头步进钩子里（tick 结果已定），`h = [cam+0x360]`（vtable 是四个兵种之一才算），徒步取身体实例 `[h+0x900]` 的 pose[0]，
-  骑乘（`HumanOnFoot` 为假）取载具实例 `v+0xEE0`（`v = [h+0x1548]`）的 pose[0]。每 tick 一次，只由第一台跟着这个兵的镜头采样。
-  身份（h、v 及其控制块 `+kSelfCtrl`、实例指针）变了就清零重来。
+- 采样：镜头步进钩子（tick 结果已定）只认身份、数 tick（`StepRoot`）：`h = [cam+0x360]`（vtable 是四个兵种之一才算），徒步取身体
+  实例 `[h+0x900]`，骑乘（`HumanOnFoot` 为假）取载具实例 `v+0xEE0`（`v = [h+0x1548]`）；只由第一台跟着这个兵的镜头计数。身份
+  （h、v 及其控制块 `+kSelfCtrl`、实例指针）变了就清零重来并切断镜头。pose[0] 在录制的第一次投影时读（`SampleRoot`，与其余对象
+  同一时机），读的是录制重抄后要画的值。原因（实机，2026-11-24，swarm 场景 `TestBoardVehicle=403_Tank` 骑坦克）：原来在步进时读，
+  骑乘时每 5 秒约 1100 / 1110 个 n = 0 帧被记成「changed since its tick」（rootsLeft），插值几乎全失效；徒步为 0。载具的画面
+  姿态在录制里另行重算，和步进时读到的不一致。追帧（一帧 2、3 个 tick）只采最后一个，这一对跨 gap 个 tick 接着用：
+  `along = (gap-1+alpha)/gap`，截断阈值乘 gap（与 §4.3.3 其余对象一致）；超过 3 个 tick 重新配对。
 - 写点：n = 0 帧在 `System::Update` 里的渲染录制 `0x1198FA4 → 0x11978D0`（`System_RecordDraw`）**里面**、第一次投影
-  `0x1197B50`（0 号视口）时写（`frame_rate_view.cpp` `ProjectStart`，经 `BeforeProject`）。帧率在 `render_record.cpp` 里的回合
-  （`RecordStart`）只记下「录制开始」。原因见下一条；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
+  `0x1197B50`（0 号视口）时写（`frame_rate_view.cpp` `ProjectStart`，经 `BeforeProject` 的 `first`）。「录制里的第一次投影」由
+  `render_record.cpp` 判定：录制调用期间打开，第一次投影或录制返回时关闭。所以一次没有投影的录制（载入中）不会让同帧
+  `0x11978D0` 其它调用点的投影顶替成采样点。原因见下一条；`BeginFrame`（`System::Update` 之前）只设 alpha / ticks / age，不写。依据（H，汇编核对）：
   - `System::Update` `0x1198DA0` 进录制前依次调 `0x1195A80`、`0x1195F20`（整理对象表，会删对象、摘掉更新表里的裸指针）、
     `0x1197680`，再过 `0x1198F84 / 0x1198F8D` 两道门才到 `0x1198FA4`。在 `BeginFrame` 写，`0x1195F20` 删掉的对象就带着写过的
     pose 进了还原表；在录制调用处写，对象表已是本帧最终状态。
@@ -287,19 +293,26 @@ HUiRoomFixedPhrase+0x8F4、HUiRoomSetting+0x7EC、HUiOpening+0x10、UiNotice+0x2
   - **调用点只有一个所有者**（`src/render_record.cpp`）。`edf::RedirectCall` 只接管仍指向原版函数的调用点，所以两个模块各自
     重定向同一点时，后装的那个会被拒、功能静默缺失。#395 复审发现过：帧率（`FrameRateCap≠0`）先装，第一人称的 Umbra 放置
     （`firstperson.cpp`，原来也挂 `0x1198FA4`）就装不上，日志 `FP installed: ... culling=0 pass=0`。现在由 `render_record.cpp`
-    独占这个调用点（核对 `kRecordSig` 后只重定向一次，`Install` 幂等），各功能用 `renderrecord::Set` 登记回合。钩子按槽位
-    固定顺序调用各回合，再原样调用 `0x11978D0`：
-    1. **帧率**（`Slot::kFrameRate`）：n = 0 帧写玩家根与其余对象的插值 pose（§4.3.3）。
-    2. **第一人称**（`Slot::kFirstPerson`）：把视图模型交给 Umbra 的包围盒放到眼睛处（`PlaceAll`）。
+    独占这个调用点（核对 `kRecordSig` 后只重定向一次，`Install` 幂等），也独占投影 `0x1197B50` 的回调
+    （`scopelens::SetBeforeProject`，与镜中镜共用这个调用点）。各功能用 `renderrecord::Set`（录制前）和
+    `renderrecord::SetProject`（每次投影，带 `first`）登记回合，按槽位固定顺序调用：
+    1. **帧率**（`Slot::kFrameRate`）：第一次投影时采样并在 n = 0 帧写玩家根与其余对象的插值 pose（§4.3.3）；每次投影写镜头插值。
+    2. **第一人称**（`Slot::kFirstPerson`）：录制前同步会话（`RenderStart`）；第一次投影时把视图模型交给 Umbra 的包围盒放到
+       眼睛处（`FirstProjection` → `PlaceAll`）。
+    - 包围盒为什么不能在录制前放（H，汇编 + 实机）：`0x6C06A0` 在 `[+0x31C] & 1` 时重抄骨骼后还调
+      `0x11B30C0(model, model+0x110)`，按模型自己的包围盒重放 Umbra 对象，和第一人称 `Place` 用的是同一个函数、同一个模型。
+      2026-11-24 M001 第一人称、FrameRateCap=1 临时诊断（Umbra 导入 `0x17567D0` 上数第一人称放过的对象在栅栏前被再放的次数）：
+      18000 / 18000 帧身体和武器两个盒都在 `0x6C06F7`（调用者 `0x1197959`，即 `0x1197950` 循环）被重放，第一人称的盒从未
+      留到绘制。以前看起来没事，是靠 `PassEndSelected` 把第一遍没画的视图模型补交（firstperson.cpp 开头 Wing Diver 的枪
+      「五帧有四帧不在可见集里……关掉放置也一样」就是这个）。挪到第一次投影（循环之后、第一次绘制之前）。
     顺序理由：
-    - 两边的输入互不相干。插值只改骨骼 pose（`[inst+0x30]`），不碰镜头，也不碰模型 `+0x110` 的包围盒；`PlaceAll` 读的是
-      镜头和 `+0x110`。所以先后都不改变对方读到的数据。
-    - 第一人称放在最后，看到的是本帧最终要画的状态。它用的眼位是本帧**实际绘制**的眼位：n = 0 帧取帧率插值后的镜头
-      （`FrameRateDrawnEye`，与 `BeforeProject` 同样的判定，只算不写），否则取镜头本身。原因是 Umbra 按 `0x11978D0` 内
-      `0x1197B50` 投影时交上去的镜头做剔除，而录制调用时 `cam+0x220` 还是步进值；盒子若放在步进眼位，镜头在一个 tick 里移动的
-      距离可能让盒子偏离镜头、被剔掉。
+    - 第一人称排在帧率之后。帧率的回合在第一次投影时已把这台镜头写成插值值，第一人称用的眼位就是本帧**实际绘制**的眼位：
+      n = 0 帧取帧率插值后的镜头（`FrameRateDrawnEye`），否则取镜头本身。Umbra 按投影时交上去的镜头剔除；盒子若放在步进
+      眼位，镜头在一个 tick 里移动的距离可能让盒子偏离镜头、被剔掉。插值只改骨骼 pose（`[inst+0x30]`）和镜头，不碰模型
+      `+0x110` 的包围盒。
     - 两边各自 `renderrecord::Install()`，谁先装都一样。`FrameRateCap=0` 时只有第一人称的回合；第一人称关时只有帧率的回合；
-      各自独立工作。离线 `render_record_test` 覆盖只重定向一次、按槽位排序、各自单独、签名或重定向失败不重试。
+      各自独立工作。离线 `render_record_test` 覆盖只重定向一次、投影只共享一次、按槽位排序、`first` 每次录制只给一次
+      （录制外、未投影的录制之后都不给）、各自单独、签名或重定向失败不重试。
       改写点所有权在运行期登记（`common/code_owner.cpp`）：`RedirectCall` / `PatchCode` / `RedirectImportCall` /
       `PatchVtableSlot` 在读写字节之前，把这几个字节登记给调用它的源文件（默认参数 `__builtin_FILE()`，在调用处展开）；
       插件自己 `VirtualProtect` 写代码的地方先调 `edf::ClaimCode`。两个文件登记到同一字节就在日志写

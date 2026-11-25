@@ -5,8 +5,8 @@
 
 namespace crew {
 namespace framerateview {
-// At load, after the gate: the camera step's snapshot (0x11995A6) and the projection's interpolation (0x1197B50, shared
-// with the lens view, scope_lens.h SetBeforeProject). False (logged by the caller): nothing interpolated.
+// At load, after the gate: the camera step's snapshot (0x11995A6) and the projection's interpolation (0x1197B50, the
+// frame rate's turn there: render_record.h SetProject). False (logged by the caller): nothing interpolated.
 bool Install() noexcept;
 // Game thread, each frame right before System::Update (frame_rate.cpp SystemUpdateHook): anything the last frame's end
 // fence did not put back is (the blends are undone at the frame end's fence 0x11A305A, once the render thread has drawn

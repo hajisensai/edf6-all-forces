@@ -31,7 +31,8 @@ int main() {
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[4]=1;Check(!Decode(c,kWire,d),"an older version (the caller its NetId)");
      c[4]=2;Check(!Decode(c,kWire,d),"version 2 (the player's tag at bytes 0..3)");
      c[4]=3;Check(!Decode(c,kWire,d),"version 3 (no caller team)");
-     c[4]=5;Check(!Decode(c,kWire,d),"another version");}
+     c[4]=4;Check(!Decode(c,kWire,d),"version 4 (different impact positions and times)");
+     c[4]=static_cast<unsigned char>(kVersion+1);Check(!Decode(c,kWire,d),"another version");}
     // The caller's team rides along (a peer without the caller warns and fires from a stand-in of that side).
     {Msg x=m;x.team=3;Check(Encode(x,b,sizeof(b)) && Decode(b,sizeof(b),d) && d.team==3,"the caller's team round trips");
      x.team=-1;Check(!Encode(x,b,sizeof(b)),"a negative team");

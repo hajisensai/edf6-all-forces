@@ -41,8 +41,8 @@ inline void GiveLocalArms(support_net::Plan* plan) noexcept {
 // (both 0) when the soldiers' weapon hooks or the preload are not in (as LocalRequesterArms: the soldier is then the
 // stock template), the game status is not readable or an id is no Fencer hand weapon.
 bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept;
-// Mission start (after PreloadSupportSoldiers, before the game's WaitPreload): this machine's player's weapons for every
-// kind queued with the mission's own preload, so its own calls need no load.
+// Mission start (before the game's WaitPreload): this player's default crew rifle joins the mission preload.
+// Requests carrying other loadouts queue and wait for the weapons they use through NpcArmsLoaded.
 void PreloadNpcArms() noexcept;
 // Whether every weapon `plan`'s soldiers carry is loaded here: ready; pending while the loads this asked for (the
 // resource manager's 0x7A3780, as debug_spawn.cpp's on-demand rows) are going on, until its completion query (0x7A3600)

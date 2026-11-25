@@ -20,6 +20,13 @@ ULONGLONG GameMs() noexcept { return now; }
 bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
 bool IsOnlineAuthority(const void*) noexcept { return !sessionOn || host; }
+float lastRouteGoal[3]{};
+npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
+    std::uint64_t,float* waypoint,npc::navigation::Profile) noexcept {
+    std::memcpy(lastRouteGoal,to,12);
+    std::memcpy(waypoint,to,12);
+    return npc::Horiz(from,to)>stop ? npc::navigation::Result::moving : npc::navigation::Result::arrived;
+}
 bool AiGunner(const unsigned char* v,const unsigned char* seat) noexcept {
     if(!config.enabled || !config.npcGunners || AnyPlayerIn(seat))return false;
     const auto who=SeatRider(seat);
@@ -439,6 +446,14 @@ int main() {
     Check(!TankCommand(v,focus,focused),"friendly or absent target cannot be focused");
     Check(TankCommand(v,Command{}),"release clears focus");
     Check(At<int>(otherCtrl,12)==2,"clearing map focus releases its reference while native AI retains its own");
+    Put<float>(target,kPosition+8,120.0f);
+    Check(TankCommand(v,Command{Order::follow,{}},{},focused),"tank accepts an authenticated follow target");
+    neutral();NpcPostInput(v);
+    Check(lastRouteGoal[2]==120.0f,"follow submits the target's current position to ground navigation");
+    Put<float>(target,kPosition+8,240.0f);
+    neutral();NpcPostInput(v);
+    Check(lastRouteGoal[2]==240.0f,"follow updates the route when its target moves");
+    Check(TankCommand(v,Command{}) && At<int>(otherCtrl,12)==2,"release drops the escort reference");
     // EDF4.1 MP004 (2026-10-17, docs/feedback-2026-10-17-balam-npc.md): a mission's AI Balam (Vehicle501_FortressRobo,
     // RideAi'd by its transporter formation) walks after the Erginus far past NpcLeash from where its crew first sat.
     // The stock walk 0x604400 is never reached: the fixture image is not executable, so reaching it would fault here.

@@ -226,15 +226,38 @@ inline float Collective(Hold& h,const float* pos,const float* vel,float vert,flo
 // The instructor's want (see above) and its pitch (`pitch`, rad, + nose up). `vert` the collective keys (-1..1), `side` A / D.
 // h.speed is the forward speed the cyclic flies (the HUD's speed target).
 inline Want Instructor(Hold& h,const float* aim,const float* nose,const float* pos,const float* vel,float vert,float side,float top,
-                       float most,float maxTilt,bool grounded,bool still,float clear,float fore,float* pitch) noexcept {
+                       float most,float maxTilt,bool grounded,bool still,float clear,float fore,float* pitch,
+                       bool holdAltitude=true) noexcept {
     Want w{};
     *pitch=grounded || still || !std::isfinite(fore+maxTilt) || maxTilt<=0.0f ? 0.0f :
         -vec::Clamp(fore,-1.0f,1.0f)*maxTilt;
     h.pressing=false;
     h.speed=grounded || still ? 0.0f : CyclicSpeed(*pitch,maxTilt,top);
     Course(w,aim,nose,h.speed,side,top,grounded || still);
-    w.climb=Collective(h,pos,vel,vert,most,grounded,clear);
+    if(holdAltitude)w.climb=Collective(h,pos,vel,vert,most,grounded,clear);
+    else {
+        h.holding=false;
+        w.climb=vert*most;
+    }
     return w;
+}
+
+struct HoverMode {
+    bool on=false,wasDown=false;
+    bool Step(bool down) noexcept {
+        const bool switched=down && !wasDown;
+        wasDown=down;
+        if(switched)on=!on;
+        return switched;
+    }
+};
+
+// With the cyclic released in flight mode, keep the current horizontal course and bleed its speed gradually.
+// Hover mode leaves the controller's zero velocity setpoint in place.
+inline void Coast(float* want,const float* velocity,float dt) noexcept {
+    const float remaining=1.0f-vec::Clamp(dt/8.0f,0.0f,1.0f);
+    want[0]=velocity[0]*remaining;
+    want[2]=velocity[2]*remaining;
 }
 
 // The coordinated turn's bank in the stock lateral channel (veh+0x1540, whose roll is -maxTilt x it, 0x654E84): the
@@ -308,6 +331,13 @@ inline float RotorThrottle(float want,float rotor,float up,float down) noexcept 
     const float rate=want>=rotor ? up : down;
     if(!std::isfinite(rotor) || !(rate>1e-4f))return vec::Clamp(want,0.0f,1.0f);
     return vec::Clamp(rotor+(want-rotor)/rate,0.0f,1.0f);
+}
+// Free flight controls collective directly. Releasing the keys sets the calibrated neutral collective without
+// a vertical-speed or altitude target, so the helicopter can continue climbing or descending through the release.
+inline float ManualCollectiveThrottle(float vertical,float hover,float rotor,const Rotor& r) noexcept {
+    const float neutral=vec::Clamp(hover,0.1f,1.0f),input=vec::Clamp(vertical,-1.0f,1.0f);
+    const float range=input>=0.0f ? 1.0f-neutral : neutral-vec::Clamp(r.idle,0.0f,neutral);
+    return RotorThrottle(neutral+input*range,rotor,r.up,r.down);
 }
 inline float CollectiveThrottle(float climb,float vy,float rotor,float* hover,bool learn,float dt,const Rotor& r) noexcept {
     const float err=climb-vy;

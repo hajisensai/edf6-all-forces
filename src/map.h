@@ -28,6 +28,7 @@ struct MapReadout {
     std::uintptr_t ownerHumanKey=0; // opaque match to the HUD pass owner, never dereferenced by the draw
     bool pad;                  // the last input was a pad's (the help line shows its buttons)
     bool follow;               // the focus follows the player (until panned; Space / A again)
+    bool commander,watchCommander;
     float focus[3],yaw,pitch,height;
     float me[3],meDir[3];      // the player (or the vehicle they ride): where, its level heading
     int count;

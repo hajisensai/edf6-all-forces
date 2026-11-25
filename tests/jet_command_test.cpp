@@ -13,6 +13,7 @@ void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) n
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept { MissingDependency(); }
 void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept { MissingDependency(); }
 float MapRay(const float*,const float*,float*) noexcept { MissingDependency();return 0; }
+float AircraftObstacleRay(const float*,const float*,const void*,const void*,float*) noexcept { MissingDependency();return -1.0f; }
 PlayArea MapPlayArea() noexcept { MissingDependency();return PlayArea{}; }
 float GroundClearance(const float*) noexcept { MissingDependency();return 0; }
 float CeilingY() noexcept { MissingDependency();return 0; }
