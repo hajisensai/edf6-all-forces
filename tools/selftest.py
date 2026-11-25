@@ -5446,7 +5446,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
                           find_edf41=lambda game: None, material_compat_wanted=lambda text: False,
-                          stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
+                          stack_weapons=lambda game: {}, retire_weapons=lambda game: True, wt_sound_files=lambda: {},
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
                           check=lambda game: True))
