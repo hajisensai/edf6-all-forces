@@ -678,11 +678,15 @@ void Budget() {
     static Machine host;host=Machine{};
     host.line=std::string(kConfigLineMost,'P');
     host.ownPlayer="1;"+std::string(playerveh::kValueMost-2,'6');
+    // and this member's longest room word (host_settings_logic.h v4: the host's SupportDisabled / SupportPtScale in it).
+    lobby.current=0;
+    Expect(Publish(crew::hostcfg::kKey,std::string(crew::hostcfg::kWordLongest-1,'w').c_str())!=0,"the longest room word published");
     Tick(host,0,1000);
     std::size_t published=0;
     for(const auto& kv:lobby.member[0].values)published+=kv.second.size();
-    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave) && ValueOf(0,"EDF6X_VCCFG3"),
-           "the longest line in every part, its readiness and the player loadouts within Coop's budget");
+    Expect(lobby.refused==0 && published<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE && ValueOf(0,kKeyHave) && ValueOf(0,"EDF6X_VCCFG3") &&
+           ValueOf(0,crew::hostcfg::kKey),
+           "the longest line in every part, its readiness, the player loadouts and the room word within Coop's budget");
     // Fewer: the parts no longer needed are withdrawn.
     host.line="short";
     Tick(host,0,3000);
@@ -828,7 +832,40 @@ void PlayerLoadouts() {
 }
 }  // namespace
 
+// The host's start gate (HoldOf): held while the files are on their way, failed while a generation failed; not for
+// what comes stock (the cap) or alone / without Coop.
+void StartHolds() {
+    Situation s;
+    Expect(HoldOf(s)==StartHold::go,"no Coop: the start goes");
+    s.api=true;s.inRoom=true;s.members=1;
+    Expect(HoldOf(s)==StartHold::go,"alone: the start goes");
+    s.members=2;s.others=1;s.list=ListState::waiting;
+    Expect(HoldOf(s)==StartHold::waiting,"a member just joined, its loadout on its way: held");
+    s.other[0].status=MemberStatus::ready;
+    Expect(HoldOf(s)==StartHold::waiting,"a member's loadout on its way: held");
+    s.list=ListState::bad;
+    Expect(HoldOf(s)==StartHold::failed,"the room's set does not read: failed");
+    s.list=ListState::ok;s.own=Ready::generating;s.ownMissing=3;
+    s.other[0].status=MemberStatus::ready;s.other[0].state=Ready::ready;
+    Expect(HoldOf(s)==StartHold::waiting,"this PC generating: held");
+    s.own=Ready::failed;
+    Expect(HoldOf(s)==StartHold::failed,"this PC's generation failed: failed");
+    s.ownCapped=3;
+    Expect(HoldOf(s)==StartHold::go,"only files over the cap missing (they come stock): goes");
+    s.own=Ready::ready;s.ownMissing=0;s.ownCapped=0;
+    Expect(HoldOf(s)==StartHold::go,"every member ready: goes");
+    s.other[0].status=MemberStatus::stale;
+    Expect(HoldOf(s)==StartHold::waiting,"a member re-checking the list: held");
+    s.other[0].status=MemberStatus::missing;s.other[0].state=Ready::generating;
+    Expect(HoldOf(s)==StartHold::waiting,"a member generating: held");
+    s.other[0].state=Ready::noGenerator;
+    Expect(HoldOf(s)==StartHold::failed,"a member without a generator: failed");
+    s.other[0].status=MemberStatus::none;
+    Expect(HoldOf(s)==StartHold::failed,"a member without pre-sync: failed");
+}
+
 int main() {
+    StartHolds();
     NamesAndTokens();
     ConfigCoding();
     HaveAndPlan();

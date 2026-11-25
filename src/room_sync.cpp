@@ -168,5 +168,31 @@ int ForEachRoomPlayerVehicle(void (*each)(void* context,VehicleBody body,std::ui
     return given;
 }
 SyncState RoomSyncState() noexcept { return engine.State(); }
+namespace {
+StartHold lastHold=StartHold::go;
+std::uint64_t heldAt=0;
+constexpr std::uint64_t kHeldShownMs=1500;   // the gate is asked each frame a start is pending
+}  // namespace
+bool RoomSyncAllowsStart() noexcept {
+    const StartHold h=engine.Hold();
+    if(h==StartHold::go) {
+        if(lastHold!=StartHold::go)Log("ROOMSYNC the room's files are ready: the held start goes on");
+        lastHold=StartHold::go;
+        return true;
+    }
+    if(h!=lastHold)Log("ROOMSYNC the start is held: %s",h==StartHold::waiting ? "the room's files are on their way" :
+                       "a member's files failed (the room's lines say whose)");
+    lastHold=h;heldAt=GetTickCount64();
+    return false;
+}
+bool RoomSyncStartHeldLine(wchar_t* out,std::size_t n) noexcept {
+    if(!out || !n)return false;
+    out[0]=0;
+    if(lastHold==StartHold::go || GetTickCount64()-heldAt>kHeldShownMs)return false;
+    _snwprintf_s(out,n,_TRUNCATE,L"%ls",hudtext::Tr(lastHold==StartHold::waiting ? hudtext::Tx::roomSyncStartHeld :
+                                                                                 hudtext::Tx::roomSyncStartFailed));
+    return true;
+}
+void RoomSyncNudge() noexcept { engine.Nudge(); }
 int RoomSyncLines(SyncLine* out,int capacity) noexcept { return engine.Lines(out,capacity,hudtext::InUse()); }
 }  // namespace crew::roomsync

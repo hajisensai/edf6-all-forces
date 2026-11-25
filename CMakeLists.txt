@@ -139,12 +139,14 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/worldmap_gpu.cpp src/worldmap_text.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+# 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
+target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
 target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
@@ -779,6 +781,10 @@ add_test(NAME room_menu COMMAND room_menu_test)
 add_executable(room_preview_test tests/room_preview_test.cpp)
 target_compile_options(room_preview_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_preview COMMAND room_preview_test)
+# The preview's placement in a design rect and its camera presets (src/preview_camera.h; docs/room-3d-preview-re.md 6.2).
+add_executable(preview_camera_test tests/preview_camera_test.cpp)
+target_compile_options(preview_camera_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME preview_camera COMMAND preview_camera_test)
 # The world map mission select's pure logic (src/worldmap_logic.h + the generated src/worldmap.inc: the table,
 # projection, view, routes, marker fan, picking; docs/plan-2026-11-10-worldmap.md).
 add_executable(worldmap_test tests/worldmap_test.cpp)
@@ -887,6 +893,31 @@ add_test(NAME room_ui COMMAND room_ui_test)
 add_executable(loadout_writer_test tests/loadout_writer_test.cpp src/loadout_file.cpp)
 target_compile_options(loadout_writer_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME loadout_writer COMMAND loadout_writer_test)
+add_executable(loadout_preset_test tests/loadout_preset_test.cpp)
+target_compile_options(loadout_preset_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME loadout_preset COMMAND loadout_preset_test)
+add_executable(armory_skin_test tests/armory_skin_test.cpp)
+target_compile_options(armory_skin_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME armory_skin COMMAND armory_skin_test)
+add_executable(player_slots_test tests/player_slots_test.cpp)
+target_compile_options(player_slots_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME player_slots COMMAND player_slots_test)
+add_executable(armory_logic_test tests/armory_logic_test.cpp)
+target_compile_options(armory_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME armory_logic COMMAND armory_logic_test)
+# 整备's 支援编成 / 载具 pages (src/support_pages.h): edits through room_menu.h, per-page saves, the 3D viewport's hole.
+add_executable(support_pages_test tests/support_pages_test.cpp)
+target_compile_options(support_pages_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME support_pages COMMAND support_pages_test)
+# 整备界面武器页的纯逻辑（src/weapon_list_logic.h）与生成的系列数据（src/weapon_series.inc，tools/gen_weapon_series.py）。
+add_executable(weapon_list_logic_test tests/weapon_list_logic_test.cpp)
+target_compile_options(weapon_list_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME weapon_list_logic COMMAND weapon_list_logic_test)
+# 整备界面的武器页（src/weapon_page_logic.h）：框架里用键鼠驱动、假游戏侧接小表（类别 / 来源 / 搜索 / 首字跳转 /
+# 装备与拒绝原因 / 收藏 / 3D 预览试拿与换回）。
+add_executable(weapon_page_logic_test tests/weapon_page_logic_test.cpp)
+target_compile_options(weapon_page_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME weapon_page_logic COMMAND weapon_page_logic_test)
 # It waits for its stand-in children however long a busy machine takes (they run at normal priority; only the
 # plugin's own generator is below normal, VariantGenerator): the hang guard is here.
 set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
@@ -1049,6 +1080,10 @@ set_tests_properties(loadout_generate PROPERTIES ENVIRONMENT PYTHONIOENCODING=ut
 # game installed, the files built from Root.cpk (read only).
 add_test(NAME menu_preview COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_preview_test.py")
 set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The loaded mechs' and jets' merged menu models and callouts (pylib/menu_graft.py): every variant's battle keys equal,
+# the menu key on the merged archive, the grafted bones and the callout points; with the game installed (read only).
+add_test(NAME menu_graft COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/menu_graft_test.py")
+set_tests_properties(menu_graft PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The base map tiles file's reader (worldmap_tiles_test above) on a small pyramid the script builds.
 add_test(NAME worldmap_tiles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_tiles_test.py" $<TARGET_FILE:worldmap_tiles_test>)
 set_tests_properties(worldmap_tiles PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1102,12 +1137,16 @@ add_test(NAME edf41_install_safety COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 set_tests_properties(edf41_install_safety PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME optics_model_reference COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_optics_model_reference.py")
 set_tests_properties(optics_model_reference PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
-# The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.
+# The room / HQ layout patch (tools/room_layout.py): stock members unchanged, vcRoot / vcLoad as src/room_ui*.{h,cpp} name them,
+# the old dialog menu's files released at install.
 add_test(NAME room_layout COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_layout_test.py")
 set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The native dialogs' code checks (src/room_dialog.cpp, tools/room_dialog_sigs.py) against EDF.dll (skipped without the game).
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
+add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
 set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1126,6 +1165,10 @@ add_test(NAME aiworld_capacity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_S
 set_tests_properties(aiworld_capacity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# 整备's own addresses (src/armory.cpp: the Draw slots, HUiBase::Draw, the draw context's +8 / +0x398;
+# src/armory_presets.cpp: the weapon table, GameStatus and the player offsets) against the real EDF.dll, read as a file.
+add_test(NAME armory_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/armory_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(armory_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The world map select's code checks (src/worldmap.cpp InstallWorldMap) against the real EDF.dll, read as a file.
 add_test(NAME worldmap_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/worldmap_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(worldmap_sigs PROPERTIES SKIP_RETURN_CODE 77)
@@ -1341,8 +1384,8 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks lazy_rows_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test preload_set_test loadout_writer_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks lazy_rows_test preload_set_test)
+add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

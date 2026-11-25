@@ -90,7 +90,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址为 RVA；证据级别 H（反汇编 / 
 所以世界地图不必重做「选中以后」的任何东西：保留这个对象（解锁、状态、在线请求、BGM / 背景配色这些原版逻辑全在），
 只把它的列表画面换成世界地图，点中一个标记 = 把 `+0x778` 设成该行在显示列表里的下标，再调 0x8A85C0。
 
-## 5. 世界地图界面（2026-11-12 已实现：`src/worldmap.cpp`、`worldmap_gpu.*`、`worldmap_text.*`、`worldmap_logic.h`）
+## 5. 世界地图界面（2026-11-12 已实现：`src/worldmap.cpp`、`ui_gpu.*`、`ui_text.*`（2026-11-24 从 worldmap_gpu / worldmap_text 抽成共用）、`worldmap_logic.h`）
 
 逆向依据：`worldmap-select-re.md`（§1 绘制槽、§2 布局、§3 光标 / 确认、§5 输入、§8 右侧空框 / 键位 / 当前任务）。
 

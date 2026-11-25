@@ -96,6 +96,8 @@ const JetWeaponRow* JetWeapon(int i) noexcept;
 bool IsStoreWeapon(const unsigned char* w) noexcept;
 // The store weapon `w` is (its SGO one of kStores'), else nullptr.
 const StoreSpec* StoreOf(const unsigned char* w) noexcept;
+// The store whose weapon files are `prefix` + rounds + ".SGO" (exactly that prefix, any case), else nullptr.
+const StoreSpec* StoreSpecOfPrefix(const wchar_t* prefix) noexcept;
 // The twin-barrel pair weapon `w` fires in turn within (its SGO one of kTwinBarrels'), else 0.
 unsigned TwinPairOf(const unsigned char* w) noexcept;
 // The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;

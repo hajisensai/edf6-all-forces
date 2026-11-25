@@ -39,6 +39,7 @@
 // <state>: r ready, g generating (or about to), f the generator failed, n no generator installed, w no set to check yet.
 #pragma once
 #include "coop_member_attribute_api.h"
+#include "host_settings_logic.h"
 #include "hudtext.h"
 #include "player_vehicle_logic.h"
 #include "room_sync.h"
@@ -70,9 +71,11 @@ inline constexpr std::uint64_t kStartGapMs=5000;      // between two generator s
 inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
-inline constexpr std::size_t kConfigBudget=3800;      // all configuration values together (header bytes included)
-static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
-              "the configuration, readiness and own player loadouts fit Coop's budget");
+// Configuration parts share Coop's budget with readiness, the player's stores, and the room word.
+inline constexpr std::size_t kConfigBudget=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE-kHaveMost-
+                                           playerveh::kValueMost-hostcfg::kWordMost;
+static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost+hostcfg::kWordMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
+              "the configuration, readiness, own player loadouts and the room word fit Coop's budget");
 // "1;" + 16 + ";" + 1 digit + ";": 21 bytes; a further part's "<16 hex>;": 17.
 inline constexpr std::size_t kConfigHeader=21,kPartHeader=17;
 // The longest line: the budget less every header.
@@ -475,6 +478,36 @@ inline SyncState StateOf(const Situation& s) noexcept {
     for(int i=0;i<s.others;++i)if(s.other[i].status!=MemberStatus::ready)return SyncState::waiting;
     return SyncState::ready;
 }
+// The host's mission start (room_pvp.cpp StartGate) against the room's files: go; held while they are on their way (a
+// member's loadout, this PC's or a member's generation, a member re-checking the list); failed (held too, the lines say
+// why) while this PC's or a member's generation failed / has no generator, a member has no pre-sync or the room's set
+// does not read. Not held for what the lines already say comes stock / with the defaults: this PC's files over the
+// room's cap (roomSyncSelfCapped), a member's loadout that does not read (roomSyncMemberConfigBad).
+enum class StartHold : std::uint8_t { go, waiting, failed };
+inline StartHold HoldOf(const Situation& s) noexcept {
+    if(StateOf(s)!=SyncState::waiting)return StartHold::go;   // no Coop, alone, every member ready
+    bool waiting=false,failed=false;
+    if(s.list==ListState::bad)failed=true;
+    else if(s.list!=ListState::ok)waiting=true;
+    else switch(s.own) {
+        case Ready::ready:break;
+        case Ready::failed:if(s.ownMissing>s.ownCapped)failed=true;break;   // only the capped missing: they come stock
+        case Ready::noGenerator:failed=true;break;
+        case Ready::generating:case Ready::noList:waiting=true;break;
+    }
+    for(int i=0;i<s.others;++i) {
+        const MemberReady& m=s.other[i];
+        switch(m.status) {
+            case MemberStatus::ready:break;
+            case MemberStatus::none:(s.list==ListState::ok ? failed : waiting)=true;break;   // (just joined: nothing yet)
+            case MemberStatus::stale:waiting=true;break;
+            case MemberStatus::missing:
+                if(m.state==Ready::failed || m.state==Ready::noGenerator)failed=true;else waiting=true;
+                break;
+        }
+    }
+    return failed ? StartHold::failed : waiting ? StartHold::waiting : StartHold::go;
+}
 // The lines, problems first; at most `capacity`.
 inline int SelectLines(const Situation& s,LineSpec* out,int capacity) noexcept {
     using hudtext::Tx;
@@ -618,6 +651,9 @@ public:
     // Bumped each time the members' lines change (0: never set): room_sync.cpp copies them for other threads only then.
     std::uint64_t MembersVersion() const noexcept { return membersVersion_; }
     SyncState State() const noexcept { return StateOf(situation_); }
+    StartHold Hold() const noexcept { return HoldOf(situation_); }
+    // The next Tick runs whatever the time (a preset switched in: the start gate reads the new set's state at once).
+    void Nudge() noexcept { ticked_=false; }
     int Lines(SyncLine* out,int capacity,hudtext::Lang lang) const noexcept {
         int n=0;
         for(;out && n<capacity && n<lines_;++n)FormatLine(line_[n],lang,&out[n]);

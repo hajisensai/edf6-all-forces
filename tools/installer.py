@@ -496,6 +496,7 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
              'their weapon text rows; recorded in Mods/.edf6at_data.json)...'))
     import make_optics
     import ledger
+    import menu_preview
     import rootcpk
     led, source = ledger.Ledger(game), None
     final = {}
@@ -506,6 +507,12 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
                 if source is None:
                     source = rootcpk.Game(game)
                 data, _ = make_optics.range_vehicle(led, source, data, make_optics.OWNER)
+            if rel.upper() == menu_preview.TANK_BASE:
+                # The support tank's base is a unified model file (docs/unified-model-re.md) made by its writer, so
+                # AutoTurret's manifest records the bytes on disk (no other hash is ever layered over its SGOs).
+                if source is None:
+                    source = rootcpk.Game(game)
+                data = menu_preview.unify_vehicle(source, rel, data, game)
         final[rel] = data
     at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=final, proteus=True)
 
@@ -937,37 +944,42 @@ def install(game: str, campaign_requested: bool = False) -> None:
 
 
 def build_room_layouts(game: str) -> dict[str, bytes] | None:
-    """The in-game loadout menu's screen (tools/room_layout.py): the room's and the HQ's stock layouts with the menu's
-    elements, from Root.cpk (only read). None (said why) when they cannot be made, whatever the reason (a malformed
-    layout raises TypeError in the SGO reader, a compression the CPK reader does not do NotImplementedError...): the
-    plugin then finds no menu elements and leaves both screens as they are, and the install goes on."""
+    """The room's and the HQ's stock layouts with the 整备 button's marker and definition (tools/room_layout.py), from
+    Root.cpk (only read). None (said why) when they cannot be made, whatever the reason (a malformed layout raises
+    TypeError in the SGO reader, a compression the CPK reader does not do NotImplementedError...): the plugin then finds
+    no marker and leaves both screens as they are, and the install goes on."""
     try:
         import room_layout
         return room_layout.build(game)
     except Exception as e:   # never stops the install: said, as write_menu_preview
-        print(tr('！ 游戏内战前配置菜单的画面布局没有生成（房间 / HQ 里不显示这个菜单，其它不受影响）：',
-                 '! The in-game loadout menu\'s screen layout was not generated (the room / HQ will not show the menu; '
-                 'nothing else is affected): ') + f'{type(e).__name__}: {e}')
+        print(tr('！ 房间 / HQ 画面的「整备」按钮布局没有生成（这两个画面里没有整备按钮，其它不受影响）：',
+                 '! The room / HQ screen layout for the Armory button was not generated (those screens will have no '
+                 'Armory button; nothing else is affected): ') + f'{type(e).__name__}: {e}')
         return None
 
 
 def write_room_layouts(game: str, room: dict[str, bytes]) -> bool:
-    """build_room_layouts' files written (room_layout.install: ours replaced, another mod's left). False (said why) when
-    the write fails: those screens show no menu, the install goes on (each layout is written atomically: a failure leaves
-    the old file or none)."""
+    """build_room_layouts' files written (room_layout.install: ours replaced, another mod's left, the old dialog menu's
+    retired files released). False (said why) when the write fails: those screens have no 整备 button, the install goes
+    on (each layout is written atomically: a failure leaves the old file or none)."""
     try:
         import room_layout
-        written, skipped = room_layout.install(game, room)
+        written, skipped, deleted, kept = room_layout.install(game, room)
     except Exception as e:   # never stops the install: said, as write_menu_preview
-        print(tr('！ 游戏内战前配置菜单的画面布局没有写入（房间 / HQ 里不显示这个菜单，其它不受影响）：',
-                 '! The in-game loadout menu\'s screen layout was not written (the room / HQ will not show the menu; '
-                 'nothing else is affected): ') + f'{type(e).__name__}: {e}')
+        print(tr('！ 房间 / HQ 画面的「整备」按钮布局没有写入（这两个画面里没有整备按钮，其它不受影响）：',
+                 '! The room / HQ screen layout for the Armory button was not written (those screens will have no '
+                 'Armory button; nothing else is affected): ') + f'{type(e).__name__}: {e}')
         return False
     for path in written:
-        print(tr('写入', 'Writing'), path, tr('（游戏内战前配置菜单的画面）', '(the in-game loadout menu\'s screen)'))
+        print(tr('写入', 'Writing'), path, tr('（房间 / HQ 画面的整备按钮）', '(the room / HQ screen\'s Armory button)'))
     for path in skipped:
-        print(tr('跳过（别的 mod 的布局，保持原样；这个画面里不显示游戏内战前配置菜单）',
-                 'Skipped (another mod\'s layout, left as it is; this screen will not show the in-game loadout menu)'), path)
+        print(tr('跳过（别的 mod 的布局，保持原样；这个画面里没有整备按钮）',
+                 'Skipped (another mod\'s layout, left as it is; this screen will have no Armory button)'), path)
+    for path in deleted:
+        print(tr('删除（旧版战前配置菜单的文件，已不再使用）', 'Removing (the old loadout menu\'s file, no longer used)'), path)
+    for path in kept:
+        print(tr('保留（旧版战前配置菜单的文件，已被别人改过）',
+                 'Kept (the old loadout menu\'s file, changed by someone else since)'), path)
     return True
 
 
@@ -1102,7 +1114,7 @@ def uninstall(game: str) -> None:
         print(tr('删除', 'Deleting'), cache)
     remove_generator(game, lock=False)   # the lock: held by this flow, removed after it (write_game)
     remove_launcher(game)   # it runs the generator just removed
-    import room_layout   # with 1 and 2: without the plugin the menu's panel would only cover the screen
+    import room_layout   # with 1 and 2: the 整备 button's layouts are the plugin's alone
     deleted, kept = room_layout.remove(game)
     for path in deleted:
         print(tr('删除', 'Deleting'), path)
@@ -1381,6 +1393,12 @@ def write_menu_preview(game: str) -> bool:
         return False
     for written in menu_preview.install(game, files):
         print(tr('写入', 'Writing'), written)
+    not_unified = menu_preview.base_problems(rootcpk.Game(game), game)
+    if not_unified:   # a writer above did not unify its base: that vehicle's preview would show nothing
+        print(tr('！ 支援载具的基础文件不是统一模型文件（预览不显示该载具）：',
+                 "! A support vehicle's base file is no unified model file (its preview shows nothing): ")
+              + '; '.join(not_unified))
+        return False
     return True
 
 

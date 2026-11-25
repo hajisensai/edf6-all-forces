@@ -119,4 +119,19 @@ check(img[0x8A27B8:0x8A27BF] == bytes.fromhex('488d8e70070000') and struct.unpac
       rel(0x8A27BF, 5, 1) == consts['kFocus'], 'the constructor: lea rcx,[rsi+770h]; call 0x953350 (the first focus)')
 # The screen's transform the stock draw places the layout by (the slide in / out).
 check(rel(0x7FAA0A, 5, 1) == consts['kTransform'], 'HUiBase::Draw calls 0x7F9E90 for its transform')
+# Stage 6: the confirm callback's functor (Agent_Object<HUiHQMissionSelect>, vtable 0x1805398) slot 1 is Invoke 0x8A4060,
+# its call 0x8A40E9 reads the adj +0x20 and the pmf +0x18; the constructor stores 0x8A85C0 (cbRequestMission) as a pmf.
+check(consts['kInvokeSlot'] == 0x1805398 + 8 and
+      struct.unpack_from('<Q', img, consts['kInvokeSlot'])[0] - base == consts['kInvoke'], "the functor's slot 1 is Invoke")
+check(arrays['kInvokeCallSig'][12] == consts['kFunctorPmf'] and arrays['kInvokeCallSig'][3] == 0x20, 'call [rbp+18h], adj [rbp+20h]')
+col = struct.unpack_from('<Q', img, 0x1805398 - 8)[0] - base
+td = struct.unpack_from('<I', img, col + 12)[0]
+name = img[td + 16:td + 16 + 80].split(b'\0')[0]
+check(b'Agent_Object' in name and b'HUiHQMissionSelect' in name, f"the vtable 0x1805398 is the select's Agent_Object ({name!r})")
+# The 返回 test in HUiLayout's update: the input offsets the synthesized 返回 sets.
+back = arrays['kBackSig']
+check(back[11:15] == struct.pack('<I', consts['kInputPressed']) and back[21:25] == struct.pack('<I', consts['kInputPads']) and
+      back[28:32] == struct.pack('<I', consts['kPadRecord']) and back[34:38] == struct.pack('<I', consts['kPadPressed']) and
+      back[43] == consts['kBackBit'], 'the 返回 bit 0x80 of +0x4524 / pad*0xDD0+0xDBC, pads at +0x4518')
+check(consts['kPadRecord'] * 2 + consts['kPadPressed'] < consts['kInputPads'] < consts['kInputCopy'], 'the input copy covers both pads')
 print(f'worldmap_sig_audit: {checks} checks passed')

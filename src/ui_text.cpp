@@ -1,5 +1,5 @@
-// worldmap_text.h: GDI labels and the pins' sprites as D3D11 textures.
-#include "worldmap_text.h"
+// ui_text.h: GDI labels and the sprites as D3D11 textures.
+#include "ui_text.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace crew::worldmaptext {
+namespace crew::uitext {
 namespace {
 using Microsoft::WRL::ComPtr;
 
@@ -149,7 +149,7 @@ struct Labels::Impl {
 Labels::Labels() noexcept : impl_(new(std::nothrow) Impl()) {}
 Labels::~Labels() noexcept=default;
 
-Label Labels::Get(worldmapgpu::Painter& paint,const wchar_t* text,float size,bool bold,hudtext::Lang lang,unsigned frame) noexcept {
+Label Labels::Get(uigpu::Painter& paint,const wchar_t* text,float size,bool bold,hudtext::Lang lang,unsigned frame) noexcept {
     ID3D11Device* const device=paint.Device();
     if(!impl_ || !device || !text || !*text)return Label{};
     Impl& s=*impl_;
@@ -179,19 +179,36 @@ Label Labels::Get(worldmapgpu::Painter& paint,const wchar_t* text,float size,boo
     return made;
 }
 
-ID3D11ShaderResourceView* Labels::Disc(worldmapgpu::Painter& paint) noexcept {
+ID3D11ShaderResourceView* Labels::Disc(uigpu::Painter& paint) noexcept {
     ID3D11Device* const device=paint.Device();
     if(!impl_ || !device)return nullptr;
     impl_->Bind(device);
     if(!impl_->disc)impl_->disc=Sprite(device,[](float d) { return d<=31.f; });
     return impl_->disc.Get();
 }
-ID3D11ShaderResourceView* Labels::Ring(worldmapgpu::Painter& paint) noexcept {
+ID3D11ShaderResourceView* Labels::Ring(uigpu::Painter& paint) noexcept {
     ID3D11Device* const device=paint.Device();
     if(!impl_ || !device)return nullptr;
     impl_->Bind(device);
     if(!impl_->ring)impl_->ring=Sprite(device,[](float d) { return d<=31.f && d>=25.f; });
     return impl_->ring.Get();
+}
+
+Label Labels::Draw(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,
+                   bool bold,hudtext::Lang lang,unsigned frame,float maxW,bool shadow) noexcept {
+    const Label l=Get(paint,text,size,bold,lang,frame);
+    if(!l.view || !(l.w>0.f))return l;
+    float x0=align==Align::left ? x : align==Align::centre ? x-l.w*0.5f : x-l.w;
+    float cx0=-1e9f,cx1=1e9f;
+    if(maxW>0.f && l.w>maxW) {
+        if(align==Align::left)cx1=x+maxW;
+        else if(align==Align::right)cx0=x-maxW;
+        else{cx0=x-maxW*0.5f;cx1=x+maxW*0.5f;x0=x-l.w*0.5f;}
+    }
+    if(shadow)paint.ImageClipped(l.view,x0+1.5f,y+1.5f,x0+1.5f+l.w,y+1.5f+l.h,0.f,0.f,1.f,1.f,
+                                 ((argb>>24)*3/4)<<24,cx0+1.5f,-1e9f,cx1+1.5f,1e9f);
+    paint.ImageClipped(l.view,x0,y,x0+l.w,y+l.h,0.f,0.f,1.f,1.f,argb,cx0,-1e9f,cx1,1e9f);
+    return l;
 }
 
 void Labels::Reset() noexcept {
@@ -202,4 +219,4 @@ void Labels::Reset() noexcept {
     impl_->device=nullptr;
 }
 
-}  // namespace crew::worldmaptext
+}  // namespace crew::uitext

@@ -6,10 +6,12 @@
 //   - the camera's x shift while the menu is open;
 //   - the planner: what to send the view this frame, from what is wanted and what it shows.
 #pragma once
+#include "preview_camera.h"
 #include "support_loadout.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 
 namespace crew::roompreview {
 
@@ -20,54 +22,74 @@ constexpr int MenuClassOf(SupportWeapon k) noexcept {
     const int c=SupportSoldierClass(k);
     return c==0 ? kRangerClass : c==1 ? kWingDiverClass : kFencerClass;
 }
-// The generated menu SGOs (tools/menu_preview.py, Mods/MENUOBJECT): the Ranger NPC body n601_common_ranger in the stock
-// P505 menu SGO; _L colours the head only (the Flame / Rocket / Shotgun / Sniper leaders; the Rifle leader colours head
-// and body, which is every colourable material, so it is the plain one). The Wing Diver / Fencer NPCs wear the player
-// bodies p606 / p607: their stock menu SGOs (CONFIG.SGO SoldierInit outfit 3, spelled as there: one FNV cache entry).
-inline constexpr const wchar_t* kMenuRanger=L"app:/MENUOBJECT/EDF6VC_MENU_RANGER.SGO";
-inline constexpr const wchar_t* kMenuRangerLeader=L"app:/MENUOBJECT/EDF6VC_MENU_RANGER_L.SGO";
-inline constexpr const wchar_t* kMenuRangerFile=L"MENUOBJECT\\EDF6VC_MENU_RANGER.SGO";      // under Mods
-inline constexpr const wchar_t* kMenuRangerLeaderFile=L"MENUOBJECT\\EDF6VC_MENU_RANGER_L.SGO";
-inline constexpr const wchar_t* kMenuRangerStock=L"APP:/MENUOBJECT/p505_ranger.SGO";        // no generated file
-inline constexpr const wchar_t* kMenuWingDiver=L"APP:/MENUOBJECT/p606_WingDiver.SGO";
-inline constexpr const wchar_t* kMenuFencer=L"APP:/MENUOBJECT/p607_fencer.SGO";
-constexpr bool HeadOnlyLeader(SupportWeapon k,bool leader) noexcept {
-    return leader && SupportSoldierClass(k)==0 && k!=SupportWeapon::rifle && k!=SupportWeapon::xmInfantry;
-}
-// The generated file the kind needs (Mods-relative), or nullptr (a stock menu SGO).
-constexpr const wchar_t* MenuFileOf(SupportWeapon k,bool leader) noexcept {
-    return SupportSoldierClass(k)!=0 ? nullptr : HeadOnlyLeader(k,leader) ? kMenuRangerLeaderFile : kMenuRangerFile;
-}
-// The path the Desc gets. `generated`: MenuFileOf's file is in Mods (a Ranger without it: the stock player Ranger).
-constexpr const wchar_t* MenuPathOf(SupportWeapon k,bool leader,bool generated) noexcept {
-    const int c=SupportSoldierClass(k);
-    if(c==1)return kMenuWingDiver;
-    if(c==2)return kMenuFencer;
-    if(!generated)return kMenuRangerStock;
-    return HeadOnlyLeader(k,leader) ? kMenuRangerLeader : kMenuRanger;
-}
-
-// A vehicle's menu SGO (tools/menu_preview.py vehicle_file): the stock P505 menu SGO with animation_model = the vehicle
-// body's own (support_loadout.h kVehicleBodies base: its model, CAS and MAB), no weapons. EDF6VC_MENU_V_<NAME>.SGO.
-inline constexpr const wchar_t* kMenuVehiclePrefix=L"EDF6VC_MENU_V_";
-// `body`'s generated file under Mods (`path` false: MENUOBJECT\<file>) or the path the Desc gets (app:/MENUOBJECT/<file>);
-// the length, 0 when `body` is no vehicle body or it does not fit.
-inline std::size_t VehicleMenuOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
-    const VehicleBodyRow* row=VehicleBodyOf(body);
+// --- The unified model file (docs/unified-model-re.md; pylib/menu_model.py) ---
+// The preview shows a unit from the very file the battle loads: each carries the keys only the menu reads, and the
+// hook on the menu's model load (room_preview.cpp MenuModelLoad) makes the menu read kMenuModelKey where the battle
+// reads animation_model (the one key both read with different values). No menu-only model file exists.
+inline constexpr const wchar_t* kMenuModelKey=L"menu_animation_model";
+inline constexpr std::uint16_t kDocClassic=0,kDocDsgo=2;   // doc variant tags (+0x10) whose member lookup the hook asks
+// The support soldiers' AI templates (tools/support_loadout.py KINDS; src/support_soldier.cpp kBodies), SupportWeapon
+// order; tools/menu_preview.py writes each and its _LEADER into Mods/OBJECT as a unified file. The X-Morph infantry
+// (its body the installer's own, no menu keys) previews as the rifle Ranger.
+inline constexpr const wchar_t* kSoldierTemplates[kSupportWeaponCount]={
+    L"N601_COMMON_RANGER_AF",L"N601_COMMON_RANGER_FL",L"N601_COMMON_RANGER_RL",L"N601_COMMON_RANGER_SG",
+    L"N601_COMMON_RANGER_SN",L"N606_AIPALEWING_LANCE",L"N606_AIPALEWING_LR",L"N606_AIPALEWING_MS",L"N606_AIPALEWING_IZN",
+    L"N606_AIPALEWING_TB",L"N607_AIHEAVYARMOR_SC",L"N607_AIHEAVYARMOR_SMC",L"N607_AIHEAVYARMOR_SP",L"N607_AIHEAVYARMOR_SSG",
+    L"N601_COMMON_RANGER_AF",
+};
+namespace detail {
+inline std::size_t Join(wchar_t* out,std::size_t capacity,std::initializer_list<const wchar_t*> parts,bool lower) noexcept {
     if(!out || !capacity)return 0;
     out[0]=0;
-    if(!row)return 0;
-    const wchar_t* parts[4]={path ? L"app:/MENUOBJECT/" : L"MENUOBJECT\\",kMenuVehiclePrefix,row->name,L".SGO"};
     std::size_t n=0;
     for(const wchar_t* part:parts)
-        for(const wchar_t* c=part;*c;++c){if(n+1>=capacity){out[0]=0;return 0;}out[n++]=*c;}
+        for(const wchar_t* c=part;*c;++c) {
+            if(n+1>=capacity){out[0]=0;return 0;}
+            const wchar_t w=*c;
+            out[n++]=lower && w>=L'A' && w<=L'Z' ? static_cast<wchar_t>(w-L'A'+L'a') : w;
+        }
     out[n]=0;
     return n;
 }
+}  // namespace detail
+// A soldier kind's unified file: `path` false its Mods-relative file (OBJECT\N601_COMMON_RANGER_AF_LEADER.SGO), true
+// the path the Desc gets (app:/object/n601_common_ranger_af_leader.sgo). The length, 0 when it does not fit / no kind.
+inline std::size_t SoldierFileOf(SupportWeapon k,bool leader,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const int i=static_cast<int>(k);
+    if(i<0 || i>=kSupportWeaponCount){if(out && capacity)out[0]=0;return 0;}
+    return path ? detail::Join(out,capacity,{L"app:/object/",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},true)
+                : detail::Join(out,capacity,{L"OBJECT\\",kSoldierTemplates[i],leader ? L"_LEADER" : L"",L".SGO"},false);
+}
+// Every support vehicle body's battle file is a unified one (docs/unified-model-re.md): the jets' bases as
+// pylib/vcobjects.py jet_sgo makes them, the tank's base as AutoTurret's install writes it, the mech's base by
+// tools/menu_preview.py, each loaded variant (EDF6VC_LO_*) by tools/support_loadout.py. So every body is previewed.
+constexpr bool VehicleUnified(VehicleBody body) noexcept { return VehicleBodyOf(body)!=nullptr; }
+// Whether `body` flies on a jet CAS (its menu file names the renamed menu copy kJetMenuCas, not its battle CAS).
+constexpr bool VehicleJet(VehicleBody body) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    return row && !row->tank && body!=VehicleBody::mech;
+}
+// The jets' menu CAS (tools/menu_preview.py jet_cas_rel; pylib/menu_model.py menu_cas_name) under Mods: a jet's unified
+// file names it, so a jet is previewed only when it is there (a CAS without `main` crashes the renderer).
+inline constexpr const wchar_t* kJetMenuCas=L"MENUOBJECT\\EDF6VC_MENU_V506_HELI.CAS";
+// The unified file the battle spawns for `body` with loadout `load` (as SoldierFileOf: `path` false the Mods-relative
+// OBJECT\EDF6VC_LO_TANK_<hex>.SGO, true app:/object/edf6vc_lo_tank_<hex>.sgo): the loaded variant
+// (support_loadout.h VehicleVariantFile) when `load` is on and names one, else the body's base. 0 when there is none.
+inline std::size_t VehicleFileOf(VehicleBody body,const VehicleLoadout& load,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    if(!row || (load.On() && load.body!=body)){if(out && capacity)out[0]=0;return 0;}
+    wchar_t variant[96];
+    const wchar_t* name=load.On() && VehicleVariantFile(load,variant,sizeof(variant)/sizeof(variant[0])) ? variant : row->base;
+    return path ? detail::Join(out,capacity,{L"app:/object/",name},true) : detail::Join(out,capacity,{L"OBJECT\\",name},false);
+}
+// The body's base file (no loadout).
+inline std::size_t VehicleFileOf(VehicleBody body,bool path,wchar_t* out,std::size_t capacity) noexcept {
+    return VehicleFileOf(body,VehicleLoadout{},path,out,capacity);
+}
 
 // The WeaponTable rows (WEAPON/WEAPONTABLE.SGO names, looked up at run time by 0xE1BA0) the menu hangs on the model in
-// place of the AI weapons (docs/room-3d-preview-re.md §5; the leaders' LAZR02 / IZNR02 / TB02 look as the 01s). A
-// Fencer's list is CONFIG's order, [0] left (the shield), [1] right; the menu shows the selected pair (Desc +0x50 = 0).
+// place of the AI weapons (docs/room-3d-preview-re.md §5; the leaders' LAZR02 / IZNR02 / TB02 look as the 01s). The
+// menu shows the selected pair (Desc +0x50 = 0).
 inline constexpr int kDescWeaponsMost=6;
 struct MenuWeapons { int count; const wchar_t* name[2]; };
 constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
@@ -83,10 +105,12 @@ constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
         case SupportWeapon::wingMonster: return {1,{L"pWeapon131",nullptr}};
         case SupportWeapon::wingIzuna: return {1,{L"pWeapon100",nullptr}};
         case SupportWeapon::wingThunderBow: return {1,{L"pWeapon102",nullptr}};
-        case SupportWeapon::fencerCannon: return {2,{L"hShield01",L"hCannon01"}};
-        case SupportWeapon::fencerMiddleCannon: return {2,{L"hShield01",L"hWeapon077"}};
-        case SupportWeapon::fencerPileBanker: return {2,{L"hShield01",L"hPileBanker01"}};
-        case SupportWeapon::fencerShotgun: return {2,{L"hShield01",L"hWeapon077"}};
+        // A Fencer's in its unified file's order (the template's soldier_weapon_slot: [0] weapon_r, [1] weapon_l):
+        // the right-hand weapon, then the shield.
+        case SupportWeapon::fencerCannon: return {2,{L"hCannon01",L"hShield01"}};
+        case SupportWeapon::fencerMiddleCannon: return {2,{L"hWeapon077",L"hShield01"}};
+        case SupportWeapon::fencerPileBanker: return {2,{L"hPileBanker01",L"hShield01"}};
+        case SupportWeapon::fencerShotgun: return {2,{L"hWeapon077",L"hShield01"}};
         default: return {0,{nullptr,nullptr}};
     }
 }
@@ -292,5 +316,41 @@ inline Actions Step(Plan& p,const Want& w,const Shown& s) noexcept {
 // TickPreview stopped (the room / HQ screen went without closing the menu): the view puts the player back by itself
 // after kOrphanFrames 60 Hz frames of the view's own (counted by the UI's dt, so the same time at any frame rate).
 inline constexpr unsigned kOrphanFrames=30;
+
+// --- The squad's other soldiers (docs/room-3d-preview-re.md section 6.3): views the preview makes, one soldier each ---
+// Such a view shows only ever its soldier (never the player): no msg 8 lock, no player rebuild. It stays hidden
+// (+0x3EC 1) until its model is the soldier asked for: its constructor posts a build of player 0 before the preview can
+// arm the override (the Async is made at the constructor's end, right before that msg 3), and the job queue's order
+// against the preview's own build is not proven (two workers could finish them in either order), so a shown model
+// that is not the soldier, with no build of ours still to run, is built again after kSquadRebuildFrames (not every
+// frame: the finished build is taken by the view's update a frame or more after the worker took the override).
+inline constexpr unsigned kSquadRebuildFrames=30;
+struct SquadPlan {
+    int posted=kNone;    // the soldier last asked for (ModelKey)
+    unsigned waited=0;   // frames the shown model has not been it
+};
+struct SquadActions {
+    bool build=false,reveal=false;
+    bool recolour[2]{};
+};
+inline SquadActions SquadStep(SquadPlan& p,const Want& w,const Shown& s) noexcept {
+    SquadActions a;
+    const int key=ModelKey(w);
+    if(p.posted!=key){a.build=true;p.posted=key;p.waited=0;return a;}
+    const bool soldierShown=!s.pending && s.cls==MenuClassOf(w.kind) && s.outfit==kSentinelOutfit;
+    if(!soldierShown) {
+        if(!s.pending && ++p.waited>=kSquadRebuildFrames){a.build=true;p.waited=0;}
+        return a;
+    }
+    p.waited=0;
+    a.reveal=true;
+    for(int ch=0;ch<2;++ch)a.recolour[ch]=s.colour[ch] && !SameRgba(w.colour[ch],s.colour[ch]);
+    return a;
+}
+// How many views the preview keeps beside the game's own: the squad's soldiers past the first, while the menu shows a
+// squad in a placed viewport (unplaced, every view would stand at MENUMODELSETTING's one camera_pos, on each other).
+constexpr int ExtraViewsWanted(bool squadOn,int count,bool placed,bool mainShowsSoldier) noexcept {
+    return !squadOn || !placed || !mainShowsSoldier || count<2 ? 0 : (count>kSquadMost ? kSquadMost : count)-1;
+}
 
 }  // namespace crew::roompreview

@@ -22,6 +22,13 @@ void TickRoomSync() noexcept;
 // The room is gone (left / mission started): stop publishing.
 void LeaveRoomSync() noexcept;
 SyncState RoomSyncState() noexcept;
+// The host's mission start (room_pvp.cpp StartGate, the room's frame): false while the room's files are not ready
+// (room_sync_logic.h HoldOf: on their way, or a generation failed); the hold logged once each change.
+bool RoomSyncAllowsStart() noexcept;
+// A start held in the last moments: its line (warn), for the 整备 status strip. false when none.
+bool RoomSyncStartHeldLine(wchar_t* out,std::size_t n) noexcept;
+// The next TickRoomSync re-reads the room at once (a preset switched in, the loadout republished).
+void RoomSyncNudge() noexcept;
 // Up to `capacity` lines for the menu's status area; returns how many.
 int RoomSyncLines(SyncLine* out,int capacity) noexcept;
 // The pre-sync turned off (RoomPreSync / RoomLoadout / Enabled): the room's set and the members' loadouts kept for the

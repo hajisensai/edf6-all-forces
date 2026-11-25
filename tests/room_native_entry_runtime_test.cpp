@@ -44,7 +44,24 @@ namespace roompreview {
 bool InstallPreviewHooks() noexcept {UnexpectedRoomDependency();return false;}
 void ShowPreview(const PreviewSpec&) noexcept {UnexpectedRoomDependency();}
 void HidePreview() noexcept {++nativePreviewHides;}
+void ShowSquad(const SquadSpec&) noexcept {UnexpectedRoomDependency();}
+void HideSquad() noexcept {UnexpectedRoomDependency();}
 void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
+void SetViewPlacement(const ViewRect&,const ViewCamera&) noexcept {UnexpectedRoomDependency();}
+void ClearViewPlacement() noexcept {}
+}
+// The 整备 menu (armory.cpp): never opened by this fixture, so dropping / forgetting it is a no-op.
+namespace armoryui {
+bool Install() noexcept {UnexpectedRoomDependency();return false;}
+void Open(unsigned char*,bool,const roommenu::Menu*,roommenu::IniRead,void*,bool,int) noexcept {UnexpectedRoomDependency();}
+bool IsOpen() noexcept {return false;}
+bool Frame(unsigned char*,bool,bool) noexcept {UnexpectedRoomDependency();return false;}
+bool PreviewWanted(roompreview::PreviewSpec*,roompreview::ViewRect*,roompreview::ViewCamera*,bool*,roompreview::SquadSpec*) noexcept {UnexpectedRoomDependency();return false;}
+bool TakePvpRequest() noexcept {UnexpectedRoomDependency();return false;}
+bool TakeMapRequest() noexcept {UnexpectedRoomDependency();return false;}
+int TakeOpenAsk() noexcept {UnexpectedRoomDependency();return -1;}
+void Forget() noexcept {}
+void ScreenGone(unsigned char*) noexcept {}
 }
 // The native dialogs (room_dialog.cpp): not ready here, so the menu keeps its overlay path this fixture drives; with no
 // dialog open, closing / forgetting one is a no-op.
@@ -53,7 +70,7 @@ bool InstallNativeDialog() noexcept {UnexpectedRoomDependency();return false;}
 bool NativeDialogReady() noexcept {return false;}
 bool DescriptionDialogReady() noexcept {return false;}
 int FocusedButton(const Handle&) noexcept {return -1;}
-bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*,const wchar_t*) noexcept {UnexpectedRoomDependency();return false;}
+bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*) noexcept {UnexpectedRoomDependency();return false;}
 bool DialogAlive(const Handle&) noexcept {UnexpectedRoomDependency();return false;}
 bool TakePicked(Handle&,std::uint64_t*) noexcept {UnexpectedRoomDependency();return false;}
 void RequestCloseDialogs() noexcept {}
@@ -99,6 +116,7 @@ void DropWeak(Shared& weak) {
 }
 
 struct FakeAction {
+    const void* table=nullptr;
     FakeControl control{};
     Shared screenWeak{};
     MemberClick member{};
@@ -114,16 +132,17 @@ struct NativeFixture {
     alignas(void*) unsigned char mission[0x240]{},exit[0x240]{};
     FakeControl screenControl{},rootControl{},parentControl{},buttonControl{},labelControl{},missionControl{},exitControl{};
     FakeAction actions[3]{};
-    int createCalls=0,weakCalls=0,makeCalls=0,addCalls=0,labelLocks=0,labelWrites=0;
+    int createCalls=0,weakCalls=0,makeCalls=0,addCalls=0,labelWrites=0;
     int enableCalls=0,hasFocusCalls=0,focusCalls=0;
     void* focused=nullptr;
     std::wstring focusedName;
     bool missionPresent=true,exitPresent=true;
     long parentUsesAtCreate=0,screenUsesAtMake=0;
-    bool installed=true,parentPresent=true,parentOwned=true,createWorks=true,weakWorks=true,makeWorks=true,labelAlive=true;
+    bool installed=true,parentPresent=true,parentOwned=true,createWorks=true,weakWorks=true,makeWorks=true;
     bool buttonPresent=false,abiGood=true,makeWithoutControl=false;
     std::wstring parentName,caption;
     void Reset(bool room=false) {
+        Release(st.nativeButton);
         // Tear down the fake native action list before resetting its controls.
         for(auto& action:actions) {
             if(action.control.value.uses) {
@@ -134,11 +153,11 @@ struct NativeFixture {
         }
         Init(screenControl);Init(rootControl);Init(parentControl);Init(buttonControl);Init(labelControl,1,2);
         Init(missionControl);Init(exitControl);
-        createCalls=weakCalls=makeCalls=addCalls=labelLocks=labelWrites=0;
+        createCalls=weakCalls=makeCalls=addCalls=labelWrites=0;
         parentUsesAtCreate=screenUsesAtMake=0;
         enableCalls=hasFocusCalls=focusCalls=0;focused=nullptr;focusedName.clear();
         missionPresent=exitPresent=true;
-        installed=parentPresent=parentOwned=createWorks=weakWorks=makeWorks=labelAlive=abiGood=true;
+        installed=parentPresent=parentOwned=createWorks=weakWorks=makeWorks=abiGood=true;
         buttonPresent=makeWithoutControl=false;parentName.clear();caption.clear();
         std::memset(button,0,sizeof(button));
         std::memset(mission,0,sizeof(mission));std::memset(exit,0,sizeof(exit));
@@ -231,6 +250,7 @@ Shared* __fastcall MakeClickStub(Shared* out,Shared* weak,const MemberClick* mem
     if(!fixture.makeWorks || slot>=3){DropWeak(*weak);return out;}
     if(fixture.makeWithoutControl){DropWeak(*weak);*out=Shared{reinterpret_cast<void*>(0x10),nullptr};return out;}
     FakeAction& action=fixture.actions[slot];
+    action.table=image+kRoomActionTable;
     Init(action.control);
     action.screenWeak=*weak;*weak=Shared{};
     action.member=*member;
@@ -241,14 +261,9 @@ void __fastcall AddActionStub(void* button,const wchar_t* event,const Shared* sh
     ++fixture.addCalls;
     fixture.abiGood=fixture.abiGood && button==fixture.button && shared->object && shared->control;
     auto& action=*static_cast<FakeAction*>(shared->object);
+    fixture.abiGood=fixture.abiGood && action.table==image+(st.room ? kRoomActionTable : kHqActionTable);
     action.event=event;
     InterlockedIncrement(&shared->control->uses);
-}
-Shared* __fastcall LockWeakStub(Shared* out,const Shared* weak) {
-    ++fixture.labelLocks;
-    fixture.abiGood=fixture.abiGood && weak->object==fixture.label && weak->control==&fixture.labelControl.value;
-    *out=fixture.labelAlive && weak->control->uses>0 ? Own(weak->object,fixture.labelControl) : Shared{};
-    return out;
 }
 void __fastcall SetButtonTextStub(void* text,const wchar_t* value,const void* font) {
     ++fixture.labelWrites;
@@ -286,7 +301,7 @@ template<class Fn> void Trampoline(unsigned rva,Fn fn) {
 void InstallNativeStubs() {
     Trampoline(kFind,&FindStub);Trampoline(kCreateButton,&CreateButtonStub);
     Trampoline(kScreenWeak,&ScreenWeakStub);Trampoline(kMakeClick,&MakeClickStub);
-    Trampoline(kAddAction,&AddActionStub);Trampoline(kLockWeak,&LockWeakStub);
+    Trampoline(kAddAction,&AddActionStub);
     Trampoline(kSetButtonText,&SetButtonTextStub);
     Trampoline(kEnableComponent,&EnableComponentStub);Trampoline(kHasFocus,&HasFocusStub);
     Trampoline(kFocusComponent,&FocusComponentStub);
@@ -301,8 +316,8 @@ void Construction() {
         Check(fixture.createCalls==1 && fixture.parentName==(room ? L"ButtonsGroup" : L"LeftButtonsBase2"),
               "HQ and room use their own stock focus parent group");
         Check(fixture.parentUsesAtCreate==3 && fixture.parentControl.value.uses==1 &&
-              fixture.rootControl.value.uses==1 && fixture.buttonControl.value.uses==1,
-              "Find reference and consumed parent copy each release exactly once");
+              fixture.rootControl.value.uses==1 && fixture.buttonControl.value.uses==2,
+              "Find and parent references are released while the UI keeps the returned button reference");
         Check(fixture.makeCalls==3 && fixture.addCalls==3 && fixture.weakCalls==3,
               "Click, focus and kill_focus each get an independent native callback");
         Check(fixture.screenUsesAtMake==1 && fixture.screenControl.value.uses==1 &&
@@ -356,6 +371,7 @@ void InvalidActionControl() {
 }
 void DisplayAndFocus() {
     fixture.Reset();EnsureNativeEntry(fixture.screen);
+    fixture.buttonPresent=false; // A runtime child remains usable through the returned reference.
     NativeEntryInput(st.nativeEntry,true);
     NativeEntryDisplay(fixture.screen,st.nativeEntry.enabled);
     Check(fixture.button[kShown] && fixture.caption==Title(false) && fixture.labelWrites==1,
@@ -363,7 +379,7 @@ void DisplayAndFocus() {
     Check(fixture.labelControl.value.uses==1 && fixture.labelControl.value.weaks==2,
           "native label lock's strong temporary is released and button's weak label is preserved");
     NativeEntryDisplay(fixture.screen,true);NativeEntryDisplay(fixture.screen,false);
-    Check(fixture.labelWrites==1 && fixture.labelLocks==1 && !fixture.button[kShown],
+    Check(fixture.labelWrites==1 && !fixture.button[kShown],
           "unchanged title avoids native text work and a covered screen hides its entry");
     hudtext::Use(hudtext::Lang::zhCN);NativeEntryDisplay(fixture.screen,true);
     Check(fixture.labelWrites==2 && fixture.caption==Title(false) && fixture.button[kShown],
@@ -372,11 +388,11 @@ void DisplayAndFocus() {
     Check(st.nativeFocused && !st.menu.open,"native focus only requests description text and never opens the menu");
     fixture.Dispatch(L"kill_focus");
     Check(!st.nativeFocused,"native kill_focus withdraws the extra description");
-    fixture.Reset();EnsureNativeEntry(fixture.screen);fixture.labelAlive=false;
+    fixture.Reset();EnsureNativeEntry(fixture.screen);fixture.labelControl.value.uses=0;
     NativeEntryDisplay(fixture.screen,true);
     Check(!fixture.button[kShown] && !fixture.labelWrites && !st.nativeLabel,
           "unready label never leaves a blank visible focus entry");
-    fixture.labelAlive=true;NativeEntryDisplay(fixture.screen,true);
+    fixture.labelControl.value.uses=1;NativeEntryDisplay(fixture.screen,true);
     Check(fixture.button[kShown] && fixture.labelWrites==1,"label weak-lock readiness is retryable without rebuilding the button");
     Check(fixture.abiGood,"native label path uses ui TextField SetText with a null font override");
 }
@@ -418,7 +434,7 @@ void FocusNavigation() {
     Check(!fixture.focusCalls && !fixture.button[kComponentEnabled] && !fixture.button[kComponentEnabled+1] &&
           fixture.missionControl.value.uses==1 && fixture.exitControl.value.uses==1,
           "all-disabled stock targets are released without forcing focus into another disabled item");
-    fixture.Reset();EnsureNativeEntry(fixture.screen);fixture.labelAlive=false;
+    fixture.Reset();EnsureNativeEntry(fixture.screen);fixture.labelControl.value.uses=0;
     NativeEntryDisplay(fixture.screen,true);
     Check(!fixture.button[kShown] && !fixture.button[kComponentEnabled] && !fixture.button[kComponentEnabled+1],
           "label weak-lock failure disables native navigation as well as drawing");
@@ -437,14 +453,14 @@ void ScreenLifecycle() {
     const wchar_t* caption=st.nativeLabel;
     NativeEntryDisplay(fixture.screen,false);
     st.menu.open=true;st.previewShown=true;st.switches.syncing=true;
-    st.gate.latched=true;st.written.valid=true;st.drew=true;
+    st.gate.latched=true;
     st.nativeEntry.requested=true;
     ForgetMenu();
     Check(st.self==fixture.screen && followed.load()==fixture.screen && st.nativeEntry.attempted &&
           st.nativeEntry.ready && st.nativeLabel==caption,
           "mission reset preserves a retained native room's button and weak action identity");
     Check(!st.menu.open && !st.previewShown && !st.nativeEntry.enabled && !st.nativeEntry.requested &&
-          !st.gate.latched && !st.written.valid && !st.drew,
+          !st.gate.latched,
           "mission reset drops menu, preview, input and queued requests without extending native state");
     Check(nativePreviewHides==1 && nativeSyncLeaves==1,"mission reset releases active preview and room synchronization once");
     EnsureNativeEntry(fixture.screen);ForgetMenu();EnsureNativeEntry(fixture.screen);
@@ -459,7 +475,8 @@ void ScreenLifecycle() {
     Check(!followedGone.load(),"another native screen's destructor cannot discard the followed screen's identity");
     NoteGone(fixture.screen);Follow(fixture.screen,false);
     Check(st.self==fixture.screen && followed.load()==fixture.screen && !followedGone.load() &&
-          !st.nativeEntry.attempted && !st.nativeEntry.ready && !st.nativeLabel && !st.nativeFocused,
+          !st.nativeEntry.attempted && !st.nativeEntry.ready && !st.nativeLabel && !st.nativeFocused &&
+          !st.nativeButton.control && fixture.buttonControl.value.uses==1,
           "destructor plus reused object address starts a fresh native-entry generation");
     // Native old layout teardown owns its action list, independently of Forget's plugin-only state.
     for(auto& action:fixture.actions) {
@@ -515,7 +532,7 @@ void ClickLifetime() {
 
 int main() {
     using namespace crew;
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x900000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1810000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
     if(!image){std::puts("FAIL: native fixture image allocation");return 2;}
     InstallNativeStubs();
     Construction();RefusalPaths();InvalidActionControl();DisplayAndFocus();FocusNavigation();ScreenLifecycle();ClickLifetime();

@@ -67,7 +67,7 @@ def make_game(root: str) -> str:
         f.write(INI.encode('utf-8'))
     with open(os.path.join(plugins, sl.PENDING), 'wb') as f:
         f.write((PENDING_NAME + '\r\n').encode())
-    for rel in menu_preview.rels():   # the preview's menu SGOs already there (tests/menu_preview_test.py makes them)
+    for rel in menu_preview.rels():   # the unified model files already there (tests/menu_preview_test.py makes them)
         os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
         with open(os.path.join(root, 'Mods', rel), 'wb') as f:
             f.write(b'menu')
@@ -97,7 +97,7 @@ def recording_rename(src: str, dst: str) -> None:
 
 
 saved = (builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game, room_layout.build)
-LAYOUTS = {'UI/LYT_HUIONLINEROOM.SGO': b'room layout', 'UI/LYT_HUIHQMAIN.SGO': b'hq layout', 'UI/EDF6VC_LOADOUTBOX.SGO': b'loadout box'}
+LAYOUTS = {'UI/LYT_HUIONLINEROOM.SGO': b'room layout', 'UI/LYT_HUIHQMAIN.SGO': b'hq layout'}
 room_layout.build = lambda root: dict(LAYOUTS)   # the fake game's Root.cpk is no archive (the real one: room_layout_test)
 builtins.input = no_prompt
 sl._build_one = fake_build_one
@@ -108,7 +108,7 @@ try:
     with tempfile.TemporaryDirectory(prefix='edf6vc-generate-') as root:
         game = make_game(root)
         obj = os.path.join(game, 'Mods', 'OBJECT')
-        os.makedirs(obj)
+        os.makedirs(obj, exist_ok=True)   # the unified soldier files live there too
         kept = os.path.join(obj, 'EDF6VC_NPC_LANCE_1E3A8A_X.SGO')   # the non-leader: already there, someone's bytes
         with open(kept, 'wb') as f:
             f.write(b'already here')
@@ -127,14 +127,13 @@ try:
         written = {os.path.relpath(dst, os.path.join(game, 'Mods')).replace('\\', '/').upper() for _, dst in renames}
         check({w for w in written if not w.startswith('PLUGINS/')} ==
               {'OBJECT/EDF6VC_NPC_LANCE_L_1E3A8A_X.SGO', 'OBJECT/' + PENDING_NAME, 'WEAPON/EDF6VC_AP_25.SGO'} |
-              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')} | set(LAYOUTS) | {room_layout.WHITE.upper()},
+              {w for w in written if w.startswith('OBJECT/EDF6VC_LO_TANK_')} | set(LAYOUTS),
               f'the new files written: {written}')
         check(not [n for d, _, fs in os.walk(game) for n in fs if '.tmp-' in n], 'no temporary file left')
         check(read(sl.pending_path(game)) == pending_before, 'the pending list is left to the plugin (it appends while running)')
         led = ledger.Ledger(game)
-        check(all('roomui' in led.owners(w) for w in [*LAYOUTS, room_layout.WHITE]) and
-              all(read(led.disk(w)) == b for w, b in LAYOUTS.items()) and read(led.disk(room_layout.WHITE)) == room_layout.white_dds(),
-              'the missing menu layouts and the white texture written as new files, owned by roomui in the ledger')
+        check(all('roomui' in led.owners(w) for w in LAYOUTS) and all(read(led.disk(w)) == b for w, b in LAYOUTS.items()),
+              'the missing room / HQ layouts written as new files, owned by roomui in the ledger')
         check(all('loadout' in led.owners(w) for w in written if not w.startswith(('PLUGINS/', 'UI/'))),
               'the new files are the loadout tool\'s in the ledger: uninstall removes them')
         st = status(game)

@@ -3505,6 +3505,9 @@ void DrawLog(int shown,int panels,const Line* lines,int count,int width,int heig
 }
 }  // namespace
 
+void ControlKeyName(int vk,wchar_t* out,int size) noexcept { KeyName(vk,out,size); }
+void ControlPadName(int mask,wchar_t* out,int size) noexcept { PadBitsName(mask,out,size); }
+
 bool InstallHud() noexcept {
     __try {
         bool quad=true,text=true;
