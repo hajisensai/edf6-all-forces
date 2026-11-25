@@ -215,7 +215,12 @@ deletes = [c for c in direct_callers(0x1195F20) if 0x1198DA0 <= c < record_call]
 check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before kRecordCall')
 check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
 check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
-check('renderrecord::Set(renderrecord::Slot::kFrameRate,&RecordStart);' in view, 'the frame rate poses in its render_record turn')
+check('renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);' in view, 'the frame rate poses in its render_record projection turn')
+check(re.search(r'recordOpen=true;\s*void\* const r=reinterpret_cast<RecordDrawFn>\(image\+kRecordDraw\)\(sys,a,b\);\s*recordOpen=false;', record_src),
+      'RecordHook opens the recording for its call only (closed when it returns)')
+check('scopelens::SetBeforeProject(&ProjectHook)' in record_src and 'SetBeforeProject' not in view,
+      'the projection is shared by render_record.cpp alone')
+check(re.search(r'if\(first\)ProjectStart\(\);', view), 'the samples and poses at the recording\'s first projection only')
 begin = re.search(r'void BeginFrame\([^)]*\) noexcept \{(.*?)\n\}', view, re.S)
 check(begin and 'PoseRoot' not in begin[1] and 'frameobjects::Pose' not in begin[1] and 'PoseFrame' not in begin[1],
       'BeginFrame writes no pose')

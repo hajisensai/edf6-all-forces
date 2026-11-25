@@ -41,11 +41,13 @@
 //    in front of the camera (the whole player, shadow too, for half a second). The real box through T was not enough
 //    (the Wing Diver's weapon, that near the eye, was still drawn in one frame in seven): in first person each camera
 //    step hands Umbra a box around the eye for the body and the weapons in hand (the camera inside it: never culled),
-//    and the real boxes back on the way out. That is done as the frame's render starts (System::update's call of the
-//    render 0x11978D0 at 0x1198FA4, redirected): a weapon's own update (slot 3 -> 0x6C06A0 -> 0x11B30C0) may come after
-//    the camera step and put its real box back. That was not all: with the camera in the head the Wing Diver's gun was
-//    still left out of the visible set four frames in five (drawn every frame in the third person, measured; the same
-//    with the placement off). So the main view's opaque pass is completed: after its list (0x11E1630 for each object,
+//    and the real boxes back on the way out. That is done at the render recording's first projection (render_record.cpp,
+//    FirstProjection): the recording's own loop first (0x1197950: slot 3 -> 0x6C06A0 -> 0x11B30C0(model,model+0x110))
+//    puts every soldier's real box back, the body's and the weapons' in hand, on every frame (M001, 2026-11-24: 18000 of
+//    18000 frames, while the boxes were placed before the recording). Before that move the placement never reached a
+//    draw, which is why the Wing Diver's gun with the camera in the head was still left out of the visible set four
+//    frames in five (drawn every frame in the third person, measured; "the same with the placement off"). So the main
+//    view's opaque pass is completed as well: after its list (0x11E1630 for each object,
 //    pass 1) and before the pass ends (0x11E1590(system, 1), its call at 0x11E2572 redirected), a model of the
 //    viewmodel the pass has not drawn this frame is submitted the same way.
 //  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
@@ -1767,6 +1769,13 @@ void Camera(unsigned char* cam) noexcept {
 // of render_record.cpp, after the frame rate's poses (it places from the eye drawn this frame).
 void RenderStart() noexcept {
     SyncSession();++renderFrame;
+}
+
+// The recording's first projection (render_record.cpp): the viewmodel's Umbra boxes around the eye this frame draws.
+// Not before the recording: its loop (0x1197950 -> 0x6C06A0) places every soldier's model again from its own bounds,
+// the body's and the weapons' too, on every frame (M001, 2026-11-24).
+void FirstProjection(void*,const int*,bool first) noexcept {
+    if(!first)return;
     State* before=selected;
     __try { for(auto& state:states)if(state.on && !state.overridden){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
@@ -2776,7 +2785,10 @@ bool InstallFirstPerson() noexcept {
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
     placeOk=placeOk && renderrecord::Install();
-    if(placeOk)renderrecord::Set(renderrecord::Slot::kFirstPerson,&RenderStart);
+    if(placeOk) {
+        renderrecord::Set(renderrecord::Slot::kFirstPerson,&RenderStart);
+        renderrecord::SetProject(renderrecord::Slot::kFirstPerson,&FirstProjection);
+    }
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());

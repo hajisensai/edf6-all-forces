@@ -174,8 +174,11 @@ check(sites.get(0x1198FA4) == {"src/render_record.cpp"},
       f"0x1198FA4 (the render recording) is redirected by src/render_record.cpp alone ({sorted(sites.get(0x1198FA4, ()))})")
 for rel, slot in (("src/frame_rate_view.cpp", "kFrameRate"), ("src/firstperson.cpp", "kFirstPerson")):
     text = strip(read(rel))
-    check("renderrecord::Install()" in text and f"renderrecord::Set(renderrecord::Slot::{slot}," in text,
+    check("renderrecord::Install()" in text and
+          re.search(r"renderrecord::Set(Project)?\(renderrecord::Slot::" + slot + ",", text) is not None,
           f"{rel} installs render_record and registers its {slot} turn")
+    check("SetBeforeProject" not in text,
+          f"{rel} takes no projection turn of its own (render_record.cpp shares 0x1197B50 with the lens view)")
     check(not re.search(r"0x1198FA4|0x11978D0", text, re.I),
           f"{rel} does not name the render recording's call itself (render_record.cpp owns it)")
 
