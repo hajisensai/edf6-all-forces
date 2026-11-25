@@ -22,6 +22,7 @@
 #include "vsynth.h"
 #include <windows.h>
 #include <xaudio2.h>
+#include <xapofx.h>
 #pragma warning(push,0)
 #include <sapi.h>
 #pragma warning(pop)
@@ -521,7 +522,8 @@ constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,
                                        0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
 // The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
 const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
-constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets: room for them
+constexpr int kLoops=96,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
+                                     // War Thunder layers ten a shot (sound_event.h): room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
@@ -690,6 +692,17 @@ bool Start() noexcept {
     DWORD mask=0;
     if(FAILED(master->GetChannelMask(&mask)))mask=0;
     layout=surround::LayoutOf(mask,static_cast<int>(masterChannels));
+    // A limiter on the output (XAPOFX's mastering limiter, its default release and loudness): the layers of guns firing
+    // together add past full scale, held under it rather than clipped.
+    const char* limiter="none (it failed: loud volleys may clip)";
+    IUnknown* fx=nullptr;
+    FXMASTERINGLIMITER_PARAMETERS lp{FXMASTERINGLIMITER_DEFAULT_RELEASE,FXMASTERINGLIMITER_DEFAULT_LOUDNESS};
+    if(SUCCEEDED(CreateFX(__uuidof(FXMasteringLimiter),&fx,&lp,sizeof(lp))) && fx) {
+        XAUDIO2_EFFECT_DESCRIPTOR d{fx,TRUE,masterChannels};
+        const XAUDIO2_EFFECT_CHAIN chain{1,&d};
+        if(SUCCEEDED(master->SetEffectChain(&chain)))limiter="on";
+        fx->Release();
+    }
     wchar_t path[MAX_PATH]{};
     UINT32 rate=kRate;
     const bool own=BesideDll(L"_jet.wav",path) && ReadWav(path,roarPcm,rate);
@@ -705,8 +718,8 @@ bool Start() noexcept {
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);
     ok=true;
-    Log("SOUND XAudio2 up: %u output channel(s), mask 0x%lX: %d around the listener, LFE %s",masterChannels,mask,layout.ring,
-        layout.lfe>=0 ? "yes" : "no");
+    Log("SOUND XAudio2 up: %u output channel(s), mask 0x%lX: %d around the listener, LFE %s; limiter %s",masterChannels,mask,
+        layout.ring,layout.lfe>=0 ? "yes" : "no",limiter);
     return true;
 }
 

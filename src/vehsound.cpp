@@ -43,6 +43,7 @@
 #include "vsynth.h"
 #include "layout.h"
 #include "surround.h"
+#include "sound_event.h"
 #include "memory.h"
 #include "vecmath.h"
 #include "edf/weapon.h"
@@ -86,7 +87,7 @@ using vmix::kFarAt;                                 // m: the air's dulling at i
 constexpr float kStartSec=1.2f,kStopSec=2.0f;       // the engine winding up / down
 constexpr float kMechServo=1.25f;                   // a mech's arm drives: the turret's, quicker and higher
 constexpr ULONGLONG kStaleMs=300;                   // a vehicle not seen this long (game ms) is gone: its voices too
-constexpr int kVehicles=48,kMostGuns=8,kPending=96;   // a Katyusha's ripple: forty rockets on their way
+constexpr int kVehicles=48,kMostGuns=8,kPending=256;   // a Katyusha's ripple: forty rockets on their way; a cannon's ten layers
 
 enum class Body : std::uint8_t { none, heavy, light, bike, mech };
 enum Loop : int { kLoopIdle, kLoopLoad, kLoopTracks, kLoopTurret, kLoopCount };
@@ -99,6 +100,7 @@ struct Gun {
     std::int32_t ammo,shots;  // its rounds, the shot count it was sent (kWeaponShots)
     float wait,total,since;   // frames: to the next shot / the cycle's full wait / since the shot
     int burst=-1,brass=-1;    // a rapid gun's loops while it fires (jetaudio.h OpenLoop), -1: none
+    bool firing=false;        // a rapid gun firing last frame (its tail when it stops)
 };
 struct Vehicle {
     ObjRef ref;
@@ -116,8 +118,10 @@ struct Vehicle {
 };
 Vehicle vehicles[kVehicles]{};
 // A report on its way (the sound's travel time, a case's fall): played when the game clock reaches `due`.
-struct Pending { int clip=-1; audio::Heard heard{}; ULONGLONG due=0; };
+// `wt`: a War Thunder recording's group (wt_clips.h), `variant` the one of it.
+struct Pending { int clip=-1; bool wt=false; int variant=0; audio::Heard heard{}; ULONGLONG due=0; };
 Pending pending[kPending]{};
+wtevent::Rotation rotation{};   // the War Thunder groups' variants, never one twice running
 bool sigOk=false,stopOk=false,broken=false;
 ULONGLONG frameDone=0;
 
@@ -324,8 +328,39 @@ void Set(int& loop,int clip,bool want,const audio::Heard& h) noexcept {
 void Later(int clip,const SoundPlace& p,float gain,float after,float muffle=0.0f) noexcept {
     if(gain<0.002f || clip<0)return;
     for(auto& q:pending)
-        if(q.clip<0){q=Pending{clip,HeardAt(p,gain,1.0f,muffle),GameMs()+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
+        if(q.clip<0){q=Pending{clip,false,0,HeardAt(p,gain,1.0f,muffle),GameMs()+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
     // more on their way than kPending: the rest are not heard
+}
+// A War Thunder event (sound_event.h) heard from `at`: each of its layers loud enough at the distance, its variant the
+// next of its group's, after the sound's travel time and the layer's own start; its spread the event's sound size, half
+// the Doppler shift. A group whose recordings are missing (the install's broken: logged once when read) stays silent.
+void PlayEvent(const wtevent::Event& e,const float* at,const float* vel,float vol) noexcept {
+    SoundPlace p{};
+    if(vol<=0.0f || !SoundAt(at,vel,&p))return;
+    wtevent::Heard h[wtevent::kMostLayers];
+    const int n=wtevent::Hear(e,p.distance,h);
+    const float spread=surround::SpreadAt(p.distance,e.size,e.least),ratio=wtevent::Doppler(e,p.doppler);
+    const ULONGLONG now=GameMs();
+    for(int i=0;i<n;++i) {
+        const float gain=vol*h[i].gain;
+        if(gain<0.001f || !audio::WtThere(h[i].clip))continue;
+        Pending* q=nullptr;
+        for(auto& f:pending)if(f.clip<0){q=&f;break;}
+        if(!q)return;   // more on their way than kPending: the rest are not heard
+        *q=Pending{h[i].clip,true,wtevent::Next(rotation,h[i].clip),
+                   audio::Heard{gain,p.side,p.front,spread,ratio,h[i].cutoff,h[i].sub},
+                   now+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+h[i].after)*1000.0f)};
+    }
+}
+// The War Thunder event of a main gun's calibre; none: its own clips (a rail gun's).
+const wtevent::Event* EventOf(vmix::Bore b) noexcept {
+    switch(b) {
+    case vmix::Bore::medium: return &wtevent::kMedium;
+    case vmix::Bore::tank: return &wtevent::kTank;
+    case vmix::Bore::heavy: return &wtevent::kHeavy;
+    case vmix::Bore::howitzer: return &wtevent::kHowitzer;
+    default: return nullptr;
+    }
 }
 
 void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
@@ -442,22 +477,22 @@ void Loader(const unsigned char* w,const Gun& g,const vmix::Profile& pf,const fl
     for(int i=0;i<pf.steps;++i)
         if(cues&(1u<<i))Cue(pf.step[i].clip,at,vel,reloadVol*kReloadShare,pf.step[i].pitch);
 }
-// A rapid gun's frame: its burst loop (the profile's two: made at kMgRate and at kGatlingRate, the nearer one to its
-// rate) and the cases raining open while it fires, its tail when it stops.
-void Rapid(const unsigned char* w,Gun& g,const vmix::Profile& pf,const float* at,const float* vel,float vol) noexcept {
+// A rapid gun's frame: each round its War Thunder grains (sound_event.h MgFor: the MG42's for a fast gun, the M2's
+// else), its tail when it stops; the cases raining open while it fires.
+void Rapid(const unsigned char* w,Gun& g,const vmix::Profile& pf,const float* at,const float* vel,float vol,bool shot) noexcept {
     const float frames=static_cast<float>(At<std::int32_t>(w,kFireInterval));
+    const wtevent::Mg& mg=wtevent::MgFor(frames);
     SoundPlace p{};
     const bool placed=SoundAt(at,vel,&p);
     const bool firing=vmix::Firing(g.since,frames) && placed && p.distance<kRapidHear;
     if(!firing) {
-        if(g.burst>=0 && placed)Later(audio::kClipBurstTail,p,vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f),0.0f);
+        if(g.firing && placed)PlayEvent(mg.last,at,vel,vol);
+        g.firing=false;
         CloseLoop(g.burst);CloseLoop(g.brass);
         return;
     }
-    const bool gatling=frames<60.0f/(0.5f*(vsynth::kMgRate+vsynth::kGatlingRate));   // the nearer of the two made rates
-    const float made=gatling ? vsynth::kGatlingRate : vsynth::kMgRate;
-    const float gain=vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f);
-    Set(g.burst,gatling ? pf.farClip : pf.nearClip,true,HeardAt(p,gain,vmix::BurstRatio(frames,made)));
+    g.firing=true;
+    if(shot)PlayEvent(mg.round,at,vel,vol);
     const bool close=!g.stockCase && pf.casing.clip>=0 && p.distance<kBrassHear;
     Set(g.brass,pf.casing.clip,close,HeardAt(p,vol*vmix::kBrassShare*vmix::Falloff(p.distance,kReloadRef,1.3f),
                                              vmix::BurstRatio(frames,vsynth::kBrassRate)));
@@ -494,14 +529,14 @@ void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
             g->ammo=ammo;g->shots=sent;g->wait=wait;
             float at[3],dir[3];
             if(!edf::MeanMuzzle(w,64,at,dir))std::memcpy(at,v+kPosition,12);
-            if(vol<=0.0f){CloseLoop(g->burst);CloseLoop(g->brass);continue;}
+            if(vol<=0.0f){CloseLoop(g->burst);CloseLoop(g->brass);g->firing=false;continue;}
             SoundPlace p{};
             switch(pf.fire) {
             case vmix::Fire::report:
                 if(shot){fired[static_cast<int>(g->bore)]=true;std::memcpy(firedAt[static_cast<int>(g->bore)],at,12);}
                 break;
             case vmix::Fire::burst:
-                Rapid(w,*g,pf,at,s.vel,vol);
+                Rapid(w,*g,pf,at,s.vel,vol,shot);
                 break;
             case vmix::Fire::round:
                 if(shot && SoundAt(at,s.vel,&p))Later(pf.nearClip,p,vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f),0.0f);
@@ -514,12 +549,21 @@ void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
     }
     const float gunVol=GroupVolume(vmix::Group::main);
     for(int b=0;b<kBores;++b)
-        if(fired[b])Report(vmix::ProfileFor(static_cast<vmix::Bore>(b)),firedAt[b],s.vel,gunVol*vmix::ProfileFor(static_cast<vmix::Bore>(b)).share);
+        if(fired[b]) {
+            const vmix::Bore bore=static_cast<vmix::Bore>(b);
+            if(const wtevent::Event* e=EventOf(bore))PlayEvent(*e,firedAt[b],s.vel,gunVol);
+            else Report(vmix::ProfileFor(bore),firedAt[b],s.vel,gunVol*vmix::ProfileFor(bore).share);
+        }
 }
 
 // Once a frame: the sounds whose time has come played, the vehicles gone forgotten.
 void Frame(ULONGLONG ms) noexcept {
-    for(auto& q:pending)if(q.clip>=0 && ms>=q.due){audio::PlayOnce(q.clip,q.heard);q.clip=-1;}
+    for(auto& q:pending)
+        if(q.clip>=0 && ms>=q.due) {
+            if(q.wt)audio::PlayWt(q.clip,q.variant,q.heard);
+            else audio::PlayOnce(q.clip,q.heard);
+            q.clip=-1;
+        }
     for(auto& s:vehicles)if(s.ref && ms-s.seen>kStaleMs)Forget(s);
 }
 
