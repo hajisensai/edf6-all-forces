@@ -61,7 +61,8 @@ std::vector<Instance> staging;
 // The published frame: the game thread swaps a full vector in, the render thread copies it out.
 SRWLOCK publishLock=SRWLOCK_INIT;
 std::vector<Instance> published;
-std::atomic<bool> optEnabled{false},optNative{false},optProbe{false},optTest{false};
+std::atomic<bool> optEnabled{false},optProbe{false},optTest{false};
+std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
 std::atomic<bool> anchorReady{false};
 float anchorShared[3]{};   // under publishLock
 
@@ -295,12 +296,54 @@ struct FadeReader {
 };
 FadeReader fade;
 
+// GpuFxNative=2, the A/B picture in one frame: of a taken-over draw, the entries right of the screen's centre are ours,
+// the left ones stay in the stock snapshot (moved to its front, its count cut) for the stock draw, then put back.
+float splitView[16]{};
+struct SplitRestore {
+    unsigned char* snapshot=nullptr;
+    std::uint64_t* countAt=nullptr;
+    std::uint64_t count=0;
+    std::vector<unsigned char> saved;
+} split;
+void RestoreSplit() noexcept {
+    if(!split.snapshot)return;
+    std::memcpy(split.snapshot,split.saved.data(),split.saved.size());
+    *split.countAt=split.count;
+    split.snapshot=nullptr;split.countAt=nullptr;
+}
+// `got` instances (from the snapshot's first entries) at nativeInstances[start]: ours keeps the right ones; the stock
+// snapshot gets the left ones (and any past `got`) at its front. Returns whether the stock draw has nothing left.
+bool Split(const unsigned char* core,const NativeView& n,std::size_t start,int got) noexcept {
+    auto* snap=const_cast<unsigned char*>(n.snapshot);
+    const std::size_t total=static_cast<std::size_t>(n.count);
+    if(!Readable(snap,kEntry*total,true) || !Readable(core+kSnapshotCount,8,true)){nativeInstances.resize(start);return false;}
+    try { split.saved.assign(snap,snap+kEntry*total); } catch(...) { nativeInstances.resize(start);return false; }
+    int keep=0;std::size_t left=0;
+    for(std::size_t i=0;i<total;++i) {
+        bool ours=false;
+        if(i<static_cast<std::size_t>(got)) {
+            const Instance in=nativeInstances[start+i];
+            float v[4];TransformPoint(in.pos,splitView,v);
+            ours=v[0]>0.0f;
+            if(ours)nativeInstances[start+static_cast<std::size_t>(keep++)]=in;
+        }
+        if(!ours){std::memcpy(snap+left*kEntry,split.saved.data()+i*kEntry,kEntry);++left;}
+    }
+    nativeInstances.resize(start+static_cast<std::size_t>(keep));
+    if(left==0){split.saved.clear();return true;}
+    split.snapshot=snap;split.countAt=reinterpret_cast<std::uint64_t*>(const_cast<unsigned char*>(core)+kSnapshotCount);split.count=n.count;
+    *split.countAt=left;
+    if(keep==0)RestoreSplit();
+    return false;
+}
+
 enum class Source { render, core };
 // One stock particle draw: taken over (its snapshot copied into a batch, the stock draw skipped; true) or left to the
 // stock draw (false). Both the ParticleRender slot and the embedded core's own draw come here.
 bool TakeOver(const unsigned char* core,const float* world,void* native,Source source,const void* obj) noexcept {
     const bool wantProbe=optProbe.load(std::memory_order_relaxed);
-    const bool wantNative=optNative.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed);
+    const int nativeMode=optNative.load(std::memory_order_relaxed);
+    const bool wantNative=nativeMode!=0 && optEnabled.load(std::memory_order_relaxed);
     NativeView n{};
     const bool read=ReadNative(core,world,n);
     ID3D11DeviceContext* context=native && Readable(native,0x10) ? At<ID3D11DeviceContext*>(native,8) : nullptr;
@@ -316,13 +359,16 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
             nativeInstances.resize(start+static_cast<std::size_t>(room));
             const int got=CopySnapshot(n,nativeInstances.data()+start,room);
             nativeInstances.resize(start+static_cast<std::size_t>(got));
-            if(got>0) {
+            bool all=true;
+            if(got>0 && nativeMode==2)all=Split(core,n,start,got);
+            const int kept=static_cast<int>(nativeInstances.size()-start);
+            if(kept>0) {
                 NativeBatch b{};b.texture=srv;b.kind=n.blend==2 ? Kind::nativeAdditive : Kind::nativeAlpha;
-                b.frames=grid*grid;b.grid=grid;b.start=static_cast<int>(start);b.count=got;
+                b.frames=grid*grid;b.grid=grid;b.start=static_cast<int>(start);b.count=kept;
                 nativeBatches.push_back(std::move(b));
                 ++probe.nativeReplaced;if(source==Source::core)++probe.coreReplaced;
-                return true;   // the stock draw skipped: ours draws these at this view's world end
             }
+            if(got>0)return nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws what is left)
         }
         ++probe.nativeRefused;
     } else if(wantNative && read && n.live && n.count>0) {
@@ -369,6 +415,7 @@ void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* vie
     const float* world=reinterpret_cast<const float*>(o+kRenderWorld);
     if(view==currentView && TakeOver(core,world,native,Source::render,obj))return;
     stock(obj,native,pass,view);
+    RestoreSplit();
     const bool logState=optProbe.load(std::memory_order_relaxed) && probe.stateLogged<24;
     if(logState)++probe.stateLogged;
     AfterStock(core,world,native,logState);
@@ -379,6 +426,7 @@ void __fastcall CoreDrawHook(void* core,void* native,const float* world) {
     const auto* c=static_cast<const unsigned char*>(core);
     if(TakeOver(c,world,native,Source::core,core))return;
     coreDrawNext(core,native,world);
+    RestoreSplit();
     AfterStock(c,world,native,false);
 }
 
@@ -567,7 +615,8 @@ void Reset() noexcept {
 
 void WorldBegin(ID3D11DeviceContext*,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire))return;
-    currentView=view;inWorld=MainView(view);observed=false;observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
+    currentView=view;inWorld=MainView(view);observed=false;
+    if(inWorld)std::memcpy(splitView,static_cast<const unsigned char*>(view)+0x20,sizeof(splitView));observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
     nativeInstances.clear();nativeBatches.clear();
 }
 

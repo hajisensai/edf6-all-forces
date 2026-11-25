@@ -307,7 +307,8 @@ struct Config {
     float scopeAimSpread=0.8f;            // ...and zoomed: x this
     bool gpuFx=true;             // GPU particle effects (src/gpufx): the module (world-end draw)
     bool gpuFxTest=false;        // ...test cards and a puff column 25 m ahead of the player at mission start
-    bool gpuFxNative=false;      // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw
+    int gpuFxNative=0;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
+                                 //    screen split, stock left and ours right: the A/B picture)
     bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
