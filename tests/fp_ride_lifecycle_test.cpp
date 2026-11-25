@@ -37,6 +37,7 @@ unsigned SeatCount(const unsigned char* vehicle) noexcept {
 
 bool RedirectCall(unsigned char*,void*,void*,bool&,edf::Claim,const char*) noexcept { return false; }
 }
+namespace crew::gpufx { void ObserveSurface(ID3D11DeviceContext*,int) noexcept {} }
 namespace crew::thermal {
 bool WantsCapture() noexcept { return false; }
 void ObserveSurface(ID3D11DeviceContext*,int) noexcept {}

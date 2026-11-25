@@ -119,6 +119,7 @@ void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
 void EnemyControlFrame() noexcept{unexpectedHook();++enemyFrameTicks;}
 void EnemyControlNetworkFrame() noexcept{unexpectedHook();++enemyNetworkTicks;}
 namespace thermal { void Tick(bool,unsigned) noexcept{unexpectedHook();++thermalFrameTicks;return;} }
+namespace gpufx { void Tick() noexcept {} }
 void BigWorldProbe(void) noexcept{unexpectedHook();return;}
 void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
