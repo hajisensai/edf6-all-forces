@@ -176,6 +176,12 @@ target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:E
 # into the game (tools/installer.py and tools/build_release.py take them from there).
 set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
 configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew.ini" COPYONLY)
+# The War Thunder gun sounds (tools/wt_sound.py): the plugin reads Mods/Plugins/EDF6VehicleCrew_wt/<clip>_<i>.wav.
+file(GLOB _wt_wavs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/sound/wt/*.wav")
+foreach(_wav ${_wt_wavs})
+  get_filename_component(_wav_name "${_wav}" NAME)
+  configure_file("${_wav}" "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew_wt/${_wav_name}" COPYONLY)
+endforeach()
 
 # The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees):
 # pylib/edf6native.py loads them with ctypes, tools/build_release.py bundles the DLL. Each is a port of a Python
@@ -1255,6 +1261,8 @@ set_tests_properties(vehicle_weapons_native PROPERTIES SKIP_RETURN_CODE 77 ENVIR
 # The recorded sound pack (tools/sound_pack.py) on a stand-in archive: every clip it names is one the plugin reads, as
 # the plugin reads it (ReadWav), the loops seamless, the recordings' DC out, never louder than the plugin's own clip.
 add_test(NAME sound_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sound_pack_test.py")
+# The War Thunder gun sounds: src/wt_clips.h, tools/wt_sound.py's table and assets/sound/wt agree (no source needed).
+add_test(NAME wt_sound COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/wt_sound_test.py")
 set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")

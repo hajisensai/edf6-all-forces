@@ -34,7 +34,8 @@ PLUGINS = os.path.join(ROOT, 'build', 'Mods', 'Plugins')
 EXE_NAME = 'EDF6VehicleCrew安装器'
 OUT = os.path.join(ROOT, 'release')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
-import installer  # noqa: E402  (PLUGINS: what the exe ships and installs)
+import installer  # noqa: E402
+import wt_sound  # noqa: E402  (PLUGINS: what the exe ships and installs)
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import xm_units  # noqa: E402
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
@@ -328,7 +329,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'testhub', 'make_emc', 'make_ultimate', 'make_barrage', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_quadvulcan', 'make_emp_mid', 'make_emp_short', 'make_emp_long', 'make_tunguska', 'make_pzh2000', 'make_sturmtiger', 'make_ciws_phalanx', 'make_flak88', 'make_apocalypse', 'make_gdf005', 'make_laser', 'make_railgun', 'make_tos1', 'make_patriot', 'make_xmorph', 'xm_units', 'xm_heli', 'xm_jet', 'xm_air_model', 'car_model', 'xm_walker', 'xm_infantry', 'xm_rig', 'emplacement_model', 'quadvulcan_model', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
                 'edf41_materials', 'edf41materials', 'goldcoat', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'make_c130', 'c130_model', 'make_helicarrier', 'helicarrier_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'cockpit_shapes', 'cockpit_tub', 'texfile_accel', 'bc7', 'model_workers', 'model_lod', 'mesh_simplify', 'mdb', 'edf6native', 'crilayla',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'make_c130', 'c130_model', 'make_helicarrier', 'helicarrier_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'cockpit_shapes', 'cockpit_tub', 'texfile_accel', 'bc7', 'model_workers', 'model_lod', 'mesh_simplify', 'mdb', 'edf6native', 'crilayla', 'wt_sound',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
@@ -337,6 +338,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
         cmd += ['--exclude-module', mod]
     for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
+    cmd += ['--add-data', f'{os.path.join(PLUGINS, installer.WT_DIR)}{seps}plugin/{installer.WT_DIR}']
     cmd += ['--add-data', f'{info}{seps}plugin']
     cmd += cmpl_binary()
     cmd += ['--add-data', f'{recipes}{seps}plugin']
@@ -416,6 +418,9 @@ def main(argv: list[str]) -> int:
     for name in plugin_data():
         if not os.path.isfile(os.path.join(PLUGINS, name)):
             raise SystemExit(f'missing {name} in build/Mods/Plugins: run build.cmd first')
+    for name in wt_sound.out_names():
+        if not os.path.isfile(os.path.join(PLUGINS, installer.WT_DIR, name)):
+            raise SystemExit(f'missing {installer.WT_DIR}/{name} in build/Mods/Plugins: run build.cmd first')
     generator = build_generator()
     print(f'generator {installer.GENERATOR}: {os.path.getsize(generator)} bytes')
     exe = build_exe(f'EDF6VehicleCrew-{version}{a.suffix}', generator)

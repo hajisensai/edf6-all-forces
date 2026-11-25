@@ -59,6 +59,7 @@ import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 import modelpack  # noqa: E402
+import wt_sound  # noqa: E402
 import model_workers  # noqa: E402
 from i18n import take_lang_arg, tr  # noqa: E402
 
@@ -70,6 +71,8 @@ SECTION = 'VehicleCrew'
 # ini into the exe, install writes them, uninstall removes them, check compares them (selftest pack_ships_every_plugin).
 PLUGINS = ((PLUGIN, SECTION), ('EDF6AutoTurret', 'AutoTurret'))
 PLUGIN_FILES = ('.dll', '.ini')            # shipped
+# The plugin reads its War Thunder gun sounds from Mods/Plugins/<dll name>_wt/<clip>_<i>.wav (src/wt_clips.h).
+WT_DIR = PLUGIN + '_wt'
 # What a plugin writes beside itself: its log, the log rotated away (src/plugin.cpp RotateLog), the Primers' trace
 # (src/primer.cpp TraceFile, ini PrimerTrace).
 PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv', '.variants_pending.txt')
@@ -165,6 +168,18 @@ def plugin_files() -> dict[str, tuple[bytes, bytes]]:
         dll, ini = (modfiles.read(os.path.join(src, name + ext)) for ext in PLUGIN_FILES)
         out[name] = (dll, ini)
     return out
+
+
+def wt_sound_files() -> dict[str, bytes]:
+    """The War Thunder gun sounds (tools/wt_sound.py, assets/sound/wt) as shipped: build/Mods/Plugins/WT_DIR/<name>_<i>.wav,
+    every one of them (a missing one is a broken package)."""
+    src = os.path.join(bundle_dir(), WT_DIR)
+    names = wt_sound.out_names()
+    missing = [n for n in names if not os.path.isfile(os.path.join(src, n))]
+    if missing:
+        raise SystemExit(tr(f'找不到 {WT_DIR} 里的 {", ".join(missing)}：先运行 build.cmd 构建插件',
+                            f'{", ".join(missing)} not found in {WT_DIR}: run build.cmd first'))
+    return {n: modfiles.read(os.path.join(src, n)) for n in names}
 
 
 def ask(prompt: str) -> str:
@@ -361,6 +376,29 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     if gone:
         print(tr(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉',
                  f'  {", ".join(gone)}: no longer used by this version, you may delete them'))
+
+
+def install_wt_sounds(game: str, files: dict[str, bytes]) -> None:
+    """The plugin's WT_DIR: only this pack's own WAVs (the folder's other files are not ours)."""
+    dst = os.path.join(game, 'Mods', 'Plugins', WT_DIR)
+    for name, data in files.items():
+        path = os.path.join(dst, name)
+        if modfiles.read(path) != data:
+            modfiles.atomic_write(path, data)
+    print(tr('写入', 'Writing'), dst, tr(f'（{len(files)} 个文件）', f'({len(files)} files)'))
+
+
+def remove_wt_sounds(game: str) -> None:
+    dst = os.path.join(game, 'Mods', 'Plugins', WT_DIR)
+    for name in wt_sound.out_names():
+        path = os.path.join(dst, name)
+        if os.path.isfile(path):
+            os.remove(path)
+    try:
+        os.rmdir(dst)   # only when nothing else is in it
+    except OSError:
+        pass
+    print(tr('删除', 'Deleting'), dst)
 
 
 def remove_plugin(game: str) -> None:
@@ -667,6 +705,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     rootcpk.use(game)
     check_loader(game)
     plugins = plugin_files()
+    wt_sounds = wt_sound_files()
     planned = player_ini_text(game, plugins[PLUGIN][1])
     stock_stores = make_stock_stores.wanted(planned)
     material_compat = material_compat_wanted(planned)
@@ -893,6 +932,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(tr('写入', 'Writing'), path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
+    install_wt_sounds(game, wt_sounds)
     # After the plugin's ini (the presets are the player's) and after every writer of V505_TANK_MISSION (AutoTurret's
     # recoil, the optics' model redirect above): the AP tank is that file with another gun.
     write_loadout_files(game)
@@ -1121,6 +1161,7 @@ def uninstall(game: str) -> None:
     for path in kept:
         print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     remove_plugin(game)
+    remove_wt_sounds(game)
     print(tr('\n卸载完成。', '\nUninstall complete.'))
 
 
@@ -1164,6 +1205,12 @@ def check(game: str) -> bool:
     rootcpk.use(game)
     ok = True
     shipped = plugin_files()
+    stale_wt = [n for n, data in wt_sound_files().items()
+                if modfiles.read(os.path.join(game, 'Mods', 'Plugins', WT_DIR, n)) != data]
+    ok &= not stale_wt
+    print(f'{WT_DIR}: ' + (tr(f'{len(stale_wt)} 个文件缺失或与本安装包不同（选 1 更新）',
+                              f'{len(stale_wt)} files missing or different from this package (1 updates them)')
+                           if stale_wt else tr('与本安装包相同', 'the same as this package')))
     for name, section in PLUGINS:
         have = modfiles.read(os.path.join(game, 'Mods', 'Plugins', name + '.dll'))
         same = have == shipped[name][0]

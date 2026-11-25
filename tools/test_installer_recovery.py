@@ -106,6 +106,7 @@ class RecoveryTests(unittest.TestCase):
                 modfiles.atomic_write(str(self.game / 'Mods/Plugins' / (name + ext)), data)
         ledger.Ledger(str(self.game)).put('jets', 'OBJECT/TEST.SGO', b'asset')
         self.stack.enter_context(patch.object(installer, 'plugin_files', return_value=shipped))
+        self.stack.enter_context(patch.object(installer, 'wt_sound_files', return_value={}))
         self.stack.enter_context(patch.object(at_build, 'check', return_value=True))
         self.stack.enter_context(patch.object(call_weapons, 'check', return_value=True))
         import make_edf5_campaign

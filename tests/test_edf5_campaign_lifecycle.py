@@ -73,7 +73,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         plugins = {name: (b'new plugin', f'[{section}]\nStockVehicleStores=0\nEDF5CampaignContent=0\nTestRangeContent=0\n'.encode())
                    for name, section in installer.PLUGINS}
         with ExitStack() as stack:
-            for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
+            for name, value in {'check_loader': None, 'plugin_files': plugins, 'wt_sound_files': {}, 'stack_weapons': {},
                                 'build_autoturret': ({}, False), 'install_autoturret': None,
                                 'build_assets': collections.defaultdict(lambda: None), 'find_edf41': None, 'material_compat_wanted': False}.items():   # a stand-in game: no EDF4.1
                 stack.enter_context(patch.object(installer, name, return_value=value))
