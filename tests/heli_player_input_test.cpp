@@ -363,8 +363,13 @@ int main() {
     float* movement=reinterpret_cast<float*>(inputVehicle+kInLateral);
     unsigned char contact=0;
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.hold.speed>0.0f && movement[2]>0.0f && recordedInput[2]>0.0f && pilot.hold.holding,
-          "W pitches nose down and flies forward while keeping height");
+    Check(pilot.hold.speed>0.0f && movement[2]>0.0f && recordedInput[2]>0.0f && !pilot.hold.holding,
+          "W pitches nose down in the default free flight without capturing a height");
+    pilot.mode.on=true;
+    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    Check(pilot.hold.holding,"switching to hover explicitly engages altitude hold");
+    pilot.mode.on=false;
+    PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
     Check(recordedInput[1]==movement[1] && recordedInput[3]==movement[3] && recordedInput[4]==movement[4],
           "throttle, w and yaw reach the attitude function unchanged");
     Put<float>(inputSeat,kSeatLY,1.0f);Put<float>(inputSeat,kSeatRY,1.0f);

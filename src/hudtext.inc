@@ -796,7 +796,7 @@ HUDTEXT(statsScopeMine,L"Mine",L"只看我",L"只看我",L"自分のみ")
 HUDTEXT(statsScopeAll,L"Everyone",L"所有人",L"所有人",L"全員")
 HUDTEXT(statsClose,L"Close",L"关闭",L"關閉",L"閉じる")
 HUDTEXT(statsBack,L"Back",L"返回",L"返回",L"戻る")
-HUDTEXT(padBack,L"Back",L"Back",L"Back",L"Back")
+HUDTEXT(padBack,L"Back",L"返回键",L"返回鍵",L"Back ボタン")
 HUDTEXT(statsSummary,L"Dealt %ls   Kills %u   Taken %ls   Healed %ls   Friendly fire %ls   Mission %ls",
         L"输出 %ls   击杀 %u   承伤 %ls   治疗 %ls   误伤 %ls   本关 %ls",L"輸出 %ls   擊殺 %u   承傷 %ls   治療 %ls   誤傷 %ls   本關 %ls",
         L"与ダメージ %ls   撃破 %u   被ダメージ %ls   回復 %ls   誤射 %ls   経過 %ls")
