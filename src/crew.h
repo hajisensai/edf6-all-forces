@@ -312,6 +312,8 @@ struct Config {
                                  //    twice, stock cut to the left half and ours to the right: a debug wipe)
     bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
                                  //    blast particles and vehicle guns' muzzle effects off (read at start)
+    bool gpuFxEfs=false;         // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
+                                 //    (with GpuFxNative 1 / 3; read at start)
     bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot

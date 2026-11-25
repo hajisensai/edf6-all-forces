@@ -1,11 +1,13 @@
 // Offline check of the GPU particle effects' pure half (src/gpufx/gpufx_sim.h): curves, the pool's budget and
 // replacement, the step's physics, back-to-front ordering, the depth formulas against standard and reversed
 // projections, and the procedural smoke flipbook (clear tile borders, determinism, time).
+#include "gpufx/gpufx_efs.h"
 #include "gpufx/gpufx_layers.h"
 #include "gpufx/gpufx_sim.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 using namespace crew::gpufx;
@@ -258,8 +260,79 @@ static void Layers() {
     CHECK(Near(LayerLod(30.0f,4000,4096),0.5f));
 }
 
+// The efs quad (gpufx_efs.h) against the stock VS 0x2130 transcribed step by step from its asm (corner rotation by
+// sincos / dp2, the quaternion product, the basis, the world centre), the fetch into strip order, the basis.
+static void EfsRefCorner(const EfsRecord& r,const EfsComposite& c,const float world[16],const float basis[9],float fx,float fy,
+                         float out[3]) {
+    const float s=std::sin(c.xrot),co=std::cos(c.xrot);
+    const float r4x=-s,r4y=co,r4z=s;
+    const float r3x=fy*r4x+fx*r4y,r3y=fy*r4y+fx*r4z;                 // dp2 r2.yx with r4.xy / r4.yz
+    const float px=r3x*c.position[2]+c.position[0],py=r3y*c.position[3]+c.position[1];
+    const float vx=r.scale[0]*px,vy=r.scale[1]*py;
+    const float qx=r.quat[0],qy=r.quat[1],qz=r.quat[2],qw=r.quat[3];
+    const float r0x=-qy*vx+vy*qx,r0z=qz*vx+qw*vy,r2y=-qx*vx-vy*qy,r0y=qw*vx-vy*qz;
+    const float t[3]{r0y*qw+(-r2y*qx+(r0z*-qz+qy*r0x)),r0z*qw+(-r2y*qy+(r0x*-qx+qz*r0y)),r0x*qw+(-r2y*qz+(r0y*-qy+qx*r0z))};
+    for(int k=0;k<3;++k)
+        out[k]=t[0]*basis[k]+t[1]*basis[3+k]+t[2]*basis[6+k]+
+               r.translate[0]*world[k]+r.translate[1]*world[4+k]+r.translate[2]*world[8+k]+world[12+k];
+}
+
+static void Efs() {
+    // EfsBasis: the world's rows; a billboard the camera's rows times the world rows' lengths.
+    float world[16]{2.0f,0.0f,0.0f,0.0f, 0.0f,0.0f,3.0f,0.0f, 0.0f,-4.0f,0.0f,0.0f, 5.0f,6.0f,7.0f,1.0f};
+    float camera[16]{0.0f,1.0f,0.0f,0.0f, -1.0f,0.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 9.0f,9.0f,9.0f,1.0f};
+    float basis[9];
+    EfsBasis(world,nullptr,basis);
+    CHECK(basis[0]==2.0f && basis[5]==3.0f && basis[7]==-4.0f && basis[1]==0.0f);
+    EfsBasis(world,camera,basis);
+    CHECK(Near(basis[1],2.0f) && Near(basis[3],-3.0f) && Near(basis[8],4.0f) && Near(basis[0],0.0f));
+    // EfsQuad: every corner of a turned, scaled, offset, rotated quad as the asm computes it.
+    std::uint32_t seed=12345u;
+    auto rnd=[&]{seed=seed*1664525u+1013904223u;return static_cast<float>(seed>>8)/16777216.0f*2.0f-1.0f;};
+    for(int it=0;it<200;++it) {
+        for(int i=0;i<12;++i)if(i%4!=3 || i>=12)world[i]=rnd()*2.0f;
+        world[12]=rnd()*50.0f;world[13]=rnd()*50.0f;world[14]=rnd()*50.0f;
+        EfsRecord r{};EfsComposite c{};
+        for(int k=0;k<3;++k)r.translate[k]=rnd()*4.0f;
+        r.scale[0]=rnd()*3.0f;r.scale[1]=rnd()*3.0f;r.scale[2]=1.0f;
+        float q[4]{rnd(),rnd(),rnd(),rnd()};const float ql=std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+        for(int k=0;k<4;++k)r.quat[k]=q[k]/ql;
+        c.xrot=rnd()*3.14159f;c.position[0]=rnd();c.position[1]=rnd();c.position[2]=rnd()*2.0f;c.position[3]=rnd()*2.0f;
+        for(int k=0;k<4;++k){c.texcoord[k]=rnd();c.color[k]=rnd();}
+        EfsBasis(world,(it&1) ? camera : nullptr,basis);
+        Instance o[2];
+        EfsQuad(r,c,world,basis,0.25f,1.5f,(it&2)!=0,o);
+        CHECK(o[0].size==0.25f && o[0].emissive==1.5f && o[1].size==((it&2) ? 1.0f : 0.0f));
+        CHECK(std::memcmp(o[0].color,c.color,sizeof(c.color))==0 && std::memcmp(o[1].color,c.texcoord,sizeof(c.texcoord))==0);
+        const float corners[5][2]{{-1.0f,1.0f},{1.0f,1.0f},{-1.0f,-1.0f},{1.0f,-1.0f},{0.3f,-0.7f}};
+        for(const auto& f:corners) {
+            float ref[3];EfsRefCorner(r,c,world,basis,f[0],f[1],ref);
+            const float ax[3]{o[0].rot,o[0].frame,o[0].soft};
+            for(int k=0;k<3;++k)CHECK(Near(o[0].pos[k]+f[0]*ax[k]+f[1]*o[1].pos[k],ref[k],1e-3f));
+        }
+    }
+    // EfsStripFetch: the stock corner order (uv (0,0) (1,0) (0,1) (1,1)) and a reordered one give the same strip.
+    const float fetch[4][4]{{-0.5f,0.5f,0.0f,0.0f},{0.5f,0.5f,1.0f,0.0f},{-0.5f,-0.5f,0.0f,1.0f},{0.5f,-0.5f,1.0f,1.0f}};
+    const std::uint32_t idx[6]{0,1,2,2,1,3};
+    float strip[16];
+    CHECK(EfsStripFetch(fetch,4,idx,strip));
+    for(int v=0;v<4;++v)CHECK(std::memcmp(strip+4*v,fetch[v],sizeof(float)*4)==0);
+    const float shuffled[5][4]{{9.0f,9.0f,9.0f,9.0f},{0.5f,-0.5f,1.0f,1.0f},{-0.5f,0.5f,0.0f,0.0f},{0.5f,0.5f,1.0f,0.0f},{-0.5f,-0.5f,0.0f,1.0f}};
+    const std::uint32_t sidx[6]{2,3,4,4,3,1};
+    float strip2[16];
+    CHECK(EfsStripFetch(shuffled,5,sidx,strip2) && std::memcmp(strip,strip2,sizeof(strip))==0);
+    // Refused: triangles sharing an edge that is not a diagonal, an index out of range, a degenerate triangle, an
+    // off-centre rectangle, three corners.
+    const std::uint32_t side[6]{0,1,2,0,2,3};CHECK(!EfsStripFetch(fetch,4,side,strip));
+    const std::uint32_t past[6]{0,1,2,2,1,4};CHECK(!EfsStripFetch(fetch,4,past,strip));
+    const std::uint32_t flat[6]{0,1,1,2,1,3};CHECK(!EfsStripFetch(fetch,4,flat,strip));
+    const std::uint32_t three[6]{0,1,2,2,1,0};CHECK(!EfsStripFetch(fetch,4,three,strip));
+    float off[4][4];std::memcpy(off,fetch,sizeof(off));off[1][0]=0.7f;off[3][0]=0.7f;
+    CHECK(!EfsStripFetch(off,4,idx,strip));
+}
+
 int main() {
-    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();
+    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();Efs();
     if(failures){std::printf("gpufx_sim: %d failure(s)\n",failures);return 1;}
     std::printf("gpufx_sim: ok\n");
     return 0;

@@ -42,6 +42,7 @@ cbuffer BatchConstants : register(b1) {
     float UInset;
     uint LitSet;
     float4 LitWeights;   // xyz: the normal's, the corner direction's and the camera direction's weights
+    float4 EfsFetch[4];  // the efs kinds: the stock quad's fetch (corner xy, uv zw) in strip order
 };
 // The stock lighting (bound only with lit batches): xgl_system (cb0 of the stock particle shaders) and
 // xgl_additional_light_setting (their cb3), the shadow map array and the clustered point lights.
@@ -152,7 +153,32 @@ float3 StockLight(float3 v, float3 n, float2 px) {
     return l + PointLights(v, n, px);
 }
 
+// The efs renderer's Texture<quad> (its VS 0x2130, docs/gpufx-re.md "efs"): a quad is a pair of instances
+// (gpufx_efs.h EfsQuad), its corner from the stock fetch, moved along the view ray by zbias (no nearer than `near`),
+// the stock fog, alpha and glow terms from its distance; in the stock system constants' own view and projection.
+V EfsVs(uint vid, uint iid) {
+    Particle a = Particles[Base + 2u * iid];
+    Particle b = Particles[Base + 2u * iid + 1u];
+    float4 f = EfsFetch[vid & 3u];
+    float3 w = a.pos + f.x * float3(a.rot, a.frame, a.soft) + f.y * b.pos;
+    float4 w4 = float4(w, 1.0);
+    float3 v = float3(dot(w4, Sys[0]), dot(w4, Sys[1]), dot(w4, Sys[2]));
+    float d = length(v);
+    float nd = max(d + a.size, a.emissive);
+    float4 pv = float4(v * (rsqrt(dot(v, v)) * nd), 1.0);
+    V o = (V)0;
+    o.pos = float4(dot(pv, Sys[8]), dot(pv, Sys[9]), dot(pv, Sys[10]), dot(pv, Sys[11]));
+    float3 wc = w - float3(Sys[4].w, Sys[5].w, Sys[6].w);
+    float dist = length(wc + normalize(wc) * (d - nd));
+    o.misc = float3(dist * Sys[34].x + Sys[34].y, 1.0 - (dist * Sys[35].z + Sys[35].w), dist * Sys[34].w + Sys[35].x);
+    o.color = a.color;
+    o.uv = float4(f.zw * b.color.zw + b.color.xy, 0.0, 0.0);
+    o.vpos = float4(pv.xyz, b.size);
+    return o;
+}
+
 V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
+    if (Kind >= 5u) return EfsVs(vid, iid);
     Particle p = Particles[Base + iid];
     float2 c = float2((vid & 1) ? 1.0 : -1.0, (vid & 2) ? -1.0 : 1.0);
     float s, co;
@@ -207,7 +233,25 @@ float SceneDistance(float2 px) {
     return abs((Proj._43 - d * Proj._44) / den);
 }
 
+// The efs PS 0x1D0: texel times colour, its glow floor (Sys[37]) and fog (Sys[36]) from the VS's terms; drawn
+// premultiplied (the stock SRC_ALPHA blends). Its depth test (LESS / LESS_EQUAL against the scene depth, no write)
+// against the depth copy.
+float4 EfsPs(V i) {
+    float4 t = Tex.Sample(Linear, i.uv.xy) * i.color;
+    if (i.vpos.w > 0.5) {
+        float scene = Depth.Load(int3(int2(i.pos.xy), 0));
+        if (i.vpos.w > 1.5 ? !(i.pos.z <= scene) : !(i.pos.z < scene)) discard;
+    }
+    float3 fz = saturate(i.misc);
+    float fog = exp2(log2(fz.x) * Sys[34].z) * Sys[36].w;
+    float3 rgb = max(exp2(log2(fz.z) * Sys[35].y) * Sys[37].w * Sys[37].rgb, t.rgb);
+    rgb += fog * (Sys[36].rgb - rgb);
+    float a = fz.y * saturate(t.a);
+    return float4(rgb * a, a);
+}
+
 float4 Ps(V i) : SV_Target0 {
+    if (Kind >= 5u) return EfsPs(i);
     float4 t = lerp(Tex.Sample(Linear, i.uv.xy), Tex.Sample(Linear, i.uv.zw), i.misc.x);
     float fade = saturate((SceneDistance(i.pos.xy) - i.misc.y) / max(i.misc.z, 0.001));
     if (Kind == 0u) {
@@ -280,6 +324,7 @@ struct BatchConstants {
     float cornerScale,uInset;
     std::uint32_t litSet;
     float litWeights[4];
+    float efsFetch[16];
 };
 static_assert(sizeof(FrameConstants)%16==0 && sizeof(BatchConstants)%16==0,"constant buffer sizes");
 
@@ -305,7 +350,7 @@ struct Renderer::Impl final {
     ComPtr<ID3DDeviceContextState> isolated;
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
-    ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd;
+    ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
     ComPtr<ID3D11DepthStencilState> noDepth;
     ComPtr<ID3D11RasterizerState> raster,rasterCut;
     ComPtr<ID3D11SamplerState> sampler;
@@ -377,6 +422,11 @@ struct Renderer::Impl final {
         ra.SrcBlendAlpha=D3D11_BLEND_ONE;ra.DestBlendAlpha=D3D11_BLEND_ZERO;ra.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
         D3D11_BLEND_DESC bd=ba;auto& rd=bd.RenderTarget[0];
         rd.SrcBlend=rd.DestBlend=rd.SrcBlendAlpha=rd.DestBlendAlpha=D3D11_BLEND_ONE;
+        // The efs blends (the ctx table 0x10FAEE0, docs/gpufx-re.md): 1 SRC_ALPHA/ONE ADD, 2 SRC_ALPHA/ONE REV_SUBTRACT,
+        // both with alpha ONE/ZERO; drawn premultiplied. (Its blend 0 is blendStockAlpha.)
+        D3D11_BLEND_DESC be=ba;auto& re=be.RenderTarget[0];
+        re.DestBlend=D3D11_BLEND_ONE;
+        D3D11_BLEND_DESC bs=be;bs.RenderTarget[0].BlendOp=D3D11_BLEND_OP_REV_SUBTRACT;
         D3D11_DEPTH_STENCIL_DESC ds{};ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         ds.DepthFunc=D3D11_COMPARISON_ALWAYS;
         D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.CullMode=D3D11_CULL_NONE;r.DepthClipEnable=TRUE;
@@ -391,7 +441,8 @@ struct Renderer::Impl final {
         fb.BindFlags=D3D11_BIND_CONSTANT_BUFFER;fb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         D3D11_BUFFER_DESC bb=fb;bb.ByteWidth=sizeof(BatchConstants);
         if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateBlendState(&ba,&blendStockAlpha)) ||
-           FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
+           FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateBlendState(&be,&blendEfsAdd)) ||
+           FAILED(device->CreateBlendState(&bs,&blendEfsSubtract)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
            FAILED(device->CreateRasterizerState(&r,&raster)) || FAILED(device->CreateRasterizerState(&rc,&rasterCut)) ||
            FAILED(device->CreateSamplerState(&s,&sampler)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
@@ -594,9 +645,11 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         int n=batch.instances ? batch.count : 0;
         if(n>kMaxInstances-total)n=kMaxInstances-total;
         if(n<0)n=0;
+        const bool efs=batch.kind>=Kind::efsAlpha;
+        if(efs)n&=~1;   // whole quads (instance pairs), in the stock order
         ranges[b]={total,n};
         if(n==0)continue;
-        if(batch.sorted) {
+        if(batch.sorted && !efs) {
             SortBackToFront(batch.instances,n,view.view,st.lookNegZ,s.order.data(),s.keys.data());
             for(int i=0;i<n;++i)out[total+i]=batch.instances[s.order[i]];
         } else {
@@ -670,11 +723,21 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             context->PSSetShaderResources(3,5,lsrv);
             context->VSSetShaderResources(3,5,lsrv);   // the set 0xC08 lights per vertex
         }
+        // b2: the lit batches' system constants, or the efs batches' (the same xgl_system, taken from an efs draw).
+        ID3D11Buffer* systemBound=litBound ? L.system : nullptr;
         for(int b=0;b<count;++b) {
             const Batch& batch=batches[b];
             if(ranges[b].count==0)continue;
+            const bool efs=batch.kind>=Kind::efsAlpha;
+            if(efs && (!view.efsSystem || !batch.texture))continue;
             ID3D11ShaderResourceView* tex=batch.texture ? batch.texture : s.flipView.Get();
             if(!tex)continue;
+            ID3D11Buffer* system=efs ? view.efsSystem : litBound ? L.system : systemBound;
+            if(system!=systemBound) {
+                context->VSSetConstantBuffers(2,1,&system);
+                context->PSSetConstantBuffers(2,1,&system);
+                systemBound=system;
+            }
             BatchConstants bc{};
             bc.base=static_cast<std::uint32_t>(ranges[b].base);
             bc.gridX=static_cast<std::uint32_t>(batch.gridX>0 ? batch.gridX : 1);
@@ -685,15 +748,19 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             if(lit && !litBound)continue;
             bc.litSet=static_cast<std::uint32_t>(batch.litSet);std::memcpy(bc.litWeights,batch.litWeights,sizeof(batch.litWeights));
             if(batch.kind==Kind::smoke)bc.litSet=litBound ? 1u : 0u;   // ours lit by the stock lighting when captured
+            std::memcpy(bc.efsFetch,batch.efsFetch,sizeof(bc.efsFetch));
             if(FAILED(context->Map(s.batchCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))continue;
             std::memcpy(map.pData,&bc,sizeof(bc));
             context->Unmap(s.batchCb.Get(),0);
             context->PSSetShaderResources(1,1,&tex);
             ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha || batch.kind==Kind::nativeLitAlpha ? s.blendStockAlpha.Get() :
-                batch.kind==Kind::nativeAdditive || batch.kind==Kind::nativeLitAdditive ? s.blendStockAdd.Get() : s.blend.Get();
+                batch.kind==Kind::nativeAdditive || batch.kind==Kind::nativeLitAdditive ? s.blendStockAdd.Get() :
+                batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :
+                batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
-            context->DrawInstanced(4,static_cast<UINT>(ranges[b].count),0,0);
-            st.drawn+=ranges[b].count;++st.batches;
+            const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
+            context->DrawInstanced(4,static_cast<UINT>(drawn),0,0);
+            st.drawn+=drawn;++st.batches;
         }
         // Nothing of the native frame stays referenced by the private state.
         context->ClearState();

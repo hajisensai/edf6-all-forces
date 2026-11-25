@@ -26,7 +26,12 @@ enum class Kind : std::uint32_t {
     // The stock lit particle sets (docs/gpufx-re.md, PS 0x196BA60 / VS 0x19848A0): the same rgb and a, the rgb times
     // the stock light sum (four directional lights, the first shadowed, the ambient, the clustered point lights).
     nativeLitAlpha=3,
-    nativeLitAdditive=4
+    nativeLitAdditive=4,
+    // The efs renderer's Texture<quad> (docs/gpufx-re.md "efs", gpufx_efs.h): two instances a quad (EfsQuad), the
+    // stock fog / glow / distance alpha from the system constants (ViewParams::efsSystem), its blends 0 / 1 / 2.
+    efsAlpha=5,
+    efsAdditive=6,
+    efsSubtract=7
 };
 
 // The stock lighting a lit batch needs, borrowed from a stock lit draw of this view (gpufx.cpp LitCapture): the
@@ -55,6 +60,7 @@ struct Batch {
     // direction, +0x11C towards the camera).
     int litSet=0;
     float litWeights[3]{};
+    float efsFetch[16]{};   // the efs kinds: the stock quad's four fetch entries (corner xy, uv zw) in strip order
     const Instance* instances=nullptr;
     int count=0;
 };
@@ -69,6 +75,7 @@ struct ViewParams {
     // The stock particle VS's distance fade (xgl_system cb0[35].z/.w): alpha *= sat(1 - (distance * mul + add)).
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
+    ID3D11Buffer* efsSystem=nullptr;   // xgl_system as an efs draw bound it (608 bytes); efs batches skipped without
     bool rightHalf=false; // GpuFxNative=3: drawn into the right half of the viewport only
 };
 

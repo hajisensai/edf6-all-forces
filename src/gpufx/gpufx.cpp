@@ -1,4 +1,5 @@
 #include "gpufx.h"
+#include "gpufx_efs.h"
 #include "gpufx_gpu.h"
 #include "gpufx_layers.h"
 #include "gpufx_sim.h"
@@ -67,7 +68,7 @@ std::vector<Instance> staging;
 // The published frame: the game thread swaps a full vector in, the render thread copies it out.
 SRWLOCK publishLock=SRWLOCK_INIT;
 std::vector<Instance> published;
-std::atomic<bool> optEnabled{false},optProbe{false},optTest{false},optLayers{false};
+std::atomic<bool> optEnabled{false},optProbe{false},optTest{false},optLayers{false},optEfs{false};
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
 std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right), 3 the wipe (below)
 std::atomic<bool> anchorReady{false};
@@ -99,7 +100,7 @@ ComPtr<ID3D11Texture2D> observedDepth;
 unsigned observedFormat=0;
 std::vector<Instance> renderOwn;
 // The stock cards taken over in this view: their instances and one batch per stock draw (in the stock order).
-struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,grid,start,count,litSet;float litWeights[3]; };
+struct NativeBatch { ComPtr<ID3D11ShaderResourceView> texture; Kind kind; int frames,grid,start,count,litSet;float litWeights[3];int geom=-1; };
 std::vector<Instance> nativeInstances;
 std::vector<NativeBatch> nativeBatches;
 std::vector<Batch> batches;
@@ -563,11 +564,267 @@ bool InstallCoreDraw() noexcept {
     return false;
 }
 
+// ---- the efs renderer's Texture<quad> (docs/gpufx-re.md "efs", gpufx_efs.h) ----
+// Texture<quad>::Draw(self, ctx, world 4x4, desc) 0x10DD1F0, reached only through its vtable (0x1A09DC0, slot 2):
+// one DrawIndexedInstanced of the material's quad (6 indices), `count` instances, from a shader set chosen by soft
+// (desc+0x10) and lighting (desc+0x20). Only the plain set (VS 0x2130 / PS 0x1D0: neither) is taken over.
+constexpr unsigned kEfsQuadSlot=0x1A09DD0,kEfsQuadDraw=0x10DD1F0;
+constexpr unsigned char kEfsQuadCode[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8D,
+    0xA8,0x68,0xFE,0xFF,0xFF};
+constexpr unsigned kEfsCamera=0x2139A90;   // billboards: *(+8) + 0x10, the camera's rows (FUN_112CDD0 reads them)
+using EfsDrawFn=void(__fastcall*)(void*,void*,const float*,const unsigned char*);
+EfsDrawFn efsDrawNext=nullptr;
+// The draw's description: material, billboard byte, soft, zbias, nearest distance, lighting, the record index list
+// (ushorts in uint4 units; null: the records in order), the 0x30-byte records, their count, the 0x40-byte composites,
+// the texture object.
+constexpr std::size_t kEfsBillboard=0x08,kEfsSoft=0x10,kEfsZBias=0x14,kEfsNear=0x18,kEfsLit=0x20,kEfsIndex=0x28,
+    kEfsIndexUnits=0x30,kEfsRecords=0x38,kEfsCount=0x40,kEfsComposites=0x48,kEfsTexture=0x50,kEfsDesc=0x58;
+constexpr std::size_t kEfsMatMesh=0x20,kEfsMeshIndices=0x28,kEfsMatFetch=0x28;
+// The draw context: the D3D context, the blend it applies (enable, then Src, Dst, Op, SrcA, DstA, OpA as D3D11 enums)
+// and its depth (write mask, compare).
+constexpr std::size_t kCtxDevice=0x08,kCtxBlendOn=0x84,kCtxBlend=0x88,kCtxDepthWrite=0x19C,kCtxDepthFunc=0x1A0;
+constexpr int kEfsBlends[3][6]={{5,6,1,2,1,1},{5,2,1,2,1,1},{5,2,3,2,1,1}};   // table 0x10FAEE0: alpha, add, subtract
+
+// The material's quad as a stock draw bound it (fetch t0, the index buffer), copied back once per material: its
+// four corners into strip order (EfsStripFetch). Draws of a material not yet read stay stock. Render thread.
+struct EfsGeom {
+    const void* mesh=nullptr;const void* fetch=nullptr;
+    int state=0;   // 0 unread, 1 copies pending, 2 known, -1 not a plain quad (stays stock)
+    ComPtr<ID3D11Buffer> fetchCopy,indexCopy;
+    int fetchCount=0;bool wide=false;
+    float strip[16]{};
+};
+std::vector<EfsGeom> efsGeoms;
+ComPtr<ID3D11Buffer> efsSystem;   // xgl_system as the stock efs draw binds it (VS / PS b0)
+int efsTextureChain=0;            // 1 T+0x10, 2 T+0x08, 3 T+0x10 -> +0x10: the SRV the stock draw binds at ps t0
+struct EfsProbe {
+    unsigned calls=0,replaced=0,quads=0,outside=0,refusedRead=0,refusedLit=0,refusedSoft=0,refusedBlend=0,refusedDepth=0,
+        refusedGeom=0,refusedTexture=0,refusedRoom=0,systemChanged=0;
+    int blendsLogged=0;
+};
+EfsProbe efsProbe;
+
+const void* EfsSrv(const unsigned char* t,int chain) noexcept {
+    if(!Readable(t,0x18))return nullptr;
+    if(chain==1)return At<const void*>(t,0x10);
+    if(chain==2)return At<const void*>(t,0x08);
+    if(chain==3){const auto* p=At<const unsigned char*>(t,0x10);return Readable(p,0x18) ? At<const void*>(p,0x10) : nullptr;}
+    return nullptr;
+}
+
+// Which efs blend (0 alpha, 1 add, 2 subtract) the context applies; -1 none of them.
+int EfsBlend(const unsigned char* ctx) noexcept {
+    if(!At<unsigned char>(ctx,kCtxBlendOn))return -1;
+    int b[6];std::memcpy(b,ctx+kCtxBlend,sizeof(b));
+    for(int m=0;m<3;++m)if(std::memcmp(b,kEfsBlends[m],sizeof(b))==0)return m;
+    return -1;
+}
+
+// 0 untested (ALWAYS), 1 LESS, 2 LESS_EQUAL; -1 a depth write or another compare.
+int EfsDepth(const unsigned char* ctx) noexcept {
+    if(At<int>(ctx,kCtxDepthWrite)!=0)return -1;
+    const int f=At<int>(ctx,kCtxDepthFunc);
+    return f==D3D11_COMPARISON_ALWAYS ? 0 : f==D3D11_COMPARISON_LESS ? 1 : f==D3D11_COMPARISON_LESS_EQUAL ? 2 : -1;
+}
+
+EfsGeom* FindGeom(const void* mesh,const void* fetch,bool add) noexcept {
+    for(auto& g:efsGeoms)if(g.mesh==mesh && g.fetch==fetch)return &g;
+    if(!add || efsGeoms.size()>=32)return nullptr;
+    try { efsGeoms.emplace_back(); } catch(...) { return nullptr; }
+    EfsGeom& g=efsGeoms.back();g.mesh=mesh;g.fetch=fetch;
+    return &g;
+}
+
+// After a stock efs draw: copy its quad's fetch and first six indices into staging buffers (read in WorldEnd).
+void EfsCopyGeometry(ID3D11DeviceContext* c,EfsGeom& g) noexcept {
+    g.state=-1;
+    ComPtr<ID3D11ShaderResourceView> fv;c->VSGetShaderResources(0,1,&fv);
+    ComPtr<ID3D11Buffer> ib;DXGI_FORMAT fmt=DXGI_FORMAT_UNKNOWN;UINT off=0;c->IAGetIndexBuffer(&ib,&fmt,&off);
+    if(!fv || !ib || (fmt!=DXGI_FORMAT_R16_UINT && fmt!=DXGI_FORMAT_R32_UINT)) {
+        Log("GPUFX efs quad: fetch %p index %p format %d; stays stock",static_cast<void*>(fv.Get()),static_cast<void*>(ib.Get()),
+            static_cast<int>(fmt));
+        return;
+    }
+    D3D11_SHADER_RESOURCE_VIEW_DESC vd{};fv->GetDesc(&vd);
+    UINT first=0;
+    if(vd.ViewDimension==D3D11_SRV_DIMENSION_BUFFER)first=vd.Buffer.FirstElement;
+    else if(vd.ViewDimension==D3D11_SRV_DIMENSION_BUFFEREX)first=vd.BufferEx.FirstElement;
+    else return;
+    ComPtr<ID3D11Resource> res;fv->GetResource(&res);ComPtr<ID3D11Buffer> fb;
+    if(FAILED(res.As(&fb)))return;
+    D3D11_BUFFER_DESC fd{};fb->GetDesc(&fd);
+    const bool structured=(fd.MiscFlags&D3D11_RESOURCE_MISC_BUFFER_STRUCTURED)!=0;
+    if(structured ? fd.StructureByteStride!=16 : vd.Format!=DXGI_FORMAT_R32G32B32A32_FLOAT)return;
+    const UINT begin=first*16u;
+    if(begin>=fd.ByteWidth)return;
+    const UINT bytes=(std::min)(fd.ByteWidth-begin,256u)&~15u;
+    D3D11_BUFFER_DESC id{};ib->GetDesc(&id);
+    const UINT isize=fmt==DXGI_FORMAT_R32_UINT ? 4u : 2u;
+    if(bytes<64 || off+6u*isize>id.ByteWidth)return;
+    ComPtr<ID3D11Device> device;c->GetDevice(&device);
+    D3D11_BUFFER_DESC sf{};sf.ByteWidth=bytes;sf.Usage=D3D11_USAGE_STAGING;sf.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    if(structured){sf.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;sf.StructureByteStride=16;}
+    D3D11_BUFFER_DESC si{};si.ByteWidth=32;si.Usage=D3D11_USAGE_STAGING;si.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    if(!device || FAILED(device->CreateBuffer(&sf,nullptr,&g.fetchCopy)) || FAILED(device->CreateBuffer(&si,nullptr,&g.indexCopy))) {
+        g.fetchCopy.Reset();g.indexCopy.Reset();return;
+    }
+    const D3D11_BOX fbox{begin,0,0,begin+bytes,1,1},ibox{off,0,0,off+6u*isize,1,1};
+    c->CopySubresourceRegion(g.fetchCopy.Get(),0,0,0,0,fb.Get(),0,&fbox);
+    c->CopySubresourceRegion(g.indexCopy.Get(),0,0,0,0,ib.Get(),0,&ibox);
+    g.fetchCount=static_cast<int>(bytes/16u);g.wide=isize==4u;g.state=1;
+}
+
+// WorldEnd: the copies that are ready, into strip order.
+void EfsReadGeometry(ID3D11DeviceContext* c) noexcept {
+    for(auto& g:efsGeoms) {
+        if(g.state!=1)continue;
+        D3D11_MAPPED_SUBRESOURCE fm{},im{};
+        if(c->Map(g.fetchCopy.Get(),0,D3D11_MAP_READ,D3D11_MAP_FLAG_DO_NOT_WAIT,&fm)!=S_OK)continue;
+        if(c->Map(g.indexCopy.Get(),0,D3D11_MAP_READ,D3D11_MAP_FLAG_DO_NOT_WAIT,&im)!=S_OK){c->Unmap(g.fetchCopy.Get(),0);continue;}
+        std::uint32_t idx[6];
+        for(int i=0;i<6;++i)
+            idx[i]=g.wide ? static_cast<const std::uint32_t*>(im.pData)[i] : static_cast<const std::uint16_t*>(im.pData)[i];
+        const int n=(std::min)(g.fetchCount,16);
+        float fetch[16][4]{};
+        std::memcpy(fetch,fm.pData,sizeof(float)*4*static_cast<std::size_t>(n));
+        c->Unmap(g.indexCopy.Get(),0);c->Unmap(g.fetchCopy.Get(),0);
+        g.fetchCopy.Reset();g.indexCopy.Reset();
+        const bool ok=EfsStripFetch(fetch,n,idx,g.strip);
+        g.state=ok ? 2 : -1;
+        const float* f=fetch[idx[0]<16u ? idx[0] : 0u];
+        Log("GPUFX efs quad mesh %p fetch %p: indices %u %u %u %u %u %u, fetch[%u] %.3f %.3f uv %.3f %.3f -> %s",g.mesh,g.fetch,idx[0],
+            idx[1],idx[2],idx[3],idx[4],idx[5],idx[0],f[0],f[1],f[2],f[3],ok ? "a plain quad: taken over" : "NOT a plain quad: stays stock");
+    }
+}
+
+// After a stock efs draw (not taken over, or the wipe's stock half): its system constants, texture chain and quad.
+void EfsAfterStock(ID3D11DeviceContext* c,const unsigned char* desc) noexcept {
+    ComPtr<ID3D11Buffer> cb;c->VSGetConstantBuffers(0,1,&cb);
+    if(cb && cb.Get()!=efsSystem.Get() && LitCapture::Bytes(cb.Get())>=608) {
+        if(efsSystem)++efsProbe.systemChanged;
+        else Log("GPUFX efs system constants %p (%u bytes)",static_cast<void*>(cb.Get()),LitCapture::Bytes(cb.Get()));
+        efsSystem=cb;
+    }
+    if(!Readable(desc,kEfsDesc))return;
+    if(!efsTextureChain) {
+        const auto* t=At<const unsigned char*>(desc,kEfsTexture);
+        if(const void* bound=t ? BoundTexture(c) : nullptr) {
+            for(int k=1;k<=3;++k) {
+                if(EfsSrv(t,k)!=bound)continue;
+                efsTextureChain=k;
+                Log("GPUFX efs texture chain %d (%s) is the bound SRV",k,k==1 ? "T+0x10" : k==2 ? "T+0x08" : "T+0x10 -> +0x10");
+                break;
+            }
+        }
+    }
+    const auto* mat=At<const unsigned char*>(desc,0);
+    if(!Readable(mat,kEfsMatFetch+8))return;
+    EfsGeom* g=FindGeom(At<const void*>(mat,kEfsMatMesh),At<const void*>(mat,kEfsMatFetch),true);
+    if(g && g->state==0)EfsCopyGeometry(c,*g);
+}
+
+// One stock efs quad draw into a batch of instance pairs (true: drawn by ours).
+bool EfsTakeOver(const unsigned char* ctx,const float* world,const unsigned char* desc) noexcept {
+    if(!inWorld){++efsProbe.outside;return false;}
+    if(!Readable(desc,kEfsDesc) || !Readable(ctx,kCtxDepthFunc+4) || !Readable(world,64)){++efsProbe.refusedRead;return false;}
+    if(At<const void*>(desc,kEfsLit)){++efsProbe.refusedLit;return false;}
+    if(std::fabs(At<float>(desc,kEfsSoft))>0.0f){++efsProbe.refusedSoft;return false;}
+    const int blend=EfsBlend(ctx),depth=EfsDepth(ctx);
+    if(blend<0 || depth<0) {
+        if(blend<0)++efsProbe.refusedBlend;else ++efsProbe.refusedDepth;
+        if(optProbe.load(std::memory_order_relaxed) && efsProbe.blendsLogged<8) {
+            ++efsProbe.blendsLogged;
+            int b[6];std::memcpy(b,ctx+kCtxBlend,sizeof(b));
+            Log("GPUFX efs refused: blend on=%u %d %d %d %d %d %d depth write=%d func=%d",At<unsigned char>(ctx,kCtxBlendOn),b[0],b[1],b[2],
+                b[3],b[4],b[5],At<int>(ctx,kCtxDepthWrite),At<int>(ctx,kCtxDepthFunc));
+        }
+        return false;
+    }
+    const void* srv=efsTextureChain ? EfsSrv(At<const unsigned char*>(desc,kEfsTexture),efsTextureChain) : nullptr;
+    if(!srv){++efsProbe.refusedTexture;return false;}
+    const auto* mat=At<const unsigned char*>(desc,0);
+    const auto* mesh=Readable(mat,kEfsMatFetch+8) ? At<const unsigned char*>(mat,kEfsMatMesh) : nullptr;
+    const EfsGeom* g=mesh && Readable(mesh,kEfsMeshIndices+4) && At<unsigned>(mesh,kEfsMeshIndices)==6u ?
+        FindGeom(mesh,At<const void*>(mat,kEfsMatFetch),false) : nullptr;
+    if(!g || g->state!=2 || !efsSystem){++efsProbe.refusedGeom;return false;}
+    const long long count=At<long long>(desc,kEfsCount);
+    if(count<=0)return true;   // nothing to draw
+    const int room=(Renderer::kMaxInstances-kBudget-static_cast<int>(nativeInstances.size()))/2;
+    if(count>room || static_cast<int>(nativeBatches.size())>=Renderer::kMaxBatches-1){++efsProbe.refusedRoom;return false;}
+    const auto* records=At<const EfsRecord*>(desc,kEfsRecords);
+    const auto* comps=At<const EfsComposite*>(desc,kEfsComposites);
+    const auto* index=At<const std::uint16_t*>(desc,kEfsIndex);
+    const long long indexed=index ? At<long long>(desc,kEfsIndexUnits)*8 : count;
+    const auto n=static_cast<std::size_t>(count);
+    if(!Readable(records,sizeof(EfsRecord)*n) || !Readable(comps,sizeof(EfsComposite)*n) ||
+       (index && (indexed<count || !Readable(index,sizeof(std::uint16_t)*n)))){++efsProbe.refusedRead;return false;}
+    const float* camera=nullptr;
+    if(At<unsigned char>(desc,kEfsBillboard)) {
+        const auto* cam=Readable(image+kEfsCamera+8,8) ? At<const unsigned char*>(image+kEfsCamera,8) : nullptr;
+        if(!cam || !Readable(cam+0x10,64)){++efsProbe.refusedRead;return false;}
+        camera=reinterpret_cast<const float*>(cam+0x10);
+    }
+    float basis[9];EfsBasis(world,camera,basis);
+    const float zbias=At<float>(desc,kEfsZBias),nearest=At<float>(desc,kEfsNear);
+    const std::size_t start=nativeInstances.size();
+    try { nativeInstances.resize(start+2u*n); } catch(...) { nativeInstances.resize(start);return false; }
+    Instance* out=nativeInstances.data()+start;
+    int quads=0;
+    for(std::size_t i=0;i<n;++i) {
+        const std::size_t r=index ? index[i] : i;
+        if(r>=n)continue;   // past the stock buffers' end
+        EfsQuad(records[r],comps[r],world,basis,zbias,nearest,depth!=0,out+2*quads);
+        out[2*quads+1].size=static_cast<float>(depth);   // 1 LESS, 2 LESS_EQUAL
+        ++quads;
+    }
+    nativeInstances.resize(start+2u*static_cast<std::size_t>(quads));
+    ++efsProbe.replaced;efsProbe.quads+=static_cast<unsigned>(quads);
+    if(quads==0)return true;
+    const Kind kind=blend==0 ? Kind::efsAlpha : blend==1 ? Kind::efsAdditive : Kind::efsSubtract;
+    const int geom=static_cast<int>(g-efsGeoms.data());
+    // Consecutive draws of one texture, blend and quad: one batch.
+    if(!nativeBatches.empty()) {
+        NativeBatch& last=nativeBatches.back();
+        if(last.kind==kind && last.geom==geom && last.texture.Get()==srv &&
+           static_cast<std::size_t>(last.start+last.count)==start){last.count+=2*quads;return true;}
+    }
+    NativeBatch b{};
+    b.texture=static_cast<ID3D11ShaderResourceView*>(const_cast<void*>(srv));
+    b.kind=kind;b.frames=1;b.grid=1;b.start=static_cast<int>(start);b.count=2*quads;b.litSet=0;b.geom=geom;
+    try { nativeBatches.push_back(std::move(b)); } catch(...) { nativeInstances.resize(start);return false; }
+    return true;
+}
+
+void __fastcall EfsQuadHook(void* self,void* ctx,const float* world,const unsigned char* desc) {
+    ++efsProbe.calls;
+    const int mode=optNative.load(std::memory_order_relaxed);
+    const bool want=optEfs.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed) && (mode==1 || mode==3);
+    const auto* c=static_cast<const unsigned char*>(ctx);
+    const bool taken=want && EfsTakeOver(c,world,desc);
+    if(taken && mode!=3)return;
+    ID3D11DeviceContext* dc=Readable(c,kCtxDevice+8) ? At<ID3D11DeviceContext*>(c,kCtxDevice) : nullptr;
+    StockScissor wipe;
+    if(taken)wipe.Begin(dc);
+    efsDrawNext(self,ctx,world,desc);
+    wipe.End();
+    if(inWorld && dc && want)EfsAfterStock(dc,desc);
+}
+
+bool InstallEfs() noexcept {
+    void** slot=reinterpret_cast<void**>(image+kEfsQuadSlot);
+    if(!Matches(kEfsQuadDraw,kEfsQuadCode,sizeof(kEfsQuadCode)) || *slot!=image+kEfsQuadDraw)return false;
+    efsDrawNext=reinterpret_cast<EfsDrawFn>(image+kEfsQuadDraw);
+    if(PatchVtableSlot(slot,image+kEfsQuadDraw,reinterpret_cast<void*>(&EfsQuadHook)))return true;
+    efsDrawNext=nullptr;
+    return false;
+}
+
 void PublishOptions() noexcept {
     const Config& c=Cfg();
     optEnabled.store(c.enabled && c.gpuFx,std::memory_order_relaxed);
     optLayers.store(c.enabled && c.gpuFx && c.gpuFxLayers && layersInstalled,std::memory_order_relaxed);
     optNative.store(c.gpuFxNative,std::memory_order_relaxed);
+    optEfs.store(c.enabled && c.gpuFx && c.gpuFxEfs && efsDrawNext,std::memory_order_relaxed);
     optProbe.store(c.gpuFxProbe,std::memory_order_relaxed);
     optTest.store(c.gpuFxTest,std::memory_order_relaxed);
 }
@@ -858,6 +1115,10 @@ bool Install() noexcept {
             layersInstalled=InstallLayers();
             if(!layersInstalled)Log("GPUFX layers: Explosion EDF+%X not as expected; the layered emitters stay off",kExplosion);
         }
+        if(c.enabled && c.gpuFx && c.gpuFxEfs) {
+            const bool efs=InstallEfs();
+            Log("GPUFX efs quad draw EDF+%X (slot EDF+%X): %s",kEfsQuadDraw,kEfsQuadSlot,efs ? "hooked" : "not as expected; stays stock");
+        }
         PublishOptions();
     } __except(EXCEPTION_EXECUTE_HANDLER) {Log("GPUFX profile fault; stock particles untouched");ok=false;}
     installed.store(true,std::memory_order_release);
@@ -964,7 +1225,7 @@ void ObserveSurface(ID3D11DeviceContext* context,int pass) noexcept {
 void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire) || view!=currentView || !inWorld) {inWorld=false;return;}
     inWorld=false;
-    if(probeReset.exchange(false,std::memory_order_acq_rel)){probe=Probe{};}
+    if(probeReset.exchange(false,std::memory_order_acq_rel)){probe=Probe{};efsProbe=EfsProbe{};}
     const bool enabled=optEnabled.load(std::memory_order_relaxed);
     const bool wantProbe=optProbe.load(std::memory_order_relaxed);
     if(!enabled || !context){nativeInstances.clear();nativeBatches.clear();return;}
@@ -992,6 +1253,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         vp.exposure=exposure;
         vp.lights=litCapture.Lights();
         vp.rightHalf=optNative.load(std::memory_order_relaxed)==3;
+        EfsReadGeometry(context);
+        vp.efsSystem=efsSystem.Get();
         batches.clear();
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
@@ -1002,6 +1265,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             b.gridX=b.gridY=nb.grid;b.frames=nb.frames;b.cornerScale=0.70710678f;b.uInset=0.0005f;b.sorted=false;
             b.instances=nativeInstances.data()+nb.start;b.count=nb.count;
             b.litSet=nb.litSet;std::memcpy(b.litWeights,nb.litWeights,sizeof(b.litWeights));
+            if(nb.geom>=0 && static_cast<std::size_t>(nb.geom)<efsGeoms.size())std::memcpy(b.efsFetch,efsGeoms[nb.geom].strip,sizeof(b.efsFetch));
             batches.push_back(b);
         }
         Stats st{};
@@ -1038,6 +1302,11 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             static_cast<int>(renderOwn.size()),kBudget,poolDropped.load(std::memory_order_relaxed),probe.nativeCalls,probe.byPass[2],probe.byPass[5],
             probe.coreCalls,probe.nativeReplaced,probe.coreReplaced,probe.nativeRefused,probe.refusedLit,probe.refusedBlend,probe.refusedGrid,
             probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
+        Log("GPUFX   efs %s: quad draws %u taken over %u (quads %u) outside %u; refused read %u lit %u soft %u blend %u depth %u geom %u "
+            "texture %u room %u; system changed %u, texture chain %d, quads known %u",optEfs.load(std::memory_order_relaxed) ? "on" : "off",
+            efsProbe.calls,efsProbe.replaced,efsProbe.quads,efsProbe.outside,efsProbe.refusedRead,efsProbe.refusedLit,efsProbe.refusedSoft,
+            efsProbe.refusedBlend,efsProbe.refusedDepth,efsProbe.refusedGeom,efsProbe.refusedTexture,efsProbe.refusedRoom,
+            efsProbe.systemChanged,efsTextureChain,static_cast<unsigned>(efsGeoms.size()));
         Log("GPUFX   lit taken over=%u (set 0xC08 %u); lighting captured in %u views, incomplete %u",probe.litReplaced,probe.litSetB,
             probe.litCaptures,probe.litCaptureFailed);
         Log("GPUFX   layers %s: shots %u blasts %u -> particles %u, queue full %u",optLayers.load(std::memory_order_relaxed) ? "on" : "off",

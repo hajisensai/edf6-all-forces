@@ -1,6 +1,7 @@
 // Real Direct3D 11 (WARP) run of the GPU particle renderer (src/gpufx/gpufx_gpu.cpp): the shaders compile, a lit smoke
 // card lands where the projection puts it, scene depth in front hides it, depth just behind softens it, the target's
 // alpha and every native binding survive the draw, and a stock-texture batch draws with its own texture.
+#include "gpufx/gpufx_efs.h"
 #include "gpufx/gpufx_gpu.h"
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -254,6 +255,95 @@ int main() {
         CHECK(centre(px)[0]<0.01f && centre(px)[1]<0.01f && std::fabs(centre(px)[2]-1.125f)<0.01f);
         px=drawLit(vp);
         CHECK(centre(px)[0]==0.0f && centre(px)[2]==0.0f && st.drawn==0);
+    }
+    // 8. The efs quads (gpufx_efs.h) with a made-up efs system constants (the view, the projection, the camera, the
+    // fog / distance alpha / glow terms): a 1.5 m quad 10 m ahead, white texture, colour (1, 0.5, 0.25).
+    {
+        D3D11_TEXTURE2D_DESC d{};d.Width=d.Height=1;d.MipLevels=d.ArraySize=1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
+        d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        const std::uint32_t white=0xFFFFFFFFu;D3D11_SUBRESOURCE_DATA init{&white,4,0};
+        ComPtr<ID3D11Texture2D> t;ComPtr<ID3D11ShaderResourceView> v;
+        CHECK(SUCCEEDED(rig.device->CreateTexture2D(&d,&init,&t)) && SUCCEEDED(rig.device->CreateShaderResourceView(t.Get(),nullptr,&v)));
+        auto system=[&](auto&& edit){
+            float sys[152]{};
+            sys[0*4+0]=sys[1*4+1]=sys[2*4+2]=1.0f;                              // world -> view: identity
+            sys[4*4+0]=sys[5*4+1]=sys[6*4+2]=1.0f;                              // view -> world, the camera at the origin
+            sys[8*4+0]=vp.proj[0];sys[9*4+1]=vp.proj[5];                        // the projection's columns
+            sys[10*4+2]=vp.proj[10];sys[10*4+3]=vp.proj[14];sys[11*4+2]=vp.proj[11];
+            sys[34*4+2]=1.0f;sys[35*4+1]=1.0f;                                  // fog / glow powers; no fog, no glow, alpha 1
+            edit(sys);
+            ComPtr<ID3D11Buffer> b;D3D11_BUFFER_DESC bd2{};bd2.ByteWidth=sizeof(sys);bd2.Usage=D3D11_USAGE_DEFAULT;
+            bd2.BindFlags=D3D11_BIND_CONSTANT_BUFFER;D3D11_SUBRESOURCE_DATA i{sys,0,0};
+            CHECK(SUCCEEDED(rig.device->CreateBuffer(&bd2,&i,&b)));
+            return b;
+        };
+        const float identity[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        EfsRecord rec{};rec.translate[2]=-10.0f;rec.scale[0]=rec.scale[1]=rec.scale[2]=1.0f;rec.quat[3]=1.0f;
+        EfsComposite comp{};comp.position[2]=comp.position[3]=1.5f;comp.texcoord[2]=comp.texcoord[3]=1.0f;
+        comp.color[0]=1.0f;comp.color[1]=0.5f;comp.color[2]=0.25f;comp.color[3]=1.0f;
+        const float fetch[4][4]{{-1.0f,1.0f,0.0f,0.0f},{1.0f,1.0f,1.0f,0.0f},{-1.0f,-1.0f,0.0f,1.0f},{1.0f,-1.0f,1.0f,1.0f}};
+        const std::uint32_t idx[6]{0,1,2,2,1,3};
+        float strip[16];CHECK(EfsStripFetch(fetch,4,idx,strip));
+        float basis[9];EfsBasis(identity,nullptr,basis);
+        Instance q[2];
+        auto drawEfs=[&](Kind kind,ID3D11Buffer* sys,const float* clearTo,float depthTo,bool depthTest){
+            EfsQuad(rec,comp,identity,basis,0.0f,0.0f,depthTest,q);
+            Batch b{};b.texture=v.Get();b.kind=kind;b.gridX=b.gridY=b.frames=1;b.instances=q;b.count=2;
+            std::memcpy(b.efsFetch,strip,sizeof(strip));
+            ViewParams ev=vp;ev.efsSystem=sys;
+            rig.context->ClearRenderTargetView(rig.rtv.Get(),clearTo);
+            rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,depthTo,0);
+            bindNative();
+            CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,ev,&b,1,&st));
+            return rig.Read();
+        };
+        auto near3=[](const float* p,float x,float y,float z,float e=0.01f){
+            return std::fabs(p[0]-x)<e && std::fabs(p[1]-y)<e && std::fabs(p[2]-z)<e;
+        };
+        ComPtr<ID3D11Buffer> plain=system([](float*){});
+        // Blend 0: SRC_ALPHA / INV_SRC_ALPHA, alpha ONE / ZERO. Half width 1.5 m at 10 m: 7 px; 4 px out drawn, 10 px clear.
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,false);
+        std::printf("efs alpha %.3f %.3f %.3f a=%.3f drawn %d\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3],st.drawn);
+        CHECK(st.drawn==1 && near3(centre(px),1.0f,0.5f,0.25f) && std::fabs(centre(px)[3]-1.0f)<1e-3f);
+        CHECK(centre(px,4)[0]>0.9f && centre(px,10)[0]==0.0f);
+        comp.color[3]=0.5f;
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,false);
+        CHECK(near3(centre(px),0.5f,0.25f,0.125f) && std::fabs(centre(px)[3]-0.5f)<1e-3f);
+        comp.color[3]=1.0f;
+        // The distance alpha: 1 - (dist * 0.05) at 10 m: a half.
+        ComPtr<ID3D11Buffer> faded=system([](float* s){s[35*4+2]=0.05f;});
+        px=drawEfs(Kind::efsAlpha,faded.Get(),clear,1.0f,false);
+        std::printf("efs faded %.3f a=%.3f\n",centre(px)[0],centre(px)[3]);
+        CHECK(near3(centre(px),0.5f,0.25f,0.125f,0.02f) && std::fabs(centre(px)[3]-0.5f)<0.02f);
+        // Full fog (green): the colour replaced by the fog's.
+        ComPtr<ID3D11Buffer> fogged=system([](float* s){s[34*4+0]=0.1f;s[36*4+1]=1.0f;s[36*4+3]=1.0f;});
+        px=drawEfs(Kind::efsAlpha,fogged.Get(),clear,1.0f,false);
+        std::printf("efs fog %.3f %.3f %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2]);
+        CHECK(near3(centre(px),0.0f,1.0f,0.0f,0.02f));
+        // The glow floor 2 (Sys37.rgb * w at o2.z = 1): above the texel colour.
+        ComPtr<ID3D11Buffer> glowing=system([](float* s){s[34*4+3]=0.1f;s[37*4+0]=s[37*4+1]=s[37*4+2]=1.0f;s[37*4+3]=2.0f;});
+        px=drawEfs(Kind::efsAlpha,glowing.Get(),clear,1.0f,false);
+        CHECK(near3(centre(px),2.0f,2.0f,2.0f,0.02f));
+        // Blend 1 / 2: the target plus / minus colour * alpha (alpha 0.5), the alpha replaced.
+        const float grey[4]{0.75f,0.75f,0.75f,0.25f};
+        comp.color[3]=0.5f;
+        px=drawEfs(Kind::efsAdditive,plain.Get(),grey,1.0f,false);
+        std::printf("efs add %.3f %.3f %.3f a=%.3f\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3]);
+        CHECK(near3(centre(px),1.25f,1.0f,0.875f) && std::fabs(centre(px)[3]-0.5f)<1e-3f);
+        px=drawEfs(Kind::efsSubtract,plain.Get(),grey,1.0f,false);
+        std::printf("efs subtract %.3f %.3f %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2]);
+        CHECK(near3(centre(px),0.25f,0.5f,0.625f));
+        comp.color[3]=1.0f;
+        // The depth test (the stock LESS): a scene 5 m ahead hides it, a far one does not; untested it shows through.
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,true);
+        CHECK(centre(px)[0]==0.0f);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,true);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,false);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        // Without the system constants the efs batch is skipped.
+        px=drawEfs(Kind::efsAlpha,nullptr,clear,1.0f,false);
+        CHECK(centre(px)[0]==0.0f && st.drawn==0);
     }
     // 5. A refusal changes nothing: depth of another size.
     {
