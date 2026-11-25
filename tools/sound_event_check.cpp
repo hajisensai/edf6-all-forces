@@ -5,6 +5,8 @@
 // a recording group of the set; the variants never repeat back to back and all come round; the machine guns' tails are
 // the rounds' 6 dB down, the fast guns the MG42's grains. The explosions: their tiers by blast radius, the near layers
 // near and the far ones far, the rumble alone to the LFE, no Doppler, a bomb carrying farthest; the voice budgets.
+// The flybys: the calibres, the crack only supersonic, the chances, the 120 m limit; the closest point; where a round
+// lands; the incoming whistle by where it lands.
 //
 //   cmake --build build --target sound_event_check && build\sound_event_check.exe
 #include "../src/sound_event.h"
@@ -175,6 +177,60 @@ void Blasts() {
     Check(BudgetSlot(b,400.0f,spent,dl,3)==1,"a spent one's place is free");
 }
 
+void Flybys() {
+    namespace w=crew::wt;
+    Check(CalibreOf(0.0f)==Calibre::rifle && CalibreOf(NAN)==Calibre::rifle && CalibreOf(1.0f)==Calibre::light &&
+              CalibreOf(3.0f)==Calibre::medium && CalibreOf(8.0f)==Calibre::heavy,
+          "a round's calibre by its blast radius: none a bullet, under 3 m light, 3-8 medium, 8 on heavy");
+    const float hit[4]={0.0f,0.0f,0.0f,0.0f},miss[4]={0.99f,0.99f,0.99f,0.99f};
+    Heard h[4];
+    int n=HearPass(kPassRifle,5.0f,900.0f,hit,h);
+    Check(n==3 && Has(h,n,w::k_crack_bullet) && Has(h,n,w::k_bypass_bullet) && Has(h,n,w::k_whiz_small),
+          "a rifle round at 900 m/s 5 m off: its crack, bypass and whiz");
+    n=HearPass(kPassRifle,5.0f,300.0f,hit,h);
+    Check(!Has(h,n,w::k_crack_bullet) && Has(h,n,w::k_bypass_bullet),"under 600 m/s: no crack (subsonic), the bypass still");
+    n=HearPass(kPassMedium,5.0f,450.0f,hit,h);
+    Check(Has(h,n,w::k_crack_mid) && Has(h,n,w::k_whiz),"a 50-150 mm shell cracks from 400 m/s; the shells' whiz near");
+    n=HearPass(kPassMedium,30.0f,450.0f,hit,h);
+    Check(!Has(h,n,w::k_whiz) && Has(h,n,w::k_crack_mid),"the shells' whiz gone by 20 m off");
+    Check(HearPass(kPassRifle,5.0f,900.0f,miss,h)==0,"the chances: none rolled, none heard");
+    Check(HearPass(kPassHeavy,kPassbyFar+1.0f,900.0f,hit,h)==0,"past 120 m from its path: nothing");
+    n=HearPass(kPassHeavy,2.0f,900.0f,hit,h);
+    const float nearGain=GainOf(h,n,w::k_crack_big);
+    n=HearPass(kPassHeavy,100.0f,900.0f,hit,h);
+    Check(nearGain>GainOf(h,n,w::k_crack_big) && GainOf(h,n,w::k_crack_big)>0.0f,"a crack farther off is quieter");
+    bool clips=true;
+    const Passby* passbys[]={&kPassRifle,&kPassLight,&kPassMedium,&kPassHeavy};
+    for(const Passby* p:passbys)
+        for(int i=0;i<p->layers;++i)clips=clips && p->pass[i].clip>=0 && p->pass[i].clip<w::kCount && w::kVariants[p->pass[i].clip]>0;
+    Check(clips,"a passby's every layer names a recording group of the set");
+    // The closest point.
+    float t=0.0f,m=0.0f;
+    const float r[3]={-100.0f,10.0f,0.0f},v[3]={1000.0f,0.0f,0.0f};
+    Check(Closest(r,v,&t,&m) && Near(t,0.1f) && Near(m,10.0f),"100 m short at 1000 m/s, 10 m to the side: closest in 0.1 s, 10 m off");
+    const float gone[3]={100.0f,10.0f,0.0f};
+    Check(Closest(gone,v,&t,&m) && t<0.0f,"one past: its closest behind it");
+    const float still[3]={0.0f,0.0f,0.0f};
+    Check(!Closest(r,still,&t,&m),"a still round never comes closer");
+    // Where it lands.
+    const float pos[3]={0.0f,200.0f,0.0f},down[3]={50.0f,-100.0f,0.0f},g[3]={0.0f,-9.8f,0.0f},flat[3]={0.0f,0.0f,0.0f};
+    float at[3];
+    Check(Lands(pos,down,flat,0.0f,&t,at) && Near(t,2.0f) && Near(at[0],100.0f),"200 m up at 100 m/s down: lands in 2 s, 100 m on");
+    Check(Lands(pos,down,g,0.0f,&t,at) && t>1.6f && t<2.0f && Near(at[1],0.0f,1e-2f),"with gravity: sooner, on the ground");
+    const float up[3]={0.0f,50.0f,0.0f};
+    Check(Lands(pos,up,g,0.0f,&t,at) && t>10.0f,"thrown up: lands on its way down");
+    Check(!Lands(pos,up,flat,0.0f,&t,at),"rising with no gravity: never lands");
+    // The incoming whistle.
+    n=Hear(kIncomingArt,0.0f,h);
+    Check(n==1 && h[0].clip==w::k_incoming_art && Near(h[0].gain,std::pow(10.0f,(10.0f+6.0f-16.0f+kTrimDb)/20.0f)),
+          "a shell landing on the ear: its whistle at 0 dB against the art bus (and the trim)");
+    const float cut0=h[0].cutoff;
+    n=Hear(kIncomingArt,300.0f,h);
+    Check(n==1 && h[0].gain<0.05f && h[0].cutoff<cut0 && Hear(kIncomingArt,600.0f,h)==0,"landing 300 m off: 40 dB down and dull; 600 m: none");
+    n=Hear(kIncomingBomb,0.0f,h);
+    Check(n==1 && h[0].clip==w::k_incoming_bomb,"a bomb's its own");
+}
+
 void Rotations() {
     Rotation r{};
     bool repeat=false;
@@ -201,6 +257,7 @@ int main() {
     Machine();
     Rotations();
     Blasts();
+    Flybys();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }

@@ -7,7 +7,8 @@
 // ground/weapon/cannons and mguns, the tracks' volumes, GainEffects and their Distance automation, the multiband EQ's
 // frequencyA over Distance, the MultiSounds' start, the Premaster, the bus chain from the event down to weapon_ai, the
 // spatialiser's sound size, minimum extent and Doppler scale); the ones not in them are marked "ours" here and in the doc.
-// The explosions the same way, by blast radius. Pure: tools/sound_event_check.cpp checks it offline; vehsound.cpp
+// The explosions the same way, by blast radius; the rounds going by (their crack, bypass and whiz by calibre and
+// speed) and coming down (the incoming whistle). Pure: tools/sound_event_check.cpp checks it offline; vehsound.cpp
 // and blastsound.cpp play it.
 #include "wt_clips.h"
 #include <cmath>
@@ -324,5 +325,120 @@ inline int BudgetSlot(const Budget& b,float distance,const float* ages,const flo
     }
     if(live<b.most)return spent>=0 ? spent : n;
     return farthest>=0 && distance<dists[farthest] ? farthest : -1;
+}
+
+// --- The rounds going by and coming down --------------------------------------------------------------------------
+// bullet_passby (one event, its layers gated by the round's calibre and speed): at most 4 at once, 50 ms apart, heard
+// within 120 m of the round's path. Three group tracks: the cracks (gain +6; the supersonic ones only: bullet_crack +2
+// at 50 % from 600 m/s under 31 mm, shell_small_crack +4 from 600 m/s 31-65 mm, shell_mid_crack +4 from 400 m/s 65-140
+// mm, shell_big_crack +2 from 600 m/s 140 mm on), the bypasses (gain 0: +3 at 50 % under 31 mm, +4 at 70.5 % 31-140 mm,
+// +4 at 69.5 % on) and the whizzes (gain -14: +6 at 50 % under 31 mm, +10 at 50 % 31-65 mm, +10 at 70.5 % 65-160 mm,
+// +10 at 69.5 % on). Its spatialiser has no distance curve (custom rolloff, none drawn): ours, 0 m 0 -> 20 m -6 -> 120
+// m -30, the round's closest point to the ear. shell_whiz (the shells' own whiz, tanks/impacts): its group -7.26, 0 m
+// 0 -> 10.5 m -6 -> 20 m -80 over that distance, at most 4. Bus: ours, kTrimDb. EDF has no calibre: the blast radius
+// stands for it (ours: CalibreOf), a round with none a bullet.
+enum class Calibre : std::uint8_t { rifle, light, medium, heavy };   // under 20 mm, 20-50, 50-150, 150 on
+constexpr float kLightBelow=3.0f,kMediumBelow=8.0f;
+inline Calibre CalibreOf(float radius) noexcept {
+    const float r=std::isfinite(radius) && radius>0.0f ? radius : 0.0f;
+    return r<=0.0f ? Calibre::rifle : r<kLightBelow ? Calibre::light : r<kMediumBelow ? Calibre::medium : Calibre::heavy;
+}
+constexpr float kPassbyFar=120.0f;     // bullet_passby's maximum distance: a round farther off at its closest not heard
+constexpr float kPassbyFrom=30.0f;     // ours: a round heard going by only once it has flown this far (not one's own gun's)
+constexpr Budget kPassbyBudget{4,0.05f,1.5f};   // maxVoices 4, triggerCooldown 50 ms; the life ours (a whiz's length)
+constexpr Curve kMiss{3,{{0.0f,0.0f},{20.0f,-6.0f},{120.0f,-30.0f}}};    // ours
+constexpr Curve kWhizMiss{3,{{0.0f,0.0f},{10.5f,-6.0f},{20.0f,-80.0f}}};
+constexpr float kCrackDb=6.0f,kBypassDb=0.0f,kWhizDb=-14.0f,kShellWhizDb=-7.26f;
+// A layer of a passby: its recording, gain and curve over the closest distance, the speed it needs (m/s, 0: any), the
+// chance it sounds (FMOD's trigger probability).
+struct Pass { int clip; float db; Curve gain; float faster,chance; };
+struct Passby { int layers; Pass pass[4]; };
+constexpr Passby kPassRifle{3,{
+    {k_crack_bullet,kCrackDb+2.0f,kMiss,600.0f,0.5f},
+    {k_bypass_bullet,kBypassDb+3.0f,kMiss,0.0f,0.5f},
+    {k_whiz_small,kWhizDb+6.0f,kMiss,0.0f,0.5f},
+}};
+constexpr Passby kPassLight{3,{
+    {k_crack_small,kCrackDb+4.0f,kMiss,600.0f,1.0f},
+    {k_bypass_bullet,kBypassDb+4.0f,kMiss,0.0f,0.705f},
+    {k_whiz_small,kWhizDb+10.0f,kMiss,0.0f,0.5f},
+}};
+constexpr Passby kPassMedium{4,{
+    {k_crack_mid,kCrackDb+4.0f,kMiss,400.0f,1.0f},
+    {k_bypass_big,kBypassDb+4.0f,kMiss,0.0f,0.705f},
+    {k_whiz_med,kWhizDb+10.0f,kMiss,0.0f,0.705f},
+    {k_whiz,kShellWhizDb,kWhizMiss,0.0f,1.0f},
+}};
+constexpr Passby kPassHeavy{4,{
+    {k_crack_big,kCrackDb+2.0f,kMiss,600.0f,1.0f},
+    {k_bypass_big,kBypassDb+4.0f,kMiss,0.0f,0.695f},
+    {k_whiz_big,kWhizDb+10.0f,kMiss,0.0f,0.695f},
+    {k_whiz,kShellWhizDb,kWhizMiss,0.0f,1.0f},
+}};
+inline const Passby& PassbyFor(Calibre c) noexcept {
+    return c==Calibre::rifle ? kPassRifle : c==Calibre::light ? kPassLight : c==Calibre::medium ? kPassMedium : kPassHeavy;
+}
+// A passby `miss` m off at its closest, the round at `speed` m/s; `rolls` one in [0, 1) a layer (the chances). Its
+// layers as Hear's (after 0: at the closest point; no low layer). Past kPassbyFar: none.
+inline int HearPass(const Passby& p,float miss,float speed,const float* rolls,Heard* out) noexcept {
+    if(!(miss>=0.0f) || miss>kPassbyFar || !std::isfinite(speed))return 0;
+    int n=0;
+    for(int i=0;i<p.layers && i<4;++i) {
+        const Pass& l=p.pass[i];
+        if(speed<l.faster || !(rolls[i]<l.chance))continue;
+        const float db=kTrimDb+l.db+At(l.gain,miss);
+        if(db<kQuietDb)continue;
+        out[n++]=Heard{l.clip,std::pow(10.0f,db/20.0f),24000.0f,0.0f,false};
+    }
+    return n;
+}
+// Where a round `r` (its position less the ear's) moving `v` (m/s) comes closest to the ear: in `t` s (negative: it
+// has passed), `miss` m off. False: it stands still.
+inline bool Closest(const float* r,const float* v,float* t,float* miss) noexcept {
+    const float vv=v[0]*v[0]+v[1]*v[1]+v[2]*v[2];
+    if(!(vv>1.0f) || !std::isfinite(vv))return false;
+    const float at=-(r[0]*v[0]+r[1]*v[1]+r[2]*v[2])/vv;
+    float m=0.0f;
+    for(int k=0;k<3;++k){const float c=r[k]+v[k]*at;m+=c*c;}
+    *t=at;*miss=std::sqrt(m);
+    return std::isfinite(*miss);
+}
+
+// art_shells_incoming: master +6, its MultiSound +4 at 70 %, its group +6, against the art bus's -16: 0 dB; over the
+// distance 0 m 0 -> 600.3 m -80, the EQ's frequencyA 22 kHz -> 12 kHz at 103.1 m -> 1.6 kHz at 400 m; a point (no
+// extent); at most 4, 200 ms apart. bombs_incoming: the same and a GainEffect +6; no distance curve of its own (ours:
+// the shells'); at most 1. Ours: the distance is the one from the ear to where the round will land, heard from the
+// round from `kIncomingLead` s before (about the recordings' lengths: 2.3-2.4 s, 2.05 s) when it lands within
+// kIncomingWithin m.
+constexpr Curve kIncomingGain{2,{{0.0f,0.0f},{600.28f,-80.0f}}};
+constexpr Curve kIncomingEq{3,{{0.0f,22000.0f},{103.107f,12000.0f},{400.0f,1600.0f}}};
+constexpr float kArtBusDb=-16.0f,kIncomingWithin=300.0f,kIncomingChance=0.7f;
+constexpr Event kIncomingArt{1,{
+    {k_incoming_art,4.0f+6.0f,kIncomingGain,kIncomingEq,0.0f,false},
+}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f};
+constexpr Event kIncomingBomb{1,{
+    {k_incoming_bomb,4.0f+6.0f+6.0f,kIncomingGain,kIncomingEq,0.0f,false},
+}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f};
+constexpr float kIncomingLeadArt=2.3f,kIncomingLeadBomb=2.0f;
+constexpr Budget kIncomingBudget[2]={{4,0.2f,2.5f},{1,0.2f,2.5f}};   // the life ours (the recording's length)
+// When and where a round at `pos` moving `vel` (m/s) under `acc` (m/s^2: the core's gravity, vel += acc / 60 a frame)
+// comes down to the height `floorY`: the first time ahead it crosses it falling. False: it does not (rising away, level).
+inline bool Lands(const float* pos,const float* vel,const float* acc,float floorY,float* t,float* at) noexcept {
+    const float a=0.5f*acc[1],b=vel[1],c=pos[1]-floorY;
+    float when=-1.0f;
+    if(std::fabs(a)<1e-6f) { if(b<0.0f)when=-c/b; }
+    else {
+        const float disc=b*b-4.0f*a*c;
+        if(disc<0.0f)return false;
+        const float s=std::sqrt(disc),t1=(-b-s)/(2.0f*a),t2=(-b+s)/(2.0f*a);
+        // The root where it is falling (2 a t + b < 0), the first ahead.
+        const float roots[2]={t1<t2 ? t1 : t2,t1<t2 ? t2 : t1};
+        for(const float x:roots)
+            if(x>0.0f && 2.0f*a*x+b<0.0f){when=x;break;}
+    }
+    if(!(when>0.0f) || !std::isfinite(when))return false;
+    *t=when;
+    for(int k=0;k<3;++k)at[k]=pos[k]+vel[k]*when+0.5f*acc[k]*when*when;
+    return true;
 }
 }  // namespace crew::wtevent

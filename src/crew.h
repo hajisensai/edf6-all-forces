@@ -760,6 +760,7 @@ void LockSound(unsigned char* vehicle) noexcept;
 // listener this frame.
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
+bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is this frame; false: none
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
