@@ -14,11 +14,13 @@
 #include "memory.h"
 #include "view_clip.h"
 #include "decal_depth.h"
+#include "render_record.h"
 #include <atomic>
 
 // The cameras themselves too (2026-10-05, the user: "a little farther and it is gone", with VIEW logging 1000 -> 3000
 // every mission): the copy from the env into the cameras (0x1230A0, at 0x1232B5) has two callers, a setup (0x9D700)
-// and a virtual (0x705530), not a per-frame step, so an env raised after the mission's load never reached them. The
+// and Application::Update (0x705530, at 0x7056BA, every frame: corrected 2026-11-24, an older note here called it
+// not per-frame; the copy at 0x1232B5 runs only when 0x1232AF finds its source, why it missed is not traced). The
 // plugin raises the four cameras' own fields every frame: camera i = *(mgr+0x4D8+i*0x188) (0x1195BE0, a shared_ptr's
 // object), mgr = *(image+0x20B2958); +0x2C far clip, +0x30 the far pass's start, +0x34 its end (what 0x1230A0 writes).
 namespace crew {
@@ -36,6 +38,7 @@ MapClip mapClip{};
 // including before ViewDistance raises it; a native overwrite becomes the new baseline on the next plugin write.
 struct ClipLease { unsigned char* at;float baseline[4],last[4];bool wrote[4]; };
 ClipLease envLease{},cameraLease[kCameraCount]{};
+std::atomic<bool> decalDepthPending{false};
 
 unsigned char* EnvNow() noexcept {
     const auto holder=At<const unsigned char*>(image,kEnvHolder);
@@ -145,7 +148,9 @@ void ViewMapClip(bool on,float farClip,float nearClip) noexcept {
 }
 
 void ViewTick() noexcept {
-    if(!ViewDepthReady()){RestoreAllClips();return;}
+    // A validated, installed decal hook may stay unused for an entire mission. No decal uses the native depth
+    // coefficients while its manager is absent. Once creation runs, a failure restores the native camera clips.
+    if(!decalDepthPending.load(std::memory_order_acquire) && !ViewDepthReady()){RestoreAllClips();return;}
     float want=ViewDistanceWanted();
     if(want<=0.0f)return;
     auto env=EnvNow();
@@ -175,6 +180,7 @@ bool decalDepthInstalled=false;
 std::atomic<bool> decalDepthReady{false},decalDepthFailureLogged{false};
 void DepthFailed(const char* reason) noexcept {
     decalDepthReady.store(false,std::memory_order_release);
+    decalDepthPending.store(false,std::memory_order_release);
     if(!decalDepthFailureLogged.exchange(true,std::memory_order_relaxed))
         Log("VIEW depth disabled: %s; retaining native near/far clip planes",reason);
 }
@@ -199,9 +205,16 @@ bool __fastcall DecalShaderCreateHook(void* shader,void* context,const void* byt
     decalDepthReady.store(false,std::memory_order_release);
     if(rewritten){bytes=decalShader.data();size=decalShader.size();}
     const bool created=reinterpret_cast<ComputeCreateFn>(image+kComputeCreate)(shader,context,bytes,size,linkage);
-    if(rewritten && created)decalDepthReady.store(true,std::memory_order_release);
+    if(rewritten && created) {
+        decalDepthReady.store(true,std::memory_order_release);
+        if(decalDepthPending.exchange(false,std::memory_order_acq_rel))Log("VIEW decal depth ready");
+    }
     else DepthFailed(rewritten ? "modified compute shader creation failed" : "unknown decal shader at creation");
     return created;
+}
+void ViewBeforeRecord() noexcept {
+    // Render recording is also reached on frames with no human update and after the native camera settings.
+    __try { ViewTick(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 } // namespace
 
@@ -216,6 +229,10 @@ bool InstallViewDepth() noexcept {
     bool changed=false;
     decalDepthInstalled=RedirectCall(image+kDecalShaderCall,image+kComputeCreate,reinterpret_cast<void*>(&DecalShaderCreateHook),changed);
     if(!decalDepthInstalled)DepthFailed("compute shader creation hook unavailable");
+    else {
+        decalDepthPending.store(true,std::memory_order_release);
+        if(renderrecord::Install())renderrecord::Set(renderrecord::Slot::kViewDistance,&ViewBeforeRecord);
+    }
     Log("HOOK decal depth=%d (awaiting native compute creation)",decalDepthInstalled);
     return decalDepthInstalled;
 }

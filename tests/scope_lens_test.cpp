@@ -27,6 +27,8 @@ void Log(const char* format,...) noexcept { ++logs;lastLog=format; }
 ID3D11DeviceContext* commanded=nullptr;
 int lensCommands=0;
 void InfantryScopeLensCommand(ID3D11DeviceContext* context) noexcept { ++lensCommands;commanded=context; }
+bool paused=false;
+bool GamePaused() noexcept { return paused; }
 }
 
 namespace {
@@ -175,6 +177,7 @@ void Main(int w,int h) {
 }  // namespace
 
 int wmain() {
+    stepfresh::See(1);
     Wire();
     Main(1920,1080);
     const std::string passThrough="P0 T0a T0c S ";
@@ -188,7 +191,8 @@ int wmain() {
     Record();
     const int lensSide=scopepip::LensViewSide(scopepip::LensRadius(1920,1080));
     Check(factories==1 && followed==cam0 && control0.weaks==2,"wanted: one lens camera, following viewport 0's camera");
-    Check(At<int>(SlotAt(3),0x3C)==lensSide && At<int>(SlotAt(3),0x40)==lensSide && At<int>(SlotAt(3),0x34)==0,"viewport 3 set to S x S");
+    Check(At<int>(SlotAt(3),0x3C)==lensSide && At<int>(SlotAt(3),0x40)==lensSide &&
+          At<int>(SlotAt(3),0x34)==1920 && At<int>(SlotAt(3),0x38)==1080,"viewport 3 has an S x S target outside the main screen rectangle");
     Check(Trace()==passThrough && !CurrentOf(SlotAt(3)),"...not armed before it joins: the recording as it was");
     Record();
     Check(factories==1 && Trace()==passThrough,"a camera in the queue is not made twice");
@@ -241,9 +245,22 @@ int wmain() {
     Want(otherCam,kScopeFov);
     Record();
     Check(Trace()==passThrough,"another camera wanted: no lens view");
-    Want(cam0,kScopeFov);wantAt.store(GetTickCount64()-10*kFreshMs);
+    // A want not renewed for more than kEveryStep steps (the camera step stopped wanting it): stale, however little
+    // wall time passed; a want under the pause menu: none.
+    Want(cam0,kScopeFov);stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep+1);
     Record();
     Check(Trace()==passThrough,"a stale want: no lens view");
+    Want(cam0,kScopeFov);paused=true;
+    Record();
+    Check(Trace()==passThrough,"the pause menu: no lens view");
+    paused=false;
+    Want(cam0,kScopeFov);Sleep(250);
+    Record();
+    Check(Trace()=="P0 T0a T0c P3 S ","a slow frame (250 ms, no step since the want): still armed");
+    Record();
+    Want(cam0,kScopeFov);stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep+1);
+    Record();
+    Check(Trace()==passThrough,"stale again: no lens view");
     Want(cam0,kScopeFov);
     Record();
     Check(Trace()=="P0 T0a T0c P3 S ","wanted again: armed again (no lens view the last recording: no command)");

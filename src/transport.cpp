@@ -94,17 +94,16 @@ bool Live(const ObjRef& r) noexcept {
 const float* Pos(const void* o) noexcept { return reinterpret_cast<const float*>(static_cast<const unsigned char*>(o)+kPosition); }
 unsigned char* Vehicle(const ObjRef& r) noexcept { return static_cast<unsigned char*>(const_cast<void*>(r.obj)); }
 bool Transportable(const void* v) noexcept {
-    return v && Readable(v,kSeatCount+8) && !static_cast<const unsigned char*>(v)[kDead] && !IsJet(v) &&
-           (IsHelicopter(v) || NpcDrivable(static_cast<const unsigned char*>(v))) && SeatCount(static_cast<const unsigned char*>(v))>1;
+    auto* vehicle=const_cast<unsigned char*>(static_cast<const unsigned char*>(v));
+    if(!vehicle || !Readable(vehicle,kSeatCount+8) || vehicle[kDead] || IsJet(vehicle) ||
+       !(IsHelicopter(vehicle) || NpcDrivable(vehicle)))return false;
+    const unsigned seats=SeatCount(vehicle);
+    for(unsigned i=1;i<seats && i<edf::kMaxSeats;++i)
+        if(At<std::uint64_t>(SeatAt(vehicle,i),kSeatWeaponCount)==0)return true;
+    return false;
 }
 Carrier CarrierOf(const void* v) noexcept { return IsHelicopter(v) ? Carrier::heli : Carrier::ground; }
 float Standoff(Carrier c) noexcept { return c==Carrier::heli ? tuning.heliStandoff : tuning.groundStandoff; }
-npc::navigation::Profile VehicleProfile() noexcept {
-    npc::navigation::Profile p;
-    p.radius=3.5f;p.height=3.0f;p.cell=4.0f;p.waypointRadius=1.5f;
-    p.horizon=120.0f;   // rolling legs: a trip may cross the map (a whole route at once would not fit the search)
-    return p;
-}
 
 Pair* PairOf(const void* top) noexcept {
     for(auto& p:pairs)if(p.top && p.top.Is(top))return &p;
@@ -128,7 +127,7 @@ int PassengersOff(unsigned char* v) noexcept {
     int left=0;
     for(unsigned seat=1;seat<SeatCount(v);++seat) {
         unsigned char* const s=SeatAt(v,seat);
-        if(SeatRider(s)!=Rider::other || !IsSoldierClass(At<const void*>(s,kSeatRider)))continue;
+        if(At<std::uint64_t>(s,kSeatWeaponCount)>0 || SeatRider(s)!=Rider::other || !IsSoldierClass(At<const void*>(s,kSeatRider)))continue;
         if(!NpcMoveSeat(v,seat,-1))++left;
     }
     return left;
@@ -141,7 +140,7 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
     for(int i=0;i<t.count;++i) {
         const TripRider& r=t.riders[i];
         if(!Live(r.top))continue;
-        if(off)NpcSquadDismount(r.top.obj);
+        if(off && v)NpcSquadDisembark(r.top.obj,v);
         NpcSquadSetOrder(r.top.obj,r.after,false);
     }
     // A hovering delivery whose riders are all out (down its ropes) need not land to go back; one that ends any other way
@@ -152,7 +151,7 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
     if(v && t.leave && still) {
         // Nobody may go back with it: the riders still listed get off, and so does anyone else in a seat past the
         // driver's (a squad that left the trip while aboard is no longer listed here: LeaveTrips).
-        for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDismount(t.riders[i].top.obj);
+        for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
         left=PassengersOff(v);
         if(left)Log("TRANSPORT v=%p delivered, but %d still aboard will not get off: it stays",t.vehicle.obj,left);
     }
@@ -186,7 +185,7 @@ transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
     for(int i=0;i<t.count;++i) {
         SquadSeats s{};
         if(!Live(t.riders[i].top) || !NpcSquadSeats(t.riders[i].top.obj,v,&s))continue;
-        alive+=s.alive;aboard+=s.aboard;
+        alive+=s.alive-s.crew;aboard+=s.aboard-s.crew;
         if(s.onFoot>0){const float d=transport::Level(Pos(t.riders[i].top.obj),vp);if(d>farthest)farthest=d;}
     }
     view.squadLive=alive>0;
@@ -219,7 +218,7 @@ transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
 // The ground vehicle on its route to `goal` (stopping within `arrive` m): the route's next corner its post, else held.
 void Drive(Trip& t,unsigned char* v,const float* goal,float arrive,ULONGLONG ms) noexcept {
     float waypoint[3];
-    const auto path=GroundNavigate(t.nav,Pos(v),goal,arrive,ms,waypoint,VehicleProfile());
+    const auto path=GroundNavigate(t.nav,Pos(v),goal,arrive,ms,waypoint,GroundVehicleProfile());
     if(path==npc::navigation::Result::moving)NpcPrepareVehicleRoutePost(v,waypoint,kVehicleHold);
     else Hold(v);   // arrived, still searching or no route: it waits (never a straight line through a wall)
 }
@@ -275,7 +274,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
         if(heli)HeliFerry(v,Pos(v),true);else Hold(v);
         if(fresh || ms-t.actAt>kUnloadEveryMs) {
             t.actAt=ms;
-            for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDismount(t.riders[i].top.obj);
+            for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
         }
         return;
     case Act::hover:
@@ -461,8 +460,11 @@ Jumper* FreeJumper() noexcept {
 
 // The plane's passengers (soldiers in its seats past the pilot's): the first one's seat, or -1.
 int NextJumper(unsigned char* plane) noexcept {
-    for(unsigned seat=1;seat<SeatCount(plane);++seat)
-        if(SeatRider(SeatAt(plane,seat))==Rider::other && IsSoldierClass(At<const void*>(SeatAt(plane,seat),kSeatRider)))return static_cast<int>(seat);
+    for(unsigned seat=1;seat<SeatCount(plane);++seat) {
+        const auto* at=SeatAt(plane,seat);
+        if(At<std::uint64_t>(at,kSeatWeaponCount)==0 && SeatRider(at)==Rider::other && IsSoldierClass(At<const void*>(at,kSeatRider)))
+            return static_cast<int>(seat);
+    }
     return -1;
 }
 
@@ -541,7 +543,7 @@ const void* TransportRiderOf(const void* vehicle) noexcept {
         for(const auto& p:pairs) {
             if(!p.vehicle.Is(vehicle) || !Live(p.top))continue;
             SquadSeats s{};
-            if(NpcSquadSeats(p.top.obj,vehicle,&s) && s.aboard>0)return p.top.obj;
+            if(NpcSquadSeats(p.top.obj,vehicle,&s) && s.aboard>s.crew)return p.top.obj;
         }
         return nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
@@ -571,7 +573,7 @@ bool TransportOrder(const void* top,const mapcmd::Command& c) noexcept {
         if(!IsOnlineAuthority(v))return false;
         SquadSeats s{};
         if(!NpcSquadSeats(top,v,&s) || s.alive<=0)return false;
-        if(!transport::Rides(true,s.aboard>0))return false;   // on foot: it walks, however far
+        if(!transport::Rides(true,s.aboard>s.crew))return false;   // a driver or gunner alone is crew, with nobody to deliver
         const ULONGLONG ms=GameMs();
         if(!StartOrJoin(v,top,c,s.aboard>0,ms))return false;
         // Held where it is until the trip lets it go (a move / attack-move would walk it off over its boarding).
@@ -600,12 +602,12 @@ NpcCommandReason TransportWithdraw(const void* top) noexcept {
         for(const auto& q:pairs) {
             if(!q.vehicle.Is(v) || !Live(q.top))continue;
             SquadSeats s{};
-            if(NpcSquadSeats(q.top.obj,v,&s) && s.aboard>0 && !still)return NpcCommandReason::noTransport;
+            if(NpcSquadSeats(q.top.obj,v,&s) && s.aboard>s.crew && !still)return NpcCommandReason::noTransport;
         }
         if(!SupportWithdrawVehicle(v))return NpcCommandReason::noTransport;   // only a support vehicle leaves the field
         if(t)EndTrip(*t,true,"withdrawn");
         for(auto& q:pairs)if(q.vehicle.Is(v)) {
-            if(Live(q.top))NpcSquadDismount(q.top.obj);
+            if(Live(q.top))NpcSquadDisembark(q.top.obj,v);
             q=Pair{};
         }
         Log("TRANSPORT v=%p withdrawn by order (squad %p)",v,top);

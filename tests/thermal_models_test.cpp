@@ -8,7 +8,9 @@
 
 namespace crew { unsigned char* image=nullptr; }
 namespace edf {
+unsigned long long asks=0;   // Readable's calls: the live accessors' evidence
 bool Readable(const void* p,std::size_t n,bool) noexcept {
+    ++asks;
     if(!p)return false;
     MEMORY_BASIC_INFORMATION m{};
     if(!VirtualQuery(p,&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_NOACCESS|PAGE_GUARD)))return false;
@@ -97,6 +99,35 @@ int main() {
           "same object can return from rejected classes to its original vtable");
     Check(crew::thermal::EnemyModels(nullptr,out,8)==0 && crew::thermal::EnemyModels(object.data(),nullptr,8)==0 &&
           crew::thermal::EnemyModels(object.data(),out,0)==0,"empty inputs produce no pointers");
+
+    // The live accessors (frame_rate_objects.cpp's per-tick sample): the same answers, and no Readable once the vtable
+    // is resolved (the RTTI walk once per object vtable and once per model vtable).
+    {
+        using namespace crew::thermal;
+        const Clone animationClone{Rtti(0x1804000,".?AVAnimationModel@@"),nullptr,nullptr};
+        Object live{};
+        Set(live.data(),0,insectClone.data()+1);
+        Set(live.data()+0x630,0,animationClone.data()+1);
+        Set(live.data()+0x630,0x10,reinterpret_cast<void*>(1));
+        Check(EnemyModels(live.data(),out,8)==1 && out[0]==live.data()+0x630,"a model of a cloned AnimationModel vtable");
+        edf::asks=0;
+        Check(EnemyModelsLive(live.data(),out,8)==1 && out[0]==live.data()+0x630 && EnemyModelLive(live.data())==live.data()+0x630 &&
+              EnemyFamilyLive(live.data())==Family::kOther,"live: the same models and family");
+        Check(edf::asks==0,"live: a resolved object vtable and model vtable ask Readable nothing");
+        edf::asks=0;
+        Check(EnemyModels(live.data(),out,8)==1,"checked: the same model");
+        const unsigned long long checkedAsks=edf::asks;
+        Check(checkedAsks>0 && checkedAsks<=4,"checked: the object and the model asked, the model's RTTI not walked again");
+        Set(object.data(),0,humanoidClone.data()+1);
+        Set(object.data(),0x6C8,models.data());Set(object.data(),0x6D8,std::size_t(3));
+        edf::asks=0;
+        Check(EnemyModelsLive(object.data(),out,8)==3 && out[2]==models.data()+2*0x710 && edf::asks==0,
+              "live: a humanoid's model array without Readable");
+        Set(object.data(),0x6C8,static_cast<void*>(nullptr));
+        Check(EnemyModelsLive(object.data(),out,8)==0,"live: a null model array with a count gives nothing");
+        Set(live.data()+0x630,0x10,static_cast<void*>(nullptr));
+        Check(EnemyModelsLive(live.data(),out,8)==0,"live: an unregistered model is excluded");
+    }
 
     VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
     std::printf("thermal models: %d checks, %d failures\n",checks,failed);

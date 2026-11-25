@@ -24,6 +24,10 @@ own models EDF6VC_CENTIPEDE / _DRAGONFLY.MRAB (pylib/centipede_model.py, pylib/d
 EDF6VC_PRIMER_SPIT / _NEEDLE.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
+The elevon bomber's EDF6VC_JET.MRAB, the interceptor's and the multirole's EDF6VC_INTERCEPTOR / _MULTIROLE.MRAB and
+EDF6VC_HELI_TRANSPORT.MRAB are built apart and checked, then written as one archive, EDF6VC_AIRCRAFT.MRAB (SHARED_FILE),
+with one copy of the textures they share, every SGO on them drawing from it (pylib/texshare.py: about 57 MB less
+every mission, which preloads all four).
 
 Every file is built in memory first (build: nothing is written unless all of it could be made), then written
 atomically and recorded in the ledger as this tool's (pylib/ledger.py); --remove releases them, so a file
@@ -47,6 +51,7 @@ import jet_models  # noqa: E402
 import mdb_jet  # noqa: E402
 import ledger  # noqa: E402
 import model_lod  # noqa: E402
+import texshare  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OWNER = 'jets'   # pylib/ledger.py
@@ -74,6 +79,7 @@ FILES: dict[str, str] = {
     # kBodies), so a carrier is what its mark says however its entry was made.
     'EDF6VC_JET_BLAST_CARRIER.SGO': 'edf6tr_jet_blast_carrier_mission',
     'EDF6VC_JET_DOLL_CARRIER.SGO': 'edf6tr_jet_doll_carrier_mission',
+    vc.SALVO_OBJECT: vc.SALVO_JET,
     # The jets the player flies (src/playerjet.cpp), which the Air Raider's EDF6VC_CALL_PJET_* weapons bring
     # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
@@ -281,6 +287,7 @@ TRANSPORT_HELI_MODEL_FILE = 'EDF6VC_HELI_TRANSPORT.MRAB'
 TRANSPORT_HELI_STOCK = 'VEHICLE410_HELI'   # the stock model's stem (its archive and model member)
 BOMBER401_MODEL = BOMBERS['EDF6VC_BOMBER401.SGO'][0]
 MODEL_FILE = vc.JET_ELEVON_FILE
+SHARED_FILE = 'EDF6VC_AIRCRAFT.MRAB'   # what build writes for MODEL_FILE, the interceptor's, the multirole's and TRANSPORT_HELI_MODEL_FILE
 MODEL = vc.JET_ELEVON_MODEL
 
 
@@ -300,6 +307,8 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{TRANSPORT_HELI_MODEL_FILE}'] = heli_transport_model(game)
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    import salvo_model
+    out[f'OBJECT/{vc.SALVO_MODEL}'] = salvo_model.build(game, out[f'OBJECT/{salvo_model.BASE_ARCHIVE}'])
     for model, name in jet_models.ANIMATIONS.items():
         out[f'OBJECT/{name}'] = jet_models.animation(game, model)
     # (each model's nozzle bones, the flames' and the arrival smoke's, are checked on its exits by jet_models.build / elevon_archive)
@@ -346,7 +355,9 @@ def build(root: str) -> dict[str, bytes]:
     for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET)):   # src/gunmuzzle.h kGunship's frame
         check_rigid_centre(out[f'OBJECT/{name}'], name, GUNSHIP_AIRFRAME)
     check_weapon_bones(out, game)
-    return out
+    # the four models every mission preloads in one archive, one copy of the textures they share (pylib/texshare.py):
+    # the last step, so every check above measured each model in the archive it was built in
+    return texshare.apply(out, SHARED_FILE)
 
 
 def medic_gun(stock: bytes, round_stock: bytes) -> bytes:
@@ -397,9 +408,9 @@ def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, MODEL_FILE, *MODEL_FILES,
-               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE,
+               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE, vc.SALVO_MODEL,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
-    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
+    return texshare.names([f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)])
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

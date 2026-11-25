@@ -18,6 +18,7 @@
 #include "dmgnum.h"
 #include "edf/host.h"
 #include "edf/patch.h"
+#include "edf/world_tables.h"
 #include "hudtext.h"
 #include "layout.h"
 #include "memory.h"
@@ -44,8 +45,7 @@ constexpr std::size_t kWeaponName=0x1B0;                    // const wchar_t*: t
 // RTTI: the vtable's complete object locator at -8; its type descriptor (+0xC) and class hierarchy (+0x10) as image
 // offsets; the hierarchy's base count (+8) and base array (+0xC), each base descriptor's type descriptor at +0.
 constexpr std::size_t kColType=0xC,kColHierarchy=0x10,kHierBases=0x8,kHierArray=0xC,kTypeName=0x10;
-constexpr std::size_t kTeams=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTeamRelation=0x18;   // heli.cpp Relations
-constexpr std::int32_t kEnemyRelation=2,kMostTeams=64;
+constexpr std::int32_t kEnemyRelation=enemypoints::kEnemyRelation,kMostTeams=enemypoints::kMaxTeam;   // edf/world_tables.h
 
 // --- Names ---
 // The class name of `o` (".?AV<name>@@" from its vtable's locator), or nullptr.
@@ -100,21 +100,12 @@ void WeaponName(const unsigned char* w,wchar_t* out,std::size_t size) noexcept {
 }
 
 // --- Sides ---
-const std::int32_t* Relations(std::int32_t team) noexcept {
-    if(team<0 || team>=kMostTeams)return nullptr;
-    const auto manager=At<const unsigned char*>(image,kTeams);
-    if(!Readable(manager,kTeamRows+8))return nullptr;
-    const auto rows=At<const unsigned char*>(manager,kTeamRows);
-    if(!Readable(rows+team*kTeamStride,kTeamStride))return nullptr;
-    const auto relation=At<const std::int32_t*>(rows+team*kTeamStride,kTeamRelation);
-    return Readable(relation,kMostTeams*4) ? relation : nullptr;
-}
 // Whether team `t` is the player's enemy (the player's team as last seen; the friendly team before that). Unreadable
 // relations: any team but the player's.
 bool EnemyTeam(std::int32_t t) noexcept {
     const std::int32_t mine=player.at ? player.team : kTeamFriend;
     if(t==mine)return false;
-    const std::int32_t* rel=Relations(mine);
+    const std::int32_t* rel=edf::Relations(image,mine);
     return rel ? t>=0 && t<kMostTeams && rel[t]==kEnemyRelation : true;
 }
 bool Soldier(const unsigned char* o) noexcept { return DerivesFrom(o,".?AVSoldierBase@@"); }

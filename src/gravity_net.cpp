@@ -1,5 +1,5 @@
-// The gravity operations online (gravity_net.h; the wire gravity_net_protocol.h; the channel plugin_net.h GRVT, sent only to
-// the peers that announced support_protocol.h kExtGravity). Game thread only.
+// The gravity operations online (gravity_net.h; the wire gravity_net_protocol.h; the channel plugin_net.h GRVT, sent to every
+// peer). Game thread only.
 #include "gravity_net.h"
 #include "command_identity.h"
 #include "gravity_net_protocol.h"
@@ -40,12 +40,12 @@ struct Out {
     gravity::Target t;
     gravity_net::Grab hold{};       // its state as it goes out (origin, grab, IDs, ray, goal)
     ObjRef by{};                    // its grabber (this machine's player): fallen mid-grab, the grab is let go (Frame)
-    ULONGLONG calledAt=0,sentAt=0;
+    ULONGLONG calledAt=0,sentFrame=0,sentMs=0;   // sentFrame/sentMs: GameFrame and ms of the hold's last state out (0: send now)
     gravity_net::Grab queue[kMostQueued]{};   // throws, let-goes, radials not sent yet
     int queued=0;
     std::uint32_t origin=1,serial=0;
     // A thrown thing with no ID (found by the ray on the peers): its flight's states follow its throw.
-    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentAt=0,slowSince=0; } flight;
+    struct Flight { bool on=false; gravity::Target t; gravity_net::Grab g{}; ULONGLONG since=0,sentFrame=0,sentMs=0,slowSince=0; } flight;
 };
 Out out;
 bool netReady=false,netHost=false;
@@ -156,8 +156,9 @@ void FlightTick(ULONGLONG now) noexcept {
     if(Len(vel)<kRestSpeed){if(!f.slowSince)f.slowSince=now;}
     else f.slowSince=0;
     const bool rest=f.slowSince && now-f.slowSince>=kFlightRestMs;
-    if(!rest && f.sentAt && now-f.sentAt<gravity_net::kFlightGapMs)return;
-    f.sentAt=now;
+    const ULONGLONG frame=GameFrame();
+    if(!rest && !gravity_net::Due(frame,f.sentFrame,gravity_net::kFlightGapFrames,now,f.sentMs,gravity_net::kFlightGapMs))return;
+    f.sentFrame=frame;f.sentMs=now;
     gravity_net::Grab g=f.g;
     g.kind=gravity_net::GrabKind::flight;
     std::memcpy(g.at,at,12);std::memcpy(g.vel,vel,12);
@@ -211,7 +212,7 @@ bool Hold(const Target& t,const unsigned char* by,const float* hit,const float* 
         if(a)std::memcpy(g.rayA,a,12);
         if(b)std::memcpy(g.rayB,b,12);
         g.origin=out.origin;g.grab=++out.serial;
-        out.hold=g;out.t=t;out.holding=true;out.sentAt=0;
+        out.hold=g;out.t=t;out.holding=true;out.sentFrame=0;
         if(out.flight.on && Same(out.flight.t,t))out.flight=Out::Flight{};   // caught again: its flight is a hold now
     }
     std::memcpy(out.hold.goal,goal,12);
@@ -280,23 +281,29 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
     if(context.localPuid && std::memchr(context.localPuid,0,sizeof(localPuid)))strcpy_s(localPuid,context.localPuid);
     else localPuid[0]=0;
     unsigned char bytes[gravity_net::kGrabWire];
-    for(int i=0;i<out.queued;++i)
-        if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
+    // A hold and a flight are state messages (gravity_net_protocol.h GrabState), one stream each of this machine's; the
+    // rest reliable, in order.
+    const std::uint32_t holdKey=plugin_net::StateKey(plugin_net::StateStream::gravityHold,0);
+    const std::uint32_t flightKey=plugin_net::StateKey(plugin_net::StateStream::gravityFlight,0);
+    for(int i=0;i<out.queued;++i) {
+        if(!gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))continue;
+        if(out.queue[i].kind==gravity_net::GrabKind::flight)plugin_net::BroadcastState(flightKey,bytes,sizeof(bytes));
+        else plugin_net::Broadcast(bytes,sizeof(bytes));
+    }
     out.queued=0;
-    const ULONGLONG ms=GameMs();
-    if(!out.holding || (out.sentAt && ms-out.sentAt<gravity_net::kHoldGapMs))return;
-    out.sentAt=ms;
+    const ULONGLONG frame=GameFrame();
+    if(!out.holding || !gravity_net::Due(frame,out.sentFrame,gravity_net::kHoldGapFrames,now,out.sentMs,gravity_net::kHoldGapMs))return;
+    out.sentFrame=frame;out.sentMs=now;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
-    plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
-    (void)now;
+    plugin_net::BroadcastState(holdKey,bytes,sizeof(bytes));
 }
 // A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
-void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentAt=0; }
+void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentFrame=0; }
 
 plugin_net::Channel GravityNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="gravity";c.magic=gravity_net::kGrabMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtGravity;
-    c.minSize=c.maxSize=gravity_net::kGrabWire;
+    c.name="gravity";c.magic=gravity_net::kGrabMagic;c.version=gravity_net::kVersion;
+    c.minSize=c.maxSize=gravity_net::kGrabWire;c.takesState=&gravity_net::GrabState;
     c.receive=&ReceiveGravityNetwork;c.update=&UpdateGravityNetwork;c.reset=&ResetGravityNetwork;c.joined=&GravityNetworkJoined;
     return c;
 }
@@ -328,6 +335,18 @@ bool ReceiveGravityNetwork(std::uint32_t peer,const char* puid,const void* bytes
             r.t=gravity::Target{};r.found=false;
             break;
         }
+        case gravity_net::GrabEvent::thrownBehind: {
+            // The grab before the one followed (whose hold came first): its own target looked for and thrown, the one
+            // followed kept as it is.
+            if(!gravity::Ready())break;
+            const gravity::Target held=r.t;const bool found=r.found;const ULONGLONG lookedAt=r.lookedAt;
+            Look(peer,g,now);
+            const bool thrown=r.found && gravity::Launch(r.t,g.vel);
+            if(logs++<64)Log("GRAVITY NET peer %u throws (its grab before) at %.0f m/s: %s",peer,Len(g.vel),thrown ? "thrown here" : "its target not found here");
+            if(thrown && Zero(g.target)){r.flight=r.t;r.flightAt=now;}
+            r.t=held;r.found=found;r.lookedAt=lookedAt;
+            break;
+        }
         case gravity_net::GrabEvent::flight:Steer(r,g,now);break;
         case gravity_net::GrabEvent::radial: {
             if(!gravity::Ready())break;
@@ -355,7 +374,7 @@ void ResetGravityNetwork() noexcept {
     inbox.Reset();
     out.queued=0;out.flight=Out::Flight{};
     out.origin=plugin_net::NewOrigin();out.serial=0;
-    if(out.holding)out.sentAt=0;   // the hold goes out again in full to the new roster
+    if(out.holding)out.sentFrame=0;   // the hold goes out again in full to the new roster
     netReady=false;netHost=false;peerCount=0;hostPeer=0;
 }
 }  // namespace crew

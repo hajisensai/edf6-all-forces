@@ -11,6 +11,7 @@ namespace crew {
 // Weapon `w`'s lock: 2 locked (`point` its first lock's target's lock point), 1 locking (`progress` 0..1 of its
 // LockonTime, `point` the target), 0 none.
 int WeaponLock(const unsigned char* w,float* point,float* progress) noexcept;
+void LogSalvoLocks(const unsigned char* weapon) noexcept;
 // The object weapon `w`'s first completed lock is on (nullptr: none locked yet).
 const void* WeaponLockObject(const unsigned char* w) noexcept;
 // The object weapon `w`'s lock in progress is on (nullptr: none locking).

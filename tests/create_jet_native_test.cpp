@@ -41,7 +41,7 @@ bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
 bool MarkSupportFirepower(unsigned char*,supportlevel::Curve) noexcept {UnexpectedWorldCall();}
 void PreloadUltimate(void*) noexcept {UnexpectedWorldCall();}
 namespace jet {
-void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG) noexcept {UnexpectedWorldCall();}
+void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG,const sortie::RunSpec&) noexcept {UnexpectedWorldCall();}
 Jet jets[kMaxJets]{};
 float FerryTurn(const Kind&) noexcept {UnexpectedWorldCall();}
 bool Alive(const ObjRef&) noexcept {UnexpectedWorldCall();}

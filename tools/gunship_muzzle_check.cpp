@@ -424,10 +424,23 @@ void FlightChecks(const Orbit* orbits,int count) {
         }
     }
 }
+
+void C130Ports() {
+    const float pose[16]={0,0,-1,0, 0,1,0,0, 1,0,0,0, 40,125,-10,1};
+    float muzzle[3], local[3];
+    gunmuzzle::ToWorld(pose,gunmuzzle::kC130Bofors,muzzle);
+    gunmuzzle::ToLocal(pose,muzzle,local);
+    for(int i=0;i<3;++i)
+        Expect(std::fabs(local[i]-gunmuzzle::kC130Bofors[i])<1e-4f,"C-130: the mouth follows the aircraft pose");
+    const float port[3]={40,0,-500},throughAirframe[3]={40,0,500};
+    Expect(gunmuzzle::LeavesC130Port(pose,muzzle,port),"C-130: a port-side target can be fired on");
+    Expect(!gunmuzzle::LeavesC130Port(pose,muzzle,throughAirframe),"C-130: a round aimed inboard is held");
+}
 }  // namespace
 
 int main() {
     GeometryChecks();
+    C130Ports();
     ScatterChecks();
     const float playerBank=1.2f;   // playerjet.cpp kTurnBank
     const Orbit orbits[]={

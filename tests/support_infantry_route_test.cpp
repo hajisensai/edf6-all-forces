@@ -1,5 +1,6 @@
 // Real support dispatcher, NPC Think/Drive/MoveTo, and GroundNavigate. Inert scene/actors and
 // a deterministic movement consumer replace only the game, not the route or NPC movement adapters.
+#include "../src/commander.h"
 #define SUPPORT_INFANTRY_NATIVE_TEST
 #define Plan NpcCombatPlan
 #define now npcFixtureMs
@@ -37,8 +38,9 @@ int SupportStrikeCount() noexcept{return 0;}
 const wchar_t* SupportStrikeKey(int) noexcept{return nullptr;}
 const wchar_t* SupportStrikeName(int) noexcept{return L"strike";}
 std::uint32_t SupportStrikePt(int) noexcept{return 0;}
+bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int) noexcept{return -1;}
-bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t) noexcept{return false;}
+bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t,const float*) noexcept{return false;}
 support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 void WarnDeployment(const support_net::Plan&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
@@ -88,7 +90,7 @@ bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
 support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
@@ -105,7 +107,6 @@ bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {
 bool PresetHandArms(int,int,std::uint64_t* a,std::uint64_t* b) noexcept{*a=0;*b=0;return false;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept{return support_net::PlanResult::ready;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}
-bool SupportPeersAcceptRescue() noexcept{return true;}
 void RescueHeliDeployed(unsigned char*,const float*,bool,const ObjRef&) noexcept{}
 bool SupportTransactionRequester(std::uint64_t,ObjRef*) noexcept{return false;}
 bool SubDeck(const float*,float*) noexcept{return false;}
@@ -139,11 +140,10 @@ bool SupportVariantReady(const wchar_t*) noexcept{return false;}
 void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
 void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}
 bool SupportPeersApplyVariants() noexcept{return true;}
-bool SupportPeersApplyBackpacks() noexcept{return true;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}
-bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t) noexcept{return false;}
+bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t,std::uint64_t,const sortie::RunSpec&) noexcept{return false;}
 void SupportNetTick() noexcept{}
 void ResetSupportNet() noexcept{}
 void ReportSupportFailure(std::uint64_t) noexcept{}
@@ -215,6 +215,7 @@ int main() {
     config.npcEvade=false;config.npcFireLane=false;config.npcGuardFormation=10;sessionOn=true;host=true;
     Put<float>(weapon,kArmReach,100);Put<float>(weapon,kArmDamage,10);Put<int>(weapon,kWeaponAmmo,100);
     for(unsigned i=0;i<4;++i)Unit(i,-900-static_cast<float>(i));
+    Check(deployments.Allocate("fixture deployments"),"the fixture deployment rows exist (the spawn path allocates them first)");
     auto& d=deployments[0];d.used=true;d.assigned=true;d.networked=true;d.id=7001;d.born=npcFixtureMs;
     d.plan.catalogId=21;d.plan.count=4;
     for(unsigned i=0;i<4;++i){d.objects[i]=ObjRef::Of(units[i]);d.plan.units[i].resourceId=i ? kSoldier : kLeader;
@@ -280,7 +281,8 @@ int main() {
     Tick(true,false);
     Check(soldier->target.obj==other && q->routeActive,"nearby combat retains its target during route updates");
     const auto* battlePos=Pos(units[0]);const float battleEye[3]={battlePos[0],battlePos[1]+kEye,battlePos[2]};
-    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0]),nullptr,battleEye,battlePos,q,npcFixtureMs);
+    ArmsSeen battleArms{};
+    const auto battle=Drive(*soldier,units[0],kSoldiers[0],ArmsOf(units[0],battleArms),nullptr,battleEye,battlePos,q,npcFixtureMs);
     Check(std::strcmp(battle.move,"combat spot")==0,"actual Drive selects combat movement ahead of the support route");
     world.enemies=0;wall=true;
     for(int i=0;i<12;++i)Tick(true,false);

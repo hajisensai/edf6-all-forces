@@ -4,19 +4,15 @@
 // called them in a chain; an unknown message ended in the support parser, which logged it malformed every time.
 // Now a channel is a row of this registry:
 //  - its magic (the message's first little-endian word) or, for a channel that owns several, its own `owns` test;
-//  - its version (the second word; 0: the channel reads its own versions, as the older ones do). A message of another
-//    version is the channel's and dropped here, said by nobody (an older or newer build: the version notice says that);
-//  - its feature bit (support_protocol.h kExt*, 0: none, every build that has the channel reads it): a message is sent only
-//    to a peer that announced the bit, and one from a peer that did not announce it is dropped here (it cannot be this
-//    build's: an older build never sends it). The bit is what lets an older build in the room be left out instead of being
-//    sent bytes it would log as malformed;
+//  - its version (the second word; 0: the channel checks its own). A message of another version is the channel's and
+//    dropped here;
 //  - its size bounds (outside: dropped);
 //  - its receive, update (each frame, the transport's context), reset (the room changed: the peer indexes mean other
-//    machines now) and joined (a peer newly has the channel's feature, a new member or a newly heard one: the channel sends
-//    it its whole state; until then it sent that peer nothing).
-// Which peers have which feature: the host hears every guest's hello (support_protocol.h, the extension word); a guest hears
-// only its host. So the host tells every guest that announced kExtPeerRoster the room's words by PUID (the roster, this
-// file's codec), and a guest knows the others' from it.
+//    machines now) and joined (the room's handshake done: the channel sends each peer its whole state).
+// Every machine of a room runs the same build's protocols (mod_room.h kAllForcesRoomProtocol: an older or newer build
+// neither finds nor joins the room), so a channel sends to every peer and reads every peer's messages: no per-feature
+// bits, no roster of who has what (net-6, 2026-11-24). `joined` waits for the support handshake alone (support_protocol.h
+// Session::RoomReady: the host heard every guest's hello; a guest, its host's welcome saying so).
 #pragma once
 #include "command_net.h"
 #include "wire.h"
@@ -34,18 +30,45 @@ struct Channel {
     std::uint32_t magic=0;                                    // first word; 0: `owns` decides
     bool (*owns)(const void* bytes,std::size_t size) noexcept=nullptr;
     std::uint32_t version=0;                                  // second word; 0: the channel checks its own
-    std::uint32_t featureBit=0;                               // support_protocol.h kExt*; 0: every peer
     std::size_t minSize=4,maxSize=kMaxPayload;
     bool (*receive)(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept=nullptr;
     void (*update)(const CommandNetworkContext& context,std::uint64_t now) noexcept=nullptr;
     void (*reset)() noexcept=nullptr;
     void (*joined)(std::uint32_t peer) noexcept=nullptr;
+    // A state message (EDF6Coop sendState; plugin_net.h SendState) of this channel's that it takes: true for the kinds it
+    // sends as state. nullptr: the channel sends none, and every state message of its magic is dropped.
+    bool (*takesState)(const void* bytes,std::size_t size) noexcept=nullptr;
 };
+
+// State messages (EDF6Coop ABI 2 sendState, net-5 2026-11-24): "the latest replaces the previous" under a key the sender
+// picks; never retransmitted, a receiver drops one not newer than the last it took of (sender, key). Their payload is the
+// channel's own message, the same bytes a reliable one would carry (EDF6Coop's [key][sequence] header is its own and
+// stripped before delivery), routed by its magic like any other; the channel's takesState says which kinds may come so.
+// The key: one stream of one sender, StateKey(stream, object):
+//  - stream: a kind of state of one channel (StateStream below; a fixed number, never a registry index, so a key does not
+//    move when a channel is added);
+//  - object: which one of them on the sending machine, a slot it keeps for the object's life (an enemy-control lease's
+//    slot, a show's slot; 0 for a machine's one hold). A slot used again for the next object is the same stream: its
+//    sequence goes on, and the receiver tells the objects apart by the payload (a lease, a grab serial, a show key).
+// stream*kStateObjects+object < 64*1024 = EDF6COOP_EXTENSION_MAX_STATE_KEYS; key 0 is no key.
+enum class StateStream : std::uint32_t {
+    enemyPose=1,       // enemy control: the host's pose of a lease (object: its lease slot, < enemy_control_protocol::kMaxLeases)
+    gravityHold=2,     // gravity: this machine's hold (object 0)
+    gravityFlight=3,   // gravity: this machine's thrown thing's flight (object 0)
+    ultimateKeep=4,    // ultimate strike: a playing show's keep (object: its show slot, < ultimate::kMaxShows)
+};
+constexpr std::uint32_t kStateObjects=1024,kStateStreams=64;
+// 0: no key (an object out of range, a stream not one).
+constexpr std::uint32_t StateKey(StateStream stream,std::uint32_t object) noexcept {
+    const auto s=static_cast<std::uint32_t>(stream);
+    return s && s<kStateStreams && object<kStateObjects ? s*kStateObjects+object : 0u;
+}
+static_assert(kStateStreams*kStateObjects<=65536u,"every key under EDF6COOP_EXTENSION_MAX_STATE_KEYS");
 
 enum class Route : std::uint8_t {
     none,        // no channel's: the caller tries its own parser (support_net's v2 messages)
     delivered,   // given to the channel
-    dropped,     // the channel's, but not taken: another version, a size out of bounds, a peer without the feature
+    dropped,     // the channel's, but not taken: another version, a size out of bounds
 };
 
 class Registry {
@@ -70,14 +93,14 @@ public:
     }
     // Every channel's reset (the room changed: RoomWatch; or the transport reset whole).
     void ResetAll() const noexcept { for(std::size_t i=0;i<count_;++i)if(rows_[i].reset)rows_[i].reset(); }
-    // `has(peer,bit)`: whether the peer announced the feature bit (plugin_net::Peers::Has).
-    template<class Has>
-    Route Dispatch(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,Has has) const noexcept {
+    // state: a state message (EDF6Coop sendState); none of a channel's: dropped, never the support parser's.
+    Route Dispatch(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,
+                   bool state=false) const noexcept {
         const Channel* c=Find(bytes,size);
-        if(!c)return Route::none;
+        if(!c)return state ? Route::dropped : Route::none;
         if(size<c->minSize || size>c->maxSize)return Route::dropped;
+        if(state && (!c->takesState || !c->takesState(bytes,size)))return Route::dropped;
         if(c->version && wire::HeadWord(bytes,size,1)!=c->version)return Route::dropped;
-        if(c->featureBit && !has(peer,c->featureBit))return Route::dropped;
         // A channel's receive returning false would hand its bytes to another parser: it never may (they are its).
         c->receive(peer,puid,bytes,size,now);
         return Route::delivered;
@@ -87,59 +110,31 @@ private:
     std::size_t count_=0;
 };
 
-// Each peer's extension word as this machine knows it (0: not heard), and which channels were told it joined.
+// Which channels were told each peer joined (the room's handshake done: plugin_net.cpp Update calls Joins only then).
 class Peers {
 public:
-    void Reset() noexcept { std::memset(ext_,0,sizeof(ext_));std::memset(told_,0,sizeof(told_));std::memset(known_,0,sizeof(known_)); }
-    void Set(std::uint32_t peer,std::uint32_t ext) noexcept {
-        if(!peer || peer>kMaxPeers)return;
-        ext_[peer]=ext;known_[peer]=1;
-    }
-    // A peer's word gone (the host lost its hello: a new challenge): told again once heard.
-    void Forget(std::uint32_t peer) noexcept { if(peer && peer<=kMaxPeers){ext_[peer]=0;told_[peer]=0;known_[peer]=0;} }
-    std::uint32_t Ext(std::uint32_t peer) const noexcept { return peer && peer<=kMaxPeers ? ext_[peer] : 0u; }
-    bool Known(std::uint32_t peer) const noexcept { return peer && peer<=kMaxPeers && known_[peer]; }
-    // bit 0: every known-or-not peer (the older channels, read by every build that has them).
-    bool Has(std::uint32_t peer,std::uint32_t bit) const noexcept {
-        if(!peer || peer>kMaxPeers)return false;
-        return !bit || (known_[peer] && (ext_[peer]&bit)==bit);
-    }
-    // For each channel with a joined callback and each peer 1..peers that has its feature now and was not told yet:
-    // `joined(channel index, peer)`, once until Reset / Forget. A channel without a feature bit is told once the peer is
-    // known (heard), so a newly heard peer gets its state.
+    void Reset() noexcept { std::memset(told_,0,sizeof(told_)); }
+    // For each channel with a joined callback and each peer 1..peers not told yet: `joined(channel index, peer)`, once
+    // until Reset.
     template<class Joined>
     void Joins(const Registry& reg,std::uint32_t peers,Joined joined) noexcept {
         if(peers>kMaxPeers)peers=kMaxPeers;
         for(std::uint32_t p=1;p<=peers;++p) {
-            if(!known_[p])continue;
             for(std::size_t i=0;i<reg.Count() && i<32;++i) {
                 const Channel& c=reg.At(i);
                 const std::uint32_t mask=1u<<i;
-                if(!c.joined || (told_[p]&mask) || !Has(p,c.featureBit))continue;
+                if(!c.joined || (told_[p]&mask))continue;
                 told_[p]|=mask;
                 joined(i,p);
             }
         }
     }
 private:
-    std::uint32_t ext_[kMaxPeers+1]{};
     std::uint32_t told_[kMaxPeers+1]{};
-    unsigned char known_[kMaxPeers+1]{};
 };
 static_assert(kMaxChannels<=32,"Peers::told_ keeps one bit a channel");
 
-// The roster (host -> every guest that announced kExtPeerRoster): the room's members by PUID and the extension word each
-// announced (the host's own among them). Up to kRosterPerMessage a message: a bigger room goes in several, each merged.
-// Wire: magic, version, count (u32); then count entries {ext u32, puid 64 bytes NUL-padded} (a PUID is at most 64 chars).
-constexpr std::uint32_t kRosterMagic=0x52534E50u;   // "PNSR"
-constexpr std::uint32_t kRosterVersion=1;
-constexpr std::size_t kPuidChars=64,kRosterEntry=4+kPuidChars,kRosterHead=12;
-constexpr std::size_t kRosterPerMessage=(kMaxPayload-kRosterHead)/kRosterEntry;
-static_assert(kRosterPerMessage>=8,"a room of eight fits one roster message");
-struct RosterEntry {
-    char puid[kPuidChars+1]{};
-    std::uint32_t ext=0;
-};
+constexpr std::size_t kPuidChars=64;   // a PUID is at most 64 printable characters
 inline bool ValidPuid(const char* p) noexcept {
     if(!p || !p[0])return false;
     std::size_t n=0;
@@ -148,51 +143,13 @@ inline bool ValidPuid(const char* p) noexcept {
     for(std::size_t i=0;i<n;++i)if(static_cast<unsigned char>(p[i])<0x21 || static_cast<unsigned char>(p[i])>0x7E)return false;
     return true;
 }
-// The bytes used (0: nothing encoded: no room, a bad PUID, more than kRosterPerMessage).
-inline std::size_t EncodeRoster(const RosterEntry* e,std::size_t count,void* bytes,std::size_t size) noexcept {
-    if(!e || !count || count>kRosterPerMessage)return 0;
-    const std::size_t used=kRosterHead+count*kRosterEntry;
-    if(size<used)return 0;
-    wire::Writer w(bytes,used);
-    w.U32(kRosterMagic).U32(kRosterVersion).U32(static_cast<std::uint32_t>(count));
-    for(std::size_t i=0;i<count;++i) {
-        if(!ValidPuid(e[i].puid))return 0;
-        char padded[kPuidChars]{};
-        std::memcpy(padded,e[i].puid,std::strlen(e[i].puid));
-        w.U32(e[i].ext).Bytes(padded,kPuidChars);
-    }
-    return w.Ok() && w.Used()==used ? used : 0;
-}
-// The entries (at most kRosterPerMessage); false: not a roster of this version, a count that is not the size's, a PUID
-// that is not one.
-inline bool DecodeRoster(const void* bytes,std::size_t size,RosterEntry* out,std::size_t* count) noexcept {
-    if(!out || !count)return false;
-    *count=0;
-    wire::Reader r(bytes,size);
-    if(r.U32()!=kRosterMagic || r.U32()!=kRosterVersion)return false;
-    const std::uint32_t n=r.U32();
-    if(!r.Ok() || !n || n>kRosterPerMessage || size!=kRosterHead+n*kRosterEntry)return false;
-    for(std::uint32_t i=0;i<n;++i) {
-        RosterEntry e{};
-        e.ext=r.U32();
-        char raw[kPuidChars];r.Bytes(raw,kPuidChars);
-        std::size_t len=0;while(len<kPuidChars && raw[len])++len;
-        for(std::size_t k=len;k<kPuidChars;++k)if(raw[k])return false;   // padding is zeros
-        std::memcpy(e.puid,raw,len);e.puid[len]=0;
-        if(!ValidPuid(e.puid))return false;
-        out[i]=e;
-    }
-    if(!r.Ok())return false;
-    *count=n;
-    return true;
-}
 
-// Which room the peers' words and the channels' per-peer state are of (plugin_net.cpp Update, every frame). The room is
+// Which room the channels' per-peer state is of (plugin_net.cpp Update, every frame). The room is
 // its epoch, roster size, host peer, whether this machine hosts and this machine's PUID: another of any of them and the
 // peer indexes mean other machines now. Before 2026-10-20 only the peer table was forgotten then; the channels'
 // reset (the contract above) was called by the transport's whole reset alone, so a member joining or leaving kept each
 // channel's state of the old indexes (2026-10-20 review).
-//  - forgetPeers: the peers' words dropped (not up, or another room): heard again, each channel told `joined` again;
+//  - forgetPeers: the joins forgotten (not up, or another room): each channel told `joined` again once ready;
 //  - resetChannels: every channel's reset, once a change, never each frame. A room left for none (offline, the
 //    transport gone) is a change; none to a first room is not (no channel holds a peer's state yet). A short drop with
 //    the room unchanged (the same epoch and roster when it comes back) is none: the peers are told `joined` again and

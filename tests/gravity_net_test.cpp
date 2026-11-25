@@ -125,16 +125,59 @@ void FlightChecks() {
     const Grab flight=MakeGrab(GrabKind::flight,7,1);
     Check(Encode(flight,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),back) && back.kind==GrabKind::flight,"a flight round trip");
 }
+
+// EDF6Coop extension ABI 2: a hold and a flight go as state messages (unreliable, the newest kept), the rest reliable.
+void StateChecks() {
+    unsigned char bytes[kGrabWire];
+    const GrabKind kinds[]={GrabKind::hold,GrabKind::thrown,GrabKind::letGo,GrabKind::flight,GrabKind::radial};
+    bool ok=true;
+    for(const GrabKind kind:kinds) {
+        Grab g=MakeGrab(kind,7,1);if(kind==GrabKind::radial){g.goal[0]=30.0f;g.goal[1]=10.0f;}
+        ok=ok && Encode(g,bytes,sizeof(bytes)) && GrabState(bytes,sizeof(bytes))==(kind==GrabKind::hold || kind==GrabKind::flight);
+    }
+    Check(ok,"a hold and a flight are states; a throw, a let-go, a radial are not");
+    Check(!GrabState(bytes,sizeof(bytes)-1) && !GrabState(nullptr,0),"a wrong size or none: not a state");
+
+    // The next grab's hold overtakes this one's reliable throw: the throw still happens, the newer hold followed on.
+    GrabInbox in;
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,1),1000)==GrabEvent::started,"grab 1 held");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,2),1100)==GrabEvent::started,"grab 2's hold first");
+    Check(in.Receive(1,MakeGrab(GrabKind::thrown,7,1),1110)==GrabEvent::thrownBehind && in.Holding(1,1110) &&
+          in.Peer(1).last.grab==2,"grab 1's throw behind it: thrown, grab 2 still held");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,1),1120)==GrabEvent::flight,"grab 1's flight follows");
+    Check(in.Receive(1,MakeGrab(GrabKind::thrown,7,1),1130)==GrabEvent::none,"its throw again: nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,1),1140)==GrabEvent::none,"a late hold of grab 1: nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,2),1150)==GrabEvent::held,"grab 2 carried on");
+    // The same with a let-go: moot (grab 2 replaced it), nothing.
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,3),1200)==GrabEvent::started,"grab 3's hold before grab 2's end");
+    Check(in.Receive(1,MakeGrab(GrabKind::letGo,7,2),1210)==GrabEvent::none && in.Holding(1,1210) && in.Peer(1).last.grab==3,
+          "grab 2's let-go behind it: nothing, grab 3 held");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,2),1220)==GrabEvent::none,"a late hold of grab 2: nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::thrown,7,3),1300)==GrabEvent::thrown && !in.Holding(1,1300),"grab 3 thrown in order");
+    // A flight overtaking its own throw: dropped (the next one, after the throw, follows).
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,4),1400)==GrabEvent::started,"grab 4");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,4),1410)==GrabEvent::none,"its flight before its throw: nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::thrown,7,4),1420)==GrabEvent::thrown,"its throw");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,4),1430)==GrabEvent::flight,"the next flight follows");
+}
 }  // namespace
 
 int main() {
     WireChecks();
     InboxChecks();
     FlightChecks();
+    StateChecks();
     // Two grabs of one thing: the same winner seen from both machines.
     Check(OtherOutranks(false,true,"0002b","0002a") && !OtherOutranks(true,false,"0002a","0002b"),"the host's grab wins, from both sides");
     Check(OtherOutranks(false,false,"0002b","0002a") && !OtherOutranks(false,false,"0002a","0002b"),"between guests the lower PUID's, from both sides");
     Check(!OtherOutranks(false,false,"0002a","0002a") && !OtherOutranks(false,false,"","0002a"),"the same PUID or none: neither");
+    // Send pacing: frames or ms, whichever first (gravity_net_protocol.h Due).
+    Check(Due(100,0,kFlightGapFrames,5000,0,kFlightGapMs),"a state never sent goes out at once");
+    Check(!Due(105,100,kFlightGapFrames,5050,4970,kFlightGapMs) && Due(106,100,kFlightGapFrames,5070,4970,kFlightGapMs),
+          "60 fps: the sixth frame, though the coarse ms clock reads under the gap");
+    Check(!Due(101,100,kFlightGapFrames,5099,5000,kFlightGapMs) && Due(101,100,kFlightGapFrames,5100,5000,kFlightGapMs),
+          "10 fps: the gap's ms, one frame later, well inside the receiver's silence");
+    Check(Due(102,100,kHoldGapFrames,5050,5000,kHoldGapMs) && !Due(101,100,kHoldGapFrames,5049,5000,kHoldGapMs),"a hold likewise");
     std::printf("gravity_net: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

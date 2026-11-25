@@ -1,4 +1,5 @@
 #pragma once
+#include "sortie_plan.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -46,6 +47,7 @@ struct Plan {
     // behaviour while retaining ownership.
     unsigned char requester[32]{};
     std::uint32_t team=0; // 0 stock, else the host-authorized PvP faction team (pvp_match.h PvpTeam)
+    sortie::RunSpec run;
 };
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
@@ -81,7 +83,8 @@ bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 using SupportPlan=support_net::Plan;
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept;
 // The request carries this machine's player's soldier weapons (npc_arms.h LocalRequesterArms).
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0) noexcept;
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0,
+                          const sortie::RunSpec& run={}) noexcept;
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
@@ -102,15 +105,8 @@ bool SupportPeersAcceptLoadout() noexcept;
 bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
 // Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
 bool SupportPeersApplyVariants() noexcept;
-// Host: whether every peer reads a soldier's backpack weapon (support_protocol.h kExtBackpack); offline / no peer: true.
-bool SupportPeersApplyBackpacks() noexcept;
 // Host: every participant supports the independent detail bits (support_protocol.h kDetailPvpSupport).
 bool SupportPeersHaveDetails(std::uint32_t details) noexcept;
-// Whether every peer has the sea rescue catalog entry (support_protocol.h kExtSeaRescue); true offline / with no session. Without it the
-// host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
-bool SupportPeersAcceptRescue() noexcept;
-// The room's builds differ (version_notice.h): the HUD's line about it, for a while after it changed (draw thread).
-bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept;
 // Host: the player whose request made committed transaction `token`, by its stable identity (the requester's
 // authenticated PUID resolved to its mission player actor; this machine's player for its own). False when unknown.
 bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;

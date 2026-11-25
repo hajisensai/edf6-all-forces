@@ -10,9 +10,9 @@
 // The float guns are the host's: it sees a colonist die and says which of its guns lies where (`drop`), a machine whose
 // player walks up to one asks for it (`pick`), the host gives it to the first who asked (`owner`) and ends it (`gone`);
 // every machine draws and fires each gun round its owner, and only the owner's machine's rounds deal damage (the game's
-// own rule: a round whose attacker is another machine's hurts nothing here; EDF6Coop docs/net-re/damage.md).
-// Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
-// to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
+// own rule: a round whose attacker is another machine's hurts nothing here; edf-coop-stable:docs/net-re/damage.md).
+// Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT and FGUN: sent to every
+// peer, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
 // and radial kinds, the float guns taken from the game's own drop. Version 3 (2026-10-31): a player (a grab's grabber, a
 // gun's asker and owner) goes by its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 // Version 4 (2026-10-31): every object is its reference (net_object_ref.h): a player by its slot with the tag at bytes
@@ -32,12 +32,21 @@ constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
 constexpr std::uint32_t kVersion=4;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
-constexpr std::uint64_t kHoldGapMs=50;     // a hold's state goes out this often while it lasts
+// Senders' pacing in logic frames (GameFrame, 60 Hz), not ms of a clock with 15.6 ms steps (which stretched 50 ms to ~63),
+// or after the Gap*Ms if that comes first: at a low frame rate the frames alone would stretch a gap toward the receiver's
+// Silent*Ms, which is wall-clock (6 frames at 10 fps are its whole 600 ms).
+constexpr std::uint64_t kHoldGapFrames=3,kHoldGapMs=50;  // a hold's state goes out this often while it lasts (20 Hz)
 constexpr std::uint64_t kHoldSilentMs=600; // a hold not heard of this long is let go (its grabber left, its plugin stopped)
 constexpr std::uint32_t kMostLeftMs=3600000;
-constexpr std::uint64_t kFlightGapMs=100;    // a thrown thing with no ID: its state goes out this often while it flies...
+constexpr std::uint64_t kFlightGapFrames=6,kFlightGapMs=100;  // a thrown thing with no ID: its state goes out this often while it flies (10 Hz)...
 constexpr std::uint64_t kFlightMostMs=4000;  // ...for at most this long (or until it rests)
 constexpr std::uint64_t kFlightSilentMs=600; // a flight not heard of this long is left to this machine's physics
+static_assert(kHoldGapMs*4<=kHoldSilentMs && kFlightGapMs*4<=kFlightSilentMs,"a state lost or late thrice is not silence");
+// Due: the next state goes out (never sent, or its frames or its ms are up, whichever first).
+constexpr bool Due(std::uint64_t frame,std::uint64_t sentFrame,std::uint64_t gapFrames,std::uint64_t now,std::uint64_t sentMs,
+                   std::uint64_t gapMs) noexcept {
+    return !sentFrame || frame-sentFrame>=gapFrames || now-sentMs>=gapMs;
+}
 constexpr float kMostRadial=200.0f;          // m: a radial's reach at most (gravity::Radial)
 constexpr float kMostRadialSpeed=200.0f;     // m/s
 
@@ -57,6 +66,10 @@ struct Grab {
     float vel[3]{};                  // hold: how fast that point moves; thrown: the velocity it is thrown at
 };
 bool OwnedGrab(const void* bytes,std::size_t size) noexcept;   // the GRVT magic (any version)
+// The kinds that go as EDF6Coop state messages (plugin_net.h SendState: unreliable, only the newest kept): a hold and a
+// flight, states sent again and again (the next one replaces a lost one). A throw, a let-go, a radial go reliable, in order.
+// So a state may overtake the reliable end of the grab before it (GrabInbox: thrownBehind).
+bool GrabState(const void* bytes,std::size_t size) noexcept;
 bool Encode(const Grab&,void* bytes,std::size_t size) noexcept;
 // False: not GRVT, the wrong size, a newer version, an unknown kind, an ID not canonical, a number not finite.
 bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept;
@@ -89,7 +102,7 @@ inline bool OtherOutranks(bool selfHost,bool otherHost,const char* selfPuid,cons
 }
 
 // The receiver of the grabs: each peer's current one.
-enum class GrabEvent { none, started, held, thrown, letGo, flight, radial };
+enum class GrabEvent { none, started, held, thrown, letGo, flight, radial, thrownBehind };
 struct RemoteGrab {
     bool active=false;
     std::uint64_t heardAt=0;
@@ -100,7 +113,9 @@ public:
     // A peer's message: `started` for a hold of a grab not followed yet (the receiver finds its target), `held` for a later
     // state of the one followed, `thrown` / `letGo` ending it (a throw of a grab never followed is still `thrown`: its target
     // is found then), `flight` for a state of the grab it last threw, `radial` for a radial (the hold untouched), `none`
-    // for one of an ended grab, an older one of the same run, a flight of a grab not thrown.
+    // for one of an ended grab, an older one of the same run, a flight of a grab not thrown. `thrownBehind`: a throw of an
+    // older grab of the same run than the one followed, whose hold (a state message) came first: that older grab's target
+    // is thrown all the same, the one followed untouched (a let-go of it is `none`: the newer grab replaced it).
     GrabEvent Receive(std::uint32_t peer,const Grab& g,std::uint64_t now) noexcept;
     // Whether the peer's grab is still held at `now` (heard within kHoldSilentMs); a silent one is let go here.
     bool Holding(std::uint32_t peer,std::uint64_t now) noexcept;

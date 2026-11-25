@@ -20,15 +20,19 @@
 // drawn on the shooter's machine and its hits on enemies are settled there (docs/scope-accuracy-re.md §4), so each machine
 // reading its own ini would let one member play the stock spread while the others are penalised unzoomed.
 //
+// Word v3 carries both the commander flag and the scope settings. Scope values are integers in units of 1/10000.
+// Word v4 (2026-11-24, with its room protocol bump: mod_room.h) adds the plugin content preload's sets (preload_set_logic.h): n= what this
+// member's play reaches (its catalog, its equipped call weapons, PreloadMode applied), p= the room's set as this member
+// last saw it (its n= and every other member's). The host's p= is what every member preloads at the mission's sync
+// (preload::AtSync): the set must be the same on every machine, a body one machine lacks is an object it cannot make.
 // The support rules (2026-11-24, docs/armory-re.md §6「房主规则」): whether a support may be called (SupportDisabled) is
 // the host's rule (support_dispatch.cpp Plan refuses by the host's SupportCfg), and the pt a call costs is its pt times
 // the host's SupportPtScale (support_points.cpp: the host keeps the pool). So a guest's 整备 support page shows the host's:
 // the word carries the host's SupportDisabled mask (d=, SupportConfig::disabled, 1..16 upper-case hex digits) and its
-// SupportPtScale (p=, the float's 32 bits in 8 upper-case hex digits: exactly the value the host prices by).
+// SupportPtScale (t=, the float's 32 bits in 8 upper-case hex digits: exactly the value the host prices by).
 //
-// Word v3 carried the commander flag and the scope settings; v4 adds the support rules. Scope values are integers in
-// units of 1/10000.
 #pragma once
+#include "preload_set_logic.h"
 #include "scope_spread_logic.h"
 #include <cstddef>
 #include <cstdint>
@@ -57,12 +61,12 @@ enum : std::uint32_t {
     kFeatCommander=512u,       // the commander mode (commander.cpp): the commander's NPC request (support catalog
                                // kCommanderCatalog), the players' NoTarget / NoHpLoss and the NPC-wipe failure
     kFeatScopeSpread=1024u,
-    kFeatHostRules=2048u,      // the host's SupportDisabled and SupportPtScale in this word (word v4): a guest's 整备
-                               // support page shows the host's rules
+    kFeatPreloadSet=2048u,     // the room's preload set (word v4 n= / p=): every member preloads the host's p=
+    kFeatHostRules=4096u,     // word v5: host support policy for the armory
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
                                          kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded|kFeatBikeGunMount|
-                                         kFeatBikeRide|kFeatCommander|kFeatScopeSpread|kFeatHostRules;
+                                         kFeatBikeRide|kFeatCommander|kFeatScopeSpread|kFeatPreloadSet|kFeatHostRules;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {
@@ -70,14 +74,15 @@ struct Word {
     std::uint32_t features=0;
     bool vanillaRecruit=false,npcFreeSquadCover=false,commander=false;
     scopespread::Params scope{};
-    std::uint64_t supportDisabled=0;   // SupportConfig::disabled (bit = catalog index)
-    float ptScale=1.0f;                // SupportPtScale, 0..kMostPtScale
+    preload::Set needs{},room{};
+    std::uint64_t supportDisabled=0;
+    float ptScale=1.0f;
 };
+inline constexpr std::size_t kWordMost=200;
 inline constexpr float kMostPtScale=100.0f;   // plugin.cpp's bound of SupportPtScale (support_points_net.h kMostScale)
-inline constexpr std::size_t kWordMost=128;
-// The longest word FormatWord writes: "4;v=" + version + ";f=" + 8 + ";r=1;c=1;m=1" + ";s=1," + 4 numbers of 6 digits
-// with 3 commas + ";d=" + 16 + ";p=" + 8, and its NUL. room_sync_logic.h reserves kWordMost of Coop's 4096 bytes for it.
-inline constexpr std::size_t kWordLongest=4+(kVersionMost-1)+3+8+12+5+(4*6+3)+3+16+3+8+1;
+// The longest word FormatWord writes: "5;v=" + version + ";f=" + 8 + ";r=1;c=1;m=1" + ";s=1," + 4 numbers of 6 digits
+// with 3 commas + ";d=" + 16 + ";t=" + 8 followed by both 32-digit preload sets, and its NUL. room_sync_logic.h reserves kWordMost of Coop's 4096 bytes for it.
+inline constexpr std::size_t kWordLongest=4+(kVersionMost-1)+3+8+12+5+(4*6+3)+3+16+3+8+2*(3+preload::kTextSize-1)+1;
 static_assert(kWordLongest<=kWordMost,"the longest word fits its buffer and its share of Coop's budget");
 // A SupportPtScale in the word: the float's bits (exact), and back (false: not a scale plugin.cpp would have taken).
 inline std::uint32_t ScaleBits(float v) noexcept { std::uint32_t b=0;std::memcpy(&b,&v,sizeof(b));return b; }
@@ -98,11 +103,13 @@ inline bool FormatWord(const Word& w,char* out,std::size_t size) noexcept {
     for(const char* p=w.version;*p;++p)if(*p==';' || *p<0x21 || *p>0x7E)return false;
     float scale=0;
     if(!ScaleOfBits(ScaleBits(w.ptScale),scale))return false;
-    const int n=std::snprintf(out,size,"4;v=%s;f=%X;r=%d;c=%d;m=%d;s=%d,%d,%d,%d,%d;d=%llX;p=%08X",w.version,static_cast<unsigned>(w.features),
+    char needs[preload::kTextSize]{},room[preload::kTextSize]{};
+    if(!preload::Format(w.needs,needs,sizeof(needs)) || !preload::Format(w.room,room,sizeof(room)))return false;
+    const int n=std::snprintf(out,size,"5;v=%s;f=%X;r=%d;c=%d;m=%d;s=%d,%d,%d,%d,%d;d=%llX;t=%08X;n=%s;p=%s",w.version,static_cast<unsigned>(w.features),
                               w.vanillaRecruit ? 1 : 0,w.npcFreeSquadCover ? 1 : 0,w.commander ? 1 : 0,w.scope.on ? 1 : 0,
                               static_cast<int>(ScopeToWord(w.scope.sniperHip)),static_cast<int>(ScopeToWord(w.scope.sniperHipMin)),
-                              static_cast<int>(ScopeToWord(w.scope.hip)),static_cast<int>(ScopeToWord(w.scope.aim)),
-                              static_cast<unsigned long long>(w.supportDisabled),static_cast<unsigned>(ScaleBits(w.ptScale)));
+                              static_cast<int>(ScopeToWord(w.scope.hip)),static_cast<int>(ScopeToWord(w.scope.aim)),static_cast<unsigned long long>(w.supportDisabled),
+                              static_cast<unsigned>(ScaleBits(w.ptScale)),needs,room);
     return n>0 && static_cast<std::size_t>(n)<size;
 }
 namespace detail {
@@ -160,7 +167,7 @@ inline bool Hex(std::string_view v,std::size_t most,std::uint64_t& out) noexcept
 inline bool ParseWord(std::string_view text,Word& out) noexcept {
     Word w;
     std::string_view rest=text,v;
-    if(rest.substr(0,2)!="4;")return false;
+    if(rest.substr(0,2)!="5;")return false;
     rest.remove_prefix(2);
     if(!detail::Field(rest,"v=",v) || v.empty() || v.size()>=kVersionMost)return false;
     std::memcpy(w.version,v.data(),v.size());
@@ -173,8 +180,10 @@ inline bool ParseWord(std::string_view text,Word& out) noexcept {
     if(!detail::Field(rest,"s=",v) || !detail::Scope(v,w.scope))return false;
     if(!detail::Field(rest,"d=",v) || !detail::Hex(v,16,w.supportDisabled))return false;
     std::uint64_t bits=0;
-    if(!detail::Field(rest,"p=",v) || v.size()!=8 || !detail::Hex(v,8,bits) ||
-       !ScaleOfBits(static_cast<std::uint32_t>(bits),w.ptScale) || !rest.empty())return false;
+    if(!detail::Field(rest,"t=",v) || v.size()!=8 || !detail::Hex(v,8,bits) ||
+       !ScaleOfBits(static_cast<std::uint32_t>(bits),w.ptScale))return false;
+    if(!detail::Field(rest,"n=",v) || !preload::Parse(v,w.needs))return false;
+    if(!detail::Field(rest,"p=",v) || !preload::Parse(v,w.room) || !rest.empty())return false;
     out=w;
     return true;
 }

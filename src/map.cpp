@@ -26,6 +26,7 @@
 //    mouse's motion is the game's own per-frame delta (the pad record the rider aim reads, 0x56DCED: pad +0x66C / +0x684
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
 #include "crew.h"
 #include "enemy_control.h"
 #include "pvp.h"
@@ -38,6 +39,7 @@
 #include "map_camera_state.h"
 #include "map_stock_hud.h"
 #include "commander.h"
+#include "heli.h"
 #include "playarea.h"
 #include "memory.h"
 #include "turretaim.h"
@@ -110,7 +112,9 @@ const HudSig kHudSigs[]={{kHudShow,kHudShowCode,sizeof(kHudShowCode)},{0x1BA80D,
     {0x80843B,kRescueDraw,sizeof(kRescueDraw)},{0x803AC9,kCrossDraw,sizeof(kCrossDraw)},
     {0x118DF4F,kViewportStep,sizeof(kViewportStep)}};
 
-constexpr ULONGLONG kFreshMs=300;       // a pose / readout older than this (wall) is the map closed (paused, loading)
+// The pose / readout are the map's while stamped within stepfresh::kEveryStep steps (step_fresh.h; Frame publishes every
+// step the owner's soldier runs). The pause menu is an explicit state, not an age: the camera step (which runs under it)
+// drops the map's view and tells Frame, which closes the map on the next step (map_camera_state.h PauseClose); a new mission: ResetMap.
 constexpr ULONGLONG kGatherMs=100;      // the marks gathered this often
 constexpr int kEaseIn=24,kEaseOut=15;   // frames the camera eases into the map's view and back out
 constexpr float kEyeClear=40.0f;        // m: the eye kept at least this over the ground under it
@@ -133,26 +137,28 @@ MarkerDtorFn nextMarkerDtor=nullptr;
 MarkerUpdateFn nextMarkerUpdate=nullptr;
 
 // --- What the game thread publishes (under `lock`) ---
-struct Pose { bool open; const void* human; float eye[3],look[3]; ULONGLONG at; };
+struct Pose { bool open; const void* human; float eye[3],look[3]; stepfresh::Step at; };
 Pose pose{};
 MapReadout readout{};
-ULONGLONG readoutAt=0;
+stepfresh::Step readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 ObjRef inputOwner{}; // published identity only, under lock; retained through closing-key drain
 std::atomic<bool> holds{false};
 mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
+mapcam::PauseClose pauseClose;   // the camera step saw the pause menu over the open map: Frame closes it
 
 // --- The game thread's own ---
 struct Keys { bool map,esc,centre,padMap,padClose,padCentre,stats; };
 struct Game {
     ObjRef human;               // the player the map is for
-    bool open,follow,pad;
+    bool open,follow,pad,watchCommander;
     bool draining;              // closed by a key still down: the input held until every closing key is let go
     mapcam::View view;
     Keys was;                   // the toggles as last read (a press is the edge)
     LARGE_INTEGER last;         // the last frame (dt)
-    ULONGLONG frameAt,gatherAt;  // wall ms: the last frame of the owner, the last gather
+    stepfresh::Step frameAt;    // the step of the owner's last frame
+    ULONGLONG gatherAt;         // wall ms: the last gather (kGatherMs cadence)
     int count;
     MapUnit unit[kMapUnits];
     int dots,larges;            // the small enemies' dots, the large enemies' pins (of `count`)
@@ -198,8 +204,9 @@ bool Down(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The magnified vehicle sight's claim on the wheel (sightzoom.cpp: its range setting), and its notches' delta.
 std::atomic<bool> scopeHolds{false};
-std::atomic<ULONGLONG> scopeHeldAt{0};   // wall: a claim not renewed for kScopeHoldMs lapses (the vehicle gone, a pause)
-constexpr ULONGLONG kScopeHoldMs=300;
+// The step of the claim (step_fresh.h): one not renewed for kEveryStep steps lapses (the vehicle gone); under the pause
+// menu (an explicit state) the wheel is the menu's.
+std::atomic<stepfresh::Step> scopeHeldAt{0};
 std::atomic<int> scopeWheel{0};
 LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_MOUSEWHEEL && holds.load(std::memory_order_relaxed)) {
@@ -207,7 +214,7 @@ LRESULT CALLBACK WheelProc(HWND w,UINT msg,WPARAM wp,LPARAM lp) {
         return 0;   // the map's: not the game's weapon change
     }
     if(msg==WM_MOUSEWHEEL && scopeHolds.load(std::memory_order_relaxed) &&
-       GetTickCount64()-scopeHeldAt.load(std::memory_order_relaxed)<=kScopeHoldMs) {
+       stepfresh::Fresh(scopeHeldAt.load(std::memory_order_relaxed)) && !GamePaused()) {
         scopeWheel.fetch_add(GET_WHEEL_DELTA_WPARAM(wp),std::memory_order_relaxed);
         return 0;   // the sight's range drum, not the game's
     }
@@ -508,14 +515,14 @@ void Gather(Game& g,const unsigned char* human) noexcept {
     }
 }
 
-void Publish(const Game& g,const unsigned char* human,const float* eye,const float* look) noexcept {
+void Publish(const Game& g,const unsigned char* human,const float* eye,const float* look,bool commanding) noexcept {
     const Config& c=Cfg();
     const unsigned char* body=Body(human);
     AcquireSRWLockExclusive(&lock);
-    pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},GetTickCount64()};
+    pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},stepfresh::Now()};
     MapReadout& r=readout;
     r.ownerHumanKey=reinterpret_cast<std::uintptr_t>(human);
-    r.pad=g.pad;r.follow=g.follow;
+    r.pad=g.pad;r.follow=g.follow;r.commander=commanding;r.watchCommander=g.watchCommander;
     std::memcpy(r.focus,g.view.focus,12);r.yaw=g.view.yaw;r.pitch=g.view.pitch;r.height=g.view.height;
     std::memcpy(r.me,PosOf(body),12);
     const float* m=reinterpret_cast<const float*>(body+kMatrix);
@@ -537,6 +544,7 @@ void Close(const char* why) noexcept {
     if(game.draining){game.draining=false;holds.store(false);}
     if(!game.open)return;
     game.open=false;
+    game.watchCommander=false;
     SuspendMapCommands();
     DamageStatsShow(false);
     holds.store(false);
@@ -545,6 +553,19 @@ void Close(const char* why) noexcept {
     ReleaseSRWLockExclusive(&lock);
     ViewMapClip(false,0.0f,0.0f);
     Log("MAP closed (%s)",why);
+}
+
+void CommanderView(const unsigned char* avatar,float* eye,float* look) noexcept {
+    const unsigned char* body=Body(avatar);
+    const float* pos=PosOf(body);
+    const float* m=reinterpret_cast<const float*>(body+kMatrix);
+    float heading[3]={m[8],0.0f,m[10]};
+    if(!vec::Normalize(heading))heading[2]=1.0f;
+    const float focus[3]={pos[0],pos[1]+1.65f,pos[2]};
+    eye[0]=focus[0]-heading[0]*5.5f;eye[1]=focus[1]+1.7f;eye[2]=focus[2]-heading[2]*5.5f;
+    float wall[3];
+    if(MapRay(focus,eye,wall)>=0.0f)for(int i=0;i<3;++i)eye[i]=focus[i]+(wall[i]-focus[i])*0.85f;
+    look[0]=focus[0]+heading[0]*4.0f;look[1]=focus[1]-0.5f;look[2]=focus[2]+heading[2]*4.0f;
 }
 
 void Open(const unsigned char* human) noexcept {
@@ -653,14 +674,15 @@ bool Frame(unsigned char* human) noexcept {
     const ULONGLONG now=GetTickCount64();
     // One player (a second local player is never held: the map is the first one's while its frames come; the old one
     // is not read, it may be gone).
-    if(game.human.obj && game.human.obj!=human && now-game.frameAt<kFreshMs)return false;
+    if(game.human.obj && game.human.obj!=human && stepfresh::Fresh(game.frameAt))return false;
     if(!game.human.Is(human)){Close("another player");game.human=ObjRef::Of(human);game.was=Keys{true,true,true,true,true,true,true};}
     LARGE_INTEGER t,hz;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&hz);
     float dt=game.last.QuadPart ? static_cast<float>(t.QuadPart-game.last.QuadPart)/static_cast<float>(hz.QuadPart) : 0.0f;
     game.last=t;
     if(!(dt>0.0f) || dt>0.1f)dt=1.0f/60.0f;
-    if(game.open && now-game.frameAt>kFreshMs)Close("the game was paused");   // its Esc read by the pause menu, not here
-    game.frameAt=now;
+    // The pause menu came over the open map (Camera saw it): its Esc read by the pause menu, not here.
+    if(pauseClose.CloseNow(game.open))Close("the game was paused");
+    game.frameAt=stepfresh::Now();
     if(!c.enabled || !c.map){Close(c.enabled ? "Map=0" : "plugin off");return false;}
     const bool front=InFront();
     XINPUT_STATE padState{};
@@ -676,8 +698,14 @@ bool Frame(unsigned char* human) noexcept {
         Log("MAP key edge: map %d, pad map %d, stats %d, esc %d, pad close %d (open %d, front %d, pad read %d)",k.map && !game.was.map,
             k.padMap && !game.was.padMap,stats,k.esc && !game.was.esc,k.padClose && !game.was.padClose,game.open,front,pad);
     game.was=k;
-    // A PvP commander's view, or the commander mode's: the map keys do not shut it.
-    const bool keepOpen=commander.load(std::memory_order_acquire) || commanderMode.load(std::memory_order_acquire);
+    const bool commanding=commanderMode.load(std::memory_order_acquire);
+    const bool keepOpen=commander.load(std::memory_order_acquire) || commanding;
+    const auto* avatar=commanding ? CommanderAvatar(human) : nullptr;
+    if(!avatar)game.watchCommander=false;
+    if(game.open && toggle && avatar && !DamageStatsShown()) {
+        game.watchCommander=!game.watchCommander;
+        Log("COMMANDER view: %s",game.watchCommander ? "its NPC" : "the map");
+    }
     if(game.open && stats && !DamageStatsShown())DamageStatsShow(true);
     else if(game.open && (stats || (!keepOpen && (toggle || close)))) {
         Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");
@@ -707,9 +735,13 @@ bool Frame(unsigned char* human) noexcept {
     // level the focus is on.
     v.focus[1]+=(GroundAt(v.focus[0],v.focus[2],game.follow ? me[1] : v.focus[1])-v.focus[1])*0.2f;
     float eye[3],look[3];
-    mapcam::Place(v,eye,look);
-    const float under=TopAt(eye[0],eye[2],eye[1]-v.height);
-    if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;   // a ridge behind the focus: over it, still looking at the focus
+    const auto placeCamera=[&]() noexcept {
+        if(game.watchCommander){CommanderView(avatar,eye,look);return;}
+        mapcam::Place(v,eye,look);
+        const float under=TopAt(eye[0],eye[2],eye[1]-v.height);
+        if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;
+    };
+    placeCamera();
     // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
     float onto[3];
     MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
@@ -720,15 +752,15 @@ bool Frame(unsigned char* human) noexcept {
     if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     game.pad=in.usingPad;
     // Pointer capture must be established before this frame's camera drag, including the first press.
-    Steer(human,dt,front,pad ? &padState : nullptr);
+    if(!game.watchCommander || DamageStatsShown())Steer(human,dt,front,pad ? &padState : nullptr);
+    else wheel.exchange(0);
     mapcam::Keep(v,bounds);   // the pan, the drag, the turn and the zoom and a unit centred: still over the map
     PumpPayloadUi(human);
-    mapcam::Place(v,eye,look);
-    const float movedUnder=TopAt(eye[0],eye[2],eye[1]-v.height);
-    if(eye[1]<movedUnder+kEyeClear)eye[1]=movedUnder+kEyeClear;
+    if(!game.watchCommander)placeCamera();
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
-    Publish(game,human,eye,look);
-    ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));
+    Publish(game,human,eye,look,commanding);
+    if(game.watchCommander)ViewMapClip(false,0.0f,0.0f);
+    else ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));
     return true;
 }
 
@@ -796,7 +828,9 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!cameraSession.Current(generation))return;
     // The camera's target: the soldier it follows (+0x350 its weak reference, +0x360 the SoldierBase cast of it).
     const bool mine=p.human && (At<const void*>(cam,kCamTargetRef)==p.human || At<const void*>(cam,kCamTarget)==p.human);
-    const bool mapOpen=p.open && mine && GetTickCount64()-p.at<=kFreshMs;
+    const bool fresh=p.open && mine && stepfresh::Fresh(p.at);
+    // The pause menu: the stock view under it, the map closed on the next step (Frame).
+    const bool mapOpen=pauseClose.CameraShows(fresh,fresh && GamePaused());
     // The Tempest's TV (tvguide.cpp) shows through the same hook (one owner of the camera step) when the map does not.
     const void* tvHuman=nullptr;
     float tvEye[3],tvLook[3];
@@ -825,7 +859,7 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
         const float k=1.0f/static_cast<float>(camSide.blend--);
         Ease(camSide.eye,stockEye,k);Ease(camSide.look,stockLook,k);
     }
-    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);FrameRateCameraCut(cam);}
 }
 
 // The stock HUD held off while the map's view is on this camera (easing in, open, easing back), or while this camera is
@@ -882,7 +916,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     if(camSide.shown && camSide.cam==cam && camSide.haveStock)std::memcpy(static_cast<unsigned char*>(cam)+kCamMatrix,camSide.stock,sizeof(camSide.stock));
     nextCamStep(cam,step);
     __try { Camera(static_cast<unsigned char*>(cam),generation); }
-    __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);FrameRateCameraCut(cam);}
     FirstPersonCameraOverride(cam,camSide.shown && camSide.cam==cam && cameraSession.Current(generation));
     StockHud(static_cast<unsigned char*>(cam),generation);
 }
@@ -998,13 +1032,13 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
-    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;
+    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;pauseClose.Reset();
     ReleaseSRWLockExclusive(&lock);
 }
 
 bool PlayerMap(MapReadout* out) noexcept {
     AcquireSRWLockShared(&lock);
-    const bool fresh=pose.open && readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=pose.open && stepfresh::Fresh(readoutAt);
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&lock);
     return fresh;
@@ -1029,7 +1063,7 @@ bool MapHidesStockHud(const void* camera) noexcept {
 int TakeScopeWheel(bool hold) noexcept {
     if(hold && !subclassed && InFront())Subclass();   // the window's wheel, first wanted here or by the map
     scopeHolds.store(hold,std::memory_order_relaxed);
-    if(hold)scopeHeldAt.store(GetTickCount64(),std::memory_order_relaxed);
+    if(hold)scopeHeldAt.store(stepfresh::Now(),std::memory_order_relaxed);
     static int rest=0;   // part of a notch left over (a smooth wheel's deltas)
     const int delta=scopeWheel.exchange(0,std::memory_order_relaxed);
     if(!hold){rest=0;return 0;}

@@ -82,7 +82,7 @@ bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) 
 unsigned SeatCount(const unsigned char* object) noexcept {
     const unsigned count=At<unsigned>(object,kSeatCount);return count<=16 ? count : 0;
 }
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept { changed=false;return false; }
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept { changed=false;return false; }
 bool IsAnyPlayer(const unsigned char* object) noexcept { return At<const void*>(object,0)==reinterpret_cast<void*>(1); }
 }
 // This older fixture isolates the cache lifecycle at the typed adapter boundary.

@@ -80,7 +80,7 @@ struct Room {
     std::deque<Packet> packets;
     std::vector<Packet> history;
     std::uint64_t now=10000;
-    unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
+    unsigned failTo=999,dropTo=999,legacyNode=999,muteNode=999;   // muteNode: its hellos lost on the way   // legacyNode: an older build, its hello announces legacyCaps only
     std::uint32_t legacyCaps=0,legacyExt=0,legacyDetails=0;
     bool oldHost=false;   // the host's welcome as a build before it carried its capabilities (index 0)
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
@@ -113,6 +113,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     if(dst==room.failTo && message.kind==room.failKind)return false;
     unsigned char wire[kWireSize];Message decoded;
     Message sent=message;
+    if(node.id==room.muteNode && message.kind==Kind::hello)return true;
     // An older (or newer) build's hello: its capabilities and its extension word as that build sends them (a build before
     // the extension: 0 and an empty filter).
     if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;sent.unit.role=room.legacyDetails;}
@@ -214,36 +215,22 @@ void Capabilities() {
     unsigned char bytes[kWireSize];Message out;
     Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCapabilities,
           "a capability hello round-trips on the unchanged v2 wire (an older host's same bounds accept it)");
-    Check(bytes[4]==3 && bytes[5]==0,"wire version 3 (2026-11-21: the Fencer second hands; the room protocol keeps older builds out)");
+    Check(bytes[4]==4 && bytes[5]==0,"wire version 4 carries the requested attack line");
     Message welcome;welcome.kind=Kind::welcome;welcome.epoch=5;welcome.challenge=7;welcome.request=1;welcome.catalog=kCapabilities;welcome.ok=1;
     Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.catalog==kCapabilities && out.ok==1,
           "a welcome with the host's capabilities passes the unchanged bounds an older guest checks");
     {Room r(3);r.With(0);
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"every new peer announced soldier variants");
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants|kCapAirborneAir),"and airborne air support");
-     Check(r.nodes[0]->session->PeersHaveExtension(kExtSeaRescue) && (kExtensions&kExtSeaRescue),"and the sea rescue entry");
      r.With(1);Check(r.nodes[1]->session->PeersHave(kCapSoldierVariants),"a client is never asked: true");}
     {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
      Check(r.nodes[0]->session->Ready(),"an older client still completes the handshake");
      Check(!r.nodes[0]->session->PeersHave(kCapSoldierVariants),"host knows one peer lacks soldier variants");
      Check(!r.nodes[0]->session->PeersHave(kCapAirborneAir),"host knows one peer cannot make air support in the air");
-     Check(!r.nodes[0]->session->PeersHaveExtension(kExtSeaRescue),"host knows one peer has no sea rescue entry (its plan is refused there)");
      Check(r.Submit(),"mixed room request");r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1,"mixed room: the v2 plan (rifles) passes the older peer's Validate");}
-    // The build just before the sea rescue entry (soldier variants and airborne air, no rescue): every air call still
-    // plans, the rescue alone is refused there (support_dispatch.cpp SupportPeersAcceptRescue).
-    // (#100's: every capability, the variants extension, no rescue extension.)
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
-     r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
-     Check(r.nodes[0]->session->PeersHave(kCapabilities) && r.nodes[0]->session->PeersHaveVariant(kExtVariants,0) &&
-           !r.nodes[0]->session->PeersHaveExtension(kExtSeaRescue),
-           "a peer one version older: air support, transports, loads and variants yes, the sea rescue no");}
-    // The rescue's bit is the catalog's, announced whatever the variants hook says (a hook that reports no variants).
-    {Room r(3);r.nodes[2]->ext=0;r.Step(1100);r.Settle();
-     Check(r.nodes[0]->session->PeersHaveExtension(kExtSeaRescue) && !r.nodes[0]->session->PeersHaveVariant(kExtVariants,0),
-           "every hello of this build announces the sea rescue; the variants only by the hook");}
-    static_assert((kCapTransports|kCapLoadout)==12u && kExtSeaRescue==2u && (kExtensions&kExtVariants),
-                  "#100's capability bits keep their values; the rescue rides the extension word");
+    static_assert((kCapTransports|kCapLoadout)==12u && kExtVariants==1u,
+                  "#100's capability bits keep their values; the variants the one extension bit (net-6)");
     {Room r(2);r.legacyNode=1;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
      r.legacyNode=999;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHave(kCapSoldierVariants),"a peer's latest hello decides (an updated peer rejoining)");}
@@ -271,7 +258,7 @@ void Arms() {
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out),"a request with arms round-trips");
      bool same=true;for(std::uint32_t k=0;k<kArmsKinds;++k)same=same && out.arms.kind[k]==arms.kind[k];
      Check(same && out.request==4,"every kind's arms exact");
-     Check(bytes[4]==3 && bytes[5]==0,"the support wire is v3");
+     Check(bytes[4]==4 && bytes[5]==0,"the support wire is v4");
      bytes[68+6*kArmsKinds]=1;Check(!Decode(bytes,sizeof(bytes),out),"the request's unused unit bytes stay zero");
      Check(Encode(m,bytes,sizeof(bytes)),"re-encode");bytes[68]=0xFF;bytes[69]=0xFF;
      Check(!Decode(bytes,sizeof(bytes),out),"none (0xFFFF) with stars refused");
@@ -552,34 +539,28 @@ void Variants() {
      Check(!r.nodes[0]->session->PeersHaveVariant(kExtVariants,0),"an older peer announces no extension: no variants for the room");
      Check(r.nodes[0]->session->Ready(),"and still completes the handshake");}
 }
-// 2026-10-10: the host's welcome carries its features (support_protocol.h Features: the capabilities and the extension
-// word; a guest says when its host is older or newer, or another guest is behind it); the sea rescue's request and the
-// map's are each told their own outcome; a host knows who asked.
+// net-6 (2026-11-24): the host's welcome says whether it heard every peer's hello of this handshake (`ok`): the room is
+// ready (Session::RoomReady, what plugin_net's joins wait for) on the host once it is, on a guest once its host says so;
+// the last hello heard, every guest is welcomed again at once. The sea rescue's request and the map's are each told their
+// own outcome; a host knows who asked.
 void RoomBuilds() {
-    {Room r(3);r.With(1);
-     Check(r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==kFeatures && !r.nodes[1]->session->RoomBehindHost(),
-           "a guest knows its host's features (capabilities and extensions) from the welcome");
-     std::uint32_t missing=1;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==0 && missing==0 && r.nodes[0]->session->PeersAhead()==0,"the same build everywhere");}
-    {Room r(3);r.legacyNode=2;r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
-     std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==kFeatures,"the host counts the older guest and what it lacks");
-     Check(r.nodes[1]->session->RoomBehindHost(),"the other guest is told a guest of the room is behind the host");}
-    // #100's build (every capability, the variants, no sea rescue): behind by exactly the rescue's extension bit, so the
-    // version notice names the rescue, never "the same build".
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
-     r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
-     std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage) &&
-           r.nodes[0]->session->PeersAhead()==0,"a guest without the sea rescue (all four capabilities) is behind, the rescue and the EDF4.1 outfit named");
-     Check(r.nodes[1]->session->RoomBehindHost(),"and the other guest is told");}
-    // A newer guest: the capability bits are full (kCapabilities<kMaxUnits), so newer is an extension bit this build lacks.
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions|(kExtensions+1);r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);
-     r.Settle();r.Step(1100);r.Settle();
-     Check(r.nodes[0]->session->PeersAhead()==1 && r.nodes[0]->session->PeersBehind(nullptr)==0,"a newer guest: the host knows");}
-    {Room r(2);r.oldHost=true;r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
-     Check(r.nodes[1]->session->Ready() && r.nodes[1]->session->HostCapsKnown() && r.nodes[1]->session->HostCaps()==0,
-           "an older host announces nothing: the guest knows it is older");}
+    {Room r(3);
+     for(const auto& n:r.nodes)Check(n->session->Ready() && n->session->RoomReady(),"every machine of a settled room: room ready");
+     Message welcome;welcome.kind=Kind::welcome;welcome.epoch=5;welcome.challenge=7;welcome.request=1;welcome.ok=1;
+     unsigned char bytes[kWireSize];Message out;
+     Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.ok==1,"the welcome's `ok` round-trips");}
+    {Room r(3);r.muteNode=2;
+     // A mission's reset (Stop on every machine), the muted guest's new hellos lost.
+     r.With(0);r.nodes[0]->session->Stop();r.nodes[0]->session->Start(true,2,0,r.now);
+     r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,r.Peer(2,0),r.now);
+     for(int i=0;i<3;++i){r.Step(1100);r.Settle();}
+     Check(r.nodes[1]->session->Ready() && !r.nodes[1]->session->RoomReady(),
+           "a guest welcomed while another guest's hello is unheard: ready, not room ready");
+     Check(!r.nodes[2]->session->RoomReady(),"the unheard guest: not room ready");
+     bool waited=true;for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::welcome && p.message.epoch==r.nodes[0]->session->Epoch())waited=waited && !p.message.ok;
+     Check(waited,"every welcome of the new handshake says not ready while a hello is missing");
+     r.muteNode=999;r.Step(1100);r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->RoomReady(),"the last hello heard: every guest told at once");}
     {Room r(2);r.nodes[0]->pending=true;
      Check(r.Submit(1,5),"the map's request");r.Settle();
      const std::uint32_t first=r.nodes[1]->notices.back().first;
@@ -632,17 +613,6 @@ void RescueChannel() {
      r.nodes[0]->pending=false;r.Settle();r.Settle();
      unsigned active=0;for(const auto& n:r.nodes[1]->notices)active+=n.second==RequestStatus::active;
      Check(active==2,"the map call is not held by the rescue in flight; both made");}
-    // A peer without the rescue channel: the rescue waits its turn as before (the map's channel and rate).
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants|kExtSeaRescue;r.With(2);r.nodes[2]->session->Stop();
-     r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
-     Check(!r.nodes[0]->session->PeersHaveExtension(kExtRescueChannel) && r.nodes[0]->session->PeersHaveExtension(kExtSeaRescue),
-           "an older peer");
-     r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;
-     Check(r.Submit(1,5),"a map call");r.Settle();
-     Check(r.Submit(2,kRescue),"a rescue meanwhile");r.Settle();
-     Check(LastFor(r,2)==RequestStatus::accepted && Active(r,kRescue)==false,"one transaction at a time with that peer in the room: it waits");
-     r.nodes[0]->pending=false;r.Settle();r.Settle();
-     Check(LastFor(r,2)==RequestStatus::active && Active(r,kRescue),"made once the map call is out");}
     // A failed rescue rolls back alone: the map's deployment stays.
     {Room r(3);
      Check(r.Submit(1,5),"a map call");r.Settle();
@@ -795,8 +765,7 @@ void TransportResume() {
      Check(r.nodes[0]->session->Suspended() && !r.nodes[0]->session->Ready() && r.nodes[0]->active[1],"stays suspended, the support kept");}
 }
 void PvpSupportCodec() {
-    static_assert(kVersion==3 && kWireSize==200 && (kFeatures&kWelcomeCatalogMask)<1024 &&
-                  WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"PvP detail does not change the ABI");
+    static_assert(kVersion==4 && kWireSize==212,"v4 carries the attack line after the v3 payload");
     Message begin;begin.kind=Kind::begin;begin.epoch=22;begin.transaction=1;begin.catalog=5;begin.count=1;
     unsigned char wire[kWireSize]{};Message decoded;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");
@@ -807,7 +776,7 @@ void PvpSupportCodec() {
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.role==2 &&
         decoded.unit.resourceId==kBeginRequesterMetadata && !std::memcmp(decoded.unit.netId,begin.unit.netId,32),
         "BEGIN requester identity and authorized side cross the unchanged real v2 codec");
-    Check(wire[4]==3 && wire[172]==0 && wire[175]==0 && wire[199]==0,"metadata preserves v3 and the reserved tail");
+    Check(wire[4]==4 && wire[172]==0 && wire[175]==0 && wire[199]==0 && wire[211]==0,"metadata keeps the reserved and path fields clear");
     begin.unit.role=0;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.netId[0]==41,
         "team zero retains requester ownership for a later PvP activation");
@@ -867,7 +836,7 @@ void PvpSupport() {
     {Room r(2);crew::netref::MakePlayer(42,r.nodes[0]->requester);r.nodes[0]->team=0;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
      for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.requester[0]==42 && !n->last.team,
         "stock-side deployment retains ownership on every peer");}
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.Step(1100);r.Settle();
      Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"one legacy peer closes the room metadata gate");
      crew::netref::MakePlayer(42,r.nodes[0]->requester);r.nodes[0]->team=1;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
      for(const auto& n:r.nodes)Check(!n->spawns,"no metadata transaction spawns with a legacy third peer");
@@ -879,10 +848,10 @@ void PvpSupport() {
      bool zero=true;for(unsigned i=68;i<kWireSize;++i)zero=zero && wire[i]==0;
      Check(zero,"mixed-room legacy BEGIN carries no metadata bytes");}
     {Room r(3);r.dropTo=0;r.dropKind=Kind::ready;crew::netref::MakePlayer(42,r.nodes[0]->requester);RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
-     r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();r.dropTo=999;r.Settle();
+     r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.Step(1100);r.Settle();r.dropTo=999;r.Settle();
      for(const auto& n:r.nodes)Check(!n->spawns,"capability loss before commit cancels a prepared requester transaction");}
     {Room r(3);const auto old=Find(r,Kind::hello,0);
-     r.legacyNode=old.from;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.With(old.from);
+     r.legacyNode=old.from;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(old.from);
      r.nodes[old.from]->session->Stop();r.nodes[old.from]->session->Start(false,2,r.Peer(old.from,0),r.now);r.Settle();
      Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"new challenge replaces the peer capability word with legacy zero");
      r.Deliver(old);Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"stale prior-mission HELLO cannot restore a capability");
@@ -1166,7 +1135,7 @@ void PreparedDroneCancelledBeforeBegin() {
     }
 }
 void LegacyTransactionCapacity() {
-    Room room(3);room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtensions;
+    Room room(3);room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtVariants;
     room.legacyDetails=kDetailPvpSupport|kDetailDynamicDrones;room.Step(1100);room.Settle();
     Check(!room.nodes[0]->session->PeersHaveDetails(kDetailTransactionGenerations),"dynamic-only legacy peer does not claim generation codec support");
     Check(!SubmitDrone(room,DronePlan()),"dynamic admission requires recyclable-slot compatibility before consuming the bounded legacy budget");
@@ -1207,14 +1176,14 @@ void GenerationDetailsWithdrawal() {
             step.message.kind=Kind::prepare;Replay(room,step);step.message.kind=Kind::commit;Replay(room,step);
             Check(room.nodes[1]->spawns==spawns,"client rechecks host generation capability before prepare/create of ordinary high-ID support");
         } else {
-            room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtensions;
+            room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtVariants;
             room.legacyDetails=kDetails&~kDetailTransactionGenerations;room.Step(1100);room.Settle();
             for(const auto& node:room.nodes)Check(node->spawns==spawns,"peer generation capability withdrawal prevents ordinary high-ID native creation");
         }
     }
 }
 void PreparedDroneDetails() {
-    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport) && !r.nodes[0]->session->PeersHaveDetails(kDetailDynamicDrones),
         "PVP-only old endpoint is distinguished from dynamic-child capable endpoint");
      Check(!SubmitDrone(r,DronePlan()),"one old detail endpoint rejects dynamic admission before allocating a token");
@@ -1233,7 +1202,7 @@ void PreparedDroneDetails() {
     for(bool spawned:{false,true}) {
         Room r(3);r.dropTo=0;r.dropKind=spawned ? Kind::result : Kind::ready;
         Check(SubmitDrone(r,DronePlan())==1,"host capability-loss fixture accepted");r.Settle();
-        r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
+        r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
         for(const auto& n:r.nodes)Check(!n->active[1] && !n->session->IsActive(1),"host capability loss before commit/finalize rolls back dynamic transaction");
         if(!spawned)for(const auto& n:r.nodes)Check(!n->spawns,"capability withdrawn before commit never creates children");
         else for(const auto& n:r.nodes)Check(n->spawns==1 && n->destroys>=1,"registered children roll back when capability disappears before activate");

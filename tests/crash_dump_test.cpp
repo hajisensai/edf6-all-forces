@@ -5,8 +5,10 @@
 // __try or a catch handles) checks there is none. The child's own filter, set before the plugin's, ends the process
 // once the chain reaches it, and ucrtbase's abort is told not to fast-fail, so no case goes on to Windows' error
 // reporting. __fastfail is not a case: nothing in the process runs for it (crash_dump.h).
+// The peer cases load a stand-in EDF6AutoTurret.dll (tests/crash_flush_peer.cpp, no writer thread of its own) whose
+// buffered lines must reach its log through the crash path (common/log.h kCrashFlush), before or after the install.
 #include "../src/crash_dump.cpp"
-#include "../src/log_buffer.h"
+#include "../common/log.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -19,7 +21,7 @@ namespace {
 wchar_t logPath[MAX_PATH]{};
 bool endWhenWritten=false;   // the invalid parameter case: its handler fast-fails after the dump, so the test ends here
 bool failCrashLog=false;
-crew::logging::Buffer<4096> logBuffer;
+edf::logfile::Buffer<4096> logBuffer;
 constexpr UINT kChained=0xC0DE0001;    // the child's own filter, behind the plugin's, ended the process
 constexpr UINT kLate=0xC0DE0002;       // a filter set after the plugin's (through the redirect) ended it
 constexpr UINT kWritten=0xC0DE0003;    // the invalid parameter case ended after its dump
@@ -40,16 +42,16 @@ void Log(const char* format,...) noexcept {
     char text[1000];va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
     logBuffer.Append(text,std::strlen(text));
     logBuffer.Append("\n",1);
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); });
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); });
 }
 void FlushLog() noexcept {
-    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { logging::AppendCrashLine(logPath,bytes,size); },true);
+    logBuffer.Drain([](const char* bytes,std::size_t size,unsigned) noexcept { edf::logfile::AppendCrashLine(logPath,bytes,size); },true);
 }
 void CrashLog(const char* text,std::size_t size) noexcept {
     WIN32_FILE_ATTRIBUTE_DATA dump{};
     if(GetFileAttributesExW(dumpPath,GetFileExInfoStandard,&dump) && (dump.nFileSizeHigh || dump.nFileSizeLow))Append("DUMP_READY");
     // The same raw append used by plugin.cpp, without the logger's buffer/file locks or printf formatting.
-    logging::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
+    edf::logfile::AppendCrashLine(failCrashLog ? L"?:\\invalid\\log.txt" : logPath,text,size);
     if(endWhenWritten)TerminateProcess(GetCurrentProcess(),kWritten);
 }
 }  // namespace crew
@@ -58,11 +60,14 @@ namespace {
 // ---- the child ----
 // The exe's own filter needs a real stack, as the game's filters behind the plugin's do (TerminateProcess alone first
 // runs RtlReportSilentProcessExit, 2.7 KB): 64 KB here, more than a stack overflow ever leaves its thread. It notes
-// the thread that called it: the crashed one, but the dumping thread after a stack overflow.
+// the thread that called it: the crashed one, but the dumping thread after a stack overflow. HungryHandler's measure
+// is written here too: the overflowed thread has no stack for it (the dumping thread runs after it is set).
+std::size_t handlerFree=0,handlerAte=0;
 __declspec(noinline) void Chained() noexcept {
     volatile char frame[64*1024];
     frame[0]=1;frame[sizeof(frame)-1]=frame[0];
     char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST chained on thread %lu",GetCurrentThreadId());Append(t);
+    if(handlerFree){_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST handler free %zu ate %zu",handlerFree,handlerAte);Append(t);}
 }
 LONG WINAPI Last(EXCEPTION_POINTERS*) { Chained(); TerminateProcess(GetCurrentProcess(),kChained); return EXCEPTION_CONTINUE_SEARCH; }
 LONG WINAPI Late(EXCEPTION_POINTERS*) { TerminateProcess(GetCurrentProcess(),kLate); return EXCEPTION_CONTINUE_SEARCH; }
@@ -97,12 +102,66 @@ __declspec(noinline) int Deep(int n) {
 }
 DWORD WINAPI Overflow(void*) {
     Mark();
+    ULONG guarantee=0;   // 0: only reads this thread's guarantee back
+    SetThreadStackGuarantee(&guarantee);
+    char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST stack guarantee %lu",guarantee);Append(t);
     return static_cast<DWORD>(Deep(1));
+}
+// What else runs on an overflowed thread before the plugin's filter: other modules' first-chance vectored handlers
+// (overlays and the like register them) and an exception frame whose size is the CPU's XSAVE state. HungryHandler
+// stands for them: it takes kHungry, but always leaves kHandlerKeep below it for the dispatch, our filter and its
+// wait (they fail with 4 KB left, the reserve's last page counted, and go through with 5 KB: Windows 11 26200). Its
+// free stack (from the reserve's bottom) measured on Windows 11 26200 with AVX-512: 36.8-40.9 KB with the guarantee,
+// 12.2-16.3 KB with Windows' default, so 16 KB is taken there, 8.3 KB at most without it. A CPU with a larger
+// exception frame (more XSAVE state) leaves less at the handler: it then takes less rather than ending the process,
+// and the parent's check (at least kHungryLeast taken, more than the default could ever give) says so with the numbers.
+// Without the guarantee, the default leaves no room for 12 KB: the CI's occasional "stack" failure (0xC0000005, no
+// dump at all) was that default running out with no handler of this kind.
+constexpr std::size_t kHungry=16*1024,kHandlerKeep=8*1024,kHungryLeast=12*1024;
+__declspec(noinline) void UseStack(std::size_t n) noexcept {
+    volatile char* bytes=static_cast<volatile char*>(_alloca(n));
+    bytes[0]=1;bytes[n-1]=bytes[0];
+}
+LONG WINAPI HungryHandler(EXCEPTION_POINTERS* ep) noexcept {
+    if(ep->ExceptionRecord->ExceptionCode!=EXCEPTION_STACK_OVERFLOW)return EXCEPTION_CONTINUE_SEARCH;
+    ULONG_PTR low=0,high=0;
+    GetCurrentThreadStackLimits(&low,&high);
+    handlerFree=reinterpret_cast<ULONG_PTR>(_AddressOfReturnAddress())-low;
+    handlerAte=handlerFree>kHandlerKeep ? (std::min)(kHungry,handlerFree-kHandlerKeep) : 0;
+    if(handlerAte)UseStack(handlerAte);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 DWORD WINAPI Handled(void*) {
     __try { *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1; } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return 0;
 }
+// The stand-in EDF6AutoTurret.dll (CRASH_PEER_DLL, CMakeLists.txt): lines buffered there just before the crash.
+using PeerLineFn=void(__cdecl*)(const char*);
+using PeerStartFn=void(__cdecl*)(const wchar_t*);
+using PeerLockFn=void(__cdecl*)();
+PeerLineFn peerLine=nullptr;
+PeerLockFn peerLock=nullptr;
+bool peerLocked=false;
+bool LoadPeer(const wchar_t* dir) noexcept {
+    const HMODULE peer=LoadLibraryW(CRASH_PEER_DLL);
+    if(!peer)return false;
+    peerLine=reinterpret_cast<PeerLineFn>(GetProcAddress(peer,"PeerLine"));
+    peerLock=reinterpret_cast<PeerLockFn>(GetProcAddress(peer,"PeerLock"));
+    const auto start=reinterpret_cast<PeerStartFn>(GetProcAddress(peer,"PeerStart"));
+    if(!peerLine || !peerLock || !start)return false;
+    wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\peer.log",dir);
+    start(log);
+    return true;
+}
+DWORD WINAPI PeerCrash(void*) {
+    Mark();
+    for(int i=1;i<=20;++i){char t[32];_snprintf_s(t,sizeof(t),_TRUNCATE,"PEER line %d",i);peerLine(t);}
+    peerLine("PEER last line before the crash");
+    if(peerLocked)peerLock();
+    *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    return 0;
+}
+
 HANDLE gate=nullptr;
 DWORD WINAPI Racer(void*) {
     WaitForSingleObject(gate,INFINITE);
@@ -121,14 +180,23 @@ int Child(const char* mode,const wchar_t* dir) {
     using AbortBehavior=unsigned(__cdecl*)(unsigned,unsigned);
     if(auto set=reinterpret_cast<AbortBehavior>(GetProcAddress(ucrt,"_set_abort_behavior")))set(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
     _set_abort_behavior(0,_WRITE_ABORT_MSG|_CALL_REPORTFAULT);
+    if((!std::strcmp(mode,"peer") || !std::strcmp(mode,"peerlock")) && !LoadPeer(dir)){Append("TEST no peer");return 2;}
     if(!crew::InstallCrashDump(dir)){Append("TEST install failed");return 2;}
     using VoidFn=void(__cdecl*)();
     if(!std::strcmp(mode,"av"))Join(&AccessViolation);
     else if(!std::strcmp(mode,"bufferlock"))Join(&BufferLockedCrash);
     else if(!std::strcmp(mode,"filelock"))Join(&FileLockedCrash);
     else if(!std::strcmp(mode,"nolog")){failCrashLog=true;Join(&BufferLockedCrash);}
+    else if(!std::strcmp(mode,"peer"))Join(&PeerCrash);
+    else if(!std::strcmp(mode,"peerlock")){peerLocked=true;Join(&PeerCrash);}
+    else if(!std::strcmp(mode,"latepeer")) {   // loaded after the crash dump: found at the mission start
+        if(!LoadPeer(dir)){Append("TEST no peer");return 2;}
+        crew::CheckCrashFilter();
+        Join(&PeerCrash);
+    }
     else if(!std::strcmp(mode,"cpp"))Join(&Throw);
     else if(!std::strcmp(mode,"stack"))Join(&Overflow);
+    else if(!std::strcmp(mode,"stackhandler")){AddVectoredExceptionHandler(1,&HungryHandler);Join(&Overflow);}
     else if(!std::strcmp(mode,"abort")){Mark();reinterpret_cast<VoidFn>(GetProcAddress(ucrt,"abort"))();}
     else if(!std::strcmp(mode,"terminate")){Mark();reinterpret_cast<VoidFn>(GetProcAddress(ucrt,"terminate"))();}
     else if(!std::strcmp(mode,"ownabort")){Mark();std::abort();}
@@ -362,7 +430,26 @@ int main(int argc,char** argv) {
 
     Crash(self,work,"av",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"cpp",kChained,0xE06D7363,"unhandled exception");
-    Crash(self,work,"stack",kChained,EXCEPTION_STACK_OVERFLOW,"unhandled exception");
+    // A thread started after the install has the plugin's stack overflow guarantee (crash_dump.cpp kOverflowStack),
+    // and with it the dump and the chain go through even with 12-16 KB of other handlers ahead of ours (HungryHandler).
+    for(const char* mode:{"stack","stackhandler"}) {
+        Crash(self,work,mode,kChained,EXCEPTION_STACK_OVERFLOW,"unhandled exception");
+        wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\log.txt",work);
+        const std::string text=Read(log);
+        const auto at=text.find("TEST stack guarantee ");
+        const unsigned long guarantee=at==std::string::npos ? 0 : std::strtoul(text.c_str()+at+21,nullptr,10);
+        char what[200];
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the overflowed thread's stack guarantee %lu (want %lu)",
+                    mode,guarantee,crew::kOverflowStack);
+        Check(guarantee>=crew::kOverflowStack,what);
+        if(std::strcmp(mode,"stackhandler"))continue;
+        const auto hungry=text.find("TEST handler free ");
+        std::size_t free=0,ate=0;
+        if(hungry!=std::string::npos)sscanf_s(text.c_str()+hungry,"TEST handler free %zu ate %zu",&free,&ate);
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"stackhandler: the handler took %zu of the %zu bytes free (want %zu at least)",
+                    ate,free,kHungryLeast);
+        Check(ate>=kHungryLeast,what);
+    }
     Crash(self,work,"abort",kAbortExit,0x40000015,"abort() in the game's CRT");
     Crash(self,work,"terminate",kAbortExit,0x40000015,"abort() in the game's CRT");
     Crash(self,work,"ownabort",kAbortExit,0x40000015,"abort() in the plugin");
@@ -376,15 +463,42 @@ int main(int argc,char** argv) {
         Check(text.find("filter kept first by redirect")!=std::string::npos,"the redirect went in");
     }
     Crash(self,work,"race",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+    {   // Five threads started after the install (four racers, the dumping thread): the TLS callback's line once.
+        wchar_t log[MAX_PATH];swprintf_s(log,L"%ls\\log.txt",work);
+        const std::string text=Read(log);
+        const char line[]="CRASHDUMP stack overflow guarantee 32 KB set by the TLS callback on a thread started after "
+                          "the install (thread ";
+        std::size_t count=0;
+        for(auto at=text.find(line);at!=std::string::npos;at=text.find(line,at+1))++count;
+        Check(count==1,"race: the first thread given the stack overflow guarantee by the TLS callback is logged, once");
+    }
     Crash(self,work,"bufferlock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
     Crash(self,work,"filelock",kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+    // EDF6AutoTurret's buffered lines reach its log on a crash (#372's review: its async log lost the last 50 ms).
+    for(const char* mode:{"peer","latepeer","peerlock"}) {
+        Crash(self,work,mode,kChained,EXCEPTION_ACCESS_VIOLATION,"unhandled exception");
+        wchar_t path[MAX_PATH];
+        swprintf_s(path,L"%ls\\peer.log",work);const std::string peer=Read(path);
+        swprintf_s(path,L"%ls\\log.txt",work);const std::string own=Read(path);
+        char what[200];
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the peer's flush was found",mode);
+        Check(own.find("CRASHDUMP EDF6AutoTurret.dll's buffered log lines are written on a crash too")!=std::string::npos,what);
+        if(!std::strcmp(mode,"peerlock")) {   // its lock owned by the crashed thread: given up, the chain went on (Crash)
+            _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: a locked peer buffer is left, not waited for",mode);
+            Check(peer.empty(),what);
+            continue;
+        }
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the peer's last lines reached its log, in order",mode);
+        const auto first=peer.find("PEER line 1\r\n"),last=peer.find("PEER last line before the crash\r\n");
+        Check(Count(peer,"PEER line ")==20 && first!=std::string::npos && last!=std::string::npos && first<last,what);
+    }
     {
         Clean(work);
         Check(Run(self,"nolog",work)==kChained,"failed crash log: the crash chain still exits promptly");
         Check(ReadDump(work).found,"failed crash log: the primary dump is still written");
     }
     {
-        crew::logging::Buffer<16> buffer;
+        edf::logfile::Buffer<16> buffer;
         std::string written;
         unsigned dropped=0;
         auto write=[&](const char* bytes,std::size_t size,unsigned lost) noexcept { written.append(bytes,size);dropped+=lost; };

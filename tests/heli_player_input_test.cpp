@@ -48,6 +48,8 @@ float inputVP[16]{};
 const Config& Cfg() noexcept { return inputConfig; }
 ULONGLONG GameMs() noexcept { return inputTime; }
 bool MapHoldsKeys() noexcept { return false; }
+bool MapPadState(std::uint16_t*,std::uint8_t*,std::uint8_t*) noexcept { return false; }
+bool KnownVehicle(const void*) noexcept { return false; }
 void Log(const char* format,...) noexcept {
     if(std::strstr(format,"obsolete EDF6VC_COAX_MG.SGO"))++obsoleteWarnings;
 }
@@ -286,11 +288,19 @@ int main() {
     // The stock actuators the player's frames quicken (PlayerMouseTune) and put back.
     Put<float>(inputVehicle,kRotorUp,0.001f);Put<float>(inputVehicle,kRotorDown,0.0007f);Put<float>(inputVehicle,kTiltSmooth,0.005f);
     Put<float>(inputVehicle,kLiftPerRotor,34.0f/60.0f);Put<float>(inputVehicle,kVertDamp,0.95f);Put<float>(inputVehicle,kRotorIdle,0.13f);
+    Check(!pilot.mode.on,"flight is the default instead of hover");
+    Check(pilot.mode.Step(true) && pilot.mode.on && !pilot.mode.Step(true),"hover toggles on the rising edge");
+    Check(!pilot.mode.Step(false) && pilot.mode.Step(true) && !pilot.mode.on,"releasing and pressing returns to flight");
     for(float damp:{0.99f,0.999f}) {
+        pilot.mode.on=true;
         const float gain=damp<0.995f ? 90.0f : 80.0f,blend=damp<0.995f ? 0.003f : 0.0003f;
         const float top=blend*gain/(1.0f-damp*(1.0f-blend));
         Put<float>(inputVehicle,kSpeedGain,gain);Put<float>(inputVehicle,kBlend,blend);Put<float>(inputVehicle,kDamp,damp);
+        inputConfig.heliSpeed=65.0f;
         PlayerAssist(inputVehicle);
+        Check(std::fabs(PlayerTop(inputVehicle)-65.0f)<0.01f,"the stock player helicopter reaches the configured top speed");
+        inputConfig.heliSpeed=0.0f;
+        PlayerAssist(inputVehicle,true);
         PlayerMouseTune(inputVehicle,true);
         Check(At<float>(inputVehicle,kRotorUp)==aim::kPlayerRotorRate && At<float>(inputVehicle,kRotorDown)==aim::kPlayerRotorRate &&
               At<float>(inputVehicle,kTiltSmooth)==kPlayerTiltSmooth,"mouse flight quickens the rotor and the tilt");
@@ -342,6 +352,7 @@ int main() {
         Check(std::fabs(npc.top-top)<0.01f,"disabled NPC speed tuning reports actual stock speed rather than a fixed estimate");
     }
     inputConfig.heliSpeed=25.0f;
+    Check(PilotOf(inputVehicle,forward,inputTime)==&pilot,"boarding again publishes a fresh pilot record");
     pilot.hold={};pilot.vel[0]=pilot.vel[1]=pilot.vel[2]=0.0f;
     Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);
     // Stock slot 55 has already copied W into movement input. Production AimFly replaces the movement setpoint with the
@@ -352,8 +363,13 @@ int main() {
     float* movement=reinterpret_cast<float*>(inputVehicle+kInLateral);
     unsigned char contact=0;
     PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
-    Check(pilot.hold.speed>0.0f && movement[2]>0.0f && recordedInput[2]>0.0f && pilot.hold.holding,
-          "W pitches nose down and flies forward while keeping height");
+    Check(pilot.hold.speed>0.0f && movement[2]>0.0f && recordedInput[2]>0.0f && !pilot.hold.holding,
+          "W pitches nose down in the default free flight without capturing a height");
+    pilot.mode.on=true;
+    AimFly(pilot,inputVehicle,inputSeat,pos,forward,right,false,100.0f,1.0f/60.0f,inputTime);
+    Check(pilot.hold.holding,"switching to hover explicitly engages altitude hold");
+    pilot.mode.on=false;
+    PlayerAttitudeHook(inputVehicle+kHeadRight,inputVehicle,movement,&contact);
     Check(recordedInput[1]==movement[1] && recordedInput[3]==movement[3] && recordedInput[4]==movement[4],
           "throttle, w and yaw reach the attitude function unchanged");
     Put<float>(inputSeat,kSeatLY,1.0f);Put<float>(inputSeat,kSeatRY,1.0f);
@@ -479,6 +495,19 @@ int main() {
     inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
     inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;
     inputTime+=251;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"stale flight never owns camera");inputTime-=251;
+    {
+        const aim::Rotor rotor{0.56f,0.95f,0.1f,0.05f,0.05f};
+        const float hover=0.42f;
+        Check(std::fabs(aim::ManualCollectiveThrottle(0.0f,hover,hover,rotor)-hover)<1e-5f,
+              "free flight releases to neutral collective");
+        const float drifting[3]={0.0f,8.0f,0.0f};
+        aim::Hold hold{};hold.holding=true;
+        float pitch=0.0f;
+        const float level[3]={0.0f,0.0f,1.0f};
+        const auto free=aim::Instructor(hold,level,level,pos,drifting,0.0f,0.0f,65.0f,8.0f,0.6f,
+                                       false,false,100.0f,0.0f,&pitch,false);
+        Check(!hold.holding && free.climb==0.0f,"releasing the throttle in flight never captures an altitude");
+    }
     CheckDroneFrame();
     VirtualFree(trampoline,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);
     std::printf("heli_player_input: %d production-path checks passed (%d attitude calls)\n",checks,calls);

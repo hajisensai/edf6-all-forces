@@ -10,6 +10,14 @@
     tells the game thread by System::update on its stack, labels a plugin hook below a phase by its outermost
     plugin frame (not the phase's own time) and ranks the plugin's functions by inclusive and self samples;
   - drive.run's `during` ends the stay as soon as it returns (the loop condition, read from the source).
+  - the measurement probes' rows (made from the plugin's own format strings): frames and steps, the frame split and
+    its n = 0 floor, the render thread, the channels, SLOW FRAME and the samples inside one by QPC, the mission entries
+    cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon.
+  - legs (several scenarios in one launch): the positional arguments with their key= / warm= / diff=, each leg's
+    warm-up, its `next` command, the autopilot's NEXT rows, the launch's logs cut a leg each (past midnight too),
+    gen.rewrite_scenario keeping the first originals, one launch of three legs with drive.run faked (the range written
+    once before the launch, rewritten for the later range leg, put back once; the keys timed from the leg's entry; a
+    leg that never comes in ends the run), and summary.md's row a leg.
 Exit code 1 when one fails.
 """
 from __future__ import annotations
@@ -205,6 +213,7 @@ def report_parsing() -> None:
               'GPU: the busiest engine of a type per sample (as Task Manager), idle types left out')
         # a game thread: System::update on most stacks
         img = perf_report.Image.__new__(perf_report.Image)
+        img.names = {}
         img.pdata = [(0x500000, 0x500100), (perf_report.SYSTEM_UPDATE, perf_report.SYSTEM_UPDATE + 0x1000)]
         img.starts = [b for b, _ in img.pdata]
         img.slot_class = {0x500000: 'GiantAnt#5'}
@@ -247,7 +256,7 @@ def report_parsing() -> None:
               'the DLL is resolved only when it is the file the run placed (sha256)')
         opened = []
         real_image = perf_report.Image
-        perf_report.Image = lambda path, classes=True: opened.append(path) or None
+        perf_report.Image = lambda path, classes=True, names=True: opened.append(path) or None
         try:
             plug = perf_report.Plugins(src)
             plug.func('EDF6VehicleCrew.dll+1000', True)
@@ -269,9 +278,228 @@ def report_parsing() -> None:
         with open(os.path.join(failed, 'run.json'), 'w') as f:
             json.dump({'scenario': 'x', 'variant': 'B'}, f)
         t = perf_report.ab_table([run, failed])
-        check('| A | run | 16.70 | 2.00% | 0 | 30.0 | 50 |' in t, 'the A/B table row')
+        check('| A | run | 16.70 | n/a (counted steps) | 2.00% | 0 | 30.0 | 50 |' in t, 'the A/B table row (an older build: no steps a frame)')
         check('| AutoTurret |' in t, "the A/B table shows each round's AutoTurret")
         check('| B | failed | not sampled |' in t, 'a round without samples is a row, not a crash')
+
+
+def c_format(path: str, head: str) -> str:
+    """The format string of the plugin's Log("<head>...", ...) call in `path` (its adjacent literals joined), as a
+    Python % format: the rows the parsers read are made from the plugin's own text, so the two cannot drift apart."""
+    import re
+    with open(os.path.join(ROOT, path), encoding='utf-8') as f:
+        src = f.read()
+    j = src.index('Log("' + head) + 4
+    parts = []
+    while True:
+        k = j + 1
+        buf = ''
+        while src[k] != '"':
+            buf += src[k:k + 2] if src[k] == '\\' else src[k]
+            k += 2 if src[k] == '\\' else 1
+        parts.append(buf)
+        rest = src[k + 1:].lstrip()
+        if not rest.startswith('"'):
+            break
+        j = len(src) - len(rest)
+    fmt = ''.join(parts).replace('\\"', '"').replace("\\'", "'")
+    return re.sub(r'%(?:ll|l)?([udXs])', lambda m: '%' + ('d' if m[1] in 'ud' else m[1]), fmt)
+
+
+def probe_parsing() -> None:
+    """The measurement probes' rows (src/perf_probe.cpp, crew.cpp PerfTick) and their parsers (cpu-1, hitch-1, hitch-5,
+    gpu-2, latency-2, net-1, cpu-11), the rows made from the plugin's own format strings."""
+    with tempfile.TemporaryDirectory() as d:
+        t0 = time.mktime((2026, 11, 7, 13, 0, 0, 0, 0, -1))
+        w = (t0 + 10, t0 + 20)
+        log = os.path.join(d, 'vehiclecrew.log')
+        perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
+        frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
+        render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
+        net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
+        gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
+        slow = c_format('src/perf_probe.cpp', 'SLOW FRAME %lld %lld %.1f ms, %u steps: app')
+        slow_bare = 'SLOW FRAME %d %d %.1f ms, %d steps'
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write('[13:00:15.000] ' + perf % (300, 600, 16.7, 60, 30.0, 6, 20, 1, 33, 8.3, 120, 12.0) + '\n')
+            f.write('[13:00:20.000] ' + perf % (100, 300, 50.0, 20, 80.0, 100, 20, 40, 33, 16.6, 60, 30.0) + '\n')
+            f.write('[13:00:15.000] ' + frame % (300, 10, 0.1, 1.0, 4.0, 0.5, 8.0, 4.0, 0.5, 0.01, 3.0, 5.6) + '\n')
+            f.write('[13:00:20.000] ' + frame % (100, 0, 0.1, 1.0, 6.0, 0.7, 40.0, 13.3, 1.5, 0.01, 1.0, 8.6) + '\n')
+            f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
+                                                  1200, 300, 0, 0, 0, 7, 2500) + '\n')
+            f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
+            f.write('[13:00:20.000] ' + gpu % (60.0, 8.0, 1.0, 0.35, 0.1, 2.5, 500.0, 1.2) + '\n')
+            f.write('[13:00:20.000] ' + net % ('bit 0x4 10/500 B, bit 0x10 5/100 B', 'head 0x00000F01 3/90 B',
+                                               20, 4.0, 0.2) + '\n')
+            f.write('[13:00:16.000] ' + slow % (1000, 2000, 40.0, 3, 1.0, 5.0, 30.0, 2.0, 2.0) + '\n')
+            f.write('[13:00:18.000] ' + slow_bare % (5000, 5500, 35.0, 2) + '\n')
+            f.write('[13:00:40.000] ' + perf % (300, 300, 16.7, 60, 99.0, 9, 20, 9, 33, 16.7, 60, 99.0) + '\n')
+        rows = perf_report.read_perf(log, w)
+        check([(r[1], r[6]) for r in rows] == [(300, 600), (100, 300)], 'PERF frames and steps from the frame anchor')
+        s = perf_report.frame_summary(rows)
+        check(s['steps'] == 900 and abs(s['steps_per_frame'] - 2.25) < 1e-9 and s['unit'] == 'frame',
+              'the frame summary counts frames, the steps a frame apart (cpu-1)')
+        sp = perf_report.read_frame_split(log, w)
+        check(sp['frames'] == 400 and sp['no step'] == 10 and abs(sp['draw'] - (300 * 4 + 100 * 6) / 400) < 1e-9,
+              'PERF FRAME: each part weighted by the frames split')
+        check(abs(sp['a step'] - (300 * 8 + 100 * 40) / (300 * 8 / 4 + 100 * 40 / 13.3)) < 1e-6,
+              "a step: the steps' time over their count, not a mean of the rows' means")
+        check(abs(sp['without steps'] - (300 * 5.6 + 100 * 8.6) / 400) < 1e-9, 'the n = 0 floor (cpu-11) read')
+        r = perf_report.read_render(log, w)
+        check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
+              and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')
+        g = perf_report.read_gpu(log, w)
+        check(g['rows'] == 2 and abs(g['queries'] - 50.0) < 1e-9 and abs(g['pending'] - 10.0) < 1e-9
+              and g['query_worst'] == 2.5 and abs(g['palettes'] - 400.0) < 1e-9 and abs(g['palette_ms'] - 1.0) < 1e-9,
+              'PERF GPU: occlusion query reads and skin palettes a frame (gpu-5, gpu-6)')
+        n = perf_report.read_net(log, w, 10.0)
+        check(n['channels'][('out', 'bit 0x4')] == (1.0, 50.0) and n['channels'][('in', 'head 0x00000F01')] == (0.3, 9.0)
+              and n['walks'] == 20, 'PERF NET CHANNELS: messages and bytes a second by channel, world walks (net-1)')
+        sl = perf_report.read_slow(log)
+        check(sl == [(1000, 2000, 40.0, 3, (1.0, 5.0, 30.0, 2.0, 2.0)), (5000, 5500, 35.0, 2, None)],
+              'SLOW FRAME rows with and without the split (hitch-1)')
+        st = os.path.join(d, 'stacks.txt')
+        with open(st, 'w', encoding='utf-8') as f:
+            f.write('D EDF.dll 1 2\nQ 10000000\nT 7 1 @1500 EDF.dll+10 EDF.dll+20\nT 7 1 @3000 EDF.dll+30\n'
+                    'T 7 1 @5200 EDF.dll+40\nT 8 1 EDF.dll+50\n')
+        ts = perf_report.read_timed_samples(st)
+        check(ts['7'][0] == (1500, ['EDF.dll+10', 'EDF.dll+20']) and ts['8'] == [(None, ['EDF.dll+50'])],
+              "rip_sampler's T lines with their QPC, and an older sampler's without")
+        check(perf_report.in_slow(ts['7'], sl) == [['EDF.dll+10', 'EDF.dll+20'], ['EDF.dll+40']],
+              'the stacks inside a slow frame by QPC')
+        coop = os.path.join(d, 'coop.log')
+        with open(coop, 'w', encoding='utf-8') as f:
+            f.write('[2026-11-07 13:00:15.000] STATS last 5s: game sends 40 kbps avg, busiest second 80 kbps, to 2 '
+                    'players, 90 B/packet avg (largest 900), 0% copies | wire up 50 kbps down 30 kbps, relayed 0\n')
+        check(perf_report.read_coop(coop, w) == [(40.0, 80.0, 2, 50.0, 30.0)], "EDF6Coop's STATS rows (its dated stamp)")
+        loads = os.path.join(d, 'loads.log')
+        with open(loads, 'w', encoding='utf-8') as f:
+            # src/mission_watch.cpp: each row names the phase starting and the one that ended with its ms
+            phase = c_format('src/mission_watch.cpp', 'MISSION phase %s (%s')
+            done = c_format('src/mission_watch.cpp', 'MISSION phases done')
+            mem = c_format('src/bigworld.cpp', 'MEMORY %s')
+            for h, ms in ((13, 3000), (14, 900)):
+                f.write(f'[{h}:00:00.000] ' + phase % ("the game's player preload", 'since none', 0) + '\n'
+                        f'[{h}:00:01.000] ' + phase % ('models', "the game's player preload", ms) + '\n'
+                        f'[{h}:00:05.000] ' + done % ('models', 4000) + '\n'
+                        f'[{h}:00:07.500] ' + mem % ('the map in', 5000, 6000, 4000, 9000, 32000, 20000, 40000) + '\n')
+        ls = perf_report.read_loads(loads)
+        check(len(ls) == 2 and ls[0]['preload_s'] == 5.0 and ls[0]['map_s'] == 2.5 and
+              ls[0]['memory']['the map in'] == (5000, 6000, 4000) and
+              ("the game's player preload", 900) in ls[1]['phases'],
+              'MISSION phases and MEMORY points by entry (hitch-5)')
+        txt = '\n'.join(perf_report.loads_text(ls))
+        check('| 1 | cold (the launch first) |' in txt and '| 2 | warm (again) |' in txt, 'the first entry cold, the next warm')
+        pm = os.path.join(d, 'presentmon.csv')
+        with open(pm, 'w', encoding='utf-8') as f:
+            f.write('Application,PresentMode,Dropped,MsBetweenDisplayChange,MsUntilDisplayed\n'
+                    'EDF6.exe,Hardware: Independent Flip,0,16.6,20\nEDF6.exe,Hardware: Independent Flip,1,0,0\n'
+                    'EDF6.exe,Hardware: Independent Flip,0,33.4,30\n')
+        p = perf_report.presentmon_summary(pm)
+        check(p['presents'] == 3 and p['dropped'] == 1 and abs(p['change_mean'] - 25.0) < 1e-9 and
+              p['modes'] == {'Hardware: Independent Flip': 3}, 'PresentMon: display changes, not displayed (latency-2)')
+        img = perf_report.Image.__new__(perf_report.Image)
+        img.names = {}
+        img.pdata = sorted([(0x111B8E0, 0x111B9E0), (perf_report.APP_FRAME, perf_report.APP_FRAME + 0x400),
+                            (perf_report.SYSTEM_UPDATE, perf_report.SYSTEM_UPDATE + 0x1000), (0x118DFF0, 0x118E100),
+                            (0x65F10, 0x66000)])
+        img.starts = [b for b, _ in img.pdata]
+        img.slot_class = {}
+        check(perf_report.thread_role(img, [['ntdll.dll+1', 'EDF.dll+111b900', 'EDF.dll+3e700']] * 5) == 'render thread',
+              'the render thread told by its entry, not by the xgs thread start every xgs thread has')
+        check(perf_report.thread_role(img, [['ntdll.dll+1', 'EDF.dll+11a2eca', 'EDF.dll+3e700']] * 5) ==
+              'game thread (main loop)', 'the game thread at full speed: in the main loop, not System::update')
+
+        class Named:
+            def func(self, f: str, leaf: bool) -> tuple[str, str]:
+                return f, {'EDF6VehicleCrew.dll+10': 'crew::perfprobe::FenceHook'}.get(f, 'crew::Other')
+        pf = perf_report.plugin_functions(Named(), [['ntdll.dll+1', 'EDF.dll+50e00', 'EDF6VehicleCrew.dll+10',
+                                                     'EDF.dll+11a305f']] * 3, 10, 16.7)
+        check(pf == ['no plugin frames'], 'the measurement probes are not the plugin\'s cost (they call through)')
+
+        class Hooks:
+            def func(self, f: str, leaf: bool) -> tuple[str, str]:
+                return f, {'EDF6VehicleCrew.dll+20': 'crew::ThinkHook<0>', 'EDF6VehicleCrew.dll+30': 'crew::Think',
+                           'EDF6VehicleCrew.dll+10': 'crew::perfprobe::UpdateHook'}.get(f, 'crew::Other')
+        stock = ['EDF.dll+596b60', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10', 'EDF.dll+1198000']
+        own = ['ntdll.dll+1', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF6VehicleCrew.dll+10']
+        called = ['EDF.dll+7000', 'EDF6VehicleCrew.dll+30', 'EDF6VehicleCrew.dll+20', 'EDF.dll+1198000']
+        check(not perf_report.plugin_owns(Hooks(), stock), "the stock Think under ThinkHook is the game's own work")
+        check(perf_report.plugin_owns(Hooks(), own) and perf_report.plugin_owns(Hooks(), called),
+              "the plugin's code, and the game code it calls, are its own work")
+        pf = perf_report.plugin_functions(Hooks(), [stock, own, called, called], 10, 20.0)
+        check(pf[0].endswith('100.0%, 20.00 ms/frame') and pf[1].endswith('75.0%, 15.00 ms/frame'),
+              'both shares reported: on the stack, and its own work')
+        def ph(*frames: str) -> str:
+            return perf_report.phase_of(img, list(frames))[0]
+        check(ph('EDF.dll+118e000', 'EDF.dll+1198fa0') == 'draw: camera / Umbra 0x118DFF0', 'the draw split by its part')
+        check(ph('EDF.dll+65f20', 'EDF.dll+1199100') == 'ai_update (waiting on the xgs pool 0x65F10)',
+              "a phase's wait on the xgs pool apart")
+        check(ph('ntdll.dll+1', 'EDF.dll+705627') == 'app: network / Steam / EOS', 'Application::Update by call')
+        check(ph('ntdll.dll+1', 'EDF.dll+11a305f') == 'main loop: render fence wait 0x111CC20', 'the main loop by part')
+        check(ph('ntdll.dll+1') == 'outside the frame loop', 'nothing of the frame: outside it')
+
+
+def vanilla_names() -> None:
+    """Stack frames named from the vanilla indexes: edf6-vanilla-re's reviewed names over the code index's labels, only
+    for the EDF.dll build they were made from; a source missing (CI) or of another build gives no names, no error."""
+    sha = 'ab' * 32
+    with tempfile.TemporaryDirectory() as d:
+        code, re_ = os.path.join(d, 'code'), os.path.join(d, 're')
+        os.makedirs(os.path.join(code, 'function-index'))
+        os.makedirs(os.path.join(re_, 'shared', 'functions'))
+        with open(os.path.join(code, 'function-index', 'summary.json'), 'w', encoding='utf-8') as f:
+            json.dump({'images_sha256': {'EDF.dll': sha.upper()}}, f)
+        with open(os.path.join(code, 'function-index', 'functions.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write('module\trva\tlabel\tlabel_kind\n'
+                    'EDF.dll\t0x6A8B50\tFUN_1806a8b50_guess\tghidra\n'
+                    'EDF.dll\t0x111B8E0\tTalkScript::Run\tsymbol\n'
+                    'EDF.dll\t0x200000\tLAB_180200000\taddress_label\n'
+                    'EDF6.exe\t0x1000\tWinMain\tsymbol\n')
+        with open(os.path.join(re_, 'shared', 'builds.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write(f'build\tmodule\tsha256\nsteam\tEDF.dll\t{sha}\nother\tEDF.dll\t{"cd" * 32}\n')
+        with open(os.path.join(re_, 'shared', 'functions', 'EDF.dll.tsv'), 'w', encoding='utf-8', newline='') as f:
+            f.write('build\trva\tname\nsteam\t0x006A8B50\tWeapon_RadioContact::UpdateCall\n'
+                    'other\t0x00300000\tNotThisBuild\n')
+        names = perf_report.vanilla_names(sha, code, re_)
+        check(names == {0x6A8B50: 'Weapon_RadioContact::UpdateCall', 0x111B8E0: 'TalkScript::Run'},
+              f'vanilla names: reviewed over index, this build, no address labels or other modules ({names})')
+        check(perf_report.vanilla_names('ef' * 32, code, re_) == {}, 'vanilla names: another build gives none')
+        check(perf_report.vanilla_names(sha, os.path.join(d, 'none'), os.path.join(d, 'none')) == {},
+              'vanilla names: missing sources give none')
+        img = perf_report.Image.__new__(perf_report.Image)
+        img.pdata, img.starts, img.slot_class, img.names = [(0x6A8B50, 0x6A8C00)], [0x6A8B50], {}, names
+        check(img.name(0x6A8B50) == '0x6a8b50 Weapon_RadioContact::UpdateCall', f'named frame ({img.name(0x6A8B50)})')
+
+
+def perfrun_probe_options() -> None:
+    _, o = perfrun.options(['M001', '--dll', 'installed', '--cycle', '3', '--cycle-stay', '10'])
+    check(o['cycle'] == 3 and o['cycle_stay'] == 10.0, '--cycle N and --cycle-stay S')
+    _, o = perfrun.options(['M001', '--dll', 'installed', '--key', '4d@50', '--key', 'esc@60:500'])
+    check(o['keys'] == [('4d', 50.0, 300), ('esc', 60.0, 500)], '--key SPEC@S[:MS], 300 ms by default')
+    for bad in (['M001', '--dll', 'installed', '--presentmon', os.path.join(ROOT, 'no-such-presentmon.exe')],
+                ['M001', '--dll', 'installed', '--cycle', '2', '--ab', __file__, __file__]):
+        try:
+            perfrun.options(bad)
+            check(False, f'{bad[3]} refused')
+        except SystemExit:
+            pass
+    a = perfrun.presentmon_args('pm.exe', 42, 20, 'o.csv')
+    check(a[:3] == ['pm.exe', '--process_id', '42'] and '--v1_metrics' in a and '--terminate_after_timed' in a,
+          'PresentMon: the game only, timed to the clean window, v1 columns')
+    src = inspect.getsource(perfrun.one_run)
+    check('cycle=(cycle, stay, False) if cycle else None' in src and 'during=None if cycle' in src,
+          'a load run hands drive.run the cycle and samples nothing')
+    check("coop.log" in src and 'run_log(clog, clog_at)' in src, "this launch's part of EDF6Coop.log kept as coop.log")
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, 'run.json'), 'w') as f:
+            json.dump({'scenario': 'M001', 'cycle': 2}, f)
+        with open(os.path.join(d, 'vehiclecrew.log'), 'w') as f:
+            f.write("[13:00:00.000] MISSION phase the game's player preload (in 0 ms)\n"
+                    '[13:00:05.000] MISSION phases done (all 4000 ms)\n')
+        t = perfrun.loads_report(d)
+        check('left and entered again 2 times' in t and '| 1 | cold' in t and
+              os.path.exists(os.path.join(d, 'loads.md')), "a load run's loads.md")
 
 
 def drive_during() -> None:
@@ -284,7 +512,8 @@ def drive_during() -> None:
 def ini_option() -> None:
     _, o = perfrun.options(['stress:1', '--ini', 'HavokMultithread=1', '--ini', 'Debug=0', '--dll', 'installed'])
     check(o['ini'] == ['HavokMultithread=1', 'Debug=0'], '--ini repeats, in order')
-    check("ini=('Debug=1', *opts['ini'])" in inspect.getsource(perfrun.one_run), "--ini reaches drive.run after Debug=1")
+    check("ini=('Debug=1', 'PerfProbe=1', *opts['ini'])" in inspect.getsource(perfrun.one_run),
+          '--ini reaches drive.run after Debug=1 and PerfProbe=1')
     try:
         perfrun.options(['stress:1', '--ini', 'HavokMultithread'])
         check(False, '--ini without = refused')
@@ -442,6 +671,355 @@ def outlived_runs() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def rewrite_files() -> None:
+    """gen.rewrite_scenario: refused before a write_scenario kept the originals; then the range's files rewritten with
+    the kept originals left as they were, so restore_scenario puts back what was there before the first write."""
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as queues:
+        os.environ['EDF6_QUEUE_DIR'] = queues
+        out = gen.mission_dir(root, gen.RANGE_MISSION)
+        os.makedirs(out)
+        with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
+            f.write(b'old script')
+        saved = {k: getattr(gen, k) for k in ('installed', 'Game', '_range_files', 'without_missing',
+                                              'has_mission_setup', '_write_mission')}
+        scripts = iter(['first leg', 'second leg', 'third leg'])
+
+        def fake_write(game_root, game, mission, site, text, points):
+            for name, data in (('MISSION.AC', text.encode()), ('MISSION.RMPA', points)):
+                with open(os.path.join(gen.mission_dir(game_root, mission), name), 'wb') as f:
+                    f.write(data)
+        gen.installed = lambda game_root: True
+        gen.Game = lambda game_root: None
+        gen.without_missing = lambda game_root, plan: (plan, ['left out'])
+        gen.has_mission_setup = lambda game, name: True
+        gen._range_files = lambda game_root, game, plan: (next(scripts), b'points', [], False)
+        gen._write_mission = fake_write
+        try:
+            plan = gen.Plan()
+            plan.vehicles = {}
+            plan.waves.enabled = False
+            try:
+                gen.rewrite_scenario(root, plan)
+                check(False, 'rewrite_scenario refused before write_scenario')
+            except RuntimeError:
+                with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                    check(f.read() == b'old script', 'rewrite_scenario refused before write_scenario, nothing written')
+            gen._range_files = lambda game_root, game, plan: (next(scripts), b'points', [], False)
+            scripts = iter(['first leg', 'second leg', 'third leg'])
+            gen.write_scenario(root, plan)
+            check(gen.rewrite_scenario(root, plan) == ['left out'], 'rewrite_scenario returns what was left out')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'second leg', 'rewrite_scenario writes the next leg\'s script')
+            with open(os.path.join(gen.scenario_backup(root), 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'the kept original is still the one from before the first leg')
+            gen.rewrite_scenario(root, plan)
+            check(gen.restore_scenario(root), 'restore after two rewrites')
+            with open(os.path.join(out, 'MISSION.AC'), 'rb') as f:
+                check(f.read() == b'old script', 'restore puts back the script from before the first leg')
+            check(not os.path.exists(os.path.join(out, 'MISSION.RMPA')), 'and removes what was not there before it')
+            gen.installed = lambda game_root: False
+            try:
+                gen.check_scenario(root, plan)
+                check(False, 'check_scenario refuses a range that is not installed')
+            except RuntimeError:
+                check(not os.path.exists(gen.scenario_backup(root)), 'check_scenario refuses, nothing kept')
+        finally:
+            for k, v in saved.items():
+                setattr(gen, k, v)
+
+
+def legs_options() -> None:
+    """The positional arguments as legs: their options, the refusals, the folders, the warm-ups, the commands."""
+    import drive
+    scenario, o = perfrun.options(['stress:1', 'stress:10', 'M001,key=4d@48,key=esc@57:500,warm=30,diff=2', 'RM015',
+                                   '--dll', 'installed'])
+    legs = o['legs']
+    check(scenario == 'stress:1' and [g['scenario'] for g in legs] == ['stress:1', 'stress:10', 'M001', 'RM015'],
+          'several positional arguments: the legs in order')
+    check(legs[2]['keys'] == [('4d', 48.0, 300), ('esc', 57.0, 500)] and legs[2]['warm'] == 30.0
+          and legs[2]['difficulty'] == 2 and legs[0]['keys'] == [] and legs[0]['warm'] is None,
+          "a leg's key= (300 ms by default) / warm= / diff=, the others' none")
+    check(o['keys'] == [] and o['leg_timeout'] == 900.0 and not o['next_reboot'], "legs: the run's own keys untouched")
+    scenario, o = perfrun.options(['M001,key=4d@48,warm=10,diff=3', '--dll', 'installed'])
+    check(scenario == 'M001' and o['keys'] == [('4d', 48.0, 300)] and o['warm'] == 10.0 and o['difficulty'] == 3
+          and len(o['legs']) == 1, 'one scenario with leg options: the single run as before, its options the run\'s')
+    _, o = perfrun.options(['M001', 'RM015', '--dll', 'installed', '--leg-timeout', '300', '--next-reboot'])
+    check(o['leg_timeout'] == 300.0 and o['next_reboot'], '--leg-timeout S, --next-reboot')
+    for bad in (['M001', 'RM015', '--dll', 'installed', '--ab', __file__, __file__],
+                ['M001', 'RM015', '--dll', 'installed', '--cycle', '2'],
+                ['M001', 'RM015', '--dll', 'installed', '--key', '4d@50'],
+                ['M001,foo=1', '--dll', 'installed'], ['M001,warm=x', '--dll', 'installed'],
+                ['M001,diff=7', '--dll', 'installed'], [',key=4d@1', '--dll', 'installed'],
+                ['M001,key', '--dll', 'installed'], ['M001,key=4d', '--dll', 'installed'],
+                ['M001,warm=-1', '--dll', 'installed'], ['M001,warm=nan', '--dll', 'installed'],
+                ['M001,warm=inf', '--dll', 'installed'], ['M001,key=4d@nan', '--dll', 'installed'],
+                ['M001,key=4d@-2', '--dll', 'installed'], ['M001,key=4d@1:0', '--dll', 'installed'],
+                ['M001', '--warm', 'nan', '--dll', 'installed'], ['M001', '--warm', '-5', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', '0', '--dll', 'installed'],
+                ['M001', 'RM015', '--leg-timeout', 'inf', '--dll', 'installed'],
+                ['M001', '--cpu', '0', '--dll', 'installed'], ['M001', '--difficulty', '9', '--dll', 'installed'],
+                ['M001', '--stacks', '-1', '--dll', 'installed'],
+                ['M001', '--restore'], ['--dll', 'installed']):
+        try:
+            perfrun.options(bad)
+            check(False, f'{bad} refused')
+        except SystemExit:
+            check(True, f'{" ".join(bad)} refused')
+    check(perfrun.leg_names([{'scenario': x} for x in ('stress:1', 'M001', 'stress:1', 'stress:1')])
+          == ['stress_1', 'M001', 'stress_1-2', 'stress_1-3'], "a leg's folder: its scenario, -2 on one run twice")
+    check(perfrun.warm_for('stress:1', None) == perfrun.stress_fields(1)[2] and perfrun.warm_for('stress:100', None)
+          == perfrun.stress_fields(100)[2] == 90.0 and perfrun.warm_for('M001', None) == 25.0
+          and perfrun.warm_for('grand', None) == 45.0 and perfrun.warm_for('stress:100', 12.0) == 12.0,
+          "each leg's warm-up: its scenario's own, or the one given")
+    check([perfrun.leg_mission(x) for x in ('stress:10', 'swarm:giantspider01', 'blast', 'grand', 'M001', 'RM015', '42')]
+          == ['range'] * 4 + ['M001', 'RM015', '42'], "a leg's mission: range for a range scenario")
+    check(drive.next_command('range', 1) == 'next range 1' and drive.next_command('M001', 2, True)
+          == 'next M001 2 reboot', "a leg's `next` command")
+    check(perfrun.legs_longest([40.0, 25.0], 20, 20, 900) == int(40 + 40 + 25 + 40 + 2 * 900 + 90),
+          "the launch's deadline: every leg's sampling and every leg's way in (the first one's loading too)")
+    check(perfrun.options(['M001,warm=0', '--dll', 'installed'])[1]['warm'] == 0.0, 'warm=0: sampled at once')
+
+
+def legs_logs() -> None:
+    """The autopilot's NEXT rows, and the launch's logs cut a leg each by the wall clock (past midnight too)."""
+    import drive
+    rows = ['[ 70.0 s] NEXT armed: M001, difficulty 1, back in by HQMain', '[ 71.0 s] CYCLE 1/1 leaving',
+            '[ 90.0 s] NEXT 1 entered: the mission runs (row 1, difficulty 1, mode 0, content id 0)']
+    check(drive.next_outcome(rows, 1) == 'entered' and drive.next_outcome(rows[:2], 1) is None,
+          'NEXT k entered: the leg is in its mission; not yet before it')
+    check(drive.next_outcome(['[ 90.0 s] NEXT 10 entered: ...'], 1) is None, 'NEXT 10 is not NEXT 1')
+    check(drive.next_outcome(['[ 1.0 s] NEXT refused: a cycle or a next is already running'], 1) == 'failed'
+          and drive.next_outcome(['[ 1.0 s] CYCLE failed: the script went back to the title'], 2) == 'failed',
+          'NEXT refused / CYCLE failed: the leg failed')
+    start = time.mktime((2026, 11, 24, 23, 59, 0, 0, 0, -1))
+    data = (b'[23:58:59.900] stamped a little before the start\r\n'
+            b'[23:59:10.000] PERF OBJECTS enemies 160, player team 4, friends 9\r\n'
+            b'  a dump row without a stamp\r\n'
+            b'[2026-11-25 00:00:40] STATS last 5s: the date first (EDF6Coop)\r\n'
+            b'[00:00:30.000] PERF OBJECTS enemies 1600, player team 4, friends 9\r\n'
+            b'[00:01:00.000] at the second bound\r\n')
+    a, b, c = perfrun.split_log(data, start, [start + 60, start + 120])
+    check(a.count(b'\r\n') == 3 and b'a little before' in a and b'without a stamp' in a and b'160,' in a,
+          'the first leg: its rows, a stamp just before the start and a row without a stamp with it')
+    check(b'1600' in b and b'date first' in b and b'160,' not in b, 'the second leg: past midnight, the date-first rows')
+    check(c == b'[00:01:00.000] at the second bound\r\n', 'a row at a bound goes to the leg after it')
+    check(perfrun.split_log(data, start, []) == [data], 'one leg: the whole log')
+    # perf_report's windows over midnight: 23:59:00 + 60 s; rows before, inside (both sides of 00:00) and after
+    d = tempfile.mkdtemp()
+    try:
+        log = os.path.join(d, 'vehiclecrew.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write('[23:58:30.000] PERF OBJECTS enemies 1, player team 4, friends 9\n'
+                    '[23:59:30.000] PERF OBJECTS enemies 10, player team 4, friends 9\n'
+                    '[00:00:00.000] PERF OBJECTS enemies 20, player team 4, friends 9\n'
+                    '[00:00:30.000] PERF OBJECTS enemies 1000, player team 4, friends 9\n'
+                    '[00:00:00.400] PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, '
+                    '0 over 33 ms\n')
+        objs = perf_report.read_objects(log, (start, start + 60))
+        check(objs.get('enemies') == (15.0, 20), f'PERF OBJECTS over midnight: the window\'s rows only ({objs})')
+        check(len(perf_report.read_perf(log, (start, start + 60))) == 1, 'PERF rows over midnight kept')
+        check(perf_report.in_window(perfrun.tod(start) - 60, (start, start + 60)) is False,
+              'a row a minute before the window is before it, not a day later')
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def legs_run() -> None:
+    """One launch of three legs with drive.run faked: the range written once before the launch and rewritten for the
+    later range leg, the `next` commands, the keys timed from the leg's entry, each leg's slice of the log and its
+    run.json, the range and the placed files put back once; summary.md's row a leg; a leg that never comes in."""
+    import contextlib
+    import io
+    import drive
+    names = ('game_pids', 'run', 'rows', 'command', 'key', 'restore_placed', 'anything_left')
+    saved = {k: getattr(drive, k) for k in names}
+    gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'rewrite_scenario',
+                                           'restore_scenario')}
+    sample_saved = perfrun._sample
+    d = tempfile.mkdtemp()
+    try:
+        game = os.path.join(d, 'game')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        os.environ['EDF6_QUEUE_DIR'] = os.path.join(d, 'queues')
+        log = perfrun.plugin_log(game)
+        with open(log, 'wb') as f:
+            f.write(b'[00:00:00.000] an earlier launch\r\n')
+        with open(os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini'), 'w', encoding='utf-8') as f:
+            f.write('[VehicleCrew]\nTestRangeContent=4242\n')
+        calls: list = []
+        auto: list[str] = []
+        running: list[int] = []
+        enemies = {'range': 0}
+        enter = ['ok']   # how a `next` goes: ok, never (no row), mode (the pack's mode not entered), wrong (difficulty)
+        running_at = [0.0]   # when the first mission runs (its RUNNING row), its loading before
+        targets = {'M001': (1, 0, 0), 'range': (0, 4242, 7)}   # row, content id, mode
+
+        def stamp(text: str) -> None:
+            t = int(perfrun.tod(time.time()) * 1000)   # once, truncated as the plugin's stamp: never past now
+            with open(log, 'ab') as f:
+                f.write(f'[{t // 3600000:02d}:{t // 60000 % 60:02d}:{t // 1000 % 60:02d}.{t % 1000:03d}] {text}\r\n'
+                        .encode())
+
+        def fake_run(game_, mission, difficulty, seconds, keep, **k):
+            calls.append(('run', mission, difficulty, k.get('extra'), isinstance(k.get('gate'), drive.Gate)))
+            running.append(1)
+            stamp(f'the launch: {mission}')
+            row, content, mode = targets[mission]
+            running_at[0] = time.time() + 0.3
+            first = [f'[ 0.5 s] RANGE mode {mode} (content id {content}) made current'] if content else []
+            auto[:] = first
+            runs = (f'[ 9.0 s] RUNNING: the mission runs (row {row}, difficulty {difficulty}, mode {mode}, '
+                    f'content id {content})')
+            rows_now[0] = lambda: (auto[:len(first)] + [runs] + auto[len(first):] if time.time() >= running_at[0]
+                                   else list(auto))
+            k['during']()
+            running.clear()
+            return 0
+
+        def fake_command(game_, text, gate=None):
+            calls.append(('command', text))
+            time.sleep(0.01)
+            stamp(f'left for {text}')
+            _, mission, diff = text.split()[:3]
+            row, content, mode = targets[mission]
+            n = sum(1 for c in calls if c[0] == 'command')
+            if enter[0] == 'mode':
+                auto.append('[ 1.0 s] RANGE no offline mode with content id 4242')
+                auto.append("[ 1.0 s] SCRIPT HQMain: the pack's mode not entered, the menu as is")
+            elif enter[0] in ('ok', 'wrong'):
+                auto.append(f'[ 1.0 s] RANGE mode {mode} (content id {content}) made current')
+                d = int(diff) + (1 if enter[0] == 'wrong' else 0)
+                auto.append(f'[ 1.0 s] NEXT {n} entered: the mission runs (row {row}, difficulty {d}, mode {mode}, '
+                            f'content id {content})')
+
+        def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
+            calls.append(('sample', os.path.basename(out), warm))
+            now = time.time()
+            n = enemies['range']
+            stamp('PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, 0 over 33 ms')
+            stamp(f'PERF OBJECTS enemies {n}, player team 4, friends 9')
+            with open(os.path.join(out, 'cpu.txt'), 'w') as f:
+                f.write('')
+            marks['pid'] = 1
+            marks['windows'] = {'cpu': [now - 30, now + 0.2], 'stacks': [now + 0.2, now + 0.3]}
+
+        def write(game_, plan):
+            calls.append(('write', plan.waves.max_alive))
+            enemies['range'] = plan.waves.max_alive
+            return []
+
+        def rewrite(game_, plan):
+            calls.append(('rewrite', plan.waves.max_alive))
+            enemies['range'] = plan.waves.max_alive
+            return ['left out']
+        drive.game_pids = lambda: list(running)
+        drive.run = fake_run
+        rows_now = [lambda: list(auto)]
+        drive.rows = lambda game_: rows_now[0]()
+        drive.command = fake_command
+        drive.key = lambda game_, spec, ms, gate=None: calls.append(('key', spec, ms))
+        drive.restore_placed = lambda game_: calls.append(('placed',)) or True
+        drive.anything_left = lambda game_: False
+        gen.installed = lambda game_: True
+        gen.check_scenario = lambda game_, plan: calls.append(('check', plan.waves.max_alive)) or []
+        gen.write_scenario = write
+        gen.rewrite_scenario = rewrite
+        gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
+        perfrun._sample = fake_sample
+        _, opts = perfrun.options(['stress:1', 'M001,key=4d@0.1,diff=3', 'stress:10,warm=7', '--dll', 'installed',
+                                   '--warm', '5'])
+        out = os.path.join(d, 'out')
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+        check(rc == 0, 'three legs: the run passes')
+        order = [c for c in calls if c[0] != 'key']
+        check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1, ('running',), True),
+                        ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
+                        ('rewrite', 1600), ('command', 'next range 1'), ('sample', 'stress_10', 7.0),
+                        ('restore',), ('placed',)],
+              'every range leg checked before the launch, written once, rewritten for the later range leg, `next` '
+              'for each later leg, put back once at the end')
+        check(('key', '4d', 300) in calls, "the M001 leg's key held")
+        dirs = [os.path.join(out, n) for n in ('stress_1', 'M001', 'stress_10')]
+        runs = []
+        for x in dirs:
+            with open(os.path.join(x, 'run.json'), encoding='utf-8') as f:
+                runs.append(json.load(f))
+        check([r['scenario'] for r in runs] == ['stress:1', 'M001', 'stress:10'] and [r['leg'] for r in runs]
+              == [1, 2, 3] and runs[1]['difficulty'] == 3 and runs[2]['skipped'] == ['left out']
+              and all('cpu' in r['windows'] for r in runs) and 'asked' in runs[1] and 'asked' not in runs[0],
+              "each leg's run.json: its scenario, difficulty, windows, when its `next` was handed")
+        check(runs[1]['keys_held'][0][:3] == ['4d', 0.1, 300], "the leg's key held, timed from its entry")
+        check(runs[0]['entered'] >= running_at[0],
+              "the first leg's warm-up from its RUNNING row (the mission runs), not from before its loading")
+        with open(os.path.join(dirs[0], 'run.json'), encoding='utf-8') as f:
+            first = json.load(f)
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(dict(first, error='rip_sampler (stacks) exit 5: denied'), f)
+        row0 = perfrun.legs_table(dirs).splitlines()[2]
+        check(row0.endswith('| **ERROR** rip_sampler (stacks) exit 5: denied |') and '| 20.00 |' in row0,
+              "summary.md: a sampled leg with an error says so in its row")
+        with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump(first, f)
+        slices = []
+        for x in dirs:
+            with open(os.path.join(x, 'vehiclecrew.log'), 'rb') as f:
+                slices.append(f.read())
+        check(b'the launch' in slices[0] and b'an earlier launch' not in slices[0]
+              and b'left for next M001' in slices[1] and b'left for next range' in slices[2]
+              and b'enemies 1600' in slices[2] and b'enemies 1600' not in slices[0] + slices[1],
+              "each leg's part of this launch's log: its leaving, its loading, its rows")
+        with open(os.path.join(out, 'vehiclecrew.log'), 'rb') as f:
+            check(f.read() == b''.join(slices), "the whole launch's log kept beside the legs'")
+        table = perfrun.legs_table(dirs)
+        lines = table.splitlines()
+        check(len(lines) == 5 and lines[2].startswith('| stress_1 | stress:1 | 5 | 20.00 | 50.0 | 1.00% | 1.00 |')
+              and 'enemies 160 (max 160)' in lines[2] and 'enemies 1600 (max 1600)' in lines[4]
+              and 'enemies 160 ' in lines[3], "summary.md: a row a leg, each leg's frames and objects")
+        with open(os.path.join(dirs[0], 'report.md'), 'w', encoding='utf-8') as f:
+            f.write("the plugin's own work (not the game's own under a hook that only calls through): 4.2%, 0.8 ms/frame\n")
+        check('| 4.2% |' in perfrun.legs_table(dirs).splitlines()[2], "summary.md: the plugin's own work from report.md")
+        # a leg that never comes in: the run ends there, failed, everything still put back
+        calls.clear()
+        auto.clear()
+        enter[0] = 'never'
+        opts['leg_timeout'] = 2.0   # the first leg's RUNNING comes 0.3 s in: in time; the second leg's never
+        out = os.path.join(d, 'out2')
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+        check(rc == 1 and ('restore',) in calls and ('placed',) in calls and not any(c[0] == 'rewrite' for c in calls)
+              and 'not sampled' in said.getvalue(), 'a leg not in its mission in time: failed, the run ends, put back')
+        with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
+            check('--leg-timeout' in json.load(f)['error'], "the leg's run.json says why")
+        table = perfrun.legs_table([os.path.join(out, n) for n in ('stress_1', 'M001', 'stress_10')]).splitlines()
+        check('not sampled: next 1 not in its mission' in table[3] and 'not sampled: not reached' in table[4]
+              and table[3].endswith('| **ERROR** next 1 not in its mission 2 s after it was asked (--leg-timeout) |')
+              and table[4].endswith('| **ERROR** not sampled |'), 'summary.md: why a leg has no numbers, marked')
+        # the pack's mode not entered: the leg failed at once, not after --leg-timeout
+        for how, want in (('mode', "failed: [ 1.0 s] SCRIPT HQMain: the pack's mode not entered"),
+                          ('wrong', 'next 1 entered another mission than M001 (difficulty 3): difficulty 4, not 3')):
+            calls.clear()
+            enter[0] = how
+            opts['leg_timeout'] = 900.0
+            out = os.path.join(d, 'out-' + how)
+            t0 = time.time()
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+            with open(os.path.join(out, 'M001', 'run.json'), encoding='utf-8') as f:
+                why = json.load(f).get('error', '')
+            check(rc == 1 and time.time() - t0 < 30 and want in why and ('placed',) in calls,
+                  f'a `next` that {how}: the leg failed at once ({why!r}), the run ended and put back')
+    finally:
+        for k, v in saved.items():
+            setattr(drive, k, v)
+        for k, v in gsaved.items():
+            setattr(gen, k, v)
+        perfrun._sample = sample_saved
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
 scenario_files()
 log_turnover()
 both_plugins()
@@ -449,6 +1027,13 @@ outlived_runs()
 ini_option()
 scenarios()
 report_parsing()
+probe_parsing()
+perfrun_probe_options()
+vanilla_names()
 drive_during()
+rewrite_files()
+legs_options()
+legs_logs()
+legs_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)

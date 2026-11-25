@@ -643,6 +643,17 @@ STORES: dict[str, Store] = {
     **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
+SALVO_ROUNDS = 32
+SALVO_MARK = 7070.0
+SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
+SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
+SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
+STORES['SALVO'] = Store(
+    'Salvo missile', 'air', 95.0, 0.012,
+    replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
+            damage=260.0, blast=9.0, lock_time=4.0, burst=float(SALVO_ROUNDS), burst_gap=3.0, interval=96.0),
+    _local('Salvo missile', '斉射ミサイル', '齊射飛彈', '齐射导弹', '일제 사격 미사일'),
+    per_pylon=8, pylon_mass=110.0, pylon_drag=0.015)
 
 def xm_store(unit: xm_units.Unit, arm: xm_units.Arm) -> str:
     """The STORES kind of an X-Morph unit's arm (xm_units.Arm): <UNIT KEY>_<ARM KEY>."""
@@ -768,6 +779,7 @@ def _load(*stores: tuple[str, int]) -> tuple[str, ...]:
 # just four).
 _FIGHTER = _load(('AAM_M', 4), ('AAM_S', 2))
 _INTERCEPTOR = _load(('AAM_L', 4), ('AAM_M', 2), ('AAM_S', 2))
+_SALVO = _load(('SALVO', SALVO_ROUNDS))
 _MULTIROLE = _load(('AAM_M', 2), ('AAM_S', 2), ('AGM', 2), ('RKT', 19), ('MK82', 4))
 _STRIKE = _load(('AGM', 6), ('RKT', 38), ('MK82', 6), ('AAM_S', 2))
 _DRONE = _load(('AGM_L', 4))
@@ -781,7 +793,7 @@ XM_LOADS: dict[str, tuple[str, ...]] = {
     u.key: (tuple(_weapon(f) for f, (_s, k) in XM_GUN_FILES.items() if k == u.key) or _GUNS)
     + tuple(_weapon(store_file(xm_store(u, a), a.rounds)) for a in u.air['stores'])
     for u in xm_units.ported('jet')}
-HOMING_WEAPONS = tuple(w for jet_weapons in (_FIGHTER, _INTERCEPTOR, _MULTIROLE, _STRIKE, _DRONE, _SHIP)
+HOMING_WEAPONS = tuple(w for jet_weapons in (_FIGHTER, _INTERCEPTOR, _SALVO, _MULTIROLE, _STRIKE, _DRONE, _SHIP)
                        for w in jet_weapons if store_of(w) and STORES[store_of(w)[0]].role in ('air', 'ground'))
 _ARMS = _FIGHTER
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
@@ -831,6 +843,7 @@ JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0
 # ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
 # kVehicleBodies payloadKg)
 JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
+JET_MASSES[SALVO_MARK] = JET_MASSES[7003.0]
 # ...and the support's C-130s (C130_JETS): the AC-130 the gunship's (C130_GUNSHIP_MARK), the paratroop plane the same
 # airframe's (C130_TRANSPORT_MARK)
 C130_GUNSHIP_MARK = 7065.0
@@ -872,7 +885,7 @@ CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
                   {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
                    8: '蜂死亡'}, '蜂ダメージ'),
 }
-STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP,
+STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_SALVO, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP,
                                                                  *(w for load in XM_LOADS.values() for w in load))
                             if store_of(w)}))
 JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES, *PRIMER_GUN_FILES, *XM_GUN_FILES)
@@ -1231,6 +1244,8 @@ JETS: dict[str, Jet] = {
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
     'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
+    SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'bomber501_2.mdb'),
+                   'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
@@ -1493,7 +1508,7 @@ class DoorError(Exception):
 # their holder bone, then stood 0.24-0.67 m in the ground under a parked jet. Every other weapon (the blast drones'
 # charges, the Primers' guns) and the fuel tank stay on the anchor.
 HARDPOINT_FILES = frozenset({JET_ELEVON_FILE, 'EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB', 'EDF6VC_DRONE.MRAB',
-                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE})
+                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE, SALVO_MODEL})
 
 
 def model_file(model) -> str:  # noqa: ANN001 - [archive path, member]
@@ -2415,6 +2430,17 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     cone.items[0] = cone.items[1] = missile.lock_cone
     if missile.muzzle is not None:
         _fire_from(game, r, missile.muzzle)
+    if store is STORES['SALVO']:
+        r.set('LockonHoldTime', 1.0)
+        flash_host = dsgo.parse(game.read('WEAPON', JET_GUN_FILES['EDF6VC_JET_GUN_L.SGO'])).root
+        flash = copy.deepcopy(flash_host.get('MuzzleFlash_CustomParameter'))
+        if flash_host.get('MuzzleFlash') != 'MuzzleFlash02' or len(flash.items) != 10:
+            raise ValueError('unexpected launcher flash template')
+        flash.items[2] = 0.72
+        flash.items[8].items[:] = [3.0, 1.65, 0.45, 1.0]
+        flash.items[9] = 0.0
+        r.set('MuzzleFlash', 'MuzzleFlash02')
+        r.set('MuzzleFlash_CustomParameter', flash)
     _look(game, r, missile.look, JET_MISSILE_STOCK)
     _named(r, store)
     return dsgo.write(doc)
@@ -2730,7 +2756,10 @@ def check_ult(files: dict[str, bytes]) -> None:
 BARRAGE_STOCK = 'DEMOINDIRECTFIREE50.SGO'
 BARRAGE_ROUND_FILE = 'EDF6VC_BARRAGE_ROUND.SGO'
 BARRAGE_BURST_FILE = 'EDF6VC_BARRAGE_BURST.SGO'
-BARRAGE_FILES = (BARRAGE_ROUND_FILE, BARRAGE_BURST_FILE)   # EmcRound's order
+BARRAGE_MISSILE_FILE = 'EDF6VC_BARRAGE_MISSILE.SGO'
+BARRAGE_MISSILE_STOCK = 'EWEAPON097.SGO'  # N6 AT, its firing unit uses the same missile body as Tempest ATS
+BARRAGE_MISSILE_MODEL = 'app:/weapon/bullet_icbm01.rab'
+BARRAGE_FILES = (BARRAGE_ROUND_FILE, BARRAGE_BURST_FILE, BARRAGE_MISSILE_FILE)   # EmcRound's order
 BARRAGE_SPEED = 5.0          # m a frame: its first frame's flight, before the plugin flies it
 BARRAGE_LIFE = 45 * 60       # frames: past the longest flight (the ballistic missile's 22 s, the creeping barrage's shells)
 BARRAGE_SIZE, BARRAGE_BLAST = 6.0, 12.0   # the SGO's own (the plugin writes each round's)
@@ -2824,6 +2853,19 @@ def barrage_rounds(game: Game) -> dict[str, bytes]:
     p[0] = [0.0, 0.0]
     m['indirect_fire_damage'] = 0.0
     out = {BARRAGE_ROUND_FILE: sgo.write(version, m)}
+    stock_missile = sgo.load(data=game.read('WEAPON', BARRAGE_MISSILE_STOCK))
+    missile = stock_missile['Ammo_CustomParameter'][4]
+    if len(missile) != 19 or missile[4] != 'MissileBullet01' or missile[14].lower() != BARRAGE_MISSILE_MODEL:
+        raise ValueError(f'{BARRAGE_MISSILE_STOCK} 的导弹发射单元与预期不符')
+    # One straight launch from the IFC. The plugin steers every later frame; keep the model and motor effects.
+    for i, value in ((2, 1), (3, 0), (5, BARRAGE_SPEED), (6, 0), (7, BARRAGE_SIZE), (9, BARRAGE_BLAST),
+                     (10, BARRAGE_LIFE), (11, 0), (15, 0)):
+        missile[i] = int(value) if isinstance(missile[i], int) else float(value)
+    missile[0] = [0.0, 0.0]
+    missile[13][4:7] = [0.0, 0.0, 100.0]  # motor acceleration/turn off, native clamp wider than the planned curve
+    missile[13][8] = 1000000.0   # no native homing or lock acquisition
+    m['indirect_fire_param'] = missile
+    out[BARRAGE_MISSILE_FILE] = sgo.write(version, m)
     version, m = sgo.read(_emc_charge(game, BARRAGE_BURST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
     m['indirect_fire_param'][12] = list(BARRAGE_BURST_COLOUR)
     out[BARRAGE_BURST_FILE] = sgo.write(version, m)
@@ -2839,6 +2881,11 @@ def check_barrage(files: dict[str, bytes]) -> None:
     assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'RocketBullet01', p
     assert p[2] == 1 and p[3] == 0 and p[6] == 0 and p[11] == 0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, p
     assert p[10] >= 30 * 60 and p[5] == BARRAGE_SPEED, p
+    m = sgo.load(data=files[BARRAGE_MISSILE_FILE])
+    p = m['indirect_fire_param']
+    assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and m['indirect_fire_damage'] == 0.0, m
+    assert p[4] == 'MissileBullet01' and p[14].lower() == BARRAGE_MISSILE_MODEL, p
+    assert p[2] == 1 and p[3] == 0 and p[6] == 0 and p[10] == BARRAGE_LIFE and p[15] == 0, p
     m = sgo.load(data=files[BARRAGE_BURST_FILE])
     p = m['indirect_fire_param']
     assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', p

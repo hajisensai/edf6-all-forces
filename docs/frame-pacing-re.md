@@ -1,4 +1,4 @@
-# 游戏本体的两处等待：窗口线程空转与帧步进 Sleep(1)
+# 游戏本体的三处等待（窗口线程空转、帧步进 Sleep(1)、渲染栅栏空转）与 DXGI 排队帧数
 
 2026-11-07。对象是 Steam 版 EDF.dll（`0x678CCB46`），实现在 `src/frame_pacing.cpp`，签名审计在 `tests/frame_pacing_sig_audit.py`。
 
@@ -68,6 +68,68 @@ return n                                        ; eax
 
 离线测试 `tools/frame_pacing_check.cpp`：周期与魔数除法一致；刚过边界、恰在边界、已过一个 / 多个 tick；随机状态下等待结束前一计数游戏数 0、恰好结束时数 1；QPC 回绕前后（base 在 2^64 附近、边界在回绕之后）；100 ns 换算向上取整且最小；在假时钟上跑游戏循环，每帧工作在一个 tick 内时恰好等一次、走一个 tick。
 
+## 游戏线程：等渲染栅栏 `0x111CC20` 空转（2026-11-24 更正）
+
+本文旧版在「没有改的」一节写的「采样里它主要是 `WaitForSingleObject` 真等待，不空转」是错的。2026-11-24 用 `tools/edfre.py`
+只读反汇编核实（字节由 `tests/frame_pacing_sig_audit.py` 审计）：
+
+```
+0x111CC4D: call 0x50D10(&ev, 0, 0)       ; CreateEventW(NULL, 自动复位, 未置位)，事件在 [rsp+80h]，每次调用新建
+0x111CC52..0x111CCB2: 往渲染环 +0x28A8 录一条「置位这个事件」的命令并发布
+0x111CCC4: call 0x50E00(&ev)             ; 先查一次
+0x111CCE0: 秒表 0x66D00 > 1.0 s 时 PeekMessageW / TranslateMessage / DispatchMessageW
+0x111CD39: xor ecx,ecx ; call [Sleep]    ; Sleep(0)
+0x111CD49: call 0x50E00(&ev) ; test al,al ; je 0x111CCE0
+0x50E00:   WaitForSingleObject([rcx], 0) ; sete al
+```
+
+零超时轮询加 `Sleep(0)`：游戏线程等渲染线程的整段时间占满一个核，还和渲染线程、Umbra、Havok 的线程抢核。采样落在
+`WaitForSingleObject` 里，是因为它每圈都进一次内核，不是在睡。主循环每帧在 `0x11A305A` 调它，载入路径还有约 40 处调用。
+
+改法（`src/frame_pacing.cpp` `FenceWait`）：`0x111CD49` 的 `call 0x50E00` 改指向 `FenceWait`，对同一个事件
+`WaitForSingleObject(ev, 10 ms)`，返回值语义与 `0x50E00` 相同（等到 = 1）。渲染线程一置位就醒；超过 1 s 时原版每圈抽一次消息，
+现在每 10 ms 抽一次（等不到的那 10 ms 才回到循环头）。`0x111CCC4` 的第一次查询、`Sleep(0)` 与消息泵不动。只在
+`0x111CD39..0x111CD52` 与 `0x50E00` 整个函数的签名都符合时才改，否则记一行 `PACING the render fence loop ... left as it is`。
+
+## DXGI 最大排队帧数（2026-11-24）
+
+EDF.dll 只在设备初始化 `0x111B420`（唯一调用者 `0x11A33DF`，`rcx` = 渲染器 `0x2136FF0`）的 `0x111B646` 对设备
+（渲染器 `+0x80`）QI 一次 `IDXGIDevice1`（IID 在 `0x1A3B768`），只为调 `GetAdapter`，随即 Release；全 DLL 不调
+`SetMaximumFrameLatency`，所以排队上限是 DXGI 默认的 3 帧。`D3D11CreateDevice` 只经 `0x12DAED0` 在 `0x111B595` 调一次，
+设备只建一次；`0x111B220` 重建的是交换链，设备属性保留。
+
+Present 是游戏线程经 `0x111D890` 录进渲染环的命令，渲染线程在 `0x1118B45` 执行。GPU 跟不上（n ≥ 2，追帧后 8 帧
+SyncInterval = 0）或显示器刷新率不高于 59.94 Hz 时，3 帧队列会填满，输入到画面多 1–2 帧。
+
+改法（`InstallFrameLatency`）：`0x11A33DF` 的调用改指向 `DeviceInitHook`，原函数返回真后对设备调
+`IDXGIDevice1::SetMaximumFrameLatency(ini MaxFrameLatency)`，`0` 不设（默认，2026-11-24 起；blast 重场景 A/B 里设 1 的三局有两局整局降速，见计划 B 线）。游戏代码只改这一处调用，日志一行
+`LATENCY max frame latency 1 (was 3)`。
+
+## 交换链：翻转模型、撕裂、可等待对象（2026-11-24，阶段 3，只在开发开关 `FrameRateFlip=1`）
+
+**玩家默认不启用**（#386 审查）：`FrameRateCap≠0` 时只装 Present 统计（下面的叶子小桩，flags 照原版 0，交换链仍是游戏的 blt；跟刷新率靠 SyncInterval 1）。翻转模型、撕裂、可等待对象整套只在 ini `FrameRateFlip=1`（发布的 ini 里没有）下装，原因：
+- 改模式除了重建，还有**原地切全屏**：`0x111CAC3`（`[rax+0x50]` = `IDXGISwapChain::SetFullscreenState`）与 `0x111BF4D`，不重建链。允许撕裂的窗口链切成独占全屏后，带 `DXGI_PRESENT_ALLOW_TEARING` 的 Present 返回 `DXGI_ERROR_INVALID_CALL`，原版 `0x1118B48` 只处理 `0x887A0005..7`，这一帧被静默丢掉（上限高于刷新率时画面冻结，跟刷新率时每次追帧后丢 8 帧）。要做就得在切全屏后清掉 tearing 标志。
+- `0x111B220` 先 Release 并清零渲染器 `+0x90` 再 CreateSwapChain，中间没有 ClearState / Flush；两次建链都失败时 `+0x90` 为空，Present 小桩 `0x1118B2F` 取空指针会崩。
+- 最小化时可等待对象不触发，帧门每帧等满 100 ms。
+- MSAA（本机 8×）下翻转模型建不出来，保留 blt；MSAA 后缓冲改成解析路径的逆向见共享笔记 `msaa-backbuffer-re.md`（以后做）。
+以上都没有实机测过（关 MSAA、切全屏、改分辨率、最小化），修好并实测后再考虑对玩家开放。
+
+交换链在 `0x111B220` 建（调用者 `0x111B77B` 设备初始化、`0x111C8EC` 切 AA 开关时重建；改分辨率走 `ResizeBuffers` `0x111BE39` / `0x111EF0F`，切全屏走原地 `SetFullscreenState`，见上）。渲染器
+`+0xA8..+0xEF` 的描述拷到栈 `rsp+0x30`，`0x111B33D` `mov rax,[rcx]; call [rax+50h]` 调 `IDXGIFactory::CreateSwapChain`
+（`rcx` 工厂 = 渲染器 `+0xF8`，`rdx` 设备，`r8` 描述，`r9` 输出）。原版描述是 blt 模型：`SwapEffect DISCARD`、1 个缓冲、
+`ALLOW_MODE_SWITCH`。窗口 / 无边框下每帧经 DWM 复制（多一个刷新的延迟），可变刷新率跟不上帧，高于刷新率的帧上不了屏。
+MSAA 在 `0x111B28D` 用 `CheckMultisampleQualityLevels` 选，翻转模型不许多重采样后缓冲。
+
+`src/swap_flip.cpp`：
+- `0x111B33D` 的 6 字节改成 `call` 近处小桩 → 插件的 CreateSwapChain：`FLIP_DISCARD`、2 个缓冲；窗口模式且
+  `IDXGIFactory5::CheckFeatureSupport(PRESENT_ALLOW_TEARING)` 为真时加 `ALLOW_TEARING`；帧门开着且 `MaxFrameLatency > 0` 时加
+  `FRAME_LATENCY_WAITABLE_OBJECT` 并对 `IDXGISwapChain2` 设排队帧数（设备上的设置对这种交换链不再起作用）。
+  采样数 > 1 或系统拒绝时按游戏原描述建，记一行日志。
+- Present（渲染线程，`0x1118B36` `mov rax,[rcx]; xor r8d,r8d`，SyncInterval 在 `xmm0` 第 3 个 dword，随后进 `edx`，`0x1118B45`
+  调 vtbl `+0x40`）：6 字节改成 `call` 叶子小桩，SyncInterval 为 0 的帧 flags 传 `DXGI_PRESENT_ALLOW_TEARING`。
+- 可等待对象：帧门（`frame_rate.cpp GateCount`）决定这一帧要跑之后、数 tick 之前等它（最多 100 ms），这一帧的输入和 tick
+  在 GPU 能接帧时才取。改模式重建交换链会换新对象，旧句柄不关（游戏线程可能正在等它），每次改模式漏一个句柄。
+
 ## 主循环里按帧而不是按 tick 执行的点
 
 主循环（`0x11A2ECA` 起）每帧：`n = min(0x11DAE60(), 3)`，`dt` = 实际帧间隔（秒表 `0x66D00`），再调 `Application::Update`（`0x705530`，`Application` vtable `0x17E91A8` 槽 1，从 `0x11A3006 call [rax+8]` 进入），参数是 `{dt, n}`（`[r14]` / `[r14+4]`）。原版的等待保证 `n >= 1`，所以「按帧」与「按 tick」只在追帧（`n` 为 2、3）和下面那一种 0 tick 帧上不同；若有 MOD 让游戏在 0 tick 时也出帧（如第三方 120 fps 研究包），下面这些点就会多跑（怎样让多出的帧有意义而不出错，见 `docs/unlimited-fps-re.md`）。2026-11-08 静态核实：
@@ -96,5 +158,4 @@ A 与 B 是同一份源码；A 不调用 `InstallFramePacing`。PERF 来自插�
 
 ## 没有改的
 
-- `0x111CC20`（游戏线程等渲染栅栏时也抽消息、`Sleep(0)`）：采样里它主要是 `WaitForSingleObject` 真等待，不空转。
 - 提交内存约 4 GB，其中常驻 RAM 只有 0.5–0.9 GB，其余是游戏预先提交、没有碰过的堆，只占提交额度、不占内存，不值得动。

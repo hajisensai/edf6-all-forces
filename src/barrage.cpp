@@ -27,7 +27,6 @@
 #include "heli.h"           // MapRay, VisitEnemiesOf
 #include "memory.h"
 #include "plugin_net.h"
-#include "support_protocol.h"   // kExtBarrage
 #include "support_soldier.h"    // ReadNativeObjectId
 #include "support_warning.h"    // WarnBarrage
 #include <cmath>
@@ -43,6 +42,11 @@ using barrage::kMaxRounds;
 // RocketBullet01 (RTTI .?AVRocketBullet01@@): its update and what it does with its core (docs/plan-2026-10-25-strikes.md §1.1).
 constexpr std::size_t kVtable=0x17A38E8,kSlotUpdate=5;
 constexpr unsigned kUpdate=0x287E40,kCoreStepCall=0x287F4A,kBirthHit=0x231EEF;
+// MissileBullet01 computes the oriented model from its own m/frame velocity, then uses 0x235540 to pass the
+// same motion to the shared core (m/s). Keep the native missile visuals and give the core the planned next point.
+constexpr unsigned kMissileMotionCall=0x26AB6E,kMissileMotion=0x235540;
+constexpr std::size_t kMissileOwn=0x13D0,kMissileInherited=0x13E0;
+const unsigned char kMissileMotionCode[]={0x48,0x8D,0x55,0x97,0x48,0x8B,0xCF,0xE8,0xCD,0xA9,0xFC,0xFF};
 const unsigned char kUpdateSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x81,0xEC,0xE0,0x00,0x00,0x00};
 // 0x287F4A: mov rdx,rsi; mov rcx,rdi (the core, +0x140); call 0x235D50 (the core's step).
 const unsigned char kCoreStepSig[]={0x48,0x8B,0xD6,0x48,0x8B,0xCF,0xE8,0xFB,0xDD,0xFA,0xFF};
@@ -60,6 +64,8 @@ constexpr float kFrame=1.0f/60.0f;
 using UpdateFn=void(__fastcall*)(void*,void*,void*,void*);
 UpdateFn nextUpdate=nullptr;
 bool hooked=false;
+bool missileHooked=false;
+bool MissileKind(Kind kind) noexcept { return kind==Kind::cruise || kind==Kind::ballistic; }
 
 struct Show {
     bool on=false;
@@ -151,10 +157,10 @@ void Fire(int i,int r) noexcept {
                         round.from[2]+(len>1e-3f ? dir[2]/len : 0.0f)*500.0f};
     std::uint32_t bits=kMarkBase|static_cast<std::uint32_t>(slot);
     float mark;std::memcpy(&mark,&bits,4);
-    if(!BarrageFire(s.by,round.from,aim,s.damage*round.share,round.size,round.blast,mark)) {
+    if(!BarrageFire(s.by,round.from,aim,s.damage*round.share,round.size,round.blast,mark,MissileKind(s.kind))) {
         slots[slot]=Slot{};
-        if(!s.refused)Log("BARRAGE %s: a round was not fired (EDF6VC_BARRAGE_ROUND.SGO not preloaded this mission, or the "
-                          "IFC's fields not where the plugin writes them)",barrage::kKindNames[static_cast<int>(s.kind)]);
+        if(!s.refused)Log("BARRAGE %s: its round SGO was unavailable or the IFC's fields failed validation",
+                          barrage::kKindNames[static_cast<int>(s.kind)]);
         s.refused=true;
         return;
     }
@@ -173,23 +179,47 @@ void CheckCaller(Show& s) noexcept {
 
 // A marked round's flight (before the stock update steps it): its velocity onto its curve's next point, no gravity; a
 // cluster's carrier put out at its split.
-void Steer(unsigned char* b) noexcept {
+bool NextPoint(unsigned char* b,float* want,bool missile) noexcept {
     std::uint32_t bits;std::memcpy(&bits,b+kMark,4);
-    if((bits&kMarkMask)!=kMarkBase)return;
+    if((bits&kMarkMask)!=kMarkBase)return false;
     const Slot& sl=slots[bits&~kMarkMask];
-    if(sl.show<0)return;   // its barrage is over: it flies on as it is
+    if(sl.show<0)return false;
     const Show& s=shows[sl.show];
+    if(MissileKind(s.kind)!=missile)return false;
     const Round& r=s.rounds[sl.round];
     const float frame=static_cast<float>(GameFrame()-sl.launched)+1.0f;
-    if(r.splitAt>=0 && frame>=static_cast<float>(r.splitAt)) {
+    if((r.splitAt>=0 && frame>=static_cast<float>(r.splitAt)) || frame>static_cast<float>(r.flight+3*barrage::kFps)) {
         Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));   // the stock round expires without a blast
-        return;
+        return false;
     }
-    float want[3];barrage::PathAt(r,frame,want);
+    barrage::PathAt(r,frame,want);
+    return true;
+}
+
+void Steer(unsigned char* b) noexcept {
+    float want[3];
+    if(!NextPoint(b,want,false))return;
     const float* pos=reinterpret_cast<const float*>(b+kPos);
     float* vel=reinterpret_cast<float*>(b+kVel);
     float* gravity=reinterpret_cast<float*>(b+kGravity);
     for(int k=0;k<3;++k){vel[k]=(want[k]-pos[k])/kFrame;gravity[k]=0.0f;}
+}
+
+void __fastcall SetMissileMotion(unsigned char* core,const float* native) noexcept {
+    using SetMotion=void(__fastcall*)(void*,const float*);
+    const auto original=reinterpret_cast<SetMotion>(image+kMissileMotion);
+    alignas(16) float velocity[4]{};
+    __try {
+        auto* missile=core-kCore;
+        float want[3];
+        if(NextPoint(missile,want,true)) {
+            for(int k=0;k<3;++k)velocity[k]=want[k]-At<float>(missile,kPos+k*sizeof(float));
+            std::memcpy(missile+kMissileOwn,velocity,sizeof(velocity));
+            std::memset(missile+kMissileInherited,0,sizeof(velocity));
+            native=velocity;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    original(core,native);
 }
 
 void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
@@ -219,7 +249,7 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
         Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no player of this mission's");
         return;
     }
-    const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));
+    const std::uint32_t sent=plugin_net::Broadcast(bytes,sizeof(bytes));
     Log("BARRAGE NET %s %08X:%u told to %u peer(s)",barrage::kKindNames[kind],m.origin,m.serial,sent);
 }
 }  // namespace
@@ -234,7 +264,7 @@ BarrageResult Start(int kind,const unsigned char* caller,std::int32_t team,const
         Log("BARRAGE not started: no kind / caller / target");
         return BarrageResult::noTarget;
     }
-    if(!hooked) {
+    if(!hooked || (MissileKind(static_cast<Kind>(kind)) && !missileHooked)) {
         Log("BARRAGE not started: the rockets' flight hook is not in (unexpected EDF.dll code)");
         return BarrageResult::noHook;
     }
@@ -322,7 +352,7 @@ void ResetBarrages() noexcept {
     origin=plugin_net::NewOrigin();serial=0;heard.Clear();
 }
 
-// ---- the channel (plugin_net.h: BRGS, support_protocol.h kExtBarrage) ----
+// ---- the channel (plugin_net.h: BRGS) ----
 namespace {
 int netLogs=0;
 bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t) noexcept {
@@ -369,7 +399,7 @@ void ResetBarrageNetwork() noexcept {}
 
 plugin_net::Channel BarrageNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;c.featureBit=support_net::kExtBarrage;
+    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;
     c.minSize=c.maxSize=barrage_net::kWire;
     c.receive=&ReceiveBarrageNetwork;c.reset=&ResetBarrageNetwork;
     return c;
@@ -387,7 +417,11 @@ bool InstallBarrages() noexcept {
         if(current!=image+kUpdate)Log("BARRAGE rocket update: chaining onto %p (another plugin)",current);
         nextUpdate=reinterpret_cast<UpdateFn>(current);
         hooked=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&UpdateHook));
+        bool changed=false;
+        missileHooked=Matches(kMissileMotionCall-7,kMissileMotionCode,sizeof(kMissileMotionCode)) &&
+            (RedirectCall(image+kMissileMotionCall,image+kMissileMotion,reinterpret_cast<void*>(&SetMissileMotion),changed) || changed);
         Log("HOOK barrages=%d (the long-range barrages' rounds flown by the plugin)",hooked);
+        Log("HOOK barrage missile curves=%d",missileHooked);
         return hooked;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

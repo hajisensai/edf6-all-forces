@@ -40,7 +40,7 @@ float Angle(){return std::atan2(edf::At<float>(rotor,0x74),edf::At<float>(rotor,
 namespace edf {
 bool Readable(const void* at,std::size_t,bool) noexcept{return fixture::readable && at!=nullptr;}
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept{return fixture::known;}
-bool RedirectCall(unsigned char* at,void* prior,void* replacement,bool& changed) noexcept{
+bool RedirectCall(unsigned char* at,void* prior,void* replacement,bool& changed,edf::Claim,const char*) noexcept{
  if(at==crew::image+0x674B7F){
   fixture::Check(prior==crew::image+0x66F430,"production hooks only audited final wheel writer");fixture::wheelHook=replacement;
  }else{

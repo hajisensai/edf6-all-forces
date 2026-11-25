@@ -282,6 +282,10 @@ std::atomic<DWORD> uiThread{0};
 
 // --- Input ---
 bool KeyDown(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
+int ArmoryHotkey() noexcept {
+    const int key=Cfg().roomLoadoutKey;
+    return key==VK_F2 && GetModuleHandleW(L"EDF6Coop.dll") ? 0 : key;
+}
 bool Foreground() noexcept {
     const HWND w=edf::ForegroundWindow();
     DWORD pid=0;
@@ -292,7 +296,7 @@ Raw ReadRaw() noexcept {
     Raw r;
     r.foreground=Foreground() && !MapHoldsKeys();   // the map never opens over the room / HQ: the rule every key reader keeps
     if(!r.foreground)return r;
-    r.toggleKey=KeyDown(Cfg().roomLoadoutKey);
+    r.toggleKey=KeyDown(ArmoryHotkey());
     r.up=KeyDown(VK_UP);r.down=KeyDown(VK_DOWN);r.left=KeyDown(VK_LEFT);r.right=KeyDown(VK_RIGHT);
     r.enter=KeyDown(VK_RETURN);r.escape=KeyDown(VK_ESCAPE);r.insert=KeyDown(VK_INSERT);r.del=KeyDown(VK_DELETE);
     r.home=KeyDown(VK_HOME);
@@ -305,7 +309,7 @@ Raw ReadRaw() noexcept {
     return r;
 }
 void ToggleName(wchar_t* out,int size) noexcept {
-    const int vk=Cfg().roomLoadoutKey;
+    const int vk=ArmoryHotkey();
     out[0]=0;
     if(vk>=VK_F1 && vk<=VK_F24)_snwprintf_s(out,static_cast<std::size_t>(size),_TRUNCATE,L"F%d",vk-VK_F1+1);
     else if(vk>0) {

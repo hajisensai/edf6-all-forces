@@ -158,13 +158,14 @@ Commander 的 `view` = `DeferredRenderSystem+0xE0`，由 `0x11E1BC0` 从查询�
 ### 5.2 生命周期（全在游戏线程的录制 `0x11978D0` 里）
 
 - 镜头步（§3.1）只发布「要镜片」：哪台相机、原版视角、时刻。
+- 2026-11-25 在 3840×2160 靶场仍可复现左上角 1296×1296 的覆盖。屏幕矩形改为从主视口的右下角开始，尺寸保持 S×S。镜片投影传入本地 `{0,0,S,S}`，仍将画面画满方形纹理。屏幕合成只读取镜片纹理，再写主视口的圆形镜圈。实机截图确认镜内仍有放大画面、镜外左上角恢复为场景。
 - 槽 0 的投影钩子：要镜片（相机就是槽 0 的当前相机、200 ms 内、主相机这一帧的 `+0x24` 比瞄准镜视角宽：`Magnification ≥ kLeast`）时
   - 还没有镜片相机：确认视口 1、2 没有当前相机（不是本机分屏）、视口 3 的相机列表为空且没有当前相机、模式为 0；
-    `0x1198C40(system, 3, {0,0,S,S})`；`0x82F60` 建一台跟随视口 0 相机的 TraceCamera（描述的 vtable 与 `stereo_camera` 相同，
+    `0x1198C40(system, 3, {主视口宽,主视口高,S,S})`；`0x82F60` 建一台跟随视口 0 相机的 TraceCamera（描述的 vtable 与 `stereo_camera` 相同，
     `+0x80/+0x88` = 视口 0 当前相机的 weak_ptr）。工厂返回 weak_ptr，插件只留它：相机由视口 3 的列表拥有，任务结束由引擎
     `0x11956C0` 在 Umbra 世界清理之前销毁，与原生相机同一时机。这次录制不画（相机还在加相机队列里）。
   - 已有：等引擎下一次 update 的 `0x1195A80` 把它放进视口 3 的列表（个数 1、首节点就是它、`+0x28` 目标已建）；主视口尺寸变了
-    （视口 3 矩形不是 `{0,0,S,S}`）就重设矩形（引擎重建目标），这次不画。
+    （视口 3 矩形与重新计算的位置或尺寸不同）就重设矩形（引擎重建目标），这次不画。
   - 就位：`0x1193FA0(视口 3, weak)` 挂上，置「就位」，发布 `S`。
 - 提交钩子：补录之后 `0x1193FA0(视口 3, 空)` 摘下。**镜片相机只在录制期间是视口 3 的当前相机**，屏幕 HUD 阶段（`0x11977F0`）、
   按视口取「第 i 号玩家相机」的 55 处调用都看不到它（TraceCamera 的 vtbl[3] / vtbl[5] 本来也是 `ret 0`）。
@@ -175,7 +176,7 @@ Commander 的 `view` = `DeferredRenderSystem+0xE0`，由 `0x11E1BC0` 从查询�
 游戏线程录制（`0x11978D0`）：槽 0 世界 →〔就位且上一次录制渲染过镜片视口：镜片合成命令〕→ 槽 0 收尾（后处理 + 上屏，原地）→
 槽 3 世界（镜片视角）→〔槽 3 收尾不录〕→ 摘下镜片相机 → 提交 → 稍后屏幕 HUD（镜筒、分划）。
 渲染线程执行：（上一帧的）槽 3 世界结束（`InfantryScopeWorldEnd`：留住镜片视口的颜色纹理与投影）→ 槽 0 世界结束（留住主视口世界颜色的 RTV
-与投影；不放掉镜片视口）→ 镜片合成命令（`InfantryScopeLensCommand` → `LensCompositor::Composite`：把镜片纹理复制一份，在主视口世界颜色上
+与投影；不放掉镜片视口）→ 镜片合成命令（`InfantryScopeLensCommand` → `LensCompositor::Composite`：直接采样镜片视口自己的颜色纹理，在主视口世界颜色上
 按圆画进去，两者都放掉）→ 槽 0 后处理与上屏 → 本帧槽 3 世界（结束时留住，给下一帧）→ HUD。
 
 - 镜片画在**后处理之前**的 HDR 世界颜色里，与主画面同一次色调映射 / 泛光，没有亮度跳变。
@@ -191,9 +192,25 @@ Commander 的 `view` = `DeferredRenderSystem+0xE0`，由 `0x11E1BC0` 从查询�
 ### 5.4 GPU 合成（`src/scope_pip_gpu.cpp LensCompositor`）
 
 - `CaptureMain`：主视口世界结束时的 RTV0（不得有别的 RTV、单采样、单 mip / array、全尺寸视口、可采样颜色格式），引用住。
-- `CaptureLens`：镜片视口世界结束时的 RTV0 纹理（同样检查，且必须是 `S×S` 正方形）；没留住主视口时不留。
-- `Composite`：D3D11.1 `SwapDeviceContextState` 隔离全部管线；`CopyResource` 镜片纹理到私有纹理；绑主视口 RTV、scissor 限在镜片外接方框，
+- `CaptureLens`：镜片视口世界结束时的 RTV0 纹理（同样检查，必须是 `S×S` 正方形，且带 `D3D11_BIND_SHADER_RESOURCE`）。
+- `Composite`：D3D11.1 `SwapDeviceContextState` 隔离全部管线；绑主视口 RTV、scissor 限在镜片外接方框，
   像素着色器圆外 `discard`，圆内 `uv = 0.5 + (p − c) / 2r` 双线性采样。深度、主画面其余像素、原生绑定都不变；结束放掉两份引用。
+- **直接采样镜片纹理，不复制**（2026-11-24 改；之前每个开镜帧 `CopyResource` 整张复制到私有纹理，4K 下 1296² × 8 字节 ≈ 13.4 MB）。依据：
+  - 视口颜色目标可采样（H，`tests/scope_lens_native_audit.py` §7 钉住）：`0x11997A0` 在 `rbp+7` 填一份 `D3D11_TEXTURE2D_DESC`，
+    `0x1199858` 格式 `0xA`、`0x1199862` `BindFlags = 0xA8`（SHADER_RESOURCE | RENDER_TARGET | UNORDERED_ACCESS）、Usage / CPU / Misc 为 0，
+    同一份描述经 `0x1121F70` 建 3 张 G-buffer 和 `+0xD0 / +0xF0` 颜色（中间只在 `0x11998D6` 重写格式，`+0xF0` 之后的深度才改成 `0x48`）。
+    `0x1121F70` 把描述原样交给 `ID3D11Device::CreateTexture2D`（vtable `+0x28`），BindFlags 含 8 时自己再建 SRV（`+0x38`）：引擎本来就采样这些目标。
+  - 镜片纹理与主视口目标是两份资源：每个视口有自己整套目标（§4.1），尺寸也不同（`S×S` 与主视口）。合成时再核一次：
+    `Composite` 读原生 OM 的全部 RTV，镜片纹理在其中、或与主视口目标是同一资源，就不画（读写冲突）。
+  - 内容不变：旧做法的 `CopyResource` 也在合成命令里、紧挨着采样之前执行，所以直接采样读到的就是原来会复制到的那一份；
+    差别只在「同一纹理是否同时被绑成 RT」，上一条已核。
+  - SRV 缓存：按纹理身份（指针 + 整份描述 + RTV 格式）缓存一份，下一帧同一纹理复用；引擎重建目标（新指针）、改分辨率（新尺寸）就换新的、
+    旧的放掉；SRV 引用着它的纹理，所以缓存期间指针不会被复用。`Reset` 全部放掉：开镜后空闲 240 个主视角世界、表面拒绝、设备变了，
+    以及新任务（`ResetInfantryScope` 递增任务代号，渲染线程下一次调用时 `Reset`）。
+  - 不带 SHADER_RESOURCE 的纹理不留（`CaptureLens` 返回假，这一帧不画），不再退回复制：没有兼容分支。
+  - 实机日志（每建一份 SRV 一行）：`INFANTRYSCOPE lens view sampled directly: texture P SxS format F view V bind 0x..; main colour P WxH;
+    native targets N, lens bound as one: no; views K`。
+  - 离线：`scope_pip_gpu`（WARP）钉住复用 / 重建 / 改分辨率 / Reset 后引用计数回到原值、本帧内容被画出、无 SRV 标志不留、镜片纹理被绑为 RT 时不画。
 
 ## 6. 离线验证
 

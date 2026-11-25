@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gamedir  # noqa: E402
 import gen_worldmap  # noqa: E402
 import make_worldmap  # noqa: E402
 import worldmap  # noqa: E402
@@ -108,8 +109,8 @@ def check_basemap() -> None:
 
 
 def check_against_game() -> None:
-    game = os.environ.get('EDF6_GAME_DIR') or make_worldmap.DEFAULT_GAME
-    if not os.path.isfile(os.path.join(game, 'Root.cpk')):
+    game = gamedir.find()
+    if not game:
         print('worldmap_data_test: no game: the table is not re-read')
         return
     fresh = make_worldmap.build(game)

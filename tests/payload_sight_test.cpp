@@ -66,7 +66,10 @@ struct VehicleFixture {
 unsigned char people[3][0x1800]{},personCtrl[3][16]{};
 int checks=0,failed=0;
 void Check(bool yes,const char* message) { ++checks;if(!yes){++failed;std::printf("FAIL: %s\n",message);} }
-void Tick(VehicleFixture& c) { ++now;PayloadFrame(c.vehicle); }
+// One scene step (step_fresh.h: the handoffs are fresh by the step count), the player's payload frame in it.
+void Tick(VehicleFixture& c) { ++now;stepfresh::See(stepfresh::Now()+1);PayloadFrame(c.vehicle); }
+// `n` steps that do not run the payload frame (the publisher stopped: the player not in the seat's frame any more).
+void Skip(stepfresh::Step n) { stepfresh::See(stepfresh::Now()+n); }
 unsigned char* Sight(VehicleFixture& c,unsigned seat=0) { return PayloadSightPicked(c.vehicle,seat); }
 bool SightWeapons(VehicleFixture& c,unsigned char* first,unsigned char* second=nullptr) {
     unsigned char* out[kMostPayload]{};
@@ -193,8 +196,8 @@ int main() {
     SetUp();Tick(c);Triggers(c,0,0,1);Tick(c);Put<void*>(c.vehicle,kSelfCtrl,cars[1].vehicleCtrl);
     Check(Sight(c)==c.weapon[0],"vehicle object reused at same address loses old sight identity immediately");
     Tick(c);Check(Sight(c)==c.weapon[0],"reused vehicle does not carry old secondary-control edge");
-    SetUp();Tick(c);sightinput::keys['R']=true;Tick(c);now+=201;
-    Check(Sight(c)==c.weapon[6] && !PayloadPicked(c.vehicle),"slow frame retains live optical store owner while HUD readout still expires");
+    SetUp();Tick(c);sightinput::keys['R']=true;Tick(c);Skip(kPickFreshSteps+1);
+    Check(Sight(c)==c.weapon[6] && !PayloadPicked(c.vehicle),"steps without the frame retain live optical store owner while HUD readout still expires");
     PullHook(c.holders[3]);Check(!c.weapon[6][kWeaponTrigger] && c.weapon[3][kWeaponTrigger],"optical retention does not extend the firing redirect freshness window");
     c.weapon[3][kWeaponTrigger]=0;
     const auto pausedGameTime=now;Sleep(250);
@@ -244,8 +247,8 @@ int main() {
     Put<int>(c.weapon[1],kWeaponReloadTime,-1);
     Check(SightWeapons(c,nullptr),"empty native group does not substitute an unselected store");
 
-    SetUp();Flak(c);Tick(c);sightinput::keys['R']=true;Tick(c);now+=201;
-    Check(SightWeapons(c,c.weapon[6]),"slow frame retains one selected flak store rather than changing optic owner to two native guns");
+    SetUp();Flak(c);Tick(c);sightinput::keys['R']=true;Tick(c);Skip(kPickFreshSteps+1);
+    Check(SightWeapons(c,c.weapon[6]),"steps without the frame retain one selected flak store rather than changing optic owner to two native guns");
     Board(c,0,1);
     Check(SightWeapons(c,c.weapon[0],c.weapon[1]),"new human cannot inherit old flak optical redirects before next input tick");
     SetUp();Tick(c);sightinput::keys['R']=true;Tick(c);Put<int>(c.weaponCtrl[6],8,0);

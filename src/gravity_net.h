@@ -1,17 +1,17 @@
 // The gravity operations online (gravity_net.cpp; the wire and why in gravity_net_protocol.h): what this machine's player
 // holds and throws, every other machine's copy of it held and thrown the same way.
 // A carrier (the gravity gun) does its own moves through gravity.h as offline and tells this layer each frame:
-//  - Hold every frame it carries `t` to `goal` (moving at `goalVel`): the grab's state goes to every peer (kHoldGapMs).
+//  - Hold every frame it carries `t` to `goal` (moving at `goalVel`): the grab's state goes to every peer (kHoldGapFrames).
 //    False: not this machine's to hold (a peer holds it already, or both grabbed it at once and the peer outranks this
 //    one: the host's grab over a guest's, else the lower PUID's): the carrier lets go;
 //  - Thrown with the velocity Throw gave it, or LetGo: once, the grab ended. A thrown thing with no ID (debris, a
-//    container) has its flight's states sent after it (kFlightGapMs, up to kFlightMostMs or its rest) and every copy is
+//    container) has its flight's states sent after it (kFlightGapFrames, up to kFlightMostMs or its rest) and every copy is
 //    steered onto them;
 //  - Radial instead of gravity::Radial: every machine moves its copies the same way.
 // A carrier that stops calling Hold without either (put away, the mission over) lets go here after a few frames.
 // Each peer's grab is carried on this machine's copy by Frame (gravity::HoldAt), and thrown with the same velocity; its
 // damage is dealt on the grabber's machine only (its own Track), never here. Offline every call is the local one alone.
-// Only peers that announced support_protocol.h kExtGravity are sent anything (plugin_net.h). Game thread only.
+// Every peer of the room is sent them (plugin_net.h). Game thread only.
 #pragma once
 #include "command_net.h"
 #include "plugin_net_logic.h"
@@ -36,6 +36,6 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
 bool ReceiveGravityNetwork(std::uint32_t peer,const char* authenticatedPuid,const void* bytes,std::size_t size,
                            std::uint64_t now) noexcept;
 void ResetGravityNetwork() noexcept;
-// Its plugin_net.h channel (support_net.cpp registers it): GRVT, support_protocol.h kExtGravity.
+// Its plugin_net.h channel (support_net.cpp registers it): GRVT.
 plugin_net::Channel GravityNetChannel() noexcept;
 }  // namespace crew

@@ -34,6 +34,7 @@ struct Cue {
     bool switched;              // the weapon in hand changed this frame
     Move move;
     float sway=0.20f;           // turn-only motion strength; zero disables sway, other motion is retained
+    bool firing=false;          // the active weapon's native trigger, including time between shots
 };
 
 // The viewmodel's offset and turn now.
@@ -52,6 +53,7 @@ struct State {
     Spring recoilZ,recoilPitch; // separate shot response: immediate kick, then return, independent of idle/sprint smoothing
     float phase;                // the bob's phase, rad
     int switchFrames;           // frames left of the lower-and-raise
+    int attackFrames;           // keeps the weapon out of the sprint tuck just after the last shot
 };
 
 constexpr float kSwayGain=0.6f,kSwayMost=0.08f;     // rad of turn per rad looked, at most
@@ -61,6 +63,7 @@ constexpr float kLandGain=0.25f,kLandMost=0.06f;    // m of dip per m/frame of f
 constexpr float kRecoilBack=0.07f,kRecoilUp=0.10f; // m back and rad up a shot at full recoil
 constexpr float kRecoilMostBack=0.12f,kRecoilMostUp=0.18f,kRecoilReturn=0.18f,kRecoilDamping=0.75f;
 constexpr int kSwitchFrames=24;                      // the lower-and-raise, frames (half down, half up)
+constexpr int kAttackRecoveryFrames=10;
 constexpr float kK=0.18f,kD=0.45f;                   // the springs (about a fifth of a second to settle)
 
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
@@ -97,8 +100,10 @@ inline Pose Advance(State& s,const Cue& c) noexcept {
         if(s.switchFrames>kSwitchFrames/2){wy-=0.25f;wp-=0.6f;}
         --s.switchFrames;
     }
-    // The stock moves.
-    if(c.move==Move::sprint){wx+=0.05f;wy-=0.06f;wp-=0.35f;wyaw-=0.45f;wr+=0.2f;}
+    // The stock sprint action can drop and return between shots. A held trigger owns the ready pose through that change.
+    if(c.firing || c.shots>0)s.attackFrames=kAttackRecoveryFrames;
+    else if(s.attackFrames>0)--s.attackFrames;
+    if(c.move==Move::sprint && s.attackFrames==0){wx+=0.05f;wy-=0.06f;wp-=0.35f;wyaw-=0.45f;wr+=0.2f;}
     if(c.move==Move::dash){wy-=0.015f;wz-=0.04f;}
     if(c.move==Move::roll){wy-=0.15f;wp-=0.5f;}
     Step(s.x,wx,kK,kD);Step(s.y,wy,kK,kD);Step(s.z,wz,kK,kD);

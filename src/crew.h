@@ -13,6 +13,7 @@
 #include "stores.h"
 #include "edf/seat.h"
 #include "mission_packs.h"
+#include "step_fresh.h"   // handoff freshness by the scene step (GameFrame), any thread
 #include "sound_place.h"
 
 namespace crew {
@@ -21,6 +22,10 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
+    bool syncLoadProbe=true;   // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
+    bool verbose=false;        // Debug=2: the per-object periodic lines too (each NPC soldier's NPCAI line every 2 s)
+    bool perfProbe=false;      // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
+    int preloadMode=0;         // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
     float crewRange=600.0f;    // metres from the player; 0 = any distance
@@ -40,9 +45,11 @@ struct Config {
     // (The flight controller's own gains are constants in heli.cpp; the old HeliMoveGain / HeliBrakeGain /
     // HeliClimbGain / HeliHoverLearn keys are ignored, plugin.cpp LoadConfig.)
     DWORD heliLandMs=5000;     // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
-    float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
+    float heliSpeed=65.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
-    float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
+    float playerHeliStopSec=1.0f;// a stock heli's horizontal response in hover mode (s; 0: stock damping)
+    int heliHoverKey=0x24;     // Home outside the command map: flight / hover
+    int heliHoverButton=0;    // optional XInput chord
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
@@ -81,7 +88,9 @@ struct Config {
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;  // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
-    int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz, -1 no cap, 61..1000; read at start only; not wired into the game yet (docs/unlimited-fps-re.md)
+    int maxFrameLatency=0;     // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
+    bool frameRateFlip=false;  // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
+    int frameRateCap=0;        // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz (shipped), 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
     float stockMissileNav=3.0f;// ...its navigation constant (2..6)
     bool playerLockByView=true;
@@ -572,6 +581,7 @@ ULONGLONG GameMs() noexcept;
 // CheckPauseFlag (at load, patches nothing) found the code different.
 bool CheckPauseFlag() noexcept;
 bool GamePaused() noexcept;
+// Another thread, or data handed between hooks: stepfresh::Now() / Fresh (step_fresh.h), the same count mirrored.
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
@@ -590,13 +600,13 @@ void SeeFrame(const void* vehicle) noexcept;
 // mission is dropped here, before the new mission's objects (which may reuse the old addresses) exist.
 void MissionStart() noexcept;
 void ResetCrew() noexcept;        // crew.cpp
+void SceneOver() noexcept;        // crew.cpp: the scene's end (mission.cpp), every step stamp stale
 void ResetHelis() noexcept;       // heli.cpp (and the player track, the rescue)
 void ResetGround() noexcept;      // ground.cpp
 void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
 void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
-void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
 void ViewDiagTick() noexcept;     // viewdiag.cpp: once a frame, logs (VIEWDIAG) when the view's eye leaves the map or the near pass's clip breaks
 bool InstallUmbraWatch() noexcept;   // viewdiag.cpp: logs (VIEWDIAG umbra) a box handed to Umbra out of any map's reach
 // view.cpp: while the map view is open (map.cpp, game thread, each frame) the cameras' far clip raised to `farClip` and
@@ -877,7 +887,7 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `escort`: it works round the player (while seen), not round `target`.
 // blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
 // singing, dancing hololive doll); after `carrier`, as they are no role of their own.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship };
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship, salvo };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches
@@ -987,7 +997,7 @@ bool BoardingRequest(unsigned char* vehicle) noexcept;
 bool BoardingReady() noexcept;                           // boarding.cpp: its hook is in (BoardingRequest can take one on)
 bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
-// fresh for kSazabiCueMs). False with none (not riding one).
+// fresh while published in the last steps, step_fresh.h). False with none (not riding one).
 struct SazabiCue {
     float thruster;          // 0..1 the thrusters' charge
     float rifleReady;        // 0..1 to the beam rifle's next shot (1 ready)
@@ -1018,7 +1028,6 @@ struct SazabiCue {
     float assist[3];         // the aim assist's enemy (its lock point, world): the aim point is it (sazabi_assist.h)
     bool lockOn;             // ...held by the lock-on (its key pressed: the camera follows it)
 };
-constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;
 // The player's Sazabi's riding camera (turretcam.cpp's look-at hook): seat `seat`'s eye and look point, false when the
 // seat is no player's Sazabi's (the stock camera then).
@@ -1068,7 +1077,7 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst,
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst, barrageMissile,
                       andryushaBlast, andryushaFire };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
@@ -1083,7 +1092,7 @@ bool EmcIfcOk() noexcept;                                    // RoundSize / Roun
 // `damage`, its AmmoSize `size`, blast `blast` m and AmmoHitSizeAdjust `mark` (the plugin's flight tells it by that); a
 // cluster's flash where its bomblets leave (EmcRound::barrageBurst, no damage). False: not fired (not preloaded, the IFC's
 // fields not where they are written).
-bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark,bool missile) noexcept;
 void BarrageBurst(const unsigned char* by,const float* at) noexcept;
 // jet_bay.cpp: one of the Andryusha's bomblets (andryusha.cpp; docs/andryusha-re.md): two rounds of `by` on one arc from
 // `from` onto `aim` (the IFC's own ballistic solve, both at one speed and gravity): its blast (EmcRound::andryushaBlast,
@@ -1113,8 +1122,6 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
 void UltimateTick() noexcept;
 void ResetUltimate() noexcept;
 void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
-// The caller's HUD line (hud.cpp): a peer in the room without the ultimate's channel does not see the show.
-bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.
@@ -1412,7 +1419,7 @@ enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
     float power;
-    bool ground,landed,keys,aiming,holding;
+    bool ground,landed,keys,aiming,holding,hoverMode;
     bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;
     float impactIn;

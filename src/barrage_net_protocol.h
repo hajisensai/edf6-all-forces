@@ -6,7 +6,7 @@
 // on the caller's machine alone (jet_bay.cpp ShellMake: OnlineShotCounts). Before 2026-10-26 the stock radio call carried
 // the point and heading to every machine; the call is no weapon any more.
 // A barrage lasts seconds: a peer that joins during one, or loses its message, does not see it (no keep).
-// Wire: fixed size, little-endian (wire.h), plugin_net.h channel BRGS, support_protocol.h kExtBarrage:
+// Wire: fixed size, little-endian (wire.h), plugin_net.h channel BRGS:
 //   magic, version, kind (byte 8), origin @12, serial @16, damage @20, at[3] @24, heading[3] @36, caller[32] @48, team @80;
 //   zero to kWire.
 // Version 2 (2026-10-31): the caller is its requester ID (net_object_ref.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine);
@@ -25,7 +25,7 @@
 
 namespace crew::barrage_net {
 constexpr std::uint32_t kMagic=0x53475242u;   // "BRGS"
-constexpr std::uint32_t kVersion=4;
+constexpr std::uint32_t kVersion=5;  // the two peers replay the same revised barrage plan
 constexpr std::size_t kWire=96;
 constexpr float kMostDamage=1.0e9f;
 

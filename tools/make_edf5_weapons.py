@@ -34,10 +34,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import edf5port  # noqa: E402
+import gamedir  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 
-STEAM = r'D:\Steam\steamapps\common'
 OUT = os.path.join(HERE, '..', 'edf5port', 'weapons.json')
 # The weapons that need files EDF6 lacks, converted from EDF5 (pylib/legacy_assets.py): their own registry, released
 # after edf41port's (tools/ported_weapons.py REGISTRIES).
@@ -332,9 +332,12 @@ def keep_order(path: str, weapons: list[dict]) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--edf5', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 5'))
-    ap.add_argument('--edf6', default=os.path.join(STEAM, 'EARTH DEFENSE FORCE 6'))
+    edf6 = gamedir.find_or_dev()
+    ap.add_argument('--edf5', default=gamedir.find_other(gamedir.EDF5, near=edf6))
+    ap.add_argument('--edf6', default=edf6)
     a = ap.parse_args()
+    if not a.edf5:
+        ap.error('EDF5 not found: set EDF5_DIR or pass --edf5')
     data = build(a.edf5, a.edf6)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     for path, weapons in ((OUT, keep_order(OUT, [w for w in data['weapons'] if 'assets' not in w])),

@@ -27,13 +27,18 @@
 #include "edf/input_source.h"
 #include "edf/katyusha_cab.h"
 #include "edf/keybind.h"
-#include "append_log.h"
+#include "log.h"
+#include "edf/game_frame.h"
+#include "edf/npc_grid.h"
+#include <algorithm>
+#include <atomic>
+#include <climits>
+#include <limits>
 #include "turret.h"
 
 namespace autoturret {
 unsigned char* image=nullptr;
 HMODULE module=nullptr;
-wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
 Config cfg{};
@@ -89,22 +94,30 @@ SRWLOCK roundLock=SRWLOCK_INIT;
 
 // The time fuse and the team each flak gun's rounds get, as the gun's vehicle stamped them on its input this
 // frame (NoteGuns): read by SpawnHook for the round the gun fires. An entry counts only when stamped this
-// game frame or the last (Fresh), so a gun no longer stamped (its vehicle gone, the weapon freed and its
+// game frame or the last (GunStamp), so a gun no longer stamped (its vehicle gone, the weapon freed and its
 // address reused) is never matched: nothing is kept past its frame, and no weapon field is ever written.
+// The frame is the scene step (Frame): a stamp of step N holds through step N+1 (a round its gun spawns before the next
+// stamp, in N's update or N+1's before N+1's input) and no later, however many vehicles' inputs ran in a step.
 struct GunFuse { const void* weapon; std::int32_t fuse; std::int32_t team; ULONGLONG frame; };
 constexpr int kMaxGunFuses=64;
 GunFuse gunFuses[kMaxGunFuses]{};
 SRWLOCK gunLock=SRWLOCK_INIT;
 bool gunsFullLogged=false;
 
-// The frame counter (SeeVehicle).
-constexpr int kFrameSeen=64;
-ULONGLONG frame=1;
-const void* frameSeen[kFrameSeen]{};
-int frameSeenCount=0;
+// The frame counter (SeeFrame): the scene steps that really ran, as gameframe::RunClock counts them (game thread; a
+// paused step is no frame, so a lock and a stamp outlast the pause menu), and its value as last seen there, for Frame()
+// on any thread.
+gameframe::RunClock frameClock;
+std::atomic<ULONGLONG> frameNow{1};
 
-// The world's lock points this frame (RefreshWorld; turret.h kFirstWorld): rows 0..worldCount-1.
+// The world's lock points this frame (RefreshWorld; turret.h kFirstWorld): rows 0..worldCount-1, their horizontal
+// extent, and their grid (built by the first scan of the frame that a smaller box helps: WorldGrid).
 std::vector<Enemy> worldEnemies(kFirstWorld);
+std::vector<enemypoints::Point> worldPoints;
+npc::grid::Grid worldGrid;
+bool worldGridBuilt=false;
+float worldLo[2]{},worldHi[2]{};
+constexpr float kWorldCell=64.0f;   // m: the grid's cell side (a gun's range covers a few)
 int worldCount=0;
 ULONGLONG worldFrame=0,worldAt=0;
 
@@ -135,35 +148,16 @@ constexpr unsigned char kFireGateStock[]={0x83,0xF8,0x05,0x74,0x23};
 constexpr unsigned char kFireGateFree[]={0x83,0xF8,0x04,0x73,0x23};
 bool legacySeen=false;
 
+// The log: common/log.h (buffered on the caller's thread, written by its own thread, rotated to .log.1 past 32 MB).
 void Log(const char* format,...) noexcept {
-    if(!logPath[0])return;
-    char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    SYSTEMTIME t{};GetLocalTime(&t);
-    char line[1100];
-    const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u] %s\r\n",t.wHour,t.wMinute,t.wSecond,text);
-    static edf::AppendLog log;
-    if(n>0)log.Write(logPath,line,static_cast<DWORD>(n));
+    va_list args;va_start(args,format);edf::logfile::Line(format,args);va_end(args);
 }
 
-namespace {
-const void* exportSeen=nullptr;   // the vehicle whose frame entry the PlayerAimV4 export made (SeeVehicleOnce)
-void Step(const void* vehicle) noexcept {
-    for(int i=0;i<frameSeenCount;++i)
-        if(frameSeen[i]==vehicle){++frame;frameSeenCount=0;break;}
-    if(frameSeenCount<kFrameSeen)frameSeen[frameSeenCount++]=vehicle;
+void SeeFrame() noexcept {
+    gameframe::See(frameClock,image);
+    frameNow.store(frameClock.logical,std::memory_order_release);
 }
-}  // namespace
-void SeeVehicle(const void* vehicle) noexcept {
-    if(vehicle==exportSeen)exportSeen=nullptr;   // its own input hook sees it again: the export no longer steps for it
-    Step(vehicle);
-}
-void SeeVehicleOnce(const void* vehicle) noexcept {
-    bool seen=false;
-    for(int i=0;i<frameSeenCount;++i)seen=seen || frameSeen[i]==vehicle;
-    if(seen && exportSeen!=vehicle)return;   // its own input hook saw it this frame (the flak, a 403 / 404 tank)
-    Step(vehicle);exportSeen=vehicle;
-}
-ULONGLONG Frame() noexcept { return frame; }
+ULONGLONG Frame() noexcept { return frameNow.load(std::memory_order_acquire); }
 
 // The object at `obj` is still the one whose weak-this control block was `ctrl`, and alive. Under __try.
 bool Same(const void* obj,const void* ctrl) noexcept {
@@ -206,40 +200,40 @@ void ToLocal(const unsigned char* vehicle,const float* world,float* local) noexc
     local[0]=Dot(d,m);local[1]=Dot(d,m+4)-cfg.pivotHeight;local[2]=Dot(d,m+8);
 }
 
-const std::int32_t* Relations(std::int32_t team) noexcept {
-    if(team<0 || team>=kMaxTeam)return nullptr;
-    const auto manager=At<const unsigned char*>(image,kTeams);
-    if(!Readable(manager,kTeamArray+8))return nullptr;
-    const auto rows=At<const unsigned char*>(manager,kTeamArray);
-    if(!Readable(rows+team*kTeamStride,kTeamStride))return nullptr;
-    const auto relation=At<const std::int32_t*>(rows+team*kTeamStride,kTeamRelation);
-    return Readable(relation,kMaxTeam*4) ? relation : nullptr;
-}
-
-// Takes the world snapshot once a frame (the first scan of the frame). Game thread, under the caller's
-// __try; the registry is the game's own and only changes on this thread.
+// Takes the world snapshot once a frame (the first scan of the frame): the registry walk every side shares
+// (enemypoints::Collect with no side, edf/enemy_points.h), each point with its object's origin, and their grid. Game
+// thread, under the caller's __try; the registry is the game's own and only changes on this thread.
 void RefreshWorld() noexcept {
-    if(worldFrame==frame)return;
-    worldFrame=frame;worldAt=GetTickCount64();worldCount=0;
-    const auto registry=At<const unsigned char*>(image,kRegistry);
-    if(!Readable(registry,kRegList+0x10))return;
-    const auto head=At<const unsigned char*>(registry,kRegList);
-    if(!Readable(head,0x10))return;
-    const std::uint64_t nodes=At<std::uint64_t>(registry,kRegSize);
-    std::uint64_t n=0;
-    for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
-        const auto target=At<const unsigned char*>(node,kNodeTarget);
-        if(!target || target[0]!=0 || !target[kTargetValid] || !target[kTargetLockable])continue;
-        const auto object=At<const unsigned char*>(target,kTargetObject);
-        if(!object || object[kDead])continue;
-        const auto team=At<std::int32_t>(object,kTeam);
-        if(team<0 || team>=kMaxTeam)continue;
-        if(static_cast<std::size_t>(worldCount)>=worldEnemies.size())worldEnemies.resize(worldEnemies.size()*2);
+    const ULONGLONG now=Frame();
+    if(worldFrame==now)return;
+    worldFrame=now;worldAt=GetTickCount64();worldCount=0;
+    worldGrid.Clear();worldGridBuilt=false;
+    const unsigned char* head=nullptr;
+    std::uint64_t nodes=0;
+    if(!edf::LockList(image,head,nodes))return;
+    diag.registry+=static_cast<unsigned>(enemypoints::Collect(head,nullptr,worldPoints,nodes));
+    if(worldEnemies.size()<worldPoints.size())worldEnemies.resize((std::max)(worldEnemies.size()*2,worldPoints.size()));
+    for(const enemypoints::Point& p:worldPoints) {
         Enemy& e=worldEnemies[static_cast<std::size_t>(worldCount)];
-        if(!Finite(target,kTargetAim,e.pos) || !Finite(object,kPosition,e.origin))continue;
-        e.object=object;e.team=team;++worldCount;
+        if(!Finite(static_cast<const unsigned char*>(p.object),kPosition,e.origin))continue;
+        std::memcpy(e.pos,p.aim,12);e.object=p.object;e.team=p.team;
+        // The extent of every point (a non-finite one makes it infinite: no box covers it, the grid keeps it apart).
+        if(!worldCount){worldLo[0]=worldHi[0]=e.pos[0];worldLo[1]=worldHi[1]=e.pos[2];}
+        for(int k=0;k<2;++k) {
+            const float v=e.pos[k*2];
+            if(!(v>=worldLo[k]))worldLo[k]=std::isnan(v) ? -std::numeric_limits<float>::infinity() : v;
+            if(!(v<=worldHi[k]))worldHi[k]=std::isnan(v) ? std::numeric_limits<float>::infinity() : v;
+        }
+        ++worldCount;
     }
-    diag.registry+=static_cast<unsigned>(n);
+}
+// The frame's grid, built once on first use.
+const npc::grid::Grid& WorldGrid() noexcept {
+    if(!worldGridBuilt) {
+        worldGrid.Build(worldCount,[](int i){ return static_cast<const float*>(worldEnemies[static_cast<std::size_t>(i)].pos); },kWorldCell);
+        worldGridBuilt=true;
+    }
+    return worldGrid;
 }
 
 const Enemy* World(int* count) noexcept {
@@ -248,17 +242,44 @@ const Enemy* World(int* count) noexcept {
     return worldEnemies.data();
 }
 
+// The world-space radius round the vehicle's pivot (m[12..14]) outside which no point can be within `range` of the
+// turret pivot in the vehicle's frame (ToLocal: local = A (p - pivot) - (0, pivotHeight, 0), A the matrix's three rows):
+// |p - pivot| <= |A^-1| (range + |pivotHeight|), |A^-1| bounded by its Frobenius norm, with room for ToLocal's float
+// rounding. Infinite (a singular matrix, a range or pivot not finite): no bound, every row is tested.
+float ScanRadius(const float* m,float range) noexcept {
+    const double a=m[0],b=m[1],c=m[2],d=m[4],e=m[5],f=m[6],g=m[8],h=m[9],k=m[10];
+    const double co[9]={e*k-f*h,c*h-b*k,b*f-c*e,f*g-d*k,a*k-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d};
+    const double det=a*co[0]+b*co[3]+c*co[6];
+    double sum=0.0;
+    for(double v:co)sum+=v*v;
+    const double r=std::sqrt(sum)/std::fabs(det)*(static_cast<double>(range)+std::fabs(static_cast<double>(cfg.pivotHeight)))*1.001+1.0;
+    if(!std::isfinite(r) || r>1.0e7 || !std::isfinite(m[12]) || !std::isfinite(m[13]) || !std::isfinite(m[14]))
+        return std::numeric_limits<float>::infinity();
+    return static_cast<float>(r);
+}
+
 void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept {
     out.count=0;
     RefreshWorld();
-    const auto relation=Relations(At<std::int32_t>(vehicle,kTeam));
+    const auto relation=edf::Relations(image,At<std::int32_t>(vehicle,kTeam));
     if(!relation)return;
     if(out.e.size()<static_cast<std::size_t>(worldCount))out.e.resize(static_cast<std::size_t>(worldCount));
-    for(int i=0;i<worldCount;++i) {
+    const auto keep=[&](int i) noexcept {
         const Enemy& e=worldEnemies[static_cast<std::size_t>(i)];
-        if(e.object==vehicle || relation[e.team]!=kEnemyRelation)continue;
+        if(e.object==vehicle || relation[e.team]!=kEnemyRelation)return false;
         float local[3];ToLocal(vehicle,e.pos,local);
-        if(Dot(local,local)<=range*range)out.e[static_cast<std::size_t>(out.count++)]=&e;
+        return Dot(local,local)<=range*range;
+    };
+    const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
+    const float r=ScanRadius(m,range);
+    // A box round the pivot that holds every point already: the grid would visit them all (in the same order).
+    const bool covers=!(m[12]-r>worldLo[0] || m[12]+r<worldHi[0] || m[14]-r>worldLo[1] || m[14]+r<worldHi[1]);
+    if(std::isfinite(r) && !covers) {
+        static std::vector<int> rows;   // kept: its room grows to the battle once
+        npc::grid::FirstAround(WorldGrid(),m+12,r,INT_MAX,keep,rows);
+        for(int i:rows)out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];
+    } else {
+        for(int i=0;i<worldCount;++i)if(keep(i))out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];
     }
     diag.enemies+=static_cast<unsigned>(out.count);
 }
@@ -331,13 +352,14 @@ bool TakeRound(const void* bullet,Round& out) noexcept {
 
 // Stamps `weapon` with the fuse and team its next rounds get (game thread).
 void StampGun(const void* weapon,std::int32_t fuse,std::int32_t team) noexcept {
+    const ULONGLONG now=Frame();
     AcquireSRWLockExclusive(&gunLock);
     GunFuse* slot=nullptr;
     for(auto& g:gunFuses) {
         if(g.weapon==weapon){slot=&g;break;}
-        if(!slot && (!g.weapon || g.frame+1<frame))slot=&g;
+        if(!slot && (!g.weapon || g.frame+1<now))slot=&g;
     }
-    if(slot)*slot=GunFuse{weapon,fuse,team,frame};
+    if(slot)*slot=GunFuse{weapon,fuse,team,now};
     ReleaseSRWLockExclusive(&gunLock);
     if(!slot && !gunsFullLogged){gunsFullLogged=true;Log("FUSE more than %d flak guns this frame: the rest fire unfused",kMaxGunFuses);}
 }
@@ -345,8 +367,9 @@ void StampGun(const void* weapon,std::int32_t fuse,std::int32_t team) noexcept {
 // The stamp of `weapon` from this frame or the last, else {kNoFuse, kNoTeam}.
 GunFuse GunStamp(const void* weapon) noexcept {
     GunFuse out{weapon,kNoFuse,kNoTeam,0};
+    const ULONGLONG now=Frame();
     AcquireSRWLockShared(&gunLock);
-    for(const auto& g:gunFuses)if(g.weapon==weapon && g.frame+1>=frame){out=g;break;}
+    for(const auto& g:gunFuses)if(g.weapon==weapon && g.frame+1>=now){out=g;break;}
     ReleaseSRWLockShared(&gunLock);
     return out;
 }
@@ -388,7 +411,7 @@ void HookSpawn(const unsigned char* weapon) noexcept {
 // Closest approach of this frame's flight segment to the enemies of `team` seen this frame.
 const Enemy* NearTarget(const float* pos,const float* step,std::int32_t team,float* burst) noexcept {
     if(GetTickCount64()-worldAt>kEnemyMs)return nullptr;
-    const auto relation=Relations(team);
+    const auto relation=edf::Relations(image,team);
     if(!relation)return nullptr;
     const float stepLength=Dot(step,step);
     float best=1.0e18f;const Enemy* hit=nullptr;
@@ -786,7 +809,7 @@ template<int K> void __fastcall HookInput(void* vehicle,std::uintptr_t hasInput,
     FlushDiag(vehicle);
     ReloadConfigIfChanged();
     __try {
-        SeeVehicle(vehicle);
+        SeeFrame();
         Flak(static_cast<unsigned char*>(vehicle),(hasInput&0xFF)!=0);   // no rider: the stock code just zeroed the turn
     } __except(EXCEPTION_EXECUTE_HANDLER) {diag.stop="fault";}
 }
@@ -997,6 +1020,15 @@ int HookFlak() noexcept {
     Log("HOOK flak input slot=1");
     return 1+HookGrenade()+HookRocket();
 }
+// Two source files patching one code byte (edf/code_owner.h): the second's patch is refused or undoes the first's.
+void LogClaimConflict(const edf::ClaimConflict& c) noexcept {
+    const auto at=reinterpret_cast<const unsigned char*>(c.at);
+    if(image && at>=image && at<image+0x4000000)
+        Log("PATCH conflict: %s and %s both patch EDF.dll+0x%llX (%zu bytes): only one may own a site",c.first,c.second,
+            static_cast<unsigned long long>(at-image),c.size);
+    else Log("PATCH conflict: %s and %s both patch %p (%zu bytes): only one may own a site",c.first,c.second,
+             static_cast<const void*>(at),c.size);
+}
 }  // namespace autoturret
 
 // A background host's keyboard and foreground window for this plugin (common/edf/input_source.h); null: user32's.
@@ -1011,22 +1043,34 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     GetModuleFileNameW(module,iniPath,MAX_PATH);
     auto dot=wcsrchr(iniPath,L'.');if(!dot)return false;
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
+    wchar_t logPath[MAX_PATH];
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
+    edf::logfile::Start(logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Auto Turret";info->version=PLUG_VER(EDF6AT_VERSION_MAJOR,EDF6AT_VERSION_MINOR,EDF6AT_VERSION_PATCH,0);
     char file[96];
     edf::DescribeModuleFile(module,file,sizeof(file));
     Log("EDF6AutoTurret %s loading (build %s, %s)",EDF6AT_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
-    image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
-    if(!image){Log("REFUSED: unsupported EDF.dll (the weapon data still works stock: the guns fire unaimed, unfused)");return false;}
+    unsigned char* const edfImage=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
+    if(!edfImage){Log("REFUSED: unsupported EDF.dll (the weapon data still works stock: the guns fire unaimed, unfused)");return false;}
+    if(!gameframe::CounterAsExpected(edfImage) || !gameframe::RunTimeAsExpected(edfImage)) {
+        Log("REFUSED: the scene step / scene time code (0x1198FD0 / 0x1193551 / 0x1198E07) is not the stock one: no game frame to count by");
+        return false;
+    }
+    // Only now: every export answers false (does nothing) while image is null, a refused load included.
+    image=edfImage;
+    edf::SetClaimConflictSink(&LogClaimConflict);   // before the first patch
     // The flak and the tank gunners stand alone: either one's code being patched by someone else
     // leaves only that one stock. The DLL stays loaded while any slot points into it.
     const int flak=HookFlak();
     const int gunners=HookGunners();
     Log("LOADED patches flak=%d gunners=%d",flak,gunners);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
+    const edf::ClaimStats claims=edf::GetClaimStats();
+    Log("PATCH owners: %u claims at load, %u conflicts, %u not registered (no room)",claims.claims,claims.conflicts,
+        claims.dropped);
     return flak+gunners>0;
 }
 
@@ -1034,8 +1078,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
 // Steers): it then leaves the turret to it for the frame. The aim step it asks from runs after this frame's input slot.
 extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void* vehicle,unsigned seat) {
     using namespace autoturret;
-    if(!vehicle)return false;
+    if(!vehicle || !image)return false;
     __try {
+        SeeFrame();
         const auto ctrl=At<const void*>(vehicle,kSelfCtrl);
         for(const Track& t:tracks)
             if(t.vehicle==vehicle && t.seat==seat && t.ctrl==ctrl)return t.steered!=0 && t.steered==Frame();
@@ -1045,9 +1090,15 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void
 
 // EDF6VehicleCrew's gun stabilizer asks whether this plugin steers its guns from the held axes (aimlink.h V3): an older
 // one would count the hull's turn twice, and gets no stabilizer on the seats it steers.
-extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return true; }
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return autoturret::image!=nullptr; }
+
+// A crash anywhere in the game: EDF6VehicleCrew's crash dump calls this after its dump (common/log.h kCrashFlush), so
+// the lines still buffered here reach EDF6AutoTurret.log. Never waits (the crashed thread may own a log lock), neither
+// rotates nor formats, and opens the log only if it was not open yet (common/log.h CrashFlush).
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_CrashFlushLogV1() { edf::logfile::CrashFlush(); }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){autoturret::module=instance;DisableThreadLibraryCalls(instance);}
+    else if(reason==DLL_PROCESS_DETACH)edf::logfile::Flush();   // process exit: the last lines still buffered (log.h)
     return TRUE;
 }

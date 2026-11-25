@@ -362,7 +362,7 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     import jet_models
     import rootcpk
     assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
-                                  vc.GUNSHIP_MODEL_FILE}, sorted(vc.HARDPOINT_FILES)
+                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}, sorted(vc.HARDPOINT_FILES)
     assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
     seen = 0
     for name, jet in vc.JETS.items():
@@ -394,7 +394,7 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
-              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE}
+              for f in vc.HARDPOINT_FILES if f not in {vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():
@@ -1875,7 +1875,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst,\s+andryushaBlast, andryushaFire \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst, barrageMissile,\s+andryushaBlast, andryushaFire \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -2178,7 +2178,7 @@ def andryusha_marks_agree() -> None:
     files = re.findall(r'L"(EDF6VC_ANDRYUSHA_\w+\.SGO)"', bay)
     assert files == list(vc.ANDRYUSHA_BOMBLET_FILES), files
     enum = re.search(r'enum class EmcRound \{(.*?)\};', src('src/crew.h'), re.S).group(1)
-    assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,andryushaBlast,andryushaFire'), enum
+    assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,barrageMissile,andryushaBlast,andryushaFire'), enum
     # The fuse switch writes the weapon's template AmmoHitSizeAdjust: the template's AmmoSpeed / AmmoAlive offsets
     # (common/edf/weapon.h) at the same distance from it as in the IFC's InitParam (docs/carrier-laser-re.md §3).
     weapon = dict(re.findall(r'(kWeaponAmmo\w+)=(0x[0-9A-F]+)', src('common/edf/weapon.h')))
@@ -2766,7 +2766,7 @@ def turret_aim_wired() -> None:
     # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
     lockon = src('src/lockon.cpp')
     score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w,&store,&held);' in score
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'FactsOf(w)' in score
     facts = lockon.split('void FactsOf(', 1)[1].split('\n}\n', 1)[0]
     assert 'IsStoreWeapon(w)' in facts and 'PlayerHolds(w)' in facts, 'Score asks the weapon once a frame (FactsOf)'
     holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
@@ -3236,6 +3236,9 @@ def installer_range_has_targets_and_no_enemy() -> None:
     hostile = [(f, a) for f, a in made if f.startswith('CreateEnemy') and gen.TARGET + '.sgo' not in a]
     assert not hostile, hostile
     assert any(f == 'CreateEnemyGroup' for f, _ in made), 'no target in the script'
+    per_wave = plan.waves.per_wave
+    assert f'slots < {per_wave} ? slots : {per_wave}' in text and '.sgo", count,' in text, \
+        'the installer range must refill one free slot'
     assert not re.search(r'internal_CreateThread\("Grand', text) and 'CreateFriendSquad' not in text
     friends = {re.search(r'object/(\w+)\.sgo', a).group(1) for f, a in made if f == 'CreateFriend'}
     assert friends == set(gen.RANGE_FRIENDS), f'NPC-placed {sorted(friends)}'
@@ -3329,27 +3332,22 @@ SPAWN_CATALOG_SHARDS = 4
 def spawn_catalog_archives(shard: int) -> None:
     """src/fsbudget.cpp adds one CriFsLoader per model archive the catalog's whole preload can hold open
     (src/spawn_catalog_archives.h, from testrange/catalog_archives.json; docs/cri-fs-loaders-re.md): the header is the
-    record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
-    now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
+    record's count (spawn_catalog_archives_counted), the record has every row and no other, and (with the game) the
+    record is what the rows' SGOs name now, through every SGO they name. The rows are measured in SPAWN_CATALOG_SHARDS tests side by side (2026-11-10:
     one test building every generated vehicle took ~490 s, the selftest's whole wall time, its other workers idle):
-    the sorted rows dealt round, so the generated vehicles' rows (edf6tr_<kind>_mission, one a kind, each building its
-    kind) spread evenly and no kind is built in two."""
+    packed by their measured seconds (testrange/catalog_row_seconds.json, pylib/testshard.py: dealt round they
+    took 357/348/175/119 s, 2026-11-24), each row in one shard, so no kind is built in two."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import catalog
     import gen_spawn_catalog as g
     rec = g.recorded()
-    if shard == 0:
-        union = g.archive_union(rec)
-        assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
-        assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
-        assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
     import rootcpk
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
     read = g.game_reader(rootcpk.DEFAULT_GAME)
     stale = []
     rows = sorted(catalog.rows(), key=lambda r: r.sgo)
-    for r in rows[shard::SPAWN_CATALOG_SHARDS]:
+    for r in g.shards(rows, SPAWN_CATALOG_SHARDS)[shard]:
         try:
             now = g.row_archives(r, read)
         except (FileNotFoundError, KeyError):
@@ -3357,6 +3355,18 @@ def spawn_catalog_archives(shard: int) -> None:
         if now != rec[r.sgo]:
             stale.append(r.sgo)
     assert not stale, f'testrange/catalog_archives.json is stale for {stale[:5]}: python tools/gen_spawn_catalog.py --archives'
+
+
+@test
+def spawn_catalog_archives_counted() -> None:
+    """The plugin's side of spawn_catalog_archives: the header is the record's count and fsbudget.cpp adds that many
+    loaders (a test of its own, so a change to the plugin's C++ does not select the shards' model builds)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen_spawn_catalog as g
+    union = g.archive_union(g.recorded())
+    assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
+    assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
+    assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
 
 
 for _shard in range(SPAWN_CATALOG_SHARDS):
@@ -4001,8 +4011,9 @@ def proteus_wired() -> None:
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
     assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::andryushaFire)+1' in bay   # the Proteus's before the ultimate's
-    assert ('PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) || '
-            'ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));') in src('src/jet_spawn.cpp')
+    assert 'PreloadShells(mgr,Preloaded(Body::gunship) || Preloaded(Body::c130Gunship) ||' in src('src/jet_spawn.cpp')
+    assert ('(preload::Want(preload::Item::dnRounds) && ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB")));'
+            in src('src/jet_spawn.cpp'))
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')
@@ -6079,7 +6090,9 @@ def stock_payload_and_seats_wired() -> None:
     assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
     frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
     assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
-    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    # The list's line stays up the whole ride: shown while its step stamp is fresh (step_fresh.h), not cut at the prompt's
+    # time (latestListed lifts shownUntil as its limit).
+    assert 'latestListed=Cfg().seatList;' in seat and '(!latestListed && ms>=shownUntil)' in seat,         'Publish: SeatList keeps the line up the whole ride'
     assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
     # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
     # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
@@ -6290,7 +6303,7 @@ def edf41_mother_parts_default_migrates() -> None:
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
                                                          installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
-                                                         installer.DEFAULTS_MARK_1110]
+                                                         installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6311,6 +6324,38 @@ def edf41_mother_parts_default_migrates() -> None:
     planned = installer.planned_ini(old, ini)
     assert re.search(r'^Edf41MotherParts=31$', planned[0], re.M) and 'Edf41MotherParts' in planned[3]
 
+
+@test
+def max_frame_latency_default_back_to_0() -> None:
+    """MaxFrameLatency shipped 1 (PR #369) and went back to 0 (docs/plan-2026-11-24-optimization.md B line: 2 of 3 heavy
+    launches at 1 ran slow): the shipped ini and the plugin's default agree, an old ini still at 1 is moved to 0 once by the
+    11-24 defaults step, a value the player chose is kept, and a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^MaxFrameLatency=0$', ini, re.M) and 'int maxFrameLatency=0;' in crew
+    assert installer.NEW_DEFAULTS_1124[installer.SECTION] == {'MaxFrameLatency': ('1', '0')}
+    marks = '\n'.join(m for m, _ in installer.DEFAULTS_STEPS if m != installer.DEFAULTS_MARK_1124)
+    old = f'[VehicleCrew]\n{marks}\nEnabled=1\nMaxFrameLatency=1\n'
+    text, flipped = installer.apply_new_defaults(old)
+    assert flipped == ['MaxFrameLatency'] and 'MaxFrameLatency=0' in text and text.count(installer.DEFAULTS_MARK_1124) == 1, flipped
+    again = text.replace('MaxFrameLatency=0', 'MaxFrameLatency=1')
+    assert installer.apply_new_defaults(again) == (again, []), "a later install undid the player's own 1"
+    mine = f'[VehicleCrew]\n{marks}\nMaxFrameLatency=2 ; mine\n'
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == [] and 'MaxFrameLatency=2 ; mine' in text
+    assert re.search(r'^MaxFrameLatency=0$', installer.planned_ini(old, ini)[0], re.M)
+
+
+
+@test
+def frame_rate_cap_default_off() -> None:
+    """FrameRateCap ships 0, the game's own 59.94 Hz (docs/unlimited-fps-re.md §5): the shipped ini and the plugin's
+    default agree, and no defaults step moves it (1, the display's refresh rate, waits for the maintainer's checklist
+    and the other objects' interpolation; a later PR changes the default)."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^FrameRateCap=0$', ini, re.M) and 'int frameRateCap=0;' in crew
+    assert all('FrameRateCap' not in flips.get(installer.SECTION, {}) for _, flips in installer.DEFAULTS_STEPS)
 
 @test
 def high_cam_default_migrates() -> None:
@@ -6689,6 +6734,15 @@ def map_wired() -> None:
     are wired."""
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
     code, cmake, mission, hud = src('src/map.cpp'), src('CMakeLists.txt'), src('src/mission.cpp'), src('src/hud.cpp')
+    # The pause menu over the open map (map_camera_state.h PauseClose, tools/map_cam_check.cpp): the camera step reports
+    # it, Frame closes the map on the first step after it, a new mission drops it. All three wired.
+    assert 'const bool mapOpen=pauseClose.CameraShows(fresh,fresh && GamePaused());' in code, \
+        'the camera step must report the pause menu over the open map'
+    assert 'if(pauseClose.CloseNow(game.open))Close("the game was paused");' in code, 'Frame must close the map after a pause'
+    assert 'pauseClose.Reset();' in code, 'ResetMap must drop a pause seen in the last mission'
+    # The scene's end (mission.cpp ReleaseGroupHook, FreeResourceGroup(2)): every step stamp stale, the scope wheel let go.
+    assert re.search(r'if\(static_cast<std::uint32_t>\(group\)==kSceneGroup\)\s*\{?\s*SceneOver\(\);', mission), \
+        'the scene end must reach SceneOver'
     for key in ('Map', 'MapKey', 'MapButton', 'MapViewDistance'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('MapKey', 'MapButton', 'MapViewDistance'):
@@ -7103,7 +7157,7 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int firstHand=0) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger+k]=0' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
     assert 'k<kHands' in veto and 'a.held[k]' in veto and 'LargestBlast(a)' in veto, \
@@ -7302,11 +7356,14 @@ def npc_ai_asks_less() -> None:
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
     assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
     assert 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }' in code
-    arms = body(code, 'Arms ArmsOf(const unsigned char* h) noexcept {')
+    # cpu-2: the asks moved to AskArms (once a soldier, again when SameArms sees its arms changed)
+    arms = body(code, 'bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,\n             std::uint64_t setCount) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
     second = arms.index('edf::PrefetchReadableSpans(spans,spanCount);', first + 1)
-    assert first < arms.index('if(!Readable(list,count*8))return a;') < second < arms.index('held[k]=SetWeapon(h,k);'),         'ArmsOf: list and sets in one call, then weapons and entries in one, before they are asked'
+    assert first < arms.index('if(!Readable(list,count*8))return false;') < second < arms.index('seen.entry[k]=entry;'),         'AskArms: list and sets in one call, then weapons and entries in one, before they are asked'
     assert 'edf::PrefetchReadable(' not in arms
+    of = body(code, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {')
+    assert of.index('SameArms(') < of.index('AskArms('), 'ArmsOf: asks only when the fingerprint changed'
     move = body(code, 'void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {')
     assert move.index('GroundNavigateDeferred(soldier->navigation)') < move.index('RouteStart(pos,from);RouteStart(to,goal);'),         'MoveTo: a caller waiting its route turn casts no floor ray'
     navigate = nav.split('npc::navigation::Result Navigate(State& state,', 1)[1]
@@ -12622,8 +12679,10 @@ def edf41_friend_grip_matches_weapons() -> None:
     import mab_legacy
     import make_edf41_objects as m
     import sgo
-    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
-    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+    import gamedir
+    edf6 = gamedir.find()
+    edf41 = gamedir.find_other(gamedir.EDF41, near=edf6)
+    if not (edf41 and edf6):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)
@@ -16016,7 +16075,13 @@ def _main(argv: list[str]) -> int:
     import time
     jobs = _jobs(argv)
     costs = _costs()
-    order = sorted(range(len(TESTS)), key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
+    chosen = range(len(TESTS))
+    if '--skip' in argv:   # tools/check.py: the tests no change selects (tools/test_domains.py), one name a line;
+        # a test the list does not name (a new one) runs
+        with open(argv[argv.index('--skip') + 1], encoding='utf-8') as f:
+            skip = {line.strip() for line in f if line.strip()}
+        chosen = [i for i in range(len(TESTS)) if TESTS[i].__name__ not in skip]
+    order = sorted(chosen, key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
     failed = 0
     took: dict[str, float] = {}
     started = time.perf_counter()
@@ -16029,7 +16094,7 @@ def _main(argv: list[str]) -> int:
         print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
         failed += 0 if ok else 1
     if jobs == 1:
-        for i in range(len(TESTS)):
+        for i in chosen:
             report(*_run_one(i))
     else:
         import multiprocessing
@@ -16043,7 +16108,7 @@ def _main(argv: list[str]) -> int:
         with contextlib.suppress(OSError):
             with open(COST_FILE, 'w', encoding='utf-8') as f:
                 json.dump({**costs, **took}, f, indent=0, sort_keys=True)
-    print(f'{len(TESTS) - failed}/{len(TESTS)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
+    print(f'{len(order) - failed}/{len(order)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
     return 1 if failed else 0
 
 

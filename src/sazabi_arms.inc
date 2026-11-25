@@ -510,7 +510,7 @@ void Footsteps(Mech& m) noexcept {
 }
 
 SazabiCue cue{};
-ULONGLONG cueMs=0;
+stepfresh::Step cueStep=0;   // the step PublishCue ran in (step_fresh.h): the player's Sazabi's input, every step
 void PublishCue(const Mech& m) noexcept {
     const Arms& a=m.arms;
     SazabiCue c{};
@@ -538,5 +538,5 @@ void PublishCue(const Mech& m) noexcept {
     c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
     c.hasAssist=a.hasAssist && (a.hasAim || a.lockOn);std::memcpy(c.assist,a.assist,12);
     c.lockOn=a.lockOn && a.hasAssist;
-    cue=c;cueMs=GameMs();
+    cue=c;cueStep=stepfresh::Now();
 }

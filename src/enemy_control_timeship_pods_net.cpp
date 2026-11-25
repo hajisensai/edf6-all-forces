@@ -486,6 +486,7 @@ bool RestoreTimeShipPodsNetworkHooks() noexcept {
             if(std::memcmp(hookPatch.site,hookPatch.original,5)) {
                 // Never remove a later mod's hook or overwrite an unknown patch.
                 if(std::memcmp(hookPatch.site,hookPatch.patched,5))return false;
+                edf::ClaimCode(hookPatch.site,5);   // a code write of its own (edf/code_owner.h)
                 DWORD old=0;if(!VirtualProtect(hookPatch.site,5,PAGE_EXECUTE_READWRITE,&old))return false;
                 std::memcpy(hookPatch.site,hookPatch.original,5);FlushInstructionCache(GetCurrentProcess(),hookPatch.site,5);
                 DWORD ignored=0;if(!VirtualProtect(hookPatch.site,5,old,&ignored))return false;

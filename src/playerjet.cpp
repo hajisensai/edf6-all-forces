@@ -34,6 +34,7 @@
 // boarded and flown through this same record and these steps; what is theirs alone is in playerjet_board.inc.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "pad_hold.h"
+#include "preload_set.h"
 #include "body506.h"
 #include "lockon.h"
 #include "edf/weapon.h"
@@ -285,6 +286,7 @@ struct PJet {
     bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
     float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
     aim::Hold hover;             // ...its mouse-aim flight's setpoint and height held (heliaim.h, HoverStep), its top speed
+    aim::HoverMode hoverMode;
     float hoverTop;
     ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
     bool specialHeld;            // the target key / X down last frame (a special store's own action)
@@ -1888,7 +1890,7 @@ void PreloadPlayerJets() noexcept {
         const pjet::CatchFile& f=pjet::kCatchFiles[i];
         playerJetPreloaded[i]=false;
         const auto mgr=At<void*>(image,kPreloadMgrAt);
-        if((f.player || twins) && mgr && jet::SpawnReady() && jet::ModFileThere(f.file)) {
+        if((f.player || twins) && preload::Want(preload::Catch(i)) && mgr && jet::SpawnReady() && jet::ModFileThere(f.file)) {
             __try {
                 reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,f.sgo,2,-1);
                 playerJetPreloaded[i]=true;
@@ -1898,14 +1900,14 @@ void PreloadPlayerJets() noexcept {
         if(n>0)at+=n;
     }
     chutePreloaded=false;   // the parachute's canopy (ChuteMake), when installed
-    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && preload::Want(preload::Item::chute) && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kChuteSgo,2,-1);
             chutePreloaded=true;
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     ropePreloaded=false;   // a helicopter's rope (RopeMake: transport.cpp's rope descent), when installed
-    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && preload::Want(preload::Item::rope) && mgr && jet::SpawnReady() && jet::ModFileThere(kRopeFile)) {
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kRopeSgo,2,-1);
             ropePreloaded=true;
@@ -1990,7 +1992,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
                 std::memcpy(f.vel,j.vel,12);
                 f.speed=std::sqrt(j.vel[0]*j.vel[0]+j.vel[2]*j.vel[2]);f.clear=r.clear;f.ground=ground;f.climb=j.climb;
                 f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
-                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
+                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=j.hover.holding;f.hoverMode=j.hoverMode.on;
                 f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
                 f.power=j.throttle;   // its engine (HoverDone)
                 f.gpws=r.gpws;f.impactIn=r.impactIn;

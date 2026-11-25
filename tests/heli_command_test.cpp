@@ -67,6 +67,8 @@ bool FuelGauge(const void*,FuelReading*) noexcept { MissingDependency();return f
 PlayArea MapPlayArea() noexcept { MissingDependency();return PlayArea{}; }
 bool MoveAreaBox(float*,float*) noexcept { MissingDependency();return false; }
 bool MapHoldsKeys() noexcept { MissingDependency();return false; }
+bool MapPadState(std::uint16_t*,std::uint8_t*,std::uint8_t*) noexcept { MissingDependency();return false; }
+bool KnownVehicle(const void*) noexcept { MissingDependency();return false; }
 bool ReadCommandUnit(const ObjRef&,const char*,const mapcmd::Command&,bool,CommandUnit*) noexcept { MissingDependency();return false; }
 float GroundClearance(const float*) noexcept { MissingDependency();return 0.0f; }
 float CeilingY() noexcept { MissingDependency();return 0.0f; }

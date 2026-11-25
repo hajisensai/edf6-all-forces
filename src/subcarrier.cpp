@@ -30,6 +30,8 @@
 // launches jet.cpp's gun drones (JetLaunchDrone) while it has a target.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "subcarrier.h"
+#include "vehicle_weapons.h"
+#include "preload_set.h"
 #include "body506.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -120,7 +122,7 @@ constexpr float kRange=2000.0f;              // it engages enemies this far from
 // it and its wide cone: the missile bay need not face the target).
 constexpr float kGunCone=0.07f,kGunReachIn=0.97f;   // 4 deg off the barrel
 constexpr float kMissileMin=60.0f;
-constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000,kGaugeMs=1000;
+constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000;
 constexpr float kPi=3.14159265f;
 // The turrets (see Turrets): the arc a barrel turns in (elevation over the deck plane, rad), how fast it turns,
 // how near a weapon's barrel must be to a part's pivot to be that part's (metres, body frame).
@@ -209,7 +211,7 @@ const void* refused=nullptr;          // the last carrier no entry was free for 
 // thread builds them into `staging` every tick and publishes the whole set; the draw reads the last published one.
 const char* const kPartNames[kSystemCount]={"TURRET A","TURRET B","MISSILES","DRONE BAY"};
 struct Gauges { CarrierPanel panel; bool shown; };
-struct Snapshot { ULONGLONG tick; Gauges sub[kMaxSubs]; };
+struct Snapshot { stepfresh::Step step; Gauges sub[kMaxSubs]; };   // step: published in (step_fresh.h)
 Gauges staging[kMaxSubs]{};
 // The triple buffer: the game thread writes shots[writing] and swaps it in as `latest` (marked kFresh); the draw
 // swaps a fresh `latest` for shots[reading]. Each side only ever touches its own and swaps through `latest`, so
@@ -864,7 +866,7 @@ void Stage(int i,const Sub& s,const unsigned char* v,const float* m,ULONGLONG ms
 void Publish() noexcept {
     Snapshot& w=shots[writing];
     std::memcpy(w.sub,staging,sizeof(staging));
-    w.tick=GetTickCount64();
+    w.step=stepfresh::Now();
     const LONG prev=InterlockedExchange(&latest,writing|kFresh);
     writing=prev&3;
 }
@@ -904,7 +906,8 @@ void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fi
     if(!hide)draw(hud,viewProj,owner,r9,fifth);
     __try {
         const Snapshot& shot=Latest();
-        const bool fresh=GetTickCount64()-shot.tick<=kGaugeMs;   // the game thread still publishing (not paused)
+        // The game thread still publishing (the step count), and not under the pause menu (an explicit state).
+        const bool fresh=stepfresh::Fresh(shot.step) && !GamePaused();
         CarrierPanel panels[kMaxSubs]{};
         int count=0;
         for(int i=0;fresh && i<kMaxSubs;++i)
@@ -1211,8 +1214,8 @@ void PreloadSub() noexcept {
         preloaded=false;
         if(!spawnOk || broken)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
-        preloaded=mgr && FilesThere();
-        if(preloaded)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kSubSgo,2,-1);
+        preloaded=mgr && preload::Want(preload::Item::sub) && FilesThere();
+        if(preloaded){reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kSubSgo,2,-1);QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSubSgo);}
         Log("SUB preload carrier=%d",preloaded);
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;}
 }

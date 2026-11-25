@@ -14,6 +14,13 @@ bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
+// map.cpp's wheel for the magnified sight: SceneOver lets it go (the scene-end case).
+int scopeWheelHeld=-1;
+int TakeScopeWheel(bool hold) noexcept { scopeWheelHeld=hold ? 1 : 0;return 0; }
+namespace perfprobe {   // the measurement probes (src/perf_probe.cpp): no frame hook here
+Frames TakeFrames() noexcept { return {}; }
+void Report(unsigned) noexcept {}
+}  // namespace perfprobe
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
 int yieldAsks=0;   // PromptHook got past its object gate to the seats (the prompt cases)
@@ -107,7 +114,6 @@ int pvpFrameTicks=0,thermalFrameTicks=0,enemyFrameTicks=0,enemyNetworkTicks=0;
 void NoopGlobalTick() {}
 void __fastcall NoPrompt(void*,void*) {}
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}
-void ViewTick(void) noexcept{unexpectedHook();return;}
 void ViewDiagTick(void) noexcept{unexpectedHook();return;}
 void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
 void EnemyControlFrame() noexcept{unexpectedHook();++enemyFrameTicks;}
@@ -315,6 +321,34 @@ int main(){
         Check(GameFrame()==first+2,"native scene reset in same allocation stays monotonic");
         frameClock.native=0xffffffffu;Put<std::uint32_t>(system,0xCE0,0);SeeFrame(testVehicle);
         Check(GameFrame()==first+3,"native counter wrap advances one frame");
+        // The handoff step (step_fresh.h) wired through SeeFrame: the traversal count, not +CE0. Under the pause menu +CE0
+        // runs on (System::update increments it before the pause test), so the first traversal after a pause of 600
+        // skipped ones is one step; a traversal seen with the pause bits set is none.
+        {
+            const auto step0=stepfresh::Now();
+            const auto stamp=stepfresh::Now();
+            pauseOk=true;
+            Put<std::uint32_t>(system,kPauseWhy,1);Put<std::uint32_t>(system,kPauseCounts,1);
+            Put<std::uint32_t>(system,0xCE0,At<std::uint32_t>(system,0xCE0)+600);SeeFrame(testVehicle);
+            Check(GamePaused(),"fixture pause bits read as paused");
+            Check(stepfresh::Now()==step0,"+CE0 run on 600 under the pause menu: no step");
+            Put<std::uint32_t>(system,kPauseWhy,0);Put<std::uint32_t>(system,kPauseCounts,0);
+            Put<std::uint32_t>(system,0xCE0,At<std::uint32_t>(system,0xCE0)+1);SeeFrame(testVehicle);
+            Check(stepfresh::Now()==step0+1,"the first traversal after the pause: one step");
+            Check(stepfresh::Fresh(stamp,stepfresh::kEveryStep),"a stamp from just before the pause is fresh after it");
+            Put<std::uint32_t>(system,0xCE0,At<std::uint32_t>(system,0xCE0)+600);SeeFrame(testVehicle);
+            Check(stepfresh::Now()==step0+2,"an unpaused jump of 600 on +CE0: one step");
+            pauseOk=false;
+            // The scene's end (mission.cpp ReleaseGroupHook, group 2): the count stands still in the menus, so SceneOver
+            // makes every stamp stale and lets the sight's wheel go.
+            const auto last=stepfresh::Now();scopeWheelHeld=-1;
+            SceneOver();
+            Check(!stepfresh::Fresh(last,stepfresh::kEveryStep) && !stepfresh::Fresh(last,stepfresh::kFromDraw),
+                  "scene end: the last step's stamps stale");
+            Check(scopeWheelHeld==0,"scene end: the magnified sight's wheel released");
+            SeeFrame(testVehicle);SeeFrame(testVehicle);
+            Check(!stepfresh::Fresh(last,stepfresh::kEveryStep),"scene end: still stale with no traversal running");
+        }
         const auto before=GameFrame();tickFrame=before;ResetCrew();
         Check(GameFrame()>before && tickFrame==0,"mission reset invalidates frame consumers and native baseline");
         frameClockOk=false;Put<void*>(image,kSystem,nullptr);

@@ -4,7 +4,7 @@
 //   0x11945E0(objectManager, const float matrix[16], const wchar_t* sgoPath, InitParam*) -> object or null: builds the SGO's
 //   class (the SGO preloaded with 0x7A3780) at the matrix and puts it in the scene. Its InitParam is the class's; the plain
 //   InitParamBase@SceneObject (vtable 0x1762068, 0x30 bytes, the rest zero) is what the stock scripts' plain objects get
-//   (docs/player-jet-re.md §8, docs/debug-spawn-re.md). The object manager *(EDF+0x20B2958); delete 0x118A1B0 marks an
+//   (docs/player-jet-re.md §8, docs/debug-spawn.md). The object manager *(EDF+0x20B2958); delete 0x118A1B0 marks an
 //   object deleted (+0x18 bit 2), the manager frees it later.
 // The call may fault on a class that throws on its data (an SGO the plugin got wrong): the callers keep their __try (an
 // SEH frame here would hide which feature it was).

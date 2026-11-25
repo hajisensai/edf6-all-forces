@@ -71,9 +71,9 @@ inline constexpr std::uint64_t kStartGapMs=5000;      // between two generator s
 inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
-inline constexpr std::size_t kConfigBudget=3800;      // all configuration values together (header bytes included)
-// Beside them every member publishes its room word (host_settings_logic.h EDF6X_AF_ROOM, kWordMost: since word v4 it
-// carries the host's SupportDisabled / SupportPtScale too, 2026-11-24).
+// Configuration parts share Coop's budget with readiness, the player's stores, and the room word.
+inline constexpr std::size_t kConfigBudget=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE-kHaveMost-
+                                           playerveh::kValueMost-hostcfg::kWordMost;
 static_assert(kConfigBudget+kHaveMost+playerveh::kValueMost+hostcfg::kWordMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
               "the configuration, readiness, own player loadouts and the room word fit Coop's budget");
 // "1;" + 16 + ";" + 1 digit + ";": 21 bytes; a further part's "<16 hex>;": 17.

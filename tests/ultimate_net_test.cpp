@@ -104,6 +104,22 @@ void TableChecks() {
     t.Release(k);
     Check(t.Find(peer)<0 && t.Receive(peer,false)==Act::none,"ended: a late keep of it never starts it again");
     Check(t.Receive(Key{},false)==Act::none && t.Claim(Key{},false,0)==-1,"no key: nothing");
+    // A keep is a state message (may overtake the start, or come after the end): an end of a show not played here is
+    // kept as ended (ultimate.cpp ReceiveUltimateNetwork), so the keep sent before it never begins it.
+    const Key late{9,2};
+    Check(t.Receive(late,true)==Act::none,"an end of a show not played here: nothing to stop");
+    t.Ended(late);
+    Check(t.Receive(late,false)==Act::none,"its keep after it: never begins it");
+    {
+        unsigned char bytes[ultimate_net::kWire];ultimate_net::Msg m=Sample();
+        bool ok=true;
+        const ultimate_net::Kind kinds[]={ultimate_net::Kind::start,ultimate_net::Kind::keep,ultimate_net::Kind::end};
+        for(const ultimate_net::Kind kind:kinds) {
+            m.kind=kind;ok=ok && ultimate_net::Encode(m,bytes,sizeof(bytes)) && ultimate_net::KeepState(bytes,sizeof(bytes))==(kind==ultimate_net::Kind::keep);
+        }
+        Check(ok,"a keep goes as a state; a start and an end do not");
+        Check(!ultimate_net::KeepState(bytes,sizeof(bytes)-1) && !ultimate_net::KeepState(nullptr,0),"a wrong size or none: not a state");
+    }
     for(std::uint32_t s=10;t.Count()<kMaxShows;++s)t.Claim(Key{2,s},false,0);
     Check(t.Claim(Key{3,1},false,0)==-1,"every slot taken: the next show refused (the strike does not start, its pt are not taken)");
     t.Reset();

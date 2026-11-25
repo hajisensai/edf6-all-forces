@@ -114,10 +114,10 @@ bool NpcPingReadout(NpcPing* out) noexcept;
 //  - its order set as the map gives one (a point order's guard / move / attack-move, or none), for the trip's hold and
 //    the order it carries out once off (`keepBoarding`: walks to seats go on);
 //  - the top of `human`'s squad (nullptr: no NPC soldier).
-struct SquadSeats { int alive=0,aboard=0,onFoot=0; };
+struct SquadSeats { int alive=0,aboard=0,onFoot=0,crew=0; };
 bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept;
 int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept;
-int NpcSquadDismount(const void* top) noexcept;
+int NpcSquadDisembark(const void* top,const unsigned char* vehicle) noexcept;
 // src/ride_along.h (test site #45): the squads following a player get into that player's vehicle (passenger seats, then
 // the gunners') and out of it with them. map.cpp, once a frame beside TransportTick.
 void NpcRideAlongTick() noexcept;

@@ -1,6 +1,9 @@
 // The enemy lock points of a side (heli.cpp ForEachEnemyOf, VisitEnemies): the lock registry walk and its filter, and
 // the frame's copy of its result that the NPC gunner seats share (heli.cpp NearestEnemyThisStep). Pure logic over the
 // registry's memory; tools/enemy_points_check.cpp proves the copy's visits equal the live walk's.
+// Both plugins walk the registry through here: EDF6AutoTurret's world snapshot (autoturret/src/plugin.cpp RefreshWorld)
+// is Collect with no side (every team's points, each with its team). The registry's head and count, and a side's
+// relation row, are read by edf/world_tables.h.
 //
 // Until 2026-11-07 every AI gunner seat of every vehicle walked the whole registry each frame (stress:100: 3.7 ms a
 // frame in the walk alone, one cache miss per node and per target). The walk is the same for every seat of a side but
@@ -15,17 +18,18 @@
 
 namespace enemypoints {
 // Registry node: next at +0, its target at +0x10. Target: kind byte +0 (0: an object's), object +0x8, aim point +0x10,
-// valid +0x29, lockable +0x2A (EDF6AutoTurret turret.h).
+// valid +0x29, lockable +0x2A (autoturret/docs/re-notes.md). Team relations: 2 = enemy (edf/world_tables.h).
 constexpr std::size_t kNodeTarget=0x10,kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTargetLockable=0x2A;
 constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
 
-struct Point { const void* object; float aim[3]; };
+struct Point { const void* object; std::int32_t team; float aim[3]; };
 
-// f(object, aim) for each valid, lockable lock point on the circular list at `head` whose object is alive, is not
-// `self`, and whose team `relation` (the side's row of the team table) calls an enemy, its aim finite; in list order.
-// At most `nodes` nodes: the registry's own count (its +0x10), so a list that does not close on its head still ends.
-template<class F> inline void Walk(const unsigned char* head,const std::int32_t* relation,const void* self,F&& f,
-                                   std::uint64_t nodes=~0ull) noexcept {
+// f(object, team, aim) for each valid, lockable lock point on the circular list at `head` whose object is alive, is not
+// `self`, and whose team is in the table and, with a `relation` (the side's row of the team table), an enemy of the
+// side (null: any team), its aim finite; in list order. At most `nodes` nodes: the registry's own count (its +0x10), so
+// a list that does not close on its head still ends. Returns the nodes walked.
+template<class F> inline std::uint64_t WalkTeams(const unsigned char* head,const std::int32_t* relation,const void* self,F&& f,
+                                                 std::uint64_t nodes=~0ull) noexcept {
     using edf::At;
     std::uint64_t n=0;
     for(auto node=At<const unsigned char*>(head,0);node!=head && n<nodes;node=At<const unsigned char*>(node,0),++n) {
@@ -34,19 +38,26 @@ template<class F> inline void Walk(const unsigned char* head,const std::int32_t*
         const auto object=At<const unsigned char*>(target,kTargetObject);
         if(!object || object==self || object[edf::kDead])continue;
         const auto other=At<std::int32_t>(object,edf::kTeam);
-        if(other<0 || other>=kMaxTeam || relation[other]!=kEnemyRelation)continue;
+        if(other<0 || other>=kMaxTeam || (relation && relation[other]!=kEnemyRelation))continue;
         const float* a=reinterpret_cast<const float*>(target+kTargetAim);
         if(!std::isfinite(a[0]) || !std::isfinite(a[1]) || !std::isfinite(a[2]))continue;
-        f(static_cast<const void*>(object),a);
+        f(static_cast<const void*>(object),other,a);
     }
+    return n;
+}
+// The walk of a side (`relation` its row): f(object, aim).
+template<class F> inline std::uint64_t Walk(const unsigned char* head,const std::int32_t* relation,const void* self,F&& f,
+                                            std::uint64_t nodes=~0ull) noexcept {
+    return WalkTeams(head,relation,self,[&](const void* object,std::int32_t,const float* aim) noexcept { f(object,aim); },nodes);
 }
 
-// The walk with no `self`, copied: what every seat of the side starts from this frame.
-inline void Collect(const unsigned char* head,const std::int32_t* relation,std::vector<Point>& out,
-                    std::uint64_t nodes=~0ull) {
+// The walk with no `self`, copied: what every seat of the side starts from this frame (with no `relation`: every
+// team's points). Returns the nodes walked.
+inline std::uint64_t Collect(const unsigned char* head,const std::int32_t* relation,std::vector<Point>& out,
+                             std::uint64_t nodes=~0ull) {
     out.clear();
-    Walk(head,relation,nullptr,[&](const void* object,const float* aim) noexcept {
-        Point p{object,{}};std::memcpy(p.aim,aim,12);out.push_back(p);
+    return WalkTeams(head,relation,nullptr,[&](const void* object,std::int32_t team,const float* aim) {
+        Point p{object,team,{}};std::memcpy(p.aim,aim,12);out.push_back(p);
     },nodes);
 }
 

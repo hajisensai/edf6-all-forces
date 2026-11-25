@@ -47,8 +47,10 @@
 #include "map_cam.h"
 #include "npc_mark.h"
 #include "support_call.h"
+#include "support_aircraft.h"
 #include "support_points.h"
 #include "support_warning.h"
+#include "barrage_plan.h"
 #include "transport.h"
 #include <Xinput.h>
 #include <algorithm>
@@ -64,7 +66,8 @@
 namespace crew {
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept;
 namespace {
-constexpr ULONGLONG kFreshMs=300;        // a readout older than this (wall) is the map closed
+// Freshness by the scene step (step_fresh.h). The map closed is an explicit state: SuspendMapCommands (map.cpp Close,
+// the pause menu included) zeroes frameAt / readoutAt / view.at; the step count covers a frame no longer called.
 constexpr ULONGLONG kNoteMs=3000;        // the last command's word shown this long
 constexpr float kPointFar=8000.0f;       // m: the map ray under the pointer reaches this far
 constexpr float kPointerGain=1.0f;       // px (at 1080 lines) a mouse unit
@@ -88,7 +91,7 @@ struct Game {
     ObjRef selected[kCmdUnits]; // identity when selected; an address recycled since then is another unit
     mapcmd::UnitRef selRef[kCmdUnits]; // ...and its members' (a squad found again through any of them)
     Keys was;
-    ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
+    stepfresh::Step frameAt;    // the step of the last frame (0 / a gap: the map was closed, no edges the first frame)
     int count;
     Entry list[kCmdUnits];
     mapcmd::PointerPosition pointer; // placed once the first rendered viewport arrives
@@ -101,6 +104,8 @@ struct Game {
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
     bool armedOrder=false;Order armed=Order::none;
     int armedSupport=-1;
+    bool runStarted=false;
+    float runStart[3]{};
     // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
     int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
@@ -165,7 +170,8 @@ std::atomic<bool> pointerCaptured{false};
 // --- The view the HUD last drew the map with (under `viewLock`) ---
 constexpr int kUiItems=16;
 struct View {
-    float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
+    // at: the step the draw saw (stepfresh::kFromDraw)
+    float vp[16],w,h; stepfresh::Step at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
     int squads=0,payloads=0,panels=0,supports=0;
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupportHits]{};
     int supportEntry[kMapSupportHits]{};
@@ -187,7 +193,7 @@ SRWLOCK viewLock=SRWLOCK_INIT;
 // --- Published for the draw (under `lock`) ---
 MapCommandReadout readout{};
 MapEnemyControlReadout enemyReadout{};
-ULONGLONG readoutAt=0;
+stepfresh::Step readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 
 bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
@@ -413,7 +419,7 @@ const wchar_t* OrderText(Order o) noexcept {
     }
 }
 // Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only the point orders / follow /
-// release, a tank no follow (it keeps a post); a squad riding a vehicle no recruitment and no point order (its vehicle
+// release, a tank can follow or guard; a squad riding a vehicle has no recruitment and no point order (its vehicle
 // takes those), a squad recruitment is not offered for no RECRUIT (mapcmd::OffersRecruit, npcai.cpp). The card shows
 // no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了"): DISMISS for the player's
 // own squads alone (recruit and dismiss never both), BOARD on foot, DISMOUNT riding.
@@ -434,7 +440,7 @@ bool Takes(const Entry& e,Order o) noexcept {
         return true;
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
-    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PlaceOrder(o);
+    if(e.owner==Owner::tank)return mapcmd::VehicleOrder(o) || o==Order::focus;
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
@@ -552,6 +558,7 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
 }
 // One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
 void Arm(Game& g,bool order,Order o,int support) noexcept {
+    if(order || support!=g.armedSupport)g.runStarted=false;
     g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
     if(order || support>=0){g.formationMenu=false;g.dismountMenu=false;g.place.armed=-1;}   // one thing armed at a time (the 「摆放」 row too)
     // A support with seats opens its composition from the load it brings uncomposed (SupportCallPreset); armed again it
@@ -654,7 +661,11 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         const bool again=g.armedSupport==hit.entry;
         if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
-        if(!again){g.supportPick=hit.entry;Note(g,hudtext::Tr(hudtext::Tx::cmdSupportArmed),SupportCallName(hit.entry));}
+        if(!again) {
+            g.supportPick=hit.entry;
+            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart : hudtext::Tx::cmdSupportArmed),
+                 SupportCallName(hit.entry));
+        }
         return;
     }
     if(hit.kind==Game::UiKind::payload) {
@@ -1334,7 +1345,6 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
-    r.squadToolsAllowed=!InSession() || MapCommandNetworkVersion()>=7;   // the formation order online (v7)
     for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
         const auto& entry=g.list[i];
         if(entry.owner==Owner::squad && !entry.u.locked)++r.selectedSquads;
@@ -1394,7 +1404,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.placeTop=g.place.category>=0 && g.place.category<debugspawn::kCategoryCount ? g.place.top[g.place.category] : 0;
     if(g.placeOn)std::memcpy(r.placeState,placeState,sizeof(placeState));
     enemyReadout=g.enemy;
-    readoutAt=GetTickCount64();
+    readoutAt=stepfresh::Now();
     ReleaseSRWLockExclusive(&lock);
 }
 }  // namespace
@@ -1414,10 +1424,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     AcquireSRWLockShared(&viewLock);
     v=view;
     ReleaseSRWLockShared(&viewLock);
-    const bool haveView=v.at && now-v.at<=kFreshMs && v.w>0.0f && v.h>0.0f;
+    const bool haveView=stepfresh::Fresh(v.at,stepfresh::kFromDraw) && v.w>0.0f && v.h>0.0f;
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
-    if(now-g.frameAt>kFreshMs) {
+    if(!stepfresh::Fresh(g.frameAt)) {
         g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};pointerCaptured.store(false);Arm(g,false,Order::none,-1);
         g.pvpPad={};pvpHoldsPad.store(false);pvpPadSelection.store(-1);
         g.enemyMenu={};g.enemyPadFire=false;enemyHoldsPad.store(false);
@@ -1425,7 +1435,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
-    g.frameAt=now;
+    g.frameAt=stepfresh::Now();
     const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) || (k.right && !g.was.right) ||
         (k.tab && !g.was.tab) || (k.hold && !g.was.hold) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
         (k.attackMove && !g.was.attackMove) ||
@@ -1570,15 +1580,18 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Shift with a move (the right button) or an attack-move (Z): after the points before it (mapcmd_logic.h Waypoints).
     const bool queue=k.shift;
     // The armed point order's click on the ground: that order there (disarmed).
-    int supportAt=-1;
+    int supportAt=-1,runClick=-1;
     SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
     if(g.armedClick && g.armedOrder) {
         p.move=p.move || g.armed==Order::move;p.attackMove=p.attackMove || g.armed==Order::attackMove;p.guard=p.guard || g.armed==Order::guard;
         Arm(g,false,Order::none,-1);
     } else if(g.armedClick && g.armedSupport>=0) {
-        supportAt=g.armedSupport;
-        if(g.composeEntry==supportAt)load=g.compose;
-        Arm(g,false,Order::none,-1);
+        if(SupportGroundRun(g.armedSupport))runClick=g.armedSupport;
+        else {
+            supportAt=g.armedSupport;
+            if(g.composeEntry==supportAt)load=g.compose;
+            Arm(g,false,Order::none,-1);
+        }
     }
     // The test range's 「摆放」 panel (range_place.h): its keys and pad this frame (its clicks UiClick took), one step; the
     // armed row's click on the map places it there and keeps it armed (one after another).
@@ -1635,18 +1648,53 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         Note(g,L"%ls",hudtext::Tr(g.marchPace ? hudtext::Tx::cmdPaceSlowest : hudtext::Tx::cmdPaceFull));
         Log("MAPCMD the march's pace: %s",g.marchPace ? "the slowest unit's" : "each at full speed");
     }
-    if(supportAt<0 && k.supportCall && !g.was.supportCall) {   // C: the picked call at the pointer (its composition if open)
-        supportAt=g.supportPick;
-        if(g.composeEntry==supportAt)load=g.compose;
+    if(supportAt<0 && runClick<0 && k.supportCall && !g.was.supportCall) {
+        if(SupportGroundRun(g.supportPick)) {
+            if(g.armedSupport!=g.supportPick)Arm(g,false,Order::none,g.supportPick);
+            runClick=g.supportPick;
+        } else {
+            supportAt=g.supportPick;
+            if(g.composeEntry==supportAt)load=g.compose;
+        }
     }
     g.was=rawKeys;
     float point[3]{};
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=Cfg().enabled;
+    sortie::RunSpec run;
+    float runCentre[3]{};
+    if(runClick>=0) {
+        using hudtext::Tx;
+        if(!pointOk)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
+        else if(!g.runStarted) {
+            std::memcpy(g.runStart,point,sizeof(g.runStart));
+            g.runStarted=true;
+            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunEnd));
+        } else if(!sortie::RunFromPoints(g.runStart,point,&run,runCentre)) {
+            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunLength));
+        } else {
+            supportAt=runClick;
+            if(g.composeEntry==supportAt)load=g.compose;
+            Arm(g,false,Order::none,-1);
+        }
+    }
+    // The map's Q/E turn (and the pad's map turn) aims the long axis of the rectangular barrages.
+    float heading[3]={in.look[0]-in.eye[0],0.0f,in.look[2]-in.eye[2]};
+    const float headingLength=std::hypot(heading[0],heading[2]);
+    if(headingLength>1e-4f){heading[0]/=headingLength;heading[2]/=headingLength;}
+    const auto aimedHeading=[&](int catalog)->const float* {
+        const int kind=SupportStrikeBarrage(SupportCatalogStrike(catalog));
+        return headingLength>1e-4f && barrage::HasOrientedFootprint(kind) ? heading : nullptr;
+    };
     // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
-    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point);
+    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,aimedHeading(g.armedSupport),
+                g.runStarted ? g.runStart : nullptr);
     if(supportAt>=0) {
-        if(pointOk){SupportCallComposedAt(supportAt,point,load.count>0 ? &load : nullptr,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
+        if(pointOk) {
+            SupportCallComposedAt(supportAt,run.half>0.0f ? runCentre : point,load.count>0 ? &load : nullptr,
+                                  g.note,_countof(g.note),aimedHeading(supportAt),run);
+            g.noteAt=GetTickCount64();
+        }
         else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
     }
     if(placeAt>=0)Place(g,placeAt,pointOk,point);
@@ -1714,7 +1762,7 @@ void ResetMapCommands() noexcept {
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
     if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
-    std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
+    std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -1785,7 +1833,7 @@ int MapPvpPadSelection() noexcept { return pvpPadSelection.load(); }
 bool ReadMapEnemyControl(MapEnemyControlReadout* out) noexcept {
     if(!out)return false;
     AcquireSRWLockShared(&lock);
-    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=stepfresh::Fresh(readoutAt);
     if(fresh)*out=enemyReadout;
     ReleaseSRWLockShared(&lock);return fresh;
 }
@@ -1838,7 +1886,7 @@ void MapCommandUiPanels(const float* rects,int n) noexcept {
 }
 
 void SuspendMapCommands() noexcept {
-    // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
+    // Closing the map ends a hover/press even if reopened at once (frameAt=0: the next frame is a first). Keep the user's selection.
     Game& g=game;
     EnemyControlHoldAbility(g.enemy.snapshot,0);
     npcmark::Assign(g.enemyCandidate,{});g.enemyMenu={};g.enemyPadFire=false;g.enemy={};enemyHoldsPad.store(false);
@@ -1853,7 +1901,7 @@ void SuspendMapCommands() noexcept {
 
 bool MapCommandEats(bool front) noexcept {
     Game& g=game;
-    if(GetTickCount64()-g.frameAt>kFreshMs)npcmark::Assign(g.hover,{});
+    if(!stepfresh::Fresh(g.frameAt))npcmark::Assign(g.hover,{});
     const int vk=Cfg().npcMarkKey;
     const bool down=front && vk>0 && Down(vk);
     if(!down || !npcmark::MarkOn()){g.eat=false;npcmark::Assign(g.eatHover,{});}
@@ -1950,7 +1998,7 @@ void MapCommandQueueTick() noexcept {
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {
     AcquireSRWLockShared(&lock);
-    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    const bool fresh=stepfresh::Fresh(readoutAt);
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&lock);
     return fresh;

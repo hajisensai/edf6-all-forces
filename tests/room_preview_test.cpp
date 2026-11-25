@@ -4,6 +4,7 @@
 // rewrites a point and restored exactly; and the planner's frames: lock once, build once per model, recolour only the
 // changed channel of the soldier on display, wait for a pending build before putting the player back, unlock last.
 // Exit code 1 when one fails.  cmake --build build --target room_preview_test && build\room_preview_test.exe
+#include <cmath>
 #include "../src/room_preview_logic.h"
 #include <cstdio>
 #include <cwchar>
@@ -142,6 +143,12 @@ void Camera() {
     Expect(t.Hold(0.5f,false)==0.5f,"then held as it is");
     y=t.Hold(0.5f,true);
     Expect(t.base==0.5f,"another vehicle later: saved afresh");
+    // The turn goes by time: 144 frames of 60/144 turn as far as 60 frames of 1 (a frame above 60 Hz turns less).
+    Turntable a,b;
+    float ya=a.Hold(1.f,true,0.f),yb=b.Hold(1.f,true,0.f);
+    for(int i=0;i<60;++i)ya=a.Hold(ya,true);
+    for(int i=0;i<144;++i)yb=b.Hold(yb,true,60.f/144.f);
+    Expect(std::fabs(ya-yb)<1e-4f && std::fabs(ya-(1.f+60*kVehicleTurn))<1e-4f,"the turn keeps its speed at 144 fps");
 }
 
 void Vehicles() {

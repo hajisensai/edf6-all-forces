@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "support_entry.h"
+#include "sortie_plan.h"
 namespace crew {
 struct ObjRef;
 struct SupportAircraft {
@@ -11,10 +12,13 @@ struct SupportAircraft {
     int sortie=0;              // a sortie call's pass (crew.h SortiePass; 0 none): one pass at the target, then away
 };
 int SupportAirCallCount() noexcept;
+// A sortie's second wave's catalog entry (tools/calls.py `then`), -1 none.
+int SupportAirCallThen(int index) noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
 std::uint32_t SupportAirCallPt(int index) noexcept;   // its pt on the map's bar (tools/calls.py Call.pt)
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
+bool SupportGroundRun(int catalog) noexcept;
 // A sortie's second wave (airstrike.cpp; tools/calls.py `then`): called onto `target` by this machine `then_after` s after
 // its first wave (`catalog`) went out (the tick: crew.cpp SharedFrameTick); forgotten at a new mission. Queued once the
 // first is out (`request` 0: offline, made), or online under the first's open `request` until SupportFollowUpSettle tells
@@ -53,7 +57,8 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix
 // Its seated real pilot authorizes the flight. `airborne`: it is in the air already: it flies on at once, a wing at its
 // kind's cruise along its nose (jet_spawn.cpp Launch's start), a helicopter with its rotor turning (HeliCalled); else
 // (a legacy plan's hull on the ground) it takes off.
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target,bool airborne) noexcept;
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target,bool airborne,
+                             const sortie::RunSpec& run={}) noexcept;
 // Where a called aircraft is on its way in (ActivateSupportAircraft sent it to `target` under a guard order), as its own
 // flight control judges it: the dispatcher (support_dispatch.cpp) hands each one over on its own, never by a distance of
 // its own (2026-11-08: a 150 m test no fixed wing on its patrol ring ever passed, so a follow call never followed).

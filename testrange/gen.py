@@ -808,17 +808,19 @@ def script(plan: Plan, lay: Layout) -> str:
     if w.enabled and target_spots(lay) and targets:
         spots = target_spots(lay)
         per = max(1, int(w.per_wave))
+        limit = min(int(w.max_alive), len(spots) * per)
         pts = ', '.join(_q(p.name) for p in spots)
         lines += [
             '',
-            '\t// Targets, per_wave to a spot within 30 m, until max_alive stand (at most one group a spot;',
-            '\t// every other spot is up in the air).',
+            '\t// Refill free target slots up to per_wave at a time. Every other position is in the air.',
             f'\tarray<string> spots = {{ {pts} }};',
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) + {per} <= {min(int(w.max_alive), len(spots) * per)} ) {{',
-            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {TARGET_SPREAD:.0f}, {_q("app:/object/" + w.enemy + ".sgo")}, {per}, {w.level:.2f}, true);',
+            f'\t\tint slots = {limit} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {TARGET_SPREAD:.0f}, {_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             '\t\t}',
             '\t\tWait(1.0);',
@@ -851,6 +853,7 @@ def script(plan: Plan, lay: Layout) -> str:
     elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        per = max(1, int(w.per_wave))
         lines += [
             '',
             '\t// Enemy waves: once fewer than max_alive enemies live, the next spot gets a new group.',
@@ -858,8 +861,10 @@ def script(plan: Plan, lay: Layout) -> str:
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(w.max_alive)} ) {{',
-            f'\t\t\t{spawn}(spots[next % spots.length()], 20, {_q("app:/object/" + w.enemy + ".sgo")}, {int(w.per_wave)}, {w.level:.2f}, true);',
+            f'\t\tint slots = {int(w.max_alive)} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            f'\t\t\t{spawn}(spots[next % spots.length()], 20, {_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             f'\t\t\tWait({w.interval:.1f});',
             '\t\t}',
@@ -871,6 +876,7 @@ def script(plan: Plan, lay: Layout) -> str:
     if air.enabled and (lay.far_points or lay.enemy_points):
         pts = ', '.join(_q(p.name) for p in (lay.far_points or lay.enemy_points))
         enemy = _q('app:/object/' + AIR_ENEMY + '.sgo')
+        per = max(1, int(air.per_wave))
         lines += [
             '',
             '\t// Enemy jets in waves (AirWaves): once fewer than max_alive enemies are left, per_wave more from the far points.',
@@ -878,8 +884,10 @@ def script(plan: Plan, lay: Layout) -> str:
             '\tuint nextAir = 0;',
             f'\tWait({air.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(air.max_alive)} ) {{',
-            f'\t\t\tfor( int k = 0; k < {max(1, int(air.per_wave))}; k++ ) {{',
+            f'\t\tint slots = {int(air.max_alive)} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {per} ? slots : {per};',
+            '\t\t\tfor( int k = 0; k < count; k++ ) {',
             f'\t\t\t\tCreateFriend(air[nextAir % air.length()], {enemy}, {plan.vehicle_level:.2f}, false);',
             '\t\t\t\tnextAir++;',
             '\t\t\t}',
@@ -1251,7 +1259,10 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
                 rel = f'{folder}/{name}'
                 led.put(OWNER, rel, data)
                 held.add(ledger.key(rel))
-    elevon = f'OBJECT/{JET_ELEVON_FILE}'
+    import texshare
+    on_disk = lambda f: os.path.isfile(led.disk(f'OBJECT/{f}'))  # noqa: E731 - a file under Mods/OBJECT there
+    # the elevon model is in tools/make_jets.py's merged archive when that is installed (pylib/texshare.py)
+    elevon = f'OBJECT/{texshare.installed(JET_ELEVON_FILE, on_disk)}'
     if any(JETS[n].model is None for n in jets) and not os.path.isfile(led.disk(elevon)):
         # The default bomber's shape is measured on the grounded elevon model.
         # A standalone range installation must generate that same model too.
@@ -1306,7 +1317,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             with open(led.disk(rel), 'rb') as file:
                 data = file.read()
         else:
-            data = vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None)
+            # on the archive each model is in on disk: the merged one when installed (pylib/texshare.py)
+            data = texshare.redirect(vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None), texshare.moved(on_disk))
         if name in PROTEUS_MISSION.values():
             import make_proteus
             held.add(ledger.key(make_proteus.range_shield(led, game, OWNER)))
@@ -1348,9 +1360,11 @@ def _release_derived(led: ledger.Ledger, rels: set[str]) -> tuple[list[str], lis
 
 
 def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
-    """A jet model archive (pylib/jet_models.py): the one tools/make_jets.py or an earlier install wrote, else
-    made now; recorded as the range's either way. Returns its ledger key."""
-    rel = f'OBJECT/{file}'
+    """A jet model archive (pylib/jet_models.py): the one tools/make_jets.py or an earlier install wrote (the merged
+    archive it is in, pylib/texshare.py installed), else made now; recorded as the range's either way. Returns its
+    ledger key."""
+    import texshare
+    rel = f'OBJECT/{texshare.installed(file, lambda f: os.path.isfile(led.disk(f"OBJECT/{f}")))}'
     if os.path.isfile(led.disk(rel)):
         led.need(OWNER, rel)
     elif file == jet_models.SAZABI_FILE:   # the installer's (tools/make_sazabi.py), else made from its model folder
@@ -1527,27 +1541,10 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
     are still kept (restore_scenario first). The originals go to scenario_backup before anything is written, all of
     them or none (the backup is built aside and renamed into place). Returns what without_missing left out of the
     plan."""
-    if not installed(game_root):
-        raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
     backup = scenario_backup(game_root)
-    if os.path.exists(backup):
+    if installed(game_root) and os.path.exists(backup):
         raise RuntimeError(f'上一次的测试场原件还留在 {backup}：先 python tools/perfrun.py --restore')
-    if plan.waves.enabled and plan.waves.enemy not in {s for s, _, _ in ENEMIES}:
-        raise RuntimeError(f'测试场不认识敌人「{plan.waves.enemy}」（gen.ENEMIES）：脚本创建不存在的 SGO 会让游戏退出')
-    game = Game(game_root)
-    plan, skipped = without_missing(game_root, plan)
-    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
-    if wave and not catalog.available(game_root, wave):
-        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）')
-    missing = sorted(x for x in spawned(plan) & (DERIVED.keys() | JETS.keys())
-                     if not os.path.isfile(os.path.join(game_root, 'Mods', 'OBJECT', x.upper() + '.SGO')))
-    if missing:
-        raise RuntimeError(f'{"、".join(missing)} 不在 Mods/OBJECT（测试场只留当前方案要用的生成载具）：'
-                           '先在测试场启动器里用这个方案装一次')
-    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)}):
-        if not has_mission_setup(game, sgo_name):
-            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
-    text, points_file, _, _ = _range_files(game_root, game, plan)
+    game, plan, skipped, text, points_file = _scenario_files(game_root, plan)
     out = mission_dir(game_root, RANGE_MISSION)
     # The backup is whole or not there: built aside, then renamed into place in one step, so a copy that fails
     # (disk full, a file held) leaves no half backup that refuses every later run and that restore cannot read.
@@ -1573,6 +1570,49 @@ def write_scenario(game_root: str, plan: Plan) -> list[str]:
         restore_scenario(game_root)
         raise
     return skipped
+
+
+def rewrite_scenario(game_root: str, plan: Plan) -> list[str]:
+    """The range mission's files rewritten for `plan` within one measurement whose first write_scenario kept the
+    originals (tools/perfrun.py's next leg in the same launch): the same checks as write_scenario, the kept originals
+    left as they are (the files found before the run, not the previous leg's), so restore_scenario still puts back
+    what was there before the run. Refuses when nothing is kept (write_scenario first). Returns what without_missing
+    left out of the plan."""
+    if not os.path.isfile(os.path.join(scenario_backup(game_root), 'absent.json')):
+        raise RuntimeError('测试场原件没有备份：同一次测量的第一段先用 write_scenario')
+    game, plan, skipped, text, points_file = _scenario_files(game_root, plan)
+    _write_mission(game_root, game, RANGE_MISSION, plan.site, text, points_file)
+    return skipped
+
+
+def check_scenario(game_root: str, plan: Plan) -> list[str]:
+    """write_scenario's checks alone, nothing written (tools/perfrun.py: every range leg before the launch, so a leg
+    that would be refused is not found out half way through it). Returns what without_missing would leave out."""
+    return _scenario_files(game_root, plan)[2]
+
+
+def _scenario_files(game_root: str, plan: Plan) -> tuple:
+    """write_scenario's / rewrite_scenario's checks, then what they write: (game, the plan without what is missing,
+    what was left out, the script, the points)."""
+    if not installed(game_root):
+        raise RuntimeError('测试场没有装：先运行 EDF6VehicleCrew 安装器选「安装」')
+    if plan.waves.enabled and plan.waves.enemy not in {s for s, _, _ in ENEMIES}:
+        raise RuntimeError(f'测试场不认识敌人「{plan.waves.enemy}」（gen.ENEMIES）：脚本创建不存在的 SGO 会让游戏退出')
+    game = Game(game_root)
+    plan, skipped = without_missing(game_root, plan)
+    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
+    if wave and not catalog.available(game_root, wave):
+        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）')
+    missing = sorted(x for x in spawned(plan) & (DERIVED.keys() | JETS.keys())
+                     if not os.path.isfile(os.path.join(game_root, 'Mods', 'OBJECT', x.upper() + '.SGO')))
+    if missing:
+        raise RuntimeError(f'{"、".join(missing)} 不在 Mods/OBJECT（测试场只留当前方案要用的生成载具）：'
+                           '先在测试场启动器里用这个方案装一次')
+    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)}):
+        if not has_mission_setup(game, sgo_name):
+            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
+    text, points_file, _, _ = _range_files(game_root, game, plan)
+    return game, plan, skipped, text, points_file
 
 
 def restore_scenario(game_root: str) -> bool:

@@ -128,7 +128,7 @@ std::vector<Bind> Binds() {
         kJet,kJet|kHeli,kJet,kJet,kJet,kDrill,kProteus,kProteus,kProteus,
         kDread,kDread,kDread,kDread,kDread,kDread,
         kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,
-        kGround,kGround,kGround,kGround,kGround,kGround,kGround};
+        kGround,kGround,kGround,kGround,kGround,kGround,kGround,kHeli};
     for(int i=0;i<kb::kSlotCount;++i)b.push_back({Narrow(kb::kSlots[i].ini),kb::CodeOfVk(kb::kSlots[i].defaultVk),ctx[i],kb::kSlots[i].page});
     return b;
 }
@@ -411,6 +411,17 @@ void PadHold() {
     Check(first>=23 && first<=25,"held: true from 0.4 s on (frame " + std::to_string(first) + ")");
     Check(crew::HeldLong(true,1.0f/60.0f,&sec,crew::kGearPadHoldSec),"...and while still held (one edge for the toggle)");
 }
+void InputDevices() {
+    for(int code=kb::kPadFirst;code<=kb::kPadLast;++code)
+        Check(km::KeyboardDisplayCode(code)==kb::kNoAssign,"a saved controller code is not a keyboard binding");
+    Check(km::KeyboardDisplayCode(kb::kMouseWheel)==kb::kNoAssign,"plugin keyboard bindings cannot read the wheel as a held key");
+    Check(km::KeyboardDisplayCode(kb::CodeOfVk('M'))==kb::CodeOfVk('M'),"valid keyboard binding displayed");
+    Check(km::KeyboardDisplayCode(kb::kMouseR)==kb::kMouseR,"valid mouse binding displayed");
+    Check(km::NextPadMode(false,false,true),"a fresh pad press switches P1 from keyboard");
+    Check(!km::NextPadMode(true,true,false),"a fresh key switches P1 back from a pad");
+    Check(!km::NextPadMode(false,false,false) && km::NextPadMode(true,false,false),"idle input keeps the device");
+    Check(!km::NextPadMode(false,true,true) && km::NextPadMode(true,true,true),"simultaneous input keeps the device");
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -422,6 +433,7 @@ int main(int argc,char** argv) {
     Stubs();
     Store();
     PadHold();
+    InputDevices();
     StockDefaults();
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;

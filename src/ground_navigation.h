@@ -406,6 +406,11 @@ bool OutsideCircle(Point a,Point b,Point c,float r,Piece piece) noexcept {
 }
 } // namespace npc::navigation
 namespace crew {
+inline npc::navigation::Profile GroundVehicleProfile() noexcept {
+    npc::navigation::Profile profile;
+    profile.radius=3.5f;profile.height=3.0f;profile.cell=4.0f;profile.waypointRadius=1.5f;profile.horizon=120.0f;
+    return profile;
+}
 // Whether GroundNavigate(state, ...) this frame would return pending at once, its waypoint its `from`, without a
 // query: it waits its turn behind the caller the shared budget denied last frame. Asked before the call, it begins the
 // frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own

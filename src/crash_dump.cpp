@@ -1,5 +1,6 @@
 // The plugin's own crash dump: src/crash_dump.h says what it catches and what it cannot.
 #include "crash_dump.h"
+#include "log.h"
 #include <Psapi.h>
 #include <atomic>
 #include <csignal>
@@ -58,16 +59,47 @@ BOOL WINAPI SerializedWrite(HANDLE,DWORD,HANDLE,MINIDUMP_TYPE,PMINIDUMP_EXCEPTIO
 constexpr DWORD kDumpWaitMs=60000;
 wchar_t dumpPath[MAX_PATH]{};
 std::atomic<bool> installed{false};
+// EDF6AutoTurret's log flush (common/log.h kCrashFlush), looked up at installation and at each mission start (the
+// plugins load in either order), never while crashing. The module is pinned: the pointer stays good to the end.
+std::atomic<edf::logfile::CrashFlushFn> peerFlush{nullptr};
+
+void FindLogPeer() noexcept {
+    if(peerFlush.load())return;
+    HMODULE peer=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN,edf::logfile::kCrashFlushDll,&peer))return;
+    const auto flush=reinterpret_cast<edf::logfile::CrashFlushFn>(GetProcAddress(peer,edf::logfile::kCrashFlush));
+    if(!flush)return;
+    peerFlush.store(flush);
+    Log("CRASHDUMP %ls's buffered log lines are written on a crash too",edf::logfile::kCrashFlushDll);
+}
 
 // The filter set before ours (the game exe's CRT filter) or after it (through the redirect): called after the dump.
 std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> behind{nullptr};
 std::atomic<DWORD> chaining{0};   // the thread calling the filter behind: a filter there that calls ours again ends
 bool redirected=false;
 
-// A stack overflow's filter behind runs on the dumping thread. The overflowed thread has only what is left below the
-// guard region once Windows has pushed the exception frame (its CONTEXT, sized by the CPU's XSAVE area) and run
-// UnhandledExceptionFilter's own prologue: nothing guarantees more than that, and where the overflow lands inside the
-// last frame moves by up to a page from one run to the next (the stack's start is randomized). A filter behind ours
+// The stack an overflowed thread keeps for its exception: the frame Windows pushes (its CONTEXT, sized by the CPU's
+// XSAVE state: 3.4 KB with AVX-512), the dispatch down to UnhandledExceptionFilter and ours (2.4 KB), our wait, and
+// before all of them any other module's first-chance vectored handler. Windows' default is only what is left of the
+// last pages below the faulting frame: 12-16 KB, 8.7-10.5 KB of it still free at our wait on Windows 11 26200, the
+// amount moving from run to run with where the overflow lands in the last frame (the stack's start is randomized).
+// When it runs out, the fault there cannot be delivered and Windows ends the process with 0xC0000005 before a dump
+// (the signature of crash_dump's occasional CI failure). SetThreadStackGuarantee makes it kOverflowStack: for the
+// installing thread and each thread started after the install (OnThreadStart, a TLS callback, so a thread of the exe
+// or of this DLL alike), only on 1 MB stacks or more (every CreateThread without STACK_SIZE_PARAM_IS_A_RESERVATION:
+// EDF.dll's threads), where it costs 3% of the stack; a smaller stack someone reserved on purpose keeps Windows' default.
+constexpr ULONG kOverflowStack=32*1024;
+constexpr ULONG_PTR kGuaranteedReserve=1024*1024;
+bool GuaranteeStack() noexcept {
+    ULONG_PTR low=0,high=0;
+    GetCurrentThreadStackLimits(&low,&high);
+    if(high-low<kGuaranteedReserve)return false;
+    ULONG size=kOverflowStack;
+    return SetThreadStackGuarantee(&size)!=FALSE;
+}
+
+// A stack overflow's filter behind runs on the dumping thread. The overflowed thread has only the guarantee above
+// (and where it has none, what Windows' default leaves), less what ran before our filter. A filter behind ours
 // needs far more than our wait: even TerminateProcess(GetCurrentProcess()) first runs RtlReportSilentProcessExit
 // (2.7 KB of stack on Windows 11 26200), and the game's are the CRT's, Steam's or an overlay's. Running one there was
 // a second, undeliverable access violation: the process ended with 0xC0000005 and no filter behind ran.
@@ -173,6 +205,7 @@ void Write() noexcept {
         .Number(static_cast<unsigned long long>(size.QuadPart)>>10).Text(" KB written)");
     line.Text("\r\n");
     CrashLog(line.text,line.size);
+    if(const edf::logfile::CrashFlushFn flush=peerFlush.load())flush();   // EDF6AutoTurret's buffered lines (log.h)
 }
 
 DWORD WINAPI Dumper(void*) noexcept {
@@ -440,11 +473,37 @@ bool InstallCrashDump(const wchar_t* folder) noexcept {
         ucrtWatson=reinterpret_cast<InvalidParameterFn>(GetProcAddress(ucrt,"_invoke_watson"));
     }
     const bool ucrt=ClaimUcrt(true);
+    FindLogPeer();
     ownAbortBefore.store(std::signal(SIGABRT,&OnOwnAbort));
     _set_invalid_parameter_handler(&OnOwnInvalidParameter);
-    Log("CRASHDUMP installed: %ls (dbghelp %d, dumping thread %d, filter kept first %s, ucrtbase abort/invalid parameter %d)",
-        path ? dumpPath : L"(no path)",dbghelp,go!=nullptr,redirected ? "by redirect" : "at each mission start",ucrt);
+    // This thread's; the threads started from now on get theirs in OnThreadStart (installed is already set). Threads
+    // already running keep Windows' default: only a thread itself can set its guarantee.
+    const bool guaranteed=GuaranteeStack();
+    Log("CRASHDUMP installed: %ls (dbghelp %d, dumping thread %d, filter kept first %s, ucrtbase abort/invalid parameter %d, "
+        "stack overflow guarantee %lu KB on this thread %d)",path ? dumpPath : L"(no path)",dbghelp,go!=nullptr,
+        redirected ? "by redirect" : "at each mission start",ucrt,kOverflowStack>>10,guaranteed);
     return path && dbghelp;
+}
+
+// Each thread started after the install: its stack overflow guarantee (GuaranteeStack), set on the thread itself.
+// The first one set is logged, once a process, with where the thread starts: the TLS callback running in the game
+// (EDF6VehicleCrew.dll loaded by EDFModLoader, DisableThreadLibraryCalls) is seen in a tester's log. Not a
+// "CRASHDUMP installed" line (tools/testhub.py _INSTALLED). The loader lock is held here: Where and Log take only
+// their own locks and the loader's (held already); the log writer thread never waits on the loader.
+std::atomic<bool> threadGuaranteeLogged{false};
+void NTAPI OnThreadStart(void*,DWORD reason,void*) noexcept {
+    if(reason!=DLL_THREAD_ATTACH || !installed.load() || !GuaranteeStack())return;
+    if(threadGuaranteeLogged.exchange(true))return;
+    using QueryThreadFn=LONG(NTAPI*)(HANDLE,ULONG,void*,ULONG,ULONG*);
+    void* start=nullptr;
+    const auto query=reinterpret_cast<QueryThreadFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtQueryInformationThread"));
+    if(query)query(GetCurrentThread(),9,&start,sizeof(start),nullptr);   // 9: ThreadQuerySetWin32StartAddress
+    wchar_t module[MAX_PATH];
+    unsigned long long offset=0;
+    Where(start,module,std::size(module),offset);
+    Log("CRASHDUMP stack overflow guarantee %lu KB set by the TLS callback on a thread started after the install "
+        "(thread %lu, start %ls+%#llx); logged for the first such thread only",
+        kOverflowStack>>10,GetCurrentThreadId(),module,offset);
 }
 
 void CheckCrashFilter() noexcept {
@@ -460,5 +519,13 @@ void CheckCrashFilter() noexcept {
         }
     }
     ClaimUcrt(true);
+    FindLogPeer();
 }
 }  // namespace crew
+
+// The TLS callback of the module crash_dump.cpp is linked into (EDF6VehicleCrew.dll, or a test's exe): the loader
+// calls it on every thread start, DisableThreadLibraryCalls or not (the module has static TLS).
+#pragma comment(linker,"/INCLUDE:_tls_used")
+#pragma comment(linker,"/INCLUDE:crewCrashStackTls")
+#pragma section(".CRT$XLF",long,read)
+extern "C" __declspec(allocate(".CRT$XLF")) const PIMAGE_TLS_CALLBACK crewCrashStackTls=&crew::OnThreadStart;

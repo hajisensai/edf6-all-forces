@@ -66,9 +66,13 @@ void EDF6COOP_MA_CALL EachAck(void* context,const EDF6CoopMemberValue* m) {
     }
 }
 
+// Called every frame (RoomPvpTick): a refused value is asked again once a second, and its refusal logged once per value
+// and reason, so neither follows the frame rate.
+constexpr std::uint64_t kRefusedRetryMs=1000;
 void Publish(const coopattr::Table* t,coopattr::Publisher& p,const char* value) noexcept {
     std::uint32_t why=0;
-    if(p.Publish(t,value,&why)==coopattr::Publisher::Result::refused)Log("ROOMPVP EDF6Coop refused %s (reason %u)",p.key,why);
+    if(p.Publish(t,value,&why,GetTickCount64(),kRefusedRetryMs)==coopattr::Publisher::Result::refused)
+        Log("ROOMPVP EDF6Coop refused %s=%s (reason %u): asked again once a second",p.key,value,why);
 }
 
 // One read of the room: members and their picks, the host's settings and lock, every acknowledgement.

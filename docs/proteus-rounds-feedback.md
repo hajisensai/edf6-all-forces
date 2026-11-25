@@ -16,6 +16,6 @@ Root.cpk 模型实测：MK2 全模型 bind 包围盒约 `[-8.906,-0.389,-6.340].
 - 驾驶炮沿实际右炮方向射击；近准星标记的提前量也必须留在炮口方向附近。齐射发射器跟随驾驶席瞄准轴，拒绝向其背后发射。
 - 构造失败不会消耗机炮冷却；齐射失败停止，防止持续制造失败对象。
 
-验证：`proteus_frame_test` 执行生产函数及真实 `MuzzleFrame`，16 项检查通过；`tests/proteus_round_native_audit.py` 读取 Root.cpk 数值，私有映射 EDF.dll（不调 DllMain），执行完整 `0x2307F0` InitParam 复制和 `0x231EEF..0x231EFE` 的原生碰撞半径乘法：修前 10，修后 1.6，伤害 150、爆炸 25 保持，6 项原生检查通过。
+验证：`proteus_frame_test` 执行生产函数及真实 `MuzzleFrame`，16 项检查通过；`0611ece6^:tests/proteus_round_native_audit.py`（已删除） 读取 Root.cpk 数值，私有映射 EDF.dll（不调 DllMain），执行完整 `0x2307F0` InitParam 复制和 `0x231EEF..0x231EFE` 的原生碰撞半径乘法：修前 10，修后 1.6，伤害 150、爆炸 25 保持，6 项原生检查通过。
 
 未运行完整 BulletControl/Havok 碰撞场景，也未启动游戏或双机验收。因此这些检查证明炮口来源、互斥和弹体半径传递，不能声称覆盖用户当时所有现场爆炸原因。驾驶员远控复用右炮，不再提供脱离实体炮管的任意屏幕方向独立武器。

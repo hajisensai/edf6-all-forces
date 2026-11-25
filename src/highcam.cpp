@@ -26,7 +26,7 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 // living at least this many frames (the howitzer 1200, the Katyusha 1500; the stock-class guns that share the ground
 // mark, the Bohr's grenades 100 and EDF6AutoTurret's flak, live under 2 s).
 constexpr std::int32_t kIndirectLife=600;
-constexpr ULONGLONG kCueMs=200;
+// The HUD cue is the HUD's while published within stepfresh::kEveryStep steps (step_fresh.h).
 
 struct HighCam {
     ObjRef ref;                 // the vehicle the toggle is offered in now (or last)
@@ -38,7 +38,7 @@ struct HighCam {
 };
 HighCam cam{};
 
-struct Cue { bool on,keys; ULONGLONG at; const void* v; };
+struct Cue { bool on,keys; stepfresh::Step at; const void* v; };
 Cue cue{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 
@@ -78,7 +78,7 @@ bool Offered(const unsigned char* v,const unsigned char* seat) noexcept {
 
 void Publish(bool on,bool keys,const void* v) noexcept {
     AcquireSRWLockExclusive(&cueLock);
-    cue=Cue{on,keys,GetTickCount64(),v};
+    cue=Cue{on,keys,stepfresh::Now(),v};
     ReleaseSRWLockExclusive(&cueLock);
 }
 
@@ -149,7 +149,7 @@ bool PlayerHighCam(bool* on,bool* keys) noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
     ReleaseSRWLockShared(&cueLock);
-    if(!c.at || !c.v || GetTickCount64()-c.at>kCueMs)return false;
+    if(!c.v || !stepfresh::Fresh(c.at))return false;
     *on=c.on;*keys=c.keys;
     return true;
 }

@@ -17,12 +17,14 @@
 #include <cstdint>
 
 namespace crew::framerate {
-// ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), -1 no cap (the GPU and the swap chain's sync
-// interval are the limit), 61..1000 at most that many frames a second. 1..60 is no more than the game already gives
+// ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), 1 the display's refresh rate (the shipped default:
+// no slots, the swap chain's sync interval 1 holds the frames to the refresh), -1 no cap (the GPU and the sync interval
+// are the limit: the game has no vsync setting, 0x11A3098's `sete dl` passes 1 except for the 8 frames after a catch-up,
+// docs/unlimited-fps-re.md §1), 61..1000 at most that many frames a second. 2..60 is no more than the game already gives
 // and is taken as 0; anything under -1 as 0; over 1000 as 1000.
-constexpr int kOff=0,kUnlimited=-1,kMinCap=61,kMaxCap=1000;
+constexpr int kOff=0,kRefresh=1,kUnlimited=-1,kMinCap=61,kMaxCap=1000;
 constexpr int FixCap(int raw) noexcept {
-    if(raw==kUnlimited)return kUnlimited;
+    if(raw==kUnlimited || raw==kRefresh)return raw;
     if(raw<kMinCap)return kOff;
     return raw>kMaxCap ? kMaxCap : raw;
 }
@@ -44,7 +46,8 @@ struct Gate {
     std::uint64_t next=0;   // QPC of the next slot
     bool armed=false;
 };
-// `cap` as FixCap gives it (not kOff: then the game's own loop runs), `period` PresentPeriod(freq, cap).
+// `cap` as FixCap gives it (not kOff: then the game's own loop runs; kRefresh is passed as kUnlimited, the sync interval
+// paces it), `period` PresentPeriod(freq, cap).
 constexpr bool Ready(Gate& g,std::uint64_t now,int cap,std::uint64_t period) noexcept {
     if(cap==kUnlimited)return true;
     const auto late=static_cast<std::int64_t>(now-g.next);
@@ -59,6 +62,20 @@ constexpr std::uint64_t WaitCounts(const Gate& g,std::uint64_t now,int cap) noex
     if(cap==kUnlimited || !g.armed)return 0;
     const auto toSlot=static_cast<std::int64_t>(g.next-now);
     return toSlot>0 ? static_cast<std::uint64_t>(toSlot) : 0;
+}
+
+// Loads (docs/unlimited-fps-re.md §4.1.1). The game's load count (0x2139AB0+0x34, `lock xadd` at 0x1133FC0) is above 0
+// from a mission script's BeginLoading to its EndLoading; the game's own job thread (0x1133950) holds its queue while it
+// is. A 0-tick frame then only renders the loading screen again (nothing to interpolate) and takes CPU and GPU from the
+// load, so the gate keeps the game's own cadence: the frame counts its ticks first and runs only when it has some (the
+// loop waits to the next tick boundary in between), every frame that runs steps. The count is not asked before the slot
+// here as Ready has it, so nothing waits for a slot with ticks counted; and the slots are left disarmed, so the first
+// frame after the load starts them over from now (no burst for the load's time).
+constexpr bool Loading(std::int32_t count) noexcept { return count>0; }
+// Whether a frame runs while loading, given the ticks the clock just counted.
+constexpr bool LoadingRuns(Gate& g,std::uint64_t ticks) noexcept {
+    g.armed=false;
+    return ticks!=0;
 }
 
 // The phase a frame renders at, between the step before the last and the last (see the top): 1 on a frame that steps
@@ -154,29 +171,74 @@ inline bool InterpolateRigid(const float previous[16],const float current[16],fl
     return true;
 }
 
-// The input's edges across presentation frames (docs/unlimited-fps-re.md §2.4). The game's action wrapper update
-// 0x1182BC0 runs every frame (0x7058C7 -> 0x77320 -> 0x7CDC0, 154 calls): it clears the wrapper's pressed / released /
-// repeat bytes (+0x11 / +0x12 / +0x13) and sets them again only on a change seen this frame. The scene step reads them
-// in the next frame's System::Update, before that frame's wrapper update. With frames that do not step, an edge set by
-// one frame's wrapper update is cleared by the next one before any step saw it. The shadow keeps what a frame without
-// a step is about to clear, and hands it to the next step; the UI (it runs after the wrapper update every frame) still
-// sees each edge once, from the native bytes.
-struct Edges {
-    std::uint8_t pressed=0,released=0,repeat=0;
-    constexpr Edges& operator|=(const Edges& o) noexcept {pressed|=o.pressed;released|=o.released;repeat|=o.repeat;return *this;}
-    constexpr bool Any() const noexcept {return pressed || released || repeat;}
-};
-struct Shadow { Edges held{}; };
-// In the wrapper update, before the native one clears `pending` (what the last update set): kept when no step has
-// read it yet, that is when this frame does not step (its System::Update came and went without a step).
-constexpr void BeforeUpdate(Shadow& s,const Edges& pending,std::uint64_t ticksThisFrame) noexcept {
-    if(!ticksThisFrame)s.held|=pending;
+// Stage 4 (docs/unlimited-fps-re.md §4.3.3): a model's root bone is a world matrix whose three rows may share one length
+// (a giant insect or a big mech is its kind's model drawn at a scale). Each row divided by the first row's length makes a
+// rigid matrix, InterpolateRigid blends that, and the rows get the blend of the two lengths back. False as there, and
+// when the rows' lengths differ (a squash, not one scale: RigidSign refuses it after the division) or one is 0.
+inline bool UnitRows(const float m[16],float out[16],double& scale) noexcept {
+    const double s=std::sqrt(static_cast<double>(m[0])*m[0]+static_cast<double>(m[1])*m[1]+static_cast<double>(m[2])*m[2]);
+    if(!(s>1e-6) || !std::isfinite(s))return false;
+    for(int i=0;i<16;++i)out[i]=m[i];
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(m[i*4+j]/s);
+    scale=s;
+    return true;
 }
-// On a frame that steps, before System::Update: what the step reads is the native bytes and everything kept.
-constexpr Edges ForStep(Shadow& s,const Edges& native) noexcept {
-    Edges e=native;
-    e|=s.held;
-    s.held={};
-    return e;
+inline bool InterpolateScaled(const float previous[16],const float current[16],float alpha,float out[16],
+                              float maxMove,float maxTurn) noexcept {
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return false;
+    if(!InterpolateRigid(p,c,alpha,out,maxMove,maxTurn))return false;
+    const double s=sp+(sc-sp)*static_cast<double>(alpha);
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(out[i*4+j]*s);
+    return true;
 }
+
+// Why InterpolateRigid / InterpolateScaled refused a pair (the FRAMERATE log's summary): alpha out of [0, 1], not a
+// rotation (a squash, a shear, NaN, beyond RigidSign's 1e-3), mirrored one way and not the other, a move or a turn over
+// the cut; kNone when they take it.
+enum class Refusal : int { kNone,kAlpha,kNotRigid,kMirrored,kMove,kTurn,kCount };
+inline Refusal RigidRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
+                            float maxTurn) noexcept {
+    if(!(alpha>=0.0f && alpha<=1.0f))return Refusal::kAlpha;
+    const double sp=RigidSign(previous),sc=RigidSign(current);
+    if(sp==0.0 || sc==0.0)return Refusal::kNotRigid;
+    if(sp!=sc)return Refusal::kMirrored;
+    Quat a{},b{};
+    if(!RotationOf(previous,sp,a) || !RotationOf(current,sc,b))return Refusal::kNotRigid;
+    double dot=std::fabs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);
+    if(dot>1.0)dot=1.0;
+    double move2=0.0;
+    for(int k=0;k<3;++k){const double d=static_cast<double>(current[12+k])-previous[12+k];move2+=d*d;}
+    if(move2>static_cast<double>(maxMove)*maxMove)return Refusal::kMove;
+    if(2.0*std::acos(dot)>maxTurn)return Refusal::kTurn;
+    return Refusal::kNone;
+}
+inline Refusal ScaledRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
+                             float maxTurn) noexcept {
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return Refusal::kNotRigid;
+    return RigidRefusal(p,c,alpha,maxMove,maxTurn);
+}
+
+// A pose's bones (`count` world matrices of 16 floats, row vectors) each times `d` on the right: bone * d.
+inline void MulBones(float* bones,std::uint64_t count,const float d[16]) noexcept {
+    for(std::uint64_t b=0;b<count;++b) {
+        float* const m=bones+b*16;
+        float r[16];
+        for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+            r[i*4+j]=m[i*4]*d[j]+m[i*4+1]*d[4+j]+m[i*4+2]*d[8+j]+m[i*4+3]*d[12+j];
+        for(int k=0;k<16;++k)m[k]=r[k];
+    }
+}
+// A pose's contents in 64 bits (Fletcher over the 32-bit words: position matters, any rewrite of a bone changes it),
+// what a frame wrote kept so the next one puts back only a pose nothing has written since.
+inline std::uint64_t PoseSum(const float* bones,std::uint64_t count) noexcept {
+    std::uint64_t a=1,b=0;
+    const auto* const w=reinterpret_cast<const std::uint32_t*>(bones);
+    for(std::uint64_t i=0;i<count*16;++i){a+=w[i];b+=a;}
+    return (b<<32)^a^(b>>32);
+}
+
 }  // namespace crew::framerate

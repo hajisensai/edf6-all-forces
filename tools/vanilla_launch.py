@@ -453,6 +453,10 @@ def _launch(game: str) -> int:
         print(tr(f'{modfiles.PROCESS} 已经在运行，先退出游戏再原版启动。',
                  f'{modfiles.PROCESS} is already running; close the game, then launch vanilla.'))
         return 1
+    if not modfiles.wait_steam_released():   # just quit: Steam still counts the game running for a few seconds
+        print(tr('Steam 仍认为游戏在运行（退出后 60 秒没清除），稍后再原版启动。',
+                 'Steam still counts the game as running 60 s after it closed; launch vanilla again in a moment.'))
+        return 1
     _on_close(game)
     try:
         for said in _step(_restore_all, game):   # a run that did not get to put things back

@@ -31,6 +31,10 @@ constexpr Airframe kGunship{{0.0f,0.0f,0.0f},{25.938f,2.009f,8.078f}};
 // C130_AIRFRAME, held to the model by its build and to this by tools/selftest.py support_c130_models) about its centre:
 // 40 m across, 30 m long, 11.6 m from its belly to the fin's top.
 constexpr Airframe kC130Gunship{{0.0f,0.0f,0.0f},{20.141f,5.812f,14.82f}};
+// The three barrel mouths on the shipped AC-130, in metres from the same collision-box centre.
+// Measured at the port-facing end rings of the Bofors and the two GAU-12 meshes in gunship.obj.
+constexpr float kC130Bofors[3]={6.146f,-4.646f,-2.027f};
+constexpr float kC130Gatling[2][3]={{3.628f,-3.998f,6.846f},{3.628f,-3.998f,7.846f}};
 constexpr float kMargin=0.5f;      // m past a round's hit sphere
 constexpr float kCannonHit=1.6f;   // the cannon round's hit radius: make_jets.py CANNON_SIZE x CANNON_HIT
 constexpr float kGatlingHit=0.8f;  // the gatling round's: make_jets.py GATLING_SIZE x GATLING_HIT
@@ -46,6 +50,11 @@ inline void ToLocal(const float* m,const float* p,float* out) noexcept {
 // A point `p` in the axes of `m` in the world, as `out`.
 inline void ToWorld(const float* m,const float* p,float* out) noexcept {
     for(int c=0;c<3;++c)out[c]=m[12+c]+p[0]*m[c]+p[1]*m[4+c]+p[2]*m[8+c];
+}
+
+inline bool LeavesC130Port(const float* m,const float* muzzle,const float* aim) noexcept {
+    const float out[3]={aim[0]-muzzle[0],aim[1]-muzzle[1],aim[2]-muzzle[2]};
+    return Dot(out,m)>0.0f;
 }
 
 // How far from the box's centre the unit direction `dir` (in the box's axes) leaves it grown by `grow` each way.

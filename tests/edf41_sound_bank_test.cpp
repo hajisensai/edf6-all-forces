@@ -121,7 +121,7 @@ void AtGameShutdown(void(*callback)() noexcept) noexcept { fixture::shutdownCall
 }
 namespace edf {
 bool Readable(const void* pointer,std::size_t,bool) noexcept { return pointer!=nullptr; }
-bool RedirectCall(unsigned char* site,void* target,void* hook,bool& changed) noexcept {
+bool RedirectCall(unsigned char* site,void* target,void* hook,bool& changed,edf::Claim,const char*) noexcept {
     ++fixture::redirects;fixture::patched.push_back({site,target,hook});changed=true;return true;
 }
 }

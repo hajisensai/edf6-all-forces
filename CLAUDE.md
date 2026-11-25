@@ -28,6 +28,11 @@
 - `docs/`：逆向笔记（`*-re.md`）、`feedback-*`（用户原话）、`plan-*` / `feature-*`、`reviews/`。草稿放 `tmp/`（不入库），写完再挪进 `docs/`。
 - `testhub/`：测试站 https://edf6.fushi.moe（Cloudflare Worker + D1 + R2）。部署一律加 `--config wrangler.toml`；原版任务脚本只放测试站，不进公开仓库。
 
+## 逆向
+
+- 静态逆向先查原版代码索引 `D:\APP\edf6-all-forces\vanilla-code`（入口 [README.md](../vanilla-code/README.md)；不在本仓库，本机独有）：`EDF.dll` / `EDF6.exe` 完整汇编、Ghidra 伪代码、`vanilla.sqlite`。在该目录运行 `python -B vanilla.py show|c|refs|notes|find|vtable <hex rva>`，再按需用 `tools/edfre.py` 手工反汇编。伪代码的类型和变量名是 Ghidra 猜的，结论以汇编为准。派做逆向的子代理时把这个索引告诉它。
+- 有新发现就向公开仓库 [hajisensai/edf6-vanilla-re](https://github.com/hajisensai/edf6-vanilla-re)（本机克隆 `D:\APP\edf6-vanilla-re`，主克隆留在 `main`，改动开分支或 worktree）提 PR，不只留在本仓库笔记里：函数名 → `shared/functions/<模块>.tsv`，全局变量 / vtable → `shared/data/`，结构体字段 → `shared/types/<类型>.tsv`，子系统笔记 → `shared/notes/*.md`。格式、命名、置信度、evidence 按它的 `CONTRIBUTING.zh-CN.md`，提交前跑 `python tools/lint_shared.py`。**禁止提交**汇编、伪代码、P-code、`.sqlite`、任务脚本正文和任何游戏文件内容，只写自己的结论；被 lint 拦下就改写，不绕过。本仓库的 `docs/*-re.md` 照常写。
+
 ## 构建
 
 - `build.cmd`；C++17、`/W4 /WX /utf-8 /permissive-`，**警告即错误**。
@@ -36,7 +41,8 @@
 
 ## 验证
 
-- 推送前跑 **`python tools/check.py`**：一条命令跑完 CI 的全部离线检查，低优先级运行，全机同一时间只跑一套，其他会话排队。不要手动并行起 `ctest -j` + `selftest`。快速看单个用例的命令、分片规则、CI 流程见细则。
+- 推送前跑 **`python tools/check.py`**：本地只跑本分支改动影响到的用例（开头打印选中 / 跳过的域），build 和生成文件检查总是全跑；改了共享底座会自动全跑，`--full` 强制全跑。低优先级运行，全机同一时间只跑一套，其他会话排队；同一 worktree 重复调用直接 exit 3，等前一套的结果。不要手动并行起 `ctest -j` + `selftest`。快速看单个用例、分片规则、CI 流程见细则。
+- 合并不等 CI：审查通过、本地相关检查绿就合，不为等 CI 挂着轮询。CI 只在最后合并发版时看一次，红了那时再修。新增 / 改名测试、或改了测试的 import / 读的文件 / 新目录后跑 `python tools/test_domains.py --write`（细则有步骤），否则 CI 的标签守卫会红。
 - 新测试别写固定的共享路径，也别按墙钟判断时效；单个用例超过约 3 分钟就拆分片。
 
 ## 实机测试（铁律）
@@ -48,6 +54,7 @@
 - 武器表 / Mods 目录多会话共用：安装只复制自己的文件，不整份覆盖表；别删存档里仍装备着的武器行（会在主菜单闪退）。
 - 测前只备份这次要覆盖的文件，测后逐字节还原；不要整份复制 `Mods/` 或游戏目录。
 - 能不开游戏就不开，依次优先：离线检查 → `tests/autopilot/drive.py`（后台驱动）→ `testrange/run_test.py`。
+- 必须开游戏时一次启动采齐：多项数据、多张地图用同一局的多条 `--cmd` / `--cycle` 采，不按问题或子线各开一次；子代理不自己排 `gamequeue`，实机需求交给父会话攒成一批跑。
 
 ## 测试站、反馈与合并
 
@@ -58,5 +65,5 @@
 ## 版本与相关仓库
 
 - 版本号只在 `CMakeLists.txt` 的 `project(EDF6VehicleCrew VERSION x.y.z)`；发版就是推 `vX.Y.Z` 标签。
-- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`）。建房 / 进房要求全员装 EDF6Coop 2.7.0+（协议细节见细则）。
+- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`）。建房 / 进房要求全员装 EDF6Coop 2.9.0+（协议细节见细则）。
 - 分享组合包：`D:\APP\edf6-share`。

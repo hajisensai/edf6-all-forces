@@ -26,7 +26,7 @@ bool Readable(const void* p,std::size_t n,bool) noexcept {
     const auto begin=reinterpret_cast<std::uintptr_t>(p),end=reinterpret_cast<std::uintptr_t>(m.BaseAddress)+m.RegionSize;
     return begin<=end && n<=end-begin;
 }
-bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
+bool ChainVtableSlot(void**,void*,void**,const char*) noexcept { return false; }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return false; }
 bool IsPlayer(const unsigned char* h) noexcept { return h!=nullptr; }
 unsigned SeatCount(const unsigned char* vehicle) noexcept {
@@ -35,7 +35,7 @@ unsigned SeatCount(const unsigned char* vehicle) noexcept {
     return count>0 && count<=kMaxSeats && Readable(seats,count*kSeatStride,false) ? static_cast<unsigned>(count) : 0;
 }
 
-bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
+bool RedirectCall(unsigned char*,void*,void*,bool&,edf::Claim,const char*) noexcept { return false; }
 }
 namespace crew::thermal {
 bool WantsCapture() noexcept { return false; }
@@ -45,6 +45,14 @@ void CaptureIndexed(ID3D11DeviceContext*,unsigned,unsigned,int) noexcept {}
 
 namespace crew {
 unsigned char* image=nullptr;
+const unsigned char* InfantryScopeLensOwner(const void*) noexcept { return nullptr; }
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
+bool FrameRateDrawnEye(const void*,float*) noexcept { return false; }
+namespace renderrecord {   // src/render_record.cpp is not linked here (render_record_test has it)
+bool Install() noexcept { return false; }
+void Set(Slot,Before) noexcept {}
+void SetProject(Slot,Project) noexcept {}
+}
 Config config{};
 bool depthPatchReady=true;
 bool ViewDepthReady() noexcept { return depthPatchReady; }

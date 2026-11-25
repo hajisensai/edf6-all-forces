@@ -94,7 +94,7 @@ struct Ui {
     Turntable turntable;         // a vehicle's turn; the stand's yaw put back after it
     std::int32_t savedHidden=0;
     unsigned posted=0;           // soldier builds asked for (shared.applied catches up)
-    unsigned sinceTick=0;
+    float sinceTick=0.f;         // 60 Hz frames since TickPreview (by the UI's dt)
     bool menuOpen=false;
     // SetViewPlacement: the rect / camera, and the selection / hidden state forced visible while placed (put back after).
     struct Placement {
@@ -494,10 +494,10 @@ void ExtraFrame(unsigned char* view,int i) noexcept {
     if(At<std::int32_t>(view,kViewSelect)==kSelectOther)Put<std::int32_t>(view,kViewSelect,kSelectNone);
 }
 
-void Frame(unsigned char* view) noexcept {
+void Frame(unsigned char* view,float frames) noexcept {
     if(!Adopt(view))return;
     ++ui.frames;
-    if(++ui.sinceTick>kOrphanFrames){ui.want.on=false;ui.menuOpen=false;}
+    if((ui.sinceTick+=frames)>static_cast<float>(kOrphanFrames)){ui.want.on=false;ui.menuOpen=false;}
     const Actions a=Step(ui.plan,ui.want,ReadShown(view,0,ui.posted));
     if(a.Any())Execute(view,a);
     HoldVisible(view);
@@ -533,12 +533,20 @@ std::uintptr_t ExtraUpdate(unsigned char* view,void* ctx,int slot) {
     if(hold && ui.extra[slot].view==view){Put<float>(view,kViewYaw,yaw);Put<float>(view,kViewZoom,zoom);}
     return r;
 }
+// The UI update's context {.., ui::Input*, float dt} (worldmap.cpp kCtxDt): this frame's length in 60 Hz frames.
+float FramesOf(const void* ctx) noexcept {
+    float dt=0.f;
+    __try { dt=*reinterpret_cast<const float*>(static_cast<const unsigned char*>(ctx)+0x10); } __except(EXCEPTION_EXECUTE_HANDLER){ dt=0.f; }
+    return dt>0.f && dt<0.25f ? dt*60.f : 1.f;
+}
+
 std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
     const int slot=SlotOf(view);
     if(slot>0)return ExtraUpdate(view,ctx,slot);
     bool ours=false;float yaw=0,zoom=0;
+    const float frames=ctx ? FramesOf(ctx) : 1.f;
     __try {
-        Frame(view);
+        Frame(view,frames);
         ours=ui.view==view && ui.menuOpen;
         if(ours){yaw=At<float>(view,kViewYaw);zoom=At<float>(view,kViewZoom);}
         // The menu closed while a vehicle turned: the stand's own yaw back before the view's frame (the player's model).
@@ -550,7 +558,7 @@ std::uintptr_t __fastcall Update(unsigned char* view,void* ctx) {
     // While the menu is open its keys are the menu's: the view's own turn / zoom from them is put back; a vehicle turns
     // slowly on its stand instead (every pylon comes round), and a soldier after it faces where the stand faced before.
     if(ours) {
-        yaw=ui.turntable.Hold(yaw,ui.want.on && ui.want.body!=VehicleBody::none);
+        yaw=ui.turntable.Hold(yaw,ui.want.on && ui.want.body!=VehicleBody::none,frames);
         Put<float>(view,kViewYaw,yaw);Put<float>(view,kViewZoom,zoom);
     }
     return r;
@@ -642,7 +650,7 @@ void ShowPlayerWeapon(int cls,int slot,int row) noexcept {
 }
 void TickPreview(bool menuOpen) noexcept {
     ui.menuOpen=menuOpen;
-    ui.sinceTick=0;
+    ui.sinceTick=0.f;
 }
 
 }  // namespace crew::roompreview

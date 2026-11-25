@@ -28,7 +28,8 @@ constexpr std::size_t kUses=0x8,kWeaks=0xC;
 constexpr std::size_t kCommands=0x2136FF0,kRing=0x28A8;
 // TraceCamera's creation description: its vtable (as stereo_camera 0xACD16 writes it), the followed camera's weak_ptr.
 constexpr std::size_t kDescVtable=0x1762178,kDescFollow=0x80,kDescSize=0xA0;
-constexpr ULONGLONG kFreshMs=200;    // a Want older than this: none (the camera step stopped running)
+// A Want is the recording's while stamped within stepfresh::kEveryStep steps (step_fresh.h; the camera step stopped
+// wanting it). Under the pause menu (explicit: the scope's soldier frame stops, infantryscope.cpp Live) none.
 constexpr ULONGLONG kJoinMs=3000;    // a lens camera not in viewport 3's list this long after its creation: refused
 using scopepip::kLensViewport;
 
@@ -116,6 +117,9 @@ using ControlFn=void(__fastcall*)(void* control);
 unsigned char* const* systemRef=nullptr;
 void* commands=nullptr;
 ProjectFn project=nullptr;
+// The projection call's other user (frame_rate_view.cpp, the camera's interpolation): called first, on every viewport.
+BeforeProjectFn beforeProject=nullptr;
+bool projectHooked=false;
 enum Tail : unsigned { post,plain,copy,history,modeTail,kTails };
 TailFn tails[kTails]{};
 SubmitFn submit=nullptr;
@@ -130,7 +134,7 @@ std::atomic<bool> installed{false};
 // Any thread.
 std::atomic<const void*> wantCamera{nullptr};
 std::atomic<float> wantFov{0.0f};
-std::atomic<ULONGLONG> wantAt{0};
+std::atomic<stepfresh::Step> wantAt{0};
 std::atomic<bool> refused{false};
 std::atomic<int> side{0};
 
@@ -188,8 +192,8 @@ bool LensCurrent(unsigned char* system) noexcept {
 void TakeOff(unsigned char* system) noexcept {
     if(LensCurrent(system))SetCurrent(Slot(system,kLensViewport),Weak{});
 }
-bool RectIs(const unsigned char* slot,int s) noexcept {
-    return At<int>(slot,kSlotRect)==0 && At<int>(slot,kSlotRect+4)==0 && At<int>(slot,kSlotRect+8)==s && At<int>(slot,kSlotRect+12)==s;
+bool RectIs(const unsigned char* slot,const int* rect) noexcept {
+    return std::memcmp(slot+kSlotRect,rect,4*sizeof(int))==0;
 }
 
 // Viewport 3's lens camera there and its targets built for S x S: true. Creates it (once a mission, while viewport 3 is
@@ -197,7 +201,7 @@ bool RectIs(const unsigned char* slot,int s) noexcept {
 bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
     if(lens.control && Uses(lens.control)==0)Drop(lens);   // the mission's cameras went (0x11956C0)
     unsigned char* const v=Slot(system,kLensViewport);
-    const int rect[4]={0,0,s,s};
+    const int rect[4]={At<int>(Slot(system,0),kSlotWidth),At<int>(Slot(system,0),kSlotHeight),s,s};
     const ULONGLONG now=GetTickCount64();
     if(!lens.object) {
         for(unsigned i=1;i<kLensViewport;++i)if(CurrentOf(Slot(system,i))){Refuse("a split screen");return false;}
@@ -224,7 +228,7 @@ bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
         return false;
     }
     if(count!=1 || firstCamera!=lens.object){Refuse("viewport 3 is in use");return false;}
-    if(!RectIs(v,s)){setViewport(system,kLensViewport,rect);readyLogged=false;return false;}
+    if(!RectIs(v,rect)){setViewport(system,kLensViewport,rect);readyLogged=false;return false;}
     if(!At<void*>(v,kSlotBuilt))return false;
     if(!readyLogged) {
         readyLogged=true;
@@ -237,11 +241,10 @@ bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
 // Viewport 0's projection: whether this recording renders the lens.
 void ArmFor(unsigned char* system,unsigned char* camera) noexcept {
     mainCamera=camera;
-    const ULONGLONG now=GetTickCount64();
     const float scopeFov=wantFov.load(std::memory_order_acquire);
     const bool want=installed.load(std::memory_order_acquire) && !refused.load(std::memory_order_acquire) &&
                     camera && wantCamera.load(std::memory_order_acquire)==camera &&
-                    now-wantAt.load(std::memory_order_acquire)<=kFreshMs && scopeFov>0.0f;
+                    stepfresh::Fresh(wantAt.load(std::memory_order_acquire)) && !GamePaused() && scopeFov>0.0f;
     unsigned char* const main=Slot(system,0);
     const float w=static_cast<float>(At<int>(main,kSlotWidth)),h=static_cast<float>(At<int>(main,kSlotHeight));
     const float r=scopepip::LensRadius(w,h);
@@ -284,6 +287,9 @@ void RecordLensCommand() noexcept {
 }
 
 void __fastcall ProjectHook(void* camera,const int* rect) {
+    if(beforeProject)beforeProject(camera,rect);
+    if(!installed.load(std::memory_order_relaxed)){project(camera,rect);return;}
+    alignas(16) int localRect[4]{};
     __try {
         unsigned char* const system=System();
         const int i=SlotOf(system,rect);
@@ -292,6 +298,9 @@ void __fastcall ProjectHook(void* camera,const int* rect) {
         else if(i==static_cast<int>(kLensViewport) && lens.object && camera==lens.object) {
             lensSlot=true;
             if(armed && mainCamera)Aim(static_cast<unsigned char*>(camera));
+            // The square render texture uses local coordinates. The slot's screen rectangle sits outside the main
+            // viewport, so native screen-space resolves cannot paint over the main view.
+            localRect[2]=rect[2];localRect[3]=rect[3];rect=localRect;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) { armed=false; }
     project(camera,rect);
@@ -320,6 +329,24 @@ void __fastcall SubmitHook(void* commandContext) {
 }
 }  // namespace
 
+// The projection call 0x1197B50 is redirected once, by whichever of the lens view and the camera's interpolation comes
+// first; the hook passes through to the native projection until the lens view is installed.
+bool HookProject() noexcept {
+    if(projectHooked)return true;
+    if(!Matches(kProjectCall-13,kProjectCode,sizeof(kProjectCode)))return false;
+    systemRef=reinterpret_cast<unsigned char* const*>(image+kSystemRef);
+    project=reinterpret_cast<ProjectFn>(image+kProject);
+    bool changed=false;
+    projectHooked=RedirectCall(image+kProjectCall,image+kProject,reinterpret_cast<void*>(&ProjectHook),changed);
+    return projectHooked;
+}
+
+bool SetBeforeProject(BeforeProjectFn fn) noexcept {
+    if(!HookProject())return false;
+    beforeProject=fn;
+    return true;
+}
+
 bool Install() noexcept {
     if(installed.load(std::memory_order_acquire))return true;
     for(const Guard& g:kGuards) {
@@ -345,7 +372,7 @@ bool Install() noexcept {
     descVtable=image+kDescVtable;
     // Every redirect passes through until `installed`: one that fails leaves the others inert.
     bool changed=false;
-    const bool ok=RedirectCall(image+kProjectCall,image+kProject,reinterpret_cast<void*>(&ProjectHook),changed) &&
+    const bool ok=HookProject() &&
         RedirectCall(image+kPostCall,image+kPost,reinterpret_cast<void*>(&TailHook<post>),changed) &&
         RedirectCall(image+kPlainCall,image+kPlain,reinterpret_cast<void*>(&TailHook<plain>),changed) &&
         RedirectCall(image+kCopyCall,image+kCopy,reinterpret_cast<void*>(&TailHook<copy>),changed) &&
@@ -360,7 +387,7 @@ bool Installed() noexcept { return installed.load(std::memory_order_acquire); }
 
 void Want(const void* camera,float scopeFov) noexcept {
     wantFov.store(scopeFov,std::memory_order_release);
-    wantAt.store(GetTickCount64(),std::memory_order_release);
+    wantAt.store(stepfresh::Now(),std::memory_order_release);
     wantCamera.store(camera,std::memory_order_release);
 }
 bool Refused() noexcept { return refused.load(std::memory_order_acquire); }

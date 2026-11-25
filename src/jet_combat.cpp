@@ -2,6 +2,7 @@
 // Missile) and the fire gate every weapon of a jet goes through (WeaponsFree).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "lockon.h"
 
 namespace crew {
 namespace jet {
@@ -67,9 +68,6 @@ constexpr ULONGLONG kFlyerMemoMs=500;
 constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 // A dogfight (Attack) once begun goes on out to this many times the guns' reach.
 constexpr float kDogfightKeep=1.5f;
-// m: the guns' reach for the fire gate (Fire) and the dogfight (Attack): their rounds' reach, at most the role's gunOpen.
-float GunReach(const Kind& k,const Arms& a) noexcept { return a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen; }
-
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
 struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; bool charges;
@@ -502,7 +500,8 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
-    return Cfg().jetPilot && j.t.target && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::takeoff;
+    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && j.mode!=Mode::withdraw &&
+           j.mode!=Mode::recover && j.mode!=Mode::takeoff;
 }
 
 // Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
@@ -555,11 +554,11 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.m.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
-        if(gun)gun=!HoldFire(v,t.target,pos,a.gunSpeed,a.gunGravity*kGravity);
+        if(gun && t.target)gun=!HoldFire(v,t.target,pos,a.gunSpeed,a.gunGravity*kGravity);
         if(gunsOk && straight && !t.flyer && a.rocket>=0 && dist<kRocketOpen && dist>k.gunClose*kRocketClose && miss<kRocketCone &&
            !friendly && ms-t.rocketAt>kRocketMs &&
-           !HoldFire(v,t.target,pos,At<float>(a.stores[a.rocket].weapon,kWeaponSpeed)*60.0f,
-                     At<float>(a.stores[a.rocket].weapon,kWeaponGravity)*kGravity)) {
+           (!t.target || !HoldFire(v,t.target,pos,At<float>(a.stores[a.rocket].weapon,kWeaponSpeed)*60.0f,
+                                  At<float>(a.stores[a.rocket].weapon,kWeaponGravity)*kGravity))) {
             TriggerStore(a.stores[a.rocket]);
             t.rocketAt=ms;
             if(Cfg().debug)Log("JET v=%p rockets: %s, %.0f m, %.1f deg off (%d left)",v,a.stores[a.rocket].spec->name,dist,
@@ -577,11 +576,14 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=SortieLockMs(j,kLockMs) && tdist>kMissileMin &&
                 tdist<MissileReach(k,a) && ms-t.missileAt>SortieMissileGapMs(j,kMissileMs) && !FriendInLine(pos,t.aim,v);
+        if(j.sortie.pass==SortiePass::missileRain)
+            missile=missile && sortie::SalvoLocked(a.missiles,a.locked);
         if(missile && a.pick>=0)
             missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
                               At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
         if(missile) {
             t.missileAt=ms;
+            if(Cfg().debug && j.sortie.pass==SortiePass::missileRain && a.pick>=0)LogSalvoLocks(a.stores[a.pick].weapon);
             if(Cfg().debug)Log("JET v=%p missiles: %s, %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,
                              a.pick>=0 ? a.stores[a.pick].spec->name : "stock",tdist,off*180.0f/kPi,
                              static_cast<float>(ms-t.lockAt)*0.001f,a.locked);

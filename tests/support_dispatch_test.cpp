@@ -185,9 +185,10 @@ int SupportStrikeCount() noexcept {return 2;}
 const wchar_t* SupportStrikeKey(int k) noexcept {return k>=0 && k<2 ? strikeKeys[k] : nullptr;}
 const wchar_t* SupportStrikeName(int k) noexcept {return k==0 ? L"火箭齐射" : L"天罚";}
 std::uint32_t SupportStrikePt(int k) noexcept {return k==0 ? 2000u : k==1 ? 15000u : 0u;}
+bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int k) noexcept {return k==0 ? 0 : -1;}
 int strikesStarted=0;bool strikeStarts=true;
-bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
     ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
 }
 support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route) noexcept {
@@ -278,13 +279,12 @@ bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne,const sortie::RunSpec&) noexcept {
     if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
     ++activated;lastAirborne=airborne;return true;
 }
-bool peersAirborne=true,peersRescue=true;
+bool peersAirborne=true;
 bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
-bool SupportPeersAcceptRescue() noexcept {return peersRescue;}
 // heli.cpp's half of the sea rescue: what the dispatcher hands it.
 int rescueDeployed=0,rescueFailed=0;unsigned char* rescueHeli=nullptr;float rescueTarget[3]{};bool rescueFlown=false;
 ObjRef rescueRequester{},hostRequester{};
@@ -396,8 +396,6 @@ void NoteMissingVariant(const wchar_t* file,const char*) noexcept {missingNoted.
 void SupportVariantHello(std::uint32_t* ext,unsigned char*) noexcept {if(ext)*ext=support_net::kExtVariants;}
 bool peersApplyVariants=true,peersHaveFiles=true;
 bool SupportPeersApplyVariants() noexcept {return peersApplyVariants;}
-bool peersApplyBackpacks=true;
-bool SupportPeersApplyBackpacks() noexcept {return peersApplyBackpacks;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept {return peersHaveFiles;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
@@ -416,7 +414,7 @@ void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
 }
 bool submitReady=true;unsigned noticeRequest=0;
 std::uint64_t lastNetLoadout=0;
-bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
+bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout,const sortie::RunSpec&) noexcept {
     ++netRequests;lastNetLoadout=loadout;
     if(!submitReady){_snwprintf_s(note,size,_TRUNCATE,L"联机扩展尚未就绪");return false;}
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
@@ -533,6 +531,7 @@ int main() {
     check(installedCreatedObserver==&NoteSupportMissionPlayerCreated && configuredHooks.createdMatches==&MissionParticipantCreationsMatch,
           "successful native actor creation observer and exact identity matcher are both wired before creation");
     installedCreatedObserver(0,ObjRef{});
+    check(!deployments.Allocated() && deployments.begin()==deployments.end(),"no deployment rows before the first support arrives (mem-4)");
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
     const int quietBefore=quietTicks;
     SupportDispatchTick();
@@ -546,6 +545,8 @@ int main() {
     check(At<float>(objects[0],kPosition)==-1400 && At<float>(objects[0],kPosition+4)==150,"hull starts in the air at the planned edge");
     check(At<float>(objects[1],kPosition+4)==150 && At<const void*>(seats[0],kSeatRider)==objects[1],
           "the real soldier is made inside its aircraft and sits in the driver's seat at spawn");
+    const Deployment* const deploymentRows=deployments.begin();   // the cursor converts to the row pointer
+    check(deploymentRows && deployments.Allocated(),"the first spawn allocates the deployment rows");
     check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
     fixtureMs+=100;SupportDispatchTick();
     fixtureMs+=100;SupportDispatchTick();check(activated==1,"activation is once, not every frame");
@@ -1376,30 +1377,6 @@ int main() {
         ResetSupportDispatch();
     }
     {
-        // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
-        // compatible resource still supplies its colours immediately (no pending-list round trip).
-        wchar_t path[MAX_PATH];TestIniPath(path,L"edf6_backpack_compat_test");
-        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
-        const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
-        std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
-        variantFiles={L"EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
-                      L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};
-        testOnline=true;peersApplyBackpacks=false;peersApplyVariants=true;peersHaveFiles=true;
-        ResetSupportDispatch();SupportPlan plan{};SupportLook look;
-        const auto load=PackSupportLoadout(PresetLoadout(SupportCfg().preset[21]));
-        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
-              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && !look.pack && look.primary==0x1E3A8A,
-              "older peer: its pack is absent but the colours are applied on the first plan");
-        wchar_t madePath[128];
-        check(SupportSoldierLookPath(plan.units[0].resourceId,plan.units[0].variant,true,madePath,128)==madePath &&
-              !std::wcscmp(madePath,L"app:/object/edf6vc_npc_rifle_l_1e3a8a_x.sgo"),"the downgraded plan uses its colour-only resource");
-        peersApplyBackpacks=true;ResetSupportDispatch();plan={};
-        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
-              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && look.pack==1 && look.primary==0x1E3A8A,
-              "every peer updated: the same preset applies its pack and its colours");
-        testOnline=false;ResetSupportDispatch();
-    }
-    {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
         // (else SupportCrewColour) - the tank's / transport's / truck's driver and crew, every aircraft's pilot and gunners,
         // the transports' and airdrops' pilots, the mission vehicles' support crews - each seat its own look variant.
@@ -1752,10 +1729,7 @@ int main() {
     config.seaRescue=false;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"海上救援"),"SeaRescue=0: refused, the reason returned");
     config.seaRescue=true;
-    peersRescue=false;
-    check(!SupportRescueAt(sea,note,128) && !made && std::wcscmp(note,hudtext::Tr(hudtext::Tx::supportRescueNeedsUpdate))==0,
-          "a peer without the rescue entry: refused before anything exists, and said why");
-    peersRescue=true;planRefusal=support::Refusal::noSky;
+    planRefusal=support::Refusal::noSky;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"开放天空"),"no open sky: refused with its reason");
     planRefusal=support::Refusal::noEntry;
     check(!SupportRescueAt(sea,note,128) && !made && std::wcsstr(note,L"航线"),"no air corridor: refused with its reason");
@@ -1826,6 +1800,7 @@ int main() {
     check(protocolTicks==ticksBefore+2,"NPC-only update continues service progress next frame");
     SupportActorFrame(nullptr);
     check(protocolTicks==ticksBefore+2,"missing actor cannot create a service frame");
+    check(deployments.begin()==deploymentRows,"every later spawn and mission reset reuses the same rows: never moved, never freed");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
     return 0;
 }

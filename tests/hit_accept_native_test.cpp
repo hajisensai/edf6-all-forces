@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <vector>
 
+// live_set.cpp: nothing handed over by the game here, so every ask goes to Readable as before.
+namespace liveset { bool Has(const void*) noexcept { return false; } }
+
 namespace crew {
 unsigned char* image=nullptr;
 Config config{};

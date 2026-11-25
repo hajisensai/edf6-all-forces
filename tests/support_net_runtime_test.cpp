@@ -3,6 +3,7 @@
 // No game process, game installation, socket, or DLL entry point is used.
 #include "../src/crew.h"
 #include "../src/coop_extension_api.h"
+#include "../src/support_protocol.h"
 #include <deque>
 #include <cstring>
 #include <cstdio>
@@ -18,6 +19,7 @@ const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
 unsigned boundedSendCalls=0;std::uint32_t boundedSendResult=EDF6COOP_EXTENSION_SEND_ACCEPTED;
+unsigned stateSendCalls=0;std::uint32_t stateSendKey=0;
 unsigned commandPackets=0,commandContexts=0;
 unsigned enemyControlPackets=0,enemyControlContexts=0,enemyControlResets=0,subPackets=0,subContexts=0,subResets=0;
 unsigned carrierPackets=0,carrierContexts=0,carrierResets=0;bool reenterCarrier=false;
@@ -30,7 +32,8 @@ unsigned lastSupportTeam=0,lastSupportOwner=0;
 unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
-struct Packet { EDF6CoopPeer sender;unsigned char bytes[200]; };   // support_protocol.h kWireSize (asserted below)
+// flags/key: as EDF6Coop ABI 2 delivers them (EDF6CoopExtensionMessage: bit 0 a state message, and its key).
+struct Packet { EDF6CoopPeer sender;unsigned char bytes[crew::support_net::kWireSize];std::uint32_t flags=0,key=0; };
 std::deque<Packet> incoming;
 HMODULE WINAPI Module(LPCWSTR name) {
     if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);
@@ -51,6 +54,7 @@ Config config;
 const Config& Cfg() noexcept { config.enabled=true;return config; }
 bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
+ULONGLONG GameFrame() noexcept { return fixture::tick; }   // a frame per fixture tick: the support tick runs once each
 unsigned char* PlayerHuman() noexcept { return nullptr; }   // the rescue requester lookup (no player in this fixture)
 void Log(const char*,...) noexcept {}
 bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
@@ -101,33 +105,35 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 // The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
-// Their channels (plugin_net.h) as registered: GRVT for kExtGravity peers, FGUN for kExtFloatGun ones.
+// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to the fixture's frames).
 bool ReceiveGravity(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {++fixture::gravityPackets;return true;}
+// Its state kinds: byte 8 is 1 (a hold); any other comes reliably only.
+bool GravityTakesState(const void* bytes,std::size_t size) noexcept {return size>8 && static_cast<const unsigned char*>(bytes)[8]==1;}
 plugin_net::Channel GravityNetChannel() noexcept {
-    plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=1;c.featureBit=support_net::kExtGravity;
-    c.minSize=c.maxSize=160;c.receive=&ReceiveGravity;return c;
+    plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=0;
+    c.minSize=c.maxSize=support_net::kWireSize;c.receive=&ReceiveGravity;c.takesState=&GravityTakesState;return c;
 }
 bool ReceiveFloatGun(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel FloatGunNetChannel() noexcept {
-    plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;c.featureBit=support_net::kExtFloatGun;
+    plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;
     c.minSize=c.maxSize=96;c.receive=&ReceiveFloatGun;return c;
 }
-// The players' own loaded jets (player_vehicle.cpp): PVEH for kExtPlayerVehicle peers, not under test here.
+// The players' own loaded jets (player_vehicle.cpp): PVEH, not under test here.
 bool ReceivePlayerVehicle(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel PlayerVehicleNetChannel() noexcept {
-    plugin_net::Channel c;c.name="player vehicles";c.magic=0x48455650u;c.version=1;c.featureBit=support_net::kExtPlayerVehicle;
+    plugin_net::Channel c;c.name="player vehicles";c.magic=0x48455650u;c.version=1;
     c.minSize=16;c.maxSize=920;c.receive=&ReceivePlayerVehicle;return c;
 }
-// The ultimate strike's (ultimate.cpp): ULTS for kExtUltimate peers, not under test here.
+// The ultimate strike's (ultimate.cpp): ULTS, not under test here.
 bool ReceiveUltimate(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel UltimateNetChannel() noexcept {
-    plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;c.featureBit=support_net::kExtUltimate;
+    plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;
     c.minSize=c.maxSize=96;c.receive=&ReceiveUltimate;return c;
 }
-// The barrages' (barrage.cpp): BRGS for kExtBarrage peers, not under test here.
+// The barrages' (barrage.cpp): BRGS, not under test here.
 bool ReceiveBarrage(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel BarrageNetChannel() noexcept {
-    plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;c.featureBit=support_net::kExtBarrage;
+    plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;
     c.minSize=c.maxSize=80;c.receive=&ReceiveBarrage;return c;
 }
 // The support pt's (support_points.cpp): SPTS for every peer, not under test here.
@@ -216,14 +222,35 @@ std::uint32_t EDF6COOP_CALL TrySend(std::uint64_t expected,const EDF6CoopPeer* t
     Check(bytes && size==4 && byteLimit==768*1024 && packetLimit==768,"bounded send forwards the caller's real SDK ceilings exactly");
     ++boundedSendCalls;return boundedSendResult;
 }
-std::uint32_t EDF6COOP_CALL Poll(std::uint64_t expected,EDF6CoopPeer* sender,void* bytes,std::uint32_t cap,std::uint32_t* out) {
+unsigned singlePolls=0;
+std::uint32_t EDF6COOP_CALL Poll(std::uint64_t expected,EDF6CoopPeer* sender,void* bytes,std::uint32_t cap,EDF6CoopExtensionMessage* out) {
     Check(expected==generation,"poll bound to observed transport generation");
-    *out=0;if(incoming.empty() || cap<kWireSize)return 0;
-    *sender=incoming.front().sender;std::memcpy(bytes,incoming.front().bytes,kWireSize);*out=kWireSize;incoming.pop_front();return 1;
+    ++singlePolls;*out={};if(incoming.empty() || cap<kWireSize)return 0;
+    *sender=incoming.front().sender;std::memcpy(bytes,incoming.front().bytes,kWireSize);
+    *out={0,0,kWireSize,incoming.front().flags,incoming.front().key};incoming.pop_front();return 1;
+}
+std::uint32_t EDF6COOP_CALL SendState(std::uint64_t expected,const EDF6CoopPeer* target,std::uint32_t key,const void* bytes,std::uint32_t size) {
+    Check(expected==generation && target && !std::strcmp(target->id,"client"),"a state message binds the roster identity and current generation");
+    Check(bytes && size && size<=EDF6COOP_EXTENSION_MAX_PAYLOAD && key,"a state message carries its key and payload");
+    ++stateSendCalls;stateSendKey=key;return 1;
+}
+unsigned batchPolls=0;
+std::uint32_t EDF6COOP_CALL Batch(std::uint64_t expected,EDF6CoopExtensionMessage* items,std::uint32_t most,void* buffer,
+                                  std::uint32_t bytes,std::uint32_t* out) {
+    Check(expected==generation,"batch poll bound to observed transport generation");
+    ++batchPolls;*out=0;
+    while(*out<most && !incoming.empty() && (*out+1)*kWireSize<=bytes) {
+        // Coop names a sender only by its roster index: one outside the roster never reaches the plugin.
+        if(std::strcmp(incoming.front().sender.id,"client") || peerCount!=1){incoming.pop_front();continue;}
+        items[*out]={0,*out*kWireSize,kWireSize,incoming.front().flags,incoming.front().key};
+        std::memcpy(static_cast<unsigned char*>(buffer)+*out*kWireSize,incoming.front().bytes,kWireSize);
+        incoming.pop_front();++*out;
+    }
+    return 1;
 }
 std::uint32_t EDF6COOP_CALL Api(std::uint32_t version,std::uint32_t size,EDF6CoopExtensionApi* out) {
-    if(version!=1 || size!=sizeof(*out))return 0;
-    *out={sizeof(*out),1,&Snapshot,&Member,&Send,&Poll};return 1;
+    if(version!=2 || size!=sizeof(*out))return 0;
+    *out={sizeof(*out),2,&Snapshot,&Member,&Send,&Poll,&SendState};return 1;
 }
 int __cdecl PuidToString(void* id,char* out,std::int32_t* length) {
     const char* text=static_cast<const char*>(id);const auto needed=static_cast<std::int32_t>(std::strlen(text)+1);
@@ -236,6 +263,7 @@ std::uint32_t __cdecl TransportGateReady() { return 1; }
 FARPROC WINAPI Proc(HMODULE,LPCSTR name) {
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&Api);
     if(!std::strcmp(name,"EDF6CoopTrySendExtension"))return reinterpret_cast<FARPROC>(&TrySend);
+    if(!std::strcmp(name,"EDF6CoopPollExtensionBatch"))return reinterpret_cast<FARPROC>(&Batch);
     if(!std::strcmp(name,"EOS_ProductUserId_ToString"))return reinterpret_cast<FARPROC>(&PuidToString);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return reinterpret_cast<FARPROC>(&ResolvePlayer);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&TransportGateReady);
@@ -351,7 +379,8 @@ int main() {
     Packet packet{};packet.sender=Peer("intruder");Check(Encode(hello,packet.bytes,sizeof(packet.bytes)),"encode handshake");
     incoming.push_back(packet);Step();Check(sendCount==0,"unknown authenticated sender absent from roster cannot handshake");
     packet.sender=Peer("client");incoming.push_back(packet);Step();Check(sendCount==1,"roster peer receives welcome");
-    static_assert(sizeof(EDF6CoopExtensionApi)==40,"bounded send preserves the legacy support ABI");
+    static_assert(sizeof(EDF6CoopExtensionApi)==48,"EDF6Coop extension ABI 2: sendState after poll");
+    static_assert(sizeof(EDF6CoopExtensionMessage)==20,"EDF6Coop extension ABI 2: peer, offset, bytes, flags, key");
     const unsigned char flowPayload[4]={'E','C','T','L'};
     for(auto status:{EDF6COOP_EXTENSION_SEND_ACCEPTED,EDF6COOP_EXTENSION_SEND_WOULD_BLOCK,EDF6COOP_EXTENSION_SEND_UNAVAILABLE}) {
         boundedSendResult=status;Check(crew::TrySendCommand(1,flowPayload,sizeof(flowPayload),768*1024,768)==status,"production wrapper retains all three SDK outcomes");
@@ -381,20 +410,49 @@ int main() {
     auto carrierPacket=packet;std::memcpy(carrierPacket.bytes,"AFDQ",4);incoming.push_back(carrierPacket);
     reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
     Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
-    Check(carrierContexts-carrierContextsBefore==2,"nested prepared-plan enqueue cannot recursively poll/advance native support");
-    // The newer channels (plugin_net.h): a peer that did not announce kExtGravity (this fixture's hellos carry no extension
-    // word) is never heard on it; a channel this build does not have is dropped, never fed to the support parser.
+    Check(carrierContexts-carrierContextsBefore==1,"nested prepared-plan enqueue cannot recursively poll/advance native support (unmoved room: only the closing update)");
+    // The channels (plugin_net.h): every peer's message is its channel's (net-6: no per-feature bits, the room protocol
+    // keeps other builds out), never fed to the support parser; a channel this build does not have is dropped.
     auto gravityPacket=packet;std::memset(gravityPacket.bytes,0,sizeof(gravityPacket.bytes));std::memcpy(gravityPacket.bytes,"GRVT",5);
     const unsigned sendsBefore=sendCount;incoming.push_back(gravityPacket);Step();
-    Check(gravityPackets==0 && sendCount==sendsBefore && carrierPackets==1,"a gravity message from a peer without the bit: dropped");
+    Check(gravityPackets==1 && sendCount==sendsBefore && carrierPackets==1,"a gravity message: its channel's, from any peer of the room");
     auto unknownPacket=packet;std::memcpy(unknownPacket.bytes,"ZZZZ",4);incoming.push_back(unknownPacket);Step();
     Check(sendCount==sendsBefore && commandPackets==1 && qmarkPackets==1 && crew::running,"a channel this build does not have: dropped quietly");
+    // State messages (net-5, EDF6Coop ABI 2): a channel's kind it takes as state is delivered like a reliable one; one it
+    // does not, one of no channel's (the support protocol's own included) and one whose flags / key are not ABI 2's are
+    // dropped, never handed to the support parser.
+    {auto holdState=gravityPacket;holdState.bytes[8]=1;holdState.flags=EDF6COOP_EXTENSION_MESSAGE_STATE;holdState.key=2*1024;
+     incoming.push_back(holdState);Step();
+     Check(gravityPackets==2 && sendCount==sendsBefore,"a state message of a kind its channel takes: delivered");
+     auto endState=holdState;endState.bytes[8]=3;incoming.push_back(endState);Step();
+     Check(gravityPackets==2,"a kind its channel sends reliably only, come as state: dropped");
+     auto helloState=packet;helloState.flags=EDF6COOP_EXTENSION_MESSAGE_STATE;helloState.key=7;incoming.push_back(helloState);Step();
+     Check(sendCount==sendsBefore && crew::running,"a support message come as state: never the support parser's");
+     auto unknownState=unknownPacket;unknownState.flags=EDF6COOP_EXTENSION_MESSAGE_STATE;unknownState.key=9;incoming.push_back(unknownState);Step();
+     Check(sendCount==sendsBefore && crew::running,"a state message of no channel: dropped");
+     auto noKey=holdState;noKey.key=0;incoming.push_back(noKey);
+     auto keyed=gravityPacket;keyed.key=5;incoming.push_back(keyed);
+     auto otherFlag=holdState;otherFlag.flags|=2;incoming.push_back(otherFlag);Step();
+     Check(gravityPackets==2,"a state message without its key, a reliable one with a key, an unknown flag: not ABI 2's, dropped");
+     incoming.push_back(gravityPacket);Step();
+     Check(gravityPackets==3,"a reliable message after them: delivered as before");
+     const unsigned char state[4]={'G','R','V','T'};
+     Check(crew::SendStateCommand(1,2*1024,state,sizeof(state)) && stateSendCalls==1 && stateSendKey==2*1024,
+         "a channel's state goes out through EDF6Coop sendState with its key");
+     Check(!crew::SendStateCommand(1,0,state,sizeof(state)) && !crew::SendStateCommand(2,1,state,sizeof(state)) && stateSendCalls==1,
+         "key 0 or a peer outside the roster: not sent");}
     // 2026-10-30 (the user: 「联机时候巨卡无比」): the channels' frame ran once a received message (2 + n a tick); it runs
     // before and after the poll only (and when the session's readiness or epoch changes), however many came in.
-    {const auto framesBefore=carrierContexts,qmarksBefore=qmarkPackets;
+    // 2026-11-24 (net-7/net-8): the frames come in 64 at a time under one EDF6Coop lock, and the update before the poll
+    // runs only when the room moved since the last one (the closing update already told the channels this room).
+    {const auto framesBefore=carrierContexts,qmarksBefore=qmarkPackets;const auto batchesBefore=batchPolls;
      for(int i=0;i<64;++i)incoming.push_back(markPacket);
      Step();
-     Check(qmarkPackets-qmarksBefore==64 && carrierContexts-framesBefore==2,"64 messages in one tick: every one routed, the channels' frame twice");}
+     Check(singlePolls==0,"the receive loop never takes the one-message poll");
+     Check(qmarkPackets-qmarksBefore==64 && carrierContexts-framesBefore==1 && batchPolls-batchesBefore==2,
+         "64 messages in one tick: every one routed by one full batch (an empty one ends the loop), the channels' frame once");
+     const auto batchesNow=batchPolls;for(int i=0;i<5;++i)incoming.push_back(markPacket);Step();
+     Check(qmarkPackets-qmarksBefore==69 && batchPolls-batchesNow==1,"a short batch is the whole queue: one EDF6Coop lock a frame");}
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();

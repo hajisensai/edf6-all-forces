@@ -17,6 +17,7 @@
 // requester machine's decision (player_vehicle_logic.h Engine). Game thread only (the transporter's init, the container's
 // update, the channel's receive / update).
 #include "player_vehicle.h"
+#include "vehicle_weapons.h"
 #include "player_vehicle_logic.h"
 #include "airdrop.h"
 #include "support_spawn.h"
@@ -103,16 +104,16 @@ void SendHave(std::uint32_t peer=0) noexcept {
     unsigned char bytes[playerveh::kMostSize];
     const std::size_t size=playerveh::Encode(m,bytes,sizeof(bytes));
     if(!size)return;
-    if(peer)plugin_net::Send(peer,support_net::kExtPlayerVehicle,bytes,size);
-    else plugin_net::Broadcast(support_net::kExtPlayerVehicle,bytes,size);
+    if(peer)plugin_net::Send(peer,bytes,size);
+    else plugin_net::Broadcast(bytes,size);
 }
 void SendMsg(const playerveh::Msg& m,std::uint32_t peer=0) noexcept {
     if(!plugin_net::Ready())return;
     unsigned char bytes[playerveh::kMostSize];
     const std::size_t size=playerveh::Encode(m,bytes,sizeof(bytes));
     if(!size)return;
-    if(peer)plugin_net::Send(peer,support_net::kExtPlayerVehicle,bytes,size);
-    else plugin_net::Broadcast(support_net::kExtPlayerVehicle,bytes,size);
+    if(peer)plugin_net::Send(peer,bytes,size);
+    else plugin_net::Broadcast(bytes,size);
 }
 
 // The transporter's configure of its container (0x5E5687): the stock one, then a request of a twin noted.
@@ -184,10 +185,7 @@ bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t s
 }
 void Update(const CommandNetworkContext&,std::uint64_t) noexcept {
     const std::uint32_t generation=plugin_net::RoomGeneration();
-    bool feature[playerveh::kPeersMost]{};
-    const int peers=static_cast<int>(plugin_net::PeerCount());
-    for(int i=0;i<peers && i<playerveh::kPeersMost;++i)feature[i]=plugin_net::PeerHas(static_cast<std::uint32_t>(i+1),support_net::kExtPlayerVehicle);
-    engine.Room(generation,peers,feature);
+    engine.Room(generation,static_cast<int>(plugin_net::PeerCount()));
     if(landing && origin && (!haveSent || generation!=haveGeneration)){SendHave();haveSent=true;haveGeneration=generation;}
 }
 void Reset() noexcept { haveSent=false; }
@@ -239,6 +237,7 @@ void PreloadPlayerVehicles() noexcept {
         if(!playerveh::LoadedPath(v,app,std::size(app)))return;
         __try {
             reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,app,2,-1);
+            QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),app);   // its guns, pylons, tank (vehicle_weapons.h)
             preloaded[n++]=v;
         } __except(EXCEPTION_EXECUTE_HANDLER){Log("PLAYERVEH preload fault: %ls",file);}
     };
@@ -306,7 +305,7 @@ void PlayerVehicleMade(unsigned char* vehicle) noexcept {
 
 plugin_net::Channel PlayerVehicleNetChannel() noexcept {
     plugin_net::Channel c;
-    c.name="player vehicles";c.magic=playerveh::kMagic;c.version=playerveh::kVersion;c.featureBit=support_net::kExtPlayerVehicle;
+    c.name="player vehicles";c.magic=playerveh::kMagic;c.version=playerveh::kVersion;
     c.minSize=playerveh::kHead;c.maxSize=playerveh::kMostSize;
     c.receive=&Receive;c.update=&Update;c.reset=&Reset;c.joined=&Joined;
     return c;

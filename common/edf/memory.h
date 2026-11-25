@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <cstddef>
 #include <cstdint>
+#include "edf/code_owner.h"
 
 namespace edf {
 // Whether [ptr, ptr+size) is committed and readable (with `writable`, also writable). Not a probing read:
@@ -28,6 +29,8 @@ ReadableStats TakeReadableStats() noexcept;
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept;
 void* AllocateNearThunk(const void* anchor,void* target) noexcept;
 // Points the rel32 call (E8) or tail jump (E9) at `callSite` to `replacement` (through a near thunk), only
-// while it still targets `expectedTarget`. `changed`: whether the site was written.
-bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement,bool& changed) noexcept;
+// while it still targets `expectedTarget`. `changed`: whether the site was written. The site's 5 bytes are claimed for
+// the calling file first (edf/code_owner.h; kLayered: a chain over another's redirect).
+bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement,bool& changed,Claim kind=Claim::kSole,
+                  const char* owner=__builtin_FILE()) noexcept;
 }  // namespace edf

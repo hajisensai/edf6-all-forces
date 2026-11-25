@@ -12,6 +12,7 @@ namespace crew {
 bool VehicleLookActive(const void*) noexcept { return false; }
 bool VehicleLookOffered(const void*,unsigned,bool) noexcept { return true; }
 unsigned char* image=nullptr;
+void FrameRateCameraCut(const void*) noexcept {}   // the frame rate view (src/frame_rate_view.cpp) is not linked here
 Config config{};
 unsigned char* currentHuman=nullptr;
 ULONGLONG clockMs=1000;
@@ -128,7 +129,7 @@ struct VehicleFixture {
     void Board(unsigned s) { auto seat=SeatAt(vehicle,s);Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,humanCtrl); }
     void Leave(unsigned s) { auto seat=SeatAt(vehicle,s);Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,kSeatRiderCtrl,nullptr); }
 };
-void Step(VehicleFixture& v) { ++clockMs;PayloadFrame(v.vehicle);TurretCamFrame(v.vehicle); }
+void Step(VehicleFixture& v) { ++clockMs;stepfresh::See(stepfresh::Now()+1);PayloadFrame(v.vehicle);TurretCamFrame(v.vehicle); }
 void Reset(VehicleFixture& v) { ResetPayload();ResetTurretCam();ResetLauncher();lookOk=true;currentHuman=v.human;highMode=false; }
 bool NativeOnly(VehicleFixture& v,unsigned seat=0) {
     unsigned char* selected[3]{};

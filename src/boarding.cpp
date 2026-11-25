@@ -33,7 +33,8 @@ namespace {
 constexpr unsigned kHitDamageCall=0x230EA6,kHitDamage=0x541FF0;
 constexpr std::size_t kDamageBlock=0x6E0,kHitRecords=0x7A8,kBulletOwner=0x9A8,kSweepFrom=0xB80;
 constexpr std::size_t kHumanVehicle=0x1548;                      // the vehicle a human rides (weak_ptr object)
-constexpr ULONGLONG kAskMs=250;                                   // an ask older than this (wall clock) is dropped
+// An ask is BoardingTick's while posted within stepfresh::kEveryStep steps (step_fresh.h: the tick runs once a step and
+// takes the ask), else dropped.
 constexpr ULONGLONG kLogMs=2000;
 using HitDamageFn=void(__fastcall*)(void*,const void*,void*);
 HitDamageFn nextHitDamage=nullptr;
@@ -44,7 +45,7 @@ bool ready=false;
 std::atomic<const void*> shooter{nullptr};
 
 // The vehicle the last round asked for. Written by the hit hook, taken by the tick.
-struct Ask { const void* vehicle; const void* ctrl; float dist2; ULONGLONG at; };
+struct Ask { const void* vehicle; const void* ctrl; float dist2; stepfresh::Step at; };
 Ask ask{};
 SRWLOCK askLock=SRWLOCK_INIT;
 const void* only=nullptr;   // BoardingOnly: game thread, for the length of one press
@@ -177,10 +178,10 @@ bool BoardingHit(const unsigned char* core,const void* object) noexcept {
     const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
     const float dist2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
     if(!std::isfinite(dist2))return false;
-    const ULONGLONG now=GetTickCount64();
+    const ULONGLONG now=GetTickCount64();   // the debug log's rate
     const void* const ctrl=At<const void*>(object,kSelfCtrl);   // no game-memory read while holding the lock
     AcquireSRWLockExclusive(&askLock);
-    if(!ask.vehicle || now-ask.at>kAskMs || dist2<ask.dist2)ask=Ask{object,ctrl,dist2,now};
+    if(!ask.vehicle || !stepfresh::Fresh(ask.at) || dist2<ask.dist2)ask=Ask{object,ctrl,dist2,stepfresh::Now()};
     ReleaseSRWLockExclusive(&askLock);
     if(Cfg().debug && now-saidAt>kLogMs){saidAt=now;Log("BOARDING hit v=%p (team %d): damage suppressed",object,team);}
     return true;
@@ -212,7 +213,7 @@ void BoardingTick() noexcept {
         if(boarding.ref.obj)EndBoarding(const_cast<unsigned char*>(static_cast<const unsigned char*>(boarding.ref.obj)),false);
         return;
     }
-    if(Cfg().boardingGun && a.vehicle && GetTickCount64()-a.at<=kAskMs && a.vehicle!=boarding.ref.obj) {
+    if(Cfg().boardingGun && a.vehicle && stepfresh::Fresh(a.at) && a.vehicle!=boarding.ref.obj) {
         const ObjRef ref{a.vehicle,a.ctrl};
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(a.vehicle));
         if(ref.Is(v))StartBoarding(human,v,ms);

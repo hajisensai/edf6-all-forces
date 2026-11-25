@@ -40,7 +40,7 @@ constexpr unsigned kAimVt=0x17D8A68,kAimSeVt=0x17D8A90;
 constexpr std::size_t kAimTargetOn=0xC0,kAimMode=0xC8;
 constexpr std::int32_t kModeTarget=1;
 constexpr ULONGLONG kResyncMs=250;    // game ms: an update this long ago is not the last frame's (a new ride, a pause)
-constexpr ULONGLONG kLogMs=1000,kCueMs=200;
+constexpr ULONGLONG kLogMs=1000;   // the HUD cue: fresh by the scene step (step_fresh.h)
 constexpr float kRad=57.2957795f;
 
 struct Sig { unsigned rva; unsigned char bytes[16]; std::size_t size; };
@@ -83,7 +83,7 @@ Hold* HoldOf(const void* v,ULONGLONG ms,bool make,bool* fresh) noexcept {
     return slot;
 }
 
-struct Cue { NixTorso t; ULONGLONG at; };
+struct Cue { NixTorso t; stepfresh::Step at; };
 Cue cue{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 
@@ -174,7 +174,7 @@ void After(unsigned char* v) noexcept {
     for(float& d:t.dir)d/=n;
     t.held=hold->held;
     AcquireSRWLockExclusive(&cueLock);
-    cue=Cue{t,GetTickCount64()};
+    cue=Cue{t,stepfresh::Now()};
     ReleaseSRWLockExclusive(&cueLock);
     DebugLog(v,*hold,t);
 }
@@ -227,7 +227,7 @@ bool PlayerNixTorso(NixTorso* out) noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
     ReleaseSRWLockShared(&cueLock);
-    if(!c.at || GetTickCount64()-c.at>kCueMs)return false;
+    if(!stepfresh::Fresh(c.at))return false;
     *out=c.t;
     return true;
 }

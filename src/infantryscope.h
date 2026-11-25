@@ -52,6 +52,7 @@ struct InfantryScopeCue {
 };
 void InfantryScopeFrame(unsigned char* human) noexcept;   // game thread, the local player's frame (MapHumanFrame)
 bool InfantryScopeNow(InfantryScopeCue* out) noexcept;    // any thread: the cue, false when none is fresh
+const unsigned char* InfantryScopeLensOwner(const void* view) noexcept;
 bool InstallInfantryScope() noexcept;                     // at load: the stock crosshair's draw chained (checked)
 void ResetInfantryScope() noexcept;                       // mission start
 // InfantryScope=2, the picture in the picture (scope_pip.h, docs/scope-pip-re.md §5.3). Render thread, at the end of a

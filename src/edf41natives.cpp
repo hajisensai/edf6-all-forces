@@ -129,6 +129,7 @@ bool InstallEdf41Natives() noexcept {
     }
     const auto offset=static_cast<std::uint32_t>(stub-image);
     unsigned char* slot=image+kTable1Jumps+4*kSlot;
+    edf::ClaimCode(slot,4);   // a code write of its own (edf/code_owner.h)
     DWORD old=0;
     if(!VirtualProtect(slot,4,PAGE_EXECUTE_READWRITE,&old)) {
         VirtualFree(stub,0,MEM_RELEASE);

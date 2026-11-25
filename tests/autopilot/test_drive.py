@@ -186,6 +186,23 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(drive.cycle_command(20, 20.0, False), 'cycle 20 20')
         self.assertEqual(drive.cycle_command(2, 45.5, True), 'cycle 2 45.5 reboot')
 
+    def test_next_command_text_and_outcome(self):
+        # tests/autopilot/autopilot.cpp AskNext: next MISSION [DIFFICULTY] [reboot]
+        self.assertEqual(drive.next_command('range', 1), 'next range 1')
+        self.assertEqual(drive.next_command('M001', 3, True), 'next M001 3 reboot')
+        log = ['[  70.0 s] NEXT armed: M001, difficulty 3, back in by HQMain',
+               '[  70.5 s] CYCLE 1/1 leaving: MissionMgr::End(ABORT), as the pause menu\'s withdraw, after 0.0 s',
+               '[  71.0 s] CYCLE 1/1 left: Result_Offline skipped (no result screen, nothing saved) -> HQMain (the next '
+               'mission)']
+        self.assertIsNone(drive.next_outcome(log, 1))
+        entered = log + ['[ 100.0 s] CYCLE 1/1 entered: the mission runs (row 1)',
+                         '[ 100.0 s] NEXT 1 entered: the mission runs (row 1, difficulty 3, mode 0, content id 0)']
+        self.assertEqual(drive.next_outcome(entered, 1), 'entered')
+        self.assertIsNone(drive.next_outcome(entered, 2))   # the launch's second next: not this row
+        self.assertEqual(drive.next_outcome(['[ 1.0 s] NEXT refused: a cycle or a next is already running'], 1), 'failed')
+        self.assertEqual(drive.next_outcome(log + ['[ 80.0 s] CYCLE failed: the script went back to the title'], 1),
+                         'failed')
+
     def test_cycle_outcome_and_report_from_the_plugins_rows(self):
         log = ['[   1.0 s] CYCLE armed: leave and enter again 2 times, 20.0 s in each mission, back in by PlayMission_Offline',
                '[  40.0 s] CYCLE 0/2 entered: the mission runs (row 13)',
@@ -508,10 +525,24 @@ class DriverTest(unittest.TestCase):
         u = Mock()
         with patch.object(drive, 'user32', u), patch.object(drive.os, 'startfile') as start, \
              patch.object(drive, 'steam_launching_title', return_value=None), \
-             patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
+             patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'),              patch.object(drive.modfiles, 'steam_running_app', return_value=0):
             drive.launch()
         start.assert_called_once_with('steam://rungameid/2291060')
         u.PostMessageW.assert_not_called()
+
+    def test_launch_waits_until_steam_releases_the_game(self):
+        # EDF6.exe gone but Steam still counting it running (its RunningAppID lags the exit): no steam:// until clear.
+        states = iter([drive.APP_ID, drive.APP_ID, 0])
+        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'steam_running_app', side_effect=lambda: next(states)),              patch.object(drive.modfiles.time, 'sleep') as nap,              patch.object(drive, 'steam_launching_title', return_value=None),              patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
+            drive.launch()
+        self.assertEqual(nap.call_count, 2)
+        start.assert_called_once_with('steam://rungameid/2291060')
+
+    def test_launch_refuses_while_steam_keeps_the_game(self):
+        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'wait_steam_released', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'Steam still counts'):
+                drive.launch()
+        start.assert_not_called()
 
     def test_steam_launching_title_from_the_clients_localization(self):
         with tempfile.TemporaryDirectory() as steam:
@@ -564,6 +595,159 @@ class DriverTest(unittest.TestCase):
                 drive.install(self.game)
         self.assertEqual(list(self.plugins.iterdir()), [])
 
+
+
+class DuringRaceTest(DriverTest):
+    """`during` (tools/perfrun.py's legs, a daemon thread) against drive.run's end, the interleavings forced with
+    Events (no timing): nothing it writes may land after the run's quit (overwriting it) or after the restore
+    (left in the game folder, every later install refused: SESSION_EXTS)."""
+
+    def session(self, during, *, seconds, pids, on_command=None, on_restore=None):
+        """drive.run with `during` on its own thread and a gate; the launch, the log waits and the desktop faked."""
+        real_command = drive.command
+        real_restore = drive.restore_placed
+
+        def command(game, text, gate=None):
+            real_command(game, text, gate)
+            if on_command:
+                on_command(text)
+
+        def restore(game):
+            if on_restore:
+                on_restore('before')
+            ok = real_restore(game)
+            if on_restore:
+                on_restore('after')
+            return ok
+        launched: list = []
+        self.pids.side_effect = lambda: pids() if launched else []   # closed for the install, running once launched
+        gate = drive.Gate()
+        with patch.object(drive, 'launch', side_effect=lambda: launched.append(1)), \
+             patch.object(drive, 'wait_for', return_value=True), \
+             patch.object(drive, 'command', side_effect=command), \
+             patch.object(drive, 'restore_placed', side_effect=restore), redirect_stdout(io.StringIO()):
+            rc = drive.run(self.game, 'range', 1, seconds, None, every=0.02, quit_wait=5,
+                           during=lambda: during(gate), gate=gate)
+        return rc
+
+    def test_game_gone_then_restored_nothing_written_after(self):
+        """Path A: the game is gone, drive.run puts everything back (uninstall); a key held across it is not released
+        into the folder afterwards, and a `next` after it is refused, not written."""
+        import threading
+        pressed, restored, done = threading.Event(), threading.Event(), threading.Event()
+        said: list = []
+        real_sleep = drive.time.sleep
+        worker: list = []
+
+        def sleep(sec):
+            if threading.current_thread() in worker:   # the key's hold: until everything is put back
+                pressed.set()
+                restored.wait(10)
+                return
+            real_sleep(min(sec, 0.01))
+
+        def during(gate):
+            worker.append(threading.current_thread())
+            try:
+                drive.key(self.game, 'enter', 5000, gate)
+                said.append('key released')
+                try:
+                    drive.command(self.game, 'next M001 1', gate)
+                    said.append('next written')
+                except drive.RunEnded:
+                    said.append('next refused')
+            finally:
+                done.set()
+
+        with patch.object(drive.time, 'sleep', side_effect=sleep):
+            rc = self.session(during, seconds=100, pids=lambda: [] if pressed.is_set() else [42],
+                              on_restore=lambda when: when == 'after' and restored.set())
+        self.assertTrue(done.wait(10))
+        self.assertEqual(rc, 1)
+        self.assertEqual(said, ['key released', 'next refused'])
+        self.assertEqual(list(self.plugins.iterdir()), [], 'nothing left in the game folder after the restore')
+        drive.install(self.game)   # a later run is not refused by a leftover .keys / .cmd
+
+    def test_deadline_quit_is_not_overwritten(self):
+        """Path B: the deadline: drive.run writes quit; a `next` handed after it is refused, so the plugin still reads
+        quit (the game leaves, everything is put back)."""
+        import threading
+        quitted, attempted = threading.Event(), threading.Event()
+        said: list = []
+        seen: list = []
+
+        def during(gate):
+            quitted.wait(10)
+            try:
+                drive.command(self.game, 'next M001 1', gate)
+                said.append('next written')
+            except drive.RunEnded:
+                said.append('next refused')
+            attempted.set()
+
+        def on_command(text):
+            if text == 'quit':
+                quitted.set()
+                attempted.wait(10)   # the `next` tried while the game still runs, before anything is put back
+                seen.append(self.path('.cmd').read_text())
+
+        rc = self.session(during, seconds=0, pids=lambda: [] if seen else [42], on_command=on_command)
+        self.assertEqual(said, ['next refused'])
+        self.assertEqual(seen, ['quit'], 'the plugin still reads quit')
+        self.assertEqual(rc, 0)
+        self.assertEqual(list(self.plugins.iterdir()), [])
+
+    def test_write_under_way_finishes_before_the_end(self):
+        """A write that took the gate first finishes before the quit is written (the quit is the last word)."""
+        import threading
+        inside, quitted = threading.Event(), threading.Event()
+        gate = drive.Gate()
+        order: list = []
+
+        def writer():
+            with gate.writing():
+                inside.set()
+                quitted.wait(0.3)   # the end waits on the lock: it cannot come in between
+                order.append('next')
+        t = threading.Thread(target=writer)
+        t.start()
+        inside.wait(10)
+        gate.end(drive.Gate.QUITTING, lambda: (order.append('quit'), quitted.set()))
+        t.join(10)
+        self.assertEqual(order, ['next', 'quit'])
+        with self.assertRaises(drive.RunEnded):
+            with gate.writing():
+                pass
+        with gate.writing(release=True):   # a key's release still allowed until CLOSED
+            pass
+        gate.end(drive.Gate.CLOSED)
+        with self.assertRaises(drive.RunEnded):
+            with gate.writing(release=True):
+                pass
+
+    def test_key_option_refuses_nan_inf_and_negatives(self):
+        for bad in ('4d@nan', '4d@inf', '4d@-1', '4d@1:0', '4d@1:-5', '@1'):
+            with self.assertRaises(SystemExit, msg=bad):
+                drive.key_option(bad)
+        self.assertEqual(drive.key_option('4d@0:300'), ('4d', 0.0, 300))
+
+    def test_entry_outcome_and_target(self):
+        rows = ['[ 1.0 s] RANGE mode 7 (content id 4242) made current',
+                '[ 9.0 s] RUNNING: the mission runs (row 0, difficulty 1, mode 7, content id 4242)']
+        how = drive.entry_outcome(rows, 0)
+        self.assertEqual(how, ('entered', {'row': 0, 'difficulty': 1, 'mode': 7, 'content': 4242, 'range_mode': 7}))
+        self.assertIsNone(drive.entry_outcome(rows, 1), 'RUNNING is the first entry only')
+        self.assertEqual(drive.entry_outcome(["[ 2.0 s] SCRIPT HQMain: the pack's mode not entered, the menu as is"],
+                                             1)[0], 'failed')
+        (self.plugins / 'EDF6VehicleCrew.ini').write_text('[VehicleCrew]\nTestRangeContent=4242\nEDF41Content=50\n')
+        self.assertEqual(drive.mission_target(self.game, 'range'), (0, 4242))
+        self.assertEqual(drive.mission_target(self.game, 'edf41mp02:3'), (3, 52))
+        self.assertEqual(drive.mission_target(self.game, 'M001'), (1, 0))
+        self.assertEqual(drive.mission_target(self.game, 'RM015'), (13, 0))
+        self.assertIsNone(drive.entry_mismatch(how[1], 0, 1, 4242))
+        self.assertIn('difficulty 1, not 3', drive.entry_mismatch(how[1], 0, 3, 4242))
+        self.assertIn('content id 4242, not 0', drive.entry_mismatch(how[1], 0, 1, 0))
+        self.assertIn('mode 8, not the 7', drive.entry_mismatch(dict(how[1], mode=8), 0, 1, 4242))
 
 if __name__ == '__main__':
     unittest.main()

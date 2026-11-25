@@ -61,7 +61,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept;
 bool SquadCommand(const void* leader,const Command& c) noexcept;
 // npcpost.cpp: the NPC tanks keeping a post (guard moves it; release puts it back on the spawn point).
 int TankCommandUnits(CommandUnit* out,int most) noexcept;
-bool TankCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
+bool TankCommand(const void* v,const Command& c,const ObjRef& focus={},const ObjRef& requester={}) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
 struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
@@ -172,7 +172,6 @@ struct MapCommandReadout {
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
-    bool squadToolsAllowed=false; // the formation tools: offline, or a host of command protocol v7 (Order::formation)
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
     bool pointer;              // the mouse pointer shown at (px, py)

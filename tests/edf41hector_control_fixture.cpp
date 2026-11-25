@@ -41,7 +41,7 @@ void __fastcall Start(void*){++starts;}
 ULONGLONG crew::GetTickCount64() noexcept {return fixture::fakeClock;}
 namespace edf {
 bool Readable(const void* value,std::size_t,bool) noexcept {return value!=nullptr;}
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept {changed=true;return true;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept {changed=true;return true;}
 }
 namespace crew {
 unsigned char* image=nullptr;const Config& Cfg() noexcept{return fixture::config;}void Log(const char*,...) noexcept {}

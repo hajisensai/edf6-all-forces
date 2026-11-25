@@ -3,11 +3,13 @@
 #include "enemy_control_capacity.h"
 #include "enemy_control_net_input.h"
 #include "enemy_control_core_pose.h"
+#include "enemy_control_pose_interp.h"
 #include "enemy_control_core_action.h"
 #include "enemy_control.h"
 #include "command_identity.h"
 #include "coop_extension_api.h"
 #include "support_net.h"
+#include "plugin_net_logic.h"
 #include "support_soldier.h"
 #include "online_authority.h"
 #include "memory.h"
@@ -24,15 +26,30 @@ bool configured=false;
 static_assert(ep::kWireBytes<=EDF6COOP_EXTENSION_MAX_PAYLOAD,"enemy control envelope must fit the actual Coop reliable extension ABI");
 static_assert(en::kInputBytes<=ep::kMaxInputBytes,"semantic input must fit the negotiated protocol payload");
 static_assert(ep::kMaxActions>=ep::kActionWindow*enemy_control::kMaxControllers,"every admitted native controller must retain a full reliable action window");
-constexpr std::uint64_t kSampleMs=33; // steady motion/held state; changes of skill state are immediate
+// Steady motion/held state goes out every second logic frame (GameFrame: 30 Hz at the game's 60 Hz); changes of skill
+// state are immediate. Counted in frames, not GetTickCount64 ms: its 15.6 ms steps read two frames as 31 or 32 ms, under a
+// 33 ms gap, so each sample waited for a third frame (about 20 Hz instead of 30, unevenly spaced).
+constexpr std::uint64_t kSampleFrames=2;
 struct Sample {
-    std::uint64_t lease=0,lastSent=0;
+    std::uint64_t lease=0,lastSent=0,lastFrame=0;
     enemy_control::Input previous{},pending{};
     bool sent=false,waiting=false;
 };
 Sample samples[enemy_control::kMaxControllers]{};
 constexpr std::uint64_t kPoseTimeoutMs=500;
-struct PoseSample {std::uint64_t lease=0,created=0,sent=0,received=0;};
+namespace pose=enemy_native::pose;
+namespace pi=enemy_native::pose_interp;
+// Per pose lease. Host: when it last sent and the previous sample's position (motion). Guest: the sample timeline
+// (pi::Track, filled by the receive callback) and the last state written, so a frame whose sampled pose did not
+// change writes nothing.
+struct PoseSample {
+    std::uint64_t lease=0,created=0,sent=0,received=0,sentFrame=0;
+    pi::SendTrack send{};
+    pi::Track track{};
+    pose::State applied{};
+    bool hasApplied=false;
+    unsigned invalid=0;
+};
 PoseSample poseSamples[enemy_control::kMaxControllers]{};
 std::uint64_t networkNow=0;
 const ep::LeaseView* Lease(std::uint64_t id) noexcept;
@@ -46,7 +63,7 @@ PoseSample* PoseFor(std::uint64_t lease,std::uint64_t now) noexcept {
     // receive callbacks that run before the next frame, so a full old ledger cannot spuriously revoke the new body.
     PrunePoses();
     for(auto& sample:poseSamples)if(sample.lease==lease)return &sample;
-    for(auto& sample:poseSamples)if(!sample.lease){sample={lease,now,0,0};return &sample;}
+    for(auto& sample:poseSamples)if(!sample.lease){sample={};sample.lease=lease;sample.created=now;return &sample;}
     return nullptr;
 }
 struct UiRequest {
@@ -68,6 +85,11 @@ const ep::LeaseView* Lease(std::uint64_t id) noexcept;
 void Publish() noexcept;
 bool Send(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     return transport.ready && transport.send && peer && peer<=transport.peerCount && transport.send(peer,bytes,size);
+}
+// A pose: the newest of its lease slot, unreliable (plugin_net.h StateKey; EDF6Coop 2.9.0 always has sendState).
+bool SendState(void*,std::uint32_t peer,std::uint32_t object,const void* bytes,std::size_t size) noexcept {
+    const auto key=plugin_net::StateKey(plugin_net::StateStream::enemyPose,object);
+    return transport.ready && transport.sendState && key && peer && peer<=transport.peerCount && transport.sendState(peer,key,bytes,size);
 }
 ep::SendResult TrySendAction(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     if(!transport.ready || !transport.trySend || !peer || peer>transport.peerCount)return ep::SendResult::unavailable;
@@ -165,12 +187,15 @@ bool Restore(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
     __try {return EnemyControlRestore(token);}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// Receive side of the host's pose: decode and buffer only. The native body is written on the game thread once per logic
+// frame (ApplyPoseFrame), from the interpolated timeline, never here.
 bool ApplyPose(void*,std::uint64_t token,const ep::LeaseSpec& spec,std::uint64_t,const void* bytes,std::size_t size) noexcept {
     __try {
-        Actors actors{};
+        Actors actors{};pose::Packet packet{};
         if(transport.host || !ResolveActors(spec,&actors) || !EnemyControlNeedsNetworkPose(token) ||
-           !EnemyControlApplyNetworkPose(token,bytes,size))return false;
+           !pose::Decode(bytes,size,&packet))return false;
         auto* sample=PoseFor(token,networkNow);if(!sample)return false;
+        sample->track.Accept(packet,GameFrame()); // an older/duplicate frame is dropped by the timeline, not a fault
         sample->received=networkNow;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -202,7 +227,7 @@ bool ActionsEmpty(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
 bool AbortActions(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
     __try{return EnemyControlAbortNetworkActions(token);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput,&TrySendAction});
+ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput,&TrySendAction,&SendState});
 const ep::LeaseView* Lease(std::uint64_t id) noexcept {
     if(!id)return nullptr;
     for(std::size_t i=0;i<ep::kMaxLeases;++i)if(const auto* lease=protocol.LeaseAt(i);lease && lease->id==id)return lease;
@@ -262,7 +287,7 @@ bool Request(const enemy_control::Snapshot& snapshot) noexcept {
 bool SendSample(Sample& sample,const enemy_control::Input& input,std::uint64_t now) noexcept {
     unsigned char bytes[en::kInputBytes]{};
     if(!en::EncodeInput(input,bytes,sizeof(bytes)) || !protocol.SubmitInput(sample.lease,bytes,sizeof(bytes),now))return false;
-    sample.previous=input;sample.lastSent=now;sample.sent=true;sample.waiting=false;return true;
+    sample.previous=input;sample.lastSent=now;sample.lastFrame=GameFrame();sample.sent=true;sample.waiting=false;return true;
 }
 bool Input(const enemy_control::Snapshot& snapshot,const enemy_control::Input& input) noexcept {
     const auto now=GetTickCount64();Tick(now);
@@ -273,7 +298,7 @@ bool Input(const enemy_control::Snapshot& snapshot,const enemy_control::Input& i
     if(!sample)for(auto& current:samples)if(!current.lease){current={};current.lease=snapshot.lease;sample=&current;break;}
     if(!sample)return false;
     const bool urgent=!sample->sent || !en::SameChannels(sample->previous,input) || en::HasPress(input);
-    if(urgent || now-sample->lastSent>=kSampleMs) {
+    if(urgent || GameFrame()-sample->lastFrame>=kSampleFrames) {
         const bool sent=SendSample(*sample,input,now);Publish();return sent;
     }
     sample->pending=input;sample->waiting=true;return true; // retained latest axes/held sample, never an unacknowledged skill edge
@@ -294,6 +319,32 @@ bool Stop(const enemy_control::Snapshot& snapshot) noexcept {
         const bool accepted=protocol.Cancel(source,target,snapshot.profileHash,binding.request,now);Publish();return accepted;
     }
     return false;
+}
+// Host: the one place a pose leaves this machine (the pose channel's send class is chosen here).
+bool SendPose(std::uint64_t lease,PoseSample& sample,std::uint64_t now) noexcept {
+    pose::Packet packet{};
+    if(!EnemyControlCaptureNetworkPose(lease,&packet.state))return false;
+    const auto frame=GameFrame();
+    packet.senderFrame=static_cast<std::uint32_t>(frame);
+    pi::MeasureMotion(sample.send,packet.state.position,frame,packet.motion);
+    unsigned char bytes[pose::kWireBytes]{};
+    if(!pose::Encode(packet,bytes,sizeof(bytes)) || !protocol.SubmitPose(lease,bytes,sizeof(bytes),now))return false;
+    sample.sent=now;sample.sentFrame=frame;return true;
+}
+// Guest: write this logic frame's interpolated pose. Nothing yet, or the same state as the last write: no write.
+bool ApplyPoseFrame(std::uint64_t lease,PoseSample& sample) noexcept {
+    pose::State state{};
+    switch(sample.track.Sample(GameFrame(),&state)) {
+    case pi::Output::none:return true;
+    case pi::Output::invalid:
+        if(sample.invalid++<4)Log("ENEMYCTRL NET pose lease=%llu: interpolated pose out of range, frame not written (%u)",
+            static_cast<unsigned long long>(lease),sample.invalid);
+        return true;
+    case pi::Output::ready:break;
+    }
+    if(sample.hasApplied && !std::memcmp(&state,&sample.applied,sizeof(state)))return true;
+    if(!EnemyControlApplyNetworkPose(lease,state))return false;
+    sample.applied=state;sample.hasApplied=true;return true;
 }
 bool Online() noexcept {return InSession();} // no local-only fallback when the room transport/capability gate is unready
 }
@@ -343,13 +394,12 @@ void EnemyControlNetworkFrame() noexcept {
         if(lease->phase==ep::Phase::active && EnemyControlNeedsNetworkPose(lease->id)) {
             auto* sample=PoseFor(lease->id,now);if(!sample){protocol.Failed(lease->id,now);continue;}
             if(transport.host) {
-                if(!sample->sent || now-sample->sent>=kSampleMs) {
-                    unsigned char bytes[ep::kMaxPoseBytes]{};std::size_t used=0;
-                    if(!EnemyControlCaptureNetworkPose(lease->id,bytes,sizeof(bytes),&used) || !used ||
-                       !protocol.SubmitPose(lease->id,bytes,used,now)){protocol.Failed(lease->id,now);continue;}
-                    sample->sent=now;
+                if((!sample->sentFrame || GameFrame()-sample->sentFrame>=kSampleFrames) && !SendPose(lease->id,*sample,now)) {
+                    protocol.Failed(lease->id,now);continue;
                 }
             } else if(now-(sample->received ? sample->received : sample->created)>kPoseTimeoutMs) {
+                protocol.Failed(lease->id,now);continue;
+            } else if(!ApplyPoseFrame(lease->id,*sample)) {
                 protocol.Failed(lease->id,now);continue;
             }
         }
@@ -357,7 +407,7 @@ void EnemyControlNetworkFrame() noexcept {
     for(auto& sample:samples)if(sample.lease) {
         const auto* lease=Lease(sample.lease);
         if(!lease || lease->phase!=ep::Phase::active){sample={};continue;}
-        if(sample.waiting && now-sample.lastSent>=kSampleMs && !SendSample(sample,sample.pending,now))protocol.Failed(sample.lease,now);
+        if(sample.waiting && GameFrame()-sample.lastFrame>=kSampleFrames && !SendSample(sample,sample.pending,now))protocol.Failed(sample.lease,now);
     }
     Publish();
 }

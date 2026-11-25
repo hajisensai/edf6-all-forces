@@ -16,6 +16,9 @@ from pathlib import Path
 import struct
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
+import gamedir  # noqa: E402
+
 COLLISION = 0xF6760
 COLLISION_SIZE = 0x2E8
 QUERY, FILTER, COOKIE = 0x11A9270, 0x106100, 0x12D8770
@@ -198,7 +201,7 @@ def run(path: Path, pefile, capstone) -> None:
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("EDF6_DIR", r"D:\steam\steamapps\common\EARTH DEFENSE FORCE 6"))
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else gamedir.find_or_dev())
     if path.is_dir():
         path /= "EDF.dll"
     if not path.is_file():

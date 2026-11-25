@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image
 
 import bigmap
+import gamedir
 import map_build
 import mdb
 import sgo
@@ -326,12 +327,12 @@ class Install(unittest.TestCase):
 
 
 class Trial(unittest.TestCase):
-    @unittest.skipUnless(os.path.isdir(os.environ.get('EDF6_GAME_DIR', r'd:\steam\steamapps\common\EARTH DEFENSE FORCE 6')),
+    @unittest.skipUnless(gamedir.find() is not None,
                          'EDF6 not installed')
     def test_mission_moves_the_player(self) -> None:
         import make_xm_maps
         import rmpa
-        game = os.environ.get('EDF6_GAME_DIR', r'd:\steam\steamapps\common\EARTH DEFENSE FORCE 6')
+        game = gamedir.find()
         entry = {'weathers': ['FINE'], 'bounds': [[0, -20, 0], [0, 10, 0]]}
         files = make_xm_maps.trial_mission('XM_TEST', entry, game)
         text = files['MISSION.AC'].decode('utf-8-sig')

@@ -677,6 +677,7 @@ bool PatchPublication() noexcept {
  const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kPublication,code,sizeof(code)));if(!thunk)return false;
  const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
  unsigned char patch[9]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
+ edf::ClaimCode(image+kPublication,9);   // a code write of its own (edf/code_owner.h)
  DWORD old=0;if(!VirtualProtect(image+kPublication,9,PAGE_EXECUTE_READWRITE,&old))return false;
  std::memcpy(image+kPublication,patch,9);FlushInstructionCache(GetCurrentProcess(),image+kPublication,9);DWORD ignored=0;
  if(!VirtualProtect(image+kPublication,9,old,&ignored))return false;
@@ -694,6 +695,7 @@ bool PatchBulletPublication() noexcept {
  const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kBulletPublication,code,sizeof(code)));if(!thunk)return false;
  const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kBulletPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
  unsigned char patch[13]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
+ edf::ClaimCode(image+kBulletPublication,13);   // a code write of its own (edf/code_owner.h)
  DWORD old=0;if(!VirtualProtect(image+kBulletPublication,13,PAGE_EXECUTE_READWRITE,&old))return false;
  std::memcpy(image+kBulletPublication,patch,13);FlushInstructionCache(GetCurrentProcess(),image+kBulletPublication,13);DWORD ignored=0;
  if(!VirtualProtect(image+kBulletPublication,13,old,&ignored))return false;

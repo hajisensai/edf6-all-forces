@@ -21,6 +21,58 @@ LOCK_FILE = os.path.join(LOCK_DIR, 'check.lock')
 HELD = 'EDF6_CHECK_LOCK'
 
 
+_JOB = None   # the job object children_die_with_me() put this process in: open as long as the process lives
+
+
+def children_die_with_me() -> None:
+    """Every process this one starts from now on, and theirs, ends when this one does, however it ends (killed
+    included): Windows puts them in a job object set to KILL_ON_JOB_CLOSE whose only handle this process holds, so the
+    system closes it, and ends them, when this process goes. A check.py killed alone left its ctest and selftest
+    running against the same build folder, under the next check. Elsewhere: nothing (CI and this machine are Windows)."""
+    global _JOB
+    if os.name != 'nt' or _JOB is not None:
+        return
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL('kernel32', use_last_error=True)
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    k.GetCurrentProcess.restype = wintypes.HANDLE
+
+    class Basic(ctypes.Structure):
+        _fields_ = [('PerProcessUserTimeLimit', ctypes.c_int64), ('PerJobUserTimeLimit', ctypes.c_int64),
+                    ('LimitFlags', wintypes.DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                    ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', wintypes.DWORD),
+                    ('Affinity', ctypes.c_size_t), ('PriorityClass', wintypes.DWORD), ('SchedulingClass', wintypes.DWORD)]
+
+    class Io(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_uint64) for n in ('ReadOperationCount', 'WriteOperationCount', 'OtherOperationCount',
+                                                   'ReadTransferCount', 'WriteTransferCount', 'OtherTransferCount')]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [('BasicLimitInformation', Basic), ('IoInfo', Io), ('ProcessMemoryLimit', ctypes.c_size_t),
+                    ('JobMemoryLimit', ctypes.c_size_t), ('PeakProcessMemoryUsed', ctypes.c_size_t),
+                    ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+    job = k.CreateJobObjectW(None, None)   # not inheritable: no child holds it open after this process is gone
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    info = Extended()
+    info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):   # ExtendedLimitInformation
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not k.AssignProcessToJobObject(job, k.GetCurrentProcess()):
+        raise ctypes.WinError(ctypes.get_last_error())
+    _JOB = job
+    # The compiler's PDB server (mspdbsrv.exe, /Zi /FS) is one per endpoint for the whole machine: the first compile
+    # to need it starts it, and here that compile is in the job, so the server is too and ends with this process,
+    # under every other session's build connected to it (their compiles fail on the PDB). This process's builds get
+    # a server of their own instead, started in the job and ended with it.
+    os.environ['_MSPDBSRV_ENDPOINT_'] = f'edf6-check-{os.getpid()}'
+
+
 def below_normal() -> None:
     """This process below normal priority; on Windows every process it starts inherits the class."""
     if os.name == 'nt':
@@ -91,5 +143,81 @@ def status() -> str:
             return 'the check slot is free'
         who = _holder()
         return f"held by {who.get('label', '?')} in {who.get('cwd', '?')} (pid {who.get('pid', '?')})"
+    finally:
+        os.close(fd)
+
+
+class Busy(Exception):
+    """This worktree's check is already queued or running: {'pid', 'root', 'since'} of the one that has it, or
+    {'starting': True} when its holder has the lock and has not written itself down yet (or is letting it go)."""
+
+
+def alive(pid: int) -> bool:
+    """Whether process `pid` is running."""
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL('kernel32', use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.get_last_error() == 5   # access denied: it exists
+        try:
+            code = wintypes.DWORD()
+            return bool(k.GetExitCodeProcess(wintypes.HANDLE(h), ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k.CloseHandle(wintypes.HANDLE(h))
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def worktree_lock(root: str) -> str:
+    """The lock file of `root`'s check; its holder's record is the same path + '.json'."""
+    import hashlib
+    key = hashlib.sha1(os.path.normcase(os.path.abspath(root)).encode('utf-8')).hexdigest()[:16]
+    return os.path.join(LOCK_DIR, f'check-{key}.lock')
+
+
+def worktree_holder(path: str) -> dict:
+    """Who holds the lock at `path` (worktree_lock), as its holder wrote it down; {'starting': True} when no live
+    process is written down: the holder has the lock and has not written itself yet, or has emptied its record and
+    is letting go (half a record does not parse: the same), or a holder that was killed left its record."""
+    try:
+        with open(path + '.json', encoding='utf-8') as h:
+            who = json.load(h)
+    except (OSError, ValueError):
+        return {'starting': True}
+    return who if isinstance(who.get('pid'), int) and alive(who['pid']) else {'starting': True}
+
+
+@contextlib.contextmanager
+def worktree_once(root: str) -> Iterator[None]:
+    """One check.py per worktree (2026-11-24: a session that started a second check of the same tree while the first
+    still waited in the queue doubled the queue): raises Busy at once, without waiting, when another holds it."""
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    path = worktree_lock(root)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    try:
+        if not _try_lock(fd):
+            raise Busy(worktree_holder(path))
+        # The record is rewritten in place, never renamed over or deleted: on Windows a rename onto, or a delete of,
+        # a file another process has open (a second check.py reading who has the lock) fails with PermissionError,
+        # which killed the holder at its start or replaced its exit code at its end. Rewriting needs only the write
+        # sharing every reader gives (Python's open shares read and write). A reader that finds it empty, half
+        # written, or naming a dead process knows the holder has not written itself down yet or is letting go.
+        with open(path + '.json', 'w', encoding='utf-8') as h:
+            json.dump({'root': os.path.abspath(root), 'pid': os.getpid(), 'since': time.time()}, h)
+        try:
+            yield
+        finally:
+            try:
+                open(path + '.json', 'w').close()   # emptied while the lock is still held: "letting go"
+            except OSError:
+                pass   # not emptied: it names this process, which is about to end; read as "letting go" then too
     finally:
         os.close(fd)

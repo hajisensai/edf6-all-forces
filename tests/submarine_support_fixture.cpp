@@ -91,7 +91,7 @@ Rider SeatRider(const unsigned char*,const unsigned char*) noexcept {return Ride
 bool AnyPlayerIn(const unsigned char*,const unsigned char*) noexcept {return submarine_fixture::playerAboard;}
 bool LivingSoldierInSeat(const unsigned char*,const unsigned char*) noexcept {return submarine_fixture::driverLiving;}
 bool IsAnyPlayer(const unsigned char*) noexcept {return submarine_fixture::driverPlayer;}
-bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept {changed=false;return false;}
+bool RedirectCall(unsigned char*,void*,void*,bool& changed,edf::Claim,const char*) noexcept {changed=false;return false;}
 }
 namespace crew {
 unsigned char* image=nullptr;
@@ -101,6 +101,7 @@ ULONGLONG GameMs() noexcept {return submarine_fixture::milliseconds;}
 ULONGLONG GameFrame() noexcept {return submarine_fixture::frame;}
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept {return submarine_fixture::session;}
+bool GamePaused() noexcept {return false;}
 bool OnlineHostOnly() noexcept {return submarine_fixture::host;}
 bool OnlineRunsHere(const void*) noexcept {return submarine_fixture::runsHere;}
 bool IsOnlineAuthority(const void*) noexcept {return submarine_fixture::authority;}

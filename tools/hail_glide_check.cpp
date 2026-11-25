@@ -7,7 +7,8 @@
 //    reproduces the fault), the production one must land in both;
 //  - a sweep of hail states (heights, speeds, climbs, banks, headings round the strip): the production law never
 //    meets the ground but on its touchdown, and lands within kLandSink m/s of sink, wings level.
-// `hail_glide_check` (CTest): exit 1 on a miss. Flat ground and no obstacles: no claim about terrain or buildings.
+// `hail_glide_check` (CTest hail_glide_<I>: its units packed by tests/hail_glide_shard.py): exit 1 on a miss. Flat
+// ground and no obstacles: no claim about terrain or buildings.
 #include "../src/hail_glide.h"
 #include "../src/pjet_handling.h"
 #include "../src/playerjet_kinds.h"
@@ -16,6 +17,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <string>
+#include <vector>
 
 namespace {
 using namespace crew;
@@ -169,22 +172,20 @@ Jet Start(float x,float y,float z,float speed,float climbDeg,float headDeg,float
 const char* Name(End e){return e==End::landed ? "landed" : e==End::crashed ? "CRASHED" : e==End::refused ? "refused" : "gave up";}
 }  // namespace
 
-int main(int argc,char** argv){
-    int fails=0;trace=argc>1;
-    if(argc>7) {   // one case traced: kind y speed climb bank bearing(0-3) heading
-        for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,argv[1])==0) {
-            const float a=std::atoi(argv[6])*kPi/2.0f;const float touch[3]={0,0,0};
-            const Jet s=Start(std::sin(a)*1500.0f,(float)std::atof(argv[2]),std::cos(a)*1500.0f,(float)std::atof(argv[3]),
-                              (float)std::atof(argv[4]),(float)std::atof(argv[7]),(float)std::atof(argv[5]));
-            const Result r=Hail(b.perf,s,touch,0.0f,Law::production);
-            std::printf("%s sink %.1f speed %.1f\n",Name(r.end),r.sink,r.speed);
-        }
-        return 0;
-    }
-    const pjet::Perf* fighter=nullptr;
-    for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,"fighter")==0)fighter=&b.perf;
+
+namespace {
+// The check in units (`hail_glide_check --list`), so ctest's hail_glide_<I> run them side by side (tests/hail_glide_shard.py
+// packs them by their measured seconds, tests/hail_glide_seconds.json): each returns its failures.
+const pjet::Perf* Kind(const char* name){
+    for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,name)==0)return &b.perf;
+    return nullptr;
+}
+
+// The logged hails (EDF6VehicleCrew.log, 2026-10-09).
+int Logged(){
+    const pjet::Perf* fighter=Kind("fighter");
     if(!fighter){std::printf("FAIL no fighter perf\n");return 1;}
-    // The logged hails (EDF6VehicleCrew.log, 2026-10-09).
+    int fails=0;
     struct Logged { const char* when; Jet start; float touch[3],head; };
     const Logged logged[]={
         {"10:34:38",Start(-769,288,-666,133,32.7f,-47,65),{112,1,-89},-60},
@@ -202,88 +203,148 @@ int main(int argc,char** argv){
     const bool control=legacyCrashes>0;
     std::printf("%s negative control: the legacy law crashes %d of %zu logged hails in this model\n",control ? "ok  " : "FAIL",legacyCrashes,
                 sizeof(logged)/sizeof(logged[0]));
-    fails+=!control;
-    // The sweep: every wing kind, hail states round a strip at the origin heading north.
+    return fails+!control;
+}
+
+// The sweep of one wing kind: hail states round a strip at the origin heading north. Never into the ground, and most
+// of them must actually land (a law that never descends would not crash either): 9 in 10 of this kind's (before the
+// split: of all the kinds' together; every kind lands all 1296).
+int Sweep(const pjet::Perf& k){
     const float touch[3]={0,0,0};
-    int flown=0,landed=0,gaveUpShown=0;
-    for(const auto& b:pjet::kBoardable) {
-        if(b.frame!=pjet::Airframe::wing)continue;
-        const auto& k=b.perf;int kindFails=0;const int landedBefore=landed,flownBefore=flown;
-        for(float y:{250.0f,500.0f,800.0f})for(float sp:{k.minAir+20.0f,0.5f*(k.minAir+k.top),k.top-10.0f})
-        for(float climb:{-20.0f,0.0f,30.0f})for(float bank:{0.0f,90.0f,175.0f})for(int bearing=0;bearing<4;++bearing)for(int head=0;head<4;++head) {
-            const float a=bearing*kPi/2.0f;
-            const Jet s=Start(std::sin(a)*1500.0f,y,std::cos(a)*1500.0f,sp,climb,head*90.0f+20.0f,bank);
-            const Result r=Hail(k,s,touch,0.0f,Law::production);
-            ++flown;
-            if(r.end==End::landed)++landed;
-            else if(r.end==End::gaveUp && trace && gaveUpShown++<6)std::printf("  gave up: %s y %.0f speed %.0f climb %.0f bank %.0f bearing %d heading %.0f\n",
-                k.name,y,sp,climb,bank,bearing,head*90.0f+20.0f);
-            // Never into the ground: a hail that does not land must give up in the air (HandBack), not crash.
-            if(r.end==End::crashed){
-                if(kindFails++<3)std::printf("FAIL %s from (%.0f,%.0f,%.0f) %.0f m/s climb %.0f bank %.0f heading %.0f: crashed at %.1f m/s sink, %.0f m/s (phase %s)\n",
-                    k.name,s.pos[0],s.pos[1],s.pos[2],sp,climb,bank,head*90.0f+20.0f,r.sink,r.speed,r.phase ? "final" : "ferry");
-            }
+    int flown=0,landed=0,gaveUpShown=0,kindFails=0;
+    for(float y:{250.0f,500.0f,800.0f})for(float sp:{k.minAir+20.0f,0.5f*(k.minAir+k.top),k.top-10.0f})
+    for(float climb:{-20.0f,0.0f,30.0f})for(float bank:{0.0f,90.0f,175.0f})for(int bearing=0;bearing<4;++bearing)for(int head=0;head<4;++head) {
+        const float a=bearing*kPi/2.0f;
+        const Jet s=Start(std::sin(a)*1500.0f,y,std::cos(a)*1500.0f,sp,climb,head*90.0f+20.0f,bank);
+        const Result r=Hail(k,s,touch,0.0f,Law::production);
+        ++flown;
+        if(r.end==End::landed)++landed;
+        else if(r.end==End::gaveUp && trace && gaveUpShown++<6)std::printf("  gave up: %s y %.0f speed %.0f climb %.0f bank %.0f bearing %d heading %.0f\n",
+            k.name,y,sp,climb,bank,bearing,head*90.0f+20.0f);
+        // Never into the ground: a hail that does not land must give up in the air (HandBack), not crash.
+        if(r.end==End::crashed){
+            if(kindFails++<3)std::printf("FAIL %s from (%.0f,%.0f,%.0f) %.0f m/s climb %.0f bank %.0f heading %.0f: crashed at %.1f m/s sink, %.0f m/s (phase %s)\n",
+                k.name,s.pos[0],s.pos[1],s.pos[2],sp,climb,bank,head*90.0f+20.0f,r.sink,r.speed,r.phase ? "final" : "ferry");
         }
-        fails+=kindFails;
-        std::printf("%s %-12s sweep: %d crashes, %d of %d landed\n",kindFails ? "FAIL" : "ok  ",k.name,kindFails,landed-landedBefore,
-                    flown-flownBefore);
     }
-    // Most of the sweep must actually land (a law that never descends would not crash either).
     const bool lands=landed*10>=flown*9;
-    std::printf("%s %d of %d swept hails landed\n",lands ? "ok  " : "FAIL",landed,flown);
-    fails+=!lands;
-    // 2026-10-09 16:53:56 (EDF6VehicleCrew.log): a gunship hailed on a map whose walls stand at +-1600 flew 4 minutes
-    // along the wall at z -1600 for an outer point past it, until the hail ran out. Negative control: that approach's
-    // outer point (straight behind a 1500 m final, 4 turn radii) lies outside the walls.
-    const hail::Box walls{{-1600.0f,-1600.0f},{1597.0f,1597.0f}};
-    const pjet::Perf* gunship=nullptr;
-    for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,"gunship")==0)gunship=&b.perf;
-    if(!gunship){std::printf("FAIL no gunship perf\n");return 1;}
+    std::printf("%s %-12s sweep: %d crashes, %d of %d landed\n",kindFails || !lands ? "FAIL" : "ok  ",k.name,kindFails,landed,flown);
+    return kindFails+!lands;
+}
+
+// 2026-10-09 16:53:56 (EDF6VehicleCrew.log): a gunship hailed on a map whose walls stand at +-1600 flew 4 minutes
+// along the wall at z -1600 for an outer point past it, until the hail ran out. Negative control: that approach's
+// outer point (straight behind a 1500 m final, 4 turn radii) lies outside the walls.
+const hail::Box kWalls{{-1600.0f,-1600.0f},{1597.0f,1597.0f}};
+const hail::Box kBig{{-4000.0f,-4000.0f},{4000.0f,4000.0f}};   // a BigWorld map's
+int Walls(){
+    const pjet::Perf* gunship=Kind("gunship");
+    const pjet::Perf* fighter=Kind("fighter");
+    if(!gunship || !fighter){std::printf("FAIL no gunship or fighter perf\n");return 1;}
+    int fails=0;
     {
         const float touch16[3]={347,24,129},head16=-30.0f,d16[2]={std::sin(head16*kPi/180.0f),std::cos(head16*kPi/180.0f)};
         const float room=std::fmax(hail::kTurnRoom,hail::kOuterTurns*FerryRadius(*gunship));
         const float oldOuter[2]={touch16[0]-d16[0]*(kFinal+room),touch16[2]-d16[1]*(kFinal+room)};
-        const bool outside=!hail::InBox(walls,oldOuter[0],oldOuter[1],0.0f);
+        const bool outside=!hail::InBox(kWalls,oldOuter[0],oldOuter[1],0.0f);
         std::printf("%s negative control: the 16:53 gunship's old outer point (%.0f,%.0f) lies %s the walls\n",outside ? "ok  " : "FAIL",
                     oldOuter[0],oldOuter[1],outside ? "outside" : "inside");
         fails+=!outside;
-        const Result r=Hail(*gunship,Start(-601,399,161,75,0,-6,57),touch16,head16,Law::production,walls);
+        const Result r=Hail(*gunship,Start(-601,399,161,75,0,-6,57),touch16,head16,Law::production,kWalls);
         const bool honest=r.end==End::refused || (r.end==End::landed && r.beyond<0.0f);
         std::printf("%s the 16:53 gunship hail now: %s (never flown at the wall: refused at once, or landed inside it)\n",honest ? "ok  " : "FAIL",Name(r.end));
         fails+=!honest;
     }
     {   // The entry fits, the outer point (4 turn radii further back) does not: refused, not flown at the wall.
-        const pjet::Perf* fighter2=fighter;const hail::Box mid{{-2500.0f,-2500.0f},{2500.0f,2500.0f}};
-        const float t0[3]={0,0,0},north[3]={0,0,1},R=FerryRadius(*fighter2);
+        const hail::Box mid{{-2500.0f,-2500.0f},{2500.0f,2500.0f}};
+        const float t0[3]={0,0,0},north[3]={0,0,1},R=FerryRadius(*fighter);
         const bool entryIn=hail::InBox(mid,0.0f,-hail::kFinalLength,0.5f*R);
         const bool refused=!hail::PlanPattern(t0,north,R,mid).ok;
         std::printf("%s a strip whose final fits but whose outer point does not is refused (entry inside %d)\n",entryIn && refused ? "ok  " : "FAIL",entryIn);
         fails+=!(entryIn && refused);
     }
-    // Every wing on that map: strips round its middle (12 headings), hailed from states 600 m from the middle. Where an
-    // approach fits (PlanPattern) it lands, never meets the ground and never goes past a wall (there the wall turns it back);
-    // where none fits the hail is refused at once.
-    const hail::Box big{{-4000.0f,-4000.0f},{4000.0f,4000.0f}};   // a BigWorld map's
-    for(const hail::Box* box:{&walls,&big})for(const auto& b:pjet::kBoardable) {
-        if(b.frame!=pjet::Airframe::wing)continue;
-        const auto& k=b.perf;int planned=0,down=0,out=0,crashed=0,cases=0;float worst=-1e9f;
-        for(int h=0;h<12;++h)for(float tx:{-400.0f,0.0f,400.0f}) {
-            const float touch2[3]={tx,0,tx*0.5f},head=h*30.0f;
-            const float dd[3]={std::sin(head*kPi/180.0f),0.0f,std::cos(head*kPi/180.0f)};
-            if(!hail::PlanPattern(touch2,dd,FerryRadius(k),*box).ok)continue;
-            ++planned;
-            for(float y:{250.0f,500.0f})for(float bank:{0.0f,90.0f})for(int bearing=0;bearing<4;++bearing)for(int hd=0;hd<4;++hd) {
-                const float a=bearing*kPi/2.0f;
-                const Result r=Hail(k,Start(std::sin(a)*600.0f,y,std::cos(a)*600.0f,0.5f*(k.minAir+k.top),0.0f,hd*90.0f+20.0f,bank),touch2,head,Law::production,*box);
-                ++cases;down+=r.end==End::landed;crashed+=r.end==End::crashed;
-                if(r.beyond>worst)worst=r.beyond;
-                if(r.beyond>0.0f)++out;
-            }
+    return fails;
+}
+
+// One wing on a walled map: strips round its middle (12 headings), hailed from states 600 m from the middle. Where an
+// approach fits (PlanPattern) it lands, never meets the ground and never goes past a wall (there the wall turns it back);
+// where none fits the hail is refused at once.
+int OnMap(const pjet::Perf& k,const hail::Box& box){
+    int planned=0,down=0,out=0,crashed=0,cases=0;float worst=-1e9f;
+    for(int h=0;h<12;++h)for(float tx:{-400.0f,0.0f,400.0f}) {
+        const float touch2[3]={tx,0,tx*0.5f},head=h*30.0f;
+        const float dd[3]={std::sin(head*kPi/180.0f),0.0f,std::cos(head*kPi/180.0f)};
+        if(!hail::PlanPattern(touch2,dd,FerryRadius(k),box).ok)continue;
+        ++planned;
+        for(float y:{250.0f,500.0f})for(float bank:{0.0f,90.0f})for(int bearing=0;bearing<4;++bearing)for(int hd=0;hd<4;++hd) {
+            const float a=bearing*kPi/2.0f;
+            const Result r=Hail(k,Start(std::sin(a)*600.0f,y,std::cos(a)*600.0f,0.5f*(k.minAir+k.top),0.0f,hd*90.0f+20.0f,bank),touch2,head,Law::production,box);
+            ++cases;down+=r.end==End::landed;crashed+=r.end==End::crashed;
+            if(r.beyond>worst)worst=r.beyond;
+            if(r.beyond>0.0f)++out;
         }
-        const bool ok=!crashed && !out && (!cases || down*10>=cases*8);
-        std::printf("%s %-12s (turns of %.0f m) on a +-%.0f map: %d of 36 strips fit, %d of %d hails landed, %d crashed, %d went past a wall (furthest %.0f m)\n",
-                    ok ? "ok  " : "FAIL",k.name,FerryRadius(k),box->hi[0],planned,down,cases,crashed,out,worst);
-        fails+=!ok;
+    }
+    const bool ok=!crashed && !out && (!cases || down*10>=cases*8);
+    std::printf("%s %-12s (turns of %.0f m) on a +-%.0f map: %d of 36 strips fit, %d of %d hails landed, %d crashed, %d went past a wall (furthest %.0f m)\n",
+                ok ? "ok  " : "FAIL",k.name,FerryRadius(k),box.hi[0],planned,down,cases,crashed,out,worst);
+    return !ok;
+}
+
+// Runs the unit `name` ("logged", "walls", "sweep:<kind>", "map1600:<kind>", "map4000:<kind>"); -1: no such unit.
+int Run(const char* name){
+    if(std::strcmp(name,"logged")==0)return Logged();
+    if(std::strcmp(name,"walls")==0)return Walls();
+    const char* colon=std::strchr(name,':');
+    if(!colon)return -1;
+    const pjet::Perf* k=Kind(colon+1);
+    if(!k)return -1;
+    const std::size_t n=(std::size_t)(colon-name);
+    if(n==5 && std::strncmp(name,"sweep",n)==0)return Sweep(*k);
+    if(n==7 && std::strncmp(name,"map1600",n)==0)return OnMap(*k,kWalls);
+    if(n==7 && std::strncmp(name,"map4000",n)==0)return OnMap(*k,kBig);
+    return -1;
+}
+}  // namespace
+
+// hail_glide_check [--trace] [UNIT...]: the named units (none: all of them, in order); --list: the units' names;
+// KIND Y SPEED CLIMB BANK BEARING HEADING: one production hail traced.
+int main(int argc,char** argv){
+    if(argc>7) {   // one case traced: kind y speed climb bank bearing(0-3) heading
+        trace=true;
+        for(const auto& b:pjet::kBoardable)if(std::strcmp(b.perf.name,argv[1])==0) {
+            const float a=std::atoi(argv[6])*kPi/2.0f;const float touch[3]={0,0,0};
+            const Jet s=Start(std::sin(a)*1500.0f,(float)std::atof(argv[2]),std::cos(a)*1500.0f,(float)std::atof(argv[3]),
+                              (float)std::atof(argv[4]),(float)std::atof(argv[7]),(float)std::atof(argv[5]));
+            const Result r=Hail(b.perf,s,touch,0.0f,Law::production);
+            std::printf("%s sink %.1f speed %.1f\n",Name(r.end),r.sink,r.speed);
+        }
+        return 0;
+    }
+    // Every unit, in the order the check printed them before it was split: as many as there are wings (no table to
+    // outgrow and cut short).
+    std::vector<std::string> names{"logged"};
+    for(const char* part:{"sweep","walls","map1600","map4000"}) {
+        if(std::strcmp(part,"walls")==0){names.emplace_back("walls");continue;}
+        for(const auto& b:pjet::kBoardable)
+            if(b.frame==pjet::Airframe::wing)names.push_back(std::string(part)+":"+b.perf.name);
+    }
+    bool list=false;int asked=0;
+    for(int i=1;i<argc;++i) {
+        if(std::strcmp(argv[i],"--list")==0)list=true;
+        else if(std::strcmp(argv[i],"--trace")==0)trace=true;
+        else ++asked;
+    }
+    if(list){for(const auto& n:names)std::printf("%s\n",n.c_str());return 0;}
+    int fails=0;
+    if(asked) {
+        for(int i=1;i<argc;++i) {
+            if(argv[i][0]=='-')continue;
+            const int f=Run(argv[i]);
+            if(f<0){std::printf("FAIL no unit %s (--list)\n",argv[i]);++fails;}
+            else fails+=f;
+        }
+    } else {
+        for(const auto& n:names)fails+=Run(n.c_str());
     }
     std::printf(fails ? "hail_glide_check: %d FAILED\n" : "hail_glide_check: all passed\n",fails);
     return fails ? 1 : 0;

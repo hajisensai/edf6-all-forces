@@ -21,6 +21,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "keyconfig.h"
 #include "crew.h"
+#include "perf_probe.h"
 #include "pvp.h"
 #include "enemy_control.h"
 #include "enemy_control_net.h"
@@ -34,7 +35,7 @@
 #include "exit_ground.h"
 #include "body506.h"
 #include "game_clock.h"
-#include "game_frame.h"
+#include "edf/game_frame.h"
 #include "gravity.h"
 #include "gravity_net.h"
 #include "floatgun.h"
@@ -60,8 +61,8 @@ namespace crew {
 // set (0x1198DFE, 0x11990C7) but still steps the viewport cameras (0x119953B on). Checked at load; off (never paused,
 // the old gap rule alone) when any of it differs.
 namespace {
-constexpr std::size_t kSystem=0x20B2958,kPauseWhy=0xCD8,kPauseCounts=0xCDC;
-constexpr unsigned kSystemVtable=0x1AE2278;
+constexpr std::size_t kSystem=gameframe::kSystem,kPauseWhy=0xCD8,kPauseCounts=0xCDC;   // the System (edf/game_frame.h)
+constexpr unsigned kSystemVtable=gameframe::kSystemVtable;
 bool pauseOk=false;
 }  // namespace
 bool CheckPauseFlag() noexcept {
@@ -86,22 +87,27 @@ bool GamePaused() noexcept {
 // It starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
 namespace { gameclock::Clock clock; }
 ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),GamePaused()); }
-// System increments +CE0 once before the scene's complete input/update traversal.
-// Reading this on the game thread avoids guessing frame boundaries from vehicle order.
+// The native scene step (common/edf/game_frame.h, shared with EDF6AutoTurret): the System increments it once before the
+// scene's complete input/update traversal. Reading it on the game thread avoids guessing frame boundaries from vehicle order.
 namespace { gameframe::Clock frameClock; bool frameClockOk=false; std::uint32_t missionCount=0; }
+// The handoffs' step (step_fresh.h): one per scene traversal the plugin saw run. Not frameClock.logical itself: System::update
+// increments +CE0 at the top of its step loop (0x1198FD0), before the pause test (0x11990C0) skips the scene, so under the
+// pause menu the native count runs on and the first traversal after it sees the whole pause as one jump. Counting the
+// traversals instead keeps the count still across the pause: a readout published just before it is as fresh after it.
+namespace { stepfresh::Traversals traversals; }
 ULONGLONG GameFrame() noexcept { return frameClock.logical; }
 ULONGLONG WallMs() noexcept { return GetTickCount64(); }
 SceneStep SceneStepNow() noexcept {
-    if(!frameClockOk)return {};
-    const auto system=At<const unsigned char*>(image,kSystem);
-    if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return {};
-    return {At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0),missionCount};
+    gameframe::Step s{};
+    if(!frameClockOk || !gameframe::ReadStep(image,s))return {};
+    return {s.scene,s.count,missionCount};
 }
 void SeeFrame(const void*) noexcept {
     if(!frameClockOk)return;
-    const auto system=At<const unsigned char*>(image,kSystem);
-    if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return;
-    frameClock.Observe(system,At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0));
+    gameframe::Step s{};
+    if(!gameframe::ReadStep(image,s))return;   // as gameframe::See, which the traversal count needs the outcome of
+    frameClock.Observe(s.system,s.scene,s.count);
+    stepfresh::See(traversals.Observe(frameClock.logical,GamePaused()));   // every thread's step count (step_fresh.h)
 }
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
@@ -850,35 +856,45 @@ int TeamObjects(std::int32_t team) noexcept {
 
 // The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
 // how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
+// This hook runs once a simulation STEP (the player soldier's pre-update, guarded by GameFrame), and a frame steps the
+// scene 0..3 times (System::update 0x1199713 loop, n clamped at 0x11A2F76): the frames themselves are timed on the main
+// loop by perf_probe.cpp. Here: the steps, how far apart (a frame's draw and wait fall between its last step and the
+// next frame's first), and what each step asked of memory.
 constexpr ULONGLONG kPerfMs=5000;
 constexpr double kPerfSlowMs=33.4;
 constexpr double kPerfLateMs=20.0;   // over one 1/60 s tick and its jitter: a frame that took two (frame_pacing.cpp)
-struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow,late; ULONGLONG at; } perf{};
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned steps; ULONGLONG at; } perf{};
 void PerfTick() noexcept {
     LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
     if(perf.last.QuadPart) {
         const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
-        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;perf.late+=ms>kPerfLateMs;if(ms>perf.worst)perf.worst=ms;}
+        if(ms<1000.0){perf.sum+=ms;++perf.steps;if(ms>perf.worst)perf.worst=ms;}
     }
     perf.last=now;
     const ULONGLONG t=GetTickCount64();
     if(t-perf.at<kPerfMs)return;
-    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over %.0f ms",perf.frames,
-        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.late,kPerfLateMs,perf.slow,kPerfSlowMs);
-    // what the frames carried (the stress runs: how many there really were, not how many the mission asked for)
-    if(Cfg().debug && perf.frames)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
+    const perfprobe::Frames fr=perfprobe::TakeFrames();
+    if(Cfg().debug && fr.frames)Log("PERF %u frames, %u steps: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over "
+        "%.0f ms; a step every %.1f ms (%.0f steps/s), worst %.1f ms",fr.frames,fr.steps,fr.sum/fr.frames,1000.0*fr.frames/fr.sum,
+        fr.worst,fr.over20,kPerfLateMs,fr.over33,kPerfSlowMs,perf.steps ? perf.sum/perf.steps : 0.0,
+        perf.sum>0.0 ? 1000.0*perf.steps/perf.sum : 0.0,perf.worst);
+    else if(Cfg().debug && perf.steps)Log("PERF %u steps (no frame hook): a step every %.1f ms (%.0f steps/s), worst %.1f ms",
+        perf.steps,perf.sum/perf.steps,1000.0*perf.steps/perf.sum,perf.worst);
+    // what the steps carried (the stress runs: how many there really were, not how many the mission asked for)
+    if(Cfg().debug && perf.steps)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
         TeamObjects(2));
     // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
     // the system calls left with their time
     const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only
-    if(Cfg().debug && perf.frames) {
-        const double f=static_cast<double>(perf.frames),tick=1000.0/static_cast<double>(hz.QuadPart);
-        Log("PERF MEM a frame: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
+    if(Cfg().debug && perf.steps) {
+        const double f=static_cast<double>(perf.steps),tick=1000.0/static_cast<double>(hz.QuadPart);
+        Log("PERF MEM a step: %.0f asks, %.0f page hits, %.1f working-set calls (%.1f pages, %.3f ms), %.1f VirtualQuery (%.3f ms)",
             static_cast<double>(r.asks)/f,static_cast<double>(r.pageHits)/f,static_cast<double>(r.wsCalls)/f,
             static_cast<double>(r.wsPages)/f,static_cast<double>(r.wsTicks)*tick/f,static_cast<double>(r.vqCalls)/f,
             static_cast<double>(r.vqTicks)*tick/f);
     }
-    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=perf.late=0;
+    perfprobe::Report(fr.frames);
+    perf.at=t;perf.worst=perf.sum=0.0;perf.steps=0;
 }
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
@@ -903,7 +919,6 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
     GuardedTick(kStepRescue,&SupportDispatchTick);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
-    GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepView,&ViewDiagTick);   // the grey-map diagnosis (viewdiag.cpp)
     GuardedTick(kStepBoarding,&BoardingTick);
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
@@ -1023,9 +1038,7 @@ void EnsureInputs() noexcept {
 }
 
 bool InstallCrew() noexcept {
-    constexpr unsigned char counterCode[]={0x41,0x8B,0x8E,0xE0,0x0C,0x00,0x00,0x8D,0x41,0x01,0x41,0x89,0x86,0xE0,0x0C,0x00,0x00};
-    constexpr unsigned char resetCode[]={0x48,0xC7,0x87,0xE0,0x0C,0x00,0x00,0x00,0x00,0x00,0x00};
-    frameClockOk=Matches(0x1198FD0,counterCode,sizeof(counterCode)) && Matches(0x1193551,resetCode,sizeof(resetCode));
+    frameClockOk=gameframe::CounterAsExpected(image);
     if(!frameClockOk){Log("HOOK crew: native scene step counter changed: crew off");return false;}
     // Without the game's SetTeam the plugin does not change a team at all (SetObjectTeam): no crew.
     setTeamOk=Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig));
@@ -1130,9 +1143,18 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 }
 
 
+// The scene's end (mission.cpp ReleaseGroupHook: the scene's resource group released): no traversal runs from here to the
+// next mission's, so the step count would stand still and keep every last-step stamp fresh in the menus. The scene's
+// handoffs are stale from here on, and the magnified sight lets the window's wheel go (map.cpp WheelProc).
+void SceneOver() noexcept {
+    stepfresh::NewMission(traversals.steps);
+    TakeScopeWheel(false);
+}
+
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
     frameClock.Reset();tickFrame=0;++missionCount;
+    stepfresh::NewMission(traversals.steps);   // nothing handed over in the last mission is fresh (step_fresh.h)
     ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};

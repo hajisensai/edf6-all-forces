@@ -6,8 +6,8 @@ exit 1 on a failure. What it holds in place:
   - npcai.cpp: InstallNpcAi installs it; Backpack runs from Drive alone (never for a script's unit), only with the held
     weapon known, behind NpcBackpack; a backpack weapon is out of ArmsOf's arms; while a use goes on the main trigger and the
     picks are off; Think still drives only the soldiers this machine runs (IsOnlineAuthority);
-  - the host takes the pack off a soldier for a room with an older build (SupportPeersApplyBackpacks, kExtBackpack announced
-    by every hello and named by the version notice);
+  - no per-peer backpack gate (net-6, 2026-11-24: the room protocol keeps older builds out, so a soldier's pack always
+    rides its plan: no SupportPeersApplyBackpacks, no kExtBackpack);
   - the generator puts the weapon in a sub weapon slot, out of the weapon sets; the room menu's new field is a 4th, its first
     three as they were;
   - the ini key is read, shipped and documented; the offline check runs under CTest.
@@ -135,7 +135,7 @@ def main() -> int:
     checks += 1
     if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')
-    arms = body(npcai, 'Arms ArmsOf(const unsigned char* h) noexcept')
+    arms = body(npcai, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept')
     checks += 1
     if 'NpcPackIndex(h,i)' not in arms:
         fail('ArmsOf: a backpack weapon counted among the arms it picks and fires')
@@ -147,17 +147,14 @@ def main() -> int:
     dispatch = code_only(read(root, 'src/support_dispatch.cpp'))
     soldier = body(dispatch, 'std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept')
     checks += 1
-    if not before(soldier, 'if(look.pack && !SupportPeersApplyBackpacks()) {', 'look.pack=0;', 'if(!look.On())return 0;', 'DecideVariant('):
-        fail('SoldierVariant: a pack sent to a room with an older build (its Validate refuses the whole plan)')
-    protocol = code_only(read(root, 'src/support_protocol.h'))
+    if not soldier or 'SupportPeersApplyBackpacks' in soldier or 'look.pack=0;' in soldier or \
+            not before(soldier, 'if(!look.On())return 0;', 'DecideVariant('):
+        fail('SoldierVariant: a per-peer backpack fallback is back (the room protocol keeps older builds out)')
     checks += 1
-    if not re.search(r'kExtensions=[^;]*kExtBackpack', protocol) or not re.search(r'kExtBuilt=[^;]*kExtBackpack[|;]', protocol):
-        fail('support_protocol.h: kExtBackpack not announced by every hello')
-    net = code_only(read(root, 'src/support_net.cpp'))
-    checks += 1
-    if 'PeersHaveExtension(support_net::kExtBackpack)' not in body(net, 'bool SupportPeersApplyBackpacks() noexcept') or \
-            '{FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack}' not in net:
-        fail('support_net.cpp: the peers\' kExtBackpack not asked, or the version notice does not name it')
+    for path in ('src/support_protocol.h', 'src/support_net.cpp', 'src/support_net.h'):
+        code = code_only(read(root, path))
+        if 'kExtBackpack' in code or 'SupportPeersApplyBackpacks' in code:
+            fail(f'{path}: the backpack extension bit or its peer gate is back')
 
     loadout = read(root, 'tools/support_loadout.py')
     with_pack = loadout.split('def with_pack(', 1)[1].split('\ndef ', 1)[0] if 'def with_pack(' in loadout else ''

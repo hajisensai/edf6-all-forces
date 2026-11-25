@@ -3,6 +3,7 @@
 #include "enemy_control_pose_codec.h"
 #include "crew.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cmath>
 #include <cstring>
 
@@ -42,7 +43,7 @@ struct Transaction {
     bool used=false,changed=false,pending=false;PoseKind kind=PoseKind::deiroi;void* stageRag=nullptr;
     Write write[kMostWrites]{};Body body[kMostBodies]{};Owner retained[kMostParts+1]{};
 };
-Transaction transactions[kTransactions]{};
+LazyRows<Transaction,kTransactions> transactions;
 struct Part {unsigned char* object=nullptr;void* control=nullptr;void* model=nullptr;void* rag=nullptr;void* collision=nullptr;};
 struct DeiroiData {unsigned char* points=nullptr;unsigned char* previous=nullptr;std::size_t count=0,oldCount=0,parts=0;Part part[kMostParts]{};};
 
@@ -83,6 +84,7 @@ Transaction* Existing(const NativeLease& l) noexcept {
     for(auto& t:transactions)if(t.used && t.object==l.object && t.control==l.control)return &t;return nullptr;
 }
 Transaction* Start(const NativeLease& l) noexcept {
+    if(!transactions.Allocate("native pose transactions"))return nullptr;
     for(auto& t:transactions)if(!t.used){t.writes=t.bodies=0;t.owners=1;t.owner=0;t.stageRag=nullptr;t.retained[0]={l.object,l.control,false,true};t.used=true;t.changed=t.pending=false;t.object=l.object;t.control=l.control;return &t;}return nullptr;
 }
 bool Clear(Transaction& t) noexcept {
@@ -535,8 +537,8 @@ bool PoseReady(const NativeLease& l) noexcept {
         return Readable(l.object,extent,true);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-bool CapturePose(const NativeLease& l,void* out,std::size_t capacity,std::size_t* used) noexcept {
-    if(used)*used=0;if(!out || !used || capacity<pose::kWireBytes || !PoseReady(l))return false;
+bool CapturePose(const NativeLease& l,State* out) noexcept {
+    if(!out || !PoseReady(l))return false;
     __try {
         State s;KindOf(l,&s.kind);s.profile=l.profile->profileHash;auto* o=l.object;
         alignas(16) float m[16]{};
@@ -562,11 +564,11 @@ bool CapturePose(const NativeLease& l,void* out,std::size_t capacity,std::size_t
             std::memcpy(s.deformation,o+0x1430,64);s.phase=At<float>(o,0xFD0);s.scale=At<float>(o,0xFD8);break;
         case PoseKind::deiroi:std::memcpy(s.targetAngles,o+0xF40,8);Get3(o,0x1610,s.linearVelocity);break;
         }
-        if(!pose::Encode(s,out,pose::kWireBytes))return false;*used=pose::kWireBytes;return true;
+        if(!pose::Valid(s))return false;*out=s;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-bool ApplyPose(NativeLease& l,const void* bytes,std::size_t size) noexcept {
-    State state;PoseKind kind{};if(!pose::Decode(bytes,size,&state) || !KindOf(l,&kind) || kind!=state.kind ||
+bool ApplyPose(NativeLease& l,const State& state) noexcept {
+    PoseKind kind{};if(!pose::Valid(state) || !KindOf(l,&kind) || kind!=state.kind ||
         !l.profile || l.profile->profileHash!=state.profile || !PoseReady(l))return false;
     l.restoreGate=&RestorePose;auto* t=Start(l);if(!t){l.restoreGate=nullptr;return false;}bool ok=false;
     __try {DeiroiData d;if(Preflight(l,kind,*t,d))ok=Apply(l,state,*t,d);}

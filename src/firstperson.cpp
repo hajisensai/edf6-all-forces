@@ -41,11 +41,13 @@
 //    in front of the camera (the whole player, shadow too, for half a second). The real box through T was not enough
 //    (the Wing Diver's weapon, that near the eye, was still drawn in one frame in seven): in first person each camera
 //    step hands Umbra a box around the eye for the body and the weapons in hand (the camera inside it: never culled),
-//    and the real boxes back on the way out. That is done as the frame's render starts (System::update's call of the
-//    render 0x11978D0 at 0x1198FA4, redirected): a weapon's own update (slot 3 -> 0x6C06A0 -> 0x11B30C0) may come after
-//    the camera step and put its real box back. That was not all: with the camera in the head the Wing Diver's gun was
-//    still left out of the visible set four frames in five (drawn every frame in the third person, measured; the same
-//    with the placement off). So the main view's opaque pass is completed: after its list (0x11E1630 for each object,
+//    and the real boxes back on the way out. That is done at the render recording's first projection (render_record.cpp,
+//    FirstProjection): the recording's own loop first (0x1197950: slot 3 -> 0x6C06A0 -> 0x11B30C0(model,model+0x110))
+//    puts every soldier's real box back, the body's and the weapons' in hand, on every frame (M001, 2026-11-24: 18000 of
+//    18000 frames, while the boxes were placed before the recording). Before that move the placement never reached a
+//    draw, which is why the Wing Diver's gun with the camera in the head was still left out of the visible set four
+//    frames in five (drawn every frame in the third person, measured; "the same with the placement off"). So the main
+//    view's opaque pass is completed as well: after its list (0x11E1630 for each object,
 //    pass 1) and before the pass ends (0x11E1590(system, 1), its call at 0x11E2572 redirected), a model of the
 //    viewmodel the pass has not drawn this frame is submitted the same way.
 //  - Two hands (measured: the Fencer's weapons hung below the view): each weapon in hand (each weapon set's current one)
@@ -62,6 +64,8 @@
 //  - The camera's first row points to the screen's left (measured: a grip at +x drew on the left), so every "right" the
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "frame_rate_view.h"
+#include "render_record.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
@@ -73,6 +77,7 @@
 #include "heli.h"
 #include "log_once.h"
 #include "fp_skin_gpu.h"
+#include "infantryscope.h"
 #include "thermal.h"
 #include "enemy_control.h"
 #include "map.h"
@@ -122,7 +127,7 @@ constexpr int kMostWeapons=16;
 // animation runs, 4 = its _finish: 0x693DB5 / 0x693D0E), the reload's frames left +0xE68 (both states run while it is
 // above 0: 0x693BAF; payload.cpp's reload bar reads it too), ReloadTime +0x20C (frames), FireRecoil +0x37C.
 constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264,kActLimit=0x5D0,
-                      kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,
+                      kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,kTrigger=0xD70,
                       kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
                       kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
@@ -150,12 +155,9 @@ constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 constexpr unsigned kUmbraPlace=0x11B30C0;
 constexpr std::size_t kModelBounds=0x110,kUmbraObject=0x10;
 constexpr float kEyeBox=2.0f;
-// The frame's render, its call in System::update (rcx the system, dl, r8b).
-constexpr unsigned kRenderCall=0x1198FA4,kRender=0x11978D0;
 // Native camera update submits its camera-to-world to Umbra before our camera callback returns. Capture that exact
 // frame at the verified main-camera call site, rather than comparing the later, differently timed camera matrix.
 constexpr unsigned kCameraSubmitCall=0x118E10A,kCameraSubmit=0x11D46D0;
-using RenderFn=void(__fastcall*)(void*,std::uint8_t,std::uint8_t);
 // The main view's opaque pass: each object submitted by 0x11E1630(system, object, 1); the pass ended by
 // 0x11E1590(system, 1), called at 0x11E2572.
 constexpr unsigned kSubmit=0x11E1630,kPassEnd=0x11E1590,kPassEndCall=0x11E2572;
@@ -814,6 +816,7 @@ void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
     if(n>kMostSets)n=kMostSets;
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
+        if(w && h[kTrigger+k])c.firing=true;
         const std::int32_t shots=w ? At<std::int32_t>(w,kShotCount) : 0,fire=w ? At<std::int32_t>(w,kFireState) : 0;
         if(Current().have && w!=Current().held[k] && Current().held[k])c.switched=true;
         if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c,&reload);
@@ -912,9 +915,13 @@ void Place(const void* model,const float* eye) noexcept {
     reinterpret_cast<PlaceFn>(image+kUmbraPlace)(const_cast<void*>(model),at.m);
 }
 
-// The body and the weapons in hand around the eye, or (`real`) where they are.
+// The body and the weapons in hand around the eye, or (`real`) where they are. The eye is the one this frame is drawn
+// from: on a frame without ticks the unlimited frame rate's blend (FrameRateDrawnEye; Umbra culls from the camera the
+// render recording projects, render_record.cpp), else the camera's own.
 void PlaceAll(bool real) noexcept {
-    const float* eye=real ? nullptr : reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
+    float drawn[3];
+    const float* eye=real ? nullptr :
+        FrameRateDrawnEye(Current().cam,drawn) ? drawn : reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
     if(ModelOwnerIs(Current().body,kBodyModel,Current().bodyCtrl))Place(Current().body,eye);
     for(int i=0;i<Current().inHandCount;++i)
         if(ModelOwnerIs(Current().inHand[i],kWeaponModel,Current().inHandCtrls[i]))Place(Current().inHand[i],eye);
@@ -1359,6 +1366,7 @@ void ReturnNear(unsigned char* cam) noexcept {
 
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
+    if(Current().on)FrameRateCameraCut(Current().cam);   // back to the stock camera: no blend across it
     const bool humanOwned=Current().human && ModelOwnerIs(Current().human+kBodyModel,kBodyModel,Current().bodyCtrl);
     if(Current().on && humanOwned){PlaceAll(true);Rebatch(true);}
     if(Current().cam)ReturnNear(Current().cam);
@@ -1717,6 +1725,7 @@ void Camera(unsigned char* cam) noexcept {
     watched.store(nullptr,std::memory_order_relaxed);
     if(!Current().on || Current().cam!=cam || Current().human!=h || Current().bodyCtrl!=At<const void*>(h,kSelfCtrl)) {
         Leave();
+        FrameRateCameraCut(cam);
         Current().on=true;Current().cam=cam;Current().human=h;Current().fresh=true;Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
         Log("FP view on %p (player %p)",cam,h);
     }
@@ -1756,13 +1765,20 @@ void Camera(unsigned char* cam) noexcept {
     Flashes();
 }
 
-// The render about to start: the viewmodel's models placed around the eye for Umbra (above).
-void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
+// The render about to start: the viewmodel's models placed around the eye for Umbra (above). The first person's turn
+// of render_record.cpp, after the frame rate's poses (it places from the eye drawn this frame).
+void RenderStart() noexcept {
     SyncSession();++renderFrame;
+}
+
+// The recording's first projection (render_record.cpp): the viewmodel's Umbra boxes around the eye this frame draws.
+// Not before the recording: its loop (0x1197950 -> 0x6C06A0) places every soldier's model again from its own bounds,
+// the body's and the weapons' too, on every frame (M001, 2026-11-24).
+void FirstProjection(void*,const int*,bool first) noexcept {
+    if(!first)return;
     State* before=selected;
     __try { for(auto& state:states)if(state.on && !state.overridden){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
-    reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
 
 // A model of the viewmodel drawn in the selected view's opaque pass in progress (render thread: counted by that pass's
@@ -1836,6 +1852,10 @@ void Publish() noexcept {
     });
 }
 
+// Whether the last camera step drew a controlled enemy's view (its take and its give-back are cuts for the frame rate's
+// interpolation, frame_rate_view.h).
+bool enemyViewLast=false;
+
 void CameraAfterNative(unsigned char* cam) noexcept {
     const M4 native=MatrixAt(cam+kCamMatrix);
     __try {
@@ -1847,9 +1867,12 @@ void CameraAfterNative(unsigned char* cam) noexcept {
             // A controlled enemy owns this source player's view. Retire human viewmodel/near/batches and cancel any
             // interrupted FP-key gesture. The map/TV chain still runs outside this step and has final precedence.
             CancelToggle(human);if(Current().on)Leave();
+            if(!enemyViewLast)FrameRateCameraCut(cam);
+            enemyViewLast=true;
             std::memcpy(cam+kCamMatrix,controlled.m,64);
             ChaseCamUp(cam,nullptr);
         } else {
+            if(enemyViewLast){enemyViewLast=false;FrameRateCameraCut(cam);}
             Camera(cam);
             if(!Current().on || Current().cam!=cam || !Current().riding) {
                 VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix),true);   // third person: round the vehicle
@@ -2325,6 +2348,9 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
     fpskin::ModelScope maskScope;
     if(pass==3 || pass==4 || pass>5){NextDraw(model)(model,ctx,pass,view);return;}
+    // The magnified view sees from the shoulder camera when opening the scope from third person.
+    // Omit its owner's body in the lens pass while preserving their main view and shadow.
+    if(const auto* owner=InfantryScopeLensOwner(view); owner && model==owner+kBodyModel)return;
     State* state=ViewState(view);
     if(!state){NextDraw(model)(model,ctx,pass,view);return;}
     StateScope scope(state);
@@ -2758,7 +2784,11 @@ bool InstallFirstPerson() noexcept {
     const bool shotOk=InstallShotEntry();
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
-    placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
+    placeOk=placeOk && renderrecord::Install();
+    if(placeOk) {
+        renderrecord::Set(renderrecord::Slot::kFirstPerson,&RenderStart);
+        renderrecord::SetProject(renderrecord::Slot::kFirstPerson,&FirstProjection);
+    }
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());

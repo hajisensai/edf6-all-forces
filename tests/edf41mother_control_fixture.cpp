@@ -31,7 +31,7 @@ void LiveSetRagdollLayer(void*,int) noexcept{}
 }
 #endif
 namespace edf {
-bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept{return false;}
+bool RedirectCall(unsigned char*,void*,void*,bool&,edf::Claim,const char*) noexcept{return false;}
 bool Readable(const void* p,std::size_t n,bool) noexcept {MEMORY_BASIC_INFORMATION mbi{};if(!p || !VirtualQuery(p,&mbi,sizeof(mbi)) || mbi.State!=MEM_COMMIT || (mbi.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;return n<=reinterpret_cast<std::uintptr_t>(mbi.BaseAddress)+mbi.RegionSize-reinterpret_cast<std::uintptr_t>(p);}
 }
 namespace crew {

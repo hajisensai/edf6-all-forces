@@ -2,6 +2,7 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "preload_set.h"
 #include "online_authority.h"
 #include "vehicleram.h"
 #include "gunmuzzle.h"
@@ -174,6 +175,7 @@ const EmcFile kEmcFiles[]={
     // the long-range barrages' (barrage.cpp; pylib/vcobjects.py BARRAGE_FILES, tools/make_barrage.py)
     {L"app:/object/edf6vc_barrage_round.sgo",L"EDF6VC_BARRAGE_ROUND.SGO","barrage round"},
     {L"app:/object/edf6vc_barrage_burst.sgo",L"EDF6VC_BARRAGE_BURST.SGO","barrage burst"},
+    {L"app:/object/edf6vc_barrage_missile.sgo",L"EDF6VC_BARRAGE_MISSILE.SGO","barrage missile"},
     // the Andryusha's bomblets (andryusha.cpp; pylib/vcobjects.py ANDRYUSHA_BOMBLET_FILES, tools/make_katyusha.py)
     {L"app:/object/edf6vc_andryusha_blast.sgo",L"EDF6VC_ANDRYUSHA_BLAST.SGO","Andryusha bomblet blast"},
     {L"app:/object/edf6vc_andryusha_fire.sgo",L"EDF6VC_ANDRYUSHA_FIRE.SGO","Andryusha bomblet fire"},
@@ -286,7 +288,7 @@ unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,
     // the EMC and the guns on its own copy, so elsewhere the round still flies and bursts (the same sight) with no damage:
     // the hit counts once, not once per machine and not nowhere.
     if(damage>0.0f && !OnlineShotCounts(owner,by))damage=0.0f;
-    alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
+    alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, from[0],from[1],from[2],1};
     unsigned char* const o=ShellCreate(sgo,m,ok);
     if(!o)return nullptr;
     __try {
@@ -343,9 +345,6 @@ float Tier(const unsigned char* v) noexcept {
     return kind && kind->durability>0.0f && hpMax>0.0f && std::isfinite(hpMax) ? hpMax/kind->durability : 1.0f;
 }
 
-// Where gunship round `r` leaves gunship `v` (entry `j`) for `at`: off its airframe on the round's path relative to the
-// gunship in flight (gunmuzzle.h Launch: the box's centre out along that path to the box grown by the round's hit radius,
-// kMargin and the gunship's travel over a late round's frame). False when the aim is inside that.
 gunmuzzle::Motion MotionOf(const Jet& j) noexcept {
     gunmuzzle::Motion mo{};
     for(int c=0;c<3;++c){mo.vel[c]=j.m.vel[c]/60.0f;mo.spin[c]=j.m.omega[c]/60.0f;}   // m/s, rad/s -> a frame
@@ -356,8 +355,15 @@ gunmuzzle::Motion MotionOf(const Jet& j) noexcept {
 const gunmuzzle::Airframe& AirframeOf(const unsigned char* v) noexcept {
     return BodyMark(v)==Row(Body::c130Gunship).mark ? gunmuzzle::kC130Gunship : gunmuzzle::kGunship;
 }
-bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gunmuzzle::Round& r,float* out) noexcept {
-    return gunmuzzle::Launch(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),AirframeOf(v),r,at,r.hit+gunmuzzle::kMargin,out);
+bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gunmuzzle::Round& r,float* out,int gatlingShot=-1) noexcept {
+    const float* const pose=reinterpret_cast<const float*>(v+kMatrix);
+    const auto& airframe=AirframeOf(v);
+    if(&airframe==&gunmuzzle::kC130Gunship) {
+        const float* const barrel=gatlingShot>=0 ? gunmuzzle::kC130Gatling[gatlingShot&1] : gunmuzzle::kC130Bofors;
+        gunmuzzle::ToWorld(pose,barrel,out);
+        return gunmuzzle::LeavesC130Port(pose,out,at);
+    }
+    return gunmuzzle::Launch(pose,MotionOf(j),airframe,r,at,r.hit+gunmuzzle::kMargin,out);
 }
 
 // Whether round `r` from `muzzle` at `aim` keeps its hit sphere off gunship `v`'s airframe as both fly (gunmuzzle.h Clears:
@@ -368,7 +374,13 @@ bool GunshipMuzzle(const Jet& j,const unsigned char* v,const float* at,const gun
 constexpr ULONGLONG kOwnHeldLogMs=2000;
 bool GunshipClears(const Jet& j,const unsigned char* v,const gunmuzzle::Round& r,const float* muzzle,const float* aim,const char* gun,
                    const char* who,int& count,ULONGLONG& at) noexcept {
-    if(gunmuzzle::Clears(reinterpret_cast<const float*>(v+kMatrix),MotionOf(j),AirframeOf(v),r,muzzle,aim))return true;
+    const float* const pose=reinterpret_cast<const float*>(v+kMatrix);
+    const auto& airframe=AirframeOf(v);
+    // Port guns start within the full-span collision box. The collector already skips the shooter's bodies.
+    // Keep their shot on the port side even after scattering it.
+    if(&airframe==&gunmuzzle::kC130Gunship)
+        return PassThrough() && gunmuzzle::LeavesC130Port(pose,muzzle,aim);
+    if(gunmuzzle::Clears(pose,MotionOf(j),airframe,r,muzzle,aim))return true;
     ++count;
     const ULONGLONG ms=GameMs();
     if(!at || ms-at>=kOwnHeldLogMs) {
@@ -393,7 +405,7 @@ bool GunShot(Jet& j,SideGun g,const unsigned char* v,const float* pos,const floa
     if(Len(d)>gun.reach)return false;
     const float damage=gun.damage*Tier(v);
     float muzzle[3],aim[3];
-    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle,g==SideGun::gatling ? c.shots : -1))return false;
     gunmuzzle::Scatter(muzzle,at,gun.spread,c.shots,aim);
     if(!GunshipClears(j,v,gun.round,muzzle,aim,gun.name,who,c.ownHeld,c.ownHeldAt))return false;
     c.at=ms;
@@ -425,7 +437,7 @@ bool GunAtTarget(Jet& j,SideGun g,const unsigned char* v,const float* pos,ULONGL
     if(Len(to)>gun.reach)return false;
     c.lookAt=ms;
     float muzzle[3],hit[3];
-    if(!GunshipMuzzle(j,v,at,gun.round,muzzle))return false;   // no clear line to a target inside the airframe
+    if(!GunshipMuzzle(j,v,at,gun.round,muzzle,g==SideGun::gatling ? c.shots : -1))return false;
     if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
         if(Len(gap)>kGunSightSlack) {
@@ -676,6 +688,8 @@ bool InstallBay(bool spawnOk) noexcept {
 
 void PreloadShells(void* mgr,bool gunship) noexcept {
     gunshipReady=shellsOk && gunship;
+    // This mission's set (preload_set.h): the vehicles' rounds (every mission but PreloadMode=2), the Dreadnought's.
+    const bool rounds=preload::Want(preload::Item::vehicleRounds),dn=preload::Want(preload::Item::dnRounds);
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
     for(auto& gun:kSideGuns) {   // each side gun whose round is installed; one from before the gun: the guns it had
         gun.ready=gunshipReady && ModFileThere(gun.file);
@@ -683,17 +697,17 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         else if(gunshipReady)Log("JET the gunship has no %s this mission: no %ls (python tools/make_jets.py, or the installer)",gun.name,gun.file);
     }
     for(int i=0;i<kChargeCount;++i) {
-        chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
+        chargeReady[i]=shellsOk && rounds && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
     }
-    drillReady=shellsOk && ModFileThere(kDrillChargeFile);
+    drillReady=shellsOk && rounds && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
     for(int i=0;i<kEmcCount;++i) {
-        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
+        emcReady[i]=shellsOk && rounds && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
         if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
     }
     for(int i=0;i<kDnRoundCount;++i) {   // with the Dreadnought (gunship: jet_spawn.cpp asks for its cannon with it)
-        dnRoundReady[i]=gunshipReady && ModFileThere(kDnRounds[i].file);
+        dnRoundReady[i]=gunshipReady && dn && ModFileThere(kDnRounds[i].file);
         if(dnRoundReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDnRounds[i].sgo,2,-1);
     }
     char charges[64];
@@ -873,9 +887,10 @@ bool RoundBlast(const RoundObj& r,float radius) noexcept {
     } __except(FaultLog("EMC round blast",GetExceptionInformation())){return false;}
 }
 
-bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept {
-    const int i=static_cast<int>(EmcRound::barrage);
-    if(!by || !ifcAmmoOk || !EmcRoundReady(EmcRound::barrage) || !(size>0.0f) || !(blast>=0.0f))return false;
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark,bool missile) noexcept {
+    const auto kind=missile ? EmcRound::barrageMissile : EmcRound::barrage;
+    const int i=static_cast<int>(kind);
+    if(!by || !ifcAmmoOk || !EmcRoundReady(kind) || !(size>0.0f) || !(blast>=0.0f))return false;
     unsigned char* const o=ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,aim,damage,true,kEmcFiles[i].name);
     if(!o)return false;
     __try {

@@ -20,11 +20,25 @@ struct State {
     float phase=0,scale=0,bank=0;
 };
 
+// One host sample on the wire: the state plus when it was taken (the host's GameFrame(), low 32 bits) and how far the body
+// actually moved per logic frame since the previous sample (measured from positions, enemy_control_pose_interp.h
+// MeasureMotion). The guest places samples on the host's frame timeline and extrapolates with motion
+// (enemy_control_pose_interp.h Track); the native linearVelocity's units differ per class and are only written back.
+struct Packet {
+    State state{};
+    std::uint32_t senderFrame=0;
+    float motion[3]{};
+};
+
 inline constexpr std::uint32_t kWireMagic=0x45534F50u; // "POSE" in little endian.
-inline constexpr std::uint32_t kWireVersion=1u;
+// Version 2 (net-9, room protocol 17): senderFrame and motion[3] after the 16-byte header. A version-1 frame is rejected.
+inline constexpr std::uint32_t kWireVersion=2u;
 inline constexpr std::size_t kFloatCount=54;
-inline constexpr std::size_t kWireBytes=16+kFloatCount*4;
-static_assert(kWireBytes==232 && sizeof(float)==4 && std::numeric_limits<float>::is_iec559,
+inline constexpr std::size_t kHeaderBytes=32;
+inline constexpr std::size_t kWireBytes=kHeaderBytes+kFloatCount*4;
+// 5 m per logic frame is 300 m/s; MeasureMotion reports a larger step as zero (a teleport, not motion).
+inline constexpr float kMaxMotion=5.0f;
+static_assert(kWireBytes==248 && sizeof(float)==4 && std::numeric_limits<float>::is_iec559,
               "pose wire requires IEEE-754 binary32");
 
 namespace codec_detail {
@@ -130,8 +144,20 @@ inline bool Valid(const State& state) noexcept {
     return true;
 }
 
-inline bool Encode(const State& state,void* buffer,std::size_t bytes) noexcept {
-    if(buffer==nullptr || bytes!=kWireBytes || !Valid(state))return false;
+inline bool ValidMotion(const float (&motion)[3]) noexcept {
+    double lengthSquared=0;
+    for(float value:motion) {
+        if(!std::isfinite(value))return false;
+        lengthSquared+=static_cast<double>(value)*value;
+    }
+    return lengthSquared<=static_cast<double>(kMaxMotion)*kMaxMotion;
+}
+
+inline bool Valid(const Packet& packet) noexcept {return Valid(packet.state) && ValidMotion(packet.motion);}
+
+inline bool Encode(const Packet& packet,void* buffer,std::size_t bytes) noexcept {
+    if(buffer==nullptr || bytes!=kWireBytes || !Valid(packet))return false;
+    const State& state=packet.state;
     float fields[kFloatCount]{};
     codec_detail::Flatten(state,fields);
     auto* out=static_cast<unsigned char*>(buffer);
@@ -139,20 +165,24 @@ inline bool Encode(const State& state,void* buffer,std::size_t bytes) noexcept {
     codec_detail::Write32(out+4,kWireVersion);
     codec_detail::Write32(out+8,static_cast<std::uint32_t>(state.kind));
     codec_detail::Write32(out+12,state.profile);
-    for(std::size_t i=0;i<kFloatCount;++i)codec_detail::Write32(out+16+i*4,codec_detail::Bits(fields[i]));
+    codec_detail::Write32(out+16,packet.senderFrame);
+    for(std::size_t i=0;i<3;++i)codec_detail::Write32(out+20+i*4,codec_detail::Bits(packet.motion[i]));
+    for(std::size_t i=0;i<kFloatCount;++i)codec_detail::Write32(out+kHeaderBytes+i*4,codec_detail::Bits(fields[i]));
     return true;
 }
 
-inline bool Decode(const void* buffer,std::size_t bytes,State* out) noexcept {
+inline bool Decode(const void* buffer,std::size_t bytes,Packet* out) noexcept {
     if(buffer==nullptr || out==nullptr || bytes!=kWireBytes)return false;
     const auto* in=static_cast<const unsigned char*>(buffer);
     if(codec_detail::Read32(in)!=kWireMagic || codec_detail::Read32(in+4)!=kWireVersion)return false;
-    State candidate{};
-    candidate.kind=static_cast<Kind>(codec_detail::Read32(in+8));
-    candidate.profile=codec_detail::Read32(in+12);
+    Packet candidate{};
+    candidate.state.kind=static_cast<Kind>(codec_detail::Read32(in+8));
+    candidate.state.profile=codec_detail::Read32(in+12);
+    candidate.senderFrame=codec_detail::Read32(in+16);
+    for(std::size_t i=0;i<3;++i)candidate.motion[i]=codec_detail::Float(codec_detail::Read32(in+20+i*4));
     float fields[kFloatCount]{};
-    for(std::size_t i=0;i<kFloatCount;++i)fields[i]=codec_detail::Float(codec_detail::Read32(in+16+i*4));
-    codec_detail::Expand(fields,candidate);
+    for(std::size_t i=0;i<kFloatCount;++i)fields[i]=codec_detail::Float(codec_detail::Read32(in+kHeaderBytes+i*4));
+    codec_detail::Expand(fields,candidate.state);
     if(!Valid(candidate))return false;
     *out=candidate;
     return true;

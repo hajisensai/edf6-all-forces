@@ -235,7 +235,9 @@ constexpr float VehicleScale(VehicleBody b) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(b);
     return !row ? 1.f : row->tank || b==VehicleBody::mech ? kTankScale : kJetScale;
 }
-// A vehicle turns slowly on its stand (the yaw +0x2A4 the menu otherwise holds): every pylon comes round. rad / frame.
+// A vehicle turns slowly on its stand (the yaw +0x2A4 the menu otherwise holds): every pylon comes round. rad a 60 Hz
+// frame (0.6 rad/s); Hold takes the frame's length in such frames (the UI's dt * 60), so the turn keeps its speed at any
+// frame rate.
 inline constexpr float kVehicleTurn=0.01f;
 inline constexpr float kTwoPi=6.28318531f;
 constexpr float Turned(float yaw,float by) noexcept {
@@ -249,10 +251,10 @@ struct Turntable {
     bool on=false;
     float base=0.f;
     // The yaw to hold this frame (`yaw` the one held so far): turning, it advances; stopping, the saved yaw.
-    float Hold(float yaw,bool turn) noexcept {
+    float Hold(float yaw,bool turn,float frames=1.f) noexcept {
         if(turn) {
             if(!on){on=true;base=yaw;}
-            return Turned(yaw,kVehicleTurn);
+            return Turned(yaw,kVehicleTurn*frames);
         }
         if(on){on=false;return base;}
         return yaw;
@@ -311,7 +313,8 @@ inline Actions Step(Plan& p,const Want& w,const Shown& s) noexcept {
     if(p.locked){a.unlock=true;p.locked=false;}
     return a;
 }
-// TickPreview stopped (the room / HQ screen went without closing the menu): the view puts the player back by itself.
+// TickPreview stopped (the room / HQ screen went without closing the menu): the view puts the player back by itself
+// after kOrphanFrames 60 Hz frames of the view's own (counted by the UI's dt, so the same time at any frame rate).
 inline constexpr unsigned kOrphanFrames=30;
 
 // --- The squad's other soldiers (docs/room-3d-preview-re.md section 6.3): views the preview makes, one soldier each ---

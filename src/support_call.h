@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include "sortie_plan.h"
 namespace crew {
 // Real support soldiers are the stock Ranger templates N601_COMMON_RANGER_<variant>[_LEADER] of Root.cpk: the same
 // AssultSoldier class, model and CAS, each loading its own stock AI weapon (tests/support_soldier_native_audit.py).
@@ -128,7 +129,8 @@ int SupportCallSeats(int index) noexcept;
 // The load the entry brings uncomposed (the ini's weapons, support_config.h), the panel's start; false for none.
 bool SupportCallPreset(int index,SupportLoadout* out) noexcept;
 // SupportCallAt with a composed load (nullptr or empty: the call's own). A load past the entry's seats is refused.
-bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept;
+bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity,
+                           const float* strikeHeading=nullptr,const sortie::RunSpec& run={}) noexcept;
 // The catalog entry's stable configuration key (EDF6VehicleCrew.ini SupportDisabled / SupportAircraftCount_<key>).
 const wchar_t* SupportCallKey(int index) noexcept;
 // The map's call of entry `index` for its price (SupportCallPrice: refused with why when the pool holds less, taken once it
@@ -157,7 +159,7 @@ const wchar_t* SupportStrikeName(int strike) noexcept;
 std::uint32_t SupportStrikePt(int strike) noexcept;
 int SupportStrikeBarrage(int strike) noexcept;
 void SupportStrikeHeading(const float* target,float* out) noexcept;
-bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity,const float* strikeHeading=nullptr) noexcept;
 // The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
 int SupportMenuCount() noexcept;
 // Why the mission's rules (support_policy.h Allowed) keep entry `index` from coming now, nullptr when they let it: the
@@ -167,8 +169,7 @@ const wchar_t* SupportCallForbidden(int index) noexcept;
 // The sea rescue (2026-10-09, the user: 「给救援加一个支援目录项，走正规的呼叫支援流程」): the catalog's last entry,
 // after the airdrops, so every older index keeps its meaning on the wire. heli.cpp's trigger (a local player on foot in
 // the sea, a submarine carrier out) asks for it at the swimmer through the same request path as a map call: offline /
-// a one-player world's host plans it here, any other online machine through the host (support_net, kExtSeaRescue on
-// every peer). One 410 made on the carrier's deck or in the air at the edge, its real pilot and a door gunner made
+// a one-player world's host plans it here, any other online machine through the host (support_net). One 410 made on the carrier's deck or in the air at the edge, its real pilot and a door gunner made
 // inside it and seated at once; its other door seat is left for the swimmer. Same return and note as SupportCallAt.
 int SupportRescueCatalog() noexcept;
 bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noexcept;

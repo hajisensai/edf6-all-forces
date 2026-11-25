@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Room member attributes for other plugins, Windows x64 C ABI (docs/member-attribute-api.md). Copy this header into
+// Room member attributes for other plugins, Windows x64 C ABI (edf-coop-stable:docs/member-attribute-api.md). Copy this header into
 // consumers; never link C++ types. Resolve EDF6CoopGetMemberAttributeApi from EDF6Coop.dll with GetProcAddress and ask
 // for EDF6COOP_MEMBER_ATTRIBUTE_VERSION; an unknown version returns NULL. The table is static: keep the pointer.
 //

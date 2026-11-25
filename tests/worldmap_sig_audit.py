@@ -109,6 +109,11 @@ check(arrays['kCurrentSig'][2] == consts['kCurrent'] and rel(0x8A5B2F, 5, 1) == 
 # The select's mode bit, the input's repeat mask.
 check(arrays['kModeSig'][2:6] == struct.pack('<I', consts['kSelectMode']), 'the confirmable bit +0x7B4')
 check(arrays['kRepeatSig'][3:7] == struct.pack('<I', consts['kRepeat']), 'the merged repeat mask +0x4528')
+mouse_call = consts['kVerticalMouseCall']
+check(img[mouse_call] == 0xE8 and rel(mouse_call, 5, 1) == consts['kVerticalMouse'],
+      'the vertical list first calls mouse navigation')
+check(img[mouse_call+5:mouse_call+9] == bytes.fromhex('84c0757c'),
+      'a false mouse result falls through to direction input')
 # The confirm 0x8A85C0 is the constructor's cbRequestMission; 0x8A27B8 calls the focus 0x953350 on this+0x770.
 check(img[0x8A27B8:0x8A27BF] == bytes.fromhex('488d8e70070000') and struct.unpack_from('<I', img, 0x8A27BB)[0] == consts['kButtons'] and
       rel(0x8A27BF, 5, 1) == consts['kFocus'], 'the constructor: lea rcx,[rsi+770h]; call 0x953350 (the first focus)')
