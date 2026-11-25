@@ -164,6 +164,9 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     V o;
     o.pos = mul(vp, Proj);
     o.color = p.color;
+    // Ours: a puff whose centre is about as near as its own size fades (the camera inside a dust cloud sees through
+    // it, not a wall); the stock kinds keep their own distance fade.
+    if (Kind == 0u) o.color.a *= saturate((centre - 0.25 * p.size) / max(0.75 * p.size, 0.5));
     float2 uv = c * float2(0.5, -0.5) + 0.5;
     float last = (float)(max(Frames, 1u) - 1u);
     float fr = clamp(p.frame, 0.0, last);
@@ -304,7 +307,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd;
     ComPtr<ID3D11DepthStencilState> noDepth;
-    ComPtr<ID3D11RasterizerState> raster;
+    ComPtr<ID3D11RasterizerState> raster,rasterCut;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11Buffer> particles,frameCb,batchCb;
     ComPtr<ID3D11ShaderResourceView> particleView;
@@ -377,6 +380,7 @@ struct Renderer::Impl final {
         D3D11_DEPTH_STENCIL_DESC ds{};ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         ds.DepthFunc=D3D11_COMPARISON_ALWAYS;
         D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.CullMode=D3D11_CULL_NONE;r.DepthClipEnable=TRUE;
+        D3D11_RASTERIZER_DESC rc=r;rc.ScissorEnable=TRUE;
         D3D11_SAMPLER_DESC s{};s.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=s.AddressV=s.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;s.MaxLOD=D3D11_FLOAT32_MAX;
         s.ComparisonFunc=D3D11_COMPARISON_NEVER;
@@ -388,7 +392,8 @@ struct Renderer::Impl final {
         D3D11_BUFFER_DESC bb=fb;bb.ByteWidth=sizeof(BatchConstants);
         if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateBlendState(&ba,&blendStockAlpha)) ||
            FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
-           FAILED(device->CreateRasterizerState(&r,&raster)) || FAILED(device->CreateSamplerState(&s,&sampler)) ||
+           FAILED(device->CreateRasterizerState(&r,&raster)) || FAILED(device->CreateRasterizerState(&rc,&rasterCut)) ||
+           FAILED(device->CreateSamplerState(&s,&sampler)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
            FAILED(device->CreateBuffer(&bb,nullptr,&batchCb)))return false;
         D3D11_SHADER_RESOURCE_VIEW_DESC pv{};pv.Format=DXGI_FORMAT_UNKNOWN;pv.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;
@@ -635,8 +640,13 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->OMSetRenderTargets(1,&target,nullptr);
         context->OMSetBlendState(s.blend.Get(),nullptr,0xFFFFFFFFu);
         context->OMSetDepthStencilState(s.noDepth.Get(),0);
-        context->RSSetState(s.raster.Get());
+        context->RSSetState(view.rightHalf ? s.rasterCut.Get() : s.raster.Get());
         context->RSSetViewports(1,&vp);
+        if(view.rightHalf) {
+            const D3D11_RECT right{static_cast<LONG>(vp.TopLeftX+vp.Width*0.5f),static_cast<LONG>(vp.TopLeftY),
+                                   static_cast<LONG>(vp.TopLeftX+vp.Width),static_cast<LONG>(vp.TopLeftY+vp.Height)};
+            context->RSSetScissorRects(1,&right);
+        }
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         context->VSSetShader(s.vs.Get(),nullptr,0);
         context->PSSetShader(s.ps.Get(),nullptr,0);

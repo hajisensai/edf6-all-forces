@@ -213,6 +213,8 @@ static void Layers() {
     const ShotCounts far=CountShot(tank,0.25f);
     CHECK(far.ring<tc.ring && far.smoke<tc.smoke && far.smoke>=3);
     CHECK(Near(LodGrow(1.0f),1.0f) && Near(LodGrow(0.25f),2.0f) && Near(LodGrow(0.01f),LodGrow(0.2f)));
+    // the blast size unit: linear to 6 m, then a square root (a 15 m rocket 9.5, a 40 m shell 15.5), never under 1
+    CHECK(Near(BlastScale(0.5f),1.0f) && Near(BlastScale(6.0f),6.0f) && Near(BlastScale(24.0f),12.0f) && BlastScale(40.0f)<16.0f);
     const int made=SpawnShot(pool,l,rng,tank,1.0f);
     CHECK(made==tc.flash+tc.ring+tc.dust+tc.smoke && pool.Live()==made);
     // The flash and the ring are gone within a second; the smoke ball lives 8-20 s.

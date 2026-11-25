@@ -69,7 +69,7 @@ SRWLOCK publishLock=SRWLOCK_INIT;
 std::vector<Instance> published;
 std::atomic<bool> optEnabled{false},optProbe{false},optTest{false},optLayers{false};
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
-std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
+std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right), 3 the wipe (below)
 std::atomic<bool> anchorReady{false};
 float anchorShared[3]{};   // under publishLock
 
@@ -404,6 +404,37 @@ bool Split(const unsigned char* core,const NativeView& n,std::size_t start,int g
     return false;
 }
 
+// GpuFxNative=3, the wipe: every taken-over card drawn twice, the stock draw cut to the left half of its viewport and
+// ours to the right half: the same cards side by side at the centre line (a debug view: the cards' cost twice).
+struct StockScissor {
+    ID3D11DeviceContext* context=nullptr;
+    ComPtr<ID3D11RasterizerState> saved,cut;
+    D3D11_RECT rects[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+    UINT rectCount=0;
+    void Begin(ID3D11DeviceContext* c) noexcept {
+        if(!c)return;
+        D3D11_VIEWPORT v{};UINT nv=1;c->RSGetViewports(&nv,&v);
+        if(nv==0 || v.Width<2.0f)return;
+        ComPtr<ID3D11Device> device;c->GetDevice(&device);
+        c->RSGetState(&saved);
+        D3D11_RASTERIZER_DESC d{};
+        if(saved)saved->GetDesc(&d);
+        else{d.FillMode=D3D11_FILL_SOLID;d.CullMode=D3D11_CULL_BACK;d.DepthClipEnable=TRUE;}
+        d.ScissorEnable=TRUE;
+        if(!device || FAILED(device->CreateRasterizerState(&d,&cut))){saved.Reset();return;}
+        rectCount=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;c->RSGetScissorRects(&rectCount,rects);
+        const D3D11_RECT left{static_cast<LONG>(v.TopLeftX),static_cast<LONG>(v.TopLeftY),static_cast<LONG>(v.TopLeftX+v.Width*0.5f),
+                              static_cast<LONG>(v.TopLeftY+v.Height)};
+        c->RSSetState(cut.Get());c->RSSetScissorRects(1,&left);
+        context=c;
+    }
+    void End() noexcept {
+        if(!context)return;
+        context->RSSetState(saved.Get());context->RSSetScissorRects(rectCount,rectCount ? rects : nullptr);
+        context=nullptr;saved.Reset();cut.Reset();rectCount=0;
+    }
+};
+
 enum class Source { render, core };
 // One stock particle draw: taken over (its snapshot copied into a batch, the stock draw skipped; true) or left to the
 // stock draw (false). Both the ParticleRender slot and the embedded core's own draw come here.
@@ -439,7 +470,8 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
                 ++probe.nativeReplaced;if(source==Source::core)++probe.coreReplaced;
                 if(n.lit){++probe.litReplaced;if(n.litSet==2)++probe.litSetB;}
             }
-            if(got>0)return nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws what is left)
+            if(got>0)return nativeMode==3 ? false : nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws
+                                                                                  // what is left; the wipe: all, cut)
         }
         ++probe.nativeRefused;
     } else if(wantNative && read && n.live && n.count>0) {
@@ -486,7 +518,11 @@ void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* vie
     const unsigned char* core=o+kCoreInRender;
     const float* world=reinterpret_cast<const float*>(o+kRenderWorld);
     if(view==currentView && TakeOver(core,world,native,Source::render,obj))return;
+    StockScissor wipe;
+    if(view==currentView && inWorld && optNative.load(std::memory_order_relaxed)==3 && native && Readable(native,0x10))
+        wipe.Begin(At<ID3D11DeviceContext*>(native,8));
     stock(obj,native,pass,view);
+    wipe.End();
     RestoreSplit();
     const bool logState=optProbe.load(std::memory_order_relaxed) && probe.stateLogged<24;
     if(logState)++probe.stateLogged;
@@ -497,7 +533,11 @@ void __fastcall CoreDrawHook(void* core,void* native,const float* world) {
     ++probe.coreCalls;
     const auto* c=static_cast<const unsigned char*>(core);
     if(TakeOver(c,world,native,Source::core,core))return;
+    StockScissor wipe;
+    if(inWorld && optNative.load(std::memory_order_relaxed)==3 && native && Readable(native,0x10))
+        wipe.Begin(At<ID3D11DeviceContext*>(native,8));
     coreDrawNext(core,native,world);
+    wipe.End();
     RestoreSplit();
     AfterStock(c,world,native,false);
 }
@@ -915,6 +955,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         vp.fadeMul=fade.mul;vp.fadeAdd=fade.add;
         vp.exposure=exposure;
         vp.lights=litCapture.Lights();
+        vp.rightHalf=optNative.load(std::memory_order_relaxed)==3;
         batches.clear();
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());

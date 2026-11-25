@@ -69,6 +69,7 @@ struct ViewParams {
     // The stock particle VS's distance fade (xgl_system cb0[35].z/.w): alpha *= sat(1 - (distance * mul + add)).
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
+    bool rightHalf=false; // GpuFxNative=3: drawn into the right half of the viewport only
 };
 
 // A unit normal into a float's bits (10 bits a component, below the NaN patterns) and back (the HLSL decodes it).

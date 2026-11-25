@@ -96,14 +96,14 @@ LayerDescs RegisterLayers(Pool<N>& pool) noexcept {
     }
     {   // residual smoke: low, grey-brown, lingering 15-25 s
         Desc d{};d.lifeMin=15.0f;d.lifeMax=25.0f;d.sizeMin=0.5f;d.sizeMax=0.7f;
-        d.size=Keys({{0.0f,0.8f},{0.2f,1.8f},{1.0f,3.5f}});d.alpha=Keys({{0.0f,0.0f},{0.1f,0.55f},{0.6f,0.35f},{1.0f,0.0f}});
+        d.size=Keys({{0.0f,0.8f},{0.2f,1.8f},{1.0f,3.5f}});d.alpha=Keys({{0.0f,0.0f},{0.1f,0.45f},{0.6f,0.28f},{1.0f,0.0f}});
         Rgb(d.color0,0.4f,0.37f,0.33f);Rgb(d.color1,0.58f,0.56f,0.53f);d.colorMix=Keys({{0.0f,0.0f},{1.0f,1.0f}});
         d.drag=0.9f;d.buoyancy=0.12f;d.windFollow=1.0f;d.spin=0.2f;d.soft=2.5f;
         l.residual=pool.Register(d);
     }
     {   // the heavy blast's wide dust cloud: 20-30 s
         Desc d{};d.lifeMin=20.0f;d.lifeMax=30.0f;d.sizeMin=0.8f;d.sizeMax=1.1f;
-        d.size=Keys({{0.0f,0.8f},{0.1f,2.0f},{1.0f,4.0f}});d.alpha=Keys({{0.0f,0.0f},{0.04f,0.7f},{0.6f,0.4f},{1.0f,0.0f}});
+        d.size=Keys({{0.0f,0.8f},{0.1f,2.0f},{1.0f,4.0f}});d.alpha=Keys({{0.0f,0.0f},{0.04f,0.5f},{0.6f,0.28f},{1.0f,0.0f}});
         Rgb(d.color0,0.45f,0.39f,0.31f);Rgb(d.color1,0.6f,0.56f,0.5f);d.colorMix=Keys({{0.0f,0.0f},{1.0f,1.0f}});
         d.drag=0.8f;d.buoyancy=0.2f;d.windFollow=1.0f;d.spin=0.15f;d.soft=3.0f;
         l.bigDust=pool.Register(d);
@@ -152,6 +152,11 @@ inline BlastCounts CountBlast(const BlastEvent& e,float lod) noexcept {
     c.bigDust=r>=kHeavyBlast ? n(12.0f*k,3) : 0;
     return c;
 }
+
+// The blast layers' size unit: the radius up to 6 m, then its square root's growth (a 15 m rocket's puffs 9.5, an
+// artillery shell's 40 m 15.5): linear in the radius, a heavy blast's 4x-grown dust puffs were 60 m walls the camera
+// stood inside of for half a minute (the range A/B, 2026-11-26).
+inline float BlastScale(float r) noexcept { return r<=6.0f ? (std::max)(r,1.0f) : 6.0f*std::sqrt(r/6.0f); }
 
 // A far or crowded event's fewer puffs are bigger: the cover stays about the same (area ~ count * size^2).
 inline float LodGrow(float lod) noexcept { return 1.0f/std::sqrt(std::clamp(lod,0.2f,1.0f)); }
@@ -214,7 +219,7 @@ int SpawnBlast(Pool<N>& pool,const LayerDescs& l,Rng& rng,const BlastEvent& e,fl
     const BlastCounts c=CountBlast(e,lod);
     const float g=LodGrow(lod);
     const float r=e.size*5.0f;
-    const float s=std::clamp(r,1.0f,40.0f);       // the layers' unit sizes are per metre of radius
+    const float s=BlastScale(r);                  // the layers' unit sizes are per metre of this
     const float up=std::clamp(std::sqrt(r/6.0f),0.5f,2.2f);   // throw speeds grow slower than the radius
     int made=0;
     auto at=[&](float spread,float lift,float* p){
