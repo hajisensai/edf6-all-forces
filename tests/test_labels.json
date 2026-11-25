@@ -2672,6 +2672,20 @@
     "tests/test_goldcoat.py"
    ]
   },
+  "gpufx_gpu": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "gpufx_sim": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "grape_turret_check": {
    "labels": [
     "plugin-native"

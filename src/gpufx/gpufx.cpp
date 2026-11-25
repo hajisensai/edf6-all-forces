@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace crew::gpufx {
@@ -30,7 +31,10 @@ using DrawFn=void(__fastcall*)(void*,void*,int,const void*);
 
 // ---- game thread ----
 constexpr int kBudget=4096;
-Pool<kBudget> pool;
+// On the heap, made by the first tick: a static Pool<4096> would grow the image's .data past the guard
+// (tests/plugin_image_size_guard).
+std::unique_ptr<Pool<kBudget>> pool;
+std::atomic<unsigned> poolDropped{0};   // the render thread's probe line reads this, never the pool
 Rng testRng{0x6F5EED01u};
 int deskFixed=-1,deskPuff=-1;
 bool anchored=false;
@@ -107,6 +111,22 @@ bool MainView(const void* view) noexcept {
 void ReadMatrices(const void* view,ViewParams& v) noexcept {
     std::memcpy(v.view,static_cast<const unsigned char*>(view)+0x20,sizeof(v.view));
     std::memcpy(v.proj,static_cast<const unsigned char*>(view)+0x60,sizeof(v.proj));
+}
+
+// The scene's directional light from the renderer's light block (run 1 probe, a daytime test range):
+// +B40 the light's travel direction (y -0.651, pointing down; +B90 holds its negation), +B50 its colour
+// (0.81 0.80 0.80), +B60 the ambient (0.19 0.22 0.21). The renderer and the block are the stock ones,
+// so a missing block means no world: the smoke keeps the header's defaults for that frame.
+void ReadLight(ViewParams& v) noexcept {
+    __try {
+        const unsigned char* r=At<const unsigned char*>(image,kRendererPtr);
+        if(!r || !Readable(r+0xB40,0x30))return;
+        const float* d=reinterpret_cast<const float*>(r+0xB40);
+        const float len=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+        if(!(len>0.5f && len<2.0f))return;
+        for(int i=0;i<3;++i){v.sunWorld[i]=-d[i];v.sunColor[i]=d[4+i];v.ambient[i]=d[8+i];}
+        v.exposure=1.0f;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 void TransformPoint(const float p[3],const float m[16],float out[4]) noexcept {
@@ -283,7 +303,7 @@ void RegisterDescs() noexcept {
     fixed.spin=0.0f;fixed.frameRate=6.0f;fixed.soft=2.0f;
     fixed.color0[0]=fixed.color0[1]=fixed.color0[2]=0.7f;fixed.color1[0]=fixed.color1[1]=fixed.color1[2]=0.7f;
     fixed.alpha=Curve::Constant(0.95f);
-    deskFixed=pool.Register(fixed);
+    deskFixed=pool->Register(fixed);
     Desc puff{};
     puff.lifeMin=6.0f;puff.lifeMax=9.0f;puff.sizeMin=1.2f;puff.sizeMax=2.0f;
     puff.size=Curve{};puff.size.Add(0.0f,1.0f);puff.size.Add(1.0f,3.5f);
@@ -291,7 +311,7 @@ void RegisterDescs() noexcept {
     puff.colorMix=Curve{};puff.colorMix.Add(0.0f,0.0f);puff.colorMix.Add(1.0f,1.0f);
     puff.color0[0]=0.35f;puff.color0[1]=0.33f;puff.color0[2]=0.3f;puff.color1[0]=puff.color1[1]=puff.color1[2]=0.62f;
     puff.drag=0.7f;puff.buoyancy=0.8f;puff.spin=0.5f;puff.soft=2.0f;
-    deskPuff=pool.Register(puff);
+    deskPuff=pool->Register(puff);
 }
 
 bool PlaceAnchor() noexcept {
@@ -311,11 +331,11 @@ bool PlaceAnchor() noexcept {
     // occlusion by the terrain), one small at eye height off to the left (scale).
     const float zero[3]{};
     const float air[3]{anchor[0],ground+4.0f,anchor[2]};
-    pool.Spawn(deskFixed,air,zero,testRng);
+    pool->Spawn(deskFixed,air,zero,testRng);
     const float half[3]{anchor[0]+right[0]*-6.0f,ground,anchor[2]+right[2]*-6.0f};
-    pool.Spawn(deskFixed,half,zero,testRng);
+    pool->Spawn(deskFixed,half,zero,testRng);
     const float eye[3]{anchor[0]+right[0]*6.0f,ground+1.6f,anchor[2]+right[2]*6.0f};
-    pool.Spawn(deskFixed,eye,zero,testRng);
+    pool->Spawn(deskFixed,eye,zero,testRng);
     Log("GPUFX test anchor %.1f %.1f %.1f (player %.1f %.1f %.1f, forward %.2f %.2f)",anchor[0],anchor[1],anchor[2],pos[0],pos[1],pos[2],fwd[0],fwd[2]);
     return true;
 }
@@ -325,6 +345,7 @@ void TickNative() noexcept {
     const float dt=lastMs && now>lastMs ? (std::min)(0.1f,static_cast<float>(now-lastMs)*0.001f) : 0.0f;
     lastMs=now;
     if(GamePaused())return;
+    if(!pool)pool=std::make_unique<Pool<kBudget>>();
     if(optTest.load(std::memory_order_relaxed)) {
         RegisterDescs();
         if(!anchored && PlaceAnchor()) {
@@ -341,14 +362,15 @@ void TickNative() noexcept {
                 spawnDebt-=1.0f;
                 const float at[3]{anchor[0]+right[0]*14.0f+testRng.Range(-0.6f,0.6f),ground+0.5f,anchor[2]+right[2]*14.0f+testRng.Range(-0.6f,0.6f)};
                 const float vel[3]{testRng.Range(-1.0f,1.0f),testRng.Range(4.0f,7.0f),testRng.Range(-1.0f,1.0f)};
-                pool.Spawn(deskPuff,at,vel,testRng);
+                pool->Spawn(deskPuff,at,vel,testRng);
             }
         }
-        pool.SetWind(1.5f,0.0f,0.5f);
+        pool->SetWind(1.5f,0.0f,0.5f);
     }
-    if(dt>0.0f)pool.Step(dt);
+    if(dt>0.0f)pool->Step(dt);
     if(staging.size()!=static_cast<std::size_t>(kBudget))staging.resize(kBudget);
-    const int n=pool.Build(staging.data(),kBudget,kFlipFrames);
+    const int n=pool->Build(staging.data(),kBudget,kFlipFrames);
+    poolDropped.store(pool->Dropped(),std::memory_order_relaxed);
     std::vector<Instance> next(staging.begin(),staging.begin()+n);
     AcquireSRWLockExclusive(&publishLock);
     published.swap(next);
@@ -403,7 +425,8 @@ void Tick() noexcept {
 }
 
 void Reset() noexcept {
-    pool.Clear();
+    if(pool)pool->Clear();
+    poolDropped.store(0,std::memory_order_relaxed);
     anchored=false;spawnDebt=0.0f;lastMs=0;ticked=~ULONGLONG(0);
     anchorReady.store(false,std::memory_order_release);
     AcquireSRWLockExclusive(&publishLock);
@@ -456,6 +479,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         if(!depth && observedDepth){depth=observedDepth;format=observedFormat;source="observed";}
         ViewParams vp{};
         ReadMatrices(view,vp);
+        ReadLight(vp);
         batches.clear();
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
@@ -497,7 +521,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
                 st.viewport[0]+(c4[0]/c4[3]*0.5f+0.5f)*st.viewport[2],st.viewport[1]+(0.5f-c4[1]/c4[3]*0.5f)*st.viewport[3],c4[0]/c4[3],c4[1]/c4[3],c4[2]/c4[3]);
         }
         Log("GPUFX   own live=%d/%d dropped=%u; stock draws=%u (pass2 %u, pass5 %u) taken over=%u refused=%u outside the world view=%u chain=%d",
-            static_cast<int>(renderOwn.size()),kBudget,pool.Dropped(),probe.nativeCalls,probe.byPass[2],probe.byPass[5],probe.nativeReplaced,
+            static_cast<int>(renderOwn.size()),kBudget,poolDropped.load(std::memory_order_relaxed),probe.nativeCalls,probe.byPass[2],probe.byPass[5],probe.nativeReplaced,
             probe.nativeRefused,probe.nativeOutside,textureChain.load(std::memory_order_relaxed));
         probe.cpuMs=0.0;probe.cpuSamples=0;
         for(int a=0;a<2;++a){probe.jitterMin[a]=1e9f;probe.jitterMax[a]=-1e9f;}
