@@ -145,7 +145,7 @@ int main() {
         Check(Score(ref,result,picker,&score) && storeQueries==4,"the weapon changing hands reads afresh");
     }
     {
-        alignas(16) static unsigned char launcher[0xD00]{}, head[0x28]{}, entries[4][0x30]{}, nodes[32][0x28]{};
+        alignas(16) static unsigned char launcher[0xD00]{}, head[0x28]{}, entries[4][0x30]{}, nodes[kSalvoLockLimit][0x28]{};
         static unsigned char enemies[3]{};
         salvoAnswer=true;
         repeatOk=true;
@@ -155,9 +155,9 @@ int main() {
         for(int i=0;i<4;++i)Put<const void*>(entries[i],kEntryObject,&enemies[i==3 ? 0 : i]);
         unsigned perEnemy[3]{};
         const unsigned char* tail=head;
-        for(int n=0;n<32;++n) {
+        for(unsigned n=0;n<kSalvoLockLimit;++n) {
             ++frameNow;
-            float best=100.0f;
+            float best=static_cast<float>(kSalvoLockLimit);
             int chosen=-1;
             for(int i=0;i<4;++i) {
                 alignas(16) unsigned char result[0x40]{};
@@ -168,7 +168,7 @@ int main() {
                 if(score<best){best=score;chosen=i;}
             }
             const int enemy=chosen==3 ? 0 : chosen;
-            Check(enemy==n%3,"all enemies get a round before any repeat, even with multiple lock points");
+            Check(enemy==static_cast<int>(n%3),"all enemies get a round before any repeat, even with multiple lock points");
             ++perEnemy[enemy];
             Put<const void*>(const_cast<unsigned char*>(tail),0,nodes[n]);
             Put<const void*>(nodes[n],0,head);
@@ -177,7 +177,7 @@ int main() {
             Put<std::uint64_t>(launcher,kLockCount,static_cast<unsigned>(n+1));
             tail=nodes[n];
         }
-        Check(launcher[kRepeatLock]==1 && perEnemy[0]==11 && perEnemy[1]==11 && perEnemy[2]==10,
+        Check(launcher[kRepeatLock]==1 && perEnemy[0]==86 && perEnemy[1]==85 && perEnemy[2]==85,
               "the full magazine is balanced 11, 11, 10 across three enemies");
     }
     VirtualFree(image,0,MEM_RELEASE);

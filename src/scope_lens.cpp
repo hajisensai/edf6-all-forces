@@ -347,14 +347,22 @@ bool SetBeforeProject(BeforeProjectFn fn) noexcept {
     return true;
 }
 
-bool Install() noexcept {
-    if(installed.load(std::memory_order_acquire))return true;
+static bool LensGuardsMatch() noexcept {
     for(const Guard& g:kGuards) {
-        if(!Matches(g.rva,g.bytes,g.size)) {
+        // render_record may already own this call through HookProject. Its native displacement was checked
+        // on the first installation; the surrounding instructions still have to agree.
+        const std::size_t size=projectHooked && g.rva==kProjectCall-13 ? g.size-5 : g.size;
+        if(!Matches(g.rva,g.bytes,size)) {
             Log("INFANTRYSCOPE the lens view's %s (0x%X) is not where docs/scope-pip-re.md has it: no lens view",g.what,g.rva);
             return false;
         }
     }
+    return true;
+}
+
+bool Install() noexcept {
+    if(installed.load(std::memory_order_acquire))return true;
+    if(!LensGuardsMatch())return false;
     systemRef=reinterpret_cast<unsigned char* const*>(image+kSystemRef);
     commands=image+kCommands;
     project=reinterpret_cast<ProjectFn>(image+kProject);

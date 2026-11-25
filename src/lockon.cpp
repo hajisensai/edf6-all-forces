@@ -57,12 +57,12 @@ struct Skip { const unsigned char* weapon; const void* entries[kMostSkips]; int 
 bool Live(const unsigned char* ctrl) noexcept { return ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)>0; }
 
 // Calls `visit(node)` for each node of `w`'s lock list (at most kMostNodes).
-template<class F> void EachLock(const unsigned char* w,F visit) noexcept {
+template<class F> void EachLock(const unsigned char* w,F visit,unsigned limit=kMostNodes) noexcept {
     if(!Readable(w+kLockList,0x10))return;
     const auto head=At<const unsigned char*>(w,kLockList);
     const auto count=At<std::uint64_t>(w,kLockCount);
     const unsigned char* node=Readable(head,8) ? At<const unsigned char*>(head,0) : nullptr;
-    for(std::uint64_t i=0;i<count && i<kMostNodes && node && node!=head && Readable(node,kNodeCtrl+8);++i) {
+    for(std::uint64_t i=0;i<count && i<limit && node && node!=head && Readable(node,kNodeCtrl+8);++i) {
         visit(node);
         node=At<const unsigned char*>(node,0);
     }
@@ -76,7 +76,7 @@ const void* LockEnemy(const unsigned char* entry) noexcept {
 
 struct SalvoAllocation {
     struct Enemy { const void* object; unsigned rounds; };
-    Enemy enemies[kMostNodes]{};
+    Enemy enemies[kSalvoLockLimit]{};
     int count=0;
 
     unsigned RoundsFor(const void* object) const noexcept {
@@ -93,7 +93,7 @@ SalvoAllocation AllocatedLocks(const unsigned char* weapon) noexcept {
         if(!enemy)return;
         for(int i=0;i<locks.count;++i)if(locks.enemies[i].object==enemy){++locks.enemies[i].rounds;return;}
         locks.enemies[locks.count++]={enemy,1};
-    });
+    },kSalvoLockLimit);
     return locks;
 }
 
@@ -160,7 +160,7 @@ const WeaponFacts& FactsOf(const unsigned char* w) noexcept {
     const auto node=At<const void*>(w,kWeaponNode),owner=At<const void*>(w,kWeaponOwner);
     if(facts.weapon!=w || facts.node!=node || facts.owner!=owner || facts.frame!=frame) {
         const auto* const spec=StoreOf(w);
-        const bool salvo=spec && std::wcscmp(spec->prefix,L"EDF6VC_SALVO_")==0;
+        const bool salvo=IsSalvoStore(spec);
         facts={w,node,owner,frame,spec!=nullptr,PlayerHolds(w),salvo,{}};
         if(salvo) {
             facts.locks=AllocatedLocks(w);
@@ -232,7 +232,7 @@ bool HookPick() noexcept {
 void LogSalvoLocks(const unsigned char* weapon) noexcept {
     const auto locks=AllocatedLocks(weapon);
     if(!locks.count)return;
-    unsigned total=0,fewest=kMostNodes,most=0;
+    unsigned total=0,fewest=kSalvoLockLimit,most=0;
     for(int i=0;i<locks.count;++i) {
         const unsigned rounds=locks.enemies[i].rounds;
         total+=rounds;
