@@ -747,6 +747,7 @@ private:
         char value[kConfigParts][kValueMost+1];
     };
     struct PartsTable { int count=0;int part=0;Parts row[kMembersMost]; };
+    struct ConfigScratch { PartsTable table{};MemberLine next[kMembersMost]{}; };
     static void TakePart(void* context,const EDF6CoopMemberValue* m) noexcept {
         auto* t=static_cast<PartsTable*>(context);
         if(!m || !m->memberId)return;
@@ -767,7 +768,10 @@ private:
     void Configs(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
         Situation& s=situation_;
         MemberLine* kept=lines();
-        static PartsTable table;   // UI thread only, as OwnConfig's line
+        static std::unique_ptr<ConfigScratch> scratch;   // UI thread only; allocate when a room has configuration to read
+        if(!scratch)scratch.reset(new(std::nothrow) ConfigScratch);
+        if(!scratch){list_=ListState::waiting;return;}
+        PartsTable& table=scratch->table;
         table.count=0;
         for(int p=0;p<kConfigParts;++p) {
             char key[33];PartKey(p,key,sizeof(key));
@@ -778,7 +782,7 @@ private:
         Collect ownSet{this,&own_,0},otherSet{this,&others_,0};
         if(env.configured)env.configured(env.context,&Engine::AddFile,&ownSet);
         bool waiting=false,changed=false;
-        static MemberLine next[kMembersMost];   // UI thread only
+        auto& next=scratch->next;
         int nextCount=0;
         static char line[kConfigLineMost+1];
         for(int i=0;i<table.count;++i) {

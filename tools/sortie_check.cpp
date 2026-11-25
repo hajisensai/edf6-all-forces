@@ -101,8 +101,10 @@ int main() {
     Carpet();
     Laps();
     Circle();
-    Check(!SalvoLocked(32,11) && !SalvoLocked(32,31),"missile rain waits for every round to have a native lock");
-    Check(SalvoLocked(32,32) && SalvoLocked(6,8) && !SalvoLocked(0,32),"only a full magazine or remaining rounds can fire");
+    Check(!SalvoLocked(256,64) && !SalvoLocked(256,255),"missile rain waits for the entire native lock queue");
+    Check(SalvoLocked(256,256) && SalvoLocked(6,8) && !SalvoLocked(0,256),"the native burst has a target for each loaded round");
+    Check(SalvoDraining(1000+256*1000/60,1000) && !SalvoDraining(7000,1000) && !SalvoDraining(1000,0),
+          "the jet stays on its pass until the one-round-per-step burst can finish");
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n",failures);
     return failures ? 1 : 0;
 }

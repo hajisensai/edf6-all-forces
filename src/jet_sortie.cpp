@@ -171,18 +171,19 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
         return true;
     case SortiePass::missileRain: {
         CountMissile(j);
-        *speed=kind.attack;
+        *speed=sortie::kRainSpeed;
         const float off[3]={pos[0]-s.line.at[0],0.0f,pos[2]-s.line.at[2]};
         const float dist=Len(off);
-        if((s.fired>0 && arms.missiles<=0) || (dist<sortie::kRainTo && ms-s.begun>5000) || ms-s.begun>2*sortie::kSearchMs) {
+        const bool outsideWindow=dist<sortie::kRainTo || along>sortie::kRainTo || ms-s.begun>2*sortie::kSearchMs;
+        if((s.fired>0 && arms.missiles<=0) || (outsideWindow && !sortie::SalvoDraining(ms,j.t.missileAt))) {
             Log("JET v=%p missile rain: leaving with %d missiles remaining",j.Vehicle(),arms.missiles);
             Done(j,arms.missiles<=0 ? "sortie: salvo complete" : "sortie: firing window ended",ms);
             std::memcpy(want,nose,12);
             return true;
         }
-        if(j.t.target && dist<sortie::kRainFrom && arms.missiles>0) {
+        if(j.t.target && dist<sortie::kRainFrom && !outsideWindow && arms.missiles>0) {
             NoseOn(pos,j.t.aim,mark+110.0f,want);
-            *missileOk=MissileReach(kind,arms)>0.0f;
+            *missileOk=arms.missileRange>0.0f;
         } else Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
         return true;
     }

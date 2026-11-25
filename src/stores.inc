@@ -34,7 +34,7 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_MG505_","M240C coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,0,false,0,{},0.0f,0.0000f,0u},
     {L"EDF6VC_MG601_","Type 74 coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,0,false,0,{},0.0f,0.0000f,0u},
     {L"EDF6VC_MG401_","M240C coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,0,false,0,{},0.0f,0.0000f,0u},
-    {L"EDF6VC_SALVO_","Salvo missile",StoreRole::air,95.0f,0.0120f,0,0,false,StoreShell::native,0,false,0,{},110.0f,0.0150f,8u},
+    {L"EDF6VC_SALVO_","Salvo cluster missile",StoreRole::air,16.0f,0.0020f,0,0,false,StoreShell::native,0,false,0,{},110.0f,0.0150f,64u},
     {L"EDF6VC_XM_MEDIUM_TANK_AA_MISSILE_","Missiles",StoreRole::ground,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{},0.0f,0.0000f,0u},
     {L"EDF6VC_XM_LARGE_TANK_MG_","Machine gun",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,0,true,1,{L"xm_mg",L"xm_mg_gun",-0.174533f,1.047198f,3.141593f,2.094395f,1.570796f},0.0f,0.0000f,0u},
     {L"EDF6VC_XM_LARGE_TANK_AAM_","AA missiles",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,3,false,0,{},0.0f,0.0000f,0u},
@@ -290,5 +290,5 @@ inline constexpr JetWeaponRow kJetWeapons[]={
     {7069.0f,L"app:/weapon/edf6vc_jet_gun_r.sgo"},
     {7070.0f,L"app:/weapon/edf6vc_jet_gun_l.sgo"},
     {7070.0f,L"app:/weapon/edf6vc_jet_gun_r.sgo"},
-    {7070.0f,L"app:/weapon/edf6vc_salvo_32.sgo"},
+    {7070.0f,L"app:/weapon/edf6vc_salvo_256.sgo"},
 };

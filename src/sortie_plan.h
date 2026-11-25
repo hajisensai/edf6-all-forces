@@ -24,8 +24,12 @@ constexpr int kPopBombs=2;
 constexpr float kPopClimb=1.6f;           // its climb away: up this much for each 1 along
 constexpr unsigned long long kPopClimbMs=4500;
 constexpr float kRainAlt=320.0f;
-constexpr float kRainFrom=2600.0f,kRainTo=400.0f;
-constexpr unsigned long long kRainBurstMs=1700;  // the 32 rounds are three simulation frames apart
+constexpr float kRainFrom=4000.0f,kRainTo=450.0f,kRainSpeed=155.0f;
+// The 256 rounds go one per simulation frame. Keep flying the pass while the native trigger is draining.
+constexpr unsigned long long kRainBurstMs=5500;
+constexpr bool SalvoDraining(unsigned long long now,unsigned long long firedAt) noexcept {
+    return firedAt!=0 && now>=firedAt && now-firedAt<=kRainBurstMs;
+}
 constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && locked>=loaded; }
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up

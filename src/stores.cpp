@@ -301,7 +301,8 @@ int ReadStores(unsigned char* v,Store* out,int most) noexcept {
         const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
         const auto locked=At<std::uint64_t>(w,kWeaponLocked);
         const float range=At<float>(w,kWeaponLockRange);
-        out[n++]=Store{w,spec,ammo>0 ? ammo : 0,locked<64 ? static_cast<std::int32_t>(locked) : 0,
+        const unsigned lockLimit=IsSalvoStore(spec) ? kSalvoLockLimit : 63;
+        out[n++]=Store{w,spec,ammo>0 ? ammo : 0,locked<=lockLimit ? static_cast<std::int32_t>(locked) : 0,
                        std::isfinite(range) && range>0.0f ? range : 0.0f,rounds};
     }
     return n;
