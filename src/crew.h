@@ -305,6 +305,10 @@ struct Config {
     float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
     float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
     float scopeAimSpread=0.8f;            // ...and zoomed: x this
+    bool gpuFx=true;             // GPU particle effects (src/gpufx): the module (world-end draw)
+    bool gpuFxTest=false;        // ...test cards and a puff column 25 m ahead of the player at mission start
+    bool gpuFxNative=false;      // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw
+    bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)

@@ -1,4 +1,5 @@
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "thermal_gpu.h"
 #include "thermal_models.h"
 #include "crew.h"
@@ -130,6 +131,7 @@ void Failed() noexcept {
 }
 void __fastcall BeginHook(void* manager,void* native,const void* view) {
     reinterpret_cast<StageFn>(image+kViewBegin)(manager,native,view);
+    gpufx::WorldBegin(Context(native),view);
     if(!installed.load(std::memory_order_acquire))return;
     Player* const p=ViewPlayer(view);
     if(!p)return;
@@ -165,6 +167,7 @@ void ThermalEnd(void* native,const void* view) noexcept {
 // InfantryScopeWorldEnd, on foot: the two never share a view; the lens would magnify the thermal picture if they did).
 void __fastcall EndHook(void* manager,void* native,const void* view) {
     reinterpret_cast<StageFn>(image+kViewEnd)(manager,native,view);
+    gpufx::WorldEnd(Context(native),view);   // the scene's particles, before the thermal picture and the lens take it
     ThermalEnd(native,view);
     if(installed.load(std::memory_order_acquire))InfantryScopeWorldEnd(Context(native),view);
 }
