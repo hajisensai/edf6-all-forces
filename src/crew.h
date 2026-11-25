@@ -45,9 +45,11 @@ struct Config {
     // (The flight controller's own gains are constants in heli.cpp; the old HeliMoveGain / HeliBrakeGain /
     // HeliClimbGain / HeliHoverLearn keys are ignored, plugin.cpp LoadConfig.)
     DWORD heliLandMs=5000;     // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
-    float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
+    float heliSpeed=65.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
-    float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
+    float playerHeliStopSec=1.0f;// a stock heli's horizontal response in hover mode (s; 0: stock damping)
+    int heliHoverKey=0x24;     // Home outside the command map: flight / hover
+    int heliHoverButton=0;    // optional XInput chord
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
@@ -605,7 +607,6 @@ void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
 void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
-void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
 void ViewDiagTick() noexcept;     // viewdiag.cpp: once a frame, logs (VIEWDIAG) when the view's eye leaves the map or the near pass's clip breaks
 bool InstallUmbraWatch() noexcept;   // viewdiag.cpp: logs (VIEWDIAG umbra) a box handed to Umbra out of any map's reach
 // view.cpp: while the map view is open (map.cpp, game thread, each frame) the cameras' far clip raised to `farClip` and
@@ -886,7 +887,7 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `escort`: it works round the player (while seen), not round `target`.
 // blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
 // singing, dancing hololive doll); after `carrier`, as they are no role of their own.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship };
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship, salvo };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches
@@ -1076,7 +1077,7 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst,
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst, barrageMissile,
                       andryushaBlast, andryushaFire };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
@@ -1091,7 +1092,7 @@ bool EmcIfcOk() noexcept;                                    // RoundSize / Roun
 // `damage`, its AmmoSize `size`, blast `blast` m and AmmoHitSizeAdjust `mark` (the plugin's flight tells it by that); a
 // cluster's flash where its bomblets leave (EmcRound::barrageBurst, no damage). False: not fired (not preloaded, the IFC's
 // fields not where they are written).
-bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark,bool missile) noexcept;
 void BarrageBurst(const unsigned char* by,const float* at) noexcept;
 // jet_bay.cpp: one of the Andryusha's bomblets (andryusha.cpp; docs/andryusha-re.md): two rounds of `by` on one arc from
 // `from` onto `aim` (the IFC's own ballistic solve, both at one speed and gravity): its blast (EmcRound::andryushaBlast,
@@ -1423,7 +1424,7 @@ enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
     float power;
-    bool ground,landed,keys,aiming,holding;
+    bool ground,landed,keys,aiming,holding,hoverMode;
     bool collective;   // W / S are the collective (a stock heli's instructor, heliaim.h), not a speed setpoint
     Gpws gpws;
     float impactIn;

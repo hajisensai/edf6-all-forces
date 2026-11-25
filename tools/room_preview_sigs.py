@@ -47,12 +47,54 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x03D450, 24, 'std::wstring::assign(ptr, len)'),
     (0x0E1BA0, 20, 'WeaponTable row by name'),
     (0x0D8700, 0x28, 'the player outfit (GS, player)'),
+    (0x93AD16, 0x1F, 'model slot load: 0x6BF380(model, ?, doc, L"animation_model", 0) (the unified file hook redirects the call)'),
+    (0x6BF3AB, 0x2E, '0x6BF380: the member lookup through table 0x179EBA8[doc tag] (index at query +8, -1 none)'),
+    (0x238F90, 0x25, 'member lookup, classic SGO (tag 0)'),
+    (0x239060, 0x22, 'member lookup, DSGO (tag 2)'),
+    (0x93D188, 0x1E, 'update: SetWorldMatrix(([view+0x120]+0x88)+0xA0, &matrix) (the placement hook redirects the call)'),
+    (0x1100B90, 0x10, 'SetWorldMatrix: four movaps rows (the matrix 16-byte aligned)'),
+    (0x93B895, 0x3B, 'msg 4: {player, slot, row}: +0x368 = slot, +0x36C[slot] = row, then the Desc rebuilt'),
+    (0x93C1C7, 0x35, 'msg 7: {0} / {1, player}: +0x304 = 0 / 1 (this player) / 2 (another: hidden)'),
+    (0x93CF1F, 0x22, 'update: +0x30C = 1, 0 when +0x304 is 2 (Draw skips it)'),
+    # The squad's views the preview makes (docs/room-3d-preview-re.md section 6.3): made as HUiHQ3DModel makes its own,
+    # killed as the UI system kills any object.
+    (0x8783B1, 0x53, 'HUiHQ3DModel 0x8782C0: a view made: createInfo {0x1800508, HQ+0x48 (the UI system), 0, 0, &out, count, index, 1}, new 0x450, 0x938760'),
+    (0x87841B, 0x53, 'HUiHQ3DModel: its strong ref of the new view released (uses +8, _Destroy, weaks +0xC)'),
+    (0x938760, 20, 'UiHQ_3DModelView constructor (view, createInfo)'),
+    (0x9392D6, 7, 'constructor: +0x3EC = 0 (shown)'),
+    (0x9393B0, 0x28, 'constructor end: msg 3 {index, class, outfit} to itself (the build posted before the override can arm)'),
+    (0x11A3F04, 0x22, 'UI node base constructor 0x11A3EA0: node +0x48 = createInfo +8 (the UI system)'),
+    (0x119CDA0, 0x4A, 'UI system: an object registered: under the lock +0x60 into the pending list +0x18, flags |= 0x20'),
+    (0x119D2A4, 0x0D, 'UI system frame 0x119D270: the lock +0x60 taken (the pending list moved into the main list)'),
+    (0x119D308, 5, 'UI system frame: the lock released before the updates (an object made in an update waits a frame)'),
+    (0x11A4450, 0x15, 'Kill: flags |= 1, then slot 4; the system releases its ref the next frame'),
+    (0x12D85B0, 9, 'operator new (the deleting destructor frees with the sized delete 0x12D85EC)'),
+    (0x11A45F0, 0x15, 'the shared_ptr control block of the view _Destroy: object slot 5 (the deleting destructor), 1'),
 )
+
+# A view made as HUiHQ3DModel makes one: the lea of createInfo +0 (its type pointer), the call of the constructor.
+VIEW_CREATE_INFO = (0x8783B1, 0x1800508)
+VIEW_CONSTRUCT = (0x8783FF, 0x938760)
+VIEW_NEW = (0x8783EA, 0x12D85B0)
+
+# The model matrix call the placement hook redirects (docs/room-3d-preview-re.md section 6.2): call site, target.
+WORLD_MATRIX_CALL = (0x93D1A1, 0x1100B90)
+# OnMessage ids the preview sends besides 3 / 5 / 8 / 9: msg 4 (a player weapon) and msg 7 (the view's selection).
+MSG_WEAPON = (4, 0x93B895)
+MSG_SELECT = (7, 0x93C1C7)
+
+# The model-slot load call the unified file hook redirects (docs/unified-model-re.md section 2): call site, target.
+MENU_MODEL_CALL = (0x93AD30, 0x6BF380)
+# The member lookup table (image VAs at the default base 0x180000000): tag -> function. Tags 0 and 2 are the hook's.
+FIND_MEMBER = 0x179EBA8
+FIND_MEMBER_ENTRIES = {0: 0x238F90, 1: 0x238DF0, 2: 0x239060}
 
 # vtable slots the hooks chain: (vtable rva, slot, the function the slot holds)
 SLOTS: tuple[tuple[int, int, int], ...] = (
     (0x180FA60, 1, 0x93CE30), (0x180FA60, 3, 0x93B320), (0x180FA60, 5, 0x93A2C0),
     (0x180FDB0, 2, 0x9424A0), (0x180FE20, 2, 0x942590),
+    # not chained, relied on: Kill's slot 4 (a ret) and the view's control block _Destroy
+    (0x180FA60, 4, 0x7CAF80), (0x1AE29F8, 0, 0x11A45F0),
 )
 
 

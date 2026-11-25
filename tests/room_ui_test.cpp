@@ -1,16 +1,15 @@
-// The room / HQ loadout screen's pure side (src/room_ui_logic.h) offline: the element names (at most 7 characters, unique,
-// the layout generator's spelling), the keyboard / pad mapping (the toggle combination's buttons do nothing else while
-// held, nothing while the game is behind), the input gate (taken while open, and after closing until every menu key is up),
-// the covered-screen plan, the rows' looks (chips only for a set colour, icons per kind / store / gun), the lines in each
-// language, the catalog's units (squads, vehicles, crews, the default and the mission crews), the crew rows (kind, the
-// default's colours worn, lines, chips, icon), the preview's soldier or crew member and the save's (field, unit, value)
-// pairing including a vehicle and its crew written for one unit. Exit code 1 when one fails.
+// The room / HQ screen frame's pure side (src/room_ui_logic.h) offline: the layout marker's name, the native 整备
+// button's click lifecycle, the keyboard / pad mapping (the toggle combination's buttons do nothing else while held,
+// nothing while the game is behind), the input gate (taken while open, and after closing until every menu key is up),
+// the covered-screen plan, the font colour, the button's texts in each language, the catalog's units (squads, vehicles,
+// crews, the default and the mission crews), a crew's kind and the colours it wears in the preview, a vehicle's preview
+// and the save's (field, unit, value) pairing including a vehicle and its crew written for one unit. Exit code 1 when one
+// fails.
 // cmake --build build --target room_ui_test && build\room_ui_test.exe
 #include "../src/room_ui_logic.h"
 #include <cstdio>
 #include <cwchar>
 #include <set>
-#include <string>
 
 namespace {
 using namespace crew;
@@ -25,25 +24,7 @@ bool Same(const wchar_t* a,const wchar_t* b) { return a && b && !std::wcscmp(a,b
 bool Has(const wchar_t* s,const wchar_t* part) { return s && part && std::wcsstr(s,part)!=nullptr; }
 
 void Names() {
-    std::set<std::wstring> seen;
-    wchar_t n[kNameMost];
-    const auto add=[&](const wchar_t* s) {
-        Expect(std::wcslen(s)<=7,"a name fits the game's in-place wstring (7 characters)");
-        Expect(seen.insert(s).second,"every name unique");
-        Expect(s[0]==L'v' && s[1]==L'c',"every name starts vc");
-    };
-    for(const wchar_t* s:{kRootName,kBackName,kHeadName,kHintName,kHelp2Name,kHelp3Name})add(s);
-    for(int i=0;i<kRows;++i) {
-        Expect(UnitName(i,n),"unit name");add(n);
-        for(Part p:{Part::box,Part::text,Part::primary,Part::secondary,Part::icon,Part::note}){Expect(RowName(i,p,n),"row name");add(n);}
-    }
-    for(int i=0;i<kStatusLines;++i){Expect(StatusName(i,n),"status name");add(n);}
-    Expect(UnitName(3,n) && Same(n,L"vcU03"),"vcU03");
-    Expect(RowName(11,Part::secondary,n) && Same(n,L"vcR11B"),"vcR11B");
-    Expect(RowName(0,Part::box,n) && Same(n,L"vcR00"),"vcR00");
-    Expect(StatusName(2,n) && Same(n,L"vcS2"),"vcS2");
-    Expect(!UnitName(kRows,n) && !RowName(kRows,Part::text,n) && !StatusName(kStatusLines,n),"no name past the layout");
-    Expect(seen.size()==6u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
+    Expect(Same(kRootName,L"vcRoot") && std::wcslen(kRootName)<=7,"the marker: tools/room_layout.py ROOT, fits the in-place wstring");
 }
 
 void NativeButton() {
@@ -142,12 +123,11 @@ void PadTable() {
 }
 
 void Colours() {
-    ViewRow r;
-    Expect(RowColour(nullptr)==kWhite && RowColour(&r)==kWhite,"plain row white");
-    r.cursor=true;Expect(RowColour(&r)==kCursorColour,"cursor row highlighted");
-    r.cursor=false;r.refused=true;Expect(RowColour(&r)==kRefusedColour,"refused unit marked");
-    r.changed=true;Expect(RowColour(&r)==kWhite,"refused but changed: the edit is what counts");
-    Expect(StatusColour(true)==kWarnColour && StatusColour(false)==kWhite,"status colours");
+    float f[4];
+    RgbaFloat(0xFF8000FFu,f);
+    Expect(f[0]==1.0f && f[1]>0.50f && f[1]<0.51f && f[2]==0.0f && f[3]==1.0f,"font colour RGBA 0..1");
+    RgbaFloat(kWhite,f);
+    Expect(f[0]==1.0f && f[1]==1.0f && f[2]==1.0f && f[3]==1.0f,"the default white");
 }
 
 void GateAndPlan() {
@@ -214,99 +194,25 @@ void SwitchesPlan() {
     Expect(!LeaveOnForget(never),"the HQ screen gone: nothing was published, nothing withdrawn");
 }
 
-void Looks() {
-    Expect(!LookOf(nullptr).shown,"no row: hidden");
-    ViewRow r;r.text=RowText::soldier;r.kind=static_cast<int>(SupportWeapon::wingLaser);r.primary=0xC0272DFFu;r.secondary=0;
-    Look l=LookOf(&r);
-    Expect(l.shown && l.primary && !l.secondary && l.primaryRgba==0xC0272DFFu,"a soldier's set colour: its chip; stock: none");
-    Expect(Same(l.icon,L"app:/weapon/icon/LAZR.dds"),"wing laser icon");
-    r.kind=0;Expect(Same(LookOf(&r).icon,L"app:/weapon/icon/AF14.dds"),"rifle icon");
-    r.kind=static_cast<int>(SupportWeapon::fencerPileBanker);Expect(Same(LookOf(&r).icon,L"app:/weapon/icon/pilebunker.dds"),"pile banker icon");
-    r=ViewRow{};r.text=RowText::pylon;r.store=7;
-    l=LookOf(&r);
-    Expect(!l.primary && !l.secondary && Same(l.icon,L"app:/weapon/icon/hornet01.dds"),"RKT pylon: hornet icon, no chips");
-    r.store=0;Expect(LookOf(&r).icon==nullptr,"unknown store: no icon");
-    r=ViewRow{};r.text=RowText::gunAP;Expect(Same(LookOf(&r).icon,L"app:/weapon/icon/h_cannon_apfsds01.dds"),"AP gun icon");
-    r.text=RowText::gunHE;Expect(Same(LookOf(&r).icon,L"app:/weapon/icon/tank01.dds"),"HE gun icon");
-    r.text=RowText::guns;Expect(LookOf(&r).icon==nullptr,"guns: no icon");
-    r.text=RowText::ownLoad;l=LookOf(&r);Expect(l.shown && !l.icon && !l.primary,"own load: text only");
-    for(int k=0;k<kSupportWeaponCount;++k)Expect(KindIcon(k)!=nullptr,"every kind has an icon");
-    for(int c=1;c<=kLoadStoreCount;++c)Expect(StoreIcon(c)!=nullptr,"every store has an icon");
-    Expect(KindIcon(-1)==nullptr && KindIcon(kSupportWeaponCount)==nullptr && StoreIcon(kLoadStoreCount+1)==nullptr,"out of range");
-    float f[4];
-    ChipColour(0xFF8000FFu,f);
-    Expect(f[0]==1.0f && f[1]>0.50f && f[1]<0.51f && f[2]==0.0f && f[3]==1.0f,"chip colour RGBA 0..1");
-}
-
 void Texts() {
     wchar_t out[kLineMost];
     for(hudtext::Lang lang:{hudtext::Lang::en,hudtext::Lang::zhCN,hudtext::Lang::zhTW,hudtext::Lang::ja}) {
         hudtext::Use(lang);
-        ViewRow u;u.text=RowText::squadUnit;u.label=UnitLabel(L"SQUAD",L"x");u.cursor=true;
-        UnitLine(u,out,kLineMost);
-        Expect(Has(out,kCursor) && Has(out,hudtext::Tr(Tx::roomUnitSquad)),"unit line: cursor and label");
-        u.changed=true;UnitLine(u,out,kLineMost);
-        Expect(std::wcslen(out)>std::wcslen(hudtext::Tr(Tx::roomUnitSquad))+2,"edited mark");
-        u.text=RowText::save;u.cursor=false;UnitLine(u,out,kLineMost);
-        Expect(Has(out,hudtext::Tr(Tx::roomSave)) && !Has(out,kCursor),"save row");
-        ViewRow r;r.text=RowText::soldier;r.kind=static_cast<int>(SupportWeapon::fencerShotgun);r.index=4;r.leader=true;
-        RowLine(r,out,kLineMost);
-        Expect(Has(out,L"5. ") && Has(out,KindLabel(r.kind)),"soldier line: number and kind");
-        NoteLine(r,out,kLineMost);
-        Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"stock colours noted");
-        r.editing=true;r.field=1;NoteLine(r,out,kLineMost);
-        Expect(Same(out,hudtext::Tr(Tx::roomFieldPrimary)),"editing colour 1");
-        r.field=roommenu::kPackField;NoteLine(r,out,kLineMost);
-        Expect(Same(out,hudtext::Tr(Tx::roomFieldPack)),"editing the backpack");
-        RowLine(r,out,kLineMost);
-        Expect(Has(out,hudtext::Tr(Tx::roomPackNone)),"editing the backpack with none: none said");
-        r.pack=59;RowLine(r,out,kLineMost);
-        Expect(Has(out,KindLabel(r.kind)) && Has(out,L" + Handy Saber"),"a soldier's line names its backpack weapon");
-        r.editing=false;r.pack=0;
-        r=ViewRow{};r.text=RowText::pylon;r.index=1;r.store=2;r.rounds=4;
-        RowLine(r,out,kLineMost);
-        Expect(Has(out,L"2. ") && Has(out,L"AIM-120"),"pylon line");
-        NoteLine(r,out,kLineMost);Expect(Same(out,L"x4"),"rounds note");
-        r.editing=true;r.field=1;NoteLine(r,out,kLineMost);Expect(Has(out,L"x4") && Has(out,L"<"),"editing rounds");
-        HintLine(L"F2",out,kLineMost);Expect(Has(out,L"F2"),"hint names the toggle");
         EntryLine(L"F7 / LB+R3",out,kLineMost);
-        Expect(Has(out,L"F7 / LB+R3"),"closed-page entry uses the configured keys");
-        for(auto level:{roommenu::Level::units,roommenu::Level::rows,roommenu::Level::fields}) {
-            HelpLine(level,0,L"F7",out,kLineMost);
-            Expect(Same(out,hudtext::Tr(level==roommenu::Level::fields ? Tx::roomHintFields : Tx::roomHintNavigate)),
-                   "first help line matches this menu level");
-            HelpLine(level,1,L"F7",out,kLineMost);
-            Expect(Same(out,hudtext::Tr(level==roommenu::Level::units ? Tx::roomHintSave :
-                                      level==roommenu::Level::rows ? Tx::roomHintTools : Tx::roomHintFinish)),
-                   "second help line offers this level's action");
-            HelpLine(level,2,L"F7",out,kLineMost);
-            Expect(Has(out,L"F7"),"closing help uses the configured key");
-        }
-        HelpLine(roommenu::Level::units,3,L"F7",out,kLineMost);
-        Expect(!out[0],"no fourth help line");
+        Expect(Has(out,L"F7 / LB+R3"),"the native button's description uses the configured keys");
+        EntryLine(L"",out,kLineMost);
+        Expect(Has(out,L"-"),"no key configured: a dash");
         GenerateStatus s;s.state=GenerateState::failed;wcscpy_s(s.message,L"boom");
         Expect(GenerateLine(s,out,kLineMost) && Has(out,L"boom"),"generator failure with its message");
         s.state=GenerateState::idle;Expect(!GenerateLine(s,out,kLineMost) && !out[0],"idle: no line");
         Expect(Same(Title(true),hudtext::Tr(Tx::roomTitleUnsaved)) && Same(Title(false),hudtext::Tr(Tx::roomTitle)),"title");
     }
     hudtext::Use(hudtext::Lang::zhCN);
+    Expect(Same(Title(false),L"整备"),"the native button reads 整备");
     Expect(Same(UnitLabel(L"tank_crewed",L"x"),L"坦克·有人"),"unit label zh, any case");
     Expect(Same(UnitLabel(L"NEW_KEY",L"新单位"),L"新单位"),"unknown key: the catalog's name");
-    Expect(Same(KindLabel(0),L"游骑兵·步枪") && Same(StoreLabel(10),L"LAHAT 炮射导弹"),"zh labels");
-    hudtext::Use(hudtext::Lang::en);
-    Expect(Same(KindLabel(13),L"Fencer, shotgun") && Same(StoreLabel(1),L"AIM-9X short-range AAM"),"en labels");
-    // Status order and the four-line cap.
-    roomsync::SyncLine sync[3]{};
-    wcscpy_s(sync[0].text,L"A");wcscpy_s(sync[1].text,L"B");sync[1].warn=true;wcscpy_s(sync[2].text,L"C");
-    GenerateStatus g;g.state=GenerateState::running;
-    Status st=ComposeStatus(true,L"saved",false,&g,sync,3);
-    Expect(st.count==kStatusLines && Same(st.text[0],hudtext::Tr(Tx::roomClientNote)) && Same(st.text[1],L"saved") &&
-           Same(st.text[2],hudtext::Tr(Tx::roomGenRunning)) && Same(st.text[3],L"A"),"status order, capped");
-    st=ComposeStatus(false,nullptr,false,nullptr,sync,3);
-    Expect(st.count==3 && Same(st.text[1],L"B") && st.warn[1] && !st.warn[0],"sync lines alone, warn kept");
-    g.state=GenerateState::missing;
-    st=ComposeStatus(false,L"",false,&g,nullptr,0);
-    Expect(st.count==1 && st.warn[0],"missing generator warns; an empty save note is no line");
+    hudtext::Use(hudtext::Lang::ja);
+    Expect(Same(UnitLabel(L"OWN_MECH",L"x"),L"自分の要請・コンバットフレーム"),"the mech's label in the HUD's language");
 }
 
 // The catalog as support_dispatch.cpp lists it (keys, seats).
@@ -353,7 +259,8 @@ void Catalog() {
            "37 entries and the player's own: specs and units fit kMostUnits");
 }
 
-// A crew row: its kind from the crew settings, the default's colours shown when inheriting, its lines, chips and icon.
+// A crew's kind from the crew settings; the preview of a crew (a member in the colours it wears: its own, else the
+// default's; X stock) and of a vehicle (its body).
 void Crews() {
     const CrewKinds kinds{SupportWeapon::sniper,SupportWeapon::shotgun};
     Expect(CrewKindOf(L"TANK_CREWED",kinds)==SupportWeapon::sniper && CrewKindOf(L"transport_delivery",kinds)==SupportWeapon::sniper,
@@ -365,109 +272,40 @@ void Crews() {
            CrewKindOf(L"truck_airdrop",kinds)==SupportWeapon::shotgun,
            "a container delivery's crew is the transport helicopter's pilot: SupportAircraftCrewWeapon, not the ground kind");
     Expect(CrewKindOf(L"",kinds)==SupportWeapon::sniper,"the default's row: the ground kind");
-    roommenu::Menu m;
-    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
-    int tank=-1,def=-1,mission=-1;
-    for(int i=0;i<m.unitCount;++i) {
-        if(Same(m.unit[i].key,L"TANK_CREWED"))tank=i;
-        if(Same(m.unit[i].key,L""))def=i;
-        if(Same(m.unit[i].key,kCrewMissionKey))mission=i;
-    }
-    Expect(tank>=0 && def>=0 && mission>=0,"tank, default, mission units");
-    m.unit[def].crew=CrewColour{true,SupportLook{0x112233,0x445566}};
-    m.open=true;m.unitAt=tank;m.level=roommenu::Level::rows;m.rowAt=roommenu::CrewRow(m.unit[tank]);
-    roommenu::View v=roommenu::Snapshot(m);
-    DressCrewRows(v,m,kinds);
-    const ViewRow* r=nullptr;
-    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew)r=&v.rows.row[i];
-    Expect(r && r->inherit && r->kind==static_cast<int>(SupportWeapon::sniper) && r->soldierClass==0,"the tank's crew row: inherits, a sniper");
-    Expect(r && r->primary==0x112233FFu && r->secondary==0x445566FFu,"inheriting: the default's colours shown");
-    Look l=LookOf(r);
-    Expect(l.primary && l.secondary && l.primaryRgba==0x112233FFu && Same(l.icon,L"app:/weapon/icon/srMMF.dds"),"crew chips and the kind's icon");
-    wchar_t out[kLineMost];
-    for(hudtext::Lang lang:{hudtext::Lang::en,hudtext::Lang::zhCN,hudtext::Lang::zhTW,hudtext::Lang::ja}) {
-        hudtext::Use(lang);
-        if(!r)break;
-        RowLine(*r,out,kLineMost);
-        Expect(Has(out,KindLabel(r->kind)) && std::wcslen(out)>std::wcslen(KindLabel(r->kind))+4,"crew line: names the kind");
-        NoteLine(*r,out,kLineMost);
-        Expect(Same(out,hudtext::Tr(Tx::roomCrewDefault)),"inheriting: the note says the default");
-        ViewRow u;u.text=RowText::crewUnit;u.key=L"GUNSHIP";u.label=L"Gunship";
-        UnitLine(u,out,kLineMost);
-        wchar_t want[kLineMost];_snwprintf_s(want,_TRUNCATE,hudtext::Tr(Tx::roomUnitCrewOf),L"Gunship");
-        Expect(Has(out,want),"a catalog entry's crew unit: \"<label>: crew\"");
-        u.key=L"";u.label=hudtext::Tr(Tx::roomUnitCrewDefault);UnitLine(u,out,kLineMost);
-        Expect(Has(out,hudtext::Tr(Tx::roomUnitCrewDefault)) && !Has(out,L"Gunship"),"the default's unit: its own label");
-        u.key=kCrewMissionKey;u.label=hudtext::Tr(Tx::roomUnitCrewMission);u.changed=true;UnitLine(u,out,kLineMost);
-        Expect(Has(out,hudtext::Tr(Tx::roomUnitCrewMission)),"the mission crews' unit, edited");
-    }
-    // Set and both stock (X): no chips, stock noted; editing names the colour field.
-    m.unit[tank].crew=CrewColour{true,SupportLook{}};
-    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
-    r=nullptr;
-    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew)r=&v.rows.row[i];
-    l=LookOf(r);
-    Expect(r && !r->inherit && !l.primary && !l.secondary && l.icon,"X: no chips, the icon stays");
-    hudtext::Use(hudtext::Lang::en);
-    if(r){NoteLine(*r,out,kLineMost);Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"X: stock noted");}
-    m.level=roommenu::Level::fields;m.fieldAt=1;
-    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
-    for(int i=0;i<v.rows.count;++i)if(v.rows.row[i].text==RowText::crew){NoteLine(v.rows.row[i],out,kLineMost);Expect(Same(out,hudtext::Tr(Tx::roomFieldSecondary)),"editing the crew's colour 2");}
-    // The default's own row: not set is stock, not "as the default".
-    m.unitAt=def;m.level=roommenu::Level::rows;m.rowAt=0;m.unit[def].crew=CrewColour{};
-    v=roommenu::Snapshot(m);DressCrewRows(v,m,kinds);
-    Expect(v.rows.count==1 && v.rows.row[0].text==RowText::crew && v.rows.row[0].inherit && !v.rows.row[0].primary,"the default's row: stock");
-    NoteLine(v.rows.row[0],out,kLineMost);
-    Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"the default's row noted stock");
 }
 
 void Preview() {
     roommenu::Menu m;
-    roommenu::UnitSpec specs[]={{L"SQUAD",L"s",12},{L"TANK_CREWED",L"t",0}};
-    roommenu::Load(m,specs,2,nullptr,nullptr);
-    roompreview::PreviewSpec p;
-    Expect(!PreviewFor(m,&p),"shut: none");
-    m.open=true;
-    Expect(!PreviewFor(m,&p),"the unit list: none");
-    m.level=roommenu::Level::rows;
-    Expect(!PreviewFor(m,&p),"a stock squad (own load row): none");
-    m.unit[0].squad.count=5;m.unit[0].squad.kind[4]=SupportWeapon::wingIzuna;m.unit[0].squad.look[4]=SupportLook{0x123456,kStockColour};
-    m.rowAt=4;
-    Expect(PreviewFor(m,&p) && p.kind==SupportWeapon::wingIzuna && p.leader && p.look.primary==0x123456,"the cursor's soldier (4: a leader)");
-    m.rowAt=1;
-    Expect(PreviewFor(m,&p) && !p.leader,"soldier 1: not a leader");
-    roompreview::PreviewSpec q=p;
-    Expect(SamePreview(p,q),"same spec");
-    q.look.secondary=0xFFFFFF;Expect(!SamePreview(p,q),"another colour");
-    m.unitAt=1;m.rowAt=0;
-    Expect(PreviewFor(m,&p) && p.body==VehicleBody::tank,"a vehicle's gun row: the vehicle");
-    roompreview::PreviewSpec soldier=q;
-    Expect(!SamePreview(p,soldier) && SamePreview(p,p),"a vehicle is not a soldier");
-    roompreview::PreviewSpec other=p;other.look.primary=0x123456;
-    Expect(SamePreview(p,other),"a vehicle: kind / look ignored");
-    other.body=VehicleBody::strike;
-    Expect(!SamePreview(p,other),"another vehicle body");
-    // A crew row: the crew's kind, a member, in the colours it wears (its own, else the default's).
     roommenu::UnitSpec crewed[]={{L"TANK_CREWED",L"t",0,true},{L"STRIKE",L"j",0,true},{L"",L"d",0,true},{kCrewMissionKey,L"m",0,true}};
     roommenu::Load(m,crewed,4,nullptr,nullptr);
-    m.open=true;m.level=roommenu::Level::rows;
     const CrewKinds kinds{SupportWeapon::flame,SupportWeapon::rocket};
+    Expect(!DefaultCrew(m).set,"the default not set: stock");
     m.unit[2].crew=CrewColour{true,SupportLook{0xABCDEF,kStockColour}};
-    m.unitAt=0;m.rowAt=roommenu::CrewRow(m.unit[0]);
-    Expect(m.rowAt==1 && PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::flame && !p.leader && p.look.primary==0xABCDEF,
-           "the tank's crew: a flamethrower member in the default's colours");
+    Expect(DefaultCrew(m).set && DefaultCrew(m).look.primary==0xABCDEF,"the default: the \"\" crew unit's colours");
+    roompreview::PreviewSpec p=CrewPreview(m,m.unit[0],kinds);
+    Expect(p.kind==SupportWeapon::flame && !p.leader && p.look.primary==0xABCDEF,"the tank's crew: a flamethrower member in the default's colours");
     m.unit[0].crew=CrewColour{true,SupportLook{0x010203,0x040506}};
-    Expect(PreviewFor(m,&p,kinds) && p.look.primary==0x010203 && p.look.secondary==0x040506,"its own colours once set");
+    p=CrewPreview(m,m.unit[0],kinds);
+    Expect(p.look.primary==0x010203 && p.look.secondary==0x040506,"its own colours once set");
     m.unit[0].crew=CrewColour{true,SupportLook{}};
-    Expect(PreviewFor(m,&p,kinds) && !p.look.On(),"X: stock, not the default");
-    m.unitAt=1;m.rowAt=roommenu::CrewRow(m.unit[1]);
-    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::rocket,"the jet's crew: the aircraft kind");
-    m.unitAt=1;m.rowAt=0;
-    Expect(PreviewFor(m,&p,kinds) && p.body==VehicleBody::strike,"the jet's guns row: the jet");
-    m.unitAt=2;m.rowAt=0;
-    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::flame && p.look.primary==0xABCDEF,"the default's own row");
-    m.unitAt=3;m.rowAt=0;
-    Expect(PreviewFor(m,&p,kinds) && p.kind==SupportWeapon::rifle && !p.leader && p.look.primary==0xABCDEF,"the mission crews: a rifle member");
+    Expect(!CrewPreview(m,m.unit[0],kinds).look.On(),"X: stock, not the default");
+    Expect(CrewPreview(m,m.unit[1],kinds).kind==SupportWeapon::rocket,"the jet's crew: the aircraft kind");
+    p=CrewPreview(m,m.unit[2],kinds);
+    Expect(p.kind==SupportWeapon::flame && p.look.primary==0xABCDEF,"the default's own row: its own colours");
+    p=CrewPreview(m,m.unit[3],kinds);
+    Expect(p.kind==SupportWeapon::rifle && !p.leader && p.look.primary==0xABCDEF,"the mission crews: a rifle member");
+    roommenu::UnitSpec vehicles[]={{L"TANK_CREWED",L"t",0},{L"STRIKE",L"j",0},{L"OWN_MECH",L"m",0}};
+    roommenu::Load(m,vehicles,3,nullptr,nullptr);
+    Expect(VehiclePreview(m.unit[0]).body==VehicleBody::tank && VehiclePreview(m.unit[1]).body==VehicleBody::strike &&
+           VehiclePreview(m.unit[2]).body==VehicleBody::mech,"a vehicle's preview: its body");
+    // A loadout: its own file (room_preview_logic.h VehicleFileOf), so the preview carries it; stock (no loadout) is the base.
+    Expect(!VehiclePreview(m.unit[0]).load.On(),"a stock tank: no loadout, the base file");
+    m.unit[0].vehicle.body=VehicleBody::tank;m.unit[0].vehicle.apGun=true;
+    const roompreview::PreviewSpec loaded=VehiclePreview(m.unit[0]);
+    Expect(loaded.load.On() && loaded.load.apGun,"a loaded tank: its loadout with it");
+    m.unit[0].vehicle.body=VehicleBody::strike;
+    Expect(!VehiclePreview(m.unit[0]).load.On(),"another body's loadout: not this vehicle's");
+    m.unit[0].vehicle=VehicleLoadout{};
 }
 
 void Save() {
@@ -540,46 +378,6 @@ void Save() {
 }
 }  // namespace
 
-// The model follows the description dialog's cursor (FocusPreview).
-void Focus() {
-    roommenu::Menu m;m.open=true;
-    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
-    int squad=-1;for(int i=0;i<m.unitCount;++i)if(roommenu::IsSquad(m.unit[i]) && squad<0)squad=i;
-    roommenu::Unit& u=m.unit[squad];
-    u.squad.count=2;u.squad.kind[0]=SupportWeapon::rifle;u.squad.kind[1]=SupportWeapon::wingLance;u.squad.look[1].primary=0x112233;
-    roomdialog::Nav nav;nav.page=roomdialog::Page::unit;nav.unit=squad;
-    m.level=roommenu::Level::rows;m.unitAt=squad;m.rowAt=0;
-    roompreview::PreviewSpec p{};
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p) && p.kind==SupportWeapon::wingLance && !p.leader &&
-           p.look.primary==0x112233,"the unit page: the soldier the focused button opens");
-    nav.page=roomdialog::Page::kind;nav.row=1;m.level=roommenu::Level::fields;m.rowAt=1;
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,static_cast<int>(SupportWeapon::fencerCannon)},&p) &&
-           p.kind==SupportWeapon::fencerCannon && p.look.primary==0x112233,"the class page: that soldier as the focused class");
-    nav.page=roomdialog::Page::primary;
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.look.primary==0x445566 &&
-           p.kind==SupportWeapon::wingLance,"the colour page: wearing the focused colour");
-    Expect(u.squad.look[1].primary==0x112233 && u.squad.kind[1]==SupportWeapon::wingLance,"nothing edited by looking");
-    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::back,0},&p) && p.kind==SupportWeapon::wingLance,
-           "another button: the page's own soldier");
-    // A vehicle's pages: the vehicle whatever has the focus, but its crew row's button the crew.
-    int tank=-1;for(int i=0;i<m.unitCount;++i)if(m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].body==VehicleBody::tank && tank<0)tank=i;
-    Expect(tank>=0,"the default units have a tank");
-    roomdialog::Nav vnav;vnav.unit=tank;m.unitAt=tank;m.rowAt=0;m.level=roommenu::Level::rows;
-    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::pylon,roomdialog::Page::gun,roomdialog::Page::store,roomdialog::Page::rounds}) {
-        vnav.page=page;
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,3},&p) && p.body==VehicleBody::tank,"a vehicle page: the vehicle");
-    }
-    if(m.unit[tank].hasCrew) {
-        vnav.page=roomdialog::Page::unit;
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::row,roommenu::CrewRow(m.unit[tank])},&p) && p.body==VehicleBody::none,
-               "the vehicle page's crew button: the crew");
-        vnav.page=roomdialog::Page::crewPrimary;m.rowAt=roommenu::CrewRow(m.unit[tank]);
-        Expect(FocusPreview(m,vnav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.body==VehicleBody::none,"the crew's colour page: the crew");
-    }
-    m.open=false;
-    Expect(!FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p),"closed: none");
-}
-
 // The HQ's mission select opened by itself: once per HQ object, only with the HQ the input owner and the F2 menu down.
 void AutoOpen() {
     Expect(AutoOpenDue(true,false,true,false),"a fresh HQ the input owner, the menu down: opened");
@@ -588,58 +386,6 @@ void AutoOpen() {
     Expect(!AutoOpenDue(true,false,false,false),"something of the game's over the HQ (opening, notice, sub-screen, transition): waited");
     Expect(!AutoOpenDue(true,false,true,true),"the F2 menu up or its key still held: waited");
     Expect(!AutoOpenDue(true,false,false,true) && !AutoOpenDue(false,true,false,true),"nothing due: never");
-}
-
-// The mech (OWN_MECH): its unit label, its rows' lines in each language (the parts' own four labels; the request's own /
-// empty in words), the note while a row is changed, its preview the mech body on every one of its pages.
-void Mech() {
-    roommenu::Menu m;m.open=true;
-    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
-    int mech=-1;for(int i=0;i<m.unitCount;++i)if(roommenu::IsMech(m.unit[i]))mech=i;
-    Expect(mech>=0 && Same(m.unit[mech].key,L"OWN_MECH"),"the default units have the mech");
-    hudtext::Use(hudtext::Lang::ja);
-    Expect(Same(UnitLabel(L"OWN_MECH",L"x"),L"自分の要請・コンバットフレーム"),"its label in the HUD's language");
-    roommenu::Unit& u=m.unit[mech];
-    m.unitAt=mech;m.level=roommenu::Level::rows;m.rowAt=0;
-    wchar_t out[kLineMost];
-    roommenu::View v=roommenu::Snapshot(m);
-    hudtext::Use(hudtext::Lang::en);
-    RowLine(v.rows.row[0],out,kLineMost);
-    Expect(v.rows.count==1 && Has(out,hudtext::Tr(Tx::roomStockMech)),"a stock mech's one row");
-    roommenu::detail::Materialise(u);
-    u.vehicle.mech.weapon[2]=-1;
-    m.rowAt=roommenu::kMechRowWeapon;
-    v=roommenu::Snapshot(m);
-    const struct { hudtext::Lang lang; const wchar_t* request; const wchar_t* arm; const wchar_t* frame; const wchar_t* shoulder; } kLangs[]={
-        {hudtext::Lang::en,L"Base request: Powered Exoskeleton Nix A",L"Right arm: Machine Gun",L"Frame: (the request's own)",L"Right shoulder: (empty)"},
-        {hudtext::Lang::zhCN,L"底座请求：战斗机体 尼克斯Ａ",L"右臂：机枪",L"机体：（请求自己的）",L"右肩：（空）"},
-        {hudtext::Lang::zhTW,L"底座請求：戰鬥機體 尼克斯Ａ",L"右臂：機鎗",L"機體：（請求自己的）",L"右肩：（空）"},
-        {hudtext::Lang::ja,L"ベースの要請：コンバットフレーム ニクスＡ",L"右腕：マシンガン",L"機体：（要請のもの）",L"右肩：（なし）"}};
-    for(const auto& l:kLangs) {
-        hudtext::Use(l.lang);
-        bool ok=v.rows.count==kMechFields;
-        RowLine(v.rows.row[0],out,kLineMost);ok=ok && Has(out,l.request);
-        RowLine(v.rows.row[1],out,kLineMost);ok=ok && Has(out,l.frame);
-        RowLine(v.rows.row[2],out,kLineMost);ok=ok && Has(out,l.arm) && Has(out,kCursor);
-        RowLine(v.rows.row[4],out,kLineMost);ok=ok && Has(out,l.shoulder);
-        Expect(ok,"the mech's rows in each language");
-    }
-    hudtext::Use(hudtext::Lang::en);
-    NoteLine(v.rows.row[2],out,kLineMost);
-    Expect(out[0]==0,"no note while not changed");
-    m.level=roommenu::Level::fields;
-    v=roommenu::Snapshot(m);
-    NoteLine(v.rows.row[2],out,kLineMost);
-    wchar_t want[32];std::swprintf(want,32,L"< %d / %d >",v.rows.row[2].choice,v.rows.row[2].choices);
-    Expect(v.rows.row[2].choice>=1 && Same(out,want),"changing: the value's place among its row's values");
-    Expect(!LookOf(&v.rows.row[2]).icon && !LookOf(&v.rows.row[2]).primary,"a mech row: no chips, no icon");
-    roompreview::PreviewSpec p{};
-    Expect(PreviewFor(m,&p) && p.body==VehicleBody::mech,"its rows: the mech");
-    roomdialog::Nav nav;nav.unit=mech;
-    for(roomdialog::Page page:{roomdialog::Page::unit,roomdialog::Page::mech}) {
-        nav.page=page;nav.row=roommenu::kMechRowCore;
-        Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,-1},&p) && p.body==VehicleBody::mech,"its dialog pages: the mech");
-    }
 }
 
 int main() {
@@ -651,14 +397,11 @@ int main() {
     GateAndPlan();
     SwitchesPlan();
     AutoOpen();
-    Looks();
     Texts();
     Catalog();
     Crews();
     Preview();
-    Focus();
     Save();
-    Mech();
     std::printf("room_ui: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

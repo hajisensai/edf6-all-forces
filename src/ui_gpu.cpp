@@ -1,7 +1,5 @@
-// See worldmap_gpu.h.
-#include "worldmap_gpu.h"
-#include "worldmap_logic.h"
-#include "worldmap_tiles.h"
+// See ui_gpu.h.
+#include "ui_gpu.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -14,41 +12,48 @@
 #include <cmath>
 #include <cstring>
 #include <new>
-#include <vector>
 
-namespace crew::worldmapgpu {
+namespace crew::uigpu {
 namespace {
 
 using Microsoft::WRL::ComPtr;
 
-// One quad: its corners in clip space, its texture rectangle, a colour (the texture's multiplier when textured).
+// One quad: its corners in clip space, its texture rectangle, a colour per corner (the texture's multiplier when
+// textured). Mode.x: textured; Mode.y: repeated (the wrapping sampler).
 constexpr char kShaders[]=R"hlsl(
 cbuffer QuadBlock : register(b0) {
     float4 Corners01;   // top-left xy, top-right xy
     float4 Corners23;   // bottom-left xy, bottom-right xy
     float4 Texels;      // u0 v0 u1 v1
-    float4 Colour;
-    float4 Mode;        // x: 1 textured
+    float4 Colour0;     // per corner, in the corners' order
+    float4 Colour1;
+    float4 Colour2;
+    float4 Colour3;
+    float4 Mode;        // x: 1 textured; y: 1 repeated
 };
 Texture2D<float4> Picture : register(t0);
 SamplerState Linear : register(s0);
-struct Corner { float4 position : SV_Position; float2 uv : TEXCOORD0; };
+SamplerState Repeat : register(s1);
+struct Corner { float4 position : SV_Position; float2 uv : TEXCOORD0; float4 colour : COLOR0; };
 Corner QuadVertex(uint id : SV_VertexID) {
     Corner c;
     float2 p = id == 0 ? Corners01.xy : id == 1 ? Corners01.zw : id == 2 ? Corners23.xy : Corners23.zw;
     c.position = float4(p, 0.0, 1.0);
     c.uv = float2((id & 1) ? Texels.z : Texels.x, (id & 2) ? Texels.w : Texels.y);
+    c.colour = id == 0 ? Colour0 : id == 1 ? Colour1 : id == 2 ? Colour2 : Colour3;
     return c;
 }
 float4 QuadPixel(Corner c) : SV_Target0 {
-    return Mode.x > 0.5 ? Picture.SampleLevel(Linear, c.uv, 0.0) * Colour : Colour;
+    if (Mode.x < 0.5) return c.colour;
+    float4 t = Mode.y > 0.5 ? Picture.SampleLevel(Repeat, c.uv, 0.0) : Picture.SampleLevel(Linear, c.uv, 0.0);
+    return t * c.colour;
 }
 )hlsl";
 
 struct QuadBlock {
     float corners[8];
     float texels[4];
-    float colour[4];
+    float colour[4][4];
     float mode[4];
 };
 static_assert(sizeof(QuadBlock)%16==0,"a constant buffer is a multiple of 16 bytes");
@@ -56,13 +61,43 @@ static_assert(sizeof(QuadBlock)%16==0,"a constant buffer is a multiple of 16 byt
 using CompileFunction=HRESULT(WINAPI*)(LPCVOID,SIZE_T,LPCSTR,const D3D_SHADER_MACRO*,ID3DInclude*,LPCSTR,LPCSTR,UINT,UINT,
                                        ID3DBlob**,ID3DBlob**);
 
-bool Srgb(DXGI_FORMAT f) noexcept {
+bool SrgbFormat(DXGI_FORMAT f) noexcept {
     return f==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || f==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || f==DXGI_FORMAT_B8G8R8X8_UNORM_SRGB ||
            f==DXGI_FORMAT_BC1_UNORM_SRGB || f==DXGI_FORMAT_BC2_UNORM_SRGB || f==DXGI_FORMAT_BC3_UNORM_SRGB ||
            f==DXGI_FORMAT_BC7_UNORM_SRGB;
 }
 
+void ColourOf(std::uint32_t argb,float* out) noexcept {
+    out[0]=static_cast<float>((argb>>16)&0xFF)/255.f;
+    out[1]=static_cast<float>((argb>>8)&0xFF)/255.f;
+    out[2]=static_cast<float>(argb&0xFF)/255.f;
+    out[3]=static_cast<float>((argb>>24)&0xFF)/255.f;
+}
+
 }  // namespace
+
+ID3D11ShaderResourceView* MakeImage(ID3D11Device* device,const std::uint32_t* bgra,int w,int h,bool srgb) noexcept {
+    if(!device || !bgra || w<=0 || h<=0 || w>16384 || h>16384)return nullptr;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width=static_cast<UINT>(w);
+    desc.Height=static_cast<UINT>(h);
+    desc.MipLevels=1;
+    desc.ArraySize=1;
+    desc.Format=DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    desc.SampleDesc.Count=1;
+    desc.Usage=D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA data{bgra,static_cast<UINT>(w)*4u,0};
+    ComPtr<ID3D11Texture2D> texture;
+    if(FAILED(device->CreateTexture2D(&desc,&data,&texture)))return nullptr;
+    D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
+    viewDesc.Format=srgb ? DXGI_FORMAT_B8G8R8A8_UNORM_SRGB : DXGI_FORMAT_B8G8R8A8_UNORM;
+    viewDesc.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+    viewDesc.Texture2D.MipLevels=1;
+    ID3D11ShaderResourceView* view=nullptr;
+    if(FAILED(device->CreateShaderResourceView(texture.Get(),&viewDesc,&view)))return nullptr;
+    return view;
+}
 
 struct Renderer::Impl {
     // The device's objects (made by Make, kept while the device is the same and alive).
@@ -74,7 +109,7 @@ struct Renderer::Impl {
     ComPtr<ID3D11VertexShader> vertexShader;
     ComPtr<ID3D11PixelShader> pixelShader;
     ComPtr<ID3D11Buffer> block;
-    ComPtr<ID3D11SamplerState> sampler;
+    ComPtr<ID3D11SamplerState> sampler,repeat;
     ComPtr<ID3D11BlendState> blend;
     ComPtr<ID3D11DepthStencilState> noDepth;
     ComPtr<ID3D11RasterizerState> raster;
@@ -89,20 +124,14 @@ struct Renderer::Impl {
     bool srgb=false;
     int targetW=0,targetH=0;
 
-    // The tiles. srgbTiles: the views' format (the target's colour space at upload: a tile is read as it is written).
-    struct Tile { int index; int level; unsigned used; ComPtr<ID3D11ShaderResourceView> view; };
-    std::vector<Tile> tiles;
-    bool srgbTiles=false;
-
     ~Impl() noexcept {
-        tiles.clear();
         if(compilerModule)FreeLibrary(compilerModule);
     }
     bool Fail(const char* what) noexcept { why=what;broken=true;return false; }
 
     bool Compile(const char* entry,const char* profile,ComPtr<ID3DBlob>& code) noexcept {
         ComPtr<ID3DBlob> errors;
-        return SUCCEEDED(compile(kShaders,sizeof(kShaders)-1,"worldmap_gpu",nullptr,nullptr,entry,profile,
+        return SUCCEEDED(compile(kShaders,sizeof(kShaders)-1,"ui_gpu",nullptr,nullptr,entry,profile,
                                  D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors));
     }
 
@@ -141,8 +170,10 @@ struct Renderer::Impl {
         samplerDesc.AddressU=samplerDesc.AddressV=samplerDesc.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;
         samplerDesc.ComparisonFunc=D3D11_COMPARISON_NEVER;
         samplerDesc.MaxLOD=D3D11_FLOAT32_MAX;
-        // Straight alpha over what is there; the target's alpha made opaque where the map is (a UI target composited
-        // by its alpha shows the map, a back buffer ignores it).
+        D3D11_SAMPLER_DESC repeatDesc=samplerDesc;
+        repeatDesc.AddressU=repeatDesc.AddressV=repeatDesc.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
+        // Straight alpha over what is there; the target's alpha made opaque where we draw (a UI target composited
+        // by its alpha shows it, a back buffer ignores it).
         D3D11_BLEND_DESC blendDesc{};
         auto& rt=blendDesc.RenderTarget[0];
         rt.BlendEnable=TRUE;
@@ -160,38 +191,38 @@ struct Renderer::Impl {
         rasterDesc.ScissorEnable=TRUE;
         if(FAILED(device->CreateBuffer(&blockDesc,nullptr,&block)) ||
            FAILED(device->CreateSamplerState(&samplerDesc,&sampler)) ||
+           FAILED(device->CreateSamplerState(&repeatDesc,&repeat)) ||
            FAILED(device->CreateBlendState(&blendDesc,&blend)) ||
            FAILED(device->CreateDepthStencilState(&depthDesc,&noDepth)) ||
            FAILED(device->CreateRasterizerState(&rasterDesc,&raster)))return Fail("a pipeline state was refused");
         return true;
     }
 
-    // Design units to clip space (the viewport is the select's: the layout stretched over it).
+    // Design units to clip space (the viewport is the screen's: the layout stretched over it).
     static float ClipX(float x) noexcept { return x/960.f-1.f; }
     static float ClipY(float y) noexcept { return 1.f-y/540.f; }
 
-    void Draw(const float (&xy)[4][2],const float* texels,std::uint32_t argb,ID3D11ShaderResourceView* view) noexcept {
+    void Draw(const float (&xy)[4][2],const float* texels,const std::uint32_t (&argb)[4],ID3D11ShaderResourceView* view,
+              bool repeated) noexcept {
         if(!context)return;
         D3D11_MAPPED_SUBRESOURCE m{};
         if(FAILED(context->Map(block.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m)))return;
         QuadBlock q{};
         for(int i=0;i<4;++i){q.corners[2*i]=ClipX(xy[i][0]);q.corners[2*i+1]=ClipY(xy[i][1]);}
         if(texels)std::memcpy(q.texels,texels,sizeof q.texels);
-        q.colour[0]=static_cast<float>((argb>>16)&0xFF)/255.f;
-        q.colour[1]=static_cast<float>((argb>>8)&0xFF)/255.f;
-        q.colour[2]=static_cast<float>(argb&0xFF)/255.f;
-        q.colour[3]=static_cast<float>((argb>>24)&0xFF)/255.f;
+        for(int i=0;i<4;++i)ColourOf(argb[i],q.colour[i]);
         q.mode[0]=view ? 1.f : 0.f;
+        q.mode[1]=repeated ? 1.f : 0.f;
         std::memcpy(m.pData,&q,sizeof q);
         context->Unmap(block.Get(),0);
         ID3D11ShaderResourceView* views[1]={view};
         context->PSSetShaderResources(0,1,views);
         context->Draw(4,0);
     }
-
-    Tile* Find(int index) noexcept {
-        for(Tile& t:tiles)if(t.index==index)return &t;
-        return nullptr;
+    void Draw(const float (&xy)[4][2],const float* texels,std::uint32_t argb,ID3D11ShaderResourceView* view,
+              bool repeated=false) noexcept {
+        const std::uint32_t all[4]={argb,argb,argb,argb};
+        Draw(xy,texels,all,view,repeated);
     }
 };
 
@@ -201,7 +232,7 @@ Renderer::~Renderer() noexcept { End(); }
 Renderer::Begun Renderer::Begin(ID3D11DeviceContext* context,const Viewport& viewport) noexcept {
     if(!context || context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE) {
         if(!impl_)impl_.reset(new(std::nothrow) Impl());
-        if(impl_){impl_->why="the select's draw has no immediate D3D11 context";impl_->broken=true;}
+        if(impl_){impl_->why="the screen's draw has no immediate D3D11 context";impl_->broken=true;}
         return Begun::broken;
     }
     if(!(viewport.w>=1.f) || !(viewport.h>=1.f) || viewport.w>16384.f || viewport.h>16384.f)return Begun::skip;
@@ -235,8 +266,7 @@ Renderer::Begun Renderer::Begin(ID3D11DeviceContext* context,const Viewport& vie
     texture->GetDesc(&desc);
     s.targetW=static_cast<int>(desc.Width);
     s.targetH=static_cast<int>(desc.Height);
-    s.srgb=Srgb(targetDesc.Format);
-    if(s.srgb!=s.srgbTiles){s.tiles.clear();s.srgbTiles=s.srgb;}
+    s.srgb=SrgbFormat(targetDesc.Format);
     s.target=std::move(target);
     s.viewport=viewport;
     s.context=context;
@@ -258,8 +288,8 @@ Renderer::Begun Renderer::Begin(ID3D11DeviceContext* context,const Viewport& vie
     ID3D11Buffer* blocks[1]={s.block.Get()};
     context->VSSetConstantBuffers(0,1,blocks);
     context->PSSetConstantBuffers(0,1,blocks);
-    ID3D11SamplerState* samplers[1]={s.sampler.Get()};
-    context->PSSetSamplers(0,1,samplers);
+    ID3D11SamplerState* samplers[2]={s.sampler.Get(),s.repeat.Get()};
+    context->PSSetSamplers(0,2,samplers);
     return Begun::ok;
 }
 
@@ -278,60 +308,6 @@ const char* Renderer::Why() const noexcept { return impl_ && impl_->why ? impl_-
 int Renderer::TargetWidth() const noexcept { return impl_ ? impl_->targetW : 0; }
 int Renderer::TargetHeight() const noexcept { return impl_ ? impl_->targetH : 0; }
 
-bool Renderer::Has(int index) const noexcept {
-    if(!impl_)return false;
-    for(const Impl::Tile& t:impl_->tiles)if(t.index==index)return true;
-    return false;
-}
-int Renderer::Cached() const noexcept { return impl_ ? static_cast<int>(impl_->tiles.size()) : 0; }
-
-bool Renderer::Upload(const worldmap::TilePixels& tile,int level,unsigned frame) noexcept {
-    if(!impl_ || !impl_->context || tile.w<=0 || tile.h<=0 ||
-       tile.bgra.size()!=static_cast<std::size_t>(tile.w)*static_cast<std::size_t>(tile.h))return false;
-    Impl& s=*impl_;
-    if(s.Find(tile.index))return true;
-    std::size_t slot=s.tiles.size();
-    if(s.tiles.size()>=static_cast<std::size_t>(kCacheTiles)) {
-        int levels[kCacheTiles];
-        unsigned used[kCacheTiles];
-        const int n=static_cast<int>(s.tiles.size()<static_cast<std::size_t>(kCacheTiles) ? s.tiles.size() : kCacheTiles);
-        for(int i=0;i<n;++i){levels[i]=s.tiles[static_cast<std::size_t>(i)].level;used[i]=s.tiles[static_cast<std::size_t>(i)].used;}
-        const int victim=worldmap::Victim(levels,used,n,frame);
-        if(victim<0)return false;
-        slot=static_cast<std::size_t>(victim);
-    }
-    D3D11_TEXTURE2D_DESC desc{};
-    desc.Width=static_cast<UINT>(tile.w);
-    desc.Height=static_cast<UINT>(tile.h);
-    desc.MipLevels=1;
-    desc.ArraySize=1;
-    desc.Format=DXGI_FORMAT_B8G8R8A8_TYPELESS;
-    desc.SampleDesc.Count=1;
-    desc.Usage=D3D11_USAGE_IMMUTABLE;
-    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-    const D3D11_SUBRESOURCE_DATA data{tile.bgra.data(),static_cast<UINT>(tile.w)*4u,0};
-    ComPtr<ID3D11Texture2D> texture;
-    if(FAILED(s.device->CreateTexture2D(&desc,&data,&texture)))return false;
-    D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
-    viewDesc.Format=s.srgbTiles ? DXGI_FORMAT_B8G8R8A8_UNORM_SRGB : DXGI_FORMAT_B8G8R8A8_UNORM;
-    viewDesc.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
-    viewDesc.Texture2D.MipLevels=1;
-    ComPtr<ID3D11ShaderResourceView> view;
-    if(FAILED(s.device->CreateShaderResourceView(texture.Get(),&viewDesc,&view)))return false;
-    Impl::Tile t{tile.index,level,frame,std::move(view)};
-    if(slot<s.tiles.size())s.tiles[slot]=std::move(t);
-    else s.tiles.push_back(std::move(t));
-    return true;
-}
-
-void Renderer::DrawTile(int index,float x0,float y0,float x1,float y1,float u0,float v0,float u1,float v1,unsigned frame) noexcept {
-    if(!impl_)return;
-    Impl::Tile* t=impl_->Find(index);
-    if(!t)return;
-    t->used=frame;
-    Image(t->view.Get(),x0,y0,x1,y1,u0,v0,u1,v1,0xFFFFFFFFu);
-}
-
 void Renderer::Reset() noexcept {
     End();
     impl_.reset();
@@ -340,9 +316,17 @@ void Renderer::Reset() noexcept {
 void Renderer::Quad(const float (&xy)[4][2],std::uint32_t argb) noexcept {
     if(impl_)impl_->Draw(xy,nullptr,argb,nullptr);
 }
+void Renderer::QuadColours(const float (&xy)[4][2],const std::uint32_t (&argb)[4]) noexcept {
+    if(impl_)impl_->Draw(xy,nullptr,argb,nullptr,false);
+}
 void Renderer::Rect(float x0,float y0,float x1,float y1,std::uint32_t argb) noexcept {
     const float xy[4][2]={{x0,y0},{x1,y0},{x0,y1},{x1,y1}};
     Quad(xy,argb);
+}
+void Renderer::Gradient(float x0,float y0,float x1,float y1,std::uint32_t from,std::uint32_t to,bool vertical) noexcept {
+    const float xy[4][2]={{x0,y0},{x1,y0},{x0,y1},{x1,y1}};
+    const std::uint32_t c[4]={from,vertical ? from : to,vertical ? to : from,to};
+    QuadColours(xy,c);
 }
 void Renderer::Line(float x0,float y0,float x1,float y1,float width,std::uint32_t argb) noexcept {
     const float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
@@ -359,7 +343,23 @@ void Renderer::Image(ID3D11ShaderResourceView* texture,float x0,float y0,float x
     const float texels[4]={u0,v0,u1,v1};
     impl_->Draw(xy,texels,tint,texture);
 }
+void Renderer::ImageClipped(ID3D11ShaderResourceView* texture,float x0,float y0,float x1,float y1,float u0,float v0,
+                            float u1,float v1,std::uint32_t tint,float cx0,float cy0,float cx1,float cy1) noexcept {
+    if(!(x1>x0) || !(y1>y0))return;
+    const float l=x0>cx0 ? x0 : cx0,t=y0>cy0 ? y0 : cy0,r=x1<cx1 ? x1 : cx1,b=y1<cy1 ? y1 : cy1;
+    if(!(r>l) || !(b>t))return;
+    const float du=(u1-u0)/(x1-x0),dv=(v1-v0)/(y1-y0);
+    Image(texture,l,t,r,b,u0+(l-x0)*du,v0+(t-y0)*dv,u0+(r-x0)*du,v0+(b-y0)*dv,tint);
+}
+void Renderer::Pattern(ID3D11ShaderResourceView* texture,float x0,float y0,float x1,float y1,float periodX,float periodY,
+                       std::uint32_t tint) noexcept {
+    if(!impl_ || !texture || !(periodX>0.f) || !(periodY>0.f))return;
+    const float xy[4][2]={{x0,y0},{x1,y0},{x0,y1},{x1,y1}};
+    const float texels[4]={x0/periodX,y0/periodY,x1/periodX,y1/periodY};
+    impl_->Draw(xy,texels,tint,texture,true);
+}
 ID3D11Device* Renderer::Device() const noexcept { return impl_ && impl_->context ? impl_->device.Get() : nullptr; }
+bool Renderer::Srgb() const noexcept { return impl_ && impl_->context && impl_->srgb; }
 void Renderer::Clip(float x0,float y0,float x1,float y1) noexcept {
     if(!impl_ || !impl_->context)return;
     const Viewport& v=impl_->viewport;
@@ -378,4 +378,4 @@ void Renderer::Unclip() noexcept {
 }
 float Renderer::Scale() const noexcept { return impl_ && impl_->viewport.w>0.f ? impl_->viewport.w/1920.f : 1.f; }
 
-}  // namespace crew::worldmapgpu
+}  // namespace crew::uigpu

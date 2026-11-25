@@ -194,6 +194,29 @@
    ],
    "scripts": []
   },
+  "armory_logic": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armory_native": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/armory_native_audit.py"
+   ]
+  },
+  "armory_skin": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "as_registration": {
    "labels": [
     "pylib-model",
@@ -3306,6 +3329,13 @@
     "tests/loadout_generate_test.py"
    ]
   },
+  "loadout_preset": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "loadout_writer": {
    "labels": [
     "plugin-native"
@@ -3443,6 +3473,25 @@
     "test-data"
    ],
    "scripts": []
+  },
+  "menu_graft": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/menu_graft_test.py"
+   ]
   },
   "menu_preview": {
    "labels": [
@@ -4222,6 +4271,12 @@
     "tests/player_name_native_audit.py"
    ]
   },
+  "player_slots": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "player_vehicle": {
    "labels": [
     "plugin-native",
@@ -4319,6 +4374,12 @@
    "scripts": []
   },
   "preload_set": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "preview_camera": {
    "labels": [
     "plugin-native"
    ],
@@ -4804,8 +4865,7 @@
   },
   "room_ui": {
    "labels": [
-    "plugin-native",
-    "test-data"
+    "plugin-native"
    ],
    "scripts": []
   },
@@ -5416,6 +5476,12 @@
    ]
   },
   "support_net_runtime": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "support_pages": {
    "labels": [
     "plugin-native"
    ],
@@ -6113,6 +6179,33 @@
    ],
    "scripts": []
   },
+  "weapon_equip_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/weapon_equip_native_audit.py"
+   ]
+  },
+  "weapon_list_logic": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "weapon_mount_native": {
    "labels": [
     "autoturret-tools",
@@ -6130,6 +6223,12 @@
    "scripts": [
     "tests/weapon_mount_native_audit.py"
    ]
+  },
+  "weapon_page_logic": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "weapon_records": {
    "labels": [

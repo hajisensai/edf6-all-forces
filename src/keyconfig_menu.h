@@ -20,6 +20,15 @@ namespace kb=edf::keybind;
 constexpr int kLastPage=kb::kFirstPage+kb::kPages-1;
 static_assert(kLastPage<0x7F,"the pages fit a cmp imm8");
 
+constexpr std::int32_t KeyboardDisplayCode(std::int32_t code) noexcept {
+    return kb::BindableCode(code) ? code : kb::kNoAssign;
+}
+
+// Native P1 input is exclusive. Switch on a fresh action, retaining the current mode on idle and simultaneous input.
+constexpr bool NextPadMode(bool padMode,bool keyboardPressed,bool padPressed) noexcept {
+    return keyboardPressed==padPressed ? padMode : padPressed;
+}
+
 // --- The six page dispatches (site: the `cmp; ja` replaced; back: the stock jump table; def: the stock default;
 // join: where the plugin's page continues)
 struct Dispatch { const char* name; std::size_t site,size,back,def,join; unsigned char reg; };

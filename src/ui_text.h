@@ -1,5 +1,6 @@
 #pragma once
-// The world map's words and marks (src/worldmap.cpp, the select's draw; render thread only, under its gpuLock).
+// The plugin UI's words and marks (src/worldmap.cpp, src/armory.cpp: a screen's draw; render thread only, under the
+// screen's draw lock).
 //  - Labels: a string rasterized by GDI (the system's CJK UI font for the game's language: Microsoft YaHei UI, Microsoft
 //    JhengHei UI, Yu Gothic UI, Segoe UI; grey-scale antialiasing) into a white texture whose alpha is the coverage,
 //    drawn with Painter::Image times a colour. Rasterized at the target's pixel size (Painter::Scale), kept by string
@@ -9,13 +10,16 @@
 //    glyph cache is not safe from another thread (glyphs.cpp locks it for that).
 //  - Sprites: an antialiased disc and ring (the pins, the current mission's ring), made once per device.
 #include "hudtext.h"
-#include "worldmap_gpu.h"
+#include "ui_gpu.h"
 
+#include <cstdint>
 #include <memory>
 
-namespace crew::worldmaptext {
+namespace crew::uitext {
 
 inline constexpr int kLabels=192;
+
+enum class Align : unsigned char { left, centre, right };
 
 struct Label {
     ID3D11ShaderResourceView* view=nullptr;   // null: not made (no device, GDI or D3D failed)
@@ -31,11 +35,16 @@ public:
 
     // `text` `size` design units tall (the font's em), bold or not, in `lang`'s font, for `paint`'s device and scale;
     // marked drawn in `frame`.
-    Label Get(worldmapgpu::Painter& paint,const wchar_t* text,float size,bool bold,hudtext::Lang lang,unsigned frame) noexcept;
+    Label Get(uigpu::Painter& paint,const wchar_t* text,float size,bool bold,hudtext::Lang lang,unsigned frame) noexcept;
     // White, alpha the shape, 64 x 64: a disc filling it, a ring 6 / 64 thick at its edge.
-    ID3D11ShaderResourceView* Disc(worldmapgpu::Painter& paint) noexcept;
-    ID3D11ShaderResourceView* Ring(worldmapgpu::Painter& paint) noexcept;
-    // Every texture released (the select gone; with the renderer's Reset).
+    ID3D11ShaderResourceView* Disc(uigpu::Painter& paint) noexcept;
+    ID3D11ShaderResourceView* Ring(uigpu::Painter& paint) noexcept;
+    // `text` drawn with its anchor at (x, y): the top of the line, its left / centre / right by `align`; cut at `maxW`
+    // design units wide (0: not cut) from the anchor's side; a dark copy 1.5 units down-right first when `shadow`. The
+    // label's size (zero when not made).
+    Label Draw(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,bool bold,
+               hudtext::Lang lang,unsigned frame,float maxW=0.f,bool shadow=false) noexcept;
+    // Every texture released (the screen gone; with the renderer's Reset).
     void Reset() noexcept;
 
 private:
@@ -43,4 +52,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace crew::worldmaptext
+}  // namespace crew::uitext

@@ -185,9 +185,10 @@ int SupportStrikeCount() noexcept {return 2;}
 const wchar_t* SupportStrikeKey(int k) noexcept {return k>=0 && k<2 ? strikeKeys[k] : nullptr;}
 const wchar_t* SupportStrikeName(int k) noexcept {return k==0 ? L"火箭齐射" : L"天罚";}
 std::uint32_t SupportStrikePt(int k) noexcept {return k==0 ? 2000u : k==1 ? 15000u : 0u;}
+bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int k) noexcept {return k==0 ? 0 : -1;}
 int strikesStarted=0;bool strikeStarts=true;
-bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
     ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
 }
 support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route) noexcept {
@@ -278,7 +279,7 @@ bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne,const sortie::RunSpec&) noexcept {
     if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
     ++activated;lastAirborne=airborne;return true;
 }
@@ -413,7 +414,7 @@ void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
 }
 bool submitReady=true;unsigned noticeRequest=0;
 std::uint64_t lastNetLoadout=0;
-bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
+bool SubmitSupportRequest(int,const float*,wchar_t* note,std::size_t size,std::uint64_t loadout,const sortie::RunSpec&) noexcept {
     ++netRequests;lastNetLoadout=loadout;
     if(!submitReady){_snwprintf_s(note,size,_TRUNCATE,L"联机扩展尚未就绪");return false;}
     if(configuredHooks.notice)configuredHooks.notice(++noticeRequest,support_net::RequestStatus::accepted);
@@ -500,6 +501,14 @@ int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    airSortie=static_cast<int>(SortiePass::gunRun);
+    airJet=static_cast<int>(JetRole::strike);airHeli=-1;
+    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties remain in the sortie tab");
+    airSortie=static_cast<int>(SortiePass::missileRain);
+    airJet=static_cast<int>(JetRole::salvo);
+    check(SupportCallTab(0)==SupportTab::air && SupportCallIcon(0)==SupportIcon::jet,
+          "the Zenith stays an aircraft and is available in the air support tab");
+    airSortie=0;airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);
     {
         // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
         // member's, the defaults for a member who published none that reads (never this machine's).
@@ -1521,7 +1530,7 @@ int main() {
     const int rescue=SupportRescueCatalog();
     check(rescue==38 && SupportCallCount()==39 && SupportMenuCount()==38,
           "the rescue is the catalog's last entry, after the transports, the airdrops and the strikes (never #100's TransportStart 29)");
-    check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"海上救援直升机")==0 &&
+    check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"Brute 410 海上救援型")==0 &&
           SupportCallIcon(rescue)==SupportIcon::heli && SupportCallVariant(rescue)==SupportVariant::none,"its key, name and icon");
     check(std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY")==0 && std::wcscmp(SupportCallKey(21),L"SQUAD")==0 &&
           std::wcscmp(SupportCallKey(29),L"SQUAD_HELI")==0 && std::wcscmp(SupportCallKey(35),L"TRUCK_AIRDROP")==0,

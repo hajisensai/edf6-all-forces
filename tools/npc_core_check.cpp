@@ -213,7 +213,8 @@ bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier c
 bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
 bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
 int tankCommands=0;Command lastTankCommand{};
-bool TankCommand(const void*,const Command& command,const ObjRef&) noexcept {++tankCommands;lastTankCommand=command;return true;}
+bool TankCommand(const void*,const Command& command,const ObjRef&,const ObjRef&) noexcept {++tankCommands;lastTankCommand=command;return true;}
+const unsigned char* CommanderAvatar(const unsigned char*) noexcept { return nullptr; }
 float MapRay(const float* from,const float* to,float* hit) noexcept {
     if(arcWallZ>0.0f && from[2]<arcWallZ && to[2]>=arcWallZ) {
         const float t=(arcWallZ-from[2])/(to[2]-from[2]);

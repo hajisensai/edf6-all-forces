@@ -192,8 +192,8 @@ bool LensCurrent(unsigned char* system) noexcept {
 void TakeOff(unsigned char* system) noexcept {
     if(LensCurrent(system))SetCurrent(Slot(system,kLensViewport),Weak{});
 }
-bool RectIs(const unsigned char* slot,int s) noexcept {
-    return At<int>(slot,kSlotRect)==0 && At<int>(slot,kSlotRect+4)==0 && At<int>(slot,kSlotRect+8)==s && At<int>(slot,kSlotRect+12)==s;
+bool RectIs(const unsigned char* slot,const int* rect) noexcept {
+    return std::memcmp(slot+kSlotRect,rect,4*sizeof(int))==0;
 }
 
 // Viewport 3's lens camera there and its targets built for S x S: true. Creates it (once a mission, while viewport 3 is
@@ -201,7 +201,7 @@ bool RectIs(const unsigned char* slot,int s) noexcept {
 bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
     if(lens.control && Uses(lens.control)==0)Drop(lens);   // the mission's cameras went (0x11956C0)
     unsigned char* const v=Slot(system,kLensViewport);
-    const int rect[4]={0,0,s,s};
+    const int rect[4]={At<int>(Slot(system,0),kSlotWidth),At<int>(Slot(system,0),kSlotHeight),s,s};
     const ULONGLONG now=GetTickCount64();
     if(!lens.object) {
         for(unsigned i=1;i<kLensViewport;++i)if(CurrentOf(Slot(system,i))){Refuse("a split screen");return false;}
@@ -228,7 +228,7 @@ bool Ensure(unsigned char* system,int s,const Weak& follow) noexcept {
         return false;
     }
     if(count!=1 || firstCamera!=lens.object){Refuse("viewport 3 is in use");return false;}
-    if(!RectIs(v,s)){setViewport(system,kLensViewport,rect);readyLogged=false;return false;}
+    if(!RectIs(v,rect)){setViewport(system,kLensViewport,rect);readyLogged=false;return false;}
     if(!At<void*>(v,kSlotBuilt))return false;
     if(!readyLogged) {
         readyLogged=true;
@@ -289,6 +289,7 @@ void RecordLensCommand() noexcept {
 void __fastcall ProjectHook(void* camera,const int* rect) {
     if(beforeProject)beforeProject(camera,rect);
     if(!installed.load(std::memory_order_relaxed)){project(camera,rect);return;}
+    alignas(16) int localRect[4]{};
     __try {
         unsigned char* const system=System();
         const int i=SlotOf(system,rect);
@@ -297,6 +298,9 @@ void __fastcall ProjectHook(void* camera,const int* rect) {
         else if(i==static_cast<int>(kLensViewport) && lens.object && camera==lens.object) {
             lensSlot=true;
             if(armed && mainCamera)Aim(static_cast<unsigned char*>(camera));
+            // The square render texture uses local coordinates. The slot's screen rectangle sits outside the main
+            // viewport, so native screen-space resolves cannot paint over the main view.
+            localRect[2]=rect[2];localRect[3]=rect[3];rect=localRect;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) { armed=false; }
     project(camera,rect);

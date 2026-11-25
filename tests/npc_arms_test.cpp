@@ -109,6 +109,16 @@ int main() {
            "the pile banker: the spear and the Dexter beside it (group 1)");
      Check((arms.kind[cannon]&0xFFFFu)==803 && (arms.offhand[cannon]&0xFFFFu)==690,"the cannon: group 2's NC101 and hammer");
      Check(arms.kind[0] && !arms.offhand[0],"a Ranger kind: no second hand");
+     const int before=queued;
+     done=false;PreloadNpcArms();
+     Check(queued==before+1 && NpcArmsLoaded(RiflePlan(static_cast<int>(arms.kind[0]&0xFFFFu)))==PlanResult::ready,
+           "the default rifle is the only eager support weapon");
+     support_net::Plan call{};
+     call.count=1;call.units[0].resourceId=SupportSoldierResource(SupportWeapon::fencerPileBanker,false);
+     call.units[0].arms=arms.kind[pile];call.units[0].offhand=arms.offhand[pile];
+     Check(NpcArmsLoaded(call)==PlanResult::pending && queued==before+3,"the Fencer request queues both weapons on demand");
+     done=true;
+     Check(NpcArmsLoaded(call)==PlanResult::ready,"the Fencer request can start after its weapons load");
      std::uint64_t a=0,b=0;
      Check(PresetHandArms(772,715,&a,&b) && (a&0xFFFFu)==772 && (b&0xFFFFu)==715,"a preset's two hands as unit words");
      Check(!PresetHandArms(26,715,&a,&b) && !a && !b,"a preset hand that is no Fencer weapon: none");

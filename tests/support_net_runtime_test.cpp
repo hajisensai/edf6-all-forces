@@ -3,6 +3,7 @@
 // No game process, game installation, socket, or DLL entry point is used.
 #include "../src/crew.h"
 #include "../src/coop_extension_api.h"
+#include "../src/support_protocol.h"
 #include <deque>
 #include <cstring>
 #include <cstdio>
@@ -32,7 +33,7 @@ unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 // flags/key: as EDF6Coop ABI 2 delivers them (EDF6CoopExtensionMessage: bit 0 a state message, and its key).
-struct Packet { EDF6CoopPeer sender;unsigned char bytes[200];std::uint32_t flags=0,key=0; };   // support_protocol.h kWireSize (asserted below)
+struct Packet { EDF6CoopPeer sender;unsigned char bytes[crew::support_net::kWireSize];std::uint32_t flags=0,key=0; };
 std::deque<Packet> incoming;
 HMODULE WINAPI Module(LPCWSTR name) {
     if(!wcscmp(name,L"EOSSDK-Win64-Shipping.dll"))return reinterpret_cast<HMODULE>(2);
@@ -104,13 +105,13 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 // The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
-// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to this fixture's 200-byte frames).
+// Their channels (plugin_net.h) as registered: GRVT and FGUN (the gravity one sized to the fixture's frames).
 bool ReceiveGravity(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {++fixture::gravityPackets;return true;}
 // Its state kinds: byte 8 is 1 (a hold); any other comes reliably only.
 bool GravityTakesState(const void* bytes,std::size_t size) noexcept {return size>8 && static_cast<const unsigned char*>(bytes)[8]==1;}
 plugin_net::Channel GravityNetChannel() noexcept {
     plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=0;
-    c.minSize=c.maxSize=200;c.receive=&ReceiveGravity;c.takesState=&GravityTakesState;return c;
+    c.minSize=c.maxSize=support_net::kWireSize;c.receive=&ReceiveGravity;c.takesState=&GravityTakesState;return c;
 }
 bool ReceiveFloatGun(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
 plugin_net::Channel FloatGunNetChannel() noexcept {

@@ -22,14 +22,32 @@ int main() {
     const float headings[2][3]={{0.0f,0.0f,1.0f},{0.6f,0.0f,-0.8f}};
     static barrage::Round rounds[barrage::kMaxRounds];
     for(const auto& heading:headings)for(int k=0;k<barrage::kKinds;++k) {
-        warning::Circle c;
-        Check(warning::BarrageArea(k,target,heading,&c),"every kind has an area");
+        warning::BarrageFootprint area;
+        Check(warning::BarrageArea(k,target,heading,&area),"every kind has an area");
+        const bool rectangular=k==static_cast<int>(barrage::Kind::creeping) || k==static_cast<int>(barrage::Kind::mrsi);
+        Check(area.rectangular==rectangular,"only the two aimed barrages have an oriented rectangle");
         barrage::Setup s;
         for(int i=0;i<3;++i){s.target[i]=target[i];s.heading[i]=heading[i];}
         s.seed=barrage::Seed(target,heading,k);s.worldHalf=1.0e6f;
         const float y=target[1];
         const int n=barrage::Plan(static_cast<barrage::Kind>(k),s,[y](float,float,float){return y;},rounds,barrage::kMaxRounds);
         Check(n>0,"the plan has rounds");
+        if(rectangular) {
+            const auto& corners=area.corners;
+            const float* origin=corners[0];
+            const float along=Flat(origin,corners[1]),across=Flat(origin,corners[3]);
+            Check(along>across && across>0.0f,"the rectangle is longer along the heading");
+            Check(std::fabs(corners[1][0]-origin[0]-heading[0]*along)<0.01f &&
+                  std::fabs(corners[1][2]-origin[2]-heading[2]*along)<0.01f,"the rectangle follows the selected heading");
+            for(int i=0;i<n;++i) {
+                const float x=rounds[i].to[0]-origin[0],z=rounds[i].to[2]-origin[2],blast=rounds[i].blast;
+                const float a=x*heading[0]+z*heading[2],b=x*heading[2]-z*heading[0];
+                Check(a>=blast-0.01f && a<=along-blast+0.01f && b>=blast-0.01f && b<=across-blast+0.01f,
+                      "the entire blast fits in the rectangle");
+            }
+            continue;
+        }
+        const warning::Circle& c=area.circle;
         float largest=0.0f;
         for(int i=0;i<n;++i) {
             Check(Flat(rounds[i].to,c.centre)+rounds[i].blast<=c.radius+0.01f,"every round's point and blast inside the area");
@@ -39,13 +57,14 @@ int main() {
         Check(c.centre[1]==target[1],"on the point's plane");
         Check(c.radius<600.0f,"no area wider than a barrage reaches");
     }
-    {warning::Circle c;
-     Check(warning::BarrageArea(6,target,headings[0],&c) && Flat(c.centre,target)<0.5f &&
+    {warning::BarrageFootprint area;
+     const warning::Circle& c=area.circle;
+     Check(warning::BarrageArea(6,target,headings[0],&area) && Flat(c.centre,target)<0.5f &&
            std::fabs(c.radius-barrage::kSpecs[6].blast)<0.5f,"the heavy mortar's one round: its blast round the point");
-     Check(!warning::BarrageArea(-1,target,headings[0],&c) && !warning::BarrageArea(barrage::kKinds,target,headings[0],&c),
+     Check(!warning::BarrageArea(-1,target,headings[0],&area) && !warning::BarrageArea(barrage::kKinds,target,headings[0],&area),
            "no area for an unknown kind");}
-    {warning::Circle c;
-     Check(warning::BarrageArea(4,target,headings[0],&c) && c.centre[2]>target[2]+50.0f,
+    {warning::BarrageFootprint area;
+     Check(warning::BarrageArea(4,target,headings[0],&area) && (area.corners[0][2]+area.corners[1][2])*0.5f>target[2]+50.0f,
            "the creeping barrage's area lies ahead of the point, along its heading");}
     Check(warning::UltimateRadius()==ultimate::kRadius+ultimate::kRingBlast,"the ultimate's: its storm and its outer ring's blast");
 

@@ -56,6 +56,7 @@ GENERATED = [
     (['tools/gen_nozzles.py', '--check'], None),
     (['tools/gen_katyusha_cab.py', '--check'], None),
     (['tools/gen_mech_parts.py', '--check'], None),
+    (['tools/gen_weapon_series.py', '--check'], None),
     (['tools/gen_worldmap.py', '--check'], None),
     (['tools/doc_links_check.py'], None),   # docs <-> code paths (eng-12)
     (['tools/test_domains.py', '--check'], None),   # every test in a domain, the labels current

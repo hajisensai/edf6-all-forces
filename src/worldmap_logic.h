@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <utility>
+#include "armory_skin.h"
 
 namespace worldmap {
 
@@ -347,7 +348,7 @@ inline int Victim(const int* level,const unsigned* used,int n,unsigned now,int r
 // --- The opening animation ---
 // Where the map shows what it is about (a place framed, LB / LT's zoom): the middle of its open area, left of the
 // select's kept windows (OverPanels: x from 842).
-inline constexpr Pixel kMapFocus{421.f,540.f};
+inline constexpr Pixel kMapFocus{582.f,540.f};
 // A view of one place: `spanDeg` degrees of longitude across the screen (the region round it), the place at `at`
 // (as far as the clamp lets it: not past a pole), not past MostZoom.
 inline View FramePlace(MapPoint p,const Screen& s,float spanDeg=24.f,Pixel at=kMapFocus) noexcept {
@@ -433,6 +434,7 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
 inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
+inline constexpr Area kMissionList{170.f,196.f,472.f,884.f};   // inside the left chrome painted by HUiMainFrame
 inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);
@@ -520,10 +522,16 @@ inline int ScrollFirst(int count,int cursor,int visible) noexcept {
     if(first>count-visible)first=count-visible;
     return first;
 }
+// Stage 6 (docs/plan-2026-11-24-ui-rewrite.md): the panel's first row under the heading is 本关出动 (the preset the
+// chosen mission starts with); the mission lines follow it; the last two rows are the keys.
+inline constexpr float kPanelFirstLine=kPanel.y0+kPanelHeading+kPanelRow;
+inline constexpr int kPanelLines=kPanelRows-3;
+inline constexpr Area kLaunchRow{kPanel.x0,kPanel.y0+kPanelHeading,kPanel.x1,kPanel.y0+kPanelHeading+kPanelRow};
+inline float PanelLineTop(int line) noexcept { return kPanelFirstLine+kPanelRow*static_cast<float>(line); }
 // The panel line under `p` (0 = the first shown), -1 none.
 inline int PanelLineAt(Pixel p,int shown) noexcept {
     if(!OverPanel(p))return -1;
-    const float y=p.y-(kPanel.y0+kPanelHeading);
+    const float y=p.y-kPanelFirstLine;
     if(y<0.f)return -1;
     const int line=static_cast<int>(y/kPanelRow);
     return line<shown ? line : -1;
@@ -697,6 +705,52 @@ inline bool RouteClear(Pixel a,Pixel b,float radius,float* cut) noexcept {
     if(!(len>=4.f*radius)){*cut=0.f;return false;}
     *cut=radius/len;
     return true;
+}
+
+// --- Stage 6: the 整备 tab bar, the preset chips, 本关出动, the campaign's progress (src/worldmap.cpp) ---
+// The title bar is the 整备 screen's (armory_skin.h layout: kTitle, Tab(i), Chip(i, count)), the map being its last
+// tab (armory.cpp kPages: 武器, 支援编成, 载具, 任务). The chips are the presets only (no ＋: presets are made in 整备).
+inline constexpr int kTabCount=4,kMapTab=3;
+inline int TitleTabAt(Pixel p) noexcept {
+    for(int i=0;i<kTabCount;++i)if(crew::armory::skin::layout::Tab(i).Contains(p.x,p.y))return i;
+    return -1;
+}
+inline int TitleChipAt(int presets,Pixel p) noexcept {
+    for(int i=0;i<presets;++i)if(crew::armory::skin::layout::Chip(i,presets).Contains(p.x,p.y))return i;
+    return -1;
+}
+inline bool OverTitle(Pixel p) noexcept {
+    const auto& t=crew::armory::skin::layout::kTitle;
+    return p.x>=t.x0 && p.x<t.x1 && p.y>=t.y0 && p.y<t.y1;
+}
+// The preset mission `remembered` (loadout_preset.h MissionPreset, -1 none) starts with, of `count`: the remembered
+// one while the book has it, else the one in force (`current`, -1 none): what 本关出动 shows and what starting it
+// switches to.
+inline int LaunchPreset(int remembered,int current,int count) noexcept {
+    if(remembered>=0 && remembered<count)return remembered;
+    return current>=0 && current<count ? current : -1;
+}
+// 本关出动 stepped by `dir` (+1 next, -1 previous) over `count` presets, wrapping; -1 when there is none.
+inline int StepPreset(int at,int dir,int count) noexcept {
+    if(count<=0)return -1;
+    if(at<0 || at>=count)return dir<0 ? count-1 : 0;
+    return ((at+dir)%count+count)%count;
+}
+// The campaign's progress over the select's display list: missions shown (open, branch, cleared, locked) and cleared.
+struct Progress { int cleared=0,shown=0; };
+inline Progress CountProgress(const int* state,int n) noexcept {
+    Progress p;
+    for(int i=0;i<n;++i) {
+        if(state[i]<0 || state[i]>3)continue;
+        ++p.shown;
+        if(state[i]==0)++p.cleared;
+    }
+    return p;
+}
+// The progress bar under the title bar, left of the kept windows; the share of it filled.
+inline constexpr Area kProgressBar{60.f,104.f,560.f,124.f};
+inline float ProgressShare(const Progress& p) noexcept {
+    return p.shown>0 ? static_cast<float>(p.cleared)/static_cast<float>(p.shown) : 0.f;
 }
 
 }  // namespace worldmap

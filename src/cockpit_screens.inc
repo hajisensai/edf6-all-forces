@@ -259,11 +259,17 @@ void MapScreenOf(void* drawer,void* ctx,Text* t,float cw,const ScreenFeed& f,Lin
     }
 }
 
-// The aim's marks of a stock vehicle alone (StockVehicleHud less its tape, block and scope: those are on the screens).
+// Aim and hull orientation for the stock vehicles with physical screens.
 void StockAimOnly(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                   const StockExtras& x,Line* lines,int* at) noexcept {
     StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
     if(x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f)ProteusMarks(drawer,ctx,text,vp,width,height,s,*x.proteus,lines,at);
+    const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;
+    const float hull=nix ? HeadingOfYaw(x.nix->legsYaw) : sight::HeadingOf(r.hull);
+    const float gun=nix ? sight::HeadingOf(x.nix->dir) : r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
+    const float look=r.lookOk ? sight::HeadingOf(r.look) : -1.0f;
+    const float up=look>=0.0f ? look : gun>=0.0f ? gun : hull;
+    if(hull>=0.0f)HullTurret(drawer,ctx,(kIndicatorR+24.0f)*s,height-(kIndicatorR+24.0f)*s,s,up,hull,gun);
     if(Cfg().playerJetThreatHud && r.threats>0) {
         PlayerJetSymbols y{};
         std::memcpy(y.pos,r.pos,12);

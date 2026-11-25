@@ -53,6 +53,16 @@ void Carpet() {
     Check(Near(0.5f*g*t*t,kCarpetAlt,0.01f),"a bomb's fall time from its height");
     const unsigned long long gap=CarpetGapMs(6,speed);
     Check(Near(static_cast<float>(gap)*0.001f*speed*5.0f,2.0f*kCarpetHalf,2.0f),"six bombs a gap apart cover the carpet");
+    const float start[3]={10.0f,20.0f,40.0f},end[3]={310.0f,20.0f,440.0f};
+    RunSpec request;
+    float centre[3]{};
+    Check(RunFromPoints(start,end,&request,centre) && RunValid(request) &&
+          Near(request.half,250.0f,0.01f) && Near(request.x,0.6f,0.001f) && Near(centre[2],240.0f,0.01f),
+          "two ground points define the requested direction, midpoint and distance");
+    Check(!RunFromPoints(start,start,&request,centre),"a zero-length run cannot be called");
+    const auto shortGap=CarpetGapMs(6,speed,100.0f),longGap=CarpetGapMs(6,speed,250.0f);
+    Check(shortGap<longGap && Near(static_cast<float>(longGap)*0.001f*speed*5.0f,500.0f,2.0f),
+          "release timing follows the length of the marked attack run");
 }
 
 void Laps() {
@@ -91,6 +101,8 @@ int main() {
     Carpet();
     Laps();
     Circle();
+    Check(!SalvoLocked(32,11) && !SalvoLocked(32,31),"missile rain waits for every round to have a native lock");
+    Check(SalvoLocked(32,32) && SalvoLocked(6,8) && !SalvoLocked(0,32),"only a full magazine or remaining rounds can fire");
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n",failures);
     return failures ? 1 : 0;
 }

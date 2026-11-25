@@ -7,6 +7,7 @@
 #include "jet_pullout.h"
 #include "hover_lift.h"
 #include "nacelle_reach.h"
+#include "support_entry.h"
 #include <cwchar>
 
 namespace crew {
@@ -322,16 +323,30 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
 void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
           float* speed) noexcept {
     const bool bomber=j.bay.bombSpeed>0.0f;
+    const bool sortie=j.sortie.pass!=SortiePass::none;
     float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
-    if(bomber)std::memcpy(away,j.bay.bombDir,12);
+    if(sortie)std::memcpy(away,j.sortie.line.dir,12);
+    else if(bomber)std::memcpy(away,j.bay.bombDir,12);
     if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
     const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
     Level(pos,away,climb<top ? climb : top,want);
     *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
+    if(sortie) {
+        float lo[2],hi[2];support::GroundEdge(MapPlayArea(),lo,hi);
+        // A pass can start off the map. Only the edge it is heading out through ends the flight.
+        const bool crossed=(away[0]>0.0f && pos[0]>=hi[0]) || (away[0]<0.0f && pos[0]<=lo[0]) ||
+                           (away[2]>0.0f && pos[2]>=hi[1]) || (away[2]<0.0f && pos[2]<=lo[1]);
+        if(crossed && !j.reap) {
+            Log("JET v=%p crossed the mission boundary (%.0f,%.0f): deleting",j.Vehicle(),pos[0],pos[2]);
+            j.reap=true;
+        }
+        return;
+    }
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
     const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    if(gone>kWithdrawFar || (gone>kWithdrawNear && (edge || ms-j.modeAt>kWithdrawStuckMs))) {
+    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || edge);
+    if(gone>kWithdrawFar || stalled) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
     }
@@ -467,7 +482,7 @@ void Turned(const float* dir,float side,float* out) noexcept {
     out[0]=dir[0]*c+dir[2]*s;out[1]=0.0f;out[2]=dir[2]*c-dir[0]*s;
 }
 
-std::int8_t TurnSide(const float* pos,const float* at) noexcept {
+std::int8_t TurnSide(const Jet& j,const float* pos,const float* at) noexcept {
     float to[3]={at[0]-pos[0],0.0f,at[2]-pos[2]};
     const float reach=Len(to)+kAsideBeyond;
     if(!Normalize(to))return 1;
@@ -476,8 +491,8 @@ std::int8_t TurnSide(const float* pos,const float* at) noexcept {
         float way[3];Turned(to,i ? -1.0f : 1.0f,way);
         const float end[3]={pos[0]+way[0]*reach,pos[1],pos[2]+way[2]*reach};
         float hit[3];
-        const float d=MapRay(pos,end,hit);
-        room[i]=d<0.0f ? reach : d;
+        const float map=MapRay(pos,end,hit),hull=AircraftObstacleRay(pos,end,j.Vehicle(),nullptr,hit);
+        room[i]=std::fmin(map<0.0f ? reach : map,hull<0.0f ? reach : hull);
     }
     return room[1]>room[0] ? -1 : 1;
 }
@@ -500,23 +515,29 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         const float t0=span*static_cast<float>(i)/kSweepSlots,t1=span*static_cast<float>(i+1)/kSweepSlots;
         const float a[3]={pos[0]+mo.vel[0]*t0,pos[1]+mo.vel[1]*t0-kMinAlt,pos[2]+mo.vel[2]*t0};
         const float b[3]={pos[0]+mo.vel[0]*t1,pos[1]+mo.vel[1]*t1-kMinAlt,pos[2]+mo.vel[2]*t1};
-        float hit[3];
-        if(MapRay(a,b,hit)<0.0f)continue;
+        float hit[3],hull[3];
+        const float low=MapRay(a,b,hit);
+        const float head[3]={a[0],a[1]+kMinAlt,a[2]},tail[3]={b[0],b[1]+kMinAlt,b[2]};
+        const float obstructed=AircraftObstacleRay(head,tail,j.Vehicle(),nullptr,hull);
+        const bool movingHull=obstructed>=0.0f && (low<0.0f || obstructed<=low);
+        if(movingHull)std::memcpy(hit,hull,12);
+        else if(low<0.0f)continue;
         float seg[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
         if(!Normalize(seg))std::memcpy(seg,dir,12);
         const float in[3]={hit[0]+seg[0]*kObstIn,hit[1]+seg[1]*kObstIn-kObstSink,hit[2]+seg[2]*kObstIn};
         const float from[3]={in[0],(pos[1]>hit[1] ? pos[1] : hit[1])+kRoofProbe,in[2]};
         float roof[3];
-        const float top=MapRay(from,in,roof)>=0.0f ? roof[1] : from[1];
+        const float top=(movingHull ? AircraftObstacleRay(from,in,j.Vehicle(),nullptr,roof) : MapRay(from,in,roof))>=0.0f
+                            ? roof[1] : movingHull ? hit[1]+kMinAlt : from[1];
         if(mo.obstUntil && top<=mo.obstTop)continue;
         if(Cfg().debug && (!mo.obstUntil || top>mo.obstTop+10.0f))
             Log("JET v=%p obstacle ahead: top y=%.0f (%.0f over it), %.0f m out",j.Vehicle(),top,top-pos[1],HorizDist(pos,hit));
         mo.obstTop=top;std::memcpy(mo.obstAt,hit,12);
-        mo.obstUntil=ms+static_cast<ULONGLONG>(span*1000.0f)+kObstKeepMs;
+        mo.obstUntil=ms+(movingHull ? 750u : static_cast<ULONGLONG>(span*1000.0f)+kObstKeepMs);
     }
     // Too steep to climb from here (now, or once it has come closer): its side picked, once.
     if(mo.obstUntil && !mo.obstSide && Unclimbable(j,mo.obstTop+kMinAlt-pos[1],HorizDist(pos,mo.obstAt)))
-        mo.obstSide=TurnSide(pos,mo.obstAt);
+        mo.obstSide=TurnSide(j,pos,mo.obstAt);
 }
 
 // What PredictPullOut needs of jet `j` now: its speed and dive, the g and thrust its stores leave it (JetSteer's

@@ -76,7 +76,9 @@ ok('InstallScopeSpread();' in plugin, 'plugin.cpp installs it')
 ok('target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)' in read('CMakeLists.txt'), 'the plugin builds it')
 
 host = read('src/host_settings_logic.h')
-ok('kFeatScopeSpread=1024u' in host and ('|kFeatScopeSpread;' in host or '|kFeatScopeSpread|' in host), 'the room word carries the feature bit')
+features = re.search(r'kFeatures=([^;]*);', host)
+ok('kFeatScopeSpread=1024u' in host and features is not None and
+   'kFeatScopeSpread' in re.findall(r'\w+', features.group(1)), 'the room word carries the feature bit')
 ok('ScopeSpreadInEffect()' in read('src/scope_spread.cpp'), 'a round plays by the values in effect (the host\'s online)')
 spread = read('src/scope_spread.cpp')
 ok('SCOPESPREAD REFUSED call site' in spread and 'SCOPESPREAD installed' in spread, 'the install logs its outcome')

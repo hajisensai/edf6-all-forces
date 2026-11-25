@@ -593,6 +593,12 @@ const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
 std::uint32_t SupportAirCallPt(int index) noexcept { return index>=0 && index<kCallCount ? kCalls[index].pt : 0u; }
+bool SupportGroundRun(int catalog) noexcept {
+    SupportAircraft spec;
+    if(!SupportAircraftSpec(catalog,&spec) || spec.heli>=0 || spec.jet<0)return false;
+    const auto pass=static_cast<SortiePass>(spec.sortie);
+    return pass==SortiePass::gunRun || pass==SortiePass::carpet;
+}
 
 // ---- The strikes (kStrikes): the map's bar calls them for the local player ----
 int SupportStrikeCount() noexcept { return kStrikeCount; }
@@ -612,7 +618,7 @@ void SupportStrikeHeading(const float* target,float* out) noexcept {
     const float dx=target[0]-by[0],dz=target[2]-by[2],l=std::sqrt(dx*dx+dz*dz);
     if(l>1.0f){out[0]=dx/l;out[2]=dz/l;}
 }
-bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity,const float* strikeHeading) noexcept {
     if(!note || !capacity)return false;
     note[0]=0;
     if(strike<0 || strike>=kStrikeCount || !target || !std::isfinite(target[0]+target[1]+target[2])) {
@@ -621,7 +627,9 @@ bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t ca
     const Strike& k=kStrikes[strike];
     unsigned char* const caller=PlayerHuman();
     if(!caller){_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::strikeNoCaller));return false;}
-    float heading[3];SupportStrikeHeading(target,heading);
+    float heading[3];
+    if(strikeHeading)std::memcpy(heading,strikeHeading,sizeof(heading));
+    else SupportStrikeHeading(target,heading);
     bool started=false;
     __try {
         if(k.kind==StrikeKind::barrage) {

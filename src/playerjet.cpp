@@ -286,6 +286,7 @@ struct PJet {
     bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
     float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
     aim::Hold hover;             // ...its mouse-aim flight's setpoint and height held (heliaim.h, HoverStep), its top speed
+    aim::HoverMode hoverMode;
     float hoverTop;
     ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
     bool specialHeld;            // the target key / X down last frame (a special store's own action)
@@ -1991,7 +1992,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
                 std::memcpy(f.vel,j.vel,12);
                 f.speed=std::sqrt(j.vel[0]*j.vel[0]+j.vel[2]*j.vel[2]);f.clear=r.clear;f.ground=ground;f.climb=j.climb;
                 f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
-                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
+                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=j.hover.holding;f.hoverMode=j.hoverMode.on;
                 f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
                 f.power=j.throttle;   // its engine (HoverDone)
                 f.gpws=r.gpws;f.impactIn=r.impactIn;

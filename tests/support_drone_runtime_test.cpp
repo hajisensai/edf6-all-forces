@@ -81,7 +81,7 @@ void PvpForgetSupportObject(const ObjRef&) noexcept {++fixture::forgets;fixture:
 void PreloadUltimate(void*) noexcept {}   // jet_spawn.cpp's PreloadJets loads the ultimate's circles (ultimate.cpp, not linked here)
 namespace jet {
 Jet jets[kMaxJets]{};
-void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG) noexcept {}   // jet_sortie.cpp, not linked here
+void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG,const sortie::RunSpec&) noexcept {}
 float FerryTurn(const Kind&) noexcept {return 0;}
 bool Alive(const ObjRef& ref) noexcept {
     return ref.obj && ref.ctrl && At<LONG>(ref.ctrl,8)>0 && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl &&

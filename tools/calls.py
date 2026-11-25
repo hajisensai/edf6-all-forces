@@ -322,7 +322,7 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SORTIE_POPUP', 7807, 'sortie_popup', False, 1, 1500, 0.8, 'jets', 'hit and run', 150, 'strike',
          sortie='popUp'),
     Call('EDF6VC_CALL_SORTIE_MISSILE_RAIN', 7808, 'sortie_missile_rain', False, 1, 2400, 1.3, 'jets', 'missile rain', 150,
-         'interceptor', sortie='missileRain'),
+         'salvo', sortie='missileRain'),
     Call('EDF6VC_CALL_SORTIE_HAMMER', 7809, 'sortie_hammer', False, 2, 3200, 1.5, 'helis', 'hammer and anvil', 150,
          body='eros506', sortie='heliStrafe', then='EDF6VC_CALL_SORTIE_POPUP', then_after=25),
     Call('EDF6VC_CALL_SORTIE_WOLFPACK', 7810, 'sortie_wolfpack', False, 4, 2400, 1.2, 'jets', 'wolf pack', 150, 'fighter',
@@ -867,40 +867,40 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                       'the fighter.'),
     },
     'interceptor': {
-        'SC': ('截击机', '呼叫截击机，优先攻击空中目标；比制空战斗机飞得更快更高，并从更远处发射导弹。'),
-        'CN': ('截擊機', '呼叫截擊機，優先攻擊空中目標；比制空戰鬥機飛得更快更高，並從更遠處發射飛彈。'),
-        'JA': ('迎撃機', '迎撃機を要請する。空中の敵を優先して攻撃する。制空戦闘機より速く高く飛び、遠くからミサイルを撃つ。'),
-        'EN': ('Interceptors', 'Calls interceptors that attack flying targets first, faster and higher than fighters, firing their missiles from farther out.'),
+        'SC': ('DN 截击机', '呼叫截击机，优先攻击空中目标；比制空战斗机飞得更快更高，并从更远处发射导弹。'),
+        'CN': ('DN 截擊機', '呼叫截擊機，優先攻擊空中目標；比制空戰鬥機飛得更快更高，並從更遠處發射飛彈。'),
+        'JA': ('DN 迎撃機', '迎撃機を要請する。空中の敵を優先して攻撃する。制空戦闘機より速く高く飛び、遠くからミサイルを撃つ。'),
+        'EN': ('DN Interceptor', 'Calls interceptors that attack flying targets first, faster and higher than fighters, firing their missiles from farther out.'),
     },
     'strike': {
-        'SC': ('对地攻击机', '呼叫对地攻击机，优先攻击地面目标，俯冲投弹。'),
-        'CN': ('對地攻擊機', '呼叫對地攻擊機，優先攻擊地面目標，俯衝投彈。'),
-        'JA': ('対地攻撃機', '対地攻撃機を要請する。地上の敵を優先し、急降下して爆撃する。'),
-        'EN': ('Strike Fighters', 'Calls strike fighters that attack ground targets first, diving onto them with bombs.'),
+        'SC': ('DN 轰炸机', '呼叫对地攻击机，优先攻击地面目标，俯冲投弹。'),
+        'CN': ('DN 轟炸機', '呼叫對地攻擊機，優先攻擊地面目標，俯衝投彈。'),
+        'JA': ('DN 爆撃機', '対地攻撃機を要請する。地上の敵を優先し、急降下して爆撃する。'),
+        'EN': ('DN Bomber', 'Calls strike fighters that attack ground targets first, diving onto them with bombs.'),
     },
     'multirole': {
-        'SC': ('多用途机', '呼叫多用途战斗机，攻击最近的目标，空中地面皆可。'),
-        'CN': ('多用途機', '呼叫多用途戰鬥機，攻擊最近的目標，空中地面皆可。'),
-        'JA': ('マルチロール機', 'マルチロール機を要請する。空中・地上を問わず最も近い敵を攻撃する。'),
-        'EN': ('Multirole Fighters', 'Calls multirole fighters that attack the nearest target, in the air or on the ground.'),
+        'SC': ('DN 防御者战斗机', '呼叫多用途战斗机，攻击最近的目标，空中地面皆可。'),
+        'CN': ('DN 防禦者戰鬥機', '呼叫多用途戰鬥機，攻擊最近的目標，空中地面皆可。'),
+        'JA': ('DN ディフェンダー', 'マルチロール機を要請する。空中・地上を問わず最も近い敵を攻撃する。'),
+        'EN': ('DN Defender', 'Calls multirole fighters that attack the nearest target, in the air or on the ground.'),
     },
     'fighter': {
-        'SC': ('制空战斗机', '呼叫制空战斗机，优先攻击空中目标。'),
-        'CN': ('制空戰鬥機', '呼叫制空戰鬥機，優先攻擊空中目標。'),
-        'JA': ('制空戦闘機', '制空戦闘機を要請する。空中の敵を優先して攻撃する。'),
-        'EN': ('Air Superiority Fighters', 'Calls air superiority fighters that attack flying targets first.'),
+        'SC': ('DN 战斗机', '呼叫制空战斗机，优先攻击空中目标。'),
+        'CN': ('DN 戰鬥機', '呼叫制空戰鬥機，優先攻擊空中目標。'),
+        'JA': ('DN 戦闘機', '制空戦闘機を要請する。空中の敵を優先して攻撃する。'),
+        'EN': ('DN Fighter', 'Calls air superiority fighters that attack flying targets first.'),
     },
     'carrier': {
-        'SC': ('无人机母舰', '呼叫无人机母舰：在空中盘旋，派出无人机攻击范围内的敌人。'),
-        'CN': ('無人機母艦', '呼叫無人機母艦：在空中盤旋，派出無人機攻擊範圍內的敵人。'),
-        'JA': ('無人機母艦', '無人機母艦を要請する。上空を旋回し、範囲内の敵へ無人機を送り込む。'),
-        'EN': ('Drone Carrier', 'Calls a drone carrier that hovers overhead and sends its drones at enemies in range.'),
+        'SC': ('Helicarrier 空中航母', '呼叫无人机母舰：在空中盘旋，派出无人机攻击范围内的敌人。'),
+        'CN': ('Helicarrier 空中航母', '呼叫無人機母艦：在空中盤旋，派出無人機攻擊範圍內的敵人。'),
+        'JA': ('ヘリキャリア', '無人機母艦を要請する。上空を旋回し、範囲内の敵へ無人機を送り込む。'),
+        'EN': ('Helicarrier', 'Calls a drone carrier that hovers overhead and sends its drones at enemies in range.'),
     },
     'blast_carrier': {
-        'SC': ('自爆无人机母舰', '呼叫自爆无人机母舰：悬停在空中，放出近炸无人机，冲到敌人身边自爆。'),
-        'CN': ('自爆無人機母艦', '呼叫自爆無人機母艦：懸停在空中，放出近炸無人機，衝到敵人身邊自爆。'),
-        'JA': ('自爆ドローン母艦', '自爆ドローン母艦を要請する。上空に滞空し、敵に突っ込んで近接起爆するドローンを放つ。'),
-        'EN': ('Blast Drone Carrier', 'Calls a carrier that hovers overhead and sends drones that dive at the enemy and blow up next to it.'),
+        'SC': ('Helicarrier 空中航母（自爆无人机型）', '呼叫自爆无人机母舰：悬停在空中，放出近炸无人机，冲到敌人身边自爆。'),
+        'CN': ('Helicarrier 空中航母（自爆無人機型）', '呼叫自爆無人機母艦：懸停在空中，放出近炸無人機，衝到敵人身邊自爆。'),
+        'JA': ('ヘリキャリア（自爆機型）', '自爆ドローン母艦を要請する。上空に滞空し、敵に突っ込んで近接起爆するドローンを放つ。'),
+        'EN': ('Helicarrier (Blast Drone Variant)', 'Calls a carrier that hovers overhead and sends drones that dive at the enemy and blow up next to it.'),
     },
     'sub': {
         'SC': ('潜水母舰支援', '呼叫潜水母舰在信号弹前方浮上：舰身可以站人，炮塔机炮和导弹自动攻击，导弹在舰内装填，随玩家移动，留到任务结束（同时最多 3 艘）。'),
@@ -909,107 +909,102 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Submarine Carrier', 'Surfaces a submarine carrier past the flare: stand on its deck while its turret guns and missiles attack on their own (missiles reload aboard). It follows you for the rest of the mission (three at most).'),
     },
     'gunship': {
-        'SC': ('炮舰机', '呼叫炮舰机：在目标点上空大圈盘旋，从机上向附近的地面敌人持续炮击，不俯冲。'),
-        'CN': ('砲艦機', '呼叫砲艦機：在目標點上空大圈盤旋，從機上向附近的地面敵人持續砲擊，不俯衝。'),
-        'JA': ('ガンシップ', 'ガンシップを要請する。上空を大きく旋回しながら、付近の地上の敵へ機上から砲撃を続ける。急降下はしない。'),
-        'EN': ('Fixed-wing Gunship', 'Calls a fixed-wing gunship that circles wide overhead and keeps shelling nearby ground enemies from the air, without diving.'),
+        'SC': ('C-130 炮艇机', '呼叫炮舰机：在目标点上空大圈盘旋，从机上向附近的地面敌人持续炮击，不俯冲。'),
+        'CN': ('C-130 砲艇機', '呼叫砲艦機：在目標點上空大圈盤旋，從機上向附近的地面敵人持續砲擊，不俯衝。'),
+        'JA': ('C-130 ガンシップ', 'ガンシップを要請する。上空を大きく旋回しながら、付近の地上の敵へ機上から砲撃を続ける。急降下はしない。'),
+        'EN': ('C-130 Gunship', 'Calls a fixed-wing gunship that circles wide overhead and keeps shelling nearby ground enemies from the air, without diving.'),
     },
     'doll_carrier': {
-        'SC': ('人偶无人机母舰', '呼叫人偶无人机母舰：放出挂着会唱歌跳舞的人偶的无人机，慢慢飞到敌人中间吸引火力，然后自爆。'),
-        'CN': ('人偶無人機母艦', '呼叫人偶無人機母艦：放出掛著會唱歌跳舞的人偶的無人機，慢慢飛到敵人中間吸引火力，然後自爆。'),
-        'JA': ('人形ドローン母艦', '人形ドローン母艦を要請する。歌って踊る人形を吊るしたドローンが敵の中へ進み、注意を引いてから自爆する。'),
-        'EN': ('Doll Drone Carrier', 'Calls a carrier whose drones carry a singing, dancing doll into the enemy, draw their fire, and blow up.'),
+        'SC': ('Helicarrier 空中航母（人偶无人机型）', '呼叫人偶无人机母舰：放出挂着会唱歌跳舞的人偶的无人机，慢慢飞到敌人中间吸引火力，然后自爆。'),
+        'CN': ('Helicarrier 空中航母（人偶無人機型）', '呼叫人偶無人機母艦：放出掛著會唱歌跳舞的人偶的無人機，慢慢飛到敵人中間吸引火力，然後自爆。'),
+        'JA': ('ヘリキャリア（人形機型）', '人形ドローン母艦を要請する。歌って踊る人形を吊るしたドローンが敵の中へ進み、注意を引いてから自爆する。'),
+        'EN': ('Helicarrier (Doll Drone Variant)', 'Calls a carrier whose drones carry a singing, dancing doll into the enemy, draw their fire, and blow up.'),
     },
     'medic_heli': {
-        'SC': ('救护直升机', '呼叫救护直升机：两侧门炮发射治疗弹，命中队友即回复体力；炮手自动瞄准受伤的队友（含玩家），不攻击敌人。'),
-        'CN': ('救護直升機', '呼叫救護直升機：兩側門砲發射治療彈，命中隊友即回復體力；砲手自動瞄準受傷的隊友（含玩家），不攻擊敵人。'),
-        'JA': ('救護ヘリ', '救護ヘリを要請する。両側のドアガンが回復弾を撃ち、命中した味方の体力を回復する。射手は負傷した味方'
+        'SC': ('Brute 410 救护型', '呼叫救护直升机：两侧门炮发射治疗弹，命中队友即回复体力；炮手自动瞄准受伤的队友（含玩家），不攻击敌人。'),
+        'CN': ('Brute 410 救護型', '呼叫救護直升機：兩側門砲發射治療彈，命中隊友即回復體力；砲手自動瞄準受傷的隊友（含玩家），不攻擊敵人。'),
+        'JA': ('ブルート 410 救護型', '救護ヘリを要請する。両側のドアガンが回復弾を撃ち、命中した味方の体力を回復する。射手は負傷した味方'
                          '（プレイヤーを含む）を自動で狙い、敵は攻撃しない。'),
-        'EN': ('Medic Helis', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
+        'EN': ('Brute 410 (Medic Variant)', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
     'sortie_heli_strafe': {
-        'SC': ('直升机扫射', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
-        'CN': ('直升機掃射', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
-        'JA': ('ヘリ機銃掃射', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
-        'EN': ('Heli Strafing Pass', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns '
+        'SC': ('Eros 506 直升机（扫射型）', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
+        'CN': ('Eros 506 直升機（掃射型）', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
+        'JA': ('エロス 506（掃射型）', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
+        'EN': ('Eros 506 (Gunship Variant)', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns '
                                  'and missiles on the way, and fly straight off.'),
     },
     'sortie_heli_hunter': {
-        'SC': ('导弹猎手', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
-        'CN': ('飛彈獵手', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 40 秒後離場。'),
-        'JA': ('ミサイルハンター', '出撃。エロス 1 機が指示地点から約 300m の位置でホバリングし、近くの別々の敵を 1 発ずつロックして'
+        'SC': ('Eros 506 直升机（导弹型）', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
+        'CN': ('Eros 506 直升機（飛彈型）', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 40 秒後離場。'),
+        'JA': ('エロス 506（ミサイル型）', '出撃。エロス 1 機が指示地点から約 300m の位置でホバリングし、近くの別々の敵を 1 発ずつロックして'
                           'ミサイルを連射する。撃ち尽くすか 40 秒で離脱する。'),
-        'EN': ('Missile Hunter', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a '
+        'EN': ('Eros 506 (Missile Variant)', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a '
                              'different enemy near it, then leaves (empty or after 40 s).'),
     },
     'sortie_heli_circle': {
-        'SC': ('死亡回旋', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
-        'CN': ('死亡迴旋', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
-        'JA': ('デスサークル', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
-        'EN': ('Death Circle', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all '
+        'SC': ('Brute 410 直升机（舱门炮型）', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
+        'CN': ('Brute 410 直升機（艙門砲型）', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
+        'JA': ('ブルート 410（ドアガン型）', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
+        'EN': ('Brute 410 (Door Gun Variant)', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all '
                            'the way round, then leaves.'),
     },
     'sortie_dive': {
-        'SC': ('俯冲扫射', '出击：两架对地攻击机浅角度俯冲，先打火箭，再用机炮拉出直线弹着带，然后爬升离场。'),
-        'CN': ('俯衝掃射', '出擊：兩架對地攻擊機淺角度俯衝，先打火箭，再用機砲拉出直線彈著帶，然後爬升離場。'),
-        'JA': ('急降下掃射', '出撃。攻撃機 2 機が浅い角度で急降下し、ロケットを撃ってから機関砲で直線の着弾帯を引き、上昇して離脱する。'),
-        'EN': ('Diving Strafing Run', 'Sortie: two strike jets dive in at a shallow angle, rockets first, then a straight line '
+        'SC': ('DN 轰炸机（火箭挂载）', '出击：两架对地攻击机浅角度俯冲，先打火箭，再用机炮拉出直线弹着带，然后爬升离场。'),
+        'CN': ('DN 轟炸機（火箭掛載）', '出擊：兩架對地攻擊機淺角度俯衝，先打火箭，再用機砲拉出直線彈著帶，然後爬升離場。'),
+        'JA': ('DN 爆撃機（ロケット型）', '出撃。攻撃機 2 機が浅い角度で急降下し、ロケットを撃ってから機関砲で直線の着弾帯を引き、上昇して離脱する。'),
+        'EN': ('DN Bomber (Rocket Loadout)', 'Sortie: two strike jets dive in at a shallow angle, rockets first, then a straight line '
                                   'of cannon fire, and climb away.'),
     },
     'sortie_missile_pass': {
-        'SC': ('导弹掠过', '出击：两架多用途机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。'),
-        'CN': ('飛彈掠過', '出擊：兩架多用途機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。'),
-        'JA': ('ミサイル航過', '出撃。マルチロール機 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。'),
-        'EN': ('Missile Pass', 'Sortie: two multirole jets sweep fast over the mark, each putting its air-to-ground missiles on '
+        'SC': ('DN 防御者战斗机（对地导弹型）', '出击：两架多用途机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。'),
+        'CN': ('DN 防禦者戰鬥機（對地飛彈型）', '出擊：兩架多用途機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。'),
+        'JA': ('DN ディフェンダー（対地ミサイル型）', '出撃。マルチロール機 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。'),
+        'EN': ('DN Defender (Air-to-Ground Variant)', 'Sortie: two multirole jets sweep fast over the mark, each putting its air-to-ground missiles on '
                            'different targets, and fly on without slowing.'),
     },
     'sortie_carpet': {
-        'SC': ('地毯轰炸', '出击：三架对地攻击机编队平飞过标记点，炸弹沿航线铺出约 300 米长的爆炸带后离场。'),
-        'CN': ('地毯轟炸', '出擊：三架對地攻擊機編隊平飛過標記點，炸彈沿航線鋪出約 300 公尺長的爆炸帶後離場。'),
-        'JA': ('絨毯爆撃', '出撃。攻撃機 3 機が編隊で指示地点の上を水平飛行し、爆弾で航路沿いに約 300m の爆発の帯を敷いて離脱する。'),
-        'EN': ('Carpet Bombing', 'Sortie: three strike jets fly level in formation over the mark and lay a band of bombs about '
+        'SC': ('DN 轰炸机（广域挂载）', '出击：三架对地攻击机编队平飞过标记点，炸弹沿航线铺出约 300 米长的爆炸带后离场。'),
+        'CN': ('DN 轟炸機（廣域掛載）', '出擊：三架對地攻擊機編隊平飛過標記點，炸彈沿航線鋪出約 300 公尺長的爆炸帶後離場。'),
+        'JA': ('DN 爆撃機（広域型）', '出撃。攻撃機 3 機が編隊で指示地点の上を水平飛行し、爆弾で航路沿いに約 300m の爆発の帯を敷いて離脱する。'),
+        'EN': ('DN Bomber (Area Bomb Loadout)', 'Sortie: three strike jets fly level in formation over the mark and lay a band of bombs about '
                              '300 m long along their track, then leave.'),
     },
     'sortie_popup': {
-        'SC': ('打了就跑', '出击：一架对地攻击机低空进场，在标记点扔下两颗炸弹后急跃升离开。'),
-        'CN': ('打了就跑', '出擊：一架對地攻擊機低空進場，在標記點扔下兩顆炸彈後急躍升離開。'),
-        'JA': ('ヒット＆アウェイ', '出撃。攻撃機 1 機が低空で進入し、指示地点に爆弾を 2 発落としてから急上昇で離脱する。'),
-        'EN': ('Hit and Run', 'Sortie: a strike jet comes in low, drops two bombs on the mark and climbs steeply away.'),
+        'SC': ('DN 轰炸机（低空挂载）', '出击：一架对地攻击机低空进场，在标记点扔下两颗炸弹后急跃升离开。'),
+        'CN': ('DN 轟炸機（低空掛載）', '出擊：一架對地攻擊機低空進場，在標記點扔下兩顆炸彈後急躍升離開。'),
+        'JA': ('DN 爆撃機（低空型）', '出撃。攻撃機 1 機が低空で進入し、指示地点に爆弾を 2 発落としてから急上昇で離脱する。'),
+        'EN': ('DN Bomber (Low Altitude Loadout)', 'Sortie: a strike jet comes in low, drops two bombs on the mark and climbs steeply away.'),
     },
     'sortie_missile_rain': {
-        'SC': ('天顶导弹雨', '出击：一架截击机在远处高空朝标记点俯冲，把远程导弹全部射向附近的敌人，导弹从头顶扎下，打完离场。'
-                        '远程导弹原本是对空武器，能否锁定地面目标未实机确认。'),
-        'CN': ('天頂飛彈雨', '出擊：一架截擊機在遠處高空朝標記點俯衝，把遠程飛彈全部射向附近的敵人，飛彈從頭頂紮下，打完離場。'
-                        '遠程飛彈原本是對空武器，能否鎖定地面目標未實機確認。'),
-        'JA': ('天頂ミサイルレイン', '出撃。迎撃機 1 機が遠方の高空から指示地点へ降下しつつ、長射程ミサイルを近くの敵へ撃ち尽くす。'
-                            'ミサイルは頭上から突っ込む。元は対空兵器のため、地上目標をロックできるかは実機未確認。'),
-        'EN': ('Missile Rain', 'Sortie: an interceptor dives at the mark from high and far away, emptying its long-range '
-                           'missiles at the enemies near it so they come down from overhead, then leaves. Those missiles are '
-                           'air-to-air: whether they lock ground targets is not yet tested in game.'),
+        'SC': ('天顶截击机', '齐射截击机锁定标记附近的敌人，从四具发光挂架连续打出 32 枚导弹后脱离。'),
+        'CN': ('天頂截擊機', '齊射截擊機鎖定標記附近的敵人，從四具發光掛架連續打出 32 枚飛彈後脫離。'),
+        'JA': ('天頂迎撃機', '斉射迎撃機が指示地点付近の敵をロックし、発光する4基の発射器から32発を斉射して離脱する。'),
+        'EN': ('Zenith Interceptor', 'A salvo interceptor locks an enemy near the mark, fires 32 missiles from four lit pods, then departs.'),
     },
     'sortie_hammer': {
-        'SC': ('锤与砧', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架对地攻击机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),
-        'CN': ('錘與砧', '出擊組合：兩架 Eros 直升機先低空掃射壓制，25 秒後再呼叫一架對地攻擊機低空投彈收尾（相當於「直升機掃射」接「打了就跑」）。'),
-        'JA': ('ハンマー＆アンビル', '出撃の組み合わせ。エロス 2 機がまず低空掃射で制圧し、25 秒後に攻撃機 1 機が低空爆撃で仕上げる'
+        'SC': ('Eros 506／DN 轰炸机', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架对地攻击机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),
+        'CN': ('Eros 506／DN 轟炸機', '出擊組合：兩架 Eros 直升機先低空掃射壓制，25 秒後再呼叫一架對地攻擊機低空投彈收尾（相當於「直升機掃射」接「打了就跑」）。'),
+        'JA': ('エロス 506／DN 爆撃機', '出撃の組み合わせ。エロス 2 機がまず低空掃射で制圧し、25 秒後に攻撃機 1 機が低空爆撃で仕上げる'
                             '（「ヘリ機銃掃射」のあとに「ヒット＆アウェイ」）。'),
-        'EN': ('Hammer and Anvil', 'Combined sortie: two Eros helicopters suppress the mark with a strafing pass, and 25 s later '
+        'EN': ('Eros 506 / DN Bomber', 'Combined sortie: two Eros helicopters suppress the mark with a strafing pass, and 25 s later '
                                'a strike jet finishes it with a low bombing run (Heli Strafing Pass, then Hit and Run).'),
     },
     'sortie_wolfpack': {
-        'SC': ('狼群', '出击：四架制空战斗机从远处扑来，各自俯冲扫射一轮后散开离场。'),
-        'CN': ('狼群', '出擊：四架制空戰鬥機從遠處撲來，各自俯衝掃射一輪後散開離場。'),
-        'JA': ('ウルフパック', '出撃。制空戦闘機 4 機が遠方から襲いかかり、それぞれ急降下掃射を 1 回行ってから散開して離脱する。'),
-        'EN': ('Wolf Pack', 'Sortie: four fighters pounce from afar, each makes one diving strafing run and they scatter away.'),
+        'SC': ('DN 战斗机（俯冲挂载）', '出击：四架制空战斗机从远处扑来，各自俯冲扫射一轮后散开离场。'),
+        'CN': ('DN 戰鬥機（俯衝掛載）', '出擊：四架制空戰鬥機從遠處撲來，各自俯衝掃射一輪後散開離場。'),
+        'JA': ('DN 戦闘機（急降下型）', '出撃。制空戦闘機 4 機が遠方から襲いかかり、それぞれ急降下掃射を 1 回行ってから散開して離脱する。'),
+        'EN': ('DN Fighter (Strike Loadout)', 'Sortie: four fighters pounce from afar, each makes one diving strafing run and they scatter away.'),
     },
     'sortie_guided': {
-        'SC': ('引导打击', '出击组合：炮艇机在标记点上空盘旋一圈并开火标定，25 秒后再呼叫两架对地攻击机俯冲扫射，然后各自撤离'
+        'SC': ('C-130／DN 轰炸机', '出击组合：炮艇机在标记点上空盘旋一圈并开火标定，25 秒后再呼叫两架对地攻击机俯冲扫射，然后各自撤离'
                       '（相当于炮艇机一圈接「俯冲扫射」）。'),
-        'CN': ('引導打擊', '出擊組合：砲艇機在標記點上空盤旋一圈並開火標定，25 秒後再呼叫兩架對地攻擊機俯衝掃射，然後各自撤離'
+        'CN': ('C-130／DN 轟炸機', '出擊組合：砲艇機在標記點上空盤旋一圈並開火標定，25 秒後再呼叫兩架對地攻擊機俯衝掃射，然後各自撤離'
                       '（相當於砲艇機一圈接「俯衝掃射」）。'),
-        'JA': ('誘導攻撃', '出撃の組み合わせ。ガンシップが指示地点の上空を一周しながら射撃で目標を示し、25 秒後に攻撃機 2 機が急降下'
+        'JA': ('C-130／DN 爆撃機', '出撃の組み合わせ。ガンシップが指示地点の上空を一周しながら射撃で目標を示し、25 秒後に攻撃機 2 機が急降下'
                       '掃射を行って、それぞれ離脱する（ガンシップ一周のあとに「急降下掃射」）。'),
-        'EN': ('Guided Strike', 'Combined sortie: a gunship circles the mark once, firing to mark it, and 25 s later two strike '
+        'EN': ('C-130 / DN Bomber', 'Combined sortie: a gunship circles the mark once, firing to mark it, and 25 s later two strike '
                             'jets make their diving strafing runs; then all leave (a gunship lap, then Diving Strafing Run).'),
     },
     'barrage_katyusha': {
@@ -1061,11 +1056,11 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                'walking 30 m on along your heading every 1.5 s, 8 lines in all. The first lands about 9 s in.'),
     },
     'barrage_mrsi': {
-        'SC': ('同时弹着射击', '远程炮击：6 发炮弹以不同弧线先后发射，在同一瞬间砸到标记点。'),
-        'CN': ('同時彈著射擊', '遠程砲擊：6 發砲彈以不同弧線先後發射，在同一瞬間砸到標記點。'),
-        'JA': ('同時弾着射撃', '長距離砲撃。6 発の砲弾を異なる弾道で順に撃ち、同じ瞬間に指示地点へ着弾させる。'),
-        'EN': ('Time-on-Target Fire', 'Long-range fire: six shells fired one after another on different arcs all land on the '
-                                  'mark in the same instant.'),
+        'SC': ('同时弹着射击', '6 发炮弹在约 8 秒内同时落进标记的矩形区域。转动地图可调整矩形朝向。'),
+        'CN': ('同時彈著射擊', '6 發砲彈在約 8 秒內同時落進標記的矩形區域。轉動地圖可調整矩形方向。'),
+        'JA': ('同時弾着射撃', '約 8 秒以内に 6 発が指定範囲へ同時に着弾する。マップを回転させると範囲の向きが変わる。'),
+        'EN': ('Time-on-Target Fire', 'Six shells strike a rectangular area in the same instant within about 8 s. '
+                                  'Rotate the map to aim the rectangle.'),
     },
     'barrage_heavy': {
         'SC': ('重型臼炮', '远程炮击：一发巨型臼炮弹从约 1.6 公里外高抛砸中标记点，抹平据点。'),
@@ -1082,10 +1077,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                              'its way, pops up short of the mark and dives onto it.'),
     },
     'barrage_ballistic': {
-        'SC': ('弹道导弹', '远程打击：远处一道烟柱冲天，约 20 秒后弹头近乎垂直地高速砸下标记点，爆炸极大。'),
-        'CN': ('彈道飛彈', '遠程打擊：遠處一道煙柱沖天，約 20 秒後彈頭近乎垂直地高速砸下標記點，爆炸極大。'),
-        'JA': ('弾道ミサイル', '長距離攻撃。遠くで煙の柱が空へ昇り、約 20 秒後に弾頭がほぼ真上から高速で指示地点に落ちる。爆発は非常に大きい。'),
-        'EN': ('Ballistic Missile', 'Long-range strike: a column of smoke climbs far away, and some 20 s later the warhead comes '
+        'SC': ('弹道导弹', '远程打击：远处一道烟柱冲天，约 16 秒后弹头近乎垂直地高速砸下标记点，爆炸极大。'),
+        'CN': ('彈道飛彈', '遠程打擊：遠處一道煙柱沖天，約 16 秒後彈頭近乎垂直地高速砸下標記點，爆炸極大。'),
+        'JA': ('弾道ミサイル', '長距離攻撃。遠くで煙の柱が空へ昇り、約 16 秒後に弾頭がほぼ真上から高速で指示地点に落ちる。爆発は非常に大きい。'),
+        'EN': ('Ballistic Missile', 'Long-range strike: a column of smoke climbs far away, and some 16 s later the warhead comes '
                                 'down almost straight onto the mark at great speed. A huge blast.'),
     },
     'ultimate': {
@@ -1222,6 +1217,8 @@ def _lang(lang: str) -> str:
 def call_name(call: Call, lang: str) -> str:
     lang = _lang(lang)
     name = KINDS[call.kind][lang][0]
+    if call.kind == 'heli':
+        name = 'Eros 506' if call.body == 'eros506' else 'Brute 410'
     return name + MODES[lang][call.follow][0] if call.modal else name
 
 

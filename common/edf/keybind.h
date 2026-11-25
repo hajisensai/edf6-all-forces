@@ -170,6 +170,7 @@ inline constexpr Slot kSlots[]={
     // ...and the stock ground vehicles' cruise gears, two keys of their own that W / S override (src/drivegear.cpp)
     {0x7E,14,9,Owner::crew,L"VehicleCruiseUpKey",0x09},
     {0x7F,14,10,Owner::crew,L"VehicleCruiseDownKey",0x70},
+    {0x80,13,5,Owner::crew,L"HeliHoverKey",0x24},
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;

@@ -1,4 +1,5 @@
 #pragma once
+#include "sortie_plan.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -46,6 +47,7 @@ struct Plan {
     // behaviour while retaining ownership.
     unsigned char requester[32]{};
     std::uint32_t team=0; // 0 stock, else the host-authorized PvP faction team (pvp_match.h PvpTeam)
+    sortie::RunSpec run;
 };
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
@@ -81,7 +83,8 @@ bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 using SupportPlan=support_net::Plan;
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept;
 // The request carries this machine's player's soldier weapons (npc_arms.h LocalRequesterArms).
-bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0) noexcept;
+bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t noteSize,std::uint64_t loadout=0,
+                          const sortie::RunSpec& run={}) noexcept;
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;

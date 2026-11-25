@@ -4,7 +4,7 @@
 //  - its own soldier stays where the mission put it, a command post: NoTarget (+0x380 0x80: the hostile walk 0x5E0F20 and
 //    the locks skip it, as a PvP commander's) and NoHpLoss (+0x380 bit 0, enemy_control.cpp ProtectSource's), set on every
 //    machine for every player, given back when the mode ends;
-//  - the M map opens by itself and its keys do not shut it (map.h MapSetCommanderMode): the player's input is the map's;
+//  - the M map opens by itself and M switches to the commander's NPC camera and back; both views keep command input;
 //  - an NPC of the player's class carrying its own equipped weapon (commander_logic.h KindFor, npc_tier.h PickBase) is
 //    made at its soldier through the support transaction (catalog commander::kCatalog: the requester asks, the host plans
 //    it at the requester's authenticated player, every peer makes the same soldier; offline this machine), and follows
@@ -29,6 +29,7 @@ void DestroyCommanderPlan(std::uint64_t transaction) noexcept;
 bool CommanderRequestNotice(std::uint32_t request,support_net::RequestStatus status) noexcept;
 // map.cpp MapHumanFrame, the local player's pre-update, once a frame: the mode's whole per-frame work.
 void CommanderFrame(unsigned char* human) noexcept;
+const unsigned char* CommanderAvatar(const unsigned char* requester) noexcept;
 // mission.cpp MissionStart: the last mission's state dropped (its objects are the teardown's), the map's lock let go.
 void ResetCommander() noexcept;
 }  // namespace crew

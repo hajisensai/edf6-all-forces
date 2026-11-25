@@ -38,6 +38,7 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
 #include "worldmap.h"
@@ -237,6 +238,8 @@ void Validate(Config& n) noexcept {
     Fix("HeliSpeed",n.heliSpeed,0.0f,200.0f);
     Fix("HeliAgility",n.heliAgility,0.5f,60.0f);
     Fix("PlayerHeliStopSec",n.playerHeliStopSec,0.0f,10.0f);
+    n.heliHoverKey=static_cast<int>(FixInt("HeliHoverKey",n.heliHoverKey,0,254));
+    n.heliHoverButton=static_cast<int>(FixInt("HeliHoverButton",n.heliHoverButton,0,0xFFFF));
     Fix("HeliYawRate",n.heliYawRate,0.0f,360.0f);
     Fix("HeliGuardRadius",n.heliGuardRadius,0.0f,1000.0f);
     Fix("HeliGuardSpeed",n.heliGuardSpeed,1.0f,100.0f);
@@ -562,6 +565,8 @@ void LoadConfig() noexcept {
     n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
+    n.heliHoverKey=ReadInt(L"HeliHoverKey",static_cast<DWORD>(n.heliHoverKey));
+    n.heliHoverButton=ReadInt(L"HeliHoverButton",static_cast<DWORD>(n.heliHoverButton));
     n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
     n.stockVehicleHud=ReadBool(L"StockVehicleHud",n.stockVehicleHud);
     n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);
@@ -1385,6 +1390,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
+    wequip::InstallWeaponEquip();   // the 整备 weapons page's equip (weapon_equip.cpp): signatures only, no patch
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
     InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)

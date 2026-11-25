@@ -18,7 +18,8 @@ alone: a peer that lacked one in an online room listed it in Mods/Plugins/EDF6Ve
 (src/support_variants.cpp), and this tool makes every name listed there too, then clears the list.
   OBJECT/EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>[_<PACK>].SGO   a coloured soldier: the stock AI template of that
       kind (its _LEADER for a leader) with its soldier_color entries recoloured (change_color0 = primary, change_color1 =
-      secondary; a face's own entry is kept). Nothing else changes: the same class, model, CAS, AI weapon. With a
+      secondary; a face's own entry is kept) and the menu keys of a unified model file (tools/menu_preview.py
+      unify_soldier: the 3D preview reads the same file). Nothing else changes: the same class, model, CAS, AI weapon. With a
       backpack weapon (PACK its upper-case WEAPONTABLE name, docs/npc-backpack-re.md) the template also loads that
       weapon after its own (soldier_load_weapon), its weapon sets keep only its own weapons (soldier_weapon_slot) and
       the new one is its sub weapon slot (soldier_sub_weapon_slot, as the player templates hold their backpack).
@@ -806,7 +807,10 @@ def soldier_file(game: rootcpk.Game, k: str, leader: bool, look: Look, carried: 
     data = game.read('OBJECT', template + '.SGO')
     if look != (STOCK, STOCK):
         data = recolour(data, look)
-    return with_pack(data, carried) if carried else data
+    if carried:
+        data = with_pack(data, carried)
+    import menu_preview   # a unified model file as its template (docs/unified-model-re.md): the 3D preview reads it too
+    return menu_preview.unify_soldier(game, template, data)
 
 
 def _as_sgo(v: object) -> sgo.Value:
@@ -928,8 +932,41 @@ def check_vehicle(made: bytes, base: bytes, l: Loadout) -> None:
         assert len(weapons) >= 4, 'the 506 builds four holders without the plugin'
 
 
+def menu_files(name: str) -> list[str]:
+    """The menu model files (pylib/menu_graft.py: the merged archive and its callouts) a wanted_files name comes with:
+    a loaded mech's or jet's; [] for a soldier and a tank (nothing to graft: its rounds leave from the main gun)."""
+    import menu_graft
+    what = decode_name(name)
+    if not what or what[0] != 'lo' or (what[1].mech is None and BODIES[what[1].body][2]):
+        return []
+    return [menu_graft.archive_rel(name), menu_graft.callouts_rel(name)]
+
+
+def _menu_model(root: str | None, game: rootcpk.Game, file: str, made: bytes, l: Loadout) -> dict[str, bytes]:
+    """`file`'s merged menu model and callouts (pylib/menu_graft.py), from its battle file `made`."""
+    import menu_graft
+    import menu_model
+    import vcobjects as vc
+
+    def read(folder: str, name: str) -> bytes | None:
+        return _source(root, game, folder, name)
+    members = menu_model.members_of(made)
+    if l.mech is not None:
+        slots = [(s, mech_parts.row_of(mech_parts.WEAPON_BY[t], s), mech_parts.weapon_path(mech_parts.WEAPON_BY[t], s))
+                 for s, t in enumerate(l.mech.weapons) if t]
+        return menu_graft.mech(read, file, members, slots)
+    weapons = members['mission_setup'][3]
+    stores = [(k, vc.store_of(w[0])[0]) for k, w in enumerate(weapons)
+              if isinstance(w, list) and w and isinstance(w[0], str) and vc.store_of(w[0])]
+    return menu_graft.jet(read, file, members, stores)
+
+
 def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, bytes]) -> dict[str, bytes]:
-    """`file` (a wanted_files name) and the pylon weapons it carries that neither the disk nor `out` has yet."""
+    """`file` (a wanted_files name), its menu model files (menu_files) and the pylon weapons it carries that neither the
+    disk nor `out` has yet. Only the unified file's menu key names the merged model: its battle keys are the battle
+    file's (menu_preview.check)."""
+    import menu_graft
+    import menu_preview
     what = decode_name(file)
     if what[0] == 'npc':
         return {'OBJECT/' + file: soldier_file(game, *what[1:])}
@@ -937,11 +974,18 @@ def _build_one(root: str | None, game: rootcpk.Game, file: str, out: dict[str, b
     if l.mech is not None:   # the frame with its setup (pylib/mech_parts.py); its weapons are the game's own
         made = mech_parts.mech_sgo(game, l.mech)
         mech_parts.check_sgo(made, game.read('OBJECT', l.mech.frame_file()), l.mech)
-        return {'OBJECT/' + file: made}
+        one = _menu_model(root, game, file, made, l)
+        one['OBJECT/' + file] = menu_preview.unify_vehicle(game, file, made, root, menu_graft.menu_model_ref(file))
+        return one
     tank = BODIES[l.body][2]
     made = tank_sgo(root, game, l) if tank else jet_sgo(root, game, l)
     check_vehicle(made, _source(root, game, 'OBJECT', BODIES[l.body][0]), l)
-    one = {'OBJECT/' + file: made}
+    # A unified model file (docs/unified-model-re.md): a jet's base already is one (pylib/vcobjects.py jet_sgo).
+    if tank:
+        one = {'OBJECT/' + file: menu_preview.unify_vehicle(game, file, made, root)}
+    else:
+        one = _menu_model(root, game, file, made, l)
+        one['OBJECT/' + file] = menu_preview.unify_vehicle(game, file, made, root, menu_graft.menu_model_ref(file))
     for name, rounds in l.pylons:
         weapon = store_file(name, rounds)
         there = root and os.path.isfile(os.path.join(root, 'Mods', 'WEAPON', weapon))
@@ -963,8 +1007,10 @@ def build(root: str | None, ini_text: str, game: rootcpk.Game | None = None, pen
 
 def missing_names(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
     """The wanted_files names with no file under Mods/OBJECT yet: all the headless generator (installer.py
-    loadout-generate) makes. A name says what its file holds, so one already there is already right."""
-    return [n for n in wanted_files(ini_text, pending) if not os.path.isfile(os.path.join(root, 'Mods', 'OBJECT', n))]
+    loadout-generate) makes. A name says what its file holds, so one already there is already right; one whose menu model
+    files (menu_files) are not there yet is made again."""
+    return [n for n in wanted_files(ini_text, pending)
+            if not all(os.path.isfile(os.path.join(root, 'Mods', *rel.split('/'))) for rel in ['OBJECT/' + n, *menu_files(n)])]
 
 
 def build_named(root: str | None, names: list[str], game: rootcpk.Game | None = None,
@@ -995,6 +1041,7 @@ def install(root: str, files: dict[str, bytes], keep: list[str] = ()) -> list[st
     held = set()
     for rel in keep:   # a kept vehicle keeps the pylon weapons it carries
         held.add(ledger.key(rel))
+        held |= {ledger.key(m) for m in menu_files(rel.split('/')[-1])}   # and its menu model
         what = decode_name(rel.split('/')[-1])
         for name, rounds in (what[1].pylons if what and what[0] == 'lo' else []):
             held.add(ledger.key('WEAPON/' + store_file(name, rounds)))
@@ -1044,6 +1091,7 @@ def stale(root: str, ini_text: str, pending: list[str] = ()) -> list[str]:
     keep: set[str] = set()
     for name in wanted_files(ini_text, pending):
         keep.add(ledger.key('OBJECT/' + name))
+        keep |= {ledger.key(m) for m in menu_files(name)}
         what = decode_name(name)
         for store, rounds in (what[1].pylons if what and what[0] == 'lo' else []):
             keep.add(ledger.key('WEAPON/' + store_file(store, rounds)))

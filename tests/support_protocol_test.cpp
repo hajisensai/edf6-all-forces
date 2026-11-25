@@ -215,7 +215,7 @@ void Capabilities() {
     unsigned char bytes[kWireSize];Message out;
     Check(Encode(hello,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCapabilities,
           "a capability hello round-trips on the unchanged v2 wire (an older host's same bounds accept it)");
-    Check(bytes[4]==3 && bytes[5]==0,"wire version 3 (2026-11-21: the Fencer second hands; the room protocol keeps older builds out)");
+    Check(bytes[4]==4 && bytes[5]==0,"wire version 4 carries the requested attack line");
     Message welcome;welcome.kind=Kind::welcome;welcome.epoch=5;welcome.challenge=7;welcome.request=1;welcome.catalog=kCapabilities;welcome.ok=1;
     Check(Encode(welcome,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.catalog==kCapabilities && out.ok==1,
           "a welcome with the host's capabilities passes the unchanged bounds an older guest checks");
@@ -258,7 +258,7 @@ void Arms() {
      Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out),"a request with arms round-trips");
      bool same=true;for(std::uint32_t k=0;k<kArmsKinds;++k)same=same && out.arms.kind[k]==arms.kind[k];
      Check(same && out.request==4,"every kind's arms exact");
-     Check(bytes[4]==3 && bytes[5]==0,"the support wire is v3");
+     Check(bytes[4]==4 && bytes[5]==0,"the support wire is v4");
      bytes[68+6*kArmsKinds]=1;Check(!Decode(bytes,sizeof(bytes),out),"the request's unused unit bytes stay zero");
      Check(Encode(m,bytes,sizeof(bytes)),"re-encode");bytes[68]=0xFF;bytes[69]=0xFF;
      Check(!Decode(bytes,sizeof(bytes),out),"none (0xFFFF) with stars refused");
@@ -765,7 +765,7 @@ void TransportResume() {
      Check(r.nodes[0]->session->Suspended() && !r.nodes[0]->session->Ready() && r.nodes[0]->active[1],"stays suspended, the support kept");}
 }
 void PvpSupportCodec() {
-    static_assert(kVersion==3 && kWireSize==200,"PvP detail does not change the ABI");
+    static_assert(kVersion==4 && kWireSize==212,"v4 carries the attack line after the v3 payload");
     Message begin;begin.kind=Kind::begin;begin.epoch=22;begin.transaction=1;begin.catalog=5;begin.count=1;
     unsigned char wire[kWireSize]{};Message decoded;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");
@@ -776,7 +776,7 @@ void PvpSupportCodec() {
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.role==2 &&
         decoded.unit.resourceId==kBeginRequesterMetadata && !std::memcmp(decoded.unit.netId,begin.unit.netId,32),
         "BEGIN requester identity and authorized side cross the unchanged real v2 codec");
-    Check(wire[4]==3 && wire[172]==0 && wire[175]==0 && wire[199]==0,"metadata preserves v3 and the reserved tail");
+    Check(wire[4]==4 && wire[172]==0 && wire[175]==0 && wire[199]==0 && wire[211]==0,"metadata keeps the reserved and path fields clear");
     begin.unit.role=0;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.netId[0]==41,
         "team zero retains requester ownership for a later PvP activation");

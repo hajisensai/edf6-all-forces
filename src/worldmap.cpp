@@ -10,7 +10,7 @@
 //    the stock OnUpdate gets a copy of its ctx with +8 null (§5.2: it then neither scrolls the hidden list nor
 //    presses its buttons; its cursor refresh still runs).
 //  - slot 2, Draw 0x7FA970 (the render command queue's thread): the map drawn into the select's viewport (ctx+0x398)
-//    on its D3D11 context (ctx+8) through worldmap_gpu.h with the routes and pins, then the stock draw (the kept
+//    on its D3D11 context (ctx+8) through ui_gpu.h (the shared private pipeline; the tiles' cache is this file's TileCache) with the routes and pins, then the stock draw (the kept
 //    windows: thumbnail, medals, briefing), then the map again over their skins' empty frame on the right and the
 //    place's panel on it (docs/worldmap-select-re.md §8.1); every later screen (a dialog, the main frame) over all.
 //  - slot 5, the scalar deleting destructor 0x8A3650: the object's end. Every texture and the device state go with it
@@ -19,13 +19,20 @@
 // installed, another layout) the log says why once and every select stays stock. The same when the draw cannot run
 // on this device (the list is hidden only once the map has been drawn).
 #include "worldmap.h"
-#include "worldmap_text.h"
+#include "ui_text.h"
+#include "armory.h"
+#include "armory_presets.h"
 #include "worldmap_tiles.h"
 #include "crew.h"
+#include "loadout_store.h"
+#include "room_sync.h"
 #include "memory.h"
 #include "map.h"
 
 #include <Xinput.h>
+#include <d3d11.h>
+#include <wrl/client.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -33,11 +40,12 @@
 #include <iterator>
 #include <mutex>
 #include <new>
+#include <vector>
 
 namespace crew {
 namespace {
 using namespace worldmap;
-namespace gpu=worldmapgpu;
+namespace gpu=uigpu;
 
 // --- The game's side (EDF.dll 0x678CCB46) ---
 constexpr unsigned kUpdateSlot=0x18052F0,kUpdate=0x8A4F60;   // vtable 0x18052E8 slot 1: OnUpdate(this, UpdateContext*)
@@ -56,6 +64,7 @@ constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8,kCtxDt=0x10;   // UpdateContex
 constexpr std::size_t kDrawDevice=0x8,kDrawViewport=0x398;       // xgl::gs::Context: ID3D11DeviceContext*, {x, y, w, h}
 constexpr unsigned kFocus=0x953350;     // (HuiButtonListUtil* select+0x770, int i): the native focus to display entry i
 constexpr unsigned kConfirm=0x8A85C0;   // cbRequestMission(select, const Result*): confirms entry +0x778 (rdx not read)
+constexpr unsigned kVerticalMouseCall=0x83FAE3,kVerticalMouse=0x7F0480;
 constexpr unsigned kTextOf=0x7A3500;    // const wchar_t* (text table, const wchar_t* key)
 constexpr unsigned kNumber=0x52F50;     // double (const Handle*): a number node's value
 constexpr unsigned kNotOpenKey=0x1810C80;   // L"MissionSelect_NotOpenMissionTitle" (the locked row's title, 0x9591B6)
@@ -64,6 +73,12 @@ constexpr std::size_t kButtons=0x770,kSelectMode=0x7B4;   // the select's HuiBut
 constexpr std::size_t kRepeat=0x4528;
 constexpr unsigned kTransform=0x7F9E90;   // float* (HUiBase*, float out[16]): the screen's transform (HUiBase::Draw 0x7FAA0A)   // ui::Input: every pad's repeat mask (1 up, 2 down, 4 left, 8 right)
 constexpr unsigned kLeftBit=4,kRightBit=8;
+// ui::Input (docs/worldmap-select-re.md §8.2): the pads' slots +0x4518 (two ints), each pad's record pad * 0xDD0 with
+// its pressed mask at +0xDBC, the merged masks +0x4520..+0x452C (held, pressed, repeat, released); 0x80 = 返回.
+constexpr std::size_t kInputPads=0x4518,kPadRecord=0xDD0,kPadPressed=0xDBC,kInputPressed=0x4524,kInputCopy=0x4530;
+constexpr unsigned char kBackBit=0x80;
+constexpr unsigned kInvokeSlot=0x18053A0,kInvoke=0x8A4060;   // Agent_Object<HUiHQMissionSelect> vtable 0x1805398 slot 1
+constexpr std::size_t kFunctorScreen=0x8,kFunctorPmf=0x18;
 
 struct Sig { unsigned rva; const unsigned char* bytes; std::size_t size; };
 const unsigned char kUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x48,0x89,0x70,0x20,0x55,0x57,0x41,0x55,0x41};
@@ -108,6 +123,16 @@ const unsigned char kRepeatSig[]={0x4D,0x8D,0x86,0x28,0x45,0x00,0x00};
 // 0x7F9E90: mov rax,rsp; mov [rax+8],rbx; mov [rax+10h],rsi; mov [rax+18h],rdi; push rbp
 const unsigned char kTransformSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x70,0x10,0x48,0x89,0x78,0x18,0x55};
 const unsigned char kCurrentSig[]={0x89,0x51,0x48,0x45,0x84,0xC0,0x74,0x06,0x89,0x91,0xA4,0x57,0x00,0x00,0xC3};
+// Stage 6 (docs/worldmap-select-re.md §10). 0x84B544 (HUiLayout's update, the 返回 key): mov eax,[rbx+34h]; cmp eax,-1;
+// jne; lea rax,[rdi+4524h]; jmp; movsxd rcx,[rdi+rax*4+4518h]; imul rax,rcx,0DD0h; add rax,0DBCh; add rax,rdi;
+// test byte [rax],80h (the pressed mask's 返回 bit, merged or the screen's pad's)
+const unsigned char kBackSig[]={0x8B,0x43,0x34,0x83,0xF8,0xFF,0x75,0x09,0x48,0x8D,0x87,0x24,0x45,0x00,0x00,0xEB,0x18,0x48,
+    0x63,0x8C,0x87,0x18,0x45,0x00,0x00,0x48,0x69,0xC1,0xD0,0x0D,0x00,0x00,0x48,0x05,0xBC,0x0D,0x00,0x00,0x48,0x03,0xC7,0xF6,
+    0x00,0x80};
+// 0x8A4060 Agent_Object<HUiHQMissionSelect>::Invoke (vtable 0x1805398 slot 1) and its call 0x8A40E9:
+// movsxd rcx,[rbp+20h]; mov rdx,r14; add rcx,rsi; call [rbp+18h] (the screen locked from the weak_ptr at +8, pmf +0x18)
+const unsigned char kInvokeSig[]={0x48,0x89,0x6C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x30};
+const unsigned char kInvokeCallSig[]={0x48,0x63,0x4D,0x20,0x49,0x8B,0xD6,0x48,0x03,0xCE,0xFF,0x55,0x18};
 const Sig kSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{kDraw,kDrawSig,sizeof(kDrawSig)},{kGone,kGoneSig,sizeof(kGoneSig)},
     {kFind,kFindSig,sizeof(kFindSig)},{0x7E999C,kShowSig,sizeof(kShowSig)},{kRowCount,kRowCountSig,sizeof(kRowCountSig)},
     {kChildIndex,kChildIndexSig,sizeof(kChildIndexSig)},{kNodeType,kNodeTypeSig,sizeof(kNodeTypeSig)},
@@ -119,6 +144,13 @@ const Sig kSigs[]={{kUpdate,kUpdateSig,sizeof(kUpdateSig)},{kDraw,kDrawSig,sizeo
     {kNumber,kNumberSig,sizeof(kNumberSig)},{0x9591AF,kNotOpenSig,sizeof(kNotOpenSig)},{0x958A66,kTitleSig,sizeof(kTitleSig)},
     {0x8A26AA,kModeSig,sizeof(kModeSig)},{0x8A5371,kRepeatSig,sizeof(kRepeatSig)},{0xDC0B0,kCurrentSig,sizeof(kCurrentSig)},
     {kTransform,kTransformSig,sizeof(kTransformSig)}};
+// Stage 6's, each part checked on its own (a mismatch leaves that part out, not the map).
+const Sig kBackSigs[]={{0x84B544,kBackSig,sizeof(kBackSig)}};
+const Sig kLaunchSigs[]={{kInvoke,kInvokeSig,sizeof(kInvokeSig)},{0x8A40E9,kInvokeCallSig,sizeof(kInvokeCallSig)}};
+template<std::size_t N> bool AllMatch(const Sig (&sigs)[N]) noexcept {
+    for(const Sig& s:sigs)if(!Matches(s.rva,s.bytes,s.size))return false;
+    return true;
+}
 
 using UpdateFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
 using DrawFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
@@ -487,7 +519,7 @@ int PinOfPlace(int place) noexcept {
 int EntryPlace(int entry) noexcept { return entry>=0 && entry<rows.n ? rows.place[entry] : -1; }
 
 // --- What the UI thread hands the draw (under shotLock) ---
-constexpr int kShownLines=kPanelRows-2;   // the panel's last two lines: the keys
+constexpr int kShownLines=kPanelLines;   // under 本关出动, over the two key lines
 struct PanelLine { wchar_t num[8]; wchar_t title[64]; int state; bool cursor; };
 struct Shot {
     bool on=false;
@@ -508,7 +540,20 @@ struct Shot {
     // The panel: the chosen place's missions from `first` (of `total`).
     int lines=0,first=0,total=0;
     PanelLine line[kShownLines]{};
+    int listFirst=0,listLines=0;
+    PanelLine list[kShownLines]{};
     hudtext::Lang lang=hudtext::Lang::en;
+    // Stage 6: the title bar (the 整备 tabs, this the last; the preset chips), 本关出动, the campaign's progress.
+    wchar_t tab[kTabCount][24]{};
+    int presetCount=0,presetCurrent=-1;
+    int launch=-1;            // the preset the chosen mission starts with (-1: as equipped, no presets)
+    bool remembered=false;    // ...remembered for it (else the one in force)
+    wchar_t launchLabel[24]{},launchName[64]{},launchKeys[48]{};
+    // A start held for the generator (Launch): what 本关出动's row says instead of the preset; failed: an error.
+    wchar_t launchNote[160]{};
+    bool launchFailed=false;
+    Progress progress;
+    wchar_t progressText[64]{};
 };
 SRWLOCK shotLock=SRWLOCK_INIT;
 Shot shot;
@@ -519,10 +564,67 @@ void Publish(const Shot& s) noexcept { AcquireSRWLockExclusive(&shotLock);shot=s
 void Read(Shot& s) noexcept { AcquireSRWLockShared(&shotLock);s=shot;ReleaseSRWLockShared(&shotLock); }
 Geometry ReadGeometry() noexcept { AcquireSRWLockShared(&shotLock);const Geometry g=geometry;ReleaseSRWLockShared(&shotLock);return g; }
 
+// The base map's tiles on the device (render thread, under gpuLock): one immutable B8G8R8A8 texture each (no mip chain:
+// worldmap_logic.h LevelFor draws the coarsest level whose pixels are no larger than the screen's, so a tile is shown
+// between 1x and 2x minified, where a bilinear sample needs no mips), at most kCacheTiles of them (1350 x 1350 x 4 =
+// 7.3 MB each), evicted by worldmap_logic.h Victim. Viewed in the target's colour space at upload (a tile is read as it
+// is written): a target of the other space, or another device, drops them all.
+constexpr int kCacheTiles=48;
+class TileCache {
+public:
+    // Before the frame's tile calls (after the renderer's Begin).
+    void Bind(gpu::Painter& paint) noexcept {
+        ID3D11Device* const d=paint.Device();
+        if(d!=device || paint.Srgb()!=srgb){tiles.clear();device=d;srgb=paint.Srgb();}
+    }
+    bool Has(int index) const noexcept {
+        for(const Tile& t:tiles)if(t.index==index)return true;
+        return false;
+    }
+    // `tile` as a texture. False: not made (no device, a failed device call, or the cache full of tiles that may not go).
+    bool Upload(const TilePixels& tile,int level,unsigned frame) noexcept {
+        if(!device || tile.w<=0 || tile.h<=0 ||
+           tile.bgra.size()!=static_cast<std::size_t>(tile.w)*static_cast<std::size_t>(tile.h))return false;
+        if(Has(tile.index))return true;
+        std::size_t slot=tiles.size();
+        if(tiles.size()>=static_cast<std::size_t>(kCacheTiles)) {
+            int levels[kCacheTiles];
+            unsigned used[kCacheTiles];
+            const int n=kCacheTiles;
+            for(int i=0;i<n;++i){levels[i]=tiles[static_cast<std::size_t>(i)].level;used[i]=tiles[static_cast<std::size_t>(i)].used;}
+            const int victim=Victim(levels,used,n,frame);
+            if(victim<0)return false;
+            slot=static_cast<std::size_t>(victim);
+        }
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+        view.Attach(gpu::MakeImage(device,tile.bgra.data(),tile.w,tile.h,srgb));
+        if(!view)return false;
+        Tile t{tile.index,level,frame,std::move(view)};
+        try {
+            if(slot<tiles.size())tiles[slot]=std::move(t);
+            else tiles.push_back(std::move(t));
+        } catch(...) { return false; }
+        return true;
+    }
+    // The cached tile's (u0, v0)..(u1, v1) over the rectangle, marked drawn in `frame`.
+    void Draw(gpu::Painter& paint,int index,float x0,float y0,float x1,float y1,float u0,float v0,float u1,float v1,
+              unsigned frame) noexcept {
+        for(Tile& t:tiles)
+            if(t.index==index){t.used=frame;paint.Image(t.view.Get(),x0,y0,x1,y1,u0,v0,u1,v1,0xFFFFFFFFu);return;}
+    }
+    void Reset() noexcept { tiles.clear();device=nullptr; }
+private:
+    struct Tile { int index; int level; unsigned used; Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view; };
+    std::vector<Tile> tiles;
+    ID3D11Device* device=nullptr;   // compared only (the renderer holds it)
+    bool srgb=false;
+};
+
 // --- The draw's state (render thread; the destructor takes gpuLock to release it) ---
 std::mutex gpuLock;
 gpu::Renderer* renderer=nullptr;            // never freed (no device calls at the DLL's unload)
-worldmaptext::Labels* labels=nullptr;       // the same
+uitext::Labels* labels=nullptr;       // the same
+TileCache* cache=nullptr;              // the same
 enum : int { kGpuUnknown, kGpuReady, kGpuBroken };
 std::atomic<int> gpuState{kGpuUnknown};
 unsigned frame=0;
@@ -553,8 +655,27 @@ struct Ui {
     int confirm=-1;                   // the entry a second click on its line confirms after the stock OnUpdate (-1: none)
     int panelFirst=0,panelLines=0;    // the panel's lines as last published (the mouse's hit test)
     int panelEntry[kShownLines]{};
+    // Stage 6
+    bool rbWas=false,digitWas[8]{};
+    int backTab=-1;           // a 整备 tab clicked: the stock 返回 given to this frame's stock OnUpdate, 整备 opened there
+    crew::armory::Presets ps; // the preset book's chips (armory_presets.h), read when the select opened
+    // A start held for the generator (Launch): the entry confirmed, the last poll; the entry whose start was refused
+    // for a failed generation (confirmed again: started with the files as they are); the line 本关出动 shows.
+    int pending=-1,failedEntry=-1;
+    ULONGLONG polled=0;
+    wchar_t note[160]{};
+    bool noteFailed=false;
+    int listFirst=0,listLines=0;
 };
 Ui ui;
+bool backOk=false,launchOk=false;   // kBackSig / the confirm callback's slot checked at load
+thread_local bool mapUpdatingStock=false;
+using ListMouseFn=bool(__fastcall*)(void*);
+
+// Behavior_Vertical tries the mouse first, then uses the navigation repeat mask when it returns false.
+bool __fastcall VerticalListMouse(void* list) noexcept {
+    return !mapUpdatingStock && reinterpret_cast<ListMouseFn>(image+kVerticalMouse)(list);
+}
 std::atomic<unsigned> selectGeneration{0};   // bumped by each select's destructor (GoneHook)
 std::atomic<unsigned char*> gone{nullptr};   // the select whose destructor ran (set there, taken by the next frame)
 constexpr float kOpeningSeconds=1.0f,kFollowSeconds=0.5f;
@@ -653,7 +774,7 @@ int EntryOfPin(int k) noexcept {
 }
 // Group k of layout l chosen: one place, its entry; several, the map opens it up (SplitView) and the cursor goes to
 // the first of its places in list order that has a mission to enter (else its first place's first entry).
-void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const char* why) noexcept {
+void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const char* why,bool expand=true) noexcept {
     MapPoint members[kPlaceCount];
     int n=0,best=-1,bestEntry=-1;
     for(int i=0;i<rows.pinCount;++i) {
@@ -664,51 +785,208 @@ void ChooseGroup(unsigned char* self,const Layout& l,int k,const Screen& s,const
         if(best<0 && bestEntry<0)best=i;
     }
     if(n==0)return;
-    if(n>1) {
+    if(n>1 && expand) {
         MoveTo(SplitView(ui.moving ? ui.to : ui.view,members,n,s),kFollowSeconds);
         Log("WORLDMAP select %p: %s: a group of %d places opened",static_cast<void*>(self),why,n);
     }
     Choose(self,bestEntry>=0 ? bestEntry : EntryOfPin(best),why);
 }
 
+// --- Stage 6: 本关出动 (the preset a mission starts with, loadout_preset.h [Missions]) ---
+// The preset remembered for display entry `entry`, -1 none.
+int RememberedOf(int entry) noexcept {
+    if(entry<0 || entry>=rows.n)return -1;
+    const wchar_t* const key=RowKey(rows.row[entry]);
+    return key ? armorypresets::MissionPreset(key) : -1;
+}
+// Entry `entry` to start with preset `index` (the book written).
+void Remember(int entry,int index,const char* how) noexcept {
+    if(entry<0 || entry>=rows.n || index<0 || index>=ui.ps.count)return;
+    const wchar_t* const key=RowKey(rows.row[entry]);
+    if(!key)return;
+    wchar_t why[160]{};
+    if(!armorypresets::RememberMission(key,index,why,std::size(why)))
+        Log("WORLDMAP 本关出动 of %ls not remembered (%s): %ls",key,how,why);
+}
+// The cursor's mission is being started (the stock confirm callback, or our click's confirm): its remembered preset
+// switched in when it is not the one in force (armory_presets.h Apply: the ini's support keys, the player's weapons).
+void StartWithPreset(unsigned char* self,const char* how) noexcept {
+    const int cursor=CursorIndex(self);
+    if(cursor<0 || cursor>=rows.n || !Enterable(rows.state[cursor]) || !Confirmable(self))return;
+    const int want=RememberedOf(cursor);
+    armorypresets::Fill(&ui.ps);
+    if(want<0 || want>=ui.ps.count || want==ui.ps.current)return;
+    crew::armory::Effects fx;
+    fx.op=crew::armory::Op::switchTo;
+    fx.index=want;
+    wchar_t why[160]{};
+    const bool ok=armorypresets::Apply(fx,why,std::size(why));
+    armorypresets::Fill(&ui.ps);
+    if(ok)roomsync::RoomSyncNudge();   // in a room the start gate reads the switched-in set's files at once
+    if(ok)Log("WORLDMAP %s: row %d starts with preset %d (switched in)",how,rows.row[cursor],want+1);
+    else Log("WORLDMAP %s: row %d: preset %d not switched in: %ls",how,rows.row[cursor],want+1,why);
+}
+// The cursor's mission confirmed (the stock confirm callback, our click's confirm): its preset switched in, then the
+// generator asked: true when the start goes on now. While it runs the start is held (ui.pending: AfterStock starts it
+// when the generator is done; the cursor moved, it is dropped); failed / no generator: not started, the error on
+// 本关出动's row, and the same mission confirmed again starts with the files as they are (the player's choice, logged).
+constexpr ULONGLONG kGenPollMs=500;
+bool Launch(unsigned char* self,const char* how) noexcept {
+    StartWithPreset(self,how);
+    const int cursor=CursorIndex(self);
+    if(cursor<0 || cursor>=rows.n || !Enterable(rows.state[cursor]) || !Confirmable(self))return true;   // the stock's own
+    const GenerateStatus g=VariantGenerationStatus();
+    ui.pending=-1;
+    if(g.state==GenerateState::running) {
+        ui.pending=cursor;ui.polled=GetTickCount64();
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchWaiting),g.message);
+        ui.noteFailed=false;
+        Log("WORLDMAP %s: row %d held: the generator is running (%ls)",how,rows.row[cursor],g.message);
+        return false;
+    }
+    if(g.state==GenerateState::failed || g.state==GenerateState::missing) {
+        if(ui.failedEntry==cursor) {
+            Log("WORLDMAP %s: row %d confirmed again after a failed generation (%ls): started with the files as they are",
+                how,rows.row[cursor],g.message);
+            ui.failedEntry=-1;ui.note[0]=0;
+            return true;
+        }
+        ui.failedEntry=cursor;
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchFailed),g.message);
+        ui.noteFailed=true;
+        Log("WORLDMAP %s: row %d not started: the generation %s (%ls)",how,rows.row[cursor],
+            g.state==GenerateState::failed ? "failed" : "has no generator",g.message);
+        return false;
+    }
+    ui.failedEntry=-1;ui.note[0]=0;
+    return true;
+}
+// A held start (Launch) each frame after the stock OnUpdate: dropped when the cursor left it or the select cannot
+// confirm; the generator polled; done, the start made (the direct confirm, as a click's).
+void FollowPending(unsigned char* self) noexcept {
+    if(ui.pending<0)return;
+    const int cursor=CursorIndex(self);
+    if(cursor!=ui.pending || !Confirmable(self)) {
+        Log("WORLDMAP select %p: the held start of entry %d dropped (the cursor on %d)",static_cast<void*>(self),ui.pending,cursor);
+        ui.pending=-1;ui.note[0]=0;
+        return;
+    }
+    const ULONGLONG now=GetTickCount64();
+    if(now-ui.polled<kGenPollMs)return;
+    ui.polled=now;
+    const GenerateStatus g=VariantGenerationStatus();
+    if(g.state==GenerateState::running) {
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchWaiting),g.message);
+        return;
+    }
+    ui.pending=-1;
+    if(g.state==GenerateState::failed || g.state==GenerateState::missing) {
+        ui.failedEntry=cursor;
+        _snwprintf_s(ui.note,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapLaunchFailed),g.message);
+        ui.noteFailed=true;
+        Log("WORLDMAP select %p: entry %d not started: the generation %s (%ls)",static_cast<void*>(self),cursor,
+            g.state==GenerateState::failed ? "failed" : "has no generator",g.message);
+        return;
+    }
+    ui.note[0]=0;
+    Log("WORLDMAP select %p: the generator is done (%ls): entry %d started",static_cast<void*>(self),g.message,cursor);
+    if(launchOk)roomsync::RoomSyncNudge();
+    Confirm(self);
+}
+// The title bar clicked: a 整备 tab (the select closed the stock way, 整备 opened at it), a chip (that preset in force).
+void TitleClick(unsigned char* self) noexcept {
+    const int tab=TitleTabAt(ui.pointer);
+    if(tab>=0 && tab!=kMapTab) {
+        if(!backOk){Log("WORLDMAP tab %d clicked: the 返回 key's code did not check out at load: not left",tab);return;}
+        if(!crew::armoryui::Installed()){Log("WORLDMAP tab %d clicked: 整备 is not installed: not left",tab);return;}
+        ui.backTab=tab;
+        Log("WORLDMAP select %p: tab %d clicked: back to the screen under it, 整备 there",static_cast<void*>(self),tab);
+        return;
+    }
+    const int chip=TitleChipAt(ui.ps.count,ui.pointer);
+    if(chip<0 || chip==ui.ps.current)return;
+    crew::armory::Effects fx;
+    fx.op=crew::armory::Op::switchTo;
+    fx.index=chip;
+    wchar_t why[160]{};
+    if(!armorypresets::Apply(fx,why,std::size(why)))Log("WORLDMAP preset %d not switched in: %ls",chip+1,why);
+    armorypresets::Fill(&ui.ps);
+}
+
 // This frame's map input; true when the stock OnUpdate must not get it (a click, a drag, the wheel, a stick, a zoom).
 bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,float dt,bool input) noexcept {
     const bool front=InFront() && !MapHoldsKeys();   // (the mission's map view is never open over the select; the census)
+    const Pixel previous=ui.pointer;
     ReadPointer(s);
-    const bool overMap=ui.pointerShown && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
+    const bool overList=ui.pointerShown && In(kMissionList,ui.pointer);
+    const bool overTitle=ui.pointerShown && OverTitle(ui.pointer);
+    const bool overMap=ui.pointerShown && !overTitle && !overList && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
     const bool overPanel=ui.pointerShown && OverPanel(ui.pointer);
-    wheelToMapUntil.store(input && front && overMap ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
+    const bool overLaunch=ui.pointerShown && In(kLaunchRow,ui.pointer);
+    const bool rb=front && Down(VK_RBUTTON);
+    wheelToMapUntil.store(input && front && (overMap || overList) ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
     const int notches=wheel.exchange(0);
     XINPUT_STATE pad{};
     const bool havePad=(front || edf::PadSource()) && PadState(&pad);
     const bool r3=havePad && (pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
     const bool rKey=front && Down('R');
     const bool lb=front && Down(VK_LBUTTON);
+    bool digit[8];
+    for(int i=0;i<8;++i)digit[i]=front && Down('1'+i);
     if(!input) {
         ui.dragging=false;
-        ui.lbWas=lb;ui.r3Was=r3;ui.rKeyWas=rKey;
+        ui.lbWas=lb;ui.r3Was=r3;ui.rKeyWas=rKey;ui.rbWas=rb;
+        for(int i=0;i<8;++i)ui.digitWas[i]=digit[i];
         return false;
     }
     bool used=false;
     const int cursor=CursorIndex(self);
+    // 本关出动: 1..8 pick the cursor mission's preset; a click on its row steps it (left next, right previous).
+    for(int i=0;i<8;++i) {
+        if(digit[i] && !ui.digitWas[i] && i<ui.ps.count)Remember(cursor,i,"a number key");
+        ui.digitWas[i]=digit[i];
+    }
+    if(overLaunch && ((lb && !ui.lbWas) || (rb && !ui.rbWas))) {
+        const int launchNow=LaunchPreset(RememberedOf(cursor),ui.ps.current,ui.ps.count);
+        Remember(cursor,StepPreset(launchNow,lb && !ui.lbWas ? 1 : -1,ui.ps.count),"its row clicked");
+        ui.lbWas=lb;
+        used=true;
+    }
+    // (the stock screen's right click is its 返回: not over our rows)
+    if((overTitle || overLaunch) && rb)used=true;
+    ui.rbWas=rb;
+    const bool mapClick=lb && !ui.lbWas && overMap;
+    const bool moved=ui.pointer.x!=previous.x || ui.pointer.y!=previous.y;
+    bool overPin=false;
+    if(overMap && (mapClick || (!lb && moved))) {
+        Layout l;
+        LayOut(ui.view,s,l);
+        Pixel at[kPlaceCount];
+        for(int k=0;k<l.count;++k)at[k]=l.groups[k].at;
+        const int pin=Pick(at,l.count,ui.pointer,kPinRadius);
+        overPin=pin>=0;
+        if(overPin && (mapClick || GroupOfPlace(l,EntryPlace(cursor))!=pin)) {
+            ChooseGroup(self,l,pin,s,mapClick ? "a pin clicked" : "the pointer entered a pin",mapClick);
+            used=true;
+        }
+    }
     // A click: a panel line (the cursor's line again: confirm), a pin (its place chosen), else the map dragged.
     if(lb && !ui.lbWas) {
-        if(overPanel) {
-            const int line=PanelLineAt(ui.pointer,ui.panelLines);
+        if(overTitle) {
+            TitleClick(self);
+            used=true;
+        } else if(overPanel || overList) {
+            Pixel relative=ui.pointer;
+            if(overList)relative.x+=kPanel.x0-kMissionList.x0;
+            const int line=PanelLineAt(relative,overList ? ui.listLines : ui.panelLines);
             if(line>=0) {
-                const int entry=ui.panelEntry[line];
+                const int entry=overList ? ui.listFirst+line : ui.panelEntry[line];
                 if(entry==cursor)ui.confirm=Confirmable(self) ? entry : -1;
                 else Choose(self,entry,"a panel line clicked");
             }
             used=true;
         } else if(overMap) {
-            Layout l;
-            LayOut(ui.view,s,l);
-            Pixel at[kPlaceCount];
-            for(int k=0;k<l.count;++k)at[k]=l.groups[k].at;
-            const int k=Pick(at,l.count,ui.pointer,kPinRadius+9.f);
-            if(k>=0)ChooseGroup(self,l,k,s,"a pin clicked");
-            else{ui.dragging=true;ui.dragAt=ui.pointer;}
+            if(!overPin){ui.dragging=true;ui.dragAt=ui.pointer;}
             used=true;
         }
     } else if(lb && ui.dragging) {
@@ -718,6 +996,11 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     if(!lb)ui.dragging=false;
     ui.lbWas=lb;
     if(notches && overMap){ZoomAt(ui.view,s,ui.pointer,WheelZoom(notches));used=true;}
+    if(notches && overList && rows.n>0) {
+        const int entry=std::clamp(cursor-notches,0,rows.n-1);
+        if(entry!=cursor)Choose(self,entry,"mission list scrolled");
+        used=true;
+    }
     // Left / right (the stock select reads neither: its list is vertical): the nearest place that way with a mission
     // that may be chosen. The stock OnUpdate still gets the input (up / down / confirm in the same frame are its).
     const unsigned repeat=RepeatMask(ctx);
@@ -773,7 +1056,19 @@ void FollowCursor(unsigned char* self,const Screen& s) noexcept {
     if(!In(kOpenArea,ToScreen(end,s,p)))MoveTo(CentreOn(end,p,s),kFollowSeconds);
 }
 
-// The shot's pins and panel from the rows and the cursor.
+void DescribeLine(PanelLine& l,int entry,int cursor,int titleCount) noexcept {
+    MissionNumber(rows.row[entry],rows.field5[entry],l.num,std::size(l.num));
+    if(rows.state[entry]==3)wcsncpy_s(l.title,rows.notOpen,_TRUNCATE);
+    else if(rows.row[entry]<titleCount)Title(rows.row[entry],l.title,std::size(l.title));
+    else l.title[0]=0;
+    wchar_t* w=l.title;
+    for(const wchar_t* c=l.title;*c;++c)if(*c!=static_cast<wchar_t>(0x2020))*w++=*c;
+    *w=0;
+    l.state=rows.state[entry];
+    l.cursor=entry==cursor;
+}
+
+// The shot's pins and both lists from the rows and the cursor.
 void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.pinCount=rows.pinCount;
     for(int i=0;i<rows.pinCount;++i)out.pins[i]=rows.pins[i];
@@ -788,6 +1083,27 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.targetCount=rows.targetCount;
     for(int i=0;i<rows.targetCount;++i){out.targets[i]=rows.targets[i];out.targetState[i]=rows.targetState[i];}
     out.lang=hudtext::InUse();
+    static constexpr hudtext::Tx kTabs[kTabCount]={hudtext::Tx::armoryTabPlayer,hudtext::Tx::armoryTabSquad,
+                                                   hudtext::Tx::armoryTabVehicle,hudtext::Tx::armoryTabMission};
+    for(int i=0;i<kTabCount;++i)wcsncpy_s(out.tab[i],hudtext::Tr(kTabs[i]),_TRUNCATE);
+    out.presetCount=ui.ps.count;out.presetCurrent=ui.ps.current;
+    const int remembered=RememberedOf(cursor);
+    out.launch=LaunchPreset(remembered,ui.ps.current,ui.ps.count);
+    out.remembered=out.launch>=0 && out.launch==remembered;
+    wcsncpy_s(out.launchLabel,hudtext::Tr(hudtext::Tx::mapLaunch),_TRUNCATE);
+    if(out.launch>=0)_snwprintf_s(out.launchName,_TRUNCATE,L"%d  %ls",out.launch+1,ui.ps.names[out.launch]);
+    else wcsncpy_s(out.launchName,hudtext::Tr(hudtext::Tx::mapLaunchNone),_TRUNCATE);
+    wcsncpy_s(out.launchKeys,hudtext::Tr(hudtext::Tx::mapLaunchKeys),_TRUNCATE);
+    wcsncpy_s(out.launchNote,ui.note,_TRUNCATE);
+    out.launchFailed=ui.noteFailed;
+    out.progress=CountProgress(rows.state,rows.n);
+    _snwprintf_s(out.progressText,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapProgress),out.progress.cleared,out.progress.shown);
+    const int total=RowCount();
+    out.listFirst=ScrollFirst(rows.n,cursor,kShownLines);
+    for(int entry=out.listFirst;entry<rows.n && out.listLines<kShownLines;++entry)
+        DescribeLine(out.list[out.listLines++],entry,cursor,total);
+    ui.listFirst=out.listFirst;
+    ui.listLines=out.listLines;
     ui.panelLines=0;
     if(out.chosen<0)return;
     int at[kMaxEntries];
@@ -795,21 +1111,11 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     int line=-1;
     for(int i=0;i<count;++i)if(at[i]==cursor)line=i;
     const int first=ScrollFirst(count,line,kShownLines);
-    const int total=RowCount();
     out.first=first;out.total=count;
     for(int i=first;i<count && out.lines<kShownLines;++i) {
         const int e=at[i];
         PanelLine& l=out.line[out.lines];
-        MissionNumber(rows.row[e],rows.field5[e],l.num,std::size(l.num));
-        if(rows.state[e]==3)wcsncpy_s(l.title,rows.notOpen,_TRUNCATE);
-        else if(rows.row[e]<total)Title(rows.row[e],l.title,std::size(l.title));
-        else l.title[0]=0;
-        // The list's titles pad some names with daggers (U+2020) the stock button text does not show: left out.
-        wchar_t* w=l.title;
-        for(const wchar_t* c=l.title;*c;++c)if(*c!=static_cast<wchar_t>(0x2020))*w++=*c;
-        *w=0;
-        l.state=rows.state[e];
-        l.cursor=e==cursor;
+        DescribeLine(l,e,cursor,total);
         ui.panelEntry[out.lines]=e;
         ++out.lines;
     }
@@ -827,6 +1133,26 @@ void Follow(unsigned char* self) noexcept {
     rows.n=0;
     rows.pinCount=0;
     rows.current=CurrentRow();
+    wchar_t why[160]{};
+    if(!armorypresets::Load(why,std::size(why)))
+        Log("WORLDMAP select %p: the preset book did not read (%ls): 本关出动 shows the loadout in force",static_cast<void*>(self),why);
+    armorypresets::Fill(&ui.ps);
+}
+
+// The ctx's ui::Input copied into `out` with 返回 pressed (the merged mask and both pads' records): false when it is not
+// readable (the click then does nothing).
+bool CopyWithBack(const unsigned char* ctx,unsigned char* out) noexcept {
+    __try {
+        const unsigned char* const in=*reinterpret_cast<unsigned char* const*>(ctx+kCtxInput);
+        if(!in)return false;
+        std::memcpy(out,in,kInputCopy);
+        out[kInputPressed]|=kBackBit;
+        for(int slot=0;slot<2;++slot) {
+            const int pad=*reinterpret_cast<const int*>(out+kInputPads+4*slot);
+            if(pad>=0 && static_cast<std::size_t>(pad)*kPadRecord+kPadPressed<kInputPads)out[pad*kPadRecord+kPadPressed]|=kBackBit;
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
 }
 
 float ReadDt(const unsigned char* ctx) noexcept {
@@ -860,9 +1186,11 @@ void AfterStock(unsigned char* self) noexcept {
         } else {
             Log("WORLDMAP select %p: confirm entry %d (row %d) by a click",static_cast<void*>(self),cursor,
                 cursor>=0 && cursor<rows.n ? rows.row[cursor] : -1);
-            Confirm(self);
+            // (the direct call skips the callback's hook)
+            if(!launchOk || Launch(self,"a click's confirm"))Confirm(self);
         }
     }
+    FollowPending(self);
 }
 
 std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
@@ -908,7 +1236,21 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     if(ui.started)Describe(on,self,s);
     Publish(on);
     std::uint64_t result;
-    if(used) {
+    const bool wasUpdatingStock=mapUpdatingStock;
+    mapUpdatingStock=true;
+    const int backTab=ui.backTab;
+    ui.backTab=-1;
+    alignas(16) static unsigned char backInput[kInputCopy];   // UI thread only
+    if(backTab>=0 && input && CopyWithBack(ctx,backInput)) {
+        // A 整备 tab clicked: this frame's stock OnUpdate reads 返回 pressed (its layout's cancel_action: set_exit_code
+        // 255, the select closed, the HQ / room shown again), and that screen opens 整备 at the tab (room_ui.cpp).
+        alignas(8) unsigned char copy[kCtxSize];
+        std::memcpy(copy,ctx,kCtxSize);
+        unsigned char* const in=backInput;
+        std::memcpy(copy+kCtxInput,&in,sizeof(in));
+        crew::armoryui::AskOpen(backTab);
+        result=nextUpdate(self,copy);
+    } else if(used) {
         // The stock OnUpdate as when it does not own the input (§5.2): no scroll, no button; its cursor refresh runs.
         alignas(8) unsigned char copy[kCtxSize];
         std::memcpy(copy,ctx,kCtxSize);
@@ -917,6 +1259,7 @@ std::uint64_t __fastcall UpdateHook(unsigned char* self,unsigned char* ctx) {
     } else {
         result=nextUpdate(self,ctx);
     }
+    mapUpdatingStock=wasUpdatingStock;
     if(ui.started)AfterStock(self);
     return result;
 }
@@ -936,7 +1279,7 @@ int DrawTiles(const View& v,const Screen& screen,int* xy) noexcept {
     const int level=LevelFor(v,screen);
     const TileSpan span=Visible(v,screen,level);
     const int n=CentreFirst(v,screen,span,xy,kMostVisible);
-    auto has=[](int i) { return i>=0 && renderer->Has(i); };
+    auto has=[](int i) { return i>=0 && cache->Has(i); };
     for(int i=0;i<n;++i) {
         const int x=xy[2*i],y=xy[2*i+1];
         int ax=0,ay=0;
@@ -945,7 +1288,7 @@ int DrawTiles(const View& v,const Screen& screen,int* xy) noexcept {
         if(z<0)continue;
         const MapRect r=TileRect(level,x,y);
         const Pixel p0=ToScreenUnwrapped(v,screen,r.u0,r.v0),p1=ToScreenUnwrapped(v,screen,r.u1,r.v1);
-        renderer->DrawTile(TileIndex(z,ax,ay),p0.x,p0.y,p1.x,p1.y,uv.u0,uv.v0,uv.u1,uv.v1,frame);
+        cache->Draw(*renderer,TileIndex(z,ax,ay),p0.x,p0.y,p1.x,p1.y,uv.u0,uv.v0,uv.u1,uv.v1,frame);
     }
     return n;
 }
@@ -954,7 +1297,7 @@ float Seconds() noexcept { return static_cast<float>(GetTickCount64()%1000000ull
 
 // A label at (x, y) (its top left), shadowed; at most `maxW` wide (cut at its right); its width.
 float Text(const wchar_t* text,float x,float y,float size,bool bold,std::uint32_t argb,float maxW=4000.f) noexcept {
-    const worldmaptext::Label l=labels->Get(*renderer,text,size,bold,drawn.lang,frame);
+    const uitext::Label l=labels->Get(*renderer,text,size,bold,drawn.lang,frame);
     if(!l.view)return 0.f;
     const float w=l.w<maxW ? l.w : maxW,u1=l.w>0.f ? w/l.w : 1.f;
     renderer->Image(l.view,x+1.5f,y+1.5f,x+1.5f+w,y+1.5f+l.h,0.f,0.f,u1,1.f,0xC0000000u);
@@ -1071,7 +1414,7 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
             if(chosen)Sprite(ring,c,r+(many ? 14.f : 9.f),0xFFFFFFFFu);
             wchar_t count[8];
             MissionNumber(g.missions-1,0,count,std::size(count));
-            const worldmaptext::Label l=labels->Get(*renderer,count,chosen ? 22.f : 18.f,true,drawn.lang,frame);
+            const uitext::Label l=labels->Get(*renderer,count,chosen ? 22.f : 18.f,true,drawn.lang,frame);
             if(l.view)renderer->Image(l.view,c.x-l.w*0.5f,c.y-l.h*0.5f,c.x+l.w*0.5f,c.y+l.h*0.5f,0.f,0.f,1.f,1.f,
                                       g.state==3 ? 0xFFFFFFFFu : 0xFF101010u);
         }
@@ -1105,10 +1448,21 @@ void DrawPanel() noexcept {
         Text(count,x+named+12.f,kPanel.y0+17.f,24.f,false,0xFFB8C4D0u);
     }
     renderer->Rect(x,kPanel.y0+kPanelHeading-6.f,x+w,kPanel.y0+kPanelHeading-4.f,0x80B8C4D0u);
+    // 本关出动: the preset the chosen mission starts with (lit when remembered for it), its keys at the right.
+    {
+        const float y=kLaunchRow.y0;
+        // A held start (Launch): its line instead of the preset, amber while the generator runs, red when it failed.
+        const bool noted=d.launchNote[0]!=0;
+        const std::uint32_t back=noted ? (d.launchFailed ? 0xC0A02020u : 0xA0806010u) : d.remembered ? 0x90F07A10u : 0x60302A1Eu;
+        renderer->Rect(kLaunchRow.x0+4.f,y,kLaunchRow.x1-4.f,y+kPanelRow-4.f,back);
+        const float label=noted ? 0.f : Text(d.launchLabel,x,y+7.f,22.f,true,0xFFEDE6D2u,140.f);
+        Text(noted ? d.launchNote : d.launchName,x+(noted ? 0.f : label+14.f),y+(noted ? 9.f : 7.f),noted ? 18.f : 22.f,false,
+             0xFFFFFFFFu,noted ? w : w-label-14.f);
+    }
     ID3D11ShaderResourceView* const disc=labels->Disc(*renderer);
     for(int i=0;i<d.lines;++i) {
         const PanelLine& l=d.line[i];
-        const float y=kPanel.y0+kPanelHeading+kPanelRow*static_cast<float>(i);
+        const float y=PanelLineTop(i);
         if(l.cursor)renderer->Rect(kPanel.x0+4.f,y,kPanel.x1-4.f,y+kPanelRow-2.f,0x70FFD23Cu);
         Sprite(disc,Pixel{x+8.f,y+kPanelRow*0.5f},7.f,StateColour(l.state));
         const std::uint32_t colour=l.state==3 ? 0xFFA0A0A0u : 0xFFFFFFFFu;
@@ -1118,17 +1472,72 @@ void DrawPanel() noexcept {
     // More above / below: small arrows at the list's right edge.
     const float ax=kPanel.x1-22.f;
     if(d.first>0) {
-        const float y=kPanel.y0+kPanelHeading+2.f;
+        const float y=PanelLineTop(0)+2.f;
         const float tri[4][2]={{ax,y},{ax,y},{ax-8.f,y+10.f},{ax+8.f,y+10.f}};
         renderer->Quad(tri,0xFFFFFFFFu);
     }
     if(d.first+d.lines<d.total) {
-        const float y=kPanel.y0+kPanelHeading+kPanelRow*static_cast<float>(kShownLines)-4.f;
+        const float y=PanelLineTop(kShownLines)-4.f;
         const float tri[4][2]={{ax-8.f,y-10.f},{ax+8.f,y-10.f},{ax,y},{ax,y}};
         renderer->Quad(tri,0xFFFFFFFFu);
     }
     Text(KeysLine(d.lang,0),x,kPanel.y1-62.f,20.f,false,0xFFD0D8E0u,300.f);
-    Text(KeysLine(d.lang,1),x,kPanel.y1-34.f,20.f,false,0xFFD0D8E0u,300.f);
+    wchar_t second[96];
+    _snwprintf_s(second,_TRUNCATE,L"%ls   %ls",KeysLine(d.lang,1),d.launchKeys);   // 本关出动's keys after the zoom's
+    Text(second,x,kPanel.y1-34.f,20.f,false,0xFFD0D8E0u,w);
+}
+
+// The 整备 title bar (armory_skin.h: the same bar, tabs, chips as the armory's; the map's tab lit) and the campaign's
+// progress under it.
+void DrawTitle() noexcept {
+    namespace skin=crew::armory::skin;
+    const Shot& d=drawn;
+    static skin::Quads quads;   // render thread, under gpuLock
+    quads.n=0;quads.dropped=0;
+    skin::Bar(&quads,skin::layout::kTitle);
+    for(int i=0;i<kTabCount;++i)skin::Tab(&quads,skin::layout::Tab(i),i==kMapTab);
+    const int chips=d.presetCount<skin::layout::kChipMost ? d.presetCount : skin::layout::kChipMost-1;
+    for(int i=0;i<chips;++i) {
+        const skin::Rect r=skin::layout::Chip(i,chips);
+        skin::Chip(&quads,r,i==d.presetCurrent,
+                   (d.pointerShown && r.Contains(d.pointer.x,d.pointer.y)) || i==d.launch);
+    }
+    for(int i=0;i<quads.n;++i)renderer->QuadColours(quads.q[i].xy,quads.q[i].argb);
+    for(int i=0;i<kTabCount;++i) {
+        const skin::Rect r=skin::layout::Tab(i);
+        Text(d.tab[i],r.x0+28.f,r.y0+12.f,26.f,true,skin::TextOn(i==kMapTab),r.W()-40.f);
+    }
+    for(int i=0;i<chips;++i) {
+        const skin::Rect r=skin::layout::Chip(i,chips);
+        wchar_t n[4];
+        _snwprintf_s(n,_TRUNCATE,L"%d",i+1);
+        Text(n,r.x0+16.f,r.y0+8.f,24.f,true,skin::TextOn(i==d.presetCurrent),r.W()-12.f);
+    }
+    if(d.progress.shown>0) {
+        const Area& b=kProgressBar;
+        renderer->Rect(b.x0,b.y0,b.x1,b.y1,0xC0141310u);
+        renderer->Rect(b.x0+2.f,b.y0+2.f,b.x0+2.f+(b.x1-b.x0-4.f)*ProgressShare(d.progress),b.y1-2.f,0xFFD8C69Cu);
+        Text(d.progressText,b.x1+12.f,b.y0-4.f,22.f,false,0xFFEDE6D2u,500.f);
+    }
+}
+
+void DrawMissionList() noexcept {
+    const Shot& d=drawn;
+    const int lang=static_cast<int>(d.lang);
+    constexpr const wchar_t* titles[]={L"Missions",L"所有关卡",L"所有關卡",L"任務一覧"};
+    const float x=kMissionList.x0+12.f,y=kMissionList.y0;
+    const float w=kMissionList.x1-x-10.f;
+    const float bottom=y+kPanelHeading+kPanelRow*static_cast<float>(d.listLines);
+    renderer->Rect(kMissionList.x0,y,kMissionList.x1,bottom,0x700A1420u);
+    Text(titles[lang>=0 && lang<4 ? lang : 0],x,y+12.f,26.f,true,0xFFFFFFFFu,w);
+    for(int i=0;i<d.listLines;++i) {
+        const PanelLine& l=d.list[i];
+        const float rowY=y+kPanelHeading+kPanelRow*static_cast<float>(i);
+        if(l.cursor)renderer->Rect(kMissionList.x0,rowY,kMissionList.x1,rowY+kPanelRow-2.f,0x70FFD23Cu);
+        const std::uint32_t colour=l.state==3 ? 0xFFC0C0C0u : 0xFFFFFFFFu;
+        Text(l.num,x,rowY+6.f,22.f,true,colour,62.f);
+        Text(l.title,x+68.f,rowY+6.f,22.f,true,colour,w-68.f);
+    }
 }
 
 // Where the select's window skins draw their large empty frame (Window02_SoldierSel1 / 2's .B / .c meshes reach x
@@ -1143,8 +1552,9 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
     if(!ReadDrawCtx(ctx,&device,vp))return;
     std::lock_guard<std::mutex> hold(gpuLock);
     if(!renderer)renderer=new(std::nothrow) gpu::Renderer();
-    if(!labels)labels=new(std::nothrow) worldmaptext::Labels();
-    if(!renderer || !labels)return;
+    if(!labels)labels=new(std::nothrow) uitext::Labels();
+    if(!cache)cache=new(std::nothrow) TileCache();
+    if(!renderer || !labels || !cache)return;
     const gpu::Viewport viewport{static_cast<float>(vp[0]),static_cast<float>(vp[1]),static_cast<float>(vp[2]),
                                  static_cast<float>(vp[3])};
     const gpu::Renderer::Begun begun=renderer->Begin(device,viewport);
@@ -1153,9 +1563,11 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
             Log("WORLDMAP the map cannot be drawn on this device: %s: the mission select stays stock",renderer->Why());
         renderer->Reset();
         labels->Reset();
+        cache->Reset();
         return;
     }
     if(begun!=gpu::Renderer::Begun::ok)return;
+    cache->Bind(*renderer);
     struct Ender { gpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
     ++frame;
     const Screen screen{1920.f,1080.f,viewport.w};
@@ -1181,15 +1593,15 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
             failed[tile.index]=true;
             continue;
         }
-        renderer->Upload(tile,LevelOfIndex(tile.index),frame);
+        cache->Upload(tile,LevelOfIndex(tile.index),frame);
     }
     const int level=LevelFor(v,screen);
     int want[3+kMostVisible];
     int wanted=0;
-    for(int i=0;i<3;++i)if(!renderer->Has(i) && !failed[i])want[wanted++]=i;
+    for(int i=0;i<3;++i)if(!cache->Has(i) && !failed[i])want[wanted++]=i;
     for(int i=0;i<n;++i) {
         const int index=TileIndex(level,WrapColumn(level,xy[2*i]),xy[2*i+1]);
-        if(index>=0 && !failed[index] && !renderer->Has(index))want[wanted++]=index;
+        if(index>=0 && !failed[index] && !cache->Has(index))want[wanted++]=index;
     }
     store->Want(want,wanted);
     // The viewport and the target's size for the UI thread (the pointer, the sharpness).
@@ -1215,11 +1627,12 @@ void DrawOver(unsigned char* ctx) noexcept {
     int vp[4]{};
     if(!ReadDrawCtx(ctx,&device,vp))return;
     std::lock_guard<std::mutex> hold(gpuLock);
-    if(!renderer || !labels || gpuState.load()!=kGpuReady)return;
+    if(!renderer || !labels || !cache || gpuState.load()!=kGpuReady)return;
     const gpu::Viewport viewport{static_cast<float>(vp[0]),static_cast<float>(vp[1]),static_cast<float>(vp[2]),
                                  static_cast<float>(vp[3])};
     if(renderer->Begin(device,viewport)!=gpu::Renderer::Begun::ok)return;
     struct Ender { gpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
+    cache->Bind(*renderer);
     const Screen screen{1920.f,1080.f,viewport.w};
     View v=drawn.view;
     Clamp(v,screen);
@@ -1232,6 +1645,8 @@ void DrawOver(unsigned char* ctx) noexcept {
     }
     renderer->Unclip();
     DrawPanel();
+    DrawTitle();
+    if(drawn.listLines>0)DrawMissionList();
     // The pointer: a small cross (the select draws no cursor of its own over the map).
     if(drawn.pointerShown) {
         const float x=drawn.pointer.x,y=drawn.pointer.y;
@@ -1300,10 +1715,29 @@ void* __fastcall GoneHook(unsigned char* self,unsigned flags) {
             std::lock_guard<std::mutex> hold(gpuLock);
             if(renderer)renderer->Reset();   // every texture and device object (made again by the next select)
             if(labels)labels->Reset();
+            if(cache)cache->Reset();
             Log("WORLDMAP select %p gone: its textures released",static_cast<void*>(self));
         }
     }
     return nextGone(self,flags);
+}
+
+// The select's confirm callback (Agent_Object<HUiHQMissionSelect>::Invoke, run by its button inside the stock OnUpdate,
+// the HQ's and the room's alike): 本关出动's preset switched in before the stock confirm starts the mission.
+using InvokeFn=std::uint64_t(__fastcall*)(unsigned char*,void*);
+InvokeFn nextInvoke=nullptr;
+std::uint64_t __fastcall InvokeHook(unsigned char* functor,void* result) {
+    unsigned char* screen=nullptr;
+    std::uintptr_t pmf=0;
+    __try {
+        screen=*reinterpret_cast<unsigned char* const*>(functor+kFunctorScreen);
+        pmf=*reinterpret_cast<const std::uintptr_t*>(functor+kFunctorPmf);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ screen=nullptr; }
+    // Held (Launch false): the stock confirm not called, as Invoke itself skips it when the screen is gone (0x8A40E4:
+    // its return value is cbRequestMission's void, nobody reads it); AfterStock starts it when the generator is done.
+    if(screen && screen==ui.self && pmf==reinterpret_cast<std::uintptr_t>(image+kConfirm) && gone.load()!=screen &&
+       !Launch(screen,"the stock confirm"))return 0;
+    return nextInvoke(functor,result);
 }
 
 // `next` is set before the slot points at the hook.
@@ -1330,12 +1764,20 @@ bool InstallWorldMap() noexcept {
             Log("HOOK worldmap REFUSED: the code at EDF+0x%X is not as expected: the mission select stays stock (the list)",s.rva);
             return false;
         }
+    bool mouseChanged=false;
+    if(!edf::RedirectCall(image+kVerticalMouseCall,image+kVerticalMouse,reinterpret_cast<void*>(&VerticalListMouse),mouseChanged))
+        return false;
     // The destructor first (a new select at a dead one's address must not inherit its state), then the draw, then the
     // update (which hides the list): a later slot that fails leaves the earlier ones inert.
     if(!Chain(kGoneSlot,kGone,reinterpret_cast<void*>(&GoneHook),nextGone,"destructor") ||
        !Chain(kDrawSlot,kDraw,reinterpret_cast<void*>(&DrawHook),nextDraw,"Draw") ||
        !Chain(kUpdateSlot,kUpdate,reinterpret_cast<void*>(&UpdateHook),nextUpdate,"OnUpdate"))return false;
     Log("HOOK worldmap select chained (vtable 0x18052E8 slots 1, 2, 5): the list becomes the world map once a select opens");
+    // Stage 6, each on its own (a mismatch leaves that part out, not the map): the 返回 a 整备 tab gives, 本关出动.
+    backOk=AllMatch(kBackSigs);
+    if(!backOk)Log("HOOK worldmap: the 返回 key's code at EDF+0x84B544 is not as expected: the map's 整备 tabs do nothing");
+    launchOk=AllMatch(kLaunchSigs) && Chain(kInvokeSlot,kInvoke,reinterpret_cast<void*>(&InvokeHook),nextInvoke,"confirm callback");
+    if(!launchOk)Log("HOOK worldmap: the select's confirm callback is not as expected: 本关出动 is shown, not switched in");
     return true;
 }
 

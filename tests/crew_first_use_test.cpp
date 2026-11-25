@@ -114,7 +114,6 @@ int pvpFrameTicks=0,thermalFrameTicks=0,enemyFrameTicks=0,enemyNetworkTicks=0;
 void NoopGlobalTick() {}
 void __fastcall NoPrompt(void*,void*) {}
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}
-void ViewTick(void) noexcept{unexpectedHook();return;}
 void ViewDiagTick(void) noexcept{unexpectedHook();return;}
 void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
 void EnemyControlFrame() noexcept{unexpectedHook();++enemyFrameTicks;}

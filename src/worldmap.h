@@ -7,7 +7,7 @@
 // The base map, pan and zoom, the opening move; one pin a place, the routes from the current mission, the chosen
 // place's panel (right, over the window skins' empty frame), choosing by left / right, pins and panel lines
 // (docs/plan-2026-11-10-worldmap.md §5). Further overlays can draw and read input through the two hooks below.
-#include "worldmap_gpu.h"
+#include "ui_gpu.h"
 #include "worldmap_logic.h"
 
 namespace crew {
@@ -24,7 +24,7 @@ namespace worldmapui {
 struct Frame {
     worldmap::View view;
     worldmap::Screen screen{1920.f,1080.f};
-    worldmapgpu::Viewport viewport{};
+    uigpu::Viewport viewport{};
     worldmap::Pixel pointer{-1.f,-1.f};
     bool pointerShown=false;
     unsigned char* select=nullptr;
@@ -32,7 +32,7 @@ struct Frame {
 
 // Render thread, in the select's Draw: after the base map, before the stock draw (so the select's own windows and
 // any dialog stay over what is drawn here). `paint` draws in design units.
-using DrawHook=void(*)(worldmapgpu::Painter& paint,const Frame& frame,void* user);
+using DrawHook=void(*)(uigpu::Painter& paint,const Frame& frame,void* user);
 // UI thread, in the select's OnUpdate, after the map's own pan / zoom of this frame and before the stock OnUpdate;
 // `input`: the select owns the input this frame (no dialog, no transition over it). True: the hook used this frame's
 // input (a click on a pin): the stock OnUpdate then runs without it (its ctx's ui::Input* null, §5.2).

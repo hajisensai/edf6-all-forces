@@ -931,7 +931,6 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
     GuardedTick(kStepRescue,&SupportDispatchTick);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
-    GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepView,&ViewDiagTick);   // the grey-map diagnosis (viewdiag.cpp)
     GuardedTick(kStepBoarding,&BoardingTick);
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)

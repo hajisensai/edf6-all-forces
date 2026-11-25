@@ -464,7 +464,8 @@ void jet::ResetSupportDrones() noexcept {
     }
 }
 
-bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne) noexcept {
+bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne,
+                             const sortie::RunSpec& run) noexcept {
     // Only the actual pilot authorizes takeoff; an empty seat/Dummy never passes this gate.
     if(!vehicle || !target || !NpcDriver(vehicle))return false;
     if(spec.heli>=0) {
@@ -490,7 +491,7 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
         const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
         const float none[3]={0.0f,0.0f,0.0f};
         SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),target,reinterpret_cast<const float*>(vehicle+kPosition),
-                    airborne ? m+8 : none,GameMs());
+                    airborne ? m+8 : none,GameMs(),run);
     }
     return true;
 }

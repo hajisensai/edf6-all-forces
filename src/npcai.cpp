@@ -45,6 +45,7 @@
 #include "seat_events.h"
 #include "support_soldier.h"
 #include "transport.h"
+#include "commander.h"
 #include "ride_along.h"
 #include "loadout_store.h"
 #include "vhud.h"
@@ -968,8 +969,8 @@ bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast
     return ShotClearOf(h,eye,to,blast);
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
-void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
-    for(int k=0;k<kHands;++k) {
+void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int firstHand=0) noexcept {
+    for(int k=firstHand;k<kHands;++k) {
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
@@ -995,8 +996,12 @@ Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const f
 // remote player too), else this machine's player. `look` is known for this machine's player alone (its camera); for
 // another machine's it is nullptr and "behind them" is taken from the threat instead.
 struct Served { const float* at; const float* look; };
-Served ServedBy(npc::Control control,const unsigned char* root) noexcept {
-    if(control==npc::Control::recruited && root && root!=PlayerHuman())return Served{Pos(root),nullptr};
+Served ServedBy(npc::Control control,const unsigned char* root,const unsigned char* soldier=nullptr) noexcept {
+    if(control==npc::Control::recruited && root) {
+        const auto* avatar=CommanderAvatar(root);
+        if(avatar && avatar!=soldier)return Served{Pos(avatar),nullptr};
+        if(root!=PlayerHuman())return Served{Pos(root),nullptr};
+    }
     if(!world.player)return Served{nullptr,nullptr};
     return Served{world.playerAt,world.lookOk ? world.look : nullptr};
 }
@@ -1890,7 +1895,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     Plan p{"stock",false,a.held[0]};
     // Its anchor: the player it follows (the one who recruited it, whichever machine's), its NPC leader, the spot it
     // was free at; a map order's point over them.
-    const Served served=ServedBy(s.control,root);
+    const Served served=ServedBy(s.control,root,h);
     Orders o=OrdersOf(q,s.control==npc::Control::recruited && served.at ? served.at :
                          s.control==npc::Control::squad && root ? Pos(root) : s.home);
     // On the way under a move / attack-move it looks for targets round itself (its leash), not round the point ahead.
@@ -1930,7 +1935,9 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         if(mask&kMaskLook)Look(h,dir);
         p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
-        Veto(h,t.e,eye,a);   // the second hand (d71) the stock may have pulled, with its own weapon
+        // ShotOk already checked the primary weapon at its predicted impact. The stock offhand can still be firing
+        // directly at the target's current position and needs its own check.
+        Veto(h,t.e,eye,a,1);
     } else {
         s.spotSet=false;
         h[kTrigger]=0;
@@ -3126,7 +3133,12 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
         MarchRoster(ms,*mr,root);
         shape=ShapeOf(*mr);marching=true;
         float look[2]={0.0f,1.0f};
-        if(mr==&march) {
+        const auto* avatar=CommanderAvatar(root);
+        if(avatar && avatar!=h) {
+            anchor=Pos(avatar);
+            const float* m=reinterpret_cast<const float*>(avatar+kMatrix);
+            look[0]=m[8];look[1]=m[10];
+        } else if(mr==&march) {
             anchor=world.playerAt;
             if(world.lookOk){look[0]=world.look[0];look[1]=world.look[2];}
         } else {
@@ -3904,7 +3916,12 @@ bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept
             if(m[i][kDead])continue;
             ++seats.alive;
             if(HumanOnFoot(m[i])){++seats.onFoot;continue;}
-            if(vehicle && At<const void*>(m[i],kHumanRiding)==vehicle)++seats.aboard;
+            if(vehicle && At<const void*>(m[i],kHumanRiding)==vehicle) {
+                ++seats.aboard;
+                auto* v=const_cast<unsigned char*>(static_cast<const unsigned char*>(vehicle));
+                const unsigned seat=SeatIndex(v,At<const unsigned char*>(m[i],kHumanSeat));
+                if(seat<SeatCount(v) && SeatPriority(v,seat)<mapcmd::kSeatPassenger)++seats.crew;
+            }
         }
         *out=seats;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -4013,11 +4030,11 @@ bool NpcCommandHint(CommandHint* out) noexcept {
     *out=hintOut;return true;
 }
 
-int NpcSquadDismount(const void* top) noexcept {
+int NpcSquadDisembark(const void* top,const unsigned char* vehicle) noexcept {
     __try {
         auto* const t=TransportTop(top);
-        if(!t || !rideOk)return 0;
-        int off=0;DismountSquad(t,&off);return off;
+        if(!t || !rideOk || !vehicle)return 0;
+        int off=0;DismountSquad(t,&off,false,0,vehicle);return off;
     } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
 }
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept {
@@ -4096,8 +4113,8 @@ NpcCommandResult NpcMapCommandForRequester(const ObjRef& selected,const mapcmd::
         // HOLD: the post where the vehicle is now (the authority's own reading of it).
         const float* at=c.order==Order::hold ? Pos(v) : c.at;
         const Command order{mapcmd::VehicleCommandOf(c.order),{at[0],at[1],at[2]}};
-        if(order.order!=Order::guard && order.order!=Order::none && order.order!=Order::focus)return CommandResult(Reason::unsupported);
-        const bool accepted=TankCommand(v,order,focus);
+        if(!mapcmd::VehicleOrder(order.order) && order.order!=Order::focus)return CommandResult(Reason::unsupported);
+        const bool accepted=TankCommand(v,order,focus,requester);
         return CommandResult(accepted ? Reason::none : Reason::failed,accepted ? 1u : 0u);
     } __except(EXCEPTION_EXECUTE_HANDLER){return CommandResult(Reason::failed);}
 }

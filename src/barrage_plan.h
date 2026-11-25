@@ -24,6 +24,9 @@ constexpr int kFps=60;
 // The calls (tools/calls.py brings 'barrage', `barrage` its kind's name; kKindNames below, in this order).
 enum class Kind : std::uint8_t { katyusha, guided, thermobaric, cluster, creeping, mrsi, heavy, cruise, ballistic, count };
 constexpr int kKinds=static_cast<int>(Kind::count);
+constexpr bool HasOrientedFootprint(int kind) noexcept {
+    return kind==static_cast<int>(Kind::creeping) || kind==static_cast<int>(Kind::mrsi);
+}
 constexpr const char* kKindNames[kKinds]={"katyusha","guided","thermobaric","cluster","creeping","mrsi","heavy","cruise",
                                           "ballistic"};
 enum class Path : std::uint8_t { arc, lobDive, cruise };
@@ -191,9 +194,9 @@ constexpr KindSpec kSpecs[kKinds]={
     {1400.0f,250.0f,8.0f,30.0f},    // thermobaric: 16 heavy rockets inside 30 m
     {3500.0f,420.0f,9.0f,8.0f},     // cluster: 12 carriers splitting 260 m up into 12 bomblets each (their blast)
     {4000.0f,450.0f,5.0f,15.0f},    // creeping: 8 lines of 8 shells walking along the heading
-    {4000.0f,450.0f,5.0f,25.0f},    // mrsi: 6 shells on one point in one frame
+    {2000.0f,600.0f,5.0f,25.0f},    // mrsi: 6 shells across a rectangle in one frame
     {1600.0f,200.0f,14.0f,45.0f},   // heavy: one 380 mm round
-    {4500.0f,280.0f,10.0f,40.0f},   // cruise: one missile low over the ground
+    {4500.0f,560.0f,10.0f,40.0f},   // cruise: one missile low over the ground
     {5000.0f,0.0f,16.0f,70.0f},     // ballistic: one warhead nearly straight down (its time below)
 };
 constexpr int kKatyushaRounds=40,kKatyushaGap=4,kGuidedRounds=6,kGuidedGap=20,kThermoRounds=16,kThermoGap=12;
@@ -201,9 +204,10 @@ constexpr int kClusterCarriers=12,kClusterGap=30,kBomblets=12,kCreepLines=8,kCre
 constexpr float kKatyushaSpread=80.0f,kThermoSpread=30.0f,kClusterSpread=60.0f,kBombletSpread=140.0f;
 constexpr float kClusterSplitHeight=260.0f,kBombletSpeed=110.0f,kBombletSize=3.0f,kBombletShare=0.3f;
 constexpr float kCreepWidth=15.0f,kCreepStep=30.0f;
+constexpr float kMrsiRowSpacing=36.0f,kMrsiColumnSpacing=26.0f;
 constexpr float kGuidedRise=1200.0f,kGuidedReach=200.0f,kCruiseOver=60.0f,kCruisePop=180.0f,kBallisticRise=4500.0f;
 constexpr float kBallisticWarp=1.7f;
-constexpr int kBallisticFlight=22*kFps;
+constexpr int kBallisticFlight=16*kFps;
 static_assert(kClusterCarriers*(1+kBomblets)<=kMaxRounds && kCreepLines*kCreepPer<=kMaxRounds,"rounds fit");
 
 namespace detail {
@@ -348,8 +352,11 @@ int Plan(Kind kind,const Setup& s,Ground ground,Round* out,int cap) noexcept {
             const float d=detail::FlatDist(site,s.target);
             for(int i=0;i<kMrsiRounds;++i){flights[i]=detail::Frames(d,spec.speed/(1.0f+0.22f*i));if(flights[i]>longest)longest=flights[i];}
             const int impact=longest+30;
-            float p[3];onGround(s.target[0],s.target[2],p);
             for(int i=0;i<kMrsiRounds;++i) {
+                const float along=(static_cast<float>(i/2)-1.0f)*kMrsiRowSpacing;
+                const float across=(static_cast<float>(i%2)-0.5f)*kMrsiColumnSpacing;
+                float p[3];
+                onGround(s.target[0]+fwd[0]*along+side[0]*across,s.target[2]+fwd[2]*along+side[2]*across,p);
                 Round* r=add(0,p,0.0f,8.0f,Path::arc);
                 if(!r)break;
                 r->rise=(0.12f+0.08f*static_cast<float>(i))*detail::FlatDist(r->from,r->to);
