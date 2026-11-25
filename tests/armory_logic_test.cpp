@@ -155,7 +155,7 @@ void Scripted() {
         r.in.held[kToggle]=false;
         Step(r.s,r.pages,3,r.ps,r.w,r.in);
         fx=r.Tap(kToggle);
-        Check(fx.close && !r.s.open && r.a.commits==1,"toggle closes after commit");
+        Check(fx.close && !fx.backToTasks && !r.s.open && r.a.commits==1,"toggle closes after commit");
     }
     // tabs: Q/E wrap and commit; a failed commit keeps the tab and notes why
     {
@@ -208,7 +208,8 @@ void Scripted() {
         Check(!fx.close && r.s.open && r.s.popup==Popup::unsaved && r.s.popupCursor==kUnsavedSave,
               "cancel in the list with edits asks first");
         fx=r.Tap(kConfirm);
-        Check(fx.close && !r.s.open && r.a.commits==1 && !r.a.dirty,"save and close commits");
+        Check(fx.close && fx.backToTasks && !r.s.open && r.a.commits==1 && !r.a.dirty,
+              "save completes the pending return to the task map");
     }
     // the close prompt: discard, back, toggle; a clean page closes at once
     {
@@ -384,15 +385,24 @@ void Scripted() {
         Check(v.layer[0].quads.dropped==0 && v.layer[0].droppedTexts==0,"view within capacity");
         r.Tap(kPresetMenu);
         Build(r.s,r.pages,3,r.ps,r.w,&v);
-        Check(v.layer[1].quads.n>0 && v.layer[1].nt==1+kActCount,"popup layer");
+        Check(v.layer[1].quads.n>0 && v.layer[1].nt==2+kActCount &&
+              !std::wcscmp(v.layer[1].texts[0].s,r.w.hints[3]),"popup controls appear on the popup layer");
         r.s.popup=Popup::none;
         r.a.dirty=true;
         r.Tap(kToggle);
         Build(r.s,r.pages,3,r.ps,r.w,&v);
-        Check(r.s.popup==Popup::unsaved && v.layer[1].nt==1+kUnsavedCount,"close prompt layer");
+        Check(r.s.popup==Popup::unsaved && v.layer[1].nt==2+kUnsavedCount,"close prompt layer");
         Close(r.s);
         Build(r.s,r.pages,3,r.ps,r.w,&v);
         Check(!v.open && v.layer[0].quads.n==0,"closed: nothing");
+        auto& layer=v.layer[0];
+        layer.nt=Layer::kTextMost-1;
+        wchar_t longHint[128];
+        for(auto& ch:longHint)ch=L'x';
+        longHint[127]=0;
+        layer.Say(longHint,0,0,24,0);
+        Check(layer.nt==Layer::kTextMost && layer.droppedTexts==0 &&
+              layer.texts[layer.nt-1].s[kTextMost-1]==0,"a long final hint stays within its text buffer");
     }
 }
 

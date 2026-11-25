@@ -82,7 +82,7 @@ struct Layer {
              float maxW=0) noexcept {
         if(nt>=kTextMost){++droppedTexts;return;}
         Text& t=texts[nt++];
-        CopyText(t.s,kTextMost,s);
+        CopyText(t.s,armory::kTextMost,s);
         t.x=x;t.y=y;t.size=size;t.argb=argb;t.align=a;t.bold=bold;t.maxW=maxW;
     }
 };
@@ -179,6 +179,7 @@ struct Presets {
 enum class Op : std::uint8_t { none,switchTo,store,add,copy,rename,remove };
 struct Effects {
     bool close=false;
+    bool backToTasks=false;
     Op op=Op::none;
     int index=-1;                  // the preset (switchTo, store, copy, rename, remove)
     wchar_t name[kTextMost]{};     // add / copy / rename
@@ -192,6 +193,8 @@ struct Words {
     const wchar_t* confirmDelete=L"";
     const wchar_t* renameTitle=L"";
     const wchar_t* hints[5]{};        // list, centre, details, popup, rename
+    const wchar_t* rootExit=L"";      // the parent screen's action when Escape is pressed in the left column
+    const wchar_t* deleteHint=L"";
     const wchar_t* suggest[kSuggestMost]{};   // names a pad cycles for a rename / new preset
     int nsuggest=0;
     const wchar_t* unsaved=L"*";              // the hint bar's mark of a page with edits not yet written
@@ -221,6 +224,7 @@ enum UnsavedAction : int { kUnsavedSave,kUnsavedDiscard,kUnsavedBack,kUnsavedCou
 
 struct State {
     bool open=false;
+    bool backToTasks=false;
     int tab=0;
     int column=0;
     Pos pos;
@@ -337,7 +341,7 @@ inline int TabAt(int pages,float x,float y) noexcept {
     return -1;
 }
 // The popup's box and its lines.
-inline skin::Rect PopupBox() noexcept { return skin::Rect{720,300,1200,300+60+kActCount*60.0f+20}; }
+inline skin::Rect PopupBox() noexcept { return skin::Rect{660,300,1260,300+60+kActCount*60.0f+44}; }
 inline skin::Rect PopupLine(int i) noexcept {
     const skin::Rect b=PopupBox();
     const float y=b.y0+60+static_cast<float>(i)*60.0f;
@@ -389,24 +393,27 @@ inline void UnsavedStep(State& s,Page& p,const Input& in,Effects* fx) noexcept {
     switch(pick){
     case kUnsavedSave:
         s.popup=Popup::none;
-        if(CommitPage(s,p)){fx->close=true;Close(s);}
+        if(CommitPage(s,p)){fx->close=true;fx->backToTasks=s.backToTasks;Close(s);}
         break;
     case kUnsavedDiscard:
         p.Discard();
         fx->close=true;
+        fx->backToTasks=s.backToTasks;
         Close(s);
         break;
     case kUnsavedBack:
         s.popup=Popup::none;
+        s.backToTasks=false;
         break;
     default:
         break;
     }
 }
 // Close asked: a page with edits asks first; otherwise commit (a page may write what is not an edit) and close.
-inline void AskClose(State& s,Page& p,Effects* fx) noexcept {
+inline void AskClose(State& s,Page& p,Effects* fx,bool backToTasks=false) noexcept {
+    s.backToTasks=backToTasks;
     if(p.Dirty()){s.popup=Popup::unsaved;s.popupCursor=kUnsavedSave;return;}
-    if(CommitPage(s,p)){fx->close=true;Close(s);}
+    if(CommitPage(s,p)){fx->close=true;fx->backToTasks=backToTasks;Close(s);}
 }
 
 inline void PopupStep(State& s,const Input& in,const Presets& ps,const Words& w,Effects* fx) noexcept {
@@ -520,6 +527,7 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
 
     if(Pressed(s,in,kToggle) && s.popup==Popup::unsaved){
         s.popup=Popup::none;
+        s.backToTasks=false;
     }else if(Pressed(s,in,kToggle) && s.popup!=Popup::rename){
         s.popup=Popup::none;
         AskClose(s,page,&fx);
@@ -596,7 +604,7 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
                 if(Pressed(s,use,kLeft) && s.column>0)--s.column;
                 if(Pressed(s,use,kCancel)){
                     if(s.column>0)--s.column;
-                    else AskClose(s,now,&fx);
+                    else AskClose(s,now,&fx,true);
                 }
             }
         }
@@ -706,11 +714,13 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
         page.Draw(s.pos,c,&base);
     }
     // hint bar, note
-    const int hint=s.popup==Popup::rename ? 4 : s.popup!=Popup::none ? 3 : s.column;
-    const wchar_t* own=s.popup==Popup::none ? page.Hint(s.pos,s.column) : nullptr;
-    base.Say(own ? own : w.hints[hint],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
-    if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
-    else if(page.Dirty())base.Say(w.unsaved,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+    if(s.popup==Popup::none) {
+        const wchar_t* own=page.Hint(s.pos,s.column);
+        base.Say(own ? own : w.hints[s.column],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
+        if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+        else if(s.column==0)base.Say(w.rootExit,L::kHint.x1-60,L::kHint.y0+12,24,skin::kTextDark,Align::right,true,440);
+        else if(page.Dirty())base.Say(w.unsaved,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+    }
     // status strip: under the hint bar, the lines side by side
     if(status && status->n>0){
         const float x0=L::kHint.x0+40, width=(L::kHint.x1-40-x0)/static_cast<float>(status->n);
@@ -724,6 +734,8 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     top.quads.Box(skin::Rect{0,0,skin::kWidth,skin::kHeight},0x90000000u);
     const skin::Rect box=PopupBox();
     skin::Panel(&top.quads,box);
+    const wchar_t* actions=s.popup==Popup::rename ? w.hints[4] : s.popup==Popup::confirmDelete ? w.deleteHint : w.hints[3];
+    top.Say(actions,(box.x0+box.x1)/2,box.y1-34,20,skin::kText,Align::centre,false,box.W()-40);
     const wchar_t* target=s.popupTarget>=0 && s.popupTarget<ps.count ? ps.names[s.popupTarget] : L"";
     if(s.popup==Popup::actions){
         top.Say(target,(box.x0+box.x1)/2,box.y0+16,28,skin::kText,Align::centre,true,box.W()-40);

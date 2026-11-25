@@ -727,7 +727,8 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         if(tab>=0){OpenArmory(self,tab);Log("ROOMUI 整备 opened at tab %d from the world map",tab);}
     }
     st.armoryTake=armoryui::Frame(self,hasInput,down.toggle);
-    const bool mapAsked=armoryui::TakeMapRequest();
+    // Open the next screen only after the closing input is released; otherwise the same Esc also closes the map.
+    const bool mapAsked=hasInput && !st.armoryTake && armoryui::TakeMapRequest();
     if(armoryui::TakePvpRequest()) {
         if(st.room && nativedialog::NativeDialogReady()) {
             st.menu.open=true;st.pvpPages=true;st.pvpNav=roompvp::Nav{};st.hasPick=false;

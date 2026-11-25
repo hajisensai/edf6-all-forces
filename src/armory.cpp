@@ -483,6 +483,8 @@ void FillWords() noexcept {
     words.hints[2]=hudtext::Tr(Tx::armoryHintDetails);
     words.hints[3]=hudtext::Tr(Tx::armoryHintPopup);
     words.hints[4]=hudtext::Tr(Tx::armoryHintRename);
+    words.rootExit=hudtext::Tr(openRoomNow ? Tx::armoryHintLobbyBack : Tx::armoryHintMapBack);
+    words.deleteHint=hudtext::Tr(Tx::armoryHintDelete);
     static constexpr Tx kSuggest[]={Tx::armorySuggest1,Tx::armorySuggest2,Tx::armorySuggest3,Tx::armorySuggest4};
     words.nsuggest=static_cast<int>(std::size(kSuggest));
     for(int i=0;i<words.nsuggest;++i)words.suggest[i]=hudtext::Tr(kSuggest[i]);
@@ -627,6 +629,7 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
           int tab) noexcept {
     if(!installed || !self)return;
     Subclass();
+    openRoomNow=room;
     FillWords();
     iniRead=read;iniContext=readContext;
     sp::Bind(support,units);
@@ -646,7 +649,6 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
     pvpAsked=false;
     mapAsked=false;
     openRoom=room;
-    openRoomNow=room;
     saveNote[0]=0;saveWarn=false;genPolled=0;
     if(tab>=0 && tab<kPageCount)state.tab=tab;
     wchar_t why[160]{};
@@ -695,6 +697,8 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     const ar::Input in=ReadInput(toggleDown);
     const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);
+    // Esc at the root of HQ's armory returns to the replacement mission map. The room's own lobby remains its parent.
+    if(fx.backToTasks && !openRoom)mapAsked=true;
     // The HQ's 任务 tab is the world map itself (its page has nothing else there): chosen, the map opens. In the room the
     // page keeps its 对战 row; its world map row opens the map.
     if(state.open && !openRoom && tabWas!=state.tab && kPages[state.tab]==&missionPage)missionPage.mapAsked=true;
