@@ -75,6 +75,7 @@ ULONGLONG GameMs() noexcept{return fixture::now;}
 ULONGLONG GameFrame() noexcept{return fixture::frame;}
 bool WeaponStatusOk() noexcept{return true;}
 bool SoundListening() noexcept{return true;}
+bool ListenerAt(float* pos) noexcept{pos[0]=pos[1]=pos[2]=0.0f;return true;}
 const char* VehicleClassName(const void*) noexcept{return "403_Tank";}
 PluginBody BodyOf(const void*) noexcept{return PluginBody::none;}
 bool IsHelicopter(const void*) noexcept{return false;}
@@ -95,6 +96,8 @@ void Log(const char* fmt,...) noexcept{va_list a;va_start(a,fmt);std::vprintf(fm
 namespace crew::audio {
 bool ClipsReady() noexcept{return true;}
 int OpenLoop(int) noexcept{return -1;}
+int OpenWtLoop(int) noexcept{return -1;}
+int LoopsOpen() noexcept{return 0;}
 void SetLoop(int,const Heard&) noexcept{}
 void CloseLoop(int) noexcept{}
 void PlayOnce(int clip,const Heard& h) noexcept{if(h.gain>0.0f)++fixture::played[clip];}

@@ -98,6 +98,12 @@ ULONGLONG GameMs() noexcept{return replay::now;}
 ULONGLONG GameFrame() noexcept{return replay::frame;}
 bool WeaponStatusOk() noexcept{return replay::status.weaponStatus!=0;}
 bool SoundListening() noexcept{return replay::status.listening!=0;}
+// As jetsound.cpp: SoundListening and the listener's first three floats, both in the frame's status.
+bool ListenerAt(float* pos) noexcept{
+    if(!replay::status.listening)return false;
+    std::memcpy(pos,replay::status.listener,3*sizeof(float));
+    return true;
+}
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept{
     if(!replay::status.placing)return false;
     *out=soundplace::Place(replay::status.listener,replay::status.listenerVel,pos,vel);
@@ -120,6 +126,9 @@ void Log(const char* fmt,...) noexcept{va_list a;va_start(a,fmt);std::vprintf(fm
 namespace crew::audio {
 bool ClipsReady() noexcept{return replay::status.clipsReady!=0;}
 int OpenLoop(int) noexcept{return replay::nextLoop++;}
+// The voices are not outputs: a loop always opens here (jetaudio.cpp's -1 for none free is not recorded).
+int OpenWtLoop(int c) noexcept{return WtThere(c) ? replay::nextLoop++ : -1;}
+int LoopsOpen() noexcept{return 0;}
 void SetLoop(int,const Heard&) noexcept{}
 void CloseLoop(int) noexcept{}
 void PlayOnce(int clip,const Heard& h) noexcept{replay::Put("once",{static_cast<float>(clip),h.gain});}
@@ -162,6 +171,7 @@ int main(int argc,char** argv){
     }
     const trace::File f=trace::Read(argv[1]);
     if(!f.error.empty()){std::printf("vehsound_replay: %s: %s\n",argv[1],f.error.c_str());return 2;}
+    if(f.cut)std::printf("vehsound_replay: the recording was cut short (the game ended before it closed): its last call dropped\n");
     std::string error;
     if(!Place(f,&error)){std::printf("vehsound_replay: %s\n",error.c_str());return 2;}
     crew::image=reinterpret_cast<unsigned char*>(f.header.image);

@@ -62,6 +62,7 @@ ULONGLONG GameMs() noexcept{return fixture::now;}
 ULONGLONG GameFrame() noexcept{return fixture::frame;}
 bool WeaponStatusOk() noexcept{return true;}
 bool SoundListening() noexcept{return true;}
+bool ListenerAt(float* pos) noexcept{std::memcpy(pos,fixture::listener,12);return true;}
 bool ListenerState(float* l,float* v) noexcept{std::memcpy(l,fixture::listener,sizeof(fixture::listener));std::memcpy(v,fixture::listenerVel,12);return true;}
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept{*out=soundplace::Place(fixture::listener,fixture::listenerVel,pos,vel);return true;}
 const char* VehicleClassName(const void*) noexcept{return "403_Tank";}
@@ -79,6 +80,8 @@ void Log(const char* fmt,...) noexcept{va_list a;va_start(a,fmt);std::vprintf(fm
 namespace crew::audio {
 bool ClipsReady() noexcept{return true;}
 int OpenLoop(int) noexcept{static int n=0;return n++;}
+int OpenWtLoop(int c) noexcept{static int n=0;return WtThere(c) ? n++ : -1;}
+int LoopsOpen() noexcept{return 0;}
 void SetLoop(int,const Heard&) noexcept{}
 void CloseLoop(int) noexcept{}
 bool WtThere(int) noexcept{return true;}

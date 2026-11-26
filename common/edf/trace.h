@@ -129,6 +129,7 @@ struct File {
     Header header{};
     std::vector<Record> records;
     std::string error;   // empty: read whole
+    bool cut=false;      // the game ended before the recording closed: read up to its last call whole (that one dropped)
 };
 inline File Read(const char* path) {
     File out;
@@ -144,13 +145,21 @@ inline File Read(const char* path) {
     std::unordered_map<std::uint64_t,std::vector<unsigned char>> last;
     std::size_t at=sizeof(kMagic)+sizeof(Header);
     auto bad=[&](const char* why){out.error=std::string(why)+" at byte "+std::to_string(at);};
+    // A recording the game's exit cut short (nothing closes it then): its last record half written. What came before is
+    // whole; the last call is dropped with it, its outputs perhaps not all written.
+    auto cutShort=[&]{
+        out.cut=true;
+        while(!out.records.empty() && out.records.back().type!=kCall)out.records.pop_back();
+        if(!out.records.empty())out.records.pop_back();
+        return out;
+    };
     while(at<all.size()) {
-        if(all.size()-at<5){bad("a cut record");return out;}
+        if(all.size()-at<5)return cutShort();
         Record r{};
         r.type=static_cast<Type>(all[at]);
         std::uint32_t size;std::memcpy(&size,&all[at+1],4);
         const unsigned char* p=all.data()+at+5;
-        if(all.size()-at-5<size){bad("a cut record");return out;}
+        if(all.size()-at-5<size)return cutShort();
         const unsigned char* const end=p+size;
         auto u64=[&]{std::uint64_t v=0;if(end-p>=8)std::memcpy(&v,p,8);p+=8;return v;};
         auto u32=[&]{std::uint32_t v=0;if(end-p>=4)std::memcpy(&v,p,4);p+=4;return v;};
