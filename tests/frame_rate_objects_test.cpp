@@ -481,8 +481,14 @@ void CatchUp() {
     Check(c.posed==1 && NearX(a.model.pose,2.5f),
           "catch-up: drawn half a tick on from the tick before cur (x 2.5, not 2 from a blend over the pair)");
     frameobjects::Restore();
+    Check(bodies[0].prepared,"the first presentation prepares the sampled pair");
+    Frame(0.25f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==1 && NearX(a.model.pose,2.25f),"the same pair is reused at a different presentation phase");
+    frameobjects::Restore();
     // A pair two ticks apart moves up to twice the cut.
     Root(a,3.0f+15.0f);TickOnly();TickOnly();frameobjects::Sample(false);
+    Check(!bodies[0].prepared,"a new sample invalidates the prepared pair");
     Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
     Check(c.posed==1 && NearX(a.model.pose,3.0f+15.0f*0.75f),"catch-up: a move over the gap is cut at gap times kCutMove");
