@@ -445,21 +445,21 @@ void Groups() {
 
 // Stage 6 (docs/plan-2026-11-24-ui-rewrite.md): the 整备 tab bar and chips, 本关出动, the campaign's progress.
 void Stage6() {
-    namespace L=crew::armory::skin::layout;
-    // The tabs and chips are the 整备 screen's own rectangles: the same spot is the same tab / chip on both screens.
+    // The map version of the armory tabs fits between the game's title and the mission lists.
     bool tabs=true;
     for(int i=0;i<kTabCount;++i){
-        const auto r=L::Tab(i);
+        const auto r=MapTab(i);
         tabs=tabs && TitleTabAt(Pixel{(r.x0+r.x1)/2,(r.y0+r.y1)/2})==i;
     }
     Expect(tabs && TitleTabAt(Pixel{100.f,50.f})==-1 && TitleTabAt(Pixel{500.f,500.f})==-1,"a tab under the pointer");
-    const auto c2=L::Chip(2,3);
+    const auto c2=MapChip(2,3);
     Expect(TitleChipAt(3,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==2 && TitleChipAt(0,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==-1,
            "a chip under the pointer (none without presets)");
-    const auto last=L::Chip(7,8),tab3=L::Tab(kMapTab);
-    Expect(last.x1<=L::kTitle.x1 && L::Chip(0,8).x0>tab3.x1,"eight chips clear of the four tabs");
-    Expect(OverTitle(Pixel{1000.f,50.f}) && !OverTitle(Pixel{1000.f,200.f}),"the title bar");
-    Expect(kProgressBar.y0>=L::kTitle.y1 && kProgressBar.y1<=kOpenArea.y0 && kProgressBar.x1<=kOpenArea.x1,
+    const auto last=MapChip(7,8),tab3=MapTab(kMapTab);
+    Expect(last.x1<=kMapTitle.x1 && MapChip(0,8).x0>tab3.x1,"eight chips clear of the four tabs");
+    Expect(OverTitle(Pixel{1000.f,150.f}) && !OverTitle(Pixel{1000.f,50.f}) && !OverTitle(Pixel{1000.f,200.f}),
+           "the native title and mission region do not receive the armory tab hits");
+    Expect(kProgressBar.y0>=kMapTitle.y1 && kProgressBar.y1<=kOpenArea.y0 && kProgressBar.x1<=kOpenArea.x1,
            "the progress bar between the title bar and the open area");
     // 本关出动: the remembered preset while the book has it, else the one in force.
     Expect(LaunchPreset(2,0,3)==2 && LaunchPreset(5,1,3)==1 && LaunchPreset(-1,1,3)==1 && LaunchPreset(-1,-1,3)==-1 &&

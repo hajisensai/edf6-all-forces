@@ -40,7 +40,7 @@ LABELS = dict(zip(AIR_KEYS + GROUND_KEYS, (
     '直升机机降·小队（4人）', '直升机机降·大队（12人）', '运输机空降·小队（4人）', '运输机空降·大队（12人）',
     '直升机投送·坦克', '直升机投送·装甲运兵车', '直升机投送·民用轻卡')))
 LABELS.update({k: calls.call_name(c, 'SC') for k, c in zip(STRIKE_KEYS, calls.STRIKES)})   # kStrikes' labels
-LABELS['RESCUE'] = '海上救援直升机'
+LABELS['RESCUE'] = 'Brute 410 海上救援型'
 # The same in English, for an English installer (pylib/i18n.py): shown only, LABELS stays the C++ tables' copy.
 LABELS_EN = dict(zip(AIR_KEYS + GROUND_KEYS, (
     'Interceptor (hold)', 'Interceptor (follow)', 'Ground attack jet (hold)', 'Ground attack jet (follow)',

@@ -177,6 +177,20 @@ void Main(int w,int h) {
 }  // namespace
 
 int wmain() {
+    {
+        std::vector<unsigned char> code(0x2000000);
+        image=code.data();
+        for(const auto& g:kGuards)std::memcpy(image+g.rva,g.bytes,g.size);
+        Check(LensGuardsMatch(),"a stock projection call passes the lens install guards");
+        image[kProjectCall+1]^=1;
+        Check(!LensGuardsMatch(),"an unowned projection call with a different target is rejected");
+        projectHooked=true;
+        Check(LensGuardsMatch(),"the lens can install after render_record hooks the shared projection");
+        image[kProjectCall-1]^=1;
+        Check(!LensGuardsMatch(),"a shared hook still requires the native projection instruction setup");
+        projectHooked=false;
+        image=nullptr;
+    }
     stepfresh::See(1);
     Wire();
     Main(1920,1080);

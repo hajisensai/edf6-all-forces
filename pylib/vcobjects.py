@@ -643,17 +643,19 @@ STORES: dict[str, Store] = {
     **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
-SALVO_ROUNDS = 32
+SALVO_ROUNDS = 256
+SALVO_CHILDREN = 4
 SALVO_MARK = 7070.0
 SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
 SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
 SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
 STORES['SALVO'] = Store(
-    'Salvo missile', 'air', 95.0, 0.012,
+    'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
-            damage=260.0, blast=9.0, lock_time=4.0, burst=float(SALVO_ROUNDS), burst_gap=3.0, interval=96.0),
+            damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=0.42, lock_time=1.0,
+            burst=float(SALVO_ROUNDS), burst_gap=1.0, interval=float(SALVO_ROUNDS)),
     _local('Salvo missile', '斉射ミサイル', '齊射飛彈', '齐射导弹', '일제 사격 미사일'),
-    per_pylon=8, pylon_mass=110.0, pylon_drag=0.015)
+    per_pylon=SALVO_ROUNDS // 4, pylon_mass=110.0, pylon_drag=0.015)
 
 def xm_store(unit: xm_units.Unit, arm: xm_units.Arm) -> str:
     """The STORES kind of an X-Morph unit's arm (xm_units.Arm): <UNIT KEY>_<ARM KEY>."""
@@ -2431,7 +2433,22 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     if missile.muzzle is not None:
         _fire_from(game, r, missile.muzzle)
     if store is STORES['SALVO']:
-        r.set('LockonHoldTime', 1.0)
+        r.set('LockonHoldTime', 6.0)
+        # Keep the vehicle holder and its four animated launch points. Only the projectile class uses
+        # the stock split-missile contract, including inherited lock points on the guided submunitions.
+        source = dsgo.parse(game.read('WEAPON', 'V_402ROCKET_ROCKETCANNON02.SGO')).root
+        split = copy.deepcopy(source.get('Ammo_CustomParameter').items[12:])
+        if (source.get('AmmoClass') != 'MissileBullet02' or len(split) != 4
+                or len(split[3].items) != 19 or split[3].items[4] != 'MissileBullet01'):
+            raise ValueError('unexpected split missile template')
+        split[0].items[:] = [1.0, 40.0]   # Split after launch even when the target has already died.
+        split[1].items[:] = [0.0, 0.0, 0.24]
+        split[3].items[2] = float(SALVO_CHILDREN)
+        split[3].items[5] = 5.0
+        split[3].items[13].items[6] = 8.0    # Native guidance can reach a target at the outer edge of the lock box.
+        r.set('AmmoClass', 'MissileBullet02')
+        cp.items[8], cp.items[9] = 4.0, 0.0  # Native guidance for the carrier, not MissileBullet01's plugin mode.
+        cp.items.extend(split)
         flash_host = dsgo.parse(game.read('WEAPON', JET_GUN_FILES['EDF6VC_JET_GUN_L.SGO'])).root
         flash = copy.deepcopy(flash_host.get('MuzzleFlash_CustomParameter'))
         if flash_host.get('MuzzleFlash') != 'MuzzleFlash02' or len(flash.items) != 10:
@@ -2442,6 +2459,8 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         r.set('MuzzleFlash', 'MuzzleFlash02')
         r.set('MuzzleFlash_CustomParameter', flash)
     _look(game, r, missile.look, JET_MISSILE_STOCK)
+    if store is STORES['SALVO']:
+        r.get('resource').items.append(cp.items[15].items[14])
     _named(r, store)
     return dsgo.write(doc)
 

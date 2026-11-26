@@ -49,7 +49,8 @@ consts = {m[0]: int(m[1], 16) for m in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b'
 arrays = {name: bytes(int(b, 16) for b in re.findall(r'0x([0-9A-Fa-f]{2})', body))
           for name, body in re.findall(r'const unsigned char (k\w+Sig)\[\]=\{([^}]*)\};', src, re.S)}
 uses = re.findall(r'\{(k\w+|0x[0-9A-Fa-f]+),(k\w+Sig),sizeof\(\2\)\}', src)
-check(len(arrays) >= 18 and len(uses) == len(arrays), f'every signature array is checked once: {len(arrays)} arrays, {len(uses)} uses')
+check(len(arrays) >= 18 and set(arrays) == {name for _, name in uses} and len(uses) == len(set(uses)),
+      'every signature is used and each address/signature pair is checked once')
 for rva_text, name in uses:
     rva = int(rva_text, 16) if rva_text.startswith('0x') else consts[rva_text]
     want = arrays[name]
