@@ -22,6 +22,7 @@
 #include "keyconfig.h"
 #include "crew.h"
 #include "perf_probe.h"
+#include "aura.h"
 #include "pvp.h"
 #include "enemy_control.h"
 #include "enemy_control_net.h"
@@ -731,10 +732,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepBarrage, kStepFollowUp, kStepMapQueue, kStepDreadnought, kStepEmplacement, kStepBlastSound, kStepJetLever, kStepGpuFx, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepBarrage, kStepFollowUp, kStepMapQueue, kStepDreadnought, kStepEmplacement, kStepBlastSound, kStepJetLever, kStepGpuFx, kStepAura, kStepCount };
 const char* const kStepNames[]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","barrage","follow-up","map queue","dreadnought","emplacement","blast sound","jet lever","gpufx"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","barrage","follow-up","map queue","dreadnought","emplacement","blast sound","jet lever","gpufx","aura"};
 static_assert(sizeof(kStepNames)/sizeof(kStepNames[0])==kStepCount,"a name for every step, in the enum's order");
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
@@ -955,6 +956,7 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepJetSoundTick,&JetSoundTick);
     GuardedTick(kStepBlastSound,&BlastSoundTick);
     GuardedTick(kStepMapQueue,&MapCommandQueueTick);  // the Shift-queued points of this machine's units (mapcmd.cpp)
+    GuardedTick(kStepAura,&AuraTick);                 // the aura trucks' auras applied (aura.cpp)
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
@@ -1015,6 +1017,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepDrill,&DrillFrame,v);
     Guarded(kStepSidecar,&SidecarFrame,v);
+    Guarded(kStepAura,&AuraVehicleFrame,v);    // an aura truck seen: where, how fast, driven (aura.cpp)
     Guarded(kStepRam,&VehicleRamFrame,v);       // after the drill and the sidecar: what the parts drove into this frame
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);

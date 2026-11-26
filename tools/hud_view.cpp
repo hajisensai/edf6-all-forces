@@ -354,6 +354,8 @@ bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;re
 // The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
 bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
+bool AuraViewNow(AuraView*) noexcept { return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }

@@ -149,6 +149,13 @@ plugin_net::Channel JetLeverNetChannel() noexcept {
     plugin_net::Channel c;c.name="jet lever";c.magic=0x4C4A4641u;c.version=1;
     c.minSize=c.maxSize=44;c.receive=&ReceiveJetLever;c.takesState=&JetLeverState;return c;
 }
+// The aura trucks (aura.cpp): AFAU states, not under test here.
+bool ReceiveAura(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+bool AuraState(const void*,std::size_t) noexcept {return true;}
+plugin_net::Channel AuraNetChannel() noexcept {
+    plugin_net::Channel c;c.name="aura vehicles";c.magic=0x55414641u;c.version=1;
+    c.minSize=c.maxSize=409;c.receive=&ReceiveAura;c.takesState=&AuraState;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

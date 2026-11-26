@@ -100,6 +100,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/andryusha.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/jet_sortie.cpp)
 # A registered jet's engine lever online (src/jet_lever_net.cpp; the wire src/jet_lever_protocol.h, tests/jet_lever_net_test.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/jet_lever_net.cpp)
+# The aura trucks (src/aura.cpp; the rules src/aura_logic.h, tests/aura_logic_test.cpp; docs/feature-aura-vehicles.md).
+target_sources(EDF6VehicleCrew PRIVATE src/aura.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
@@ -3058,6 +3060,14 @@ target_link_libraries(barrel_recoil_test PRIVATE edf6common user32)
 target_compile_options(barrel_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks barrel_recoil_test)
 add_test(NAME barrel_recoil COMMAND barrel_recoil_test)
+# The aura trucks' pure rules (src/aura_logic.h): selection, one kind never stacked, the repair / ammo steps, the AFAU wire.
+add_executable(aura_logic_test EXCLUDE_FROM_ALL tests/aura_logic_test.cpp)
+target_compile_options(aura_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks aura_logic_test)
+add_test(NAME aura_logic COMMAND aura_logic_test)
+# The aura trucks' registries (tools/make_aura_vehicles.py, calls, vcobjects, cockpits, ledger, installer, range) and,
+# where the game is, their built models (each its marker under body).
+add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aura_vehicles_guard.py")
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.

@@ -224,6 +224,32 @@
     "tests/test_as_registration.py"
    ]
   },
+  "aura_logic": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "aura_vehicles_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/aura_vehicles_guard.py"
+   ]
+  },
   "autopilot_driver": {
    "labels": [
     "autoturret-tools",

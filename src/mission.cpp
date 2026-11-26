@@ -7,6 +7,7 @@
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crash_dump.h"
 #include "crew.h"
+#include "aura.h"
 #include "gravity.h"
 #include "gravity_net.h"
 #include "floatgun.h"
@@ -203,6 +204,7 @@ void MissionStart() noexcept {
     ResetEmc();
     ResetSidecars();
     ResetProteus();
+    ResetAura();
     ResetBigWorld();
     ResetTerrainShare();
     ResetPlayArea();

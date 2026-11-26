@@ -1231,3 +1231,7 @@ HUDTEXT(mapLaunchFailed,L"Not started, the files were not made: %ls. Confirm aga
 HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")
 HUDTEXT(cmdSupportArmedFlown,L"%ls: LEFT-CLICK THE MAP FOR ITS DESTINATION (G: TURN ITS WAY IN; RIGHT-CLICK: CANCEL)",L"%ls：左键点击地图指定目的地（G 旋转入场方向，右键取消）",L"%ls：左鍵點擊地圖指定目的地（G 旋轉入場方向，右鍵取消）",L"%ls：マップを左クリックで目的地（G で進入方向を回転、右クリックで取消）")
 HUDTEXT(cmdEntryTurn,L"Way in turned %d deg from yours (G; Shift+G back)",L"入场方向：从你这边转 %d°（G；Shift+G 反转）",L"入場方向：從你這邊轉 %d°（G；Shift+G 反轉）",L"進入方向：自分側から %d° 回転（G／Shift+G で逆）")
+HUDTEXT(auraTitle,L"AURA",L"光环",L"光環",L"オーラ")
+HUDTEXT(auraAttack,L"ATTACK +%d%%",L"攻击 +%d%%",L"攻擊 +%d%%",L"攻撃 +%d%%")
+HUDTEXT(auraRepair,L"REPAIR %.1f%%/s",L"维修 %.1f%%/秒",L"維修 %.1f%%/秒",L"修理 %.1f%%/秒")
+HUDTEXT(auraAmmo,L"AMMO %.1f%%/s",L"补弹 %.1f%%/秒",L"補彈 %.1f%%/秒",L"補給 %.1f%%/秒")
