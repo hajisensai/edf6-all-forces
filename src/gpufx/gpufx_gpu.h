@@ -4,12 +4,15 @@
 // D3D11.1 context state (SwapDeviceContextState), so no native binding, shader constant or state object changes.
 #pragma once
 #include "gpufx_sim.h"
+#include "gpufx_trail.h"
 #include <cstdint>
 #include <cstring>
 #include <memory>
 
 struct ID3D11Buffer;
 struct ID3D11DeviceContext;
+struct ID3D11RasterizerState;
+struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 
@@ -31,8 +34,15 @@ enum class Kind : std::uint32_t {
     // stock fog / glow / distance alpha from the system constants (ViewParams::efsSystem), its blends 0 / 1 / 2.
     efsAlpha=5,
     efsAdditive=6,
-    efsSubtract=7
+    efsSubtract=7,
+    // The efs RenderInfo trails (docs/gpufx-re.md "trails", gpufx_trail.h): quads drawn by the stock trail shaders
+    // themselves (Renderer::PrepareTrails), the efs blends 0 / 1 / 2, the stock draw's own depth compare.
+    trailAlpha=8,
+    trailAdditive=9,
+    trailSubtract=10
 };
+constexpr bool IsEfs(Kind k) noexcept { return k==Kind::efsAlpha || k==Kind::efsAdditive || k==Kind::efsSubtract; }
+constexpr bool IsTrail(Kind k) noexcept { return k==Kind::trailAlpha || k==Kind::trailAdditive || k==Kind::trailSubtract; }
 
 // The stock lighting a lit batch needs, borrowed from a stock lit draw of this view (gpufx.cpp LitCapture): the
 // system constants (xgl_system, 608 bytes), the shadow constants (xgl_additional_light_setting, 400 bytes), the
@@ -66,6 +76,10 @@ struct Batch {
     float litWeights[3]{};
     float efsFetch[16]{};   // the efs kinds: the stock quad's four fetch entries (corner xy, uv zw) in strip order
     const Instance* instances=nullptr;
+    // The trail kinds: `count` quads from `trail` (no instances), tested against the scene depth by the stock draw's
+    // compare (0 none, 1 LESS, 2 LESS_EQUAL; no depth write).
+    const TrailQuad* trail=nullptr;
+    int depthFunc=0;
     int count=0;
 };
 
@@ -80,6 +94,11 @@ struct ViewParams {
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
     ID3D11Buffer* efsSystem=nullptr;   // xgl_system as an efs draw bound it (608 bytes); efs batches skipped without
+    // The trail kinds: the stock trail draw's own xgl_system (its VS b0), sampler (PS s0) and rasterizer state, bound
+    // as they were (null: the D3D default, as for the stock draw); trail batches skipped without the system.
+    ID3D11Buffer* trailSystem=nullptr;
+    ID3D11SamplerState* trailSampler=nullptr;
+    ID3D11RasterizerState* trailRaster=nullptr;
     bool profile=false;   // the probe: a timestamp around every batch, summed per bucket (Stats::bucketMs)
 };
 
@@ -103,11 +122,12 @@ struct Stats {
     float gpuMs=-1.0f;     // the last resolved GPU time of a Draw (timestamp queries, a few frames late; -1: none yet)
     double pixelsShaded=-1.0;   // the same Draw's pixel shader invocations (pipeline statistics; -1: none yet)
     // ViewParams::profile: the last resolved per-bucket GPU time and this Draw's instances per bucket (0 ours, 1 the
-    // stock unlit kinds, 2 the stock lit set 0xC08 (lit per vertex), 3 the stock lit set 0xA40 (per pixel), 4 efs).
-    static constexpr int kBuckets=5;
-    float bucketMs[kBuckets]{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
+    // stock unlit kinds, 2 the stock lit set 0xC08 (lit per vertex), 3 the stock lit set 0xA40 (per pixel), 4 efs,
+    // 5 the efs trails (counted in quads)).
+    static constexpr int kBuckets=6;
+    float bucketMs[kBuckets]{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
     int bucketDrawn[kBuckets]{};
-    double bucketPixels[kBuckets]{-1.0,-1.0,-1.0,-1.0,-1.0};   // the same frame's PS invocations per bucket
+    double bucketPixels[kBuckets]{-1.0,-1.0,-1.0,-1.0,-1.0,-1.0};   // the same frame's PS invocations per bucket
     // The scene's luminance before our draw (the median of five 16x16 blocks of the colour target, read back a few
     // frames late without a stall; -1: none yet) and the brightest block's.
     float sceneLuma=-1.0f,sceneLumaMax=-1.0f;
@@ -135,8 +155,17 @@ public:
     // Release every device resource (a new mission, a device change).
     void Reset() noexcept;
 
+    // The trail kinds' pipeline from the stock trail shaders' bytecode (the forward VS / PS of
+    // ":EFS_DUTIL:g_effect_ext_line", read from EDF.dll's image) and the stock g_color (xgl_user_param, its PS b2).
+    // Call on the render thread with the immediate context Draw gets; false (nothing made): trail batches are never
+    // drawn (the bytecode refused, or a device failure). TrailsReady: made (until Reset).
+    bool PrepareTrails(ID3D11DeviceContext* context,const void* vs,std::size_t vsBytes,const void* ps,std::size_t psBytes,
+                       const float color[4]) noexcept;
+    bool TrailsReady() const noexcept;
+
     static constexpr int kMaxInstances=65536;   // ours (kBudget) and the taken-over stock cards of one view
     static constexpr int kMaxBatches=1024;
+    static constexpr int kMaxTrailQuads=16384;  // the taken-over trail quads of one view (16-bit indices: 4 vertices each)
 
 private:
     struct Impl;

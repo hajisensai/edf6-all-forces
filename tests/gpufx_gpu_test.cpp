@@ -1,9 +1,12 @@
 // Real Direct3D 11 (WARP) run of the GPU particle renderer (src/gpufx/gpufx_gpu.cpp): the shaders compile, a lit smoke
 // card lands where the projection puts it, scene depth in front hides it, depth just behind softens it, the target's
-// alpha and every native binding survive the draw, and a stock-texture batch draws with its own texture.
+// alpha and every native binding survive the draw, a stock-texture batch draws with its own texture, and the efs
+// trails draw through the stock trail shaders' pipeline (blends, compares, batching, order against cards).
 #include "gpufx/gpufx_efs.h"
 #include "gpufx/gpufx_gpu.h"
+#include <windows.h>
 #include <d3d11.h>
+#include <d3dcommon.h>
 #include <wrl/client.h>
 #include <cmath>
 #include <cstdio>
@@ -379,6 +382,169 @@ int main() {
         // Without the system constants the efs batch is skipped.
         px=drawEfs(Kind::efsAlpha,nullptr,clear,1.0f,0);
         CHECK(centre(px)[0]==0.0f && st.drawn==0);
+    }
+    // 4b. The efs trails (Kind::trail*): drawn by the stock trail shaders. The game's bytecode is not in this repo, so
+    // the test compiles HLSL with the stock signatures and the stock math (docs/gpufx-re.md "trails": the VS of
+    // ":EFS_DUTIL:g_effect_ext_line" line by line, its PS tex * g_color * COLOR, alpha sat(a) * sat(FOG_FADE.y)).
+    {
+        static const char kStockTrail[]=R"(
+cbuffer xgl_system:register(b0){float4 sys[38];}
+cbuffer xgl_transform:register(b1){float4 world[4];}
+cbuffer xgl_user_param:register(b2){float4 g_color;}
+Texture2D tex:register(t0);SamplerState smp:register(s0);
+struct VI{float3 pos:POSITION;float4 color:COLOR;float3 uv:UV_SIZE;float3 front:FRONT;};
+struct VO{float4 p:SV_POSITION;float3 view:VIEW_POSITION;float3 fog:FOG_FADE;float4 color:COLOR;float3 uv:UV_SIZE;float3 front:FRONT;};
+VO vs(VI i){
+    VO o;float4 p=float4(i.pos,1);
+    float3 w=float3(dot(p,world[0]),dot(p,world[1]),dot(p,world[2]));
+    float3 f=float3(dot(i.front,world[0].xyz),dot(i.front,world[1].xyz),dot(i.front,world[2].xyz));
+    float3 e=w-float3(sys[4].w,sys[5].w,sys[6].w);float d=length(e);
+    float4 P=float4(w+normalize(cross(e,f))*i.uv.z,1);
+    o.p=float4(dot(P,sys[12]),dot(P,sys[13]),dot(P,sys[14]),dot(P,sys[15]));
+    o.view=float3(dot(P,sys[0]),dot(P,sys[1]),dot(P,sys[2]));
+    o.fog=float3(d*sys[34].x+sys[34].y,1-(d*sys[35].z+sys[35].w),d*sys[34].w+sys[35].x);
+    o.color=i.color;o.uv=i.uv;o.front=i.front;return o;
+}
+float4 ps(VO i):SV_Target{float4 c=tex.Sample(smp,i.uv.xy)*g_color*i.color;return float4(c.rgb,saturate(c.a)*saturate(i.fog.y));}
+)";
+        using Compile=HRESULT(WINAPI*)(LPCVOID,SIZE_T,LPCSTR,const D3D_SHADER_MACRO*,ID3DInclude*,LPCSTR,LPCSTR,UINT,UINT,ID3DBlob**,ID3DBlob**);
+        HMODULE compiler=LoadLibraryExW(L"d3dcompiler_47.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+        CHECK(compiler!=nullptr);
+        const auto compile=compiler ? reinterpret_cast<Compile>(reinterpret_cast<void*>(GetProcAddress(compiler,"D3DCompile"))) : nullptr;
+        ComPtr<ID3DBlob> vsCode,psCode,errors;
+        CHECK(compile && SUCCEEDED(compile(kStockTrail,sizeof(kStockTrail)-1,"trail",nullptr,nullptr,"vs","vs_5_0",0,0,&vsCode,&errors)));
+        if(errors)std::printf("%s\n",static_cast<const char*>(errors->GetBufferPointer()));
+        CHECK(compile && SUCCEEDED(compile(kStockTrail,sizeof(kStockTrail)-1,"trail",nullptr,nullptr,"ps","ps_5_0",0,0,&psCode,&errors)));
+        if(!vsCode || !psCode){std::printf("gpufx_gpu: trail shaders did not compile\n");return 1;}
+        const float white[4]{1.0f,1.0f,1.0f,1.0f};
+        // A bytecode D3D refuses: nothing made, trail batches never drawn.
+        {
+            Renderer bad;
+            const unsigned char junk[64]{'D','X','B','C'};
+            CHECK(!bad.PrepareTrails(rig.context.Get(),junk,sizeof(junk),psCode->GetBufferPointer(),psCode->GetBufferSize(),white));
+            CHECK(!bad.TrailsReady());
+        }
+        CHECK(!r.TrailsReady());
+        CHECK(r.PrepareTrails(rig.context.Get(),vsCode->GetBufferPointer(),vsCode->GetBufferSize(),psCode->GetBufferPointer(),
+                              psCode->GetBufferSize(),white));
+        CHECK(r.TrailsReady());
+        D3D11_TEXTURE2D_DESC d{};d.Width=d.Height=1;d.MipLevels=d.ArraySize=1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
+        d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        const std::uint32_t texel=0xFFFFFFFFu;D3D11_SUBRESOURCE_DATA init{&texel,4,0};
+        ComPtr<ID3D11Texture2D> t;ComPtr<ID3D11ShaderResourceView> v;
+        CHECK(SUCCEEDED(rig.device->CreateTexture2D(&d,&init,&t)) && SUCCEEDED(rig.device->CreateShaderResourceView(t.Get(),nullptr,&v)));
+        auto system=[&](float fadeMul){
+            float sys[152]{};
+            sys[0*4+0]=sys[1*4+1]=sys[2*4+2]=1.0f;                              // view: identity; the camera (Sys[4..6].w) at 0
+            sys[12*4+0]=vp.proj[0];sys[13*4+1]=vp.proj[5];                      // view-projection: the projection
+            sys[14*4+2]=vp.proj[10];sys[14*4+3]=vp.proj[14];sys[15*4+2]=vp.proj[11];
+            sys[35*4+2]=fadeMul;                                                // the distance fade: 1 - dist * fadeMul
+            ComPtr<ID3D11Buffer> b;D3D11_BUFFER_DESC bd2{};bd2.ByteWidth=sizeof(sys);bd2.Usage=D3D11_USAGE_DEFAULT;
+            bd2.BindFlags=D3D11_BIND_CONSTANT_BUFFER;D3D11_SUBRESOURCE_DATA i{sys,0,0};
+            CHECK(SUCCEEDED(rig.device->CreateBuffer(&bd2,&i,&b)));
+            return b;
+        };
+        ComPtr<ID3D11Buffer> plain=system(0.0f),faded=system(0.05f);
+        // A trail along x 10 m ahead (x -2..2, half width 1: the VS turns it to face the camera, so y -1..1), colour
+        // (1, 0.5, 0.25, alpha), moved by its transform from points around the origin.
+        const float move[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-10.0f,1};
+        auto points=[](float y,float alpha,int n){
+            std::vector<TrailPoint> p(static_cast<std::size_t>(n));
+            for(int i=0;i<n;++i) {
+                TrailPoint& q=p[static_cast<std::size_t>(i)];
+                q.pos[0]=-2.0f+4.0f*static_cast<float>(i)/static_cast<float>(n-1);q.pos[1]=y;
+                q.color[0]=1.0f;q.color[1]=0.5f;q.color[2]=0.25f;q.color[3]=alpha;q.v=0.5f;q.halfWidth=1.0f;
+            }
+            return p;
+        };
+        std::vector<TrailQuad> quads(16);
+        auto trailBatch=[&](Kind kind,const TrailQuad* q,int n,int depthFunc){
+            Batch b{};b.kind=kind;b.texture=v.Get();b.trail=q;b.count=n;b.depthFunc=depthFunc;return b;
+        };
+        auto drawTrails=[&](const Batch* b,int n,ID3D11Buffer* sys,const float* clearTo,float depthTo){
+            ViewParams tv=vp;tv.trailSystem=sys;
+            rig.context->ClearRenderTargetView(rig.rtv.Get(),clearTo);
+            rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,depthTo,0);
+            bindNative();
+            CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,tv,b,n,&st));
+            return rig.Read();
+        };
+        auto near3=[](const float* p,float x,float y,float z,float e=0.01f){
+            return std::fabs(p[0]-x)<e && std::fabs(p[1]-y)<e && std::fabs(p[2]-z)<e;
+        };
+        auto at=[](const std::vector<float>& px,int dx,int dy){
+            const int h=static_cast<int>(kSize)/2;
+            return &px[static_cast<std::size_t>((h+dy)*static_cast<int>(kSize)+h+dx)*4];
+        };
+        // ExtLine, one quad, blend 0 (SRC_ALPHA / INV_SRC_ALPHA, alpha ONE / ZERO): 2 m at 10 m is 9.6 px each way.
+        auto p=points(0.0f,1.0f,2);
+        int n=ExtLineQuads(p.data(),2u,move,quads.data());
+        Batch b=trailBatch(Kind::trailAlpha,quads.data(),n,0);
+        px=drawTrails(&b,1,plain.Get(),clear,1.0f);
+        std::printf("trail alpha %.3f %.3f %.3f a=%.3f drawn %d batches %d\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3],st.drawn,st.batches);
+        CHECK(st.drawn==1 && st.batches==1 && st.bucketDrawn[5]==1);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f) && std::fabs(centre(px)[3]-1.0f)<1e-3f);
+        CHECK(near3(at(px,7,3),1.0f,0.5f,0.25f) && at(px,12,0)[0]==0.0f && at(px,0,7)[0]==0.0f && at(px,0,-7)[0]==0.0f);
+        CHECK(near3(at(px,0,3),1.0f,0.5f,0.25f) && near3(at(px,0,-3),1.0f,0.5f,0.25f));
+        // The stock's alpha: half alpha over black; the distance fade (1 - 10 * 0.05) halves it again.
+        p=points(0.0f,0.5f,2);n=ExtLineQuads(p.data(),2u,move,quads.data());
+        px=drawTrails(&b,1,plain.Get(),clear,1.0f);
+        CHECK(near3(centre(px),0.5f,0.25f,0.125f) && std::fabs(centre(px)[3]-0.5f)<1e-3f);
+        px=drawTrails(&b,1,faded.Get(),clear,1.0f);
+        std::printf("trail faded %.3f a=%.3f\n",centre(px)[0],centre(px)[3]);
+        CHECK(near3(centre(px),0.25f,0.125f,0.0625f,0.01f) && std::fabs(centre(px)[3]-0.25f)<0.01f);
+        // Blends 1 / 2 over grey: plus / minus colour * alpha.
+        const float grey[4]{0.75f,0.75f,0.75f,0.25f};
+        b.kind=Kind::trailAdditive;px=drawTrails(&b,1,plain.Get(),grey,1.0f);
+        std::printf("trail add %.3f %.3f %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2]);
+        CHECK(near3(centre(px),1.25f,1.0f,0.875f));
+        b.kind=Kind::trailSubtract;px=drawTrails(&b,1,plain.Get(),grey,1.0f);
+        CHECK(near3(centre(px),0.25f,0.5f,0.625f));
+        // The stock compare: a scene 5 m ahead hides it under LESS and LESS_EQUAL, not untested; at its own D24 depth
+        // LESS hides it and LESS_EQUAL does not.
+        b.kind=Kind::trailAlpha;p=points(0.0f,1.0f,2);n=ExtLineQuads(p.data(),2u,move,quads.data());
+        b.depthFunc=1;px=drawTrails(&b,1,plain.Get(),clear,z5);CHECK(centre(px)[0]==0.0f);
+        b.depthFunc=2;px=drawTrails(&b,1,plain.Get(),clear,z5);CHECK(centre(px)[0]==0.0f);
+        b.depthFunc=0;px=drawTrails(&b,1,plain.Get(),clear,z5);CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        b.depthFunc=1;px=drawTrails(&b,1,plain.Get(),clear,1.0f);CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        const float z10=DepthFromViewZ(vp.proj,-10.0f);
+        b.depthFunc=1;px=drawTrails(&b,1,plain.Get(),clear,z10);
+        std::printf("trail at its own D24 depth: LESS %.3f",centre(px)[0]);
+        CHECK(centre(px)[0]==0.0f);
+        b.depthFunc=2;px=drawTrails(&b,1,plain.Get(),clear,z10);
+        std::printf(", LESS_EQUAL %.3f\n",centre(px)[0]);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        b.depthFunc=0;
+        // Locus, 9 points: 8 quads in one draw, a continuous band across.
+        p=points(0.0f,1.0f,9);n=LocusQuads(p.data(),9u,move,quads.data());
+        CHECK(n==8);
+        b=trailBatch(Kind::trailAlpha,quads.data(),n,0);
+        px=drawTrails(&b,1,plain.Get(),clear,1.0f);
+        CHECK(st.drawn==8 && st.batches==1);
+        int covered=0;
+        for(int x=-9;x<=9;++x)covered+=near3(at(px,x,0),1.0f,0.5f,0.25f) ? 1 : 0;
+        CHECK(covered==19);
+        // Mixed with a particle batch, in order: the later one on top, and the pipelines swap both ways (the second
+        // trail, 3 m up, after the card).
+        const auto lower=points(0.0f,1.0f,2);
+        std::vector<TrailQuad> q2(2);
+        ExtLineQuads(lower.data(),2u,move,q2.data());
+        const float up[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,3.0f,-10.0f,1};
+        ExtLineQuads(lower.data(),2u,up,q2.data()+1);
+        Batch cardFirst[2]{batch,trailBatch(Kind::trailAlpha,q2.data(),1,0)};
+        px=drawTrails(cardFirst,2,plain.Get(),clear,1.0f);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f) && st.batches==2);
+        Batch trailFirst[3]{trailBatch(Kind::trailAlpha,q2.data(),1,0),batch,trailBatch(Kind::trailAlpha,q2.data()+1,1,0)};
+        px=drawTrails(trailFirst,3,plain.Get(),clear,1.0f);
+        std::printf("trail under a card %.3f %.3f %.3f; above %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2],at(px,0,-14)[0]);
+        CHECK(st.batches==3 && st.drawn==3 && st.bucketDrawn[5]==2);
+        CHECK(!near3(centre(px),1.0f,0.5f,0.25f));                     // the card over it
+        CHECK(near3(at(px,0,-14),1.0f,0.5f,0.25f));                     // the second trail (y 3 m: 14 px up) on top
+        // Without the system constants the trail batch is skipped.
+        b=trailBatch(Kind::trailAlpha,quads.data(),n,0);
+        px=drawTrails(&b,1,nullptr,clear,1.0f);
+        CHECK(centre(px)[0]==0.0f && st.drawn==0);
+        if(compiler)FreeLibrary(compiler);
     }
     // 5. A refusal changes nothing: depth of another size.
     {

@@ -420,6 +420,16 @@ struct Renderer::Impl final {
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps[4];   // PsOurs, PsStock, PsStockLit, PsEfs
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
+    // The trail kinds (PrepareTrails): the stock trail shaders, their vertex layout, the quads' vertex buffer and the
+    // fixed triangle-list indices, xgl_transform (the identity: the quads are in world space) and xgl_user_param, the
+    // efs blends as the stock applies them (SRC_ALPHA: the stock PS's output is not premultiplied) and the compares.
+    ComPtr<ID3D11VertexShader> trailVs;
+    ComPtr<ID3D11PixelShader> trailPs;
+    ComPtr<ID3D11InputLayout> trailLayout;
+    ComPtr<ID3D11Buffer> trailVertices,trailIndices,trailTransform,trailColor;
+    ComPtr<ID3D11BlendState> trailBlend[3];
+    ComPtr<ID3D11DepthStencilState> trailLess,trailLessEqual;
+    bool trailFailed=false;
     ComPtr<ID3D11DepthStencilState> noDepth,testDepth,testDepthReversed;
     // The scene depth bound for the hardware test (read-only, no write) of the particle kinds: a view of the depth
     // target itself (the depth copy is what the shaders read).
@@ -452,8 +462,8 @@ struct Renderer::Impl final {
     int timingNext=0;
     float gpuMs=-1.0f;
     double pixelsShaded=-1.0;   // the PS invocations of the same timed Draw
-    std::array<float,Stats::kBuckets> bucketMs{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
-    std::array<double,Stats::kBuckets> bucketPixels{-1.0,-1.0,-1.0,-1.0,-1.0};
+    std::array<float,Stats::kBuckets> bucketMs{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
+    std::array<double,Stats::kBuckets> bucketPixels{-1.0,-1.0,-1.0,-1.0,-1.0,-1.0};
     // The scene's luminance: five 16x16 blocks of the colour target copied before our draw into a ring of staging
     // textures, mapped without waiting a few frames later.
     static constexpr int kLumaRing=3,kLumaBlock=16,kLumaBlocks=5;
@@ -557,6 +567,53 @@ struct Renderer::Impl final {
         order.resize(kMaxInstances);keys.resize(kMaxInstances);
         context=value;
         return true;
+    }
+
+    // The stock trail pipeline from its bytecode (the input layout checked against the VS's own signature by D3D).
+    bool MakeTrails(const void* vsCode,std::size_t vsBytes,const void* psCode,std::size_t psBytes,const float color[4]) noexcept {
+        const D3D11_INPUT_ELEMENT_DESC layout[]={
+            {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0x00,D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"COLOR",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,0x0C,D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"UV_SIZE",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0x1C,D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"FRONT",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0x28,D3D11_INPUT_PER_VERTEX_DATA,0}};
+        static_assert(offsetof(TrailVertex,color)==0x0C && offsetof(TrailVertex,uvSize)==0x1C && offsetof(TrailVertex,front)==0x28,
+                      "the stock vertex layout");
+        if(FAILED(device->CreateVertexShader(vsCode,vsBytes,nullptr,&trailVs)) ||
+           FAILED(device->CreatePixelShader(psCode,psBytes,nullptr,&trailPs)) ||
+           FAILED(device->CreateInputLayout(layout,4,vsCode,vsBytes,&trailLayout)))return false;
+        D3D11_BUFFER_DESC vb{};vb.ByteWidth=static_cast<UINT>(sizeof(TrailQuad))*kMaxTrailQuads;vb.Usage=D3D11_USAGE_DYNAMIC;
+        vb.BindFlags=D3D11_BIND_VERTEX_BUFFER;vb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        std::vector<std::uint16_t> index;
+        try { index.resize(static_cast<std::size_t>(kMaxTrailQuads)*kTrailIndices); } catch(...) { return false; }
+        for(std::size_t i=0;i<index.size();++i)index[i]=TrailIndex(static_cast<int>(i));
+        D3D11_BUFFER_DESC ib{};ib.ByteWidth=static_cast<UINT>(index.size()*sizeof(std::uint16_t));ib.Usage=D3D11_USAGE_IMMUTABLE;
+        ib.BindFlags=D3D11_BIND_INDEX_BUFFER;
+        const D3D11_SUBRESOURCE_DATA indexData{index.data(),0,0};
+        const float identity[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        D3D11_BUFFER_DESC tb{};tb.ByteWidth=sizeof(identity);tb.Usage=D3D11_USAGE_IMMUTABLE;tb.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+        const D3D11_SUBRESOURCE_DATA identityData{identity,0,0};
+        D3D11_BUFFER_DESC cb=tb;cb.ByteWidth=16;
+        const D3D11_SUBRESOURCE_DATA colorData{color,0,0};
+        if(FAILED(device->CreateBuffer(&vb,nullptr,&trailVertices)) || FAILED(device->CreateBuffer(&ib,&indexData,&trailIndices)) ||
+           FAILED(device->CreateBuffer(&tb,&identityData,&trailTransform)) || FAILED(device->CreateBuffer(&cb,&colorData,&trailColor)))return false;
+        // The ctx blend table 0x10FAEE0 as the stock applies it (docs/gpufx-re.md "efs"): alpha SRC_ALPHA/INV_SRC_ALPHA,
+        // add SRC_ALPHA/ONE, subtract SRC_ALPHA/ONE REV_SUBTRACT; alpha ONE/ZERO ADD; all four channels written.
+        for(int k=0;k<3;++k) {
+            D3D11_BLEND_DESC b{};auto& rt=b.RenderTarget[0];
+            rt.BlendEnable=TRUE;rt.SrcBlend=D3D11_BLEND_SRC_ALPHA;rt.DestBlend=k==0 ? D3D11_BLEND_INV_SRC_ALPHA : D3D11_BLEND_ONE;
+            rt.BlendOp=k==2 ? D3D11_BLEND_OP_REV_SUBTRACT : D3D11_BLEND_OP_ADD;
+            rt.SrcBlendAlpha=D3D11_BLEND_ONE;rt.DestBlendAlpha=D3D11_BLEND_ZERO;rt.BlendOpAlpha=D3D11_BLEND_OP_ADD;
+            rt.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+            if(FAILED(device->CreateBlendState(&b,&trailBlend[k])))return false;
+        }
+        D3D11_DEPTH_STENCIL_DESC d{};d.DepthEnable=TRUE;d.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;d.DepthFunc=D3D11_COMPARISON_LESS;
+        if(FAILED(device->CreateDepthStencilState(&d,&trailLess)))return false;
+        d.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
+        return SUCCEEDED(device->CreateDepthStencilState(&d,&trailLessEqual));
+    }
+    void DropTrails() noexcept {
+        trailVs.Reset();trailPs.Reset();trailLayout.Reset();trailVertices.Reset();trailIndices.Reset();trailTransform.Reset();
+        trailColor.Reset();for(auto& b:trailBlend)b.Reset();trailLess.Reset();trailLessEqual.Reset();
     }
 
     bool PrepareTestView(ID3D11Texture2D* target,DXGI_FORMAT viewFormat) noexcept {
@@ -709,6 +766,27 @@ void Renderer::Reset() noexcept {
     }
 }
 
+bool Renderer::PrepareTrails(ID3D11DeviceContext* context,const void* vs,std::size_t vsBytes,const void* ps,std::size_t psBytes,
+                             const float color[4]) noexcept {
+    if(!context || !vs || !ps || !color)return false;
+    if(!impl_)impl_.reset(new(std::nothrow) Impl);
+    if(!impl_)return false;
+    Impl& s=*impl_;
+    if(s.failed)return false;
+    if(!s.device) {
+        if(!s.Initialize(context)){s.failed=true;return false;}
+    } else if(s.context.Get()!=context) {
+        return false;
+    }
+    if(s.trailVs)return true;
+    if(s.trailFailed)return false;
+    if(s.MakeTrails(vs,vsBytes,ps,psBytes,color))return true;
+    s.DropTrails();s.trailFailed=true;
+    return false;
+}
+
+bool Renderer::TrailsReady() const noexcept { return impl_ && impl_->trailVs; }
+
 bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned depthViewFormat,const ViewParams& view,
                     const Batch* batches,int count,Stats* stats) noexcept {
     Stats local{};
@@ -770,12 +848,14 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     if(FAILED(context->Map(s.particles.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))return refuse("particle buffer map failed");
     auto* out=static_cast<Instance*>(map.pData);
     int total=0;
+    bool anyTrail=false;
     for(int b=0;b<count;++b) {
         const Batch& batch=batches[b];
+        if(IsTrail(batch.kind)){ranges[b]={0,0};anyTrail=anyTrail || (batch.trail && batch.count>0);continue;}
         int n=batch.instances ? batch.count : 0;
         if(n>kMaxInstances-total)n=kMaxInstances-total;
         if(n<0)n=0;
-        const bool efs=batch.kind>=Kind::efsAlpha;
+        const bool efs=IsEfs(batch.kind);
         if(efs)n&=~1;   // whole quads (instance pairs), in the stock order
         ranges[b]={total,n};
         if(n==0)continue;
@@ -788,6 +868,23 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         total+=n;
     }
     context->Unmap(s.particles.Get(),0);
+    // The trail quads, in the batches' order (a batch's range in quads).
+    if(anyTrail && s.trailVs && view.trailSystem) {
+        if(FAILED(context->Map(s.trailVertices.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))return refuse("trail buffer map failed");
+        auto* quads=static_cast<TrailQuad*>(map.pData);
+        int used=0;
+        for(int b=0;b<count;++b) {
+            const Batch& batch=batches[b];
+            if(!IsTrail(batch.kind) || !batch.trail)continue;
+            int n=batch.count;
+            if(n>kMaxTrailQuads-used)n=kMaxTrailQuads-used;
+            if(n<=0)continue;
+            ranges[b]={used,n};
+            std::memcpy(quads+used,batch.trail,sizeof(TrailQuad)*static_cast<std::size_t>(n));
+            used+=n;
+        }
+        context->Unmap(s.trailVertices.Get(),0);
+    }
 
     FrameConstants f{};
     std::memcpy(f.view,view.view,sizeof(f.view));std::memcpy(f.proj,view.proj,sizeof(f.proj));
@@ -866,10 +963,63 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         }
         // b2: the lit batches' system constants, or the efs batches' (the same xgl_system, taken from an efs draw).
         ID3D11Buffer* systemBound=litBound ? L.system : nullptr;
+        // A trail batch swaps in the stock trail pipeline; the next particle batch swaps the particles' back.
+        bool trailBound=false;
+        auto timedDraw=[&](int bucket,auto draw) noexcept {
+            ID3D11Query* const pipe=profiled ? timing.pipes[static_cast<std::size_t>(timing.used)].Get() : nullptr;
+            if(profiled) {
+                timing.bucket[static_cast<std::size_t>(timing.used)]=static_cast<unsigned char>(bucket);
+                context->End(timing.marks[static_cast<std::size_t>(timing.used++)].Get());
+                context->Begin(pipe);
+            }
+            draw();
+            if(pipe)context->End(pipe);
+        };
         for(int b=0;b<count;++b) {
             const Batch& batch=batches[b];
             if(ranges[b].count==0)continue;
-            const bool efs=batch.kind>=Kind::efsAlpha;
+            if(IsTrail(batch.kind)) {
+                if(!batch.texture)continue;
+                if(!trailBound) {
+                    ID3D11Buffer* vb=s.trailVertices.Get();const UINT stride=sizeof(TrailVertex),offset=0;
+                    context->IASetInputLayout(s.trailLayout.Get());
+                    context->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+                    context->IASetIndexBuffer(s.trailIndices.Get(),DXGI_FORMAT_R16_UINT,0);
+                    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                    ID3D11Buffer* vcb[]={view.trailSystem,s.trailTransform.Get()};
+                    context->VSSetShader(s.trailVs.Get(),nullptr,0);
+                    context->VSSetConstantBuffers(0,2,vcb);
+                    ID3D11Buffer* pcb=s.trailColor.Get();
+                    context->PSSetShader(s.trailPs.Get(),nullptr,0);
+                    context->PSSetConstantBuffers(2,1,&pcb);
+                    ID3D11SamplerState* ts=view.trailSampler;
+                    context->PSSetSamplers(0,1,&ts);
+                    context->RSSetState(view.trailRaster);
+                    trailBound=true;psBound=nullptr;depthBound=nullptr;
+                }
+                ID3D11ShaderResourceView* tex=batch.texture;
+                context->PSSetShaderResources(0,1,&tex);
+                const int blendIndex=batch.kind==Kind::trailAlpha ? 0 : batch.kind==Kind::trailAdditive ? 1 : 2;
+                context->OMSetBlendState(s.trailBlend[blendIndex].Get(),nullptr,0xFFFFFFFFu);
+                ID3D11DepthStencilState* const dss=batch.depthFunc==1 ? s.trailLess.Get() : batch.depthFunc==2 ? s.trailLessEqual.Get() : s.noDepth.Get();
+                if(dss!=depthBound){context->OMSetDepthStencilState(dss,0);depthBound=dss;}
+                const int quads=ranges[b].count,base=ranges[b].base;
+                st.bucketDrawn[5]+=quads;
+                timedDraw(5,[&]() noexcept { context->DrawIndexed(static_cast<UINT>(quads*kTrailIndices),0,base*4); });
+                st.drawn+=quads;++st.batches;
+                continue;
+            }
+            if(trailBound) {
+                context->IASetInputLayout(nullptr);
+                context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+                context->VSSetShader(s.vs.Get(),nullptr,0);
+                context->VSSetConstantBuffers(0,2,cbs);
+                context->PSSetConstantBuffers(2,1,&systemBound);
+                context->PSSetSamplers(0,2,sm);
+                context->RSSetState(s.raster.Get());
+                trailBound=false;psBound=nullptr;depthBound=nullptr;
+            }
+            const bool efs=IsEfs(batch.kind);
             if(efs && (!view.efsSystem || !batch.texture))continue;
             ID3D11ShaderResourceView* tex=batch.texture ? batch.texture : s.flipView.Get();
             if(!tex)continue;
@@ -908,14 +1058,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
             const int bucket=group==3 ? 4 : group==2 ? (batch.litSet==2 ? 2 : 3) : group;
             st.bucketDrawn[bucket]+=drawn;
-            ID3D11Query* const pipe=profiled ? timing.pipes[static_cast<std::size_t>(timing.used)].Get() : nullptr;
-            if(profiled) {
-                timing.bucket[static_cast<std::size_t>(timing.used)]=static_cast<unsigned char>(bucket);
-                context->End(timing.marks[static_cast<std::size_t>(timing.used++)].Get());
-                context->Begin(pipe);
-            }
-            context->DrawInstanced(4,static_cast<UINT>(drawn),0,0);
-            if(pipe)context->End(pipe);
+            timedDraw(bucket,[&]() noexcept { context->DrawInstanced(4,static_cast<UINT>(drawn),0,0); });
             st.drawn+=drawn;++st.batches;
         }
         // Nothing of the native frame stays referenced by the private state.
