@@ -8,7 +8,8 @@
 
 namespace crew {
 unsigned char* image=nullptr;
-bool IsSoldierClass(const void* o) noexcept {return Readable(o,8) && At<unsigned>(o,0)==0x534F4C44;}
+bool IsSoldierClassLive(const void* o) noexcept {return At<unsigned>(o,0)==0x534F4C44;}
+bool IsSoldierClass(const void* o) noexcept {return Readable(o,8) && IsSoldierClassLive(o);}
 const Config& Cfg() noexcept {static const Config cfg{};return cfg;}
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept {return false;}

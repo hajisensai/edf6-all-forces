@@ -187,7 +187,11 @@ struct Room {
         else CHECK(nodes[packet.to].protocol.Receive(peer,who,packet.bytes.data(),packet.bytes.size(),now));
     }
     void One() {CHECK(!queue.empty());const Packet packet=queue.front();queue.pop_front();Deliver(packet);}
-    void Pump() {unsigned guard=0;while(!queue.empty()){CHECK(++guard<10000);One();}}
+    void Pump() {
+        unsigned guard=0;
+        while(!queue.empty()){CHECK(++guard<10000);One();}
+        crew::Publish(); // the production receive pump publishes at its final channel update
+    }
     void Step(unsigned milliseconds=32) {
         CHECK(milliseconds>=ep::kActionFrameMs);now+=milliseconds;TickAll();crew::EnemyControlNetworkFrame();
         for(unsigned i=0;i<3;++i)if(i!=bridge)nodes[i].protocol.TransportFrame(now);Pump();
@@ -219,7 +223,7 @@ struct Room {
     }
     void Until(unsigned source,ep::Phase phase) {
         unsigned guard=0;
-        while(true) {const auto* lease=ForSource(bridge,actors[source].id);if(lease && lease->phase==phase)return;
+        while(true) {const auto* lease=ForSource(bridge,actors[source].id);if(lease && lease->phase==phase){crew::Publish();return;}
             if(guard==998) {
                 std::fprintf(stderr,"Until stalled bridge=%u epoch=%llu source=%u wanted=%u ready=%u result=%u now=%llu\n",bridge,static_cast<unsigned long long>(epoch),source,static_cast<unsigned>(phase),Protocol(bridge).Ready(),static_cast<unsigned>(Protocol(bridge).LastResult()),static_cast<unsigned long long>(now));
                 for(unsigned node=0;node<3;++node)for(std::size_t i=0;i<ep::kMaxLeases;++i){const auto* value=Protocol(node).LeaseAt(i);if(value && value->id)std::fprintf(stderr," node=%u lease=%llu phase=%u result=%u restored=%u\n",node,static_cast<unsigned long long>(value->id),static_cast<unsigned>(value->phase),static_cast<unsigned>(value->result),value->localRestored);}

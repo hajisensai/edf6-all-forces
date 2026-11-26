@@ -36,11 +36,11 @@ bool Alive(const NetLife life,const unsigned char* object,ObjRef* ref) noexcept 
 }
 // A player's soldier (any machine's): named by its slot alone, never by its NetId (another on every machine).
 bool PlayerSoldier(const unsigned char* object) noexcept {
-    return Readable(object,0x1EE0) && IsSoldierClass(object) && IsAnyPlayer(object);
+    // The caller already validated the object's header. Only soldiers need the larger player span.
+    return IsSoldierClassLive(object) && Readable(object,0x1EE0) && IsAnyPlayerSelf(object);
 }
-// A mission player's soldier: its slot (User+48, inside the mission's `expected` players) and its native PUID (User+18).
-bool Player(const unsigned char* object,unsigned expected,void** puid,int* slot) noexcept {
-    if(!Readable(object,0x1EE0) || !IsAnyPlayer(object) || !IsSoldierClass(object))return false;
+// A player soldier already classified above: its mission slot (User+48) and native PUID (User+18).
+bool PlayerBinding(const unsigned char* object,unsigned expected,void** puid,int* slot) noexcept {
     const auto user=At<const unsigned char*>(object,0x1ED0);
     const auto ctrl=At<const unsigned char*>(object,0x1ED8);
     if(!Readable(user,0x4C) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0)return false;
@@ -96,7 +96,8 @@ void Record(Players& t,const ObjRef& ref,void* puid,int slot) noexcept {
 bool StillSeen(const Seen& s,unsigned expected) noexcept {
     ObjRef now{};void* puid=nullptr;int slot=-1;
     const auto object=static_cast<const unsigned char*>(s.ref.obj);
-    return Present(object,&now) && Same(now,s.ref) && Player(object,expected,&puid,&slot) && slot==s.slot && puid==s.puid;
+    return Present(object,&now) && Same(now,s.ref) && PlayerSoldier(object) &&
+        PlayerBinding(object,expected,&puid,&slot) && slot==s.slot && puid==s.puid;
 }
 
 // The NetIds the same walk met (every present object that is no player soldier), kept for the same frame and world as
@@ -158,7 +159,7 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
         if(!Present(object,&ref))return;
         if(PlayerSoldier(object)) {   // by its slot alone: its NetId is matched by no reference
             void* puid=nullptr;int slot=-1;
-            if(Player(object,v->expected,&puid,&slot))Record(*v->table,ref,puid,slot);
+            if(PlayerBinding(object,v->expected,&puid,&slot))Record(*v->table,ref,puid,slot);
             return;
         }
         unsigned char id[32]{};
@@ -168,7 +169,7 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
         for(unsigned i=0;i<v->n;++i) {
             Query& q=v->q[i];
             if(q.kind!=netref::Kind::native || std::memcmp(id,q.id,32))continue;
-            if(Alive(q.life,object,&ref)) {
+            if(q.life==NetLife::present || !object[kDead]) {
                 if(q.match && !Same(q.match,ref))q.matchTwice=true;
                 q.match=ref;
             }
@@ -204,7 +205,7 @@ bool CachedNative(Query& q) noexcept {
         const auto object=static_cast<const unsigned char*>(s.ref.obj);
         ObjRef now{};unsigned char id[32]{};
         if(!Present(object,&now) || !Same(now,s.ref) || !ReadNativeObjectId(object,id) || std::memcmp(id,q.id,32))return false;
-        if(Alive(q.life,object,&now)) {
+        if(q.life==NetLife::present || !object[kDead]) {
             if(q.match && !Same(q.match,now))q.matchTwice=true;
             q.match=now;
         }
@@ -254,7 +255,7 @@ bool EncodeNetRef(const ObjRef& who,unsigned char out[32]) noexcept {
             // A player by its slot alone; one outside the mission's players (no User bound) has no name another machine shares.
             void* puid=nullptr;int slot=-1;
             const unsigned expected=Expected();
-            return expected && Player(object,expected,&puid,&slot) && netref::MakePlayer(slot,out);
+            return expected && PlayerBinding(object,expected,&puid,&slot) && netref::MakePlayer(slot,out);
         }
         unsigned char id[32]{};
         return ReadNativeObjectId(object,id) && netref::MakeNative(id,out);
@@ -334,7 +335,8 @@ bool StillNetRef(const unsigned char* ref,NetLife life,const NetResolved& r) noe
         case netref::Kind::player: {
             void* puid=nullptr;int found=-1;
             const unsigned expected=Expected();
-            return expected && Player(object,expected,&puid,&found) && found==slot && puid==r.puid && (object[kDead]!=0)==r.dead;
+            return expected && PlayerSoldier(object) && PlayerBinding(object,expected,&puid,&found) &&
+                found==slot && puid==r.puid && (object[kDead]!=0)==r.dead;
         }
         case netref::Kind::native: {
             unsigned char id[32]{};
