@@ -16,6 +16,7 @@
 #include <cstdio>
 
 #include "edf/memory.h"
+#include "edf/page_access_cache.h"
 
 namespace {
 int failures = 0;
@@ -35,6 +36,28 @@ void WaitTick() {
     while (GetTickCount64() == t) Sleep(1);
 }
 
+void CacheTags() {
+    using Cache=edf::detail::PageAccessCache;
+    static_assert(sizeof(Cache)<65*1024);
+    Cache cache;
+    constexpr std::uintptr_t page=0x10000,other=page+Cache::kSlots*Cache::kPage;
+    cache.Begin(0);
+    cache.Put(page,3);
+    cache.Put(other,0);
+    cache.Begin(0);
+    Check(cache.Access(page)==3 && cache.Access(other)==0,
+          "aligned arenas keep different permissions and a cached denial is not a miss");
+    cache.Begin(1);
+    Check(cache.Access(page)==Cache::kMissing && cache.Access(other)==Cache::kMissing,
+          "the next tick invalidates both permissions");
+    cache.Put(page,1);
+    for(std::uint64_t tick=2;tick<Cache::kPage/4;++tick)cache.Begin(tick);
+    Check(cache.Access(page)==Cache::kMissing && cache.Access(other)==Cache::kMissing,
+          "wrapping a packed tick tag cannot revive an old page or denial");
+    cache.Put(other,3);
+    Check(cache.Access(other)==3,"a wrapped tick can record new permissions");
+}
+
 // The old Readable: VirtualQuery per region, no cache (its cache hardly ever hit, see memory.cpp).
 bool OldReadable(const void* ptr, std::size_t size) {
     auto at = reinterpret_cast<std::uintptr_t>(ptr);
@@ -52,6 +75,7 @@ bool OldReadable(const void* ptr, std::size_t size) {
 
 int main() {
     using edf::Readable;
+    CacheTags();
     DWORD old0 = 0;
     unsigned char* rw = Alloc(4, PAGE_READWRITE);
     rw[0] = 1;
@@ -63,17 +87,22 @@ int main() {
         Check(K32QueryWorkingSetEx(GetCurrentProcess(), &w, sizeof w) && w.VirtualAttributes.Valid,
               "a touched page is in the working set (QueryWorkingSetEx answers it: the page path)");
     }
-    {   // two pages 32 MB apart share a cache slot (8192 entries): each answered as itself
+    {   // These two pages 32 MiB apart used to evict each other on each ask.
         constexpr std::size_t kSlots = 8192;
         unsigned char* far1 = Alloc(kSlots + 1, PAGE_READWRITE);
         far1[0] = far1[kSlots * kPage] = 1;
         VirtualProtect(far1 + kSlots * kPage, kPage, PAGE_READONLY, &old0);
         WaitTick();
+        edf::TakeReadableStats();
         bool same = true;
         for (int i = 0; i < 4; ++i)
             same = same && Readable(far1, 8, true) && !Readable(far1 + kSlots * kPage, 8, true) &&
                    Readable(far1 + kSlots * kPage, 8);
-        Check(same, "two pages in one cache slot, asked in turn: each answered as itself");
+        const auto stats=edf::TakeReadableStats();
+        Check(same, "two pages 32 MiB apart, asked in turn: each answered as itself");
+        std::printf("     alternating aligned pages: %llu asks, %llu hits, %llu working-set calls\n",
+                    stats.asks,stats.pageHits,stats.wsCalls);
+        VirtualFree(far1,0,MEM_RELEASE);
     }
     {   // the image: this exe's code is readable, not writable; its read-only data too
         const auto* code = reinterpret_cast<const unsigned char*>(&main);

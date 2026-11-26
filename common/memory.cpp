@@ -1,8 +1,10 @@
 // Memory primitives shared by EDF6VehicleCrew and EDF6AutoTurret: one copy (the two plugins had drifted
 // apart: only one had the region cache and the E9 tail-jump redirect).
 #include "edf/memory.h"
+#include "edf/page_access_cache.h"
 #include <psapi.h>
 #include <cstring>
+#include <new>
 namespace edf {
 // The plugin asks this many times per object per frame (WastedFire / PickTarget per gunner per enemy, the jets' and
 // crews' frames): hundreds to thousands of asks a frame in a battle.
@@ -28,7 +30,8 @@ namespace edf {
 // they are made instead: PrefetchReadable for a batch, and no ask for an object known live (seat.h IsAnyPlayerSelf).
 // Not a probing read: touching a PAGE_GUARD page (a thread's stack guard) would take the guard away.
 namespace {
-constexpr std::uintptr_t kPage=0x1000;
+using PageCache=detail::PageAccessCache;
+constexpr std::uintptr_t kPage=PageCache::kPage;
 // What a page allows, as Readable checks it: 0 nothing (or not known), else these bits.
 constexpr unsigned char kRead=1,kWrite=2;
 unsigned char Allows(DWORD protect) noexcept {
@@ -43,16 +46,6 @@ unsigned char Allows(DWORD protect) noexcept {
     }
 }
 
-// Per thread, direct-mapped by page number; an entry counts only in the tick it was written. An entry is the page's
-// address with what it allows in the low bits (a page address has 12 zero bits), and its tick: 16 bytes, 128 KB. A
-// battle's game thread looks at ~5,000 pages a frame (300 ants and their gunners): 1024 entries were too few, each
-// frame pushed out what it would ask again (perfrun blast, 2026-11-07: 4,800 working-set calls a frame).
-struct PageCache {
-    static constexpr int kSize=8192;
-    struct Entry { std::uintptr_t pageAllows; ULONGLONG tick; };
-    Entry e[kSize];
-    Entry& Slot(std::uintptr_t page) noexcept { return e[(page/kPage)%kSize]; }
-};
 // Made on a thread's first ask, freed when the thread ends (a game or Coop thread that comes and goes leaks nothing).
 struct PageCacheOwner {
     PageCache* pages=nullptr;
@@ -63,7 +56,8 @@ PageCache* Pages() noexcept {
     thread_local PageCacheOwner owner;
     if(!owner.pages && !owner.tried) {
         owner.tried=true;
-        owner.pages=static_cast<PageCache*>(VirtualAlloc(nullptr,sizeof(PageCache),MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+        if(void* storage=VirtualAlloc(nullptr,sizeof(PageCache),MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))
+            owner.pages=new (storage) PageCache{};
     }
     return owner.pages;
 }
@@ -125,7 +119,7 @@ unsigned char Record(PageCache& cache,const PSAPI_WORKING_SET_EX_INFORMATION& as
         MEMORY_BASIC_INFORMATION mbi{};
         if(Query(page,mbi,now) && mbi.State==MEM_COMMIT) allows=Allows(mbi.Protect);
     }
-    cache.Slot(page)={page|allows,now};
+    cache.Put(page,allows);
     return allows;
 }
 }  // namespace
@@ -142,13 +136,14 @@ bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
     const std::uintptr_t pages=(last-first)/kPage+1;
     PageCache* cache=Pages();
     if(pages>kMaxPages || !cache) return ReadableByRegion(at,end,need,now);
+    cache->Begin(now);
     PSAPI_WORKING_SET_EX_INFORMATION ask[kMaxPages];
     int asked=0;
     for(std::uintptr_t page=first;;page+=kPage) {
-        const auto& hit=cache->Slot(page);
-        if((hit.pageAllows&~(kPage-1))==page && hit.tick==now) {
+        const int access=cache->Access(page);
+        if(access!=PageCache::kMissing) {
             ++stats.pageHits;
-            if((hit.pageAllows&need)!=need) return false;
+            if((access&need)!=need) return false;
         } else {
             ask[asked]={};
             ask[asked].VirtualAddress=reinterpret_cast<void*>(page);
@@ -169,7 +164,7 @@ namespace {
 // The pages of the spans added that the cache has not this tick, asked of the working set kPrefetchPages at a time.
 class PrefetchBatch {
 public:
-    explicit PrefetchBatch(PageCache& cache) noexcept : cache_(cache),now_(GetTickCount64()) {}
+    explicit PrefetchBatch(PageCache& cache) noexcept : cache_(cache),now_(GetTickCount64()) { cache_.Begin(now_); }
     ~PrefetchBatch() { Flush(); }
     PrefetchBatch(const PrefetchBatch&)=delete;
     PrefetchBatch& operator=(const PrefetchBatch&)=delete;
@@ -179,8 +174,7 @@ public:
         const std::uintptr_t first=at&~(kPage-1),last=(at+size-1)&~(kPage-1);
         if((last-first)/kPage+1>kMaxPages) return;   // Readable asks such a span by region
         for(std::uintptr_t page=first;;page+=kPage) {
-            const auto& hit=cache_.Slot(page);
-            bool queued=(hit.pageAllows&~(kPage-1))==page && hit.tick==now_;
+            bool queued=cache_.Access(page)!=PageCache::kMissing;
             for(int i=0;i<asked_ && !queued;++i) queued=reinterpret_cast<std::uintptr_t>(ask_[i].VirtualAddress)==page;
             if(!queued) {
                 if(asked_==kPrefetchPages) Flush();
