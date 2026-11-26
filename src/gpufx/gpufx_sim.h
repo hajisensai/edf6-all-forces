@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <vector>
 
 namespace crew::gpufx {
 
@@ -235,22 +237,44 @@ inline float SerialUnit(std::uint32_t id) noexcept {
     return static_cast<float>(id>>8)*(1.0f/16777216.0f);
 }
 struct Thinned { int count=0;float covered=0.0f,keep=1.0f; };
-// In place: the puffs that cover nothing dropped; past `budget` screens, the stable fraction keep = budget / cover
-// (no less than `least`) kept, their alpha raised so a cloud seen through them stays as opaque (k overlapping layers
-// of alpha a pass (1 - a)^k; keep * k of them at 1 - (1 - a)^(1 / keep) pass the same).
+// In place: the puffs that cover nothing dropped; past `budget` screens, each puff is kept with the stable chance
+// keep = min(1, cap / its cover), cap so that the kept cover adds up to the budget (sum of min(cover, cap)). The
+// puffs smaller than the cap (the distant ones, the cloud's outline) all stay; the big ones (the camera inside the
+// cloud: each a whole screen, hundreds deep) are thinned, their alpha raised so the cloud seen through them stays as
+// opaque (k overlapping layers of alpha a pass (1 - a)^k; keep * k of them at 1 - (1 - a)^(1 / keep) pass the same).
+// `scratch`: the covers (reused, no allocation once grown). Thinned.keep: the least kept chance.
 inline Thinned ThinToBudget(Instance* in,const std::uint32_t* ids,int n,const float view[16],const float proj[16],
-                            bool lookNegZ,float budget,float least) noexcept {
+                            bool lookNegZ,float budget,std::vector<float>& scratch) {
     Thinned t{};
-    for(int i=0;i<n;++i)t.covered+=Coverage(in[i],view,proj,lookNegZ);
-    if(t.covered>budget && budget>0.0f)t.keep=(std::max)(least,budget/t.covered);
-    const float power=1.0f/t.keep;
+    if(n<=0)return t;
+    scratch.resize(static_cast<std::size_t>(n)*2u);
+    float* cover=scratch.data();
+    float* sorted=cover+n;
+    int m=0;
+    for(int i=0;i<n;++i) {
+        cover[i]=Coverage(in[i],view,proj,lookNegZ);
+        t.covered+=cover[i];
+        if(cover[i]>0.0f)sorted[m++]=cover[i];
+    }
+    float cap=std::numeric_limits<float>::infinity();
+    if(t.covered>budget && budget>0.0f) {
+        std::sort(sorted,sorted+m);
+        float below=0.0f;   // the cover of the puffs smaller than sorted[j]
+        for(int j=0;j<m;++j) {
+            const float rest=static_cast<float>(m-j);
+            if(below+rest*sorted[j]>=budget){cap=(budget-below)/rest;break;}
+            below+=sorted[j];
+        }
+    }
     int out=0;
     for(int i=0;i<n;++i) {
-        const float c=Coverage(in[i],view,proj,lookNegZ);
+        const float c=cover[i];
         if(!(c>0.0f))continue;
-        if(t.keep<1.0f) {
-            if(SerialUnit(ids[i])>=t.keep)continue;
-            in[i].color[3]=1.0f-std::pow(1.0f-std::clamp(in[i].color[3],0.0f,1.0f),power);
+        if(c>cap) {
+            const float keep=cap/c;
+            t.keep=(std::min)(t.keep,keep);
+            if(SerialUnit(ids[i])>=keep)continue;
+            in[i].color[3]=1.0f-std::pow(1.0f-std::clamp(in[i].color[3],0.0f,1.0f),1.0f/keep);
         }
         in[out++]=in[i];
     }

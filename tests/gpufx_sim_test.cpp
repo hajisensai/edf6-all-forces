@@ -382,25 +382,35 @@ static void FillBudget() {
     Instance behind=far;behind.pos[2]=10.0f;
     CHECK(Coverage(behind,view,proj,true)==0.0f);
     // 1000 puffs each a whole screen against a budget of 100: a stable tenth...
+    std::vector<float> scratch;
     std::vector<Instance> in(1000,inside);std::vector<std::uint32_t> ids(1000);
     for(int i=0;i<1000;++i)ids[i]=static_cast<std::uint32_t>(i+1);
     in[7]=faded;
     std::vector<Instance> again=in;
-    const Thinned t=ThinToBudget(in.data(),ids.data(),1000,view,proj,true,100.0f,0.05f);
+    const Thinned t=ThinToBudget(in.data(),ids.data(),1000,view,proj,true,100.0f,scratch);
     CHECK(Near(t.covered,999.0f));CHECK(Near(t.keep,100.0f/999.0f));
     CHECK(t.count>70 && t.count<130);
-    const Thinned u=ThinToBudget(again.data(),ids.data(),1000,view,proj,true,100.0f,0.05f);
+    const Thinned u=ThinToBudget(again.data(),ids.data(),1000,view,proj,true,100.0f,scratch);
     CHECK(u.count==t.count);
     for(int i=0;i<t.count;++i)CHECK(in[i].pos[2]==again[i].pos[2]);
     // ...each as opaque as the ten it stands for: 1 - 0.5^(1 / keep).
     CHECK(Near(in[0].color[3],1.0f-std::pow(0.5f,999.0f/100.0f),1e-4f));
-    // The floor: no less than `least` kept; under the budget only the faded one goes, alpha untouched.
+    // Under the budget only the faded one goes, alpha untouched.
     std::vector<Instance> few(10,inside);few[3]=faded;
-    const Thinned w=ThinToBudget(few.data(),ids.data(),10,view,proj,true,100.0f,0.2f);
+    const Thinned w=ThinToBudget(few.data(),ids.data(),10,view,proj,true,100.0f,scratch);
     CHECK(w.count==9 && w.keep==1.0f && few[0].color[3]==0.5f);
-    std::vector<Instance> many(1000,inside);
-    const Thinned m=ThinToBudget(many.data(),ids.data(),1000,view,proj,true,10.0f,0.2f);
-    CHECK(Near(m.keep,0.2f) && m.count>150 && m.count<250);
+    // The small ones all stay: 500 whole screens and 500 far puffs (1e-4 each) against 10 screens; the cap is
+    // (10 - 0.05) / 500, the far ones kept with their alpha, about 2% of the near ones kept.
+    std::vector<Instance> mixed(1000,inside);
+    for(int i=0;i<500;++i)mixed[static_cast<std::size_t>(i)*2u]=far;
+    const Thinned m=ThinToBudget(mixed.data(),ids.data(),1000,view,proj,true,10.0f,scratch);
+    CHECK(Near(m.keep,(10.0f-0.05f)/500.0f,1e-4f));
+    int farKept=0,nearKept=0;
+    for(int i=0;i<m.count;++i) {
+        if(mixed[i].pos[2]==-100.0f){++farKept;CHECK(mixed[i].color[3]==0.5f);}
+        else ++nearKept;
+    }
+    CHECK(farKept==500 && nearKept>2 && nearKept<25);
     // The pool hands out the serials with the drawables.
     Pool<4> pool;Desc d{};d.lifeMin=d.lifeMax=1.0f;d.size.Add(0.0f,1.0f);d.alpha.Add(0.0f,1.0f);
     const int k=pool.Register(d);Rng rng(3);const float o[3]{},v[3]{};

@@ -73,9 +73,9 @@ SRWLOCK publishLock=SRWLOCK_INIT;
 std::vector<Instance> published;
 std::vector<std::uint32_t> publishedIds;   // each one's spawn serial (the fill budget keeps a stable subset)
 // The fill budget (gpufx_sim.h ThinToBudget): ours covers at most this many pixels a view (about 6 screens at 4K, 24
-// at 1080p); past it a stable subset, no less than a fifth, is drawn with its opacity raised.
+// at 1080p); past it the biggest puffs are thinned to a stable subset drawn with its opacity raised.
 constexpr float kFillPixels=50.0e6f;
-constexpr float kFillLeast=0.2f;
+std::vector<float> fillScratch;
 std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false};
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
@@ -1392,7 +1392,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         if(!renderOwn.empty() && renderOwnIds.size()==renderOwn.size()) {
             const float screens=kFillPixels/static_cast<float>(lastTargetPixels ? lastTargetPixels : 3840u*2160u);
             const Thinned t=ThinToBudget(renderOwn.data(),renderOwnIds.data(),static_cast<int>(renderOwn.size()),vp.view,vp.proj,
-                                         vp.proj[11]<0.0f,screens,kFillLeast);
+                                         vp.proj[11]<0.0f,screens,fillScratch);
             probe.ownBefore+=static_cast<unsigned>(renderOwn.size());probe.ownDrawn+=static_cast<unsigned>(t.count);
             probe.covered+=t.covered;probe.coveredMax=(std::max)(probe.coveredMax,t.covered);probe.keepMin=(std::min)(probe.keepMin,t.keep);
             ++probe.ownViews;
