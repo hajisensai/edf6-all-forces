@@ -1,6 +1,6 @@
 #pragma once
 // The War Thunder recordings the ground vehicles' guns, the explosions and the rounds going by are layered from, and the
-// turret's and the loader's (jetaudio.cpp kWtFor)
+// turret's and the loader's (jetaudio.cpp kWtFor), the rounds hitting armour (hitsound.cpp)
 // (docs/feature-wt-sound.md): each a group of variants, installed as Mods/Plugins/<dll name>_wt/<name>_<1..n>.wav (16-bit PCM 48 kHz, mono or stereo), made from
 // GaijinEntertainment/fmod_studio_warthunder_for_modders by tools/wt_sound.py (its table says which file each one is;
 // assets/sound/wt/SOURCE.md lists them). tools/wt_sound.py and tests/wt_sound_test.py read this list: the same names,
@@ -17,7 +17,7 @@
     X(art_body,3) X(bomb_body,3) X(bomb_far,3) X(debris_small,2) X(debris_med,2) X(debris_bomb,2) X(ex_tail,3) X(ex_sub,3) \
     X(whiz,3) X(crack_bullet,4) X(crack_small,3) X(crack_mid,3) X(crack_big,2) X(bypass_bullet,4) X(bypass_big,2) \
     X(whiz_small,3) X(whiz_med,3) X(whiz_big,3) X(incoming_art,3) X(incoming_bomb,2) \
-    X(turret_loop,1) X(turret_stop,3) X(reload_open,4) X(reload_eject,4) X(reload_insert,4) X(reload_close,4)
+    X(turret_loop,1) X(turret_stop,3) X(reload_open,4) X(reload_eject,4) X(reload_insert,4) X(reload_close,4)     X(hit_bullet,6) X(hit_small,3) X(hit_mid,3) X(hit_big,2) X(hit_pierce,3) X(dull_small,3) X(dull_med,3)     X(hit_small_far,3) X(hit_med_far,3) X(hit_big_far,3) X(rico_hit,3) X(rico_whiz,3) X(bullet_whiz,4)
 
 namespace crew::wt {
 #define CREW_WT_ENUM(name,n) k_##name,

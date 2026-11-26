@@ -8,15 +8,15 @@ The upstream assets are already vorbis-compressed (ogg renamed to .wav); they ar
 16-bit PCM.
 
 Made by `tools/wt_sound.py` (clip names and variant counts: src/wt_clips.h CREW_WT_CLIPS). Per file: channels kept
-(`art_attack_far`, `bomb_far`, `bypass_big`, `bypass_bullet`, `crack_big`, `crack_bullet`, `crack_mid`, `crack_small`, `ex_attack_far`, `ex_sub`, `reload_close`, `reload_eject`, `reload_insert`, `reload_open`, `sub`, `turret_loop`, `turret_stop`, `whiz`, `whiz_big`, `whiz_med`, `whiz_small`, `xs_far`: mixed to mono), resampled to 48000 Hz, 20 Hz high-pass, no
+(`art_attack_far`, `bomb_far`, `bullet_whiz`, `bypass_big`, `bypass_bullet`, `crack_big`, `crack_bullet`, `crack_mid`, `crack_small`, `dull_med`, `dull_small`, `ex_attack_far`, `ex_sub`, `hit_big`, `hit_big_far`, `hit_bullet`, `hit_med_far`, `hit_mid`, `hit_pierce`, `hit_small`, `hit_small_far`, `reload_close`, `reload_eject`, `reload_insert`, `reload_open`, `rico_hit`, `rico_whiz`, `sub`, `turret_loop`, `turret_stop`, `whiz`, `whiz_big`, `whiz_med`, `whiz_small`, `xs_far`: mixed to mono), resampled to 48000 Hz, 20 Hz high-pass, no
 per-file levelling or normalising, start kept, tail under -60 dBFS cut with a 20 ms fade-out
 (loops kept whole: `turret_loop`);
-cut to a length (300 ms fade-out): close_150 5.0 s, tail_heavy 7.0 s, crack_big 2.5 s, bypass_big 2.0 s.
+cut to a length (300 ms fade-out): close_150 5.0 s, tail_heavy 7.0 s, crack_big 2.5 s, bypass_big 2.0 s, hit_small 2.0 s, hit_mid 2.0 s, hit_big 2.5 s, hit_pierce 2.0 s, hit_small_far 2.0 s, hit_med_far 2.0 s, hit_big_far 2.5 s, rico_hit 1.5 s, rico_whiz 2.0 s.
 One gain for the whole set: **0.680167** (set peak before gain 1.440824; scaled only when over 0.98).
 
 Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.
 
-Files: 192, total size 68436586 bytes (65.27 MiB).
+Files: 234, total size 74929346 bytes (71.46 MiB).
 
 | file | source (under the project root) | channels | seconds | bytes |
 |---|---|---|---|---|
@@ -212,3 +212,45 @@ Files: 192, total size 68436586 bytes (65.27 MiB).
 | reload_close_2.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-002.wav | 1 | 2.000 | 192044 |
 | reload_close_3.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-003.wav | 1 | 2.000 | 192044 |
 | reload_close_4.wav | tanks/weapon/cannons/cannon_reloading/reloading_close-004.wav | 1 | 1.983 | 190396 |
+| hit_bullet_1.wav | tanks/impacts/hits_recorded/tank_hit_bullet-001.wav | 1 | 0.843 | 80950 |
+| hit_bullet_2.wav | tanks/impacts/hits_recorded/tank_hit_bullet-002.wav | 1 | 0.870 | 83532 |
+| hit_bullet_3.wav | tanks/impacts/hits_recorded/tank_hit_bullet-003.wav | 1 | 0.898 | 86226 |
+| hit_bullet_4.wav | tanks/impacts/hits_recorded/tank_hit_bullet-004.wav | 1 | 0.835 | 80200 |
+| hit_bullet_5.wav | tanks/impacts/hits_recorded/tank_hit_bullet-005.wav | 1 | 0.888 | 85306 |
+| hit_bullet_6.wav | tanks/impacts/hits_recorded/tank_hit_bullet-006.wav | 1 | 0.899 | 86376 |
+| hit_small_1.wav | tanks/impacts/hits_recorded/tank_hit_small-001.wav | 1 | 1.853 | 177936 |
+| hit_small_2.wav | tanks/impacts/hits_recorded/tank_hit_small-002.wav | 1 | 1.845 | 177152 |
+| hit_small_3.wav | tanks/impacts/hits_recorded/tank_hit_small-003.wav | 1 | 1.946 | 186896 |
+| hit_mid_1.wav | tanks/impacts/hits_recorded/tank_hit_mid-001.wav | 1 | 1.964 | 188630 |
+| hit_mid_2.wav | tanks/impacts/hits_recorded/tank_hit_mid-002.wav | 1 | 1.963 | 188480 |
+| hit_mid_3.wav | tanks/impacts/hits_recorded/tank_hit_mid-003.wav | 1 | 1.949 | 187138 |
+| hit_big_1.wav | tanks/impacts/hits_recorded/tank_hit_big-002.wav | 1 | 2.447 | 234976 |
+| hit_big_2.wav | tanks/impacts/hits_recorded/tank_hit_big-004.wav | 1 | 2.486 | 238664 |
+| hit_pierce_1.wav | tanks/impacts/hits_recorded/tank_hit_pierce-001.wav | 1 | 2.000 | 192044 |
+| hit_pierce_2.wav | tanks/impacts/hits_recorded/tank_hit_pierce-002.wav | 1 | 2.000 | 192044 |
+| hit_pierce_3.wav | tanks/impacts/hits_recorded/tank_hit_pierce-003.wav | 1 | 2.000 | 192044 |
+| dull_small_1.wav | tanks/impacts/hits_recorded/adds/hit_dull_small-001.wav | 1 | 1.197 | 114966 |
+| dull_small_2.wav | tanks/impacts/hits_recorded/adds/hit_dull_small-002.wav | 1 | 1.197 | 114966 |
+| dull_small_3.wav | tanks/impacts/hits_recorded/adds/hit_dull_small-003.wav | 1 | 1.197 | 114966 |
+| dull_med_1.wav | tanks/impacts/hits_recorded/adds/hit_dull_med-001.wav | 1 | 1.197 | 114966 |
+| dull_med_2.wav | tanks/impacts/hits_recorded/adds/hit_dull_med-002.wav | 1 | 1.197 | 114966 |
+| dull_med_3.wav | tanks/impacts/hits_recorded/adds/hit_dull_med-003.wav | 1 | 1.197 | 114966 |
+| hit_small_far_1.wav | tanks/impacts/hit_far/hit_small_far-001.wav | 1 | 2.000 | 192044 |
+| hit_small_far_2.wav | tanks/impacts/hit_far/hit_small_far-002.wav | 1 | 2.000 | 192044 |
+| hit_small_far_3.wav | tanks/impacts/hit_far/hit_small_far-003.wav | 1 | 2.000 | 192044 |
+| hit_med_far_1.wav | tanks/impacts/hit_far/hit_med_far-001.wav | 1 | 1.951 | 187314 |
+| hit_med_far_2.wav | tanks/impacts/hit_far/hit_med_far-002.wav | 1 | 1.931 | 185460 |
+| hit_med_far_3.wav | tanks/impacts/hit_far/hit_med_far-003.wav | 1 | 1.944 | 186716 |
+| hit_big_far_1.wav | tanks/impacts/hit_far/hit_big_far-001.wav | 1 | 2.409 | 231288 |
+| hit_big_far_2.wav | tanks/impacts/hit_far/hit_big_far-002.wav | 1 | 2.441 | 234386 |
+| hit_big_far_3.wav | tanks/impacts/hit_far/hit_big_far-003.wav | 1 | 2.414 | 231798 |
+| rico_hit_1.wav | tanks/impacts/hit_rico/rico_hit-001.wav | 1 | 1.482 | 142320 |
+| rico_hit_2.wav | tanks/impacts/hit_rico/rico_hit-002.wav | 1 | 1.481 | 142206 |
+| rico_hit_3.wav | tanks/impacts/hit_rico/rico_hit-003.wav | 1 | 1.486 | 142726 |
+| rico_whiz_1.wav | tanks/impacts/hit_rico/rico_whiz-001.wav | 1 | 2.000 | 192044 |
+| rico_whiz_2.wav | tanks/impacts/hit_rico/rico_whiz-002.wav | 1 | 2.000 | 192044 |
+| rico_whiz_3.wav | tanks/impacts/hit_rico/rico_whiz-003.wav | 1 | 2.000 | 192044 |
+| bullet_whiz_1.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-001.wav | 1 | 0.785 | 75386 |
+| bullet_whiz_2.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-002.wav | 1 | 0.787 | 75580 |
+| bullet_whiz_3.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-003.wav | 1 | 0.897 | 86176 |
+| bullet_whiz_4.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-004.wav | 1 | 0.737 | 70750 |
