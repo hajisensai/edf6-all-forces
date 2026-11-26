@@ -649,10 +649,37 @@ SALVO_MARK = 7070.0
 SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
 SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
 SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
+# The salvo's launch, after Ace Combat's multi-missile volleys (the user, 2026-11-26: 「参照别的游戏做导弹发射效果…类似王牌空战」):
+# the rounds ripple off the four rails a frame apart, drop clear of the launcher for a beat, light, fan out, then
+# turn onto their locks off the nose; each splits into four bright children. The carrier is MissileBullet02
+# (docs/missile-re.md §MissileBullet02): its CP[7] [frames, factor] the drop before ignition (the launcher's velocity
+# times factor each frame plus AmmoGravityFactor's gravity; own speed AmmoSpeed and no trail), then the motor (own
+# speed + CP[4] a frame to CP[6], the inherited velocity x0.9 a frame and no gravity).
+SALVO_LOCK_CONE = 1.40          # rad, LockonAngle both halves: about 80 deg off the nose (front hemisphere only, 0x22DF30)
+SALVO_EJECT = 0.6               # m a frame off the rail (AmmoSpeed): a push clear, not a shot
+SALVO_DROP = (9.0, 1.0)         # CP[7]: 0.15 s before the motor lights, the launcher's speed kept
+SALVO_DROP_GRAVITY = 12.0       # AmmoGravityFactor, felt only before ignition: ~2 m of drop, 26 m/s down when it lights
+SALVO_FAN = 0.3                 # rad, FireAccuracy: the rounds leave in a 17 deg cone (polar angle uniform in [0, it])
+SALVO_ACCEL = 0.26              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
+SALVO_TOP = 12.0                # m a frame (CP[6])
+SALVO_HOMING_DELAY = 8.0        # frames after ignition before it steers (CP[8]): the fan opens first
+SALVO_SPLIT_AFTER = 40.0        # frames after ignition it splits (CP[12] = [1, it]: by time, the target alive or not)
+SALVO_SPLIT_CONE = 0.45         # rad, CP[13][2]: the children's cone off the carrier's heading
+SALVO_CHILD_SPEED = 11.0        # m a frame the children leave at (CP[15][5]): the carrier's own speed at the split
+SALVO_CHILD_ACCEL = 0.15        # their CP[4]
+SALVO_CHILD_TURN = 0.15         # their CP[5] (the plugin's PN: lateral acceleration at most |own| x it a frame)
+SALVO_CHILD_TOP = 14.0          # their CP[6]
+SALVO_CHILD_HOMING_DELAY = 6.0  # their CP[8]: a second, smaller fan before they turn
+SALVO_CHILD_SPREAD = (0.9, 1.0)  # their CP[10]: top speed x U[0.9, 1], turn x U[1, 1] (MissileBullet01 ctor 0x267910)
+# AmmoColor, HDR like the stock glowing trails (AWEAPON148's [5, 5, 5, 0.25]): the smoke trail (噴射煙_01.dds) takes
+# it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b) (ctor 0x26BEA4): a white-hot head, a blue-white trail.
+SALVO_COLOUR = (3.0, 3.2, 4.0, 0.4)
+SALVO_CHILD_COLOUR = (2.5, 2.5, 3.0, 0.3)    # CP[15][12]: the children's AmmoColor
 STORES['SALVO'] = Store(
     'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
-            damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=0.42, lock_time=1.0,
+            damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=SALVO_LOCK_CONE, lock_time=1.0,
+            accel=SALVO_ACCEL * 3600.0, top=SALVO_TOP * 60.0, eject=SALVO_EJECT, spread=SALVO_FAN,
             burst=float(SALVO_ROUNDS), burst_gap=1.0, interval=float(SALVO_ROUNDS)),
     _local('Salvo missile', '斉射ミサイル', '齊射飛彈', '齐射导弹', '일제 사격 미사일'),
     per_pylon=SALVO_ROUNDS // 4, pylon_mass=110.0, pylon_drag=0.015)
@@ -2449,13 +2476,24 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         if (source.get('AmmoClass') != 'MissileBullet02' or len(split) != 4
                 or len(split[3].items) != 19 or split[3].items[4] != 'MissileBullet01'):
             raise ValueError('unexpected split missile template')
-        split[0].items[:] = [1.0, 40.0]   # Split after launch even when the target has already died.
-        split[1].items[:] = [0.0, 0.0, 0.24]
+        child = split[3].items[13]
+        if (len(split[3].items[12].items) != 4 or len(child.items) != 12 or len(child.items[10].items) != 2
+                or len(cp.items[7].items) != 2):
+            raise ValueError('unexpected split missile template')
+        split[0].items[:] = [1.0, SALVO_SPLIT_AFTER]   # Split after launch even when the target has already died.
+        split[1].items[:] = [0.0, 0.0, SALVO_SPLIT_CONE]
         split[3].items[2] = float(SALVO_CHILDREN)
-        split[3].items[5] = 5.0
-        split[3].items[13].items[6] = 8.0    # Native guidance can reach a target at the outer edge of the lock box.
+        split[3].items[5] = SALVO_CHILD_SPEED
+        split[3].items[12].items[:] = list(SALVO_CHILD_COLOUR)
+        child.items[4], child.items[5], child.items[6] = SALVO_CHILD_ACCEL, SALVO_CHILD_TURN, SALVO_CHILD_TOP
+        child.items[8] = SALVO_CHILD_HOMING_DELAY
+        child.items[10].items[:] = list(SALVO_CHILD_SPREAD)
         r.set('AmmoClass', 'MissileBullet02')
-        cp.items[8], cp.items[9] = 4.0, 0.0  # Native guidance for the carrier, not MissileBullet01's plugin mode.
+        r.set('AmmoGravityFactor', SALVO_DROP_GRAVITY)
+        r.get('AmmoColor').items[:] = list(SALVO_COLOUR)
+        cp.items[7].items[:] = list(SALVO_DROP)
+        # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
+        cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
         flash_host = dsgo.parse(game.read('WEAPON', JET_GUN_FILES['EDF6VC_JET_GUN_L.SGO'])).root
         flash = copy.deepcopy(flash_host.get('MuzzleFlash_CustomParameter'))
