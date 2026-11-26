@@ -60,6 +60,8 @@ void FirstPersonTurn() noexcept { if(orderAt<7)order[orderAt++]='F'; }
 // The projection turns: 'P' / 'Q' the frame rate's / first person's at a first projection, 'p' / 'q' at any other.
 void FrameRateProject(void*,const int*,bool first) noexcept { if(orderAt<7)order[orderAt++]=first ? 'P' : 'p'; }
 void FirstPersonProject(void*,const int*,bool first) noexcept { if(orderAt<7)order[orderAt++]=first ? 'Q' : 'q'; }
+void PoseSnapshotProject(void*,const int*,bool first) noexcept {if(first && orderAt<7)order[orderAt++]='S';}
+void PoseSnapshotAfter() noexcept {if(orderAt<7)order[orderAt++]='E';}
 int recordProjections=0;   // the projections the stand-in recording makes
 void* StandInRecord(void* sys,std::uint64_t a,std::uint64_t b) {
     if(orderAt<7)order[orderAt++]='G';
@@ -70,6 +72,7 @@ void* StandInRecord(void* sys,std::uint64_t a,std::uint64_t b) {
 void Reset() {
     recordState=0;
     for(auto& b:recordBefores)b=nullptr;
+    for(auto& a:recordAfters)a=nullptr;
     for(auto& p:recordProjects)p=nullptr;
     recordOpen=false;recordProjections=0;
     matches=redirects=shares=0;sigOk=redirectOk=shareOk=true;redirectedTo=nullptr;projectHook=nullptr;
@@ -121,6 +124,13 @@ void Both() {
     recordProjections=1;
     Frame();
     Check(!std::strcmp(order,"RFGQ"),"a projection turn cleared: the other's only");
+    renderrecord::SetProject(renderrecord::Slot::kPoseSnapshot,&PoseSnapshotProject);
+    renderrecord::SetAfter(renderrecord::Slot::kPoseSnapshot,&PoseSnapshotAfter);
+    Frame();
+    Check(!std::strcmp(order,"RFGQSE"),"pose snapshots seal after other projection hooks and retire after recording");
+    recordProjections=0;
+    Frame();
+    Check(!std::strcmp(order,"RFGE"),"an unprojected recording still closes its pose capture");
 }
 
 // Each alone (the frame rate off, or the first person off).

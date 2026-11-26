@@ -14,12 +14,14 @@ using Before=void(*)() noexcept;
 // projection the samples and, on frames without ticks, the poses; each projection's camera blend), then the first person
 // (firstperson.cpp: its session before the recording, its Umbra boxes around the eye this frame draws at the first
 // projection).
-enum class Slot { kFrameRate,kViewDistance,kFirstPerson,kCount };
+enum class Slot { kFrameRate,kViewDistance,kFirstPerson,kPoseSnapshot,kCount };
 // At load, by each feature that registers: the call site checked and redirected once (later calls: whether it is in).
 // False (logged here once): the site is not as read or could not be redirected; nothing registers.
 bool Install() noexcept;
 // `before` runs in `slot`'s turn from now on (nullptr: no longer). Call after Install returned true.
 void Set(Slot slot,Before before) noexcept;
+// Game thread, after the native recording, to close its queued work.
+void SetAfter(Slot slot,Before after) noexcept;
 // Game thread, at every projection 0x1197B50 (scope_lens.cpp's hook, shared with the lens view: this frame's viewports
 // and the projections of EDF.dll's four other callers of 0x11978D0), in Slot order, before the native projection.
 // `first`: the first projection inside the recording this module hooked, once a recording: after the recording's loop

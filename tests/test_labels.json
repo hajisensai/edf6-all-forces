@@ -4706,6 +4706,12 @@
     "tests/redirect_owner_guard.py"
    ]
   },
+  "render_pose": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "render_record": {
    "labels": [
     "plugin-native"

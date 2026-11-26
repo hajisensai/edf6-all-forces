@@ -459,6 +459,18 @@ int main() {
         Current().ride.seat=0;Current().instrumentsReady=true;
     }
     check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
+    {
+        Publish();DrawSnap snapshot{};TakeSnapshot(&snapshot);SnapScope taken(&snapshot);
+        alignas(16) float frozen[32],privatePose[32]{};
+        std::memcpy(frozen,originals,sizeof(frozen));
+        frozen[28]=3.0f;
+        pose[28]=99.0f;  // the writer has since advanced this same native instance
+        PoseRestore captured{};
+        check(InstrumentPose(inst,privatePose,&captured,frozen) && privatePose[0]==0 && privatePose[28]==3.0f &&
+              pose[0]==1 && pose[28]==99.0f && !captured.pose,
+              "a covered instrument edits the draw-owned matrices without modifying the live world");
+        pose[28]=0.0f;
+    }
     Put<const wchar_t*>(bones,0,L"vc_i_0_0_l_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_l_1_0");
     Current().instruments.language=1;drawInstruments();

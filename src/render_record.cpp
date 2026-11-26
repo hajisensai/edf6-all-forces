@@ -41,6 +41,7 @@ constexpr unsigned kRecordCall=0x1198FA4,kRecordDraw=0x11978D0;
 const unsigned char kRecordSig[]={0x41,0xB0,0x01,0x41,0x0F,0xB6,0x96,0xE9,0x0C,0x00,0x00,0x49,0x8B,0xCE,
                                   0xE8,0x27,0xE9,0xFF,0xFF};
 renderrecord::Before recordBefores[static_cast<int>(renderrecord::Slot::kCount)]{};
+renderrecord::Before recordAfters[static_cast<int>(renderrecord::Slot::kCount)]{};
 renderrecord::Project recordProjects[static_cast<int>(renderrecord::Slot::kCount)]{};
 bool recordOpen=false;   // from the recording's call to its return, until its first projection
 int recordState=0;   // 0 not tried, 1 in, -1 refused
@@ -51,9 +52,15 @@ void* RecordHook(void* sys,std::uint64_t a,std::uint64_t b) {
     for(const renderrecord::Before before:recordBefores)
         if(before)before();
     recordOpen=true;
-    void* const r=reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
-    recordOpen=false;
-    return r;
+    void* result=nullptr;
+    __try {
+        result=reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
+    } __finally {
+        recordOpen=false;
+        for(const renderrecord::Before after:recordAfters)
+            if(after)after();
+    }
+    return result;
 }
 
 // Each projection 0x1197B50 (scope_lens.cpp's hook calls it first): the recording's first, once.
@@ -90,6 +97,11 @@ bool Install() noexcept {
 void Set(Slot slot,Before before) noexcept {
     const int i=static_cast<int>(slot);
     if(recordState>0 && i>=0 && i<static_cast<int>(Slot::kCount))recordBefores[i]=before;
+}
+
+void SetAfter(Slot slot,Before after) noexcept {
+    const int i=static_cast<int>(slot);
+    if(recordState>0 && i>=0 && i<static_cast<int>(Slot::kCount))recordAfters[i]=after;
 }
 
 void SetProject(Slot slot,Project project) noexcept {

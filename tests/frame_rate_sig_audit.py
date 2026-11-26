@@ -216,8 +216,9 @@ check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before 
 check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
 check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
 check('renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);' in view, 'the frame rate poses in its render_record projection turn')
-check(re.search(r'recordOpen=true;\s*void\* const r=reinterpret_cast<RecordDrawFn>\(image\+kRecordDraw\)\(sys,a,b\);\s*recordOpen=false;', record_src),
-      'RecordHook opens the recording for its call only (closed when it returns)')
+check(re.search(r'recordOpen=true;\s*void\* result=nullptr;\s*__try\s*\{\s*result=reinterpret_cast<RecordDrawFn>'
+                r'\(image\+kRecordDraw\)\(sys,a,b\);\s*\}\s*__finally\s*\{\s*recordOpen=false;', record_src),
+      'RecordHook closes the projection gate and releases its capture on every exit')
 check('scopelens::SetBeforeProject(&ProjectHook)' in record_src and 'SetBeforeProject' not in view,
       'the projection is shared by render_record.cpp alone')
 check(re.search(r'if\(first\)ProjectStart\(\);', view), 'the samples and poses at the recording\'s first projection only')
@@ -283,4 +284,27 @@ check(img[jr:jr + 5] == arrays['kLoadJobReadSig'] and img[jr - 3:jr] == bytes.fr
 check('if(LoadingNow())return pacing::CountsToBoundary(' in src and 'if(!framerate::LoadingRuns(gate,n))return 0;' in src,
       'while loading the gate counts first and waits to tick boundaries')
 check(re.search(r'constexpr int kGuards=8;', src) and 'guards!=kGuards' in src, 'the gate needs all 8 guards')
+# Pose snapshot markers share the native FIFO with the actual draw consumers.
+pose_src = open(os.path.join(ROOT, 'src', 'render_pose.cpp'), encoding='utf-8').read()
+pose_constants = {name: int(value, 16)
+                  for name, value in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b', pose_src)}
+pose_signatures = {name: bytes(int(byte, 16) for byte in re.findall(r'0x([0-9a-fA-F]{2})', data))
+                   for name, data in re.findall(r'\b(k\w+)Sig\[\]=\{([^}]*)\}', pose_src)}
+for site in ('kWrite', 'kPalette', 'kMesh', 'kAlloc', 'kCommit'):
+    at, sig = pose_constants[site], pose_signatures[site]
+    check(img[at:at + len(sig)] == sig, f'render pose: {site} entry matches')
+for site, prefix in (('kWrite', '33d24c8bc1'), ('kPalette', 'b878c00000'), ('kMesh', '4c894c2420')):
+    check(pose_signatures[site][:5] == bytes.fromhex(prefix),
+          f'render pose: {site} trampoline copies complete position-independent instructions')
+check(img[0x11009CB:0x11009CF] == bytes.fromhex('4d8b5008'),
+      'render pose: skinning reads the matrix pointer from list+8')
+check(img[0x1103EC6:0x1103ED2] == bytes.fromhex('488b457748c1e10648034808'),
+      'render pose: the rigid mesh uses the same list+8, indexed by a 64-byte matrix')
+check(img[0x1100F2C:0x1100F30] == bytes.fromhex('498b4030'),
+      'render pose: the writer destinations are at instance+0x30')
+check(img[0x51D46:0x51D52] == bytes.fromhex('4863435048c1e00448034328'),
+      'render pose: each producer FIFO unit occupies 16 bytes')
+check(img[0x111B946:0x111B95B] ==
+      bytes.fromhex('488b38e8b265f3fe4885ff742a488bd3488bceffd7'),
+      'render pose: the dispatcher pops one unit, then calls its callback with context and read side')
 print(f'frame rate signatures: {checks} checks ok')
