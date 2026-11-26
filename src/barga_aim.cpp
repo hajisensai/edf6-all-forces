@@ -1,7 +1,8 @@
 // The Balam's impact marker (docs/feature-barga-aim.md; the pure part barga_aim.h): while this machine's player drives a
 // 501_FortressRobo (V515 Retro Balam / V605 Barga Cannon), from the vehicle's own state each frame:
-//  - idle (no hit group lit): each fist's reach as an arc at the height it strikes, bright on the side whose attack may start now;
-//  - while hit groups are lit: their spheres, and where each meets the ground or an enemy's lock point;
+//  - each fist (LB left, RB right): a ring as wide as its hit sphere where the attack its button would start now
+//    reaches, bright when one may start, dim (its opening jab) when none may;
+//  - while hit groups are lit: where a sphere touches the ground or meets an enemy's lock point;
 //  - V605, during ground_charge / attack_cannon and its burst: where the rounds still to come land, and their blast.
 // Read on the game thread from the vehicle's input (crew.cpp InputHook, the 501's 0x60AEC0), published with the step it
 // was read in (step_fresh.h) and drawn by hud.cpp BargaAimMarks. Local state only: host and guests alike read their own
@@ -190,21 +191,19 @@ void SphereContacts(const unsigned char* v,bargaaim::Readout& r) noexcept {
     VisitEnemies(v,&EnemyHit,&ctx);
 }
 
-// The fists' arcs (idle): each side's attack that may start now, else its opening one.
-void ReadArcs(const unsigned char* v,const bargaaim::Variant& variant,unsigned flags,bargaaim::Readout& r) noexcept {
+// The fists' marks: each side's attack that may start now, else its opening one.
+void ReadFists(const unsigned char* v,const bargaaim::Variant& variant,unsigned flags,bargaaim::Readout& r) noexcept {
     const auto rows=reinterpret_cast<const float*>(v+kMatrix);
     for(int side=0;side<2;++side) {
-        auto& a=r.arc[side];
-        a=bargaaim::FistArc{};
+        auto& a=r.fist[side];
+        a=bargaaim::FistMark{};
         const auto pick=bargaaim::PickFist(variant,side,r.current,r.accept,flags);
         a.attack=pick.next>=0 ? pick.next : pick.base;
         if(a.attack<0)continue;
         a.on=true;a.next=pick.next>=0;
         const auto& attack=variant.attacks[a.attack];
-        float pts[bargaaim::kArcPoints][3];
-        bargaaim::ReachArc(attack,bargaaim::kArcHalfSpan,bargaaim::kArcPoints,pts);
-        for(int i=0;i<bargaaim::kArcPoints;++i)bargaaim::ModelToWorld(rows,pts[i],a.pts[i]);
-        bargaaim::ModelToWorld(rows,attack.reach,a.strike);
+        bargaaim::ModelToWorld(rows,attack.reach,a.at);
+        a.r=attack.radius;
     }
 }
 
@@ -286,7 +285,7 @@ void BargaAimFrame(unsigned char* v) noexcept {
     LitLog lit{};
     ReadSpheres(v,r,log ? &lit : nullptr);
     if(r.spheres)SphereContacts(v,r);
-    else ReadArcs(v,variant,flags,r);
+    ReadFists(v,variant,flags,r);   // mid-attack too: the ring is where the combo's next blow of that button lands
     float frozen[3]={},pos[3]={},nativeDir[3]={};
     const unsigned char* w=nullptr;
     if(variant.cannon>=0 && (w=SwingShoot(seat))!=nullptr) {
@@ -300,9 +299,9 @@ void BargaAimFrame(unsigned char* v) noexcept {
     // vsnprintf fail and the whole line come out empty (the 2026-11-27 run: an empty line before each "BARGA sphere").
     char litNames[3*_countof(lit.names)]{};
     if(lit.names[0] && !WideCharToMultiByte(CP_UTF8,0,lit.names,-1,litNames,sizeof(litNames),nullptr,nullptr))litNames[0]='\0';
-    Log("BARGA v=%p %s current=%d accept=%d flags=%u lit=[%s] spheres=%d arcs L=%d%s R=%d%s fwd=(%.2f,%.2f,%.2f)",v,variant.file,
-        r.current,r.accept,flags,litNames,r.spheres,r.arc[bargaaim::kLeft].attack,r.arc[bargaaim::kLeft].next ? "*" : "",
-        r.arc[bargaaim::kRight].attack,r.arc[bargaaim::kRight].next ? "*" : "",rows[8],rows[9],rows[10]);
+    Log("BARGA v=%p %s current=%d accept=%d flags=%u lit=[%s] spheres=%d fists L=%d%s R=%d%s fwd=(%.2f,%.2f,%.2f)",v,variant.file,
+        r.current,r.accept,flags,litNames,r.spheres,r.fist[bargaaim::kLeft].attack,r.fist[bargaaim::kLeft].next ? "*" : "",
+        r.fist[bargaaim::kRight].attack,r.fist[bargaaim::kRight].next ? "*" : "",rows[8],rows[9],rows[10]);
     for(int i=0;i<r.spheres && i<4;++i) {
         const auto& s=r.sphere[i];
         float local[3];

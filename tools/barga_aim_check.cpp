@@ -10,9 +10,11 @@
 //  - the combo's availability (0x60F570's rule) and the variant match over both generated tables: a jab opens from
 //    idle only, a follow-up only after the attack it follows, a stomp needs flag 1, nothing while the input is not
 //    accepted; a list one entry off matches none;
-//  - the fists' picks by button (mask 1 left, 2 right; V515's maxBeat is a right-button move led by the left arm) and
-//    their arcs (at the strike's height, reach + radius out, centred on the reach's bearing), and that the arc lies in
-//    the view from the cockpit's eye (41.3 m over the feet, as the 2026-11-27 run logged) where a ground arc did not.
+//  - the fists' picks by button (mask 1 left, 2 right; V515's maxBeat is a right-button move led by the left arm); the
+//    idle rings (each jab's reach and sphere) in the view from the cockpit's eye (41.3 m over the feet, 6.3 m ahead, as
+//    the 2026-11-27 run logged) and either side of its middle, apart (the arcs they replace read as one line);
+//  - the off-screen chevron (ToEdge): on the inset border every way, the way to turn from the clip x, y (right behind
+//    the camera still right), straight behind down.
 // Exit code 1 when one fails. cmake --build build --target barga_aim_check && build\barga_aim_check.exe
 #include "barga_aim.h"
 #include <cmath>
@@ -152,42 +154,59 @@ void Combo() {
     Expect(std::strcmp(kVariants[0].attacks[kVariants[0].charge].name,"ground_charge")==0,"V515 charge index");
 }
 
-void Arcs() {
-    const Attack& a=kVariants[0].attacks[Find(kVariants[0],"jab_l")];
-    float pts[kArcPoints][3];
-    Expect(ReachArc(a,kArcHalfSpan,kArcPoints,pts)==kArcPoints,"arc points");
-    const float r=Horizontal(a)+a.radius,bearing=std::atan2(a.reach[0],a.reach[2]);
-    bool onCircle=true;
-    for(const auto& p:pts)onCircle=onCircle && Near(std::sqrt(p[0]*p[0]+p[2]*p[2]),r,1e-3f) && p[1]==a.reach[1];
-    Expect(onCircle,"at the strike's height at reach + radius",r);
+void Fists() {
     // In the view from the cockpit: the eye the 2026-11-27 run logged ("eye at its cockpit (-295.45 42.27 158.07)", the
     // vehicle at (-301,1,155) heading (0.86,0,0.51): 41.3 m up, 6.3 m ahead). The view is pi/4 high (docs/zoom-re.md:
     // 0xF8906, fovY pi/4 over the zoom; the seat's camera is the soldier's), pi/8 either side of its middle. Looking level,
-    // the idle arcs (the opening attacks, the jabs) are within it; a ground arc (y 0) was some 50 deg under it. (The
-    // low follow-ups, maxBeat's downward beat, land lower: in view as the player looks down at them.)
+    // the idle rings' centres (the opening attacks' reach points, the jabs) are within it (a ring's lower edge may run
+    // off it: V605's jab_r is 0.32 rad down, its ring 0.31 rad wide, drawn clipped by the screen). (The low follow-ups,
+    // maxBeat's downward beat, land lower: in view as the player looks down, else the chevron points there.)
     constexpr float kEyeUp=41.3f,kEyeAhead=6.3f,kInView=3.14159265f/8.0f;
     float worst=0.0f;
     for(int vi=0;vi<kVariantCount;++vi)
         for(int i=0;i<kVariants[vi].count;++i) {
             const Attack& x=kVariants[vi].attacks[i];
             if(FistSide(x)<0 || x.limb<0 || x.prevCount!=0 || x.flag!=0)continue;
-            float arc[kArcPoints][3];
-            ReachArc(x,kArcHalfSpan,kArcPoints,arc);
-            for(const auto& p:arc) {
-                const float ahead=p[2]-kEyeAhead,flat=std::sqrt(p[0]*p[0]+ahead*ahead);
-                worst=std::fmax(worst,std::fabs(std::atan2(p[1]-kEyeUp,flat)));
-            }
+            const float ahead=x.reach[2]-kEyeAhead,flat=std::sqrt(x.reach[0]*x.reach[0]+ahead*ahead);
+            worst=std::fmax(worst,std::fabs(std::atan2(x.reach[1]-kEyeUp,flat)));
         }
-    Expect(worst<kInView,"the idle arcs in the level view from the eye (rad)",worst,kInView);
-    {
-        const float ahead=r*std::cos(bearing)-kEyeAhead,flat=std::sqrt(r*std::sin(bearing)*r*std::sin(bearing)+ahead*ahead);
-        Expect(std::fabs(std::atan2(-kEyeUp,flat))>kInView,"a ground arc would be out of it",std::atan2(-kEyeUp,flat));
+    Expect(worst<kInView,"the idle rings' centres in the level view from the eye (rad)",worst,kInView);
+    // The two sides apart on the screen (the arcs they replace were two lines at one height: one line to the eye):
+    // the jabs' bearings from the eye differ by more than their rings' width.
+    for(int vi=0;vi<kVariantCount;++vi) {
+        const Attack& l=kVariants[vi].attacks[Find(kVariants[vi],"jab_l")];
+        const Attack& r=kVariants[vi].attacks[Find(kVariants[vi],"jab_r")];
+        const float bl=std::atan2(l.reach[0],l.reach[2]-kEyeAhead),br=std::atan2(r.reach[0],r.reach[2]-kEyeAhead);
+        const float half=std::asin(l.radius/std::sqrt(l.reach[0]*l.reach[0]+(l.reach[2]-kEyeAhead)*(l.reach[2]-kEyeAhead)));
+        Expect(bl>0.0f && br<0.0f && bl-br>half,"the jabs' rings either side of the middle",bl,br);
     }
-    const auto& mid=pts[kArcPoints/2];
-    Expect(Near(std::atan2(mid[0],mid[2]),bearing),"centred on the bearing",std::atan2(mid[0],mid[2]),bearing);
-    Expect(Near(std::atan2(pts[0][0],pts[0][2]),bearing-kArcHalfSpan) &&
-           Near(std::atan2(pts[kArcPoints-1][0],pts[kArcPoints-1][2]),bearing+kArcHalfSpan),"half span either side");
-    Expect(ReachArc(a,kArcHalfSpan,1,pts)==0,"fewer than two: none");
+}
+
+void Edges() {
+    constexpr float kW=1280.0f,kH=720.0f,kIn=30.0f;
+    auto on=[&](const EdgeMark& e,float x,float y,const char* what){Expect(Near(e.x,x,0.5f) && Near(e.y,y,0.5f),what,e.x,e.y);};
+    on(ToEdge(2.0f,0.0f,kW,kH,kIn),kW-kIn,kH*0.5f,"right: the right border's middle");
+    on(ToEdge(-2.0f,0.0f,kW,kH,kIn),kIn,kH*0.5f,"left");
+    on(ToEdge(0.0f,3.0f,kW,kH,kIn),kW*0.5f,kIn,"up (clip y up, screen y down)");
+    on(ToEdge(0.0f,0.0f,kW,kH,kIn),kW*0.5f,kH-kIn,"straight behind: down");
+    // Behind and to the right (w < 0 with cx > 0): still the right; dividing by w would have put it left.
+    const auto behind=ToEdge(0.5f,-0.1f,kW,kH,kIn);
+    Expect(behind.x>kW*0.5f && behind.dx>0.0f,"behind and right: right",behind.x,behind.dx);
+    // The way is the screen's: a clip (1, 1) is the corner's direction, (w/2, -h/2) in pixels.
+    const auto corner=ToEdge(1.0f,1.0f,kW,kH,kIn);
+    Expect(Near(corner.dx*kH,-corner.dy*kW,1e-3f) && corner.dx>0.0f,"the corner's direction",corner.dx,corner.dy);
+    Expect(corner.x<=kW-kIn+0.5f && corner.y>=kIn-0.5f && (Near(corner.x,kW-kIn,0.5f) || Near(corner.y,kIn,0.5f)),
+           "on the inset border",corner.x,corner.y);
+    for(int a=0;a<36;++a) {
+        const float ang=6.2831853f*static_cast<float>(a)/36.0f;
+        const auto e=ToEdge(std::cos(ang),std::sin(ang),kW,kH,kIn);
+        const bool inside=e.x>=kIn-0.5f && e.x<=kW-kIn+0.5f && e.y>=kIn-0.5f && e.y<=kH-kIn+0.5f;
+        const bool border=Near(e.x,kIn,0.5f) || Near(e.x,kW-kIn,0.5f) || Near(e.y,kIn,0.5f) || Near(e.y,kH-kIn,0.5f);
+        Expect(inside && border && Near(e.dx*e.dx+e.dy*e.dy,1.0f,1e-4f),"every way: on the border, a unit direction",e.x,e.y);
+    }
+}
+
+void Picks() {
     // The reaches are ahead of the feet and over them (the tables are the model's).
     for(int vi=0;vi<kVariantCount;++vi)
         for(int i=0;i<kVariants[vi].count;++i) {
@@ -231,7 +250,9 @@ int main() {
     Rounds();
     Spheres();
     Combo();
-    Arcs();
+    Fists();
+    Edges();
+    Picks();
     std::printf("%d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }

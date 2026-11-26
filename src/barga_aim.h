@@ -88,19 +88,21 @@ inline void ModelToWorld(const float* rows,const float* p,float* out) noexcept {
     for(int k=0;k<3;++k)out[k]=p[0]*rows[k]+p[1]*rows[4+k]+p[2]*rows[8+k]+rows[12+k];
 }
 
-// The arc of a reach: `n` points (n >= 2) at the height the fist strikes (the reach's model y) at the reach's horizontal
-// distance plus its radius, `halfSpan` rad either side of its bearing, in the model's frame. Not on the feet's plane:
-// the Balam's eye is about 41 m over its feet (the 2026-11-27 run: "FP in a vehicle ... eye at its cockpit" 41.3 m over
-// the vehicle's position) and the fist ends about 30 m ahead, so a ground arc lies some 50 deg under the view's middle,
-// off the screen; the fist's own height is where it lands.
-inline int ReachArc(const Attack& a,float halfSpan,int n,float (*out)[3]) noexcept {
-    if(n<2)return 0;
-    const float r=Horizontal(a)+a.radius,bearing=std::atan2(a.reach[0],a.reach[2]);
-    for(int i=0;i<n;++i) {
-        const float b=bearing-halfSpan+2.0f*halfSpan*static_cast<float>(i)/static_cast<float>(n-1);
-        out[i][0]=r*std::sin(b);out[i][1]=a.reach[1];out[i][2]=r*std::cos(b);
-    }
-    return n;
+// Where to point at a mark the camera does not show (off the screen or behind it): `cx`, `cy` its clip x and y (the
+// view-projection's, before the divide by w). They point the way to turn from the screen's middle whatever w's sign:
+// in front (w > 0) they are the screen offset times w; behind (w <= 0) a point to the right still has cx > 0, where
+// dividing by w would flip it. The chevron goes where that ray from the middle meets the screen's border less `inset`
+// px; dx, dy its unit direction in pixels (y down). Straight behind (cx = cy = 0): down, the way to look round.
+struct EdgeMark { float x,y,dx,dy; };
+inline EdgeMark ToEdge(float cx,float cy,float width,float height,float inset) noexcept {
+    float dx=cx*width*0.5f,dy=-cy*height*0.5f;
+    const float len=std::sqrt(dx*dx+dy*dy);
+    if(len>1e-6f){dx/=len;dy/=len;}
+    else{dx=0.0f;dy=1.0f;}
+    const float hw=std::fmax(width*0.5f-inset,0.0f),hh=std::fmax(height*0.5f-inset,0.0f);
+    const float kx=std::fabs(dx)>1e-6f ? hw/std::fabs(dx) : 1e30f,ky=std::fabs(dy)>1e-6f ? hh/std::fabs(dy) : 1e30f;
+    const float k=std::fmin(kx,ky);
+    return {width*0.5f+dx*k,height*0.5f+dy*k,dx,dy};
 }
 
 // A hit sphere's centre (0x6BB420): its offset (x, y, z, w) times its bone's world rows (16 floats from bone +0xB0).
@@ -166,16 +168,16 @@ inline int SampleRounds(int toCome,int most,int* left) noexcept {
 }
 
 // --- what barga_aim.cpp publishes and hud.cpp draws (world points) ---
-constexpr int kArcPoints=13;
-constexpr float kArcHalfSpan=0.35f;   // rad either side of a reach's bearing (a draw choice: about 20 deg)
 constexpr int kMostSpheres=16,kMostRounds=20;
 // Every how many sampled rounds a blast ring is drawn (the last one always): a ring each would bury the line.
 constexpr int kRingEvery=4;
-struct FistArc {
+// A fist's mark: a ring as wide as its hit sphere at the reach of the attack its button would start now. No sweep line:
+// the tables hold each attack's farthest point only, not the path to it (a hook's sideways travel is not measured).
+struct FistMark {
     bool on,next;              // next: an attack of this fist may start now (drawn bright), else its opening one dim
     int attack;                // its index in the variant's table
-    float pts[kArcPoints][3];  // the reach arc (at the strike's height)
-    float strike[3];           // the sphere's centre at its reach
+    float at[3];               // the sphere's centre at its reach (world)
+    float r;                   // the sphere's radius (m)
 };
 struct Sphere {
     float c[3],prev[3],r;      // now, where its last test was (point +0x10), the radius
@@ -187,7 +189,7 @@ struct Sphere {
 struct Readout {
     int variant,current;
     bool accept;
-    FistArc arc[2];
+    FistMark fist[2];          // kLeft (LB), kRight (RB)
     int spheres;
     Sphere sphere[kMostSpheres];
     bool cannon,bursting;      // the cannon's marks: during ground_charge / attack_cannon, or while a burst runs

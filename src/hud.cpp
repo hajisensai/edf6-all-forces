@@ -2951,12 +2951,7 @@ void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,
     Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
     Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
 }
-// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md): its fists' reach at their height (green on the side
-// whose attack may start now, dim the other), its lit hit spheres (a ring as wide as the sphere looks; red where one
-// touches the ground, a cross where it meets the ground under it, a target ring on an enemy in its sweep), and V605's
-// cannon (a line through where the rounds still to come land, their blast rings every kRingEvery and the last; a round
-// that lands nowhere is left out).
-// Returns how many of the points are on the screen (the Debug=1 "BARGA draw" line).
+// A line through world points, broken where one is off the screen. Returns how many of the points are on it.
 int WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float height,const float (*pts)[3],int n,float t,
                   const float* rgba) noexcept {
     float px=0.0f,py=0.0f;
@@ -2981,8 +2976,66 @@ void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,c
     }
     WorldPolyline(drawer,ctx,vp,width,height,pts,kSides+1,t,rgba);
 }
+// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md):
+//  - each fist: a ring as wide as its hit sphere looks, at the reach of the attack its button would start now, with a
+//    centre cross and its letter (L the LB side cyan, R the RB side green; bright when that button may start one, dim
+//    when not); off the screen or behind the camera, a chevron at the screen's border pointing the way to it;
+//  - a lit sphere: a cross where it touches the ground or meets an enemy (the spheres themselves are left out: the
+//    2026-11-27 run had them on the screen hardly ever, "spheres 0/3", at most 1/3);
+//  - V605's cannon: a line through where the rounds still to come land, their blast rings every kRingEvery and the
+//    last; a round that lands nowhere is left out.
+// The clip coordinates of `p` (Project's, before the divide).
+void Clip(const float* vp,const float* p,float* c) noexcept {
+    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+}
+// How wide a world sphere of radius `r` at `c` looks (px) from its centre's screen point (x, y): its offsets along the
+// world axes projected, the widest.
+float ScreenRadius(const float* vp,float width,float height,const float* c,float r,float x,float y) noexcept {
+    float radius=0.0f;
+    for(int k=0;k<3;++k) {
+        float e[3]={c[0],c[1],c[2]};e[k]+=r;
+        float ex,ey,ed;
+        if(Project(vp,e,width,height,&ex,&ey,&ed))radius=std::fmax(radius,std::sqrt((ex-x)*(ex-x)+(ey-y)*(ey-y)));
+    }
+    return radius;
+}
+// The side's letter in strokes, `h` px high, its top left at (x, y).
+void FistLetter(void* drawer,void* ctx,int side,float x,float y,float h,float t,const float* rgba) noexcept {
+    const float w=h*0.6f;
+    Seg(drawer,ctx,x,y,x,y+h,t,rgba);
+    if(side==bargaaim::kLeft){Seg(drawer,ctx,x,y+h,x+w,y+h,t,rgba);return;}
+    Seg(drawer,ctx,x,y,x+w*0.7f,y,t,rgba);Seg(drawer,ctx,x+w*0.7f,y,x+w,y+h*0.25f,t,rgba);
+    Seg(drawer,ctx,x+w,y+h*0.25f,x+w*0.7f,y+h*0.5f,t,rgba);Seg(drawer,ctx,x+w*0.7f,y+h*0.5f,x,y+h*0.5f,t,rgba);
+    Seg(drawer,ctx,x+w*0.35f,y+h*0.5f,x+w,y+h,t,rgba);
+}
+// What the fist's mark came out as (the Debug=1 "BARGA draw" line).
+struct FistDrawn { char how; float x,y,r; };   // how: 'r' a ring on the screen, 'e' a chevron at the edge, '-' none
+FistDrawn FistMarkDraw(void* drawer,void* ctx,const float* vp,float width,float height,float s,int side,
+                       const bargaaim::FistMark& f) noexcept {
+    alignas(16) static const float kDimCyan[4]={0.3f,0.85f,1.0f,0.45f};
+    alignas(16) static const float kDimGreen[4]={0.35f,1.0f,0.35f,0.45f};
+    if(!f.on)return {'-',-1.0f,-1.0f,0.0f};
+    const float* const rgba=side==bargaaim::kLeft ? (f.next ? kCyan : kDimCyan) : (f.next ? kGreen : kDimGreen);
+    const float t=(f.next ? 3.0f : 2.0f)*s,letter=14.0f*s;
+    float x,y,depth;
+    if(Project(vp,f.at,width,height,&x,&y,&depth)) {
+        const float r=std::fmin(std::fmax(ScreenRadius(vp,width,height,f.at,f.r,x,y),10.0f*s),height*0.4f),c=6.0f*s;
+        Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,32,rgba);
+        Seg(drawer,ctx,x-c,y,x+c,y,t,rgba);Seg(drawer,ctx,x,y-c,x,y+c,t,rgba);
+        FistLetter(drawer,ctx,side,x+r*0.72f+3.0f*s,y-r*0.72f-letter,letter,t,rgba);
+        return {'r',x,y,r};
+    }
+    float c[4];
+    Clip(vp,f.at,c);
+    const float size=12.0f*s;
+    const auto e=bargaaim::ToEdge(c[0],c[1],width,height,size*2.5f);
+    // A chevron: its tip at the edge point, its arms back along the direction.
+    const float bx=e.x-e.dx*size,by=e.y-e.dy*size,px=-e.dy*size*0.8f,py=e.dx*size*0.8f;
+    Seg(drawer,ctx,bx+px,by+py,e.x,e.y,t,rgba);Seg(drawer,ctx,e.x,e.y,bx-px,by-py,t,rgba);
+    FistLetter(drawer,ctx,side,e.x-e.dx*size*2.2f-letter*0.3f,e.y-e.dy*size*2.2f-letter*0.5f,letter,t,rgba);
+    return {'e',e.x,e.y,0.0f};
+}
 void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const bargaaim::Readout& r) noexcept {
-    alignas(16) static const float kDimGreen[4]={0.35f,1.0f,0.35f,0.4f};
     const float t=2.0f*s;
     // Debug=1: what of it is on the screen, every kBargaDrawLogMs (the draw's half of the game thread's "BARGA v=" line).
     constexpr ULONGLONG kBargaDrawLogMs=500;
@@ -2990,41 +3043,20 @@ void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float heig
     const ULONGLONG now=GetTickCount64();
     const bool log=Cfg().debug && now-logged>=kBargaDrawLogMs;
     if(log)logged=now;
-    int arcShown[2]={},spheresShown=0,roundsShown=0;
-    float firstX=-1.0f,firstY=-1.0f,firstDepth=-1.0f;
-    for(int side=0;side<2;++side) {
-        const auto& a=r.arc[side];
-        if(!a.on)continue;
-        arcShown[side]=WorldPolyline(drawer,ctx,vp,width,height,a.pts,bargaaim::kArcPoints,a.next ? t*1.5f : t,a.next ? kGreen : kDimGreen);
-    }
+    FistDrawn drawn[2];
+    for(int side=0;side<2;++side)drawn[side]=FistMarkDraw(drawer,ctx,vp,width,height,s,side,r.fist[side]);
+    int contacts=0,contactsShown=0,roundsShown=0;
     for(int i=0;i<r.spheres && i<bargaaim::kMostSpheres;++i) {
         const auto& sp=r.sphere[i];
-        float x,y,depth;
-        if(Project(vp,sp.c,width,height,&x,&y,&depth)) {
-            ++spheresShown;
-            if(firstDepth<0.0f){firstX=x;firstY=y;firstDepth=depth;}
-            float radius=0.0f;
-            for(int k=0;k<3;++k) {
-                float e[3]={sp.c[0],sp.c[1],sp.c[2]};e[k]+=sp.r;
-                float ex,ey,ed;
-                if(Project(vp,e,width,height,&ex,&ey,&ed))radius=std::fmax(radius,std::sqrt((ex-x)*(ex-x)+(ey-y)*(ey-y)));
-            }
-            radius=std::fmin(std::fmax(radius,6.0f*s),height*0.5f);
-            Arc(drawer,ctx,x,y,radius,0.0f,kTurn,t,24,sp.touch ? kRed : kAmber);
-        }
         float sx,sy;
-        if(sp.ground)ImpactCross(drawer,ctx,vp,width,height,s,sp.groundAt,&sx,&sy);
-        if(sp.target)TargetRing(drawer,ctx,vp,width,height,s,sp.targetAt);
+        if(sp.touch && sp.ground){++contacts;contactsShown+=ImpactCross(drawer,ctx,vp,width,height,s,sp.groundAt,&sx,&sy) ? 1 : 0;}
+        if(sp.target){++contacts;contactsShown+=ImpactCross(drawer,ctx,vp,width,height,s,sp.targetAt,&sx,&sy) ? 1 : 0;}
     }
     const int n=!r.cannon || r.rounds<=0 ? 0 : r.rounds<bargaaim::kMostRounds ? r.rounds : bargaaim::kMostRounds;
-    if(log) {
-        float ax=-1.0f,ay=-1.0f,ad=-1.0f;   // the bright (else the first) arc's middle point
-        const auto& shownArc=r.arc[r.arc[bargaaim::kRight].next || !r.arc[bargaaim::kLeft].on ? bargaaim::kRight : bargaaim::kLeft];
-        if(shownArc.on && !Project(vp,shownArc.pts[bargaaim::kArcPoints/2],width,height,&ax,&ay,&ad))ax=ay=ad=-1.0f;
-        Log("BARGA draw %.0fx%.0f arcs L=%d/%d R=%d/%d mid=(%.0f,%.0f) %.1f m spheres %d/%d first=(%.0f,%.0f) %.1f m rounds %d",
-            width,height,arcShown[0],r.arc[0].on ? bargaaim::kArcPoints : 0,arcShown[1],r.arc[1].on ? bargaaim::kArcPoints : 0,ax,ay,ad,
-            spheresShown,r.spheres,firstX,firstY,firstDepth,n);
-    }
+    if(log)
+        Log("BARGA draw %.0fx%.0f L=%c%s (%.0f,%.0f) r=%.0f R=%c%s (%.0f,%.0f) r=%.0f spheres %d contacts %d/%d rounds %d",
+            width,height,drawn[0].how,r.fist[0].next ? "*" : "",drawn[0].x,drawn[0].y,drawn[0].r,
+            drawn[1].how,r.fist[1].next ? "*" : "",drawn[1].x,drawn[1].y,drawn[1].r,r.spheres,contactsShown,contacts,n);
     if(n<=0)return;
     // Only the rounds that land: one that meets nothing ends its flight in the air (RoundLands' finite end, up to
     // km out), no point on the ground to mark, so the line breaks there and it has no ring or cross.

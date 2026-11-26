@@ -6,14 +6,18 @@
 
 | 时机 | 画什么 |
 | --- | --- |
-| 待机（没有命中判定亮着） | 两只拳头够得到的弧线，画在出拳的高度（表里够及点的 y，约 35～48 m）：这一下连招能出的一侧亮绿、加粗，另一侧暗绿（画的是它的起手拳） |
-| 命中判定亮着（出拳 / 出脚中） | 每个判定球画一个圈（大小与球在屏幕上的大小一致；碰到地面时变红）；球正下方的地面打黄色十字；扫过敌人锁定点时在敌人身上套绿色目标圈 |
+| 一直（待机和出拳中都画） | 每只拳头一个圈：圈心是这个键**现在**按下去会出的那一招的够及点（表里判定球心，约 35～48 m 高），圈的大小 = 手部判定球（6.25 m）在屏幕上的大小；圈心小十字，圈右上写 L / R。L（LB）青色、R（RB）绿色；这个键现在能出招时亮、加粗，不能时暗（画它的起手拳）。圈心不在屏幕上（含在镜头背后）时，在屏幕边上画一个指向它的箭头（V 形）加字母 |
+| 命中判定亮着（出拳 / 出脚中） | 判定球碰到地面处、扫到敌人锁定点处打黄色十字；判定球本身不画 |
 | V605 `ground_charge` / `attack_cannon` 中、连射进行中 | 剩余炮弹的落点连线（蓄力时琥珀色、连射中红色），每 4 发和最后一发画 50 m（AmmoExplosion）爆炸圈，下一发打黄色十字；连射中只画还没打出去的；打不到任何东西（射线在空中结束）的弹不画，连线在那里断开 |
 
 - 只看本机：只在本机玩家坐 0 号座位（驾驶位）时读，房主和客人一样，不发联机消息。
 - 开关：`EDF6VehicleCrew.ini` 的 `BargaAimMarker=1`（默认开，0 关）。`CONFIG hud ... bargaAimMarker=%d` 一行记下读到的值。
 - 和原版载具 HUD（`src/vhud.cpp`）不重复：这里在画 V605 加农时（`BargaOwnsCannon`：同一把武器、开关开着、本帧结果新鲜），vhud 不再给这门炮画自己的弹着点；标记关掉或没在画时，vhud 照旧画。
-- 为什么弧线不画在地面：全周天第一人称的眼睛在脚上约 41.3 m、前方约 6.3 m，视野竖直 ±22.5°（fovY = π/4，`docs/zoom-re.md`）；脚前 25～35 m 的地面在视线下方约 50°，整条弧都在屏幕外（2026-11-27 实机：日志有数据、画面什么都没有）。
+- 为什么是圈、不是弧线：
+  - 第一版是地面弧线：全周天第一人称的眼睛在脚上约 41.3 m、前方约 6.3 m，视野竖直 ±22.5°（fovY = π/4，`docs/zoom-re.md`）；脚前 25～35 m 的地面在视线下方约 50°，整条弧都在屏幕外（2026-11-27 第一局：日志有数据、画面什么都没有）。
+  - 第二版把弧线抬到出拳高度：两侧的弧几乎同高，眼睛又就在那个高度附近，看上去是地平线附近一条横贯屏幕的细绿线；出招中变成浮在天上的两条细线，读不出「拳头落在哪」（2026-11-27 第二局截图）。
+  - 判定球几乎从不在屏幕上（`spheres 0/3`，最多 1/3），画了也没用，所以只留它碰到地面 / 敌人处的十字。
+  - 不画「横扫路径」：表里每招只有最远点，没有到那里的路径（勾拳的横向移动没测过），画不出可信的扫掠线。
 
 ## 代码
 
@@ -47,13 +51,14 @@
 
 ## 已离线验证
 
-- `barga_aim_check`：190 项全过，`build.cmd` 编译零警告。覆盖的内容：
+- `barga_aim_check`：229 项全过，`build.cmd` 编译零警告。覆盖的内容：
   - 扫射角公式与端点、方向（仰角减扫射角、保持航向、零向量取 +Z）。
   - 连射进度、剩余弹采样（下一发与最后一发必在、按发射顺序）。
   - 判定球心。
   - 两套生成表上的连招可出规则与变体匹配（错一条就不匹配）。
   - 两侧拳头的选择（按按键：两套表的 `maxBeat` 都在右侧；V515 `ground_charge` 之后右 = `maxBeat`、左 = `maxHook_l`）。
-  - 弧线在出拳高度；按实机眼位（脚上 41.3 m、前 6.3 m）待机两条弧都在 ±22.5° 视野内，同样的弧放在地面则在视野外。
+  - 按实机眼位（脚上 41.3 m、前 6.3 m）平视时，两套表起手拳的圈心都在 ±22.5° 视野内（最低的是 V605 `jab_r`，约 0.32 rad；它的圈下缘会出屏，按屏幕裁掉），左右两圈分在中线两侧、间距大于圈宽。
+  - 出屏箭头（`ToEdge`）：任何方向都落在内缩后的屏幕边上、方向为单位向量；在镜头背后偏右的点仍指向右（直接除以 w 会翻到左）；正后方指向下。
   - 连射状态：扫射中按剩余、等待按整轮、剩 0 按着重扫 = 整轮、剩 0 松开 = 0、其它状态 = 0。
   - 表的合理性（够及点在脚前、脚上，左拳在 +X）。
 - `gen_barga_reach.py --check`：`current`。
@@ -63,20 +68,26 @@
 - 数据路径通：`BARGA v=` / `BARGA sphere` 行都在，`limb` 按组名解析正确，`ground=1`（脚前 60 m 内射线碰到地面，是预期）。
 - 什么都没画，原因两条：一是待机弧在地面上、整条在视野下方（见上，已改到出拳高度）；二是带组名的那几行整行为空——`%ls` 遇到日文组名在 C locale 下让 vsnprintf_s 失败，`lit=[]`、`spheres=0` 看上去像没读到，其实是日志丢了（已改为先转 UTF-8 再 `%s`）。出拳中判定圈有没有画出来，当时没有能核对的日志，下面的 `BARGA draw` 行就是为此加的。
 
+## 2026-11-27 第二局（d64032bb：V515 range:4，V605 调试召唤）
+
+- 已实机确认（不要再动）：
+  - V605 按键：LT → 10（stomp_l）、RT → 11（stomp_r）、Y → 15（ground_charge，`cannon on=1 toCome=60`）、L3 → 14；L3 之后 Y 打出连射（`state=sweeping`）。
+  - 同一 t 下 `native` 与 `predicted` 一致（t=0.383：(-0.473,-0.153,-0.868) 对 (-0.472,-0.159,-0.867)；t=0.883：(-0.478,-0.019,-0.878) 对 (-0.478,-0.023,-0.878)），`kSweepSign=+1` 正确。
+  - 20 发里 18 发落地、16 发在屏幕上；橙色 50 m 爆炸圈加十字在截图里清楚。
+  - 亮着的组：RB → [右腕]、LB → [左腕]，`*` 对。`BARGA draw` 待机时弧线 13/13 都在屏幕上。
+- 拳头部分看不懂（见上「为什么是圈」），改成现在的圈 + 箭头。
+
 ## 未验证（等实机，Debug=1 日志每 500 ms 一组）
 
-- `BARGA v=... <SGO> current=.. accept=.. flags=.. lit=[组名] spheres=.. arcs L=..(*) R=..(*) fwd=(..)`：`lit` 现在应有日文组名；核对每个攻击下标亮的是哪些组名，带 `*` 的一侧与按键（RB 右 / LB 左）对得上。
-- `BARGA draw WxH arcs L=a/b R=a/b mid=(x,y) d m spheres a/b first=(x,y) d m rounds n`（HUD 线程，`a` 是投影到屏幕上的点数）：待机时亮的那条弧 `a` 应接近 `b`（13），`mid` 在屏幕内；出拳中 `spheres a/b` 的 `a` > 0。有 `BARGA v=` 而没有 `BARGA draw`：发布 / 新鲜度那一环断了。之后一行 `BARGA draw rounds X landed of N, Y on the screen`（只在有炮弹时）。
+- `BARGA v=... <SGO> current=.. accept=.. flags=.. lit=[组名] spheres=.. fists L=..(*) R=..(*) fwd=(..)`：每侧拳头圈画的是哪一招（表里下标），带 `*` 的一侧现在能出招。
+- `BARGA draw WxH L=h[*] (x,y) r=.. R=h[*] (x,y) r=.. spheres n contacts a/b rounds n`（HUD 线程）：`h` 是 `r`（圈在屏幕上，`(x,y)` 圈心、`r` 半径 px）、`e`（圈心不在屏幕上，`(x,y)` 是边上的箭头）、`-`（不画）；`contacts a/b` 是碰地 / 碰敌十字在屏幕上的个数 / 总数。待机平视时两侧都应是 `r`、左圈 x 小于右圈；有 `BARGA v=` 而没有 `BARGA draw`：发布 / 新鲜度那一环断了。有炮弹时之后一行 `BARGA draw rounds X landed of N, Y on the screen`。
+- 圈的大小与位置在截图里是否读得出「这一拳打到哪」，L / R 字母和箭头是否清楚。
 - `BARGA sphere i limb=.. r=.. c=(..) hull=(..) moved=.. ground=.. touch=.. target=..`：`hull` 是球心在车体系里的坐标，应接近表里的够及点（尤其 +X 是否为左手侧，验证 `gen_barga_reach.py` 的 ORDER=0）。
-- `BARGA cannon on=.. state=sweeping|waiting|other(+RVA) held=..(+13D .. +13A ..) burst=.. left=.. count=.. toCome=.. t=.. frozen=(..) src=..(vehicle) native=(..) predicted=(..) ... first=..[(air)] last=..[(air)]`：
-  - `state` 的 RVA 应是 0x6B4100 / 0x6B4080；按住扳机时 `held=1`。
-  - `native`（炮口 +0xD0）和 `predicted` 是否一致；只有 y 的符号相反就翻转 `kSweepSign`。
-  - `src` 后面有没有 `(vehicle)`（`w+0x120` 是不是车体本身）；`first` / `last` 落点是否合理。
+- `BARGA cannon ...`：第二局已核对（见上），格式不变。
 - `BARGA v=... variant none`：表不认识这台车的攻击列表。
 - 画面上 vhud 不再给 V605 加农画第二个弹着点。
-- V605 的 `ground_charge`（mask 16）/ `attack_cannon`（mask 64）由哪个键出没有核对过（推测在扳机或面键上）。
 
 ## 实机怎么测（一次运行）
 
-- V515：`python tests/autopilot/drive.py run range:4 0 90 --ini TestBoardVehicle=501_FortressRobo --ini FirstPersonStart=1 --ini Debug=1 --shots DIR --every 1.5`，约 20 s 登车；登车后待机截几张，再 `--key pad_rb@35:600`、`--key pad_lb@40:600`、`--key pad_rb@45:600`（出拳，按键前后各截一张）。
-- V605：原版任务 M118 里 90 s 内没出现 501，不用它。改用调试召唤（`DebugSpawn=1`，菜单打开时默认就是「载具」分类，巴尔加炮 605 是第 6 项）：在没有 501 的测试场关卡（`range`，`range:4` 会先登上 V515）里 `--ini DebugSpawn=1 --ini TestBoardVehicle=501_FortressRobo`，`--key 77@25:200`（F8 开菜单）、`--key 75@27:200` … 共 5 次 F6（各隔 1 s）、`--key 78@33:200`（F9 召唤），召唤出来 6 s 后 TestBoardVehicle 把玩家送上去；之后依次按住几个候选键（如 `pad_lt` / `pad_rt` / `pad_x` / `pad_y`，各 3 s）找出蓄力 / 加农。M 地图「摆放」面板也能放，但要鼠标点，autopilot 按不了。
+- V515：`python tests/autopilot/drive.py run range:4 0 90 --ini TestBoardVehicle=501_FortressRobo --ini FirstPersonStart=1 --ini Debug=1 --shots DIR --every 1.5`，约 20 s 登车；登车后待机截几张，再 `--key pad_rb@35:600`、`--key pad_lb@40:600`、`--key pad_rb@45:600`（出拳，按键前后各截一张），再 `--key look_right@50:2500`、`--key look_left@55:5000`（转头让圈出屏，看箭头）。
+- V605：原版任务 M118 里 90 s 内没出现 501，不用它。改用调试召唤（`DebugSpawn=1`，菜单打开时默认就是「载具」分类，巴尔加炮 605 是第 6 项）：在没有 501 的测试场关卡（`range`，`range:4` 会先登上 V515）里 `--ini DebugSpawn=1 --ini TestBoardVehicle=501_FortressRobo`，`--key 77@25:200`（F8 开菜单）、`--key 75@27:200` … 共 5 次 F6（各隔 1 s）、`--key 78@33:200`（F9 召唤），召唤出来 6 s 后 TestBoardVehicle 把玩家送上去；之后 Y 蓄力、L3 → Y 连射（第二局已确认）。M 地图「摆放」面板也能放，但要鼠标点，autopilot 按不了。
