@@ -280,7 +280,11 @@ def gen_checks(log: str, sel: dict) -> tuple[int, float]:
 
 
 def main(argv: list[str]) -> int:
-    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
+    # Redirected into a file on a GBK console, a log's stray U+FFFD crashed the report itself: never die printing.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(errors='replace')
+    known ={'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
     if any(a.startswith('-') and a not in known for a in argv):
         print(__doc__)
         return 0 if {'-h', '--help'} & set(argv) else 2
