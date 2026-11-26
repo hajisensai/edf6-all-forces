@@ -103,6 +103,38 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
     std::sort(newTimes.begin(),newTimes.end());
     std::printf("500,000 %s: %.2f -> %.2f ms (median of five runs)\n",name,oldTimes[2],newTimes[2]);
 }
+bool AvoidanceNeighbors() noexcept {
+    using Sift=int(__fastcall*)(AvoidanceHeap*,int) noexcept;
+    const auto stock=reinterpret_cast<Sift>(image+kAvoidanceSift);
+    std::mt19937 rng(2101);
+    constexpr unsigned cases=24000,capacity=64;
+    for(const auto& site:kAvoidanceCalls) {
+        if(image[site.call]!=0xE8)return false;
+        const auto candidate=Redirected<Sift>(site.call);
+        if(reinterpret_cast<const void*>(candidate)==image+kAvoidanceSift)return false;
+        for(unsigned i=0;i<cases;++i) {
+            std::array<AvoidanceNeighbor,capacity> expected{},actual{};
+            const int count=static_cast<int>(rng()%capacity);
+            const int root=count ? static_cast<int>(rng()%static_cast<unsigned>(count)) : 0;
+            for(int j=0;j<count;++j) {
+                float distance=static_cast<float>(rng()%31);
+                if(i%7==0 && j%11==0)distance=std::numeric_limits<float>::quiet_NaN();
+                if(i%9==0 && j%7==0)distance=-0.0f;
+                expected[static_cast<std::size_t>(j)]={rng(),distance,static_cast<std::uint32_t>(rng())};
+            }
+            actual=expected;
+            AvoidanceHeap a{expected.data(),count},b{actual.data(),count};
+            if(stock(&a,root)!=candidate(&b,root) || a.count!=b.count ||
+               std::memcmp(expected.data(),actual.data(),sizeof(expected))!=0) {
+                std::printf("FAIL: neighbor heap at %x, case %u\n",site.call,i);
+                return false;
+            }
+        }
+    }
+    std::printf("native avoidance neighbor heap: %u byte-identical cases per call site\n",cases);
+    return true;
+}
+
 struct StreamBlock {
     std::uint16_t records=0;
     unsigned char padding[6]{};
@@ -352,6 +384,7 @@ int main(int argc,char** argv) {
         std::puts("FAIL: ray collector reset template does not reproduce the native state");
         return 1;
     }
+    if(!AvoidanceNeighbors())return 1;
     if(!ContactStreams()) {
         std::puts("FAIL: contact stream changed record dispatch, deferred bytes or command accounting");
         return 1;

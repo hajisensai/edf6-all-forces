@@ -38,7 +38,64 @@ constexpr BasisCall kAttachedBasisCalls[]={
     {0x6ED902,0x6ED9EB,{0x48,0x8D,0x4C,0x24,0x20},{0xE8,0xD0,0x37,0x96,0xFF}},
     {0x6EDB05,0x6EDBF4,{0x48,0x8D,0x4C,0x24,0x60},{0xE8,0xC7,0x35,0x96,0xFF}},
 };
-static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+3==kNativeBodyMathSites);
+constexpr unsigned kAvoidanceSift=0xD5E020,kAvoidanceSiftEnd=0xD5E0F7;
+struct AvoidanceCall {
+    unsigned call;
+    unsigned char stock[10];
+};
+constexpr AvoidanceCall kAvoidanceCalls[]{
+    {0xD5F5A5,{0x8B,0xD7,0x48,0x8B,0xCB,0xE8,0x76,0xEA,0xFF,0xFF}},
+    {0xD5F604,{0x75,0x08,0x48,0x8B,0xCB,0xE8,0x17,0xEA,0xFF,0xFF}},
+};
+static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
+              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+3==kNativeBodyMathSites);
+
+struct AvoidanceNeighbor { std::uint64_t handle; float distanceSquared; std::uint32_t padding; };
+struct AvoidanceHeap { AvoidanceNeighbor* entries; int count; };
+static_assert(sizeof(AvoidanceNeighbor)==0x10 && offsetof(AvoidanceNeighbor,distanceSquared)==8 &&
+              offsetof(AvoidanceHeap,count)==8);
+
+int __fastcall SiftAvoidanceNeighbors(AvoidanceHeap* heap,int root) noexcept {
+    const int inner=heap->count/2;
+    if(root>=inner)return root;
+    auto* const entries=heap->entries;
+    const auto handle=entries[root].handle;
+    const float distance=entries[root].distanceSquared;
+    int hole=root;
+    while(hole<inner) {
+        const int left=hole*2+1,right=left+1;
+        // Stock picks the right child on a tie or unordered comparison.
+        const int child=right<heap->count && !(entries[left].distanceSquared>entries[right].distanceSquared) ?
+            right : left;
+        if(!(entries[child].distanceSquared>distance))break;
+        entries[hole].handle=entries[child].handle;
+        entries[hole].distanceSquared=entries[child].distanceSquared;
+        hole=child;
+    }
+    if(hole!=root) {
+        // The native swap only moves the handle and distance. Leave the trailing word in its original slot.
+        entries[hole].handle=handle;
+        entries[hole].distanceSquared=distance;
+    }
+    return hole;
+}
+
+unsigned InstallAvoidanceHeap() noexcept {
+    const auto* const stock=image+kAvoidanceSift;
+    constexpr unsigned bytes=kAvoidanceSiftEnd-kAvoidanceSift;
+    if(!edf::Readable(stock,bytes))return 0;
+    std::uint64_t fingerprint=14695981039346656037ull;
+    for(unsigned i=0;i<bytes;++i)fingerprint=(fingerprint^stock[i])*1099511628211ull;
+    if(fingerprint!=0xD8C5803BAE3519BBull)return 0;
+    unsigned installed=0;
+    for(const auto& site:kAvoidanceCalls) {
+        if(!edf::Matches(image,site.call-5,site.stock,sizeof(site.stock)))continue;
+        bool changed=false;
+        edf::RedirectCall(image+site.call,image+kAvoidanceSift,reinterpret_cast<void*>(&SiftAvoidanceNeighbors),changed);
+        installed+=changed;
+    }
+    return installed;
+}
 
 constexpr unsigned kStreamCall=0xE782CB,kStockStream=0xE776F0,kContactCommand=0x12FE960;
 constexpr unsigned char kStreamCaller[]={0x4C,0x8D,0x4D,0x07,0x49,0x8B,0xD6,0x49,0x8B,0xCC,0xE8,0x20,0xF4,0xFF,0xFF};
@@ -273,6 +330,7 @@ unsigned InstallNativeBodyMath() noexcept {
             installed+=changed;
         }
     }
+    installed+=InstallAvoidanceHeap();
     installed+=InstallClingBodyReuse();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
