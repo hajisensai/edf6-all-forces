@@ -10,7 +10,8 @@
 //   carpet       level kCarpetAlt over the mark along its line, its bombs let go to land within kCarpetHalf of it either
 //                side, a gap apart over the run (SortieFire); a formation abreast lays parallel bands
 //   popUp        in low (kPopAlt) at the mark, two bombs onto it, then a steep climb away
-//   missileRain  approaches the mark at kRainAlt and releases its magazine after every missile has a native lock.
+//   missileRain  approaches the mark at kRainAlt, holds its fire until over the target area with its nose settled
+//                (sortie::RainHoldStep), then releases its magazine on its first native lock.
 //   gunshipLap   the gunship's own circle round the mark and its shells, one lap counted (sortie::Lap), then away
 // Every pass that finds nothing to strike gives up after kSearchMs, or once past the mark on its line.
 #include "jet_internal.h"
@@ -183,8 +184,19 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
         }
         if(j.t.target && dist<sortie::kRainFrom && !outsideWindow && arms.missiles>0) {
             NoseOn(pos,j.t.aim,mark+110.0f,want);
-            *missileOk=arms.missileRange>0.0f;
-        } else Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
+            // Held until it is over the target area with its nose settled (sortie::RainHoldStep).
+            float n[3]={nose[0],nose[1],nose[2]};
+            const float cosOff=Normalize(n) ? Dot(n,want) : -1.0f;
+            const float noseOff=std::acos(cosOff>1.0f ? 1.0f : cosOff<-1.0f ? -1.0f : cosOff);
+            const int was=s.phase;
+            const bool open=sortie::RainHoldStep(s.phase,s.phaseAt,dist,noseOff,ms);
+            if(open && was!=2)Log("JET v=%p missile rain: open fire %.0f m from the mark, nose %.2f rad off, %llu ms after it came",
+                                  j.Vehicle(),dist,noseOff,ms-s.begun);
+            *missileOk=open && arms.missileRange>0.0f;
+        } else {
+            if(s.phase==1)s.phase=0;   // off its aim: the hold starts again (an open pass stays open)
+            Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
+        }
         return true;
     }
     case SortiePass::gunshipLap: {

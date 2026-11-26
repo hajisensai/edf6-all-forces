@@ -5,7 +5,8 @@
 //  - the carpet: bombs let go level at kCarpetAlt land where they are reckoned to, the window kCarpetHalf either side, and
 //    the gap spreads a load over it;
 //  - the lap: a circle counted either way round across the angle's wrap, done after one full turn, not before;
-//  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside.
+//  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside;
+//  - the missile rain's hold: it fires only over the target area with its nose settled for kRainHoldMs (RainHoldStep).
 //
 //   cmake --build build --target sortie_check && build\sortie_check.exe        exit code 0: every check passed
 #include "../src/sortie_plan.h"
@@ -131,6 +132,23 @@ void Volleys() {
     for(int r=0;r<salvo::kRounds;++r)all=all && salvo::SalvoNode(r,so,1,1)==0;
     Check(all,"one lock takes the whole salvo");
 }
+// The rain's hold (RainHoldStep): no fire on arrival, outside kRainOpen or with the nose swinging; kRainHoldMs settled
+// over the target area opens it, a wobble before that starts the count again, and once open it stays open.
+void RainHold() {
+    int phase=0;unsigned long long since=0;
+    Check(!RainHoldStep(phase,since,kRainFrom-10.0f,0.0f,1000) && phase==0,"no fire on arrival outside the target area");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,kRainSteadyCone+0.05f,2000) && phase==0,"no fire with the nose off its aim");
+    bool early=false;
+    for(unsigned long long t=3000;t<3000+kRainHoldMs;t+=16)early=early || RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,t);
+    Check(!early && phase==1 && since==3000,"the hold runs its kRainHoldMs settled");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,0.6f,3000+kRainHoldMs-100) && phase==0,"a wobble starts it again");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000) && !RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000+kRainHoldMs-1),
+          "counted again from the settled nose");
+    Check(RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000+kRainHoldMs) && phase==2,"open after kRainHoldMs settled");
+    Check(RainHoldStep(phase,since,kRainTo+1.0f,0.7f,9000),"open stays open through the lock's dwell and the burst");
+    const float closes=kRainOpen-kRainSpeed*static_cast<float>(kRainHoldMs+kRainBurstMs)/1000.0f;
+    Check(closes>kRainTo,"from kRainOpen the hold and the burst end before the window does");
+}
 }  // namespace
 
 int main() {
@@ -141,6 +159,7 @@ int main() {
     Check(SalvoLocked(256,1) && SalvoLocked(256,64) && SalvoLocked(256,256) && !SalvoLocked(256,0) && !SalvoLocked(0,256),
           "missile rain fires on its first lock");
     Volleys();
+    RainHold();
     const unsigned long long burst=static_cast<unsigned long long>(crew::salvo::VolleyFrames(crew::salvo::kRounds))*1000/60;
     Check(SalvoDraining(1000+burst,1000) && !SalvoDraining(1000+kRainBurstMs+1,1000) && !SalvoDraining(1000,0),
           "the jet stays on its pass until the volleys are out");
