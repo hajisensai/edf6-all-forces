@@ -170,6 +170,7 @@ void MissionStart() noexcept {
     ResetLaser();
     ResetHud();
     ResetLauncher();
+    ResetBargaAim();
     ResetKatyushas();
     ResetAndryusha();
     ResetHighCam();

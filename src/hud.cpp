@@ -22,6 +22,7 @@
 // load make every one stale, as the count stands still in the menus; nothing is drawn while the game is paused (GamePaused).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "barga_aim.h"
 #include "cockpit_canvas.h"
 #include "firstperson.h"
 #include "vehicle_look.h"
@@ -164,7 +165,7 @@ Work work[kEntries]{};
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { stepfresh::Step step; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue; bool emc; EmcCue emcCue;
-                  bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
+                  bool launcher; LauncherReadout launch; bool barga; bargaaim::Readout bargaAim; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
                   bool mountedOptic;
@@ -2950,6 +2951,66 @@ void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,
     Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
     Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
 }
+// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md): its fists' reach on the ground (green on the side
+// whose attack may start now, dim the other), its lit hit spheres (a ring as wide as the sphere looks; red where one
+// touches the ground, a cross where it meets the ground under it, a target ring on an enemy in its sweep), and V605's
+// cannon (a line through where the rounds still to come land, their blast rings every kRingEvery and the last).
+void WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float height,const float (*pts)[3],int n,float t,
+                   const float* rgba) noexcept {
+    float px=0.0f,py=0.0f;
+    bool had=false;
+    for(int i=0;i<n;++i) {
+        float x,y,depth;
+        const bool on=Project(vp,pts[i],width,height,&x,&y,&depth);
+        if(on && had)Seg(drawer,ctx,px,py,x,y,t,rgba);
+        had=on;px=x;py=y;
+    }
+}
+void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,const float* c,float radius,float t,
+               const float* rgba) noexcept {
+    constexpr int kSides=24;
+    float pts[kSides+1][3];
+    for(int i=0;i<=kSides;++i) {
+        const float a=kTurn*static_cast<float>(i)/kSides;
+        pts[i][0]=c[0]+radius*std::sin(a);pts[i][1]=c[1];pts[i][2]=c[2]+radius*std::cos(a);
+    }
+    WorldPolyline(drawer,ctx,vp,width,height,pts,kSides+1,t,rgba);
+}
+void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const bargaaim::Readout& r) noexcept {
+    alignas(16) static const float kDimGreen[4]={0.35f,1.0f,0.35f,0.4f};
+    alignas(16) static const float kDimAmber[4]={1.0f,0.7f,0.15f,0.5f};
+    const float t=2.0f*s;
+    for(const auto& a:r.arc) {
+        if(!a.on)continue;
+        WorldPolyline(drawer,ctx,vp,width,height,a.pts,bargaaim::kArcPoints,a.next ? t*1.5f : t,a.next ? kGreen : kDimGreen);
+    }
+    for(int i=0;i<r.spheres && i<bargaaim::kMostSpheres;++i) {
+        const auto& sp=r.sphere[i];
+        float x,y,depth;
+        if(Project(vp,sp.c,width,height,&x,&y,&depth)) {
+            float radius=0.0f;
+            for(int k=0;k<3;++k) {
+                float e[3]={sp.c[0],sp.c[1],sp.c[2]};e[k]+=sp.r;
+                float ex,ey,ed;
+                if(Project(vp,e,width,height,&ex,&ey,&ed))radius=std::fmax(radius,std::sqrt((ex-x)*(ex-x)+(ey-y)*(ey-y)));
+            }
+            radius=std::fmin(std::fmax(radius,6.0f*s),height*0.5f);
+            Arc(drawer,ctx,x,y,radius,0.0f,kTurn,t,24,sp.touch ? kRed : kAmber);
+        }
+        float sx,sy;
+        if(sp.ground)ImpactCross(drawer,ctx,vp,width,height,s,sp.groundAt,&sx,&sy);
+        if(sp.target)TargetRing(drawer,ctx,vp,width,height,s,sp.targetAt);
+    }
+    if(!r.cannon || r.rounds<=0)return;
+    const int n=r.rounds<bargaaim::kMostRounds ? r.rounds : bargaaim::kMostRounds;
+    WorldPolyline(drawer,ctx,vp,width,height,r.at,n,t*1.5f,r.bursting ? kRed : kAmber);
+    for(int i=0;i<n;++i) {
+        if(i%bargaaim::kRingEvery!=0 && i!=n-1)continue;
+        if(r.blast>0.0f)WorldRing(drawer,ctx,vp,width,height,r.at[i],r.blast,t,r.landed[i] ? (r.bursting ? kRed : kAmber) : kDimAmber);
+    }
+    float sx,sy;
+    ImpactCross(drawer,ctx,vp,width,height,s,r.at[0],&sx,&sy);   // the next round
+}
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                     const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
@@ -3799,6 +3860,7 @@ void HudPublish() noexcept {
     s.drill=PlayerDrillCue(&s.drillCue);
     s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
+    s.barga=PlayerBargaAim(&s.bargaAim);
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun) || DreadnoughtGunnerHud(&s.gun);   // the gunship's gun or a Dreadnought turret
     s.sensor=PlayerVehicleContacts(&s.sensorHud);
@@ -6178,6 +6240,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
+        if(fresh && snap.barga)BargaAimMarks(drawer,ctx,viewProj,width,height,s,snap.bargaAim);
         if(fresh && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(fresh && snap.lookHint) {
             wchar_t key[32];
