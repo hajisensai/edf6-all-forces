@@ -425,6 +425,8 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
                 if shell.get(key) is None or doc.root.get(key) is None:
                     raise ValueError(f'{source} / {stock}: missing {key}')
                 doc.root.set(key, copy.deepcopy(shell.get(key)))
+            if source == EMPLACEMENT_SHELL:   # the bursting shell's white smoke trail made a War Thunder tracer
+                vc.wt_tracer(doc.root, f'{source} / {stock}')
     if doc.root.get('xgs_scene_object_class') != 'Weapon_VehicleShoot':
         raise ValueError(f'{stock}: not a native vehicle gun')
     fire = doc.root.get('FireSe')

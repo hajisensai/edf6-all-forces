@@ -219,6 +219,19 @@ static void Layers() {
     ShotEvent launcher=tank;launcher.vehicle=false;
     const ShotCounts lc=CountShot(launcher,1.0f);
     CHECK(lc.flash==0 && lc.ring==0 && lc.dust==0 && lc.smoke==6);
+    // A rail or tube launch (a missile, a rocket): its tube's backblast on the ground only, no flash, no ring.
+    ShotEvent tube=tank;tube.launch=true;
+    const ShotCounts uc=CountShot(tube,1.0f);
+    CHECK(uc.flash==0 && uc.ring==0 && uc.dust==10 && uc.smoke==6);
+    ShotEvent rail=tube;rail.pos[1]=300.0f;
+    const ShotCounts rc=CountShot(rail,1.0f);
+    CHECK(rc.flash+rc.ring+rc.dust+rc.smoke==0);
+    // The shot's size: a tank's APFSDS (no burst, 350) as its HE; an autocannon's AP too small; a launch by its burst.
+    bool launch=true;
+    CHECK(Near(ShotPower(0.0f,350.0f,18.0f,true,launch),8.75f) && !launch);
+    CHECK(ShotPower(0.0f,40.0f,4.0f,true,launch)<kCannonBlast && !launch);
+    CHECK(Near(ShotPower(0.0f,1000.0f,18.0f,false,launch),0.0f));   // a hand-held rifle: never by its damage
+    CHECK(Near(ShotPower(10.0f,500.0f,0.3f,true,launch),10.0f) && launch);
     const ShotCounts far=CountShot(tank,0.25f);
     CHECK(far.ring<tc.ring && far.smoke<tc.smoke && far.smoke>=3);
     CHECK(Near(LodGrow(1.0f),1.0f) && Near(LodGrow(0.25f),2.0f) && Near(LodGrow(0.01f),LodGrow(0.2f)));

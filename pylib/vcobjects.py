@@ -218,6 +218,23 @@ class Bomb:
 
 
 ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer, no smoke
+# trail. A RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node
+# (the stock 105 mm's 100; white whatever AmmoColor, 0x17A3B60), behind a flame CP[1] frames long in AmmoColor
+# (docs/missile-re.md, RocketBullet01): the smoke off, the flame a short hot streak, its tracer. A SolidBullet01 round's
+# tracer is a 12-point streak of AmmoColor as long as its frame's travel (0x28B6A0): AP_TRACER over the stock's blue.
+SHELL_TRACER_CP = {1: 14.0, 2: 0.0}
+AP_TRACER = (3.6, 1.4, 0.5, 1.0)
+
+
+def wt_tracer(r: dsgo.Node, where: str) -> None:
+    """A RocketBullet01 round's smoke trail off and its flame a tracer (SHELL_TRACER_CP), in place; ValueError when `r`
+    is not one of the stock four-entry RocketBullet01 rounds."""
+    cp = r.get('Ammo_CustomParameter')
+    if r.get('AmmoClass') != 'RocketBullet01' or not isinstance(cp, dsgo.Node) or len(cp.items) != 4:
+        raise ValueError(f'{where} 不是四项 CP 的 RocketBullet01 弹')
+    for i, value in SHELL_TRACER_CP.items():
+        cp.items[i] = value
 
 
 @dataclass(frozen=True)
@@ -495,7 +512,7 @@ STORES: dict[str, Store] = {
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
-    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap'),
+    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap', colour=AP_TRACER),
                 _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
     # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
@@ -542,7 +559,7 @@ STORES: dict[str, Store] = {
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
     # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
     # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
-    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap'),
+    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap', colour=AP_TRACER),
                    _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
     'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
                    _local('HE belt', 'HE弾帯（榴弾）', 'HE彈鏈（高爆）', 'HE弹链（高爆）', 'HE 탄띠（고폭）')),
@@ -643,6 +660,55 @@ STORES: dict[str, Store] = {
     **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
+
+
+@dataclass(frozen=True)
+class Plume:
+    """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
+    游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
+    class's own fields (docs/missile-re.md, MissileBullet01):
+      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
+        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+        whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
+      - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
+        where it was laid, it does not drift).
+      - `colour`: AmmoColor, both the trail's start colour (rgb as given, fading to alpha 0) and the motor's flame
+        ((r*4, g*2, b, a), 0x268AEB): over 1 a brighter, whiter trail and a white-hot flame. The trail's and the flame's
+        widths are AmmoSize's (the round's model at its real length, Look), not ours to set."""
+    ignite: float
+    trail: float
+    colour: tuple[float, float, float, float]
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.ignite <= PLUME_IGNITE_MOST and self.trail > 0.0 and len(self.colour) == 4):
+            raise ValueError(f'bad plume {self}')
+
+
+PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
+# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
+# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
+# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+_HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
+_SAM = (1.6, 1.5, 1.4, 0.9)
+_ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
+_ROCKET = (1.25, 1.15, 1.0, 0.7)
+PLUMES: dict[str, Plume] = {
+    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
+    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
+    'RKT': Plume(0.0, 150.0, _ROCKET),
+    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+}
+
+
+def plume_of(store: Store) -> Plume | None:
+    """The store's Plume (PLUMES by its STORES key, or the Sazabi's), None: the template's look (the salvo's own)."""
+    kind = next((k for k, s in STORES.items() if s is store), None)
+    if kind is None and store is globals().get('SAZABI_MISSILE'):
+        kind = 'SAZABI_MISSILE'
+    return PLUMES.get(kind) if kind else None
 SALVO_ROUNDS = 256
 SALVO_CHILDREN = 4
 # The salvo's rhythm (src/salvo_volley.h kVolley / kVolleyGap, src/lockon.cpp ShotHook): the plugin fires SALVO_VOLLEY
@@ -2318,6 +2384,8 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
     _check_round(shell, r, made=True)
+    if shell.ammo_class == 'RocketBullet01':
+        wt_tracer(r, shell.template)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
@@ -2522,6 +2590,16 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    plume = plume_of(store)
+    if plume is not None:
+        if len(cp.items[7].items) != 2 or not isinstance(cp.items[2], float):
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 CP[2] / CP[7] 不是预期的尾烟寿命 / [点火延迟, 衰减]')
+        cp.items[2] = plume.trail
+        cp.items[7].items[:] = [plume.ignite, 1.0]
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = [float(c) for c in plume.colour]
     if missile.muzzle is not None:
         _fire_from(game, r, missile.muzzle)
     if store is STORES['SALVO']:
