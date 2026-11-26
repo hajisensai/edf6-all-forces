@@ -106,6 +106,78 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
     std::sort(newTimes.begin(),newTimes.end());
     std::printf("500,000 %s: %.2f -> %.2f ms (median of five runs)\n",name,oldTimes[2],newTimes[2]);
 }
+bool TargetBonusCases() {
+    using Score=void(__fastcall*)(void*,void*);
+    using Read=const void*(__fastcall*)(const void*);
+    using Match=bool(__fastcall*)(const void*,const void*,Read);
+    const auto score=reinterpret_cast<Score>(image+kTargetBonus);
+    const auto stock=reinterpret_cast<Read>(image+kReadWeakTarget);
+    alignas(16) unsigned char observer[0x550]{},holder[0x530]{};
+    alignas(16) unsigned char first[0x480]{},second[0x480]{},control[16]{};
+    edf::Put(first,0x90,12.0f);
+    edf::Put(second,0x90,12.0f);
+    edf::Put(first,0x47C,0.75f);
+    edf::Put(second,0x47C,0.75f);
+    edf::Put(observer,0x538,3.0f);
+    edf::Put(observer,0x548,holder+0);
+    edf::Put(holder,0x520,control+0);
+
+    struct Choice {
+        const void* candidate;
+        std::uint32_t score;
+    };
+    const auto choose=[&](unsigned flags) {
+        alignas(16) unsigned char walk[0x40]{};
+        edf::Put(walk,0x20,FLT_MAX);
+        edf::Put(walk,0x28,observer+0);
+        walk[0x38]=static_cast<unsigned char>(flags&1);
+        edf::Put(observer,0x548,(flags&2) ? static_cast<unsigned char*>(nullptr) : holder+0);
+        edf::Put(holder,0x518,(flags&4) ? second+0 : (flags&8) ? first+0 : static_cast<unsigned char*>(nullptr));
+        edf::Put(holder,0x520,(flags&16) ? static_cast<unsigned char*>(nullptr) : control+0);
+        edf::Put(control,8,(flags&32) ? 0 : 2);
+        edf::Put(first,0x39C,(flags&64) ? 4u : 0u);
+        edf::Put(first,0x90,(flags&128) ? std::numeric_limits<float>::quiet_NaN() : 12.0f);
+        score(walk,first);
+        score(walk,second);
+        return Choice{edf::At<const void*>(walk,0x30),edf::At<std::uint32_t>(walk,0x20)};
+    };
+    std::array<Choice,256> expected{};
+    for(unsigned i=0;i<expected.size();++i)expected[i]=choose(i);
+    if(expected[0].candidate!=first || expected[4].candidate!=second ||
+       expected[36].candidate!=first || expected[20].candidate!=first)return false;
+    if(!InstallNativeTargetBonus())return false;
+    for(unsigned i=0;i<expected.size();++i) {
+        const auto actual=choose(i);
+        if(actual.candidate!=expected[i].candidate || actual.score!=expected[i].score ||
+           edf::At<int>(control,8)!=((i&32) ? 0 : 2))return false;
+    }
+
+    // Reproduce the native call's use of nonvolatile rdi and the comparison after the call.
+    constexpr unsigned char caller[]{
+        0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xFA,0x41,0xFF,0xD0,0x48,0x3B,0xC7,
+        0x0F,0x94,0xC0,0x48,0x83,0xC4,0x20,0x5F,0xC3,
+    };
+    auto* const code=edf::AllocateNearCode(image+kTargetBonusCall,caller,sizeof(caller));
+    if(!code)return false;
+    const auto match=reinterpret_cast<Match>(code);
+    const auto fast=Redirected<Read>(kTargetBonusCall);
+    edf::Put(holder,0x518,second+0);
+    edf::Put(holder,0x520,control+0);
+    edf::Put(control,8,2);
+    const bool valid=match(holder,second,stock) && match(holder,second,fast) &&
+                     !match(holder,first,stock) && !match(holder,first,fast);
+    if(valid) {
+        Bench("held-target checks (63 unrelated candidates per match)",
+              [&](unsigned i){match(holder,i ? first : second,stock);},
+              [&](unsigned i){match(holder,i ? first : second,fast);});
+        Bench("held-target checks (all match)",
+              [&](unsigned){match(holder,second,stock);},
+              [&](unsigned){match(holder,second,fast);});
+    }
+    VirtualFree(code,0,MEM_RELEASE);
+    return valid && edf::At<int>(control,8)==2;
+}
+
 bool BoundsValidation() noexcept {
     using Check=bool(__fastcall*)(const float*);
     const auto* const code=image+kBoundsCheck;
@@ -932,6 +1004,10 @@ int main(int argc,char** argv) {
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
+    if(!TargetBonusCases()) {
+        std::puts("FAIL: native held-target bonus differs from stock");
+        return 1;
+    }
     if(!MotionLibraryCases(false)) {
         std::puts("FAIL: stock motion library behavior does not match the fixture");
         return 1;

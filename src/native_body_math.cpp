@@ -153,6 +153,38 @@ bool AvoidanceKernelMatches(unsigned begin,unsigned end,std::uint64_t expected) 
     return fingerprint==expected;
 }
 
+constexpr unsigned kTargetBonus=0x54A3B0,kTargetBonusEnd=0x54A4A4,kTargetBonusCall=0x54A46B;
+constexpr unsigned kReadWeakTarget=0x30C0F0,kReadWeakTargetEnd=0x30C1DA;
+constexpr unsigned char kTargetBonusStock[]{0xE8,0x80,0x1C,0xDC,0xFF};
+
+bool InstallTargetBonusGate() noexcept {
+    if(!AvoidanceKernelMatches(kTargetBonus,kTargetBonusEnd,0xA0D9D4BC5DF2ACCFull) ||
+       !AvoidanceKernelMatches(kReadWeakTarget,kReadWeakTargetEnd,0x367523FA969A4231ull))return false;
+    // The candidate (rdi) is live in this callback. A different raw target can never earn its bonus.
+    // A matching address still needs the original weak-reference acquisition and the caller's identity check.
+    unsigned char code[]{
+        0x48,0x39,0xB9,0x18,0x05,0,0, // cmp [rcx+518h],rdi
+        0x74,0x03,                    // je stock
+        0x33,0xC0,0xC3,               // xor eax,eax; ret
+        0xFF,0x25,0,0,0,0,            // jmp qword ptr [rip]
+        0,0,0,0,0,0,0,0,
+    };
+    auto* const site=image+kTargetBonusCall;
+    auto* const stock=image+kReadWeakTarget;
+    std::memcpy(code+sizeof(code)-sizeof(stock),&stock,sizeof(stock));
+    auto* const thunk=edf::AllocateNearCode(site,code,sizeof(code));
+    if(!thunk)return false;
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        unsigned char call[]{0xE8,0,0,0,0};
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(call+1,&rel32,sizeof(rel32));
+        if(edf::PatchCode(site,kTargetBonusStock,call,sizeof(call)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
 bool InstallAvoidanceOverflow() noexcept {
     if(!edf::Matches(image,kAvoidanceOverflow-2,kAvoidanceFirstHeapSkip,sizeof(kAvoidanceFirstHeapSkip)) ||
        !edf::Matches(image,kAvoidanceDone,kAvoidanceDoneSig,sizeof(kAvoidanceDoneSig)) ||
@@ -963,6 +995,10 @@ void __fastcall NormalizeAttachedBasis(float* matrix) noexcept {
     // Keep the stock handling of overflowing or unordered intermediates, before writing any row.
     reinterpret_cast<void(__fastcall*)(float*)>(image+kBasis)(matrix);
 }
+}
+
+bool InstallNativeTargetBonus() noexcept {
+    return image && InstallTargetBonusGate();
 }
 
 unsigned InstallNativeBodyMath() noexcept {
