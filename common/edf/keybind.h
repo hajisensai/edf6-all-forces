@@ -170,7 +170,7 @@ inline constexpr Slot kSlots[]={
     // ...and the stock ground vehicles' cruise gears, two keys of their own that W / S override (src/drivegear.cpp)
     {0x7E,14,9,Owner::crew,L"VehicleCruiseUpKey",0x09},
     {0x7F,14,10,Owner::crew,L"VehicleCruiseDownKey",0x70},
-    {0x80,13,5,Owner::crew,L"HeliHoverKey",0x24},
+    {0x80,13,5,Owner::crew,L"HeliHoverKey",0x48},
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;
@@ -195,14 +195,15 @@ constexpr int MarkerSteps(std::int32_t marker) noexcept {
 // --- Default steps: a slot's default changed after stores were seeded. COMMON.CFG keeps what a seeded slot holds, so a
 // new default reaches a store seeded before it only through a step (the installer's ini steps, tools/installer.py
 // NEW_DEFAULTS_*, are the same for the ini). A move: the slot still holding its old default gets the new one, if no
-// other slot holds that key then (a move freeing a key lets the one waiting for it go: HighCamKey off C, then
+// conflicting slot holds that key then (a move freeing a key lets the one waiting for it go: HighCamKey off C, then
 // FreeLookKey onto it). A key the player set is kept. A store seeded after a step (its ini has the new defaults) skips it.
 struct Move { unsigned char action; int fromVk; int toVk; };
 struct Step { const Move* moves; int count; };
 // 2026-11-10 (docs/feedback-2026-11-10-freeview-key.md): free look off the middle button, which on the drive page is the
 // stock row that sounds the Grape's horn (docs/keyconfig-re.md §8), onto C; the high view off C onto L.
 inline constexpr Move kMoves1110[]={{0x59,0x43,0x4C},{0x58,0x04,0x43}};
-inline constexpr Step kCrewSteps[]={{kMoves1110,2}};
+inline constexpr Move kMoves1126[]={{0x80,0x24,0x48}};
+inline constexpr Step kCrewSteps[]={{kMoves1110,2},{kMoves1126,1}};
 constexpr int StepsOf(Owner owner) noexcept {
     return owner==Owner::crew ? static_cast<int>(sizeof(kCrewSteps)/sizeof(kCrewSteps[0])) : 0;
 }
@@ -287,9 +288,14 @@ inline int SeededSteps(unsigned char* store,Owner owner) noexcept { return Marke
 inline bool Seeded(unsigned char* store,Owner owner) noexcept {
     return SeededEnd(store,owner)>=OwnerEnd(owner) && SeededSteps(store,owner)>=StepsOf(owner);
 }
-// Does a slot other than `except` hold `code` (player 0's set 0, as the plugins read them)?
+// H is also the default for calling an aircraft on foot, the Dreadnought hangar, and the ground vehicle's sixth weapon.
+// Those actions are unavailable at the rotorcraft controls. A different binding on H still blocks the migration.
 inline bool CodeHeld(unsigned char* store,std::int32_t code,int except) noexcept {
-    for(const Slot& s:kSlots)if(s.action!=except && Read(store,0,s.action)==code)return true;
+    for(const Slot& s:kSlots) {
+        const bool sharedHoverKey=except==0x80 && code==CodeOfVk('H') &&
+                                  (s.action==0x51 || s.action==0x70 || s.action==0x7C);
+        if(s.action!=except && !sharedHoverKey && Read(store,0,s.action)==code)return true;
+    }
     return false;
 }
 // One step on a seeded store (player 0's, as seeded): the moves whose slot was seeded before `kept` (the marker's end then:
