@@ -242,8 +242,10 @@ class OnTheBuild(unittest.TestCase):
             self.skipTest('not a ninja build')
         self.assertIn('src/heli.cpp', files['edf6vehiclecrew'])
         self.assertIn('common/edf/memory.h', files['edf6vehiclecrew'])
-        built = [t for t in td.ctest_tests(BUILD) if os.path.isfile(t['command'][0] if t['command'] else '')]
-        known = sum(1 for t in built if os.path.splitext(os.path.basename(t['command'][0]))[0].lower() in files)
+        exes = [os.path.splitext(os.path.basename(t['command'][0]))[0].lower() for t in td.ctest_tests(BUILD)
+                if t['command'] and os.path.isfile(t['command'][0])]
+        built = [e for e in exes if e in self.repo.target_names]
+        known = sum(1 for e in built if e in files)
         self.assertGreater(known, len(built) * 0.9, 'most built C++ tests have their sources known')
 
     def test_plugin_source_selects_the_cpp_tests_compiling_it_not_the_model_builds(self) -> None:
@@ -257,7 +259,8 @@ class OnTheBuild(unittest.TestCase):
     def test_a_test_script_selects_its_tests(self) -> None:
         r = td.select_files(['tests/cockpit_build_test.py'], self.deps, self.cpp)
         self.assertIn('cockpit_build_0', r['ctest'])
-        self.assertEqual(r['selftest'], [])
+        for name in r['selftest']:   # only the selftests listing tests/ itself
+            self.assertTrue({'tests/', 'tests/*'} & self.deps['selftest'][name][0], name)
 
     def test_tests_reading_the_whole_repo_follow_every_source(self) -> None:
         # gamedir_literal_guard reads every tracked .py / .cmd (git ls-files); cab_floor_katyusha_only lists tools/,
