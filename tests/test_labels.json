@@ -3736,6 +3736,12 @@
     "tests/test_native_bc7.py"
    ]
   },
+  "native_bone_update": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_cmpl": {
    "labels": [
     "native-codec",

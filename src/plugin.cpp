@@ -20,6 +20,7 @@
 #include "perf_probe.h"
 #include "sync_load_probe.h"
 #include "frame_rate.h"
+#include "native_bone_update.h"
 #include "render_pose.h"
 #include "render_record.h"
 #include "frame_rate_logic.h"
@@ -1336,6 +1337,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
+    if(Cfg().enabled)Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());
     if(Cfg().enabled && Cfg().renderRecordThread)
