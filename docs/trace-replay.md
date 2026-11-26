@@ -7,7 +7,10 @@
 ## 怎么用
 
 1. 录：ini 设 `TraceFile=<路径>`（`TraceSeconds` 默认 120），从进入的第一个任务开始录，到秒数或 1 GB 为止，日志有 `TRACE recording …` / `TRACE closed …`。perfrun / drive.py 用 `--ini TraceFile=…` 传。
-2. 回放：`vehsound_replay_test <trace> [--at-least note.report_rail=1]... [--list]`。
+2. 回放：`vehsound_replay_test <trace> [--at-least note.report_rail=1]... [--list]`（要先 `cmake --build build --target vehsound_replay_test`，`build.cmd` 不编测试）。
+3. 游戏退出时录制没有关上（退出不经过插件），最后一条记录是半截：回放丢掉最后一次调用，其余照常，并打印「cut short」。
+
+实机录一局的命令（2026-11-26 用过，wtfx3：玩家在泰坦里、NPC 403 电磁炮坦克、狂战士波次）：在 `gamequeue.py run --` 下跑 perfrun，`--ini Debug=1 --ini TestBoardVehicle=404_Tank --ini TraceFile=<scratchpad>/live.trc --ini TraceSeconds=150`。
 
 ## 录什么（`src/trace_rec.cpp`）
 
@@ -28,9 +31,17 @@
 
 变异核对：录制器不录武器内存时，回放的 `report_rail` 为 0，游戏里为 5，16 次调用不一致，测试变红。
 
+## 实机结果（2026-11-26）
+
+- 一局约 75 s、74 688 次调用、约 200 MB（gzip 后 52 MB）：太大，**不入库**；实机录制只在本机用（录一次，改代码前后各回放一遍）。仓库里只有上面的闭环用例。
+- 用同一版源码回放，74 688 次调用的输出逐条与游戏一致；`report_rail` 25 次（游戏里 25 次），`once` 808、`wt` 3546 等全部对上。
+- 前两次实机录制回放出 25 / 34 次调用「差一帧」，找到的是生产代码里的真问题，不是回放的毛病：
+  - `GameMs()` 读的是 `GetTickCount64`，一步里读几次就可能跨过一个 tick：等声速传播的 clip 在第 N 帧还是 N+1 帧放，取决于读到哪一次。改为 `VehicleSoundAt(v, ms)`：调用点（`crew.cpp`）读一次，整步只用这一个「现在」（`vehsound.cpp` 的 `stepMs`）。
+  - 录制器自己耗时（复制内存），它读的时间和这一步读的时间会跨 tick。同一个 `ms` 同时交给录制器和 `VehicleSoundAt` 后才完全对上。
+
 ## 加新的子系统
 
-照 `trace_rec.cpp` 的做法：在调用点前录内存和值，在输出函数里加 `TraceOutput`，写一个对应的回放测试。录少了的东西，第一次用同一版源码回放时就会以「与游戏不一致」报出来。
+照 `trace_rec.cpp` 的做法：在调用点前录内存和值，在输出函数里加 `TraceOutput`，写一个对应的回放测试。录少了的东西，第一次用同一版源码回放时就会以「与游戏不一致」报出来。这一步自己要读时间的，改成由调用点传入（见上），否则回放永远差一帧。
 
 ## 限制
 
