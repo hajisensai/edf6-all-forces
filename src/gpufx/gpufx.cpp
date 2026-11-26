@@ -1477,7 +1477,10 @@ constexpr BenchPhase kLookPhases[]={{"stock",0,false,false,false,false},{"takeov
                                     {"takeover+layers",1,true,true,true,true}};
 constexpr BenchPhase kLoadPhases[]={{"stock",0,false,false,false,false},{"takeover",1,true,true,false,true},
                                     {"takeover, 0xA40 stock",1,false,true,false,true},{"takeover, trails stock",1,true,true,false,false}};
-constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000;
+// The strike bench (GpuFxTest 5): the ultimate strike at each phase's start, the set 0xA40 stock and ours by turns,
+// the same strike each time: the set's stock and our GPU time and pixels under the strike's point lights.
+constexpr BenchPhase kStrikePhases[]={{"strike, 0xA40 stock",1,false,true,false,true},{"strike, 0xA40 ours",1,true,true,false,true}};
+constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000,kStrikePhaseMs=16000;
 // An MSVC std::wstring as the efs loader reads it (const, never grown): the text out of line (capacity past the 7 of
 // the small buffer).
 struct GameWString { const wchar_t* text;unsigned char pad[8];std::uint64_t size,capacity; };
@@ -1561,11 +1564,10 @@ const BenchPhase* BenchPhaseNow(int& index) noexcept {
     if(test<3 || !bench.started)return nullptr;
     const ULONGLONG now=GameMs();
     if(now<bench.startMs)return nullptr;
-    const bool look=test==3;
-    const ULONGLONG span=look ? kLookPhaseMs : kLoadPhaseMs;
-    const ULONGLONG count=look ? std::size(kLookPhases) : std::size(kLoadPhases);
+    const ULONGLONG span=test==3 ? kLookPhaseMs : test==4 ? kLoadPhaseMs : kStrikePhaseMs;
+    const ULONGLONG count=test==3 ? std::size(kLookPhases) : test==4 ? std::size(kLoadPhases) : std::size(kStrikePhases);
     index=static_cast<int>(((now-bench.startMs)/span)%count);
-    return look ? &kLookPhases[index] : &kLoadPhases[index];
+    return test==3 ? &kLookPhases[index] : test==4 ? &kLoadPhases[index] : &kStrikePhases[index];
 }
 
 // Game thread, after PublishOptions: the phase's switches over the ini's.
@@ -1595,7 +1597,9 @@ void BenchTick(ULONGLONG now) noexcept {
         bench.nextBlast=bench.nextEfs=bench.nextTrail=now+500;
         Log("GPUFX bench phase %d (%s): native=%d litA=%d efs=%d layers=%d trails=%d; so far blasts %u, flashes %u, trails %u",index,ph->name,
             ph->native,ph->litA,ph->efs,ph->layers,ph->trails,bench.blasts,bench.flashes,bench.trails);
+        if(optTest.load(std::memory_order_relaxed)==5)StressStrike(now);
     }
+    if(optTest.load(std::memory_order_relaxed)==5)return;
     const float fx=anchor[0]-anchorFrom[0],fz=anchor[2]-anchorFrom[2];
     const float len=std::sqrt(fx*fx+fz*fz);
     if(!(len>1e-3f))return;
@@ -1637,25 +1641,6 @@ void BenchTick(ULONGLONG now) noexcept {
         if(look){trail(2,10.0f,-5.0f);trail(3,10.0f,5.0f);}
         else for(int k=0;k<5;++k){trail(2,30.0f+10.0f*static_cast<float>(k),-8.0f);trail(3,30.0f+10.0f*static_cast<float>(k),8.0f);}
     }
-}
-
-// DevFrameCap: the game thread held to at most this many frames a second (a high resolution waitable timer), so a
-// run that is not about the frame rate does not drive the GPU flat out.
-void CapFrameRate(int cap) noexcept {
-    static HANDLE timer=nullptr;
-    static LARGE_INTEGER last{},freq{};
-    if(cap<=0){last.QuadPart=0;return;}
-    if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
-    if(!timer)timer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
-    LARGE_INTEGER now;QueryPerformanceCounter(&now);
-    const LONGLONG period=freq.QuadPart/cap;
-    if(last.QuadPart && now.QuadPart-last.QuadPart<period) {
-        const LONGLONG wait=period-(now.QuadPart-last.QuadPart);
-        LARGE_INTEGER due;due.QuadPart=-(wait*10000000LL/freq.QuadPart);   // 100 ns units, relative
-        if(timer && due.QuadPart<0 && SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer,100);
-        QueryPerformanceCounter(&now);
-    }
-    last=now;
 }
 
 void TickNative() noexcept {
@@ -1770,7 +1755,6 @@ void Tick() noexcept {
     const ULONGLONG frame=GameFrame();
     if(ticked==frame)return;
     ticked=frame;
-    CapFrameRate(Cfg().devFrameCap);
     PublishOptions();
     BenchOverride();
     ApplyLayerPatches(optLayers.load(std::memory_order_relaxed));

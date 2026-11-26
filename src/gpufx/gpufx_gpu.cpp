@@ -138,12 +138,19 @@ float3 PointLights(float3 v, float3 n, float2 px) {
         [loop] while (bits != 0u) {
             uint b = firstbitlow(bits);
             bits &= ~(1u << b);
-            PointLight pl = Points[k * 32u + b];
-            float3 d = w - pl.posRange.xyz;
+            // The stock's order: the position and range first, the rest only for a light in range (a light out of
+            // range costs one 16 byte read, not the whole 64).
+            const uint at = k * 32u + b;
+            const float4 pr = Points[at].posRange;
+            float3 d = w - pr.xyz;
             float dist = length(d);
-            if (dist < pl.posRange.w) {
-                float t = pl.cone.z - dot(d / dist, n) * (1.0 - pl.cone.z);
-                if (t > 0.0) l += pow(max(1.0 - dist * pl.colorFalloff.w, 0.0), pl.cone.w) * saturate(t) * pl.colorFalloff.rgb;
+            [branch] if (dist < pr.w) {
+                const float cz = Points[at].cone.z;
+                float t = cz - dot(d / dist, n) * (1.0 - cz);
+                [branch] if (t > 0.0) {
+                    const float4 cf = Points[at].colorFalloff;
+                    l += pow(max(1.0 - dist * cf.w, 0.0), Points[at].cone.w) * saturate(t) * cf.rgb;
+                }
             }
         }
     }
@@ -301,7 +308,9 @@ float4 SampleSlot(uint slot, float2 uv, bool clampUv) {
 
 // One pixel shader per group of kinds (the group a literal: each entry point compiles only its own path, so the
 // stock cards do not pay the registers of our lit smoke or of the stock lit path): 0 ours, 1 the stock unlit kinds,
-// 2 the stock lit kinds, 3 the efs kinds.
+// 2 the stock lit set 0xC08, 3 the efs kinds, 4 the stock lit set 0xA40 (its own entry: the set 0xC08's clip is a
+// discard, and a pixel shader with a discard in it is a late depth test on the hardware, so every card pixel behind
+// the scene would run the 0xA40's shadow and point light loop: the stock 0xA40 PS 0x196BA60 has none).
 float4 PsGroup(V i, const uint group) {
     if (group == 3u) return EfsPs(i);
     // A flipbook blends two frames; a one-frame texture (the stock cards, almost all) samples once (Frames is uniform).
@@ -346,10 +355,10 @@ float4 PsGroup(V i, const uint group) {
     // The stock forward PS (0x19670A0): rgb = texel * colour (no saturate: HDR), a = sat(texel.a * colour.a) times
     // sat(the VS's distance fade); ours adds the soft depth fade.
     float a = saturate(t.a * i.color.a) * saturate(1.0 - (i.vpos.w * Fade.x + Fade.y)) * fade;
-    if (group == 2u) {
-        // The set 0xC08 lit per vertex; the set 0xA40 per pixel (a branch: a ?: would evaluate both).
+    if (group == 2u || group == 4u) {
+        // The set 0xC08 lit per vertex; the set 0xA40 per pixel.
         float3 light = i.vlight;
-        [branch] if (LitSet == 2u) {
+        if (group == 2u) {
             if (t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
         } else {
             // Lit only where the pixel adds anything (alpha: a > 0; additive: a non-zero texel colour, not faded out):
@@ -368,6 +377,7 @@ float4 PsOurs(V i) : SV_Target0 { return PsGroup(i, 0u); }
 float4 PsStock(V i) : SV_Target0 { return PsGroup(i, 1u); }
 float4 PsStockLit(V i) : SV_Target0 { return PsGroup(i, 2u); }
 float4 PsEfs(V i) : SV_Target0 { return PsGroup(i, 3u); }
+float4 PsStockLitA(V i) : SV_Target0 { return PsGroup(i, 4u); }
 )hlsl";
 
 using CompileFunction=HRESULT(WINAPI*)(LPCVOID,SIZE_T,LPCSTR,const D3D_SHADER_MACRO*,ID3DInclude*,LPCSTR,LPCSTR,UINT,UINT,
@@ -418,7 +428,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11DeviceContext1> context1;
     ComPtr<ID3DDeviceContextState> isolated;
     ComPtr<ID3D11VertexShader> vs;
-    ComPtr<ID3D11PixelShader> ps[4];   // PsOurs, PsStock, PsStockLit, PsEfs
+    ComPtr<ID3D11PixelShader> ps[5];   // PsOurs, PsStock, PsStockLit (0xC08), PsEfs, PsStockLitA (0xA40)
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
     // The trail kinds (PrepareTrails): the stock trail shaders, their vertex layout, the quads' vertex buffer and the
     // fixed triangle-list indices, xgl_transform (the identity: the quads are in world space) and xgl_user_param, the
@@ -504,8 +514,8 @@ struct Renderer::Impl final {
         if(!compile)return false;
         ComPtr<ID3DBlob> vsCode;
         if(!Compile("Vs","vs_5_0",vsCode))return false;
-        static constexpr const char* kPs[4]={"PsOurs","PsStock","PsStockLit","PsEfs"};
-        for(int k=0;k<4;++k) {
+        static constexpr const char* kPs[5]={"PsOurs","PsStock","PsStockLit","PsEfs","PsStockLitA"};
+        for(int k=0;k<5;++k) {
             ComPtr<ID3DBlob> psCode;
             if(!Compile(kPs[k],"ps_5_0",psCode) ||
                FAILED(device->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps[k])))return false;
@@ -1050,13 +1060,13 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
                 batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :
                 batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
-            const int group=efs ? 3 : lit ? 2 : batch.kind==Kind::smoke ? 0 : 1;
+            const int group=efs ? 3 : lit ? (batch.litSet==2 ? 2 : 4) : batch.kind==Kind::smoke ? 0 : 1;
             ID3D11PixelShader* const pss=s.ps[group].Get();
             if(pss!=psBound){context->PSSetShader(pss,nullptr,0);psBound=pss;}
             ID3D11DepthStencilState* const dss=efs ? s.noDepth.Get() : tested;
             if(dss!=depthBound){context->OMSetDepthStencilState(dss,0);depthBound=dss;}
             const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
-            const int bucket=group==3 ? 4 : group==2 ? (batch.litSet==2 ? 2 : 3) : group;
+            const int bucket=group==3 ? 4 : group==4 ? 3 : group;
             st.bucketDrawn[bucket]+=drawn;
             timedDraw(bucket,[&]() noexcept { context->DrawInstanced(4,static_cast<UINT>(drawn),0,0); });
             st.drawn+=drawn;++st.batches;
