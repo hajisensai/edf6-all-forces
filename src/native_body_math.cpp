@@ -354,7 +354,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+6==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+7==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -417,6 +417,60 @@ unsigned InstallContactDecoders() noexcept {
     }
     return installed;
 }
+
+constexpr unsigned kBodyQuaternionCall=0xE51651,kNativeBodyQuaternion=0x98BF30;
+constexpr unsigned char kBodyQuaternionStock[]{0xE8,0xDA,0xA8,0xB3,0xFF};
+
+bool InstallStaticBodyQuaternionSkip() noexcept {
+    // The changed-pose path leaves the hknpBody in rdi until it notifies the world.
+    constexpr unsigned char setter[]{
+        0x48,0x8D,0x4C,0x24,0x30,0x48,0x8B,0xD6,0x4C,0x89,0xBC,0x24,0xA8,0,0,0,
+        0xE8,0xDA,0xA8,0xB3,0xFF,0x4D,0x8B,0xC6,0x48,0x8B,0xD6,0x48,0x8B,0xCF,
+        0xE8,0x5C,0x80,0xF9,0xFF,0x8B,0x84,0x24,0xB0,0,0,0,0x4C,0x8D,0x44,0x24,0x30,
+        0x45,0x33,0xC9,0x89,0x44,0x24,0x20,0x48,0x8B,0xD7,0x49,0x8D,0x4D,0xE8,0xE8,0xDD,0xEF,0xF5,0xFF,
+    };
+    constexpr unsigned char motionId[]{0x8B,0xBA,0x80,0,0,0};
+    constexpr unsigned char motionBranch[]{0x85,0xFF,0x0F,0x84,0x2E,0x07,0,0};
+    constexpr unsigned char staticUpdate[]{0x49,0x8B,0xCE,0xE8,0x73,0x88,0x03,0};
+    constexpr unsigned char dynamicQuaternion[]{0x4D,0x85,0xC9,0x0F,0x84,0x64,1,0,0,0x41,0x0F,0x10,0x9E,
+        0xA0,0,0,0,0x41,0x0F,0x10,0x29};
+    constexpr unsigned char quaternionSig[]{0x40,0x53,0x48,0x83,0xEC,0x10,0xF3,0x0F,0x10,0x1A,0x0F,0x57,0xC0};
+    if(!edf::Matches(image,0xE51641,setter,sizeof(setter)) ||
+       !edf::Matches(image,0xDB06CB,motionId,sizeof(motionId)) ||
+       !edf::Matches(image,0xDB07DF,motionBranch,sizeof(motionBranch)) ||
+       !edf::Matches(image,0xDB0F15,staticUpdate,sizeof(staticUpdate)) ||
+       !edf::Matches(image,0xDB0911,dynamicQuaternion,sizeof(dynamicQuaternion)) ||
+       !edf::Matches(image,kNativeBodyQuaternion,quaternionSig,sizeof(quaternionSig)))return false;
+
+    // Motion ID zero goes directly to the static update without reading the supplied quaternion.
+    // Use the home space for MXCSR and keep the native math when FP exceptions are unmasked.
+    unsigned char code[]{
+        0x83,0xBF,0x80,0,0,0,0,          // cmp dword ptr [rdi+80h],0
+        0x75,0x16,                     // jne stock
+        0x0F,0xAE,0x5C,0x24,0x08,       // stmxcsr [rsp+8]
+        0x8B,0x44,0x24,0x08,            // mov eax,[rsp+8]
+        0x25,0x80,0x1F,0,0,            // and eax,1f80h
+        0x3D,0x80,0x1F,0,0,            // cmp eax,1f80h
+        0x75,0x01,0xC3,                // jne stock; ret
+        0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0,
+    };
+    auto* const site=image+kBodyQuaternionCall;
+    auto* const original=image+kNativeBodyQuaternion;
+    std::memcpy(code+33,&original,sizeof(original));
+    auto* const thunk=edf::AllocateNearCode(site,code,sizeof(code));
+    if(!thunk)return false;
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        unsigned char call[]{0xE8,0,0,0,0};
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(call+1,&rel32,sizeof(rel32));
+        if(edf::PatchCode(site,kBodyQuaternionStock,call,sizeof(call)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
+
 
 inline __m128 XyzMask() noexcept { return _mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1)); }
 
@@ -603,6 +657,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();
     installed+=InstallContactDecoders();
+    installed+=InstallStaticBodyQuaternionSkip();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {

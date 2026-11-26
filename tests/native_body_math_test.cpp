@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <limits>
 #include <random>
@@ -367,6 +368,71 @@ bool RayResetTemplates() {
     return true;
 }
 
+bool BodyQuaternionUpdates() {
+    using Quaternion=void(__fastcall*)(float*,const float*);
+    using Run=void(__fastcall*)(float*,const float*,const void*,Quaternion);
+    // The native setter has already loaded the body into the nonvolatile rdi.
+    constexpr unsigned char caller[]{
+        0x57,0x48,0x83,0xEC,0x20,0x49,0x8B,0xF8,0x41,0xFF,0xD1,
+        0x48,0x83,0xC4,0x20,0x5F,0xC3,
+    };
+    const auto thunk=edf::AllocateNearCode(image+kBodyQuaternionCall,caller,sizeof(caller));
+    if(!thunk)return false;
+    const auto run=reinterpret_cast<Run>(thunk);
+    const auto stock=reinterpret_cast<Quaternion>(image+kNativeBodyQuaternion);
+    const auto fast=Redirected<Quaternion>(kBodyQuaternionCall);
+    alignas(16) unsigned char body[0xB0]{};
+    alignas(16) float expected[4],actual[4];
+    std::array<Matrix,64> matrices{};
+    for(unsigned i=0;i<matrices.size();++i) {
+        const float angle=static_cast<float>(i)*0.09817477f;
+        const float c=std::cos(angle),s=std::sin(angle);
+        auto& m=matrices[i].data;
+        m[0]=m[15]=1.0f;
+        m[5]=m[10]=c;
+        m[6]=s;
+        m[9]=-s;
+    }
+    const auto saved=_mm_getcsr();
+    const auto check=[&] {
+        if(stock==fast)return false;
+        for(const auto masks:{0x1F80u,0x1F00u}) {
+            for(const unsigned motion:{0u,1u,0xFFFFFFFFu}) {
+                edf::Put(body,0x80,motion);
+                for(const auto& matrix:matrices) {
+                    std::memset(actual,0xA5,sizeof(actual));
+                    _mm_setcsr(masks);
+                    if(masks==0x1F80 && !motion) {
+                        std::memset(expected,0xA5,sizeof(expected));
+                        run(actual,nullptr,body,fast);
+                        if(_mm_getcsr()!=masks)return false;
+                    } else {
+                        stock(expected,matrix.data);
+                        const auto flags=_mm_getcsr();
+                        _mm_setcsr(masks);
+                        run(actual,matrix.data,body,fast);
+                        if(_mm_getcsr()!=flags)return false;
+                    }
+                    if(std::memcmp(actual,expected,sizeof(actual))!=0)return false;
+                }
+            }
+        }
+        return true;
+    };
+    const bool valid=check();
+    _mm_setcsr(saved);
+    if(valid) {
+        edf::Put(body,0x80,0u);
+        Bench("static body's unused quaternions",
+              [&](unsigned i){run(expected,matrices[i].data,body,stock);},
+              [&](unsigned i){run(actual,matrices[i].data,body,fast);});
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return valid;
+}
+
+
+
 bool ContactManifolds() {
     alignas(16) unsigned char world[0x8A0]{},bodies[4*0xB0]{},motions[4*0x80]{};
     alignas(16) unsigned char event[0xB0]{},cache[0x40]{},compressed[0x240]{},lookup[0x60]{};
@@ -637,6 +703,10 @@ int main(int argc,char** argv) {
     if(!BoundsValidation() || !AvoidanceNeighbors())return 1;
     if(!AvoidanceBoxes()) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
+        return 1;
+    }
+    if(!BodyQuaternionUpdates()) {
+        std::puts("FAIL: native body quaternion fast path or fallback mismatch");
         return 1;
     }
     if(!ContactManifolds()) {
