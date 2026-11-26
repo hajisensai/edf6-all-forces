@@ -92,6 +92,8 @@ using vmix::kTurretShare; using vmix::kReloadShare;
 constexpr float kTurretHear=150.0f,kReloadHear=80.0f,kRapidHear=1200.0f,kBrassHear=40.0f;   // m: no voice farther
 using vmix::kFarAt;                                 // m: the air's dulling at its fullest (the jets')
 constexpr float kStartSec=1.2f,kStopSec=2.0f;       // the engine winding up / down
+constexpr std::size_t kSeatStickY=0x2C4;            // seat 0's left stick Y: the throttle (forward negative)
+constexpr ULONGLONG kTurnLogMs=250;
 constexpr float kMechServo=1.25f;                   // a mech's arm drives: the turret's, quicker and higher
 constexpr ULONGLONG kStaleMs=300;                   // a vehicle not seen this long (game ms) is gone: its voices too
 constexpr int kVehicles=48,kMostGuns=8,kPending=256;   // a Katyusha's ripple: forty rockets on their way; a cannon's ten layers
@@ -119,6 +121,8 @@ struct Vehicle {
     int loop[kLoopCount]={-1};            // its voices (jetaudio.h OpenLoop), -1: none
     const engine::Drive* drive;           // its engine and running gear (engine::kDrives), nullptr: none
     engine::Gearbox box;
+    engine::Pedal pedal;                  // the driver's last (logged at once when it, or the reverse gear, changes)
+    bool logReverse;
     const engine::Event* engineEvent;     // the events its voices are of (the player's or the AI's)
     const engine::Event* gearEvent;
     int engineVoice[engine::kMostEventLayers],gearVoice[engine::kMostEventLayers];   // each layer's loop + 1, 0: none
@@ -440,7 +444,12 @@ void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
     const float wasOn=s.on;
     s.on=vec::Approach(s.on,driven ? 1.0f : 0.0f,dt/(driven ? kStartSec : kStopSec));
     const float speed=std::sqrt(vec::Dot(s.vel,s.vel)),load=At<float>(v,kEngineLoad);
-    engine::Step(s.box,d,speed*3.6f,std::isfinite(load) ? load : 0.0f,s.on,dt);
+    // Along the nose: backing runs the reverse gear (engine::Step).
+    const float along=vec::Dot(s.vel,reinterpret_cast<const float*>(v+kMatrix+32))*3.6f;
+    engine::Step(s.box,d,along,std::isfinite(load) ? load : 0.0f,s.on,dt);
+    const engine::Pedal pedal=engine::PedalOf(along,SeatCount(v)>0 ? At<float>(SeatAt(v,0),kSeatStickY) : 0.0f);
+    const char* turned=pedal!=s.pedal ? (pedal==engine::Pedal::brake ? "brake" : pedal==engine::Pedal::drive ? "drive" : "coast") :
+                       s.box.reverse!=s.logReverse ? (s.box.reverse ? "into reverse" : "out of reverse") : nullptr;
     const bool own=Own(v);
     const engine::Event& e=engine::EngineEvent(d.kind,own);
     const engine::Event& gear=engine::GearEvent(d.gear,own);
@@ -484,17 +493,24 @@ void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
                                    audio::AirCutoff(p.distance/kFarAt),false});
     }
     const ULONGLONG ms=x.ms;
-    if((Cfg().verbose || (own && Cfg().debug)) && ms-s.logAt>=2000) {
-        s.logAt=ms;
+    // Every 2 s, and at once as the driver brakes, drives or lets go or it goes into the reverse gear or out of it
+    // (a brake is over in less than 2 s), kTurnLogMs apart at most (a stick wavering at the edge: the last change later).
+    if((Cfg().verbose || (own && Cfg().debug)) && (ms-s.logAt>=2000 || (turned && ms-s.logAt>=kTurnLogMs))) {
+        s.logAt=ms;s.pedal=pedal;s.logReverse=s.box.reverse;
         char a[200],b[120];int at=0,bt=0,open=0;
         for(int k=0;k<ne && at<160;++k){open+=s.engineVoice[k] ? 1 : 0;at+=std::snprintf(a+at,sizeof(a)-at,"%s%.3f",k ? "," : "",ge*he[k].gain);}
         for(int k=0;k<ng && bt<90;++k){open+=s.gearVoice[k] ? 1 : 0;bt+=std::snprintf(b+bt,sizeof(b)-bt,"%s%.3f",k ? "," : "",gg*hg[k].gain);}
         if(!ne)a[0]=0;
         if(!ng)b[0]=0;
-        Log("SOUND vehicle v=%p %s %s %s gear %d rpm %.0f load %.2f %.0f km/h on %.2f, %.0f m cone %.0f late %.2f s; engine [%s] "
-            "running gear [%s] %d voice(s) of its %d, %d loop(s) open",v,VehicleClassName(v),own ? "own" : "ai",
-            d.kind==engine::Kind::turbine ? "turbine" : d.kind==engine::Kind::diesel ? "diesel" : "petrol",s.box.gear+1,
-            r->in.v[engine::kRpm],r->in.v[engine::kLoad],speed*3.6f,s.on,p.distance,cone,static_cast<double>(ms-r->ms)/1000.0,a,b,
+        char gearName[8];
+        if(s.box.reverse)std::snprintf(gearName,sizeof(gearName),"R");
+        else std::snprintf(gearName,sizeof(gearName),"%d",s.box.gear+1);
+        Log("SOUND vehicle v=%p %s %s %s gear %s rpm %.0f load %.2f %.0f km/h (%+.0f along) %s%s%s on %.2f, %.0f m cone %.0f "
+            "late %.2f s; engine [%s] running gear [%s] %d voice(s) of its %d, %d loop(s) open",v,VehicleClassName(v),
+            own ? "own" : "ai",d.kind==engine::Kind::turbine ? "turbine" : d.kind==engine::Kind::diesel ? "diesel" : "petrol",
+            gearName,r->in.v[engine::kRpm],r->in.v[engine::kLoad],speed*3.6f,along,
+            pedal==engine::Pedal::brake ? "braking" : pedal==engine::Pedal::drive ? "driving" : "coasting",
+            turned ? ", now: " : "",turned ? turned : "",s.on,p.distance,cone,static_cast<double>(ms-r->ms)/1000.0,a,b,
             open,ne+ng,audio::LoopsOpen());
     }
 }

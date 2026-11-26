@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace {
 using namespace crew::engine;
@@ -189,6 +190,49 @@ void Models() {
     Gearbox off;
     for(int i=0;i<300;++i)Step(off,tank,0.0f,0.0f,0.0f,dt);
     Check(off.rpm<0.5f,"the engine off: no rpm");
+    // Backing: the one reverse gear, high (War Thunder's), in and out of it a shift; braking: the forward gears down.
+    {
+        Gearbox r;
+        for(int i=0;i<600;++i)Step(r,tank,30.0f,0.8f,1.0f,dt);
+        Check(!r.reverse && r.gear>0,"forward at 30 km/h: a forward gear over the first");
+        const float fwd=r.rpm;
+        for(int i=0;i<60;++i)Step(r,tank,30.0f*(1.0f-static_cast<float>(i)/60.0f),0.3f,1.0f,dt);
+        Check(!r.reverse,"braking to a stand: still forward");
+        Step(r,tank,-0.5f,1.0f,1.0f,dt);
+        Check(!r.reverse,"under kReverseKmh back: not yet the reverse gear");
+        Step(r,tank,-2.0f,1.0f,1.0f,dt);
+        Check(r.reverse && r.gear==0 && r.shift>0.0f,"past kReverseKmh back: into the reverse gear, a shift");
+        int backMost=0;float low=1000.0f;
+        for(int i=0;i<1200;++i) {
+            const float v=-50.0f*static_cast<float>(i)/1200.0f;
+            Step(r,tank,v,1.0f,1.0f,dt);
+            if(r.gear>backMost)backMost=r.gear;
+            if(i>120 && r.rpm<low)low=r.rpm;
+            if(!r.reverse)backMost=99;
+        }
+        Check(backMost==0 && r.reverse,"backing up to 50 km/h: the one reverse gear, never a forward one");
+        Check(low>=kSlip+kSlipThrottle*0.9f,"backing at full throttle: the rpm high all the way");
+        Check(r.rpm>fwd,"backing at 50 km/h: higher than forward in its gear at 30");
+        Check(r.rpm>kShiftUp && r.rpm<=100.0f,"backing near the top: past kShiftUp (the gear as short as kReverseShare)");
+        Step(r,tank,0.5f,0.0f,1.0f,dt);
+        Check(r.reverse,"under kReverseKmh forward: still in reverse");
+        Step(r,tank,2.0f,0.5f,1.0f,dt);
+        Check(!r.reverse && r.gear==0 && r.shift>0.0f,"forward again: the first, a shift");
+        const Drive turbine{Kind::turbine,Gear::tracks,0,60.0f,1.0f};
+        Gearbox g;
+        for(int i=0;i<600;++i)Step(g,turbine,-20.0f,0.6f,1.0f,dt);
+        Gearbox h;
+        for(int i=0;i<600;++i)Step(h,turbine,20.0f,0.6f,1.0f,dt);
+        Check(!g.reverse && Near(g.rpm,h.rpm,1e-3f),"the turbine: no gears either way, backing as forward");
+    }
+    // The driver's pedal (forward negative on the stick).
+    Check(PedalOf(30.0f,-1.0f)==Pedal::drive && PedalOf(-30.0f,1.0f)==Pedal::drive && PedalOf(0.0f,1.0f)==Pedal::drive,
+          "with the way it rolls, or standing: a drive");
+    Check(PedalOf(30.0f,1.0f)==Pedal::brake && PedalOf(-30.0f,-0.5f)==Pedal::brake,"against it: a brake");
+    Check(PedalOf(30.0f,0.1f)==Pedal::coast && PedalOf(30.0f,-0.1f)==Pedal::coast,"the stick in the middle: a coast");
+    Check(PedalOf(0.5f,1.0f)==Pedal::drive,"under kReverseKmh: no brake, backing away");
+    Check(PedalOf(std::numeric_limits<float>::quiet_NaN(),1.0f)==Pedal::coast &&
+          PedalOf(30.0f,std::numeric_limits<float>::infinity())==Pedal::coast,"not finite: a coast");
     const Drive gt{Kind::turbine,Gear::tracks,0,60.0f,1.0f};
     Gearbox t;
     for(int i=0;i<60;++i)Step(t,gt,0.0f,0.0f,1.0f,dt);

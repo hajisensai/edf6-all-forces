@@ -185,16 +185,21 @@ constexpr ClassDrive kDrives[]={
 // The rpm (0..100) of a geared engine, and its load (0..1): in a gear the rpm is the speed's (kShiftUp at the gear's top
 // speed, the gears' tops kStep apart: up at kShiftUp, down under kShiftDown); pulling away the clutch slips: no lower
 // than kSlip + kSlipThrottle * throttle in the first; standing, the idle; a shift a moment's lift of the load. A turbine
-// has no gears: its rpm follows the throttle (and the speed it holds) with its spool's lag.
+// has no gears: its rpm follows the throttle (and the speed it holds) with its spool's lag. Backing (War Thunder's
+// tanks: one reverse gear, the engine high in it) the one reverse gear, as short as kReverseShare of the top speed
+// over the whole range backward and its clutch slipping like the first's: the rpm high; into it and out of it
+// (the speed past kReverseKmh the other way) a shift's lift of the load.
 constexpr float kIdle=5.0f,kShiftUp=88.0f,kShiftDown=40.0f,kStep=0.7f,kSlip=20.0f,kSlipThrottle=60.0f;
+constexpr float kReverseShare=0.75f,kReverseKmh=1.0f;
 constexpr float kRevUp=140.0f,kRevDown=90.0f;       // rpm / s
 constexpr float kSpoolUp=35.0f,kSpoolDown=25.0f;    // a turbine's rpm / s
 constexpr float kShiftSec=0.25f;
-struct Gearbox { float rpm=0.0f,load=0.0f,shift=0.0f; int gear=0; };
+struct Gearbox { float rpm=0.0f,load=0.0f,shift=0.0f; int gear=0; bool reverse=false; };   // gear: a forward one's
 inline float GearTop(const Drive& d,int g) noexcept { return d.top*std::pow(kStep,static_cast<float>(d.gears-1-g)); }
-// `speed` km/h, `throttle` 0..1 (the stock engine's drive +0x1A80), `on` 0..1 (the engine winding up / down).
+// `speed` km/h along the nose (backward negative), `throttle` 0..1 (the stock engine's drive +0x1A80), `on` 0..1 (the
+// engine winding up / down).
 inline void Step(Gearbox& b,const Drive& d,float speed,float throttle,float on,float dt) noexcept {
-    const float v=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
+    const float sv=std::isfinite(speed) ? speed : 0.0f,v=sv<0.0f ? -sv : sv;
     const float t=std::isfinite(throttle) ? (throttle<0.0f ? 0.0f : throttle>1.0f ? 1.0f : throttle) : 0.0f;
     float want;
     if(d.kind==Kind::turbine || d.gears<=0) {
@@ -206,17 +211,32 @@ inline void Step(Gearbox& b,const Drive& d,float speed,float throttle,float on,f
         return;
     }
     if(b.gear<0 || b.gear>=d.gears)b.gear=0;
+    if(b.reverse ? sv>kReverseKmh : sv<-kReverseKmh){b.reverse=!b.reverse;b.gear=0;b.shift=kShiftSec;}
     auto inGear=[&](int g){ return kShiftUp*v/GearTop(d,g); };
-    if(b.gear+1<d.gears && inGear(b.gear)>kShiftUp){++b.gear;b.shift=kShiftSec;}
-    else if(b.gear>0 && inGear(b.gear)<kShiftDown){--b.gear;b.shift=kShiftSec;}
-    want=inGear(b.gear);
-    if(b.gear==0 && want<kSlip+kSlipThrottle*t)want=kSlip+kSlipThrottle*t;
+    if(b.reverse)want=kShiftUp*v/(d.top*kReverseShare);
+    else {
+        if(b.gear+1<d.gears && inGear(b.gear)>kShiftUp){++b.gear;b.shift=kShiftSec;}
+        else if(b.gear>0 && inGear(b.gear)<kShiftDown){--b.gear;b.shift=kShiftSec;}
+        want=inGear(b.gear);
+    }
+    if((b.reverse || b.gear==0) && want<kSlip+kSlipThrottle*t)want=kSlip+kSlipThrottle*t;
     if(t<0.02f && v<1.0f)want=kIdle;
     if(want<kIdle)want=kIdle;
     if(want>100.0f)want=100.0f;
     b.rpm=Toward(b.rpm,want*on,kRevUp,kRevDown,dt);
     b.shift=b.shift>dt ? b.shift-dt : 0.0f;
     b.load=Toward(b.load,b.shift>0.0f ? 0.0f : t,6.0f,8.0f,dt);
+}
+
+// What the driver does with it (the log's): his stick (seat+0x2C4, the stock's and the NPC driver's alike: forward
+// negative) against the way it rolls (`speed` km/h along the nose): against it past kPedalStick a brake (from over
+// kReverseKmh), with it or standing a drive, the stick in the middle a coast.
+enum class Pedal { coast, drive, brake };
+constexpr float kPedalStick=0.2f;
+inline Pedal PedalOf(float speed,float stick) noexcept {
+    if(!std::isfinite(speed) || !std::isfinite(stick) || (stick<kPedalStick && stick>-kPedalStick))return Pedal::coast;
+    if((speed>kReverseKmh && stick>0.0f) || (speed<-kReverseKmh && stick<0.0f))return Pedal::brake;
+    return Pedal::drive;
 }
 
 // A jet's engine (ours): its rpm (800 idle .. 2600 full military power .. 2750 with the afterburner) spooling up and
