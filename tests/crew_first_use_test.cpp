@@ -143,6 +143,7 @@ void EmcTick(void) noexcept{unexpectedHook();return;}
 void SazabiSoundTick(void) noexcept{unexpectedHook();return;}
 void BlastSoundTick(void) noexcept{unexpectedHook();return;}
 void SidecarFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void AuraVehicleFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool SidecarBoard(unsigned char *,unsigned char *) noexcept{unexpectedHook();return {};}
 void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void SightZoomStock(unsigned char *) noexcept{unexpectedHook();return;}
@@ -165,6 +166,7 @@ void SupportFollowUpTick() noexcept{}   // ...and the sorties' second waves (air
 namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
 void GravityGunTick() noexcept{}
 void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
+void AuraTick() noexcept{}   // crew.cpp's SharedFrameTick applies the aura trucks (aura.cpp, not linked here)
 void FloatGunTick() noexcept{}
 void KeyConfigTick() noexcept{}   // crew.cpp's FrameTick follows the game's key config (keyconfig.cpp, not linked here)
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
