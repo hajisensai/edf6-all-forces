@@ -134,6 +134,10 @@ NEW_DEFAULTS_1124: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1124 = ('; edf6vc-defaults-2026-11-24：安装器已把仍是旧出厂值 1 的 MaxFrameLatency 改成 0（不设显卡排队帧数，'
                       '保持系统默认；重场景实测设 1 时有降速）（想改就改，之后安装不会再改）')
+NEW_DEFAULTS_1126: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'HeliHoverKey': ('0x24', '0x48')},
+}
+DEFAULTS_MARK_1126 = '; edf6vc-defaults-2026-11-26：悬停键仍为旧出厂值 Home 时改为 H，之后安装保留玩家选择'
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
@@ -142,6 +146,7 @@ DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = 
     (DEFAULTS_MARK_1108, NEW_DEFAULTS_1108),
     (DEFAULTS_MARK_1110, NEW_DEFAULTS_1110),
     (DEFAULTS_MARK_1124, NEW_DEFAULTS_1124),
+    (DEFAULTS_MARK_1126, NEW_DEFAULTS_1126),
 )
 
 
