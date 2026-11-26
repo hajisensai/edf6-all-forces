@@ -32,7 +32,7 @@ import checklock
 
 PASSED, FAILED, SKIPPED, TIMEOUT, NOT_RUN = 'Passed', 'Failed', 'Skipped', 'Timeout', 'Not Run'
 BAD = (FAILED, TIMEOUT, NOT_RUN)
-UNKNOWN_COST = 1e9   # a test with no recorded time runs first: it may be the longest
+UNKNOWN_COST = 1e9   # a test with no recorded time: schedule() gives it a cost (known_costs)
 
 
 @dataclass
@@ -55,6 +55,18 @@ class Result:
     ended: float = 0.0
 
 
+def known_costs(jobs: list[Job]) -> dict[str, float]:
+    """Each job's cost to order by, one with none recorded (UNKNOWN_COST) given one: its part's longest recorded (a new
+    test may be long: it starts with the longest), or with none of its part recorded (a fresh build: no ctest times
+    yet) the mean of the others' (2026-11-26: 733 unknown ctest tests all ahead of selftest's left its long ones last)."""
+    known = [j for j in jobs if j.cost < UNKNOWN_COST]
+    top: dict[str, float] = {}
+    for j in known:
+        top[j.part] = max(top.get(j.part, 0.0), j.cost)
+    mean = sum(j.cost for j in known) / len(known) if known else 1.0
+    return {j.name: j.cost if j.cost < UNKNOWN_COST else top.get(j.part, mean) for j in jobs}
+
+
 def schedule(jobs: list[Job], width: int, caps: dict[str, int] | None = None,
              done: Callable[[Job, Result], None] | None = None) -> dict[str, Result]:
     """Run `jobs`, `width` at most at once and caps[part] at most of a part, each in a core slot, the longest
@@ -62,7 +74,8 @@ def schedule(jobs: list[Job], width: int, caps: dict[str, int] | None = None,
     at a time). Returns every job's result."""
     caps = caps or {}
     names = {j.name for j in jobs}
-    pending = sorted(jobs, key=lambda j: -j.cost)
+    cost = known_costs(jobs)
+    pending = sorted(jobs, key=lambda j: -cost[j.name])
     results: dict[str, Result] = {}
     running: dict[str, int] = {}
     cv = threading.Condition()

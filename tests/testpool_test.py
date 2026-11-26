@@ -32,6 +32,16 @@ class Schedule(unittest.TestCase):
         testpool.schedule([job('a', 1, log=log), job('b', 9, log=log), job('c', 5, log=log)], 1)
         self.assertEqual([n for e, n in log if e == 'start'], ['b', 'c', 'a'])
 
+    def test_unknown_costs(self) -> None:
+        """A new test starts with its part's longest; a part with no times (a fresh build) mixes in at the mean."""
+        u = testpool.UNKNOWN_COST
+        jobs = [job('c_new', u), job('c_old', 4), job('c_long', 10),
+                job('s_a', u, part='selftest'), job('s_b', u, part='selftest'), job('g', 2, part='gen')]
+        got = testpool.known_costs(jobs)
+        self.assertEqual(got['c_new'], 10)
+        self.assertAlmostEqual(got['s_a'], (4 + 10 + 2) / 3)
+        self.assertEqual(testpool.known_costs([job('x', u)]), {'x': 1.0})
+
     def test_after_and_needs(self) -> None:
         log: list = []
         jobs = [job('setup', 1, log=log, status=testpool.FAILED, sleep=0.1),
