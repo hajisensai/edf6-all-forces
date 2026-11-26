@@ -1280,8 +1280,8 @@ JETS: dict[str, Jet] = {
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
     'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
-    SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'bomber501_2.mdb'),
-                   'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
+    SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'edf6vc_salvo_interceptor.mdb'),
+                   SALVO_MODEL, 'body', 'body'),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
