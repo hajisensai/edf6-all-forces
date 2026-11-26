@@ -1511,14 +1511,20 @@ def store_looks() -> None:
                         [vc.SALVO_EJECT, vc.SALVO_DROP_GRAVITY, vc.SALVO_FAN, vc.SALVO_ACCEL, vc.SALVO_TOP,
                          vc.SALVO_HOMING_DELAY]), name
             assert near(cp[7], vc.SALVO_DROP) and near(got['AmmoColor'], vc.SALVO_COLOUR), name
+            # A cold launch (the user, 2026-11-26: Arsenal Bird): let go dark, ignition 0.3 s or more later, a white
+            # trail just over 1 (not a glowing HDR one), long smoke.
+            assert vc.SALVO_DROP[0] >= 18.0 and vc.SALVO_EJECT <= 0.3 and max(vc.SALVO_COLOUR[:3]) <= 1.6, name
+            assert cp[2] == vc.SALVO_TRAIL >= 300.0 and child[2] == vc.SALVO_CHILD_TRAIL >= 160.0, (cp[2], child[2])
             assert near(cp[12], [1.0, vc.SALVO_SPLIT_AFTER]) and near(cp[13], [0.0, 0.0, vc.SALVO_SPLIT_CONE]), name
             assert near([cp[15][5], child[4], child[5], child[6], child[8]],
                         [vc.SALVO_CHILD_SPEED, vc.SALVO_CHILD_ACCEL, vc.SALVO_CHILD_TURN, vc.SALVO_CHILD_TOP,
                          vc.SALVO_CHILD_HOMING_DELAY]), name
             assert near(cp[15][12], vc.SALVO_CHILD_COLOUR) and near(child[10], vc.SALVO_CHILD_SPREAD), name
             # The rounds' glow declarations (docs/round-glow.md): past every entry their class reads, the last entry.
-            assert near(cp[16], [vc.GLOW_MARK, *vc.SALVO_GLOW]), cp[16]
+            # Set back onto the flame (the 6th number), both.
+            assert near(cp[16], [vc.GLOW_MARK, *vc.SALVO_GLOW]) and len(cp[16]) == 7 and cp[16][6] > 0.0, cp[16]
             assert len(child) == 14 and child[12] == 0 and near(child[13], [vc.GLOW_MARK, *vc.SALVO_CHILD_GLOW]), child
+            assert len(child[13]) == 7 and child[13][6] > 0.0, child
             child_models = [cp[15][14]]
         assert was['resource'] == [was['AmmoModel'], *child_models], name
         assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path, *child_models], look.size), name
@@ -2105,14 +2111,31 @@ def sortie_copies_agree() -> None:
         node = dsgo.Node([0.0] * (free - len(vc.GLOW_PAD.get(ammo_class, {}))))
         vc.declare_glow(node, ammo_class, vc.SALVO_GLOW)
         assert len(node.items) == free + 1 and node.items[free].items[0] == vc.GLOW_MARK, ammo_class
+        assert node.items[free].items[1:] == [float(v) for v in vc.SALVO_GLOW], node.items[free].items
+    node = dsgo.Node([0.0] * 16)
+    vc.declare_glow(node, 'MissileBullet02', (1.0, 1.0, 1.0, 1.0, 1.0))   # back optional: 0 when absent
+    assert len(node.items[16].items) == 6, node.items[16].items
+    # back's bounds, the field's index, the halo drawn only alive and lit (the stuck glows of dead rounds, 2026-11-26).
+    assert 'constexpr int kBackField=6;' in glow and 'kMostBack=50.0f;' in glow
+    assert 'if(!glow::Shines(flags,' in src('src/gpufx/gpufx.cpp') and 'flame!=0; }' in glow
     for bad in (('SolidBullet01', vc.SALVO_GLOW), ('MissileBullet02', (1.5, 1.0, 1.0, 1.0, 1.0)),
-                ('MissileBullet02', (1.0, 1.0, 1.0, 0.0, 1.0))):
+                ('MissileBullet02', (1.0, 1.0, 1.0, 0.0, 1.0)), ('MissileBullet02', (1.0, 1.0, 1.0, 1.0, 1.0, -0.1)),
+                ('MissileBullet02', (1.0, 1.0, 1.0, 1.0, 1.0, 51.0)), ('MissileBullet02', (1.0, 1.0, 1.0, 1.0)),
+                ('MissileBullet02', (1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0))):
         try:
             vc.declare_glow(dsgo.Node([0.0] * 16), *bad)
         except ValueError:
             continue
         raise AssertionError(f'declare_glow took {bad}')
     assert 'salvo ? sortie::kRainRoundSpeed : ' in combat and 'salvo ? 0.0f : ' in combat
+    # The rain's hold (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」; tools/sortie_check.cpp RainHold):
+    # over the target area with the nose settled for 2-3 s before it opens fire, the trigger gated on it.
+    hold = int(re.search(r'constexpr unsigned long long kRainHoldMs=(\d+);', plan).group(1))
+    assert 2000 <= hold <= 3000, hold
+    assert 'constexpr float kRainOpen=' in plan and 'inline bool RainHoldStep(' in plan
+    sortie_cpp = src('src/jet_sortie.cpp')
+    assert 'sortie::RainHoldStep(s.phase,s.phaseAt,dist,noseOff,ms)' in sortie_cpp
+    assert '*missileOk=open && arms.missileRange>0.0f;' in sortie_cpp and 'missile rain: open fire' in sortie_cpp
     # The salvo's volleys (src/salvo_volley.h, src/lockon.cpp ShotHook; the user, 2026-11-26: 「每帧只能出一发 什么垃圾设定，
     # 改」): its constants the store's, both shot calls patched, one lock enough, the old repeat-lock queue gone.
     volley = src('src/salvo_volley.h')

@@ -42,6 +42,25 @@ constexpr float kRainFireCone=0.8f;
 // What its rounds fly at, for the fire-or-hold check (wastedfire HoldFire): the children's launch speed, m/s
 // (SALVO_CHILD_SPEED x 60), with no gravity (the carrier's AmmoGravityFactor acts only in the drop before ignition).
 constexpr float kRainRoundSpeed=660.0f;
+// The rain's hold before it opens fire (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」): its nose goes on the
+// target from kRainFrom out, but it fires only once inside kRainOpen of the mark (over the target area) and after its
+// nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again);
+// once open it stays open for the rest of the pass, so the lock's dwell and the burst are not cut off by a wobble.
+constexpr float kRainOpen=2400.0f;           // m from the mark (level): over the target area
+constexpr float kRainSteadyCone=0.25f;       // rad between the nose and its aim: the nose settled
+constexpr unsigned long long kRainHoldMs=2500;
+static_assert(kRainOpen<kRainFrom && kRainOpen>kRainTo+kRainSpeed*(kRainHoldMs+kRainBurstMs)/1000.0f,
+              "the hold and the burst fit between kRainOpen and the end of the window");
+static_assert(kRainSteadyCone<kRainFireCone,"settled is tighter than the fire cone");
+// One step of the hold. `phase` 0 waiting, 1 settled since `since`, 2 open; true: it may fire now.
+inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,unsigned long long now) noexcept {
+    if(phase==2)return true;
+    if(!(dist<kRainOpen) || !(noseOff<=kRainSteadyCone)){phase=0;return false;}
+    if(phase!=1){phase=1;since=now;}
+    if(now-since<kRainHoldMs)return false;
+    phase=2;
+    return true;
+}
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
 constexpr float kRunMin=100.0f,kRunMax=2400.0f;
