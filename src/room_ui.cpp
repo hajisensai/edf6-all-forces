@@ -296,6 +296,10 @@ std::atomic<bool> resetAsked{false};
 // its destructor has run since: the next frame forgets it even when the new screen sits at the same address.
 std::atomic<unsigned char*> followed{nullptr};
 std::atomic<bool> followedGone{false};
+// The objects the menu left for a newer one while they still run (room_ui_logic.h ScreenTrack), and how many of their
+// frames were passed through since the last retirement (logged when one ends: the next run's evidence of the overlap).
+ScreenTrack track;
+std::atomic<int> staleFrames{0};
 // The thread the screens' frames run on (the UI thread): a destructor hook running there may touch the menu's state.
 std::atomic<DWORD> uiThread{0};
 
@@ -439,22 +443,38 @@ void Forget() noexcept {
     followed.store(nullptr);
     followedGone.store(false);
 }
-void Follow(unsigned char* self,bool room) noexcept {
+// True: `self` is the screen followed (its frame runs the menu); false: one the menu left for a newer object, still
+// running (the old HQ through its close after a pack switch): its frame passes straight through.
+bool Follow(unsigned char* self,bool room) noexcept {
     if(followedGone.exchange(false) && st.self) {
         Log("ROOMUI screen %p (%s) ended (its destructor ran): forgotten",st.self,st.room ? "room" : "HQ");
         Forget();
+        ClearRetired(track);   // an older object still alive is the screen now
     }
-    if(self==st.self)return;
-    if(st.self)Log("ROOMUI screen %p (%s) replaced by %p (%s)",st.self,st.room ? "room" : "HQ",self,room ? "room" : "HQ");
+    switch(TrackScreen(track,st.self,self)) {
+    case Track::Same: return true;
+    case Track::Stale:
+        staleFrames.fetch_add(1);
+        return false;
+    case Track::Replaced:
+        Log("ROOMUI screen %p (%s) replaced by %p (%s): the old one's frames pass through until it ends",
+            st.self,st.room ? "room" : "HQ",self,room ? "room" : "HQ");
+        staleFrames.store(0);
+        break;
+    case Track::First: break;
+    }
     Forget();
     st.self=self;st.room=room;
     followed.store(self);
+    return true;
 }
 // A screen's destructor: the one followed is marked gone (the next frame forgets it). On the UI thread (where the game
 // destroys its screens) the dialog standing over it is closed right here: it hangs on the game's global UI, not on the
 // screen, and would stay on top of whatever comes next (2026-10-20 review of #218). Elsewhere only the mark: the
 // menu's state is the UI thread's (and the dialog's own frame closes it once a mission starts: RequestCloseDialogs).
 void NoteGone(unsigned char* self) noexcept {
+    if(self && Unretire(track,self))
+        Log("ROOMUI screen %p ended after it was replaced (%d of its frames passed through)",self,staleFrames.exchange(0));
     if(!self || followed.load()!=self)return;
     followedGone.store(true);
     if(GetCurrentThreadId()!=uiThread.load())return;
@@ -727,7 +747,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         ForgetMenu();
         st.held=rm::Keys{};
     }
-    Follow(self,screen.room);
+    if(!Follow(self,screen.room))return screen.next(self,ctx);   // a replaced object finishing: nothing of the menu
     PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
     RoomPvpTick();       // this member's faction pick, the host's settings and start lock (room_pvp.cpp)
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
@@ -802,7 +822,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
 std::uint64_t __fastcall HqHook(unsigned char* self,void* ctx) {
     const std::uint64_t result=Frame(screens[1],self,ctx);
-    AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched || st.armoryTake || armoryui::IsOpen());
+    if(self==st.self)AutoOpenMission(self,ctx,st.menu.open || st.dialog.control || st.gate.latched || st.armoryTake || armoryui::IsOpen());
     return result;
 }
 // RoomLoadout=0 at load: the HQ's own update and the mission select opened, nothing of the menu.

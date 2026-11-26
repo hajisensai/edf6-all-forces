@@ -388,8 +388,74 @@ void AutoOpen() {
     Expect(!AutoOpenDue(true,false,false,true) && !AutoOpenDue(false,true,false,true),"nothing due: never");
 }
 
+// room_ui.cpp Follow over the HQ's pack switch, as the 2026-11-27 run logged it: after each switch the old HQ and the new
+// one both ran OnUpdate for ~0.27 s; every frame alternated "replaced by" and built the native 整备 button anew. Several
+// switches in a row, ESC pressed on the HQ in between (no screen object changes: Same frames), each old HQ ending later.
+struct Follower {
+    ScreenTrack t;
+    const void* current=nullptr;
+    bool gone=false;   // followedGone
+    int replaced=0,firsts=0,stale=0,menus=0;   // menus: Forget + a native button built (First / Replaced)
+    bool Frame(const void* self) {
+        if(gone && current){current=nullptr;ClearRetired(t);}
+        gone=false;
+        switch(TrackScreen(t,current,self)) {
+        case Track::Same: return true;
+        case Track::Stale: ++stale; return false;
+        case Track::Replaced: ++replaced; break;
+        case Track::First: ++firsts; break;
+        }
+        current=self;
+        ++menus;
+        return true;
+    }
+    void Gone(const void* self) { Unretire(t,self); if(self==current)gone=true; }
+};
+void ScreensFollowed() {
+    int objects[8]{};
+    Follower f;
+    Expect(f.Frame(&objects[0]) && f.firsts==1 && f.menus==1,"the first HQ: followed");
+    for(int i=0;i<3;++i)Expect(f.Frame(&objects[0]),"ESC on the HQ's root (nothing opened): the same object, followed");
+    const void* hq=&objects[0];
+    for(int sw=1;sw<=6;++sw) {
+        const void* next=&objects[sw];
+        bool oldPassed=true,newRan=true;
+        Expect(f.Frame(next) && f.current==next,"the new HQ's first frame: it replaces the old one");
+        for(int frame=0;frame<18;++frame) {   // both update for a while, in either order
+            if(frame%2){newRan&=f.Frame(next);oldPassed&=!f.Frame(hq);}
+            else {oldPassed&=!f.Frame(hq);newRan&=f.Frame(next);}
+        }
+        Expect(oldPassed && newRan && f.current==next,"the overlap: the old HQ's frames pass through, the new one keeps the menu");
+        f.Gone(hq);
+        Expect(f.current==next && !IsRetired(f.t,hq),"the old HQ ends: forgotten, the new one still followed");
+        for(int i=0;i<3;++i)Expect(f.Frame(next),"ESC in between: nothing changes");
+        hq=next;
+    }
+    Expect(f.replaced==6 && f.menus==7 && f.stale==6*18,"six switches: one replacement and one native button each, never alternating");
+    // A new object at an ended one's address is a new screen.
+    Follower g;
+    g.Frame(&objects[0]);g.Frame(&objects[1]);g.Gone(&objects[0]);
+    Expect(g.Frame(&objects[1]) && g.current==&objects[1],"the old one ended: the new one followed");
+    g.Gone(&objects[1]);
+    Expect(g.Frame(&objects[0]) && g.current==&objects[0] && g.firsts==2,"an object built at an ended one's address: followed as new");
+    // The newer object ends first while the older one still runs: the older one is the screen again.
+    Follower h;
+    h.Frame(&objects[0]);h.Frame(&objects[1]);
+    Expect(!h.Frame(&objects[0]),"the replaced one passes through");
+    h.Gone(&objects[1]);
+    Expect(h.Frame(&objects[0]) && h.current==&objects[0],"the followed one ended first: the older one still alive is followed again");
+    // The ring: more overlapping objects than its slots: the oldest may be followed again (never a crash, never a stuck menu).
+    Follower r;
+    for(int i=0;i<=kRetiredMost+1;++i)r.Frame(&objects[i]);
+    Expect(r.current==&objects[kRetiredMost+1] && IsRetired(r.t,&objects[kRetiredMost]) && !IsRetired(r.t,&objects[0]),
+           "the retired ring keeps the newest ones");
+    Expect(!Unretire(r.t,nullptr) && !IsRetired(r.t,nullptr) && Unretire(r.t,&objects[kRetiredMost]) &&
+           !Unretire(r.t,&objects[kRetiredMost]),"Unretire: once, never for nullptr");
+}
+
 int main() {
     Names();
+    ScreensFollowed();
     NativeButton();
     Input();
     PadTable();
