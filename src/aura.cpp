@@ -68,6 +68,7 @@ struct Truck {
     ULONGLONG atMs=0,seen=0;
     float speed=-1.0f;       // m/s; -1: not measured yet
     bool driven=false;
+    aura::StateMark mark;    // its last state line (LogStates)
 };
 LazyRows<Truck,kTrucks> trucks;   // heap from the first use (plugin_image_size_guard: no image table)
 bool ok=false,netReady=false;
@@ -82,6 +83,10 @@ LazyRows<Carry,kCarries> carries;
 SRWLOCK viewLock=SRWLOCK_INIT;
 AuraView view{};
 ULONGLONG ringAt=0;
+unsigned stateLines=0;            // state lines this mission (aura::kStateLines)
+bool hereLogged=false;            // the kinds reaching the player: last logged (Publish)
+std::uint8_t hereKinds=0;
+ULONGLONG hereAt=0;
 
 const float* Pos(const void* o) noexcept { return reinterpret_cast<const float*>(static_cast<const unsigned char*>(o)+kPosition); }
 
@@ -279,6 +284,13 @@ void Publish(const aura::Msg& m,ULONGLONG ms) noexcept {
             }
         }
     }
+    // what the HUD block shows, logged when it changes (a kind flickering: which source and how far, LogStates)
+    if(stateLines<aura::kStateLines && (!hereLogged || here.kinds!=hereKinds) && (ms<hereAt || ms-hereAt>=aura::kStateGapMs)) {
+        ++stateLines;hereLogged=true;hereKinds=here.kinds;hereAt=ms;
+        Log("AURA here: kinds 0x%X (attack %.2f repair %.3f ammo %.3f) of %d standing, player %s",static_cast<unsigned>(here.kinds),
+            static_cast<double>(here.attack),static_cast<double>(here.repair),static_cast<double>(here.ammo),m.count,
+            have ? "seen" : "not seen");
+    }
     AcquireSRWLockExclusive(&viewLock);
     if(rays){view.rings=next.rings;std::memcpy(view.ring,next.ring,sizeof(next.ring));}
     if(!m.count)view.rings=0;
@@ -352,6 +364,33 @@ void AuraVehicleFrame(unsigned char* v) noexcept {
     t->driven=r==Rider::player || r==Rider::other;
 }
 
+// Each aura truck this machine sees: why its aura stands or not and how far the player is (aura::StateLogDue paces it).
+// Read with AURA here: a kind that comes and goes with `inside` flipping is the player crossing that truck's radius.
+void LogStates(ULONGLONG ms) noexcept {
+    static const char* const kNames[aura::kKinds]={"command","repair","ammo"};
+    const Config& c=Cfg();
+    const unsigned char* const human=PlayerHuman();
+    const bool have=human && Readable(human,kPosition+12);
+    for(Truck& t:trucks) {
+        if(t.kind<0 || t.kind>=aura::kKinds || ms-t.seen>kGoneMs || !TruckLive(t))continue;
+        const auto* v=static_cast<const unsigned char*>(t.ref.obj);
+        const bool dead=v[kDead]!=0;
+        const bool active=aura::Active(dead,t.driven,t.speed,c.auraParkSpeed);
+        aura::Source s{};
+        std::memcpy(s.pos,t.pos,12);s.radius=c.auraRadius;
+        const bool inside=have && aura::Inside(s,Pos(human));
+        if(!aura::StateLogDue(t.mark,active,inside,ms,stateLines))continue;
+        ++stateLines;
+        t.mark=aura::StateMark{true,active,inside,ms};
+        const float d=have ? std::sqrt(aura::Dist2(t.pos,Pos(human))) : -1.0f;
+        Log("AURA truck %p %s: active=%d (dead=%d driven=%d speed=%.2f m/s, park %.2f) at (%.1f,%.1f,%.1f), player %.1f m "
+            "(radius %.0f, inside=%d)",t.ref.obj,kNames[t.kind],active ? 1 : 0,dead ? 1 : 0,t.driven ? 1 : 0,
+            static_cast<double>(t.speed),static_cast<double>(c.auraParkSpeed),static_cast<double>(t.pos[0]),
+            static_cast<double>(t.pos[1]),static_cast<double>(t.pos[2]),static_cast<double>(d),
+            static_cast<double>(c.auraRadius),inside ? 1 : 0);
+    }
+}
+
 void AuraTick() noexcept {
     const ULONGLONG frame=GameFrame();
     if(frame==lastFrame)return;
@@ -366,6 +405,7 @@ void AuraTick() noexcept {
         m=Standing(ms);
         if(InSession() && netReady)SendState(m,ms);
     } else if(netReady && aura::Fresh(heardAt,ms))m=heard;
+    LogStates(ms);
     Apply(m,dt,frame);
     Publish(m,ms);
 }
@@ -374,6 +414,7 @@ void ResetAura() noexcept {
     for(Truck& t:trucks)t=Truck{};
     for(Carry& c:carries)c=Carry{};
     sent=false;sentMsg=aura::Msg{};sentAt=0;heard=aura::Msg{};heardAt=0;lastMs=0;
+    stateLines=0;hereLogged=false;hereKinds=0;hereAt=0;
     ClearView();
 }
 

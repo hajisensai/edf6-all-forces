@@ -67,6 +67,29 @@ inline Effect Select(const Source* s,int n,const float* pos,std::int32_t team) n
     return e;
 }
 
+// A friend at `pos` within the source's radius (the same test as Select's).
+inline bool Inside(const Source& s,const float* pos) noexcept {
+    return pos && s.radius>0.0f && Dist2(s.pos,pos)<=s.radius*s.radius;
+}
+
+// The state log (aura.cpp): one line per truck when what decides its aura for the player changes (it stands or not, the
+// player within its radius or not), at most each kStateGapMs a truck, else a heartbeat each kStateBeatMs; and one line
+// when the kinds reaching the player change. At most kStateLines a mission (a long mission is no log flood).
+constexpr std::uint64_t kStateGapMs=500,kStateBeatMs=10000;
+constexpr unsigned kStateLines=1500;
+struct StateMark {
+    bool logged=false;
+    bool active=false,inside=false;
+    std::uint64_t at=0;
+};
+// Compared with what was last logged (not the last frame): a change inside the gap is still logged once the gap passed.
+constexpr bool StateLogDue(const StateMark& last,bool active,bool inside,std::uint64_t now,unsigned lines) noexcept {
+    if(lines>=kStateLines)return false;
+    if(!last.logged || now<last.at)return true;
+    const std::uint64_t since=now-last.at;
+    return active!=last.active || inside!=last.inside ? since>=kStateGapMs : since>=kStateBeatMs;
+}
+
 // The native dealt multiplier with the attack bonus in (the game resets it to 1 each frame and every support device
 // takes the max of its own and what is there, 0x2AC8CA): never lowered.
 inline float AttackMultiplier(float current,float bonus) noexcept {

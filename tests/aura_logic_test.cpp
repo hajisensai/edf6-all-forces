@@ -141,6 +141,35 @@ int main() {
         Check(Fresh(1000,1000+kSilentMs-1) && !Fresh(1000,1000+kSilentMs) && !Fresh(0,10),"heard: stands kSilentMs");
     }
 
+    // Run 1 in game (2026-11-27): the three trucks made on one point pushed one another apart; parked (speed 0) all stood,
+    // but the repair truck came to rest 69..104 m from the player (radius 60: never on the HUD) and the ammo truck 27..67 m
+    // (on, off, on as the player walked about the command truck). The rules gave just that: no hysteresis to add.
+    {
+        const float player[3]={-283.0f,1.0f,160.0f};
+        const Source s[]={At(Kind::command,-291.9f,151.6f,60,0.3f),At(Kind::repair,-329.2f,224.3f,60,0.02f),
+                          At(Kind::ammo,-263.1f,200.7f,60,0.1f)};
+        const Effect e=Select(s,3,player,1);
+        Check(!Inside(s[1],player) && e.repair==0.0f,"the repair truck 79 m off: no repair");
+        Check(Inside(s[0],player) && Inside(s[2],player) && e.kinds==((1u<<0)|(1u<<2)),"command and ammo within 60 m: both");
+        const float farther[3]={-300.0f,1.0f,140.0f};
+        Check(!Inside(s[2],farther) && (Select(s,3,farther,1).kinds&(1u<<2))==0,"the ammo truck 71 m off: no ammo");
+        Check(Active(false,false,0.0f,1.0f),"parked at rest: stands");
+        Source none=s[0];none.radius=0.0f;
+        Check(!Inside(none,player) && !Inside(s[0],nullptr),"no radius / no friend: not inside");
+    }
+
+    // The state log's pacing.
+    {
+        StateMark m{};
+        Check(StateLogDue(m,true,false,0,0),"first sight: logged");
+        m=StateMark{true,true,false,1000};
+        Check(!StateLogDue(m,true,false,1000+kStateBeatMs-1,0) && StateLogDue(m,true,false,1000+kStateBeatMs,0),"unchanged: the heartbeat");
+        Check(!StateLogDue(m,true,true,1000+kStateGapMs-1,0) && StateLogDue(m,true,true,1000+kStateGapMs,0),"inside flips: after the gap");
+        Check(StateLogDue(m,false,false,1000+kStateGapMs,0),"stands no more: after the gap");
+        Check(!StateLogDue(m,false,true,1000+kStateBeatMs,kStateLines),"the mission's lines spent: none");
+        Check(StateLogDue(m,true,false,500,0),"the clock went back (a new mission): logged");
+    }
+
     // The markers: told apart within the 16 characters the game's bone lookup compares.
     for(int i=0;i<kKinds;++i)for(int j=i+1;j<kKinds;++j)
         Check(std::wcsncmp(kMarkers[i],kMarkers[j],16)!=0,"markers apart within 16 characters");
