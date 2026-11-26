@@ -155,6 +155,12 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - 不双响：命中装甲的 1744 次里，原版预设全是「本来没声音」（`stock_silent_armour`），只响我们的；没有一次「原版真起播又被标成我们的」（`stock_hit_kept` 只出现在非装甲命中上）。爆炸：被顶替的 176 次原版爆炸声都没有起播，我们响 62 次，其余被爆炸预算丢掉（`kBlastBudget`：每档同时在响的至多 6 / 4 / 4 / 3 个，各有冷却与寿命；喀秋莎一次齐射十几发落在同一处），没有双响。
   - 声部：one-shots dropped 全 0，busy 峰值 93 / 118 of 160，loops 峰值 38/96、none free 0，限幅器 on（2 声道）。`stock_se_held` 0。
   - 没触发的：战雷主炮事件（这几段的 NPC 坦克是 403 电磁炮：`Bore::rail` 走插件自己的电磁炮声 `Report`，没有战雷事件；那条路原来不记 Debug，已补 `report_rail` / `report_other`）、榴弹炮（伤害统计里 NPC 榴弹炮一发没开）、来袭（喀秋莎火箭弹道平，没有陡落到耳边 300 m 内的弹）、hit_aphe_mid。
+- 第三轮（测试场自定义方案 wtfx，只用已装载具：玩家坐停放的泰坦 `TestBoardVehicle=404_Tank`，进任务 20 s 起每 9 s 开一炮；狂战士波次；友军 PzH2000×2、X-Morph 中型自行火炮×2、插件榴弹炮、突击虎、X-Morph 中型坦克×2、BMPT；120 s 29 个窗口；DLL build ad369a8917，loading 行相符）：
+  - 战雷主炮事件触发了：泰坦主炮 `128mm_pak44_ai` 10 次（9 层，47 m，矩阵 [0.30 0.31]），NPC 榴弹炮 `150mm_sfh_18_ai` 41 次（8 层）；装填 reload_open 10 / insert 18 / close 9，炮塔 turret_loop 43 / stop 42，passby 153。
+  - 爆炸：bomb_explosion_ground 47、art_explosion_ground 3、explosion_ground 2，`stock_blast_taken` 54；hit_aphe_big 20（`stock_silent_armour` 44），`stock_hit_taken` 0、`stock_hit_kept` 0：不双响。
+  - 声部：dropped 0，busy 峰值 66/160，loops 40/96、none free 0，限幅器 on。
+  - 没触发：来袭（41 次榴弹炮齐射、14 处爆炸落在耳边 300 m 内，一次也没过「陡落」条件；插件榴弹炮 240 m/s，按 g≈14.4 m/s² 低伸弹道要 3 km 以上落角才过 26.6°，所以加了 Debug 计数 `incoming_flat_under10deg` / `_under20deg` / `_under27deg` / `incoming_no_burst` / `incoming_rolled_out` / `incoming_over_budget`，下一轮看落角分布再定）、hit_aphe_mid（3–8 m 的爆炸只有 2 次且不在装甲上：所有友军都是 603_Flak 车体，中型坦克和 BMPT 整局没有开火记录）。
+  - 顺带查出：`KindOf` 漏了 GrenadeBullet01_MapNoDamage（0x17A16E8，近炸高爆弹）和 RocketBullet01_LowLight（0x17A39A8），这两类弹没有掠过声和来袭声；已补（docs/hit-sound-re.md）。
 
 ## 没验证的
 
