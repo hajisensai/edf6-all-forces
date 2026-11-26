@@ -369,7 +369,10 @@ bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hul
         for(int side=-1;side<=1;++side) {
             const float offset=static_cast<float>(side);
             Point foot{at.x+rx*offset,at.y,at.z+rz*offset};float floor{};
-            if(!ground(foot,p.step,floor)||std::fabs(floor-at.y)>p.step)return false;
+            // On level ground the two centre probes have the same start and end heights. A step changes the probe
+            // window and may reveal a different floor for the headroom check, so that case still queries the map.
+            if(side==0 && at.y==previous.y && foot.x==at.x && foot.z==at.z)floor=at.y;
+            else if(!ground(foot,p.step,floor)||std::fabs(floor-at.y)>p.step)return false;
             Point low{foot.x,floor+0.08f,foot.z},high{foot.x,floor+p.height,foot.z};
             if(!clear(low,high) || (side==0 && !hull(low,high)))return false;
             for(int level=0;level<3;++level) {
