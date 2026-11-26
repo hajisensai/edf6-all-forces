@@ -129,7 +129,7 @@
 - 尺寸：单位尺寸乘 `BlastScale(r)`：半径 ≤ 6 m 线性（下限 1），再往上按 `6·sqrt(r/6)` 增长（24 m → 12），否则大爆炸的尘云能到 60 m 一团，把玩家周围糊成一堵不透明的墙。残留烟与大尘云的 alpha 峰值 0.45 / 0.5。自家烟离相机近于自身尺寸时按 `(距离 − 0.25·尺寸) / (0.75·尺寸)` 淡出，相机钻进烟团时不会满屏糊住。
 - 预算与降级：池 8192 颗（`Renderer::kMaxInstances` 65536 的其余给接管）；满时替换最接近寿命末尾的粒子。LOD：60 m 内满量，越远越少（最低 1/5），池超过 3/4 再减半；数量减少时单颗按 `1/sqrt(lod)` 放大，覆盖面积不变。同一帧超过 24 个爆炸时其余每个降到 0.35。相机位置用玩家位置代替（游戏线程拿不到相机）。
 
-## efs 渲染器（`0x2EDE20`，第 3 段接管 Texture<quad>，`GpuFxEfs`，默认关）
+## efs 渲染器（`0x2EDE20`，第 3 段接管 Texture<quad>，`GpuFxEfs`，第 5 段起默认开）
 
 - `0x2EDE20` 是 `effect::EfsObject` 渲染子对象（vtable `0x17A84E0`，槽 1，构造 `0x2ED6E0`）的 `Draw(sub, ctx, pass, view*)`，是多种 efs RenderInfo 的调度器，不经过 `0x3027B0 / 0x1155810 / 0x1154F70`。
 - 结构：`efsInst+0x40` 链表 → 发射器组（`node[2]+0x70`，快照数组 `+0x28`，每视图 0xA0 字节）→ `efs::Emitter`（vtable `0x19AD1C0`，槽 6 `0x10D4C30` 绘制 → `0x10D5C40`）→ RenderInfo（13 种：Texture、Distortion、Sprite、Life、Model、Locus、Line、ExtLine、LocusLine、LocusExtendLine、EmittingExtendLine、Null）。
@@ -145,9 +145,9 @@
   - cull：原版 efs 不剔除（cull 1 NONE），与我方相同；原版 ParticleRender 是 BACK（cull 3），粒子卡片总是正对相机、绕序不翻，BACK 不剔除任何一张，我方不剔除等价。
   - xgl_system 跨帧不变（`system changed 0`），efs 绘制都在 WorldBegin/WorldEnd 之间（`outside 0`），所有 efs 网格索引都是 `0 1 2 3 1 2`（索引为空即顺序的假设没被用到）。
   - 深度：本机绑定的 DSV 是 D32_FLOAT（`fmt=40`），没有 24 位量化；原版 efs 的比较按 ctx `+0x1A0` 逐绘制带进实例（0 不测、1 LESS、2 LESS_EQUAL）。深度目标若是 D24，PS 先把片元深度按 24 位 UNORM 取整再比（硬件测试比较的是换成目标格式后的值），`gpufx_gpu` 在 D24 上覆盖「场景深度正好等于卡片深度：LESS 不画、LESS_EQUAL 画」。
-  - 画面对照：`GpuFxNative=2` 按卡片中心分屏，测试场里 Fencer 挥刀的 efs 四边形中心全在右半屏（探针 `split stock 0`），原版那一半没有可比的卡片；改成两次运行对照（`efsab3` `GpuFxEfs=0` / `efsab4` `GpuFxEfs=1`，同一 DLL t15，`GpuFxNative=1`），整轮只有约 45 个 efs 四边形（每秒约 2 个），0.25 s 一张的截图一张都没拍到，两次运行的场景本身也会分叉（爆炸、车辆位置）。所以 efs 的画面一致还没有被截图证实，`GpuFxEfs` 保持默认关。要证实需要让 efs 四边形落在左半屏的测试（转身挥刀或在左侧生成 `CreateEfs`），本轮没做。
+  - 画面对照：`GpuFxNative=2` 按卡片中心分屏，测试场里 Fencer 挥刀的 efs 四边形中心全在右半屏（探针 `split stock 0`），原版那一半没有可比的卡片；改成两次运行对照（`efsab3` `GpuFxEfs=0` / `efsab4` `GpuFxEfs=1`，同一 DLL t15，`GpuFxNative=1`），整轮只有约 45 个 efs 四边形（每秒约 2 个），0.25 s 一张的截图一张都没拍到，两次运行的场景本身也会分叉（爆炸、车辆位置）。当时 efs 的画面一致没有被截图证实。第 5 段用对照台（`GpuFxTest=3`，同一位置定点放 efs 闪光，运行中轮换开关）补上了截图对照，GPU 时间也低于原版（见「对照台」），`GpuFxEfs` 改为默认开。
 
-## efs 拖尾（trails：ExtLine / LocusExtendLine / EmittingExtendLine，`GpuFxTrails`，默认关）
+## efs 拖尾（trails：ExtLine / LocusExtendLine / EmittingExtendLine，`GpuFxTrails`，第 5 段起默认开）
 
 - 三种 RenderInfo 都在 vtable 槽 3 里一次做完更新和绘制（每条拖尾每帧一次）：先把点拼进向量（每点 0x30 字节：位置、颜色、v、半宽），再调一次原版绘制。
   - ExtLine 的槽 3 是 `[0x1A3A2F8] = 0x10F0FE0`，在 `0x10F12B3` 调 `0x10C2240`。
@@ -188,7 +188,7 @@
 - 离线核对：
   - `gpufx_sim` 把四边形逐三角形对照原版条带：ExtLine 0 / 1 / 奇数点和 1000 点分批（0、1、2、3、7、12、1000、1001 点），Locus 不足两点不画、512 点重开（2、3、9、511、512、513、1024、1100 点）。
   - `gpufx_gpu` 在 WARP 上用等价 HLSL 编出的字节码验证：坏字节码被拒，三种混合、淡出、LESS / LESS_EQUAL、条带覆盖、与卡片交错的绘制顺序。
-- 未实机验证：画面一致和 GPU 时间要跑 `GpuFxTest=3 / 4` 对照（命令见 PR 说明）。
+- 实机：bench3 / bench4 对照见「对照台」一节，我方拖尾 GPU 时间不高于原版，画面无缺失。
 
 ## 性能（第 2 段，`perfrun blast`，3840×2160，`GpuFxNative=1`，20 s 干净窗口）
 
@@ -237,10 +237,32 @@
   - 单帧贴图（原版卡片几乎全是）也采两次再插值：`Frames > 1` 才采第二帧。
   - 粒子种类改用只读 DSV 的硬件深度测试（LESS_EQUAL；反向深度用 GREATER_EQUAL），被场景挡住的像素不进 PS。
   - 输出为零的像素（alpha 种类 a = 0；加色种类贴图色为零或软淡出为零）跳过光照，结果逐位不变。
+- 集 A 的根因（第 5 段，DXBC 对照原版 PS `0x196BA60`）：
+  - 原版集 A 的 PS 里没有 discard，我方集 A 和集 B 共用一个入口 `PsStockLit`，带着集 B 的 `discard`。PS 里只要有 discard，硬件就改成 late Z：被场景挡住的卡片像素也要先跑完阴影（4 次阴影图读取）和分簇点光循环，再做深度测试。天罚时点光多、卡片大多埋在烟里，这部分全是白算。现在集 A 有自己的入口 `PsStockLitA`，不带 discard。
+  - 点光循环里，原版每个掩码位先只读 16 字节的位置和范围，在范围内才读其余字段；我方原来每位都读整条 64 字节的点光。现在改成和原版一样的读取顺序。
+  - 这两条修正还要用 `GpuFxTest=5` 实测确认，确认前 `GpuFxLitA` 默认为 0（集 A 不接管）。
 - 仍有的差距：`GpuFxLayers=0` 时重灾窗口 34–35 fps，原版 40–51。默认配置（`GpuFxLayers=1`，天罚的爆炸粒子换成自家分层烟）最差 35 fps，随后回到 46–54。集 A 每张卡比原版贵在哪里还没有定论：要拿 GPU 抓帧（PIX）逐个对比原版 PS 与我方 PS 的同一次绘制，本轮没做。
+
+## 对照台（第 5 段，`GpuFxTest=3 / 4 / 5`）
+
+同一次运行里在固定位置放特效，按阶段在运行中切换 `GpuFxNative` / `GpuFxEfs` / `GpuFxLayers` / `GpuFxTrails` / `GpuFxLitA`（`BenchOverride` 在 `PublishOptions` 之后覆盖开关，`ApplyLayerPatches` 每步按当前开关打 / 撤补丁），配合 `GpuFxProbe=1` 每 5 s 记一帧各桶的我方 GPU 毫秒，以及原版同类绘制的毫秒、绘制数、卡片数和像素屏数（`stock draws by bucket`）。之后的画面调校都用这种方式：一次启动，同一位置，开关轮换。
+
+- `3` 观感：每阶段 10 s，原版 / 接管 / 接管加分层，看截图。
+- `4` 负载：每阶段 12 s，原版 / 接管 / 接管但集 0xA40 留原版 / 接管但拖尾留原版；前方 50–110 m 网格每 2 s 放 24 处爆炸，每 0.25 s 一次闪光。
+- `5` 天罚：每阶段 16 s，阶段开头放一次天罚，集 0xA40 轮流由原版 / 我方画，其余都接管。
+- `DevFrameCap`（需 `Debug=1`）：在 perf_probe 的输入采样钩子里（每帧一次，帧内各步之前）用高精度可等待计时器把主循环限到每秒 N 帧。最初放在 `gpufx::Tick` 里，那里每个游戏步调一次（一帧最多 3 步），每步都等会把步进拖慢，主循环再补步，30 帧上限实测只剩 10 fps。
+
+负载台实测（bench4，`2997c118`，截图 1280×720，全程 60 fps）。表中是同一类卡片每帧的 GPU 毫秒，原版取该类留给原版画的阶段，我方取接管阶段：
+
+| 桶 | 原版（ms） | 我方（ms） |
+|---|---|---|
+| 集 0xA40（约 300 张，点光少） | 0.29–0.41 | 0.07–0.17 |
+| efs 四边形（约 450 张，像素 8–9 屏） | 0.94–1.63 | 0.40–0.61 |
+| 拖尾（约 6000 个四边形，像素 7–11 屏） | 0.59–0.78 | 0.45–0.73 |
+
+观感台（bench3）的截图里，原版、接管、接管加分层三个阶段的爆炸、efs 闪光和拖尾都在，没有黑块、错位或缺失。
 
 ## 未验证 / 未做
 
 - efs RenderInfo 里 Distortion、Model、Line / LocusLine 未接（ExtLine / LocusExtendLine / EmittingExtendLine 已接，见「efs 拖尾」；Line 系的理由同节）。
-- 拖尾接管未实机验证：画面与 GPU 时间待 `GpuFxTest=3 / 4` 对照。
 - 集 A 带光照卡片在大量点光下比原版贵（见上一节），根因需要 GPU 抓帧对比。

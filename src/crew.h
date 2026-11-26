@@ -316,9 +316,9 @@ struct Config {
                                  //    ours is no slower (docs/gpufx-re.md)
     bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
                                  //    blast particles and vehicle guns' muzzle effects off
-    bool gpuFxEfs=false;         // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
+    bool gpuFxEfs=true;          // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
                                  //    (with GpuFxNative 1 / 3)
-    bool gpuFxTrails=false;      // ...the efs renderer's trails (ExtLine / LocusExtendLine / EmittingExtendLine: smoke trails,
+    bool gpuFxTrails=true;       // ...the efs renderer's trails (ExtLine / LocusExtendLine / EmittingExtendLine: smoke trails,
                                  //    tracers) drawn by the GPU renderer with the stock trail shaders, batched (with GpuFxNative 1 / 2)
     bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
     int devFrameCap=0;           // with debug: the main loop held to at most this many frames a second (0 off; perf_probe.cpp):
