@@ -825,6 +825,30 @@ def legs_logs() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def wave_ready() -> None:
+    import drive
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as d:
+        log = os.path.join(d, 'vehiclecrew.log')
+        with open(log, 'wb') as f:
+            f.write(b'[00:00:00.000] PERF OBJECTS enemies 30, player team 1, friends 19\n')
+        during = iter((b'[00:00:10.000] PERF OBJECTS enemies 0, player team 1, friends 4\n',
+                       b'[00:00:15.000] PERF OBJECTS enemies 10, player team 1, friends 19\n'))
+        polls = []
+
+        def advance(_):
+            polls.append(1)
+            with open(log, 'ab') as f:
+                f.write(next(during))
+
+        with patch.object(drive, 'game_pids', return_value=[1]), patch.object(perfrun.time, 'sleep', side_effect=advance):
+            ready = perfrun.wait_population(d, log, 60.0)
+        check(ready is None and len(polls) == 2, 'wave readiness ignores old counts and waits for a live enemy')
+        with patch.object(drive, 'game_pids', return_value=[]):
+            check('exited' in perfrun.wait_population(d, log, 60.0), 'game exit stops a wait for the wave')
+
+
 def legs_run() -> None:
     """One launch of three legs with drive.run faked: the range written once before the launch and rewritten for the
     later range leg, the `next` commands, the keys timed from the leg's entry, each leg's slice of the log and its
@@ -837,6 +861,7 @@ def legs_run() -> None:
     gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'rewrite_scenario',
                                            'restore_scenario')}
     sample_saved = perfrun._sample
+    population_saved = perfrun.wait_population
     d = tempfile.mkdtemp()
     try:
         game = os.path.join(d, 'game')
@@ -896,7 +921,7 @@ def legs_run() -> None:
         def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
             calls.append(('sample', os.path.basename(out), warm))
             now = time.time()
-            n = enemies['range']
+            n = 0 if enter[0] == 'ended' else enemies['range']
             stamp('PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, 0 over 33 ms')
             stamp(f'PERF OBJECTS enemies {n}, player team 4, friends 9')
             with open(os.path.join(out, 'cpu.txt'), 'w') as f:
@@ -927,6 +952,12 @@ def legs_run() -> None:
         gen.rewrite_scenario = rewrite
         gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
         perfrun._sample = fake_sample
+
+        def fake_population(game_, log_, timeout, gate):
+            calls.append(('population',))
+            return 'no live enemy wave' if enter[0] == 'empty' else None
+
+        perfrun.wait_population = fake_population
         _, opts = perfrun.options(['stress:1', 'M001,key=4d@0.1,diff=3', 'stress:10,warm=7', '--dll', 'installed',
                                    '--warm', '5'])
         out = os.path.join(d, 'out')
@@ -935,8 +966,8 @@ def legs_run() -> None:
         check(rc == 0, 'three legs: the run passes')
         order = [c for c in calls if c[0] != 'key']
         check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1, ('running',), True),
-                        ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
-                        ('rewrite', 1600), ('command', 'next range 1'), ('sample', 'stress_10', 7.0),
+                        ('population',), ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
+                        ('rewrite', 1600), ('command', 'next range 1'), ('population',), ('sample', 'stress_10', 7.0),
                         ('restore',), ('placed',)],
               'every range leg checked before the launch, written once, rewritten for the later range leg, `next` '
               'for each later leg, put back once at the end')
@@ -952,7 +983,9 @@ def legs_run() -> None:
               "each leg's run.json: its scenario, difficulty, windows, when its `next` was handed")
         check(runs[1]['keys_held'][0][:3] == ['4d', 0.1, 300], "the leg's key held, timed from its entry")
         check(runs[0]['entered'] >= running_at[0],
-              "the first leg's warm-up from its RUNNING row (the mission runs), not from before its loading")
+              "the first leg clocks entry from the RUNNING row")
+        check(runs[0]['population_ready'] >= runs[0]['entered'] and 'population_ready' not in runs[1],
+              'only a wave leg waits for population before warm-up')
         with open(os.path.join(dirs[0], 'run.json'), encoding='utf-8') as f:
             first = json.load(f)
         with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
@@ -980,6 +1013,21 @@ def legs_run() -> None:
         with open(os.path.join(dirs[0], 'report.md'), 'w', encoding='utf-8') as f:
             f.write("the plugin's own work (not the game's own under a hook that only calls through): 4.2%, 0.8 ms/frame\n")
         check('| 4.2% |' in perfrun.legs_table(dirs).splitlines()[2], "summary.md: the plugin's own work from report.md")
+        calls.clear()
+        enter[0] = 'empty'
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'], os.path.join(d, 'out-empty'), None, opts)
+        check(rc == 1 and ('population',) in calls and not any(c[0] == 'sample' for c in calls)
+              and ('restore',) in calls, 'an empty wave leg never samples and restores the range')
+        calls.clear()
+        enter[0] = 'ended'
+        out = os.path.join(d, 'out-ended')
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'][:1], out, None, opts)
+        with open(os.path.join(out, 'stress_1', 'run.json'), encoding='utf-8') as f:
+            bad = json.load(f)
+        check(rc == 1 and 'cpu' in bad['windows'] and 'no live enemies' in bad['error'] and ('restore',) in calls,
+              'an initially populated battle that empties before measurement is not a valid sample')
         # a leg that never comes in: the run ends there, failed, everything still put back
         calls.clear()
         auto.clear()
@@ -1016,6 +1064,7 @@ def legs_run() -> None:
         for k, v in gsaved.items():
             setattr(gen, k, v)
         perfrun._sample = sample_saved
+        perfrun.wait_population = population_saved
         import shutil
         shutil.rmtree(d, ignore_errors=True)
 
@@ -1034,6 +1083,7 @@ drive_during()
 rewrite_files()
 legs_options()
 legs_logs()
+wave_ready()
 legs_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)
