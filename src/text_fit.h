@@ -44,8 +44,9 @@ inline int Keep(const wchar_t* text,const float* ends,int n,float maxW,float ell
 }
 
 // Where a line of `n` characters is broken into two rows: the first row is [0, end), the second [start, n) (the
-// spaces between dropped). `ends` as for Keep. A run of spaces is preferred (the hint bar's "key: action" groups are
-// separated by three); among the candidates the one whose wider row is narrowest. No candidate (n < 2): false.
+// spaces between dropped). `ends` as for Keep. A run of two spaces or more is preferred (the hint bar's "key: action"
+// groups are separated by three), then a single space, then any character boundary; among the candidates of the first
+// kind there is, the one whose wider row is narrowest. No candidate (n < 2): false.
 struct Break { int end=0,start=0; };
 inline float Width(const float* ends,int from,int to) noexcept {   // text[from, to)
     if(to<=from)return 0.f;
@@ -55,13 +56,13 @@ inline bool BreakTwo(const wchar_t* text,const float* ends,int n,Break* out) noe
     if(!text || !ends || n<2)return false;
     bool found=false;
     float best=0.f;
-    for(int pass=0;pass<2 && !found;++pass)   // spaces first; none: any character boundary
+    for(int pass=0;pass<3 && !found;++pass)   // space runs, single spaces, any character boundary
         for(int i=1;i<n;++i) {
             int end=i,start=i;
-            if(pass==0) {
+            if(pass<2) {
                 if(!Space(text[i]) || Space(text[i-1]))continue;   // the first space of a run
                 while(start<n && Space(text[start]))++start;
-                if(start>=n)continue;
+                if(start>=n || (pass==0)!=(start-end>=2))continue;
             } else if(HighSurrogate(text[i-1]))continue;
             const float a=Width(ends,0,end),b=Width(ends,start,n),wider=a>b ? a : b;
             if(!found || wider<best){found=true;best=wider;out->end=end;out->start=start;}

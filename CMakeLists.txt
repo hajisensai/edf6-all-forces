@@ -946,6 +946,9 @@ add_test(NAME player_slots COMMAND player_slots_test)
 add_executable(armory_logic_test tests/armory_logic_test.cpp)
 target_compile_options(armory_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME armory_logic COMMAND armory_logic_test)
+add_executable(text_fit_test tests/text_fit_test.cpp)
+target_compile_options(text_fit_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME text_fit COMMAND text_fit_test)
 # 整备's 支援编成 / 载具 pages (src/support_pages.h): edits through room_menu.h, per-page saves, the 3D viewport's hole.
 add_executable(support_pages_test tests/support_pages_test.cpp)
 target_compile_options(support_pages_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -972,7 +975,7 @@ add_test(NAME room_sync COMMAND room_sync_test)
 # A room member's support loadout line (src/member_config.h): written, read back, left out past the budget, refused whole.
 add_executable(member_config_test tests/member_config_test.cpp)
 target_compile_options(member_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_test(NAME member_config COMMAND member_config_test)
+add_test(NAME member_config COMMAND member_config_test text_fit_test)
 # The mission's variant preload set (configuration + the room host's list + the pending list's newest, never a
 # directory scan) and the hello's filter (src/support_variants_logic.h; the design doc's 阶段 R).
 add_executable(support_variants_test tests/support_variants_test.cpp)

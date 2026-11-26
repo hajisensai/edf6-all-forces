@@ -5720,6 +5720,12 @@
     "tests/texshare_test.py"
    ]
   },
+  "text_fit": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "texture_acceleration": {
    "labels": [
     "cockpit",
