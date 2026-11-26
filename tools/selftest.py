@@ -6311,7 +6311,8 @@ def edf41_mother_parts_default_migrates() -> None:
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
                                                          installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
-                                                         installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124]
+                                                         installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124,
+                                                         installer.DEFAULTS_MARK_1126]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6457,7 +6458,7 @@ def infantry_scope_pip_default_migrates() -> None:
     assert 'constexpr int kModeLowest=0,kModeHighest=2,kModeDefault=2;' in pip
     assert 'FixInt("InfantryScope"' in plugin and 'scopepip::kModeLowest,scopepip::kModeHighest' in plugin
     assert installer.NEW_DEFAULTS_1110[installer.SECTION]['InfantryScope'] == ('1', '2')
-    done = ''.join(f'{m}\n' for m, _ in installer.DEFAULTS_STEPS[:-1])
+    done = ''.join(f'{m}\n' for m, _ in installer.DEFAULTS_STEPS if m != installer.DEFAULTS_MARK_1110)
     old = f'[VehicleCrew]\n{done}Enabled=1\nInfantryScope=1\n'
     text, flipped = installer.apply_new_defaults(old)
     assert flipped == ['InfantryScope'] and re.search(r'^InfantryScope=2$', text, re.M), flipped
