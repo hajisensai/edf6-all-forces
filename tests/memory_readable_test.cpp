@@ -150,6 +150,29 @@ int main() {
     Check(Readable(two + kPage - 8, 8), "the last bytes before the no-access page");
     Check(!Readable(two + kPage - 8, 16), "a span into the no-access page");
 
+    {   // A cached prefix must be counted once, while separated misses still share one system call.
+        unsigned char* span = Alloc(4, PAGE_READWRITE);
+        for(std::size_t i=0;i<4;++i)span[i*kPage]=1;
+        VirtualProtect(span+2*kPage,kPage,PAGE_READONLY,&old);
+        bool batched=false,denied=false;
+        for(int attempt=0;attempt<5 && !(batched && denied);++attempt) {
+            WaitTick();
+            const auto tick=GetTickCount64();
+            Check(Readable(span,1) && Readable(span+2*kPage,1),"cache a writable and read-only page");
+            edf::TakeReadableStats();
+            const bool writable=Readable(span+kPage-8,16+kPage,true);
+            const auto rejection=edf::TakeReadableStats();
+            const bool readable=Readable(span,4*kPage);
+            const auto batch=edf::TakeReadableStats();
+            if(tick!=GetTickCount64())continue;
+            denied=!writable && rejection.wsCalls==0 && rejection.pageHits==2;
+            batched=readable && batch.wsCalls==1 && batch.wsPages==2 && batch.pageHits==2;
+        }
+        Check(denied,"cached denial after an uncached page avoids the working-set query");
+        Check(batched,"one working-set call for both uncached pages and one hit per cached page");
+        VirtualFree(span,0,MEM_RELEASE);
+    }
+
     // past kMaxPages (16): the region path, a hole in the middle seen
     unsigned char* big = Alloc(40, PAGE_READWRITE);
     for (std::size_t i = 0; i < 40; ++i) big[i * kPage] = 1;

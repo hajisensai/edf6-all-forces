@@ -122,44 +122,57 @@ unsigned char Record(PageCache& cache,const PSAPI_WORKING_SET_EX_INFORMATION& as
     cache.Put(page,allows);
     return allows;
 }
-}  // namespace
-
-bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
-    const auto at=reinterpret_cast<std::uintptr_t>(ptr);
-    if (!at || size>UINTPTR_MAX-at) return false;
-    const auto end=at+size;
-    if(end==at) return true;
-    ++stats.asks;
-    const unsigned char need=writable ? kRead|kWrite : kRead;
-    const ULONGLONG now=GetTickCount64();
-    const std::uintptr_t first=at&~(kPage-1),last=(end-1)&~(kPage-1);
-    const std::uintptr_t pages=(last-first)/kPage+1;
-    PageCache* cache=Pages();
-    if(pages>kMaxPages || !cache) return ReadableByRegion(at,end,need,now);
-    cache->Begin(now);
+__declspec(noinline) bool ReadableMiss(std::uintptr_t at,std::uintptr_t end,unsigned char need,
+                                      ULONGLONG now,PageCache& cache,std::uintptr_t missing) noexcept {
     PSAPI_WORKING_SET_EX_INFORMATION ask[kMaxPages];
-    int asked=0;
-    for(std::uintptr_t page=first;;page+=kPage) {
-        const int access=cache->Access(page);
+    ask[0]={reinterpret_cast<void*>(missing),{}};
+    int asked=1;
+    const auto last=(end-1)&~(kPage-1);
+    for(auto page=missing;page!=last;) {
+        page+=kPage;
+        const int access=cache.Access(page);
         if(access!=PageCache::kMissing) {
             ++stats.pageHits;
-            if((access&need)!=need) return false;
+            if((access&need)!=need)return false;
         } else {
-            ask[asked]={};
-            ask[asked].VirtualAddress=reinterpret_cast<void*>(page);
-            ++asked;
+            ask[asked++]={reinterpret_cast<void*>(page),{}};
         }
-        if(page==last) break;
     }
-    if(!asked) return true;
     const std::uint64_t t0=Qpc();
     const bool got=K32QueryWorkingSetEx(GetCurrentProcess(),ask,static_cast<DWORD>(asked*sizeof(ask[0])))!=0;
     ++stats.wsCalls;stats.wsPages+=static_cast<unsigned>(asked);stats.wsTicks+=Qpc()-t0;
     if(!got) return ReadableByRegion(at,end,need,now);
     for(int i=0;i<asked;++i)
-        if((Record(*cache,ask[i],now)&need)!=need) return false;
+        if((Record(cache,ask[i],now)&need)!=need) return false;
     return true;
 }
+}  // namespace
+
+bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
+    const auto at=reinterpret_cast<std::uintptr_t>(ptr);
+    if(!at || size>UINTPTR_MAX-at)return false;
+    if(!size)return true;
+
+    ++stats.asks;
+    const unsigned char need=writable ? kRead|kWrite : kRead;
+    const ULONGLONG now=GetTickCount64();
+    const auto first=at&~(kPage-1);
+    const auto end=at+size;
+    const auto last=(end-1)&~(kPage-1);
+    PageCache* const cache=Pages();
+    if(!cache || last-first>=kMaxPages*kPage)return ReadableByRegion(at,end,need,now);
+
+    // Leave the working-set query off the cached path. The first miss passes its unchecked suffix.
+    cache->Begin(now);
+    for(auto page=first;;page+=kPage) {
+        const int access=cache->Access(page);
+        if(access==PageCache::kMissing)return ReadableMiss(at,end,need,now,*cache,page);
+        ++stats.pageHits;
+        if((access&need)!=need)return false;
+        if(page==last)return true;
+    }
+}
+
 namespace {
 // The pages of the spans added that the cache has not this tick, asked of the working set kPrefetchPages at a time.
 class PrefetchBatch {
