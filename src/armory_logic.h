@@ -145,6 +145,11 @@ struct Input {
     bool pointer=false;   // x / y valid (the cursor over the window, design units)
     float x=0,y=0;
     int wheel=0;          // notches since the last frame, + away from the user (up)
+    // The right stick past its dead zone, -1..1 (+ right / up), and the seconds since the last frame (0: not known):
+    // a page that looks round with it (Page::Look). stickKeys: the bits (1 << key) of kAltPrev / kAltNext / kJumpPrev /
+    // kJumpNext that only the stick holds (a page that takes the stick takes those, not the keyboard's A / D).
+    float lookX=0,lookY=0,dt=0;
+    unsigned stickKeys=0;
     wchar_t typed[8]{};   // characters typed since the last frame (WM_CHAR), for a rename / a page's search
     int ntyped=0;
 };
@@ -200,9 +205,14 @@ public:
     virtual bool Click(Pos& /*p*/,float /*x*/,float /*y*/) noexcept { return false; }
     // Z / C on a page without sub tabs. True when something changed.
     virtual bool Cycle(const Pos&,int /*delta*/) noexcept { return false; }
+    // Every frame without a popup, before Key: the page may look round its 3D view with the pointer, the wheel and the
+    // right stick. What it took (kLookWheel, kLookStick): the state does nothing with those this frame.
+    virtual int Look(const Pos&,int /*column*/,const Input&) noexcept { return 0; }
 protected:
     ~Page()=default;
 };
+
+inline constexpr int kLookWheel=1,kLookStick=2;   // Page::Look
 
 // ---- effects -------------------------------------------------------------------------------------------------------
 // The preset chips as the runtime knows them this frame.
@@ -578,10 +588,15 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
         for(int k=0;k<kKeyCount;++k)
             if(k!=kToggle && Pressed(s,in,k))page.Key(s.pos,s.column,k,in);
     }else{
-        // the page first: a key it takes is not down for the state this frame (prev still follows `in`)
+        // the page first: what it looks round with and a key it takes are not down for the state this frame (prev
+        // still follows `in`)
         Input use=in;
+        const int looked=page.Look(s.pos,s.column,in);
+        if(looked&kLookWheel)use.wheel=0;
+        if(looked&kLookStick)
+            for(int k=0;k<kKeyCount;++k)if(use.stickKeys&(1u<<k))use.held[k]=false;
         for(int k=0;k<kKeyCount;++k)
-            if(k!=kToggle && Pressed(s,in,k) && page.Key(s.pos,s.column,k,in))use.held[k]=false;
+            if(k!=kToggle && Pressed(s,use,k) && page.Key(s.pos,s.column,k,use))use.held[k]=false;
         Clamp(s,page);
         // preset chips: keys and mouse
         for(int d=0;d<kPresetMost;++d)

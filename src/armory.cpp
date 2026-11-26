@@ -164,6 +164,25 @@ void ReadPointer(ar::Input& in) noexcept {
     in.x=at.x;in.y=at.y;
 }
 
+// A stick axis past the pad's right dead zone, -1..1 (0 inside it).
+float StickAxis(SHORT v) noexcept {
+    constexpr float kStickDead=XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE,kFull=32767.f;
+    const float a=static_cast<float>(v);
+    if(a>kStickDead)return a>=kFull ? 1.f : (a-kStickDead)/(kFull-kStickDead);
+    if(a<-kStickDead)return a<=-kFull ? -1.f : (a+kStickDead)/(kFull-kStickDead);
+    return 0.f;
+}
+// Seconds since the last call (the frame's dt), 0 the first time; at most 0.1.
+float FrameSeconds() noexcept {
+    static LARGE_INTEGER last{},freq{};
+    LARGE_INTEGER now{};
+    if(!freq.QuadPart && !QueryPerformanceFrequency(&freq))return 0.f;
+    QueryPerformanceCounter(&now);
+    const float s=last.QuadPart ? static_cast<float>(now.QuadPart-last.QuadPart)/static_cast<float>(freq.QuadPart) : 0.f;
+    last=now;
+    return s<0.f ? 0.f : s>0.1f ? 0.1f : s;
+}
+
 // The frame's input: nothing while the game is not in front or the mission's map holds the keys.
 ar::Input ReadInput(bool toggleDown) noexcept {
     ar::Input in;
@@ -196,10 +215,15 @@ ar::Input ReadInput(bool toggleDown) noexcept {
         h[ar::kTabPrev]|=(b&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0;h[ar::kTabNext]|=(b&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
         h[ar::kSubPrev]|=pad.Gamepad.bLeftTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         h[ar::kSubNext]|=pad.Gamepad.bRightTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
-        // the right stick: left / right a page's alternate (the weapons page's category), up / down its jump
+        // the right stick: left / right a page's alternate (the weapons page's category), up / down its jump; a page
+        // looking round its 3D view takes it whole instead (Page::Look: lookX / lookY, the keys only it holds)
         constexpr int kStick=16000;
-        h[ar::kAltPrev]|=pad.Gamepad.sThumbRX<-kStick;h[ar::kAltNext]|=pad.Gamepad.sThumbRX>kStick;
-        h[ar::kJumpPrev]|=pad.Gamepad.sThumbRY>kStick;h[ar::kJumpNext]|=pad.Gamepad.sThumbRY<-kStick;
+        const bool stick[4]={pad.Gamepad.sThumbRX<-kStick,pad.Gamepad.sThumbRX>kStick,pad.Gamepad.sThumbRY>kStick,
+                             pad.Gamepad.sThumbRY<-kStick};
+        const int keys[4]={ar::kAltPrev,ar::kAltNext,ar::kJumpPrev,ar::kJumpNext};
+        for(int i=0;i<4;++i)
+            if(stick[i] && !h[keys[i]]){h[keys[i]]=true;in.stickKeys|=1u<<keys[i];}
+        in.lookX=StickAxis(pad.Gamepad.sThumbRX);in.lookY=StickAxis(pad.Gamepad.sThumbRY);
     }
     ReadPointer(in);
     return in;
@@ -694,7 +718,8 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     }
     FillWords();
     FillRules();
-    const ar::Input in=ReadInput(toggleDown);
+    ar::Input in=ReadInput(toggleDown);
+    in.dt=FrameSeconds();
     const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);
     // Esc at the root of HQ's armory returns to the replacement mission map. The room's own lobby remains its parent.

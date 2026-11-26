@@ -258,12 +258,39 @@ public:
             if(CamButton(k).Contains(x,y)){camera=k;return true;}
         return ClickView(p,x,y);
     }
+    // 自由 by hand while the model shows: the left button dragged from inside the viewport (not from its buttons) turns
+    // it, the wheel over it zooms, the right stick turns it. Starts from where the view drew the model (Env::placed).
+    int Look(const ar::Pos& p,int,const ar::Input& in) noexcept override {
+        const bool down=in.held[ar::kMouseLeft];
+        const bool on=camera==0 && model && model->env.previewOn && PreviewOf(p,nullptr);
+        const bool wasDown=lookDown;
+        lookDown=down;
+        if(!on){dragging=false;return 0;}
+        const bool over=in.pointer && kView.Contains(in.x,in.y);
+        bool onButton=false;
+        for(int k=0;k<rp::kCameraPresetCount;++k)onButton=onButton || (in.pointer && CamButton(k).Contains(in.x,in.y));
+        if(down && !wasDown && over && !onButton){dragging=true;dragX=in.x;dragY=in.y;}
+        if(!down || !in.pointer)dragging=false;
+        int took=0;
+        if(dragging && (in.x!=dragX || in.y!=dragY)) {
+            rp::Turn(&look,(in.x-dragX)*rp::kLookRadPerUnit,(in.y-dragY)*rp::kLookRadPerUnit,StandYaw());
+            dragX=in.x;dragY=in.y;
+        }
+        if(in.wheel && over){rp::Zoom(&look,in.wheel,StandYaw());took|=ar::kLookWheel;}
+        if(in.lookX!=0.f || in.lookY!=0.f) {
+            const float dt=in.dt>0.f && in.dt<0.1f ? in.dt : 1.f/60.f;
+            rp::Turn(&look,in.lookX*rp::kLookStickRad*dt,in.lookY*rp::kLookStickRad*dt,StandYaw());
+            took|=ar::kLookStick;
+        }
+        return took;
+    }
     // What the 3D view shows at `p` (false: nothing: the viewport is an opaque box).
     virtual bool PreviewOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept=0;
     // The soldiers shown side by side at `p` (room_preview.h ShowSquad), `out` (null: only counted) the first
     // rp::kSquadMost; soldier 0 is PreviewOf's of the first of them. Below 2: one model (PreviewOf's).
     virtual int SquadOf(const ar::Pos&,rp::PreviewSpec* /*out*/) const noexcept { return 0; }
-    rp::ViewCamera Camera() const noexcept { return rp::kCameraPresets[camera]; }
+    rp::ViewCamera Camera() const noexcept { return camera==0 ? rp::CameraOf(look) : rp::kCameraPresets[camera]; }
+    const rp::FreeLook& FreeView() const noexcept { return look; }
     int CameraIndex() const noexcept { return camera; }
     // The menu unit index of row `row` (-1 none).
     int UnitIndex(int row) const noexcept { return model && row>=0 && row<n ? index[row] : -1; }
@@ -340,10 +367,19 @@ protected:
         y+=40;
         out->Say(hudtext::Tr(model->env.host ? Tx::spHostRules : Tx::spGuestRules),x,y,22,skin::kTextDim,ar::Align::left,false,w);
     }
+    // The yaw the view drew the model with (0 when it cannot say): where a hand-turned 自由 starts.
+    float StandYaw() const noexcept {
+        rp::Matrix4 m;
+        float aspect=0;
+        return model && model->env.placed && model->env.placed(&m,&aspect) ? rp::YawOf(m) : 0.f;
+    }
     Model* model=nullptr;
     int index[rm::kMostUnits]{};
     int n=0;
     int camera=0;
+    rp::FreeLook look{};   // 自由 turned by hand (Look)
+    bool dragging=false,lookDown=false;
+    float dragX=0,dragY=0;
 };
 
 // ---- 支援编成: the squads --------------------------------------------------------------------------------------------

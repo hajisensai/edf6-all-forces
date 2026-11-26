@@ -18,7 +18,7 @@ void Check(bool ok,const char* why) {
 using namespace crew::armory;
 
 // A page whose counts depend on the cursor (rows -> items -> fields), counting edits and commits.
-class FakePage final : public Page {
+class FakePage : public Page {
 public:
     const wchar_t* name=L"P";
     int subs=0;
@@ -575,6 +575,45 @@ void Fitting() {
     }
     Check(yielding>0 && hints==1,"labels and the hint keys yield");
 }
+
+// Page::Look: what the page takes (the wheel, the stick) the state does not use; the stick's keys only, not the
+// keyboard's.
+struct LookPage final : FakePage {
+    int took=0,looks=0,keys=0;
+    int Look(const Pos&,int,const Input&) noexcept override { ++looks;return took; }
+    bool Key(Pos&,int,int key,const Input&) noexcept override { if(key==kAltNext)++keys;return false; }
+};
+void Looking() {
+    LookPage a;FakePage b,c;
+    Page* pages[3]{&a,&b,&c};
+    State s;
+    Presets ps=MakePresets(3,0);
+    Words w=MakeWords();
+    Input in;
+    a.name=L"A";b.name=L"B";c.name=L"C";
+    Open(s,in);
+    s.column=1;
+    in.wheel=-1;
+    Step(s,pages,3,ps,w,in);
+    Check(a.looks==1 && s.pos.item==1,"nothing taken: the wheel moves the cursor");
+    a.took=kLookWheel;
+    Step(s,pages,3,ps,w,in);
+    Check(s.pos.item==1,"the wheel taken: the cursor stays");
+    in.wheel=0;
+    a.took=kLookStick;
+    in.held[kAltNext]=true;in.stickKeys=1u<<kAltNext;
+    Step(s,pages,3,ps,w,in);
+    Check(a.keys==0,"the stick taken: its key not given");
+    in.held[kAltNext]=false;in.stickKeys=0;
+    Step(s,pages,3,ps,w,in);
+    in.held[kAltNext]=true;   // the keyboard's D
+    Step(s,pages,3,ps,w,in);
+    Check(a.keys==1,"the stick taken: the keyboard's key still given");
+    s.popup=Popup::actions;
+    const int looks=a.looks;
+    Step(s,pages,3,ps,w,in);
+    Check(a.looks==looks,"a popup: no look");
+}
 }  // namespace
 
 int main() {
@@ -582,6 +621,7 @@ int main() {
     Hooks();
     RandomWalk();
     Fitting();
+    Looking();
     std::printf("armory_logic: %d checks passed\n",checks);
     return 0;
 }
