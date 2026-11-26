@@ -4,14 +4,23 @@
 //
 // The declaration: the round's Ammo_CustomParameter (the list every round's bullet core keeps a copy of, core+0xA58,
 // tag word core+0xA68; docs/missile-re.md) gets one more entry at its end, a list
-//     [kMark, r, g, b, intensity, size]
+//     [kMark, r, g, b, intensity, size(, back)]
 // r g b the halo's colour (linear, 0..1 each, normalised by the largest), intensity its HDR scale (the colour times it,
-// like the stock glowing trails' AmmoColor above 1), size the halo's half width in metres. It must sit past every
+// like the stock glowing trails' AmmoColor above 1), size the halo's half width in metres, back (optional, 0 when
+// absent) how far behind the round's position along its nose the halo's centre sits, in metres: the missiles' flame and
+// trail start at the position and run back along -nose (the updates give the flare +0xF50 and the trail +0x1140 the
+// position and nose x -1, the constant 0x1C36AD0), so a
+// halo set back hugs the flame instead of lighting the whole round. Drawn only while the round is alive with its flame
+// lit (Shines): a missile's object outlives its death on the bullet list until its smoke trail has faded (its update,
+// 0x26A880 / 0x26E4C0, deletes it, 0x118A1B0, only once +0x1090 and +0x1280 are empty; the core's destructor 0x230550
+// takes it off the list), up to the trail's
+// life (CP[2], 300 frames and more), and before ignition it has no flame (cold launch). It must sit past every
 // entry the round's class reads (Kinds below): there the stock never looks, so the stock round is the same with or
 // without it. Rounds of any other class are not looked at (add the class here once its reads are known).
 #pragma once
 #include "gpufx_sim.h"
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -19,13 +28,17 @@ namespace crew::gpufx::glow {
 
 constexpr double kMark=7146.0;   // the first number: this list is a glow declaration (pylib/vcobjects.py GLOW_MARK)
 constexpr int kFields=6;         // mark, r, g, b, intensity, size
+constexpr int kBackField=6;      // the optional seventh: back, m (0..kMostBack)
 constexpr int kMostFields=16;    // more numbers than that: not ours
-constexpr float kMostIntensity=64.0f,kMostSize=50.0f;
+constexpr float kMostIntensity=64.0f,kMostSize=50.0f,kMostBack=50.0f;
 
 // The classes looked at, by the round's vtable (core-0x140) and the first entry index their constructor never reads:
 //  - MissileBullet01 (ctor 0x267910): CP[0..11], CP[12] only when the list has more than 12 (`0xc < count`, its bool
 //    at +0x13C0 otherwise 0): a declaration at 13 or later (the list padded with CP[12] = 0, the same as none).
 //  - MissileBullet02 (ctor 0x26AF70): CP[0..15] unconditionally, nothing past 15: 16 or later.
+// Both keep their flame's on flag at round+0xF90 (core+0xE50): set each frame once lit (MissileBullet01 update 0x26A880
+// past its CP[7] frames, MissileBullet02's flight state 0x26EC10 on entry), cleared each frame once dead (the same
+// updates, 0x26A880 / 0x26E4C0), 0 from the constructor until then.
 struct Kind { unsigned vtable; int firstFree; };
 constexpr Kind kKinds[]={{0x17A1C10u,13},{0x17A1E28u,16}};
 constexpr int kKindCount=static_cast<int>(sizeof(kKinds)/sizeof(kKinds[0]));
@@ -34,21 +47,31 @@ constexpr int FirstFree(unsigned vt) noexcept {
     for(const Kind& k:kKinds)if(k.vtable==vt)return k.firstFree;
     return -1;
 }
+constexpr std::uint32_t kDead=1u;            // core+0xAF4 bit 0: dead (0x2318E0 sets 3; the updates test bit 0)
+constexpr std::size_t kCoreFlags=0xAF4;
+constexpr std::ptrdiff_t kCoreFlame=0xF90-0x140;   // the flame's on flag, from the core (round+0x140)
+constexpr std::ptrdiff_t kCoreNose=0x80-0x140;     // the round's nose (round+0x80), before the core
+// Whether a round of a kind looked at gets its halo this frame: alive, its flame lit.
+constexpr bool Shines(std::uint32_t flags,unsigned char flame) noexcept { return !(flags&kDead) && flame!=0; }
 // Whether a list of `count` entries can carry a declaration (its last) for a class whose first free index is `free`.
 constexpr bool CanDeclare(int count,int free) noexcept { return free>=0 && count>free; }
 
-struct Glow { float color[3]; float size; };   // colour HDR (r g b normalised, times the intensity), half width m
+struct Glow { float color[3]; float size; float back=0.0f; };   // colour HDR (r g b normalised, times the intensity),
+                                                                 // half width m, set back m behind the position
 
 // The declaration's numbers `v` (its `n` entries): false (none) unless the mark, all finite, a colour not all zero
-// and in range, intensity in (0, kMostIntensity], size in (0, kMostSize].
+// and in range, intensity in (0, kMostIntensity], size in (0, kMostSize], back (when given) in [0, kMostBack].
 inline bool Parse(const double* v,int n,Glow* out) noexcept {
     if(n<kFields || n>kMostFields || v[0]!=kMark)return false;
     for(int i=1;i<kFields;++i)if(!std::isfinite(v[i]))return false;
     const double peak=std::fmax(v[1],std::fmax(v[2],v[3]));
     if(v[1]<0.0 || v[2]<0.0 || v[3]<0.0 || !(peak>0.0) || peak>1.0+1e-6)return false;
     if(!(v[4]>0.0) || v[4]>kMostIntensity || !(v[5]>0.0) || v[5]>kMostSize)return false;
+    const double back=n>kBackField ? v[kBackField] : 0.0;
+    if(!std::isfinite(back) || back<0.0 || back>kMostBack)return false;
     for(int i=0;i<3;++i)out->color[i]=static_cast<float>(v[1+i]/peak*v[4]);
     out->size=static_cast<float>(v[5]);
+    out->back=static_cast<float>(back);
     return true;
 }
 
@@ -91,12 +114,15 @@ inline std::uint32_t IdOf(std::uintptr_t core) noexcept {
 }
 inline bool Kept(std::uint32_t id,float share) noexcept { return share>=1.0f || SerialUnit(id^0x9E3779B9u)<share; }
 
-// The halo of a round at `pos` flying at `vel` (m/s): one camera-facing card (Kind::glow), its centre led by
-// kLeadSteps, `share` the KeepShare it was kept by. Soft against the scene over a quarter of its size.
-inline Instance Make(const Glow& g,const float pos[3],const float vel[3],float share) noexcept {
+// The halo of a round at `pos` flying at `vel` (m/s) with its nose `nose`: one camera-facing card (Kind::glow), its
+// centre led by kLeadSteps and set g.back behind along the nose (a nose not finite or near zero: not set back),
+// `share` the KeepShare it was kept by. Soft against the scene over a quarter of its size.
+inline Instance Make(const Glow& g,const float pos[3],const float vel[3],const float nose[3],float share) noexcept {
     Instance in{};
     const float lead=kLeadSteps*kStep;
-    for(int i=0;i<3;++i)in.pos[i]=pos[i]+(std::isfinite(vel[i]) ? vel[i]*lead : 0.0f);
+    const float len=std::sqrt(nose[0]*nose[0]+nose[1]*nose[1]+nose[2]*nose[2]);
+    const bool setBack=std::isfinite(len) && len>1e-3f;   // a NaN nose x 0 would still be NaN
+    for(int i=0;i<3;++i)in.pos[i]=pos[i]+(std::isfinite(vel[i]) ? vel[i]*lead : 0.0f)-(setBack ? nose[i]*g.back/len : 0.0f);
     in.size=g.size;
     const float k=share>0.0f && share<1.0f ? 1.0f/share : 1.0f;
     for(int i=0;i<3;++i)in.color[i]=g.color[i]*k;
