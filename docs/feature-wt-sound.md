@@ -168,6 +168,12 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - 来袭：落在耳边 300 m 内、2.3 s 内落地的候选 87 发，**全部**落角 < 10°（`incoming_flat_under10deg` 87，10°–27° 两档都是 0）。这些是近距离平射：目标都在几百米内，榴弹炮的武器不是 lofted 标记，走低弧；按 240 m/s 算，低弧要 3.2 km 外落角才陡过 26.6°。落角分布在 10° 以下和 26.6° 以上之间没有样本，阈值放到 10°–27° 之间任何位置都不改变结果，放到 10° 以下就会给平射弹放炮弹来袭声，所以条件（陡于 26.6°）不改。测试场方案没法把炮兵放到离耳边 3 km 外再把弹落到耳边，来袭在实机仍未触发。
   - hit_aphe_mid 0 的根因：`Strike`（装甲命中）自己的弹类清单漏了 GrenadeBullet01_MapNoDamage，Flak 88 的 7 m 近炸高爆弹打在狂战士上只出 explosion_ground。已改成和 `KindOf` 共用 `ShellClass`，并加 Debug 计数 `armour_shell_no_hit_se`（高爆弹打在装甲上但原版这一下不放命中声，所以爆炸不带装甲层）。
 
+- 第五轮（wtfx3 = wtfx2 + 一辆 403 电磁炮坦克；29 个窗口；DLL build 867701c7eb，loading 行相符）：
+  - report_rail 25（插件电磁炮声，如 31 m 1 层、矩阵 [0.73 0.35]）；主炮 128mm_pak44_ai 10、150mm_sfh_18_ai 55，12mm_m2_ai 950；hit_pierce 15、hit_mgun 425、rico_mgun 84，hit_aphe_big 27；`stock_silent_armour` 1003，`stock_hit_taken` / `stock_hit_kept` 0：不双响。
+  - 声部：dropped 0，busy 峰值 109/160，loops 41/96、none free 0，限幅器 on。
+  - 来袭候选 43 发，仍全部 < 10°。
+  - hit_aphe_mid 仍 0，`armour_shell_no_hit_se` 也是 0：Flak 88 的高爆弹是近炸弹（在目标附近引爆），这一轮没有一发撞上装甲留下命中记录（否则这两个计数必有其一），打在近旁按普通爆炸出 explosion_ground（64），这和 WT 一致（近旁的高爆爆炸不放命中装甲声）。这组武器里没有 3–8 m 半径又撞击引爆的弹，hit_aphe_mid 和 hit_aphe_big 走同一条路径（只是半径档不同，`ArmourEvent` 离线检查覆盖），实机没触发到。
+
 ## 没验证的
 
 - 没在游戏里试听（只有上面的日志数据）：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
