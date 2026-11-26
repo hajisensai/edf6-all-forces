@@ -1897,64 +1897,6 @@ void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms);
 }
 
-// A straggler put back (formation.h Stranded / RegroupAt; the player 2026-11-26 「可以抄一下这个跟随的好的地方」): a
-// recruited soldier on foot, fighting nothing, under no order, NpcRegroupRange m and more from the player it follows
-// and out of its view for kStrandMs, is warped kRegroupBack m behind that player, onto the ground, out of its view, in
-// its sight line's clear (not through a wall onto the far side); none of the three places fits, it tries again
-// kStrandMs on. Online the soldier's authority does it (Drive runs there alone): the player is then the one who
-// recruited it, of whichever machine, its body's facing standing for a remote player's camera.
-constexpr float kRegroupEye=1.6f;   // m: the eye over a remote player's feet, the waist over a soldier's
-bool Regroup(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
-             const char** move) noexcept {
-    using namespace npc::formation;
-    const float range=Cfg().npcRegroupRange;
-    if(!(range>0.0f) || s.control!=npc::Control::recruited || !root || !IsAnyPlayer(root) || (q && q->cmd.order!=Order::none) ||
-       s.boardV || !HumanOnFoot(h) || !IsOnlineAuthority(h)) {
-        s.keep.strand=Strand{};
-        return false;
-    }
-    const auto* avatar=CommanderAvatar(root);
-    const unsigned char* const who=avatar && avatar!=h ? avatar : root;
-    if(who[kDead] || !HumanOnFoot(who)){s.keep.strand=Strand{};return false;}   // riding: ride_along.h's
-    const bool local=who==PlayerHuman() && world.player;
-    const float* const at=local ? world.playerAt : Pos(who);
-    float eye[3],look[3];
-    if(local && world.lookOk){std::memcpy(eye,world.eye,12);std::memcpy(look,world.look,12);}
-    else {
-        const float* m=reinterpret_cast<const float*>(who+kMatrix);
-        eye[0]=at[0];eye[1]=at[1]+kRegroupEye;eye[2]=at[2];
-        look[0]=m[8];look[1]=0.0f;look[2]=m[10];
-    }
-    const float waist[3]={pos[0],pos[1]+1.0f,pos[2]};
-    const bool out=npc::Horiz(pos,at)>range && !InView(eye,look,waist);
-    if(!Stranded(s.keep.strand,out,ms))return false;
-    float level[2]={look[0],look[2]};
-    const float l=std::sqrt(level[0]*level[0]+level[1]*level[1]);
-    if(l>1e-3f){level[0]/=l;level[1]/=l;}else{level[0]=0.0f;level[1]=1.0f;}
-    const int k=static_cast<int>((reinterpret_cast<std::uintptr_t>(h)>>4)&3);
-    for(int i=0;i<3;++i) {
-        float to[3];
-        RegroupAt(at,level,k,Cfg().npcFormationSpacing,i,to);
-        const float top[3]={to[0],to[1]+3.0f,to[2]},bottom[3]={to[0],to[1]-6.0f,to[2]};
-        float floor[3];
-        if(!(MapFloorRay(top,bottom,floor)>=0.0f) || !std::isfinite(floor[1]))continue;
-        to[1]=floor[1];
-        const float seen[3]={to[0],to[1]+1.0f,to[2]};
-        if(InView(eye,look,seen))continue;
-        const float from[3]={at[0],at[1]+1.0f,at[2]};
-        float hit[3];
-        if(MapRay(from,seen,hit)>=0.0f)continue;
-        if(!WarpHuman(h,to))break;
-        Log("NPCAI soldier %p regroups: %.0f m off, warped behind its player (place %d)",h,npc::Horiz(pos,at),i);
-        s.keep=Keep{};
-        s.navigation.initialized=false;
-        *move="regroup";
-        return true;
-    }
-    s.keep.strand.since=ms ? ms : 1;s.keep.strand.last=ms;   // no place fit: again kStrandMs on
-    return false;
-}
-
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -2029,7 +1971,6 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         else p.move="support follow";
         return p;
     }
-    if(!t.e && Regroup(s,h,pos,q,root,ms,&p.move))return p;
     if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);

@@ -553,8 +553,6 @@ struct Config {
     int npcFormationKey=0x55;       // ...on foot: cycles it ('U', ini NpcFormationCycleKey: T is the stock Shotcut, plan §3.3; 0: off;
                                     // the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
-    float npcRegroupRange=150.0f;   // a recruited soldier this many m off its player and out of its view is warped back
-                                    // behind it (npcai.cpp Regroup, formation.h Stranded; 0: off)
     int npcGuardFormation=0;        // a guard order's defence (0 stock radius, 10 perimeter, 5 line, 3 wedge)
     int npcPickupKey=0x59;          // on foot: the recruited squads spread out and fetch the item boxes ('Y'; 0: off)
     float npcPickupRange=80.0f;     // ...the boxes within this many m of the player

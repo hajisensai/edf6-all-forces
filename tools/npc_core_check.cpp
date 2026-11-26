@@ -35,7 +35,6 @@ bool NpcPackReload(unsigned char*) noexcept { ++packReloads;return true; }
 bool RealDriverNativeReady() noexcept { return true; }
 bool SaveIniFlag(const char*,const char*) noexcept { return true; }   // loadout_store.cpp: the ini, not written here
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
-bool WarpHuman(unsigned char*,const float*) noexcept { return false; }   // sidecar.cpp: the warp (npcai.cpp Regroup), none here
 int announcedBoards=0;
 bool AnnounceNpcBoarding(unsigned char*) noexcept { ++announcedBoards;return true; }
 bool AnnounceNpcDismount(unsigned char*) noexcept { return true; }

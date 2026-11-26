@@ -505,7 +505,6 @@ void Validate(Config& n) noexcept {
     n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
     n.npcFormationKey=static_cast<int>(FixInt("NpcFormationCycleKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
-    if(n.npcRegroupRange!=0.0f)Fix("NpcRegroupRange",n.npcRegroupRange,30.0f,2000.0f);
     n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));
     n.npcPickupKey=static_cast<int>(FixInt("NpcPickupKey",n.npcPickupKey,0,254));
     Fix("NpcPickupRange",n.npcPickupRange,10.0f,300.0f);
@@ -1045,7 +1044,6 @@ void LoadConfig() noexcept {
     n.npcFormation=ReadInt(L"NpcFormation",static_cast<DWORD>(n.npcFormation));
     n.npcFormationKey=ReadInt(L"NpcFormationCycleKey",static_cast<DWORD>(n.npcFormationKey));
     n.npcFormationSpacing=ReadFloat(L"NpcFormationSpacing",n.npcFormationSpacing);
-    n.npcRegroupRange=ReadFloat(L"NpcRegroupRange",n.npcRegroupRange);
     n.npcGuardFormation=ReadInt(L"NpcGuardFormation",static_cast<DWORD>(n.npcGuardFormation));
     n.npcPickupKey=ReadInt(L"NpcPickupKey",static_cast<DWORD>(n.npcPickupKey));
     n.npcPickupRange=ReadFloat(L"NpcPickupRange",n.npcPickupRange);
@@ -1132,8 +1130,8 @@ void LoadConfig() noexcept {
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d rideAlong=%d commandHintShown=%d",n.npcMarkKey,n.npcMarkCone,
         n.npcBoarding,n.npcGunners,n.npcRideAlong,n.commandHintShown);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
-    Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d regroup=%.0f",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,
-        n.npcGuardFormation,n.npcRegroupRange);
+    Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,
+        n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d freeSquadCover=%d commanderMode=%d",
         n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec,n.vanillaRecruit,n.npcFreeSquadCover,n.commanderMode);

@@ -132,8 +132,8 @@ void Cycles() {
     Check(n==static_cast<int>(sizeof(kGuard)/sizeof(kGuard[0])),"the guard cycle goes round",n);
     Check(FromInt(-1)==Shape::stock && FromInt(kShapes)==Shape::stock && FromInt(3)==Shape::wedge,"ini values");
 }
-// The keeping up (formation.h Observe / Lead / Ease / Resend / EaseLeast / Resting / Scatter / InView / Stranded /
-// RegroupAt): the anchor walked at a steady speed, turned about, stood still, warped; a straggler out of view.
+// The keeping up (formation.h Observe / Lead / Ease / Resend / EaseLeast / Resting / Scatter):
+// the anchor walked at a steady speed, turned about, stood still, warped.
 void Keeps() {
     // Observe: a steady 5 m/s along +x settles near 5 m/s; a warp of 200 m in a frame starts it over at rest.
     Motion m{};
@@ -205,30 +205,6 @@ void Keeps() {
         }
     }
     Check(!Scatter(-1,sp,&xs[0],&zs[0]) && !Scatter(0,0.0f,&xs[0],&zs[0]),"no place for no soldier or no spacing");
-    // InView: ahead in view, behind and well to the side not.
-    const float eye[3]={0.0f,1.6f,0.0f},look[3]={0.0f,0.0f,1.0f};
-    const float ahead[3]={5.0f,1.0f,50.0f},behind[3]={0.0f,1.0f,-50.0f},side[3]={50.0f,1.0f,5.0f};
-    Check(InView(eye,look,ahead) && !InView(eye,look,behind) && !InView(eye,look,side),"the view cone");
-    // Stranded: kStrandMs out in a row; back in starts over; a gap (not asked about) starts over.
-    Strand st{};
-    Check(!Stranded(st,true,1000) && !Stranded(st,true,1800) && !Stranded(st,true,2600) && !Stranded(st,true,3400),"not yet stranded");
-    Check(Stranded(st,true,4000),"stranded after kStrandMs");
-    Check(!Stranded(st,false,4100),"back in view");
-    Check(!Stranded(st,true,4200) && !Stranded(st,true,5000) && !Stranded(st,true,5800) && !Stranded(st,true,6600) &&
-          !Stranded(st,true,7100),"back in view: the stretch over");
-    Strand gap{};
-    Check(!Stranded(gap,true,1000) && !Stranded(gap,true,1500),"gap: started");
-    Check(!Stranded(gap,true,5000),"a gap past kSampleGap starts it over");
-    Check(!Stranded(gap,true,5500),"still counting after the gap");
-    // RegroupAt: behind the anchor against its look, then behind left and right, kRegroupBack away at least.
-    const float an[3]={100.0f,10.0f,100.0f},lk[2]={0.0f,1.0f};
-    float d0[3],d1[3],d2[3];
-    RegroupAt(an,lk,0,sp,0,d0);RegroupAt(an,lk,0,sp,1,d1);RegroupAt(an,lk,0,sp,2,d2);
-    Check(Near(d0[0],100.0f,1e-3f) && Near(d0[2],100.0f-kRegroupBack,1e-3f) && d0[1]==10.0f,"straight behind",d0[0],d0[2]);
-    Check(d1[2]<100.0f && d2[2]<100.0f && d1[0]>100.0f && d2[0]<100.0f,"behind its left (+x is left of +z here) and right",d1[0],d2[0]);
-    float d3[3];
-    RegroupAt(an,lk,3,sp,0,d3);
-    Check(Near(d3[2],100.0f-kRegroupBack-3.0f*sp,1e-3f),"each place spacing farther back",d3[2]);
 }
 }  // namespace
 

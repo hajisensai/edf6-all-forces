@@ -166,8 +166,6 @@ inline bool GiveUp(Progress& p,float dist,std::uint64_t ms) noexcept {
 //    soldier keeps pace with a walking player instead of easing in to a stop behind its slot every few metres;
 //  - resting (Resting / Scatter): the anchor kept within kStillRadius m for kStillMs, the soldiers spread round it,
 //    the front left open (its line of fire); it moves off, they take their slots again;
-//  - stranded (Stranded / InView / RegroupAt): a soldier more than NpcRegroupRange m off for kStrandMs, out of the
-//    player's view, fighting nothing, under no order, is put down behind the player out of view (the caller warps it).
 constexpr float kLeadSec=0.6f,kLeadMost=6.0f,kWalkSpeed=4.0f,kWalkLead=0.25f;
 constexpr float kJumpSpeed=60.0f,kVelBlend=0.3f;
 constexpr std::uint64_t kSampleMs=50,kSampleGap=1000;
@@ -178,9 +176,6 @@ constexpr float kFullWalk=6.0f,kCatchFrom=3.0f,kCatchBand=6.0f,kEaseFloor=0.3f;
 constexpr float kStillRadius=2.0f;
 constexpr std::uint64_t kStillMs=5000;
 constexpr float kOpenFront=1.0471976f;     // rad either side of the heading left open while resting (60 degrees)
-constexpr std::uint64_t kStrandMs=3000;
-constexpr float kViewCos=0.42f;            // cos 65 degrees off the camera's centre: wider than its half view
-constexpr float kRegroupBack=15.0f;        // m behind the anchor a stranded soldier is put down (and spacing a place)
 
 inline float Level2(const float* a,const float* b) noexcept {
     const float dx=a[0]-b[0],dz=a[2]-b[2];
@@ -263,35 +258,8 @@ inline bool Scatter(int k,float spacing,float* x,float* z) noexcept {
     }
 }
 
-// Whether `at` is within the view round the camera at `eye` looking along unit `look` (cosHalf off its centre).
-inline bool InView(const float* eye,const float* look,const float* at,float cosHalf=kViewCos) noexcept {
-    const float d[3]={at[0]-eye[0],at[1]-eye[1],at[2]-eye[2]};
-    const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
-    if(!(l>1e-3f))return true;
-    return (d[0]*look[0]+d[1]*look[1]+d[2]*look[2])/l>=cosHalf;
-}
-// The stretch a soldier has been stranded (`out`: past the range, out of view, free): true once kStrandMs long.
-// A stretch not asked about for over kSampleGap (the soldier fought, dodged, fell back meanwhile) starts over.
-struct Strand { std::uint64_t since,last; };
-inline bool Stranded(Strand& s,bool out,std::uint64_t ms) noexcept {
-    const bool gap=!s.since || ms<s.since || ms<s.last || ms-s.last>kSampleGap;
-    s.last=ms;
-    if(!out){s.since=0;return false;}
-    if(gap){s.since=ms ? ms : 1;return false;}
-    return ms-s.since>=kStrandMs;
-}
-// Try `tryIndex` (0..2) of where stranded soldier k is put down: behind the anchor against the level look `look`
-// (x, z; unit), kRegroupBack m and `spacing` more a place (k % 4), straight back, then back left, back right.
-inline void RegroupAt(const float* anchor,const float* look,int k,float spacing,int tryIndex,float* out) noexcept {
-    const float back=kRegroupBack+spacing*static_cast<float>(k>0 ? k%4 : 0);
-    const float side=tryIndex==1 ? -1.0f : tryIndex==2 ? 1.0f : 0.0f;
-    const float right[2]={-look[1],look[0]};
-    out[0]=anchor[0]-look[0]*back+right[0]*side*back*0.6f;
-    out[1]=anchor[1];
-    out[2]=anchor[2]-look[1]*back+right[1]*side*back*0.6f;
-}
-// A soldier's own keeping up: its eased slot, the goal its route was last given, its stranded stretch.
-struct Keep { Goal goal; Sent sent; Strand strand; };
+// A soldier's own keeping up: its eased slot, the goal its route was last given.
+struct Keep { Goal goal; Sent sent; };
 
 static_assert(Next(Shape::stock,false)==Shape::column && Next(Shape::bounding,false)==Shape::stock,"the march cycle");
 static_assert(Next(Shape::stock,true)==Shape::perimeter && Next(Shape::wedge,true)==Shape::stock,"the guard cycle");
