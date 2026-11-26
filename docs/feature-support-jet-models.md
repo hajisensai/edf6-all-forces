@@ -145,6 +145,35 @@
 - 螺旋桨不转（骨骼已留，插件未驱动）；没有尾焰（涡桨，模型没有喷口骨骼）；
 - 运输机投伞兵的位置（仍是插件按机体原点投放）。
 
+### 6.6 天顶截击机：Sketchfab 的 TU-1600 Zvezda（2026-11-26）
+
+- 来源：Sketchfab「SPACESHIP PAK DA (K) TU-1600 ZVEZDA」（uid `30e58a90fe874f21afdfaa5c4022b311`，作者 Ilya Shevchuk / shilma513，
+  许可 **CC Attribution（CC BY 4.0）**；177534 三角形、7 个材质、4096² 贴图）。原件在 `D:\APP\edf6-models\downloads\salvo_tu1600\`，只当数据读
+  （`python -I`，脚本放在下载目录外、路径当参数传）。替换的是 `tools/calls.py` `sortie_missile_rain`（天顶截击机）的外观，原来是
+  bomber501_2 加一圈发光导弹舱圆柱。
+- `tools/prep_tu1600.py`（开发者用）→ `D:\APP\edf6-models\salvo_tu1600\`：源模型 +Y 朝上、机头朝 -x，转到游戏坐标 (z, y, -x)（绕 Y 旋转，
+  绕向不变）；缩放到翼展 40 m（系数 1.39958），整机 **40.0 × 9.67 × 61.8 m**（宽 × 高 × 长）；最低点为 y 0，x、z 居中。
+  `mesh_simplify` 按材质分组、保 UV 缝，从 177534 减到 72000 三角形（最大误差 0.03 m）。去掉 Decals 材质（MASK 贴花，62 个三角形）：船体材质不透明，
+  留着会露出透明角。贴图减半到 2048²（同原版机体量级），法线是 DirectX 绿通道（G 朝下），按 `pbr_maps` 统一成 R 粗糙度 / G 金属度。
+  SOURCE.txt 记署名与改动，`tu1600.json` 记材质、尺寸和两个喷口。
+- 喷口：机尾六个钟形喷管，两侧各三个，呈三角形排布。`MAX_NOZZLES` 是 4，放不下 6 个，所以每侧三个合成一束：`nozzle_0` / `nozzle_1`
+  位于三个喷口端面的中心 (±5.44, 4.27, -25.90)，宽 4.73 m（三个喷口的外接宽度），长 23.6 m（宽 × 5）。
+- 生成：`pylib/salvo_model.py`，骨架同 C-130：`mdl` → `tu1600` → `globalSRT` → `body` → `tu_hull`，再挂两个喷口骨骼和 `hp_gun` / `hp_store`。
+  材质用 V505 船体材质，换上本模型的贴图（7 个材质，BC7 / BC5 / DXT1），LOD 由 `model_lod.finish` 自动生成（72k / 25k / 12.6k）。
+  `tools/make_jets.py` `salvo_files` 写出 `EDF6VC_SALVO_INTERCEPTOR.MRAB` 和碰撞 `EDF6VC_SALVO_INTERCEPTOR_AIRFRAME.SHKT`
+  （`aircraft_collision.SALVO_FILES`，属于 `PACK_FILES`，SGO 带 `edf6vc_airframe`）。安装器缓存的模型输入是 `jets` → `salvo_tu1600/`，
+  发布包和分享包（`run_export.py EXTERNAL_MODELS`）都带这个目录。
+- 发射点：256 枚导弹从 `hp_store` 出膛，偏移沿用原版导弹舱的四个炮口偏移（`vcobjects.hardpoint_muzzles`，所有战机共用，本模型不改）。
+  决定出膛位置的是**骨骼位置**，不是偏移：`jet_hardpoints.with_hardpoints` 把 `hp_store` 放在机身纵向中部，在满足「每个炮口都在蒙皮内、
+  离地不少于 `GROUND_CLEAR`」的前提下取最高处。实测 `hp_store` 在 (0, 1.42, 0)，八个炮口落在机腹中线两侧 x ±1.05…±1.96、y 0.75…0.94、
+  z 0.2…1.5。没有外挂圆柱，原模型的发光导弹舱随之去掉，发光只来自导弹本身。
+- 缺 `salvo_tu1600/` 目录时，`make_jets` 打一行提示，不写模型、碰撞和 `EDF6VC_JET_SALVO_INTERCEPTOR.SGO`；插件规划时找不到预载的 SGO，
+  天顶截击机就不出动（同 6.4），不退回旧外观。
+- `vcobjects.JETS[SALVO_JET]` 指向新模型：`(app:/object/edf6vc_salvo_interceptor.mrab, edf6vc_salvo_interceptor.mdb)`、文件 `SALVO_MODEL`、
+  `body` / `anchor` 都是 `body`（同 C-130 / Helicarrier）。
+- 需实机确认：机头朝向与大小观感（62 m 长，编队间距是否够）；两束尾焰的位置；导弹从机腹出膛的观感；碰撞与着地；
+  质量仍沿用截击机的 `JET_MASSES[7003]`，62 m 的机体可能显得过轻。
+
 ## 7. 验证
 
 - 离线：`python tools/make_dreadnought.py --out tmp/dnout`（生成 + `check`：SGO 模型 / 标记 / 耐久 / 挂载 / 碰撞 / 武器骨骼 / 喷口骨骼）、
