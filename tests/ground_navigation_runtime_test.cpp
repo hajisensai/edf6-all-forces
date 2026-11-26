@@ -100,6 +100,10 @@ void BodyClearanceScope() {
           "a cached clear body skips only horizontal world rays and retains their logical budget");
     Check(hit.stats.bodyRays>0 && hit.stats.bodyClear==0 && hit.worldRays==old.worldRays,
           "a cached body hit still reaches the original world ray");
+    Check(!old.stats.bodyFloor && fast.stats.bodyFloor>0 && fast.stats.bodyFloor<fast.stats.floor &&
+          fast.stats.floor==old.stats.floor && hit.stats.bodyFloor==fast.stats.bodyFloor,
+          "later covered floor rays reuse the body while the edge keeps its logical floor budget");
+
 }
 void Corners() {
     auto s=std::make_unique<State>();Profile vehicle{};vehicle.cell=4;vehicle.waypointRadius=1.5f;

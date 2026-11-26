@@ -69,6 +69,21 @@ float Floor(const float* a,const float* b,Normals k,Ray ray,float* hit) noexcept
     return at;
 }
 
+// A candidate known to cover the first segment can answer that segment's first hit. On a miss,
+// or after skipping a back face, the caller still walks the world ray.
+template<class Ray,class First>
+float FloorWithFirst(const float* a,const float* b,Normals k,Ray ray,First first,float* hit) noexcept {
+    bool pending=true;
+    return Floor(a,b,k,[&](const float* from,const float* to,float* point,float* normal) noexcept {
+        if(pending) {
+            pending=false;
+            const float candidate=first(from,to,point,normal);
+            if(candidate>=0.0f && std::isfinite(candidate))return candidate;
+        }
+        return ray(from,to,point,normal);
+    },hit);
+}
+
 // Of the front hits on the vertical ray from `top` down to `bottom` (x, z the same) that `ok(point)` takes, the height
 // nearest `y`: true with `h`.
 template<class Ray,class Ok>

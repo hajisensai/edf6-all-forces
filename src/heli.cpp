@@ -339,6 +339,11 @@ __forceinline void FireRay(unsigned char* g,const float* a,const float* b,std::u
     reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
 }
 
+__forceinline float RayDistance(float fraction,const float* a,const float* b) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return fraction*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
 float CastRayIn(unsigned char* g,const float* a,const float* b,float* hit=nullptr,bool any=false,
                 std::uint32_t* flags=nullptr,std::uint32_t filter=kMapLayer,float* normal=nullptr,
                 std::uint32_t* body=nullptr) noexcept {
@@ -352,8 +357,7 @@ float CastRayIn(unsigned char* g,const float* a,const float* b,float* hit=nullpt
     if(flags)std::memcpy(flags,col.raw+0x9C,4);
     if(normal)std::memcpy(normal,col.raw+0x40,12);
     if(body)std::memcpy(body,col.raw+0x78,4);
-    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
-    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    return RayDistance(f,a,b);
 }
 
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
@@ -4207,23 +4211,42 @@ bool GroundBodyRays::Capture(const float* lower,const float* upper) noexcept {
     return body!=nullptr;
 }
 
-bool GroundBodyRays::Unobstructed(const float* from,const float* to) const noexcept {
-    RayHits col=mapRayStart;
+__forceinline void GroundBodyRays::Cast(const float* from,const float* to,void* collector) const noexcept {
     const RayInput in{{from[0],from[1],from[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
     reinterpret_cast<void(*)(const Context*,void*,const RayInput*,const void* const*,int)>(image+kShapeRayResolved)(
-        &context,&col,&in,&body,1);
+        &context,collector,&in,&body,1);
+}
+
+bool GroundBodyRays::Unobstructed(const float* from,const float* to) const noexcept {
+    RayHits col=mapRayStart;
+    Cast(from,to,&col);
     return At<std::int32_t>(col.raw,0x0C)==0;
+}
+
+float GroundBodyRays::FloorHit(const float* from,const float* to,float* point,float* normal) const noexcept {
+    RayHits col=mapRayStart;
+    Cast(from,to,&col);
+    if(!At<std::int32_t>(col.raw,0x0C))return -1.0f;
+    const float f=At<float>(col.raw,0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    std::memcpy(point,col.raw+0x30,12);
+    std::memcpy(normal,col.raw+0x40,12);
+    return RayDistance(f,from,to);
 }
 
 unsigned char* GroundRayBatch::World() noexcept {
     if(!opened){world=RayWorld();opened=true;}
     return world;
 }
-float GroundRayBatch::Floor(const float* a,const float* b,float* hit) noexcept {
+float GroundRayBatch::Floor(const float* a,const float* b,float* hit,const GroundBodyRays* first) noexcept {
     auto* const g=World();
     if(!g)return -1.0f;
-    return mapfloor::Floor(a,b,mapNormals,[g](const float* from,const float* to,float* point,float* normal) noexcept {
+    const auto ray=[g](const float* from,const float* to,float* point,float* normal) noexcept {
         return CastRayIn(g,from,to,point,false,nullptr,kMapLayer,normal);
+    };
+    if(!first)return mapfloor::Floor(a,b,mapNormals,ray,hit);
+    return mapfloor::FloorWithFirst(a,b,mapNormals,ray,[first](const float* from,const float* to,float* point,float* normal) noexcept {
+        return first->FloorHit(from,to,point,normal);
     },hit);
 }
 bool GroundRayBatch::Clear(const float* a,const float* b) noexcept {

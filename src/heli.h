@@ -69,9 +69,10 @@ enum class Sea { unknown, land, water };
 Sea SeaAt(float x,float z,float* surface) noexcept;
 
 // Build one read-only view of the world for a synchronous ground-navigation query.
+class GroundBodyRays;
 class GroundRayBatch {
 public:
-    float Floor(const float* a,const float* b,float* hit) noexcept;
+    float Floor(const float* a,const float* b,float* hit,const GroundBodyRays* first=nullptr) noexcept;
     bool Clear(const float* a,const float* b) noexcept;
     Sea Water(float x,float z,float* surface) noexcept;
     bool Dry() const noexcept {return waterHead && !waterCount;}

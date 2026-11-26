@@ -506,7 +506,7 @@ bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
 
 struct GroundProbeStats {
     unsigned batches=0,floor=0,clearance=0,water=0,dryWater=0;
-    unsigned bodyLists=0,bodyRays=0,bodyClear=0;
+    unsigned bodyLists=0,bodyRays=0,bodyClear=0,bodyFloor=0;
 };
 GroundProbeStats TakeGroundProbeStats() noexcept;
 // The bodies the route must go round that the map ray (layer 22: terrain and buildings, no units or vehicles;

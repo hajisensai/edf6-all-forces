@@ -51,12 +51,18 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
         if(queries+worst>4096){if(!nextStart)nextStart=&state;return Edge::pending;}
         int cast=0;
         bool waterUnknown=false;
+        GroundBodyRays candidates;
+        bool gathered=steps<4,ready=false;
+        float lower[3]{},upper[3]{};
         auto ground=[&](Point at,float step,float& y) noexcept {
             cast+=2;
             if(!sampled){sampled=true;++probeStats.batches;}
             ++probeStats.floor;
             const float top[3]={at.x,at.y+step,at.z},bottom[3]={at.x,at.y-step,at.z};float hit[3];
-            if(rays.Floor(top,bottom,hit)<0.0f || !std::isfinite(hit[1]))return false;
+            const bool use=ready && at.x>=lower[0] && at.x<=upper[0] && at.z>=lower[2] && at.z<=upper[2] &&
+                bottom[1]>=lower[1] && bottom[1]<=upper[1] && top[1]>=lower[1] && top[1]<=upper[1];
+            if(use)++probeStats.bodyFloor;
+            if(rays.Floor(top,bottom,hit,use ? &candidates : nullptr)<0.0f || !std::isfinite(hit[1]))return false;
             float surface=0.0f;
             ++probeStats.water;
             const Sea sea=rays.Water(at.x,at.z,&surface);
@@ -91,9 +97,6 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
             });
         };
         // The shared budget still charges the same logical probes in the same order.
-        GroundBodyRays candidates;
-        bool gathered=steps<4,ready=false;
-        float lower[3]{},upper[3]{};
         const float ankle=profile.step+0.08f,waist=profile.height*0.65f;
         const float lowHeight=(std::min)(ankle,(std::min)(waist,profile.height));
         const float highHeight=(std::max)(ankle,(std::max)(waist,profile.height));
@@ -107,8 +110,8 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
                 upper[0]=(std::max)(a.x,b.x)+sideX+0.005f;
                 lower[2]=(std::min)(a.z,b.z)-sideZ-0.005f;
                 upper[2]=(std::max)(a.z,b.z)+sideZ+0.005f;
-                lower[1]=minY-0.125f;
-                upper[1]=maxY+0.125f;
+                lower[1]=(std::min)(minY,(std::min)(prev.y,at.y)-profile.step)-0.125f;
+                upper[1]=(std::max)(maxY,(std::max)(prev.y,at.y)+profile.step)+0.125f;
                 ready=candidates.Capture(lower,upper);
                 if(ready)++probeStats.bodyLists;
             }
