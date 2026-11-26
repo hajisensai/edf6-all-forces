@@ -550,7 +550,12 @@ std::uintptr_t __fastcall EventListenerProbe(void* listener,void* input,void* ev
     auto* const trace=activeContact;
     if(!trace || !inContactDispatch)return original(listener,input,event,const_cast<void*>(table));
     const unsigned type=At<std::uint16_t>(event,4);
-    const auto address=reinterpret_cast<std::uintptr_t>(original)-reinterpret_cast<std::uintptr_t>(image);
+    const auto base=reinterpret_cast<std::uintptr_t>(image);
+    auto address=reinterpret_cast<std::uintptr_t>(original)-base;
+    // Common MemberSlot adapter: use the actual listener when its instructions prove the slot layout.
+    constexpr unsigned char adapter[]={0x48,0x8B,0xC1,0x48,0x8B,0x49,0x10,0x48,0xFF,0x60,0x18};
+    if(contactImageSize>=sizeof(adapter) && address<=contactImageSize-sizeof(adapter) &&
+       edf::Matches(image,address,adapter,sizeof(adapter)))address=At<std::uintptr_t>(listener,0x18)-base;
     const auto callback=address<contactImageSize ? static_cast<unsigned>(address) : 0u;
     unsigned slot=0;
     for(;slot<trace->count;++slot) {
