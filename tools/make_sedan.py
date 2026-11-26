@@ -28,6 +28,7 @@ import sgo
 import texfile
 import sidecar_model
 import vcobjects as vc
+import vehicle_check
 import vehicle_optics
 from mdb import Rab, RabFile, bind_world, cmpl_compress, mdb_read, mdb_write, rab_read, rab_write
 from mdb_jet import pack_vertex, vertex_table
@@ -258,7 +259,10 @@ def build(root):
         at,_ = vc.mab_locator(bytes(mab), name)
         struct.pack_into('<3f', mab, at, *point)
     m['animation_model'][2] = closed_driver(bytes(mab), m['vehicle_riding_position'][0][1])
-    m['vehicle_riding_position'] = m['vehicle_riding_position'][:1]
+    vehicle_check.keep_seats(m, 1)   # the driver alone; the V512's fall-out seats [1, 2, 3, 4] go with its bed
+    bad = vehicle_check.fall_out_problems(m, STEM)
+    if bad:
+        raise ValueError('; '.join(map(str, bad)))
     m['vehicle_weapon_setting'] = []
     m['vehicle_setup'][-1] = []
     m['game_object_durability'] = 300.
