@@ -381,3 +381,6 @@ ini 改 `HavokMultithread=1`、保持 `Debug=1`。装 DLL 前核对日志里 `HA
 ### 碰撞任务归因的入口
 
 mode 0 队列在 `0xA0FE5D` 暂存出队记录，`0xA0FE70` 从记录 `+0x58` 取执行对象，`0xA0FE77` 经执行对象的 vtable `+0x10` 调用。碰撞图构造器里的 RTTI 锚点包括 `ProcessNarrowPhaseGridTask`（`0x18C1A58`，process `0xECB1E0`）、`ProcessNarrowPhasePairsTask`（`0x18C4E78`，`0xEB5F90`）、`FinalizeNarrowPhasePairsTask`（`0x18C1AD8`，`0xECCA60`）和 `PrepareNarrowPhaseTask`（`0x18C56F8`，`0xEC82D0`）。对前次 `stress:30` 原始栈按 PE 展开链归类，只命中 5 个 PostCollide、1 个 ProcessNarrowPhaseGrid 和 1 个 PrepareNarrowPhase，采样量不足以排序。按首段图的任务记录和依赖配对，再取执行起止时刻，可以区别最晚结束的任务、总工作量和主线程等待。
+
+
+`PerfProbe=2` 每 16 次前段 mode 0 图调度采一张。图节点来自 `graph+0x18` 的 24 字节记录，依赖来自 `graph+0x328` 的前驱和后继索引。图在发布到队列前取快照，`0xA0FE74` 同时核对执行对象和原生队列记录。多个图节点可以共用同一个执行对象。每个采样节点记录首个回调起点、最后结束、总时长、worker 回调数，以及 worker 回调和主线程事件等待的重叠。并行回调的时长可以相加，重叠总量可以超过主线程等待。报表只对节点齐全且未丢事件的图显示最后完成的可观测依赖链。缓冲在启用任务追踪时分配。

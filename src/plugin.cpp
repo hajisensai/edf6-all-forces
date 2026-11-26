@@ -549,7 +549,7 @@ void LoadConfig() noexcept {
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.verbose=ReadInt(L"Debug",n.debug ? 1 : 0)>=2;
-    n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
+    n.perfProbe=ReadInt(L"PerfProbe",n.perfProbe);
     n.preloadMode=static_cast<int>(FixInt("PreloadMode",ReadInt(L"PreloadMode",n.preloadMode),0,2));
     n.syncLoadProbe=ReadBool(L"SyncLoadProbe",n.syncLoadProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);

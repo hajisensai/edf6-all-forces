@@ -448,6 +448,50 @@ def read_collide(log: str, window: tuple[float, float]) -> dict:
     return out
 
 
+COLLIDE_GRAPH = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE GRAPH (\d+) nodes (\d+)/(\d+) '
+                           r'dropped (\d+) tail (-?\d+) wait ([\d.]+) ms')
+COLLIDE_NODE = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE NODE (\d+) index (\d+) (\w+) '
+                          r'calls (\d+) workers (\d+) work ([\d.]+) ms withwait ([\d.]+) ms '
+                          r'first ([\d.]+) ms last ([\d.]+) ms predecessor (-?\d+)')
+
+
+def read_collide_tasks(log: str, window: tuple[float, float]) -> dict:
+    """Sampled task graphs, by complete observed tail chains and aggregate timed callback spans."""
+    graphs = {int(m[4]): m for m in _rows(log, COLLIDE_GRAPH, window)}
+    if not graphs:
+        return {}
+    nodes = {graph: {} for graph in graphs}
+    for m in _rows(log, COLLIDE_NODE, None):
+        graph = int(m[4])
+        if graph in nodes:
+            nodes[graph][int(m[5])] = m
+
+    totals = {}
+    chains = collections.Counter()
+    complete = 0
+    for graph, row in graphs.items():
+        found = nodes[graph]
+        for m in found.values():
+            kind = totals.setdefault(m[6], [0, 0, 0.0, 0.0])
+            kind[0] += int(m[7])
+            kind[1] += int(m[8])
+            kind[2] += float(m[9])
+            kind[3] += float(m[10])
+        if int(row[5]) != int(row[6]) or int(row[7]) or len(found) != int(row[5]):
+            continue
+        complete += 1
+        cursor = int(row[8])
+        chain, seen = [], set()
+        while cursor in found and cursor not in seen:
+            seen.add(cursor)
+            chain.append(found[cursor][6])
+            cursor = int(found[cursor][13])
+        if chain:
+            chains[tuple(reversed(chain))] += 1
+    return {'graphs': len(graphs), 'complete': complete, 'chains': chains, 'tasks': totals,
+            'wait_ms': sum(float(m[9]) for m in graphs.values())}
+
+
 def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
     """The PERF RENDER rows in `window`: means weighted by presents, worsts the max. {} without them."""
     rows = _rows(log, RENDER, window)
@@ -962,6 +1006,18 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                     f'- Queue dispatch and execution: {dispatch_ms / n:.3f} ms/build ({dispatches} dispatches)',
                     f'- Main-thread mode-0 event wait within dispatch: {sleep_ms / n:.3f} ms/build '
                     f"({sleeps} waits, {collide['mode0']}/{dispatches} dispatches used mode 0)"]
+    tasks = read_collide_tasks(log, cw)
+    if tasks:
+        out += ['', '## Sampled Havok collision tasks (PerfProbe=2)', '',
+                f"{tasks['complete']}/{tasks['graphs']} graphs timed every concrete node. "
+                f"Main thread event wait across sampled graphs: {tasks['wait_ms']:.2f} ms.", '',
+                '| Task | Calls | Worker calls | Callback time (ms) | Worker callbacks overlapping main wait (ms) |',
+                '|---|---:|---:|---:|---:|']
+        for name, (calls, workers, work, overlap) in sorted(tasks['tasks'].items(), key=lambda item: -item[1][3]):
+            out.append(f'| {name} | {calls} | {workers} | {work:.2f} | {overlap:.2f} |')
+        if tasks['chains']:
+            out += ['', 'Last-finishing observed dependency chains:', '']
+            out += [f"- {' → '.join(chain)}: {count} graphs" for chain, count in tasks['chains'].most_common(4)]
     render = read_render(log, cw)
     if render:
         sub = ' / '.join(f'{v:.0f}' for v in render['submits'])

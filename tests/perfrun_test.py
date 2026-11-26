@@ -316,7 +316,9 @@ def probe_parsing() -> None:
         perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
         havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
-        collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE')
+        collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
+        graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
+        node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
         gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
@@ -334,6 +336,13 @@ def probe_parsing() -> None:
             f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
             f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
             f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
+            f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
+            f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
+            f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
+            f.write('[13:00:20.000] ' + node % (1, 0, 'Grid', 2, 2, 4.0, 2.5, 0.1, 2.9, -1) + '\n')
+            f.write('[13:00:20.000] ' + node % (1, 1, 'PostCollide', 1, 0, 0.5, 0.0, 3.0, 3.5, 0) + '\n')
+            f.write('[13:00:20.000] ' + node % (2, 0, 'Grid', 1, 1, 2.0, 1.0, 0.0, 2.0, -1) + '\n')
+            f.write('[13:00:40.000] ' + node % (3, 0, 'Grid', 1, 1, 9.0, 9.0, 0.0, 9.0, -1) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
             f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
@@ -363,6 +372,10 @@ def probe_parsing() -> None:
         c = perf_report.read_collide(log, w)
         check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
               'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')
+        trace = perf_report.read_collide_tasks(log, w)
+        check(trace['graphs'] == 2 and trace['complete'] == 1 and trace['wait_ms'] == 4.0
+              and trace['chains'] == {('Grid', 'PostCollide'): 1} and trace['tasks']['Grid'] == [3, 3, 6., 3.5],
+              'collision task report weights callback spans and excludes partial graphs from tail chains')
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')

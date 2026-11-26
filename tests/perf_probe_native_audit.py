@@ -65,6 +65,25 @@ slot = jump + 7 + struct.unpack_from('<i', binary, jump+3)[0]
 pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
 assert any(entry.address - pe.OPTIONAL_HEADER.ImageBase == slot and entry.name == b'WaitForSingleObject'
            for library in pe.DIRECTORY_ENTRY_IMPORT for entry in library.imports)
+# The mode-0 call uses the same +0x20 task interface that the graph passes to queue slot 4.
+at = value('kModeZeroExecute')
+assert binary[at-16:at+6] == bytes.fromhex('488d431048894588488d55a0488b4b58488b01ff5010')
+assert struct.unpack_from('<Q', binary, vt + 0x20)[0] - pe.OPTIONAL_HEADER.ImageBase == 0xA15830
+assert binary[0xA1583C:0xA15840] == bytes.fromhex('4c894258')
+assert binary[0x9EDC05:0x9EDC09] == bytes.fromhex('488b5310')
+assert binary[0x9EC4AB:0x9EC4AF] == bytes.fromhex('4c8d4320')
+assert binary[0x9EC6BB:0x9EC6BF] == bytes.fromhex('4c8934c8')
+for raw, name in re.findall(r'{(0x[0-9A-Fa-f]+),"([A-Za-z]+)"}', source):
+    vtable = int(raw, 16)
+    if not (0x18C0000 <= vtable < 0x18D0000):
+        continue
+    col = struct.unpack_from('<Q', binary, vtable - 8)[0] - pe.OPTIONAL_HEADER.ImageBase
+    assert struct.unpack_from('<I', binary, col + 4)[0] == 0x20
+    td = struct.unpack_from('<I', binary, col + 12)[0]
+    native_name = binary[td + 16:td + 128].partition(b'\0')[0]
+    assert native_name == f'.?AVhknp{name}Task@@'.encode(), native_name
+    assert struct.unpack_from('<Q', binary, vtable + 0x10)[0] == struct.unpack_from('<Q', binary, vtable - 0x20 + 0x30)[0]
+checked += 1
 # The Present command's rcx: lea rcx, [rip+disp] at 0x11A308E, the renderer.
 assert binary[0x11A308E:0x11A3091] == bytes.fromhex('488d0d')
 assert 0x11A3095 + struct.unpack_from('<i', binary, 0x11A3091)[0] == value('kRenderer')

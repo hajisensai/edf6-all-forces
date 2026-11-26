@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <new>
 
 #include "crew.h"
 #include "memory.h"
@@ -34,6 +35,11 @@ constexpr unsigned kCollideConstructCall=0xDAF931,kCollideConstruct=0xDAAD40;
 constexpr unsigned kCollideDispatchCalls[]={0xDAF9BB,0xDAF9E0};
 constexpr unsigned kCollideSleepCall=0xA0FC48,kCollideSleep=0x9EAE60;
 constexpr unsigned kDefaultQueueInterface=0x182EC80,kDefaultQueueMode=0x36C;
+constexpr unsigned kModeZeroExecute=0xA0FE74;
+constexpr unsigned kGraphNodes=0x18,kGraphNodeCount=0x20,kGraphEdges=0x328,kGraphEdgeCount=0x330;
+constexpr unsigned kGraphNodeStride=0x18,kGraphNodeJob=0x10;
+constexpr unsigned char kTaskExecuteSig[]={0x48,0x8D,0x43,0x10,0x48,0x89,0x45,0x88,0x48,0x8D,0x55,
+                                            0xA0,0x48,0x8B,0x4B,0x58,0x48,0x8B,0x01,0xFF,0x50,0x10};
 // mov rax,[rsi]; lea rdx,[rsp+0x20]; xor r8d,r8d; mov rcx,rsi; call [rax+0xA8]
 constexpr unsigned char kCollideDispatchSig[]={0x48,0x8B,0x06,0x48,0x8D,0x54,0x24,0x20,0x45,0x33,0xC0,
                                                0x48,0x8B,0xCE,0xFF,0x90,0xA8,0,0,0};
@@ -89,8 +95,8 @@ bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
 std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 bool anchored=false;                // the frame anchor chained
-bool havokTiming=false,havokSplit=false,collideTiming=false;
-thread_local bool profileCollide=false,profileCollideSleep=false;
+bool havokTiming=false,havokSplit=false,collideTiming=false,taskTrace=false;
+thread_local bool profileCollide=false,profileCollideSleep=false,profileTaskWaits=false;
 unsigned havokPhase=2;    // game thread only: 0 before objects, 1 after, 2 outside either tagged step
 
 double tickMs=0.0;   // ms a QPC tick
@@ -112,6 +118,216 @@ struct CollideTimes {
     unsigned modeZero=0;
 };
 CollideTimes collideTimes;
+
+struct TaskKind { unsigned vtable;const char* name; };
+constexpr TaskKind kCollisionTasks[]={
+    {0x18C1D90,"FinalizeNarrowPhaseGrid"},{0x18C1A78,"ProcessNarrowPhaseGrid"},
+    {0x18C1AF8,"FinalizeNarrowPhasePairs"},{0x18C2158,"GenSolverTasks"},
+    {0x18C2060,"CollideSync"},{0x18C1BF0,"SortFinalizeNarrowPhasePairs"},
+    {0x18C4E98,"ProcessNarrowPhasePairs"},{0x18C5698,"ApplyDrag"},
+    {0x18C5718,"PrepareNarrowPhase"},{0x18C57E8,"PrepareNarrowPhasePairs"},
+    {0x18C59D8,"BuildConstraintJacobians"},{0x18C5968,"PrepareConstraints"},
+    {0x18C1D28,"PostCollide"},
+};
+constexpr unsigned kGraphNodesMax=128,kGraphEdgesMax=512,kTaskSpansMax=1024,kWaitSpansMax=128,kGraphReportsMax=32;
+struct GraphEdge { std::uint16_t from,to; };
+static_assert(sizeof(GraphEdge)==4);
+struct TaskSpan { LONGLONG begin,end;unsigned node;bool worker; };
+struct WaitSpan { LONGLONG begin,end; };
+struct TaskNodeReport {
+    const char* name=nullptr;
+    LONGLONG begin=0,end=0,work=0,duringWait=0;
+    unsigned calls=0,workers=0;
+    int predecessor=-1;
+};
+struct GraphReport {
+    TaskNodeReport nodes[kGraphNodesMax]{};
+    unsigned id=0,count=0,concrete=0,observed=0,dropped=0;
+    int tail=-1;
+    LONGLONG origin=0,wait=0;
+};
+struct ActiveTaskGraph {
+    const unsigned char* nativeNodes=nullptr;
+    const void* tasks[kGraphNodesMax]{};
+    const char* names[kGraphNodesMax]{};
+    GraphEdge edges[kGraphEdgesMax]{};
+    TaskSpan spans[kTaskSpansMax]{};
+    WaitSpan waits[kWaitSpansMax]{};
+    unsigned id=0,count=0,edgeCount=0,spanCount=0,waitCount=0,dropped=0;
+    DWORD owner=0;
+    LONGLONG origin=0;
+};
+SRWLOCK graphLock=SRWLOCK_INIT;
+std::atomic<bool> graphActive{false};
+struct TaskTraceStorage {
+    ActiveTaskGraph graph;
+    GraphReport reports[kGraphReportsMax];
+};
+TaskTraceStorage* taskTraceStorage=nullptr;
+unsigned traceSteps=0,traceId=0,taskReportCount=0,taskTraceLost=0;
+unsigned traceRejected=0;
+int rejectedNodes=0,rejectedEdges=0;
+const char* rejection=nullptr;
+
+bool CaptureTaskGraph(const void* graph) noexcept {
+    if(!taskTrace || (++traceSteps%16)!=0 || graphActive.load(std::memory_order_acquire))return false;
+    ++traceRejected;
+    rejection="unreadable";
+    __try {
+        const int count=At<int>(graph,kGraphNodeCount),edgeCount=At<int>(graph,kGraphEdgeCount);
+        rejectedNodes=count;rejectedEdges=edgeCount;
+        if(count<=0 || count>static_cast<int>(kGraphNodesMax) ||
+           edgeCount<0 || edgeCount>static_cast<int>(kGraphEdgesMax)){rejection="size";return false;}
+        const auto* nodes=At<const unsigned char*>(graph,kGraphNodes);
+        const auto* edges=At<const GraphEdge*>(graph,kGraphEdges);
+        if(!nodes || (edgeCount && !edges))return false;
+        // The dispatcher has yet to publish these native nodes to workers.
+        const void* tasks[kGraphNodesMax]{};
+        const char* names[kGraphNodesMax]{};
+        for(int i=0;i<count;++i) {
+            const void* task=At<const void*>(nodes,static_cast<unsigned>(i)*kGraphNodeStride);
+            tasks[i]=task;
+            if(!task)continue;
+            const void* table=At<const void*>(task,0);
+            names[i]="Unknown";
+            for(const auto& kind:kCollisionTasks)if(table==image+kind.vtable){names[i]=kind.name;break;}
+        }
+        GraphEdge snapshot[kGraphEdgesMax];
+        unsigned validEdges=0,skippedEdges=0;
+        for(int i=0;i<edgeCount;++i) {
+            const auto& edge=edges[i];
+            if(edge.from>=count || edge.to>=count){++skippedEdges;continue;}
+            snapshot[validEdges++]=edge;
+        }
+        AcquireSRWLockExclusive(&graphLock);
+        auto& taskGraph=taskTraceStorage->graph;
+        taskGraph.id=++traceId;
+        taskGraph.count=static_cast<unsigned>(count);
+        taskGraph.edgeCount=validEdges;
+        taskGraph.nativeNodes=nodes;
+        taskGraph.spanCount=taskGraph.waitCount=0;
+        taskGraph.dropped=skippedEdges;
+        taskGraph.owner=GetCurrentThreadId();
+        taskGraph.origin=Qpc();
+        std::memcpy(taskGraph.tasks,tasks,taskGraph.count*sizeof(tasks[0]));
+        std::memcpy(taskGraph.names,names,taskGraph.count*sizeof(names[0]));
+        std::memcpy(taskGraph.edges,snapshot,taskGraph.edgeCount*sizeof(snapshot[0]));
+        graphActive.store(true,std::memory_order_release);
+        ReleaseSRWLockExclusive(&graphLock);
+        --traceRejected;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void FinishTaskGraph(bool completed) noexcept {
+    AcquireSRWLockExclusive(&graphLock);
+    graphActive.store(false,std::memory_order_release);
+    ReleaseSRWLockExclusive(&graphLock);
+    if(!completed)return;
+    if(taskReportCount==kGraphReportsMax){++taskTraceLost;return;}
+    const auto& taskGraph=taskTraceStorage->graph;
+    auto& report=taskTraceStorage->reports[taskReportCount++];
+    report={};
+    report.id=taskGraph.id;
+    report.count=taskGraph.count;
+    report.origin=taskGraph.origin;
+    report.dropped=taskGraph.dropped;
+    for(unsigned i=0;i<taskGraph.count;++i) {
+        report.nodes[i].name=taskGraph.names[i];
+        if(taskGraph.tasks[i])++report.concrete;
+    }
+    for(unsigned i=0;i<taskGraph.waitCount;++i)report.wait+=taskGraph.waits[i].end-taskGraph.waits[i].begin;
+    for(unsigned i=0;i<taskGraph.spanCount;++i) {
+        const auto& span=taskGraph.spans[i];
+        auto& node=report.nodes[span.node];
+        if(!node.calls || span.begin<node.begin)node.begin=span.begin;
+        if(span.end>node.end)node.end=span.end;
+        ++node.calls;
+        node.work+=span.end-span.begin;
+        if(!span.worker)continue;
+        ++node.workers;
+        for(unsigned j=0;j<taskGraph.waitCount;++j) {
+            const auto& wait=taskGraph.waits[j];
+            const auto begin=span.begin>wait.begin ? span.begin : wait.begin;
+            const auto end=span.end<wait.end ? span.end : wait.end;
+            if(end>begin)node.duringWait+=end-begin;
+        }
+    }
+    for(unsigned i=0;i<report.count;++i) {
+        const auto& node=report.nodes[i];
+        if(!node.calls)continue;
+        ++report.observed;
+        if(report.tail<0 || node.end>report.nodes[report.tail].end)report.tail=static_cast<int>(i);
+    }
+    for(unsigned i=0;i<taskGraph.edgeCount;++i) {
+        const auto& edge=taskGraph.edges[i];
+        const auto& from=report.nodes[edge.from];
+        auto& to=report.nodes[edge.to];
+        if(!from.calls || !to.calls || from.end>to.begin)continue;
+        if(to.predecessor<0 || from.end>report.nodes[to.predecessor].end)to.predecessor=edge.from;
+    }
+}
+
+using TaskExecuteFn=std::uintptr_t(__fastcall*)(void*,void*,void*,void*);
+
+std::uintptr_t __fastcall TaskExecuteProbe(void* task,void* context,void* a3,void* a4) {
+    const auto original=At<TaskExecuteFn>(At<const void*>(task,0),0x10);
+    unsigned id=0,node=0;
+    DWORD owner=0;
+    if(graphActive.load(std::memory_order_acquire)) {
+        AcquireSRWLockShared(&graphLock);
+        if(graphActive.load(std::memory_order_relaxed)) {
+            const auto& taskGraph=taskTraceStorage->graph;
+            // Mode 0 saves job+0x10 at context-0x18. The dispatcher writes the job into node+0x10.
+            const auto* const jobData=At<const unsigned char*>(static_cast<const unsigned char*>(context)-0x18,0);
+            const auto* const job=jobData-0x10;
+            for(;node<taskGraph.count;++node) {
+                if(taskGraph.tasks[node]!=task)continue;
+                if(At<const void*>(taskGraph.nativeNodes,node*kGraphNodeStride+kGraphNodeJob)!=job)continue;
+                id=taskGraph.id;
+                owner=taskGraph.owner;
+                break;
+            }
+        }
+        ReleaseSRWLockShared(&graphLock);
+    }
+    if(!id)return original(task,context,a3,a4);
+    const auto begin=Qpc();
+    const auto result=original(task,context,a3,a4);
+    const auto end=Qpc();
+    const bool worker=owner!=GetCurrentThreadId();
+    AcquireSRWLockExclusive(&graphLock);
+    auto& taskGraph=taskTraceStorage->graph;
+    if(graphActive.load(std::memory_order_relaxed) && id==taskGraph.id) {
+        if(taskGraph.spanCount<kTaskSpansMax)taskGraph.spans[taskGraph.spanCount++]={begin,end,node,worker};
+        else ++taskGraph.dropped;
+    }
+    ReleaseSRWLockExclusive(&graphLock);
+    return result;
+}
+
+void ReportTaskGraphs() noexcept {
+    for(unsigned i=0;i<taskReportCount;++i) {
+        const auto& graph=taskTraceStorage->reports[i];
+        Log("PERF COLLIDE GRAPH %u nodes %u/%u dropped %u tail %d wait %.3f ms",
+            graph.id,graph.observed,graph.concrete,graph.dropped,graph.tail,static_cast<double>(graph.wait)*tickMs);
+        for(unsigned j=0;j<graph.count;++j) {
+            const auto& node=graph.nodes[j];
+            if(!node.calls)continue;
+            Log("PERF COLLIDE NODE %u index %u %s calls %u workers %u work %.3f ms withwait %.3f ms "
+                "first %.3f ms last %.3f ms predecessor %d",graph.id,j,node.name,node.calls,node.workers,
+                static_cast<double>(node.work)*tickMs,static_cast<double>(node.duringWait)*tickMs,
+                static_cast<double>(node.begin-graph.origin)*tickMs,
+                static_cast<double>(node.end-graph.origin)*tickMs,node.predecessor);
+        }
+    }
+    if(taskTraceLost)Log("PERF COLLIDE GRAPH lost %u (report buffer full)",taskTraceLost);
+    if(traceRejected)Log("PERF COLLIDE GRAPH skipped %u (last %s nodes %d edges %d)",
+                         traceRejected,rejection,rejectedNodes,rejectedEdges);
+    taskReportCount=taskTraceLost=traceRejected=0;
+}
 
 template<unsigned phase>
 void __fastcall HavokStepHook(void* context,void* services,void* queue,float dt) {
@@ -184,30 +400,45 @@ void __fastcall CollideDispatchHook(void* queue,void* graph,std::uint32_t flags)
     profileCollideSleep=table==image+kDefaultQueueInterface &&
                         At<int>(static_cast<const unsigned char*>(queue),kDefaultQueueMode)==0;
     if(profileCollideSleep)++collideTimes.modeZero;
+    const bool wasTracing=profileTaskWaits;
+    const bool captured=profileCollideSleep && CaptureTaskGraph(graph);
+    profileTaskWaits=captured;
     const auto start=Qpc();
     __try {
         original(queue,graph,flags);
     } __finally {
         profileCollideSleep=previous;
+        profileTaskWaits=wasTracing;
+        if(captured && AbnormalTermination())FinishTaskGraph(false);
     }
     collideTimes.dispatch.Add(Qpc()-start);
+    if(captured)FinishTaskGraph(true);
 }
 
 DWORD __fastcall CollideSleepHook(void* event) {
     if(!profileCollideSleep)return nextCollideSleep(event);
     const auto start=Qpc();
     const DWORD result=nextCollideSleep(event);
-    collideTimes.sleep.Add(Qpc()-start);
+    const auto end=Qpc();
+    collideTimes.sleep.Add(end-start);
+    if(profileTaskWaits) {
+        auto& taskGraph=taskTraceStorage->graph;
+        if(taskGraph.waitCount<kWaitSpansMax)taskGraph.waits[taskGraph.waitCount++]={start,end};
+        else {
+            AcquireSRWLockExclusive(&graphLock);
+            ++taskGraph.dropped;
+            ReleaseSRWLockExclusive(&graphLock);
+        }
+    }
     return result;
 }
 
-bool InstallCollideDispatch(unsigned call) noexcept {
-    constexpr auto size=sizeof(kCollideDispatchSig);
-    constexpr unsigned argumentBytes=14;
-    static_assert(size-argumentBytes==6);
+template<std::size_t N>
+bool InstallIndirectProbe(unsigned call,const unsigned char (&signature)[N],void* hook) noexcept {
+    constexpr auto argumentBytes=N-6;
     const auto at=image+call;
-    if(!edf::Matches(image,call-argumentBytes,kCollideDispatchSig,size))return false;
-    auto* const thunk=static_cast<unsigned char*>(edf::AllocateNearThunk(at,reinterpret_cast<void*>(&CollideDispatchHook)));
+    if(!edf::Matches(image,call-argumentBytes,signature,N))return false;
+    auto* const thunk=static_cast<unsigned char*>(edf::AllocateNearThunk(at,hook));
     if(!thunk)return false;
     // Preserve the six-byte virtual call's footprint.
     unsigned char code[]={0xE8,0,0,0,0,0x90};
@@ -215,7 +446,7 @@ bool InstallCollideDispatch(unsigned call) noexcept {
     if(delta>=INT32_MIN && delta<=INT32_MAX) {
         const auto rel32=static_cast<std::int32_t>(delta);
         std::memcpy(code+1,&rel32,sizeof(rel32));
-        if(edf::PatchCode(at,kCollideDispatchSig+argumentBytes,code,sizeof(code)))return true;
+        if(edf::PatchCode(at,signature+argumentBytes,code,sizeof(code)))return true;
     }
     VirtualFree(thunk,0,MEM_RELEASE);
     return false;
@@ -227,9 +458,17 @@ void InstallCollideProbe() noexcept {
     const bool sleep=Chain(kCollideSleepCall,kCollideSleep,reinterpret_cast<void*>(&CollideSleepHook),
                           reinterpret_cast<void**>(&nextCollideSleep));
     unsigned dispatch=0;
-    for(const auto call:kCollideDispatchCalls)dispatch+=InstallCollideDispatch(call);
+    for(const auto call:kCollideDispatchCalls)
+        dispatch+=InstallIndirectProbe(call,kCollideDispatchSig,reinterpret_cast<void*>(&CollideDispatchHook));
     collideTiming=construct && sleep && dispatch==std::size(kCollideDispatchCalls);
     Log("HOOK perf Havok collide construct=%d dispatch=%u/%zu sleep=%d",construct,dispatch,std::size(kCollideDispatchCalls),sleep);
+    if(collideTiming && Cfg().perfProbe>=2) {
+        taskTraceStorage=new(std::nothrow) TaskTraceStorage{};
+        taskTrace=taskTraceStorage &&
+            InstallIndirectProbe(kModeZeroExecute,kTaskExecuteSig,reinterpret_cast<void*>(&TaskExecuteProbe));
+        if(!taskTrace){delete taskTraceStorage;taskTraceStorage=nullptr;}
+        Log("HOOK perf Havok collision tasks=%d (one graph sampled every 16 builds)",taskTrace);
+    }
 }
 
 // --- The frame (game thread only) ---
@@ -575,6 +814,7 @@ void Report(unsigned frames) noexcept {
             static_cast<double>(c.dispatch.ticks)*tickMs,c.modeZero,c.sleep.calls,static_cast<double>(c.sleep.ticks)*tickMs);
         collideTimes={};
     }
+    if(taskTrace)ReportTaskGraphs();
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);
