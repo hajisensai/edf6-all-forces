@@ -66,6 +66,7 @@ QueueCallback cell=nullptr;
 float paletteValue=0.0f,meshValue=0.0f;
 bool arguments=false;
 float writerMark=0.0f;
+int lodCalls=0,meshCalls=0;
 
 void* AllocUnit(void*,int units) {
     Check(units==1,"each marker occupies one native unit");
@@ -82,9 +83,15 @@ std::uintptr_t StockPalette(const unsigned char*,void*,const PoseList* source) {
     return 78;
 }
 std::uintptr_t StockMesh(void*,void*,int pass,const unsigned char*,const PoseList* source,unsigned char flags) {
+    ++meshCalls;
     meshValue=source->matrix[1].elements[12];
     arguments=pass==3 && flags==1;
     return 79;
+}
+std::uintptr_t StockDrawLod(void* lod,void* context,int pass,const unsigned char* inst,const PoseList* source,unsigned char flags) {
+    ++lodCalls;
+    Palette(inst,context,source);
+    return Mesh(lod,context,pass,inst,source,flags);
 }
 void Take() {
     const auto command=queue.front();
@@ -99,7 +106,7 @@ void Draw(Instance& inst,float expected) {
 }
 
 void Pipeline() {
-    stockWrite=&StockWrite;stockPalette=&StockPalette;stockMesh=&StockMesh;
+    stockWrite=&StockWrite;stockPalette=&StockPalette;stockMesh=&StockMesh;stockDrawLod=&StockDrawLod;
     allocate=&AllocUnit;commit=&CommitUnit;
     // Only the mock ring functions consume this address.
     unsigned char ring[16]{};
@@ -212,13 +219,14 @@ void PaletteOwnership() {
     model.Set(500);
     buffer.Release();  // the native owner's reference can go before frame retirement
     Check(frame.Open() && buffer.references==1,"the pending frame owns the last buffer reference");
-    const auto* frozen=frame.Lookup(key);
-    const auto* palette=frame.Palette(key,frozen,&buffer);
+    const auto captured=frame.Read(key,&buffer);
+    const auto* palette=captured.palette;
     Check(palette && palette[1].columns[3]==10.0f,"packing uses the recorded world matrix and inverse bind");
-    Check(frame.Palette(key,frozen,&buffer)==palette,"repeated passes reuse the packed palette");
+    Check(frame.Read(key,&buffer).palette==palette,"repeated passes reuse the packed palette");
     TestBuffer replacement;
-    Check(!frame.Palette(key,frozen,&replacement) && !frame.Palette(key,model.pose,&buffer),
-          "rebinding the buffer or explicitly overriding a pose bypasses the packed palette");
+    const auto changed=frame.Read(key,&replacement);
+    Check(changed.pose && changed.pose==captured.pose && !changed.palette,
+          "a rebound GPU buffer keeps the frozen matrices and uses the native upload");
     frame.Retire();
     Check(buffer.references==0,"retirement releases the retained D3D resource");
 
@@ -227,7 +235,7 @@ void PaletteOwnership() {
     Check(frame.Begin(),"the retired slot can be reused");
     frame.Observe(key);
     Check(frame.Seal(&Copy,&CapturePalette) && frame.Open() && replacement.references==1 &&
-          !frame.Palette(key,frame.Lookup(key),&replacement),"nonmatching buffer widths preserve the native upload");
+          !frame.Read(key,&replacement).palette,"nonmatching buffer widths preserve the native upload");
     frame.Retire();
 }
 
@@ -265,10 +273,11 @@ void ArenaGrowth() {
         model.inst.Set(-1);
         std::memset(model.records,0,sizeof(model.records));
         const auto key=Identify(model.inst.bytes);
-        const auto* pose=frame.Lookup(key);
+        const auto draw=frame.Read(key,&buffer);
+        const auto* pose=draw.pose;
         const float expected=static_cast<float>(i)+(i<staged ? 4.0f : 0.0f);
         posesOk=posesOk && pose && pose[1].elements[12]==expected;
-        const auto* packed=frame.Palette(key,pose,&buffer);
+        const auto* packed=draw.palette;
         palettesOk=palettesOk && packed && packed[1].columns[3]==expected+static_cast<float>(i+1);
     }
     Check(posesOk && palettesOk,"growth retains captured prefixes and packs each staged transform exactly once");
@@ -318,7 +327,9 @@ void WarpPaletteUpload() {
     desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     ID3D11Buffer* target=nullptr;
     ID3D11Buffer* readback=nullptr;
-    const HRESULT create=device->CreateBuffer(&desc,nullptr,&target);
+    PackedBone initial[2]{};
+    const D3D11_SUBRESOURCE_DATA initialData{initial,0,0};
+    const HRESULT create=device->CreateBuffer(&desc,&initialData,&target);
     desc.BindFlags=0;
     desc.Usage=D3D11_USAGE_STAGING;
     desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
@@ -335,15 +346,40 @@ void WarpPaletteUpload() {
         After();
         model.Set(77);
         Take();
-        Check(Palette(model.bytes,nativeContext,model.Source())==0,"the covered draw uses the captured upload path");
-        context->CopyResource(readback,target);
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        if(SUCCEEDED(context->Map(readback,0,D3D11_MAP_READ,0,&mapped))) {
-            const auto* p=static_cast<const PackedBone*>(mapped.pData);
-            Check(p[1].columns[3]==42.0f,"D3D received the recorded palette rather than the live pose");
+        const auto current=[&]() {
+            context->CopyResource(readback,target);
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if(FAILED(context->Map(readback,0,D3D11_MAP_READ,0,&mapped)))return -1.0f;
+            const auto* packed=static_cast<const PackedBone*>(mapped.pData);
+            const float mark=packed[1].columns[3];
             context->Unmap(readback,0);
-        } else Check(false,"the software render buffer can be read back");
+            return mark;
+        };
+        alignas(16) unsigned char lod[0xE8]{};
+        edf::Put<std::uint64_t>(lod,0xC0,1);
+        const int drawStart=lodCalls,meshStart=meshCalls;
+        DrawLod(lod,nativeContext,3,model.bytes,model.Source(),1);
+        DrawLod(lod,nativeContext,2,model.bytes,model.Source(),1);
+        Check(lodCalls==drawStart && meshCalls==meshStart+2 && current()==0,
+              "shadow-culling and an empty transparent list preserve mesh state calls without uploading");
+        DrawLod(lod,nativeContext,1,model.bytes,model.Source(),1);
+        Check(lodCalls==drawStart+1 && meshCalls==meshStart+3 && current()==42.0f,
+              "a drawable color pass uploads the recorded palette rather than the live pose");
+        Matrix explicitPose[2]{};
+        explicitPose[1].elements[12]=199;
+        const PoseList explicitSource{0,explicitPose};
+        Check(Palette(model.bytes,nativeContext,&explicitSource)==78 && paletteValue==199 && current()==42.0f,
+              "a caller's explicit pose uses the stock palette path rather than the frame upload");
+        edf::Put<std::uint64_t>(lod,0xC0,0);
+        edf::Put<std::uint64_t>(lod,0xE0,1);
+        DrawLod(lod,nativeContext,1,model.bytes,model.Source(),1);
+        DrawLod(lod,nativeContext,2,model.bytes,model.Source(),1);
+        Check(lodCalls==drawStart+2 && meshCalls==meshStart+5,
+              "color and transparent passes use their own mesh counts");
         Take();
+        DrawLod(lod,nativeContext,1,model.bytes,model.Source(),1);
+        Check(lodCalls==drawStart+3 && meshCalls==meshStart+6,
+              "outside an open recording the native LOD path is used");
     }
     if(readback)readback->Release();
     if(target)target->Release();

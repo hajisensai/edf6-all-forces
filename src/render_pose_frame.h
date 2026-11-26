@@ -47,6 +47,7 @@ class Frame {
 public:
     static constexpr std::size_t kMaxBones=1024;   // native palette scratch holds 1024 3x4 matrices
     static constexpr std::size_t kMaxMatrices=1u<<19,kMaxInstances=1u<<15;
+    struct DrawData { const Matrix* pose; const PackedBone* palette; };
 
     bool Begin() noexcept {
         State free=State::free;
@@ -136,34 +137,26 @@ public:
         const int at=index_.Find(instance);
         if(at>=0)entries_[static_cast<std::size_t>(at)].offset=kUncopied;
     }
-    const Matrix* Lookup(const Skeleton& key) noexcept {
+    DrawData Read(const Skeleton& key,ID3D11Buffer* buffer=nullptr) noexcept {
         const int at=index_.Find(key.instance);
-        if(at<0)return nullptr;
+        if(at<0)return {};
         auto& entry=entries_[static_cast<std::size_t>(at)];
-        if(entry.offset==kUncopied || !(entry.key==key))return nullptr;
+        if(entry.offset==kUncopied || !(entry.key==key))return {};
         auto* pose=matrices_.data()+entry.offset;
         if(entry.transform!=kNoTransform) {
             // Only the queue consumer can touch this slot after Open().
             framerate::MulBones(pose->elements,key.count,transforms_.data()[entry.transform].elements);
             entry.transform=kNoTransform;
         }
-        return pose;
-    }
-
-    const PackedBone* Palette(const Skeleton& key,const Matrix* pose,ID3D11Buffer* buffer) noexcept {
-        if(!buffer || !pose)return nullptr;
-        const int at=index_.Find(key.instance);
-        if(at<0)return nullptr;
-        auto& entry=entries_[static_cast<std::size_t>(at)];
-        if(entry.offset==kUncopied || entry.buffer!=buffer || !(entry.key==key) ||
-           pose!=matrices_.data()+entry.offset || entry.transform!=kNoTransform)return nullptr;
+        if(!buffer || entry.buffer!=buffer)return {pose,nullptr};
         const auto offset=entry.paletteOffset;
         if(!entry.paletteReady) {
             for(std::size_t i=0;i<key.count;++i)PackBone(inverse_.data()[offset+i],pose[i],packed_.data()[offset+i]);
             entry.paletteReady=true;
         }
-        return packed_.data()+offset;
+        return {pose,packed_.data()+offset};
     }
+    const Matrix* Lookup(const Skeleton& key) noexcept { return Read(key).pose; }
 
 private:
     static constexpr std::size_t kMaxPaletteBones=1u<<17;

@@ -12,12 +12,23 @@
 
 namespace crew::renderpose {
 namespace {
-constexpr unsigned kWrite=0x1100F10,kPalette=0x11009A0,kMesh=0x1103DA0;
+constexpr unsigned kWrite=0x1100F10,kPalette=0x11009A0,kMesh=0x1103DA0,kDrawLod=0x1104100;
+constexpr unsigned kLodPaletteCall=0x1104131,kLodMeshTail=0x1104165;
+constexpr unsigned kShadowTest=0x1103DC4,kEmptyMeshTest=0x1103DEF;
 constexpr unsigned kAlloc=0x51D00,kCommit=0x51D60,kCommands=0x2136FF0,kRing=0x28A8;
 constexpr unsigned kBones=0x10,kCount=0x20,kPose=0x30,kPaletteHolder=0x50,kBoneStride=0x110,kInverseBind=0x30;
+constexpr unsigned kLodCastsShadow=0x60,kLodOpaqueCount=0xC0,kLodTransparentCount=0xE0;
 constexpr unsigned char kWriteSig[]={0x33,0xD2,0x4C,0x8B,0xC1,0x48,0x39,0x51,0x20,0x76,0x52};
 constexpr unsigned char kPaletteSig[]={0xB8,0x78,0xC0,0x00,0x00,0xE8,0x56,0x7D,0x1D,0x00,0x48,0x2B,0xE0};
 constexpr unsigned char kMeshSig[]={0x4C,0x89,0x4C,0x24,0x20,0x48,0x89,0x4C,0x24,0x08,0x55,0x53,0x57};
+constexpr unsigned char kDrawLodSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
+constexpr unsigned char kLodPaletteCallSig[]={0xE8,0x6A,0xC8,0xFF,0xFF};
+constexpr unsigned char kLodMeshTailSig[]={0xE9,0x36,0xFC,0xFF,0xFF};
+constexpr unsigned char kShadowTestSig[]={0x41,0x83,0xF8,0x03,0x75,0x0A,0x80,0x79,0x60,0x00,0x0F,0x84,0x39,0x02,0x00,0x00};
+constexpr unsigned char kEmptyMeshTestSig[]={0x33,0xF6,0x48,0xC7,0x45,0xC7,0x00,0x00,0x00,0x00,
+    0x41,0x83,0xFD,0x02,0x48,0xC7,0x45,0xCF,0xFF,0xFF,0xFF,0xFF,
+    0xB8,0xC0,0x00,0x00,0x00,0x41,0xBC,0xE0,0x00,0x00,0x00,0x44,0x0F,0x45,0xE0,
+    0x4C,0x03,0xE3,0x49,0x39,0x34,0x24,0x0F,0x86,0xDC,0x01,0x00,0x00};
 constexpr unsigned char kAllocSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x8B,0x41,0x48,0x8B,0xFA,0x48};
 constexpr unsigned char kCommitSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x01,0x51,0x50,0x33,0xFF,0x8B};
 
@@ -31,6 +42,7 @@ using Commit=void(__fastcall*)(void*,int);
 WriteFn stockWrite=nullptr;
 PaletteFn stockPalette=nullptr;
 MeshFn stockMesh=nullptr;
+MeshFn stockDrawLod=nullptr;
 Alloc allocate=nullptr;
 Commit commit=nullptr;
 
@@ -95,9 +107,26 @@ const float* ReadFrozen(const unsigned char* inst) noexcept {
     return nullptr;
 }
 
-const PoseList* Select(const unsigned char* inst,const PoseList* source,PoseList& own) noexcept {
+struct PaletteUpload {
+    void* nativeContext;
+    ID3D11DeviceContext* context=nullptr;
+    ID3D11Buffer* buffer=nullptr;
+    const PackedBone* packed=nullptr;
+};
+
+ID3D11Buffer* UploadTarget(const unsigned char* inst,PaletteUpload& upload) noexcept {
+    if(!upload.nativeContext)return nullptr;
+    __try {
+        upload.context=edf::At<ID3D11DeviceContext*>(upload.nativeContext,8);
+        if(upload.context)upload.buffer=NativePalette(inst);
+        return upload.buffer;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return nullptr;}
+}
+
+const PoseList* Select(const unsigned char* inst,const PoseList* source,PoseList& own,PaletteUpload* upload=nullptr) noexcept {
     if(!reading || !inst || !source)return source;
     __try {
+        auto* const buffer=upload ? UploadTarget(inst,*upload) : nullptr;
         const Skeleton key=Identify(inst);
         // A native caller supplying custom matrices retains those matrices.
         if(source->matrix!=key.live)return source;
@@ -107,37 +136,51 @@ const PoseList* Select(const unsigned char* inst,const PoseList* source,PoseList
             own={source->header,reinterpret_cast<const Matrix*>(override->matrices)};
             return &own;
         }
-        if(const auto* copy=reading->Lookup(key)) {
-            own={source->header,copy};
+        const auto data=reading->Read(key,buffer);
+        if(data.pose) {
+            if(upload)upload->packed=data.palette;
+            own={source->header,data.pose};
             return &own;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return source;
 }
 
-bool UploadPalette(const unsigned char* inst,void* context,const PoseList& list) noexcept {
+bool UploadPalette(const PaletteUpload& upload) noexcept {
     __try {
-        auto* const buffer=NativePalette(inst);
-        const auto* packed=reading->Palette(Identify(inst),list.matrix,buffer);
-        if(!packed)return false;
-        auto* const d3d=context ? edf::At<ID3D11DeviceContext*>(context,8) : nullptr;
-        if(!d3d)return false;
         // Same subresource and whole-buffer update as the native 0x113F860 path.
-        d3d->UpdateSubresource(buffer,0,nullptr,packed,0,0);
+        upload.context->UpdateSubresource(upload.buffer,0,nullptr,upload.packed,0,0);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
 }
 
 std::uintptr_t __fastcall Palette(const unsigned char* inst,void* context,const PoseList* source) {
+    if(!reading)return stockPalette(inst,context,source);
     PoseList own{};
-    const auto* list=Select(inst,source,own);
-    if(list==&own && UploadPalette(inst,context,own))return 0;
+    PaletteUpload upload{context};
+    const auto* list=Select(inst,source,own,&upload);
+    if(upload.packed && UploadPalette(upload))return 0;
     return stockPalette(inst,context,list);
 }
 
 std::uintptr_t __fastcall Mesh(void* lod,void* context,int pass,const unsigned char* inst,const PoseList* source,unsigned char flags) {
     PoseList own{};
     return stockMesh(lod,context,pass,inst,Select(inst,source,own),flags);
+}
+
+bool NoMeshDraw(const void* lod,int pass) noexcept {
+    if(!lod)return false;
+    __try {
+        if(pass==3 && !edf::At<unsigned char>(lod,kLodCastsShadow))return true;
+        return edf::At<std::uint64_t>(lod,pass==2 ? kLodTransparentCount : kLodOpaqueCount)==0;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+
+std::uintptr_t __fastcall DrawLod(void* lod,void* context,int pass,const unsigned char* inst,const PoseList* source,unsigned char flags) {
+    // 0x1104100 always builds a palette before its tail call. The mesh entry has the pass state changes, even on
+    // an empty list. Keep that entry; neither its pose nor its palette is read when the verified guards reject all draws.
+    if(reading && NoMeshDraw(lod,pass))return stockMesh(lod,context,pass,inst,source,flags);
+    return stockDrawLod(lod,context,pass,inst,source,flags);
 }
 
 template<std::size_t I> void __fastcall Open(void*,void*) {
@@ -235,9 +278,14 @@ bool Install() noexcept {
     if(GetModuleHandleW(L"EDF6VR.dll"))return false;
     Detour hooks[]={{kWrite,kWriteSig,sizeof(kWriteSig),reinterpret_cast<void*>(&Write)},
                     {kPalette,kPaletteSig,sizeof(kPaletteSig),reinterpret_cast<void*>(&Palette)},
-                    {kMesh,kMeshSig,sizeof(kMeshSig),reinterpret_cast<void*>(&Mesh)}};
+                    {kMesh,kMeshSig,sizeof(kMeshSig),reinterpret_cast<void*>(&Mesh)},
+                    {kDrawLod,kDrawLodSig,sizeof(kDrawLodSig),reinterpret_cast<void*>(&DrawLod)}};
     for(const auto& hook:hooks)if(!edf::Matches(image,hook.rva,hook.original,hook.sigSize))return false;
-    if(!edf::Matches(image,kAlloc,kAllocSig,sizeof(kAllocSig)) ||
+    if(!edf::Matches(image,kLodPaletteCall,kLodPaletteCallSig,sizeof(kLodPaletteCallSig)) ||
+       !edf::Matches(image,kLodMeshTail,kLodMeshTailSig,sizeof(kLodMeshTailSig)) ||
+       !edf::Matches(image,kShadowTest,kShadowTestSig,sizeof(kShadowTestSig)) ||
+       !edf::Matches(image,kEmptyMeshTest,kEmptyMeshTestSig,sizeof(kEmptyMeshTestSig)) ||
+       !edf::Matches(image,kAlloc,kAllocSig,sizeof(kAllocSig)) ||
        !edf::Matches(image,kCommit,kCommitSig,sizeof(kCommitSig)) || !renderrecord::Install())return false;
     for(auto& hook:hooks)if(!Prepare(hook)) {
         for(const auto& allocated:hooks)if(allocated.page)VirtualFree(allocated.page,0,MEM_RELEASE);
@@ -246,6 +294,7 @@ bool Install() noexcept {
     stockWrite=reinterpret_cast<WriteFn>(hooks[0].page);
     stockPalette=reinterpret_cast<PaletteFn>(hooks[1].page);
     stockMesh=reinterpret_cast<MeshFn>(hooks[2].page);
+    stockDrawLod=reinterpret_cast<MeshFn>(hooks[3].page);
     allocate=reinterpret_cast<Alloc>(image+kAlloc);
     commit=reinterpret_cast<Commit>(image+kCommit);
 

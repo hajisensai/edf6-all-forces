@@ -290,10 +290,12 @@ pose_constants = {name: int(value, 16)
                   for name, value in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b', pose_src)}
 pose_signatures = {name: bytes(int(byte, 16) for byte in re.findall(r'0x([0-9a-fA-F]{2})', data))
                    for name, data in re.findall(r'\b(k\w+)Sig\[\]=\{([^}]*)\}', pose_src)}
-for site in ('kWrite', 'kPalette', 'kMesh', 'kAlloc', 'kCommit'):
+for site in ('kWrite', 'kPalette', 'kMesh', 'kDrawLod', 'kLodPaletteCall', 'kLodMeshTail',
+             'kShadowTest', 'kEmptyMeshTest', 'kAlloc', 'kCommit'):
     at, sig = pose_constants[site], pose_signatures[site]
     check(img[at:at + len(sig)] == sig, f'render pose: {site} entry matches')
-for site, prefix in (('kWrite', '33d24c8bc1'), ('kPalette', 'b878c00000'), ('kMesh', '4c894c2420')):
+for site, prefix in (('kWrite', '33d24c8bc1'), ('kPalette', 'b878c00000'), ('kMesh', '4c894c2420'),
+                     ('kDrawLod', '48895c2408')):
     check(pose_signatures[site][:5] == bytes.fromhex(prefix),
           f'render pose: {site} trampoline copies complete position-independent instructions')
 check(img[0x11009CB:0x11009CF] == bytes.fromhex('4d8b5008'),
@@ -315,6 +317,11 @@ check(rel_target(0x1100B72, 5) == 0x113F860 and
       img[0x113F883:0x113F886] == bytes.fromhex('488b12') and
       img[0x113D240:0x113D24E] == bytes.fromhex('488b49084c8b1149ffa280010000'),
       'render palette: native inst+0x50 leads to the buffer, and the context dispatches UpdateSubresource')
+check(rel_target(pose_constants['kLodPaletteCall'], 5) == pose_constants['kPalette'] and
+      rel_target(pose_constants['kLodMeshTail'], 5) == pose_constants['kMesh'],
+      'render palette: the LOD wrapper uploads first then tail-calls the mesh entry')
+check(rel_target(0x1103DCE, 6) == 0x110400D and rel_target(0x1103E1B, 6) == 0x1103FFD,
+      'render palette: a shadow-rejected or empty mesh list branches beyond all draws')
 umbra_path = os.path.join(os.path.dirname(path), 'umbra_sandlot.dll')
 if os.path.isfile(umbra_path):
     umbra = pefile.PE(umbra_path)
