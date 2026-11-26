@@ -953,6 +953,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(Cfg().enabled)Guarded(kStepPayload,&SeatTurretsInput,static_cast<unsigned char*>(vehicle));
     // The player driver's War Thunder gears on the keyboard (drivegear.cpp): the stock input reads the gear's stick, the
     // seat gets the keys' own back at the end of this traversal.
+    if(Cfg().enabled && Cfg().testDriveCycle)TestDriveInput(static_cast<unsigned char*>(vehicle));   // tests only, before the gears
     DriveGearInput gears(static_cast<unsigned char*>(vehicle));
     // A fixed emplacement never drives: its drive stick cleared last, over every writer before (emplacement.cpp).
     if(Cfg().enabled)Guarded(kStepEmplacement,&EmplacementInput,static_cast<unsigned char*>(vehicle));

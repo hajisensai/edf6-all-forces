@@ -41,6 +41,7 @@ constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=soundp
 constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
 constexpr float kJetSize=15.0f;   // m: a fighter's length, how wide it is heard near (surround.h SpreadAt)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
+constexpr float kBurnerShare=0.5f;               // an NPC jet's burner: this share of the way from cruise to attack
 constexpr float kJetTop=245.0f;                  // m/s: the fastest attack speed (jet.cpp kKinds' interceptor), a
                                                  // jet of no record's (another player's) top: its speed_relative
 constexpr float kParked=3.0f;                    // m/s: another player's jet slower than this stands
@@ -190,7 +191,10 @@ void Step(unsigned char* v) noexcept {
             state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
             if(state.rotor)state.throttle=j->m.power;   // its engine (Hover): hovering, climbing, braking
             top=kind.attack>1.0f ? kind.attack : kJetTop;
-            burner=!state.rotor && state.speed>=top-5.0f;   // ours: at its attack speed, the burner lit
+            // Ours: past halfway from its cruise to its attack speed it is pushing for the attack, the burner lit. Its
+            // thrust only closes on the attack speed (gravity and its turns on top), so it never quite reaches it: a live
+            // run's fighters peaked at 229 of their 235 m/s, never within the 5 m/s this was once, and never lit it.
+            burner=!state.rotor && state.speed>=kind.cruise+(kind.attack-kind.cruise)*kBurnerShare;
         }
     }
     state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;
