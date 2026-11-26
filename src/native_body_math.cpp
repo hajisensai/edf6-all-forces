@@ -7,11 +7,20 @@
 namespace crew {
 namespace {
 constexpr unsigned kTransformBox=0x652F0,kBoxArguments=0x109BFD,kBoxCall=0x109C09,kSignMask=0x1C36A90;
-constexpr unsigned kBasis=0x511C0,kAttachedBasisCall=0x6ED9EB;
+constexpr unsigned kBasis=0x511C0;
 constexpr unsigned char kBoxSig[]={0x48,0x83,0xEC,0x18,0xF3,0x0F,0x10,0x1D,0x94,0x17,0xBD,0x01};
 constexpr unsigned char kBoxArgumentsSig[]={0x48,0x8D,0x53,0x20,0x4C,0x8D,0x43,0x60,0x48,0x8D,0x4B,0x40};
 constexpr unsigned char kBasisSig[]={0x48,0x8B,0xC4,0x53,0x48,0x81,0xEC,0xD0,0x00,0x00,0x00};
-constexpr unsigned char kAttachedBasisCallSig[]={0xE8,0xD0,0x37,0x96,0xFF};
+struct BasisCall {
+    unsigned arguments,call;
+    unsigned char argumentSig[5],callSig[5];
+};
+// Each mode builds its own 4x4 scratch matrix and normalizes it before passing it to a different consumer.
+constexpr BasisCall kAttachedBasisCalls[]={
+    {0x6ED902,0x6ED9EB,{0x48,0x8D,0x4C,0x24,0x20},{0xE8,0xD0,0x37,0x96,0xFF}},
+    {0x6EDB05,0x6EDBF4,{0x48,0x8D,0x4C,0x24,0x60},{0xE8,0xC7,0x35,0x96,0xFF}},
+};
+static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+1==kNativeBodyMathSites);
 
 inline __m128 XyzMask() noexcept { return _mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1)); }
 
@@ -87,10 +96,12 @@ unsigned InstallNativeBodyMath() noexcept {
         edf::RedirectCall(image+kBoxCall,image+kTransformBox,reinterpret_cast<void*>(&TransformBox),changed);
         installed+=changed;
     }
-    if(edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)) &&
-       edf::Matches(image,kAttachedBasisCall,kAttachedBasisCallSig,sizeof(kAttachedBasisCallSig))) {
+    if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
+    for(const auto& site:kAttachedBasisCalls) {
+        if(!edf::Matches(image,site.arguments,site.argumentSig,sizeof(site.argumentSig)) ||
+           !edf::Matches(image,site.call,site.callSig,sizeof(site.callSig)))continue;
         bool changed=false;
-        edf::RedirectCall(image+kAttachedBasisCall,image+kBasis,reinterpret_cast<void*>(&NormalizeAttachedBasis),changed);
+        edf::RedirectCall(image+site.call,image+kBasis,reinterpret_cast<void*>(&NormalizeAttachedBasis),changed);
         installed+=changed;
     }
     return installed;

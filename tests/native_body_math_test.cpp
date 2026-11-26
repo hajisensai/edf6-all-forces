@@ -52,12 +52,13 @@ int main(int argc,char** argv) {
     image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
-    if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || InstallNativeBodyMath()!=2) {
+    if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || InstallNativeBodyMath()!=kNativeBodyMathSites) {
         std::puts("FAIL: native attachment math call sites or signatures do not match");
         return 1;
     }
     const auto oldBox=reinterpret_cast<BoxFn>(image+kTransformBox),newBox=Redirected<BoxFn>(kBoxCall);
-    const auto oldBasis=reinterpret_cast<BasisFn>(image+kBasis),newBasis=Redirected<BasisFn>(kAttachedBasisCall);
+    const auto oldBasis=reinterpret_cast<BasisFn>(image+kBasis);
+    const BasisFn newBases[]={Redirected<BasisFn>(0x6ED9EB),Redirected<BasisFn>(0x6EDBF4)};
     std::mt19937 rng(20261126);
     std::uniform_real_distribution<float> number(-32.0f,32.0f);
     std::array<Matrix,64> matrices{};
@@ -81,11 +82,14 @@ int main(int argc,char** argv) {
         if(std::memcmp(&expectedBox,&actualBox,sizeof(Box))!=0) {
             std::printf("FAIL: transformed box case %d\n",i);return 1;
         }
-        auto expectedBasis=matrix,actualBasis=matrix;
+        auto expectedBasis=matrix;
         oldBasis(expectedBasis.data);
-        newBasis(actualBasis.data);
-        if(std::memcmp(&expectedBasis,&actualBasis,sizeof(Matrix))!=0) {
-            std::printf("FAIL: normalized basis case %d\n",i);return 1;
+        for(const auto newBasis:newBases) {
+            auto actualBasis=matrix;
+            newBasis(actualBasis.data);
+            if(std::memcmp(&expectedBasis,&actualBasis,sizeof(Matrix))!=0) {
+                std::printf("FAIL: normalized basis case %d\n",i);return 1;
+            }
         }
         if(i%8==7) {
             const auto slot=static_cast<std::size_t>(i/8)%matrices.size();
@@ -100,7 +104,7 @@ int main(int argc,char** argv) {
     Bench("box transforms",[&](unsigned i){oldBox(a.data,boxes[i].data,matrices[i].data);},
           [&](unsigned i){newBox(b.data,boxes[i].data,matrices[i].data);});
     Bench("basis normalizations",[&](unsigned i){oldBasis(oldMatrices[i].data);},
-          [&](unsigned i){newBasis(newMatrices[i].data);});
+          [&](unsigned i){newBases[1](newMatrices[i].data);});
     if(std::memcmp(&a,&b,sizeof(Box))!=0 || std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
     }
