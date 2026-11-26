@@ -75,7 +75,7 @@ constexpr float kCoastDrag=0.004f;       // of its speed a frame after burnout (
 constexpr float kMinSpeed=1.0f;          // m a frame: no slower (it falls out of the sky as its life ends)
 constexpr float kFuseShare=0.6f,kFuseLeast=4.0f;   // m
 constexpr float kG=9.8f;
-constexpr float kDrop=5.0f*kG;   // m/s^2 off the rail before ignition: about a metre in 0.2 s, plain to see
+constexpr float kDrop=5.0f*kG;   // m/s^2 off the rail before ignition: rounds.h kRailDrop (the predictor's; its test asserts they agree)
 constexpr float kJumpM=20.0f;          // a lock point moving more in a frame went to another target
 
 // Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
