@@ -3,6 +3,7 @@
 #pragma once
 #include "fp_view.h"
 #include "cockpit_fields.inc"
+#include <cwchar>
 
 namespace crew {
 namespace instruments {
@@ -44,6 +45,41 @@ constexpr bool BootShown(float t,int step,int kind) noexcept {
 static_assert(BootShown(0.0f,0,0) && !BootShown(0.0f,0,1),"the boot begins dark");
 static_assert(!BootShown(kBootEnd,kBootSteps-1,0) && !BootShown(kBootEnd,kBootSteps-1,1),"the boot is over by kBootEnd");
 static_assert(kBootScreens<BootStepAt(0)-kBootGlow,"the screens light before the first tile");
+
+// A panoramic pod keeps the vehicle's arms in its rider's view (the user, 2026-11-26: 「看不到机甲的手臂，不知道攻击打到
+//哪里」): the bones of an arm chain are not folded with the hull. Balam's (jowan / kawan the upper / fore arm, hand,
+// fing* its claw) and the smaller mechs' (Begaruta, Nix: jowan / kawan / weapon_hand / weapon_lowerArm /
+// weapon_upperArm; the old robot: arm / arm_slide and the weapon_ ones). Not the shoulder armour (shoulderArmor*,
+// kata_): it stands beside the eye.
+inline bool PanoramicArm(const wchar_t* name) noexcept {
+    if(!name)return false;
+    static constexpr const wchar_t* kArm[]={L"jowan_",L"kawan_",L"hand_",L"fing",L"arm_",L"weapon_hand_",
+                                            L"weapon_lowerArm_",L"weapon_upperArm_"};
+    for(const wchar_t* a:kArm)if(std::wcsncmp(name,a,std::wcslen(a))==0)return true;
+    return false;
+}
+
+// The seat's two control sticks (pylib/cockpit_kits_mech.py _sticks): bone vc_i_<seat>_<i>_j_<hand>_<degrees>_0 at
+// a stick's foot (rows: x the eye's left, y up the shaft, z ahead), hand 0 the left stick (the seat's left stick: the
+// move), 1 the right (its right stick: the aim). `x` right positive and `y` forward negative (the seat block's,
+// seat+0x2C0 / +0x2C4, +0x2D0 / +0x2D4, each -1..1): the stick leans ahead by -y and to the right by x, `degrees` at
+// full throw.
+inline fpview::M4 StickPose(const fpview::M4& original,float x,float y,int degrees) noexcept {
+    const float most=static_cast<float>(degrees)*0.01745329252f;
+    const float ahead=-fpview::Clamp(std::isfinite(y) ? y : 0.0f,-1.0f,1.0f)*most;
+    const float right=fpview::Clamp(std::isfinite(x) ? x : 0.0f,-1.0f,1.0f)*most;
+    const float ax[3]={1,0,0},az[3]={0,0,1};
+    // Row vectors: the foot's frame turned about its x (the tip toward +z), then its z (the tip toward -x: right).
+    return fpview::Mul(fpview::Mul(fpview::Rotation(ax,std::cos(ahead),std::sin(ahead)),
+                                   fpview::Rotation(az,std::cos(right),std::sin(right))),original);
+}
+// A stick's lean follows its input over kStickLag seconds (a mouse's right stick is one frame's move: it would twitch).
+constexpr float kStickLag=0.08f;
+inline float StickFollow(float now,float want,float dt) noexcept {
+    if(!std::isfinite(want))want=0.0f;
+    if(!std::isfinite(now) || !(dt>0.0f))return std::isfinite(now) ? now : 0.0f;
+    return now+(want-now)*(1.0f-std::exp(-dt/kStickLag));
+}
 
 // One weapon of the seat, for the weapons screen: its round class (hud_cue.h CockpitRound), rounds, magazine fill (< 0
 // no magazine read), loading (< 0 not loading: hud_cue.h CellLoad) and whether it is spent for good (no rounds, no

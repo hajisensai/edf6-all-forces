@@ -669,7 +669,34 @@ void GunCamera() {
            "a closed cockpit's gunner and a flown craft's pilot keep the bone's frame even with a turning gun");
 }
 
+// The panoramic pod's control sticks and kept arms (src/cockpit_instruments.h StickPose, StickFollow, PanoramicArm).
+void Sticks() {
+    using namespace crew::instruments;
+    const M4 foot=Translate(1.0f,2.0f,3.0f);
+    float tip[3];
+    auto top=[&](const M4& m){const float p[3]={0,0.2f,0};Point(m,p,tip);};
+    top(StickPose(foot,0.0f,0.0f,18));
+    Expect(Near(tip[0],1.0f) && Near(tip[1],2.2f) && Near(tip[2],3.0f),"a stick let go stands upright",tip[0],tip[2]);
+    top(StickPose(foot,0.0f,-1.0f,18));
+    Expect(tip[2]>3.05f && Near(tip[0],1.0f),"pushed forward (y -1) it leans ahead",tip[2]);
+    top(StickPose(foot,1.0f,0.0f,18));
+    Expect(tip[0]<0.95f && Near(tip[2],3.0f),"pushed right (x +1) it leans to the eye's right (-x)",tip[0]);
+    top(StickPose(foot,5.0f,0.0f,18));
+    const float clamped=tip[0];
+    top(StickPose(foot,1.0f,0.0f,18));
+    Expect(Near(clamped,tip[0]),"its throw is clamped at full",clamped,tip[0]);
+    float v=0.0f;
+    for(int i=0;i<60;++i)v=StickFollow(v,1.0f,1.0f/60.0f);
+    Expect(v>0.99f,"a held stick is followed within a second",v);
+    Expect(Near(StickFollow(0.3f,1.0f,0.0f),0.3f),"no time, no move");
+    Expect(PanoramicArm(L"kawan_l") && PanoramicArm(L"fingOutA1_r") && PanoramicArm(L"weapon_lowerArm_l") &&
+           PanoramicArm(L"arm_slide_r"),"the arm chains are kept");
+    Expect(!PanoramicArm(L"mune") && !PanoramicArm(L"shoulderArmor_l") && !PanoramicArm(L"kata_l") &&
+           !PanoramicArm(L"vc_pan_0") && !PanoramicArm(nullptr),"the hull and the shoulder armour fold");
+}
+
 int main() {
+    Sticks();
     CameraOwnership();
     GunCamera();
     OrientationAndSteadiness();
