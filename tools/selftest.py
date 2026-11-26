@@ -393,8 +393,10 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     muzzles = vc.hardpoint_muzzles(game)
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
+    import salvo_model   # the salvo's TU-1600: made from the model pack's folder (pylib/salvo_model.py), where it is there
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
-              for f in vc.HARDPOINT_FILES if f not in {vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}}
+              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE
+              and (f != vc.SALVO_MODEL or salvo_model.model_dir() is not None)}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():

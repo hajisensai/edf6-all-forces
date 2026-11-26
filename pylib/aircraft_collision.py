@@ -41,9 +41,12 @@ DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES
 C130_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.C130_FILES}
 # ...and the support's air carrier (pylib/helicarrier_model.py): tools/make_helicarrier.py writes it the same way.
 HELICARRIER_FILES = {jet_models.HELICARRIER_FILE: jet_models.HELICARRIER_FILE.replace('.MRAB', '_AIRFRAME.SHKT')}
-# Every airframe made from the model pack by a tool of its own (not tools/make_jets.py's FILES): its SGO's body is its
-# ragdoll's mesh compound (vcobjects.AIRFRAME_MEMBER).
-PACK_FILES = {**DN_FILES, **C130_FILES, **HELICARRIER_FILES}
+# ...and the salvo interceptor's TU-1600 (pylib/salvo_model.py): tools/make_jets.py writes it next to the model, only when
+# the model folder is there (not in its FILES, which it always writes).
+SALVO_FILES = {jet_models.SALVO_FILE: jet_models.SALVO_FILE.replace('.MRAB', '_AIRFRAME.SHKT')}
+# Every airframe made from the model pack (not tools/make_jets.py's FILES): its SGO's body is its ragdoll's mesh compound
+# (vcobjects.AIRFRAME_MEMBER).
+PACK_FILES = {**DN_FILES, **C130_FILES, **HELICARRIER_FILES, **SALVO_FILES}
 # The 500 m dreadnought's own grid (tools/make_dreadnought.py, tools/prep_dreadnought.py: its markers stand on and clear
 # these cells): a cell is its column's highest point, and at 24 x 32 (9.5 by 15.6 m) 39.5% of its hull's area had its
 # collision more than 1.5 m over the drawn deck (3.1 m on average, 57 m at the worst, by a 96 x 128 grid of the

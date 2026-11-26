@@ -47,6 +47,7 @@ from dataclasses import dataclass
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import cockpits  # noqa: E402
+from i18n import tr  # noqa: E402
 import jet_models  # noqa: E402
 import mdb_jet  # noqa: E402
 import ledger  # noqa: E402
@@ -307,8 +308,7 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{TRANSPORT_HELI_MODEL_FILE}'] = heli_transport_model(game)
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
-    import salvo_model
-    out[f'OBJECT/{vc.SALVO_MODEL}'] = salvo_model.build(game, out[f'OBJECT/{salvo_model.BASE_ARCHIVE}'])
+    skip = salvo_files(game, out)
     for model, name in jet_models.ANIMATIONS.items():
         out[f'OBJECT/{name}'] = jet_models.animation(game, model)
     # (each model's nozzle bones, the flames' and the arrival smoke's, are checked on its exits by jet_models.build / elevon_archive)
@@ -317,6 +317,8 @@ def build(root: str) -> dict[str, bytes]:
     primer_fighter_model.check(arc)
     out[f'OBJECT/{vc.JETS["edf6tr_jet_primer_fighter_mission"].file}'] = arc
     for name, jet in FILES.items():
+        if name in skip:
+            continue
         data = vc.jet_sgo(game, jet, MODEL)
         if vc.JETS[jet].mark == GUNSHIP_MARK:   # the requested gunship: the gunner seat the NPC gunship has
             data = with_gunner_seat(data, game.read('OBJECT', GUNNER_STOCK))
@@ -404,12 +406,34 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
     return vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid, airborne=True)
 
 
+def salvo_files(game, out: dict[str, bytes]) -> set[str]:  # noqa: ANN001 - rootcpk.Game
+    """The salvo interceptor's TU-1600 (pylib/salvo_model.py, made from the model pack's folder) and its collision, measured
+    off it as built (pylib/aircraft_collision.py SALVO_FILES), into `out`; the files of FILES not to write: without the
+    model folder its SGO (that call then does not deploy: src/jet_internal.h Body::salvoInterceptor's SGO is not there)."""
+    import aircraft_collision
+    import salvo_model
+    if salvo_model.model_dir() is None:
+        print(tr(f'未找到天顶截击机模型（{salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型'
+                 '目录）：天顶截击机的呼叫不会出动。放好模型包后重新安装即可。',
+                 f'The salvo interceptor model was not found ({salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}; the '
+                 'environment variable EDF6VC_MODELS can name the model folder): the salvo interceptor call will not '
+                 'deploy. Put the model pack in place and install again.'))
+        return {vc.SALVO_OBJECT}
+    arc, _info, md = salvo_model.build_archive(game)
+    out[f'OBJECT/{vc.SALVO_MODEL}'] = arc
+    jet_models._MODELS_MADE[(id(game), vc.SALVO_MODEL)] = md   # what jet_sgo measures (model_box, _model_of): this one
+    out[f'OBJECT/{aircraft_collision.SALVO_FILES[vc.SALVO_MODEL]}'] = aircraft_collision.airframe(
+        game, md, jet_models.model_box(game, vc.SALVO_MODEL)[0])
+    return set()
+
+
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, MODEL_FILE, *MODEL_FILES,
                vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE, vc.SALVO_MODEL,
-               *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *jet_models.ANIMATIONS.values()]
+               *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *aircraft_collision.SALVO_FILES.values(),
+               *jet_models.ANIMATIONS.values()]
     return texshare.names([f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)])
 
 
