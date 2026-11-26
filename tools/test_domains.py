@@ -54,7 +54,7 @@ FULL = (
     'cmake/', 'build.cmd', '.github/', '.gitattributes', '.gitignore',
     'tools/check.py', 'tools/test_domains.py', 'tools/msvc-x64-env.cmd',
     # the test runners and how they find the game: every test runs through them
-    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py',
+    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py', 'pylib/testpool.py',
 )
 # The CMake files cmake_effects reads; outside FULL (a line it cannot place runs everything).
 CMAKE_FILES = ('CMakeLists.txt', 'autoturret/CMakeLists.txt', 'common/CMakeLists.txt')

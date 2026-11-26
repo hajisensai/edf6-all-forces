@@ -16196,13 +16196,15 @@ def installer_speaks_english() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Every test, in -j worker processes (each a fresh interpreter: what one test leaves in a module's state stays in
-    its worker, as it stayed in the one process before). The tests share no file outside their own temporary folders.
-    Took ~21 min in one process (2026-10-25)."""
+    its worker, as it stayed in the one process before), each test in one of the machine's core slots
+    (pylib/checklock.py core, pylib/testpool.py: with a check or another selftest running, they share the cores test
+    by test). The tests share no file outside their own temporary folders. Took ~21 min in one process (2026-10-25)."""
     argv = sys.argv[1:] if argv is None else argv
-    import checklock   # below normal and one full check on the machine at a time (pylib/checklock.py)
+    import checklock   # below normal, the machine's core slots (pylib/checklock.py)
     import heartbeat   # a line every few minutes for whoever watches the run (pylib/heartbeat.py): a test can be silent for long
     checklock.below_normal()
-    with checklock.held(f'tools/selftest.py ({os.path.basename(ROOT)})'),             heartbeat.beating('selftest.py', lambda: f'{_reported[0]}/{len(TESTS)} done'):
+    with checklock.running(f'tools/selftest.py ({os.path.basename(ROOT)})'), \
+            heartbeat.beating('selftest.py', lambda: f'{_reported[0]}/{len(TESTS)} done'):
         return _main(argv)
 
 
@@ -16211,43 +16213,44 @@ _reported = [0]   # the tests reported so far (_main's report): the heartbeat's 
 
 def _main(argv: list[str]) -> int:
     import time
+    import checklock
+    import testpool
     jobs = _jobs(argv)
     costs = _costs()
     chosen = range(len(TESTS))
-    if '--skip' in argv:   # tools/check.py: the tests no change selects (tools/test_domains.py), one name a line;
-        # a test the list does not name (a new one) runs
+    if '--skip' in argv:   # the tests not to run, one name a line; a test the list does not name (a new one) runs
         with open(argv[argv.index('--skip') + 1], encoding='utf-8') as f:
             skip = {line.strip() for line in f if line.strip()}
         chosen = [i for i in range(len(TESTS)) if TESTS[i].__name__ not in skip]
-    order = sorted(chosen, key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
     failed = 0
     took: dict[str, float] = {}
     started = time.perf_counter()
 
-    def report(index: int, ok: bool, sec: float, text: str) -> None:
+    def report(name: str, ok: bool, sec: float, text: str) -> None:
         nonlocal failed
-        name = TESTS[index].__name__
         took[name] = round(sec, 2)
         _reported[0] += 1
         sys.stdout.write(text)
         print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
         failed += 0 if ok else 1
     if jobs == 1:
-        for i in chosen:
-            report(*_run_one(i))
+        with checklock.core():
+            for i in chosen:
+                _, ok, sec, text = _run_one(i)
+                report(TESTS[i].__name__, ok, sec, text)
     else:
-        import multiprocessing
-        # One BLAS thread a worker: -j processes each starting one a core oversubscribe the machine.
-        for var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
-            os.environ.setdefault(var, '1')
-        with multiprocessing.get_context('spawn').Pool(jobs) as pool:
-            for result in pool.imap_unordered(_run_one, order, chunksize=1):
-                report(*result)
+        workers = testpool.SelftestWorkers(jobs)
+        try:
+            pool = [workers.job(TESTS[i].__name__, costs.get(TESTS[i].__name__, testpool.UNKNOWN_COST)) for i in chosen]
+            testpool.schedule(pool, jobs, None,
+                              lambda j, r: report(j.name, r.status == testpool.PASSED, r.seconds, r.text))
+        finally:
+            workers.close()
     if os.path.isdir(os.path.dirname(COST_FILE)):
         with contextlib.suppress(OSError):
             with open(COST_FILE, 'w', encoding='utf-8') as f:
                 json.dump({**costs, **took}, f, indent=0, sort_keys=True)
-    print(f'{len(order) - failed}/{len(order)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
+    print(f'{len(chosen) - failed}/{len(chosen)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
     return 1 if failed else 0
 
 

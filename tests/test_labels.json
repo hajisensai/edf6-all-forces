@@ -5703,6 +5703,36 @@
     "tests/testhub_dump_source_test.py"
    ]
   },
+  "testpool": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tests/testpool_test.py",
+    "tools/selftest.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
   "texshare": {
    "labels": [
     "autoturret-tools",

@@ -278,31 +278,116 @@ class OnTheBuild(unittest.TestCase):
 
 
 class Slot(unittest.TestCase):
-    def test_tests_are_chosen_after_the_check_slot_is_held_and_the_build(self) -> None:
-        import contextlib
-        import check
-        order: list[str] = []
-
-        @contextlib.contextmanager
-        def held(_who: str):
-            order.append('held')
-            yield
-
-        saved = check.checklock.held
-        check.checklock.held = held
-        try:
-            with tempfile.TemporaryDirectory() as root:
-                with checklock.worktree_once(root):   # the worktree's own slot chooses nothing
-                    self.assertEqual(order, [])
-            with check.slot() as waited:
-                self.assertEqual(order, ['held'])
-                self.assertGreaterEqual(waited, 0)
-        finally:
-            check.checklock.held = saved
+    def test_the_build_holds_a_build_slot_and_the_tests_are_chosen_after_it(self) -> None:
+        """2026-11-26 「特别是并发」: the build in one of the machine's build slots, not a slot the tests wait on too; the
+        tests chosen once the build is done (the code and the build they run), and run in the shared core slots."""
         with open(os.path.join(ROOT, 'tools', 'check.py'), encoding='utf-8') as f:
             body = f.read().split('def _main(', 1)[1]
-        self.assertLess(body.index('with slot() as waited'), body.index("results['build'] = run("))
+        self.assertLess(body.index('with checklock.build_slot('), body.index("results['build'] = run("))
         self.assertLess(body.index("results['build'] = run("), body.index('sel = plan(argv)'))
+        self.assertLess(body.index('sel = plan(argv)'), body.index('with checklock.running('))
+        self.assertNotIn('checklock.held', body)
+
+
+class MachineSlots(unittest.TestCase):
+    """pylib/checklock.py Slots: the machine's build and core slots, across processes."""
+
+    HOLD = ('import sys, time\n'
+            f'sys.path.insert(0, {os.path.join(ROOT, "pylib")!r})\n'
+            'import checklock\n'
+            's = checklock.Slots(sys.argv[1], int(sys.argv[2]))\n'
+            'i = s.take()\n'
+            'print(i, flush=True)\n'
+            'sys.stdin.readline()\n'   # held till told
+            'if sys.argv[3] == "give":\n'
+            '    s.give(i)\n'
+            '    print("given", flush=True)\n'
+            '    sys.stdin.readline()\n')
+
+    def holder(self, name: str, n: int, end: str = 'give') -> subprocess.Popen:
+        p = subprocess.Popen([sys.executable, '-c', self.HOLD, name, str(n), end], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdin.close(), p.stdout.close()))
+        return p
+
+    def test_n_slots_hold_n_and_a_dead_holders_slot_is_free_again(self) -> None:
+        name = f'test-{os.getpid()}'
+        a, b = self.holder(name, 2), self.holder(name, 2, 'die')
+        self.assertEqual({a.stdout.readline().strip(), b.stdout.readline().strip()}, {'0', '1'})
+        s = checklock.Slots(name, 2)
+        self.assertIsNone(s.take(0.2), 'a third took one of two held slots')
+        self.assertEqual(s.free(), 0)
+        b.kill()   # killed holding it: the system lets go of it
+        b.wait()
+        got = s.take(10)
+        self.assertIsNotNone(got)
+        a.stdin.write('\n')
+        a.stdin.flush()
+        self.assertEqual(a.stdout.readline().strip(), 'given')
+        import threading
+        seen: list[int] = []
+        t = threading.Thread(target=lambda: seen.append(checklock.Slots(name, 2).free()))   # another thread: ours is held
+        t.start()
+        t.join()
+        self.assertEqual(seen, [1])   # a's given back
+        s.give(got)
+        self.assertEqual(s.free(), 2)
+
+    def test_a_waiter_wakes_when_a_slot_is_let_go(self) -> None:
+        import time
+        name = f'test-wake-{os.getpid()}'
+        a = self.holder(name, 1)
+        self.assertEqual(a.stdout.readline().strip(), '0')
+        s = checklock.Slots(name, 1)
+        import threading
+        took: list[float] = []
+
+        def wait() -> None:
+            i = s.take(30)
+            took.append(time.monotonic())
+            s.give(i)
+        t = threading.Thread(target=wait)
+        t.start()
+        time.sleep(0.3)
+        self.assertEqual(took, [])
+        let_go = time.monotonic()
+        a.stdin.write('\n')
+        a.stdin.flush()
+        t.join(30)
+        self.assertEqual(len(took), 1)
+        self.assertLess(took[0] - let_go, 1.5, 'the waiter did not wake when the slot was let go')
+
+    def test_started_by_a_run_waits_for_no_slot(self) -> None:
+        saved = os.environ.get(checklock.HELD)
+        try:
+            os.environ[checklock.HELD] = str(os.getpid())   # this process's own run: it waits like anyone
+            self.assertFalse(checklock._inside())
+            os.environ[checklock.HELD] = str(os.getpid() + 1)   # a run that started this process
+            self.assertTrue(checklock._inside())
+            with checklock.build_slot('test') as waited:
+                self.assertEqual(waited, 0.0)
+        finally:
+            if saved is None:
+                os.environ.pop(checklock.HELD, None)
+            else:
+                os.environ[checklock.HELD] = saved
+
+
+class PoolLog(unittest.TestCase):
+    def test_the_pools_lines_read_as_ctests(self) -> None:
+        """pylib/testpool.py writes check-ctest.log in ctest's words: check.py and heartbeat read it as before."""
+        import check
+        import heartbeat
+        import testpool
+        j = testpool.Job('cockpit_build_0', 'ctest', 1, lambda: ('', ''), index=12)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, 'check-ctest.log')
+            with open(log, 'w', encoding='utf-8') as f:
+                f.write(testpool.ctest_line(1, 3, j, testpool.Result(testpool.PASSED, 1.5, '')))
+                f.write(testpool.ctest_line(2, 3, testpool.Job('b', 'ctest', 1, lambda: ('', ''), index=2),
+                                            testpool.Result(testpool.SKIPPED, 0.1, '')))
+            self.assertEqual(check.ctest_outcomes(log), {'cockpit_build_0': 'Passed', 'b': 'Skipped'})
+            self.assertEqual(heartbeat.parts_progress({}, {'ctest': log}), 'ctest 2/3')
 
 
 class WorktreeOnce(unittest.TestCase):
