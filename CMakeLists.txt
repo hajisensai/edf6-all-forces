@@ -1079,7 +1079,7 @@ add_test(NAME hangar_recover COMMAND hangar_recover_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 # In COCKPIT_BUILD_SHARDS parts run side by side (its units: tests/cockpit_build_test.py units; all in one run took ~15 min).
-set(COCKPIT_BUILD_SHARDS 8)
+set(COCKPIT_BUILD_SHARDS 20)
 math(EXPR _cockpit_last "${COCKPIT_BUILD_SHARDS} - 1")
 foreach(_shard RANGE ${_cockpit_last})
   add_test(NAME cockpit_build_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_build_test.py"
@@ -2679,7 +2679,7 @@ add_test(NAME level_list COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/te
 add_test(NAME model_lod COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_lod.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
 # Its kinds in WT_TRACKED_SHARDS parts run side by side (EDF6_TEST_SHARD; all in one run took ~11 min).
-set(WT_TRACKED_SHARDS 4)
+set(WT_TRACKED_SHARDS 8)
 math(EXPR _wt_last "${WT_TRACKED_SHARDS} - 1")
 foreach(_shard RANGE ${_wt_last})
   add_test(NAME wt_tracked_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")

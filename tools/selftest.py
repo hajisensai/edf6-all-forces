@@ -3399,7 +3399,7 @@ def spawn_catalog_rows_check_their_files() -> None:
     assert 'static_assert(FilesAgree(),' in src('src/debug_spawn.h')
 
 
-SPAWN_CATALOG_SHARDS = 4
+SPAWN_CATALOG_SHARDS = 8
 
 
 def spawn_catalog_archives(shard: int) -> None:

@@ -453,6 +453,176 @@
     "tests/cockpit_build_test.py"
    ]
   },
+  "cockpit_build_10": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_11": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_12": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_13": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_14": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_15": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_16": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_17": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_18": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_19": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
   "cockpit_build_2": {
    "labels": [
     "autoturret-tools",
@@ -539,6 +709,40 @@
    ]
   },
   "cockpit_build_7": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_8": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_9": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -6474,6 +6678,74 @@
    ]
   },
   "wt_tracked_3": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_4": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_5": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_6": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_7": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -13906,6 +14178,110 @@
    ]
   },
   "spawn_catalog_archives_recorded_3": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
+   ]
+  },
+  "spawn_catalog_archives_recorded_4": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
+   ]
+  },
+  "spawn_catalog_archives_recorded_5": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
+   ]
+  },
+  "spawn_catalog_archives_recorded_6": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "SPAWN_CATALOG_SHARDS",
+    "_spawn_catalog_shard",
+    "os",
+    "spawn_catalog_archives",
+    "sys"
+   ]
+  },
+  "spawn_catalog_archives_recorded_7": {
    "labels": [
     "autoturret-tools",
     "cockpit",
