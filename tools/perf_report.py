@@ -413,6 +413,21 @@ def read_frame_split(log: str, window: tuple[float, float]) -> dict[str, float]:
     return out
 
 
+HAVOK_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF HAVOK build (\d+) calls ([\d.]+) ms total max '
+                        r'([\d.]+) ms, finish (\d+) calls ([\d.]+) ms total max ([\d.]+) ms')
+
+
+def read_havok(log: str, window: tuple[float, float]) -> dict[str, tuple[int, float, float]]:
+    """Direct task graph timings: per phase (calls, mean ms, max ms), including the caller's waits."""
+    rows = _rows(log, HAVOK_TIME, window)
+    out = {}
+    for name, i in (('build', 4), ('finish', 7)):
+        calls = sum(int(m[i]) for m in rows)
+        if calls:
+            out[name] = (calls, sum(float(m[i + 1]) for m in rows) / calls, max(float(m[i + 2]) for m in rows))
+    return out
+
+
 def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
     """The PERF RENDER rows in `window`: means weighted by presents, worsts the max. {} without them."""
     rows = _rows(log, RENDER, window)
@@ -911,6 +926,11 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'there): {split["without steps"]:.2f} ms: the floor of a frame that steps nothing, n = 0 (cpu-11), '
                 f'at most {1000 / split["without steps"]:.0f} frames a second on this thread alone.'
                 if split['without steps'] else '']
+    havok = read_havok(log, cw)
+    if havok:
+        out += ['', '## Havok task graphs (direct timing, including waits)', '']
+        out += [f'- {phase}: {count} calls, {mean:.2f} ms/call (worst {worst:.2f})'
+                for phase, (count, mean, worst) in havok.items()]
     render = read_render(log, cw)
     if render:
         sub = ' / '.join(f'{v:.0f}' for v in render['submits'])

@@ -39,7 +39,8 @@ def call(at: int, target: int) -> None:
 checked = 0
 for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPresentCall', 'kPresentCmd'),
                      ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
-                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette')):
+                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'),
+                     ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish')):
     call(value(site), value(target))
     checked += 1
 for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh')):

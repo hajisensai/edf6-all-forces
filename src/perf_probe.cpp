@@ -25,6 +25,9 @@ constexpr unsigned kPresentCall=0x11A309B,kPresentCmd=0x111D890;
 constexpr unsigned kUpdateCall=0x705715,kUpdate=0x1198DA0;
 constexpr unsigned kDrawCall=0x1198FA4,kDraw=0x11978D0;
 constexpr unsigned kResolveCall=0x11B6B1D,kResolve=0x12D6110;
+// The two consecutive hknpWorld task graphs under 0x11AD780, including their game-thread waits.
+constexpr unsigned kHavokBuildCall=0x11AD814,kHavokBuild=0xDAF820;
+constexpr unsigned kHavokFinishCall=0x11AD827,kHavokFinish=0xDAFA30;
 // The draw submits (system, object, pass in r8d) of the scene's lists, and the mesh draws.
 constexpr unsigned kSubmitCalls[]={0x11E255C,0x11E25F9,0x11E3A3F,0x11E4029,0x11E40BC};
 constexpr unsigned kSubmit=0x11E1630;
@@ -53,6 +56,8 @@ using SubmitFn=void(__fastcall*)(void*,void*,int);
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
 using PresentFn=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
 using QueryFn=bool(__fastcall*)(void*,void*,void*,void*,std::uint8_t);
+using HavokBuildFn=void(__fastcall*)(void*,void*,void*);
+using HavokFinishFn=void(__fastcall*)(void*,void*);
 
 InputFn nextInput=nullptr;
 UpdateFn nextUpdate=nullptr;
@@ -63,13 +68,39 @@ MeshFn nextMesh[std::size(kMeshCalls)]={};
 PresentFn nextPresent=nullptr;
 QueryFn nextQuery=nullptr;
 PassFn nextPalette=nullptr;
+HavokBuildFn nextHavokBuild=nullptr;
+HavokFinishFn nextHavokFinish=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
 std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 bool anchored=false;                // the frame anchor chained
+bool havokTiming=false;
 
 double tickMs=0.0;   // ms a QPC tick
 LONGLONG Qpc() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
+
+struct HavokPart {
+    unsigned calls=0;
+    LONGLONG ticks=0,worst=0;
+    void Add(LONGLONG start) noexcept {
+        const LONGLONG elapsed=Qpc()-start;
+        ++calls;ticks+=elapsed;
+        if(elapsed>worst)worst=elapsed;
+    }
+};
+HavokPart havokBuild,havokFinish;
+
+void __fastcall HavokBuildHook(void* world,void* step,void* queue) {
+    const LONGLONG start=Qpc();
+    nextHavokBuild(world,step,queue);
+    havokBuild.Add(start);
+}
+
+void __fastcall HavokFinishHook(void* world,void* queue) {
+    const LONGLONG start=Qpc();
+    nextHavokFinish(world,queue);
+    havokFinish.Add(start);
+}
 
 // Points the call at `rva` to `hook` over whatever it calls now: the stock function, or another hook's near thunk
 // (common/memory.cpp AllocateNearThunk: mov rax,imm64; jmp rax) that ends in it. `*next` gets that target first.
@@ -346,6 +377,10 @@ void Install() noexcept {
     const bool query=Chain(kQueryCall,kQuery,reinterpret_cast<void*>(&QueryHook),reinterpret_cast<void**>(&nextQuery));
     const bool palette=Chain(kPaletteCall,kPalette,reinterpret_cast<void*>(&PaletteHook),reinterpret_cast<void**>(&nextPalette));
     Log("HOOK perf queries=%d palettes=%d (PerfProbe=1: the occlusion query reads, the skin palettes)",query,palette);
+    const bool build=Chain(kHavokBuildCall,kHavokBuild,reinterpret_cast<void*>(&HavokBuildHook),reinterpret_cast<void**>(&nextHavokBuild));
+    const bool finish=Chain(kHavokFinishCall,kHavokFinish,reinterpret_cast<void*>(&HavokFinishHook),reinterpret_cast<void**>(&nextHavokFinish));
+    havokTiming=build && finish;
+    Log("HOOK perf Havok build=%d finish=%d",build,finish);
 }
 
 bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
@@ -369,6 +404,12 @@ void Report(unsigned frames) noexcept {
             parts.present/n,parts.tail/n,parts.without/n);
     }
     parts=Split{};
+    if(havokTiming && havokBuild.calls && havokFinish.calls) {
+        Log("PERF HAVOK build %u calls %.3f ms total max %.3f ms, finish %u calls %.3f ms total max %.3f ms",
+            havokBuild.calls,static_cast<double>(havokBuild.ticks)*tickMs,static_cast<double>(havokBuild.worst)*tickMs,
+            havokFinish.calls,static_cast<double>(havokFinish.ticks)*tickMs,static_cast<double>(havokFinish.worst)*tickMs);
+    }
+    havokBuild={};havokFinish={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);
     const double pt=static_cast<double>(presentTicks.exchange(0,std::memory_order_relaxed))*tickMs;
