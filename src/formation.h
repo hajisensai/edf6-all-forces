@@ -152,6 +152,147 @@ inline bool GiveUp(Progress& p,float dist,std::uint64_t ms) noexcept {
     return false;
 }
 
+// --- Keeping up with the player (2026-11-26, the player: 「可以抄一下这个跟随的好的地方」, a follower mod's design, not its
+// code). What the march adds round its slots (npcai.cpp FormationMove):
+//  - the anchor's motion (Observe): its level velocity, sampled every kSampleMs and blended; a jump (a warp, boarding)
+//    past kJumpSpeed or a gap of over a second starts it over at rest;
+//  - the slots round where the anchor will be (Lead): kLeadSec of its velocity ahead, at most kLeadMost m, a quarter of
+//    that at a walk (kWalkSpeed and under), so they do not trail their slots by the walk's own lag;
+//  - the slot eased (Ease): it moves at most kGoalRate m/s plus kGoalCatch times the anchor's speed, so a heading that
+//    turns about swings the slots round instead of sending every soldier across at once; past kGoalSnap m it jumps;
+//  - the route's goal re-sent only once it moved kRegoal m and kRegoalMs went by since the last (at once past
+//    kRegoalFar): the route is not asked for again every frame the slot moves a little (the stop-start dashes);
+//  - the walk's least stick (EaseLeast): the anchor's speed's share of a full walk, more the farther behind it is, so a
+//    soldier keeps pace with a walking player instead of easing in to a stop behind its slot every few metres;
+//  - resting (Resting / Scatter): the anchor kept within kStillRadius m for kStillMs, the soldiers spread round it,
+//    the front left open (its line of fire); it moves off, they take their slots again;
+//  - stranded (Stranded / InView / RegroupAt): a soldier more than NpcRegroupRange m off for kStrandMs, out of the
+//    player's view, fighting nothing, under no order, is put down behind the player out of view (the caller warps it).
+constexpr float kLeadSec=0.6f,kLeadMost=6.0f,kWalkSpeed=4.0f,kWalkLead=0.25f;
+constexpr float kJumpSpeed=60.0f,kVelBlend=0.3f;
+constexpr std::uint64_t kSampleMs=50,kSampleGap=1000;
+constexpr float kGoalRate=6.0f,kGoalCatch=1.5f,kGoalSnap=30.0f;
+constexpr float kRegoal=1.5f,kRegoalFar=6.0f;
+constexpr std::uint64_t kRegoalMs=500;
+constexpr float kFullWalk=6.0f,kCatchFrom=3.0f,kCatchBand=6.0f,kEaseFloor=0.3f;
+constexpr float kStillRadius=2.0f;
+constexpr std::uint64_t kStillMs=5000;
+constexpr float kOpenFront=1.0471976f;     // rad either side of the heading left open while resting (60 degrees)
+constexpr std::uint64_t kStrandMs=3000;
+constexpr float kViewCos=0.42f;            // cos 65 degrees off the camera's centre: wider than its half view
+constexpr float kRegroupBack=15.0f;        // m behind the anchor a stranded soldier is put down (and spacing a place)
+
+inline float Level2(const float* a,const float* b) noexcept {
+    const float dx=a[0]-b[0],dz=a[2]-b[2];
+    return std::sqrt(dx*dx+dz*dz);
+}
+
+struct Motion { float last[3]; float vel[2]; std::uint64_t at; bool set; };
+inline void Observe(Motion& m,const float* at,std::uint64_t ms) noexcept {
+    if(!m.set || ms<m.at){m=Motion{{at[0],at[1],at[2]},{0.0f,0.0f},ms,true};return;}
+    const std::uint64_t dt=ms-m.at;
+    if(dt<kSampleMs)return;
+    const float s=static_cast<float>(dt)*0.001f;
+    const float vx=(at[0]-m.last[0])/s,vz=(at[2]-m.last[2])/s;
+    if(dt>kSampleGap || !std::isfinite(vx) || !std::isfinite(vz) || vx*vx+vz*vz>kJumpSpeed*kJumpSpeed){m.vel[0]=m.vel[1]=0.0f;}
+    else{m.vel[0]+=(vx-m.vel[0])*kVelBlend;m.vel[1]+=(vz-m.vel[1])*kVelBlend;}
+    m.last[0]=at[0];m.last[1]=at[1];m.last[2]=at[2];m.at=ms;
+}
+inline float SpeedOf(const Motion& m) noexcept { return m.set ? std::sqrt(m.vel[0]*m.vel[0]+m.vel[1]*m.vel[1]) : 0.0f; }
+inline void Lead(const Motion& m,const float* at,float* out) noexcept {
+    const float v=SpeedOf(m);
+    float dx=0.0f,dz=0.0f;
+    if(v>1e-3f) {
+        const float ahead=v*kLeadSec*(v<=kWalkSpeed ? kWalkLead : 1.0f);
+        const float l=ahead<kLeadMost ? ahead : kLeadMost;
+        dx=m.vel[0]/v*l;dz=m.vel[1]/v*l;
+    }
+    out[0]=at[0]+dx;out[1]=at[1];out[2]=at[2]+dz;
+}
+
+struct Goal { float at[3]; std::uint64_t ms; bool set; };
+inline void Ease(Goal& g,const float* target,float anchorSpeed,std::uint64_t ms) noexcept {
+    const float d=g.set ? Level2(g.at,target) : 0.0f;
+    if(!g.set || ms<g.ms || ms-g.ms>kSampleGap || !(d<=kGoalSnap)) {
+        g.at[0]=target[0];g.at[1]=target[1];g.at[2]=target[2];g.ms=ms;g.set=true;
+        return;
+    }
+    const float step=(kGoalRate+kGoalCatch*(anchorSpeed>0.0f ? anchorSpeed : 0.0f))*static_cast<float>(ms-g.ms)*0.001f;
+    const float t=d>step ? step/d : 1.0f;
+    g.at[0]+=(target[0]-g.at[0])*t;g.at[2]+=(target[2]-g.at[2])*t;g.at[1]=target[1];
+    g.ms=ms;
+}
+
+struct Sent { float at[3]; std::uint64_t ms; bool set; };
+inline bool Resend(Sent& s,const float* goal,std::uint64_t ms) noexcept {
+    const float d=s.set ? Level2(s.at,goal) : 0.0f;
+    if(s.set && ms>=s.ms && !(d>=kRegoalFar) && !(d>=kRegoal && ms-s.ms>=kRegoalMs))return false;
+    s.at[0]=goal[0];s.at[1]=goal[1];s.at[2]=goal[2];s.ms=ms;s.set=true;
+    return true;
+}
+
+inline float EaseLeast(float anchorSpeed,float dist) noexcept {
+    const float v=kEaseFloor+(anchorSpeed>0.0f ? anchorSpeed/kFullWalk : 0.0f)+(dist>kCatchFrom ? (dist-kCatchFrom)/kCatchBand : 0.0f);
+    return v<kEaseFloor ? kEaseFloor : v>1.0f ? 1.0f : v;
+}
+
+struct Rest { float at[3]; std::uint64_t since; bool set; };
+inline bool Resting(Rest& r,const float* anchor,std::uint64_t ms) noexcept {
+    if(!r.set || ms<r.since || !(Level2(anchor,r.at)<=kStillRadius)) {
+        r.at[0]=anchor[0];r.at[1]=anchor[1];r.at[2]=anchor[2];r.since=ms;r.set=true;
+        return false;
+    }
+    return ms-r.since>=kStillMs;
+}
+// Soldier k's place round a resting anchor (x right, z forward of its heading): rings `spacing` apart outwards, each
+// filled round the back, kOpenFront either side of the heading left open; at least `spacing` between neighbours.
+inline bool Scatter(int k,float spacing,float* x,float* z) noexcept {
+    if(k<0 || !(spacing>0.0f))return false;
+    const float arc=2.0f*3.14159265f-2.0f*kOpenFront;
+    int first=0;
+    for(int ring=0;;++ring) {
+        const float r=spacing*static_cast<float>(ring+1);
+        int room=static_cast<int>(arc*r/spacing);
+        if(room<1)room=1;
+        if(k<first+room) {
+            const float a=kOpenFront+arc*(static_cast<float>(k-first)+0.5f)/static_cast<float>(room);
+            *x=r*std::sin(a);*z=r*std::cos(a);
+            return true;
+        }
+        first+=room;
+    }
+}
+
+// Whether `at` is within the view round the camera at `eye` looking along unit `look` (cosHalf off its centre).
+inline bool InView(const float* eye,const float* look,const float* at,float cosHalf=kViewCos) noexcept {
+    const float d[3]={at[0]-eye[0],at[1]-eye[1],at[2]-eye[2]};
+    const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(l>1e-3f))return true;
+    return (d[0]*look[0]+d[1]*look[1]+d[2]*look[2])/l>=cosHalf;
+}
+// The stretch a soldier has been stranded (`out`: past the range, out of view, free): true once kStrandMs long.
+// A stretch not asked about for over kSampleGap (the soldier fought, dodged, fell back meanwhile) starts over.
+struct Strand { std::uint64_t since,last; };
+inline bool Stranded(Strand& s,bool out,std::uint64_t ms) noexcept {
+    const bool gap=!s.since || ms<s.since || ms<s.last || ms-s.last>kSampleGap;
+    s.last=ms;
+    if(!out){s.since=0;return false;}
+    if(gap){s.since=ms ? ms : 1;return false;}
+    return ms-s.since>=kStrandMs;
+}
+// Try `tryIndex` (0..2) of where stranded soldier k is put down: behind the anchor against the level look `look`
+// (x, z; unit), kRegroupBack m and `spacing` more a place (k % 4), straight back, then back left, back right.
+inline void RegroupAt(const float* anchor,const float* look,int k,float spacing,int tryIndex,float* out) noexcept {
+    const float back=kRegroupBack+spacing*static_cast<float>(k>0 ? k%4 : 0);
+    const float side=tryIndex==1 ? -1.0f : tryIndex==2 ? 1.0f : 0.0f;
+    const float right[2]={-look[1],look[0]};
+    out[0]=anchor[0]-look[0]*back+right[0]*side*back*0.6f;
+    out[1]=anchor[1];
+    out[2]=anchor[2]-look[1]*back+right[1]*side*back*0.6f;
+}
+// A soldier's own keeping up: its eased slot, the goal its route was last given, its stranded stretch.
+struct Keep { Goal goal; Sent sent; Strand strand; };
+
 static_assert(Next(Shape::stock,false)==Shape::column && Next(Shape::bounding,false)==Shape::stock,"the march cycle");
 static_assert(Next(Shape::stock,true)==Shape::perimeter && Next(Shape::wedge,true)==Shape::stock,"the guard cycle");
 static_assert(Next(Shape::perimeter,false)==Shape::stock && Next(Shape::column,true)==Shape::stock,"a shape of the other list starts over");
