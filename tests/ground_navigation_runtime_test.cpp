@@ -10,10 +10,10 @@
 #include <memory>
 #include <vector>
 namespace {
-ULONGLONG frame=100;int queries=0,floors=0,waters=0,walls=0,cases=0,failures=0;
+ULONGLONG frame=100;int queries=0,floors=0,waters=0,walls=0,mapRays=0,cases=0,failures=0;
 float floorHeight=0,surface=0;crew::Sea sea=crew::Sea::land;bool cornerWall=false;
 void Check(bool yes,const char* what){++cases;if(!yes){++failures;std::printf("FAIL %s\n",what);}}
-void Scene(float floor,crew::Sea water,float waterAt=0){++frame;queries=floors=waters=walls=0;floorHeight=floor;sea=water;surface=waterAt;cornerWall=false;}
+void Scene(float floor,crew::Sea water,float waterAt=0){++frame;queries=floors=waters=walls=mapRays=0;floorHeight=floor;sea=water;surface=waterAt;cornerWall=false;}
 void Next(){++frame;queries=0;}
 }
 namespace crew {
@@ -24,7 +24,7 @@ float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     hit[0]=a[0];hit[1]=floorHeight;hit[2]=a[2];return a[1]-floorHeight;
 }
 float MapRay(const float* a,const float* b,float*) noexcept {
-    ++queries;
+    ++queries;++mapRays;
     if(cornerWall)for(int i=0;i<=32;++i){
         const float t=static_cast<float>(i)/32.0f,x=a[0]+(b[0]-a[0])*t,z=a[2]+(b[2]-a[2])*t;
         if(x>3.3f && x<3.9f && z>1.0f && z<2.0f){++walls;return 0.5f;}
@@ -76,6 +76,30 @@ void GroundBatchScope() {
     floorHeight=-3; // Same frame and coordinates, changed world before another invocation.
     Check(crew::GroundNavigate(*s,from,from,0.1f,frame*16,next)==Result::blocked && floors>first,
           "a new invocation checks current geometry even in the same frame");
+}
+void BodyClearanceScope() {
+    struct Outcome { Result result;crew::GroundProbeStats stats;int worldRays; };
+    const float from[3]={0,0,0},goal[3]={2,0,0};
+    const auto run=[&](bool available,bool clear) {
+        auto s=std::make_unique<State>();
+        Scene(0,crew::Sea::land);
+        crew::TakeGroundProbeStats();
+        ground_ray_fixture::bodyAvailable=available;
+        ground_ray_fixture::bodyClear=clear;
+        float next[3]{};
+        const auto result=Advance(*s,from,goal,next);
+        ground_ray_fixture::bodyAvailable=false;
+        return Outcome{result,crew::TakeGroundProbeStats(),mapRays};
+    };
+    const auto old=run(false,false),fast=run(true,true),hit=run(true,false);
+    Check(old.result==Result::moving && fast.result==old.result && hit.result==old.result,
+          "ground-body clearance retains the same route result");
+    Check(fast.stats.bodyLists>0 && fast.stats.bodyRays==fast.stats.bodyClear &&
+          old.stats.clearance==fast.stats.clearance &&
+          old.worldRays-fast.worldRays==static_cast<int>(fast.stats.bodyClear) && fast.worldRays>0,
+          "a cached clear body skips only horizontal world rays and retains their logical budget");
+    Check(hit.stats.bodyRays>0 && hit.stats.bodyClear==0 && hit.worldRays==old.worldRays,
+          "a cached body hit still reaches the original world ray");
 }
 void Corners() {
     auto s=std::make_unique<State>();Profile vehicle{};vehicle.cell=4;vehicle.waypointRadius=1.5f;
@@ -364,4 +388,4 @@ void VehicleRoute() {
     Check(blind>0 && seeing*100>=blind*50,"the vehicles' unspent rays given back to the frame's shared budget");
 }
 }
-int main(){Water();GroundBatchScope();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+int main(){Water();GroundBatchScope();BodyClearanceScope();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

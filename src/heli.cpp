@@ -33,6 +33,7 @@
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
 #include "crew.h"
+#include "ground_body_rays.h"
 #include "map_floor.h"
 #include "body506.h"
 #include "heliaim.h"
@@ -4123,6 +4124,97 @@ void LearnMapNormals(const float* standing) noexcept {
 float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Floor(a,b,mapNormals,&FloorHit,hit);
 }
+namespace {
+constexpr std::size_t kWorldBodyBox=0xE4D480,kShapeRayResolved=0x11A77C0;
+constexpr std::size_t kSimdBroadPhase=0x1C21450,kGroupCollisionFilter=0x18BBFC0,kShapeTagCodec=0x1AE3388;
+constexpr std::size_t kBodyIdAllocator=0x1F826E0,kReleaseBodyIds=0x97B150;
+
+bool GroundBodyRayProfile() noexcept {
+    const auto exact=[](std::size_t first,std::size_t end,std::uint64_t expected) noexcept {
+        if(!Readable(image+first,end-first))return false;
+        std::uint64_t fingerprint=14695981039346656037ull;
+        for(auto i=first;i<end;++i)fingerprint=(fingerprint^image[i])*1099511628211ull;
+        return fingerprint==expected;
+    };
+    // The bodies query and the full ray must select the same broad-phase trees and body layers.
+    constexpr unsigned char allowTree[]{0xB0,0x01,0xC3};
+    constexpr unsigned char release[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x44,0x89,0x4C,0x24,0x20,0x44};
+    return Readable(image+kWorldVtbl,0x1B8) && At<const void*>(image+kWorldVtbl,0x188)==image+kWorldBodyBox &&
+        At<const void*>(image+kWorldVtbl,0x1B0)==image+0xE4D160 &&
+        Readable(image+kSimdBroadPhase,0xB8) && At<const void*>(image+kSimdBroadPhase,0x78)==image+0x16060A0 &&
+        At<const void*>(image+kSimdBroadPhase,0xB0)==image+0x16020B0 &&
+        Readable(image+kGroupCollisionFilter,0x40) && At<const void*>(image+kGroupCollisionFilter,0x30)==image+0xD93700 &&
+        At<const void*>(image+kGroupCollisionFilter,0x38)==image+0xD93770 &&
+        Matches(0xD93770,allowTree,sizeof(allowTree)) && Matches(kReleaseBodyIds,release,sizeof(release)) &&
+        exact(kWorldBodyBox,0xE4D5D0,0x943F82F7424EC158ull) &&
+        exact(0x16060A0,0x16062F9,0xEBBD70C42BECB389ull) &&
+        exact(kCastRay,0x11A7FF7,0x59A947B3B2974E9Full) &&
+        exact(0x16020B0,0x1602C88,0xC6D552FB2361FD4Full) &&
+        exact(0x1605DC0,0x1605EAD,0x3B228A7C11065113ull) &&
+        exact(0xD93700,0xD93770,0x32C306AEE29CBD97ull) &&
+        exact(kShapeRayResolved,0x11A7ABC,0x81C15323984D56BFull);
+}
+}
+
+bool GroundBodyRays::Capture(const float* lower,const float* upper) noexcept {
+    body=nullptr;
+    if(!rayOk || !bodyOk)return false;
+    for(int axis=0;axis<3;++axis)
+        if(!std::isfinite(lower[axis]) || !std::isfinite(upper[axis]) || lower[axis]>upper[axis])return false;
+    static const bool compatible=GroundBodyRayProfile();
+    if(!compatible)return false;
+    auto* const g=RayWorld();
+    if(!g)return false;
+    auto* const holder=At<unsigned char*>(g,0x68);
+    auto* const world=holder+0x20;
+    if(!Readable(world,0x958) || At<const void*>(world,0)!=image+kWorldVtbl)return false;
+
+    const auto* const broadPhase=At<const unsigned char*>(world,0x4C0);
+    const auto* const filter=At<const unsigned char*>(world,0x4B8);
+    const auto* const codec=At<const unsigned char*>(world,0x950);
+    const void* const dispatcher=At<const void*>(holder,0x520);
+    if(!dispatcher || !Readable(broadPhase,8) || At<const void*>(broadPhase,0)!=image+kSimdBroadPhase ||
+       !Readable(filter,8) || At<const void*>(filter,0)!=image+kGroupCollisionFilter ||
+       !Readable(codec,8) || At<const void*>(codec,0)!=image+kShapeTagCodec ||
+       !Readable(image+kBodyIdAllocator,sizeof(void*)))return false;
+    auto* const allocator=At<void*>(image,kBodyIdAllocator);
+    if(!allocator)return false;
+
+    struct alignas(16) BodyBox {
+        const void* codec;
+        const void* filter;
+        std::uint16_t material,reserved;
+        std::uint32_t layer;
+        std::uint64_t user;
+        std::uint8_t flags[16];
+        float lower[4],upper[4];
+    };
+    struct BodyIds { std::uint32_t* data;int count;std::uint32_t capacityAndFlags; };
+    static_assert(sizeof(BodyBox)==0x50 && offsetof(BodyBox,lower)==0x30 && sizeof(BodyIds)==0x10);
+    const BodyBox box{nullptr,filter,0xFFFF,0,kMapLayer,0,{1,0,0xFB},
+                      {lower[0],lower[1],lower[2],0},{upper[0],upper[1],upper[2],0}};
+    std::uint32_t storage[32];
+    BodyIds ids{storage,0,0x80000020u};
+    reinterpret_cast<void(*)(void*,const BodyBox*,BodyIds*)>(image+kWorldBodyBox)(world,&box,&ids);
+    const auto id=(ids.count==1 && ids.data) ? ids.data[0] : 0xFFFFFFu;
+    if(!(ids.capacityAndFlags&0x80000000u) && ids.data && ids.data!=storage)
+        reinterpret_cast<void(*)(void*,void*,int,int)>(image+kReleaseBodyIds)(
+            allocator,ids.data,4,static_cast<int>(ids.capacityAndFlags&0x3FFFFFFFu));
+    if(id==0xFFFFFFu || BodyKind(id)!=mapfloor::Body::fixed)return false;
+    const auto getBody=reinterpret_cast<const void*(*)(void*,std::uint32_t)>(image+kWorldGetBody);
+    body=getBody(world,id);
+    context={dispatcher,filter,codec};
+    return body!=nullptr;
+}
+
+bool GroundBodyRays::Unobstructed(const float* from,const float* to) const noexcept {
+    RayHits col=mapRayStart;
+    const RayInput in{{from[0],from[1],from[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
+    reinterpret_cast<void(*)(const Context*,void*,const RayInput*,const void* const*,int)>(image+kShapeRayResolved)(
+        &context,&col,&in,&body,1);
+    return At<std::int32_t>(col.raw,0x0C)==0;
+}
+
 unsigned char* GroundRayBatch::World() noexcept {
     if(!opened){world=RayWorld();opened=true;}
     return world;

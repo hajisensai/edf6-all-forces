@@ -981,6 +981,8 @@ void Report(unsigned frames) noexcept {
     if(Cfg().perfProbe && ground.floor)
         Log("PERF NAV RAYS %u batches, %u floor, %u clearance, %u water, %u dry",
             ground.batches,ground.floor,ground.clearance,ground.water,ground.dryWater);
+    if(Cfg().perfProbe && ground.bodyLists)
+        Log("PERF NAV BODY RAYS views=%u tested=%u clear=%u",ground.bodyLists,ground.bodyRays,ground.bodyClear);
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);

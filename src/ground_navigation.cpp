@@ -1,5 +1,6 @@
 #include "crew.h"
 #include "ground_navigation.h"
+#include "ground_body_rays.h"
 #include "heli.h"
 namespace crew {
 namespace {
@@ -67,10 +68,17 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
             if(sea==Sea::water && surface-hit[1]>profile.maxWaterDepth)return false;
             y=hit[1];return true;
         };
-        auto clear=[&](Point a0,Point b0) noexcept {
+        auto clear=[&](Point a0,Point b0,const GroundBodyRays* candidate=nullptr) noexcept {
             ++cast;
             ++probeStats.clearance;
             const float a1[3]={a0.x,a0.y,a0.z},b1[3]={b0.x,b0.y,b0.z};
+            if(candidate) {
+                ++probeStats.bodyRays;
+                if(candidate->Unobstructed(a1,b1)) {
+                    ++probeStats.bodyClear;
+                    return true;
+                }
+            }
             return rays.Clear(a1,b1);
         };
         auto body=[&](Point a0,Point b0) noexcept {
@@ -82,7 +90,34 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
                 return hull.clear(hull.object,a1,b1);
             });
         };
-        const bool walkable=WalkEdge(a,b,out,profile,ground,clear,body);
+        // The shared budget still charges the same logical probes in the same order.
+        GroundBodyRays candidates;
+        bool gathered=steps<4,ready=false;
+        float lower[3]{},upper[3]{};
+        const float ankle=profile.step+0.08f,waist=profile.height*0.65f;
+        const float lowHeight=(std::min)(ankle,(std::min)(waist,profile.height));
+        const float highHeight=(std::max)(ankle,(std::max)(waist,profile.height));
+        auto sweep=[&](Point prev,Point at,float rx,float rz) noexcept {
+            const float sideX=std::fabs(rx),sideZ=std::fabs(rz);
+            const float minY=(std::min)(prev.y,at.y)+lowHeight,maxY=(std::max)(prev.y,at.y)+highHeight;
+            if(!gathered) {
+                gathered=true;
+                // Bound the whole short edge in X/Z. Subsequent samples may leave its height band.
+                lower[0]=(std::min)(a.x,b.x)-sideX-0.005f;
+                upper[0]=(std::max)(a.x,b.x)+sideX+0.005f;
+                lower[2]=(std::min)(a.z,b.z)-sideZ-0.005f;
+                upper[2]=(std::max)(a.z,b.z)+sideZ+0.005f;
+                lower[1]=minY-0.125f;
+                upper[1]=maxY+0.125f;
+                ready=candidates.Capture(lower,upper);
+                if(ready)++probeStats.bodyLists;
+            }
+            const bool use=ready && minY>=lower[1] && maxY<=upper[1] &&
+                (std::min)(prev.x,at.x)-sideX>=lower[0] && (std::max)(prev.x,at.x)+sideX<=upper[0] &&
+                (std::min)(prev.z,at.z)-sideZ>=lower[2] && (std::max)(prev.z,at.z)+sideZ<=upper[2];
+            return [&,use](Point a0,Point b0) noexcept {return clear(a0,b0,use ? &candidates : nullptr);};
+        };
+        const bool walkable=WalkEdge(a,b,out,profile,ground,clear,body,sweep);
         queries+=(std::min)(cast,worst);
         return walkable ? Edge::open : waterUnknown ? Edge::pending : Edge::blocked;
     };
