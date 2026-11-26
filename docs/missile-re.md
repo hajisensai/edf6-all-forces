@@ -145,7 +145,7 @@ AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFire
 做不到的：
 
 - 发射节奏：一次扳机一帧最多出 FireCount 发，分配方式 0 时每发一个锁定（`docs/lockon-re.md` §3），256 发至少 256 帧 ≈ 4.3 s。要 2 s 内打完得 FireCount 2 + 128 个锁定（改 SALVO_ROUNDS、`kSalvoLockLimit`、`lockon.cpp` 分配、HUD、`SalvoLocked`），未做。
-- 弹体自发光：AmmoColor 只染尾焰和光焰，弹体模型的材质不受它影响；要发光得做一个带发光材质的导弹 RAB（安装管线），未做。
+- 弹体自发光（已由插件补上）：AmmoColor 只染尾焰和光焰，弹体模型的材质不受它影响。现在母弹 CP[16]、子弹 CP[13] 各带一条发光声明，插件在弹头处画加色光晕，模型不改（`docs/round-glow.md`）。
 - 母弹尾迹粗、子弹细：尾迹宽绑在 AmmoSize（也是模型尺寸）上，只能改模型大小，未改。
 
 ## 未实测
@@ -153,6 +153,6 @@ AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFire
 以上都是静态分析得出的结论，还没有进游戏验证。需要在游戏里确认：
 - 近炸引爆的爆炸特效是否正常播放（M）。
 - 锁定条目里的瞄准点是否每帧都会刷新（M）。
-- 齐射（MissileBullet02）：HDR 颜色的实际亮度和 256 条烟尾的性能；点火前 2 m 下坠看不看得出；±80° 离轴目标 PN 能否转过来；飞行中是否真的没有重力下沉（上面 M 的一条）。
+- 齐射（MissileBullet02）：HDR 颜色的实际亮度和 256 条烟尾的性能；弹体光晕的位置、亮度和联机远端是否也发光（`docs/round-glow.md` §待实机确认）；点火前 2 m 下坠看不看得出；±80° 离轴目标 PN 能否转过来；飞行中是否真的没有重力下沉（上面 M 的一条）。
 
 打开 debug 后，日志里会有 `MISSILE ... proximity fuse` 行。

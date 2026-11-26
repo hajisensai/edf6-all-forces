@@ -1,6 +1,7 @@
 #include "gpufx.h"
 #include "gpufx_batch.h"
 #include "gpufx_efs.h"
+#include "gpufx_glow.h"
 #include "gpufx_gpu.h"
 #include "gpufx_layers.h"
 #include "gpufx_sim.h"
@@ -76,6 +77,10 @@ std::vector<std::uint32_t> publishedIds;   // each one's spawn serial (the fill 
 // at 1080p); past it the biggest puffs are thinned to a stable subset drawn with its opacity raised.
 constexpr float kFillPixels=50.0e6f;
 std::vector<float> fillScratch;
+// The rounds' halos (gpufx_glow.h), published with the smoke, drawn under their own fill budget (about one 4K screen).
+std::vector<Instance> publishedGlow;
+std::vector<std::uint32_t> publishedGlowIds;
+constexpr float kGlowFillPixels=8.0e6f;
 std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false},optTrails{false};
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
@@ -111,6 +116,9 @@ ComPtr<ID3D11Texture2D> observedDepth;
 unsigned observedFormat=0;
 std::vector<Instance> renderOwn;
 std::vector<std::uint32_t> renderOwnIds;
+std::vector<Instance> renderGlow;
+std::vector<std::uint32_t> renderGlowIds;
+std::vector<float> glowScratch;
 unsigned lastTargetPixels=0;   // the last drawn view's viewport (the fill budget in screens)
 // The stock cards taken over in this view: their instances and one batch per stock draw (in the stock order).
 // The stock kinds (1..4) may draw up to 1 + Batch::kMore textures in one draw: an instance's slot in its `soft`.
@@ -1648,6 +1656,84 @@ void BenchTick(ULONGLONG now) noexcept {
     }
 }
 
+// ---- the rounds that glow (gpufx_glow.h, docs/round-glow.md) ----
+// Every live round is on the bullet system's list (blastsound.cpp Flyby: *(EDF+0x20B32F0), the sentinel node at +8,
+// each node {next, prev, core at +0x10}), the player's, the NPCs', the enemies' and a remote player's copies (replayed
+// through the same 0x696FD0, from the same SGO) alike. The round's class: its vtable at core-0x140; its
+// Ammo_CustomParameter: the core's copy at core+0xA58 (0x2307F0; the missiles' constructors read it there, 0x267AB6).
+constexpr unsigned kBulletSystem=0x20B32F0;
+constexpr std::size_t kSystemSentinel=8,kNodeCore=0x10,kBulletCore=0x140,kCoreCustom=0xA58,kCorePos=0xB80,kCoreVel=0xB90;
+constexpr int kMostWalked=4096;
+glow::Cache glowCache;
+struct GlowHit { const unsigned char* core; glow::Glow glow; };
+std::vector<GlowHit> glowHits;
+std::vector<Instance> glowStaging;
+std::vector<std::uint32_t> glowStagingIds;
+std::atomic<unsigned> glowSeen{0},glowKept{0};   // the last frame's glowing rounds and the halos made of them (probe)
+
+// The glowing rounds on the list now into `hits` (at most `most`): their core and their declaration.
+int WalkGlows(GlowHit* hits,int most,ULONGLONG now) noexcept {
+    int n=0;
+    __try {
+        const unsigned char* system=At<const unsigned char*>(image,kBulletSystem);
+        if(!system)return 0;
+        const unsigned char* const sentinel=At<const unsigned char*>(system,kSystemSentinel);
+        if(!sentinel)return 0;
+        int walked=0;
+        for(const unsigned char* node=At<const unsigned char*>(sentinel,0);node && node!=sentinel && walked<kMostWalked;
+            node=At<const unsigned char*>(node,0),++walked) {
+            const unsigned char* core=At<const unsigned char*>(node,kNodeCore);
+            if(!core)continue;
+            const auto vt=static_cast<unsigned>(At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image));
+            const int free=glow::FirstFree(vt);
+            if(free<0)continue;
+            const unsigned char* key=core+kCoreCustom;
+            const glow::Cache::Entry* e=glowCache.Find(key,now);
+            if(!e) {
+                double v[glow::kMostFields];int got=0;
+                const int count=CustomTail(key,free,v,glow::kMostFields,&got);
+                glow::Glow g{};
+                const bool ok=glow::CanDeclare(count,free) && glow::Parse(v,got,&g);
+                e=glowCache.Put(key,now,ok ? &g : nullptr);
+            }
+            if(!e->glows || n>=most)continue;
+            hits[n].core=core;hits[n].glow=e->glow;++n;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return n;
+}
+
+// A glowing round's position and velocity (m/s) now; false: not readable or not finite.
+bool GlowAt(const unsigned char* core,float* pos,float* vel) noexcept {
+    __try {
+        std::memcpy(pos,core+kCorePos,12);std::memcpy(vel,core+kCoreVel,12);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+    return std::isfinite(pos[0]+pos[1]+pos[2]);
+}
+
+// This frame's halos into glowStaging / glowStagingIds (their count).
+int BuildGlows(ULONGLONG now) {
+    if(glowHits.size()!=static_cast<std::size_t>(kMostWalked))glowHits.resize(kMostWalked);
+    if(glowStaging.size()!=static_cast<std::size_t>(glow::kMostGlows)) {
+        glowStaging.resize(glow::kMostGlows);glowStagingIds.resize(glow::kMostGlows);
+    }
+    const int hits=WalkGlows(glowHits.data(),kMostWalked,now);
+    const float share=glow::KeepShare(hits);
+    int n=0;
+    for(int i=0;i<hits && n<glow::kMostGlows;++i) {
+        const GlowHit& h=glowHits[static_cast<std::size_t>(i)];
+        const std::uint32_t id=glow::IdOf(reinterpret_cast<std::uintptr_t>(h.core));
+        float pos[3],vel[3];
+        if(!glow::Kept(id,share) || !GlowAt(h.core,pos,vel))continue;
+        glowStaging[static_cast<std::size_t>(n)]=glow::Make(h.glow,pos,vel,share);
+        glowStagingIds[static_cast<std::size_t>(n)]=id;
+        ++n;
+    }
+    glowSeen.store(static_cast<unsigned>(hits),std::memory_order_relaxed);
+    glowKept.store(static_cast<unsigned>(n),std::memory_order_relaxed);
+    return n;
+}
+
 void TickNative() noexcept {
     const ULONGLONG now=GameMs();
     const float dt=lastMs && now>lastMs ? (std::min)(0.1f,static_cast<float>(now-lastMs)*0.001f) : 0.0f;
@@ -1685,8 +1771,12 @@ void TickNative() noexcept {
     poolDropped.store(pool->Dropped(),std::memory_order_relaxed);
     std::vector<Instance> next(staging.begin(),staging.begin()+n);
     std::vector<std::uint32_t> nextIds(stagingIds.begin(),stagingIds.begin()+n);
+    const int glows=BuildGlows(now);
+    std::vector<Instance> nextGlow(glowStaging.begin(),glowStaging.begin()+glows);
+    std::vector<std::uint32_t> nextGlowIds(glowStagingIds.begin(),glowStagingIds.begin()+glows);
     AcquireSRWLockExclusive(&publishLock);
     published.swap(next);publishedIds.swap(nextIds);
+    publishedGlow.swap(nextGlow);publishedGlowIds.swap(nextGlowIds);
     ReleaseSRWLockExclusive(&publishLock);
 }
 
@@ -1830,7 +1920,9 @@ void Reset() noexcept {
     anchorReady.store(false,std::memory_order_release);
     AcquireSRWLockExclusive(&publishLock);
     published.clear();publishedIds.clear();
+    publishedGlow.clear();publishedGlowIds.clear();
     ReleaseSRWLockExclusive(&publishLock);
+    glowCache.Clear();
     probeReset.store(true,std::memory_order_release);
 }
 
@@ -1871,6 +1963,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         AcquireSRWLockShared(&publishLock);
         renderOwn.assign(published.begin(),published.end());
         renderOwnIds.assign(publishedIds.begin(),publishedIds.end());
+        renderGlow.assign(publishedGlow.begin(),publishedGlow.end());
+        renderGlowIds.assign(publishedGlowIds.begin(),publishedGlowIds.end());
         float anchorNow[3];std::memcpy(anchorNow,anchorShared,sizeof(anchorNow));
         ReleaseSRWLockShared(&publishLock);
         // The depth: what is bound at the world's end, else the scene depth seen in this view's opaque pass.
@@ -1915,6 +2009,19 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         }
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
+            batches.push_back(b);
+        }
+        // The rounds' halos: their own fill budget, one additive batch (Kind::glow draws its own falloff; the renderer
+        // still binds a texture: the flipbook, not sampled for it).
+        if(!renderGlow.empty() && renderGlowIds.size()==renderGlow.size()) {
+            const float screens=kGlowFillPixels/static_cast<float>(lastTargetPixels ? lastTargetPixels : 3840u*2160u);
+            const Thinned t=ThinToBudget(renderGlow.data(),renderGlowIds.data(),static_cast<int>(renderGlow.size()),vp.view,vp.proj,
+                                         vp.proj[11]<0.0f,screens,glowScratch);
+            renderGlow.resize(static_cast<std::size_t>(t.count));
+        }
+        if(!renderGlow.empty() && flipGiven) {
+            Batch b{};b.instances=renderGlow.data();b.count=static_cast<int>(renderGlow.size());
+            b.kind=Kind::glow;b.gridX=b.gridY=b.frames=1;b.sorted=false;
             batches.push_back(b);
         }
         // The records' payloads regrouped: instances, or a trail kind's quads.
@@ -1965,6 +2072,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d, trails %.3f %d",
             st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
             st.bucketMs[4],st.bucketDrawn[4],st.bucketMs[5],st.bucketDrawn[5]);
+        Log("GPUFX   round glows: %u glowing rounds, %u halos published, %d drawn this view (the stock-kinds bucket)",
+            glowSeen.load(std::memory_order_relaxed),glowKept.load(std::memory_order_relaxed),static_cast<int>(renderGlow.size()));
         {
             const double screen=st.viewport[2]>0.0f ? static_cast<double>(st.viewport[2])*st.viewport[3] : 3840.0*2160.0;
             Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f, trails %.2f",

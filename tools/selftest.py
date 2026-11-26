@@ -1500,7 +1500,7 @@ def store_looks() -> None:
         child_models = []
         if kind(name) == 'SALVO':
             cp = got['Ammo_CustomParameter']
-            assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 16 and cp[12][0] == 1
+            assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 17 and cp[12][0] == 1
             assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireBurstInterval'] == 1
             assert cp[15][2] == vc.SALVO_CHILDREN and cp[15][4] == 'MissileBullet01'
             near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b, strict=True))  # noqa: E731
@@ -1515,6 +1515,9 @@ def store_looks() -> None:
                         [vc.SALVO_CHILD_SPEED, vc.SALVO_CHILD_ACCEL, vc.SALVO_CHILD_TURN, vc.SALVO_CHILD_TOP,
                          vc.SALVO_CHILD_HOMING_DELAY]), name
             assert near(cp[15][12], vc.SALVO_CHILD_COLOUR) and near(child[10], vc.SALVO_CHILD_SPREAD), name
+            # The rounds' glow declarations (docs/round-glow.md): past every entry their class reads, the last entry.
+            assert near(cp[16], [vc.GLOW_MARK, *vc.SALVO_GLOW]), cp[16]
+            assert len(child) == 14 and child[12] == 0 and near(child[13], [vc.GLOW_MARK, *vc.SALVO_CHILD_GLOW]), child
             child_models = [cp[15][14]]
         assert was['resource'] == [was['AmmoModel'], *child_models], name
         assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path, *child_models], look.size), name
@@ -2091,6 +2094,23 @@ def sortie_copies_agree() -> None:
     assert vc.SALVO_CHILD_SPEED < vc.SALVO_CHILD_TOP, 'the children still accelerate'
     assert f'constexpr float kRainRoundSpeed={vc.SALVO_CHILD_SPEED * 60.0:.1f}f;' in plan, 'HoldFire flies the children'
     assert 'off>(salvo ? sortie::kRainFireCone : kMissileCone)' in combat
+    # The glow declaration's mark and the classes' first free indices agree with the plugin's reader (gpufx_glow.h).
+    glow = src('src/gpufx/gpufx_glow.h')
+    assert f'constexpr double kMark={vc.GLOW_MARK:.1f};' in glow and vc.GLOW_MARK not in (vc.MISSILE_MARK, vc.SALVO_MARK)
+    kinds = {'MissileBullet01': '0x17A1C10u', 'MissileBullet02': '0x17A1E28u'}
+    assert set(kinds) == set(vc.GLOW_FIRST_FREE)
+    assert 'constexpr Kind kKinds[]={' + ','.join(f'{{{kinds[k]},{vc.GLOW_FIRST_FREE[k]}}}' for k in kinds) + '};' in glow
+    for ammo_class, free in vc.GLOW_FIRST_FREE.items():
+        node = dsgo.Node([0.0] * (free - len(vc.GLOW_PAD.get(ammo_class, {}))))
+        vc.declare_glow(node, ammo_class, vc.SALVO_GLOW)
+        assert len(node.items) == free + 1 and node.items[free].items[0] == vc.GLOW_MARK, ammo_class
+    for bad in (('SolidBullet01', vc.SALVO_GLOW), ('MissileBullet02', (1.5, 1.0, 1.0, 1.0, 1.0)),
+                ('MissileBullet02', (1.0, 1.0, 1.0, 0.0, 1.0))):
+        try:
+            vc.declare_glow(dsgo.Node([0.0] * 16), *bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'declare_glow took {bad}')
     assert 'salvo ? sortie::kRainRoundSpeed : ' in combat and 'salvo ? 0.0f : ' in combat
     cmake = src('CMakeLists.txt')
     assert 'src/jet_sortie.cpp' in cmake and 'add_executable(sortie_check EXCLUDE_FROM_ALL tools/sortie_check.cpp)' in cmake

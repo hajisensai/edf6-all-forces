@@ -675,6 +675,10 @@ SALVO_CHILD_SPREAD = (0.9, 1.0)  # their CP[10]: top speed x U[0.9, 1], turn x U
 # it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b) (ctor 0x26BEA4): a white-hot head, a blue-white trail.
 SALVO_COLOUR = (3.0, 3.2, 4.0, 0.4)
 SALVO_CHILD_COLOUR = (2.5, 2.5, 3.0, 0.3)    # CP[15][12]: the children's AmmoColor
+# The rounds' own glow (docs/round-glow.md, drawn by the plugin): (r, g, b, intensity, size m). The carrier white-hot,
+# the children blue-white, the same hues as their trails; the round's model untouched.
+SALVO_GLOW = (1.0, 0.95, 0.9, 6.0, 1.6)
+SALVO_CHILD_GLOW = (0.8, 0.9, 1.0, 4.0, 0.9)
 STORES['SALVO'] = Store(
     'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
@@ -2445,6 +2449,32 @@ def coax_model(game: Game, name: str) -> bytes:
     return mdb.rab_write(rab)
 
 
+# A round's glow declaration (src/gpufx/gpufx_glow.h, docs/round-glow.md): one more Ammo_CustomParameter entry
+# [GLOW_MARK, r, g, b, intensity, size] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
+# stock never looks there). MissileBullet01's CP[12] is read only when present (a bool, 0 when absent): padded with 0.
+GLOW_MARK = 7146.0
+GLOW_FIRST_FREE = {'MissileBullet01': 13, 'MissileBullet02': 16}
+GLOW_PAD = {'MissileBullet01': {12: 0.0}}
+
+def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> None:
+    """Appends the glow declaration `glow` (r, g, b, intensity, size) to the Ammo_CustomParameter `cp` of a round of
+    `ammo_class`, padding it up to the class's first free index."""
+    free = GLOW_FIRST_FREE.get(ammo_class)
+    if free is None:
+        raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 读法未核实，不能声明发光')
+    r, g, b, intensity, size = glow
+    peak = max(r, g, b)
+    if min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0:
+        raise ValueError(f'发光声明越界: {glow}')
+    if len(cp.items) > free:
+        raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 已有 {len(cp.items)} 项，超过首个空闲位 {free}')
+    pad = GLOW_PAD.get(ammo_class, {})
+    while len(cp.items) < free:
+        if len(cp.items) not in pad:
+            raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 只有 {len(cp.items)} 项，缺原版读的参数')
+        cp.items.append(pad[len(cp.items)])
+    cp.items.append(dsgo.Node([GLOW_MARK, float(r), float(g), float(b), float(intensity), float(size)]))
+
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     missile = store.weapon
     doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
@@ -2488,6 +2518,7 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         child.items[4], child.items[5], child.items[6] = SALVO_CHILD_ACCEL, SALVO_CHILD_TURN, SALVO_CHILD_TOP
         child.items[8] = SALVO_CHILD_HOMING_DELAY
         child.items[10].items[:] = list(SALVO_CHILD_SPREAD)
+        declare_glow(child, split[3].items[4], SALVO_CHILD_GLOW)
         r.set('AmmoClass', 'MissileBullet02')
         r.set('AmmoGravityFactor', SALVO_DROP_GRAVITY)
         r.get('AmmoColor').items[:] = list(SALVO_COLOUR)
@@ -2495,6 +2526,7 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
         cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
+        declare_glow(cp, 'MissileBullet02', SALVO_GLOW)
         flash_host = dsgo.parse(game.read('WEAPON', JET_GUN_FILES['EDF6VC_JET_GUN_L.SGO'])).root
         flash = copy.deepcopy(flash_host.get('MuzzleFlash_CustomParameter'))
         if flash_host.get('MuzzleFlash') != 'MuzzleFlash02' or len(flash.items) != 10:

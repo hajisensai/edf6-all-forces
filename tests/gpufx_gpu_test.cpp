@@ -161,6 +161,31 @@ int main() {
         // The stock corner layout: half width size/sqrt2 = 2.12 m at 10 m -> 0.212 of the half screen = 10 px; 14 px out is clear.
         CHECK(centre(px,8)[0]>0.5f && centre(px,14)[0]==0.0f);
     }
+    // 4b. A round's halo (Kind::glow, gpufx_glow.h): no texture of its own, colour added with a (1 - r^2)^2 falloff,
+    // the target's alpha kept. Half width 3 m at 10 m, pulled 1.5 m nearer: about 17 px; the centre is the colour.
+    {
+        Instance halo=card;halo.color[0]=2.0f;halo.color[1]=1.0f;halo.color[2]=0.5f;halo.color[3]=1.0f;halo.soft=0.75f;
+        halo.frame=0.0f;halo.emissive=1.0f;
+        Batch b{};b.kind=Kind::glow;b.gridX=b.gridY=b.frames=1;b.instances=&halo;b.count=1;b.sorted=false;
+        rig.context->ClearRenderTargetView(rig.rtv.Get(),clear);
+        rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,1.0f,0);
+        bindNative();
+        CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,vp,&b,1,&st));
+        px=rig.Read();
+        std::printf("halo %.3f %.3f %.3f a=%.3f, 8 px out %.3f, 20 px out %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2],
+                    centre(px)[3],centre(px,8)[0],centre(px,20)[0]);
+        CHECK(std::fabs(centre(px)[0]-2.0f)<0.05f && std::fabs(centre(px)[1]-1.0f)<0.03f && std::fabs(centre(px)[2]-0.5f)<0.02f);
+        CHECK(std::fabs(centre(px)[3]-0.25f)<1e-3f);   // alpha untouched
+        CHECK(centre(px,8)[0]>0.6f && centre(px,8)[0]<1.8f);   // falling off
+        CHECK(centre(px,20)[0]==0.0f);
+        // Behind the scene (depth 0: everything in front of it): hidden.
+        rig.context->ClearRenderTargetView(rig.rtv.Get(),clear);
+        rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,0.0f,0);
+        bindNative();
+        CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,vp,&b,1,&st));
+        px=rig.Read();
+        CHECK(centre(px)[0]==0.0f);
+    }
     // 5. One stock draw of two textures (Batch::more): the instance's slot (its `soft`) picks the texture; slot 0 is
     // `texture`. White at the centre, green 4 m (19 px) to the right, both additive at colour 1.
     {

@@ -13951,10 +13951,12 @@
    "uses": [
     "ROOT",
     "calls",
+    "dsgo",
     "os",
     "re",
     "sortie_copies_agree",
-    "src"
+    "src",
+    "vc"
    ]
   },
   "sound_at_takes_a_still_sound": {
