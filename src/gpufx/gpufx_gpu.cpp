@@ -70,6 +70,7 @@ Texture2D<float4> Tex : register(t1);
 Texture2D<float4> TexMore[7] : register(t8);
 Texture2D<float> Depth : register(t2);
 SamplerState Linear : register(s0);
+SamplerState Wrap : register(s1);     // the stock efs sampler (linear, wrap: its first draw's PS s0)
 
 struct V {
     float4 pos : SV_Position;
@@ -243,7 +244,7 @@ float SceneDistance(float2 px) {
 // premultiplied (the stock SRC_ALPHA blends). Its depth test (LESS / LESS_EQUAL against the scene depth, no write)
 // against the depth copy.
 float4 EfsPs(V i) {
-    float4 t = Tex.Sample(Linear, i.uv.xy) * i.color;
+    float4 t = Tex.Sample(Wrap, i.uv.xy) * i.color;
     if (i.vpos.w > 0.5) {
         float scene = Depth.Load(int3(int2(i.pos.xy), 0));
         if (i.vpos.w > 1.5 ? !(i.pos.z <= scene) : !(i.pos.z < scene)) discard;
@@ -375,7 +376,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
     ComPtr<ID3D11DepthStencilState> noDepth;
     ComPtr<ID3D11RasterizerState> raster;
-    ComPtr<ID3D11SamplerState> sampler;
+    ComPtr<ID3D11SamplerState> sampler,samplerWrap;
     ComPtr<ID3D11Buffer> particles,frameCb,batchCb;
     ComPtr<ID3D11ShaderResourceView> particleView;
     ComPtr<ID3D11Texture2D> flip;
@@ -455,6 +456,7 @@ struct Renderer::Impl final {
         D3D11_SAMPLER_DESC s{};s.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=s.AddressV=s.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;s.MaxLOD=D3D11_FLOAT32_MAX;
         s.ComparisonFunc=D3D11_COMPARISON_NEVER;
+        D3D11_SAMPLER_DESC sw=s;sw.AddressU=sw.AddressV=sw.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
         D3D11_BUFFER_DESC pb{};pb.ByteWidth=static_cast<UINT>(sizeof(Instance))*kMaxInstances;pb.Usage=D3D11_USAGE_DYNAMIC;
         pb.BindFlags=D3D11_BIND_SHADER_RESOURCE;pb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         pb.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;pb.StructureByteStride=sizeof(Instance);
@@ -465,7 +467,7 @@ struct Renderer::Impl final {
            FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateBlendState(&be,&blendEfsAdd)) ||
            FAILED(device->CreateBlendState(&bs,&blendEfsSubtract)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
            FAILED(device->CreateRasterizerState(&r,&raster)) ||
-           FAILED(device->CreateSamplerState(&s,&sampler)) ||
+           FAILED(device->CreateSamplerState(&s,&sampler)) || FAILED(device->CreateSamplerState(&sw,&samplerWrap)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
            FAILED(device->CreateBuffer(&bb,nullptr,&batchCb)))return false;
         D3D11_SHADER_RESOURCE_VIEW_DESC pv{};pv.Format=DXGI_FORMAT_UNKNOWN;pv.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;
@@ -726,8 +728,8 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->VSSetShaderResources(0,1,&pv);
         ID3D11ShaderResourceView* dv=s.depthView.Get();
         context->PSSetShaderResources(2,1,&dv);
-        ID3D11SamplerState* sm=s.sampler.Get();
-        context->PSSetSamplers(0,1,&sm);
+        ID3D11SamplerState* sm[]={s.sampler.Get(),s.samplerWrap.Get()};
+        context->PSSetSamplers(0,2,sm);
         // The stock lighting, for the lit batches: borrowed buffers and views, bound read-only.
         const StockLights& L=view.lights;
         const bool litBound=L.Complete();

@@ -312,6 +312,12 @@ void LogBoundState(ID3D11DeviceContext* context) noexcept {
         Log("GPUFX native   blend en=%d src=%d dst=%d op=%d srcA=%d dstA=%d opA=%d mask=%X a2c=%d",r.BlendEnable,r.SrcBlend,
             r.DestBlend,r.BlendOp,r.SrcBlendAlpha,r.DestBlendAlpha,r.BlendOpAlpha,r.RenderTargetWriteMask,d.AlphaToCoverageEnable);
     } else Log("GPUFX native   blend default");
+    {
+        ID3D11SamplerState* sm=nullptr;context->PSGetSamplers(0,1,&sm);D3D11_SAMPLER_DESC smd{};if(sm){sm->GetDesc(&smd);sm->Release();}
+        ComPtr<ID3D11RasterizerState> rs;context->RSGetState(&rs);D3D11_RASTERIZER_DESC rd{};if(rs)rs->GetDesc(&rd);
+        Log("GPUFX native   ps s0 filter %d addr %d %d (%s) | cull %d",static_cast<int>(smd.Filter),static_cast<int>(smd.AddressU),
+            static_cast<int>(smd.AddressV),sm ? "bound" : "none",rs ? static_cast<int>(rd.CullMode) : -1);
+    }
     ComPtr<ID3D11DepthStencilState> ds;UINT ref=0;
     context->OMGetDepthStencilState(&ds,&ref);
     if(ds){D3D11_DEPTH_STENCIL_DESC d{};ds->GetDesc(&d);Log("GPUFX native   depth en=%d write=%d func=%d stencil=%d",d.DepthEnable,d.DepthWriteMask,d.DepthFunc,d.StencilEnable);}
