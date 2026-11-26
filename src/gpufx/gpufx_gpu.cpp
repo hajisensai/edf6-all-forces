@@ -374,7 +374,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
     ComPtr<ID3D11DepthStencilState> noDepth;
-    ComPtr<ID3D11RasterizerState> raster,rasterCut;
+    ComPtr<ID3D11RasterizerState> raster;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11Buffer> particles,frameCb,batchCb;
     ComPtr<ID3D11ShaderResourceView> particleView;
@@ -452,7 +452,6 @@ struct Renderer::Impl final {
         D3D11_DEPTH_STENCIL_DESC ds{};ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         ds.DepthFunc=D3D11_COMPARISON_ALWAYS;
         D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.CullMode=D3D11_CULL_NONE;r.DepthClipEnable=TRUE;
-        D3D11_RASTERIZER_DESC rc=r;rc.ScissorEnable=TRUE;
         D3D11_SAMPLER_DESC s{};s.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=s.AddressV=s.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;s.MaxLOD=D3D11_FLOAT32_MAX;
         s.ComparisonFunc=D3D11_COMPARISON_NEVER;
@@ -465,7 +464,7 @@ struct Renderer::Impl final {
         if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateBlendState(&ba,&blendStockAlpha)) ||
            FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateBlendState(&be,&blendEfsAdd)) ||
            FAILED(device->CreateBlendState(&bs,&blendEfsSubtract)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
-           FAILED(device->CreateRasterizerState(&r,&raster)) || FAILED(device->CreateRasterizerState(&rc,&rasterCut)) ||
+           FAILED(device->CreateRasterizerState(&r,&raster)) ||
            FAILED(device->CreateSamplerState(&s,&sampler)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
            FAILED(device->CreateBuffer(&bb,nullptr,&batchCb)))return false;
@@ -715,14 +714,8 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->OMSetRenderTargets(1,&target,nullptr);
         context->OMSetBlendState(s.blend.Get(),nullptr,0xFFFFFFFFu);
         context->OMSetDepthStencilState(s.noDepth.Get(),0);
-        context->RSSetState(view.half ? s.rasterCut.Get() : s.raster.Get());
+        context->RSSetState(s.raster.Get());
         context->RSSetViewports(1,&vp);
-        if(view.half) {
-            const LONG mid=static_cast<LONG>(vp.TopLeftX+vp.Width*0.5f);
-            const D3D11_RECT cut{view.half==1 ? mid : static_cast<LONG>(vp.TopLeftX),static_cast<LONG>(vp.TopLeftY),
-                                 view.half==1 ? static_cast<LONG>(vp.TopLeftX+vp.Width) : mid,static_cast<LONG>(vp.TopLeftY+vp.Height)};
-            context->RSSetScissorRects(1,&cut);
-        }
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         context->VSSetShader(s.vs.Get(),nullptr,0);
         context->PSSetShader(s.ps.Get(),nullptr,0);

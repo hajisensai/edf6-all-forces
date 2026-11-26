@@ -79,7 +79,7 @@ constexpr float kFillLeast=0.2f;
 std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false};
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
-std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right), 3 the wipe (below)
+std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
 std::atomic<bool> anchorReady{false};
 float anchorShared[3]{};   // under publishLock
 
@@ -152,7 +152,7 @@ struct Probe {
     ULONGLONG loggedAt=0;
     int nativeLogged=0;
     unsigned nativeCalls=0,nativeReplaced=0,nativeOutside=0,nativeRefused=0,byPass[8]{};
-    unsigned coreCalls=0,coreReplaced=0,refusedLit=0,refusedBlend=0,refusedGrid=0,stateLogged=0,wipeLogged=0;
+    unsigned coreCalls=0,coreReplaced=0,refusedLit=0,refusedBlend=0,refusedGrid=0,stateLogged=0;
     unsigned litReplaced=0,litSetB=0,litCaptures=0,litCaptureFailed=0;
     unsigned records=0,draws=0,views=0;   // per probe log: the stock draws' records and the draws they coalesced into
     unsigned kinds[8]{};                  // the records by kind
@@ -485,41 +485,6 @@ bool Split(const unsigned char* core,const NativeView& n,std::size_t start,int g
     return false;
 }
 
-// GpuFxNative=3, the wipe: every taken-over card drawn twice, the stock draw cut to the left half of its viewport and
-// ours to the right half: the same cards side by side at the centre line (a debug view: the cards' cost twice). 4: the
-// same mirrored (stock right, ours left), so an effect on one side of the centre is seen drawn both ways in two runs.
-bool Wipe(int mode) noexcept { return mode==3 || mode==4; }
-struct StockScissor {
-    ID3D11DeviceContext* context=nullptr;
-    ComPtr<ID3D11RasterizerState> saved,cut;
-    D3D11_RECT rects[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
-    UINT rectCount=0;
-    void Begin(ID3D11DeviceContext* c) noexcept {
-        if(!c)return;
-        D3D11_VIEWPORT v{};UINT nv=1;c->RSGetViewports(&nv,&v);
-        if(nv==0 || v.Width<2.0f)return;
-        ComPtr<ID3D11Device> device;c->GetDevice(&device);
-        c->RSGetState(&saved);
-        D3D11_RASTERIZER_DESC d{};
-        if(saved)saved->GetDesc(&d);
-        else{d.FillMode=D3D11_FILL_SOLID;d.CullMode=D3D11_CULL_BACK;d.DepthClipEnable=TRUE;}
-        d.ScissorEnable=TRUE;
-        if(!device || FAILED(device->CreateRasterizerState(&d,&cut))){saved.Reset();return;}
-        rectCount=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;c->RSGetScissorRects(&rectCount,rects);
-        const bool stockRight=optNative.load(std::memory_order_relaxed)==4;
-        const LONG mid=static_cast<LONG>(v.TopLeftX+v.Width*0.5f);
-        const D3D11_RECT half{stockRight ? mid : static_cast<LONG>(v.TopLeftX),static_cast<LONG>(v.TopLeftY),
-                              stockRight ? static_cast<LONG>(v.TopLeftX+v.Width) : mid,static_cast<LONG>(v.TopLeftY+v.Height)};
-        c->RSSetState(cut.Get());c->RSSetScissorRects(1,&half);
-        context=c;
-    }
-    void End() noexcept {
-        if(!context)return;
-        context->RSSetState(saved.Get());context->RSSetScissorRects(rectCount,rectCount ? rects : nullptr);
-        context=nullptr;saved.Reset();cut.Reset();rectCount=0;
-    }
-};
-
 enum class Source { render, core };
 // One stock particle draw: taken over (its snapshot copied into a batch, the stock draw skipped; true) or left to the
 // stock draw (false). Both the ParticleRender slot and the embedded core's own draw come here.
@@ -555,8 +520,7 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
                 ++probe.nativeReplaced;if(source==Source::core)++probe.coreReplaced;
                 if(n.lit){++probe.litReplaced;if(n.litSet==2)++probe.litSetB;}
             }
-            if(got>0)return Wipe(nativeMode) ? false : nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws
-                                                                                  // what is left; the wipe: all, cut)
+            if(got>0)return nativeMode==2 ? all : true;   // the stock draw skipped (split: it draws what is left)
         }
         ++probe.nativeRefused;
     } else if(wantNative && read && n.live && n.count>0) {
@@ -603,28 +567,7 @@ void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* vie
     const unsigned char* core=o+kCoreInRender;
     const float* world=reinterpret_cast<const float*>(o+kRenderWorld);
     if(view==currentView && TakeOver(core,world,native,Source::render,obj))return;
-    StockScissor wipe;
-    if(view==currentView && inWorld && Wipe(optNative.load(std::memory_order_relaxed)) && native && Readable(native,0x10))
-        wipe.Begin(At<ID3D11DeviceContext*>(native,8));
     stock(obj,native,pass,view);
-    if(wipe.context && optProbe.load(std::memory_order_relaxed) && probe.wipeLogged<40) {
-        ++probe.wipeLogged;
-        ID3D11DeviceContext* dc=wipe.context;
-        ComPtr<ID3D11RasterizerState> rs;dc->RSGetState(&rs);D3D11_RASTERIZER_DESC rd{};if(rs)rs->GetDesc(&rd);
-        D3D11_RECT rr[4]{};UINT nr=4;dc->RSGetScissorRects(&nr,rr);
-        D3D11_VIEWPORT v{};UINT nv=1;dc->RSGetViewports(&nv,&v);
-        ComPtr<ID3D11RenderTargetView> rtv[2];ComPtr<ID3D11DepthStencilView> dsv;dc->OMGetRenderTargets(2,rtv[0].GetAddressOf(),&dsv);
-        D3D11_TEXTURE2D_DESC td[2]{};
-        for(int i=0;i<2;++i)if(rtv[i]){ComPtr<ID3D11Resource> res;rtv[i]->GetResource(&res);ComPtr<ID3D11Texture2D> tx;if(SUCCEEDED(res.As(&tx)))tx->GetDesc(&td[i]);}
-        UINT vpCount=0;dc->RSGetViewports(&vpCount,nullptr);
-        ComPtr<ID3D11GeometryShader> gs;dc->GSGetShader(&gs,nullptr,nullptr);ComPtr<ID3D11HullShader> hs;dc->HSGetShader(&hs,nullptr,nullptr);
-        ComPtr<ID3D11UnorderedAccessView> uav;dc->OMGetRenderTargetsAndUnorderedAccessViews(0,nullptr,nullptr,1,1,&uav);
-        Log("GPUFX native wipe   viewports %u gs %p hs %p uav1 %p",vpCount,static_cast<void*>(gs.Get()),static_cast<void*>(hs.Get()),static_cast<void*>(uav.Get()));
-        Log("GPUFX native wipe after the stock draw: state %s (scissor %d) rects %u [%ld %ld %ld %ld] vp %.0f %.0f %.0fx%.0f rt0 %ux%u fmt %d rt1 %ux%u fmt %d dsv %d",
-            rs.Get()==wipe.cut.Get() ? "ours" : "the engine's",rd.ScissorEnable,nr,rr[0].left,rr[0].top,rr[0].right,rr[0].bottom,v.TopLeftX,v.TopLeftY,v.Width,v.Height,
-            td[0].Width,td[0].Height,static_cast<int>(td[0].Format),td[1].Width,td[1].Height,static_cast<int>(td[1].Format),dsv ? 1 : 0);
-    }
-    wipe.End();
     RestoreSplit();
     const bool logState=optProbe.load(std::memory_order_relaxed) && probe.stateLogged<24;
     if(logState)++probe.stateLogged;
@@ -635,11 +578,7 @@ void __fastcall CoreDrawHook(void* core,void* native,const float* world) {
     ++probe.coreCalls;
     const auto* c=static_cast<const unsigned char*>(core);
     if(TakeOver(c,world,native,Source::core,core))return;
-    StockScissor wipe;
-    if(inWorld && Wipe(optNative.load(std::memory_order_relaxed)) && native && Readable(native,0x10))
-        wipe.Begin(At<ID3D11DeviceContext*>(native,8));
     coreDrawNext(core,native,world);
-    wipe.End();
     RestoreSplit();
     AfterStock(c,world,native,false);
 }
@@ -701,7 +640,7 @@ int efsTextureChain=0;            // 1 T+0x10, 2 T+0x08, 3 T+0x10 -> +0x10: the 
 struct EfsProbe {
     unsigned calls=0,replaced=0,quads=0,outside=0,refusedRead=0,refusedLit=0,refusedSoft=0,refusedBlend=0,refusedDepth=0,
         refusedGeom=0,refusedTexture=0,refusedRoom=0,systemChanged=0,textureMismatch=0,splitStock=0;
-    int blendsLogged=0,drawsLogged=0,stateLogged=0,wipeLogged=0;
+    int blendsLogged=0,drawsLogged=0,stateLogged=0;
     void* shaders[8][2]{};
 };
 EfsProbe efsProbe;
@@ -821,7 +760,7 @@ void EfsReadGeometry(ID3D11DeviceContext* c) noexcept {
     }
 }
 
-// After a stock efs draw (not taken over, or the wipe's stock half): its system constants, texture chain and quad.
+// After a stock efs draw (not taken over): its system constants, texture chain and quad.
 void EfsAfterStock(ID3D11DeviceContext* c,const unsigned char* desc) noexcept {
     ComPtr<ID3D11Buffer> cb;c->VSGetConstantBuffers(0,1,&cb);
     if(cb && cb.Get()!=efsSystem.Get() && LitCapture::Bytes(cb.Get())>=608) {
@@ -977,23 +916,12 @@ bool EfsTakeOver(const unsigned char* ctx,const float* world,const unsigned char
 void __fastcall EfsQuadHook(void* self,void* ctx,const float* world,const unsigned char* desc) {
     ++efsProbe.calls;
     const int mode=optNative.load(std::memory_order_relaxed);
-    const bool want=optEfs.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed) && (mode==1 || mode==2 || Wipe(mode));
+    const bool want=optEfs.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed) && (mode==1 || mode==2);
     const auto* c=static_cast<const unsigned char*>(ctx);
     const bool taken=want && EfsTakeOver(c,world,desc);
-    if(taken && !Wipe(mode))return;
+    if(taken)return;
     ID3D11DeviceContext* dc=Readable(c,kCtxDevice+8) ? At<ID3D11DeviceContext*>(c,kCtxDevice) : nullptr;
-    StockScissor wipe;
-    if(taken)wipe.Begin(dc);
     efsDrawNext(self,ctx,world,desc);
-    if(taken && dc && optProbe.load(std::memory_order_relaxed) && efsProbe.wipeLogged<6) {
-        ++efsProbe.wipeLogged;
-        ComPtr<ID3D11RasterizerState> rs;dc->RSGetState(&rs);D3D11_RASTERIZER_DESC rd{};if(rs)rs->GetDesc(&rd);
-        D3D11_RECT rr[4]{};UINT nr=4;dc->RSGetScissorRects(&nr,rr);
-        D3D11_VIEWPORT v{};UINT nv=1;dc->RSGetViewports(&nv,&v);
-        Log("GPUFX efs wipe after the stock draw: state %s (scissor %d) rects %u [%ld %ld %ld %ld] vp %.0f %.0f %.0fx%.0f",
-            rs.Get()==wipe.cut.Get() ? "ours" : "the engine's",rd.ScissorEnable,nr,rr[0].left,rr[0].top,rr[0].right,rr[0].bottom,v.TopLeftX,v.TopLeftY,v.Width,v.Height);
-    }
-    wipe.End();
     if(inWorld && dc && want)EfsAfterStock(dc,desc);
 }
 
@@ -1457,7 +1385,6 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         vp.fadeMul=fade.mul;vp.fadeAdd=fade.add;
         vp.exposure=exposure;
         vp.lights=litCapture.Lights();
-        vp.half=optNative.load(std::memory_order_relaxed)==3 ? 1 : optNative.load(std::memory_order_relaxed)==4 ? 2 : 0;
         EfsReadGeometry(context);
         vp.efsSystem=efsSystem.Get();
         if(optProbe.load(std::memory_order_relaxed) && efsSysDumps>=1 && efsSysDumps<8 && efsProbe.replaced>0)EfsDumpSystem(context,efsSystem.Get(),"at world end");

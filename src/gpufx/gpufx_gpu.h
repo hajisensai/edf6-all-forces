@@ -80,7 +80,6 @@ struct ViewParams {
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
     ID3D11Buffer* efsSystem=nullptr;   // xgl_system as an efs draw bound it (608 bytes); efs batches skipped without
-    int half=0;   // GpuFxNative=3 / 4 (the wipe): drawn into the right (1) / left (2) half of the viewport only
 };
 
 // A unit normal into a float's bits (10 bits a component, below the NaN patterns) and back (the HLSL decodes it).
@@ -128,8 +127,8 @@ public:
     // Release every device resource (a new mission, a device change).
     void Reset() noexcept;
 
-    static constexpr int kMaxInstances=16384;
-    static constexpr int kMaxBatches=256;
+    static constexpr int kMaxInstances=65536;   // ours (kBudget) and the taken-over stock cards of one view
+    static constexpr int kMaxBatches=1024;
 
 private:
     struct Impl;

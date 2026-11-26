@@ -309,8 +309,7 @@ struct Config {
     int gpuFxTest=0;             // ...test cards and a puff column 25 m ahead of the player at mission start (2: and the
                                  //    stress: the ultimate strike 60 m ahead, three of them 6 s apart, with no pt asked)
     int gpuFxNative=1;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
-                                 //    screen split, stock left and ours right: the A/B picture; 3: the same cards drawn
-                                 //    twice, stock cut to the left half and ours to the right: a debug wipe; 4: the wipe mirrored)
+                                 //    screen split, stock left and ours right: the A/B picture)
     bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
                                  //    blast particles and vehicle guns' muzzle effects off (read at start)
     bool gpuFxEfs=false;         // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
