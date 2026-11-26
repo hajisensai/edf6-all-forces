@@ -863,27 +863,48 @@ def support_file(role: str) -> str:
 
 
 # kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against, and
-# the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage). Every jet mark has one (tools/selftest.py
-# jet_masses_cover_every_jet): the carriers are the EDF transport x 1.6 (a C-17's class), the Primers' fighter a light
-# fighter's, the blast / doll drones the drone's, the gunship (tools/make_jets.py GUNSHIP_MARK) an AC-130's.
-JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
-              7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
-              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
-              7401.0: 71200.0,   # the Sazabi: its canonical full weight (30.5 t empty)
-              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
-              # supercarrier's displacement (~100 kt)
-              7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
+# the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage; src/support_loadout.h payloadKg 40 % of it).
+# Every jet mark has one (tools/selftest.py jet_masses_cover_every_jet). Each its real prototype's (the user, 2026-11-26:
+# 「重量全得重新做，全都还原一下」, by the real types; table: docs/feature-support-jet-models.md §8), all in one measure:
+# empty weight + full internal fuel, no external stores (they are weighed on top of it: Burden), crew left out; fuel
+# given as a volume at 0.8 kg/L; rounded to 100 kg. A role's prototype (strike, fighter, interceptor, multirole, the
+# gunship / transport) whatever stock model it wears; a body with none (sci-fi, X-Morph, the drones) the nearest real
+# aircraft its size, unscaled. Figures: Wikipedia's specifications sections unless said.
+JET_MASSES = {
+    7001.0: 21600.0,    # strike: F-15E, 15,694 kg empty + 5,858 kg internal fuel
+    7002.0: 19300.0,    # fighter: F-15C, 13,154 + 6,103
+    7003.0: 27200.0,    # interceptor (AIM-54s): F-14D, 19,838 + 7,348
+    7004.0: 21200.0,    # multirole: F/A-18E, 14,552 + 6,668
+    # the carriers (V508 x 1.6, 59.4 x 17.0 x 76.8 m): the C-5M its size (67.9 x 19.8 x 75.3 m), 172,365 + 154,880
+    7005.0: 327200.0, 7009.0: 327200.0, 7010.0: 327200.0,
+    # the drones (pd607 x 3, 3.5 x 2.3 x 5.7 m; the blast / doll drones the same airframe): the BQM-167A its size
+    # (3.4 x 1.2 x 6.1 m), 313 kg empty + ~435 L of fuel (Kratos' sheet; not a confirmed figure)
+    7006.0: 700.0, 7007.0: 700.0, 7008.0: 700.0,
+    # the gunship (tools/make_jets.py GUNSHIP_MARK): the C-130J airframe, 34,274 + 6,700 US gal (25,360 L); the AC-130J's
+    # guns and mission kit have no published weight (its stores weigh on top)
+    7011.0: 54600.0,
+    7020.0: 25800.0,    # the enemy fighter: Su-27SK, 16,380 + 9,400
+    # the Primers' fighter (19.5 m across, its fuselage 5.9 x 3.2 x 10.9 m: an F-16's box): F-16C Block 50, 8,573 + 3,200
+    7030.0: 11800.0,
+    7201.0: 19300.0, 7202.0: 21600.0,   # the player's fighter and strike jet: their kinds' (7002, 7001)
+    7401.0: 71200.0,   # the Sazabi (not an aircraft): its canonical full weight (30.5 t empty)
+    # the Dreadnought's hangar fighters: the same models as the support's (SUPPORT_JETS), so their roles' prototypes:
+    # the fighter F-15C, the defender F/A-18E, the bomber F-15E, the interceptor F-14D; the Dreadnought (a ship, not an
+    # aircraft): a supercarrier's displacement (~100 kt)
+    7041.0: 19300.0, 7042.0: 21200.0, 7043.0: 21600.0, 7044.0: 27200.0, 7601.0: 1.0e8}
 # ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
 # kVehicleBodies payloadKg)
 JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
-JET_MASSES[SALVO_MARK] = JET_MASSES[7003.0]
+# ...the salvo interceptor in the TU-1600 (40.0 x 9.7 x 61.8 m, salvo_model): the Tu-160 its size (55.7 / 35.6 x 13.1 x
+# 54.1 m), 110,000 + 130,000 (a B-1B, 42 / 24 x 10 x 45 m, would be 87,090 + 120,326 per the USAF sheet: 207 t)
+JET_MASSES[SALVO_MARK] = 240000.0
 # ...and the support's C-130s (C130_JETS): the AC-130 the gunship's (C130_GUNSHIP_MARK), the paratroop plane the same
-# airframe's (C130_TRANSPORT_MARK)
+# airframe's (C130_TRANSPORT_MARK): the C-130J's
 C130_GUNSHIP_MARK = 7065.0
 C130_TRANSPORT_MARK = 7066.0
 JET_MASSES[C130_GUNSHIP_MARK] = JET_MASSES[C130_TRANSPORT_MARK] = JET_MASSES[7011.0]
-# ...and the support's air carriers in the model pack's Helicarrier (HELICARRIER_JETS): the carriers' mass (the carrier
-# kind's mark -> the Helicarrier's)
+# ...and the support's air carriers in the model pack's Helicarrier (HELICARRIER_JETS, 46.0 x 16.4 x 80.0 m: the C-5M
+# its size too): the carriers' mass (the carrier kind's mark -> the Helicarrier's)
 HELICARRIER_MARKS = {7005.0: 7067.0, 7009.0: 7068.0, 7010.0: 7069.0}
 JET_MASSES.update({mark: JET_MASSES[kind] for kind, mark in HELICARRIER_MARKS.items()})
 # ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
