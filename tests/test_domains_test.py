@@ -84,7 +84,7 @@ class Select(unittest.TestCase):
         self.assertTrue(self.sel(['src/heli.cpp'], cmake=(set(), 'a CMake if() changed'))['full'])
 
     def test_every_domain_test_follows_any_change(self) -> None:
-        for f in ('docs/x.md', 'pylib/mdb.py', 'testhub/src/a.ts', 'misc.txt'):
+        for f in ('docs/agent-rules-detail.md', 'pylib/mdb.py', 'testhub/src/a.ts', 'misc.txt'):
             self.assertIn('reads_all', self.sel([f])['ctest'], f)
 
     def test_cmake_names_select_their_tests(self) -> None:
