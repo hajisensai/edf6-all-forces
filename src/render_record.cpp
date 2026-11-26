@@ -28,11 +28,13 @@
 // call to its return: a recording without a projection (loading) leaves no first for a projection by another caller of
 // 0x11978D0.
 #include "render_record.h"
+#include "render_record_thread.h"
 #include "crew.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include "scope_lens.h"
 #include <cstdint>
+#include <cstring>
 
 namespace crew {
 namespace {
@@ -43,24 +45,80 @@ const unsigned char kRecordSig[]={0x41,0xB0,0x01,0x41,0x0F,0xB6,0x96,0xE9,0x0C,0
 renderrecord::Before recordBefores[static_cast<int>(renderrecord::Slot::kCount)]{};
 renderrecord::Before recordAfters[static_cast<int>(renderrecord::Slot::kCount)]{};
 renderrecord::Project recordProjects[static_cast<int>(renderrecord::Slot::kCount)]{};
-bool recordOpen=false;   // from the recording's call to its return, until its first projection
+thread_local bool recordOpen=false;   // first projection on the recording owner
+constexpr unsigned char kDrawEntrySig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x55};
+renderrecord::RecordingThread recordThread;
+INIT_ONCE threadStartup=INIT_ONCE_STATIC_INIT;
+bool entryPatched=false;
 int recordState=0;   // 0 not tried, 1 in, -1 refused
 
 // System_RecordDraw's call; rdx / r8 passed through whole, its result too.
-using RecordDrawFn=void*(*)(void*,std::uint64_t,std::uint64_t);
-void* RecordHook(void* sys,std::uint64_t a,std::uint64_t b) {
+using RecordDrawFn=renderrecord::RecordingThread::Draw;
+RecordDrawFn stockDraw=nullptr;
+
+void* NativeRecord(void* sys,std::uint64_t a,std::uint64_t b) {
+    const auto draw=stockDraw ? stockDraw : reinterpret_cast<RecordDrawFn>(image+kRecordDraw);
+    return draw(sys,a,b);
+}
+
+void* RecordFrame(void* sys,std::uint64_t a,std::uint64_t b) {
     for(const renderrecord::Before before:recordBefores)
         if(before)before();
+    const bool outerOpen=recordOpen;
     recordOpen=true;
     void* result=nullptr;
     __try {
-        result=reinterpret_cast<RecordDrawFn>(image+kRecordDraw)(sys,a,b);
+        result=NativeRecord(sys,a,b);
     } __finally {
         recordOpen=false;
         for(const renderrecord::Before after:recordAfters)
             if(after)after();
+        recordOpen=outerOpen;
     }
     return result;
+}
+
+BOOL CALLBACK StartRecordThread(PINIT_ONCE,void*,void**) {
+    const bool started=recordThread.Start();
+    Log("RENDER native recording worker started=%d owner=%u caller=%lu",started,recordThread.Id(),GetCurrentThreadId());
+    return TRUE;
+}
+
+void* DispatchRecord(RecordDrawFn draw,void* sys,std::uint64_t a,std::uint64_t b) {
+    if(!entryPatched)return draw(sys,a,b);
+    const DWORD lastError=GetLastError();
+    // The first actual recording runs after plugin loading. A failed install never
+    // needs to wait for a thread that is still waiting for DLL_THREAD_ATTACH.
+    InitOnceExecuteOnce(&threadStartup,&StartRecordThread,nullptr,nullptr);
+    SetLastError(lastError);
+    return recordThread.Invoke(draw,sys,a,b);
+}
+
+void* RecordHook(void* sys,std::uint64_t a,std::uint64_t b) {
+    return DispatchRecord(&RecordFrame,sys,a,b);
+}
+
+void* StandaloneRecord(void* sys,std::uint64_t a,std::uint64_t b) {
+    const bool outerOpen=recordOpen;
+    recordOpen=false;
+    void* result=nullptr;
+    __try {
+        result=NativeRecord(sys,a,b);
+    } __finally {
+        recordOpen=outerOpen;
+    }
+    return result;
+}
+
+void* RecordEntry(void* sys,std::uint64_t a,std::uint64_t b) {
+    // Loading, menus and secondary callers keep their original projection semantics.
+    return DispatchRecord(&StandaloneRecord,sys,a,b);
+}
+
+void JumpAbsolute(unsigned char* code,const void* target) noexcept {
+    const unsigned char op[]={0xFF,0x25,0,0,0,0};
+    std::memcpy(code,op,sizeof(op));
+    std::memcpy(code+sizeof(op),&target,sizeof(target));
 }
 
 // Each projection 0x1197B50 (scope_lens.cpp's hook calls it first): the recording's first, once.
@@ -91,6 +149,42 @@ bool Install() noexcept {
         return false;
     }
     recordState=1;
+    return true;
+}
+
+bool InstallThread() noexcept {
+    if(entryPatched)return true;
+    if(!image || GetModuleHandleW(L"EDF6VR.dll") ||
+       !edf::Matches(image,kRecordDraw,kDrawEntrySig,sizeof(kDrawEntrySig)) || !Install())return false;
+
+    // Replay only the first complete instruction (5 bytes). The absolute jumps
+    // preserve every argument register and enter the original unwind range at +5.
+    constexpr std::size_t kPrefix=5,kLongJump=14,kEntryThunk=kPrefix+kLongJump;
+    unsigned char code[kEntryThunk+kLongJump]{};
+    std::memcpy(code,kDrawEntrySig,kPrefix);
+    JumpAbsolute(code+kPrefix,image+kRecordDraw+kPrefix);
+    JumpAbsolute(code+kEntryThunk,reinterpret_cast<void*>(&RecordEntry));
+    auto* const site=image+kRecordDraw;
+    auto* const page=static_cast<unsigned char*>(edf::AllocateNearCode(site,code,sizeof(code)));
+    if(!page)return false;
+    HMODULE held=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+                           reinterpret_cast<LPCWSTR>(&RecordEntry),&held)) {
+        VirtualFree(page,0,MEM_RELEASE);
+        return false;
+    }
+
+    unsigned char jump[kPrefix]{0xE9};
+    const auto displacement=static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(page+kEntryThunk)-
+                                                      reinterpret_cast<std::intptr_t>(site+kPrefix));
+    std::memcpy(jump+1,&displacement,sizeof(displacement));
+    stockDraw=reinterpret_cast<RecordDrawFn>(page);
+    if(!edf::PatchCode(site,kDrawEntrySig,jump,sizeof(jump))) {
+        stockDraw=nullptr;
+        VirtualFree(page,0,MEM_RELEASE);
+        return false;
+    }
+    entryPatched=true;
     return true;
 }
 

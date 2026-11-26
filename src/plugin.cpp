@@ -21,6 +21,7 @@
 #include "sync_load_probe.h"
 #include "frame_rate.h"
 #include "render_pose.h"
+#include "render_record.h"
 #include "frame_rate_logic.h"
 #include "log.h"
 #include "mod_file.h"
@@ -605,6 +606,7 @@ void LoadConfig() noexcept {
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
+    n.renderRecordThread=ReadBool(L"RenderRecordThread",n.renderRecordThread);
     n.renderPoseSnapshots=ReadBool(L"RenderPoseSnapshots",n.renderPoseSnapshots);
     n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency)),0,3));
     {
@@ -1334,7 +1336,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
-    if(Cfg().renderPoseSnapshots)Log("RENDER pose snapshots installed=%d",renderpose::Install());
+    if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
+        Log("RENDER pose snapshots installed=%d",renderpose::Install());
+    if(Cfg().enabled && Cfg().renderRecordThread)
+        Log("RENDER native recording thread installed=%d",renderrecord::InstallThread());
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     InstallHavokProps();       // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes

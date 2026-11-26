@@ -216,8 +216,8 @@ check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before 
 check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
 check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
 check('renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);' in view, 'the frame rate poses in its render_record projection turn')
-check(re.search(r'recordOpen=true;\s*void\* result=nullptr;\s*__try\s*\{\s*result=reinterpret_cast<RecordDrawFn>'
-                r'\(image\+kRecordDraw\)\(sys,a,b\);\s*\}\s*__finally\s*\{\s*recordOpen=false;', record_src),
+check(re.search(r'recordOpen=true;\s*void\* result=nullptr;\s*__try\s*\{\s*result=NativeRecord'
+                r'\(sys,a,b\);\s*\}\s*__finally\s*\{\s*recordOpen=false;', record_src),
       'RecordHook closes the projection gate and releases its capture on every exit')
 check('scopelens::SetBeforeProject(&ProjectHook)' in record_src and 'SetBeforeProject' not in view,
       'the projection is shared by render_record.cpp alone')
@@ -329,4 +329,15 @@ if os.path.isfile(umbra_path):
               umbra_rel(0x8206, 5) == 0x8210 and umbra_rel(0x8246, 5) == 0x30D00 and
               umbra_imports.get(umbra_rel(0x30D07, 7)) == b'ReleaseSemaphore',
               'Umbra resolve submits work and wakes its own worker')
+entry_sig = re.search(r'kDrawEntrySig\[\]=\{([^}]*)\}', record_src)
+entry = bytes(int(byte, 16) for byte in re.findall(r'0x([0-9a-fA-F]{2})', entry_sig[1]))
+check(img[0x11978D0:0x11978D0+len(entry)] == entry and entry[:5] == bytes.fromhex('48895c2410'),
+      'threaded recorder: native entry trampoline displaces just the full RBX home instruction')
+check(direct_callers(0x11978D0) == [0x93C3F, 0x9D8BA, 0x9DE91, 0xBB48B, 0x1198FA4],
+      'threaded recorder: the common original entry covers all five native callers')
+check('DispatchRecord(&RecordFrame,sys,a,b)' in record_src and
+      'DispatchRecord(&StandaloneRecord,sys,a,b)' in record_src,
+      'threaded recorder: the mission wrapper and stock entry share one work handoff')
+check(img[0x1198FA9:0x1198FB9] == bytes.fromhex('418bd5895424304585e40f847b070000'),
+      'threaded recorder: the simulation branch is reached after the original call returns')
 print(f'frame rate signatures: {checks} checks ok')

@@ -231,7 +231,7 @@ bool Prepare(Detour& h) noexcept {
 
 bool Install() noexcept {
     const auto& cfg=Cfg();
-    if(!cfg.enabled || !cfg.renderPoseSnapshots)return false;
+    if(!cfg.enabled || !(cfg.renderPoseSnapshots || cfg.renderRecordThread))return false;
     if(GetModuleHandleW(L"EDF6VR.dll"))return false;
     Detour hooks[]={{kWrite,kWriteSig,sizeof(kWriteSig),reinterpret_cast<void*>(&Write)},
                     {kPalette,kPaletteSig,sizeof(kPaletteSig),reinterpret_cast<void*>(&Palette)},
