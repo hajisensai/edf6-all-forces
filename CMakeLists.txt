@@ -3050,6 +3050,11 @@ target_link_libraries(barrel_recoil_test PRIVATE edf6common user32)
 target_compile_options(barrel_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks barrel_recoil_test)
 add_test(NAME barrel_recoil COMMAND barrel_recoil_test)
+# The aura trucks' pure rules (src/aura_logic.h): selection, one kind never stacked, the repair / ammo steps, the AFAU wire.
+add_executable(aura_logic_test EXCLUDE_FROM_ALL tests/aura_logic_test.cpp)
+target_compile_options(aura_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks aura_logic_test)
+add_test(NAME aura_logic COMMAND aura_logic_test)
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
