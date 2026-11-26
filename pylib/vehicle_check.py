@@ -274,6 +274,33 @@ def wheel_size(b: sc.BodyInfo) -> tuple[float, float] | None:
     return max(math.hypot(p[1] - cy, p[2] - cz) + r for p, r in flat), (xs_hi - xs_lo) / 2
 
 
+def fall_out_problems(doc: dict, sgo_name: str = 'SGO') -> list[Problem]:
+    """car_base_fall_out [4] lists the seats thrown off at a hard impact. CarBase's pre-update (EDF.dll 0x673F1E ..
+    0x673F70) indexes the seat array with each one unchecked: seat = [veh+0x608] + i * 0x340, then weak_ptr-locks the
+    rider at seat+0x260/+0x268. A seat past the vehicle's vehicle_riding_position reads the heap block after the seat
+    array, another object, and a non-zero qword there is taken for a control block (2026-11-26: a one-seat car built
+    on the V512 with its [1, 2, 3, 4] read a 510's seat field 15.0f as a pointer, C0000005 at EDF.dll+0x673F70)."""
+    fall = doc.get('car_base_fall_out')
+    if not isinstance(fall, list) or len(fall) < 5:
+        return []
+    seats = len(doc.get('vehicle_riding_position') or [])
+    # a seat number as an integer or an integral float (the stock V613_BIKE writes [0.0])
+    bad = [i for i in fall[4] if not isinstance(i, (int, float)) or i != int(i) or not 0 <= i < seats] \
+        if isinstance(fall[4], list) else [fall[4]]
+    if not bad:
+        return []
+    return [Problem('error', f'{sgo_name} car_base_fall_out', f'names seats it does not have: {bad} of {seats}')]
+
+
+def keep_seats(members: dict, n: int) -> None:
+    """Keep a vehicle's first n seats (`members`: sgo.read's) and drop the car_base_fall_out seats past them (see
+    fall_out_problems: the game indexes the seat array with those unchecked)."""
+    members['vehicle_riding_position'] = members['vehicle_riding_position'][:n]
+    fall = members.get('car_base_fall_out')
+    if fall is not None:
+        fall[4] = [i for i in fall[4] if getattr(i, 'value', i) < n]
+
+
 def vehicle_problems(doc: dict, shkt: bytes, bone_world: Callable[[str], Vec3 | None] | None = None,
                      sgo_name: str = 'SGO') -> list[Problem]:
     """Every problem of a vehicle SGO's car_base_* settings against its SHKT (`bone_world`: a model bone's bind
@@ -284,7 +311,7 @@ def vehicle_problems(doc: dict, shkt: bytes, bone_world: Callable[[str], Vec3 | 
         return []
     bs = bodies(shkt)
     bones = bone_proxies(doc)
-    out: list[Problem] = []
+    out: list[Problem] = fall_out_problems(doc, sgo_name)
     for where, name, node in v.names:
         if find_body(bs, name, bones) is not None:
             continue

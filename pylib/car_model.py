@@ -262,7 +262,7 @@ def build(game, kind: str) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
     for k, light in enumerate(m['car_base_head_light']):
         _locate(mab, light[0], ((1 if k == 0 else -1) * 0.6 * float(nose[:, 0].max()), lamp_y - body_y, hi[2] - 0.1))
     m['animation_model'][2] = bytes(mab)
-    m['vehicle_riding_position'] = m['vehicle_riding_position'][:1]
+    vehicle_check.keep_seats(m, 1)   # the driver alone; the V512's fall-out seats [1, 2, 3, 4] go with its bed
     m['vehicle_weapon_setting'] = []
     m['vehicle_setup'][-1] = []
     m['game_object_durability'] = unit.durability

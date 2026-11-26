@@ -66,6 +66,9 @@ def main():
     version, m = sgo.read(files['OBJECT/EDF6VC_SEDAN.SGO'])
     assert m['xgs_scene_object_class'] == 'Vehicle_Car'
     assert len(m['vehicle_riding_position']) == 1 and m['vehicle_weapon_setting'] == [] and m['vehicle_setup'][-1] == []
+    # No fall-out seat past the driver's: EDF.dll 0x673F41 indexes the seat array with them unchecked; the V512's
+    # [1, 2, 3, 4] (its bed) read the next heap block as seats (2026-11-26, C0000005 at EDF.dll+0x673F70).
+    assert m['car_base_fall_out'][4] == [], m['car_base_fall_out'][4]
     # A closed car hides its rider (DispCharacter 0, as every stock closed seat): one integer of the truck's driver
     # locator parameters changes, its animation, profile, class mask and input mode stay.
     native = sgo.read(game.read('OBJECT', sedan.HOST+'.SGO'))[1]

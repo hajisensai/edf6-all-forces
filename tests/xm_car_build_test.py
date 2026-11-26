@@ -66,6 +66,8 @@ def main() -> int:
         _v, m = sgo.read(files[f'OBJECT/{stem}.SGO'])
         assert m['xgs_scene_object_class'] == 'Vehicle_Car' and m['mission_setup'] == stock['mission_setup']
         assert m['vehicle_weapon_setting'] == [] and m['vehicle_setup'][-1] == [] and len(m['vehicle_riding_position']) == 1
+        # no fall-out seat past the driver's: EDF.dll 0x673F41 indexes the seat array with them unchecked
+        assert m['car_base_fall_out'][4] == [], (u.key, m['car_base_fall_out'][4])
         assert getattr(m['game_object_durability'], 'value', m['game_object_durability']) == u.durability
         physical = {row[0]: row[8].value for row in m['car_base_wheel']}
         assert set(physical) == {f'{a}_{s}' for a in (car_model.FRONT, car_model.REAR) for s in 'lr'}, physical
