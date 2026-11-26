@@ -48,6 +48,10 @@ struct StockLights {
 
 struct Batch {
     ID3D11ShaderResourceView* texture=nullptr;   // null: the procedural smoke flipbook
+    // The stock kinds: the draw's further textures (an instance's slot 1..7 in its `soft`, 0 is `texture`).
+    static constexpr int kMore=7;
+    ID3D11ShaderResourceView* more[kMore]{};
+    int moreCount=0;
     Kind kind=Kind::smoke;
     int gridX=kFlipGrid,gridY=kFlipGrid,frames=kFlipFrames;
     // Corner distance multiplier: 1 = the quad's half width is the instance size (ours); the stock VS places each
@@ -76,7 +80,7 @@ struct ViewParams {
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
     ID3D11Buffer* efsSystem=nullptr;   // xgl_system as an efs draw bound it (608 bytes); efs batches skipped without
-    bool rightHalf=false; // GpuFxNative=3: drawn into the right half of the viewport only
+    int half=0;   // GpuFxNative=3 / 4 (the wipe): drawn into the right (1) / left (2) half of the viewport only
 };
 
 // A unit normal into a float's bits (10 bits a component, below the NaN patterns) and back (the HLSL decodes it).

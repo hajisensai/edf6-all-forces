@@ -66,6 +66,8 @@ struct Particle {
 };
 StructuredBuffer<Particle> Particles : register(t0);
 Texture2D<float4> Tex : register(t1);
+// The stock kinds' further textures of one draw (Batch::more): an instance's slot 1..7 samples TexMore[slot - 1].
+Texture2D<float4> TexMore[7] : register(t8);
 Texture2D<float> Depth : register(t2);
 SamplerState Linear : register(s0);
 
@@ -78,6 +80,7 @@ struct V {
     float4 vpos : TEXCOORD3;    // the corner's view-space position; w: the centre's distance from the camera
     float3 nrm : TEXCOORD4;     // the lit kinds: the stock VS's world normal
     float3 vlight : TEXCOORD5;  // the set 0xC08: its light, per vertex like its VS (0x19848A0)
+    nointerpolation uint slot : TEXCOORD6;   // the stock kinds: which of the draw's textures (0 Tex, 1..7 TexMore)
 };
 
 float3 UnpackNormal(uint u) {
@@ -199,7 +202,10 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     uint f0 = (uint)fr;
     uint f1 = min(f0 + 1u, (uint)last);
     o.uv = float4(FrameUV(f0, uv), FrameUV(f1, uv));
-    o.misc = float3(fr - (float)f0, abs(vp.z), p.soft);
+    // The stock kinds carry their texture slot in `soft` (gpufx.cpp AppendBatch); their soft range is half the size.
+    const bool stock = Kind >= 1u && Kind <= 4u;
+    o.misc = float3(fr - (float)f0, abs(vp.z), stock ? clamp(p.size * 0.5, 0.05, 3.0) : p.soft);
+    o.slot = stock ? (uint)p.soft : 0u;
     o.basis = float3(co, s, p.emissive);
     o.vpos = float4(vp.xyz, centre);
     o.nrm = float3(0.0, 1.0, 0.0);
@@ -250,9 +256,25 @@ float4 EfsPs(V i) {
     return float4(rgb * a, a);
 }
 
+// One of the draw's textures. The slot is one instance's (flat), so a quad's pixels agree but for its edges: the
+// gradients are taken outside the branch.
+float4 SampleSlot(uint slot, float2 uv) {
+    float2 dx = ddx(uv), dy = ddy(uv);
+    [branch] switch (slot) {
+    case 1u: return TexMore[0].SampleGrad(Linear, uv, dx, dy);
+    case 2u: return TexMore[1].SampleGrad(Linear, uv, dx, dy);
+    case 3u: return TexMore[2].SampleGrad(Linear, uv, dx, dy);
+    case 4u: return TexMore[3].SampleGrad(Linear, uv, dx, dy);
+    case 5u: return TexMore[4].SampleGrad(Linear, uv, dx, dy);
+    case 6u: return TexMore[5].SampleGrad(Linear, uv, dx, dy);
+    case 7u: return TexMore[6].SampleGrad(Linear, uv, dx, dy);
+    default: return Tex.SampleGrad(Linear, uv, dx, dy);
+    }
+}
+
 float4 Ps(V i) : SV_Target0 {
     if (Kind >= 5u) return EfsPs(i);
-    float4 t = lerp(Tex.Sample(Linear, i.uv.xy), Tex.Sample(Linear, i.uv.zw), i.misc.x);
+    float4 t = lerp(SampleSlot(i.slot, i.uv.xy), SampleSlot(i.slot, i.uv.zw), i.misc.x);
     float fade = saturate((SceneDistance(i.pos.xy) - i.misc.y) / max(i.misc.z, 0.001));
     if (Kind == 0u) {
         fade *= saturate((i.misc.y - 0.3) / max(Ambient.w, 0.001));   // ours only: no card cuts the near plane
@@ -693,12 +715,13 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->OMSetRenderTargets(1,&target,nullptr);
         context->OMSetBlendState(s.blend.Get(),nullptr,0xFFFFFFFFu);
         context->OMSetDepthStencilState(s.noDepth.Get(),0);
-        context->RSSetState(view.rightHalf ? s.rasterCut.Get() : s.raster.Get());
+        context->RSSetState(view.half ? s.rasterCut.Get() : s.raster.Get());
         context->RSSetViewports(1,&vp);
-        if(view.rightHalf) {
-            const D3D11_RECT right{static_cast<LONG>(vp.TopLeftX+vp.Width*0.5f),static_cast<LONG>(vp.TopLeftY),
-                                   static_cast<LONG>(vp.TopLeftX+vp.Width),static_cast<LONG>(vp.TopLeftY+vp.Height)};
-            context->RSSetScissorRects(1,&right);
+        if(view.half) {
+            const LONG mid=static_cast<LONG>(vp.TopLeftX+vp.Width*0.5f);
+            const D3D11_RECT cut{view.half==1 ? mid : static_cast<LONG>(vp.TopLeftX),static_cast<LONG>(vp.TopLeftY),
+                                 view.half==1 ? static_cast<LONG>(vp.TopLeftX+vp.Width) : mid,static_cast<LONG>(vp.TopLeftY+vp.Height)};
+            context->RSSetScissorRects(1,&cut);
         }
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         context->VSSetShader(s.vs.Get(),nullptr,0);
@@ -753,6 +776,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             std::memcpy(map.pData,&bc,sizeof(bc));
             context->Unmap(s.batchCb.Get(),0);
             context->PSSetShaderResources(1,1,&tex);
+            if(batch.moreCount>0)context->PSSetShaderResources(8,static_cast<UINT>(batch.moreCount),batch.more);
             ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha || batch.kind==Kind::nativeLitAlpha ? s.blendStockAlpha.Get() :
                 batch.kind==Kind::nativeAdditive || batch.kind==Kind::nativeLitAdditive ? s.blendStockAdd.Get() :
                 batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :

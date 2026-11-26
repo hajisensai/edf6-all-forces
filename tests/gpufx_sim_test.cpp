@@ -1,6 +1,8 @@
 // Offline check of the GPU particle effects' pure half (src/gpufx/gpufx_sim.h): curves, the pool's budget and
 // replacement, the step's physics, back-to-front ordering, the depth formulas against standard and reversed
-// projections, and the procedural smoke flipbook (clear tile borders, determinism, time).
+// projections, the procedural smoke flipbook (clear tile borders, determinism, time), and the taken-over draws
+// coalesced (gpufx_batch.h), the fill budget (ThinToBudget).
+#include "gpufx/gpufx_batch.h"
 #include "gpufx/gpufx_efs.h"
 #include "gpufx/gpufx_layers.h"
 #include "gpufx/gpufx_sim.h"
@@ -331,8 +333,84 @@ static void Efs() {
     CHECK(!EfsStripFetch(off,4,idx,strip));
 }
 
+// The taken-over records coalesced: additive runs grouped by key (first-seen order, stock order inside a group),
+// alpha records never moved across; the count while collecting equals the draws made at the end.
+struct Rec { int key; bool add; int start,count; };
+static void CoalesceRuns() {
+    auto same=[](const Rec& a,const Rec& b){return a.key==b.key && a.add==b.add;};
+    auto orderFree=[](const Rec& r){return r.add;};
+    // Stock order: A1 B1 A2 | alpha C | A3 B2 C(add) B3, then alpha C twice (consecutive: one record).
+    const struct { int key; bool add; } order[]{{1,true},{2,true},{1,true},{3,false},{1,true},{2,true},{3,true},{2,true},{3,false},{3,false}};
+    std::vector<Rec> records;std::vector<int> inst;
+    crew::gpufx::Coalescing<Rec> c;
+    int opened=0;
+    for(int i=0;i<10;++i) {
+        Rec r{order[i].key,order[i].add,static_cast<int>(inst.size()),2};
+        inst.push_back(i*10);inst.push_back(i*10+1);
+        if(c.OpensDraw(records,r,same,orderFree))++opened;
+        if(!records.empty() && same(records.back(),r) && records.back().start+records.back().count==r.start){records.back().count+=r.count;continue;}
+        records.push_back(r);c.Added(records,same,orderFree);
+    }
+    CHECK(records.size()==9u);
+    std::vector<Rec> out;std::vector<int> outInst;
+    Coalesce(records,inst,out,outInst,same,orderFree);
+    // Draws: [A1 A2] [B1] | C | [A3] [B2 B3] [C add] | C C
+    CHECK(out.size()==7u);CHECK(c.draws==7);CHECK(opened==7);
+    CHECK(outInst.size()==inst.size());
+    const int want[]{0,1,20,21, 10,11, 30,31, 40,41, 50,51,70,71, 60,61, 80,81,90,91};
+    CHECK(std::memcmp(outInst.data(),want,sizeof(want))==0);
+    if(out.size()==7u) {
+        CHECK(out[0].key==1 && out[0].start==0 && out[0].count==4);
+        CHECK(out[1].key==2 && out[1].count==2);
+        CHECK(out[2].key==3 && !out[2].add && out[2].start==6);
+        CHECK(out[3].key==1 && out[3].add);
+        CHECK(out[4].key==2 && out[4].start==10 && out[4].count==4);
+        CHECK(out[5].key==3 && out[5].add);
+        CHECK(out[6].key==3 && !out[6].add && out[6].count==4);
+    }
+}
+
+static void FillBudget() {
+    float view[16]{};view[0]=view[5]=view[10]=view[15]=1.0f;   // the camera at the origin looking down -Z
+    float proj[16];Perspective(proj,1.0f,1.0f,0.1f,1000.0f,false);
+    Instance far{};far.pos[2]=-100.0f;far.size=1.0f;far.color[3]=0.5f;
+    CHECK(Near(Coverage(far,view,proj,true),1.0e-4f,1e-6f));           // 1 / 100^2 of the screen
+    Instance inside=far;inside.pos[2]=-0.8f;
+    CHECK(Near(Coverage(inside,view,proj,true),1.0f));                // the camera within its size: all of it
+    Instance faded=far;faded.pos[2]=-0.2f;
+    CHECK(Coverage(faded,view,proj,true)==0.0f);                      // the VS fades it out: nothing drawn
+    Instance behind=far;behind.pos[2]=10.0f;
+    CHECK(Coverage(behind,view,proj,true)==0.0f);
+    // 1000 puffs each a whole screen against a budget of 100: a stable tenth...
+    std::vector<Instance> in(1000,inside);std::vector<std::uint32_t> ids(1000);
+    for(int i=0;i<1000;++i)ids[i]=static_cast<std::uint32_t>(i+1);
+    in[7]=faded;
+    std::vector<Instance> again=in;
+    const Thinned t=ThinToBudget(in.data(),ids.data(),1000,view,proj,true,100.0f,0.05f);
+    CHECK(Near(t.covered,999.0f));CHECK(Near(t.keep,100.0f/999.0f));
+    CHECK(t.count>70 && t.count<130);
+    const Thinned u=ThinToBudget(again.data(),ids.data(),1000,view,proj,true,100.0f,0.05f);
+    CHECK(u.count==t.count);
+    for(int i=0;i<t.count;++i)CHECK(in[i].pos[2]==again[i].pos[2]);
+    // ...each as opaque as the ten it stands for: 1 - 0.5^(1 / keep).
+    CHECK(Near(in[0].color[3],1.0f-std::pow(0.5f,999.0f/100.0f),1e-4f));
+    // The floor: no less than `least` kept; under the budget only the faded one goes, alpha untouched.
+    std::vector<Instance> few(10,inside);few[3]=faded;
+    const Thinned w=ThinToBudget(few.data(),ids.data(),10,view,proj,true,100.0f,0.2f);
+    CHECK(w.count==9 && w.keep==1.0f && few[0].color[3]==0.5f);
+    std::vector<Instance> many(1000,inside);
+    const Thinned m=ThinToBudget(many.data(),ids.data(),1000,view,proj,true,10.0f,0.2f);
+    CHECK(Near(m.keep,0.2f) && m.count>150 && m.count<250);
+    // The pool hands out the serials with the drawables.
+    Pool<4> pool;Desc d{};d.lifeMin=d.lifeMax=1.0f;d.size.Add(0.0f,1.0f);d.alpha.Add(0.0f,1.0f);
+    const int k=pool.Register(d);Rng rng(3);const float o[3]{},v[3]{};
+    pool.Spawn(k,o,v,rng);pool.Spawn(k,o,v,rng);
+    Instance b[4];std::uint32_t bi[4]{};
+    CHECK(pool.Build(b,4,1,bi)==2 && bi[0]==1u && bi[1]==2u);
+}
+
 int main() {
-    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();Efs();
+    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();Efs();CoalesceRuns();FillBudget();
     if(failures){std::printf("gpufx_sim: %d failure(s)\n",failures);return 1;}
     std::printf("gpufx_sim: ok\n");
     return 0;

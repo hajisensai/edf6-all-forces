@@ -129,7 +129,7 @@
 
 - `0x2EDE20` 是 `effect::EfsObject` 渲染子对象（vtable `0x17A84E0`，槽 1，构造 `0x2ED6E0`）的 `Draw(sub, ctx, pass, view*)`，是多种 efs RenderInfo 的调度器，不经过 `0x3027B0 / 0x1155810 / 0x1154F70`。
 - 结构：`efsInst+0x40` 链表 → 发射器组（`node[2]+0x70`，快照数组 `+0x28`，每视图 0xA0 字节）→ `efs::Emitter`（vtable `0x19AD1C0`，槽 6 `0x10D4C30` 绘制 → `0x10D5C40`）→ RenderInfo（13 种：Texture、Distortion、Sprite、Life、Model、Locus、Line、ExtLine、LocusLine、LocusExtendLine、EmittingExtendLine、Null）。
-- Sprite 的 end `0x10F2000` → `0x10DA360` → `Texture<quad>::Draw 0x10DD1F0`（只经 vtable `0x1A09DC0` 槽 2，槽地址 `0x1A09DD0`）。走 efs 的效果：EfsBullet、EfsExposureBullet、EfsMuzzleFlash、SpiderStringBullet03、MapObject_Efs、HumanoidPartsBreakEffect_Efs、若干怪物部件效果，及脚本 `CreateEfs`。
+- Sprite 的 end `0x10F2000` → `0x10DA360` → `Texture<quad>::Draw 0x10DD1F0`（只经 vtable 槽调用，槽地址 `0x1A09DC0`；第 3 段初稿误写 `0x1A09DD0`，实机日志 `not as expected` 后对照 EDF.dll 改正）。走 efs 的效果：EfsBullet、EfsExposureBullet、EfsMuzzleFlash、SpiderStringBullet03、MapObject_Efs、HumanoidPartsBreakEffect_Efs、若干怪物部件效果，及脚本 `CreateEfs`。
 - 接管点：`0x10DD1F0(self, ctx, world float[16] 行向量, desc)` 换 vtable 槽（`PatchVtableSlot`，先核序言与槽内容）。它做一次 `DrawIndexedInstanced(6, count, 0, 0, 0)`，shader 组由 soft / 光照选。
   - desc：`+0` 材质（`+0x20` 网格，`*(u32*)(网格+0x28)` 索引数，须为 6；`+0x28` fetch 资源）、`+8` billboard 字节、`+0xC` normal_pow、`+0x10` soft（|soft| > 0 走变体 2）、`+0x14` zbias、`+0x18` near、`+0x20` 光照指针、`+0x28` ushort 记录索引（单位 uint4，空 = 顺序）、`+0x38` 记录（0x30：translate、scale、quat）、`+0x40` 个数、`+0x48` composite（0x40：xrot、dist、distR、pad；position；texcoord；color）、`+0x50` 纹理对象（空 = 默认纹理，不接）。
   - ctx：`+8` D3D 上下文；`+0x84` 混合开关、`+0x88` 六个 D3D11 枚举 {Src, Dst, Op, SrcA, DstA, OpA}，表 `0x10FAEE0`：0 = {5,6,1,2,1,1}（alpha）、1 = {5,2,1,2,1,1}（加）、2 = {5,2,3,2,1,1}（反减）；`+0x19C` 深度写（须 0）、`+0x1A0` 比较（8 ALWAYS / 2 LESS / 4 LESS_EQUAL）。

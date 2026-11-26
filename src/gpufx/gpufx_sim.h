@@ -72,6 +72,7 @@ struct Particle {
     float size0=1.0f,rot=0.0f,spin=0.0f,frame0=0.0f;
     std::uint16_t desc=0;
     bool live=false;
+    std::uint32_t serial=0;   // which spawn (a stable id while it lives: the fill budget's subset)
 };
 
 // A tiny deterministic generator (xorshift32): the same seed makes the same smoke on every machine. Effects are
@@ -130,7 +131,7 @@ public:
         p.rot=rng.Range(0.0f,6.2831853f);
         p.spin=rng.Range(-d->spin,d->spin);
         p.frame0=rng.Range(0.0f,8.0f);   // a frame offset so neighbours do not billow in step
-        p.desc=static_cast<std::uint16_t>(desc);p.live=true;
+        p.desc=static_cast<std::uint16_t>(desc);p.live=true;p.serial=++serial_;
         return slot;
     }
 
@@ -153,11 +154,13 @@ public:
         }
     }
 
-    // The drawable state of every live particle; returns the count (at most `most`). `frames`: the flipbook's.
-    int Build(Instance* out,int most,int frames) const noexcept {
+    // The drawable state of every live particle; returns the count (at most `most`). `frames`: the flipbook's. `ids`
+    // (optional, `most` long): each one's spawn serial.
+    int Build(Instance* out,int most,int frames,std::uint32_t* ids=nullptr) const noexcept {
         int n=0;
         for(const auto& p:p_) {
             if(!p.live || n>=most)continue;
+            if(ids)ids[n]=p.serial;
             const Desc& d=desc_[p.desc];
             const float t=p.age/p.life;
             Instance& o=out[n++];
@@ -185,6 +188,7 @@ private:
     Desc desc_[kDescs]{};
     int descCount_=0,live_=0,free_=0;
     unsigned replaced_=0;
+    std::uint32_t serial_=0;
     float wind_[3]{};
 };
 
@@ -204,6 +208,54 @@ inline void SortBackToFront(const Instance* in,int n,const float view[16],bool l
         order[i]=static_cast<std::uint32_t>(i);
     }
     std::stable_sort(order,order+n,[keys](std::uint32_t a,std::uint32_t b){return keys[a]<keys[b];});
+}
+
+// ---- the fill budget ----
+// Ours is drawn lit and soft per pixel, so its cost is the screen it covers: a blast seen from inside its cloud covers
+// the screen hundreds of times over (the ultimate strike at 60 m: some 5000 puffs, 0.46 s a frame at 4K). Lowering the
+// count does not help by itself (LodGrow keeps the cover), so the cover is budgeted where the camera is known.
+//
+// One puff's cover in screens: its quad (half width `size`, ours: no corner scale) over the screen at its view depth;
+// a whole screen once the camera is about inside it, none where the VS fades it out (its centre nearer than a
+// quarter of its size) or behind the camera.
+inline float Coverage(const Instance& in,const float view[16],const float proj[16],bool lookNegZ) noexcept {
+    float v[3];
+    for(int a=0;a<3;++a)v[a]=in.pos[0]*view[a]+in.pos[1]*view[4+a]+in.pos[2]*view[8+a]+view[12+a];
+    const float s=in.size;
+    if(!(s>0.0f))return 0.0f;
+    const float centre=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+    if(centre<=0.25f*s)return 0.0f;
+    const float d=lookNegZ ? -v[2] : v[2];
+    if(d<=s)return d<=-s ? 0.0f : 1.0f;
+    return (std::min)(1.0f,s*s*std::fabs(proj[0]*proj[5])/(d*d));
+}
+// A stable pseudo-random [0, 1) from a spawn serial (the subset kept must not flicker from frame to frame).
+inline float SerialUnit(std::uint32_t id) noexcept {
+    id^=id>>16;id*=0x7FEB352Du;id^=id>>15;id*=0x846CA68Bu;id^=id>>16;
+    return static_cast<float>(id>>8)*(1.0f/16777216.0f);
+}
+struct Thinned { int count=0;float covered=0.0f,keep=1.0f; };
+// In place: the puffs that cover nothing dropped; past `budget` screens, the stable fraction keep = budget / cover
+// (no less than `least`) kept, their alpha raised so a cloud seen through them stays as opaque (k overlapping layers
+// of alpha a pass (1 - a)^k; keep * k of them at 1 - (1 - a)^(1 / keep) pass the same).
+inline Thinned ThinToBudget(Instance* in,const std::uint32_t* ids,int n,const float view[16],const float proj[16],
+                            bool lookNegZ,float budget,float least) noexcept {
+    Thinned t{};
+    for(int i=0;i<n;++i)t.covered+=Coverage(in[i],view,proj,lookNegZ);
+    if(t.covered>budget && budget>0.0f)t.keep=(std::max)(least,budget/t.covered);
+    const float power=1.0f/t.keep;
+    int out=0;
+    for(int i=0;i<n;++i) {
+        const float c=Coverage(in[i],view,proj,lookNegZ);
+        if(!(c>0.0f))continue;
+        if(t.keep<1.0f) {
+            if(SerialUnit(ids[i])>=t.keep)continue;
+            in[i].color[3]=1.0f-std::pow(1.0f-std::clamp(in[i].color[3],0.0f,1.0f),power);
+        }
+        in[out++]=in[i];
+    }
+    t.count=out;
+    return t;
 }
 
 // ---- the stock particle card (docs/gpufx-re.md: VS 0x1968790, grid table 0x1AE0BA0) ----

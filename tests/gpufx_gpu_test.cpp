@@ -158,6 +158,32 @@ int main() {
         // The stock corner layout: half width size/sqrt2 = 2.12 m at 10 m -> 0.212 of the half screen = 10 px; 14 px out is clear.
         CHECK(centre(px,8)[0]>0.5f && centre(px,14)[0]==0.0f);
     }
+    // 5. One stock draw of two textures (Batch::more): the instance's slot (its `soft`) picks the texture; slot 0 is
+    // `texture`. White at the centre, green 4 m (19 px) to the right, both additive at colour 1.
+    {
+        D3D11_TEXTURE2D_DESC d{};d.Width=d.Height=1;d.MipLevels=d.ArraySize=1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
+        d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        const std::uint32_t white=0xFFFFFFFFu,green=0xFF00FF00u;
+        D3D11_SUBRESOURCE_DATA wi{&white,4,0},gi{&green,4,0};
+        ComPtr<ID3D11Texture2D> tw,tg;ComPtr<ID3D11ShaderResourceView> vw,vg;
+        CHECK(SUCCEEDED(rig.device->CreateTexture2D(&d,&wi,&tw)) && SUCCEEDED(rig.device->CreateShaderResourceView(tw.Get(),nullptr,&vw)));
+        CHECK(SUCCEEDED(rig.device->CreateTexture2D(&d,&gi,&tg)) && SUCCEEDED(rig.device->CreateShaderResourceView(tg.Get(),nullptr,&vg)));
+        Instance two[2]{card,card};
+        for(auto& c:two){c.color[0]=c.color[1]=c.color[2]=1.0f;c.color[3]=1.0f;c.frame=0.0f;c.size=1.0f;}
+        two[0].soft=0.0f;two[1].soft=1.0f;two[1].pos[0]+=4.0f;
+        Batch b{};b.texture=vw.Get();b.more[0]=vg.Get();b.moreCount=1;b.kind=Kind::nativeAdditive;b.gridX=b.gridY=b.frames=1;
+        b.cornerScale=0.70710678f;b.instances=two;b.count=2;b.sorted=false;
+        rig.context->ClearRenderTargetView(rig.rtv.Get(),clear);
+        rig.context->ClearDepthStencilView(rig.dsv.Get(),D3D11_CLEAR_DEPTH,1.0f,0);
+        bindNative();
+        CHECK(r.Draw(rig.context.Get(),rig.depth.Get(),DXGI_FORMAT_D24_UNORM_S8_UINT,vp,&b,1,&st));
+        CHECK(st.batches==1);
+        px=rig.Read();
+        const float* w=centre(px);const float* g=centre(px,19);
+        std::printf("table slot0 %.3f %.3f %.3f slot1 %.3f %.3f %.3f\n",w[0],w[1],w[2],g[0],g[1],g[2]);
+        CHECK(w[0]>0.9f && w[1]>0.9f && w[2]>0.9f);
+        CHECK(g[0]<0.01f && g[1]>0.9f && g[2]<0.01f);
+    }
     // 6. A stock blend-1 batch from a 2x2 atlas (4 frames): frame 3 is the bottom-right tile, upright at stock rot
     // -pi/4 (the tile's top-left texel top left on screen), alpha written ONE/ZERO, the stock distance fade applied.
     {
