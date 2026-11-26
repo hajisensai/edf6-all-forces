@@ -99,7 +99,7 @@ function newStep() { return { id: uid(), tag: '', title: '新的一步', body: '
 function renderLane(l) {
   const li = data.lanes.indexOf(l);
   const small = (text, fn, disabled = false) => h('button', { type: 'button', class: 'btn ghost small', onclick: fn, disabled: disabled || busy }, text);
-  const steps = l.steps.map((s, i) => h('li', { class: 'olStep' },
+  const steps = l.steps.map((s, i) => h('li', { class: 'olStep', 'data-tone': s.tone || null },
     h('span', { class: 'olDot' }, i + 1),
     h('div', { class: 'olCard', tabindex: editing ? 0 : null, role: editing ? 'button' : null,
       onclick: () => editing && openStep(l, s),
@@ -161,6 +161,7 @@ function openStep(l, s) {
   $('fTitle').value = s.title;
   $('fTag').value = s.tag || '';
   $('fBody').value = s.body || '';
+  $('fTone').value = s.tone || '';
   $('stepDlg').showModal();
   $('fTitle').focus();
 }
@@ -169,6 +170,7 @@ $('stepForm').addEventListener('submit', () => {
   s.title = $('fTitle').value.trim() || '（未命名）';
   s.tag = $('fTag').value.trim();
   s.body = $('fBody').value.replace(/\s+$/, '');
+  if ($('fTone').value) s.tone = $('fTone').value; else delete s.tone;
   changed();
 });
 $('fCancel').addEventListener('click', () => $('stepDlg').close());
