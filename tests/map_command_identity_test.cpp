@@ -136,7 +136,7 @@ const void* TransportTripTo(const void*,const float*,float) noexcept { return nu
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 NpcCommandResult NpcMapCommandForRequester(const ObjRef&,const Command&,const ObjRef&,const ObjRef&) noexcept {return {};}

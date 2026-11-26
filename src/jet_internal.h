@@ -18,6 +18,7 @@
 #include "air_chase.h"
 #include "sortie_plan.h"
 #include "support_aircraft.h"
+#include "jet_escort.h"
 #include <cmath>
 
 namespace crew {
@@ -575,6 +576,16 @@ struct Jet {
     support::PassLine ferryLine{};
     ferry::Pass ferryPass{};
     Sortie sortie{};            // a sortie call's one pass (jet_sortie.cpp)
+    // A follow order another machine's player gave it (JetCommand's requester; online the order is run here, where the
+    // jet flies): held weakly (HoldRef) until another order; `followAt` where they are this frame, `followSeen` while
+    // they are there (JetFrame). This machine's player's follow order holds none: player.pos is theirs.
+    ObjRef followBy{};
+    float followAt[3]{};
+    bool followSeen=false;
+    // Flying escort on the player it follows this frame (JetFrame; jet_escort.h): no target, its guns' weapon, the
+    // anchor the player (a follow order, a call's follow variant); `escortTrack` their motion.
+    bool escorting=false;
+    jetescort::Track escortTrack{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -627,6 +638,7 @@ inline bool MapCommandMoving(Jet& j,const float* pos,const float* anchor,float r
 // follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
 inline const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
     if(j.cmd.order==Order::guard)return j.cmd.at;
+    if(j.cmd.order==Order::follow && j.followBy.ctrl)return j.followSeen ? j.followAt : own;   // another machine's player
     if(j.cmd.order==Order::follow && follow)return player.pos;
     return own;
 }
