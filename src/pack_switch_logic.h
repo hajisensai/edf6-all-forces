@@ -5,6 +5,7 @@
 //  - the script routine that switches to it: `string AF_PackSwitch<mode>()`, compiled into MAINSCRIPT's module once,
 //    which calls the script's own ApplyModeNo (the lobby's switch of mode inside a session) and goes back to HQMain.
 #pragma once
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cwchar>
@@ -57,5 +58,23 @@ inline int Pressed(const Keys& was,const Keys& now) noexcept {
     if(now.prev && !was.prev)return -1;
     if(now.next && !was.next)return 1;
     return 0;
+}
+
+// The mode the HQ was closed for: the UI thread asks it (Ask), the script's thread takes it at the next routine start
+// (Take, createCoRoutine: whatever routine that is, so a switch never outlives the HQ it was asked from); -1: none.
+struct Pending { std::atomic<int> mode{-1}; };
+inline bool Ask(Pending& p,int mode) noexcept {
+    int none=-1;
+    return mode>=0 && p.mode.compare_exchange_strong(none,mode);
+}
+inline int Take(Pending& p) noexcept { return p.mode.exchange(-1); }
+
+// One HQ frame (pack_switch.cpp HqUpdate): the keys' edge, `was` advanced every frame whatever follows (a key held down
+// while something covered the HQ does not fire when it uncovers); the direction to switch when the HQ owned the input
+// before and after its own update (`owned`) and no switch is pending, else 0.
+inline int HqFrame(Keys& was,const Keys& now,bool owned,const Pending& p) noexcept {
+    const int dir=Pressed(was,now);
+    was=now;
+    return dir && owned && p.mode.load()<0 ? dir : 0;
 }
 }  // namespace crew::packswitch

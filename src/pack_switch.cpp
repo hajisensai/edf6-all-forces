@@ -91,8 +91,8 @@ using CompileFn=int(__fastcall*)(void*,const char*,const char*,int,unsigned,void
 
 void* nextHq=nullptr;   // ChainVtableSlot writes it before the slot
 CoRoutineFn nextCoRoutine=nullptr;
-// The mode the HQ was closed for (UI thread writes, the script's thread takes it at the next routine start); -1: none.
-std::atomic<int> pending{-1};
+// The mode the HQ was closed for (UI thread asks, the script's thread takes it at the next routine start).
+Pending pending;
 Keys was{};   // UI thread only
 
 template<class T> T Read(const unsigned char* p,std::size_t off) noexcept { T v; std::memcpy(&v,p+off,sizeof(T)); return v; }
@@ -159,16 +159,22 @@ std::uint64_t __fastcall HqUpdate(unsigned char* self,void* ctx) {
     const bool owned=Cfg().enabled && ctx && getInput(self,ctx) && !armoryui::IsOpen();
     const std::uint64_t result=reinterpret_cast<UpdateFn>(nextHq)(self,ctx);
     const Keys now=ReadKeys();
-    const int dir=Pressed(was,now);
-    was=now;
-    if(!dir || !owned || pending.load()>=0 || !getInput(self,ctx) || armoryui::IsOpen())return result;
+    const int edge=Pressed(was,now);
+    const bool ownedAfter=owned && getInput(self,ctx) && !armoryui::IsOpen();
+    const int dir=HqFrame(was,now,ownedAfter,pending);
+    if(edge && !dir && Cfg().debug)   // a press, not taken: which gate (a key press at a time: no flood)
+        Log("PACKSWITCH %s on the HQ %p not taken: %s",edge<0 ? "Q" : "E",static_cast<void*>(self),
+            pending.mode.load()>=0 ? "a switch is pending (the script has not started its next routine yet)" :
+            !owned ? "the HQ did not own the input before its update (covered, in a transition, 整备 open, or off)" :
+                     "the HQ lost the input in its own update (a sub-screen opened this frame)");
+    if(!dir)return result;
     unsigned char* const gs=GameStatus();
     ModeView views[kMaxModes]{};
     int count=0,current=-1;
     if(!ReadModes(gs,views,count,current)){Log("PACKSWITCH the mode table cannot be read: not switched");return result;}
     const int to=Step(views,count,current,dir);
     if(to<0){Log("PACKSWITCH %s: no other mission pack to go to (mode %d)",dir<0 ? "Q" : "E",current);return result;}
-    pending.store(to);
+    if(!Ask(pending,to))return result;   // HqFrame saw none pending, and only this thread asks
     Log("PACKSWITCH %s: mode %d (content %d) -> %d (content %d): the HQ closed as 回到标题 (exit %d, saved by the script)",
         dir<0 ? "Q" : "E",current,ContentOfMode(gs,current),to,ContentOfMode(gs,to),kGotoTitle);
     reinterpret_cast<CloseExitFn>(image+kCloseExit)(kGotoTitle);
@@ -202,7 +208,7 @@ bool EnsureRoutine(int mode,const char* decl) noexcept {
 }
 
 void* __fastcall CoRoutineHook(void* out,const std::wstring* decl) {
-    const int mode=pending.exchange(-1);
+    const int mode=Take(pending);
     if(mode<0 || !decl)return nextCoRoutine(out,decl);
     if(*decl!=L"string StartToTitle()") {
         Log("PACKSWITCH the HQ went to another routine (%ls): mode %d not switched to",decl->c_str(),mode);

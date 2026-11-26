@@ -1,6 +1,6 @@
 # HQ 主界面 Q / E 切换任务包（`src/pack_switch.cpp`）
 
-2026-11-26，静态逆向（`EDF.dll` TimeDateStamp `0x678CCB46`，地址为 RVA）。地址与契约由 `tests/pack_switch_native_audit.py` 对真文件核对，纯逻辑由 `tests/pack_switch_test.cpp` 覆盖。**未实机验证。**
+2026-11-26，静态逆向（`EDF.dll` TimeDateStamp `0x678CCB46`，地址为 RVA）。地址与契约由 `tests/pack_switch_native_audit.py` 对真文件核对，纯逻辑由 `tests/pack_switch_test.cpp` 覆盖。实机见 §5。
 
 ## 1. 需求与做法
 
@@ -41,3 +41,9 @@
 - **联机**：联机走待机房间，不经过 HQ 主菜单，房间的任务包在建房时定。房主在房间里切任务包并同步给客人，要走房间自己的换模式消息并更新房间属性（DLC / MISSION_NO / AF_PACK），另做。
 - **世界地图**：HQ 默认自动打开世界地图选关（`HqAutoMissionSelect=1`），地图上 `Q` / `E`、`LB` / `RB` 已用来切整备页签，所以只有回到 HQ 主菜单时才能切任务包。
 - **DLC 默认解锁**：没做。原版 DLC 任务包是付费内容，插件把未购买的 DLC 视作已拥有就是绕过购买，不做。本功能照原版归属判定跳过未拥有的包。
+
+## 5. 实机（2026-11-27，`drive.py run M001 --hq`）
+
+- 按键 E×4、ESC×3（总部根菜单）、Q、ESC、E、Q，七次都切了：日志 `PACKSWITCH E: mode 0 -> 2`、`2 -> 4`、`4 -> 6`、`6 -> 8`、`Q: 8 -> 6`、`E: 6 -> 8`、`Q: 8 -> 6`，每次后面都有 `StartToTitle -> string AF_PackSwitchN()` 和 `WEAPONREC save ...MAIN.GST`（照原版「回到标题」存档）。ESC 在根菜单不打开任何东西，不影响下一次切换；待切换模式在脚本下一个例程开始时取走（`Take`），不会残留。
+- **新旧两个 HQ 同时更新**：关掉的旧 `HUiHQMain` 在新 HQ 出现后还会再跑约 0.27 s 的 OnUpdate（日志里两个指针每帧交替 `ROOMUI screen A (HQ) replaced by B (HQ)`，每次切换 37 行）。`room_ui.cpp` 原来每次「换屏」都 Forget 并在该屏重新建原生「整备」按钮，交替的结果是新 HQ 的按钮列表里留下十几个孤儿「整备」按钮（截图：切换后「整备」压在「出击」上、列表出现滚动箭头）。修法：`room_ui_logic.h` `ScreenTrack`，被新对象替换的旧对象记为 retired，它的帧直接走原版更新，直到它的析构（`Unretire`）；正在跟随的对象先析构时清空 retired（还活着的旧对象可以重新跟随）。日志改为每次切换一行 `replaced by ...: the old one's frames pass through until it ends`，旧对象析构时一行 `ended after it was replaced (N of its frames passed through)`。
+- 原版 HQ 主菜单没有 Q / E（LB / RB）用途：`LYT_HUIHQMAIN.SGO` 只有按钮的 `CallWindow` / `set_close_exit` 等动作，没有翻页 / 肩键动作，底部按键提示只有「决定」；`HUiHQMain::OnUpdate`（`0x89F740`）只调基类更新和描述文本，不读按键。插件自己的世界地图与整备占用 Q / E 时（`MapHoldsKeys` / `armoryui::IsOpen`）不响应。
