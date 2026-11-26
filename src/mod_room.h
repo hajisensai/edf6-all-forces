@@ -72,8 +72,10 @@ namespace crew {
 //  22 (2026-11-26): a registered jet's engine lever goes to every peer (jet_lever_net.h AFJL, state stream jetLever): the
 //      other machines' engine sound, afterburner and exhaust read it instead of guessing from its speed. An older build
 //      would neither send it (its jets silent elsewhere: no guess any more) nor read it.
+//  23 (2026-11-26): a flown call's request carries its way in (sortie_plan.h RunSpec's heading-only form, the map's G /
+//      the caller's facing): an older build rejects that message (its RunValid wants half 0 with no heading).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=22;  // a registered jet's engine lever (jet_lever_net.h)
+constexpr std::int64_t kAllForcesRoomProtocol=23;  // a flown call's way in (sortie_plan.h RunSpec heading)
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

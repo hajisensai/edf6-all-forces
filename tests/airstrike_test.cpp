@@ -45,7 +45,7 @@ bool UltimateStart(const unsigned char* caller,const float*,float damage,std::ui
 unsigned char* playerHuman=nullptr;
 unsigned char* PlayerHuman() noexcept { return playerHuman; }
 int unpaidCalls=0;
-bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t) noexcept {++unpaidCalls;return true;}
+bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t,const sortie::RunSpec&) noexcept {++unpaidCalls;return true;}
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }   // the second waves (airstrike.cpp SupportFollowUpTick)
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
@@ -144,6 +144,23 @@ int main() {
            "the transport plane is planned in the air at the edge like any aircraft");
      SupportAircraft nothing{};nothing.count=1;
      Check(PlanAirSupport(nothing,supportTarget,observer,&route)==support::Refusal::unsupported,"a spec with no aircraft is refused");}
+    // The way in asked for (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」「应该直接进入航线才对」): a heading off the
+    // planner's 16 bearings comes in on it exactly, the entry on its line produced back from the target (no lap to line up).
+    {const float way[3]={0.5f,0.0f,0.8660254f};
+     support::Route asked;
+     Check(PlanAirSupport(call0,supportTarget,observer,&asked,way)==support::Refusal::none &&
+           std::fabs(asked.heading[0]-way[0])<1e-5f && std::fabs(asked.heading[2]-way[2])<1e-5f,
+           "the entry's heading is the one asked for, not the nearest of 16 bearings");
+     const float back[2]={asked.from[0]-supportTarget[0],asked.from[2]-supportTarget[2]};
+     Check(std::fabs(back[0]*way[2]-back[1]*way[0])<0.5f && back[0]*way[0]+back[1]*way[2]<-1000.0f,
+           "the entry stands on the attack line produced, short of the target");
+     const float other[3]={-0.8660254f,0.0f,-0.5f};
+     Check(PlanAirSupport(call0,supportTarget,observer,&asked,other)==support::Refusal::none &&
+           std::fabs(asked.heading[0]-other[0])<1e-5f && std::fabs(asked.heading[2]-other[2])<1e-5f,
+           "another way in turns the entry with it");
+     support::Route preview;
+     Check(PreviewAirRoute(call0,supportTarget,observer,&preview,other)==support::Refusal::none &&
+           !std::memcmp(preview.from,asked.from,12),"the map's preview shows the same way in");}
 
     // ---- The supports' prices (tools/calls.py Call.pt) ----
     for(int i=0;i<kCallCount;++i)Check(SupportAirCallPt(i)==kCalls[i].pt && kCalls[i].pt>=1000,"every flown support has its pt");

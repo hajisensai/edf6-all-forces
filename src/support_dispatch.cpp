@@ -520,7 +520,12 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
         Refuse(catalog,"invalid request or target (a strike is never planned)",L"支援请求或目标无效");return PlanResult::refused;
     }
     const auto run=out->run;
-    if(!sortie::RunValid(run) || (run.half>0.0f && !SupportGroundRun(static_cast<int>(catalog))))return PlanResult::refused;
+    if(!sortie::RunValid(run) || (run.half>0.0f && !SupportGroundRun(static_cast<int>(catalog))) ||
+       (sortie::HasHeading(run) && !SupportCatalogFlown(static_cast<int>(catalog))))return PlanResult::refused;
+    // The heading it comes in on (the requester's: the map's turned entry, or from them toward the target, sortie_plan.h
+    // RunSpec), the requester's own and not this machine's player's (online the host's): every flown entry's.
+    const float runHeading[3]={run.x,0.0f,run.z};
+    const float* const entryHeading=sortie::HasHeading(run) ? runHeading : nullptr;
     if(!SupportCfg().Enabled(static_cast<int>(catalog))) {
         Refuse(catalog,"disabled by SupportDisabled in EDF6VehicleCrew.ini",L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled）");
         return PlanResult::refused;
@@ -599,8 +604,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
                                                     catalog,route.from[0],route.from[1],route.from[2],n);
             else Log("SUPPORT plan catalog=%u: %s; from the map's edge",catalog,n ? "no takeoff point to climb out of" : "no takeoff point");
         }
-        const float approach[3]={target[0]-run.x*1000.0f,target[1],target[2]-run.z*1000.0f};
-        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,run.half>0.0f ? approach : player.pos,&route);
+        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,player.pos,&route,entryHeading);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
             else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
@@ -643,7 +647,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
                    L"运输机资源未安装：请用安装器重新安装");
             return PlanResult::refused;
         }
-        const auto refusal=PlanAirSupport(spec,target,player.pos,&route);
+        const auto refusal=PlanAirSupport(spec,target,player.pos,&route,entryHeading);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，运输机无法进入");
             else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
@@ -694,7 +698,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             Refuse(catalog,"container or vehicle not preloaded / airdrop profile off",L"集装箱或该车辆的资源不可用，无法投送");
             return PlanResult::refused;
         }
-        const auto refusal=PlanAirSupport(air,target,player.pos,&route);
+        const auto refusal=PlanAirSupport(air,target,player.pos,&route,entryHeading);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，运输直升机无法进入");
             else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
@@ -860,7 +864,8 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
     return result;
 }
 bool Validate(const SupportPlan& plan) noexcept {
-    if(!sortie::RunValid(plan.run) || (plan.run.half>0.0f && !SupportGroundRun(static_cast<int>(plan.catalogId))))return false;
+    if(!sortie::RunValid(plan.run) || (plan.run.half>0.0f && !SupportGroundRun(static_cast<int>(plan.catalogId))) ||
+       (sortie::HasHeading(plan.run) && !SupportCatalogFlown(static_cast<int>(plan.catalogId))))return false;
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
     if(plan.catalogId==commander::kCatalog)return ValidateCommanderPlan(plan);
     const bool dynamicDrone=plan.count==1 &&
@@ -1625,7 +1630,7 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
     localRequest.shown=false;note[0]=0;
     Configure();bool accepted=false;
     if(!Cfg().enabled || !target || index<0 || index>=SupportCallCount() || !sortie::RunValid(run) ||
-       (run.half>0.0f && !SupportGroundRun(index)))Status(L"支援请求不可用");
+       (run.half>0.0f && !SupportGroundRun(index)) || (sortie::HasHeading(run) && !SupportCatalogFlown(index)))Status(L"支援请求不可用");
     else if(load && load->count>0 && (!loadout || load->count>SupportCallSeats(index)))Status(hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
     else if(!SupportCfg().Enabled(index)) {
         // Known before any request leaves this machine: the host would refuse it with no detail.
@@ -1667,8 +1672,8 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
         if(accepted && followUp) {
             using support_net::RequestStatus;
             if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)
-                SupportFollowUpQueue(index,target,localRequest.id);
-            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)SupportFollowUpQueue(index,target,0);
+                SupportFollowUpQueue(index,target,localRequest.id,run);
+            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)SupportFollowUpQueue(index,target,0,run);
         }
         if(!accepted || !localRequest.hasNotice) {
             localRequest.shown=true;localRequest.acceptNotices=accepted;localRequest.hasNotice=false;
@@ -1699,9 +1704,9 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     return SupportCallComposedAt(index,target,nullptr,note,capacity);
 }
-bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity,const sortie::RunSpec& run) noexcept {
     if(!note || !capacity || index==SupportRescueCatalog())return false;
-    return Request(index,target,nullptr,0,false,note,capacity);
+    return Request(index,target,nullptr,0,false,note,capacity,nullptr,run);
 }
 std::uint32_t SupportCallPt(int index) noexcept {
     if(index<0 || index>=SupportCallCount() || index==SupportRescueCatalog())return 0;
@@ -1716,11 +1721,15 @@ int SupportCatalogStrike(int index) noexcept {
     return index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike) ? strike : -1;
 }
 bool SupportCatalogAir(int index) noexcept { return index>=0 && index<AirCount() && !SupportSubCatalog(index); }
-bool SupportPreviewEntry(int index,const float* target,float* from) noexcept {
+bool SupportCatalogFlown(int index) noexcept {
+    SupportAircraft spec;
+    return index>=0 && index<SupportCallCount() && AircraftSpecOf(static_cast<std::uint32_t>(index),&spec);
+}
+bool SupportPreviewEntry(int index,const float* target,float* from,const float* heading) noexcept {
     SupportAircraft spec;
     if(!from || !target || !SupportCatalogAir(index) || !SupportAircraftSpec(index,&spec) || !player.at || !PlayAreaMeasured())return false;
     support::Route route{};
-    if(PreviewAirRoute(spec,target,player.pos,&route)!=support::Refusal::none)return false;
+    if(PreviewAirRoute(spec,target,player.pos,&route,heading)!=support::Refusal::none)return false;
     std::memcpy(from,route.from,12);
     return true;
 }
@@ -1999,7 +2008,7 @@ void SupportDispatchTick() noexcept {
                 if(!made)Status(L"支援资源、真实机组或席位分配失败");
             }
             if(!made)SupportPointsRefund(offlineCharge);   // its plan refused or not made: its pt back, and no second wave
-            else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0);   // out: its second wave's wait starts
+            else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0,plan.run);   // out: its second wave's wait starts
             offlineCharge=0;offlineFollowUp=false;
         }
     }

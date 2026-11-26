@@ -507,13 +507,16 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
 // say (support_net).
 namespace {
 // `request`: the first wave's online request still open (0: the first is out, `due` set).
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0; };
+// `run`: the first wave's way in (its line too where the second flies one: SupportGroundRun).
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0;
+                  sortie::RunSpec run{}; };
 FollowUp followUps[8]{};
 }  // namespace
-void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept {
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request,const sortie::RunSpec& run) noexcept {
     if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
     for(auto& f:followUps)if(f.catalog<0) {
         f=FollowUp{};f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.afterMs=kCalls[catalog].thenMs;
+        f.run=run.half>0.0f && !SupportGroundRun(f.catalog) ? sortie::HeadingRun(run.x,run.z) : run;
         f.request=request;
         if(!request)f.due=GameMs()+f.afterMs;
         if(request)Log("SUPPORT %s: its second wave (%s) %lu s after request %u is out",kCalls[catalog].name,
@@ -544,7 +547,7 @@ void SupportFollowUpTick() noexcept {
         const FollowUp now=f;
         f=FollowUp{};
         wchar_t note[128]{};
-        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note));   // paid with the first; no wave of its own
+        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note),now.run);   // paid with the first; no wave of its own
         Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
         if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
     }
@@ -647,14 +650,18 @@ bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t ca
     return started;
 }
 namespace {
-support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                             bool logged) noexcept {
+support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,const float* heading,
+                             support::Route* route,bool logged) noexcept {
     // A spec that brings an aircraft: a jet row, a heli row, or the paratroop plane (no row of either).
     if(!route || !target || (spec.jet<0 && spec.heli<0 && !spec.transportPlane) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};
     // Host chooses the entire plan once. Peers receive its explicit matrices.
-    if(observer) {
+    // The way in asked for (the requester's, support_dispatch.cpp Plan), else from the observer toward the target.
+    if(heading && std::hypot(heading[0],heading[2])>1e-4f) {
+        const float d=std::hypot(heading[0],heading[2]);
+        direction[0]=heading[0]/d;direction[2]=heading[2]/d;
+    } else if(observer) {
         const float x=target[0]-observer[0],z=target[2]-observer[2],d=std::hypot(x,z);
         if(d>0.1f){direction[0]=x/d;direction[2]=z/d;}
     }
@@ -693,11 +700,13 @@ support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,con
     return refusal;
 }
 }  // namespace
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
-    return AirRouteFor(spec,target,observer,route,true);
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                const float* heading) noexcept {
+    return AirRouteFor(spec,target,observer,heading,route,true);
 }
-support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
-    return AirRouteFor(spec,target,observer,route,false);
+support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                 const float* heading) noexcept {
+    return AirRouteFor(spec,target,observer,heading,route,false);
 }
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

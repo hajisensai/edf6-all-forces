@@ -513,6 +513,11 @@ struct Sortie {
     const void* struck[8]{};
     int struckCount=0;
     sortie::Lap lap{};
+    // A marked strafe's (gunRun with runHalf): the lead its nose keeps on the line ahead (sortie_plan.h StrafeLead, set as
+    // its window opens), whether it came round once already after a miss (only once), and the side it came round on.
+    float strafeLead=0.0f;
+    bool reentered=false;
+    float reenterSide=1.0f;
 };
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is

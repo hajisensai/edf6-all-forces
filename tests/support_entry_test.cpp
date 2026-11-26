@@ -156,5 +156,15 @@ int main() {
     check(slots[1][2]*slots[2][2]<0,"the line alternates sides");
     float close[3];AirFormationSlot(lead,1,0.6f,close);
     check(std::fabs(close[2])<std::fabs(slots[1][2]),"helicopters fly closer");
+    // A way in between the 16 bearings (the user, 2026-11-26: 「应该直接进入航线才对」): in on it exactly, the entry on its
+    // line produced (22.5 deg quantised, the entry stood hundreds of metres beside a gun run's line and the jet flew a lap).
+    {const float way[3]={0.5f,0.0f,0.8660254f};
+     Route exact;
+     check(AirRoute(area,stock,target,observer,way,150,0,clear,mapGround(area),exact)==Refusal::none &&
+           std::fabs(exact.heading[0]-way[0])<1e-6f && std::fabs(exact.heading[2]-way[2])<1e-6f,"the heading asked for, exactly");
+     check(std::fabs((exact.from[0]-target[0])*way[2]-(exact.from[2]-target[2])*way[0])<0.5f,"the entry on its line produced");
+     const auto westBlocked=[&](const float* from,const float*){return !(from[0]<-100.0f && from[2]<-100.0f);};
+     check(AirRoute(area,stock,target,observer,way,150,0,westBlocked,mapGround(area),exact)==Refusal::none &&
+           exact.heading[0]*way[0]+exact.heading[2]*way[2]>0.85f && exact.heading[0]*way[0]+exact.heading[2]*way[2]<0.99f,"its corridor blocked: the nearest clear bearing to it");}
     std::printf("support_entry_test: %d checks passed\n",checks);
 }
