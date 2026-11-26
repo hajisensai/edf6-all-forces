@@ -307,4 +307,26 @@ check(img[0x51D46:0x51D52] == bytes.fromhex('4863435048c1e00448034328'),
 check(img[0x111B946:0x111B95B] ==
       bytes.fromhex('488b38e8b265f3fe4885ff742a488bd3488bceffd7'),
       'render pose: the dispatcher pops one unit, then calls its callback with context and read side')
+check(img[0x1100A18:0x1100A23] == bytes.fromhex('f3440f1048fcf30f1040f8') and
+      img[0x1100B01:0x1100B07] == bytes.fromhex('480510010000'),
+      'render palette: inverse bind starts at record+0x30, with 0x110 byte stride')
+check(rel_target(0x1100B72, 5) == 0x113F860 and
+      img[0x113F86A:0x113F86E] == bytes.fromhex('488b5108') and
+      img[0x113F883:0x113F886] == bytes.fromhex('488b12') and
+      img[0x113D240:0x113D24E] == bytes.fromhex('488b49084c8b1149ffa280010000'),
+      'render palette: native inst+0x50 leads to the buffer, and the context dispatches UpdateSubresource')
+umbra_path = os.path.join(os.path.dirname(path), 'umbra_sandlot.dll')
+if os.path.isfile(umbra_path):
+    umbra = pefile.PE(umbra_path)
+    umbra_img = umbra.get_memory_mapped_image()
+    umbra_base = umbra.OPTIONAL_HEADER.ImageBase
+    umbra_imports = {i.address-umbra_base:i.name for lib in umbra.DIRECTORY_ENTRY_IMPORT for i in lib.imports}
+    checked_exports = {e.name:e.address for e in umbra.DIRECTORY_ENTRY_EXPORT.symbols}
+    if checked_exports.get(b'?resolveVisibility@Camera@Umbra@@QEBAXXZ') == 0x2CF60:
+        def umbra_rel(at, size):
+            return at + size + struct.unpack_from('<i', umbra_img, at+size-4)[0]
+        check(umbra_rel(0x2CFFA, 5) == 0x81F0 and umbra_rel(0x81F9, 5) == 0x8260 and
+              umbra_rel(0x8206, 5) == 0x8210 and umbra_rel(0x8246, 5) == 0x30D00 and
+              umbra_imports.get(umbra_rel(0x30D07, 7)) == b'ReleaseSemaphore',
+              'Umbra resolve submits work and wakes its own worker')
 print(f'frame rate signatures: {checks} checks ok')

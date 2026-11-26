@@ -58,6 +58,7 @@
 // frame without ticks that does not fit leaves the rest as stepped and asks for more at the next tick. Online: only what
 // is drawn changes, on frames that send nothing.
 #include "frame_rate_objects.h"
+#include "render_pose.h"
 #include "fp_view.h"
 #include "thermal_models.h"
 #include "scene_object.h"
@@ -319,6 +320,7 @@ bool PoseModel(const Who& who,const Part& part,const float* d) noexcept {
         std::uint64_t n=0;
         float* const pose=PoseOf(insts[i],&n);
         if(!pose || posedIndex.Find(pose)>=0)continue;
+        if(renderpose::stagePose && renderpose::stagePose(insts[i],d))continue;
         const std::size_t floats=static_cast<std::size_t>(n)*16;
         if(posed.size()>=posed.capacity() || posedBefore.size()+floats>posedBefore.capacity() ||
            posedAfter.size()+floats>posedAfter.capacity() || (posedIndex.Size()+1)*2>posedIndex.Capacity()) {

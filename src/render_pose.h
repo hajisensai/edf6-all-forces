@@ -4,6 +4,11 @@ namespace crew::renderpose {
 // Install at plugin load, before the game starts recording commands.
 bool Install() noexcept;
 
+// During recording, reserve a private output for a tracked instance and attach
+// its draw-space transform. False leaves the caller's native path available.
+using StagePose=bool(*)(const unsigned char*,const float*) noexcept;
+inline thread_local StagePose stagePose=nullptr;
+
 // The current native queue recording's frozen matrices, when one is active.
 using FrozenPose=const float*(*)(const unsigned char*) noexcept;
 inline thread_local FrozenPose frozenPose=nullptr;

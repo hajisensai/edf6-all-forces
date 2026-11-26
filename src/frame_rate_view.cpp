@@ -43,6 +43,7 @@
 #include "frame_rate_view.h"
 #include "frame_rate_objects.h"
 #include "render_record.h"
+#include "render_pose.h"
 #include "frame_rate_logic.h"
 #include "fp_view.h"
 #include "heli.h"
@@ -216,6 +217,7 @@ void PoseModel(const unsigned char* model,const fpview::M4& d) {
         bool done=false;
         for(const Posed& p:posed)done=done || p.pose==pose;
         if(done)continue;
+        if(renderpose::stagePose && renderpose::stagePose(insts[i],d.m))continue;
         // The record and both copies before the first write: a fault part way leaves nothing it cannot put back.
         const std::size_t at=posedBefore.size();
         posedBefore.insert(posedBefore.end(),pose,pose+n*16);

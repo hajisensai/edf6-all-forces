@@ -2227,6 +2227,7 @@ add_test(NAME render_record COMMAND render_record_test)
 
 add_executable(render_pose_test EXCLUDE_FROM_ALL tests/render_pose_test.cpp)
 target_include_directories(render_pose_test PRIVATE src common)
+target_link_libraries(render_pose_test PRIVATE d3d11)
 target_compile_options(render_pose_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks render_pose_test)
 add_test(NAME render_pose COMMAND render_pose_test)

@@ -14,7 +14,7 @@ namespace crew::renderpose {
 namespace {
 constexpr unsigned kWrite=0x1100F10,kPalette=0x11009A0,kMesh=0x1103DA0;
 constexpr unsigned kAlloc=0x51D00,kCommit=0x51D60,kCommands=0x2136FF0,kRing=0x28A8;
-constexpr unsigned kBones=0x10,kCount=0x20,kPose=0x30;
+constexpr unsigned kBones=0x10,kCount=0x20,kPose=0x30,kPaletteHolder=0x50,kBoneStride=0x110,kInverseBind=0x30;
 constexpr unsigned char kWriteSig[]={0x33,0xD2,0x4C,0x8B,0xC1,0x48,0x39,0x51,0x20,0x76,0x52};
 constexpr unsigned char kPaletteSig[]={0xB8,0x78,0xC0,0x00,0x00,0xE8,0x56,0x7D,0x1D,0x00,0x48,0x2B,0xE0};
 constexpr unsigned char kMeshSig[]={0x4C,0x89,0x4C,0x24,0x20,0x48,0x89,0x4C,0x24,0x08,0x55,0x53,0x57};
@@ -60,6 +60,34 @@ bool Copy(const Skeleton& key,Matrix* destination) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
 }
 
+ID3D11Buffer* NativePalette(const unsigned char* inst) noexcept {
+    const auto holder=edf::At<const unsigned char*>(inst,kPaletteHolder);
+    return holder ? edf::At<ID3D11Buffer*>(holder,0) : nullptr;
+}
+
+ID3D11Buffer* CapturePalette(const Skeleton& key,Matrix* inverse) noexcept {
+    __try {
+        const auto* inst=static_cast<const unsigned char*>(key.instance);
+        if(!(Identify(inst)==key))return nullptr;
+        auto* const buffer=NativePalette(inst);
+        if(!buffer)return nullptr;
+        D3D11_BUFFER_DESC desc{};
+        buffer->GetDesc(&desc);
+        if(desc.ByteWidth!=key.count*sizeof(PackedBone) || desc.Usage!=D3D11_USAGE_DEFAULT ||
+           !(desc.BindFlags&D3D11_BIND_CONSTANT_BUFFER))return nullptr;
+        const auto* bones=static_cast<const unsigned char*>(key.bones);
+        for(std::size_t i=0;i<key.count;++i)std::memcpy(inverse+i,bones+i*kBoneStride+kInverseBind,sizeof(Matrix));
+        // All fallible native reads precede the retained reference.
+        buffer->AddRef();
+        return buffer;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return nullptr;}
+}
+
+bool Stage(const unsigned char* inst,const float* transform) noexcept {
+    __try {return capture && capture->Stage(Identify(inst),transform,&Copy);}
+    __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+
 const float* ReadFrozen(const unsigned char* inst) noexcept {
     __try {
         if(const auto* copy=reading->Lookup(Identify(inst)))return copy->elements;
@@ -87,9 +115,24 @@ const PoseList* Select(const unsigned char* inst,const PoseList* source,PoseList
     return source;
 }
 
+bool UploadPalette(const unsigned char* inst,void* context,const PoseList& list) noexcept {
+    __try {
+        auto* const buffer=NativePalette(inst);
+        const auto* packed=reading->Palette(Identify(inst),list.matrix,buffer);
+        if(!packed)return false;
+        auto* const d3d=context ? edf::At<ID3D11DeviceContext*>(context,8) : nullptr;
+        if(!d3d)return false;
+        // Same subresource and whole-buffer update as the native 0x113F860 path.
+        d3d->UpdateSubresource(buffer,0,nullptr,packed,0,0);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+}
+
 std::uintptr_t __fastcall Palette(const unsigned char* inst,void* context,const PoseList* source) {
     PoseList own{};
-    return stockPalette(inst,context,Select(inst,source,own));
+    const auto* list=Select(inst,source,own);
+    if(list==&own && UploadPalette(inst,context,own))return 0;
+    return stockPalette(inst,context,list);
 }
 
 std::uintptr_t __fastcall Mesh(void* lod,void* context,int pass,const unsigned char* inst,const PoseList* source,unsigned char flags) {
@@ -127,6 +170,7 @@ void Enqueue(QueueCallback command) noexcept {
 void Before() noexcept {
     for(auto& slot:frames)if(slot.Begin()) {
         capture=&slot;
+        stagePose=&Stage;
         return;
     }
 }
@@ -134,13 +178,15 @@ void Before() noexcept {
 void Project(void*,const int*,bool first) noexcept {
     if(!first || !capture)return;
     Frame* frame=capture;
+    stagePose=nullptr;
     capture=nullptr;
-    if(!frame->Seal(&Copy))return;
+    if(!frame->Seal(&Copy,&CapturePalette))return;
     queued=frame;
     Enqueue(kOpen[frame-frames.data()]);
 }
 
 void After() noexcept {
+    stagePose=nullptr;
     if(capture) {
         capture->Cancel();
         capture=nullptr;

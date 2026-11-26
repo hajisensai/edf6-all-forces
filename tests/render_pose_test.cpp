@@ -32,16 +32,35 @@ void Check(bool ok,const char* label) {
     if(!ok){++failures;std::printf("FAIL %s\n",label);}
 }
 struct Instance {
-    alignas(16) unsigned char bytes[0x40]{};
+    alignas(16) unsigned char bytes[0x60]{};
     Matrix pose[2]{};
     Instance() {
         edf::Put<const void*>(bytes,kBones,bytes);
         edf::Put<std::uint64_t>(bytes,kCount,2);
         edf::Put<Matrix*>(bytes,kPose,pose);
+        for(auto& bone:pose)for(int i=0;i<4;++i)bone.elements[i*5]=1.0f;
     }
     const PoseList* Source() const noexcept {return reinterpret_cast<const PoseList*>(bytes+0x28);}
     void Set(float mark){pose[1].elements[12]=mark;}
 };
+struct TestBuffer final : ID3D11Buffer {
+    ULONG references=1;
+    UINT size=2*sizeof(PackedBone);
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID,void**) override {return E_NOINTERFACE;}
+    ULONG STDMETHODCALLTYPE AddRef() override {return ++references;}
+    ULONG STDMETHODCALLTYPE Release() override {return --references;}
+    void STDMETHODCALLTYPE GetDevice(ID3D11Device**) override {}
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID,UINT*,void*) override {return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID,UINT,const void*) override {return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID,const IUnknown*) override {return E_NOTIMPL;}
+    void STDMETHODCALLTYPE GetType(D3D11_RESOURCE_DIMENSION* type) override {*type=D3D11_RESOURCE_DIMENSION_BUFFER;}
+    void STDMETHODCALLTYPE SetEvictionPriority(UINT) override {}
+    UINT STDMETHODCALLTYPE GetEvictionPriority() override {return 0;}
+    void STDMETHODCALLTYPE GetDesc(D3D11_BUFFER_DESC* desc) override {
+        *desc={size,D3D11_USAGE_DEFAULT,D3D11_BIND_CONSTANT_BUFFER,0,0,0};
+    }
+};
+
 std::deque<QueueCallback> queue;
 QueueCallback cell=nullptr;
 float paletteValue=0.0f,meshValue=0.0f;
@@ -91,6 +110,9 @@ void Pipeline() {
     Write(body.bytes);
     // The first projection includes final interpolation edits made after the writer.
     body.Set(11);
+    const float delta[]={1,0,0,0,0,1,0,0,0,0,1,0,4,0,0,1};
+    Check(stagePose && stagePose(body.bytes,delta) && body.pose[1].elements[12]==11,
+          "staging accepts the transform without touching the live skeleton");
     Project(nullptr,nullptr,true);
     Project(nullptr,nullptr,false);
     After();
@@ -105,7 +127,8 @@ void Pipeline() {
     body.Set(30);
     Check(queue.size()==4,"two in-flight recordings keep distinct slots");
     Take();
-    Draw(body,11);
+    Draw(body,15);
+    Draw(body,15);
     Matrix viewmodel[2]{};
     viewmodel[1].elements[12]=31;
     const Override override[]{ {body.bytes,viewmodel[0].elements} };
@@ -125,7 +148,7 @@ void Pipeline() {
     Mesh(nullptr,nullptr,3,body.bytes,&explicitCustom,1);
     Check(paletteValue==88 && meshValue==88,"an explicit native pose list is not replaced by any snapshot");
     drawOverrides=nullptr;
-    Draw(body,11);
+    Draw(body,15);
     Take();
     Draw(body,30);
     Take();
@@ -139,7 +162,7 @@ void Pipeline() {
     Before();
     Write(body.bytes);
     After();   // loading and canceled recordings can return without any projection
-    Check(queue.empty() && !capture,"no-projection recording returns its slot without emitting commands");
+    Check(queue.empty() && !capture && !stagePose,"no-projection recording returns its slot without emitting commands");
 }
 
 void BoundedBacklog() {
@@ -164,6 +187,118 @@ void BoundedBacklog() {
         Take();
     }
     Check(queue.empty(),"all slots are released in FIFO order");
+}
+
+void PaletteOwnership() {
+    Frame frame;
+    Instance model;
+    TestBuffer buffer;
+    ID3D11Buffer* holder=&buffer;
+    alignas(16) unsigned char records[2*kBoneStride]{};
+    edf::Put<void*>(model.bytes,kBones,records);
+    edf::Put<void*>(model.bytes,kPaletteHolder,&holder);
+    Matrix bind{};
+    for(int i=0;i<4;++i)bind.elements[i*5]=1.0f;
+    bind.elements[12]=2.0f;
+    for(int i=0;i<2;++i)std::memcpy(records+i*kBoneStride+kInverseBind,&bind,sizeof(bind));
+
+    const auto key=Identify(model.bytes);
+    model.Set(8);
+    Check(frame.Begin(),"a free slot starts a binding capture");
+    frame.Observe(key);
+    Check(frame.Seal(&Copy,&CapturePalette) && buffer.references==2,
+          "sealing copies inverse binds and retains the actual constant buffer");
+    std::memset(records,0xA5,sizeof(records));
+    model.Set(500);
+    buffer.Release();  // the native owner's reference can go before frame retirement
+    Check(frame.Open() && buffer.references==1,"the pending frame owns the last buffer reference");
+    const auto* frozen=frame.Lookup(key);
+    const auto* palette=frame.Palette(key,frozen,&buffer);
+    Check(palette && palette[1].columns[3]==10.0f,"packing uses the recorded world matrix and inverse bind");
+    Check(frame.Palette(key,frozen,&buffer)==palette,"repeated passes reuse the packed palette");
+    TestBuffer replacement;
+    Check(!frame.Palette(key,frozen,&replacement) && !frame.Palette(key,model.pose,&buffer),
+          "rebinding the buffer or explicitly overriding a pose bypasses the packed palette");
+    frame.Retire();
+    Check(buffer.references==0,"retirement releases the retained D3D resource");
+
+    holder=&replacement;
+    replacement.size+=16;
+    Check(frame.Begin(),"the retired slot can be reused");
+    frame.Observe(key);
+    Check(frame.Seal(&Copy,&CapturePalette) && frame.Open() && replacement.references==1 &&
+          !frame.Palette(key,frame.Lookup(key),&replacement),"nonmatching buffer widths preserve the native upload");
+    frame.Retire();
+}
+
+void WarpPaletteUpload() {
+    ID3D11Device* device=nullptr;
+    ID3D11DeviceContext* context=nullptr;
+    if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,
+                                 &device,nullptr,&context))) {
+        std::puts("WARP unavailable, skipping software D3D upload check");
+        return;
+    }
+    Instance model;
+    alignas(16) unsigned char records[2*kBoneStride]{};
+    edf::Put<void*>(model.bytes,kBones,records);
+    Matrix bind{};
+    for(int i=0;i<4;++i)bind.elements[i*5]=1.0f;
+    for(int i=0;i<2;++i)std::memcpy(records+i*kBoneStride+kInverseBind,&bind,sizeof(bind));
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth=2*sizeof(PackedBone);
+    desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    ID3D11Buffer* target=nullptr;
+    ID3D11Buffer* readback=nullptr;
+    const HRESULT create=device->CreateBuffer(&desc,nullptr,&target);
+    desc.BindFlags=0;
+    desc.Usage=D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    const HRESULT staging=device->CreateBuffer(&desc,nullptr,&readback);
+    Check(SUCCEEDED(create) && SUCCEEDED(staging),"software D3D creates matching constant and staging buffers");
+    if(target && readback) {
+        edf::Put<void*>(model.bytes,kPaletteHolder,&target);
+        void* nativeContext[2]={nullptr,context};
+        model.Set(42);
+        Before();
+        // Record the real native identity, then let the producer move the live pose.
+        capture->Observe(Identify(model.bytes));
+        Project(nullptr,nullptr,true);
+        After();
+        model.Set(77);
+        Take();
+        Check(Palette(model.bytes,nativeContext,model.Source())==0,"the covered draw uses the captured upload path");
+        context->CopyResource(readback,target);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if(SUCCEEDED(context->Map(readback,0,D3D11_MAP_READ,0,&mapped))) {
+            const auto* p=static_cast<const PackedBone*>(mapped.pData);
+            Check(p[1].columns[3]==42.0f,"D3D received the recorded palette rather than the live pose");
+            context->Unmap(readback,0);
+        } else Check(false,"the software render buffer can be read back");
+        Take();
+    }
+    if(readback)readback->Release();
+    if(target)target->Release();
+    context->Release();
+    device->Release();
+}
+
+void MatrixPacking() {
+    Matrix bind{},world{};
+    for(int i=0;i<16;++i) {
+        bind.elements[i]=static_cast<float>(i-9)*0.25f;
+        world.elements[i]=static_cast<float>((i*7)%19-5)*0.125f;
+    }
+    PackedBone packed{};
+    PackBone(bind,world,packed);
+    bool equal=true;
+    for(int c=0;c<3;++c)for(int r=0;r<4;++r) {
+        const auto* b=bind.elements+4*r;
+        const auto* p=world.elements+c;
+        const float expected=(b[0]*p[0]+b[1]*p[4])+(b[2]*p[8]+b[3]*p[12]);
+        equal=equal && packed.columns[c*4+r]==expected;
+    }
+    Check(equal,"all 12 outputs match the native inverse-bind product and column layout");
 }
 
 void Lifetime() {
@@ -200,6 +335,9 @@ void Lifetime() {
 int main() {
     Pipeline();
     BoundedBacklog();
+    PaletteOwnership();
+    MatrixPacking();
+    WarpPaletteUpload();
     Lifetime();
     std::printf("render_pose: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
