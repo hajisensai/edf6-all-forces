@@ -3,12 +3,16 @@
 //    pow 0.25) give 0.75 rad at the burst's first round and none at its end; SweepDir turns a level direction down by
 //    it (kSweepSign +1), keeps the yaw, gives +Z for a zero direction, and the burst's progress (0x6B4080) is
 //    1 - left / count;
-//  - the rounds still to come and the sampled ones (the next and the last always in, in firing order);
+//  - the rounds still to come by the burst's state (0x6B4100 waiting: the whole burst; 0x6B4080 sweeping: those left, or
+//    with none left and the trigger held the whole next one, along the old frozen direction) and the sampled ones (the
+//    next and the last always in, in firing order);
 //  - a hit sphere's centre (0x6BB420): offset (x, y, z, w) times the bone's rows;
 //  - the combo's availability (0x60F570's rule) and the variant match over both generated tables: a jab opens from
 //    idle only, a follow-up only after the attack it follows, a stomp needs flag 1, nothing while the input is not
 //    accepted; a list one entry off matches none;
-//  - the fists' picks and their ground arcs (on the feet's plane, reach + radius out, centred on the reach's bearing).
+//  - the fists' picks by button (mask 1 left, 2 right; V515's maxBeat is a right-button move led by the left arm) and
+//    their arcs (at the strike's height, reach + radius out, centred on the reach's bearing), and that the arc lies in
+//    the view from the cockpit's eye (41.3 m over the feet, as the 2026-11-27 run logged) where a ground arc did not.
 // Exit code 1 when one fails. cmake --build build --target barga_aim_check && build\barga_aim_check.exe
 #include "barga_aim.h"
 #include <cmath>
@@ -70,10 +74,15 @@ void Sweeps() {
 }
 
 void Rounds() {
-    Expect(RoundsToCome(17,60,true)==17,"bursting: the rounds left");
-    Expect(RoundsToCome(0,60,false)==60,"before: the whole burst");
-    Expect(RoundsToCome(90,60,true)==60,"clamped to the burst");
-    Expect(RoundsToCome(5,0,true)==0,"no burst");
+    using S=SweepState;
+    Expect(RoundsToCome(S::sweeping,17,60,false)==17,"sweeping: the rounds left");
+    Expect(RoundsToCome(S::waiting,0,60,false)==60,"waiting: the whole burst");
+    Expect(RoundsToCome(S::sweeping,90,60,false)==60,"clamped to the burst");
+    Expect(RoundsToCome(S::sweeping,5,0,true)==0,"no burst");
+    Expect(RoundsToCome(S::sweeping,0,60,true)==60,"none left, trigger held: the next burst again");
+    Expect(RoundsToCome(S::sweeping,0,60,false)==0,"none left, let go: none");
+    Expect(RoundsToCome(S::other,10,60,true)==0,"an unknown handler: none");
+    Expect(FromFrozen(S::sweeping) && !FromFrozen(S::waiting) && !FromFrozen(S::other),"the frozen direction only while sweeping");
     int left[kMostRounds];
     Expect(SampleRounds(5,kMostRounds,left)==5 && left[0]==5 && left[4]==1,"few: each");
     const int n=SampleRounds(60,kMostRounds,left);
@@ -149,8 +158,31 @@ void Arcs() {
     Expect(ReachArc(a,kArcHalfSpan,kArcPoints,pts)==kArcPoints,"arc points");
     const float r=Horizontal(a)+a.radius,bearing=std::atan2(a.reach[0],a.reach[2]);
     bool onCircle=true;
-    for(const auto& p:pts)onCircle=onCircle && Near(std::sqrt(p[0]*p[0]+p[2]*p[2]),r,1e-3f) && p[1]==0.0f;
-    Expect(onCircle,"on the feet's plane at reach + radius",r);
+    for(const auto& p:pts)onCircle=onCircle && Near(std::sqrt(p[0]*p[0]+p[2]*p[2]),r,1e-3f) && p[1]==a.reach[1];
+    Expect(onCircle,"at the strike's height at reach + radius",r);
+    // In the view from the cockpit: the eye the 2026-11-27 run logged ("eye at its cockpit (-295.45 42.27 158.07)", the
+    // vehicle at (-301,1,155) heading (0.86,0,0.51): 41.3 m up, 6.3 m ahead). The view is pi/4 high (docs/zoom-re.md:
+    // 0xF8906, fovY pi/4 over the zoom; the seat's camera is the soldier's), pi/8 either side of its middle. Looking level,
+    // the idle arcs (the opening attacks, the jabs) are within it; a ground arc (y 0) was some 50 deg under it. (The
+    // low follow-ups, maxBeat's downward beat, land lower: in view as the player looks down at them.)
+    constexpr float kEyeUp=41.3f,kEyeAhead=6.3f,kInView=3.14159265f/8.0f;
+    float worst=0.0f;
+    for(int vi=0;vi<kVariantCount;++vi)
+        for(int i=0;i<kVariants[vi].count;++i) {
+            const Attack& x=kVariants[vi].attacks[i];
+            if(FistSide(x)<0 || x.limb<0 || x.prevCount!=0 || x.flag!=0)continue;
+            float arc[kArcPoints][3];
+            ReachArc(x,kArcHalfSpan,kArcPoints,arc);
+            for(const auto& p:arc) {
+                const float ahead=p[2]-kEyeAhead,flat=std::sqrt(p[0]*p[0]+ahead*ahead);
+                worst=std::fmax(worst,std::fabs(std::atan2(p[1]-kEyeUp,flat)));
+            }
+        }
+    Expect(worst<kInView,"the idle arcs in the level view from the eye (rad)",worst,kInView);
+    {
+        const float ahead=r*std::cos(bearing)-kEyeAhead,flat=std::sqrt(r*std::sin(bearing)*r*std::sin(bearing)+ahead*ahead);
+        Expect(std::fabs(std::atan2(-kEyeUp,flat))>kInView,"a ground arc would be out of it",std::atan2(-kEyeUp,flat));
+    }
     const auto& mid=pts[kArcPoints/2];
     Expect(Near(std::atan2(mid[0],mid[2]),bearing),"centred on the bearing",std::atan2(mid[0],mid[2]),bearing);
     Expect(Near(std::atan2(pts[0][0],pts[0][2]),bearing-kArcHalfSpan) &&
@@ -163,6 +195,26 @@ void Arcs() {
             if(x.limb<0)continue;
             Expect(x.reach[2]>5.0f && x.reach[1]>0.0f && x.radius>0.0f,x.name,x.reach[2],x.reach[1]);
         }
+    // The sides by button: every fist attack's mask is 1 or 2 and FistSide follows it; V515's maxBeat (mask 2, led by
+    // the left arm) is on the right, as V605's.
+    for(int vi=0;vi<kVariantCount;++vi) {
+        const Variant& v=kVariants[vi];
+        for(int i=0;i<v.count;++i) {
+            const Attack& x=v.attacks[i];
+            if(x.limb==kLeft || x.limb==kRight)
+                Expect((x.mask==kLeftButton && FistSide(x)==kLeft) || (x.mask==kRightButton && FistSide(x)==kRight),x.name,
+                       static_cast<float>(x.mask),static_cast<float>(FistSide(x)));
+        }
+        Expect(FistSide(v.attacks[Find(v,"maxBeat")])==kRight,"maxBeat on the right button");
+        Expect(FistSide(v.attacks[Find(v,"stomp_l")])<0 && FistSide(v.attacks[Find(v,"ground_charge")])<0,"no fist side");
+    }
+    {
+        const Variant& v=kVariants[0];
+        const int charge=v.charge,beat=Find(v,"maxBeat");
+        const FistPick l=PickFist(v,kLeft,charge,true,0),r2=PickFist(v,kRight,charge,true,0);
+        Expect(r2.next==beat,"after ground_charge: maxBeat lights the right",static_cast<float>(r2.next));
+        Expect(l.next==Find(v,"maxHook_l"),"and maxHook_l the left",static_cast<float>(l.next));
+    }
     // The left jab on the left hand's side (+X), the right on the other.
     for(int vi=0;vi<kVariantCount;++vi) {
         const Variant& v=kVariants[vi];

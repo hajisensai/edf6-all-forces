@@ -59,16 +59,24 @@ inline bool Available(const Variant& v,int i,int current,bool accept,unsigned fl
     return false;
 }
 
-// A fist's reach for the marker: `next` the farthest of the attacks of that fist (limb kLeft / kRight) that may start
-// now (Available), else -1; `base` the farthest of its opening attacks (following nothing, no flag: the jab), drawn
-// dim when none may start.
+// The button side an attack is on: its input mask 1 the left fist's button (LB), 2 the right's (RB; the 2026-11-27 run:
+// pad_rb started attack 1, jab_r), else -1 (the feet, the charge, the cannon). By the button, not by `limb`: the limb is
+// the one the generator saw move forward most, and a whole-body move may lead with the other arm (V515's maxBeat, on
+// the right button, has its left arm farthest out); the reach drawn stays the limb's.
+constexpr int kLeftButton=1,kRightButton=2;
+inline int FistSide(const Attack& a) noexcept {
+    return a.mask==kLeftButton ? kLeft : a.mask==kRightButton ? kRight : -1;
+}
+// A fist's reach for the marker: `next` the farthest of the attacks on that side's button (FistSide kLeft / kRight)
+// that may start now (Available), else -1; `base` the farthest of its opening attacks (following nothing, no flag: the
+// jab), drawn dim when none may start.
 struct FistPick { int next,base; };
 inline float Horizontal(const Attack& a) noexcept { return std::sqrt(a.reach[0]*a.reach[0]+a.reach[2]*a.reach[2]); }
 inline FistPick PickFist(const Variant& v,int side,int current,bool accept,unsigned flags) noexcept {
     FistPick p{-1,-1};
     for(int i=0;i<v.count;++i) {
         const Attack& a=v.attacks[i];
-        if(a.limb!=side)continue;
+        if(FistSide(a)!=side || a.limb<0)continue;
         if(a.prevCount==0 && a.flag==0 && (p.base<0 || Horizontal(a)>Horizontal(v.attacks[p.base])))p.base=i;
         if(Available(v,i,current,accept,flags) && (p.next<0 || Horizontal(a)>Horizontal(v.attacks[p.next])))p.next=i;
     }
@@ -80,14 +88,17 @@ inline void ModelToWorld(const float* rows,const float* p,float* out) noexcept {
     for(int k=0;k<3;++k)out[k]=p[0]*rows[k]+p[1]*rows[4+k]+p[2]*rows[8+k]+rows[12+k];
 }
 
-// The ground arc of a reach: `n` points (n >= 2) on the feet's plane (model y 0) at the reach's horizontal distance
-// plus its radius, `halfSpan` rad either side of its bearing, in the model's frame.
+// The arc of a reach: `n` points (n >= 2) at the height the fist strikes (the reach's model y) at the reach's horizontal
+// distance plus its radius, `halfSpan` rad either side of its bearing, in the model's frame. Not on the feet's plane:
+// the Balam's eye is about 41 m over its feet (the 2026-11-27 run: "FP in a vehicle ... eye at its cockpit" 41.3 m over
+// the vehicle's position) and the fist ends about 30 m ahead, so a ground arc lies some 50 deg under the view's middle,
+// off the screen; the fist's own height is where it lands.
 inline int ReachArc(const Attack& a,float halfSpan,int n,float (*out)[3]) noexcept {
     if(n<2)return 0;
     const float r=Horizontal(a)+a.radius,bearing=std::atan2(a.reach[0],a.reach[2]);
     for(int i=0;i<n;++i) {
         const float b=bearing-halfSpan+2.0f*halfSpan*static_cast<float>(i)/static_cast<float>(n-1);
-        out[i][0]=r*std::sin(b);out[i][1]=0.0f;out[i][2]=r*std::cos(b);
+        out[i][0]=r*std::sin(b);out[i][1]=a.reach[1];out[i][2]=r*std::cos(b);
     }
     return n;
 }
@@ -126,11 +137,23 @@ inline void SweepDir(const float* forward,float angle,float* dir) noexcept {
     const float e=pitch-kSweepSign*angle;
     dir[0]=std::sin(yaw)*std::cos(e);dir[1]=std::sin(e);dir[2]=std::cos(yaw)*std::cos(e);
 }
-// The rounds still to come: `left` (+0xE18) while a burst runs, the whole burst (`count`, +0x370) before it.
-inline int RoundsToCome(int left,int count,bool bursting) noexcept {
+// Where the burst's state machine (weapon +0x1650, its handler at +0x1668: 0x6B3FE0 stores it at +0x18) is:
+//  - waiting (0x6B4100): the next burst freezes the source's direction (*(+0x120) +0x80) and starts at t 0;
+//  - sweeping (0x6B4080): each round along the frozen +0x1670. Its t is 1 - left / count, but with no round left and
+//    the trigger still held (0x691080: +0x13D, or +0x13A for a single-round weapon not set to +0x143) it takes left as
+//    count, so the next burst sweeps again from t 0 along the OLD frozen direction (no re-freeze); with the trigger let
+//    go it goes back to waiting.
+enum class SweepState { other, waiting, sweeping };
+// Whether the frozen direction (+0x1670) is the one the rounds to come leave along (else the source's).
+inline bool FromFrozen(SweepState s) noexcept { return s==SweepState::sweeping; }
+// The rounds still to come: waiting, the whole burst (`count`, +0x370); sweeping, `left` (+0xE18), or with none left
+// and the trigger `held` the whole next burst (0x6B4080 above); else none.
+inline int RoundsToCome(SweepState s,int left,int count,bool held) noexcept {
     if(count<=0)return 0;
-    if(!bursting)return count;
-    return left<0 ? 0 : left>count ? count : left;
+    if(s==SweepState::waiting)return count;
+    if(s!=SweepState::sweeping)return 0;
+    if(left<=0)return held ? count : 0;
+    return left>count ? count : left;
 }
 // `most` of the `toCome` rounds, evenly spread, the next one and the last always in: each as the `left` it is fired
 // with (toCome down to 1). Returns how many.
@@ -151,7 +174,7 @@ constexpr int kRingEvery=4;
 struct FistArc {
     bool on,next;              // next: an attack of this fist may start now (drawn bright), else its opening one dim
     int attack;                // its index in the variant's table
-    float pts[kArcPoints][3];  // the ground arc
+    float pts[kArcPoints][3];  // the reach arc (at the strike's height)
     float strike[3];           // the sphere's centre at its reach
 };
 struct Sphere {

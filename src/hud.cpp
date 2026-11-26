@@ -2951,20 +2951,25 @@ void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,
     Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
     Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
 }
-// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md): its fists' reach on the ground (green on the side
+// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md): its fists' reach at their height (green on the side
 // whose attack may start now, dim the other), its lit hit spheres (a ring as wide as the sphere looks; red where one
 // touches the ground, a cross where it meets the ground under it, a target ring on an enemy in its sweep), and V605's
-// cannon (a line through where the rounds still to come land, their blast rings every kRingEvery and the last).
-void WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float height,const float (*pts)[3],int n,float t,
-                   const float* rgba) noexcept {
+// cannon (a line through where the rounds still to come land, their blast rings every kRingEvery and the last; a round
+// that lands nowhere is left out).
+// Returns how many of the points are on the screen (the Debug=1 "BARGA draw" line).
+int WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float height,const float (*pts)[3],int n,float t,
+                  const float* rgba) noexcept {
     float px=0.0f,py=0.0f;
     bool had=false;
+    int shown=0;
     for(int i=0;i<n;++i) {
         float x,y,depth;
         const bool on=Project(vp,pts[i],width,height,&x,&y,&depth);
         if(on && had)Seg(drawer,ctx,px,py,x,y,t,rgba);
+        shown+=on ? 1 : 0;
         had=on;px=x;py=y;
     }
+    return shown;
 }
 void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,const float* c,float radius,float t,
                const float* rgba) noexcept {
@@ -2978,16 +2983,26 @@ void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,c
 }
 void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const bargaaim::Readout& r) noexcept {
     alignas(16) static const float kDimGreen[4]={0.35f,1.0f,0.35f,0.4f};
-    alignas(16) static const float kDimAmber[4]={1.0f,0.7f,0.15f,0.5f};
     const float t=2.0f*s;
-    for(const auto& a:r.arc) {
+    // Debug=1: what of it is on the screen, every kBargaDrawLogMs (the draw's half of the game thread's "BARGA v=" line).
+    constexpr ULONGLONG kBargaDrawLogMs=500;
+    static ULONGLONG logged=0;
+    const ULONGLONG now=GetTickCount64();
+    const bool log=Cfg().debug && now-logged>=kBargaDrawLogMs;
+    if(log)logged=now;
+    int arcShown[2]={},spheresShown=0,roundsShown=0;
+    float firstX=-1.0f,firstY=-1.0f,firstDepth=-1.0f;
+    for(int side=0;side<2;++side) {
+        const auto& a=r.arc[side];
         if(!a.on)continue;
-        WorldPolyline(drawer,ctx,vp,width,height,a.pts,bargaaim::kArcPoints,a.next ? t*1.5f : t,a.next ? kGreen : kDimGreen);
+        arcShown[side]=WorldPolyline(drawer,ctx,vp,width,height,a.pts,bargaaim::kArcPoints,a.next ? t*1.5f : t,a.next ? kGreen : kDimGreen);
     }
     for(int i=0;i<r.spheres && i<bargaaim::kMostSpheres;++i) {
         const auto& sp=r.sphere[i];
         float x,y,depth;
         if(Project(vp,sp.c,width,height,&x,&y,&depth)) {
+            ++spheresShown;
+            if(firstDepth<0.0f){firstX=x;firstY=y;firstDepth=depth;}
             float radius=0.0f;
             for(int k=0;k<3;++k) {
                 float e[3]={sp.c[0],sp.c[1],sp.c[2]};e[k]+=sp.r;
@@ -3001,15 +3016,35 @@ void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float heig
         if(sp.ground)ImpactCross(drawer,ctx,vp,width,height,s,sp.groundAt,&sx,&sy);
         if(sp.target)TargetRing(drawer,ctx,vp,width,height,s,sp.targetAt);
     }
-    if(!r.cannon || r.rounds<=0)return;
-    const int n=r.rounds<bargaaim::kMostRounds ? r.rounds : bargaaim::kMostRounds;
-    WorldPolyline(drawer,ctx,vp,width,height,r.at,n,t*1.5f,r.bursting ? kRed : kAmber);
+    const int n=!r.cannon || r.rounds<=0 ? 0 : r.rounds<bargaaim::kMostRounds ? r.rounds : bargaaim::kMostRounds;
+    if(log) {
+        float ax=-1.0f,ay=-1.0f,ad=-1.0f;   // the bright (else the first) arc's middle point
+        const auto& shownArc=r.arc[r.arc[bargaaim::kRight].next || !r.arc[bargaaim::kLeft].on ? bargaaim::kRight : bargaaim::kLeft];
+        if(shownArc.on && !Project(vp,shownArc.pts[bargaaim::kArcPoints/2],width,height,&ax,&ay,&ad))ax=ay=ad=-1.0f;
+        Log("BARGA draw %.0fx%.0f arcs L=%d/%d R=%d/%d mid=(%.0f,%.0f) %.1f m spheres %d/%d first=(%.0f,%.0f) %.1f m rounds %d",
+            width,height,arcShown[0],r.arc[0].on ? bargaaim::kArcPoints : 0,arcShown[1],r.arc[1].on ? bargaaim::kArcPoints : 0,ax,ay,ad,
+            spheresShown,r.spheres,firstX,firstY,firstDepth,n);
+    }
+    if(n<=0)return;
+    // Only the rounds that land: one that meets nothing ends its flight in the air (RoundLands' finite end, up to
+    // km out), no point on the ground to mark, so the line breaks there and it has no ring or cross.
+    const float* const rgba=r.bursting ? kRed : kAmber;
+    int landedCount=0;
+    for(int i=0;i<n;) {
+        if(!r.landed[i]){++i;continue;}
+        int end=i;
+        while(end<n && r.landed[end])++end;
+        roundsShown+=WorldPolyline(drawer,ctx,vp,width,height,r.at+i,end-i,t*1.5f,rgba);
+        landedCount+=end-i;
+        i=end;
+    }
+    if(log)Log("BARGA draw rounds %d landed of %d, %d on the screen",landedCount,n,roundsShown);
     for(int i=0;i<n;++i) {
-        if(i%bargaaim::kRingEvery!=0 && i!=n-1)continue;
-        if(r.blast>0.0f)WorldRing(drawer,ctx,vp,width,height,r.at[i],r.blast,t,r.landed[i] ? (r.bursting ? kRed : kAmber) : kDimAmber);
+        if(!r.landed[i] || (i%bargaaim::kRingEvery!=0 && i!=n-1))continue;
+        if(r.blast>0.0f)WorldRing(drawer,ctx,vp,width,height,r.at[i],r.blast,t,rgba);
     }
     float sx,sy;
-    ImpactCross(drawer,ctx,vp,width,height,s,r.at[0],&sx,&sy);   // the next round
+    if(r.landed[0])ImpactCross(drawer,ctx,vp,width,height,s,r.at[0],&sx,&sy);   // the next round
 }
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                     const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {

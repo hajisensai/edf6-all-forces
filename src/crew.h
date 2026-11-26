@@ -1549,6 +1549,9 @@ bool PlayerLauncher(LauncherReadout* out) noexcept;
 // thread; only a 501 the player drives reads); PlayerBargaAim the last readout, false with none this step.
 void BargaAimFrame(unsigned char* vehicle) noexcept;
 bool PlayerBargaAim(bargaaim::Readout* out) noexcept;
+// Whether the marker draws `weapon`'s rounds this step (V605's SwingShoot while it charges or sweeps): vhud.cpp leaves
+// that weapon's own impact point out, so the two do not show one cannon twice.
+bool BargaOwnsCannon(const void* weapon) noexcept;
 void ResetBargaAim() noexcept;
 // katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
 // is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;

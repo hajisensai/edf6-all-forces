@@ -1,6 +1,6 @@
 // The Balam's impact marker (docs/feature-barga-aim.md; the pure part barga_aim.h): while this machine's player drives a
 // 501_FortressRobo (V515 Retro Balam / V605 Barga Cannon), from the vehicle's own state each frame:
-//  - idle (no hit group lit): each fist's reach as a ground arc, bright on the side whose attack may start now;
+//  - idle (no hit group lit): each fist's reach as an arc at the height it strikes, bright on the side whose attack may start now;
 //  - while hit groups are lit: their spheres, and where each meets the ground or an enemy's lock point;
 //  - V605, during ground_charge / attack_cannon and its burst: where the rounds still to come land, and their blast.
 // Read on the game thread from the vehicle's input (crew.cpp InputHook, the 501's 0x60AEC0), published with the step it
@@ -39,6 +39,11 @@ constexpr int kMostNodes=64,kMostPoints=64;
 constexpr std::size_t kBurstCount=0x370,kBurstLeft=0xE18,kFrozen=0x1670,kSweepBegin=0x1680,kSweepEnd=0x1690,kSweepPow=0x16A0;
 constexpr std::size_t kAimSource=0x120,kAimSourceDir=0x80,kExplosion=0x8B0;
 constexpr std::size_t kMuzzleDir=0xD0;   // a muzzle's direction the sweep writes (w 1; mode +0xE0 = 2)
+// The burst's state machine (bargaaim::SweepState): its handler (0x6B3FE0 stores it at the machine +0x18; the machine at
+// +0x1650), and what 0x691080 reads for "the trigger held": +0x13D, or +0x13A for a burst of one not set to +0x143.
+constexpr std::size_t kSweepHandler=0x1668;
+constexpr unsigned kSweepWaiting=0x6B4100,kSweepRunning=0x6B4080;
+constexpr std::size_t kHeld=0x13D,kHeldSingle=0x13A,kHeldBurstAlways=0x143;
 constexpr std::uint64_t kMostMuzzles=8;
 constexpr float kGroundBelow=60.0f;      // m under a sphere a ground ray looks
 constexpr ULONGLONG kLogMs=500;
@@ -47,6 +52,7 @@ constexpr std::size_t kBoneEnd=edf::kBoneRows+64;   // a bone's world rows
 bargaaim::Readout latest{};
 stepfresh::Step latestStep=0;
 const void* latestVehicle=nullptr;
+const void* latestCannon=nullptr;   // the SwingShoot whose rounds `latest` marks (latest.cannon), for vhud.cpp
 
 // The SwingShoot weapon on the seat, or nullptr.
 const unsigned char* SwingShoot(const unsigned char* seat) noexcept {
@@ -202,11 +208,23 @@ void ReadArcs(const unsigned char* v,const bargaaim::Variant& variant,unsigned f
     }
 }
 
-// The cannon's rounds to come. `frozen` the direction the burst sweeps from: the weapon's own copy while a burst runs,
-// its source (what 0x6B4100 will copy) before.
+bargaaim::SweepState SweepStateOf(const unsigned char* w) noexcept {
+    const auto handler=At<const void*>(w,kSweepHandler);
+    return handler==image+kSweepRunning ? bargaaim::SweepState::sweeping
+         : handler==image+kSweepWaiting ? bargaaim::SweepState::waiting : bargaaim::SweepState::other;
+}
+bool TriggerHeld(const unsigned char* w) noexcept {   // 0x691080
+    if(At<std::int32_t>(w,kBurstCount)<2 && !At<unsigned char>(w,kHeldBurstAlways))return At<unsigned char>(w,kHeldSingle)!=0;
+    return At<unsigned char>(w,kHeld)!=0;
+}
+
+// The cannon's rounds to come. `frozen` the direction the burst sweeps from: the weapon's own copy while the machine
+// sweeps (0x6B4080, a held trigger's next burst included), its source (what 0x6B4100 will copy) while it waits.
 bool ReadCannon(const unsigned char* w,bargaaim::Readout& r,float* frozen,float* pos,float* nativeDir) noexcept {
     const int count=At<std::int32_t>(w,kBurstCount),left=At<std::int32_t>(w,kBurstLeft);
-    r.bursting=left>0;
+    const auto state=SweepStateOf(w);
+    if(state==bargaaim::SweepState::other)return false;   // a handler the RE does not know: no marks
+    r.bursting=bargaaim::FromFrozen(state);
     const float* source=reinterpret_cast<const float*>(w+kFrozen);
     if(!r.bursting) {
         const auto aim=At<const unsigned char*>(w,kAimSource);
@@ -223,7 +241,7 @@ bool ReadCannon(const unsigned char* w,bargaaim::Readout& r,float* frozen,float*
     const auto muzzle=edf::MuzzleAt(w,0);
     if(muzzle && Readable(muzzle,kMuzzleDir+12))for(int k=0;k<3;++k)nativeDir[k]=At<float>(muzzle,kMuzzleDir+4*k);
     r.blast=At<float>(w,kExplosion);
-    r.toCome=bargaaim::RoundsToCome(left,count,r.bursting);
+    r.toCome=bargaaim::RoundsToCome(state,left,count,TriggerHeld(w));
     int lefts[bargaaim::kMostRounds];
     r.rounds=bargaaim::SampleRounds(r.toCome,bargaaim::kMostRounds,lefts);
     const float reach=model.speed*static_cast<float>(model.alive>0 ? model.alive : 60)*1.05f;
@@ -243,7 +261,7 @@ void HullLocal(const float* rows,const float* p,float* out) noexcept {
 
 void BargaAimFrame(unsigned char* v) noexcept {
     const auto clear=[&] {
-        if(latestVehicle==v){latest=bargaaim::Readout{};latestStep=0;latestVehicle=nullptr;}
+        if(latestVehicle==v){latest=bargaaim::Readout{};latestStep=0;latestVehicle=nullptr;latestCannon=nullptr;}
     };
     if(!Cfg().enabled || !Cfg().bargaAimMarker || At<const void*>(v,0)!=image+kVtBarga || v[kDead] || SeatCount(v)==0) {
         clear();return;
@@ -273,13 +291,17 @@ void BargaAimFrame(unsigned char* v) noexcept {
     const unsigned char* w=nullptr;
     if(variant.cannon>=0 && (w=SwingShoot(seat))!=nullptr) {
         const bool charging=r.current==variant.cannon || r.current==variant.charge;
-        if((charging || At<std::int32_t>(w,kBurstLeft)>0) && ReadCannon(w,r,frozen,pos,nativeDir))r.cannon=true;
+        if((charging || SweepStateOf(w)==bargaaim::SweepState::sweeping) && ReadCannon(w,r,frozen,pos,nativeDir))r.cannon=true;
     }
-    latest=r;latestStep=stepfresh::Now();latestVehicle=v;
+    latest=r;latestStep=stepfresh::Now();latestVehicle=v;latestCannon=r.cannon ? w : nullptr;
     if(!log)return;
     const auto rows=reinterpret_cast<const float*>(v+kMatrix);
-    Log("BARGA v=%p %s current=%d accept=%d flags=%u lit=[%ls] spheres=%d arcs L=%d%s R=%d%s fwd=(%.2f,%.2f,%.2f)",v,variant.file,
-        r.current,r.accept,flags,lit.names,r.spheres,r.arc[bargaaim::kLeft].attack,r.arc[bargaaim::kLeft].next ? "*" : "",
+    // The group names are the SGO's Japanese: UTF-8 for the log. A wide %ls the CRT's "C" locale cannot convert makes
+    // vsnprintf fail and the whole line come out empty (the 2026-11-27 run: an empty line before each "BARGA sphere").
+    char litNames[3*_countof(lit.names)]{};
+    if(lit.names[0] && !WideCharToMultiByte(CP_UTF8,0,lit.names,-1,litNames,sizeof(litNames),nullptr,nullptr))litNames[0]='\0';
+    Log("BARGA v=%p %s current=%d accept=%d flags=%u lit=[%s] spheres=%d arcs L=%d%s R=%d%s fwd=(%.2f,%.2f,%.2f)",v,variant.file,
+        r.current,r.accept,flags,litNames,r.spheres,r.arc[bargaaim::kLeft].attack,r.arc[bargaaim::kLeft].next ? "*" : "",
         r.arc[bargaaim::kRight].attack,r.arc[bargaaim::kRight].next ? "*" : "",rows[8],rows[9],rows[10]);
     for(int i=0;i<r.spheres && i<4;++i) {
         const auto& s=r.sphere[i];
@@ -296,14 +318,18 @@ void BargaAimFrame(unsigned char* v) noexcept {
         bargaaim::Sweep sweep{};
         for(int k=0;k<3;++k){sweep.begin[k]=At<float>(w,kSweepBegin+4*k);sweep.end[k]=At<float>(w,kSweepEnd+4*k);}
         sweep.pow=At<float>(w,kSweepPow);
-        // Bursting: the round the weapon fired last (one more left than now: its muzzle holds that one's direction);
-        // before: the burst's first.
+        // Sweeping: the round the weapon fired last (one more left than now: its muzzle holds that one's direction);
+        // waiting: the burst's first.
+        const auto state=SweepStateOf(w);
         const float t=bargaaim::BurstT(r.bursting ? left+1 : count,count);
         bargaaim::SweepDir(frozen,bargaaim::SweepAngle(sweep,t),predicted);
         const auto src=At<const unsigned char*>(w,kAimSource);
-        Log("BARGA cannon on=%d burst=%d left=%d count=%d t=%.3f frozen=(%.3f,%.3f,%.3f) src=%p%s native=(%.3f,%.3f,%.3f) "
+        const auto handler=At<const unsigned char*>(w,kSweepHandler);
+        Log("BARGA cannon on=%d state=%s(+%llX) held=%d(+13D %d +13A %d) burst=%d left=%d count=%d toCome=%d t=%.3f frozen=(%.3f,%.3f,%.3f) src=%p%s native=(%.3f,%.3f,%.3f) "
             "predicted=(%.3f,%.3f,%.3f) muzzle=(%.1f,%.1f,%.1f) blast=%.1f rounds=%d first=(%.1f,%.1f,%.1f)%s last=(%.1f,%.1f,%.1f)%s",
-            r.cannon,r.bursting,left,count,t,frozen[0],frozen[1],frozen[2],src,src==v ? "(vehicle)" : "",nativeDir[0],nativeDir[1],nativeDir[2],
+            r.cannon,state==bargaaim::SweepState::sweeping ? "sweeping" : state==bargaaim::SweepState::waiting ? "waiting" : "other",
+            static_cast<unsigned long long>(handler ? handler-image : 0),TriggerHeld(w),At<unsigned char>(w,kHeld),
+            At<unsigned char>(w,kHeldSingle),r.bursting,left,count,r.toCome,t,frozen[0],frozen[1],frozen[2],src,src==v ? "(vehicle)" : "",nativeDir[0],nativeDir[1],nativeDir[2],
             predicted[0],predicted[1],predicted[2],pos[0],pos[1],pos[2],r.blast,r.rounds,
             r.rounds ? r.at[0][0] : 0.0f,r.rounds ? r.at[0][1] : 0.0f,r.rounds ? r.at[0][2] : 0.0f,r.rounds && r.landed[0] ? "" : "(air)",
             r.rounds ? r.at[r.rounds-1][0] : 0.0f,r.rounds ? r.at[r.rounds-1][1] : 0.0f,r.rounds ? r.at[r.rounds-1][2] : 0.0f,
@@ -317,7 +343,11 @@ bool PlayerBargaAim(bargaaim::Readout* out) noexcept {
     return true;
 }
 
+bool BargaOwnsCannon(const void* weapon) noexcept {
+    return weapon && weapon==latestCannon && Cfg().enabled && stepfresh::Fresh(latestStep);
+}
+
 void ResetBargaAim() noexcept {
-    latest=bargaaim::Readout{};latestStep=0;latestVehicle=nullptr;
+    latest=bargaaim::Readout{};latestStep=0;latestVehicle=nullptr;latestCannon=nullptr;
 }
 }  // namespace crew
