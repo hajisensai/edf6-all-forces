@@ -91,7 +91,7 @@ constexpr int kVehicles=48,kMostGuns=8,kPending=256;   // a Katyusha's ripple: f
 
 enum class Body : std::uint8_t { none, heavy, light, bike, mech };
 enum Loop : int { kLoopIdle, kLoopLoad, kLoopTracks, kLoopTurret, kLoopCount };
-struct Saved { unsigned char cues[kCueBytes]; bool held; };
+struct Saved { unsigned char cues[kCueBytes]; bool held; const unsigned char* where=nullptr; };   // where: the preset's cues held
 struct Gun {
     const unsigned char* w;
     vmix::Bore bore;
@@ -174,6 +174,7 @@ void Hold(unsigned char* cues,Saved& s) noexcept {
     std::memcpy(s.cues,cues,kCueBytes);
     std::memset(cues,0,kCueBytes);
     s.held=true;
+    s.where=cues;
 }
 void GiveBack(unsigned char* cues,Saved& s) noexcept {
     if(!s.held)return;
@@ -341,16 +342,20 @@ void PlayEvent(const wtevent::Event& e,const float* at,const float* vel,float vo
     const int n=wtevent::Hear(e,p.distance,h);
     const float spread=surround::SpreadAt(p.distance,e.size,e.least),ratio=wtevent::Doppler(e,p.doppler);
     const ULONGLONG now=GameMs();
+    int queued=0;
+    audio::Heard first{};
     for(int i=0;i<n;++i) {
         const float gain=vol*h[i].gain;
         if(gain<0.001f || !audio::WtThere(h[i].clip))continue;
         Pending* q=nullptr;
         for(auto& f:pending)if(f.clip<0){q=&f;break;}
-        if(!q)return;   // more on their way than kPending: the rest are not heard
+        if(!q)break;   // more on their way than kPending: the rest are not heard
         *q=Pending{h[i].clip,true,wtevent::Next(rotation,h[i].clip),
-                   audio::Heard{gain,p.side,p.front,spread,ratio,h[i].cutoff,h[i].sub},
+                   audio::Heard{gain,p.side,p.front,spread,ratio*h[i].ratio,h[i].cutoff,h[i].sub},
                    now+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+h[i].after)*1000.0f)};
+        if(!queued++)first=q->heard;
     }
+    if(queued)audio::Note(e.name,queued,p.distance,first);
 }
 // The War Thunder event of a main gun's calibre; none: its own clips (a rail gun's).
 const wtevent::Event* EventOf(vmix::Bore b) noexcept {
@@ -424,10 +429,17 @@ void TurretStep(unsigned char* v,Vehicle& s) noexcept {
     const float g=heard ? vol*kTurretShare*vmix::Falloff(p.distance,kTurretRef,1.2f) : 0.0f;
     const float pitch=mech ? kMechServo : 1.0f;
     Set(s.loop[kLoopTurret],audio::kClipTurret,heard,HeardAt(p,g*t.gain,t.ratio*pitch));   // kept open still: no voice made each slew
-    if(s.slew>vmix::kTurretMoving)s.moving=true;
+    if(s.slew>vmix::kTurretMoving) {
+        if(!s.moving && heard)audio::Note("turret_loop",1,p.distance,HeardAt(p,g*t.gain,t.ratio*pitch));
+        s.moving=true;
+    }
     else if(s.moving && s.slew<vmix::kTurretStill) {
         s.moving=false;
-        if(heard)audio::PlayOnce(audio::kClipTurretStop,HeardAt(p,g*0.8f,pitch));
+        if(heard) {
+            const audio::Heard stop=HeardAt(p,g*0.8f,pitch);
+            audio::PlayOnce(audio::kClipTurretStop,stop);
+            audio::Note("turret_stop",1,p.distance,stop);
+        }
     }
 }
 
@@ -452,7 +464,10 @@ void Report(const vmix::Profile& pf,const float* at,const float* vel,float gain)
 void Cue(int clip,const float* at,const float* vel,float gain,float pitch) noexcept {
     SoundPlace p{};
     if(!SoundAt(at,vel,&p) || p.distance>kReloadHear)return;
-    audio::PlayOnce(clip,HeardAt(p,gain*vmix::Falloff(p.distance,kReloadRef,1.3f),pitch));
+    const audio::Heard h=HeardAt(p,gain*vmix::Falloff(p.distance,kReloadRef,1.3f),pitch);
+    audio::PlayOnce(clip,h);
+    audio::Note(clip==audio::kClipBreechOpen ? "reload_open" : clip==audio::kClipEject ? "reload_eject" :
+                clip==audio::kClipClose ? "reload_close" : "reload_insert",1,p.distance,h);
 }
 // A shot's case landing (its calibre's, kProfiles), `delay` after the shot, unless the weapon throws a physical case of
 // its own (ShellCase) that lands with its own sound. A main gun's is the loader's work (VehicleReloadVolume), a small
@@ -623,5 +638,21 @@ void ResetVehicleSound() noexcept {
     for(auto& s:vehicles)Forget(s);
     for(auto& q:pending)q.clip=-1;
     frameDone=0;
+}
+
+// Whether `preset` (a sound preset, its cues at +kCues) is one of the vehicles' held ones (the Debug probe's: a stock
+// start of one would be both sounds at once).
+bool VehicleSoundHeld(const void* preset) noexcept {
+    if(!preset)return false;
+    const auto* cues=static_cast<const unsigned char*>(preset)+kCues;
+    auto held=[cues](const Saved& s){ return s.held && s.where==cues; };
+    for(const Vehicle& v:vehicles) {
+        if(!v.ref)continue;
+        for(const Saved& s:v.engine)if(held(s))return true;
+        for(const Saved& s:v.turret)if(held(s))return true;
+        for(const Saved& s:v.aim)if(held(s))return true;
+        for(int i=0;i<v.guns && i<kMostGuns;++i)if(held(v.gun[i].fire))return true;
+    }
+    return false;
 }
 }  // namespace crew

@@ -15,7 +15,7 @@
 #include <cstdint>
 
 namespace crew::wtevent {
-constexpr int kMostPoints=4,kMostLayers=12;
+constexpr int kMostPoints=5,kMostLayers=12;
 constexpr float kQuietDb=-60.0f;    // a layer heard under this is not played (FMOD's curves end at -80: silence)
 // Ours: the whole set's level against the plugin's other sounds (WT's weapon_ai bus and its master are WT's mix): the
 // loudest cannon layer near the gun at about full scale, the master limiter (jetaudio.cpp) taking the layers' sum.
@@ -57,6 +57,7 @@ struct Layer {
     Curve cutoff;   // Hz over the distance
     float after;    // s after the shot (its MultiSound's start)
     bool sub;       // a low layer: the LFE channel's alone (surround.h)
+    float ratio=1.0f;   // its playback rate (a MultiSound's pitch: 2^(semitones / 12))
 };
 // Ours: past kHold m the mix is WT's at kHold, falling as 1 / d (6 dB a doubling, the old reports' falloff), the
 // low-pass still the distance's. WT's events end at their spatialiser's maximum distance, 2000 m, their Far and Premaster
@@ -71,11 +72,12 @@ struct Event {
     Curve master;   // the Premaster's distance gain
     float size,least,doppler;   // the spatialiser's sound size (m), minimum extent (0..1 of all around), Doppler scale
     float hold=kHold;           // m: past it WT's mix there, falling as 1 / d
+    const char* name="";        // WT's event (the Debug tallies, jetaudio.h Note)
 };
 
 // What a layer is heard as at a distance: its gain (linear), its low-pass and how long after the shot it starts (the
 // sound's travel time is the caller's). Those under kQuietDb are left out.
-struct Heard { int clip; float gain,cutoff,after; bool sub; };
+struct Heard { int clip; float gain,cutoff,after; bool sub; float ratio=1.0f; };
 inline int Hear(const Event& e,float distance,Heard* out) noexcept {
     const float d=std::isfinite(distance) && distance>0.0f ? distance : 0.0f;
     const float hold=e.hold>0.0f ? e.hold : kHold;
@@ -85,7 +87,7 @@ inline int Hear(const Event& e,float distance,Heard* out) noexcept {
         const Layer& l=e.layer[i];
         const float db=e.db+At(e.master,mixAt)+l.db+At(l.gain,mixAt)+spread;
         if(db<kQuietDb)continue;
-        out[n++]=Heard{l.clip,std::pow(10.0f,db/20.0f),CutoffAt(l.cutoff,d),l.after,l.sub};
+        out[n++]=Heard{l.clip,std::pow(10.0f,db/20.0f),CutoffAt(l.cutoff,d),l.after,l.sub,l.ratio};
     }
     return n;
 }
@@ -160,7 +162,7 @@ constexpr Event kMedium{9,{
     {k_metal,6.0f,kMetalMid,kAir,0.2f,false},
     {k_tail_mid,6.0f-3.0f,kOpen,kAir,0.5f,false},
     {k_sub,kSubDb,kSub,kOpen,0.0f,true},
-}, 2.5f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale};
+}, 2.5f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale, kHold, "75mm_kwk40_ai"};
 // 122 mm D-25T (122mm_d25t_ai, master +2): the 120 mm tank guns.
 constexpr Event kTank{10,{
     {k_shot_big,3.0f-6.0f+6.0f,kShot,kCannonEq,0.0f,false},
@@ -173,7 +175,7 @@ constexpr Event kTank{10,{
     {k_metal,9.0f,kMetalBig,kAir,0.15f,false},
     {k_tail_big,9.0f-6.0f,kOpen,kAir,0.6f,false},
     {k_sub,kSubDb,kSub,kOpen,0.0f,true},
-}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale};
+}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale, kHold, "122mm_d25t_ai"};
 // 128 mm PaK 44 (128mm_pak44_ai, master +2): the super-heavy guns. Its near layers are the 122's (ours).
 constexpr Event kHeavy{10,{
     {k_shot_heavy,3.0f-6.0f+6.0f,kShot,kCannonEq,0.0f,false},
@@ -186,7 +188,7 @@ constexpr Event kHeavy{10,{
     {k_metal,9.0f,kMetalBig,kAir,0.15f,false},
     {k_tail_heavy,9.0f-6.0f,kOpen,kAir,0.6f,false},
     {k_sub,kSubDb,kSub,kOpen,0.0f,true},
-}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale};
+}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale, kHold, "128mm_pak44_ai"};
 // 150 mm sFH 18 (150mm_sfh_18_ai, master +2; Close +10, Far +4 on their tracks): the howitzers. Its near layers are
 // the 122's (ours), its breech's mechanism the player event's howitzer_shot_mech.
 constexpr Event kHowitzer{11,{
@@ -201,7 +203,7 @@ constexpr Event kHowitzer{11,{
     {k_mech_howitzer,9.0f,kMech,kAir,0.45f,false},
     {k_tail_heavy,9.0f-6.0f,kOpen,kAir,0.6f,false},
     {k_sub,kSubDb,kSub,kOpen,0.0f,true},
-}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale};
+}, 2.0f+kCannonBusDb+kTrimDb, kPremaster, kCannonSize, kCannonLeast, kDopplerScale, kHold, "150mm_sfh_18_ai"};
 
 // --- The machine guns (12mm_m2_ai, 8mm_mg42_ai) ----------------------------------------------------------------------
 // One grain a round (WT loops 0.105 s grains: one a round at the gun's rate), close and far together; the last round's
@@ -217,14 +219,14 @@ constexpr float kMgDb=5.0f+6.0f+kTrimDb,kLastDb=-6.0f;
 struct Mg { Event round,last; };
 constexpr Mg kM2{
     {2,{{k_m2_close,-12.0f,kMgClose,kMgCloseEq,0.0f,false},{k_m2_far,-16.0f,kMgFar,kMgFarEq,0.0f,false}},
-     kMgDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale},
+     kMgDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale,kHold,"12mm_m2_ai"},
     {2,{{k_m2_last_close,-12.0f,kMgClose,kMgCloseEq,0.0f,false},{k_m2_last_far,-16.0f,kMgFar,kMgFarEq,0.0f,false}},
-     kMgDb+kLastDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale}};
+     kMgDb+kLastDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale,kHold,"12mm_m2_ai_last"}};
 constexpr Mg kMg42{
     {2,{{k_mg42_close,-12.0f,kMgClose,kMgCloseEq,0.0f,false},{k_mg42_far,-18.0f,kMgFar,kMgFarEq,0.0f,false}},
-     kMgDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale},
+     kMgDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale,kHold,"8mm_mg42_ai"},
     {2,{{k_mg42_last_close,-12.0f,kMgClose,kMgCloseEq,0.0f,false},{k_mg42_last_far,-18.0f+6.0f,kMgFar,kMgFarEq,0.0f,false}},
-     kMgDb+kLastDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale}};
+     kMgDb+kLastDb,kMgPremaster,kCannonSize,kCannonLeast,kDopplerScale,kHold,"8mm_mg42_ai_last"}};
 // The M2's grains for a gun slower than kFastFrames a round (the heavy machine guns, the flak), the MG42's for a faster
 // one (the gatlings' buzz): ours, WT has no gatling.
 constexpr float kFastFrames=4.0f;
@@ -256,7 +258,7 @@ constexpr Event kBlastSmall{3,{
     {k_xs_close,8.0f,{2,{{0.0f,6.0f},{400.0f,-80.0f}}},kSmallEq,0.0f,false},
     {k_xs_far,10.0f,{3,{{0.0f,4.0f},{200.0f,0.0f},{400.0f,-80.0f}}},kSmallEq,0.0f,false},
     {k_ex_sub,-12.0f,kRumble,kOpen,0.0f,true},
-}, -6.0f+kBlastBusDb+kTrimDb, kSmallPremaster, 10.0f, 120.0f/360.0f, 0.0f, kBlastHold};
+}, -6.0f+kBlastBusDb+kTrimDb, kSmallPremaster, 10.0f, 120.0f/360.0f, 0.0f, kBlastHold, "explosion_ground_20_37"};
 // explosion_ground (master -6): aa_explosion (the sweetener) +11, 0 m +7 -> 190.7 m +6 -> 1000 m -80; heavy_explosion
 // _attack_3 +11, 0 m +10 -> 2000 m -80, its _far +11, -80 at 0 m -> +6 at 204.8 m -> -80 at 5000 m; expl_body_med -5,
 // -80 at 0 m -> +9.9 at 190.7 m -> -56.7 at 5000 m, its EQ 22 kHz -> 350 Hz at 3000 m; dirt_debris_small +10, 0 m 0 ->
@@ -269,7 +271,7 @@ constexpr Event kBlastMid{7,{
     {k_debris_small,10.0f,kDebris,kBlastEq,0.2f,false},
     {k_ex_tail,-12.0f,kOpen,kBlastEq,0.1f,false},
     {k_ex_sub,-6.0f,kRumble,kOpen,0.0f,true},
-}, -6.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold};
+}, -6.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold, "explosion_ground"};
 // art_explosion_ground (master -4): art_attack +12, 0 m +10 -> 1000 m -80, its _far +9.5, -80 at 0 m -> +1.11 at 218.9 m
 // -> -2.32 at 981.6 m -> -4 at 5000 m; art_body +6, -80 at 7.06 m -> +5.22 at 190.7 m -> -80 at 1000 m; aa_explosion
 // +10 between 50 m (-0.2) and 1000 m (-4) only; dirt_debris_med +12, 0 m 0 -> 403.8 m -80, from 1.0 s. Premaster and
@@ -282,7 +284,7 @@ constexpr Event kBlastBig{7,{
     {k_debris_med,12.0f,kDebris,kBlastEq,1.0f,false},
     {k_ex_tail,-8.0f,kOpen,kBlastEq,0.15f,false},
     {k_ex_sub,-3.0f,kRumble,kOpen,0.0f,true},
-}, -4.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold};
+}, -4.0f+kBlastBusDb+kTrimDb, kBlastPremaster, 2.0f, 60.0f/360.0f, 0.0f, kBlastHold, "art_explosion_ground"};
 // bomb_explosion_ground (its master not in the metadata view: 0, ours): aa_explosion +12, 0 m +10 -> 1000 m -80;
 // slow_attack_big +6, 0 m +6 -> 190.7 m +6 -> 5000 m -80; bomb_body_heavy +6, 0 m -6 -> +6 at 981.6 m -> -5 at 4046.6 m
 // -> -80 at 5000 m, from 0.5 s; bomb_debirs -4, 0 m 0 -> 300 m -59.4, then silent, from 1.4 s. Premaster: 0 to 2012.7
@@ -294,7 +296,7 @@ constexpr Event kBlastHeavy{6,{
     {k_debris_bomb,-4.0f,{3,{{0.0f,0.0f},{300.0f,-59.4f},{300.1f,-80.0f}}},kBombEq,1.4f,false},
     {k_ex_tail,-6.0f,kOpen,kBombEq,0.2f,false},
     {k_ex_sub,0.0f,kRumble,kOpen,0.0f,true},
-}, 0.0f+kBlastBusDb+kTrimDb, kBombPremaster, 120.0f, 140.0f/360.0f, 0.0f, kBlastHold};
+}, 0.0f+kBlastBusDb+kTrimDb, kBombPremaster, 120.0f, 140.0f/360.0f, 0.0f, kBlastHold, "bomb_explosion_ground"};
 
 // The tiers by blast radius (m) and their voice budgets: at most WT's maxVoices (the small and the big one's ours) started
 // within `life` s (about one's length: ours), none within `cooldown` s of the last (explosion_ground's 60 ms; the others'
@@ -415,10 +417,10 @@ constexpr Curve kIncomingEq{3,{{0.0f,22000.0f},{103.107f,12000.0f},{400.0f,1600.
 constexpr float kArtBusDb=-16.0f,kIncomingWithin=300.0f,kIncomingChance=0.7f;
 constexpr Event kIncomingArt{1,{
     {k_incoming_art,4.0f+6.0f,kIncomingGain,kIncomingEq,0.0f,false},
-}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f};
+}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f, "art_shells_incoming"};
 constexpr Event kIncomingBomb{1,{
     {k_incoming_bomb,4.0f+6.0f+6.0f,kIncomingGain,kIncomingEq,0.0f,false},
-}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f};
+}, 6.0f+kArtBusDb+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, 600.28f, "bombs_incoming"};
 constexpr float kIncomingLeadArt=2.3f,kIncomingLeadBomb=2.0f;
 constexpr Budget kIncomingBudget[2]={{4,0.2f,2.5f},{1,0.2f,2.5f}};   // the life ours (the recording's length)
 // When and where a round at `pos` moving `vel` (m/s) under `acc` (m/s^2: the core's gravity, vel += acc / 60 a frame)
@@ -441,4 +443,86 @@ inline bool Lands(const float* pos,const float* vel,const float* acc,float floor
     for(int k=0;k<3;++k)at[k]=pos[k]+vel[k]*when+0.5f*acc[k]*when*when;
     return true;
 }
+// --- The rounds hitting armour (hit_mgun, rico_mgun, hit_small_unpierce, hit_big_unpierce, hit_big / hit_aphe_big) ----
+// A round striking an armoured target (blastsound.cpp Armoured: the vehicles, the robots, the ships and their parts)
+// is heard as WT's tank hits: a bullet's hit_mgun, its glancing blow rico_mgun; a heavy plain round's (a railgun's, a
+// shell's with no blast) hit_big_unpierce, its glancing blow rico, its going through (AmmoIsPenetration) the pierce; an
+// explosive round's explosion with the hit_big / hit_aphe_big layers its tier calls for over it (ArmourEvent). EDF has
+// no calibre and no armour: the round's class stands for the calibre (a bullet class or not), the angle it strikes at
+// for the ricochet (HitKind; ours). Bus: ours, kTrimDb. hit_mgun (master -4): tank_hit_bullet -6 +10, 0 m 0 -> 500 m
+// -80, its EQ 7.5 kHz 0 dB -> -17 dB at 500 m (a low-pass here, ours), heard 0-200 m; at most 4. rico_mgun (+3.84
+// semitones; its master not in the view: hit_mgun's, ours): tank_hit_bullet -6 +6, 0 m 0 -> 250 m -80; bullet_whiz -6,
+// 0 m 0 -> 11.7 m -3.9 -> 23.5 m -11.2 -> 60.9 m -16.3 -> 98.4 m -80, heard 0-100 m. hit_small_unpierce / hit_big_unpierce
+// (gain -22): the impact (tank_hit_mid / _big) -5 +10, 0 m +6 -> 23.8 m -2 -> 47.7 m -11.6 -> 124 m -16.8 -> 200.8 m -80;
+// hit_dull_small from 0.18 s +6 +6 / hit_dull from 0.2 s +3, -6 semitones (the dull layer's distance: the impact's,
+// ours); at most 3. hit_big / hit_aphe_big (master +6, gain -16): the impact (tank_hit_*) -5 +10, 0 m 0 -> 99.5 m -2.9
+// -> 500 m -80; the distant one (hit_*_far) from 0.19 s +6, -80 at 0 m -> +10 at 100 m -> -80 at 500 m; their hit_expl
+// layers are the explosion's own (kBlast*). Spatialiser: 4 m, 80 degrees; maximum distance 500 m. rico (the heavy
+// rounds'): rico_hit -4, rico_whiz -4 -8.2, their distance ours (rico_mgun's impact's). The pierce: tank_hit_pierce,
+// hit_big_unpierce's numbers (ours: WT's hit_ap events are the player's own, inside the tank).
+constexpr float kHitHold=500.0f;
+constexpr Curve kHitEq{2,{{0.0f,22000.0f},{500.0f,4000.0f}}};   // ours
+constexpr Curve kHitBulletGain{2,{{0.0f,0.0f},{500.0f,-80.0f}}};
+constexpr Curve kRicoGain{2,{{0.0f,0.0f},{250.0f,-80.0f}}};
+constexpr Curve kRicoWhizGain{5,{{0.0f,0.0f},{11.7f,-3.9f},{23.5f,-11.2f},{60.9f,-16.3f},{98.4f,-80.0f}}};
+constexpr Curve kUnpierceGain{5,{{0.0f,6.0f},{23.8f,-2.0f},{47.7f,-11.6f},{124.0f,-16.8f},{200.8f,-80.0f}}};
+constexpr Curve kArmourGain{3,{{0.0f,0.0f},{99.5f,-2.9f},{500.0f,-80.0f}}};
+constexpr Curve kArmourFar{3,{{0.0f,-80.0f},{100.0f,10.0f},{500.0f,-80.0f}}};
+constexpr float kRicoPitch=1.2484f,kDullPitch=0.7071f;   // +3.84 and -6 semitones
+constexpr float kHitSize=4.0f,kHitLeast=80.0f/360.0f;
+constexpr Event kHitBullet{1,{
+    {k_hit_bullet,-6.0f+10.0f,kHitBulletGain,kHitEq,0.0f,false},
+}, -4.0f+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, kHitHold, "hit_mgun"};
+constexpr Event kRicoBullet{2,{
+    {k_hit_bullet,-6.0f+6.0f,kRicoGain,kHitEq,0.0f,false,kRicoPitch},
+    {k_bullet_whiz,-6.0f,kRicoWhizGain,kHitEq,0.0f,false,kRicoPitch},
+}, -4.0f+kTrimDb, kOpen, 0.0f, 0.0f, 0.0f, kHitHold, "rico_mgun"};
+constexpr Event kHitHeavy{2,{
+    {k_hit_big,-5.0f+10.0f,kUnpierceGain,kHitEq,0.0f,false},
+    {k_dull_med,3.0f,kUnpierceGain,kHitEq,0.2f,false,kDullPitch},
+}, -22.0f+kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "hit_big_unpierce"};
+constexpr Event kRicoHeavy{2,{
+    {k_rico_hit,-4.0f,kRicoGain,kHitEq,0.0f,false},
+    {k_rico_whiz,-4.0f-8.2f,kRicoWhizGain,kHitEq,0.0f,false},
+}, kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "rico"};
+constexpr Event kHitPierce{2,{
+    {k_hit_pierce,-5.0f+10.0f,kUnpierceGain,kHitEq,0.0f,false},
+    {k_dull_med,3.0f,kUnpierceGain,kHitEq,0.2f,false,kDullPitch},
+}, -22.0f+kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "hit_pierce"};
+// Over an explosive round's explosion on armour, by its tier: the small ones' hit_small_unpierce impact (tank_hit_small,
+// its dull layer hit_dull_small), the rest hit_big's / hit_aphe_big's impact and distant layers.
+constexpr Event kArmourSmall{2,{
+    {k_hit_small,-5.0f+10.0f,kUnpierceGain,kHitEq,0.0f,false},
+    {k_dull_small,6.0f+6.0f,kUnpierceGain,kHitEq,0.18f,false,kDullPitch},
+}, -22.0f+kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "hit_small_unpierce"};
+constexpr Event kArmourMid{2,{
+    {k_hit_mid,-5.0f+10.0f,kArmourGain,kHitEq,0.0f,false},
+    {k_hit_med_far,6.0f,kArmourFar,kHitEq,0.19f,false},
+}, 6.0f-16.0f+kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "hit_aphe_mid"};
+constexpr Event kArmourBig{2,{
+    {k_hit_big,-5.0f+10.0f,kArmourGain,kHitEq,0.0f,false},
+    {k_hit_big_far,6.0f,kArmourFar,kHitEq,0.19f,false},
+}, 6.0f-16.0f+kTrimDb, kOpen, kHitSize, kHitLeast, 0.0f, kHitHold, "hit_aphe_big"};
+// What a plain round's strike on armour is heard as: `heavy` not a bullet class, `pierce` its AmmoIsPenetration (a
+// bullet going through is still a bullet's hit), `facing` the cosine between its way and the face it strikes (1 head
+// on, 0 grazing). Under kGlancing (about 75 degrees off the face's normal: ours) it glances off, unless it goes through.
+enum class Hit : std::uint8_t { bullet, ricoBullet, heavy, ricoHeavy, pierce };
+constexpr int kHitKinds=5;
+constexpr float kGlancing=0.26f;
+inline Hit HitKind(bool heavy,bool pierce,float facing) noexcept {
+    const bool glancing=std::isfinite(facing) && facing<kGlancing;
+    if(heavy)return pierce ? Hit::pierce : glancing ? Hit::ricoHeavy : Hit::heavy;
+    return glancing && !pierce ? Hit::ricoBullet : Hit::bullet;
+}
+inline const Event& HitEvent(Hit h) noexcept {
+    return h==Hit::bullet ? kHitBullet : h==Hit::ricoBullet ? kRicoBullet : h==Hit::heavy ? kHitHeavy :
+           h==Hit::ricoHeavy ? kRicoHeavy : kHitPierce;
+}
+inline const Event& ArmourEvent(Blast b) noexcept {
+    return b==Blast::minor ? kArmourSmall : b==Blast::shell ? kArmourMid : kArmourBig;
+}
+// m: past it a hit is not heard (hit_mgun's trigger range, rico_mgun's, the others' maximum distance).
+constexpr float kHitFar[kHitKinds]={200.0f,250.0f,500.0f,500.0f,500.0f};
+// At most WT's maxVoices (hit_mgun 4, the others 3) within about one's length (ours), 20 / 50 ms apart (ours).
+constexpr Budget kHitBudget[kHitKinds]={{4,0.02f,0.9f},{3,0.05f,0.9f},{3,0.05f,2.0f},{3,0.05f,1.5f},{3,0.05f,2.0f}};
 }  // namespace crew::wtevent

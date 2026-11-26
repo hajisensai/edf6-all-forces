@@ -12,6 +12,7 @@
 #include "../src/sound_event.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 using namespace crew::wtevent;
@@ -248,6 +249,34 @@ void Rotations() {
     Check(all,"every variant comes round");
     Check(Next(r,-1)==0 && Next(r,crew::wt::kCount)==0,"a bad group: the first variant");
 }
+// The rounds striking armour: the kind by class, piercing and angle; the events' layers, ranges and names.
+void Hits() {
+    Check(HitKind(false,false,1.0f)==Hit::bullet && HitKind(false,false,0.1f)==Hit::ricoBullet &&
+          HitKind(false,true,0.1f)==Hit::bullet && HitKind(false,false,NAN)==Hit::bullet,
+          "a bullet: its hit, a glancing one's ricochet, never one going through or of no angle");
+    Check(HitKind(true,false,1.0f)==Hit::heavy && HitKind(true,false,0.2f)==Hit::ricoHeavy && HitKind(true,true,0.2f)==Hit::pierce,
+          "a heavy round: its unpierced hit, its glancing blow's ricochet, its going through the pierce");
+    bool named=true,clips=true,ranged=true;
+    for(int k=0;k<kHitKinds;++k) {
+        const Event& e=HitEvent(static_cast<Hit>(k));
+        named=named && e.name && e.name[0];
+        for(int i=0;i<e.layers;++i)clips=clips && e.layer[i].clip>=0 && e.layer[i].clip<crew::wt::kCount && !e.layer[i].sub;
+        Heard h[kMostLayers];
+        ranged=ranged && Hear(e,10.0f,h)>0 && Hear(e,kHitFar[k]+600.0f,h)==0 && kHitBudget[k].most>=1 && kHitBudget[k].most<=8;
+    }
+    Check(named,"every hit event named (the Debug tallies)");
+    Check(clips,"every hit layer names a recording group, none to the LFE");
+    Check(ranged,"every hit heard near, silent well past its range, its budget within the rows");
+    Heard h[kMostLayers];
+    const int n=Hear(kRicoBullet,5.0f,h);
+    Check(n==2 && Near(h[0].ratio,kRicoPitch) && Near(h[1].ratio,kRicoPitch),"rico_mgun: its hit and whiz, +3.84 semitones");
+    Check(Hear(kHitBullet,50.0f,h)==1 && h[0].cutoff<22000.0f && h[0].cutoff>4000.0f,"hit_mgun dulled over the distance");
+    const int m=Hear(kArmourBig,150.0f,h);
+    Check(m==2 && Has(h,m,crew::wt::k_hit_big_far),"150 m from a big round on armour: its distant layer too");
+    Check(&ArmourEvent(Blast::minor)==&kArmourSmall && &ArmourEvent(Blast::shell)==&kArmourMid &&
+          &ArmourEvent(Blast::art)==&kArmourBig && &ArmourEvent(Blast::bomb)==&kArmourBig,"the armour's layers by the tier");
+    Check(std::strcmp(kTank.name,"122mm_d25t_ai")==0 && std::strcmp(kBlastMid.name,"explosion_ground")==0,"the events keep WT's names");
+}
 }  // namespace
 
 int main() {
@@ -258,6 +287,7 @@ int main() {
     Rotations();
     Blasts();
     Flybys();
+    Hits();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }
