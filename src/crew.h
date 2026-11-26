@@ -309,7 +309,7 @@ struct Config {
     int gpuFxTest=0;             // ...test cards and a puff column 25 m ahead of the player at mission start (2: and the
                                  //    stress: the ultimate strike 60 m ahead, three of them 6 s apart, with no pt asked;
                                  //    3 / 4: the bench, fixed blasts and flashes with the switches cycled: the look / the load; 5: the ultimate
-                                 //    strike every 16 s, the set 0xA40 stock and ours by turns)
+                                 //    strike every 16 s, the set 0xA40 stock and ours by turns each second)
     int gpuFxNative=1;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
                                  //    screen split, stock left and ours right: the A/B picture)
     bool gpuFxLitA=false;        // ...and the lit set 0xA40 (the middle-distance lit smoke) too: off, it stays stock until

@@ -1458,7 +1458,7 @@ void StressStrike(ULONGLONG now) noexcept {
     const float at[3]{anchor[0]+(anchor[0]-anchorFrom[0])*1.4f,ground,anchor[2]+(anchor[2]-anchorFrom[2])*1.4f};
     wchar_t note[128];
     const bool ok=strike>=0 && SupportStrikeAt(strike,at,note,_countof(note));
-    Log("GPUFX stress: ultimate strike %d of 3 (catalog strike %d) at %.1f %.1f %.1f: %s",stressFired,strike,at[0],at[1],at[2],ok ? "started" : "refused");
+    Log("GPUFX stress: ultimate strike %d (catalog strike %d) at %.1f %.1f %.1f: %s",stressFired,strike,at[0],at[1],at[2],ok ? "started" : "refused");
 }
 
 // ---- the bench (GpuFxTest 3 the look, 4 the load; docs/gpufx-re.md "定点对照台") ----
@@ -1477,10 +1477,12 @@ constexpr BenchPhase kLookPhases[]={{"stock",0,false,false,false,false},{"takeov
                                     {"takeover+layers",1,true,true,true,true}};
 constexpr BenchPhase kLoadPhases[]={{"stock",0,false,false,false,false},{"takeover",1,true,true,false,true},
                                     {"takeover, 0xA40 stock",1,false,true,false,true},{"takeover, trails stock",1,true,true,false,false}};
-// The strike bench (GpuFxTest 5): the ultimate strike at each phase's start, the set 0xA40 stock and ours by turns,
-// the same strike each time: the set's stock and our GPU time and pixels under the strike's point lights.
+// The strike bench (GpuFxTest 5): the ultimate strike every 16 s, the set 0xA40 stock and ours by turns each second
+// (a strike's cards and lights come some 10-25 s after the call and outlive the next one: phases as long as a strike
+// would give each a different part of it; by the second both draw the same fire, and the probe's frame every 5 s, an
+// odd count of seconds apart, falls on each in turn: its bucket line says which).
 constexpr BenchPhase kStrikePhases[]={{"strike, 0xA40 stock",1,false,true,false,true},{"strike, 0xA40 ours",1,true,true,false,true}};
-constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000,kStrikePhaseMs=16000;
+constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000,kStrikePhaseMs=1000,kStrikeEveryMs=16000;
 // An MSVC std::wstring as the efs loader reads it (const, never grown): the text out of line (capacity past the 7 of
 // the small buffer).
 struct GameWString { const wchar_t* text;unsigned char pad[8];std::uint64_t size,capacity; };
@@ -1495,7 +1497,7 @@ constexpr EfsSource kBenchEfs[]={{L"app:/weapon/effect/v601_tank_cannon.efarc",L
 constexpr int kBenchSources=static_cast<int>(std::size(kBenchEfs));
 struct Bench {
     bool started=false;ULONGLONG startMs=0;int phase=-1;
-    ULONGLONG nextBlast=0,nextEfs=0,nextTrail=0;
+    ULONGLONG nextBlast=0,nextEfs=0,nextTrail=0,nextStrike=0;
     // The efs controllers (0x40 bytes each, zeroed: loaded flag, the resource, the instances' weak list, no owner),
     // one per source and mission; never freed (their instances may outlive the mission's Reset and their destructor
     // 0x2EC240 would end them under the efs renderer: a few hundred bytes a mission, bench only).
@@ -1584,22 +1586,24 @@ void BenchOverride() noexcept {
 }
 
 void BenchTick(ULONGLONG now) noexcept {
-    if(!bench.started){bench.started=true;bench.startMs=now+3000;bench.phase=-1;return;}
+    if(!bench.started){bench.started=true;bench.startMs=now+3000;bench.phase=-1;bench.nextStrike=0;return;}
     if(now<bench.startMs)return;
     if(!bench.efsTried)BenchLoadEfs();
     int index=0;
     const BenchPhase* ph=BenchPhaseNow(index);
     if(!ph)return;
     const bool look=optTest.load(std::memory_order_relaxed)==3;
+    if(optTest.load(std::memory_order_relaxed)==5) {
+        if(now>=bench.nextStrike){bench.nextStrike=now+kStrikeEveryMs;StressStrike(now);}
+        return;
+    }
     if(index!=bench.phase) {
         bench.phase=index;
         // Each phase starts on the same beat: its blasts and flashes at the same offsets from its start.
         bench.nextBlast=bench.nextEfs=bench.nextTrail=now+500;
         Log("GPUFX bench phase %d (%s): native=%d litA=%d efs=%d layers=%d trails=%d; so far blasts %u, flashes %u, trails %u",index,ph->name,
             ph->native,ph->litA,ph->efs,ph->layers,ph->trails,bench.blasts,bench.flashes,bench.trails);
-        if(optTest.load(std::memory_order_relaxed)==5)StressStrike(now);
     }
-    if(optTest.load(std::memory_order_relaxed)==5)return;
     const float fx=anchor[0]-anchorFrom[0],fz=anchor[2]-anchorFrom[2];
     const float len=std::sqrt(fx*fx+fz*fz);
     if(!(len>1e-3f))return;
